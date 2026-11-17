@@ -1,5 +1,7 @@
 # iormesh
 
+<img src="assets/logo.svg" alt="iormesh logo" width="150" />
+
 BPF-based process observability mesh: map what a PID touches (files,
 sockets), self-replicate across the wire to the other side of each
 connection, and trace Java-level code flow inside the process.

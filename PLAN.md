@@ -554,6 +554,7 @@ internal/bpfembed.go  # go:embed of the compiled .bpf.o + env override
 agent/                # Java agent source (M2)
 workload/             # traceable test app source (M0) + container image
 deploy/               # k8s manifests: sidecar patch, debug container
+assets/               # logo + wordmark (SVG)
 Magefile.go           # generate/build/test targets, ior-style
 scripts/              # container builds (docker/podman), ior-style
 docs/                 # design notes as they emerge
