@@ -5,92 +5,114 @@ How iormesh is put together. Companion to
 doc gives the narrative.
 
 ```
-┌─────────────────────────── host A ───────────────────────────┐
-│  target process (PID, optionally JVM 21)                     │
-│      │                                                       │
-│      ├── eBPF probes ──────────► userspace correlator        │
-│      │    - file: open/read/write/poll/statx                  │
-│      │    - net:  socket/bind/connect/accept/send/recv        │
-│      │      with peer IP + ports (inet/ipv6)                  │
-│      │    - exits: per-event → PID/TID + stack (user+bpf)     │
-│      │                                                       │
-│      ├── Java agent (JDK 21) ─► userspace correlator          │
-│      │    - bytecode instrumentation of method entry/exit      │
-│      │    - async-profiler-style TID→stack sampling            │
-│      │                                                       │
-│      └── mesh agent ◄── propagates on detected egress:        │
-│           detects outbound connect to external endpoint →     │
-│           ships the tracer to the peer (SSH, iormeshctl      │
-│           push pattern), attaches to the remote PID, and    │
-│           reports back                                       │
-└──────────────────────────────────────────────────────────────┘
-                │
-                ▼
-        central collector / storage (per-event ring buffer,
-        dedup, graph construction: pid ↔ socket ↔ remote pid)
+┌──────────────────────── server (host A) ────────────────────────┐
+│  target process (PID, optionally a JVM)                         │
+│      │                                                          │
+│      ├── eBPF probes ───────────► correlator (tracer process)   │
+│      │    - file syscalls: data and meta ops                    │
+│      │    - sockets: syscalls + socket state transitions        │
+│      │      (4-tuples, join key)                                │
+│      │    - lifecycle, IPC, signals                             │
+│      │                                                          │
+│      └── Java agent ── spool ───► correlator                    │
+│           - hooks at the JDK's I/O boundaries only              │
+│           - stack + kernel TID + time window per I/O op         │
+│           - OTEL span ids, HTTP request events                  │
+│                                                                 │
+│  correlator ──► parquet segments, rotated every minute          │
+│                 /opt/iormesh/traces/<project>/ready/            │
+└────────────────────────────────┬────────────────────────────────┘
+                                 │  SSH + rsync, operator's key
+                                 │  (the tracer listens on nothing)
+                                 ▼
+┌──────────────────── controller (laptop) ────────────────────────┐
+│  iormeshctl: registry · deploy · collect · offline merge ·      │
+│              service-interaction db · expand · query · views    │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+There is no long-lived collector and no mesh agent. Each server
+runs one tracer (probes + correlator) that writes trace segments;
+everything cross-host — merging, the graph, mesh expansion, the
+views — happens on the controller.
 
 ## Components
 
-- **eBPF layer (Go)**
-  - Tracepoints / kprobes for file syscalls and tcp/udp socket
-    lifecycle; sockops/tracepoints for per-packet metadata as needed.
-  - Per-PID TID correlation; maps: pid→fd→(remote ip,port), pid→fd→path.
-- **Userspace correlator (Go)**
-  - Consumes the BPF ring buffer, resolves inode→path, joins events,
-    builds the per-PID I/O graph.
-- **Mesh agent**
-  - Watches the graph for new *outbound external* connections.
-  - Boots a minimal iormesh tracer on the peer host, scoped to the
-    remote PID of that socket. Bidirectional: both directions of
-    the socket land in one combined view.
-- **Java instrumenter (JDK 21)**
-  - Loaded via `-javaagent` (or attach API for live processes).
-  - Method entry/exit events; per-TID stack tracking (async-profiler
-    style) so any syscall I/O event can be annotated with the
-    executing Java method + owning `Thread`.
+- **eBPF layer (C, loaded from Go)**
+  - Tracepoints for file syscalls and the socket lifecycle. TCP
+    4-tuples come from the socket's state transitions
+    (`sock:inet_sock_set_state`), not from syscall arguments —
+    Java's non-blocking connects return before the connection
+    exists — and join back to pid/fd through the sock pointer.
+  - Native stack capture is opt-in and meant for non-JVM
+    targets; BPF cannot unwind JIT-compiled Java frames
+    reliably.
+- **Correlator (Go, inside the tracer)**
+  - Consumes the BPF ring buffer, resolves inode→path, keeps
+    pid→fd→path and pid→fd→4-tuple, joins the Java agent's
+    events to syscalls by kernel TID and time window, and writes
+    the parquet segments.
+- **Java agent**
+  - Loaded via `-javaagent` (primary) or the attach API for live
+    processes — with JDK 21's dynamic-loading caveats, see
+    PLAN.md decision #2.
+  - Instruments only the JDK methods where Java hands I/O to the
+    kernel and captures the Java stack there. Cost follows the
+    I/O rate, not the call rate; blanket method entry/exit
+    tracing is a non-goal.
+  - Tracks virtual-thread mount/unmount, because syscalls run on
+    carrier threads and the TID→Java thread map changes over
+    time.
+  - Hands events to the tracer through a spool in a tracer-owned
+    directory — no socket. Its own I/O is tagged and kept out of
+    the target's story.
   - OpenTelemetry-aware: when the app runs the OTEL SDK, the
     agent reads the active span context and tags every I/O
     event with its OTEL trace/span ids.
   - HTTP/HTTPS instrumentation: hooks at known client/server API
     boundaries record method, URI, headers (redacted), status
     and latency — joined to the socket, the stack and the span.
+  - The whole design is gated by spike S1 (PLAN.md), which
+    proves the join and measures its cost first.
 - **Traceable test workload (Java)**
   - A purpose-built Java app — never a live app — that iormesh is
     developed and validated against first. It runs scripted,
     deterministic scenarios (file ops — data and meta alike —,
     loopback/TCP traffic, known method-call flows, and a
     microservices topology of several service roles talking REST
-    over plain HTTP and TLS) whose expected event graph we can
-    state in advance, so every tracer feature can be checked
-    end-to-end before it ever attaches to anything real. This is
-    the Java sibling of ior's `cmd/ioworkload`.
-- **Collector / map**
-  - Single source of truth; owns the trace output contract (events,
-    graph, summary — see [output-contract.md](output-contract.md)).
-- **Views: SVG, sequence diagrams, interactive explorer**
-  - iormesh itself builds SVG diagrams of the mesh it generates —
-    deterministic for a given graph, so diagrams diff and golden
-    like data exports — plus deterministic sequence diagrams:
-    lifelines are services, arrows are requests in time order,
-    each hop attributed to the Java thread that caused it,
-    interleaved with that thread's local file I/O.
-  - Interactive explorer over the collected graph: filter by
-    host/PID/pod/time/method, click a node or edge, follow a
-    connection across hosts (form factor TBD — see PLAN.md).
+    over plain HTTP and TLS). Each scenario brackets itself with
+    markers and declares the events it must produce, so every
+    tracer feature can be checked end-to-end before it ever
+    attaches to anything real. This is the Java sibling of ior's
+    `cmd/ioworkload`. The catalogue grows milestone by
+    milestone.
+- **Normalizer**
+  - Renumbers run-specific values (PIDs, TIDs, fds, ports,
+    inodes, timestamps) to symbolic ids and cuts a trace to a
+    scenario's marker bracket. Golden checks, run-to-run diffs
+    and visual goldens all work on normalized output.
 - **Controller (`iormeshctl`)**
   - Runs on the controller — a laptop or MacBook, Linux or macOS —
     with no eBPF at all. Keeps the server list automatically
-    (`iormeshctl add|rm HOSTNAME`), pushes the matching Linux
-    build (amd64/arm64) to Rocky 9 servers as
-    `/opt/iormesh/bin/iormesh`, starts it in the background as
-    root via sudo (4h auto-exit and a disk-space watchdog by
-    default), then collects the trace segments over rsync —
-    streaming, deleting each synced segment on the server — and
-    builds the merged mesh, its SVG and sequence views locally.
+    (`iormeshctl add|rm HOSTNAME`), verifies and pushes the
+    matching Linux build (amd64/arm64) to Rocky 9 servers as
+    `/opt/iormesh/bin/iormesh`, and starts it with
+    `sudo iormesh start`.
+  - The tracer runs as a transient systemd unit: independent of
+    the SSH session, capped in CPU and memory by its cgroup,
+    bounded to 4h by default and by a disk-space watchdog, and
+    stopped cleanly with a flush.
+  - Every privileged action is a tracer subcommand (`start`,
+    `stop`, `status`, `uninstall`), so one pinned sudoers rule
+    covers the whole lifecycle.
+  - Collects the trace segments over rsync — streaming,
+    unprivileged, deleting each synced segment on the server —
+    and merges them offline: both ends of a connection fuse into
+    one cross-host edge (NAT-tolerant join key), and clock
+    offsets between hosts are bounded from the traffic itself.
   - Additively maintains a service-interaction database of
     app-to-app network interaction; humans name services through
-    the CLI via hostname-pattern + port rules (see PLAN.md, M6).
+    the CLI via hostname-pattern + port rules (see PLAN.md, M4).
   - Project-aware: unrelated apps on the same server trace as
     separate projects — every trace lives under
     `/opt/iormesh/traces/<project>/`. Collect can merge
@@ -102,6 +124,31 @@ doc gives the narrative.
   - `rm` also cleans up the server: it stops the tracer and
     removes `/opt/iormesh` — trace files are synced off first,
     so nothing is lost.
+- **Mesh expansion (in the controller)**
+  - After a collect, the merged graph holds unresolved peers:
+    connections whose far end has no tracer. `iormeshctl expand`
+    lists them, and with `--apply` deploys tracers to the ones
+    matching the expansion allowlist, bound to the process
+    listening on the observed port — round by round, under a hop
+    limit and a node cap.
+  - Tracers never deploy anything and never connect anywhere;
+    servers hold no credentials. The mesh grows only through the
+    operator's SSH key.
+- **Views, query and the LLM eval**
+  - iormesh itself builds SVG diagrams of the mesh it generates —
+    deterministic for a given graph, so diagrams diff and golden
+    like data exports — plus deterministic sequence diagrams:
+    lifelines are services, arrows are requests in
+    happens-before order, each hop attributed to the Java thread
+    that caused it, interleaved with that thread's local file
+    I/O.
+  - Interactive explorer over the collected graph: filter by
+    host/PID/pod/time/method, click a node or edge, follow a
+    connection across hosts (form factor TBD — see PLAN.md).
+  - `iormeshctl query` slices the merged trace into size-capped
+    NDJSON — what an LLM or a human actually reads — and an eval
+    with known answers tests whether the outputs really are
+    LLM-introspectable.
 - **Kubernetes sidecar / debug container**
   - Runs as a sidecar (or `kubectl debug` ephemeral container) in
     the target pod with a privileged security context for eBPF;
@@ -124,4 +171,4 @@ doc gives the narrative.
 - [Trace scope](trace-scope.md) — what is traced, and why each
   family is in the model.
 - [Output contract](output-contract.md) — the trace format.
-- [PLAN.md](../PLAN.md) — milestones and open decisions.
+- [PLAN.md](../PLAN.md) — milestones, spikes and decisions.

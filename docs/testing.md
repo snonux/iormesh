@@ -1,26 +1,68 @@
 # Testing strategy
 
-The test workload comes *first*, not last:
+Companion to [PLAN.md](../PLAN.md) — the plan is the source of
+truth.
 
-- Build the workload app before (or alongside) the tracer, so every
-  milestone lands against a known target.
-- Each scenario declares the exact I/O and method-flow it produces;
-  validation = diff the collected graph against that expectation.
+The test workload comes *first*, not last — and it comes first
+per milestone:
+
+- The workload framework (M0) lands before any tracer code. Every
+  later milestone adds its own scenarios before its tracer code,
+  so each one lands against a known target. PLAN.md's scenario
+  catalogue says which scenarios prove which milestone.
+- A walking skeleton (M1) runs the whole chain once — probes,
+  correlator, schema, normalizer, golden check, harness — on the
+  smallest scenario, before the traced surface widens.
+- The risky mechanisms are proven by spikes before milestones
+  depend on them: the Java↔syscall join, the cross-host join,
+  and the overhead budget.
 - The app has client and server modes — and a microservices flavor
   where several service roles talk REST over plain HTTP and TLS —
-  so single-hop and multi-hop mesh propagation can be rehearsed on
+  so cross-host fusion and mesh expansion can be rehearsed on
   loopback, between two test VMs/containers or across test hosts,
-  without going near anything live.
+  without going near anything live. One scenario talks to a
+  non-Java peer, so the degraded node shape is tested too.
 - Only once a milestone passes against the workload is it considered
   ready for a live process.
-- Expected graphs are declared in the same trace schema as real
-  output, so validation is a plain machine diff — and the goldens
-  double as few-shot examples for LLM introspection.
-- Deterministic SVG gives M0 visual goldens; the controller flow
-  (add → deploy → collect → rm) is rehearsed against M0 on two
-  test hosts, and its pull-merged mesh must equal M3's propagated
-  result; the k8s mode rehearses the same scenarios as pods in
-  kind.
+
+## What a golden check asserts
+
+A JVM issues thousands of syscalls nobody declared — startup,
+class loading, JIT and GC threads — and PIDs, TIDs, ports and
+inodes differ on every run. So validation is subset, not
+equality:
+
+1. **Normalize** the collected trace: run-specific values become
+   symbolic ids, in order of first appearance.
+2. **Cut to the marker bracket**: every scenario emits a begin
+   and an end marker; nothing outside them is asserted on.
+3. **Declared ⊆ collected**: every declared event and edge is
+   present, in the declared per-thread order.
+4. **Must-not-appear**: the scenario's forbidden list holds —
+   e.g. the planted `Authorization` header, query secret and argv
+   secret never show up.
+
+Expectations are declared in the same trace schema as real
+output, so they double as few-shot examples for LLM
+introspection.
+
+## Beyond single-host
+
+- Deterministic SVG gives the scenarios visual goldens (rendered
+  from normalized graphs).
+- The controller flow (add → deploy → collect → rm) is rehearsed
+  on two test hosts; its merged mesh must equal the single-host
+  result for single-host scenarios.
+- Mesh expansion is rehearsed on the microservices topology with
+  only the gateway enrolled; the expanded mesh must equal the one
+  obtained by enrolling every host by hand.
+- Hosts emulated as network namespaces share one kernel clock, so
+  a test-only flag injects a clock offset per tracer, and the
+  merge must recover it; NAT is emulated with a DNAT hop.
+- The k8s mode rehearses the same scenarios as pods in kind.
+- The LLM claim is tested: a fixed question set over workload
+  traces, with answers known from the scenario declarations,
+  rerun on every schema change.
 
 ## Integration tests follow ior
 

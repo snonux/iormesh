@@ -3,8 +3,8 @@
 <img src="assets/logo.svg" alt="iormesh logo" width="150" />
 
 BPF-based process observability mesh: map what a PID touches (files,
-sockets), self-replicate across the wire to the other side of each
-connection, and trace Java-level code flow inside the process.
+sockets), follow each connection across the wire to its other side,
+and trace Java-level code flow inside the process.
 
 Companion project to [ior](https://github.com/snonux/ior). Where `ior`
 answers *"what is this process doing to its I/O right now?"*, iormesh
@@ -22,11 +22,11 @@ schema, milestones — is subject to change as the PoC evolves.
 1. **Full I/O map per PID** — every file op and every network
    socket with resolved IPs and ports, plus the HTTP requests
    riding them (method, URI, headers, status).
-2. **Self-propagating mesh** — when an *outbound* external
-   connection is detected, iormesh deploys a lightweight tracer
-   on the remote host, attached to the process accepting that
-   connection — under an allowlist, signed binaries and hop
-   limits.
+2. **A mesh that grows along its edges** — when a connection to
+   an untraced host is observed, `iormeshctl` can deploy a
+   tracer there, attached to the process accepting that
+   connection — from the controller, under an allowlist, signed
+   binaries and hop limits. Tracers never deploy themselves.
 3. **Java code-flow instrumentation** (JDK 21) — attribute I/O
    events to the method stack that caused them, and to the
    OpenTelemetry span when the app is instrumented.
@@ -60,17 +60,20 @@ app is ever the first test subject.
 - **Kubernetes (later phase)** — sidecar or `iormeshctl`-driven
   `kubectl debug` container (context and image configurable)
   next to the app; pod-aware identity.
-- **Self-propagating mesh** — tracers deploy themselves to
-  connection peers under the allowlist and hop limits (M3/M4).
+- **Mesh expansion** — `iormeshctl expand` follows observed
+  connections to untraced peers and deploys tracers there, under
+  the allowlist and hop limits (M6). Driven by the controller;
+  servers hold no credentials.
 
 ## Security in brief
 
 - Read-only tracing, metadata only — no file or socket payload
   is ever recorded. One deliberate exception: HTTP(S) request
-  metadata captured at the Java API boundary, with sensitive
-  headers and query params redacted by policy.
-- Self-replication only against an explicit allowlist, with a
-  signed tracer binary, hop limits and egress rules.
+  metadata captured at the Java API boundary. One redaction
+  policy covers headers, query params, URI paths and argv.
+- Mesh expansion only from the controller, against an explicit
+  allowlist, with a signed tracer binary, a hop limit and a
+  node cap. Tracers never deploy and never connect anywhere.
 - No management sockets — the tracer listens on nothing; control
   flows only through SSH (or `kubectl exec`), i.e. the
   operator's key.
@@ -79,8 +82,8 @@ Details: [docs/security.md](./docs/security.md).
 
 ## Documentation
 
-- [PLAN.md](./PLAN.md) — the working plan: scope, milestones
-  M0–M7, open decisions. The source of truth.
+- [PLAN.md](./PLAN.md) — the working plan: scope, spikes,
+  milestones M0–M7, decisions. The source of truth.
 - [docs/architecture.md](./docs/architecture.md) — components
   and how they fit together.
 - [docs/trace-scope.md](./docs/trace-scope.md) — what iormesh

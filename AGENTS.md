@@ -2,7 +2,7 @@
 
 iormesh is in the planning phase: no implementation code exists
 yet. [PLAN.md](PLAN.md) is the working plan and the source of
-truth for scope, milestones (M0–M7), and open decisions. `ior`
+truth for scope, spikes (S1–S3), milestones (M0–M7), and decisions. `ior`
 (`../ior`) is the reference project for BPF/C code generation and
 integration tests — consult it before inventing patterns.
 Don't scaffold implementation ahead of the milestones — the
