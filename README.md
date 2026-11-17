@@ -324,9 +324,12 @@ below gets invented twice:
 - `vmlinux.h` from BTF, clang CO-RE compile, the `.bpf.o` embedded
   into the static binary via `go:embed` (env override to load an
   external object for testing).
-- Docker build pins the generation kernel; the static binary is
+- Container builds with Docker **or Podman**: the container pins
+  the build environment; the static binary is
   copyable to any BTF host, and tracepoints missing there are
-  skipped at runtime.
+  skipped at runtime. The tracer builds for linux/amd64 + arm64
+  from its container; the cgo-free controller cross-compiles
+  darwin/linux for both arches from the same pipeline.
 
 Where ior already solved a problem — fd→path resolution in BPF,
 syscall enter/exit pairing and restart edge cases, thread/TID

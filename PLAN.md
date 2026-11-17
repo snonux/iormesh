@@ -216,7 +216,8 @@ later phase):
   SSH key.
 - Target platform for the tracer: Rocky Linux 9 first (BTF
   present; ior's Rocky 9 build/Docker patterns apply), amd64
-  and arm64.
+  and arm64. Deployed binaries come out of the container build
+  pipeline (see "Container builds (Docker/Podman)").
 - Acceptance: two test hosts run M0 scenarios; from a
   controller, `add` → `deploy` → `collect` → `rm` produces the
   merged mesh and its SVG with zero manual steps on the
@@ -485,9 +486,30 @@ pattern (and, where sensible, the code) from `../ior`:
   ring buffer consumption, and the libbpf link-wrapper seam that
   keeps teardown safe.
 - **Build tooling**: Magefile with generate/build/test/vet/lint
-  targets wired for cgo (libbpfgo paths), Docker build scripts for a
-  pinned generation kernel, and generated-artifact drift checked in
-  CI like ior does.
+  targets wired for cgo (libbpfgo paths), container builds that
+  run on Docker **and Podman** (engine-agnostic scripts,
+  ior's build-with-docker pattern with a podman alias), and
+  generated-artifact drift checked in CI like ior does.
+
+## Container builds (Docker/Podman)
+
+Both binaries build inside containers, with the same commands
+whether the engine is Docker or Podman:
+
+- **Tracer (`iormesh`)**: linux/amd64 + linux/arm64. The
+  container pins the build environment (clang, libbpf,
+  bpftool); tracepoint generation reads the host kernel, so the
+  diff gate stays the honesty check — build on a kernel whose
+  tracepoint set you mean to pin, ior-style. arm64
+  cross-compiles from its own container with an aarch64
+  toolchain and sysroot.
+- **Controller (`iormeshctl`)**: pure Go, no cgo — one
+  container cross-compiles darwin/amd64, darwin/arm64,
+  linux/amd64, linux/arm64.
+- Mage targets are engine-agnostic (`mage buildDocker` /
+  `mage buildPodman`, or one target taking an engine); the
+  signed tracer binary comes out of the same pipeline the
+  controller pushes with.
 
 ## Component map (planned)
 
@@ -533,7 +555,7 @@ agent/                # Java agent source (M2)
 workload/             # traceable test app source (M0) + container image
 deploy/               # k8s manifests: sidecar patch, debug container
 Magefile.go           # generate/build/test targets, ior-style
-scripts/              # build-with-docker.sh etc. (pinned generation kernel)
+scripts/              # container builds (docker/podman), ior-style
 docs/                 # design notes as they emerge
 ```
 
