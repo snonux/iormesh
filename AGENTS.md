@@ -8,6 +8,12 @@ integration tests — consult it before inventing patterns.
 Don't scaffold implementation ahead of the milestones — the
 plan moves first.
 
+Picking up a spike or milestone? Read its section in
+[docs/implementation.md](docs/implementation.md) — files, order
+of work, code sketches, tests — after PLAN.md. If a sketch there
+disagrees with PLAN.md, the plan is right; fix the guide in the
+same commit.
+
 ## Documentation layout — keep it that way
 
 - **README.md stays lean**: pitch, status, goals, deployment
@@ -15,8 +21,11 @@ plan moves first.
   not accumulate detail sections again.
 - **Detailed documentation lives in `docs/`**, one topic per
   file (architecture, trace-scope, output-contract, testing,
-  security, build), each linked from the README's Documentation
-  section.
+  security, build, implementation), each linked from the
+  README's Documentation section.
+- **Diagrams are generated**: `docs/diagrams/*.svg` come from
+  `docs/diagrams/gen.py` (`python3 docs/diagrams/gen.py
+  docs/diagrams`). Change the generator, not the SVGs.
 - **PLAN.md decides, docs narrate**: decisions land in PLAN.md
   first; the docs expand and explain them. When the plan
   changes, update the matching docs file in the same commit —

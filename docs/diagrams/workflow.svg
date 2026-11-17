@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="480" viewBox="0 0 1000 480" role="img" aria-labelledby="t d">
+  <title id="t">Operator workflow</title>
+  <desc id="d">add, deploy, trace, collect, merge and explore; collect repeats while the session runs; expand feeds new hosts back into deploy; rm cleans up.</desc>
+  <defs><marker id="a22d3ee" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#22d3ee"/></marker><marker id="afb7185" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#fb7185"/></marker><marker id="afbbf24" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#fbbf24"/></marker><marker id="a9fb0d0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#9fb0d0"/></marker></defs>
+  <rect width="1000" height="480" rx="18" fill="#0b1026"/>
+  <text x="40" y="46" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="22" fill="#e6edf7" text-anchor="start" font-weight="600">Operator workflow</text>
+  <text x="40" y="70" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="13" fill="#9fb0d0" text-anchor="start">Everything is driven from the laptop with iormeshctl. Servers only ever run the tracer.</text>
+  <rect x="30" y="150" width="140" height="84" rx="10" fill="#1b2454" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="44" y="177" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="15" fill="#e6edf7" text-anchor="start" font-weight="600">add</text>
+  <text x="156" y="174" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="end">1</text>
+  <text x="44" y="199" font-family="'JetBrains Mono','Noto Sans Mono',Menlo,Consolas,monospace" font-size="11" fill="#22d3ee" text-anchor="start">add HOST</text>
+  <text x="44" y="218" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">enroll a server</text>
+  <rect x="190" y="150" width="140" height="84" rx="10" fill="#1b2454" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="204" y="177" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="15" fill="#e6edf7" text-anchor="start" font-weight="600">deploy</text>
+  <text x="316" y="174" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="end">2</text>
+  <text x="204" y="199" font-family="'JetBrains Mono','Noto Sans Mono',Menlo,Consolas,monospace" font-size="11" fill="#22d3ee" text-anchor="start">deploy</text>
+  <text x="204" y="218" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">push + start tracer</text>
+  <path d="M171 192 L188 192" fill="none" stroke="#9fb0d0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#a9fb0d0)"/>
+  <rect x="350" y="150" width="140" height="84" rx="10" fill="#1b2454" stroke="#fb7185" stroke-width="1.5"/>
+  <text x="364" y="177" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="15" fill="#e6edf7" text-anchor="start" font-weight="600">trace</text>
+  <text x="476" y="174" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="end">3</text>
+  <text x="364" y="199" font-family="'JetBrains Mono','Noto Sans Mono',Menlo,Consolas,monospace" font-size="11" fill="#fb7185" text-anchor="start">≤ 4h, disk-bounded</text>
+  <text x="364" y="218" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">1 segment per minute</text>
+  <path d="M331 192 L348 192" fill="none" stroke="#9fb0d0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#a9fb0d0)"/>
+  <rect x="510" y="150" width="140" height="84" rx="10" fill="#1b2454" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="524" y="177" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="15" fill="#e6edf7" text-anchor="start" font-weight="600">collect</text>
+  <text x="636" y="174" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="end">4</text>
+  <text x="524" y="199" font-family="'JetBrains Mono','Noto Sans Mono',Menlo,Consolas,monospace" font-size="11" fill="#22d3ee" text-anchor="start">collect</text>
+  <text x="524" y="218" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">rsync the segments</text>
+  <path d="M491 192 L508 192" fill="none" stroke="#9fb0d0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#a9fb0d0)"/>
+  <rect x="670" y="150" width="140" height="84" rx="10" fill="#1b2454" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="684" y="177" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="15" fill="#e6edf7" text-anchor="start" font-weight="600">merge</text>
+  <text x="796" y="174" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="end">5</text>
+  <text x="684" y="199" font-family="'JetBrains Mono','Noto Sans Mono',Menlo,Consolas,monospace" font-size="11" fill="#22d3ee" text-anchor="start">(part of collect)</text>
+  <text x="684" y="218" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">fuse cross-host edges</text>
+  <path d="M651 192 L668 192" fill="none" stroke="#9fb0d0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#a9fb0d0)"/>
+  <rect x="830" y="150" width="140" height="84" rx="10" fill="#1b2454" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="844" y="177" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="15" fill="#e6edf7" text-anchor="start" font-weight="600">explore</text>
+  <text x="956" y="174" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="end">6</text>
+  <text x="844" y="199" font-family="'JetBrains Mono','Noto Sans Mono',Menlo,Consolas,monospace" font-size="11" fill="#22d3ee" text-anchor="start">query · svg</text>
+  <text x="844" y="218" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">views, sequence, LLM</text>
+  <path d="M811 192 L828 192" fill="none" stroke="#9fb0d0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#a9fb0d0)"/>
+  <path d="M580 148 C580 112 420 112 420 146" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 4" marker-end="url(#a22d3ee)"/>
+  <text x="500" y="108" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#22d3ee" text-anchor="middle">repeat while the session runs</text>
+  <rect x="330" y="300" width="300" height="104" rx="10" fill="#1b2454" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="344" y="327" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="15" fill="#e6edf7" text-anchor="start" font-weight="600">expand</text>
+  <text x="616" y="324" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="end">7</text>
+  <text x="344" y="349" font-family="'JetBrains Mono','Noto Sans Mono',Menlo,Consolas,monospace" font-size="11" fill="#22d3ee" text-anchor="start">expand --apply --hops N</text>
+  <text x="344" y="369" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">untraced peers become new hosts</text>
+  <text x="344" y="386" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">allowlist · hop limit · node cap</text>
+  <path d="M740 236 L740 352 L633 352" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 4" marker-end="url(#a22d3ee)"/>
+  <text x="732" y="290" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#22d3ee" text-anchor="end">unresolved edges</text>
+  <path d="M330 352 L260 352 L260 237" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 4" marker-end="url(#a22d3ee)"/>
+  <text x="252" y="290" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#22d3ee" text-anchor="end">next round</text>
+  <rect x="830" y="300" width="140" height="104" rx="10" fill="#1b2454" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="844" y="327" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="15" fill="#e6edf7" text-anchor="start" font-weight="600">rm</text>
+  <text x="956" y="324" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="end">8</text>
+  <text x="844" y="349" font-family="'JetBrains Mono','Noto Sans Mono',Menlo,Consolas,monospace" font-size="11" fill="#22d3ee" text-anchor="start">rm HOST</text>
+  <text x="844" y="369" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">sync, stop, remove</text>
+  <text x="844" y="386" font-family="'JetBrains Mono','Noto Sans Mono',Menlo,Consolas,monospace" font-size="11" fill="#9fb0d0" text-anchor="start">/opt/iormesh</text>
+  <path d="M900 236 L900 298" fill="none" stroke="#9fb0d0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#a9fb0d0)"/>
+  <text x="908" y="272" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">when done</text>
+  <rect x="40" y="440" width="12" height="12" rx="3" fill="#1b2454" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="60" y="451" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">runs on your laptop</text>
+  <rect x="200" y="440" width="12" height="12" rx="3" fill="#1b2454" stroke="#fb7185" stroke-width="1.5"/>
+  <text x="220" y="451" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">runs on the servers</text>
+</svg>

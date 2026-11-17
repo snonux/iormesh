@@ -4,32 +4,7 @@ How iormesh is put together. Companion to
 [PLAN.md](../PLAN.md) — the plan is the source of truth; this
 doc gives the narrative.
 
-```
-┌──────────────────────── server (host A) ────────────────────────┐
-│  target process (PID, optionally a JVM)                         │
-│      │                                                          │
-│      ├── eBPF probes ───────────► correlator (tracer process)   │
-│      │    - file syscalls: data and meta ops                    │
-│      │    - sockets: syscalls + socket state transitions        │
-│      │      (4-tuples, join key)                                │
-│      │    - lifecycle, IPC, signals                             │
-│      │                                                          │
-│      └── Java agent ── spool ───► correlator                    │
-│           - hooks at the JDK's I/O boundaries only              │
-│           - stack + kernel TID + time window per I/O op         │
-│           - OTEL span ids, HTTP request events                  │
-│                                                                 │
-│  correlator ──► parquet segments, rotated every minute          │
-│                 /opt/iormesh/traces/<project>/ready/            │
-└────────────────────────────────┬────────────────────────────────┘
-                                 │  SSH + rsync, operator's key
-                                 │  (the tracer listens on nothing)
-                                 ▼
-┌──────────────────── controller (laptop) ────────────────────────┐
-│  iormeshctl: registry · deploy · collect · offline merge ·      │
-│              service-interaction db · expand · query · views    │
-└─────────────────────────────────────────────────────────────────┘
-```
+![How iormesh works](diagrams/architecture.svg)
 
 There is no long-lived collector and no mesh agent. Each server
 runs one tracer (probes + correlator) that writes trace segments;
@@ -166,9 +141,41 @@ views — happens on the controller.
     Traefik's API in k8s mode) and completes the edge: app →
     FQDN → ingress → workload, with no tracer on the ingress.
 
+## Operator workflow
+
+![Operator workflow](diagrams/workflow.svg)
+
+Everything is driven from the laptop. `collect` repeats while a
+session runs; `expand` turns the unresolved edges of one round
+into the newly enrolled hosts of the next; `rm` syncs, stops and
+removes. See PLAN.md, M4 and M6.
+
+## The two joins
+
+![Two joins make one story](diagrams/join.svg)
+
+Two joins turn raw events into the end-goal picture. On each
+host, a syscall is joined to the Java stack of the thread that
+issued it. On the controller, the two hosts' views of one TCP
+connection are fused into a single edge. Order across hosts is
+happens-before — each thread's own order plus send→receive —
+never a comparison of clocks.
+
+## Roadmap
+
+![Roadmap](diagrams/roadmap.svg)
+
+The step-by-step version, with code sketches, is the
+[implementation guide](implementation.md).
+
 ## See also
 
 - [Trace scope](trace-scope.md) — what is traced, and why each
   family is in the model.
 - [Output contract](output-contract.md) — the trace format.
+- [Implementation guide](implementation.md) — work packages
+  with code sketches.
 - [PLAN.md](../PLAN.md) — milestones, spikes and decisions.
+
+The diagrams are generated: edit `diagrams/gen.py` and run
+`python3 docs/diagrams/gen.py docs/diagrams`.

@@ -85,7 +85,10 @@ Details: [docs/security.md](./docs/security.md).
 - [PLAN.md](./PLAN.md) — the working plan: scope, spikes,
   milestones M0–M7, decisions. The source of truth.
 - [docs/architecture.md](./docs/architecture.md) — components
-  and how they fit together.
+  and how they fit together, with diagrams.
+- [docs/implementation.md](./docs/implementation.md) — the
+  implementation guide: work packages in execution order, with
+  code sketches.
 - [docs/trace-scope.md](./docs/trace-scope.md) — what iormesh
   traces, and why each family is in the model.
 - [docs/output-contract.md](./docs/output-contract.md) — the

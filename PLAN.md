@@ -86,6 +86,11 @@ and M7 kept their numbers.)
 | M6        | Mesh expansion, controller-driven           | —        |
 | M7        | Kubernetes                                  | —        |
 
+How to build each of these — files, order of work, code
+sketches, tests — is in the
+[implementation guide](docs/implementation.md). The plan decides;
+the guide shows how.
+
 ### Spikes — feasibility before commitment
 
 Three mechanisms carry the project and none of them exists in ior.
@@ -102,15 +107,22 @@ throwaway; its findings update this plan.
     implementations, the NIO dispatchers) bracket the syscalls of
     the M0 scenarios, and which I/O stays unbracketed (JNI
     libraries, JVM-internal I/O).
-  - Join key: kernel TID plus a monotonic time window. Java
-    exposes no kernel TID, so a small native helper is needed —
-    or a different design, e.g. a per-thread memory slot the BPF
-    side reads at syscall time. Verify the agent's clock and the
-    BPF clock are the same clock.
+  - Join key, cheapest candidate first: the fd plus a time
+    window (no TID needed — the matched syscall then teaches
+    the TID↔Java thread mapping); the kernel TID plus a time
+    window (Java exposes no kernel TID: `/proc/thread-self` or
+    a native helper); a per-thread memory slot the BPF side
+    reads at syscall time.
+  - Clocks: the agent's clock is monotonic, ior's BPF records
+    use the boot clock — they differ by time spent suspended.
+    Verify the conversion's error is far below a syscall's
+    duration.
   - Virtual threads: syscalls run on carrier threads and a
-    parked virtual thread may resume on another carrier — how
-    mount/unmount is tracked so TID→Java thread stays correct
-    over time.
+    parked virtual thread may resume on another carrier. Does
+    hooking the innermost Java frame above each native I/O
+    call — where a virtual thread cannot park — keep the TID
+    stable inside one bracket, or is mount/unmount tracking
+    needed after all?
   - Transport: how agent events reach the tracer without a
     socket (decision #27), and how the agent's own I/O is kept
     out of the target's story.
@@ -327,17 +339,21 @@ spike confirms or corrects.
   kernel (hook set from S1) and captures the Java stack there.
   Cost scales with the I/O rate, not the call rate; blanket
   method entry/exit tracing is a non-goal.
-- **Join to kernel events**: each boundary hook records the
-  kernel TID, monotonic enter/exit timestamps and a stack id;
-  the correlator attaches the stack to the syscalls that TID
-  issued inside the window. Events no hook brackets (JNI
-  libraries, JVM-internal I/O) stay in the trace marked
-  `attribution: none` — never guessed.
+- **Join to kernel events**: each boundary hook records its
+  join key (fd or kernel TID — S1 picks), monotonic enter/exit
+  timestamps and a stack id; the correlator attaches the stack
+  to the matching syscalls inside the window. Events no hook
+  brackets (JNI libraries, JVM-internal I/O) and ambiguous
+  matches stay in the trace marked `attribution: none` — never
+  guessed.
 - **Virtual threads**: syscalls run on carrier threads, and a
   parked virtual thread may resume on a different carrier, so
-  TID→Java thread is a time-varying map; the agent tracks
-  mount/unmount, and each hook records the virtual thread it
-  ran for.
+  TID→Java thread is a time-varying map. Hooks therefore sit at
+  the innermost Java frame above each native I/O call, where a
+  virtual thread cannot park: the TID is stable inside one
+  bracket, and each hook records the virtual thread it ran for.
+  Mount/unmount tracking is the fallback if S1 finds a bracket
+  that can park.
 - **Agent → tracer transport**: socket-free like everything
   else — a spool the agent appends to in a tracer-owned
   directory, read by the correlator (decision #27). The agent's
@@ -422,7 +438,9 @@ Kubernetes (M7) build on it.
   a second, independent bound — no unbounded daemons on
   servers.
 - **One sudoers rule**: every privileged action is a tracer
-  subcommand — `start`, `stop`, `status`, `uninstall` — so a
+  subcommand — `start`, `stop`, `status`, `upgrade`,
+  `uninstall` (and `run`, the foreground tracer `start`
+  wraps) — so a
   single pinned rule for `/opt/iormesh/bin/iormesh` covers the
   whole lifecycle; nothing else on the server needs sudo. The
   binary is root-owned; how it gets installed and upgraded
@@ -1318,7 +1336,9 @@ controller.
 
 ```
 cmd/iormesh/          # tracer binary (Linux, eBPF loader +
-                      #   correlator); runs on the targets
+                      #   correlator); runs on the targets:
+                      #   run|start|stop|status|upgrade|
+                      #   uninstall|normalize
 cmd/iormeshctl/       # controller (Linux/macOS, no eBPF, no cgo):
                       #   add|rm registry, deploy, collect,
                       #   expand, query, svg
@@ -1329,8 +1349,19 @@ internal/c/           # BPF C sources: ior-style helpers +
 internal/generate/    # tracepoint/type generators (Go, ior pattern)
 internal/tracepoints/ # generated Go tracepoint tables
 internal/types/       # generated C-derived Go types
+internal/schema/      # the output contract in Go: Event, Graph,
+                      #   NDJSON + parquet mapping (cgo-free)
+internal/bpf/         # libbpfgo loader, attach, ring buffer (cgo)
 internal/correlate/   # event joins, pid/fd/path graphs,
                       #   agent-event join
+internal/target/      # target spec: PID, pattern, listening port
+internal/segment/     # minute-rotated parquet segments, ready/
+                      #   contract, disk watchdog
+internal/redact/      # one redaction policy: argv, headers,
+                      #   query params, paths (cgo-free)
+internal/agentspool/  # reader for the Java agent's spool
+internal/buildgate/   # repo-wide gates: controller stays
+                      #   cgo-free, no //nolint
 internal/normalize/   # symbolic ids, marker brackets, golden
                       #   check (cgo-free — tracer, tests and
                       #   iormeshctl share it)
@@ -1350,18 +1381,25 @@ internal/explore/     # interactive explorer (self-contained HTML/JS)
 internal/k8s/         # cgroup→pod identity mapping, k8s metadata
 internal/routemap/    # FQDN→ingress→workload map (config + k8s discovery)
 internal/bpfembed.go  # go:embed of the compiled .bpf.o + env override
-agent/                # Java agent source (M3)
+agent/                # Java agent source (M3): bridge jar
+                      #   (bootstrap-visible hooks) + core
 workload/             # traceable test app source (M0) + container image
 integrationtests/     # end-to-end suite, ior pattern: harness,
                       #   expectations, per-family scenario tests,
                       #   kernel probes, multi-host topology runs
+eval/                 # LLM introspection eval: questions,
+                      #   results (M5)
+spikes/               # throwaway spike prototypes (S1–S3);
+                      #   their results live in docs/spikes/
 deploy/               # k8s manifests: sidecar patch, debug container
 assets/               # logo + wordmark (SVG)
 Magefile.go           # generate/build/test targets, ior-style
 scripts/              # container builds (docker/podman), ior-style
 docs/                 # design docs: architecture, trace scope,
-                      #   output contract, testing, security, build;
-                      #   docs/spikes/ holds the spike results
+                      #   output contract, testing, security,
+                      #   build, implementation guide;
+                      #   docs/spikes/ holds the spike results,
+                      #   docs/diagrams/ the generated SVGs
 ```
 
 (Layout mirrors ior's generation tree so the pattern can be lifted

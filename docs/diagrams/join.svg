@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="590" viewBox="0 0 1000 590" role="img" aria-labelledby="t d">
+  <title id="t">Two joins make one story</title>
+  <desc id="d">A Java stack is joined to the syscalls of the same thread inside the hook&#x27;s time window; the two hosts&#x27; views of one TCP connection are joined into one edge; order is happens-before.</desc>
+  <defs><marker id="a22d3ee" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#22d3ee"/></marker><marker id="afb7185" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#fb7185"/></marker><marker id="afbbf24" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#fbbf24"/></marker><marker id="a9fb0d0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#9fb0d0"/></marker></defs>
+  <rect width="1000" height="590" rx="18" fill="#0b1026"/>
+  <text x="40" y="46" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="22" fill="#e6edf7" text-anchor="start" font-weight="600">Two joins make one story</text>
+  <text x="40" y="70" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="13" fill="#9fb0d0" text-anchor="start">How one request from gateway to orders becomes an attributed, ordered line in the sequence view.</text>
+  <text x="40" y="114" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="13" fill="#e6edf7" text-anchor="start" font-weight="600">host A · gateway · thread http-1</text>
+  <text x="960" y="114" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="end">time →</text>
+  <rect x="40" y="124" width="920" height="124" rx="14" fill="#131a3d" stroke="#3a4a86" stroke-width="1.5"/>
+  <text x="56" y="160" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">Java agent</text>
+  <text x="56" y="220" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">eBPF</text>
+  <rect x="150" y="142" width="170" height="28" rx="6" fill="#131a3d" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="235.0" y="160" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf7" text-anchor="middle">OrdersClient.fetch()</text>
+  <rect x="185" y="202" width="100" height="28" rx="6" fill="#1b2454" stroke="#3a4a86" stroke-width="1.5"/>
+  <text x="235.0" y="220" font-family="'JetBrains Mono','Noto Sans Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf7" text-anchor="middle">write fd 9</text>
+  <path d="M235 170 L235 200" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3 3"/>
+  <rect x="770" y="142" width="170" height="28" rx="6" fill="#131a3d" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="855.0" y="160" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf7" text-anchor="middle">OrdersClient.fetch()</text>
+  <rect x="805" y="202" width="100" height="28" rx="6" fill="#1b2454" stroke="#3a4a86" stroke-width="1.5"/>
+  <text x="855.0" y="220" font-family="'JetBrains Mono','Noto Sans Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf7" text-anchor="middle">read fd 9</text>
+  <path d="M855 170 L855 200" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3 3"/>
+  <text x="336" y="154" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11.5" fill="#22d3ee" text-anchor="start">① Java ↔ kernel — the syscall runs on the same thread,</text>
+  <text x="353" y="170" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11.5" fill="#22d3ee" text-anchor="start">inside the hook&#x27;s time window, so it gets that stack.</text>
+  <text x="40" y="320" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="13" fill="#e6edf7" text-anchor="start" font-weight="600">host B · orders · thread worker-3</text>
+  <text x="960" y="320" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="end">time →</text>
+  <rect x="40" y="330" width="920" height="124" rx="14" fill="#131a3d" stroke="#3a4a86" stroke-width="1.5"/>
+  <text x="56" y="426" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">Java agent</text>
+  <text x="56" y="366" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">eBPF</text>
+  <rect x="350" y="348" width="100" height="28" rx="6" fill="#1b2454" stroke="#3a4a86" stroke-width="1.5"/>
+  <text x="400.0" y="366" font-family="'JetBrains Mono','Noto Sans Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf7" text-anchor="middle">read fd 12</text>
+  <rect x="478" y="348" width="134" height="28" rx="6" fill="#1b2454" stroke="#3a4a86" stroke-width="1.5"/>
+  <text x="545.0" y="366" font-family="'JetBrains Mono','Noto Sans Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf7" text-anchor="middle">openat orders.conf</text>
+  <rect x="640" y="348" width="100" height="28" rx="6" fill="#1b2454" stroke="#3a4a86" stroke-width="1.5"/>
+  <text x="690.0" y="366" font-family="'JetBrains Mono','Noto Sans Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf7" text-anchor="middle">write fd 12</text>
+  <rect x="330" y="408" width="140" height="28" rx="6" fill="#131a3d" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="400.0" y="426" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf7" text-anchor="middle">OrderHandler.handle()</text>
+  <rect x="478" y="408" width="134" height="28" rx="6" fill="#131a3d" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="545.0" y="426" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf7" text-anchor="middle">Config.load()</text>
+  <rect x="620" y="408" width="140" height="28" rx="6" fill="#131a3d" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="690.0" y="426" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf7" text-anchor="middle">OrderHandler.handle()</text>
+  <path d="M400 378 L400 406" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3 3"/>
+  <path d="M545 378 L545 406" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3 3"/>
+  <path d="M690 378 L690 406" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3 3"/>
+  <path d="M235 232 L392 345" fill="none" stroke="#fbbf24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#afbbf24)"/>
+  <path d="M698 345 L850 233" fill="none" stroke="#fbbf24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#afbbf24)"/>
+  <text x="545" y="276" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11.5" fill="#fbbf24" text-anchor="middle">② host ↔ host — both tracers recorded the same TCP</text>
+  <text x="545" y="292" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11.5" fill="#fbbf24" text-anchor="middle">connection, so its two halves fuse into one edge.</text>
+  <text x="40" y="492" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11.5" fill="#9fb0d0" text-anchor="start">③ Order is happens-before: each thread&#x27;s own order plus the send → receive arrows. Clocks are never compared across hosts.</text>
+  <rect x="40" y="510" width="920" height="56" rx="10" fill="#1b2454" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="56" y="532" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9fb0d0" text-anchor="start" font-weight="600">SEQUENCE VIEW</text>
+  <text x="56" y="552" font-family="'JetBrains Mono','Noto Sans Mono',Menlo,Consolas,monospace" font-size="11.5" fill="#e6edf7" text-anchor="start">gateway http-1 → orders worker-3: read request → read orders.conf → wrote response → gateway http-1</text>
+</svg>
