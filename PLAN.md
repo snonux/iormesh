@@ -315,6 +315,10 @@ later phase):
   the minute currently being written, and collection is never
   an end-of-run bulk download. The active segment never enters
   `ready/`, so rsync can never grab or delete a file mid-write.
+  Synced segments land on the controller under
+  `~/.local/share/iormesh/traces/<project>/` — that path on
+  every platform, always — and stay there until the operator
+  deletes them; nothing is auto-cleaned.
   Collect is project-aware: one project at a time, or
   several together — when project A's app calls project B's
   app over TCP, the same 4-tuple join fuses both sides into
@@ -548,7 +552,19 @@ Later phase — plain Linux servers (M6) come first.
     diffable and inspectable, but incremental updates and
     bigger meshes get awkward); one database per project vs
     one with project scoping; glob vs regex for the naming
-    rules.
+    rules. Lives under `~/.local/share/iormesh/`, next to the
+    collected traces.
+25. **Tracer overhead budget** — to think about, not yet
+    pinned: tracing runs at syscall frequency and the agent
+    instruments method entry/exit, so the overhead the target
+    pays needs an explicit, measured budget — tracer CPU
+    overhead and ring-buffer loss rate under the M0
+    scenarios (ior's `perf/` + bench-profiles pattern is the
+    measurement model). Open: the numbers, whether the
+    budget becomes an M1 acceptance criterion, and where it
+    is enforced (a perf target in CI vs a documented
+    measurement run per release). Pin before anything live
+    is attached.
 
 ## What we trace — the mental-model inventory
 
