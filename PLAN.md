@@ -213,12 +213,18 @@ later phase):
   non-interacting applications on the same server are traced
   and stored independently.
 - **Trace files** land on the server as parquet under
-  `/opt/iormesh/traces/<project>/<fqdn>-<session>-<start-ts>.parquet`
-  — every trace is always inside a project subfolder, so
-  unrelated apps on one server never mix. Parquet is the bulk
-  format behind the same schema as NDJSON (columnar, queryable,
-  compact; ior already records parquet). Segments flush
-  periodically, so a crash or kill loses minutes, not hours.
+  `/opt/iormesh/traces/<project>/` — every trace is always
+  inside a project subfolder, so unrelated apps on one server
+  never mix. Parquet is the bulk format behind the same schema
+  as NDJSON (columnar, queryable, compact; ior already records
+  parquet). Segments **rotate once per minute**: only the
+  active segment is being written; on rotation it is closed,
+  compressed (codec per decision #16), and moved into a `ready/`
+  subfolder as `<fqdn>-<session>-<start-ts>-<seq>.parquet.zst`.
+  `ready/` is the sync contract: files there are immutable and
+  final, so iormeshctl can collect them while the session
+  runs, and a crash or kill loses at most the current minute,
+  never a synced segment.
 - **Disk watchdog**: the trace directory is configurable
   (`-trace-dir`, default `/opt/iormesh/traces`), and the
   tracer continuously monitors the partition holding it
@@ -229,11 +235,19 @@ later phase):
   exits. Together with the 4h bound, tracing is bounded by
   disk too — it never fills the partition. A startup check
   fails fast if the partition is already at the limit.
-- **Collect**: iterate the registry, download the trace files,
+- **Collect**: iterate the registry, sync the trace files,
   merge offline by stable ids — connection ids, 4-tuple joins,
   clock reconciliation — fusing the outbound side on host A
   with the inbound side on host B into single cross-host
-  edges. Collect is project-aware: one project at a time, or
+  edges. **Sync is streaming and rsync-based**: `collect` is
+  repeatable during a live session and rsyncs each server's
+  `ready/` folder over SSH with `--remove-source-files`, so a
+  segment is deleted from the server as soon as it has
+  transferred — server disk holds only unsynced segments plus
+  the minute currently being written, and collection is never
+  an end-of-run bulk download. The active segment never enters
+  `ready/`, so rsync can never grab or delete a file mid-write.
+  Collect is project-aware: one project at a time, or
   several together — when project A's app calls project B's
   app over TCP, the same 4-tuple join fuses both sides into
   one cross-project edge, giving the complete picture across
@@ -241,9 +255,9 @@ later phase):
 - **Cleanup (`rm`)**: removes the host from the registry and
   tears down the deployment on it — stops the running tracer
   and removes `/opt/iormesh` (binary and traces). Trace files
-  are downloaded first, so `rm` never destroys uncollected
-  traces; an unreachable host warns and only drops from the
-  registry.
+  are synced off first (rsync, same as collect), so `rm` never
+  destroys uncollected traces; an unreachable host warns and
+  only drops from the registry.
 - **No management plane**: every tracer flag and feature is
   reachable through its own CLI, and `iormeshctl` composes
   those commands over plain SSH (later `kubectl exec` in the
@@ -262,9 +276,14 @@ later phase):
   merged mesh and its SVG with zero manual steps on the
   servers, leaves nothing behind under `/opt/iormesh`, and the
   merged mesh equals the single-host result for single-host
-  scenarios. A deliberately low `-disk-limit` proves the
-  watchdog: the tracer exits cleanly, the last parquet segment
-  is intact, and the exit reason shows up in the summary.
+  scenarios. Streaming collect is proven too: `collect` run
+  repeatedly during a live session pulls each `ready/`
+  segment over rsync and deletes it from the server, so
+  between collections the server holds only unsynced segments
+  plus the one being written. A deliberately low
+  `-disk-limit` proves the watchdog: the tracer exits cleanly,
+  the last parquet segment is intact, and the exit reason
+  shows up in the summary.
   The M0 client and server run as two projects; collecting
   both fuses their connection into a single cross-project
   edge.
@@ -360,7 +379,9 @@ Later phase — plain Linux servers (M6) come first.
     local web UI (live filtering over bigger meshes) vs
     TUI-first; deterministic SVG ships regardless.
 12. **Controller transport details** — SSH with the same keys as
-    mesh propagation; server registry in
+    mesh propagation; collect syncs over rsync (which must be
+    present on servers — `deploy` fails fast if it is missing);
+    server registry in
     `~/.config/iormesh/servers.yaml`; in k8s (later phase),
     kubectl exec/cp or a sidecar endpoint.
 13. **K8s privilege profile** — full privileged SecurityContext vs
@@ -375,9 +396,13 @@ Later phase — plain Linux servers (M6) come first.
     IngressRoute objects, Traefik's API, service→workload
     resolution) vs Traefik access logs as a live source; and
     their precedence when they disagree.
-16. **Trace-file segmentation** — one parquet per session vs
-    time/size-rotated segments for 4h runs (rotation interval,
-    download-while-running); both must keep the deterministic
+16. **Trace-file segmentation** — largely settled: rotate once
+    per minute, finalize-then-compress into `ready/`, and
+    collect-while-running via rsync with delete-after-sync
+    (see M6). Open points: the compression codec (zstd vs
+    gzip vs parquet-internal column compression) and whether
+    a size cap should force an early rotation for very hot
+    sessions; both must keep the deterministic
     export story intact.
 17. **Disk-watchdog semantics** — percent of partition vs an
     absolute free-bytes floor (or both); check interval; and
@@ -477,7 +502,8 @@ can reconstruct behavior and check it against source code:
 - **Two serializations, one schema**: NDJSON is the live/golden
   format; parquet is the bulk trace-file format on servers —
   columnar, compact, queryable (ior already records parquet;
-  reuse the writer). Same envelope either way.
+  reuse the writer), written as minute-rotated segments that
+  are compressed on finalize. Same envelope either way.
 - **Event envelope (v1 sketch)**: `schema_version, project, seq,
   boot_ns, wall_ns, host_id, pid, pid_incarnation, tid, comm,
   event, fd, fd_gen, ret, err, latency_ns, bytes, args (path /
@@ -632,7 +658,8 @@ internal/generate/    # tracepoint/type generators (Go, ior pattern)
 internal/tracepoints/ # generated Go tracepoint tables
 internal/types/       # generated C-derived Go types
 internal/correlate/   # event joins, pid/fd/path graphs
-internal/federate/    # server registry, trace download, offline
+internal/federate/    # server registry, trace sync (rsync,
+                      #   delete-after-transfer), offline
                       #   merge (cgo-free — shared with iormeshctl)
 internal/render/      # deterministic SVG diagram generation
 internal/explore/     # interactive explorer (self-contained HTML/JS)
