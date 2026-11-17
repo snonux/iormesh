@@ -172,18 +172,24 @@ later phase):
 - **Server registry**: `iormeshctl add HOSTNAME` / `rm HOSTNAME`
   manage the list automatically (kept in the controller's
   config, e.g. `~/.config/iormesh/servers.yaml`). The registry
-  doubles as the deployment allowlist (principle #3).
+  doubles as the deployment allowlist (principle #3). Entries
+  are project-aware: the same server can host several
+  independent sessions, one per project.
 - **Deploy**: detect the server's arch (amd64/arm64), push the
   matching tracer build over SSH to `/opt/iormesh/bin/iormesh`
   (signature verified), and start it in the background as root
   via sudo. Runs default to a 4h auto-exit (`-duration`,
-  ior-style) — no unbounded daemons on servers.
+  ior-style) — no unbounded daemons on servers. Every session is
+  labeled with a project (`-project`), so completely different,
+  non-interacting applications on the same server are traced
+  and stored independently.
 - **Trace files** land on the server as parquet under
-  `/opt/iormesh/traces/<fqdn>-<session>-<start-ts>.parquet` —
-  the bulk format behind the same schema as NDJSON (columnar,
-  queryable, compact; ior already records parquet). Segments
-  flush periodically, so a crash or kill loses minutes, not
-  hours.
+  `/opt/iormesh/traces/<project>/<fqdn>-<session>-<start-ts>.parquet`
+  — every trace is always inside a project subfolder, so
+  unrelated apps on one server never mix. Parquet is the bulk
+  format behind the same schema as NDJSON (columnar, queryable,
+  compact; ior already records parquet). Segments flush
+  periodically, so a crash or kill loses minutes, not hours.
 - **Disk watchdog**: the trace directory is configurable
   (`-trace-dir`, default `/opt/iormesh/traces`), and the
   tracer continuously monitors the partition holding it
@@ -198,7 +204,11 @@ later phase):
   merge offline by stable ids — connection ids, 4-tuple joins,
   clock reconciliation — fusing the outbound side on host A
   with the inbound side on host B into single cross-host
-  edges. All views (M5) then run locally on the controller.
+  edges. Collect is project-aware: one project at a time, or
+  several together — when project A's app calls project B's
+  app over TCP, the same 4-tuple join fuses both sides into
+  one cross-project edge, giving the complete picture across
+  both. All views (M5) then run locally on the controller.
 - **Cleanup (`rm`)**: removes the host from the registry and
   tears down the deployment on it — stops the running tracer
   and removes `/opt/iormesh` (binary and traces). Trace files
@@ -226,6 +236,9 @@ later phase):
   scenarios. A deliberately low `-disk-limit` proves the
   watchdog: the tracer exits cleanly, the last parquet segment
   is intact, and the exit reason shows up in the summary.
+  The M0 client and server run as two projects; collecting
+  both fuses their connection into a single cross-project
+  edge.
 
 ### M7 — Kubernetes: sidecar & debug-container deployment
 
@@ -243,7 +256,8 @@ Later phase — plain Linux servers (M6) come first.
   provide them; decision #18).
 - Pod identity enrichment: map host PIDs/cgroups → pod, namespace,
   container, so the graph speaks "pod checkout-7d9f (ns prod)"
-  instead of bare host PIDs.
+  instead of bare host PIDs. In k8s mode the project defaults
+  to the namespace (decision #21).
 - Java agent live-attach through the shared process namespace
   (`shareProcessNamespace: true`; attach socket reached via
   `/proc/<pid>/root`) — decision #14.
@@ -355,6 +369,11 @@ Later phase — plain Linux servers (M6) come first.
     trace overlay on the mesh. Ingested spans are the app's own
     exported telemetry — deliberately distinct from the
     no-payload-capture rule, worth stating in docs/schema.md.
+21. **Project semantics** — for now a project is a manual label
+    (`-project`, kept with the registry entry); later
+    candidates: defaulting to the k8s namespace, or
+    auto-derivation from the traced app. Cross-project
+    collection: explicit project list vs merge-everything-found.
 
 ## What we trace — the mental-model inventory
 
@@ -405,11 +424,12 @@ can reconstruct behavior and check it against source code:
   format; parquet is the bulk trace-file format on servers —
   columnar, compact, queryable (ior already records parquet;
   reuse the writer). Same envelope either way.
-- **Event envelope (v1 sketch)**: `schema_version, seq, boot_ns,
-  wall_ns, host_id, pid, pid_incarnation, tid, comm, event, fd,
-  fd_gen, ret, err, latency_ns, bytes, args (path / 4-tuple / …),
-  stack_id, java_stack (method ids), otel (trace_id, span_id —
-  present when the app is OTEL-instrumented)`.
+- **Event envelope (v1 sketch)**: `schema_version, project, seq,
+  boot_ns, wall_ns, host_id, pid, pid_incarnation, tid, comm,
+  event, fd, fd_gen, ret, err, latency_ns, bytes, args (path /
+  4-tuple / …), stack_id, java_stack (method ids), otel
+  (trace_id, span_id — present when the app is
+  OTEL-instrumented)`.
 - **Method table**: `method_id, class, method, signature,
   source_file, line, jar, classloader`. Frames reference ids, so
   stacks stay compact and every frame joins to its JAR.
@@ -433,6 +453,11 @@ can reconstruct behavior and check it against source code:
 - **Pod-aware identity**: under Kubernetes, the envelope gains
   pod/namespace/container (cgroup-mapped); the graph treats pod
   identity as a first-class node type.
+- **Project-scoped**: every session belongs to a named project
+  (`-project`); traces always live under
+  `/opt/iormesh/traces/<project>/`, graph nodes carry their
+  project label, and connections between projects render as
+  explicit cross-project edges.
 - **Proxy-hop edges**: routes through an ingress render as
   synthetic `routed_via` edges and introduce service + workload
   (deployment/statefulset) node types — FQDN → ingress →
@@ -523,7 +548,7 @@ whether the engine is Docker or Podman:
 | Collector/map    | Go       | ring buffer → append-only log, dedup, graph, export |
 | Output contract  | versioned JSON + parquet | NDJSON live/golden, parquet bulk files, graph, summary |
 | Views            | Go + SVG | deterministic SVG export, interactive explorer, TUI |
-| Controller (iormeshctl) | Go, cgo-free | registry, deploy, collect, rm cleanup, local SVG |
+| Controller (iormeshctl) | Go, cgo-free | registry, deploy, collect, rm cleanup, projects, SVG |
 | K8s mode         | manifests | sidecar/debug-container deploy, pod identity |
 | Route map        | YAML + k8s API | FQDN→ingress→service/workload edges |
 

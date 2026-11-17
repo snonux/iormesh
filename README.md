@@ -122,6 +122,11 @@ app is ever the first test subject.
     root via sudo (4h auto-exit and a disk-space watchdog by
     default), then downloads the
     parquet traces and builds the mesh SVG locally.
+  - Project-aware: unrelated apps on the same server trace as
+    separate projects — every trace lives under
+    `/opt/iormesh/traces/<project>/`. Collect can merge
+    projects, and when one app talks to another over TCP, the
+    mesh fuses both sides into one cross-project picture.
   - Every tracer flag and feature is controllable through
     iormeshctl — composed over plain SSH (and `kubectl exec` in
     the k8s phase), never over network sockets.
@@ -220,6 +225,10 @@ Outputs are a stable, versioned contract — not an internal dump:
   given graph, so it diffs and goldens like the data exports.
 - **Pod-aware identity** — under Kubernetes, events carry
   pod/namespace/container alongside host PID identity.
+- **Project-scoped** — every session belongs to a named project;
+  traces live under `/opt/iormesh/traces/<project>/`, and
+  cross-project connections render as explicit edges in the
+  merged mesh.
 - **Proxy-hop edges** — routes through an ingress render as
   synthetic edges (FQDN → ingress → service → workload), so the
   graph completes even where no tracer can run.
@@ -279,8 +288,9 @@ The test workload comes *first*, not last:
       (`add|rm`, with host cleanup of `/opt/iormesh`), SSH push
       of amd64/arm64 builds to Rocky 9 servers, sudo background
       start with 4h auto-exit and disk-space watchdog, parquet
-      trace files (configurable trace dir), download + local
-      mesh SVG; must match M3's propagated result.
+      trace files in project folders (configurable trace dir),
+      cross-project merge, download + local mesh SVG; must match
+      M3's propagated result.
 - [ ] **M7** (later phase): Kubernetes — sidecar/debug-container
       deployment, iormeshctl-driven with configurable kubectl
       context and debug image, pod-identity enrichment, Java
