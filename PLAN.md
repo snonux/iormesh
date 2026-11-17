@@ -56,6 +56,11 @@ which exists to make specific syscalls fire on demand.
 - Client and server modes, so socket scenarios can run between
   two processes on loopback or two test hosts — the rehearsal
   ground for mesh propagation (M3/M4).
+- HTTP scenarios: client and server exchange declared HTTP
+  requests (plain and over TLS) with known method, path and
+  headers — goldens assert the captured http events and the
+  redaction (a planted `Authorization` header must never
+  appear in the trace).
 - An ingress scenario: client → Traefik → server in kind, with
   the route map declared alongside the expected graph (M7 proves
   the mapping against it).
@@ -110,11 +115,21 @@ which exists to make specific syscalls fire on demand.
   Socket-free either way; span ids are metadata, and ingested
   spans are the app's own deliberately-exported telemetry,
   not captured payload.
+- **HTTP/HTTPS request events**: hooks at known HTTP client and
+  server API boundaries (JDK HttpClient, HttpURLConnection,
+  Servlet, … — the v1 set is decision #22) record method,
+  scheme, host, path/URI, status, sizes and latency, joined to
+  the socket 4-tuple, the Java stack and the OTEL span.
+  Captured at the API boundary, so HTTPS is included without
+  ever touching the wire; sensitive headers and query params
+  are redacted by policy before anything is recorded.
 - Acceptance: frames carry `class#method(file:line)`; M0's
   declared method flows show up as the annotated cause of the
   matching syscalls; virtual threads attribute correctly; the
   OTEL-flavored workload's events carry the expected
-  trace/span ids.
+  trace/span ids; M0's HTTP scenarios produce the expected
+  http events, and the redaction golden holds — sensitive
+  headers never appear.
 
 ### M3 — Mesh: single-hop propagation
 
@@ -274,6 +289,8 @@ Later phase — plain Linux servers (M6) come first.
   Ingress/IngressRoute objects, the Traefik API, and
   service→workload resolution via the k8s API. No payload
   parsing — Traefik's own configuration and logs are the source.
+  Observed http events (host + path from the agent) can
+  validate the mapping against what actually flowed.
 - Collection works with the controller tooling too —
   per-pod/per-node trace fetch (decision #12), events carrying
   pod identity.
@@ -374,6 +391,14 @@ Later phase — plain Linux servers (M6) come first.
     candidates: defaulting to the k8s namespace, or
     auto-derivation from the traced app. Cross-project
     collection: explicit project list vs merge-everything-found.
+22. **HTTP capture mechanics** — agent-boundary hooks (v1 set:
+    JDK HttpClient, HttpURLConnection, Servlet, Apache
+    HttpClient, OkHttp, Netty?) vs eBPF plaintext HTTP parsing
+    for non-Java processes (in scope at all?); redaction policy —
+    denylist (drop Authorization/Cookie/… by default) vs
+    allowlist (record only named headers), sensitive query
+    params, and whether URIs are recorded verbatim or
+    path-only.
 
 ## What we trace — the mental-model inventory
 
@@ -398,6 +423,13 @@ Metadata only — nothing below is payload (see non-goals):
   hostname↔IP mappings (agent hooks — decision #8), optional TLS
   peer identity. *Why: who talks to whom — by hostname, not just
   IP — and which threads block on what.*
+- **HTTP/HTTPS**: method, scheme, host, path/URI, status,
+  sizes, latency per request — captured at the Java HTTP
+  client/server API boundary by the agent (HTTPS included,
+  nothing sniffed off the wire), sensitive headers and query
+  params redacted by policy. *Why: URIs are what the mesh
+  actually routes on — and what an LLM matches against
+  source code.*
 - **Local IPC**: pipes (both ends), unix sockets (peer PID where
   the kernel exposes it), socketpair, eventfd, shared memory;
   loopback TCP pairs joined locally by the correlator. *Why:
@@ -429,7 +461,8 @@ can reconstruct behavior and check it against source code:
   event, fd, fd_gen, ret, err, latency_ns, bytes, args (path /
   4-tuple / …), stack_id, java_stack (method ids), otel
   (trace_id, span_id — present when the app is
-  OTEL-instrumented)`.
+  OTEL-instrumented), http (method, scheme, host, path, status —
+  on http events; headers per redaction policy)`.
 - **Method table**: `method_id, class, method, signature,
   source_file, line, jar, classloader`. Frames reference ids, so
   stacks stay compact and every frame joins to its JAR.
@@ -467,6 +500,11 @@ can reconstruct behavior and check it against source code:
   every event joinable with the app's distributed traces; an
   LLM can cross-reference the mesh with span timelines and
   instrumented code paths.
+- **HTTP request events**: method, scheme, host, path/URI,
+  status and sizes as first-class events, correlated with
+  connection, stack and span; sensitive headers/params are
+  redacted before recording (policy documented in
+  docs/schema.md).
 - **Summary rollup**: per-process entry point — config files read,
   connections with hostnames, thread table, top methods by I/O —
   cheap context before diving into the event stream.
@@ -543,7 +581,7 @@ whether the engine is Docker or Podman:
 | eBPF probes      | C (CO-RE)| file/net syscall tracepoints, per-event stacks  |
 | Correlator       | Go       | ring buffer consumer, fd/inode joins, graph     |
 | Mesh agent       | Go       | egress watch, remote deploy, allowlist rules    |
-| Java agent       | Java 21  | method entry/exit, TID→stack, OTEL span ids |
+| Java agent       | Java 21  | method entry/exit, TID→stack, OTEL ids, HTTP events |
 | Test workload    | Java 21  | deterministic traceable scenarios (M0)         |
 | Collector/map    | Go       | ring buffer → append-only log, dedup, graph, export |
 | Output contract  | versioned JSON + parquet | NDJSON live/golden, parquet bulk files, graph, summary |
@@ -593,19 +631,22 @@ with minimal renaming; exact shapes settle when M0/M1 start.)
 - Modifying target behavior (writes, injection, parameter edits).
 - Kernel-mode dedup/ aggregation — correlation happens in userspace.
 - Non-Linux hosts — BPF + JDK 21 on Linux is the whole universe.
-- No payload capture: file/socket contents are never recorded —
+- No payload capture for files and non-HTTP socket streams:
   paths, sizes, offsets, endpoints only. (Argv is metadata; env
-  capture is decision #9; anything deeper is out.)
+  capture is decision #9.) The one deliberate exception:
+  HTTP(S) request metadata (method, URI, headers) via
+  agent-boundary hooks, redacted per policy — decision #22.
 - No Java method-argument capture: stacks and lines suffice to
   match source; args add cost and secrets risk.
 - No GC/JIT events — I/O attribution only. (Exception events are
   decision #10.)
 - No Kubernetes operator or auto-injection webhook — the
   deployment owner adds the sidecar explicitly, by patch.
-- No L7 packet parsing to recover hostnames or routes — TLS SNI
-  and HTTP Host headers are never sniffed from payloads; routing
-  knowledge comes from DNS answers, the configured route map,
-  the k8s API, and Traefik's own configuration/logs.
+- No packet sniffing: nothing is parsed off the wire — HTTP
+  request metadata comes from the Java agent's API-boundary
+  hooks; routing knowledge comes from DNS answers, the
+  configured route map, the k8s API, and Traefik's own
+  configuration/logs.
 - Tracing the mesh itself into the mesh (that's what M4 loop
   detection is *for*, but the mesh agent's own control-plane traffic
   is out of the traced set).

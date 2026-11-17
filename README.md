@@ -20,7 +20,8 @@ Build a live "connectome" of a process's interaction with the outside
 world, from multiple vantage points:
 
 1. **Full I/O map per PID** — every file read/write/open and every
-   network socket with resolved IPs and ports.
+   network socket with resolved IPs and ports — plus the HTTP
+   requests riding them (method, URI, headers, status).
 2. **Self-propagating mesh** — when an *outbound* external connection
    is detected, iormesh deploys a lightweight tracer on the remote
    host, attached to the process accepting that connection. The mesh
@@ -95,6 +96,9 @@ app is ever the first test subject.
   - OpenTelemetry-aware: when the app runs the OTEL SDK, the
     agent reads the active span context and tags every I/O
     event with its OTEL trace/span ids.
+  - HTTP/HTTPS instrumentation: hooks at known client/server API
+    boundaries record method, URI, headers (redacted), status
+    and latency — joined to the socket, the stack and the span.
 - **Traceable test workload (Java)**
   - A purpose-built Java app — never a live app — that iormesh is
     developed and validated against first. It runs scripted,
@@ -185,6 +189,12 @@ A mental model of an app needs more than file and socket events:
   optional TLS peer identity, and ingress route maps for proxy
   hops that hide the peer. *Who talks to whom, under what
   name — and which threads wait on what.*
+- **HTTP/HTTPS** — method, scheme, host, path/URI, status,
+  sizes, latency per request — captured at the Java HTTP
+  client/server API boundary by the agent (so HTTPS included,
+  nothing sniffed off the wire), sensitive headers and query
+  params redacted by policy. *What is actually said, at the
+  level the mesh routes on.*
 - **Local IPC** — pipes, unix sockets (peer PID where the kernel
   exposes it), eventfd, shared memory; loopback TCP pairs joined
   locally. *Single-host edges a "mesh" would otherwise miss.*
@@ -236,6 +246,10 @@ Outputs are a stable, versioned contract — not an internal dump:
   trace/span ids when the app is instrumented, so the mesh joins
   with any tracing backend; spans can be ingested (opt-in) to
   overlay the distributed service graph.
+- **HTTP request events** — method, scheme, host, path/URI,
+  status and sizes as first-class events, correlated with the
+  connection, the method stack and the OTEL span; sensitive
+  headers and query params are redacted before recording.
 - **Goldens in the same schema** — M0's expected graphs are
   schema documents; validation is a plain diff, and the goldens
   double as few-shot examples for introspecting real runs.
@@ -274,7 +288,8 @@ The test workload comes *first*, not last:
       goldens.
 - [ ] **M2**: Java agent: attribute syscalls to `class#method(file:line)`
       stacks (JDK 21); class/JAR map, thread names, hostname↔IP
-      resolution, OTEL span attribution when instrumented.
+      resolution, OTEL span attribution, HTTP/HTTPS request
+      events (URI + redacted headers) when instrumented.
       Checked against M0's known call flows.
 - [ ] **M3**: mesh: detect external outbound connection, deploy
       tracer to peer, correlate both sides under one connection id
@@ -307,9 +322,12 @@ The test workload comes *first*, not last:
   domain egress rules. This is the part that makes it a *mesh* — and
   the part that must be tightly controlled.
 - Metadata-only tracing: no file or socket payload contents are
-  ever recorded — paths, sizes, offsets, endpoints, stacks.
-  (Argv is metadata; env capture is a policy decision, see
-  PLAN.md.)
+  recorded — paths, sizes, offsets, endpoints, stacks. The one
+  deliberate exception: HTTP(S) request metadata (method, URI,
+  headers), captured at the Java API boundary — never sniffed
+  off the wire — with sensitive headers and query params
+  redacted by policy. (Argv is metadata; env capture is a policy
+  decision, see PLAN.md.)
 - Kubernetes: eBPF privileges are node-kernel-wide — a sidecar
   with CAP_BPF can in principle observe any process on the node.
   iormesh scopes itself by config to the pod it runs in, is added
