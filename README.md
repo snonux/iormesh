@@ -11,8 +11,11 @@ answers *"what is this process doing to its I/O right now?"*, iormesh
 answers *"what does this process touch — and what touches it back?"* —
 across hosts, not just one.
 
-**Status: planning.** No code yet — this repo currently holds the
-project plan ([PLAN.md](./PLAN.md)) and this README.
+**Status: early phase — PoC.** This project is a proof of
+concept in the making: the repo currently holds the project
+plan ([PLAN.md](./PLAN.md)), this README, and the logo.
+Everything described here — flags, paths, schema, milestones —
+is subject to change as the PoC evolves.
 
 ## Goals
 
