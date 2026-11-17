@@ -15,9 +15,11 @@ hosts ↔ PIDs ↔ sockets ↔ remote PIDs ↔ files ↔ Java method stacks.
 The end-goal reads one level up: a complete picture of how
 every service talks to every other service — every edge,
 in the order it happened, attributed to the Java threads
-that drove it. The graph is the source; the service-level
-sequence view (M5) and the interaction database (M6) are the
-renderings of it.
+that drove it — and interleaved with the local file I/O
+those same threads performed: which files they opened, what
+was read from or written to them. The graph is the source;
+the service-level sequence view (M5) and the interaction
+database (M6) are the renderings of it.
 
 ## Guiding principles
 
@@ -214,10 +216,17 @@ which exists to make specific syscalls fire on demand.
   arrows are connections/requests in time order, each hop
   attributed to the Java thread and method frame that caused
   it: gateway thread X → orders thread Y → inventory thread
-  Z. The causality is already in the data — sockets join to
-  threads on both ends, http events carry the causing stack
-  — so the view renders the correlated graph instead of
-  re-inferring it. Where a hop is async (virtual threads,
+  Z. **The same sequence protocols the driving threads' local
+  file I/O**: which files a thread opened, what it read from
+  or wrote to them (path, sizes, offsets — metadata only,
+  never payload), interleaved in the same time order, so one
+  thread's story reads as one line: received request →
+  opened /var/data/order-42.json → read 4 KB → wrote
+  response → sent reply. All of it is already in the data —
+  sockets join to threads on both ends, http events carry
+  the causing stack, file ops carry the same thread
+  attribution — so the view renders the correlated graph
+  instead of re-inferring it. Where a hop is async (virtual threads,
   executor hand-offs) and no direct thread causality
   exists, the arrow is explicitly time-ordered instead —
   never a silent guess. Same rule as the SVG: same graph
@@ -228,8 +237,10 @@ which exists to make specific syscalls fire on demand.
   and what touches it back" from one screen; an M0 scenario's SVG
   matches its golden; the microservices scenario's sequence view
   shows every service-to-service hop on its causing Java thread
-  (gateway X → orders Y → inventory Z), with async hops visibly
-  time-ordered rather than thread-attributed.
+  (gateway X → orders Y → inventory Z), with each thread's
+  declared file work (M0 microservices: config read, data
+  write) interleaved in the same order, and async hops
+  visibly time-ordered rather than thread-attributed.
 
 ### M6 — Controller (`iormeshctl`): push, collect, build locally
 
@@ -604,10 +615,11 @@ can reconstruct behavior and check it against source code:
 - **Cross-service causality**: connection ids + per-thread
   ordering + stack attribution are enough to reconstruct
   sequences across services — which thread on service A
-  caused which thread on service B — without re-inference;
-  M5's sequence view is a rendering of exactly this, and
-  async hops without direct thread causality are marked as
-  time-ordered, never guessed.
+  caused which thread on service B, and which files those
+  same threads opened, read or wrote locally — without
+  re-inference; M5's sequence view is a rendering of exactly
+  this, and async hops without direct thread causality are
+  marked as time-ordered, never guessed.
 - **Explicit end**: every trace records how it ended — duration
   reached, disk limit reached, controller stop, or error — as a
   final event and in the summary rollup; an LLM reading the
