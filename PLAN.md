@@ -861,7 +861,8 @@ deploy/               # k8s manifests: sidecar patch, debug container
 assets/               # logo + wordmark (SVG)
 Magefile.go           # generate/build/test targets, ior-style
 scripts/              # container builds (docker/podman), ior-style
-docs/                 # design notes as they emerge
+docs/                 # design docs: architecture, trace scope,
+                      #   output contract, testing, security, build
 ```
 
 (Layout mirrors ior's generation tree so the pattern can be lifted
