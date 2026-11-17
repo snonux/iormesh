@@ -59,7 +59,9 @@ state in advance. It is the Java sibling of ior's `cmd/ioworkload`,
 which exists to make specific syscalls fire on demand.
 
 - Scenario-driven: each scenario emits a known sequence of file
-  ops (open/read/write/rename/unlink…), socket lifecycle events
+  ops — data ops (open/read/write) and meta ops alike
+  (create/delete, rename/move, touch, symlink/hardlink…) —
+  plus socket lifecycle events
   (bind/connect/accept/send/recv, IPv4 + IPv6), and known
   method-call flows (deep stacks, virtual threads, async I/O).
 - Client and server modes, so socket scenarios can run between
@@ -79,8 +81,9 @@ which exists to make specific syscalls fire on demand.
   pair. The link mix is deliberately varied: plain HTTP and
   TLS (self-signed certs pinned per service), loopback and
   cross-host, one service per host/pod — and each service
-  also does its own file work (config read, data write), so
-  the graph has file edges too. The golden declares the
+  also does its own file work (config read, data write via
+  the create-tmp/rename pattern), so the graph has file
+  edges too. The golden declares the
   complete service graph — every hop, which links are TLS —
   so the mesh must discover and fuse every hop itself. Runs
   on plain hosts (M3/M4/M6) and as pods (M7), one project per
@@ -108,8 +111,9 @@ which exists to make specific syscalls fire on demand.
 ### M1 — Trace a PID
 
 - eBPF probes for file syscalls and socket lifecycle, per-event
-  PID/TID + stacks; userspace correlator building pid→fd→path and
-  pid→fd→(remote ip,port).
+  PID/TID + stacks; userspace correlator building pid→fd→path
+  (rename-aware: an open fd's path follows its inode through
+  renames and moves) and pid→fd→(remote ip,port).
 - **Target spec — PID or process-name pattern**: a session is
   bound either to a PID or to a process-name pattern, matched
   on exec (argv and exe path — kernel comms are 15 chars and
@@ -217,12 +221,15 @@ which exists to make specific syscalls fire on demand.
   attributed to the Java thread and method frame that caused
   it: gateway thread X → orders thread Y → inventory thread
   Z. **The same sequence protocols the driving threads' local
-  file I/O**: which files a thread opened, what it read from
-  or wrote to them (path, sizes, offsets — metadata only,
-  never payload), interleaved in the same time order, so one
+  file I/O** — data ops and meta ops alike: which files a
+  thread opened, read from or wrote to (path, sizes,
+  offsets), and the structural changes it made — create,
+  delete, rename/move, touch, symlink — all metadata only,
+  never payload, interleaved in the same time order, so one
   thread's story reads as one line: received request →
-  opened /var/data/order-42.json → read 4 KB → wrote
-  response → sent reply. All of it is already in the data —
+  read /etc/orders.conf → created order-42.json.tmp → wrote
+  response → renamed it to order-42.json → sent reply. All
+  of it is already in the data —
   sockets join to threads on both ends, http events carry
   the causing stack, file ops carry the same thread
   attribution — so the view renders the correlated graph
@@ -239,8 +246,9 @@ which exists to make specific syscalls fire on demand.
   shows every service-to-service hop on its causing Java thread
   (gateway X → orders Y → inventory Z), with each thread's
   declared file work (M0 microservices: config read, data
-  write) interleaved in the same order, and async hops
-  visibly time-ordered rather than thread-attributed.
+  write via create-tmp/rename) interleaved in the same order,
+  and async hops visibly time-ordered rather than
+  thread-attributed.
 
 ### M6 — Controller (`iormeshctl`): push, collect, build locally
 
@@ -547,12 +555,19 @@ Metadata only — nothing below is payload (see non-goals):
   app's PID changes are tracked as one identity. *Why:
   the model needs a stable "who", including parentage and
   lifetimes.*
-- **Filesystem**: open/close, read/write/pread, stat family,
-  rename/unlink/mkdir, file mmaps (which JARs/libs/data files are
-  mapped), zero-copy paths (sendfile/splice/copy_file_range).
-  *Why: what data is touched — with no holes where read/write
-  never fires* (ior's scenarios already cover the zero-copy
-  family).
+- **Filesystem**: the full syscall surface, not just data
+  movement — open/close, read/write/pread, stat family,
+  create (open O_CREAT, creat, mkdir), delete (unlink/rmdir),
+  rename & move (renameat2, cross-directory and cross-device),
+  touch-style timestamps (utimensat/futimens), symlinks
+  (symlink/readlink, lstat's no-follow distinction), hard
+  links (link), truncate, the chmod/chown family, xattrs,
+  file mmaps (which JARs/libs/data files are mapped), and
+  zero-copy paths (sendfile/splice/copy_file_range). *Why:
+  what data is touched — and what happened to it
+  structurally: files created, deleted, renamed, relinked,
+  touched — with no holes where read/write never fires*
+  (ior's scenarios already cover the zero-copy family).
 - **Descriptor lifecycle**: dup/dup2/fcntl(F_DUPFD), fd inheritance
   across fork/exec, per-fd generation numbers. *Why: aliasing and
   reuse are the classic mis-attribution bugs.*
@@ -597,9 +612,9 @@ can reconstruct behavior and check it against source code:
   are compressed on finalize. Same envelope either way.
 - **Event envelope (v1 sketch)**: `schema_version, project, seq,
   boot_ns, wall_ns, host_id, pid, pid_incarnation, tid, comm,
-  event, fd, fd_gen, ret, err, latency_ns, bytes, args (path /
-  4-tuple / …), stack_id, java_stack (method ids), otel
-  (trace_id, span_id — present when the app is
+  event, fd, fd_gen, ret, err, latency_ns, bytes, args (path,
+  old+new path on renames / 4-tuple / …), stack_id, java_stack
+  (method ids), otel (trace_id, span_id — present when the app is
   OTEL-instrumented), http (method, scheme, host, path, status —
   on http events; headers per redaction policy)`.
 - **Method table**: `method_id, class, method, signature,
@@ -616,10 +631,10 @@ can reconstruct behavior and check it against source code:
   ordering + stack attribution are enough to reconstruct
   sequences across services — which thread on service A
   caused which thread on service B, and which files those
-  same threads opened, read or wrote locally — without
-  re-inference; M5's sequence view is a rendering of exactly
-  this, and async hops without direct thread causality are
-  marked as time-ordered, never guessed.
+  same threads touched locally (data and meta ops alike) —
+  without re-inference; M5's sequence view is a rendering of
+  exactly this, and async hops without direct thread
+  causality are marked as time-ordered, never guessed.
 - **Explicit end**: every trace records how it ended — duration
   reached, disk limit reached, controller stop, or error — as a
   final event and in the summary rollup; an LLM reading the
