@@ -25,7 +25,8 @@ world, from multiple vantage points:
    grows organically, host by host, node by node.
 3. **Java code-flow instrumentation** (JDK 21) — attribute I/O events
    to the method stack that caused them, so you see *which call
-   triggered which syscall*.
+   triggered which syscall* — and, when the app runs
+   OpenTelemetry, which span.
 4. **Correlated, queryable map** — one dataset tying hosts, PIDs,
    sockets, files, and Java call stacks together over time.
 5. **LLM-introspectable trace outputs** — a stable, self-describing
@@ -89,6 +90,9 @@ app is ever the first test subject.
   - Method entry/exit events; per-TID stack tracking (async-profiler
     style) so any syscall I/O event can be annotated with the
     executing Java method + owning `Thread`.
+  - OpenTelemetry-aware: when the app runs the OTEL SDK, the
+    agent reads the active span context and tags every I/O
+    event with its OTEL trace/span ids.
 - **Traceable test workload (Java)**
   - A purpose-built Java app — never a live app — that iormesh is
     developed and validated against first. It runs scripted,
@@ -116,6 +120,9 @@ app is ever the first test subject.
     root via sudo (4h auto-exit and a disk-space watchdog by
     default), then downloads the
     parquet traces and builds the mesh SVG locally.
+  - Every tracer flag and feature is controllable through
+    iormeshctl — composed over plain SSH (and `kubectl exec` in
+    the k8s phase), never over network sockets.
   - `rm` also cleans up the server: it stops the tracer and
     removes `/opt/iormesh` — trace files are downloaded first,
     so nothing is lost.
@@ -178,7 +185,9 @@ A mental model of an app needs more than file and socket events:
   process — e.g. which supervisor sent the SIGTERM.*
 - **Java** — class↔JAR map, thread names (kernel TID ↔ Java
   thread), method entry/exit as `class#method(file:line)` when
-  debug info is present, virtual-thread attribution. *The
+  debug info is present, virtual-thread attribution, and the
+  active OTEL span (trace/span ids) when the app is
+  OpenTelemetry-instrumented. *The
   source-level truth every event above is annotated with.*
 
 ## Trace output — built for LLM introspection
@@ -212,6 +221,10 @@ Outputs are a stable, versioned contract — not an internal dump:
 - **Proxy-hop edges** — routes through an ingress render as
   synthetic edges (FQDN → ingress → service → workload), so the
   graph completes even where no tracer can run.
+- **OTEL-correlated** — events carry the active OpenTelemetry
+  trace/span ids when the app is instrumented, so the mesh joins
+  with any tracing backend; spans can be ingested (opt-in) to
+  overlay the distributed service graph.
 - **Goldens in the same schema** — M0's expected graphs are
   schema documents; validation is a plain diff, and the goldens
   double as few-shot examples for introspecting real runs.
@@ -250,7 +263,8 @@ The test workload comes *first*, not last:
       goldens.
 - [ ] **M2**: Java agent: attribute syscalls to `class#method(file:line)`
       stacks (JDK 21); class/JAR map, thread names, hostname↔IP
-      resolution. Checked against M0's known call flows.
+      resolution, OTEL span attribution when instrumented.
+      Checked against M0's known call flows.
 - [ ] **M3**: mesh: detect external outbound connection, deploy
       tracer to peer, correlate both sides under one connection id
       (M0 client ↔ M0 server); cross-host clock reconciliation.
@@ -289,6 +303,9 @@ The test workload comes *first*, not last:
   iormesh scopes itself by config to the pod it runs in, is added
   only by the deployment owner's explicit patch, and its
   container image is signed like the tracer binary.
+- No management sockets: the tracer listens on nothing — control
+  flows only through SSH (or kubectl exec), i.e. the operator's
+  key.
 - The test workload keeps guardrails honest too: propagation rules
   are rehearsed in a sandbox before they exist in the wild.
 

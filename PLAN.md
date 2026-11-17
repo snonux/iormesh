@@ -65,6 +65,10 @@ which exists to make specific syscalls fire on demand.
   few-shot examples for LLM introspection later.
 - Packaged as a plain JVM app and as a container image, so the
   same scenarios run as pods for the Kubernetes milestone (M7).
+- An optional OpenTelemetry-instrumented flavor (separate
+  module — the core workload stays JDK-only per decision #5)
+  that emits spans with declared trace ids, so M2's OTEL
+  attribution has goldens too.
 - Acceptance: M1–M7 each cite which scenarios prove them.
 
 ### M1 — Trace a PID
@@ -96,9 +100,21 @@ which exists to make specific syscalls fire on demand.
   thread), DNS hostname↔IP (InetAddress hooks), `file:line` on
   frames when debug info is present; TLS peer identity if adopted
   (decision #8).
+- **OpenTelemetry introspection**: when the app runs the OTEL
+  SDK, the agent reads the active span context and tags every
+  I/O event with its OTEL trace/span ids — iormesh events join
+  1:1 with the app's distributed traces in any OTEL backend.
+  Optionally, spans can also be ingested (an OTLP receiver the
+  app dual-exports to, or the collector's file export —
+  decision #20) to overlay the service graph on the mesh.
+  Socket-free either way; span ids are metadata, and ingested
+  spans are the app's own deliberately-exported telemetry,
+  not captured payload.
 - Acceptance: frames carry `class#method(file:line)`; M0's
   declared method flows show up as the annotated cause of the
-  matching syscalls; virtual threads attribute correctly.
+  matching syscalls; virtual threads attribute correctly; the
+  OTEL-flavored workload's events carry the expected
+  trace/span ids.
 
 ### M3 — Mesh: single-hop propagation
 
@@ -189,6 +205,15 @@ later phase):
   are downloaded first, so `rm` never destroys uncollected
   traces; an unreachable host warns and only drops from the
   registry.
+- **No management plane**: every tracer flag and feature is
+  reachable through its own CLI, and `iormeshctl` composes
+  those commands over plain SSH (later `kubectl exec` in the
+  k8s phase) — the tracer never needs a network socket on the
+  server. Tracer flags pass through on deploy; runtime changes
+  are stop-and-restart with new flags (cheap under bounded 4h
+  runs); status comes from a tracer subcommand reading its
+  state files. The only way into a server is the operator's
+  SSH key.
 - Target platform for the tracer: Rocky Linux 9 first (BTF
   present; ior's Rocky 9 build/Docker patterns apply), amd64
   and arm64.
@@ -317,6 +342,18 @@ Later phase — plain Linux servers (M6) come first.
     must both be configurable; where they live (flags, per-host
     registry entries, a k8s section in the server config)
     settles with concrete fleet examples, to be provided.
+19. **Runtime control mechanics** — restart-only (stop and
+    redeploy with new flags; cheapest, and 4h bounds make it
+    cheap) vs signals for graceful stop/flush vs a watched
+    control file for live flag changes; all socket-free by
+    design.
+20. **OTEL integration mode** — agent-read span context (primary,
+    socket-free) vs ingesting the app's OTLP stream (a local
+    receiver the app dual-exports to, or the collector's file
+    export) vs both; and whether the views render a distributed-
+    trace overlay on the mesh. Ingested spans are the app's own
+    exported telemetry — deliberately distinct from the
+    no-payload-capture rule, worth stating in docs/schema.md.
 
 ## What we trace — the mental-model inventory
 
@@ -350,7 +387,9 @@ Metadata only — nothing below is payload (see non-goals):
 - **Java**: class loading (class↔JAR/classloader), thread lifecycle
   + names (kernel TID ↔ Java thread), method entry/exit with
   `class#method(file:line)` when debug info is present,
-  virtual-thread continuation attribution. *Why: the source-level
+  virtual-thread continuation attribution, and the active OTEL
+  span (trace/span ids) when the app is OpenTelemetry-
+  instrumented. *Why: the source-level
   truth everything above gets annotated with.*
 
 ## Trace output contract — built for LLM introspection
@@ -368,7 +407,8 @@ can reconstruct behavior and check it against source code:
 - **Event envelope (v1 sketch)**: `schema_version, seq, boot_ns,
   wall_ns, host_id, pid, pid_incarnation, tid, comm, event, fd,
   fd_gen, ret, err, latency_ns, bytes, args (path / 4-tuple / …),
-  stack_id, java_stack (method ids)`.
+  stack_id, java_stack (method ids), otel (trace_id, span_id —
+  present when the app is OTEL-instrumented)`.
 - **Method table**: `method_id, class, method, signature,
   source_file, line, jar, classloader`. Frames reference ids, so
   stacks stay compact and every frame joins to its JAR.
@@ -397,6 +437,10 @@ can reconstruct behavior and check it against source code:
   (deployment/statefulset) node types — FQDN → ingress →
   service → workload completes the graph across proxies no
   tracer can run on.
+- **OTEL correlation**: trace/span ids in the envelope make
+  every event joinable with the app's distributed traces; an
+  LLM can cross-reference the mesh with span timelines and
+  instrumented code paths.
 - **Summary rollup**: per-process entry point — config files read,
   connections with hostnames, thread table, top methods by I/O —
   cheap context before diving into the event stream.
@@ -452,7 +496,7 @@ pattern (and, where sensible, the code) from `../ior`:
 | eBPF probes      | C (CO-RE)| file/net syscall tracepoints, per-event stacks  |
 | Correlator       | Go       | ring buffer consumer, fd/inode joins, graph     |
 | Mesh agent       | Go       | egress watch, remote deploy, allowlist rules    |
-| Java agent       | Java 21  | method entry/exit, TID→stack attribution        |
+| Java agent       | Java 21  | method entry/exit, TID→stack, OTEL span ids |
 | Test workload    | Java 21  | deterministic traceable scenarios (M0)         |
 | Collector/map    | Go       | ring buffer → append-only log, dedup, graph, export |
 | Output contract  | versioned JSON + parquet | NDJSON live/golden, parquet bulk files, graph, summary |
