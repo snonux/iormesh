@@ -35,11 +35,15 @@ database (M6) are the renderings of it.
 4. **One graph, many vantage points.** Every milestone must end with
    events landing in the same correlated dataset — never a
    per-component output format that needs re-joining later.
-5. **Reuse ior's BPF/C machinery.** The code-generation pattern —
-   generated tracepoint handlers, generated Go tables, diff-gated
-   results, CO-RE embed, Mage + Docker generation host — is ior's,
-   proven and pinned by its tests. iormesh copies/adapts it
-   instead of inventing its own (details below).
+5. **Reuse ior's machinery — BPF/C and tests.** The
+   code-generation pattern — generated tracepoint handlers,
+   generated Go tables, diff-gated results, CO-RE embed, Mage +
+   Docker generation host — and the integration-test suite are
+   ior's, proven and pinned by its tests. iormesh copies/adapts
+   them instead of inventing its own (details below; whoever
+   implements this should look at `../ior` for inspiration
+   first — see "BPF/C code generation" and "Integration tests
+   — follow ior").
 6. **The trace is a document, not a dump.** Outputs follow a
    versioned, self-describing schema with stable ids and explicit
    loss accounting — precise enough for an LLM to reconstruct
@@ -135,7 +139,9 @@ which exists to make specific syscalls fire on demand.
 - Output: trace schema v1 — NDJSON event stream + graph export.
 - Acceptance: M0 goldens diff clean, including edge cases (fd
   reuse and aliasing, exec, PID reuse, pattern restarts (new
-  PID, same app), threaded I/O, loopback pairs, socket races).
+  PID, same app), threaded I/O, loopback pairs, socket races),
+  proven by the integration suite ("Integration tests — follow
+  ior").
 
 ### M2 — Java agent: code-flow attribution
 
@@ -720,6 +726,68 @@ pattern (and, where sensible, the code) from `../ior`:
   ior's build-with-docker pattern with a podman alias), and
   generated-artifact drift checked in CI like ior does.
 
+## Integration tests — follow ior
+
+iormesh does not invent its end-to-end test machinery either.
+When this work is picked up, study ior's `integrationtests/`
+package (in `../ior`, its README first) and lift the pattern
+with the workload swapped for M0's — another agent will
+re-read ior before implementing, so this section is the map,
+not the replacement:
+
+- **Suite layout**: a dedicated `integrationtests/` package and
+  `mage integrationTest` (plus a serial variant) that builds
+  the tracer, the M0 workload and the compiled test binary,
+  then runs it as root — skipping with an explanation when
+  root or BPF is unavailable. Like ior, the test binary is
+  compiled to the repo root so its absolute path matches a
+  scoped sudoers rule.
+- **Harness** (ior's `harness.go`): start the tracer against
+  a known M0 workload process — or the whole microservices
+  topology — collect the trace output (NDJSON live, parquet
+  segments), and expose parsed rows for assertions; ior's
+  readiness wait, timeouts and BPF-object override env apply
+  as-is.
+- **Two expectation layers** (ior's `expectations.go`):
+  aggregated event assertions (path contains, event, comm,
+  min count, flag bits) over the recording, and exact
+  per-event fields (fd, fd_gen, ret, err, bytes, latency)
+  over the parquet rows — aggregate where exactness doesn't
+  matter, row-exact where it does.
+- **Per-family test files**: one `*_test.go` per trace family,
+  each running its M0 scenario and asserting the declared
+  events — file ops (data + meta: rename, symlink, touch,
+  xattr, chmod/chown…), sockets (IPv4/IPv6, TCP/UDP
+  lifecycle), local IPC, signals, process/thread/fd
+  lifecycle, and with M2: Java stacks, virtual threads,
+  class loads, HTTP events (plain + TLS — including the
+  redaction golden: the planted Authorization header must be
+  absent), OTEL ids.
+- **The golden diff is the integration-level assertion**:
+  collected graph vs M0's declared graph, machine-diffed in
+  the schema ("Goldens use the schema") — the per-family
+  expectations are the fine-grained complement, not a
+  replacement.
+- **Multi-host tests**: the microservices topology across two
+  test hosts (or containers in distinct network namespaces)
+  drives deploy → propagate → collect → merge and asserts
+  the fused cross-host edges and the sequence view's thread
+  causality.
+- **Kernel-support probes** (ior's `kernel_support_test.go`):
+  probe for the newer syscalls/tracepoints a scenario needs
+  and skip with the reason — never infer support from kernel
+  version.
+- **Loss honesty** (ior's `kernelloss.go` + `unexercised.go`):
+  a run missing events that kernel-side loss could explain
+  is re-run; a test none of whose runs exercised its case
+  skips with a marker instead of passing — a silent green is
+  not a green.
+- **Gates, not exit codes** (ior's `gatecmd`): the runner
+  verifies the required tests actually reported passed and
+  prints a skip summary — exit 0 alone is not believed.
+- **Parallelism**: `INTEGRATION_PARALLEL`-style knob with
+  `-test.failfast` by default, serial mode for debugging.
+
 ## Container builds (Docker/Podman)
 
 Both binaries build inside containers, with the same commands
@@ -786,6 +854,9 @@ internal/mesh/        # propagation logic, guardrails
 internal/bpfembed.go  # go:embed of the compiled .bpf.o + env override
 agent/                # Java agent source (M2)
 workload/             # traceable test app source (M0) + container image
+integrationtests/     # end-to-end suite, ior pattern: harness,
+                      #   expectations, per-family scenario tests,
+                      #   kernel probes, multi-host topology runs
 deploy/               # k8s manifests: sidecar patch, debug container
 assets/               # logo + wordmark (SVG)
 Magefile.go           # generate/build/test targets, ior-style
