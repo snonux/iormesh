@@ -189,7 +189,9 @@ which exists to make specific syscalls fire on demand.
 ### M5 — Views: TUI, SVG, interactive explorer
 
 - TUI and/or JSON export rendering the full mesh: hosts, PIDs,
-  sockets, files, and Java stacks, over time.
+  sockets, files, and Java stacks, over time; endpoints named
+  in the service-interaction database (M6) render as their
+  service.
 - **Deterministic SVG export**: iormesh builds SVG diagrams of the
   (sub)mesh itself — hosts as layers, processes, files, sockets
   and method frames as nodes, typed edges. Same graph in, same
@@ -269,6 +271,25 @@ later phase):
   app over TCP, the same 4-tuple join fuses both sides into
   one cross-project edge, giving the complete picture across
   both. All views (M5) then run locally on the controller.
+- **Service-interaction database**: every `collect` also
+  analyzes the merged traces and updates a controller-side
+  database of app-to-app network interaction — per observed
+  connection: client app (project, host, app identity),
+  server endpoint (hostname as resolved via the agent's DNS
+  hooks, IP, port), protocol hints (plain vs TLS, http
+  host/path), counts and activity windows — keyed so
+  re-collecting the same mesh updates rows instead of
+  duplicating them. The database is **additive**: new sessions,
+  hosts and projects fold in, and human input is never
+  overwritten. Humans name services through the CLI, never by
+  hand-editing files: `iormeshctl services` lists observed
+  endpoints (unnamed ones first), and naming rules map
+  hostname patterns + port numbers to service names
+  (`orders*` + 8443 → `orders`); rules apply retroactively
+  and to every future collect, so the interaction view says
+  "orders → inventory" instead of bare host:port. Views (M5)
+  and the summary rollup render the named services; storage
+  format is decision #24.
 - **Cleanup (`rm`)**: removes the host from the registry and
   tears down the deployment on it — stops the running tracer
   and removes `/opt/iormesh` (binary and traces). Trace files
@@ -306,7 +327,10 @@ later phase):
   edge. The microservices scenario spreads one service per
   host, each as its own project — a single `collect` over the
   whole registry produces the complete service graph with
-  every REST edge (plain and TLS) fused.
+  every REST edge (plain and TLS) fused. Naming two of the
+  services via `iormeshctl services` then re-rendering shows
+  them by name in graph and SVG — no manual file edits
+  anywhere.
 
 ### M7 — Kubernetes: sidecar & debug-container deployment
 
@@ -465,6 +489,14 @@ Later phase — plain Linux servers (M6) come first.
     re-appearance vs end the session). Kernel comm's 15-char
     limit makes argv matching the primary source for Java
     apps.
+24. **Service-interaction database** — controller-side (distinct
+    from #3's collector runtime graph): sqlite via a pure-Go
+    driver (keeps iormeshctl cgo-free; additive merges and
+    queries come natural) vs a plain YAML file (trivially
+    diffable and inspectable, but incremental updates and
+    bigger meshes get awkward); one database per project vs
+    one with project scoping; glob vs regex for the naming
+    rules.
 
 ## What we trace — the mental-model inventory
 
@@ -659,7 +691,7 @@ whether the engine is Docker or Podman:
 | Collector/map    | Go       | ring buffer → append-only log, dedup, graph, export |
 | Output contract  | versioned JSON + parquet | NDJSON live/golden, parquet bulk files, graph, summary |
 | Views            | Go + SVG | deterministic SVG export, interactive explorer, TUI |
-| Controller (iormeshctl) | Go, cgo-free | registry, deploy, collect, rm cleanup, projects, SVG |
+| Controller (iormeshctl) | Go, cgo-free | registry, deploy, collect, service-interaction db, rm cleanup, projects, SVG |
 | K8s mode         | manifests | sidecar/debug-container deploy, pod identity |
 | Route map        | YAML + k8s API | FQDN→ingress→service/workload edges |
 
@@ -682,6 +714,9 @@ internal/correlate/   # event joins, pid/fd/path graphs
 internal/federate/    # server registry, trace sync (rsync,
                       #   delete-after-transfer), offline
                       #   merge (cgo-free — shared with iormeshctl)
+internal/servicedb/   # service-interaction database: observed
+                      #   connections, naming rules, CLI-facing
+                      #   queries (cgo-free)
 internal/render/      # deterministic SVG diagram generation
 internal/explore/     # interactive explorer (self-contained HTML/JS)
 internal/k8s/         # cgroup→pod identity mapping, k8s metadata
