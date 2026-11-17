@@ -61,12 +61,28 @@ which exists to make specific syscalls fire on demand.
   headers — goldens assert the captured http events and the
   redaction (a planted `Authorization` header must never
   appear in the trace).
+- **A microservices end-to-end scenario**: several instances
+  of the app playing declared service roles (gateway, orders,
+  inventory, billing…), talking to each other over REST — call
+  chains (A→B→C), fan-out (A→B and A→C), fan-in (B→A←C) — so
+  tracing, detection and cross-host graph fusion are proven
+  the way real microservices talk, not just one client↔server
+  pair. The link mix is deliberately varied: plain HTTP and
+  TLS (self-signed certs pinned per service), loopback and
+  cross-host, one service per host/pod — and each service
+  also does its own file work (config read, data write), so
+  the graph has file edges too. The golden declares the
+  complete service graph — every hop, which links are TLS —
+  so the mesh must discover and fuse every hop itself. Runs
+  on plain hosts (M3/M4/M6) and as pods (M7), one project per
+  service when cross-project fusion is under test.
 - A restart scenario: the app exits mid-session and comes back
   with a new PID; goldens assert both incarnations were traced
   under one app identity, with nothing mis-attributed across
   the gap.
-- An ingress scenario: client → Traefik → server in kind, with
-  the route map declared alongside the expected graph (M7 proves
+- An ingress scenario: gateway → Traefik → backend service in
+  kind (the microservices scenario's front door), with the
+  route map declared alongside the expected graph (M7 proves
   the mapping against it).
 - Ships with the *expected* per-scenario event graph, declared in
   the trace output schema (see below) — validation is a plain
@@ -165,9 +181,10 @@ which exists to make specific syscalls fire on demand.
   max-node cap; loop detection so the mesh closes instead of
   oscillating.
 - Auth between iormesh nodes.
-- Acceptance: a 3+ hop M0 topology fully mapped with depth limits
-  demonstrably terminating propagation; correlation survives NAT
-  (docker port-mapped topology).
+- Acceptance: the M0 microservices topology (3+ hops, mixed
+  plain-HTTP/TLS links) fully mapped with depth limits
+  demonstrably terminating propagation; correlation survives
+  NAT (docker port-mapped topology).
 
 ### M5 — Views: TUI, SVG, interactive explorer
 
@@ -286,7 +303,10 @@ later phase):
   shows up in the summary.
   The M0 client and server run as two projects; collecting
   both fuses their connection into a single cross-project
-  edge.
+  edge. The microservices scenario spreads one service per
+  host, each as its own project — a single `collect` over the
+  whole registry produces the complete service graph with
+  every REST edge (plain and TLS) fused.
 
 ### M7 — Kubernetes: sidecar & debug-container deployment
 
@@ -431,13 +451,14 @@ Later phase — plain Linux servers (M6) come first.
     auto-derivation from the traced app. Cross-project
     collection: explicit project list vs merge-everything-found.
 22. **HTTP capture mechanics** — agent-boundary hooks (v1 set:
-    JDK HttpClient, HttpURLConnection, Servlet, Apache
-    HttpClient, OkHttp, Netty?) vs eBPF plaintext HTTP parsing
-    for non-Java processes (in scope at all?); redaction policy —
-    denylist (drop Authorization/Cookie/… by default) vs
-    allowlist (record only named headers), sensitive query
-    params, and whether URIs are recorded verbatim or
-    path-only.
+    JDK HttpClient, HttpURLConnection, the JDK's built-in
+    HttpServer (the microservices workload's REST server),
+    Servlet, Apache HttpClient, OkHttp, Netty?) vs eBPF
+    plaintext HTTP parsing for non-Java processes (in scope at
+    all?); redaction policy — denylist (drop
+    Authorization/Cookie/… by default) vs allowlist (record
+    only named headers), sensitive query params, and whether
+    URIs are recorded verbatim or path-only.
 23. **Target-pattern mechanics** — match on exec (argv/exe)
     vs comm; glob vs regex; concurrent matches (newest wins vs
     trace all vs error); restart semantics (wait for
