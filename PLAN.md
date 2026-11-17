@@ -12,6 +12,13 @@ flow inside the process — correlated into one queryable graph:
 
 hosts ↔ PIDs ↔ sockets ↔ remote PIDs ↔ files ↔ Java method stacks.
 
+The end-goal reads one level up: a complete picture of how
+every service talks to every other service — every edge,
+in the order it happened, attributed to the Java threads
+that drove it. The graph is the source; the service-level
+sequence view (M5) and the interaction database (M6) are the
+renderings of it.
+
 ## Guiding principles
 
 1. **The test workload comes first.** We build a purpose-built Java
@@ -186,7 +193,7 @@ which exists to make specific syscalls fire on demand.
   demonstrably terminating propagation; correlation survives
   NAT (docker port-mapped topology).
 
-### M5 — Views: TUI, SVG, interactive explorer
+### M5 — Views: TUI, SVG, sequence diagrams, interactive explorer
 
 - TUI and/or JSON export rendering the full mesh: hosts, PIDs,
   sockets, files, and Java stacks, over time; endpoints named
@@ -201,11 +208,28 @@ which exists to make specific syscalls fire on demand.
   follow a connection across hosts, scrub time. Form factor is
   decision #11 (self-contained HTML vs local web UI vs
   TUI-first).
+- **Sequence view (the end-goal rendering)**: a deterministic
+  sequence-diagram export of mesh conversations — lifelines
+  are services (named via the service-interaction database),
+  arrows are connections/requests in time order, each hop
+  attributed to the Java thread and method frame that caused
+  it: gateway thread X → orders thread Y → inventory thread
+  Z. The causality is already in the data — sockets join to
+  threads on both ends, http events carry the causing stack
+  — so the view renders the correlated graph instead of
+  re-inferring it. Where a hop is async (virtual threads,
+  executor hand-offs) and no direct thread causality
+  exists, the arrow is explicitly time-ordered instead —
+  never a silent guess. Same rule as the SVG: same graph
+  in, same diagram out.
 - Plus the per-run summary/report export — the LLM rollup of the
   whole mesh (see "Trace output contract").
 - Acceptance: an operator can answer "what does this process touch,
   and what touches it back" from one screen; an M0 scenario's SVG
-  matches its golden.
+  matches its golden; the microservices scenario's sequence view
+  shows every service-to-service hop on its causing Java thread
+  (gateway X → orders Y → inventory Z), with async hops visibly
+  time-ordered rather than thread-attributed.
 
 ### M6 — Controller (`iormeshctl`): push, collect, build locally
 
@@ -287,7 +311,10 @@ later phase):
   hostname patterns + port numbers to service names
   (`orders*` + 8443 → `orders`); rules apply retroactively
   and to every future collect, so the interaction view says
-  "orders → inventory" instead of bare host:port. Views (M5)
+  "orders → inventory" instead of bare host:port — the
+  who-talks-to-whom index of the end-goal picture (see
+  Purpose); the in-order, thread-attributed story is M5's
+  sequence view. Views (M5)
   and the summary rollup render the named services; storage
   format is decision #24.
 - **Cleanup (`rm`)**: removes the host from the registry and
@@ -574,6 +601,13 @@ can reconstruct behavior and check it against source code:
   monotonic order, boot + wall clocks per host, explicit
   cross-host clock-reconciliation records; ring-buffer drops are
   explicit events — gaps are never silent.
+- **Cross-service causality**: connection ids + per-thread
+  ordering + stack attribution are enough to reconstruct
+  sequences across services — which thread on service A
+  caused which thread on service B — without re-inference;
+  M5's sequence view is a rendering of exactly this, and
+  async hops without direct thread causality are marked as
+  time-ordered, never guessed.
 - **Explicit end**: every trace records how it ended — duration
   reached, disk limit reached, controller stop, or error — as a
   final event and in the summary rollup; an LLM reading the
@@ -690,7 +724,7 @@ whether the engine is Docker or Podman:
 | Test workload    | Java 21  | deterministic traceable scenarios (M0)         |
 | Collector/map    | Go       | ring buffer → append-only log, dedup, graph, export |
 | Output contract  | versioned JSON + parquet | NDJSON live/golden, parquet bulk files, graph, summary |
-| Views            | Go + SVG | deterministic SVG export, interactive explorer, TUI |
+| Views            | Go + SVG | deterministic SVG + sequence-diagram exports, interactive explorer, TUI |
 | Controller (iormeshctl) | Go, cgo-free | registry, deploy, collect, service-interaction db, rm cleanup, projects, SVG |
 | K8s mode         | manifests | sidecar/debug-container deploy, pod identity |
 | Route map        | YAML + k8s API | FQDN→ingress→service/workload edges |
