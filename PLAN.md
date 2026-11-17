@@ -61,6 +61,10 @@ which exists to make specific syscalls fire on demand.
   headers — goldens assert the captured http events and the
   redaction (a planted `Authorization` header must never
   appear in the trace).
+- A restart scenario: the app exits mid-session and comes back
+  with a new PID; goldens assert both incarnations were traced
+  under one app identity, with nothing mis-attributed across
+  the gap.
 - An ingress scenario: client → Traefik → server in kind, with
   the route map declared alongside the expected graph (M7 proves
   the mapping against it).
@@ -81,6 +85,16 @@ which exists to make specific syscalls fire on demand.
 - eBPF probes for file syscalls and socket lifecycle, per-event
   PID/TID + stacks; userspace correlator building pid→fd→path and
   pid→fd→(remote ip,port).
+- **Target spec — PID or process-name pattern**: a session is
+  bound either to a PID or to a process-name pattern, matched
+  on exec (argv and exe path — kernel comms are 15 chars and
+  cannot tell two JVMs apart; mechanics in decision #23). A
+  pattern-bound session auto-detects restarts: when the traced
+  app exits and a new process matching the pattern appears, the
+  tracer re-attaches, the Java agent re-attaches to the new
+  JVM, and both PID incarnations link under one app node in
+  the graph. This is also what keeps a project's target stable
+  across restarts.
 - Built on the ior-pattern generation pipeline (see "BPF/C code
   generation — follow ior" below); probes reuse ior's fd/path
   resolution helpers where the problems are the same.
@@ -91,8 +105,8 @@ which exists to make specific syscalls fire on demand.
   poll/epoll wait events.
 - Output: trace schema v1 — NDJSON event stream + graph export.
 - Acceptance: M0 goldens diff clean, including edge cases (fd
-  reuse and aliasing, exec, PID reuse, threaded I/O, loopback
-  pairs, socket races).
+  reuse and aliasing, exec, PID reuse, pattern restarts (new
+  PID, same app), threaded I/O, loopback pairs, socket races).
 
 ### M2 — Java agent: code-flow attribution
 
@@ -399,6 +413,12 @@ Later phase — plain Linux servers (M6) come first.
     allowlist (record only named headers), sensitive query
     params, and whether URIs are recorded verbatim or
     path-only.
+23. **Target-pattern mechanics** — match on exec (argv/exe)
+    vs comm; glob vs regex; concurrent matches (newest wins vs
+    trace all vs error); restart semantics (wait for
+    re-appearance vs end the session). Kernel comm's 15-char
+    limit makes argv matching the primary source for Java
+    apps.
 
 ## What we trace — the mental-model inventory
 
@@ -406,7 +426,9 @@ Metadata only — nothing below is payload (see non-goals):
 
 - **Identity & lifecycle**: exec (exe, argv), fork/clone, thread
   create, exit, comm/thread renames; PID incarnation ids (pid +
-  boot-time start time) so a reused PID is never confused. *Why:
+  boot-time start time) so a reused PID is never confused.
+  Pattern-bound sessions re-attach across restarts, so the
+  app's PID changes are tracked as one identity. *Why:
   the model needs a stable "who", including parentage and
   lifetimes.*
 - **Filesystem**: open/close, read/write/pread, stat family,
@@ -491,6 +513,10 @@ can reconstruct behavior and check it against source code:
   `/opt/iormesh/traces/<project>/`, graph nodes carry their
   project label, and connections between projects render as
   explicit cross-project edges.
+- **App identity across restarts**: sessions bound to a
+  process-name pattern produce one app node linking every PID
+  incarnation of the matched process — the graph says "the app
+  restarted" instead of showing an unrelated new PID.
 - **Proxy-hop edges**: routes through an ingress render as
   synthetic `routed_via` edges and introduce service + workload
   (deployment/statefulset) node types — FQDN → ingress →

@@ -178,7 +178,9 @@ A mental model of an app needs more than file and socket events:
 
 - **Identity & lifecycle** — exec (exe, argv), fork/clone, thread
   create/exit, thread renames; PID incarnation ids so a reused
-  PID is never confused with the old one. *Who exists, spawned by
+  PID is never confused with the old one. Sessions bound to a
+  process-name pattern auto-detect restarts and follow the app
+  to its new PID. *Who exists, spawned by
   whom, for how long.*
 - **Filesystem** — open/read/write/close, stat family,
   rename/unlink/mkdir, file mmaps (which JARs, libs, data files),
@@ -223,6 +225,9 @@ Outputs are a stable, versioned contract — not an internal dump:
 - **Stable identifiers** — PID incarnation, fd generation,
   cross-host connection ids, a deduplicated method table — two
   runs of the same scenario diff to almost nothing.
+- **App identity** — pattern-bound sessions link every PID
+  incarnation of the app into one node: a restart shows up as
+  the same app continuing, not an unrelated new PID.
 - **Ordering you can trust** — per-host sequence numbers,
   per-thread monotonic order, boot + wall clocks, cross-host
   reconciliation records; ring-buffer drops are explicit events,
@@ -285,10 +290,11 @@ The test workload comes *first*, not last:
       file/socket/method-flow scenarios, each shipping its expected
       event graph in the trace schema (goldens; the target
       everything else is validated against).
-- [ ] **M1**: trace a PID — process/fd lifecycle, all file ops
-      (incl. zero-copy), all sockets, local IPC, signals →
-      versioned NDJSON + graph JSON. Validated by diff against M0
-      goldens.
+- [ ] **M1**: trace a PID — or a process-name pattern that
+      follows the app across restarts to new PIDs — process/fd
+      lifecycle, all file ops (incl. zero-copy), all sockets,
+      local IPC, signals → versioned NDJSON + graph JSON.
+      Validated by diff against M0 goldens.
 - [ ] **M2**: Java agent: attribute syscalls to `class#method(file:line)`
       stacks (JDK 21); class/JAR map, thread names, hostname↔IP
       resolution, OTEL span attribution, HTTP/HTTPS request
