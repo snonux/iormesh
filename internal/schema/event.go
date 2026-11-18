@@ -44,8 +44,9 @@ const (
 const NoFD = -1
 
 // Event is the envelope every trace record shares, in NDJSON and parquet
-// alike. Fields without omitempty are required: Decode rejects an event
-// that lacks any of them, so a zero value is always a real zero.
+// alike. Fields without omitempty are required: DecodeEvent rejects an
+// event that lacks any of them or sets one to null, so a zero value is
+// always a real zero.
 type Event struct {
 	SchemaVersion uint32 `json:"schema_version" parquet:"schema_version"`
 	Project       string `json:"project" parquet:"project,dict"`
@@ -109,6 +110,8 @@ type Args struct {
 
 // Java is the Java-side attribution of one event. Provisional: its shape
 // is a placeholder until spike S1 settles how stacks join to syscalls.
+// PLAN.md's sketch names the fields flat (java_thread, java_stack); they
+// are nested here until S1 decides.
 type Java struct {
 	Thread string `json:"thread,omitempty" parquet:"thread,optional"`
 	// Stack lists method-table ids, innermost frame first.

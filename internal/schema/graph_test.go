@@ -43,7 +43,7 @@ func TestNodeIDs(t *testing.T) {
 	cases := map[string]string{
 		HostNodeID("h1"):              "host:h1",
 		ProcessNodeID("h1", 4711, 99): "proc:h1/4711@99",
-		FileNodeID("h1", "/etc/x"):    "file:h1//etc/x",
+		FileNodeID("h1", "/etc/x"):    "file:h1:/etc/x",
 		SocketNodeID("abc"):           "conn:abc",
 	}
 	for got, want := range cases {
@@ -95,6 +95,9 @@ func TestGraphValidateRejects(t *testing.T) {
 		"unknown node type":  func(g *Graph) { g.Nodes[0].Type = "pod" },
 		"id prefix mismatch": func(g *Graph) { g.Nodes[0].ID = "proc:x" },
 		"bare prefix id":     func(g *Graph) { g.Nodes[0].ID = "file:" },
+		"file id no host":    func(g *Graph) { g.Nodes[0].ID = "file:/tmp/x" },
+		"file id empty host": func(g *Graph) { g.Nodes[0].ID = "file::/tmp/x" },
+		"file id no path":    func(g *Graph) { g.Nodes[0].ID = "file:h1:" },
 		"duplicate node":     func(g *Graph) { g.Nodes = append(g.Nodes, g.Nodes[len(g.Nodes)-1]) },
 		"unsorted nodes": func(g *Graph) {
 			g.Nodes[0], g.Nodes[1] = g.Nodes[1], g.Nodes[0]
@@ -135,7 +138,15 @@ func TestDecodeGraphRejectsMalformed(t *testing.T) {
 		"unknown node key": strings.Replace(line, `"type":"file"`,
 			`"type":"file","label":"x"`, 1),
 		"trailing data": line + `x`,
-		"version 2":     strings.Replace(line, `"schema_version":1`, `"schema_version":2`, 1),
+		"null nodes":    `{"schema_version":1,"nodes":null,"edges":[]}`,
+		"null edges":    `{"schema_version":1,"nodes":[],"edges":null}`,
+		"null node id": strings.Replace(line, `"type":"host","id":"host:3f2a"`,
+			`"type":"host","id":null`, 1),
+		"case-folded key": strings.Replace(line, `"edges"`, `"Edges"`, 1),
+		"case-folded node key": strings.Replace(line, `"type":"host"`,
+			`"type":"host","Type":"pod"`, 1),
+		"case-folded edge key": strings.Replace(line, `"from"`, `"From"`, 1),
+		"version 2":            strings.Replace(line, `"schema_version":1`, `"schema_version":2`, 1),
 	}
 	for name, in := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -143,6 +154,21 @@ func TestDecodeGraphRejectsMalformed(t *testing.T) {
 				t.Fatalf("DecodeGraph(%s) = %v, want ErrInvalid", in, err)
 			}
 		})
+	}
+}
+
+// TestEmptyGraphRoundTrip checks that a zero Graph (nil slices) exports
+// as arrays, not null, and reads back.
+func TestEmptyGraphRoundTrip(t *testing.T) {
+	data, err := json.Marshal(Graph{SchemaVersion: Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"schema_version":1,"nodes":[],"edges":[]}`; string(data) != want {
+		t.Fatalf("got %s, want %s", data, want)
+	}
+	if _, err := DecodeGraph(data); err != nil {
+		t.Fatal(err)
 	}
 }
 

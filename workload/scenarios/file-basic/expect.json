@@ -11,6 +11,6 @@
    {"thread": "$t1", "event": "close", "fd": "$fd2"}
  ],
  "edges": [
-   {"type": "opened", "from": "$p1", "to": "file:$tmp/file-basic.dat"}
+   {"type": "opened", "from": "$p1", "to": "file:$h1:$tmp/file-basic.dat"}
  ],
  "must_not_appear": []}

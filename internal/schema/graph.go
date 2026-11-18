@@ -2,6 +2,7 @@ package schema
 
 import (
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"slices"
 )
@@ -78,10 +79,13 @@ func ProcessNodeID(hostID string, pid uint32, pidInc uint64) string {
 	return fmt.Sprintf("%s%s/%d@%d", prefixProcess, hostID, pid, pidInc)
 }
 
-// FileNodeID names a file by host and path; the same path on two hosts
-// is two files.
+// FileNodeID names a file by host and path: "file:<host_id>:<path>". The
+// same path on two hosts is two files. The colon keeps the host and the
+// absolute path apart without a double slash, and lets the normalizer
+// swap each segment for a symbol on its own — goldens declare
+// "file:$h1:$tmp/file-basic.dat".
 func FileNodeID(hostID, path string) string {
-	return prefixFile + hostID + "/" + path
+	return prefixFile + hostID + ":" + path
 }
 
 // SocketNodeID names a connection by its conn_id (provisional until S2,
@@ -95,6 +99,21 @@ func SocketNodeID(connID string) string { return prefixConn + connID }
 func (g Graph) Sort() {
 	slices.SortFunc(g.Nodes, compareNodes)
 	slices.SortFunc(g.Edges, compareEdges)
+}
+
+// MarshalJSON writes nil node and edge slices as [] rather than null:
+// readers require both keys as arrays, and an empty graph is still a
+// graph, not a missing one.
+func (g Graph) MarshalJSON() ([]byte, error) {
+	type plain Graph // drops this method, so json.Marshal does not recurse
+	p := plain(g)
+	if p.Nodes == nil {
+		p.Nodes = []Node{}
+	}
+	if p.Edges == nil {
+		p.Edges = []Edge{}
+	}
+	return json.Marshal(p)
 }
 
 func compareNodes(a, b Node) int {

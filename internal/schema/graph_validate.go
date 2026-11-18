@@ -1,6 +1,9 @@
 package schema
 
-import "strings"
+import (
+	"reflect"
+	"strings"
+)
 
 // edgeShape is what one edge type may connect, and whether it carries a
 // state.
@@ -9,11 +12,12 @@ type edgeShape struct {
 	wantState bool
 }
 
-// DecodeGraph parses a graph export strictly (unknown keys and trailing
-// data are errors) and validates it.
+// DecodeGraph parses a graph export strictly (exact-case keys, required
+// keys present and non-null — nodes and edges are always arrays — no
+// trailing data) and validates it.
 func DecodeGraph(data []byte) (Graph, error) {
 	var g Graph
-	if err := requireKeys(data, []string{"schema_version", "nodes", "edges"}); err != nil {
+	if err := checkKeys(data, reflect.TypeFor[Graph]()); err != nil {
 		return Graph{}, err
 	}
 	if err := decodeStrict(data, &g); err != nil {
@@ -56,12 +60,8 @@ func (g Graph) validateNodes() (map[string]string, error) {
 		if i > 0 && compareNodes(g.Nodes[i-1], n) >= 0 {
 			return nil, invalidf("nodes not sorted or duplicated at %s %s", n.Type, n.ID)
 		}
-		prefix, ok := nodeIDPrefix(n.Type)
-		if !ok {
-			return nil, invalidf("unknown node type %q", n.Type)
-		}
-		if !strings.HasPrefix(n.ID, prefix) || len(n.ID) == len(prefix) {
-			return nil, invalidf("%s node id %q lacks %q prefix", n.Type, n.ID, prefix)
+		if err := validateNodeID(n); err != nil {
+			return nil, err
 		}
 		if _, dup := types[n.ID]; dup {
 			return nil, invalidf("node id %q used twice", n.ID)
@@ -69,6 +69,26 @@ func (g Graph) validateNodes() (map[string]string, error) {
 		types[n.ID] = n.Type
 	}
 	return types, nil
+}
+
+// validateNodeID checks that a node's id carries its type's prefix and,
+// for files, the "<host>:<path>" shape FileNodeID builds.
+func validateNodeID(n Node) error {
+	prefix, ok := nodeIDPrefix(n.Type)
+	if !ok {
+		return invalidf("unknown node type %q", n.Type)
+	}
+	rest, ok := strings.CutPrefix(n.ID, prefix)
+	if !ok || rest == "" {
+		return invalidf("%s node id %q lacks %q prefix", n.Type, n.ID, prefix)
+	}
+	if n.Type == NodeFile {
+		host, path, ok := strings.Cut(rest, ":")
+		if !ok || host == "" || path == "" {
+			return invalidf("file node id %q, want file:<host>:<path>", n.ID)
+		}
+	}
+	return nil
 }
 
 // validateEdge checks one edge against its shape and the known nodes.

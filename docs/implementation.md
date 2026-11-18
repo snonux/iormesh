@@ -183,7 +183,7 @@ Field notes:
   on it — open*, accept*, socket, dup*, pipe, … — so the
   correlator must see those syscalls even where it emits no
   event for them. Otherwise a library's open and a later
-  `socket()` on the same number (tcp-loopback's client fd 6)
+  `socket()` on the same number (tcp-loopback's client `$fd6`)
   would share one (pid, fd, fd_gen). `0` means the fd predates
   the trace, or there is no fd.
 - `err` is the errno name and is only set when `ret < 0`.
@@ -196,18 +196,23 @@ Field notes:
 - `Java` (`thread`, `stack` of method ids; set exactly when
   `attribution` is `java`) and `HTTP` are provisional until S1
   reports; `conn_id` is provisional until S2 — M1 assigns it
-  locally to fused loopback pairs.
+  locally to fused loopback pairs. The Java fields are nested
+  (`java.thread`, `java.stack`) where PLAN.md's sketch names
+  them flat (`java_thread`, `java_stack`); S1 picks one.
 - `schema.Sink` (`Event(Event) error`, `Close() error`) is what
   the correlator writes to; the NDJSON and parquet writers
   implement it.
 
-Reading is strict: `schema.DecodeEvent` rejects unknown keys
-(at any depth), missing required keys (every field without
-`omitempty`), trailing data, a `schema_version` other than
-`Version`, an unknown `event` kind, a bad `attribution`, and a
-kind missing the argument it cannot be read without (open* →
-`path`, `marker` → `marker`, `tcp_state` → `sock_state`). The
-kind list only grows: M2 appends its syscalls there.
+Reading is strict: `schema.DecodeEvent` rejects unknown keys at
+any depth — matched case-sensitively, since encoding/json alone
+would let `"Comm"` overwrite `"comm"` — required keys (every
+field without `omitempty`) that are missing or `null`, trailing
+data, a `schema_version` other than `Version`, an unknown
+`event` kind, a bad `attribution` (`java` needs a non-empty
+`java.stack`), and a kind missing the argument it cannot be read
+without (open* → non-empty `path`, `marker` → `marker`,
+`tcp_state` → `sock_state`). The kind list only grows: M2
+appends its syscalls there.
 
 One NDJSON line, as M1 emits it:
 
@@ -247,7 +252,8 @@ type Edge struct {
 ```
 
 Node ids are derived, never counters: `host:<host_id>`,
-`proc:<host_id>/<pid>@<pid_incarnation>`, `file:<host_id>/<path>`,
+`proc:<host_id>/<pid>@<pid_incarnation>`, `file:<host_id>:<path>`
+(a colon, so an absolute path never makes a double slash),
 `conn:<conn_id>`. A `socket` node is one connection — the socket
 pair, not one end — and carries the `conn:` id, so both
 processes of a fused pair point at the same node. Edge shapes:
@@ -256,16 +262,19 @@ process → socket with `state` `fused` (both ends traced and
 joined) or `unresolved` (one end seen); no other edge carries a
 state. Slices are sorted (`Graph.Sort`) before every export; Go
 map iteration order must never reach an output file.
-`schema.DecodeGraph` and `Graph.Validate` reject unsorted or
-duplicate nodes and edges, ids without their type's prefix, and
-edges to missing nodes or nodes of the wrong type.
+`nodes` and `edges` are always arrays, never `null` (the encoder
+writes `[]` for an empty graph). `schema.DecodeGraph` and
+`Graph.Validate` reject unsorted or duplicate nodes and edges,
+ids without their type's prefix (or a file id without
+`<host>:<path>`), and edges to missing nodes or nodes of the
+wrong type.
 
 ### Expectations (the golden format)
 
 A scenario's expectation file sits next to its source in
 `workload/scenarios/<name>/expect.json`. Symbolic ids (`$p1`,
-`$t1`, `$fd1`, `$port1`) bind on first match; the checker then
-requires consistency.
+`$t1`, `$fd1`, `$port1`, `$h1` for hosts) bind on first match;
+the checker then requires consistency.
 
 The shipped `file-basic` golden (write, close, reopen, read):
 
@@ -283,7 +292,7 @@ The shipped `file-basic` golden (write, close, reopen, read):
    {"thread": "$t1", "event": "close", "fd": "$fd2"}
  ],
  "edges": [
-   {"type": "opened", "from": "$p1", "to": "file:$tmp/file-basic.dat"}
+   {"type": "opened", "from": "$p1", "to": "file:$h1:$tmp/file-basic.dat"}
  ],
  "must_not_appear": []}
 ```
@@ -605,7 +614,7 @@ this package is a channel of decoded raw records
 // Correlator turns raw BPF records into schema events and a
 // per-host graph. One goroutine owns all of its state.
 type Correlator struct {
-    host   schema.HostInfo
+    host   schema.HostInfo // to come with fa4; not in schema yet
     procs  map[uint32]*procState // by tgid
     socks  map[uint64]*sockState // by struct sock address
     seq    uint64
@@ -676,7 +685,9 @@ type symbols struct {
 }
 ```
 
-Normalized: `pid`, `tid`, `pid_incarnation`, `fd` (≥ 3 only —
+Normalized: `host_id` (to `$h1`, …, also inside node ids, so
+`file:<host_id>:/tmp/x/a.dat` becomes `file:$h1:$tmp/a.dat`),
+`pid`, `tid`, `pid_incarnation`, `fd` (≥ 3 only —
 0/1/2 are stable), ephemeral ports, inode-derived ids, `conn_id`,
 `seq` (renumbered from 1), all times (replaced by the event's
 rank). Not normalized: event names, paths under known prefixes,

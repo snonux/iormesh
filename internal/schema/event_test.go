@@ -107,9 +107,20 @@ func TestDecodeEventRejectsMalformed(t *testing.T) {
 		"negative pid":    strings.Replace(openatLine, `"pid":4711`, `"pid":-1`, 1),
 		"string seq":      strings.Replace(openatLine, `"seq":412`, `"seq":"412"`, 1),
 		"port overflow":   strings.Replace(openatLine, `"flags":0`, `"flags":0,"local_port":70000`, 1),
+		// encoding/json alone folds case: "Comm" would overwrite "comm".
+		"case-folded duplicate": strings.Replace(openatLine, `"comm":"java"`, `"comm":"java","Comm":"evil"`, 1),
+		"case-folded key":       strings.Replace(openatLine, `"comm"`, `"COMM"`, 1),
+		"case-folded arg key":   strings.Replace(openatLine, `"path"`, `"Path"`, 1),
+		"case-folded java key": strings.Replace(openatLine, `"attribution":"none"`,
+			`"attribution":"java","java":{"Stack":[1]}`, 1),
+		"case-folded http key": strings.Replace(openatLine, `"attribution":"none"`,
+			`"attribution":"none","http":{"METHOD":"GET"}`, 1),
+		"unknown java key": strings.Replace(openatLine, `"attribution":"none"`,
+			`"attribution":"java","java":{"stack":[1],"frames":[]}`, 1),
 	}
-	for _, key := range eventRequiredKeys {
+	for _, key := range requiredKeys(reflect.TypeFor[Event]()) {
 		cases["missing "+key] = dropKey(t, openatLine, key)
+		cases["null "+key] = setKey(t, openatLine, key, "null")
 	}
 	for name, line := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -123,24 +134,26 @@ func TestDecodeEventRejectsMalformed(t *testing.T) {
 // TestEventValidateRejects breaks one semantic invariant per case.
 func TestEventValidateRejects(t *testing.T) {
 	cases := map[string]func(*Event){
-		"schema_version 0":         func(e *Event) { e.SchemaVersion = 0 },
-		"schema_version 2":         func(e *Event) { e.SchemaVersion = Version + 1 },
-		"empty project":            func(e *Event) { e.Project = "" },
-		"empty host_id":            func(e *Event) { e.HostID = "" },
-		"seq 0":                    func(e *Event) { e.Seq = 0 },
-		"unknown kind":             func(e *Event) { e.Event = "frobnicate" },
-		"empty kind":               func(e *Event) { e.Event = "" },
-		"fd below NoFD":            func(e *Event) { e.FD = -2 },
-		"fd_gen without fd":        func(e *Event) { e.FD = NoFD },
-		"err with ret >= 0":        func(e *Event) { e.Ret = 0 },
-		"empty attribution":        func(e *Event) { e.Attribution = "" },
-		"bogus attribution":        func(e *Event) { e.Attribution = "jvm" },
-		"java attribution no java": func(e *Event) { e.Java = nil },
-		"none attribution w/ java": func(e *Event) { e.Attribution = AttributionNone },
-		"openat without path":      func(e *Event) { e.Event = KindOpenat },
-		"marker without name":      func(e *Event) { e.Event = KindMarker },
-		"marker empty name":        func(e *Event) { e.Event, e.Args.Marker = KindMarker, ptr("") },
-		"tcp_state without state":  func(e *Event) { e.Event = KindTCPState },
+		"schema_version 0":          func(e *Event) { e.SchemaVersion = 0 },
+		"schema_version 2":          func(e *Event) { e.SchemaVersion = Version + 1 },
+		"empty project":             func(e *Event) { e.Project = "" },
+		"empty host_id":             func(e *Event) { e.HostID = "" },
+		"seq 0":                     func(e *Event) { e.Seq = 0 },
+		"unknown kind":              func(e *Event) { e.Event = "frobnicate" },
+		"empty kind":                func(e *Event) { e.Event = "" },
+		"fd below NoFD":             func(e *Event) { e.FD = -2 },
+		"fd_gen without fd":         func(e *Event) { e.FD = NoFD },
+		"err with ret >= 0":         func(e *Event) { e.Ret = 0 },
+		"empty attribution":         func(e *Event) { e.Attribution = "" },
+		"bogus attribution":         func(e *Event) { e.Attribution = "jvm" },
+		"java attribution no java":  func(e *Event) { e.Java = nil },
+		"java attribution no stack": func(e *Event) { e.Java.Stack = nil },
+		"openat empty path":         func(e *Event) { e.Event, e.Args.Path = KindOpenat, ptr("") },
+		"none attribution w/ java":  func(e *Event) { e.Attribution = AttributionNone },
+		"openat without path":       func(e *Event) { e.Event = KindOpenat },
+		"marker without name":       func(e *Event) { e.Event = KindMarker },
+		"marker empty name":         func(e *Event) { e.Event, e.Args.Marker = KindMarker, ptr("") },
+		"tcp_state without state":   func(e *Event) { e.Event = KindTCPState },
 	}
 	for name, breakIt := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -176,24 +189,45 @@ func TestEventValidateAcceptsEveryKind(t *testing.T) {
 	}
 }
 
-// TestEventRequiredKeysMatchTags keeps eventRequiredKeys in step with the
-// struct: every field without omitempty is required, nothing else is.
-func TestEventRequiredKeysMatchTags(t *testing.T) {
-	var want []string
-	rt := reflect.TypeFor[Event]()
-	for i := range rt.NumField() {
-		name, opts, _ := strings.Cut(rt.Field(i).Tag.Get("json"), ",")
-		if !strings.Contains(opts, "omitempty") {
-			want = append(want, name)
+// TestRequiredKeysFollowTags pins the required set of the envelope, so a
+// tag edit that silently makes a field optional (or required) shows up.
+func TestRequiredKeysFollowTags(t *testing.T) {
+	want := []string{"args", "attribution", "boot_ns", "bytes", "comm",
+		"event", "fd", "fd_gen", "host_id", "latency_ns", "pid",
+		"pid_incarnation", "project", "ret", "schema_version", "seq", "tid",
+		"wall_ns"}
+	if got := requiredKeys(reflect.TypeFor[Event]()); !slices.Equal(got, want) {
+		t.Fatalf("required keys = %v, want %v", got, want)
+	}
+}
+
+// requiredKeys lists t's required json keys, sorted.
+func requiredKeys(t reflect.Type) []string {
+	var keys []string
+	for name, f := range jsonFields(t) {
+		if f.required {
+			keys = append(keys, name)
 		}
 	}
-	if !slices.Equal(eventRequiredKeys, want) {
-		t.Fatalf("eventRequiredKeys = %v, struct tags say %v", eventRequiredKeys, want)
-	}
+	slices.Sort(keys)
+	return keys
 }
 
 // dropKey removes one top-level key from a JSON object.
 func dropKey(t *testing.T, line, key string) string {
+	t.Helper()
+	return editKey(t, line, key, func(obj map[string]json.RawMessage) { delete(obj, key) })
+}
+
+// setKey replaces one top-level key's raw JSON value.
+func setKey(t *testing.T, line, key, raw string) string {
+	t.Helper()
+	return editKey(t, line, key, func(obj map[string]json.RawMessage) {
+		obj[key] = json.RawMessage(raw)
+	})
+}
+
+func editKey(t *testing.T, line, key string, edit func(map[string]json.RawMessage)) string {
 	t.Helper()
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(line), &obj); err != nil {
@@ -202,7 +236,7 @@ func dropKey(t *testing.T, line, key string) string {
 	if _, ok := obj[key]; !ok {
 		t.Fatalf("key %q not in %s", key, line)
 	}
-	delete(obj, key)
+	edit(obj)
 	out, err := json.Marshal(obj)
 	if err != nil {
 		t.Fatal(err)

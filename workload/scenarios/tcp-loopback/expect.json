@@ -43,9 +43,9 @@
  ],
  "edges": [
    {"type": "opened", "from": "$p1",
-    "to": "file:$tmp/tcp-loopback-server.dat"},
+    "to": "file:$h1:$tmp/tcp-loopback-server.dat"},
    {"type": "opened", "from": "$p2",
-    "to": "file:$tmp/tcp-loopback-client.dat"},
+    "to": "file:$h1:$tmp/tcp-loopback-client.dat"},
    {"type": "connected", "from": "$p1", "to": "conn:$c1", "state": "fused"},
    {"type": "connected", "from": "$p2", "to": "conn:$c1", "state": "fused"}
  ],

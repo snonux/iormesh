@@ -62,8 +62,8 @@ func (e Event) validateFD() error {
 func (e Event) validateAttribution() error {
 	switch e.Attribution {
 	case AttributionJava:
-		if e.Java == nil {
-			return invalidf("attribution java without java payload")
+		if e.Java == nil || len(e.Java.Stack) == 0 {
+			return invalidf("attribution java without a java stack")
 		}
 	case AttributionNone:
 		if e.Java != nil {
@@ -82,7 +82,7 @@ func (e Event) validateAttribution() error {
 func (e Event) validateKindArgs() error {
 	switch e.Event {
 	case KindOpen, KindOpenat, KindOpenat2:
-		if e.Args.Path == nil {
+		if e.Args.Path == nil || *e.Args.Path == "" {
 			return invalidf("%s without args.path", e.Event)
 		}
 	case KindMarker:
