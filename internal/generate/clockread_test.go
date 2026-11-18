@@ -1,5 +1,6 @@
 // Adapted from ior internal/generate/clockread_test.go @ b21afc50328c.
-// Changes: none.
+// Changes: the enter hook may be ior_on_rw_syscall_enter, the folded kinds'
+// variant (rwagg.c, M2 step 11).
 
 package generate
 
@@ -19,9 +20,10 @@ const clockHelperCall = "bpf_ktime_get_boot_ns("
 // handlerSplit matches the start of every generated syscall handler.
 var handlerSplit = regexp.MustCompile(`(?m)^/// (sys_\w+) is a struct `)
 
-// enterHookCall finds an enter hook call of either variant: ior_on_syscall_enter
-// or ior_on_syscall_enter_stateful (the handlers that stash a pending filename).
-var enterHookCall = regexp.MustCompile(`ior_on_syscall_enter(_stateful)?\(`)
+// enterHookCall finds an enter hook call of any variant: ior_on_syscall_enter,
+// ior_on_syscall_enter_stateful (the handlers that stash a pending filename)
+// or ior_on_rw_syscall_enter (read and write, which fold; rwagg.c).
+var enterHookCall = regexp.MustCompile(`ior_on_(rw_)?syscall_enter(_stateful)?\(`)
 
 // enterHookWithNow and exitHookWithNow match the enter/exit hook calls that
 // are passed the handler's single timestamp. The exit hook has three variants:
@@ -29,7 +31,7 @@ var enterHookCall = regexp.MustCompile(`ior_on_syscall_enter(_stateful)?\(`)
 // their single enter-state lookup (the argument after now is then an out
 // pointer, not the closing parenthesis).
 var (
-	enterHookWithNow = regexp.MustCompile(`ior_on_syscall_enter(_stateful)?\(tid, \w+, now\)`)
+	enterHookWithNow = regexp.MustCompile(`ior_on_(rw_)?syscall_enter(_stateful)?\(tid, \w+, now\)`)
 	exitHookCall     = regexp.MustCompile(`ior_on_syscall_exit(_take_filenames?|_take_handle)?\(`)
 	exitHookWithNow  = regexp.MustCompile(`ior_on_syscall_exit(_take_filenames?|_take_handle)?\(tid, \w+, ctx->ret, now[,)]`)
 )

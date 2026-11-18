@@ -1,7 +1,8 @@
 // Adapted from ior internal/c/filter.c @ b21afc50328c.
 // Changes: filter() gates on target_map (iormesh_filter_tgid, which also
 // counts a pattern session's attach gap) instead of
-// the single-TGID rodata PID_FILTER.
+// the single-TGID rodata PID_FILTER; the enter hooks flush the thread's
+// folded reads and writes first (iormesh_rw_flush, rwagg.c, M2 step 11).
 
 //+build ignore
 
@@ -282,6 +283,13 @@ static __always_inline int ior_should_emit_trace(__u32 enter_trace_id) {
 static __always_inline void ior_restart_on_enter(__u32 tid, __u64 now);
 static __always_inline int ior_restart_on_exit(__u32 tid, __s64 ret, int emits);
 
+// The read/write aggregation's flush (rwagg.c, included after this file for
+// the same reason). Every enter hook below calls it before anything else,
+// except ior_on_rw_syscall_enter, the hook of the folded kinds themselves:
+// a syscall that is not a folded read or write is a flush point, so the
+// thread's folded calls reach the stream ahead of its record.
+static __always_inline void iormesh_rw_flush(__u32 tid);
+
 static __always_inline int ior_on_enter_state_lost(__u32 enter_trace_id, __u32 rate) {
     if (rate == 1)
         return 1;
@@ -371,6 +379,15 @@ static __always_inline int ior_on_syscall_enter_impl(__u32 tid, __u32 enter_trac
 // of an interrupted call, and rt_sigreturn is the restart fold's own
 // business (handle_restart_sigreturn).
 static __always_inline int ior_on_syscall_enter(__u32 tid, __u32 enter_trace_id, __u64 now) {
+    iormesh_rw_flush(tid);
+    ior_restart_on_enter(tid, now);
+    return ior_on_syscall_enter_impl(tid, enter_trace_id, now, 0);
+}
+
+// ior_on_rw_syscall_enter is ior_on_syscall_enter for the folded kinds (read,
+// write; rwagg.c): no flush, since the call may continue the thread's hot
+// loop; iormesh_rw_on_enter, which the generated handler calls next, decides.
+static __always_inline int ior_on_rw_syscall_enter(__u32 tid, __u32 enter_trace_id, __u64 now) {
     ior_restart_on_enter(tid, now);
     return ior_on_syscall_enter_impl(tid, enter_trace_id, now, 0);
 }
@@ -382,6 +399,7 @@ static __always_inline int ior_on_syscall_enter(__u32 tid, __u32 enter_trace_id,
 // which uses the second filename slot). It writes the enter state at every
 // rate, since a stash needs the entry.
 static __always_inline int ior_on_syscall_enter_stateful(__u32 tid, __u32 enter_trace_id, __u64 now) {
+    iormesh_rw_flush(tid);
     ior_restart_on_enter(tid, now);
     return ior_on_syscall_enter_impl(tid, enter_trace_id, now, 1);
 }
@@ -409,6 +427,9 @@ static __always_inline int ior_on_syscall_enter_stateful(__u32 tid, __u32 enter_
 //     Untimed is the truthful shape: a noreturn syscall has no duration and no
 //     return value, so it must neither add a histogram sample nor an error.
 static __always_inline int ior_on_noreturn_syscall_enter(__u32 enter_trace_id) {
+    // exit and exit_group: the thread's exit handler flushes too, but only
+    // after this enter record.
+    iormesh_rw_flush((__u32)bpf_get_current_pid_tgid());
     if (ior_should_emit_trace(enter_trace_id))
         return 1;
     ior_count_untimed_syscall(enter_trace_id);

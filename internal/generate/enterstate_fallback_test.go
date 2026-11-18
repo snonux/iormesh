@@ -1,5 +1,6 @@
 // Adapted from ior internal/generate/enterstate_fallback_test.go @ b21afc50328c.
-// Changes: none.
+// Changes: the harness stubs iormesh_rw_flush (rwagg.c, M2 step 11), which
+// the enter hooks call; rwagg_harness_test.go drives the real one.
 
 package generate
 
@@ -157,6 +158,17 @@ static inline int ior_restart_on_exit(__u32 tid, __s64 ret, int emits) {
     (void)tid;
     (void)ret;
     return emits;
+}
+
+/* The read/write aggregation's flush (rwagg.c), which every enter hook calls
+ * first, is not part of the accounting either; rwagg_harness_test.go drives
+ * the real one. */
+static inline void iormesh_rw_flush(__u32 tid) {
+    (void)tid;
+}
+
+static inline __u64 bpf_get_current_pid_tgid(void) {
+    return 0;
 }
 
 %s

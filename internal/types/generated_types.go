@@ -154,6 +154,7 @@ const EXEC_ARGV_EVENT = 69
 const PROCESS_ARGV_EVENT = 70
 const SOCK_ADDR_EVENT = 71
 const SIGNAL_EVENT = 72
+const RW_AGGREGATE_EVENT = 73
 const UNCLASSIFIED = 0
 const READ_CLASSIFIED = 1
 const WRITE_CLASSIFIED = 2
@@ -4109,4 +4110,78 @@ func (s *SignalEvent) Bytes() ([]byte, error) {
 
 func (s *SignalEvent) Recycle() {
 	poolOfSignalEvents.Put(s)
+}
+
+type RwAggregateEvent struct {
+	EventType  EventType
+	TraceId    TraceId
+	Time       uint64
+	EndTime    uint64
+	TotalBytes uint64
+	LatencyNs  uint64
+	Pid        uint32
+	Tid        uint32
+	Fd         int32
+	FileIdent  uint32
+	Count      uint32
+	Reserved   uint32
+}
+
+func (r RwAggregateEvent) String() string {
+	return fmt.Sprintf("EventType:%v TraceId:%v Time:%v EndTime:%v TotalBytes:%v LatencyNs:%v Pid:%v Tid:%v Fd:%v FileIdent:%v Count:%v Reserved:%v", r.EventType, r.TraceId, r.Time, r.EndTime, r.TotalBytes, r.LatencyNs, r.Pid, r.Tid, r.Fd, r.FileIdent, r.Count, r.Reserved)
+}
+
+func (r RwAggregateEvent) Equals(other any) bool {
+	otherConcrete, ok := other.(*RwAggregateEvent)
+	if !ok {
+		return false
+	}
+	return r.EventType == otherConcrete.EventType && r.TraceId == otherConcrete.TraceId && r.Time == otherConcrete.Time && r.EndTime == otherConcrete.EndTime && r.TotalBytes == otherConcrete.TotalBytes && r.LatencyNs == otherConcrete.LatencyNs && r.Pid == otherConcrete.Pid && r.Tid == otherConcrete.Tid && r.Fd == otherConcrete.Fd && r.FileIdent == otherConcrete.FileIdent && r.Count == otherConcrete.Count && r.Reserved == otherConcrete.Reserved
+}
+
+func (r *RwAggregateEvent) GetEventType() EventType {
+	return r.EventType
+}
+
+func (r *RwAggregateEvent) GetTraceId() TraceId {
+	return r.TraceId
+}
+
+func (r *RwAggregateEvent) GetPid() uint32 {
+	return r.Pid
+}
+
+func (r *RwAggregateEvent) GetTid() uint32 {
+	return r.Tid
+}
+
+func (r *RwAggregateEvent) GetTime() uint64 {
+	return r.Time
+}
+
+var poolOfRwAggregateEvents = sync.Pool{
+	New: func() any { return &RwAggregateEvent{} },
+}
+
+func NewRwAggregateEvent(raw []byte) *RwAggregateEvent {
+	r := poolOfRwAggregateEvents.Get().(*RwAggregateEvent)
+	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, r); err != nil {
+		*r = RwAggregateEvent{}
+		poolOfRwAggregateEvents.Put(r)
+		return nil
+	}
+	return r
+}
+
+func (r *RwAggregateEvent) Bytes() ([]byte, error) {
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.LittleEndian, r)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (r *RwAggregateEvent) Recycle() {
+	poolOfRwAggregateEvents.Put(r)
 }

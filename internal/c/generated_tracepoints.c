@@ -12076,7 +12076,11 @@ int handle_sys_enter_read(struct syscall_trace_enter *ctx) {
         return 0;
 
     __u64 now = bpf_ktime_get_boot_ns();
-    if (!ior_on_syscall_enter(tid, SYS_ENTER_READ, now))
+    if (!ior_on_rw_syscall_enter(tid, SYS_ENTER_READ, now))
+        return 0;
+    __s32 rw_fd = (__s32)ctx->args[0];
+    __u32 file_ident = ior_file_ident(rw_fd);
+    if (!iormesh_rw_on_enter(pid, tid, SYS_ENTER_READ, rw_fd, file_ident, now))
         return 0;
 
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
@@ -12091,7 +12095,7 @@ int handle_sys_enter_read(struct syscall_trace_enter *ctx) {
     ev->tid = tid;
     ev->time = now;
     ev->fd = (__s32)ctx->args[0];
-    ev->file_ident = ior_file_ident(ev->fd);
+    ev->file_ident = file_ident;
 
     bpf_ringbuf_submit(ev, 0);
     return 0;
@@ -12106,6 +12110,8 @@ int handle_sys_exit_read(struct syscall_trace_exit *ctx) {
 
     __u64 now = bpf_ktime_get_boot_ns();
     if (!ior_on_syscall_exit(tid, SYS_ENTER_READ, ctx->ret, now))
+        return 0;
+    if (!iormesh_rw_on_exit(pid, tid, SYS_ENTER_READ, ctx->ret, now))
         return 0;
 
     struct ret_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct ret_event), 0);
@@ -12135,7 +12141,11 @@ int handle_sys_enter_write(struct syscall_trace_enter *ctx) {
         return 0;
 
     __u64 now = bpf_ktime_get_boot_ns();
-    if (!ior_on_syscall_enter(tid, SYS_ENTER_WRITE, now))
+    if (!ior_on_rw_syscall_enter(tid, SYS_ENTER_WRITE, now))
+        return 0;
+    __s32 rw_fd = (__s32)ctx->args[0];
+    __u32 file_ident = ior_file_ident(rw_fd);
+    if (!iormesh_rw_on_enter(pid, tid, SYS_ENTER_WRITE, rw_fd, file_ident, now))
         return 0;
 
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
@@ -12150,7 +12160,7 @@ int handle_sys_enter_write(struct syscall_trace_enter *ctx) {
     ev->tid = tid;
     ev->time = now;
     ev->fd = (__s32)ctx->args[0];
-    ev->file_ident = ior_file_ident(ev->fd);
+    ev->file_ident = file_ident;
 
     bpf_ringbuf_submit(ev, 0);
     return 0;
@@ -12165,6 +12175,8 @@ int handle_sys_exit_write(struct syscall_trace_exit *ctx) {
 
     __u64 now = bpf_ktime_get_boot_ns();
     if (!ior_on_syscall_exit(tid, SYS_ENTER_WRITE, ctx->ret, now))
+        return 0;
+    if (!iormesh_rw_on_exit(pid, tid, SYS_ENTER_WRITE, ctx->ret, now))
         return 0;
 
     struct ret_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct ret_event), 0);

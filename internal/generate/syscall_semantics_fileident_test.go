@@ -1,5 +1,7 @@
 // Adapted from ior internal/generate/syscall_semantics_fileident_test.go @ b21afc50328c.
-// Changes: none.
+// Changes: the folded kinds (read, write; foldedFdSyscalls, M2 step 11)
+// capture the identity into a local their aggregation hook keys on; the
+// fd_event mutations moved from read/write to fsync/fdatasync.
 
 package generate
 
@@ -31,6 +33,11 @@ import (
 //     call also walks to the identity, so these handlers store its result
 //     (the local file_ident) instead of walking again. No other handler
 //     makes that call.
+//   - the enter handlers of foldedFdSyscalls (read, write; internal/c/rwagg.c,
+//     M2 step 11) read the very argument ev->fd is set from into rw_fd and
+//     its identity once into the local file_ident, and hand both to
+//     iormesh_rw_on_enter, whose "held" answer ends the handler ahead of the
+//     reserve; the record stores the local. No other handler calls it.
 
 // returnedFileSyscalls is reviewed data, not derived from the generator's kind
 // table: the syscalls whose successful return value is a new descriptor of
@@ -63,6 +70,13 @@ var namedFdSyscalls = map[string]struct{}{
 	"close": {},
 }
 
+// foldedFdSyscalls is reviewed data: the fd_event syscalls whose hot loops
+// the kernel folds (internal/c/rwagg.c; the generator's aggregatedSyscalls).
+var foldedFdSyscalls = map[string]struct{}{
+	"read":  {},
+	"write": {},
+}
+
 const (
 	fileIdentLocalLine = "    ev->file_ident = file_ident;\n"
 	fileIdentEnterLine = "    ev->file_ident = ior_file_ident(ev->fd);\n"
@@ -80,6 +94,12 @@ var (
 	// included: trace ID in group 1, descriptor expression in group 2.
 	fdNameEnterRE = regexp.MustCompile(`(?m)^    __u32 file_ident;\n` +
 		`    if \(ior_emit_fd_name_enter\(pid, tid, (SYS_ENTER_[A-Z0-9_]+), now, ([^;\n]*), &file_ident\)\)\n` +
+		`        return 0;$`)
+	// foldedEnterRE matches a folded kind's descriptor, identity read and
+	// hook: the descriptor's argument in group 1, the hook's trace ID in 2.
+	foldedEnterRE = regexp.MustCompile(`(?m)^    __s32 rw_fd = ([^;\n]*);\n` +
+		`    __u32 file_ident = ior_file_ident\(rw_fd\);\n` +
+		`    if \(!iormesh_rw_on_enter\(pid, tid, (SYS_ENTER_[A-Z0-9_]+), rw_fd, file_ident, now\)\)\n` +
 		`        return 0;$`)
 )
 
@@ -106,6 +126,10 @@ func validateEnterFileIdent(name, body string) error {
 	if !named && strings.Contains(body, "ior_emit_fd_name_enter") {
 		return fmt.Errorf("%s reports a file name, which only %v may", handler, namedFdSyscalls)
 	}
+	_, folded := foldedFdSyscalls[name]
+	if !folded && strings.Contains(body, "iormesh_rw_on_enter") {
+		return fmt.Errorf("%s folds its calls, which only %v may", handler, foldedFdSyscalls)
+	}
 	if _, carries := identEnterRecords[structOf(eventStruct)]; !carries {
 		if len(writes) != 0 || named {
 			return fmt.Errorf("%s writes ev->file_ident %d times but reserves no record with the word", handler, len(writes))
@@ -113,7 +137,7 @@ func validateEnterFileIdent(name, body string) error {
 		return nil
 	}
 	capture := fileIdentEnterRE
-	if named {
+	if named || folded {
 		capture = fileIdentLocalRE
 	}
 	captures := capture.FindAllStringIndex(body, -1)
@@ -124,12 +148,48 @@ func validateEnterFileIdent(name, body string) error {
 	if len(fds) != 1 || fds[0][1] > captures[0][0] {
 		return fmt.Errorf("%s reads the file identity before its one ev->fd assignment", handler)
 	}
-	if named {
-		if err := validateFdNameEnter(name, body, body[fds[0][2]:fds[0][3]]); err != nil {
-			return err
-		}
+	if err := validateLocalIdent(name, body, body[fds[0][2]:fds[0][3]], named, folded); err != nil {
+		return err
 	}
 	return validateBeforeSubmit(handler, body, captures[0][1])
+}
+
+// validateLocalIdent checks where a local file_ident came from: the fd-name
+// attempt (namedFdSyscalls) or the folded kinds' identity read and hook
+// (foldedFdSyscalls). Other handlers have no local.
+func validateLocalIdent(name, body, fdExpr string, named, folded bool) error {
+	switch {
+	case named:
+		return validateFdNameEnter(name, body, fdExpr)
+	case folded:
+		return validateFoldedEnter(name, body, fdExpr)
+	}
+	return nil
+}
+
+// validateFoldedEnter checks a foldedFdSyscalls enter handler: exactly one
+// identity read and aggregation hook, for this syscall's trace ID, both of
+// the argument the record reports, after the enter hook that does not
+// flush and ahead of the handler's own reserve.
+func validateFoldedEnter(name, body, fdExpr string) error {
+	handler := "sys_enter_" + name
+	hooks := foldedEnterRE.FindAllStringSubmatchIndex(body, -1)
+	if len(hooks) != 1 || strings.Count(body, "iormesh_rw_on_enter") != 1 {
+		return fmt.Errorf("%s has %d complete aggregation hooks, want 1", handler, len(hooks))
+	}
+	at := hooks[0]
+	if traceID := body[at[4]:at[5]]; traceID != "SYS_ENTER_"+strings.ToUpper(name) {
+		return fmt.Errorf("%s folds its calls under trace ID %s", handler, traceID)
+	}
+	if fd := body[at[2]:at[3]]; fd != fdExpr {
+		return fmt.Errorf("%s keys on descriptor %q but reports %q", handler, fd, fdExpr)
+	}
+	hook := strings.Index(body, "ior_on_rw_syscall_enter(")
+	reserve := strings.Index(body, "bpf_ringbuf_reserve")
+	if hook < 0 || hook > at[0] || reserve < at[1] || strings.Contains(body, "ior_on_syscall_enter(") {
+		return fmt.Errorf("%s does not call its aggregation hook between ior_on_rw_syscall_enter and its reserve", handler)
+	}
+	return nil
 }
 
 // validateFdNameEnter checks the fd_name_event attempt of a namedFdSyscalls
@@ -197,14 +257,14 @@ func fileIdentEnterMutations() []semanticMutation {
 	}
 	fdLine := "    ev->fd = (__s32)ctx->args[0];\n"
 	return []semanticMutation{
-		{"file identity not captured", enter("read", fileIdentEnterLine, "")},
-		{"file identity of another argument", enter("read", fileIdentEnterLine,
+		{"file identity not captured", enter("fsync", fileIdentEnterLine, "")},
+		{"file identity of another argument", enter("fdatasync", fileIdentEnterLine,
 			"    ev->file_ident = ior_file_ident((__s32)ctx->args[1]);\n")},
 		{"file identity constant", enter("fsync", fileIdentEnterLine, fileIdentZeroLine)},
-		{"file identity read before the descriptor is set", enter("write", fdLine+fileIdentEnterLine,
+		{"file identity read before the descriptor is set", enter("fdatasync", fdLine+fileIdentEnterLine,
 			fileIdentEnterLine+fdLine)},
-		{"file identity overwritten", enter("read", fileIdentEnterLine, fileIdentEnterLine+fileIdentZeroLine)},
-		{"file identity written after submission", enter("read", fileIdentEnterLine+"\n    bpf_ringbuf_submit(ev, 0);\n",
+		{"file identity overwritten", enter("fsync", fileIdentEnterLine, fileIdentEnterLine+fileIdentZeroLine)},
+		{"file identity written after submission", enter("fsync", fileIdentEnterLine+"\n    bpf_ringbuf_submit(ev, 0);\n",
 			"\n    bpf_ringbuf_submit(ev, 0);\n"+fileIdentEnterLine)},
 		{"dup3's file identity not captured", enter("dup3", fileIdentEnterLine, "")},
 		{"dup3's file identity of the new descriptor", enter("dup3", fileIdentEnterLine,
@@ -212,6 +272,18 @@ func fileIdentEnterMutations() []semanticMutation {
 		{"file identity written into a record without the word", enter("recvfrom",
 			"    ev->schema_version = FD_SIZE_EVENT_SCHEMA_VERSION;\n",
 			"    ev->schema_version = FD_SIZE_EVENT_SCHEMA_VERSION;\n"+fileIdentEnterLine)},
+		{"folded identity of another argument", enter("read",
+			"    __u32 file_ident = ior_file_ident(rw_fd);",
+			"    __u32 file_ident = ior_file_ident((__s32)ctx->args[1]);")},
+		{"folded call keyed on another descriptor", enter("write",
+			"    __s32 rw_fd = (__s32)ctx->args[0];", "    __s32 rw_fd = (__s32)ctx->args[2];")},
+		{"folded under another trace ID", enter("read",
+			"iormesh_rw_on_enter(pid, tid, SYS_ENTER_READ,", "iormesh_rw_on_enter(pid, tid, SYS_ENTER_WRITE,")},
+		{"folded identity walked a second time", enter("write", fileIdentLocalLine, fileIdentEnterLine)},
+		{"folded kind flushes itself", enter("read", "ior_on_rw_syscall_enter(", "ior_on_syscall_enter(")},
+		{"another kind folds", enter("fsync", "    struct fd_event *ev = bpf_ringbuf_reserve(",
+			"    if (!iormesh_rw_on_enter(pid, tid, SYS_ENTER_FSYNC, (__s32)ctx->args[0], 0, now))\n"+
+				"        return 0;\n    struct fd_event *ev = bpf_ringbuf_reserve(")},
 	}
 }
 

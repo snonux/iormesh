@@ -88,6 +88,11 @@ int handle_signal_generate(void *ctx) {
 
     if (!(scope & (SIGNAL_SCOPE_SENDER | SIGNAL_SCOPE_TARGET)))
         return 0;
+    // The current task's folded reads and writes happened before this
+    // signal - a write's SIGPIPE fires inside the write - so they go first
+    // (rwagg.c). Only the current task's: another thread's entry is not
+    // this program's to touch, and an untraced task has none.
+    iormesh_rw_flush((__u32)pid_tgid);
     ev = bpf_ringbuf_reserve(&event_map, sizeof(*ev), 0);
     if (!ev) {
         ior_count_ringbuf_drop();

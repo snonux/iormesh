@@ -1,5 +1,6 @@
 // Adapted from ior internal/generate/syscall_semantics_test.go @ b21afc50328c.
-// Changes: import paths ior/ -> iormesh/.
+// Changes: import paths ior/ -> iormesh/; the fd_event capture mutation uses
+// fsync (read and write fold, M2 step 11).
 
 package generate
 
@@ -643,7 +644,7 @@ func TestSyscallSemanticsOracleRejectsSemanticMutations(t *testing.T) {
 		{
 			name: "direct capture after submission",
 			mutate: func(t *testing.T, source string) string {
-				return replaceInHandler(t, source, "enter", "read",
+				return replaceInHandler(t, source, "enter", "fsync",
 					"    ev->fd = (__s32)ctx->args[0];\n"+fileIdentEnterLine+"\n    bpf_ringbuf_submit(ev, 0);",
 					fileIdentEnterLine+"\n    bpf_ringbuf_submit(ev, 0);\n\n    ev->fd = (__s32)ctx->args[0];")
 			},

@@ -1,5 +1,6 @@
 // Adapted from ior internal/generate/enterhook_test.go @ b21afc50328c.
-// Changes: none.
+// Changes: ior_on_rw_syscall_enter (read, write; rwagg.c, M2 step 11) counts
+// as the plain hook.
 
 package generate
 
@@ -20,7 +21,8 @@ func checkEnterHookMatchesStash(name, body string) error {
 	}
 	stashes := strings.Contains(body, "ior_stash_pending_filename")
 	stateful := strings.Contains(body, "ior_on_syscall_enter_stateful(")
-	plain := strings.Contains(body, "ior_on_syscall_enter(")
+	// The folded kinds' hook is the plain one without the flush (rwagg.c).
+	plain := strings.Contains(body, "ior_on_syscall_enter(") || strings.Contains(body, "ior_on_rw_syscall_enter(")
 	switch {
 	case stateful == plain:
 		return fmt.Errorf("%s: want exactly one enter hook, stateful=%v plain=%v", name, stateful, plain)
@@ -79,7 +81,7 @@ func TestEnterHookCheckRejectsMismatches(t *testing.T) {
 	if strings.Contains(read, "ior_on_syscall_enter_stateful(") {
 		t.Error("sys_enter_read must use the plain enter hook")
 	}
-	if checkEnterHookMatchesStash("sys_enter_read", strings.Replace(read, "ior_on_syscall_enter(", "ior_on_syscall_enter_stateful(", 1)) == nil {
+	if checkEnterHookMatchesStash("sys_enter_read", strings.Replace(read, "ior_on_rw_syscall_enter(", "ior_on_syscall_enter_stateful(", 1)) == nil {
 		t.Error("the stateful hook on a handler that stashes nothing was not rejected")
 	}
 }

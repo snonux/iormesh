@@ -2,7 +2,8 @@
 
 // Adapted from ior internal/c/ior.bpf.c @ b21afc50328c.
 // Changes: renamed to iormesh.bpf.c; rawsyscall.c not included; bpf_endian.h
-// and sock.c added; sockaddr.c and signal.c added (M2 step 7).
+// and sock.c added; sockaddr.c and signal.c added (M2 step 7); rwagg.c added
+// (M2 step 11).
 
 #include "vmlinux.h"
 #include <bpf/bpf_core_read.h>
@@ -19,6 +20,11 @@
  * splitting the code up into several smaller files.
  */
 #include "filter.c"
+
+// In-kernel aggregation of hot read/write loops (M2 step 11, decision #25):
+// filter.c's enter hooks flush through it, the generated read and write
+// handlers fold through it.
+#include "rwagg.c"
 
 // Receive-side capture helpers used by the generated recvmsg handler.
 #include "recv.c"

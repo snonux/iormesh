@@ -1,6 +1,7 @@
 // Adapted from ior internal/c/maps.h @ b21afc50328c.
 // Changes: target_map added (replaces ior's rodata PID_FILTER), with
-// struct iormesh_target values for tree following and pattern sessions (M2).
+// struct iormesh_target values for tree following and pattern sessions (M2);
+// rw_agg_map and struct iormesh_rw_state added (rwagg.c, M2 step 11).
 
 //+build ignore
 
@@ -204,3 +205,64 @@ struct {
     __type(key, __u32);
     __type(value, __u64);
 } restart_pending_map SEC(".maps");
+
+// struct iormesh_rw_slot is one aggregation key of a thread: the read or
+// write calls (trace_id, the enter id; 0 marks a free slot) on one fd
+// instance (fd plus its file identity). streak counts the key's consecutive
+// hot calls sent individually so far; count, bytes, latency_ns and first_ns
+// describe the folded calls not flushed yet (count 0: nothing pending).
+// last_ns is the exit time of the key's latest call, folded or not, which
+// tells whether the next call continues a hot loop (rwagg.c).
+struct iormesh_rw_slot {
+    __u64 first_ns;
+    __u64 last_ns;
+    __u64 bytes;
+    __u64 latency_ns;
+    __s32 fd;
+    __u32 file_ident;
+    __u32 trace_id;
+    __u32 streak;
+    __u32 count;
+    __u32 reserved;
+};
+
+// IORMESH_RW_SLOTS is how many keys one thread aggregates at once: a copy
+// loop needs two (read one fd, write another), the syscall burst too (a
+// write fd and a read fd), a two-way proxy four. A fifth key evicts the
+// least recently used one, flushing it first.
+#define IORMESH_RW_SLOTS 4
+
+// struct iormesh_rw_state is one thread's rw_agg_map value. cur_* describe
+// the read or write in flight: its slot + 1 (0 = none), its enter time, fd
+// and file identity, and whether its enter record was held back
+// (cur_held), in which case its exit either folds it or sends the enter it
+// owes. pid is the thread's tgid, which every record flushed from here
+// carries. internal/bpf parses this layout at session end (aggregate.go);
+// 256 bytes, no implicit padding.
+struct iormesh_rw_state {
+    struct iormesh_rw_slot slot[IORMESH_RW_SLOTS];
+    __u64 cur_enter_ns;
+    __u32 cur_slot;
+    __u32 cur_held;
+    __s32 cur_fd;
+    __u32 cur_ident;
+    __u32 pid;
+    __u32 reserved;
+};
+
+// rw_agg_map holds the aggregation state of every traced thread that made a
+// read or write (rwagg.c, decision #25). Modelled on ior's
+// syscall_aggregate_map above, which sums a syscall's calls in the kernel so
+// userspace need not see each one; here the sums are per thread and fd and
+// are flushed into event_map as rw_aggregate_event records instead of being
+// polled, so every folded call still reaches the trace, in its thread's
+// order. Entries are removed when their thread exits or execs. A full map
+// (8192 threads with live entries) only stops aggregating for the threads
+// that found no entry: their calls are sent one by one, as without
+// aggregation.
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 8192);
+    __type(key, __u32);
+    __type(value, struct iormesh_rw_state);
+} rw_agg_map SEC(".maps");

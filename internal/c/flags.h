@@ -1,6 +1,7 @@
 // Adapted from ior internal/c/flags.h @ b21afc50328c.
 // Changes: PID_FILTER removed; the target set is target_map (maps.h);
-// IORMESH_EXEC_WATCH added (M2 pattern sessions).
+// IORMESH_EXEC_WATCH added (M2 pattern sessions); IORMESH_RW_AGGREGATE added
+// (M2 step 11).
 
 //+build ignore
 
@@ -25,3 +26,9 @@ const volatile u32 IOR_FILE_IDENT = 0;
 // target_map, so a pattern session can match it (exec.c, maps.h). PID and
 // listening-port sessions leave it 0 and pay nothing per foreign exec.
 const volatile u32 IORMESH_EXEC_WATCH = 0;
+// IORMESH_RW_AGGREGATE (1) folds hot read/write loops in the kernel
+// (rwagg.c, decision #25); 0 sends every call as its own enter and exit
+// records, for debugging (iormesh run -aggregate=false). Userspace always
+// sets it before the load; as a load-time constant the verifier prunes the
+// disabled side, so an off switch costs nothing per call.
+const volatile u32 IORMESH_RW_AGGREGATE = 1;

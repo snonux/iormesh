@@ -2,8 +2,9 @@
 // Changes: the PID_FILTER tests are iormesh_pid_targeted (target_map); M2
 // adds process-tree following (iormesh_follow_child), the removal of exited
 // processes from target_map (iormesh_forget_target) and the pattern
-// session's exec watch (iormesh_watch_exec, exec_argv_event) and the argv of
-// traced execs (iormesh_emit_argv, PROCESS_ARGV_EVENT).
+// session's exec watch (iormesh_watch_exec, exec_argv_event), the argv of
+// traced execs (iormesh_emit_argv, PROCESS_ARGV_EVENT) and the read/write
+// aggregation's flush points (iormesh_rw_flush/_forget, rwagg.c, M2 step 11).
 
 //+build ignore
 
@@ -281,6 +282,10 @@ int handle_sched_process_exec(struct trace_event_raw_sched_process_exec *ctx) {
     // the start of the record (the high 16 its length).
     __u32 fname_off = ctx->__data_loc_filename & 0xFFFF;
     barrier_var(fname_off);
+    // The exec'ing thread's folded reads and writes precede the exec, which
+    // closes its close-on-exec fds; its entry goes with the old program
+    // (and maybe the old tid, de_thread). An untraced thread has none.
+    iormesh_rw_forget(old_tid);
     ior_on_exec_tid_change(old_tid, tid, in_scope);
     if (!in_scope)
         iormesh_watch_exec(ctx, fname_off, pid, tid);
@@ -576,6 +581,9 @@ int handle_sched_process_exit(void *ctx) {
     // pending (killed while stopped, say) never reaches the enter that would
     // clear it, and its tid may be recycled (restart.c).
     ior_restart_forget((__u32)bpf_get_current_pid_tgid());
+    // The thread's folded reads and writes, ahead of its exit record; the
+    // entry dies with the thread. One lookup for an untraced thread.
+    iormesh_rw_forget((__u32)bpf_get_current_pid_tgid());
     if (ior_process_exit_in_scope(ctx, &pid, &tid, &group_dead))
         ior_emit_process_exit(pid, tid, group_dead);
     // After the scope check, which needs the entry to judge the exit.
@@ -773,6 +781,9 @@ int handle_task_newtask(void *raw_ctx) {
 
     __u32 scope_flags = 0;
 
+    // The creator's folded reads and writes precede the child, which
+    // inherits its fd table (rwagg.c); a no-op for an untraced creator.
+    iormesh_rw_flush(creator_tid);
     // First, so a followed child is in scope for the record below.
     iormesh_follow_child(clone_flags, creator_pid, child_pid);
     if (!ior_task_in_scope(child_pid, child_tid)) {

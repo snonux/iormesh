@@ -1,5 +1,6 @@
 // Adapted from ior internal/generate/bpfhandler.go @ b21afc50328c.
-// Changes: the prologue calls renderSockOwnerHook (sockowner.go).
+// Changes: the prologue calls renderSockOwnerHook (sockowner.go); read and
+// write call the rwagg.c hooks (rwagg.go, M2 step 11).
 
 package generate
 
@@ -54,6 +55,7 @@ func handlerSideSpec(tp GeneratedTracepoint, isEnter bool) handlerSpec {
 		outputHandleArg:       outputHandleArgForHandler(name),
 		ringFds:               ringFdsArgsForHandler(name),
 		fdNameArg:             fdNameArgForHandler(tp, isEnter),
+		rwFdArg:               rwFdArgForHandler(tp, isEnter),
 	}
 }
 
@@ -162,6 +164,9 @@ type handlerSpec struct {
 	// fdNameArg is the argument index of the descriptor whose file name the
 	// handler reports in place of its plain record (fdNameSyscalls), or -1.
 	fdNameArg int
+	// rwFdArg is the descriptor argument of a folded kind (read, write;
+	// aggregatedSyscalls), whose handlers call the rwagg.c hooks, or -1.
+	rwFdArg int
 }
 
 // takesPendingFilename reports whether this exit handler takes the pointer the
@@ -261,6 +266,10 @@ func renderSyscallHook(b *strings.Builder, h handlerSpec) {
 		b.WriteString("        return 0;\n")
 		b.WriteString("\n")
 		b.WriteString(clockReadLine)
+	case h.rwFdArg >= 0 && h.isEnter:
+		renderRWEnterHook(b, h)
+	case h.rwFdArg >= 0:
+		renderRWExitHook(b, h)
 	case h.isEnter:
 		b.WriteString(clockReadLine)
 		hook := "ior_on_syscall_enter"
@@ -597,9 +606,10 @@ func generateFdCapture(f *Format) string {
 //
 // A handler that reports its file's name (close; fdNameSyscalls) has done
 // the walk already, for the same argument, and takes the identity from the
-// local renderFdNameEnter declared.
+// local renderFdNameEnter declared; so does a folded kind (read, write),
+// whose enter hook needed the identity as its key (renderRWEnterHook).
 func generateExtraFd(f *Format) string {
-	if emitsFdName(syscallName(f.Name)) {
+	if emitsFdName(syscallName(f.Name)) || aggregates(syscallName(f.Name)) {
 		return generateFdCapture(f) + "    ev->file_ident = file_ident;\n"
 	}
 	return generateFdCapture(f) + "    ev->file_ident = ior_file_ident(ev->fd);\n"
