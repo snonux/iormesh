@@ -165,7 +165,11 @@ Voluntary context switches of the tracer fell from ~45 k to
 ~6–9 k per run. The medians sit at or under the 2 µs budget on
 this busy host; the after-profile is now dominated by the
 correlator and encoder themselves (~1.4 µs of ~2 µs per event
-under contention, 0.4 µs in the quiet benchmark), the BPF load
-being the only larger item. The 1-thread burst now loses no
+under contention; in the Go benchmark — no ring, no contention,
+also run at load ~3.7 — decode, correlate and encode together
+take 0.8–0.9 µs), the BPF load being the only larger item. The
+1-thread median sits exactly at 2.0 µs (range 1.4–2.6), so the
+budget is met only at the boundary until a quiet-host
+`measure.sh` run settles it (due before M2 acceptance). The 1-thread burst now loses no
 records; the 4-thread one still can, which is what in-kernel
 aggregation (task vc4) addresses.

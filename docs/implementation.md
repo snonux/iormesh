@@ -682,9 +682,9 @@ Output of this package is a channel of decoded raw records
   epoll timeout, or at once when blocked on a full `Records`,
   which it then closes), unmaps the ring, and leaves the rest to
   libbpfgo's `Module.Close` — links, then the object — never
-  destroying a link itself (a failed destroy already freed it). Records in flight at Close are dropped and not counted;
-  the map methods return an error after Close but must not race
-  it.
+  destroying a link itself (a failed destroy already freed it).
+  Records in flight at Close are dropped and not counted; the
+  map methods return an error after Close but must not race it.
 
 Root tests (`internal/loader_root_test.go`, run by `mage
 bpfRootTest`): a bash target opening `/etc/hostname` with shell

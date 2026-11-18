@@ -104,7 +104,10 @@ func (r *ringReader) read(limit int, add func([]byte)) int {
 
 // wait blocks until the ring holds data or timeoutMs passed. The ring's
 // epoll readiness is level-triggered on "producer ahead of consumer", so
-// a record committed between a read and this wait returns at once.
+// a record committed between a read and this wait returns at once. One
+// race remains, as in libbpf: a record still BUSY when read, committed
+// before the consumer position is stored, may wait up to timeoutMs —
+// later, never lost.
 func (r *ringReader) wait(timeoutMs int) error {
 	var events [1]unix.EpollEvent
 	_, err := unix.EpollWait(r.epfd, events[:], timeoutMs)
