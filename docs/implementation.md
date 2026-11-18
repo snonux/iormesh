@@ -973,6 +973,10 @@ Runs on the M1 build. Result: `docs/spikes/s3-overhead.md`.
    not (iormesh has no hot-path benchmarks yet). Step 3 adds its
    traced and bystander runs as further `mode=` values of the
    same file. Usage: docs/testing.md "Performance baselines".
+   The committed `perf/burst-d34e2e2.txt` was recorded under
+   load (loadavg 7.6, see its header) as proof the tooling works
+   — it is not the S3 reference; step 3 re-records on an idle
+   host.
 2. Add a load scenario to the workload: `syscall-burst --ops N
    --threads T` (tight 1-byte read/write loop on a temp file —
    the worst case per syscall). *Landed*
