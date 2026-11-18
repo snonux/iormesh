@@ -39,6 +39,16 @@ type sockState struct {
 	// fdGen is the generation of the owner's fd bound at the socket's
 	// first record; every later transition reports that instance.
 	fdGen uint32
+	// table resolves the socket alone once its fuse window passed; nil is
+	// the TCP table. UDP flows and unix connections pair in tables of
+	// their own (ipc.go), which must also forget the waiting entry.
+	table resolver
+}
+
+// resolver gives a socket whose fuse window passed unfused its own conn
+// id and forgets it as a pairing candidate.
+type resolver interface {
+	resolveAlone(s *sockState)
 }
 
 // fillArgs copies the known 4-tuple into args. A nil socket (an fd the

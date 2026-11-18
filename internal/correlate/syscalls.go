@@ -23,13 +23,21 @@ const (
 	shapeOpen              // open_event: dirfd, path, flags; returns an fd
 	shapePath              // path_event: dirfd, path, flags (files.go)
 	shapeName              // name_event: two dirfd/path pairs (files.go)
+	// shapeIPC: the M2 step 7 records with their own layout — pipe and
+	// socketpair, kill's null_event, epoll_ctl, the poll waits, epoll
+	// create (ipc.go). bind, sendto, recvfrom and the zero-copy calls are
+	// plain fd records and stay shapeFd.
+	shapeIPC
 )
 
 // enter is a syscall enter waiting for its exit on the same thread. A
 // thread runs one syscall at a time, so the tid alone keys it. fd is the
 // fd argument, or the dirfd of the path shapes; newDirfd and newPath are
 // the second name of a name_event. flags holds the syscall's flags (open,
-// accept4, dup3) or fcntl's command, arg fcntl's third argument.
+// accept4, dup3) or fcntl's command, arg fcntl's third argument. fd2 is a
+// second descriptor (a pipe's write end, epoll_ctl's target); addr and sig
+// are the side records of M2 step 7 that arrived while the call ran
+// (sock_addr_event, signal_event), nil when none did.
 type enter struct {
 	name     string // syscall name, e.g. "openat"
 	shape    shape
@@ -45,6 +53,9 @@ type enter struct {
 	pathKnown bool
 	flags     int32
 	arg       uint64
+	fd2       int32
+	addr      *sockAddr
+	sig       *sigInfo
 }
 
 func (c *Correlator) enterOpen(r *types.OpenEvent) {
@@ -156,6 +167,8 @@ func (c *Correlator) syscallDetail(ev *schema.Event, en enter, ret int64) (*sock
 	case shapeName:
 		c.nameDetail(ev, p, en, ret)
 		return nil, true
+	case shapeIPC:
+		return c.ipcDetail(ev, p, en, ret)
 	}
 	switch en.name {
 	case schema.KindAccept, schema.KindAccept4:
@@ -175,7 +188,10 @@ func (c *Correlator) syscallDetail(ev *schema.Event, en enter, ret int64) (*sock
 			p.close(en.fd)
 		}
 	case schema.KindConnect:
-		sock.fillArgs(&ev.Args)
+		sock = c.connectDetail(ev, p, en, sock)
+	case schema.KindBind, schema.KindSendto, schema.KindRecvfrom,
+		schema.KindSendfile64, schema.KindSplice, schema.KindTee, schema.KindCopyFileRange:
+		sock = c.socketFdDetail(ev, p, en, ret, sock)
 	default:
 		fdFileDetail(ev, p, en, ret)
 	}
@@ -210,10 +226,11 @@ func (c *Correlator) openDetail(ev *schema.Event, p *procState, en enter, ret in
 	return true
 }
 
-// acceptDetail registers the accepted fd. Its socket was bound by the
-// snapshot record the BPF side emits right before the accept exit; its
-// close-on-exec state is accept4's SOCK_CLOEXEC (accept's enter flags are
-// 0).
+// acceptDetail registers the accepted fd. A TCP socket was bound by the
+// snapshot record the BPF side emits right before the accept exit; an
+// AF_UNIX one by its sock_addr record (en.addr), which joins it with the
+// connecting client's end (ipc.go). Its close-on-exec state is accept4's
+// SOCK_CLOEXEC (accept's enter flags are 0).
 func (c *Correlator) acceptDetail(ev *schema.Event, p *procState, en enter, ret int64) *sockState {
 	if ret < 0 {
 		return nil
@@ -221,6 +238,9 @@ func (c *Correlator) acceptDetail(ev *schema.Event, p *procState, en enter, ret 
 	fd := int32(ret)
 	ev.FD, ev.FDGen = fd, p.create(fd, true)
 	p.openCloexec(fd, en.flags)
+	if en.addr != nil {
+		return c.unixEnd(p, fd, en)
+	}
 	sock := p.sockOf[fd]
 	sock.fillArgs(&ev.Args)
 	return sock

@@ -108,6 +108,9 @@ func (b *bindings) refsMatch(d ExpectedEvent, e schema.Event) bool {
 	if d.FD != nil && !b.matchRef(*d.FD, fdValue(d.FD, e)) {
 		return false
 	}
+	if d.Args.FD2 != nil && (e.Args.FD2 == nil || !b.matchRef(*d.Args.FD2, fd2Value(d.Args.FD2, e))) {
+		return false
+	}
 	if d.ConnID != nil && (e.ConnID == "" || !b.matchRef(*d.ConnID, e.ConnID)) {
 		return false
 	}
@@ -123,6 +126,19 @@ func fdValue(r *Ref, e schema.Event) string {
 		return fmt.Sprintf("%s#%d.%d", processKey(e), e.FD, e.FDGen)
 	}
 	return strconv.Itoa(int(e.FD))
+}
+
+// fd2Value is fdValue for args.fd2: the same instance key, so a pipe end
+// bound through pipe2's fd2 is the one its writes name by fd.
+func fd2Value(r *Ref, e schema.Event) string {
+	var gen uint32
+	if e.Args.FD2Gen != nil {
+		gen = *e.Args.FD2Gen
+	}
+	if r.symbol() {
+		return fmt.Sprintf("%s#%d.%d", processKey(e), *e.Args.FD2, gen)
+	}
+	return strconv.Itoa(int(*e.Args.FD2))
 }
 
 func (b *bindings) portMatch(want *Ref, got *uint16) bool {
@@ -142,7 +158,11 @@ func plainFieldsMatch(d ExpectedEvent, e schema.Event) bool {
 	return strMatch(a.Path, g.Path) && strMatch(a.NewPath, g.NewPath) &&
 		strMatch(a.LocalAddr, g.LocalAddr) && strMatch(a.RemoteAddr, g.RemoteAddr) &&
 		strMatch(a.SockState, g.SockState) && strMatch(a.Marker, g.Marker) &&
-		flagsMatch(a.Flags, g.Flags)
+		flagsMatch(a.Flags, g.Flags) && signalMatch(a.Signal, g.Signal)
+}
+
+func signalMatch(want, got *int32) bool {
+	return want == nil || (got != nil && *want == *got)
 }
 
 func strMatch(want, got *string) bool {

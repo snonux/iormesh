@@ -114,16 +114,39 @@ func (n normalizer) processFields(e *schema.Event) {
 	proc := processKey(*e)
 	e.TID = uint32(n.syms.ord(kindTID, proc+"/"+strconv.FormatUint(uint64(e.TID), 10)))
 	e.FD, e.FDGen = n.fd(proc, e.FD, e.FDGen)
+	if e.Args.FD2 != nil {
+		// A second fd instance of the same process (a pipe's other end,
+		// M2 step 7) is renumbered like the first; fresh pointers, since
+		// the input event shares them.
+		var gen uint32
+		if e.Args.FD2Gen != nil {
+			gen = *e.Args.FD2Gen
+		}
+		fd2, gen2 := n.fd(proc, *e.Args.FD2, gen)
+		e.Args.FD2, e.Args.FD2Gen = &fd2, &gen2
+	}
 	if returnsFD(e.Event) && e.Ret >= 0 {
 		// A successful open or accept returns the fd itself, so its
 		// return value is as run-specific as the fd and follows it.
 		e.Ret = int64(e.FD)
 	}
 	e.PID, e.PIDInc = n.process(proc, e.PID)
+	host, _, _ := strings.Cut(strings.TrimPrefix(proc, "proc:"), "/")
+	e.Args.TargetPID = mapPtr(e.Args.TargetPID, func(pid uint32) uint32 { return n.pid(host, pid) })
+	e.Args.SenderPID = mapPtr(e.Args.SenderPID, func(pid uint32) uint32 { return n.pid(host, pid) })
+}
+
+// pid renumbers a raw pid an argument names (a kill's target, a signal's
+// sender) with the PID ordinal its process's events get: they are keyed
+// alike (host and PID), so a signalled child's events and the kill naming
+// it agree. An untraced pid takes an ordinal too — in a deterministic
+// scenario it is still first named at the same place.
+func (n normalizer) pid(host string, pid uint32) uint32 {
+	return uint32(n.syms.ord(kindPID, host+"/"+strconv.FormatUint(uint64(pid), 10)))
 }
 
 // process maps a raw (pid, incarnation) to ordinals. The PID ordinal is
-// keyed by host and PID alone, so a reused PID keeps its number and only
+// keyed by host and PID alone (as pid's), so a reused PID keeps its number and only
 // the incarnation tells the two processes apart — as in the raw trace.
 func (n normalizer) process(procKey string, pid uint32) (uint32, uint64) {
 	host, _, _ := strings.Cut(strings.TrimPrefix(procKey, "proc:"), "/")

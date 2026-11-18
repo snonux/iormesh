@@ -52,6 +52,14 @@ func (g *graphBuilder) forked(parent uint32, parentInc uint64, child uint32, chi
 		To:   schema.ProcessNodeID(g.hostID, child, childInc)})
 }
 
+// signaled adds the edge from a traced sender to the traced process it
+// signalled (M2 step 7). Both process nodes exist: proc() registered both.
+func (g *graphBuilder) signaled(sender uint32, senderInc uint64, target uint32, targetInc uint64) {
+	g.edge(schema.Edge{Type: schema.EdgeSignaled,
+		From: schema.ProcessNodeID(g.hostID, sender, senderInc),
+		To:   schema.ProcessNodeID(g.hostID, target, targetInc)})
+}
+
 // opened adds a file node and the process's opened edge. The file id uses
 // the path exactly as the open event reports it, so the normalizer's
 // bracket pruning finds the node from the event (internal/normalize).

@@ -29,7 +29,7 @@ func (c *Correlator) release(force bool) error {
 			if !force && c.now < q.sock.deadline(c.cfg.FuseWindowNS) {
 				break
 			}
-			c.socks.resolveAlone(q.sock)
+			c.resolverOf(q.sock).resolveAlone(q.sock)
 		}
 		if err := c.emit(q); err != nil {
 			c.queue = c.queue[n+1:]
@@ -47,4 +47,12 @@ func (c *Correlator) emit(q queued) error {
 		c.graph.connected(ev.PID, ev.PIDInc, q.sock.connID, q.sock.fused)
 	}
 	return c.cfg.Sink.Event(ev)
+}
+
+// resolverOf is the table that pairs s: its own, or the TCP table.
+func (c *Correlator) resolverOf(s *sockState) resolver {
+	if s.table != nil {
+		return s.table
+	}
+	return c.socks
 }

@@ -14,6 +14,8 @@
 package correlate
 
 import (
+	"net/netip"
+
 	"iormesh/internal/redact"
 	"iormesh/internal/schema"
 	"iormesh/internal/types"
@@ -60,8 +62,11 @@ type Correlator struct {
 	now      uint64 // boot ns of the newest record seen
 	procs    map[uint32]*procState
 	socks    *sockTable
-	enters   map[uint32]enter // pending syscall enters by tid
-	queue    []queued         // emitted in seq order, held for conn ids
+	datagram *sockTable                       // UDP flows, apart from TCP: one tuple may be both
+	unix     *unixTable                       // AF_UNIX stream connections by their socket pair
+	flows    map[[2]netip.AddrPort]*sockState // UDP flows by (local, remote)
+	enters   map[uint32]enter                 // pending syscall enters by tid
+	queue    []queued                         // emitted in seq order, held for conn ids
 	graph    *graphBuilder
 	unpaired uint64
 	noPath   uint64
@@ -85,20 +90,24 @@ func New(cfg Config) *Correlator {
 		policy = *cfg.Redaction
 	}
 	return &Correlator{
-		cfg:    cfg,
-		redact: policy,
-		procs:  map[uint32]*procState{},
-		socks:  newSockTable(cfg.FuseWindowNS),
-		enters: map[uint32]enter{},
-		graph:  newGraphBuilder(cfg.Host.ID),
+		cfg:      cfg,
+		redact:   policy,
+		procs:    map[uint32]*procState{},
+		socks:    newSockTable(cfg.FuseWindowNS),
+		datagram: newSockTable(cfg.FuseWindowNS),
+		unix:     newUnixTable(),
+		flows:    map[[2]netip.AddrPort]*sockState{},
+		enters:   map[uint32]enter{},
+		graph:    newGraphBuilder(cfg.Host.ID),
 	}
 }
 
 // Handle consumes one record from bpf.Tracer.Records: syscall records
 // (M1's, and the path, name, dup3 and fcntl enters of M2's file surface),
-// TCP state records and the process lifecycle records of M2 steps 1 and 6
-// (new processes, execs, exits). Other record types are ignored; the
-// exec_argv records of a pattern session are the caller's to judge
+// TCP state records, the process lifecycle records of M2 steps 1 and 6
+// (new processes, execs, exits) and M2 step 7's records (handleIPC:
+// pipes, socketpairs, kill, epoll and poll, socket addresses, signals).
+// Other record types are ignored; the exec_argv records of a pattern session are the caller's to judge
 // (Incarnation), and an exec's argv reaches the trace through Exec, once
 // the caller has completed a truncated one. The error is the sink's, or
 // ErrEnded after End.
@@ -134,7 +143,9 @@ func (c *Correlator) Handle(rec any) error {
 	case *types.ProcessExecEvent:
 		c.execTask(r)
 	default:
-		return nil
+		if !c.handleIPC(rec) {
+			return nil
+		}
 	}
 	return c.release(false)
 }

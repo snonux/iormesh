@@ -62,6 +62,10 @@ type ExpectedArgs struct {
 	RemotePort *Ref    `json:"remote_port,omitempty"`
 	SockState  *string `json:"sock_state,omitempty"`
 	Marker     *string `json:"marker,omitempty"`
+	// FD2 binds the event's second fd instance (a pipe's other end, M2
+	// step 7) like FD binds the first; Signal is the signal number.
+	FD2    *Ref   `json:"fd2,omitempty"`
+	Signal *int32 `json:"signal,omitempty"`
 }
 
 // ExpectedEdge is one declared graph edge. From and To are node-id
@@ -197,7 +201,8 @@ func (e ExpectedEvent) validate(threadProc map[string]string) error {
 	refs := []struct {
 		r    *Ref
 		kind string
-	}{{e.FD, "fd"}, {e.ConnID, "c"}, {e.Args.LocalPort, "port"}, {e.Args.RemotePort, "port"}}
+	}{{e.FD, "fd"}, {e.ConnID, "c"}, {e.Args.LocalPort, "port"}, {e.Args.RemotePort, "port"},
+		{e.Args.FD2, "fd"}}
 	for _, ref := range refs {
 		if ref.r != nil && ref.r.symbol() && symbolKind(ref.r.v) != ref.kind {
 			return fmt.Errorf("%s is not a $%s symbol", ref.r.v, ref.kind)
