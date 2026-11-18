@@ -42,6 +42,7 @@ const (
 	vmlinuxPath          = "internal/c/vmlinux.h"
 	forceGenerateEnv     = "IORMESH_FORCE_GENERATE"
 	rootTestBinary       = "iormesh-internal.test"
+	binaryName           = "iormesh"
 )
 
 // Default builds the project.
@@ -50,11 +51,14 @@ func Default() {
 }
 
 // Build compiles the BPF object and every Go package with the libbpfgo cgo
-// environment. There is no tracer binary until cmd/iormesh lands (M1 step
-// 10); building ./... still proves the go:embed of the object links.
+// environment, then links the tracer binary ./iormesh (cmd/iormesh, M1
+// step 10) with the object embedded.
 func Build() error {
 	mg.Deps(BpfBuild)
-	return sh.RunWithV(goEnv(), "go", "build", "./...")
+	if err := sh.RunWithV(goEnv(), "go", "build", "./..."); err != nil {
+		return err
+	}
+	return sh.RunWithV(goEnv(), "go", "build", "-o", binaryName, "./cmd/iormesh")
 }
 
 // BpfBuild builds the embedded BPF object (CO-RE, from vmlinux.h).

@@ -1,4 +1,5 @@
 /workload.jar
+/iormesh
 /workload/classes/
 
 # BPF build outputs and inputs (as in ior): the object is rebuilt by

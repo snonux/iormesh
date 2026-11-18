@@ -13,14 +13,16 @@ are optional, so an older reader never sees a changed meaning.
 
 ## Files
 
-| Output | Format | Writer |
-|--------|--------|--------|
-| event stream | one event per line (NDJSON) | `schema.NDJSONSink` |
-| graph export | one graph object, indented JSON | `schema.WriteGraph` / `WriteGraphFile` |
-| parquet segments | the same events, columnar | M4 segment writer (to come) |
+`iormesh run -out DIR` writes a trace directory:
 
-The file names are fixed when the tracer CLI wires these writers
-(`iormesh run -out DIR`, M1 step 10); no command writes them yet.
+| File | Format | Writer |
+|------|--------|--------|
+| `events.ndjson` | one event per line (NDJSON) | `schema.NDJSONSink`, as events complete |
+| `graph.json` | one graph object, indented JSON | `schema.WriteGraphFile`, at exit |
+| `*.parquet` | the same events, columnar | M4 segment writer (to come) |
+
+`iormesh normalize -out DIR` writes the same two files for the
+normalized trace.
 
 **NDJSON framing**: UTF-8, one JSON object per line, `\n`
 terminated, no blank lines, keys in the order of the table below

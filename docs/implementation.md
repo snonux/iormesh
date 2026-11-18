@@ -859,10 +859,32 @@ threads, fd reuse, startup I/O outside the bracket, extra open
 flags, mapped addresses — against the shipped `expect.json`
 files, plus one negative case per rule.
 
-**Step 10 — CLI** (`cmd/iormesh`): subcommands `run` (foreground
-tracer: `-pid`, `-project`, `-duration`, `-out DIR`) and
-`normalize` (`-bracket`, `-check expect.json`). `main.go` only
-dispatches.
+**Step 10 — CLI** (`cmd/iormesh`, logic in `internal/cli`; built,
+`mage build` links `./iormesh`). `main.go` only dispatches.
+
+- `iormesh run -pid PID[,PID…] -project NAME -out DIR
+  [-duration 4h] [-ready FILE]` — the foreground tracer:
+  `bpf.Open` → `correlate` → `schema.NDJSONSink` into
+  `DIR/events.ndjson`, then `DIR/graph.json` at exit. It stops at
+  `-duration` (default 4h, ior-style bound), on SIGINT/SIGTERM, or
+  when every target has exited (draining until the ring buffer is
+  quiet for 300ms), and prints a one-line summary with the loss
+  counters to stderr. Loading the object takes seconds, so
+  `-ready FILE` is created once every probe is attached — a
+  harness waits for it before releasing the target's startup
+  gate. Flags are validated (pids positive, distinct, running;
+  project `[A-Za-z0-9._-]`; duration positive); errors exit 2.
+- `iormesh normalize [-bracket S] [-tmp PREFIX] [-check
+  expect.json] [-out DIR] TRACEDIR` — reads a trace directory
+  strictly, normalizes it, then either golden-checks it (each
+  violation printed, exit 3) or writes the normalized trace to
+  `-out` (or its events to stdout).
+
+Verified by hand on this host: the real `file-basic` and the
+two-process `tcp-loopback` scenarios, traced with `-ready` gating,
+pass `normalize -check` against their goldens — one fused
+connection for the JVM pair. Session, end and drop *events* are
+not written yet (the summary line carries the counts).
 
 **Step 11 — integration harness**: lift
 `integrationtests/harness.go`, `parse.go`, `kernelloss.go`,
