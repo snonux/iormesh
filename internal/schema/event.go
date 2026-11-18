@@ -23,8 +23,10 @@ const (
 	// KindMarker is an openat of /iormesh-marker/<scenario>/<edge>; the
 	// normalizer cuts traces to the bracket these delimit.
 	KindMarker = "marker"
-	// KindDrop records ring-buffer loss: gaps are explicit, never silent.
-	// args.lost counts the records lost since the previous drop event.
+	// KindDrop records loss: gaps are explicit, never silent. args.lost
+	// counts the records lost since the previous drop event; without
+	// args.drop_reason it is ring-buffer or decoder loss of the host
+	// (pid 0), with one it says why (DropAttachGap).
 	KindDrop = "drop"
 	// KindSession is the per-trace header record, the first event of a
 	// trace; Event.Session describes the host.
@@ -45,6 +47,15 @@ const (
 	EndTargetsExited = "targets_exited" // every traced process exited
 	EndDiskLimit     = "disk_limit"     // the trace disk budget ran out (M4)
 	EndError         = "error"          // the tracer failed; the trace is incomplete
+)
+
+// Drop reasons, the values of args.drop_reason.
+const (
+	// DropAttachGap: the records a pattern-matched process produced
+	// between its exec and the tracer attaching to it (M2 step 2). The
+	// drop names that process (pid, pid_incarnation) and is emitted when
+	// the tracer attached, before any of its traced events.
+	DropAttachGap = "attach_gap"
 )
 
 // Attribution values. Missing attribution is data, not a hole: every
@@ -128,6 +139,9 @@ type Args struct {
 	// Lost is a drop event's count: records lost since the previous drop
 	// event, kernel- and userspace-side together. Always > 0.
 	Lost *uint64 `json:"lost,omitempty" parquet:"lost,optional"`
+	// DropReason says why a drop event's records were lost, one of the
+	// Drop* constants; absent for ring-buffer and decoder loss.
+	DropReason *string `json:"drop_reason,omitempty" parquet:"drop_reason,optional"`
 	// EndReason is an end event's reason, one of the End* constants.
 	EndReason *string `json:"end_reason,omitempty" parquet:"end_reason,optional"`
 }

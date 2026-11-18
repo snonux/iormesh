@@ -209,6 +209,11 @@ func TestHostEventValidateRejects(t *testing.T) {
 		"lost on end":             {KindEnd, func(e *Event) { e.Args.Lost = ptr(uint64(1)) }},
 		"end_reason on drop":      {KindDrop, func(e *Event) { e.Args.EndReason = ptr(EndStop) }},
 		"lost on session":         {KindSession, func(e *Event) { e.Args.Lost = ptr(uint64(1)) }},
+		"unknown drop reason": {KindDrop, func(e *Event) {
+			e.PID, e.Args.DropReason = 7, ptr("ring_buffer")
+		}},
+		"attach_gap without pid": {KindDrop, func(e *Event) { e.Args.DropReason = ptr(DropAttachGap) }},
+		"drop_reason on end":     {KindEnd, func(e *Event) { e.Args.DropReason = ptr(DropAttachGap) }},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -216,6 +221,24 @@ func TestHostEventValidateRejects(t *testing.T) {
 			c.breakIt(&e)
 			checkRejected(t, e)
 		})
+	}
+}
+
+// TestAttachGapDropValid: a drop that names its process and the
+// attach_gap reason is a valid event and survives a round trip.
+func TestAttachGapDropValid(t *testing.T) {
+	e := hostEvent(KindDrop)
+	e.PID, e.PIDInc, e.TID, e.Args.DropReason = 4711, 99, 4711, ptr(DropAttachGap)
+	if err := e.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	data, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodeEvent(data)
+	if err != nil || got.Args.DropReason == nil || *got.Args.DropReason != DropAttachGap {
+		t.Fatalf("round trip: %+v, %v", got.Args, err)
 	}
 }
 

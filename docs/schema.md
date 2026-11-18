@@ -92,6 +92,7 @@ column each, never a blob.
 | `sock_state` | `tcp_state` (required): `ESTABLISHED`, `CLOSE`, … |
 | `marker` | `marker` (required): `<scenario>/<edge>` |
 | `lost` | `drop` (required, > 0): records lost since the previous `drop` event |
+| `drop_reason` | `drop`, optional: why the records were lost — `attach_gap` (M2); absent for ring-buffer and decoder loss |
 | `end_reason` | `end` (required): why the trace ended, below |
 
 IPv4 peers of dual-stack sockets are written unmapped
@@ -114,7 +115,7 @@ in the M1 schema yet.
 | `connect`, `accept`, `accept4` | syscall pair; args carry the 4-tuple |
 | `tcp_state` | `sock:inet_sock_set_state`, joined to the owning pid/fd |
 | `marker` | an open of `/iormesh-marker/<scenario>/<edge>` |
-| `drop` | ring-buffer loss — gaps are explicit |
+| `drop` | loss — gaps are explicit: ring-buffer and decoder loss, or a pattern session's attach gap (`drop_reason`) |
 | `session` | the per-trace header |
 | `end` | why the trace ended (duration, disk limit, stop, targets exited, error) |
 
@@ -151,6 +152,20 @@ stays gap-free.
   written with `lost` 0. No `drop` event means no loss was
   counted. Records lost after that last poll, while the probes
   detach, are counted nowhere (a known M1 limit).
+
+  One `drop` is not host-level: the **attach gap** of a
+  pattern-bound session (`-pattern`, M2). Between a matching
+  process's exec and the tracer attaching to it, the kernel counts
+  the records the process produced but could not trace; the drop
+  carries that count, `args.drop_reason` `attach_gap`, and the
+  process's `pid`, `pid_incarnation`, `tid` (= pid) and `comm`. It
+  is written at the attach, ahead of every traced event of that
+  process; its `boot_ns` is the attach time. A JVM's start-up runs
+  between exec and its first marker, so the drop lies before the
+  scenario's bracket — one inside it means the attach came too
+  late. The count is a lower bound (records counted between the
+  tracer's read and its attach are not in it), and a gap of 0
+  writes no drop.
 - **`end`** is the last event; `args.end_reason` is one of:
 
   | Reason | Meaning |
@@ -180,16 +195,21 @@ stays gap-free.
 | `process` | `proc:<host_id>/<pid>@<pid_incarnation>` |
 | `file` | `file:<host_id>:<path>` — the path exactly as the open event reports it |
 | `socket` | `conn:<conn_id>` — one node per connection, both ends |
+| `app` | `app:<project>/<pattern>` — the identity of a pattern-bound session's app (M2): every process incarnation the pattern matched links to it, so a restarted app is a new process node under the same app node |
 
 | Edge | From → to | State |
 |------|-----------|-------|
 | `runs_on` | process → host | — |
 | `opened` | process → file | — |
 | `connected` | process → socket | `fused` (both ends traced and joined) or `unresolved` |
+| `incarnation` | app → process | — |
 
 Node attributes stay minimal (`comm` on processes): raw pids or
 ports in attributes would survive normalization and make two runs'
-graphs differ.
+graphs differ. An `app` id names nothing run-specific (project and
+pattern), so the normalizer passes it through unchanged and two
+runs — or two hosts — name the same app the same way; goldens bind
+it with `$a1`. A `-pid` or `-listen-port` session has no app node.
 
 ## Parquet mapping
 

@@ -72,7 +72,7 @@ func (g Graph) validateNodes() (map[string]string, error) {
 }
 
 // validateNodeID checks that a node's id carries its type's prefix and,
-// for files, the "<host>:<path>" shape FileNodeID builds.
+// for files and apps, the shape FileNodeID and AppNodeID build.
 func validateNodeID(n Node) error {
 	prefix, ok := nodeIDPrefix(n.Type)
 	if !ok {
@@ -82,10 +82,16 @@ func validateNodeID(n Node) error {
 	if !ok || rest == "" {
 		return invalidf("%s node id %q lacks %q prefix", n.Type, n.ID, prefix)
 	}
-	if n.Type == NodeFile {
+	switch n.Type {
+	case NodeFile:
 		host, path, ok := strings.Cut(rest, ":")
 		if !ok || host == "" || path == "" {
 			return invalidf("file node id %q, want file:<host>:<path>", n.ID)
+		}
+	case NodeApp:
+		project, pattern, ok := strings.Cut(rest, "/")
+		if !ok || project == "" || pattern == "" {
+			return invalidf("app node id %q, want app:<project>/<pattern>", n.ID)
 		}
 	}
 	return nil
@@ -124,6 +130,8 @@ func nodeIDPrefix(nodeType string) (string, bool) {
 		return prefixFile, true
 	case NodeSocket:
 		return prefixConn, true
+	case NodeApp:
+		return prefixApp, true
 	}
 	return "", false
 }
@@ -137,6 +145,8 @@ func edgeShapeOf(edgeType string) (edgeShape, bool) {
 		return edgeShape{from: NodeProcess, to: NodeFile}, true
 	case EdgeConnected:
 		return edgeShape{from: NodeProcess, to: NodeSocket, wantState: true}, true
+	case EdgeIncarnation:
+		return edgeShape{from: NodeApp, to: NodeProcess}, true
 	}
 	return edgeShape{}, false
 }

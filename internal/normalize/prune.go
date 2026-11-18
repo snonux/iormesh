@@ -4,11 +4,6 @@ import (
 	"iormesh/internal/schema"
 )
 
-// edgeIncarnation links an app node to one process incarnation it matched
-// (M2 step 3). It lives here until the M2 graph schema (task pa4) defines
-// the app node and this edge; then this becomes schema's constant.
-const edgeIncarnation = "incarnation"
-
 // prune keeps the part of the graph the bracketed events account for. The
 // graph has no times, so without this a JVM startup file opened outside
 // the bracket would still satisfy a declared edge or trip must_not_appear,
@@ -26,7 +21,7 @@ const edgeIncarnation = "incarnation"
 func prune(g schema.Graph, events []schema.Event) schema.Graph {
 	seen := touched(events)
 	keep := func(e schema.Edge) bool {
-		if e.Type == edgeIncarnation {
+		if e.Type == schema.EdgeIncarnation {
 			return seen[e.To]
 		}
 		if !seen[e.From] {

@@ -7,7 +7,7 @@ import (
 	"slices"
 )
 
-// Node types. The set only grows (app, service, pod, … arrive with later
+// Node types. The set only grows (service, pod, … arrive with later
 // milestones), and Graph.Validate rejects types not listed here.
 const (
 	NodeHost    = "host"
@@ -17,6 +17,11 @@ const (
 	// it — so both processes of a fused pair point at the same node. Its
 	// id is "conn:<conn_id>".
 	NodeSocket = "socket"
+	// NodeApp is the identity a pattern-bound session gives every process
+	// incarnation its pattern matched (M2 step 3): an app restarted with a
+	// new PID is a new process node, linked to the same app node. Its id
+	// is "app:<project>/<pattern>" (AppNodeID).
+	NodeApp = "app"
 )
 
 // Edge types.
@@ -24,6 +29,8 @@ const (
 	EdgeRunsOn    = "runs_on"   // process → host
 	EdgeOpened    = "opened"    // process → file
 	EdgeConnected = "connected" // process → socket; carries a State
+	// EdgeIncarnation links an app to one process incarnation of it.
+	EdgeIncarnation = "incarnation" // app → process
 )
 
 // Edge states, set on connected edges only. A connection is fused when
@@ -42,6 +49,7 @@ const (
 	prefixProcess = "proc:"
 	prefixFile    = "file:"
 	prefixConn    = "conn:"
+	prefixApp     = "app:"
 )
 
 // Graph is the merged, queryable form: built per host by the correlator
@@ -86,6 +94,15 @@ func ProcessNodeID(hostID string, pid uint32, pidInc uint64) string {
 // "file:$h1:$tmp/file-basic.dat".
 func FileNodeID(hostID, path string) string {
 	return prefixFile + hostID + ":" + path
+}
+
+// AppNodeID names an app by the project and the target pattern of the
+// session that matched it: "app:<project>/<pattern>". Neither part is
+// run-specific, so the id survives restarts, re-runs and normalization
+// unchanged, and two hosts tracing one project with one pattern name the
+// same app. A project name holds no '/', so the first one splits the id.
+func AppNodeID(project, pattern string) string {
+	return prefixApp + project + "/" + pattern
 }
 
 // SocketNodeID names a connection by its conn_id (provisional until S2,

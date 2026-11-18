@@ -35,8 +35,8 @@ func (e Event) Validate() error {
 	}
 	// The host-level args belong to their kind alone: a lost count on a
 	// read, say, would make "sum args.lost" over a trace lie.
-	if e.Args.Lost != nil && e.Event != KindDrop {
-		return invalidf("args.lost on a %s event (drop only)", e.Event)
+	if (e.Args.Lost != nil || e.Args.DropReason != nil) && e.Event != KindDrop {
+		return invalidf("args.lost or args.drop_reason on a %s event (drop only)", e.Event)
 	}
 	if e.Args.EndReason != nil && e.Event != KindEnd {
 		return invalidf("args.end_reason on a %s event (end only)", e.Event)
@@ -118,6 +118,14 @@ func (e Event) validateSyntheticArgs() error {
 	case KindDrop:
 		if e.Args.Lost == nil || *e.Args.Lost == 0 {
 			return invalidf("drop without a positive args.lost")
+		}
+		if r := e.Args.DropReason; r != nil && *r != DropAttachGap {
+			return invalidf("drop reason %q, want %q or none", *r, DropAttachGap)
+		}
+		if e.Args.DropReason != nil && e.PID == 0 {
+			// An attach gap is one process's loss; without its pid
+			// nobody could tell whose first records are missing.
+			return invalidf("attach_gap drop without a pid")
 		}
 	case KindEnd:
 		if e.Args.EndReason == nil || !KnownEndReason(*e.Args.EndReason) {

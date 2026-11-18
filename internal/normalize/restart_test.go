@@ -41,19 +41,19 @@ func restartTrace(r run) Trace {
 // app node linking every incarnation the pattern matched.
 func restartGraph(r run, state string, procs ...proc) schema.Graph {
 	g := schema.Graph{SchemaVersion: schema.Version}
-	app, file := "app:demo/*RestartApp*", schema.FileNodeID(r.host, state)
-	g.Nodes = append(g.Nodes, schema.Node{Type: "app", ID: app},
+	app, file := schema.AppNodeID("demo", "*RestartApp*"), schema.FileNodeID(r.host, state)
+	g.Nodes = append(g.Nodes, schema.Node{Type: schema.NodeApp, ID: app},
 		schema.Node{Type: schema.NodeFile, ID: file})
 	// A third incarnation outside the bracket: its edge must be pruned.
 	stray := schema.ProcessNodeID(r.host, 99, 1)
 	g.Nodes = append(g.Nodes, schema.Node{Type: schema.NodeProcess, ID: stray})
-	g.Edges = append(g.Edges, schema.Edge{Type: edgeIncarnation, From: app, To: stray})
+	g.Edges = append(g.Edges, schema.Edge{Type: schema.EdgeIncarnation, From: app, To: stray})
 	for _, p := range procs {
 		id := schema.ProcessNodeID(r.host, p.pid, p.inc)
 		g.Nodes = append(g.Nodes, schema.Node{Type: schema.NodeProcess, ID: id})
 		g.Edges = append(g.Edges,
 			schema.Edge{Type: schema.EdgeOpened, From: id, To: file},
-			schema.Edge{Type: edgeIncarnation, From: app, To: id})
+			schema.Edge{Type: schema.EdgeIncarnation, From: app, To: id})
 	}
 	g.Sort()
 	return g
@@ -70,7 +70,7 @@ func TestRestartGoldenEndToEnd(t *testing.T) {
 		}
 		n := 0
 		for _, e := range got.Graph.Edges {
-			if e.Type == edgeIncarnation {
+			if e.Type == schema.EdgeIncarnation {
 				n++
 			}
 		}
@@ -86,11 +86,11 @@ func TestRestartTwoApps(t *testing.T) {
 	r := runA()
 	raw := restartTrace(r)
 	for i, e := range raw.Graph.Edges {
-		if e.Type == edgeIncarnation && e.To == schema.ProcessNodeID(r.host, r.client.pid, r.client.inc) {
+		if e.Type == schema.EdgeIncarnation && e.To == schema.ProcessNodeID(r.host, r.client.pid, r.client.inc) {
 			raw.Graph.Edges[i].From = "app:demo/*Other*"
 		}
 	}
-	raw.Graph.Nodes = append(raw.Graph.Nodes, schema.Node{Type: "app", ID: "app:demo/*Other*"})
+	raw.Graph.Nodes = append(raw.Graph.Nodes, schema.Node{Type: schema.NodeApp, ID: "app:demo/*Other*"})
 	raw.Graph.Sort()
 	vs := Check(normalized(t, raw, r, "restart"), golden(t, "restart"))
 	if len(vs) != 1 || vs[0].Kind != ViolationEdge {

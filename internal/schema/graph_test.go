@@ -45,6 +45,7 @@ func TestNodeIDs(t *testing.T) {
 		ProcessNodeID("h1", 4711, 99): "proc:h1/4711@99",
 		FileNodeID("h1", "/etc/x"):    "file:h1:/etc/x",
 		SocketNodeID("abc"):           "conn:abc",
+		AppNodeID("shop", "*Main*"):   "app:shop/*Main*",
 	}
 	for got, want := range cases {
 		if got != want {
@@ -179,5 +180,52 @@ func TestEmptyGraphIsValid(t *testing.T) {
 	}
 	if len(g.Nodes) != 0 || len(g.Edges) != 0 {
 		t.Fatalf("unexpected content: %+v", g)
+	}
+}
+
+// restartGraph is what a pattern session exports for one app restarted
+// once: two process incarnations, each linked from the one app node.
+func restartGraph() Graph {
+	const host = "3f2a"
+	app := AppNodeID("demo", "*RestartApp*")
+	one, two := ProcessNodeID(host, 100, 1000), ProcessNodeID(host, 101, 2000)
+	g := Graph{SchemaVersion: Version,
+		Nodes: []Node{{Type: NodeApp, ID: app}, {Type: NodeProcess, ID: one},
+			{Type: NodeProcess, ID: two}, {Type: NodeHost, ID: HostNodeID(host)}},
+		Edges: []Edge{{Type: EdgeIncarnation, From: app, To: one},
+			{Type: EdgeIncarnation, From: app, To: two},
+			{Type: EdgeRunsOn, From: one, To: HostNodeID(host)},
+			{Type: EdgeRunsOn, From: two, To: HostNodeID(host)}}}
+	g.Sort()
+	return g
+}
+
+func TestGraphAcceptsAppIncarnations(t *testing.T) {
+	if err := restartGraph().Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+// TestGraphRejectsBadApps: an app id without its project or pattern, and
+// an incarnation edge that does not run app → process, are invalid.
+func TestGraphRejectsBadApps(t *testing.T) {
+	cases := map[string]func(*Graph){
+		"app id without pattern": func(g *Graph) { g.Nodes[0].ID = "app:demo/" },
+		"app id without project": func(g *Graph) { g.Nodes[0].ID = "app:/*x*" },
+		"app id without slash":   func(g *Graph) { g.Nodes[0].ID = "app:demo" },
+		"incarnation reversed": func(g *Graph) {
+			g.Edges[0].From, g.Edges[0].To = g.Edges[0].To, g.Edges[0].From
+		},
+		"incarnation with state": func(g *Graph) { g.Edges[0].State = StateFused },
+	}
+	for name, breakIt := range cases {
+		t.Run(name, func(t *testing.T) {
+			g := restartGraph()
+			breakIt(&g)
+			g.Sort()
+			if err := g.Validate(); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("Validate = %v, want ErrInvalid", err)
+			}
+		})
 	}
 }
