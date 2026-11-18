@@ -39,9 +39,33 @@ func validEvent() Event {
 	}
 }
 
+// validSession is a complete session header payload.
+func validSession() *Session {
+	return &Session{BootID: "b1d2", FQDN: "host.example.org", Kernel: "6.12.0", Arch: "x86_64"}
+}
+
+// hostEvent returns a valid host-level (pid 0) event of kind: the shape
+// the correlator gives session, drop and end events.
+func hostEvent(kind string) Event {
+	e := Event{SchemaVersion: Version, Project: "demo", Seq: 1, BootNS: 10, WallNS: 20,
+		HostID: "3f2a", Event: kind, FD: NoFD, Attribution: AttributionNone}
+	switch kind {
+	case KindSession:
+		e.Session = validSession()
+	case KindDrop:
+		e.Args.Lost = ptr(uint64(3))
+	case KindEnd:
+		e.Args.EndReason = ptr(EndTargetsExited)
+	}
+	return e
+}
+
 func TestEventRoundTrip(t *testing.T) {
 	cases := map[string]Event{
-		"full": validEvent(),
+		"full":    validEvent(),
+		"session": hostEvent(KindSession),
+		"drop":    hostEvent(KindDrop),
+		"end":     hostEvent(KindEnd),
 		"marker": func() Event {
 			e := validEvent()
 			e.Event, e.FD, e.FDGen, e.Ret, e.Err = KindMarker, NoFD, 0, 0, ""
@@ -159,17 +183,73 @@ func TestEventValidateRejects(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			e := validEvent()
 			breakIt(&e)
-			if err := e.Validate(); !errors.Is(err, ErrInvalid) {
-				t.Fatalf("Validate() = %v, want ErrInvalid", err)
-			}
-			data, err := json.Marshal(e)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := DecodeEvent(data); !errors.Is(err, ErrInvalid) {
-				t.Fatalf("DecodeEvent accepted an invalid event: %v", err)
-			}
+			checkRejected(t, e)
 		})
+	}
+}
+
+// TestHostEventValidateRejects breaks the session, drop and end
+// invariants one at a time.
+func TestHostEventValidateRejects(t *testing.T) {
+	cases := map[string]struct {
+		kind    string
+		breakIt func(*Event)
+	}{
+		"drop without lost":       {KindDrop, func(e *Event) { e.Args.Lost = nil }},
+		"drop with zero lost":     {KindDrop, func(e *Event) { e.Args.Lost = ptr(uint64(0)) }},
+		"end without reason":      {KindEnd, func(e *Event) { e.Args.EndReason = nil }},
+		"end with unknown reason": {KindEnd, func(e *Event) { e.Args.EndReason = ptr("signal") }},
+		"end with empty reason":   {KindEnd, func(e *Event) { e.Args.EndReason = ptr("") }},
+		"session without object":  {KindSession, func(e *Event) { e.Session = nil }},
+		"session empty boot_id":   {KindSession, func(e *Event) { e.Session.BootID = "" }},
+		"session empty fqdn":      {KindSession, func(e *Event) { e.Session.FQDN = "" }},
+		"session empty kernel":    {KindSession, func(e *Event) { e.Session.Kernel = "" }},
+		"session empty arch":      {KindSession, func(e *Event) { e.Session.Arch = "" }},
+		"session object on end":   {KindEnd, func(e *Event) { e.Session = validSession() }},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := hostEvent(c.kind)
+			c.breakIt(&e)
+			checkRejected(t, e)
+		})
+	}
+}
+
+// TestSessionKeysStrict: the session object is decoded as strictly as the
+// envelope — a missing or unknown key fails.
+func TestSessionKeysStrict(t *testing.T) {
+	data, err := json.Marshal(hostEvent(KindSession))
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := string(data)
+	for name, bad := range map[string]string{
+		"missing kernel": strings.Replace(line, `"kernel":"6.12.0",`, ``, 1),
+		"unknown key":    strings.Replace(line, `"arch":`, `"cpus":4,"arch":`, 1),
+		"case-folded":    strings.Replace(line, `"fqdn"`, `"FQDN"`, 1),
+	} {
+		if bad == line {
+			t.Fatalf("%s: edit did not apply to %s", name, line)
+		}
+		if _, err := DecodeEvent([]byte(bad)); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: DecodeEvent = %v, want ErrInvalid", name, err)
+		}
+	}
+}
+
+// checkRejected asserts both Validate and the strict decoder reject e.
+func checkRejected(t *testing.T, e Event) {
+	t.Helper()
+	if err := e.Validate(); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Validate() = %v, want ErrInvalid", err)
+	}
+	data, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeEvent(data); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("DecodeEvent accepted an invalid event: %v", err)
 	}
 }
 
@@ -183,6 +263,11 @@ func TestEventValidateAcceptsEveryKind(t *testing.T) {
 		e.Args.Path = ptr("/x")
 		e.Args.Marker = ptr("s/begin")
 		e.Args.SockState = ptr("TCP_ESTABLISHED")
+		e.Args.Lost = ptr(uint64(1))
+		e.Args.EndReason = ptr(EndStop)
+		if k == KindSession {
+			e.Session = validSession()
+		}
 		if err := e.Validate(); err != nil {
 			t.Errorf("kind %s: %v", k, err)
 		}

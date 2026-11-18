@@ -71,6 +71,7 @@ Required fields are always present; a zero is a real zero.
 | `attribution` | string | `java` or `none` — missing attribution is data |
 | `java` | object, optional | `{thread, stack}`, set exactly when attribution is `java` (*provisional until S1*) |
 | `http` | object, optional | request fields on http events (*provisional until S1/M3*) |
+| `session` | object, optional | the host description, set exactly on `session` events (below) |
 
 `(pid, pid_incarnation, fd, fd_gen)` names one fd instance, even
 when a library's open and a later socket land on the same number.
@@ -90,6 +91,8 @@ column each, never a blob.
 | `remote_addr`, `remote_port` | socket events, when known |
 | `sock_state` | `tcp_state` (required): `ESTABLISHED`, `CLOSE`, … |
 | `marker` | `marker` (required): `<scenario>/<edge>` |
+| `lost` | `drop` (required, > 0): records lost since the previous `drop` event |
+| `end_reason` | `end` (required): why the trace ended, below |
 
 IPv4 peers of dual-stack sockets are written unmapped
 (`127.0.0.1`, not `::ffff:127.0.0.1`).
@@ -105,10 +108,50 @@ IPv4 peers of dual-stack sockets are written unmapped
 | `marker` | an open of `/iormesh-marker/<scenario>/<edge>` |
 | `drop` | ring-buffer loss — gaps are explicit |
 | `session` | the per-trace header |
-| `end` | why the trace ended (duration, disk limit, stop, error) |
+| `end` | why the trace ended (duration, disk limit, stop, targets exited, error) |
 
 The set only grows; M2 appends the rest of the file and socket
 surface.
+
+### Host-level events: session, drop, end
+
+`session`, `drop` and `end` describe the tracer, not a syscall:
+`pid`, `pid_incarnation` and `tid` are `0`, `comm` is empty, `fd`
+is `-1`, `attribution` is `none`, and `boot_ns` is the boot clock
+when the tracer wrote them. PID 0 is what tells the normalizer to
+keep them out of process renumbering and inside the marker
+bracket. Like every event they take the next `seq`, so the stream
+stays gap-free.
+
+- **`session`** is the first event (`seq` 1) of every
+  `iormesh run` trace. Its `session` object is required there and
+  forbidden elsewhere; every key in it is required:
+
+  | Key | Meaning |
+  |-----|---------|
+  | `boot_id` | `/proc/sys/kernel/random/boot_id` — `boot_ns` of two traces compare only when these match |
+  | `fqdn` | the host's canonical name (`hostname -f`), or its hostname when it has none |
+  | `kernel` | kernel release (`uname -r`) |
+  | `arch` | machine hardware name (`uname -m`), e.g. `x86_64` |
+
+- **`drop`** reports loss: `args.lost` records — kernel
+  ring-buffer reservations that failed plus records that arrived
+  undecodable — since the previous `drop`. `iormesh run` polls
+  the counters every 200ms and once more at the end, so a `drop`
+  follows its gap within a poll interval; it is never written
+  with `lost` 0. No `drop` event means no loss was counted.
+- **`end`** is the last event; `args.end_reason` is one of:
+
+  | Reason | Meaning |
+  |--------|---------|
+  | `duration` | the `-duration` bound was reached |
+  | `stop` | SIGINT/SIGTERM — a user or controller stop |
+  | `targets_exited` | every traced process exited (the stream was drained until quiet) |
+  | `disk_limit` | the trace disk budget ran out (M4) |
+  | `error` | the tracer failed — lost its record stream or could not read its loss counters; the trace is incomplete |
+
+  A trace **without** an `end` event was cut short: the tracer
+  crashed, or a write error also lost the end record.
 
 ## Graph
 

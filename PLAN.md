@@ -1149,9 +1149,9 @@ can reconstruct behavior and check it against source code:
   stream ids (an ordinal cannot pair multiplexed requests),
   are marked as time-ordered, never guessed.
 - **Explicit end**: every trace records how it ended — duration
-  reached, disk limit reached, controller stop, or error — as a
-  final event and in the summary rollup; an LLM reading the
-  trace always knows whether it is complete.
+  reached, disk limit reached, controller stop, every target
+  exited, or error — as a final event and in the summary rollup;
+  an LLM reading the trace always knows whether it is complete.
 - **Normalization**: raw traces are full of run-specific
   values — PIDs, TIDs, fds, ephemeral ports, inodes,
   timestamps. The normalizer (a library, plus `iormesh

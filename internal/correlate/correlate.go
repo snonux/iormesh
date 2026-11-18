@@ -2,7 +2,9 @@
 // events and the per-host graph (docs/implementation.md, M1 step 6). It
 // keeps pid→fd→path and pid→fd→socket state, pairs syscall enters with
 // their exits, turns marker opens into marker events and fuses the two
-// ends of a loopback connection into one conn id.
+// ends of a loopback connection into one conn id. Around the syscall
+// events it numbers the host-level ones the caller reports: the session
+// header (Session), ring-buffer loss (RecordLosses) and the end (End).
 //
 // One goroutine owns a Correlator: Handle, Close and Graph must not be
 // called concurrently. The package is cgo-free; it only sees decoded
@@ -37,6 +39,8 @@ type Config struct {
 	// other end before it is emitted as unresolved; 0 means 5s, the
 	// window the plan gives the loopback join.
 	FuseWindowNS uint64
+	// Clock stamps session, drop and end events; it defaults to BootNow.
+	Clock Clock
 }
 
 const defaultFuseWindowNS = 5_000_000_000
@@ -53,6 +57,8 @@ type Correlator struct {
 	graph    *graphBuilder
 	unpaired uint64
 	noPath   uint64
+	lost     uint64 // cumulative losses already reported by drop events
+	ended    bool   // End was called: nothing may follow the end event
 }
 
 // New returns a Correlator writing to cfg.Sink.
@@ -62,6 +68,9 @@ func New(cfg Config) *Correlator {
 	}
 	if cfg.FuseWindowNS == 0 {
 		cfg.FuseWindowNS = defaultFuseWindowNS
+	}
+	if cfg.Clock == nil {
+		cfg.Clock = BootNow
 	}
 	return &Correlator{
 		cfg:    cfg,
@@ -73,8 +82,12 @@ func New(cfg Config) *Correlator {
 }
 
 // Handle consumes one record from bpf.Tracer.Records. Record types the M1
-// probe set does not produce are ignored. The error is the sink's.
+// probe set does not produce are ignored. The error is the sink's, or
+// ErrEnded after End.
 func (c *Correlator) Handle(rec any) error {
+	if c.ended {
+		return ErrEnded
+	}
 	switch r := rec.(type) {
 	case *types.OpenEvent:
 		c.enterOpen(r)

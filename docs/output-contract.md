@@ -52,8 +52,8 @@ the plan is the source of truth.
   limits are stated: async hops and HTTP/2 requests without
   captured stream ids render as time-ordered, never guessed.
 - **Explicit end** — every trace records how it ended (duration,
-  disk limit, stop, error), so a reader — LLM or human — knows
-  whether it is complete.
+  disk limit, stop, targets exited, error), so a reader — LLM or
+  human — knows whether it is complete.
 - **Source-matching frames** — `class#method(file:line)` plus the
   class's JAR origin, directly comparable with source code.
 - **Deterministic exports** — canonical key order, so two

@@ -30,6 +30,9 @@ func (e Event) Validate() error {
 	if err := e.validateAttribution(); err != nil {
 		return err
 	}
+	if (e.Event == KindSession) != (e.Session != nil) {
+		return invalidf("session object on a %s event (set exactly on session events)", e.Event)
+	}
 	return e.validateKindArgs()
 }
 
@@ -93,8 +96,41 @@ func (e Event) validateKindArgs() error {
 		if e.Args.SockState == nil || *e.Args.SockState == "" {
 			return invalidf("tcp_state without args.sock_state")
 		}
+	default:
+		return e.validateSyntheticArgs()
 	}
 	return nil
+}
+
+// validateSyntheticArgs checks the host-level kinds: a drop without its
+// count, an end without a known reason or a header without the boot id
+// would turn "the trace says how complete it is" into a guess.
+func (e Event) validateSyntheticArgs() error {
+	switch e.Event {
+	case KindDrop:
+		if e.Args.Lost == nil || *e.Args.Lost == 0 {
+			return invalidf("drop without a positive args.lost")
+		}
+	case KindEnd:
+		if e.Args.EndReason == nil || !KnownEndReason(*e.Args.EndReason) {
+			return invalidf("end without a known args.end_reason")
+		}
+	case KindSession:
+		s := e.Session
+		if s.BootID == "" || s.FQDN == "" || s.Kernel == "" || s.Arch == "" {
+			return invalidf("session with an empty boot_id, fqdn, kernel or arch")
+		}
+	}
+	return nil
+}
+
+// KnownEndReason reports whether reason is one of the End* constants.
+func KnownEndReason(reason string) bool {
+	switch reason {
+	case EndDuration, EndStop, EndTargetsExited, EndDiskLimit, EndError:
+		return true
+	}
+	return false
 }
 
 // invalidf formats a validation failure wrapped in ErrInvalid.

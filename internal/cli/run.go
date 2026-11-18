@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -35,9 +34,21 @@ func runCommand(args []string, stderr io.Writer) error {
 	return runTrace(ctx, cfg, stderr)
 }
 
+// tracer is what run needs of bpf.Tracer; tests substitute a fake to
+// drive the loop without a kernel.
+type tracer interface {
+	Records() <-chan any
+	Losses() (bpf.Losses, error)
+	Close() error
+}
+
+var _ tracer = (*bpf.Tracer)(nil)
+
 // runTrace traces cfg.pids until the duration ends, a signal arrives or
 // every target has exited, then writes the event stream and the graph
-// into cfg.out.
+// into cfg.out. The stream opens with a session header, records loss as
+// drop events while it runs and closes with an end event naming why it
+// stopped (PLAN.md, "Trace output contract").
 //
 // The tracer is opened before the output files are created, so a run that
 // cannot attach (no root, no BTF) leaves an existing trace directory
@@ -54,27 +65,45 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	c, err := newCorrelator(cfg)
+	c, err := newCorrelator(ctx, cfg)
 	if err != nil {
 		return errors.Join(err, tr.Close())
 	}
-	if err := announceReady(cfg, tr, stderr); err != nil {
-		return errors.Join(err, tr.Close(), c.Close())
+	_, _ = fmt.Fprintf(stderr, "iormesh: attached, tracing pid %v (%d tracepoints missing on this kernel)\n",
+		cfg.pids, len(tr.Skipped()))
+	if err := announceReady(cfg); err != nil {
+		return errors.Join(err, finish(cfg, tr, c, schema.EndError, stderr))
 	}
 	reason, loopErr := traceLoop(ctx, tr, c, cfg)
-	losses, lossErr := tr.Losses()
+	return errors.Join(loopErr, finish(cfg, tr, c, reason, stderr))
+}
+
+// finish ends a trace: a last loss poll (the counters die with the
+// tracer), the tracer's close, the end event, the sink's close and the
+// graph file, then the one-line summary. A loss count it cannot read
+// turns the end reason into error: the trace might hide a gap.
+func finish(cfg runConfig, tr tracer, c *correlate.Correlator, reason string, stderr io.Writer) error {
+	losses, lossErr := pollLosses(tr, c)
+	if lossErr != nil {
+		reason = schema.EndError
+	}
 	closeErr := tr.Close()
+	endErr := c.End(reason)
 	sinkErr := c.Close()
 	graphErr := schema.WriteGraphFile(filepath.Join(cfg.out, GraphFile), c.Graph())
 	_, _ = fmt.Fprintf(stderr, "iormesh: stopped (%s); lost records %d (kernel %d), unpaired exits %d, unreadable paths %d\n",
 		reason, losses.Total(), losses.Kernel, c.Unpaired(), c.NoPath())
-	return errors.Join(loopErr, lossErr, closeErr, sinkErr, graphErr)
+	return errors.Join(lossErr, closeErr, endErr, sinkErr, graphErr)
 }
 
-// newCorrelator creates cfg.out and the correlator writing its events
-// file there.
-func newCorrelator(cfg runConfig) (*correlate.Correlator, error) {
+// newCorrelator describes the host, creates cfg.out and the correlator
+// writing its events file there, and queues the session header.
+func newCorrelator(ctx context.Context, cfg runConfig) (*correlate.Correlator, error) {
 	host, err := machineID()
+	if err != nil {
+		return nil, err
+	}
+	session, err := hostSession(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -89,14 +118,16 @@ func newCorrelator(cfg runConfig) (*correlate.Correlator, error) {
 	if err != nil {
 		return nil, err
 	}
-	return correlate.New(correlate.Config{Host: correlate.Host{ID: host, Project: cfg.project},
-		Sink: schema.NewNDJSONSink(f), WallOffsetNS: offset}), nil
+	c := correlate.New(correlate.Config{Host: correlate.Host{ID: host, Project: cfg.project},
+		Sink: schema.NewNDJSONSink(f), WallOffsetNS: offset})
+	if err := c.Session(session); err != nil {
+		return nil, errors.Join(err, c.Close())
+	}
+	return c, nil
 }
 
-// announceReady reports the attached probe set and creates cfg.ready.
-func announceReady(cfg runConfig, tr *bpf.Tracer, stderr io.Writer) error {
-	_, _ = fmt.Fprintf(stderr, "iormesh: attached, tracing pid %v (%d tracepoints missing on this kernel)\n",
-		cfg.pids, len(tr.Skipped()))
+// announceReady creates cfg.ready once every probe is attached.
+func announceReady(cfg runConfig) error {
 	if cfg.ready == "" {
 		return nil
 	}
@@ -107,23 +138,21 @@ func announceReady(cfg runConfig, tr *bpf.Tracer, stderr io.Writer) error {
 	return f.Close()
 }
 
-// machineID is the host id every event carries (/etc/machine-id).
-func machineID() (string, error) {
-	b, err := os.ReadFile("/etc/machine-id")
+// pollLosses turns growth of the tracer's loss counters into a drop event,
+// so a gap is visible in the stream close to where it happened.
+func pollLosses(tr tracer, c *correlate.Correlator) (bpf.Losses, error) {
+	l, err := tr.Losses()
 	if err != nil {
-		return "", fmt.Errorf("host id: %w", err)
+		return l, fmt.Errorf("loss counters: %w", err)
 	}
-	id := strings.TrimSpace(string(b))
-	if id == "" {
-		return "", errors.New("host id: /etc/machine-id is empty")
-	}
-	return id, nil
+	return l, c.RecordLosses(l.Total())
 }
 
 // traceLoop feeds records to the correlator until a stop condition and
-// returns why it stopped. A sink error stops the trace at once: tracing
-// on into a broken file would only hide the loss.
-func traceLoop(ctx context.Context, tr *bpf.Tracer, c *correlate.Correlator, cfg runConfig) (string, error) {
+// returns why it stopped, as a schema end reason. A sink error stops the
+// trace at once: tracing on into a broken file would only hide the loss.
+// So does an unreadable loss counter, since drops must never be silent.
+func traceLoop(ctx context.Context, tr tracer, c *correlate.Correlator, cfg runConfig) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, cfg.duration)
 	defer cancel()
 	tick := time.NewTicker(liveCheckEvery)
@@ -132,19 +161,26 @@ func traceLoop(ctx context.Context, tr *bpf.Tracer, c *correlate.Correlator, cfg
 		select {
 		case rec, ok := <-tr.Records():
 			if !ok {
-				return "record stream closed", nil
+				// Only Close ends the stream, and run has not closed it.
+				return schema.EndError, errors.New("record stream closed unexpectedly")
 			}
 			if err := c.Handle(rec); err != nil {
-				return "write error", err
+				return schema.EndError, err
 			}
 		case <-ctx.Done():
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return "duration", nil
+				return schema.EndDuration, nil
 			}
-			return "signal", nil
+			return schema.EndStop, nil
 		case <-tick.C:
+			if _, err := pollLosses(tr, c); err != nil {
+				return schema.EndError, err
+			}
 			if !anyAlive(cfg.pids) {
-				return "targets exited", drainQuiet(ctx, tr, c)
+				if err := drainQuiet(ctx, tr, c); err != nil {
+					return schema.EndError, err
+				}
+				return schema.EndTargetsExited, nil
 			}
 		}
 	}
@@ -152,7 +188,7 @@ func traceLoop(ctx context.Context, tr *bpf.Tracer, c *correlate.Correlator, cfg
 
 // drainQuiet handles records until none arrives for quietFor, or the
 // duration or a signal ends the run first.
-func drainQuiet(ctx context.Context, tr *bpf.Tracer, c *correlate.Correlator) error {
+func drainQuiet(ctx context.Context, tr tracer, c *correlate.Correlator) error {
 	for {
 		select {
 		case <-ctx.Done():

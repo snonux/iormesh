@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"iormesh/internal/normalize"
+	"iormesh/internal/schema"
 	"iormesh/internal/types"
 )
 
@@ -16,7 +17,10 @@ import (
 
 const tmp = "/tmp/run1"
 
-func checkGolden(t *testing.T, c *Correlator, sink *memSink, scenario string) {
+// checkGolden closes c, normalizes what it emitted to scenario's bracket
+// and checks it against the shipped expectation; it returns the
+// normalized trace for further assertions.
+func checkGolden(t *testing.T, c *Correlator, sink *memSink, scenario string) normalize.Trace {
 	t.Helper()
 	if err := c.Close(); err != nil {
 		t.Fatal(err)
@@ -33,6 +37,7 @@ func checkGolden(t *testing.T, c *Correlator, sink *memSink, scenario string) {
 	for _, v := range normalize.Check(got, want) {
 		t.Error(v)
 	}
+	return got
 }
 
 // fileWork is file-basic's I/O: write a file, reopen it, read it back.
@@ -46,15 +51,33 @@ func fileWork(f feeder, name string, fd int32) {
 	f.close(fd)
 }
 
+// TestGoldenFileBasic also carries the host-level events a real run
+// writes — session header, a drop inside the bracket, end — to pin that
+// they do not disturb the bracket cut or the subset check.
 func TestGoldenFileBasic(t *testing.T) {
 	c, sink := newTest(t)
+	if err := c.Session(testSession); err != nil {
+		t.Fatal(err)
+	}
 	now := uint64(0)
 	f := feeder{t, c, 10, 12, &now}
 	f.open("/usr/lib/jvm/lib/modules", 0, 4) // JVM startup, outside the bracket
 	f.open("/iormesh-marker/file-basic/begin", 0, -2)
 	fileWork(f, "file-basic.dat", 5)
+	if err := c.RecordLosses(2); err != nil {
+		t.Fatal(err)
+	}
 	f.open("/iormesh-marker/file-basic/end", 0, -2)
-	checkGolden(t, c, sink, "file-basic")
+	if err := c.End(schema.EndTargetsExited); err != nil {
+		t.Fatal(err)
+	}
+	got := checkGolden(t, c, sink, "file-basic")
+	if n := len(byKind(got.Events, schema.KindDrop)); n != 1 {
+		t.Fatalf("%d drop events in the bracket, want the one inside it", n)
+	}
+	if n := len(byKind(got.Events, schema.KindSession)) + len(byKind(got.Events, schema.KindEnd)); n != 0 {
+		t.Fatalf("session/end inside the bracket: %d, want 0 (they lie outside it)", n)
+	}
 }
 
 func TestGoldenTCPLoopback(t *testing.T) {
@@ -85,6 +108,7 @@ func TestGoldenTCPLoopback(t *testing.T) {
 	server.write(7, 5)
 	client.read(6, 5)
 	client.close(6)
+	server.read(7, 0) // the server reads to the client's EOF before closing
 	server.close(7)
 	client.open("/iormesh-marker/tcp-loopback/end", 0, -2)
 	server.open("/iormesh-marker/tcp-loopback/end", 0, -2)

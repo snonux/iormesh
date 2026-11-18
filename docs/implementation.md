@@ -148,6 +148,7 @@ type Event struct {
     Attribution   string `json:"attribution" parquet:"attribution,dict"`
     Java          *Java  `json:"java,omitempty" parquet:"java,optional"`
     HTTP          *HTTP  `json:"http,omitempty" parquet:"http,optional"`
+    Session       *Session `json:"session,omitempty" parquet:"session,optional"`
 }
 
 // Args holds every syscall-specific argument as an optional
@@ -164,13 +165,16 @@ type Args struct {
     RemotePort *uint16 `json:"remote_port,omitempty" parquet:"remote_port,optional"`
     SockState  *string `json:"sock_state,omitempty" parquet:"sock_state,optional"`
     Marker     *string `json:"marker,omitempty" parquet:"marker,optional"`
+    Lost       *uint64 `json:"lost,omitempty" parquet:"lost,optional"`
+    EndReason  *string `json:"end_reason,omitempty" parquet:"end_reason,optional"`
 }
 ```
 
 Field notes:
 
-- `host_id` is `/etc/machine-id`; the session header record adds
-  boot id, FQDN, kernel release and arch.
+- `host_id` is `/etc/machine-id`; the session header's optional
+  `session` object (`schema.Session`) adds boot id, FQDN, kernel
+  release and arch.
 - `pid_incarnation` is the task's start time on the boot clock
   (`task->start_boottime` via CO-RE) — unique per PID reuse.
 - `seq` is per host, starts at 1 and has no gaps but explicit
@@ -211,7 +215,9 @@ data, a `schema_version` other than `Version`, an unknown
 `event` kind, a bad `attribution` (`java` needs a non-empty
 `java.stack`), and a kind missing the argument it cannot be read
 without (open* → non-empty `path`, `marker` → `marker`,
-`tcp_state` → `sock_state`). The kind list only grows: M2
+`tcp_state` → `sock_state`, `drop` → `lost` > 0, `end` → a known
+`end_reason`, `session` → a complete `session` object, which no
+other kind may carry). The kind list only grows: M2
 appends its syscalls there.
 
 One NDJSON line, as M1 emits it:
@@ -713,6 +719,18 @@ unit-tested with synthetic record streams:
   `ProcInfo` (`/proc/<pid>/stat` starttime, clock-tick
   resolution); `wall_ns = boot_ns + WallOffsetNS`
   (`BootToWallOffset`, measured once); `err` is the errno name.
+- **Host-level events** go through the same queue, so `seq`
+  stays gap-free and ordered: `Session(schema.Session)` queues
+  the header and must come before the first `Handle`
+  (`ErrSessionNotFirst` otherwise); `RecordLosses(total)` takes
+  the cumulative `bpf.Losses.Total()` and queues a `drop` with
+  `args.lost` = the growth since the last call, nothing when it
+  did not grow; `End(reason)` checks the reason
+  (`schema.KnownEndReason`) and queues the `end` behind every
+  held socket event, after which every call fails (`ErrEnded`).
+  They carry PID 0 and are stamped by `Config.Clock`
+  (`CLOCK_BOOTTIME` by default). Field reference:
+  [schema.md](schema.md), "Host-level events".
 
 `golden_test.go` feeds streams shaped like `file-basic` and
 `tcp-loopback` (JVM noise outside the bracket included) through
@@ -726,9 +744,10 @@ latest; `ReadNDJSON` reads a stream back strictly; `WriteGraph` /
 `WriteGraphFile` write the graph sorted, validated and (for the
 file) atomically; the CLI (step 10) picks the file names. The on-disk format is documented in
 [schema.md](schema.md). `internal/correlate/export_test.go` runs a
-fixed record stream through the correlator into both writers and
-compares the bytes with committed goldens (`-update` rewrites
-them).
+fixed record stream — session header, file work, a drop, a fused
+loopback pair, end — through the correlator into both writers
+and compares the bytes with committed goldens (`-update`
+rewrites them).
 
 **Step 8 — the normalizer** (`internal/normalize`, cgo-free; done):
 
@@ -869,7 +888,15 @@ files, plus one negative case per rule.
   `-duration` (default 4h, ior-style bound), on SIGINT/SIGTERM, or
   when every target has exited (draining until the ring buffer is
   quiet for 300ms), and prints a one-line summary with the loss
-  counters to stderr. Loading the object takes seconds, so
+  counters to stderr. The stream opens with a `session` header
+  (boot id, FQDN, kernel release, arch — gathered before the
+  trace directory is touched), gets a `drop` event whenever the
+  loss counters grew (polled on the 200ms liveness tick and once
+  after the loop, before the tracer closes) and closes with an
+  `end` event: `duration`, `stop` (signal), `targets_exited`, or
+  `error` (write error, record stream closed, unreadable loss
+  counters — the last also stops the run, since drops must never
+  be silent). Loading the object takes seconds, so
   `-ready FILE` is created once every probe is attached — a
   harness waits for it before releasing the target's startup
   gate. Flags are validated (pids positive, distinct, running;
@@ -883,8 +910,7 @@ files, plus one negative case per rule.
 Verified by hand on this host: the real `file-basic` and the
 two-process `tcp-loopback` scenarios, traced with `-ready` gating,
 pass `normalize -check` against their goldens — one fused
-connection for the JVM pair. Session, end and drop *events* are
-not written yet (the summary line carries the counts).
+connection for the JVM pair.
 
 **Step 11 — integration harness**: lift
 `integrationtests/harness.go`, `parse.go`, `kernelloss.go`,

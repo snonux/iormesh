@@ -24,12 +24,27 @@ const (
 	// normalizer cuts traces to the bracket these delimit.
 	KindMarker = "marker"
 	// KindDrop records ring-buffer loss: gaps are explicit, never silent.
+	// args.lost counts the records lost since the previous drop event.
 	KindDrop = "drop"
-	// KindSession is the per-trace header record.
+	// KindSession is the per-trace header record, the first event of a
+	// trace; Event.Session describes the host.
 	KindSession = "session"
-	// KindEnd records why the trace ended (duration, disk limit, stop,
-	// error), so a reader knows whether the trace is complete.
+	// KindEnd records why the trace ended (args.end_reason), so a reader
+	// knows whether the trace is complete. It is the last event; a trace
+	// without one was cut short (crash, or a write error that also lost
+	// the end record).
 	KindEnd = "end"
+)
+
+// End reasons, the values of args.end_reason. PLAN.md ("Explicit end")
+// names duration, disk limit, controller stop and error; targets_exited
+// is the foreground tracer's own natural end.
+const (
+	EndDuration      = "duration"       // the -duration bound was reached
+	EndStop          = "stop"           // SIGINT/SIGTERM: a user or controller stop
+	EndTargetsExited = "targets_exited" // every traced process exited
+	EndDiskLimit     = "disk_limit"     // the trace disk budget ran out (M4)
+	EndError         = "error"          // the tracer failed; the trace is incomplete
 )
 
 // Attribution values. Missing attribution is data, not a hole: every
@@ -90,6 +105,10 @@ type Event struct {
 	Java *Java `json:"java,omitempty" parquet:"java,optional"`
 	// HTTP is provisional until S1 reports; present on http events (M3).
 	HTTP *HTTP `json:"http,omitempty" parquet:"http,optional"`
+	// Session describes the traced host; set exactly on session events.
+	// A nested object rather than envelope fields because only one event
+	// per trace carries it.
+	Session *Session `json:"session,omitempty" parquet:"session,optional"`
 }
 
 // Args holds every syscall-specific argument as an optional field: one
@@ -106,6 +125,27 @@ type Args struct {
 	RemotePort *uint16 `json:"remote_port,omitempty" parquet:"remote_port,optional"`
 	SockState  *string `json:"sock_state,omitempty" parquet:"sock_state,optional"`
 	Marker     *string `json:"marker,omitempty" parquet:"marker,optional"`
+	// Lost is a drop event's count: records lost since the previous drop
+	// event, kernel- and userspace-side together. Always > 0.
+	Lost *uint64 `json:"lost,omitempty" parquet:"lost,optional"`
+	// EndReason is an end event's reason, one of the End* constants.
+	EndReason *string `json:"end_reason,omitempty" parquet:"end_reason,optional"`
+}
+
+// Session is the host description of the session header. Its fields are
+// required inside the object: a header that cannot say which boot or
+// kernel it traced would make a cross-run comparison guess.
+type Session struct {
+	// BootID is /proc/sys/kernel/random/boot_id: boot_ns values of two
+	// traces are comparable only when their boot ids are equal.
+	BootID string `json:"boot_id" parquet:"boot_id"`
+	// FQDN is the host's canonical name, or its hostname when it has
+	// none.
+	FQDN string `json:"fqdn" parquet:"fqdn"`
+	// Kernel is the kernel release (uname -r).
+	Kernel string `json:"kernel" parquet:"kernel"`
+	// Arch is the machine hardware name (uname -m), e.g. x86_64.
+	Arch string `json:"arch" parquet:"arch"`
 }
 
 // Java is the Java-side attribution of one event. Provisional: its shape

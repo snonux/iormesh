@@ -15,8 +15,8 @@ import (
 // update rewrites the export goldens: go test ./internal/correlate -update
 var update = flag.Bool("update", false, "rewrite testdata goldens")
 
-// TestExportGolden runs a fixed record stream (file work plus a fused
-// loopback connection) through the correlator into the real NDJSON sink
+// TestExportGolden runs a fixed record stream (session header, file work,
+// a drop, a fused loopback connection, end) through the correlator into the real NDJSON sink
 // and graph writer, and compares both outputs byte for byte with the
 // committed goldens. It pins the export format end to end: field order,
 // conn ids, fd generations, graph order.
@@ -24,13 +24,23 @@ func TestExportGolden(t *testing.T) {
 	var events bytes.Buffer
 	c := New(Config{Host: Host{ID: "h1", Project: "p"}, Sink: schema.NewNDJSONSink(&events),
 		WallOffsetNS: 1_700_000_000_000_000_000,
-		ProcInfo:     func(pid uint32) (string, uint64) { return "java", 1000 + uint64(pid) }})
+		ProcInfo:     func(pid uint32) (string, uint64) { return "java", 1000 + uint64(pid) },
+		Clock:        func() uint64 { return 5 }})
 	now := uint64(0)
 	f := feeder{t, c, 100, 101, &now}
+	if err := c.Session(testSession); err != nil {
+		t.Fatal(err)
+	}
 	f.open("/iormesh-marker/demo/begin", 0, -2)
 	fileWork(f, "demo.dat", 5)
+	if err := c.RecordLosses(4); err != nil {
+		t.Fatal(err)
+	}
 	loopback(t, c, 1000)
 	f.open("/iormesh-marker/demo/end", 0, -2)
+	if err := c.End(schema.EndDuration); err != nil {
+		t.Fatal(err)
+	}
 	if err := c.Close(); err != nil {
 		t.Fatal(err)
 	}
