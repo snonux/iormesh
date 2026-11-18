@@ -110,6 +110,9 @@ The tests:
 |---|---|
 | `TestWalkingSkeleton` | tcp-loopback golden; exactly one fused connection (two `connected` edges, both fused, to one socket node, one from each PID); mutated goldens fail |
 | `TestFileBasic` | file-basic golden; mutated goldens fail |
+| `TestFileLifecycle` | file-lifecycle golden, incl. `ftruncate` on the renamed path (rename-aware fd paths); mutated goldens fail |
+| `TestFileLinks` | file-links golden (symlink text unresolved, no-follow `statx`, hard link); mutated goldens fail |
+| `TestFileAttrs` | file-attrs golden (chmod/chown by path and fd, dirfd-resolved `fchmodat`, `dup`, f*xattr); mutated goldens fail |
 | `TestUntracedProcessStaysOut` | a released but untraced twin leaves no event and no node |
 | `TestSecondRunNormalizesIdentically` | two runs of each scenario, normalized and bracketed, are equal |
 

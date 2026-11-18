@@ -1213,7 +1213,13 @@ scenarios landing first (principle #1).
    the rest of step 6 stays there. The three goldens load and pass
    (`TestFileLifecycle`, `TestFileLinks`, `TestFileAttrs`); JDK 25
    issues `statx`, as declared. `file-attrs` now declares
-   `fchmodat`'s name resolved against its directory fd.
+   `fchmodat`'s name resolved against its directory fd, and
+   `fchown`'s and `fsetxattr`'s fd paths.
+   Not measured yet: S3's decision #25 budget was settled on M1's
+   nine syscalls; this step adds about 60 default tracepoints, and
+   `newstat`, `statx` and `newfstatat` fire often in a JVM. The
+   `spikes/s3/measure.sh` run against #25 is due before M2's
+   acceptance (step 11).
 
 5. **Rename-aware paths** (done, task qa4, `paths.go`): each fd
    instance a traced open (or dup) named keeps its absolute path;
@@ -1222,9 +1228,15 @@ scenarios landing first (principle #1).
    and adds an `opened` edge to the new name. Matching is by name,
    not inode: the rename record has no inode, and a directory
    rename moves files of many inodes. What a name match could get
-   wrong — a name reused by another file — is closed by marking
-   the fds of an unlinked name, or of a name a rename replaced,
-   gone. The fd metadata kinds (`ftruncate`, `fchown`, `f*xattr`,
+   wrong — a name reused by another file — is narrowed, not
+   closed, by marking the fds of an unlinked name, or of a name a
+   rename replaced, gone. It stays open for an unlink, recreate or
+   rename by an untraced process (no record), a cwd-relative
+   unlink or rename (absolute fd paths cannot match it),
+   `renameat2(RENAME_EXCHANGE)` (the record's flags are always 0:
+   the fds at the new name are marked gone instead of swapped),
+   and processes in different mount namespaces (one name, two
+   files — M7's containers). The fd metadata kinds (`ftruncate`, `fchown`, `f*xattr`,
    …) report the current path; `read`/`write` carry none
    (decision #25). Unit tests cover a directory rename, a
    cross-directory move, a prefix-sharing sibling, a failed rename
@@ -1254,8 +1266,8 @@ scenarios landing first (principle #1).
    AF_INET6 connection in one process, full 4-tuples declared).
    Their goldens use kinds `schema.KnownKind` lacks — `bind`,
    `sendto`, `recvfrom`, `pipe2`, `kill` (`unlink` and `dup2`
-   came with step 4) — and only existing fields, which leaves gaps this step must close
-   and then tighten the goldens with: `pipe2` returns two fds
+   came with step 4) — and only existing fields, which leaves
+   gaps this step must close and then tighten the goldens with: `pipe2` returns two fds
    (declared without `fd`; the ends bind through their reads and
    writes), `kill` has no target-PID or signal argument (declared
    bare; delivery with the sender's PID — `signal_generate` — is

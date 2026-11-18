@@ -89,11 +89,11 @@ func (e Event) validateAttribution() error {
 }
 
 // validateKindArgs requires the arguments a kind cannot be read without:
-// an open without its path, or a marker without its name, would make the
-// correlator's and normalizer's joins silently miss.
+// an open (creat is one) without its path, or a marker without its name,
+// would make the correlator's and normalizer's joins silently miss.
 func (e Event) validateKindArgs() error {
 	switch e.Event {
-	case KindOpen, KindOpenat, KindOpenat2:
+	case KindOpen, KindOpenat, KindOpenat2, KindCreat:
 		if e.Args.Path == nil || *e.Args.Path == "" {
 			return invalidf("%s without args.path", e.Event)
 		}

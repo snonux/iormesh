@@ -16,8 +16,18 @@ const atFDCWD = -100
 // of the host (the rename is filesystem-wide). What name matching could
 // get wrong is a name that came to stand for another file: unlink marks
 // the fds of the removed name gone, and so does a rename onto an existing
-// name for the fds of the file it replaced, so a later file reusing the
-// name never drags them along.
+// name for the fds of the file it replaced, so a later traced file reusing
+// the name does not drag them along.
+//
+// That narrows the hazard; it does not close it. Still open:
+//   - an unlink, recreate or rename by an untraced process: no record;
+//   - a cwd-relative unlink or rename: the cwd is not tracked, and a
+//     relative name cannot match the absolute paths fds keep;
+//   - renameat2(RENAME_EXCHANGE): the record's flags are always 0, so the
+//     swap reads as a replace — the fds at the new name are marked gone
+//     with a stale name instead of moving to the old one;
+//   - processes in different mount namespaces: one name may be two
+//     files (containers, M7), and the match is a plain string compare.
 type fdPath struct {
 	path string
 	// gone: the name was unlinked or replaced while the fd stayed open.

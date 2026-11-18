@@ -83,7 +83,7 @@ column each, never a blob.
 
 | Key | Set on |
 |-----|--------|
-| `path` | opens (required); the M2 path kinds; the old name of the rename/link family (a symlink's text); the fd metadata kinds (the fd's current path) |
+| `path` | opens and `creat` (required); the M2 path kinds; the old name of the rename/link family (a symlink's text); the fd metadata kinds (the fd's current path) |
 | `new_path` | rename/link family (M2): the new name |
 | `flags` | opens: the raw open flags; the path kinds whose syscall has a flags argument (`statx`, `newfstatat`, `utimensat`, `fchownat`, `fchmodat2`, `linkat`) |
 | `offset` | positional I/O (planned, not set yet) |
@@ -152,7 +152,13 @@ process of the host — and its process gains an `opened` edge to
 the new name. A name that was unlinked, or replaced by a rename
 onto it, no longer moves the fds of the file it named. Matching is
 by name: the rename record carries no inode, and a directory
-rename moves files of many inodes. `read` and `write` carry no
+rename moves files of many inodes. That narrows the name-reuse
+hazard but does not close it: an unlink, recreate or rename by an
+untraced process, a cwd-relative unlink or rename,
+`renameat2(RENAME_EXCHANGE)` (its flags are not recorded, so the
+fds at the new name are marked gone with a stale name instead of
+swapped) and processes in different mount namespaces can still
+leave an fd under a wrong name. `read` and `write` carry no
 path at all (decision #25's per-event cost); their fd instance
 joins to the open that named it.
 
