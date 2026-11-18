@@ -162,11 +162,44 @@ func TestLoaderAttachesEveryFamily(t *testing.T) {
 			}
 			ev, isSig := rec.(*types.SignalEvent)
 			if isSig && ev.TargetPid == tg.pid() && ev.Sig == int32(syscall.SIGWINCH) &&
-				ev.Scope&types.SIGNAL_SCOPE_TARGET != 0 && ev.Pid == uint32(os.Getpid()) {
+				ev.Scope&types.SIGNAL_SCOPE_TARGET != 0 && ev.Scope&types.SIGNAL_SCOPE_USER != 0 &&
+				ev.Pid == uint32(os.Getpid()) {
 				return
 			}
 		case <-deadline:
 			t.Fatalf("no signal_generate record for SIGWINCH to pid %d", tg.pid())
+		}
+	}
+}
+
+// TestKernelSignalHasNoSender: a traced bash runs a followed child; the
+// child's exit raises SIGCHLD for bash in the child's own context, where
+// the traced child is the current task. The kernel sent it, so the record
+// must not name the child as a traced sender (no SIGNAL_SCOPE_USER, no
+// SIGNAL_SCOPE_SENDER) - else the correlator would draw a signaled edge
+// child → parent that no task ever sent.
+func TestKernelSignalHasNoSender(t *testing.T) {
+	tg := startScript(t, "bash", "-c", `while read -r _; do /bin/true; echo ok; done`)
+	tr := openTracerWith(t, ibpf.Config{Pids: []uint32{tg.pid()},
+		Probes: ibpf.ProbesFor(tracepoints.AllFamilies())})
+	tg.poke(t)
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case rec, ok := <-tr.Records():
+			if !ok {
+				t.Fatal("records closed before the SIGCHLD record")
+			}
+			ev, isSig := rec.(*types.SignalEvent)
+			if !isSig || ev.TargetPid != tg.pid() || ev.Sig != int32(syscall.SIGCHLD) {
+				continue
+			}
+			if ev.Scope&(types.SIGNAL_SCOPE_USER|types.SIGNAL_SCOPE_SENDER) != 0 {
+				t.Fatalf("SIGCHLD from a child's exit has scope %#x: a sender was named", ev.Scope)
+			}
+			return
+		case <-deadline:
+			t.Fatalf("no SIGCHLD record for pid %d", tg.pid())
 		}
 	}
 }

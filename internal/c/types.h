@@ -1103,13 +1103,18 @@ struct sock_addr_event {
 // signal_event (iormesh, signal.c, M2 step 7) is one signal:signal_generate:
 // a signal queued for target_pid (tgid) / target_tid by the current task
 // pid / tid - the sender, which for kill(2) and tgkill(2) is the caller,
-// since the tracepoint fires inside the call. It is emitted when either side
-// is traced; scope says which (SIGNAL_SCOPE_SENDER, SIGNAL_SCOPE_TARGET).
+// since the tracepoint fires inside the call. scope says whether a task sent
+// it at all (SIGNAL_SCOPE_USER: kill, sigqueue, tkill/tgkill, by siginfo;
+// not for a kernel-raised SIGALRM, SIGCHLD, SIGIO or fault, whose pid/tid
+// are just the task that ran), whether that sender is traced
+// (SIGNAL_SCOPE_SENDER, only with USER) and whether the target is
+// (SIGNAL_SCOPE_TARGET). It is emitted when SENDER or TARGET is set.
 // result is the tracepoint's (TRACE_SIGNAL_DELIVERED 0, _IGNORED 1,
 // _ALREADY_PENDING 2, _OVERFLOW_FAIL 3, _LOSE_INFO 4); group is 1 for a
 // process-directed signal. No implicit padding, 48 bytes.
 #define SIGNAL_SCOPE_SENDER 1
 #define SIGNAL_SCOPE_TARGET 2
+#define SIGNAL_SCOPE_USER 4
 struct signal_event {
     __u32 event_type;
     __u32 trace_id;

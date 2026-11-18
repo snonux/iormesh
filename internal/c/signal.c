@@ -7,8 +7,9 @@
 //
 // Why signal_generate: it fires once per signal queued for a task, inside
 // the call that queued it - kill(2), tgkill(2), a child's exit (SIGCHLD), a
-// fault - so the current task is the sender for every user-sent signal, and
-// one record names both ends. signal_deliver (restart.c) fires in the
+// fault - so the current task is the sender of every task-sent signal, and
+// one record names both ends. A kernel-raised one (its siginfo says so) has
+// no sender: the current task merely ran when it fired. signal_deliver (restart.c) fires in the
 // receiver only and says nothing about who sent it.
 //
 // Why a raw tracepoint: the classic tracepoint names the target by its
@@ -28,13 +29,47 @@ struct iormesh_signal_args {
     __u64 result;
 };
 
-// iormesh_signal_scope says which ends of a signal are traced: the sender
-// (the current task; never the tracer itself) and the target. 0 = neither.
-static __always_inline __u32 iormesh_signal_scope(__u32 sender, __u32 target) {
+// Special siginfo pointer values (include/linux/sched/signal.h): no info
+// means a task's kill(2)-style send, PRIV a kernel-internal one.
+#define IORMESH_SEND_SIG_NOINFO 0
+#define IORMESH_SEND_SIG_PRIV 1
+// si_code values of a signal a task sent (include/uapi/asm-generic/
+// siginfo.h): kill(2), sigqueue(3), tkill(2)/tgkill(2). The other
+// non-positive codes - SI_TIMER, SI_MESGQ, SI_ASYNCIO, SI_SIGIO - are
+// raised by the kernel on the process's behalf, like every positive one
+// (a fault, CLD_EXITED, POLL_IN).
+#define IORMESH_SI_USER 0
+#define IORMESH_SI_QUEUE (-1)
+#define IORMESH_SI_TKILL (-6)
+
+// iormesh_signal_from_task reports whether the current task sent the
+// signal. Only then is it a sender: a timer's SIGALRM, a SIGCHLD from a
+// child's exit or a SIGIO fires in whatever task happens to run, and naming
+// that task would invent a signaled edge.
+static __always_inline int iormesh_signal_from_task(__u64 info) {
+    int code;
+
+    if (info == IORMESH_SEND_SIG_NOINFO)
+        return 1;
+    if (info == IORMESH_SEND_SIG_PRIV)
+        return 0;
+    code = BPF_CORE_READ((struct kernel_siginfo *)info, si_code);
+    return code == IORMESH_SI_USER || code == IORMESH_SI_QUEUE || code == IORMESH_SI_TKILL;
+}
+
+// iormesh_signal_scope says which ends of a signal are traced and whether a
+// task sent it: SIGNAL_SCOPE_USER for a task-sent signal, SIGNAL_SCOPE_SENDER
+// when that task (the current one, never the tracer) is traced too,
+// SIGNAL_SCOPE_TARGET when the target is. 0 or USER alone = nothing to
+// report.
+static __always_inline __u32 iormesh_signal_scope(__u32 sender, __u32 target, __u64 info) {
     __u32 scope = 0;
 
-    if (sender != IOR_PID_FILTER && iormesh_pid_targeted(sender))
-        scope |= SIGNAL_SCOPE_SENDER;
+    if (iormesh_signal_from_task(info)) {
+        scope |= SIGNAL_SCOPE_USER;
+        if (sender != IOR_PID_FILTER && iormesh_pid_targeted(sender))
+            scope |= SIGNAL_SCOPE_SENDER;
+    }
     if (iormesh_pid_targeted(target))
         scope |= SIGNAL_SCOPE_TARGET;
     return scope;
@@ -48,10 +83,10 @@ int handle_signal_generate(void *ctx) {
     struct task_struct *task = args->task;
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u32 target = (__u32)BPF_CORE_READ(task, tgid);
-    __u32 scope = iormesh_signal_scope(pid_tgid >> 32, target);
+    __u32 scope = iormesh_signal_scope(pid_tgid >> 32, target, args->info);
     struct signal_event *ev;
 
-    if (!scope)
+    if (!(scope & (SIGNAL_SCOPE_SENDER | SIGNAL_SCOPE_TARGET)))
         return 0;
     ev = bpf_ringbuf_reserve(&event_map, sizeof(*ev), 0);
     if (!ev) {
@@ -62,6 +97,8 @@ int handle_signal_generate(void *ctx) {
     // Not a syscall tracepoint: there is no enter/exit trace id.
     ev->trace_id = 0;
     ev->time = bpf_ktime_get_boot_ns();
+    // pid/tid are the current task: the sender when scope has USER, else
+    // just whoever ran when the kernel raised it.
     ev->pid = pid_tgid >> 32;
     ev->tid = (__u32)pid_tgid;
     ev->target_pid = target;

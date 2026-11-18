@@ -10,7 +10,10 @@ import (
 // the sender's pending kill, tgkill or tkill gets the target and the signal
 // number, and a traced receiver gets a signal event naming its sender —
 // also when the sender is not traced (a supervisor's SIGTERM). Both traced:
-// a signaled edge, sender → receiver.
+// a signaled edge, sender → receiver. Only a task-sent signal has a sender
+// (signal.c reads the siginfo): a kernel-raised SIGALRM, SIGCHLD or SIGIO
+// fires in whatever task runs, which the record's scope leaves without
+// SIGNAL_SCOPE_USER, so it gets no sender_pid and no edge.
 
 // Results of signal_generate (include/trace/events/signal.h) that mean the
 // signal is queued for the receiver. An ignored one (a default-ignored
@@ -55,6 +58,8 @@ func (c *Correlator) signalRecord(r *types.SignalEvent) {
 }
 
 // signalSender attaches target and signal to the sender's pending call.
+// SIGNAL_SCOPE_SENDER is set only for a task-sent signal, so a kernel
+// signal raised while the call ran never lands on it.
 // The record fires inside that call, so the call is still pending; kill of
 // a process group generates one record per member, and the first names the
 // call's target.
@@ -73,11 +78,15 @@ func (c *Correlator) signalSender(r *types.SignalEvent) {
 // signalReceived records the delivery on the receiving process and thread.
 func (c *Correlator) signalReceived(r *types.SignalEvent) {
 	p := c.proc(r.TargetPid)
-	sig, sender := r.Sig, r.Pid
+	sig := r.Sig
 	ev := schema.Event{SchemaVersion: schema.Version, Project: c.cfg.Host.Project,
 		HostID: c.cfg.Host.ID, BootNS: r.Time, WallNS: c.wall(r.Time), PID: r.TargetPid,
 		PIDInc: p.inc, TID: r.TargetTid, Comm: p.comm, Event: schema.KindSignal, FD: schema.NoFD,
 		Attribution: schema.AttributionNone}
-	ev.Args.Signal, ev.Args.SenderPID = &sig, &sender
+	ev.Args.Signal = &sig
+	if r.Scope&types.SIGNAL_SCOPE_USER != 0 {
+		sender := r.Pid
+		ev.Args.SenderPID = &sender
+	}
 	c.enqueue(ev, nil)
 }

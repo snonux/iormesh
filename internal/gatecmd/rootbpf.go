@@ -23,6 +23,7 @@ func RootBPFTests() []string {
 		"TestLoaderCloseEndsRecords",
 		"TestLoaderRefusesEmptyAttach",
 		"TestLoaderAttachesEveryFamily",
+		"TestKernelSignalHasNoSender",
 		"TestFollowForkExec",
 		"TestUntracedForkNotFollowed",
 		"TestExecWatchAdoptAndIgnore",

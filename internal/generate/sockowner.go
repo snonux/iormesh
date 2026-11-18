@@ -21,24 +21,28 @@ var sockOwnerHooks = map[string]string{
 
 // sockAddrHooks names, per tracepoint, the sockaddr.c hook that reports a
 // socket call's addresses (internal/c/sockaddr.c, M2 step 7): the enter of
-// bind, connect, sendto and recvfrom parks the address argument (args[1],
-// args[4]), their exit sends it with the socket's own addresses right before
-// the exit record; the accept exits report an accepted AF_UNIX socket and
-// its peer. bind and connect report failures too, connect never a TCP
-// socket (IORMESH_ADDR_* in sockaddr.c).
+// bind, connect, sendto and recvfrom parks the address argument and its
+// length (recvfrom's is a pointer the kernel writes back), their exit sends
+// it with the socket's own addresses right before the exit record; the
+// accept exits report an accepted AF_UNIX socket and its peer. bind and
+// connect report failures too, connect never a TCP socket, sendto and
+// recvfrom never a stream socket - send(3)/recv(3) on a connection are
+// these syscalls (IORMESH_ADDR_* in sockaddr.c).
 var sockAddrHooks = map[string]string{
-	"sys_enter_bind":     "iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[1])",
-	"sys_enter_connect":  "iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[1])",
-	"sys_enter_sendto":   "iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[4])",
-	"sys_enter_recvfrom": "iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[4])",
+	"sys_enter_bind":     "iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[1], ctx->args[2], 0)",
+	"sys_enter_connect":  "iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[1], ctx->args[2], 0)",
+	"sys_enter_sendto":   "iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[4], ctx->args[5], 0)",
+	"sys_enter_recvfrom": "iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[4], ctx->args[5], 1)",
 	"sys_exit_bind": "iormesh_addr_on_exit(pid, tid, SYS_EXIT_BIND, ctx->ret, " +
 		"IORMESH_ADDR_FAILED_TOO)",
 	"sys_exit_connect": "iormesh_addr_on_exit(pid, tid, SYS_EXIT_CONNECT, ctx->ret, " +
 		"IORMESH_ADDR_FAILED_TOO | IORMESH_ADDR_NOT_TCP)",
-	"sys_exit_sendto":   "iormesh_addr_on_exit(pid, tid, SYS_EXIT_SENDTO, ctx->ret, 0)",
-	"sys_exit_recvfrom": "iormesh_addr_on_exit(pid, tid, SYS_EXIT_RECVFROM, ctx->ret, 0)",
-	"sys_exit_accept":   "iormesh_addr_on_accept(pid, tid, SYS_EXIT_ACCEPT, ctx->ret)",
-	"sys_exit_accept4":  "iormesh_addr_on_accept(pid, tid, SYS_EXIT_ACCEPT4, ctx->ret)",
+	"sys_exit_sendto": "iormesh_addr_on_exit(pid, tid, SYS_EXIT_SENDTO, ctx->ret, " +
+		"IORMESH_ADDR_NOT_STREAM)",
+	"sys_exit_recvfrom": "iormesh_addr_on_exit(pid, tid, SYS_EXIT_RECVFROM, ctx->ret, " +
+		"IORMESH_ADDR_NOT_STREAM)",
+	"sys_exit_accept":  "iormesh_addr_on_accept(pid, tid, SYS_EXIT_ACCEPT, ctx->ret)",
+	"sys_exit_accept4": "iormesh_addr_on_accept(pid, tid, SYS_EXIT_ACCEPT4, ctx->ret)",
 }
 
 // renderSockOwnerHook writes the socket (un)registration call of the handler

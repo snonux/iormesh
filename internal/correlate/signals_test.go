@@ -19,7 +19,7 @@ func (f feeder) kill(target uint32, sig int32, scope uint32, result int32) {
 	f.exit(types.SYS_EXIT_KILL, 0)
 }
 
-const bothEnds = types.SIGNAL_SCOPE_SENDER | types.SIGNAL_SCOPE_TARGET
+const bothEnds = types.SIGNAL_SCOPE_USER | types.SIGNAL_SCOPE_SENDER | types.SIGNAL_SCOPE_TARGET
 
 // TestKillBetweenTracedProcesses: the kill names target and signal, the
 // receiver gets a signal event naming its sender, and a signaled edge
@@ -50,7 +50,8 @@ func TestKillBetweenTracedProcesses(t *testing.T) {
 func TestSignalFromUntracedSender(t *testing.T) {
 	c, sink := newTest(t)
 	if err := c.Handle(&types.SignalEvent{EventType: types.SIGNAL_EVENT, Time: 50, Pid: 1, Tid: 1,
-		TargetPid: 20, TargetTid: 21, Sig: int32(unix.SIGTERM), Scope: types.SIGNAL_SCOPE_TARGET}); err != nil {
+		TargetPid: 20, TargetTid: 21, Sig: int32(unix.SIGTERM),
+		Scope: types.SIGNAL_SCOPE_USER | types.SIGNAL_SCOPE_TARGET}); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Close(); err != nil {
@@ -74,7 +75,7 @@ func TestIgnoredSignalNotDelivered(t *testing.T) {
 	c, sink := newTest(t)
 	f := feeder{t, c, 10, 11, new(uint64)}
 	f.kill(20, int32(unix.SIGCHLD), bothEnds, 1)
-	f.kill(30, int32(unix.SIGTERM), types.SIGNAL_SCOPE_SENDER, signalDelivered)
+	f.kill(30, int32(unix.SIGTERM), types.SIGNAL_SCOPE_USER|types.SIGNAL_SCOPE_SENDER, signalDelivered)
 	if err := c.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -101,5 +102,35 @@ func TestKillWithoutSignal(t *testing.T) {
 	k := byKind(sink.events, schema.KindKill)[0]
 	if k.Args.Signal != nil || k.Args.TargetPID != nil || k.Err != "ESRCH" {
 		t.Fatalf("kill %+v args %+v", k, k.Args)
+	}
+}
+
+// TestKernelSignalHasNoSender: a kernel-raised signal (a child's SIGCHLD,
+// a timer's SIGALRM) fires while some traced task runs — here pid 10 —
+// but that task did not send it: the receiver's event names no sender,
+// no signaled edge appears, and a call pid 10 has pending is untouched.
+func TestKernelSignalHasNoSender(t *testing.T) {
+	c, sink := newTest(t)
+	f := feeder{t, c, 10, 11, new(uint64)}
+	f.handle(&types.NullEvent{EventType: types.ENTER_NULL_EVENT, TraceId: types.SYS_ENTER_KILL,
+		Time: f.tick(), Pid: 10, Tid: 11})
+	f.handle(&types.SignalEvent{EventType: types.SIGNAL_EVENT, Time: f.tick(), Pid: 10, Tid: 11,
+		TargetPid: 20, TargetTid: 20, Sig: int32(unix.SIGCHLD), Result: signalDelivered,
+		Scope: types.SIGNAL_SCOPE_TARGET})
+	f.exit(types.SYS_EXIT_KILL, -int64(unix.ESRCH))
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s := byKind(sink.events, schema.KindSignal)
+	if len(s) != 1 || s[0].Args.SenderPID != nil {
+		t.Fatalf("signal events %+v, want one without sender_pid", s)
+	}
+	if k := byKind(sink.events, schema.KindKill)[0]; k.Args.Signal != nil {
+		t.Fatalf("kill took a kernel signal: %+v", k.Args)
+	}
+	for _, e := range c.Graph().Edges {
+		if e.Type == schema.EdgeSignaled {
+			t.Fatalf("signaled edge %+v for a kernel-raised signal", e)
+		}
 	}
 }
