@@ -1,4 +1,4 @@
-# S2 spike notes — experiments 1–2 (task 6b4)
+# S2 spike notes — experiments 1–3 (tasks 6b4, 7b4)
 
 Raw notes; the write-up is `docs/spikes/s2-cross-host.md` (task 7b4).
 Throwaway code, nothing here is production.
@@ -42,8 +42,14 @@ Per pass:
   - reuse-rst: 6 connections from source port 45679, aborted with
     SO_LINGER 0 right after the request, so close() sends an RST (6 RSTs
     in each capture) and leaves no TIME_WAIT;
+  - pingpong (added for experiment 3, task 7b4): 4 connections of 20
+    request/response rounds of 32 bytes each;
   - tfo: 6 connections with MSG_FASTOPEN. The first fetches the cookie,
     the other 5 carry data in the SYN.
+- `clock.bt` (experiment 3): one bpftrace instance per host namespace,
+  each with its own test-only clock offset, prints send-enter and
+  recv-exit times keyed by TCP sequence numbers; `clock.py` intersects
+  the send-before-receive constraints.
 - `join.py` checks that hostA's and hostB's SYN/SYN-ACK sequence numbers
   agree, checks every derivation against tcpdump (the k-th connection on
   a reused tuple against the k-th SYN of that tuple, not any of them),
@@ -51,8 +57,13 @@ Per pass:
 
 Kernel 7.2.15-200.fc44, bpftrace 0.24.2. Runs 1–3 had 24 connections per
 pass (no reuse-rst phase) and gave the same results; the only difference
-was run1's artefact, explained below. Run 5 is the current version
-(review round 1); its numbers are quoted below unless noted.
+was run1's artefact, explained below. Run 5 is the version of review
+round 1; its numbers are quoted below unless noted. Runs 7 and 8 (task
+7b4) add the pingpong phase, 34 connections per pass, and reproduce every
+experiment 1–2 result on the larger set: ISN join 34/34 unique in both
+passes, role-aware rebuild 34/34 from ESTABLISHED on, conntrack by tuple
+22 unique / 12 ambiguous, snapshot under DNAT+SNAT 24/34 agree (10 wrong
+server tuple), `td_end0 - 1 == client iss` 29/29 without SYN data.
 
 ## Experiment 1 — ISN pair
 
@@ -200,3 +211,69 @@ ISN pair matches, the edge stays unresolved, as decision #26 already says.
 The guide (docs/implementation.md, S2 experiment 1) has the reconstruction
 off by one for the active side. Task 7b4 should fix the guide when it
 writes the doc.
+
+## Experiment 3 — clock bounds (task 7b4)
+
+The namespaces share one kernel clock, so rig.sh runs one `clock.bt` per
+host and each adds its own test-only offset to every timestamp it prints
+(the stand-in for iormesh's `-test-clock-offset`). Injected
+θ = clock_B − clock_A: pass dnat offsets A 0 / B 1 234 567 891 ns
+(θ = +1.234567891 s), pass dnat-snat A 987 654 321 / B 0 ns
+(θ = −0.987654321 s). `clock.injected` records it; `clock.py` sees only
+the shifted logs and the value to grade against.
+
+Per message:
+
+```
+A->B bytes:  theta < recv_B - send_A     (upper bound)
+B->A bytes:  theta > send_B - recv_A     (lower bound)
+```
+
+- `send` is the send syscall's enter (sendto/sendmsg/write), `recv` the
+  recv syscall's exit (recvfrom/recvmsg/read), as iormesh records them.
+- Matching needs no clock and no byte counting across hosts: NAT leaves
+  sequence numbers alone, so a byte's stream offset `seq − (iss + 1)` is
+  the same number on both ends. Each recv pairs with the send that queued
+  its last byte (the latest-starting send any of its bytes came from).
+  Connections pair across hosts by the ISN pair, rebuilt from the CLOSE
+  record with the role-aware formula. 0 recvs without a matching send in
+  runs 7–8.
+- Pitfall found: `copied_seq` after `tcp_recvmsg` is one past the data
+  when the same call consumes the peer's FIN (`found_fin_ok: ++*seq`).
+  Run 6 used it and lost 29–33 recvs to off-by-one offsets. The stream
+  offset of a recv is `copied_seq` at entry plus the bytes returned.
+- Connection boundaries per struct sock: from SYN_SENT / SYN_RECV to the
+  next one, not up to CLOSE. FIN_WAIT2 → TIME_WAIT runs `tcp_done`
+  (state CLOSE) while the last response still waits in the receive queue,
+  so recvs can follow CLOSE.
+
+Results (34 fused connections per pass; 101–109 inequalities each way):
+
+| run / pass | interval around θ (µs) | width | midpoint error | without pingpong |
+|---|---|---|---|---|
+| 7 dnat      | [−8.6, +7.9] | 16.5 µs | −0.4 µs | 83.2 µs |
+| 7 dnat-snat | [−6.7, +8.1] | 14.8 µs | +0.7 µs | 103.5 µs |
+| 8 dnat      | [−5.5, +5.4] | 10.9 µs | −0.0 µs | 82.1 µs |
+| 8 dnat-snat | [−6.3, +6.4] | 12.7 µs | +0.0 µs | 86.2 µs |
+
+- θ was inside the interval in all four, both signs of skew; no single
+  inequality was violated (0 of ~210 per pass).
+- The width is the sum of the smallest one-way gap in each direction
+  (send enter to recv exit over veth + one forwarding namespace): 5–9 µs
+  each, p50 8–11 µs.
+- What tightens it is a receiver already blocked in recv when the bytes
+  arrive. Single-exchange connections give a tight lower bound (the
+  client waits for the response: ~40–60 µs) but a 50 ms upper bound (the
+  request waits out the server's accept delay): plain, reuse-tw and tfo
+  alone leave intervals 28–50 ms wide; reuse-rst alone gives only an upper
+  bound (the server never answers). Together they reach 82–104 µs because
+  some connection in each direction caught a waiting receiver; the
+  ping-pong rounds bring it to 11–17 µs. Width after the first k
+  connections, run 8 dnat: k=1 open (no data), 2: 50.4 ms, 10: 50.0 ms,
+  20: 101 µs, 34: 10.9 µs.
+- Not tested: real hosts (LAN latency, NIC offloads, interrupt
+  coalescing — the gap floor grows to tens or hundreds of µs), clock
+  drift over a long run (a constant θ assumed; NTP-disciplined clocks
+  drift by ppm, ~14 ms over 4 h at 1 ppm, so a 4 h interval can come out
+  empty — the merge needs windowed bounds or an offset-plus-drift fit),
+  and suspend (boot vs monotonic clock).

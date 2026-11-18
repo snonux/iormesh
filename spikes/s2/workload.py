@@ -9,7 +9,8 @@ server PORT
     iormesh first learns the passive socket's owner and has to rebuild the
     ISN pair from bytes_received (docs/implementation.md, S2 experiment 1).
     Reads to EOF, answers with as many bytes as the request had (capped),
-    closes.
+    closes. A request starting with PING_BYTE is an echo session instead:
+    every chunk is sent straight back until EOF.
 
 client HOST PORT MODE COUNT
     MODE plain: COUNT connections with varying request sizes, normal close.
@@ -25,6 +26,12 @@ client HOST PORT MODE COUNT
         with SO_LINGER 0 right after the request (no shutdown), so close()
         sends an RST and leaves no TIME_WAIT; the next connect gets a fresh
         clock-based ISN for the same tuple.
+    MODE pingpong: COUNT connections of PING_ROUNDS request/response rounds
+        each (PING_SIZE bytes echoed back). Added for the clock bounds
+        (task 7b4): a single request/response leaves the request queued
+        behind the server's accept delay, so its send->receive gap is 50 ms;
+        later rounds find the peer already blocked in recv, which is what
+        tightens the bound in both directions.
     MODE tfo:   COUNT connections with MSG_FASTOPEN; the first one fetches the
         cookie, the rest carry the request in the SYN.
 """
@@ -38,6 +45,9 @@ SIZES = [0, 1, 100, 1460, 5000, 65536]
 REUSE_TW_PORT = 45678
 REUSE_RST_PORT = 45679
 LINGER_0 = b"\x01\x00\x00\x00\x00\x00\x00\x00"
+PING_BYTE = b"P"
+PING_SIZE = 32
+PING_ROUNDS = 20
 
 
 def serve(port):
@@ -58,13 +68,21 @@ def serve(port):
 
 
 def _answer(conn):
-    n = 0
-    while True:
+    first = conn.recv(65536)
+    if first.startswith(PING_BYTE):
+        _echo(conn, first)
+        return
+    n, chunk = len(first), first
+    while chunk:
         chunk = conn.recv(65536)
-        if not chunk:
-            break
         n += len(chunk)
     conn.sendall(b"r" * min(n, 4096))
+
+
+def _echo(conn, chunk):
+    while chunk:
+        conn.sendall(chunk)
+        chunk = conn.recv(65536)
 
 
 def _exchange(s, size, sent=0):
@@ -107,6 +125,17 @@ def reuse_rst(host, port, count):
         time.sleep(0.1)  # let the server drain its accept before the next
 
 
+def pingpong(host, port, count):
+    for _ in range(count):
+        with socket.create_connection((host, port)) as s:
+            for _ in range(PING_ROUNDS):
+                s.sendall(PING_BYTE * PING_SIZE)
+                got = 0
+                while got < PING_SIZE:
+                    got += len(s.recv(PING_SIZE - got))
+            _exchange(s, 0)
+
+
 def tfo(host, port, count):
     for i in range(count):
         size = 100 + i
@@ -122,7 +151,7 @@ def main(argv):
         return
     host, port, mode, count = argv[2], int(argv[3]), argv[4], int(argv[5])
     {"plain": plain, "reuse-tw": reuse_tw, "reuse-rst": reuse_rst,
-     "tfo": tfo}[mode](host, port, count)
+     "pingpong": pingpong, "tfo": tfo}[mode](host, port, count)
 
 
 if __name__ == "__main__":

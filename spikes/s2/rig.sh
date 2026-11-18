@@ -8,9 +8,11 @@
 # 10.0.2.254 with a random port, so no address or port of the connection is
 # the same on both ends. For each pass the script runs isn.bt (ISN state on
 # both ends, conntrack inserts in s2nat), tcpdump on both ends (ground truth
-# for the ISNs), and the workload (plain, TIME_WAIT-reuse, RST-reuse and TFO
-# connections),
-# dumps /proc/net/nf_conntrack from s2nat, then runs join.py over it all.
+# for the ISNs), one clock.bt per host namespace (data timestamps for the
+# clock bounds, task 7b4, each with its own test-only clock offset), and the
+# workload (plain, TIME_WAIT-reuse, RST-reuse, ping-pong and TFO
+# connections), dumps /proc/net/nf_conntrack from s2nat, then runs join.py
+# and clock.py over it all.
 #
 # Usage: sudo -n spikes/s2/rig.sh OUTDIR
 # Everything it creates lives in the three namespaces, which the EXIT trap
@@ -22,6 +24,11 @@ declare -r VIP=10.0.1.254 SERVER=10.0.2.2 PORT=8080
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 declare -r HERE
 declare -a BG_PIDS=()
+# Test-only clock offsets (ns) per pass, "hostA hostB": the namespaces share
+# one kernel clock, so each clock.bt instance shifts its timestamps instead.
+# The injected skew theta = offset_B - offset_A is positive in one pass and
+# negative in the other.
+declare -rA CLOCK_OFFSETS=([dnat]="0 1234567891" [dnat-snat]="987654321 0")
 
 log() {
     echo "rig: $*" >&2
@@ -106,8 +113,28 @@ _wait_for() {
     return 1
 }
 
+# _clock_tracers starts one clock.bt per host, each with its own offset,
+# the way two hosts would each run their own tracer.
+_clock_tracers() {
+    local -r out="$1"; shift
+    local -r pass="$1"; shift
+    local off_a off_b
+    read -r off_a off_b <<<"${CLOCK_OFFSETS[$pass]}"
+    echo "theta_ns=$((off_b - off_a))" >"$out/clock.injected"
+    bpftrace "$HERE/clock.bt" "$(_netns_inode "$NS_A")" "$off_a" \
+        >"$out/clock.hostA.log" 2>&1 &
+    BG_PIDS+=($!)
+    bpftrace "$HERE/clock.bt" "$(_netns_inode "$NS_B")" "$off_b" \
+        >"$out/clock.hostB.log" 2>&1 &
+    BG_PIDS+=($!)
+    _wait_for "$out/clock.hostA.log" Attached
+    _wait_for "$out/clock.hostB.log" Attached
+}
+
 rig::capture_start() {
     local -r out="$1"; shift
+    local -r pass="$1"; shift
+    _clock_tracers "$out" "$pass"
     bpftrace "$HERE/isn.bt" "$(_netns_inode "$NS_A")" \
         "$(_netns_inode "$NS_B")" "$(_netns_inode "$NS_N")" "$PORT" \
         >"$out/isn.log" 2>&1 &
@@ -156,15 +183,16 @@ rig::pass() {
     log "pass $pass -> $out"
     rig::up
     rig::nat "$pass"
-    rig::capture_start "$out"
+    rig::capture_start "$out" "$pass"
     local mode
-    for mode in plain:12 reuse-tw:6 reuse-rst:6 tfo:6; do
+    for mode in plain:12 reuse-tw:6 reuse-rst:6 pingpong:4 tfo:6; do
         ip netns exec "$NS_A" python3 "$HERE/workload.py" client \
             "$VIP" "$PORT" "${mode%%:*}" "${mode##*:}"
     done
     rig::capture_stop "$out"
     rig::down
     python3 "$HERE/join.py" "$out" | tee "$out/join.txt"
+    python3 "$HERE/clock.py" "$out" | tee "$out/clock.txt"
 }
 
 main() {

@@ -1,0 +1,118 @@
+// S2 spike (throwaway, task 7b4): data timestamps for the clock bounds.
+//
+// Positional parameters: $1 = the netns inode of the one "host" this
+// instance traces, $2 = the test-only clock offset in ns added to every
+// timestamp it prints (the spike's stand-in for iormesh's
+// -test-clock-offset flag: the rig's namespaces share one kernel clock, so
+// without it there is no skew to recover).
+//
+// rig.sh runs one instance per host namespace, like one tracer per host.
+// Each prints three kinds of key=value lines; spikes/s2/clock.py parses
+// them:
+//
+//   ev=send  t = send syscall ENTER, end = write_seq after tcp_sendmsg,
+//            n = bytes queued; the bytes carry sequence numbers
+//            [end - n, end). Taking end after the call also covers TCP
+//            Fast Open, where tcp_sendmsg assigns the ISN itself.
+//   ev=recv  t = recv syscall EXIT, end = copied_seq at tcp_recvmsg's
+//            entry + n, n = bytes copied: sequence numbers [end - n, end).
+//            copied_seq after the call is no use: when the same call
+//            reaches the peer's FIN it steps one further.
+//   ev=state SYN_SENT / SYN_RECV (a connection starts on this struct
+//            sock) and CLOSE, the latter with the fields join.py's
+//            role-aware rebuild turns into the ISN pair (decision #26's
+//            key), so clock.py can tie every data event to its connection.
+//            CLOSE can come before the last recv (FIN_WAIT2 -> TIME_WAIT
+//            runs tcp_done while data still waits in the receive queue),
+//            so a connection is "from its start to the next start", not
+//            "up to its CLOSE".
+//
+// Every line also carries at = the unshifted time it was printed, which
+// clock.py orders the events of one host by (t is the shifted syscall time;
+// a TFO send's t precedes the SYN_SENT it causes).
+//
+// NAT leaves sequence numbers alone, so the same byte has the same
+// sequence number on both hosts: that matches a send on one host with the
+// recv of the same bytes on the other without any clock.
+
+tracepoint:syscalls:sys_enter_sendto,
+tracepoint:syscalls:sys_enter_sendmsg,
+tracepoint:syscalls:sys_enter_write
+{
+    @enter[tid] = nsecs;
+}
+
+fexit:vmlinux:tcp_sendmsg
+/retval > 0 && @enter[tid] != 0/
+{
+    $sk = args.sk;
+    if ($sk->__sk_common.skc_net.net->ns.inum == $1) {
+        printf("ev=send sk=%p at=%llu t=%llu end=%u n=%d\n", $sk, nsecs,
+            @enter[tid] + $2,
+            ((struct tcp_sock *)$sk)->write_seq, retval);
+    }
+}
+
+tracepoint:syscalls:sys_exit_sendto,
+tracepoint:syscalls:sys_exit_sendmsg,
+tracepoint:syscalls:sys_exit_write
+{
+    if (has_key(@enter, tid)) {
+        delete(@enter, tid);
+    }
+}
+
+// tcp_recvmsg returns before the syscall does; stash what it copied and
+// print it at the syscall exit, which is the timestamp iormesh records.
+fentry:vmlinux:tcp_recvmsg
+{
+    @rstart[tid] = ((struct tcp_sock *)args.sk)->copied_seq;
+}
+
+fexit:vmlinux:tcp_recvmsg
+/retval > 0/
+{
+    $sk = args.sk;
+    if ($sk->__sk_common.skc_net.net->ns.inum == $1) {
+        @rsk[tid] = $sk;
+        @rend[tid] = (uint32)(@rstart[tid] + (uint32)retval);
+        @rn[tid] = retval;
+    }
+}
+
+tracepoint:syscalls:sys_exit_recvfrom,
+tracepoint:syscalls:sys_exit_recvmsg,
+tracepoint:syscalls:sys_exit_read
+/@rn[tid] != 0/
+{
+    printf("ev=recv sk=%p at=%llu t=%llu end=%u n=%d\n", @rsk[tid], nsecs,
+        nsecs + $2,
+        @rend[tid], @rn[tid]);
+    delete(@rsk, tid);
+    delete(@rend, tid);
+    delete(@rn, tid);
+}
+
+tracepoint:sock:inet_sock_set_state
+/args.protocol == 6 && args.family == 2 &&
+ (args.newstate == 2 || args.newstate == 3 || args.newstate == 7)/
+{
+    $sk = (struct sock *)args.skaddr;
+    if ($sk->__sk_common.skc_net.net->ns.inum == $1) {
+        $tp = (struct tcp_sock *)args.skaddr;
+        printf("ev=state sk=%p at=%llu t=%llu old=%d new=%d src=%s:%d dst=%s:%d snd_una=%u rcv_nxt=%u bytes_acked=%llu bytes_received=%llu\n",
+            $sk, nsecs, nsecs + $2, args.oldstate, args.newstate,
+            ntop(args.saddr), args.sport, ntop(args.daddr), args.dport,
+            $tp->snd_una, $tp->rcv_nxt, $tp->bytes_acked,
+            $tp->bytes_received);
+    }
+}
+
+END
+{
+    clear(@enter);
+    clear(@rstart);
+    clear(@rsk);
+    clear(@rend);
+    clear(@rn);
+}

@@ -275,17 +275,24 @@ def isn_deltas(conns, out):
         out.append(f"{mode} ISN deltas: client {d(ci)} server {d(si)}")
 
 
+TFO_COUNT, PINGPONG_COUNT = 6, 4  # rig.sh's last two phases, in order
+
+
 def tag_modes(conns):
     """Labels connections by workload phase: reuse-tw uses source port
-    45678, reuse-rst 45679, TFO is the last 6 client connections (rig.sh
-    runs it last); servers inherit the label through the ISN join later."""
+    45678, reuse-rst 45679, TFO is the last 6 client connections and
+    ping-pong the 4 before them (rig.sh runs them last, in that order);
+    servers inherit the label through the ISN join later. conns must be in
+    time order."""
     clients = [c for c in conns if c["role"] == "client"]
+    tfo = len(clients) - TFO_COUNT
     for c in conns:
         c["mode"] = "?"
     for i, c in enumerate(clients):
         c["mode"] = ("reuse-tw" if c["src"].endswith(":45678") else
                      "reuse-rst" if c["src"].endswith(":45679") else
-                     "tfo" if i >= len(clients) - 6 else "plain")
+                     "tfo" if i >= tfo else
+                     "pingpong" if i >= tfo - PINGPONG_COUNT else "plain")
 
 
 def tfo_evidence(d, out):
