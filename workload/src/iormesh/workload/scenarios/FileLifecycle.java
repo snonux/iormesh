@@ -43,9 +43,10 @@ import java.util.Set;
  * through an fd of its own (open, then utimensat with a NULL path), so
  * "touch" arrives as an fd event, not a path event.
  *
- * expect.json declares an opened edge for b.dat only: whether a.dat's
- * edge is rewritten by the rename is the rename-aware correlator's
- * decision (M2 step 5), not something this golden presumes.
+ * expect.json declares the ftruncate on fd1 with b.dat's path: the M2
+ * correlator moves an open fd's path with the rename (M2 step 5) and
+ * reports it on fd metadata events. It also adds an opened edge to the
+ * new name, next to a.dat's; the golden declares b.dat's only.
  */
 public final class FileLifecycle implements Scenario {
     static final String NAME = "file-lifecycle";

@@ -46,11 +46,11 @@ import java.util.Set;
  * change it offers is fchmodat on a directory fd. fchown(2) does fire.
  * Every xattr op opens the file anew, so each gets its own fd instance.
  *
- * expect.json leaves the dirfd-relative openat (fd4) undeclared: its
- * path is "file-attrs.dat" relative to fd3, and whether the trace shows
- * it raw or resolved is the M2 correlator's call; a declaration without
- * a path would bind greedily to the NSS lookup's open just before it.
- * fchown's fd binds fd4 instead.
+ * The M2 correlator resolves a dirfd-relative name against the
+ * directory fd's path, so expect.json declares fchmodat on
+ * $tmp/file-attrs.dat. It still leaves the dirfd-relative openat (fd4)
+ * undeclared: fchown's fd binds fd4 without it, and the golden stays
+ * independent of the NSS lookup's opens around it.
  */
 public final class FileAttrs implements Scenario {
     static final String NAME = "file-attrs";

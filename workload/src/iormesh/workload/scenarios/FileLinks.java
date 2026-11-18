@@ -29,11 +29,11 @@ import java.util.Set;
  * </pre>
  *
  * The open through the symlink carries the link's path, not the
- * target's: resolving it to target.dat is the correlator's job (via the
- * fd's inode), which is what this scenario lets M2 prove. So
- * expect.json declares an opened edge for target.dat only; how opens
- * via sym.lnk and hard.dat show in the graph is for M2 to decide. The
- * EOF reads (readAllBytes probing for more) are left undeclared.
+ * target's, and the M2 correlator keeps it so: resolving it to
+ * target.dat needs the fd's inode, which the default attach set does
+ * not capture. So expect.json declares an opened edge for target.dat
+ * only; opens via sym.lnk and hard.dat get edges of their own names.
+ * The EOF reads (readAllBytes probing for more) are left undeclared.
  */
 public final class FileLinks implements Scenario {
     static final String NAME = "file-links";
