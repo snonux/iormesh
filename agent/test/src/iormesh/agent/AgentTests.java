@@ -28,6 +28,7 @@ public final class AgentTests {
         cases.addAll(BoundaryTransformerTest.cases());
         cases.addAll(StackIdsTest.cases());
         cases.addAll(iormesh.bridge.HooksTest.cases());
+        cases.addAll(iormesh.bridge.RingTest.cases());
         int failed = 0;
         for (Case c : cases) {
             try {

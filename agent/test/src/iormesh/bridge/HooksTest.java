@@ -30,7 +30,7 @@ public final class HooksTest {
 
     /** Fresh counters for ids 1..4, stack walking on; depth must be 0. */
     private static void reset() {
-        Hooks.configure(5, true);
+        Hooks.configure(5, true, true);
         equal(0, Hooks.depth(), "depth before the test");
     }
 

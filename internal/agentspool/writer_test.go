@@ -1,0 +1,141 @@
+package agentspool
+
+import (
+	"os"
+	"path/filepath"
+	"sync/atomic"
+	"syscall"
+	"testing"
+	"unsafe"
+)
+
+// testWriter is a Go copy of the agent's writer (Ring.java), for the
+// reader's tests: same header, same CAS reservation, same release
+// publish. The cross-language tests (java_test.go) check that the real
+// agent agrees with it.
+type testWriter struct {
+	mem []byte
+	cap uint64
+}
+
+// newTestRing creates a ring file of capacity data bytes in a temp dir,
+// header complete, and maps it for writing.
+func newTestRing(t *testing.T, capacity uint64) (string, *testWriter) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "4242.ring")
+	hdr := make([]byte, headerSize)
+	le.PutUint64(hdr[0:], magic)
+	le.PutUint32(hdr[offVersion:], Version)
+	le.PutUint32(hdr[offHeaderSize:], headerSize)
+	le.PutUint64(hdr[offCapacity:], capacity)
+	le.PutUint64(hdr[offPID:], 4242)
+	le.PutUint64(hdr[offCreated:], 77)
+	if err := os.WriteFile(path, append(hdr, make([]byte, capacity)...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path, mapWriter(t, path, capacity)
+}
+
+func mapWriter(t *testing.T, path string, capacity uint64) *testWriter {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	mem, err := syscall.Mmap(int(f.Fd()), 0, int(headerSize+capacity),
+		syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Munmap(mem) })
+	return &testWriter{mem: mem, cap: capacity}
+}
+
+func (w *testWriter) ptr(off int) *uint64 {
+	return (*uint64)(unsafe.Pointer(&w.mem[off]))
+}
+
+// reserve mirrors Ring.reserve: a PAD for the rest of the lap if the
+// record does not fit, a counted drop if the reader is a ring behind.
+func (w *testWriter) reserve(length, typ int) int {
+	for {
+		head := atomic.LoadUint64(w.ptr(offHead))
+		tail := atomic.LoadUint64(w.ptr(offTail))
+		pos := head & (w.cap - 1)
+		var pad uint64
+		if pos+uint64(length) > w.cap {
+			pad = w.cap - pos
+		}
+		if head+pad+uint64(length)-tail > w.cap {
+			atomic.AddUint64(w.ptr(offDropped+8*typ), 1)
+			atomic.AddUint64(w.ptr(offDroppedBytes), uint64(length))
+			return -1
+		}
+		if atomic.CompareAndSwapUint64(w.ptr(offHead), head, head+pad+uint64(length)) {
+			if pad > 0 {
+				w.publish(headerSize+int(pos), int(pad), typePad)
+				return headerSize
+			}
+			return headerSize + int(pos)
+		}
+	}
+}
+
+func (w *testWriter) publish(off, length, typ int) {
+	atomic.StoreUint64(w.ptr(off), uint64(length)|uint64(typ)<<32)
+}
+
+// raw writes a record of type typ with body (padded to 8 by the caller).
+func (w *testWriter) raw(typ int, body []byte) bool {
+	length := wordLen + len(body)
+	off := w.reserve(length, typ)
+	if off < 0 {
+		return false
+	}
+	copy(w.mem[off+wordLen:], body)
+	w.publish(off, length, typ)
+	return true
+}
+
+func (w *testWriter) bracket(b Bracket) bool {
+	return w.raw(typeBracket, bracketBody(b))
+}
+
+func (w *testWriter) stack(s Stack) bool {
+	return w.raw(typeStack, stringsBody(s.ID, uint32(len(s.Frames)), s.Frames))
+}
+
+func (w *testWriter) thread(th Thread) bool {
+	return w.raw(typeThread, stringsBody(th.ID, uint32(th.KTID), []string{th.Name}))
+}
+
+func (w *testWriter) watermark(m Watermark) bool {
+	return w.raw(typeWatermark, le.AppendUint64(nil, m.Mono))
+}
+
+func bracketBody(b Bracket) []byte {
+	body := make([]byte, 0, bracketLen-wordLen)
+	body = le.AppendUint32(body, uint32(b.Hook))
+	body = le.AppendUint32(body, uint32(b.KTID))
+	for _, v := range []uint64{b.EnterMono, b.ExitMono, b.StackID, b.ThreadID} {
+		body = le.AppendUint64(body, v)
+	}
+	return body
+}
+
+// stringsBody is a STACK or THREAD body: id, a u32, four zero bytes,
+// then the strings, zero-padded to 8.
+func stringsBody(id uint64, word uint32, strs []string) []byte {
+	body := le.AppendUint64(nil, id)
+	body = le.AppendUint32(body, word)
+	body = le.AppendUint32(body, 0)
+	for _, s := range strs {
+		body = le.AppendUint32(body, uint32(len(s)))
+		body = append(body, s...)
+	}
+	for len(body)%8 != 0 {
+		body = append(body, 0)
+	}
+	return body
+}

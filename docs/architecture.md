@@ -50,8 +50,8 @@ views — happens on the controller.
   - Hands events to the tracer through a memory-mapped ring in a
     tracer-owned directory — no socket, and no syscall per
     record (decision #27). Its few own syscalls (ring setup, one
-    thread-id lookup per thread) are tagged and kept out of the
-    target's story.
+    thread-id lookup per thread, the sleeps of its watermark
+    thread) are tagged and kept out of the target's story.
   - OpenTelemetry-aware: when the app runs the OTEL SDK, the
     agent reads the active span context and tags every I/O
     event with its OTEL trace/span ids.

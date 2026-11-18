@@ -1,0 +1,297 @@
+package iormesh.bridge;
+
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+/**
+ * The agent → tracer transport (decision #27): one memory-mapped ring
+ * per JVM, a file {@code <spool dir>/<pid>.ring} in the tracer-owned
+ * spool directory, mapped shared by the agent (writers: every target
+ * thread that closes a bracket, plus the watermark thread) and the
+ * tracer (one reader, internal/agentspool). After {@link #create} a
+ * record is plain memory stores and one CAS — no syscall, no allocation
+ * for BRACKET and WATERMARK — so the transport adds nothing to the
+ * target's syscall story.
+ *
+ * Layout, little endian (internal/agentspool mirrors it; bump VERSION on
+ * any change):
+ * <pre>
+ *   0    magic "IORMRING", stored last with release: the header is complete
+ *   8    version u32           12  header size u32 (4096)
+ *   16   capacity u64 (data bytes, a power of two)
+ *   24   writer pid u64        32  CLOCK_MONOTONIC ns at create
+ *   64   head — bytes reserved by writers (CAS), its own cache line
+ *   128  tail — bytes consumed by the reader, written by the reader only
+ *   192  dropped records per type, u64[8] (index = record type)
+ *   256  dropped bytes        264  abandoned records (fill threw)
+ *   4096 data[capacity]
+ * </pre>
+ * A record is one 8-byte word {@code len | type << 32} (len counts the
+ * word, a multiple of 8) and its body. Writers reserve with a CAS on
+ * head, fill the body, then publish the word with a release store; the
+ * reader sees 0 until then, copies the record, zeroes it and moves tail
+ * with a release store, so every lap starts from zeros. A record that
+ * would straddle the end of the data area is preceded by a PAD filling
+ * the rest of the lap, so records are always contiguous.
+ *
+ * Concurrency: one shared ring with a CAS on head, not one ring per
+ * thread. Per-thread rings would need a file or a slot table per thread
+ * (thread count unknown at setup, so either more syscalls on target
+ * threads or a fixed cap), and the reader would have to merge them to
+ * keep the WATERMARK promise. The CAS costs one contended cache line;
+ * the bracket's dominant cost is the stack walk (S1: ≈8 µs vs ≈0.3 µs),
+ * so contention on head is not what limits the agent.
+ *
+ * Back-pressure: never block the target. When the reader is a full
+ * capacity behind, the record is dropped and counted in the header by
+ * type; the tracer turns the counters into the trace's loss accounting.
+ */
+public final class Ring {
+    static final int PAD = 0;
+    static final int BRACKET = 1;
+    static final int STACK = 2;
+    static final int THREAD = 3;
+    static final int WATERMARK = 4;
+    /** Format version; the reader rejects any other. */
+    static final int VERSION = 1;
+    static final long MAGIC = 0x474e49524d524f49L; // "IORMRING", little endian
+    static final int DATA = 4096;
+    static final int HEAD = 64;
+    static final int TAIL = 128;
+    static final int DROPPED = 192;
+    static final int DROPPED_BYTES = 256;
+    static final int ABANDONED = 264;
+    static final long MIN_CAPACITY = 1L << 16;
+    static final long MAX_CAPACITY = 1L << 30;
+    /** BRACKET body: hook, ktid, enter, exit, stack, thread. */
+    static final int BRACKET_LEN = 8 + 40;
+    static final int WATERMARK_LEN = 8 + 8;
+    /** Bounds a STACK or THREAD record, so one never needs a large share of the ring. */
+    static final int MAX_RECORD = 16 * 1024;
+    /** Each frame or thread name is cut to this many chars before encoding. */
+    static final int MAX_STRING = 1024;
+
+    // VarHandle coordinates are signature-polymorphic: they must be exactly
+    // (ByteBuffer, int), so offsets are ints and buf a ByteBuffer.
+    private static final VarHandle LONGS = MethodHandles.byteBufferViewVarHandle(
+            long[].class, ByteOrder.LITTLE_ENDIAN);
+
+    private final ByteBuffer buf;
+    private final long capacity;
+    private final Path path;
+
+    private Ring(ByteBuffer buf, long capacity, Path path) {
+        this.buf = buf;
+        this.capacity = capacity;
+        this.path = path;
+    }
+
+    /**
+     * Creates (or truncates a stale one of a reused pid) and maps
+     * {@code dir/<pid>.ring}; install time only. The directory is the
+     * tracer's: the agent never creates it, so a missing directory means
+     * no tracer is listening and fails the install. These are the agent's
+     * own syscalls, which the tracer recognises by the spool path.
+     */
+    static Ring create(Path dir, long capacity) throws IOException {
+        if (Long.bitCount(capacity) != 1 || capacity < MIN_CAPACITY || capacity > MAX_CAPACITY) {
+            throw new IllegalArgumentException("ring size must be a power of two in ["
+                    + MIN_CAPACITY + ", " + MAX_CAPACITY + "], got " + capacity);
+        }
+        long pid = ProcessHandle.current().pid();
+        Path path = dir.resolve(pid + ".ring");
+        try (RandomAccessFile f = new RandomAccessFile(path.toFile(), "rw")) {
+            f.setLength(0);
+            f.setLength(DATA + capacity);
+            ByteBuffer b = f.getChannel().map(FileChannel.MapMode.READ_WRITE, 0, DATA + capacity);
+            b.order(ByteOrder.LITTLE_ENDIAN);
+            b.putInt(8, VERSION);
+            b.putInt(12, DATA);
+            b.putLong(16, capacity);
+            b.putLong(24, pid);
+            b.putLong(32, System.nanoTime());
+            // Magic last: a reader that sees it sees a complete header.
+            LONGS.setRelease(b, 0, MAGIC);
+            return new Ring(b, capacity, path);
+        }
+    }
+
+    /** The ring file, for the debug dump and for discard. */
+    Path path() {
+        return path;
+    }
+
+    /**
+     * Deletes the ring file after a failed install, so the tracer does
+     * not wait on a ring nobody writes. The mapping stays valid.
+     */
+    void discard() throws IOException {
+        Files.deleteIfExists(path);
+    }
+
+    /** Writes a BRACKET; false if it was dropped. No allocation. */
+    boolean bracket(int hook, int ktid, long enter, long exit, long stack, long thread) {
+        int off = reserve(BRACKET_LEN, BRACKET);
+        if (off < 0) {
+            return false;
+        }
+        try {
+            buf.putInt(off + 8, hook);
+            buf.putInt(off + 12, ktid);
+            buf.putLong(off + 16, enter);
+            buf.putLong(off + 24, exit);
+            buf.putLong(off + 32, stack);
+            buf.putLong(off + 40, thread);
+        } catch (Throwable e) {
+            return abandon(off, BRACKET_LEN);
+        }
+        publish(off, BRACKET_LEN, BRACKET);
+        return true;
+    }
+
+    /**
+     * Writes a WATERMARK: every bracket that exited before mono is in
+     * the ring ahead of this record (or counted as dropped). No allocation.
+     */
+    boolean watermark(long mono) {
+        int off = reserve(WATERMARK_LEN, WATERMARK);
+        if (off < 0) {
+            return false;
+        }
+        buf.putLong(off + 8, mono);
+        publish(off, WATERMARK_LEN, WATERMARK);
+        return true;
+    }
+
+    /**
+     * Writes a STACK: id u64, n u32, 4 zero bytes, then n strings
+     * (u32 byte length + UTF-8), zero-padded to 8. Allocates the encoded
+     * strings — once per distinct stack, not per bracket.
+     */
+    boolean stack(long id, String[] frames) {
+        byte[][] enc = new byte[frames.length][];
+        int len = 8 + 16;
+        for (int i = 0; i < frames.length; i++) {
+            enc[i] = utf8(frames[i]);
+            len += 4 + enc[i].length;
+        }
+        return strings(STACK, align(len), id, frames.length, enc);
+    }
+
+    /**
+     * Writes a THREAD: Java thread id u64, kernel tid i32 (0 = unknown),
+     * then one string, the thread's name (u32 length + UTF-8), padded.
+     */
+    boolean thread(long threadId, int ktid, String name) {
+        byte[][] enc = {utf8(name)};
+        return strings(THREAD, align(8 + 16 + 4 + enc[0].length), threadId, ktid, enc);
+    }
+
+    /** Counts a record of type the caller chose not to write (StackIds' cap). */
+    void lost(int type) {
+        countDrop(type, 0);
+    }
+
+    /** Records dropped so far, all types (the debug dump). */
+    long dropped() {
+        long n = 0;
+        for (int t = 0; t < 8; t++) {
+            n += (long) LONGS.getVolatile(buf, DROPPED + 8 * t);
+        }
+        return n;
+    }
+
+    /** Fills and publishes a STACK or THREAD record (shared shape). */
+    private boolean strings(int type, int len, long id, int word, byte[][] enc) {
+        if (len > MAX_RECORD) {
+            countDrop(type, len);
+            return false;
+        }
+        int off = reserve(len, type);
+        if (off < 0) {
+            return false;
+        }
+        try {
+            buf.putLong(off + 8, id);
+            buf.putInt(off + 16, word);
+            int p = off + 24;
+            for (byte[] s : enc) {
+                buf.putInt(p, s.length);
+                buf.put(p + 4, s, 0, s.length);
+                p += 4 + s.length;
+            }
+        } catch (Throwable e) {
+            return abandon(off, len);
+        }
+        publish(off, len, type);
+        return true;
+    }
+
+    /**
+     * Reserves len bytes (a multiple of 8) and returns the record's
+     * buffer offset, or -1 after counting a drop of type when the reader
+     * is too far behind. A record that does not fit before the end of
+     * the data area reserves a PAD for the rest of the lap as well.
+     */
+    private int reserve(int len, int type) {
+        while (true) {
+            long head = (long) LONGS.getVolatile(buf, HEAD);
+            long tail = (long) LONGS.getAcquire(buf, TAIL);
+            long pos = head & (capacity - 1);
+            long pad = pos + len > capacity ? capacity - pos : 0;
+            if (head + pad + len - tail > capacity) {
+                countDrop(type, len);
+                return -1;
+            }
+            if (LONGS.compareAndSet(buf, HEAD, head, head + pad + len)) {
+                if (pad > 0) {
+                    publish(DATA + (int) pos, (int) pad, PAD);
+                    return DATA;
+                }
+                return DATA + (int) pos;
+            }
+        }
+    }
+
+    private void countDrop(int type, int len) {
+        LONGS.getAndAdd(buf, DROPPED + 8 * type, 1L);
+        LONGS.getAndAdd(buf, DROPPED_BYTES, (long) len);
+    }
+
+    /**
+     * A fill that threw (e.g. StackOverflowError deep in the target)
+     * must still publish its reservation, or the reader would wait on it
+     * forever: it becomes a PAD, counted as abandoned.
+     */
+    private boolean abandon(int off, int len) {
+        try {
+            publish(off, len, PAD);
+            LONGS.getAndAdd(buf, ABANDONED, 1L);
+        } catch (Throwable ignored) {
+            // Nothing left to try; the reader reports the ring stalled.
+        }
+        return false;
+    }
+
+    /** Makes a filled record visible to the reader (release store). */
+    private void publish(int off, int len, int type) {
+        LONGS.setRelease(buf, off, (len & 0xffffffffL) | ((long) type << 32));
+    }
+
+    private static int align(int len) {
+        return (len + 7) & ~7;
+    }
+
+    private static byte[] utf8(String s) {
+        String cut = s.length() > MAX_STRING ? s.substring(0, MAX_STRING) : s;
+        return cut.getBytes(StandardCharsets.UTF_8);
+    }
+}

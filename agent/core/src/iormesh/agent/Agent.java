@@ -14,6 +14,10 @@ import java.util.Set;
  * attach, decision #2) run the same install: the JDK's I/O classes are
  * loaded before either runs, so both rewrite them by retransformation.
  *
+ * With {@code spool=<dir>} the brackets, the stacks and threads they
+ * name, and watermarks go to a memory-mapped ring in that tracer-owned
+ * directory (decision #27, iormesh.bridge.Ring).
+ *
  * The agent must never take the target down: any failure while
  * installing is reported on stderr and leaves the JVM as it was (or with
  * the hooks installed so far, which are harmless on their own).
@@ -38,9 +42,9 @@ public final class Agent {
     }
 
     /**
-     * Order matters: the bridge must be linked and warm, and ASM loaded,
-     * before the first JDK class is rewritten, so that no agent class
-     * loading happens inside a bracket of the target's I/O.
+     * Order matters: the bridge must be linked and warm, the ring mapped,
+     * and ASM loaded, before the first JDK class is rewritten, so that no
+     * agent class loading happens inside a bracket of the target's I/O.
      */
     static void install(AgentArgs args, Instrumentation inst) throws Exception {
         int feature = Runtime.version().feature();
@@ -60,17 +64,58 @@ public final class Agent {
             bridge.deleteExtracted();
             return;
         }
-        bridge.configure(table.maxId() + 1, args.walkStack());
-        bridge.warmUp();
-        bridge.deleteExtracted();
-        BoundaryTransformer.warmUp();
-        BoundaryTransformer transformer = new BoundaryTransformer(table);
-        if (args.debug() != null) {
-            Runtime.getRuntime().addShutdownHook(new Thread(
-                    () -> writeDebug(args.debug(), table, transformer, bridge),
-                    "iormesh-agent-debug"));
-        }
+        BoundaryTransformer transformer = prepare(args, table, bridge);
+        Runtime.getRuntime().addShutdownHook(new Thread(
+                () -> atExit(args, table, transformer, bridge), "iormesh-agent-exit"));
         retransform(inst, table, transformer);
+    }
+
+    /**
+     * Everything before the first rewrite: configure the bridge, map the
+     * ring, warm up, start the watermarks. A failure here has rewritten
+     * nothing, so the claim is released (and the ring discarded) — a
+     * later live attach may then try again instead of finding an agent
+     * "already installed" with nothing active.
+     */
+    private static BoundaryTransformer prepare(AgentArgs args, HookTable table, Bridge bridge)
+            throws Exception {
+        try {
+            bridge.configure(table.maxId() + 1, args.walkStack(), args.debug() != null);
+            if (args.spool() != null) {
+                bridge.openRing(args.spool(), args.ringSize());
+            }
+            bridge.warmUp();
+            bridge.deleteExtracted();
+            BoundaryTransformer.warmUp();
+            BoundaryTransformer transformer = new BoundaryTransformer(table);
+            bridge.startWatermarks(args.watermarkMs());
+            return transformer;
+        } catch (Exception | Error e) {
+            try {
+                bridge.release();
+                bridge.deleteExtracted();
+            } catch (Exception cleanup) {
+                e.addSuppressed(cleanup);
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * At JVM exit: a last watermark — every bracket closed so far is in
+     * the ring, so the joiner need not time out — then the debug dump.
+     */
+    private static void atExit(AgentArgs args, HookTable table, BoundaryTransformer t,
+                               Bridge bridge) {
+        try {
+            bridge.agentThread();  // the dump's own I/O is not the target's
+            bridge.watermark();
+        } catch (ReflectiveOperationException e) {
+            System.err.println("iormesh-agent: last watermark failed: " + e);
+        }
+        if (args.debug() != null) {
+            writeDebug(args.debug(), table, t, bridge);
+        }
     }
 
     /**
@@ -106,9 +151,9 @@ public final class Agent {
             long[] counts = bridge.counts();
             Set<Integer> applied = t.applied();
             Set<String> seen = t.seen();
-            out.printf("# iormesh-agent debug: variant=%s java=%d skips=%d fails=%d stacks=%d%n",
-                    table.variant(), Runtime.version().feature(), bridge.skips(),
-                    bridge.fails(), bridge.stacks());
+            out.printf("# iormesh-agent debug: variant=%s java=%d skips=%d fails=%d stacks=%d"
+                    + " ring_dropped=%d%n", table.variant(), Runtime.version().feature(),
+                    bridge.skips(), bridge.fails(), bridge.stacks(), bridge.ringDropped());
             for (HookTable.Hook h : table.hooks()) {
                 String status = applied.contains(h.id()) ? "applied"
                         : seen.contains(h.owner()) ? "missing" : "unloaded";

@@ -9,8 +9,12 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * The id hashes the caller frames, so a call site that does I/O in a
  * loop costs one walk and one hash per call but stores its frames once:
- * the first time an id is seen its frames are kept for {@link #frames},
- * from which the ring transport (M3 step 4) will write a STACK record.
+ * the first time an id is seen its frames are kept for {@link #frames}
+ * and written to the ring as a STACK record (decision #27). A STACK the
+ * ring dropped is forgotten again, so the next sighting retries it;
+ * past MAX_KNOWN distinct stacks no more are kept or written, and each
+ * unkept sighting counts as a dropped STACK — the bracket keeps its id,
+ * the trace's loss accounting says why the frames are missing.
  *
  * Lives in the bridge (bootstrap path) because {@link Hooks#enter} calls
  * it from rewritten java.base code, which cannot see the agent's own
@@ -44,8 +48,8 @@ public final class StackIds {
                 .limit(MAX_FRAMES)
                 .toList());
         long id = hash(frames);
-        if (KNOWN.size() < MAX_KNOWN && !KNOWN.containsKey(id)) {
-            KNOWN.putIfAbsent(id, describe(frames));
+        if (!KNOWN.containsKey(id)) {
+            remember(id, frames);
         }
         return id;
     }
@@ -88,6 +92,24 @@ public final class StackIds {
         }
         // A separator, so "ab"+"c" and "a"+"bc" differ.
         return (h ^ 0xffff) * FNV_PRIME;
+    }
+
+    /**
+     * Keeps a new stack's frames and writes its STACK record; only the
+     * thread whose putIfAbsent won writes it, so a stack is written once.
+     */
+    private static void remember(long id, List<StackWalker.StackFrame> frames) {
+        Ring r = Hooks.ring;
+        if (KNOWN.size() >= MAX_KNOWN) {
+            if (r != null) {
+                r.lost(Ring.STACK);
+            }
+            return;
+        }
+        String[] described = describe(frames);
+        if (KNOWN.putIfAbsent(id, described) == null && r != null && !r.stack(id, described)) {
+            KNOWN.remove(id);
+        }
     }
 
     private static String[] describe(List<StackWalker.StackFrame> frames) {

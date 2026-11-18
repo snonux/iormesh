@@ -32,10 +32,11 @@ import java.util.function.LongSupplier;
  * method's catch-all range, so the handler would exit a second time and
  * close the caller's bracket.
  *
- * Until the ring transport (M3 step 4, decision #27) lands, a closed
- * bracket only bumps its hook's counter ({@link #counts}): the agent's
- * debug dump and the smoke test read it to show the hooks fire. The
- * bracket's enter time and stack id are already captured for the ring.
+ * A closed bracket becomes a BRACKET record in the ring (decision #27,
+ * {@link Ring}); a thread's first bracket also writes its THREAD record,
+ * and a stack's first sighting its STACK record (StackIds). Without a
+ * ring (no spool= option) brackets are only counted, and only when the
+ * agent's debug dump asked for counts ({@link #counts}).
  */
 public final class Hooks {
     /** Deeper nesting than this is not tracked (still balanced). */
@@ -49,19 +50,12 @@ public final class Hooks {
     static volatile LongSupplier stacks = WALK;
     /** Closed brackets per hook id; package-private so tests can break it. */
     static volatile AtomicLongArray counts = new AtomicLongArray(0);
+    /** The transport, or null (no spool=): brackets then go nowhere. */
+    static volatile Ring ring;
     private static final AtomicLong SKIPS = new AtomicLong();
     private static final AtomicLong FAILS = new AtomicLong();
     private static final AtomicBoolean CLAIMED = new AtomicBoolean();
     private static final ThreadLocal<Brackets> STATE = ThreadLocal.withInitial(Brackets::new);
-
-    /** One thread's open brackets; preallocated, so no allocation per call. */
-    private static final class Brackets {
-        boolean busy;
-        int depth;
-        final int[] hooks = new int[MAX_DEPTH];
-        final long[] enters = new long[MAX_DEPTH];
-        final long[] stacks = new long[MAX_DEPTH];
-    }
 
     private Hooks() {}
 
@@ -77,26 +71,96 @@ public final class Hooks {
     }
 
     /**
+     * Undoes {@link #claim} after an install that failed before any JDK
+     * class was rewritten, so a later live attach can still install;
+     * also discards the ring, so the tracer does not wait on it.
+     */
+    public static void release() {
+        Ring r = ring;
+        ring = null;
+        if (r != null) {
+            try {
+                r.discard();
+            } catch (Exception e) {
+                // The tracer then finds a ring that stays empty.
+            }
+        }
+        CLAIMED.set(false);
+    }
+
+    /**
      * Called once by the agent before any JDK class is rewritten.
      * hookIds bounds the ids the table uses (ids are 1..hookIds-1);
      * stack=false records StackIds.NONE instead of walking (S1's cost
-     * split, and an escape hatch while M3 engineers the walk down).
+     * split, and an escape hatch while M3 engineers the walk down);
+     * count=true keeps per-hook counts for the debug dump (an atomic
+     * increment per bracket, so off unless asked for).
      */
-    public static void configure(int hookIds, boolean stack) {
-        counts = new AtomicLongArray(hookIds);
+    public static void configure(int hookIds, boolean stack, boolean count) {
+        counts = new AtomicLongArray(count ? hookIds : 0);
         stacks = stack ? WALK : NO_WALK;
     }
 
     /**
+     * Creates and maps the ring in the tracer's spool directory and
+     * returns its path; install time, before warmUp, so the warm-up
+     * exercises the ring's paths too.
+     */
+    public static String openRing(String dir, long capacity) throws java.io.IOException {
+        Ring r = Ring.create(java.nio.file.Path.of(dir), capacity);
+        ring = r;
+        return r.path().toString();
+    }
+
+    /** Starts the watermark thread (Watermarks); needs the ring. */
+    public static void startWatermarks(long intervalMs) {
+        Ring r = ring;
+        if (r != null && intervalMs > 0) {
+            Watermarks.start(r, intervalMs);
+        }
+    }
+
+    /**
+     * Marks the calling thread as the agent's own for good: its hooked
+     * I/O (the debug dump at exit) is never bracketed.
+     */
+    public static void agentThread() {
+        STATE.get().busy = true;
+    }
+
+    /** Writes a watermark now (the agent's shutdown hook). */
+    public static void watermark() {
+        Ring r = ring;
+        if (r != null) {
+            Watermarks.emit(r);
+        }
+    }
+
+    /** Records dropped by the ring so far, or 0 without one. */
+    public static long ringDropped() {
+        Ring r = ring;
+        return r == null ? 0 : r.dropped();
+    }
+
+    /**
      * Initializes and links what the hot path touches (the thread state,
-     * the stack walker's stream machinery) at install time, so none of
-     * that class loading — and its jar reads — lands inside the target's
-     * own I/O later. Records nothing.
+     * the kernel tid lookup, the stack walker's stream machinery, the
+     * ring's record paths) at install time, so none of that class
+     * loading — and its jar reads — lands inside the target's own I/O
+     * later. With a ring this writes real records: the installing
+     * thread's THREAD, the warm-up stack's STACK and a first WATERMARK.
      */
     public static void warmUp() {
         Brackets t = STATE.get();
         t.busy = true;
         try {
+            Ring r = ring;
+            t.kernelTid();
+            if (r != null) {
+                describe(t, r);
+                Watermarks.emit(r);
+                r.dropped();
+            }
             stacks.getAsLong();
         } finally {
             t.busy = false;
@@ -123,6 +187,10 @@ public final class Hooks {
         }
         t.busy = true;
         try {
+            Ring r = ring;
+            if (r != null && !t.described) {
+                describe(t, r);
+            }
             t.stacks[d] = stacks.getAsLong();
             // Stamped after the walk, so the walk is outside the bracket.
             t.enters[d] = System.nanoTime();
@@ -144,6 +212,10 @@ public final class Hooks {
             if (d >= MAX_DEPTH || t.hooks[d] != hook) {
                 return;       // skipped, failed or overflowed enter
             }
+            Ring r = ring;
+            if (r != null) {
+                close(t, d, r);
+            }
             AtomicLongArray c = counts;
             if (hook > 0 && hook < c.length()) {
                 c.incrementAndGet(hook);
@@ -151,6 +223,39 @@ public final class Hooks {
         } catch (Throwable e) {
             countSkip(FAILS);
         }
+    }
+
+    /** The calling thread's state (the watermark thread's own, too). */
+    static Brackets state() {
+        return STATE.get();
+    }
+
+    /**
+     * Writes slot d's BRACKET. The thread is marked closing (Watermarks)
+     * before the exit is stamped and until the record is published, and
+     * busy, so nothing the write might do is bracketed itself. A dropped
+     * record is counted in the ring header, not here.
+     */
+    private static void close(Brackets t, int d, Ring r) {
+        t.closing = t.enters[d];
+        boolean wasBusy = t.busy;
+        t.busy = true;
+        try {
+            long exit = System.nanoTime();
+            r.bracket(t.hooks[d], t.ktid, t.enters[d], exit, t.stacks[d], t.owner.getId());
+        } finally {
+            t.busy = wasBusy;
+            t.closing = Brackets.IDLE;
+        }
+    }
+
+    /**
+     * Writes the thread's THREAD record (its first bracket, or the
+     * warm-up); a dropped one is retried at the next bracket, and the
+     * kernel tid lookup — a syscall — happens only once regardless.
+     */
+    private static void describe(Brackets t, Ring r) {
+        t.described = r.thread(t.owner.getId(), t.kernelTid(), t.owner.getName());
     }
 
     /** Counts a dropped bracket; must not throw either. */

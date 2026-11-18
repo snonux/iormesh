@@ -59,7 +59,8 @@ mage bpfRootTest   # BPF loader + TCP tuple tests as root (sudo -n)
 mage integrationTest        # tracer + workload end to end, as root
 mage integrationTestSerial  # the same, one test at a time
 mage agentBuild    # the Java agent -> ./iormesh-agent.jar (M3)
-mage agentTest     # its unit tests + -javaagent smoke runs
+mage agentTest     # its unit tests, -javaagent smoke runs and
+                   # the ring's Java-driven Go tests
 ```
 
 The Java agent (`agent/`) is built with the JDK alone, like the
@@ -71,7 +72,10 @@ pinned SHA-256 and relocates its classes to
 neither build nor tests touch the network. `mage agentTest` runs
 with the `java` on `PATH` and again with each JDK listed in
 `IORMESH_AGENT_JDKS` (colon-separated `JAVA_HOME`s), which is how
-the `jdk17` hook table gets checked against a JDK 17.
+the `jdk17` hook table gets checked against a JDK 17. It ends
+with `internal/agentspool`'s `TestJava*` tests (cgo-free, run with
+the `java` on `PATH`), which skip under a plain `go test` because
+only Mage sets the agent and workload paths they need.
 
 Run Go commands through Mage: bare `go test ./...` or
 `go vet ./...` cannot build `internal`, which imports libbpfgo,

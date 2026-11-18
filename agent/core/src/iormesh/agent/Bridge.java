@@ -11,7 +11,7 @@ import java.util.Set;
 import java.util.jar.JarFile;
 
 /**
- * Puts the bridge (iormesh.bridge.Hooks, StackIds) where rewritten JDK
+ * Puts the bridge (iormesh.bridge.Hooks, StackIds, Ring) where rewritten JDK
  * code can call it, and gives the agent a handle on it.
  *
  * Two steps, both found necessary by S1: append the bridge jar to the
@@ -87,8 +87,42 @@ final class Bridge {
         return (boolean) hooks.getMethod("claim").invoke(null);
     }
 
-    void configure(int hookIds, boolean walkStack) throws ReflectiveOperationException {
-        hooks.getMethod("configure", int.class, boolean.class).invoke(null, hookIds, walkStack);
+    /** See Hooks.release: undoes claim after an install that rewrote nothing. */
+    void release() throws ReflectiveOperationException {
+        hooks.getMethod("release").invoke(null);
+    }
+
+    void configure(int hookIds, boolean walkStack, boolean count)
+            throws ReflectiveOperationException {
+        hooks.getMethod("configure", int.class, boolean.class, boolean.class)
+                .invoke(null, hookIds, walkStack, count);
+    }
+
+    /** Creates the ring in the spool directory; returns its path. */
+    String openRing(String dir, long capacity) throws Exception {
+        try {
+            return (String) hooks.getMethod("openRing", String.class, long.class)
+                    .invoke(null, dir, capacity);
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            // "disabled: <the IOException>" says what to fix; the wrapper does not.
+            throw e.getCause() instanceof Exception c ? c : e;
+        }
+    }
+
+    void startWatermarks(long intervalMs) throws ReflectiveOperationException {
+        hooks.getMethod("startWatermarks", long.class).invoke(null, intervalMs);
+    }
+
+    void agentThread() throws ReflectiveOperationException {
+        hooks.getMethod("agentThread").invoke(null);
+    }
+
+    void watermark() throws ReflectiveOperationException {
+        hooks.getMethod("watermark").invoke(null);
+    }
+
+    long ringDropped() throws ReflectiveOperationException {
+        return (long) hooks.getMethod("ringDropped").invoke(null);
     }
 
     void warmUp() throws ReflectiveOperationException {

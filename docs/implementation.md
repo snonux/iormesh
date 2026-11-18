@@ -1499,8 +1499,10 @@ agent/
   bridge/src/iormesh/bridge/Hooks.java       # bootstrap-visible
   bridge/src/iormesh/bridge/StackIds.java    # called by Hooks.enter
   bridge/src/iormesh/bridge/Ring.java        # mmap spool writer
+  bridge/src/iormesh/bridge/Brackets.java    # per-thread bracket state
+  bridge/src/iormesh/bridge/Watermarks.java  # WATERMARK timer + scan
   core/src/iormesh/agent/Agent.java          # premain/agentmain
-  core/src/iormesh/agent/AgentArgs.java      # bridge=, table=, debug=
+  core/src/iormesh/agent/AgentArgs.java      # bridge=, spool=, debug=…
   core/src/iormesh/agent/Bridge.java         # bootstrap append + module
   core/src/iormesh/agent/HookTable.java      # loads the tables below
   core/src/iormesh/agent/BoundaryTransformer.java
@@ -1509,6 +1511,7 @@ agent/
   core/src/iormesh/agent/http/…              # one file per library
   core/src/iormesh/agent/otel/SpanContext.java
   test/src/iormesh/agent/…    # plain-main unit tests + AgentSmoke
+  test/src/iormesh/bridge/…   # Hooks/Ring tests, RingStress
   tools/Relocate.java         # shades ASM (build tool)
   third_party/asm/            # ASM 9.11.1 jar, LICENSE, PROVENANCE
 magefile_agent.go, magefile_agenttest.go
@@ -1544,7 +1547,7 @@ internal/correlate/javajoin.go
    path (thread state, `StackWalker`), then retransform. Expect
    the CDS warning on stderr ("Sharing is only supported for boot
    loader classes…") — the workload's stdout contract is intact.
-   Done (task 0b4), but for the ring (step 4, next): the nested
+   Done (task 0b4; the ring by task 1b4, step 4): the nested
    bridge jar is copied to a temp file (the bootstrap path takes
    files only) and deleted once the bridge is loaded and warm —
    the JVM keeps the jar open, so nothing is left behind even on
@@ -1560,12 +1563,14 @@ internal/correlate/javajoin.go
    is fully open; a throwing exit would run the catch-all's exit a
    second time and close the caller's bracket). A second
    `-javaagent` or attach finds the bridge claimed and installs
-   nothing. Until the ring lands, a closed bracket bumps a
-   per-hook counter; the agent option `debug=<path>` dumps the
-   table with each row's status (`applied`, `missing` = this JDK
-   lacks the method, `unloaded`) and count at exit. Any install
-   failure prints `iormesh-agent: disabled: …`, removes the
-   transformer and leaves the JVM running. `BoundaryTransformer`
+   nothing. A closed bracket goes to the ring (step 4); with the
+   agent option `debug=<path>` it also bumps a per-hook counter,
+   and the table is dumped with each row's status (`applied`,
+   `missing` = this JDK lacks the method, `unloaded`) and count at
+   exit. Any install failure prints `iormesh-agent: disabled: …`,
+   removes the transformer and leaves the JVM running; a failure
+   before the first rewrite also releases the claim and deletes
+   the ring, so a later live attach can still install. `BoundaryTransformer`
    rewrites only bootstrap-loaded classes of the table and only
    their listed methods (exact descriptors); it writes the
    catch-all handler's stack map frame itself instead of
@@ -1615,37 +1620,108 @@ internal/correlate/javajoin.go
    `IORMESH_AGENT_JDKS`); the smoke runs with boot-class
    verification on (`-XX:+BytecodeVerificationLocal`). Live attach
    fired the hooks on 25 and a doubled `-javaagent` installed once
-   (by hand, not in `agentTest`). Not run: a JDK 21 runtime (none
-   installed; the `jdk21` rows come from S1's check of the 21
-   sources), 18–20.
+   (by hand, not in `agentTest`). Not run: 18–20. Open: the first
+   JDK 21 runs (21.0.6, 21.0.12, during task 1b4) fail the
+   running-JDK check on one `jdk21` row — 21 has no
+   `Net.serverSocket(ProtocolFamily)`, only `serverSocket(boolean)`
+   and `serverSocket(ProtocolFamily, boolean)`; the row came from
+   S1's reading of the 21 sources.
 4. The ring (decision #27): one file per JVM,
-   `<spool dir>/<pid>.ring`, in the tracer-owned directory, mapped
-   `MAP_SHARED` by agent and tracer. Header (magic, capacity, pid,
-   `head` and `tail` on their own cache lines, drop counters), then
-   records framed by one 8-byte word `len | type << 32` published
-   with a release store. Writers reserve with a CAS on `head`;
-   when the reader is a full ring behind they drop and count —
-   never block the target. Record types:
+   `<spool dir>/<pid>.ring` (pid as the JVM sees it), in the
+   tracer-owned directory, mapped `MAP_SHARED` by agent and
+   tracer. The agent never creates the directory: a missing one
+   disables the agent (no tracer is listening). Agent options:
+   `spool=<dir>`, `ringsize=<bytes>` (a power of two, 64 KiB–1 GiB,
+   default 8 MiB), `watermark=<ms>` (default 10, 0 = only at
+   install and exit). Done (task 1b4). The header, little endian,
+   version-checked by the reader:
 
    ```
-   BRACKET   hook_id, ktid, enter_mono, exit_mono, stack_id, thread_id
-   STACK     stack_id, n, frames[n]    // first time an id is seen
-   THREAD    thread_id, ktid, name     // first bracket of a thread
-   METHOD    method_id, class, method, descriptor, file, line, jar
-   WATERMARK mono_ns                   // every bracket that exited
-                                       // before this is in the ring
+   0    magic "IORMRING" (stored last, release: header complete)
+   8    version u32 = 1     12  header size u32 = 4096
+   16   capacity u64        24  pid u64     32  created mono ns
+   64   head (writers' CAS, own cache line)
+   128  tail (reader's release store, own cache line)
+   192  dropped records per type u64[8]
+   256  dropped bytes       264  abandoned records
+   4096 data[capacity]
    ```
+
+   Records are framed by one 8-byte word `len | type << 32` (len
+   counts the word, a multiple of 8) published with a release
+   store after the body; the reader copies a record, zeroes it and
+   moves `tail`, so every lap starts from zeros, and a record that
+   would straddle the end of the data area is preceded by a PAD.
+   Writers reserve with a CAS on one shared `head` — not a ring
+   per thread, which would need a file or a fixed slot table per
+   thread (thread count unknown at setup) and a merge in the
+   reader to keep the watermark promise; the stack walk (≈8 µs),
+   not the CAS, bounds a bracket's cost. When the reader is a full
+   ring behind the writer drops and counts per type — never
+   blocks the target. A fill that throws (a `StackOverflowError`
+   deep in the target) is published as a PAD and counted as
+   abandoned, so the reader never waits on it. Record bodies:
+
+   ```
+   PAD       0  (skipped)
+   BRACKET   1  hook i32, ktid i32, enter_mono, exit_mono,
+                stack_id, thread_id u64        // 48 bytes
+   STACK     2  stack_id u64, n u32, 0 u32, n × (u32 len, UTF-8)
+   THREAD    3  thread_id u64, ktid i32, 0 u32, (u32 len, name)
+   WATERMARK 4  mono_ns u64    // every bracket that exited
+                               // before this is in the ring
+   ```
+
+   STACK and THREAD are zero-padded to 8 and capped at 16 KiB
+   (strings cut to 1024 chars); BRACKET and WATERMARK allocate
+   nothing. A thread's first bracket writes its THREAD, a stack's
+   first sighting its STACK, both before the BRACKET that names
+   them; a dropped one is retried at the next sighting (so each
+   attempt counts as a drop), and sightings of stacks past
+   StackIds' 65 536-entry cap count as dropped STACKs. METHOD
+   (the method table) waits for step 6.
 
    Brackets are written at exit, so a syscall inside a still-open
-   bracket has no record yet; an agent timer thread writes
+   bracket has no record yet; the agent's watermark thread writes
    `WATERMARK` (a memory store, no syscall) so the joiner knows
    when to stop waiting. The S1 prototype had no watermark — it
-   drained after exit.
+   drained after exit. The promise holds without locks: a closing
+   bracket marks its thread with its enter stamp before stamping
+   the exit and clears the mark after publishing; a watermark
+   reads the clock, then scans the threads and lowers itself to
+   any marked thread's enter stamp. Install and JVM exit (a
+   shutdown hook) write one too.
 
-   The agent's only syscalls are the ring's setup in `install`
-   and one `readlink("/proc/thread-self")` per thread; the tracer
-   tags both as the agent's (spool path; first such readlink per
-   TID before that TID's THREAD record) — never the target's.
+   The agent's syscalls are the ring's setup in `install`, one
+   `readlink("/proc/thread-self")` per thread, and the watermark
+   thread's sleeps; the tracer tags them as the agent's (spool
+   path; first such readlink per TID before that TID's THREAD
+   record; the watermark thread names itself
+   `iormesh-agent-watermark` in its THREAD record) — never the
+   target's. The exit hook's thread (debug dump) is never
+   bracketed.
+
+   Reader: `internal/agentspool` (cgo-free: `syscall.Mmap`,
+   `sync/atomic` on the mapped words). `Open` rejects a header it
+   cannot trust (`ErrNotReady` before the magic, `ErrVersion`,
+   `ErrTruncated`, `ErrCorrupt`); `Drain` hands out `Bracket`,
+   `Stack`, `Thread` and `Watermark` records in ring order. A
+   framing error (length unaligned, past the lap or past `head`)
+   makes the ring `ErrCorrupt` for good; a body that does not
+   decode (wrong length, hook ≤ 0, exit before enter, bad UTF-8,
+   non-zero padding) is skipped and counted as `Malformed`, an
+   unknown type as `Unknown`. `Losses` adds the agent's header
+   counters, so delivered + lost = written, the same contract as
+   `bpf.Losses`. Tests: round trip, wraparound with PADs, eight
+   concurrent writers with a live reader, a lagging reader,
+   negative tables for headers, framing and bodies; and from
+   `mage agentTest` the Java-driven ones — `RingStress` (eight
+   Java threads, a 64 KiB ring lapping under a live Go reader) and
+   `workload.jar file-basic` under the agent, whose ring must
+   order THREAD and STACK before each BRACKET, match the debug
+   dump's counts and keep every watermark's promise. Checked on
+   25 (the Go-driven runs), the Java unit tests also on 17
+   (GraalVM CE 17.0.9) and 27-ea.
 5. The Go side joins the agent bracket to the uprobe-marked
    syscall:
 

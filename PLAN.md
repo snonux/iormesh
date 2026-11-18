@@ -456,8 +456,8 @@ Gated by S1 — done; the design below is S1's result
   directory, written lock-free by the agent and drained by the
   correlator; when it is full the agent drops and counts, never
   blocks (decision #27). The agent's own syscalls (ring setup,
-  one thread-id lookup per thread) are tagged and kept out of
-  the target's story.
+  one thread-id lookup per thread, its watermark thread's
+  sleeps) are tagged and kept out of the target's story.
 - **Attach**: `-javaagent` at launch is the primary path. Live
   attach stays supported for the "trace an existing PID" story,
   with its cost stated: the JVM prints JEP 451's warning on
@@ -987,9 +987,15 @@ answer), and deferred.
   tracer turns the counters into the trace's loss accounting.
   The agent's own syscalls are its ring setup and one
   `/proc/thread-self` lookup per thread, tagged by path and
-  never shown as the target's I/O. An append-only file was
-  rejected: every flush is a target-thread syscall to filter,
-  and it grows unbounded when the tracer lags.
+  never shown as the target's I/O, plus the sleeps of its
+  watermark thread, which names itself in the ring. An
+  append-only file was rejected: every flush is a target-thread
+  syscall to filter, and it grows unbounded when the tracer
+  lags. Built in M3 (task 1b4): one shared ring with a CAS on
+  `head`, not a ring per thread — the thread count is unknown at
+  setup, and the stack walk, not the CAS, bounds a bracket's
+  cost; format versioned in the header, reader strict
+  (`internal/agentspool`).
 
 ### Open — blocks M2
 

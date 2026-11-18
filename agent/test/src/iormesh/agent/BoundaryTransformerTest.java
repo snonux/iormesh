@@ -94,7 +94,7 @@ final class BoundaryTransformerTest {
         byte[] after = transformer(TABLE).rewrite(FIXTURE, fixtureBytes());
         Class<?> c = new OneClassLoader("iormesh.agent.Fixture", after)
                 .loadClass("iormesh.agent.Fixture");
-        Hooks.configure(8, true);
+        Hooks.configure(8, true, true);
         Hooks.enter(7);
         callFixture(c);
         Hooks.exit(7);

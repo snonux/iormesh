@@ -29,7 +29,9 @@ var smokeKinds = []string{"open", "read", "write", "seek", "close", "socket",
 // the java on PATH, then again with each JDK in IORMESH_AGENT_JDKS (a
 // colon-separated list of JAVA_HOMEs, e.g. a JDK 17 to check the jdk17
 // hook table), and finally runs the workload's file-basic scenario under
-// the agent.
+// the agent. Last, internal/agentspool's Java-driven tests read rings
+// the real agent wrote (decision #27): a concurrent RingStress writer and
+// the workload under the agent with a spool directory.
 func AgentTest() error {
 	mg.SerialDeps(AgentBuild, WorkloadBuild)
 	cp := strings.Join([]string{agentCoreDir, agentASMDir, agentBridgeDir}, ":")
@@ -44,7 +46,31 @@ func AgentTest() error {
 			return err
 		}
 	}
-	return smokeWorkloadFileBasic()
+	if err := smokeWorkloadFileBasic(); err != nil {
+		return err
+	}
+	return agentSpoolJavaTests()
+}
+
+// agentSpoolJavaTests runs internal/agentspool's TestJava* tests, which
+// skip unless these variables name the classes and jars (absolute, since
+// go test runs in the package directory).
+func agentSpoolJavaTests() error {
+	abs := func(p string) string {
+		a, err := filepath.Abs(p)
+		if err != nil {
+			return p
+		}
+		return a
+	}
+	env := map[string]string{
+		"CGO_ENABLED":           "0",
+		"IORMESH_AGENT_TEST_CP": abs(agentTestDir) + ":" + abs(agentBridgeDir),
+		"IORMESH_AGENT_JAR":     abs(agentJar),
+		"IORMESH_WORKLOAD_JAR":  abs(workloadJar),
+	}
+	return sh.RunWithV(env, "go", "test", "-count=1", "-v", "-run", "^TestJava",
+		"./internal/agentspool/")
 }
 
 // agentTestJavas is the java on PATH plus bin/java of each JDK listed
