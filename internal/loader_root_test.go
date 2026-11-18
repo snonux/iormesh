@@ -12,10 +12,12 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	ibpf "iormesh/internal/bpf"
+	"iormesh/internal/tracepoints"
 	"iormesh/internal/types"
 )
 
@@ -131,6 +133,41 @@ func TestLoaderDeliversRecords(t *testing.T) {
 	}
 	if s := tr.Skipped(); len(s) != 0 {
 		t.Logf("tracepoints missing on this kernel: %v", s)
+	}
+}
+
+// TestLoaderAttachesEveryFamily: every event family (M2 step 7) loads and
+// attaches on this kernel - the opt-in ones' programs pass the verifier
+// too - and the signal family's raw signal_generate reports a signal sent
+// to a target from outside the trace (the test process), attributed to the
+// target.
+func TestLoaderAttachesEveryFamily(t *testing.T) {
+	tg := startTarget(t)
+	tr := openTracerWith(t, ibpf.Config{Pids: []uint32{tg.pid()},
+		Probes: ibpf.ProbesFor(tracepoints.AllFamilies())})
+	if s := tr.Skipped(); len(s) != 0 {
+		t.Fatalf("probes skipped with every family: %v", s)
+	}
+	// SIGWINCH: bash ignores it, so the target lives on; the record is
+	// emitted whatever the result.
+	if err := syscall.Kill(int(tg.pid()), syscall.SIGWINCH); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case rec, ok := <-tr.Records():
+			if !ok {
+				t.Fatal("records closed before the signal record")
+			}
+			ev, isSig := rec.(*types.SignalEvent)
+			if isSig && ev.TargetPid == tg.pid() && ev.Sig == int32(syscall.SIGWINCH) &&
+				ev.Scope&types.SIGNAL_SCOPE_TARGET != 0 && ev.Pid == uint32(os.Getpid()) {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("no signal_generate record for SIGWINCH to pid %d", tg.pid())
+		}
 	}
 }
 

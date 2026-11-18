@@ -3,6 +3,7 @@ package bpf
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -33,22 +34,42 @@ func (p Probe) pairKey() string {
 	return "syscalls:" + name
 }
 
-// DefaultProbes is the attach set: enter and exit of every syscall in
-// tracepoints.DefaultSyscalls, sock:inet_sock_set_state, which carries the
-// TCP 4-tuple and state transitions (M1 step 4), and ControlProbes. The
+// rawCategory marks a Probe attached as a raw tracepoint (SEC
+// "raw_tracepoint/<event>"), whose handler gets the tracepoint's arguments
+// - task_struct pointers included - instead of the formatted record.
+const rawCategory = "raw_tracepoint"
+
+// DefaultProbes is the attach set of the default families
+// (tracepoints.DefaultFamilies, decision #7): ProbesFor them.
+func DefaultProbes() []Probe {
+	return ProbesFor(tracepoints.DefaultFamilies())
+}
+
+// ProbesFor is the attach set of the given families: enter and exit of
+// each of their syscalls (tracepoints.SyscallsFor), the socket family's
+// sock:inet_sock_set_state, which carries the TCP 4-tuple and state
+// transitions (M1 step 4), the signal family's signal_generate (the
+// delivery with its sender, M2 step 7), and always ControlProbes. The
 // generated object has handlers for every syscall; only this list decides
 // what attaches.
-func DefaultProbes() []Probe {
+func ProbesFor(families []tracepoints.TraceFamily) []Probe {
 	var probes []Probe
-	for _, sc := range tracepoints.DefaultSyscalls() {
+	for _, sc := range tracepoints.SyscallsFor(families) {
 		for _, dir := range []string{"enter", "exit"} {
 			event := "sys_" + dir + "_" + sc
 			probes = append(probes, Probe{Program: "handle_" + event, Category: "syscalls", Event: event})
 		}
 	}
-	probes = append(probes, Probe{
-		Program: "handle_inet_sock_set_state", Category: "sock", Event: "inet_sock_set_state",
-	})
+	if slices.Contains(families, tracepoints.FamilySocket) {
+		probes = append(probes, Probe{
+			Program: "handle_inet_sock_set_state", Category: "sock", Event: "inet_sock_set_state",
+		})
+	}
+	if slices.Contains(families, tracepoints.FamilySignal) {
+		probes = append(probes, Probe{
+			Program: "handle_signal_generate", Category: rawCategory, Event: "signal_generate",
+		})
+	}
 	return append(probes, ControlProbes()...)
 }
 
@@ -152,7 +173,12 @@ func (t *Tracer) attachTracepoint(p Probe) (*bpf.BPFLink, error) {
 		// so the error is not wrapped (it may carry ENOENT).
 		return nil, fmt.Errorf("program %s: %v", p.Program, err)
 	}
-	link, err := prog.AttachTracepoint(p.Category, p.Event)
+	var link *bpf.BPFLink
+	if p.Category == rawCategory {
+		link, err = prog.AttachRawTracepoint(p.Event)
+	} else {
+		link, err = prog.AttachTracepoint(p.Category, p.Event)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("attach %s to %s: %w", p.Program, p, err)
 	}

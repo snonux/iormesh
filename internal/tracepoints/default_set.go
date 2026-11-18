@@ -1,9 +1,10 @@
 package tracepoints
 
 // DefaultSyscalls returns the syscalls attached when no -trace-* selector
-// is given: M1's walking-skeleton set (PLAN.md, "M1 — Walking skeleton",
-// Probes) — file open/read/write/close and the TCP connect/accept that pin a
-// socket to its fd — plus M2's file surface (fileSurfaceSyscalls).
+// is given: those of DefaultFamilies (decision #7: file and socket on) —
+// M1's walking-skeleton set (PLAN.md, "M1 — Walking skeleton", Probes),
+// M2's file surface (fileSurfaceSyscalls) and the socket calls that carry
+// addresses (socketSyscalls).
 //
 // Only attachment is narrowed. The generator still emits handlers for every
 // syscall the kernel has, so widening the set later is a change here, not a
@@ -12,12 +13,26 @@ package tracepoints
 //
 // A fresh slice per call, so a caller cannot change the default for others.
 func DefaultSyscalls() []string {
-	m1 := []string{
-		"open", "openat", "openat2",
-		"read", "write", "close",
-		"connect", "accept", "accept4",
-	}
-	return append(m1, fileSurfaceSyscalls()...)
+	return SyscallsFor(DefaultFamilies())
+}
+
+// m1FileSyscalls is the file half of M1's set: the opens (also how the
+// scenario markers arrive) and the fd I/O.
+func m1FileSyscalls() []string {
+	return []string{"open", "openat", "openat2", "read", "write", "close"}
+}
+
+// socketSyscalls is the socket family: M1's connect and accepts, which pin
+// a TCP socket to its fd, plus M2 step 7's bind (a unix socket's name, a
+// server's port) and the datagram calls, whose address argument is a UDP
+// peer (internal/c/sockaddr.c). read, write and close come along so the
+// family alone still sees a connection's data. sendmsg/recvmsg (and their
+// mmsg forms) are not attached: their addresses sit inside a msghdr the
+// hooks do not walk yet, and the JDK's DatagramChannel uses sendto and
+// recvfrom.
+func socketSyscalls() []string {
+	return []string{"read", "write", "close",
+		"connect", "accept", "accept4", "bind", "sendto", "recvfrom"}
 }
 
 // fileSurfaceSyscalls is M2 step 4's file surface, on by default
@@ -32,8 +47,8 @@ func DefaultSyscalls() []string {
 //
 // Left out on purpose: access/faccessat (existence probes the JDK fires
 // at syscall frequency, decision #25's per-event cost), getdents, lseek,
-// fsync, mounts and other admin calls, the zero-copy calls (opt-in, M2
-// step 7) and close_range: the JDK 25 child closes its fds one by one
+// fsync, mounts and other admin calls, the zero-copy calls (the opt-in
+// zerocopy family, trace_family.go) and close_range: the JDK 25 child closes its fds one by one
 // through close (strace-measured). A program that does use close_range
 // keeps those fds in the correlator's table, so a number it reuses
 // through an untraced syscall keeps the closed instance's generation.

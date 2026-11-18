@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"iormesh/internal/target"
+	"iormesh/internal/tracepoints"
 )
 
 // runConfig is a validated `iormesh run` command line.
@@ -25,6 +26,9 @@ type runConfig struct {
 	// waits for it before releasing the target, since loading the object
 	// takes seconds and a fixed sleep races.
 	ready string
+	// families are the event families to attach (-trace-families,
+	// decision #7): the defaults plus whatever opt-in ones were named.
+	families []tracepoints.TraceFamily
 }
 
 // defaultDuration bounds every run, ior-style: no unbounded tracer on a
@@ -64,6 +68,8 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 	out := fs.String("out", "", "directory for the trace files (required)")
 	duration := fs.Duration("duration", defaultDuration, "stop after this long")
 	ready := fs.String("ready", "", "create this file once the probes are attached")
+	families := fs.String("trace-families", "",
+		"opt-in event families to add to file and socket: ipc, signal, poll, zerocopy, or all")
 	if err := fs.Parse(args); err != nil {
 		return runConfig{}, fmt.Errorf("%w: %v", errUsage, err)
 	}
@@ -76,8 +82,11 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 		return runConfig{}, fmt.Errorf("%w: -listen-port %d: want 1-65535", errUsage, *port)
 	}
 	cfg.spec.ListenPort = uint16(*port)
+	var err error
+	if cfg.families, err = tracepoints.ParseTraceFamilies(*families); err != nil {
+		return runConfig{}, fmt.Errorf("%w: -trace-families: %v", errUsage, err)
+	}
 	if *pids != "" {
-		var err error
 		if cfg.spec.PIDs, err = parsePids(*pids); err != nil {
 			return runConfig{}, err
 		}

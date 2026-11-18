@@ -5,12 +5,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"iormesh/internal/schema"
 	"iormesh/internal/target"
+	"iormesh/internal/tracepoints"
 )
 
 // fakeProcs makes processAlive answer from a fixed set for the test, and
@@ -50,6 +52,16 @@ func TestParseRunFlags(t *testing.T) {
 	if err != nil || cfg.spec.Mode() != target.ModeListenPort || cfg.spec.ListenPort != 8080 {
 		t.Fatalf("listen port: %+v, %v", cfg.spec, err)
 	}
+	if !slices.Equal(cfg.families, tracepoints.DefaultFamilies()) {
+		t.Fatalf("default families %v", cfg.families)
+	}
+	cfg, err = parseRunFlags([]string{"-pid", "10", "-project", "p", "-out", "o",
+		"-trace-families", "signal,ipc"}, &bytes.Buffer{})
+	want := []tracepoints.TraceFamily{tracepoints.FamilyFile, tracepoints.FamilySocket,
+		tracepoints.FamilyIPC, tracepoints.FamilySignal}
+	if err != nil || !slices.Equal(cfg.families, want) {
+		t.Fatalf("-trace-families: %v, %v", cfg.families, err)
+	}
 }
 
 func TestParseRunFlagsRejects(t *testing.T) {
@@ -77,6 +89,7 @@ func TestParseRunFlagsRejects(t *testing.T) {
 		"missing out":        {"-pid", "10", "-project", "p"},
 		"stray argument":     {"-pid", "10", "-project", "p", "-out", "o", "extra"},
 		"unknown flag":       {"-pid", "10", "-project", "p", "-out", "o", "-bogus"},
+		"unknown family":     {"-pid", "10", "-project", "p", "-out", "o", "-trace-families", "FS"},
 	}
 	for name, args := range cases {
 		if _, err := parseRunFlags(args, &bytes.Buffer{}); !errors.Is(err, errUsage) {

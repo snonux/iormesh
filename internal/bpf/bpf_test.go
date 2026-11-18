@@ -95,7 +95,7 @@ func TestDefaultProbes(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	for _, p := range probes {
-		if p.Program != "handle_"+p.Event && p.Program != "handle_inet_sock_set_state" {
+		if p.Program != "handle_"+p.Event {
 			t.Errorf("program %s does not follow handle_<event> for %s", p.Program, p)
 		}
 		seen[p.String()] = true
@@ -109,19 +109,47 @@ func TestDefaultProbes(t *testing.T) {
 	}
 }
 
-// TestDefaultProbeProgramsExist checks every default program is defined in
+// TestProbesForFamilies: the opt-in families add their syscalls and the
+// signal family its raw signal_generate probe; without the socket family
+// there is no inet_sock_set_state.
+func TestProbesForFamilies(t *testing.T) {
+	all := ProbesFor(tracepoints.AllFamilies())
+	want := 2*len(tracepoints.SyscallsFor(tracepoints.AllFamilies())) + 2 + len(ControlProbes())
+	if len(all) != want {
+		t.Fatalf("%d probes for every family, want %d", len(all), want)
+	}
+	seen := map[string]bool{}
+	for _, p := range all {
+		seen[p.String()] = true
+	}
+	for _, need := range []string{"syscalls:sys_enter_pipe2", "syscalls:sys_exit_kill",
+		"raw_tracepoint:signal_generate", "syscalls:sys_enter_epoll_wait",
+		"syscalls:sys_exit_sendfile64"} {
+		if !seen[need] {
+			t.Errorf("probes for every family lack %s", need)
+		}
+	}
+	for _, p := range ProbesFor([]tracepoints.TraceFamily{tracepoints.FamilyFile}) {
+		if p.Category == "sock" || p.Category == rawCategory {
+			t.Errorf("file family alone attaches %s", p)
+		}
+	}
+}
+
+// TestDefaultProbeProgramsExist checks every program of every family is defined in
 // the C the object is built from, so a renamed handler fails here and not
 // as an attach error on a host.
 func TestDefaultProbeProgramsExist(t *testing.T) {
 	var src []byte
-	for _, f := range []string{"../c/generated_tracepoints.c", "../c/sock.c", "../c/exec.c"} {
+	for _, f := range []string{"../c/generated_tracepoints.c", "../c/sock.c", "../c/exec.c",
+		"../c/signal.c"} {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
 		}
 		src = append(src, b...)
 	}
-	for _, p := range DefaultProbes() {
+	for _, p := range ProbesFor(tracepoints.AllFamilies()) {
 		def := regexp.MustCompile(`int\s+` + regexp.QuoteMeta(p.Program) + `\s*\(`)
 		if !def.Match(src) {
 			t.Errorf("program %s not defined in internal/c", p.Program)

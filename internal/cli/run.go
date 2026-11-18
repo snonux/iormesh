@@ -75,7 +75,8 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	tr, err := bpf.Open(bpf.Config{Pids: pids, ExecWatch: cfg.spec.Mode() == target.ModePattern})
+	tr, err := bpf.Open(bpf.Config{Pids: pids, ExecWatch: cfg.spec.Mode() == target.ModePattern,
+		Probes: bpf.ProbesFor(cfg.families)})
 	if err != nil {
 		return err
 	}
