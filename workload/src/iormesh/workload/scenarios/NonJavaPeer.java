@@ -65,8 +65,10 @@ public final class NonJavaPeer implements Scenario {
     public void run(String role, Map<String, String> opts) throws Exception {
         Options.requireRole(NAME, role, Set.of("solo"));
         Options.requireKnown(opts, Set.of(Workdir.OPTION, PEER_OPTION));
-        Path peer = peerBinary(opts);
+        // The workdir first: a bad --dir is a run failure (exit 1) even on
+        // a host where the missing peer would otherwise make it a skip.
         try (Workdir wd = Workdir.open(opts)) {
+            Path peer = peerBinary(opts);
             Path log = wd.file(LOG);
             try {
                 exchange(peer, log);
@@ -95,7 +97,12 @@ public final class NonJavaPeer implements Scenario {
         return p;
     }
 
-    /** The directory holding workload.jar (or the class directory). */
+    /**
+     * The directory holding workload.jar, where mage builds echopeer. Run
+     * from a class directory instead, the code source is that directory
+     * and this is its parent (workload/ in the repo), which holds no
+     * echopeer binary — the scenario then skips unless --peer is given.
+     */
     private static Path besideCode() throws URISyntaxException {
         Path code = Path.of(NonJavaPeer.class.getProtectionDomain().getCodeSource()
                 .getLocation().toURI());

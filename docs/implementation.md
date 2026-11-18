@@ -1116,7 +1116,13 @@ scenarios landing first (principle #1).
    (app → process). `restart`'s golden declares them from one
    `$a1`; the graph must accept the `app` node type and the
    `incarnation` edge, and the normalizer passes `app:` ids
-   through unchanged (they carry nothing run-specific).
+   through unchanged (they carry nothing run-specific). Its
+   bracket prune keeps an `incarnation` edge, and so its app
+   node, when the edge's process has events in the bracket —
+   the app node never has events of its own
+   (`TestRestartGoldenEndToEnd` runs the golden through
+   `Normalize`). The edge type is a normalize-local constant
+   until the graph schema defines it.
 
 4. **File surface**: attach the remaining file families (ior's
    family table, `internal/tracepoints/family.go`). For each

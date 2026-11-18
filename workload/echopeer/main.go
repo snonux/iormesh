@@ -12,10 +12,12 @@
 // It brackets itself with the scenario's markers — failed opens of
 // /iormesh-marker/non-java-peer/{begin,end}, exactly what the Java
 // workload's Marker does — so the normalizer's per-process cut keeps it
-// although it is a child the JVM forked. Every syscall is a raw one from
-// package syscall on the main thread, never through Go's netpoller: the
-// declared syscalls (see workload/scenarios/non-java-peer/expect.json)
-// are then exactly the ones below, blocking, on TID == PID.
+// although it is a child the JVM forked. Every scenario socket and file
+// syscall is a raw one from package syscall on the main thread, never
+// through Go's netpoller: the declared syscalls (see
+// workload/scenarios/non-java-peer/expect.json) are then exactly the ones
+// below, blocking, on TID == PID. The Go runtime's own syscalls (futex,
+// mmap, nanosleep on other threads) are not declared.
 //
 // Built cgo-free by `mage workloadBuild`. The go:debug lines and the
 // thread lock follow ior's cmd/ioworkload for the same reasons: no

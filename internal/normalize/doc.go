@@ -10,6 +10,6 @@
 //
 // Check asserts declared ⊆ collected: every declared event appears in
 // its declared per-thread order, every declared edge exists, with the
-// expectation's symbols ($p1, $t1, $fd1, $port1, $h1, $c1) bound
+// expectation's symbols ($p1, $t1, $fd1, $port1, $h1, $c1, $a1) bound
 // consistently, and no must_not_appear string occurs anywhere.
 package normalize

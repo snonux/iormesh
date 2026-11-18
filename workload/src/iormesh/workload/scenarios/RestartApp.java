@@ -58,10 +58,11 @@ public final class RestartApp {
             return 0;
         }
         String got = new String(buf, 0, Math.max(n, 0), StandardCharsets.US_ASCII);
-        if (n != STATE_LEN || !got.startsWith(PREFIX)) {
+        char digit = n == STATE_LEN ? got.charAt(STATE_LEN - 1) : ' ';
+        if (!got.startsWith(PREFIX) || !Character.isDigit(digit)) {
             throw new IOException("bad restart state: " + got);
         }
-        return got.charAt(STATE_LEN - 1) - '0';
+        return digit - '0';
     }
 
     private static void save(Path state, int incarnation) throws IOException {

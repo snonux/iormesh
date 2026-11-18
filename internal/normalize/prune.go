@@ -4,6 +4,11 @@ import (
 	"iormesh/internal/schema"
 )
 
+// edgeIncarnation links an app node to one process incarnation it matched
+// (M2 step 3). It lives here until the M2 graph schema (task pa4) defines
+// the app node and this edge; then this becomes schema's constant.
+const edgeIncarnation = "incarnation"
+
 // prune keeps the part of the graph the bracketed events account for. The
 // graph has no times, so without this a JVM startup file opened outside
 // the bracket would still satisfy a declared edge or trip must_not_appear,
@@ -13,10 +18,17 @@ import (
 // (path or new_path), and connected edges whose conn_id a bracketed event
 // of that process carries; then exactly the nodes those edges and
 // processes name. The correlator must therefore set conn_id on the socket
-// events of a connection (docs/implementation.md M1 step 6).
+// events of a connection (docs/implementation.md M1 step 6). An
+// incarnation edge (app → process, M2 step 3) is kept when its process
+// has events in the bracket: the app node never has events of its own, so
+// testing From like the other edges would always drop it, and restart's
+// golden could never pass.
 func prune(g schema.Graph, events []schema.Event) schema.Graph {
 	seen := touched(events)
 	keep := func(e schema.Edge) bool {
+		if e.Type == edgeIncarnation {
+			return seen[e.To]
+		}
 		if !seen[e.From] {
 			return false
 		}
