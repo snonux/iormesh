@@ -2,7 +2,7 @@
 
 // Adapted from ior internal/c/ior.bpf.c @ b21afc50328c.
 // Changes: renamed to iormesh.bpf.c; rawsyscall.c not included; bpf_endian.h
-// and sock.c added.
+// and sock.c added; sockaddr.c and signal.c added (M2 step 7).
 
 #include "vmlinux.h"
 #include <bpf/bpf_core_read.h>
@@ -45,6 +45,13 @@
 // back to pid/fd through the socket registered at connect/accept (iormesh).
 // The generated connect and accept handlers call its hooks.
 #include "sock.c"
+
+// Address arguments and socket addresses of bind, connect, sendto, recvfrom
+// and AF_UNIX accepts (M2 step 7), sent by hooks of the generated handlers.
+#include "sockaddr.c"
+
+// Signals sent by or to traced processes, from signal_generate (M2 step 7).
+#include "signal.c"
 
 // Restart fold: the pending-restart state behind filter.c's enter/exit hooks
 // and its two probes (signal:signal_deliver, a second sys_enter_rt_sigreturn).

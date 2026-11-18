@@ -38,11 +38,47 @@ func TestSockOwnerHooksInCommittedHandlers(t *testing.T) {
 // TestSockOwnerHookOnlyForItsHandlers: the enter sides of accept and an
 // unrelated syscall render no socket registration.
 func TestSockOwnerHookOnlyForItsHandlers(t *testing.T) {
-	for _, name := range []string{"sys_enter_accept", "sys_enter_accept4", "sys_enter_read"} {
+	for _, name := range []string{"sys_enter_accept", "sys_enter_accept4", "sys_enter_read", "sys_exit_write"} {
 		var b strings.Builder
 		renderSockOwnerHook(&b, name)
 		if b.Len() != 0 {
 			t.Errorf("%s renders %q, want nothing", name, b.String())
 		}
+	}
+}
+
+// TestSockAddrHooksInCommittedHandlers pins the address hooks of M2 step 7
+// (internal/c/sockaddr.c) the same way: once each, behind filter() and
+// ahead of the per-tid hook, so a sampled-out call still parks and reports
+// its address, and the exit's report precedes the exit record.
+func TestSockAddrHooksInCommittedHandlers(t *testing.T) {
+	artifact, err := readGeneratedTracepointsC()
+	if err != nil {
+		t.Fatalf("read generated tracepoints C: %v", err)
+	}
+	if got := strings.Count(artifact, "iormesh_addr_on_"); got != len(sockAddrHooks) {
+		t.Errorf("artifact calls the address hooks %d times, want %d", got, len(sockAddrHooks))
+	}
+	for name, hook := range sockAddrHooks {
+		body := handlerBody(t, artifact, name)
+		hookAt := strings.Index(body, hook+";")
+		filterAt := strings.Index(body, "if (filter(&pid, &tid))")
+		syscallHookAt := strings.Index(body, "if (!ior_on_syscall_")
+		if hookAt < 0 || !(filterAt < hookAt && hookAt < syscallHookAt) {
+			t.Errorf("%s: address hook missing or misplaced:\n%s", name, body)
+		}
+	}
+}
+
+// TestConnectRendersBothHooks: connect's enter registers its TCP socket
+// first and then parks its address; neither replaces the other.
+func TestConnectRendersBothHooks(t *testing.T) {
+	var b strings.Builder
+	renderSockOwnerHook(&b, "sys_enter_connect")
+	got := b.String()
+	owner := strings.Index(got, sockOwnerHooks["sys_enter_connect"])
+	addr := strings.Index(got, sockAddrHooks["sys_enter_connect"])
+	if owner < 0 || addr < 0 || owner > addr {
+		t.Errorf("connect enter renders %q, want the owner hook, then the address hook", got)
 	}
 }

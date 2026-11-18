@@ -152,6 +152,8 @@ const RING_FDS_EVENT = 67
 const TCP_STATE_EVENT = 68
 const EXEC_ARGV_EVENT = 69
 const PROCESS_ARGV_EVENT = 70
+const SOCK_ADDR_EVENT = 71
+const SIGNAL_EVENT = 72
 const UNCLASSIFIED = 0
 const READ_CLASSIFIED = 1
 const WRITE_CLASSIFIED = 2
@@ -201,6 +203,12 @@ const TCP_STATE_SNAPSHOT = 0
 const TCP_ADDR_LEN = 16
 const TCP_STATE_EVENT_SCHEMA_VERSION = 1
 const MAX_ARGV_LENGTH = 1024
+const SOCK_ADDR_PATH_NONE = 0
+const SOCK_ADDR_PATH_NAMED = 1
+const SOCK_ADDR_PATH_ABSTRACT = 2
+const SOCK_ADDR_PATH_LENGTH = 108
+const SIGNAL_SCOPE_SENDER = 1
+const SIGNAL_SCOPE_TARGET = 2
 const SYS_ENTER_SOCKET TraceId = 1899
 const SYS_EXIT_SOCKET TraceId = 1898
 const SYS_ENTER_SOCKETPAIR TraceId = 1897
@@ -3945,4 +3953,159 @@ func (e *ExecArgvEvent) Bytes() ([]byte, error) {
 
 func (e *ExecArgvEvent) Recycle() {
 	poolOfExecArgvEvents.Put(e)
+}
+
+type SockAddrEvent struct {
+	EventType  EventType
+	TraceId    TraceId
+	Time       uint64
+	Pid        uint32
+	Tid        uint32
+	Fd         int32
+	Family     uint32
+	SockType   uint32
+	LocalPort  uint32
+	RemotePort uint32
+	ArgFamily  uint32
+	ArgPort    uint32
+	PathKind   uint32
+	Sk         uint64
+	Peer       uint64
+	LocalAddr  [TCP_ADDR_LEN]byte
+	RemoteAddr [TCP_ADDR_LEN]byte
+	ArgAddr    [TCP_ADDR_LEN]byte
+	Path       [SOCK_ADDR_PATH_LENGTH]byte
+	Reserved   uint32
+}
+
+func (s SockAddrEvent) String() string {
+	return fmt.Sprintf("EventType:%v TraceId:%v Time:%v Pid:%v Tid:%v Fd:%v Family:%v SockType:%v LocalPort:%v RemotePort:%v ArgFamily:%v ArgPort:%v PathKind:%v Sk:%v Peer:%v LocalAddr:%v RemoteAddr:%v ArgAddr:%v Path:%v Reserved:%v", s.EventType, s.TraceId, s.Time, s.Pid, s.Tid, s.Fd, s.Family, s.SockType, s.LocalPort, s.RemotePort, s.ArgFamily, s.ArgPort, s.PathKind, s.Sk, s.Peer, hex.EncodeToString(s.LocalAddr[:]), hex.EncodeToString(s.RemoteAddr[:]), hex.EncodeToString(s.ArgAddr[:]), StringValue(s.Path[:]), s.Reserved)
+}
+
+func (s SockAddrEvent) Equals(other any) bool {
+	otherConcrete, ok := other.(*SockAddrEvent)
+	if !ok {
+		return false
+	}
+	return s.EventType == otherConcrete.EventType && s.TraceId == otherConcrete.TraceId && s.Time == otherConcrete.Time && s.Pid == otherConcrete.Pid && s.Tid == otherConcrete.Tid && s.Fd == otherConcrete.Fd && s.Family == otherConcrete.Family && s.SockType == otherConcrete.SockType && s.LocalPort == otherConcrete.LocalPort && s.RemotePort == otherConcrete.RemotePort && s.ArgFamily == otherConcrete.ArgFamily && s.ArgPort == otherConcrete.ArgPort && s.PathKind == otherConcrete.PathKind && s.Sk == otherConcrete.Sk && s.Peer == otherConcrete.Peer && s.LocalAddr == otherConcrete.LocalAddr && s.RemoteAddr == otherConcrete.RemoteAddr && s.ArgAddr == otherConcrete.ArgAddr && s.Path == otherConcrete.Path && s.Reserved == otherConcrete.Reserved
+}
+
+func (s *SockAddrEvent) GetEventType() EventType {
+	return s.EventType
+}
+
+func (s *SockAddrEvent) GetTraceId() TraceId {
+	return s.TraceId
+}
+
+func (s *SockAddrEvent) GetPid() uint32 {
+	return s.Pid
+}
+
+func (s *SockAddrEvent) GetTid() uint32 {
+	return s.Tid
+}
+
+func (s *SockAddrEvent) GetTime() uint64 {
+	return s.Time
+}
+
+var poolOfSockAddrEvents = sync.Pool{
+	New: func() any { return &SockAddrEvent{} },
+}
+
+func NewSockAddrEvent(raw []byte) *SockAddrEvent {
+	s := poolOfSockAddrEvents.Get().(*SockAddrEvent)
+	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, s); err != nil {
+		*s = SockAddrEvent{}
+		poolOfSockAddrEvents.Put(s)
+		return nil
+	}
+	return s
+}
+
+func (s *SockAddrEvent) Bytes() ([]byte, error) {
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.LittleEndian, s)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (s *SockAddrEvent) Recycle() {
+	poolOfSockAddrEvents.Put(s)
+}
+
+type SignalEvent struct {
+	EventType EventType
+	TraceId   TraceId
+	Time      uint64
+	Pid       uint32
+	Tid       uint32
+	TargetPid uint32
+	TargetTid uint32
+	Sig       int32
+	Result    int32
+	Group     uint32
+	Scope     uint32
+}
+
+func (s SignalEvent) String() string {
+	return fmt.Sprintf("EventType:%v TraceId:%v Time:%v Pid:%v Tid:%v TargetPid:%v TargetTid:%v Sig:%v Result:%v Group:%v Scope:%v", s.EventType, s.TraceId, s.Time, s.Pid, s.Tid, s.TargetPid, s.TargetTid, s.Sig, s.Result, s.Group, s.Scope)
+}
+
+func (s SignalEvent) Equals(other any) bool {
+	otherConcrete, ok := other.(*SignalEvent)
+	if !ok {
+		return false
+	}
+	return s.EventType == otherConcrete.EventType && s.TraceId == otherConcrete.TraceId && s.Time == otherConcrete.Time && s.Pid == otherConcrete.Pid && s.Tid == otherConcrete.Tid && s.TargetPid == otherConcrete.TargetPid && s.TargetTid == otherConcrete.TargetTid && s.Sig == otherConcrete.Sig && s.Result == otherConcrete.Result && s.Group == otherConcrete.Group && s.Scope == otherConcrete.Scope
+}
+
+func (s *SignalEvent) GetEventType() EventType {
+	return s.EventType
+}
+
+func (s *SignalEvent) GetTraceId() TraceId {
+	return s.TraceId
+}
+
+func (s *SignalEvent) GetPid() uint32 {
+	return s.Pid
+}
+
+func (s *SignalEvent) GetTid() uint32 {
+	return s.Tid
+}
+
+func (s *SignalEvent) GetTime() uint64 {
+	return s.Time
+}
+
+var poolOfSignalEvents = sync.Pool{
+	New: func() any { return &SignalEvent{} },
+}
+
+func NewSignalEvent(raw []byte) *SignalEvent {
+	s := poolOfSignalEvents.Get().(*SignalEvent)
+	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, s); err != nil {
+		*s = SignalEvent{}
+		poolOfSignalEvents.Put(s)
+		return nil
+	}
+	return s
+}
+
+func (s *SignalEvent) Bytes() ([]byte, error) {
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.LittleEndian, s)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (s *SignalEvent) Recycle() {
+	poolOfSignalEvents.Put(s)
 }

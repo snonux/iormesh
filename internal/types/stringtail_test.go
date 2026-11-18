@@ -1,5 +1,7 @@
 // Adapted from ior internal/types/stringtail_test.go @ b21afc50328c.
-// Changes: TCP_ADDR_LEN (tcp_state_event addresses) is a binary size.
+// Changes: TCP_ADDR_LEN (tcp_state_event addresses) is a binary size;
+// fillStringFields skips the binary addresses of sock_addr_event, the first
+// struct with both kinds of byte array (M2 step 7).
 
 package types
 
@@ -147,7 +149,7 @@ func stringBearingEvents() []fmt.Stringer {
 		&OpenEvent{}, &OpenNameFixupEvent{}, &ExecEvent{}, &NameEvent{}, &PathEvent{},
 		&FdPathEvent{}, &EventfdEvent{}, &EventfdNameEvent{}, &TwoFdEvent{},
 		&TwoFdNamesEvent{}, &ProcessExecEvent{}, &TaskNewtaskEvent{}, &TaskRenameEvent{},
-		&FdEvent{}, &FdNameEvent{}, &ExecArgvEvent{},
+		&FdEvent{}, &FdNameEvent{}, &ExecArgvEvent{}, &SockAddrEvent{},
 	}
 }
 
@@ -160,7 +162,8 @@ func fillStringFields(ev any, terminate bool) []string {
 	var written []string
 	for i := 0; i < v.NumField(); i++ {
 		f := v.Field(i)
-		if f.Kind() != reflect.Array || f.Type().Elem().Kind() != reflect.Uint8 {
+		if f.Kind() != reflect.Array || f.Type().Elem().Kind() != reflect.Uint8 ||
+			binaryFieldNames[v.Type().Field(i).Name] {
 			continue
 		}
 		s := fmt.Sprintf("/s%d", i)
@@ -267,6 +270,11 @@ func TestStringBearingEventsListIsComplete(t *testing.T) {
 // data, not a NUL-terminated string: a file handle and the
 // io_uring_rsrc_update array of a registered-ring record. String() renders
 // them as hex (TestFileHandleFieldRendersAsHex, TestRingFdsFieldRendersAsHex).
+// binaryFieldNames are the TCP_ADDR_LEN fields of the string-bearing
+// sock_addr_event (M2 step 7): addresses, rendered as hex like
+// tcp_state_event's, which fillStringFields must not fill with a string.
+var binaryFieldNames = map[string]bool{"LocalAddr": true, "RemoteAddr": true, "ArgAddr": true}
+
 var binaryFieldSizes = map[string]bool{
 	"IOR_MAX_HANDLE_SZ":  true,
 	"IOR_RING_FDS_BYTES": true,

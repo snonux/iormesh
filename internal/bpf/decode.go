@@ -4,7 +4,8 @@
 // Changes: only the event type → decoder mapping is kept (ior's enter
 // filters, exit handlers and control handlers belong to its event loop, the
 // correlator's job here); TCP_STATE_EVENT (M1 step 4), EXEC_ARGV_EVENT
-// (M2 step 2) and PROCESS_ARGV_EVENT (M2 step 8) added.
+// (M2 step 2), PROCESS_ARGV_EVENT (M2 step 8), SOCK_ADDR_EVENT and
+// SIGNAL_EVENT (M2 step 7) added.
 
 package bpf
 
@@ -101,6 +102,10 @@ func addControlDecoders(d map[types.EventType]decoder) {
 	// The same record shape, for a traced process's exec: its EventType
 	// tells the caller it is to be recorded, not judged.
 	d[types.PROCESS_ARGV_EVENT] = typed(types.NewExecArgvEvent)
+	// M2 step 7: a socket call's addresses (sockaddr.c) and a signal
+	// sent by or to a traced process (signal.c).
+	d[types.SOCK_ADDR_EVENT] = typed(types.NewSockAddrEvent)
+	d[types.SIGNAL_EVENT] = typed(types.NewSignalEvent)
 }
 
 // decodeFdSizeEvent widens an fd+size record to the FdEvent shape the

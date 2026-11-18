@@ -19,18 +19,48 @@ var sockOwnerHooks = map[string]string{
 	"sys_exit_accept4":  "iormesh_sock_on_accept(pid, ctx->ret)",
 }
 
+// sockAddrHooks names, per tracepoint, the sockaddr.c hook that reports a
+// socket call's addresses (internal/c/sockaddr.c, M2 step 7): the enter of
+// bind, connect, sendto and recvfrom parks the address argument (args[1],
+// args[4]), their exit sends it with the socket's own addresses right before
+// the exit record; the accept exits report an accepted AF_UNIX socket and
+// its peer. bind and connect report failures too, connect never a TCP
+// socket (IORMESH_ADDR_* in sockaddr.c).
+var sockAddrHooks = map[string]string{
+	"sys_enter_bind":     "iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[1])",
+	"sys_enter_connect":  "iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[1])",
+	"sys_enter_sendto":   "iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[4])",
+	"sys_enter_recvfrom": "iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[4])",
+	"sys_exit_bind": "iormesh_addr_on_exit(pid, tid, SYS_EXIT_BIND, ctx->ret, " +
+		"IORMESH_ADDR_FAILED_TOO)",
+	"sys_exit_connect": "iormesh_addr_on_exit(pid, tid, SYS_EXIT_CONNECT, ctx->ret, " +
+		"IORMESH_ADDR_FAILED_TOO | IORMESH_ADDR_NOT_TCP)",
+	"sys_exit_sendto":   "iormesh_addr_on_exit(pid, tid, SYS_EXIT_SENDTO, ctx->ret, 0)",
+	"sys_exit_recvfrom": "iormesh_addr_on_exit(pid, tid, SYS_EXIT_RECVFROM, ctx->ret, 0)",
+	"sys_exit_accept":   "iormesh_addr_on_accept(pid, tid, SYS_EXIT_ACCEPT, ctx->ret)",
+	"sys_exit_accept4":  "iormesh_addr_on_accept(pid, tid, SYS_EXIT_ACCEPT4, ctx->ret)",
+}
+
 // renderSockOwnerHook writes the socket (un)registration call of the handler
-// named name, if it has one. It goes right behind filter() and ahead of the
+// named name, if it has one, and then its address hook (sockAddrHooks). It goes right behind filter() and ahead of the
 // per-tid hook on purpose: that hook returns early when sampling sheds the
 // syscall's own record, but the registration decides whether the
 // connection's 4-tuple is reported at all, and the connect exit's cleanup
 // whether a dead socket's address stays registered, so neither may depend
 // on the sampling rate.
+// The address hooks sit in the same place for the same reason: whether a
+// datagram's peer is reported must not depend on sampling either.
 func renderSockOwnerHook(b *strings.Builder, name string) {
-	hook, ok := sockOwnerHooks[name]
-	if !ok {
+	owner, hasOwner := sockOwnerHooks[name]
+	addr, hasAddr := sockAddrHooks[name]
+	if !hasOwner && !hasAddr {
 		return
 	}
-	fmt.Fprintf(b, "    %s;\n", hook)
+	if hasOwner {
+		fmt.Fprintf(b, "    %s;\n", owner)
+	}
+	if hasAddr {
+		fmt.Fprintf(b, "    %s;\n", addr)
+	}
 	b.WriteString("\n")
 }
