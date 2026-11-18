@@ -1083,8 +1083,11 @@ scenarios landing first (principle #1).
    an entry the kernel may have removed: a pattern match is
    adopted only by updating its still-existing pending entry
    (`AdoptExec`, `BPF_EXIST`), and a match the start scan found is
-   removed again if it exited before its insert. So no entry
-   outlives its process, and a reused PID is not traced. The three handlers attach as `bpf.ControlProbes`. The
+   removed again if it exited before its insert — "exited" includes
+   a task already in `do_exit` (`PF_EXITING` in `/proc/<pid>/stat`),
+   whose exit handler has run while its state still reads R/S/D.
+   So no entry outlives its process, and a reused PID is not
+   traced. The three handlers attach as `bpf.ControlProbes`. The
    correlator registers a forked child at its `task_newtask`
    record (its incarnation is read from `/proc` while it surely
    exists) and drops a dead thread's pending enter at its exit.

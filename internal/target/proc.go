@@ -24,6 +24,9 @@ type ProcFS struct {
 type Stat struct {
 	State byte   // field 3: R, S, D, Z (zombie), X (dead), …
 	PPID  uint32 // field 4
+	// Flags is field 9, the task's PF_* flags; PF_EXITING marks a task
+	// already in do_exit.
+	Flags uint64
 	// StartNS is field 22, starttime, on the boot clock in ns: the pid
 	// incarnation, which tells a reused PID from its predecessor.
 	StartNS uint64
@@ -42,18 +45,19 @@ func ParseStat(line []byte) (Stat, error) {
 	if i < 0 {
 		return Stat{}, ErrStat
 	}
-	// fields[0] is field 3 (state), so ppid (4) is fields[1] and
-	// starttime (22) is fields[19].
+	// fields[0] is field 3 (state), so ppid (4) is fields[1], flags (9)
+	// is fields[6] and starttime (22) is fields[19].
 	fields := strings.Fields(string(line[i+1:]))
 	if len(fields) < 20 || len(fields[0]) != 1 {
 		return Stat{}, ErrStat
 	}
 	ppid, err1 := strconv.ParseUint(fields[1], 10, 32)
-	ticks, err2 := strconv.ParseUint(fields[19], 10, 64)
-	if err1 != nil || err2 != nil {
+	flags, err2 := strconv.ParseUint(fields[6], 10, 64)
+	ticks, err3 := strconv.ParseUint(fields[19], 10, 64)
+	if err1 != nil || err2 != nil || err3 != nil {
 		return Stat{}, ErrStat
 	}
-	return Stat{State: fields[0][0], PPID: uint32(ppid),
+	return Stat{State: fields[0][0], PPID: uint32(ppid), Flags: flags,
 		StartNS: ticks * (1_000_000_000 / clockTicks)}, nil
 }
 
@@ -105,15 +109,26 @@ func (p ProcFS) Tgid(pid uint32) (uint32, error) {
 	return 0, fmt.Errorf("target: /proc/%d/status has no Tgid line", pid)
 }
 
+// pfExiting is the kernel's PF_EXITING task flag (include/linux/sched.h).
+const pfExiting = 0x4
+
 // Alive reports whether pid is still the process a session started
 // tracing: it exists, is a thread group's leader rather than another
-// process's thread, is neither a zombie nor dead, and — when startNS is
+// process's thread, is neither a zombie, dead nor exiting, and — when
+// startNS is
 // not 0 — has the start time recorded then, so a reused PID is not taken
 // for the process that exited. A bare existence check kept a run alive
 // for a recycled PID, a zombie or a thread id.
+//
+// Exiting matters for the start scan's re-check after AddTarget: the BPF
+// exit handler (sched_process_exit) runs inside do_exit before the task
+// turns zombie, and in between — file and mm teardown, milliseconds for
+// a big JVM — its state still reads R/S/D. PF_EXITING is set before
+// that tracepoint fires, so a process whose handler already ran never
+// passes as alive and its re-inserted entry is removed.
 func (p ProcFS) Alive(pid uint32, startNS uint64) bool {
 	st, err := p.Stat(pid)
-	if err != nil || st.State == 'Z' || st.State == 'X' || st.State == 'x' {
+	if err != nil || st.State == 'Z' || st.State == 'X' || st.State == 'x' || st.Flags&pfExiting != 0 {
 		return false
 	}
 	if startNS != 0 && st.StartNS != startNS {

@@ -64,7 +64,7 @@ func (f fakeProc) socket(pid uint32, fd int, inode string) {
 
 func TestParseStat(t *testing.T) {
 	st, err := ParseStat([]byte("42 (we ird) comm)) S 7 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 12345 0 0"))
-	if err != nil || st.State != 'S' || st.PPID != 7 || st.StartNS != 12345*10_000_000 {
+	if err != nil || st.State != 'S' || st.PPID != 7 || st.Flags != 0 || st.StartNS != 12345*10_000_000 {
 		t.Fatalf("ParseStat = %+v, %v", st, err)
 	}
 	for _, bad := range []string{"", "42 no paren", "42 (x) S 7", "42 (x) S x 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 1"} {
@@ -81,6 +81,10 @@ func TestAlive(t *testing.T) {
 	f.proc(10, 10, 1, 'S', 500, "")
 	f.proc(11, 11, 1, 'Z', 500, "")
 	f.proc(12, 10, 1, 'S', 500, "") // a thread of 10
+	f.proc(14, 14, 1, 'S', 500, "")
+	// 14 is in do_exit: state still S, but PF_EXITING (0x4) set.
+	f.write(filepath.Join(f.root, "14"), "stat",
+		"14 (a (b) c) S 1 1 1 0 -1 4194308 0 0 0 0 0 0 0 0 20 0 1 0 500 0 0")
 	fs := f.fs()
 	cases := []struct {
 		pid   uint32
@@ -93,6 +97,7 @@ func TestAlive(t *testing.T) {
 		{11, 0, false},                // zombie
 		{12, 0, false},                // thread id
 		{13, 0, false},                // gone
+		{14, 0, false},                // exiting, not yet a zombie
 	}
 	for _, c := range cases {
 		if got := fs.Alive(c.pid, c.start); got != c.want {
