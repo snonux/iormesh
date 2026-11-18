@@ -124,7 +124,7 @@ def architecture():
            bold=True)
     boxes = [
         ("collect", "rsync the ready/ segments,", "delete after transfer"),
-        ("merge", "fuse both halves of a", "connection into one edge"),
+        ("build", "fuse both halves of a", "connection into one edge"),
         ("graph + service db", "who talks to whom,", "with named services"),
         ("views + query", "SVG · sequence diagram ·", "slices for humans and LLMs"),
     ]
@@ -143,7 +143,7 @@ def architecture():
 
 def workflow():
     s = Svg(480, "Operator workflow",
-            "add, deploy, trace, collect, merge and explore; collect repeats "
+            "add, deploy, trace, collect, build and explore; collect repeats "
             "while the session runs; expand feeds new hosts back into deploy; "
             "rm cleans up.")
     s.header("Operator workflow",
@@ -154,7 +154,7 @@ def workflow():
         ("deploy", "deploy", "push + start tracer", CYAN),
         ("trace", "≤ 4h, disk-bounded", "1 segment per minute", ROSE),
         ("collect", "collect", "rsync the segments", CYAN),
-        ("merge", "(part of collect)", "fuse cross-host edges", CYAN),
+        ("build", "build", "merge, render outputs", CYAN),
         ("explore", "query · svg", "views, sequence, LLM", CYAN),
     ]
     for i, (title, cmd, note, color) in enumerate(steps):
@@ -169,6 +169,7 @@ def workflow():
     # collect repeats while the tracer is still running
     s.path("M580 148 C580 112 420 112 420 146", CYAN, "5 4")
     s.text(500, 108, "repeat while the session runs", 11, CYAN, "middle")
+    s.text(628, 262, "refresh = collect + build", 11, MUTED, "middle", mono=True)
     # expansion loop: unresolved edges become new hosts
     s.rect(330, 300, 300, 104, BOX, CYAN)
     s.text(344, 327, "expand", 15, bold=True)

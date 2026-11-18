@@ -1081,8 +1081,11 @@ width on loopback, veth and a real LAN.
 
 ## M4 — controller
 
-**Goal**: `add` → `deploy` → `collect` → `rm`, merge on the
-laptop. PLAN.md: "M4 — Controller".
+**Goal**: `add` → `deploy` → `refresh` → `rm`, merge on the
+laptop. `collect` and `build` are separate commands — sync only,
+and offline build only — and `refresh` is the two in a row;
+keep them separate in code too (`collect.go` never imports the
+merge). PLAN.md: "M4 — Controller".
 
 ![Operator workflow](diagrams/workflow.svg)
 
@@ -1259,13 +1262,13 @@ CREATE TABLE interaction (
 CREATE TABLE naming_rule (
   id INTEGER PRIMARY KEY, host_glob TEXT NOT NULL,
   port INTEGER, service TEXT NOT NULL);   -- human input: never
-                                          -- touched by collect
+                                          -- touched by build
 ```
 
-`collect` only ever upserts `endpoint` and `interaction`
+`build` only ever upserts `endpoint` and `interaction`
 (`ON CONFLICT … DO UPDATE` widening `first_seen`/`last_seen`,
 adding to `connections` by segment — track merged segment names
-in a fourth table so re-collecting is idempotent). Names are
+in a fourth table so rebuilding is idempotent). Names are
 resolved at read time by joining `naming_rule`, so a new rule
 applies retroactively without rewriting anything.
 

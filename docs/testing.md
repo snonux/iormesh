@@ -50,7 +50,7 @@ introspection.
 
 - Deterministic SVG gives the scenarios visual goldens (rendered
   from normalized graphs).
-- The controller flow (add → deploy → collect → rm) is rehearsed
+- The controller flow (add → deploy → refresh → rm) is rehearsed
   on two test hosts; its merged mesh must equal the single-host
   result for single-host scenarios.
 - Mesh expansion is rehearsed on the microservices topology with

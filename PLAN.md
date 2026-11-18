@@ -473,13 +473,19 @@ Kubernetes (M7) build on it.
   exits. Together with the 4h bound, tracing is bounded by
   disk too — it never fills the partition. A startup check
   fails fast if the partition is already at the limit.
-- **Collect**: iterate the registry, sync the trace files,
-  merge offline by stable ids — connection ids, 4-tuple joins
-  with the NAT-tolerant key (decision #26), clock
-  reconciliation — fusing the outbound side on host A with the
-  inbound side on host B into single cross-host edges. An
-  outbound edge whose far end has no tracer stays in the graph,
-  marked *unresolved* (M6 feeds on these). **Sync is streaming
+- **Three commands, two jobs**:
+  - `iormeshctl collect` only collects: it syncs trace segments
+    from the servers to the controller. It touches the network
+    and nothing else.
+  - `iormeshctl build` only builds: it merges what has been
+    collected into the graph, updates the service database and
+    renders the outputs. It is offline, repeatable, and never
+    contacts a server — so a build can be rerun after naming
+    services, with other projects, or on a plane.
+  - `iormeshctl refresh` does both, collect then build — the
+    everyday command.
+- **Collect**: iterate the registry and sync the trace files.
+  **Sync is streaming
   and rsync-based**: `collect` is repeatable during a live
   session and rsyncs each server's `ready/` folder over SSH
   with `--remove-source-files`, unprivileged, so a segment is
@@ -493,27 +499,35 @@ Kubernetes (M7) build on it.
   every platform, always — and stay there until the operator
   deletes them; nothing is auto-cleaned.
   Collect is project-aware: one project at a time, or
-  several together — when project A's app calls project B's
-  app over TCP, the same join fuses both sides into one
-  cross-project edge, giving the complete picture across
-  both. All views (M5) then run locally on the controller.
-  From M4 on, `collect` ends by printing a plain-text summary
-  of the merged mesh (services, edges, health, unresolved
-  peers); the site and the TUI follow in M5.
+  several together.
+- **Build**: merge the collected segments offline by stable
+  ids — connection ids, 4-tuple joins with the NAT-tolerant
+  key (decision #26), clock reconciliation — fusing the
+  outbound side on host A with the inbound side on host B into
+  single cross-host edges. An outbound edge whose far end has
+  no tracer stays in the graph, marked *unresolved* (M6 feeds
+  on these). Build is project-aware too: when project A's app
+  calls project B's app over TCP and both are built together,
+  the same join fuses both sides into one cross-project edge,
+  giving the complete picture across both. All views (M5) run
+  locally on the controller, from the build's output. From M4
+  on, `build` ends by printing a plain-text summary of the
+  merged mesh (services, edges, health, unresolved peers);
+  the site and the TUI follow in M5.
 - **Clock reconciliation from the traffic itself**: every
   fused connection gives send-before-receive constraints in
   both directions; together they bound the clock offset per
   host pair. The merge records the bound, and cross-host order
   is derived from happens-before (per-thread order plus
   send→receive edges), never from raw wall-clock comparison.
-- **Service-interaction database**: every `collect` also
+- **Service-interaction database**: every `build` also
   analyzes the merged traces and updates a controller-side
   database of app-to-app network interaction — per observed
   connection: client app (project, host, app identity),
   server endpoint (hostname as resolved via the agent's DNS
   hooks, IP, port), protocol hints (plain vs TLS, http
   host/path), counts and activity windows — keyed so
-  re-collecting the same mesh updates rows instead of
+  rebuilding the same mesh updates rows instead of
   duplicating them. The database is **additive**: new sessions,
   hosts and projects fold in, and human input is never
   overwritten. Humans name services through the CLI, never by
@@ -521,7 +535,7 @@ Kubernetes (M7) build on it.
   endpoints (unnamed ones first), and naming rules map
   hostname patterns + port numbers to service names
   (`orders*` + 8443 → `orders`); rules apply retroactively
-  and to every future collect, so the interaction view says
+  and to every future build, so the interaction view says
   "orders → inventory" instead of bare host:port — the
   who-talks-to-whom index of the end-goal picture (see
   Purpose); the in-order, thread-attributed story is M5's
@@ -548,7 +562,7 @@ Kubernetes (M7) build on it.
   and arm64. Deployed binaries come out of the container build
   pipeline (see "Container builds (Docker/Podman)").
 - Acceptance: two test hosts run M4's scenarios; from a
-  controller, `add` → `deploy` → `collect` → `rm` produces the
+  controller, `add` → `deploy` → `refresh` → `rm` produces the
   merged graph export with zero manual steps on the servers,
   leaves nothing behind under `/opt/iormesh`, and the merged
   mesh equals the single-host result for single-host
@@ -560,22 +574,26 @@ Kubernetes (M7) build on it.
   `-disk-limit` proves the watchdog: the tracer exits cleanly,
   the last parquet segment is intact, and the exit reason
   shows up in the summary.
-  The M0 client and server run as two projects; collecting
-  both fuses their connection into a single cross-project
+  The M0 client and server run as two projects; building
+  both together fuses their connection into a single cross-project
   edge. The microservices scenario spreads one service per
-  host, each as its own project — a single `collect` over the
+  host, each as its own project — a single `refresh` over the
   whole registry produces the complete service graph with
   every REST edge (plain and TLS) fused. The NAT'ed pair
   fuses into one edge although the two ends saw different
   4-tuples, and an injected clock skew (test-only flag) is
-  recovered within the recorded bound. Naming two of the
+  recovered within the recorded bound. `build` rerun with the
+  network down reproduces the same graph export byte for
+  byte, and `collect` alone changes nothing but the local
+  segment store. Naming two of the
   services via `iormeshctl services` shows them by name in
   the graph export — no manual file edits anywhere.
 
 ### M5 — Views, query and the LLM eval
 
 - **Every consolidation run ends in something to explore.**
-  `iormeshctl collect` finishes by building one view model of
+  `iormeshctl build` (and so `refresh`) finishes by building
+  one view model of
   the merged mesh and rendering it three ways — never three
   separate readings of the data (design:
   [docs/visualization.md](docs/visualization.md)):
@@ -583,7 +601,7 @@ Kubernetes (M7) build on it.
     `iormeshctl open`) — the interactive explorer;
   - a **terminal UI** (`iormeshctl tui`, Bubble Tea — ior's
     libraries) for SSH sessions and browser-less hosts;
-  - **plain text** (`iormeshctl show …`, also what `collect`
+  - **plain text** (`iormeshctl show …`, also what `build`
     prints) for reading, piping and LLMs.
 
   All three show hosts, PIDs, sockets, files and Java stacks
@@ -647,9 +665,9 @@ Kubernetes (M7) build on it.
   principle #6.
 - Acceptance: an operator can answer "what does this process touch,
   and what touches it back" from one screen; `add` → `deploy` →
-  `collect` yields the merged mesh's SVG, matching its golden;
+  `refresh` yields the merged mesh's SVG, matching its golden;
   named services render by name in graph and SVG; the same
-  `collect` leaves a local site that opens from `file://` with
+  build leaves a local site that opens from `file://` with
   no network request and no console error, and `iormeshctl
   tui` and `iormeshctl show` present the same view model —
   the microservices scenario can be walked from the mesh to
@@ -670,7 +688,7 @@ The mesh grows along the connections it observes — driven by
 tracers deploy nothing and connect to nothing; every hop is the
 operator's SSH key from the controller.
 
-- **Discover**: after a `collect`, the merged graph holds
+- **Discover**: after a `refresh`, the merged graph holds
   unresolved peers — connections whose far end is a host with
   no tracer. `iormeshctl expand` lists them: peer host and
   port, which traced app talks to it, how often. Listing is the
@@ -682,7 +700,7 @@ operator's SSH key from the controller.
   socket on the observed port (target spec: listening port,
   M2). Peers outside the allowlist are listed, never touched.
 - **Rounds**: expansion is iterative — deploy, let traffic
-  flow, collect, expand again. The hop limit counts rounds from
+  flow, refresh, expand again. The hop limit counts rounds from
   the originally enrolled hosts; a max-node cap bounds the
   total; a visited set makes cycles (A→B→A) terminate instead
   of oscillating.
@@ -761,7 +779,7 @@ answer), and deferred.
 
 - **#3 Graph storage** — none on the server. The tracer writes
   parquet segments; the controller rebuilds the merged graph
-  from them offline, on every collect. There is no long-lived
+  from them offline, on every build. There is no long-lived
   collector whose state would need to survive a restart. (The
   controller's service database is separate — #24.)
 - **#4 Go eBPF library** — ior's stack (`aquasecurity/libbpfgo`,
@@ -1376,7 +1394,8 @@ cmd/iormesh/          # tracer binary (Linux, eBPF loader +
                       #   uninstall|normalize
 cmd/iormeshctl/       # controller (Linux/macOS, no eBPF, no cgo):
                       #   add|rm registry, deploy, collect,
-                      #   expand, query, svg
+                      #   build, refresh, expand, query,
+                      #   open, tui, show
 cmd/testworkload/     # wrapper for the Java test app scenarios
 internal/c/           # BPF C sources: ior-style helpers +
                       #   generated_tracepoints.c + vmlinux.h +

@@ -87,9 +87,12 @@ views — happens on the controller.
   - Every privileged action is a tracer subcommand (`start`,
     `stop`, `status`, `uninstall`), so one pinned sudoers rule
     covers the whole lifecycle.
+  - Three commands: `collect` only syncs segments, `build` only
+    builds from what was collected (offline, repeatable),
+    `refresh` does both.
   - Collects the trace segments over rsync — streaming,
     unprivileged, deleting each synced segment on the server —
-    and merges them offline: both ends of a connection fuse into
+    and builds the mesh from them offline: both ends of a connection fuse into
     one cross-host edge (NAT-tolerant join key), and clock
     offsets between hosts are bounded from the traffic itself.
   - Additively maintains a service-interaction database of
@@ -97,7 +100,7 @@ views — happens on the controller.
     the CLI via hostname-pattern + port rules (see PLAN.md, M4).
   - Project-aware: unrelated apps on the same server trace as
     separate projects — every trace lives under
-    `/opt/iormesh/traces/<project>/`. Collect can merge
+    `/opt/iormesh/traces/<project>/`. Build can merge
     projects, and when one app talks to another over TCP, the
     mesh fuses both sides into one cross-project picture.
   - Every tracer flag and feature is controllable through
@@ -107,7 +110,7 @@ views — happens on the controller.
     removes `/opt/iormesh` — trace files are synced off first,
     so nothing is lost.
 - **Mesh expansion (in the controller)**
-  - After a collect, the merged graph holds unresolved peers:
+  - After a build, the merged graph holds unresolved peers:
     connections whose far end has no tracer. `iormeshctl expand`
     lists them, and with `--apply` deploys tracers to the ones
     matching the expansion allowlist, bound to the process
@@ -124,7 +127,7 @@ views — happens on the controller.
     happens-before order, each hop attributed to the Java thread
     that caused it, interleaved with that thread's local file
     I/O.
-  - Every `collect` ends in something to explore: a local
+  - Every `build` ends in something to explore: a local
     static site, a Bubble Tea terminal UI and plain text, all
     rendered from one view model — see
     [visualization.md](visualization.md).
@@ -153,8 +156,9 @@ views — happens on the controller.
 
 ![Operator workflow](diagrams/workflow.svg)
 
-Everything is driven from the laptop. `collect` repeats while a
-session runs; `expand` turns the unresolved edges of one round
+Everything is driven from the laptop. `collect` syncs and
+`build` merges and renders; `refresh` does both and repeats
+while a session runs; `expand` turns the unresolved edges of one round
 into the newly enrolled hosts of the next; `rm` syncs, stops and
 removes. See PLAN.md, M4 and M6.
 

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="480" viewBox="0 0 1000 480" role="img" aria-labelledby="t d">
   <title id="t">Operator workflow</title>
-  <desc id="d">add, deploy, trace, collect, merge and explore; collect repeats while the session runs; expand feeds new hosts back into deploy; rm cleans up.</desc>
+  <desc id="d">add, deploy, trace, collect, build and explore; collect repeats while the session runs; expand feeds new hosts back into deploy; rm cleans up.</desc>
   <defs><marker id="a22d3ee" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#22d3ee"/></marker><marker id="afb7185" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#fb7185"/></marker><marker id="afbbf24" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#fbbf24"/></marker><marker id="a9fb0d0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#9fb0d0"/></marker></defs>
   <rect width="1000" height="480" rx="18" fill="#0b1026"/>
   <text x="40" y="46" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="22" fill="#e6edf7" text-anchor="start" font-weight="600">Operator workflow</text>
@@ -29,10 +29,10 @@
   <text x="524" y="218" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">rsync the segments</text>
   <path d="M491 192 L508 192" fill="none" stroke="#9fb0d0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#a9fb0d0)"/>
   <rect x="670" y="150" width="140" height="84" rx="10" fill="#1b2454" stroke="#22d3ee" stroke-width="1.5"/>
-  <text x="684" y="177" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="15" fill="#e6edf7" text-anchor="start" font-weight="600">merge</text>
+  <text x="684" y="177" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="15" fill="#e6edf7" text-anchor="start" font-weight="600">build</text>
   <text x="796" y="174" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="end">5</text>
-  <text x="684" y="199" font-family="'JetBrains Mono','Noto Sans Mono',Menlo,Consolas,monospace" font-size="11" fill="#22d3ee" text-anchor="start">(part of collect)</text>
-  <text x="684" y="218" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">fuse cross-host edges</text>
+  <text x="684" y="199" font-family="'JetBrains Mono','Noto Sans Mono',Menlo,Consolas,monospace" font-size="11" fill="#22d3ee" text-anchor="start">build</text>
+  <text x="684" y="218" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">merge, render outputs</text>
   <path d="M651 192 L668 192" fill="none" stroke="#9fb0d0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#a9fb0d0)"/>
   <rect x="830" y="150" width="140" height="84" rx="10" fill="#1b2454" stroke="#22d3ee" stroke-width="1.5"/>
   <text x="844" y="177" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="15" fill="#e6edf7" text-anchor="start" font-weight="600">explore</text>
@@ -42,6 +42,7 @@
   <path d="M811 192 L828 192" fill="none" stroke="#9fb0d0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#a9fb0d0)"/>
   <path d="M580 148 C580 112 420 112 420 146" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 4" marker-end="url(#a22d3ee)"/>
   <text x="500" y="108" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#22d3ee" text-anchor="middle">repeat while the session runs</text>
+  <text x="628" y="262" font-family="'JetBrains Mono','Noto Sans Mono',Menlo,Consolas,monospace" font-size="11" fill="#9fb0d0" text-anchor="middle">refresh = collect + build</text>
   <rect x="330" y="300" width="300" height="104" rx="10" fill="#1b2454" stroke="#22d3ee" stroke-width="1.5"/>
   <text x="344" y="327" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="15" fill="#e6edf7" text-anchor="start" font-weight="600">expand</text>
   <text x="616" y="324" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="end">7</text>

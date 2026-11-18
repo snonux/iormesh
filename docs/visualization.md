@@ -4,9 +4,11 @@ How the result of a consolidation run is shown. Companion to
 [PLAN.md](../PLAN.md) (M4, M5, decision #11) — the plan is the
 source of truth; this doc is the design.
 
-A *consolidation run* is `iormeshctl collect`: it syncs the trace
-segments, merges them, and rebuilds the graph. Every such run ends
-with three things to look at, all built from the same data:
+A *consolidation run* is `iormeshctl build`: it merges the
+collected trace segments and rebuilds the graph. (`collect` only
+syncs segments from the servers; `refresh` runs collect, then
+build.) Every build ends with three things to look at, all made
+from the same data:
 
 | Surface | Command | For |
 |---------|---------|-----|
@@ -14,11 +16,12 @@ with three things to look at, all built from the same data:
 | Terminal UI (Bubble Tea) | `iormeshctl tui` | exploring over SSH or without a browser |
 | Plain text | `iormeshctl show …` | reading, grepping, piping, pasting into an LLM |
 
-`collect` itself prints the plain-text summary and the path of the
-site, so there is always something on screen when it finishes:
+`build` itself prints the plain-text summary and the path of the
+site, so there is always something on screen when it finishes.
+With `refresh`, the first line comes from the collect half:
 
 ```
-$ iormeshctl collect --project shop
+$ iormeshctl refresh --project shop
 collected  3 hosts · 41 segments · 1.2M events · 12:00:00–12:07:31
 merged     4 services · 7 edges (6 fused, 1 unresolved)
 health     0 drops · 2.1% unattributed · clock bounds ≤ 180µs
@@ -37,7 +40,7 @@ model**, and each surface only renders it.
 ```
 merged graph + events ──► view model ──┬─► site  (data files + JS)
 (internal/federate)   (internal/viewmodel) ├─► TUI   (Bubble Tea)
-                                          └─► text  (show, collect)
+                                          └─► text  (show, build)
 ```
 
 ```go
@@ -111,7 +114,7 @@ Rules:
 
 ## The local site
 
-A folder of static files, written at the end of every `collect`:
+A folder of static files, written at the end of every `build`:
 
 ```
 ~/.local/share/iormesh/sites/<project>/
@@ -220,11 +223,11 @@ writes the current view as text to a file.
 
 ## Plain text
 
-`iormeshctl show` prints one view and exits. It is what `collect`
+`iormeshctl show` prints one view and exits. It is what `build`
 prints, what gets piped, and what the LLM eval feeds on.
 
 ```
-iormeshctl show                       # the summary collect prints
+iormeshctl show                       # the summary build prints
 iormeshctl show services
 iormeshctl show edges [--unresolved]
 iormeshctl show sequence [CONV-ID]    # the text diagram above
@@ -241,12 +244,12 @@ iormeshctl show health
 
 | Step | Lands with | What |
 |------|-----------|------|
-| V1 | M4 | `internal/viewmodel` (run, health, services, edges); `show` and the `collect` summary |
+| V1 | M4 | `internal/viewmodel` (run, health, services, edges); `show` and the `build` summary |
 | V2 | M5 | conversations in the model; `show sequence`; deterministic SVG exports |
-| V3 | M5 | the local site, written by every `collect` |
+| V3 | M5 | the local site, written by every `build` |
 | V4 | M5 | the TUI |
 
-V1 goes first on purpose: from the first working `collect`, a run
+V1 goes first on purpose: from the first working `build`, a run
 ends with readable output, and the model's shape is settled
 before two UIs are built on it.
 

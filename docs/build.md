@@ -51,4 +51,4 @@ JDK's native I/O functions are new work in iormesh. See PLAN.md,
 - Storage: in-memory ring buffer → parquet trace files on
   servers (minute-rotated segments, parquet-internal zstd;
   ior's parquet pattern); graph + summary exports, rebuilt on
-  the controller at every collect — no server-side database.
+  the controller at every build — no server-side database.
