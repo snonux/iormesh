@@ -95,15 +95,15 @@ type Event struct {
 	LatencyNS uint64 `json:"latency_ns" parquet:"latency_ns"`
 	Bytes     uint64 `json:"bytes" parquet:"bytes"`
 	Args      Args   `json:"args" parquet:"args"`
-	// ConnID names the connection a socket event belongs to. Provisional
-	// until S2: M1 assigns it locally for fused loopback pairs; the
-	// cross-host join key the controller's merge assigns may differ.
+	// ConnID names the connection a socket event belongs to. M1 assigns
+	// it locally for fused loopback pairs; across hosts the controller's
+	// merge joins by the TCP ISN pair (decision #26) and may reassign it.
 	ConnID      string `json:"conn_id,omitempty" parquet:"conn_id,optional"`
 	Attribution string `json:"attribution" parquet:"attribution,dict"`
-	// Java is provisional until S1 reports; set exactly when
-	// Attribution is AttributionJava.
+	// Java is set exactly when Attribution is AttributionJava (shape
+	// settled by spike S1: nested thread + stack).
 	Java *Java `json:"java,omitempty" parquet:"java,optional"`
-	// HTTP is provisional until S1 reports; present on http events (M3).
+	// HTTP is provisional until M3; present on http events.
 	HTTP *HTTP `json:"http,omitempty" parquet:"http,optional"`
 	// Session describes the traced host; set exactly on session events.
 	// A nested object rather than envelope fields because only one event
@@ -148,17 +148,17 @@ type Session struct {
 	Arch string `json:"arch" parquet:"arch"`
 }
 
-// Java is the Java-side attribution of one event. Provisional: its shape
-// is a placeholder until spike S1 settles how stacks join to syscalls.
-// PLAN.md's sketch names the fields flat (java_thread, java_stack); they
-// are nested here until S1 decides.
+// Java is the Java-side attribution of one event: the Java thread and
+// the stack captured at the I/O boundary. Spike S1 settled this nested
+// shape (docs/spikes/s1-java-join.md); a syscall the uprobe marked but
+// no agent bracket contains stays attribution none.
 type Java struct {
 	Thread string `json:"thread,omitempty" parquet:"thread,optional"`
 	// Stack lists method-table ids, innermost frame first.
 	Stack []uint64 `json:"stack,omitempty" parquet:"stack,list"`
 }
 
-// HTTP describes one request on an http event. Provisional until S1/M3.
+// HTTP describes one request on an http event. Provisional until M3.
 type HTTP struct {
 	Method string `json:"method,omitempty" parquet:"method,optional"`
 	Scheme string `json:"scheme,omitempty" parquet:"scheme,optional"`

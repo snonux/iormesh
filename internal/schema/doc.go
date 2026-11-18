@@ -6,9 +6,10 @@
 // these types and the controller (CGO_ENABLED=0, darwin too) reads them,
 // so it must never import anything that pulls in cgo.
 //
-// Version 1 is a draft (M1). It is not frozen until spikes S1 (Java ↔
-// syscall join) and S2 (cross-host join) have reported; the fields they
-// own are marked provisional where they are declared. Fields are only
+// Version 1 is a draft (M1). Spikes S1 (Java ↔ syscall join) and S2
+// (cross-host join) have reported and settled the java and conn_id
+// shapes (docs/spikes/); fields still marked provisional (http) settle
+// with M3. Fields are only
 // ever appended, and every appended field is optional (omitempty), so a
 // reader of an older file sees the new ones as absent, never as a
 // different meaning — ior's parquet rule.
