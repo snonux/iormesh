@@ -1044,12 +1044,12 @@ CPU via `/usr/bin/time` around the sudo'd tracer, the
 idle-target tracer's CPU as the fixed load/attach cost), results
 in `spikes/s3/results/`, write-up in
 [spikes/s3-overhead.md](spikes/s3-overhead.md). Parquet bytes
-could not be measured (no parquet writer before M4); zstd on
-the volume run's NDJSON stands in. Every quoted figure is
-recomputed from `spikes/s3/results/samples.txt`. Outcome: decision #25 is Decided with a
-budget; #16 gets a 64 MB size cap; #7 keeps its default; hot
-read/write loops get in-kernel aggregation in M2 (step 11
-below).
+could not be measured (no parquet writer before M4); zstd on the
+volume run's NDJSON stands in. Every quoted figure is recomputed
+from `spikes/s3/results/samples.txt`. Outcome: decision #25 is
+Decided with a budget; #16 gets a 64 MB size cap; #7 keeps its
+default; hot read/write loops get in-kernel aggregation in M2
+(step 11 below).
 
 ## M2 — full trace surface
 
