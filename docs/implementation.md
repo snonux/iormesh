@@ -1546,60 +1546,78 @@ internal/correlate/javajoin.go
    loader classes…") — the workload's stdout contract is intact.
    Done (task 0b4), but for the ring (step 4, next): the nested
    bridge jar is copied to a temp file (the bootstrap path takes
-   files only); the bridge holds `Hooks` *and* `StackIds`, since
+   files only) and deleted once the bridge is loaded and warm —
+   the JVM keeps the jar open, so nothing is left behind even on
+   SIGKILL; the bridge holds `Hooks` *and* `StackIds`, since
    rewritten java.base code cannot see the agent's loader; the
    transformer rewrites one class of its own before the first JDK
-   class, so ASM's class loading never lands in a bracket.
-   `Hooks` kept S1's `enter(id)`/`exit(id)` with a per-thread
-   bracket stack (not the token sketched in S1's Experiment 2):
-   nested hooks need the stack anyway. Until the ring lands, a
-   closed bracket bumps a per-hook counter; the agent option
-   `debug=<path>` dumps the table with each row's status
-   (`applied`, `missing` = this JDK lacks the method, `unloaded`)
-   and count at exit. Any install failure prints
-   `iormesh-agent: disabled: …` and leaves the JVM running.
-   `BoundaryTransformer` rewrites only bootstrap-loaded classes
-   of the table and only their listed methods (exact
-   descriptors); it writes the catch-all handler's stack map
-   frame itself instead of `COMPUTE_FRAMES`, which would load
-   classes from inside a transformer. `StackIds` drops the
-   bridge's own frames by package, keeps 10, and stores a stack's
+   class, so ASM's class loading never lands in a bracket. `Hooks`
+   kept S1's `enter(id)`/`exit(id)` with a per-thread bracket
+   stack (not the token sketched in S1's Experiment 2): nested
+   hooks need the stack anyway. Neither ever throws into the
+   target, and the depth stays balanced when the walk or the
+   bookkeeping fails (a slot is marked skipped until the bracket
+   is fully open; a throwing exit would run the catch-all's exit a
+   second time and close the caller's bracket). A second
+   `-javaagent` or attach finds the bridge claimed and installs
+   nothing. Until the ring lands, a closed bracket bumps a
+   per-hook counter; the agent option `debug=<path>` dumps the
+   table with each row's status (`applied`, `missing` = this JDK
+   lacks the method, `unloaded`) and count at exit. Any install
+   failure prints `iormesh-agent: disabled: …`, removes the
+   transformer and leaves the JVM running. `BoundaryTransformer`
+   rewrites only bootstrap-loaded classes of the table and only
+   their listed methods (exact descriptors); it writes the
+   catch-all handler's stack map frame itself instead of
+   `COMPUTE_FRAMES`, which would load classes from inside a
+   transformer. `StackIds` drops the bridge's own frames by
+   package, keeps 10, hashes them with 64-bit FNV-1a (a collision
+   would merge two stacks, undetected), and stores a stack's
    frames (`class#method(file:line)`) the first time its id is
    seen, for the ring's STACK record.
 3. `HookTable` is data, not code: a table of
    `(class, method, descriptor, hookId, native, allowed syscalls)`
    so decision #29's per-JDK differences become table variants and
    the tracer gets the same table for its uprobe set (S1's hook
-   table above). Done (task 0b4): one TSV per variant (columns
-   id, kind, class, method, descriptor, native, syscalls) —
-   `jdk17` for 17–20, `jdk21` for 21+, chosen by
-   `Runtime.version().feature()`, below 17 no attribution. One
-   row per overload. A test walks each row against the running
-   JDK's class bytes: the method exists, has a body and reaches
-   its native within three same-class calls (JDK 25 routes
-   `RandomAccessFile.write` through a JFR `implWrite` that 21
-   does not have). Beyond S1's table, 17 sends socket writes and
-   closes from `SocketDispatcher` to `FileDispatcherImpl`'s
-   natives, and `FileDispatcherImpl.close` reaches the already
-   hooked `FileDescriptor.close`.
+   table above). Done (task 0b4): one TSV per variant (columns id,
+   kind, class, method, descriptor, native, syscalls) — `jdk17`
+   for 17–20, `jdk21` for 21+, chosen by
+   `Runtime.version().feature()`, below 17 no attribution. One row
+   per overload; kinds come from a fixed set (open, read, write,
+   close, seek, socket, bind, connect, listen, accept, shutdown,
+   unlink, rename, stat). A test walks each row against the
+   running JDK's class bytes: the method exists, has a body, the
+   named native is a native method, and the method reaches it
+   within three same-class calls (JDK 25 routes
+   `RandomAccessFile.write` through a JFR `implWrite` that 21 does
+   not have); deliberately wrong rows must fail it. Beyond S1's
+   table, 17 sends socket writes and closes from
+   `SocketDispatcher` to `FileDispatcherImpl`'s natives, and
+   `FileDispatcherImpl.close` reaches the already hooked
+   `FileDescriptor.close`.
 
    Tests (`mage agentTest`): the transformer rewrites exactly the
    listed methods of a fixture (unlisted ones and an overload stay
    instruction-for-instruction the same), the rewritten class
    verifies and closes one bracket per call on return, exception
-   and inner-handler paths; an unknown class, a class without a
-   listed method and a non-bootstrap loader are no-ops; table
-   parsing and the running-JDK check; `StackIds` per call site.
-   Smoke: `AgentSmoke` (file, RAF, `Files`, TCP loopback) under
-   `-javaagent` must close a bracket of every hook kind with no
-   `missing` row, and `workload.jar file-basic` under the agent
-   keeps its stdout/stderr contract and fires its open/write/read
-   hooks. Checked on 25, 27-ea and 17 (GraalVM CE 17.0.9, via
+   and inner-handler paths, all inside a hand-opened outer bracket
+   that must close exactly once; an unknown class, a class without
+   a listed method and a non-bootstrap loader are no-ops; `Hooks`
+   nesting, busy skips, overflow past 16 levels, mismatched exits,
+   a throwing walk and a throwing exit; table parsing and the
+   running-JDK check; `StackIds` per call site. Smoke:
+   `AgentSmoke` (file streams, RAF, `Files` stat/move/delete, TCP
+   loopback with a shutdown) under `-javaagent` must close a
+   bracket of all fourteen hook kinds with no `missing` row, and
+   `workload.jar file-basic` under the agent keeps its
+   stdout/stderr contract and fires its open/write/read hooks.
+   Checked on 25, 27-ea and 17 (GraalVM CE 17.0.9, via
    `IORMESH_AGENT_JDKS`); the smoke runs with boot-class
    verification on (`-XX:+BytecodeVerificationLocal`). Live attach
-   fired the hooks on 25 (by hand, not in `agentTest`). Not run: a
-   JDK 21 runtime (none installed; the `jdk21` rows come from S1's
-   check of the 21 sources), 18–20.
+   fired the hooks on 25 and a doubled `-javaagent` installed once
+   (by hand, not in `agentTest`). Not run: a JDK 21 runtime (none
+   installed; the `jdk21` rows come from S1's check of the 21
+   sources), 18–20.
 4. The ring (decision #27): one file per JVM,
    `<spool dir>/<pid>.ring`, in the tracer-owned directory, mapped
    `MAP_SHARED` by agent and tracer. Header (magic, capacity, pid,

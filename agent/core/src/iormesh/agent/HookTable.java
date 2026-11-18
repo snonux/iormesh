@@ -42,6 +42,13 @@ final class HookTable {
     }
 
     private static final int COLUMNS = 7;
+    /**
+     * The I/O kinds a row may name (the tables' header lists them): a
+     * typo would otherwise become a kind nothing downstream knows.
+     */
+    static final Set<String> KINDS = Set.of("open", "read", "write", "close", "seek",
+            "socket", "bind", "connect", "listen", "accept", "shutdown", "unlink",
+            "rename", "stat");
 
     private final String variant;
     private final List<Hook> hooks;
@@ -127,6 +134,9 @@ final class HookTable {
         // 0 is not an id: Hooks.counts() index 0 stays unused.
         if (id <= 0 || id > Short.MAX_VALUE) {
             throw new IllegalArgumentException(where + ": id out of range " + id);
+        }
+        if (!KINDS.contains(f[1])) {
+            throw new IllegalArgumentException(where + ": unknown kind " + f[1]);
         }
         if (!f[4].startsWith("(")) {
             throw new IllegalArgumentException(where + ": bad descriptor " + f[4]);

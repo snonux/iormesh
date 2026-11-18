@@ -24,6 +24,7 @@ public final class StackIds {
     static final int MAX_KNOWN = 1 << 16;
     /** 0 means "no stack" (stack walking off, or a skipped bracket). */
     public static final long NONE = 0;
+    private static final long FNV_PRIME = 0x100000001b3L;
 
     private static final StackWalker WALKER = StackWalker.getInstance();
     private static final String OWN_PACKAGE = "iormesh.bridge.";
@@ -64,18 +65,29 @@ public final class StackIds {
     }
 
     /**
-     * FNV-1a-style mix of class, method and bytecode index per frame. The
-     * bci tells two calls in one method apart; a 64-bit collision merges
-     * two stacks, which at the expected call-site counts is negligible.
+     * 64-bit FNV-1a over each frame's class and method name (char by
+     * char, not String.hashCode, which would cap each name at 32 bits)
+     * and bytecode index; the bci tells two calls in one method apart.
+     * A collision is not detected: two stacks would share an id (and
+     * the first one's frames). With n distinct stacks the odds are about
+     * n²/2⁶⁵ — negligible for the call-site counts the agent sees.
      */
     private static long hash(List<StackWalker.StackFrame> frames) {
         long h = 0xcbf29ce484222325L;
         for (StackWalker.StackFrame f : frames) {
-            h = (h ^ f.getClassName().hashCode()) * 0x100000001b3L;
-            h = (h ^ f.getMethodName().hashCode()) * 0x100000001b3L;
-            h = (h ^ f.getByteCodeIndex()) * 0x100000001b3L;
+            h = mix(h, f.getClassName());
+            h = mix(h, f.getMethodName());
+            h = (h ^ f.getByteCodeIndex()) * FNV_PRIME;
         }
         return h == NONE ? 1 : h;
+    }
+
+    private static long mix(long h, String s) {
+        for (int i = 0; i < s.length(); i++) {
+            h = (h ^ s.charAt(i)) * FNV_PRIME;
+        }
+        // A separator, so "ab"+"c" and "a"+"bc" differ.
+        return (h ^ 0xffff) * FNV_PRIME;
     }
 
     private static String[] describe(List<StackWalker.StackFrame> frames) {

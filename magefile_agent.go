@@ -28,8 +28,9 @@ const (
 	// (agent/third_party/asm/PROVENANCE); the hash pins the exact jar,
 	// so a swapped or corrupted copy fails the build instead of being
 	// shaded into the agent.
-	asmJar    = "agent/third_party/asm/asm-9.11.1.jar"
-	asmSHA256 = "ae4e6e10d59d0a1500317764b21881ad883f8550e33c66e6142f7032c6fb566c"
+	asmJar     = "agent/third_party/asm/asm-9.11.1.jar"
+	asmLicense = "agent/third_party/asm/LICENSE.txt"
+	asmSHA256  = "ae4e6e10d59d0a1500317764b21881ad883f8550e33c66e6142f7032c6fb566c"
 	// Where ASM's classes move in the agent jar, so the agent never
 	// clashes with an ASM the traced application ships.
 	asmFrom = "org/objectweb/asm/"
@@ -96,7 +97,8 @@ func buildBridge() error {
 }
 
 // buildAgentCore compiles the core against the relocated ASM and copies
-// in its resources: the hook tables and the nested bridge jar.
+// in its resources: the hook tables, the nested bridge jar and ASM's
+// license notice.
 func buildAgentCore() error {
 	if err := javacAgent("agent/core/src", agentCoreDir, agentASMDir); err != nil {
 		return err
@@ -114,7 +116,11 @@ func buildAgentCore() error {
 			return err
 		}
 	}
-	return nil
+	// BSD-3 asks binary redistributions to carry ASM's notice.
+	if err := os.MkdirAll(filepath.Join(agentCoreDir, "META-INF"), 0o755); err != nil {
+		return err
+	}
+	return sh.Copy(filepath.Join(agentCoreDir, "META-INF", "LICENSE-asm.txt"), asmLicense)
 }
 
 // packAgent writes the agent jar: manifest, core classes and resources,

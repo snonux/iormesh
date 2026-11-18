@@ -53,8 +53,16 @@ public final class Agent {
         }
         HookTable table = HookTable.load(variant);
         Bridge bridge = Bridge.install(inst, args.bridge());
+        if (!bridge.claim()) {
+            // A second -javaagent or attach: the first install's hooks
+            // stand; installing again would bracket every call twice.
+            System.err.println("iormesh-agent: already installed, ignoring this load");
+            bridge.deleteExtracted();
+            return;
+        }
         bridge.configure(table.maxId() + 1, args.walkStack());
         bridge.warmUp();
+        bridge.deleteExtracted();
         BoundaryTransformer.warmUp();
         BoundaryTransformer transformer = new BoundaryTransformer(table);
         if (args.debug() != null) {
@@ -62,10 +70,26 @@ public final class Agent {
                     () -> writeDebug(args.debug(), table, transformer, bridge),
                     "iormesh-agent-debug"));
         }
+        retransform(inst, table, transformer);
+    }
+
+    /**
+     * Registers the transformer and rewrites the already-loaded targets.
+     * If that fails the transformer is removed again, so "disabled" on
+     * stderr is true for classes loaded later too; classes rewritten
+     * before the failure keep their (harmless) hooks.
+     */
+    private static void retransform(Instrumentation inst, HookTable table,
+                                    BoundaryTransformer transformer) throws Exception {
         inst.addTransformer(transformer, true);
-        Class<?>[] loaded = table.loadedTargets(inst);
-        if (loaded.length > 0) {
-            inst.retransformClasses(loaded);
+        try {
+            Class<?>[] loaded = table.loadedTargets(inst);
+            if (loaded.length > 0) {
+                inst.retransformClasses(loaded);
+            }
+        } catch (Exception | Error e) {
+            inst.removeTransformer(transformer);
+            throw e;
         }
     }
 
@@ -82,9 +106,9 @@ public final class Agent {
             long[] counts = bridge.counts();
             Set<Integer> applied = t.applied();
             Set<String> seen = t.seen();
-            out.printf("# iormesh-agent debug: variant=%s java=%d skips=%d stacks=%d%n",
+            out.printf("# iormesh-agent debug: variant=%s java=%d skips=%d fails=%d stacks=%d%n",
                     table.variant(), Runtime.version().feature(), bridge.skips(),
-                    bridge.stacks());
+                    bridge.fails(), bridge.stacks());
             for (HookTable.Hook h : table.hooks()) {
                 String status = applied.contains(h.id()) ? "applied"
                         : seen.contains(h.owner()) ? "missing" : "unloaded";

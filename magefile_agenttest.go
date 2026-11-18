@@ -21,9 +21,9 @@ import (
 var agentTestDir = filepath.Join(agentBuildDir, "test")
 
 // smokeKinds are the hook kinds AgentSmoke's I/O must close at least one
-// bracket of; together they cover every family of the hook table.
+// bracket of: every kind the hook tables use (HookTable.KINDS).
 var smokeKinds = []string{"open", "read", "write", "seek", "close", "socket",
-	"bind", "connect", "listen", "accept", "unlink"}
+	"bind", "connect", "listen", "accept", "shutdown", "unlink", "rename", "stat"}
 
 // AgentTest builds the agent and runs its unit tests and smoke runs with
 // the java on PATH, then again with each JDK in IORMESH_AGENT_JDKS (a

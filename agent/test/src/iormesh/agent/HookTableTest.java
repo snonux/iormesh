@@ -26,7 +26,9 @@ final class HookTableTest {
                 new AgentTests.Case("hooktable/bundled tables load", HookTableTest::bundled),
                 new AgentTests.Case("hooktable/rejects bad rows", HookTableTest::badRows),
                 new AgentTests.Case("hooktable/matches the running JDK",
-                        HookTableTest::matchesRunningJdk));
+                        HookTableTest::matchesRunningJdk),
+                new AgentTests.Case("hooktable/JDK check catches wrong rows",
+                        HookTableTest::wrongRows));
     }
 
     static void variantFor() {
@@ -63,6 +65,8 @@ final class HookTableTest {
                 "x\tread\ta/B\tm\t()V\tm0\tread")));
         rejects("empty column", () -> HookTable.parse("t", List.of(
                 "1\t\ta/B\tm\t()V\tm0\tread")));
+        rejects("unknown kind", () -> HookTable.parse("t", List.of(
+                "1\treed\ta/B\tm\t()V\tm0\tread")));
         rejects("bad descriptor", () -> HookTable.parse("t", List.of(
                 "1\tread\ta/B\tm\tV\tm0\tread")));
         HookTable t = HookTable.parse("t", List.of("# comment", "", ok));
@@ -72,7 +76,8 @@ final class HookTableTest {
 
     /**
      * Every row of the running JDK's variant names a method that exists,
-     * has a body, and reaches the row's native — the check that a table
+     * has a body, and reaches the row's native, which must be a native
+     * method of its class (by name) — the check that a table
      * still fits a JDK (decision #29). Run it under each JDK of
      * IORMESH_AGENT_JDKS to check the other variants.
      *
@@ -108,9 +113,31 @@ final class HookTableTest {
             return g.noBody.contains(self) ? "no body (native or abstract)" : "no such method";
         }
         int dot = h.nativeRef().lastIndexOf('.');
-        String target = (dot < 0 ? h.owner() : h.nativeRef().substring(0, dot))
-                + "." + h.nativeRef().substring(dot + 1);
-        return g.reaches(self, target, MAX_HOPS) ? null : "does not reach " + target;
+        String owner = dot < 0 ? h.owner() : h.nativeRef().substring(0, dot);
+        String name = h.nativeRef().substring(dot + 1);
+        CallGraph target = owner.equals(h.owner()) ? g : CallGraph.of(owner);
+        if (target == null || !target.natives.contains(name)) {
+            return owner + "." + name + " is not a native method";
+        }
+        return g.reaches(self, owner + "." + name, MAX_HOPS) ? null
+                : "does not reach " + owner + "." + name;
+    }
+
+    /**
+     * Rows that must fail the JDK check: a "native" that is plain Java,
+     * a native the method never calls, and a method that is not there.
+     */
+    static void wrongRows() throws Exception {
+        String fis = "java/io/FileInputStream";
+        List<String> rows = List.of(
+                "1\tread\t" + fis + "\tread\t([BII)I\tclose\tread",
+                "2\tread\t" + fis + "\tread\t([BII)I\topen0\tread",
+                "3\tread\t" + fis + "\tread\t(J)I\treadBytes\tread");
+        // One table per row: a table may not list a method twice.
+        for (String row : rows) {
+            HookTable.Hook h = HookTable.parse("wrong", List.of(row)).hooks().get(0);
+            check(checkRow(h) != null, "row " + h.id() + " passed the JDK check");
+        }
     }
 
     /**
@@ -120,6 +147,7 @@ final class HookTableTest {
     private static final class CallGraph extends ClassVisitor {
         final Map<String, Set<String>> calls = new HashMap<>();
         final Set<String> noBody = new HashSet<>();
+        final Set<String> natives = new HashSet<>();
         private final String owner;
 
         private CallGraph(String owner) {
@@ -142,6 +170,9 @@ final class HookTableTest {
         @Override
         public MethodVisitor visitMethod(int access, String n, String desc, String sig,
                                          String[] exc) {
+            if ((access & Opcodes.ACC_NATIVE) != 0) {
+                natives.add(n);
+            }
             if ((access & (Opcodes.ACC_NATIVE | Opcodes.ACC_ABSTRACT)) != 0) {
                 noBody.add(n + desc);
                 return null;

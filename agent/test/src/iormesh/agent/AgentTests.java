@@ -8,14 +8,15 @@ import java.util.List;
  * agent build is JDK-only: no JUnit). Each test is a named check; the
  * run prints one line per test and exits non-zero if any failed, so mage
  * fails too. Compiled for 17 like the agent, so the same tests also run
- * on every JDK listed in IORMESH_AGENT_JDKS.
+ * on every JDK listed in IORMESH_AGENT_JDKS. Bridge internals are tested
+ * from the bridge's package (iormesh.bridge.HooksTest).
  */
 public final class AgentTests {
     /** One test: a name and a body that throws on failure. */
-    record Case(String name, Body body) {}
+    public record Case(String name, Body body) {}
 
     @FunctionalInterface
-    interface Body {
+    public interface Body {
         void run() throws Exception;
     }
 
@@ -26,6 +27,7 @@ public final class AgentTests {
         cases.addAll(HookTableTest.cases());
         cases.addAll(BoundaryTransformerTest.cases());
         cases.addAll(StackIdsTest.cases());
+        cases.addAll(iormesh.bridge.HooksTest.cases());
         int failed = 0;
         for (Case c : cases) {
             try {
@@ -42,13 +44,13 @@ public final class AgentTests {
         System.exit(failed == 0 ? 0 : 1);
     }
 
-    static void check(boolean ok, String what) {
+    public static void check(boolean ok, String what) {
         if (!ok) {
             throw new AssertionError(what);
         }
     }
 
-    static void equal(Object want, Object got, String what) {
+    public static void equal(Object want, Object got, String what) {
         if (!java.util.Objects.equals(want, got)) {
             throw new AssertionError(what + ": want " + want + ", got " + got);
         }

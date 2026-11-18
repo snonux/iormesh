@@ -1,7 +1,9 @@
 package iormesh.bridge;
 
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
+import java.util.function.LongSupplier;
 
 /**
  * The entry points the rewritten JDK methods call: {@code enter(id)} at
@@ -16,11 +18,19 @@ import java.util.concurrent.atomic.AtomicLongArray;
  * ASM, nothing of the agent core.
  *
  * Each thread keeps a small stack of open brackets: hooked methods nest
- * (FileInputStream.read(byte[]) can reach read(byte[],int,int)), and the
- * innermost bracket containing a syscall is the one the joiner keeps.
- * A bracket opened while the thread is already inside the bridge (the
- * stack walk loading a class, which reads a jar) is skipped, so the
+ * (RandomAccessFile.write(byte[]) reaches the hooked writeBytes), and
+ * the innermost bracket containing a syscall is the one the joiner
+ * keeps. A bracket opened while the thread is already inside the bridge
+ * (the stack walk loading a class, which reads a jar) is skipped, so the
  * agent never brackets its own work.
+ *
+ * Neither entry point ever throws into the target, and both keep the
+ * per-thread depth balanced whatever fails: a slot is marked SKIPPED
+ * before anything that can throw runs, and only marked with its hook
+ * once the bracket is fully open. An exit that threw would be worse
+ * than a lost bracket — the pre-return exit calls lie inside the
+ * method's catch-all range, so the handler would exit a second time and
+ * close the caller's bracket.
  *
  * Until the ring transport (M3 step 4, decision #27) lands, a closed
  * bracket only bumps its hook's counter ({@link #counts}): the agent's
@@ -32,10 +42,16 @@ public final class Hooks {
     static final int MAX_DEPTH = 16;
     /** Marks a skipped slot, so its exit is dropped too. */
     private static final int SKIPPED = -1;
+    private static final LongSupplier WALK = StackIds::current;
+    private static final LongSupplier NO_WALK = () -> StackIds.NONE;
 
-    private static volatile boolean walkStack = true;
-    private static volatile AtomicLongArray counts = new AtomicLongArray(0);
+    /** Where enter gets its stack id; package-private so tests can fail it. */
+    static volatile LongSupplier stacks = WALK;
+    /** Closed brackets per hook id; package-private so tests can break it. */
+    static volatile AtomicLongArray counts = new AtomicLongArray(0);
     private static final AtomicLong SKIPS = new AtomicLong();
+    private static final AtomicLong FAILS = new AtomicLong();
+    private static final AtomicBoolean CLAIMED = new AtomicBoolean();
     private static final ThreadLocal<Brackets> STATE = ThreadLocal.withInitial(Brackets::new);
 
     /** One thread's open brackets; preallocated, so no allocation per call. */
@@ -50,6 +66,17 @@ public final class Hooks {
     private Hooks() {}
 
     /**
+     * Claims the bridge for one agent install and returns whether this
+     * caller got it. A second -javaagent or a repeated live attach finds
+     * this (bootstrap-loaded, so shared) Hooks already claimed and must
+     * not install again: it would rewrite the JDK twice — two brackets
+     * per call — and reset the counters.
+     */
+    public static boolean claim() {
+        return CLAIMED.compareAndSet(false, true);
+    }
+
+    /**
      * Called once by the agent before any JDK class is rewritten.
      * hookIds bounds the ids the table uses (ids are 1..hookIds-1);
      * stack=false records StackIds.NONE instead of walking (S1's cost
@@ -57,7 +84,7 @@ public final class Hooks {
      */
     public static void configure(int hookIds, boolean stack) {
         counts = new AtomicLongArray(hookIds);
-        walkStack = stack;
+        stacks = stack ? WALK : NO_WALK;
     }
 
     /**
@@ -70,46 +97,68 @@ public final class Hooks {
         Brackets t = STATE.get();
         t.busy = true;
         try {
-            StackIds.current();
+            stacks.getAsLong();
         } finally {
             t.busy = false;
         }
     }
 
     public static void enter(int hook) {
-        Brackets t = STATE.get();
+        Brackets t;
+        try {
+            t = STATE.get();
+        } catch (Throwable e) {
+            return;           // no state, no slot: exit finds none either
+        }
         int d = t.depth++;
         if (d >= MAX_DEPTH) {
             return;           // too deep: exit sees d >= MAX_DEPTH and drops it
         }
+        // Skipped until fully open, so a throw below leaves a balanced,
+        // dropped slot instead of a half-written bracket.
+        t.hooks[d] = SKIPPED;
         if (t.busy) {
-            t.hooks[d] = SKIPPED;
-            SKIPS.incrementAndGet();
+            countSkip(SKIPS);
             return;
         }
         t.busy = true;
         try {
-            t.hooks[d] = hook;
-            t.stacks[d] = walkStack ? StackIds.current() : StackIds.NONE;
-            // Stamped last, so the walk is outside the bracket's time.
+            t.stacks[d] = stacks.getAsLong();
+            // Stamped after the walk, so the walk is outside the bracket.
             t.enters[d] = System.nanoTime();
+            t.hooks[d] = hook;
+        } catch (Throwable e) {
+            countSkip(FAILS);  // e.g. StackOverflowError in a deep recursion
         } finally {
             t.busy = false;
         }
     }
 
     public static void exit(int hook) {
-        Brackets t = STATE.get();
-        if (t.depth == 0) {
-            return;           // retransformed mid-call: no matching enter
+        try {
+            Brackets t = STATE.get();
+            if (t.depth == 0) {
+                return;       // retransformed mid-call: no matching enter
+            }
+            int d = --t.depth;
+            if (d >= MAX_DEPTH || t.hooks[d] != hook) {
+                return;       // skipped, failed or overflowed enter
+            }
+            AtomicLongArray c = counts;
+            if (hook > 0 && hook < c.length()) {
+                c.incrementAndGet(hook);
+            }
+        } catch (Throwable e) {
+            countSkip(FAILS);
         }
-        int d = --t.depth;
-        if (d >= MAX_DEPTH || t.hooks[d] != hook) {
-            return;           // skipped or overflowed enter
-        }
-        AtomicLongArray c = counts;
-        if (hook > 0 && hook < c.length()) {
-            c.incrementAndGet(hook);
+    }
+
+    /** Counts a dropped bracket; must not throw either. */
+    private static void countSkip(AtomicLong n) {
+        try {
+            n.incrementAndGet();
+        } catch (Throwable ignored) {
+            // Counting is best effort; the target's call goes on.
         }
     }
 
@@ -126,5 +175,15 @@ public final class Hooks {
     /** Brackets skipped because the thread was inside the bridge already. */
     public static long skips() {
         return SKIPS.get();
+    }
+
+    /** Brackets dropped because opening or closing them threw. */
+    public static long fails() {
+        return FAILS.get();
+    }
+
+    /** The calling thread's open-bracket depth (tests). */
+    static int depth() {
+        return STATE.get().depth;
     }
 }

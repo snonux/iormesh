@@ -108,7 +108,7 @@ final class BoundaryTransformer implements ClassFileTransformer {
     static void warmUp() throws java.io.IOException {
         String self = BoundaryTransformer.class.getName().replace('.', '/');
         HookTable t = HookTable.parse("warm-up", java.util.List.of(
-                "1\twarm-up\t" + self + "\twarmUp\t()V\tnone\tnone"));
+                "1\tread\t" + self + "\twarmUp\t()V\tnone\tnone"));
         try (java.io.InputStream in = BoundaryTransformer.class
                 .getResourceAsStream("BoundaryTransformer.class")) {
             if (in == null || new BoundaryTransformer(t).rewrite(self, in.readAllBytes()) == null) {

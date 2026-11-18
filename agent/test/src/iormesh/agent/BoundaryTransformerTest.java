@@ -49,7 +49,7 @@ final class BoundaryTransformerTest {
     }
 
     private static String row(int id, String method, String desc) {
-        return id + "\ttest\t" + FIXTURE + "\t" + method + "\t" + desc + "\tnone\tnone";
+        return id + "\tread\t" + FIXTURE + "\t" + method + "\t" + desc + "\tnone\tnone";
     }
 
     private static BoundaryTransformer transformer(List<String> rows) {
@@ -84,12 +84,27 @@ final class BoundaryTransformerTest {
         equal(java.util.Set.of(FIXTURE), t.seen(), "seen classes");
     }
 
-    /** Loads the rewritten Fixture in its own loader (so it is verified). */
+    /**
+     * Loads the rewritten Fixture in its own loader (so it is verified)
+     * and calls every method inside an outer bracket (hook 7) opened by
+     * hand: a rewritten method that exited twice would close hook 7's
+     * bracket early, which its count of 1 rules out.
+     */
     static void runs() throws Exception {
         byte[] after = transformer(TABLE).rewrite(FIXTURE, fixtureBytes());
-        Class<?> c = new OneClassLoader("iormesh.agent.Fixture", after).loadClass("iormesh.agent.Fixture");
-        Object f = c.getConstructor().newInstance();
+        Class<?> c = new OneClassLoader("iormesh.agent.Fixture", after)
+                .loadClass("iormesh.agent.Fixture");
         Hooks.configure(8, true);
+        Hooks.enter(7);
+        callFixture(c);
+        Hooks.exit(7);
+        long[] n = Hooks.counts();
+        equal(List.of(0L, 1L, 1L, 2L, 1L, 2L, 0L, 1L), List.of(n[0], n[1], n[2], n[3], n[4],
+                n[5], n[6], n[7]), "closed brackets per hook (7 = the outer one)");
+    }
+
+    private static void callFixture(Class<?> c) throws Exception {
+        Object f = c.getConstructor().newInstance();
         equal(7, c.getMethod("value").invoke(f), "value()");
         equal(9, c.getMethod("value", int.class).invoke(f, 2), "value(int)");
         equal(14, c.getMethod("unlisted").invoke(f), "unlisted()");
@@ -107,9 +122,6 @@ final class BoundaryTransformerTest {
         } catch (InvocationTargetException e) {
             equal(IllegalStateException.class, e.getCause().getClass(), "rethrown as is");
         }
-        long[] n = Hooks.counts();
-        equal(List.of(0L, 1L, 1L, 2L, 1L, 2L), List.of(n[0], n[1], n[2], n[3], n[4], n[5]),
-                "closed brackets per hook");
     }
 
     static void unknownClass() throws Exception {

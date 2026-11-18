@@ -14,7 +14,9 @@ Why vendored: the agent build is JDK-only (no Maven or Gradle) and must
 work offline, at build and test time. `mage agentBuild` checks the
 SHA-256 above before using the jar, then relocates its classes to
 iormesh.agent.shaded.asm (agent/tools/Relocate.java) so the agent never
-clashes with an ASM the traced application ships.
+clashes with an ASM the traced application ships. LICENSE.txt ships in
+the agent jar as META-INF/LICENSE-asm.txt, as BSD-3 asks of binary
+redistributions.
 
 Why this version: 9.11.1 reads class files up to Java 28 (Opcodes.V28)
 and is itself Java 5 bytecode, so it runs on the agent's JDK 17 floor

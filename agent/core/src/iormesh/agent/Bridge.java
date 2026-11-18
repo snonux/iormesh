@@ -32,26 +32,31 @@ final class Bridge {
     static final String NESTED = "iormesh-bridge.jar";
 
     private final Class<?> hooks;
+    /** The temporary copy of the nested jar, or null for bridge=<path>. */
+    private final Path extracted;
 
-    private Bridge(Class<?> hooks) {
+    private Bridge(Class<?> hooks, Path extracted) {
         this.hooks = hooks;
+        this.extracted = extracted;
     }
 
     /** Appends the bridge (path, or the nested jar if null) and links it. */
     static Bridge install(Instrumentation inst, String path) throws Exception {
-        Path jar = path != null ? Path.of(path) : extractNested();
+        Path extracted = path != null ? null : extractNested();
+        Path jar = path != null ? Path.of(path) : extracted;
         inst.appendToBootstrapClassLoaderSearch(new JarFile(jar.toFile()));
         Class<?> hooks = Class.forName(HOOKS, true, null);
         inst.redefineModule(Object.class.getModule(), Set.of(hooks.getModule()),
                 Map.of(), Map.of(), Set.of(), Map.of());
-        return new Bridge(hooks);
+        return new Bridge(hooks, extracted);
     }
 
     /**
      * Copies the nested bridge jar to a temporary file: the bootstrap
      * search path takes files only. Install-time I/O, before any JDK
-     * class is rewritten, so it is never bracketed. The file is deleted
-     * at JVM exit; the JVM holds it open until then.
+     * class is rewritten, so it is never bracketed. The agent deletes it
+     * once the bridge is loaded and warm ({@link #deleteExtracted});
+     * deleteOnExit is only the fallback if install fails before that.
      */
     private static Path extractNested() throws IOException {
         Path tmp = Files.createTempFile("iormesh-bridge-", ".jar");
@@ -63,6 +68,23 @@ final class Bridge {
             Files.copy(in, tmp, StandardCopyOption.REPLACE_EXISTING);
         }
         return tmp;
+    }
+
+    /**
+     * Deletes the extracted jar, so a SIGKILLed JVM leaves no temp file
+     * behind. The JVM opened the jar when it was appended and keeps that
+     * descriptor, and on Linux an unlinked file stays readable through
+     * it, so classes the bridge loads later still resolve.
+     */
+    void deleteExtracted() throws IOException {
+        if (extracted != null) {
+            Files.deleteIfExists(extracted);
+        }
+    }
+
+    /** See Hooks.claim: false if an agent is installed in this JVM already. */
+    boolean claim() throws ReflectiveOperationException {
+        return (boolean) hooks.getMethod("claim").invoke(null);
     }
 
     void configure(int hookIds, boolean walkStack) throws ReflectiveOperationException {
@@ -79,6 +101,10 @@ final class Bridge {
 
     long skips() throws ReflectiveOperationException {
         return (long) hooks.getMethod("skips").invoke(null);
+    }
+
+    long fails() throws ReflectiveOperationException {
+        return (long) hooks.getMethod("fails").invoke(null);
     }
 
     int stacks() throws ReflectiveOperationException {
