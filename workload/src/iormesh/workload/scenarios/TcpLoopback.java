@@ -92,6 +92,8 @@ public final class TcpLoopback implements Scenario {
         return NAME + "-" + role + ".dat";
     }
 
+    // No accept timeout on purpose: a standalone server waits for its
+    // client as long as it takes; the harness kills it on failure.
     private static void server(int port) throws IOException {
         try (ServerSocket listener = bind(port)) {
             System.out.println("listening " + listener.getLocalPort());

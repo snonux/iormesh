@@ -231,15 +231,20 @@ A scenario's expectation file sits next to its source in
 `$t1`, `$fd1`, `$port1`) bind on first match; the checker then
 requires consistency.
 
+The shipped `file-basic` golden (write, close, reopen, read):
+
 ```json
 {"scenario": "file-basic",
  "schema_version": 1,
  "events": [
    {"thread": "$t1", "event": "openat",
-    "args": {"path": "$tmp/file-basic.dat"}, "fd": "$fd1"},
+    "args": {"path": "$tmp/file-basic.dat", "flags": 577}, "fd": "$fd1"},
    {"thread": "$t1", "event": "write", "fd": "$fd1", "bytes": 4096},
-   {"thread": "$t1", "event": "read",  "fd": "$fd1", "bytes": 4096},
-   {"thread": "$t1", "event": "close", "fd": "$fd1"}
+   {"thread": "$t1", "event": "close", "fd": "$fd1"},
+   {"thread": "$t1", "event": "openat",
+    "args": {"path": "$tmp/file-basic.dat", "flags": 0}, "fd": "$fd2"},
+   {"thread": "$t1", "event": "read", "fd": "$fd2", "bytes": 4096},
+   {"thread": "$t1", "event": "close", "fd": "$fd2"}
  ],
  "edges": [
    {"type": "opened", "from": "$p1", "to": "file:$tmp/file-basic.dat"}
@@ -365,7 +370,8 @@ dependencies either.
    `--port` defaults to 0 (kernel-picked) and it prints
    `listening <port>` as the stdout line after the PID; the
    harness starts or releases the client (`--port` required) only
-   after that line. Bad options or roles exit 2.
+   after that line. Bad options or roles exit 2; a
+   `--dir` that is not a directory exits 1.
 
 5. `expect.json` per scenario, in the format above.
 
