@@ -3,7 +3,8 @@
  "events": [
    {"process": "$p1", "thread": "$t1", "event": "bind", "fd": "$fd1",
     "args": {"path": "$tmp/unix-socket.sock"}},
-   {"process": "$p1", "thread": "$t1", "event": "accept", "fd": "$fd2"},
+   {"process": "$p1", "thread": "$t1", "event": "accept", "fd": "$fd2",
+    "conn_id": "$c1"},
    {"process": "$p1", "thread": "$t1", "event": "read", "fd": "$fd2",
     "bytes": 5},
    {"process": "$p1", "thread": "$t1", "event": "write", "fd": "$fd2",
@@ -16,7 +17,7 @@
     "args": {"path": "$tmp/unix-socket.sock"}},
 
    {"process": "$p2", "thread": "$t2", "event": "connect", "fd": "$fd3",
-    "args": {"path": "$tmp/unix-socket.sock"}},
+    "args": {"path": "$tmp/unix-socket.sock"}, "conn_id": "$c1"},
    {"process": "$p2", "thread": "$t2", "event": "write", "fd": "$fd3",
     "bytes": 5},
    {"process": "$p2", "thread": "$t2", "event": "read", "fd": "$fd3",

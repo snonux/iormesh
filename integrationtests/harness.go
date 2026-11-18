@@ -10,7 +10,9 @@ package integrationtests
 // the trace directory (events.ndjson + graph.json) read strictly, not an
 // .ior.zst recording; no flamegraph, parquet, wrapper or per-PID-args
 // variants yet. A run may bind the tracer to a pattern instead of PIDs
-// (Harness.Pattern, M2), which ior has no counterpart of.
+// (Harness.Pattern, M2), which ior has no counterpart of, and may add
+// opt-in event families (Harness.Families, M2 step 7). A workload exiting
+// with the skip code 3 ends the run with ErrWorkloadSkipped.
 
 import (
 	"errors"
@@ -44,7 +46,15 @@ const (
 	bpfObjectOverrideEnv   = "IORMESH_BPF_OBJECT"
 	workloadStartupFileEnv = "IORMESH_WORKLOAD_STARTUP_FILE"
 	tracerProject          = "iormesh-it"
+	// workloadSkipCode is the workload's EXIT_SKIP (workload Main.java).
+	workloadSkipCode = 3
 )
+
+// ErrWorkloadSkipped: a workload exited with the skip code — the host
+// lacks what its scenario needs (tcp-ipv6 without an IPv6 loopback). Not
+// a pass and not a failure: the test skips (docs/implementation.md M2
+// step 7).
+var ErrWorkloadSkipped = errors.New("workload skipped")
 
 // Harness starts workloads and traces them with the real tracer binary.
 // One harness belongs to one test; Close (registered by newHarness) kills
@@ -62,6 +72,10 @@ type Harness struct {
 	// ends by itself (it waits for the app to re-appear, decision #23),
 	// so Trace stops it with SIGINT once the workloads exited.
 	Pattern string
+	// Families, when set, is the tracer's -trace-families: the opt-in
+	// event families (ipc, signal, poll, zerocopy) a scenario needs on
+	// top of the default file and socket families (decision #7).
+	Families string
 
 	runs  int
 	procs []*process
@@ -116,6 +130,12 @@ func (h *Harness) StartOptionless(scenario string) (*Workload, error) {
 	return h.startWorkload("", scenario, nil)
 }
 
+// StartNoDir starts a scenario role that takes options but no --dir: the
+// udp-loopback roles and the unix-socket client, which write no files.
+func (h *Harness) StartNoDir(scenario string, args ...string) (*Workload, error) {
+	return h.startWorkload("", scenario, args)
+}
+
 // startWorkload starts a workload; an empty dir passes no --dir.
 func (h *Harness) startWorkload(dir, scenario string, args []string) (*Workload, error) {
 	startup := filepath.Join(h.Dir, fmt.Sprintf("startup-%d-%s", len(h.procs), scenario))
@@ -157,7 +177,7 @@ func (h *Harness) Trace(ws ...*Workload) (Run, error) {
 	}
 	for _, w := range ws {
 		if err := w.proc.wait(runTimeout); err != nil {
-			return run, err
+			return run, skipped(w, err)
 		}
 	}
 	if h.Pattern != "" {
@@ -177,6 +197,17 @@ func (h *Harness) Trace(ws ...*Workload) (Run, error) {
 	return run, err
 }
 
+// skipped turns a workload's exit with the skip code into
+// ErrWorkloadSkipped, keeping its stderr (which says why); any other
+// error passes unchanged.
+func skipped(w *Workload, err error) error {
+	var exit *exec.ExitError
+	if !errors.As(w.proc.err, &exit) || exit.ExitCode() != workloadSkipCode {
+		return err
+	}
+	return fmt.Errorf("%w: %s: %v", ErrWorkloadSkipped, w.Scenario, err)
+}
+
 // Close kills every process the harness started that is still running.
 func (h *Harness) Close() {
 	for _, p := range h.procs {
@@ -190,6 +221,9 @@ func (h *Harness) startTracer(ws []*Workload, out string) (*process, error) {
 	ready := out + ".ready"
 	args := append([]string{"run"}, h.targetArgs(ws)...)
 	args = append(args, "-project", tracerProject, "-out", out, "-duration", tracerDuration, "-ready", ready)
+	if h.Families != "" {
+		args = append(args, "-trace-families", h.Families)
+	}
 	cmd := exec.Command(h.TracerBinary, args...)
 	if h.BpfObject != "" {
 		cmd.Env = append(os.Environ(), bpfObjectOverrideEnv+"="+h.BpfObject)

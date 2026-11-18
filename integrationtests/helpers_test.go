@@ -7,6 +7,7 @@ package integrationtests
 // are iormesh's: the golden check of internal/normalize and graph checks.
 
 import (
+	"errors"
 	"flag"
 	"net"
 	"os"
@@ -132,7 +133,8 @@ type tracedRun struct {
 // no record in the kernel (FirstRunWithoutKernelLoss). A run that lost
 // records on every attempt cannot be judged: the test skips with the
 // unexercised marker rather than pass or fail on loss. Undecodable records
-// are a decoder bug and fail at once.
+// are a decoder bug and fail at once. A workload that exits with the skip
+// code (the host cannot run its scenario) skips the test.
 func traceJudged(t *testing.T, h *Harness, start starter) tracedRun {
 	t.Helper()
 	run, lost, err := FirstRunWithoutKernelLoss(lossAttempts, func() (tracedRun, KernelLoss, error) {
@@ -149,6 +151,9 @@ func traceJudged(t *testing.T, h *Harness, start starter) tracedRun {
 		}
 		return tracedRun{Run: r, pids: pids}, r.Loss, err
 	})
+	if errors.Is(err, ErrWorkloadSkipped) {
+		t.Skipf("traced run: %v", err)
+	}
 	if err != nil {
 		t.Fatalf("traced run: %v", err)
 	}
