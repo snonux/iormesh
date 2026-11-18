@@ -8,6 +8,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -182,7 +183,7 @@ func finish(r *gatedRun, scenario string) error {
 // valid JSON naming its scenario, for every scenario --list names, so a
 // new scenario without an expect.json fails here rather than in M1.
 func checkExpectations() error {
-	out, err := exec.Command("java", "-jar", workloadJar, "--list").Output()
+	out, err := runBounded("--list")
 	if err != nil {
 		return fmt.Errorf("--list: %w", err)
 	}
@@ -198,8 +199,10 @@ func checkExpectations() error {
 	return nil
 }
 
+// checkExpectation asserts `--expect name` prints valid JSON whose
+// scenario field is name.
 func checkExpectation(name string) error {
-	out, err := exec.Command("java", "-jar", workloadJar, "--expect", name).Output()
+	out, err := runBounded("--expect", name)
 	if err != nil {
 		return fmt.Errorf("--expect %s: %w", name, err)
 	}
@@ -281,8 +284,7 @@ func closedPort() (int, error) {
 
 // expectExit runs the workload jar and fails unless it exits with code.
 func expectExit(code int, args ...string) error {
-	cmd := exec.Command("java", append([]string{"-jar", workloadJar}, args...)...)
-	err := cmd.Run()
+	_, err := runBounded(args...)
 	var exitErr *exec.ExitError
 	switch {
 	case err == nil && code == 0:
@@ -292,4 +294,14 @@ func expectExit(code int, args ...string) error {
 	default:
 		return fmt.Errorf("workload %q: want exit %d, got %v", args, code, err)
 	}
+}
+
+// runBounded runs the workload jar to completion and returns its stdout.
+// gateWait bounds it, so a run that blocks (say, a client whose "closed"
+// port got reused by a silent listener) fails the check instead of
+// hanging it.
+func runBounded(args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), gateWait)
+	defer cancel()
+	return workloadCmd(ctx, args...).Output()
 }

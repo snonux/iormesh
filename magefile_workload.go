@@ -8,6 +8,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -23,10 +24,15 @@ const gateWait = 20 * time.Second
 
 // gatedRun is a workload process whose stdout and stderr are read line by
 // line, and whose exit is reported on done.
+//
+// Both streams are read by goroutines into channels, so every wait can be
+// bounded by gateWait with a select — a blocking Scan on a pipe could not
+// be, and a hung workload would hang `mage workloadTest` instead of
+// failing it. The channels hold 64 lines; the scenarios print two or
+// three, and drainStdout empties stdout once a check has read its lines.
 type gatedRun struct {
 	cmd    *exec.Cmd
-	outR   io.Reader
-	stdout *bufio.Scanner
+	stdout chan string
 	stderr chan string
 	done   chan error
 }
@@ -42,7 +48,7 @@ func startGated(startup, hold string) (*gatedRun, error) {
 // startRun starts the workload jar with args, adding env to the inherited
 // environment.
 func startRun(env []string, args ...string) (*gatedRun, error) {
-	cmd := exec.Command("java", append([]string{"-jar", workloadJar}, args...)...)
+	cmd := workloadCmd(context.Background(), args...)
 	cmd.Env = append(os.Environ(), env...)
 	// io.Pipe writers instead of Cmd.StdoutPipe/StderrPipe: Wait then
 	// drains the output itself, so reaping the process can never cut a
@@ -53,7 +59,7 @@ func startRun(env []string, args ...string) (*gatedRun, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	r := &gatedRun{cmd: cmd, outR: outR, stdout: bufio.NewScanner(outR),
+	r := &gatedRun{cmd: cmd, stdout: make(chan string, 64),
 		stderr: make(chan string, 64), done: make(chan error, 1)}
 	go func() {
 		err := cmd.Wait()
@@ -61,14 +67,24 @@ func startRun(env []string, args ...string) (*gatedRun, error) {
 		_ = errW.Close()
 		r.done <- err
 	}()
-	go func() {
-		sc := bufio.NewScanner(errR)
-		for sc.Scan() {
-			r.stderr <- sc.Text()
-		}
-		close(r.stderr)
-	}()
+	go readLines(outR, r.stdout)
+	go readLines(errR, r.stderr)
 	return r, nil
+}
+
+// readLines sends each line of in to lines and closes lines at EOF.
+func readLines(in io.Reader, lines chan<- string) {
+	sc := bufio.NewScanner(in)
+	for sc.Scan() {
+		lines <- sc.Text()
+	}
+	close(lines)
+}
+
+// workloadCmd builds `java -jar workload.jar args...`; ctx bounds runs
+// that are not driven through a gatedRun.
+func workloadCmd(ctx context.Context, args ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, "java", append([]string{"-jar", workloadJar}, args...)...)
 }
 
 // name labels a run in error messages by its workload arguments (the
@@ -77,14 +93,18 @@ func (r *gatedRun) name() string {
 	return fmt.Sprintf("workload %q", r.cmd.Args[3:])
 }
 
-// nextStdout returns the next stdout line. A scenario prints at most a
-// couple of lines before it blocks on its peer or a gate, so a blocking
-// read is fine here; the deferred kill unblocks it on a hung check.
+// nextStdout returns the next stdout line, failing if stdout ends or no
+// line arrives within gateWait.
 func (r *gatedRun) nextStdout() (string, error) {
-	if !r.stdout.Scan() {
-		return "", fmt.Errorf("%s: stdout ended early: %v", r.name(), r.stdout.Err())
+	select {
+	case line, ok := <-r.stdout:
+		if !ok {
+			return "", fmt.Errorf("%s: stdout ended early", r.name())
+		}
+		return line, nil
+	case <-time.After(gateWait):
+		return "", fmt.Errorf("%s: no stdout line within %v", r.name(), gateWait)
 	}
-	return r.stdout.Text(), nil
 }
 
 // expectPID asserts the first stdout line is the process's PID.
@@ -114,11 +134,14 @@ func (r *gatedRun) expectListening() (int, error) {
 	return port, nil
 }
 
-// drainStdout discards the rest of stdout so the copy goroutine behind
-// Wait never blocks. Called only after the lines a check reads, so the
-// drain cannot race the scanner for them.
+// drainStdout discards the rest of stdout so the reader goroutine (and
+// the copy behind Wait) never blocks on a full channel. Called only after
+// the lines a check reads, so the drain cannot steal them.
 func (r *gatedRun) drainStdout() {
-	go func() { _, _ = io.Copy(io.Discard, r.outR) }()
+	go func() {
+		for range r.stdout {
+		}
+	}()
 }
 
 // expectQuiet fails if the process prints to stderr or exits within d.
@@ -170,6 +193,7 @@ func (r *gatedRun) wait() error {
 // kill ends a run left behind by a failed check; harmless after exit.
 func (r *gatedRun) kill() { _ = r.cmd.Process.Kill() }
 
+// touch creates an empty file, releasing a workload gate.
 func touch(path string) error {
 	return os.WriteFile(path, nil, 0o600)
 }
