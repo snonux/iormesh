@@ -1050,11 +1050,12 @@ answer), and deferred.
 - **#29 JDK version support** — the plan says JDK 21, but
   fleets run 17 and older. Boundary hooks, stacks and HTTP
   events do not need 21 (only the deferred virtual-thread
-  support would). S1 found the hook set's natives identical
-  from 21 to 25 (27-ea changes two signatures outside the set),
-  while 17 differs (no `UnixFileDispatcherImpl`/`UnixDispatcher`,
-  RAF `readBytes` instead of `readBytes0`) — one hook-table
-  variant for 17. M3 (task 0b4) builds the agent for 17 with
+  support would). S1 (from sources, no 21 runtime then) found
+  the hook set's natives identical from 21 to 25 (27-ea changes
+  two signatures outside the set), while 17 differs (no
+  `UnixFileDispatcherImpl`/`UnixDispatcher`, RAF `readBytes`
+  instead of `readBytes0`); the hooked *Java* methods differ
+  more, which sc4 settled as three variants (below). M3 (task 0b4) builds the agent for 17 with
   shaded ASM and ships per-JDK table variants. A real JDK 21
   (task sc4) showed one hooked Java method S1's source reading
   missed: `Net.serverSocket` keeps its `boolean` stream flag

@@ -1471,7 +1471,8 @@ silently; live attach prints the JEP 451 warning; what
 `-XX:-EnableDynamicAgentLoading` does; what a root-run tracer must
 do to attach to a JVM owned by another uid.
 
-S1 result (JDK 25 and 27-ea; no JDK 21 runtime): `-javaagent`
+S1 result (JDK 25 and 27-ea; no JDK 21 runtime at the time —
+the agent has since run on 21, task sc4): `-javaagent`
 silent; live attach works and prints the JEP 451 warning on both;
 `+EnableDynamicAgentLoading` silences it;
 `-EnableDynamicAgentLoading` fails the load with
