@@ -123,10 +123,15 @@ validate_label() {
 validate_settings() {
     [[ $count =~ ^[1-9][0-9]*$ ]] || die "PERF_COUNT '$count' is not a positive integer"
     [[ $ops =~ ^[1-9][0-9]*$ ]] || die "PERF_OPS '$ops' is not a positive integer"
+    # The scenario parses --ops as a Java int; reject what it would
+    # reject, before the jar build rather than at the first sample.
+    [ "${#ops}" -le 10 ] && [ "$ops" -le 2147483647 ] || die "PERF_OPS '$ops' exceeds 2^31-1"
     local t
     [ -n "${threads// /}" ] || die "PERF_THREADS is empty"
     for t in $threads; do
         [[ $t =~ ^[1-9][0-9]*$ ]] || die "PERF_THREADS entry '$t' is not a positive integer"
+        [ "${#t}" -le 4 ] && [ "$t" -le 1024 ] || die "PERF_THREADS entry '$t' exceeds 1024"
+        [ "$ops" -ge "$t" ] || die "PERF_OPS $ops is below PERF_THREADS entry $t (each thread needs an op)"
     done
 }
 
@@ -210,6 +215,9 @@ write_header() {
     echo "# java:        $(java -version 2>&1 | head -1)"
     echo "# settings:    count=$count ops=$ops threads=$threads"
     echo "# loadavg:     $(cut -d' ' -f1-3 /proc/loadavg) (at start; keep the host idle while recording)"
+    # The burst's files live in java.io.tmpdir; tmpfs vs a disk
+    # filesystem dominates ns/syscall, so the header names it.
+    echo "# workdir fs:  $(df -T "${TMPDIR:-/tmp}" | awk 'NR == 2 {print $2}')"
     echo
 }
 
@@ -218,9 +226,17 @@ write_header() {
 # "syscall-burst ops=…" result line is read.
 burst_sample() {
     local -r t=$1
-    local out line elapsed
-    out=$(java -jar "$workload_jar" syscall-burst --ops "$ops" --threads "$t" 2>/dev/null) ||
-        die "syscall-burst --ops $ops --threads $t failed"
+    local out line elapsed err
+    # stderr goes to a file, not /dev/null: a failed sample must say why.
+    # Marker lines are the scenario's normal stderr and are dropped.
+    err=$(mktemp) || die "cannot create a temp file"
+    if ! out=$(java -jar "$workload_jar" syscall-burst --ops "$ops" --threads "$t" 2>"$err"); then
+        local why
+        why=$(grep -v '^marker ' "$err" | tail -5)
+        rm -f -- "$err"
+        die "syscall-burst --ops $ops --threads $t failed: $why"
+    fi
+    rm -f -- "$err"
     line=$(grep -m1 '^syscall-burst ops=' <<< "$out") ||
         die "syscall-burst printed no result line: $out"
     elapsed=$(sed -n 's/.* elapsed_ns=\([0-9][0-9]*\)$/\1/p' <<< "$line")

@@ -205,6 +205,18 @@ throwaway; its findings update this plan.
   Exit: the budget's numbers are written into decision #25 and
   become acceptance criteria from M2 on.
 
+  Result (2026-11-18, [docs/spikes/s3-overhead.md](docs/spikes/s3-overhead.md);
+  medians of 3 on a busy host, load 4–6, so order of magnitude):
+  on the per-syscall worst case (`syscall-burst`, 1-byte
+  read/write) tracing slows the target 1.5–1.8×, every other
+  process on the host pays ~1.2× per syscall while a trace runs,
+  the tracer spends 3.6–11 µs CPU per event, and a sustained
+  burst loses 30–80 % of its records — the consumer, not the
+  ring, is the limit. NDJSON is ~326 B/event; zstd shrinks it
+  19×. Hot read/write loops therefore need in-kernel aggregation
+  (ior's `syscall_aggregate_map`) in M2; decision #25 records the
+  budget.
+
 ### M0 — Traceable test workload (Java): framework first
 
 A deterministic Java 21 app whose scenario behavior we can state
@@ -922,8 +934,10 @@ answer), and deferred.
   (`.parquet.zst`) would make segments unqueryable without a
   decompress step. Variable event arguments map to one
   nullable column per argument field (see "Trace output
-  contract"). One sub-point rides on S3: whether a size cap
-  forces an early rotation for very hot sessions.
+  contract"). A size cap forces an early rotation for very hot
+  sessions (settled by S3): a segment rotates at one minute or
+  64 MB, whichever comes first, so a segment never outgrows what
+  one `collect` moves comfortably.
 - **#26 Cross-host join key** — the TCP initial-sequence-number
   pair (decided by S2, 2026-11-18): the client's `(iss, irs)`
   equals the server's `(irs, iss)`, which NAT leaves untouched.
@@ -947,6 +961,33 @@ answer), and deferred.
   the JDK alone (`javac` + `jar` via `mage workloadBuild`, no
   Maven or Gradle), so the thing being traced never has an
   excuse to behave differently from a real app.
+- **#25 Tracer overhead and volume budget** — settled by S3
+  (2026-11-18; numbers and method in
+  [docs/spikes/s3-overhead.md](docs/spikes/s3-overhead.md)). The
+  four numbers, as M1 measured them on `syscall-burst`, and the
+  budget M2 onward is accepted against:
+  1. *tracer CPU* — M1: 3.6–11 µs per event. Budget: ≤ 2 µs per
+     emitted event on `syscall-burst` (median), with hot
+     read/write loops aggregated in the kernel (below);
+  2. *bystander cost* (host-wide, every untraced process) — M1:
+     ~1.2× per syscall on the worst case. Budget: ≤ 1.25× on
+     `syscall-burst`, paid only while a trace runs;
+  3. *loss* — M1: 30–80 % of records on a sustained burst, 0 on
+     the M0 scenarios. Budget: zero lost records on every M0/M2
+     scenario, and < 1 % on `syscall-burst` at 1 and 4 threads
+     with aggregation on; any loss is an explicit `drop` event;
+  4. *volume* — M1: ~326 B/event NDJSON, zstd ×19. Budget:
+     ≤ 30 B/event in compressed segments (≈ 18 MB per minute at
+     10 k events/s, ≈ 4.3 GB per 4 h session).
+
+  In-kernel aggregation (ior's model): repeated read/write on
+  one fd instance by one thread are summed per flush into one
+  event with a count; every event that changes fd, socket or
+  process state stays individual, so goldens and attribution
+  are unaffected. Enforcement: the budget is checked by a
+  documented `spikes/s3/measure.sh` run per milestone (CI
+  machines are too noisy for a perf gate); the zero-loss
+  criterion is part of the integration suite.
 - **#19 Runtime control** — the transient systemd unit (M4):
   graceful stop via SIGTERM, flag changes via stop-and-restart.
   No control file, no socket.
@@ -1000,34 +1041,13 @@ answer), and deferred.
 
 ### Open — blocks M2
 
-- **#25 Tracer overhead and volume budget** — tracing runs at
-  syscall frequency, so the cost needs explicit numbers,
-  measured by S3 and enforced as acceptance criteria from M2
-  on. Four numbers to pin:
-  1. tracer CPU while tracing the M0 scenarios;
-  2. the cost every *other* process on the host pays — ior
-     measured that classic syscall tracepoints add a
-     per-syscall cost to every task once enabled (its
-     `docs/raw-tracepoint-design.md`), so the budget is
-     host-wide, not per-target;
-  3. ring-buffer loss rate;
-  4. trace bytes per minute — events/s × compressed
-     bytes/event × 60. (Order of magnitude only, to be
-     replaced by S3's measurement: 10k events/s at 20 bytes
-     each is ~12 MB per minute, ~3 GB per 4h session and
-     host.) The disk watchdog default, the size-cap rotation
-     (#16) and any need for in-kernel aggregation of hot
-     read/write loops follow from this number.
-
-  Also open: where the budget is enforced (a perf target in CI
-  vs a documented measurement run per release). *Default: the
-  owner pins initial targets from ior's `perf/` baselines
-  before M1 starts; S3 replaces them with measurements.*
 - **#7 Event families, default-on vs opt-in** — signals, epoll
   registrations, mmaps and renames all add volume; reuse ior's
   trace-family concept and pick defaults per measured cost
   (S3). *Default: file, socket and lifecycle on; the rest
-  opt-in.*
+  opt-in.* S3 supports the default: the consumer's per-event
+  cost, not the probes, limits throughput, so every family
+  that fires at syscall frequency stays opt-in.
 - **#23 Target-pattern mechanics** — match on exec (argv/exe)
   vs comm; glob vs regex; concurrent matches (newest wins vs
   trace all vs error); restart semantics (wait for

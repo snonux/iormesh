@@ -1,0 +1,40 @@
+# S3 samples 2026-11-18T18:43:30Z commit c0cdf76
+# kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
+# java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
+# ops=200000 threads=1 4 16 runs=3
+# run 1 threads 1 loadavg 6.49 5.75 8.06
+mode=untraced threads=1 ops=200000 elapsed_ns=727288560
+mode=traced threads=1 ops=200000 elapsed_ns=965469614 tracer_cpu_ms=6250 lost=116143 events=341360 ndjson_bytes=111180928
+mode=bystander threads=1 ops=200000 elapsed_ns=618153276 tracer_cpu_ms=2090
+# run 1 threads 4 loadavg 6.03 5.68 8.01
+mode=untraced threads=4 ops=200000 elapsed_ns=199778632
+mode=traced threads=4 ops=200000 elapsed_ns=302905060 tracer_cpu_ms=2830 lost=340449 events=228622 ndjson_bytes=74514186
+mode=bystander threads=4 ops=200000 elapsed_ns=235684948 tracer_cpu_ms=1370
+# run 1 threads 16 loadavg 5.56 5.59 7.95
+mode=untraced threads=16 ops=200000 elapsed_ns=190598531
+mode=traced threads=16 ops=200000 elapsed_ns=253665803 tracer_cpu_ms=2690 lost=327162 events=205009 ndjson_bytes=66921650
+mode=bystander threads=16 ops=200000 elapsed_ns=218262469 tracer_cpu_ms=1340
+# run 2 threads 1 loadavg 5.52 5.58 7.94
+mode=untraced threads=1 ops=200000 elapsed_ns=340667857
+mode=traced threads=1 ops=200000 elapsed_ns=605677986 tracer_cpu_ms=3490 lost=136842 events=331049 ndjson_bytes=107812751
+mode=bystander threads=1 ops=200000 elapsed_ns=399918829 tracer_cpu_ms=1370
+# run 2 threads 4 loadavg 5.21 5.51 7.89
+mode=untraced threads=4 ops=200000 elapsed_ns=189104561
+mode=traced threads=4 ops=200000 elapsed_ns=274023902 tracer_cpu_ms=2960 lost=323892 events=236437 ndjson_bytes=77065738
+mode=bystander threads=4 ops=200000 elapsed_ns=214529957 tracer_cpu_ms=1360
+# run 2 threads 16 loadavg 4.87 5.43 7.84
+mode=untraced threads=16 ops=200000 elapsed_ns=179525810
+mode=traced threads=16 ops=200000 elapsed_ns=279162597 tracer_cpu_ms=2830 lost=298388 events=204384 ndjson_bytes=66692924
+mode=bystander threads=16 ops=200000 elapsed_ns=406554074 tracer_cpu_ms=2130
+# run 3 threads 1 loadavg 4.80 5.40 7.81
+mode=untraced threads=1 ops=200000 elapsed_ns=523497821
+mode=traced threads=1 ops=200000 elapsed_ns=1060803454 tracer_cpu_ms=5910 lost=120535 events=338947 ndjson_bytes=110412744
+mode=bystander threads=1 ops=200000 elapsed_ns=698544524 tracer_cpu_ms=2280
+# run 3 threads 4 loadavg 4.52 5.32 7.76
+mode=untraced threads=4 ops=200000 elapsed_ns=356734349
+mode=traced threads=4 ops=200000 elapsed_ns=588638445 tracer_cpu_ms=5210 lost=319925 events=238985 ndjson_bytes=77999770
+mode=bystander threads=4 ops=200000 elapsed_ns=406973233 tracer_cpu_ms=2080
+# run 3 threads 16 loadavg 4.33 5.24 7.70
+mode=untraced threads=16 ops=200000 elapsed_ns=310677468
+mode=traced threads=16 ops=200000 elapsed_ns=493825977 tracer_cpu_ms=4650 lost=297474 events=216124 ndjson_bytes=70622641
+mode=bystander threads=16 ops=200000 elapsed_ns=333883647 tracer_cpu_ms=2090

@@ -1036,6 +1036,18 @@ Runs on the M1 build. Result: `docs/spikes/s3-overhead.md`.
    in-kernel aggregation (ior's `syscall_aggregate_map` is the
    model).
 
+*Done* (2026-11-18): `spikes/s3/measure.sh OUTDIR` takes the
+samples (untraced, traced, bystander per thread count; tracer
+CPU via `/usr/bin/time` around the sudo'd tracer, the
+idle-target tracer's CPU as the fixed load/attach cost), results
+in `spikes/s3/results/`, write-up in
+[spikes/s3-overhead.md](spikes/s3-overhead.md). Parquet bytes
+could not be measured (no parquet writer before M4); zstd on
+the NDJSON stands in. Outcome: decision #25 is Decided with a
+budget; #16 gets a 64 MB size cap; #7 keeps its default; hot
+read/write loops get in-kernel aggregation in M2 (step 11
+below).
+
 ## M2 — full trace surface
 
 **Goal**: everything in PLAN.md's "What we trace" except Java.
@@ -1224,6 +1236,14 @@ scenarios landing first (principle #1).
     golden declares `attribution: none` on every peer event;
     the tracer must never attribute a non-JVM process (no
     agent, no Java fields).
+11. **Budget (decision #25, from S3)**: in-kernel aggregation of
+    hot read/write loops, ior's `syscall_aggregate_map` model —
+    repeated read/write on one fd instance by one thread summed
+    per flush into one event with a count; every state-changing
+    event stays individual. Plus a cheaper consumer (validation
+    out of the hot path, encoding cost down) to reach ≤ 2 µs per
+    event. Measured with `spikes/s3/measure.sh` against the
+    #25 budget.
 
 **Done when**: PLAN.md's M2 acceptance holds, including the S3
 budget as a `mage perfGate` target.
