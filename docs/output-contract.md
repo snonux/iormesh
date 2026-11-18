@@ -7,8 +7,9 @@ the plan is the source of truth.
 - **Self-describing schema** — NDJSON event stream, graph export
   (typed nodes + edges), per-run summary rollup; documented
   in-repo in [schema.md](schema.md). The v1 *draft* (M1) is
-  the cgo-free `internal/schema` package; it stays a draft
-  until spikes S1 and S2 settle the Java and cross-host fields.
+  the cgo-free `internal/schema` package; S1 and S2 have
+  settled the Java and cross-host fields, and it stays a draft
+  until M3 settles `http`.
   Readers are strict: a record with an unknown or mis-cased
   key, a missing or null field, another schema version or an
   unknown event kind is rejected, never half-read.

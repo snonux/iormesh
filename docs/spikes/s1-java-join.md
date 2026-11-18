@@ -113,34 +113,42 @@ converted with a (boot, mono) pair read in bpftrace's `BEGIN` and
 saw it "jitter" by up to ~180 ns. `spikes/s1/clock/` measured
 where that comes from:
 
-- In user space, sampling mono–boot–mono and taking the midpoint,
-  the offset is a **constant** — p1–p99 spread 2 ns (10 ns at
-  load 25). BOOTTIME is MONOTONIC plus accumulated suspend time;
-  it moves only across a suspend.
+- In user space (`offset.c`), sampling mono–boot–mono and taking
+  the midpoint, the offset is a **constant** — the same p50 to the
+  nanosecond in every run of the session, p1–p99 spread 2 ns at
+  loadavg ~3 and 10 ns at ~25. BOOTTIME is MONOTONIC plus
+  accumulated suspend time; it moves only across a suspend.
 - `ClockProbe` brackets 20 000 writes to `/dev/null` with
-  `nanoTime()` (bracket p50 ≈ 1.5 µs, min ≈ 310 ns); `clock.bt`
-  stamps each `sys_enter` with both kernel clocks. Three runs:
+  `nanoTime()` (bracket p50 1.2–8 µs, min 310 ns–1 µs,
+  load-dependent); `clock.bt` stamps each `sys_enter` with both
+  kernel clocks. 8 runs at loadavg 3–27
+  (`spikes/s1/results/clock.txt`; the midpoint row exists for the 6
+  runs whose raw logs survived):
 
 | kernel stamp, converted how | outside bracket | min margin |
 |---|---|---|
-| `bpf_ktime_get_ns` (MONOTONIC), none | 0 / 60 000 | 146–164 ns |
-| boot, minus the `BEGIN` pair | **14 / 20 000** (run 1) | −14 ns |
-| boot, minus the user-space midpoint | 0 / 60 000 | 132–148 ns |
+| `bpf_ktime_get_ns` (MONOTONIC), none | 0 / 160 000 | 146–453 ns |
+| boot, minus the `BEGIN` pair | **14 / 20 000** in one run, 0 in the other 7 | −14 ns |
+| boot, minus the user-space midpoint | 0 / 120 000 | 132–419 ns |
 
-The `BEGIN` pair is biased by 74–162 ns: it is two helper calls
-in sequence. The "jitter" was measurement error, and it is enough
-to push a stamp out of a tight bracket. In the scenario joins
+The `BEGIN` pair is off by roughly 70–230 ns, run-dependent: it
+is two helper calls in sequence, not a moving offset. The
+midpoint conversion lands within 16–41 ns (p50) of the in-probe
+monotonic stamp — the time between its two helper calls. The
+"jitter" was measurement error, and it is enough to push a stamp
+out of a tight bracket. In the scenario joins
 the brackets are wider (smallest window-to-syscall gap 1.6–9.6 µs,
 load-dependent), so wa4's joins were right, but not by design.
 
-**Result**: the join needs no clock correlation at all if BPF
-stamps the native's entry with `bpf_ktime_get_ns` — the same
-clock as `nanoTime()`. Events keep their boot-clock timestamp
-(ior's convention, safe across suspend); only the join field is
-monotonic. Where an agent-only record (an HTTP event) must be
-placed on the boot timeline, the tracer converts with a midpoint
-offset sampled in user space and re-sampled per segment, so a
-suspend shows up as a step.
+**Result**: the join needs no clock correlation at all if BPF stamps with
+`bpf_ktime_get_ns` — the same clock as `nanoTime()`. The prototype compared the
+`sys_enter` stamp with the agent bracket; stamping the native's *entry* (the
+uprobe) instead, as M3 plans, is the same clock one step earlier and was not
+run. Events keep their boot-clock timestamp (ior's convention, safe across
+suspend); only the join field is monotonic. Where an agent-only record (an HTTP
+event) must be placed on the boot timeline, the tracer converts with a midpoint
+offset sampled in user space and re-sampled per segment, so a suspend shows up
+as a step.
 
 ## Experiment 3 — transport (decision #27)
 
@@ -196,7 +204,8 @@ a gated `file-basic` (JDK 25.0.4.1; live attach also on 27-ea):
 | attacher root, target another uid | works |
 
 Attach took ≈150–175 ms, loading the agent (retransforming the
-17 hook classes) ≈90–130 ms. The attach handshake (an
+17 hook classes) ≈90–130 ms — both on a loaded host, so
+load-dependent. The attach handshake (an
 `.attach_pid` file, SIGQUIT, a Unix socket `/tmp/.java_pid<pid>`
 in the target's mount namespace) is a client connection to the
 target's local socket — the tracer still listens on nothing. A
@@ -234,17 +243,20 @@ Per hooked I/O call that is roughly: the uprobe pair ≈ 3.5 µs
 (trap, uretprobe and its syscall-335 trampoline, two map
 operations); an agent bracket without the stack ≈ 0.3 µs; the
 stack walk ≈ 8 µs — about 95 % of the agent's cost. Two more cost
-facts for decision #25: uprobes sit on the library's inode, so
-they trap in **every** process mapping that `libjava`/`libnio`/
-`libnet` — all JVMs of that JDK install on the host — and filter
-by PID afterwards; and syscall-burst is the worst case (a 1-byte
-I/O per call), real I/O amortizes the same per-call cost over
-more work.
+facts for decision #25: as attached here (bpftrace, by library
+path, no PID filter) the uprobes trap in every process mapping
+that `libjava`/`libnio`/`libnet` — all JVMs of that JDK install
+on the host — and filter by PID in the program; the kernel can
+also scope a uprobe to a PID (perf-event pid, `uprobe_multi`
+pid), which M3/#25 must confirm for the production attach. And
+syscall-burst is the worst case (a 1-byte I/O per call); real I/O
+amortizes the same per-call cost over more work.
 
 **Result for decision #6**: stacks are captured at the I/O
 boundary by the agent (`StackWalker`), as planned — the uprobe
-mark alone cannot name a Java method, and an eBPF HotSpot unwinder
-returned only unsymbolized frames. Sampling between I/O events is
+mark alone cannot name a Java method, and a plain BPF stack walk
+returned only unsymbolized Java frames (a HotSpot-aware eBPF
+unwinder was not tried; v1 does not need one). Sampling between I/O events is
 not adopted for v1. The stack walk is the cost to engineer down in
 M3: fewer frames, no `StackFrame` materialization for known
 stacks, and a per-thread cache of the last stack for tight loops
@@ -257,6 +269,8 @@ stacks, and a per-thread cache of the last stack for tight loops
 - JDK builds with **stripped or statically linked** native
   libraries (no `Java_*` symbols to attach to).
 - Multiple threads in the cost runs, and the cost on a quiet host.
+- The join on the uprobe's native-entry stamp (the prototype used
+  the `sys_enter` stamp), and per-PID uprobe attachment.
 - The ring's reader in Go, and a ring that wraps while the target
   writes from many threads at once.
 - Containers: the spool directory reached through
@@ -276,3 +290,12 @@ stacks, and a per-thread cache of the last stack for tight loops
   syscall allowlist, probe ids, nr 335 dropped, reset on thread
   exit) plus the agent bracket on the same TID, compared in
   CLOCK_MONOTONIC.
+- The envelope's Java fields are settled: nested, as
+  `internal/schema` already has them — `java.thread` (the Java
+  thread name, from the agent's `THREAD` record) and `java.stack`
+  (method-table ids, innermost first, from its `STACK` record),
+  set exactly when `attribution` is `java`. PLAN.md's flat
+  `java_thread`/`java_stack` were a sketch. A syscall the uprobe
+  marked but no agent bracket contains stays `attribution: none`;
+  whether to also record the native's name is M3's call (an
+  appended optional field). `http` stays provisional until M3.

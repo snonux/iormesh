@@ -1,3 +1,6 @@
+# clock.sh runs, JDK 25, 20000 paced 3-byte writes each (spikes/s1/clock).
+# Part A: the first three runs (loadavg ~3), analysis as committed in
+# 71ead41 (clock.py had no midpoint row yet):
 writes=20000 bracket_ns p50=1748 min=346
 mono        outside=0 min_margin_ns=164 p50_margin_ns=298
 boot->mono  outside=14 min_margin_ns=-14 p50_margin_ns=426
@@ -10,4 +13,61 @@ writes=20000 bracket_ns p50=1427 min=309
 mono        outside=0 min_margin_ns=146 p50_margin_ns=190
 boot->mono  outside=0 min_margin_ns=58 p50_margin_ns=279
 in-probe (boot-mono) - BEGIN offset: min=87 max=2003 p50=90 ns; BEGIN->END drift -60 ns
+# Run A3's raw logs survived and are re-analyzed with the midpoint row;
+# A1/A2's raw logs were overwritten by the review's reproduction runs
+# (same scratch paths, loadavg ~25), which are re-analyzed as R1/R2.
+# Midpoint offset = offset.c p50 307592393459662, identical (+-1 ns) in
+# every offset.c run of this session (no suspend in between).
+== A3
+writes=20000 bracket_ns p50=1427 min=309
+mono        outside=0 min_margin_ns=146 p50_margin_ns=190
+boot->mono  outside=0 min_margin_ns=58 p50_margin_ns=279
+boot->mid   outside=0 min_margin_ns=132 p50_margin_ns=205
+boot->mid residual vs in-probe mono: p50=16 min=13 max=1929 ns; BEGIN offset - midpoint -74 ns
+in-probe (boot-mono) - BEGIN offset: min=87 max=2003 p50=90 ns; BEGIN->END drift -60 ns
+== R1
+writes=20000 bracket_ns p50=1584 min=1002
+mono        outside=0 min_margin_ns=441 p50_margin_ns=722
+boot->mono  outside=0 min_margin_ns=241 p50_margin_ns=516
+boot->mid   outside=0 min_margin_ns=408 p50_margin_ns=683
+boot->mid residual vs in-probe mono: p50=40 min=32 max=9599 ns; BEGIN offset - midpoint -167 ns
+in-probe (boot-mono) - BEGIN offset: min=199 max=9766 p50=207 ns; BEGIN->END drift 8 ns
+== R2
+writes=20000 bracket_ns p50=2131 min=769
+mono        outside=0 min_margin_ns=351 p50_margin_ns=791
+boot->mono  outside=0 min_margin_ns=200 p50_margin_ns=940
+boot->mid   outside=0 min_margin_ns=315 p50_margin_ns=827
+boot->mid residual vs in-probe mono: p50=41 min=31 max=5621 ns; BEGIN offset - midpoint -115 ns
+in-probe (boot-mono) - BEGIN offset: min=146 max=5736 p50=156 ns; BEGIN->END drift -35 ns
+# offset.c, 1M samples (raw lines as printed):
+# session start, loadavg ~3, three runs:
+samples=1000000 offset_ns min=307592393446713 p50=307592393459662 max=307592393465558 spread_p1_p99=2 gap_ns p50=28 p99=32 max=25931
+samples=1000000 offset_ns min=307592393457381 p50=307592393459662 max=307592393475058 spread_p1_p99=2 gap_ns p50=29 p99=33 max=31025
+samples=1000000 offset_ns min=307592393456046 p50=307592393459662 max=307592393461656 spread_p1_p99=2 gap_ns p50=31 p99=36 max=7267
+# loadavg ~25:
 samples=1000000 offset_ns min=307592391080453 p50=307592393459662 max=307592395054648 spread_p1_p99=10 gap_ns p50=84 p99=106 max=4758509
+# Part B: review-round re-run, clock.sh samples offset.c itself, loadavg 23-27:
+== run 1 (loadavg 23.39 21.73 17.07)
+samples=1000000 offset_ns min=307592392413141 p50=307592393459662 max=307592394922516 spread_p1_p99=7 gap_ns p50=50 p99=59 max=2928031
+writes=20000 bracket_ns p50=1206 min=528
+mono        outside=0 min_margin_ns=234 p50_margin_ns=472
+boot->mono  outside=0 min_margin_ns=118 p50_margin_ns=562
+boot->mid   outside=0 min_margin_ns=214 p50_margin_ns=486
+boot->mid residual vs in-probe mono: p50=23 min=18 max=416 ns; BEGIN offset - midpoint -96 ns
+in-probe (boot-mono) - BEGIN offset: min=114 max=512 p50=119 ns; BEGIN->END drift -21 ns
+== run 2 (loadavg 24.08 21.90 17.15)
+samples=1000000 offset_ns min=307592391716855 p50=307592393459663 max=307592395071986 spread_p1_p99=11 gap_ns p50=87 p99=104 max=3485704
+writes=20000 bracket_ns p50=2118 min=1045
+mono        outside=0 min_margin_ns=451 p50_margin_ns=846
+boot->mono  outside=0 min_margin_ns=308 p50_margin_ns=989
+boot->mid   outside=0 min_margin_ns=418 p50_margin_ns=885
+boot->mid residual vs in-probe mono: p50=40 min=31 max=644 ns; BEGIN offset - midpoint -110 ns
+in-probe (boot-mono) - BEGIN offset: min=141 max=754 p50=150 ns; BEGIN->END drift -67 ns
+== run 3 (loadavg 27.08 22.61 17.43)
+samples=1000000 offset_ns min=307592392421668 p50=307592393459662 max=307592394880411 spread_p1_p99=11 gap_ns p50=82 p99=98 max=2844124
+writes=20000 bracket_ns p50=8262 min=1000
+mono        outside=0 min_margin_ns=453 p50_margin_ns=902
+boot->mono  outside=0 min_margin_ns=193 p50_margin_ns=1103
+boot->mid   outside=0 min_margin_ns=419 p50_margin_ns=943
+boot->mid residual vs in-probe mono: p50=41 min=32 max=7538 ns; BEGIN offset - midpoint -226 ns
+in-probe (boot-mono) - BEGIN offset: min=258 max=7764 p50=267 ns; BEGIN->END drift 70 ns

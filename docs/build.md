@@ -93,9 +93,10 @@ because only Mage sets `CGO_CFLAGS`/`CGO_LDFLAGS`.
   along with its code-generation pattern (see above).
 - Java agent: bytecode instrumentation at the JDK's I/O
   boundaries only, stacks captured there; joined to syscalls
-  by thread id, most likely through eBPF uprobes on the JDK's
-  native I/O functions (design gated by spike S1 — see
-  PLAN.md). Platform threads only in v1.
+  by thread id through eBPF uprobes on the JDK's native I/O
+  functions (settled by spike S1 —
+  [result](spikes/s1-java-join.md)). Platform threads only in
+  v1.
 - Controller (`iormeshctl`): pure Go, no cgo — cross-compiled
   for Linux and macOS; tracer: linux/amd64 + linux/arm64 with
   the embedded CO-RE object.

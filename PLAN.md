@@ -146,16 +146,21 @@ throwaway; its findings update this plan.
   uretprobe trampoline), keys marks on probe ids and resets them
   on thread exit. Clocks: compared in CLOCK_MONOTONIC — BPF
   stamps the native's entry with `bpf_ktime_get_ns`, no
-  conversion; a boot/mono pair read in BPF is biased by up to
-  ~160 ns and pushed 14/20 000 stamps out of tight brackets.
+  conversion; a boot/mono pair read in BPF is off by roughly
+  70–230 ns (run-dependent) and pushed 14/20 000 stamps out of
+  tight brackets in one run.
   Transport: an mmap ring, no syscall per record, every record
   delivered or counted (#27). Attach: live attach works on 25
   and 27-ea with JEP 451's warning (#2). Cost (loaded host, CPU
   time, indicative): per hooked I/O call ≈3.5 µs for the uprobe
   pair and ≈8 µs for the agent's 10-frame stack walk; the agent
   without the walk ≈0.3 µs. Decisions #2, #6 and #27 are
-  settled. Untested: a JDK 21 runtime, stripped or static JDK
-  libraries, multi-threaded cost, containers.
+  settled, and the envelope's Java fields with them: nested
+  `java.thread` / `java.stack` (see "Trace output contract").
+  Untested: a JDK 21 runtime, the ASM-based agent on 21 and 17,
+  stripped or static JDK libraries, multi-threaded cost, cost on
+  a quiet host, the join on the native-entry stamp (the prototype
+  paired on `sys_enter`), per-PID uprobe attachment, containers.
 - **S2 — Cross-host join** (gates M4's merge). Questions:
   - The NAT-tolerant join key (decision #26): conntrack state
     read on the NAT host vs the TCP initial-sequence-number pair
@@ -431,7 +436,9 @@ Gated by S1 — done; the design below is S1's result
   the Java stack id and thread — as a bracket keyed by kernel TID
   (one `/proc/thread-self` lookup per thread); the correlator
   pairs a marked syscall with the agent bracket on its TID that
-  contains the native's entry, same clock, no conversion. Events
+  contains the native's entry, same clock, no conversion. (S1
+  paired on the `sys_enter` stamp; the native-entry stamp is the
+  same clock one step earlier, still to be run.) Events
   no hook brackets (JNI libraries, JVM-internal I/O) and
   ambiguous matches stay in the trace marked `attribution:
   none` — never guessed.
@@ -962,8 +969,9 @@ answer), and deferred.
 - **#6 Java stack source** — the agent captures the stack at
   the I/O boundary with `StackWalker` (decided by S1,
   2026-11-18); blanket method entry/exit instrumentation is a
-  non-goal, and an eBPF HotSpot unwinder is out (unsymbolized
-  frames). No async-profiler-style sampling between I/O events
+  non-goal; a plain BPF stack walk gave only unsymbolized Java
+  frames, and a HotSpot-aware eBPF unwinder is not needed for
+  v1. No async-profiler-style sampling between I/O events
   in v1. The walk is the agent's largest cost (≈8 µs per I/O
   call, S1), so M3 must reduce it and measure it against #25.
 - **#27 Agent → tracer transport** — a memory-mapped ring per
@@ -1243,9 +1251,12 @@ can reconstruct behavior and check it against source code:
   java_stack (method ids), otel (trace_id, span_id — present
   when the app is OTEL-instrumented), http (method, scheme,
   host, path, status, req_seq — on http events; headers per
-  redaction policy)`. The Java fields are provisional until
-  spike S1 reports. Cross-host, `conn_id` comes from the merge's
-  ISN-pair join (S2, decision #26).
+  redaction policy)`. S1 settled the Java fields: nested
+  `java.thread` (thread name) and `java.stack` (method ids,
+  innermost first), as `internal/schema` has them — the flat
+  names above are shorthand; `http` stays provisional until M3.
+  Cross-host, `conn_id` comes from the merge's ISN-pair join
+  (S2, decision #26).
 - **Method table**: `method_id, class, method, signature,
   source_file, line, jar, classloader`. Frames reference ids, so
   stacks stay compact and every frame joins to its JAR.

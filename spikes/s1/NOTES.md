@@ -291,19 +291,27 @@ added for live attach; `Hooks.warmUp()` loads the hot path in
 
 ## Clocks
 
+All raw lines: `results/clock.txt` (with provenance: the raw logs
+of the first runs 1–2 were overwritten by the review's reproduction
+runs, which are kept as R1/R2).
+
 - `offset.c` (user space, mono–boot–mono, midpoint): the offset is a
-  constant between suspends; p1–p99 spread 2 ns on an idle-ish host
-  (10 ns at load 25), read gap ~30 ns.
-- `clock.sh` (20 000 nanoTime-bracketed 3-byte writes to /dev/null,
-  bracket p50 ~1.5 µs, min ~310 ns), 3 runs:
-  - kernel stamp `nsecs(monotonic)`: 0/60 000 outside, min margin
-    146–164 ns;
+  constant between suspends — the same p50 in every run; p1–p99
+  spread 2 ns at loadavg ~3 (read gap p50 28–31 ns), 7–11 ns at
+  loadavg ~25 (gap 50–87 ns).
+- `clock.sh` (20 000 nanoTime-bracketed 3-byte writes to /dev/null),
+  8 runs at loadavg 3–27:
+  - kernel stamp `nsecs(monotonic)`: 0/160 000 outside, min margin
+    146–453 ns;
   - `nsecs(boot)` minus the BEGIN `C` pair (wa4's method): **14/20 000
-    outside in run 1** (min margin −14 ns), 0 in runs 2–3;
-  - `nsecs(boot)` minus the `offset.c` midpoint: 0 outside, residual
-    boot−offset−mono ≈ 16 ns (the second helper call).
-  - The BEGIN pair is biased by 74–162 ns: two helper calls in
-    sequence, not a moving offset.
+    outside in the first run** (min margin −14 ns), 0 in the others;
+  - `nsecs(boot)` minus the `offset.c` midpoint (`clock.py OUT
+    OFFSET`, 6 runs): 0/120 000 outside, min margin 132–419 ns;
+    residual against the in-probe mono stamp p50 16–41 ns (the
+    second helper call).
+  - The BEGIN pair is off by 74–226 ns in the 6 runs with the
+    midpoint row: two helper calls in sequence, not a moving
+    offset.
 - So: join in CLOCK_MONOTONIC (`bpf_ktime_get_ns`), or convert with a
   user-space midpoint offset; never a single in-BPF pair. `join.bt.in`
   now stamps E/X/P with `nsecs(monotonic)` and prints `CLOCK
@@ -360,7 +368,7 @@ same JEP 451 behaviour is specified for 21.
 .write(int) + FileInputStream.read(), two hooked natives). Wall ns/op
 swung 1.9–12 µs untraced at loadavg 15–34 (`results/cost-wall-200k.txt`),
 so the numbers below are CPU (user+sys of the JVM) differences between
-100k and 500k ops, medians of 3 (`results/costper.txt`, loadavg 9–13):
+100k and 500k ops, medians of 3 (`results/costper.txt`, loadavg 9–28):
 
 | mode | CPU ns/op | over untraced |
 |------|-----------|---------------|
@@ -381,7 +389,11 @@ wall untraced, so absolute numbers here are inflated by contention;
 the ratios are the finding. Note `@sys[1]` counts 2 marked "syscalls"
 per native call: the real one and nr 335.
 
-Uprobes sit on the library inode: they trap in *every* process that
-maps that libjava/libnio/libnet (all JVMs of that JDK install on the
-host) and filter by PID in BPF — a host-wide tax for decision #25.
+As attached here (bpftrace, by library path, no PID filter) the
+uprobes trap in every process that maps that libjava/libnio/libnet
+(all JVMs of that JDK install on the host) and filter by PID in the
+program — a host-wide tax for decision #25. That is bpftrace's attach
+mode, not a property of uprobes: the kernel can scope them to a PID
+(perf-event pid, uprobe_multi pid); M3/#25 confirm the production
+attach.
 

@@ -7,8 +7,12 @@ Reports, per clock domain, how many kernel stamps fall outside their
 bracket and the smallest margin (distance to the nearer bracket edge):
   mono          — bpf_ktime_get_ns vs nanoTime, no conversion at all;
   boot→mono     — bpf boot stamp minus the boot-mono offset sampled in
-                  clock.bt's BEGIN, i.e. what agentjoin.py does today;
+                  clock.bt's BEGIN, i.e. what agentjoin.py did in wa4;
+  boot→mid      — bpf boot stamp minus OFFSET, the user-space midpoint
+                  offset offset.c printed (p50) — only when given;
 and the spread of (boot - mono) read back to back in each probe.
+
+Usage: clock.py OUTDIR [OFFSET_NS]
 """
 import statistics
 import sys
@@ -48,9 +52,20 @@ def main():
     width = [hi - lo for lo, hi in brackets]
     print(f"writes={len(stamps)} bracket_ns p50={statistics.median(width):.0f} "
           f"min={min(width)}")
-    for name, ks in (("mono", mono), ("boot->mono", conv)):
+    domains = [("mono", mono), ("boot->mono", conv)]
+    if len(sys.argv) > 2:
+        mid = int(sys.argv[2])
+        domains.append(("boot->mid", [b - mid for _, b in stamps]))
+    for name, ks in domains:
         o, mn, med = check(brackets, ks)
         print(f"{name:11s} outside={o} min_margin_ns={mn} p50_margin_ns={med:.0f}")
+    if len(sys.argv) > 2:
+        # Residual of the midpoint conversion against the in-probe
+        # monotonic stamp: the time between the two helper calls.
+        res = [b - mid - m for m, b in stamps]
+        print(f"boot->mid residual vs in-probe mono: p50={statistics.median(res):.0f} "
+              f"min={min(res)} max={max(res)} ns; BEGIN offset - midpoint "
+              f"{begin_off - mid} ns")
     d = [o - begin_off for o in probe_off]
     print(f"in-probe (boot-mono) - BEGIN offset: min={min(d)} max={max(d)} "
           f"p50={statistics.median(d):.0f} ns; BEGIN->END drift "

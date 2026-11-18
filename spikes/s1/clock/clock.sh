@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Throwaway (S1, task xa4): runs ClockProbe under clock.bt and analyzes.
+# Throwaway (S1, task xa4): runs ClockProbe under clock.bt, samples the
+# user-space midpoint offset (offset.c) and analyzes.
 # Usage: clock.sh <JAVA_HOME> <N> <outdir>
 set -euo pipefail
 
@@ -39,4 +40,8 @@ wait "$jpid" || true
 sleep 0.5
 sudo -n pkill -INT -f "bpftrace $here/clock.bt" || true
 wait || true
-python3 "$here/clock.py" "$out"
+# The user-space midpoint offset (offset.c), for clock.py's third row.
+cc -O2 -o "$out/offset" "$here/offset.c"
+"$out/offset" 1000000 | tee "$out/offset.txt"
+mid="$(sed -n 's/.*offset_ns min=[0-9]* p50=\([0-9]*\).*/\1/p' "$out/offset.txt")"
+python3 "$here/clock.py" "$out" "$mid"

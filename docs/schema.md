@@ -6,10 +6,10 @@ and PLAN.md ("Trace output contract"); this file says what is on
 disk. The Go form — and the authority when this file lags — is the
 cgo-free package `internal/schema`.
 
-Version 1 is a **draft** until spikes S1 (Java ↔ syscall join) and
-S2 (cross-host join) report; the fields they own are marked
-*provisional*. Fields are only ever appended, and appended fields
-are optional, so an older reader never sees a changed meaning.
+Version 1 is a **draft**: spikes S1 (Java ↔ syscall join) and S2 (cross-host
+join) have reported and settled their fields; what M3 still owns (`http`) is
+marked *provisional*. Fields are only ever appended, and appended fields are
+optional, so an older reader never sees a changed meaning.
 
 ## Files
 
@@ -69,8 +69,8 @@ Required fields are always present; a zero is a real zero.
 | `args` | object | syscall-specific arguments, below |
 | `conn_id` | string, optional | the connection a socket event belongs to; across hosts assigned by the merge's ISN-pair join (S2, decision #26) |
 | `attribution` | string | `java` or `none` — missing attribution is data |
-| `java` | object, optional | `{thread, stack}`, set exactly when attribution is `java` (*provisional until S1*) |
-| `http` | object, optional | request fields on http events (*provisional until S1/M3*) |
+| `java` | object, optional | `{thread, stack}`, set exactly when attribution is `java`; `thread` is the Java thread name, `stack` method-table ids, innermost first (settled by S1) |
+| `http` | object, optional | request fields on http events (*provisional until M3*) |
 | `session` | object, optional | the host description, set exactly on `session` events (below) |
 
 `(pid, pid_incarnation, fd, fd_gen)` names one fd instance, even

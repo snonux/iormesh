@@ -198,12 +198,14 @@ Field notes:
   `carrier` flag (added with M3) marks I/O that ran for a
   virtual thread, which v1 attributes to the carrier.
 - `Java` (`thread`, `stack` of method ids; set exactly when
-  `attribution` is `java`) and `HTTP` are provisional until S1
-  reports. M1 assigns `conn_id` locally to fused loopback pairs;
+  `attribution` is `java`) is settled by S1 (thread name from the
+  agent's `THREAD` record, stack ids from its `STACK` records);
+  `HTTP` is provisional until M3. M1 assigns `conn_id` locally to fused loopback pairs;
   across hosts the merge assigns it from the ISN-pair join (S2,
   decision #26). The Java fields are nested
-  (`java.thread`, `java.stack`) where PLAN.md's sketch names
-  them flat (`java_thread`, `java_stack`); S1 picks one.
+  (`java.thread`, `java.stack`) — settled by S1; PLAN.md's flat
+  `java_thread`/`java_stack` were a sketch. `HTTP` stays
+  provisional until M3.
 - `schema.Sink` (`Event(Event) error`, `Close() error`) is what
   the correlator writes to; the NDJSON and parquet writers
   implement it.
@@ -1251,6 +1253,7 @@ every entry; 17 differs — decision #29;
 | `sun.nio.ch.UnixDispatcher` | `close` | `close0` | close |
 | `sun.nio.ch.Net` | `socket`, `serverSocket`, `bind`, `connect` | `socket0`, `bind0`, `connect0` | socket, setsockopt / bind / connect |
 | `sun.nio.ch.NioSocketImpl` | `accept`, `listen` (callers) | `Net.accept`, `Net.listen` | accept, accept4 / listen |
+| `sun.nio.ch.NioSocketImpl` | `shutdownInput`, `shutdownOutput` (callers) | `Net.shutdown` | shutdown |
 | `sun.nio.ch.ServerSocketChannelImpl` | `implAccept` (caller) | `Net.accept` | accept, accept4 |
 | `sun.nio.fs.UnixNativeDispatcher` | `open`, `unlink`, `rename`, `stat`, … | `open0`, `unlink0`, … | openat / unlink(at) / rename(at) / statx |
 
@@ -1415,13 +1418,16 @@ agent watermark and converts brackets to the boot clock (ior's
 Verify the residual error is far below a syscall's duration.
 
 S1 result: don't convert for the join. A (boot, mono) pair read
-in BPF is biased by 74–162 ns (two helper calls) and pushed 14 of
-20 000 kernel stamps out of tight `nanoTime()` brackets; stamping
-with `bpf_ktime_get_ns` (MONOTONIC, `nanoTime`'s clock) put 0 of
-60 000 outside. So BPF records the native's entry in MONOTONIC as
-the join field; event timestamps stay on the boot clock. Agent-only
+in BPF is off by roughly 70–230 ns, run-dependent (two helper
+calls), and pushed 14 of 20 000 kernel stamps out of tight
+`nanoTime()` brackets in one run; stamping with `bpf_ktime_get_ns`
+(MONOTONIC, `nanoTime`'s clock) put 0 of 160 000 outside. So BPF
+records the native's entry in MONOTONIC as the join field (the
+prototype used the `sys_enter` stamp; the native-entry variant is
+untested); event timestamps stay on the boot clock. Agent-only
 records are placed with a user-space midpoint offset
-(mono–boot–mono: 2 ns spread), re-sampled per segment.
+(mono–boot–mono: 2–11 ns spread, load-dependent), re-sampled per
+segment.
 
 **Experiment 5 — transport** (decision #27). Compare:
 
@@ -1450,8 +1456,10 @@ ns per I/O op and the share spent in the stack walk.
 
 S1 result (loaded host, CPU time, indicative): per hooked I/O
 call the uprobe pair costs ≈3.5 µs, an agent bracket without stack
-≈0.3 µs, the 10-frame stack walk ≈8 µs (~95 % of the agent). The
-uprobes trap in every process mapping the JDK library.
+≈0.3 µs, the 10-frame stack walk ≈8 µs (~95 % of the agent). As
+bpftrace attached them (by path, no PID filter) the uprobes trap
+in every process mapping the JDK library; per-PID attachment is
+for M3/#25 to confirm.
 
 **Experiment 7 — attach.** Confirm on JDK 21: `-javaagent` works
 silently; live attach prints the JEP 451 warning; what
@@ -1526,11 +1534,19 @@ internal/correlate/javajoin.go
    never block the target. Record types:
 
    ```
-   BRACKET hook_id, ktid, enter_mono, exit_mono, stack_id, thread_id
-   STACK   stack_id, n, frames[n]      // first time an id is seen
-   THREAD  thread_id, ktid, name       // first bracket of a thread
-   METHOD  method_id, class, method, descriptor, file, line, jar
+   BRACKET   hook_id, ktid, enter_mono, exit_mono, stack_id, thread_id
+   STACK     stack_id, n, frames[n]    // first time an id is seen
+   THREAD    thread_id, ktid, name     // first bracket of a thread
+   METHOD    method_id, class, method, descriptor, file, line, jar
+   WATERMARK mono_ns                   // every bracket that exited
+                                       // before this is in the ring
    ```
+
+   Brackets are written at exit, so a syscall inside a still-open
+   bracket has no record yet; an agent timer thread writes
+   `WATERMARK` (a memory store, no syscall) so the joiner knows
+   when to stop waiting. The S1 prototype had no watermark — it
+   drained after exit.
 
    The agent's only syscalls are the ring's setup in `install`
    and one `readlink("/proc/thread-self")` per thread; the tracer
@@ -1545,8 +1561,9 @@ internal/correlate/javajoin.go
    // with bpf_ktime_get_ns (CLOCK_MONOTONIC, the clock of
    // System.nanoTime), so containment needs no conversion; the
    // event's own timestamp stays on the boot clock. A marked
-   // syscall with no bracket keeps its native-level attribution
-   // and no Java stack; nothing is attributed by guessing.
+   // syscall with no bracket stays attribution "none" (no Java
+   // stack); nothing is attributed by guessing. S1 paired on the
+   // sys_enter stamp; the native-entry stamp is untested.
    type joiner struct {
        open   map[uint32][]agentspool.Bracket // per ktid, by enter
        stacks map[uint64][]uint32             // stack id → methods
@@ -1555,9 +1572,9 @@ internal/correlate/javajoin.go
    func (j *joiner) attribute(ev *schema.Event) (ready bool)
    ```
 
-   Events are released once the ring's reader has passed the
-   syscall's time on that TID, or after a 2 s timeout when no
-   agent is attached — then `attribution: none`.
+   Events are released once an agent `WATERMARK` has passed the
+   syscall's time, or after a 2 s timeout when no agent is
+   attached — then `attribution: none`.
 6. Method table and thread table are emitted as their own NDJSON
    record kinds and parquet files (`methods`, `threads`), keyed by
    id.
