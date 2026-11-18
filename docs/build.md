@@ -72,7 +72,8 @@ because only Mage sets `CGO_CFLAGS`/`CGO_LDFLAGS`.
   gitignored, as in ior; CO-RE relocations make the object
   portable anyway.
 - **Attach set**: handlers are generated for every syscall, but
-  without a `-trace-*` selector only M1's set attaches
+  without a `-trace-*` selector or `-tps` regex only M1's set
+  attaches
   (`tracepoints.DefaultSyscalls`). Widening it is a code change,
   not a regeneration.
 - **External object**: `IORMESH_BPF_OBJECT=path.bpf.o` loads that

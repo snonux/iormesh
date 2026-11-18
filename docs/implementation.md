@@ -438,7 +438,8 @@ narrows. `tracepoints.DefaultSyscalls()` is M1's set —
 `open`/`openat`/`openat2`, `read`, `write`, `close`, `connect`,
 `accept`/`accept4` — and replaces ior's FS-family fallback in
 `ParseSelectorWithDimensions`, the selector ior already uses for
-`-trace-syscalls`: with no `-trace-*` selector, exactly these
+`-trace-syscalls`: with no `-trace-*` selector and no `-tps`
+regex (which, as in ior, alone decides then), exactly these
 attach; an explicit selector replaces the set, a `-no-trace-*`
 one narrows it. Nothing attaches yet — the loader is step 5.
 

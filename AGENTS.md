@@ -3,10 +3,11 @@
 iormesh is early in implementation: M0 (the Java test workload
 under `workload/`) and M1's build and generator lifted from ior
 (`internal/`, the `magefile_*.go` targets) are the first code;
-everything else is still plan. [PLAN.md](PLAN.md) is the working plan and the source of
-truth for scope, spikes (S1–S3), milestones (M0–M7), and decisions. `ior`
-(`../ior`) is the reference project for BPF/C code generation and
-integration tests — consult it before inventing patterns.
+everything else is still plan. [PLAN.md](PLAN.md) is the
+working plan and the source of truth for scope, spikes (S1–S3),
+milestones (M0–M7), and decisions. `ior` (`../ior`) is the
+reference project for BPF/C code generation and integration
+tests — consult it before inventing patterns.
 Don't scaffold implementation ahead of the milestones — the
 plan moves first.
 
