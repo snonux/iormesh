@@ -91,7 +91,7 @@ the plan is the source of truth.
   recording — the same policy covers argv.
 - **Goldens in the same schema** — M0's declared expectations
   are schema documents with symbolic ids. Validation is subset,
-  not equality: normalize, cut to the marker bracket, assert
+  not equality: cut to the marker bracket, normalize, assert
   everything declared is present and nothing on the
   must-not-appear list is. The declarations double as few-shot
   examples for introspecting real runs.

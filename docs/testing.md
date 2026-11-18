@@ -32,10 +32,11 @@ class loading, JIT and GC threads — and PIDs, TIDs, ports and
 inodes differ on every run. So validation is subset, not
 equality:
 
-1. **Normalize** the collected trace: run-specific values become
-   symbolic ids, in order of first appearance.
-2. **Cut to the marker bracket**: every scenario emits a begin
+1. **Cut to the marker bracket**: every scenario emits a begin
    and an end marker; nothing outside them is asserted on.
+2. **Normalize** what is left: run-specific values become
+   symbolic ids, in order of first appearance inside the
+   bracket, so startup noise never shifts them.
 3. **Declared ⊆ collected**: every declared event and edge is
    present, in the declared per-thread order.
 4. **Must-not-appear**: the scenario's forbidden list holds —

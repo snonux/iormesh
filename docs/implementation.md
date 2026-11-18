@@ -313,7 +313,11 @@ tcp-loopback ship real ones):
 - Declare only syscalls the target milestone traces (M1: open,
   read, write, close, connect, accept) and ports rather than
   addresses: the JVM's dual-stack sockets show 127.0.0.1 as
-  `::ffff:127.0.0.1` unless the host lacks IPv6.
+  `::ffff:127.0.0.1` unless the host lacks IPv6 (the normalizer
+  unmaps it to `127.0.0.1` anyway, see M1 step 8).
+- `flags` are compared by access mode plus the declared bits, so
+  577 means "write-only, create, truncate" and tolerates an extra
+  `O_CLOEXEC`; `0` matches any read-only open (M1 step 9).
 
 ## M0 — workload framework
 
@@ -644,52 +648,120 @@ Rules to implement, each with a unit test:
 order (encoding/json already does this), then `graph.json` at
 exit with sorted nodes and edges.
 
-**Step 8 — the normalizer** (`internal/normalize`, cgo-free):
+**Step 8 — the normalizer** (`internal/normalize`, cgo-free; done):
 
 ```go
-// Normalize rewrites run-specific values to symbolic ids in
-// order of first appearance, so two runs of one scenario compare
-// equal. It never reorders events.
-func Normalize(in []schema.Event, opt Options) []schema.Event
-
-type Options struct {
-    // Bracket cuts the output to the events between the begin
-    // and end markers of this scenario (inclusive); empty keeps
-    // everything.
-    Bracket string
-    // TmpPrefix is replaced by "$tmp" in every path.
-    TmpPrefix string
+// Trace is one trace's event stream and graph export. They are
+// normalized together: node ids embed the same host ids, PIDs,
+// paths and connection ids as the events.
+type Trace struct {
+    Events []schema.Event
+    Graph  schema.Graph
 }
 
-// symbols hands out $p1, $t1, $fd1, $port1, … per kind.
-type symbols struct {
-    next map[string]int
-    seen map[string]string // "pid:4711" → "$p1"
+// Normalize cuts the trace to opt.Bracket, then rewrites
+// run-specific values in order of first appearance. It never
+// reorders events and never modifies its input.
+func Normalize(in Trace, opt Options) (Trace, error)
+
+type Options struct {
+    Bracket   string // scenario name; empty keeps everything
+    TmpPrefix string // replaced by "$tmp" in paths and file ids
 }
 ```
 
-Normalized: `host_id` (to `$h1`, …, also inside node ids, so
-`file:<host_id>:/tmp/x/a.dat` becomes `file:$h1:$tmp/a.dat`),
-`pid`, `tid`, `pid_incarnation`, `fd` (≥ 3 only —
-0/1/2 are stable), ephemeral ports, inode-derived ids, `conn_id`,
-`seq` (renumbered from 1), all times (replaced by the event's
-rank). Not normalized: event names, paths under known prefixes,
-byte counts, return values, well-known ports.
+The bracket is cut *per process*: each process keeps its events
+from its own `<scenario>/begin` marker to its own `/end` marker,
+inclusive — tcp-loopback's server and client bracket themselves
+separately, and one global window would let the first role's
+JVM startup in. Processes without a begin marker are dropped;
+host-level events (PID 0: `drop`, `session`, `end`) are kept
+inside the union of the brackets, so a ring-buffer gap in the
+scenario stays visible. No begin marker at all
+(`ErrNoBracket`), a begin without an end
+(`ErrUnterminatedBracket`), or repeated or out-of-order markers
+(`ErrMalformedBracket`) are errors, never a best-effort cut.
 
-**Step 9 — the golden check** (same package):
+The cut comes *before* renumbering, so ids count from the
+bracket and noise outside it never shifts them. The output stays
+a `[]schema.Event`, so numeric fields carry ordinals instead of
+`$` strings; renumbered values start right after the range kept
+verbatim, so the two never collide:
+
+- `host_id`, `conn_id` → `$h1`, `$c1`, …
+- `pid`, `tid`, `pid_incarnation` → 1, 2, … The PID is keyed by
+  host and PID, so a reused PID keeps its number and the
+  incarnation tells the two processes apart.
+- `fd` ≥ 3 → 3, 4, … per fd *instance* (pid, fd, `fd_gen`);
+  `fd_gen` becomes 1, or stays 0 for an fd predating the trace.
+  fds 0–2 stay.
+- `ret` of a successful open* or accept* → the normalized fd
+  (it *is* the fd).
+- ports ≥ 1024 → 1024, 1025, …, keyed by value, so a loopback
+  server's local port and its client's remote port stay one
+  port. Well-known ports stay.
+- `local_addr`, `remote_addr`: IPv4-mapped addresses are
+  unmapped (`::ffff:127.0.0.1` → `127.0.0.1`) — the JVM's
+  dual-stack sockets report the mapped form unless the host
+  lacks IPv6.
+- `path`, `new_path`: `TmpPrefix` → `$tmp` (whole leading
+  components only).
+- `seq`, `boot_ns`, `wall_ns` → the event's rank in the output;
+  `latency_ns` → 0 (a duration whose value is noise).
+- node ids and edge ends get the same symbols
+  (`file:$h1:$tmp/a.dat`, `proc:$h1/1@1`, `conn:$c1`); the graph
+  is sorted again after rewriting.
+
+Not normalized: event names, comm, flags, byte counts, other
+return values, paths outside `TmpPrefix`, node and edge attrs
+(only copied). v1 has no inode field yet; inode-derived ids join
+the table when M2 adds one.
+
+**Step 9 — the golden check** (same package; done):
 
 ```go
 // Check asserts declared ⊆ collected on a normalized, bracketed
 // trace. It returns every violation, not just the first.
-func Check(got []schema.Event, graph schema.Graph,
-    want Expectation) []Violation
+func Check(got Trace, want Expectation) []Violation
+
+// LoadExpectation reads expect.json strictly (unknown keys and
+// trailing data are errors) and validates it.
+func LoadExpectation(path string) (Expectation, error)
 ```
 
-Algorithm: per declared thread, walk the collected events of each
-candidate thread in order and match greedily; bind symbols on
-first use; backtrack over candidate threads only. Then check
-edges, then scan every string field of every event for
-`must_not_appear` entries.
+Symbols bind to values as a bijection per kind: a symbol keeps
+its first value, and two symbols of one kind never share one
+(`$fd1` and `$fd2` are different instances). `$p` binds to the
+process node id, `$t` to a thread of it, `$fd` to the instance
+(pid, fd, `fd_gen`), `$port` to the port, `$c` to `conn_id`;
+node-id templates (`file:$h1:$tmp/a.dat`, `conn:$c1`) bind the
+symbols inside them. A trail of bindings lets a failed attempt
+undo without copying.
+
+Algorithm: declared events are grouped by thread; each declared
+thread is assigned a collected thread, backtracking over
+candidate threads only. Within a thread the match is greedy:
+each declared event takes the first collected event after the
+previous match that fits. Unset declared fields are not
+compared. Open flags compare by access mode (`O_ACCMODE`) plus
+every declared bit, tolerating extra bits — the JDK, libc or
+architecture may add `O_CLOEXEC` or `O_LARGEFILE`, while 577's
+`O_CREAT|O_TRUNC` must be there; declared 0 matches any
+read-only open. If no assignment exists, one event violation
+names the deepest declared thread that failed, its first
+missing event and the best candidate's progress. Edges are then
+matched in declared order (an empty declared `state` matches
+any) with the bindings the events made — or the best partial
+ones — and finally every string reachable from every event and
+the graph (walked by reflection: JSON escaping would hide a
+planted secret from a substring search) is scanned for
+`must_not_appear` entries, one violation per entry with its
+count and first location.
+
+Tests run synthetic traces shaped like real runs — noise
+threads, fd reuse, startup I/O outside the bracket, extra open
+flags, mapped addresses — against the shipped `expect.json`
+files, plus one negative case per rule.
 
 **Step 10 — CLI** (`cmd/iormesh`): subcommands `run` (foreground
 tracer: `-pid`, `-project`, `-duration`, `-out DIR`) and
@@ -712,10 +784,13 @@ func TestWalkingSkeleton(t *testing.T) {
         "--port", port)
     // Releases the server, then the client once the server printed
     // its "listening" line.
-    trace := h.Trace(server.PID, client.PID)
-    got := normalize.Normalize(trace.Events,
+    trace := h.Trace(server.PID, client.PID) // a normalize.Trace
+    got, err := normalize.Normalize(trace,
         normalize.Options{Bracket: "tcp-loopback", TmpPrefix: h.Tmp})
-    for _, v := range normalize.Check(got, trace.Graph,
+    if err != nil {
+        t.Fatal(err)
+    }
+    for _, v := range normalize.Check(got,
         h.Expectation("tcp-loopback")) {
         t.Error(v)
     }

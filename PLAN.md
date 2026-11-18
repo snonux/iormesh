@@ -183,10 +183,11 @@ before that milestone's tracer code (principle #1).
 - **Golden semantics — subset, not equality**: a JVM issues
   thousands of syscalls nobody declared, and PIDs, TIDs, ports
   and inodes differ per run. So validation is:
-  1. *normalize* the collected trace — renumber PIDs, TIDs,
-     fds, ports, inodes and timestamps to symbolic ids in
-     order of first appearance (see "Trace output contract");
-  2. cut it to the marker bracket;
+  1. cut the collected trace to the marker bracket;
+  2. *normalize* it — renumber PIDs, TIDs, fds, ports, inodes
+     and timestamps to symbolic ids in order of first
+     appearance inside the bracket, so JVM startup noise never
+     shifts them (see "Trace output contract");
   3. assert *declared ⊆ collected*: every declared event and
      edge is present, in the declared per-thread order;
   4. assert the scenario's *must-not-appear* list (e.g. the
@@ -1202,7 +1203,7 @@ can reconstruct behavior and check it against source code:
   cheap context before diving into the event stream.
 - **Goldens use the schema**: M0's declared expectations are
   schema documents with symbolic ids; validation is the golden
-  check — normalize, cut to the marker bracket, assert
+  check — cut to the marker bracket, normalize, assert
   declared ⊆ collected plus the must-not-appear list (see M0)
   — and the declarations double as few-shot examples for
   introspecting real runs.
