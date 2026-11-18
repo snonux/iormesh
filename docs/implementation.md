@@ -199,8 +199,9 @@ Field notes:
   virtual thread, which v1 attributes to the carrier.
 - `Java` (`thread`, `stack` of method ids; set exactly when
   `attribution` is `java`) and `HTTP` are provisional until S1
-  reports; `conn_id` is provisional until S2 — M1 assigns it
-  locally to fused loopback pairs. The Java fields are nested
+  reports. M1 assigns `conn_id` locally to fused loopback pairs;
+  across hosts the merge assigns it from the ISN-pair join (S2,
+  decision #26). The Java fields are nested
   (`java.thread`, `java.stack`) where PLAN.md's sketch names
   them flat (`java_thread`, `java_stack`); S1 picks one.
 - `schema.Sink` (`Event(Event) error`, `Close() error`) is what
@@ -1385,20 +1386,26 @@ internal/correlate/javajoin.go
 
 **Goal**: a join key that survives NAT, and clock bounds from the
 traffic. Throwaway code under `spikes/s2/`; result in
-`docs/spikes/s2-cross-host-join.md`. *Hypotheses* throughout.
+[docs/spikes/s2-cross-host.md](spikes/s2-cross-host.md).
+**Done** (2026-11-18): the ISN pair is the key (decision #26)
+and the clock bounds hold. The experiments below keep their
+original questions, each followed by what the spike found.
 
-**Test rig** — two "hosts" on one machine:
+**Test rig** — two "hosts" on one machine
+(`spikes/s2/rig.sh`, as built):
 
 ```sh
-ip netns add hostA; ip netns add hostB; ip netns add nat
-# veth pairs hostA↔nat and nat↔hostB, then in nat:
-ip netns exec nat nft add rule ip nat prerouting \
-    tcp dport 8080 dnat to 10.0.2.2:8080
+ip netns add s2hostA; ip netns add s2nat; ip netns add s2hostB
+# veths created inside the namespaces, then in s2nat (nft):
+#   prerouting:  ip daddr 10.0.1.254 tcp dport 8080 dnat to 10.0.2.2:8080
+#   postrouting: snat to 10.0.2.254:40000-40999 random  (second pass)
 ```
 
-One tracer per namespace's process set, each with its own
-`-host-id` override and `-test-clock-offset` (added by this
-spike; test-only).
+The spike used bpftrace instead of iormesh tracers: one
+`clock.bt` per host namespace, each adding its own test-only
+offset to every timestamp. M4's integration test does the same
+with real tracers, each with its own `-host-id` override and
+`-test-clock-offset` (test-only).
 
 **Experiment 1 — ISN pair as key.** NAT rewrites addresses and
 ports but not TCP sequence numbers. At the `ESTABLISHED`
@@ -1413,7 +1420,7 @@ __u32 irs = BPF_CORE_READ(tp, rcv_nxt) - 1;
 ```
 
 The client's `(iss, irs)` must equal the server's `(irs, iss)`.
-Open questions the spike must answer:
+Open questions the spike answered:
 
 - the passive side reaches `ESTABLISHED` before `accept()`, when
   no owner is registered (see M1 step 4). Can the pair be
@@ -1425,9 +1432,34 @@ Open questions the spike must answer:
 - what breaks it: SYN proxies, sequence-randomizing firewalls,
   any L4 proxy that terminates the connection.
 
+*Found*: the pair matched 34/34 connections, all unique, under
+DNAT and DNAT plus random-port SNAT, with reused 4-tuples and
+TFO. The direct form fails once data (TFO) or a FIN has moved
+the counters, and nothing is readable at the opening transition
+of either side. The rebuild holds at `ESTABLISHED` and every
+later record up to `CLOSE` — but the off-by-one for the SYN is
+*not* the same on both sides:
+
+```c
+// role-aware rebuild, all mod 2^32; read at ESTABLISHED or later
+//   connect side: bytes_acked already counts our own SYN (the
+//   SYN-ACK runs tcp_snd_una_update), so no -1;
+//   accept side: the child starts with snd_una = iss + 1 and
+//   bytes_acked = 0; bytes_received never counts the peer's SYN.
+__u32 iss = snd_una - (__u32)bytes_acked - (is_accept ? 1 : 0);
+__u32 irs = rcv_nxt - (__u32)bytes_received - 1;
+```
+
+The TCP state record carries `snd_una`, `rcv_nxt`,
+`bytes_acked` and `bytes_received`; the role comes from the
+owner registration (connect vs accept).
 **Experiment 2 — conntrack as the alternative**: read the
 original↔reply tuple mapping on the NAT host. Works only where a
-tracer or conntrack access exists on that host.
+tracer or conntrack access exists on that host. *Found*: as an
+event stream it joins every connection, but reused tuples need a
+time order across hosts; a `/proc/net/nf_conntrack` snapshot
+loses all but the last use of a tuple and misattributed 10/34
+under SNAT. Optional only.
 
 **Experiment 3 — clock bounds.** For hosts A and B with offset
 θ = clock_B − clock_A, every message gives one inequality:
@@ -1438,12 +1470,23 @@ B→A message:  θ > send_B − recv_A
 ```
 
 `send` is the `write` *enter* time, `recv` the `read` *exit* time
-of the same stream bytes (matched by cumulative byte offset on
-the connection). Intersect over all messages; report the interval
-width on loopback, veth and a real LAN.
+of the same stream bytes. Intersect over all messages; report the
+interval width on loopback, veth and a real LAN.
+
+*Found* (veth through one forwarding namespace; loopback and a
+real LAN untested): the bytes are matched by TCP sequence offset
+`seq − (iss + 1)`, identical on both ends, and each receive pairs
+with the send that queued its last byte. A receive's offset is
+`copied_seq` at `tcp_recvmsg` entry plus the bytes returned —
+after the call it is one too far when the FIN was consumed in
+the same call. Injected skews of +1.23 s and −0.99 s were
+recovered inside 11–17 µs (midpoint within 1 µs, no violated
+inequality); single request/response connections alone gave
+82–104 µs, because only a receiver already blocked in `recv`
+gives a tight inequality.
 
 **Exit**: PLAN.md's S2 exit criterion, plus a pick for decision
-#26.
+#26. Met: the ISN pair, decided in PLAN.md.
 
 ## M4 — controller
 
@@ -1573,19 +1616,40 @@ Packages: `internal/federate/registry.go`, `ssh.go` (wraps the
 ### The merge
 
 ```go
+// ISNPair is decision #26's key, oriented the same on both hosts:
+// the connecting side's ISN first. NAT never rewrites it.
+type ISNPair struct{ Client, Server uint32 }
+
+// KeyFromState rebuilds the pair from one TCP state record taken
+// at ESTABLISHED or later (S2): the connecting side's bytes_acked
+// already counts its own SYN, the accepting side's does not;
+// bytes_received never counts the peer's SYN. All mod 2^32.
+func KeyFromState(r TCPState) ISNPair {
+    own := r.SndUna - uint32(r.BytesAcked)
+    if r.Role == "server" {
+        own--
+    }
+    peer := r.RcvNxt - uint32(r.BytesReceived) - 1
+    if r.Role == "server" {
+        return ISNPair{Client: peer, Server: own}
+    }
+    return ISNPair{Client: own, Server: peer}
+}
+
 // Half is one end of a TCP connection as one host recorded it.
 type Half struct {
     Host        string
     Proc        string         // node id
     Role        string         // "client" | "server"
-    Local, Peer netip.AddrPort
-    Key         JoinKey        // S2's NAT-tolerant key, may be zero
+    Local, Peer netip.AddrPort // differ across NAT; display only
+    Key         ISNPair        // zero when no record had the fields
     Established uint64         // that host's boot ns
 }
 
-// Fuse pairs client and server halves into cross-host edges.
-// Order of preference: join key, then mirrored 4-tuple within
-// the time window. A half without a partner is returned
+// Fuse pairs client and server halves into cross-host edges by
+// ISN pair. window is coarse (minutes): it only guards against
+// the ISN clock wrapping (~275 s), the pair itself separates
+// reused 4-tuples. A half without a partner is returned
 // unresolved — it stays in the graph and feeds M6.
 func Fuse(halves []Half, window time.Duration) (
     edges []schema.Edge, unresolved []Half)
@@ -1593,18 +1657,30 @@ func Fuse(halves []Half, window time.Duration) (
 
 Rules, each a table-driven test:
 
-- a key match beats a tuple match; two candidates for one half is
-  an error surfaced in the summary, never a coin toss;
-- tuple matching compares the client's `(Local, Peer)` with the
-  server's `(Peer, Local)`;
-- port reuse: the same tuple twice must be separated by its
-  `Established` times;
+- a client half fuses with the server half whose `Key` is equal;
+  the 4-tuples are not compared (NAT rewrites them);
+- two candidates for one half is an error surfaced in the
+  summary, never a coin toss; candidates outside `window` (after
+  aligning the hosts by the clock bound) do not count;
+- a zero key, or a key nobody else has (sequence-randomizing
+  firewall, SYN proxy, untraced far end), leaves the half
+  unresolved — no 4-tuple fallback, that would be a guess;
+- port reuse: the same 4-tuple six times gives six distinct keys
+  and six edges (S2's TIME_WAIT and RST reuse phases);
 - fused edges get `State: "fused"` and a `conn_id` shared by both
   hosts' events.
 
 Clock offsets (`internal/federate/clock.go`) implement S2's
-inequalities per host pair and attach `{min, max}` to the merged
-graph as a `clock_bound` record. Cross-host ordering is a
+inequalities per host pair: every receive pairs with the send
+that queued its last byte, matched by sequence offset
+`seq − (iss + 1)` (so the data records need their sequence
+range: `write_seq` after the send minus the bytes queued — TFO
+assigns the ISN inside the call — and `copied_seq` before the
+receive). θ = clock_B − clock_A is below
+`recv_B − send_A` and above `send_B − recv_A`; the intersection,
+computed per time window so drift shows up, is attached to the
+merged graph as a `clock_bound` record `{min, max}` with its
+width. An empty intersection is reported, not clamped. Cross-host ordering is a
 topological sort over per-thread order plus send→receive edges
 (`internal/federate/order.go`); timestamps only break ties
 between causally unrelated events, and such ties are flagged.

@@ -67,7 +67,7 @@ Required fields are always present; a zero is a real zero.
 | `latency_ns` | int | exit minus enter |
 | `bytes` | int | bytes moved (read/write) |
 | `args` | object | syscall-specific arguments, below |
-| `conn_id` | string, optional | the connection a socket event belongs to (*provisional until S2*) |
+| `conn_id` | string, optional | the connection a socket event belongs to; across hosts assigned by the merge's ISN-pair join (S2, decision #26) |
 | `attribution` | string | `java` or `none` — missing attribution is data |
 | `java` | object, optional | `{thread, stack}`, set exactly when attribution is `java` (*provisional until S1*) |
 | `http` | object, optional | request fields on http events (*provisional until S1/M3*) |

@@ -106,3 +106,6 @@ Details: [docs/security.md](./docs/security.md).
 - [docs/security.md](./docs/security.md) — security & scope.
 - [docs/build.md](./docs/build.md) — build, code generation and
   tech choices.
+- [docs/spikes/s2-cross-host.md](./docs/spikes/s2-cross-host.md)
+  — spike S2's result: the NAT-proof cross-host join key and
+  clock bounds from the traffic.

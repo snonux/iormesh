@@ -146,6 +146,27 @@ throwaway; its findings update this plan.
   Exit: two tracers in separate network namespaces with DNAT
   between them and an injected clock skew (test-only flag)
   produce one fused edge and recover the skew within the bound.
+
+  Result (2026-11-18, kernel 7.2.15, bpftrace;
+  [docs/spikes/s2-cross-host.md](docs/spikes/s2-cross-host.md)):
+  works. The ISN pair joined 34/34 connections per pass, all
+  unique, under DNAT and under DNAT plus random-port SNAT,
+  including reused 4-tuples (TIME_WAIT takeover and RST) and TCP
+  Fast Open. It is rebuilt from `tcp_sock` at `ESTABLISHED` or
+  any later record, role-aware: connecting side
+  `iss = snd_una − bytes_acked`, accepting side
+  `iss = snd_una − bytes_acked − 1`, both
+  `irs = rcv_nxt − bytes_received − 1` (mod 2³²). Conntrack
+  joins only as an event stream on the NAT host, and only with a
+  time order for reused tuples; a snapshot misattributed 10/34
+  under SNAT. Clock bounds: two tracer instances with injected
+  skews of +1.23 s and −0.99 s recovered them inside intervals
+  11–17 µs wide on veth (midpoint within 1 µs), with sends and
+  receives matched by TCP sequence offset. The width depends on
+  the traffic: single request/response connections alone gave
+  82–104 µs, ping-pong rounds tightened it. Decision #26 is
+  settled. Untested: SYN cookies, connections over 4 GiB, IPv6,
+  real hosts, clock drift over long runs.
 - **S3 — Overhead and volume budget** (gates M2; pins decision
   #25). Measured on the M1 skeleton with ior's `perf/` +
   bench-profiles pattern: tracer CPU, the cost untraced
@@ -521,8 +542,8 @@ Kubernetes (M7) build on it.
   Collect is project-aware: one project at a time, or
   several together.
 - **Build**: merge the collected segments offline by stable
-  ids — connection ids, 4-tuple joins with the NAT-tolerant
-  key (decision #26), clock reconciliation — fusing the
+  ids — connection ids, the ISN-pair join key (decision #26),
+  clock reconciliation — fusing the
   outbound side on host A with the inbound side on host B into
   single cross-host edges. An outbound edge whose far end has
   no tracer stays in the graph, marked *unresolved* (M6 feeds
@@ -536,8 +557,15 @@ Kubernetes (M7) build on it.
   the site and the TUI follow in M5.
 - **Clock reconciliation from the traffic itself**: every
   fused connection gives send-before-receive constraints in
-  both directions; together they bound the clock offset per
-  host pair. The merge records the bound, and cross-host order
+  both directions (send = send-syscall enter, receive =
+  receive-syscall exit, the two ends of a message matched by
+  TCP sequence offset, which NAT leaves alone); together they
+  bound the clock offset per host pair. The merge records the
+  bound and its width — S2 measured 11–17 µs on veth with
+  interactive traffic, 82–104 µs with single exchanges only —
+  computed per time window so clock drift over a long session
+  shows up instead of emptying the interval; an empty
+  intersection is reported, never hidden. Cross-host order
   is derived from happens-before (per-thread order plus
   send→receive edges), never from raw wall-clock comparison.
 - **Service-interaction database**: every `build` also
@@ -823,6 +851,24 @@ answer), and deferred.
   nullable column per argument field (see "Trace output
   contract"). One sub-point rides on S3: whether a size cap
   forces an early rotation for very hot sessions.
+- **#26 Cross-host join key** — the TCP initial-sequence-number
+  pair (decided by S2, 2026-11-18): the client's `(iss, irs)`
+  equals the server's `(irs, iss)`, which NAT leaves untouched.
+  Each tracer records `snd_una`, `rcv_nxt`, `bytes_acked` and
+  `bytes_received` with the socket's role on its TCP state
+  records, at `ESTABLISHED` or later; the merge rebuilds the pair
+  (connecting side `iss = snd_una − bytes_acked`, accepting side
+  one less, both `irs = rcv_nxt − bytes_received − 1`, mod 2³²)
+  and joins on it, inside a coarse time window that guards
+  against ISN-clock wrap. The 4-tuple plus a time window breaks
+  under NAT and port reuse and is not a fallback across hosts.
+  Conntrack on the NAT host is optional — it needs a tracer or
+  netlink access there and adds nothing the two ends lack. When
+  no pair matches (sequence-randomizing firewalls, SYN proxies,
+  an untraced far end), the edge stays unresolved, never a
+  guess; L4/L7 proxies that terminate the connection stay the
+  route map's job (#15). Details:
+  [docs/spikes/s2-cross-host.md](docs/spikes/s2-cross-host.md).
 - **#5 Test workload scope** — same repo, `workload/`
   (adopted with M0, 2026-11-18). A plain Java 21 app built with
   the JDK alone (`javac` + `jar` via `mage workloadBuild`, no
@@ -941,15 +987,6 @@ answer), and deferred.
 
 ### Open — blocks M4
 
-- **#26 Cross-host join key** — the 4-tuple plus a time window
-  breaks under NAT and port reuse. Candidates: conntrack state
-  read on the NAT host (needs a tracer or access there) vs the
-  TCP initial-sequence-number pair read from both sockets (NAT
-  leaves it untouched; SYN proxies and sequence-randomizing
-  firewalls do not). L7 proxies terminate the connection
-  either way and stay the route map's job (#15). *Default: S2
-  picks; the fallback when no key matches is an unresolved
-  edge, never a guess.*
 - **#1 Remote bootstrapping and sudo scope** — transport is
   settled: SSH, key-based, from the controller only. The sudo
   scope is one pinned sudoers rule for exactly
@@ -1128,7 +1165,8 @@ can reconstruct behavior and check it against source code:
   when the app is OTEL-instrumented), http (method, scheme,
   host, path, status, req_seq — on http events; headers per
   redaction policy)`. The Java fields are provisional until
-  spike S1 reports; the connection join key until S2.
+  spike S1 reports. Cross-host, `conn_id` comes from the merge's
+  ISN-pair join (S2, decision #26).
 - **Method table**: `method_id, class, method, signature,
   source_file, line, jar, classloader`. Frames reference ids, so
   stacks stay compact and every frame joins to its JAR.
