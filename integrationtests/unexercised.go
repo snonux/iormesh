@@ -23,7 +23,9 @@ type skipVerdict interface {
 // claim a check that never ran - and first prints
 // gatecmd.UnexercisedSkipMarker with the test and why to out (the test
 // binary's stdout), so `mage integrationTest` lists it in its closing
-// summary (gatecmd.SkipSummary) before its gate fails on the missing PASS.
+// summary (gatecmd.SkipSummary) before its gate fails on the "--- SKIP"
+// line - a top-level test's or a subtest's alike (gatecmd.SkippedTests):
+// a parent whose subtests all skipped still prints "--- PASS".
 func SkipUnexercised(t skipVerdict, out io.Writer, why string) {
 	t.Helper()
 	_, _ = fmt.Fprintf(out, "%s%s: %s\n", gatecmd.UnexercisedSkipMarker, t.Name(), why)

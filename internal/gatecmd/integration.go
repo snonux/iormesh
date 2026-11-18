@@ -11,9 +11,9 @@ import (
 // unexercisedskips.go) @ b21afc50328c. Changes: ior runs its integration
 // binary without -test.v and believes the exit status plus a skip summary;
 // iormesh runs it with -test.v and requires every listed test to report
-// PASS, like the root BPF tests (rootbpf.go) - a skip, for root missing or
-// for a case no run exercised, fails the target after the summary says
-// why. Only the unexercised-case marker is lifted; ior's fold and row
+// PASS, like the root BPF tests (rootbpf.go), and no test or subtest to
+// report SKIP (SkippedTests) - a skip, for root missing or for a case no
+// run exercised, fails the target after the summary says why. Only the unexercised-case marker is lifted; ior's fold and row
 // skips have no iormesh counterpart yet.
 
 // IntegrationTestBinary is where `mage integrationTest` compiles the test
@@ -82,6 +82,22 @@ func IntegrationTestArgs(parallel int) []string {
 // output does not report as passed (see notPassed).
 func IntegrationTestsNotPassed(output string) []string {
 	return notPassed(output, IntegrationTests())
+}
+
+// SkippedTests returns the name of every test output reports as skipped,
+// top-level or subtest: the "--- SKIP: " verdict at any indentation. The
+// gate needs both: Go prints "--- PASS" for a parent test whose subtests
+// all skipped, so IntegrationTestsNotPassed alone would believe a parent
+// that checked nothing.
+func SkippedTests(output string) []string {
+	var skipped []string
+	for line := range strings.SplitSeq(output, "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimLeft(line, " \t"), "--- SKIP: "); ok {
+			name, _, _ := strings.Cut(rest, " ")
+			skipped = append(skipped, name)
+		}
+	}
+	return skipped
 }
 
 // SkipSummary returns the lines `mage integrationTest` prints after the

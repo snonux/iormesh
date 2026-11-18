@@ -5,8 +5,8 @@
 // runIntegrationTestBinary, resolveIntegrationParallelism).
 // Changes: the workload is the Java jar (WorkloadBuild) instead of ior's
 // ioworkload; no root link step (BpfRootTest is its own target); the test
-// binary runs with -test.v and every test of gatecmd.IntegrationTests must
-// report PASS, where ior believes the exit status plus its skip summary;
+// binary runs with -test.v, every test of gatecmd.IntegrationTests must
+// report PASS and none, nor any subtest, SKIP, where ior believes the exit status plus its skip summary;
 // the parallel switch is a test-binary flag, not an environment variable.
 
 package main
@@ -65,7 +65,8 @@ func runIntegrationTests(parallel int) error {
 // runIntegrationTestBinary runs the test binary as root and judges it by
 // what it reported, not by its exit status: the skip summary first (why a
 // test could not be judged on this host), then the gate that every listed
-// test passed - a skipped or unmatched test exits 0 too.
+// test passed and nothing - test or subtest - skipped; a skipped or
+// unmatched test exits 0 too.
 func runIntegrationTestBinary(args []string) error {
 	var output bytes.Buffer
 	err := runRootTestBinary(gatecmd.IntegrationTestBinary, "integrationtests",
@@ -79,6 +80,12 @@ func runIntegrationTestBinary(args []string) error {
 	if missing := gatecmd.IntegrationTestsNotPassed(output.String()); len(missing) != 0 {
 		return fmt.Errorf("the integration test binary exited 0 but did not report these tests as passed: %s",
 			strings.Join(missing, ", "))
+	}
+	// A parent test passes even when all its subtests skipped, so every
+	// skip, at any level, fails the gate too.
+	if skipped := gatecmd.SkippedTests(output.String()); len(skipped) != 0 {
+		return fmt.Errorf("these tests or subtests skipped, so what they check went unchecked: %s",
+			strings.Join(skipped, ", "))
 	}
 	return nil
 }

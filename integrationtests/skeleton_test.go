@@ -7,6 +7,7 @@ package integrationtests
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -87,7 +88,13 @@ func TestUntracedProcessStaysOut(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		other, err := h.StartUntraced(t.TempDir(), "file-basic")
+		// A subdirectory of h.Dir, which outlives h.Close (registered
+		// after it), so the untraced twin is killed before its dir goes.
+		dir, err := os.MkdirTemp(h.Dir, "untraced-")
+		if err != nil {
+			return nil, err
+		}
+		other, err := h.StartUntraced(dir, "file-basic")
 		if err != nil {
 			return nil, err
 		}

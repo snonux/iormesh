@@ -127,7 +127,9 @@ scoped sudoers rule, as in ior), runs it as root with `sudo -n
 `-test.failfast`; `mage integrationTestSerial` runs one test at
 a time. The binary runs with `-test.v`, and the target fails
 unless every test in `gatecmd.IntegrationTests()` printed
-`--- PASS` — a skip is no pass. Skips caused by kernel loss are
-summarized at the end. `internal/buildgate` keeps that list
+`--- PASS` and no test or subtest printed `--- SKIP` — Go reports
+a parent whose subtests all skipped as passed, so the gate reads
+skips at every level. Skips caused by kernel loss are summarized
+before the gate fails. `internal/buildgate` keeps that list
 equal to the tests the package declares. Set `IORMESH_IT_KEEP=DIR`
 to keep a failed test's trace directories.

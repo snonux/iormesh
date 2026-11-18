@@ -43,9 +43,11 @@ func TestSecondRunNormalizesIdentically(t *testing.T) {
 	}
 	for _, sc := range scenarios {
 		t.Run(sc.name, func(t *testing.T) {
-			h := newHarness(t)
-			first := normalized(t, h, traceJudged(t, h, sc.start(t)), sc.name)
-			second := normalized(t, h, traceJudged(t, h, sc.start(t)), sc.name)
+			// A harness per run: each run writes into a fresh tmp dir, so
+			// the second cannot find (or trip over) the first one's files.
+			h1, h2 := newHarness(t), newHarness(t)
+			first := normalized(t, h1, traceJudged(t, h1, sc.start(t)), sc.name)
+			second := normalized(t, h2, traceJudged(t, h2, sc.start(t)), sc.name)
 			if len(first.Events) == 0 {
 				t.Fatal("the first run has no events inside the bracket")
 			}

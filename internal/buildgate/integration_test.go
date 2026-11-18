@@ -82,3 +82,25 @@ func TestIntegrationTestsNotPassed(t *testing.T) {
 		t.Errorf("IntegrationTestsNotPassed() = %v, want %v", got, names[:1])
 	}
 }
+
+// TestSkippedTests: a subtest's skip under a parent's top-level PASS - what
+// Go prints when every subtest skipped - must still be caught, or a run
+// that checked nothing passes the gate.
+func TestSkippedTests(t *testing.T) {
+	cases := map[string]struct {
+		output string
+		want   []string
+	}{
+		"all pass": {"--- PASS: TestA (1s)\n    --- PASS: TestA/x (1s)", nil},
+		"subtest skip under parent pass": {"--- PASS: TestA (0s)\n    --- SKIP: TestA/x (0s)\n" +
+			"        helpers_test.go:1: lost", []string{"TestA/x"}},
+		"top-level skip": {"--- SKIP: TestB (0s)", []string{"TestB"}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := gatecmd.SkippedTests(tc.output); !slices.Equal(got, tc.want) {
+				t.Errorf("SkippedTests() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
