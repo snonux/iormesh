@@ -83,10 +83,10 @@ column each, never a blob.
 
 | Key | Set on |
 |-----|--------|
-| `path` | opens (required) |
-| `new_path` | rename/link family (M2) |
-| `flags` | opens: the raw open flags |
-| `offset` | positional I/O (M2) |
+| `path` | opens (required); the M2 path kinds; the old name of the rename/link family (a symlink's text); the fd metadata kinds (the fd's current path) |
+| `new_path` | rename/link family (M2): the new name |
+| `flags` | opens: the raw open flags; the path kinds whose syscall has a flags argument (`statx`, `newfstatat`, `utimensat`, `fchownat`, `fchmodat2`, `linkat`) |
+| `offset` | positional I/O (planned, not set yet) |
 | `local_addr`, `local_port` | socket events, when known |
 | `remote_addr`, `remote_port` | socket events, when known |
 | `sock_state` | `tcp_state` (required): `ESTABLISHED`, `CLOSE`, … |
@@ -121,6 +121,40 @@ in the M1 schema yet.
 
 The set only grows; M2 appends the rest of the file and socket
 surface.
+
+### Event kinds (M2 file surface)
+
+Default-on (decision #7), each named after its kernel tracepoint
+(`internal/schema/kinds_file.go`, attach list
+`internal/tracepoints/default_set.go`):
+
+| Shape | Kinds | fd | args |
+|-------|-------|----|------|
+| path | `creat`, `mkdir`, `mkdirat`, `mknod`, `mknodat`, `rmdir`, `unlink`, `unlinkat`, `readlink`, `readlinkat`, `newstat`, `newlstat`, `newfstatat`, `statx`, `truncate`, `utime`, `utimes`, `futimesat`, `utimensat`, `chmod`, `fchmodat`, `fchmodat2`, `chown`, `lchown`, `fchownat`, `setxattr`, `lsetxattr`, `getxattr`, `lgetxattr`, `listxattr`, `llistxattr`, `removexattr`, `lremovexattr` | the dirfd; `-1` for `AT_FDCWD` | `path`, `flags` where the syscall has them |
+| name | `rename`, `renameat`, `renameat2`, `link`, `linkat`, `symlink`, `symlinkat` | `-1` | `path` (old), `new_path` |
+| fd | `newfstat`, `ftruncate`, `fallocate`, `fchmod`, `fchown`, `fsetxattr`, `fgetxattr`, `flistxattr`, `fremovexattr` | the fd | `path`: the fd's current path, except on `newfstat` |
+| data | `pread64`, `pwrite64`, `readv`, `writev`, `preadv`, `pwritev`, `preadv2`, `pwritev2` | the fd | `bytes` as for `read`/`write`; no path |
+| dup | `dup`, `dup2`, `dup3` | the old fd; `ret` is the new one | — |
+
+`creat` is an open: `fd` is the returned descriptor, `flags`
+`O_CREAT|O_WRONLY|O_TRUNC`. A relative path is resolved against
+its dirfd's path when the trace saw that fd opened; against
+`AT_FDCWD` it stays as the call gave it (the working directory is
+not tracked). An empty path with a dirfd (`AT_EMPTY_PATH`,
+`utimensat`'s NULL form) names the fd's own file. A symlink's
+`path` is the link's text, never resolved.
+
+**Rename-aware paths** (M2 step 5): the path an fd's metadata
+events report follows its file through `rename*` — an fd at or
+below the old name (a directory rename moves everything under
+it) names the same place under the new one, in every traced
+process of the host — and its process gains an `opened` edge to
+the new name. A name that was unlinked, or replaced by a rename
+onto it, no longer moves the fds of the file it named. Matching is
+by name: the rename record carries no inode, and a directory
+rename moves files of many inodes. `read` and `write` carry no
+path at all (decision #25's per-event cost); their fd instance
+joins to the open that named it.
 
 ### Host-level events: session, drop, end
 
@@ -193,14 +227,14 @@ stays gap-free.
 |------|----|
 | `host` | `host:<host_id>` |
 | `process` | `proc:<host_id>/<pid>@<pid_incarnation>` |
-| `file` | `file:<host_id>:<path>` — the path exactly as the open event reports it |
+| `file` | `file:<host_id>:<path>` — the path exactly as the open event reports it, or the new name of a rename that moved an open fd |
 | `socket` | `conn:<conn_id>` — one node per connection, both ends |
 | `app` | `app:<project>/<pattern>` — the identity of a pattern-bound session's app (M2): every process incarnation the pattern matched links to it, so a restarted app is a new process node under the same app node |
 
 | Edge | From → to | State |
 |------|-----------|-------|
 | `runs_on` | process → host | — |
-| `opened` | process → file | — |
+| `opened` | process → file: opened under that name, or held open while a rename moved it there | — |
 | `connected` | process → socket | `fused` (both ends traced and joined) or `unresolved` |
 | `incarnation` | app → process | — |
 

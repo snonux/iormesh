@@ -1182,26 +1182,55 @@ scenarios landing first (principle #1).
    `Normalize`; `TestRestartPattern` runs it against the real
    tracer).
 
-4. **File surface**: attach the remaining file families (ior's
-   family table, `internal/tracepoints/family.go`). For each
-   family, port ior's test from `integrationtests/<family>_test.go`
-   with the Java scenario swapped in.
-   Scenarios (landed ahead, task ma4): `file-lifecycle` (mkdir,
-   O_EXCL create, rename, ftruncate, utimensat, unlink, rmdir),
-   `file-links` (symlink, readlink, statx no-follow, link) and
-   `file-attrs` (chmod, chown, fchmodat, fchown, f*xattr). Their
-   goldens name the syscalls strace shows on JDK 25 and 27
-   (`rename`, not `renameat2`; `statx`, which JDKs before 22
-   issue as `newfstatat`) and use only the existing `path`,
-   `new_path` and `flags` args. They do not load until the new kinds are
-   appended to `schema.KnownKind`, which `ParseExpectation`
-   checks — that is this step's first change.
+4. **File surface** (done, task qa4): `tracepoints.DefaultSyscalls`
+   appends the file surface to M1's set (decision #7: file on by
+   default) — create/delete, rename and links, the stat family,
+   truncate, timestamps, chmod/chown, xattrs, positional and
+   vectored I/O, and `dup*`, which `file-attrs` declares. Left out:
+   `access`/`faccessat` (fired at syscall frequency, decision
+   #25), `getdents`, `lseek`, `fsync`, `fcntl` (step 6), mounts,
+   zero-copy (step 7). Each name is a kind in
+   `internal/schema/kinds_file.go` (a unit test keeps attach list
+   and kinds in step). The correlator keys the exit on the enter's
+   record shape — fd, open, path or name event (`files.go`):
 
-5. **Rename-aware paths**: on `rename*` exit, rewrite `path` of
-   every open `fdState` under the old name; unit-test directory
-   renames and cross-directory moves.
-   `file-lifecycle` writes through an fd after renaming its
-   file, so its golden proves this end to end.
+   ```go
+   switch en.shape { // an integer compare first: read/write pay nothing
+   case shapeOpen: return nil, c.openDetail(ev, p, en, ret)
+   case shapePath: return nil, c.pathDetail(ev, p, en, ret)
+   case shapeName: c.nameDetail(ev, p, en, ret); return nil, true
+   }
+   ```
+
+   A path kind's `fd` is its dirfd (`-1` for `AT_FDCWD`); relative
+   paths resolve against a dirfd the trace saw opened, an empty
+   one (`AT_EMPTY_PATH`, `utimensat(fd, NULL)`) names the fd's own
+   file; the cwd is not tracked. `flags` appear only where the
+   syscall has them (`statx`'s `AT_SYMLINK_NOFOLLOW`). A symlink's
+   text stays unresolved; opens through a symlink keep the link's
+   path (resolving it needs the inode capture, not attached). The
+   dup kinds create the new fd instance with the old one's path;
+   the rest of step 6 stays there. The three goldens load and pass
+   (`TestFileLifecycle`, `TestFileLinks`, `TestFileAttrs`); JDK 25
+   issues `statx`, as declared. `file-attrs` now declares
+   `fchmodat`'s name resolved against its directory fd.
+
+5. **Rename-aware paths** (done, task qa4, `paths.go`): each fd
+   instance a traced open (or dup) named keeps its absolute path;
+   a successful `rename*` rewrites every fd at or below the old
+   name, in every traced process (a rename is filesystem-wide),
+   and adds an `opened` edge to the new name. Matching is by name,
+   not inode: the rename record has no inode, and a directory
+   rename moves files of many inodes. What a name match could get
+   wrong — a name reused by another file — is closed by marking
+   the fds of an unlinked name, or of a name a rename replaced,
+   gone. The fd metadata kinds (`ftruncate`, `fchown`, `f*xattr`,
+   …) report the current path; `read`/`write` carry none
+   (decision #25). Unit tests cover a directory rename, a
+   cross-directory move, a prefix-sharing sibling, a failed rename
+   and reuse after unlink; `file-lifecycle` declares its
+   `ftruncate` after the rename on `b.dat`, so the golden proves
+   it end to end (`TestGoldenFileLifecycle` offline too).
 
 6. **fd lifecycle**: `dup*`, `fcntl(F_DUPFD*)` copy `fdState`
    (new `gen`); fork copies the parent's table; exec drops
@@ -1224,8 +1253,8 @@ scenarios landing first (principle #1).
    datagram each way) and `tcp-ipv4`/`tcp-ipv6` (one AF_INET or
    AF_INET6 connection in one process, full 4-tuples declared).
    Their goldens use kinds `schema.KnownKind` lacks — `bind`,
-   `unlink`, `sendto`, `recvfrom`, `pipe2`, `dup2`, `kill` — and
-   only existing fields, which leaves gaps this step must close
+   `sendto`, `recvfrom`, `pipe2`, `kill` (`unlink` and `dup2`
+   came with step 4) — and only existing fields, which leaves gaps this step must close
    and then tighten the goldens with: `pipe2` returns two fds
    (declared without `fd`; the ends bind through their reads and
    writes), `kill` has no target-PID or signal argument (declared

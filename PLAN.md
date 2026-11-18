@@ -399,8 +399,10 @@ criterion here.
 
 - eBPF probes for the full file-syscall surface and the socket
   lifecycle; userspace correlator building pid→fd→path
-  (rename-aware: an open fd's path follows its inode through
-  renames and moves) and pid→fd→(remote ip,port).
+  (rename-aware: an open fd's path follows its file through
+  renames and moves — matched by name, since a rename record
+  carries no inode and a directory rename moves many; see
+  docs/implementation.md M2 step 5) and pid→fd→(remote ip,port).
 - **Target spec — PID, process-name pattern or listening
   port**: a session is bound to a PID, to a process-name
   pattern matched on exec (argv and exe path — kernel comms are
