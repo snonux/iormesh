@@ -60,9 +60,8 @@ the ring buffer.
   medians are the usable figure.
   At ~10 µs an event, one core sustains ~100 k events/s; the
   burst issues ~0.7–1.4 M records/s per thread. The consumer is
-  the bottleneck; where its time goes is not profiled yet (task
-  wc4) — JSON encoding and per-event validation are the
-  suspects.
+  the bottleneck; where its time went is in "Follow-up (wc4)"
+  below.
 - **Volume**: 325–327 bytes per event as NDJSON. On the volume
   run's trace (100 025 events), zstd compresses 18.4× at level 3
   (17.7 B/event) and 24.9× at level 19 (13.1 B/event). The burst
@@ -80,8 +79,8 @@ the ring buffer.
    a count and bytes. Opens, closes, connects, accepts, markers
    and every event that changes fd or socket state stay per
    event, so goldens and attribution are unaffected (task vc4).
-2. **The consumer must get cheaper** (task wc4): profile, then
-   cut encoding and validation cost.
+2. **The consumer must get cheaper** (task wc4): done, see
+   "Follow-up (wc4)".
 3. **The bystander tax** appears as ~1.14× at 4 and 16 threads;
    the 1-thread figure is noise-dominated on this host. It is
    paid by every process on the host only while a trace runs
@@ -100,3 +99,73 @@ the ring buffer.
 
 The budget itself (the acceptance criteria) is decision #25 in
 PLAN.md.
+
+## Follow-up (wc4): the consumer's per-event CPU
+
+Task wc4 profiled and cut the tracer's userspace cost per event
+(decision #25, budget item 1). Measured 2026-11-19 on the same
+host, **again not quiet**: load average 2.6–4.1 from unrelated
+work, so single runs spread ~2×; the figures are medians and are
+for comparison, not the acceptance run (a quiet-host
+`measure.sh` run is still due before M2's acceptance).
+
+**Where the time went** (`go test ./internal/correlate -bench
+SyscallBurst -cpuprofile`, and `iormesh run -cpuprofile FILE` on
+a traced burst):
+
+1. `json.Marshal` — over half of the correlator + sink time
+   (reflection walk, one allocation per line);
+2. the record path from the ring: libbpfgo's cgo callback per
+   record, a `GoBytes` copy, then two channel hops (raw, decoded),
+   each waking a goroutine — on the real tracer ~130 k voluntary
+   context switches per 400 k events and about as much CPU as the
+   correlator itself;
+3. pooled records never returned (`Recycle` was not called), so
+   each decode allocated, plus the GC that caused (~20 %);
+4. smaller items: a 4 KiB `bufio` buffer (a `write(2)` per ~12
+   events), the correlator's queue reallocating as it slid
+   forward, and `Validate` copying the 330-byte event into each
+   of its checks (62 ns).
+
+Per-event validation itself was cheap: once the copies were gone
+it costs ~15 ns, so it stays on the hot path — a producer bug
+still fails the write instead of reaching a file the strict
+reader rejects.
+
+**Changes**: `schema.AppendEvent`, a hand-written encoder held
+byte-identical to `json.Marshal` by a property test on randomly
+filled events (every field) and a fuzz target; the export goldens
+are unchanged. The sink encodes into a 64 KiB `bufio` buffer in
+place. `types.Recycle` returns every record to its pool once the
+session handled it. `internal/bpf` reads `event_map` from its own
+memory mapping (`ringbuf.go`) instead of libbpfgo's callback, and
+delivers records in batches of up to 256, pausing 200 µs after a
+partial batch and blocking in epoll on an empty ring.
+
+**Numbers** — Go benchmark (decode + correlate + encode, writing
+to `io.Discard`; 3 interleaved runs each, load ~3.7):
+
+| | ns/event | allocs/record |
+|--|--:|--:|
+| before (`359e726`) | 3122–3152 | 2 (665 B) |
+| after | 811–896 | 0 |
+
+Real tracer on `syscall-burst --ops 200000`: tracer utime+stime
+from the ready file to exit (load and attach excluded, so the
+fixed cost no longer swamps the figure), divided by emitted
+events; 3 interleaved runs each, load 3.2–4.1. "Lost" is as
+above, lost records over records wanted:
+
+| Threads | before ns/event | after ns/event | before lost | after lost |
+|--:|--:|--:|--:|--:|
+| 1 | 5803 (5523–6118) | 2000 (1375–2625) | 12–15 % | 0 |
+| 4 | 6294 (6181–11617) | 1532 (1425–2499) | 38–40 % | 0–5 % |
+
+Voluntary context switches of the tracer fell from ~45 k to
+~6–9 k per run. The medians sit at or under the 2 µs budget on
+this busy host; the after-profile is now dominated by the
+correlator and encoder themselves (~1.4 µs of ~2 µs per event
+under contention, 0.4 µs in the quiet benchmark), the BPF load
+being the only larger item. The 1-thread burst now loses no
+records; the 4-thread one still can, which is what in-kernel
+aggregation (task vc4) addresses.

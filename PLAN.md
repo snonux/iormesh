@@ -978,7 +978,9 @@ answer), and deferred.
   1. *tracer CPU* — M1: 6.6–13 µs per event (medians). Budget:
      ≤ 2 µs per emitted event on `syscall-burst` (median) — one
      core then sustains 500 k events/s, five times M1, which
-     together with aggregation covers the burst;
+     together with aggregation covers the burst (task
+     wc4 brought it to ~1.5–2 µs on a busy host, quiet-host run
+     pending — s3-overhead.md, "Follow-up (wc4)");
   2. *bystander cost* (host-wide, every untraced process) — M1:
      ~1.14× per syscall at 4 and 16 threads. Budget: ≤ 1.25× on
      `syscall-burst` at 4 threads, measured on a quiet host
