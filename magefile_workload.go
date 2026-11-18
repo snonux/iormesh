@@ -2,7 +2,7 @@
 
 // The process harness behind WorkloadTest (Magefile.go): it starts the
 // workload jar and reads its stdout and stderr line by line, so a check
-// can assert on the PID-first contract, the server's `listening <port>`
+// can assert on the PID-first contract, a server's `listening <addr>`
 // line and the scenario markers while the process still runs.
 package main
 
@@ -13,7 +13,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -120,18 +119,19 @@ func (r *gatedRun) expectPID() error {
 	return nil
 }
 
-// expectListening reads the tcp-loopback server's `listening <port>` line
-// and returns the port the kernel picked.
-func (r *gatedRun) expectListening() (int, error) {
+// expectListening reads a server's `listening <addr>` line and returns
+// addr: the port the kernel picked (tcp-loopback, udp-loopback) or the
+// socket path (unix-socket); the caller validates its shape.
+func (r *gatedRun) expectListening() (string, error) {
 	line, err := r.nextStdout()
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	port, err := strconv.Atoi(strings.TrimPrefix(line, "listening "))
-	if err != nil || !strings.HasPrefix(line, "listening ") || port < 1 {
-		return 0, fmt.Errorf("%s: want `listening <port>`, got %q", r.name(), line)
+	addr, ok := strings.CutPrefix(line, "listening ")
+	if !ok || addr == "" {
+		return "", fmt.Errorf("%s: want `listening <addr>`, got %q", r.name(), line)
 	}
-	return port, nil
+	return addr, nil
 }
 
 // drainStdout discards the rest of stdout so the reader goroutine (and

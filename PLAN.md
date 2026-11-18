@@ -224,7 +224,7 @@ Scenario catalogue, by the milestone it lands with:
 |------------|-----------|
 | M1 | File data ops (open/read/write/close) — `file-basic`; TCP client ↔ server on loopback — `tcp-loopback`; markers (all landed with M0) |
 | S3 | Syscall load: tight 1-byte read/write loops, N ops over T threads — `syscall-burst` |
-| M2 | Full file surface — `file-lifecycle` (create/delete, rename while open, move, truncate, touch), `file-links` (symlink/readlink/lstat, hardlink), `file-attrs` (chmod/chown by path and fd, xattr); fd lifecycle (dup, inheritance across fork/exec, reuse) — `fd-lifecycle` (these four landed ahead of the M2 tracer work); local IPC; signals; UDP; IPv4 + IPv6; restart; non-Java peer |
+| M2 | Full file surface — `file-lifecycle` (create/delete, rename while open, move, truncate, touch), `file-links` (symlink/readlink/lstat, hardlink), `file-attrs` (chmod/chown by path and fd, xattr); fd lifecycle (dup, inheritance across fork/exec, reuse) — `fd-lifecycle` (these four landed ahead of the M2 tracer work); local IPC — `pipe-ipc` (pipe, child stdio pipes), `unix-socket`; signals — `signals`; UDP — `udp-loopback`; IPv4 + IPv6 — `tcp-ipv4`, `tcp-ipv6` (these six landed ahead too); restart; non-Java peer |
 | M3 | Method flows (deep stacks, async I/O); HTTP plain + TLS; redaction; OTEL flavor |
 | M4 | Client and server on two hosts as two projects; microservices topology, one service per host; NAT'ed pair |
 | M5 | (renders M4's microservices scenario) |
@@ -266,6 +266,16 @@ Scenario notes:
   stream). `fd-lifecycle`'s child JVM brackets nothing itself:
   a process forked inside a bracket belongs to it, so the
   normalizer's per-process cut must keep such children.
+- **IPC, signal, UDP and address-family scenarios** (M2):
+  `pipe-ipc`, `unix-socket`, `signals`, `udp-loopback`,
+  `tcp-ipv4` and `tcp-ipv6` declare what strace shows on JDK
+  25–27, within what JDK-only Java can do: pipes come from
+  `java.nio.channels.Pipe` and a child's stdio, and the only
+  signals are SIGTERM and SIGKILL to the workload's own
+  children (`Process.destroy`/`destroyForcibly`), so the golden
+  declares the sender's `kill` and leaves delivery to the
+  tracer. `tcp-ipv6` exits with the skip code 3 on a host
+  without `::1`, so a harness reports a skip, never a pass.
 - **Non-Java peer** (M2): one scenario talks to a non-JVM
   process (ior's `ioworkload`, or a minimal C/Go echo peer),
   proving the degraded node shape — files and sockets only,

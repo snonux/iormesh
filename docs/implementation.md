@@ -322,7 +322,13 @@ tcp-loopback ship real ones):
   read, write, close, connect, accept) and ports rather than
   addresses: the JVM's dual-stack sockets show 127.0.0.1 as
   `::ffff:127.0.0.1` unless the host lacks IPv6 (the normalizer
-  unmaps it to `127.0.0.1` anyway, see M1 step 8).
+  unmaps it to `127.0.0.1` anyway, see M1 step 8). M2's
+  `tcp-ipv4`, `tcp-ipv6` and `udp-loopback` do declare
+  addresses: their NIO channels are opened with an explicit
+  protocol family, so each socket has exactly one.
+- A kind's fds beyond the one `fd` field (`pipe2`'s pair, a
+  `dup2`'s target) are declared through the events that use
+  them, as `fd-lifecycle` does for its `dup`.
 - `flags` are compared by access mode plus the declared bits, so
   577 means "write-only, create, truncate" and tolerates an extra
   `O_CLOEXEC`; `0` matches any read-only open (M1 step 9).
@@ -431,7 +437,10 @@ dependencies either.
    `listening <port>` as the stdout line after the PID; the
    harness starts or releases the client (`--port` required) only
    after that line. Bad options or roles exit 2; a
-   `--dir` that is not a directory exits 1.
+   `--dir` that is not a directory exits 1. A scenario the
+   host cannot run (M2's `tcp-ipv6` without `::1`) throws
+   `ScenarioSkipped` and exits 3: the self-test prints `skip`,
+   and a harness reports a skip, never a pass.
 
 5. `expect.json` per scenario, in the format above.
 
@@ -442,15 +451,18 @@ checks a gated run (PID first on stdout; no marker before the
 startup file appears; still alive after the scenario until the
 hold file appears) and a two-process tcp-loopback run (server on
 `--port 0`, PID then `listening <port>` on stdout; the client
-started on that port; both print the end marker and exit 0). It
+started on that port; both print the end marker and exit 0),
+and runs M2's `udp-loopback` and `unix-socket` (`listening
+<path>`, passed to the client as `--path`) the same way. It
 also checks that `--expect` prints valid JSON naming the scenario
 for every name `--list` prints, that malformed invocations —
 unknown scenario or role, a missing or duplicate option, a stray
 argument, a missing, non-numeric or out-of-range `--port`, an
 unknown scenario option — exit with the usage code 2, and that
 well-formed runs failing at run time — a client on a closed port,
-a `--dir` that does not exist — exit with 1. The process harness
-lives in `magefile_workload.go`.
+a `--dir` that does not exist — exit with 1, and that `tcp-ipv6`
+on an IPv4-only JVM exits with the skip code 3. The process
+harness lives in `magefile_workload.go`.
 
 **Done when**: PLAN.md's M0 acceptance holds — the M1 scenarios
 run standalone and `strace -f -e trace=openat` shows the two
@@ -1109,6 +1121,28 @@ scenarios landing first (principle #1).
 
 7. **IPC, signals, UDP, epoll**: as families, default-off per S3's
    recommendation.
+   Scenarios (landed ahead, task na4; strace-verified on JDK 25,
+   26 and 27-ea): `pipe-ipc` (a `java.nio.channels.Pipe`, then a
+   child JVM's stdin/stdout pipes), `unix-socket` (server and
+   client roles on `$tmp/unix-socket.sock`), `signals` (SIGTERM
+   via `Process.destroy`, SIGKILL via `destroyForcibly`, to two
+   child JVMs), `udp-loopback` (server and client roles, one
+   datagram each way) and `tcp-ipv4`/`tcp-ipv6` (one AF_INET or
+   AF_INET6 connection in one process, full 4-tuples declared).
+   Their goldens use kinds `schema.KnownKind` lacks — `bind`,
+   `unlink`, `sendto`, `recvfrom`, `pipe2`, `dup2`, `kill` — and
+   only existing fields, which leaves gaps this step must close
+   and then tighten the goldens with: `pipe2` returns two fds
+   (declared without `fd`; the ends bind through their reads and
+   writes), `kill` has no target-PID or signal argument (declared
+   bare; delivery with the sender's PID — `signal_generate` — is
+   not declared at all), a unix socket's path is `args.path` on
+   `bind` and `connect`, and UDP and pipes declare no edges
+   because the graph has no edge type for them yet. The children
+   of `pipe-ipc` and `signals` emit no markers, like
+   `fd-lifecycle`'s (step 6). The first NIO use inside a bracket
+   also makes a `socketpair` and throwaway AF_INET6 probe
+   sockets; nothing declares them.
 
 8. **Redaction** (`internal/redact`, cgo-free — M3 and M5 reuse
    it):

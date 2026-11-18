@@ -1,0 +1,24 @@
+{"scenario": "tcp-ipv6",
+ "schema_version": 1,
+ "events": [
+   {"thread": "$t1", "event": "accept",
+    "args": {"local_addr": "::1", "local_port": "$port1",
+             "remote_addr": "::1", "remote_port": "$port2"},
+    "fd": "$fd1"},
+   {"thread": "$t1", "event": "read", "fd": "$fd1", "bytes": 5},
+   {"thread": "$t1", "event": "write", "fd": "$fd1", "bytes": 5},
+   {"thread": "$t1", "event": "read", "fd": "$fd1", "bytes": 0},
+   {"thread": "$t1", "event": "close", "fd": "$fd1"},
+
+   {"thread": "$t2", "event": "connect",
+    "args": {"local_addr": "::1", "local_port": "$port2",
+             "remote_addr": "::1", "remote_port": "$port1"},
+    "fd": "$fd2"},
+   {"thread": "$t2", "event": "write", "fd": "$fd2", "bytes": 5},
+   {"thread": "$t2", "event": "read", "fd": "$fd2", "bytes": 5},
+   {"thread": "$t2", "event": "close", "fd": "$fd2"}
+ ],
+ "edges": [
+   {"type": "connected", "from": "$p1", "to": "conn:$c1", "state": "fused"}
+ ],
+ "must_not_appear": []}

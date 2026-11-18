@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -76,9 +77,9 @@ func javaSources(root string) ([]string, error) {
 }
 
 // WorkloadTest runs every scenario without a tracer (--self-test), then
-// checks the gates, the two-process tcp-loopback run, every scenario's
-// --expect output, syscall-burst's result line and the exit codes of bad
-// invocations.
+// checks the gates, the two-process runs (tcp-loopback, udp-loopback,
+// unix-socket), every scenario's --expect output, syscall-burst's result
+// line, the exit codes of bad invocations and the skip exit code.
 func WorkloadTest() error {
 	mg.Deps(WorkloadBuild)
 	if err := sh.RunV("java", "-jar", workloadJar, "--self-test"); err != nil {
@@ -87,10 +88,13 @@ func WorkloadTest() error {
 	checks := []func() error{
 		checkGatedRun,
 		checkTCPLoopback,
+		checkUDPLoopback,
+		checkUnixSocket,
 		checkExpectations,
 		checkSyscallBurst,
 		checkUsageErrors,
 		checkRunFailures,
+		checkSkip,
 	}
 	for _, check := range checks {
 		if err := check(); err != nil {
@@ -143,7 +147,43 @@ func checkGatedRun() error {
 // only after the server's `listening <port>` line, so the connect never
 // races the listen. Both must finish their bracket and exit 0.
 func checkTCPLoopback() error {
-	server, err := startRun(nil, "tcp-loopback", "--role", "server")
+	return checkTwoRoles("tcp-loopback", nil, portClient)
+}
+
+// checkUDPLoopback runs udp-loopback's two roles the same way.
+func checkUDPLoopback() error {
+	return checkTwoRoles("udp-loopback", nil, portClient)
+}
+
+// checkUnixSocket runs unix-socket's two roles: the server binds its
+// socket in a fresh directory and names it in its `listening <path>`
+// line, which the client gets as --path. os.MkdirTemp's short /tmp path
+// keeps the socket path under the kernel's 108-byte sun_path limit.
+func checkUnixSocket() error {
+	dir, err := os.MkdirTemp("", "iormesh-unix-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	return checkTwoRoles("unix-socket", []string{"--dir", dir},
+		func(addr string) []string { return []string{"--path", addr} })
+}
+
+// portClient turns a server's `listening <port>` address into the
+// client's options, rejecting anything but a valid port.
+func portClient(addr string) []string {
+	if port, err := strconv.Atoi(addr); err != nil || port < 1 || port > 65535 {
+		return nil
+	}
+	return []string{"--port", addr}
+}
+
+// checkTwoRoles starts scenario's server with serverOpts, reads its
+// `listening <addr>` line, starts the client with clientOpts(addr) and
+// expects both to finish their bracket and exit 0. A nil clientOpts
+// result means the server announced a malformed address.
+func checkTwoRoles(scenario string, serverOpts []string, clientOpts func(string) []string) error {
+	server, err := startRun(nil, append([]string{scenario, "--role", "server"}, serverOpts...)...)
 	if err != nil {
 		return err
 	}
@@ -151,12 +191,16 @@ func checkTCPLoopback() error {
 	if err := server.expectPID(); err != nil {
 		return err
 	}
-	port, err := server.expectListening()
+	addr, err := server.expectListening()
 	if err != nil {
 		return err
 	}
 	server.drainStdout()
-	client, err := startRun(nil, "tcp-loopback", "--role", "client", "--port", fmt.Sprint(port))
+	opts := clientOpts(addr)
+	if opts == nil {
+		return fmt.Errorf("%s: bad listening address %q", server.name(), addr)
+	}
+	client, err := startRun(nil, append([]string{scenario, "--role", "client"}, opts...)...)
 	if err != nil {
 		return err
 	}
@@ -167,10 +211,10 @@ func checkTCPLoopback() error {
 	client.drainStdout()
 	// Client first: a server stuck in accept would otherwise hide the
 	// client failure that caused it behind a timeout.
-	if err := finish(client, "tcp-loopback"); err != nil {
+	if err := finish(client, scenario); err != nil {
 		return err
 	}
-	return finish(server, "tcp-loopback")
+	return finish(server, scenario)
 }
 
 // finish expects the scenario's end marker on stderr, then exit code 0.
@@ -284,6 +328,12 @@ func checkUsageErrors() error {
 	for _, name := range m2FileScenarios {
 		bad = append(bad, []string{name, "--role", "client"}, []string{name, "--bogus", "x"})
 	}
+	// The M2 IPC, signal and address-family scenarios run solo with no
+	// options at all, so even --dir is a usage error.
+	for _, name := range m2SoloScenarios {
+		bad = append(bad, []string{name, "--role", "server"}, []string{name, "--dir", "x"})
+	}
+	bad = append(bad, m2RoleUsageErrors...)
 	for _, args := range bad {
 		if err := expectExit(2, args...); err != nil {
 			return err
@@ -296,6 +346,25 @@ func checkUsageErrors() error {
 // (task ma4): solo, --dir their only option, so they share one set of
 // usage and run-failure checks.
 var m2FileScenarios = []string{"fd-lifecycle", "file-attrs", "file-lifecycle", "file-links"}
+
+// m2SoloScenarios are M2's option-less solo scenarios (task na4).
+var m2SoloScenarios = []string{"pipe-ipc", "signals", "tcp-ipv4", "tcp-ipv6"}
+
+// m2RoleUsageErrors are malformed invocations of M2's two-role
+// scenarios (task na4): each role accepts only its own options.
+var m2RoleUsageErrors = [][]string{
+	{"unix-socket", "--role", "solo"},
+	{"unix-socket", "--role", "client"},
+	{"unix-socket", "--role", "client", "--path", ""},
+	{"unix-socket", "--role", "client", "--path", "s", "--dir", "x"},
+	{"unix-socket", "--role", "server", "--path", "s"},
+	{"udp-loopback", "--role", "solo"},
+	{"udp-loopback", "--role", "client"},
+	{"udp-loopback", "--role", "client", "--port", "abc"},
+	{"udp-loopback", "--role", "client", "--port", "0"},
+	{"udp-loopback", "--role", "server", "--port", "70000"},
+	{"udp-loopback", "--role", "server", "--dir", "x"},
+}
 
 // checkRunFailures asserts a well-formed run that fails at run time exits
 // with code 1, not the usage code: a client with nobody listening, and a
@@ -313,10 +382,32 @@ func checkRunFailures() error {
 	for _, name := range m2FileScenarios {
 		failing = append(failing, []string{name, "--dir", "/nonexistent/iormesh-workload"})
 	}
+	// unix-socket fails like tcp-loopback: no directory for the server's
+	// socket, no socket for the client. udp-loopback has no such check:
+	// an unconnected UDP client never learns its datagram went nowhere.
+	failing = append(failing,
+		[]string{"unix-socket", "--role", "server", "--dir", "/nonexistent/iormesh-workload"},
+		[]string{"unix-socket", "--role", "client", "--path", "/nonexistent/iormesh.sock"})
 	for _, args := range failing {
 		if err := expectExit(1, args...); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// checkSkip asserts a scenario the host cannot run exits with the skip
+// code 3, not as a failure: tcp-ipv6 on a JVM told to use IPv4 only
+// (JDK_JAVA_OPTIONS reaches the launcher without a jar-side flag).
+func checkSkip() error {
+	ctx, cancel := context.WithTimeout(context.Background(), gateWait)
+	defer cancel()
+	cmd := workloadCmd(ctx, "tcp-ipv6")
+	cmd.Env = append(os.Environ(), "JDK_JAVA_OPTIONS=-Djava.net.preferIPv4Stack=true")
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 3 {
+		return fmt.Errorf("tcp-ipv6 on an IPv4-only JVM: want exit 3 (skip), got %v", err)
 	}
 	return nil
 }

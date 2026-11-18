@@ -20,6 +20,9 @@ import java.util.Set;
  *   java -jar workload.jar --list
  * </pre>
  *
+ * Exit codes: 0 ok, 1 the scenario failed, 2 usage error, 3 skipped
+ * (the host lacks what the scenario needs, see {@link ScenarioSkipped}).
+ *
  * Gating mirrors ior's cmd/ioworkload so the tracer is attached before
  * the first scenario syscall: the PID is the first stdout line, then the
  * process waits for $IORMESH_WORKLOAD_STARTUP_FILE (if set) and, after
@@ -35,6 +38,9 @@ public final class Main {
 
     static final int EXIT_FAILURE = 1;
     static final int EXIT_USAGE = 2;
+    // The host lacks what the scenario needs (ScenarioSkipped): neither
+    // a pass nor a failure, so a harness turns it into a test skip.
+    static final int EXIT_SKIP = 3;
 
     private static final Set<String> ROLES = Set.of("client", "server", "solo");
 
@@ -49,6 +55,9 @@ public final class Main {
             System.err.println(e.getMessage());
             usage(registry);
             code = EXIT_USAGE;
+        } catch (ScenarioSkipped e) {
+            System.err.println("skipped: " + e.getMessage());
+            code = EXIT_SKIP;
         } catch (Exception e) {
             System.err.println("workload failed: " + e);
             code = EXIT_FAILURE;

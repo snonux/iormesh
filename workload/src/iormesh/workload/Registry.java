@@ -6,8 +6,13 @@ import iormesh.workload.scenarios.FileBasic;
 import iormesh.workload.scenarios.FileLifecycle;
 import iormesh.workload.scenarios.FileLinks;
 import iormesh.workload.scenarios.Noop;
+import iormesh.workload.scenarios.PipeIpc;
+import iormesh.workload.scenarios.Signals;
 import iormesh.workload.scenarios.SyscallBurst;
+import iormesh.workload.scenarios.TcpFamily;
 import iormesh.workload.scenarios.TcpLoopback;
+import iormesh.workload.scenarios.UdpLoopback;
+import iormesh.workload.scenarios.UnixSocket;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -28,8 +33,14 @@ final class Registry {
         r.add(new FileLifecycle());
         r.add(new FileLinks());
         r.add(new Noop());
+        r.add(new PipeIpc());
+        r.add(new Signals());
         r.add(new SyscallBurst());
+        r.add(TcpFamily.ipv4());
+        r.add(TcpFamily.ipv6());
         r.add(new TcpLoopback());
+        r.add(new UdpLoopback());
+        r.add(new UnixSocket());
         return r;
     }
 

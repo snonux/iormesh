@@ -14,6 +14,9 @@ final class SelfTest {
             try {
                 Main.bracketed(s.name(), s::selfTest);
                 System.out.println("ok   " + s.name());
+            } catch (ScenarioSkipped e) {
+                // Not a failure: the host cannot run it (e.g. no IPv6).
+                System.out.println("skip " + s.name() + ": " + e.getMessage());
             } catch (Exception e) {
                 failed++;
                 System.out.println("FAIL " + s.name() + ": " + e);
