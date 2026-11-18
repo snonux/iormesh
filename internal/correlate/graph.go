@@ -1,0 +1,72 @@
+package correlate
+
+import (
+	"maps"
+	"slices"
+
+	"iormesh/internal/schema"
+)
+
+// graphBuilder accumulates the per-host graph as events are emitted.
+// Nodes and edges are keyed by id so repeats collapse; build sorts them.
+// Attributes stay minimal on purpose: raw pids or ports in attrs would
+// survive normalization and make two runs' graphs differ.
+type graphBuilder struct {
+	hostID string
+	nodes  map[string]schema.Node
+	edges  map[[3]string]schema.Edge
+}
+
+func newGraphBuilder(hostID string) *graphBuilder {
+	g := &graphBuilder{hostID: hostID, nodes: map[string]schema.Node{},
+		edges: map[[3]string]schema.Edge{}}
+	host := schema.HostNodeID(hostID)
+	g.nodes[host] = schema.Node{Type: schema.NodeHost, ID: host}
+	return g
+}
+
+// process adds a process node and its runs_on edge.
+func (g *graphBuilder) process(pid uint32, inc uint64, comm string) {
+	id := schema.ProcessNodeID(g.hostID, pid, inc)
+	node := schema.Node{Type: schema.NodeProcess, ID: id}
+	if comm != "" {
+		node.Attrs = map[string]string{"comm": comm}
+	}
+	g.nodes[id] = node
+	g.edge(schema.Edge{Type: schema.EdgeRunsOn, From: id, To: schema.HostNodeID(g.hostID)})
+}
+
+// opened adds a file node and the process's opened edge. The file id uses
+// the path exactly as the open event reports it, so the normalizer's
+// bracket pruning finds the node from the event (internal/normalize).
+func (g *graphBuilder) opened(pid uint32, inc uint64, path string) {
+	file := schema.FileNodeID(g.hostID, path)
+	g.nodes[file] = schema.Node{Type: schema.NodeFile, ID: file}
+	g.edge(schema.Edge{Type: schema.EdgeOpened,
+		From: schema.ProcessNodeID(g.hostID, pid, inc), To: file})
+}
+
+// connected adds a socket node for connID and the process's connected
+// edge, fused when both ends were traced on this host.
+func (g *graphBuilder) connected(pid uint32, inc uint64, connID string, fused bool) {
+	sock := schema.SocketNodeID(connID)
+	g.nodes[sock] = schema.Node{Type: schema.NodeSocket, ID: sock}
+	state := schema.StateUnresolved
+	if fused {
+		state = schema.StateFused
+	}
+	g.edge(schema.Edge{Type: schema.EdgeConnected,
+		From: schema.ProcessNodeID(g.hostID, pid, inc), To: sock, State: state})
+}
+
+func (g *graphBuilder) edge(e schema.Edge) {
+	g.edges[[3]string{e.Type, e.From, e.To}] = e
+}
+
+func (g *graphBuilder) build() schema.Graph {
+	gr := schema.Graph{SchemaVersion: schema.Version,
+		Nodes: slices.Collect(maps.Values(g.nodes)),
+		Edges: slices.Collect(maps.Values(g.edges))}
+	gr.Sort()
+	return gr
+}

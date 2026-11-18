@@ -649,53 +649,64 @@ and is traced again after a second `AddTarget`; `Close` closes
 `Records` with both channels full and nobody reading; `Open`
 with only missing tracepoints fails.
 
-**Step 6 — the correlator** (`internal/correlate`):
+**Step 6 — the correlator** (`internal/correlate`, cgo-free;
+built). `correlate.New(Config{Host, Sink, ProcInfo, WallOffsetNS,
+FuseWindowNS})` returns a `Correlator`; `Handle(rec)` takes each
+record from `bpf.Tracer.Records()`, `Close()` flushes and closes
+the sink, `Graph()` returns the sorted per-host graph. One
+goroutine owns it. `Host{ID, Project}` lives here, not in
+`schema` (the guide's earlier `schema.HostInfo`). The rules, each
+unit-tested with synthetic record streams:
 
-```go
-// Correlator turns raw BPF records into schema events and a
-// per-host graph. One goroutine owns all of its state.
-type Correlator struct {
-    host   schema.HostInfo // to come with fa4; not in schema yet
-    procs  map[uint32]*procState // by tgid
-    socks  map[uint64]*sockState // by struct sock address
-    seq    uint64
-    out    schema.Sink
-}
+- **Pairing**: an enter waits per tid for its exit (a thread runs
+  one syscall at a time); an exit without the matching enter
+  (lost to a drop) emits nothing and is counted (`Unpaired`).
+  ior's restart handling is not lifted: M1 attaches no restart
+  probes (`SYSCALL_RESTART_EVENT`), so it lands with M2's signal
+  work.
+- **fd generations**: an open or accept exit with `ret >= 0`
+  creates a new instance (`gen = last + 1`); `close` removes it
+  (except on `EBADF`). M1 does not trace `socket`, `dup` or
+  `pipe`, so the creation rule is completed from the other side:
+  an fd never seen predates the trace (`gen 0`), and an fd used
+  again after its close was recreated by an untraced syscall
+  (`gen = last + 1`). `(pid, pid_incarnation, fd, fd_gen)` thus
+  names one instance even when a library's open and a later
+  socket land on one number.
+- **Sockets**: a socket's first `tcp_state` record binds the
+  owner's fd to the socket (`sk`) — `CLOSE → SYN_SENT` inside
+  connect, or the accept snapshot, which precedes its accept
+  exit and so reports the generation that exit will create.
+  Later transitions report the instance bound then, even after
+  close(2), and never re-bind a reused number. `connect` and
+  `accept` events carry the known 4-tuple in `args`.
+- **Markers**: an open of `/iormesh-marker/<s>/<edge>` becomes a
+  `marker` event with `args.marker = "<s>/<edge>"`.
+- **Loopback join**: two sockets whose `(local, remote)` mirror
+  each other, established within 5s, share one `conn_id` — the
+  hex SHA-256 (first 16 chars) of the sorted address pair plus
+  the earlier establish time — and both processes get a fused
+  `connected` edge to `conn:<id>`. A socket still alone when its
+  window passes gets its own id and an unresolved edge.
+- **Every socket event carries `conn_id`** (connect, accept,
+  read, write, close, tcp_state on a socket): the normalizer
+  keeps a `connected` edge only for conn ids its bracketed
+  events carry (step 8). To give each event its final id, socket
+  events wait in a FIFO until their socket is fused or its
+  window passes; events behind them wait too, so the sink still
+  sees gap-free `seq` order (seq is assigned on completion).
+- **Graph**: host, process (attr `comm` only — raw pids or ports
+  in attrs would survive normalization), `runs_on`; file nodes
+  `file:<host_id>:<path>` from the exact event path with an
+  `opened` edge per successful open; socket nodes per conn id.
+- **Envelope**: `pid_incarnation` and `comm` come from
+  `ProcInfo` (`/proc/<pid>/stat` starttime, clock-tick
+  resolution); `wall_ns = boot_ns + WallOffsetNS`
+  (`BootToWallOffset`, measured once); `err` is the errno name.
 
-type procState struct {
-    inc uint64               // pid incarnation (start_boottime)
-    fds map[int32]*fdState
-}
-
-type fdState struct {
-    gen  uint32              // bumped on every (re)creation
-    path string              // files
-    sk   uint64              // sockets: key into Correlator.socks
-}
-
-type sockState struct {
-    local, remote netip.AddrPort
-    established   uint64     // boot ns
-    role          string     // "client" | "server"
-}
-```
-
-Rules to implement, each with a unit test:
-
-- syscall enter/exit pairing — lift ior's pair tracker, including
-  its restart handling, rather than rewriting it;
-- `openat` exit with `ret >= 0` creates `fds[ret]` with
-  `gen = previous + 1` — as does every other fd-creating
-  syscall, `socket` included (see `fd_gen` above); `close`
-  removes it;
-- `connect` enter and `accept` exit bind fd → `sk`;
-  `tcp_state` events fill `sockState`;
-- an `openat` on `/iormesh-marker/…` becomes a `marker` event;
-- **loopback join**: two `sockState`s whose `(local, remote)` are
-  each other's mirror, established within the same 5s, become one
-  `conn:<id>` — `conn_id` is the hex SHA-256 (first 16 chars) of
-  the sorted address pair plus the earlier establish time. Both
-  processes get a `connected` edge to it.
+`golden_test.go` feeds streams shaped like `file-basic` and
+`tcp-loopback` (JVM noise outside the bracket included) through
+the correlator, the normalizer and the shipped `expect.json`.
 
 **Step 7 — NDJSON sink and graph export**
 (`internal/schema/ndjson.go`): one event per line, keys in struct

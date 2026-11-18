@@ -1,0 +1,149 @@
+package correlate
+
+import (
+	"bytes"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"golang.org/x/sys/unix"
+)
+
+// procState is one traced process incarnation.
+type procState struct {
+	inc  uint64
+	comm string
+	// fds holds the live fd instances; lastGen remembers each number's
+	// newest generation after close too, so a number reused by a syscall
+	// M1 does not trace (socket, dup, pipe, …) still gets a fresh fd_gen.
+	fds     map[int32]uint32
+	lastGen map[int32]uint32
+	// sockOf binds an fd to the struct sock address of the socket it
+	// names; tcp_state records carry that binding.
+	sockOf map[int32]uint64
+}
+
+func (c *Correlator) proc(pid uint32) *procState {
+	if p, ok := c.procs[pid]; ok {
+		return p
+	}
+	comm, inc := c.cfg.ProcInfo(pid)
+	p := &procState{inc: inc, comm: comm, fds: map[int32]uint32{},
+		lastGen: map[int32]uint32{}, sockOf: map[int32]uint64{}}
+	c.procs[pid] = p
+	c.graph.process(pid, inc, comm)
+	return p
+}
+
+// create registers a new fd instance returned by a traced syscall and
+// returns its generation. A non-socket creation (open) drops any stale
+// socket binding of the number; accept keeps the one its snapshot record
+// set just before.
+func (p *procState) create(fd int32, socket bool) uint32 {
+	gen := p.lastGen[fd] + 1
+	p.lastGen[fd] = gen
+	p.fds[fd] = gen
+	if !socket {
+		delete(p.sockOf, fd)
+	}
+	return gen
+}
+
+// use returns the generation of an fd a syscall acts on. An fd never seen
+// predates the trace (gen 0); one seen and closed before was recreated by
+// an untraced syscall, so it is a new instance (gen + 1).
+func (p *procState) use(fd int32) uint32 {
+	if gen, ok := p.fds[fd]; ok {
+		return gen
+	}
+	gen := uint32(0)
+	if last, ok := p.lastGen[fd]; ok {
+		gen = last + 1
+	}
+	p.lastGen[fd] = gen
+	p.fds[fd] = gen
+	return gen
+}
+
+// nextGen is the generation the next creation of fd will get, for the
+// accept snapshot that arrives just before its accept exit.
+func (p *procState) nextGen(fd int32) uint32 {
+	return p.lastGen[fd] + 1
+}
+
+// sockGen binds fd to socket sk on the socket's first record and returns
+// the fd generation a tcp_state event reports:
+//   - the accept snapshot precedes the accept exit that creates the fd, so
+//     it reports the generation that creation will get (use() would
+//     register, and maybe bump, the number before it exists);
+//   - the first record of a connecting socket (CLOSE -> SYN_SENT, inside
+//     connect) binds the fd the connect acts on;
+//   - later transitions report the instance bound then (kept on the
+//     socket), even once the fd was closed (TCP_CLOSE often follows
+//     close(2)) — never re-binding a number another open may reuse.
+func (p *procState) sockGen(fd int32, sk uint64, s *sockState, first, snapshot bool) uint32 {
+	switch {
+	case snapshot:
+		p.sockOf[fd] = sk
+		s.fdGen = p.nextGen(fd)
+	case first:
+		p.sockOf[fd] = sk
+		s.fdGen = p.use(fd)
+	}
+	return s.fdGen
+}
+
+func (p *procState) close(fd int32) {
+	delete(p.fds, fd)
+	delete(p.sockOf, fd)
+}
+
+// clockTicks is USER_HZ, the unit of /proc/<pid>/stat's starttime. It is
+// 100 on every Linux architecture iormesh targets.
+const clockTicks = 100
+
+// ReadProcInfo reads comm and start time from /proc. The start time has
+// clock-tick resolution, which is enough to tell PID reuses apart. A
+// process already gone yields ("", 0): its events still carry its pid.
+func ReadProcInfo(pid uint32) (string, uint64) {
+	comm, _ := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return strings.TrimSpace(string(comm)), 0
+	}
+	return strings.TrimSpace(string(comm)), parseStartTime(stat)
+}
+
+// parseStartTime returns field 22 (starttime) of a /proc/<pid>/stat line
+// in boot-clock nanoseconds. The comm field may contain spaces and
+// parentheses, so fields are counted after the last ')'.
+func parseStartTime(stat []byte) uint64 {
+	i := bytes.LastIndexByte(stat, ')')
+	if i < 0 {
+		return 0
+	}
+	fields := strings.Fields(string(stat[i+1:]))
+	// fields[0] is field 3 (state), so starttime (22) is fields[19].
+	if len(fields) < 20 {
+		return 0
+	}
+	ticks, err := strconv.ParseUint(fields[19], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return ticks * (1_000_000_000 / clockTicks)
+}
+
+// BootToWallOffset measures wall-clock minus boot-clock time now, the
+// Config.WallOffsetNS that converts BPF timestamps (bpf_ktime_get_boot_ns)
+// to wall time. Measured once per session: the offset drifts only when the
+// wall clock is stepped, and a stepped clock must not reorder events.
+func BootToWallOffset() (int64, error) {
+	var ts unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &ts); err != nil {
+		return 0, err
+	}
+	return time.Now().UnixNano() - ts.Nano(), nil
+}
