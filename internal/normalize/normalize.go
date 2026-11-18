@@ -155,11 +155,21 @@ func (n normalizer) conn(id string) string {
 	return "$" + kindConn + strconv.Itoa(n.syms.ord(kindConn, id))
 }
 
-// args rewrites paths, addresses and ports. The pointers are replaced,
-// never written through, because the input event shares them.
+// args rewrites paths, addresses and ports. The pointers (and an exec's
+// argv) are replaced, never written through, because the input event
+// shares them. An argv element that is a path under the scenario's temp
+// directory is one too — a child gets its work dir that way — so it is
+// rewritten like args.path; other elements pass unchanged.
 func (n normalizer) args(a schema.Args) schema.Args {
 	a.Path = mapPtr(a.Path, n.path)
 	a.NewPath = mapPtr(a.NewPath, n.path)
+	if a.Argv != nil {
+		argv := make([]string, len(a.Argv))
+		for i, arg := range a.Argv {
+			argv[i] = n.path(arg)
+		}
+		a.Argv = argv
+	}
 	a.LocalAddr = mapPtr(a.LocalAddr, canonicalAddr)
 	a.RemoteAddr = mapPtr(a.RemoteAddr, canonicalAddr)
 	a.LocalPort = mapPtr(a.LocalPort, n.port)

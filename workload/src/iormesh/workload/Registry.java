@@ -1,5 +1,6 @@
 package iormesh.workload;
 
+import iormesh.workload.scenarios.ArgvSecret;
 import iormesh.workload.scenarios.FdLifecycle;
 import iormesh.workload.scenarios.FileAttrs;
 import iormesh.workload.scenarios.FileBasic;
@@ -29,6 +30,7 @@ final class Registry {
     /** The registry with every built-in scenario. */
     static Registry builtin() {
         Registry r = new Registry();
+        r.add(new ArgvSecret());
         r.add(new FdLifecycle());
         r.add(new FileAttrs());
         r.add(new FileBasic());

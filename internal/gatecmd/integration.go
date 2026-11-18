@@ -53,6 +53,7 @@ func IntegrationTests() []string {
 		"TestFileAttrs",
 		"TestFdLifecycle",
 		"TestForkedChildrenKept",
+		"TestArgvSecretRedacted",
 		"TestSecondRunNormalizesIdentically",
 		"TestDiffNormalized",
 		"TestParseKernelLoss",

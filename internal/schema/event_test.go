@@ -66,6 +66,14 @@ func TestEventRoundTrip(t *testing.T) {
 		"session": hostEvent(KindSession),
 		"drop":    hostEvent(KindDrop),
 		"end":     hostEvent(KindEnd),
+		"exec": func() Event {
+			e := validEvent()
+			e.Event, e.FD, e.FDGen, e.Ret, e.Err = KindExec, NoFD, 0, 0, ""
+			e.Args = Args{Path: ptr("/usr/bin/java"),
+				Argv: []string{"java", "-Dpassword=***", "Main"}}
+			e.Attribution, e.Java, e.HTTP, e.ConnID = AttributionNone, nil, nil, ""
+			return e
+		}(),
 		"marker": func() Event {
 			e := validEvent()
 			e.Event, e.FD, e.FDGen, e.Ret, e.Err = KindMarker, NoFD, 0, 0, ""
@@ -178,6 +186,7 @@ func TestEventValidateRejects(t *testing.T) {
 		"marker without name":       func(e *Event) { e.Event = KindMarker },
 		"marker empty name":         func(e *Event) { e.Event, e.Args.Marker = KindMarker, ptr("") },
 		"tcp_state without state":   func(e *Event) { e.Event = KindTCPState },
+		"argv on a non-exec event":  func(e *Event) { e.Args.Argv = []string{"java"} },
 	}
 	for name, breakIt := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -282,7 +291,7 @@ func checkRejected(t *testing.T, e Event) {
 func TestEventValidateAcceptsEveryKind(t *testing.T) {
 	kinds := []string{KindOpen, KindOpenat, KindOpenat2, KindRead, KindWrite,
 		KindClose, KindConnect, KindAccept, KindAccept4, KindTCPState,
-		KindMarker, KindDrop, KindSession, KindEnd}
+		KindMarker, KindDrop, KindSession, KindEnd, KindExec}
 	for _, k := range kinds {
 		e := validEvent()
 		e.Event = k

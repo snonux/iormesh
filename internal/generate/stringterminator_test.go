@@ -357,16 +357,18 @@ func TestHandWrittenBPFStringCapturesNeedNoMemset(t *testing.T) {
 // userspace never reads the stale bytes behind it.
 func checkExecArgvCapture(t *testing.T, execC string) {
 	t.Helper()
-	watch := regexp.MustCompile(`(?s)iormesh_watch_exec\(void \*ctx.*?\n\}\n`).FindString(execC)
+	// iormesh_emit_argv fills the record for both users: the exec watch
+	// (EXEC_ARGV_EVENT) and a traced exec (PROCESS_ARGV_EVENT, M2 step 8).
+	emit := regexp.MustCompile(`(?s)iormesh_emit_argv\(void \*ctx.*?\n\}\n`).FindString(execC)
 	argv := regexp.MustCompile(`(?s)static __always_inline void iormesh_read_argv\(.*?\n\}\n`).FindString(execC)
-	if watch == "" || argv == "" {
-		t.Fatal("iormesh_watch_exec or iormesh_read_argv not found in exec.c")
+	if emit == "" || argv == "" {
+		t.Fatal("iormesh_emit_argv or iormesh_read_argv not found in exec.c")
 	}
-	if strings.Contains(watch+argv, "__builtin_memset") {
-		t.Error("the exec watch memsets its strings")
+	if strings.Contains(emit+argv, "__builtin_memset") {
+		t.Error("the argv record memsets its strings")
 	}
-	if !strings.Contains(watch, "        ev->exe[0] = 0;\n") {
-		t.Error("iormesh_watch_exec must terminate exe when its read fails")
+	if !strings.Contains(emit, "        ev->exe[0] = 0;\n") {
+		t.Error("iormesh_emit_argv must terminate exe when its read fails")
 	}
 	if !strings.Contains(argv, "    ev->argv_len = 0;\n") || !strings.Contains(argv, "        ev->argv_len = len;\n") {
 		t.Error("iormesh_read_argv must write argv_len on every path, the copied length only on success")

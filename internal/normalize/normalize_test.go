@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -263,5 +264,26 @@ func TestNormalizePrunesGraph(t *testing.T) {
 	}
 	if err := got.Graph.Validate(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestNormalizeArgv: an exec's argv elements under the temp directory
+// become $tmp paths like args.path; everything else, including a path
+// that only shares the prefix's string, stays verbatim, and the input
+// argv is not written through.
+func TestNormalizeArgv(t *testing.T) {
+	n := normalizer{opt: Options{TmpPrefix: "/tmp/run1/"}}
+	in := []string{"/jdk/bin/java", "-Dpassword=***", "/tmp/run1", "/tmp/run1/work", "/tmp/run10", "x=/tmp/run1/a"}
+	keep := slices.Clone(in)
+	got := n.args(schema.Args{Argv: in}).Argv
+	want := []string{"/jdk/bin/java", "-Dpassword=***", "$tmp", "$tmp/work", "/tmp/run10", "x=/tmp/run1/a"}
+	if !slices.Equal(got, want) {
+		t.Errorf("argv %q, want %q", got, want)
+	}
+	if !slices.Equal(in, keep) {
+		t.Errorf("input argv modified: %q", in)
+	}
+	if n.args(schema.Args{}).Argv != nil {
+		t.Error("absent argv became non-nil")
 	}
 }

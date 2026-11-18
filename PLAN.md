@@ -267,7 +267,7 @@ Scenario catalogue, by the milestone it lands with:
 |------------|-----------|
 | M1 | File data ops (open/read/write/close) — `file-basic`; TCP client ↔ server on loopback — `tcp-loopback`; markers (all landed with M0) |
 | S3 | Syscall load: tight 1-byte read/write loops, N ops over T threads — `syscall-burst` |
-| M2 | Full file surface — `file-lifecycle` (create/delete, rename while open, move, truncate, touch), `file-links` (symlink/readlink/lstat, hardlink), `file-attrs` (chmod/chown by path and fd, xattr); fd lifecycle (dup, inheritance across fork/exec, reuse) — `fd-lifecycle` (these four landed ahead of the M2 tracer work); local IPC — `pipe-ipc` (pipe, child stdio pipes), `unix-socket`; signals — `signals`; UDP — `udp-loopback`; IPv4 + IPv6 — `tcp-ipv4`, `tcp-ipv6` (these six landed ahead too); restart — `restart`; non-Java peer — `non-java-peer` (these two landed ahead too) |
+| M2 | Full file surface — `file-lifecycle` (create/delete, rename while open, move, truncate, touch), `file-links` (symlink/readlink/lstat, hardlink), `file-attrs` (chmod/chown by path and fd, xattr); fd lifecycle (dup, inheritance across fork/exec, reuse) — `fd-lifecycle` (these four landed ahead of the M2 tracer work); local IPC — `pipe-ipc` (pipe, child stdio pipes), `unix-socket`; signals — `signals`; UDP — `udp-loopback`; IPv4 + IPv6 — `tcp-ipv4`, `tcp-ipv6` (these six landed ahead too); restart — `restart`; non-Java peer — `non-java-peer` (these two landed ahead too); argv redaction — `argv-secret` |
 | M3 | Method flows (deep stacks, async I/O); HTTP plain + TLS; redaction; OTEL flavor |
 | M4 | Client and server on two hosts as two projects; microservices topology, one service per host; NAT'ed pair |
 | M5 | (renders M4's microservices scenario) |
@@ -281,7 +281,7 @@ Scenario notes:
   headers — expectations assert the captured http events and the
   redaction: a planted `Authorization` header, a planted secret
   in a query parameter and a planted secret in argv must never
-  appear in the trace.
+  appear in the trace (argv's is M2's `argv-secret`).
 - **Microservices end-to-end scenario** (M4): several instances
   of the app playing declared service roles (gateway, orders,
   inventory, billing…), talking to each other over REST — call
@@ -429,7 +429,7 @@ criterion here.
 - **Native stacks are opt-in** (`stack_id`): BPF stack walks do
   not unwind JIT-compiled Java frames reliably, so they serve
   non-JVM targets; Java attribution comes from the agent (M3).
-- Argv is recorded redacted (decision #9).
+- Argv is recorded redacted (decision #9), on `exec` events.
 - Output: trace schema v1 — NDJSON event stream + graph export.
 - Acceptance: M2's scenarios pass the golden check, including
   edge cases (fd reuse and aliasing, exec, PID reuse, pattern
@@ -1081,7 +1081,13 @@ answer), and deferred.
   masked). Capturing the environment at exec
   (`/proc/<pid>/environ`) is useful for the model but a
   privacy call to make explicitly. *Default: argv redacted,
-  env off.*
+  env off.* M2 step 8 (task ta4) implements the default:
+  `internal/redact` masks option and KEY=VALUE values by a
+  denylist, program-scoped flags (mysql's `-p`), URL userinfo
+  and query values; every exec of a traced process becomes an
+  `exec` event carrying its redacted argv, and the environment
+  is never read. A process already running when the trace
+  attaches has no exec, so its argv is not recorded (yet).
 
 ### Open — blocks M3
 

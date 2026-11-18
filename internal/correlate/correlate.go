@@ -14,6 +14,7 @@
 package correlate
 
 import (
+	"iormesh/internal/redact"
 	"iormesh/internal/schema"
 	"iormesh/internal/types"
 )
@@ -43,6 +44,10 @@ type Config struct {
 	FuseWindowNS uint64
 	// Clock stamps session, drop and end events; it defaults to BootNow.
 	Clock Clock
+	// Redaction masks secrets in exec argv (decision #9). nil means
+	// redact.Default(): a pointer, so a zero Config can never mean "no
+	// redaction".
+	Redaction *redact.Policy
 }
 
 const defaultFuseWindowNS = 5_000_000_000
@@ -50,6 +55,7 @@ const defaultFuseWindowNS = 5_000_000_000
 // Correlator holds the per-host state between records.
 type Correlator struct {
 	cfg      Config
+	redact   redact.Policy
 	seq      uint64
 	now      uint64 // boot ns of the newest record seen
 	procs    map[uint32]*procState
@@ -74,8 +80,13 @@ func New(cfg Config) *Correlator {
 	if cfg.Clock == nil {
 		cfg.Clock = BootNow
 	}
+	policy := redact.Default()
+	if cfg.Redaction != nil {
+		policy = *cfg.Redaction
+	}
 	return &Correlator{
 		cfg:    cfg,
+		redact: policy,
 		procs:  map[uint32]*procState{},
 		socks:  newSockTable(cfg.FuseWindowNS),
 		enters: map[uint32]enter{},
@@ -88,7 +99,8 @@ func New(cfg Config) *Correlator {
 // TCP state records and the process lifecycle records of M2 steps 1 and 6
 // (new processes, execs, exits). Other record types are ignored; the
 // exec_argv records of a pattern session are the caller's to judge
-// (Incarnation). The error is the sink's, or
+// (Incarnation), and an exec's argv reaches the trace through Exec, once
+// the caller has completed a truncated one. The error is the sink's, or
 // ErrEnded after End.
 func (c *Correlator) Handle(rec any) error {
 	if c.ended {

@@ -1337,23 +1337,67 @@ scenarios landing first (principle #1).
    failure.
 
 8. **Redaction** (`internal/redact`, cgo-free — M3 and M5 reuse
-   it):
+   it; done, task ta4):
 
    ```go
-   // Policy masks secrets in argv, URIs and headers before
-   // anything is written. Deny wins over allow.
+   // Policy masks secrets before anything is written: deny globs
+   // ('*', '?') over keys folded to lower case without '-', '_'
+   // and '.', so "*apikey*" covers --api-key, API_KEY, apiKey.
    type Policy struct {
-       ArgvDeny   []string // globs: "-D*password*", "--token*"
-       HeaderDeny []string // "authorization", "cookie", …
-       QueryDeny  []string // parameter names
+       ArgvDeny   []string   // "*password*", "*token*", "*secret*", …
+       FlagRules  []FlagRule // {Program: "mysql*", Flag: "-p"}, …
+       HeaderDeny []string   // "authorization", "cookie", …
+       QueryDeny  []string   // "*": every query value (#22)
    }
 
+   func Default() Policy
    func (p Policy) Argv(argv []string) []string
+   func (p Policy) Header(name, value string) string
+   func (p Policy) URL(raw string) string  // absolute or request target
+   func (p Policy) Text(s string) string   // URLs embedded in text
    ```
 
-   A masked value becomes `"***"`; `--token X` masks the *next*
-   element too. Scenario: `argv-secret`, with the planted secret
-   in `must_not_appear`.
+   A masked value becomes `"***"` and the structure stays:
+   `-Dpassword=***`, `--token ***` (a bare denied option masks the
+   *next* element, whatever it looks like — `-Dname` without `=`
+   excepted, it sets a property to ""), `DB_PASSWORD=***`,
+   `https://user:***@host/?q=***` (userinfo always; a lone
+   userinfo, a token, whole). Options too generic to deny
+   everywhere are scoped by program (`FlagRule`): `-p` is mysql's
+   password but java's module path, so `mysql -psecret` →
+   `-p***` and `java -p mods` stays. The defaults over-mask
+   rather than leak (`--password-stdin` masks its successor); a
+   secret under an innocuous name is not recognized — a denylist
+   is best effort, and the environment is never captured.
+   There is no allowlist in v1 (#22's default). The Java agent
+   (M3) cannot import Go: it either sends headers to the tracer
+   for `Policy.Header` before the spool or mirrors the defaults —
+   M3 decides, keeping `Default()` the one list.
+
+   Capture: every exec of a traced process sends one more record
+   after `process_exec_event`: `PROCESS_ARGV_EVENT`, the
+   `exec_argv_event` struct of the exec watch (exe, the first
+   1 KiB of argv) under its own type, so `internal/cli` records
+   it instead of judging it. A cut block is completed from
+   `/proc/<pid>/cmdline` as for the watch (a race: the process
+   may have exec'd again; then the cut argv stays). The exec a
+   pattern session adopts is recorded too, after its
+   `attach_gap` drop. `correlate.Correlator.Exec` builds the
+   `exec` event — `args.path` the exe, `args.argv` redacted
+   there, before the event exists (`Config.Redaction`, nil =
+   `Default()`). The normalizer rewrites argv elements under the
+   temp dir like paths. Not recorded: a process already running
+   at attach (a `-pid` target, the start scan's matches) has no
+   exec, so no argv. Graph node attrs stay `comm` only.
+   Scenario: `argv-secret` — the workload starts a child JVM
+   with `-Dpassword=S`, `--token S`, `--api-key=S` and a URL
+   with userinfo and a query value; its golden declares the
+   child's `exec` and lists `S` in `must_not_appear`.
+   `TestArgvSecretRedacted` also checks the raw `events.ndjson`
+   and `graph.json` and that each shape is in the exec's argv,
+   masked. Unit tests: `internal/redact` (table, negatives,
+   `FuzzArgv`), `TestExecRecordsRedactedArgv`,
+   `TestExecArgvRecordedRedacted` (cli routing).
 
 9. **Native stacks** (opt-in, `-native-stacks`):
    `bpf_get_stackid` into a `BPF_MAP_TYPE_STACK_TRACE`,

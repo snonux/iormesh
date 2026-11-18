@@ -3,8 +3,8 @@
 // decodeFdSizeEvent/decodeEventfdNameEvent/decodeTwoFdNamesEvent helpers).
 // Changes: only the event type → decoder mapping is kept (ior's enter
 // filters, exit handlers and control handlers belong to its event loop, the
-// correlator's job here); TCP_STATE_EVENT (M1 step 4) and EXEC_ARGV_EVENT
-// (M2 step 2) added.
+// correlator's job here); TCP_STATE_EVENT (M1 step 4), EXEC_ARGV_EVENT
+// (M2 step 2) and PROCESS_ARGV_EVENT (M2 step 8) added.
 
 package bpf
 
@@ -98,6 +98,9 @@ func addControlDecoders(d map[types.EventType]decoder) {
 	d[types.FILE_HANDLE_EVENT] = typed(types.NewFileHandleEventFast)
 	d[types.RING_FDS_EVENT] = typed(types.NewRingFdsEventFast)
 	d[types.EXEC_ARGV_EVENT] = typed(types.NewExecArgvEvent)
+	// The same record shape, for a traced process's exec: its EventType
+	// tells the caller it is to be recorded, not judged.
+	d[types.PROCESS_ARGV_EVENT] = typed(types.NewExecArgvEvent)
 }
 
 // decodeFdSizeEvent widens an fd+size record to the FdEvent shape the

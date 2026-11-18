@@ -1,6 +1,7 @@
 // Adapted from ior internal/c/types.h @ b21afc50328c.
 // Changes: TCP_STATE_EVENT and struct tcp_state_event added (sock.c);
-// EXEC_ARGV_EVENT and struct exec_argv_event added (exec.c, M2).
+// EXEC_ARGV_EVENT, PROCESS_ARGV_EVENT and struct exec_argv_event added
+// (exec.c, M2).
 
 //+build ignore
 
@@ -98,6 +99,11 @@
 // executable path and argv the target pattern is matched against
 // (struct exec_argv_event, exec.c).
 #define EXEC_ARGV_EVENT 69
+// iormesh: the exe and argv of an exec of a traced process, recorded
+// redacted in the trace (decision #9; struct exec_argv_event, exec.c). The
+// same struct as EXEC_ARGV_EVENT under its own type, so userspace never
+// mistakes a traced exec for one awaiting the pattern's verdict.
+#define PROCESS_ARGV_EVENT 70
 
 #define UNCLASSIFIED 0
 #define READ_CLASSIFIED 1
@@ -1014,8 +1020,9 @@ struct tcp_state_event {
 // block's full length, so argv_len < argv_total means truncated and userspace
 // re-reads /proc/<pid>/cmdline. A Java command line puts the main class after
 // a class path that can be long, which is why the block is 1 KiB and the
-// fallback exists. Not every pattern-session exec is emitted: a traced
-// process's exec stays traced and needs no verdict. No implicit padding.
+// fallback exists. A traced process's exec needs no verdict; it is sent
+// as PROCESS_ARGV_EVENT instead, in every session, so the trace can record
+// its argv (redacted in userspace, decision #9). No implicit padding.
 #define MAX_ARGV_LENGTH 1024
 struct exec_argv_event {
     __u32 event_type;

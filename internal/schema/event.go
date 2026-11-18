@@ -36,6 +36,13 @@ const (
 	// without one was cut short (crash, or a write error that also lost
 	// the end record).
 	KindEnd = "end"
+	// KindExec is a successful exec of a traced process (M2 step 8,
+	// sched_process_exec): args.path is the executable as exec'd, and
+	// args.argv the new program's argv, redacted by internal/redact
+	// (decision #9; env is never captured). The exec through which a
+	// pattern session found its target counts too; a process already
+	// running when the trace attached has none.
+	KindExec = "exec"
 )
 
 // End reasons, the values of args.end_reason. PLAN.md ("Explicit end")
@@ -145,6 +152,10 @@ type Args struct {
 	DropReason *string `json:"drop_reason,omitempty" parquet:"drop_reason,optional"`
 	// EndReason is an end event's reason, one of the End* constants.
 	EndReason *string `json:"end_reason,omitempty" parquet:"end_reason,optional"`
+	// Argv is an exec event's command line, redacted before it is set
+	// (internal/redact: "-Dpassword=***", "--token ***"). Only exec
+	// events carry it; an unreadable argv leaves it absent.
+	Argv []string `json:"argv,omitempty" parquet:"argv,list"`
 }
 
 // Session is the host description of the session header. Its fields are

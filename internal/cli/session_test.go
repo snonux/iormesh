@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	"iormesh/internal/correlate"
@@ -147,5 +149,54 @@ func TestStartScanDropsVanished(t *testing.T) {
 	if !slices.Equal(tr.added, []uint32{4242}) || !slices.Equal(tr.removed, []uint32{4242}) || len(s.live) != 0 {
 		t.Fatalf("added %v removed %v live %v: want the vanished match inserted and removed",
 			tr.added, tr.removed, s.live)
+	}
+}
+
+// TestExecArgvRecordedRedacted: a traced process's exec (PROCESS_ARGV_EVENT)
+// and the exec a pattern session adopts both become exec events whose
+// argv is redacted — the adopted one after its attach_gap drop — while a
+// dismissed exec leaves no trace; the planted secret is nowhere in the
+// events file (decision #9).
+func TestExecArgvRecordedRedacted(t *testing.T) {
+	fakeProcs(t)
+	dir := t.TempDir()
+	tr := newFakeTracer()
+	tr.gap = 2
+	c := testCorrelator(t, dir)
+	s := patternSession(t, tr, c)
+	traced := execRecord(80, 10, "/jdk/bin/java", "/jdk/bin/java", "-Dpassword=hunter2", "-cp", "w.jar", "Child")
+	traced.EventType = types.PROCESS_ARGV_EVENT
+	recs := []any{
+		traced,
+		execRecord(81, 20, "/usr/bin/grep", "grep", "--token", "hunter2"),
+		execRecord(82, 30, "/jdk/bin/java", "/jdk/bin/java", "-cp", "w.jar",
+			"iormesh.test.NoSuchRestartApp", "--api-key=hunter2"),
+	}
+	for _, r := range recs {
+		if err := s.handle(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	var argvs [][]string
+	for _, e := range readEvents(t, dir) {
+		if e.PID != 0 {
+			kinds = append(kinds, e.Event)
+		}
+		if e.Event == schema.KindExec {
+			argvs = append(argvs, e.Args.Argv)
+		}
+		if b, _ := json.Marshal(e); strings.Contains(string(b), "hunter2") {
+			t.Errorf("event %d holds the secret: %s", e.Seq, b)
+		}
+	}
+	if want := []string{schema.KindExec, schema.KindDrop, schema.KindExec}; !slices.Equal(kinds, want) {
+		t.Fatalf("process events %v, want %v", kinds, want)
+	}
+	if argvs[0][1] != "-Dpassword=***" || argvs[1][4] != "--api-key=***" {
+		t.Fatalf("argvs %q", argvs)
 	}
 }

@@ -2,7 +2,8 @@
 // Changes: the PID_FILTER tests are iormesh_pid_targeted (target_map); M2
 // adds process-tree following (iormesh_follow_child), the removal of exited
 // processes from target_map (iormesh_forget_target) and the pattern
-// session's exec watch (iormesh_watch_exec, exec_argv_event).
+// session's exec watch (iormesh_watch_exec, exec_argv_event) and the argv of
+// traced execs (iormesh_emit_argv, PROCESS_ARGV_EVENT).
 
 //+build ignore
 
@@ -151,7 +152,9 @@ ior_exec_record_scope(int in_scope, __u32 pid, __u32 old_tid) {
 // returns for IOR_PID_FILTER first).
 //
 // Cost: one ~1.3 KiB record and one map update per exec on the host, only in
-// pattern sessions. Execs are rare next to syscalls (S3).
+// pattern sessions, plus one such record (no map update) per exec of a
+// traced process in every session, which carries the argv the trace records
+// (PROCESS_ARGV_EVENT). Execs are rare next to syscalls (S3).
 
 // iormesh_read_argv copies the head of the current task's argument block -
 // argv as NUL-separated strings, where the new program's mm keeps it - into
@@ -175,35 +178,22 @@ static __always_inline void iormesh_read_argv(struct exec_argv_event *ev) {
         ev->argv_len = len;
 }
 
-// iormesh_watch_exec marks the exec'ing, untraced process PENDING and reports
-// the exec with its exe and argv (see above). The entry goes in before the
-// record is submitted, because userspace may judge the record at once and its
-// verdict acts on the entry. A failed insert (map full) or a failed reserve
-// is counted as a ring-buffer drop: either way the process cannot be adopted
-// with a counted gap, and the trace must show that something was lost. The
-// entry of an unreported exec is removed again, so nothing waits for a
-// verdict that cannot come.
-static __always_inline void
-iormesh_watch_exec(void *ctx, __u32 fname_off, __u32 pid, __u32 tid) {
-    struct iormesh_target pending = {};
+// iormesh_emit_argv reports the current exec with its exe and argv as one
+// exec_argv_event of the given type: EXEC_ARGV_EVENT for the pattern's
+// verdict (iormesh_watch_exec), PROCESS_ARGV_EVENT for a traced exec, whose
+// argv the trace records redacted (decision #9). It returns -1 when the
+// ring buffer is full; that is counted as a drop here, so the trace shows
+// the loss either way.
+static __always_inline int
+iormesh_emit_argv(void *ctx, __u32 fname_off, __u32 pid, __u32 tid, __u32 type, __u64 now) {
     struct exec_argv_event *ev;
-    __u64 now;
-
-    if (!IORMESH_EXEC_WATCH)
-        return;
-    now = bpf_ktime_get_boot_ns();
-    pending.state = IORMESH_TARGET_PENDING;
-    pending.since = now;
-    if (bpf_map_update_elem(&target_map, &pid, &pending, BPF_ANY))
-        ior_count_ringbuf_drop();
 
     ev = bpf_ringbuf_reserve(&event_map, sizeof(struct exec_argv_event), 0);
     if (!ev) {
-        bpf_map_delete_elem(&target_map, &pid);
         ior_count_ringbuf_drop();
-        return;
+        return -1;
     }
-    ev->event_type = EXEC_ARGV_EVENT;
+    ev->event_type = type;
     // Not a syscall tracepoint: there is no enter/exit trace id to report.
     ev->trace_id = 0;
     ev->time = now;
@@ -216,6 +206,31 @@ iormesh_watch_exec(void *ctx, __u32 fname_off, __u32 pid, __u32 tid) {
         ev->exe[0] = 0;
     iormesh_read_argv(ev);
     bpf_ringbuf_submit(ev, 0);
+    return 0;
+}
+
+// iormesh_watch_exec marks the exec'ing, untraced process PENDING and reports
+// the exec with its exe and argv (see above). The entry goes in before the
+// record is submitted, because userspace may judge the record at once and its
+// verdict acts on the entry. A failed insert (map full) or a failed reserve
+// is counted as a ring-buffer drop: either way the process cannot be adopted
+// with a counted gap, and the trace must show that something was lost. The
+// entry of an unreported exec is removed again, so nothing waits for a
+// verdict that cannot come.
+static __always_inline void
+iormesh_watch_exec(void *ctx, __u32 fname_off, __u32 pid, __u32 tid) {
+    struct iormesh_target pending = {};
+    __u64 now;
+
+    if (!IORMESH_EXEC_WATCH)
+        return;
+    now = bpf_ktime_get_boot_ns();
+    pending.state = IORMESH_TARGET_PENDING;
+    pending.since = now;
+    if (bpf_map_update_elem(&target_map, &pid, &pending, BPF_ANY))
+        ior_count_ringbuf_drop();
+    if (iormesh_emit_argv(ctx, fname_off, pid, tid, EXEC_ARGV_EVENT, now))
+        bpf_map_delete_elem(&target_map, &pid);
 }
 
 // ior_emit_process_exec submits the process_exec_event of an exec in scope
@@ -282,6 +297,9 @@ int handle_sched_process_exec(struct trace_event_raw_sched_process_exec *ctx) {
 
     ior_emit_process_exec(pid, tid, old_tid,
                           (scope == IOR_EXEC_CALLER_TRACED || exit_unseen) ? 1 : 0);
+    // After the exec record, so userspace has applied the exec to the
+    // process before it records the new program's argv (iormesh, M2).
+    iormesh_emit_argv(ctx, fname_off, pid, tid, PROCESS_ARGV_EVENT, bpf_ktime_get_boot_ns());
     return 0;
 }
 

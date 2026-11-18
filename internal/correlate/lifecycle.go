@@ -63,3 +63,41 @@ func (c *Correlator) Incarnation(app string, pid uint32, gap uint64) error {
 	}
 	return c.release(false)
 }
+
+// ExecInfo is one exec of a traced process as the caller read it: the
+// exec record's time and executable, and the argv, already completed from
+// /proc/<pid>/cmdline when the record's copy was cut short.
+type ExecInfo struct {
+	PID, TID uint32
+	BootNS   uint64 // the exec's time on the boot clock
+	Exe      string // the path as exec'd; "" when unreadable
+	Argv     []string
+}
+
+// Exec queues the exec event of a traced process (M2 step 8): its
+// executable and its argv, redacted by the correlator's policy before the
+// event exists, so no sink, queue or later stage ever holds the raw
+// secret (decision #9; the environment is never captured). A pattern
+// session calls it after Incarnation, so the attach gap's drop comes
+// first, as it must precede every traced event of the process.
+func (c *Correlator) Exec(x ExecInfo) error {
+	if c.ended {
+		return ErrEnded
+	}
+	c.advance(x.BootNS)
+	p := c.proc(x.PID)
+	ev := schema.Event{
+		SchemaVersion: schema.Version, Project: c.cfg.Host.Project, HostID: c.cfg.Host.ID,
+		BootNS: x.BootNS, WallNS: c.wall(x.BootNS), PID: x.PID, PIDInc: p.inc, TID: x.TID,
+		Comm: p.comm, Event: schema.KindExec, FD: schema.NoFD,
+		Attribution: schema.AttributionNone,
+	}
+	if x.Exe != "" {
+		ev.Args.Path = &x.Exe
+	}
+	if len(x.Argv) > 0 {
+		ev.Args.Argv = c.redact.Argv(x.Argv)
+	}
+	c.enqueue(ev, nil)
+	return c.release(false)
+}

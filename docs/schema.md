@@ -105,6 +105,7 @@ column each, never a blob.
 | `lost` | `drop` (required, > 0): records lost since the previous `drop` event |
 | `drop_reason` | `drop`, optional: why the records were lost — `attach_gap` (M2); absent for ring-buffer and decoder loss |
 | `end_reason` | `end` (required): why the trace ended, below |
+| `argv` | `exec` only: the new program's argv, a list of strings, redacted (see Redaction); absent when unreadable |
 
 IPv4 peers of dual-stack sockets are written unmapped
 (`127.0.0.1`, not `::ffff:127.0.0.1`).
@@ -173,6 +174,22 @@ swapped) and processes in different mount namespaces can still
 leave an fd under a wrong name. `read` and `write` carry no
 path at all (decision #25's per-event cost); their fd instance
 joins to the open that named it.
+
+### Event kinds (M2 process lifecycle)
+
+| Kind | Source |
+|------|--------|
+| `exec` | a successful exec of a traced process (`sched_process_exec` plus the argv record): `args.path` is the executable as exec'd (empty when unreadable, then absent), `args.argv` the command line, redacted; `fd` is `-1`, `ret` `0` |
+
+A followed child's exec is one, and so is the exec through which a
+`-pattern` session found its app (after that process's
+`attach_gap` drop). A process already running when the trace
+attached has none, so its argv is not in the trace. `jspawnhelper`
+and the program it execs are two `exec` events of one process.
+BPF copies the first 1 KiB of the argument block; a longer one is
+completed from `/proc/<pid>/cmdline`, which can be a later
+program's if the process exec'd again in between — then the cut
+argv is kept. The environment is never captured (decision #9).
 
 ### Host-level events: session, drop, end
 
@@ -263,6 +280,35 @@ graphs differ. An `app` id names nothing run-specific (project and
 pattern), so the normalizer passes it through unchanged and two
 runs — or two hosts — name the same app the same way; goldens bind
 it with `$a1`. A `-pid` or `-listen-port` session has no app node.
+
+## Redaction
+
+One policy, `internal/redact` (`redact.Default()`), masks secrets
+before an event exists — no queue, sink or later stage holds the
+raw value (PLAN.md decisions #9 and #22). A masked value is `***`
+and the structure stays:
+
+| Input | Recorded |
+|-------|----------|
+| `-Dpassword=s`, `--client-secret=s`, `DB_PASSWORD=s` | `-Dpassword=***`, `--client-secret=***`, `DB_PASSWORD=***` |
+| `--token s`, `-secret s` (option without `=`) | `--token ***` — the next element is masked, whatever it is |
+| `mysql -ps`, `curl -u bob:s`, `redis-cli -a s` | `-p***`, `-u ***`, `-a ***` — only for those programs |
+| `https://bob:s@h/p?k=s` (anywhere in an argument) | `https://bob:***@h/p?k=***` |
+| `jdbc:sqlserver://h;user=u;password=s` | `jdbc:sqlserver://h;user=***;password=***` |
+
+Keys match case-insensitively with `-`, `_` and `.` ignored, so
+one glob covers every spelling. The argv denylist names
+`password`, `passwd`, `passphrase`, `pwd` (suffix), `secret`,
+`token`, `apikey`, `accesskey`, `privatekey`, `credential`,
+`authorization`, `bearer` and `cookie` anywhere in a key; URL
+userinfo is always masked, query values all (decision #22's
+default). It is best effort: a secret under an innocuous name or
+as a bare positional argument is not recognized, and the
+defaults over-mask rather than leak (`--password-stdin` masks the
+argument after it). HTTP headers (M3) use the same package:
+`authorization`, `proxy-authorization`, `cookie`, `set-cookie`
+and names containing `token`, `apikey`, `secret`, `password`,
+`session` or `signature` are recorded as `***`.
 
 ## Parquet mapping
 

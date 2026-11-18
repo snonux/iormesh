@@ -41,16 +41,21 @@ func (e Event) Validate() error {
 	if e.Args.EndReason != nil && e.Event != KindEnd {
 		return invalidf("args.end_reason on a %s event (end only)", e.Event)
 	}
+	// argv is recorded through the redaction policy on exec events only;
+	// one anywhere else came from a producer that may have skipped it.
+	if e.Args.Argv != nil && e.Event != KindExec {
+		return invalidf("args.argv on a %s event (exec only)", e.Event)
+	}
 	return e.validateKindArgs()
 }
 
 // KnownKind reports whether kind is part of this schema draft: an M1
-// kind or one of the M2 file surface (kinds_file.go).
+// kind, exec (M2 step 8) or one of the M2 file surface (kinds_file.go).
 func KnownKind(kind string) bool {
 	switch kind {
 	case KindOpen, KindOpenat, KindOpenat2, KindRead, KindWrite,
 		KindClose, KindConnect, KindAccept, KindAccept4,
-		KindTCPState, KindMarker, KindDrop, KindSession, KindEnd:
+		KindTCPState, KindMarker, KindDrop, KindSession, KindEnd, KindExec:
 		return true
 	}
 	return fileKind(kind)

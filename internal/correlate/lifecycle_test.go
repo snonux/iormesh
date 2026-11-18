@@ -1,10 +1,13 @@
 package correlate
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
+	"iormesh/internal/redact"
 	"iormesh/internal/schema"
 	"iormesh/internal/types"
 )
@@ -133,5 +136,68 @@ func TestIncarnationAfterEnd(t *testing.T) {
 	}
 	if err := c.Incarnation(schema.AppNodeID("p", "*x*"), 1, 0); !errors.Is(err, ErrEnded) {
 		t.Fatalf("Incarnation after End: %v, want ErrEnded", err)
+	}
+}
+
+// TestExecRecordsRedactedArgv: an exec event carries the executable and
+// the argv with every planted secret masked, and nothing it emits — event
+// or graph — holds the secret (decision #9).
+func TestExecRecordsRedactedArgv(t *testing.T) {
+	c, sink := newTest(t)
+	argv := []string{"/usr/bin/java", "-Dpassword=hunter2", "-cp", "/a.jar", "Main", "--token", "hunter2"}
+	if err := c.Exec(ExecInfo{PID: 40, TID: 40, BootNS: 5, Exe: "/usr/bin/java", Argv: argv}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	execs := byKind(sink.events, schema.KindExec)
+	if len(execs) != 1 {
+		t.Fatalf("%d exec events, want 1", len(execs))
+	}
+	ev := execs[0]
+	want := []string{"/usr/bin/java", "-Dpassword=***", "-cp", "/a.jar", "Main", "--token", "***"}
+	if !slices.Equal(ev.Args.Argv, want) || ev.Args.Path == nil || *ev.Args.Path != "/usr/bin/java" {
+		t.Fatalf("exec args %+v, want path /usr/bin/java and argv %q", ev.Args, want)
+	}
+	if ev.PID != 40 || ev.PIDInc != 1040 || ev.FD != schema.NoFD || ev.BootNS != 5 {
+		t.Fatalf("exec envelope %+v", ev)
+	}
+	if argv[1] != "-Dpassword=hunter2" {
+		t.Fatal("Exec modified the caller's argv")
+	}
+	if b, _ := json.Marshal(c.Graph()); strings.Contains(string(b), "hunter2") {
+		t.Fatalf("graph holds the secret: %s", b)
+	}
+}
+
+// TestExecCustomPolicyAndEmptyArgv: Config.Redaction replaces the default
+// policy, and an exec whose argv could not be read has no argv at all.
+func TestExecCustomPolicyAndEmptyArgv(t *testing.T) {
+	sink := &memSink{t: t}
+	policy := redact.Policy{ArgvDeny: []string{"color"}}
+	c := New(Config{Host: Host{ID: "h1", Project: "p"}, Sink: sink, Redaction: &policy,
+		ProcInfo: func(uint32) (string, uint64) { return "x", 1 }})
+	if err := c.Exec(ExecInfo{PID: 7, TID: 7, BootNS: 1, Argv: []string{"ls", "--color=auto", "--password=p"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Exec(ExecInfo{PID: 7, TID: 7, BootNS: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.End(schema.EndStop); err != nil {
+		t.Fatal(err)
+	}
+	execs := byKind(sink.events, schema.KindExec)
+	if len(execs) != 2 {
+		t.Fatalf("%d exec events, want 2", len(execs))
+	}
+	if want := []string{"ls", "--color=***", "--password=p"}; !slices.Equal(execs[0].Args.Argv, want) {
+		t.Errorf("argv %q, want %q", execs[0].Args.Argv, want)
+	}
+	if execs[1].Args.Argv != nil || execs[1].Args.Path != nil {
+		t.Errorf("unreadable exec has args %+v", execs[1].Args)
+	}
+	if err := c.Exec(ExecInfo{PID: 7}); !errors.Is(err, ErrEnded) {
+		t.Errorf("Exec after End: %v, want ErrEnded", err)
 	}
 }
