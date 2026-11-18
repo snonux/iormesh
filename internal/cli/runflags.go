@@ -33,6 +33,10 @@ type runConfig struct {
 	// itself: how decision #25's per-event cost is found on a real trace
 	// (docs/spikes/s3-overhead.md, "Follow-up (wc4)").
 	cpuProfile string
+	// noAggregation turns the kernel's folding of hot read/write loops off
+	// (-aggregate=false, internal/c/rwagg.c): every call then reaches the
+	// trace as its own event, at decision #25's per-event cost.
+	noAggregation bool
 }
 
 // defaultDuration bounds every run, ior-style: no unbounded tracer on a
@@ -75,6 +79,8 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 	families := fs.String("trace-families", "",
 		"opt-in event families to add to file and socket: ipc, signal, poll, zerocopy, or all")
 	cpuProfile := fs.String("cpuprofile", "", "write a CPU profile of the tracer to this file")
+	aggregate := fs.Bool("aggregate", true,
+		"fold hot read/write loops into one event with args.count (false: one event per call, for debugging)")
 	if err := fs.Parse(args); err != nil {
 		return runConfig{}, fmt.Errorf("%w: %v", errUsage, err)
 	}
@@ -82,7 +88,7 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 		return runConfig{}, fmt.Errorf("%w: unexpected argument %q", errUsage, fs.Arg(0))
 	}
 	cfg := runConfig{project: *project, out: *out, duration: *duration, ready: *ready,
-		spec: target.Spec{Pattern: *pattern}, cpuProfile: *cpuProfile}
+		spec: target.Spec{Pattern: *pattern}, cpuProfile: *cpuProfile, noAggregation: !*aggregate}
 	if *port > math.MaxUint16 {
 		return runConfig{}, fmt.Errorf("%w: -listen-port %d: want 1-65535", errUsage, *port)
 	}

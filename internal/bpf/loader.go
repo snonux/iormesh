@@ -29,6 +29,11 @@ type Config struct {
 	// caller decides with AdoptExec or IgnoreExec. Off, an untraced
 	// process's exec costs nothing.
 	ExecWatch bool
+	// NoAggregation sends every read and write as its own enter and exit
+	// records instead of folding hot loops in the kernel (rwagg.c, M2
+	// step 11): a debugging switch (iormesh run -aggregate=false), which
+	// gives up decision #25's loss budget on a busy loop.
+	NoAggregation bool
 	// Buffer is how many decoded records may wait for the consumer (in
 	// batches of up to 256); 0 means 4096. A full channel is
 	// backpressure: the ring buffer then fills and the kernel counts
@@ -103,6 +108,13 @@ func (t *Tracer) load(cfg Config) error {
 	}
 	if err := t.module.InitGlobalVariable("IORMESH_EXEC_WATCH", watch); err != nil {
 		return fmt.Errorf("set IORMESH_EXEC_WATCH: %w", err)
+	}
+	aggregate := uint32(1)
+	if cfg.NoAggregation {
+		aggregate = 0
+	}
+	if err := t.module.InitGlobalVariable("IORMESH_RW_AGGREGATE", aggregate); err != nil {
+		return fmt.Errorf("set IORMESH_RW_AGGREGATE: %w", err)
 	}
 	if err := t.module.BPFLoadObject(); err != nil {
 		return fmt.Errorf("load BPF object: %w", err)

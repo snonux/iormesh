@@ -16,6 +16,7 @@ import (
 	"iormesh/internal/correlate"
 	"iormesh/internal/schema"
 	"iormesh/internal/target"
+	"iormesh/internal/types"
 )
 
 // liveCheckEvery is how often run checks whether its targets still exist;
@@ -74,6 +75,7 @@ type tracer interface {
 	RemoveTarget(pid uint32) error
 	AdoptExec(pid uint32) (gap uint64, adopted bool, err error)
 	IgnoreExec(pid uint32, since uint64) error
+	PendingAggregates() ([]*types.RwAggregateEvent, error)
 	Close() error
 }
 
@@ -102,7 +104,7 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 		return err
 	}
 	tr, err := bpf.Open(bpf.Config{Pids: pids, ExecWatch: cfg.spec.Mode() == target.ModePattern,
-		Probes: bpf.ProbesFor(cfg.families)})
+		Probes: bpf.ProbesFor(cfg.families), NoAggregation: cfg.noAggregation})
 	if err != nil {
 		return err
 	}
@@ -151,17 +153,37 @@ func describe(spec target.Spec, pids []uint32) string {
 // graph file, then the one-line summary. A loss count it cannot read
 // turns the end reason into error: the trace might hide a gap.
 func finish(cfg runConfig, tr tracer, c *correlate.Correlator, reason string, stderr io.Writer) error {
+	aggErr := drainAggregates(tr, c)
 	losses, lossErr := pollLosses(tr, c)
-	if lossErr != nil {
+	if lossErr != nil || aggErr != nil {
 		reason = schema.EndError
 	}
 	closeErr := tr.Close()
 	endErr := c.End(reason)
 	sinkErr := c.Close()
 	graphErr := schema.WriteGraphFile(filepath.Join(cfg.out, GraphFile), c.Graph())
-	_, _ = fmt.Fprintf(stderr, "iormesh: stopped (%s); lost records %d (kernel %d), unpaired exits %d, unreadable paths %d\n",
-		reason, losses.Total(), losses.Kernel, c.Unpaired(), c.NoPath())
-	return errors.Join(lossErr, closeErr, endErr, sinkErr, graphErr)
+	_, _ = fmt.Fprintf(stderr, "iormesh: stopped (%s); lost records %d (kernel %d), unpaired exits %d, "+
+		"unreadable paths %d, unattributed aggregates %d\n",
+		reason, losses.Total(), losses.Kernel, c.Unpaired(), c.NoPath(), c.Unattributed())
+	return errors.Join(aggErr, lossErr, closeErr, endErr, sinkErr, graphErr)
+}
+
+// drainAggregates hands the correlator the folded read/write calls the
+// kernel still holds (bpf.Tracer.PendingAggregates): those of threads that
+// reached no flush point before the trace ended. Without it their calls
+// would be missing from the trace, with no drop to say so. An unreadable
+// map ends the trace as error for the same reason.
+func drainAggregates(tr tracer, c *correlate.Correlator) error {
+	recs, err := tr.PendingAggregates()
+	for _, rec := range recs {
+		if herr := c.Handle(rec); herr != nil {
+			return herr
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("pending aggregates: %w", err)
+	}
+	return nil
 }
 
 // newCorrelator describes the host, creates cfg.out and the correlator

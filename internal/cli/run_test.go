@@ -30,6 +30,9 @@ type fakeTracer struct {
 	added, removed, adopted, ignored []uint32
 	gap                              uint64
 	exited                           map[uint32]bool
+	// pending is what PendingAggregates hands finish, pendingErr its error.
+	pending    []*types.RwAggregateEvent
+	pendingErr error
 }
 
 func newFakeTracer() *fakeTracer { return &fakeTracer{records: make(chan []any, 16)} }
@@ -72,6 +75,12 @@ func (f *fakeTracer) IgnoreExec(pid uint32, since uint64) error {
 	defer f.mu.Unlock()
 	f.ignored = append(f.ignored, pid)
 	return nil
+}
+
+func (f *fakeTracer) PendingAggregates() ([]*types.RwAggregateEvent, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pending, f.pendingErr
 }
 
 func (f *fakeTracer) Close() error {
@@ -329,5 +338,45 @@ func TestFinishNoLossNoDrop(t *testing.T) {
 	}
 	if got := kinds(readEvents(t, dir)); got != "session,end" {
 		t.Fatalf("kinds %s, want session,end", got)
+	}
+}
+
+// TestFinishDrainsPendingAggregates: the folded calls the kernel still
+// holds at the end reach the trace ahead of the end event, a single call
+// as a plain event and a run of calls with args.count; an unreadable map
+// ends the trace as error, after the records it did return.
+func TestFinishDrainsPendingAggregates(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		reason string
+	}{{"read", nil, schema.EndStop}, {"unreadable", errors.New("map gone"), schema.EndError}} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tr := newFakeTracer()
+			tr.pending = []*types.RwAggregateEvent{
+				{EventType: types.RW_AGGREGATE_EVENT, TraceId: types.SYS_ENTER_WRITE, Time: 5, EndTime: 9,
+					TotalBytes: 40, LatencyNs: 3, Pid: 10, Tid: 11, Fd: 4, Count: 8},
+				{EventType: types.RW_AGGREGATE_EVENT, TraceId: types.SYS_ENTER_READ, Time: 6, EndTime: 7,
+					TotalBytes: 2, LatencyNs: 1, Pid: 10, Tid: 12, Fd: 5, Count: 1},
+			}
+			tr.pendingErr = tc.err
+			c := testCorrelator(t, dir)
+			err := finish(runConfig{out: dir}, tr, c, schema.EndStop, &bytes.Buffer{})
+			if (err != nil) != (tc.err != nil) {
+				t.Fatalf("finish = %v, want error %v", err, tc.err)
+			}
+			events := readEvents(t, dir)
+			if got := kinds(events); got != "session,write,read,end" {
+				t.Fatalf("kinds %s, want session,write,read,end", got)
+			}
+			w, r := events[1], events[2]
+			if w.Args.Count == nil || *w.Args.Count != 8 || w.Bytes != 40 || r.Args.Count != nil || r.Bytes != 2 {
+				t.Fatalf("write count %v bytes %d, read count %v bytes %d", w.Args.Count, w.Bytes, r.Args.Count, r.Bytes)
+			}
+			if got := *events[3].Args.EndReason; got != tc.reason {
+				t.Fatalf("end reason %q, want %q", got, tc.reason)
+			}
+		})
 	}
 }
