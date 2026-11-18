@@ -72,7 +72,7 @@ func newSockTracer(t *testing.T) *sockTracer {
 	bpf.SetLoggerCbs(bpf.Callbacks{LogFilters: []func(int, string) bool{
 		func(level int, _ string) bool { return level > bpf.LibbpfWarnLevel },
 	}})
-	module, step, err := loadBPFModule()
+	module, step, err := LoadBPFModule()
 	if err != nil {
 		t.Fatalf("%s: %v", step, err)
 	}

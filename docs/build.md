@@ -55,7 +55,7 @@ mage lint          # golangci-lint: errcheck + staticcheck SA
 mage fmt / fmtCheck
 mage clean         # keeps vmlinux.h (it needs root to recreate)
 mage workloadTest  # the Java workload, standalone (M0)
-mage bpfRootTest   # BPF load + TCP tuple tests as root (sudo -n)
+mage bpfRootTest   # BPF loader + TCP tuple tests as root (sudo -n)
 ```
 
 Run Go commands through Mage: bare `go test ./...` or

@@ -606,11 +606,39 @@ naming another PID, yields nothing (with a positive control). The target only co
 reported as passed (`gatecmd.RootBPFTests`, pinned by
 `internal/buildgate`). Not covered yet: IPv6, Java processes.
 
-**Step 5 — loader and ring buffer** (`internal/bpf`, cgo): lift
-ior's module load, attach and ring-buffer poll
-(`internal/bpfsetup.go`, the event loop's raw channel). Output of
-this package is a channel of decoded raw records
-(`internal/types`), nothing more.
+**Step 5 — loader and ring buffer** (`internal/bpf`, cgo; built).
+Output of this package is a channel of decoded raw records
+(`internal/types`), nothing more:
+
+- `bpf.Open(Config{Pids, Probes, Buffer})` loads the object
+  (`internal.LoadBPFModule`, embedded or `IORMESH_BPF_OBJECT`),
+  sets `IOR_PID_FILTER` to the tracer's own PID (self-exclusion),
+  seeds `target_map`, attaches the probe set one at a time
+  (libbpfgo's link list is not thread-safe — ior's
+  `libbpfAttachMu`) and starts the ring-buffer poll.
+  `AddTarget`/`RemoveTarget` edit `target_map` at run time.
+- `DefaultProbes()` is enter+exit of every
+  `tracepoints.DefaultSyscalls()` syscall plus
+  `sock:inet_sock_set_state`. A tracepoint this kernel lacks
+  (`ENOENT`) is skipped and listed by `Skipped()`; a program
+  missing from our own object is an error.
+- `Records()` yields typed records (`*types.OpenEvent`, …) in
+  ring-buffer order; the decode table is ior's
+  `rawRuntimeEvents` mapping (`eventloop_kinds.go`) without its
+  event-loop handlers, plus `TCP_STATE_EVENT`. A full channel is
+  backpressure: the ring buffer fills and the kernel counts drops.
+- `Losses()` = kernel drops (`ringbuf_drop_map`, summed per CPU)
+  + records that arrived undecodable (unknown type, malformed,
+  short) — the correlator turns deltas into `drop` events.
+- `Close()` destroys links before the module (a link must not
+  outlive its program), stops the poll and closes `Records`;
+  records in flight at Close are dropped.
+
+Root tests (`internal/loader_root_test.go`, run by `mage
+bpfRootTest`): a bash target opening `/etc/hostname` with shell
+builtins yields an `OpenEvent` with no loss; an untargeted PID
+yields nothing until `AddTarget`, and nothing again after
+`RemoveTarget`; `Close` closes `Records` with nobody reading.
 
 **Step 6 — the correlator** (`internal/correlate`):
 

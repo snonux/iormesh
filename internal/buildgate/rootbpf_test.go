@@ -12,8 +12,10 @@ import (
 	"iormesh/internal/gatecmd"
 )
 
-// rootBPFTestFile holds the tests `mage bpfRootTest` runs as root.
-const rootBPFTestFile = "internal/sock_root_test.go"
+// rootBPFTestFiles hold the tests `mage bpfRootTest` runs as root: the
+// socket tests (M1 step 4) and the loader tests (step 5), both in the one
+// test binary of ./internal.
+var rootBPFTestFiles = []string{"internal/sock_root_test.go", "internal/loader_root_test.go"}
 
 // testFunctionsIn returns the names of the top-level Test functions of the Go
 // file at the repository path rel. Adapted from ior
@@ -35,16 +37,19 @@ func testFunctionsIn(t *testing.T, rel string) []string {
 }
 
 // TestRootBPFTestsAreTheTestsOfTheFile: a root test added to or renamed in
-// the file without updating gatecmd.RootBPFTests would never run, because
+// the files without updating gatecmd.RootBPFTests would never run, because
 // every other `go test` skips it for not being root.
 func TestRootBPFTestsAreTheTestsOfTheFile(t *testing.T) {
 	listed := gatecmd.RootBPFTests()
-	declared := testFunctionsIn(t, rootBPFTestFile)
+	var declared []string
+	for _, f := range rootBPFTestFiles {
+		declared = append(declared, testFunctionsIn(t, f)...)
+	}
 	slices.Sort(listed)
 	slices.Sort(declared)
 	if len(declared) == 0 || !slices.Equal(listed, declared) {
-		t.Errorf("gatecmd.RootBPFTests() = %v, but %s declares %v: the two must name the same tests",
-			listed, rootBPFTestFile, declared)
+		t.Errorf("gatecmd.RootBPFTests() = %v, but %v declare %v: the two must name the same tests",
+			listed, rootBPFTestFiles, declared)
 	}
 }
 

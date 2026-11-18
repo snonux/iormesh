@@ -1,6 +1,6 @@
 // Adapted from ior internal/bpfembed.go @ b21afc50328c.
 // Changes: env override renamed to IORMESH_BPF_OBJECT, object to
-// iormesh.bpf.o; nothing calls loadBPFModule until the M1 loader (step 5).
+// iormesh.bpf.o; LoadBPFModule exported for the loader in internal/bpf.
 
 package internal
 
@@ -31,10 +31,10 @@ var (
 	newBPFModuleFromBuffer = bpf.NewModuleFromBuffer
 )
 
-// loadBPFModule opens the BPF module from the override file when
+// LoadBPFModule opens the BPF module from the override file when
 // IORMESH_BPF_OBJECT is set, else from the embedded object. The returned
 // string names the step for error messages.
-func loadBPFModule() (*bpf.Module, string, error) {
+func LoadBPFModule() (*bpf.Module, string, error) {
 	if path := os.Getenv(bpfObjectOverrideEnv); path != "" {
 		module, err := newBPFModuleFromFile(path)
 		return module, "load module from override file", err
