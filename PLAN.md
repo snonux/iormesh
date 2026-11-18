@@ -123,12 +123,6 @@ throwaway; its findings update this plan.
     use the boot clock — they differ by time spent suspended.
     Verify the conversion's error is far below a syscall's
     duration.
-  - Virtual threads: syscalls run on carrier threads and a
-    parked virtual thread may resume on another carrier. Does
-    hooking the innermost Java frame above each native I/O
-    call — where a virtual thread cannot park — keep the TID
-    stable inside one bracket, or is mount/unmount tracking
-    needed after all?
   - Transport: how agent events reach the tracer without a
     socket (decision #27), and how the agent's own I/O is kept
     out of the target's story.
@@ -138,7 +132,8 @@ throwaway; its findings update this plan.
 
   Exit: a prototype attributes every declared I/O op of one M0
   file scenario and one socket scenario to its declared method,
-  on platform and virtual threads, with the overhead measured.
+  on platform threads, with the overhead measured. (Virtual
+  threads are deferred — see "Deferred — not in v1".)
 - **S2 — Cross-host join** (gates M4's merge). Questions:
   - The NAT-tolerant join key (decision #26): conntrack state
     read on the NAT host vs the TCP initial-sequence-number pair
@@ -206,7 +201,7 @@ Scenario catalogue, by the milestone it lands with:
 |------------|-----------|
 | M1 | File data ops (open/read/write/close); TCP client ↔ server on loopback; markers |
 | M2 | Full file surface (create/delete, rename/move, touch, symlink/hardlink, xattr, chmod/chown…); fd lifecycle (dup, inheritance, reuse); local IPC; signals; UDP; IPv4 + IPv6; restart; non-Java peer |
-| M3 | Method flows (deep stacks, virtual threads, async I/O); HTTP plain + TLS; redaction; OTEL flavor |
+| M3 | Method flows (deep stacks, async I/O); HTTP plain + TLS; redaction; OTEL flavor |
 | M4 | Client and server on two hosts as two projects; microservices topology, one service per host; NAT'ed pair |
 | M5 | (renders M4's microservices scenario) |
 | M6 | Microservices topology with only the gateway enrolled |
@@ -352,14 +347,12 @@ spike confirms or corrects.
   brackets (JNI libraries, JVM-internal I/O) and ambiguous
   matches stay in the trace marked `attribution: none` — never
   guessed.
-- **Virtual threads**: syscalls run on carrier threads, and a
-  parked virtual thread may resume on a different carrier, so
-  TID→Java thread is a time-varying map. Hooks therefore sit at
-  the innermost Java frame above each native I/O call, where a
-  virtual thread cannot park: the TID is stable inside one
-  bracket, and each hook records the virtual thread it ran for.
-  Mount/unmount tracking is the fallback if S1 finds a bracket
-  that can park.
+- **Platform threads only in v1.** Virtual-thread attribution
+  is deferred (see "Deferred — not in v1"). I/O issued by a
+  virtual thread is still traced and still joined to its native
+  I/O call, but it is attributed to the carrier thread and
+  flagged `carrier: true` — visible as a known gap, never
+  passed off as the carrier's own work.
 - **Agent → tracer transport**: socket-free like everything
   else — a spool the agent appends to in a tracer-owned
   directory, read by the correlator (decision #27). The agent's
@@ -402,8 +395,7 @@ spike confirms or corrects.
   time-ordered unless stream ids are captured (decision #22).
 - Acceptance: frames carry `class#method(file:line)`; every
   declared I/O op of M3's method-flow scenarios carries its
-  declared causing method, on platform and virtual threads
-  alike; unbracketed events are marked unattributed; the
+  declared causing method; unbracketed events are marked unattributed; the
   OTEL-flavored workload's events carry the expected
   trace/span ids; the HTTP scenarios produce the expected
   http events, and the redaction expectations hold — the
@@ -851,9 +843,9 @@ answer), and deferred.
   never appear as the target's I/O. Socket-free either way.
   *Default: S1 picks.*
 - **#29 JDK version support** — the plan says JDK 21, but
-  fleets run 17 and older. Virtual threads need 21; boundary
-  hooks, stacks and HTTP events do not. *Default: agent runs
-  on 17+, with virtual-thread support active on 21+; anything
+  fleets run 17 and older. Boundary hooks, stacks and HTTP
+  events do not need 21 (only the deferred virtual-thread
+  support would). *Default: agent runs on 17+; anything
   older is traced without Java attribution (the non-Java
   node shape).*
 - **#22 HTTP capture mechanics** — agent-boundary hooks (v1
@@ -972,6 +964,18 @@ answer), and deferred.
 - **OTLP span ingestion and the distributed-trace overlay**
   (the optional half of #20) — after span-context tagging has
   proven itself.
+- **Virtual-thread attribution** — out of v1; the owner's apps
+  do not use virtual threads yet. The problem: the kernel only
+  sees the carrier thread, and a parked virtual thread may
+  resume on another carrier, so thread id alone cannot name
+  the virtual thread. The likely solution when it is needed:
+  the agent's I/O-boundary hook records `Thread.currentThread()`
+  — hooks sit at the innermost Java frame above the native
+  call, where a virtual thread cannot park, so the carrier's
+  thread id is stable for the length of one bracket. Fallback:
+  track mount/unmount. Until then such I/O is attributed to
+  the carrier and flagged (see M3). Needs JDK 21+, a
+  `virtual-threads` scenario, and its own acceptance.
 
 ## What we trace — the mental-model inventory
 
@@ -1026,8 +1030,7 @@ Metadata only — nothing below is payload (see non-goals):
 - **Java**: class loading (class↔JAR/classloader), thread lifecycle
   + names (kernel TID ↔ Java thread), the Java stack at every
   I/O boundary as `class#method(file:line)` frames (line
-  numbers when debug info is present), virtual-thread
-  mount/unmount attribution, and the active OTEL span
+  numbers when debug info is present), and the active OTEL span
   (trace/span ids) when the app is OpenTelemetry-instrumented.
   *Why: the source-level truth everything above gets annotated
   with.*
@@ -1261,7 +1264,7 @@ not the replacement:
   events — file ops (data + meta: rename, symlink, touch,
   xattr, chmod/chown…), sockets (IPv4/IPv6, TCP/UDP
   lifecycle), local IPC, signals, process/thread/fd
-  lifecycle, and with M3: Java stacks, virtual threads,
+  lifecycle, and with M3: Java stacks,
   class loads, HTTP events (plain + TLS — including the
   redaction expectations: the planted Authorization header,
   query secret and argv secret must be absent), OTEL ids.

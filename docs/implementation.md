@@ -798,10 +798,12 @@ move between releases, which feeds decision #29):
 | `sun.nio.ch.Net` | `connect`, `accept`, `bind`, `listen` | lifecycle |
 | `sun.nio.fs.UnixNativeDispatcher` | `open`, `rename`, `unlink`, … | `Files.*` |
 
-Hooking *this low* is deliberate: between entry and exit of these
-methods a virtual thread cannot park, so the kernel TID is stable
-inside one bracket and no mount/unmount tracking is needed. The
-captured stack still contains every caller above.
+Hooking *this low* is deliberate: the bracket around the native
+call is as tight as it gets, and the captured stack still
+contains every caller above. (It is also what would later make
+virtual threads tractable — they cannot park inside such a
+bracket — but virtual-thread attribution is deferred; v1 only
+flags carrier-thread I/O. See PLAN.md, "Deferred — not in v1".)
 
 **Experiment 2 — the agent skeleton.**
 
@@ -1003,7 +1005,7 @@ internal/correlate/javajoin.go
    app's class loader, read `Span.current().getSpanContext()`
    reflectively at `enter` and add ids to the bracket. No OTEL
    dependency in the agent.
-7. Scenarios first, as always: `method-flow`, `virtual-threads`,
+7. Scenarios first, as always: `method-flow`,
    `http-plain`, `http-tls`, `http-redaction`, `otel`.
 
 **Done when**: PLAN.md's M3 acceptance holds.

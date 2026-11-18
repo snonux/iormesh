@@ -35,9 +35,10 @@ views — happens on the controller.
     kernel and captures the Java stack there. Cost follows the
     I/O rate, not the call rate; blanket method entry/exit
     tracing is a non-goal.
-  - Tracks virtual-thread mount/unmount, because syscalls run on
-    carrier threads and the TID→Java thread map changes over
-    time.
+  - Platform threads only in v1. I/O from virtual threads is
+    traced but attributed to the carrier thread and flagged;
+    naming the virtual thread is deferred (PLAN.md,
+    "Deferred — not in v1").
   - Hands events to the tracer through a spool in a tracer-owned
     directory — no socket. Its own I/O is tagged and kept out of
     the target's story.
