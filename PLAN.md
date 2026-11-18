@@ -1290,8 +1290,9 @@ Metadata only — nothing below is payload (see non-goals):
   of its two sockets; UDP has no connection, so its unit is the
   flow — one local/remote address pair — whose two loopback
   sides fuse like TCP's ends, while a flow to another host stays
-  unresolved. A signal between traced processes is a `signaled`
-  edge.
+  unresolved. A signal one traced process sends another is a
+  `signaled` edge; a kernel-raised one (timer, SIGCHLD) has no
+  sender.
 - **Signals**: delivery with sender PID. *Why: "who touched the
   process" includes the supervisor's SIGTERM.*
 - **Java**: class loading (class↔JAR/classloader), thread lifecycle

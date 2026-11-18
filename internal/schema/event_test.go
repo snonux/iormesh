@@ -187,6 +187,21 @@ func TestEventValidateRejects(t *testing.T) {
 		"marker empty name":         func(e *Event) { e.Event, e.Args.Marker = KindMarker, ptr("") },
 		"tcp_state without state":   func(e *Event) { e.Event = KindTCPState },
 		"argv on a non-exec event":  func(e *Event) { e.Args.Argv = []string{"java"} },
+		// M2 step 7's args stay with their kinds.
+		"signal without args.signal": func(e *Event) { e.Event = KindSignal },
+		"signal without a receiver": func(e *Event) {
+			e.Event, e.PID, e.Args.Signal = KindSignal, 0, ptr(int32(15))
+		},
+		"args.signal on a connect":     func(e *Event) { e.Args.Signal = ptr(int32(15)) },
+		"args.target_pid on a connect": func(e *Event) { e.Args.TargetPID = ptr(uint32(1)) },
+		"args.sender_pid on a kill": func(e *Event) {
+			e.Event, e.Args.SenderPID = KindKill, ptr(uint32(1))
+		},
+		"args.sender_pid on a connect": func(e *Event) { e.Args.SenderPID = ptr(uint32(1)) },
+		"fd2_gen without fd2": func(e *Event) {
+			e.Event, e.Args.FD2Gen = KindPipe2, ptr(uint32(1))
+		},
+		"fd2 on a connect": func(e *Event) { e.Args.FD2 = ptr(int32(7)) },
 	}
 	for name, breakIt := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -292,6 +307,7 @@ func TestEventValidateAcceptsEveryKind(t *testing.T) {
 	kinds := []string{KindOpen, KindOpenat, KindOpenat2, KindRead, KindWrite,
 		KindClose, KindConnect, KindAccept, KindAccept4, KindTCPState,
 		KindMarker, KindDrop, KindSession, KindEnd, KindExec}
+	kinds = append(kinds, stepSevenKinds()...)
 	for _, k := range kinds {
 		e := validEvent()
 		e.Event = k
@@ -306,8 +322,48 @@ func TestEventValidateAcceptsEveryKind(t *testing.T) {
 		case KindSession:
 			e.Session = validSession()
 		}
+		withStepSevenArgs(&e)
 		if err := e.Validate(); err != nil {
 			t.Errorf("kind %s: %v", k, err)
+		}
+	}
+}
+
+// stepSevenKinds are the 22 kinds of M2 step 7 (kinds_ipc.go).
+func stepSevenKinds() []string {
+	return []string{KindBind, KindSendto, KindRecvfrom, KindPipe, KindPipe2,
+		KindSocketpair, KindKill, KindTgkill, KindTkill, KindSignal,
+		KindEpollCreate, KindEpollCreate1, KindEpollCtl, KindEpollWait,
+		KindEpollPwait, KindEpollPwait2, KindPoll, KindPpoll,
+		KindSendfile64, KindSplice, KindTee, KindCopyFileRange}
+}
+
+// withStepSevenArgs sets the step 7 args the event's kind may carry, so
+// the accept test also proves each kind takes its own args.
+func withStepSevenArgs(e *Event) {
+	if fd2Kind(e.Event) {
+		e.Args.FD2, e.Args.FD2Gen = ptr(int32(7)), ptr(uint32(1))
+	}
+	if signalKind(e.Event) {
+		e.Args.Signal = ptr(int32(15))
+		if e.Event == KindSignal {
+			e.Args.SenderPID = ptr(uint32(1))
+		} else {
+			e.Args.TargetPID = ptr(uint32(2))
+		}
+	}
+}
+
+// TestStepSevenKindsAreKnown: every step 7 kind is a schema kind and the
+// list above is complete — 22, as kinds_ipc.go declares.
+func TestStepSevenKindsAreKnown(t *testing.T) {
+	kinds := stepSevenKinds()
+	if len(kinds) != 22 {
+		t.Fatalf("%d step 7 kinds listed, want 22", len(kinds))
+	}
+	for _, k := range kinds {
+		if !KnownKind(k) || !ipcKind(k) {
+			t.Errorf("%s is not a known step 7 kind", k)
 		}
 	}
 }

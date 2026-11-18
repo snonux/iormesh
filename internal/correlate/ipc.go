@@ -247,7 +247,7 @@ func (c *Correlator) socketFdDetail(ev *schema.Event, p *procState, en enter, re
 		setPath(&ev.Args, a.path)
 		return nil
 	}
-	return c.datagramDetail(ev, en, a, ret)
+	return c.datagramDetail(ev, p, en, a, ret)
 }
 
 // bindArgs: an AF_UNIX bind names its socket file; an inet one its local
@@ -309,7 +309,8 @@ func (c *Correlator) unixEnd(p *procState, fd int32, en enter) *sockState {
 // datagramDetail fills one UDP datagram's addresses — the socket's local
 // one and the peer it went to or came from (the argument, or the socket's
 // remote end when it is connected) — and returns its flow.
-func (c *Correlator) datagramDetail(ev *schema.Event, en enter, a *sockAddr, ret int64) *sockState {
+func (c *Correlator) datagramDetail(ev *schema.Event, p *procState, en enter, a *sockAddr,
+	ret int64) *sockState {
 	remote := a.arg
 	if !remote.IsValid() {
 		remote = a.remote
@@ -319,7 +320,7 @@ func (c *Correlator) datagramDetail(ev *schema.Event, en enter, a *sockAddr, ret
 	if a.sockType != sockDgram || ret < 0 || !a.local.IsValid() || !remote.IsValid() {
 		return nil
 	}
-	return c.flow(flowLocal(a.local, remote), remote, en.time)
+	return c.flow(p, en.fd, flowLocal(a.local, remote), remote, en.time)
 }
 
 // flowLocal is the local end a flow is keyed by. A socket bound to the
@@ -335,9 +336,10 @@ func flowLocal(local, remote netip.AddrPort) netip.AddrPort {
 }
 
 // flow returns the UDP flow of (local, remote), creating it on its first
-// datagram. A new flow waits in the datagram table for its mirror image —
-// the other side of a loopback exchange — like a TCP end does.
-func (c *Correlator) flow(local, remote netip.AddrPort, at uint64) *sockState {
+// datagram, owned by the fd that carried it (dropFlows ends it with that
+// fd). A new flow waits in the datagram table for its mirror image — the
+// other side of a loopback exchange — like a TCP end does.
+func (c *Correlator) flow(p *procState, fd int32, local, remote netip.AddrPort, at uint64) *sockState {
 	k := [2]netip.AddrPort{local, remote}
 	if s, ok := c.flows[k]; ok {
 		return s
@@ -345,8 +347,21 @@ func (c *Correlator) flow(local, remote netip.AddrPort, at uint64) *sockState {
 	s := &sockState{local: local, remote: remote, firstSeen: at, established: at,
 		table: c.datagram}
 	c.flows[k] = s
+	p.flowsOf[fd] = append(p.flowsOf[fd], k)
 	c.datagram.fuse(s)
 	return s
+}
+
+// dropFlows ends the UDP flows fd started when it is closed, so the flow
+// table does not grow with every peer a long-lived process ever had, and a
+// later socket reusing the tuple is a flow of its own. A flow outlives an
+// exec or the process's exit (no close record) until the session ends —
+// bounded by the sockets the trace saw.
+func (c *Correlator) dropFlows(p *procState, fd int32) {
+	for _, k := range p.flowsOf[fd] {
+		delete(c.flows, k)
+	}
+	delete(p.flowsOf, fd)
 }
 
 // unixTable pairs the two ends of unix stream connections. Each end is

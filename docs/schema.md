@@ -109,7 +109,7 @@ column each, never a blob.
 | `fd2`, `fd2_gen` | a second fd instance (M2 step 7): the other end of `pipe`, `pipe2`, `socketpair`; the fd `epoll_ctl` registers |
 | `signal` | the signal number: `kill`, `tgkill`, `tkill` (when the kernel generated a signal) and `signal` (required) |
 | `target_pid` | `kill`, `tgkill`, `tkill`: the tgid signalled — raw, the target need not be traced |
-| `sender_pid` | `signal` only: the tgid that sent it — raw, the sender need not be traced |
+| `sender_pid` | `signal` only: the tgid that sent it — raw, the sender need not be traced; absent for a kernel-raised signal |
 
 IPv4 peers of dual-stack sockets are written unmapped
 (`127.0.0.1`, not `::ffff:127.0.0.1`).
@@ -210,7 +210,7 @@ ipc,signal,poll,zerocopy` (or `all`) adds them.
 |--------|-------|----|------|
 | socket | `bind` | the socket | AF_UNIX: `path`; inet: `local_addr`/`local_port` (the bound address; the kernel's port for port 0) |
 | socket | `connect` (M1) | the socket | TCP: the 4-tuple; AF_UNIX: `path` |
-| socket | `sendto`, `recvfrom` | the socket | `bytes`; per datagram `local_*` and `remote_*` (the peer it went to or came from); AF_UNIX: `path` |
+| socket | `sendto`, `recvfrom` | the socket | `bytes`; per datagram `local_*` and `remote_*` (the peer it went to or came from); AF_UNIX: `path`. On a stream socket (`send`/`recv` on a TCP or unix connection) only the connection's 4-tuple, as `read`/`write` |
 | ipc | `pipe`, `pipe2`, `socketpair` | the first end (a pipe's read end) | `fd2`, `fd2_gen`: the second end |
 | signal | `kill`, `tgkill`, `tkill` | `-1` | `target_pid`, `signal` |
 | signal | `signal` | `-1` | `signal`, `sender_pid`; `pid`/`tid` are the receiver |
@@ -229,24 +229,34 @@ ipc,signal,poll,zerocopy` (or `all`) adds them.
   parent and the child it talks to over stdio share it;
 - a **unix stream connection**: the connecting socket and the
   accepted one are paired by the kernel (`unix_sk->peer`), so the
-  two ends fuse when both are traced, else stay `unresolved`;
+  two ends fuse when both are traced and the accept follows the
+  connect within the fuse window (5 s); otherwise each stays
+  `unresolved` — a later accept is a node of its own;
 - a **UDP flow** — UDP has no connection, so the unit is one
   (local, remote) address pair seen in the datagrams: the two
   sides of a loopback flow mirror each other and fuse within the
   window, like TCP's ends. A socket bound to the wildcard sends
   from the address the route picks; towards a loopback peer that
   is the peer's own address, so such flows fuse too, while a flow
-  to another host stays `unresolved`. One tuple reused within a
-  session is one flow.
+  to another host stays `unresolved`. A flow ends when the socket
+  that carried its first datagram is closed; until then one tuple
+  is one flow (a flow of a process that exits or execs without
+  closing lasts until the session ends).
 
 **Signals**: `signal` is a delivery, from `signal_generate`, on
-the receiving process (the target's thread for `tgkill`, the
-process's tid for a process-directed signal). An ignored signal
+the receiving process. Only a signal a task sent — `kill`,
+`sigqueue`, `tkill`/`tgkill`, told by its siginfo — has a sender:
+`sender_pid` is that task's tgid. A kernel-raised one (a timer's
+`SIGALRM`, a child's `SIGCHLD`, `SIGIO`, a fault) fires in whatever
+task happens to run, so it has no `sender_pid`, puts nothing on a
+pending `kill` and draws no edge. The receiver is the target's
+thread for `tgkill`, the process's tid for a process-directed
+signal. An ignored signal
 (a default-ignored `SIGCHLD`), or one the kernel could not queue,
 is not a delivery and is not recorded. A sender's `kill` carries
 `target_pid` and `signal` only when the kernel generated one
 (`kill(pid, 0)`, `ESRCH` and `EPERM` carry neither). Both ends
-traced: a `signaled` edge.
+traced, and a task sent it: a `signaled` edge.
 
 ### Host-level events: session, drop, end
 

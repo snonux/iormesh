@@ -48,8 +48,8 @@ func socketSyscalls() []string {
 // Left out on purpose: access/faccessat (existence probes the JDK fires
 // at syscall frequency, decision #25's per-event cost), getdents, lseek,
 // fsync, mounts and other admin calls, the zero-copy calls (the opt-in
-// zerocopy family, trace_family.go) and close_range: the JDK 25 child closes its fds one by one
-// through close (strace-measured). A program that does use close_range
+// zerocopy family, trace_family.go) and close_range: the JDK 25 child
+// closes its fds one by one through close (strace-measured). A program that does use close_range
 // keeps those fds in the correlator's table, so a number it reuses
 // through an untraced syscall keeps the closed instance's generation.
 //

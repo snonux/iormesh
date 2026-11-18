@@ -169,12 +169,16 @@ func invalidf(format string, args ...any) error {
 }
 
 // validateIPCArgs keeps M2 step 7's args to their kinds: a second fd's
-// generation names nothing without the fd, and signal numbers or pids on
+// generation names nothing without the fd, a second fd belongs to the kinds
+// that have one (fd2Kind), and signal numbers or pids on
 // other kinds would make "count the SIGTERMs" or "who signalled whom" lie.
 func (e Event) validateIPCArgs() error {
 	a := e.Args
 	if a.FD2Gen != nil && a.FD2 == nil {
 		return invalidf("args.fd2_gen without args.fd2 on a %s event", e.Event)
+	}
+	if a.FD2 != nil && !fd2Kind(e.Event) {
+		return invalidf("args.fd2 on a %s event", e.Event)
 	}
 	if (a.Signal != nil || a.TargetPID != nil) && !signalKind(e.Event) {
 		return invalidf("args.signal or args.target_pid on a %s event", e.Event)

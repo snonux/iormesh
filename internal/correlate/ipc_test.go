@@ -268,3 +268,47 @@ func TestZeroCopyBytes(t *testing.T) {
 		t.Fatalf("sendfile64 fd %d bytes %d", e.FD, e.Bytes)
 	}
 }
+
+// TestUDPFlowEndsWithItsFd: closing the socket that started a flow drops
+// it from the table, so a later socket on the same tuple is a new flow.
+func TestUDPFlowEndsWithItsFd(t *testing.T) {
+	c, sink := newTest(t)
+	f := feeder{t, c, 20, 21, new(uint64)}
+	f.addrCall(types.SYS_ENTER_SENDTO, types.SYS_EXIT_SENDTO, 5,
+		udpAddr("0.0.0.0:40000", "192.0.2.1:53"), 5)
+	f.close(5)
+	if len(c.flows) != 0 {
+		t.Fatalf("%d flows left after close", len(c.flows))
+	}
+	f.addrCall(types.SYS_ENTER_SENDTO, types.SYS_EXIT_SENDTO, 5,
+		udpAddr("0.0.0.0:40000", "192.0.2.1:53"), 5)
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s := byKind(sink.events, schema.KindSendto)
+	if len(s) != 2 || s[0].ConnID == "" || s[1].ConnID == "" {
+		t.Fatalf("sendto events %+v", s)
+	}
+}
+
+// TestUnixDatagramConnectStaysUnpaired: an AF_UNIX datagram socket has a
+// path but no stream pairing, so its connect names the path and joins no
+// connection.
+func TestUnixDatagramConnectStaysUnpaired(t *testing.T) {
+	c, sink := newTest(t)
+	f := feeder{t, c, 20, 21, new(uint64)}
+	a := unixAddr("/dev/log", 0xC, 0xA)
+	a.SockType = sockDgram
+	f.addrCall(types.SYS_ENTER_CONNECT, types.SYS_EXIT_CONNECT, 5, a, 0)
+	f.write(5, 3)
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	conn := byKind(sink.events, schema.KindConnect)[0]
+	if conn.Args.Path == nil || *conn.Args.Path != "/dev/log" || conn.ConnID != "" {
+		t.Fatalf("connect args %+v conn %q, want the path and no connection", conn.Args, conn.ConnID)
+	}
+	if len(c.unix.waiting) != 0 {
+		t.Fatal("a datagram socket waits for a stream peer")
+	}
+}

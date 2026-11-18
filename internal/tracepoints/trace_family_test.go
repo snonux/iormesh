@@ -36,6 +36,8 @@ func TestParseTraceFamilies(t *testing.T) {
 		{raw: "file", want: []TraceFamily{FamilyFile, FamilySocket}},
 		{raw: "poll,all", want: AllFamilies()},
 		{raw: "signals", wantErr: true},
+		{raw: "all,bogus", wantErr: true},
+		{raw: "bogus,all", wantErr: true},
 		{raw: "FS", wantErr: true}, // ior's family names are not iormesh's
 	}
 	for _, tt := range tests {

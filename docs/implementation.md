@@ -1325,16 +1325,22 @@ scenarios landing first (principle #1).
      and a correlator shape, which ior's broader groups lack.
      Not attached yet: sendmsg/recvmsg (their addresses sit in a
      msghdr), select/pselect6, vmsplice. The default set grows by
-     bind, sendto and recvfrom, and each datagram now costs a
-     second, 232-byte record: step 11's #25 measurement covers it.
+     bind, sendto and recvfrom. glibc's send(3)/recv(3) are these
+     syscalls, so a stream socket's sendto/recvfrom sends no
+     address record (`IORMESH_ADDR_NOT_STREAM`; its connection
+     already has the addresses) and pays only the enter-time park
+     of the argument by tid; each datagram costs a second,
+     232-byte record. Step 11's #25 measurement covers both.
    - **Socket addresses** (`internal/c/sockaddr.c`): the generated
      handlers of bind, connect, sendto and recvfrom call
      `iormesh_addr_on_enter` (parks the address argument by tid) and
      `iormesh_addr_on_exit`, which sends a `sock_addr_event` right
      before the exit record: the socket's own addresses (read from
      the `struct sock`), the argument (read by its own family's
-     size; recvfrom's is only filled at exit) and, for AF_UNIX, the
-     path and `unix_sk(sk)->peer`. The accept exits report an
+     size, only as far as its parked length — recvfrom's
+     value-result length is read back at exit, 0 means no address;
+     a sun_path is cut at the length, abstract names included) and,
+     for AF_UNIX, the path and `unix_sk(sk)->peer`. The accept exits report an
      accepted AF_UNIX socket the same way; TCP keeps sock.c's
      state records. The hooks are listed in
      `internal/generate/sockowner.go` (`sockAddrHooks`), rendered
@@ -1342,7 +1348,13 @@ scenarios landing first (principle #1).
    - **Signals** (`internal/c/signal.c`): a raw `signal_generate`
      handler — the classic tracepoint names only the target's tid,
      the raw one its `task_struct` — emits a `signal_event` when
-     the sender (current) or the target (by tgid) is traced. It
+     the sender or the target (by tgid) is traced. The current task
+     is the sender only of a task-sent signal: siginfo
+     `SEND_SIG_NOINFO`, or `si_code` `SI_USER`, `SI_QUEUE` or
+     `SI_TKILL`; `SEND_SIG_PRIV` and every other code (timers,
+     `SIGCHLD`, `SIGIO`, faults) is the kernel's, with no sender
+     (root test `TestKernelSignalHasNoSender`: a child's `SIGCHLD`
+     names no traced sender). It
      fires inside kill(2), so the correlator attaches target and
      signal to the pending `kill`, and records a `signal` event on
      a traced receiver (args.sender_pid) unless the signal was
@@ -1362,8 +1374,10 @@ scenarios landing first (principle #1).
      address sends from what the route picks, which towards a
      loopback peer is the peer's own address — anything else stays
      unresolved, never guessed; the wildcard itself is written as
-     no `local_addr`. A tuple reused within one session is one
-     flow (a known limit). epoll_ctl reports the epoll fd, the
+     no `local_addr`. A flow ends with the fd that carried its first
+     datagram (`dropFlows`), so the table stays bounded by open
+     sockets; one left by an exec or exit lasts the session.
+     epoll_ctl reports the epoll fd, the
      registered one as `args.fd2` and the op as `args.cmd`; the
      waits name the epoll fd and their latency is the block.
      Zero-copy calls report their first fd and the bytes moved

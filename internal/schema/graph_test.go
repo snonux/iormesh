@@ -229,3 +229,30 @@ func TestGraphRejectsBadApps(t *testing.T) {
 		})
 	}
 }
+
+// TestGraphSignaledEdge: signaled links two processes, without a state;
+// one to a host or carrying a state is invalid.
+func TestGraphSignaledEdge(t *testing.T) {
+	g := restartGraph()
+	one, two := ProcessNodeID("3f2a", 100, 1000), ProcessNodeID("3f2a", 101, 2000)
+	g.Edges = append(g.Edges, Edge{Type: EdgeSignaled, From: one, To: two})
+	g.Sort()
+	if err := g.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	cases := map[string]Edge{
+		"signaled with state":   {Type: EdgeSignaled, From: one, To: two, State: StateFused},
+		"signaled to a host":    {Type: EdgeSignaled, From: one, To: HostNodeID("3f2a")},
+		"signaled from the app": {Type: EdgeSignaled, From: AppNodeID("demo", "*RestartApp*"), To: two},
+	}
+	for name, e := range cases {
+		t.Run(name, func(t *testing.T) {
+			g := restartGraph()
+			g.Edges = append(g.Edges, e)
+			g.Sort()
+			if err := g.Validate(); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("Validate = %v, want ErrInvalid", err)
+			}
+		})
+	}
+}

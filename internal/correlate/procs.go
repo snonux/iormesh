@@ -2,6 +2,7 @@ package correlate
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"strings"
 	"time"
@@ -33,6 +34,8 @@ type procState struct {
 	// cloexec is the close-on-exec state of the fd instances the trace
 	// knows it of (fdtable.go): true set, false clear, absent unknown.
 	cloexec map[int32]bool
+	// flowsOf lists the UDP flows (by key) each fd started (ipc.go).
+	flowsOf map[int32][][2]netip.AddrPort
 }
 
 func (c *Correlator) proc(pid uint32) *procState {
@@ -42,7 +45,8 @@ func (c *Correlator) proc(pid uint32) *procState {
 	comm, inc := c.cfg.ProcInfo(pid)
 	p := &procState{inc: inc, comm: comm, fds: map[int32]uint32{},
 		lastGen: map[int32]uint32{}, sockOf: map[int32]*sockState{},
-		paths: map[int32]fdPath{}, cloexec: map[int32]bool{}}
+		paths: map[int32]fdPath{}, cloexec: map[int32]bool{},
+		flowsOf: map[int32][][2]netip.AddrPort{}}
 	c.procs[pid] = p
 	c.graph.process(pid, inc, comm)
 	return p

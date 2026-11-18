@@ -82,16 +82,21 @@ func AllFamilies() []TraceFamily {
 // An empty value is the default set.
 func ParseTraceFamilies(raw string) ([]TraceFamily, error) {
 	want := map[TraceFamily]bool{}
+	all := false
 	for _, name := range csvlist.Split(raw) {
 		name = strings.ToLower(name)
 		if name == "all" {
-			return AllFamilies(), nil
+			all = true // after the loop: "all,bogus" still names a bogus one
+			continue
 		}
 		f := TraceFamily(name)
 		if _, ok := familySyscalls[f]; !ok {
 			return nil, fmt.Errorf("unknown trace family %q (want %s or all)", name, familyNames())
 		}
 		want[f] = true
+	}
+	if all {
+		return AllFamilies(), nil
 	}
 	for _, f := range DefaultFamilies() {
 		want[f] = true

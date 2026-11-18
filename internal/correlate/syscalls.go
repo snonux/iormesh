@@ -186,6 +186,7 @@ func (c *Correlator) syscallDetail(ev *schema.Event, en enter, ret int64) (*sock
 		// EBADF means there was nothing to release.
 		if ret != -int64(syscall.EBADF) {
 			p.close(en.fd)
+			c.dropFlows(p, en.fd)
 		}
 	case schema.KindConnect:
 		sock = c.connectDetail(ev, p, en, sock)

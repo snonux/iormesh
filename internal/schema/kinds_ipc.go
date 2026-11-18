@@ -82,3 +82,13 @@ func signalKind(kind string) bool {
 	}
 	return false
 }
+
+// fd2Kind reports whether kind may carry args.fd2: the pair creators and
+// epoll_ctl's registered fd.
+func fd2Kind(kind string) bool {
+	switch kind {
+	case KindPipe, KindPipe2, KindSocketpair, KindEpollCtl:
+		return true
+	}
+	return false
+}

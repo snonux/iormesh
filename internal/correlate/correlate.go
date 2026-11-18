@@ -107,9 +107,10 @@ func New(cfg Config) *Correlator {
 // TCP state records, the process lifecycle records of M2 steps 1 and 6
 // (new processes, execs, exits) and M2 step 7's records (handleIPC:
 // pipes, socketpairs, kill, epoll and poll, socket addresses, signals).
-// Other record types are ignored; the exec_argv records of a pattern session are the caller's to judge
-// (Incarnation), and an exec's argv reaches the trace through Exec, once
-// the caller has completed a truncated one. The error is the sink's, or
+// Other record types are ignored; the exec_argv records of a pattern
+// session are the caller's to judge (Incarnation), and an exec's argv
+// reaches the trace through Exec, once the caller has completed a
+// truncated one. The error is the sink's, or
 // ErrEnded after End.
 func (c *Correlator) Handle(rec any) error {
 	if c.ended {
