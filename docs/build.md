@@ -72,7 +72,9 @@ pinned SHA-256 and relocates its classes to
 neither build nor tests touch the network. `mage agentTest` runs
 with the `java` on `PATH` and again with each JDK listed in
 `IORMESH_AGENT_JDKS` (colon-separated `JAVA_HOME`s), which is how
-the `jdk17` hook table gets checked against a JDK 17. It ends
+each hook-table variant gets checked against its JDK: list a 17
+and a 21 (`jdk17`, `jdk21`) when `java` on `PATH` is 25 or later
+(`jdk25`). It ends
 with `internal/agentspool`'s `TestJava*` tests (cgo-free, run with
 the `java` on `PATH`), which skip under a plain `go test` because
 only Mage sets the agent and workload paths they need.

@@ -157,8 +157,9 @@ throwaway; its findings update this plan.
   without the walk ≈0.3 µs. Decisions #2, #6 and #27 are
   settled, and the envelope's Java fields with them: nested
   `java.thread` / `java.stack` (see "Trace output contract").
-  Untested: a JDK 21 runtime, the ASM-based agent on 21 and 17,
-  stripped or static JDK libraries, multi-threaded cost, cost on
+  Untested in S1: a JDK 21 runtime and the ASM-based agent on
+  21 and 17 (both since run in M3, see #29), stripped or static
+  JDK libraries, multi-threaded cost, cost on
   a quiet host, the join on the native-entry stamp (the prototype
   paired on `sys_enter`), per-PID uprobe attachment, containers.
 - **S2 — Cross-host join** (gates M4's merge). Questions:
@@ -1054,9 +1055,14 @@ answer), and deferred.
   while 17 differs (no `UnixFileDispatcherImpl`/`UnixDispatcher`,
   RAF `readBytes` instead of `readBytes0`) — one hook-table
   variant for 17. M3 (task 0b4) builds the agent for 17 with
-  shaded ASM and ships two table variants, `jdk17` (17–20) and
-  `jdk21` (21+); the agent runs and its hooks fire on 17, 25 and
-  27-ea (no 21 runtime was at hand; 18–20 untested).
+  shaded ASM and ships per-JDK table variants. A real JDK 21
+  (task sc4) showed one hooked Java method S1's source reading
+  missed: `Net.serverSocket` keeps its `boolean` stream flag
+  through 24 and drops it in 25 — so three variants, `jdk17`
+  (17–20), `jdk21` (21–24) and `jdk25` (25+). The agent runs and
+  its hooks fire on 17, 21 (21.0.6, 21.0.12), 25 and 27-ea; 22
+  and 24 were checked by `javap` of their class files only, 23
+  and 18–20 are untested.
   *Default: agent runs on 17+; anything
   older is traced without Java attribution (the non-Java
   node shape).*

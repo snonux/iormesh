@@ -22,7 +22,9 @@ import java.util.Set;
  *
  * Data rather than code so that decision #29's per-JDK differences are
  * table variants (S1: 17 lacks UnixFileDispatcherImpl/UnixDispatcher and
- * has native RAF readBytes/writeBytes; 21 through 27-ea agree), and so
+ * has native RAF readBytes/writeBytes; 21 to 24 keep Net.serverSocket's
+ * stream flag, which 25 dropped — found on a real 21, S1 had only its
+ * sources), and so
  * the tracer can load the same rows for its uprobe set and per-native
  * syscall allowlist (M3 step 3). Exact descriptors, not names: a JDK
  * that changes a signature leaves the row unmatched, which the agent
@@ -72,15 +74,19 @@ final class HookTable {
 
     /**
      * The variant for a JDK feature release: "jdk17" for 17–20 (only 17
-     * is checked; 18–20 are assumed to match it), "jdk21" from 21 on,
-     * null below 17 — such JVMs are traced without Java attribution
-     * (decision #29).
+     * is checked; 18–20 are assumed to match it), "jdk21" for 21–24 (21
+     * is run; 22 and 24 were checked by javap, 23 is assumed), "jdk25"
+     * from 25 on, null below 17 — such JVMs are traced without Java
+     * attribution (decision #29).
      */
     static String variantFor(int feature) {
         if (feature < 17) {
             return null;
         }
-        return feature < 21 ? "jdk17" : "jdk21";
+        if (feature < 21) {
+            return "jdk17";
+        }
+        return feature < 25 ? "jdk21" : "jdk25";
     }
 
     /** Loads the bundled variant's resource. */

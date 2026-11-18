@@ -6,7 +6,10 @@ numbers and the throwaway code are in
 [spikes/s1/](../../spikes/s1/NOTES.md). Kernel 7.2.15-200.fc44,
 bpftrace 0.24.2, JDK 25.0.4.1 (Red Hat build; 27-ea for the
 uprobe join), November 2026. No JDK 21 runtime was installed:
-JDK 21 was checked against its sources only.
+JDK 21 was checked against its sources only — which missed one
+signature: 21 has `Net.serverSocket(ProtocolFamily, boolean)`, not
+25's `serverSocket(ProtocolFamily)`. M3 found it on real 21
+runtimes (task sc4) and split the hook table (PLAN.md #29).
 
 **Verdict: works.** Every declared I/O op of `file-basic` (6/6)
 and `tcp-loopback` (server 11/11, client 10/10) is attributed to
@@ -266,6 +269,8 @@ stacks, and a per-thread cache of the last stack for tight loops
 
 - A **JDK 21 runtime** (sources only) and the agent on 21: the
   prototype uses `java.lang.classfile` (JDK 24+); M3 shades ASM.
+  Since covered by M3: the ASM agent runs on 21.0.6 and 21.0.12
+  under `mage agentTest`.
 - JDK builds with **stripped or statically linked** native
   libraries (no `Java_*` symbols to attach to).
 - Multiple threads in the cost runs, and the cost on a quiet host.

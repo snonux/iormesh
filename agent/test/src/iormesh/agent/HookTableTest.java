@@ -36,11 +36,13 @@ final class HookTableTest {
         equal("jdk17", HookTable.variantFor(17), "17");
         equal("jdk17", HookTable.variantFor(20), "20");
         equal("jdk21", HookTable.variantFor(21), "21");
-        equal("jdk21", HookTable.variantFor(27), "27");
+        equal("jdk21", HookTable.variantFor(24), "24");
+        equal("jdk25", HookTable.variantFor(25), "25");
+        equal("jdk25", HookTable.variantFor(27), "27");
     }
 
     static void bundled() throws Exception {
-        for (String v : List.of("jdk17", "jdk21")) {
+        for (String v : List.of("jdk17", "jdk21", "jdk25")) {
             HookTable t = HookTable.load(v);
             check(t.hooks().size() > 30, v + " has " + t.hooks().size() + " rows");
             check(t.hasClass("java/io/FileOutputStream"), v + " lists FileOutputStream");
@@ -50,6 +52,16 @@ final class HookTableTest {
         // The variants differ where S1 found the JDKs differ (#29).
         check(HookTable.load("jdk21").hasClass("sun/nio/ch/UnixDispatcher"), "21 UnixDispatcher");
         check(!HookTable.load("jdk17").hasClass("sun/nio/ch/UnixDispatcher"), "17 no UnixDispatcher");
+        // 21–24 keep Net.serverSocket's stream flag; 25 dropped it.
+        String net = "sun/nio/ch/Net";
+        String pf = "(Ljava/net/ProtocolFamily;";
+        String fd = ")Ljava/io/FileDescriptor;";
+        check(HookTable.load("jdk21").lookup(net, "serverSocket", pf + "Z" + fd) != null,
+                "21 serverSocket(ProtocolFamily, boolean)");
+        check(HookTable.load("jdk25").lookup(net, "serverSocket", pf + fd) != null,
+                "25 serverSocket(ProtocolFamily)");
+        check(HookTable.load("jdk25").lookup(net, "serverSocket", pf + "Z" + fd) == null,
+                "25 no serverSocket(ProtocolFamily, boolean)");
     }
 
     static void badRows() throws Exception {
@@ -82,10 +94,10 @@ final class HookTableTest {
      * IORMESH_AGENT_JDKS to check the other variants.
      *
      * "Reaches" allows a short detour through methods of the same class:
-     * JDK 25 routes RandomAccessFile.write through implWrite (a JFR
-     * FileWriteEvent split) where 21 calls write0 directly, and hooking
-     * write keeps one row valid for both while the bracket still holds
-     * only the native's I/O.
+     * JDK 24 and later route RandomAccessFile.write through implWrite
+     * (a JFR FileWriteEvent split) where 21 calls write0 directly, and
+     * hooking write keeps one row valid for both — jdk21 covers 21–24 —
+     * while the bracket still holds only the native's I/O.
      */
     static void matchesRunningJdk() throws Exception {
         HookTable t = HookTable.load(HookTable.variantFor(Runtime.version().feature()));

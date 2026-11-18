@@ -1507,7 +1507,8 @@ agent/
   core/src/iormesh/agent/HookTable.java      # loads the tables below
   core/src/iormesh/agent/BoundaryTransformer.java
   core/resources/iormesh/agent/hooks-jdk17.tsv  # 17–20
-  core/resources/iormesh/agent/hooks-jdk21.tsv  # 21+
+  core/resources/iormesh/agent/hooks-jdk21.tsv  # 21–24
+  core/resources/iormesh/agent/hooks-jdk25.tsv  # 25+
   core/src/iormesh/agent/http/…              # one file per library
   core/src/iormesh/agent/otel/SpanContext.java
   test/src/iormesh/agent/…    # plain-main unit tests + AgentSmoke
@@ -1586,14 +1587,14 @@ internal/correlate/javajoin.go
    the tracer gets the same table for its uprobe set (S1's hook
    table above). Done (task 0b4): one TSV per variant (columns id,
    kind, class, method, descriptor, native, syscalls) — `jdk17`
-   for 17–20, `jdk21` for 21+, chosen by
+   for 17–20, `jdk21` for 21–24, `jdk25` for 25+, chosen by
    `Runtime.version().feature()`, below 17 no attribution. One row
    per overload; kinds come from a fixed set (open, read, write,
    close, seek, socket, bind, connect, listen, accept, shutdown,
    unlink, rename, stat). A test walks each row against the
    running JDK's class bytes: the method exists, has a body, the
    named native is a native method, and the method reaches it
-   within three same-class calls (JDK 25 routes
+   within three same-class calls (JDK 24 and later route
    `RandomAccessFile.write` through a JFR `implWrite` that 21 does
    not have); deliberately wrong rows must fail it. Beyond S1's
    table, 17 sends socket writes and closes from
@@ -1620,12 +1621,15 @@ internal/correlate/javajoin.go
    `IORMESH_AGENT_JDKS`); the smoke runs with boot-class
    verification on (`-XX:+BytecodeVerificationLocal`). Live attach
    fired the hooks on 25 and a doubled `-javaagent` installed once
-   (by hand, not in `agentTest`). Not run: 18–20. Open: the first
-   JDK 21 runs (21.0.6, 21.0.12, during task 1b4) fail the
-   running-JDK check on one `jdk21` row — 21 has no
-   `Net.serverSocket(ProtocolFamily)`, only `serverSocket(boolean)`
-   and `serverSocket(ProtocolFamily, boolean)`; the row came from
-   S1's reading of the 21 sources.
+   (by hand, not in `agentTest`). Not run: 18–20, 22–24. JDK 21
+   (21.0.6, 21.0.12; task sc4) passes everything, smoke included,
+   after one fix: 21 has no `Net.serverSocket(ProtocolFamily)`,
+   only `serverSocket(boolean)` and `serverSocket(ProtocolFamily,
+   boolean)` — S1's reading of the 21 sources had missed it. The
+   `boolean` survives through 24 (`javap` of 22.0.2's and 24.0.2's
+   class files; every other hooked signature matches 21) and is
+   gone in 25, hence `jdk21` (21–24) and `jdk25` (25+), which
+   differ in that one row.
 4. The ring (decision #27): one file per JVM,
    `<spool dir>/<pid>.ring` (pid as the JVM sees it), in the
    tracer-owned directory, mapped `MAP_SHARED` by agent and

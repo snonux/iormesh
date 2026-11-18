@@ -1,5 +1,8 @@
-# iormesh agent hook table, variant jdk21 (JDK 21 and later; checked on 25
-# and 27-ea, and against the JDK 21 sources by S1 — no 21 runtime here).
+# iormesh agent hook table, variant jdk21 (JDK 21 to 24; run on 21.0.6
+# and 21.0.12; 22.0.2 and 24.0.2 checked by javap of their class files,
+# 23 assumed to match). Where 21 differs from the jdk25 variant: Net's
+# serverSocket still takes a "stream" flag, (ProtocolFamily, boolean) —
+# 25 dropped it. S1 read the 21 sources and missed that difference.
 # Written by hand from javap -p -s of the JDK classes and checked against
 # the running JDK by `mage agentTest` (HookTableTest.matchesRunningJdk).
 # One row per hooked Java method (overloads are separate rows). Columns,
@@ -45,7 +48,7 @@
 26	write	sun/nio/ch/SocketDispatcher	writev	(Ljava/io/FileDescriptor;JI)J	writev0	writev
 27	close	sun/nio/ch/UnixDispatcher	close	(Ljava/io/FileDescriptor;)V	close0	close
 28	socket	sun/nio/ch/Net	socket	(Ljava/net/ProtocolFamily;Z)Ljava/io/FileDescriptor;	socket0	socket,setsockopt
-29	socket	sun/nio/ch/Net	serverSocket	(Ljava/net/ProtocolFamily;)Ljava/io/FileDescriptor;	socket0	socket,setsockopt
+29	socket	sun/nio/ch/Net	serverSocket	(Ljava/net/ProtocolFamily;Z)Ljava/io/FileDescriptor;	socket0	socket,setsockopt
 30	bind	sun/nio/ch/Net	bind	(Ljava/net/ProtocolFamily;Ljava/io/FileDescriptor;Ljava/net/InetAddress;I)V	bind0	bind
 31	connect	sun/nio/ch/Net	connect	(Ljava/net/ProtocolFamily;Ljava/io/FileDescriptor;Ljava/net/InetAddress;I)I	connect0	connect
 32	listen	sun/nio/ch/NioSocketImpl	listen	(I)V	sun/nio/ch/Net.listen	listen

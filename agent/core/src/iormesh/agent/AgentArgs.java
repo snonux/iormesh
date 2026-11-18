@@ -9,7 +9,7 @@ package iormesh.agent;
  * <li>{@code bridge=<path>} — use this bridge jar instead of extracting
  *     the one nested in the agent jar;</li>
  * <li>{@code table=<variant>} — force a hook-table variant (jdk17,
- *     jdk21) instead of picking it from the running JDK;</li>
+ *     jdk21, jdk25) instead of picking it from the running JDK;</li>
  * <li>{@code debug=<path>} — at JVM exit, write the hook table with
  *     whether each row was applied and how many brackets it closed
  *     (the smoke test's evidence that the hooks fire);</li>

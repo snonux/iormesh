@@ -5,9 +5,9 @@
 # socket writes and closes call FileDispatcherImpl's natives from
 # SocketDispatcher (no UnixDispatcher); FileDispatcherImpl.close reaches
 # FileDescriptor.close, already hooked; RandomAccessFile's readBytes and
-# writeBytes are themselves native, so read/write are hooked; Net's
-# socket factories take a "reuse" flag; UnixNativeDispatcher has
-# stat(UnixPath) instead of stat2.
+# writeBytes are themselves native, so read/write are hooked;
+# UnixNativeDispatcher has stat(UnixPath) instead of stat2. Net's
+# serverSocket(ProtocolFamily, boolean) is the same as in jdk21.
 # Written by hand from javap -p -s of the JDK classes and checked against
 # the running JDK by `mage agentTest` (HookTableTest.matchesRunningJdk).
 # One row per hooked Java method (overloads are separate rows). Columns,
