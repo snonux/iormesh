@@ -250,3 +250,26 @@ func FuzzArgvOneElement(f *testing.F) {
 		}
 	})
 }
+
+// TestArgvMultiWordHeaderValue: inside a multi-word element a denied
+// header's value is the rest of the element, which can itself be several
+// words; the whole of it is masked, not just its first word.
+func TestArgvMultiWordHeaderValue(t *testing.T) {
+	p := Default()
+	cases := []struct{ in, want, leak string }{
+		{"-H Authorization: Bearer S", "-H Authorization: ***", "S"},
+		{"  Authorization: Bearer S", "  Authorization: ***", "S"},
+		{"-H Proxy-Authorization:\tBasic dXNlcjpwYXNz", "-H Proxy-Authorization:\t***", "dXNlcjpwYXNz"},
+		{"-H Accept: text/plain", "-H Accept: text/plain", ""}, // not denied
+	}
+	for _, c := range cases {
+		got := p.Argv([]string{"curl", c.in})[1]
+		if got != c.want || (c.leak != "" && strings.Contains(got, c.leak)) {
+			t.Errorf("Argv(curl, %q)[1] = %q, want %q", c.in, got, c.want)
+		}
+	}
+	// A denied header name as the last word still masks the next element.
+	if got := p.Argv([]string{"curl", "-H Authorization:", "Bearer S"}); got[2] != Mask {
+		t.Errorf("trailing header name: %q, want the next element masked", got)
+	}
+}

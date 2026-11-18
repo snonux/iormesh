@@ -34,14 +34,41 @@ func (p Policy) words(st *argvState, s string) (string, bool) {
 	}
 	sub := argvState{progs: slices.Clone(st.progs)}
 	var b strings.Builder
-	for _, t := range toks {
+	for i, t := range toks {
 		if t.sep {
 			b.WriteString(t.text)
 			continue
 		}
 		b.WriteString(p.word(&sub, t.text))
+		if p.openHeader(t.text) && hasWordAfter(toks, i) {
+			// A header value is the rest of the element and may itself be
+			// several words ("Authorization: Bearer S"): masking only the
+			// next word would leak the token, so everything after the
+			// name's separator becomes one Mask.
+			b.WriteString(toks[i+1].text)
+			b.WriteString(Mask)
+			return b.String(), false
+		}
 	}
 	return b.String(), sub.maskNext
+}
+
+// openHeader reports a denied header name with an empty value, e.g. the
+// word "Authorization:" of "-H Authorization: Bearer S".
+func (p Policy) openHeader(word string) bool {
+	name, rest, ok := strings.Cut(word, ":")
+	bare := strings.TrimLeft(name, `'"`)
+	return ok && rest == "" && isName(bare) && denied(p.HeaderDeny, bare)
+}
+
+// hasWordAfter reports whether a word follows toks[i] (separators skipped).
+func hasWordAfter(toks []token, i int) bool {
+	for _, t := range toks[i+1:] {
+		if !t.sep {
+			return true
+		}
+	}
+	return false
 }
 
 // splitWords cuts s into words and separators. With quotes, a run between
