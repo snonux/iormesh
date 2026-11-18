@@ -3,6 +3,7 @@ package bpf
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"syscall"
 
 	bpf "github.com/aquasecurity/libbpfgo"
@@ -19,6 +20,17 @@ type Probe struct {
 
 func (p Probe) String() string {
 	return p.Category + ":" + p.Event
+}
+
+// pairKey groups a syscall's enter and exit probe: they attach together or
+// not at all, since an enter without its exit (or the reverse) yields
+// records the correlator could never pair. Other probes stand alone.
+func (p Probe) pairKey() string {
+	if p.Category != "syscalls" {
+		return p.String()
+	}
+	name := strings.TrimPrefix(strings.TrimPrefix(p.Event, "sys_enter_"), "sys_exit_")
+	return "syscalls:" + name
 }
 
 // DefaultProbes is M1's attach set: enter and exit of every syscall in
@@ -38,31 +50,89 @@ func DefaultProbes() []Probe {
 	})
 }
 
-// attachAll attaches probes one at a time. libbpfgo appends each link to a
-// module-wide slice without a lock, so attaches must never run in parallel
-// (ior's libbpfAttachMu, internal/ior_bpflink.go @ b21afc50328c); a single
-// sequential loop needs no mutex.
-func (t *Tracer) attachAll(probes []Probe) error {
-	for _, p := range probes {
-		link, err := t.attach(p)
-		switch {
-		case errors.Is(err, syscall.ENOENT):
-			// The tracepoint does not exist on this kernel (an arch without
-			// open(2), say): skip it, as ior does, and report it.
-			t.skipped = append(t.skipped, p)
-		case err != nil:
-			return err
-		default:
-			t.links = append(t.links, link)
+// errNothingAttached: every probe was skipped. A missing tracepoint and an
+// unmounted tracefs both surface as ENOENT, so without this check a host
+// without tracefs would run a session that silently traces nothing (ior's
+// noProbesError, internal/ior_bpfsetup.go @ b21afc50328c).
+var errNothingAttached = errors.New("bpf: no probe attached (every tracepoint missing — is tracefs mounted?)")
+
+// attachFunc attaches one probe; destroyFunc detaches one link. They are
+// parameters so attachProbes can be tested without a kernel.
+type (
+	attachFunc  func(Probe) (*bpf.BPFLink, error)
+	destroyFunc func(*bpf.BPFLink) error
+)
+
+// attachProbes attaches probes one pair group at a time, in order. A group
+// with a tracepoint this kernel lacks (ENOENT) is detached again and
+// skipped as a whole; any other error aborts. Attaches run sequentially
+// because libbpfgo appends each link to a module-wide slice without a lock
+// (ior's libbpfAttachMu, internal/ior_bpflink.go @ b21afc50328c).
+func attachProbes(probes []Probe, attach attachFunc, destroy destroyFunc) (
+	links []*bpf.BPFLink, skipped []Probe, err error) {
+	for _, group := range pairGroups(probes) {
+		got, missing, err := attachGroup(group, attach, destroy)
+		if err != nil {
+			return links, skipped, err
 		}
+		if missing {
+			skipped = append(skipped, group...)
+			continue
+		}
+		links = append(links, got...)
 	}
-	return nil
+	if len(links) == 0 {
+		return nil, skipped, errNothingAttached
+	}
+	return links, skipped, nil
 }
 
-func (t *Tracer) attach(p Probe) (*bpf.BPFLink, error) {
+// pairGroups splits probes into groups by pairKey, keeping first-seen order.
+func pairGroups(probes []Probe) [][]Probe {
+	index := map[string]int{}
+	var groups [][]Probe
+	for _, p := range probes {
+		k := p.pairKey()
+		i, ok := index[k]
+		if !ok {
+			i = len(groups)
+			index[k] = i
+			groups = append(groups, nil)
+		}
+		groups[i] = append(groups[i], p)
+	}
+	return groups
+}
+
+// attachGroup attaches every probe of one group. On ENOENT it detaches what
+// it attached and reports the group missing.
+func attachGroup(group []Probe, attach attachFunc, destroy destroyFunc) (
+	[]*bpf.BPFLink, bool, error) {
+	var links []*bpf.BPFLink
+	for _, p := range group {
+		link, err := attach(p)
+		if err == nil {
+			links = append(links, link)
+			continue
+		}
+		var derr error
+		for _, l := range links {
+			derr = errors.Join(derr, destroy(l))
+		}
+		if errors.Is(err, syscall.ENOENT) && derr == nil {
+			return nil, true, nil
+		}
+		return nil, false, errors.Join(err, derr)
+	}
+	return links, false, nil
+}
+
+// attachTracepoint is the real attachFunc of a loaded module.
+func (t *Tracer) attachTracepoint(p Probe) (*bpf.BPFLink, error) {
 	prog, err := t.module.GetProgram(p.Program)
 	if err != nil {
-		// Our own object lacks the program: a build defect, never a skip.
+		// Our own object lacks the program: a build defect, never a skip,
+		// so the error is not wrapped (it may carry ENOENT).
 		return nil, fmt.Errorf("program %s: %v", p.Program, err)
 	}
 	link, err := prog.AttachTracepoint(p.Category, p.Event)

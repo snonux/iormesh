@@ -1,7 +1,6 @@
 package bpf
 
 import (
-	"errors"
 	"fmt"
 )
 
@@ -16,7 +15,6 @@ func (t *Tracer) startReader(buffer int) error {
 	if err != nil {
 		return fmt.Errorf("ring buffer %s: %w", ringbufMapName, err)
 	}
-	t.rb = rb
 	t.records = make(chan any, buffer)
 	t.decoded.Add(1)
 	go t.decodeLoop(raw)
@@ -43,36 +41,20 @@ func (t *Tracer) decodeLoop(raw <-chan []byte) {
 	}
 }
 
-// Close detaches every probe first, so no new record is produced, then
-// stops the ring buffer and closes Records. Records still in flight when
-// Close is called are dropped. It is safe to call more than once.
+// Close stops the trace and closes Records; records in flight are dropped.
+// It is safe to call more than once. libbpfgo's Module.Close does the
+// teardown in the right order — ring buffer (its Stop drains and closes
+// the raw channel, which ends decodeLoop), then every link still attached,
+// then the object — so links are never destroyed here a second time: a
+// failed bpf_link__destroy has already freed the link, and destroying it
+// again would be a double free.
 func (t *Tracer) Close() error {
-	var err error
 	t.closing.Do(func() {
 		close(t.done)
-		err = t.destroyLinks()
-		if t.rb != nil {
-			t.rb.Close()
-			t.decoded.Wait()
-		}
 		if t.module != nil {
 			t.module.Close()
 		}
+		t.decoded.Wait()
 	})
-	return err
-}
-
-// destroyLinks detaches every attached program. Links are destroyed before
-// the module is closed: libbpf frees the programs with the object, and a
-// link outliving its program is a use-after-free (ior's probe manager keeps
-// the same order).
-func (t *Tracer) destroyLinks() error {
-	var errs []error
-	for _, l := range t.links {
-		if err := l.Destroy(); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	t.links = nil
-	return errors.Join(errs...)
+	return nil
 }

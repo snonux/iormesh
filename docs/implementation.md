@@ -619,9 +619,12 @@ Output of this package is a channel of decoded raw records
   `AddTarget`/`RemoveTarget` edit `target_map` at run time.
 - `DefaultProbes()` is enter+exit of every
   `tracepoints.DefaultSyscalls()` syscall plus
-  `sock:inet_sock_set_state`. A tracepoint this kernel lacks
-  (`ENOENT`) is skipped and listed by `Skipped()`; a program
-  missing from our own object is an error.
+  `sock:inet_sock_set_state`. A syscall's enter and exit attach
+  together or not at all; a pair whose tracepoint this kernel
+  lacks (`ENOENT`) is skipped and listed by `Skipped()`. A
+  program missing from our own object, any other attach error,
+  and a set where nothing attached (an unmounted tracefs looks
+  like every tracepoint missing) fail `Open`.
 - `Records()` yields typed records (`*types.OpenEvent`, …) in
   ring-buffer order; the decode table is ior's
   `rawRuntimeEvents` mapping (`eventloop_kinds.go`) without its
@@ -630,15 +633,21 @@ Output of this package is a channel of decoded raw records
 - `Losses()` = kernel drops (`ringbuf_drop_map`, summed per CPU)
   + records that arrived undecodable (unknown type, malformed,
   short) — the correlator turns deltas into `drop` events.
-- `Close()` destroys links before the module (a link must not
-  outlive its program), stops the poll and closes `Records`;
-  records in flight at Close are dropped.
+- `Close()` leaves the teardown order to libbpfgo's
+  `Module.Close` — ring buffer (stops the poll, closes the raw
+  channel and so `Records`), then links, then the object — and
+  never destroys a link itself (a failed destroy already freed
+  it). Records in flight at Close are dropped and not counted;
+  the map methods return an error after Close but must not race
+  it.
 
 Root tests (`internal/loader_root_test.go`, run by `mage
 bpfRootTest`): a bash target opening `/etc/hostname` with shell
 builtins yields an `OpenEvent` with no loss; an untargeted PID
-yields nothing until `AddTarget`, and nothing again after
-`RemoveTarget`; `Close` closes `Records` with nobody reading.
+yields nothing until `AddTarget`, nothing after `RemoveTarget`,
+and is traced again after a second `AddTarget`; `Close` closes
+`Records` with both channels full and nobody reading; `Open`
+with only missing tracepoints fails.
 
 **Step 6 — the correlator** (`internal/correlate`):
 

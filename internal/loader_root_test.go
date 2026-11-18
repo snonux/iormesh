@@ -65,10 +65,20 @@ func (tg *target) poke(t *testing.T) {
 
 func openTracer(t *testing.T, pids ...uint32) *ibpf.Tracer {
 	t.Helper()
+	return openTracerWith(t, ibpf.Config{Pids: pids})
+}
+
+func requireRoot(t *testing.T) {
+	t.Helper()
 	if os.Geteuid() != 0 {
 		t.Skip("needs root to load BPF programs (run `mage bpfRootTest`)")
 	}
-	tr, err := ibpf.Open(ibpf.Config{Pids: pids})
+}
+
+func openTracerWith(t *testing.T, cfg ibpf.Config) *ibpf.Tracer {
+	t.Helper()
+	requireRoot(t)
+	tr, err := ibpf.Open(cfg)
 	if err != nil {
 		t.Fatalf("open tracer: %v", err)
 	}
@@ -118,8 +128,9 @@ func TestLoaderDeliversRecords(t *testing.T) {
 }
 
 // TestLoaderTargetsOnlyTheMap: a process outside target_map yields nothing;
-// after AddTarget it does; after RemoveTarget it stops again. Each negative
-// phase is followed by a positive one, so a dead pipeline cannot pass it.
+// after AddTarget it does; after RemoveTarget it stops; after a second
+// AddTarget it is traced again. Each negative phase is followed by a
+// positive one, so a dead pipeline cannot pass it.
 func TestLoaderTargetsOnlyTheMap(t *testing.T) {
 	tg := startTarget(t)
 	tr := openTracer(t)
@@ -141,14 +152,24 @@ func TestLoaderTargetsOnlyTheMap(t *testing.T) {
 	if paths := opensOf(tr, tg.pid(), 500*time.Millisecond); len(paths) != 0 {
 		t.Fatalf("after RemoveTarget pid %d still traced: %v", tg.pid(), paths)
 	}
+	if err := tr.AddTarget(tg.pid()); err != nil {
+		t.Fatal(err)
+	}
+	tg.poke(t)
+	if paths := opensOf(tr, tg.pid(), 2*time.Second); !contains(paths, probePath) {
+		t.Fatalf("after re-adding: no open of %s; got %v", probePath, paths)
+	}
 }
 
 // TestLoaderCloseEndsRecords: Close closes Records even with nobody
-// reading, and a second Close is harmless.
+// reading and both channels full (Buffer 1, many records unread), a second
+// Close is harmless, and the map methods refuse to touch the freed module.
 func TestLoaderCloseEndsRecords(t *testing.T) {
 	tg := startTarget(t)
-	tr := openTracer(t, tg.pid())
-	tg.poke(t)
+	tr := openTracerWith(t, ibpf.Config{Pids: []uint32{tg.pid()}, Buffer: 1})
+	for range 20 {
+		tg.poke(t)
+	}
 	if err := tr.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
@@ -157,6 +178,9 @@ func TestLoaderCloseEndsRecords(t *testing.T) {
 	}
 	if _, err := tr.Losses(); err == nil {
 		t.Fatal("Losses after Close read a freed module")
+	}
+	if err := tr.AddTarget(tg.pid()); err == nil {
+		t.Fatal("AddTarget after Close touched a freed module")
 	}
 	timeout := time.After(5 * time.Second)
 	for {
@@ -178,4 +202,21 @@ func contains(xs []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestLoaderRefusesEmptyAttach: when every probe's tracepoint is missing
+// (what an unmounted tracefs looks like too), Open fails instead of running
+// a session that traces nothing.
+func TestLoaderRefusesEmptyAttach(t *testing.T) {
+	requireRoot(t)
+	tr, err := ibpf.Open(ibpf.Config{Probes: []ibpf.Probe{{
+		Program: "handle_sys_enter_openat", Category: "syscalls", Event: "sys_enter_no_such_call",
+	}}})
+	if err == nil {
+		_ = tr.Close()
+		t.Fatal("Open with only missing tracepoints succeeded")
+	}
+	if tr != nil {
+		t.Fatal("Open returned a tracer together with its error")
+	}
 }

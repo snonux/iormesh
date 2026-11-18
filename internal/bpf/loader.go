@@ -44,7 +44,6 @@ type Tracer struct {
 	module  *bpf.Module
 	links   []*bpf.BPFLink
 	skipped []Probe
-	rb      *bpf.RingBuffer
 	records chan any
 	done    chan struct{}
 	decoded sync.WaitGroup
@@ -74,10 +73,14 @@ func Open(cfg Config) (_ *Tracer, err error) {
 	if probes == nil {
 		probes = DefaultProbes()
 	}
-	if err := t.attachAll(probes); err != nil {
+	t.links, t.skipped, err = attachProbes(probes, t.attachTracepoint, (*bpf.BPFLink).Destroy)
+	if err != nil {
 		return nil, err
 	}
-	return t, t.startReader(cfg.Buffer)
+	if err := t.startReader(cfg.Buffer); err != nil {
+		return nil, err
+	}
+	return t, nil
 }
 
 // load sets the load-time globals, loads the object into the kernel and
@@ -120,6 +123,9 @@ func (t *Tracer) RemoveTarget(pid uint32) error {
 }
 
 func (t *Tracer) setTarget(pid uint32, on bool) error {
+	if t.closed() {
+		return errClosed
+	}
 	m, err := t.module.GetMap(targetMapName)
 	if err != nil {
 		return fmt.Errorf("get %s: %w", targetMapName, err)
@@ -151,16 +157,28 @@ func (t *Tracer) Skipped() []Probe {
 	return append([]Probe(nil), t.skipped...)
 }
 
-// errClosed is what Losses returns after Close: the kernel counter lives in
-// the module Close freed.
+// errClosed is what the map-touching methods return after Close: the maps
+// live in the module Close freed.
 var errClosed = errors.New("bpf: tracer closed")
 
-// Losses reads the cumulative loss counters. Read them before Close.
-func (t *Tracer) Losses() (Losses, error) {
+// closed reports whether Close has started. AddTarget, RemoveTarget and
+// Losses check it, but must still not race Close itself: a call that passed
+// the check while Close frees the module would touch freed memory.
+func (t *Tracer) closed() bool {
 	select {
 	case <-t.done:
-		return Losses{}, errClosed
+		return true
 	default:
+		return false
+	}
+}
+
+// Losses reads the cumulative loss counters. Read them before Close: the
+// records Close drops in flight are counted nowhere, by design, since the
+// counters die with the module.
+func (t *Tracer) Losses() (Losses, error) {
+	if t.closed() {
+		return Losses{}, errClosed
 	}
 	l := Losses{
 		Unknown:   t.losses.unknown.Load(),

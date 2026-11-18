@@ -2,10 +2,15 @@ package bpf
 
 import (
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"os"
 	"regexp"
+	"syscall"
 	"testing"
 	"unsafe"
+
+	bpf "github.com/aquasecurity/libbpfgo"
 
 	"iormesh/internal/tracepoints"
 	"iormesh/internal/types"
@@ -161,5 +166,77 @@ func TestDecodeLossesCount(t *testing.T) {
 	l := Losses{Kernel: 1, Unknown: d.unknown.Load(), Malformed: d.malformed.Load(), Short: d.short.Load()}
 	if l.Unknown != 1 || l.Malformed != 2 || l.Short != 1 || l.Total() != 5 {
 		t.Fatalf("losses %+v total %d; want unknown 1 malformed 2 short 1 total 5", l, l.Total())
+	}
+}
+
+// fakeAttach attaches every probe except those whose event is in missing
+// (ENOENT) or broken (EPERM), and records attach/destroy calls.
+type fakeAttach struct {
+	missing, broken map[string]bool
+	attached        []string
+	destroyed       int
+}
+
+func (f *fakeAttach) attach(p Probe) (*bpf.BPFLink, error) {
+	switch {
+	case f.missing[p.Event]:
+		return nil, fmt.Errorf("attach %s: %w", p, syscall.ENOENT)
+	case f.broken[p.Event]:
+		return nil, fmt.Errorf("attach %s: %w", p, syscall.EPERM)
+	}
+	f.attached = append(f.attached, p.Event)
+	return &bpf.BPFLink{}, nil
+}
+
+func (f *fakeAttach) destroy(*bpf.BPFLink) error {
+	f.destroyed++
+	return nil
+}
+
+func TestAttachProbesAllPresent(t *testing.T) {
+	f := &fakeAttach{}
+	links, skipped, err := attachProbes(DefaultProbes(), f.attach, f.destroy)
+	if err != nil || len(skipped) != 0 || len(links) != len(DefaultProbes()) {
+		t.Fatalf("links %d skipped %v err %v; want all %d attached", len(links), skipped, err, len(DefaultProbes()))
+	}
+}
+
+// TestAttachProbesSkipsWholePair: a missing exit takes its already attached
+// enter down with it, so no half pair ever runs.
+func TestAttachProbesSkipsWholePair(t *testing.T) {
+	f := &fakeAttach{missing: map[string]bool{"sys_exit_open": true}}
+	links, skipped, err := attachProbes(DefaultProbes(), f.attach, f.destroy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skipped) != 2 || skipped[0].Event != "sys_enter_open" || skipped[1].Event != "sys_exit_open" {
+		t.Fatalf("skipped %v, want the open pair", skipped)
+	}
+	if f.destroyed != 1 || len(links) != len(DefaultProbes())-2 {
+		t.Fatalf("destroyed %d links %d; want the enter detached and the rest attached", f.destroyed, len(links))
+	}
+}
+
+func TestAttachProbesNothingAttached(t *testing.T) {
+	f := &fakeAttach{missing: map[string]bool{}}
+	for _, p := range DefaultProbes() {
+		f.missing[p.Event] = true
+	}
+	links, _, err := attachProbes(DefaultProbes(), f.attach, f.destroy)
+	if !errors.Is(err, errNothingAttached) || links != nil {
+		t.Fatalf("links %d err %v; want errNothingAttached", len(links), err)
+	}
+}
+
+// TestAttachProbesRealErrorAborts: an error other than ENOENT is never
+// mistaken for a missing tracepoint.
+func TestAttachProbesRealErrorAborts(t *testing.T) {
+	f := &fakeAttach{broken: map[string]bool{"sys_exit_read": true}}
+	_, skipped, err := attachProbes(DefaultProbes(), f.attach, f.destroy)
+	if !errors.Is(err, syscall.EPERM) || len(skipped) != 0 {
+		t.Fatalf("err %v skipped %v; want EPERM and no skip", err, skipped)
+	}
+	if f.destroyed != 1 {
+		t.Fatalf("destroyed %d; want the half-attached read pair's enter detached", f.destroyed)
 	}
 }

@@ -19,6 +19,7 @@ func RootBPFTests() []string {
 		"TestLoaderDeliversRecords",
 		"TestLoaderTargetsOnlyTheMap",
 		"TestLoaderCloseEndsRecords",
+		"TestLoaderRefusesEmptyAttach",
 	}
 }
 
