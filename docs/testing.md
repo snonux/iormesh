@@ -114,7 +114,7 @@ The tests:
 | `TestFileLinks` | file-links golden (symlink text unresolved, no-follow `statx`, hard link); mutated goldens fail |
 | `TestFileAttrs` | file-attrs golden (chmod/chown by path and fd, dirfd-resolved `fchmodat`, `dup`, f*xattr); mutated goldens fail |
 | `TestUntracedProcessStaysOut` | a released but untraced twin leaves no event and no node |
-| `TestSecondRunNormalizesIdentically` | two runs of each scenario, normalized and bracketed, are equal |
+| `TestSecondRunNormalizesIdentically` | two runs of each scenario, normalized and bracketed, are equal (tcp_state: see below) |
 
 The repeat check is exact per process: two processes running at
 once interleave in the host-wide sequence as the scheduler
@@ -126,6 +126,24 @@ client's EOF before it closes: closing right after its reply
 raced the client's close, and the traced TCP teardown (a
 simultaneous close through `CLOSING`, or not) differed between
 runs.
+
+tcp_state events are the one exception. They are the kernel's
+socket transitions (`sock:inet_sock_set_state`), mostly fired
+in softirq as the peer's segments arrive, not the process's
+syscalls. Where they fall between the process's syscalls, and
+whether the tail lands before the end marker, depends on
+scheduling. Under CPU load, about half of the tcp-loopback
+runs failed: the client's `FIN_WAIT2` and `CLOSE` came before
+its `close` event in one run and after it in the next, or after
+the end marker. Also, Java's close runs `shutdown(2)` first,
+and `close(2)` then stores the socket's state again. The kernel
+reports that as `FIN_WAIT1` → `FIN_WAIT1` if the server's ACK
+has not arrived yet; if it has, there is no record. So each
+process's tcp_state events are compared apart from its
+syscalls, in their own order, with an immediate repeat
+collapsed. The shorter run's sequence only has to be a prefix
+of the longer one's. Syscall events and the graph are still
+compared exactly.
 
 `mage integrationTest` builds the tracer, the workload jar and
 the test binary (`integrationtests.test` at the repo root, for a
