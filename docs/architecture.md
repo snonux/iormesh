@@ -22,17 +22,19 @@ views — happens on the controller.
   - Uprobes on the JDK's native I/O functions (`libjava`,
     `libnio`, `libnet`) bracket each Java I/O call per thread
     id, so a syscall can be tied in the kernel to the native
-    call that issued it — the front-runner for the Java↔syscall
-    join, verified in a first experiment (PLAN.md, S1).
+    call that issued it — the Java↔syscall join, confirmed by
+    spike S1 ([result](spikes/s1-java-join.md)) on a curated
+    set of leaf I/O natives.
   - Native stack capture is opt-in and meant for non-JVM
     targets; BPF cannot unwind JIT-compiled Java frames
     reliably.
 - **Correlator (Go, inside the tracer)**
   - Consumes the BPF ring buffer, resolves inode→path, keeps
     pid→fd→path and pid→fd→4-tuple, attaches the Java agent's
-    stacks to the syscalls they caused (by thread id; the exact
-    mechanism is spike S1's pick), and writes the parquet
-    segments.
+    stacks to the syscalls they caused (the uprobe mark names
+    the native call; the agent bracket on the same thread id
+    that contains it, compared in CLOCK_MONOTONIC, names the Java
+    method and stack — S1), and writes the parquet segments.
 - **Java agent**
   - Loaded via `-javaagent` (primary) or the attach API for live
     processes — with JDK 21's dynamic-loading caveats, see
@@ -45,17 +47,19 @@ views — happens on the controller.
     traced but attributed to the carrier thread and flagged;
     naming the virtual thread is deferred (PLAN.md,
     "Deferred — not in v1").
-  - Hands events to the tracer through a spool in a tracer-owned
-    directory — no socket. Its own I/O is tagged and kept out of
-    the target's story.
+  - Hands events to the tracer through a memory-mapped ring in a
+    tracer-owned directory — no socket, and no syscall per
+    record (decision #27). Its few own syscalls (ring setup, one
+    thread-id lookup per thread) are tagged and kept out of the
+    target's story.
   - OpenTelemetry-aware: when the app runs the OTEL SDK, the
     agent reads the active span context and tags every I/O
     event with its OTEL trace/span ids.
   - HTTP/HTTPS instrumentation: hooks at known client/server API
     boundaries record method, URI, headers (redacted), status
     and latency — joined to the socket, the stack and the span.
-  - The whole design is gated by spike S1 (PLAN.md), which
-    proves the join and measures its cost first.
+  - The design was gated by spike S1 (PLAN.md), which proved
+    the join and measured its cost.
 - **Traceable test workload (Java)**
   - A purpose-built Java app — never a live app — that iormesh is
     developed and validated against first. It runs scripted,

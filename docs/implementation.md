@@ -1219,8 +1219,9 @@ budget as a `mage perfGate` target.
 
 **Goal**: prove that a Java stack can be joined to the syscalls it
 caused, and what that costs. Throwaway code under `spikes/s1/`;
-result in `docs/spikes/s1-java-join.md`. Everything below is
-*hypothesis* until the spike says otherwise.
+result in [`docs/spikes/s1-java-join.md`](spikes/s1-java-join.md).
+The experiments below were the plan; each ends with what S1
+found.
 
 **Constraint that shapes the design**: the JDK's I/O classes are
 loaded before any agent runs, and retransformation cannot add,
@@ -1228,19 +1229,54 @@ remove or rename methods. So hooks are pure *body rewrites* of
 existing methods — the native-method-prefix trick is unavailable.
 
 **Experiment 1 — the hook set.** Instrument the thin Java methods
-that directly call the native I/O functions. Starting list for
-JDK 21 (verify each against the JDK sources — these internal names
-move between releases, which feeds decision #29):
+that directly call the native I/O functions. Verified by S1 against
+the JDK 21 sources and the JDK 25 bytecode (21 and 25 agree for
+every entry; 17 differs — decision #29;
+[result](spikes/s1-java-join.md)):
 
-| Class | Methods | Covers |
-|-------|---------|--------|
-| `java.io.FileInputStream` | `open`, `read`, `readBytes` | stream reads |
-| `java.io.FileOutputStream` | `open`, `write`, `writeBytes` | stream writes |
-| `java.io.RandomAccessFile` | `open`, `read*`, `write*` | random access |
-| `sun.nio.ch.FileDispatcherImpl` | `read`, `write`, `pread`, `pwrite` | `FileChannel` |
-| `sun.nio.ch.SocketDispatcher` | `read`, `write`, `readv`, `writev` | sockets |
-| `sun.nio.ch.Net` | `connect`, `accept`, `bind`, `listen` | lifecycle |
-| `sun.nio.fs.UnixNativeDispatcher` | `open`, `rename`, `unlink`, … | `Files.*` |
+| Class (body rewritten) | Java methods | Native (uprobe) | Syscalls allowed under it |
+|-------|---------|--------|--------|
+| `java.io.FileInputStream` | `open`, `read` (all overloads) | `open0`, `read0`, `readBytes` | openat, fstat / read |
+| `java.io.FileOutputStream` | `open`, `write` (all overloads) | `open0`, `write`, `writeBytes` | openat, fstat / write |
+| `java.io.RandomAccessFile` | `open`, `readBytes`, `writeBytes`, `seek` | `open0`, `readBytes0`, `writeBytes0`, `seek0` | openat, fstat / read / write / lseek |
+| `java.io.FileDescriptor` | `close` | `close0` | close |
+| `sun.nio.ch.UnixFileDispatcherImpl` | `read`, `pread`, `readv`, `write`, `pwrite`, `writev`, `seek` | `read0`, `pread0`, … | read, pread64, … |
+| `sun.nio.ch.SocketDispatcher` | `read`, `readv`, `write`, `writev` | `read0`, `readv0`, `write0`, `writev0` | read, readv, write, writev |
+| `sun.nio.ch.UnixDispatcher` | `close` | `close0` | close |
+| `sun.nio.ch.Net` | `socket`, `serverSocket`, `bind`, `connect` | `socket0`, `bind0`, `connect0` | socket, setsockopt / bind / connect |
+| `sun.nio.ch.NioSocketImpl` | `accept`, `listen` (callers) | `Net.accept`, `Net.listen` | accept, accept4 / listen |
+| `sun.nio.ch.ServerSocketChannelImpl` | `implAccept` (caller) | `Net.accept` | accept, accept4 |
+| `sun.nio.fs.UnixNativeDispatcher` | `open`, `unlink`, `rename`, `stat`, … | `open0`, `unlink0`, … | openat / unlink(at) / rename(at) / statx |
+
+What S1 corrected in the first draft of this table:
+
+- `FileDispatcherImpl`'s `read/write/pread/pwrite` live in
+  `sun.nio.ch.UnixFileDispatcherImpl` since JDK 21; the Linux
+  `FileDispatcherImpl` keeps only `transferTo0/From0`.
+- `Net.accept`, `Net.listen`, `Net.shutdown` and `Net.poll` are
+  themselves native — nothing to rewrite. Their *callers* are
+  hooked: `NioSocketImpl.accept/listen` (and
+  `shutdownInput/Output`), `ServerSocketChannelImpl.implAccept`
+  for NIO channels.
+- `FileInputStream.readBytes`, `FileOutputStream.writeBytes` and
+  `RandomAccessFile.readBytes0/writeBytes0` are natives; the Java
+  callers (`read`, `write`, RAF's private `readBytes`/`writeBytes`)
+  are the hooks.
+- Socket close is `UnixDispatcher.close0` (JDK 21+), not a
+  `SocketDispatcher` method.
+
+The uprobe side needs four rules the first experiment did not
+show: (1) a **curated leaf set** of natives — hooking every
+`Java_*` makes `Class.forName0` and friends outer brackets whose
+mark leaks onto unrelated I/O below them; (2) a **per-native
+allowlist of syscall kinds** (last column) — the JVM's own work
+inside a bracket (jimage `pread` while loading an exception class
+inside `open0`, `mprotect` inside `Inet6Address.init`) is "JVM
+work", not the native's I/O; (3) **drop syscall 335** on x86_64,
+`uretprobe(2)` (kernel ≥ 6.11): every uretprobe return enters it
+on the target thread; (4) **per-probe ids** (BPF cookies) as the
+mark, never runtime symbolization — `libextnet.so` is mapped after
+attach and its natives showed up as raw addresses.
 
 Hooking *this low* is deliberate: the bracket around the native
 call is as tight as it gets, and the captured stack still
@@ -1265,6 +1301,10 @@ public final class Agent {
         // loader sees, so the hook entry points live in a tiny
         // separate jar appended to its search path.
         inst.appendToBootstrapClassLoaderSearch(bridgeJar(args));
+        // S1: java.base must also *read* the bridge's (unnamed)
+        // module, or the rewritten JDK methods fail to link Hooks.
+        inst.redefineModule(Object.class.getModule(),
+            Set.of(bridgeModule()), Map.of(), Map.of(), Set.of(), Map.of());
         HookTable table = HookTable.v1();
         inst.addTransformer(new BoundaryTransformer(table), true);
         inst.retransformClasses(table.loadedTargets(inst));
@@ -1301,6 +1341,11 @@ agent may have dependencies, the workload may not) to wrap each
 target method body in `enter`/`try`/`finally exit`.
 `StackIds.current()` walks with `StackWalker`, hashes the frames,
 and writes a `STACK` record the first time a hash is seen.
+
+S1 result: the prototype (`spikes/s1/agent`, `java.lang.classfile`,
+JDK 25 only) did exactly this, with `enter(id)`/`exit(id)` and a
+per-thread bracket stack instead of a token. The stack walk turned
+out to be the agent's dominant cost (Experiment 6).
 
 **Experiment 3 — the join key.** Front-runner first, then the
 agent-only fallbacks.
@@ -1346,6 +1391,15 @@ agent-only fallbacks.
   agent-clock-free, but needs native memory and a uprobe or a
   registered address. Only if (a) and (b) fail.
 
+S1 result: (u) plus (b). The uprobe mark names the native call in
+the kernel; the agent bracket on the same kernel TID (from one
+`readlink /proc/thread-self` per thread) that contains the marked
+syscall names the Java method and stack. Every declared op of
+`file-basic` and `tcp-loopback` joined, 0 hook/mark mismatches.
+The production rules — curated leaf natives, per-native syscall
+allowlist, nr 335 dropped, probe ids, mark reset — are listed
+under Experiment 1. (a) and (c) were not needed.
+
 **Experiment 4 — clocks.** ior stamps BPF records with
 `bpf_ktime_get_boot_ns()` (CLOCK_BOOTTIME); `System.nanoTime()` is
 CLOCK_MONOTONIC on Linux. They differ by time spent suspended.
@@ -1353,6 +1407,15 @@ The tracer samples `boottime − monotonic` at start and on every
 agent watermark and converts brackets to the boot clock (ior's
 `internal/bootclock.go` already handles boot-clock domains).
 Verify the residual error is far below a syscall's duration.
+
+S1 result: don't convert for the join. A (boot, mono) pair read
+in BPF is biased by 74–162 ns (two helper calls) and pushed 14 of
+20 000 kernel stamps out of tight `nanoTime()` brackets; stamping
+with `bpf_ktime_get_ns` (MONOTONIC, `nanoTime`'s clock) put 0 of
+60 000 outside. So BPF records the native's entry in MONOTONIC as
+the join field; event timestamps stay on the boot clock. Agent-only
+records are placed with a user-space midpoint offset
+(mono–boot–mono: 2 ns spread), re-sampled per segment.
 
 **Experiment 5 — transport** (decision #27). Compare:
 
@@ -1362,7 +1425,10 @@ Verify the residual error is far below a syscall's duration.
 - a memory-mapped ring (`FileChannel.map`, single writer) — no
   syscalls on the hot path, so no self-noise.
 
-Record types either way:
+S1 result: the ring (decision #27) — 0 syscalls per record,
+drop-and-count when the reader is a ring behind, every record
+delivered or counted in the runs; layout in M3 step 4. Record
+types either way:
 
 ```
 BRACKET   hook_id, tid|fd, enter_ns, exit_ns, stack_id, thread_id
@@ -1376,33 +1442,50 @@ WATERMARK mono_ns        // "everything before this is written"
 `FileOutputStream`: untraced, agent only, agent + tracer. Report
 ns per I/O op and the share spent in the stack walk.
 
+S1 result (loaded host, CPU time, indicative): per hooked I/O
+call the uprobe pair costs ≈3.5 µs, an agent bracket without stack
+≈0.3 µs, the 10-frame stack walk ≈8 µs (~95 % of the agent). The
+uprobes trap in every process mapping the JDK library.
+
 **Experiment 7 — attach.** Confirm on JDK 21: `-javaagent` works
 silently; live attach prints the JEP 451 warning; what
 `-XX:-EnableDynamicAgentLoading` does; what a root-run tracer must
 do to attach to a JVM owned by another uid.
 
+S1 result (JDK 25 and 27-ea; no JDK 21 runtime): `-javaagent`
+silent; live attach works and prints the JEP 451 warning on both;
+`+EnableDynamicAgentLoading` silences it;
+`-EnableDynamicAgentLoading` fails the load with
+`AgentLoadException`; a root attacher reaches a JVM of another uid
+as is.
+
 **Exit**: PLAN.md's S1 exit criterion, plus a recommendation for
-each of decisions #2, #6, #27 and #29.
+each of decisions #2, #6, #27 and #29. Met — see
+[the S1 result](spikes/s1-java-join.md); #2, #6 and #27 are
+decided in PLAN.md, #29 keeps its default with the 17 → 21 table
+differences recorded.
 
 ## M3 — Java agent
 
 **Goal**: S1's prototype, productionized. PLAN.md: "M3 — Java
-agent". Assumes S1 confirmed the design; where it did not, its
-report replaces the affected steps.
+agent". S1 confirmed the design with the corrections below
+([result](spikes/s1-java-join.md)): the join is the uprobe TID
+mark plus the agent bracket on the same TID, compared in
+CLOCK_MONOTONIC; the transport is an mmap ring.
 
 **Files**
 
 ```
 agent/
   bridge/src/iormesh/bridge/Hooks.java       # bootstrap-visible
+  bridge/src/iormesh/bridge/Ring.java        # mmap spool writer
   core/src/iormesh/agent/Agent.java          # premain/agentmain
   core/src/iormesh/agent/HookTable.java      # class → methods → id
   core/src/iormesh/agent/BoundaryTransformer.java
   core/src/iormesh/agent/StackIds.java
-  core/src/iormesh/agent/Spool.java
   core/src/iormesh/agent/http/…              # one file per library
   core/src/iormesh/agent/otel/SpanContext.java
-internal/agentspool/    # Go reader for the spool (cgo-free)
+internal/agentspool/    # Go reader for the ring (cgo-free)
 internal/correlate/javajoin.go
 ```
 
@@ -1410,49 +1493,80 @@ internal/correlate/javajoin.go
 
 1. Build: `mage agentBuild` → `iormesh-agent.jar` with the bridge
    jar nested as a resource; ASM shaded under
-   `iormesh.agent.shaded`.
-2. `HookTable` is data, not code: a table of
-   `(class, method, descriptor, hookId, kind)` so decision #29's
-   per-JDK differences become table variants.
-3. The Go side joins brackets to events:
+   `iormesh.agent.shaded` (the S1 prototype used
+   `java.lang.classfile`, final only in JDK 24 — M3 must run on
+   21 and, per #29, 17). Manifest: `Premain-Class`,
+   `Agent-Class`, `Can-Retransform-Classes`.
+2. Install, from `premain` and `agentmain` alike: append the
+   bridge jar to the bootstrap search, then
+   `Instrumentation.redefineModule(java.base, extraReads =
+   {bridge's unnamed module})` — without it the rewritten JDK
+   methods fail to link `Hooks`. Map the ring, warm up the hot
+   path (thread state, `StackWalker`), then retransform. Expect
+   the CDS warning on stderr ("Sharing is only supported for boot
+   loader classes…") — the workload's stdout contract is intact.
+3. `HookTable` is data, not code: a table of
+   `(class, method, descriptor, hookId, native, allowed syscalls)`
+   so decision #29's per-JDK differences become table variants and
+   the tracer gets the same table for its uprobe set (S1's hook
+   table above).
+4. The ring (decision #27): one file per JVM,
+   `<spool dir>/<pid>.ring`, in the tracer-owned directory, mapped
+   `MAP_SHARED` by agent and tracer. Header (magic, capacity, pid,
+   `head` and `tail` on their own cache lines, drop counters), then
+   records framed by one 8-byte word `len | type << 32` published
+   with a release store. Writers reserve with a CAS on `head`;
+   when the reader is a full ring behind they drop and count —
+   never block the target. Record types:
+
+   ```
+   BRACKET hook_id, ktid, enter_mono, exit_mono, stack_id, thread_id
+   STACK   stack_id, n, frames[n]      // first time an id is seen
+   THREAD  thread_id, ktid, name       // first bracket of a thread
+   METHOD  method_id, class, method, descriptor, file, line, jar
+   ```
+
+   The agent's only syscalls are the ring's setup in `install`
+   and one `readlink("/proc/thread-self")` per thread; the tracer
+   tags both as the agent's (spool path; first such readlink per
+   TID before that TID's THREAD record) — never the target's.
+5. The Go side joins the agent bracket to the uprobe-marked
+   syscall:
 
    ```go
-   // joiner attributes syscall events to Java brackets. If S1
-   // settles on the uprobe join, the bracket arrives from BPF
-   // already tied to the syscall and this shrinks to a lookup
-   // of the agent's stack for that bracket. Both
-   // streams are ordered per key, so one cursor per key is
-   // enough; nothing is ever attributed by guessing.
+   // joiner pairs a uprobe-marked syscall with the agent bracket
+   // that contains it. The BPF side stamps the native's entry
+   // with bpf_ktime_get_ns (CLOCK_MONOTONIC, the clock of
+   // System.nanoTime), so containment needs no conversion; the
+   // event's own timestamp stays on the boot clock. A marked
+   // syscall with no bracket keeps its native-level attribution
+   // and no Java stack; nothing is attributed by guessing.
    type joiner struct {
-       pending map[joinKey][]agentspool.Bracket // sorted by enter
-       stacks  map[uint32][]uint32              // stack id → methods
-       mark    uint64                           // agent watermark
+       open   map[uint32][]agentspool.Bracket // per ktid, by enter
+       stacks map[uint64][]uint32             // stack id → methods
    }
 
-   // attribute sets ev.Attribution and ev.Java. An event newer
-   // than the watermark is held back: its bracket may not have
-   // been written yet.
    func (j *joiner) attribute(ev *schema.Event) (ready bool)
    ```
 
-   Events are released in `seq` order once the watermark passes
-   them, or after a 2s timeout when no agent is attached — then
-   `attribution: none`.
-4. Method table and thread table are emitted as their own NDJSON
+   Events are released once the ring's reader has passed the
+   syscall's time on that TID, or after a 2 s timeout when no
+   agent is attached — then `attribution: none`.
+6. Method table and thread table are emitted as their own NDJSON
    record kinds and parquet files (`methods`, `threads`), keyed by
    id.
-5. HTTP hooks: one transformer per library, each emitting an
+7. HTTP hooks: one transformer per library, each emitting an
    `http` event at request completion with `conn_id` (via the
    socket's fd) and `req_seq` (per-connection counter). Start
    with the JDK's `HttpClient` and built-in `HttpServer` — the
    pair the workload uses — then widen per decision #22.
    Headers pass through `redact.Policy` *in the agent*, before
    the spool.
-6. OTEL: if `io.opentelemetry.api.trace.Span` is loadable in the
+8. OTEL: if `io.opentelemetry.api.trace.Span` is loadable in the
    app's class loader, read `Span.current().getSpanContext()`
    reflectively at `enter` and add ids to the bracket. No OTEL
    dependency in the agent.
-7. Scenarios first, as always: `method-flow`,
+9. Scenarios first, as always: `method-flow`,
    `http-plain`, `http-tls`, `http-redaction`, `otel`.
 
 **Done when**: PLAN.md's M3 acceptance holds.

@@ -134,6 +134,28 @@ throwaway; its findings update this plan.
   file scenario and one socket scenario to its declared method,
   on platform threads, with the overhead measured. (Virtual
   threads are deferred — see "Deferred — not in v1".)
+
+  Result (2026-11-18, JDK 25 and 27-ea, kernel 7.2.15, bpftrace;
+  [docs/spikes/s1-java-join.md](docs/spikes/s1-java-join.md)):
+  works. Uprobe TID marks on a curated set of leaf I/O natives
+  plus the agent's bracket on the same TID attributed every
+  declared op of `file-basic` (6/6) and `tcp-loopback` (server
+  11/11, client 10/10) to its declared method, 0 mismatches. The
+  uprobe side needs a per-native syscall allowlist (JVM work
+  runs inside brackets), must drop x86_64 syscall 335 (the
+  uretprobe trampoline), keys marks on probe ids and resets them
+  on thread exit. Clocks: compared in CLOCK_MONOTONIC — BPF
+  stamps the native's entry with `bpf_ktime_get_ns`, no
+  conversion; a boot/mono pair read in BPF is biased by up to
+  ~160 ns and pushed 14/20 000 stamps out of tight brackets.
+  Transport: an mmap ring, no syscall per record, every record
+  delivered or counted (#27). Attach: live attach works on 25
+  and 27-ea with JEP 451's warning (#2). Cost (loaded host, CPU
+  time, indicative): per hooked I/O call ≈3.5 µs for the uprobe
+  pair and ≈8 µs for the agent's 10-frame stack walk; the agent
+  without the walk ≈0.3 µs. Decisions #2, #6 and #27 are
+  settled. Untested: a JDK 21 runtime, stripped or static JDK
+  libraries, multi-threaded cost, containers.
 - **S2 — Cross-host join** (gates M4's merge). Questions:
   - The NAT-tolerant join key (decision #26): conntrack state
     read on the NAT host vs the TCP initial-sequence-number pair
@@ -390,24 +412,29 @@ criterion here.
 
 ### M3 — Java agent: code-flow attribution
 
-Gated by S1 — the design below is the working hypothesis the
-spike confirms or corrects.
+Gated by S1 — done; the design below is S1's result
+([docs/spikes/s1-java-join.md](docs/spikes/s1-java-join.md)).
 
 - **Instrument I/O boundaries, not every method.** The agent
   rewrites only the JDK methods where Java hands I/O to the
   kernel (hook set from S1) and captures the Java stack there.
   Cost scales with the I/O rate, not the call rate; blanket
   method entry/exit tracing is a non-goal.
-- **Join to kernel events**: the front-runner is an in-kernel
-  join by thread id — uprobes on the JDK's native I/O functions
-  bracket each call, and the syscall handler reads the bracket
-  (see S1). The agent's boundary hook supplies what the kernel
-  cannot see: the Java stack id and thread. How the two records
-  meet, or whether the agent joins by fd or TID plus a time
-  window instead, is S1's pick. Events no hook
-  brackets (JNI libraries, JVM-internal I/O) and ambiguous
-  matches stay in the trace marked `attribution: none` — never
-  guessed.
+- **Join to kernel events** (S1): uprobes on a curated set of
+  the JDK's leaf native I/O functions mark the thread id with a
+  per-probe id; the syscall handler reads the mark and keeps it
+  only for the syscall kinds that native issues (anything else is
+  JVM work inside the bracket), drops the uretprobe trampoline
+  (x86_64 nr 335), and marks are reset on thread exit. The BPF
+  side also stamps the native's entry in CLOCK_MONOTONIC. The
+  agent's boundary hook supplies what the kernel cannot see —
+  the Java stack id and thread — as a bracket keyed by kernel TID
+  (one `/proc/thread-self` lookup per thread); the correlator
+  pairs a marked syscall with the agent bracket on its TID that
+  contains the native's entry, same clock, no conversion. Events
+  no hook brackets (JNI libraries, JVM-internal I/O) and
+  ambiguous matches stay in the trace marked `attribution:
+  none` — never guessed.
 - **Platform threads only in v1.** Virtual-thread attribution
   is deferred (see "Deferred — not in v1"). I/O issued by a
   virtual thread is still traced and still joined to its native
@@ -415,15 +442,24 @@ spike confirms or corrects.
   flagged `carrier: true` — visible as a known gap, never
   passed off as the carrier's own work.
 - **Agent → tracer transport**: socket-free like everything
-  else — a spool the agent appends to in a tracer-owned
-  directory, read by the correlator (decision #27). The agent's
-  own I/O is tagged and kept out of the target's story.
+  else — a memory-mapped ring per JVM in a tracer-owned
+  directory, written lock-free by the agent and drained by the
+  correlator; when it is full the agent drops and counts, never
+  blocks (decision #27). The agent's own syscalls (ring setup,
+  one thread-id lookup per thread) are tagged and kept out of
+  the target's story.
 - **Attach**: `-javaagent` at launch is the primary path. Live
   attach stays supported for the "trace an existing PID" story,
-  with its cost stated: JDK 21 warns on dynamically loaded
-  agents (JEP 451) and a later release disables them by
-  default, after which the app must opt in with
-  `-XX:+EnableDynamicAgentLoading` (decision #2).
+  with its cost stated: the JVM prints JEP 451's warning on
+  stderr (seen on 25 and 27-ea), a later release disables
+  dynamic loading by default, after which the app must opt in
+  with `-XX:+EnableDynamicAgentLoading`, and a live-attached
+  agent misses everything before the attach (decision #2).
+- **Stack capture cost**: the per-I/O `StackWalker` walk is the
+  agent's dominant cost (S1: ≈8 µs per call on a loaded host vs
+  ≈0.3 µs for the rest of the bracket); M3 engineers it down
+  (fewer frames, cached stacks for repeated call sites) and
+  measures it against decision #25.
 - Supporting mappings the model needs: class-load map
   (class↔JAR/classloader), thread names (kernel TID ↔ Java
   thread), DNS hostname↔IP (InetAddress hooks), `file:line` on
@@ -910,6 +946,40 @@ answer), and deferred.
   for nothing the static site cannot do at these sizes. Design
   in docs/visualization.md.
 
+- **#2 Java agent attach strategy** — `-javaagent` at launch
+  is primary; live attach is supported (decided by S1,
+  2026-11-18). Live attach works on JDK 25 and 27-ea and prints
+  JEP 451's warning on the target's stderr;
+  `-XX:+EnableDynamicAgentLoading` silences it,
+  `-XX:-EnableDynamicAgentLoading` (and a future default) makes
+  the load fail, which the tracer reports instead of retrying.
+  A root attacher reaches a JVM of another uid; the handshake is
+  a client connection to the target's own attach socket, so the
+  tracer still listens on nothing. Documented caveats: the
+  warning, the retransformation of loaded classes, and that a
+  live-attached agent misses all I/O before the attach. The k8s
+  flavour is #14.
+- **#6 Java stack source** — the agent captures the stack at
+  the I/O boundary with `StackWalker` (decided by S1,
+  2026-11-18); blanket method entry/exit instrumentation is a
+  non-goal, and an eBPF HotSpot unwinder is out (unsymbolized
+  frames). No async-profiler-style sampling between I/O events
+  in v1. The walk is the agent's largest cost (≈8 µs per I/O
+  call, S1), so M3 must reduce it and measure it against #25.
+- **#27 Agent → tracer transport** — a memory-mapped ring per
+  JVM (decided by S1, 2026-11-18): a file in the tracer-owned
+  spool directory (reached through `/proc/<pid>/root` in k8s),
+  mapped shared by agent and tracer; lock-free reservation,
+  records published with a release store, zero syscalls per
+  record. Back-pressure: when the reader is a ring behind, the
+  agent drops the record and counts it in the ring header; the
+  tracer turns the counters into the trace's loss accounting.
+  The agent's own syscalls are its ring setup and one
+  `/proc/thread-self` lookup per thread, tagged by path and
+  never shown as the target's I/O. An append-only file was
+  rejected: every flush is a target-thread syscall to filter,
+  and it grows unbounded when the tracer lags.
+
 ### Open — blocks M2
 
 - **#25 Tracer overhead and volume budget** — tracing runs at
@@ -959,31 +1029,14 @@ answer), and deferred.
 
 ### Open — blocks M3
 
-- **#2 Java agent attach strategy** — pre-launch `-javaagent`
-  vs live attach. Live attach is friendlier for the "just
-  trace an existing PID" story but: JEP 451 (JDK 21 warns, a
-  later JDK disables dynamic loading by default), the attach
-  handshake has uid and mount-namespace requirements the
-  root-run tracer must satisfy, and retransforming loaded
-  classes in a live JVM is the least "read-only" thing iormesh
-  does. *Default: `-javaagent` primary, live attach supported
-  and documented with those caveats.*
-- **#6 Java stack source** — largely settled: instrument I/O
-  boundaries and capture the stack there (M3); blanket method
-  entry/exit instrumentation is out (non-goal). Open: whether
-  async-profiler-style sampling supplements it for the
-  stretches between I/O events — S1 reports the cost.
-- **#27 Agent → tracer transport** — append-only spool file vs
-  memory-mapped ring, in a tracer-owned directory the agent
-  reaches from inside the target (through `/proc/<pid>/root`
-  in k8s); back-pressure and loss accounting when the tracer
-  falls behind; how the agent's own writes are tagged so they
-  never appear as the target's I/O. Socket-free either way.
-  *Default: S1 picks.*
 - **#29 JDK version support** — the plan says JDK 21, but
   fleets run 17 and older. Boundary hooks, stacks and HTTP
   events do not need 21 (only the deferred virtual-thread
-  support would). *Default: agent runs on 17+; anything
+  support would). S1 found the hook set's natives identical
+  from 21 to 25 (27-ea changes two signatures outside the set),
+  while 17 differs (no `UnixFileDispatcherImpl`/`UnixDispatcher`,
+  RAF `readBytes` instead of `readBytes0`) — one hook-table
+  variant for 17. *Default: agent runs on 17+; anything
   older is traced without Java attribution (the non-Java
   node shape).*
 - **#22 HTTP capture mechanics** — agent-boundary hooks (v1
