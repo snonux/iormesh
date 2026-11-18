@@ -1,0 +1,73 @@
+// S2 spike (throwaway, task 6b4): ISN-pair and conntrack capture.
+//
+// Positional parameters: $1 = hostA netns inode, $2 = hostB netns inode,
+// $3 = nat netns inode, $4 = service port (8080).
+//
+// Prints one key=value line per event; spikes/s2/join.py parses them.
+//
+// Experiment 1 (ISN pair): at every TCP state transition of a socket in
+// hostA or hostB that touches the service port, and at the exit of
+// inet_csk_accept (the first moment iormesh knows the passive socket's
+// owner), print the sequence state of struct tcp_sock. join.py derives the
+// ISN pair from it (direct: snd_una - 1 / rcv_nxt - 1; rebuilt: also minus
+// bytes_acked / bytes_received, with a role-dependent SYN correction - see
+// join.py derive) and checks it against tcpdump's ground truth.
+//
+// Experiment 2 (conntrack): at the exit of __nf_conntrack_confirm in the nat
+// namespace (the moment a new conntrack entry is inserted, after NAT has set
+// the reply tuple) print the original and reply tuples, plus conntrack's own
+// TCP window tracking state (td_end of the originator after the SYN, which
+// is iss + 1 + SYN payload).
+
+tracepoint:sock:inet_sock_set_state
+/args.protocol == 6 && args.family == 2 &&
+ (args.sport == $4 || args.dport == $4)/
+{
+    $sk = (struct sock *)args.skaddr;
+    $ns = $sk->__sk_common.skc_net.net->ns.inum;
+    if ($ns == $1 || $ns == $2) {
+        $tp = (struct tcp_sock *)args.skaddr;
+        printf("ev=state ns=%u sk=%p t=%llu old=%d new=%d src=%s:%d dst=%s:%d snd_una=%u rcv_nxt=%u bytes_acked=%llu bytes_received=%llu write_seq=%u\n",
+            $ns, $sk, nsecs, args.oldstate, args.newstate,
+            ntop(args.saddr), args.sport, ntop(args.daddr), args.dport,
+            $tp->snd_una, $tp->rcv_nxt, $tp->bytes_acked,
+            $tp->bytes_received, $tp->write_seq);
+    }
+}
+
+fexit:vmlinux:inet_csk_accept
+/retval != 0/
+{
+    $sk = retval;
+    $ns = $sk->__sk_common.skc_net.net->ns.inum;
+    if (($ns == $1 || $ns == $2) && $sk->__sk_common.skc_num == $4) {
+        $tp = (struct tcp_sock *)retval;
+        printf("ev=accept ns=%u sk=%p t=%llu old=-1 new=-1 src=%s:%d dst=%s:%d snd_una=%u rcv_nxt=%u bytes_acked=%llu bytes_received=%llu write_seq=%u\n",
+            $ns, $sk, nsecs,
+            ntop(2, $sk->__sk_common.skc_rcv_saddr),
+            $sk->__sk_common.skc_num,
+            ntop(2, $sk->__sk_common.skc_daddr),
+            bswap($sk->__sk_common.skc_dport),
+            $tp->snd_una, $tp->rcv_nxt, $tp->bytes_acked,
+            $tp->bytes_received, $tp->write_seq);
+    }
+}
+
+// The skb's _nfct field holds the struct nf_conn pointer with the ctinfo in
+// its low 3 bits (NFCT_PTRMASK).
+fexit:nf_conntrack:__nf_conntrack_confirm
+{
+    $ct = (struct nf_conn *)(args.skb->_nfct & ~(uint64)7);
+    if ($ct == 0) { return; }
+    if ($ct->ct_net.net->ns.inum != $3) { return; }
+    $o = $ct->tuplehash[0].tuple;
+    $r = $ct->tuplehash[1].tuple;
+    if ($o.dst.protonum != 6) { return; }
+    printf("ev=ct ns=%u ct=%p t=%llu ret=%d orig=%s:%d>%s:%d reply=%s:%d>%s:%d td_end0=%u td_end1=%u\n",
+        $ct->ct_net.net->ns.inum, $ct, nsecs, retval,
+        ntop(2, $o.src.u3.ip), bswap($o.src.u.tcp.port),
+        ntop(2, $o.dst.u3.ip), bswap($o.dst.u.tcp.port),
+        ntop(2, $r.src.u3.ip), bswap($r.src.u.tcp.port),
+        ntop(2, $r.dst.u3.ip), bswap($r.dst.u.tcp.port),
+        $ct->proto.tcp.seen[0].td_end, $ct->proto.tcp.seen[1].td_end);
+}
