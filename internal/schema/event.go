@@ -2,9 +2,9 @@ package schema
 
 // Event kinds. A kind is either the traced syscall's name or one of the
 // synthetic kinds the correlator emits. The set only grows: M2 widens the
-// traced surface by appending kinds here, and Validate rejects any kind not
-// listed so a typo or a stale producer fails loudly instead of producing
-// events no query matches.
+// traced surface by appending kinds (the file surface in kinds_file.go),
+// and Validate rejects any kind not listed so a typo or a stale producer
+// fails loudly instead of producing events no query matches.
 const (
 	KindOpen    = "open"
 	KindOpenat  = "openat"

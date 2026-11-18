@@ -44,7 +44,8 @@ func (e Event) Validate() error {
 	return e.validateKindArgs()
 }
 
-// KnownKind reports whether kind is part of this schema draft.
+// KnownKind reports whether kind is part of this schema draft: an M1
+// kind or one of the M2 file surface (kinds_file.go).
 func KnownKind(kind string) bool {
 	switch kind {
 	case KindOpen, KindOpenat, KindOpenat2, KindRead, KindWrite,
@@ -52,7 +53,7 @@ func KnownKind(kind string) bool {
 		KindTCPState, KindMarker, KindDrop, KindSession, KindEnd:
 		return true
 	}
-	return false
+	return fileKind(kind)
 }
 
 // validateFD enforces the fd conventions: NoFD is the only negative fd,
