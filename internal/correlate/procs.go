@@ -20,9 +20,12 @@ type procState struct {
 	// M1 does not trace (socket, dup, pipe, …) still gets a fresh fd_gen.
 	fds     map[int32]uint32
 	lastGen map[int32]uint32
-	// sockOf binds an fd to the struct sock address of the socket it
-	// names; tcp_state records carry that binding.
-	sockOf map[int32]uint64
+	// sockOf binds an fd instance to the socket it names; tcp_state
+	// records carry that binding. It holds the socket itself, not its sk
+	// address: the sk is dropped from the socket table at TCP_CLOSE (the
+	// address may be reused), while the fd — after an RST, say — stays
+	// open and its events still belong to that connection.
+	sockOf map[int32]*sockState
 }
 
 func (c *Correlator) proc(pid uint32) *procState {
@@ -31,7 +34,7 @@ func (c *Correlator) proc(pid uint32) *procState {
 	}
 	comm, inc := c.cfg.ProcInfo(pid)
 	p := &procState{inc: inc, comm: comm, fds: map[int32]uint32{},
-		lastGen: map[int32]uint32{}, sockOf: map[int32]uint64{}}
+		lastGen: map[int32]uint32{}, sockOf: map[int32]*sockState{}}
 	c.procs[pid] = p
 	c.graph.process(pid, inc, comm)
 	return p
@@ -83,13 +86,18 @@ func (p *procState) nextGen(fd int32) uint32 {
 //   - later transitions report the instance bound then (kept on the
 //     socket), even once the fd was closed (TCP_CLOSE often follows
 //     close(2)) — never re-binding a number another open may reuse.
-func (p *procState) sockGen(fd int32, sk uint64, s *sockState, first, snapshot bool) uint32 {
+//
+// If the accept exit after a snapshot is lost, the fd is never created:
+// the snapshot reported last+1 while later uses of the number report the
+// use() rule's generation. The two then disagree; a drop event already
+// marks that gap.
+func (p *procState) sockGen(fd int32, s *sockState, first, snapshot bool) uint32 {
 	switch {
 	case snapshot:
-		p.sockOf[fd] = sk
+		p.sockOf[fd] = s
 		s.fdGen = p.nextGen(fd)
 	case first:
-		p.sockOf[fd] = sk
+		p.sockOf[fd] = s
 		s.fdGen = p.use(fd)
 	}
 	return s.fdGen

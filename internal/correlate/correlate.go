@@ -52,6 +52,7 @@ type Correlator struct {
 	queue    []queued         // emitted in seq order, held for conn ids
 	graph    *graphBuilder
 	unpaired uint64
+	noPath   uint64
 }
 
 // New returns a Correlator writing to cfg.Sink.
@@ -77,6 +78,8 @@ func (c *Correlator) Handle(rec any) error {
 	switch r := rec.(type) {
 	case *types.OpenEvent:
 		c.enterOpen(r)
+	case *types.OpenNameFixupEvent:
+		c.fixupName(r)
 	case *types.FdEvent:
 		c.enterFd(r)
 	case *types.AcceptEvent:
@@ -96,6 +99,14 @@ func (c *Correlator) Handle(rec any) error {
 // exits produce no event: without the enter, fd and path are unknown.
 func (c *Correlator) Unpaired() uint64 {
 	return c.unpaired
+}
+
+// NoPath counts opens whose path could not be read (a NULL or faulting
+// pointer the exit-time re-read could not recover either). They produce
+// no event — an open without its path says nothing — but their fd is
+// still tracked.
+func (c *Correlator) NoPath() uint64 {
+	return c.noPath
 }
 
 // Close emits every held event (connections still unfused become

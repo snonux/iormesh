@@ -20,6 +20,17 @@ func tcp(at, sk uint64, pid uint32, fd, old, new int32, local, remote string) *t
 	return r
 }
 
+// tcp6 builds the record a dual-stack (JVM) socket reports: AF_INET6 with
+// IPv4-mapped addresses (::ffff:a.b.c.d) for IPv4 peers.
+func tcp6(at, sk uint64, pid uint32, fd, old, new int32, local, remote string) *types.TcpStateEvent {
+	r := tcp(at, sk, pid, fd, old, new, local, remote)
+	l, rm := netip.MustParseAddrPort(local), netip.MustParseAddrPort(remote)
+	r.Family = afInet6
+	r.Saddr = netip.AddrFrom16(l.Addr().As16()).As16()
+	r.Daddr = netip.AddrFrom16(rm.Addr().As16()).As16()
+	return r
+}
+
 const (
 	synSent = 2
 	cli     = "127.0.0.1:40000"
@@ -163,5 +174,89 @@ func TestCloseThenReuse(t *testing.T) {
 	states := byKind(sink.events, schema.KindTCPState)
 	if closeEv := states[len(states)-1]; *closeEv.Args.SockState != "CLOSE" || closeEv.FDGen != 0 {
 		t.Fatalf("late TCP_CLOSE %+v: want reported on the closed socket's instance (gen 0)", closeEv)
+	}
+}
+
+// TestDualStackLoopback: both ends as the JVM reports them (AF_INET6,
+// ::ffff:127.0.0.1) fuse, and args carry the unmapped address.
+func TestDualStackLoopback(t *testing.T) {
+	c, sink := newTest(t)
+	cnow, snow := uint64(100), uint64(200)
+	client := feeder{t, c, 100, 101, &cnow}
+	server := feeder{t, c, 200, 201, &snow}
+	client.handle(&types.FdEvent{EventType: types.ENTER_FD_EVENT, TraceId: types.SYS_ENTER_CONNECT,
+		Time: client.tick(), Pid: 100, Tid: 101, Fd: 6})
+	client.handle(tcp6(client.tick(), 0xA, 100, 6, synSent, tcpEstablished, cli, srv))
+	client.exit(types.SYS_EXIT_CONNECT, 0)
+	server.handle(tcp6(server.tick(), 0xB, 200, 7, types.TCP_STATE_SNAPSHOT, tcpEstablished, srv, cli))
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	conn := byKind(sink.events, schema.KindConnect)[0]
+	states := byKind(sink.events, schema.KindTCPState)
+	if conn.ConnID == "" || conn.ConnID != states[len(states)-1].ConnID {
+		t.Fatalf("dual-stack ends not fused: connect %q server %q", conn.ConnID, states[len(states)-1].ConnID)
+	}
+	if *conn.Args.RemoteAddr != "127.0.0.1" {
+		t.Fatalf("remote addr %q, want the unmapped 127.0.0.1", *conn.Args.RemoteAddr)
+	}
+}
+
+// TestResetKeepsConnID: after an RST (ESTABLISHED -> CLOSE while the fd is
+// open) the fd's remaining events still carry the connection's id.
+func TestResetKeepsConnID(t *testing.T) {
+	c, sink := newTest(t)
+	loopback(t, c, 1000)
+	now := uint64(1_000_000)
+	client := feeder{t, c, 100, 101, &now}
+	client.handle(tcp(client.tick(), 0xA, 100, 6, tcpEstablished, tcpClose, cli, srv))
+	client.read(6, -104) // ECONNRESET
+	client.close(6)
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	want := byKind(sink.events, schema.KindConnect)[0].ConnID
+	for _, kind := range []string{schema.KindRead, schema.KindClose} {
+		evs := byKind(sink.events, kind)
+		if got := evs[len(evs)-1]; got.ConnID != want {
+			t.Fatalf("%s after RST has conn_id %q, want %q", kind, got.ConnID, want)
+		}
+	}
+}
+
+// TestSnapshotCloseWaitFuses: a server end whose peer already sent FIN is
+// snapshotted in CLOSE_WAIT; that still counts as established.
+func TestSnapshotCloseWaitFuses(t *testing.T) {
+	c, sink := newTest(t)
+	cnow, snow := uint64(100), uint64(200)
+	client := feeder{t, c, 100, 101, &cnow}
+	server := feeder{t, c, 200, 201, &snow}
+	client.handle(tcp(client.tick(), 0xA, 100, 6, synSent, tcpEstablished, cli, srv))
+	server.handle(tcp(server.tick(), 0xB, 200, 7, types.TCP_STATE_SNAPSHOT, 8, srv, cli)) // CLOSE_WAIT
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if sink.events[0].ConnID != sink.events[1].ConnID {
+		t.Fatalf("CLOSE_WAIT snapshot not fused: %q vs %q", sink.events[0].ConnID, sink.events[1].ConnID)
+	}
+}
+
+// TestRefusedConnectsStayApart: two refused connects on one tuple never
+// established; their ids must still differ, and resolving the first must
+// not evict the second from the join index.
+func TestRefusedConnectsStayApart(t *testing.T) {
+	c, sink := newTest(t)
+	now := uint64(100)
+	f := feeder{t, c, 100, 101, &now}
+	f.handle(tcp(f.tick(), 0xA, 100, 6, tcpClose, synSent, cli, srv))
+	f.handle(tcp(f.tick(), 0xA, 100, 6, synSent, tcpClose, cli, srv))
+	now += defaultFuseWindowNS
+	f.handle(tcp(f.tick(), 0xC, 100, 6, tcpClose, synSent, cli, srv))
+	f.handle(tcp(f.tick(), 0xC, 100, 6, synSent, tcpClose, cli, srv))
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if sink.events[0].ConnID == sink.events[2].ConnID {
+		t.Fatalf("two refused connects share conn_id %q", sink.events[0].ConnID)
 	}
 }

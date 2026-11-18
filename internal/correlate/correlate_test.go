@@ -237,3 +237,36 @@ func TestBootToWallOffset(t *testing.T) {
 		t.Fatalf("offset %d is not epoch-scale", off)
 	}
 }
+
+// TestPathFixupAndUnknownPath: a faulted enter read recovered at exit
+// (OPEN_NAME_FIXUP_EVENT) gives the open its path; an unrecovered one
+// emits no event but still tracks the fd; the bare marker root is a plain
+// open, never a marker with an empty name.
+func TestPathFixupAndUnknownPath(t *testing.T) {
+	c, sink := newTest(t)
+	now := uint64(0)
+	f := feeder{t, c, 10, 11, &now}
+	f.handle(&types.OpenEvent{EventType: types.ENTER_OPEN_EVENT, TraceId: types.SYS_ENTER_OPENAT,
+		Time: f.tick(), Pid: 10, Tid: 11})
+	fix := &types.OpenNameFixupEvent{EventType: types.OPEN_NAME_FIXUP_EVENT,
+		TraceId: types.SYS_ENTER_OPENAT, Tid: 11, Slot: types.OPEN_NAME_FIXUP_SLOT_FIRST}
+	copy(fix.Filename[:], "/tmp/late")
+	f.handle(fix)
+	f.exit(types.SYS_EXIT_OPENAT, 4)
+	f.open("", 0, 5) // never recovered
+	f.read(5, 1)
+	f.open("/iormesh-marker/", 0, -21)
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if *sink.events[0].Args.Path != "/tmp/late" {
+		t.Fatalf("fixed-up open %+v", sink.events[0])
+	}
+	if c.NoPath() != 1 || sink.events[1].Event != schema.KindRead || sink.events[1].FDGen != 1 {
+		t.Fatalf("unknown path: noPath %d next event %+v; want 1 and a read on gen 1",
+			c.NoPath(), sink.events[1])
+	}
+	if last := sink.events[2]; last.Event != schema.KindOpenat || *last.Args.Path != "/iormesh-marker/" {
+		t.Fatalf("bare marker root %+v, want a plain openat", last)
+	}
+}

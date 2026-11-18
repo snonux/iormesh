@@ -13,6 +13,8 @@ import (
 // Kernel TCP states (include/net/tcp_states.h) the correlator acts on.
 const (
 	tcpEstablished = 1
+	tcpSynSent     = 2
+	tcpSynRecv     = 3
 	tcpClose       = 7
 	afInet         = 2
 	afInet6        = 10
@@ -76,13 +78,6 @@ func newSockTable(window uint64) *sockTable {
 		waiting: map[[2]netip.AddrPort]*sockState{}}
 }
 
-func (t *sockTable) get(sk uint64) *sockState {
-	if sk == 0 {
-		return nil
-	}
-	return t.bySk[sk]
-}
-
 // observe applies one tcp_state record to its socket and returns it, and
 // whether this was the socket's first record.
 func (t *sockTable) observe(r *types.TcpStateEvent) (*sockState, bool) {
@@ -95,7 +90,7 @@ func (t *sockTable) observe(r *types.TcpStateEvent) (*sockState, bool) {
 	if local.IsValid() {
 		s.local, s.remote = local, remote
 	}
-	if r.Newstate == tcpEstablished && s.established == 0 {
+	if establishes(r) && s.established == 0 {
 		s.established = r.Time
 		t.fuse(s)
 	}
@@ -105,6 +100,18 @@ func (t *sockTable) observe(r *types.TcpStateEvent) (*sockState, bool) {
 		delete(t.bySk, r.Sk)
 	}
 	return s, !ok
+}
+
+// establishes reports whether r shows the connection established: the
+// SYN_SENT -> ESTABLISHED transition, or an accept snapshot taken in any
+// state the connection only reaches after establishing (CLOSE_WAIT when
+// the peer already sent its FIN, say) — the snapshot is the only record
+// such a server end gets.
+func establishes(r *types.TcpStateEvent) bool {
+	if r.Oldstate != types.TCP_STATE_SNAPSHOT {
+		return r.Newstate == tcpEstablished
+	}
+	return r.Newstate != tcpClose && r.Newstate != tcpSynSent && r.Newstate != tcpSynRecv
 }
 
 // fuse joins s with an established, unfused socket whose tuple mirrors
@@ -126,8 +133,17 @@ func (t *sockTable) resolveAlone(s *sockState) {
 	if s.connID != "" {
 		return
 	}
-	delete(t.waiting, [2]netip.AddrPort{s.local, s.remote})
-	s.connID = hashID(fmt.Sprintf("%s|%s|%d", s.local, s.remote, s.established))
+	k := [2]netip.AddrPort{s.local, s.remote}
+	if t.waiting[k] == s { // a later socket may reuse the tuple
+		delete(t.waiting, k)
+	}
+	// A never-established socket (a refused connect) hashes its first
+	// record's time, so two refused connects on one tuple stay apart.
+	at := s.established
+	if at == 0 {
+		at = s.firstSeen
+	}
+	s.connID = hashID(fmt.Sprintf("%s|%s|%d", s.local, s.remote, at))
 }
 
 func within(a, b, window uint64) bool {
@@ -162,7 +178,10 @@ func tuple(r *types.TcpStateEvent) (local, remote netip.AddrPort) {
 		la = netip.AddrFrom4([4]byte(r.Saddr[:4]))
 		ra = netip.AddrFrom4([4]byte(r.Daddr[:4]))
 	case afInet6:
-		la, ra = netip.AddrFrom16(r.Saddr), netip.AddrFrom16(r.Daddr)
+		// A dual-stack socket (the JVM's default) reports IPv4 peers as
+		// ::ffff:a.b.c.d; unmapping lets it fuse with a plain AF_INET end
+		// and gives args the address the peer itself would report.
+		la, ra = netip.AddrFrom16(r.Saddr).Unmap(), netip.AddrFrom16(r.Daddr).Unmap()
 	default:
 		return netip.AddrPort{}, netip.AddrPort{}
 	}
@@ -178,7 +197,7 @@ func (c *Correlator) tcpState(r *types.TcpStateEvent) {
 		return
 	}
 	p := c.proc(r.Pid)
-	gen := p.sockGen(r.Fd, r.Sk, s, first, r.Oldstate == types.TCP_STATE_SNAPSHOT)
+	gen := p.sockGen(r.Fd, s, first, r.Oldstate == types.TCP_STATE_SNAPSHOT)
 	state := tcpStateNames[r.Newstate]
 	if state == "" {
 		state = fmt.Sprintf("STATE_%d", r.Newstate)

@@ -69,13 +69,14 @@ func TestGoldenTCPLoopback(t *testing.T) {
 
 	client.handle(&types.FdEvent{EventType: types.ENTER_FD_EVENT, TraceId: types.SYS_ENTER_CONNECT,
 		Time: client.tick(), Pid: 100, Tid: 101, Fd: 6})
-	client.handle(tcp(client.tick(), 0xA, 100, 6, tcpClose, synSent, "127.0.0.1:0", srv))
-	client.handle(tcp(client.tick(), 0xA, 100, 6, synSent, tcpEstablished, cli, srv))
+	// The JVM's sockets are dual-stack: AF_INET6 with ::ffff: addresses.
+	client.handle(tcp6(client.tick(), 0xA, 100, 6, tcpClose, synSent, "127.0.0.1:0", srv))
+	client.handle(tcp6(client.tick(), 0xA, 100, 6, synSent, tcpEstablished, cli, srv))
 	client.exit(types.SYS_EXIT_CONNECT, 0)
 	snow = cnow
 	server.handle(&types.AcceptEvent{EventType: types.ENTER_ACCEPT_EVENT, TraceId: types.SYS_ENTER_ACCEPT,
 		Time: server.tick(), Pid: 200, Tid: 201, Fd: 6})
-	server.handle(tcp(server.tick(), 0xB, 200, 7, types.TCP_STATE_SNAPSHOT, tcpEstablished, srv, cli))
+	server.handle(tcp6(server.tick(), 0xB, 200, 7, types.TCP_STATE_SNAPSHOT, tcpEstablished, srv, cli))
 	server.handle(&types.AcceptEvent{EventType: types.EXIT_ACCEPT_EVENT, TraceId: types.SYS_EXIT_ACCEPT,
 		Time: server.tick(), Pid: 200, Tid: 201, Fd: -1, Ret: 7})
 

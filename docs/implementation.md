@@ -694,7 +694,17 @@ unit-tested with synthetic record streams:
   events carry (step 8). To give each event its final id, socket
   events wait in a FIFO until their socket is fused or its
   window passes; events behind them wait too, so the sink still
-  sees gap-free `seq` order (seq is assigned on completion).
+  sees gap-free `seq` order (seq is assigned on completion). The
+  cost: an unfused socket (a peer on another host) holds every
+  later event in memory for up to the 5s window, measured on the
+  record clock — `Close` always flushes.
+- **Paths**: an enter whose path read faulted is completed by the
+  exit-time re-read (`OPEN_NAME_FIXUP_EVENT`); an open whose path
+  stays unknown tracks its fd but emits no event (`NoPath`
+  counts it) — `args.path` is required and a `file:<host>:` node
+  would be a lie. Dual-stack sockets' `::ffff:` addresses are
+  unmapped, so both ends of a JVM loopback pair fuse and `args`
+  shows `127.0.0.1`.
 - **Graph**: host, process (attr `comm` only — raw pids or ports
   in attrs would survive normalization), `runs_on`; file nodes
   `file:<host_id>:<path>` from the exact event path with an

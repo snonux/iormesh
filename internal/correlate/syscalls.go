@@ -35,6 +35,19 @@ func (c *Correlator) enterOpen(r *types.OpenEvent) {
 		path: types.StringValue(r.Filename[:]), flags: r.Flags}
 }
 
+// fixupName applies the path the BPF side re-read at sys_exit after the
+// enter-time read faulted. It is submitted before the exit record, so the
+// enter is still pending (filter.c, ior_emit_name_fixup). Only the first
+// path slot exists for the open family.
+func (c *Correlator) fixupName(r *types.OpenNameFixupEvent) {
+	en, ok := c.enters[r.Tid]
+	if !ok || r.Slot != types.OPEN_NAME_FIXUP_SLOT_FIRST || en.name != r.TraceId.Name() {
+		return
+	}
+	en.path = types.StringValue(r.Filename[:])
+	c.enters[r.Tid] = en
+}
+
 func (c *Correlator) enterFd(r *types.FdEvent) {
 	c.advance(r.Time)
 	c.enters[r.Tid] = enter{name: r.TraceId.Name(), time: r.Time, pid: r.Pid, fd: r.Fd}
@@ -66,7 +79,10 @@ func (c *Correlator) exit(tid uint32, name string, ret int64, at uint64) {
 		return
 	}
 	ev := c.base(en, tid, ret, at)
-	sock := c.syscallDetail(&ev, en, ret)
+	sock, ok := c.syscallDetail(&ev, en, ret)
+	if !ok {
+		return
+	}
 	c.enqueue(ev, sock)
 }
 
@@ -94,18 +110,18 @@ func (c *Correlator) wall(bootNS uint64) uint64 {
 
 // syscallDetail sets the kind-specific fields and updates fd state. It
 // returns the socket the event acts on, if any, so the queue can hold the
-// event until that socket's conn id is known.
-func (c *Correlator) syscallDetail(ev *schema.Event, en enter, ret int64) *sockState {
+// event until that socket's conn id is known, and false when the event
+// must not be emitted.
+func (c *Correlator) syscallDetail(ev *schema.Event, en enter, ret int64) (*sockState, bool) {
 	p := c.proc(en.pid)
 	switch en.name {
 	case schema.KindOpen, schema.KindOpenat, schema.KindOpenat2:
-		c.openDetail(ev, p, en, ret)
-		return nil
+		return nil, c.openDetail(ev, p, en, ret)
 	case schema.KindAccept, schema.KindAccept4:
-		return c.acceptDetail(ev, p, ret)
+		return c.acceptDetail(ev, p, ret), true
 	}
 	ev.FD, ev.FDGen = en.fd, p.use(en.fd)
-	sock := c.socks.get(p.sockOf[en.fd])
+	sock := p.sockOf[en.fd]
 	switch en.name {
 	case schema.KindRead, schema.KindWrite:
 		if ret > 0 {
@@ -120,23 +136,31 @@ func (c *Correlator) syscallDetail(ev *schema.Event, en enter, ret int64) *sockS
 	case schema.KindConnect:
 		sock.fillArgs(&ev.Args)
 	}
-	return sock
+	return sock, true
 }
 
 // openDetail turns an open into a file event, or a marker event when it
-// targets the reserved marker root.
-func (c *Correlator) openDetail(ev *schema.Event, p *procState, en enter, ret int64) {
-	if name, ok := strings.CutPrefix(en.path, markerRoot); ok {
+// targets the reserved marker root. An open whose path is unknown (the
+// read faulted and was not recovered) still creates its fd, but is not
+// emitted: schema requires args.path, and a file node "" would be a lie.
+func (c *Correlator) openDetail(ev *schema.Event, p *procState, en enter, ret int64) bool {
+	if name, ok := strings.CutPrefix(en.path, markerRoot); ok && name != "" {
 		ev.Event, ev.Args.Marker = schema.KindMarker, &name
-		return
+		return true
+	}
+	if ret >= 0 {
+		ev.FD, ev.FDGen = int32(ret), p.create(int32(ret), false)
+	}
+	if en.path == "" {
+		c.noPath++
+		return false
 	}
 	path, flags := en.path, uint32(en.flags)
 	ev.Args.Path, ev.Args.Flags = &path, &flags
-	if ret < 0 {
-		return
+	if ret >= 0 {
+		c.graph.opened(ev.PID, ev.PIDInc, path)
 	}
-	ev.FD, ev.FDGen = int32(ret), p.create(int32(ret), false)
-	c.graph.opened(ev.PID, ev.PIDInc, path)
+	return true
 }
 
 // acceptDetail registers the accepted fd. Its socket was bound by the
@@ -147,7 +171,7 @@ func (c *Correlator) acceptDetail(ev *schema.Event, p *procState, ret int64) *so
 	}
 	fd := int32(ret)
 	ev.FD, ev.FDGen = fd, p.create(fd, true)
-	sock := c.socks.get(p.sockOf[fd])
+	sock := p.sockOf[fd]
 	sock.fillArgs(&ev.Args)
 	return sock
 }
