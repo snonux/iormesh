@@ -380,10 +380,17 @@ dependencies either.
 non-zero on an exception; `mage workloadTest` wraps it, then
 checks a gated run (PID first on stdout; no marker before the
 startup file appears; still alive after the scenario until the
-hold file appears), that `--expect noop` prints valid JSON, and
-that malformed invocations — unknown scenario or role, a missing
-or duplicate option, a stray argument — exit with the usage
-code 2. `--list` prints the registered scenario names.
+hold file appears) and a two-process tcp-loopback run (server on
+`--port 0`, PID then `listening <port>` on stdout; the client
+started on that port; both print the end marker and exit 0). It
+also checks that `--expect` prints valid JSON naming the scenario
+for every name `--list` prints, that malformed invocations —
+unknown scenario or role, a missing or duplicate option, a stray
+argument, a missing, non-numeric or out-of-range `--port`, an
+unknown scenario option — exit with the usage code 2, and that
+well-formed runs failing at run time — a client on a closed port,
+a `--dir` that does not exist — exit with 1. The process harness
+lives in `magefile_workload.go`.
 
 **Done when**: PLAN.md's M0 acceptance holds — the M1 scenarios
 run standalone and `strace -f -e trace=openat` shows the two

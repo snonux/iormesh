@@ -1,0 +1,175 @@
+//go:build mage
+
+// The process harness behind WorkloadTest (Magefile.go): it starts the
+// workload jar and reads its stdout and stderr line by line, so a check
+// can assert on the PID-first contract, the server's `listening <port>`
+// line and the scenario markers while the process still runs.
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// gateWait bounds every wait in the workload checks; the JVM starts in
+// well under a second, so this only stops a hung check.
+const gateWait = 20 * time.Second
+
+// gatedRun is a workload process whose stdout and stderr are read line by
+// line, and whose exit is reported on done.
+type gatedRun struct {
+	cmd    *exec.Cmd
+	outR   io.Reader
+	stdout *bufio.Scanner
+	stderr chan string
+	done   chan error
+}
+
+// startGated runs the noop scenario behind the startup and hold gates.
+func startGated(startup, hold string) (*gatedRun, error) {
+	return startRun([]string{
+		"IORMESH_WORKLOAD_STARTUP_FILE=" + startup,
+		"IORMESH_WORKLOAD_HOLD_FILE=" + hold,
+	}, "noop")
+}
+
+// startRun starts the workload jar with args, adding env to the inherited
+// environment.
+func startRun(env []string, args ...string) (*gatedRun, error) {
+	cmd := exec.Command("java", append([]string{"-jar", workloadJar}, args...)...)
+	cmd.Env = append(os.Environ(), env...)
+	// io.Pipe writers instead of Cmd.StdoutPipe/StderrPipe: Wait then
+	// drains the output itself, so reaping the process can never cut a
+	// read short (StdoutPipe forbids Wait before all reads complete).
+	outR, outW := io.Pipe()
+	errR, errW := io.Pipe()
+	cmd.Stdout, cmd.Stderr = outW, errW
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	r := &gatedRun{cmd: cmd, outR: outR, stdout: bufio.NewScanner(outR),
+		stderr: make(chan string, 64), done: make(chan error, 1)}
+	go func() {
+		err := cmd.Wait()
+		_ = outW.Close()
+		_ = errW.Close()
+		r.done <- err
+	}()
+	go func() {
+		sc := bufio.NewScanner(errR)
+		for sc.Scan() {
+			r.stderr <- sc.Text()
+		}
+		close(r.stderr)
+	}()
+	return r, nil
+}
+
+// name labels a run in error messages by its workload arguments (the
+// ones after "java -jar workload.jar").
+func (r *gatedRun) name() string {
+	return fmt.Sprintf("workload %q", r.cmd.Args[3:])
+}
+
+// nextStdout returns the next stdout line. A scenario prints at most a
+// couple of lines before it blocks on its peer or a gate, so a blocking
+// read is fine here; the deferred kill unblocks it on a hung check.
+func (r *gatedRun) nextStdout() (string, error) {
+	if !r.stdout.Scan() {
+		return "", fmt.Errorf("%s: stdout ended early: %v", r.name(), r.stdout.Err())
+	}
+	return r.stdout.Text(), nil
+}
+
+// expectPID asserts the first stdout line is the process's PID.
+func (r *gatedRun) expectPID() error {
+	got, err := r.nextStdout()
+	if err != nil {
+		return err
+	}
+	if got != fmt.Sprint(r.cmd.Process.Pid) {
+		return fmt.Errorf("%s: first stdout line %q is not the PID %d",
+			r.name(), got, r.cmd.Process.Pid)
+	}
+	return nil
+}
+
+// expectListening reads the tcp-loopback server's `listening <port>` line
+// and returns the port the kernel picked.
+func (r *gatedRun) expectListening() (int, error) {
+	line, err := r.nextStdout()
+	if err != nil {
+		return 0, err
+	}
+	port, err := strconv.Atoi(strings.TrimPrefix(line, "listening "))
+	if err != nil || !strings.HasPrefix(line, "listening ") || port < 1 {
+		return 0, fmt.Errorf("%s: want `listening <port>`, got %q", r.name(), line)
+	}
+	return port, nil
+}
+
+// drainStdout discards the rest of stdout so the copy goroutine behind
+// Wait never blocks. Called only after the lines a check reads, so the
+// drain cannot race the scanner for them.
+func (r *gatedRun) drainStdout() {
+	go func() { _, _ = io.Copy(io.Discard, r.outR) }()
+}
+
+// expectQuiet fails if the process prints to stderr or exits within d.
+func (r *gatedRun) expectQuiet(phase string, d time.Duration) error {
+	select {
+	case line, ok := <-r.stderr:
+		if ok {
+			return fmt.Errorf("%s: %q printed %s", r.name(), line, phase)
+		}
+		return fmt.Errorf("%s: stderr closed %s", r.name(), phase)
+	case err := <-r.done:
+		return fmt.Errorf("%s exited %s: %v", r.name(), phase, err)
+	case <-time.After(d):
+		return nil
+	}
+}
+
+// expectStderr waits until want appears as a stderr line.
+func (r *gatedRun) expectStderr(want string) error {
+	timeout := time.After(gateWait)
+	for {
+		select {
+		case line, ok := <-r.stderr:
+			if !ok {
+				return fmt.Errorf("%s: stderr closed before %q", r.name(), want)
+			}
+			if line == want {
+				return nil
+			}
+		case <-timeout:
+			return fmt.Errorf("%s: no %q within %v", r.name(), want, gateWait)
+		}
+	}
+}
+
+// wait expects the process to exit with code 0 within gateWait.
+func (r *gatedRun) wait() error {
+	select {
+	case err := <-r.done:
+		if err != nil {
+			return fmt.Errorf("%s: %w", r.name(), err)
+		}
+		return nil
+	case <-time.After(gateWait):
+		return fmt.Errorf("%s: no exit within %v", r.name(), gateWait)
+	}
+}
+
+// kill ends a run left behind by a failed check; harmless after exit.
+func (r *gatedRun) kill() { _ = r.cmd.Process.Kill() }
+
+func touch(path string) error {
+	return os.WriteFile(path, nil, 0o600)
+}

@@ -1,18 +1,18 @@
 //go:build mage
 
-// Magefile for iormesh: the Java workload targets (M0). The tracer build,
-// BPF and generation targets lifted from ior live beside it in
-// magefile_bpf.go, magefile_generate.go and magefile_fmt.go
-// (docs/implementation.md, "M1 — walking skeleton", step 1).
+// Magefile for iormesh: the Java workload targets (M0); their process
+// harness is in magefile_workload.go. The tracer build, BPF and
+// generation targets lifted from ior live beside it in magefile_bpf.go,
+// magefile_generate.go and magefile_fmt.go (docs/implementation.md,
+// "M1 — walking skeleton", step 1).
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,24 +75,27 @@ func javaSources(root string) ([]string, error) {
 }
 
 // WorkloadTest runs every scenario without a tracer (--self-test), then
-// checks the command line rejects bad input with the usage exit code.
+// checks the gates, the two-process tcp-loopback run, every scenario's
+// --expect output and the exit codes of bad invocations.
 func WorkloadTest() error {
 	mg.Deps(WorkloadBuild)
 	if err := sh.RunV("java", "-jar", workloadJar, "--self-test"); err != nil {
 		return err
 	}
-	if err := checkGatedRun(); err != nil {
-		return err
+	checks := []func() error{
+		checkGatedRun,
+		checkTCPLoopback,
+		checkExpectations,
+		checkUsageErrors,
+		checkRunFailures,
 	}
-	if err := checkExpectation(); err != nil {
-		return err
+	for _, check := range checks {
+		if err := check(); err != nil {
+			return err
+		}
 	}
-	return checkUsageErrors()
+	return nil
 }
-
-// gateWait bounds every wait in the gated-run check; the JVM starts in
-// well under a second, so this only stops a hung check.
-const gateWait = 20 * time.Second
 
 // checkGatedRun proves the harness gates hold: the PID comes first on
 // stdout, no marker fires while the startup file is missing, and the
@@ -113,6 +116,7 @@ func checkGatedRun() error {
 	if err := run.expectPID(); err != nil {
 		return err
 	}
+	run.drainStdout()
 	if err := run.expectQuiet("before the startup file", time.Second); err != nil {
 		return err
 	}
@@ -131,134 +135,88 @@ func checkGatedRun() error {
 	return run.wait()
 }
 
-// gatedRun is a workload process whose stdout and stderr are read line by
-// line, and whose exit is reported on done.
-type gatedRun struct {
-	cmd    *exec.Cmd
-	outR   io.Reader
-	stdout *bufio.Scanner
-	stderr chan string
-	done   chan error
+// checkTCPLoopback runs tcp-loopback as the harness will in M1: a server
+// on a kernel-picked port (the default --port 0), then a client started
+// only after the server's `listening <port>` line, so the connect never
+// races the listen. Both must finish their bracket and exit 0.
+func checkTCPLoopback() error {
+	server, err := startRun(nil, "tcp-loopback", "--role", "server")
+	if err != nil {
+		return err
+	}
+	defer server.kill()
+	if err := server.expectPID(); err != nil {
+		return err
+	}
+	port, err := server.expectListening()
+	if err != nil {
+		return err
+	}
+	server.drainStdout()
+	client, err := startRun(nil, "tcp-loopback", "--role", "client", "--port", fmt.Sprint(port))
+	if err != nil {
+		return err
+	}
+	defer client.kill()
+	if err := client.expectPID(); err != nil {
+		return err
+	}
+	client.drainStdout()
+	// Client first: a server stuck in accept would otherwise hide the
+	// client failure that caused it behind a timeout.
+	if err := finish(client, "tcp-loopback"); err != nil {
+		return err
+	}
+	return finish(server, "tcp-loopback")
 }
 
-func startGated(startup, hold string) (*gatedRun, error) {
-	cmd := exec.Command("java", "-jar", workloadJar, "noop")
-	cmd.Env = append(os.Environ(),
-		"IORMESH_WORKLOAD_STARTUP_FILE="+startup,
-		"IORMESH_WORKLOAD_HOLD_FILE="+hold)
-	// io.Pipe writers instead of Cmd.StdoutPipe/StderrPipe: Wait then
-	// drains the output itself, so reaping the process can never cut a
-	// read short (StdoutPipe forbids Wait before all reads complete).
-	outR, outW := io.Pipe()
-	errR, errW := io.Pipe()
-	cmd.Stdout, cmd.Stderr = outW, errW
-	if err := cmd.Start(); err != nil {
-		return nil, err
+// finish expects the scenario's end marker on stderr, then exit code 0.
+func finish(r *gatedRun, scenario string) error {
+	if err := r.expectStderr("marker " + scenario + "/end"); err != nil {
+		return err
 	}
-	r := &gatedRun{cmd: cmd, outR: outR, stdout: bufio.NewScanner(outR),
-		stderr: make(chan string, 64), done: make(chan error, 1)}
-	go func() {
-		err := cmd.Wait()
-		_ = outW.Close()
-		_ = errW.Close()
-		r.done <- err
-	}()
-	go func() {
-		sc := bufio.NewScanner(errR)
-		for sc.Scan() {
-			r.stderr <- sc.Text()
+	return r.wait()
+}
+
+// checkExpectations asserts --expect prints the bundled expect.json as
+// valid JSON naming its scenario, for every scenario --list names, so a
+// new scenario without an expect.json fails here rather than in M1.
+func checkExpectations() error {
+	out, err := exec.Command("java", "-jar", workloadJar, "--list").Output()
+	if err != nil {
+		return fmt.Errorf("--list: %w", err)
+	}
+	names := strings.Fields(string(out))
+	if len(names) == 0 {
+		return errors.New("--list: no scenarios")
+	}
+	for _, name := range names {
+		if err := checkExpectation(name); err != nil {
+			return err
 		}
-		close(r.stderr)
-	}()
-	return r, nil
-}
-
-func (r *gatedRun) expectPID() error {
-	if !r.stdout.Scan() {
-		return fmt.Errorf("gated run: no stdout line: %v", r.stdout.Err())
 	}
-	if got := r.stdout.Text(); got != fmt.Sprint(r.cmd.Process.Pid) {
-		return fmt.Errorf("first stdout line %q is not the PID %d", got, r.cmd.Process.Pid)
-	}
-	// Stdout after the PID line is not checked; drain it (only now, so
-	// the drain cannot race the scanner for the PID) so the copy
-	// goroutine behind Wait never blocks.
-	go func() { _, _ = io.Copy(io.Discard, r.outR) }()
 	return nil
 }
 
-// expectQuiet fails if the process prints to stderr or exits within d.
-func (r *gatedRun) expectQuiet(phase string, d time.Duration) error {
-	select {
-	case line, ok := <-r.stderr:
-		if ok {
-			return fmt.Errorf("gated run: %q printed %s", line, phase)
-		}
-		return fmt.Errorf("gated run: stderr closed %s", phase)
-	case err := <-r.done:
-		return fmt.Errorf("gated run exited %s: %v", phase, err)
-	case <-time.After(d):
-		return nil
-	}
-}
-
-// expectStderr waits until want appears as a stderr line.
-func (r *gatedRun) expectStderr(want string) error {
-	timeout := time.After(gateWait)
-	for {
-		select {
-		case line, ok := <-r.stderr:
-			if !ok {
-				return fmt.Errorf("gated run: stderr closed before %q", want)
-			}
-			if line == want {
-				return nil
-			}
-		case <-timeout:
-			return fmt.Errorf("gated run: no %q within %v", want, gateWait)
-		}
-	}
-}
-
-func (r *gatedRun) wait() error {
-	select {
-	case err := <-r.done:
-		if err != nil {
-			return fmt.Errorf("gated run: %w", err)
-		}
-		return nil
-	case <-time.After(gateWait):
-		return fmt.Errorf("gated run: no exit within %v of the hold file", gateWait)
-	}
-}
-
-// kill ends a run left behind by a failed check; harmless after exit.
-func (r *gatedRun) kill() { _ = r.cmd.Process.Kill() }
-
-func touch(path string) error {
-	return os.WriteFile(path, nil, 0o600)
-}
-
-// checkExpectation asserts --expect prints the bundled expect.json as
-// valid JSON naming its scenario.
-func checkExpectation() error {
-	out, err := exec.Command("java", "-jar", workloadJar, "--expect", "noop").Output()
+func checkExpectation(name string) error {
+	out, err := exec.Command("java", "-jar", workloadJar, "--expect", name).Output()
 	if err != nil {
-		return fmt.Errorf("--expect noop: %w", err)
+		return fmt.Errorf("--expect %s: %w", name, err)
 	}
 	var exp struct {
 		Scenario string `json:"scenario"`
 	}
 	if err := json.Unmarshal(out, &exp); err != nil {
-		return fmt.Errorf("--expect noop: invalid JSON: %w", err)
+		return fmt.Errorf("--expect %s: invalid JSON: %w", name, err)
 	}
-	if exp.Scenario != "noop" {
-		return fmt.Errorf("--expect noop: scenario %q", exp.Scenario)
+	if exp.Scenario != name {
+		return fmt.Errorf("--expect %s: scenario %q", name, exp.Scenario)
 	}
 	return nil
 }
 
-// checkUsageErrors asserts each malformed invocation exits with code 2.
+// checkUsageErrors asserts each malformed invocation exits with the usage
+// code 2, before any scenario I/O.
 func checkUsageErrors() error {
 	bad := [][]string{
 		{},
@@ -271,6 +229,14 @@ func checkUsageErrors() error {
 		{"noop", "stray"},
 		{"--expect"},
 		{"--expect", "no-such-scenario"},
+		// Scenario-level option checks (Options.java).
+		{"tcp-loopback", "--role", "client"},
+		{"tcp-loopback", "--role", "client", "--port", "abc"},
+		{"tcp-loopback", "--role", "client", "--port", "70000"},
+		{"tcp-loopback", "--role", "client", "--port", "0"},
+		{"tcp-loopback", "--role", "solo"},
+		{"file-basic", "--role", "server"},
+		{"file-basic", "--bogus", "x"},
 	}
 	for _, args := range bad {
 		if err := expectExit(2, args...); err != nil {
@@ -278,6 +244,39 @@ func checkUsageErrors() error {
 		}
 	}
 	return nil
+}
+
+// checkRunFailures asserts a well-formed run that fails at run time exits
+// with code 1, not the usage code: a client with nobody listening, and a
+// --dir that does not exist.
+func checkRunFailures() error {
+	port, err := closedPort()
+	if err != nil {
+		return err
+	}
+	failing := [][]string{
+		{"tcp-loopback", "--role", "client", "--port", fmt.Sprint(port)},
+		{"file-basic", "--dir", "/nonexistent/iormesh-workload"},
+	}
+	for _, args := range failing {
+		if err := expectExit(1, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// closedPort returns a loopback port nothing listens on: one the kernel
+// just handed out and that was closed again. The kernel picks such ports
+// from the whole ephemeral range, so another process taking this one in
+// the second before the client connects is unlikely enough for a check.
+func closedPort() (int, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	return port, l.Close()
 }
 
 // expectExit runs the workload jar and fails unless it exits with code.
