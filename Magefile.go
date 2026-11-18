@@ -30,15 +30,23 @@ const (
 	workloadClassesDir = "workload/classes"
 	workloadJar        = "workload.jar"
 	workloadMainClass  = "iormesh.workload.Main"
+	// The non-java-peer scenario's Go peer, built next to the jar, where
+	// NonJavaPeer looks for it by default.
+	echoPeerBinary = "echopeer"
+	echoPeerPkg    = "./workload/echopeer"
 	// The workload targets Java 21 (PLAN.md decision #5) whatever newer
 	// JDK builds it, so it never depends on post-21 APIs.
 	workloadRelease = "21"
 )
 
 // WorkloadBuild compiles the Java workload with the JDK alone (no Maven or
-// Gradle, so the traced app has no build-time dependencies) and bundles
-// each scenario's expect.json so `--expect <name>` can print it.
+// Gradle, so the traced app has no build-time dependencies), bundles
+// each scenario's expect.json so `--expect <name>` can print it, and
+// builds the non-java-peer scenario's Go peer.
 func WorkloadBuild() error {
+	if err := EchoPeerBuild(); err != nil {
+		return err
+	}
 	srcs, err := javaSources(workloadSrcDir)
 	if err != nil {
 		return err
@@ -56,6 +64,14 @@ func WorkloadBuild() error {
 		"--main-class", workloadMainClass,
 		"-C", workloadClassesDir, ".",
 		"-C", "workload", "scenarios")
+}
+
+// EchoPeerBuild builds ./echopeer, the non-JVM end of the non-java-peer
+// scenario. CGO_ENABLED=0: it must not need the libbpfgo environment or
+// libc to run, and a static binary execs the same everywhere.
+func EchoPeerBuild() error {
+	return sh.RunWithV(map[string]string{"CGO_ENABLED": "0"},
+		"go", "build", "-o", echoPeerBinary, echoPeerPkg)
 }
 
 // javaSources lists every .java file under root, sorted by WalkDir.
@@ -79,7 +95,8 @@ func javaSources(root string) ([]string, error) {
 // WorkloadTest runs every scenario without a tracer (--self-test), then
 // checks the gates, the two-process runs (tcp-loopback, udp-loopback,
 // unix-socket), every scenario's --expect output, syscall-burst's result
-// line, the exit codes of bad invocations and the skip exit code.
+// line, the exit codes of bad invocations, the skip exit code, and
+// restart's and non-java-peer's own failure modes (magefile_restartpeer.go).
 func WorkloadTest() error {
 	mg.Deps(WorkloadBuild)
 	if err := sh.RunV("java", "-jar", workloadJar, "--self-test"); err != nil {
@@ -95,6 +112,7 @@ func WorkloadTest() error {
 		checkUsageErrors,
 		checkRunFailures,
 		checkSkip,
+		checkRestartPeer,
 	}
 	for _, check := range checks {
 		if err := check(); err != nil {
@@ -334,6 +352,7 @@ func checkUsageErrors() error {
 		bad = append(bad, []string{name, "--role", "server"}, []string{name, "--dir", "x"})
 	}
 	bad = append(bad, m2RoleUsageErrors...)
+	bad = append(bad, m2AppUsageErrors...)
 	for _, args := range bad {
 		if err := expectExit(2, args...); err != nil {
 			return err
@@ -388,6 +407,7 @@ func checkRunFailures() error {
 	failing = append(failing,
 		[]string{"unix-socket", "--role", "server", "--dir", "/nonexistent/iormesh-workload"},
 		[]string{"unix-socket", "--role", "client", "--path", "/nonexistent/iormesh.sock"})
+	failing = append(failing, m2AppRunFailures...)
 	for _, args := range failing {
 		if err := expectExit(1, args...); err != nil {
 			return err

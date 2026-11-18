@@ -10,9 +10,11 @@ import java.nio.file.Path;
  * open(2) of a reserved path that never exists: it costs one failed
  * syscall, needs no tracer cooperation, and the correlator turns the
  * openat of /iormesh-marker/&lt;scenario&gt;/&lt;edge&gt; into a synthetic
- * marker event.
+ * marker event. Public because helper processes that are traced on their
+ * own — restart's incarnations, matched by a pattern session that never
+ * sees the launcher — must bracket themselves.
  */
-final class Marker {
+public final class Marker {
     static final String ROOT = "/iormesh-marker/";
 
     // Checked once at class init, i.e. before the first begin marker and so
@@ -27,11 +29,11 @@ final class Marker {
 
     private Marker() {}
 
-    static void begin(String scenario) {
+    public static void begin(String scenario) {
         touch(scenario, "begin");
     }
 
-    static void end(String scenario) {
+    public static void end(String scenario) {
         touch(scenario, "end");
     }
 

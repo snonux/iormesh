@@ -93,6 +93,9 @@ func checkMutations() []mutation {
 		{name: "create bits missing from open flags", scenario: "file-basic", kind: ViolationEvent,
 			trace:    editWhere(isOpen(7, 1), func(e *schema.Event) { e.Args.Flags = u32p(1) }),
 			contains: "declared event 1 (openat"},
+		{name: "attribution declared but not traced", scenario: "file-basic", kind: ViolationEvent,
+			want:     func(x *Expectation) { x.Events[1].Attribution = schema.AttributionJava },
+			contains: "declared event 2 (write fd=$fd1 bytes=4096 attribution=java)"},
 		{name: "missing edge", scenario: "file-basic", kind: ViolationEdge,
 			trace:    dropEdges(schema.EdgeOpened),
 			contains: "declared edge 1 (opened $p1 → file:$h1:$tmp/file-basic.dat)"},
@@ -207,6 +210,47 @@ func TestBindings(t *testing.T) {
 	b.undo(m)
 	if _, ok := b.sym["$h1"]; ok || !b.bind("$h2", "$h3") {
 		t.Fatal("undo must release symbol and value")
+	}
+}
+
+// TestCheckAttributionNone: a declared "none" matches the fixtures'
+// unattributed events, the shape non-java-peer declares for its peer.
+func TestCheckAttributionNone(t *testing.T) {
+	r := runA()
+	want := golden(t, "file-basic")
+	for i := range want.Events {
+		want.Events[i].Attribution = schema.AttributionNone
+	}
+	if vs := Check(normalized(t, fileBasic(r), r, "file-basic"), want); len(vs) > 0 {
+		t.Fatalf("violations: %v", vs)
+	}
+}
+
+// TestCheckAppEdges: restart's "incarnation" edges bind one $a1 to the
+// app node, so two incarnations under two different app nodes fail.
+func TestCheckAppEdges(t *testing.T) {
+	want := []ExpectedEdge{
+		{Type: "incarnation", From: "$a1", To: "$p1"},
+		{Type: "incarnation", From: "$a1", To: "$p2"},
+	}
+	edges := func(app2 string) []schema.Edge {
+		return []schema.Edge{
+			{Type: "incarnation", From: "app:demo/*RestartApp*", To: "proc:$h1/1@1"},
+			{Type: "incarnation", From: app2, To: "proc:$h1/2@1"},
+		}
+	}
+	bound := func() *bindings {
+		b := newBindings()
+		b.bind("$p1", "proc:$h1/1@1")
+		b.bind("$p2", "proc:$h1/2@1")
+		return b
+	}
+	if vs := checkEdges(edges("app:demo/*RestartApp*"), want, bound()); len(vs) > 0 {
+		t.Fatalf("one app node: %v", vs)
+	}
+	vs := checkEdges(edges("app:demo/*Other*"), want, bound())
+	if len(vs) != 1 || !strings.Contains(vs[0].Msg, "declared edge 2") {
+		t.Fatalf("two app nodes: want edge 2 missing, got %v", vs)
 	}
 }
 

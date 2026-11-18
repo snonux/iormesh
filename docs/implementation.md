@@ -332,6 +332,14 @@ tcp-loopback ship real ones):
 - `flags` are compared by access mode plus the declared bits, so
   577 means "write-only, create, truncate" and tolerates an extra
   `O_CLOEXEC`; `0` matches any read-only open (M1 step 9).
+- `attribution` (`"java"` or `"none"`), when declared, must equal
+  the event's; unset, it is not compared. `non-java-peer`
+  declares `none` on every event of its Go peer.
+- `$a1` names an app node — the one node every incarnation of a
+  pattern-matched app links to (M2 step 3). Only edges use it;
+  it binds the whole node id, so `restart`'s two `incarnation`
+  edges from one `$a1` assert one app identity, whatever the
+  id's format turns out to be.
 
 ## M0 — workload framework
 
@@ -461,8 +469,12 @@ argument, a missing, non-numeric or out-of-range `--port`, an
 unknown scenario option — exit with the usage code 2, and that
 well-formed runs failing at run time — a client on a closed port,
 a `--dir` that does not exist — exit with 1, and that `tcp-ipv6`
-on an IPv4-only JVM exits with the skip code 3. The process
-harness lives in `magefile_workload.go`.
+on an IPv4-only JVM exits with the skip code 3. `restart` must
+refuse a leftover state file (exit 1), `non-java-peer` must skip
+(3) from a jar with no `echopeer` beside it and fail (1) on a
+bad `--peer`, and `echopeer` itself exits 2 on bad arguments
+(`magefile_restartpeer.go`). The process harness lives in
+`magefile_workload.go`.
 
 **Done when**: PLAN.md's M0 acceptance holds — the M1 scenarios
 run standalone and `strace -f -e trace=openat` shows the two
@@ -1083,10 +1095,28 @@ scenarios landing first (principle #1).
    exec event is evaluated in userspace and the tgid inserted.
    The window between exec and insert loses the first syscalls of
    a restarted app — record it as a `drop` event with reason
-   `attach_gap`, never silently. Scenario: `restart`.
+   `attach_gap`, never silently. Scenario: `restart` (landed
+   ahead, task oa4): a launcher runs `RestartApp` as a child JVM,
+   reaps it and runs it again with the identical argv
+   (`java <flags> -cp <cp> iormesh.workload.scenarios.RestartApp
+   <dir>`); the first incarnation finds no state file (a failed
+   `openat`) and writes one, the second reads it and rewrites
+   it. The harness binds the session to the glob
+   `*iormesh.workload.scenarios.RestartApp*`, which matches both
+   incarnations and never the launcher (`-jar workload.jar
+   restart`), so each incarnation emits its own `restart`
+   markers and the per-process cut keeps it without
+   fork-following. The JVM's own startup runs between exec and
+   the begin marker, so an `attach_gap` drop lands before the
+   bracket; one inside it means the insert came too late and
+   the run must fail.
 
 3. **App identity**: all incarnations matched by one pattern share
-   an `app:<project>/<pattern>` node with `incarnation` edges.
+   an `app:<project>/<pattern>` node with `incarnation` edges
+   (app → process). `restart`'s golden declares them from one
+   `$a1`; the graph must accept the `app` node type and the
+   `incarnation` edge, and the normalizer passes `app:` ids
+   through unchanged (they carry nothing run-specific).
 
 4. **File surface**: attach the remaining file families (ior's
    family table, `internal/tracepoints/family.go`). For each
@@ -1168,8 +1198,19 @@ scenarios landing first (principle #1).
    symbolized in userspace from `/proc/<pid>/maps`. Off by
    default; documented as not useful for JIT frames.
 
-10. **Non-Java peer**: build ior's `ioworkload` as the peer for
-    the `non-java-peer` scenario; assert `attribution: none`.
+10. **Non-Java peer**: scenario `non-java-peer` (landed ahead,
+    task oa4). Its peer is `workload/echopeer`, a cgo-free Go
+    echo server that `mage workloadBuild` builds next to the
+    jar — ior's `ioworkload` has no scenario that serves a TCP
+    client. It uses raw `syscall` calls on a locked main thread
+    (socket, bind, listen, `accept4`, read, write, close, then
+    an `openat`/write/close of `$tmp/non-java-peer.log`), so its
+    declared syscalls are exact and carry TID == PID; it
+    brackets itself with the scenario's markers. The JVM spawns
+    it, connects over AF_INET, then reads the log back. The
+    golden declares `attribution: none` on every peer event;
+    the tracer must never attribute a non-JVM process (no
+    agent, no Java fields).
 
 **Done when**: PLAN.md's M2 acceptance holds, including the S3
 budget as a `mage perfGate` target.

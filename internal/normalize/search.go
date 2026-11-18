@@ -168,5 +168,8 @@ func describe(d ExpectedEvent) string {
 	if d.Args.RemotePort != nil {
 		add("remote_port", d.Args.RemotePort.String())
 	}
+	if d.Attribution != "" {
+		add("attribution", d.Attribution)
+	}
 	return strings.Join(parts, " ")
 }

@@ -224,7 +224,7 @@ Scenario catalogue, by the milestone it lands with:
 |------------|-----------|
 | M1 | File data ops (open/read/write/close) — `file-basic`; TCP client ↔ server on loopback — `tcp-loopback`; markers (all landed with M0) |
 | S3 | Syscall load: tight 1-byte read/write loops, N ops over T threads — `syscall-burst` |
-| M2 | Full file surface — `file-lifecycle` (create/delete, rename while open, move, truncate, touch), `file-links` (symlink/readlink/lstat, hardlink), `file-attrs` (chmod/chown by path and fd, xattr); fd lifecycle (dup, inheritance across fork/exec, reuse) — `fd-lifecycle` (these four landed ahead of the M2 tracer work); local IPC — `pipe-ipc` (pipe, child stdio pipes), `unix-socket`; signals — `signals`; UDP — `udp-loopback`; IPv4 + IPv6 — `tcp-ipv4`, `tcp-ipv6` (these six landed ahead too); restart; non-Java peer |
+| M2 | Full file surface — `file-lifecycle` (create/delete, rename while open, move, truncate, touch), `file-links` (symlink/readlink/lstat, hardlink), `file-attrs` (chmod/chown by path and fd, xattr); fd lifecycle (dup, inheritance across fork/exec, reuse) — `fd-lifecycle` (these four landed ahead of the M2 tracer work); local IPC — `pipe-ipc` (pipe, child stdio pipes), `unix-socket`; signals — `signals`; UDP — `udp-loopback`; IPv4 + IPv6 — `tcp-ipv4`, `tcp-ipv6` (these six landed ahead too); restart — `restart`; non-Java peer — `non-java-peer` (these two landed ahead too) |
 | M3 | Method flows (deep stacks, async I/O); HTTP plain + TLS; redaction; OTEL flavor |
 | M4 | Client and server on two hosts as two projects; microservices topology, one service per host; NAT'ed pair |
 | M5 | (renders M4's microservices scenario) |
@@ -258,7 +258,15 @@ Scenario notes:
 - **Restart scenario** (M2): the app exits mid-session and
   comes back with a new PID; expectations assert both
   incarnations were traced under one app identity, with
-  nothing mis-attributed across the gap.
+  nothing mis-attributed across the gap. `restart` is a
+  launcher that runs the app (a child JVM) twice in a row with
+  the identical argv; only the state file the first
+  incarnation leaves tells the second it is a restart. Each
+  incarnation brackets itself, because a pattern-bound
+  session (the argv glob of decision #23) never sees the
+  launcher; the golden declares two distinct processes, each
+  with its own file work, linked by `incarnation` edges from
+  one app node.
 - **File-surface and fd scenarios** (M2): `file-lifecycle`,
   `file-links`, `file-attrs` and `fd-lifecycle` declare the
   syscalls strace shows on the host JDK, as JDK-only Java can
@@ -277,10 +285,14 @@ Scenario notes:
   tracer. `tcp-ipv6` exits with the skip code 3 on a host
   without `::1`, so a harness reports a skip, never a pass.
 - **Non-Java peer** (M2): one scenario talks to a non-JVM
-  process (ior's `ioworkload`, or a minimal C/Go echo peer),
-  proving the degraded node shape — files and sockets only,
-  no Java stacks, no agent-sourced hostnames or http events,
-  every event marked unattributed rather than left ambiguous.
+  process, proving the degraded node shape — files and sockets
+  only, no Java stacks, no agent-sourced hostnames or http
+  events, every event marked unattributed rather than left
+  ambiguous. `non-java-peer`'s peer is a minimal cgo-free Go
+  echo server built in-repo (`workload/echopeer`), not ior's
+  `ioworkload`, whose scenarios are all self-contained and
+  none can serve a TCP client; the Java side stays JDK-only.
+  The golden declares `attribution: none` on every peer event.
 - **NAT'ed pair** (M4): client and server with a DNAT hop
   between them (docker port-mapped), so the two ends observe
   different 4-tuples.

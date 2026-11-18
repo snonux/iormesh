@@ -12,10 +12,12 @@ import (
 )
 
 // symbolRE matches one expectation symbol: $p1 (process), $t1 (thread),
-// $fd1 (fd instance), $port1, $h1 (host), $c1 (connection). "$tmp" is
-// not a symbol — the normalizer writes it literally into paths. Go's
-// regexp prefers the earlier alternative, so "$port1" is a port, not $p.
-var symbolRE = regexp.MustCompile(`\$(fd|port|p|t|h|c)[1-9][0-9]*`)
+// $fd1 (fd instance), $port1, $h1 (host), $c1 (connection), $a1 (app —
+// the node every incarnation of a pattern-matched app links to, M2; only
+// edges name it, binding the whole node id). "$tmp" is not a symbol — the
+// normalizer writes it literally into paths. Go's regexp prefers the
+// earlier alternative, so "$port1" is a port, not $p.
+var symbolRE = regexp.MustCompile(`\$(fd|port|p|t|h|c|a)[1-9][0-9]*`)
 
 // Expectation is a scenario's declared golden (workload/scenarios/<name>/
 // expect.json): the events and edges the trace must contain, and the
@@ -41,6 +43,10 @@ type ExpectedEvent struct {
 	Bytes   *uint64      `json:"bytes,omitempty"`
 	ConnID  *Ref         `json:"conn_id,omitempty"`
 	Args    ExpectedArgs `json:"args"`
+	// Attribution, when set, must equal the event's ("java" or "none"):
+	// how a golden says a process is not a JVM (non-java-peer), so a
+	// tracer that guessed Java frames for it fails the check.
+	Attribution string `json:"attribution,omitempty"`
 }
 
 // ExpectedArgs mirrors schema.Args. Paths compare after normalization
@@ -172,6 +178,11 @@ func (x Expectation) Validate() error {
 func (e ExpectedEvent) validate(threadProc map[string]string) error {
 	if !schema.KnownKind(e.Event) {
 		return fmt.Errorf("unknown event %q", e.Event)
+	}
+	switch e.Attribution {
+	case "", schema.AttributionJava, schema.AttributionNone:
+	default:
+		return fmt.Errorf("unknown attribution %q", e.Attribution)
 	}
 	if err := wantKind(e.Thread, "t", false); err != nil {
 		return fmt.Errorf("thread: %w", err)

@@ -230,6 +230,8 @@ func TestParseExpectationErrors(t *testing.T) {
 		"thread in 2 procs": `{"scenario":"s","schema_version":1,"events":[` + strings.Replace(ev, `{`, `{"process":"$p1",`, 1) + `,` + strings.Replace(ev, `{`, `{"process":"$p2",`, 1) + `]}`,
 		"empty forbidden":   `{"scenario":"s","schema_version":1,"must_not_appear":[""]}`,
 		"edge without to":   `{"scenario":"s","schema_version":1,"edges":[{"type":"opened","from":"$p1"}]}`,
+		"bad attribution":   `{"scenario":"s","schema_version":1,"events":[{"thread":"$t1","event":"read","attribution":"jvm"}]}`,
+		"fd as app symbol":  `{"scenario":"s","schema_version":1,"events":[{"thread":"$t1","event":"read","fd":"$a1"}]}`,
 	}
 	for name, doc := range tests {
 		t.Run(name, func(t *testing.T) {

@@ -134,7 +134,8 @@ func (b *bindings) portMatch(want *Ref, got *uint16) bool {
 
 // plainFieldsMatch compares the fields that bind nothing.
 func plainFieldsMatch(d ExpectedEvent, e schema.Event) bool {
-	if d.Event != e.Event || (d.Bytes != nil && *d.Bytes != e.Bytes) {
+	if d.Event != e.Event || (d.Bytes != nil && *d.Bytes != e.Bytes) ||
+		(d.Attribution != "" && d.Attribution != e.Attribution) {
 		return false
 	}
 	a, g := d.Args, e.Args
