@@ -456,7 +456,8 @@ Kubernetes (M7) build on it.
   minute**: only the active segment is being written; on
   rotation it is closed and moved (atomic rename) into a
   `ready/` subfolder as
-  `<fqdn>-<session>-<start-ts>-<seq>.parquet`.
+  `<fqdn>-<session>-<start-ts>-<seq>.parquet` (`<start-ts>` is
+  when that segment was opened).
   `ready/` is the sync contract: files there are immutable and
   final, so iormeshctl can collect them while the session
   runs, and a crash or kill loses at most the current minute,
@@ -494,6 +495,11 @@ Kubernetes (M7) build on it.
   currently being written, and collection is never an
   end-of-run bulk download. The active segment never enters
   `ready/`, so rsync can never grab or delete a file mid-write.
+  Server-side cleanup is delete-on-transfer, not by age: an
+  uncollected segment older than a minute is still data the
+  operator wants, so only a confirmed transfer frees it; if
+  `collect` never runs, the disk watchdog and the 4h bound cap
+  what piles up.
   Synced segments land on the controller under
   `~/.local/share/iormesh/traces/<project>/` — that path on
   every platform, always — and stay there until the operator

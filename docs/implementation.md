@@ -1131,6 +1131,7 @@ type Writer struct {
     dir, fqdn, session string
     seq                int
     active             *parquet.GenericWriter[schema.Event]
+    start              time.Time // active segment opened; names it
     rotateAt           time.Time
     watchdog           DiskWatchdog
 }
