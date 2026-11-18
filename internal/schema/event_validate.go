@@ -46,11 +46,15 @@ func (e Event) Validate() error {
 	if e.Args.Argv != nil && e.Event != KindExec {
 		return invalidf("args.argv on a %s event (exec only)", e.Event)
 	}
+	if err := e.validateIPCArgs(); err != nil {
+		return err
+	}
 	return e.validateKindArgs()
 }
 
 // KnownKind reports whether kind is part of this schema draft: an M1
-// kind, exec (M2 step 8) or one of the M2 file surface (kinds_file.go).
+// kind, exec (M2 step 8), one of the M2 file surface (kinds_file.go) or of
+// M2 step 7's socket addresses and opt-in families (kinds_ipc.go).
 func KnownKind(kind string) bool {
 	switch kind {
 	case KindOpen, KindOpenat, KindOpenat2, KindRead, KindWrite,
@@ -58,7 +62,7 @@ func KnownKind(kind string) bool {
 		KindTCPState, KindMarker, KindDrop, KindSession, KindEnd, KindExec:
 		return true
 	}
-	return fileKind(kind)
+	return fileKind(kind) || ipcKind(kind)
 }
 
 // validateFD enforces the fd conventions: NoFD is the only negative fd,
@@ -110,6 +114,10 @@ func (e Event) validateKindArgs() error {
 		if e.Args.SockState == nil || *e.Args.SockState == "" {
 			return invalidf("tcp_state without args.sock_state")
 		}
+	case KindSignal:
+		if e.Args.Signal == nil || e.PID == 0 {
+			return invalidf("signal without args.signal or a receiving pid")
+		}
 	default:
 		return e.validateSyntheticArgs()
 	}
@@ -158,4 +166,21 @@ func KnownEndReason(reason string) bool {
 // invalidf formats a validation failure wrapped in ErrInvalid.
 func invalidf(format string, args ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{ErrInvalid}, args...)...)
+}
+
+// validateIPCArgs keeps M2 step 7's args to their kinds: a second fd's
+// generation names nothing without the fd, and signal numbers or pids on
+// other kinds would make "count the SIGTERMs" or "who signalled whom" lie.
+func (e Event) validateIPCArgs() error {
+	a := e.Args
+	if a.FD2Gen != nil && a.FD2 == nil {
+		return invalidf("args.fd2_gen without args.fd2 on a %s event", e.Event)
+	}
+	if (a.Signal != nil || a.TargetPID != nil) && !signalKind(e.Event) {
+		return invalidf("args.signal or args.target_pid on a %s event", e.Event)
+	}
+	if a.SenderPID != nil && e.Event != KindSignal {
+		return invalidf("args.sender_pid on a %s event (signal only)", e.Event)
+	}
+	return nil
 }

@@ -136,7 +136,7 @@ type Args struct {
 	Path       *string `json:"path,omitempty" parquet:"path,optional"`
 	NewPath    *string `json:"new_path,omitempty" parquet:"new_path,optional"`
 	Flags      *uint32 `json:"flags,omitempty" parquet:"flags,optional"`
-	Cmd        *uint32 `json:"cmd,omitempty" parquet:"cmd,optional"` // fcntl's raw command
+	Cmd        *uint32 `json:"cmd,omitempty" parquet:"cmd,optional"` // fcntl's raw command; epoll_ctl's op
 	Offset     *int64  `json:"offset,omitempty" parquet:"offset,optional"`
 	LocalAddr  *string `json:"local_addr,omitempty" parquet:"local_addr,optional"`
 	LocalPort  *uint16 `json:"local_port,omitempty" parquet:"local_port,optional"`
@@ -156,6 +156,19 @@ type Args struct {
 	// (internal/redact: "-Dpassword=***", "--token ***"). Only exec
 	// events carry it; an unreadable argv leaves it absent.
 	Argv []string `json:"argv,omitempty" parquet:"argv,list"`
+	// FD2 and FD2Gen name a second fd instance (M2 step 7): the other end
+	// of a pipe or socketpair, or the fd epoll_ctl registers. The pair is
+	// an fd instance like the envelope's (fd, fd_gen).
+	FD2    *int32  `json:"fd2,omitempty" parquet:"fd2,optional"`
+	FD2Gen *uint32 `json:"fd2_gen,omitempty" parquet:"fd2_gen,optional"`
+	// Signal is the signal number: what kill, tgkill and tkill sent (when
+	// the kernel generated it) and what a signal event delivered.
+	Signal *int32 `json:"signal,omitempty" parquet:"signal,optional"`
+	// TargetPID is the tgid a kill, tgkill or tkill signalled; SenderPID
+	// the tgid that sent a signal event's signal. Raw pids: the sender
+	// or target need not be traced, and then no process node names it.
+	TargetPID *uint32 `json:"target_pid,omitempty" parquet:"target_pid,optional"`
+	SenderPID *uint32 `json:"sender_pid,omitempty" parquet:"sender_pid,optional"`
 }
 
 // Session is the host description of the session header. Its fields are

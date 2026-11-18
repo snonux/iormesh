@@ -13,9 +13,11 @@ const (
 	NodeHost    = "host"
 	NodeProcess = "process"
 	NodeFile    = "file"
-	// NodeSocket is one TCP connection — the socket pair, not one end of
-	// it — so both processes of a fused pair point at the same node. Its
-	// id is "conn:<conn_id>".
+	// NodeSocket is one connection — the pair, not one end of it — so
+	// both processes of a fused pair point at the same node: a TCP
+	// connection, a unix stream connection, a UDP flow (one local/remote
+	// address pair) or a pipe or socketpair (M2 step 7). Its id is
+	// "conn:<conn_id>".
 	NodeSocket = "socket"
 	// NodeApp is the identity a pattern-bound session gives every process
 	// incarnation its pattern matched (M2 step 3): an app restarted with a
@@ -36,6 +38,9 @@ const (
 	// normalizer's bracket cut gives a child forked inside a bracket that
 	// bracket (internal/normalize, cut).
 	EdgeForked = "forked" // process → process
+	// EdgeSignaled links a traced process to a traced process it sent a
+	// signal (M2 step 7, signal family): "who touched the process".
+	EdgeSignaled = "signaled" // process → process
 )
 
 // Edge states, set on connected edges only. A connection is fused when

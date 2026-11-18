@@ -147,7 +147,7 @@ func edgeShapeOf(edgeType string) (edgeShape, bool) {
 		return edgeShape{from: NodeProcess, to: NodeSocket, wantState: true}, true
 	case EdgeIncarnation:
 		return edgeShape{from: NodeApp, to: NodeProcess}, true
-	case EdgeForked:
+	case EdgeForked, EdgeSignaled:
 		return edgeShape{from: NodeProcess, to: NodeProcess}, true
 	}
 	return edgeShape{}, false
