@@ -63,9 +63,10 @@ type normalizer struct {
 // scenario compare equal. It never reorders events and never modifies
 // the input.
 //
-// Cutting comes first (PLAN.md lists it second): ids numbered over the
-// whole trace would shift with every JVM startup file outside the
-// bracket, and the bracket is exactly where runs must agree.
+// Cutting comes first (PLAN.md M0 "Golden semantics"): ids numbered over
+// the whole trace would shift with every JVM startup file outside the
+// bracket, and the bracket is exactly where runs must agree. The graph is
+// pruned to what the bracketed events touched for the same reason.
 func Normalize(in Trace, opt Options) (Trace, error) {
 	events := in.Events
 	if opt.Bracket != "" {
@@ -79,7 +80,11 @@ func Normalize(in Trace, opt Options) (Trace, error) {
 	for i, e := range events {
 		out.Events[i] = n.event(e, uint64(i+1))
 	}
-	out.Graph = n.graph(in.Graph)
+	g := in.Graph
+	if opt.Bracket != "" {
+		g = prune(g, events)
+	}
+	out.Graph = n.graph(g)
 	return out, nil
 }
 
@@ -87,8 +92,25 @@ func Normalize(in Trace, opt Options) (Trace, error) {
 // it becomes seq and both clocks, since only order survives across runs.
 // Latency is a duration whose value is noise, so it becomes 0.
 func (n normalizer) event(e schema.Event, rank uint64) schema.Event {
-	proc := processKey(e)
 	e.Seq, e.BootNS, e.WallNS, e.LatencyNS = rank, rank, rank, 0
+	if e.PID != 0 {
+		// PID 0 marks host-level events (drop, session, end): they stay
+		// 0, like stdio fds, so they keep that meaning and a run-specific
+		// drop never takes — and shifts — a process ordinal.
+		n.processFields(&e)
+	}
+	e.HostID = n.host(e.HostID)
+	if e.ConnID != "" {
+		e.ConnID = n.conn(e.ConnID)
+	}
+	e.Args = n.args(e.Args)
+	return e
+}
+
+// processFields renumbers the fields naming a process, its thread and
+// its fd. The process key is taken before any of them changes.
+func (n normalizer) processFields(e *schema.Event) {
+	proc := processKey(*e)
 	e.TID = uint32(n.syms.ord(kindTID, proc+"/"+strconv.FormatUint(uint64(e.TID), 10)))
 	e.FD, e.FDGen = n.fd(proc, e.FD, e.FDGen)
 	if returnsFD(e.Event) && e.Ret >= 0 {
@@ -96,13 +118,7 @@ func (n normalizer) event(e schema.Event, rank uint64) schema.Event {
 		// return value is as run-specific as the fd and follows it.
 		e.Ret = int64(e.FD)
 	}
-	e.HostID = n.host(e.HostID)
 	e.PID, e.PIDInc = n.process(proc, e.PID)
-	if e.ConnID != "" {
-		e.ConnID = n.conn(e.ConnID)
-	}
-	e.Args = n.args(e.Args)
-	return e
 }
 
 // process maps a raw (pid, incarnation) to ordinals. The PID ordinal is

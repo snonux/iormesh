@@ -209,3 +209,42 @@ func TestBindings(t *testing.T) {
 		t.Fatal("undo must release symbol and value")
 	}
 }
+
+// TestCheckIgnoresOutsideBracket: what happens outside the bracket can
+// neither satisfy a declaration nor violate must_not_appear.
+func TestCheckIgnoresOutsideBracket(t *testing.T) {
+	r := runA()
+	b := &traceBuilder{r: r}
+	p := r.server
+	b.open(p, p.tid, "/srv/q?auth=Bearer s3cret", 0, 5, 1)
+	b.fileWork(p, "file-basic.dat") // the declared work, but too early
+	b.marker(p, "file-basic", "begin")
+	b.jvmNoise(p)
+	b.marker(p, "file-basic", "end")
+	raw := Trace{Events: b.events, Graph: r.graph([]proc{p}, []string{"file-basic.dat"}, false)}
+	want := golden(t, "file-basic")
+	want.MustNotAppear = []string{"Bearer s3cret"}
+	var kinds []string
+	for _, v := range Check(normalized(t, raw, r, "file-basic"), want) {
+		kinds = append(kinds, v.Kind)
+	}
+	if !slices.Equal(kinds, []string{ViolationEvent, ViolationEdge}) {
+		t.Fatalf("want one event and one edge violation, got kinds %v", kinds)
+	}
+}
+
+// TestCheckWrongProcess: a declared client event that ran in the server
+// process does not count for the client.
+func TestCheckWrongProcess(t *testing.T) {
+	r := runA()
+	raw := tcpLoopback(r)
+	editWhere(func(e schema.Event) bool {
+		return e.PID == r.client.pid && e.Event == schema.KindWrite && e.Bytes == 4096
+	}, func(e *schema.Event) {
+		e.PID, e.PIDInc, e.TID = r.server.pid, r.server.inc, r.server.tid
+	})(&raw)
+	vs := Check(normalized(t, raw, r, "tcp-loopback"), golden(t, "tcp-loopback"))
+	if len(vs) != 1 || !strings.Contains(vs[0].Msg, "thread $t2: declared event 2 (write process=$p2 fd=$fd4") {
+		t.Fatalf("want the client's missing write, got %v", vs)
+	}
+}

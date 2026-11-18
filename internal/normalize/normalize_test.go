@@ -209,6 +209,12 @@ func TestBracketKeepsHostEvents(t *testing.T) {
 	if len(got.Events) != 3 || got.Events[1].Event != schema.KindDrop {
 		t.Fatalf("want begin, drop, end; got %s", encode(t, got))
 	}
+	// A host-level event stays PID 0 and takes no process ordinal, so
+	// the process after it is still 1.
+	drop, end := got.Events[1], got.Events[2]
+	if drop.PID != 0 || drop.PIDInc != 0 || drop.TID != 0 || end.PID != 1 || end.TID != 1 {
+		t.Fatalf("host event renumbered: %s", encode(t, got))
+	}
 }
 
 func TestParseExpectationErrors(t *testing.T) {
@@ -231,5 +237,29 @@ func TestParseExpectationErrors(t *testing.T) {
 				t.Fatal("accepted")
 			}
 		})
+	}
+}
+
+// TestNormalizePrunesGraph: with a bracket, the graph keeps only what
+// bracketed events touched — not a JVM startup file opened before the
+// begin marker, nor a process that never entered the scenario.
+func TestNormalizePrunesGraph(t *testing.T) {
+	r := runA()
+	raw := fileBasic(r)
+	stray := proc{pid: 999, inc: 1, tid: 999}
+	g := r.graph([]proc{r.server, stray}, []string{"file-basic.dat", "other.dat"}, false)
+	pid := schema.ProcessNodeID(r.host, r.server.pid, r.server.inc)
+	jvm := schema.FileNodeID(r.host, "/usr/lib/jvm/lib/modules")
+	g.Nodes = append(g.Nodes, schema.Node{Type: schema.NodeFile, ID: jvm})
+	g.Edges = append(g.Edges, schema.Edge{Type: schema.EdgeOpened, From: pid, To: jvm})
+	g.Sort()
+	raw.Graph = g
+	got := normalized(t, raw, r, "file-basic")
+	want := normalized(t, fileBasic(r), r, "file-basic").Graph
+	if !reflect.DeepEqual(got.Graph, want) {
+		t.Fatalf("graph not pruned to the bracket:\n%+v\nwant\n%+v", got.Graph, want)
+	}
+	if err := got.Graph.Validate(); err != nil {
+		t.Fatal(err)
 	}
 }

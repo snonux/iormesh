@@ -12,9 +12,10 @@ import (
 // graph rewrites node ids and edge endpoints with the symbol table the
 // events filled, so "file:<host>:<tmp>/a.dat" becomes "file:$h1:$tmp/a.dat"
 // and a process node names the same ordinals as its events. The input is
-// sorted (on a copy) first: entities the bracketed events never touched get
-// their ordinals in canonical graph order, not in the producer's order.
-// Attrs are copied, not rewritten.
+// sorted (on a copy) first: an entity no event named — only possible
+// without a bracket, which prunes the graph to the events — gets its
+// ordinal in canonical graph order, not in the producer's order. Attrs are
+// copied, not rewritten.
 func (n normalizer) graph(g schema.Graph) schema.Graph {
 	out := schema.Graph{
 		SchemaVersion: g.SchemaVersion,
