@@ -36,7 +36,9 @@
 # own mode= values to the same file.
 #
 # Environment:
-#   PERF_COUNT    samples per thread count          (default 3)
+#   PERF_COUNT    samples per thread count          (default 6: benchstat
+#                 needs >= 4 to call a difference significant and >= 6
+#                 for a confidence interval; S3 asks for three at least)
 #   PERF_OPS      --ops per sample                  (default 1000000)
 #   PERF_THREADS  thread counts, space-separated    (default "1 4 16")
 #   PERF_FORCE    1 overwrites an existing baseline of the same label
@@ -246,7 +248,7 @@ run_samples() {
 
 record() {
     [ $# -le 1 ] || die "usage: record [label]"
-    count=${PERF_COUNT:-3} ops=${PERF_OPS:-1000000} threads=${PERF_THREADS:-1 4 16}
+    count=${PERF_COUNT:-6} ops=${PERF_OPS:-1000000} threads=${PERF_THREADS:-1 4 16}
     validate_settings
     # INT/TERM exit through the EXIT trap, which removes every temp file.
     trap cleanup_tmp EXIT

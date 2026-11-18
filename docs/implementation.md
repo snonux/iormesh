@@ -963,7 +963,8 @@ Runs on the M1 build. Result: `docs/spikes/s3-overhead.md`.
 1. Lift `scripts/perf-baseline.sh` and the `perf/` layout from
    ior. *Landed*: `scripts/perf-baseline.sh record [label]`
    builds the jar, runs `syscall-burst` untraced `PERF_COUNT`
-   times (default 3) at each of `PERF_THREADS` (default
+   times (default 6, benchstat's minimum for a confidence
+   interval) at each of `PERF_THREADS` (default
    `1 4 16`) and writes `perf/burst-<label>.txt` in benchstat
    format (`BenchmarkSyscallBurst/mode=untraced/threads=T`, with
    ns/op and ns/syscall); `compare OLD NEW` runs benchstat. ior's

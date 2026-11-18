@@ -163,9 +163,9 @@ scripts/perf-baseline.sh compare OLD NEW  # benchstat, labels or paths
 ```
 
 `record` builds the jar, runs the burst untraced `PERF_COUNT`
-times (default 3) at each thread count in `PERF_THREADS`
-(default `1 4 16`) with `PERF_OPS` ops (default 1,000,000), and
-writes `perf/burst-<label>.txt`: a provenance header (commit,
+times (default 6, the fewest benchstat builds a confidence
+interval from) at each thread count in `PERF_THREADS` (default
+`1 4 16`) with `PERF_OPS` ops (default 1,000,000), and writes `perf/burst-<label>.txt`: a provenance header (commit,
 kernel, CPU, JDK, load average) and one benchstat line per
 sample, `BenchmarkSyscallBurst/mode=untraced/threads=T` with
 ns/op and ns/syscall. As in ior, a tree with uncommitted changes
