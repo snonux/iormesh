@@ -19,7 +19,7 @@
   <text x="400" y="293" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#fb7185" text-anchor="start">(no socket)</text>
   <rect x="60" y="262" width="270" height="56" rx="10" fill="#1b2454" stroke="#3a4a86" stroke-width="1.5"/>
   <text x="76" y="286" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="13" fill="#e6edf7" text-anchor="start" font-weight="600">Linux kernel · eBPF probes</text>
-  <text x="76" y="304" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">file syscalls · socket state · lifecycle</text>
+  <text x="76" y="304" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">syscalls · socket state · JDK uprobes</text>
   <rect x="60" y="340" width="400" height="76" rx="10" fill="#1b2454" stroke="#22d3ee" stroke-width="1.5"/>
   <text x="76" y="364" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="13" fill="#e6edf7" text-anchor="start" font-weight="600">iormesh tracer (correlator)</text>
   <text x="76" y="383" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">joins fd ↔ path ↔ socket ↔ Java stack</text>
@@ -41,7 +41,7 @@
   <text x="742" y="196" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">events marked unattributed</text>
   <rect x="540" y="262" width="270" height="56" rx="10" fill="#1b2454" stroke="#3a4a86" stroke-width="1.5"/>
   <text x="556" y="286" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="13" fill="#e6edf7" text-anchor="start" font-weight="600">Linux kernel · eBPF probes</text>
-  <text x="556" y="304" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">file syscalls · socket state · lifecycle</text>
+  <text x="556" y="304" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">syscalls · socket state · JDK uprobes</text>
   <rect x="540" y="340" width="400" height="76" rx="10" fill="#1b2454" stroke="#22d3ee" stroke-width="1.5"/>
   <text x="556" y="364" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="13" fill="#e6edf7" text-anchor="start" font-weight="600">iormesh tracer (correlator)</text>
   <text x="556" y="383" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">joins fd ↔ path ↔ socket ↔ Java stack</text>

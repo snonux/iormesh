@@ -177,7 +177,9 @@ Field notes:
 - `event` is the syscall name, or one of the synthetic kinds:
   `tcp_state`, `marker`, `drop` (ring-buffer loss), `session`
   (header), `end` (why the trace ended).
-- `attribution` is `"java"` or `"none"` — never empty.
+- `attribution` is `"java"` or `"none"` — never empty. A
+  `carrier` flag (added with M3) marks I/O that ran for a
+  virtual thread, which v1 attributes to the carrier.
 - `Java` and `HTTP` are provisional until S1 reports.
 
 One NDJSON line, as M1 emits it:
@@ -973,7 +975,10 @@ internal/correlate/javajoin.go
 3. The Go side joins brackets to events:
 
    ```go
-   // joiner attributes syscall events to Java brackets. Both
+   // joiner attributes syscall events to Java brackets. If S1
+   // settles on the uprobe join, the bracket arrives from BPF
+   // already tied to the syscall and this shrinks to a lookup
+   // of the agent's stack for that bracket. Both
    // streams are ordered per key, so one cursor per key is
    // enough; nothing is ever attributed by guessing.
    type joiner struct {

@@ -90,7 +90,7 @@ def server(s, x0, name, target, with_agent):
         s.text(x0 + 222, 196, "events marked unattributed", 11, MUTED)
     s.rect(x0 + 20, 262, 270, 56)
     s.text(x0 + 36, 286, "Linux kernel · eBPF probes", 13, bold=True)
-    s.text(x0 + 36, 304, "file syscalls · socket state · lifecycle", 11, MUTED)
+    s.text(x0 + 36, 304, "syscalls · socket state · JDK uprobes", 11, MUTED)
     s.rect(x0 + 20, 340, 400, 76, BOX, CYAN)
     s.text(x0 + 36, 364, "iormesh tracer (correlator)", 13, bold=True)
     s.text(x0 + 36, 383, "joins fd ↔ path ↔ socket ↔ Java stack", 11, MUTED)
@@ -265,7 +265,7 @@ def chip(s, x, y, w, label):
 def join():
     s = Svg(590, "Two joins make one story",
             "A Java stack is joined to the syscalls of the same thread "
-            "inside the hook's time window; the two hosts' views of one TCP "
+            "while its I/O hook is open; the two hosts' views of one TCP "
             "connection are joined into one edge; order is happens-before.")
     s.header("Two joins make one story",
              "How one request from gateway to orders becomes an attributed, "
@@ -279,7 +279,7 @@ def join():
     s.path("M855 170 L855 200", CYAN, "3 3", arrow=False, sw=1.5)
     s.text(336, 154, "① Java ↔ kernel — the syscall runs on the same thread,",
            11.5, CYAN)
-    s.text(353, 170, "inside the hook's time window, so it gets that stack.",
+    s.text(353, 170, "while that thread's I/O hook is open, so it gets that stack.",
            11.5, CYAN)
 
     lane(s, 330, "host B · orders · thread worker-3", 408, 348)

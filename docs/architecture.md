@@ -19,14 +19,20 @@ views — happens on the controller.
     (`sock:inet_sock_set_state`), not from syscall arguments —
     Java's non-blocking connects return before the connection
     exists — and join back to pid/fd through the sock pointer.
+  - Uprobes on the JDK's native I/O functions (`libjava`,
+    `libnio`, `libnet`) bracket each Java I/O call per thread
+    id, so a syscall can be tied in the kernel to the native
+    call that issued it — the front-runner for the Java↔syscall
+    join, verified in a first experiment (PLAN.md, S1).
   - Native stack capture is opt-in and meant for non-JVM
     targets; BPF cannot unwind JIT-compiled Java frames
     reliably.
 - **Correlator (Go, inside the tracer)**
   - Consumes the BPF ring buffer, resolves inode→path, keeps
-    pid→fd→path and pid→fd→4-tuple, joins the Java agent's
-    events to syscalls by kernel TID and time window, and writes
-    the parquet segments.
+    pid→fd→path and pid→fd→4-tuple, attaches the Java agent's
+    stacks to the syscalls they caused (by thread id; the exact
+    mechanism is spike S1's pick), and writes the parquet
+    segments.
 - **Java agent**
   - Loaded via `-javaagent` (primary) or the attach API for live
     processes — with JDK 21's dynamic-loading caveats, see

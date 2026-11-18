@@ -34,8 +34,10 @@ the plan is the source of truth.
   explicit events, never silent gaps.
 - **Explicit attribution** — every I/O event says whether a
   Java stack was joined to it or not (non-JVM process, JNI or
-  JVM-internal I/O, agent absent). Missing attribution is
-  data, not a hole.
+  JVM-internal I/O, agent absent). I/O that ran on a virtual
+  thread's carrier is flagged, because v1 attributes it to the
+  carrier and cannot name the virtual thread. Missing
+  attribution is data, not a hole.
 - **Cross-service causality** — connection ids + per-connection
   request ordinals + per-thread ordering + stack attribution
   are enough to reconstruct which thread on service A caused

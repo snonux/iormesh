@@ -6,7 +6,8 @@ truth.
 - **Read-only tracing.** Privileged (root) for eBPF, but
   observation only — no tampering with what the target does or
   the data it handles. Observation still costs something: the
-  Java agent rewrites bytecode at I/O boundaries and probes take
+  Java agent rewrites bytecode at I/O boundaries, and probes —
+  kernel tracepoints and uprobes in the JDK's libraries — take
   time, so overhead is budgeted, measured, and capped by the
   tracer's cgroup limits.
 - **The operator's SSH key is the only way in.** The tracer

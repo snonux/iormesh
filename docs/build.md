@@ -32,16 +32,19 @@ ior fixes can be ported deliberately.
 Reuse has an edge. ior reads no socket peer addresses, follows no
 child processes, and captures no stacks — so 4-tuples (from the
 socket's state transitions), process-tree following with
-exec-time pattern matching, and stack capture are new work in
-iormesh. See PLAN.md, "What ior does not give us".
+exec-time pattern matching, stack capture and uprobes on the
+JDK's native I/O functions are new work in iormesh. See PLAN.md,
+"What ior does not give us".
 
 ## Tech choices
 
 - Go + libbpfgo + eBPF (CO-RE) — the same stack as ior, adopted
   along with its code-generation pattern (see above).
 - Java agent: bytecode instrumentation at the JDK's I/O
-  boundaries only, stacks captured there (design gated by
-  spike S1 — see PLAN.md).
+  boundaries only, stacks captured there; joined to syscalls
+  by thread id, most likely through eBPF uprobes on the JDK's
+  native I/O functions (design gated by spike S1 — see
+  PLAN.md). Platform threads only in v1.
 - Controller (`iormeshctl`): pure Go, no cgo — cross-compiled
   for Linux and macOS; tracer: linux/amd64 + linux/arm64 with
   the embedded CO-RE object.

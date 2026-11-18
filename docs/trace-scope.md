@@ -48,8 +48,7 @@ Metadata only — nothing below is payload.
 - **Java** — class↔JAR map, thread names (kernel TID ↔ Java
   thread), the Java stack at every I/O boundary as
   `class#method(file:line)` frames (line numbers when debug
-  info is present), and the
-  active OTEL span (trace/span ids) when the app is
+  info is present), and the active OTEL span (trace/span ids) when the app is
   OpenTelemetry-instrumented. The agent instruments only the
   points where Java hands I/O to the kernel — never every
   method — so its cost follows the I/O rate. *The

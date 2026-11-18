@@ -340,10 +340,13 @@ spike confirms or corrects.
   kernel (hook set from S1) and captures the Java stack there.
   Cost scales with the I/O rate, not the call rate; blanket
   method entry/exit tracing is a non-goal.
-- **Join to kernel events**: each boundary hook records its
-  join key (fd or kernel TID — S1 picks), monotonic enter/exit
-  timestamps and a stack id; the correlator attaches the stack
-  to the matching syscalls inside the window. Events no hook
+- **Join to kernel events**: the front-runner is an in-kernel
+  join by thread id — uprobes on the JDK's native I/O functions
+  bracket each call, and the syscall handler reads the bracket
+  (see S1). The agent's boundary hook supplies what the kernel
+  cannot see: the Java stack id and thread. How the two records
+  meet, or whether the agent joins by fd or TID plus a time
+  window instead, is S1's pick. Events no hook
   brackets (JNI libraries, JVM-internal I/O) and ambiguous
   matches stay in the trace marked `attribution: none` — never
   guessed.
@@ -1064,7 +1067,8 @@ can reconstruct behavior and check it against source code:
   boot_ns, wall_ns, host_id, pid, pid_incarnation, tid, comm,
   event, fd, fd_gen, ret, err, latency_ns, bytes, args (path,
   old+new path on renames / 4-tuple / …), conn_id, stack_id
-  (native, opt-in), attribution (java | none), java_thread,
+  (native, opt-in), attribution (java | none), carrier (set
+  when the I/O ran for a virtual thread), java_thread,
   java_stack (method ids), otel (trace_id, span_id — present
   when the app is OTEL-instrumented), http (method, scheme,
   host, path, status, req_seq — on http events; headers per
@@ -1088,7 +1092,9 @@ can reconstruct behavior and check it against source code:
 - **Attribution is explicit**: every I/O event says whether a
   Java stack was joined to it (`attribution: java`) or not
   (`none` — non-JVM process, JNI or JVM-internal I/O, agent
-  absent). Missing attribution is data, not a hole.
+  absent), and flags I/O that ran on a virtual thread's
+  carrier (`carrier: true`), since v1 cannot name the virtual
+  thread. Missing attribution is data, not a hole.
 - **Cross-service causality**: connection ids + per-connection
   request ordinals (`req_seq`) + per-thread ordering + stack
   attribution are enough to reconstruct sequences across
