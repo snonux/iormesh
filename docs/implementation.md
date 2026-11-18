@@ -329,9 +329,11 @@ tcp-loopback ship real ones):
   `tcp-ipv4`, `tcp-ipv6` and `udp-loopback` do declare
   addresses: their NIO channels are opened with an explicit
   protocol family, so each socket has exactly one.
-- A kind's fds beyond the one `fd` field (`pipe2`'s pair, a
-  `dup2`'s target) are declared through the events that use
-  them, as `fd-lifecycle` does for its `dup`.
+- A kind's second fd (`pipe2`'s other end, `epoll_ctl`'s
+  target) is `args.fd2`, an `$fd` symbol bound to the instance
+  like `fd` (M2 step 7); a `dup2`'s returned fd is still declared
+  through the events that use it, as `fd-lifecycle` does for its
+  `dup`. `args.signal` compares a `kill`'s or `signal`'s number.
 - `flags` are compared by access mode plus the declared bits, so
   577 means "write-only, create, truncate" and tolerates an extra
   `O_CLOEXEC`; `0` matches any read-only open (M1 step 9).
@@ -1196,7 +1198,8 @@ scenarios landing first (principle #1).
    vectored I/O, and `dup*`, which `file-attrs` declares (step 6
    adds `fcntl`). Left out: `access`/`faccessat` (fired at
    syscall frequency, decision #25), `getdents`, `lseek`,
-   `fsync`, mounts, zero-copy (step 7). Each name is a kind in
+   `fsync`, mounts, zero-copy (step 7's opt-in `zerocopy`).
+   Each name is a kind in
    `internal/schema/kinds_file.go` (a unit test keeps attach list
    and kinds in step). The correlator keys the exit on the enter's
    record shape — fd, open, path or name event (`files.go`):
@@ -1305,36 +1308,89 @@ scenarios landing first (principle #1).
    7's). The golden format still has no field for a copy's
    returned fd: `fd-lifecycle` declares it through its close.
 
-7. **IPC, signals, UDP, epoll**: as families, default-off per S3's
-   recommendation.
+7. **IPC, signals, UDP, epoll** (done, task sa4): families after
+   ior's `-trace-families` concept, defaults per decision #7.
+   - **Families** (`internal/tracepoints/trace_family.go`):
+     `file` (M1's opens and fd I/O, steps 4–6) and `socket`
+     (connect, accept*, bind, sendto, recvfrom) on; `ipc` (pipe,
+     pipe2, socketpair), `signal` (kill, tgkill, tkill plus the raw
+     tracepoint `signal_generate`), `poll` (epoll_create*,
+     epoll_ctl, epoll_wait/pwait/pwait2, poll, ppoll) and
+     `zerocopy` (sendfile64, splice, tee, copy_file_range) opt-in:
+     `iormesh run -trace-families signal,ipc` (or `all`).
+     `bpf.ProbesFor(families)` is the attach set; lifecycle's
+     control probes always attach. The flag adds, it cannot drop
+     file or socket. ior's own family names (FS, Network, …) are
+     not accepted: every syscall of a family here has a schema kind
+     and a correlator shape, which ior's broader groups lack.
+     Not attached yet: sendmsg/recvmsg (their addresses sit in a
+     msghdr), select/pselect6, vmsplice. The default set grows by
+     bind, sendto and recvfrom, and each datagram now costs a
+     second, 232-byte record: step 11's #25 measurement covers it.
+   - **Socket addresses** (`internal/c/sockaddr.c`): the generated
+     handlers of bind, connect, sendto and recvfrom call
+     `iormesh_addr_on_enter` (parks the address argument by tid) and
+     `iormesh_addr_on_exit`, which sends a `sock_addr_event` right
+     before the exit record: the socket's own addresses (read from
+     the `struct sock`), the argument (read by its own family's
+     size; recvfrom's is only filled at exit) and, for AF_UNIX, the
+     path and `unix_sk(sk)->peer`. The accept exits report an
+     accepted AF_UNIX socket the same way; TCP keeps sock.c's
+     state records. The hooks are listed in
+     `internal/generate/sockowner.go` (`sockAddrHooks`), rendered
+     behind `filter()` like the TCP owner hooks.
+   - **Signals** (`internal/c/signal.c`): a raw `signal_generate`
+     handler — the classic tracepoint names only the target's tid,
+     the raw one its `task_struct` — emits a `signal_event` when
+     the sender (current) or the target (by tgid) is traced. It
+     fires inside kill(2), so the correlator attaches target and
+     signal to the pending `kill`, and records a `signal` event on
+     a traced receiver (args.sender_pid) unless the signal was
+     ignored or not queued; both traced: a `signaled` edge.
+   - **Correlator** (`internal/correlate/ipc.go`, `signals.go`):
+     non-TCP connections are `sockState`s too, so their events wait
+     for a conn id and draw `connected` edges like TCP's. A pipe or
+     socketpair creates both fd instances (event fd = first end,
+     `args.fd2`/`fd2_gen` the second) naming one connection, fused
+     at once; a child that inherits an end, or dup2s it onto its
+     stdio, joins the node. A unix stream connection's two ends
+     share the sorted (sk, peer) key (`unixTable`). UDP is
+     connectionless, so the unit is the *flow*: one (local,
+     remote) pair, keyed per datagram; the two sides of a loopback
+     flow mirror each other and fuse in a table of their own
+     (`datagram`), like TCP's ends. A socket bound to the wildcard
+     address sends from what the route picks, which towards a
+     loopback peer is the peer's own address — anything else stays
+     unresolved, never guessed; the wildcard itself is written as
+     no `local_addr`. A tuple reused within one session is one
+     flow (a known limit). epoll_ctl reports the epoll fd, the
+     registered one as `args.fd2` and the op as `args.cmd`; the
+     waits name the epoll fd and their latency is the block.
+     Zero-copy calls report their first fd and the bytes moved
+     (the second fd is not captured yet).
+   - **Normalizer and goldens**: `args.fd2` is renumbered as an fd
+     instance of its process, `target_pid`/`sender_pid` take their
+     process's PID ordinal; expectations gain `args.fd2` (an `$fd`
+     symbol) and `args.signal`; prune keeps a `signaled` edge when
+     both processes have bracketed events.
    Scenarios (landed ahead, task na4; strace-verified on JDK 25,
-   26 and 27-ea): `pipe-ipc` (a `java.nio.channels.Pipe`, then a
-   child JVM's stdin/stdout pipes), `unix-socket` (server and
-   client roles on `$tmp/unix-socket.sock`), `signals` (SIGTERM
-   via `Process.destroy`, SIGKILL via `destroyForcibly`, to two
-   child JVMs), `udp-loopback` (server and client roles, one
-   datagram each way) and `tcp-ipv4`/`tcp-ipv6` (one AF_INET or
-   AF_INET6 connection in one process, full 4-tuples declared).
-   Their goldens use kinds `schema.KnownKind` lacks — `bind`,
-   `sendto`, `recvfrom`, `pipe2`, `kill` (`unlink` and `dup2`
-   came with step 4) — and only existing fields, which leaves
-   gaps this step must close and then tighten the goldens with: `pipe2` returns two fds
-   (declared without `fd`; the ends bind through their reads and
-   writes), `kill` has no target-PID or signal argument (declared
-   bare; delivery with the sender's PID — `signal_generate` — is
-   not declared at all), a unix socket's path is `args.path` on
-   `bind` and `connect`, and UDP and pipes declare no edges
-   because the graph has no edge type for them yet. The children
-   of `pipe-ipc` and `signals` emit no markers, like
-   `fd-lifecycle`'s; step 6's cut keeps them by their `forked`
-   edges. The first NIO use inside a bracket
-   also makes a `socketpair` and throwaway AF_INET6 probe
-   sockets; nothing declares them.
-   `tcp-ipv6` (and `non-java-peer`) exit with the skip code 3
-   when the host cannot run them, but `integrationtests/process.go`
-   still fails on any non-zero exit: the harness that runs these
-   scenarios must map exit 3 to `t.Skip`, or a skip reads as a
-   failure.
+   26 and 27-ea), now declared in full: `pipe-ipc` (each pipe2
+   binds both ends — the JDK makes the child's stdin pipe before
+   its stdout pipe — and three fused pipe connections, two shared
+   with the child), `unix-socket` (path on bind and connect, one
+   fused connection), `signals` (kill with signal 15, then 9; each
+   child's `signal` event; two `signaled` edges), `udp-loopback`
+   (per-datagram addresses, one fused flow) and
+   `tcp-ipv4`/`tcp-ipv6` (full 4-tuples, fused). Integration
+   tests (`integrationtests/ipc_test.go`): `TestPipeIPC` and
+   `TestSignals` run with `-trace-families ipc` and `signal`,
+   the others on the defaults. The first NIO use also makes a
+   `socketpair` and throwaway AF_INET6 probe sockets; nothing
+   declares them. A workload exiting with the skip code 3
+   (`tcp-ipv6` without an IPv6 loopback) ends the harness run with
+   `ErrWorkloadSkipped`, which `traceJudged` turns into `t.Skip`
+   (`TestSkipCodeIsSkip`) — and `mage integrationTest`'s gate,
+   which fails on any skip, says why.
 
 8. **Redaction** (`internal/redact`, cgo-free — M3 and M5 reuse
    it; done, task ta4):

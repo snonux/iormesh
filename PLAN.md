@@ -1061,6 +1061,19 @@ answer), and deferred.
   opt-in.* S3 supports the default: the consumer's per-event
   cost, not the probes, limits throughput, so every family
   that fires at syscall frequency stays opt-in.
+  M2 step 7 (task sa4) implements the default as iormesh's own
+  families (ior's concept, iormesh's grouping:
+  `internal/tracepoints`): `file` and `socket` on — socket now
+  includes bind and the datagram calls sendto/recvfrom, since
+  unix sockets and UDP are sockets — and lifecycle always on
+  (its probes decide what is traced); `ipc` (pipes,
+  socketpairs), `signal` (kill/tgkill/tkill and
+  signal_generate), `poll` (epoll, poll) and `zerocopy`
+  (sendfile, splice, tee, copy_file_range) opt-in through
+  `iormesh run -trace-families ipc,signal,…|all`. The flag only
+  adds: file and socket cannot be turned off (the scenario
+  markers are opens). Renames and mmaps are not families: the
+  renames are the file surface's, mmaps are not traced yet.
 - **#23 Target-pattern mechanics** — match on exec (argv/exe)
   vs comm; glob vs regex; concurrent matches (newest wins vs
   trace all vs error); restart semantics (wait for
@@ -1271,6 +1284,14 @@ Metadata only — nothing below is payload (see non-goals):
   the kernel exposes it), socketpair, eventfd, shared memory;
   loopback TCP pairs joined locally by the correlator. *Why:
   single-host edges a "mesh" would otherwise miss entirely.*
+  Edges (M2 step 7): a pipe or socketpair is one connection
+  node, fused at creation, joined by whoever inherits an end; a
+  unix stream connection fuses through the kernel's own pairing
+  of its two sockets; UDP has no connection, so its unit is the
+  flow — one local/remote address pair — whose two loopback
+  sides fuse like TCP's ends, while a flow to another host stays
+  unresolved. A signal between traced processes is a `signaled`
+  edge.
 - **Signals**: delivery with sender PID. *Why: "who touched the
   process" includes the supervisor's SIGTERM.*
 - **Java**: class loading (class↔JAR/classloader), thread lifecycle

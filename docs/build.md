@@ -96,10 +96,12 @@ because only Mage sets `CGO_CFLAGS`/`CGO_LDFLAGS`.
   gitignored, as in ior; CO-RE relocations make the object
   portable anyway.
 - **Attach set**: handlers are generated for every syscall, but
-  without a `-trace-*` selector or `-tps` regex only M1's set
-  attaches
-  (`tracepoints.DefaultSyscalls`). Widening it is a code change,
-  not a regeneration.
+  only the selected event families attach: the default `file`
+  and `socket` (`tracepoints.DefaultSyscalls`), plus what
+  `iormesh run -trace-families` adds (`ipc`, `signal`, `poll`,
+  `zerocopy`, decision #7). A new family or member is a code
+  change in `internal/tracepoints/trace_family.go`, not a
+  regeneration.
 - **External object**: `IORMESH_BPF_OBJECT=path.bpf.o` loads that
   object instead of the embedded one.
 - **`//nolint` is banned** (`internal/buildgate`): a deliberate

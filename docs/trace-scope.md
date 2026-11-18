@@ -4,7 +4,11 @@ The mental-model inventory: an app needs more than file and
 socket events to be understood. Companion to [PLAN.md](../PLAN.md)
 ("What we trace") — the plan is the source of truth.
 
-Metadata only — nothing below is payload.
+Metadata only — nothing below is payload. Not all of it is on
+by default (decision #7): files, sockets (TCP, unix, UDP) and
+the lifecycle are; IPC, signals, poll/epoll and zero-copy are
+event families `iormesh run -trace-families` adds (see
+[schema.md](schema.md)).
 
 - **Identity & lifecycle** — exec (exe, argv — redacted by
   policy), fork/clone, thread

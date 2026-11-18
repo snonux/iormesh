@@ -93,19 +93,23 @@ column each, never a blob.
 
 | Key | Set on |
 |-----|--------|
-| `path` | opens and `creat` (required); the M2 path kinds; the old name of the rename/link family (a symlink's text); the fd metadata kinds (the fd's current path) |
+| `path` | opens and `creat` (required); the M2 path kinds; the old name of the rename/link family (a symlink's text); the fd metadata kinds (the fd's current path); an AF_UNIX `bind`, `connect`, `sendto` or `recvfrom`: the socket path (`@name` for an abstract one) |
 | `new_path` | rename/link family (M2): the new name |
 | `flags` | opens: the raw open flags; the path kinds whose syscall has a flags argument (`statx`, `newfstatat`, `utimensat`, `fchownat`, `fchmodat2`, `linkat`); `dup3` |
-| `cmd` | `fcntl` (M2): the raw command (`F_DUPFD` 0, `F_GETFD` 1, `F_SETFD` 2, `F_DUPFD_CLOEXEC` 1030, …) |
+| `cmd` | `fcntl` (M2): the raw command (`F_DUPFD` 0, `F_GETFD` 1, `F_SETFD` 2, `F_DUPFD_CLOEXEC` 1030, …); `epoll_ctl`: the op (`EPOLL_CTL_ADD` 1, `DEL` 2, `MOD` 3) |
 | `offset` | positional I/O (planned, not set yet) |
-| `local_addr`, `local_port` | socket events, when known |
-| `remote_addr`, `remote_port` | socket events, when known |
+| `local_addr`, `local_port` | socket events, when known; a socket bound to the wildcard address (`0.0.0.0`, `::`) has its port but no `local_addr` |
+| `remote_addr`, `remote_port` | socket events, when known; on `sendto`/`recvfrom` the datagram's peer |
 | `sock_state` | `tcp_state` (required): `ESTABLISHED`, `CLOSE`, … |
 | `marker` | `marker` (required): `<scenario>/<edge>` |
 | `lost` | `drop` (required, > 0): records lost since the previous `drop` event |
 | `drop_reason` | `drop`, optional: why the records were lost — `attach_gap` (M2); absent for ring-buffer and decoder loss |
 | `end_reason` | `end` (required): why the trace ended, below |
 | `argv` | `exec` only: the new program's argv, a list of strings, redacted (see Redaction); absent when unreadable |
+| `fd2`, `fd2_gen` | a second fd instance (M2 step 7): the other end of `pipe`, `pipe2`, `socketpair`; the fd `epoll_ctl` registers |
+| `signal` | the signal number: `kill`, `tgkill`, `tkill` (when the kernel generated a signal) and `signal` (required) |
+| `target_pid` | `kill`, `tgkill`, `tkill`: the tgid signalled — raw, the target need not be traced |
+| `sender_pid` | `signal` only: the tgid that sent it — raw, the sender need not be traced |
 
 IPv4 peers of dual-stack sockets are written unmapped
 (`127.0.0.1`, not `::ffff:127.0.0.1`).
@@ -132,7 +136,7 @@ in the M1 schema yet.
 | `end` | why the trace ended (duration, disk limit, stop, targets exited, error) |
 
 The set only grows; M2 appends the rest of the file and socket
-surface.
+surface and the opt-in families (below).
 
 ### Event kinds (M2 file surface)
 
@@ -193,6 +197,56 @@ PID been reused, by the time userspace reads it. Otherwise the cut
 argv is kept, its partial last element masked as `***` (a cut
 `https://u:secr` is no longer recognizable as a URL password).
 The environment is never captured (decision #9).
+
+### Event kinds (M2 step 7: IPC, signals, UDP, poll, zero-copy)
+
+Each family is decision #7's (`internal/schema/kinds_ipc.go`;
+families in `internal/tracepoints/trace_family.go`): `bind`,
+`sendto` and `recvfrom` belong to the default-on socket family,
+the rest to opt-in ones — `iormesh run -trace-families
+ipc,signal,poll,zerocopy` (or `all`) adds them.
+
+| Family | Kinds | fd | args |
+|--------|-------|----|------|
+| socket | `bind` | the socket | AF_UNIX: `path`; inet: `local_addr`/`local_port` (the bound address; the kernel's port for port 0) |
+| socket | `connect` (M1) | the socket | TCP: the 4-tuple; AF_UNIX: `path` |
+| socket | `sendto`, `recvfrom` | the socket | `bytes`; per datagram `local_*` and `remote_*` (the peer it went to or came from); AF_UNIX: `path` |
+| ipc | `pipe`, `pipe2`, `socketpair` | the first end (a pipe's read end) | `fd2`, `fd2_gen`: the second end |
+| signal | `kill`, `tgkill`, `tkill` | `-1` | `target_pid`, `signal` |
+| signal | `signal` | `-1` | `signal`, `sender_pid`; `pid`/`tid` are the receiver |
+| poll | `epoll_create`, `epoll_create1` | the new epoll fd | — |
+| poll | `epoll_ctl` | the epoll fd | `fd2`, `fd2_gen` (registered fd), `cmd` (op) |
+| poll | `epoll_wait`, `epoll_pwait`, `epoll_pwait2` | the epoll fd | `ret`: ready count; `latency_ns`: the block |
+| poll | `poll`, `ppoll` | `-1` | as the waits |
+| zerocopy | `sendfile64`, `splice`, `tee`, `copy_file_range` | the first fd argument | `bytes` moved (the second fd is not captured yet) |
+
+**Connections beyond TCP** (each is a `socket` node and draws
+`connected` edges, and its events carry `conn_id`):
+
+- a **pipe or socketpair** is one connection, `fused` at
+  creation — its creator holds both ends; a process that inherits
+  an end (fork, `dup2` onto stdio) joins the same node, so a
+  parent and the child it talks to over stdio share it;
+- a **unix stream connection**: the connecting socket and the
+  accepted one are paired by the kernel (`unix_sk->peer`), so the
+  two ends fuse when both are traced, else stay `unresolved`;
+- a **UDP flow** — UDP has no connection, so the unit is one
+  (local, remote) address pair seen in the datagrams: the two
+  sides of a loopback flow mirror each other and fuse within the
+  window, like TCP's ends. A socket bound to the wildcard sends
+  from the address the route picks; towards a loopback peer that
+  is the peer's own address, so such flows fuse too, while a flow
+  to another host stays `unresolved`. One tuple reused within a
+  session is one flow.
+
+**Signals**: `signal` is a delivery, from `signal_generate`, on
+the receiving process (the target's thread for `tgkill`, the
+process's tid for a process-directed signal). An ignored signal
+(a default-ignored `SIGCHLD`), or one the kernel could not queue,
+is not a delivery and is not recorded. A sender's `kill` carries
+`target_pid` and `signal` only when the kernel generated one
+(`kill(pid, 0)`, `ESRCH` and `EPERM` carry neither). Both ends
+traced: a `signaled` edge.
 
 ### Host-level events: session, drop, end
 
@@ -266,7 +320,7 @@ stays gap-free.
 | `host` | `host:<host_id>` |
 | `process` | `proc:<host_id>/<pid>@<pid_incarnation>` |
 | `file` | `file:<host_id>:<path>` — the path exactly as the open event reports it, or the new name of a rename that moved an open fd |
-| `socket` | `conn:<conn_id>` — one node per connection, both ends |
+| `socket` | `conn:<conn_id>` — one node per connection, both ends: a TCP or unix stream connection, a UDP flow, a pipe or socketpair (M2 step 7) |
 | `app` | `app:<project>/<pattern>` — the identity of a pattern-bound session's app (M2): every process incarnation the pattern matched links to it, so a restarted app is a new process node under the same app node |
 
 | Edge | From → to | State |
@@ -276,6 +330,7 @@ stays gap-free.
 | `connected` | process → socket | `fused` (both ends traced and joined) or `unresolved` |
 | `incarnation` | app → process | — |
 | `forked` | process → process: a traced process forked the child (M2) | — |
+| `signaled` | process → process: a traced process sent the other a signal (M2 step 7, signal family) | — |
 
 Node attributes stay minimal (`comm` on processes): raw pids or
 ports in attributes would survive normalization and make two runs'
