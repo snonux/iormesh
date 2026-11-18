@@ -165,15 +165,17 @@ scripts/perf-baseline.sh compare OLD NEW  # benchstat, labels or paths
 `record` builds the jar, runs the burst untraced `PERF_COUNT`
 times (default 6, the fewest benchstat builds a confidence
 interval from) at each thread count in `PERF_THREADS` (default
-`1 4 16`) with `PERF_OPS` ops (default 1,000,000), and writes `perf/burst-<label>.txt`: a provenance header (commit,
-kernel, CPU, JDK, load average) and one benchstat line per
-sample, `BenchmarkSyscallBurst/mode=untraced/threads=T` with
-ns/op and ns/syscall. As in ior, a tree with uncommitted changes
-gets a `-dirty` label, an existing baseline is never overwritten
+`1 4 16`) with `PERF_OPS` ops (default 1,000,000), and writes
+`perf/burst-<label>.txt`: a provenance header (commit, kernel,
+CPU, JDK, load average) and one benchstat line per sample,
+`BenchmarkSyscallBurst/mode=untraced/threads=T` with ns/op and
+ns/syscall. As in ior, a tree with uncommitted changes gets a
+`-dirty` label, an existing baseline is never overwritten
 unless `PERF_FORCE=1`, and a tree that changes while recording
 writes nothing — so while other work edits the checkout, record
 from a clean one (`git worktree add --detach DIR` and run DIR's
-script, then copy the file into `perf/`). Record on an idle host;
-the header's load average says whether it was. Baselines are committed so a later
-change is judged against the numbers that motivated it.
-S3's traced and bystander runs add their own `mode=` lines.
+script, then copy the file into `perf/`). Record on an idle
+host; the header's load average says whether it was. Baselines
+are committed so a later change is judged against the numbers
+that motivated it. S3's traced and bystander runs add their own
+`mode=` lines.
