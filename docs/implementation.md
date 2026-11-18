@@ -997,13 +997,15 @@ Runs on the M1 build. Result: `docs/spikes/s3-overhead.md`.
    ns/op and ns/syscall); `compare OLD NEW` runs benchstat. ior's
    label rules, dirty-tree fingerprint and no-overwrite refusal
    are kept; its `go test -bench` set and static BPF metrics are
-   not (iormesh has no hot-path benchmarks yet). Step 3 adds its
-   traced and bystander runs as further `mode=` values of the
-   same file. Usage: docs/testing.md "Performance baselines".
-   The committed `perf/burst-d34e2e2.txt` was recorded under
-   load (loadavg 7.6, see its header) as proof the tooling works
-   — it is not the S3 reference; step 3 re-records on an idle
-   host.
+   not (iormesh has no hot-path benchmarks yet). Usage:
+   docs/testing.md "Performance baselines". The committed
+   `perf/burst-d34e2e2.txt` was recorded under load (loadavg
+   7.6, see its header) as proof the tooling works — it is not
+   the S3 reference. Step 3 took its traced and bystander runs
+   with `spikes/s3/measure.sh` instead (it needs the tracer as
+   root and per-run tracer CPU, which the baseline script does
+   not do); a quiet-host untraced baseline is still to be
+   recorded with this script before M2 acceptance.
 2. Add a load scenario to the workload: `syscall-burst --ops N
    --threads T` (tight 1-byte read/write loop on a temp file —
    the worst case per syscall). *Landed*
@@ -1043,7 +1045,8 @@ idle-target tracer's CPU as the fixed load/attach cost), results
 in `spikes/s3/results/`, write-up in
 [spikes/s3-overhead.md](spikes/s3-overhead.md). Parquet bytes
 could not be measured (no parquet writer before M4); zstd on
-the NDJSON stands in. Outcome: decision #25 is Decided with a
+the volume run's NDJSON stands in. Every quoted figure is
+recomputed from `spikes/s3/results/samples.txt`. Outcome: decision #25 is Decided with a
 budget; #16 gets a 64 MB size cap; #7 keeps its default; hot
 read/write loops get in-kernel aggregation in M2 (step 11
 below).
@@ -1246,7 +1249,9 @@ scenarios landing first (principle #1).
     #25 budget.
 
 **Done when**: PLAN.md's M2 acceptance holds, including the S3
-budget as a `mage perfGate` target.
+budget (decision #25) checked by a documented
+`spikes/s3/measure.sh` run on a quiet host — not a CI gate, CI
+machines are too noisy.
 
 ## S1 — Java↔syscall join
 

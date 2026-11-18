@@ -205,17 +205,20 @@ throwaway; its findings update this plan.
   Exit: the budget's numbers are written into decision #25 and
   become acceptance criteria from M2 on.
 
-  Result (2026-11-18, [docs/spikes/s3-overhead.md](docs/spikes/s3-overhead.md);
-  medians of 3 on a busy host, load 4–6, so order of magnitude):
-  on the per-syscall worst case (`syscall-burst`, 1-byte
-  read/write) tracing slows the target 1.5–1.8×, every other
-  process on the host pays ~1.2× per syscall while a trace runs,
-  the tracer spends 3.6–11 µs CPU per event, and a sustained
-  burst loses 30–80 % of its records — the consumer, not the
-  ring, is the limit. NDJSON is ~326 B/event; zstd shrinks it
-  19×. Hot read/write loops therefore need in-kernel aggregation
-  (ior's `syscall_aggregate_map`) in M2; decision #25 records the
-  budget.
+  Result (2026-11-18,
+  [docs/spikes/s3-overhead.md](docs/spikes/s3-overhead.md);
+  medians of 3 on a busy host, load 8–12, so order of
+  magnitude): on the per-syscall worst case (`syscall-burst`,
+  1-byte read/write) tracing slows the target 1.3–2.3×, other
+  processes on the host pay ~1.14× per syscall while a trace
+  runs, the tracer spends 6.6–13 µs CPU per event, and a
+  sustained burst loses 16–42 % of its ring records — the
+  consumer, not the ring, is the limit (a short burst and the M0
+  scenarios lose nothing). NDJSON is ~326 B/event; zstd shrinks
+  it 18×. Hot read/write loops therefore need in-kernel
+  aggregation (ior's `syscall_aggregate_map`) in M2; decision #25
+  records the budget. A quiet-host re-run is due before M2's
+  acceptance.
 
 ### M0 — Traceable test workload (Java): framework first
 
@@ -936,8 +939,9 @@ answer), and deferred.
   nullable column per argument field (see "Trace output
   contract"). A size cap forces an early rotation for very hot
   sessions (settled by S3): a segment rotates at one minute or
-  64 MB, whichever comes first, so a segment never outgrows what
-  one `collect` moves comfortably.
+  64 MB (≈ 3.5 minutes at the #25 reference rate of 18 MB per
+  minute), whichever comes first, so a segment never outgrows
+  what one `collect` moves comfortably.
 - **#26 Cross-host join key** — the TCP initial-sequence-number
   pair (decided by S2, 2026-11-18): the client's `(iss, irs)`
   equals the server's `(irs, iss)`, which NAT leaves untouched.
@@ -966,28 +970,32 @@ answer), and deferred.
   [docs/spikes/s3-overhead.md](docs/spikes/s3-overhead.md)). The
   four numbers, as M1 measured them on `syscall-burst`, and the
   budget M2 onward is accepted against:
-  1. *tracer CPU* — M1: 3.6–11 µs per event. Budget: ≤ 2 µs per
-     emitted event on `syscall-burst` (median), with hot
-     read/write loops aggregated in the kernel (below);
+  1. *tracer CPU* — M1: 6.6–13 µs per event (medians). Budget:
+     ≤ 2 µs per emitted event on `syscall-burst` (median) — one
+     core then sustains 500 k events/s, five times M1, which
+     together with aggregation covers the burst;
   2. *bystander cost* (host-wide, every untraced process) — M1:
-     ~1.2× per syscall on the worst case. Budget: ≤ 1.25× on
-     `syscall-burst`, paid only while a trace runs;
-  3. *loss* — M1: 30–80 % of records on a sustained burst, 0 on
-     the M0 scenarios. Budget: zero lost records on every M0/M2
-     scenario, and < 1 % on `syscall-burst` at 1 and 4 threads
-     with aggregation on; any loss is an explicit `drop` event;
-  4. *volume* — M1: ~326 B/event NDJSON, zstd ×19. Budget:
-     ≤ 30 B/event in compressed segments (≈ 18 MB per minute at
-     10 k events/s, ≈ 4.3 GB per 4 h session).
+     ~1.14× per syscall at 4 and 16 threads. Budget: ≤ 1.25× on
+     `syscall-burst` at 4 threads, measured on a quiet host
+     (load < 1), paid only while a trace runs;
+  3. *loss* — M1: 16–42 % of ring records on a sustained burst,
+     0 on a short burst and on the M0 scenarios. Budget: zero
+     lost records on every M0/M2 scenario, and < 1 % on
+     `syscall-burst` at 1 and 4 threads with aggregation on; any
+     loss is an explicit `drop` event;
+  4. *volume* — M1: ~326 B/event NDJSON, zstd ×18. Budget:
+     ≤ 30 B/event compressed (≈ 18 MB per minute at 10 k
+     events/s, ≈ 4.3 GB per 4 h session), measured as zstd -3
+     on the NDJSON until the M4 parquet writer exists.
 
   In-kernel aggregation (ior's model): repeated read/write on
   one fd instance by one thread are summed per flush into one
   event with a count; every event that changes fd, socket or
   process state stays individual, so goldens and attribution
   are unaffected. Enforcement: the budget is checked by a
-  documented `spikes/s3/measure.sh` run per milestone (CI
-  machines are too noisy for a perf gate); the zero-loss
-  criterion is part of the integration suite.
+  documented `spikes/s3/measure.sh` run per milestone on a quiet
+  host (CI machines are too noisy for a perf gate); the
+  zero-loss criterion is part of the integration suite.
 - **#19 Runtime control** — the transient systemd unit (M4):
   graceful stop via SIGTERM, flag changes via stop-and-restart.
   No control file, no socket.
