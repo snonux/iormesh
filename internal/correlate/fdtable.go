@@ -66,8 +66,10 @@ func dupDetail(p *procState, oldfd int32, ret int64, cloexec bool) {
 // fcntlDetail records fcntl's command and applies the commands that
 // change or reveal the fd table: the F_DUPFD forms copy (ret is the new
 // fd), F_SETFD sets the close-on-exec state and F_GETFD reports it. The
-// JDK asks F_GETFD of every fd it hands a child before it spawns one, so
-// the state of inherited stdio becomes known exactly where exec needs it.
+// JDK asks F_GETFD of the fds it redirects onto a child's stdio before it
+// spawns one, so their state is known exactly where exec needs it; the
+// pipes it hands its spawn helper stay unknown (only the helper queries
+// them, after the exec already dropped them from the table).
 // The other commands (F_GETFL, F_SETFL, locks, …) leave the table alone.
 func fcntlDetail(ev *schema.Event, p *procState, en enter, ret int64) {
 	cmd := uint32(en.flags)
@@ -115,7 +117,9 @@ func (c *Correlator) forked(creator uint32, child *procState, pid uint32) {
 }
 
 // inherit replaces p's (fresh) fd table with a copy of parent's. Sockets
-// are shared, not copied: parent and child hold the same connection.
+// are shared, not copied: parent and child hold the same connection. The
+// shared *sockState also shares its fdGen, so a socket first bound after
+// the fork (rare) reports one process's generation for both.
 func (p *procState) inherit(parent *procState) {
 	p.fds = maps.Clone(parent.fds)
 	p.lastGen = maps.Clone(parent.lastGen)
@@ -151,8 +155,10 @@ func (p *procState) closeOnExec() {
 // state decides. An unknown one (the fd predates the trace or came from an
 // untraced syscall — socket, pipe, …) counts as closed, as in ior: keeping
 // an fd the kernel closed would hand its path and socket to whatever the
-// new program puts on the number, while dropping one that survived only
-// gives its next use a new generation. Unknown stdio (0–2) is the
+// new program puts on the number, while dropping one that survived gives
+// its next use a new generation and loses its path and socket binding — an
+// inherited socket (fd > 2) not opened by a traced syscall loses its
+// conn_id after the exec. Unknown stdio (0–2) is the
 // exception: it is inherited by convention and almost never close-on-exec,
 // and a new generation on every exec's stdout would split one instance.
 func (p *procState) survivesExec(fd int32) bool {

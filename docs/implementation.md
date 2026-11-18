@@ -1275,8 +1275,10 @@ scenarios landing first (principle #1).
      instance of the number — except unknown stdio 0–2. The
      state comes from the open and `accept4` flags, `dup3`,
      `F_DUPFD_CLOEXEC` and `fcntl(F_SETFD)`/`F_GETFD`; the JDK
-     asks `F_GETFD` of every fd it hands a child, so inherited
-     stdio is known.
+     asks `F_GETFD` of the fds it redirects onto a child's stdio,
+     so those are known; the pipes it hands its spawn helper stay
+     unknown and get a new generation after the exec (an unknown
+     inherited fd above 2 also loses its path and socket).
    - `close_range` is not attached: the JDK 25 child closes its
      fds one by one through `close` (strace-measured). A
      program using it keeps those fds in the table.

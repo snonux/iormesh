@@ -15,9 +15,11 @@ import (
 )
 
 // TestFdLifecycle: the child JVM, which emits no markers, is kept through
-// the forked edge, its dup2s act on the fds it inherited, and its read
-// and write on fd 0 and 1 follow; in the parent the dup's copy is an
-// instance of its own.
+// the forked edge, it issues its dup2s and its read and write on fd 0
+// and 1, and in the parent the dup's copy is an instance of its own. fd
+// symbols bind per process, so the golden cannot show the child's dup2
+// acts on the parent's very instances; fork inheritance itself is unit-
+// tested (TestForkInheritsTable).
 func TestFdLifecycle(t *testing.T) {
 	enableParallelIfRequested(t)
 	h := newHarness(t)
