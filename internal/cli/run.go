@@ -45,7 +45,8 @@ type tracer interface {
 	Records() <-chan any
 	Losses() (bpf.Losses, error)
 	AddTarget(pid uint32) error
-	AdoptExec(pid uint32, since uint64) (uint64, error)
+	RemoveTarget(pid uint32) error
+	AdoptExec(pid uint32) (gap uint64, adopted bool, err error)
 	IgnoreExec(pid uint32, since uint64) error
 	Close() error
 }

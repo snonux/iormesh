@@ -25,8 +25,15 @@ type session struct {
 	// app is the app node id of a pattern session, "" otherwise: only a
 	// pattern names an app that outlives its processes.
 	app string
+	// match is the pattern compiled once; every exec on the host asks it.
+	match target.Matcher
+	// selfExe is the tracer's executable: another iormesh session's
+	// command line names its pattern, but it is never a target.
+	selfExe string
 	// live maps each traced process to its start time (its incarnation),
 	// so a PID the kernel reuses is not taken for the target that exited.
+	// 0 means unknown: /proc could not be read, and over() does not take
+	// whatever runs under that PID now for the target.
 	live map[uint32]uint64
 }
 
@@ -34,6 +41,9 @@ func newSession(tr tracer, c *correlate.Correlator, cfg runConfig) *session {
 	s := &session{tr: tr, c: c, spec: cfg.spec, live: map[uint32]uint64{}}
 	if cfg.spec.Mode() == target.ModePattern {
 		s.app = schema.AppNodeID(cfg.project, cfg.spec.Pattern)
+		// The spec was validated, so the pattern compiles.
+		s.match, _ = cfg.spec.Matcher()
+		s.selfExe = target.HostProcFS().Exe(uint32(os.Getpid()))
 	}
 	return s
 }
@@ -55,16 +65,31 @@ func (s *session) start(pids []uint32) error {
 		return fmt.Errorf("scan for %q: %w", s.spec.Pattern, err)
 	}
 	for _, pid := range found {
-		if err := s.tr.AddTarget(pid); err != nil {
-			return err
-		}
-		// Already running: its earlier syscalls precede the session, they
-		// are no gap of it.
-		if err := s.adopt(pid, 0); err != nil {
+		if err := s.adoptRunning(pid); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// adoptRunning traces a process the start scan found. Its start time is
+// read before the insert and its liveness checked after: a process that
+// exited in between had its exit handled before the entry existed, so
+// nothing would ever remove the entry, and a later process under the PID
+// would be traced. Such an entry is removed again. Its earlier syscalls
+// precede the session, so they are no attach gap.
+func (s *session) adoptRunning(pid uint32) error {
+	start := processStart(pid)
+	if start == 0 {
+		return nil // gone already
+	}
+	if err := s.tr.AddTarget(pid); err != nil {
+		return err
+	}
+	if !processAlive(pid, start) {
+		return s.tr.RemoveTarget(pid)
+	}
+	return s.adopt(pid, 0)
 }
 
 // handle routes one record: exec reports to the pattern judge, process
@@ -98,14 +123,25 @@ func (s *session) judgeExec(ev *types.ExecArgvEvent) error {
 			argv = full
 		}
 	}
-	if !s.spec.Matches(types.StringValue(ev.Exe[:]), argv) {
+	exe := types.StringValue(ev.Exe[:])
+	if !s.match.Match(exe, argv) || s.isTracer(ev.Pid, exe) {
 		return s.tr.IgnoreExec(ev.Pid, ev.Time)
 	}
-	gap, err := s.tr.AdoptExec(ev.Pid, ev.Time)
-	if err != nil {
+	gap, adopted, err := s.tr.AdoptExec(ev.Pid)
+	if err != nil || !adopted {
+		// Not adopted: the process exited before the verdict, and the
+		// kernel already dropped its entry. It is no incarnation.
 		return err
 	}
 	return s.adopt(ev.Pid, gap)
+}
+
+// isTracer reports whether a matching exec is another iormesh session —
+// "iormesh run -pattern X" matches X by its own argv. The record's exe is
+// the path as exec'd; /proc/<pid>/exe resolves it.
+func (s *session) isTracer(pid uint32, exe string) bool {
+	return target.IsTracer(exe, s.selfExe) ||
+		target.IsTracer(target.HostProcFS().Exe(pid), s.selfExe)
 }
 
 // adopt makes pid an incarnation of the session's app, once per process
@@ -122,15 +158,18 @@ func (s *session) adopt(pid uint32, gap uint64) error {
 // over reports whether a PID or port session has nothing left to trace:
 // every target and followed child exited. Exit records remove most of
 // them; this also drops those whose exit record was lost, by asking /proc
-// whether that incarnation still lives (a reused PID, a zombie or a
-// thread id does not). A pattern session is never over: it waits for the
+// whether that incarnation still lives (a reused PID, a zombie, a thread
+// id or an unknown start time does not). A pattern session is never over: it waits for the
 // app to re-appear (decision #23) until its duration or a stop.
 func (s *session) over() bool {
 	if s.app != "" {
 		return false
 	}
 	for pid, start := range s.live {
-		if !processAlive(pid, start) {
+		// An unknown start time could not tell the target from a
+		// process that reused its PID: the read failed because the
+		// target was gone, so it counts as gone.
+		if start == 0 || !processAlive(pid, start) {
 			delete(s.live, pid)
 		}
 	}

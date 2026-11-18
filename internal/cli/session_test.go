@@ -38,13 +38,15 @@ func patternSession(t *testing.T, tr *fakeTracer, c *correlate.Correlator) *sess
 
 // TestPatternSessionJudgesExecs: a matching exec is adopted and linked to
 // the app with its gap as an attach_gap drop; a non-matching exec — the
-// launcher, or a helper whose comm-like name would fit — is dismissed.
-// Two incarnations under two PIDs share the one app node.
+// launcher, or a helper whose comm-like name would fit — is dismissed; a
+// match that exited before its verdict is no incarnation. Two
+// incarnations under two PIDs share the one app node.
 func TestPatternSessionJudgesExecs(t *testing.T) {
 	fakeProcs(t)
 	dir := t.TempDir()
 	tr := newFakeTracer()
 	tr.gap = 4
+	tr.exited = map[uint32]bool{74: true}
 	c := testCorrelator(t, dir)
 	s := patternSession(t, tr, c)
 	app := "*iormesh.test.NoSuchRestartApp*"
@@ -54,6 +56,8 @@ func TestPatternSessionJudgesExecs(t *testing.T) {
 		execRecord(71, 30, "/jdk/bin/java", "/jdk/bin/java", "-cp", "w.jar", "iormesh.test.NoSuchRestartApp", "/d"),
 		execRecord(72, 40, "/usr/bin/NoSuchRestartApp", "NoSuchRestartApp"),
 		execRecord(73, 50, "/jdk/bin/java", "/jdk/bin/java", "-cp", "w.jar", "iormesh.test.NoSuchRestartApp", "/d"),
+		// Matches, but exited before the verdict: no incarnation.
+		execRecord(74, 60, "/jdk/bin/java", "/jdk/bin/java", "-cp", "w.jar", "iormesh.test.NoSuchRestartApp", "/d"),
 	}
 	for _, r := range recs {
 		if err := s.handle(r); err != nil {
@@ -116,4 +120,32 @@ func TestPIDSessionOver(t *testing.T) {
 		t.Fatalf("live %v: the session must be over", s.live)
 	}
 	_ = c.Close()
+}
+
+// TestUnknownStartTimeIsGone: a target whose start time could not be
+// read is not kept alive by whatever process holds its PID now.
+func TestUnknownStartTimeIsGone(t *testing.T) {
+	fakeProcs(t, 10)
+	processStart = func(uint32) uint64 { return 0 }
+	s, _ := pidSession(t, newFakeTracer(), testCorrelator(t, t.TempDir()), 10)
+	if !s.over() {
+		t.Fatalf("live %v: an unknown start time kept the session alive", s.live)
+	}
+}
+
+// TestStartScanDropsVanished: a scanned match that exits between the
+// scan and the insert is removed from target_map again — nothing else
+// would ever remove it — and is no incarnation.
+func TestStartScanDropsVanished(t *testing.T) {
+	fakeProcs(t) // nothing is alive by the time of the re-check
+	tr := newFakeTracer()
+	s := newSession(tr, testCorrelator(t, t.TempDir()),
+		runConfig{spec: target.Spec{Pattern: "*x*"}, project: "p"})
+	if err := s.adoptRunning(4242); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(tr.added, []uint32{4242}) || !slices.Equal(tr.removed, []uint32{4242}) || len(s.live) != 0 {
+		t.Fatalf("added %v removed %v live %v: want the vanished match inserted and removed",
+			tr.added, tr.removed, s.live)
+	}
 }

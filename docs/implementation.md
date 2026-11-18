@@ -1079,8 +1079,12 @@ scenarios landing first (principle #1).
 
    ior's CO-RE "flavor" structs (`___ior` suffix) stay for the
    contexts. The exit handler removes a tgid once its whole group
-   is dead (`iormesh_forget_target`), so a reused PID is never
-   traced. The three handlers attach as `bpf.ControlProbes`. The
+   is dead (`iormesh_forget_target`). Userspace never re-inserts
+   an entry the kernel may have removed: a pattern match is
+   adopted only by updating its still-existing pending entry
+   (`AdoptExec`, `BPF_EXIST`), and a match the start scan found is
+   removed again if it exited before its insert. So no entry
+   outlives its process, and a reused PID is not traced. The three handlers attach as `bpf.ControlProbes`. The
    correlator registers a forked child at its `task_newtask`
    record (its incarnation is read from `/proc` while it surely
    exists) and drops a dead thread's pending enter at its exit.
@@ -1120,15 +1124,23 @@ scenarios landing first (principle #1).
    the argument block; userspace re-reads `/proc/<pid>/cmdline`
    when it was cut) and marked PENDING in `target_map` first.
    Userspace adopts a match (`bpf.Tracer.AdoptExec`) or dismisses
-   it (`IgnoreExec`). Processes already running at start are found
-   by a `/proc` scan after the probes attached, skipping the
-   tracer and its ancestors, whose command lines name the
-   pattern. While PENDING, `filter()` counts every record the
+   it (`IgnoreExec`); a match that exited before the verdict is
+   not adopted and is no incarnation. Processes already running at
+   start are found by a `/proc` scan after the probes attached,
+   skipping the tracer, its ancestors and every other process
+   running the tracer's executable, whose command lines name the
+   pattern. Matching the whole command line is decision #23's
+   default and it is broad: `grep RestartApp`, or an editor on a
+   file of that name, matches `*RestartApp*` as well, so a pattern
+   should name what only the app's command line carries. While PENDING, `filter()` counts every record the
    process loses: that is the window between exec and insert, and
    `AdoptExec` returns it as the gap, which the correlator writes
    as a `drop` naming the process with `args.drop_reason`
    `attach_gap`, ahead of its first traced event — never silently
-   (a lower bound; 0 writes nothing). A PENDING entry carries its
+   (a lower bound; 0 writes nothing). Children a process forks
+   while it is still PENDING are not followed, and their records
+   are not in the gap either: until the verdict nothing says the
+   tree belongs to the session. A PENDING entry carries its
    exec time, so the dismissal of a posix_spawn child's first exec
    (`jspawnhelper`) cannot remove the entry of its second (the
    app). A pattern session never ends by itself — it waits for
@@ -1136,7 +1148,8 @@ scenarios landing first (principle #1).
    a stop drains the records in flight (at most 2 s). PID and port
    sessions end once every target and followed child is gone,
    judged by exit records and by `/proc` (start time, tgid, not a
-   zombie), so a reused PID cannot keep a run alive.
+   zombie; an unreadable start time counts as gone), so a reused
+   PID cannot keep a run alive.
    Root test: `TestExecWatchAdoptAndIgnore`. Scenario: `restart`
    (landed ahead, task oa4): a launcher runs `RestartApp` as a
    child JVM, reaps it and runs it again with the identical argv

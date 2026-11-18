@@ -70,21 +70,45 @@ func (s Spec) Mode() Mode {
 	return ModePIDs
 }
 
-// Matches reports whether an exec of exe with argv is a target of a
-// pattern spec: the glob matches the command line (argv joined by single
-// spaces, as ps shows it) or the executable path. Nothing else counts —
-// a process known only by its comm never matches, however well the comm
-// fits. A spec without a pattern, or one that does not compile, matches
-// nothing: Validate reports why.
-func (s Spec) Matches(exe string, argv []string) bool {
+// Matcher is a pattern spec's glob, compiled once: a session asks it
+// about every exec on the host.
+type Matcher struct {
+	glob Glob
+}
+
+// Matcher compiles the spec's pattern.
+func (s Spec) Matcher() (Matcher, error) {
 	g, err := CompileGlob(s.Pattern)
 	if err != nil {
+		return Matcher{}, fmt.Errorf("%w: %w", ErrSpec, err)
+	}
+	return Matcher{glob: g}, nil
+}
+
+// Match reports whether an exec of exe with argv is a target: the glob
+// matches the command line (argv joined by single spaces, as ps shows
+// it) or the executable path. Nothing else counts — a process known only
+// by its comm never matches, however well the comm fits. Matching the
+// whole command line is decision #23's default, and it is broad: a
+// "grep RestartApp" or an editor opened on a file of that name matches
+// "*RestartApp*" too, so a pattern should name what only the app's
+// command line carries.
+func (m Matcher) Match(exe string, argv []string) bool {
+	if m.glob.pattern == "" {
 		return false
 	}
-	if len(argv) > 0 && g.Match(strings.Join(argv, " ")) {
+	if len(argv) > 0 && m.glob.Match(strings.Join(argv, " ")) {
 		return true
 	}
-	return exe != "" && g.Match(exe)
+	return exe != "" && m.glob.Match(exe)
+}
+
+// Matches is Matcher().Match for a one-off question. A spec without a
+// pattern, or one that does not compile, matches nothing: Validate
+// reports why.
+func (s Spec) Matches(exe string, argv []string) bool {
+	m, err := s.Matcher()
+	return err == nil && m.Match(exe, argv)
 }
 
 // SplitArgv turns an argument block — NUL-separated strings as in

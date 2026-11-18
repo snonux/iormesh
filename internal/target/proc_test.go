@@ -101,8 +101,9 @@ func TestAlive(t *testing.T) {
 	}
 }
 
-// TestResolvePattern: running matches are found, the tracer and its
-// ancestors (whose command lines name the pattern) are skipped.
+// TestResolvePattern: running matches are found; the tracer, its
+// ancestors and other iormesh sessions (whose command lines name the
+// pattern) are skipped.
 func TestResolvePattern(t *testing.T) {
 	f := newFakeProc(t)
 	f.proc(1, 1, 0, 'S', 1, "/sbin/init", "/sbin/init")
@@ -110,6 +111,9 @@ func TestResolvePattern(t *testing.T) {
 	f.proc(51, 51, 50, 'S', 3, "/build/iormesh", "iormesh", "run", "-pattern", "*RestartApp*")
 	f.proc(60, 60, 1, 'S', 4, "/usr/bin/java", "java", "-cp", "w.jar", "x.RestartApp", "/d")
 	f.proc(61, 61, 1, 'S', 5, "/usr/bin/java", "java", "-jar", "w.jar", "restart")
+	// A second iormesh session, not an ancestor: its argv names the
+	// pattern, its executable is the tracer's.
+	f.proc(70, 70, 1, 'S', 6, "/build/iormesh", "iormesh", "run", "-pattern", "*RestartApp*")
 	got, err := Spec{Pattern: "*RestartApp*"}.Resolve(f.fs(), 51)
 	if err != nil || !slices.Equal(got, []uint32{60}) {
 		t.Fatalf("Resolve = %v, %v; want [60]", got, err)

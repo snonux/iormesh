@@ -9,6 +9,7 @@ package internal_test
 
 import (
 	"fmt"
+	"os/exec"
 	"slices"
 	"testing"
 	"time"
@@ -147,9 +148,10 @@ func TestExecWatchAdoptAndIgnore(t *testing.T) {
 			argv, ev.ArgvLen, ev.ArgvTotal, types.StringValue(ev.Exe[:]), spec.Pattern)
 	}
 	time.Sleep(200 * time.Millisecond) // sh has run its start-up and blocks in read
-	gap, err := tr.AdoptExec(ev.Pid, ev.Time)
-	if err != nil || gap == 0 {
-		t.Fatalf("AdoptExec = %d, %v: want the start-up syscalls counted as the gap", gap, err)
+	gap, ok, err := tr.AdoptExec(ev.Pid)
+	if err != nil || !ok || gap == 0 {
+		t.Fatalf("AdoptExec = %d, %v, %v: want adopted with the start-up syscalls counted as the gap",
+			gap, ok, err)
 	}
 	ignored := startScript(t, "sh", watchScript(marker+"-other")...)
 	other := execOf(t, tr, ignored.pid())
@@ -167,5 +169,36 @@ func TestExecWatchAdoptAndIgnore(t *testing.T) {
 	}
 	if traced, err := tr.Targeted(ignored.pid()); err != nil || traced {
 		t.Fatalf("dismissed pid %d targeted (%v, %v)", ignored.pid(), traced, err)
+	}
+}
+
+// TestExecWatchExitedBeforeAdopt: a matching process that exits before
+// userspace's verdict is not adopted, and leaves no target_map entry —
+// the kernel dropped its pending entry at the exit, and an insert now
+// would never be removed and would trace whatever process reuses the PID.
+// The same process, exec'ed again and still running, is the positive
+// control: it is adopted.
+func TestExecWatchExitedBeforeAdopt(t *testing.T) {
+	tr := openTracerWith(t, ibpf.Config{ExecWatch: true})
+	marker := fmt.Sprintf("iormesh-gone-%d", time.Now().UnixNano())
+	cmd := exec.Command("sh", "-c", "exit 0", marker)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pid := uint32(cmd.Process.Pid)
+	ev := execOf(t, tr, pid)
+	if err := cmd.Wait(); err != nil { // exited and reaped before the verdict
+		t.Fatal(err)
+	}
+	gap, adopted, err := tr.AdoptExec(ev.Pid)
+	if err != nil || adopted {
+		t.Fatalf("AdoptExec of exited pid %d = %d, %v, %v: want not adopted", pid, gap, adopted, err)
+	}
+	if traced, err := tr.Targeted(pid); err != nil || traced {
+		t.Fatalf("exited pid %d left in target_map (%v, %v)", pid, traced, err)
+	}
+	live := startScript(t, "sh", watchScript(marker)...)
+	if _, adopted, err := tr.AdoptExec(execOf(t, tr, live.pid()).Pid); err != nil || !adopted {
+		t.Fatalf("control: running pid %d not adopted (%v, %v)", live.pid(), adopted, err)
 	}
 }

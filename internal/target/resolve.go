@@ -37,13 +37,19 @@ func (s Spec) Resolve(p ProcFS, self uint32) ([]uint32, error) {
 }
 
 // resolvePattern scans the tree for running matches. A process that
-// vanishes during the scan is simply not a match.
+// vanishes during the scan is simply not a match. Skipped: self and its
+// ancestors, and every process running self's executable — another
+// iormesh session's command line names its pattern too (IsTracer).
 func (s Spec) resolvePattern(p ProcFS, self uint32) ([]uint32, error) {
+	m, err := s.Matcher()
+	if err != nil {
+		return nil, err
+	}
 	pids, err := p.PIDs()
 	if err != nil {
 		return nil, err
 	}
-	skip := p.Ancestors(self)
+	skip, selfExe := p.Ancestors(self), p.Exe(self)
 	var out []uint32
 	for _, pid := range pids {
 		if skip[pid] {
@@ -53,12 +59,21 @@ func (s Spec) resolvePattern(p ProcFS, self uint32) ([]uint32, error) {
 		if err != nil {
 			continue
 		}
-		if s.Matches(p.Exe(pid), argv) {
+		exe := p.Exe(pid)
+		if m.Match(exe, argv) && !IsTracer(exe, selfExe) {
 			out = append(out, pid)
 		}
 	}
 	slices.Sort(out)
 	return out, nil
+}
+
+// IsTracer reports whether exe, a process's executable, is the tracer's
+// own (selfExe): an iormesh session is never a target, though its
+// command line — "iormesh run -pattern X" — matches X. Both empty or
+// unknown is no evidence.
+func IsTracer(exe, selfExe string) bool {
+	return exe != "" && exe == selfExe
 }
 
 // ListenOwners returns the processes holding a TCP socket (IPv4 or IPv6)

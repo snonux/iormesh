@@ -24,6 +24,7 @@ func RootBPFTests() []string {
 		"TestFollowForkExec",
 		"TestUntracedForkNotFollowed",
 		"TestExecWatchAdoptAndIgnore",
+		"TestExecWatchExitedBeforeAdopt",
 	}
 }
 

@@ -50,26 +50,39 @@ func (t *Tracer) RemoveTarget(pid uint32) error {
 	return nil
 }
 
-// AdoptExec turns the exec reported by an ExecArgvEvent (pid, its Time as
-// since) into a traced process and returns its attach gap: how many
-// records the process produced between the exec and now, which no trace
-// will ever show (maps.h). The gap is 0 when the pending entry is gone or
-// belongs to a later exec of pid (the kernel lost it, or the newer exec's
-// own record will follow): nothing was counted for this exec then. A few
-// records counted between the read and the update are not included, so
-// the gap is a lower bound.
-func (t *Tracer) AdoptExec(pid uint32, since uint64) (uint64, error) {
+// AdoptExec turns pid's pending exec (reported by an ExecArgvEvent) into
+// a traced process and returns its attach gap: how many records the
+// process produced since its pending entry was made, which no trace will
+// ever show (maps.h). The entry is updated only if it still exists
+// (BPF_EXIST): once the process exited, the kernel removed it
+// (iormesh_forget_target), and re-inserting it would leave an entry no
+// exit ever removes — tracing whatever process reuses the PID. adopted is
+// false then, and the caller must not record an incarnation. Any pending
+// entry's gap counts, even one of a later exec of pid (a wrapper that
+// execs the app before the verdict on the wrapper): those are the
+// process's lost records all the same. Records counted between the read
+// and the update are not included, so the gap is a lower bound.
+func (t *Tracer) AdoptExec(pid uint32) (gap uint64, adopted bool, err error) {
 	m, err := t.targetMap()
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	var gap uint64
-	if v, ok, err := lookupTarget(m, pid); err != nil {
-		return 0, err
-	} else if ok && v.State == targetPending && v.Since == since {
+	v, ok, err := lookupTarget(m, pid)
+	if err != nil || !ok {
+		return 0, false, err
+	}
+	if v.State == targetPending {
 		gap = uint64(v.Gap)
 	}
-	return gap, updateTarget(m, pid)
+	traced := targetValue{State: targetTraced}
+	err = m.UpdateValueFlags(unsafe.Pointer(&pid), unsafe.Pointer(&traced), bpf.MapFlagUpdateExist)
+	if errors.Is(err, syscall.ENOENT) {
+		return 0, false, nil // exited between the read and the update
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("adopt target %d: %w", pid, err)
+	}
+	return gap, true, nil
 }
 
 // IgnoreExec dismisses the exec reported by an ExecArgvEvent: its pending

@@ -27,8 +27,9 @@ type fakeTracer struct {
 	lossErr error
 	closed  bool
 	// The target_map calls a session made, and the gap AdoptExec reports.
-	added, adopted, ignored []uint32
-	gap                     uint64
+	added, removed, adopted, ignored []uint32
+	gap                              uint64
+	exited                           map[uint32]bool
 }
 
 func newFakeTracer() *fakeTracer { return &fakeTracer{records: make(chan any, 16)} }
@@ -48,11 +49,22 @@ func (f *fakeTracer) AddTarget(pid uint32) error {
 	return nil
 }
 
-func (f *fakeTracer) AdoptExec(pid uint32, since uint64) (uint64, error) {
+func (f *fakeTracer) RemoveTarget(pid uint32) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.removed = append(f.removed, pid)
+	return nil
+}
+
+// AdoptExec adopts unless the test marked pid exited before its verdict.
+func (f *fakeTracer) AdoptExec(pid uint32) (uint64, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.exited[pid] {
+		return 0, false, nil
+	}
 	f.adopted = append(f.adopted, pid)
-	return f.gap, nil
+	return f.gap, true, nil
 }
 
 func (f *fakeTracer) IgnoreExec(pid uint32, since uint64) error {

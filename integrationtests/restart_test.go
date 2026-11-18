@@ -82,7 +82,7 @@ func assertEndReason(t *testing.T, events []schema.Event, want string) {
 }
 
 // assertIncarnations checks the raw trace: the app node links exactly two
-// process incarnations with distinct PIDs, neither the launcher, each of
+// distinct process nodes (pid and incarnation), neither the launcher's, each of
 // which bracketed the scenario itself, and every attach_gap drop precedes
 // its process's begin marker.
 func assertIncarnations(t *testing.T, tr normalize.Trace, app string, launcher int) {
