@@ -14,14 +14,19 @@ import (
 	"iormesh/internal/bpf"
 	"iormesh/internal/correlate"
 	"iormesh/internal/schema"
+	"iormesh/internal/target"
 )
 
 // liveCheckEvery is how often run checks whether its targets still exist;
 // quietFor is how long it keeps draining once they are all gone, so the
 // records of their last syscalls are not lost.
+// stopDrainMax bounds the drain after a signal or the duration ended the
+// run: the records already in flight are handled (their targets' last
+// syscalls, say), but a busy target cannot hold a stop up.
 const (
 	liveCheckEvery = 200 * time.Millisecond
 	quietFor       = 300 * time.Millisecond
+	stopDrainMax   = 2 * time.Second
 )
 
 func runCommand(args []string, stderr io.Writer) error {
@@ -39,16 +44,20 @@ func runCommand(args []string, stderr io.Writer) error {
 type tracer interface {
 	Records() <-chan any
 	Losses() (bpf.Losses, error)
+	AddTarget(pid uint32) error
+	AdoptExec(pid uint32, since uint64) (uint64, error)
+	IgnoreExec(pid uint32, since uint64) error
 	Close() error
 }
 
 var _ tracer = (*bpf.Tracer)(nil)
 
-// runTrace traces cfg.pids until the duration ends, a signal arrives or
-// every target has exited, then writes the event stream and the graph
-// into cfg.out. The stream opens with a session header, records loss as
-// drop events while it runs and closes with an end event naming why it
-// stopped (PLAN.md, "Trace output contract").
+// runTrace traces cfg.spec's targets until the duration ends, a signal
+// arrives or (for PIDs and a port) every target has exited, then writes
+// the event stream and the graph into cfg.out. The stream opens with a
+// session header, records loss as drop events while it runs and closes
+// with an end event naming why it stopped (PLAN.md, "Trace output
+// contract").
 //
 // The tracer is opened before the output files are created, so a run that
 // cannot attach (no root, no BTF) leaves an existing trace directory
@@ -61,7 +70,11 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 			return fmt.Errorf("ready file: %w", err)
 		}
 	}
-	tr, err := bpf.Open(bpf.Config{Pids: cfg.pids})
+	pids, err := initialTargets(cfg.spec)
+	if err != nil {
+		return err
+	}
+	tr, err := bpf.Open(bpf.Config{Pids: pids, ExecWatch: cfg.spec.Mode() == target.ModePattern})
 	if err != nil {
 		return err
 	}
@@ -69,13 +82,40 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 	if err != nil {
 		return errors.Join(err, tr.Close())
 	}
-	_, _ = fmt.Fprintf(stderr, "iormesh: attached, tracing pid %v (%d tracepoints missing on this kernel)\n",
-		cfg.pids, len(tr.Skipped()))
+	s := newSession(tr, c, cfg)
+	if err := s.start(pids); err != nil {
+		return errors.Join(err, finish(cfg, tr, c, schema.EndError, stderr))
+	}
+	_, _ = fmt.Fprintf(stderr, "iormesh: attached, tracing %s (%d tracepoints missing on this kernel)\n",
+		describe(cfg.spec, pids), len(tr.Skipped()))
 	if err := announceReady(cfg); err != nil {
 		return errors.Join(err, finish(cfg, tr, c, schema.EndError, stderr))
 	}
-	reason, loopErr := traceLoop(ctx, tr, c, cfg)
+	reason, loopErr := traceLoop(ctx, s, cfg)
 	return errors.Join(loopErr, finish(cfg, tr, c, reason, stderr))
+}
+
+// initialTargets resolves the processes target_map starts with: the
+// PIDs, or the owners of the listening port (resolved once, at start —
+// decision #23 leaves following the port across restarts to M6). A
+// pattern starts empty; its matches are added after the probes attached
+// (session.start), so none can exec unseen in between.
+func initialTargets(spec target.Spec) ([]uint32, error) {
+	if spec.Mode() == target.ModePattern {
+		return nil, nil
+	}
+	return spec.Resolve(target.HostProcFS(), uint32(os.Getpid()))
+}
+
+// describe names the targets for the attach line.
+func describe(spec target.Spec, pids []uint32) string {
+	switch spec.Mode() {
+	case target.ModePattern:
+		return fmt.Sprintf("pattern %q", spec.Pattern)
+	case target.ModeListenPort:
+		return fmt.Sprintf("port %d owners, pid %v", spec.ListenPort, pids)
+	}
+	return fmt.Sprintf("pid %v", pids)
 }
 
 // finish ends a trace: a last loss poll (the counters die with the
@@ -148,33 +188,33 @@ func pollLosses(tr tracer, c *correlate.Correlator) (bpf.Losses, error) {
 	return l, c.RecordLosses(l.Total())
 }
 
-// traceLoop feeds records to the correlator until a stop condition and
+// traceLoop feeds records to the session until a stop condition and
 // returns why it stopped, as a schema end reason. A sink error stops the
 // trace at once: tracing on into a broken file would only hide the loss.
 // So does an unreadable loss counter, since drops must never be silent.
-func traceLoop(ctx context.Context, tr tracer, c *correlate.Correlator, cfg runConfig) (string, error) {
+func traceLoop(ctx context.Context, s *session, cfg runConfig) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, cfg.duration)
 	defer cancel()
 	tick := time.NewTicker(liveCheckEvery)
 	defer tick.Stop()
 	for {
 		select {
-		case rec, ok := <-tr.Records():
+		case rec, ok := <-s.tr.Records():
 			if !ok {
 				// Only Close ends the stream, and run has not closed it.
 				return schema.EndError, errors.New("record stream closed unexpectedly")
 			}
-			if err := c.Handle(rec); err != nil {
+			if err := s.handle(rec); err != nil {
 				return schema.EndError, err
 			}
 		case <-ctx.Done():
-			return ctxReason(ctx), nil
+			return ctxReason(ctx), drainStopped(s)
 		case <-tick.C:
-			if _, err := pollLosses(tr, c); err != nil {
+			if _, err := pollLosses(s.tr, s.c); err != nil {
 				return schema.EndError, err
 			}
-			if !anyAlive(cfg.pids) {
-				return drainQuiet(ctx, tr, c)
+			if s.over() {
+				return drainQuiet(ctx, s)
 			}
 		}
 	}
@@ -185,7 +225,7 @@ func traceLoop(ctx context.Context, tr tracer, c *correlate.Correlator, cfg runC
 // first, which then is the reason, since the drain was cut short. It
 // keeps polling the loss counters, so a gap in the targets' last records
 // still gets its drop event within a poll interval.
-func drainQuiet(ctx context.Context, tr tracer, c *correlate.Correlator) (string, error) {
+func drainQuiet(ctx context.Context, s *session) (string, error) {
 	tick := time.NewTicker(liveCheckEvery)
 	defer tick.Stop()
 	quiet := time.NewTimer(quietFor)
@@ -193,21 +233,49 @@ func drainQuiet(ctx context.Context, tr tracer, c *correlate.Correlator) (string
 	for {
 		select {
 		case <-ctx.Done():
-			return ctxReason(ctx), nil
-		case rec, ok := <-tr.Records():
+			return ctxReason(ctx), drainStopped(s)
+		case rec, ok := <-s.tr.Records():
 			if !ok {
 				return schema.EndError, errors.New("record stream closed unexpectedly")
 			}
-			if err := c.Handle(rec); err != nil {
+			if err := s.handle(rec); err != nil {
 				return schema.EndError, err
 			}
 			quiet.Reset(quietFor)
 		case <-tick.C:
-			if _, err := pollLosses(tr, c); err != nil {
+			if _, err := pollLosses(s.tr, s.c); err != nil {
 				return schema.EndError, err
 			}
 		case <-quiet.C:
 			return schema.EndTargetsExited, nil
+		}
+	}
+}
+
+// drainStopped handles the records already in flight when a signal or
+// the duration stopped the run — until none arrives for quietFor, at most
+// stopDrainMax — so a stop does not cut off the targets' last syscalls,
+// which a pattern session (never over by itself) would otherwise always
+// lose. What arrives later is lost to Close, uncounted.
+func drainStopped(s *session) error {
+	quiet := time.NewTimer(quietFor)
+	defer quiet.Stop()
+	bound := time.NewTimer(stopDrainMax)
+	defer bound.Stop()
+	for {
+		select {
+		case rec, ok := <-s.tr.Records():
+			if !ok {
+				return nil
+			}
+			if err := s.handle(rec); err != nil {
+				return err
+			}
+			quiet.Reset(quietFor)
+		case <-quiet.C:
+			return nil
+		case <-bound.C:
+			return nil
 		}
 	}
 }
@@ -219,13 +287,4 @@ func ctxReason(ctx context.Context) string {
 		return schema.EndDuration
 	}
 	return schema.EndStop
-}
-
-func anyAlive(pids []uint32) bool {
-	for _, pid := range pids {
-		if processExists(pid) {
-			return true
-		}
-	}
-	return false
 }

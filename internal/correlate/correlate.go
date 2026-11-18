@@ -81,8 +81,10 @@ func New(cfg Config) *Correlator {
 	}
 }
 
-// Handle consumes one record from bpf.Tracer.Records. Record types the M1
-// probe set does not produce are ignored. The error is the sink's, or
+// Handle consumes one record from bpf.Tracer.Records: syscall records,
+// TCP state records and the process lifecycle records of M2 step 1 (new
+// processes, exits). Other record types are ignored; the exec records of a
+// pattern session are the caller's to judge (Incarnation). The error is the sink's, or
 // ErrEnded after End.
 func (c *Correlator) Handle(rec any) error {
 	if c.ended {
@@ -101,6 +103,10 @@ func (c *Correlator) Handle(rec any) error {
 		c.exitRet(r)
 	case *types.TcpStateEvent:
 		c.tcpState(r)
+	case *types.TaskNewtaskEvent:
+		c.newTask(r)
+	case *types.ProcessExitEvent:
+		c.exitTask(r)
 	default:
 		return nil
 	}

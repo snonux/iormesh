@@ -1,14 +1,14 @@
 package correlate
 
 import (
-	"bytes"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"iormesh/internal/target"
 )
 
 // procState is one traced process incarnation.
@@ -108,10 +108,6 @@ func (p *procState) close(fd int32) {
 	delete(p.sockOf, fd)
 }
 
-// clockTicks is USER_HZ, the unit of /proc/<pid>/stat's starttime. It is
-// 100 on every Linux architecture iormesh targets.
-const clockTicks = 100
-
 // ReadProcInfo reads comm and start time from /proc. The start time has
 // clock-tick resolution, which is enough to tell PID reuses apart. A
 // process already gone yields ("", 0): its events still carry its pid.
@@ -125,23 +121,14 @@ func ReadProcInfo(pid uint32) (string, uint64) {
 }
 
 // parseStartTime returns field 22 (starttime) of a /proc/<pid>/stat line
-// in boot-clock nanoseconds. The comm field may contain spaces and
-// parentheses, so fields are counted after the last ')'.
+// in boot-clock nanoseconds, 0 for a line that does not parse
+// (target.ParseStat, shared with the session's liveness check).
 func parseStartTime(stat []byte) uint64 {
-	i := bytes.LastIndexByte(stat, ')')
-	if i < 0 {
-		return 0
-	}
-	fields := strings.Fields(string(stat[i+1:]))
-	// fields[0] is field 3 (state), so starttime (22) is fields[19].
-	if len(fields) < 20 {
-		return 0
-	}
-	ticks, err := strconv.ParseUint(fields[19], 10, 64)
+	st, err := target.ParseStat(stat)
 	if err != nil {
 		return 0
 	}
-	return ticks * (1_000_000_000 / clockTicks)
+	return st.StartNS
 }
 
 // BootToWallOffset measures wall-clock minus boot-clock time now, the

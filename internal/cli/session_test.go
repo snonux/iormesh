@@ -1,0 +1,119 @@
+package cli
+
+import (
+	"slices"
+	"testing"
+
+	"iormesh/internal/correlate"
+	"iormesh/internal/schema"
+	"iormesh/internal/target"
+	"iormesh/internal/types"
+)
+
+// execRecord is the exec report of pid with argv (NUL-separated, as the
+// BPF side copies it) and exe.
+func execRecord(pid uint32, at uint64, exe string, argv ...string) *types.ExecArgvEvent {
+	ev := &types.ExecArgvEvent{EventType: types.EXEC_ARGV_EVENT, Time: at, Pid: pid, Tid: pid}
+	copy(ev.Exe[:], exe)
+	n := 0
+	for _, a := range argv {
+		n += copy(ev.Argv[n:], a)
+		n++ // the NUL the zeroed array already holds
+	}
+	ev.ArgvLen, ev.ArgvTotal = uint32(n), uint32(n)
+	return ev
+}
+
+// patternSession is a started -pattern session; the pattern matches
+// nothing on the test host, so start adopts nobody.
+func patternSession(t *testing.T, tr *fakeTracer, c *correlate.Correlator) *session {
+	t.Helper()
+	cfg := runConfig{spec: target.Spec{Pattern: "*iormesh.test.NoSuchRestartApp*"}, project: "p"}
+	s := newSession(tr, c, cfg)
+	if err := s.start(nil); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// TestPatternSessionJudgesExecs: a matching exec is adopted and linked to
+// the app with its gap as an attach_gap drop; a non-matching exec — the
+// launcher, or a helper whose comm-like name would fit — is dismissed.
+// Two incarnations under two PIDs share the one app node.
+func TestPatternSessionJudgesExecs(t *testing.T) {
+	fakeProcs(t)
+	dir := t.TempDir()
+	tr := newFakeTracer()
+	tr.gap = 4
+	c := testCorrelator(t, dir)
+	s := patternSession(t, tr, c)
+	app := "*iormesh.test.NoSuchRestartApp*"
+	recs := []any{
+		execRecord(70, 10, "/usr/bin/java", "java", "-jar", "w.jar", "restart"),
+		execRecord(71, 20, "/jdk/lib/jspawnhelper", "/jdk/lib/jspawnhelper", "3:4"),
+		execRecord(71, 30, "/jdk/bin/java", "/jdk/bin/java", "-cp", "w.jar", "iormesh.test.NoSuchRestartApp", "/d"),
+		execRecord(72, 40, "/usr/bin/NoSuchRestartApp", "NoSuchRestartApp"),
+		execRecord(73, 50, "/jdk/bin/java", "/jdk/bin/java", "-cp", "w.jar", "iormesh.test.NoSuchRestartApp", "/d"),
+	}
+	for _, r := range recs {
+		if err := s.handle(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !slices.Equal(tr.adopted, []uint32{71, 73}) || !slices.Equal(tr.ignored, []uint32{70, 71, 72}) {
+		t.Fatalf("adopted %v ignored %v; want [71 73] and [70 71 72]", tr.adopted, tr.ignored)
+	}
+	if s.over() {
+		t.Fatal("a pattern session is over: it must wait for the app to re-appear")
+	}
+	g := c.Graph()
+	appID := schema.AppNodeID("p", app)
+	var to []string
+	for _, e := range g.Edges {
+		if e.Type == schema.EdgeIncarnation && e.From == appID {
+			to = append(to, e.To)
+		}
+	}
+	if len(to) != 2 || g.Validate() != nil {
+		t.Fatalf("incarnation edges %v (graph valid: %v), want 2", to, g.Validate())
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	drops := 0
+	for _, e := range readEvents(t, dir) {
+		if e.Event == schema.KindDrop && e.Args.DropReason != nil && *e.Args.Lost == 4 {
+			drops++
+		}
+	}
+	if drops != 2 {
+		t.Fatalf("%d attach_gap drops of 4, want one per incarnation", drops)
+	}
+}
+
+// TestPIDSessionOver: a -pid session follows its targets' children and
+// ends once the target and its child are both gone — by their exit
+// records, or by /proc for one whose record was lost.
+func TestPIDSessionOver(t *testing.T) {
+	exitAll := liveUntilExit(t)
+	tr := newFakeTracer()
+	c := testCorrelator(t, t.TempDir())
+	s, _ := pidSession(t, tr, c, 10)
+	child := &types.TaskNewtaskEvent{EventType: types.TASK_NEWTASK_EVENT, Time: 1, Pid: 11, Tid: 11, CreatorPid: 10}
+	thread := &types.TaskNewtaskEvent{EventType: types.TASK_NEWTASK_EVENT, Time: 2, Pid: 10, Tid: 12,
+		CreatorPid: 10, CloneFlags: cloneThread}
+	exit := &types.ProcessExitEvent{EventType: types.PROCESS_EXIT_EVENT, Time: 3, Pid: 10, Tid: 10, GroupDead: 1}
+	for _, r := range []any{child, thread, exit} {
+		if err := s.handle(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s.over() || len(s.live) != 1 || s.live[11] == 0 {
+		t.Fatalf("live %v: the followed child must keep the session going", s.live)
+	}
+	exitAll() // the child's exit record was lost: /proc says it is gone
+	if !s.over() {
+		t.Fatalf("live %v: the session must be over", s.live)
+	}
+	_ = c.Close()
+}

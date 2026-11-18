@@ -47,6 +47,7 @@ func IntegrationTests() []string {
 		"TestWalkingSkeleton",
 		"TestFileBasic",
 		"TestUntracedProcessStaysOut",
+		"TestRestartPattern",
 		"TestSecondRunNormalizesIdentically",
 		"TestDiffNormalized",
 		"TestParseKernelLoss",

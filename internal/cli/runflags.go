@@ -4,16 +4,20 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"iormesh/internal/target"
 )
 
 // runConfig is a validated `iormesh run` command line.
 type runConfig struct {
-	pids     []uint32
+	// spec names the targets: -pid, -pattern or -listen-port, exactly
+	// one (target.Spec.Validate).
+	spec     target.Spec
 	project  string
 	out      string
 	duration time.Duration
@@ -31,10 +35,21 @@ const defaultDuration = 4 * time.Hour
 // and controllers (PLAN.md: traces live under …/traces/<project>/).
 var projectName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
-// processExists is a variable so flag tests need no real processes.
-var processExists = func(pid uint32) bool {
-	_, err := os.Stat(fmt.Sprintf("/proc/%d", pid))
-	return err == nil
+// processAlive reports whether pid is a live process, and when startNS
+// is not 0 the incarnation that started then (target.ProcFS.Alive). It
+// is a variable so flag and loop tests need no real processes.
+var processAlive = func(pid uint32, startNS uint64) bool {
+	return target.HostProcFS().Alive(pid, startNS)
+}
+
+// processStart returns pid's start time on the boot clock (its
+// incarnation), 0 when it cannot be read. A variable like processAlive.
+var processStart = func(pid uint32) uint64 {
+	st, err := target.HostProcFS().Stat(pid)
+	if err != nil {
+		return 0
+	}
+	return st.StartNS
 }
 
 // parseRunFlags parses and validates `run`'s arguments. Every error wraps
@@ -42,7 +57,9 @@ var processExists = func(pid uint32) bool {
 func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	pids := fs.String("pid", "", "comma-separated PIDs to trace (required)")
+	pids := fs.String("pid", "", "comma-separated PIDs to trace, with their children")
+	pattern := fs.String("pattern", "", "glob over the command line or executable, matched on exec")
+	port := fs.Uint("listen-port", 0, "trace the owners of the TCP socket listening on this port")
 	project := fs.String("project", "", "project label (required)")
 	out := fs.String("out", "", "directory for the trace files (required)")
 	duration := fs.Duration("duration", defaultDuration, "stop after this long")
@@ -53,15 +70,25 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 	if fs.NArg() != 0 {
 		return runConfig{}, fmt.Errorf("%w: unexpected argument %q", errUsage, fs.Arg(0))
 	}
-	cfg := runConfig{project: *project, out: *out, duration: *duration, ready: *ready}
-	var err error
-	if cfg.pids, err = parsePids(*pids); err != nil {
-		return runConfig{}, err
+	cfg := runConfig{project: *project, out: *out, duration: *duration, ready: *ready,
+		spec: target.Spec{Pattern: *pattern}}
+	if *port > math.MaxUint16 {
+		return runConfig{}, fmt.Errorf("%w: -listen-port %d: want 1-65535", errUsage, *port)
+	}
+	cfg.spec.ListenPort = uint16(*port)
+	if *pids != "" {
+		var err error
+		if cfg.spec.PIDs, err = parsePids(*pids); err != nil {
+			return runConfig{}, err
+		}
 	}
 	return cfg, validateRun(cfg)
 }
 
 func validateRun(cfg runConfig) error {
+	if err := cfg.spec.Validate(); err != nil {
+		return fmt.Errorf("%w: %v (-pid, -pattern and -listen-port exclude each other)", errUsage, err)
+	}
 	switch {
 	case !projectName.MatchString(cfg.project):
 		return fmt.Errorf("%w: -project %q: want 1-64 of [A-Za-z0-9._-], not starting with . _ -",
@@ -75,11 +102,8 @@ func validateRun(cfg runConfig) error {
 }
 
 // parsePids parses "-pid 12,34": every entry a positive integer naming a
-// running process, no duplicates.
+// running process (not a thread, not a zombie), no duplicates.
 func parsePids(s string) ([]uint32, error) {
-	if s == "" {
-		return nil, fmt.Errorf("%w: -pid is required", errUsage)
-	}
 	seen := map[uint32]bool{}
 	var pids []uint32
 	for _, f := range strings.Split(s, ",") {
@@ -91,7 +115,7 @@ func parsePids(s string) ([]uint32, error) {
 		if seen[pid] {
 			return nil, fmt.Errorf("%w: -pid %d given twice", errUsage, pid)
 		}
-		if !processExists(pid) {
+		if !processAlive(pid, 0) {
 			return nil, fmt.Errorf("%w: -pid %d: no such process", errUsage, pid)
 		}
 		seen[pid] = true

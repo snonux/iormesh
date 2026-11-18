@@ -14,6 +14,7 @@ import (
 	"iormesh/internal/bpf"
 	"iormesh/internal/correlate"
 	"iormesh/internal/schema"
+	"iormesh/internal/target"
 	"iormesh/internal/types"
 )
 
@@ -25,6 +26,9 @@ type fakeTracer struct {
 	losses  bpf.Losses
 	lossErr error
 	closed  bool
+	// The target_map calls a session made, and the gap AdoptExec reports.
+	added, adopted, ignored []uint32
+	gap                     uint64
 }
 
 func newFakeTracer() *fakeTracer { return &fakeTracer{records: make(chan any, 16)} }
@@ -35,6 +39,27 @@ func (f *fakeTracer) Losses() (bpf.Losses, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.losses, f.lossErr
+}
+
+func (f *fakeTracer) AddTarget(pid uint32) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.added = append(f.added, pid)
+	return nil
+}
+
+func (f *fakeTracer) AdoptExec(pid uint32, since uint64) (uint64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.adopted = append(f.adopted, pid)
+	return f.gap, nil
+}
+
+func (f *fakeTracer) IgnoreExec(pid uint32, since uint64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ignored = append(f.ignored, pid)
+	return nil
 }
 
 func (f *fakeTracer) Close() error {
@@ -95,6 +120,17 @@ func kinds(events []schema.Event) string {
 	return strings.Join(k, ",")
 }
 
+// pidSession is the session of a -pid run over pids, started.
+func pidSession(t *testing.T, tr tracer, c *correlate.Correlator, pids ...uint32) (*session, runConfig) {
+	t.Helper()
+	cfg := runConfig{spec: target.Spec{PIDs: pids}, project: "p", duration: time.Hour}
+	s := newSession(tr, c, cfg)
+	if err := s.start(pids); err != nil {
+		t.Fatal(err)
+	}
+	return s, cfg
+}
+
 // TestTraceLoopReasons: every stop condition maps to its schema end
 // reason, and the failing ones also return an error.
 func TestTraceLoopReasons(t *testing.T) {
@@ -119,7 +155,9 @@ func TestTraceLoopReasons(t *testing.T) {
 			defer cancel()
 			tc.setup(tr, cancel)
 			c := testCorrelator(t, t.TempDir())
-			reason, err := traceLoop(ctx, tr, c, runConfig{pids: []uint32{10}, duration: tc.dur})
+			s, cfg := pidSession(t, tr, c, 10)
+			cfg.duration = tc.dur
+			reason, err := traceLoop(ctx, s, cfg)
 			if reason != tc.want || (err != nil) != tc.wantErr {
 				t.Fatalf("traceLoop = %q, %v; want %q, error %v", reason, err, tc.want, tc.wantErr)
 			}
@@ -134,9 +172,10 @@ func liveUntilExit(t *testing.T) func() {
 	t.Helper()
 	var mu sync.Mutex
 	live := true
-	orig := processExists
-	processExists = func(uint32) bool { mu.Lock(); defer mu.Unlock(); return live }
-	t.Cleanup(func() { processExists = orig })
+	origAlive, origStart := processAlive, processStart
+	processAlive = func(uint32, uint64) bool { mu.Lock(); defer mu.Unlock(); return live }
+	processStart = func(uint32) uint64 { return 1 }
+	t.Cleanup(func() { processAlive, processStart = origAlive, origStart })
 	return func() { mu.Lock(); defer mu.Unlock(); live = false }
 }
 
@@ -160,8 +199,9 @@ func TestRunWritesSessionDropsEnd(t *testing.T) {
 		tr.records <- &types.RetEvent{EventType: types.EXIT_RET_EVENT, TraceId: types.SYS_EXIT_READ, Time: 4, Pid: 10, Tid: 10, Ret: 1}
 		exitAll()
 	}()
-	cfg := runConfig{pids: []uint32{10}, out: dir, duration: time.Minute}
-	reason, err := traceLoop(context.Background(), tr, c, cfg)
+	s, cfg := pidSession(t, tr, c, 10)
+	cfg.out, cfg.duration = dir, time.Minute
+	reason, err := traceLoop(context.Background(), s, cfg)
 	if err != nil || reason != schema.EndTargetsExited {
 		t.Fatalf("traceLoop = %q, %v", reason, err)
 	}
@@ -206,7 +246,8 @@ func TestTraceLoopWriteError(t *testing.T) {
 		ProcInfo: func(uint32) (string, uint64) { return "x", 1 }})
 	tr.records <- &types.FdEvent{EventType: types.ENTER_FD_EVENT, TraceId: types.SYS_ENTER_READ, Time: 1, Pid: 10, Tid: 10}
 	tr.records <- &types.RetEvent{EventType: types.EXIT_RET_EVENT, TraceId: types.SYS_EXIT_READ, Time: 2, Pid: 10, Tid: 10, Ret: 1}
-	reason, err := traceLoop(context.Background(), tr, c, runConfig{pids: []uint32{10}, duration: time.Hour})
+	s, cfg := pidSession(t, tr, c, 10)
+	reason, err := traceLoop(context.Background(), s, cfg)
 	if reason != schema.EndError || err == nil {
 		t.Fatalf("traceLoop = %q, %v; want error and a non-nil error", reason, err)
 	}
@@ -220,7 +261,8 @@ func TestDrainQuiet(t *testing.T) {
 	tr := newFakeTracer()
 	tr.setLosses(bpf.Losses{Kernel: 2}, nil)
 	c := testCorrelator(t, dir)
-	reason, err := drainQuiet(context.Background(), tr, c)
+	s, _ := pidSession(t, tr, c, 10)
+	reason, err := drainQuiet(context.Background(), s)
 	if reason != schema.EndTargetsExited || err != nil {
 		t.Fatalf("drainQuiet = %q, %v; want targets_exited", reason, err)
 	}
@@ -233,12 +275,14 @@ func TestDrainQuiet(t *testing.T) {
 	}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if reason, _ := drainQuiet(cancelled, newFakeTracer(), testCorrelator(t, t.TempDir())); reason != schema.EndStop {
+	stopped, _ := pidSession(t, newFakeTracer(), testCorrelator(t, t.TempDir()), 10)
+	if reason, _ := drainQuiet(cancelled, stopped); reason != schema.EndStop {
 		t.Fatalf("signal during drain: %q, want stop", reason)
 	}
 	expired, cancel2 := context.WithTimeout(context.Background(), 0)
 	defer cancel2()
-	if reason, _ := drainQuiet(expired, newFakeTracer(), testCorrelator(t, t.TempDir())); reason != schema.EndDuration {
+	timedOut, _ := pidSession(t, newFakeTracer(), testCorrelator(t, t.TempDir()), 10)
+	if reason, _ := drainQuiet(expired, timedOut); reason != schema.EndDuration {
 		t.Fatalf("duration during drain: %q, want duration", reason)
 	}
 }

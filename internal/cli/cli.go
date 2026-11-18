@@ -1,10 +1,12 @@
 // Package cli implements the iormesh tracer's subcommands (M1 step 10):
 //
-//	iormesh run -pid PID[,PID…] -project NAME -out DIR [-duration 4h] [-ready FILE]
+//	iormesh run (-pid PID[,PID…] | -pattern GLOB | -listen-port N) -project NAME -out DIR [-duration 4h] [-ready FILE]
 //	iormesh normalize [-bracket S] [-tmp PREFIX] [-check expect.json] [-out DIR] TRACEDIR
 //
-// run is the foreground tracer; M4 adds start/stop/status/upgrade/
-// uninstall around it. normalize applies the golden-check library
+// run is the foreground tracer; its target spec (internal/target) is a
+// PID list, an argv/exe glob matched on exec, or a listening port (M2
+// steps 1–3, session.go). M4 adds start/stop/status/upgrade/uninstall
+// around it. normalize applies the golden-check library
 // (internal/normalize) to a written trace.
 package cli
 
@@ -72,7 +74,8 @@ func report(err error, code int, stderr io.Writer) int {
 
 func usage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `usage:
-  iormesh run -pid PID[,PID...] -project NAME -out DIR [-duration 4h] [-ready FILE]
+  iormesh run (-pid PID[,PID...] | -pattern GLOB | -listen-port N) -project NAME -out DIR
+              [-duration 4h] [-ready FILE]
   iormesh normalize [-bracket SCENARIO] [-tmp PREFIX] [-check expect.json] [-out DIR] TRACEDIR
 `)
 }

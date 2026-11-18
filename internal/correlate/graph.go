@@ -36,6 +36,14 @@ func (g *graphBuilder) process(pid uint32, inc uint64, comm string) {
 	g.edge(schema.Edge{Type: schema.EdgeRunsOn, From: id, To: schema.HostNodeID(g.hostID)})
 }
 
+// incarnation adds the app node and its incarnation edge to one process
+// (M2 step 3). The process node itself comes from process().
+func (g *graphBuilder) incarnation(app string, pid uint32, inc uint64) {
+	g.nodes[app] = schema.Node{Type: schema.NodeApp, ID: app}
+	g.edge(schema.Edge{Type: schema.EdgeIncarnation, From: app,
+		To: schema.ProcessNodeID(g.hostID, pid, inc)})
+}
+
 // opened adds a file node and the process's opened edge. The file id uses
 // the path exactly as the open event reports it, so the normalizer's
 // bracket pruning finds the node from the event (internal/normalize).

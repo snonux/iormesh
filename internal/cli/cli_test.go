@@ -10,18 +10,21 @@ import (
 	"time"
 
 	"iormesh/internal/schema"
+	"iormesh/internal/target"
 )
 
-// fakeProcs makes processExists answer from a fixed set for the test.
+// fakeProcs makes processAlive answer from a fixed set for the test, and
+// processStart report one start time for every pid.
 func fakeProcs(t *testing.T, pids ...uint32) {
 	t.Helper()
 	live := map[uint32]bool{}
 	for _, p := range pids {
 		live[p] = true
 	}
-	orig := processExists
-	processExists = func(pid uint32) bool { return live[pid] }
-	t.Cleanup(func() { processExists = orig })
+	origAlive, origStart := processAlive, processStart
+	processAlive = func(pid uint32, _ uint64) bool { return live[pid] }
+	processStart = func(uint32) uint64 { return 1 }
+	t.Cleanup(func() { processAlive, processStart = origAlive, origStart })
 }
 
 func TestParseRunFlags(t *testing.T) {
@@ -31,7 +34,7 @@ func TestParseRunFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.pids) != 2 || cfg.pids[1] != 20 || cfg.project != "shop" ||
+	if len(cfg.spec.PIDs) != 2 || cfg.spec.PIDs[1] != 20 || cfg.project != "shop" ||
 		cfg.duration != 90*time.Second || cfg.ready != "/tmp/r" {
 		t.Fatalf("cfg %+v", cfg)
 	}
@@ -39,27 +42,41 @@ func TestParseRunFlags(t *testing.T) {
 	if err != nil || cfg.duration != defaultDuration {
 		t.Fatalf("default duration: %v, %v", cfg.duration, err)
 	}
+	cfg, err = parseRunFlags([]string{"-pattern", "*RestartApp*", "-project", "p", "-out", "o"}, &bytes.Buffer{})
+	if err != nil || cfg.spec.Mode() != target.ModePattern || cfg.spec.Pattern != "*RestartApp*" {
+		t.Fatalf("pattern: %+v, %v", cfg.spec, err)
+	}
+	cfg, err = parseRunFlags([]string{"-listen-port", "8080", "-project", "p", "-out", "o"}, &bytes.Buffer{})
+	if err != nil || cfg.spec.Mode() != target.ModeListenPort || cfg.spec.ListenPort != 8080 {
+		t.Fatalf("listen port: %+v, %v", cfg.spec, err)
+	}
 }
 
 func TestParseRunFlagsRejects(t *testing.T) {
 	fakeProcs(t, 10)
 	ok := []string{"-project", "p", "-out", "o"}
 	cases := map[string][]string{
-		"missing pid":     ok,
-		"pid not number":  append([]string{"-pid", "abc"}, ok...),
-		"pid zero":        append([]string{"-pid", "0"}, ok...),
-		"pid negative":    append([]string{"-pid", "-5"}, ok...),
-		"pid empty entry": append([]string{"-pid", "10,"}, ok...),
-		"pid twice":       append([]string{"-pid", "10,10"}, ok...),
-		"no such process": append([]string{"-pid", "99"}, ok...),
-		"bad duration":    {"-pid", "10", "-project", "p", "-out", "o", "-duration", "soon"},
-		"zero duration":   {"-pid", "10", "-project", "p", "-out", "o", "-duration", "0s"},
-		"neg duration":    {"-pid", "10", "-project", "p", "-out", "o", "-duration", "-1m"},
-		"missing project": {"-pid", "10", "-out", "o"},
-		"bad project":     {"-pid", "10", "-project", "../etc", "-out", "o"},
-		"missing out":     {"-pid", "10", "-project", "p"},
-		"stray argument":  {"-pid", "10", "-project", "p", "-out", "o", "extra"},
-		"unknown flag":    {"-pid", "10", "-project", "p", "-out", "o", "-bogus"},
+		"no target":          ok,
+		"pid and pattern":    append([]string{"-pid", "10", "-pattern", "*x*"}, ok...),
+		"pattern and port":   append([]string{"-pattern", "*x*", "-listen-port", "80"}, ok...),
+		"pid and port":       append([]string{"-pid", "10", "-listen-port", "80"}, ok...),
+		"pattern too broad":  append([]string{"-pattern", "*"}, ok...),
+		"pattern bad escape": append([]string{"-pattern", `x\`}, ok...),
+		"port too big":       append([]string{"-listen-port", "70000"}, ok...),
+		"pid not number":     append([]string{"-pid", "abc"}, ok...),
+		"pid zero":           append([]string{"-pid", "0"}, ok...),
+		"pid negative":       append([]string{"-pid", "-5"}, ok...),
+		"pid empty entry":    append([]string{"-pid", "10,"}, ok...),
+		"pid twice":          append([]string{"-pid", "10,10"}, ok...),
+		"no such process":    append([]string{"-pid", "99"}, ok...),
+		"bad duration":       {"-pid", "10", "-project", "p", "-out", "o", "-duration", "soon"},
+		"zero duration":      {"-pid", "10", "-project", "p", "-out", "o", "-duration", "0s"},
+		"neg duration":       {"-pid", "10", "-project", "p", "-out", "o", "-duration", "-1m"},
+		"missing project":    {"-pid", "10", "-out", "o"},
+		"bad project":        {"-pid", "10", "-project", "../etc", "-out", "o"},
+		"missing out":        {"-pid", "10", "-project", "p"},
+		"stray argument":     {"-pid", "10", "-project", "p", "-out", "o", "extra"},
+		"unknown flag":       {"-pid", "10", "-project", "p", "-out", "o", "-bogus"},
 	}
 	for name, args := range cases {
 		if _, err := parseRunFlags(args, &bytes.Buffer{}); !errors.Is(err, errUsage) {

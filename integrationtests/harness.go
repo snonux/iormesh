@@ -9,7 +9,8 @@ package integrationtests
 // every probe is attached rather than a line on its output; the result is
 // the trace directory (events.ndjson + graph.json) read strictly, not an
 // .ior.zst recording; no flamegraph, parquet, wrapper or per-PID-args
-// variants yet.
+// variants yet. A run may bind the tracer to a pattern instead of PIDs
+// (Harness.Pattern, M2), which ior has no counterpart of.
 
 import (
 	"errors"
@@ -56,6 +57,11 @@ type Harness struct {
 	// Tmp is every workload's --dir and the normalizer's TmpPrefix, so
 	// the scenario files normalize to "$tmp/…" as goldens declare them.
 	Tmp string
+	// Pattern, when set, binds the tracer to this glob (-pattern, M2
+	// step 2) instead of the workloads' PIDs. A pattern session never
+	// ends by itself (it waits for the app to re-appear, decision #23),
+	// so Trace stops it with SIGINT once the workloads exited.
+	Pattern string
 
 	runs  int
 	procs []*process
@@ -144,6 +150,11 @@ func (h *Harness) Trace(ws ...*Workload) (Run, error) {
 			return run, err
 		}
 	}
+	if h.Pattern != "" {
+		if err := stopPatternTracer(tracer); err != nil {
+			return run, err
+		}
+	}
 	waitErr := tracer.wait(runTimeout)
 	run.Logged = tracer.stderr.String()
 	if waitErr != nil {
@@ -166,15 +177,10 @@ func (h *Harness) Close() {
 // startTracer starts `iormesh run` and returns once it created its ready
 // file, i.e. every probe is attached.
 func (h *Harness) startTracer(ws []*Workload, out string) (*process, error) {
-	var pids []string
-	for _, w := range ws {
-		if !w.Untraced {
-			pids = append(pids, strconv.Itoa(w.PID))
-		}
-	}
 	ready := out + ".ready"
-	cmd := exec.Command(h.TracerBinary, "run", "-pid", strings.Join(pids, ","),
-		"-project", tracerProject, "-out", out, "-duration", tracerDuration, "-ready", ready)
+	args := append([]string{"run"}, h.targetArgs(ws)...)
+	args = append(args, "-project", tracerProject, "-out", out, "-duration", tracerDuration, "-ready", ready)
+	cmd := exec.Command(h.TracerBinary, args...)
 	if h.BpfObject != "" {
 		cmd.Env = append(os.Environ(), bpfObjectOverrideEnv+"="+h.BpfObject)
 	}
@@ -184,6 +190,32 @@ func (h *Harness) startTracer(ws []*Workload, out string) (*process, error) {
 	}
 	h.procs = append(h.procs, tracer)
 	return tracer, waitReady(tracer, ready)
+}
+
+// targetArgs is the tracer's target spec: the pattern, or the PIDs of
+// the traced workloads.
+func (h *Harness) targetArgs(ws []*Workload) []string {
+	if h.Pattern != "" {
+		return []string{"-pattern", h.Pattern}
+	}
+	var pids []string
+	for _, w := range ws {
+		if !w.Untraced {
+			pids = append(pids, strconv.Itoa(w.PID))
+		}
+	}
+	return []string{"-pid", strings.Join(pids, ",")}
+}
+
+// stopPatternTracer stops a pattern session the way a user does, with
+// SIGINT, once its workloads exited: their last records are still in
+// flight, and the tracer drains them before it writes the end event
+// (internal/cli drainStopped).
+func stopPatternTracer(tracer *process) error {
+	if err := tracer.cmd.Process.Signal(os.Interrupt); err != nil {
+		return tracer.failure(fmt.Sprintf("could not be stopped: %v", err))
+	}
+	return nil
 }
 
 // waitReady polls for the tracer's ready file. The tracer exiting first
