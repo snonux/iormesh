@@ -6,7 +6,11 @@ the plan is the source of truth.
 
 - **Self-describing schema** — NDJSON event stream, graph export
   (typed nodes + edges), per-run summary rollup; documented
-  in-repo.
+  in-repo. The v1 *draft* (M1) is the cgo-free `internal/schema`
+  package; it stays a draft until spikes S1 and S2 settle the
+  Java and cross-host fields. Readers are strict: a record with
+  an unknown key, a missing field, another schema version or an
+  unknown event kind is rejected, never half-read.
 - **Parquet bulk files** — the same schema serialized columnar
   for on-server trace files: minute-rotated segments with
   parquet-internal zstd compression, so each one is directly

@@ -110,8 +110,9 @@ func TestControllerIsCgoFree(t *testing.T) {
 ## Shared building blocks
 
 These types are used by every package after M1. They live in
-`internal/schema` (cgo-free) and are the Go form of PLAN.md's
-"Trace output contract".
+`internal/schema` (cgo-free, landed with M1 as the v1 *draft*) and
+are the Go form of PLAN.md's "Trace output contract". The package
+is the reference; the sketches below show its shape.
 
 ### The event envelope
 
@@ -172,15 +173,41 @@ Field notes:
   boot id, FQDN, kernel release and arch.
 - `pid_incarnation` is the task's start time on the boot clock
   (`task->start_boottime` via CO-RE) — unique per PID reuse.
+- `seq` is per host, starts at 1 and has no gaps but explicit
+  `drop` events; 0 means "never assigned" and is rejected.
+- `fd` is the fd the event acts on: the argument, or for open*
+  and accept* the returned one; `-1` (`schema.NoFD`) when there
+  is none — synthetic kinds, a failed open or accept.
 - `fd_gen` counts how often this fd number was (re)created in this
-  process incarnation: +1 on every open/accept/dup landing on it.
+  process incarnation: +1 on *every* fd-creating syscall landing
+  on it — open*, accept*, socket, dup*, pipe, … — so the
+  correlator must see those syscalls even where it emits no
+  event for them. Otherwise a library's open and a later
+  `socket()` on the same number (tcp-loopback's client fd 6)
+  would share one (pid, fd, fd_gen). `0` means the fd predates
+  the trace, or there is no fd.
+- `err` is the errno name and is only set when `ret < 0`.
 - `event` is the syscall name, or one of the synthetic kinds:
   `tcp_state`, `marker`, `drop` (ring-buffer loss), `session`
   (header), `end` (why the trace ended).
 - `attribution` is `"java"` or `"none"` — never empty. A
   `carrier` flag (added with M3) marks I/O that ran for a
   virtual thread, which v1 attributes to the carrier.
-- `Java` and `HTTP` are provisional until S1 reports.
+- `Java` (`thread`, `stack` of method ids; set exactly when
+  `attribution` is `java`) and `HTTP` are provisional until S1
+  reports; `conn_id` is provisional until S2 — M1 assigns it
+  locally to fused loopback pairs.
+- `schema.Sink` (`Event(Event) error`, `Close() error`) is what
+  the correlator writes to; the NDJSON and parquet writers
+  implement it.
+
+Reading is strict: `schema.DecodeEvent` rejects unknown keys
+(at any depth), missing required keys (every field without
+`omitempty`), trailing data, a `schema_version` other than
+`Version`, an unknown `event` kind, a bad `attribution`, and a
+kind missing the argument it cannot be read without (open* →
+`path`, `marker` → `marker`, `tcp_state` → `sock_state`). The
+kind list only grows: M2 appends its syscalls there.
 
 One NDJSON line, as M1 emits it:
 
@@ -205,7 +232,7 @@ type Graph struct {
 }
 
 type Node struct {
-    Type  string            `json:"type"` // host|process|app|file|socket|service
+    Type  string            `json:"type"` // host|process|file|socket, +later
     ID    string            `json:"id"`   // stable, see below
     Attrs map[string]string `json:"attrs,omitempty"`
 }
@@ -221,8 +248,17 @@ type Edge struct {
 
 Node ids are derived, never counters: `host:<host_id>`,
 `proc:<host_id>/<pid>@<pid_incarnation>`, `file:<host_id>/<path>`,
-`conn:<conn_id>`. Slices are sorted before every export; Go map
-iteration order must never reach an output file.
+`conn:<conn_id>`. A `socket` node is one connection — the socket
+pair, not one end — and carries the `conn:` id, so both
+processes of a fused pair point at the same node. Edge shapes:
+`runs_on` process → host, `opened` process → file, `connected`
+process → socket with `state` `fused` (both ends traced and
+joined) or `unresolved` (one end seen); no other edge carries a
+state. Slices are sorted (`Graph.Sort`) before every export; Go
+map iteration order must never reach an output file.
+`schema.DecodeGraph` and `Graph.Validate` reject unsorted or
+duplicate nodes and edges, ids without their type's prefix, and
+edges to missing nodes or nodes of the wrong type.
 
 ### Expectations (the golden format)
 
@@ -573,7 +609,7 @@ type Correlator struct {
     procs  map[uint32]*procState // by tgid
     socks  map[uint64]*sockState // by struct sock address
     seq    uint64
-    out    Sink
+    out    schema.Sink
 }
 
 type procState struct {
@@ -592,12 +628,6 @@ type sockState struct {
     established   uint64     // boot ns
     role          string     // "client" | "server"
 }
-
-// Sink receives finished events in seq order.
-type Sink interface {
-    Event(schema.Event) error
-    Close() error
-}
 ```
 
 Rules to implement, each with a unit test:
@@ -605,7 +635,9 @@ Rules to implement, each with a unit test:
 - syscall enter/exit pairing — lift ior's pair tracker, including
   its restart handling, rather than rewriting it;
 - `openat` exit with `ret >= 0` creates `fds[ret]` with
-  `gen = previous + 1`; `close` removes it;
+  `gen = previous + 1` — as does every other fd-creating
+  syscall, `socket` included (see `fd_gen` above); `close`
+  removes it;
 - `connect` enter and `accept` exit bind fd → `sk`;
   `tcp_state` events fill `sockState`;
 - an `openat` on `/iormesh-marker/…` becomes a `marker` event;
