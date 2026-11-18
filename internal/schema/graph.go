@@ -31,6 +31,11 @@ const (
 	EdgeConnected = "connected" // process → socket; carries a State
 	// EdgeIncarnation links an app to one process incarnation of it.
 	EdgeIncarnation = "incarnation" // app → process
+	// EdgeForked links a traced process to a child it forked (M2 step
+	// 6): the child starts with a copy of the parent's fd table, and the
+	// normalizer's bracket cut gives a child forked inside a bracket that
+	// bracket (internal/normalize, cut).
+	EdgeForked = "forked" // process → process
 )
 
 // Edge states, set on connected edges only. A connection is fused when

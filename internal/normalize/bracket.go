@@ -28,15 +28,18 @@ type span struct{ begin, end int }
 // of scenario, inclusive. The bracket is per process because a
 // multi-process scenario (tcp-loopback's server and client) brackets each
 // role separately; one global window would let the first role's
-// pre-scenario JVM startup in. Events of processes that never began the
-// scenario are dropped. Host-level synthetic events (PID 0: drop, session,
-// end) are kept when they fall inside the union of all brackets, so a
-// ring-buffer gap inside the scenario stays visible.
-func cut(events []schema.Event, scenario string) ([]schema.Event, error) {
+// pre-scenario JVM startup in. A process forked inside a bracket belongs
+// to it (inheritSpans): fd-lifecycle's, pipe-ipc's and signals' child
+// JVMs emit no markers. Events of any other process that never began the
+// scenario are dropped. Host-level synthetic events (PID 0: drop,
+// session, end) are kept when they fall inside the union of all brackets,
+// so a ring-buffer gap inside the scenario stays visible.
+func cut(events []schema.Event, edges []schema.Edge, scenario string) ([]schema.Event, error) {
 	spans, err := findSpans(events, scenario)
 	if err != nil {
 		return nil, err
 	}
+	inheritSpans(spans, events, edges)
 	lo, hi := len(events), -1
 	for _, s := range spans {
 		lo, hi = min(lo, s.begin), max(hi, s.end)
@@ -50,6 +53,52 @@ func cut(events []schema.Event, scenario string) ([]schema.Event, error) {
 		}
 	}
 	return out, nil
+}
+
+// inheritSpans gives a process without a bracket of its own the bracket
+// of the process that forked it (a forked edge, M2 step 6) when the
+// child's first event lies inside that bracket. A child can have no event
+// before its fork, so a first event before the parent's begin marker
+// means it was forked before the scenario began (a helper the harness or
+// the JVM started), and it stays out; one forked inside the bracket but
+// silent until after the end marker contributes nothing either way. The
+// child is then cut to the parent's window: what it does after the
+// parent's end marker is not the scenario's. Grandchildren inherit
+// through their parent, so the loop runs until no span changes — at most
+// once per edge, since every pass that changes something adds a span.
+func inheritSpans(spans map[string]span, events []schema.Event, edges []schema.Edge) {
+	first := firstEvents(events)
+	for changed := true; changed; {
+		changed = false
+		for _, e := range edges {
+			if e.Type != schema.EdgeForked {
+				continue
+			}
+			if _, own := spans[e.To]; own {
+				continue
+			}
+			ps, ok := spans[e.From]
+			i, seen := first[e.To]
+			if ok && seen && i >= ps.begin && i <= ps.end {
+				spans[e.To] = ps
+				changed = true
+			}
+		}
+	}
+}
+
+// firstEvents maps each process node id to the index of its first event.
+func firstEvents(events []schema.Event) map[string]int {
+	first := map[string]int{}
+	for i, e := range events {
+		if e.PID == 0 {
+			continue
+		}
+		if _, ok := first[processKey(e)]; !ok {
+			first[processKey(e)] = i
+		}
+	}
+	return first
 }
 
 // findSpans locates every process's begin and end marker of scenario.

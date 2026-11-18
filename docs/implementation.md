@@ -268,8 +268,9 @@ pair, not one end — and carries the `conn:` id, so both
 processes of a fused pair point at the same node. Edge shapes:
 `runs_on` process → host, `opened` process → file, `connected`
 process → socket with `state` `fused` (both ends traced and
-joined) or `unresolved` (one end seen); no other edge carries a
-state. Slices are sorted (`Graph.Sort`) before every export; Go
+joined) or `unresolved` (one end seen), and from M2 `incarnation`
+app → process and `forked` process → process; no other edge
+carries a state. Slices are sorted (`Graph.Sort`) before every export; Go
 map iteration order must never reach an output file.
 `nodes` and `edges` are always arrays, never `null` (the encoder
 writes `[]` for an empty graph). `schema.DecodeGraph` and
@@ -804,7 +805,12 @@ The bracket is cut *per process*: each process keeps its events
 from its own `<scenario>/begin` marker to its own `/end` marker,
 inclusive — tcp-loopback's server and client bracket themselves
 separately, and one global window would let the first role's
-JVM startup in. Processes without a begin marker are dropped;
+JVM startup in. A process without markers of its own that a
+bracketed process forked inside its bracket (a `forked` edge,
+M2 step 6; its first event lies inside the parent's bracket)
+takes the parent's window, transitively for its own children —
+fd-lifecycle's, pipe-ipc's and signals' child JVMs emit no
+markers. Other processes without a begin marker are dropped;
 host-level events (PID 0: `drop`, `session`, `end`) are kept
 inside the union of the brackets, so a ring-buffer gap in the
 scenario stays visible. No begin marker at all
@@ -853,7 +859,8 @@ bracketed events and their `runs_on` edges, `opened` edges to a
 file such an event of that process opened (`path` or
 `new_path`), `connected` edges to a connection whose `conn_id`
 such an event carries — so the correlator must set `conn_id` on
-a connection's socket events — and the nodes those name.
+a connection's socket events —, `forked` edges whose two
+processes both have bracketed events, and the nodes those name.
 
 Not normalized: event names, comm, flags, byte counts, other
 return values, paths outside `TmpPrefix`, node and edge attrs
@@ -1186,10 +1193,10 @@ scenarios landing first (principle #1).
    appends the file surface to M1's set (decision #7: file on by
    default) — create/delete, rename and links, the stat family,
    truncate, timestamps, chmod/chown, xattrs, positional and
-   vectored I/O, and `dup*`, which `file-attrs` declares. Left out:
-   `access`/`faccessat` (fired at syscall frequency, decision
-   #25), `getdents`, `lseek`, `fsync`, `fcntl` (step 6), mounts,
-   zero-copy (step 7). Each name is a kind in
+   vectored I/O, and `dup*`, which `file-attrs` declares (step 6
+   adds `fcntl`). Left out: `access`/`faccessat` (fired at
+   syscall frequency, decision #25), `getdents`, `lseek`,
+   `fsync`, mounts, zero-copy (step 7). Each name is a kind in
    `internal/schema/kinds_file.go` (a unit test keeps attach list
    and kinds in step). The correlator keys the exit on the enter's
    record shape — fd, open, path or name event (`files.go`):
@@ -1210,7 +1217,7 @@ scenarios landing first (principle #1).
    text stays unresolved; opens through a symlink keep the link's
    path (resolving it needs the inode capture, not attached). The
    dup kinds create the new fd instance with the old one's path;
-   the rest of step 6 stays there. The three goldens load and pass
+   step 6 completes the copy. The three goldens load and pass
    (`TestFileLifecycle`, `TestFileLinks`, `TestFileAttrs`); JDK 25
    issues `statx`, as declared. `file-attrs` now declares
    `fchmodat`'s name resolved against its directory fd, and
@@ -1244,15 +1251,57 @@ scenarios landing first (principle #1).
    `ftruncate` after the rename on `b.dat`, so the golden proves
    it end to end (`TestGoldenFileLifecycle` offline too).
 
-6. **fd lifecycle**: `dup*`, `fcntl(F_DUPFD*)` copy `fdState`
-   (new `gen`); fork copies the parent's table; exec drops
-   `O_CLOEXEC` fds.
+6. **fd lifecycle** (done, task ra4, `internal/correlate/fdtable.go`,
+   modelled on ior's `fdTracker`): each process's fd table is the
+   `procState` maps — generation, path, socket binding and
+   close-on-exec state per fd.
+   - `dup`, `dup2`, `dup3` and `fcntl(F_DUPFD, F_DUPFD_CLOEXEC)`
+     make a new instance of the returned number (new `fd_gen`)
+     naming the old fd's path *and* socket, so the copy's reads
+     and writes join the same file and connection; its
+     close-on-exec state is the call's (`dup3`'s `O_CLOEXEC`,
+     `F_DUPFD_CLOEXEC`). `dup2` onto itself creates nothing.
+     `dup3` reports `flags`, `fcntl` its command as `args.cmd`.
+   - Fork (`task_newtask` with the creator's tgid): the child
+     gets a copy of the parent's table — same instances and
+     generations, one lineage, so the child's next instance of
+     a number continues after the parent's — and the graph a
+     `forked` edge parent → child. A `CLONE_FILES` sharer is
+     copied too (not modelled as shared).
+   - Exec (`sched_process_exec`): fds whose close-on-exec state
+     is set are closed; so are unknown ones (predating the trace
+     or from an untraced syscall), as in ior — keeping an fd the
+     kernel closed would hand its path to the next untraced
+     instance of the number — except unknown stdio 0–2. The
+     state comes from the open and `accept4` flags, `dup3`,
+     `F_DUPFD_CLOEXEC` and `fcntl(F_SETFD)`/`F_GETFD`; the JDK
+     asks `F_GETFD` of every fd it hands a child, so inherited
+     stdio is known.
+   - `close_range` is not attached: the JDK 25 child closes its
+     fds one by one through `close` (strace-measured). A
+     program using it keeps those fds in the table.
+   `fcntl` joins the default attach set; a JVM calls it while
+   setting descriptors up, not per I/O, and the #25 measurement
+   due at step 11 covers it. Unit tests: every copy form, a
+   copy onto an open number and of a socket, fork inheritance
+   and isolation, exec per close-on-exec source
+   (`fdtable_test.go`).
+   Normalizer: a process without markers that a bracketed
+   process forked inside its bracket — by a `forked` edge, with
+   its first event inside the parent's bracket — is cut to the
+   parent's window, transitively (`inheritSpans`,
+   `TestBracketKeepsForkedChildren`); `prune` keeps a `forked`
+   edge when both processes have bracketed events.
    Scenario: `fd-lifecycle` — fd reuse, a `dup` (the JDK's only
    in-process one: `Files.newDirectoryStream`) and stdin/stdout
    inherited by a child JVM (`ProcessBuilder` redirects, `dup2`
-   onto 0 and 1 in the child). The child emits no markers, so
-   `normalize`'s per-process cut must also keep processes forked
-   inside a bracket; today it drops them.
+   onto 0 and 1 in the child, between jspawnhelper's exec and
+   the child JVM's). Its golden now also declares the `forked`
+   edge `$p1` → `$p2`. `TestFdLifecycle` passes it under the
+   real tracer; `TestForkedChildrenKept` shows pipe-ipc's and
+   signals' children kept by the cut (their goldens are step
+   7's). The golden format still has no field for a copy's
+   returned fd: `fd-lifecycle` declares it through its close.
 
 7. **IPC, signals, UDP, epoll**: as families, default-off per S3's
    recommendation.
@@ -1275,7 +1324,8 @@ scenarios landing first (principle #1).
    `bind` and `connect`, and UDP and pipes declare no edges
    because the graph has no edge type for them yet. The children
    of `pipe-ipc` and `signals` emit no markers, like
-   `fd-lifecycle`'s (step 6). The first NIO use inside a bracket
+   `fd-lifecycle`'s; step 6's cut keeps them by their `forked`
+   edges. The first NIO use inside a bracket
    also makes a `socketpair` and throwaway AF_INET6 probe
    sockets; nothing declares them.
    `tcp-ipv6` (and `non-java-peer`) exit with the skip code 3

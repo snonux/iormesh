@@ -48,11 +48,12 @@ import java.util.Set;
  * two dup2s there and not the closes. posix_spawn has been the JDK's
  * default launch mechanism on Linux since JDK 12, so the shape is
  * expected on the Java 21 floor too — expected, not measured. The
- * golden declares no process-lifecycle events or edges for the child —
- * those belong to M2 step 1's fork-exec scenario — only the fd events
- * either side. The child never emits markers of its own: its events
- * count as the scenario's because it was forked inside the parent's
- * bracket, which the normalizer's per-process cut must learn in M2.
+ * golden declares no process-lifecycle events for the child, only the
+ * fd events either side and the forked edge (parent to child) the
+ * correlator records at the fork. The child never emits markers of its
+ * own: its events count as the scenario's because it was forked inside
+ * the parent's bracket, which the normalizer's per-process cut follows
+ * through that forked edge (M2 step 6).
  *
  * A dup event's fd is its argument (fd3): the golden format binds
  * returned fds only for opens and accepts, so the duplicate (fd4) is

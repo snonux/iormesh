@@ -36,8 +36,9 @@ const (
 // Options controls Normalize.
 type Options struct {
 	// Bracket cuts the trace to the events between the begin and end
-	// markers of this scenario (inclusive, per process); empty keeps
-	// everything.
+	// markers of this scenario (inclusive, per process; a process forked
+	// inside a bracket shares it, which the graph's forked edges tell);
+	// empty keeps everything.
 	Bracket string
 	// TmpPrefix is replaced by "$tmp" in every path and file node id;
 	// empty leaves paths alone.
@@ -71,7 +72,7 @@ func Normalize(in Trace, opt Options) (Trace, error) {
 	events := in.Events
 	if opt.Bracket != "" {
 		var err error
-		if events, err = cut(events, opt.Bracket); err != nil {
+		if events, err = cut(events, in.Graph.Edges, opt.Bracket); err != nil {
 			return Trace{}, err
 		}
 	}

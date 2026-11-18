@@ -110,11 +110,21 @@ func (h *Harness) StartUntraced(dir, scenario string, args ...string) (*Workload
 	return w, nil
 }
 
+// StartOptionless starts a scenario that takes no options at all, not
+// even --dir (pipe-ipc, signals): it writes no files.
+func (h *Harness) StartOptionless(scenario string) (*Workload, error) {
+	return h.startWorkload("", scenario, nil)
+}
+
+// startWorkload starts a workload; an empty dir passes no --dir.
 func (h *Harness) startWorkload(dir, scenario string, args []string) (*Workload, error) {
 	startup := filepath.Join(h.Dir, fmt.Sprintf("startup-%d-%s", len(h.procs), scenario))
 	_ = os.Remove(startup) // a stale gate would release it before the tracer attached
 	argv := append([]string{"-jar", h.WorkloadJar, scenario}, args...)
-	cmd := exec.Command("java", append(argv, "--dir", dir)...)
+	if dir != "" {
+		argv = append(argv, "--dir", dir)
+	}
+	cmd := exec.Command("java", argv...)
 	cmd.Env = append(os.Environ(), workloadStartupFileEnv+"="+startup)
 	proc, err := startProcess("workload "+scenario, cmd)
 	if err != nil {

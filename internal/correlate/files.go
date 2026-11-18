@@ -1,6 +1,8 @@
 package correlate
 
 import (
+	"golang.org/x/sys/unix"
+
 	"iormesh/internal/schema"
 	"iormesh/internal/types"
 )
@@ -26,13 +28,6 @@ func (c *Correlator) enterName(r *types.NameEvent) {
 		pid: r.Pid, fd: r.Olddirfd, newDirfd: r.Newdirfd,
 		path: types.StringValue(r.Oldname[:]), newPath: types.StringValue(r.Newname[:]),
 		pathKnown: r.OldnameStatus != types.PATH_READ_FAILED, flags: int32(r.Flags)}
-}
-
-// enterDup3 is dup3's own record layout; only its old fd matters here.
-func (c *Correlator) enterDup3(r *types.Dup3Event) {
-	c.advance(r.Time)
-	c.enters[r.Tid] = enter{name: r.TraceId.Name(), shape: shapeFd, time: r.Time,
-		pid: r.Pid, fd: r.Fd}
 }
 
 // pathDetail fills a path kind: the dirfd as fd (none for AT_FDCWD), the
@@ -86,7 +81,8 @@ func (c *Correlator) nameDetail(ev *schema.Event, p *procState, en enter, ret in
 
 // fdFileDetail fills the fd kinds of the file surface: bytes for the data
 // kinds, the fd's current path for the metadata ones (so an ftruncate
-// after a rename names the new file), and the new descriptor of a dup.
+// after a rename names the new file), and the fd lifecycle of dup* and
+// fcntl (fdtable.go).
 // read and write never get the path: they are the hot kinds, and their fd
 // instance already joins to the open that named it (decision #25).
 func fdFileDetail(ev *schema.Event, p *procState, en enter, ret int64) {
@@ -103,23 +99,15 @@ func fdFileDetail(ev *schema.Event, p *procState, en enter, ret int64) {
 			path := fp.path
 			ev.Args.Path = &path
 		}
-	case schema.KindDup, schema.KindDup2, schema.KindDup3:
-		dupDetail(p, en.fd, ret)
-	}
-}
-
-// dupDetail registers a dup's new descriptor as a new instance naming the
-// old one's file. dup2 onto itself returns the same fd and creates
-// nothing. The socket binding is not copied: fd inheritance in full (dup
-// of sockets, fork, exec, fcntl(F_DUPFD)) is M2 step 6.
-func dupDetail(p *procState, oldfd int32, ret int64) {
-	if ret < 0 || int32(ret) == oldfd {
-		return
-	}
-	fp, ok := p.paths[oldfd]
-	p.create(int32(ret), false)
-	if ok {
-		p.paths[int32(ret)] = fp
+	case schema.KindDup, schema.KindDup2:
+		// Neither has a flags argument: the copy's close-on-exec is clear.
+		dupDetail(p, en.fd, ret, false)
+	case schema.KindDup3:
+		flags := uint32(en.flags)
+		ev.Args.Flags = &flags
+		dupDetail(p, en.fd, ret, flags&unix.O_CLOEXEC != 0)
+	case schema.KindFcntl:
+		fcntlDetail(ev, p, en, ret)
 	}
 }
 

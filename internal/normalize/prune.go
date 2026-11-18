@@ -17,12 +17,17 @@ import (
 // incarnation edge (app → process, M2 step 3) is kept when its process
 // has events in the bracket: the app node never has events of its own, so
 // testing From like the other edges would always drop it, and restart's
-// golden could never pass.
+// golden could never pass. A forked edge (M2 step 6) is kept when both
+// processes have events in the bracket: a child the cut left out must not
+// bring its node back.
 func prune(g schema.Graph, events []schema.Event) schema.Graph {
 	seen := touched(events)
 	keep := func(e schema.Edge) bool {
-		if e.Type == schema.EdgeIncarnation {
+		switch e.Type {
+		case schema.EdgeIncarnation:
 			return seen[e.To]
+		case schema.EdgeForked:
+			return seen[e.From] && seen[e.To]
 		}
 		if !seen[e.From] {
 			return false

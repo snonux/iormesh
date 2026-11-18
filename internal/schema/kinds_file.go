@@ -91,12 +91,17 @@ const (
 	KindPreadv2  = "preadv2"
 	KindPwritev2 = "pwritev2"
 
-	// Descriptor copies: fd is the old descriptor, ret the new one. The
+	// Descriptor copies: fd is the old descriptor, ret the new one; the
+	// new instance names the old one's file and socket (M2 step 6). The
 	// file-attrs scenario needs dup (its SecureDirectoryStream dups the
-	// directory fd); fd inheritance and fcntl(F_DUPFD) are M2 step 6.
+	// directory fd). dup3 carries its flags (O_CLOEXEC).
 	KindDup  = "dup"
 	KindDup2 = "dup2"
 	KindDup3 = "dup3"
+	// KindFcntl carries args.cmd. Its F_DUPFD and F_DUPFD_CLOEXEC forms are
+	// copies like dup (ret is the new fd); F_SETFD and F_GETFD tell the
+	// correlator an fd's close-on-exec state, which exec needs (M2 step 6).
+	KindFcntl = "fcntl"
 )
 
 // fileKind reports whether kind is one of the M2 file-surface kinds.
@@ -116,7 +121,7 @@ func fileKind(kind string) bool {
 		KindRemovexattr, KindLremovexattr, KindFremovexattr,
 		KindPread64, KindPwrite64, KindReadv, KindWritev,
 		KindPreadv, KindPwritev, KindPreadv2, KindPwritev2,
-		KindDup, KindDup2, KindDup3:
+		KindDup, KindDup2, KindDup3, KindFcntl:
 		return true
 	}
 	return false

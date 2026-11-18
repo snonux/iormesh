@@ -129,6 +129,7 @@ type Args struct {
 	Path       *string `json:"path,omitempty" parquet:"path,optional"`
 	NewPath    *string `json:"new_path,omitempty" parquet:"new_path,optional"`
 	Flags      *uint32 `json:"flags,omitempty" parquet:"flags,optional"`
+	Cmd        *uint32 `json:"cmd,omitempty" parquet:"cmd,optional"` // fcntl's raw command
 	Offset     *int64  `json:"offset,omitempty" parquet:"offset,optional"`
 	LocalAddr  *string `json:"local_addr,omitempty" parquet:"local_addr,optional"`
 	LocalPort  *uint16 `json:"local_port,omitempty" parquet:"local_port,optional"`

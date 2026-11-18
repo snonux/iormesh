@@ -28,7 +28,8 @@ const (
 // enter is a syscall enter waiting for its exit on the same thread. A
 // thread runs one syscall at a time, so the tid alone keys it. fd is the
 // fd argument, or the dirfd of the path shapes; newDirfd and newPath are
-// the second name of a name_event.
+// the second name of a name_event. flags holds the syscall's flags (open,
+// accept4, dup3) or fcntl's command, arg fcntl's third argument.
 type enter struct {
 	name     string // syscall name, e.g. "openat"
 	shape    shape
@@ -43,6 +44,7 @@ type enter struct {
 	// itself".
 	pathKnown bool
 	flags     int32
+	arg       uint64
 }
 
 func (c *Correlator) enterOpen(r *types.OpenEvent) {
@@ -87,7 +89,8 @@ func (c *Correlator) enterFd(r *types.FdEvent) {
 func (c *Correlator) accept(r *types.AcceptEvent) {
 	c.advance(r.Time)
 	if r.EventType == types.ENTER_ACCEPT_EVENT {
-		c.enters[r.Tid] = enter{name: r.TraceId.Name(), time: r.Time, pid: r.Pid, fd: schema.NoFD}
+		c.enters[r.Tid] = enter{name: r.TraceId.Name(), time: r.Time, pid: r.Pid,
+			fd: schema.NoFD, flags: r.Flags}
 		return
 	}
 	c.exit(r.Tid, r.TraceId.Name(), r.Ret, r.Time)
@@ -156,7 +159,7 @@ func (c *Correlator) syscallDetail(ev *schema.Event, en enter, ret int64) (*sock
 	}
 	switch en.name {
 	case schema.KindAccept, schema.KindAccept4:
-		return c.acceptDetail(ev, p, ret), true
+		return c.acceptDetail(ev, p, en, ret), true
 	}
 	ev.FD, ev.FDGen = en.fd, p.use(en.fd)
 	sock := p.sockOf[en.fd]
@@ -201,19 +204,23 @@ func (c *Correlator) openDetail(ev *schema.Event, p *procState, en enter, ret in
 	ev.Args.Path, ev.Args.Flags = &path, &flags
 	if ret >= 0 {
 		p.setPath(int32(ret), path)
+		p.openCloexec(int32(ret), en.flags)
 		c.graph.opened(ev.PID, ev.PIDInc, path)
 	}
 	return true
 }
 
 // acceptDetail registers the accepted fd. Its socket was bound by the
-// snapshot record the BPF side emits right before the accept exit.
-func (c *Correlator) acceptDetail(ev *schema.Event, p *procState, ret int64) *sockState {
+// snapshot record the BPF side emits right before the accept exit; its
+// close-on-exec state is accept4's SOCK_CLOEXEC (accept's enter flags are
+// 0).
+func (c *Correlator) acceptDetail(ev *schema.Event, p *procState, en enter, ret int64) *sockState {
 	if ret < 0 {
 		return nil
 	}
 	fd := int32(ret)
 	ev.FD, ev.FDGen = fd, p.create(fd, true)
+	p.openCloexec(fd, en.flags)
 	sock := p.sockOf[fd]
 	sock.fillArgs(&ev.Args)
 	return sock

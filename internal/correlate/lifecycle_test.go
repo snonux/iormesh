@@ -2,6 +2,7 @@ package correlate
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	"iormesh/internal/schema"
@@ -71,8 +72,9 @@ func TestIncarnationGapDrop(t *testing.T) {
 }
 
 // TestNewTaskRegistersChild: a forked child is registered at its
-// task_newtask record (incarnation read then), a new thread is not a
-// process, and a PID reused by a new child is a new incarnation.
+// task_newtask record (incarnation read then) with a forked edge from its
+// creator, a new thread is not a process, and a PID reused by a new child
+// is a new incarnation.
 func TestNewTaskRegistersChild(t *testing.T) {
 	c, _ := newTest(t)
 	info := map[uint32]uint64{50: 7}
@@ -94,9 +96,15 @@ func TestNewTaskRegistersChild(t *testing.T) {
 			procs = append(procs, n.ID)
 		}
 	}
-	want := []string{schema.ProcessNodeID("h1", 50, 7), schema.ProcessNodeID("h1", 50, 9)}
-	if len(procs) != 2 || procs[0] != want[0] || procs[1] != want[1] {
+	parent := schema.ProcessNodeID("h1", 1, 0)
+	want := []string{parent, schema.ProcessNodeID("h1", 50, 7), schema.ProcessNodeID("h1", 50, 9)}
+	if !slices.Equal(procs, want) {
 		t.Fatalf("process nodes %v, want %v", procs, want)
+	}
+	for _, child := range want[1:] {
+		if !hasEdge(c.Graph(), schema.EdgeForked, parent, child, "") {
+			t.Errorf("no forked edge %s → %s", parent, child)
+		}
 	}
 }
 

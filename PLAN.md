@@ -315,8 +315,11 @@ Scenario notes:
   syscalls strace shows on the host JDK, as JDK-only Java can
   issue them (no `fchmod`, and `dup` only via a directory
   stream). `fd-lifecycle`'s child JVM brackets nothing itself:
-  a process forked inside a bracket belongs to it, so the
-  normalizer's per-process cut must keep such children.
+  a process forked inside a bracket belongs to it. The
+  correlator records each fork of a traced process as a
+  `forked` graph edge (parent → child), and the normalizer's
+  per-process cut gives a marker-less child whose first event
+  lies inside its parent's bracket that bracket.
   `file-links`' lstat is `statx` on JDK 22+ (measured on 25
   and 27-ea); JDK 21 issues `newfstatat` instead (21 itself
   unmeasured), so the golden holds for JDK 22+ only.

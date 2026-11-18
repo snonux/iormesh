@@ -30,6 +30,9 @@ type procState struct {
 	// a dup of one) named, rewritten by renames (paths.go). It names the
 	// dirfd of a relative *at call and the file of an fd metadata event.
 	paths map[int32]fdPath
+	// cloexec is the close-on-exec state of the fd instances the trace
+	// knows it of (fdtable.go): true set, false clear, absent unknown.
+	cloexec map[int32]bool
 }
 
 func (c *Correlator) proc(pid uint32) *procState {
@@ -39,7 +42,7 @@ func (c *Correlator) proc(pid uint32) *procState {
 	comm, inc := c.cfg.ProcInfo(pid)
 	p := &procState{inc: inc, comm: comm, fds: map[int32]uint32{},
 		lastGen: map[int32]uint32{}, sockOf: map[int32]*sockState{},
-		paths: map[int32]fdPath{}}
+		paths: map[int32]fdPath{}, cloexec: map[int32]bool{}}
 	c.procs[pid] = p
 	c.graph.process(pid, inc, comm)
 	return p
@@ -48,8 +51,9 @@ func (c *Correlator) proc(pid uint32) *procState {
 // create registers a new fd instance returned by a traced syscall and
 // returns its generation. A non-socket creation (open, dup) drops any
 // stale socket binding of the number; accept keeps the one its snapshot
-// record set just before. The new instance has no path until its creator
-// sets one: the number's old path belonged to the instance it replaces.
+// record set just before. The new instance has no path and no known
+// close-on-exec state until its creator sets them: the number's old ones
+// belonged to the instance it replaces.
 func (p *procState) create(fd int32, socket bool) uint32 {
 	gen := p.lastGen[fd] + 1
 	p.lastGen[fd] = gen
@@ -58,6 +62,7 @@ func (p *procState) create(fd int32, socket bool) uint32 {
 		delete(p.sockOf, fd)
 	}
 	delete(p.paths, fd)
+	delete(p.cloexec, fd)
 	return gen
 }
 
@@ -110,10 +115,13 @@ func (p *procState) sockGen(fd int32, s *sockState, first, snapshot bool) uint32
 	return s.fdGen
 }
 
+// close forgets a released fd instance. lastGen keeps the number's
+// generation, so whatever reuses the number is a new instance.
 func (p *procState) close(fd int32) {
 	delete(p.fds, fd)
 	delete(p.sockOf, fd)
 	delete(p.paths, fd)
+	delete(p.cloexec, fd)
 }
 
 // ReadProcInfo reads comm and start time from /proc. The start time has

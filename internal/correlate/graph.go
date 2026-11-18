@@ -44,6 +44,14 @@ func (g *graphBuilder) incarnation(app string, pid uint32, inc uint64) {
 		To: schema.ProcessNodeID(g.hostID, pid, inc)})
 }
 
+// forked adds the edge from a parent process to the child it forked (M2
+// step 6). Both process nodes exist: newTask registered both.
+func (g *graphBuilder) forked(parent uint32, parentInc uint64, child uint32, childInc uint64) {
+	g.edge(schema.Edge{Type: schema.EdgeForked,
+		From: schema.ProcessNodeID(g.hostID, parent, parentInc),
+		To:   schema.ProcessNodeID(g.hostID, child, childInc)})
+}
+
 // opened adds a file node and the process's opened edge. The file id uses
 // the path exactly as the open event reports it, so the normalizer's
 // bracket pruning finds the node from the event (internal/normalize).

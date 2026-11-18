@@ -47,6 +47,7 @@
     "args": {"path": "$tmp/fd-lifecycle.d"}}
  ],
  "edges": [
+   {"type": "forked", "from": "$p1", "to": "$p2"},
    {"type": "opened", "from": "$p1",
     "to": "file:$h1:$tmp/fd-lifecycle.d/first.dat"},
    {"type": "opened", "from": "$p1",

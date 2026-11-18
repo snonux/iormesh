@@ -61,7 +61,7 @@ Required fields are always present; a zero is a real zero.
 | `comm` | string | process name |
 | `event` | string | the event kind, below |
 | `fd` | int | descriptor acted on — the argument, or the returned one for opens and accepts; `-1` when none |
-| `fd_gen` | int | how often this fd number was (re)created in this incarnation; `0` = predates the trace or no fd |
+| `fd_gen` | int | how often this fd number was (re)created in this incarnation; `0` = predates the trace or no fd. A forked child continues its parent's count (it inherits the parent's instances) |
 | `ret` | int | the syscall's return value |
 | `err` | string, optional | errno name (`ENOENT`), only when `ret < 0` |
 | `latency_ns` | int | exit minus enter |
@@ -76,6 +76,16 @@ Required fields are always present; a zero is a real zero.
 `(pid, pid_incarnation, fd, fd_gen)` names one fd instance, even
 when a library's open and a later socket land on the same number.
 
+**fd lifecycle** (M2 step 6): a copy (`dup*`,
+`fcntl(F_DUPFD*)`) is a new instance of the returned number that
+names the old fd's file and connection; a forked child starts
+with its parent's fds as they were (same `fd_gen`) and gets a
+`forked` edge; an exec closes the close-on-exec fds — and those
+whose state the trace never learned, except stdio — so a number
+the new program reuses is a new instance. The state comes from
+the open and `accept4` flags, `dup3`, `F_DUPFD_CLOEXEC` and
+`fcntl(F_SETFD/F_GETFD)`. `close_range` is not traced.
+
 ### Args
 
 Every argument is its own optional field — one nullable parquet
@@ -85,7 +95,8 @@ column each, never a blob.
 |-----|--------|
 | `path` | opens and `creat` (required); the M2 path kinds; the old name of the rename/link family (a symlink's text); the fd metadata kinds (the fd's current path) |
 | `new_path` | rename/link family (M2): the new name |
-| `flags` | opens: the raw open flags; the path kinds whose syscall has a flags argument (`statx`, `newfstatat`, `utimensat`, `fchownat`, `fchmodat2`, `linkat`) |
+| `flags` | opens: the raw open flags; the path kinds whose syscall has a flags argument (`statx`, `newfstatat`, `utimensat`, `fchownat`, `fchmodat2`, `linkat`); `dup3` |
+| `cmd` | `fcntl` (M2): the raw command (`F_DUPFD` 0, `F_GETFD` 1, `F_SETFD` 2, `F_DUPFD_CLOEXEC` 1030, …) |
 | `offset` | positional I/O (planned, not set yet) |
 | `local_addr`, `local_port` | socket events, when known |
 | `remote_addr`, `remote_port` | socket events, when known |
@@ -134,7 +145,8 @@ Default-on (decision #7), each named after its kernel tracepoint
 | name | `rename`, `renameat`, `renameat2`, `link`, `linkat`, `symlink`, `symlinkat` | `-1` | `path` (old), `new_path` |
 | fd | `newfstat`, `ftruncate`, `fallocate`, `fchmod`, `fchown`, `fsetxattr`, `fgetxattr`, `flistxattr`, `fremovexattr` | the fd | `path`: the fd's current path, except on `newfstat` |
 | data | `pread64`, `pwrite64`, `readv`, `writev`, `preadv`, `pwritev`, `preadv2`, `pwritev2` | the fd | `bytes` as for `read`/`write`; no path |
-| dup | `dup`, `dup2`, `dup3` | the old fd; `ret` is the new one | — |
+| dup | `dup`, `dup2`, `dup3` | the old fd; `ret` is the new one | `flags` on `dup3` |
+| fcntl | `fcntl` | the fd | `cmd`; for `F_DUPFD`/`F_DUPFD_CLOEXEC` `ret` is the new fd |
 
 `creat` is an open: `fd` is the returned descriptor, `flags`
 `O_CREAT|O_WRONLY|O_TRUNC`. A relative path is resolved against
@@ -243,6 +255,7 @@ stays gap-free.
 | `opened` | process → file: opened under that name, or held open while a rename moved it there | — |
 | `connected` | process → socket | `fused` (both ends traced and joined) or `unresolved` |
 | `incarnation` | app → process | — |
+| `forked` | process → process: a traced process forked the child (M2) | — |
 
 Node attributes stay minimal (`comm` on processes): raw pids or
 ports in attributes would survive normalization and make two runs'

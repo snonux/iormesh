@@ -1,7 +1,8 @@
 // Package correlate turns the raw BPF records of internal/bpf into schema
 // events and the per-host graph (docs/implementation.md, M1 step 6). It
 // keeps pid→fd→path state that follows renames (M2 step 5, paths.go) and
-// pid→fd→socket state, pairs syscall enters with their exits, turns
+// pid→fd→socket state through dup, fork and exec (M2 step 6, fdtable.go),
+// pairs syscall enters with their exits, turns
 // marker opens into marker events and fuses the two ends of a loopback
 // connection into one conn id. Around the syscall
 // events it numbers the host-level ones the caller reports: the session
@@ -83,10 +84,11 @@ func New(cfg Config) *Correlator {
 }
 
 // Handle consumes one record from bpf.Tracer.Records: syscall records
-// (M1's, and the path, name and dup3 enters of M2's file surface), TCP
-// state records and the process lifecycle records of M2 step 1 (new
-// processes, exits). Other record types are ignored; the exec records of a
-// pattern session are the caller's to judge (Incarnation). The error is the sink's, or
+// (M1's, and the path, name, dup3 and fcntl enters of M2's file surface),
+// TCP state records and the process lifecycle records of M2 steps 1 and 6
+// (new processes, execs, exits). Other record types are ignored; the
+// exec_argv records of a pattern session are the caller's to judge
+// (Incarnation). The error is the sink's, or
 // ErrEnded after End.
 func (c *Correlator) Handle(rec any) error {
 	if c.ended {
@@ -105,6 +107,8 @@ func (c *Correlator) Handle(rec any) error {
 		c.enterName(r)
 	case *types.Dup3Event:
 		c.enterDup3(r)
+	case *types.FcntlEvent:
+		c.enterFcntl(r)
 	case *types.AcceptEvent:
 		c.accept(r)
 	case *types.RetEvent:
@@ -115,6 +119,8 @@ func (c *Correlator) Handle(rec any) error {
 		c.newTask(r)
 	case *types.ProcessExitEvent:
 		c.exitTask(r)
+	case *types.ProcessExecEvent:
+		c.execTask(r)
 	default:
 		return nil
 	}

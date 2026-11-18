@@ -14,15 +14,16 @@ const cloneThread = 0x00010000
 // incarnation is read from /proc before a short-lived child can vanish.
 // A new pid is a new process by definition, so any state the correlator
 // still holds under that pid belongs to a predecessor that exited (or
-// whose records were lost), and is replaced. New threads need nothing: they share their
-// process's state.
+// whose records were lost), and is replaced — by a copy of its parent's
+// fd table (M2 step 6, forked). New threads need nothing: they share
+// their process's state.
 func (c *Correlator) newTask(r *types.TaskNewtaskEvent) {
 	c.advance(r.Time)
 	if r.CloneFlags&cloneThread != 0 || r.ScopeFlags != 0 {
 		return
 	}
 	delete(c.procs, r.Pid)
-	c.proc(r.Pid)
+	c.forked(r.CreatorPid, c.proc(r.Pid), r.Pid)
 }
 
 // exitTask forgets a dead thread's pending enter: its syscall never

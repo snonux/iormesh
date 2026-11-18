@@ -33,7 +33,9 @@ inodes differ on every run. So validation is subset, not
 equality:
 
 1. **Cut to the marker bracket**: every scenario emits a begin
-   and an end marker; nothing outside them is asserted on.
+   and an end marker; nothing outside them is asserted on. A
+   child the scenario forks inside its bracket shares it (the
+   graph's `forked` edge says whose child it is).
 2. **Normalize** what is left: run-specific values become
    symbolic ids, in order of first appearance inside the
    bracket, so startup noise never shifts them.
@@ -113,6 +115,8 @@ The tests:
 | `TestFileLifecycle` | file-lifecycle golden, incl. `ftruncate` on the renamed path (rename-aware fd paths); mutated goldens fail |
 | `TestFileLinks` | file-links golden (symlink text unresolved, no-follow `statx`, hard link); mutated goldens fail |
 | `TestFileAttrs` | file-attrs golden (chmod/chown by path and fd, dirfd-resolved `fchmodat`, `dup`, f*xattr); mutated goldens fail |
+| `TestFdLifecycle` | fd-lifecycle golden: fd reuse, the `dup`'s copy as its own instance, the child JVM kept through its `forked` edge with its `dup2`s and stdio read/write; only the target and its forked children appear; mutated goldens fail |
+| `TestForkedChildrenKept` | pipe-ipc's and signals' marker-less child JVMs survive the bracket cut (their goldens wait for M2 step 7) |
 | `TestUntracedProcessStaysOut` | a released but untraced twin leaves no event and no node |
 | `TestSecondRunNormalizesIdentically` | two runs of each scenario, normalized and bracketed, are equal (tcp_state: see below) |
 
