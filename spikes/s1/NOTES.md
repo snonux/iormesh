@@ -261,9 +261,127 @@ Known by construction (not exercised here):
   libj2pkcs11 — add globs if they matter.
 - Virtual threads: deferred (PLAN.md "Deferred — not in v1").
 
-## Not done here (xa4)
+## Not done in wa4 (picked up by xa4 below)
 
 Uprobe cost per I/O op, agent cost and stack-walk share (S3's
 syscall-burst), transport (#27), attach mode (#2: only `-javaagent`
 was used), JDK builds with stripped or static libraries, and running
 the agent on a real JDK 21.
+
+# xa4 — clocks, transport, attach, cost
+
+Write-up: `docs/spikes/s1-java-join.md`. Raw outputs: `results/`.
+Host shared with sibling workers: loadavg 9–34 during these runs.
+
+New files:
+
+| File | What |
+|------|------|
+| `clock/` | `ClockProbe.java` + `clock.bt` + `clock.py` (`clock.sh` runs them); `offset.c` |
+| `agent/bridge/.../Ring.java` | the mmap spool writer (decision #27) |
+| `spoolread.py` | tracer-side reader: drain, zero, advance tail; `--recs` for agentjoin |
+| `spool.sh` | burst in ring mode with a concurrent reader (ring laps) |
+| `cost.sh`, `cost.bt.in`, `hooks-burst.txt`, `costper.py` | cost matrix |
+| `attach/` | `Attach.java` (jdk.attach) + `attach.sh` cases |
+
+Agent args grew a mode: `<bridge.jar>,<prefix>[,mem|ring[:k]|file|noop[,nostack]]`
+(`mem` stays the default, as in wa4); `Agent-Class` + `agentmain`
+added for live attach; `Hooks.warmUp()` loads the hot path in
+`premain`.
+
+## Clocks
+
+- `offset.c` (user space, mono–boot–mono, midpoint): the offset is a
+  constant between suspends; p1–p99 spread 2 ns on an idle-ish host
+  (10 ns at load 25), read gap ~30 ns.
+- `clock.sh` (20 000 nanoTime-bracketed 3-byte writes to /dev/null,
+  bracket p50 ~1.5 µs, min ~310 ns), 3 runs:
+  - kernel stamp `nsecs(monotonic)`: 0/60 000 outside, min margin
+    146–164 ns;
+  - `nsecs(boot)` minus the BEGIN `C` pair (wa4's method): **14/20 000
+    outside in run 1** (min margin −14 ns), 0 in runs 2–3;
+  - `nsecs(boot)` minus the `offset.c` midpoint: 0 outside, residual
+    boot−offset−mono ≈ 16 ns (the second helper call).
+  - The BEGIN pair is biased by 74–162 ns: two helper calls in
+    sequence, not a moving offset.
+- So: join in CLOCK_MONOTONIC (`bpf_ktime_get_ns`), or convert with a
+  user-space midpoint offset; never a single in-BPF pair. `join.bt.in`
+  now stamps E/X/P with `nsecs(monotonic)` and prints `CLOCK
+  monotonic`; `agentjoin.py` then uses agent times unconverted.
+
+## Transport (#27)
+
+- Ring mode: `syscall-burst --ops 200000`, 256 MiB ring: 400 120
+  brackets + 28 stacks + 3 threads, 0 dropped.
+- 64 KiB ring, no reader: 1 149 brackets kept, 398 977 dropped
+  (19 152 480 bytes) — every record delivered or counted.
+- Concurrent Python reader (`spool.sh`), rings 2^16 / 2^20 / 2^24:
+  delivered + dropped = 400 120 in each (1 152 / 1 884 / 141 dropped;
+  the Python reader is slow, a Go reader will do better).
+- Agent syscalls inside the traced window (run.sh + ring, all three
+  JVMs): none. Ring setup (open, ftruncate, mmap) and each thread's
+  `readlink(/proc/thread-self)` ran before bpftrace attached (gated
+  workload); a thread born later does one readlink (marked
+  `UnixNativeDispatcher_readlink0`).
+
+## Exit re-run (ring transport, monotonic join)
+
+`JAVA_OPTS='-javaagent:A/agent.jar=A/bridge.jar,{out},ring' run.sh`,
+then `spoolread.py ring OUT/x.spool --recs OUT/x.recs`, `agentjoin.py`:
+file-basic 14/14 declared-kind joined, 7 with a workload frame (6/6
+expect.json + unlink); tcp server 21/34 joined, 13 with a workload
+frame (11/11 + unlink + listener close); client 23/36, 11 (10/10 +
+unlink); 0 hook/mark mismatches; smallest window gap 6.6–9.6 µs. The
+unjoined ones are wa4's list (libnio init, libextnet load + probes).
+
+## Attach (#2)
+
+`attach.sh JAVA_HOME AGENTDIR OUT CASE` on file-basic (gated):
+
+| case | JDK 25.0.4.1 | JDK 27-ea |
+|------|--------------|-----------|
+| `-javaagent` | silent (only the CDS bootstrap-append note); 128 brackets incl. startup | — |
+| live attach, no flag | works; 4-line JEP 451 WARNING on target stderr; 31 brackets | same warning |
+| `-XX:+EnableDynamicAgentLoading` | works, silent | — |
+| `-XX:-EnableDynamicAgentLoading` | `AgentLoadException: Dynamic agent loading is not enabled` | — |
+| attacher root, target user | works, warning as above | — |
+
+attach ~145–175 ms, loadAgent (retransform 17 hook classes) 89–128 ms.
+The warning text: "A Java agent has been loaded dynamically (…)",
+"If a serviceability tool is in use, please run with
+-XX:+EnableDynamicAgentLoading to hide this warning", "…
+-Djdk.instrument.traceUsage…", "Dynamic loading of agents will be
+disallowed by default in a future release". No JDK 21 runtime: the
+same JEP 451 behaviour is specified for 21.
+
+## Cost
+
+`cost.sh` modes, `syscall-burst` 1 thread (one op = FileOutputStream
+.write(int) + FileInputStream.read(), two hooked natives). Wall ns/op
+swung 1.9–12 µs untraced at loadavg 15–34 (`results/cost-wall-200k.txt`),
+so the numbers below are CPU (user+sys of the JVM) differences between
+100k and 500k ops, medians of 3 (`results/costper.txt`, loadavg 9–13):
+
+| mode | CPU ns/op | over untraced |
+|------|-----------|---------------|
+| untraced | 3 152 | — |
+| sys (raw_syscalls tracepoint + map lookup) | 3 775 | +622 |
+| uprobe (sys + uprobe/uretprobe marks) | 10 150 | +6 998 |
+| agent noop (rewritten bodies, empty hooks) | 3 625 | +472 |
+| agent ring, no stack | 3 775 | +622 |
+| agent ring + stack (StackWalker, 10 frames) | 19 998 | +16 845 |
+| agent file spool + stack | 34 272 | +31 120 (noisy) |
+| agent ring + stack + uprobes | 35 325 | +32 172 |
+
+Per hooked call: uprobe pair ≈ 3.2–3.5 µs (the uprobe trap, the
+uretprobe and its syscall-335 trampoline, two map ops); agent bracket
+without stack ≈ 0.3 µs; the stack walk ≈ 8 µs — ~95 % of the agent's
+cost. The idle-host baseline (perf/burst-d34e2e2.txt) is 0.76 µs/op
+wall untraced, so absolute numbers here are inflated by contention;
+the ratios are the finding. Note `@sys[1]` counts 2 marked "syscalls"
+per native call: the real one and nr 335.
+
+Uprobes sit on the library inode: they trap in *every* process that
+maps that libjava/libnio/libnet (all JVMs of that JDK install on the
+host) and filter by PID in BPF — a host-wide tax for decision #25.
+

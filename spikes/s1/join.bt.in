@@ -19,10 +19,13 @@
  *   X <ns> <tid> <nr> <ret>                          syscall exit
  *   P <ns> <tid> <nr> <path>                         path of open/unlink
  *   C <boot_ns> <mono_ns>                            clock pair, BEGIN+END
- * <ns> is bpftrace's nsecs, which is CLOCK_BOOTTIME (bpf_ktime_get_boot_ns),
- * like ior's records; the agent stamps CLOCK_MONOTONIC (System.nanoTime),
- * so the C lines give agentjoin.py the boot - monotonic offset (it moves
- * only across a suspend) to convert with.
+ *   CLOCK monotonic                                  <ns> domain, at BEGIN
+ * <ns> is nsecs(monotonic) — bpf_ktime_get_ns, CLOCK_MONOTONIC, the clock
+ * System.nanoTime() reads — so agentjoin.py compares agent brackets with
+ * no conversion (task xa4). wa4 used nsecs (CLOCK_BOOTTIME, like ior's
+ * records) shifted by the BEGIN C pair, but spikes/s1/clock showed that
+ * pair is biased by 74-162 ns (two helper calls in sequence), enough to
+ * push stamps out of tight brackets. The C lines stay for comparison.
  * <mark> is the innermost Java_* function active on the TID, or "-".
  */
 
@@ -46,11 +49,11 @@ tracepoint:raw_syscalls:sys_enter
 {
 	$d = @depth[tid];
 	if ($d > 0) {
-		printf("E\t%llu\t%d\t%s\t%d\t%ld\t%ld\t%ld\t%s\n", nsecs, tid,
+		printf("E\t%llu\t%d\t%s\t%d\t%ld\t%ld\t%ld\t%s\n", nsecs(monotonic), tid,
 		    comm, args.id, args.args[0], args.args[1], args.args[2],
 		    @mark[tid, $d]);
 	} else {
-		printf("E\t%llu\t%d\t%s\t%d\t%ld\t%ld\t%ld\t-\n", nsecs, tid,
+		printf("E\t%llu\t%d\t%s\t%d\t%ld\t%ld\t%ld\t-\n", nsecs(monotonic), tid,
 		    comm, args.id, args.args[0], args.args[1], args.args[2]);
 	}
 }
@@ -58,24 +61,25 @@ tracepoint:raw_syscalls:sys_enter
 tracepoint:raw_syscalls:sys_exit
 /pid == $1/
 {
-	printf("X\t%llu\t%d\t%d\t%ld\n", nsecs, tid, args.id, args.ret);
+	printf("X\t%llu\t%d\t%d\t%ld\n", nsecs(monotonic), tid, args.id, args.ret);
 }
 
 tracepoint:syscalls:sys_enter_openat
 /pid == $1/
 {
-	printf("P\t%llu\t%d\t%d\t%s\n", nsecs, tid, 257, str(args.filename));
+	printf("P\t%llu\t%d\t%d\t%s\n", nsecs(monotonic), tid, 257, str(args.filename));
 }
 
 tracepoint:syscalls:sys_enter_unlink
 /pid == $1/
 {
-	printf("P\t%llu\t%d\t%d\t%s\n", nsecs, tid, 87, str(args.pathname));
+	printf("P\t%llu\t%d\t%d\t%s\n", nsecs(monotonic), tid, 87, str(args.pathname));
 }
 
 BEGIN
 {
 	printf("C\t%llu\t%llu\n", nsecs(boot), nsecs(monotonic));
+	printf("CLOCK\tmonotonic\n");
 	printf("READY\n");
 }
 

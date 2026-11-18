@@ -1,0 +1,7 @@
+# Cost-run hook set (task xa4): the hooks-v1 entries syscall-burst hits.
+# A uprobe costs only when it fires, so the per-op cost equals the full
+# set's; attaching hooks-v1's ~580 probes took over a minute on the
+# loaded host, longer than the workload's 30 s startup gate.
+libjava.so Java_java_io_FileInputStream_*
+libjava.so Java_java_io_FileOutputStream_*
+libjava.so Java_java_io_FileDescriptor_*

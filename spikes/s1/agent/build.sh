@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Throwaway (S1, task wa4): builds bridge.jar (bootstrap-visible Hooks)
-# and agent.jar (premain + rewriter) into the given directory.
+# and agent.jar (premain/agentmain + rewriter) into the given directory.
 # Usage: build.sh <JAVA_HOME (25+)> <outdir>
 set -euo pipefail
 readonly jh="${1:?usage: build.sh JAVA_HOME OUTDIR}"
@@ -15,6 +15,7 @@ mapfile -t core_src < <(find "$here/core" -name '*.java')
 "$jh/bin/javac" -d "$out/core" "${core_src[@]}"
 cat > "$out/MANIFEST.MF" <<MF
 Premain-Class: iormesh.s1.agent.Agent
+Agent-Class: iormesh.s1.agent.Agent
 Can-Retransform-Classes: true
 Can-Redefine-Classes: true
 MF

@@ -31,9 +31,15 @@ import java.util.jar.JarFile;
  * Uses the java.lang.classfile API (final in JDK 24), so this prototype
  * runs on JDK 25 only; M3 shades ASM to cover JDK 21.
  *
- * Agent args: {@code <bridge.jar>,<out-prefix>}; writes
- * {@code <out-prefix>.hooks} (id → class.method) at premain and
- * {@code <out-prefix>.recs} (Hooks records) at shutdown.
+ * Agent args: {@code <bridge.jar>,<out-prefix>[,<mode>[,nostack]]};
+ * writes {@code <out-prefix>.hooks} (id → class.method) at startup.
+ * mode (Hooks.configure, task xa4): mem (default; {@code <out-prefix>.recs}
+ * at shutdown), ring ({@code <out-prefix>.spool}, mmap), file
+ * ({@code <out-prefix>.spool}, appended), noop. nostack skips the walk.
+ *
+ * premain ({@code -javaagent}) and agentmain (live attach, decision #2)
+ * run the same install: retransformation rewrites the already-loaded
+ * java.base classes either way.
  */
 public final class Agent {
     private static final ClassDesc HOOKS = ClassDesc.of("iormesh.s1.bridge.Hooks");
@@ -42,13 +48,26 @@ public final class Agent {
     private Agent() {}
 
     public static void premain(String args, Instrumentation inst) throws Exception {
-        String[] a = args.split(",", 2);
+        install(args, inst);
+    }
+
+    public static void agentmain(String args, Instrumentation inst) throws Exception {
+        install(args, inst);
+    }
+
+    private static void install(String args, Instrumentation inst) throws Exception {
+        String[] a = args.split(",");
         inst.appendToBootstrapClassLoaderSearch(new JarFile(a[0]));
         Class<?> hooks = Class.forName("iormesh.s1.bridge.Hooks", true, null);
         // java.base must read the bootstrap loader's unnamed module, or
         // the rewritten JDK methods fail to link against Hooks.
         inst.redefineModule(Object.class.getModule(), Set.of(hooks.getModule()),
                 Map.of(), Map.of(), Set.of(), Map.of());
+        String mode = a.length > 2 ? a[2] : "mem";
+        boolean stack = !(a.length > 3 && a[3].equals("nostack"));
+        hooks.getMethod("configure", String.class, boolean.class, String.class)
+                .invoke(null, mode, stack, a[1] + ".spool");
+        hooks.getMethod("warmUp").invoke(null);
         List<String> ids = HookTable.ids();
         try (PrintStream out = new PrintStream(a[1] + ".hooks")) {
             for (int i = 0; i < ids.size(); i++) {

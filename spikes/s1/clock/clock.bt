@@ -1,0 +1,25 @@
+#!/usr/bin/env bpftrace
+/*
+ * Throwaway (S1, task xa4): stamps every 3-byte write(2) of PID $1 —
+ * ClockProbe's bracketed writes — with both kernel clocks, read back to
+ * back in one probe: bpf_ktime_get_ns (CLOCK_MONOTONIC, the clock
+ * System.nanoTime() reads) and bpf_ktime_get_boot_ns (CLOCK_BOOTTIME,
+ * the clock ior's records use).
+ * Output: W <mono_ns> <boot_ns>, in syscall order (one thread writes).
+ */
+tracepoint:syscalls:sys_enter_write
+/pid == $1 && args.count == 3/
+{
+	printf("W\t%llu\t%llu\n", nsecs(monotonic), nsecs(boot));
+}
+
+BEGIN
+{
+	printf("C\t%llu\t%llu\n", nsecs(boot), nsecs(monotonic));
+	printf("READY\n");
+}
+
+END
+{
+	printf("C\t%llu\t%llu\n", nsecs(boot), nsecs(monotonic));
+}

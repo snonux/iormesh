@@ -10,11 +10,12 @@ Usage: agentjoin.py <dir> <name>
   syscall on the same TID, and the first workload frame of its stack —
   the "declared method" S1's exit criterion asks for.
 
-Clocks: bpftrace's nsecs is CLOCK_BOOTTIME, System.nanoTime() is
-CLOCK_MONOTONIC (they differed by ~85 h on the test laptop: suspends).
-join.bt prints a (boot, mono) pair at BEGIN and END; agent times are
-shifted by the BEGIN offset, and the BEGIN/END offset difference is
-printed as the drift (non-zero only if the host suspended mid-run).
+Clocks: System.nanoTime() is CLOCK_MONOTONIC. Since task xa4 join.bt
+stamps with nsecs(monotonic) too and says so in a "CLOCK monotonic"
+line: then agent times are used as they are. Logs from wa4 (no CLOCK
+line) stamped CLOCK_BOOTTIME; agent times are then shifted by the BEGIN
+(boot, mono) pair — biased by up to ~160 ns (spikes/s1/clock), which
+the reported smallest window gap must exceed.
 """
 import sys
 
@@ -52,9 +53,12 @@ HOOK_NATIVES = {
 
 
 def clock_offsets(log):
-    """boot - mono at bpftrace BEGIN and END (END missing if killed)."""
+    """boot - mono at bpftrace BEGIN and END (END missing if killed), or
+    [0] when the log's stamps are monotonic already (CLOCK line)."""
     offs = []
     for line in open(log):
+        if line.startswith("CLOCK\tmonotonic"):
+            return [0]
         if line.startswith("C\t"):
             _, boot, mono = line.rstrip("\n").split("\t")
             offs.append(int(boot) - int(mono))

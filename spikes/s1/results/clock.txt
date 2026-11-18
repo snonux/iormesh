@@ -1,0 +1,13 @@
+writes=20000 bracket_ns p50=1748 min=346
+mono        outside=0 min_margin_ns=164 p50_margin_ns=298
+boot->mono  outside=14 min_margin_ns=-14 p50_margin_ns=426
+in-probe (boot-mono) - BEGIN offset: min=176 max=8314 p50=179 ns; BEGIN->END drift 72 ns
+writes=20000 bracket_ns p50=1573 min=353
+mono        outside=0 min_margin_ns=163 p50_margin_ns=220
+boot->mono  outside=0 min_margin_ns=36 p50_margin_ns=340
+in-probe (boot-mono) - BEGIN offset: min=125 max=529 p50=127 ns; BEGIN->END drift -26 ns
+writes=20000 bracket_ns p50=1427 min=309
+mono        outside=0 min_margin_ns=146 p50_margin_ns=190
+boot->mono  outside=0 min_margin_ns=58 p50_margin_ns=279
+in-probe (boot-mono) - BEGIN offset: min=87 max=2003 p50=90 ns; BEGIN->END drift -60 ns
+samples=1000000 offset_ns min=307592391080453 p50=307592393459662 max=307592395054648 spread_p1_p99=10 gap_ns p50=84 p99=106 max=4758509

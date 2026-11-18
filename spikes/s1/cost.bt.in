@@ -1,0 +1,45 @@
+#!/usr/bin/env bpftrace
+/*
+ * Throwaway (S1, task xa4): the uprobe join's cost, without the output.
+ * Same marks as join.bt.in (per-TID depth stack, innermost wins), but the
+ * syscall handler only reads the mark and counts, the way the production
+ * handler would read it into the event — so the run measures the uprobe/
+ * uretprobe pair plus one map lookup per syscall, not bpftrace's printf.
+ * Rendered without the uprobes (cost.sh's sys mode) it is the baseline
+ * the marks add to: tracepoint plus the (missing) mark lookup.
+ */
+
+@ENTRY@
+/pid == $1/
+{
+	@depth[tid] = @depth[tid] + 1;
+	@mark[tid, @depth[tid]] = probe;
+}
+
+@RETURN@
+/pid == $1 && @depth[tid] > 0/
+{
+	delete(@mark[tid, @depth[tid]]);
+	@depth[tid] = @depth[tid] - 1;
+}
+
+tracepoint:raw_syscalls:sys_enter
+/pid == $1/
+{
+	@sys[@depth[tid] > 0 ? 1 : 0] = count();
+}
+
+BEGIN
+{
+	// Declare both maps, so the baseline (no uprobes) does the same
+	// lookup per syscall and the difference is the uprobe pair alone.
+	@depth[0] = 0;
+	@mark[(uint64)0, (uint64)0] = "";
+	printf("READY\n");
+}
+
+END
+{
+	clear(@mark);
+	clear(@depth);
+}
