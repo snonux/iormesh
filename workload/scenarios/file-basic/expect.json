@@ -1,0 +1,16 @@
+{"scenario": "file-basic",
+ "schema_version": 1,
+ "events": [
+   {"thread": "$t1", "event": "openat",
+    "args": {"path": "$tmp/file-basic.dat", "flags": 577}, "fd": "$fd1"},
+   {"thread": "$t1", "event": "write", "fd": "$fd1", "bytes": 4096},
+   {"thread": "$t1", "event": "close", "fd": "$fd1"},
+   {"thread": "$t1", "event": "openat",
+    "args": {"path": "$tmp/file-basic.dat", "flags": 0}, "fd": "$fd2"},
+   {"thread": "$t1", "event": "read", "fd": "$fd2", "bytes": 4096},
+   {"thread": "$t1", "event": "close", "fd": "$fd2"}
+ ],
+ "edges": [
+   {"type": "opened", "from": "$p1", "to": "file:$tmp/file-basic.dat"}
+ ],
+ "must_not_appear": []}

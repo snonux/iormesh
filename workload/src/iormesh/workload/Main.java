@@ -192,13 +192,4 @@ public final class Main {
                 + " [--key value ...] | --self-test | --list | --expect <scenario>");
         System.err.println("scenarios: " + String.join(", ", registry.names()));
     }
-
-    /** A command-line error: reported with usage, exit code 2. */
-    static final class UsageException extends Exception {
-        private static final long serialVersionUID = 1L;
-
-        UsageException(String message) {
-            super(message);
-        }
-    }
 }

@@ -250,6 +250,21 @@ requires consistency.
 Events of one `thread` must appear in the listed order; events of
 different threads are unordered against each other.
 
+Clarifications the M0 goldens rely on (file-basic and
+tcp-loopback ship real ones):
+
+- `fd` is the fd the event acts on: the argument, or for
+  `openat` and `accept` the returned one. An fd symbol binds to
+  the fd *instance* (pid, fd, `fd_gen`), so two opens that reuse
+  one number — as FileOutputStream then FileInputStream do —
+  take two symbols (`$fd1`, `$fd2`).
+- Multi-process scenarios add `"process": "$p1"` next to
+  `thread`, binding the same `$p` symbols the edges use.
+- Declare only syscalls the target milestone traces (M1: open,
+  read, write, close, connect, accept) and ports rather than
+  addresses: the JVM's dual-stack sockets show 127.0.0.1 as
+  `::ffff:127.0.0.1` unless the host lacks IPv6.
+
 ## M0 — workload framework
 
 **Goal**: a JDK-only Java 21 app that runs one named scenario,
@@ -257,8 +272,7 @@ brackets it with markers, and ships the scenario's expectations.
 PLAN.md: "M0 — Traceable test workload".
 
 **Files** (the framework landed with M0 and its code is now the
-reference — the sketches below only record intent; the two M1
-scenarios marked "next" are still to come)
+reference — the sketches below only record intent)
 
 ```
 workload/
@@ -268,8 +282,9 @@ workload/
   src/iormesh/workload/Registry.java    # name → Scenario
   src/iormesh/workload/SelfTest.java    # --self-test runner
   src/iormesh/workload/scenarios/Noop.java      # framework check
-  src/iormesh/workload/scenarios/FileBasic.java   # next: M1 scenario
-  src/iormesh/workload/scenarios/TcpLoopback.java # next: M1 scenario
+  src/iormesh/workload/scenarios/FileBasic.java   # M1 scenario
+  src/iormesh/workload/scenarios/TcpLoopback.java # M1 scenario
+  src/iormesh/workload/scenarios/FileWork.java    # their file work
   scenarios/<name>/expect.json          # bundled into the jar
 ```
 
@@ -343,6 +358,14 @@ dependencies either.
      `file-basic`'s file work, so both PIDs have file edges.
      Use `java.net.Socket` on a platform thread — virtual threads
      come with M3's scenarios.
+
+   Both take `--dir D` (the harness passes its tmp dir, which the
+   normalizer maps to `$tmp`; default: a fresh temp dir, removed
+   after) and write `<scenario>[-<role>].dat` there. The server's
+   `--port` defaults to 0 (kernel-picked) and it prints
+   `listening <port>` as the stdout line after the PID; the
+   harness starts or releases the client (`--port` required) only
+   after that line. Bad options or roles exit 2.
 
 5. `expect.json` per scenario, in the format above.
 
@@ -613,9 +636,14 @@ One test:
 ```go
 func TestWalkingSkeleton(t *testing.T) {
     h := newHarness(t)
-    server := h.StartWorkload("tcp-loopback", "--role", "server")
-    client := h.StartWorkload("tcp-loopback", "--role", "client")
-    trace := h.Trace(server.PID, client.PID) // releases both
+    port := h.FreePort() // both start before either runs
+    server := h.StartWorkload("tcp-loopback", "--role", "server",
+        "--port", port)
+    client := h.StartWorkload("tcp-loopback", "--role", "client",
+        "--port", port)
+    // Releases the server, then the client once the server printed
+    // its "listening" line.
+    trace := h.Trace(server.PID, client.PID)
     got := normalize.Normalize(trace.Events,
         normalize.Options{Bracket: "tcp-loopback", TmpPrefix: h.Tmp})
     for _, v := range normalize.Check(got, trace.Graph,

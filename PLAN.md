@@ -199,7 +199,7 @@ Scenario catalogue, by the milestone it lands with:
 
 | Lands with | Scenarios |
 |------------|-----------|
-| M1 | File data ops (open/read/write/close); TCP client ↔ server on loopback; markers |
+| M1 | File data ops (open/read/write/close) — `file-basic`; TCP client ↔ server on loopback — `tcp-loopback`; markers (all landed with M0) |
 | M2 | Full file surface (create/delete, rename/move, touch, symlink/hardlink, xattr, chmod/chown…); fd lifecycle (dup, inheritance, reuse); local IPC; signals; UDP; IPv4 + IPv6; restart; non-Java peer |
 | M3 | Method flows (deep stacks, async I/O); HTTP plain + TLS; redaction; OTEL flavor |
 | M4 | Client and server on two hosts as two projects; microservices topology, one service per host; NAT'ed pair |
