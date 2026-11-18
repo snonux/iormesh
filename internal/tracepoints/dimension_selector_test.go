@@ -1,6 +1,6 @@
 // Adapted from ior internal/tracepoints/dimension_selector_test.go @ b21afc50328c.
-// Changes: the default-set tests expect DefaultSyscalls (M1's set) instead
-// of ior's FS family.
+// Changes: the default-set tests expect DefaultSyscalls (M1's set plus
+// the M2 file surface) instead of ior's FS family.
 
 package tracepoints
 

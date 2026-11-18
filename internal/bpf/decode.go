@@ -30,9 +30,10 @@ func typed[T any](decode func([]byte) *T) decoder {
 }
 
 // decoders maps every record type the BPF object can emit to its decoder.
-// The full table is kept although M1 attaches only the open/read/write/
-// close/connect/accept set: a record type missing here would be counted as
-// unknown instead of silently mis-decoded once M2 widens the attach set.
+// The full table is kept although the default attach set
+// (tracepoints.DefaultSyscalls) uses only some record types: a record type
+// missing here would be counted as unknown instead of silently mis-decoded
+// once a selector widens the attach set.
 var decoders = buildDecoders()
 
 func buildDecoders() map[types.EventType]decoder {

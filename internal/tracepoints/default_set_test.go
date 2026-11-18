@@ -3,6 +3,8 @@ package tracepoints
 import (
 	"slices"
 	"testing"
+
+	"iormesh/internal/schema"
 )
 
 // TestDefaultSyscallsHaveGeneratedHandlers guards the default set against a
@@ -14,6 +16,17 @@ func TestDefaultSyscallsHaveGeneratedHandlers(t *testing.T) {
 			if !slices.Contains(List, tp) {
 				t.Errorf("default syscall %q: no generated tracepoint %s", name, tp)
 			}
+		}
+	}
+}
+
+// TestDefaultSyscallsAreSchemaKinds: the correlator names an event after
+// its syscall, so a default syscall without a schema kind would produce
+// events the sink rejects — every attached record lost at the last step.
+func TestDefaultSyscallsAreSchemaKinds(t *testing.T) {
+	for _, name := range DefaultSyscalls() {
+		if !schema.KnownKind(name) {
+			t.Errorf("default syscall %q is not a schema kind (schema/kinds_file.go)", name)
 		}
 	}
 }

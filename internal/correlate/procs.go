@@ -26,6 +26,10 @@ type procState struct {
 	// address may be reused), while the fd — after an RST, say — stays
 	// open and its events still belong to that connection.
 	sockOf map[int32]*sockState
+	// paths holds the current path of each fd instance a traced open (or
+	// a dup of one) named, rewritten by renames (paths.go). It names the
+	// dirfd of a relative *at call and the file of an fd metadata event.
+	paths map[int32]fdPath
 }
 
 func (c *Correlator) proc(pid uint32) *procState {
@@ -34,16 +38,18 @@ func (c *Correlator) proc(pid uint32) *procState {
 	}
 	comm, inc := c.cfg.ProcInfo(pid)
 	p := &procState{inc: inc, comm: comm, fds: map[int32]uint32{},
-		lastGen: map[int32]uint32{}, sockOf: map[int32]*sockState{}}
+		lastGen: map[int32]uint32{}, sockOf: map[int32]*sockState{},
+		paths: map[int32]fdPath{}}
 	c.procs[pid] = p
 	c.graph.process(pid, inc, comm)
 	return p
 }
 
 // create registers a new fd instance returned by a traced syscall and
-// returns its generation. A non-socket creation (open) drops any stale
-// socket binding of the number; accept keeps the one its snapshot record
-// set just before.
+// returns its generation. A non-socket creation (open, dup) drops any
+// stale socket binding of the number; accept keeps the one its snapshot
+// record set just before. The new instance has no path until its creator
+// sets one: the number's old path belonged to the instance it replaces.
 func (p *procState) create(fd int32, socket bool) uint32 {
 	gen := p.lastGen[fd] + 1
 	p.lastGen[fd] = gen
@@ -51,6 +57,7 @@ func (p *procState) create(fd int32, socket bool) uint32 {
 	if !socket {
 		delete(p.sockOf, fd)
 	}
+	delete(p.paths, fd)
 	return gen
 }
 
@@ -106,6 +113,7 @@ func (p *procState) sockGen(fd int32, s *sockState, first, snapshot bool) uint32
 func (p *procState) close(fd int32) {
 	delete(p.fds, fd)
 	delete(p.sockOf, fd)
+	delete(p.paths, fd)
 }
 
 // ReadProcInfo reads comm and start time from /proc. The start time has

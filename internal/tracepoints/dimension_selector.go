@@ -1,6 +1,7 @@
 // Adapted from ior internal/tracepoints/dimension_selector.go @ b21afc50328c.
 // Changes: import paths ior/ -> iormesh/; the default without a positive
-// selector is DefaultSyscalls (M1's set) instead of ior's FS family.
+// selector is DefaultSyscalls (M1's set plus the M2 file surface) instead
+// of ior's FS family.
 
 package tracepoints
 

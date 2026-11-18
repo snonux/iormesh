@@ -14,15 +14,35 @@ import (
 // to bracket a scenario (workload/src/iormesh/workload/Marker.java).
 const markerRoot = "/iormesh-marker/"
 
+// shape is the record layout an enter came in, which decides how its exit
+// becomes an event: the layout says which arguments the enter carries.
+type shape uint8
+
+const (
+	shapeFd   shape = iota // fd_event and its widened forms: one fd argument
+	shapeOpen              // open_event: dirfd, path, flags; returns an fd
+	shapePath              // path_event: dirfd, path, flags (files.go)
+	shapeName              // name_event: two dirfd/path pairs (files.go)
+)
+
 // enter is a syscall enter waiting for its exit on the same thread. A
-// thread runs one syscall at a time, so the tid alone keys it.
+// thread runs one syscall at a time, so the tid alone keys it. fd is the
+// fd argument, or the dirfd of the path shapes; newDirfd and newPath are
+// the second name of a name_event.
 type enter struct {
-	name  string // syscall name, e.g. "openat"
-	time  uint64
-	pid   uint32
-	fd    int32
-	path  string
-	flags int32
+	name     string // syscall name, e.g. "openat"
+	shape    shape
+	time     uint64
+	pid      uint32
+	fd       int32
+	newDirfd int32
+	path     string
+	newPath  string
+	// pathKnown is false when the path read faulted (and no fixup came
+	// yet): an empty path then is unknown, not AT_EMPTY_PATH's "the fd
+	// itself".
+	pathKnown bool
+	flags     int32
 }
 
 func (c *Correlator) enterOpen(r *types.OpenEvent) {
@@ -31,26 +51,35 @@ func (c *Correlator) enterOpen(r *types.OpenEvent) {
 	if comm := types.StringValue(r.Comm[:]); comm != "" && p.comm == "" {
 		p.comm = comm
 	}
-	c.enters[r.Tid] = enter{name: r.TraceId.Name(), time: r.Time, pid: r.Pid, fd: schema.NoFD,
-		path: types.StringValue(r.Filename[:]), flags: r.Flags}
+	c.enters[r.Tid] = enter{name: r.TraceId.Name(), shape: shapeOpen, time: r.Time,
+		pid: r.Pid, fd: r.Dirfd, path: types.StringValue(r.Filename[:]),
+		pathKnown: r.FilenameStatus != types.PATH_READ_FAILED, flags: r.Flags}
 }
 
 // fixupName applies the path the BPF side re-read at sys_exit after the
 // enter-time read faulted. It is submitted before the exit record, so the
-// enter is still pending (filter.c, ior_emit_name_fixup). Only the first
-// path slot exists for the open family.
+// enter is still pending (filter.c, ior_emit_name_fixup). The second slot
+// is a name_event's new name.
 func (c *Correlator) fixupName(r *types.OpenNameFixupEvent) {
 	en, ok := c.enters[r.Tid]
-	if !ok || r.Slot != types.OPEN_NAME_FIXUP_SLOT_FIRST || en.name != r.TraceId.Name() {
+	if !ok || en.name != r.TraceId.Name() {
 		return
 	}
-	en.path = types.StringValue(r.Filename[:])
+	switch r.Slot {
+	case types.OPEN_NAME_FIXUP_SLOT_FIRST:
+		en.path, en.pathKnown = types.StringValue(r.Filename[:]), true
+	case types.OPEN_NAME_FIXUP_SLOT_SECOND:
+		en.newPath = types.StringValue(r.Filename[:])
+	default:
+		return
+	}
 	c.enters[r.Tid] = en
 }
 
 func (c *Correlator) enterFd(r *types.FdEvent) {
 	c.advance(r.Time)
-	c.enters[r.Tid] = enter{name: r.TraceId.Name(), time: r.Time, pid: r.Pid, fd: r.Fd}
+	c.enters[r.Tid] = enter{name: r.TraceId.Name(), shape: shapeFd, time: r.Time,
+		pid: r.Pid, fd: r.Fd}
 }
 
 // accept handles both halves: the enter carries nothing the exit needs
@@ -111,12 +140,21 @@ func (c *Correlator) wall(bootNS uint64) uint64 {
 // syscallDetail sets the kind-specific fields and updates fd state. It
 // returns the socket the event acts on, if any, so the queue can hold the
 // event until that socket's conn id is known, and false when the event
-// must not be emitted.
+// must not be emitted. The shape switch comes first and is an integer
+// compare: read and write, the hot kinds, pay for nothing they don't use
+// (decision #25).
 func (c *Correlator) syscallDetail(ev *schema.Event, en enter, ret int64) (*sockState, bool) {
 	p := c.proc(en.pid)
-	switch en.name {
-	case schema.KindOpen, schema.KindOpenat, schema.KindOpenat2:
+	switch en.shape {
+	case shapeOpen:
 		return nil, c.openDetail(ev, p, en, ret)
+	case shapePath:
+		return nil, c.pathDetail(ev, p, en, ret)
+	case shapeName:
+		c.nameDetail(ev, p, en, ret)
+		return nil, true
+	}
+	switch en.name {
 	case schema.KindAccept, schema.KindAccept4:
 		return c.acceptDetail(ev, p, ret), true
 	}
@@ -135,14 +173,18 @@ func (c *Correlator) syscallDetail(ev *schema.Event, en enter, ret int64) (*sock
 		}
 	case schema.KindConnect:
 		sock.fillArgs(&ev.Args)
+	default:
+		fdFileDetail(ev, p, en, ret)
 	}
 	return sock, true
 }
 
 // openDetail turns an open into a file event, or a marker event when it
-// targets the reserved marker root. An open whose path is unknown (the
-// read faulted and was not recovered) still creates its fd, but is not
-// emitted: schema requires args.path, and a file node "" would be a lie.
+// targets the reserved marker root. A dirfd-relative path is resolved
+// against the dirfd's path when the trace knows it. An open whose path is
+// unknown (the read faulted and was not recovered) still creates its fd,
+// but is not emitted: schema requires args.path, and a file node "" would
+// be a lie.
 func (c *Correlator) openDetail(ev *schema.Event, p *procState, en enter, ret int64) bool {
 	if name, ok := strings.CutPrefix(en.path, markerRoot); ok && name != "" {
 		ev.Event, ev.Args.Marker = schema.KindMarker, &name
@@ -155,9 +197,10 @@ func (c *Correlator) openDetail(ev *schema.Event, p *procState, en enter, ret in
 		c.noPath++
 		return false
 	}
-	path, flags := en.path, uint32(en.flags)
+	path, flags := p.resolve(en.fd, en.path, true), uint32(en.flags)
 	ev.Args.Path, ev.Args.Flags = &path, &flags
 	if ret >= 0 {
+		p.setPath(int32(ret), path)
 		c.graph.opened(ev.PID, ev.PIDInc, path)
 	}
 	return true

@@ -1,8 +1,9 @@
 // Package correlate turns the raw BPF records of internal/bpf into schema
 // events and the per-host graph (docs/implementation.md, M1 step 6). It
-// keeps pid→fd→path and pid→fd→socket state, pairs syscall enters with
-// their exits, turns marker opens into marker events and fuses the two
-// ends of a loopback connection into one conn id. Around the syscall
+// keeps pid→fd→path state that follows renames (M2 step 5, paths.go) and
+// pid→fd→socket state, pairs syscall enters with their exits, turns
+// marker opens into marker events and fuses the two ends of a loopback
+// connection into one conn id. Around the syscall
 // events it numbers the host-level ones the caller reports: the session
 // header (Session), ring-buffer loss (RecordLosses) and the end (End).
 //
@@ -81,8 +82,9 @@ func New(cfg Config) *Correlator {
 	}
 }
 
-// Handle consumes one record from bpf.Tracer.Records: syscall records,
-// TCP state records and the process lifecycle records of M2 step 1 (new
+// Handle consumes one record from bpf.Tracer.Records: syscall records
+// (M1's, and the path, name and dup3 enters of M2's file surface), TCP
+// state records and the process lifecycle records of M2 step 1 (new
 // processes, exits). Other record types are ignored; the exec records of a
 // pattern session are the caller's to judge (Incarnation). The error is the sink's, or
 // ErrEnded after End.
@@ -97,6 +99,12 @@ func (c *Correlator) Handle(rec any) error {
 		c.fixupName(r)
 	case *types.FdEvent:
 		c.enterFd(r)
+	case *types.PathEvent:
+		c.enterPath(r)
+	case *types.NameEvent:
+		c.enterName(r)
+	case *types.Dup3Event:
+		c.enterDup3(r)
 	case *types.AcceptEvent:
 		c.accept(r)
 	case *types.RetEvent:
