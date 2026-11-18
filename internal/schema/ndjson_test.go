@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"os"
@@ -109,14 +110,18 @@ func TestReadNDJSONRejects(t *testing.T) {
 	_ = s.Event(sampleEvent(1))
 	_ = s.Close()
 	good := buf.String()
-	for name, in := range map[string]string{
-		"blank line":    good + "\n",
-		"unknown key":   strings.Replace(good, `"seq"`, `"Seq"`, 1),
-		"not json":      good + "{\n",
-		"line too long": good + strings.Repeat("x", maxLine+1) + "\n",
+	// Each must fail for its own reason, not an unrelated one.
+	for name, c := range map[string]struct {
+		in   string
+		want error
+	}{
+		"blank line":    {good + "\n", ErrInvalid},
+		"unknown key":   {strings.Replace(good, `"seq"`, `"Seq"`, 1), ErrInvalid},
+		"not json":      {good + "{\n", ErrInvalid},
+		"line too long": {good + strings.Repeat("x", maxLine+1) + "\n", bufio.ErrTooLong},
 	} {
-		if _, err := ReadNDJSON(strings.NewReader(in)); err == nil {
-			t.Errorf("%s: accepted", name)
+		if _, err := ReadNDJSON(strings.NewReader(c.in)); !errors.Is(err, c.want) {
+			t.Errorf("%s: err %v, want %v", name, err, c.want)
 		}
 	}
 	if _, err := ReadNDJSON(strings.NewReader(good + "\n")); err == nil || !strings.Contains(err.Error(), "line 2") {
@@ -171,5 +176,44 @@ func TestWriteGraphFileIsAtomic(t *testing.T) {
 	}
 	if err := WriteGraphFile(filepath.Join(dir, "missing", "g.json"), sampleGraph()); err == nil {
 		t.Fatal("write into a missing directory succeeded")
+	}
+}
+
+func TestNDJSONClosedSink(t *testing.T) {
+	w := &failWriter{n: 1 << 20}
+	s := NewNDJSONSink(w)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Event(sampleEvent(1)); !errors.Is(err, errSinkClosed) {
+		t.Fatalf("Event after Close: %v, want errSinkClosed", err)
+	}
+	w.closed = false
+	if err := s.Close(); err != nil || w.closed {
+		t.Fatalf("second Close: err %v, closed the writer again %v", err, w.closed)
+	}
+}
+
+func TestWriteGraphFileModeAndRenameCleanup(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "graph.json")
+	if err := WriteGraphFile(path, sampleGraph()); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o644 {
+		t.Fatalf("mode %v err %v, want 0644", fi.Mode().Perm(), err)
+	}
+	// A directory in the way makes the rename fail after the temp file
+	// was fully written: it must not be left behind.
+	blocked := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(filepath.Join(blocked, "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteGraphFile(blocked, sampleGraph()); err == nil {
+		t.Fatal("rename onto a non-empty directory succeeded")
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 2 {
+		t.Fatalf("%d entries after a failed rename, want graph.json and sub only", len(entries))
 	}
 }

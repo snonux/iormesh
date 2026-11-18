@@ -723,8 +723,8 @@ the correlator, the normalizer and the shipped `expect.json`.
 validated event per line, keys in struct order (encoding/json),
 buffered, with a sticky write error that `Close` reports at the
 latest; `ReadNDJSON` reads a stream back strictly; `WriteGraph` /
-`WriteGraphFile` write `graph.json` sorted, validated and (for the
-file) atomically. The on-disk format is documented in
+`WriteGraphFile` write the graph sorted, validated and (for the
+file) atomically; the CLI (step 10) picks the file names. The on-disk format is documented in
 [schema.md](schema.md). `internal/correlate/export_test.go` runs a
 fixed record stream through the correlator into both writers and
 compares the bytes with committed goldens (`-update` rewrites

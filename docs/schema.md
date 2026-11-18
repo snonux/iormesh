@@ -13,18 +13,25 @@ are optional, so an older reader never sees a changed meaning.
 
 ## Files
 
-| File | Format | Written by |
-|------|--------|------------|
-| `events.ndjson` | one event per line | tracer (`schema.NDJSONSink`) |
-| `graph.json` | one graph object, indented | tracer at exit (`schema.WriteGraphFile`) |
-| `*.parquet` | the same events, columnar | tracer segments (M4, to come) |
+| Output | Format | Writer |
+|--------|--------|--------|
+| event stream | one event per line (NDJSON) | `schema.NDJSONSink` |
+| graph export | one graph object, indented JSON | `schema.WriteGraph` / `WriteGraphFile` |
+| parquet segments | the same events, columnar | M4 segment writer (to come) |
+
+The file names are fixed when the tracer CLI wires these writers
+(`iormesh run -out DIR`, M1 step 10); no command writes them yet.
 
 **NDJSON framing**: UTF-8, one JSON object per line, `\n`
 terminated, no blank lines, keys in the order of the table below
-(byte-stable for the same event). Lines are at most 1 MiB.
-Events appear in `seq` order.
+(byte-stable for the same event). Events appear in `seq` order.
+The reader also accepts a final line without `\n` and a `\r\n`
+ending, and rejects a line of 1 MiB or more. Linux paths are raw
+bytes: a path that is not valid UTF-8 is written with U+FFFD in
+place of the invalid bytes — lossy, and a known v1 limit.
 
-**graph.json** is written atomically (temp file + rename) with
+**The graph export** is written atomically by `WriteGraphFile`
+(synced temp file, mode 0644, renamed into place) with
 nodes sorted by `(type, id)` and edges by `(type, from, to)`, so
 the same graph is the same bytes.
 

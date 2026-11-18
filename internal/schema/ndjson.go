@@ -53,6 +53,9 @@ func (s *NDJSONSink) Event(ev Event) error {
 // Close implements Sink: it flushes, then closes the underlying writer if
 // it is one. A flush error is returned even when closing succeeds.
 func (s *NDJSONSink) Close() error {
+	if s.err == errSinkClosed {
+		return nil
+	}
 	err := s.err
 	if ferr := s.w.Flush(); ferr != nil && err == nil {
 		err = fmt.Errorf("ndjson: flush: %w", ferr)
@@ -60,8 +63,13 @@ func (s *NDJSONSink) Close() error {
 	if s.closer != nil {
 		err = errors.Join(err, s.closer.Close())
 	}
+	// Later calls fail instead of buffering into a closed writer, and a
+	// second Close does not close the underlying writer twice.
+	s.closer, s.err = nil, errSinkClosed
 	return err
 }
+
+var errSinkClosed = errors.New("ndjson: sink closed")
 
 // maxLine bounds one NDJSON line. An event is a few hundred bytes; paths
 // are at most PATH_MAX (4096), so 1 MiB is generous and still stops a
@@ -89,7 +97,8 @@ func ReadNDJSON(r io.Reader) ([]Event, error) {
 
 // WriteGraph writes g as indented JSON, nodes and edges in canonical
 // order, after validating it. Indentation makes graph goldens diffable
-// line by line; the order makes them byte-stable.
+// line by line; the order makes them byte-stable. It sorts g's slices in
+// place (Graph.Sort), so the caller's graph ends up sorted too.
 func WriteGraph(w io.Writer, g Graph) error {
 	g.Sort()
 	if err := g.Validate(); err != nil {
@@ -106,7 +115,10 @@ func WriteGraph(w io.Writer, g Graph) error {
 }
 
 // WriteGraphFile writes the graph export to path atomically: a reader (or
-// rsync) sees the old file or the complete new one, never half a graph.
+// rsync) sees the old file or the complete new one, never half a graph,
+// and the data is synced before the rename so a crash cannot leave the
+// new name on an empty file. The mode is 0644 (CreateTemp's 0600 would
+// keep an unprivileged collector out).
 func WriteGraphFile(path string, g Graph) (err error) {
 	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
 	if err != nil {
@@ -117,12 +129,28 @@ func WriteGraphFile(path string, g Graph) (err error) {
 			_ = os.Remove(tmp.Name())
 		}
 	}()
-	if err := WriteGraph(tmp, g); err != nil {
+	if err := writeSynced(tmp, g); err != nil {
 		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("graph: %w", err)
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return fmt.Errorf("graph: %w", err)
+	}
+	return nil
+}
+
+func writeSynced(f *os.File, g Graph) error {
+	if err := WriteGraph(f, g); err != nil {
+		return err
+	}
+	if err := f.Chmod(0o644); err != nil {
+		return fmt.Errorf("graph: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("graph: %w", err)
+	}
+	return nil
 }

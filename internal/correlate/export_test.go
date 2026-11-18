@@ -2,6 +2,7 @@ package correlate
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -71,9 +72,29 @@ func TestSinkErrorStopsCorrelator(t *testing.T) {
 	f.handle(&types.FdEvent{EventType: types.ENTER_FD_EVENT, TraceId: types.SYS_ENTER_READ,
 		Time: f.tick(), Pid: 1, Tid: 1, Fd: 3})
 	f.exit(types.SYS_EXIT_READ, 1) // buffered: no error yet
-	if err := c.Close(); err == nil {
-		t.Fatal("Close succeeded although the sink could not write")
+	if err := c.Close(); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("Close: %v, want the sink's write error", err)
 	}
+}
+
+// TestSinkErrorMidStream: once the sink's buffer overflows into a failing
+// writer, Handle itself returns the error — the caller stops at once
+// instead of tracing into the void until Close.
+func TestSinkErrorMidStream(t *testing.T) {
+	c := New(Config{Host: Host{ID: "h1", Project: "p"}, Sink: schema.NewNDJSONSink(errWriter{}),
+		ProcInfo: func(uint32) (string, uint64) { return "", 0 }})
+	now := uint64(0)
+	f := feeder{t, c, 1, 1, &now}
+	for range 1000 {
+		_ = c.Handle(&types.FdEvent{EventType: types.ENTER_FD_EVENT, TraceId: types.SYS_ENTER_READ,
+			Time: f.tick(), Pid: 1, Tid: 1, Fd: 3})
+		err := c.Handle(&types.RetEvent{EventType: types.EXIT_RET_EVENT, TraceId: types.SYS_EXIT_READ,
+			Time: f.tick(), Pid: 1, Tid: 1, Ret: 1})
+		if errors.Is(err, os.ErrClosed) {
+			return
+		}
+	}
+	t.Fatal("1000 events into a failing sink and Handle never reported it")
 }
 
 type errWriter struct{}
