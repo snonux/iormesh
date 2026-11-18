@@ -1,0 +1,29 @@
+# iormesh performance baseline (syscall-burst)
+# label:       d34e2e2
+# commit:      d34e2e20cbe24d4078b7fd3a16b5953a4cd3803e (perf: default to 6 samples, benchstat's minimum for an interval (task ka4))
+# date:        2026-11-18T16:36:49Z
+# kernel:      7.2.15-200.fc44.x86_64
+# cpu:         11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
+# clocksource: tsc
+# java:        openjdk version "25.0.4.1" 2026-08-18
+# settings:    count=6 ops=1000000 threads=1 4 16
+# loadavg:     7.62 4.13 3.19 (at start; keep the host idle while recording)
+
+BenchmarkSyscallBurst/mode=untraced/threads=1 1000000 749.06 ns/op 374.53 ns/syscall
+BenchmarkSyscallBurst/mode=untraced/threads=4 1000000 329.02 ns/op 164.51 ns/syscall
+BenchmarkSyscallBurst/mode=untraced/threads=16 1000000 254.39 ns/op 127.19 ns/syscall
+BenchmarkSyscallBurst/mode=untraced/threads=1 1000000 786.35 ns/op 393.18 ns/syscall
+BenchmarkSyscallBurst/mode=untraced/threads=4 1000000 274.23 ns/op 137.12 ns/syscall
+BenchmarkSyscallBurst/mode=untraced/threads=16 1000000 262.15 ns/op 131.07 ns/syscall
+BenchmarkSyscallBurst/mode=untraced/threads=1 1000000 762.78 ns/op 381.39 ns/syscall
+BenchmarkSyscallBurst/mode=untraced/threads=4 1000000 294.12 ns/op 147.06 ns/syscall
+BenchmarkSyscallBurst/mode=untraced/threads=16 1000000 254.80 ns/op 127.40 ns/syscall
+BenchmarkSyscallBurst/mode=untraced/threads=1 1000000 777.89 ns/op 388.95 ns/syscall
+BenchmarkSyscallBurst/mode=untraced/threads=4 1000000 319.17 ns/op 159.59 ns/syscall
+BenchmarkSyscallBurst/mode=untraced/threads=16 1000000 262.67 ns/op 131.33 ns/syscall
+BenchmarkSyscallBurst/mode=untraced/threads=1 1000000 743.34 ns/op 371.67 ns/syscall
+BenchmarkSyscallBurst/mode=untraced/threads=4 1000000 330.04 ns/op 165.02 ns/syscall
+BenchmarkSyscallBurst/mode=untraced/threads=16 1000000 257.72 ns/op 128.86 ns/syscall
+BenchmarkSyscallBurst/mode=untraced/threads=1 1000000 869.52 ns/op 434.76 ns/syscall
+BenchmarkSyscallBurst/mode=untraced/threads=4 1000000 318.91 ns/op 159.46 ns/syscall
+BenchmarkSyscallBurst/mode=untraced/threads=16 1000000 268.12 ns/op 134.06 ns/syscall
