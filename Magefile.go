@@ -1,7 +1,8 @@
 //go:build mage
 
-// Magefile for iormesh. M0 only needs the Java workload targets; the
-// tracer build and BPF generation targets are lifted from ior in M1
+// Magefile for iormesh: the Java workload targets (M0). The tracer build,
+// BPF and generation targets lifted from ior live beside it in
+// magefile_bpf.go, magefile_generate.go and magefile_fmt.go
 // (docs/implementation.md, "M1 — walking skeleton", step 1).
 package main
 

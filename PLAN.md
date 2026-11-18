@@ -1228,7 +1228,8 @@ pattern (and, where sensible, the code) from `../ior`:
   matching kernel — ior pins its generation host with
   `scripts/build-with-docker.sh`; iormesh does the same.
 - **vmlinux.h** from the build host's BTF (`/sys/kernel/btf/vmlinux`),
-  kept in-tree and deliberately preserved by clean targets.
+  kept in the working tree (gitignored, as in ior) and
+  deliberately preserved by clean targets.
 - **Compile & embed**: hand-written BPF C (ior's helpers: fd name
   resolution, file identification, poll/recv handling…) plus the
   generated handlers, clang with CO-RE relocations → `.bpf.o` →

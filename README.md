@@ -15,7 +15,9 @@ across hosts, not just one.
 concept in the making: the repo holds the project plan
 ([PLAN.md](./PLAN.md)), the design docs ([docs/](./docs/)) and
 the first code — M0's Java test workload (`workload/`, built
-with `mage workloadBuild`). Everything described — flags,
+with `mage workloadBuild`) and M1's BPF build and generator
+lifted from ior (`mage generate`, `mage build`; see
+[docs/build.md](docs/build.md)). Everything described — flags,
 paths, schema, milestones — is subject to change as the PoC
 evolves.
 

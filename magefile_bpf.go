@@ -1,0 +1,234 @@
+//go:build mage
+
+// Adapted from ior Magefile.go @ b21afc50328c.
+// Changes: only the build, BPF, generate, test, vet, lint, fmt and clean
+// targets (no TUI, demo, bench, parquet, docker or integration targets yet);
+// IOR_FORCE_GENERATE renamed to IORMESH_FORCE_GENERATE; Build compiles every
+// package instead of a binary, since cmd/iormesh lands in M1 step 10.
+
+package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"github.com/magefile/mage/mg"
+	"github.com/magefile/mage/sh"
+
+	"iormesh/internal/gatecmd"
+)
+
+// Build-input and output paths of the BPF and generation targets. They
+// mirror ior's layout so ior fixes port file for file.
+const (
+	defaultLibbpfgoPath  = "../libbpfgo"
+	libbpfgoRequiredTag  = "v0.9.2-libbpf-1.5.1"
+	bpfSourcePath        = "internal/c/iormesh.bpf.c"
+	bpfObjectPath        = "internal/c/iormesh.bpf.o"
+	tracepointsCPath     = "internal/c/generated_tracepoints.c"
+	tracepointsResult    = "internal/c/generated_tracepoints_result.txt"
+	tracepointsResultNew = "internal/c/generated_tracepoints_result.txt.new"
+	tracepointsGoPath    = "internal/tracepoints/generated_tracepoints.go"
+	typesGoPath          = "internal/types/generated_types.go"
+	typesHeaderPath      = "internal/c/types.h"
+	vmlinuxPath          = "internal/c/vmlinux.h"
+	forceGenerateEnv     = "IORMESH_FORCE_GENERATE"
+)
+
+// Default builds the project.
+func Default() {
+	mg.Deps(Build)
+}
+
+// Build compiles the BPF object and every Go package with the libbpfgo cgo
+// environment. There is no tracer binary until cmd/iormesh lands (M1 step
+// 10); building ./... still proves the go:embed of the object links.
+func Build() error {
+	mg.Deps(BpfBuild)
+	return sh.RunWithV(goEnv(), "go", "build", "./...")
+}
+
+// BpfBuild builds the embedded BPF object (CO-RE, from vmlinux.h).
+func BpfBuild() error {
+	if err := ensureVMLINUX(); err != nil {
+		return err
+	}
+	return buildBPFObject()
+}
+
+// Test runs the full Go test suite (not the Java workload; see WorkloadTest).
+func Test() error {
+	mg.Deps(BpfBuild)
+	if err := run(gatecmd.CleanTestCache()); err != nil {
+		return err
+	}
+	return run(gatecmd.TestAll())
+}
+
+// Vet runs go vet over the module with the libbpfgo cgo environment; a bare
+// `go vet ./...` cannot typecheck the packages that import libbpfgo.
+func Vet() error {
+	mg.Deps(BpfBuild)
+	return run(gatecmd.VetAll())
+}
+
+// Lint runs golangci-lint (errcheck + staticcheck SA, see .golangci.yml)
+// with the same cgo environment, after verifying the config: `run` silently
+// ignores unknown keys and would report "0 issues" from an unreviewed file.
+func Lint() error {
+	mg.Deps(BpfBuild)
+	if _, err := exec.LookPath(gatecmd.GolangciLintBin); err != nil {
+		return fmt.Errorf("%s not on PATH; install it with `go install %s`",
+			gatecmd.GolangciLintBin, gatecmd.GolangciLintPkg)
+	}
+	if err := run(gatecmd.LintConfigVerify()); err != nil {
+		return err
+	}
+	return run(gatecmd.LintRun())
+}
+
+// run executes one gate command line with the libbpfgo cgo environment. The
+// argv comes from internal/gatecmd so internal/buildgate can pin it.
+func run(argv []string) error {
+	return sh.RunWithV(goEnv(), argv[0], argv[1:]...)
+}
+
+// Clean removes build artifacts. vmlinux.h is deliberately preserved: it is
+// a gitignored build input recoverable only with root (ensureVMLINUX dumps it
+// via sudo bpftool), so deleting it would leave the tree unbuildable on a
+// host without sudo.
+func Clean() error {
+	// The *.tmp-* glob sweeps generate temp renders orphaned by a signal
+	// between render and the atomic rename.
+	for _, pattern := range []string{"internal/c/*.o", tracepointsCPath + ".tmp-*"} {
+		if err := removeFilesByGlob(pattern); err != nil {
+			return err
+		}
+	}
+	return removeFilesByPath(tracepointsResultNew)
+}
+
+func buildBPFObject() error {
+	if err := ensureLibbpfgoStaticToolchain(); err != nil {
+		return err
+	}
+	includeDir := filepath.Join(libbpfgoPath(), "output")
+	return sh.RunWithV(map[string]string{"CC": "clang"}, "clang", "-g", "-O2",
+		"-Wall", "-fpie", "-target", "bpf", "-D__TARGET_ARCH_amd64",
+		"-I"+includeDir, "-c", bpfSourcePath, "-o", bpfObjectPath)
+}
+
+// ensureLibbpfgoStaticToolchain fails early, with the fix spelled out, when
+// the pinned libbpfgo checkout has not been built: the clang and cgo errors
+// it would otherwise cause (bpf/bpf.h not found) do not name the cause.
+func ensureLibbpfgoStaticToolchain() error {
+	libbpfgo := libbpfgoPath()
+	for _, path := range []string{
+		filepath.Join(libbpfgo, "output"),
+		filepath.Join(libbpfgo, "output", "libbpf", "libbpf.a"),
+		filepath.Join(libbpfgo, "selftest", "common"),
+	} {
+		_, err := os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("missing libbpfgo static toolchain path %s\n%s",
+				path, libbpfgoSetupHint(libbpfgo))
+		}
+		if err != nil {
+			return fmt.Errorf("stat %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func libbpfgoSetupHint(libbpfgo string) string {
+	return strings.Join([]string{
+		fmt.Sprintf("expected a local libbpfgo checkout at %s pinned to %s", libbpfgo, libbpfgoRequiredTag),
+		"rebuild the static toolchain with:",
+		fmt.Sprintf("  git -C %s checkout %s", libbpfgo, libbpfgoRequiredTag),
+		fmt.Sprintf("  git -C %s submodule update --init --recursive", libbpfgo),
+		fmt.Sprintf("  make -C %s libbpfgo-static", libbpfgo),
+	}, "\n")
+}
+
+// ensureVMLINUX dumps vmlinux.h from the build host's BTF once; the CO-RE
+// relocations make the object portable regardless of which host's types it
+// was compiled against.
+func ensureVMLINUX() error {
+	if _, err := os.Stat(vmlinuxPath); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stat %s: %w", vmlinuxPath, err)
+	}
+	output, err := sudoOutput("bpftool", "btf", "dump", "file", "/sys/kernel/btf/vmlinux", "format", "c")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(vmlinuxPath, []byte(output), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", vmlinuxPath, err)
+	}
+	return nil
+}
+
+// goEnv is the cgo environment every Go command needs once a package imports
+// libbpfgo: headers and the static libbpf from the pinned checkout.
+func goEnv() map[string]string {
+	libbpfgo := libbpfgoPath()
+	return map[string]string{
+		"CGO_CFLAGS": fmt.Sprintf("-I%s -I%s", filepath.Join(libbpfgo, "output"),
+			filepath.Join(libbpfgo, "selftest", "common")),
+		"CGO_LDFLAGS": fmt.Sprintf("-lelf -lzstd %s",
+			filepath.Join(libbpfgo, "output", "libbpf", "libbpf.a")),
+		"GOARCH":   "amd64",
+		"GOOS":     "linux",
+		"LIBBPFGO": libbpfgo,
+	}
+}
+
+func libbpfgoPath() string {
+	if libbpfgo := os.Getenv("LIBBPFGO"); libbpfgo != "" {
+		return libbpfgo
+	}
+	return filepath.Clean(filepath.Join(repoRoot(), defaultLibbpfgoPath))
+}
+
+func repoRoot() string {
+	root, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return root
+}
+
+// sudoOutput runs cmd as root: directly when mage already is root, else
+// through non-interactive sudo, so a missing sudoers rule fails instead of
+// hanging on a password prompt.
+func sudoOutput(cmd string, args ...string) (string, error) {
+	if os.Geteuid() == 0 {
+		return sh.Output(cmd, args...)
+	}
+	return sh.Output("sudo", append([]string{"-n", cmd}, args...)...)
+}
+
+func removeFilesByGlob(pattern string) error {
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return fmt.Errorf("glob %s: %w", pattern, err)
+	}
+	for _, match := range matches {
+		if err := removeFilesByPath(match); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func removeFilesByPath(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove %s: %w", path, err)
+	}
+	return nil
+}

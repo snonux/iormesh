@@ -36,6 +36,51 @@ exec-time pattern matching, stack capture and uprobes on the
 JDK's native I/O functions are new work in iormesh. See PLAN.md,
 "What ior does not give us".
 
+## Building and testing
+
+The tracer build is ior's, lifted in M1 (provenance headers name
+the ior commit). Prerequisites, as for ior: a libbpfgo checkout at
+`../libbpfgo` (or `$LIBBPFGO`) pinned to `v0.9.2-libbpf-1.5.1`
+and built with `make -C ../libbpfgo libbpfgo-static`; clang;
+bpftool; and non-interactive `sudo` for the two root reads
+(`/sys/kernel/tracing` formats, `/sys/kernel/btf/vmlinux`).
+
+```bash
+mage generate      # tracepoint formats -> C handlers, Go tables, Go types
+mage bpfBuild      # vmlinux.h (first run) + clang CO-RE -> iormesh.bpf.o
+mage build         # bpfBuild + go build ./... with the cgo environment
+mage test          # go test ./... (the generator's C harness tests too)
+mage vet           # go vet ./... with the cgo environment
+mage lint          # golangci-lint: errcheck + staticcheck SA
+mage fmt / fmtCheck
+mage clean         # keeps vmlinux.h (it needs root to recreate)
+mage workloadTest  # the Java workload, standalone (M0)
+```
+
+Run Go commands through Mage: bare `go test ./...` or
+`go vet ./...` cannot build `internal`, which imports libbpfgo,
+because only Mage sets `CGO_CFLAGS`/`CGO_LDFLAGS`.
+
+- **Generation host**: the committed artifacts were generated on
+  Linux 7.2 and match ior's byte for byte. On a kernel with
+  another tracepoint set `mage generate` stops at the diff of
+  `internal/c/generated_tracepoints_result.txt` without touching
+  the tree; `IORMESH_FORCE_GENERATE=1` adopts the new set (for
+  throwaway container builds — do not commit an older kernel's
+  deletions).
+- **vmlinux.h** is dumped from the build host's BTF and
+  gitignored, as in ior; CO-RE relocations make the object
+  portable anyway.
+- **Attach set**: handlers are generated for every syscall, but
+  without a `-trace-*` selector only M1's set attaches
+  (`tracepoints.DefaultSyscalls`). Widening it is a code change,
+  not a regeneration.
+- **External object**: `IORMESH_BPF_OBJECT=path.bpf.o` loads that
+  object instead of the embedded one.
+- **`//nolint` is banned** (`internal/buildgate`): a deliberate
+  discard is an explicit `_ =`; an exemption goes into
+  `.golangci.yml` with its reasoning.
+
 ## Tech choices
 
 - Go + libbpfgo + eBPF (CO-RE) — the same stack as ior, adopted

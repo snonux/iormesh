@@ -1,2 +1,12 @@
 /workload.jar
 /workload/classes/
+
+# BPF build outputs and inputs (as in ior): the object is rebuilt by
+# `mage bpfBuild`; vmlinux.h is dumped from the build host's BTF by
+# ensureVMLINUX and kept out of git like ior keeps it.
+*.o
+vmlinux.h
+# mage generate transients (removed by defer; swept by `mage clean`).
+*.new
+internal/c/generated_tracepoints.c.tmp-*
+*.test

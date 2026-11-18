@@ -395,23 +395,52 @@ marker opens around each scenario.
 normalizer → golden check → integration harness, on `file-basic`
 and `tcp-loopback`. PLAN.md: "M1 — Walking skeleton".
 
-**Step 1 — lift the build and generator from ior.** Copy with
-provenance headers: `Magefile.go` (keep `Build`, `Generate*`,
-`Test`, `Vet`, `Lint`, `Fmt*`, `IntegrationTest*`, `BpfBuild`;
-drop TUI/demo/bench targets), `internal/generate/`,
-`internal/tracepoints/`, `internal/types/`, `internal/bpfembed.go`
-(rename the env override to `IORMESH_BPF_OBJECT`),
-`internal/c/{maps.h,types.h,filter.c,fdname.c,fileident.c}`,
-`internal/c/vmlinux.h`, `scripts/build-with-docker.sh`. First
-commit: the copied tree builds and `mage generate` passes its diff
-gate with ior's full syscall set.
+**Step 1 — lift the build and generator from ior** (done, from
+ior `b21afc50328c`; every copied file names that commit and its
+changes in a provenance header):
 
-**Step 2 — narrow the attach set, not the generator.** Keep the
-generated handlers for all syscalls; M1 attaches only
+- Mage targets `Build`, `BpfBuild`, `Generate*`, `Test`, `Vet`,
+  `Lint`, `Fmt`, `FmtCheck`, `Clean` — split over
+  `magefile_bpf.go`, `magefile_generate.go` and `magefile_fmt.go`
+  beside M0's `Magefile.go`. `Build` compiles every package
+  (`go build ./...`) until `cmd/iormesh` exists (step 10). The
+  force switch is `IORMESH_FORCE_GENERATE`.
+- `internal/generate/`, `internal/tracepoints/`,
+  `internal/types/`, `internal/csvlist/` (a tracepoints
+  dependency), whole, with their tests; only the tests that check
+  ior's own docs were dropped.
+- `internal/c/`: every hand-written file but ior's raw-tracepoint
+  prototype `rawsyscall.c` — not just
+  `maps.h`/`types.h`/`filter.c`/`fdname.c`/`fileident.c`, because
+  the generated handlers call helpers from all of them (restart,
+  exec, recv, poll, handle, iouring). `ior.bpf.c` became
+  `iormesh.bpf.c`. The C macros keep ior's `IOR_` prefix so ior
+  fixes port without renaming.
+- `internal/bpfembed.go` (override `IORMESH_BPF_OBJECT`,
+  object `iormesh.bpf.o`); `internal/gatecmd/`, a trimmed
+  `internal/buildgate/` (argv pins, lint-config review, the
+  planted-defect lint run, no nested modules, the `//nolint`
+  ban) and `.golangci.yml`.
+- `vmlinux.h` is dumped from the build host's BTF on first
+  `mage bpfBuild` and gitignored, as in ior.
+- Not lifted yet: `IntegrationTest*` (step 11, with the
+  harness) and `scripts/build-with-docker.sh` (the container
+  build needs the tracer binary of step 10; deployed binaries
+  need it by M4).
+
+Regenerating on the generation host reproduces ior's committed
+artifacts byte for byte, so `mage generate` passes its diff gate
+with ior's full syscall set.
+
+**Step 2 — narrow the attach set, not the generator** (done).
+The generated handlers stay for all syscalls; only attachment
+narrows. `tracepoints.DefaultSyscalls()` is M1's set —
 `open`/`openat`/`openat2`, `read`, `write`, `close`, `connect`,
-`accept`/`accept4`. ior already selects tracepoints at runtime
-(`internal/tracepoints/selector.go`, `-trace-syscalls`) — reuse
-that, with M1's set as the default.
+`accept`/`accept4` — and replaces ior's FS-family fallback in
+`ParseSelectorWithDimensions`, the selector ior already uses for
+`-trace-syscalls`: with no `-trace-*` selector, exactly these
+attach; an explicit selector replaces the set, a `-no-trace-*`
+one narrows it. Nothing attaches yet — the loader is step 5.
 
 **Step 3 — the target filter becomes a map.** ior filters on one
 TGID baked into rodata (`PID_FILTER`, `internal/c/filter.c`).

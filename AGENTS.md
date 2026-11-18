@@ -1,8 +1,9 @@
 # AGENTS.md — conventions for agents working in this repo
 
 iormesh is early in implementation: M0 (the Java test workload
-under `workload/`) is the first code; everything else is still
-plan. [PLAN.md](PLAN.md) is the working plan and the source of
+under `workload/`) and M1's build and generator lifted from ior
+(`internal/`, the `magefile_*.go` targets) are the first code;
+everything else is still plan. [PLAN.md](PLAN.md) is the working plan and the source of
 truth for scope, spikes (S1–S3), milestones (M0–M7), and decisions. `ior`
 (`../ior`) is the reference project for BPF/C code generation and
 integration tests — consult it before inventing patterns.
@@ -14,6 +15,20 @@ Picking up a spike or milestone? Read its section in
 of work, code sketches, tests — after PLAN.md. If a sketch there
 disagrees with PLAN.md, the plan is right; fix the guide in the
 same commit.
+
+## Build and test
+
+Run everything through Mage — `mage generate`, `mage build`,
+`mage test`, `mage vet`, `mage lint`, `mage fmtCheck`,
+`mage workloadTest`. Bare `go test`/`go vet` cannot build the
+packages that import libbpfgo. Prerequisites (libbpfgo at
+`../libbpfgo`, pinned tag, clang, bpftool, `sudo -n`) and the
+generation-host rule are in [docs/build.md](docs/build.md);
+ior's AGENTS.md ("Build/Test Commands", "Code Generation") is
+the longer story. Files copied from ior carry a provenance
+header (`// Adapted from ior <path> @ <commit>.` plus one
+`Changes:` line); keep it current when you change such a file.
+Never write `//nolint` — a test fails on it.
 
 ## Documentation layout — keep it that way
 
