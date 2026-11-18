@@ -89,6 +89,8 @@ Details: [docs/security.md](./docs/security.md).
 - [docs/implementation.md](./docs/implementation.md) — the
   implementation guide: work packages in execution order, with
   code sketches.
+- [docs/visualization.md](./docs/visualization.md) — exploring
+  a consolidated mesh: local site, terminal UI, plain text.
 - [docs/trace-scope.md](./docs/trace-scope.md) — what iormesh
   traces, and why each family is in the model.
 - [docs/output-contract.md](./docs/output-contract.md) — the

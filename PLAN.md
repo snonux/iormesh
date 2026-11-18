@@ -497,6 +497,9 @@ Kubernetes (M7) build on it.
   app over TCP, the same join fuses both sides into one
   cross-project edge, giving the complete picture across
   both. All views (M5) then run locally on the controller.
+  From M4 on, `collect` ends by printing a plain-text summary
+  of the merged mesh (services, edges, health, unresolved
+  peers); the site and the TUI follow in M5.
 - **Clock reconciliation from the traffic itself**: every
   fused connection gives send-before-receive constraints in
   both directions; together they bound the clock offset per
@@ -571,20 +574,34 @@ Kubernetes (M7) build on it.
 
 ### M5 — Views, query and the LLM eval
 
-- TUI and/or JSON export rendering the full mesh: hosts, PIDs,
-  sockets, files, and Java stacks, over time; endpoints named
-  in the service-interaction database (M4) render as their
-  service.
+- **Every consolidation run ends in something to explore.**
+  `iormeshctl collect` finishes by building one view model of
+  the merged mesh and rendering it three ways — never three
+  separate readings of the data (design:
+  [docs/visualization.md](docs/visualization.md)):
+  - a **local site** (static HTML/JS/SVG, opened with
+    `iormeshctl open`) — the interactive explorer;
+  - a **terminal UI** (`iormeshctl tui`, Bubble Tea — ior's
+    libraries) for SSH sessions and browser-less hosts;
+  - **plain text** (`iormeshctl show …`, also what `collect`
+    prints) for reading, piping and LLMs.
+
+  All three show hosts, PIDs, sockets, files and Java stacks
+  over time; endpoints named in the service-interaction
+  database (M4) render as their service; unresolved edges,
+  time-ordered hops and unattributed I/O are visible in each.
 - **Deterministic SVG export**: iormesh builds SVG diagrams of the
   (sub)mesh itself — hosts as layers, processes, files, sockets
   and method frames as nodes, typed edges. Same normalized
   graph in, same SVG out: diffable, and M0 scenarios get visual
   goldens.
-- **Interactive explorer**: walk the generated mesh — pan/zoom,
-  filter by host/PID/pod/time/method, click a node or edge,
-  follow a connection across hosts, scrub time. Form factor is
-  decision #11 (self-contained HTML vs local web UI vs
-  TUI-first).
+- **Interactive explorer (the local site)**: walk the mesh —
+  pan/zoom, filter by host/PID/pod/time/method, click a node or
+  edge, follow a connection across hosts, open a conversation
+  as a sequence diagram and any step down to its Java stack.
+  Static files, no server, no dependencies, no network; one
+  folder per run, kept until the operator deletes it
+  (decision #11).
 - **Sequence view (the end-goal rendering)**: a deterministic
   sequence-diagram export of mesh conversations — lifelines
   are services (named via the service-interaction database),
@@ -631,7 +648,12 @@ Kubernetes (M7) build on it.
 - Acceptance: an operator can answer "what does this process touch,
   and what touches it back" from one screen; `add` → `deploy` →
   `collect` yields the merged mesh's SVG, matching its golden;
-  named services render by name in graph and SVG;
+  named services render by name in graph and SVG; the same
+  `collect` leaves a local site that opens from `file://` with
+  no network request and no console error, and `iormeshctl
+  tui` and `iormeshctl show` present the same view model —
+  the microservices scenario can be walked from the mesh to
+  one step's Java stack in each of the three;
   the microservices scenario's sequence view
   shows every service-to-service hop on its causing Java thread
   (gateway X → orders Y → inventory Z), with each thread's
@@ -766,6 +788,12 @@ answer), and deferred.
 - **#19 Runtime control** — the transient systemd unit (M4):
   graceful stop via SIGTERM, flag changes via stop-and-restart.
   No control file, no socket.
+- **#11 Explorer form factor** — all three, on one view model:
+  a generated static site (HTML/JS/SVG, no server, opens from
+  `file://`), a Bubble Tea terminal UI, and plain text. A
+  local web server was rejected: it adds a listening socket
+  for nothing the static site cannot do at these sizes. Design
+  in docs/visualization.md.
 
 ### Open — blocks M0/M1
 
@@ -926,14 +954,6 @@ answer), and deferred.
   what the controller does when a tracer exits on the limit
   (surface it, redeploy with a lower duration, or nothing).
   *Default: both limits, surface only.*
-
-### Open — blocks M5
-
-- **#11 Explorer form factor** — generated self-contained HTML
-  (embeds the graph, opens anywhere, zero server) vs embedded
-  local web UI (live filtering over bigger meshes) vs
-  TUI-first; deterministic SVG ships regardless. *Default:
-  self-contained HTML.*
 
 ### Open — blocks M7
 
@@ -1338,7 +1358,7 @@ whether the engine is Docker or Podman:
 | Output contract  | versioned JSON + parquet | NDJSON live/golden, parquet bulk files, graph, summary |
 | Normalizer       | Go, cgo-free | symbolic ids, marker brackets, golden check |
 | Controller (iormeshctl) | Go, cgo-free | registry, deploy, collect, offline merge, service-interaction db, expand, query, rm cleanup, projects |
-| Views            | Go + SVG | deterministic SVG + sequence-diagram exports, interactive explorer, TUI |
+| Views            | Go + SVG/HTML/JS | one view model; local site, Bubble Tea TUI, plain text; deterministic SVG + sequence exports |
 | K8s mode         | manifests | sidecar/debug-container deploy, pod identity |
 | Route map        | YAML + k8s API | FQDN→ingress→service/workload edges |
 
@@ -1392,7 +1412,11 @@ internal/expand/      # controller-driven mesh expansion:
 internal/query/       # trace slicing for humans and LLMs
                       #   (cgo-free)
 internal/render/      # deterministic SVG diagram generation
-internal/explore/     # interactive explorer (self-contained HTML/JS)
+internal/viewmodel/   # the one model every surface renders
+                      #   (cgo-free)
+internal/site/        # local site: embedded HTML/JS, data files
+internal/tui/         # Bubble Tea terminal explorer
+internal/textview/    # plain-text views: show, collect summary
 internal/k8s/         # cgroup→pod identity mapping, k8s metadata
 internal/routemap/    # FQDN→ingress→workload map (config + k8s discovery)
 internal/bpfembed.go  # go:embed of the compiled .bpf.o + env override

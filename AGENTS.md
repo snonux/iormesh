@@ -21,7 +21,7 @@ same commit.
   not accumulate detail sections again.
 - **Detailed documentation lives in `docs/`**, one topic per
   file (architecture, trace-scope, output-contract, testing,
-  security, build, implementation), each linked from the
+  security, build, implementation, visualization), each linked from the
   README's Documentation section.
 - **Diagrams are generated**: `docs/diagrams/*.svg` come from
   `docs/diagrams/gen.py` (`python3 docs/diagrams/gen.py

@@ -124,9 +124,10 @@ views — happens on the controller.
     happens-before order, each hop attributed to the Java thread
     that caused it, interleaved with that thread's local file
     I/O.
-  - Interactive explorer over the collected graph: filter by
-    host/PID/pod/time/method, click a node or edge, follow a
-    connection across hosts (form factor TBD — see PLAN.md).
+  - Every `collect` ends in something to explore: a local
+    static site, a Bubble Tea terminal UI and plain text, all
+    rendered from one view model — see
+    [visualization.md](visualization.md).
   - `iormeshctl query` slices the merged trace into size-capped
     NDJSON — what an LLM or a human actually reads — and an eval
     with known answers tests whether the outputs really are

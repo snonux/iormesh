@@ -1275,6 +1275,13 @@ plus one run on two real hosts.
 
 ## M5 — views, query, eval
 
+The three surfaces — local site, terminal UI, plain text — and
+the view model they share are designed in
+[visualization.md](visualization.md), including the build order
+(V1 lands with M4, V2–V4 here). Build `internal/viewmodel` and
+its goldens first; a renderer never reads the merged graph
+directly.
+
 ![The two joins behind one line of the sequence view](diagrams/join.svg)
 
 **Determinism rules** for everything in `internal/render` — a
