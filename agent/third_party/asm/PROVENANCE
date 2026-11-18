@@ -1,0 +1,26 @@
+ASM 9.11.1 — vendored, unmodified, for the Java agent (M3).
+
+What:     org.ow2.asm:asm:9.11.1 (core ASM: ClassReader, ClassWriter,
+          visitors; no asm-commons/asm-tree)
+From:     https://repo1.maven.org/maven2/org/ow2/asm/asm/9.11.1/asm-9.11.1.jar
+Fetched:  2026-11-18
+SHA-1:    edb29aa0c2da2918ce338fb7b218c21ea138dde2 (matches Maven Central's
+          asm-9.11.1.jar.sha1)
+SHA-256:  ae4e6e10d59d0a1500317764b21881ad883f8550e33c66e6142f7032c6fb566c
+License:  BSD-3-Clause (LICENSE.txt, from the ASM_9_11_1 tag of
+          https://gitlab.ow2.org/asm/asm)
+
+Why vendored: the agent build is JDK-only (no Maven or Gradle) and must
+work offline, at build and test time. `mage agentBuild` checks the
+SHA-256 above before using the jar, then relocates its classes to
+iormesh.agent.shaded.asm (agent/tools/Relocate.java) so the agent never
+clashes with an ASM the traced application ships.
+
+Why this version: 9.11.1 reads class files up to Java 28 (Opcodes.V28)
+and is itself Java 5 bytecode, so it runs on the agent's JDK 17 floor
+(PLAN.md decision #29) and parses the JDK classes of 17 through 27-ea.
+
+To update: download the new asm-<v>.jar from Maven Central, compare its
+SHA-1 with the published .sha1, replace the jar and LICENSE.txt, and
+update the version, both hashes here and asmJar/asmSHA256 in
+magefile_agent.go in the same commit.

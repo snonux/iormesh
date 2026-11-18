@@ -1047,7 +1047,11 @@ answer), and deferred.
   from 21 to 25 (27-ea changes two signatures outside the set),
   while 17 differs (no `UnixFileDispatcherImpl`/`UnixDispatcher`,
   RAF `readBytes` instead of `readBytes0`) — one hook-table
-  variant for 17. *Default: agent runs on 17+; anything
+  variant for 17. M3 (task 0b4) builds the agent for 17 with
+  shaded ASM and ships two table variants, `jdk17` (17–20) and
+  `jdk21` (21+); the agent runs and its hooks fire on 17, 25 and
+  27-ea (no 21 runtime was at hand; 18–20 untested).
+  *Default: agent runs on 17+; anything
   older is traced without Java attribution (the non-Java
   node shape).*
 - **#22 HTTP capture mechanics** — agent-boundary hooks (v1

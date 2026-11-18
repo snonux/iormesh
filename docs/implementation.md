@@ -1497,13 +1497,21 @@ CLOCK_MONOTONIC; the transport is an mmap ring.
 ```
 agent/
   bridge/src/iormesh/bridge/Hooks.java       # bootstrap-visible
+  bridge/src/iormesh/bridge/StackIds.java    # called by Hooks.enter
   bridge/src/iormesh/bridge/Ring.java        # mmap spool writer
   core/src/iormesh/agent/Agent.java          # premain/agentmain
-  core/src/iormesh/agent/HookTable.java      # class → methods → id
+  core/src/iormesh/agent/AgentArgs.java      # bridge=, table=, debug=
+  core/src/iormesh/agent/Bridge.java         # bootstrap append + module
+  core/src/iormesh/agent/HookTable.java      # loads the tables below
   core/src/iormesh/agent/BoundaryTransformer.java
-  core/src/iormesh/agent/StackIds.java
+  core/resources/iormesh/agent/hooks-jdk17.tsv  # 17–20
+  core/resources/iormesh/agent/hooks-jdk21.tsv  # 21+
   core/src/iormesh/agent/http/…              # one file per library
   core/src/iormesh/agent/otel/SpanContext.java
+  test/src/iormesh/agent/…    # plain-main unit tests + AgentSmoke
+  tools/Relocate.java         # shades ASM (build tool)
+  third_party/asm/            # ASM 9.11.1 jar, LICENSE, PROVENANCE
+magefile_agent.go, magefile_agenttest.go
 internal/agentspool/    # Go reader for the ring (cgo-free)
 internal/correlate/javajoin.go
 ```
@@ -1512,10 +1520,22 @@ internal/correlate/javajoin.go
 
 1. Build: `mage agentBuild` → `iormesh-agent.jar` with the bridge
    jar nested as a resource; ASM shaded under
-   `iormesh.agent.shaded` (the S1 prototype used
+   `iormesh.agent.shaded.asm` (the S1 prototype used
    `java.lang.classfile`, final only in JDK 24 — M3 must run on
    21 and, per #29, 17). Manifest: `Premain-Class`,
-   `Agent-Class`, `Can-Retransform-Classes`.
+   `Agent-Class`, `Can-Retransform-Classes`. Done (task 0b4):
+   JDK-only like the workload, `--release 17`. ASM is vendored —
+   the released `asm-9.11.1.jar` with its BSD-3 license and a
+   PROVENANCE file (URL, SHA-1 matching Maven Central, SHA-256)
+   — rather than downloaded by mage: build and tests stay offline,
+   and mage checks the pinned SHA-256 before use. Shading needs
+   no Maven: `agent/tools/Relocate.java` rewrites the constant
+   pool's Utf8 entries (`org/objectweb/asm/` →
+   `iormesh/agent/shaded/asm/`) and copies the rest of each class
+   file unchanged; the core imports the relocated package
+   directly. 9.11.1 reads class files up to Java 28; a JDK newer
+   than ASM leaves the class unrewritten (stderr note, no
+   attribution), never a broken target.
 2. Install, from `premain` and `agentmain` alike: append the
    bridge jar to the bootstrap search, then
    `Instrumentation.redefineModule(java.base, extraReads =
@@ -1524,11 +1544,62 @@ internal/correlate/javajoin.go
    path (thread state, `StackWalker`), then retransform. Expect
    the CDS warning on stderr ("Sharing is only supported for boot
    loader classes…") — the workload's stdout contract is intact.
+   Done (task 0b4), but for the ring (step 4, next): the nested
+   bridge jar is copied to a temp file (the bootstrap path takes
+   files only); the bridge holds `Hooks` *and* `StackIds`, since
+   rewritten java.base code cannot see the agent's loader; the
+   transformer rewrites one class of its own before the first JDK
+   class, so ASM's class loading never lands in a bracket.
+   `Hooks` kept S1's `enter(id)`/`exit(id)` with a per-thread
+   bracket stack (not the token sketched in S1's Experiment 2):
+   nested hooks need the stack anyway. Until the ring lands, a
+   closed bracket bumps a per-hook counter; the agent option
+   `debug=<path>` dumps the table with each row's status
+   (`applied`, `missing` = this JDK lacks the method, `unloaded`)
+   and count at exit. Any install failure prints
+   `iormesh-agent: disabled: …` and leaves the JVM running.
+   `BoundaryTransformer` rewrites only bootstrap-loaded classes
+   of the table and only their listed methods (exact
+   descriptors); it writes the catch-all handler's stack map
+   frame itself instead of `COMPUTE_FRAMES`, which would load
+   classes from inside a transformer. `StackIds` drops the
+   bridge's own frames by package, keeps 10, and stores a stack's
+   frames (`class#method(file:line)`) the first time its id is
+   seen, for the ring's STACK record.
 3. `HookTable` is data, not code: a table of
    `(class, method, descriptor, hookId, native, allowed syscalls)`
    so decision #29's per-JDK differences become table variants and
    the tracer gets the same table for its uprobe set (S1's hook
-   table above).
+   table above). Done (task 0b4): one TSV per variant (columns
+   id, kind, class, method, descriptor, native, syscalls) —
+   `jdk17` for 17–20, `jdk21` for 21+, chosen by
+   `Runtime.version().feature()`, below 17 no attribution. One
+   row per overload. A test walks each row against the running
+   JDK's class bytes: the method exists, has a body and reaches
+   its native within three same-class calls (JDK 25 routes
+   `RandomAccessFile.write` through a JFR `implWrite` that 21
+   does not have). Beyond S1's table, 17 sends socket writes and
+   closes from `SocketDispatcher` to `FileDispatcherImpl`'s
+   natives, and `FileDispatcherImpl.close` reaches the already
+   hooked `FileDescriptor.close`.
+
+   Tests (`mage agentTest`): the transformer rewrites exactly the
+   listed methods of a fixture (unlisted ones and an overload stay
+   instruction-for-instruction the same), the rewritten class
+   verifies and closes one bracket per call on return, exception
+   and inner-handler paths; an unknown class, a class without a
+   listed method and a non-bootstrap loader are no-ops; table
+   parsing and the running-JDK check; `StackIds` per call site.
+   Smoke: `AgentSmoke` (file, RAF, `Files`, TCP loopback) under
+   `-javaagent` must close a bracket of every hook kind with no
+   `missing` row, and `workload.jar file-basic` under the agent
+   keeps its stdout/stderr contract and fires its open/write/read
+   hooks. Checked on 25, 27-ea and 17 (GraalVM CE 17.0.9, via
+   `IORMESH_AGENT_JDKS`); the smoke runs with boot-class
+   verification on (`-XX:+BytecodeVerificationLocal`). Live attach
+   fired the hooks on 25 (by hand, not in `agentTest`). Not run: a
+   JDK 21 runtime (none installed; the `jdk21` rows come from S1's
+   check of the 21 sources), 18–20.
 4. The ring (decision #27): one file per JVM,
    `<spool dir>/<pid>.ring`, in the tracer-owned directory, mapped
    `MAP_SHARED` by agent and tracer. Header (magic, capacity, pid,

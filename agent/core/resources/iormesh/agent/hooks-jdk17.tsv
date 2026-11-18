@@ -1,0 +1,72 @@
+# iormesh agent hook table, variant jdk17 (JDK 17 to 20; checked on 17 —
+# GraalVM CE 17.0.9, a HotSpot JDK — while 18 to 20 are assumed to match).
+# Where 17 differs from the jdk21 variant (decision #29): file channels
+# go through sun/nio/ch/FileDispatcherImpl (no UnixFileDispatcherImpl);
+# socket writes and closes call FileDispatcherImpl's natives from
+# SocketDispatcher (no UnixDispatcher); FileDispatcherImpl.close reaches
+# FileDescriptor.close, already hooked; RandomAccessFile's readBytes and
+# writeBytes are themselves native, so read/write are hooked; Net's
+# socket factories take a "reuse" flag; UnixNativeDispatcher has
+# stat(UnixPath) instead of stat2.
+# Written by hand from javap -p -s of the JDK classes and checked against
+# the running JDK by `mage agentTest` (HookTableTest.matchesRunningJdk).
+# One row per hooked Java method (overloads are separate rows). Columns,
+# tab-separated:
+#   id        hook id the rewritten method passes to Hooks.enter/exit
+#             (unique in this file, 1..; ids are per variant, the agent
+#             reports the table it used)
+#   kind      the I/O the bracket stands for (open, read, write, close,
+#             seek, socket, bind, connect, listen, accept, shutdown,
+#             unlink, rename, stat)
+#   class     internal name of the class whose method body is rewritten
+#   method    method name
+#   desc      method descriptor
+#   native    the JNI native the body calls (same class unless qualified
+#             as owner.name) — the tracer's uprobe for this hook
+#   syscalls  the syscall kinds allowed under that native; anything else
+#             inside the bracket is JVM work (S1)
+1	open	java/io/FileInputStream	open	(Ljava/lang/String;)V	open0	openat,fstat
+2	read	java/io/FileInputStream	read	()I	read0	read
+3	read	java/io/FileInputStream	read	([B)I	readBytes	read
+4	read	java/io/FileInputStream	read	([BII)I	readBytes	read
+5	open	java/io/FileOutputStream	open	(Ljava/lang/String;Z)V	open0	openat,fstat
+6	write	java/io/FileOutputStream	write	(I)V	write	write
+7	write	java/io/FileOutputStream	write	([B)V	writeBytes	write
+8	write	java/io/FileOutputStream	write	([BII)V	writeBytes	write
+9	open	java/io/RandomAccessFile	open	(Ljava/lang/String;I)V	open0	openat,fstat
+10	read	java/io/RandomAccessFile	read	()I	read0	read
+11	read	java/io/RandomAccessFile	read	([B)I	readBytes	read
+12	read	java/io/RandomAccessFile	read	([BII)I	readBytes	read
+13	write	java/io/RandomAccessFile	write	(I)V	write0	write
+14	write	java/io/RandomAccessFile	write	([B)V	writeBytes	write
+15	write	java/io/RandomAccessFile	write	([BII)V	writeBytes	write
+16	seek	java/io/RandomAccessFile	seek	(J)V	seek0	lseek
+17	close	java/io/FileDescriptor	close	()V	close0	close
+18	read	sun/nio/ch/FileDispatcherImpl	read	(Ljava/io/FileDescriptor;JI)I	read0	read
+19	read	sun/nio/ch/FileDispatcherImpl	pread	(Ljava/io/FileDescriptor;JIJ)I	pread0	pread64
+20	read	sun/nio/ch/FileDispatcherImpl	readv	(Ljava/io/FileDescriptor;JI)J	readv0	readv
+21	write	sun/nio/ch/FileDispatcherImpl	write	(Ljava/io/FileDescriptor;JI)I	write0	write
+22	write	sun/nio/ch/FileDispatcherImpl	pwrite	(Ljava/io/FileDescriptor;JIJ)I	pwrite0	pwrite64
+23	write	sun/nio/ch/FileDispatcherImpl	writev	(Ljava/io/FileDescriptor;JI)J	writev0	writev
+24	seek	sun/nio/ch/FileDispatcherImpl	seek	(Ljava/io/FileDescriptor;J)J	seek0	lseek
+25	read	sun/nio/ch/SocketDispatcher	read	(Ljava/io/FileDescriptor;JI)I	read0	read,recvfrom
+26	read	sun/nio/ch/SocketDispatcher	readv	(Ljava/io/FileDescriptor;JI)J	readv0	readv
+27	write	sun/nio/ch/SocketDispatcher	write	(Ljava/io/FileDescriptor;JI)I	sun/nio/ch/FileDispatcherImpl.write0	write,sendto
+28	write	sun/nio/ch/SocketDispatcher	writev	(Ljava/io/FileDescriptor;JI)J	sun/nio/ch/FileDispatcherImpl.writev0	writev
+29	close	sun/nio/ch/SocketDispatcher	close	(Ljava/io/FileDescriptor;)V	sun/nio/ch/FileDispatcherImpl.close0	close
+30	socket	sun/nio/ch/Net	socket	(Ljava/net/ProtocolFamily;Z)Ljava/io/FileDescriptor;	socket0	socket,setsockopt
+31	socket	sun/nio/ch/Net	serverSocket	(Ljava/net/ProtocolFamily;Z)Ljava/io/FileDescriptor;	socket0	socket,setsockopt
+32	bind	sun/nio/ch/Net	bind	(Ljava/net/ProtocolFamily;Ljava/io/FileDescriptor;Ljava/net/InetAddress;I)V	bind0	bind
+33	connect	sun/nio/ch/Net	connect	(Ljava/net/ProtocolFamily;Ljava/io/FileDescriptor;Ljava/net/InetAddress;I)I	connect0	connect
+34	listen	sun/nio/ch/NioSocketImpl	listen	(I)V	sun/nio/ch/Net.listen	listen
+35	accept	sun/nio/ch/NioSocketImpl	accept	(Ljava/net/SocketImpl;)V	sun/nio/ch/Net.accept	accept,accept4
+36	shutdown	sun/nio/ch/NioSocketImpl	shutdownInput	()V	sun/nio/ch/Net.shutdown	shutdown
+37	shutdown	sun/nio/ch/NioSocketImpl	shutdownOutput	()V	sun/nio/ch/Net.shutdown	shutdown
+38	accept	sun/nio/ch/ServerSocketChannelImpl	implAccept	(Ljava/io/FileDescriptor;Ljava/io/FileDescriptor;[Ljava/net/SocketAddress;)I	sun/nio/ch/Net.accept	accept,accept4
+39	open	sun/nio/fs/UnixNativeDispatcher	open	(Lsun/nio/fs/UnixPath;II)I	open0	openat
+40	unlink	sun/nio/fs/UnixNativeDispatcher	unlink	(Lsun/nio/fs/UnixPath;)V	unlink0	unlink,unlinkat
+41	rename	sun/nio/fs/UnixNativeDispatcher	rename	(Lsun/nio/fs/UnixPath;Lsun/nio/fs/UnixPath;)V	rename0	rename,renameat,renameat2
+42	stat	sun/nio/fs/UnixNativeDispatcher	lstat	(Lsun/nio/fs/UnixPath;Lsun/nio/fs/UnixFileAttributes;)V	lstat0	lstat,newfstatat,statx
+43	close	sun/nio/fs/UnixNativeDispatcher	close	(I)V	close0	close
+44	stat	sun/nio/fs/UnixNativeDispatcher	stat	(Lsun/nio/fs/UnixPath;Lsun/nio/fs/UnixFileAttributes;)V	stat0	stat,newfstatat,statx
+45	stat	sun/nio/fs/UnixNativeDispatcher	stat	(Lsun/nio/fs/UnixPath;)I	stat1	stat,newfstatat,statx

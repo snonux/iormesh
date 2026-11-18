@@ -12,3 +12,7 @@ vmlinux.h
 *.new
 internal/c/generated_tracepoints.c.tmp-*
 *.test
+
+# Java agent build (mage agentBuild).
+/iormesh-agent.jar
+/agent/build/

@@ -1,0 +1,91 @@
+package iormesh.bridge;
+
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * The Java stack at an I/O boundary, as a 64-bit id (decision #6: the
+ * agent walks the stack with StackWalker at the hook, nothing else).
+ *
+ * The id hashes the caller frames, so a call site that does I/O in a
+ * loop costs one walk and one hash per call but stores its frames once:
+ * the first time an id is seen its frames are kept for {@link #frames},
+ * from which the ring transport (M3 step 4) will write a STACK record.
+ *
+ * Lives in the bridge (bootstrap path) because {@link Hooks#enter} calls
+ * it from rewritten java.base code, which cannot see the agent's own
+ * class loader. The walk is the agent's dominant cost (S1: ≈8 µs of a
+ * ≈8.3 µs bracket on a loaded host), which is why the depth is capped.
+ */
+public final class StackIds {
+    /** S1's depth: enough to reach the application frame above the JDK's. */
+    static final int MAX_FRAMES = 10;
+    /** Bounds the frame table if an app has unboundedly many call sites. */
+    static final int MAX_KNOWN = 1 << 16;
+    /** 0 means "no stack" (stack walking off, or a skipped bracket). */
+    public static final long NONE = 0;
+
+    private static final StackWalker WALKER = StackWalker.getInstance();
+    private static final String OWN_PACKAGE = "iormesh.bridge.";
+    private static final ConcurrentHashMap<Long, String[]> KNOWN = new ConcurrentHashMap<>();
+
+    private StackIds() {}
+
+    /**
+     * Returns the id of the current stack below the bridge: the first
+     * frame is the hooked JDK method, then its callers. Frames of this
+     * package are dropped by name rather than by a fixed skip count, so
+     * the id does not depend on how the bridge calls this.
+     */
+    public static long current() {
+        List<StackWalker.StackFrame> frames = WALKER.walk(s -> s
+                .dropWhile(f -> f.getClassName().startsWith(OWN_PACKAGE))
+                .limit(MAX_FRAMES)
+                .toList());
+        long id = hash(frames);
+        if (KNOWN.size() < MAX_KNOWN && !KNOWN.containsKey(id)) {
+            KNOWN.putIfAbsent(id, describe(frames));
+        }
+        return id;
+    }
+
+    /**
+     * Returns the frames recorded for id, innermost first, as
+     * {@code class#method(file:line)}, or null if the id is unknown.
+     */
+    public static String[] frames(long id) {
+        String[] f = KNOWN.get(id);
+        return f == null ? null : f.clone();
+    }
+
+    /** The number of distinct stacks seen so far. */
+    public static int size() {
+        return KNOWN.size();
+    }
+
+    /**
+     * FNV-1a-style mix of class, method and bytecode index per frame. The
+     * bci tells two calls in one method apart; a 64-bit collision merges
+     * two stacks, which at the expected call-site counts is negligible.
+     */
+    private static long hash(List<StackWalker.StackFrame> frames) {
+        long h = 0xcbf29ce484222325L;
+        for (StackWalker.StackFrame f : frames) {
+            h = (h ^ f.getClassName().hashCode()) * 0x100000001b3L;
+            h = (h ^ f.getMethodName().hashCode()) * 0x100000001b3L;
+            h = (h ^ f.getByteCodeIndex()) * 0x100000001b3L;
+        }
+        return h == NONE ? 1 : h;
+    }
+
+    private static String[] describe(List<StackWalker.StackFrame> frames) {
+        String[] out = new String[frames.size()];
+        for (int i = 0; i < out.length; i++) {
+            StackWalker.StackFrame f = frames.get(i);
+            String file = f.getFileName() == null ? "Unknown Source" : f.getFileName();
+            out[i] = f.getClassName() + "#" + f.getMethodName()
+                    + "(" + file + ":" + f.getLineNumber() + ")";
+        }
+        return out;
+    }
+}
