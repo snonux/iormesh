@@ -1,5 +1,16 @@
-# JDK 21 natives, grepped from openjdk/jdk21u master sources (no JDK 21
-# runtime on the test host): raw.githubusercontent.com/openjdk/jdk21u/master/src/java.base/...
+# JDK 21 natives, grepped from the openjdk/jdk21u sources (no JDK 21
+# runtime on the test host). Source: jdk21u master, commit
+# 70b7fe11759210c7aec57d8913164c9113a72ce5 (2026-11-18; newest tag then
+# jdk-21.0.14+2), files fetched from
+#   https://raw.githubusercontent.com/openjdk/jdk21u/<commit>/src/java.base/
+#   {share,unix,linux}/classes/<pkg>/<Class>.java
+# for FileInputStream, FileOutputStream, RandomAccessFile, FileDescriptor,
+# FileDispatcherImpl (linux), UnixFileDispatcherImpl, SocketDispatcher,
+# UnixDispatcher, Net, IOUtil, NioSocketImpl, UnixNativeDispatcher, then
+#   for f in *.java; do echo "== $f"
+#     grep -E '^\s+[a-z ]*native ' "$f" | sed 's/^ *//'; done
+# (multi-line declarations show their first line only). First fetched
+# from master; re-fetched at the commit above and byte-identical.
 == sun_nio_ch_FileDispatcherImpl.java
 static native long transferTo0(FileDescriptor src, long position,
 static native long transferFrom0(FileDescriptor src, FileDescriptor dst,

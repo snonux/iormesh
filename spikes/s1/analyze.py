@@ -10,8 +10,12 @@ Usage: analyze.py <log> [--all] [--pairs]
            whose syscall the native never issues itself (pread of the
            jimage under open0, say) is a mark leaking onto JVM work.
 
-The declared events (expect.json) are the I/O syscalls of the scenario
-thread; the summary line counts how many of them carried a mark.
+The summary line counts "declared-kind" syscalls: every syscall of a
+kind expect.json uses (openat, read, write, close, connect, accept,
+unlink) on the scenario thread inside the bracket — the declared events
+plus same-kind JDK work such as class loading from the app jar, the
+marker line on stderr or the client's net.properties read. It is not a
+count of expect.json's events.
 """
 import collections
 import subprocess
@@ -40,7 +44,7 @@ def syscall_names():
 
 def parse(path):
     """Returns enter events in order, each with its exit ret and path."""
-    events, open_by_tid, paths = [], {}, {}
+    events, open_by_tid, pending = [], {}, {}
     for line in open(path, errors="replace"):
         f = line.rstrip("\n").split("\t")
         if f[0] == "E" and len(f) == 9 and int(f[4]) == URETPROBE_NR:
@@ -49,6 +53,9 @@ def parse(path):
             ev = {"ns": int(f[1]), "tid": int(f[2]), "comm": f[3],
                   "nr": int(f[4]), "a": f[5:8], "mark": f[8],
                   "ret": None, "path": None}
+            p = pending.pop(ev["tid"], None)
+            if p is not None and p[0] == ev["nr"]:
+                ev["path"] = p[1]
             events.append(ev)
             open_by_tid[ev["tid"]] = ev
         elif f[0] == "X" and len(f) == 5:
@@ -56,10 +63,15 @@ def parse(path):
             if ev is not None and ev["nr"] == int(f[3]):
                 ev["ret"] = int(f[4])
         elif f[0] == "P" and len(f) == 5:
-            paths[int(f[2])] = f[4]
-            ev = open_by_tid.get(int(f[2]))
-            if ev is not None:
+            # A path belongs to the in-flight syscall of the same TID *and*
+            # nr. Both lines come from sys_enter probes whose order is not
+            # guaranteed, so a P seen first waits for its E.
+            tid, nr = int(f[2]), int(f[3])
+            ev = open_by_tid.get(tid)
+            if ev is not None and ev["nr"] == nr and ev["path"] is None:
                 ev["path"] = f[4]
+            else:
+                pending[tid] = (nr, f[4])
     return events
 
 

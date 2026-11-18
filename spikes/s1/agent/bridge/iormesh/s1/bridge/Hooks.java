@@ -14,8 +14,10 @@ import java.util.stream.Collectors;
  * caller stack) in memory; nothing is written until JVM shutdown, so
  * the agent adds no I/O of its own inside the scenario bracket. The
  * tracer-side join (agentjoin.py) matches these records to the uprobe
- * marks by TID and time: bpftrace's nsecs and System.nanoTime() are both
- * CLOCK_MONOTONIC on Linux, so no clock conversion is needed here.
+ * marks by TID and time. The clocks differ: System.nanoTime() is
+ * CLOCK_MONOTONIC, bpftrace's nsecs is CLOCK_BOOTTIME; agentjoin.py
+ * shifts these records by the (boot - mono) offset join.bt samples at
+ * BEGIN. The agent itself stays on the monotonic clock.
  */
 public final class Hooks {
     /** Set while the hook itself runs, and for good once dumping starts. */

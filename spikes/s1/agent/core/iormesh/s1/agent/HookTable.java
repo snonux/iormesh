@@ -6,7 +6,8 @@ import java.util.stream.Collectors;
 
 /**
  * Throwaway (S1, task wa4): the Java-level hook set for file-basic and
- * tcp-loopback on JDK 21/25. Every entry is a *Java* method that calls a
+ * tcp-loopback. The agent runs on JDK 25 only (java.lang.classfile);
+ * the methods were checked against JDK 21 sources and JDK 25 bytecode. Every entry is a *Java* method that calls a
  * JNI I/O native directly; a native itself has no body to rewrite, so
  * where the native is called straight from a bigger method (Net.accept,
  * Net.listen) the caller is hooked instead. One id per class.method,

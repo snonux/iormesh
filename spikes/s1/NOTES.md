@@ -73,8 +73,10 @@ syscall on the scenario thread carries the right native's mark.**
 | socketpair + close (libnio init) | `Java_sun_nio_ch_UnixDispatcher_init` |
 | class loading from the app jar | `Java_java_io_RandomAccessFile_readBytes0`, `seek0` |
 
-Counts of declared-kind syscalls (openat/read/write/close/connect/
-accept/unlink) on the scenario thread inside the bracket: file-basic
+Counts of "declared-kind" syscalls — every openat/read/write/close/
+connect/accept/unlink on the scenario thread inside the bracket, i.e.
+expect.json's events *plus* same-kind JDK work (app-jar class loading,
+the marker line on stderr, net.properties, libextnet): file-basic
 14 marked / 0 unmarked; tcp-loopback server 27 / 7, client 29 / 7.
 The 7 unmarked per tcp process are all the JVM's own `dlopen` of
 `libextnet.so` (see §3), none is scenario I/O.
@@ -105,6 +107,13 @@ Raw findings:
   but bpftrace printed `func` as a raw address, because it symbolizes
   against the maps it saw at attach. Production should key a mark on a
   per-attach-point id (BPF cookie), never on runtime symbolization.
+- **Sticky marks (production concern)**: join.bt's per-TID depth
+  stack is never reset. A missed uretprobe (return-probe instance
+  limit, a native that leaves by longjmp, probes detached mid-call,
+  a TID reused by a new thread) would leave a mark that tags every
+  later syscall of that TID. The production tracer needs a reset path:
+  clear on thread exit (`sched_process_exit`), cap the depth, and
+  sanity-check marks against the per-hook syscall allowlist.
 - Other threads inside the bracket: only C1/C2 compiler threads and
   "Monitor Deflation" doing futex/mprotect/mmap — no file or socket
   I/O by JVM threads during these scenarios.
@@ -184,15 +193,16 @@ final in 24; M3 needs shaded ASM for 21):
 ## 3. Agent ↔ uprobe join (TID + time)
 
 `agentjoin.py`: a marked syscall belongs to the innermost agent record
-on the same kernel TID whose [enter, exit] contains it. 5 runs each,
-JDK 25: **every scenario-declared op joined to its declared method**,
-0 runs with a hook/mark disagreement.
+on the same kernel TID whose [enter, exit] contains it. It checks each
+join mechanically against a hook → native map (`HOOK_NATIVES`): 8
+runs (5 + 3 after review), JDK 25: **every expect.json event joined
+to its declared method, 0 hook/mark mismatches**.
 
-| Process | Scenario ops attributed | Declared methods seen |
-|---------|-------------------------|-----------------------|
-| file-basic | 7/7 (openat, write, close, openat, read, close, unlink) | `FileWork.write:60/61/62`, `FileWork.read:69/70/74`, `FileWork.run:44` |
-| tcp server | 13/13 (file 7 + accept, read, write, read EOF, close ×2) | `TcpLoopback.serve:128/131/132/135`, `expect:148`, `server:103` |
-| tcp client | 11/11 (file 7 + connect, write, read, close) | `TcpLoopback.client:140/141/143`, `expect:148` |
+| Process | expect.json events attributed | Extra scenario ops, also attributed | Declared methods seen |
+|---------|-------------------------------|-------------------------------------|-----------------------|
+| file-basic | 6/6 (openat, write, close, openat, read, close) | unlink | `FileWork.write:60/61/62`, `FileWork.read:69/70/74`, `FileWork.run:44` (unlink) |
+| tcp server | 11/11 (file 6 + accept, read, write, read EOF, close) | unlink, listener close | `TcpLoopback.serve:128/131/132/135`, `expect:148`, `server:103` (listener) |
+| tcp client | 10/10 (file 6 + connect, write, read, close) | unlink | `TcpLoopback.client:140/141/143`, `expect:148` |
 
 Non-scenario I/O inside the bracket also joined, to JDK frames: app
 jar class loading (`RandomAccessFile` under `URLClassPath$JarLoader`),
@@ -203,8 +213,13 @@ Clocks (raw, for xa4): bpftrace `nsecs` is **CLOCK_BOOTTIME**
 (`nsecs == nsecs(boot)`), `System.nanoTime()` is CLOCK_MONOTONIC. On
 this laptop boot − mono = 307 592.39 s (~85 h suspended). join.bt
 samples (boot, mono) in one probe at BEGIN and END; the offset jitters
-by ±80 ns between samples (BEGIN→END |drift| 4–81 ns over 15 runs),
-far below the µs-scale syscalls here. Note the uprobe mark already
+between samples: BEGIN→END |drift| 1–84 ns within a run, and the
+BEGIN offset spread across runs up to ~130 ns here (179 ns in the
+review's runs). The real safety argument is the margin, not the
+jitter: the smallest distance between a joined syscall and the edge
+of its agent window (`agentjoin.py`, "smallest hook-window-to-syscall
+gap") was 1.6–3.7 µs in the post-review runs (≥ 2.3 µs in the
+review's), i.e. ≥ 10× the offset error. Note the uprobe mark already
 gives an exact, clock-free native-level join; a clock-free *agent*
 join is possible too (k-th agent bracket of hook H on TID t ↔ k-th
 uprobe bracket of its native on t) — untested.
@@ -216,9 +231,14 @@ Observed in these runs:
 - **JVM class loading from the runtime image**: `pread`/`mmap` of
   `lib/modules` (fd 3) by libjvm — no JNI frame, or under an
   unrelated native (see the leak above).
-- **JVM native-library loading**: `os::dll_load` of `libextnet.so`
-  (openat, fstat, read ×2, lseek, close, twice) — libjvm, not
-  `Java_*`. Same for any `System.loadLibrary`.
+- **JVM native-library loading**: loading `libextnet.so` (the JVM's
+  ELF check, then the loader's `dlopen`): openat, fstat, read, lseek,
+  read, lseek, close, openat, read, fstat, close (+ mmap/mprotect) —
+  libjvm and ld.so, not `Java_*`. Same for any `System.loadLibrary`.
+- **libextnet feature probes**: right after loading, 5× socket +
+  getsockopt + close under libextnet's own natives
+  (`LinuxSocketOptions.*Supported0`, marked at native level, printed
+  as raw addresses) — JDK-internal, no agent hook.
 - **JIT/GC/runtime threads**: futex, mprotect, mmap on compiler and
   "Monitor Deflation" threads.
 - **libnio init**: `socketpair` + `close` (`UnixDispatcher.init`) is

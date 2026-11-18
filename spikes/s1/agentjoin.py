@@ -22,6 +22,34 @@ import analyze
 
 WORKLOAD_PKG = "iormesh.workload."
 
+# Agent hook -> the JNI natives (uprobe marks, "Java_" stripped) that hook
+# calls directly (HookTable.java). A joined syscall whose mark is not in
+# its hook's set is a mismatch: the two joins disagree.
+HOOK_NATIVES = {
+    "java/io/FileOutputStream.open": {"java_io_FileOutputStream_open0"},
+    "java/io/FileOutputStream.write": {"java_io_FileOutputStream_writeBytes",
+                                       "java_io_FileOutputStream_write"},
+    "java/io/FileInputStream.open": {"java_io_FileInputStream_open0"},
+    "java/io/FileInputStream.read": {"java_io_FileInputStream_readBytes",
+                                     "java_io_FileInputStream_read0"},
+    "java/io/FileDescriptor.close": {"java_io_FileDescriptor_close0"},
+    "java/io/RandomAccessFile.readBytes": {"java_io_RandomAccessFile_readBytes0"},
+    "java/io/RandomAccessFile.seek": {"java_io_RandomAccessFile_seek0"},
+    "sun/nio/fs/UnixNativeDispatcher.unlink":
+        {"sun_nio_fs_UnixNativeDispatcher_unlink0"},
+    "sun/nio/ch/Net.socket": {"sun_nio_ch_Net_socket0"},
+    "sun/nio/ch/Net.serverSocket": {"sun_nio_ch_Net_socket0"},
+    "sun/nio/ch/Net.bind": {"sun_nio_ch_Net_bind0"},
+    "sun/nio/ch/Net.connect": {"sun_nio_ch_Net_connect0"},
+    "sun/nio/ch/NioSocketImpl.listen": {"sun_nio_ch_Net_listen"},
+    "sun/nio/ch/NioSocketImpl.accept": {"sun_nio_ch_Net_accept"},
+    "sun/nio/ch/SocketDispatcher.read": {"sun_nio_ch_SocketDispatcher_read0",
+                                         "sun_nio_ch_SocketDispatcher_readv0"},
+    "sun/nio/ch/SocketDispatcher.write": {"sun_nio_ch_SocketDispatcher_write0",
+                                          "sun_nio_ch_SocketDispatcher_writev0"},
+    "sun/nio/ch/UnixDispatcher.close": {"sun_nio_ch_UnixDispatcher_close0"},
+}
+
 
 def clock_offsets(log):
     """boot - mono at bpftrace BEGIN and END (END missing if killed)."""
@@ -76,19 +104,36 @@ def main():
     print(f"boot-mono offset {offs[0]} ns, drift BEGIN->END "
           f"{offs[-1] - offs[0]} ns")
     recs = load_recs(f"{d}/{name}", offs[0])
-    joined = total = 0
+    stats = {"total": 0, "joined": 0, "scenario": 0, "mismatch": 0,
+             "gap": None}
     for ev in mine:
         sc = names.get(ev["nr"], str(ev["nr"]))
-        if sc not in analyze.DECLARED:
-            continue
-        rec = innermost(recs, tid, ev["ns"])
-        total += 1
-        joined += rec is not None
-        hook = rec["hook"] if rec else "-"
-        print(f"{sc:8} ret={ev['ret']!s:5} {ev['mark'][5:]:42.42} "
-              f"{hook:36.36} {declared_frame(rec)}")
-    print(f"{name}: {joined}/{total} declared-kind syscalls joined to an "
-          f"agent bracket")
+        if sc in analyze.DECLARED:
+            report(ev, sc, innermost(recs, tid, ev["ns"]), stats)
+    print(f"{name}: {stats['joined']}/{stats['total']} declared-kind "
+          f"syscalls joined to an agent bracket, {stats['scenario']} with a "
+          f"workload frame, {stats['mismatch']} hook/mark mismatches, "
+          f"smallest hook-window-to-syscall gap {stats['gap']} ns")
+
+
+def report(ev, sc, rec, stats):
+    """Prints one syscall's join and folds it into stats."""
+    stats["total"] += 1
+    mark = ev["mark"][5:]
+    if rec is not None:
+        stats["joined"] += 1
+        frame = declared_frame(rec)
+        stats["scenario"] += not frame.startswith("(jdk)")
+        if mark not in HOOK_NATIVES.get(rec["hook"], set()):
+            stats["mismatch"] += 1
+            print(f"MISMATCH hook {rec['hook']} vs mark {ev['mark']}")
+        # How far the syscall sits inside the agent window: the margin a
+        # boot/mono offset error would have to exceed to break the join.
+        gap = min(ev["ns"] - rec["enter"], rec["exit"] - ev["ns"])
+        stats["gap"] = gap if stats["gap"] is None else min(stats["gap"], gap)
+    hook = rec["hook"] if rec else "-"
+    print(f"{sc:8} ret={ev['ret']!s:5} {mark:42.42} {hook:36.36} "
+          f"{declared_frame(rec)}")
 
 
 if __name__ == "__main__":

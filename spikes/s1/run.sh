@@ -29,6 +29,8 @@ probe_list() {
 }
 
 mkdir -p "$out"
+# PIDs of the JVMs this script started; cleanup kills any still alive.
+jvm_pids=()
 cp "$hooks" "$out/hooks.txt"
 python3 - "$here/join.bt.in" "$(probe_list uprobe)" "$(probe_list uretprobe)" \
   > "$out/join.bt" <<'PY'
@@ -37,7 +39,8 @@ src, entry, ret = sys.argv[1:]
 print(open(src).read().replace("@ENTRY@", entry).replace("@RETURN@", ret), end="")
 PY
 
-# start_jvm <name> <args...>: launches the workload gated, prints its PID.
+# start_jvm <name> <args...>: launches the workload gated and sets
+# started_pid (not via $(...): a subshell could not record jvm_pids).
 start_jvm() {
   local name="$1"; shift
   rm -f "$out/$name.gate"
@@ -47,11 +50,16 @@ start_jvm() {
   # shellcheck disable=SC2086
   IORMESH_WORKLOAD_STARTUP_FILE="$out/$name.gate" \
     "$jh/bin/java" $opts -jar "$jar" "$@" > "$out/$name.stdout" 2> "$out/$name.stderr" &
+  jvm_pids+=("$!")
   for _ in $(seq 100); do
     [[ -s "$out/$name.stdout" ]] && break
     sleep 0.1
   done
-  head -1 "$out/$name.stdout"
+  started_pid="$(head -1 "$out/$name.stdout")"
+  if [[ ! "$started_pid" =~ ^[0-9]+$ ]]; then
+    echo "no PID from the $name JVM (see $out/$name.stderr)" >&2
+    return 1
+  fi
 }
 
 # trace <name> <pid>: attaches join.bt to pid and returns once it is live.
@@ -71,20 +79,34 @@ trace() {
 # stop_trace: ends every bpftrace this script started.
 stop_trace() {
   sudo -n pkill -INT -f "bpftrace $out/join.bt" || true
-  wait || true
 }
 
-run_file_basic() {
+# cleanup: EXIT trap — kills leftover JVMs, stops bpftrace, reaps children.
+cleanup() {
   local pid
-  pid="$(start_jvm solo file-basic --dir "$out")"
+  for pid in "${jvm_pids[@]}"; do
+    kill "$pid" 2>/dev/null || true
+  done
+  stop_trace
+  wait || true
+}
+# Always tear down: a failed step must never leave a root bpftrace with
+# hundreds of uprobes on the shared JDK libraries, or a gated JVM. Set
+# before anything is started (the render above starts nothing).
+trap cleanup EXIT
+
+run_file_basic() {
+  start_jvm solo file-basic --dir "$out"
+  local pid="$started_pid"
   trace solo "$pid"
   touch "$out/solo.gate"
   wait_pid "$pid"
 }
 
 run_tcp_loopback() {
-  local spid cpid port
-  spid="$(start_jvm server tcp-loopback --role server --dir "$out")"
+  local spid cpid port=""
+  start_jvm server tcp-loopback --role server --dir "$out"
+  spid="$started_pid"
   trace server "$spid"
   touch "$out/server.gate"
   for _ in $(seq 100); do
@@ -92,16 +114,28 @@ run_tcp_loopback() {
     [[ -n "$port" ]] && break
     sleep 0.1
   done
-  cpid="$(start_jvm client tcp-loopback --role client --port "$port" --dir "$out")"
+  if [[ -z "$port" ]]; then
+    echo "server never printed its port" >&2
+    return 1
+  fi
+  start_jvm client tcp-loopback --role client --port "$port" --dir "$out"
+  cpid="$started_pid"
   trace client "$cpid"
   touch "$out/client.gate"
   wait_pid "$cpid"
   wait_pid "$spid"
 }
 
-# wait_pid: waits for a non-child-of-this-subshell JVM to exit.
+# wait_pid <pid>: waits for a JVM to exit, failing after 60 s (the
+# scenarios take well under a second once the gate opens).
 wait_pid() {
-  while kill -0 "$1" 2>/dev/null; do sleep 0.1; done
+  local i
+  for ((i = 0; i < 600; i++)); do
+    kill -0 "$1" 2>/dev/null || return 0
+    sleep 0.1
+  done
+  echo "JVM $1 still running after 60 s" >&2
+  return 1
 }
 
 case "$scenario" in
@@ -109,5 +143,4 @@ case "$scenario" in
   tcp-loopback) run_tcp_loopback ;;
   *) echo "unknown scenario: $scenario" >&2; exit 2 ;;
 esac
-sleep 0.5   # let bpftrace drain the last exits before SIGINT
-stop_trace
+sleep 0.5   # let bpftrace drain the last exits before the EXIT trap stops it
