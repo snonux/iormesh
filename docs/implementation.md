@@ -1450,9 +1450,10 @@ __u32 iss = snd_una - (__u32)bytes_acked - (is_accept ? 1 : 0);
 __u32 irs = rcv_nxt - (__u32)bytes_received - 1;
 ```
 
-The TCP state record carries `snd_una`, `rcv_nxt`,
-`bytes_acked` and `bytes_received`; the role comes from the
-owner registration (connect vs accept).
+The TCP state record must carry `snd_una`, `rcv_nxt`,
+`bytes_acked` and `bytes_received` (added in M4; extends M1's
+88-byte `tcp_state_event`); the role is derived from the
+socket's first record (connect vs accept).
 **Experiment 2 — conntrack as the alternative**: read the
 original↔reply tuple mapping on the NAT host. Works only where a
 tracer or conntrack access exists on that host. *Found*: as an
@@ -1480,7 +1481,8 @@ with the send that queued its last byte. A receive's offset is
 `copied_seq` at `tcp_recvmsg` entry plus the bytes returned —
 after the call it is one too far when the FIN was consumed in
 the same call. Injected skews of +1.23 s and −0.99 s were
-recovered inside 11–17 µs (midpoint within 1 µs, no violated
+recovered inside ≈10–25 µs (runs 7–9, load-dependent; midpoint
+within 1 µs, no violated
 inequality); single request/response connections alone gave
 82–104 µs, because only a receiver already blocked in `recv`
 gives a tight inequality.
@@ -1660,8 +1662,11 @@ Rules, each a table-driven test:
 - a client half fuses with the server half whose `Key` is equal;
   the 4-tuples are not compared (NAT rewrites them);
 - two candidates for one half is an error surfaced in the
-  summary, never a coin toss; candidates outside `window` (after
-  aligning the hosts by the clock bound) do not count;
+  summary, never a coin toss; candidates whose raw `Established`
+  times differ by more than `window` do not count — the window is
+  minutes, far wider than any plausible clock offset, so fusing
+  needs no clock bound (the bound is computed afterwards, from
+  the fused connections);
 - a zero key, or a key nobody else has (sequence-randomizing
   firewall, SYN proxy, untraced far end), leaves the half
   unresolved — no 4-tuple fallback, that would be a guess;

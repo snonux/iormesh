@@ -97,6 +97,14 @@ column each, never a blob.
 IPv4 peers of dual-stack sockets are written unmapped
 (`127.0.0.1`, not `::ffff:127.0.0.1`).
 
+Planned for M4 (S2, decision #26): `tcp_state` gains the four
+`tcp_sock` fields the merge rebuilds the ISN-pair key from
+(`snd_una`, `rcv_nxt`, `bytes_acked`, `bytes_received`), and
+socket send/receive events gain their TCP sequence range (start
+sequence plus `bytes`, from new `tcp_sendmsg`/`tcp_recvmsg`
+hooks), which the merge's clock bounds match across hosts. Not
+in the M1 schema yet.
+
 ### Event kinds (M1)
 
 | Kind | Source |

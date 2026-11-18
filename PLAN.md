@@ -161,7 +161,8 @@ throwaway; its findings update this plan.
   time order for reused tuples; a snapshot misattributed 10/34
   under SNAT. Clock bounds: two tracer instances with injected
   skews of +1.23 s and −0.99 s recovered them inside intervals
-  11–17 µs wide on veth (midpoint within 1 µs), with sends and
+  ≈10–25 µs wide on veth (runs 7–9, load-dependent; midpoint
+  within 1 µs), with sends and
   receives matched by TCP sequence offset. The width depends on
   the traffic: single request/response connections alone gave
   82–104 µs, ping-pong rounds tightened it. Decision #26 is
@@ -561,11 +562,14 @@ Kubernetes (M7) build on it.
   receive-syscall exit, the two ends of a message matched by
   TCP sequence offset, which NAT leaves alone); together they
   bound the clock offset per host pair. The merge records the
-  bound and its width — S2 measured 11–17 µs on veth with
-  interactive traffic, 82–104 µs with single exchanges only —
-  computed per time window so clock drift over a long session
-  shows up instead of emptying the interval; an empty
-  intersection is reported, never hidden. Cross-host order
+  bound and its width — S2 measured ≈10–25 µs on veth with
+  interactive traffic (load-dependent), 82–104 µs with single
+  exchanges only — computed per time window so clock drift
+  over a long session shows up instead of emptying the
+  interval; an empty intersection is reported, never hidden.
+  This needs every send and receive record to carry its TCP
+  sequence range, not just its byte count — new
+  `tcp_sendmsg`/`tcp_recvmsg` hooks, added in M4. Cross-host order
   is derived from happens-before (per-thread order plus
   send→receive edges), never from raw wall-clock comparison.
 - **Service-interaction database**: every `build` also

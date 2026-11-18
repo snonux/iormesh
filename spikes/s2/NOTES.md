@@ -260,16 +260,17 @@ Results (34 fused connections per pass; 101–109 inequalities each way):
   inequality was violated (0 of ~210 per pass).
 - The width is the sum of the smallest one-way gap in each direction
   (send enter to recv exit over veth + one forwarding namespace): 5–9 µs
-  each, p50 8–11 µs.
+  each, p50 8–11 µs. A review run 9 on a busier machine gave 10–12 µs
+  per direction and 21–23 µs width: ≈10–25 µs, load-dependent.
 - What tightens it is a receiver already blocked in recv when the bytes
   arrive. Single-exchange connections give a tight lower bound (the
   client waits for the response: ~40–60 µs) but a 50 ms upper bound (the
-  request waits out the server's accept delay): plain, reuse-tw and tfo
-  alone leave intervals 28–50 ms wide; reuse-rst alone gives only an upper
-  bound (the server never answers). Together they reach 82–104 µs because
-  some connection in each direction caught a waiting receiver; the
-  ping-pong rounds bring it to 11–17 µs. Width after the first k
-  connections, run 8 dnat: k=1 open (no data), 2: 50.4 ms, 10: 50.0 ms,
+  request waits out the server's accept delay): plain and reuse-tw alone
+  leave intervals of about 50 ms, tfo alone 20–50 ms; reuse-rst alone
+  gives only an upper bound (the server never answers). Together they
+  reach 82–104 µs because some connection in each direction caught a
+  waiting receiver; the ping-pong rounds bring it to 11–17 µs (runs 7–8;
+  ≈10–25 µs with run 9). Width after the first k connections, run 8 dnat: k=1 open (no data), 2: 50.4 ms, 10: 50.0 ms,
   20: 101 µs, 34: 10.9 µs.
 - Not tested: real hosts (LAN latency, NIC offloads, interrupt
   coalescing — the gap floor grows to tens or hundreds of µs), clock

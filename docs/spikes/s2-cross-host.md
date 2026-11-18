@@ -11,7 +11,8 @@ cross-host join key (decision #26, now decided). It survives DNAT
 and DNAT plus random-port SNAT, separates reused 4-tuples, and
 needs nothing on the NAT host. Conntrack works too but is weaker
 and needs access to the NAT host. Clock bounds from the traffic
-recover an injected skew inside an interval of 11–17 µs on veth.
+recover an injected skew inside an interval of ≈10–25 µs on
+veth (runs 7–9, load-dependent).
 
 ## The rig
 
@@ -99,17 +100,21 @@ Checked against tcpdump at every recorded event:
   apart. A collision needs the same tuple and the same pair after
   the ISN clock wraps (≈ 275 s at 64 ns per tick); the merge
   still bounds candidates by a coarse time window.
-- **Role**: the SYN correction needs the socket's role. M1's
-  owner registration (connect vs accept) already records it.
-- **Cost**: four extra fields on the TCP state record —
+- **Role**: the SYN correction needs the socket's role. M1
+  records no role field, but the role follows from the socket's
+  first record (a connect or an accept), so the merge derives
+  it.
+- **Cost**: four extra fields the TCP state record must carry
+  (added in M4; extends M1's 88-byte `tcp_state_event`) —
   `snd_una`, `rcv_nxt` (4 bytes each), `bytes_acked`,
   `bytes_received` (8 bytes each).
 
 One child per pass was reset while still in the accept queue,
 and `accept()` returned it already in `TCP_CLOSE`. The rebuild
-holds for it too, but M1's accept exit skips such a socket as
-never registered, so that edge stays unresolved unless M4 takes
-the key from the snapshot.
+holds for it too. M1's accept exit emits the snapshot for such
+a socket but does not register it as an owned connection, so
+that edge stays unresolved unless M4 takes the key from the
+snapshot.
 
 ## Experiment 2 — conntrack on the NAT host
 
@@ -177,20 +182,24 @@ per pass:
 | 7 DNAT+SNAT | −6.7 / +8.1 µs | 14.8 µs | +0.7 µs | 104 µs |
 | 8 DNAT      | −5.5 / +5.4 µs | 10.9 µs | 0.0 µs | 82 µs |
 | 8 DNAT+SNAT | −6.3 / +6.4 µs | 12.7 µs | 0.0 µs | 86 µs |
+| 9 (review)  | 10–12 µs each side | 21–23 µs | — | — |
 
 - θ lay inside the interval every time, for both signs of skew,
   and no single inequality was violated.
 - **How tight**: the width is the smallest one-way gap
   (send enter to receive exit) in each direction added together:
-  5–9 µs each way over veth through one forwarding namespace.
+  5–12 µs each way over veth through one forwarding namespace,
+  depending on load.
 - **What tightens it** is a receiver already blocked in `recv`
   when the bytes arrive. One request/response per connection
   gives a tight lower bound (the client waits for the answer,
   ~40–60 µs) but a loose upper bound (the request waits out the
-  50 ms accept delay): plain, TIME_WAIT reuse and TFO connections
-  alone leave intervals 28–50 ms wide. The mix of all single
-  exchanges reached 82–104 µs; the ping-pong rounds bring it to
-  11–17 µs. The bound is only as good as the most interactive
+  50 ms accept delay): plain and TIME_WAIT reuse connections
+  alone leave intervals of about 50 ms, TFO alone 20–50 ms. The
+  mix of all single exchanges reached 82–104 µs; the ping-pong
+  rounds bring it to ≈10–25 µs (11–17 µs in runs 7–8, 21–23 µs
+  in a review run 9 — the per-direction gap floor moves with
+  machine load). The bound is only as good as the most interactive
   traffic between the two hosts.
 
 For the merge this means: the bound comes for free with every
@@ -231,7 +240,11 @@ never a guess.
 
 - Decision #26 is decided: the ISN pair is the key; conntrack is
   optional; no key match means an unresolved edge.
-- M1/M4's TCP state record carries the four `tcp_sock` fields and
-  the role; the key is taken at `ESTABLISHED` or later.
+- The TCP state record must carry the four `tcp_sock` fields
+  (added in M4; extends M1's 88-byte `tcp_state_event`); the role
+  is derived from the socket's first record; the key is taken at
+  `ESTABLISHED` or later.
+- Send and receive records must carry their TCP sequence range
+  (`tcp_sendmsg`/`tcp_recvmsg` hooks, M4).
 - The merge's clock reconciliation uses the inequalities above,
   matched by sequence offset, and records the bound and its width.
