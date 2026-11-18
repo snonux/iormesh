@@ -142,7 +142,12 @@ has not arrived yet; if it has, there is no record. So each
 process's tcp_state events are compared apart from its
 syscalls, in their own order, with an immediate repeat
 collapsed. The shorter run's sequence only has to be a prefix
-of the longer one's. Syscall events and the graph are still
+of the longer one's, and that prefix must still reach teardown
+(`FIN_WAIT1`, `CLOSE_WAIT`, …) whenever the longer one does. A
+process's first teardown state is set before its own close or
+EOF read returns, so it is always inside the bracket. Without
+that rule, an empty sequence, or one cut after `SYN_SENT`,
+would match anything. Syscall events and the graph are still
 compared exactly.
 
 `mage integrationTest` builds the tracer, the workload jar and

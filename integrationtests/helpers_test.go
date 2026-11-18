@@ -207,7 +207,10 @@ func assertOnlyTracedPIDs(t *testing.T, events []schema.Event, pids []int) {
 
 // dumpOnFailure keeps a failed run's trace for the reader: t.TempDir is
 // removed when the test ends, so the directory is copied to
-// IORMESH_IT_KEEP when that is set.
+// IORMESH_IT_KEEP when that is set. Each copy gets its own fresh
+// directory: a test with two harnesses (TestSecondRunNormalizesIdentically)
+// has two runs both named trace-1, and copying the second onto the first
+// failed with "file exists" and lost it.
 func dumpOnFailure(t *testing.T, run tracedRun) {
 	t.Helper()
 	keep := os.Getenv("IORMESH_IT_KEEP")
@@ -218,7 +221,16 @@ func dumpOnFailure(t *testing.T, run tracedRun) {
 		if !t.Failed() {
 			return
 		}
-		dst := filepath.Join(keep, strings.ReplaceAll(t.Name(), "/", "_"), filepath.Base(run.Dir))
+		parent := filepath.Join(keep, strings.ReplaceAll(t.Name(), "/", "_"))
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			t.Logf("keep trace: %v", err)
+			return
+		}
+		dst, err := os.MkdirTemp(parent, filepath.Base(run.Dir)+"-")
+		if err != nil {
+			t.Logf("keep trace: %v", err)
+			return
+		}
 		if err := os.CopyFS(dst, os.DirFS(run.Dir)); err != nil {
 			t.Logf("keep trace: %v", err)
 			return
