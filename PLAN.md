@@ -201,6 +201,7 @@ Scenario catalogue, by the milestone it lands with:
 | Lands with | Scenarios |
 |------------|-----------|
 | M1 | File data ops (open/read/write/close) — `file-basic`; TCP client ↔ server on loopback — `tcp-loopback`; markers (all landed with M0) |
+| S3 | Syscall load: tight 1-byte read/write loops, N ops over T threads — `syscall-burst` |
 | M2 | Full file surface (create/delete, rename/move, touch, symlink/hardlink, xattr, chmod/chown…); fd lifecycle (dup, inheritance, reuse); local IPC; signals; UDP; IPv4 + IPv6; restart; non-Java peer |
 | M3 | Method flows (deep stacks, async I/O); HTTP plain + TLS; redaction; OTEL flavor |
 | M4 | Client and server on two hosts as two projects; microservices topology, one service per host; NAT'ed pair |
@@ -247,6 +248,11 @@ Scenario notes:
 - **Ingress scenario** (M7): gateway → Traefik → backend
   service in kind (the microservices scenario's front door),
   with the route map declared alongside the expected graph.
+- **Load scenarios** (S3): `syscall-burst` exists to be
+  measured, not golden-checked — its event count scales with
+  `--ops` and its threads interleave as the scheduler decides,
+  so its expect.json declares only the marker bracket; S3
+  asserts counts (syscalls, drops) instead.
 - **OpenTelemetry-instrumented flavor** (M3): a separate module
   — the core workload stays JDK-only per decision #5 — that
   emits spans with declared trace ids, so OTEL attribution has

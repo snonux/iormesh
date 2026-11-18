@@ -133,3 +133,45 @@ skips at every level. Skips caused by kernel loss are summarized
 before the gate fails. `internal/buildgate` keeps that list
 equal to the tests the package declares. Set `IORMESH_IT_KEEP=DIR`
 to keep a failed test's trace directories.
+
+## Performance baselines
+
+S3 (PLAN.md, decision #25) measures overhead against a load the
+workload can state in advance: `syscall-burst`, a tight loop of
+1-byte `write` + `read` pairs on per-thread temp files — the
+most syscalls per unit of real work, so the tracer's per-event
+cost is at its largest. Run it standalone:
+
+```sh
+mage workloadBuild
+java -jar workload.jar syscall-burst --ops 1000000 --threads 4
+```
+
+After the PID it prints one result line,
+`syscall-burst ops=N threads=T syscalls=2N elapsed_ns=E`; E
+times the loops only, not JVM startup or the file opens. Its
+expect.json declares only the marker bracket: the event count
+scales with `--ops` and the threads interleave freely, so the
+spike asserts counts, not a golden.
+
+`scripts/perf-baseline.sh` (lifted from ior) records and
+compares baselines under `perf/`:
+
+```sh
+scripts/perf-baseline.sh record [label]   # default label: short HEAD
+scripts/perf-baseline.sh compare OLD NEW  # benchstat, labels or paths
+```
+
+`record` builds the jar, runs the burst untraced `PERF_COUNT`
+times (default 3) at each thread count in `PERF_THREADS`
+(default `1 4 16`) with `PERF_OPS` ops (default 1,000,000), and
+writes `perf/burst-<label>.txt`: a provenance header (commit,
+kernel, CPU, JDK, load average) and one benchstat line per
+sample, `BenchmarkSyscallBurst/mode=untraced/threads=T` with
+ns/op and ns/syscall. As in ior, a tree with uncommitted changes
+gets a `-dirty` label, an existing baseline is never overwritten
+unless `PERF_FORCE=1`, and a tree that changes while recording
+writes nothing. Record on an idle host; the header's load
+average says whether it was. Baselines are committed so a later
+change is judged against the numbers that motivated it.
+S3's traced and bystander runs add their own `mode=` lines.

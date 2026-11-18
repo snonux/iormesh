@@ -961,10 +961,32 @@ normalized run diffs empty against the first inside the bracket.
 Runs on the M1 build. Result: `docs/spikes/s3-overhead.md`.
 
 1. Lift `scripts/perf-baseline.sh` and the `perf/` layout from
-   ior.
+   ior. *Landed*: `scripts/perf-baseline.sh record [label]`
+   builds the jar, runs `syscall-burst` untraced `PERF_COUNT`
+   times (default 3) at each of `PERF_THREADS` (default
+   `1 4 16`) and writes `perf/burst-<label>.txt` in benchstat
+   format (`BenchmarkSyscallBurst/mode=untraced/threads=T`, with
+   ns/op and ns/syscall); `compare OLD NEW` runs benchstat. ior's
+   label rules, dirty-tree fingerprint and no-overwrite refusal
+   are kept; its `go test -bench` set and static BPF metrics are
+   not (iormesh has no hot-path benchmarks yet). Step 3 adds its
+   traced and bystander runs as further `mode=` values of the
+   same file. Usage: docs/testing.md "Performance baselines".
 2. Add a load scenario to the workload: `syscall-burst --ops N
    --threads T` (tight 1-byte read/write loop on a temp file —
-   the worst case per syscall).
+   the worst case per syscall). *Landed*
+   (`workload/src/.../scenarios/SyscallBurst.java`): N ops
+   (default 1,000,000) split evenly over T platform threads
+   (default 1, at most 1024, N ≥ T); each thread holds a write
+   and a read fd on its own `syscall-burst-<i>.dat`, so one op
+   is exactly `write(fdW, 1)` + `read(fdR, 1)` — no lseek — and
+   every byte read back is checked. It prints
+   `syscall-burst ops=N threads=T syscalls=2N elapsed_ns=E` on
+   stdout, E timing the loops alone (opens before a start latch,
+   JVM startup outside). Its expect.json declares only the
+   marker bracket (PLAN.md, "Load scenarios"). `mage
+   workloadTest` checks the result line and that bad `--ops` /
+   `--threads` exit 2.
 3. Measure, three runs each, idle host:
    - **target slowdown**: `syscall-burst` wall time untraced vs
      traced;

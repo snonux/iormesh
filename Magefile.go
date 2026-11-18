@@ -77,7 +77,8 @@ func javaSources(root string) ([]string, error) {
 
 // WorkloadTest runs every scenario without a tracer (--self-test), then
 // checks the gates, the two-process tcp-loopback run, every scenario's
-// --expect output and the exit codes of bad invocations.
+// --expect output, syscall-burst's result line and the exit codes of bad
+// invocations.
 func WorkloadTest() error {
 	mg.Deps(WorkloadBuild)
 	if err := sh.RunV("java", "-jar", workloadJar, "--self-test"); err != nil {
@@ -87,6 +88,7 @@ func WorkloadTest() error {
 		checkGatedRun,
 		checkTCPLoopback,
 		checkExpectations,
+		checkSyscallBurst,
 		checkUsageErrors,
 		checkRunFailures,
 	}
@@ -179,6 +181,33 @@ func finish(r *gatedRun, scenario string) error {
 	return r.wait()
 }
 
+// checkSyscallBurst runs the load scenario standalone with more threads
+// than ops divide evenly into, and asserts its result line: the PID
+// first, then exactly the ops, threads and syscall count asked for (two
+// syscalls per op) and a positive elapsed time — the line
+// scripts/perf-baseline.sh parses, so a format change fails here first.
+func checkSyscallBurst() error {
+	run, err := startRun(nil, "syscall-burst", "--ops", "1001", "--threads", "3")
+	if err != nil {
+		return err
+	}
+	defer run.kill()
+	if err := run.expectPID(); err != nil {
+		return err
+	}
+	line, err := run.nextStdout()
+	if err != nil {
+		return err
+	}
+	run.drainStdout()
+	var elapsed int64
+	_, err = fmt.Sscanf(line, "syscall-burst ops=1001 threads=3 syscalls=2002 elapsed_ns=%d", &elapsed)
+	if err != nil || elapsed <= 0 {
+		return fmt.Errorf("%s: bad result line %q", run.name(), line)
+	}
+	return finish(run, "syscall-burst")
+}
+
 // checkExpectations asserts --expect prints the bundled expect.json as
 // valid JSON naming its scenario, for every scenario --list names, so a
 // new scenario without an expect.json fails here rather than in M1.
@@ -240,6 +269,16 @@ func checkUsageErrors() error {
 		{"tcp-loopback", "--role", "solo"},
 		{"file-basic", "--role", "server"},
 		{"file-basic", "--bogus", "x"},
+		{"syscall-burst", "--ops", "abc"},
+		{"syscall-burst", "--ops", "0"},
+		{"syscall-burst", "--ops", "-5"},
+		{"syscall-burst", "--ops", "99999999999"},
+		{"syscall-burst", "--threads", "x"},
+		{"syscall-burst", "--threads", "0"},
+		{"syscall-burst", "--threads", "1025"},
+		{"syscall-burst", "--ops", "3", "--threads", "4"},
+		{"syscall-burst", "--role", "client"},
+		{"syscall-burst", "--bogus", "x"},
 	}
 	for _, args := range bad {
 		if err := expectExit(2, args...); err != nil {
@@ -251,7 +290,7 @@ func checkUsageErrors() error {
 
 // checkRunFailures asserts a well-formed run that fails at run time exits
 // with code 1, not the usage code: a client with nobody listening, and a
-// --dir that does not exist.
+// --dir that does not exist (file-basic and syscall-burst).
 func checkRunFailures() error {
 	port, err := closedPort()
 	if err != nil {
@@ -260,6 +299,7 @@ func checkRunFailures() error {
 	failing := [][]string{
 		{"tcp-loopback", "--role", "client", "--port", fmt.Sprint(port)},
 		{"file-basic", "--dir", "/nonexistent/iormesh-workload"},
+		{"syscall-burst", "--ops", "10", "--dir", "/nonexistent/iormesh-workload"},
 	}
 	for _, args := range failing {
 		if err := expectExit(1, args...); err != nil {

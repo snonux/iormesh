@@ -2,6 +2,7 @@ package iormesh.workload;
 
 import iormesh.workload.scenarios.FileBasic;
 import iormesh.workload.scenarios.Noop;
+import iormesh.workload.scenarios.SyscallBurst;
 import iormesh.workload.scenarios.TcpLoopback;
 import java.util.List;
 import java.util.Map;
@@ -19,6 +20,7 @@ final class Registry {
         Registry r = new Registry();
         r.add(new FileBasic());
         r.add(new Noop());
+        r.add(new SyscallBurst());
         r.add(new TcpLoopback());
         return r;
     }

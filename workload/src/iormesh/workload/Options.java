@@ -50,6 +50,30 @@ public final class Options {
         return parsePort(v, 1);
     }
 
+    /**
+     * The {@code --key} value as an int in [min, max], or dflt when
+     * absent. Load scenarios size their work with these (syscall-burst's
+     * --ops and --threads); a typo must exit 2 before any I/O, not run a
+     * default-sized burst.
+     */
+    public static int intInRange(Map<String, String> opts, String key, int dflt, int min,
+            int max) throws UsageException {
+        String v = opts.get(key);
+        if (v == null) {
+            return dflt;
+        }
+        int n;
+        try {
+            n = Integer.parseInt(v);
+        } catch (NumberFormatException e) {
+            throw new UsageException("bad --" + key + ": " + v);
+        }
+        if (n < min || n > max) {
+            throw new UsageException("--" + key + " out of range [" + min + ", " + max + "]: " + v);
+        }
+        return n;
+    }
+
     private static int parsePort(String v, int min) throws UsageException {
         int port;
         try {
