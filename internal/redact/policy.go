@@ -2,6 +2,7 @@ package redact
 
 import (
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -13,9 +14,12 @@ const Mask = "***"
 // FlagRule denies one option of one program, for options whose name alone
 // is too generic to deny everywhere: "-p" is mysql's password but java's
 // module path and ssh's port, "-u" is curl's user:password but sort's
-// unique. Program is a glob over the basename of argv[0]; Flag is the
-// option as written ("-p", "--user"). A short Flag ("-p") also masks a
-// value glued to it ("-psecret" → "-p***").
+// unique. Program is a glob over the basename of any word before the
+// option that is not itself an option — argv[0], or a program a wrapper
+// runs ("sudo -u root mysql -p…", "env X=1 mysql -p…", "docker login
+// -p…" with Program "login"). Flag is the option as written ("-p",
+// "--user"). A short Flag ("-p") also masks a value glued to it
+// ("-psecret" → "-p***").
 type FlagRule struct {
 	Program string
 	Flag    string
@@ -47,6 +51,7 @@ func Default() Policy {
 	return Policy{
 		ArgvDeny: []string{
 			"*password*", "*passwd*", "*passphrase*", "*pwd",
+			"*pass", "passin", "passout", // openssl -pass/-passin
 			"*secret*", "*token*", "*apikey*", "*accesskey*",
 			"*privatekey*", "*credential*", "*authorization*",
 			"*bearer*", "*cookie*",
@@ -58,6 +63,8 @@ func Default() Policy {
 			{Program: "redis-cli", Flag: "-a"},
 			{Program: "curl", Flag: "-u"},
 			{Program: "curl", Flag: "--user"},
+			// docker/podman login: "run -p" is a port mapping.
+			{Program: "login", Flag: "-p"},
 		},
 		HeaderDeny: []string{
 			"authorization", "proxy-authorization", "cookie",
@@ -68,35 +75,35 @@ func Default() Policy {
 	}
 }
 
+// argvState is what redacting one element needs from the elements before
+// it: whether it is the value of a denied option, and the program words
+// seen so far, which FlagRules match against.
+type argvState struct {
+	maskNext bool
+	progs    []string // lower-cased basenames of program words FlagRules name
+}
+
 // Argv returns argv with every secret masked; argv itself is not modified.
 // The result has the same length, so element i still is argument i. An
 // option that names a secret and carries no "=value" masks the element
 // after it ("--token X" → "--token ***"), whatever that element looks like:
-// a secret may begin with '-', and guessing wrong would leak it.
+// a secret may begin with '-', and guessing wrong would leak it. An element
+// holding several words ("--token x", sh -c "mysql -psecret") is redacted
+// word by word with the same rules (see words).
 func (p Policy) Argv(argv []string) []string {
 	if argv == nil {
 		return nil
 	}
 	out := make([]string, len(argv))
-	prog := ""
-	if len(argv) > 0 {
-		prog = path.Base(argv[0])
-	}
-	maskNext := false
+	var st argvState
 	for i, arg := range argv {
-		switch {
-		case maskNext:
-			// Still ask whether it is an option of its own: in
-			// "--token --password x" either reading may be the right one,
-			// and only masking both cannot leak.
-			_, maskNext = p.argvElem(prog, arg)
-			out[i] = Mask
-		case i == 0:
+		if i == 0 {
 			// The program itself is a path, never an option.
 			out[i] = p.Text(arg)
-		default:
-			out[i], maskNext = p.argvElem(prog, arg)
+			p.see(&st, arg)
+			continue
 		}
+		out[i] = p.word(&st, arg)
 	}
 	return out
 }
@@ -111,35 +118,84 @@ func (p Policy) Header(name, value string) string {
 	return p.Text(value)
 }
 
-// argvElem redacts one argument after argv[0] and reports whether the next
-// argument is the value of a denied option and must be masked too.
-func (p Policy) argvElem(prog, arg string) (string, bool) {
-	if out, next, ok := p.flagRule(prog, arg); ok {
+// word redacts one argv element (or one word of a multi-word element) in
+// sequence: it is masked whole when the word before asked for it, and it
+// may ask the same of the word after it. A masked word still counts as an
+// option of its own: in "--token --password x" either reading may be the
+// right one, and only masking both cannot leak.
+func (p Policy) word(st *argvState, arg string) string {
+	masked := st.maskNext
+	out, next := p.argvElem(st, arg)
+	st.maskNext = next
+	if masked {
+		return Mask
+	}
+	p.see(st, arg)
+	return out
+}
+
+// see records arg as a program word when it is no option and some
+// FlagRule names it, once. Other words, and repeats, are not kept: a long
+// shell string would otherwise make every later word scan them all.
+func (p Policy) see(st *argvState, arg string) {
+	if arg == "" || strings.HasPrefix(arg, "-") {
+		return
+	}
+	prog := strings.ToLower(path.Base(arg))
+	if slices.Contains(st.progs, prog) {
+		return
+	}
+	for _, r := range p.FlagRules {
+		if globMatch(strings.ToLower(r.Program), prog) {
+			st.progs = append(st.progs, prog)
+			return
+		}
+	}
+}
+
+// argvElem redacts one element and reports whether the next one is the
+// value of a denied option and must be masked too. The forms are tried
+// from the most specific: a program's own flag, a "Name: value" header or
+// colon pair, KEY=VALUE (whose value is redacted like an element of its
+// own: it may hold a header, a command or another pair), several words,
+// a bare denied option, and finally URLs anywhere in the text.
+func (p Policy) argvElem(st *argvState, arg string) (string, bool) {
+	if out, next, ok := p.flagRule(st.progs, arg); ok {
 		return out, next
 	}
-	// A key with URL or path characters is not an option name: in
+	if out, next, ok := p.colonPair(arg); ok {
+		return out, next
+	}
+	// A key with URL, path or space characters is not an option name: in
 	// "https://h/?api_key=x" the '=' belongs to the query string.
-	if key, _, ok := strings.Cut(arg, "="); ok && !strings.ContainsAny(key, "/?&#@") {
+	if key, value, ok := strings.Cut(arg, "="); ok && !strings.ContainsAny(key, "/?&#@") && !hasSpace(key) {
 		if denied(p.ArgvDeny, optionKey(key)) {
 			return key + "=" + Mask, false
 		}
-		return p.Text(arg), false
+		out, next := p.argvElem(st, value)
+		return key + "=" + out, next
+	}
+	if hasSpace(arg) {
+		return p.words(st, arg)
 	}
 	// A bare option naming a secret takes its value from the next element.
 	// "-Dname" is the exception: it sets a system property to "", and the
 	// next element is an unrelated argument (often the main class).
-	if strings.HasPrefix(arg, "-") && !isSysProp(arg) &&
-		denied(p.ArgvDeny, optionKey(arg)) {
+	opt := strings.TrimLeft(arg, `'"`)
+	if strings.HasPrefix(opt, "-") && !isSysProp(opt) &&
+		denied(p.ArgvDeny, optionKey(opt)) {
 		return arg, true
 	}
 	return p.Text(arg), false
 }
 
-// flagRule applies the FlagRules that match prog to arg. ok is false when
-// no rule is about arg, so the generic handling applies.
-func (p Policy) flagRule(prog, arg string) (out string, next, ok bool) {
+// flagRule applies the FlagRules whose program is among progs to arg. ok
+// is false when no rule is about arg, so the generic handling applies.
+func (p Policy) flagRule(progs []string, arg string) (out string, next, ok bool) {
 	for _, r := range p.FlagRules {
-		if r.Flag == "" || !globMatch(strings.ToLower(r.Program), strings.ToLower(prog)) {
+		if r.Flag == "" || !slices.ContainsFunc(progs, func(prog string) bool {
+			return globMatch(strings.ToLower(r.Program), prog)
+		}) {
 			continue
 		}
 		switch {
@@ -155,9 +211,11 @@ func (p Policy) flagRule(prog, arg string) (out string, next, ok bool) {
 }
 
 // optionKey strips what makes a key an option rather than a name: leading
-// dashes and, for a Java system property, the 'D' of "-D". What is left is
-// matched against the deny globs.
+// dashes (and quotes, for a word cut out of a shell string) and, for a Java
+// system property, the 'D' of "-D". What is left is matched against the
+// deny globs.
 func optionKey(key string) string {
+	key = strings.TrimLeft(key, `'"`)
 	if isSysProp(key) {
 		return key[2:]
 	}

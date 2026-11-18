@@ -28,27 +28,54 @@ func (p Policy) Text(s string) string {
 
 // URL masks one URL or request target (what an HTTP server sees:
 // "/orders?token=x"): the userinfo of an absolute URL and the values of
-// denied query parameters. Parameters are split at '&' and ';' and start at
-// the first '?' or ';' after the authority, which also covers JDBC's
-// "jdbc:sqlserver://h;user=a;password=b". It never parses strictly — a
-// malformed URL is masked as far as it can be read, never passed through.
+// denied parameters. Parameters are split at '&', ';' and '#' and start at
+// the first '?', ';' or '#' after the authority, which also covers JDBC's
+// "jdbc:sqlserver://h;user=a;password=b" and OAuth's
+// "#access_token=x" fragments (a fragment without '=' stays). It never
+// parses strictly — a malformed URL is masked as far as it can be read,
+// never passed through.
 func (p Policy) URL(raw string) string {
 	rest, head := raw, ""
 	if i := strings.Index(raw, "://"); i >= 0 {
 		authStart := i + len("://")
-		authEnd := authStart + strings.IndexAny(raw[authStart:]+"/", "/?#;")
+		authEnd := authorityEnd(raw, authStart)
 		head = raw[:authStart] + maskUserinfo(raw[authStart:authEnd])
 		rest = raw[authEnd:]
 	}
-	q := strings.IndexAny(rest, "?;")
+	q := strings.IndexAny(rest, "?;#")
 	if q < 0 {
 		return head + rest
 	}
-	end := len(rest)
-	if f := strings.IndexByte(rest[q:], '#'); f >= 0 {
-		end = q + f
+	return head + rest[:q] + p.maskParams(rest[q:])
+}
+
+// authorityEnd returns where the authority starting at start ends. An '@'
+// before the first '/', '?' or '#' ends the userinfo as usual. Without
+// one, an '@' further on still does when the text before that delimiter
+// looks like user:password — a ':' followed by something other than a
+// port number — because an unescaped '/', '?' or '#' in a password
+// ("u:p/ss@h") would otherwise leave its tail in the "path". So
+// "https://host/@user" and "https://h:8080/x?mail=a@b" keep their host.
+func authorityEnd(raw string, start int) int {
+	rest := raw[start:]
+	delim := strings.IndexAny(rest, "/?#")
+	if delim < 0 {
+		delim = len(rest)
 	}
-	return head + rest[:q] + p.maskParams(rest[q:end]) + rest[end:]
+	hostStart := 0
+	if at := strings.LastIndexByte(rest[:delim], '@'); at >= 0 {
+		hostStart = at + 1
+	} else if at := strings.IndexByte(rest[delim:], '@'); at >= 0 && looksLikeUserPass(rest[:delim]) {
+		hostStart = delim + at + 1
+	}
+	return start + hostStart + strings.IndexAny(rest[hostStart:]+"/", "/?#;")
+}
+
+// looksLikeUserPass reports "user:pass" as opposed to "host:port" or
+// "host": a ':' with a non-numeric remainder.
+func looksLikeUserPass(s string) bool {
+	_, after, ok := strings.Cut(s, ":")
+	return ok && strings.TrimLeft(after, "0123456789") != ""
 }
 
 // maskUserinfo masks the credentials of an authority ("user:pw@host" →
@@ -67,13 +94,14 @@ func maskUserinfo(auth string) string {
 }
 
 // maskParams masks the values of denied parameters in a parameter run that
-// starts with its separator ("?a=1&b=2", ";user=a;password=b"). Separators
-// and names stay; a parameter without '=' has no value to mask.
+// starts with its separator ("?a=1&b=2", ";user=a;password=b",
+// "#access_token=x"). Separators and names stay; a parameter without '='
+// has no value to mask.
 func (p Policy) maskParams(params string) string {
 	var b strings.Builder
 	start := 0
 	for i := 0; i <= len(params); i++ {
-		if i < len(params) && !strings.ContainsRune("?&;", rune(params[i])) {
+		if i < len(params) && !strings.ContainsRune("?&;#", rune(params[i])) {
 			continue
 		}
 		if i > start {

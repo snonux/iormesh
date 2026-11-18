@@ -187,9 +187,12 @@ A followed child's exec is one, and so is the exec through which a
 attached has none, so its argv is not in the trace. `jspawnhelper`
 and the program it execs are two `exec` events of one process.
 BPF copies the first 1 KiB of the argument block; a longer one is
-completed from `/proc/<pid>/cmdline`, which can be a later
-program's if the process exec'd again in between — then the cut
-argv is kept. The environment is never captured (decision #9).
+completed from `/proc/<pid>/cmdline` only when that still starts
+with the copied bytes — the process may have exec'd again, or its
+PID been reused, by the time userspace reads it. Otherwise the cut
+argv is kept, its partial last element masked as `***` (a cut
+`https://u:secr` is no longer recognizable as a URL password).
+The environment is never captured (decision #9).
 
 ### Host-level events: session, drop, end
 
@@ -295,15 +298,22 @@ and the structure stays:
 | `mysql -ps`, `curl -u bob:s`, `redis-cli -a s` | `-p***`, `-u ***`, `-a ***` — only for those programs |
 | `https://bob:s@h/p?k=s` (anywhere in an argument) | `https://bob:***@h/p?k=***` |
 | `jdbc:sqlserver://h;user=u;password=s` | `jdbc:sqlserver://h;user=***;password=***` |
+| `https://h/cb#access_token=s` | `https://h/cb#access_token=***` — fragment parameters too |
+| `--token s` in one element; `sh -c "mysql -ps"` | `--token ***`; `mysql -p***` — several words are redacted word by word, separators and quoting kept |
+| `curl -H "Authorization: Bearer s"`, `--header=Cookie: s`, `--api_key:s`, `pass:s` | `Authorization: ***`, `--header=Cookie: ***`, `--api_key:***`, `pass:***` |
+| `sudo -u root mysql -ps`, `env X=1 mysql -p s`, `docker login -p s` | `-p***`, `-p ***`, `-p ***` — a flag rule applies after any word naming its program |
 
 Keys match case-insensitively with `-`, `_` and `.` ignored, so
 one glob covers every spelling. The argv denylist names
-`password`, `passwd`, `passphrase`, `pwd` (suffix), `secret`,
+`password`, `passwd`, `passphrase`, `pwd` and `pass` (suffixes),
+`passin` and `passout` (openssl), `secret`,
 `token`, `apikey`, `accesskey`, `privatekey`, `credential`,
 `authorization`, `bearer` and `cookie` anywhere in a key; URL
 userinfo is always masked, query values all (decision #22's
 default). It is best effort: a secret under an innocuous name or
-as a bare positional argument is not recognized, and the
+as a bare positional argument is not recognized, a quoted
+value with spaces inside a shell string is masked only up to the
+quote's end as a shell would split it, and the
 defaults over-mask rather than leak (`--password-stdin` masks the
 argument after it). HTTP headers (M3) use the same package:
 `authorization`, `proxy-authorization`, `cookie`, `set-cookie`

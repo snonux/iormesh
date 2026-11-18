@@ -1362,10 +1362,17 @@ scenarios landing first (principle #1).
    *next* element, whatever it looks like — `-Dname` without `=`
    excepted, it sets a property to ""), `DB_PASSWORD=***`,
    `https://user:***@host/?q=***` (userinfo always; a lone
-   userinfo, a token, whole). Options too generic to deny
-   everywhere are scoped by program (`FlagRule`): `-p` is mysql's
-   password but java's module path, so `mysql -psecret` →
-   `-p***` and `java -p mods` stays. The defaults over-mask
+   userinfo, a token, whole; an '@' past the first '/' still ends
+   a userinfo that looks like `user:pass`). Options too generic to
+   deny everywhere are scoped by program (`FlagRule`, matched
+   against every program word before the option, so `sudo`,
+   `env`, `timeout` and `docker login` are covered): `-p` is
+   mysql's password but java's module path, so `mysql -psecret` →
+   `-p***` and `java -p mods` stays. An element of several words
+   (`"--token x"`, `sh -c "…"`) is redacted word by word, shell
+   quoting respected; `Name: value` elements (`curl -H`,
+   `--header=`) go through the header denylist, colon pairs
+   (`--api_key:x`, `pass:x`) through both. The defaults over-mask
    rather than leak (`--password-stdin` masks its successor); a
    secret under an innocuous name is not recognized — a denylist
    is best effort, and the environment is never captured.
@@ -1379,8 +1386,11 @@ scenarios landing first (principle #1).
    `exec_argv_event` struct of the exec watch (exe, the first
    1 KiB of argv) under its own type, so `internal/cli` records
    it instead of judging it. A cut block is completed from
-   `/proc/<pid>/cmdline` as for the watch (a race: the process
-   may have exec'd again; then the cut argv stays). The exec a
+   `/proc/<pid>/cmdline` only when that starts with the copied
+   bytes (the process may have exec'd again, or its PID been
+   reused); otherwise the cut argv stays, its partial last element
+   masked (`ExecInfo.Cut`). Records are never logged: they carry
+   the raw argv. The exec a
    pattern session adopts is recorded too, after its
    `attach_gap` drop. `correlate.Correlator.Exec` builds the
    `exec` event — `args.path` the exe, `args.argv` redacted
@@ -1396,8 +1406,11 @@ scenarios landing first (principle #1).
    `TestArgvSecretRedacted` also checks the raw `events.ndjson`
    and `graph.json` and that each shape is in the exec's argv,
    masked. Unit tests: `internal/redact` (table, negatives,
-   `FuzzArgv`), `TestExecRecordsRedactedArgv`,
-   `TestExecArgvRecordedRedacted` (cli routing).
+   multi-word, header and wrapper cases, `FuzzArgv`,
+   `FuzzArgvOneElement`), `TestExecRecordsRedactedArgv`,
+   `TestExecArgvRecordedRedacted` (cli routing),
+   `TestCutArgvCompletion` (/proc agrees, unreadable, exec'd
+   again).
 
 9. **Native stacks** (opt-in, `-native-stacks`):
    `bpf_get_stackid` into a `BPF_MAP_TYPE_STACK_TRACE`,

@@ -1,6 +1,7 @@
 package correlate
 
 import (
+	"iormesh/internal/redact"
 	"iormesh/internal/schema"
 	"iormesh/internal/types"
 )
@@ -65,13 +66,18 @@ func (c *Correlator) Incarnation(app string, pid uint32, gap uint64) error {
 }
 
 // ExecInfo is one exec of a traced process as the caller read it: the
-// exec record's time and executable, and the argv, already completed from
-// /proc/<pid>/cmdline when the record's copy was cut short.
+// exec record's time and executable, and the argv, completed from
+// /proc/<pid>/cmdline when the record's copy was cut short and /proc
+// still showed the same command line.
 type ExecInfo struct {
 	PID, TID uint32
 	BootNS   uint64 // the exec's time on the boot clock
 	Exe      string // the path as exec'd; "" when unreadable
 	Argv     []string
+	// Cut says Argv is the record's cut copy: its last element is a
+	// fragment ("https://u:secr", "--passw") the policy cannot judge, so
+	// it is masked whole.
+	Cut bool
 }
 
 // Exec queues the exec event of a traced process (M2 step 8): its
@@ -93,10 +99,15 @@ func (c *Correlator) Exec(x ExecInfo) error {
 		Attribution: schema.AttributionNone,
 	}
 	if x.Exe != "" {
-		ev.Args.Path = &x.Exe
+		// A path, but one that may embed a URL like any argument.
+		exe := c.redact.Text(x.Exe)
+		ev.Args.Path = &exe
 	}
 	if len(x.Argv) > 0 {
 		ev.Args.Argv = c.redact.Argv(x.Argv)
+		if x.Cut {
+			ev.Args.Argv[len(ev.Args.Argv)-1] = redact.Mask
+		}
 	}
 	c.enqueue(ev, nil)
 	return c.release(false)

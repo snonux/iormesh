@@ -166,3 +166,87 @@ func FuzzArgv(f *testing.F) {
 		}
 	})
 }
+
+// TestArgvMultiWordElements is review round 1's first leak: a name and its
+// value in one element, and shell command strings, are redacted word by
+// word with the same rules, separators kept.
+func TestArgvMultiWordElements(t *testing.T) {
+	cases := []struct{ in, want []string }{
+		{[]string{"app", "--token abc123"}, []string{"app", "--token ***"}},
+		{[]string{"app", "--token\tsecret"}, []string{"app", "--token\t***"}},
+		{[]string{"sh", "-c", "app --token x"}, []string{"sh", "-c", "app --token ***"}},
+		{[]string{"sh", "-c", "mysql -psecret db"}, []string{"sh", "-c", "mysql -p*** db"}},
+		{[]string{"sh", "-c", "java -Dx=1 -Dpassword=s M"}, []string{"sh", "-c", "java -Dx=1 -Dpassword=*** M"}},
+		{[]string{"sh", "-c", "a  --password  s  b"}, []string{"sh", "-c", "a  --password  ***  b"}},
+		{[]string{"sh", "-c", "app --token"}, []string{"sh", "-c", "app --token"}},
+		{[]string{"sh", "-c", "app --token", "s"}, []string{"sh", "-c", "app --token", "***"}},
+		{[]string{"app", "--opts=--token s"}, []string{"app", "--opts=--token ***"}},
+		{[]string{"sh", "-c", `curl -H 'Authorization: Bearer s' http://h/`},
+			[]string{"sh", "-c", `curl -H 'Authorization: *** http://h/`}},
+		{[]string{"sh", "-c", "x 'a b' --secret 'c d'"}, []string{"sh", "-c", "x 'a b' --secret ***"}},
+		{[]string{"app", "a b c"}, []string{"app", "a b c"}},
+		{[]string{"app", "　--token　s"}, []string{"app", "　--token　***"}}, // ideographic spaces
+	}
+	for _, c := range cases {
+		if got := Default().Argv(c.in); !slices.Equal(got, c.want) {
+			t.Errorf("Argv(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestArgvHeaderAndColonPairs is review round 1's second leak: curl -H
+// "Authorization: Bearer s", --header=…, and colon pairs.
+func TestArgvHeaderAndColonPairs(t *testing.T) {
+	cases := []struct{ in, want []string }{
+		{[]string{"curl", "-H", "Authorization: Bearer s", "http://h/"},
+			[]string{"curl", "-H", "Authorization: ***", "http://h/"}},
+		{[]string{"curl", "--header=Authorization: Bearer s"}, []string{"curl", "--header=Authorization: ***"}},
+		{[]string{"curl", "-H", "Cookie:a=s"}, []string{"curl", "-H", "Cookie:***"}},
+		{[]string{"curl", "-H", "X-Api-Key:", "s"}, []string{"curl", "-H", "X-Api-Key:", "***"}},
+		{[]string{"app", "--api_key:s"}, []string{"app", "--api_key:***"}},
+		{[]string{"openssl", "enc", "-pass", "pass:s"}, []string{"openssl", "enc", "-pass", "***"}},
+		{[]string{"openssl", "rsa", "-passin", "pass:s"}, []string{"openssl", "rsa", "-passin", "***"}},
+		{[]string{"x", "pass:s"}, []string{"x", "pass:***"}},
+		{[]string{"curl", "-H", "Accept: text/plain"}, []string{"curl", "-H", "Accept: text/plain"}},
+		{[]string{"java", "-XX:+UseG1GC", "-Xlog:gc:file=/tmp/gc", "jdbc:h2:mem", "host:8080"},
+			[]string{"java", "-XX:+UseG1GC", "-Xlog:gc:file=/tmp/gc", "jdbc:h2:mem", "host:8080"}},
+	}
+	for _, c := range cases {
+		if got := Default().Argv(c.in); !slices.Equal(got, c.want) {
+			t.Errorf("Argv(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestArgvWrappedPrograms: FlagRules see the program a wrapper runs, and
+// a subcommand ("docker login"), not just argv[0].
+func TestArgvWrappedPrograms(t *testing.T) {
+	cases := []struct{ in, want []string }{
+		{[]string{"sudo", "-u", "root", "mysql", "-psecret"}, []string{"sudo", "-u", "root", "mysql", "-p***"}},
+		{[]string{"env", "HOME=/x", "mysql", "-p", "s"}, []string{"env", "HOME=/x", "mysql", "-p", "***"}},
+		{[]string{"timeout", "10", "redis-cli", "-a", "s"}, []string{"timeout", "10", "redis-cli", "-a", "***"}},
+		{[]string{"docker", "login", "-p", "s", "reg"}, []string{"docker", "login", "-p", "***", "reg"}},
+		{[]string{"docker", "run", "-p", "8080:80", "img"}, []string{"docker", "run", "-p", "8080:80", "img"}},
+		{[]string{"app", "--pass", "s", "--dbpass=s"}, []string{"app", "--pass", "***", "--dbpass=***"}},
+	}
+	for _, c := range cases {
+		if got := Default().Argv(c.in); !slices.Equal(got, c.want) {
+			t.Errorf("Argv(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// FuzzArgvOneElement: whatever precedes it, a "--password value" pair
+// inside one element never lets the value through.
+func FuzzArgvOneElement(f *testing.F) {
+	f.Add("sh -c")
+	f.Add("'")
+	f.Add(`a="b`)
+	f.Add("Accept:")
+	f.Fuzz(func(t *testing.T, prefix string) {
+		in := []string{"x", prefix + " --password Zq9planted"}
+		if out := strings.Join(Default().Argv(in), " "); strings.Contains(out, "Zq9planted") {
+			t.Fatalf("planted value survived: %q", out)
+		}
+	})
+}

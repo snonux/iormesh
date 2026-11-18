@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -198,5 +199,62 @@ func TestExecArgvRecordedRedacted(t *testing.T) {
 	}
 	if argvs[0][1] != "-Dpassword=***" || argvs[1][4] != "--api-key=***" {
 		t.Fatalf("argvs %q", argvs)
+	}
+}
+
+// cutExecRecord is a traced exec's record whose argv block was cut after
+// n bytes, as the BPF side reports a block longer than it copies.
+func cutExecRecord(pid uint32, n int, argv ...string) *types.ExecArgvEvent {
+	ev := execRecord(pid, 10, "/bin/app", argv...)
+	ev.EventType = types.PROCESS_ARGV_EVENT
+	ev.ArgvTotal = ev.ArgvLen
+	ev.ArgvLen = uint32(n)
+	clear(ev.Argv[n:])
+	return ev
+}
+
+// TestCutArgvCompletion is review round 1's third leak: a cut argv is
+// completed from /proc only when /proc still shows the same command line;
+// otherwise the cut copy is recorded with its partial last element masked
+// — a URL password cut before its '@' is no longer recognizable as one.
+func TestCutArgvCompletion(t *testing.T) {
+	argv := []string{"app", "--url", "https://u:Secr3tPw@h/"}
+	cutAt := len("app\x00--url\x00https://u:Secr") // inside the password
+	cases := []struct {
+		name string
+		proc func(uint32) ([]string, error)
+		want []string
+	}{
+		{"proc agrees", func(uint32) ([]string, error) { return argv, nil },
+			[]string{"app", "--url", "https://u:***@h/"}},
+		{"proc unreadable", func(uint32) ([]string, error) { return nil, os.ErrNotExist },
+			[]string{"app", "--url", "***"}},
+		{"process exec'd again", func(uint32) ([]string, error) { return []string{"other", "x"}, nil },
+			[]string{"app", "--url", "***"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			orig := procCmdline
+			procCmdline = c.proc
+			t.Cleanup(func() { procCmdline = orig })
+			dir := t.TempDir()
+			cc := testCorrelator(t, dir)
+			s, _ := pidSession(t, newFakeTracer(), cc, 90)
+			if err := s.handle(cutExecRecord(90, cutAt, argv...)); err != nil {
+				t.Fatal(err)
+			}
+			if err := cc.Close(); err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, e := range readEvents(t, dir) {
+				if e.Event == schema.KindExec {
+					got = e.Args.Argv
+				}
+			}
+			if !slices.Equal(got, c.want) {
+				t.Errorf("argv %q, want %q", got, c.want)
+			}
+		})
 	}
 }

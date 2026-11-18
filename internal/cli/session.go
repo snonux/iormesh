@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"iormesh/internal/correlate"
 	"iormesh/internal/schema"
@@ -100,7 +101,8 @@ func (s *session) handle(rec any) error {
 	case *types.ExecArgvEvent:
 		defer r.Recycle()
 		if r.EventType == types.PROCESS_ARGV_EVENT {
-			return s.c.Exec(execInfo(r, execArgv(r)))
+			argv, cut := execArgv(r)
+			return s.c.Exec(execInfo(r, argv, cut))
 		}
 		return s.judgeExec(r)
 	case *types.TaskNewtaskEvent:
@@ -120,7 +122,7 @@ func (s *session) handle(rec any) error {
 // it. An adopted exec is also recorded (redacted, by the correlator):
 // it is how the app came to be traced, and its argv is the app's.
 func (s *session) judgeExec(ev *types.ExecArgvEvent) error {
-	argv := execArgv(ev)
+	argv, cut := execArgv(ev)
 	exe := types.StringValue(ev.Exe[:])
 	if !s.match.Match(exe, argv) || s.isTracer(ev.Pid, exe) {
 		return s.tr.IgnoreExec(ev.Pid, ev.Time)
@@ -134,27 +136,48 @@ func (s *session) judgeExec(ev *types.ExecArgvEvent) error {
 	if err := s.adopt(ev.Pid, gap); err != nil {
 		return err
 	}
-	return s.c.Exec(execInfo(ev, argv))
+	return s.c.Exec(execInfo(ev, argv, cut))
 }
 
-// execArgv returns an exec record's argv. A record whose argv block was
-// cut short is completed from /proc/<pid>/cmdline, since a Java main
-// class sits behind the class path; if that read fails (the process is
-// gone), the cut argv is all there is.
-func execArgv(ev *types.ExecArgvEvent) []string {
-	argv := target.SplitArgv(ev.Argv[:min(int(ev.ArgvLen), len(ev.Argv))])
-	if ev.ArgvLen < ev.ArgvTotal {
-		if full, err := target.HostProcFS().Cmdline(ev.Pid); err == nil {
-			argv = full
-		}
+// procCmdline reads a process's command line; a variable so tests need
+// no /proc.
+var procCmdline = func(pid uint32) ([]string, error) {
+	return target.HostProcFS().Cmdline(pid)
+}
+
+// execArgv returns an exec record's argv and whether it is the record's
+// cut copy. A cut block (a Java main class sits behind the class path) is
+// completed from /proc/<pid>/cmdline — but only when that still starts
+// with the bytes the record copied: by the time userspace reads it, the
+// process may have exec'd again or its PID been reused, and another
+// program's command line must not be recorded as this exec's. Otherwise
+// the cut argv is all there is, and cut is true (the correlator masks its
+// partial last element). The argv is a secret's carrier: the record and
+// this result are never logged.
+func execArgv(ev *types.ExecArgvEvent) (argv []string, cut bool) {
+	block := ev.Argv[:min(int(ev.ArgvLen), len(ev.Argv))]
+	argv = target.SplitArgv(block)
+	if ev.ArgvLen >= ev.ArgvTotal {
+		return argv, false
 	}
-	return argv
+	full, err := procCmdline(ev.Pid)
+	if err == nil && len(block) > 0 && sameArgvStart(full, block) {
+		return full, false
+	}
+	return argv, true
+}
+
+// sameArgvStart reports whether argv, NUL-joined as in the argument block,
+// starts with block.
+func sameArgvStart(argv []string, block []byte) bool {
+	joined := strings.Join(argv, "\x00") + "\x00"
+	return strings.HasPrefix(joined, string(block))
 }
 
 // execInfo is the correlator's view of an exec record with its argv.
-func execInfo(ev *types.ExecArgvEvent, argv []string) correlate.ExecInfo {
+func execInfo(ev *types.ExecArgvEvent, argv []string, cut bool) correlate.ExecInfo {
 	return correlate.ExecInfo{PID: ev.Pid, TID: ev.Tid, BootNS: ev.Time,
-		Exe: types.StringValue(ev.Exe[:]), Argv: argv}
+		Exe: types.StringValue(ev.Exe[:]), Argv: argv, Cut: cut}
 }
 
 // isTracer reports whether a matching exec is another iormesh session —

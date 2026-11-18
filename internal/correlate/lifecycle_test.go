@@ -201,3 +201,25 @@ func TestExecCustomPolicyAndEmptyArgv(t *testing.T) {
 		t.Errorf("Exec after End: %v, want ErrEnded", err)
 	}
 }
+
+// TestExecCutArgvAndExe: a cut argv's partial last element is masked
+// whole — the policy cannot judge a fragment — and the executable path
+// goes through the policy like any argument.
+func TestExecCutArgvAndExe(t *testing.T) {
+	c, sink := newTest(t)
+	x := ExecInfo{PID: 40, TID: 40, BootNS: 5, Exe: "/x/https://u:pw@h/app",
+		Argv: []string{"app", "--url", "https://u:secr"}, Cut: true}
+	if err := c.Exec(x); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ev := byKind(sink.events, schema.KindExec)[0]
+	if want := []string{"app", "--url", "***"}; !slices.Equal(ev.Args.Argv, want) {
+		t.Errorf("argv %q, want %q", ev.Args.Argv, want)
+	}
+	if *ev.Args.Path != "/x/https://u:***@h/app" {
+		t.Errorf("exe %q", *ev.Args.Path)
+	}
+}
