@@ -107,12 +107,18 @@ throwaway; its findings update this plan.
     implementations, the NIO dispatchers) bracket the syscalls of
     the M0 scenarios, and which I/O stays unbracketed (JNI
     libraries, JVM-internal I/O).
-  - Join key, cheapest candidate first: the fd plus a time
-    window (no TID needed — the matched syscall then teaches
-    the TID↔Java thread mapping); the kernel TID plus a time
-    window (Java exposes no kernel TID: `/proc/thread-self` or
-    a native helper); a per-thread memory slot the BPF side
-    reads at syscall time.
+  - Join key. Front-runner, shown to work in a first
+    experiment (2026-11-18, JDK 25, bpftrace): uprobes on the
+    JDK's native I/O functions (`libjava`/`libnio`/`libnet`)
+    mark the thread id on entry and clear it on return, and
+    the syscall handler reads the mark — an exact, in-kernel
+    join by TID with no clocks involved, on platform and
+    virtual threads alike. It says *which native I/O call*
+    issued a syscall, not which Java method or virtual thread:
+    that still needs the agent, or an eBPF HotSpot unwinder —
+    how the two meet is the open question. Fallbacks: fd plus a
+    time window; kernel TID (`/proc/thread-self`) plus a time
+    window.
   - Clocks: the agent's clock is monotonic, ior's BPF records
     use the boot clock — they differ by time spent suspended.
     Verify the conversion's error is far below a syscall's

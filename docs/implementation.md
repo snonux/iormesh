@@ -856,7 +856,35 @@ target method body in `enter`/`try`/`finally exit`.
 `StackIds.current()` walks with `StackWalker`, hashes the frames,
 and writes a `STACK` record the first time a hash is seen.
 
-**Experiment 3 — the join key.** Three candidates, cheapest first:
+**Experiment 3 — the join key.** Front-runner first, then the
+agent-only fallbacks.
+
+- **(u) uprobes + TID, all in eBPF.** Verified on 2026-11-18
+  (JDK 25, Fedora, bpftrace): a uprobe/uretprobe pair on
+  `Java_java_io_FileOutputStream_writeBytes` (`libjava.so`) and
+  `Java_sun_nio_ch_UnixFileDispatcherImpl_write0` (`libnio.so`)
+  set and cleared a per-TID map entry; the `sys_enter_write`
+  handler found the entry for all 12 of the test's writes — 6 on
+  a platform thread, 6 on a virtual thread's carrier — and for
+  none of the host's other writes. Exact, no clocks, no agent.
+
+  ```
+  uprobe:…/libnio.so:Java_sun_nio_ch_UnixFileDispatcherImpl_write0
+      { @in[tid] = probe; }
+  uretprobe:…/libnio.so:Java_sun_nio_ch_UnixFileDispatcherImpl_write0
+      { delete(@in[tid]); }
+  tracepoint:syscalls:sys_enter_write /@in[tid] != ""/ { … }
+  ```
+
+  What it does *not* give: Java identity. The kernel sees the
+  carrier (`ForkJoinPool-1-…`), not the virtual thread's name,
+  and a BPF stack walk returned only unsymbolized addresses for
+  the Java frames (interpreter frames in the test, run with
+  `-XX:+PreserveFramePointer`). Still to settle: how the Java
+  stack and thread reach the bracket — the agent (then: how its
+  record meets the uprobe's TID), or reading HotSpot's frames
+  from eBPF as profilers do; uprobe cost per I/O op; and JDK
+  builds whose libraries are stripped or statically linked.
 
 - **(a) fd + time window.** The hook knows the Java-level fd
   (`FileDescriptor.fd`). The correlator matches syscalls on
