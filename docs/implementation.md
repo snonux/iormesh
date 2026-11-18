@@ -256,7 +256,9 @@ different threads are unordered against each other.
 brackets it with markers, and ships the scenario's expectations.
 PLAN.md: "M0 — Traceable test workload".
 
-**Files**
+**Files** (the framework landed with M0 and its code is now the
+reference — the sketches below only record intent; the two M1
+scenarios marked "next" are still to come)
 
 ```
 workload/
@@ -264,33 +266,19 @@ workload/
   src/iormesh/workload/Scenario.java    # the interface
   src/iormesh/workload/Marker.java      # begin/end markers
   src/iormesh/workload/Registry.java    # name → Scenario
-  src/iormesh/workload/scenarios/FileBasic.java
-  src/iormesh/workload/scenarios/TcpLoopback.java
-  scenarios/file-basic/expect.json
-  scenarios/tcp-loopback/expect.json
+  src/iormesh/workload/SelfTest.java    # --self-test runner
+  src/iormesh/workload/scenarios/Noop.java      # framework check
+  src/iormesh/workload/scenarios/FileBasic.java   # next: M1 scenario
+  src/iormesh/workload/scenarios/TcpLoopback.java # next: M1 scenario
+  scenarios/<name>/expect.json          # bundled into the jar
 ```
 
-No Maven, no Gradle: `mage workloadBuild` runs `javac` and `jar`
-directly, so the workload has no build-time dependencies either.
-
-```go
-// Magefile.go
-// WorkloadBuild compiles the Java workload with the JDK alone.
-func WorkloadBuild() error {
-    srcs, err := filepath.Glob("workload/src/iormesh/workload/*/*.java")
-    if err != nil {
-        return err
-    }
-    top, _ := filepath.Glob("workload/src/iormesh/workload/*.java")
-    args := append([]string{"--release", "21", "-d", "workload/classes"},
-        append(top, srcs...)...)
-    if err := sh.RunV("javac", args...); err != nil {
-        return err
-    }
-    return sh.RunV("jar", "--create", "--file", "workload.jar",
-        "--main-class", "iormesh.workload.Main", "-C", "workload/classes", ".")
-}
-```
+No Maven, no Gradle: `mage workloadBuild` (in `Magefile.go`)
+walks `workload/src` for `.java` files, runs `javac --release 21
+-Xlint:all -Werror` and `jar`, and bundles `workload/scenarios/`
+so `java -jar workload.jar --expect <name>` prints a scenario's
+declared expectations. The workload has no build-time
+dependencies either.
 
 **Steps**
 
@@ -304,6 +292,10 @@ func WorkloadBuild() error {
        void run(String role, Map<String, String> opts) throws Exception;
    }
    ```
+
+   Multi-role scenarios override `default void selfTest()` to drive
+   every role inside one process, so `--self-test` needs no second
+   process and no fixed port.
 
 2. `Marker` — the bracket every golden check cuts to. It is an
    `open(2)` of a reserved path that never exists, so it costs one
@@ -356,7 +348,13 @@ func WorkloadBuild() error {
 
 **Tests**: a JUnit-free self-test mode — `java -jar workload.jar
 --self-test` runs every scenario without a tracer and exits
-non-zero on an exception; `mage workloadTest` wraps it.
+non-zero on an exception; `mage workloadTest` wraps it, then
+checks a gated run (PID first on stdout; no marker before the
+startup file appears; still alive after the scenario until the
+hold file appears), that `--expect noop` prints valid JSON, and
+that malformed invocations — unknown scenario or role, a missing
+or duplicate option, a stray argument — exit with the usage
+code 2. `--list` prints the registered scenario names.
 
 **Done when**: PLAN.md's M0 acceptance holds — the M1 scenarios
 run standalone and `strace -f -e trace=openat` shows the two

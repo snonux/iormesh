@@ -1,7 +1,8 @@
 # AGENTS.md — conventions for agents working in this repo
 
-iormesh is in the planning phase: no implementation code exists
-yet. [PLAN.md](PLAN.md) is the working plan and the source of
+iormesh is early in implementation: M0 (the Java test workload
+under `workload/`) is the first code; everything else is still
+plan. [PLAN.md](PLAN.md) is the working plan and the source of
 truth for scope, spikes (S1–S3), milestones (M0–M7), and decisions. `ior`
 (`../ior`) is the reference project for BPF/C code generation and
 integration tests — consult it before inventing patterns.

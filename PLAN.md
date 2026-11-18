@@ -809,6 +809,11 @@ answer), and deferred.
   nullable column per argument field (see "Trace output
   contract"). One sub-point rides on S3: whether a size cap
   forces an early rotation for very hot sessions.
+- **#5 Test workload scope** — same repo, `workload/`
+  (adopted with M0, 2026-11-18). A plain Java 21 app built with
+  the JDK alone (`javac` + `jar` via `mage workloadBuild`, no
+  Maven or Gradle), so the thing being traced never has an
+  excuse to behave differently from a real app.
 - **#19 Runtime control** — the transient systemd unit (M4):
   graceful stop via SIGTERM, flag changes via stop-and-restart.
   No control file, no socket.
@@ -818,14 +823,6 @@ answer), and deferred.
   local web server was rejected: it adds a listening socket
   for nothing the static site cannot do at these sizes. Design
   in docs/visualization.md.
-
-### Open — blocks M0/M1
-
-- **#5 Test workload scope** — single repo or separate module?
-  It must stay a plain, dependency-light Java 21 app (ideally
-  just the JDK) so the thing being traced never has an excuse
-  to behave differently from a real app. *Default: same repo,
-  `workload/`.*
 
 ### Open — blocks M2
 

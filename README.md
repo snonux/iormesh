@@ -12,10 +12,12 @@ answers *"what does this process touch — and what touches it back?"* —
 across hosts, not just one.
 
 **Status: early phase — PoC.** This project is a proof of
-concept in the making: the repo currently holds the project
-plan ([PLAN.md](./PLAN.md)), the design docs ([docs/](./docs/)),
-this README, and the logo. Everything described — flags, paths,
-schema, milestones — is subject to change as the PoC evolves.
+concept in the making: the repo holds the project plan
+([PLAN.md](./PLAN.md)), the design docs ([docs/](./docs/)) and
+the first code — M0's Java test workload (`workload/`, built
+with `mage workloadBuild`). Everything described — flags,
+paths, schema, milestones — is subject to change as the PoC
+evolves.
 
 ## Goals
 
