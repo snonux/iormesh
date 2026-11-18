@@ -1057,89 +1057,114 @@ default; hot read/write loops get in-kernel aggregation in M2
 Work in this order — each item is one PR-sized unit with its
 scenarios landing first (principle #1).
 
-1. **Process tree.** ior's `internal/c/exec.c` already handles
-   `task:task_newtask`, `sched_process_exec` and
+1. **Process tree** (done, task pa4). ior's `internal/c/exec.c`
+   handles `task:task_newtask`, `sched_process_exec` and
    `sched_process_exit` — but only to *report* tasks; its filter
-   drops a forked child because the child has a new tgid. Adapt
-   the new-task handler so a traced parent's child joins the
-   traced set:
+   drops a forked child because the child has a new tgid. The
+   new-task handler now inserts a traced creator's child into
+   `target_map` before the child is first woken, so no record of
+   it is lost (`iormesh_follow_child`):
 
    ```c
-   // Runs in the parent's context. A new thread shares its
-   // creator's tgid and is covered already; a new process is
-   // inserted here, before it can make its first syscall.
-   SEC("tracepoint/task/task_newtask")
-   int handle_task_newtask(void *raw) {
-       struct trace_event_raw_task_newtask___ior *ctx = raw;
-       __u32 parent = bpf_get_current_pid_tgid() >> 32;
-       if (!bpf_map_lookup_elem(&target_map, &parent))
-           return 0;
-       // vmlinux.h carries no macros: define the flag next to
-       // ior's IOR_CLONE_FILES (0x00010000 is CLONE_THREAD).
-       if (BPF_CORE_READ(ctx, clone_flags) & IORMESH_CLONE_THREAD)
-           return 0;
-       __u32 child = BPF_CORE_READ(ctx, pid);
-       __u8 one = 1;
-       bpf_map_update_elem(&target_map, &child, &one, BPF_ANY);
-       // then emit ior's task_newtask_event as before
-       return 0;
-   }
+   // Runs in the creator's context inside copy_process(). A new
+   // thread shares its creator's tgid and is covered already.
+   if (clone_flags & IOR_CLONE_THREAD)
+       return;
+   if (!iormesh_pid_targeted(creator_pid))
+       return;
+   traced.state = IORMESH_TARGET_TRACED;
+   if (bpf_map_update_elem(&target_map, &child_pid, &traced, BPF_ANY))
+       ior_count_ringbuf_drop(); // a full map loses the child, counted
    ```
 
-   Keep ior's CO-RE "flavor" struct (`___ior` suffix) for the
-   context — it is what keeps the object buildable on hosts whose
-   `vmlinux.h` differs. Remove exited tgids from `target_map` in
-   the exit handler. Scenario: `fork-exec` (the workload starts a
-   child JVM via `ProcessBuilder`).
+   ior's CO-RE "flavor" structs (`___ior` suffix) stay for the
+   contexts. The exit handler removes a tgid once its whole group
+   is dead (`iormesh_forget_target`), so a reused PID is never
+   traced. The three handlers attach as `bpf.ControlProbes`. The
+   correlator registers a forked child at its `task_newtask`
+   record (its incarnation is read from `/proc` while it surely
+   exists) and drops a dead thread's pending enter at its exit.
+   Root tests: `TestFollowForkExec` (a traced bash's forked and
+   exec'd child is traced and leaves `target_map` once it exited)
+   and `TestUntracedForkNotFollowed` (the negative, then the
+   positive control). The `fork-exec` workload scenario is not
+   written yet; `fd-lifecycle`, `pipe-ipc` and `signals` spawn
+   child JVMs and exercise following once their families land.
 
-2. **Target spec** (`internal/target`):
+2. **Target spec** (`internal/target`, done, task pa4):
 
    ```go
-   // Spec says which processes a session traces.
+   // Spec says which processes a session traces; exactly one is set.
    type Spec struct {
        PIDs       []uint32
-       Pattern    string // glob over "exe argv…" (decision #23)
-       ListenPort uint16 // whoever owns this listening socket
+       Pattern    string // glob over the command line or the exe
+       ListenPort uint16 // the owners of this listening socket
    }
 
-   // Resolve returns the tgids matching right now; the exec
-   // handler calls Matches for every later exec.
-   func (s Spec) Resolve(proc ProcFS) ([]uint32, error)
+   func (s Spec) Resolve(p ProcFS, self uint32) ([]uint32, error)
    func (s Spec) Matches(exe string, argv []string) bool
    ```
 
-   Pattern sessions leave `target_map` empty until a match; the
-   exec event is evaluated in userspace and the tgid inserted.
-   The window between exec and insert loses the first syscalls of
-   a restarted app — record it as a `drop` event with reason
-   `attach_gap`, never silently. Scenario: `restart` (landed
-   ahead, task oa4): a launcher runs `RestartApp` as a child JVM,
-   reaps it and runs it again with the identical argv
+   `iormesh run` takes `-pid`, `-pattern` or `-listen-port`
+   (exactly one). The glob's `*` crosses `/` and spaces, `?` is one
+   byte, `\` escapes; a pattern without a literal character is
+   refused (it would trace every process). `Matches` tries the
+   argv joined by spaces, then the exe path — never the comm.
+   `-listen-port` resolves the owners once, at start
+   (`/proc/net/tcp{,6}` LISTEN inode → `/proc/*/fd`); following
+   the port across restarts stays open for M6 (decision #23).
+
+   Pattern sessions load the object with `IORMESH_EXEC_WATCH`
+   set: every exec of an untraced process is reported as an
+   `exec_argv_event` (exe from the tracepoint, the first 1 KiB of
+   the argument block; userspace re-reads `/proc/<pid>/cmdline`
+   when it was cut) and marked PENDING in `target_map` first.
+   Userspace adopts a match (`bpf.Tracer.AdoptExec`) or dismisses
+   it (`IgnoreExec`). Processes already running at start are found
+   by a `/proc` scan after the probes attached, skipping the
+   tracer and its ancestors, whose command lines name the
+   pattern. While PENDING, `filter()` counts every record the
+   process loses: that is the window between exec and insert, and
+   `AdoptExec` returns it as the gap, which the correlator writes
+   as a `drop` naming the process with `args.drop_reason`
+   `attach_gap`, ahead of its first traced event — never silently
+   (a lower bound; 0 writes nothing). A PENDING entry carries its
+   exec time, so the dismissal of a posix_spawn child's first exec
+   (`jspawnhelper`) cannot remove the entry of its second (the
+   app). A pattern session never ends by itself — it waits for
+   re-appearance (decision #23) until `-duration` or a signal, and
+   a stop drains the records in flight (at most 2 s). PID and port
+   sessions end once every target and followed child is gone,
+   judged by exit records and by `/proc` (start time, tgid, not a
+   zombie), so a reused PID cannot keep a run alive.
+   Root test: `TestExecWatchAdoptAndIgnore`. Scenario: `restart`
+   (landed ahead, task oa4): a launcher runs `RestartApp` as a
+   child JVM, reaps it and runs it again with the identical argv
    (`java <flags> -cp <cp> iormesh.workload.scenarios.RestartApp
    <dir>`); the first incarnation finds no state file (a failed
-   `openat`) and writes one, the second reads it and rewrites
-   it. The harness binds the session to the glob
+   `openat`) and writes one, the second reads it and rewrites it.
+   `TestRestartPattern` binds the session to the glob
    `*iormesh.workload.scenarios.RestartApp*`, which matches both
    incarnations and never the launcher (`-jar workload.jar
-   restart`), so each incarnation emits its own `restart`
-   markers and the per-process cut keeps it without
-   fork-following. The JVM's own startup runs between exec and
-   the begin marker, so an `attach_gap` drop lands before the
-   bracket; one inside it means the insert came too late and
-   the run must fail.
+   restart`), so each incarnation emits its own `restart` markers
+   and the per-process cut keeps it without fork-following. The
+   JVM's own startup runs between exec and the begin marker, so an
+   `attach_gap` drop lands before the bracket; the test fails on
+   one inside it.
 
-3. **App identity**: all incarnations matched by one pattern share
-   an `app:<project>/<pattern>` node with `incarnation` edges
-   (app → process). `restart`'s golden declares them from one
-   `$a1`; the graph must accept the `app` node type and the
-   `incarnation` edge, and the normalizer passes `app:` ids
-   through unchanged (they carry nothing run-specific). Its
-   bracket prune keeps an `incarnation` edge, and so its app
-   node, when the edge's process has events in the bracket —
-   the app node never has events of its own
+3. **App identity** (done, task pa4): all incarnations matched by
+   one pattern share an `app:<project>/<pattern>` node
+   (`schema.NodeApp`, `schema.AppNodeID`) with `incarnation` edges
+   (`schema.EdgeIncarnation`, app → process), which
+   `Graph.Validate` accepts and `correlate.Correlator.Incarnation`
+   adds. `restart`'s golden declares them from one `$a1`; the
+   normalizer passes `app:` ids through unchanged (they carry
+   nothing run-specific). Its bracket prune keeps an `incarnation`
+   edge, and so its app node, when the edge's process has events
+   in the bracket — the app node never has events of its own
    (`TestRestartGoldenEndToEnd` runs the golden through
-   `Normalize`). The edge type is a normalize-local constant
-   until the graph schema defines it.
+   `Normalize`; `TestRestartPattern` runs it against the real
+   tracer).
 
 4. **File surface**: attach the remaining file families (ior's
    family table, `internal/tracepoints/family.go`). For each

@@ -55,7 +55,7 @@ mage lint          # golangci-lint: errcheck + staticcheck SA
 mage fmt / fmtCheck
 mage clean         # keeps vmlinux.h (it needs root to recreate)
 mage workloadTest  # the Java workload, standalone (M0)
-mage bpfRootTest   # BPF loader + TCP tuple tests as root (sudo -n)
+mage bpfRootTest   # BPF root tests: loader, TCP, fork, exec watch (sudo -n)
 mage integrationTest        # tracer + workload end to end, as root
 mage integrationTestSerial  # the same, one test at a time
 mage agentBuild    # the Java agent -> ./iormesh-agent.jar (M3)

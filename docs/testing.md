@@ -89,6 +89,11 @@ ior source and what changed:
   workloads in order (the tcp-loopback client only once the
   server printed `listening`), wait for all of them and for the
   tracer's drain, and read the trace. Every wait is bounded.
+  With `Harness.Pattern` set the tracer runs `-pattern GLOB`
+  instead (M2); such a session never ends by itself, so the
+  harness stops it with SIGINT once the workloads exited
+  (`TestRestartPattern`: the `restart` scenario's two
+  incarnations under one app node, the launcher never traced).
 - `parse.go` — `events.ndjson` + `graph.json`, read strictly.
 - `kernelloss.go` — parses the tracer's exit summary line; a run
   whose kernel lost records is re-run (three attempts), and a

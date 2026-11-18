@@ -1064,6 +1064,11 @@ answer), and deferred.
   port across restarts). Kernel comm's 15-char limit makes
   argv matching the primary source for Java apps. *Default:
   glob on argv, trace all matches, wait for re-appearance.*
+  M2 steps 1–3 (task pa4) implement the default: the glob runs
+  over argv and the exe path, never the comm, and the
+  exec-to-attach window is written as an `attach_gap` drop. The
+  listening-port target resolves once at start for now; whether
+  it follows the port across restarts stays open for M6.
 - **#9 Capture policy for argv and env** — argv is in, but it
   is not harmless: command lines carry passwords and tokens
   (`-Dpassword=…`, `--token …`). Argv is recorded through the
