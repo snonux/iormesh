@@ -38,7 +38,48 @@ func javaEnv(t *testing.T, names ...string) []string {
 // record is either delivered in its writer's order or counted as lost.
 func TestJavaRingStress(t *testing.T) {
 	cp := javaEnv(t, "IORMESH_AGENT_TEST_CP")[0]
-	cmd := exec.Command("java", "-cp", cp, "iormesh.bridge.RingStress",
+	s := newStressCheck(t)
+	r, written := runRingStress(t, cp, "raw", s.record)
+	l := r.Losses()
+	got := s.delivered + l.DroppedBrackets + l.DroppedStacks + l.Abandoned
+	if got != written || l.Unknown+l.Malformed+l.DroppedThreads+l.DroppedWatermarks != 0 {
+		t.Errorf("delivered %d + losses %+v != written %d", s.delivered, l, written)
+	}
+	if s.delivered*bracketLen < 10*testCap {
+		t.Errorf("only %d records delivered: the ring hardly wrapped", s.delivered)
+	}
+	t.Logf("delivered %d, losses %+v", s.delivered, l)
+}
+
+// TestJavaHooksStress: eight Java threads close brackets through Hooks
+// from one call site while the watermark thread runs every millisecond
+// and this reader drains a 64 KiB ring. No BRACKET may follow a WATERMARK
+// it exited before, and every thread and stack id resolves. Mutation
+// check (by hand, 1b4): without the closing mark in Hooks.close it failed
+// 6 of 6 runs on x86-64. The fences cannot be checked this way there —
+// x86 already orders a volatile store before later loads — so their
+// absence would show only on weaker hardware (AArch64), and even then
+// only probabilistically.
+func TestJavaHooksStress(t *testing.T) {
+	cp := javaEnv(t, "IORMESH_AGENT_TEST_CP")[0]
+	a := newAgentCheck(t)
+	r, written := runRingStress(t, cp, "hooks", a.record)
+	l := r.Losses()
+	a.resolve(l)
+	if got := uint64(len(a.named)) + l.DroppedBrackets + l.Abandoned; got != written {
+		t.Errorf("brackets delivered %d + losses %+v != written %d", len(a.named), l, written)
+	}
+	if a.watermarks < 10 || l.Unknown+l.Malformed != 0 {
+		t.Errorf("%d watermarks, losses %+v", a.watermarks, l)
+	}
+	t.Logf("brackets %d, watermarks %d, losses %+v", len(a.named), a.watermarks, l)
+}
+
+// runRingStress runs RingStress in mode with a live reader handing every
+// record to fn, and returns the drained ring and the written count.
+func runRingStress(t *testing.T, cp, mode string, fn func(Record)) (*Ring, uint64) {
+	t.Helper()
+	cmd := exec.Command("java", "-cp", cp, "iormesh.bridge.RingStress", mode,
 		t.TempDir(), strconv.Itoa(testCap), "8", "20000")
 	stdin, lines := startJava(t, cmd)
 	ready := <-lines
@@ -50,23 +91,14 @@ func TestJavaRingStress(t *testing.T) {
 	if _, err := io.WriteString(stdin, "go\n"); err != nil {
 		t.Fatal(err)
 	}
-	s := newStressCheck(t)
-	written := drainUntilDone(t, r, lines, s.record)
+	written := drainUntilDone(t, r, lines, fn)
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("RingStress: %v", err)
 	}
-	if _, err := r.Drain(s.record); err != nil {
+	if _, err := r.Drain(fn); err != nil {
 		t.Fatal(err)
 	}
-	l := r.Losses()
-	got := s.delivered + l.DroppedBrackets + l.DroppedStacks + l.Abandoned
-	if got != written || l.Unknown+l.Malformed+l.DroppedThreads+l.DroppedWatermarks != 0 {
-		t.Errorf("delivered %d + losses %+v != written %d", s.delivered, l, written)
-	}
-	if s.delivered*bracketLen < 10*testCap {
-		t.Errorf("only %d records delivered: the ring hardly wrapped", s.delivered)
-	}
-	t.Logf("delivered %d, losses %+v", s.delivered, l)
+	return r, written
 }
 
 // startJava starts cmd and returns its stdin and a channel of its stdout
@@ -175,8 +207,10 @@ func TestJavaAgentWorkload(t *testing.T) {
 	if _, err := r.Drain(a.record); err != nil {
 		t.Fatal(err)
 	}
-	if l := r.Losses(); l.Total() != 0 || r.Pending() != 0 {
+	l := r.Losses()
+	if l.Total() != 0 || r.Pending() != 0 {
 		t.Errorf("losses %+v, pending %d", l, r.Pending())
 	}
+	a.resolve(l)
 	a.finish(readDebugCounts(t, debug))
 }

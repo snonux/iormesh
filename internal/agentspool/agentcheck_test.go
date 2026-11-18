@@ -7,14 +7,17 @@ import (
 	"testing"
 )
 
-// agentCheck checks a real agent's ring, record by record, for what the
-// joiner (task 2b4) will rely on: a bracket's THREAD and STACK come
-// before it, its kernel tid is its thread's, and no bracket after a
-// WATERMARK exited before that watermark.
+// agentCheck checks a real agent's ring for what the joiner (task 2b4)
+// will rely on: every bracket's thread and stack id resolves to a THREAD
+// and STACK somewhere in the ring (not necessarily before it: another
+// thread may publish a bracket on a stack whose STACK is still being
+// written, and a dropped one is retried later), a bracket's kernel tid is
+// its thread's, and no bracket after a WATERMARK exited before it.
 type agentCheck struct {
 	t          *testing.T
 	threads    map[uint64]Thread
 	stacks     map[uint64]Stack
+	named      []Bracket       // brackets whose ids resolve at the end
 	brackets   map[int32]int64 // per hook id
 	watermarks int
 	mark       uint64 // the latest watermark
@@ -41,24 +44,28 @@ func (a *agentCheck) record(rec Record) {
 		a.mark = v.Mono
 		a.watermarks++
 	case Bracket:
-		a.bracket(v)
+		a.brackets[v.Hook]++
+		a.named = append(a.named, v)
+		if v.ExitMono < a.mark {
+			a.t.Errorf("bracket %+v exited before the watermark %d ahead of it", v, a.mark)
+		}
 	}
 }
 
-func (a *agentCheck) bracket(b Bracket) {
-	a.brackets[b.Hook]++
-	th, ok := a.threads[b.ThreadID]
-	switch {
-	case !ok:
-		a.t.Errorf("bracket %+v before its THREAD", b)
-	case th.KTID <= 0 || th.KTID != b.KTID:
-		a.t.Errorf("bracket %+v: ktid, thread says %d", b, th.KTID)
-	}
-	if _, ok := a.stacks[b.StackID]; !ok {
-		a.t.Errorf("bracket %+v before its STACK", b)
-	}
-	if b.ExitMono < a.mark {
-		a.t.Errorf("bracket %+v exited before the watermark %d ahead of it", b, a.mark)
+// resolve checks every bracket's ids against all records read. An id
+// may stay unresolved only if records of its kind were dropped.
+func (a *agentCheck) resolve(l Losses) {
+	for _, b := range a.named {
+		th, ok := a.threads[b.ThreadID]
+		switch {
+		case !ok && l.DroppedThreads == 0:
+			a.t.Errorf("bracket %+v: no THREAD", b)
+		case ok && (th.KTID <= 0 || th.KTID != b.KTID):
+			a.t.Errorf("bracket %+v: ktid, thread says %d", b, th.KTID)
+		}
+		if _, ok := a.stacks[b.StackID]; !ok && l.DroppedStacks == 0 {
+			a.t.Errorf("bracket %+v: no STACK", b)
+		}
 	}
 }
 

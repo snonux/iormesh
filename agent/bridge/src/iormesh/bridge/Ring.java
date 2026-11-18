@@ -95,8 +95,10 @@ public final class Ring {
     }
 
     /**
-     * Creates (or truncates a stale one of a reused pid) and maps
-     * {@code dir/<pid>.ring}; install time only. The directory is the
+     * Creates and maps {@code dir/<pid>.ring}; install time only. A
+     * stale file of a reused pid is deleted and a new one created, never
+     * truncated in place: a tracer may still map the old inode, and
+     * shrinking it would SIGBUS that reader. The directory is the
      * tracer's: the agent never creates it, so a missing directory means
      * no tracer is listening and fails the install. These are the agent's
      * own syscalls, which the tracer recognises by the spool path.
@@ -108,8 +110,8 @@ public final class Ring {
         }
         long pid = ProcessHandle.current().pid();
         Path path = dir.resolve(pid + ".ring");
+        Files.deleteIfExists(path);
         try (RandomAccessFile f = new RandomAccessFile(path.toFile(), "rw")) {
-            f.setLength(0);
             f.setLength(DATA + capacity);
             ByteBuffer b = f.getChannel().map(FileChannel.MapMode.READ_WRITE, 0, DATA + capacity);
             b.order(ByteOrder.LITTLE_ENDIAN);
@@ -150,11 +152,11 @@ public final class Ring {
             buf.putLong(off + 24, exit);
             buf.putLong(off + 32, stack);
             buf.putLong(off + 40, thread);
+            publish(off, BRACKET_LEN, BRACKET);
+            return true;
         } catch (Throwable e) {
             return abandon(off, BRACKET_LEN);
         }
-        publish(off, BRACKET_LEN, BRACKET);
-        return true;
     }
 
     /**
@@ -166,9 +168,13 @@ public final class Ring {
         if (off < 0) {
             return false;
         }
-        buf.putLong(off + 8, mono);
-        publish(off, WATERMARK_LEN, WATERMARK);
-        return true;
+        try {
+            buf.putLong(off + 8, mono);
+            publish(off, WATERMARK_LEN, WATERMARK);
+            return true;
+        } catch (Throwable e) {
+            return abandon(off, WATERMARK_LEN);
+        }
     }
 
     /**
@@ -228,20 +234,23 @@ public final class Ring {
                 buf.put(p + 4, s, 0, s.length);
                 p += 4 + s.length;
             }
+            publish(off, len, type);
+            return true;
         } catch (Throwable e) {
             return abandon(off, len);
         }
-        publish(off, len, type);
-        return true;
     }
 
     /**
      * Reserves len bytes (a multiple of 8) and returns the record's
      * buffer offset, or -1 after counting a drop of type when the reader
      * is too far behind. A record that does not fit before the end of
-     * the data area reserves a PAD for the rest of the lap as well.
+     * the data area reserves a PAD for the rest of the lap as well. Once
+     * the CAS succeeded every reserved byte must end up published, or
+     * the reader waits on it for ever: a PAD whose publish throws is
+     * abandoned, and so is the record behind it.
      */
-    private int reserve(int len, int type) {
+    int reserve(int len, int type) {
         while (true) {
             long head = (long) LONGS.getVolatile(buf, HEAD);
             long tail = (long) LONGS.getAcquire(buf, TAIL);
@@ -253,11 +262,22 @@ public final class Ring {
             }
             if (LONGS.compareAndSet(buf, HEAD, head, head + pad + len)) {
                 if (pad > 0) {
-                    publish(DATA + (int) pos, (int) pad, PAD);
-                    return DATA;
+                    return padThenRecord(DATA + (int) pos, (int) pad, len);
                 }
                 return DATA + (int) pos;
             }
+        }
+    }
+
+    /** Publishes the lap's closing PAD; the record then starts the next lap. */
+    private int padThenRecord(int padOff, int pad, int len) {
+        try {
+            publish(padOff, pad, PAD);
+            return DATA;
+        } catch (Throwable e) {
+            abandon(padOff, pad);
+            abandon(DATA, len);
+            return -1;
         }
     }
 
@@ -271,7 +291,7 @@ public final class Ring {
      * must still publish its reservation, or the reader would wait on it
      * forever: it becomes a PAD, counted as abandoned.
      */
-    private boolean abandon(int off, int len) {
+    boolean abandon(int off, int len) {
         try {
             publish(off, len, PAD);
             LONGS.getAndAdd(buf, ABANDONED, 1L);

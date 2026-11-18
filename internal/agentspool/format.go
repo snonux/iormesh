@@ -70,7 +70,7 @@ const (
 // Errors Open and Drain return; test with errors.Is.
 var (
 	// ErrNotReady: the file exists but the agent has not finished its
-	// header yet (no magic). Retry later.
+	// header yet (shorter than the header, or no magic). Retry later.
 	ErrNotReady = errors.New("agentspool: ring header not written yet")
 	// ErrVersion: the ring was written by an agent of another format.
 	ErrVersion = errors.New("agentspool: unsupported ring version")

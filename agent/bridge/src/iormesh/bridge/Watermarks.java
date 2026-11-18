@@ -1,5 +1,6 @@
 package iormesh.bridge;
 
+import java.lang.invoke.VarHandle;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -18,7 +19,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * its record precedes the watermark's reservation) or will stamp its
  * exit after the scan, hence after the clock read; a thread seen
  * closing lowers the watermark to its enter stamp, which no exit
- * precedes. Watermarks never go backwards.
+ * precedes. Watermarks never go backwards. Both sides fence between
+ * their volatile access and their clock read (Dekker): the JMM does not
+ * order System.nanoTime() against volatiles by itself.
  */
 final class Watermarks {
     /** The thread's name: the tracer recognises its syscalls as the agent's. */
@@ -53,6 +56,9 @@ final class Watermarks {
      */
     static synchronized void emit(Ring ring) {
         long now = System.nanoTime();
+        // Orders the clock read before the scan's volatile loads, which
+        // the JMM alone does not; pairs with the fence in Hooks.close.
+        VarHandle.fullFence();
         long w = now;
         for (Brackets b : LIVE) {
             long c = b.closing;

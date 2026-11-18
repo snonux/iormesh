@@ -33,6 +33,8 @@ public final class RingTest {
                 new AgentTests.Case("ring/bad size", RingTest::badSize),
                 new AgentTests.Case("ring/no spool dir", RingTest::noDir),
                 new AgentTests.Case("ring/full drops and counts", RingTest::fullDrops),
+                new AgentTests.Case("ring/abandoned fill becomes PAD", RingTest::abandoned),
+                new AgentTests.Case("ring/stale file replaced", RingTest::staleFile),
                 new AgentTests.Case("ring/hooks write records", RingTest::hooksWrite),
                 new AgentTests.Case("ring/watermark waits for closing", RingTest::watermark),
                 new AgentTests.Case("ring/release discards", RingTest::release));
@@ -101,6 +103,39 @@ public final class RingTest {
         equal((long) attempts, brackets + r.dropped(), "delivered + dropped = written");
         equal(r.dropped(), map(r.path()).getLong(Ring.DROPPED + 8 * Ring.BRACKET),
                 "dropped counted as BRACKET");
+        delete(dir);
+    }
+
+    /**
+     * A fill that threw publishes its reservation as a counted PAD, so
+     * the reader skips it instead of waiting on a zero word for ever.
+     */
+    static void abandoned() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
+        int off = r.reserve(Ring.BRACKET_LEN, Ring.BRACKET);
+        check(!r.abandon(off, Ring.BRACKET_LEN), "abandon reports no record");
+        check(r.bracket(1, 2, 3, 4, 5, 6), "next record written");
+        ByteBuffer b = map(r.path());
+        equal(Ring.PAD, (int) (b.getLong(Ring.DATA) >>> 32), "abandoned slot is a PAD");
+        equal(1L, b.getLong(Ring.ABANDONED), "abandoned counted");
+        equal(List.of(Ring.BRACKET), records(b).stream().map(Rec::type).toList(),
+                "the next record follows the PAD");
+        delete(dir);
+    }
+
+    /**
+     * A stale ring of a reused pid is replaced by a new file (new inode),
+     * never truncated under a reader that may still map it.
+     */
+    static void staleFile() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        Ring old = Ring.create(dir, Ring.MIN_CAPACITY);
+        Object inode = Files.getAttribute(old.path(), "unix:ino");
+        ByteBuffer oldMap = map(old.path());
+        Ring r = Ring.create(dir, Ring.MIN_CAPACITY * 2);
+        check(!inode.equals(Files.getAttribute(r.path(), "unix:ino")), "new inode");
+        equal(Ring.MAGIC, oldMap.getLong(0), "the old mapping stays readable");
         delete(dir);
     }
 

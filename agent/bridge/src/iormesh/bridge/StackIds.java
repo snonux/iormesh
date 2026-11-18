@@ -10,8 +10,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * The id hashes the caller frames, so a call site that does I/O in a
  * loop costs one walk and one hash per call but stores its frames once:
  * the first time an id is seen its frames are kept for {@link #frames}
- * and written to the ring as a STACK record (decision #27). A STACK the
- * ring dropped is forgotten again, so the next sighting retries it;
+ * and written to the ring as a STACK record (decision #27). The id is
+ * visible to other threads before its STACK is published, so a STACK
+ * may follow brackets that name it; the joiner resolves stacks by id. A
+ * STACK the ring dropped is forgotten again, so a sighting after a 1 ms
+ * back-off (Hooks.RETRY_NS) retries it;
  * past MAX_KNOWN distinct stacks no more are kept or written, and each
  * unkept sighting counts as a dropped STACK — the bracket keeps its id,
  * the trace's loss accounting says why the frames are missing.
@@ -33,6 +36,8 @@ public final class StackIds {
     private static final StackWalker WALKER = StackWalker.getInstance();
     private static final String OWN_PACKAGE = "iormesh.bridge.";
     private static final ConcurrentHashMap<Long, String[]> KNOWN = new ConcurrentHashMap<>();
+    /** After a dropped STACK, no new stack is written before this nanoTime. */
+    private static volatile long retryAt;
 
     private StackIds() {}
 
@@ -106,9 +111,13 @@ public final class StackIds {
             }
             return;
         }
+        if (r != null && System.nanoTime() < retryAt) {
+            return;  // backing off after a drop: no allocation per sighting
+        }
         String[] described = describe(frames);
         if (KNOWN.putIfAbsent(id, described) == null && r != null && !r.stack(id, described)) {
             KNOWN.remove(id);
+            retryAt = System.nanoTime() + Hooks.RETRY_NS;
         }
     }
 

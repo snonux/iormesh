@@ -167,14 +167,18 @@ func TestConcurrentWriters(t *testing.T) {
 	}
 }
 
-func TestMalformedSkipped(t *testing.T) {
+// malformedCase is a record with sound framing but a body (or type) the
+// reader must skip and count, not deliver.
+type malformedCase struct {
+	typ     int
+	body    []byte
+	unknown bool
+}
+
+func malformedCases() map[string]malformedCase {
 	good := bracketBody(Bracket{Hook: 1, KTID: 2, EnterMono: 3, ExitMono: 4})
 	bad := func(f func(b []byte) []byte) []byte { return f(append([]byte(nil), good...)) }
-	cases := map[string]struct {
-		typ     int
-		body    []byte
-		unknown bool
-	}{
+	return map[string]malformedCase{
 		"bracket too long":   {typeBracket, append(append([]byte(nil), good...), make([]byte, 8)...), false},
 		"bracket hook 0":     {typeBracket, bad(func(b []byte) []byte { le.PutUint32(b, 0); return b }), false},
 		"bracket ktid < 0":   {typeBracket, bad(func(b []byte) []byte { le.PutUint32(b[4:], 1<<31); return b }), false},
@@ -190,7 +194,10 @@ func TestMalformedSkipped(t *testing.T) {
 		"thread ktid < 0":    {typeThread, stringsBody(1, 1<<31, []string{"t"}), false},
 		"unknown type":       {9, make([]byte, 8), true},
 	}
-	for name, c := range cases {
+}
+
+func TestMalformedSkipped(t *testing.T) {
+	for name, c := range malformedCases() {
 		t.Run(name, func(t *testing.T) {
 			path, w := newTestRing(t, testCap)
 			w.raw(c.typ, c.body)
@@ -258,7 +265,7 @@ func TestOpenRejects(t *testing.T) {
 		"head behind tail":   {func(_ string, m []byte) error { le.PutUint64(m[offTail:], 8); return nil }, ErrCorrupt},
 		"head a lap ahead":   {func(_ string, m []byte) error { le.PutUint64(m[offHead:], testCap+8); return nil }, ErrCorrupt},
 		"file truncated":     {func(p string, _ []byte) error { return os.Truncate(p, headerSize+testCap/2) }, ErrTruncated},
-		"no room for header": {func(p string, _ []byte) error { return os.Truncate(p, 100) }, ErrTruncated},
+		"no room for header": {func(p string, _ []byte) error { return os.Truncate(p, 100) }, ErrNotReady},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

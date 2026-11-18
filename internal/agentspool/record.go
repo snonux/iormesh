@@ -27,14 +27,19 @@ type Bracket struct {
 
 // Stack names the frames of a stack id, innermost first, each
 // "class#method(file:line)". Written the first time the agent sees the
-// id, so it precedes every Bracket that names it.
+// id — usually ahead of the Brackets naming it, but not always: another
+// thread on the same call site may publish its Bracket first, and a
+// dropped Stack is retried later. Resolve stack ids against everything
+// read, not only what came before.
 type Stack struct {
 	ID     uint64
 	Frames []string
 }
 
 // Thread maps a Java thread id to its kernel tid (0: lookup failed) and
-// name. Written before the thread's first Bracket. The agent's own
+// name. Written at the thread's first bracket, ahead of its Brackets
+// unless it was dropped and retried later (so, like Stack, resolve by id
+// over everything read). The agent's own
 // watermark thread has one too, so its syscalls can be told apart.
 type Thread struct {
 	ID   uint64

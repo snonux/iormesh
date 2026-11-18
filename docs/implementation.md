@@ -1675,11 +1675,15 @@ internal/correlate/javajoin.go
    STACK and THREAD are zero-padded to 8 and capped at 16 KiB
    (strings cut to 1024 chars); BRACKET and WATERMARK allocate
    nothing. A thread's first bracket writes its THREAD, a stack's
-   first sighting its STACK, both before the BRACKET that names
-   them; a dropped one is retried at the next sighting (so each
-   attempt counts as a drop), and sightings of stacks past
-   StackIds' 65 536-entry cap count as dropped STACKs. METHOD
-   (the method table) waits for step 6.
+   first sighting its STACK. Neither is guaranteed to precede the
+   BRACKETs naming it: the stack id is visible to other threads
+   before its STACK is published, so a second thread on the same
+   call site may publish its BRACKET first, and a dropped THREAD or
+   STACK is retried later (after a 1 ms back-off, so back-pressure
+   costs no allocation per bracket; each failed attempt counts as
+   a drop). The joiner resolves ids against everything it has
+   read. Sightings of stacks past StackIds' 65 536-entry cap count
+   as dropped STACKs. METHOD (the method table) waits for step 6.
 
    Brackets are written at exit, so a syscall inside a still-open
    bracket has no record yet; the agent's watermark thread writes
@@ -1689,8 +1693,12 @@ internal/correlate/javajoin.go
    bracket marks its thread with its enter stamp before stamping
    the exit and clears the mark after publishing; a watermark
    reads the clock, then scans the threads and lowers itself to
-   any marked thread's enter stamp. Install and JVM exit (a
-   shutdown hook) write one too.
+   any marked thread's enter stamp. Both sides put a full fence
+   between their volatile access and their clock read: the JMM
+   does not order `System.nanoTime()` against volatiles, and on
+   AArch64 the closing mark could otherwise become visible only
+   after the exit was stamped. Install and JVM exit (a shutdown
+   hook) write one too.
 
    The agent's syscalls are the ring's setup in `install`, one
    `readlink("/proc/thread-self")` per thread, and the watermark
@@ -1717,9 +1725,13 @@ internal/correlate/javajoin.go
    negative tables for headers, framing and bodies; and from
    `mage agentTest` the Java-driven ones — `RingStress` (eight
    Java threads, a 64 KiB ring lapping under a live Go reader) and
-   `workload.jar file-basic` under the agent, whose ring must
-   order THREAD and STACK before each BRACKET, match the debug
-   dump's counts and keep every watermark's promise. Checked on
+   a `hooks` mode (eight threads closing brackets through `Hooks`
+   on one call site while the watermark thread runs every
+   millisecond: no BRACKET after a WATERMARK it exited before,
+   every id resolves; without the closing mark it failed 6 of 6
+   runs), and `workload.jar file-basic` under the agent, whose
+   ring must resolve every bracket's THREAD and STACK, match the
+   debug dump's counts and keep every watermark's promise. Checked on
    25 (the Go-driven runs), the Java unit tests also on 17
    (GraalVM CE 17.0.9) and 27-ea.
 5. The Go side joins the agent bracket to the uprobe-marked

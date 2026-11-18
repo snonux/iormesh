@@ -40,6 +40,14 @@ final class Bridge {
         this.extracted = extracted;
     }
 
+    /**
+     * A handle on an already loadable Hooks (tests: the bridge classes on
+     * the class path), with nothing extracted.
+     */
+    static Bridge of(Class<?> hooks) {
+        return new Bridge(hooks, null);
+    }
+
     /** Appends the bridge (path, or the nested jar if null) and links it. */
     static Bridge install(Instrumentation inst, String path) throws Exception {
         Path extracted = path != null ? null : extractNested();

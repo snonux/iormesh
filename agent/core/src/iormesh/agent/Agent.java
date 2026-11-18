@@ -77,7 +77,7 @@ public final class Agent {
      * later live attach may then try again instead of finding an agent
      * "already installed" with nothing active.
      */
-    private static BoundaryTransformer prepare(AgentArgs args, HookTable table, Bridge bridge)
+    static BoundaryTransformer prepare(AgentArgs args, HookTable table, Bridge bridge)
             throws Exception {
         try {
             bridge.configure(table.maxId() + 1, args.walkStack(), args.debug() != null);

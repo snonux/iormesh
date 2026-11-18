@@ -1,5 +1,6 @@
 package iormesh.bridge;
 
+import java.lang.invoke.VarHandle;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
@@ -34,13 +35,19 @@ import java.util.function.LongSupplier;
  *
  * A closed bracket becomes a BRACKET record in the ring (decision #27,
  * {@link Ring}); a thread's first bracket also writes its THREAD record,
- * and a stack's first sighting its STACK record (StackIds). Without a
+ * and a stack's first sighting its STACK record (StackIds). Neither is
+ * guaranteed to precede the brackets naming it — a dropped one is
+ * retried later, and another thread may publish a bracket on a stack
+ * whose STACK is still being written — so the joiner resolves ids
+ * against everything it has read. Without a
  * ring (no spool= option) brackets are only counted, and only when the
  * agent's debug dump asked for counts ({@link #counts}).
  */
 public final class Hooks {
     /** Deeper nesting than this is not tracked (still balanced). */
     static final int MAX_DEPTH = 16;
+    /** How long a dropped THREAD or STACK waits before it is tried again. */
+    static final long RETRY_NS = 1_000_000;
     /** Marks a skipped slot, so its exit is dropped too. */
     private static final int SKIPPED = -1;
     private static final LongSupplier WALK = StackIds::current;
@@ -122,7 +129,9 @@ public final class Hooks {
 
     /**
      * Marks the calling thread as the agent's own for good: its hooked
-     * I/O (the debug dump at exit) is never bracketed.
+     * I/O is never bracketed. The agent calls it on its shutdown-hook
+     * thread, iormesh-agent-exit, whose debug dump writes a file through
+     * hooked JDK methods; that I/O is the agent's, not the target's.
      */
     public static void agentThread() {
         STATE.get().busy = true;
@@ -188,7 +197,7 @@ public final class Hooks {
         t.busy = true;
         try {
             Ring r = ring;
-            if (r != null && !t.described) {
+            if (r != null && !t.described && System.nanoTime() >= t.retryAt) {
                 describe(t, r);
             }
             t.stacks[d] = stacks.getAsLong();
@@ -238,6 +247,13 @@ public final class Hooks {
      */
     private static void close(Brackets t, int d, Ring r) {
         t.closing = t.enters[d];
+        // The JMM does not order System.nanoTime() against volatiles:
+        // without a full fence the clock read below may take effect
+        // before the closing store is visible (AArch64's stlr has no
+        // trailing barrier), and a watermark that read the clock later
+        // could still see this thread idle and claim a time before our
+        // exit. Paired with the fence in Watermarks.emit (Dekker).
+        VarHandle.fullFence();
         boolean wasBusy = t.busy;
         t.busy = true;
         try {
@@ -253,9 +269,15 @@ public final class Hooks {
      * Writes the thread's THREAD record (its first bracket, or the
      * warm-up); a dropped one is retried at the next bracket, and the
      * kernel tid lookup — a syscall — happens only once regardless.
+     * After a drop the retry waits RETRY_NS: under back-pressure every
+     * bracket would otherwise encode the name again (an allocation) only
+     * to be dropped again.
      */
     private static void describe(Brackets t, Ring r) {
         t.described = r.thread(t.owner.getId(), t.kernelTid(), t.owner.getName());
+        if (!t.described) {
+            t.retryAt = System.nanoTime() + RETRY_NS;
+        }
     }
 
     /** Counts a dropped bracket; must not throw either. */

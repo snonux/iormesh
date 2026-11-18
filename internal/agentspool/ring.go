@@ -33,7 +33,9 @@ type Ring struct {
 // Open maps the ring file read-write (the reader zeroes what it consumed
 // and moves the tail) and checks its header. ErrNotReady means the agent
 // has not finished the header yet; retry. The mapping outlives the file
-// descriptor, which is closed before Open returns.
+// descriptor, which is closed before Open returns. A file shorter than
+// the header is also ErrNotReady: the agent has created but not yet
+// sized it.
 func Open(path string) (*Ring, error) {
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
@@ -45,8 +47,10 @@ func Open(path string) (*Ring, error) {
 		return nil, fmt.Errorf("agentspool: %w", err)
 	}
 	if st.Size() < headerSize {
-		return nil, fmt.Errorf("%s: %d bytes, no room for the header: %w", path, st.Size(),
-			ErrTruncated)
+		// The agent sizes the file right after creating it: a file this
+		// short is one caught in between, not a damaged ring.
+		return nil, fmt.Errorf("%s: %d bytes, header not written yet: %w", path, st.Size(),
+			ErrNotReady)
 	}
 	mem, err := syscall.Mmap(int(f.Fd()), 0, int(st.Size()),
 		syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)

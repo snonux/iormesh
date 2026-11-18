@@ -26,6 +26,8 @@ final class Brackets {
     int ktid = UNKNOWN_KTID;
     /** Whether this thread's THREAD record reached the ring. */
     boolean described;
+    /** After a dropped THREAD, no retry before this nanoTime. */
+    long retryAt;
     /**
      * The enter stamp of the bracket being written to the ring, or IDLE:
      * set before the exit is stamped and cleared after the record is
