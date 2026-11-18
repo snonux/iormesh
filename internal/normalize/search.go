@@ -159,6 +159,9 @@ func describe(d ExpectedEvent) string {
 	if d.Args.Path != nil {
 		add("path", *d.Args.Path)
 	}
+	if d.Args.Count != nil {
+		add("count", strconv.FormatUint(*d.Args.Count, 10))
+	}
 	if d.Args.Flags != nil {
 		add("flags", strconv.FormatUint(uint64(*d.Args.Flags), 10))
 	}

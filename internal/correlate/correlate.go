@@ -2,7 +2,8 @@
 // events and the per-host graph (docs/implementation.md, M1 step 6). It
 // keeps pid→fd→path state that follows renames (M2 step 5, paths.go) and
 // pid→fd→socket state through dup, fork and exec (M2 step 6, fdtable.go),
-// pairs syscall enters with their exits, turns
+// pairs syscall enters with their exits, expands the kernel's folded
+// read/write records (M2 step 11, aggregate.go), turns
 // marker opens into marker events and fuses the two ends of a loopback
 // connection into one conn id. Around the syscall
 // events it numbers the host-level ones the caller reports: the session
@@ -60,6 +61,7 @@ type Correlator struct {
 	redact   redact.Policy
 	seq      uint64
 	now      uint64 // boot ns of the newest record seen
+	recTime  uint64 // boot ns of the record being handled (procState.clock)
 	procs    map[uint32]*procState
 	socks    *sockTable
 	datagram *sockTable                       // UDP flows, apart from TCP: one tuple may be both
@@ -70,8 +72,11 @@ type Correlator struct {
 	graph    *graphBuilder
 	unpaired uint64
 	noPath   uint64
-	lost     uint64 // cumulative losses already reported by drop events
-	ended    bool   // End was called: nothing may follow the end event
+	// unattributed counts folded read/write records no fd instance
+	// explains (aggregate.go).
+	unattributed uint64
+	lost         uint64 // cumulative losses already reported by drop events
+	ended        bool   // End was called: nothing may follow the end event
 }
 
 // New returns a Correlator writing to cfg.Sink.
@@ -137,6 +142,8 @@ func (c *Correlator) Handle(rec any) error {
 		c.accept(r)
 	case *types.RetEvent:
 		c.exitRet(r)
+	case *types.RwAggregateEvent:
+		c.aggregate(r)
 	case *types.TcpStateEvent:
 		c.tcpState(r)
 	case *types.TaskNewtaskEvent:
@@ -184,8 +191,10 @@ func (c *Correlator) Graph() schema.Graph {
 }
 
 // advance moves the correlator's clock; records are not strictly ordered
-// across CPUs, so the clock only ever moves forward.
+// across CPUs, so the clock only ever moves forward. recTime is the
+// record's own time, which dates the fd instances it creates or ends.
 func (c *Correlator) advance(bootNS uint64) {
+	c.recTime = bootNS
 	if bootNS > c.now {
 		c.now = bootNS
 	}

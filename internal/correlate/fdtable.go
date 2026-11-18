@@ -126,6 +126,8 @@ func (p *procState) inherit(parent *procState) {
 	p.sockOf = maps.Clone(parent.sockOf)
 	p.paths = maps.Clone(parent.paths)
 	p.cloexec = maps.Clone(parent.cloexec)
+	p.born = maps.Clone(parent.born)
+	p.past = maps.Clone(parent.past)
 }
 
 // execTask applies a successful exec (sched_process_exec, emitted for

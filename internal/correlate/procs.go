@@ -36,6 +36,15 @@ type procState struct {
 	cloexec map[int32]bool
 	// flowsOf lists the UDP flows (by key) each fd started (ipc.go).
 	flowsOf map[int32][][2]netip.AddrPort
+	// born is when each live instance a traced call created was created
+	// (the creating record's boot time), past each number's previous
+	// instance: a folded read/write record can arrive after its fd was
+	// closed and reused, and is matched to its instance by time
+	// (aggregate.go). clock points at the correlator's current record
+	// time, which stamps both.
+	born  map[int32]uint64
+	past  map[int32]pastInstance
+	clock *uint64
 }
 
 func (c *Correlator) proc(pid uint32) *procState {
@@ -46,7 +55,8 @@ func (c *Correlator) proc(pid uint32) *procState {
 	p := &procState{inc: inc, comm: comm, fds: map[int32]uint32{},
 		lastGen: map[int32]uint32{}, sockOf: map[int32]*sockState{},
 		paths: map[int32]fdPath{}, cloexec: map[int32]bool{},
-		flowsOf: map[int32][][2]netip.AddrPort{}}
+		flowsOf: map[int32][][2]netip.AddrPort{}, born: map[int32]uint64{},
+		past: map[int32]pastInstance{}, clock: &c.recTime}
 	c.procs[pid] = p
 	c.graph.process(pid, inc, comm)
 	return p
@@ -57,11 +67,14 @@ func (c *Correlator) proc(pid uint32) *procState {
 // stale socket binding of the number; accept keeps the one its snapshot
 // record set just before. The new instance has no path and no known
 // close-on-exec state until its creator sets them: the number's old ones
-// belonged to the instance it replaces.
+// belonged to the instance it replaces, which is retired as the number's
+// past instance (aggregate.go).
 func (p *procState) create(fd int32, socket bool) uint32 {
+	p.retire(fd)
 	gen := p.lastGen[fd] + 1
 	p.lastGen[fd] = gen
 	p.fds[fd] = gen
+	p.born[fd] = *p.clock
 	if !socket {
 		delete(p.sockOf, fd)
 	}
@@ -120,8 +133,11 @@ func (p *procState) sockGen(fd int32, s *sockState, first, snapshot bool) uint32
 }
 
 // close forgets a released fd instance. lastGen keeps the number's
-// generation, so whatever reuses the number is a new instance.
+// generation, so whatever reuses the number is a new instance; past keeps
+// the instance itself for a folded record that arrives late (retire).
 func (p *procState) close(fd int32) {
+	p.retire(fd)
+	delete(p.born, fd)
 	delete(p.fds, fd)
 	delete(p.sockOf, fd)
 	delete(p.paths, fd)

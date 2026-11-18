@@ -169,6 +169,12 @@ type Args struct {
 	// or target need not be traced, and then no process node names it.
 	TargetPID *uint32 `json:"target_pid,omitempty" parquet:"target_pid,optional"`
 	SenderPID *uint32 `json:"sender_pid,omitempty" parquet:"sender_pid,optional"`
+	// Count is how many calls a read or write event stands for when the
+	// tracer folded a hot loop into it (M2 step 11, decision #25): bytes
+	// and ret are then the calls' sums, latency_ns the sum of their
+	// latencies, boot_ns the first call's enter. Absent for a single call;
+	// when set, always ≥ 2.
+	Count *uint64 `json:"count,omitempty" parquet:"count,optional"`
 }
 
 // Session is the host description of the session header. Its fields are

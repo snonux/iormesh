@@ -96,6 +96,14 @@ func checkMutations() []mutation {
 		{name: "attribution declared but not traced", scenario: "file-basic", kind: ViolationEvent,
 			want:     func(x *Expectation) { x.Events[1].Attribution = schema.AttributionJava },
 			contains: "declared event 2 (write fd=$fd1 bytes=4096 attribution=java)"},
+		// M2 step 11: a declaration without args.count is one call, so a
+		// folded write never stands in for it, even with equal bytes.
+		{name: "folded write for a single declared one", scenario: "file-basic", kind: ViolationEvent,
+			trace:    editWhere(isWrite(7, 1), func(e *schema.Event) { n := uint64(2); e.Args.Count = &n }),
+			contains: "declared event 2 (write fd=$fd1 bytes=4096)"},
+		{name: "declared count not met", scenario: "file-basic", kind: ViolationEvent,
+			want:     func(x *Expectation) { n := uint64(3); x.Events[1].Args.Count = &n },
+			contains: "declared event 2 (write fd=$fd1 bytes=4096 count=3)"},
 		{name: "missing edge", scenario: "file-basic", kind: ViolationEdge,
 			trace:    dropEdges(schema.EdgeOpened),
 			contains: "declared edge 1 (opened $p1 → file:$h1:$tmp/file-basic.dat)"},
@@ -290,5 +298,19 @@ func TestCheckWrongProcess(t *testing.T) {
 	vs := Check(normalized(t, raw, r, "tcp-loopback"), golden(t, "tcp-loopback"))
 	if len(vs) != 1 || !strings.Contains(vs[0].Msg, "thread $t2: declared event 2 (write process=$p2 fd=$fd4") {
 		t.Fatalf("want the client's missing write, got %v", vs)
+	}
+}
+
+// TestCheckDeclaredCount: a declared args.count matches the folded event
+// that carries it (M2 step 11).
+func TestCheckDeclaredCount(t *testing.T) {
+	r := runA()
+	raw := fileBasic(r)
+	editWhere(isWrite(7, 1), func(e *schema.Event) { n := uint64(2); e.Args.Count = &n })(&raw)
+	want := golden(t, "file-basic")
+	n := uint64(2)
+	want.Events[1].Args.Count = &n
+	if vs := Check(normalized(t, raw, r, "file-basic"), want); len(vs) > 0 {
+		t.Fatalf("violations: %v", vs)
 	}
 }

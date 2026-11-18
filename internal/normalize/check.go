@@ -158,7 +158,17 @@ func plainFieldsMatch(d ExpectedEvent, e schema.Event) bool {
 	return strMatch(a.Path, g.Path) && strMatch(a.NewPath, g.NewPath) &&
 		strMatch(a.LocalAddr, g.LocalAddr) && strMatch(a.RemoteAddr, g.RemoteAddr) &&
 		strMatch(a.SockState, g.SockState) && strMatch(a.Marker, g.Marker) &&
-		flagsMatch(a.Flags, g.Flags) && signalMatch(a.Signal, g.Signal)
+		flagsMatch(a.Flags, g.Flags) && signalMatch(a.Signal, g.Signal) &&
+		countMatch(a.Count, g.Count)
+}
+
+// countMatch requires the declared args.count, and a single call — no
+// count — when none is declared (ExpectedArgs.Count).
+func countMatch(want, got *uint64) bool {
+	if want == nil || got == nil {
+		return want == got
+	}
+	return *want == *got
 }
 
 func signalMatch(want, got *int32) bool {

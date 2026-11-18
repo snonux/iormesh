@@ -66,6 +66,11 @@ type ExpectedArgs struct {
 	// step 7) like FD binds the first; Signal is the signal number.
 	FD2    *Ref   `json:"fd2,omitempty"`
 	Signal *int32 `json:"signal,omitempty"`
+	// Count is a folded read/write's args.count (M2 step 11). Unlike the
+	// other fields it is compared when absent too: a declaration without
+	// it means one call and matches only a single-call event, never a
+	// folded loop whose summed bytes happen to equal the declared ones.
+	Count *uint64 `json:"count,omitempty"`
 }
 
 // ExpectedEdge is one declared graph edge. From and To are node-id

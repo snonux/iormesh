@@ -189,5 +189,22 @@ func (e *Event) validateIPCArgs() error {
 	if a.SenderPID != nil && e.Event != KindSignal {
 		return invalidf("args.sender_pid on a %s event (signal only)", e.Event)
 	}
+	return e.validateCount()
+}
+
+// validateCount keeps args.count (M2 step 11) to what it means: the calls
+// of a folded read or write loop, at least two — a single call carries no
+// count, so "count 1" and "absent" never both describe one call.
+func (e *Event) validateCount() error {
+	c := e.Args.Count
+	if c == nil {
+		return nil
+	}
+	if e.Event != KindRead && e.Event != KindWrite {
+		return invalidf("args.count on a %s event (read and write only)", e.Event)
+	}
+	if *c < 2 {
+		return invalidf("args.count %d, want ≥ 2 or none", *c)
+	}
 	return nil
 }

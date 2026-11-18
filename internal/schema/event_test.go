@@ -202,6 +202,11 @@ func TestEventValidateRejects(t *testing.T) {
 			e.Event, e.Args.FD2Gen = KindPipe2, ptr(uint32(1))
 		},
 		"fd2 on a connect": func(e *Event) { e.Args.FD2 = ptr(int32(7)) },
+		// M2 step 11: a count names the calls of a folded read or write.
+		"args.count on a connect": func(e *Event) { e.Args.Count = ptr(uint64(2)) },
+		"args.count 1 on a read": func(e *Event) {
+			e.Event, e.Err, e.Ret, e.Args.Count = KindRead, "", 1, ptr(uint64(1))
+		},
 	}
 	for name, breakIt := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -421,4 +426,16 @@ func editKey(t *testing.T, line, key string, edit func(map[string]json.RawMessag
 		t.Fatal(err)
 	}
 	return string(out)
+}
+
+// TestFoldedReadWriteValid: a folded read or write — args.count ≥ 2 — is a
+// valid event (M2 step 11).
+func TestFoldedReadWriteValid(t *testing.T) {
+	for _, kind := range []string{KindRead, KindWrite} {
+		e := validEvent()
+		e.Event, e.Err, e.Ret, e.Bytes, e.Args = kind, "", 4000, 4000, Args{Count: ptr(uint64(1000))}
+		if err := e.Validate(); err != nil {
+			t.Errorf("folded %s: %v", kind, err)
+		}
+	}
 }
