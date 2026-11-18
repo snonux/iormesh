@@ -1,0 +1,169 @@
+# JDK 21 natives, grepped from openjdk/jdk21u master sources (no JDK 21
+# runtime on the test host): raw.githubusercontent.com/openjdk/jdk21u/master/src/java.base/...
+== sun_nio_ch_FileDispatcherImpl.java
+static native long transferTo0(FileDescriptor src, long position,
+static native long transferFrom0(FileDescriptor src, FileDescriptor dst,
+static native void init0();
+== java_io_FileDescriptor.java
+private native void sync0() throws SyncFailedException;
+private static native void initIDs();
+private static native long getHandle(int d);
+private static native boolean getAppend(int fd);
+private native void close0() throws IOException;
+== java_io_FileInputStream.java
+private native void open0(String name) throws FileNotFoundException;
+private native int read0() throws IOException;
+private native int readBytes(byte[] b, int off, int len) throws IOException;
+private native long length0() throws IOException;
+private native long position0() throws IOException;
+private native long skip0(long n) throws IOException;
+private native int available0() throws IOException;
+private static native void initIDs();
+== java_io_FileOutputStream.java
+private native void open0(String name, boolean append)
+private native void write(int b, boolean append) throws IOException;
+private native void writeBytes(byte[] b, int off, int len, boolean append)
+private static native void initIDs();
+== java_io_RandomAccessFile.java
+private native void open0(String name, int mode)
+private native int read0() throws IOException;
+private native int readBytes0(byte[] b, int off, int len) throws IOException;
+private native void write0(int b) throws IOException;
+private native void writeBytes0(byte[] b, int off, int len) throws IOException;
+public native long getFilePointer() throws IOException;
+private native void seek0(long pos) throws IOException;
+private native long length0() throws IOException;
+private native void setLength0(long newLength) throws IOException;
+private static native void initIDs();
+== sun_nio_ch_IOUtil.java
+static native boolean randomBytes(byte[] someBytes);
+static native long makePipe(boolean blocking) throws IOException;
+static native int write1(int fd, byte b) throws IOException;
+static native boolean drain(int fd) throws IOException;
+static native int drain1(int fd) throws IOException;
+public static native void configureBlocking(FileDescriptor fd,
+public static native int fdVal(FileDescriptor fd);
+static native void setfdVal(FileDescriptor fd, int value);
+static native int fdLimit();
+static native int iovMax();
+static native long writevMax();
+static native void initIDs();
+== sun_nio_ch_Net.java
+private static native boolean isIPv6Available0();
+private static native boolean isReusePortAvailable0();
+private static native int isExclusiveBindAvailable();
+private static native boolean shouldShutdownWriteBeforeClose0();
+private static native boolean shouldSetBothIPv4AndIPv6Options0();
+private static native boolean canIPv6SocketJoinIPv4Group0();
+private static native boolean canJoin6WithIPv4Group0();
+private static native boolean canUseIPv6OptionsWithIPv4LocalAddress0();
+private static native int socket0(boolean preferIPv6, boolean stream, boolean reuse,
+private static native void bind0(FileDescriptor fd, boolean preferIPv6,
+static native void listen(FileDescriptor fd, int backlog) throws IOException;
+private static native int connect0(boolean preferIPv6,
+public static native int accept(FileDescriptor fd,
+static native void shutdown(FileDescriptor fd, int how) throws IOException;
+private static native int localPort(FileDescriptor fd)
+private static native InetAddress localInetAddress(FileDescriptor fd)
+private static native int remotePort(FileDescriptor fd)
+private static native InetAddress remoteInetAddress(FileDescriptor fd)
+private static native int getIntOption0(FileDescriptor fd, boolean mayNeedConversion,
+private static native void setIntOption0(FileDescriptor fd, boolean mayNeedConversion,
+static native int poll(FileDescriptor fd, int events, long timeout)
+public static native boolean pollConnect(FileDescriptor fd, long timeout)
+static native int available(FileDescriptor fd) throws IOException;
+static native int sendOOB(FileDescriptor fd, byte data) throws IOException;
+static native boolean discardOOB(FileDescriptor fd) throws IOException;
+private static native int joinOrDrop4(boolean join, FileDescriptor fd, int group, int interf, int source)
+private static native int blockOrUnblock4(boolean block, FileDescriptor fd, int group,
+private static native int joinOrDrop6(boolean join, FileDescriptor fd, byte[] group, int index, byte[] source)
+static native int blockOrUnblock6(boolean block, FileDescriptor fd, byte[] group, int index, byte[] source)
+static native void setInterface4(FileDescriptor fd, int interf) throws IOException;
+static native int getInterface4(FileDescriptor fd) throws IOException;
+static native void setInterface6(FileDescriptor fd, int index) throws IOException;
+static native int getInterface6(FileDescriptor fd) throws IOException;
+private static native void initIDs();
+static native short pollinValue();
+static native short polloutValue();
+static native short pollerrValue();
+static native short pollhupValue();
+static native short pollnvalValue();
+static native short pollconnValue();
+== sun_nio_ch_NioSocketImpl.java
+== sun_nio_ch_SocketDispatcher.java
+private static native int read0(FileDescriptor fd, long address, int len)
+private static native long readv0(FileDescriptor fd, long address, int len)
+private static native int write0(FileDescriptor fd, long address, int len)
+private static native long writev0(FileDescriptor fd, long address, int len)
+== sun_nio_ch_UnixDispatcher.java
+private static native void close0(FileDescriptor fd) throws IOException;
+private static native void preClose0(FileDescriptor fd) throws IOException;
+static native void init();
+== sun_nio_ch_UnixFileDispatcherImpl.java
+static native int read0(FileDescriptor fd, long address, int len)
+static native int pread0(FileDescriptor fd, long address, int len,
+static native long readv0(FileDescriptor fd, long address, int len)
+static native int write0(FileDescriptor fd, long address, int len)
+static native int pwrite0(FileDescriptor fd, long address, int len,
+static native long writev0(FileDescriptor fd, long address, int len)
+static native int force0(FileDescriptor fd, boolean metaData)
+static native long seek0(FileDescriptor fd, long offset)
+static native int truncate0(FileDescriptor fd, long size)
+static native long size0(FileDescriptor fd) throws IOException;
+static native int lock0(FileDescriptor fd, boolean blocking, long pos,
+static native void release0(FileDescriptor fd, long pos, long size)
+static native void closeIntFD(int fd) throws IOException;
+static native long allocationGranularity0();
+static native long map0(FileDescriptor fd, int prot, long position,
+static native int unmap0(long address, long length);
+static native int setDirect0(FileDescriptor fd) throws IOException;
+== sun_nio_fs_UnixNativeDispatcher.java
+static native byte[] getcwd();
+static native int dup(int filedes) throws UnixException;
+private static native int open0(long pathAddress, int flags, int mode)
+private static native int openat0(int dfd, long pathAddress, int flags, int mode)
+private static native void close0(int fd) throws UnixException;
+static native void rewind(long stream) throws UnixException;
+static native int getlinelen(long stream) throws UnixException;
+private static native void link0(long existingAddress, long newAddress)
+private static native void unlink0(long pathAddress) throws UnixException;
+private static native void unlinkat0(int dfd, long pathAddress, int flag)
+private static native void mknod0(long pathAddress, int mode, long dev)
+private static native void rename0(long fromAddress, long toAddress)
+private static native void renameat0(int fromfd, long fromAddress, int tofd, long toAddress)
+private static native void mkdir0(long pathAddress, int mode) throws UnixException;
+private static native void rmdir0(long pathAddress) throws UnixException;
+private static native byte[] readlink0(long pathAddress) throws UnixException;
+private static native byte[] realpath0(long pathAddress) throws UnixException;
+private static native void symlink0(long name1, long name2)
+private static native int stat0(long pathAddress, UnixFileAttributes attrs);
+private static native void lstat0(long pathAddress, UnixFileAttributes attrs)
+private static native void fstat0(int fd, UnixFileAttributes attrs)
+private static native void fstatat0(int dfd, long pathAddress, int flag,
+private static native void chown0(long pathAddress, int uid, int gid)
+private static native void lchown0(long pathAddress, int uid, int gid)
+static native void fchown0(int fd, int uid, int gid) throws UnixException;
+private static native void chmod0(long pathAddress, int mode)
+private static native void fchmod0(int fd, int mode) throws UnixException;
+private static native void utimes0(long pathAddress, long times0, long times1)
+private static native void futimes0(int fd, long times0, long times1)
+private static native void futimens0(int fd, long times0, long times1)
+private static native void lutimes0(long pathAddress, long times0, long times1)
+private static native long opendir0(long pathAddress) throws UnixException;
+static native long fdopendir(int dfd) throws UnixException;
+static native void closedir(long dir) throws UnixException;
+static native byte[] readdir0(long dir) throws UnixException;
+private static native int read0(int fildes, long buf, int nbyte) throws UnixException;
+private static native int write0(int fildes, long buf, int nbyte) throws UnixException;
+private static native int access0(long pathAddress, int amode);
+static native byte[] getpwuid(int uid) throws UnixException;
+static native byte[] getgrgid(int gid) throws UnixException;
+private static native int getpwnam0(long nameAddress) throws UnixException;
+private static native int getgrnam0(long nameAddress) throws UnixException;
+private static native void statvfs0(long pathAddress, UnixFileStoreAttributes attrs)
+static native byte[] strerror(int errnum);
+private static native int fgetxattr0(int filedes, long nameAddress,
+private static native void fsetxattr0(int filedes, long nameAddress,
+private static native void fremovexattr0(int filedes, long nameAddress)
+static native int flistxattr(int filedes, long listAddress, int size)
+private static native int init();

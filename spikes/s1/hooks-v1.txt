@@ -1,0 +1,12 @@
+# Curated leaf hook set (S1 candidate): only JNI functions whose job is
+# the I/O itself, so no mark spans Java upcalls that do unrelated I/O.
+# <library> <symbol glob>, relative to $JAVA_HOME/lib.
+libjava.so Java_java_io_FileInputStream_*
+libjava.so Java_java_io_FileOutputStream_*
+libjava.so Java_java_io_RandomAccessFile_*
+libjava.so Java_java_io_FileDescriptor_*
+libjava.so Java_java_io_FileCleanable_*
+libjava.so Java_java_io_UnixFileSystem_*
+libnio.so Java_sun_nio_*
+libnet.so Java_*
+libextnet.so Java_*

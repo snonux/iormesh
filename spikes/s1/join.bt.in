@@ -1,0 +1,87 @@
+#!/usr/bin/env bpftrace
+/*
+ * Throwaway (S1, task wa4): the uprobe TID-mark join, decision-free.
+ *
+ * Each JNI entry point of a hook set (hooks-all.txt: every Java_* of
+ * libjava/libnio/libnet, for discovery; hooks-v1.txt: the curated leaf
+ * I/O natives) sets a per-TID mark on entry and clears it on return;
+ * every syscall of the target PID prints the mark that was set when it
+ * entered. run.sh expands the ENTRY/RETURN placeholders from the hook set file.
+ *
+ * Usage: run.sh renders this template (probe specs need literal library
+ * paths) and runs it as `bpftrace join.bt PID`.
+ * Absolute library paths, not `-p PID`: the uprobe then sits on the
+ * inode and also fires for a library the JVM maps only later (libnet is
+ * loaded lazily, possibly after the tracer attached).
+ *
+ * Output, one line per event, tab-separated:
+ *   E <ns> <tid> <comm> <nr> <a0> <a1> <a2> <mark>   syscall enter
+ *   X <ns> <tid> <nr> <ret>                          syscall exit
+ *   P <ns> <tid> <nr> <path>                         path of open/unlink
+ *   C <boot_ns> <mono_ns>                            clock pair, BEGIN+END
+ * <ns> is bpftrace's nsecs, which is CLOCK_BOOTTIME (bpf_ktime_get_boot_ns),
+ * like ior's records; the agent stamps CLOCK_MONOTONIC (System.nanoTime),
+ * so the C lines give agentjoin.py the boot - monotonic offset (it moves
+ * only across a suspend) to convert with.
+ * <mark> is the innermost Java_* function active on the TID, or "-".
+ */
+
+@ENTRY@
+/pid == $1/
+{
+	// Innermost wins; depth survives a Java_* that calls another one.
+	@depth[tid] = @depth[tid] + 1;
+	@mark[tid, @depth[tid]] = func;
+}
+
+@RETURN@
+/pid == $1 && @depth[tid] > 0/
+{
+	delete(@mark[tid, @depth[tid]]);
+	@depth[tid] = @depth[tid] - 1;
+}
+
+tracepoint:raw_syscalls:sys_enter
+/pid == $1/
+{
+	$d = @depth[tid];
+	if ($d > 0) {
+		printf("E\t%llu\t%d\t%s\t%d\t%ld\t%ld\t%ld\t%s\n", nsecs, tid,
+		    comm, args.id, args.args[0], args.args[1], args.args[2],
+		    @mark[tid, $d]);
+	} else {
+		printf("E\t%llu\t%d\t%s\t%d\t%ld\t%ld\t%ld\t-\n", nsecs, tid,
+		    comm, args.id, args.args[0], args.args[1], args.args[2]);
+	}
+}
+
+tracepoint:raw_syscalls:sys_exit
+/pid == $1/
+{
+	printf("X\t%llu\t%d\t%d\t%ld\n", nsecs, tid, args.id, args.ret);
+}
+
+tracepoint:syscalls:sys_enter_openat
+/pid == $1/
+{
+	printf("P\t%llu\t%d\t%d\t%s\n", nsecs, tid, 257, str(args.filename));
+}
+
+tracepoint:syscalls:sys_enter_unlink
+/pid == $1/
+{
+	printf("P\t%llu\t%d\t%d\t%s\n", nsecs, tid, 87, str(args.pathname));
+}
+
+BEGIN
+{
+	printf("C\t%llu\t%llu\n", nsecs(boot), nsecs(monotonic));
+	printf("READY\n");
+}
+
+END
+{
+	printf("C\t%llu\t%llu\n", nsecs(boot), nsecs(monotonic));
+	clear(@mark);
+	clear(@depth);
+}

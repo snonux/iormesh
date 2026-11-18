@@ -1,0 +1,7 @@
+# Discovery hook set: every JNI entry point of the three I/O libraries.
+# Shows which native brackets which syscall, but outer natives
+# (Class.forName0, ClassLoader.defineClass1, ...) leak their mark onto
+# I/O the JVM or an unhooked library does underneath them.
+libjava.so Java_*
+libnio.so Java_*
+libnet.so Java_*
