@@ -33,7 +33,14 @@ const probePath = "/etc/hostname"
 func startTarget(t *testing.T) *target {
 	t.Helper()
 	script := fmt.Sprintf(`while read -r _; do exec 3< %s; read -r -u 3 _; exec 3<&-; echo ok; done`, probePath)
-	cmd := exec.Command("bash", "-c", script)
+	return startScript(t, "bash", "-c", script)
+}
+
+// startScript starts name with args as a target: each line written to its
+// stdin is a poke it acknowledges with one line on stdout.
+func startScript(t *testing.T, name string, args ...string) *target {
+	t.Helper()
+	cmd := exec.Command(name, args...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)

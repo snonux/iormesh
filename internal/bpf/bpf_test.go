@@ -89,7 +89,7 @@ func TestDecodersCoverEveryRecordType(t *testing.T) {
 
 func TestDefaultProbes(t *testing.T) {
 	probes := DefaultProbes()
-	want := 2*len(tracepoints.DefaultSyscalls()) + 1
+	want := 2*len(tracepoints.DefaultSyscalls()) + 1 + len(ControlProbes())
 	if len(probes) != want {
 		t.Fatalf("%d probes, want %d", len(probes), want)
 	}
@@ -101,7 +101,8 @@ func TestDefaultProbes(t *testing.T) {
 		seen[p.String()] = true
 	}
 	for _, need := range []string{"syscalls:sys_enter_openat", "syscalls:sys_exit_accept4",
-		"sock:inet_sock_set_state"} {
+		"sock:inet_sock_set_state", "task:task_newtask", "sched:sched_process_exec",
+		"sched:sched_process_exit"} {
 		if !seen[need] {
 			t.Errorf("default probes lack %s", need)
 		}
@@ -113,7 +114,7 @@ func TestDefaultProbes(t *testing.T) {
 // as an attach error on a host.
 func TestDefaultProbeProgramsExist(t *testing.T) {
 	var src []byte
-	for _, f := range []string{"../c/generated_tracepoints.c", "../c/sock.c"} {
+	for _, f := range []string{"../c/generated_tracepoints.c", "../c/sock.c", "../c/exec.c"} {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
@@ -125,6 +126,22 @@ func TestDefaultProbeProgramsExist(t *testing.T) {
 		if !def.Match(src) {
 			t.Errorf("program %s not defined in internal/c", p.Program)
 		}
+	}
+}
+
+// TestDecodeTargetValue: a target_map value reads back field by field in
+// struct iormesh_target's layout, and a value of another size (a map
+// declared differently from maps.h) is an error, not garbage.
+func TestDecodeTargetValue(t *testing.T) {
+	raw := binary.NativeEndian.AppendUint32(nil, targetPending)
+	raw = binary.NativeEndian.AppendUint32(raw, 7)
+	raw = binary.NativeEndian.AppendUint64(raw, 123456789)
+	v, ok, err := decodeTargetValue(raw)
+	if err != nil || !ok || v != (targetValue{State: targetPending, Gap: 7, Since: 123456789}) {
+		t.Fatalf("decodeTargetValue = %+v, %v, %v", v, ok, err)
+	}
+	if _, _, err := decodeTargetValue(raw[:8]); err == nil {
+		t.Fatal("an 8-byte value decoded")
 	}
 }
 

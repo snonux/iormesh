@@ -1,5 +1,6 @@
 // Adapted from ior internal/c/filter.c @ b21afc50328c.
-// Changes: filter() gates on target_map (iormesh_pid_targeted) instead of
+// Changes: filter() gates on target_map (iormesh_filter_tgid, which also
+// counts a pattern session's attach gap) instead of
 // the single-TGID rodata PID_FILTER.
 
 //+build ignore
@@ -825,21 +826,42 @@ static __always_inline void ior_emit_second_name_fixup(__u32 tid, __u32 enter_tr
 
 // iormesh_pid_targeted reports whether tgid is one of the traced processes.
 // ior gated on a single TGID baked into rodata (PID_FILTER, -1 meaning
-// trace-all); iormesh traces several processes per session and, from M2,
-// their children, which a load-time constant cannot express. So the set is a
-// hash map userspace fills before attaching (target_map, maps.h). There is no
-// trace-all value any more: an empty map traces nothing, which is also what a
-// pattern session must do until its first match.
+// trace-all); iormesh traces several processes per session and their
+// children, which a load-time constant cannot express. So the set is a hash
+// map (target_map, maps.h) that userspace fills and the task_newtask handler
+// extends (exec.c). There is no trace-all value any more: an empty map traces
+// nothing, which is also what a pattern session does until its first match. A
+// PENDING entry (pattern sessions, waiting for userspace's verdict) is not
+// traced yet.
 static __always_inline int iormesh_pid_targeted(__u32 tgid) {
-    return bpf_map_lookup_elem(&target_map, &tgid) != 0;
+    struct iormesh_target *t = bpf_map_lookup_elem(&target_map, &tgid);
+    return t && t->state == IORMESH_TARGET_TRACED;
+}
+
+// iormesh_filter_tgid is filter()'s target-set test. Unlike
+// iormesh_pid_targeted it counts every record a PENDING process loses while
+// userspace decides whether it matches the pattern: that count is the
+// attach_gap drop userspace reports once it adopts the process (maps.h), so
+// the gap is never silent. Only filter() counts, so each record is counted
+// once; it runs once per enter or exit handler, which emits one record each.
+// For processes absent from the map it costs what the plain lookup did.
+static __always_inline int iormesh_filter_tgid(__u32 tgid) {
+    struct iormesh_target *t = bpf_map_lookup_elem(&target_map, &tgid);
+    if (!t)
+        return 0;
+    if (t->state == IORMESH_TARGET_TRACED)
+        return 1;
+    __sync_fetch_and_add(&t->gap, 1);
+    return 0;
 }
 
 // filter() decides whether the current task's syscall is in scope: its TGID
-// must be in target_map (iormesh_pid_targeted) and, as in ior, an optional
-// TID_FILTER narrows that to one thread. The tracer's own TGID is excluded
-// first (IOR_PID_FILTER), so a target set that ever named the tracer could
-// not make it trace itself. Children are not followed yet; M2's fork handler
-// will insert them into target_map (docs/implementation.md, M2).
+// must be a TRACED entry of target_map (iormesh_filter_tgid) and, as in ior, an
+// optional TID_FILTER narrows that to one thread. The tracer's own TGID is
+// excluded first (IOR_PID_FILTER), so a target set that ever named the tracer
+// could not make it trace itself. Children of traced processes are in the map
+// because the task_newtask handler inserted them before their first syscall
+// (exec.c, M2 process-tree following).
 static __always_inline int filter(__u32 *pid, __u32 *tid) {
     u64 pid_tgid = bpf_get_current_pid_tgid();
     *pid = pid_tgid >> 32;
@@ -850,7 +872,7 @@ static __always_inline int filter(__u32 *pid, __u32 *tid) {
     }
 
     *tid = pid_tgid & 0xFFFFFFFF;
-    if (!iormesh_pid_targeted(*pid))
+    if (!iormesh_filter_tgid(*pid))
         return FILTER;
     if (-1 == TID_FILTER || *tid == TID_FILTER)
         return ACCEPT;

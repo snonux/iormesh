@@ -1,5 +1,6 @@
 // Adapted from ior internal/c/types.h @ b21afc50328c.
-// Changes: TCP_STATE_EVENT and struct tcp_state_event added (sock.c).
+// Changes: TCP_STATE_EVENT and struct tcp_state_event added (sock.c);
+// EXEC_ARGV_EVENT and struct exec_argv_event added (exec.c, M2).
 
 //+build ignore
 
@@ -93,6 +94,10 @@
 // iormesh: a TCP socket's 4-tuple and state, from sock:inet_sock_set_state
 // or from the accept exit (struct tcp_state_event, sock.c).
 #define TCP_STATE_EVENT 68
+// iormesh: an exec of an untraced process in a pattern session, carrying the
+// executable path and argv the target pattern is matched against
+// (struct exec_argv_event, exec.c).
+#define EXEC_ARGV_EVENT 69
 
 #define UNCLASSIFIED 0
 #define READ_CLASSIFIED 1
@@ -994,4 +999,32 @@ struct tcp_state_event {
     __u32 reserved;
     __u8 saddr[TCP_ADDR_LEN];
     __u8 daddr[TCP_ADDR_LEN];
+};
+
+// exec_argv_event (iormesh, exec.c) reports an exec of a process that is not
+// traced, emitted only in a pattern session (IORMESH_EXEC_WATCH, flags.h):
+// userspace matches the target pattern (decision #23: a glob over argv and the
+// executable path, never the 15-character comm, which cannot tell two JVMs
+// apart) and adopts or dismisses the PENDING target_map entry the handler
+// inserted (maps.h). time is the exec's boot-clock time and equals that
+// entry's since. exe is the path the exec was asked for (the tracepoint's
+// filename, NUL-terminated, empty if unreadable). argv is the head of the new
+// program's argument block, NUL-separated as in /proc/<pid>/cmdline:
+// argv_len bytes were copied (0 when the read failed), argv_total is the
+// block's full length, so argv_len < argv_total means truncated and userspace
+// re-reads /proc/<pid>/cmdline. A Java command line puts the main class after
+// a class path that can be long, which is why the block is 1 KiB and the
+// fallback exists. Not every pattern-session exec is emitted: a traced
+// process's exec stays traced and needs no verdict. No implicit padding.
+#define MAX_ARGV_LENGTH 1024
+struct exec_argv_event {
+    __u32 event_type;
+    __u32 trace_id;
+    __u64 time;
+    __u32 pid;
+    __u32 tid;
+    __u32 argv_len;
+    __u32 argv_total;
+    char exe[MAX_FILENAME_LENGTH];
+    char argv[MAX_ARGV_LENGTH];
 };

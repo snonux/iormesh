@@ -2,10 +2,11 @@ package gatecmd
 
 import "strings"
 
-// RootBPFTests are the tests of internal/sock_root_test.go and
-// internal/loader_root_test.go: they load the real BPF object, attach the
-// TCP programs or the loader's default probe set, and read the ring buffer
-// (M1 steps 4 and 5). They skip for anybody but root, so `mage test` passes them by, and
+// RootBPFTests are the tests of internal/sock_root_test.go,
+// internal/loader_root_test.go and internal/follow_root_test.go: they load
+// the real BPF object, attach the TCP programs or the loader's default
+// probe set, and read the ring buffer (M1 steps 4 and 5; process-tree
+// following and the exec watch, M2 steps 1–2). They skip for anybody but root, so `mage test` passes them by, and
 // `mage bpfRootTest` is the one place that runs them. The names are listed
 // rather than matched by a pattern so that a renamed test fails a gate
 // (internal/buildgate) instead of silently no longer running. Adapted from
@@ -20,6 +21,9 @@ func RootBPFTests() []string {
 		"TestLoaderTargetsOnlyTheMap",
 		"TestLoaderCloseEndsRecords",
 		"TestLoaderRefusesEmptyAttach",
+		"TestFollowForkExec",
+		"TestUntracedForkNotFollowed",
+		"TestExecWatchAdoptAndIgnore",
 	}
 }
 

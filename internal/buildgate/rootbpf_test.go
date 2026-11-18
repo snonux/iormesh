@@ -13,9 +13,11 @@ import (
 )
 
 // rootBPFTestFiles hold the tests `mage bpfRootTest` runs as root: the
-// socket tests (M1 step 4) and the loader tests (step 5), both in the one
-// test binary of ./internal.
-var rootBPFTestFiles = []string{"internal/sock_root_test.go", "internal/loader_root_test.go"}
+// socket tests (M1 step 4), the loader tests (step 5) and the process-tree
+// and exec-watch tests (M2 steps 1–2), all in the one test binary of
+// ./internal.
+var rootBPFTestFiles = []string{"internal/sock_root_test.go", "internal/loader_root_test.go",
+	"internal/follow_root_test.go"}
 
 // testFunctionsIn returns the names of the top-level Test functions of the Go
 // file at the repository path rel. Adapted from ior

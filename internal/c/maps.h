@@ -1,18 +1,44 @@
 // Adapted from ior internal/c/maps.h @ b21afc50328c.
-// Changes: target_map added (replaces ior's rodata PID_FILTER).
+// Changes: target_map added (replaces ior's rodata PID_FILTER), with
+// struct iormesh_target values for tree following and pattern sessions (M2).
 
 //+build ignore
 
-// target_map is the set of TGIDs being traced (filter.c,
-// iormesh_pid_targeted). Userspace inserts the session's target PIDs before it
-// attaches; M2's fork handler will insert their children. The value is unused
-// (a set). 4096 entries leave room for process trees well beyond M1's two
-// processes; a full map makes the insert fail in userspace, never silently.
+// struct iormesh_target is one target_map value. A TRACED entry is a process
+// whose syscalls are traced: a session target userspace inserted, or a child
+// the task_newtask handler inserted because its creator was TRACED (M2
+// process-tree following, exec.c). A PENDING entry exists only in pattern
+// sessions (IORMESH_EXEC_WATCH): the sched_process_exec handler inserts it for
+// every exec of an untraced process, before it emits the exec_argv_event
+// userspace matches the target pattern against. Until userspace decides,
+// filter() counts every record the process would have produced in gap - the
+// attach gap (docs/implementation.md M2 step 2) - and userspace either turns
+// the entry TRACED and reports gap as an attach_gap drop, or deletes it. since
+// is the exec's boot-clock time, also the record's time, so userspace deletes
+// only the pending entry of the exec it judged and never a newer one (a
+// posix_spawn child exec's jspawnhelper and then the app, two execs of one
+// pid in quick succession). The value is 16 bytes with no implicit padding;
+// internal/bpf writes it with the same layout.
+#define IORMESH_TARGET_TRACED 1
+#define IORMESH_TARGET_PENDING 2
+struct iormesh_target {
+    __u32 state;
+    __u32 gap;
+    __u64 since;
+};
+
+// target_map is the set of TGIDs being traced or, in a pattern session,
+// waiting for userspace's verdict (struct iormesh_target above). The
+// sched_process_exit handler removes a process's entry once its whole thread
+// group is dead, so a reused PID never inherits it. 16384 entries leave room
+// for process trees and for the pending entries of a burst of host-wide execs
+// that userspace has not judged yet; a full map makes a userspace insert fail
+// loudly and a kernel-side insert count a drop (exec.c), never silently.
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 4096);
+    __uint(max_entries, 16384);
     __type(key, __u32);
-    __type(value, __u8);
+    __type(value, struct iormesh_target);
 } target_map SEC(".maps");
 
 // event_map is the ring buffer carrying every event to userspace. max_entries

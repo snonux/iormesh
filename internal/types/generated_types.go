@@ -150,6 +150,7 @@ const FILE_HANDLE_EVENT = 65
 const ENTER_FD_NAME_EVENT = 66
 const RING_FDS_EVENT = 67
 const TCP_STATE_EVENT = 68
+const EXEC_ARGV_EVENT = 69
 const UNCLASSIFIED = 0
 const READ_CLASSIFIED = 1
 const WRITE_CLASSIFIED = 2
@@ -198,6 +199,7 @@ const RESTART_PHASE_RESUME = 2
 const TCP_STATE_SNAPSHOT = 0
 const TCP_ADDR_LEN = 16
 const TCP_STATE_EVENT_SCHEMA_VERSION = 1
+const MAX_ARGV_LENGTH = 1024
 const SYS_ENTER_SOCKET TraceId = 1899
 const SYS_EXIT_SOCKET TraceId = 1898
 const SYS_ENTER_SOCKETPAIR TraceId = 1897
@@ -3871,4 +3873,75 @@ func (t *TcpStateEvent) Bytes() ([]byte, error) {
 
 func (t *TcpStateEvent) Recycle() {
 	poolOfTcpStateEvents.Put(t)
+}
+
+type ExecArgvEvent struct {
+	EventType EventType
+	TraceId   TraceId
+	Time      uint64
+	Pid       uint32
+	Tid       uint32
+	ArgvLen   uint32
+	ArgvTotal uint32
+	Exe       [MAX_FILENAME_LENGTH]byte
+	Argv      [MAX_ARGV_LENGTH]byte
+}
+
+func (e ExecArgvEvent) String() string {
+	return fmt.Sprintf("EventType:%v TraceId:%v Time:%v Pid:%v Tid:%v ArgvLen:%v ArgvTotal:%v Exe:%v Argv:%v", e.EventType, e.TraceId, e.Time, e.Pid, e.Tid, e.ArgvLen, e.ArgvTotal, StringValue(e.Exe[:]), StringValue(e.Argv[:]))
+}
+
+func (e ExecArgvEvent) Equals(other any) bool {
+	otherConcrete, ok := other.(*ExecArgvEvent)
+	if !ok {
+		return false
+	}
+	return e.EventType == otherConcrete.EventType && e.TraceId == otherConcrete.TraceId && e.Time == otherConcrete.Time && e.Pid == otherConcrete.Pid && e.Tid == otherConcrete.Tid && e.ArgvLen == otherConcrete.ArgvLen && e.ArgvTotal == otherConcrete.ArgvTotal && e.Exe == otherConcrete.Exe && e.Argv == otherConcrete.Argv
+}
+
+func (e *ExecArgvEvent) GetEventType() EventType {
+	return e.EventType
+}
+
+func (e *ExecArgvEvent) GetTraceId() TraceId {
+	return e.TraceId
+}
+
+func (e *ExecArgvEvent) GetPid() uint32 {
+	return e.Pid
+}
+
+func (e *ExecArgvEvent) GetTid() uint32 {
+	return e.Tid
+}
+
+func (e *ExecArgvEvent) GetTime() uint64 {
+	return e.Time
+}
+
+var poolOfExecArgvEvents = sync.Pool{
+	New: func() any { return &ExecArgvEvent{} },
+}
+
+func NewExecArgvEvent(raw []byte) *ExecArgvEvent {
+	e := poolOfExecArgvEvents.Get().(*ExecArgvEvent)
+	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, e); err != nil {
+		*e = ExecArgvEvent{}
+		poolOfExecArgvEvents.Put(e)
+		return nil
+	}
+	return e
+}
+
+func (e *ExecArgvEvent) Bytes() ([]byte, error) {
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.LittleEndian, e)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (e *ExecArgvEvent) Recycle() {
+	poolOfExecArgvEvents.Put(e)
 }

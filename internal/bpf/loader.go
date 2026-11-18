@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"unsafe"
 
 	bpf "github.com/aquasecurity/libbpfgo"
 
@@ -24,6 +23,12 @@ type Config struct {
 	Pids []uint32
 	// Probes is the attach set; nil means DefaultProbes().
 	Probes []Probe
+	// ExecWatch turns on the pattern session's exec watch (M2 step 2):
+	// every exec of an untraced process is reported as a
+	// *types.ExecArgvEvent and waits PENDING in target_map until the
+	// caller decides with AdoptExec or IgnoreExec. Off, an untraced
+	// process's exec costs nothing.
+	ExecWatch bool
 	// Buffer is the capacity of the Records channel; 0 means 4096. A full
 	// channel is backpressure: the ring buffer then fills and the kernel
 	// counts drops (Losses.Kernel) instead of blocking the traced app.
@@ -36,7 +41,6 @@ const (
 	// before it re-checks for Stop, i.e. how long Close can wait.
 	pollTimeoutMs  = 50
 	ringbufMapName = "event_map"
-	targetMapName  = "target_map"
 )
 
 // Tracer is one loaded BPF object with its links and ring-buffer reader.
@@ -66,7 +70,7 @@ func Open(cfg Config) (_ *Tracer, err error) {
 			err = errors.Join(err, t.Close())
 		}
 	}()
-	if err := t.load(cfg.Pids); err != nil {
+	if err := t.load(cfg); err != nil {
 		return nil, err
 	}
 	probes := cfg.Probes
@@ -85,16 +89,23 @@ func Open(cfg Config) (_ *Tracer, err error) {
 
 // load sets the load-time globals, loads the object into the kernel and
 // seeds target_map.
-func (t *Tracer) load(pids []uint32) error {
+func (t *Tracer) load(cfg Config) error {
 	// The tracer's own I/O (ring buffer, segment writes) must never reach
 	// its trace, even if a target spec ever matched it (filter.c).
 	if err := t.module.InitGlobalVariable("IOR_PID_FILTER", uint32(os.Getpid())); err != nil {
 		return fmt.Errorf("set IOR_PID_FILTER: %w", err)
 	}
+	watch := uint32(0)
+	if cfg.ExecWatch {
+		watch = 1
+	}
+	if err := t.module.InitGlobalVariable("IORMESH_EXEC_WATCH", watch); err != nil {
+		return fmt.Errorf("set IORMESH_EXEC_WATCH: %w", err)
+	}
 	if err := t.module.BPFLoadObject(); err != nil {
 		return fmt.Errorf("load BPF object: %w", err)
 	}
-	for _, pid := range pids {
+	for _, pid := range cfg.Pids {
 		if err := t.AddTarget(pid); err != nil {
 			return err
 		}
@@ -109,39 +120,6 @@ func quietLibbpf() {
 	bpf.SetLoggerCbs(bpf.Callbacks{LogFilters: []func(int, string) bool{
 		func(level int, _ string) bool { return level > bpf.LibbpfWarnLevel },
 	}})
-}
-
-// AddTarget starts tracing pid's syscalls.
-func (t *Tracer) AddTarget(pid uint32) error {
-	return t.setTarget(pid, true)
-}
-
-// RemoveTarget stops tracing pid. Records already in the ring buffer are
-// still delivered.
-func (t *Tracer) RemoveTarget(pid uint32) error {
-	return t.setTarget(pid, false)
-}
-
-func (t *Tracer) setTarget(pid uint32, on bool) error {
-	if t.closed() {
-		return errClosed
-	}
-	m, err := t.module.GetMap(targetMapName)
-	if err != nil {
-		return fmt.Errorf("get %s: %w", targetMapName, err)
-	}
-	key := unsafe.Pointer(&pid)
-	if !on {
-		if err := m.DeleteKey(key); err != nil {
-			return fmt.Errorf("remove target %d: %w", pid, err)
-		}
-		return nil
-	}
-	val := uint8(1)
-	if err := m.Update(key, unsafe.Pointer(&val)); err != nil {
-		return fmt.Errorf("add target %d: %w", pid, err)
-	}
-	return nil
 }
 
 // Records delivers decoded records in ring-buffer order. Each value is a

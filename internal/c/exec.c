@@ -1,5 +1,8 @@
 // Adapted from ior internal/c/exec.c @ b21afc50328c.
-// Changes: the PID_FILTER tests are iormesh_pid_targeted (target_map).
+// Changes: the PID_FILTER tests are iormesh_pid_targeted (target_map); M2
+// adds process-tree following (iormesh_follow_child), the removal of exited
+// processes from target_map (iormesh_forget_target) and the pattern
+// session's exec watch (iormesh_watch_exec, exec_argv_event).
 
 //+build ignore
 
@@ -136,39 +139,95 @@ ior_exec_record_scope(int in_scope, __u32 pid, __u32 old_tid) {
     return IOR_EXEC_CALLER_TRACED;
 }
 
-SEC("tracepoint/sched/sched_process_exec")
-int handle_sched_process_exec(struct trace_event_raw_sched_process_exec *ctx) {
-    // Zero-initialised: filter() leaves tid unwritten on its early ior-self
-    // return.
-    __u32 pid = 0, tid = 0;
-    struct process_exec_event *ev;
-    int in_scope = !filter(&pid, &tid);
-    enum ior_exec_scope scope;
-    int exit_unseen;
+// Why exec_argv_event exists (iormesh, M2): a pattern session (decision #23)
+// binds to processes by their command line, matched on exec, and
+// userspace can only match what it is told. The process_exec_event below
+// reports traced processes only and carries the 15-character comm, which
+// cannot tell two JVMs apart. So with IORMESH_EXEC_WATCH set, every exec of a
+// process that is not traced yet is reported with its executable path and
+// argv, and the process is marked PENDING in target_map first: from then on
+// filter() counts what it loses until userspace adopts it (the attach gap,
+// maps.h) or dismisses it. The tracer itself never gets here (the caller
+// returns for IOR_PID_FILTER first).
+//
+// Cost: one ~1.3 KiB record and one map update per exec on the host, only in
+// pattern sessions. Execs are rare next to syscalls (S3).
 
-    if (pid == IOR_PID_FILTER)
-        return 0;
-    // Keep the CO-RE load as a scalar across the map helpers below. Older
-    // LLVM versions otherwise reuse a relocated ctx + offset pointer for
-    // later loads, which tracepoint verifiers reject as a modified ctx.
-    __u32 old_tid = (__u32)ctx->old_pid;
-    barrier_var(old_tid);
-    ior_on_exec_tid_change(old_tid, tid, in_scope);
-    scope = ior_exec_record_scope(in_scope, pid, old_tid);
-    if (scope == IOR_EXEC_OUT_OF_SCOPE)
-        return 0;
-    // An in-scope exec into a 32-bit program: its sys_exit never fires
-    // (ior_exec_into_compat), so the enter state is settled now and the
-    // record below tells userspace to complete the execve from it. After
-    // the tid move above, the state is under the post-exec tid.
-    exit_unseen = scope == IOR_EXEC_IN_SCOPE && ior_exec_into_compat();
-    if (exit_unseen)
-        ior_on_exec_exit_unseen(tid);
+// iormesh_read_argv copies the head of the current task's argument block -
+// argv as NUL-separated strings, where the new program's mm keeps it - into
+// ev and records how much it copied and how long the block is. At
+// sched_process_exec the new mm is installed and the block was just written by
+// the kernel, so the pages are present; a failed read still reports the total,
+// and userspace falls back to /proc/<pid>/cmdline.
+static __always_inline void iormesh_read_argv(struct exec_argv_event *ev) {
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    unsigned long start = BPF_CORE_READ(task, mm, arg_start);
+    unsigned long end = BPF_CORE_READ(task, mm, arg_end);
+    __u64 total = end > start ? end - start : 0;
+    // At most MAX_ARGV_LENGTH - 1 bytes, so the mask below bounds the size
+    // for the verifier without ever turning a full buffer into 0.
+    __u32 len = total < MAX_ARGV_LENGTH - 1 ? (__u32)total : MAX_ARGV_LENGTH - 1;
+
+    ev->argv_total = total > 0xFFFFFFFFULL ? 0xFFFFFFFFU : (__u32)total;
+    ev->argv_len = 0;
+    len &= MAX_ARGV_LENGTH - 1;
+    if (len && bpf_probe_read_user(ev->argv, len, (void *)start) == 0)
+        ev->argv_len = len;
+}
+
+// iormesh_watch_exec marks the exec'ing, untraced process PENDING and reports
+// the exec with its exe and argv (see above). The entry goes in before the
+// record is submitted, because userspace may judge the record at once and its
+// verdict acts on the entry. A failed insert (map full) or a failed reserve
+// is counted as a ring-buffer drop: either way the process cannot be adopted
+// with a counted gap, and the trace must show that something was lost. The
+// entry of an unreported exec is removed again, so nothing waits for a
+// verdict that cannot come.
+static __always_inline void
+iormesh_watch_exec(void *ctx, __u32 fname_off, __u32 pid, __u32 tid) {
+    struct iormesh_target pending = {};
+    struct exec_argv_event *ev;
+    __u64 now;
+
+    if (!IORMESH_EXEC_WATCH)
+        return;
+    now = bpf_ktime_get_boot_ns();
+    pending.state = IORMESH_TARGET_PENDING;
+    pending.since = now;
+    if (bpf_map_update_elem(&target_map, &pid, &pending, BPF_ANY))
+        ior_count_ringbuf_drop();
+
+    ev = bpf_ringbuf_reserve(&event_map, sizeof(struct exec_argv_event), 0);
+    if (!ev) {
+        bpf_map_delete_elem(&target_map, &pid);
+        ior_count_ringbuf_drop();
+        return;
+    }
+    ev->event_type = EXEC_ARGV_EVENT;
+    // Not a syscall tracepoint: there is no enter/exit trace id to report.
+    ev->trace_id = 0;
+    ev->time = now;
+    ev->pid = pid;
+    ev->tid = tid;
+    // The filename is the path execve was asked for (a relative one stays
+    // relative). An unreadable one is sent empty: argv may still match.
+    if (bpf_probe_read_kernel_str(ev->exe, sizeof(ev->exe),
+                                  (void *)((unsigned long)ctx + fname_off)) < 0)
+        ev->exe[0] = 0;
+    iormesh_read_argv(ev);
+    bpf_ringbuf_submit(ev, 0);
+}
+
+// ior_emit_process_exec submits the process_exec_event of an exec in scope
+// (split out of the handler to keep it short; iormesh).
+static __always_inline void
+ior_emit_process_exec(__u32 pid, __u32 tid, __u32 old_tid, __u32 exit_untraced) {
+    struct process_exec_event *ev;
 
     ev = bpf_ringbuf_reserve(&event_map, sizeof(struct process_exec_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
-        return 0;
+        return;
     }
 
     ev->event_type = PROCESS_EXEC_EVENT;
@@ -182,9 +241,47 @@ int handle_sched_process_exec(struct trace_event_raw_sched_process_exec *ctx) {
     // records" in filter.c.
     bpf_get_current_comm(&ev->comm, sizeof(ev->comm));
     ev->old_tid = old_tid;
-    ev->exit_untraced = (scope == IOR_EXEC_CALLER_TRACED || exit_unseen) ? 1 : 0;
+    ev->exit_untraced = exit_untraced;
 
     bpf_ringbuf_submit(ev, 0);
+}
+
+SEC("tracepoint/sched/sched_process_exec")
+int handle_sched_process_exec(struct trace_event_raw_sched_process_exec *ctx) {
+    // Zero-initialised: filter() leaves tid unwritten on its early ior-self
+    // return.
+    __u32 pid = 0, tid = 0;
+    int in_scope = !filter(&pid, &tid);
+    enum ior_exec_scope scope;
+    int exit_unseen;
+
+    if (pid == IOR_PID_FILTER)
+        return 0;
+    // Keep the CO-RE load as a scalar across the map helpers below. Older
+    // LLVM versions otherwise reuse a relocated ctx + offset pointer for
+    // later loads, which tracepoint verifiers reject as a modified ctx.
+    __u32 old_tid = (__u32)ctx->old_pid;
+    barrier_var(old_tid);
+    // The low 16 bits of a __data_loc word are the string's offset from
+    // the start of the record (the high 16 its length).
+    __u32 fname_off = ctx->__data_loc_filename & 0xFFFF;
+    barrier_var(fname_off);
+    ior_on_exec_tid_change(old_tid, tid, in_scope);
+    if (!in_scope)
+        iormesh_watch_exec(ctx, fname_off, pid, tid);
+    scope = ior_exec_record_scope(in_scope, pid, old_tid);
+    if (scope == IOR_EXEC_OUT_OF_SCOPE)
+        return 0;
+    // An in-scope exec into a 32-bit program: its sys_exit never fires
+    // (ior_exec_into_compat), so the enter state is settled now and the
+    // record below tells userspace to complete the execve from it. After
+    // the tid move above, the state is under the post-exec tid.
+    exit_unseen = scope == IOR_EXEC_IN_SCOPE && ior_exec_into_compat();
+    if (exit_unseen)
+        ior_on_exec_exit_unseen(tid);
+
+    ior_emit_process_exec(pid, tid, old_tid,
+                          (scope == IOR_EXEC_CALLER_TRACED || exit_unseen) ? 1 : 0);
     return 0;
 }
 
@@ -407,27 +504,15 @@ ior_exit_tid_inherited(__u32 pid, __u32 tid) {
     return IOR_EXIT_TID_INHERITED;
 }
 
-SEC("tracepoint/sched/sched_process_exit")
-// ctx is void *: the tracepoint's context struct has a different name (and
-// layout) per kernel generation and the handler only needs its address.
-int handle_sched_process_exit(void *ctx) {
-    // Zero-initialised: filter() leaves tid unwritten on its early ior-self
-    // return, and the verifier cannot prove the bypass never reaches the
-    // ev->tid store on that path.
-    __u32 pid = 0, tid = 0, group_dead = 0;
+// ior_emit_process_exit submits the process_exit_event of an in-scope exit.
+static __always_inline void
+ior_emit_process_exit(__u32 pid, __u32 tid, __u32 group_dead) {
     struct process_exit_event *ev;
-
-    // Before the scope check: a task that dies with an interrupted call
-    // pending (killed while stopped, say) never reaches the enter that would
-    // clear it, and its tid may be recycled (restart.c).
-    ior_restart_forget((__u32)bpf_get_current_pid_tgid());
-    if (!ior_process_exit_in_scope(ctx, &pid, &tid, &group_dead))
-        return 0;
 
     ev = bpf_ringbuf_reserve(&event_map, sizeof(struct process_exit_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
-        return 0;
+        return;
     }
 
     ev->event_type = PROCESS_EXIT_EVENT;
@@ -442,6 +527,41 @@ int handle_sched_process_exit(void *ctx) {
     ev->exit_flags = ior_exit_tid_inherited(pid, tid);
 
     bpf_ringbuf_submit(ev, 0);
+}
+
+// iormesh_forget_target removes an exited process from target_map once its
+// whole thread group is dead (iormesh, M2). Without it a traced or pending
+// tgid would outlive its process, and whatever process the kernel later gave
+// that PID would be traced (or counted as a gap) without ever matching
+// anything. Only a group-dead exit qualifies: a thread exiting leaves its
+// siblings traced. The lookup comes first, so the exits of the host's
+// untraced processes cost one hash lookup and no group_dead read.
+static __always_inline void iormesh_forget_target(void *ctx) {
+    __u32 tgid = (__u32)(bpf_get_current_pid_tgid() >> 32);
+
+    if (!bpf_map_lookup_elem(&target_map, &tgid))
+        return;
+    if (ior_exit_group_dead(ctx))
+        bpf_map_delete_elem(&target_map, &tgid);
+}
+
+SEC("tracepoint/sched/sched_process_exit")
+// ctx is void *: the tracepoint's context struct has a different name (and
+// layout) per kernel generation and the handler only needs its address.
+int handle_sched_process_exit(void *ctx) {
+    // Zero-initialised: filter() leaves tid unwritten on its early ior-self
+    // return, and the verifier cannot prove the bypass never reaches the
+    // ev->tid store on that path.
+    __u32 pid = 0, tid = 0, group_dead = 0;
+
+    // Before the scope check: a task that dies with an interrupted call
+    // pending (killed while stopped, say) never reaches the enter that would
+    // clear it, and its tid may be recycled (restart.c).
+    ior_restart_forget((__u32)bpf_get_current_pid_tgid());
+    if (ior_process_exit_in_scope(ctx, &pid, &tid, &group_dead))
+        ior_emit_process_exit(pid, tid, group_dead);
+    // After the scope check, which needs the entry to judge the exit.
+    iormesh_forget_target(ctx);
     return 0;
 }
 
@@ -532,6 +652,28 @@ ior_task_in_scope(__u32 child_pid, __u32 child_tid) {
     return 1;
 }
 
+// iormesh_follow_child is M2's process-tree following (iormesh): a new
+// process - not a new thread, which shares its creator's tgid and is covered
+// already - whose creator is traced joins target_map as TRACED. The handler
+// runs in the creator's context inside copy_process(), before the child is
+// first woken, so the entry is there before the child's first syscall and no
+// record of it is lost. ior's filter dropped such a child, since its tgid is
+// new. A PENDING creator's children are not followed: until userspace adopts
+// the creator, nothing says its tree belongs to the session (part of the
+// attach gap). A full map loses the child, counted as a drop.
+static __always_inline void
+iormesh_follow_child(__u64 clone_flags, __u32 creator_pid, __u32 child_pid) {
+    struct iormesh_target traced = {};
+
+    if (clone_flags & IOR_CLONE_THREAD)
+        return;
+    if (!iormesh_pid_targeted(creator_pid))
+        return;
+    traced.state = IORMESH_TARGET_TRACED;
+    if (bpf_map_update_elem(&target_map, &child_pid, &traced, BPF_ANY))
+        ior_count_ringbuf_drop();
+}
+
 // trace_event_raw_task_newtask___ior is a CO-RE "flavor" of the kernel's
 // struct trace_event_raw_task_newtask, reduced to the two scalars this program
 // reads; libbpf matches it to the kernel type by name (the ___ior suffix is
@@ -546,44 +688,17 @@ struct trace_event_raw_task_newtask___ior {
     unsigned long clone_flags;
 } __attribute__((preserve_access_index));
 
-SEC("tracepoint/task/task_newtask")
-int handle_task_newtask(void *raw_ctx) {
-    struct trace_event_raw_task_newtask___ior *ctx = raw_ctx;
+// ior_emit_task_newtask submits the task_newtask_event of a created task
+// (split out of the handler to keep it short; iormesh).
+static __always_inline void
+ior_emit_task_newtask(__u32 child_pid, __u32 child_tid, __u64 clone_flags,
+                      __u32 creator_pid, __u32 scope_flags) {
     struct task_newtask_event *ev;
-    __u64 clone_flags = ctx->clone_flags;
-    __u32 child_tid = (__u32)ctx->pid;
-    // The creator's tgid: this handler runs in the context of the task that
-    // called clone, so the current task is the creator.
-    __u64 creator_id = bpf_get_current_pid_tgid();
-    __u32 creator_pid = (__u32)(creator_id >> 32);
-    __u32 creator_tid = (__u32)creator_id;
-    // The child's tgid: the creator's for a new thread, its own tid for a new
-    // process. Derived rather than read from the child's task_struct so the
-    // handler does not depend on when copy_process() assigns p->tgid relative to
-    // the tracepoint.
-    __u32 child_pid = (clone_flags & IOR_CLONE_THREAD)
-        ? creator_pid
-        : child_tid;
-
-    __u32 scope_flags = 0;
-
-    if (!ior_task_in_scope(child_pid, child_tid)) {
-        // Out of scope: silent, except for a CLONE_FILES process child of an
-        // in-scope creator, whose hidden table writes hit the creator's table.
-        // A new thread (CLONE_THREAD) is excluded: it is not a separate
-        // process, and a hidden sibling thread is the -tid limitation
-        // documented in AGENTS.md, not something this record can fix.
-        if (!(clone_flags & IOR_CLONE_FILES) || (clone_flags & IOR_CLONE_THREAD))
-            return 0;
-        if (!ior_task_in_scope(creator_pid, creator_tid))
-            return 0;
-        scope_flags = IOR_NEWTASK_CHILD_OUT_OF_SCOPE;
-    }
 
     ev = bpf_ringbuf_reserve(&event_map, sizeof(struct task_newtask_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
-        return 0;
+        return;
     }
 
     ev->event_type = TASK_NEWTASK_EVENT;
@@ -618,6 +733,44 @@ int handle_task_newtask(void *raw_ctx) {
     ev->scope_flags = scope_flags;
 
     bpf_ringbuf_submit(ev, 0);
+}
+
+SEC("tracepoint/task/task_newtask")
+int handle_task_newtask(void *raw_ctx) {
+    struct trace_event_raw_task_newtask___ior *ctx = raw_ctx;
+    __u64 clone_flags = ctx->clone_flags;
+    __u32 child_tid = (__u32)ctx->pid;
+    // The creator's tgid: this handler runs in the context of the task that
+    // called clone, so the current task is the creator.
+    __u64 creator_id = bpf_get_current_pid_tgid();
+    __u32 creator_pid = (__u32)(creator_id >> 32);
+    __u32 creator_tid = (__u32)creator_id;
+    // The child's tgid: the creator's for a new thread, its own tid for a new
+    // process. Derived rather than read from the child's task_struct so the
+    // handler does not depend on when copy_process() assigns p->tgid relative to
+    // the tracepoint.
+    __u32 child_pid = (clone_flags & IOR_CLONE_THREAD)
+        ? creator_pid
+        : child_tid;
+
+    __u32 scope_flags = 0;
+
+    // First, so a followed child is in scope for the record below.
+    iormesh_follow_child(clone_flags, creator_pid, child_pid);
+    if (!ior_task_in_scope(child_pid, child_tid)) {
+        // Out of scope: silent, except for a CLONE_FILES process child of an
+        // in-scope creator, whose hidden table writes hit the creator's table.
+        // A new thread (CLONE_THREAD) is excluded: it is not a separate
+        // process, and a hidden sibling thread is the -tid limitation
+        // documented in AGENTS.md, not something this record can fix.
+        if (!(clone_flags & IOR_CLONE_FILES) || (clone_flags & IOR_CLONE_THREAD))
+            return 0;
+        if (!ior_task_in_scope(creator_pid, creator_tid))
+            return 0;
+        scope_flags = IOR_NEWTASK_CHILD_OUT_OF_SCOPE;
+    }
+
+    ior_emit_task_newtask(child_pid, child_tid, clone_flags, creator_pid, scope_flags);
     return 0;
 }
 

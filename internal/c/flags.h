@@ -1,5 +1,6 @@
 // Adapted from ior internal/c/flags.h @ b21afc50328c.
-// Changes: PID_FILTER removed; the target set is target_map (maps.h).
+// Changes: PID_FILTER removed; the target set is target_map (maps.h);
+// IORMESH_EXEC_WATCH added (M2 pattern sessions).
 
 //+build ignore
 
@@ -19,3 +20,8 @@ const volatile u32 TID_FILTER_TGID = -1;
 // fd_event and ret_event are written at all: an object built before the
 // capture has no such symbol (and leaves those bytes as stale padding).
 const volatile u32 IOR_FILE_IDENT = 0;
+// IORMESH_EXEC_WATCH (1) makes the sched_process_exec handler report every
+// exec of an untraced process with its argv and mark it PENDING in
+// target_map, so a pattern session can match it (exec.c, maps.h). PID and
+// listening-port sessions leave it 0 and pay nothing per foreign exec.
+const volatile u32 IORMESH_EXEC_WATCH = 0;

@@ -44,7 +44,7 @@ var structsWithComm = map[string]bool{"open_event": true, "exec_event": true}
 // handWrittenStringStructs are the structs with a string field that only
 // hand-written BPF code fills; TestHandWrittenBPFStringCapturesNeedNoMemset
 // covers them, and fdname_harness_test.go the name of fd_name_event.
-var handWrittenStringStructs = map[string]bool{"open_name_fixup_event": true, "process_exec_event": true, "task_newtask_event": true, "task_rename_event": true, "fd_name_event": true}
+var handWrittenStringStructs = map[string]bool{"open_name_fixup_event": true, "process_exec_event": true, "task_newtask_event": true, "task_rename_event": true, "fd_name_event": true, "exec_argv_event": true}
 
 var handlerStructRE = regexp.MustCompile(`(?m)^/// \S+ is a struct (\w+)`)
 
@@ -295,9 +295,11 @@ func TestHandWrittenBPFStringCapturesNeedNoMemset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read exec.c: %v", err)
 	}
-	handler := regexp.MustCompile(`(?s)int handle_sched_process_exec\(.*?\n\}\n`).FindString(execC)
+	// The handlers' records are filled by their emit helpers, which are
+	// what these checks read.
+	handler := regexp.MustCompile(`(?s)ior_emit_process_exec\(__u32 pid.*?\n\}\n`).FindString(execC)
 	if handler == "" {
-		t.Fatal("handle_sched_process_exec not found in exec.c")
+		t.Fatal("ior_emit_process_exec not found in exec.c")
 	}
 	if strings.Contains(handler, "__builtin_memset") {
 		t.Error("handle_sched_process_exec memsets comm")
@@ -306,8 +308,12 @@ func TestHandWrittenBPFStringCapturesNeedNoMemset(t *testing.T) {
 		t.Error("handle_sched_process_exec must capture comm unconditionally")
 	}
 
-	newtask := regexp.MustCompile(`(?s)int handle_task_newtask\(.*?\n\}\n`).FindString(execC)
+	newtask := regexp.MustCompile(`(?s)ior_emit_task_newtask\(__u32 child_pid.*?\n\}\n`).FindString(execC)
 	if newtask == "" {
+		t.Fatal("ior_emit_task_newtask not found in exec.c")
+	}
+	newtaskHandler := regexp.MustCompile(`(?s)int handle_task_newtask\(.*?\n\}\n`).FindString(execC)
+	if newtaskHandler == "" {
 		t.Fatal("handle_task_newtask not found in exec.c")
 	}
 	if strings.Contains(newtask, "__builtin_memset") {
@@ -319,7 +325,7 @@ func TestHandWrittenBPFStringCapturesNeedNoMemset(t *testing.T) {
 	// Copying ctx->comm compiles to ctx pointer arithmetic that RHEL/Rocky 8/9
 	// verifiers reject (see the comment in exec.c); the buildgate objdump test
 	// checks the compiled object, this one catches the source pattern early.
-	if strings.Contains(newtask, "ctx->comm") {
+	if strings.Contains(newtask+newtaskHandler, "ctx->comm") {
 		t.Error("handle_task_newtask must not read the tracepoint's comm array out of the context")
 	}
 
@@ -340,6 +346,30 @@ func TestHandWrittenBPFStringCapturesNeedNoMemset(t *testing.T) {
 	}
 	if strings.Contains(rename, "ctx->newcomm") {
 		t.Error("handle_task_rename must not read the classic tracepoint's newcomm array out of the context")
+	}
+	checkExecArgvCapture(t, execC)
+}
+
+// checkExecArgvCapture pins exec_argv_event's two strings (iormesh, M2):
+// exe is terminated by a successful bpf_probe_read_kernel_str and set to
+// "" when the read fails, and argv is a NUL-separated block whose length
+// is argv_len — written on every path, 0 unless the copy succeeded — so
+// userspace never reads the stale bytes behind it.
+func checkExecArgvCapture(t *testing.T, execC string) {
+	t.Helper()
+	watch := regexp.MustCompile(`(?s)iormesh_watch_exec\(void \*ctx.*?\n\}\n`).FindString(execC)
+	argv := regexp.MustCompile(`(?s)static __always_inline void iormesh_read_argv\(.*?\n\}\n`).FindString(execC)
+	if watch == "" || argv == "" {
+		t.Fatal("iormesh_watch_exec or iormesh_read_argv not found in exec.c")
+	}
+	if strings.Contains(watch+argv, "__builtin_memset") {
+		t.Error("the exec watch memsets its strings")
+	}
+	if !strings.Contains(watch, "        ev->exe[0] = 0;\n") {
+		t.Error("iormesh_watch_exec must terminate exe when its read fails")
+	}
+	if !strings.Contains(argv, "    ev->argv_len = 0;\n") || !strings.Contains(argv, "        ev->argv_len = len;\n") {
+		t.Error("iormesh_read_argv must write argv_len on every path, the copied length only on success")
 	}
 }
 

@@ -33,10 +33,11 @@ func (p Probe) pairKey() string {
 	return "syscalls:" + name
 }
 
-// DefaultProbes is M1's attach set: enter and exit of every syscall in
-// tracepoints.DefaultSyscalls, plus sock:inet_sock_set_state, which carries
-// the TCP 4-tuple and state transitions (M1 step 4). The generated object
-// has handlers for every syscall; only this list decides what attaches.
+// DefaultProbes is the attach set: enter and exit of every syscall in
+// tracepoints.DefaultSyscalls, sock:inet_sock_set_state, which carries the
+// TCP 4-tuple and state transitions (M1 step 4), and ControlProbes. The
+// generated object has handlers for every syscall; only this list decides
+// what attaches.
 func DefaultProbes() []Probe {
 	var probes []Probe
 	for _, sc := range tracepoints.DefaultSyscalls() {
@@ -45,9 +46,25 @@ func DefaultProbes() []Probe {
 			probes = append(probes, Probe{Program: "handle_" + event, Category: "syscalls", Event: event})
 		}
 	}
-	return append(probes, Probe{
+	probes = append(probes, Probe{
 		Program: "handle_inet_sock_set_state", Category: "sock", Event: "inet_sock_set_state",
 	})
+	return append(probes, ControlProbes()...)
+}
+
+// ControlProbes are the process-lifecycle handlers of exec.c (M2 step 1):
+// task_newtask inserts a traced process's children into target_map before
+// their first syscall, sched_process_exit removes a dead process from it
+// (so a reused PID is not traced), and sched_process_exec reports execs —
+// of traced processes, and in a pattern session (Config.ExecWatch) of every
+// untraced one, with its argv. Each stands alone: a kernel lacking one
+// skips just that one, which Skipped reports.
+func ControlProbes() []Probe {
+	return []Probe{
+		{Program: "handle_task_newtask", Category: "task", Event: "task_newtask"},
+		{Program: "handle_sched_process_exec", Category: "sched", Event: "sched_process_exec"},
+		{Program: "handle_sched_process_exit", Category: "sched", Event: "sched_process_exit"},
+	}
 }
 
 // errNothingAttached: every probe was skipped. A missing tracepoint and an
