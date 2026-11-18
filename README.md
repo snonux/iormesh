@@ -99,6 +99,8 @@ Details: [docs/security.md](./docs/security.md).
   traces, and why each family is in the model.
 - [docs/output-contract.md](./docs/output-contract.md) — the
   trace output format, built for LLM introspection.
+- [docs/schema.md](./docs/schema.md) — the field-level trace
+  schema: envelope, args, event kinds, graph, files.
 - [docs/testing.md](./docs/testing.md) — workload-first testing
   and the ior-style integration suite.
 - [docs/security.md](./docs/security.md) — security & scope.

@@ -719,9 +719,16 @@ unit-tested with synthetic record streams:
 the correlator, the normalizer and the shipped `expect.json`.
 
 **Step 7 — NDJSON sink and graph export**
-(`internal/schema/ndjson.go`): one event per line, keys in struct
-order (encoding/json already does this), then `graph.json` at
-exit with sorted nodes and edges.
+(`internal/schema/ndjson.go`; built): `NewNDJSONSink(w)` writes one
+validated event per line, keys in struct order (encoding/json),
+buffered, with a sticky write error that `Close` reports at the
+latest; `ReadNDJSON` reads a stream back strictly; `WriteGraph` /
+`WriteGraphFile` write `graph.json` sorted, validated and (for the
+file) atomically. The on-disk format is documented in
+[schema.md](schema.md). `internal/correlate/export_test.go` runs a
+fixed record stream through the correlator into both writers and
+compares the bytes with committed goldens (`-update` rewrites
+them).
 
 **Step 8 — the normalizer** (`internal/normalize`, cgo-free; done):
 

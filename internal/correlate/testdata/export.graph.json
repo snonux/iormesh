@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "nodes": [
+    {
+      "type": "file",
+      "id": "file:h1:/tmp/run1/demo.dat"
+    },
+    {
+      "type": "host",
+      "id": "host:h1"
+    },
+    {
+      "type": "process",
+      "id": "proc:h1/100@1100",
+      "attrs": {
+        "comm": "java"
+      }
+    },
+    {
+      "type": "process",
+      "id": "proc:h1/200@1200",
+      "attrs": {
+        "comm": "java"
+      }
+    },
+    {
+      "type": "socket",
+      "id": "conn:f98fe098d8731752"
+    }
+  ],
+  "edges": [
+    {
+      "type": "connected",
+      "from": "proc:h1/100@1100",
+      "to": "conn:f98fe098d8731752",
+      "state": "fused"
+    },
+    {
+      "type": "connected",
+      "from": "proc:h1/200@1200",
+      "to": "conn:f98fe098d8731752",
+      "state": "fused"
+    },
+    {
+      "type": "opened",
+      "from": "proc:h1/100@1100",
+      "to": "file:h1:/tmp/run1/demo.dat"
+    },
+    {
+      "type": "runs_on",
+      "from": "proc:h1/100@1100",
+      "to": "host:h1"
+    },
+    {
+      "type": "runs_on",
+      "from": "proc:h1/200@1200",
+      "to": "host:h1"
+    }
+  ]
+}

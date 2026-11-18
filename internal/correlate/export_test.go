@@ -1,0 +1,81 @@
+package correlate
+
+import (
+	"bytes"
+	"flag"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"iormesh/internal/schema"
+	"iormesh/internal/types"
+)
+
+// update rewrites the export goldens: go test ./internal/correlate -update
+var update = flag.Bool("update", false, "rewrite testdata goldens")
+
+// TestExportGolden runs a fixed record stream (file work plus a fused
+// loopback connection) through the correlator into the real NDJSON sink
+// and graph writer, and compares both outputs byte for byte with the
+// committed goldens. It pins the export format end to end: field order,
+// conn ids, fd generations, graph order.
+func TestExportGolden(t *testing.T) {
+	var events bytes.Buffer
+	c := New(Config{Host: Host{ID: "h1", Project: "p"}, Sink: schema.NewNDJSONSink(&events),
+		WallOffsetNS: 1_700_000_000_000_000_000,
+		ProcInfo:     func(pid uint32) (string, uint64) { return "java", 1000 + uint64(pid) }})
+	now := uint64(0)
+	f := feeder{t, c, 100, 101, &now}
+	f.open("/iormesh-marker/demo/begin", 0, -2)
+	fileWork(f, "demo.dat", 5)
+	loopback(t, c, 1000)
+	f.open("/iormesh-marker/demo/end", 0, -2)
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var graph bytes.Buffer
+	if err := schema.WriteGraph(&graph, c.Graph()); err != nil {
+		t.Fatal(err)
+	}
+	compareGolden(t, "export.ndjson", events.Bytes())
+	compareGolden(t, "export.graph.json", graph.Bytes())
+	if _, err := schema.ReadNDJSON(&events); err != nil {
+		t.Fatalf("exported stream does not read back strictly: %v", err)
+	}
+}
+
+func compareGolden(t *testing.T, name string, got []byte) {
+	t.Helper()
+	path := filepath.Join("testdata", name)
+	if *update {
+		if err := os.WriteFile(path, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("%v (run with -update to create it)", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s differs from the golden; got:\n%s", name, got)
+	}
+}
+
+// TestSinkErrorStopsCorrelator: a failing NDJSON sink's error reaches the
+// correlator's caller.
+func TestSinkErrorStopsCorrelator(t *testing.T) {
+	c := New(Config{Host: Host{ID: "h1", Project: "p"}, Sink: schema.NewNDJSONSink(errWriter{}),
+		ProcInfo: func(uint32) (string, uint64) { return "", 0 }})
+	now := uint64(0)
+	f := feeder{t, c, 1, 1, &now}
+	f.handle(&types.FdEvent{EventType: types.ENTER_FD_EVENT, TraceId: types.SYS_ENTER_READ,
+		Time: f.tick(), Pid: 1, Tid: 1, Fd: 3})
+	f.exit(types.SYS_EXIT_READ, 1) // buffered: no error yet
+	if err := c.Close(); err == nil {
+		t.Fatal("Close succeeded although the sink could not write")
+	}
+}
+
+type errWriter struct{}
+
+func (errWriter) Write([]byte) (int, error) { return 0, os.ErrClosed }

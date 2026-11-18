@@ -1094,7 +1094,7 @@ can reconstruct behavior and check it against source code:
 
 - **Schema, versioned & self-describing**: NDJSON event stream,
   graph export (nodes + typed edges), per-run summary rollup.
-  Documented in-repo (`docs/schema.md` once code starts).
+  Documented in-repo in [docs/schema.md](docs/schema.md).
 - **Two serializations, one schema**: NDJSON is the live/golden
   format; parquet is the bulk trace-file format on servers —
   columnar, compact, queryable (ior already records parquet;
