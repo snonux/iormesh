@@ -38,14 +38,25 @@ func runCommand(args []string, stderr io.Writer) error {
 // runTrace traces cfg.pids until the duration ends, a signal arrives or
 // every target has exited, then writes the event stream and the graph
 // into cfg.out.
+//
+// The tracer is opened before the output files are created, so a run that
+// cannot attach (no root, no BTF) leaves an existing trace directory
+// untouched instead of truncating its events next to an old graph. A
+// stale ready file is removed first, so a harness reusing the path never
+// mistakes a previous run's for this one's.
 func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
-	c, err := newCorrelator(cfg)
-	if err != nil {
-		return err
+	if cfg.ready != "" {
+		if err := os.Remove(cfg.ready); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("ready file: %w", err)
+		}
 	}
 	tr, err := bpf.Open(bpf.Config{Pids: cfg.pids})
 	if err != nil {
-		return errors.Join(err, c.Close())
+		return err
+	}
+	c, err := newCorrelator(cfg)
+	if err != nil {
+		return errors.Join(err, tr.Close())
 	}
 	if err := announceReady(cfg, tr, stderr); err != nil {
 		return errors.Join(err, tr.Close(), c.Close())
@@ -133,16 +144,19 @@ func traceLoop(ctx context.Context, tr *bpf.Tracer, c *correlate.Correlator, cfg
 			return "signal", nil
 		case <-tick.C:
 			if !anyAlive(cfg.pids) {
-				return "targets exited", drainQuiet(tr, c)
+				return "targets exited", drainQuiet(ctx, tr, c)
 			}
 		}
 	}
 }
 
-// drainQuiet handles records until none arrives for quietFor.
-func drainQuiet(tr *bpf.Tracer, c *correlate.Correlator) error {
+// drainQuiet handles records until none arrives for quietFor, or the
+// duration or a signal ends the run first.
+func drainQuiet(ctx context.Context, tr *bpf.Tracer, c *correlate.Correlator) error {
 	for {
 		select {
+		case <-ctx.Done():
+			return nil
 		case rec, ok := <-tr.Records():
 			if !ok {
 				return nil
