@@ -280,6 +280,10 @@ func checkUsageErrors() error {
 		{"syscall-burst", "--role", "client"},
 		{"syscall-burst", "--bogus", "x"},
 	}
+	// The M2 file and fd scenarios take --dir only and run solo.
+	for _, name := range m2FileScenarios {
+		bad = append(bad, []string{name, "--role", "client"}, []string{name, "--bogus", "x"})
+	}
 	for _, args := range bad {
 		if err := expectExit(2, args...); err != nil {
 			return err
@@ -288,9 +292,14 @@ func checkUsageErrors() error {
 	return nil
 }
 
+// m2FileScenarios are M2's file-surface and fd-lifecycle scenarios
+// (task ma4): solo, --dir their only option, so they share one set of
+// usage and run-failure checks.
+var m2FileScenarios = []string{"fd-lifecycle", "file-attrs", "file-lifecycle", "file-links"}
+
 // checkRunFailures asserts a well-formed run that fails at run time exits
 // with code 1, not the usage code: a client with nobody listening, and a
-// --dir that does not exist (file-basic and syscall-burst).
+// --dir that does not exist (every scenario that takes --dir).
 func checkRunFailures() error {
 	port, err := closedPort()
 	if err != nil {
@@ -300,6 +309,9 @@ func checkRunFailures() error {
 		{"tcp-loopback", "--role", "client", "--port", fmt.Sprint(port)},
 		{"file-basic", "--dir", "/nonexistent/iormesh-workload"},
 		{"syscall-burst", "--ops", "10", "--dir", "/nonexistent/iormesh-workload"},
+	}
+	for _, name := range m2FileScenarios {
+		failing = append(failing, []string{name, "--dir", "/nonexistent/iormesh-workload"})
 	}
 	for _, args := range failing {
 		if err := expectExit(1, args...); err != nil {

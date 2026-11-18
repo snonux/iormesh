@@ -1,6 +1,10 @@
 package iormesh.workload;
 
+import iormesh.workload.scenarios.FdLifecycle;
+import iormesh.workload.scenarios.FileAttrs;
 import iormesh.workload.scenarios.FileBasic;
+import iormesh.workload.scenarios.FileLifecycle;
+import iormesh.workload.scenarios.FileLinks;
 import iormesh.workload.scenarios.Noop;
 import iormesh.workload.scenarios.SyscallBurst;
 import iormesh.workload.scenarios.TcpLoopback;
@@ -18,7 +22,11 @@ final class Registry {
     /** The registry with every built-in scenario. */
     static Registry builtin() {
         Registry r = new Registry();
+        r.add(new FdLifecycle());
+        r.add(new FileAttrs());
         r.add(new FileBasic());
+        r.add(new FileLifecycle());
+        r.add(new FileLinks());
         r.add(new Noop());
         r.add(new SyscallBurst());
         r.add(new TcpLoopback());

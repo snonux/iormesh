@@ -202,7 +202,7 @@ Scenario catalogue, by the milestone it lands with:
 |------------|-----------|
 | M1 | File data ops (open/read/write/close) — `file-basic`; TCP client ↔ server on loopback — `tcp-loopback`; markers (all landed with M0) |
 | S3 | Syscall load: tight 1-byte read/write loops, N ops over T threads — `syscall-burst` |
-| M2 | Full file surface (create/delete, rename/move, touch, symlink/hardlink, xattr, chmod/chown…); fd lifecycle (dup, inheritance, reuse); local IPC; signals; UDP; IPv4 + IPv6; restart; non-Java peer |
+| M2 | Full file surface — `file-lifecycle` (create/delete, rename while open, move, truncate, touch), `file-links` (symlink/readlink/lstat, hardlink), `file-attrs` (chmod/chown by path and fd, xattr); fd lifecycle (dup, inheritance across fork/exec, reuse) — `fd-lifecycle` (these four landed ahead of the M2 tracer work); local IPC; signals; UDP; IPv4 + IPv6; restart; non-Java peer |
 | M3 | Method flows (deep stacks, async I/O); HTTP plain + TLS; redaction; OTEL flavor |
 | M4 | Client and server on two hosts as two projects; microservices topology, one service per host; NAT'ed pair |
 | M5 | (renders M4's microservices scenario) |
@@ -237,6 +237,13 @@ Scenario notes:
   comes back with a new PID; expectations assert both
   incarnations were traced under one app identity, with
   nothing mis-attributed across the gap.
+- **File-surface and fd scenarios** (M2): `file-lifecycle`,
+  `file-links`, `file-attrs` and `fd-lifecycle` declare the
+  syscalls strace shows on the host JDK, as JDK-only Java can
+  issue them (no `fchmod`, and `dup` only via a directory
+  stream). `fd-lifecycle`'s child JVM brackets nothing itself:
+  a process forked inside a bracket belongs to it, so the
+  normalizer's per-process cut must keep such children.
 - **Non-Java peer** (M2): one scenario talks to a non-JVM
   process (ior's `ioworkload`, or a minimal C/Go echo peer),
   proving the degraded node shape — files and sockets only,

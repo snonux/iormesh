@@ -1079,14 +1079,32 @@ scenarios landing first (principle #1).
    family table, `internal/tracepoints/family.go`). For each
    family, port ior's test from `integrationtests/<family>_test.go`
    with the Java scenario swapped in.
+   Scenarios (landed ahead, task ma4): `file-lifecycle` (mkdir,
+   O_EXCL create, rename, ftruncate, utimensat, unlink, rmdir),
+   `file-links` (symlink, readlink, statx no-follow, link) and
+   `file-attrs` (chmod, chown, fchmodat, fchown, f*xattr). Their
+   goldens name the syscalls strace shows on JDK 25 and 27
+   (`rename`, not `renameat2`; `statx`, which JDKs before 22
+   issue as `newfstatat`) and use only the existing `path`,
+   `new_path` and `flags` args. They do not load until the new kinds are
+   appended to `schema.KnownKind`, which `ParseExpectation`
+   checks — that is this step's first change.
 
 5. **Rename-aware paths**: on `rename*` exit, rewrite `path` of
    every open `fdState` under the old name; unit-test directory
    renames and cross-directory moves.
+   `file-lifecycle` writes through an fd after renaming its
+   file, so its golden proves this end to end.
 
 6. **fd lifecycle**: `dup*`, `fcntl(F_DUPFD*)` copy `fdState`
    (new `gen`); fork copies the parent's table; exec drops
    `O_CLOEXEC` fds.
+   Scenario: `fd-lifecycle` — fd reuse, a `dup` (the JDK's only
+   in-process one: `Files.newDirectoryStream`) and stdin/stdout
+   inherited by a child JVM (`ProcessBuilder` redirects, `dup2`
+   onto 0 and 1 in the child). The child emits no markers, so
+   `normalize`'s per-process cut must also keep processes forked
+   inside a bracket; today it drops them.
 
 7. **IPC, signals, UDP, epoll**: as families, default-off per S3's
    recommendation.
