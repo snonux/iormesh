@@ -2,7 +2,6 @@ package iormesh.workload.scenarios;
 
 import iormesh.workload.Options;
 import iormesh.workload.Scenario;
-import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
@@ -24,26 +23,31 @@ import java.util.Set;
  * <pre>
  *   reuse:   openat(D/first.dat) = fd1; write(fd1, 64); close(fd1)
  *            openat(D/second.dat) = fd2 (same number); write(fd2, 64); close(fd2)
- *   dup:     openat(D, O_DIRECTORY) = fd3; dup(fd3) = fd4;
- *            getdents64(fd3)...; close(fd3); close(fd4)
- *   inherit: Files.write fills D/in.dat (openat, write 64, close); the
- *            parent opens D/in.dat (fd5) and D/out.dat (fd6), spawns
+ *   dup:     openat(D, O_RDONLY) = fd3 (strace shows no O_DIRECTORY);
+ *            dup(fd3) = fd4; getdents64(fd3)...; close(fd3); close(fd4)
+ *   inherit: Files.write fills D/in.dat (openat = fd5, write 64, close);
+ *            the parent opens D/in.dat (fd6) and D/out.dat (fd7), spawns
  *            the child; the child dup2s them onto 0 and 1 and execs
  *            a child JVM, which reads 64 bytes on fd 0 and writes them
- *            on fd 1 ({@link FdChild}); the parent closes fd5 and fd6
+ *            on fd 1 ({@link FdChild}); the parent closes fd6 and fd7
  *   clean:   unlink the four files; rmdir(D)
  * </pre>
  *
+ * The fd names are the golden's ($fd1...): each open binds a fresh name
+ * even where the kernel hands out the same number again (as for fd2).
+ *
  * The spawn is the JDK's posix_spawn: clone3(CLONE_VM|CLONE_VFORK),
- * then dup2(fd5', 0) and dup2(fd6', 1) on the child's inherited copies,
- * then exec of lib/jspawnhelper, which execs java in the same process;
+ * then dup2(fd6', 0) and dup2(fd7', 1) on the child's inherited copies
+ * (the golden's $fd8 and $fd9), then exec of lib/jspawnhelper, which
+ * execs java in the same process;
  * the child JVM's main thread then does the stdio I/O. Where the dup2s
  * run is JDK-dependent — JDK 25's jspawnhelper issues them (and closes
  * the sources), JDK 27's posix_spawn file actions issue them before
  * jspawnhelper (and leave the sources to close-on-exec) — but both run
  * on the child's main thread (TID = PID), so the golden declares the
- * two dup2s there and not the closes. JDK 15+ default to this launch
- * mechanism on Linux, so the shape holds for the Java 21 floor. The
+ * two dup2s there and not the closes. posix_spawn has been the JDK's
+ * default launch mechanism on Linux since JDK 12, so the shape is
+ * expected on the Java 21 floor too — expected, not measured. The
  * golden declares no process-lifecycle events or edges for the child —
  * those belong to M2 step 1's fork-exec scenario — only the fd events
  * either side. The child never emits markers of its own: its events
@@ -75,16 +79,12 @@ public final class FdLifecycle implements Scenario {
         Options.requireRole(NAME, role, Set.of("solo"));
         Options.requireKnown(opts, Set.of(Workdir.OPTION));
         try (Workdir wd = Workdir.open(opts)) {
-            Path dir = wd.file(NAME + ".d");
-            try {
-                Files.createDirectory(dir);
+            Tree.inFreshDir(wd.file(NAME + ".d"), dir -> {
                 reuse(dir);
                 dup(dir);
                 inherit(dir);
                 clean(dir);
-            } finally {
-                Tree.delete(dir);
-            }
+            });
         }
     }
 
@@ -117,13 +117,13 @@ public final class FdLifecycle implements Scenario {
         byte[] data = payload('I');
         Path in = Files.write(dir.resolve("in.dat"), data);
         Path out = dir.resolve("out.dat");
-        Process p = new ProcessBuilder(childCommand())
+        Process p = new ProcessBuilder(ChildJvm.command(FdChild.class))
                 .redirectInput(in.toFile())
                 .redirectOutput(out.toFile())
                 // The child's own complaints stay visible on our stderr.
                 .redirectError(ProcessBuilder.Redirect.INHERIT)
                 .start();
-        int code = p.waitFor();
+        int code = ChildJvm.await(p, NAME);
         if (code != 0) {
             throw new IOException("fd-lifecycle child exited " + code);
         }
@@ -133,23 +133,9 @@ public final class FdLifecycle implements Scenario {
     }
 
     /**
-     * The child JVM's command line: this JVM's java and class path, so
-     * the scenario stays JDK-only and needs nothing on PATH. Serial GC
-     * and C1-only keep the short-lived child's thread count and start
-     * time down, and no perf data means no hsperfdata file in /tmp;
-     * none of them changes the declared stdio syscalls.
-     */
-    private static List<String> childCommand() {
-        String java = System.getProperty("java.home") + File.separator + "bin"
-                + File.separator + "java";
-        return List.of(java, "-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1", "-XX:-UsePerfData",
-                "-cp", System.getProperty("java.class.path"), FdChild.class.getName());
-    }
-
-    /**
-     * Deletes what the scenario made, so Tree.delete has nothing left to
-     * walk — its walk would open and dup the directory again, an extra
-     * dup inside the bracket the golden does not declare.
+     * Deletes what the scenario made, so Tree.inFreshDir has nothing
+     * left to walk — its walk would open and dup the directory again, an
+     * extra dup inside the bracket the golden does not declare.
      */
     private static void clean(Path dir) throws IOException {
         for (String name : List.of("first.dat", "second.dat", "in.dat", "out.dat")) {

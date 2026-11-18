@@ -4,6 +4,7 @@ import iormesh.workload.Options;
 import iormesh.workload.Scenario;
 import iormesh.workload.ScenarioSkipped;
 import java.io.IOException;
+import java.net.BindException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -91,11 +92,9 @@ public final class TcpFamily implements Scenario {
     }
 
     /**
-     * Binds the loopback of this family on a kernel-picked port. Any
-     * failure on IPv6 means the host has no usable ::1 — an
-     * UnsupportedOperationException when the JDK runs IPv4-only, a
-     * SocketException when the kernel lacks AF_INET6 or ::1 — so it
-     * skips; on IPv4 it is a real failure.
+     * Binds the loopback of this family on a kernel-picked port. On IPv6
+     * only the failures that mean "no usable ::1" skip (see noIpv6);
+     * anything else, and every failure on IPv4, is a real failure.
      */
     private ServerSocketChannel listen() throws IOException, ScenarioSkipped {
         try {
@@ -109,11 +108,31 @@ public final class TcpFamily implements Scenario {
             }
             return listener;
         } catch (UnsupportedOperationException | SocketException e) {
-            if (family != StandardProtocolFamily.INET6) {
+            if (family != StandardProtocolFamily.INET6 || !noIpv6(e)) {
                 throw e;
             }
             throw new ScenarioSkipped("no IPv6 loopback (::1): " + e, e);
         }
+    }
+
+    /**
+     * Whether e says the host has no IPv6 loopback: the JDK runs
+     * IPv4-only (UnsupportedOperationException), ::1 is not configured
+     * (bind's EADDRNOTAVAIL) or the kernel lacks AF_INET6 (socket's
+     * EAFNOSUPPORT). Anything else — EMFILE, say — must not hide as a
+     * skip. The JDK passes errno on only as its strerror text, so that
+     * is what is matched; a translated message fails instead of skipping,
+     * the safe side.
+     */
+    private static boolean noIpv6(Exception e) {
+        if (e instanceof UnsupportedOperationException) {
+            return true;
+        }
+        String msg = String.valueOf(e.getMessage());
+        if (e instanceof BindException) {
+            return msg.contains("Cannot assign requested address");
+        }
+        return msg.contains("Address family not supported");
     }
 
     private static void serve(ServerSocketChannel listener) throws IOException {

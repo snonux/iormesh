@@ -15,13 +15,17 @@ import java.util.Set;
  *
  * <pre>
  *   per child: spawn SignalChild (stdin and stdout pipes); read its
- *              1-byte ready message; close the stdout pipe; read
- *              /proc/&lt;child&gt;/stat (the JDK checks the PID still
- *              names its child — PID reuse — before signalling);
- *              kill(child, SIGTERM | SIGKILL), then destroy() itself
- *              closes the stdin pipe; the reaper thread's wait4 reaps
- *              the child
+ *              1-byte ready message; close the stdout pipe; close the
+ *              stdin pipe; read /proc/&lt;child&gt;/stat (the JDK checks
+ *              the PID still names its child — PID reuse — before
+ *              signalling); kill(child, SIGTERM | SIGKILL); the reaper
+ *              thread's wait4 reaps the child
  * </pre>
+ *
+ * Both pipes are closed on this thread before the signal, on purpose:
+ * left open, destroy() would close stdin after kill(2), but the JDK's
+ * reaper thread closes it too when it sees the child die — whichever
+ * runs first issues the close(2), so its thread would vary run to run.
  *
  * The child exits 143 (SIGTERM: the JVM's own handler runs shutdown
  * and exits 128+15) or is killed by SIGKILL (exit value 137); anything
@@ -65,12 +69,16 @@ public final class Signals implements Scenario {
                 .start();
         try {
             awaitReady(p);
+            // Before the signal: see the class comment. The child takes
+            // the EOF as no cue to exit (SignalChild), so the signal
+            // still decides its exit value.
+            p.getOutputStream().close();
             if (force) {
                 p.destroyForcibly();
             } else {
                 p.destroy();
             }
-            int code = p.waitFor();
+            int code = ChildJvm.await(p, NAME);
             if (code != want) {
                 throw new IOException("signals child exited " + code + ", want " + want);
             }
@@ -78,8 +86,7 @@ public final class Signals implements Scenario {
             // On failure, no child may outlive the scenario. On success
             // the child is already reaped and the JDK skips kill(2) and
             // the (already done) pipe closes, so this adds no syscall.
-            p.destroyForcibly();
-            p.waitFor();
+            ChildJvm.kill(p);
         }
     }
 

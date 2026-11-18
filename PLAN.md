@@ -301,6 +301,9 @@ Scenario notes:
   stream). `fd-lifecycle`'s child JVM brackets nothing itself:
   a process forked inside a bracket belongs to it, so the
   normalizer's per-process cut must keep such children.
+  `file-links`' lstat is `statx` on JDK 22+ (measured on 25
+  and 27-ea); JDK 21 issues `newfstatat` instead (21 itself
+  unmeasured), so the golden holds for JDK 22+ only.
 - **IPC, signal, UDP and address-family scenarios** (M2):
   `pipe-ipc`, `unix-socket`, `signals`, `udp-loopback`,
   `tcp-ipv4` and `tcp-ipv6` declare what strace shows on JDK

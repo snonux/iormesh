@@ -4,13 +4,13 @@
    {"process": "$p1", "thread": "$t1", "event": "read", "fd": "$fd1",
     "bytes": 1},
    {"process": "$p1", "thread": "$t1", "event": "close", "fd": "$fd1"},
-   {"process": "$p1", "thread": "$t1", "event": "kill"},
    {"process": "$p1", "thread": "$t1", "event": "close", "fd": "$fd2"},
+   {"process": "$p1", "thread": "$t1", "event": "kill"},
    {"process": "$p1", "thread": "$t1", "event": "read", "fd": "$fd3",
     "bytes": 1},
    {"process": "$p1", "thread": "$t1", "event": "close", "fd": "$fd3"},
-   {"process": "$p1", "thread": "$t1", "event": "kill"},
    {"process": "$p1", "thread": "$t1", "event": "close", "fd": "$fd4"},
+   {"process": "$p1", "thread": "$t1", "event": "kill"},
 
    {"process": "$p2", "thread": "$t2", "event": "write", "fd": 1, "bytes": 1},
    {"process": "$p3", "thread": "$t3", "event": "write", "fd": 1, "bytes": 1}

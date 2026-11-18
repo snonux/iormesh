@@ -3,6 +3,8 @@ package iormesh.workload.scenarios;
 import iormesh.workload.Options;
 import iormesh.workload.Scenario;
 import java.io.IOException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -45,11 +47,15 @@ import java.util.Set;
  * Blocking receives with no timeout, on purpose: a timeout turns the
  * JDK's receive into poll(2) plus recvfrom(2). Loopback does not drop
  * these datagrams; a harness bounds a hung run, as for tcp-loopback.
+ * Only --self-test, which no tracer watches and no harness bounds, sets
+ * one, so a role whose peer failed fails too instead of hanging.
  * There is no run-failure check for a client on a closed port: an
  * unconnected UDP socket never sees the ICMP error, so it just waits.
  */
 public final class UdpLoopback implements Scenario {
     static final String NAME = "udp-loopback";
+    // The self-test's receive timeout; 0 (the traced runs) blocks forever.
+    static final int SELF_TEST_TIMEOUT_MILLIS = 30_000;
 
     private static final InetAddress LOOPBACK = loopback();
 
@@ -65,13 +71,13 @@ public final class UdpLoopback implements Scenario {
         // Parse the port before any I/O: a bad option is a usage error.
         int port = role.equals("server") ? Options.port(opts, 0) : Options.requiredPort(opts);
         if (role.equals("client")) {
-            client(port);
+            client(port, 0);
             return;
         }
         try (DatagramChannel ch = bind(port)) {
             System.out.println("listening " + localPort(ch));
             System.out.flush();
-            serve(ch);
+            serve(ch, 0);
         }
     }
 
@@ -79,9 +85,14 @@ public final class UdpLoopback implements Scenario {
     @Override
     public void selfTest() throws Exception {
         try (DatagramChannel ch = bind(0)) {
-            Peer server = Peer.start(NAME + "-server", () -> serve(ch));
-            client(localPort(ch));
-            server.join();
+            Peer server = Peer.start(NAME + "-server",
+                    () -> serve(ch, SELF_TEST_TIMEOUT_MILLIS));
+            try {
+                client(localPort(ch), SELF_TEST_TIMEOUT_MILLIS);
+            } finally {
+                // Bounded either way: the server's receive times out too.
+                server.join();
+            }
         }
     }
 
@@ -97,16 +108,16 @@ public final class UdpLoopback implements Scenario {
     }
 
     /** Answers the first datagram with PONG, to whoever sent it. */
-    private static void serve(DatagramChannel ch) throws IOException {
-        SocketAddress from = receive(ch, Wire.PING);
+    private static void serve(DatagramChannel ch, int timeoutMillis) throws IOException {
+        SocketAddress from = receive(ch, Wire.PING, timeoutMillis);
         ch.send(ByteBuffer.wrap(Wire.PONG), from);
     }
 
-    private static void client(int port) throws IOException {
+    private static void client(int port, int timeoutMillis) throws IOException {
         try (DatagramChannel ch = DatagramChannel.open(StandardProtocolFamily.INET)) {
             InetSocketAddress server = new InetSocketAddress(LOOPBACK, port);
             ch.send(ByteBuffer.wrap(Wire.PING), server);
-            SocketAddress from = receive(ch, Wire.PONG);
+            SocketAddress from = receive(ch, Wire.PONG, timeoutMillis);
             if (!server.equals(from)) {
                 throw new IOException("pong from " + from + ", want " + server);
             }
@@ -116,12 +127,27 @@ public final class UdpLoopback implements Scenario {
     /**
      * Receives one datagram and fails unless it is exactly want. The
      * buffer is one byte larger, so an oversized datagram is caught
-     * instead of silently truncated to a match.
+     * instead of silently truncated to a match. A non-zero timeout goes
+     * through the socket adaptor, the channel's only timed receive.
      */
-    private static SocketAddress receive(DatagramChannel ch, byte[] want) throws IOException {
-        ByteBuffer buf = ByteBuffer.allocate(want.length + 1);
-        SocketAddress from = ch.receive(buf);
-        byte[] got = Arrays.copyOf(buf.array(), buf.position());
+    private static SocketAddress receive(DatagramChannel ch, byte[] want, int timeoutMillis)
+            throws IOException {
+        byte[] buf = new byte[want.length + 1];
+        SocketAddress from;
+        int n;
+        if (timeoutMillis == 0) {
+            ByteBuffer bb = ByteBuffer.wrap(buf);
+            from = ch.receive(bb);
+            n = bb.position();
+        } else {
+            DatagramSocket s = ch.socket();
+            s.setSoTimeout(timeoutMillis);
+            DatagramPacket pkt = new DatagramPacket(buf, buf.length);
+            s.receive(pkt);
+            from = pkt.getSocketAddress();
+            n = pkt.getLength();
+        }
+        byte[] got = Arrays.copyOf(buf, n);
         if (!Arrays.equals(want, got)) {
             throw new IOException("datagram of " + got.length + " bytes is not "
                     + new String(want, StandardCharsets.US_ASCII));

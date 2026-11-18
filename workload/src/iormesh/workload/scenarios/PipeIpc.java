@@ -85,6 +85,21 @@ public final class PipeIpc implements Scenario {
                 // The child's own complaints stay visible on our stderr.
                 .redirectError(ProcessBuilder.Redirect.INHERIT)
                 .start();
+        try {
+            roundTrip(p, data);
+        } catch (Throwable t) {
+            // A child stuck mid-exchange must not outlive the scenario.
+            ChildJvm.kill(p);
+            throw t;
+        }
+        int code = ChildJvm.await(p, NAME);
+        if (code != 0) {
+            throw new IOException("pipe-ipc child exited " + code);
+        }
+    }
+
+    /** Writes data to the child's stdin and expects it back on stdout. */
+    private static void roundTrip(Process p, byte[] data) throws IOException {
         OutputStream toChild = p.getOutputStream();
         InputStream fromChild = p.getInputStream();
         try {
@@ -99,10 +114,6 @@ public final class PipeIpc implements Scenario {
             // the child's EOF, its cue to exit.
             fromChild.close();
             toChild.close();
-        }
-        int code = p.waitFor();
-        if (code != 0) {
-            throw new IOException("pipe-ipc child exited " + code);
         }
     }
 

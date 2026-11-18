@@ -10,9 +10,9 @@ import java.io.IOException;
  * byte on stdout, then waits for the parent's signal. A plain main
  * class with no markers of its own.
  *
- * It waits by reading stdin, and EOF does not end it: Process.destroy()
- * closes the parent's pipe ends right after kill(2), so EOF races the
- * signal, and exiting on it would turn SIGTERM's 143 into a 0. After
+ * It waits by reading stdin, and EOF does not end it: the parent closes
+ * its stdin pipe end right before kill(2), so EOF comes first, and
+ * exiting on it would turn SIGTERM's 143 into a 0. After
  * EOF it sleeps out a grace period instead — the signal ends it long
  * before — and exits 0 only if no signal came (the parent then reports
  * the failure), or if the parent died, so no orphan lingers for long.

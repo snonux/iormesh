@@ -15,7 +15,6 @@ import (
 	"io/fs"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -95,7 +94,8 @@ func javaSources(root string) ([]string, error) {
 // WorkloadTest runs every scenario without a tracer (--self-test), then
 // checks the gates, the two-process runs (tcp-loopback, udp-loopback,
 // unix-socket), every scenario's --expect output, syscall-burst's result
-// line, the exit codes of bad invocations, the skip exit code, and
+// line, the exit codes of bad invocations, that a failed run leaves a
+// directory it did not create alone, the skip exit code, and
 // restart's and non-java-peer's own failure modes (magefile_restartpeer.go).
 func WorkloadTest() error {
 	mg.Deps(WorkloadBuild)
@@ -111,6 +111,7 @@ func WorkloadTest() error {
 		checkSyscallBurst,
 		checkUsageErrors,
 		checkRunFailures,
+		checkForeignDirSurvives,
 		checkSkip,
 		checkRestartPeer,
 	}
@@ -274,7 +275,7 @@ func checkSyscallBurst() error {
 // valid JSON naming its scenario, for every scenario --list names, so a
 // new scenario without an expect.json fails here rather than in M1.
 func checkExpectations() error {
-	out, err := runBounded("--list")
+	out, err := runBounded(nil, "--list")
 	if err != nil {
 		return fmt.Errorf("--list: %w", err)
 	}
@@ -293,7 +294,7 @@ func checkExpectations() error {
 // checkExpectation asserts `--expect name` prints valid JSON whose
 // scenario field is name.
 func checkExpectation(name string) error {
-	out, err := runBounded("--expect", name)
+	out, err := runBounded(nil, "--expect", name)
 	if err != nil {
 		return fmt.Errorf("--expect %s: %w", name, err)
 	}
@@ -416,20 +417,49 @@ func checkRunFailures() error {
 	return nil
 }
 
+// treeScenarios build their own <name>.d directory inside --dir.
+var treeScenarios = []string{"fd-lifecycle", "file-lifecycle", "file-links"}
+
+// checkForeignDirSurvives: a <name>.d the run did not create (left in a
+// reused --dir) makes the scenario's mkdir fail, so the run fails (exit
+// 1) — and its failure cleanup must leave that directory alone.
+func checkForeignDirSurvives() error {
+	for _, name := range treeScenarios {
+		if err := foreignDirSurvives(name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func foreignDirSurvives(name string) error {
+	dir, err := os.MkdirTemp("", "iormesh-foreign-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	keep := filepath.Join(dir, name+".d", "keep.dat")
+	if err := os.Mkdir(filepath.Dir(keep), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(keep, []byte("not yours"), 0o644); err != nil {
+		return err
+	}
+	if err := expectExit(1, name, "--dir", dir); err != nil {
+		return err
+	}
+	if _, err := os.Stat(keep); err != nil {
+		return fmt.Errorf("%s deleted a directory it did not create: %w", name, err)
+	}
+	return nil
+}
+
 // checkSkip asserts a scenario the host cannot run exits with the skip
 // code 3, not as a failure: tcp-ipv6 on a JVM told to use IPv4 only
 // (JDK_JAVA_OPTIONS reaches the launcher without a jar-side flag).
 func checkSkip() error {
-	ctx, cancel := context.WithTimeout(context.Background(), gateWait)
-	defer cancel()
-	cmd := workloadCmd(ctx, "tcp-ipv6")
-	cmd.Env = append(os.Environ(), "JDK_JAVA_OPTIONS=-Djava.net.preferIPv4Stack=true")
-	err := cmd.Run()
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 3 {
-		return fmt.Errorf("tcp-ipv6 on an IPv4-only JVM: want exit 3 (skip), got %v", err)
-	}
-	return nil
+	env := []string{"JDK_JAVA_OPTIONS=-Djava.net.preferIPv4Stack=true"}
+	return expectExitEnv(env, 3, "tcp-ipv6")
 }
 
 // closedPort returns a loopback port nothing listens on: one the kernel
@@ -447,24 +477,28 @@ func closedPort() (int, error) {
 
 // expectExit runs the workload jar and fails unless it exits with code.
 func expectExit(code int, args ...string) error {
-	_, err := runBounded(args...)
-	var exitErr *exec.ExitError
-	switch {
-	case err == nil && code == 0:
-		return nil
-	case errors.As(err, &exitErr) && exitErr.ExitCode() == code:
-		return nil
-	default:
-		return fmt.Errorf("workload %q: want exit %d, got %v", args, code, err)
-	}
+	return expectExitEnv(nil, code, args...)
 }
 
-// runBounded runs the workload jar to completion and returns its stdout.
-// gateWait bounds it, so a run that blocks (say, a client whose "closed"
-// port got reused by a silent listener) fails the check instead of
-// hanging it.
-func runBounded(args ...string) ([]byte, error) {
+// expectExitEnv is expectExit with env added to the jar's environment.
+func expectExitEnv(env []string, code int, args ...string) error {
+	_, err := runBounded(env, args...)
+	if err == nil && code == 0 {
+		return nil
+	}
+	return wantExitCode(err, code, fmt.Sprintf("workload %q", args))
+}
+
+// runBounded runs the workload jar to completion, with env added to its
+// environment, and returns its stdout. gateWait bounds it, so a run that
+// blocks (say, a client whose "closed" port got reused by a silent
+// listener) fails the check instead of hanging it.
+func runBounded(env []string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gateWait)
 	defer cancel()
-	return workloadCmd(ctx, args...).Output()
+	cmd := workloadCmd(ctx, args...)
+	if env != nil {
+		cmd.Env = append(os.Environ(), env...)
+	}
+	return cmd.Output()
 }

@@ -1181,6 +1181,11 @@ scenarios landing first (principle #1).
    `fd-lifecycle`'s (step 6). The first NIO use inside a bracket
    also makes a `socketpair` and throwaway AF_INET6 probe
    sockets; nothing declares them.
+   `tcp-ipv6` (and `non-java-peer`) exit with the skip code 3
+   when the host cannot run them, but `integrationtests/process.go`
+   still fails on any non-zero exit: the harness that runs these
+   scenarios must map exit 3 to `t.Skip`, or a skip reads as a
+   failure.
 
 8. **Redaction** (`internal/redact`, cgo-free — M3 and M5 reuse
    it):

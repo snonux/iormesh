@@ -63,19 +63,14 @@ public final class FileLifecycle implements Scenario {
         Options.requireRole(NAME, role, Set.of("solo"));
         Options.requireKnown(opts, Set.of(Workdir.OPTION));
         try (Workdir wd = Workdir.open(opts)) {
-            Path dir = wd.file(NAME + ".d");
-            try {
-                lifecycle(dir);
-            } finally {
-                // A failed run must not leave a tree behind in a --dir the
-                // harness reuses; a clean run has removed it already.
-                Tree.delete(dir);
-            }
+            // A failed run must not leave a tree behind in a --dir the
+            // harness reuses; a clean run has removed it already.
+            Tree.inFreshDir(wd.file(NAME + ".d"), FileLifecycle::lifecycle);
         }
     }
 
+    /** Runs in D, which Tree.inFreshDir has just made (the mkdir). */
     private static void lifecycle(Path dir) throws IOException {
-        Files.createDirectory(dir);
         Path b = createRenamedWhileOpen(dir);
         Files.setLastModifiedTime(b, TOUCHED);
         if (!Files.getLastModifiedTime(b).equals(TOUCHED)) {

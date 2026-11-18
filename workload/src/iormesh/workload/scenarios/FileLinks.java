@@ -49,17 +49,12 @@ public final class FileLinks implements Scenario {
         Options.requireRole(NAME, role, Set.of("solo"));
         Options.requireKnown(opts, Set.of(Workdir.OPTION));
         try (Workdir wd = Workdir.open(opts)) {
-            Path dir = wd.file(NAME + ".d");
-            try {
-                links(dir);
-            } finally {
-                Tree.delete(dir);
-            }
+            Tree.inFreshDir(wd.file(NAME + ".d"), FileLinks::links);
         }
     }
 
+    /** Runs in D, which Tree.inFreshDir has just made (the mkdir). */
     private static void links(Path dir) throws IOException {
-        Files.createDirectory(dir);
         Path target = dir.resolve("target.dat");
         byte[] data = new byte[SIZE];
         Arrays.fill(data, (byte) 'L');

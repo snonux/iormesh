@@ -87,9 +87,19 @@ public final class UnixSocket implements Scenario {
             });
             try {
                 client(sock);
-            } finally {
-                server.join();
+            } catch (Throwable t) {
+                // A client that failed before connecting leaves the server
+                // blocked in accept; closing the listener wakes it (an
+                // AsynchronousCloseException), so the join cannot hang.
+                listener.close();
+                try {
+                    server.join();
+                } catch (Exception e) {
+                    t.addSuppressed(e);
+                }
+                throw t;
             }
+            server.join();
         }
     }
 

@@ -10,15 +10,43 @@ import java.util.stream.Stream;
 
 /**
  * Failure cleanup for scenarios that build a directory tree in their
- * workdir. Only the finally paths call it: on a clean run the scenario
- * has deleted everything itself, as declared syscalls, so delete() finds
- * nothing and adds just one undeclared lstat to the bracket.
+ * workdir. On a clean run the scenario has deleted everything itself,
+ * as declared syscalls, so the cleanup finds nothing and adds just one
+ * undeclared lstat to the bracket.
  */
 final class Tree {
     private Tree() {}
 
+    /** A scenario body working inside the directory it was handed. */
+    interface Body {
+        void run(Path dir) throws Exception;
+    }
+
+    /**
+     * Creates dir (its mkdir is the scenario's first declared syscall),
+     * runs body in it, then removes whatever the body left behind. The
+     * cleanup only starts once createDirectory succeeded: a dir that
+     * already existed — left by someone else in a reused --dir — is not
+     * ours to delete, so that run just fails. A cleanup error never
+     * replaces the body's: it rides along as a suppressed exception.
+     */
+    static void inFreshDir(Path dir, Body body) throws Exception {
+        Files.createDirectory(dir);
+        try {
+            body.run(dir);
+        } catch (Throwable t) {
+            try {
+                delete(dir);
+            } catch (IOException e) {
+                t.addSuppressed(e);
+            }
+            throw t;
+        }
+        delete(dir);
+    }
+
     /** Removes root and everything under it; absent root is fine. */
-    static void delete(Path root) throws IOException {
+    private static void delete(Path root) throws IOException {
         if (!Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
             return;
         }
