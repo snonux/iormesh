@@ -111,7 +111,9 @@ func New(cfg Config) *Correlator {
 // session are the caller's to judge (Incarnation), and an exec's argv
 // reaches the trace through Exec, once the caller has completed a
 // truncated one. The error is the sink's, or
-// ErrEnded after End.
+// ErrEnded after End. Handle keeps no reference to rec (it copies what it
+// needs), so the caller may recycle it once Handle returns
+// (types.Recycle).
 func (c *Correlator) Handle(rec any) error {
 	if c.ended {
 		return ErrEnded

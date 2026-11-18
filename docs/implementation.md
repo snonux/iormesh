@@ -653,7 +653,7 @@ Output of this package is a channel of decoded raw records
   sets `IOR_PID_FILTER` to the tracer's own PID (self-exclusion),
   seeds `target_map`, attaches the probe set one at a time
   (libbpfgo's link list is not thread-safe — ior's
-  `libbpfAttachMu`) and starts the ring-buffer poll.
+  `libbpfAttachMu`) and starts the ring-buffer reader.
   `AddTarget`/`RemoveTarget` edit `target_map` at run time.
 - `DefaultProbes()` is enter+exit of every
   `tracepoints.DefaultSyscalls()` syscall plus
@@ -664,18 +664,25 @@ Output of this package is a channel of decoded raw records
   and a set where nothing attached (an unmounted tracefs looks
   like every tracepoint missing) fail `Open`.
 - `Records()` yields typed records (`*types.OpenEvent`, …) in
-  ring-buffer order; the decode table is ior's
-  `rawRuntimeEvents` mapping (`eventloop_kinds.go`) without its
-  event-loop handlers, plus `TCP_STATE_EVENT`. A full channel is
-  backpressure: the ring buffer fills and the kernel counts drops.
+  ring-buffer order, in batches of up to 256 (task wc4); the
+  decode table is ior's `rawRuntimeEvents` mapping
+  (`eventloop_kinds.go`) without its event-loop handlers, plus
+  `TCP_STATE_EVENT`. The reader maps `event_map` itself
+  (`ringbuf.go`: consumer page, producer page, data area mapped
+  twice) and decodes in place — no libbpfgo callback, copy or
+  channel hop per record, which cost more than the correlator and
+  encoder together (decision #25). It pauses 200 µs after a
+  partial batch so a burst arrives in batches, and blocks in
+  epoll on an empty ring. A full channel is backpressure: the
+  ring buffer fills and the kernel counts drops.
 - `Losses()` = kernel drops (`ringbuf_drop_map`, summed per CPU)
   + records that arrived undecodable (unknown type, malformed,
   short) — the correlator turns deltas into `drop` events.
-- `Close()` leaves the teardown order to libbpfgo's
-  `Module.Close` — ring buffer (stops the poll, closes the raw
-  channel and so `Records`), then links, then the object — and
-  never destroys a link itself (a failed destroy already freed
-  it). Records in flight at Close are dropped and not counted;
+- `Close()` stops the reader (it sees the close within its 50 ms
+  epoll timeout, or at once when blocked on a full `Records`,
+  which it then closes), unmaps the ring, and leaves the rest to
+  libbpfgo's `Module.Close` — links, then the object — never
+  destroying a link itself (a failed destroy already freed it). Records in flight at Close are dropped and not counted;
   the map methods return an error after Close but must not race
   it.
 
@@ -684,7 +691,7 @@ bpfRootTest`): a bash target opening `/etc/hostname` with shell
 builtins yields an `OpenEvent` with no loss; an untargeted PID
 yields nothing until `AddTarget`, nothing after `RemoveTarget`,
 and is traced again after a second `AddTarget`; `Close` closes
-`Records` with both channels full and nobody reading; `Open`
+`Records` with its channel full and nobody reading; `Open`
 with only missing tracepoints fails.
 
 **Step 6 — the correlator** (`internal/correlate`, cgo-free;
@@ -1504,10 +1511,16 @@ scenarios landing first (principle #1).
     hot read/write loops, ior's `syscall_aggregate_map` model —
     repeated read/write on one fd instance by one thread summed
     per flush into one event with a count; every state-changing
-    event stays individual. Plus a cheaper consumer (validation
-    out of the hot path, encoding cost down) to reach ≤ 2 µs per
-    event. Measured with `spikes/s3/measure.sh` against the
-    #25 budget.
+    event stays individual. Plus a cheaper consumer to reach
+    ≤ 2 µs per event (done, task wc4: a hand-written encoder
+    byte-identical to `encoding/json`, pooled records recycled,
+    batched records read from the mapped ring; validation stays
+    on the hot path, it costs ~15 ns once it stopped copying the
+    event; numbers in
+    [s3-overhead.md](spikes/s3-overhead.md), "Follow-up (wc4)";
+    benchmark `go test ./internal/correlate -bench SyscallBurst`,
+    profile `iormesh run -cpuprofile FILE`). Measured with
+    `spikes/s3/measure.sh` against the #25 budget.
 
 **Done when**: PLAN.md's M2 acceptance holds, including the S3
 budget (decision #25) checked by a documented

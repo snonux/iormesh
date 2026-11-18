@@ -13,18 +13,31 @@ import (
 // NDJSONSink writes one event per line, the live and golden format
 // (docs/schema.md). Every event is validated first: a producer bug fails
 // the write instead of reaching a file a strict reader would reject.
-// Keys come out in struct order, which encoding/json guarantees, so two
-// writes of the same event are byte-identical.
+// Lines are encoded by AppendEvent, byte-identical to json.Marshal (keys
+// in struct order), so two writes of the same event are byte-identical;
+// it appends straight into the bufio buffer, so a line costs no
+// allocation (decision #25's per-event budget, task wc4).
 type NDJSONSink struct {
 	w      *bufio.Writer
 	closer io.Closer
 	err    error // sticky: once a write failed, every later call fails
 }
 
+// sinkBuffer is the sink's write buffer: one write(2) per ~200 burst
+// events instead of per ~12 with bufio's 4 KiB default, which was a tenth
+// of the tracer's per-event CPU (task wc4). A crash loses at most this
+// much of the stream — and the end event, which tells a reader so.
+// lineRoom is the free space below which the buffer is flushed before a
+// line is encoded: a typical event line is ~330 bytes.
+const (
+	sinkBuffer = 64 << 10
+	lineRoom   = 1 << 10
+)
+
 // NewNDJSONSink buffers writes to w. If w is an io.Closer, Close closes it
 // after flushing.
 func NewNDJSONSink(w io.Writer) *NDJSONSink {
-	s := &NDJSONSink{w: bufio.NewWriter(w)}
+	s := &NDJSONSink{w: bufio.NewWriterSize(w, sinkBuffer)}
 	if c, ok := w.(io.Closer); ok {
 		s.closer = c
 	}
@@ -39,12 +52,19 @@ func (s *NDJSONSink) Event(ev Event) error {
 	if err := ev.Validate(); err != nil {
 		return fmt.Errorf("ndjson: event seq %d: %w", ev.Seq, err)
 	}
-	line, err := json.Marshal(ev)
-	if err != nil {
-		s.err = fmt.Errorf("ndjson: encode seq %d: %w", ev.Seq, err)
-		return s.err
+	// A nearly full buffer is flushed first, so the line is encoded in
+	// place: AvailableBuffer is empty with the buffer's free capacity, and
+	// Write of a slice of it only advances the buffer. A line longer than
+	// the room left (a long argv, say) grows a copy, which Write flushes
+	// through.
+	if s.w.Available() < lineRoom && s.w.Buffered() > 0 {
+		if err := s.w.Flush(); err != nil {
+			s.err = fmt.Errorf("ndjson: write seq %d: %w", ev.Seq, err)
+			return s.err
+		}
 	}
-	if _, err := s.w.Write(append(line, '\n')); err != nil {
+	line := append(AppendEvent(s.w.AvailableBuffer(), &ev), '\n')
+	if _, err := s.w.Write(line); err != nil {
 		s.err = fmt.Errorf("ndjson: write seq %d: %w", ev.Seq, err)
 	}
 	return s.err

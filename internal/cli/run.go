@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/pprof"
 	"syscall"
 	"time"
 
@@ -36,13 +37,38 @@ func runCommand(args []string, stderr io.Writer) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	return runTrace(ctx, cfg, stderr)
+	stopProfile, err := startCPUProfile(cfg.cpuProfile)
+	if err != nil {
+		return err
+	}
+	return errors.Join(runTrace(ctx, cfg, stderr), stopProfile())
+}
+
+// startCPUProfile starts a pprof CPU profile into path ("" profiles
+// nothing) and returns the function that stops and writes it. It covers
+// the whole run, BPF load included; the per-event share is what the
+// correlator's and sink's frames add up to.
+func startCPUProfile(path string) (stop func() error, err error) {
+	if path == "" {
+		return func() error { return nil }, nil
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return nil, fmt.Errorf("cpuprofile: %w", err)
+	}
+	if err := pprof.StartCPUProfile(f); err != nil {
+		return nil, errors.Join(fmt.Errorf("cpuprofile: %w", err), f.Close())
+	}
+	return func() error {
+		pprof.StopCPUProfile()
+		return f.Close()
+	}, nil
 }
 
 // tracer is what run needs of bpf.Tracer; tests substitute a fake to
 // drive the loop without a kernel.
 type tracer interface {
-	Records() <-chan any
+	Records() <-chan []any
 	Losses() (bpf.Losses, error)
 	AddTarget(pid uint32) error
 	RemoveTarget(pid uint32) error
@@ -201,12 +227,12 @@ func traceLoop(ctx context.Context, s *session, cfg runConfig) (string, error) {
 	defer tick.Stop()
 	for {
 		select {
-		case rec, ok := <-s.tr.Records():
+		case batch, ok := <-s.tr.Records():
 			if !ok {
 				// Only Close ends the stream, and run has not closed it.
 				return schema.EndError, errors.New("record stream closed unexpectedly")
 			}
-			if err := s.handle(rec); err != nil {
+			if err := s.handleAll(batch); err != nil {
 				return schema.EndError, err
 			}
 		case <-ctx.Done():
@@ -236,11 +262,11 @@ func drainQuiet(ctx context.Context, s *session) (string, error) {
 		select {
 		case <-ctx.Done():
 			return ctxReason(ctx), drainStopped(s)
-		case rec, ok := <-s.tr.Records():
+		case batch, ok := <-s.tr.Records():
 			if !ok {
 				return schema.EndError, errors.New("record stream closed unexpectedly")
 			}
-			if err := s.handle(rec); err != nil {
+			if err := s.handleAll(batch); err != nil {
 				return schema.EndError, err
 			}
 			quiet.Reset(quietFor)
@@ -266,11 +292,11 @@ func drainStopped(s *session) error {
 	defer bound.Stop()
 	for {
 		select {
-		case rec, ok := <-s.tr.Records():
+		case batch, ok := <-s.tr.Records():
 			if !ok {
 				return nil
 			}
-			if err := s.handle(rec); err != nil {
+			if err := s.handleAll(batch); err != nil {
 				return err
 			}
 			quiet.Reset(quietFor)

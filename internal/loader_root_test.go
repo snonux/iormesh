@@ -101,12 +101,14 @@ func opensOf(tr *ibpf.Tracer, pid uint32, wait time.Duration) []string {
 	deadline := time.After(wait)
 	for {
 		select {
-		case rec, ok := <-tr.Records():
+		case batch, ok := <-tr.Records():
 			if !ok {
 				return paths
 			}
-			if ev, isOpen := rec.(*types.OpenEvent); isOpen && ev.Pid == pid {
-				paths = append(paths, types.StringValue(ev.Filename[:]))
+			for _, rec := range batch {
+				if ev, isOpen := rec.(*types.OpenEvent); isOpen && ev.Pid == pid {
+					paths = append(paths, types.StringValue(ev.Filename[:]))
+				}
 			}
 		case <-deadline:
 			return paths
@@ -156,15 +158,17 @@ func TestLoaderAttachesEveryFamily(t *testing.T) {
 	deadline := time.After(2 * time.Second)
 	for {
 		select {
-		case rec, ok := <-tr.Records():
+		case batch, ok := <-tr.Records():
 			if !ok {
 				t.Fatal("records closed before the signal record")
 			}
-			ev, isSig := rec.(*types.SignalEvent)
-			if isSig && ev.TargetPid == tg.pid() && ev.Sig == int32(syscall.SIGWINCH) &&
-				ev.Scope&types.SIGNAL_SCOPE_TARGET != 0 && ev.Scope&types.SIGNAL_SCOPE_USER != 0 &&
-				ev.Pid == uint32(os.Getpid()) {
-				return
+			for _, rec := range batch {
+				ev, isSig := rec.(*types.SignalEvent)
+				if isSig && ev.TargetPid == tg.pid() && ev.Sig == int32(syscall.SIGWINCH) &&
+					ev.Scope&types.SIGNAL_SCOPE_TARGET != 0 && ev.Scope&types.SIGNAL_SCOPE_USER != 0 &&
+					ev.Pid == uint32(os.Getpid()) {
+					return
+				}
 			}
 		case <-deadline:
 			t.Fatalf("no signal_generate record for SIGWINCH to pid %d", tg.pid())
@@ -186,18 +190,20 @@ func TestKernelSignalHasNoSender(t *testing.T) {
 	deadline := time.After(2 * time.Second)
 	for {
 		select {
-		case rec, ok := <-tr.Records():
+		case batch, ok := <-tr.Records():
 			if !ok {
 				t.Fatal("records closed before the SIGCHLD record")
 			}
-			ev, isSig := rec.(*types.SignalEvent)
-			if !isSig || ev.TargetPid != tg.pid() || ev.Sig != int32(syscall.SIGCHLD) {
-				continue
+			for _, rec := range batch {
+				ev, isSig := rec.(*types.SignalEvent)
+				if !isSig || ev.TargetPid != tg.pid() || ev.Sig != int32(syscall.SIGCHLD) {
+					continue
+				}
+				if ev.Scope&(types.SIGNAL_SCOPE_USER|types.SIGNAL_SCOPE_SENDER) != 0 {
+					t.Fatalf("SIGCHLD from a child's exit has scope %#x: a sender was named", ev.Scope)
+				}
+				return
 			}
-			if ev.Scope&(types.SIGNAL_SCOPE_USER|types.SIGNAL_SCOPE_SENDER) != 0 {
-				t.Fatalf("SIGCHLD from a child's exit has scope %#x: a sender was named", ev.Scope)
-			}
-			return
 		case <-deadline:
 			t.Fatalf("no SIGCHLD record for pid %d", tg.pid())
 		}

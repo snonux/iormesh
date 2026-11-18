@@ -1,6 +1,6 @@
 // Package cli implements the iormesh tracer's subcommands (M1 step 10):
 //
-//	iormesh run (-pid PID[,PID…] | -pattern GLOB | -listen-port N) -project NAME -out DIR [-duration 4h] [-ready FILE]
+//	iormesh run (-pid PID[,PID…] | -pattern GLOB | -listen-port N) -project NAME -out DIR [-duration 4h] [-ready FILE] [-cpuprofile FILE]
 //	iormesh normalize [-bracket S] [-tmp PREFIX] [-check expect.json] [-out DIR] TRACEDIR
 //
 // run is the foreground tracer; its target spec (internal/target) is a
@@ -76,6 +76,7 @@ func usage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `usage:
   iormesh run (-pid PID[,PID...] | -pattern GLOB | -listen-port N) -project NAME -out DIR
               [-duration 4h] [-ready FILE] [-trace-families ipc,signal,poll,zerocopy|all]
+              [-cpuprofile FILE]
   iormesh normalize [-bracket SCENARIO] [-tmp PREFIX] [-check expect.json] [-out DIR] TRACEDIR
 `)
 }

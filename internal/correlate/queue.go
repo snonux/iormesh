@@ -36,8 +36,22 @@ func (c *Correlator) release(force bool) error {
 			return err
 		}
 	}
-	c.queue = c.queue[n:]
+	c.dequeue(n)
 	return nil
+}
+
+// dequeue drops the first n queued events. The common case — every event
+// released at once — rewinds the slice onto its own array instead of
+// slicing it forward, so enqueue appends without reallocating per event
+// (decision #25's budget); the released entries are cleared first, so the
+// array holds no stale sockets or strings for the GC.
+func (c *Correlator) dequeue(n int) {
+	if n == len(c.queue) {
+		clear(c.queue)
+		c.queue = c.queue[:0]
+		return
+	}
+	c.queue = c.queue[n:]
 }
 
 func (c *Correlator) emit(q queued) error {

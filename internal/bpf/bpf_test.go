@@ -35,6 +35,66 @@ func TestDecodeTypedRecord(t *testing.T) {
 	}
 }
 
+// fakeRing is a ring buffer's data area in plain memory, mapped "twice"
+// by writing every byte to both halves, as the kernel's double mapping
+// shows it.
+type fakeRing struct {
+	data               []byte
+	size               uint64
+	consumer, producer uint64
+}
+
+func newFakeRing(size uint64) *fakeRing {
+	return &fakeRing{data: make([]byte, 2*size), size: size}
+}
+
+// put commits a record of payload at the producer position with the
+// given header flags.
+func (f *fakeRing) put(payload []byte, flags uint32) {
+	hdr := binary.LittleEndian.AppendUint32(nil, uint32(len(payload))|flags)
+	rec := append(append(hdr, 0, 0, 0, 0), payload...)
+	for i, b := range rec {
+		off := (f.producer + uint64(i)) % f.size
+		f.data[off], f.data[off+f.size] = b, b
+	}
+	f.producer += (uint64(len(payload)) + ringHdrSize + 7) &^ 7
+}
+
+func (f *fakeRing) consume(limit int) []string {
+	var got []string
+	consume(f.data, f.size-1, &f.consumer, &f.producer, limit, func(raw []byte) {
+		got = append(got, string(raw))
+	})
+	return got
+}
+
+// TestConsumeRing: committed records come out in order, a discarded one
+// is skipped, the limit is honoured, a record wrapping the end of the
+// ring is whole, and a busy record stops the read until it is committed.
+func TestConsumeRing(t *testing.T) {
+	f := newFakeRing(64)
+	f.put([]byte("one"), 0)
+	f.put([]byte("dropped"), ringDiscardBit)
+	f.put([]byte("two"), 0)
+	if got := f.consume(1); len(got) != 1 || got[0] != "one" {
+		t.Fatalf("limit 1: %q", got)
+	}
+	if got := f.consume(10); len(got) != 1 || got[0] != "two" || f.consumer != f.producer {
+		t.Fatalf("rest: %q, consumer %d producer %d", got, f.consumer, f.producer)
+	}
+	f.put([]byte("wraps-around-the-end"), 0) // starts at 48, ends past 64
+	f.put([]byte("busy"), ringBusyBit)
+	busyAt := f.producer - 16
+	if got := f.consume(10); len(got) != 1 || got[0] != "wraps-around-the-end" || f.consumer != busyAt {
+		t.Fatalf("wrap: %q, consumer %d, want %d (stopped at the busy record)", got, f.consumer, busyAt)
+	}
+	off := busyAt % f.size
+	f.data[off+3], f.data[off+f.size+3] = 0, 0 // commit: clear the busy bit
+	if got := f.consume(10); len(got) != 1 || got[0] != "busy" {
+		t.Fatalf("after commit: %q", got)
+	}
+}
+
 func TestDecodeRejects(t *testing.T) {
 	typeOnly := func(et types.EventType) []byte {
 		return binary.LittleEndian.AppendUint32(nil, uint32(et))

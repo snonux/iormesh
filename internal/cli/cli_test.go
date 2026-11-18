@@ -62,6 +62,30 @@ func TestParseRunFlags(t *testing.T) {
 	if err != nil || !slices.Equal(cfg.families, want) {
 		t.Fatalf("-trace-families: %v, %v", cfg.families, err)
 	}
+	cfg, err = parseRunFlags([]string{"-pid", "10", "-project", "p", "-out", "o",
+		"-cpuprofile", "cpu.out"}, &bytes.Buffer{})
+	if err != nil || cfg.cpuProfile != "cpu.out" {
+		t.Fatalf("-cpuprofile: %q, %v", cfg.cpuProfile, err)
+	}
+}
+
+// TestCPUProfile: the profile file is created and written on stop; no
+// path profiles nothing.
+func TestCPUProfile(t *testing.T) {
+	stop, err := startCPUProfile("")
+	if err != nil || stop() != nil {
+		t.Fatalf("no profile: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "cpu.out")
+	if stop, err = startCPUProfile(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Stat(path); err != nil || st.Size() == 0 {
+		t.Fatalf("profile %v, %v: want a non-empty file", st, err)
+	}
 }
 
 func TestParseRunFlagsRejects(t *testing.T) {

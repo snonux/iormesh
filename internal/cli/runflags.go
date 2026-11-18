@@ -29,6 +29,10 @@ type runConfig struct {
 	// families are the event families to attach (-trace-families,
 	// decision #7): the defaults plus whatever opt-in ones were named.
 	families []tracepoints.TraceFamily
+	// cpuProfile, if set, is where run writes a pprof CPU profile of
+	// itself: how decision #25's per-event cost is found on a real trace
+	// (docs/spikes/s3-overhead.md, "Follow-up (wc4)").
+	cpuProfile string
 }
 
 // defaultDuration bounds every run, ior-style: no unbounded tracer on a
@@ -70,6 +74,7 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 	ready := fs.String("ready", "", "create this file once the probes are attached")
 	families := fs.String("trace-families", "",
 		"opt-in event families to add to file and socket: ipc, signal, poll, zerocopy, or all")
+	cpuProfile := fs.String("cpuprofile", "", "write a CPU profile of the tracer to this file")
 	if err := fs.Parse(args); err != nil {
 		return runConfig{}, fmt.Errorf("%w: %v", errUsage, err)
 	}
@@ -77,7 +82,7 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 		return runConfig{}, fmt.Errorf("%w: unexpected argument %q", errUsage, fs.Arg(0))
 	}
 	cfg := runConfig{project: *project, out: *out, duration: *duration, ready: *ready,
-		spec: target.Spec{Pattern: *pattern}}
+		spec: target.Spec{Pattern: *pattern}, cpuProfile: *cpuProfile}
 	if *port > math.MaxUint16 {
 		return runConfig{}, fmt.Errorf("%w: -listen-port %d: want 1-65535", errUsage, *port)
 	}

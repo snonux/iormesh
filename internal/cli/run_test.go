@@ -21,7 +21,7 @@ import (
 // fakeTracer stands in for bpf.Tracer: records come from a channel the
 // test feeds, losses from a counter it sets.
 type fakeTracer struct {
-	records chan any
+	records chan []any
 	mu      sync.Mutex
 	losses  bpf.Losses
 	lossErr error
@@ -32,9 +32,9 @@ type fakeTracer struct {
 	exited                           map[uint32]bool
 }
 
-func newFakeTracer() *fakeTracer { return &fakeTracer{records: make(chan any, 16)} }
+func newFakeTracer() *fakeTracer { return &fakeTracer{records: make(chan []any, 16)} }
 
-func (f *fakeTracer) Records() <-chan any { return f.records }
+func (f *fakeTracer) Records() <-chan []any { return f.records }
 
 func (f *fakeTracer) Losses() (bpf.Losses, error) {
 	f.mu.Lock()
@@ -200,15 +200,15 @@ func TestRunWritesSessionDropsEnd(t *testing.T) {
 	dir := t.TempDir()
 	tr := newFakeTracer()
 	c := testCorrelator(t, dir)
-	tr.records <- &types.FdEvent{EventType: types.ENTER_FD_EVENT, TraceId: types.SYS_ENTER_READ, Time: 1, Pid: 10, Tid: 10, Fd: 0}
-	tr.records <- &types.RetEvent{EventType: types.EXIT_RET_EVENT, TraceId: types.SYS_EXIT_READ, Time: 2, Pid: 10, Tid: 10, Ret: 1}
+	tr.records <- []any{&types.FdEvent{EventType: types.ENTER_FD_EVENT, TraceId: types.SYS_ENTER_READ, Time: 1, Pid: 10, Tid: 10, Fd: 0}}
+	tr.records <- []any{&types.RetEvent{EventType: types.EXIT_RET_EVENT, TraceId: types.SYS_EXIT_READ, Time: 2, Pid: 10, Tid: 10, Ret: 1}}
 	tr.setLosses(bpf.Losses{Kernel: 3}, nil)
 	go func() {
 		time.Sleep(liveCheckEvery + liveCheckEvery/2) // one tick sees the 3 losses
 		// A record after that tick: the drop must precede it, which only
 		// the loop's own poll achieves (the drain polls only later).
-		tr.records <- &types.FdEvent{EventType: types.ENTER_FD_EVENT, TraceId: types.SYS_ENTER_READ, Time: 3, Pid: 10, Tid: 10}
-		tr.records <- &types.RetEvent{EventType: types.EXIT_RET_EVENT, TraceId: types.SYS_EXIT_READ, Time: 4, Pid: 10, Tid: 10, Ret: 1}
+		tr.records <- []any{&types.FdEvent{EventType: types.ENTER_FD_EVENT, TraceId: types.SYS_ENTER_READ, Time: 3, Pid: 10, Tid: 10}}
+		tr.records <- []any{&types.RetEvent{EventType: types.EXIT_RET_EVENT, TraceId: types.SYS_EXIT_READ, Time: 4, Pid: 10, Tid: 10, Ret: 1}}
 		exitAll()
 	}()
 	s, cfg := pidSession(t, tr, c, 10)
@@ -256,8 +256,8 @@ func TestTraceLoopWriteError(t *testing.T) {
 	tr := newFakeTracer()
 	c := correlate.New(correlate.Config{Host: correlate.Host{ID: "h", Project: "p"}, Sink: failSink{},
 		ProcInfo: func(uint32) (string, uint64) { return "x", 1 }})
-	tr.records <- &types.FdEvent{EventType: types.ENTER_FD_EVENT, TraceId: types.SYS_ENTER_READ, Time: 1, Pid: 10, Tid: 10}
-	tr.records <- &types.RetEvent{EventType: types.EXIT_RET_EVENT, TraceId: types.SYS_EXIT_READ, Time: 2, Pid: 10, Tid: 10, Ret: 1}
+	tr.records <- []any{&types.FdEvent{EventType: types.ENTER_FD_EVENT, TraceId: types.SYS_ENTER_READ, Time: 1, Pid: 10, Tid: 10}}
+	tr.records <- []any{&types.RetEvent{EventType: types.EXIT_RET_EVENT, TraceId: types.SYS_EXIT_READ, Time: 2, Pid: 10, Tid: 10, Ret: 1}}
 	s, cfg := pidSession(t, tr, c, 10)
 	reason, err := traceLoop(context.Background(), s, cfg)
 	if reason != schema.EndError || err == nil {

@@ -4,8 +4,11 @@ import "fmt"
 
 // Validate checks the envelope's invariants — the ones every consumer
 // (normalizer, golden check, merge, LLM) relies on without rechecking.
-// It returns the first violation, wrapped in ErrInvalid.
-func (e Event) Validate() error {
+// It returns the first violation, wrapped in ErrInvalid. The receiver is
+// a pointer, as for every Event method: the sink validates each event,
+// and copying the envelope into each check cost more than the checks
+// (decision #25's per-event budget, task wc4).
+func (e *Event) Validate() error {
 	if e.SchemaVersion != Version {
 		return invalidf("schema_version %d, want %d", e.SchemaVersion, Version)
 	}
@@ -67,7 +70,7 @@ func KnownKind(kind string) bool {
 
 // validateFD enforces the fd conventions: NoFD is the only negative fd,
 // and an absent fd has no generation to count.
-func (e Event) validateFD() error {
+func (e *Event) validateFD() error {
 	if e.FD < NoFD {
 		return invalidf("fd %d below %d", e.FD, NoFD)
 	}
@@ -80,7 +83,7 @@ func (e Event) validateFD() error {
 // validateAttribution keeps the attribution flag and the Java payload in
 // agreement, so "java" never points at an empty stack and "none" never
 // hides one.
-func (e Event) validateAttribution() error {
+func (e *Event) validateAttribution() error {
 	switch e.Attribution {
 	case AttributionJava:
 		if e.Java == nil || len(e.Java.Stack) == 0 {
@@ -100,7 +103,7 @@ func (e Event) validateAttribution() error {
 // validateKindArgs requires the arguments a kind cannot be read without:
 // an open (creat is one) without its path, or a marker without its name,
 // would make the correlator's and normalizer's joins silently miss.
-func (e Event) validateKindArgs() error {
+func (e *Event) validateKindArgs() error {
 	switch e.Event {
 	case KindOpen, KindOpenat, KindOpenat2, KindCreat:
 		if e.Args.Path == nil || *e.Args.Path == "" {
@@ -127,7 +130,7 @@ func (e Event) validateKindArgs() error {
 // validateSyntheticArgs checks the host-level kinds: a drop without its
 // count, an end without a known reason or a header without the boot id
 // would turn "the trace says how complete it is" into a guess.
-func (e Event) validateSyntheticArgs() error {
+func (e *Event) validateSyntheticArgs() error {
 	switch e.Event {
 	case KindDrop:
 		if e.Args.Lost == nil || *e.Args.Lost == 0 {
@@ -172,7 +175,7 @@ func invalidf(format string, args ...any) error {
 // generation names nothing without the fd, a second fd belongs to the kinds
 // that have one (fd2Kind), and signal numbers or pids on
 // other kinds would make "count the SIGTERMs" or "who signalled whom" lie.
-func (e Event) validateIPCArgs() error {
+func (e *Event) validateIPCArgs() error {
 	a := e.Args
 	if a.FD2Gen != nil && a.FD2 == nil {
 		return invalidf("args.fd2_gen without args.fd2 on a %s event", e.Event)

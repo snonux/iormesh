@@ -32,18 +32,20 @@ func childOpens(tr *ibpf.Tracer, parent uint32, wait time.Duration) (opens map[u
 	deadline := time.After(wait)
 	for {
 		select {
-		case rec, ok := <-tr.Records():
+		case batch, ok := <-tr.Records():
 			if !ok {
 				return opens, forked
 			}
-			switch ev := rec.(type) {
-			case *types.OpenEvent:
-				if ev.Pid != parent {
-					opens[ev.Pid] = append(opens[ev.Pid], types.StringValue(ev.Filename[:]))
-				}
-			case *types.TaskNewtaskEvent:
-				if ev.CreatorPid == parent && ev.Pid != parent {
-					forked = append(forked, ev.Pid)
+			for _, rec := range batch {
+				switch ev := rec.(type) {
+				case *types.OpenEvent:
+					if ev.Pid != parent {
+						opens[ev.Pid] = append(opens[ev.Pid], types.StringValue(ev.Filename[:]))
+					}
+				case *types.TaskNewtaskEvent:
+					if ev.CreatorPid == parent && ev.Pid != parent {
+						forked = append(forked, ev.Pid)
+					}
 				}
 			}
 		case <-deadline:
@@ -121,9 +123,11 @@ func execOf(t *testing.T, tr *ibpf.Tracer, pid uint32) *types.ExecArgvEvent {
 	deadline := time.After(3 * time.Second)
 	for {
 		select {
-		case rec := <-tr.Records():
-			if ev, ok := rec.(*types.ExecArgvEvent); ok && ev.Pid == pid {
-				return ev
+		case batch := <-tr.Records():
+			for _, rec := range batch {
+				if ev, ok := rec.(*types.ExecArgvEvent); ok && ev.Pid == pid {
+					return ev
+				}
 			}
 		case <-deadline:
 			t.Fatalf("no exec record for pid %d", pid)

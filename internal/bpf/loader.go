@@ -29,16 +29,17 @@ type Config struct {
 	// caller decides with AdoptExec or IgnoreExec. Off, an untraced
 	// process's exec costs nothing.
 	ExecWatch bool
-	// Buffer is the capacity of the Records channel; 0 means 4096. A full
-	// channel is backpressure: the ring buffer then fills and the kernel
-	// counts drops (Losses.Kernel) instead of blocking the traced app.
+	// Buffer is how many decoded records may wait for the consumer (in
+	// batches of up to 256); 0 means 4096. A full channel is
+	// backpressure: the ring buffer then fills and the kernel counts
+	// drops (Losses.Kernel) instead of blocking the traced app.
 	Buffer int
 }
 
 const (
 	defaultBuffer = 4096
-	// pollTimeoutMs bounds how long the poll goroutine sleeps in epoll
-	// before it re-checks for Stop, i.e. how long Close can wait.
+	// pollTimeoutMs bounds how long the reader sleeps in epoll before it
+	// re-checks for Close, i.e. how long Close can wait.
 	pollTimeoutMs  = 50
 	ringbufMapName = "event_map"
 )
@@ -48,7 +49,8 @@ type Tracer struct {
 	module  *bpf.Module
 	links   []*bpf.BPFLink
 	skipped []Probe
-	records chan any
+	ring    *ringReader
+	records chan []any
 	done    chan struct{}
 	decoded sync.WaitGroup
 	losses  decodeLosses
@@ -122,10 +124,12 @@ func quietLibbpf() {
 	}})
 }
 
-// Records delivers decoded records in ring-buffer order. Each value is a
-// pointer to an internal/types record (e.g. *types.OpenEvent); the receiver
-// owns it and may Recycle it. The channel is closed by Close.
-func (t *Tracer) Records() <-chan any {
+// Records delivers decoded records in ring-buffer order, in batches of
+// those that arrived together (never empty). Each value is a pointer to
+// an internal/types record (e.g. *types.OpenEvent); the receiver owns
+// batch and records and may Recycle them (types.Recycle). The channel is
+// closed by Close.
+func (t *Tracer) Records() <-chan []any {
 	return t.records
 }
 
