@@ -28,7 +28,10 @@ import (
 // SYN_SENT -> ESTABLISHED transition, attributed to the connecting fd
 // although that transition fires in softirq; the accept side yields the
 // mirrored tuple as a snapshot record; TCP_CLOSE unregisters both sockets;
-// and a PID outside target_map yields nothing. What they do not prove: the
+// a connect failing before any state transition and an accept of a
+// connection reset in the accept queue (plain accept(2), not accept4) leave
+// no registration behind; and an empty target_map, or one naming another
+// PID, yields nothing. What they do not prove: the
 // loader's attach set, IPv6, or anything about Java processes.
 
 // TCP states as the kernel numbers them (include/net/tcp_states.h).
@@ -41,6 +44,7 @@ const (
 // sockTestPrograms are the programs a TCP tuple needs, by tracepoint.
 var sockTestPrograms = map[string][2]string{
 	"handle_sys_enter_connect":   {"syscalls", "sys_enter_connect"},
+	"handle_sys_exit_connect":    {"syscalls", "sys_exit_connect"},
 	"handle_sys_exit_accept":     {"syscalls", "sys_exit_accept"},
 	"handle_sys_exit_accept4":    {"syscalls", "sys_exit_accept4"},
 	"handle_inet_sock_set_state": {"sock", "inet_sock_set_state"},
@@ -123,6 +127,24 @@ func (tr *sockTracer) ownerRegistered(t *testing.T, sk uint64) bool {
 	}
 	_, err = owners.GetValue(unsafe.Pointer(&sk))
 	return err == nil
+}
+
+// entries returns the number of entries in the named map.
+func (tr *sockTracer) entries(t *testing.T, name string) int {
+	t.Helper()
+	m, err := tr.module.GetMap(name)
+	if err != nil {
+		t.Fatalf("%s: %v", name, err)
+	}
+	it := m.Iterator()
+	n := 0
+	for it.Next() {
+		n++
+	}
+	if err := it.Err(); err != nil {
+		t.Fatalf("iterate %s: %v", name, err)
+	}
+	return n
 }
 
 // waitTCPState returns the first tcp_state_event that match accepts, or nil
@@ -290,24 +312,18 @@ func checkClosed(t *testing.T, tr *sockTracer, p *loopbackPair, sks ...uint64) {
 	}
 }
 
-// TestSockNonTargetPidNoEvents: with target_map naming another PID, a
-// loopback connection of this process yields no tcp_state record at all.
+// TestSockNonTargetPidNoEvents: with target_map empty, and then naming
+// another PID, a loopback connection of this process yields no tcp_state
+// record at all.
 // A second connection after adding this PID is the positive control: it
 // shows the same tracer would have reported the first one.
 func TestSockNonTargetPidNoEvents(t *testing.T) {
 	requireRoot(t)
 	tr := newSockTracer(t)
 	pid := uint32(os.Getpid())
+	expectNoRecords(t, tr, pid, "empty target_map")
 	tr.setTarget(t, uint32(os.Getppid()), true)
-
-	ignored := dialLoopback(t)
-	ignored.close()
-	stray := tr.waitTCPState(time.Second, func(ev *types.TcpStateEvent) bool {
-		return ev.Pid == pid || ev.Sport == ignored.clientPort || ev.Sport == ignored.serverPort
-	})
-	if stray != nil {
-		t.Fatalf("non-target PID reported: %v", stray)
-	}
+	expectNoRecords(t, tr, pid, "target_map naming another PID")
 
 	tr.setTarget(t, pid, true)
 	p := dialLoopback(t)
@@ -317,4 +333,116 @@ func TestSockNonTargetPidNoEvents(t *testing.T) {
 	}) == nil {
 		t.Fatal("positive control: no record once this PID is a target")
 	}
+}
+
+// expectNoRecords makes a loopback connection that must yield no
+// tcp_state record and no socket registration.
+func expectNoRecords(t *testing.T, tr *sockTracer, pid uint32, phase string) {
+	t.Helper()
+	ignored := dialLoopback(t)
+	ignored.close()
+	stray := tr.waitTCPState(time.Second, func(ev *types.TcpStateEvent) bool {
+		return ev.Pid == pid || ev.Sport == ignored.clientPort || ev.Sport == ignored.serverPort
+	})
+	if stray != nil {
+		t.Fatalf("%s: non-target PID reported: %v", phase, stray)
+	}
+	if n := tr.entries(t, "sock_owner_map"); n != 0 {
+		t.Fatalf("%s: sock_owner_map holds %d entries, want 0", phase, n)
+	}
+}
+
+// TestSockFailedConnectUnregisters: a connect that fails before the kernel
+// sets SYN_SENT (ENETUNREACH for the broadcast address) has no state
+// transition, and neither has the close that follows; the connect exit
+// must drop the registration, or a later socket reusing the freed struct
+// sock's address would be attributed to this pid/fd.
+func TestSockFailedConnectUnregisters(t *testing.T) {
+	requireRoot(t)
+	tr := newSockTracer(t)
+	tr.setTarget(t, uint32(os.Getpid()), true)
+
+	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatalf("socket: %v", err)
+	}
+	err = syscall.Connect(fd, &syscall.SockaddrInet4{Port: 9, Addr: [4]byte{255, 255, 255, 255}})
+	if err != syscall.ENETUNREACH {
+		_ = syscall.Close(fd)
+		t.Fatalf("connect to 255.255.255.255 = %v, want ENETUNREACH (the early-failure path)", err)
+	}
+	if n := tr.entries(t, "sock_owner_map"); n != 0 {
+		t.Errorf("after the failed connect sock_owner_map holds %d entries, want 0", n)
+	}
+	if err := syscall.Close(fd); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if n := tr.entries(t, "sock_owner_map"); n != 0 {
+		t.Errorf("after close sock_owner_map holds %d entries, want 0", n)
+	}
+	if n := tr.entries(t, "connect_sock_map"); n != 0 {
+		t.Errorf("connect_sock_map holds %d entries after the exit, want 0", n)
+	}
+}
+
+// TestSockResetBeforeAcceptNotRegistered: a connection the peer resets while
+// it waits in the accept queue is TCP_CLOSE when accept(2) returns it and
+// never transitions again. Its snapshot is still reported (state
+// TCP_CLOSE), but it must not be registered. The accept is the raw
+// accept(2) syscall, so sys_exit_accept is exercised (Go's own accepts use
+// accept4).
+func TestSockResetBeforeAcceptNotRegistered(t *testing.T) {
+	requireRoot(t)
+	tr := newSockTracer(t)
+	tr.setTarget(t, uint32(os.Getpid()), true)
+	lfd, port := rawListener(t)
+
+	client, err := net.DialTCP("tcp4", nil, &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: int(port)})
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	clientPort := uint32(client.LocalAddr().(*net.TCPAddr).Port)
+	_ = client.SetLinger(0) // close sends RST instead of FIN
+	_ = client.Close()
+	time.Sleep(100 * time.Millisecond) // let the RST reach the queued child
+
+	nfd, _, errno := syscall.Syscall(syscall.SYS_ACCEPT, uintptr(lfd), 0, 0)
+	if errno != 0 {
+		t.Fatalf("accept: %v", errno)
+	}
+	defer func() { _ = syscall.Close(int(nfd)) }()
+	snap := tr.waitTCPState(5*time.Second, func(ev *types.TcpStateEvent) bool {
+		return ev.Oldstate == types.TCP_STATE_SNAPSHOT && ev.Dport == clientPort
+	})
+	if snap == nil {
+		t.Fatal("no accept snapshot from accept(2)")
+	}
+	if snap.Newstate != tcpClose || snap.Fd != int32(nfd) {
+		t.Errorf("snapshot state=%d fd=%d, want TCP_CLOSE fd=%d", snap.Newstate, snap.Fd, nfd)
+	}
+	if n := tr.entries(t, "sock_owner_map"); n != 0 {
+		t.Errorf("sock_owner_map holds %d entries, want 0 (reset child registered?)", n)
+	}
+}
+
+// rawListener returns a listening IPv4 loopback socket made with raw
+// syscalls (closed at cleanup) and its port.
+func rawListener(t *testing.T) (int, uint32) {
+	t.Helper()
+	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatalf("socket: %v", err)
+	}
+	t.Cleanup(func() { _ = syscall.Close(fd) })
+	if err := syscall.Bind(fd, &syscall.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	if err := syscall.Listen(fd, 8); err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	sa, err := syscall.Getsockname(fd)
+	if err != nil {
+		t.Fatalf("getsockname: %v", err)
+	}
+	return fd, uint32(sa.(*syscall.SockaddrInet4).Port)
 }

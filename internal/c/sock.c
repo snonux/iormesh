@@ -16,7 +16,10 @@
 //     pass filter(), register the socket's struct sock address with its
 //     owner (pid, fd) in sock_owner_map (iormesh_sock_on_connect/_accept);
 //   - the tracepoint handler reports only sockets found there, attributed to
-//     the registered owner, and forgets a socket at TCP_CLOSE.
+//     the registered owner, and forgets a socket at TCP_CLOSE; a socket that
+//     is TCP_CLOSE without a transition (a connect failing early, an accept
+//     of a reset connection) is forgotten by the connect exit, or never
+//     registered by the accept exit (see sock_owner_map).
 // The struct sock address is the join key userspace uses to tie the state
 // records to the fd's syscalls: an fd number is reused after close, a socket
 // is the connection itself.
@@ -47,16 +50,36 @@ struct sock_owner {
     __s32 fd;
 };
 
-// sock_owner_map: struct sock address -> owner. LRU, because a registered
-// socket that never reaches TCP_CLOSE while traced (the trace ends first, or
-// the close transition is lost) would otherwise hold its entry forever; the
-// least recently used entries go first, which are the long-idle ones.
+// sock_owner_map: struct sock address -> owner. An entry must not outlive
+// its socket: once the struct sock is freed, the slab can hand its address
+// to a new socket - possibly a non-target's - whose transitions would then be
+// attributed to the old owner. Two removals keep it exact: the TCP_CLOSE
+// transition (handle_inet_sock_set_state), and, for a socket that is
+// already TCP_CLOSE and so never transitions again, its registering call's
+// own exit (iormesh_sock_on_connect_exit, iormesh_sock_on_accept). What is
+// left is a socket still open when the trace ends, or one whose TCP_CLOSE
+// record ran while event_map was full - its delete still runs, so only
+// a lost tracepoint run leaks. LRU bounds those: the least recently used
+// entries, the long-idle ones, go first.
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 65536);
     __type(key, __u64);
     __type(value, struct sock_owner);
 } sock_owner_map SEC(".maps");
+
+// connect_sock_map carries a connect's struct sock from its enter to its
+// exit, by tid, so the exit can check the socket's state without walking a
+// descriptor another thread may have closed or reused meanwhile (the
+// connect itself holds the file, so the socket is alive until the exit).
+// LRU, because an exit that never runs (the tracer detaches mid-call)
+// strands its entry.
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 8192);
+    __type(key, __u32);
+    __type(value, __u64);
+} connect_sock_map SEC(".maps");
 
 // iormesh_file_of_fd returns the current task's file at descriptor fd, or
 // NULL: current->files->fdt->fd[fd], bounds-checked against max_fds before
@@ -158,35 +181,71 @@ static __always_inline void iormesh_read_sk_tuple(struct tcp_state_event *ev, st
     bpf_core_read(ev->daddr, 4, &sk->__sk_common.skc_daddr);
 }
 
+// iormesh_sock_state returns sk's TCP state (TCP_ESTABLISHED ... ).
+static __always_inline int iormesh_sock_state(struct sock *sk) {
+    return BPF_CORE_READ(sk, __sk_common.skc_state);
+}
+
 // iormesh_sock_on_connect is the connect-enter hook (generated handler,
 // internal/generate/sockowner.go). Registering before the call, not after,
 // is what makes the CLOSE -> SYN_SENT transition inside connect and the
-// later SYN_SENT -> ESTABLISHED in softirq visible at all; a connect that
-// fails ends in TCP_CLOSE, which unregisters it again.
-static __always_inline void iormesh_sock_on_connect(__u32 pid, __s32 fd) {
+// later SYN_SENT -> ESTABLISHED in softirq visible at all. The socket is
+// also parked for the exit hook, by tid.
+static __always_inline void iormesh_sock_on_connect(__u32 pid, __u32 tid, __s32 fd) {
     struct sock *sk = iormesh_tcp_sock_of_fd(fd);
+    __u64 key = (__u64)sk;
 
-    if (sk)
-        iormesh_sock_register(sk, pid, fd);
+    if (!sk)
+        return;
+    iormesh_sock_register(sk, pid, fd);
+    bpf_map_update_elem(&connect_sock_map, &tid, &key, BPF_ANY);
+}
+
+// iormesh_sock_on_connect_exit is the connect-exit hook. A connect that
+// fails before tcp_v4_connect/tcp_v6_connect set SYN_SENT (ENETUNREACH,
+// EINVAL, EAFNOSUPPORT, a cgroup BPF EACCES, ...) leaves the socket in
+// TCP_CLOSE with no transition at all, and its later close() is silent too
+// (__tcp_close goes straight to the orphan path when the state is already
+// TCP_CLOSE). Nothing would ever unregister it, so the exit does: a socket
+// still in TCP_CLOSE here is dropped. Every other outcome keeps the entry -
+// EINPROGRESS and EALREADY leave SYN_SENT, success ESTABLISHED, and a
+// refused connect already unregistered itself through its SYN_SENT ->
+// CLOSE transition (the delete here is then a harmless miss).
+static __always_inline void iormesh_sock_on_connect_exit(__u32 tid) {
+    __u64 *parked = bpf_map_lookup_elem(&connect_sock_map, &tid);
+    __u64 key;
+
+    if (!parked)
+        return;
+    key = *parked;
+    bpf_map_delete_elem(&connect_sock_map, &tid);
+    if (iormesh_sock_state((struct sock *)key) == TCP_CLOSE)
+        bpf_map_delete_elem(&sock_owner_map, &key);
 }
 
 // iormesh_sock_on_accept is the accept/accept4-exit hook: ret is the new
-// descriptor. It registers the accepted socket and emits its snapshot.
+// descriptor. It emits the accepted socket's snapshot and registers the
+// socket - unless it is already TCP_CLOSE (the peer reset it while it sat
+// in the accept queue): such a socket never transitions again, so its entry
+// could only outlive it.
 static __always_inline void iormesh_sock_on_accept(__u32 pid, __s64 ret) {
     struct tcp_state_event *ev;
     struct sock *sk;
+    int state;
 
     if (ret < 0 || ret > 0x7fffffff)
         return;
     sk = iormesh_tcp_sock_of_fd((__s32)ret);
     if (!sk)
         return;
-    iormesh_sock_register(sk, pid, (__s32)ret);
+    state = iormesh_sock_state(sk);
+    if (state != TCP_CLOSE)
+        iormesh_sock_register(sk, pid, (__s32)ret);
     ev = iormesh_reserve_tcp_state((__u64)sk, pid, (__s32)ret);
     if (!ev)
         return;
     ev->oldstate = TCP_STATE_SNAPSHOT;
-    ev->newstate = BPF_CORE_READ(sk, __sk_common.skc_state);
+    ev->newstate = state;
     iormesh_read_sk_tuple(ev, sk);
     bpf_ringbuf_submit(ev, 0);
 }

@@ -13,6 +13,8 @@ func RootBPFTests() []string {
 	return []string{
 		"TestSockLoopbackConnectTuple",
 		"TestSockNonTargetPidNoEvents",
+		"TestSockFailedConnectUnregisters",
+		"TestSockResetBeforeAcceptNotRegistered",
 	}
 }
 

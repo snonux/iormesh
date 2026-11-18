@@ -6,8 +6,8 @@ import (
 )
 
 // TestSockOwnerHooksInCommittedHandlers pins where the committed artifact
-// registers TCP sockets (internal/c/sock.c): exactly in the connect enter and
-// the two accept exits, once each, and behind filter() but ahead of the
+// registers and unregisters TCP sockets (internal/c/sock.c): exactly in the
+// connect enter and exit and the two accept exits, once each, and behind filter() but ahead of the
 // per-tid hook - a sampled-out call returns from that hook, and its socket
 // must still be registered or the connection's 4-tuple is never reported.
 func TestSockOwnerHooksInCommittedHandlers(t *testing.T) {
@@ -35,10 +35,10 @@ func TestSockOwnerHooksInCommittedHandlers(t *testing.T) {
 	}
 }
 
-// TestSockOwnerHookOnlyForItsHandlers: the opposite sides of connect and
-// accept, and an unrelated syscall, render no socket registration.
+// TestSockOwnerHookOnlyForItsHandlers: the enter sides of accept and an
+// unrelated syscall render no socket registration.
 func TestSockOwnerHookOnlyForItsHandlers(t *testing.T) {
-	for _, name := range []string{"sys_exit_connect", "sys_enter_accept4", "sys_enter_read"} {
+	for _, name := range []string{"sys_enter_accept", "sys_enter_accept4", "sys_enter_read"} {
 		var b strings.Builder
 		renderSockOwnerHook(&b, name)
 		if b.Len() != 0 {

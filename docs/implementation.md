@@ -273,7 +273,8 @@ wrong type.
 
 A scenario's expectation file sits next to its source in
 `workload/scenarios/<name>/expect.json`. Symbolic ids (`$p1`,
-`$t1`, `$fd1`, `$port1`, `$h1` for hosts) bind on first match;
+`$t1`, `$fd1`, `$port1`, `$h1` for hosts, `$c1` for
+connections) bind on first match;
 the checker then requires consistency.
 
 The shipped `file-basic` golden (write, close, reopen, read):
@@ -533,8 +534,11 @@ scope) call `iormesh_pid_targeted` too.
 `internal/c/sock.c`, included ahead of the generated handlers:
 
 - `sock_owner_map` (LRU hash, 65536): `struct sock *` →
-  `{pid, fd}`. LRU because a socket that never reaches
-  `TCP_CLOSE` while traced would otherwise hold its entry.
+  `{pid, fd}`. An entry must not outlive its socket: slab reuse
+  hands a freed sock's address to the next socket, possibly a
+  non-target's, which would then be attributed to the old
+  owner. LRU only bounds what is left (sockets open when the
+  trace ends, a lost tracepoint run).
 - **connect (active side)**: the generated `sys_enter_connect`
   handler calls `iormesh_sock_on_connect(pid, fd)`, which walks
   fd → `struct file` → `struct socket` → `struct sock`, keeps
@@ -542,6 +546,15 @@ scope) call `iormesh_pid_targeted` too.
   in-syscall `CLOSE → SYN_SENT` (local port still 0) and the
   softirq `SYN_SENT → ESTABLISHED` transition (full 4-tuple —
   the local port the syscall never sees) are both reported.
+  The `sys_exit_connect` handler calls
+  `iormesh_sock_on_connect_exit(tid)` with the sock parked by
+  tid at enter (`connect_sock_map`): a connect failing before
+  `SYN_SENT` (`ENETUNREACH`, `EINVAL`, a cgroup `EACCES`, ...)
+  leaves the sock in `TCP_CLOSE` with no transition, and its
+  `close()` is silent too, so a sock still `TCP_CLOSE` at exit
+  is unregistered there. Chosen over a kprobe/fentry on
+  `__sk_destruct`: it stays on stable tracepoints and costs only
+  target connects instead of every socket free on the host.
 - **accept (passive side)**: the child socket reaches
   `ESTABLISHED` in softirq *before* `accept()` returns, when no
   owner is registered, so that transition is lost. The generated
@@ -549,7 +562,9 @@ scope) call `iormesh_pid_targeted` too.
   `iormesh_sock_on_accept(pid, ret)`: register the returned fd's
   sock and emit a snapshot read straight from `sk->__sk_common`
   (`oldstate = TCP_STATE_SNAPSHOT` (0), `newstate` the socket's
-  current state).
+  current state). A child the peer reset in the accept queue is
+  already `TCP_CLOSE`: it still gets its snapshot but is not
+  registered, since it never transitions again.
 - **`sock:inet_sock_set_state`** (`handle_inet_sock_set_state`):
   TCP only, and only sockets found in `sock_owner_map`. It never
   filters or attributes by the current task — in softirq that is
@@ -584,8 +599,10 @@ and over loopback checks the client's `SYN_SENT → ESTABLISHED`
 tuple and owner fd (Go's `net.Dial` connects non-blocking and
 gets `EINPROGRESS`, like NIO), the accept snapshot's mirrored
 tuple, `TCP_CLOSE` for both sockets with `sock_owner_map`
-emptied, and that a PID outside `target_map` yields nothing
-(with a positive control). The target only counts tests
+emptied; that a connect to 255.255.255.255 (`ENETUNREACH`)
+and a reset child taken by plain `accept(2)` leave
+`sock_owner_map` empty; and that an empty `target_map`, or one
+naming another PID, yields nothing (with a positive control). The target only counts tests
 reported as passed (`gatecmd.RootBPFTests`, pinned by
 `internal/buildgate`). Not covered yet: IPv6, Java processes.
 
@@ -711,6 +728,19 @@ verbatim, so the two never collide:
 - node ids and edge ends get the same symbols
   (`file:$h1:$tmp/a.dat`, `proc:$h1/1@1`, `conn:$c1`); the graph
   is sorted again after rewriting.
+- host-level events (PID 0) keep `pid`, `pid_incarnation` and
+  `tid` 0, so they stay recognizable and a run-specific drop
+  never shifts a process ordinal.
+
+With a bracket the graph is pruned to what the bracketed events
+account for — the graph has no times, so otherwise a JVM
+startup file opened before the begin marker would satisfy a
+declared edge or trip `must_not_appear`. Kept: processes with
+bracketed events and their `runs_on` edges, `opened` edges to a
+file such an event of that process opened (`path` or
+`new_path`), `connected` edges to a connection whose `conn_id`
+such an event carries — so the correlator must set `conn_id` on
+a connection's socket events — and the nodes those name.
 
 Not normalized: event names, comm, flags, byte counts, other
 return values, paths outside `TmpPrefix`, node and edge attrs
@@ -750,7 +780,8 @@ architecture may add `O_CLOEXEC` or `O_LARGEFILE`, while 577's
 read-only open. If no assignment exists, one event violation
 names the deepest declared thread that failed, its first
 missing event and the best candidate's progress. Edges are then
-matched in declared order (an empty declared `state` matches
+matched greedily in declared order (each takes the first fitting
+graph edge, without backtracking) (an empty declared `state` matches
 any) with the bindings the events made — or the best partial
 ones — and finally every string reachable from every event and
 the graph (walked by reflection: JSON escaping would hide a
