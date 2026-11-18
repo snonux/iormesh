@@ -149,6 +149,7 @@ const SYSCALL_RESTART_EVENT = 64
 const FILE_HANDLE_EVENT = 65
 const ENTER_FD_NAME_EVENT = 66
 const RING_FDS_EVENT = 67
+const TCP_STATE_EVENT = 68
 const UNCLASSIFIED = 0
 const READ_CLASSIFIED = 1
 const WRITE_CLASSIFIED = 2
@@ -194,6 +195,9 @@ const RING_FDS_TOO_MANY = 3
 const IOR_FD_NAME_LENGTH = 68
 const RESTART_PHASE_HANDLER = 1
 const RESTART_PHASE_RESUME = 2
+const TCP_STATE_SNAPSHOT = 0
+const TCP_ADDR_LEN = 16
+const TCP_STATE_EVENT_SCHEMA_VERSION = 1
 const SYS_ENTER_SOCKET TraceId = 1899
 const SYS_EXIT_SOCKET TraceId = 1898
 const SYS_ENTER_SOCKETPAIR TraceId = 1897
@@ -3799,4 +3803,72 @@ func (s *SyscallRestartEvent) Bytes() ([]byte, error) {
 
 func (s *SyscallRestartEvent) Recycle() {
 	poolOfSyscallRestartEvents.Put(s)
+}
+
+type TcpStateEvent struct {
+	EventType     EventType
+	SchemaVersion uint32
+	Time          uint64
+	Sk            uint64
+	Pid           uint32
+	Fd            int32
+	Oldstate      int32
+	Newstate      int32
+	Family        uint32
+	Sport         uint32
+	Dport         uint32
+	Reserved      uint32
+	Saddr         [TCP_ADDR_LEN]byte
+	Daddr         [TCP_ADDR_LEN]byte
+}
+
+func (t TcpStateEvent) String() string {
+	return fmt.Sprintf("EventType:%v SchemaVersion:%v Time:%v Sk:%v Pid:%v Fd:%v Oldstate:%v Newstate:%v Family:%v Sport:%v Dport:%v Reserved:%v Saddr:%v Daddr:%v", t.EventType, t.SchemaVersion, t.Time, t.Sk, t.Pid, t.Fd, t.Oldstate, t.Newstate, t.Family, t.Sport, t.Dport, t.Reserved, hex.EncodeToString(t.Saddr[:]), hex.EncodeToString(t.Daddr[:]))
+}
+
+func (t TcpStateEvent) Equals(other any) bool {
+	otherConcrete, ok := other.(*TcpStateEvent)
+	if !ok {
+		return false
+	}
+	return t.EventType == otherConcrete.EventType && t.SchemaVersion == otherConcrete.SchemaVersion && t.Time == otherConcrete.Time && t.Sk == otherConcrete.Sk && t.Pid == otherConcrete.Pid && t.Fd == otherConcrete.Fd && t.Oldstate == otherConcrete.Oldstate && t.Newstate == otherConcrete.Newstate && t.Family == otherConcrete.Family && t.Sport == otherConcrete.Sport && t.Dport == otherConcrete.Dport && t.Reserved == otherConcrete.Reserved && t.Saddr == otherConcrete.Saddr && t.Daddr == otherConcrete.Daddr
+}
+
+func (t *TcpStateEvent) GetEventType() EventType {
+	return t.EventType
+}
+
+func (t *TcpStateEvent) GetPid() uint32 {
+	return t.Pid
+}
+
+func (t *TcpStateEvent) GetTime() uint64 {
+	return t.Time
+}
+
+var poolOfTcpStateEvents = sync.Pool{
+	New: func() any { return &TcpStateEvent{} },
+}
+
+func NewTcpStateEvent(raw []byte) *TcpStateEvent {
+	t := poolOfTcpStateEvents.Get().(*TcpStateEvent)
+	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, t); err != nil {
+		*t = TcpStateEvent{}
+		poolOfTcpStateEvents.Put(t)
+		return nil
+	}
+	return t
+}
+
+func (t *TcpStateEvent) Bytes() ([]byte, error) {
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.LittleEndian, t)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (t *TcpStateEvent) Recycle() {
+	poolOfTcpStateEvents.Put(t)
 }

@@ -1,5 +1,6 @@
 // Adapted from ior internal/c/filter.c @ b21afc50328c.
-// Changes: none.
+// Changes: filter() gates on target_map (iormesh_pid_targeted) instead of
+// the single-TGID rodata PID_FILTER.
 
 //+build ignore
 
@@ -822,29 +823,36 @@ static __always_inline void ior_emit_second_name_fixup(__u32 tid, __u32 enter_tr
     ior_emit_name_fixup(tid, enter_trace_id, filename_ptr, OPEN_NAME_FIXUP_SLOT_SECOND);
 }
 
-// filter() decides whether the current task's syscall is in scope. Today this is
-// a single-TGID gate (PID_FILTER, with -1 meaning trace-all) plus an optional
-// TID_FILTER. ior does NOT follow forks: a traced process's children run under a
-// different TGID and are excluded here, which also means their syscalls miss the
-// aggregate-count path downstream. A planned opt-in process-tree-following mode
-// would extend this gate to also accept descendant TGIDs from a BPF-maintained
-// set seeded with the root PID and updated via sched_process_fork/exit — see
-// docs/follow-forks-plan.md for the full design.
+// iormesh_pid_targeted reports whether tgid is one of the traced processes.
+// ior gated on a single TGID baked into rodata (PID_FILTER, -1 meaning
+// trace-all); iormesh traces several processes per session and, from M2,
+// their children, which a load-time constant cannot express. So the set is a
+// hash map userspace fills before attaching (target_map, maps.h). There is no
+// trace-all value any more: an empty map traces nothing, which is also what a
+// pattern session must do until its first match.
+static __always_inline int iormesh_pid_targeted(__u32 tgid) {
+    return bpf_map_lookup_elem(&target_map, &tgid) != 0;
+}
+
+// filter() decides whether the current task's syscall is in scope: its TGID
+// must be in target_map (iormesh_pid_targeted) and, as in ior, an optional
+// TID_FILTER narrows that to one thread. The tracer's own TGID is excluded
+// first (IOR_PID_FILTER), so a target set that ever named the tracer could
+// not make it trace itself. Children are not followed yet; M2's fork handler
+// will insert them into target_map (docs/implementation.md, M2).
 static __always_inline int filter(__u32 *pid, __u32 *tid) {
     u64 pid_tgid = bpf_get_current_pid_tgid();
     *pid = pid_tgid >> 32;
 
-    // Ignore ior userland process itself
+    // Ignore the tracer's own userland process.
     if (*pid == IOR_PID_FILTER) {
         return FILTER;
     }
-    
-    *tid = pid_tgid & 0xFFFFFFFF;
-    if (-1 == PID_FILTER || *pid == PID_FILTER) {
-        if (-1 == TID_FILTER || *tid == TID_FILTER) {
-            return ACCEPT;
-        }
-    }
 
+    *tid = pid_tgid & 0xFFFFFFFF;
+    if (!iormesh_pid_targeted(*pid))
+        return FILTER;
+    if (-1 == TID_FILTER || *tid == TID_FILTER)
+        return ACCEPT;
     return FILTER;
 }

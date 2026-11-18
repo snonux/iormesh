@@ -1,5 +1,5 @@
 // Adapted from ior internal/c/types.h @ b21afc50328c.
-// Changes: none.
+// Changes: TCP_STATE_EVENT and struct tcp_state_event added (sock.c).
 
 //+build ignore
 
@@ -90,6 +90,9 @@
 // set or released (ior_emit_ring_fds, iouring.c). 66 is ENTER_FD_NAME_EVENT;
 // the ids only have to be distinct, not dense.
 #define RING_FDS_EVENT 67
+// iormesh: a TCP socket's 4-tuple and state, from sock:inet_sock_set_state
+// or from the accept exit (struct tcp_state_event, sock.c).
+#define TCP_STATE_EVENT 68
 
 #define UNCLASSIFIED 0
 #define READ_CLASSIFIED 1
@@ -950,4 +953,45 @@ struct syscall_restart_event {
     __u32 tid;
     __u32 phase;
     __u32 sa_restart;
+};
+
+// tcp_state_event (iormesh, sock.c) reports a TCP socket of a traced process:
+// its 4-tuple and a state transition. The syscalls cannot supply this - a
+// non-blocking (Java NIO) connect returns EINPROGRESS before the local port
+// is even chosen - so the record comes from the socket itself:
+//   - sock:inet_sock_set_state, for every transition of a socket registered
+//     at connect or accept. oldstate/newstate are the kernel's TCP states
+//     (TCP_ESTABLISHED = 1 ... TCP_CLOSE = 7, TCP_SYN_SENT = 2). The
+//     tracepoint also fires in softirq context, so pid and fd are not the
+//     current task's but the socket's registered owner;
+//   - the accept exit, as a snapshot: the accepted socket reached
+//     ESTABLISHED in softirq before anyone could own it, so its transition
+//     was not reported. oldstate is TCP_STATE_SNAPSHOT (0, no TCP state has
+//     it) and newstate the socket's state at accept time.
+// sk is the struct sock address, the join key back to the owner: an fd
+// number can be reused, the socket is the connection. family is AF_INET (2)
+// or AF_INET6 (10); sport/dport are host byte order (sport is the local
+// port, 0 in the CLOSE -> SYN_SENT transition, which precedes the port
+// choice); saddr/daddr are network byte order, an IPv4 address in the first
+// 4 bytes and zeroes after. All scalars are 32/64-bit because the Go type
+// generator maps no 16-bit integers. No implicit padding, 88 bytes.
+#define TCP_STATE_SNAPSHOT 0
+// An address field holds an IPv6 address; IPv4 uses its first 4 bytes.
+#define TCP_ADDR_LEN 16
+#define TCP_STATE_EVENT_SCHEMA_VERSION 1
+struct tcp_state_event {
+    __u32 event_type;
+    __u32 schema_version;
+    __u64 time;
+    __u64 sk;
+    __u32 pid;
+    __s32 fd;
+    __s32 oldstate;
+    __s32 newstate;
+    __u32 family;
+    __u32 sport;
+    __u32 dport;
+    __u32 reserved;
+    __u8 saddr[TCP_ADDR_LEN];
+    __u8 daddr[TCP_ADDR_LEN];
 };

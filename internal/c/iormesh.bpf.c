@@ -1,10 +1,12 @@
 //+build ignore
 
 // Adapted from ior internal/c/ior.bpf.c @ b21afc50328c.
-// Changes: renamed to iormesh.bpf.c; rawsyscall.c not included.
+// Changes: renamed to iormesh.bpf.c; rawsyscall.c not included; bpf_endian.h
+// and sock.c added.
 
 #include "vmlinux.h"
 #include <bpf/bpf_core_read.h>
+#include <bpf/bpf_endian.h>
 #include <bpf/bpf_helpers.h>
 #include "types.h"
 #include "maps.h"
@@ -38,6 +40,11 @@
 // Name of the file a close releases, read through the same walk, used by the
 // generated close handler.
 #include "fdname.c"
+
+// TCP 4-tuples and state transitions from sock:inet_sock_set_state, joined
+// back to pid/fd through the socket registered at connect/accept (iormesh).
+// The generated connect and accept handlers call its hooks.
+#include "sock.c"
 
 // Restart fold: the pending-restart state behind filter.c's enter/exit hooks
 // and its two probes (signal:signal_deliver, a second sys_enter_rt_sigreturn).

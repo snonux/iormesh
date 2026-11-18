@@ -1041,6 +1041,8 @@ int handle_sys_exit_accept4(struct syscall_trace_exit *ctx) {
     if (filter(&pid, &tid))
         return 0;
 
+    iormesh_sock_on_accept(pid, ctx->ret);
+
     __u64 now = bpf_ktime_get_boot_ns();
     if (!ior_on_syscall_exit(tid, SYS_ENTER_ACCEPT4, ctx->ret, now))
         return 0;
@@ -1103,6 +1105,8 @@ int handle_sys_exit_accept(struct syscall_trace_exit *ctx) {
     if (filter(&pid, &tid))
         return 0;
 
+    iormesh_sock_on_accept(pid, ctx->ret);
+
     __u64 now = bpf_ktime_get_boot_ns();
     if (!ior_on_syscall_exit(tid, SYS_ENTER_ACCEPT, ctx->ret, now))
         return 0;
@@ -1133,6 +1137,8 @@ int handle_sys_enter_connect(struct syscall_trace_enter *ctx) {
     __u32 pid, tid;
     if (filter(&pid, &tid))
         return 0;
+
+    iormesh_sock_on_connect(pid, (__s32)ctx->args[0]);
 
     __u64 now = bpf_ktime_get_boot_ns();
     if (!ior_on_syscall_enter(tid, SYS_ENTER_CONNECT, now))

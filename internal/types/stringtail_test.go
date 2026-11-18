@@ -1,5 +1,5 @@
 // Adapted from ior internal/types/stringtail_test.go @ b21afc50328c.
-// Changes: none.
+// Changes: TCP_ADDR_LEN (tcp_state_event addresses) is a binary size.
 
 package types
 
@@ -217,7 +217,7 @@ func TestGeneratedStringShowsAMissingTerminator(t *testing.T) {
 // TestStringBearingEventsListIsComplete fails when generated_types.go gains a
 // struct with a byte-array field that stringBearingEvents does not list. A
 // binary field (binaryFieldSizes: a file handle, the array of a
-// registered-ring record; C __u8 arrays) is not a string: it has no
+// registered-ring record, a TCP address; C __u8 arrays) is not a string: it has no
 // terminator, is zero-filled by BPF and rendered whole, as hex
 // (TestFileHandleFieldRendersAsHex, TestRingFdsFieldRendersAsHex).
 func TestStringBearingEventsListIsComplete(t *testing.T) {
@@ -270,6 +270,8 @@ func TestStringBearingEventsListIsComplete(t *testing.T) {
 var binaryFieldSizes = map[string]bool{
 	"IOR_MAX_HANDLE_SZ":  true,
 	"IOR_RING_FDS_BYTES": true,
+	// iormesh: the IPv4/IPv6 addresses of tcp_state_event.
+	"TCP_ADDR_LEN": true,
 }
 
 // TestRingFdsFieldRendersAsHex: the array of a registered-ring record is

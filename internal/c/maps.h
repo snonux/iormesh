@@ -1,7 +1,19 @@
 // Adapted from ior internal/c/maps.h @ b21afc50328c.
-// Changes: none.
+// Changes: target_map added (replaces ior's rodata PID_FILTER).
 
 //+build ignore
+
+// target_map is the set of TGIDs being traced (filter.c,
+// iormesh_pid_targeted). Userspace inserts the session's target PIDs before it
+// attaches; M2's fork handler will insert their children. The value is unused
+// (a set). 4096 entries leave room for process trees well beyond M1's two
+// processes; a full map makes the insert fail in userspace, never silently.
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, __u32);
+    __type(value, __u8);
+} target_map SEC(".maps");
 
 // event_map is the ring buffer carrying every event to userspace. max_entries
 // is its size in BYTES and must stay equal to config.DefaultEventMapSize

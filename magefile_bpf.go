@@ -4,13 +4,17 @@
 // Changes: only the build, BPF, generate, test, vet, lint, fmt and clean
 // targets (no TUI, demo, bench, parquet, docker or integration targets yet);
 // IOR_FORCE_GENERATE renamed to IORMESH_FORCE_GENERATE; Build compiles every
-// package instead of a binary, since cmd/iormesh lands in M1 step 10.
+// package instead of a binary, since cmd/iormesh lands in M1 step 10;
+// BpfRootTest is ior's runRootLinkTests/runRootTestBinary, reduced to the BPF
+// root tests of ./internal.
 
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,6 +41,7 @@ const (
 	typesHeaderPath      = "internal/c/types.h"
 	vmlinuxPath          = "internal/c/vmlinux.h"
 	forceGenerateEnv     = "IORMESH_FORCE_GENERATE"
+	rootTestBinary       = "iormesh-internal.test"
 )
 
 // Default builds the project.
@@ -67,6 +72,49 @@ func Test() error {
 		return err
 	}
 	return run(gatecmd.TestAll())
+}
+
+// BpfRootTest runs the BPF root tests of ./internal (gatecmd.RootBPFTests)
+// as root: their test binary is built with the cgo environment, run through
+// `sudo -n -E` unless mage already is root, and removed again however the
+// run ends. The exit status alone is not believed - skipped or unmatched
+// tests exit 0 too - so every listed test must be reported as passed.
+func BpfRootTest() (err error) {
+	mg.Deps(BpfBuild)
+	defer func() {
+		err = errors.Join(err, removeFilesByPath(rootTestBinary))
+	}()
+	if err := sh.RunWithV(goEnv(), "go", "test", "-c", "./internal/", "-o", rootTestBinary); err != nil {
+		return err
+	}
+	var output bytes.Buffer
+	if err := runRootTestBinary("internal", io.MultiWriter(os.Stdout, &output), gatecmd.RootBPFTestArgs()...); err != nil {
+		return err
+	}
+	if missing := gatecmd.RootBPFTestsNotPassed(output.String()); len(missing) != 0 {
+		return fmt.Errorf("the test binary exited 0 but did not report these tests as passed: %s",
+			strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+// runRootTestBinary execs rootTestBinary as root in dir, the package
+// directory, as `go test` would. stderr passes through; stdout goes to the
+// caller's writer so the verdicts can be read back.
+func runRootTestBinary(dir string, stdout io.Writer, args ...string) error {
+	binaryPath, err := filepath.Abs(rootTestBinary)
+	if err != nil {
+		return fmt.Errorf("resolve %s: %w", rootTestBinary, err)
+	}
+	argv := append([]string{binaryPath}, args...)
+	if os.Geteuid() != 0 {
+		argv = append([]string{"sudo", "-n", "-E"}, argv...)
+	}
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir = dir
+	cmd.Stdout = stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 // Vet runs go vet over the module with the libbpfgo cgo environment; a bare

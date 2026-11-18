@@ -1,6 +1,8 @@
 // Adapted from ior internal/gatecmd/gatecmd.go @ b21afc50328c.
 // Changes: no unsafeptr exemption (iormesh has no ioworkload), so vet is one
-// pass over ./...; the integration-test root-link argv is not lifted yet.
+// pass over ./...; the integration-test root-link argv is not lifted yet;
+// ior's RootLinkTests trio became RootBPFTests/Args/NotPassed for the BPF
+// root tests of ./internal (rootbpf.go).
 
 // Package gatecmd holds the command lines of the repository's static-analysis
 // gates as data.

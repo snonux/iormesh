@@ -21,8 +21,9 @@ same commit.
 
 Run everything through Mage — `mage generate`, `mage build`,
 `mage test`, `mage vet`, `mage lint`, `mage fmtCheck`,
-`mage workloadTest`. Bare `go test`/`go vet` cannot build the
-packages that import libbpfgo. Prerequisites (libbpfgo at
+`mage workloadTest`, `mage bpfRootTest` (root, `sudo -n`). Bare
+`go test`/`go vet` cannot build the packages that import
+libbpfgo. Prerequisites (libbpfgo at
 `../libbpfgo`, pinned tag, clang, bpftool, `sudo -n`) and the
 generation-host rule are in [docs/build.md](docs/build.md);
 ior's AGENTS.md ("Build/Test Commands", "Code Generation") is

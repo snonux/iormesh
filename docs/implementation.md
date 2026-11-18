@@ -480,9 +480,10 @@ changes in a provenance header):
   build needs the tracer binary of step 10; deployed binaries
   need it by M4).
 
-Regenerating on the generation host reproduces ior's committed
-artifacts byte for byte, so `mage generate` passes its diff gate
-with ior's full syscall set.
+Regenerating on the generation host reproduced ior's committed
+artifacts byte for byte (since step 4 they differ only by the
+socket hooks and `tcp_state_event`), so `mage generate` passes
+its diff gate with ior's full syscall set.
 
 **Step 2 — narrow the attach set, not the generator** (done).
 The generated handlers stay for all syscalls; only attachment
@@ -495,14 +496,13 @@ regex (which, as in ior, alone decides then), exactly these
 attach; an explicit selector replaces the set, a `-no-trace-*`
 one narrows it. Nothing attaches yet — the loader is step 5.
 
-**Step 3 — the target filter becomes a map.** ior filters on one
-TGID baked into rodata (`PID_FILTER`, `internal/c/filter.c`).
-iormesh needs several targets now and a process tree in M2, so
-the gate is a hash map userspace fills:
+**Step 3 — the target filter becomes a map** (done). ior
+filters on one TGID baked into rodata (`PID_FILTER`). iormesh
+needs several targets now and a process tree in M2, so the gate
+is a hash map userspace fills before it attaches:
 
 ```c
-// maps.h — tgids being traced. Userspace inserts the session's
-// targets; M2's fork handler inserts their children.
+// maps.h — tgids being traced (a set; the value is unused).
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 4096);
@@ -510,97 +510,80 @@ struct {
     __type(value, __u8);
 } target_map SEC(".maps");
 
-// filter.c — returns FILTER for tasks outside the traced set.
-static __always_inline int filter(__u32 *pid, __u32 *tid) {
-    __u64 id = bpf_get_current_pid_tgid();
-    *pid = id >> 32;
-    *tid = (__u32)id;
-    return bpf_map_lookup_elem(&target_map, pid) ? ACCEPT : FILTER;
+// filter.c
+static __always_inline int iormesh_pid_targeted(__u32 tgid) {
+    return bpf_map_lookup_elem(&target_map, &tgid) != 0;
 }
 ```
 
-Keep ior's own-PID exclusion (`IOR_PID_FILTER`) so the tracer
-never traces itself.
+`filter()` checks ior's own-PID exclusion (`IOR_PID_FILTER`,
+so the tracer never traces itself) first, then
+`iormesh_pid_targeted`, then ior's optional `TID_FILTER`. The
+`PID_FILTER` rodata is gone, and with it ior's "-1 traces all":
+an empty map traces nothing, which is also what a pattern
+session needs until its first match. `exec.c`'s two direct
+`PID_FILTER` tests (exec record scope, `task_newtask` child
+scope) call `iormesh_pid_targeted` too.
 
-**Step 4 — TCP 4-tuples from the socket.** New file
-`internal/c/sock.c`. Three pieces:
+**Step 4 — TCP 4-tuples from the socket** (done). New file
+`internal/c/sock.c`, included ahead of the generated handlers:
 
-```c
-// sock_owner_map: which traced process and fd a socket belongs
-// to. Filled at connect-enter and accept-exit; the state
-// tracepoint only reports sockets found here.
-struct sock_owner { __u32 tgid; __s32 fd; };
-struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __uint(max_entries, 65536);
-    __type(key, __u64);                 // struct sock *
-    __type(value, struct sock_owner);
-} sock_owner_map SEC(".maps");
-
-struct tcp_state_event {
-    __u32 event_type;       // TCP_STATE_EVENT
-    __u32 schema_version;
-    __u64 time;             // bpf_ktime_get_boot_ns()
-    __u64 sk;               // join key back to pid/fd
-    __u32 tgid;
-    __s32 fd;
-    __s32 oldstate, newstate;
-    __u16 family, sport, dport, _pad;
-    __u8  saddr[16], daddr[16];   // v4 in the first 4 bytes
-};
-
-SEC("tracepoint/sock/inet_sock_set_state")
-int handle_inet_sock_set_state(
-        struct trace_event_raw_inet_sock_set_state *ctx) {
-    if (ctx->protocol != IPPROTO_TCP)
-        return 0;
-    // This tracepoint also fires in softirq context, where
-    // "current" is whichever task was interrupted. Never filter
-    // or attribute by current here — only by the socket.
-    __u64 sk = (__u64)ctx->skaddr;
-    struct sock_owner *owner = bpf_map_lookup_elem(&sock_owner_map, &sk);
-    if (!owner)
-        return 0;
-    struct tcp_state_event *ev =
-        bpf_ringbuf_reserve(&event_map, sizeof(*ev), 0);
-    if (!ev) {
-        ior_count_ringbuf_drop();
-        return 0;
-    }
-    ev->event_type = TCP_STATE_EVENT;
-    ev->schema_version = TCP_STATE_EVENT_SCHEMA_VERSION;
-    ev->time = bpf_ktime_get_boot_ns();
-    ev->sk = sk;
-    ev->tgid = owner->tgid;
-    ev->fd = owner->fd;
-    ev->oldstate = ctx->oldstate;
-    ev->newstate = ctx->newstate;
-    ev->family = ctx->family;
-    ev->sport = ctx->sport;
-    ev->dport = ctx->dport;
-    iormesh_copy_addrs(ev, ctx);     // v4 or v6 by family
-    bpf_ringbuf_submit(ev, 0);
-    if (ctx->newstate == TCP_CLOSE)
-        bpf_map_delete_elem(&sock_owner_map, &sk);
-    return 0;
-}
-```
-
-- **connect (active side)**: in the `connect` enter hook, resolve
-  fd → `struct file` → `struct socket` → `struct sock` (ior's
-  `fdname.c` already walks fd → file and recognizes sockets;
-  extend it with `iormesh_fd_to_sock`) and insert into
-  `sock_owner_map`. The `SYN_SENT → ESTABLISHED` transition then
-  delivers the full 4-tuple, including the local port the syscall
-  never sees.
+- `sock_owner_map` (LRU hash, 65536): `struct sock *` →
+  `{pid, fd}`. LRU because a socket that never reaches
+  `TCP_CLOSE` while traced would otherwise hold its entry.
+- **connect (active side)**: the generated `sys_enter_connect`
+  handler calls `iormesh_sock_on_connect(pid, fd)`, which walks
+  fd → `struct file` → `struct socket` → `struct sock`, keeps
+  only IPv4/IPv6 TCP sockets and registers the owner. Then the
+  in-syscall `CLOSE → SYN_SENT` (local port still 0) and the
+  softirq `SYN_SENT → ESTABLISHED` transition (full 4-tuple —
+  the local port the syscall never sees) are both reported.
 - **accept (passive side)**: the child socket reaches
-  `ESTABLISHED` in softirq *before* `accept()` returns, so no
-  owner is registered yet and the transition is not reported. In
-  the `accept`/`accept4` exit hook, resolve the returned fd to its
-  sock, insert the owner, and read the tuple straight from
-  `sk->__sk_common` (`skc_rcv_saddr`, `skc_daddr`, `skc_num`,
-  `skc_dport`, v6 equivalents) into a `tcp_state_event` with
-  `newstate = TCP_ESTABLISHED`.
+  `ESTABLISHED` in softirq *before* `accept()` returns, when no
+  owner is registered, so that transition is lost. The generated
+  `sys_exit_accept`/`sys_exit_accept4` handlers call
+  `iormesh_sock_on_accept(pid, ret)`: register the returned fd's
+  sock and emit a snapshot read straight from `sk->__sk_common`
+  (`oldstate = TCP_STATE_SNAPSHOT` (0), `newstate` the socket's
+  current state).
+- **`sock:inet_sock_set_state`** (`handle_inet_sock_set_state`):
+  TCP only, and only sockets found in `sock_owner_map`. It never
+  filters or attributes by the current task — in softirq that is
+  whichever task was interrupted — only by the socket. On
+  `TCP_CLOSE` the entry is deleted, since the next socket may
+  reuse the address.
+- The fd → sock walk uses `BPF_CORE_READ` probe reads, not
+  `fileident.c`'s typed walk: connect and accept are rare, and
+  the probe reads work without the `bpf_rdonly_cast` kfunc
+  (kernels before 6.2). `sk_protocol` is read as a probed
+  bitfield (it was one before 5.6).
+- The hooks are emitted by the generator
+  (`internal/generate/sockowner.go`) right behind `filter()` and
+  ahead of the per-tid hook, so a sampled-out call still
+  registers its socket.
+
+The record is `struct tcp_state_event` in `types.h` (88 bytes,
+generated into `types.TcpStateEvent`): `event_type`
+(`TCP_STATE_EVENT`, 68), `schema_version`, `time`, `sk` (the
+join key — fd numbers are reused, the socket is the
+connection), owner `pid`/`fd`, `oldstate`/`newstate`,
+`family`, `sport`/`dport` (host order, `sport` local), and
+`saddr`/`daddr` (16 bytes, network order, IPv4 in the first 4).
+Every scalar is 32/64-bit because the Go type generator maps no
+16-bit integers.
+
+Tested by `mage bpfRootTest` (root, via `sudo -n`): the test
+binary of `./internal` (`internal/sock_root_test.go`) loads the
+whole object, attaches only the connect/accept handlers and the
+state tracepoint with libbpfgo directly (the loader is step 5),
+and over loopback checks the client's `SYN_SENT → ESTABLISHED`
+tuple and owner fd (Go's `net.Dial` connects non-blocking and
+gets `EINPROGRESS`, like NIO), the accept snapshot's mirrored
+tuple, `TCP_CLOSE` for both sockets with `sock_owner_map`
+emptied, and that a PID outside `target_map` yields nothing
+(with a positive control). The target only counts tests
+reported as passed (`gatecmd.RootBPFTests`, pinned by
+`internal/buildgate`). Not covered yet: IPv6, Java processes.
 
 **Step 5 — loader and ring buffer** (`internal/bpf`, cgo): lift
 ior's module load, attach and ring-buffer poll

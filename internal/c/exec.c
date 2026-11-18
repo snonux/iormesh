@@ -1,5 +1,5 @@
 // Adapted from ior internal/c/exec.c @ b21afc50328c.
-// Changes: none.
+// Changes: the PID_FILTER tests are iormesh_pid_targeted (target_map).
 
 //+build ignore
 
@@ -123,14 +123,15 @@ enum ior_exec_scope {
 // sched_process_exit record, with a narrower key: it is not "some thread of
 // the traced process" but the traced thread itself, identified exactly by
 // old_tid == TID_FILTER (tid reuse aside, the same ambiguity filter() has).
-// PID_FILTER still applies, so -pid P -tid T never emits for a T outside P.
+// The target set still applies, so -pid P -tid T never emits for a T
+// outside P.
 static __always_inline enum ior_exec_scope
 ior_exec_record_scope(int in_scope, __u32 pid, __u32 old_tid) {
     if (in_scope)
         return IOR_EXEC_IN_SCOPE;
     if (-1 == TID_FILTER || old_tid != TID_FILTER)
         return IOR_EXEC_OUT_OF_SCOPE;
-    if (-1 != PID_FILTER && pid != PID_FILTER)
+    if (!iormesh_pid_targeted(pid))
         return IOR_EXEC_OUT_OF_SCOPE;
     return IOR_EXEC_CALLER_TRACED;
 }
@@ -292,7 +293,7 @@ ior_exit_group_dead(void *raw_ctx) {
 // thread.
 //
 // The bypass is scoped to TID_FILTER_TGID, the traced thread's process, which
-// userspace resolves at setup (PID_FILTER when -pid is also given, else
+// userspace resolves at setup (the target when -pid is also given, else
 // /proc/<tid>/status; see tidFilterTgid in internal/bpfsetup.go). An unscoped
 // bypass would emit a record for every process death on the system under
 // -tid without -pid. When the tgid is unresolved (-1) no pid matches, so
@@ -524,7 +525,7 @@ static __always_inline int
 ior_task_in_scope(__u32 child_pid, __u32 child_tid) {
     if (child_pid == IOR_PID_FILTER)
         return 0;
-    if (-1 != PID_FILTER && child_pid != PID_FILTER)
+    if (!iormesh_pid_targeted(child_pid))
         return 0;
     if (-1 != TID_FILTER && child_tid != TID_FILTER)
         return 0;

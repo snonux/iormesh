@@ -55,6 +55,7 @@ mage lint          # golangci-lint: errcheck + staticcheck SA
 mage fmt / fmtCheck
 mage clean         # keeps vmlinux.h (it needs root to recreate)
 mage workloadTest  # the Java workload, standalone (M0)
+mage bpfRootTest   # BPF load + TCP tuple tests as root (sudo -n)
 ```
 
 Run Go commands through Mage: bare `go test ./...` or
@@ -62,7 +63,9 @@ Run Go commands through Mage: bare `go test ./...` or
 because only Mage sets `CGO_CFLAGS`/`CGO_LDFLAGS`.
 
 - **Generation host**: the committed artifacts were generated on
-  Linux 7.2 and match ior's byte for byte. On a kernel with
+  Linux 7.2 and match ior's byte for byte but for iormesh's
+  additions (the socket hooks of connect/accept, step 4's
+  `tcp_state_event`). On a kernel with
   another tracepoint set `mage generate` stops at the diff of
   `internal/c/generated_tracepoints_result.txt` without touching
   the tree; `IORMESH_FORCE_GENERATE=1` adopts the new set (for

@@ -1,5 +1,5 @@
 // Adapted from ior internal/generate/bpfhandler.go @ b21afc50328c.
-// Changes: none.
+// Changes: the prologue calls renderSockOwnerHook (sockowner.go).
 
 package generate
 
@@ -205,7 +205,8 @@ func enterConstForHandler(name string, isEnter bool) string {
 }
 
 // renderHandlerPrologue writes everything ahead of the ring-buffer reserve: the
-// scope gate, the per-tid enter/exit hook (for io_uring_register with its
+// scope gate, the TCP socket registration of connect and accept
+// (renderSockOwnerHook), the per-tid enter/exit hook (for io_uring_register with its
 // registered-ring capture around it, renderRingFdsHook), and - for the
 // path-capturing kinds and the output-path and output-handle syscalls
 // (outputPathSyscalls, outputHandleSyscalls) only - the stash/take/emit of a
@@ -229,6 +230,7 @@ func renderHandlerPrologue(b *strings.Builder, h handlerSpec) {
 	b.WriteString("    if (filter(&pid, &tid))\n")
 	b.WriteString("        return 0;\n")
 	b.WriteString("\n")
+	renderSockOwnerHook(b, name)
 	renderSyscallHook(b, h)
 	b.WriteString("\n")
 	renderPendingFilenameUse(b, h)
