@@ -40,10 +40,14 @@ fexit:vmlinux:inet_csk_accept
 {
     $sk = retval;
     $ns = $sk->__sk_common.skc_net.net->ns.inum;
-    if (($ns == $1 || $ns == $2) && $sk->__sk_common.skc_num == $4) {
+    // No port filter here: a child reset while still in the accept queue
+    // has gone through TCP_CLOSE, whose inet_put_port zeroed skc_num, yet
+    // accept() still returns it (reuse-rst phase). The two namespaces carry
+    // only the rig's traffic, so the netns filter is enough.
+    if ($ns == $1 || $ns == $2) {
         $tp = (struct tcp_sock *)retval;
-        printf("ev=accept ns=%u sk=%p t=%llu old=-1 new=-1 src=%s:%d dst=%s:%d snd_una=%u rcv_nxt=%u bytes_acked=%llu bytes_received=%llu write_seq=%u\n",
-            $ns, $sk, nsecs,
+        printf("ev=accept ns=%u sk=%p t=%llu old=-1 new=-1 state=%d src=%s:%d dst=%s:%d snd_una=%u rcv_nxt=%u bytes_acked=%llu bytes_received=%llu write_seq=%u\n",
+            $ns, $sk, nsecs, $sk->__sk_common.skc_state,
             ntop(2, $sk->__sk_common.skc_rcv_saddr),
             $sk->__sk_common.skc_num,
             ntop(2, $sk->__sk_common.skc_daddr),

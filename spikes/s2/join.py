@@ -50,14 +50,18 @@ def connections(events):
     a socket enters SYN_SENT (from CLOSE) or SYN_RECV (a child cloned from
     the listener, so old=LISTEN). struct sock addresses are recycled, so
     the address alone is not a connection."""
-    open_conn, conns = {}, []
+    open_conn, last, conns = {}, {}, []
     for e in events:
         key = (e["ns"], e["sk"])
         if e["new"] in (2, 3):
-            open_conn[key] = {"ns": e["ns"], "events": []}
+            open_conn[key] = last[key] = {"ns": e["ns"], "events": []}
             conns.append(open_conn[key])
         if key in open_conn:
             open_conn[key]["events"].append(e)
+        elif e["new"] == -1 and key in last:
+            # accept() of a child that was reset in the accept queue: its
+            # TCP_CLOSE came first, the accept still belongs to it.
+            last[key]["events"].append(e)
         if e["new"] == 7:
             open_conn.pop(key, None)
     for c in conns:
@@ -112,12 +116,32 @@ def truth(path):
     return pairs
 
 
-def true_pair(c, truths):
-    """The (own iss, peer iss) the pcap shows for this connection's
-    tuple, or the candidates if the tuple was reused."""
-    if c["role"] == "client":
-        return truths["A"].get((c["src"], c["dst"]), [])
-    return [(r, i) for i, r in truths["B"].get((c["dst"], c["src"]), [])]
+def assign_truth(conns, truths):
+    """Gives each connection the (own iss, peer iss) the pcap shows for it.
+    A reused tuple has several SYNs; the k-th connection on a tuple (in
+    event time order) gets the k-th distinct SYN of that tuple, so a
+    derivation must hit its own connection's pair, not any of them."""
+    seen = collections.Counter()
+    for c in sorted(conns, key=lambda c: c["t"]):
+        if c["role"] == "client":
+            key = ("A", c["src"], c["dst"])
+            pairs = truths["A"].get((c["src"], c["dst"]), [])
+        else:
+            key = ("B", c["dst"], c["src"])
+            pairs = [(r, i) for i, r in
+                     truths["B"].get((c["dst"], c["src"]), [])]
+        k = seen[key]
+        seen[key] += 1
+        c["truth"] = pairs[k] if k < len(pairs) else None
+
+
+def pcap_seq_equal(truths, out):
+    """NAT must leave sequence numbers alone: every (SYN seq, SYN-ACK seq)
+    pair hostA saw must also appear in hostB's capture."""
+    a = [p for ps in truths["A"].values() for p in ps]
+    b = {p for ps in truths["B"].values() for p in ps}
+    out.append(f"pcap seq pairs hostA found in hostB: "
+               f"{sum(p in b for p in a)}/{len(a)}")
 
 
 def check_methods(conns, truths, out):
@@ -125,18 +149,17 @@ def check_methods(conns, truths, out):
     the true one."""
     score = collections.defaultdict(lambda: [0, 0])
     for c in conns:
-        cands = set(true_pair(c, truths))
         for e in c["events"]:
             ev = f"{STATE.get(e['old'])}->{STATE.get(e['new'])}"
             for name, p in derive(e, c["role"]).items():
                 s = score[(c["mode"], c["role"], ev, name)]
-                s[0] += p in cands
+                s[0] += p == c["truth"]
                 s[1] += 1
     out.append("ISN derivation vs tcpdump (ok/total) per mode, role, "
                "event, method:")
     for k in sorted(score):
         ok, n = score[k]
-        out.append(f"  {k[0]:5} {k[1]:6} {k[2]:24} {k[3]:7} {ok}/{n}")
+        out.append(f"  {k[0]:9} {k[1]:6} {k[2]:24} {k[3]:7} {ok}/{n}")
 
 
 def key_at_owner(c):
@@ -191,42 +214,77 @@ def ct_dump(path):
 
 def ct_join(conns, cts, dump, out):
     """Client tuple == conntrack original, server tuple reversed ==
-    conntrack reply; ambiguity counted where an original tuple maps to
-    more than one inserted entry."""
+    conntrack reply. Three ways: by original tuple alone (ambiguous where a
+    tuple was reused), by tuple plus order (the k-th connection on a tuple
+    takes the k-th insert - stands in for a time-window match, which across
+    hosts needs clock reconciliation), and against the /proc snapshot read
+    at the end of the pass."""
     inserts = collections.defaultdict(list)
     for ct in cts:
         inserts[ct["orig"]].append(ct)
-    ok = amb = miss = right = 0
-    for c in (c for c in conns if c["role"] == "client"):
-        hits = inserts.get(f"{c['src']}>{c['dst']}", [])
+    snap = {orig: reply for orig, reply, _ in dump}
+    ok = amb = miss = ordered = snap_ok = snap_wrong = snap_gone = 0
+    seen = collections.Counter()
+    clients = sorted((c for c in conns if c["role"] == "client"),
+                     key=lambda c: c["t"])
+    for c in clients:
+        orig = f"{c['src']}>{c['dst']}"
+        hits = inserts.get(orig, [])
         ok += len(hits) == 1
         amb += len(hits) > 1
         miss += not hits
+        k = seen[orig]
+        seen[orig] += 1
         p = c.get("isn_peer")
-        if len(hits) >= 1 and p:
-            right += hits[-1]["reply"] == f"{p['src']}>{p['dst']}"
+        if not p:
+            continue
+        server = f"{p['src']}>{p['dst']}"
+        ordered += k < len(hits) and hits[k]["reply"] == server
+        if orig not in snap:
+            snap_gone += 1
+        elif snap[orig] == server:
+            snap_ok += 1
+        else:
+            snap_wrong += 1
     out.append(f"conntrack inserts (confirm events in nat): {len(cts)}")
-    out.append(f"conntrack-insert join: unique={ok} ambiguous={amb} "
-               f"missing={miss}; reply tuple agrees with ISN join={right}")
+    out.append(f"conntrack-insert join by tuple: unique={ok} ambiguous={amb} "
+               f"missing={miss}; by tuple+order agreeing with ISN "
+               f"join={ordered}")
     out.append(f"/proc/net/nf_conntrack at end: {len(dump)} entries "
-               f"(states {dict(collections.Counter(r[2] for r in dump))})")
-    seq_ok = sum(1 for c in conns if c["role"] == "client" and
-                 c.get("isn_peer") and any(
-                     (int(ct["td_end0"]) - 1) % M32 == key_at_owner(c)[0]
-                     for ct in inserts.get(f"{c['src']}>{c['dst']}", [])))
+               f"(states {dict(collections.Counter(r[2] for r in dump))}); "
+               f"snapshot join vs ISN join: agree={snap_ok} "
+               f"wrong-server={snap_wrong} no-entry={snap_gone}")
+    seq_ok = sum(1 for c in clients if c.get("isn_peer") and any(
+        (int(ct["td_end0"]) - 1) % M32 == key_at_owner(c)[0]
+        for ct in inserts.get(f"{c['src']}>{c['dst']}", [])))
     out.append(f"conntrack td_end0-1 == client iss (non-TFO expected): "
                f"{seq_ok}")
 
 
+def isn_deltas(conns, out):
+    """ISN steps between consecutive connections of a reused tuple: on the
+    TIME_WAIT path the client's new ISN is the old snd_nxt + 65537, on the
+    RST path both sides draw from the clock."""
+    for mode in ("reuse-tw", "reuse-rst"):
+        cl = sorted((c for c in conns if c["mode"] == mode and
+                     c["role"] == "client" and c["isn_peer"]),
+                    key=lambda c: c["t"])
+        ci = [key_at_owner(c)[0] for c in cl]
+        si = [key_at_owner(c["isn_peer"])[0] for c in cl]
+        d = lambda xs: [(b - a) % M32 for a, b in zip(xs, xs[1:])]
+        out.append(f"{mode} ISN deltas: client {d(ci)} server {d(si)}")
+
+
 def tag_modes(conns):
-    """Labels connections by workload phase: reuse uses source port 45678,
-    TFO is the last 6 client connections (rig.sh runs plain, reuse, tfo in
-    that order); servers inherit the label through the ISN join later."""
+    """Labels connections by workload phase: reuse-tw uses source port
+    45678, reuse-rst 45679, TFO is the last 6 client connections (rig.sh
+    runs it last); servers inherit the label through the ISN join later."""
     clients = [c for c in conns if c["role"] == "client"]
     for c in conns:
         c["mode"] = "?"
     for i, c in enumerate(clients):
-        c["mode"] = ("reuse" if c["src"].endswith(":45678") else
+        c["mode"] = ("reuse-tw" if c["src"].endswith(":45678") else
+                     "reuse-rst" if c["src"].endswith(":45679") else
                      "tfo" if i >= len(clients) - 6 else "plain")
 
 
@@ -237,6 +295,9 @@ def tfo_evidence(d, out):
             if "Flags [S]," in line and not line.rstrip().endswith(
                 "length 0"))
     out.append(f"client SYNs with payload (TFO): {n}")
+    for side in ("hostA", "hostB"):
+        rst = sum(1 for _ in open(f"{d}/{side}.rst.txt"))
+        out.append(f"RST packets in {side} capture: {rst}")
 
 
 def main(d):
@@ -246,11 +307,14 @@ def main(d):
     truths = {"A": truth(f"{d}/hostA.syn.txt"),
               "B": truth(f"{d}/hostB.syn.txt")}
     out = []
+    pcap_seq_equal(truths, out)
     isn_join(conns, out)
     for c in conns:
         if c["role"] == "client" and c["isn_peer"]:
             c["isn_peer"]["mode"] = c["mode"]
+    assign_truth(conns, truths)
     check_methods(conns, truths, out)
+    isn_deltas(conns, out)
     ct_join(conns, cts, ct_dump(f"{d}/conntrack.txt"), out)
     tfo_evidence(d, out)
     print("\n".join(out))

@@ -8,7 +8,8 @@
 # 10.0.2.254 with a random port, so no address or port of the connection is
 # the same on both ends. For each pass the script runs isn.bt (ISN state on
 # both ends, conntrack inserts in s2nat), tcpdump on both ends (ground truth
-# for the ISNs), and the workload (plain, port-reuse and TFO connections),
+# for the ISNs), and the workload (plain, TIME_WAIT-reuse, RST-reuse and TFO
+# connections),
 # dumps /proc/net/nf_conntrack from s2nat, then runs join.py over it all.
 #
 # Usage: sudo -n spikes/s2/rig.sh OUTDIR
@@ -143,6 +144,8 @@ rig::capture_stop() {
     for side in hostA hostB; do
         tcpdump -r "$out/$side.pcap" -nn -S -tt \
             'tcp[tcpflags] & tcp-syn != 0' >"$out/$side.syn.txt" 2>/dev/null
+        tcpdump -r "$out/$side.pcap" -nn -S -tt \
+            'tcp[tcpflags] & tcp-rst != 0' >"$out/$side.rst.txt" 2>/dev/null
     done
 }
 
@@ -155,7 +158,7 @@ rig::pass() {
     rig::nat "$pass"
     rig::capture_start "$out"
     local mode
-    for mode in plain:12 reuse:6 tfo:6; do
+    for mode in plain:12 reuse-tw:6 reuse-rst:6 tfo:6; do
         ip netns exec "$NS_A" python3 "$HERE/workload.py" client \
             "$VIP" "$PORT" "${mode%%:*}" "${mode##*:}"
     done

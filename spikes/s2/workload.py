@@ -13,9 +13,18 @@ server PORT
 
 client HOST PORT MODE COUNT
     MODE plain: COUNT connections with varying request sizes, normal close.
-    MODE reuse: COUNT connections all from the same source port, closed with
-        SO_LINGER 0 (RST, no TIME_WAIT) so the port is free at once - the
-        4-tuple repeats within milliseconds, the ISN pair must not.
+    MODE reuse-tw: COUNT connections all from source port 45678 with the
+        normal FIN close. The client closes first, so each connection ends
+        in TIME_WAIT on the client; the next connect from the same port
+        takes the tuple over through the kernel's TIME_WAIT reuse
+        (tcp_twsk_unique), which sets the new ISN to the old connection's
+        snd_nxt + 65535 + 2 instead of drawing it from the clock. No RST is
+        sent (setting SO_LINGER 0 after the FIN exchange, as the first
+        version did, changes nothing).
+    MODE reuse-rst: COUNT connections all from source port 45679, aborted
+        with SO_LINGER 0 right after the request (no shutdown), so close()
+        sends an RST and leaves no TIME_WAIT; the next connect gets a fresh
+        clock-based ISN for the same tuple.
     MODE tfo:   COUNT connections with MSG_FASTOPEN; the first one fetches the
         cookie, the rest carry the request in the SYN.
 """
@@ -26,7 +35,9 @@ import time
 
 ACCEPT_DELAY = 0.05
 SIZES = [0, 1, 100, 1460, 5000, 65536]
-REUSE_PORT = 45678
+REUSE_TW_PORT = 45678
+REUSE_RST_PORT = 45679
+LINGER_0 = b"\x01\x00\x00\x00\x00\x00\x00\x00"
 
 
 def serve(port):
@@ -40,13 +51,20 @@ def serve(port):
         time.sleep(ACCEPT_DELAY)
         conn, _ = ls.accept()
         with conn:
-            n = 0
-            while True:
-                chunk = conn.recv(65536)
-                if not chunk:
-                    break
-                n += len(chunk)
-            conn.sendall(b"r" * min(n, 4096))
+            try:
+                _answer(conn)
+            except (ConnectionResetError, BrokenPipeError):
+                pass  # reuse-rst clients abort before the answer
+
+
+def _answer(conn):
+    n = 0
+    while True:
+        chunk = conn.recv(65536)
+        if not chunk:
+            break
+        n += len(chunk)
+    conn.sendall(b"r" * min(n, 4096))
 
 
 def _exchange(s, size, sent=0):
@@ -64,17 +82,29 @@ def plain(host, port, count):
             _exchange(s, SIZES[i % len(SIZES)])
 
 
-def reuse(host, port, count):
+def _bound(port):
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(("0.0.0.0", port))
+    return s
+
+
+def reuse_tw(host, port, count):
     for i in range(count):
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind(("0.0.0.0", REUSE_PORT))
+        with _bound(REUSE_TW_PORT) as s:
+            s.connect((host, port))
+            _exchange(s, SIZES[i % len(SIZES)])
+
+
+def reuse_rst(host, port, count):
+    for i in range(count):
+        s = _bound(REUSE_RST_PORT)
         s.connect((host, port))
-        _exchange(s, SIZES[i % len(SIZES)])
-        # SO_LINGER {on, 0}: close sends RST, the port skips TIME_WAIT.
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
-                     b"\x01\x00\x00\x00\x00\x00\x00\x00")
+        s.sendall(b"q" * SIZES[i % len(SIZES)])
+        # SO_LINGER {on, 0} before any FIN: close() aborts with an RST.
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, LINGER_0)
         s.close()
+        time.sleep(0.1)  # let the server drain its accept before the next
 
 
 def tfo(host, port, count):
@@ -91,7 +121,8 @@ def main(argv):
         serve(int(argv[2]))
         return
     host, port, mode, count = argv[2], int(argv[3]), argv[4], int(argv[5])
-    {"plain": plain, "reuse": reuse, "tfo": tfo}[mode](host, port, count)
+    {"plain": plain, "reuse-tw": reuse_tw, "reuse-rst": reuse_rst,
+     "tfo": tfo}[mode](host, port, count)
 
 
 if __name__ == "__main__":
