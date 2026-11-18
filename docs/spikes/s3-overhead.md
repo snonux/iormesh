@@ -55,8 +55,9 @@ the ring buffer.
   event at 1, 4 and 16 threads (utime + stime of the tracer,
   minus the median CPU of the idle-target tracer as the fixed
   cost of loading and attaching the object). The fixed cost is
-  half to three quarters of a traced run's CPU, so single runs
-  span 1.5–23 µs per event; the medians are the usable figure.
+  38–93 % of a traced run's CPU (medians about half to three
+  quarters), so single runs span 1.5–23 µs per event; the
+  medians are the usable figure.
   At ~10 µs an event, one core sustains ~100 k events/s; the
   burst issues ~0.7–1.4 M records/s per thread. The consumer is
   the bottleneck; where its time goes is not profiled yet (task

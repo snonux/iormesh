@@ -47,11 +47,12 @@ forget() {
     pids=("${keep[@]}")
 }
 
+# newdir creates a work dir and registers it for cleanup. It sets the
+# global $work instead of printing it: called as $(newdir) it would run
+# in a subshell and the registration would never reach the trap.
 newdir() {
-    local d
-    d=$(mktemp -d) || die "mktemp failed"
-    dirs+=("$d")
-    printf '%s\n' "$d"
+    work=$(mktemp -d) || die "mktemp failed"
+    dirs+=("$work")
 }
 
 done_dir() {
@@ -102,7 +103,7 @@ elapsed_of() {
 
 untraced() {
     local t=$1 work
-    work=$(newdir)
+    newdir
     java -jar "$jar" syscall-burst --ops "$ops" --threads "$t" --dir "$work" >"$work/out" 2>/dev/null ||
         die "untraced burst failed"
     echo "mode=untraced threads=$t ops=$ops elapsed_ns=$(elapsed_of "$work/out")" >>"$samples"
@@ -114,7 +115,7 @@ untraced() {
 # child, so time wraps the tracer itself).
 traced() {
     local t=$1 work pid tpid jpid
-    work=$(newdir)
+    newdir
     IORMESH_WORKLOAD_STARTUP_FILE=$work/gate java -jar "$jar" syscall-burst --ops "$ops" \
         --threads "$t" --dir "$work" >"$work/out" 2>/dev/null &
     jpid=$!
@@ -153,7 +154,7 @@ traced_line() {
 # "a short burst loses nothing" observation come from this line.
 volume() {
     local vops=${S3_VOLUME_OPS:-50000} work pid tpid jpid f z3 z19
-    work=$(newdir)
+    newdir
     IORMESH_WORKLOAD_STARTUP_FILE=$work/gate java -jar "$jar" syscall-burst --ops "$vops" \
         --threads 1 --dir "$work" >"$work/out" 2>/dev/null &
     jpid=$!
@@ -182,7 +183,7 @@ volume() {
 # filter it out. The difference to untraced is the host-wide tax.
 bystander() {
     local t=$1 work idle tpid
-    work=$(newdir)
+    newdir
     sleep 600 &
     idle=$!
     pids+=("$idle")
