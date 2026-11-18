@@ -206,6 +206,9 @@ func TestHostEventValidateRejects(t *testing.T) {
 		"session empty kernel":    {KindSession, func(e *Event) { e.Session.Kernel = "" }},
 		"session empty arch":      {KindSession, func(e *Event) { e.Session.Arch = "" }},
 		"session object on end":   {KindEnd, func(e *Event) { e.Session = validSession() }},
+		"lost on end":             {KindEnd, func(e *Event) { e.Args.Lost = ptr(uint64(1)) }},
+		"end_reason on drop":      {KindDrop, func(e *Event) { e.Args.EndReason = ptr(EndStop) }},
+		"lost on session":         {KindSession, func(e *Event) { e.Args.Lost = ptr(uint64(1)) }},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -263,9 +266,12 @@ func TestEventValidateAcceptsEveryKind(t *testing.T) {
 		e.Args.Path = ptr("/x")
 		e.Args.Marker = ptr("s/begin")
 		e.Args.SockState = ptr("TCP_ESTABLISHED")
-		e.Args.Lost = ptr(uint64(1))
-		e.Args.EndReason = ptr(EndStop)
-		if k == KindSession {
+		switch k {
+		case KindDrop:
+			e.Args.Lost = ptr(uint64(1))
+		case KindEnd:
+			e.Args.EndReason = ptr(EndStop)
+		case KindSession:
 			e.Session = validSession()
 		}
 		if err := e.Validate(); err != nil {

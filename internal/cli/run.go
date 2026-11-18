@@ -168,42 +168,57 @@ func traceLoop(ctx context.Context, tr tracer, c *correlate.Correlator, cfg runC
 				return schema.EndError, err
 			}
 		case <-ctx.Done():
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return schema.EndDuration, nil
-			}
-			return schema.EndStop, nil
+			return ctxReason(ctx), nil
 		case <-tick.C:
 			if _, err := pollLosses(tr, c); err != nil {
 				return schema.EndError, err
 			}
 			if !anyAlive(cfg.pids) {
-				if err := drainQuiet(ctx, tr, c); err != nil {
-					return schema.EndError, err
-				}
-				return schema.EndTargetsExited, nil
+				return drainQuiet(ctx, tr, c)
 			}
 		}
 	}
 }
 
-// drainQuiet handles records until none arrives for quietFor, or the
-// duration or a signal ends the run first.
-func drainQuiet(ctx context.Context, tr tracer, c *correlate.Correlator) error {
+// drainQuiet handles records until none arrives for quietFor and
+// returns targets_exited — unless the duration or a signal ends the run
+// first, which then is the reason, since the drain was cut short. It
+// keeps polling the loss counters, so a gap in the targets' last records
+// still gets its drop event within a poll interval.
+func drainQuiet(ctx context.Context, tr tracer, c *correlate.Correlator) (string, error) {
+	tick := time.NewTicker(liveCheckEvery)
+	defer tick.Stop()
+	quiet := time.NewTimer(quietFor)
+	defer quiet.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return ctxReason(ctx), nil
 		case rec, ok := <-tr.Records():
 			if !ok {
-				return nil
+				return schema.EndError, errors.New("record stream closed unexpectedly")
 			}
 			if err := c.Handle(rec); err != nil {
-				return err
+				return schema.EndError, err
 			}
-		case <-time.After(quietFor):
-			return nil
+			quiet.Reset(quietFor)
+		case <-tick.C:
+			if _, err := pollLosses(tr, c); err != nil {
+				return schema.EndError, err
+			}
+		case <-quiet.C:
+			return schema.EndTargetsExited, nil
 		}
 	}
+}
+
+// ctxReason is the end reason of a run whose context is done: its
+// duration bound expired, or a signal cancelled it.
+func ctxReason(ctx context.Context) string {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return schema.EndDuration
+	}
+	return schema.EndStop
 }
 
 func anyAlive(pids []uint32) bool {

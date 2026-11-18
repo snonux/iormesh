@@ -33,6 +33,14 @@ func (e Event) Validate() error {
 	if (e.Event == KindSession) != (e.Session != nil) {
 		return invalidf("session object on a %s event (set exactly on session events)", e.Event)
 	}
+	// The host-level args belong to their kind alone: a lost count on a
+	// read, say, would make "sum args.lost" over a trace lie.
+	if e.Args.Lost != nil && e.Event != KindDrop {
+		return invalidf("args.lost on a %s event (drop only)", e.Event)
+	}
+	if e.Args.EndReason != nil && e.Event != KindEnd {
+		return invalidf("args.end_reason on a %s event (end only)", e.Event)
+	}
 	return e.validateKindArgs()
 }
 

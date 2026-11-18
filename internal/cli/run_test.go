@@ -142,8 +142,8 @@ func liveUntilExit(t *testing.T) func() {
 
 // TestRunWritesSessionDropsEnd drives the loop and finish with a fake
 // tracer: records, loss growth seen on a tick, the targets exiting and
-// loss that only the final read after the loop sees. The file must read back strictly as
-// session, events, drops, end — in gap-free seq order.
+// loss that only the final read after the loop sees. The file must read
+// back strictly as session, events, drops, end — in gap-free seq order.
 func TestRunWritesSessionDropsEnd(t *testing.T) {
 	exitAll := liveUntilExit(t)
 	dir := t.TempDir()
@@ -154,6 +154,10 @@ func TestRunWritesSessionDropsEnd(t *testing.T) {
 	tr.setLosses(bpf.Losses{Kernel: 3}, nil)
 	go func() {
 		time.Sleep(liveCheckEvery + liveCheckEvery/2) // one tick sees the 3 losses
+		// A record after that tick: the drop must precede it, which only
+		// the loop's own poll achieves (the drain polls only later).
+		tr.records <- &types.FdEvent{EventType: types.ENTER_FD_EVENT, TraceId: types.SYS_ENTER_READ, Time: 3, Pid: 10, Tid: 10}
+		tr.records <- &types.RetEvent{EventType: types.EXIT_RET_EVENT, TraceId: types.SYS_EXIT_READ, Time: 4, Pid: 10, Tid: 10, Ret: 1}
 		exitAll()
 	}()
 	cfg := runConfig{pids: []uint32{10}, out: dir, duration: time.Minute}
@@ -167,25 +171,75 @@ func TestRunWritesSessionDropsEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	events := readEvents(t, dir)
-	got := kinds(events)
-	if !strings.HasPrefix(got, "session,read,drop") || !strings.HasSuffix(got, "drop,end") {
-		t.Fatalf("event kinds %s: want session, read, drop … drop, end", got)
+	if got := kinds(events); got != "session,read,drop,read,drop,end" {
+		t.Fatalf("event kinds %s: want session,read,drop,read,drop,end", got)
 	}
-	var lost uint64
-	for _, e := range events {
-		if e.Event == schema.KindDrop {
-			lost += *e.Args.Lost
-		}
+	// 3 from the in-loop poll, then 1 from finish's: one drop of 4, or a
+	// drop behind the second read, would mean the loop never polled.
+	if a, b := *events[2].Args.Lost, *events[4].Args.Lost; a != 3 || b != 1 {
+		t.Fatalf("drops lost %d then %d, want 3 then 1", a, b)
 	}
 	end := events[len(events)-1]
-	if lost != 4 || *end.Args.EndReason != schema.EndTargetsExited || !tr.closed {
-		t.Fatalf("lost %d (want 4), end %q, tracer closed %v", lost, *end.Args.EndReason, tr.closed)
+	if *end.Args.EndReason != schema.EndTargetsExited || !tr.closed {
+		t.Fatalf("end %q, tracer closed %v", *end.Args.EndReason, tr.closed)
 	}
 	if _, err := os.Stat(filepath.Join(dir, GraphFile)); err != nil {
 		t.Fatalf("graph not written: %v", err)
 	}
 	if !strings.Contains(stderr.String(), "stopped (targets_exited); lost records 4") {
 		t.Fatalf("summary %q", stderr.String())
+	}
+}
+
+// failSink rejects every event, like an NDJSON sink whose disk is full.
+type failSink struct{}
+
+func (failSink) Event(schema.Event) error { return errors.New("disk full") }
+func (failSink) Close() error             { return nil }
+
+// TestTraceLoopWriteError: a sink error stops the loop at once with end
+// reason error and returns the error.
+func TestTraceLoopWriteError(t *testing.T) {
+	fakeProcs(t, 10)
+	tr := newFakeTracer()
+	c := correlate.New(correlate.Config{Host: correlate.Host{ID: "h", Project: "p"}, Sink: failSink{},
+		ProcInfo: func(uint32) (string, uint64) { return "x", 1 }})
+	tr.records <- &types.FdEvent{EventType: types.ENTER_FD_EVENT, TraceId: types.SYS_ENTER_READ, Time: 1, Pid: 10, Tid: 10}
+	tr.records <- &types.RetEvent{EventType: types.EXIT_RET_EVENT, TraceId: types.SYS_EXIT_READ, Time: 2, Pid: 10, Tid: 10, Ret: 1}
+	reason, err := traceLoop(context.Background(), tr, c, runConfig{pids: []uint32{10}, duration: time.Hour})
+	if reason != schema.EndError || err == nil {
+		t.Fatalf("traceLoop = %q, %v; want error and a non-nil error", reason, err)
+	}
+}
+
+// TestDrainQuiet: the drain ends targets_exited once quiet, still polls
+// losses while it waits, and reports a signal or the duration that cut it
+// short as the reason instead.
+func TestDrainQuiet(t *testing.T) {
+	dir := t.TempDir()
+	tr := newFakeTracer()
+	tr.setLosses(bpf.Losses{Kernel: 2}, nil)
+	c := testCorrelator(t, dir)
+	reason, err := drainQuiet(context.Background(), tr, c)
+	if reason != schema.EndTargetsExited || err != nil {
+		t.Fatalf("drainQuiet = %q, %v; want targets_exited", reason, err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	events := readEvents(t, dir)
+	if got := kinds(events); got != "session,drop" || *events[1].Args.Lost != 2 {
+		t.Fatalf("kinds %s: want the drain's poll to write drop lost 2", got)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if reason, _ := drainQuiet(cancelled, newFakeTracer(), testCorrelator(t, t.TempDir())); reason != schema.EndStop {
+		t.Fatalf("signal during drain: %q, want stop", reason)
+	}
+	expired, cancel2 := context.WithTimeout(context.Background(), 0)
+	defer cancel2()
+	if reason, _ := drainQuiet(expired, newFakeTracer(), testCorrelator(t, t.TempDir())); reason != schema.EndDuration {
+		t.Fatalf("duration during drain: %q, want duration", reason)
 	}
 }
 

@@ -137,18 +137,21 @@ stays gap-free.
 - **`drop`** reports loss: `args.lost` records — kernel
   ring-buffer reservations that failed plus records that arrived
   undecodable — since the previous `drop`. `iormesh run` polls
-  the counters every 200ms and once more at the end, so a `drop`
-  follows its gap within a poll interval; it is never written
-  with `lost` 0. No `drop` event means no loss was counted.
+  the counters every 200ms — also while it drains the targets'
+  last records — and once more just before it detaches, so a
+  `drop` follows its gap within a poll interval; it is never
+  written with `lost` 0. No `drop` event means no loss was
+  counted. Records lost after that last poll, while the probes
+  detach, are counted nowhere (a known M1 limit).
 - **`end`** is the last event; `args.end_reason` is one of:
 
   | Reason | Meaning |
   |--------|---------|
   | `duration` | the `-duration` bound was reached |
-  | `stop` | SIGINT/SIGTERM — a user or controller stop |
-  | `targets_exited` | every traced process exited (the stream was drained until quiet) |
+  | `stop` | SIGINT/SIGTERM — a user or controller stop, also one that cuts the final drain short |
+  | `targets_exited` | every traced process exited and the stream was drained until quiet |
   | `disk_limit` | the trace disk budget ran out (M4) |
-  | `error` | the tracer failed — lost its record stream or could not read its loss counters; the trace is incomplete |
+  | `error` | the tracer failed — an events-file write error, the ready file could not be created, the record stream closed, or the loss counters could not be read; the trace is incomplete |
 
   A trace **without** an `end` event was cut short: the tracer
   crashed, or a write error also lost the end record.

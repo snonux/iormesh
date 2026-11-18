@@ -891,12 +891,13 @@ files, plus one negative case per rule.
   counters to stderr. The stream opens with a `session` header
   (boot id, FQDN, kernel release, arch — gathered before the
   trace directory is touched), gets a `drop` event whenever the
-  loss counters grew (polled on the 200ms liveness tick and once
-  after the loop, before the tracer closes) and closes with an
-  `end` event: `duration`, `stop` (signal), `targets_exited`, or
-  `error` (write error, record stream closed, unreadable loss
-  counters — the last also stops the run, since drops must never
-  be silent). Loading the object takes seconds, so
+  loss counters grew (polled on the 200ms tick, during the final
+  drain too, and once after the loop, before the tracer closes)
+  and closes with an `end` event: `duration`, `stop` (signal —
+  also one that cuts the drain short), `targets_exited`, or
+  `error` (write error, ready file, record stream closed,
+  unreadable loss counters — the last also stops the run, since
+  drops must never be silent). Loading the object takes seconds, so
   `-ready FILE` is created once every probe is attached — a
   harness waits for it before releasing the target's startup
   gate. Flags are validated (pids positive, distinct, running;

@@ -16,9 +16,9 @@ import (
 var update = flag.Bool("update", false, "rewrite testdata goldens")
 
 // TestExportGolden runs a fixed record stream (session header, file work,
-// a drop, a fused loopback connection, end) through the correlator into the real NDJSON sink
-// and graph writer, and compares both outputs byte for byte with the
-// committed goldens. It pins the export format end to end: field order,
+// a drop, a fused loopback connection, end) through the correlator into
+// the real NDJSON sink and graph writer, and compares both outputs byte
+// for byte with the committed goldens. It pins the export format end to end: field order,
 // conn ids, fd generations, graph order.
 func TestExportGolden(t *testing.T) {
 	var events bytes.Buffer
