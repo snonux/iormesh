@@ -414,7 +414,10 @@ dependencies either.
    - `file-basic`: create a temp file, write 4096 bytes, read them
      back, close. Uses `FileOutputStream`/`FileInputStream`.
    - `tcp-loopback`: `--role server` binds `127.0.0.1:<port>`,
-     accepts one connection, reads 5 bytes, writes 5 bytes;
+     accepts one connection, reads 5 bytes, writes 5 bytes, then
+     reads until the client's EOF before closing (so the client
+     always closes first and the TCP teardown is the same in every
+     run — M1 step 11);
      `--role client` connects, writes, reads. Each side also runs
      `file-basic`'s file work, so both PIDs have file edges.
      Use `java.net.Socket` on a platform thread — virtual threads
@@ -486,8 +489,7 @@ changes in a provenance header):
   ban) and `.golangci.yml`.
 - `vmlinux.h` is dumped from the build host's BTF on first
   `mage bpfBuild` and gitignored, as in ior.
-- Not lifted yet: `IntegrationTest*` (step 11, with the
-  harness) and `scripts/build-with-docker.sh` (the container
+- Not lifted yet: `scripts/build-with-docker.sh` (the container
   build needs the tracer binary of step 10; deployed binaries
   need it by M4).
 
@@ -913,37 +915,41 @@ two-process `tcp-loopback` scenarios, traced with `-ready` gating,
 pass `normalize -check` against their goldens — one fused
 connection for the JVM pair.
 
-**Step 11 — integration harness**: lift
-`integrationtests/harness.go`, `parse.go`, `kernelloss.go`,
-`unexercised.go`, `kernel_support_test.go` and the `gatecmd`
-runner from ior; swap `ioworkload` for `java -jar workload.jar`.
-One test:
+**Step 11 — integration harness** (done; `mage integrationTest`):
+`integrationtests/` lifts ior's `harness.go`, `parse.go`,
+`kernelloss.go`, `unexercised.go`, `kernel_support_test.go` and
+the judged-run helpers, and `internal/gatecmd/integration.go`
+plus `magefile_integration.go` lift the runner and its gate, with
+`ioworkload` swapped for `java -jar workload.jar` and ior's
+`.ior.zst` for the trace directory `iormesh run` writes. The
+details and the test table are in docs/testing.md. The test as
+built:
 
 ```go
 func TestWalkingSkeleton(t *testing.T) {
+    enableParallelIfRequested(t)
     h := newHarness(t)
-    port := h.FreePort() // both start before either runs
-    server := h.StartWorkload("tcp-loopback", "--role", "server",
-        "--port", port)
-    client := h.StartWorkload("tcp-loopback", "--role", "client",
-        "--port", port)
-    // Releases the server, then the client once the server printed
-    // its "listening" line.
-    trace := h.Trace(server.PID, client.PID) // a normalize.Trace
-    got, err := normalize.Normalize(trace,
-        normalize.Options{Bracket: "tcp-loopback", TmpPrefix: h.Tmp})
-    if err != nil {
-        t.Fatal(err)
-    }
-    for _, v := range normalize.Check(got,
-        h.Expectation("tcp-loopback")) {
-        t.Error(v)
-    }
-    if n := countEdges(trace.Graph, "connected", "fused"); n != 2 {
-        t.Fatalf("want one fused connection (2 edges), got %d", n)
-    }
+    // Starts server and client on a free port behind their gates,
+    // traces both PIDs, releases the server, then the client once
+    // the server printed "listening"; re-runs on kernel loss.
+    run := traceJudged(t, h, startTCPPair(t))
+    assertOnlyTracedPIDs(t, run.Trace.Events, run.pids)
+    got := normalized(t, h, run, "tcp-loopback")
+    want := expectation(t, "tcp-loopback")
+    assertGolden(t, got, want) // normalize.Check, each violation
+    // one socket node; two connected edges, fused, one per PID
+    assertOneFusedConnection(t, run.Trace.Graph, run.pids)
+    // plus: mutated goldens must fail the check
 }
 ```
+
+Beside it: `TestFileBasic`, `TestUntracedProcessStaysOut` (an
+untraced twin leaves nothing) and
+`TestSecondRunNormalizesIdentically` (two runs per scenario,
+normalized inside the bracket, equal per process — see
+docs/testing.md for why per process). That last check made the
+tcp-loopback server wait for the client's EOF before closing:
+the racing closes traced different TCP teardowns run to run.
 
 **Done when**: PLAN.md's M1 acceptance holds;
 `mage integrationTest` passes ten times in a row; a second

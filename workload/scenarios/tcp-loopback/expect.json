@@ -19,6 +19,8 @@
     "bytes": 5},
    {"process": "$p1", "thread": "$t1", "event": "write", "fd": "$fd3",
     "bytes": 5},
+   {"process": "$p1", "thread": "$t1", "event": "read", "fd": "$fd3",
+    "bytes": 0},
    {"process": "$p1", "thread": "$t1", "event": "close", "fd": "$fd3"},
 
    {"process": "$p2", "thread": "$t2", "event": "openat",

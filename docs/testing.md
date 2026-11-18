@@ -75,3 +75,59 @@ trace family, kernel-support probes with explained skips,
 loss-honest re-runs, unexercised-skip markers, and pass gates
 that do not trust exit codes. See PLAN.md, "Integration tests —
 follow ior" for the full map.
+
+### The suite today (M1)
+
+`integrationtests/` drives the real tracer binary (`./iormesh
+run`) against the real workload (`java -jar workload.jar`) and
+reads the trace directory it writes. Each lifted file names its
+ior source and what changed:
+
+- `harness.go` + `process.go` — start workloads behind their
+  startup gate (PID first on stdout), start `iormesh run -pid
+  … -ready FILE`, wait for the ready file, release the
+  workloads in order (the tcp-loopback client only once the
+  server printed `listening`), wait for all of them and for the
+  tracer's drain, and read the trace. Every wait is bounded.
+- `parse.go` — `events.ndjson` + `graph.json`, read strictly.
+- `kernelloss.go` — parses the tracer's exit summary line; a run
+  whose kernel lost records is re-run (three attempts), and a
+  test whose every run lost records skips with the
+  unexercised marker (`unexercised.go`) instead of passing.
+  Undecodable records fail at once: they are a decoder bug.
+- `kernel_support_test.go` — the tests skip unless tracefs shows
+  every tracepoint M1 attaches to; a probe that cannot find them
+  as root fails, so a blind probe never turns the suite green.
+
+The tests:
+
+| Test | Asserts |
+|---|---|
+| `TestWalkingSkeleton` | tcp-loopback golden; exactly one fused connection (two `connected` edges, both fused, to one socket node, one from each PID); mutated goldens fail |
+| `TestFileBasic` | file-basic golden; mutated goldens fail |
+| `TestUntracedProcessStaysOut` | a released but untraced twin leaves no event and no node |
+| `TestSecondRunNormalizesIdentically` | two runs of each scenario, normalized and bracketed, are equal |
+
+The repeat check is exact per process: two processes running at
+once interleave in the host-wide sequence as the scheduler
+decides, and seq and the clocks are that rank after
+normalization, so the comparison drops those three fields and
+keeps each process's events in its own order. Everything else
+must match — which is why tcp-loopback's server waits for the
+client's EOF before it closes: closing right after its reply
+raced the client's close, and the traced TCP teardown (a
+simultaneous close through `CLOSING`, or not) differed between
+runs.
+
+`mage integrationTest` builds the tracer, the workload jar and
+the test binary (`integrationtests.test` at the repo root, for a
+scoped sudoers rule, as in ior), runs it as root with `sudo -n
+-E` from `integrationtests/`, in parallel
+(`INTEGRATION_PARALLEL`, default min(NumCPU, 2)) with
+`-test.failfast`; `mage integrationTestSerial` runs one test at
+a time. The binary runs with `-test.v`, and the target fails
+unless every test in `gatecmd.IntegrationTests()` printed
+`--- PASS` — a skip is no pass. Skips caused by kernel loss are
+summarized at the end. `internal/buildgate` keeps that list
+equal to the tests the package declares. Set `IORMESH_IT_KEEP=DIR`
+to keep a failed test's trace directories.

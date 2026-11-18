@@ -161,7 +161,8 @@ func (r run) graph(procs []proc, files []string, conn bool) schema.Graph {
 }
 
 // tcpLoopback builds a raw two-process tcp-loopback trace: the server
-// starts first, the client's bracket overlaps the server's, and the
+// starts first, the client's bracket overlaps the server's, the server
+// waits for the client's EOF before it closes, and the
 // dual-stack JVM reports loopback as ::ffff:127.0.0.1.
 func tcpLoopback(r run) Trace {
 	b := &traceBuilder{r: r}
@@ -178,10 +179,13 @@ func tcpLoopback(r run) Trace {
 	b.io(s, s.tid, schema.KindRead, r.serverAccFD, 3, 5)
 	b.io(s, s.tid, schema.KindWrite, r.serverAccFD, 3, 5)
 	b.io(c, c.tid, schema.KindRead, 6, 2, 5)
-	b.close(s, r.serverAccFD, 3)
-	b.marker(s, "tcp-loopback", "end")
 	b.close(c, 6, 2)
 	b.marker(c, "tcp-loopback", "end")
+	// The server closes only after reading the client's EOF, so the
+	// client always closes first (the workload's deterministic teardown).
+	b.io(s, s.tid, schema.KindRead, r.serverAccFD, 3, 0)
+	b.close(s, r.serverAccFD, 3)
+	b.marker(s, "tcp-loopback", "end")
 	return Trace{Events: b.events, Graph: r.graph([]proc{s, c},
 		[]string{"tcp-loopback-server.dat", "tcp-loopback-client.dat"}, true)}
 }

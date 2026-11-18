@@ -43,6 +43,14 @@ func RootBPFTestArgs() []string {
 // A verdict counts only at the start of a line, where the testing package
 // prints that of a top-level test; a subtest's is indented.
 func RootBPFTestsNotPassed(output string) []string {
+	return notPassed(output, RootBPFTests())
+}
+
+// notPassed returns the tests of names that output, the -test.v output of
+// a test binary, does not report as passed. Shared by the root BPF tests
+// and the integration tests (integration.go): both gates believe only a
+// "--- PASS" line, never the exit status.
+func notPassed(output string, names []string) []string {
 	passed := map[string]bool{}
 	for line := range strings.SplitSeq(output, "\n") {
 		if rest, ok := strings.CutPrefix(line, "--- PASS: "); ok {
@@ -51,7 +59,7 @@ func RootBPFTestsNotPassed(output string) []string {
 		}
 	}
 	var missing []string
-	for _, name := range RootBPFTests() {
+	for _, name := range names {
 		if !passed[name] {
 			missing = append(missing, name)
 		}

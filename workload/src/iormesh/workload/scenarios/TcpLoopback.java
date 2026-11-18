@@ -19,7 +19,8 @@ import java.util.Set;
  * (file "tcp-loopback-&lt;role&gt;.dat"), so both PIDs get file edges.
  *
  * <pre>
- *   --role server [--port N] [--dir D]   bind, accept one, read 5, write 5
+ *   --role server [--port N] [--dir D]   bind, accept one, read 5, write 5,
+ *                                        wait for the client's EOF
  *   --role client  --port N  [--dir D]   connect, write 5, read 5
  * </pre>
  *
@@ -114,11 +115,23 @@ public final class TcpLoopback implements Scenario {
         return listener;
     }
 
-    /** Accepts one connection, reads PING, answers PONG. */
+    /**
+     * Accepts one connection, reads PING, answers PONG, then waits for the
+     * client's EOF before closing. Closing right after PONG raced the
+     * client's close: sometimes both FINs crossed (a simultaneous close,
+     * TCP state CLOSING), sometimes not (FIN_WAIT2), so two runs traced
+     * different socket state transitions. With the client always closing
+     * first, the teardown is the same in every run (M1 acceptance: a
+     * second normalized run diffs empty inside the bracket).
+     */
     private static void serve(ServerSocket listener) throws IOException {
         try (Socket conn = listener.accept()) {
-            expect(conn.getInputStream(), PING);
+            InputStream in = conn.getInputStream();
+            expect(in, PING);
             conn.getOutputStream().write(PONG);
+            if (in.read() != -1) {
+                throw new IOException("want EOF after pong, got more data");
+            }
         }
     }
 

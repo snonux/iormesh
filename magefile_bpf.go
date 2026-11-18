@@ -2,7 +2,8 @@
 
 // Adapted from ior Magefile.go @ b21afc50328c.
 // Changes: only the build, BPF, generate, test, vet, lint, fmt and clean
-// targets (no TUI, demo, bench, parquet, docker or integration targets yet);
+// targets (no TUI, demo, bench, parquet or docker targets; the integration
+// targets are in magefile_integration.go);
 // IOR_FORCE_GENERATE renamed to IORMESH_FORCE_GENERATE; Build compiles every
 // package instead of a binary, since cmd/iormesh lands in M1 step 10;
 // BpfRootTest is ior's runRootLinkTests/runRootTestBinary, reduced to the BPF
@@ -92,7 +93,7 @@ func BpfRootTest() (err error) {
 		return err
 	}
 	var output bytes.Buffer
-	if err := runRootTestBinary("internal", io.MultiWriter(os.Stdout, &output), gatecmd.RootBPFTestArgs()...); err != nil {
+	if err := runRootTestBinary(rootTestBinary, "internal", io.MultiWriter(os.Stdout, &output), gatecmd.RootBPFTestArgs()...); err != nil {
 		return err
 	}
 	if missing := gatecmd.RootBPFTestsNotPassed(output.String()); len(missing) != 0 {
@@ -102,13 +103,15 @@ func BpfRootTest() (err error) {
 	return nil
 }
 
-// runRootTestBinary execs rootTestBinary as root in dir, the package
-// directory, as `go test` would. stderr passes through; stdout goes to the
-// caller's writer so the verdicts can be read back.
-func runRootTestBinary(dir string, stdout io.Writer, args ...string) error {
-	binaryPath, err := filepath.Abs(rootTestBinary)
+// runRootTestBinary execs the test binary at binary (relative to the repo
+// root) as root in dir, the package directory, as `go test` would. stderr
+// passes through; stdout goes to the caller's writer so the verdicts can be
+// read back. BpfRootTest and the integration targets
+// (magefile_integration.go) share it.
+func runRootTestBinary(binary, dir string, stdout io.Writer, args ...string) error {
+	binaryPath, err := filepath.Abs(binary)
 	if err != nil {
-		return fmt.Errorf("resolve %s: %w", rootTestBinary, err)
+		return fmt.Errorf("resolve %s: %w", binary, err)
 	}
 	argv := append([]string{binaryPath}, args...)
 	if os.Geteuid() != 0 {
