@@ -129,6 +129,22 @@ func (p *process) wait(timeout time.Duration) error {
 	}
 }
 
+// waitStderr polls the child's stderr until it contains substr; the
+// child exiting first, or the timeout, is an error carrying its stderr.
+func (p *process) waitStderr(substr string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for !strings.Contains(p.stderr.String(), substr) {
+		if p.exited() {
+			return p.failure(fmt.Sprintf("exited before printing %q", substr))
+		}
+		if time.Now().After(deadline) {
+			return p.failure(fmt.Sprintf("printed no %q within %v", substr, timeout))
+		}
+		time.Sleep(readyPoll)
+	}
+	return nil
+}
+
 // exited reports whether the child has been reaped.
 func (p *process) exited() bool {
 	select {

@@ -15,7 +15,11 @@ package integrationtests
 // (Harness.NativeStacks, M2 step 9). A workload exiting
 // with the skip code 3 ends the run with ErrWorkloadSkipped. A gated
 // workload may also be a Go helper binary speaking the same gate protocol
-// (StartHelper, workload/edgepeer), optionally held on its stdin.
+// (StartHelper, workload/edgepeer), optionally held on its stdin. A run
+// may also live-load the agent into JVMs started without it
+// (Harness.AttachAgent, task ge4): by the tracer at start (-agent) or by
+// `iormesh attach` from a Midway step between the workloads' release and
+// their exit, on a chosen JDK (Harness.Java) and user (Credential).
 
 import (
 	"errors"
@@ -24,8 +28,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"iormesh/internal/normalize"
@@ -46,6 +52,9 @@ const (
 	runTimeout     = 60 * time.Second
 	tracerDuration = "90s"
 	readyPoll      = 50 * time.Millisecond
+	// attachTimeout bounds `iormesh attach`: S1 measured a fraction of a
+	// second; a loaded host may take several.
+	attachTimeout = 20 * time.Second
 
 	bpfObjectOverrideEnv   = "IORMESH_BPF_OBJECT"
 	workloadStartupFileEnv = "IORMESH_WORKLOAD_STARTUP_FILE"
@@ -90,6 +99,24 @@ type Harness struct {
 	// creates it — and the tracer gives it its mode.
 	JavaAgent string
 	Spool     string
+	// AttachAgent, when set, is iormesh-agent.jar for a live attach
+	// (decision #2, task ge4): the workloads start without -javaagent,
+	// the tracer runs with -spool Spool (which it creates), and the agent
+	// is loaded by the tracer at start when AgentAtStart is set (-agent),
+	// or by the test (Attach) otherwise.
+	AttachAgent  string
+	AgentAtStart bool
+	// Midway, when set, runs after Trace released the workloads and
+	// before it waits for them: a live attach in the middle of a
+	// scenario. tracer is the running `iormesh run`.
+	Midway func(tracer *process) error
+	// Java is the java binary the workloads run on; "" is the one on
+	// PATH. JVMFlags go before -jar.
+	Java     string
+	JVMFlags []string
+	// Credential, when set, runs the workloads as another user (a root
+	// attacher reaching a JVM of another uid).
+	Credential *syscall.Credential
 
 	runs  int
 	procs []*process
@@ -169,7 +196,8 @@ func (h *Harness) StartHeldHelper(binary, role string, args ...string) (*Workloa
 
 // startWorkload starts a workload; an empty dir passes no --dir.
 func (h *Harness) startWorkload(dir, scenario string, args []string) (*Workload, error) {
-	argv := append([]string{"-jar", h.WorkloadJar, scenario}, args...)
+	argv := append(slices.Clone(h.JVMFlags), "-jar", h.WorkloadJar, scenario)
+	argv = append(argv, args...)
 	if h.JavaAgent != "" {
 		if err := os.MkdirAll(h.Spool, 0o755); err != nil {
 			return nil, err
@@ -179,7 +207,16 @@ func (h *Harness) startWorkload(dir, scenario string, args []string) (*Workload,
 	if dir != "" {
 		argv = append(argv, "--dir", dir)
 	}
-	return h.startGated(scenario, exec.Command("java", argv...), false)
+	java := h.Java
+	if java == "" {
+		java = "java"
+	}
+	cmd := exec.Command(java, argv...)
+	if h.Credential != nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: h.Credential}
+		cmd.Dir = h.Tmp // the test's own working directory may be closed to that user
+	}
+	return h.startGated(scenario, cmd, false)
 }
 
 // startGated starts cmd behind a fresh startup gate and returns once it
@@ -223,6 +260,11 @@ func (h *Harness) Trace(ws ...*Workload) (Run, error) {
 	}
 	if err := release(ws); err != nil {
 		return run, err
+	}
+	if h.Midway != nil {
+		if err := h.Midway(tracer); err != nil {
+			return run, err
+		}
 	}
 	for _, w := range ws {
 		if err := w.proc.wait(runTimeout); err != nil {
@@ -276,8 +318,11 @@ func (h *Harness) startTracer(ws []*Workload, out string) (*process, error) {
 	if h.NativeStacks {
 		args = append(args, "-native-stacks")
 	}
-	if h.JavaAgent != "" {
+	if h.JavaAgent != "" || h.AttachAgent != "" {
 		args = append(args, "-spool", h.Spool)
+	}
+	if h.AgentAtStart {
+		args = append(args, "-agent", h.AttachAgent)
 	}
 	cmd := exec.Command(h.TracerBinary, args...)
 	if h.BpfObject != "" {
@@ -289,6 +334,20 @@ func (h *Harness) startTracer(ws []*Workload, out string) (*process, error) {
 	}
 	h.procs = append(h.procs, tracer)
 	return tracer, waitReady(tracer, ready)
+}
+
+// Attach live-loads AttachAgent into w's JVM with `iormesh attach`,
+// writing its ring into Spool, and returns the command's stderr. The
+// spool must exist (a tracer running with -spool Spool created it).
+func (h *Harness) Attach(w *Workload) (string, error) {
+	cmd := exec.Command(h.TracerBinary, "attach", "-pid", strconv.Itoa(w.PID),
+		"-agent", h.AttachAgent, "-spool", h.Spool, "-timeout", attachTimeout.String())
+	var stderr OutputCapture
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return stderr.String(), fmt.Errorf("iormesh attach: %w; stderr:\n%s", err, stderr.String())
+	}
+	return stderr.String(), nil
 }
 
 // targetArgs is the tracer's target spec: the pattern, or the PIDs of

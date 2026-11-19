@@ -99,13 +99,21 @@ func (o *javaOutput) sink(next schema.Sink) schema.Sink {
 }
 
 // attachMarks probes one JVM's natives through the tracer, in the
-// joiner's terms.
+// joiner's terms. Success is reported on stderr: from here on the JVM's
+// I/O can be attributed, which is what a user who live-attached the
+// agent (`iormesh attach`, task ge4) — or a test — waits for. Failures
+// are the joiner's to report.
 func (o *javaOutput) attachMarks(pid uint32, natives []correlate.MarkedNative) ([]string, error) {
 	out := make([]bpf.JavaNative, len(natives))
 	for i, n := range natives {
 		out[i] = bpf.JavaNative{Symbol: n.Symbol, Cookie: n.Cookie}
 	}
-	return o.marker.AttachJavaMarks(pid, out)
+	missing, err := o.marker.AttachJavaMarks(pid, out)
+	if err == nil && len(missing) < len(natives) {
+		_, _ = fmt.Fprintf(o.stderr, "iormesh: java agent of pid %d joined, %d natives probed\n",
+			pid, len(natives)-len(missing))
+	}
+	return missing, err
 }
 
 func (o *javaOutput) warn(err error) {

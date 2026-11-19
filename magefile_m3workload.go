@@ -19,11 +19,14 @@ import (
 )
 
 // m3UsageErrors are malformed M3 invocations (exit 2): method-flow is
-// solo with --dir only; the HTTP scenarios are client/server, the client
+// solo with --dir only, live-attach (task ge4) solo with --dir and
+// --attach-gate; the HTTP scenarios are client/server, the client
 // needs a connectable --port, and only http-tls takes --dir.
 var m3UsageErrors = [][]string{
 	{"method-flow", "--role", "client"},
 	{"method-flow", "--port", "1"},
+	{"live-attach", "--role", "client"},
+	{"live-attach", "--port", "1"},
 	{"http-plain", "--role", "solo"},
 	{"http-plain", "--role", "client"},
 	{"http-plain", "--role", "client", "--port", "0"},

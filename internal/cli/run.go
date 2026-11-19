@@ -127,13 +127,11 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 	if err := s.start(pids); err != nil {
 		return errors.Join(err, finish(cfg, tr, c, out, schema.EndError, stderr))
 	}
-	// The rings of JVMs already running get their natives probed before
-	// the ready file promises the tracer is live (the Java mark, task td4).
-	if err := s.java.poll(); err != nil {
-		return errors.Join(err, finish(cfg, tr, c, out, schema.EndError, stderr))
-	}
 	_, _ = fmt.Fprintf(stderr, "iormesh: attached, tracing %s (%d tracepoints missing on this kernel)\n",
 		describe(cfg.spec, pids), len(tr.Skipped()))
+	if err := s.startJava(ctx, cfg, stderr); err != nil {
+		return errors.Join(err, finish(cfg, tr, c, out, schema.EndError, stderr))
+	}
 	if err := announceReady(cfg); err != nil {
 		return errors.Join(err, finish(cfg, tr, c, out, schema.EndError, stderr))
 	}

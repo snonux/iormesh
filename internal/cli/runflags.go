@@ -46,6 +46,10 @@ type runConfig struct {
 	// M3): JVMs started with -javaagent:iormesh-agent.jar=spool=DIR get
 	// their I/O joined to Java stacks. "" joins nothing.
 	spool string
+	// agent is iormesh-agent.jar to live-load into the JVMs the session
+	// starts with (-agent, decision #2, task ge4), absolute; "" loads
+	// nothing. It needs spool.
+	agent string
 }
 
 // defaultDuration bounds every run, ior-style: no unbounded tracer on a
@@ -99,6 +103,8 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 		"record each syscall's native user stack (stack_id, stacks.ndjson); not useful for JIT-compiled Java")
 	spool := fs.String("spool", "",
 		"directory for the Java agent's rings (created, mode 1733); join their JVMs' I/O to Java stacks")
+	agent := fs.String("agent", "",
+		"live-load this iormesh-agent.jar into the JVMs traced at start (needs -spool; JEP 451 warns)")
 	if err := fs.Parse(args); err != nil {
 		return runConfig{}, fmt.Errorf("%w: %v", errUsage, err)
 	}
@@ -112,12 +118,24 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 		return runConfig{}, fmt.Errorf("%w: -listen-port %d: want 1-65535", errUsage, *port)
 	}
 	cfg.spec.ListenPort = uint16(*port)
+	return parseRunLists(cfg, *pids, *families, *agent)
+}
+
+// parseRunLists finishes parseRunFlags with the arguments that need more
+// than a copy: the PID list, the event families and the agent jar (whose
+// path, like the spool's, the JVM resolves: both become absolute).
+func parseRunLists(cfg runConfig, pids, families, agent string) (runConfig, error) {
 	var err error
-	if cfg.families, err = tracepoints.ParseTraceFamilies(*families); err != nil {
+	if cfg.families, err = tracepoints.ParseTraceFamilies(families); err != nil {
 		return runConfig{}, fmt.Errorf("%w: -trace-families: %v", errUsage, err)
 	}
-	if *pids != "" {
-		if cfg.spec.PIDs, err = parsePids(*pids); err != nil {
+	if pids != "" {
+		if cfg.spec.PIDs, err = parsePids(pids); err != nil {
+			return runConfig{}, err
+		}
+	}
+	if agent != "" {
+		if cfg.agent, cfg.spool, err = agentPaths(agent, cfg.spool); err != nil {
 			return runConfig{}, err
 		}
 	}

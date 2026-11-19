@@ -2,12 +2,15 @@
 //
 //	iormesh run (-pid PID[,PID…] | -pattern GLOB | -listen-port N) -project NAME -out DIR [-duration 4h] [-ready FILE] [-cpuprofile FILE]
 //	iormesh normalize [-bracket S] [-tmp PREFIX] [-check expect.json] [-out DIR] TRACEDIR
+//	iormesh attach -pid PID -agent JAR -spool DIR [-timeout 10s]
 //
 // run is the foreground tracer; its target spec (internal/target) is a
 // PID list, an argv/exe glob matched on exec, or a listening port (M2
 // steps 1–3, session.go). M4 adds start/stop/status/upgrade/uninstall
 // around it. normalize applies the golden-check library
-// (internal/normalize) to a written trace.
+// (internal/normalize) to a written trace. attach live-loads the Java
+// agent into a running JVM a `run -spool` traces (decision #2, task ge4;
+// `run -agent` does the same for the JVMs a session starts with).
 package cli
 
 import (
@@ -57,6 +60,8 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		err = runCommand(args[1:], stderr)
 	case "normalize":
 		code, err = normalizeCommand(args[1:], stdout, stderr)
+	case "attach":
+		err = attachCommand(args[1:], stderr)
 	case "help", "-h", "--help":
 		usage(stdout)
 		return exitOK
@@ -86,7 +91,8 @@ func usage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `usage:
   iormesh run (-pid PID[,PID...] | -pattern GLOB | -listen-port N) -project NAME -out DIR
               [-duration 4h] [-ready FILE] [-trace-families ipc,signal,poll,zerocopy|all]
-              [-cpuprofile FILE] [-aggregate=false] [-native-stacks]
+              [-cpuprofile FILE] [-aggregate=false] [-native-stacks] [-spool DIR [-agent JAR]]
   iormesh normalize [-bracket SCENARIO] [-tmp PREFIX] [-check expect.json] [-out DIR] TRACEDIR
+  iormesh attach -pid PID -agent JAR -spool DIR [-timeout 10s]
 `)
 }
