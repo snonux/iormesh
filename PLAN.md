@@ -1114,7 +1114,9 @@ answer), and deferred.
      0 on a short burst and on the M0 scenarios. Budget: zero
      lost records on every M0/M2 scenario, and < 1 % on
      `syscall-burst` at 1 and 4 threads with aggregation on; any
-     loss is an explicit `drop` event (task vc4's aggregation: 0
+     loss is an explicit `drop` event, skipped program runs as
+     possible loss of their own (task vd4, "Trace output
+     contract") (task vc4's aggregation: 0
      lost in 3 runs each at 1 and 4 threads, on a busy host —
      s3-overhead.md, "Follow-up (vc4)");
   4. *volume* — M1: ~326 B/event NDJSON, zstd ×18. Budget:
@@ -1498,6 +1500,26 @@ can reconstruct behavior and check it against source code:
   happens-before — per-thread order plus send→receive edges —
   never a comparison of raw timestamps. Ring-buffer drops are
   explicit events — gaps are never silent.
+- **Skipped program runs are possible loss, not lost records**
+  (task vd4, 2026-11-19): the kernel skips a BPF program while
+  another one runs on that CPU (its recursion guard), and the
+  skip happens before the program's target filter, so a
+  program's `recursion_misses` counts untraced processes' calls
+  too — host-wide BPF activity, not the trace's loss. It bounds
+  the target records lost from above and cannot be attributed:
+  nothing runs to look at the pid. So the contract reports it on
+  its own and never adds it to the lost records (ring-buffer
+  reservation failures and undecodable records, which are the
+  trace's own): a host-level `drop` with `drop_reason`
+  `skipped_runs` whose `args.lost` is the runs skipped since the
+  previous one, and the summary's "skipped runs" figure beside
+  "lost records". Loss stays never silent — a skip that did hit
+  a target is inside that count — and never inflated. The
+  integration gate stays conservative: a run with skipped runs
+  cannot be judged loss-free and is retried like kernel loss
+  (skipped as unexercised when every attempt had some); the
+  root loader test requires zero lost records and only logs
+  skipped runs.
 - **Attribution is explicit**: every I/O event says whether a
   Java stack was joined to it (`attribution: java`) or not
   (`none` — non-JVM process, JNI or JVM-internal I/O, agent
