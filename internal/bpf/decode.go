@@ -5,7 +5,8 @@
 // filters, exit handlers and control handlers belong to its event loop, the
 // correlator's job here); TCP_STATE_EVENT (M1 step 4), EXEC_ARGV_EVENT
 // (M2 step 2), PROCESS_ARGV_EVENT (M2 step 8), SOCK_ADDR_EVENT and
-// SIGNAL_EVENT (M2 step 7) and RW_AGGREGATE_EVENT (M2 step 11) added.
+// SIGNAL_EVENT (M2 step 7), RW_AGGREGATE_EVENT (M2 step 11) and
+// STACK_EVENT (M2 step 9) added.
 
 package bpf
 
@@ -108,6 +109,9 @@ func addControlDecoders(d map[types.EventType]decoder) {
 	d[types.SIGNAL_EVENT] = typed(types.NewSignalEvent)
 	// M2 step 11: a hot loop's folded reads or writes (rwagg.c).
 	d[types.RW_AGGREGATE_EVENT] = typed(types.NewRwAggregateEvent)
+	// M2 step 9: a syscall enter's native user stack id (stack.c), only
+	// sent with Config.NativeStacks.
+	d[types.STACK_EVENT] = typed(types.NewStackEvent)
 }
 
 // decodeFdSizeEvent widens an fd+size record to the FdEvent shape the

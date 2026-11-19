@@ -48,8 +48,8 @@ func AppendEvent(dst []byte, ev *Event) []byte {
 	return appendEventTail(dst, ev)
 }
 
-// appendEventTail appends the optional nested objects and closes the
-// event's object.
+// appendEventTail appends the optional nested objects and the optional
+// stack_id (M2 step 9), then closes the event's object.
 func appendEventTail(dst []byte, ev *Event) []byte {
 	if ev.Java != nil {
 		dst = append(dst, `,"java":`...)
@@ -66,6 +66,9 @@ func appendEventTail(dst []byte, ev *Event) []byte {
 		dst = appendStringField(dst, `,"kernel":`, s.Kernel)
 		dst = appendStringField(dst, `,"arch":`, s.Arch)
 		dst = append(dst, '}')
+	}
+	if ev.StackID != nil {
+		dst = appendUintField(dst, `,"stack_id":`, uint64(*ev.StackID))
 	}
 	return append(dst, '}')
 }

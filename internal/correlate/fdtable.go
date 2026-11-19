@@ -134,11 +134,15 @@ func (p *procState) inherit(parent *procState) {
 // traced processes only) to the process's fd table: the kernel closed
 // every close-on-exec fd (do_close_on_exec). Without this, the new
 // program reusing such a number through an untraced syscall would inherit
-// the old program's instance, path and socket.
+// the old program's instance, path and socket. The native stack table
+// learns of it too: the new program's stacks live in a new address space.
 func (c *Correlator) execTask(r *types.ProcessExecEvent) {
 	c.advance(r.Time)
 	if p, ok := c.procs[r.Pid]; ok {
 		p.closeOnExec()
+	}
+	if c.cfg.Stacks != nil {
+		c.cfg.Stacks.Exec(r.Pid) // a new image: new stacks, new mappings
 	}
 }
 

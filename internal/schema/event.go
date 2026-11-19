@@ -133,6 +133,12 @@ type Event struct {
 	// A nested object rather than envelope fields because only one event
 	// per trace carries it.
 	Session *Session `json:"session,omitempty" parquet:"session,optional"`
+	// StackID names the native user stack the thread had when it entered
+	// the syscall: a stack_id of the trace's stack table (stacks.ndjson,
+	// Stack). Only with iormesh run -native-stacks (M2 step 9), and only on
+	// syscall events whose stack the kernel could walk; absent otherwise,
+	// and always ≥ 1 when set. Appended after Session: fields only append.
+	StackID *uint32 `json:"stack_id,omitempty" parquet:"stack_id,optional"`
 }
 
 // Args holds every syscall-specific argument as an optional field: one

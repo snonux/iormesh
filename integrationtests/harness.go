@@ -11,7 +11,8 @@ package integrationtests
 // .ior.zst recording; no flamegraph, parquet, wrapper or per-PID-args
 // variants yet. A run may bind the tracer to a pattern instead of PIDs
 // (Harness.Pattern, M2), which ior has no counterpart of, and may add
-// opt-in event families (Harness.Families, M2 step 7). A workload exiting
+// opt-in event families (Harness.Families, M2 step 7) and native stacks
+// (Harness.NativeStacks, M2 step 9). A workload exiting
 // with the skip code 3 ends the run with ErrWorkloadSkipped.
 
 import (
@@ -76,6 +77,9 @@ type Harness struct {
 	// event families (ipc, signal, poll, zerocopy) a scenario needs on
 	// top of the default file and socket families (decision #7).
 	Families string
+	// NativeStacks runs the tracer with -native-stacks (M2 step 9): events
+	// carry stack_id and the trace directory holds stacks.ndjson.
+	NativeStacks bool
 
 	runs  int
 	procs []*process
@@ -223,6 +227,9 @@ func (h *Harness) startTracer(ws []*Workload, out string) (*process, error) {
 	args = append(args, "-project", tracerProject, "-out", out, "-duration", tracerDuration, "-ready", ready)
 	if h.Families != "" {
 		args = append(args, "-trace-families", h.Families)
+	}
+	if h.NativeStacks {
+		args = append(args, "-native-stacks")
 	}
 	cmd := exec.Command(h.TracerBinary, args...)
 	if h.BpfObject != "" {

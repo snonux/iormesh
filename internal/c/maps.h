@@ -2,7 +2,7 @@
 // Changes: target_map added (replaces ior's rodata PID_FILTER), with
 // struct iormesh_target values for tree following and pattern sessions (M2);
 // rw_agg_map, rw_agg_stop and struct iormesh_rw_state added (rwagg.c, M2
-// step 11).
+// step 11); stack_map added (stack.c, M2 step 9).
 
 //+build ignore
 
@@ -279,3 +279,26 @@ struct {
     __type(key, __u32);
     __type(value, __u32);
 } rw_agg_stop SEC(".maps");
+
+// IORMESH_STACK_DEPTH is how many user frames stack_map keeps per stack;
+// deeper stacks are cut to their innermost frames. 64 covers the call
+// chains of the servers iormesh targets with room to spare, at half the
+// memory of the kernel's 127-frame maximum.
+#define IORMESH_STACK_DEPTH 64
+
+// stack_map holds the distinct user stacks of syscall enters (stack.c, M2
+// step 9; iormesh run -native-stacks). bpf_get_stackid hashes a stack into
+// one of max_entries buckets and returns the bucket as its id; a stack
+// already there gets the same id (so the map deduplicates and userspace
+// reads each stack once), another stack hashing to an occupied bucket gets
+// -EEXIST. No BPF_F_REUSE_STACKID: overwriting a bucket would change what
+// an id already in the trace stands for, so an id stays valid for the whole
+// session and a collision costs a stack, not a wrong one. Preallocated:
+// about 4.3 MB here, which is why userspace shrinks it to one entry when
+// native stacks are off (internal/bpf, Config.NativeStacks).
+struct {
+    __uint(type, BPF_MAP_TYPE_STACK_TRACE);
+    __uint(max_entries, 8192);
+    __uint(key_size, sizeof(__u32));
+    __uint(value_size, IORMESH_STACK_DEPTH * sizeof(__u64));
+} stack_map SEC(".maps");

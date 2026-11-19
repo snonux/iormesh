@@ -34,6 +34,11 @@ type Config struct {
 	// step 11): a debugging switch (iormesh run -aggregate=false), which
 	// gives up decision #25's loss budget on a busy loop.
 	NoAggregation bool
+	// NativeStacks makes every emitted syscall enter send its thread's
+	// user stack id first, as a *types.StackEvent (stack.c, M2 step 9);
+	// StackTrace reads the stack behind an id. Off, stack_map shrinks to
+	// one entry and the handlers' stack walk is pruned at load.
+	NativeStacks bool
 	// Buffer is how many decoded records may wait for the consumer (in
 	// batches of up to 256); 0 means 4096. A full channel is
 	// backpressure: the ring buffer then fills and the kernel counts
@@ -118,6 +123,9 @@ func (t *Tracer) load(cfg Config) error {
 	}
 	if err := t.module.InitGlobalVariable("IORMESH_RW_AGGREGATE", aggregate); err != nil {
 		return fmt.Errorf("set IORMESH_RW_AGGREGATE: %w", err)
+	}
+	if err := t.setNativeStacks(cfg.NativeStacks); err != nil {
+		return err
 	}
 	if err := t.module.BPFLoadObject(); err != nil {
 		return fmt.Errorf("load BPF object: %w", err)

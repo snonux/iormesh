@@ -64,8 +64,12 @@ func TestParseRunFlags(t *testing.T) {
 	}
 	cfg, err = parseRunFlags([]string{"-pid", "10", "-project", "p", "-out", "o",
 		"-cpuprofile", "cpu.out"}, &bytes.Buffer{})
-	if err != nil || cfg.cpuProfile != "cpu.out" {
-		t.Fatalf("-cpuprofile: %q, %v", cfg.cpuProfile, err)
+	if err != nil || cfg.cpuProfile != "cpu.out" || cfg.nativeStacks {
+		t.Fatalf("-cpuprofile: %q, %v (native stacks %v, want off by default)", cfg.cpuProfile, err, cfg.nativeStacks)
+	}
+	cfg, err = parseRunFlags([]string{"-pid", "10", "-project", "p", "-out", "o", "-native-stacks"}, &bytes.Buffer{})
+	if err != nil || !cfg.nativeStacks {
+		t.Fatalf("-native-stacks: %v, %v", cfg.nativeStacks, err)
 	}
 }
 

@@ -1,7 +1,7 @@
 // Adapted from ior internal/c/flags.h @ b21afc50328c.
 // Changes: PID_FILTER removed; the target set is target_map (maps.h);
 // IORMESH_EXEC_WATCH added (M2 pattern sessions); IORMESH_RW_AGGREGATE added
-// (M2 step 11).
+// (M2 step 11); IORMESH_NATIVE_STACKS added (M2 step 9).
 
 //+build ignore
 
@@ -32,3 +32,9 @@ const volatile u32 IORMESH_EXEC_WATCH = 0;
 // sets it before the load; as a load-time constant the verifier prunes the
 // disabled side, so an off switch costs nothing per call.
 const volatile u32 IORMESH_RW_AGGREGATE = 1;
+// IORMESH_NATIVE_STACKS (1) makes every emitted syscall enter send its user
+// stack id first (stack.c; iormesh run -native-stacks, M2 step 9). Off by
+// default (decision #25: a stack walk per call is not free), and like the
+// switches above a load-time constant, so the verifier prunes the walk from
+// every handler and an off switch costs nothing per call.
+const volatile u32 IORMESH_NATIVE_STACKS = 0;

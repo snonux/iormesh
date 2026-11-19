@@ -144,6 +144,11 @@ func (c *Correlator) base(en enter, tid uint32, ret int64, at uint64) schema.Eve
 	if ret < 0 {
 		ev.Err = unix.ErrnoName(syscall.Errno(-ret))
 	}
+	// Native stacks are opt-in: without them the map is always empty and
+	// the length check is all an event pays (decision #25).
+	if len(c.stacks) != 0 {
+		ev.StackID = c.takeStack(tid, en.time)
+	}
 	return ev
 }
 

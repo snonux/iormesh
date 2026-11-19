@@ -59,6 +59,8 @@ func IntegrationTests() []string {
 		"TestUnixSocket",
 		"TestUDPLoopback",
 		"TestTCPFamilies",
+		"TestNonJavaPeer",
+		"TestNativeStacks",
 		"TestSyscallBurstFoldsEveryCall",
 		"TestSkipCodeIsSkip",
 		"TestSecondRunNormalizesIdentically",

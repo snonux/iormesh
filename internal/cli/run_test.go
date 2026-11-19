@@ -94,6 +94,11 @@ func (f *fakeTracer) PendingAggregates() ([]*types.RwAggregateEvent, error) {
 	return f.pending, f.pendingErr
 }
 
+// StackTrace has no stacks to give: the fake sends no stack records.
+func (f *fakeTracer) StackTrace(uint32) ([]uint64, error) {
+	return nil, errors.New("no stacks in the fake")
+}
+
 func (f *fakeTracer) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -246,7 +251,7 @@ func TestRunWritesSessionDropsEnd(t *testing.T) {
 	}
 	tr.setLosses(bpf.Losses{Kernel: 3, Short: 1}, nil) // only finish's poll sees this one
 	var stderr bytes.Buffer
-	if err := finish(cfg, tr, c, reason, &stderr); err != nil {
+	if err := finish(cfg, tr, c, nil, reason, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	events := readEvents(t, dir)
@@ -334,7 +339,7 @@ func TestFinishLossErrorEndsWithError(t *testing.T) {
 	tr := newFakeTracer()
 	tr.setLosses(bpf.Losses{}, errors.New("map gone"))
 	c := testCorrelator(t, dir)
-	err := finish(runConfig{out: dir}, tr, c, schema.EndDuration, &bytes.Buffer{})
+	err := finish(runConfig{out: dir}, tr, c, nil, schema.EndDuration, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("finish hid the loss read error")
 	}
@@ -351,7 +356,7 @@ func TestFinishLossErrorEndsWithError(t *testing.T) {
 func TestFinishNoLossNoDrop(t *testing.T) {
 	dir := t.TempDir()
 	c := testCorrelator(t, dir)
-	if err := finish(runConfig{out: dir}, newFakeTracer(), c, schema.EndStop, &bytes.Buffer{}); err != nil {
+	if err := finish(runConfig{out: dir}, newFakeTracer(), c, nil, schema.EndStop, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := kinds(readEvents(t, dir)); got != "session,end" {
@@ -380,7 +385,7 @@ func TestFinishDrainsPendingAggregates(t *testing.T) {
 			}
 			tr.pendingErr = tc.err
 			c := testCorrelator(t, dir)
-			err := finish(runConfig{out: dir}, tr, c, schema.EndStop, &bytes.Buffer{})
+			err := finish(runConfig{out: dir}, tr, c, nil, schema.EndStop, &bytes.Buffer{})
 			if (err != nil) != (tc.err != nil) {
 				t.Fatalf("finish = %v, want error %v", err, tc.err)
 			}

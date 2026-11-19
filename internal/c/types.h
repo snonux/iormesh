@@ -2,7 +2,8 @@
 // Changes: TCP_STATE_EVENT and struct tcp_state_event added (sock.c);
 // SOCK_ADDR_EVENT and SIGNAL_EVENT with their structs added (sockaddr.c,
 // signal.c, M2 step 7); RW_AGGREGATE_EVENT and struct rw_aggregate_event
-// added (rwagg.c, M2 step 11);
+// added (rwagg.c, M2 step 11); STACK_EVENT and struct stack_event added
+// (stack.c, M2 step 9);
 // EXEC_ARGV_EVENT, PROCESS_ARGV_EVENT and struct exec_argv_event added
 // (exec.c, M2).
 
@@ -117,6 +118,10 @@
 // iormesh: hot read or write calls of one thread on one fd folded into one
 // record (struct rw_aggregate_event, rwagg.c, M2 step 11, decision #25).
 #define RW_AGGREGATE_EVENT 73
+// iormesh: the native user stack of a syscall enter, sent right before the
+// enter record when native stacks are on (struct stack_event, stack.c, M2
+// step 9).
+#define STACK_EVENT 74
 
 #define UNCLASSIFIED 0
 #define READ_CLASSIFIED 1
@@ -1154,5 +1159,24 @@ struct rw_aggregate_event {
     __s32 fd;
     __u32 file_ident;
     __u32 count;
+    __u32 reserved;
+};
+
+// stack_event (iormesh, stack.c, M2 step 9) names the user stack a traced
+// thread had when it entered a syscall: stack_id is bpf_get_stackid's id in
+// stack_map (maps.h), or its negative errno when the walk failed (-EFAULT:
+// nothing unwound; -EEXIST: the id's bucket holds another stack). time is
+// the enter handler's clock read, the very value its enter record carries,
+// which is how userspace pairs the two: the stack record is sent right
+// before the enter record (or not at all), so a stack whose enter never
+// arrived - a full ring - pairs with nothing. trace_id is 0: the enter
+// record names the syscall. 32 bytes, no implicit padding.
+struct stack_event {
+    __u32 event_type;
+    __u32 trace_id;
+    __u64 time;
+    __u32 pid;
+    __u32 tid;
+    __s32 stack_id;
     __u32 reserved;
 };

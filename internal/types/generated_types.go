@@ -155,6 +155,7 @@ const PROCESS_ARGV_EVENT = 70
 const SOCK_ADDR_EVENT = 71
 const SIGNAL_EVENT = 72
 const RW_AGGREGATE_EVENT = 73
+const STACK_EVENT = 74
 const UNCLASSIFIED = 0
 const READ_CLASSIFIED = 1
 const WRITE_CLASSIFIED = 2
@@ -4184,4 +4185,73 @@ func (r *RwAggregateEvent) Bytes() ([]byte, error) {
 
 func (r *RwAggregateEvent) Recycle() {
 	poolOfRwAggregateEvents.Put(r)
+}
+
+type StackEvent struct {
+	EventType EventType
+	TraceId   TraceId
+	Time      uint64
+	Pid       uint32
+	Tid       uint32
+	StackId   int32
+	Reserved  uint32
+}
+
+func (s StackEvent) String() string {
+	return fmt.Sprintf("EventType:%v TraceId:%v Time:%v Pid:%v Tid:%v StackId:%v Reserved:%v", s.EventType, s.TraceId, s.Time, s.Pid, s.Tid, s.StackId, s.Reserved)
+}
+
+func (s StackEvent) Equals(other any) bool {
+	otherConcrete, ok := other.(*StackEvent)
+	if !ok {
+		return false
+	}
+	return s.EventType == otherConcrete.EventType && s.TraceId == otherConcrete.TraceId && s.Time == otherConcrete.Time && s.Pid == otherConcrete.Pid && s.Tid == otherConcrete.Tid && s.StackId == otherConcrete.StackId && s.Reserved == otherConcrete.Reserved
+}
+
+func (s *StackEvent) GetEventType() EventType {
+	return s.EventType
+}
+
+func (s *StackEvent) GetTraceId() TraceId {
+	return s.TraceId
+}
+
+func (s *StackEvent) GetPid() uint32 {
+	return s.Pid
+}
+
+func (s *StackEvent) GetTid() uint32 {
+	return s.Tid
+}
+
+func (s *StackEvent) GetTime() uint64 {
+	return s.Time
+}
+
+var poolOfStackEvents = sync.Pool{
+	New: func() any { return &StackEvent{} },
+}
+
+func NewStackEvent(raw []byte) *StackEvent {
+	s := poolOfStackEvents.Get().(*StackEvent)
+	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, s); err != nil {
+		*s = StackEvent{}
+		poolOfStackEvents.Put(s)
+		return nil
+	}
+	return s
+}
+
+func (s *StackEvent) Bytes() ([]byte, error) {
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.LittleEndian, s)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (s *StackEvent) Recycle() {
+	poolOfStackEvents.Put(s)
 }

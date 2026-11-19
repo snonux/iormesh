@@ -1,6 +1,7 @@
 // Adapted from ior internal/generate/bpfhandler.go @ b21afc50328c.
 // Changes: the prologue calls renderSockOwnerHook (sockowner.go); read and
-// write call the rwagg.c hooks (rwagg.go, M2 step 11).
+// write call the rwagg.c hooks (rwagg.go, M2 step 11); every enter handler
+// calls the stack.c hook (renderStackHook, M2 step 9).
 
 package generate
 
@@ -421,6 +422,7 @@ func renderHandler(h handlerSpec) string {
 		b.WriteString(h.sideMapTake)
 		b.WriteString("\n")
 	}
+	renderStackHook(&b, h)
 	renderFdNameEnter(&b, h)
 	fmt.Fprintf(&b, "    struct %s *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct %s), 0);\n", h.eventStruct, h.eventStruct)
 	// A NULL reserve means event_map is full: the event is lost right here.
@@ -445,6 +447,20 @@ func renderHandler(h handlerSpec) string {
 	b.WriteString("    return 0;\n")
 	b.WriteString("}\n")
 	return b.String()
+}
+
+// renderStackHook writes, for every enter handler, the call that sends the
+// thread's native user stack id ahead of the enter record
+// (iormesh_stack_on_enter, internal/c/stack.c; M2 step 9). It sits after
+// every hook that may decide not to emit the enter (sampling, the read/write
+// fold), so a stack is taken only for an enter that is sent, and before the
+// fd-name enter, which may send close's record and return. With native
+// stacks off the call is pruned by the verifier.
+func renderStackHook(b *strings.Builder, h handlerSpec) {
+	if !h.isEnter {
+		return
+	}
+	b.WriteString("    iormesh_stack_on_enter(ctx, pid, tid, now);\n")
 }
 
 // renderFdNameEnter writes, for an enter handler that names its descriptor's

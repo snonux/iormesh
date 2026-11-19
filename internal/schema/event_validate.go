@@ -49,6 +49,9 @@ func (e *Event) Validate() error {
 	if e.Args.Argv != nil && e.Event != KindExec {
 		return invalidf("args.argv on a %s event (exec only)", e.Event)
 	}
+	if e.StackID != nil && *e.StackID == 0 {
+		return invalidf("stack_id 0: stack table ids start at 1")
+	}
 	if err := e.validateIPCArgs(); err != nil {
 		return err
 	}

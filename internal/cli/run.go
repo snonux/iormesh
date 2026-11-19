@@ -77,6 +77,7 @@ type tracer interface {
 	IgnoreExec(pid uint32, since uint64) error
 	StopAggregation() error
 	PendingAggregates() ([]*types.RwAggregateEvent, error)
+	StackTrace(id uint32) ([]uint64, error)
 	Close() error
 }
 
@@ -105,25 +106,30 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 		return err
 	}
 	tr, err := bpf.Open(bpf.Config{Pids: pids, ExecWatch: cfg.spec.Mode() == target.ModePattern,
-		Probes: bpf.ProbesFor(cfg.families), NoAggregation: cfg.noAggregation})
+		Probes: bpf.ProbesFor(cfg.families), NoAggregation: cfg.noAggregation,
+		NativeStacks: cfg.nativeStacks})
 	if err != nil {
 		return err
 	}
-	c, err := newCorrelator(ctx, cfg)
+	st, err := openStacks(cfg, tr)
 	if err != nil {
 		return errors.Join(err, tr.Close())
 	}
+	c, err := newCorrelator(ctx, cfg, st.ids())
+	if err != nil {
+		return errors.Join(err, st.close(), tr.Close())
+	}
 	s := newSession(tr, c, cfg)
 	if err := s.start(pids); err != nil {
-		return errors.Join(err, finish(cfg, tr, c, schema.EndError, stderr))
+		return errors.Join(err, finish(cfg, tr, c, st, schema.EndError, stderr))
 	}
 	_, _ = fmt.Fprintf(stderr, "iormesh: attached, tracing %s (%d tracepoints missing on this kernel)\n",
 		describe(cfg.spec, pids), len(tr.Skipped()))
 	if err := announceReady(cfg); err != nil {
-		return errors.Join(err, finish(cfg, tr, c, schema.EndError, stderr))
+		return errors.Join(err, finish(cfg, tr, c, st, schema.EndError, stderr))
 	}
 	reason, loopErr := traceLoop(ctx, s, cfg)
-	return errors.Join(loopErr, finish(cfg, tr, c, reason, stderr))
+	return errors.Join(loopErr, finish(cfg, tr, c, st, reason, stderr))
 }
 
 // initialTargets resolves the processes target_map starts with: the
@@ -150,10 +156,12 @@ func describe(spec target.Spec, pids []uint32) string {
 }
 
 // finish ends a trace: a last loss poll (the counters die with the
-// tracer), the tracer's close, the end event, the sink's close and the
-// graph file, then the one-line summary. A loss count it cannot read
+// tracer), the tracer's close, the end event, the sink's close, the graph
+// file and the stack table's close (st, nil without -native-stacks), then
+// the one-line summary. A loss count it cannot read
 // turns the end reason into error: the trace might hide a gap.
-func finish(cfg runConfig, tr tracer, c *correlate.Correlator, reason string, stderr io.Writer) error {
+func finish(cfg runConfig, tr tracer, c *correlate.Correlator, st *stackOutput, reason string,
+	stderr io.Writer) error {
 	aggErr := drainAggregates(tr, c)
 	losses, lossErr := pollLosses(tr, c)
 	if lossErr != nil || aggErr != nil {
@@ -163,10 +171,11 @@ func finish(cfg runConfig, tr tracer, c *correlate.Correlator, reason string, st
 	endErr := c.End(reason)
 	sinkErr := c.Close()
 	graphErr := schema.WriteGraphFile(filepath.Join(cfg.out, GraphFile), c.Graph())
+	stackErr := st.close()
 	_, _ = fmt.Fprintf(stderr, "iormesh: stopped (%s); lost records %d (kernel %d), unpaired exits %d, "+
-		"unreadable paths %d, unattributed aggregates %d\n",
-		reason, losses.Total(), losses.KernelSide(), c.Unpaired(), c.NoPath(), c.Unattributed())
-	return errors.Join(aggErr, lossErr, closeErr, endErr, sinkErr, graphErr)
+		"unreadable paths %d, unattributed aggregates %d%s\n",
+		reason, losses.Total(), losses.KernelSide(), c.Unpaired(), c.NoPath(), c.Unattributed(), st.summary())
+	return errors.Join(aggErr, lossErr, closeErr, endErr, sinkErr, graphErr, stackErr)
 }
 
 // drainAggregates hands the correlator the folded read/write calls the
@@ -193,8 +202,9 @@ func drainAggregates(tr tracer, c *correlate.Correlator) error {
 }
 
 // newCorrelator describes the host, creates cfg.out and the correlator
-// writing its events file there, and queues the session header.
-func newCorrelator(ctx context.Context, cfg runConfig) (*correlate.Correlator, error) {
+// writing its events file there, and queues the session header. stacks
+// is the native stack table, nil without -native-stacks.
+func newCorrelator(ctx context.Context, cfg runConfig, stacks correlate.StackIDs) (*correlate.Correlator, error) {
 	host, err := machineID()
 	if err != nil {
 		return nil, err
@@ -215,7 +225,7 @@ func newCorrelator(ctx context.Context, cfg runConfig) (*correlate.Correlator, e
 		return nil, err
 	}
 	c := correlate.New(correlate.Config{Host: correlate.Host{ID: host, Project: cfg.project},
-		Sink: schema.NewNDJSONSink(f), WallOffsetNS: offset})
+		Sink: schema.NewNDJSONSink(f), WallOffsetNS: offset, Stacks: stacks})
 	if err := c.Session(session); err != nil {
 		return nil, errors.Join(err, c.Close())
 	}

@@ -29,6 +29,9 @@ const (
 const (
 	EventsFile = "events.ndjson"
 	GraphFile  = "graph.json"
+	// StacksFile is the native stack table, written only by a
+	// -native-stacks run (M2 step 9).
+	StacksFile = "stacks.ndjson"
 )
 
 // errUsage marks a command-line error: reported with usage, exit 2.

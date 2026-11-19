@@ -9,6 +9,9 @@
 // events it numbers the host-level ones the caller reports: the session
 // header (Session), ring-buffer loss (RecordLosses) and the end (End).
 //
+// With Config.Stacks it also names each syscall event's native stack
+// (M2 step 9, stacks.go).
+//
 // One goroutine owns a Correlator: Handle, Close and Graph must not be
 // called concurrently. The package is cgo-free; it only sees decoded
 // internal/types values.
@@ -51,6 +54,10 @@ type Config struct {
 	// redact.Default(): a pointer, so a zero Config can never mean "no
 	// redaction".
 	Redaction *redact.Policy
+	// Stacks, when set, turns the kernel's stack records into stack_id
+	// fields (M2 step 9, -native-stacks; stacks.go). nil: stack records
+	// are ignored, as they never come without the switch anyway.
+	Stacks StackIDs
 }
 
 const defaultFuseWindowNS = 5_000_000_000
@@ -68,6 +75,7 @@ type Correlator struct {
 	unix     *unixTable                       // AF_UNIX stream connections by their socket pair
 	flows    map[[2]netip.AddrPort]*sockState // UDP flows by (local, remote)
 	enters   map[uint32]enter                 // pending syscall enters by tid
+	stacks   map[uint32]stackRef              // stacks awaiting their enter, by tid
 	queue    []queued                         // emitted in seq order, held for conn ids
 	graph    *graphBuilder
 	unpaired uint64
@@ -103,6 +111,7 @@ func New(cfg Config) *Correlator {
 		unix:     newUnixTable(),
 		flows:    map[[2]netip.AddrPort]*sockState{},
 		enters:   map[uint32]enter{},
+		stacks:   map[uint32]stackRef{},
 		graph:    newGraphBuilder(cfg.Host.ID),
 	}
 }
@@ -110,8 +119,9 @@ func New(cfg Config) *Correlator {
 // Handle consumes one record from bpf.Tracer.Records: syscall records
 // (M1's, and the path, name, dup3 and fcntl enters of M2's file surface),
 // TCP state records, the process lifecycle records of M2 steps 1 and 6
-// (new processes, execs, exits) and M2 step 7's records (handleIPC:
-// pipes, socketpairs, kill, epoll and poll, socket addresses, signals).
+// (new processes, execs, exits), M2 step 7's records (handleIPC:
+// pipes, socketpairs, kill, epoll and poll, socket addresses, signals)
+// and M2 step 9's native stack records (stacks.go).
 // Other record types are ignored; the exec_argv records of a pattern
 // session are the caller's to judge (Incarnation), and an exec's argv
 // reaches the trace through Exec, once the caller has completed a
@@ -152,6 +162,10 @@ func (c *Correlator) Handle(rec any) error {
 		c.exitTask(r)
 	case *types.ProcessExecEvent:
 		c.execTask(r)
+	case *types.StackEvent:
+		if err := c.stackRecord(r); err != nil {
+			return err
+		}
 	default:
 		if !c.handleIPC(rec) {
 			return nil
