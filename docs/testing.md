@@ -276,6 +276,30 @@ integration tests run them under the agent:
 `TestOtelGoldenIDsDeclaredByScenario` (`internal/normalize`)
 checks the golden's ids against `OtelScenario`'s declaration.
 
+### Live attach (task ge4)
+
+Decision #2's live-attach path ([java-attach.md](java-attach.md))
+has its own scenario, `live-attach`: one JVM writes a file, prints
+`awaiting attach` and waits for its `--attach-gate` file, then
+writes a second one and removes both. Its golden declares the
+first half `attribution: none` and the rest `java` with the
+causing method. Without the option it runs straight through, so
+`mage workloadTest` self-tests it like the others. The harness
+starts these JVMs without `-javaagent` (`Harness.AttachAgent`);
+the tests need root like the rest of the suite.
+
+| Test | What it checks |
+|---|---|
+| `TestJavaLiveAttach` | live-attach under `run -spool`: between the halves `iormesh attach` loads the agent, the test waits for the tracer's `java agent of pid N joined` line and opens the gate; the golden holds (first half none, second half and sweep java); no event of the JVM that ended before the attach began is attributed, and there are such events; JEP 451's warning on the JVM's stderr; mutated goldens fail |
+| `TestJavaLiveAttachAtStart` | `run -agent` on a gated method-flow JVM: the tracer reports the load and the method-flow golden holds as under `-javaagent`; the JVM printed the warning |
+| `TestJavaAttachDynamicLoading` | no tracer, per JDK (the `java` on PATH plus each JAVA_HOME in `IORMESH_ATTACH_JDKS`): a default JVM loads and warns, `-XX:+EnableDynamicAgentLoading` loads silently, `-XX:-EnableDynamicAgentLoading` refuses with `dynamic agent loading is disabled` and no ring, the JVM finishing cleanly every time; and a root attacher loads into a JVM running as nobody, whose ring is then nobody's |
+
+`internal/javaattach` unit-tests the handshake against a fake
+`/proc` and listener: the trigger file and the one SIGQUIT, no
+signal to a running listener, a process that is no JVM, has no
+SIGQUIT handler or disables the attach mechanism, a planted
+non-socket, and both timeouts.
+
 ## Performance baselines
 
 S3 (PLAN.md, decision #25) measures overhead against a load the

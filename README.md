@@ -103,6 +103,9 @@ Details: [docs/security.md](./docs/security.md).
   schema: envelope, args, event kinds, graph, files.
 - [docs/testing.md](./docs/testing.md) — workload-first testing
   and the ior-style integration suite.
+- [docs/java-attach.md](./docs/java-attach.md) — getting the
+  Java agent into a JVM: `-javaagent`, or live attach and its
+  caveats (JEP 451).
 - [docs/security.md](./docs/security.md) — security & scope.
 - [docs/build.md](./docs/build.md) — build, code generation and
   tech choices.

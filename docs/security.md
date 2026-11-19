@@ -46,6 +46,14 @@ truth.
   truncates under the mapping faults on access, which the reader
   turns into a corrupt ring, not a crash (docs/schema.md, "Java
   attribution").
+- **Live attach touches the target only as `jcmd` would.**
+  `run -agent` and `iormesh attach` create a trigger file in the
+  JVM's working directory (or `/tmp`), send it one SIGQUIT — only
+  if it maps `libjvm.so` and handles the signal, through a pidfd
+  — and connect to its own attach socket, refused unless the
+  socket belongs to the JVM's uid or root. As root the tracer
+  reaches every user's JVM, whose agent then runs as that user.
+  Details in [java-attach.md](java-attach.md).
 - **Bounded by design.** Sessions end after 4h by default
   (enforced twice — by the tracer and by its systemd unit) and
   stop before the trace partition fills.

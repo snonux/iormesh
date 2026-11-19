@@ -606,6 +606,11 @@ Gated by S1 — done; the design below is S1's result
   dynamic loading by default, after which the app must opt in
   with `-XX:+EnableDynamicAgentLoading`, and a live-attached
   agent misses everything before the attach (decision #2).
+  As built (task ge4): the tracer attaches itself, speaking
+  HotSpot's attach protocol (no JDK on the host) — `iormesh run
+  -agent JAR` for the JVMs a session starts with, `iormesh
+  attach` for one at any time — and never signals a process
+  that could die of SIGQUIT; caveats in docs/java-attach.md.
 - **Stack capture cost**: the per-I/O `StackWalker` walk is the
   agent's dominant cost (S1: ≈8 µs per call on a loaded host vs
   ≈0.3 µs for the rest of the bracket); M3 engineers it down
@@ -1316,7 +1321,10 @@ answer), and deferred.
   tracer still listens on nothing. Documented caveats: the
   warning, the retransformation of loaded classes, and that a
   live-attached agent misses all I/O before the attach. The k8s
-  flavour is #14.
+  flavour is #14. Built and tested end to end by task ge4
+  (`run -agent`, `iormesh attach`; 21, 25 and 27-ea warn and
+  refuse under `-EnableDynamicAgentLoading` alike, 17 attaches
+  silently).
 - **#6 Java stack source** — the agent captures the stack at
   the I/O boundary with `StackWalker` (decided by S1,
   2026-11-18); blanket method entry/exit instrumentation is a

@@ -36,9 +36,11 @@ views — happens on the controller.
     that contains it, compared in CLOCK_MONOTONIC, names the Java
     method and stack — S1), and writes the parquet segments.
 - **Java agent**
-  - Loaded via `-javaagent` (primary) or the attach API for live
-    processes — with JDK 21's dynamic-loading caveats, see
-    PLAN.md decision #2.
+  - Loaded via `-javaagent` (primary) or live-attached to a
+    running JVM by the tracer (`run -agent`, `iormesh attach`,
+    speaking HotSpot's attach protocol itself) — with JDK 21's
+    dynamic-loading caveats, see PLAN.md decision #2 and
+    [java-attach.md](java-attach.md).
   - Instruments only the JDK methods where Java hands I/O to the
     kernel and captures the Java stack there. Cost follows the
     I/O rate, not the call rate; blanket method entry/exit

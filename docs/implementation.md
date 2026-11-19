@@ -2029,6 +2029,8 @@ agent/
 magefile_agent.go, magefile_agenttest.go
 internal/agentspool/    # Go reader for the ring (cgo-free)
 internal/correlate/javajoin.go
+internal/javaattach/    # live attach: HotSpot's attach protocol (step 10)
+internal/cli/attach.go  # `iormesh attach`, `run -agent`
 ```
 
 **Steps**
@@ -2939,6 +2941,43 @@ internal/correlate/javajoin.go
    `ExpectedHTTP` and promoted `method-flow`'s and the HTTP
    scenarios' pending files to `expect.json`; step 8 (task 4b4)
    promoted `otel`'s, the last one.
+10. Live attach (done, task ge4; decision #2). Until then the
+    agent's `agentmain` existed but nothing loaded it: S1 used a
+    throwaway `Attach.java`. `internal/javaattach` speaks
+    HotSpot's attach protocol from Go — no JDK on the tracer
+    host, every step under a context deadline: if
+    `/proc/<pid>/root/tmp/.java_pid<nspid>` is missing, it
+    creates `.attach_pid<nspid>` in `/proc/<pid>/cwd` (else the
+    JVM's `/tmp`; `O_EXCL|O_NOFOLLOW`), sends one SIGQUIT
+    through a pidfd and polls for the socket; checks the socket
+    is one and owned by the JVM's euid or root; sends protocol
+    1's `load instrument false <jar>=spool=<dir>` and judges the
+    reply (status line, then `return code: 0`, or the JVM's
+    message — `Dynamic agent loading is not enabled` becomes
+    `ErrDynamicLoadingDisabled`). SIGQUIT kills what does not
+    handle it, so a process without `libjvm.so` mapped, without
+    SIGQUIT in `SigCgt` (a JVM still starting), or with
+    `-XX:+DisableAttachMechanism` in its command line or
+    `JAVA_TOOL_OPTIONS`/`JDK_JAVA_OPTIONS` is refused unsignalled
+    (`-Xrs` JVMs start their listener at startup and attach
+    without a signal). `internal/cli/attach.go` adds `iormesh
+    attach -pid -agent -spool [-timeout]` and `run -agent JAR`
+    (needs `-spool`): the latter loads into the session's
+    starting processes from a goroutine while the main one keeps
+    handling records, prints one line per pid, then polls the
+    spool so the new rings are marked before `-ready`. A load
+    the JVM confirmed but that left no `<spool>/<pid>.ring` (the
+    agent disabled itself; checked only for a JVM in the
+    tracer's mount namespace) is reported as such. The tracer
+    now prints `java agent of pid N joined, K natives probed`
+    when it marks a JVM — what `iormesh attach`'s user and
+    `TestJavaLiveAttach` wait for. Scenario `live-attach` and
+    the three tests: [testing.md](testing.md#live-attach-task-ge4);
+    user-facing caveats: [java-attach.md](java-attach.md).
+    Checked on 17.0.19 (by hand), 21.0.12, 25.0.4 and 27-ea+35
+    (`IORMESH_ATTACH_JDKS`). Not built: attaching to JVMs a
+    pattern session finds on exec (they are still starting) and
+    across mount namespaces (M7, #14).
 
 **Done when**: PLAN.md's M3 acceptance holds.
 
