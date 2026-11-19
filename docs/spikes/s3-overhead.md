@@ -213,8 +213,8 @@ consumer slower.
   bystander 0.3–2.5× — noise-dominated on this host; the folding
   removes the ring-buffer work per call, not the tracepoint and
   map lookups, so the bystander tax is unchanged by design. A
-  quiet-host run is still due for those two items before M2's
-  acceptance.
+  run by #25's paired CPU-time method (task md4) is still due
+  for those two items; it gates M3's acceptance.
 - **Volume** per event is unchanged (~330 B), but per syscall it
   fell by three orders of magnitude on this load: the volume
   run's 100 000 syscalls are 94 events, 32 KB of NDJSON, 3 KB at
@@ -320,11 +320,16 @@ so it can make a ratio look better as well as worse.
 
 | #25 item | Budget | Measured |
 |----------|--------|----------|
-| tracer CPU | ≤ 2 µs per emitted event | **open**: the folded burst (83–151 events) shows only the idle-target fixed cost; not re-measured per event here — wc4 gave 1.5–2.0 µs (boundary), and the unfolded volume run gives a rough (1370 − 1260 ms) / 40 065 events ≈ 2.7 µs, above budget |
+| tracer CPU | ≤ 2 µs per emitted event | **open** (task md4): the folded burst (83–151 events) shows only the idle-target fixed cost; not re-measured per event here — wc4 gave 1.5–2.0 µs (boundary), and the unfolded run gives a rough (1370 − 1260 ms) / 40 067 events ≈ 2.7 µs, above budget but weak: two separate runs at 10 ms CPU granularity |
 | bystander | ≤ 1.25× at 4 threads, quiet host | **open**: 1.17× (runs 1.20, 1.14, 1.20) on a loaded host; 1 thread noisy (1.26–1.93) |
 | loss | 0 on scenarios, < 1 % on the burst | 0 records lost in every run at 1 and 4 threads (skipped programs counted); 0 in both integration runs |
 | volume | ≤ 30 B/event compressed | 325 B/event NDJSON, zstd -3 15.9 B/event (unfolded volume run, 100 067 events) |
 
-Loss and volume pass. The two timing items stay open until a
-quiet-host run; the rough per-event figure above suggests the
+Loss and volume pass. The two timing items moved to task md4
+(2026-11-19), which gates M3's acceptance: this host never gets
+quiet, so PLAN.md #25 now measures them load-tolerantly — the
+tracer's own CPU time per event, and the bystander as the median
+of ≥ 10 interleaved, pinned traced/untraced pairs on CPU time,
+with the wall-clock ratio recorded alongside. The limits are
+unchanged; the rough per-event figure above suggests the
 consumer may need another round of cuts.

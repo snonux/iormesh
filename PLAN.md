@@ -217,8 +217,9 @@ throwaway; its findings update this plan.
   scenarios lose nothing). NDJSON is ~326 B/event; zstd shrinks
   it 18×. Hot read/write loops therefore need in-kernel
   aggregation (ior's `syscall_aggregate_map`) in M2; decision #25
-  records the budget. A quiet-host re-run is due before M2's
-  acceptance.
+  records the budget. The two timing items are measured by the
+  load-tolerant paired CPU-time method in #25 (2026-11-19; this
+  host never gets quiet), tracked by task md4.
 
 ### M0 — Traceable test workload (Java): framework first
 
@@ -457,18 +458,21 @@ criterion here.
   run stays inside the overhead and volume budget (decision
   #25).
 
-  Status (2026-11-19): functionally accepted; the #25 timing
-  items are **open**. The integration suite (27 tests) is green
-  on two consecutive runs with zero loss; every edge case above
+  Status (2026-11-19): accepted; the two #25 timing items are
+  tracked by task md4, which gates M3's acceptance (not its
+  start — no M3 step reads a #25 number). The integration
+  suite (27 tests) is green on two consecutive runs with zero
+  loss; every edge case above
   is covered end to end (docs/testing.md, "M2 acceptance") — PID
   reuse and socket races too, since task id4 forces them with a
   Go helper (`workload/edgepeer`). Of the #25 budget, loss (0) and
   volume (15.9 B/event compressed) pass; the tracer-CPU and
   bystander timings were only taken on a loaded host (load ~3),
   which says little either way, and one rough unfolded run puts
-  tracer CPU at ~2.7 µs/event, above the 2 µs budget. A
-  quiet-host `measure.sh` run must settle them before M2 is
-  accepted in full (docs/spikes/s3-overhead.md, "M2 acceptance
+  tracer CPU at ~2.7 µs/event, above the 2 µs budget — a weak
+  figure (two separate runs at 10 ms CPU granularity) that md4
+  re-measures and profiles before M3's javajoin adds per-event
+  work (docs/spikes/s3-overhead.md, "M2 acceptance
   measurement"). Schema v1 is frozen outside `http`.
 
 ### M3 — Java agent: code-flow attribution
@@ -1011,12 +1015,20 @@ answer), and deferred.
      ≤ 2 µs per emitted event on `syscall-burst` (median) — one
      core then sustains 500 k events/s, five times M1, which
      together with aggregation covers the burst (task
-     wc4 brought it to ~1.5–2 µs on a busy host, quiet-host run
-     pending — s3-overhead.md, "Follow-up (wc4)");
+     wc4 brought it to ~1.5–2 µs on a busy host; re-measured
+     by task md4 — s3-overhead.md, "Follow-up (wc4)"). Measured
+     as the tracer's own user+sys CPU time per event, which
+     host load barely moves;
   2. *bystander cost* (host-wide, every untraced process) — M1:
      ~1.14× per syscall at 4 and 16 threads. Budget: ≤ 1.25× on
-     `syscall-burst` at 4 threads, measured on a quiet host
-     (load < 1), paid only while a trace runs;
+     `syscall-burst` at 4 threads, paid only while a trace runs.
+     Measured as the median of ≥ 10 interleaved traced/untraced
+     pairs, pinned with taskset (tracer on its own core), on the
+     bystander's user+sys CPU time; the wall-clock ratio is
+     recorded alongside, and if its median exceeds 1.25× while
+     CPU time passes, the item stays open and one run is taken
+     on a host with its background load paused (2026-11-19: the
+     quiet-host rule replaced, the limits unchanged);
   3. *loss* — M1: 16–42 % of ring records on a sustained burst,
      0 on a short burst and on the M0 scenarios. Budget: zero
      lost records on every M0/M2 scenario, and < 1 % on
@@ -1042,10 +1054,12 @@ answer), and deferred.
   within 1 ms — so declared single calls stay exact; the folded
   event carries `args.count` (≥ 2) and summed `bytes`; every
   other traced call of the thread flushes first; `iormesh run
-  -aggregate=false` turns it off for debugging. Enforcement: the budget is checked by a
-  documented `spikes/s3/measure.sh` run per milestone on a quiet
-  host (CI machines are too noisy for a perf gate); the
-  zero-loss criterion is part of the integration suite.
+  -aggregate=false` turns it off for debugging. Enforcement: the
+  budget is checked by a documented `spikes/s3/measure.sh` run
+  per milestone by the paired CPU-time method above, load
+  average recorded, not gated (CI machines are too noisy for a
+  perf gate); the zero-loss criterion is part of the integration
+  suite.
 - **#19 Runtime control** — the transient systemd unit (M4):
   graceful stop via SIGTERM, flag changes via stop-and-restart.
   No control file, no socket.

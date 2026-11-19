@@ -1041,8 +1041,9 @@ Runs on the M1 build. Result: `docs/spikes/s3-overhead.md`.
    the S3 reference. Step 3 took its traced and bystander runs
    with `spikes/s3/measure.sh` instead (it needs the tracer as
    root and per-run tracer CPU, which the baseline script does
-   not do); a quiet-host untraced baseline is still to be
-   recorded with this script before M2 acceptance.
+   not do); the untraced baseline is taken by the same script,
+   as interleaved pairs (#25's paired CPU-time method, task
+   md4).
 2. Add a load scenario to the workload: `syscall-burst --ops N
    --threads T` (tight 1-byte read/write loop on a temp file —
    the worst case per syscall). *Landed*
@@ -1693,8 +1694,9 @@ scenarios landing first (principle #1).
 
 **Done when**: PLAN.md's M2 acceptance holds, including the S3
 budget (decision #25) checked by a documented
-`spikes/s3/measure.sh` run on a quiet host — not a CI gate, CI
-machines are too noisy.
+`spikes/s3/measure.sh` run by #25's paired CPU-time method — not
+a CI gate, CI machines are too noisy. M2's two timing items moved
+to task md4, which gates M3's acceptance.
 
 ## S1 — Java↔syscall join
 
