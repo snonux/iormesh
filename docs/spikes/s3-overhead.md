@@ -307,3 +307,21 @@ not a quiet host: the figures are rough, medians of 3.
   +2 % after zstd -3; the table holds one line per distinct
   stack (~200 for the non-java-peer run: a JVM start-up plus the
   Go peer).
+
+## M2 acceptance measurement (2026-11-19)
+
+`spikes/s3/measure.sh` on HEAD (all M2 families default, folding
+on), S3_OPS=200000, 1 and 4 threads, 3 runs —
+`spikes/s3/results-m2/`; a volume run with `-aggregate=false` —
+`spikes/s3/results-m2-noagg/`. Load average 2.8–3.1: **not the
+quiet host (< 1) #25 asks for**, so the timings are upper bounds.
+
+| #25 item | Budget | Measured |
+|----------|--------|----------|
+| tracer CPU | ≤ 2 µs per emitted event | burst folds to 83–151 events, so tracer CPU equals the idle-target fixed cost; per individual event 1.5–2.0 µs (wc4) |
+| bystander | ≤ 1.25× at 4 threads | 1.17× (runs 1.20, 1.14, 1.20); 1 thread noisy (1.26–1.93) |
+| loss | 0 on scenarios, < 1 % on the burst | 0 records lost in every run at 1 and 4 threads (skipped programs counted); 0 in both integration runs |
+| volume | ≤ 30 B/event compressed | 324 B/event NDJSON, zstd -3 15.9 B/event (unfolded volume run, 100 067 events) |
+
+All four items are inside the budget even on this loaded host; a
+quiet-host re-run should only tighten the timings.

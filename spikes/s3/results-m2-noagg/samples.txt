@@ -1,0 +1,9 @@
+# S3 samples 2026-11-19T03:03:04Z commit dc10e7f
+# kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
+# java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
+# ops=20000 threads=1 runs=1 tracer_flags=-aggregate=false
+# run 1 threads 1 loadavg 2.56 2.82 2.71
+mode=untraced threads=1 ops=20000 elapsed_ns=29672983
+mode=traced threads=1 ops=20000 elapsed_ns=45986491 tracer_cpu_ms=1370 lost=0 kernel_lost=0 events=40067 ndjson_bytes=13012067
+mode=bystander threads=1 ops=20000 elapsed_ns=37175550 tracer_cpu_ms=1260 events=2
+mode=volume threads=1 ops=50000 lost=0 events=100067 ndjson_bytes=32512173 zstd3_bytes=1595905 zstd19_bytes=1159284

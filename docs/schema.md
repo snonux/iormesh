@@ -6,8 +6,9 @@ and PLAN.md ("Trace output contract"); this file says what is on
 disk. The Go form — and the authority when this file lags — is the
 cgo-free package `internal/schema`.
 
-Version 1 is a **draft**: spikes S1 (Java ↔ syscall join) and S2 (cross-host
-join) have reported and settled their fields; what M3 still owns (`http`) is
+Version 1 is frozen outside `http` since M2's acceptance (2026-11-19):
+spikes S1 (Java ↔ syscall join) and S2 (cross-host join) settled their
+fields, and M2 the rest of the traced surface. What M3 still owns (`http`) is
 marked *provisional*. Fields are only ever appended, and appended fields are
 optional, so an older reader never sees a changed meaning.
 

@@ -455,6 +455,16 @@ criterion here.
   run stays inside the overhead and volume budget (decision
   #25).
 
+  Status (2026-11-19): accepted. The 25-test integration suite
+  is green on two consecutive runs with zero loss; every edge
+  case above is covered (docs/testing.md, "M2 acceptance"),
+  PID reuse and socket races at root/unit level only, with
+  integration-level tests as a follow-up task. The #25 budget
+  holds on all four items, measured on a loaded host (load ~3),
+  so the timings are upper bounds (docs/spikes/s3-overhead.md,
+  "M2 acceptance measurement"). Schema v1 is frozen outside
+  `http`.
+
 ### M3 — Java agent: code-flow attribution
 
 Gated by S1 — done; the design below is S1's result

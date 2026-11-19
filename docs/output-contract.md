@@ -8,8 +8,11 @@ the plan is the source of truth.
   (typed nodes + edges), per-run summary rollup; documented
   in-repo in [schema.md](schema.md). The v1 *draft* (M1) is
   the cgo-free `internal/schema` package; S1 and S2 have
-  settled the Java and cross-host fields, and it stays a draft
-  until M3 settles `http`.
+  settled the Java and cross-host fields. With M2's acceptance
+  (2026-11-19) every field outside `http` is **frozen**: its
+  name, type and meaning no longer change, only new optional
+  fields and kinds are appended. `http` stays provisional until
+  M3 settles it.
   Readers are strict: a record with an unknown or mis-cased
   key, a missing or null field, another schema version or an
   unknown event kind is rejected, never half-read.

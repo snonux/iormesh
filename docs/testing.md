@@ -179,6 +179,28 @@ before the gate fails. `internal/buildgate` keeps that list
 equal to the tests the package declares. Set `IORMESH_IT_KEEP=DIR`
 to keep a failed test's trace directories.
 
+### M2 acceptance (2026-11-19)
+
+`mage integrationTest`: 25 tests, two consecutive full runs green
+on HEAD, no skips, zero lost records. PLAN.md's M2 edge cases map
+to the suite as follows:
+
+| Edge case | Proven by |
+|-----------|-----------|
+| fd reuse and aliasing | `TestFdLifecycle` (golden: reuse, dup, inherited stdio) |
+| exec | `TestFdLifecycle` (child exec, CLOEXEC), `TestArgvSecretRedacted` |
+| pattern restarts (new PID, same app) | `TestRestartPattern` (two incarnations, one app node) |
+| threaded I/O | `TestSyscallBurstFoldsEveryCall` (2 threads, folded counts exact) |
+| loopback pairs | `TestWalkingSkeleton`, `TestTCPFamilies` (v4, v6), `TestUnixSocket`, `TestUDPLoopback`, `TestPipeIPC` |
+| non-Java peer | `TestNonJavaPeer`, `TestNativeStacks` |
+| PID reuse | root/unit level only: exit cleanup of `target_map` (`TestFollowForkExec`), `TestExecWatchExitedBeforeAdopt`, `internal/target` `TestAlive` |
+| socket races | root level only: `TestSockResetBeforeAcceptNotRegistered`, `TestSockFailedConnectUnregisters` |
+
+The last two rows are not yet integration tests — forcing a PID
+reuse or a reset race end to end needs a dedicated harness; a
+follow-up task tracks it. The decision #25 budget run is recorded
+in docs/spikes/s3-overhead.md ("M2 acceptance measurement").
+
 ## Performance baselines
 
 S3 (PLAN.md, decision #25) measures overhead against a load the
