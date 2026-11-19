@@ -66,7 +66,10 @@ const (
 // Tracer is one loaded BPF object with its links and ring-buffer reader.
 type Tracer struct {
 	module *bpf.Module
-	links  []*bpf.BPFLink
+	links  []link
+	// slots counts the filled dispatch slots (attachSlot): with none, the
+	// raw_syscalls dispatchers stay detached.
+	slots int
 	// javaLinks are the Java mark's uprobe links per JVM pid
 	// (AttachJavaMarks), guarded by javaMu.
 	javaLinks map[uint32][]*bpf.BPFLink
@@ -84,7 +87,8 @@ type Tracer struct {
 }
 
 // Open loads the object, excludes the tracer itself, fills target_map,
-// attaches cfg.Probes and starts delivering records. On any error
+// attaches cfg.Probes - the syscall ones through the raw_syscalls dispatch
+// (dispatch.go) - and starts delivering records. On any error
 // everything acquired so far is released again.
 func Open(cfg Config) (_ *Tracer, err error) {
 	quietLibbpf()
@@ -105,8 +109,11 @@ func Open(cfg Config) (_ *Tracer, err error) {
 	if probes == nil {
 		probes = DefaultProbes()
 	}
-	t.links, t.skipped, err = attachProbes(probes, t.attachTracepoint, (*bpf.BPFLink).Destroy)
+	t.links, t.skipped, err = attachProbes(probes, t.attachProbe, destroyLink)
 	if err != nil {
+		return nil, err
+	}
+	if err := t.attachDispatchers(); err != nil {
 		return nil, err
 	}
 	if err := t.startReader(cfg.Buffer); err != nil {

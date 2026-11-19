@@ -32,8 +32,8 @@ type Losses struct {
 	// the ring buffer (userspace backpressure), summed over CPUs.
 	Kernel uint64
 	// Missed is how often the kernel skipped one of the attached programs
-	// because another BPF program was running on that CPU (recursion
-	// misses, progmiss.go). It is possible loss, not lost records: the
+	// - the raw_syscalls dispatchers and the other tracepoint programs -
+	// under its recursion guard (recursion misses, progmiss.go). It is possible loss, not lost records: the
 	// skip comes before the program's target filter, so it counts
 	// untraced processes' calls too and only bounds the target records
 	// lost from above (task vd4). Hence it is not in Total; it reaches

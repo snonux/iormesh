@@ -20,22 +20,30 @@ import "C"
 
 import "fmt"
 
-// Program runs the kernel skipped (task vc4). A tracepoint program is not
-// run when another BPF program is already running on that CPU - the
-// kernel's recursion guard (bpf_prog_active, trace_call_bpf) - and the
-// skip is visible only as the program's recursion_misses counter. Under
-// concurrent load on Linux 7.2 the read/write handlers of a syscall burst
-// were skipped thousands of times per run: a skip of a target's call
-// loses the enter or exit record it would have written (or, for a held
-// read/write, the call itself), and the trace showed them only as
-// unpaired exits. So the misses are reported, as skipped_runs drops.
+// Program runs the kernel skipped (task vc4). The kernel does not run a
+// tracepoint program while its recursion guard is raised, and the skip is
+// visible only as the program's recursion_misses counter: a skip of a
+// target's call loses the enter or exit record it would have written (or,
+// for a held read/write, the call itself). So the misses are reported, as
+// skipped_runs drops.
 //
 // They are not lost records, though (task vd4): the guard skips the
 // program before its target filter runs, so the count includes every
-// untraced process's syscalls that hit the guard - on a host with other
-// BPF tracers, hundreds during a two-record trace. Nothing runs that
-// could tell whose call it was, so the count is only an upper bound on
-// the target records lost and stays out of Losses.Total.
+// untraced process's syscalls that hit the guard. Nothing runs that could
+// tell whose call it was, so the count is only an upper bound on the
+// target records lost and stays out of Losses.Total.
+//
+// Which guard (task 8e4): on Linux 7.2 a per-syscall tracepoint program
+// ran preemptibly behind a per-program guard, so a task preempted inside
+// it skipped the same syscall of every other task on that CPU - up to a
+// time slice of calls per preemption, the target's among them. Syscall
+// handlers therefore run behind the raw_syscalls dispatchers
+// (internal/c/dispatch.c), which run with preemption disabled; what can
+// still skip them, and the other classic tracepoint programs, is the
+// host-wide bpf_prog_active guard, held by another BPF program on that
+// CPU or by a task preempted inside a bpf() map syscall. Those are the
+// programs whose misses are read here (Tracer.progFDs): the tail-called
+// handlers are never skipped on their own.
 
 // readProgMisses sums the recursion misses of the programs behind fds.
 func readProgMisses(fds []int, read func(fd int) (uint64, error)) (uint64, error) {

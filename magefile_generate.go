@@ -4,7 +4,8 @@
 // diff gate and their helpers).
 // Changes: IOR_FORCE_GENERATE renamed to IORMESH_FORCE_GENERATE; split out
 // of the main Magefile; long helpers split under 50 lines; a failing
-// scan or sort of the result lines is an error instead of a silent fallback.
+// scan or sort of the result lines is an error instead of a silent fallback;
+// Generate also writes the syscall number tables (task 8e4).
 
 package main
 
@@ -24,8 +25,10 @@ import (
 	"iormesh/internal/generate"
 )
 
-// Generate regenerates the C tracepoint handlers, the Go tracepoint list and
-// the Go types from the running kernel's syscall tracepoints.
+// Generate regenerates the C tracepoint handlers, the Go tracepoint list,
+// the Go types from the running kernel's syscall tracepoints, and the
+// per-arch syscall number tables of the raw_syscalls dispatch
+// (magefile_sysnum.go).
 //
 // The C step is diff-gated: if the derived result file would change (another
 // kernel, another tracepoint set), it aborts without touching the tree.
@@ -34,9 +37,9 @@ func Generate() error {
 	fmt.Println("Generating tracepoint and type artifacts...")
 	if forceGenerateFromEnv() {
 		fmt.Println("Force generation enabled – ignoring diff checks.")
-		mg.SerialDeps(GenerateTracepointsCForce, GenerateTracepointsGo, GenerateTypesGo)
+		mg.SerialDeps(GenerateTracepointsCForce, GenerateTracepointsGo, GenerateTypesGo, GenerateSyscallNumbersGo)
 	} else {
-		mg.SerialDeps(GenerateTracepointsC, GenerateTracepointsGo, GenerateTypesGo)
+		mg.SerialDeps(GenerateTracepointsC, GenerateTracepointsGo, GenerateTypesGo, GenerateSyscallNumbersGo)
 	}
 	fmt.Println("Generation complete.")
 	return nil

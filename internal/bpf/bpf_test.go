@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 	"unsafe"
@@ -282,7 +284,7 @@ type fakeAttach struct {
 	destroyed       int
 }
 
-func (f *fakeAttach) attach(p Probe) (*bpf.BPFLink, error) {
+func (f *fakeAttach) attach(p Probe) (link, error) {
 	switch {
 	case f.missing[p.Event]:
 		return nil, fmt.Errorf("attach %s: %w", p, syscall.ENOENT)
@@ -293,7 +295,7 @@ func (f *fakeAttach) attach(p Probe) (*bpf.BPFLink, error) {
 	return &bpf.BPFLink{}, nil
 }
 
-func (f *fakeAttach) destroy(*bpf.BPFLink) error {
+func (f *fakeAttach) destroy(link) error {
 	f.destroyed++
 	return nil
 }
@@ -343,5 +345,47 @@ func TestAttachProbesRealErrorAborts(t *testing.T) {
 	}
 	if f.destroyed != 1 {
 		t.Fatalf("destroyed %d; want the half-attached read pair's enter detached", f.destroyed)
+	}
+}
+
+// TestEverySyscallProbeHasANumber: every syscall probe of every family has
+// a dispatch slot on the arches the tracer builds for (dispatch.go), so
+// none is silently reported missing on a kernel that has it. arm64 lacks
+// the legacy x86 syscalls; there they are absent from its kernel too.
+func TestEverySyscallProbeHasANumber(t *testing.T) {
+	if runtime.GOARCH != "amd64" {
+		t.Skipf("syscall tables are checked on amd64, the generation arch (GOARCH %s)", runtime.GOARCH)
+	}
+	for _, p := range ProbesFor(tracepoints.AllFamilies()) {
+		if !p.isSyscall() {
+			continue
+		}
+		name := strings.TrimPrefix(strings.TrimPrefix(p.Event, "sys_enter_"), "sys_exit_")
+		if _, ok := syscallNumbers[name]; !ok {
+			t.Errorf("%s: syscall %s has no number", p, name)
+		}
+	}
+	if syscallNumbers["read"] != 0 || syscallNumbers["newuname"] != 63 || syscallNumbers["sendfile64"] != 40 {
+		t.Errorf("read %d newuname %d sendfile64 %d, want x86_64's 0, 63, 40",
+			syscallNumbers["read"], syscallNumbers["newuname"], syscallNumbers["sendfile64"])
+	}
+}
+
+// TestDispatchersExist: the two raw_syscalls dispatchers are defined in
+// dispatch.c, exit side first, so the exit side runs before any enter is
+// recorded.
+func TestDispatchersExist(t *testing.T) {
+	src, err := os.ReadFile("../c/dispatch.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dispatchers[0].Event != "sys_exit" || dispatchers[1].Event != "sys_enter" {
+		t.Errorf("dispatchers %v, want the exit side first", dispatchers)
+	}
+	for _, p := range dispatchers {
+		sec := `SEC("tracepoint/` + p.Category + `/` + p.Event + `")` + "\nint " + p.Program + "("
+		if !strings.Contains(string(src), sec) {
+			t.Errorf("dispatch.c lacks %s", sec)
+		}
 	}
 }

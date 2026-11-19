@@ -76,9 +76,16 @@
 // Hand-written non-syscall tracepoints (sched:sched_process_exec, sched:sched_process_exit).
 #include "exec.c"
 
-// Auto-generated tracepoints. ior's raw-tracepoint dispatch prototype
-// (rawsyscall.c, task 703) is not lifted: it is opt-in there and S3 decides
-// whether iormesh needs cheaper dispatch.
+// Syscall dispatch (task 8e4): two classic raw_syscalls programs tail-call
+// the generated handlers by syscall number, because Linux 7.2 lets a
+// per-syscall tracepoint program be preempted and then skips the other
+// tasks' calls on that CPU. After exec.c, whose compat test it shares.
+#include "dispatch.c"
+
+// Auto-generated tracepoints, run through dispatch.c's program arrays. ior's
+// raw-tracepoint dispatch prototype (rawsyscall.c, task 703) is not lifted:
+// its raw tracepoints keep the preemptible recursion guard dispatch.c
+// avoids.
 #include "generated_tracepoints.c"
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
