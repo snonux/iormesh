@@ -433,7 +433,7 @@ header() {
         echo "# java $(java -version 2>&1 | head -1); workdir fs $(df -T "${TMPDIR:-/tmp}" | awk 'NR==2{print $2}')"
         echo "# ops=$ops threads=$threads runs=$runs pairs=$pairs modes=$modes" \
             "kind_ops=$kind_ops tracer_cpu=$tracer_cpu load_cpus=$load_cpus" \
-        "tracer_flags=${tracer_flags[*]}"
+            "tracer_flags=${tracer_flags[*]}"
     } >>"$samples"
 }
 

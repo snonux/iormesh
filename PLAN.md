@@ -523,11 +523,16 @@ criterion here.
   CPU-time method on the same busy host: tracer CPU 1.2 µs/event
   at 1 thread and 1.7 µs at 4 (unfolded, medians of 5), the
   bystander 1.19× and 1.15× at 4 threads (CPU time, two sets of
-  10 pairs; wall clock 1.21× and 1.14×) — all four #25 items pass
-  (before 8e4's dispatch; ae4 re-ran the bystander after it,
-  1.16× and 1.14×, and found no tracer-CPU regression)
+  10 pairs; wall clock 1.21× and 1.14×) — all four #25 items
+  passed at that moderate load (before 8e4's dispatch). ae4
+  re-ran both after it: the bystander passes (1.16× and
+  1.14×); tracer CPU shows no 8e4 regression but is over 2 µs
+  at load ≥ 10 (3.0 / 3.1 µs; the build before 8e4 likewise),
+  so that item passes at moderate load (md4) and is over at
+  load ≥ 10 (ae4); 5b4 re-measures it
   (docs/spikes/s3-overhead.md, "M2 acceptance measurement",
-  "Follow-up (md4)" and "Follow-up (ae4)"). Schema v1 is frozen outside `http`.
+  "Follow-up (md4)" and "Follow-up (ae4)"). Schema v1 is
+  frozen outside `http`.
 
 ### M3 — Java agent: code-flow attribution
 
@@ -1144,17 +1149,24 @@ answer), and deferred.
      wc4 brought it to ~1.5–2 µs on a busy host; task md4
      measured 1.2 µs at 1 thread and 1.7 µs at 4, unfolded,
      medians of 5 — s3-overhead.md, "Follow-up (wc4)" and
-     "Follow-up (md4)"). With the Java join (`-spool`, every
+     "Follow-up (md4)"; at md4's load, 4.6–9, the item passes).
+     Task ae4 (after 8e4's dispatch, load 9.8–11.8): 3.0 µs at
+     1 thread and 3.1 µs at 4, over budget; interleaved against
+     the build before 8e4 at load 8–14, 2.18 / 3.55 µs before
+     and 2.08 / 2.15 µs after — no 8e4 regression, but both
+     builds over 2 µs at load ≥ 10 (s3-overhead.md, "Follow-up
+     (ae4)"); M3's acceptance (5b4) re-measures it, the limit
+     unchanged. With the Java join (`-spool`, every
      event joined): 5.2 µs, over budget — task ud4, gating M3's
      acceptance (5b4); td4's Java mark measured +0.7 µs per
      marked event on top, within the host's noise
      (s3-overhead.md, "Follow-up (td4)"). Measured as the
-     tracer's own user+sys CPU time per event from its ready file to its exit (load
-     and attach excluded), which host load moves less than wall
-     time — not nothing: on a loaded SMT host one thread's CPU
+     tracer's own user+sys CPU time per event from its ready
+     file to its exit (load and attach excluded), which host
+     load moves less than wall time — not nothing: on a loaded SMT host one thread's CPU
      time still spreads 2–3×, hence medians of ≥ 5 runs;
   2. *bystander cost* (host-wide, every untraced process) — M1:
-     ~1.14× per syscall at 4 and 16 threads. Budget: ≤ 1.25× on
+     ~1.14× per traced-kind syscall at 4 and 16 threads. Budget: ≤ 1.25× on
      `syscall-burst` at 4 threads, paid only while a trace runs.
      Measured as the median of ≥ 10 interleaved traced/untraced
      pairs, pinned with taskset (tracer on its own core), on the
@@ -1634,7 +1646,7 @@ can reconstruct behavior and check it against source code:
   `raw_syscalls` perf path. Task ae4 measured it by #25's
   paired method (s3-overhead.md, "Follow-up (ae4)"): the gated
   `syscall-burst` bystander 1.16× and 1.14× at 4 threads
-  (passes); a pure `getppid` loop ~2.0× (+~0.2 µs per call),
+  (passes); a pure `getppid` loop ~2.0× (+0.2–0.3 µs per call),
   recorded, not gated. Of that, the dispatcher programs are
   ~5 % of the loop's cycles and the kernel's perf-tracepoint
   path the rest, so no dispatcher fast path is worth adding.

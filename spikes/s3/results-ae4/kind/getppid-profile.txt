@@ -1,3 +1,4 @@
+# sudo perf record -e cycles -- taskset -c 1 getppid 1 5000000 (11532 samples), beside an iormesh run -pid <idle sleep> pinned to CPU 3, commit 1255da6; perf report --sort sym --stdio, top 30
     14.13%  [k] entry_SYSCALL_64
     13.95%  [k] clear_bhb_loop
     10.76%  [k] trace_call_bpf

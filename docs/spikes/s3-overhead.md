@@ -588,8 +588,8 @@ traces `getppid`, so before 8e4 it met no iormesh program at all.
 | 4 | **2.05×** | 2.00× | +60–360 ns | 10.3–13.2 |
 
 An untraced `getppid` costs 120–320 ns of CPU here (clock frequency
-follows host load); beside a trace it costs about twice that, about
-+0.2 µs per call — 8e4's kernel-instruction count (443 → 1142 per
+follows host load); beside a trace it costs about twice that, +0.2–0.3 µs
+per call (pair medians: +287 ns at 1 thread, +194 ns at 4) — 8e4's kernel-instruction count (443 → 1142 per
 call) said the same. This is a pure-syscall loop, the worst case:
 nothing in it dilutes the per-call tax, which is why it is recorded,
 not gated (#25 gates `syscall-burst`). Where the time goes (`perf
@@ -598,7 +598,8 @@ record` of the 1-thread loop beside an idle trace,
 are 4.9 % of the loop's cycles; the kernel's perf-tracepoint path
 around them — `trace_call_bpf` 10.8 %, `trace_syscall_enter`/`exit`
 12.3 %, `perf_trace_*`, the buffer and recursion-context helpers and
-RCU ~19 % — is the rest of the added cost. So a cheaper dispatcher
+RCU ~19 % (part of the RCU share is `getppid`'s own) — is the
+rest of the added cost. So a cheaper dispatcher
 fast path (testing the program-array slot first, or a pid pre-filter
 before the tail call; the handlers already filter on entry) could
 recover at most ~5 % of the loop: not taken. The only cut that
@@ -616,9 +617,13 @@ S3_THREADS="1 4"`, `results-ae4/cpu/`): 3.0 µs at 1 thread and
 3.1 µs at 4, medians of 5, at load 9.8–11.8 — against md4's 1.2 and
 1.7 µs at load 4.6–9. The dispatch changes only kernel-side work,
 so the gap was checked against the commit before 8e4 (`8bfd6c5`),
-built in a worktree and run interleaved with `1255da6` (three
-rounds of two runs each, base first; one base run failed to start
-its JVM within the timeout under load; `results-ae4/cpu-ab/`):
+built in a worktree and run interleaved with `1255da6`, base
+first (`results-ae4/cpu-ab/`): the base build in three rounds —
+two runs per thread count in `base-1` and `base-2`, and `base-3`
+cut short after one run per thread count, when a burst JVM did
+not start within the timeout under load (so it has no
+`summary.txt`) — and `1255da6` in two rounds, `head-1` and
+`head-2`, two runs per thread count each:
 
 | Build | 1 thread, ns/event median | 4 threads, ns/event median | Load average |
 |--|--:|--:|--:|
@@ -626,15 +631,17 @@ its JVM within the timeout under load; `results-ae4/cpu-ab/`):
 | 8e4 (`1255da6`), 4 runs each | 2084 (1690–3530) | 2153 (1876–3555) | 9.1–13.3 |
 
 No regression from 8e4: the two builds overlap, the newer one no
-slower. The absolute figure on a host at load 10 and more is over
-2 µs for both builds — the tracer's core 3 shares its SMT sibling,
-CPU 7, with the rest of the host — so it says nothing new about the
-budget; md4's figures stand, and M3's acceptance (5b4) re-measures
-the item anyway. Loss in the unfolded 4-thread runs is the full
+slower. But every median of both builds at load 10 and more is
+over the 2 µs budget (ae4's own 3.0 / 3.1 µs; the A/B's 2.18 /
+3.55 µs before 8e4 and 2.08 / 2.15 µs after) — the tracer's core 3
+shares its SMT sibling, CPU 7, with the rest of the host. So the
+item passes at moderate load (md4, 4.6–9) and is over at load
+≥ 10 (ae4); the limit stays, and M3's acceptance (5b4)
+re-measures it. Loss in the unfolded 4-thread runs is the full
 ring, as in md4; skipped runs were 0 in every run.
 
 | #25 item | Budget | ae4 verdict |
 |----------|--------|-------------|
 | bystander | ≤ 1.25× at 4 threads (CPU-time median of ≥ 10 pairs) | **passes** with 8e4's dispatch: 1.16× and 1.14× in two sets of 10 pairs; wall clock 1.16× and 1.19× (guard not tripped) |
-| bystander, untraced kind | recorded, not gated | ~2.0× on a pure `getppid` loop (+~0.2 µs per call), the perf-tracepoint path's price |
-| tracer CPU | ≤ 2 µs per emitted event (median) | no regression from 8e4 (A/B, interleaved); md4's 1.2/1.7 µs stand |
+| bystander, untraced kind | recorded, not gated | ~2.0× on a pure `getppid` loop (+0.2–0.3 µs per call), the perf-tracepoint path's price |
+| tracer CPU | ≤ 2 µs per emitted event (median) | passes at moderate load (md4: 1.2/1.7 µs at load 4.6–9), **over at load ≥ 10** (ae4: 3.0/3.1 µs; A/B 2.08/2.15 µs after 8e4, 2.18/3.55 µs before); no 8e4 regression; 5b4 re-measures |
