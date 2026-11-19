@@ -1,5 +1,6 @@
 package iormesh.agent;
 
+import iormesh.agent.http.ApacheHttpClient;
 import iormesh.agent.http.Async;
 import iormesh.agent.http.JdkDns;
 import iormesh.agent.http.JdkHttpClient;
@@ -38,13 +39,13 @@ final class HttpHooks {
      * v1's libraries (decision #22): the JDK's own three first, then the
      * JDK's name lookups (decision #8, task wd4: DNS records, not
      * requests), then the third-party ones of the app's class path in
-     * #22's order (task de4): Servlet, … Each is built with the bridge's
-     * handles for requests completing on another thread (Async), which
-     * only HttpClient's sendAsync needs.
+     * #22's order (task de4): Servlet, Apache HttpClient, … Each is
+     * built with the bridge's handles for requests completing on another
+     * thread (Async), which only HttpClient's sendAsync needs.
      */
     private static final List<Function<Async, Library>> LIBRARIES = List.of(
             a -> new JdkHttpServer(), JdkHttpClient::new, a -> new JdkUrlConnection(),
-            a -> new JdkDns(), a -> new Servlet());
+            a -> new JdkDns(), a -> new Servlet(), a -> new ApacheHttpClient());
 
     private final List<Hook> hooks = new ArrayList<>();
     private final Map<String, Hook> byKey = new HashMap<>();

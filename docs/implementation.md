@@ -2588,6 +2588,8 @@ internal/correlate/javajoin.go
    agent/core/src/iormesh/agent/BridgeSight.java   # may this loader link the bridge?
    agent/core/src/iormesh/agent/http/Handles.java  # per-class public API lookups
    agent/core/src/iormesh/agent/http/Servlet.java  # jakarta + javax HttpServlet
+   agent/core/src/iormesh/agent/http/ApacheHttpClient.java # HttpClient 5 classic
+   agent/core/src/iormesh/agent/http/Slots.java    # a request's exchanges, per thread
    workload/libs/                                  # module, jar, vendored libs
    ```
 
@@ -2657,7 +2659,32 @@ internal/correlate/javajoin.go
    `TestHTTPServlet` (`http-servlet`: the JDK HttpClient against a
    servlet in an embedded Tomcat 10.1, one request thread).
 
-   Not yet: Apache HttpClient, OkHttp, Netty.
+   - **Apache HttpClient 5** (classic): `InternalHttpClient` and
+     `MinimalHttpClient.doExecute(HttpHost, ClassicHttpRequest,
+     HttpContext)` — what every `execute` overload reaches —
+     entry-stamped, target and request as the pair, record the
+     request on the calling thread when the response is handed
+     back (body unread). httpcore5's `HttpRequestExecutor.execute`
+     (one exchange on one connection) records nothing: its probe
+     finds the request's `doExecute` as the open hook and fills a
+     per-thread `Slots.Slot` — exchanges counted (a followed
+     redirect, an answered 401/407: the server saw each), the
+     connection's socket ends, the version spoken — which the
+     request's exit takes and clears both ways out. A request that
+     failed records nothing, unless an exchange had happened: then
+     the probe throws, a lost record (numbering stops, never
+     shifts). The causing method is the library's
+     `InternalHttpClient#doExecute`; the app's call is below it on
+     the stack. HttpClient 4.x (`org.apache.http`) is not hooked.
+
+   Tests (Apache): `AgentSmoke` executes one GET through the
+   vendored client in a `URLClassLoader` of its own, so the dump
+   must show `doExecute` and `execute` applied and recording on
+   every JDK of `IORMESH_AGENT_JDKS` (17, 21, 25, 27 checked);
+   `TestHTTPApache` (`http-apache`: the client against the JDK's
+   HttpServer).
+
+   Not yet: OkHttp, Netty.
 8. OTEL (done, task 4b4): read `Span.current().getSpanContext()`
    reflectively in the app's class loader at `enter` and add the
    ids to the bracket. No OTEL dependency in the agent. The `otel`

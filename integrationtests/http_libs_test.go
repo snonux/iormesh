@@ -56,3 +56,33 @@ func TestHTTPServlet(t *testing.T) {
 		})
 	})
 }
+
+// TestHTTPApache: http-apache's pair (task de4) — Apache HttpClient 5's
+// classic client against the JDK's HttpServer — records the client's
+// http events through the agent's Apache hooks in the app's class
+// loader: one per request on the calling thread, after the read that
+// brought the response, caused by InternalHttpClient#doExecute (the
+// library's own frame; the app's call is below it on the stack), on the
+// connection its exchange used, with sizes and a latency, numbered 1–3,
+// so both ends pair.
+func TestHTTPApache(t *testing.T) {
+	enableParallelIfRequested(t)
+	got, want := traceLibs(t, "http-apache")
+	t.Run("wrong expectations are caught", func(t *testing.T) {
+		assertCaught(t, got, want, map[string]func(*normalize.Expectation){
+			// Declared event 13 is the client's first http event.
+			"the app's frame": func(x *normalize.Expectation) {
+				j := *x.Events[13].Java
+				j.Method = "iormesh.workload.libs.ApacheFetch#call"
+				x.Events[13].Java = &j
+			},
+			"another ordinal": func(x *normalize.Expectation) {
+				n := uint32(1)
+				httpOf(x, 16).ReqSeq = &n
+			},
+			"another host": func(x *normalize.Expectation) {
+				httpOf(x, 13).Host = "localhost"
+			},
+		})
+	})
+}

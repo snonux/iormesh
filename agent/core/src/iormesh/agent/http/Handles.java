@@ -77,6 +77,15 @@ final class Handles {
         }
     }
 
+    /**
+     * virtual with the method's return type named (binary name, "[L…;"
+     * for an array) and found in owner's loader: a library type the probe
+     * has no class literal for.
+     */
+    static MethodHandle virtual(Class<?> owner, String name, String ret, Class<?>... params) {
+        return virtual(owner, name, sibling(owner, ret), params);
+    }
+
     /** h(self), or null when h is (a method the API lacks). */
     static Object call(MethodHandle h, Object self) throws Throwable {
         return h == null ? null : (Object) h.invokeExact(self);

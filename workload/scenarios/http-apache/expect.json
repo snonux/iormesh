@@ -1,0 +1,30 @@
+{"scenario": "http-apache",
+ "schema_version": 1,
+ "events": [
+   {"process": "$p1", "thread": "$t1", "event": "accept", "args": {"local_port": "$port1"}, "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t1", "event": "read", "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t1", "event": "write", "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t1", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "iormesh.workload.scenarios.HttpServe#handle"}, "http": {"method": "GET", "scheme": "http", "path": "/apache/hello", "status": 200, "req_seq": 1, "req_bytes": 0, "resp_bytes": 5}},
+   {"process": "$p1", "thread": "$t1", "event": "read", "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t1", "event": "write", "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t1", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "iormesh.workload.scenarios.HttpServe#handle"}, "http": {"method": "POST", "scheme": "http", "path": "/apache/echo", "status": 200, "req_seq": 2, "req_bytes": 5, "resp_bytes": 5}},
+   {"process": "$p1", "thread": "$t1", "event": "read", "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t1", "event": "write", "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t1", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "iormesh.workload.scenarios.HttpServe#handle"}, "http": {"method": "GET", "scheme": "http", "path": "/apache/missing", "status": 404, "req_seq": 3, "req_bytes": 0, "resp_bytes": 0}},
+   {"process": "$p2", "thread": "$t2", "event": "connect", "args": {"remote_port": "$port1"}, "fd": "$fd2", "attribution": "java"},
+   {"process": "$p2", "thread": "$t2", "event": "write", "fd": "$fd2", "attribution": "java"},
+   {"process": "$p2", "thread": "$t2", "event": "read", "fd": "$fd2", "attribution": "java"},
+   {"process": "$p2", "thread": "$t2", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "org.apache.hc.client5.http.impl.classic.InternalHttpClient#doExecute"}, "http": {"method": "GET", "scheme": "http", "host": "127.0.0.1", "path": "/apache/hello", "status": 200, "req_seq": 1, "req_bytes": 0, "resp_bytes": 5}},
+   {"process": "$p2", "thread": "$t2", "event": "write", "fd": "$fd2", "attribution": "java"},
+   {"process": "$p2", "thread": "$t2", "event": "read", "fd": "$fd2", "attribution": "java"},
+   {"process": "$p2", "thread": "$t2", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "org.apache.hc.client5.http.impl.classic.InternalHttpClient#doExecute"}, "http": {"method": "POST", "scheme": "http", "host": "127.0.0.1", "path": "/apache/echo", "status": 200, "req_seq": 2, "req_bytes": 5, "resp_bytes": 5}},
+   {"process": "$p2", "thread": "$t2", "event": "write", "fd": "$fd2", "attribution": "java"},
+   {"process": "$p2", "thread": "$t2", "event": "read", "fd": "$fd2", "attribution": "java"},
+   {"process": "$p2", "thread": "$t2", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "org.apache.hc.client5.http.impl.classic.InternalHttpClient#doExecute"}, "http": {"method": "GET", "scheme": "http", "host": "127.0.0.1", "path": "/apache/missing", "status": 404, "req_seq": 3, "req_bytes": 0, "resp_bytes": 0}},
+   {"process": "$p2", "thread": "$t2", "event": "close", "fd": "$fd2", "attribution": "java"}
+ ],
+ "edges": [
+   {"type": "connected", "from": "$p1", "to": "conn:$c1", "state": "fused"},
+   {"type": "connected", "from": "$p2", "to": "conn:$c1", "state": "fused"}
+ ],
+ "must_not_appear": []}

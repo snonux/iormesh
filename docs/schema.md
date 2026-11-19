@@ -643,7 +643,10 @@ With `-spool`, the agent's HTTP hooks (decision #22, M3 step 7)
 add one `http` event per request a JVM made or answered through
 the JDK's HttpServer, HttpClient (`send`) or HttpURLConnection,
 or a third-party library (task de4): a servlet container's
-`HttpServlet` (Servlet API, jakarta or javax).
+`HttpServlet` (Servlet API, jakarta or javax), Apache HttpClient 5's
+classic client (stamped when it hands the response back, its start
+when `execute` reached the client's `doExecute`; sizes from the
+request's entity and the response's `Content-Length`).
 It is not a syscall: it is stamped when the request completed —
 the server's exchange was closed by the handler (or the handler
 returned without closing it), the client's `send` returned, the
@@ -750,7 +753,8 @@ server's event of one HTTP/1 request pair by (`conn_id`,
 - from the first request on a connection that took several HTTP
   exchanges on: HttpClient following a redirect or answering a
   401/407 through its authenticator, HttpURLConnection doing the
-  same (an interim `100 Continue` counts too) — the server saw
+  same (an interim `100 Continue` counts too), Apache HttpClient
+  doing either (every exchange its executor ran) — the server saw
   each exchange as a request, the caller one, and the ends' counts
   no longer agree.
 

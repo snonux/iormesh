@@ -24,12 +24,16 @@ import java.nio.file.attribute.BasicFileAttributes;
  * The target of `mage agentTest`'s smoke run under each JDK: does a
  * little of every hook kind of the tables (file streams,
  * RandomAccessFile, Files stat/move/delete, a TCP loopback connection
- * with a shutdown) and one request through each HTTP hook's library, so
- * the agent's debug dump shows its
+ * with a shutdown) and one request through each HTTP hook's library (a
+ * third-party one, Apache HttpClient, too: task de4), so the agent's
+ * debug dump shows its
  * hooks fired on that JDK. Compiled for 17 like the agent, unlike the
  * workload (21), so it also runs on the 17 variant's JDK. Prints "ok".
  */
 public final class AgentSmoke {
+    /** Apache HttpClient 5 and its dependencies, vendored for the workload (task de4). */
+    static final Path APACHE_JARS = Path.of("workload", "libs", "third_party", "httpclient5");
+
     private AgentSmoke() {}
 
     public static void main(String[] args) throws Exception {
@@ -85,8 +89,44 @@ public final class AgentSmoke {
             }
             c.getInputStream().readAllBytes();
             c.disconnect();
+            apache(uri);
         } finally {
             server.stop(0);
+        }
+    }
+
+    /**
+     * One GET through Apache HttpClient 5 (task de4), the vendored jars of
+     * the workload's third-party module in a class loader of their own —
+     * an application loader the agent has to find and check, like a web
+     * app's — and called reflectively (the agent's tests compile without
+     * them), so the dump shows the third-party hooks applied and recording
+     * on this JDK. Run from the repository root, as `mage agentTest` does.
+     */
+    private static void apache(URI uri) throws Exception {
+        java.util.List<java.net.URL> urls = new java.util.ArrayList<>();
+        try (java.util.stream.Stream<Path> jars = Files.list(APACHE_JARS)) {
+            for (Path p : (Iterable<Path>) jars.sorted()::iterator) {
+                if (p.toString().endsWith(".jar")) {
+                    urls.add(p.toUri().toURL());
+                }
+            }
+        }
+        try (java.net.URLClassLoader l = new java.net.URLClassLoader(
+                urls.toArray(new java.net.URL[0]), AgentSmoke.class.getClassLoader())) {
+            Class<?> clients = l.loadClass("org.apache.hc.client5.http.impl.classic.HttpClients");
+            Object client = clients.getMethod("createDefault").invoke(null);
+            Object get = l.loadClass("org.apache.hc.client5.http.classic.methods.HttpGet")
+                    .getConstructor(URI.class).newInstance(uri);
+            Class<?> req = l.loadClass("org.apache.hc.core5.http.ClassicHttpRequest");
+            Object resp = client.getClass().getMethod("execute", req).invoke(client, get);
+            int code = (int) l.loadClass("org.apache.hc.core5.http.HttpResponse")
+                    .getMethod("getCode").invoke(resp);
+            ((AutoCloseable) resp).close();
+            ((AutoCloseable) client).close();
+            if (code != 200) {
+                throw new IllegalStateException("http smoke: apache " + code);
+            }
         }
     }
 

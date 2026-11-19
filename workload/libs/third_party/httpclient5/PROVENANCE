@@ -1,0 +1,58 @@
+Apache HttpClient 5.6.5 with its dependencies — vendored, unmodified, for
+the third-party HTTP workload module (workload/libs, M3, task de4).
+
+What:     org.apache.httpcomponents.client5:httpclient5:5.6.5   (the classic
+                                                         client the
+                                                         scenario drives)
+          org.apache.httpcomponents.core5:httpcore5:5.4.4       (its HTTP/1.1
+                                                         core)
+          org.apache.httpcomponents.core5:httpcore5-h2:5.4.4    (its HTTP/2
+                                                         core; a compile
+                                                         dependency, unused
+                                                         by the classic
+                                                         client)
+          org.slf4j:slf4j-api:1.7.36                            (its logging
+                                                         API; no binding,
+                                                         so SLF4J prints a
+                                                         note on stderr and
+                                                         logs nothing)
+          These are httpclient5's Maven dependencies (compile scope, not
+          optional) at the versions its 5.6.5 pom names. The http-apache
+          scenario's client, so the agent's Apache HttpClient hooks
+          (decision #22) are exercised against the real library; the
+          agent's smoke run (mage agentTest) loads them too.
+From:     https://repo1.maven.org/maven2/org/apache/httpcomponents/client5/httpclient5/5.6.5/
+          https://repo1.maven.org/maven2/org/apache/httpcomponents/core5/httpcore5/5.4.4/
+          https://repo1.maven.org/maven2/org/apache/httpcomponents/core5/httpcore5-h2/5.4.4/
+          https://repo1.maven.org/maven2/org/slf4j/slf4j-api/1.7.36/
+Fetched:  2026-11-19
+SHA-1:    httpclient5   4540cf4269d2e4a713a434a01e195af29e1ef9e1
+          httpcore5     fb236f682f1eaae1abec9b60e940158ac369f15b
+          httpcore5-h2  90c30ff56e226bdb96cf5c987aebc42e1a8a9f45
+          slf4j-api     6c62681a2f655b49963a5983b8b0950a6120ae14
+          (each matches Maven Central's .jar.sha1)
+SHA-256:  httpclient5   a10b555f7c85a720d1011a086d679d854b155816cde91a40198cc98c2b0867e8
+          httpcore5     b08e3c3a440fec2029e89980134c7c787dd6796454641ad1eafb81478d7e8b0b
+          httpcore5-h2  9a61441889f9b222ce99581977cc549b4dfca7ac9d2841582c1e57a31fa65b48
+          slf4j-api     d3ef575e3e4979678dc01bf1dcce51021493b4d11fb7f1be8ad982877c16a1c0
+License:  Apache-2.0 for the HttpComponents jars (LICENSE.txt, each jar's
+          identical META-INF/LICENSE; NOTICE.txt, their three
+          META-INF/NOTICE files). MIT for SLF4J (LICENSE-slf4j.txt, from
+          the v_1.7.36 tag of https://github.com/qos-ch/slf4j; the jar
+          ships none).
+
+Why vendored: the workload build is JDK-only (no Maven or Gradle) and must
+work offline. The core workload stays free of third-party code (PLAN.md
+decision #5); only workload-libs.jar runs against these jars, named in
+its manifest's Class-Path, not copied into it. `mage workloadLibsBuild`
+checks the SHA-256s above before compiling.
+
+Why this version: httpclient5 5.6.5 is the newest release at least two
+weeks old on the fetch date; the core versions are the ones its pom pins.
+The classic client is Java 8 bytecode, so the smoke run loads it on every
+JDK the agent supports (decision #29: 17+).
+
+To update: download the jars of the new version (and the versions its pom
+pins) from Maven Central, compare each SHA-1 with the published .sha1,
+replace the jars and license files, and update the versions, the hashes
+here and libsJars in magefile_libs.go in the same commit.

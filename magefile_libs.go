@@ -34,10 +34,16 @@ const (
 type vendoredJar struct{ path, sha256 string }
 
 // libsJars are workload/libs's vendored jars: Tomcat's embeddable core
-// (the Servlet API and container) with the annotations API it depends on.
+// (the Servlet API and container) with the annotations API it depends
+// on; Apache HttpClient 5 with httpcore5 (and its HTTP/2 module) and the
+// SLF4J API, its Maven dependencies.
 var libsJars = []vendoredJar{
 	{"tomcat/tomcat-embed-core-10.1.61.jar", "57b8e4bdb3a49163c3a6a501929240531523c111ff53844c9f82efba60f789f7"},
 	{"tomcat/tomcat-annotations-api-10.1.61.jar", "8d408d675d89da99f86171ead3067f9e947accf722e3785e6775e9af387ff3a6"},
+	{"httpclient5/httpclient5-5.6.5.jar", "a10b555f7c85a720d1011a086d679d854b155816cde91a40198cc98c2b0867e8"},
+	{"httpclient5/httpcore5-5.4.4.jar", "b08e3c3a440fec2029e89980134c7c787dd6796454641ad1eafb81478d7e8b0b"},
+	{"httpclient5/httpcore5-h2-5.4.4.jar", "9a61441889f9b222ce99581977cc549b4dfca7ac9d2841582c1e57a31fa65b48"},
+	{"httpclient5/slf4j-api-1.7.36.jar", "d3ef575e3e4979678dc01bf1dcce51021493b4d11fb7f1be8ad982877c16a1c0"},
 }
 
 // WorkloadLibsBuild builds workload-libs.jar, the third-party HTTP
@@ -114,7 +120,7 @@ func packModuleJar(jar, classes, resources string, classPath []string) error {
 
 // libsScenarios are workload-libs.jar's scenarios, one per hooked
 // library (decision #22's order).
-var libsScenarios = []string{"http-servlet"}
+var libsScenarios = []string{"http-servlet", "http-apache"}
 
 // checkLibsScenarios runs workload-libs.jar's scenarios (task de4) the
 // way checkOtelScenario runs the OTEL flavor: each self-test, --list and
