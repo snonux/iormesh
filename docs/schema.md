@@ -419,17 +419,30 @@ How it is captured and what it can and cannot say:
   `tcp_state`, `signal`, `exec`).
 - **Ids are per process image**: the same kernel stack in two
   processes, or before and after an exec, gets two ids, since
-  the addresses mean different code.
-- **Symbolization** happens in the tracer, from
-  `/proc/<pid>/maps` read at the image's first stack (re-read
-  when a later address lies outside every mapping, e.g. after a
-  `dlopen`) and the mapped files, opened through
-  `/proc/<pid>/root` right then and parsed on a worker
-  goroutine (`.symtab` and `.dynsym`). A process that exited
-  before its first stack was handled keeps raw addresses only;
-  a stripped binary keeps module, offset and build id, which is
-  what an offline symbolizer needs (`addr2line -e FILE OFFSET`
-  after mapping the offset through the file's segments).
+  the addresses mean different code. The stack record carries
+  the image's `mm->arg_start`, which every exec draws anew and
+  `/proc/<pid>/stat` shows as field 48.
+- **Symbolization** happens in the tracer. At an image's first
+  stack it reads `/proc/<pid>/maps` and believes it only when
+  `/proc/<pid>/stat` shows the record's incarnation and image
+  tag before and after — so a process that exec'd, exited or
+  whose pid was reused before the tracer got to the record
+  keeps bare addresses, never another image's names. The maps
+  are re-read when a later address lies outside every mapping
+  (a `dlopen`); an address that stays uncovered is remembered,
+  not re-read for. The mapped files are opened right then
+  through `/proc/<pid>/map_files/<range>` — the very file the
+  mapping holds, no path lookup the traced process could steer
+  — non-blocking, and only regular files are kept; a worker
+  goroutine parses them (`.symtab`, `.dynsym`, build id) with a
+  panic guard, since the files are the traced process's. Parsed
+  files are cached by device, inode, size and mtime for the
+  session, so a reused inode is another file. A stripped binary
+  keeps module, offset and build id, which is what an offline
+  symbolizer needs (`addr2line -e FILE OFFSET` after mapping the
+  offset through the file's segments). The table forgets a
+  process at its exec and exit, so a long session holds only the
+  live ones.
 - **Walks follow frame pointers**. Go binaries and C built with
   frame pointers (Fedora's default) unwind to `main`; the JVM's
   own C++ frames (libjvm) do too, but interpreted and

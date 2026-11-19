@@ -279,10 +279,14 @@ not a quiet host: the figures are rough, medians of 3.
 
 - **Per traced call, in the kernel**: ~1.1 µs (1 thread, no
   fold: +450 ms over 400 000 calls) — the frame-pointer walk of
-  `bpf_get_stackid` plus a second, 32-byte ring record. Paid by
+  `bpf_get_stackid` plus a second ring record (32 bytes when
+  measured; review round 1 added the 8-byte image tag). Paid by
   the traced process only, and only for enters that are sent:
   with the default fold the burst sends ~85 events, so the walk
-  barely runs and the difference to the default is noise.
+  barely runs; the difference to the default is small but
+  visible on this loaded host (400 → 461 ms at 1 thread,
+  220 → 343 ms at 4, medians) — more than ~85 walks explain, so
+  part of it is load, which a quiet-host run should settle.
 - **Per event, in the tracer**: ~1 µs (+0.4 s over 400 000
   events): decoding the side record (reflective
   `binary.Read`), the pairing, and one map read per *distinct*

@@ -1502,12 +1502,12 @@ scenarios landing first (principle #1).
      read/write fold) and before its record
      (`renderStackHook`; `TestStackHookOnEveryEmittedEnter`
      pins the placement, `TestCommittedHandlersCallTheStackHook`
-     the committed file). It sends a 32-byte `stack_event` (tid,
-     the enter's own `now`, the id or the walk's negative errno)
-     ahead of the enter record. `IORMESH_NATIVE_STACKS` is a
-     load-time constant, so with the flag off the verifier prunes
-     the call and userspace shrinks `stack_map` to one entry
-     (it is preallocated, ~4.3 MB). User stacks only: at
+     the committed file). It sends a 40-byte `stack_event` (tid,
+     the enter's own `now`, the id or the walk's negative errno,
+     the image tag `mm->arg_start`) ahead of the enter record.
+     `IORMESH_NATIVE_STACKS` is a load-time constant, so with the
+     flag off the verifier prunes the call and userspace shrinks
+     `stack_map` to one entry (it is preallocated, ~4.3 MB). User stacks only: at
      `sys_enter` the kernel stack is the entry path.
    - **Correlator** (`internal/correlate/stacks.go`): a stack
      record is turned into a trace id by `Config.Stacks` and
@@ -1517,31 +1517,49 @@ scenarios landing first (principle #1).
      pays a length check. An exec tells the table a new image
      begins.
    - **Table** (`internal/stacks`, cgo-free): ids are per process
-     image (pid, incarnation, execs seen) and kernel id — the
-     same addresses in two images are two call sites — numbered
-     from 1. A new stack is read from the map
-     (`bpf.Tracer.StackTrace`), its image's maps are snapshotted
-     and the files they map opened right away (through
-     `/proc/<pid>/root`, inode-checked: on btrfs the maps line's
-     device is not the file's `st_dev`), because a short-lived
-     process takes both with it when it exits; the slow part —
-     parsing ELF symbol tables, a 20 MB libjvm once — runs on a
-     worker goroutine that writes `stacks.ndjson`. The first
-     version symbolized inline and resolved nothing for the
-     non-java-peer's Go peer: the correlator was still parsing
-     the JVM's libraries when the peer exited. Frames keep the
-     raw address and add module, file offset, GNU build id and
+     image and kernel id — the same addresses in two images are
+     two call sites — numbered from 1. The image is (pid,
+     incarnation, tag), the tag being `mm->arg_start`, which the
+     stack record carries and `/proc/<pid>/stat` shows (field
+     48); a snapshot of `/proc/<pid>/maps` is believed only when
+     stat shows the record's incarnation and tag before and after
+     the read, so a late record of an exec'd, exited or reused
+     process keeps bare addresses. A new stack is read from the
+     map (`bpf.Tracer.StackTrace`), its image's maps are
+     snapshotted and the files they map opened right away,
+     through `/proc/<pid>/map_files/<range>` (the mapped file
+     itself: no path under the traced process's control is
+     resolved as root), `O_NONBLOCK`, regular files only, because
+     a short-lived process takes both with it when it exits; the
+     slow part — parsing ELF symbol tables, a 20 MB libjvm once —
+     runs on a worker goroutine, behind a `recover` (debug/elf is
+     not hardened against hostile files), that writes
+     `stacks.ndjson`. Modules are cached by device, inode, size
+     and mtime; uncovered addresses are remembered per image; a
+     process's ids and snapshots are dropped at its exec and exit
+     (and a thread's parked stack at its exit). The first version
+     symbolized inline and resolved nothing for the
+     non-java-peer's Go peer: the correlator was still parsing the
+     JVM's libraries when the peer exited. Frames keep the raw
+     address and add module, file offset, GNU build id and
      `.symtab`/`.dynsym` symbol where known; the run's summary
      line adds `native stacks N (uncaptured M)`.
    - **Schema**: `Event.StackID` (`stack_id`, appended, optional)
      and `schema.Stack`/`StackFrame` with a strict reader
      (`ReadStacks`); docs/schema.md "Native stacks".
    Tests: `internal/stacks` (maps lines, build-id notes, symbol
-   lookup, this test binary's own mapping, a dead process's raw
-   addresses, id rules, a write error ending the trace), the
+   lookup; with a fake /proc: opening through `map_files`, a FIFO
+   there neither blocking nor parsed, another image or
+   incarnation keeping bare addresses, a known miss not
+   re-reading; garbage and corrupt ELF and `FuzzSafeReadModule`;
+   id rules, a write error ending the trace), the
    correlator's pairing (`stacks_test.go`), schema round trip
    and strictness, `TestOpenStacks*` (a stale table removed when
-   off); integration `TestNativeStacks` (non-java-peer with
+   off); root `TestNativeStacksOnlyWhenAsked` (a one-entry map
+   and no stack record without the flag; with it the full map
+   and a stack record stamped with the open's own time and a
+   non-zero image tag, readable back); integration
+   `TestNativeStacks` (non-java-peer with
    `-native-stacks`: the golden still passes, every `stack_id`
    resolves to a stack of its own process, and the Go peer's
    `accept4` and log `openat` stacks reach `main.*` in the

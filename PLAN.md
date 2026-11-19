@@ -435,7 +435,9 @@ criterion here.
   a per-trace `stack_id` and the stacks go once each into their
   own table, `stacks.ndjson`. Symbolization happens in the
   tracer, from `/proc/<pid>/maps` read at a process image's
-  first stack and the ELF symbol tables of the mapped files:
+  first stack (believed only while `/proc/<pid>/stat` still
+  shows the record's image) and the ELF symbol tables of the
+  mapped files, opened through `/proc/<pid>/map_files`:
   every frame keeps its raw address, plus module, file offset
   and GNU build id where the address lies in a file, so an
   offline symbolizer can redo what the tracer could not.
