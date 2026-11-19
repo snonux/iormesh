@@ -30,6 +30,7 @@ context" below).
 | `stacks.ndjson` | the native stack table, one stack per line; only with `-native-stacks` | `schema.StackWriter`, one line per new stack |
 | `methods.ndjson` | the Java method table; only with `-spool` (M3) | `schema.TableWriter[Method]`, one line per new frame |
 | `threads.ndjson` | the Java thread table; only with `-spool` (M3) | `schema.TableWriter[Thread]`, one line per agent THREAD record |
+| `classes.ndjson` | the Java class table (class-load map); only with `-spool` (M3) | `schema.TableWriter[Class]`, one line per new class a method row names |
 | `*.parquet` | the same events, columnar | M4 segment writer (to come) |
 
 `iormesh normalize -out DIR` writes the same two files for the
@@ -616,26 +617,50 @@ first event naming it:
 | `class`, `method` | string | the frame's binary class name and method name |
 | `file` | string, optional | the source file; absent when the class has no source attribute |
 | `line` | int, optional | the line; absent when unknown (no line table, a native method) |
+| `class_id` | int, optional | the frame's class in `classes.ndjson`; absent when the agent's description of it was lost |
 
 A frame is a method *and* a line, so two call sites in one method
-are two ids. Ids are keyed by the frame text alone, across JVMs;
-JAR and class loader come with the class-load map (a later M3
-step), appended as optional fields.
+are two ids. Ids are keyed by the frame text and its class: the
+same frame from two JARs (two classes) is two ids, from two JVMs
+running the same JAR one.
+
+`classes.ndjson` — the class-load map (task fe4): one line per
+class some method row names, written before the first method row
+naming it. The agent describes only classes on recorded stacks,
+not every class the JVM loads (PLAN.md M3, "Supporting
+mappings"). Rows are deduplicated across the trace's JVMs by
+class, loader and code source.
+
+```json
+{"schema_version":1,"class_id":2,
+ "class":"iormesh.workload.scenarios.MethodFlow$Journal","loader":"app",
+ "code_source":"/home/user/iormesh/workload.jar"}
+```
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `class_id` | int | the id `methods.ndjson` uses, from 1, unique in the trace |
+| `class` | string | the binary class name, as the method row has it |
+| `loader` | string | the defining loader: `bootstrap`, the loader's name (`app`, `platform`, a container's), else its class name |
+| `code_source` | string, optional | the JAR or class directory path, `jrt:/<module>` for the runtime image, another URL without userinfo, query or fragment; absent when the class has none (generated classes) |
 
 `threads.ndjson` — one line per agent THREAD record, the agent's
-own `iormesh-agent-watermark` thread included:
+own `iormesh-agent-watermark` thread included. A thread renamed
+after its first bracket gets another record (same
+`java_thread_id`, the new name) at its next bracket; its events
+from then on carry the new name:
 
 | Key | Type | Meaning |
 |-----|------|---------|
 | `pid`, `pid_incarnation` | int | the JVM |
 | `tid` | int | the kernel tid; `0` if the agent could not look it up; for a virtual thread the carrier of its first bracket only |
 | `java_thread_id` | int | `Thread.getId()` |
-| `name` | string | the thread's name at its first bracket |
+| `name` | string | the thread's name at its first bracket, or after a rename |
 | `virtual` | bool, optional | `true` for a virtual thread |
 
-Both tables carry `parquet:` tags for the M4 segment writer
-(`methods` and `threads` files, PLAN.md M3); until it exists they
-are NDJSON only.
+The tables carry `parquet:` tags for the M4 segment writer
+(`methods`, `threads` and `classes` files, PLAN.md M3); until it
+exists they are NDJSON only.
 
 ## HTTP events (M3)
 

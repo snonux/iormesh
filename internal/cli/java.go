@@ -16,7 +16,7 @@ import (
 
 // javaOutput is a -spool run's Java join (M3): the spool directory the
 // agents' rings appear in, the joiner between the correlator and the
-// events file, and the method and thread tables it fills. A nil
+// events file, and the method, thread and class tables it fills. A nil
 // *javaOutput is a run without -spool; its methods are no-ops then, as
 // stackOutput's are.
 type javaOutput struct {
@@ -25,6 +25,7 @@ type javaOutput struct {
 	dir     *agentspool.Dir
 	methods *schema.TableWriter[schema.Method]
 	threads *schema.TableWriter[schema.Thread]
+	classes *schema.TableWriter[schema.Class]
 	stderr  io.Writer
 	skipped int
 }
@@ -36,13 +37,13 @@ type javaMarker interface {
 	DetachJavaMarks(pid uint32) error
 }
 
-// openJava creates the spool directory and the two table files, or,
+// openJava creates the spool directory and the three table files, or,
 // without -spool, removes stale tables a previous run left in cfg.out:
 // they would describe ids no event of this trace carries. marker is the
 // tracer, opened with Config.JavaMarks when cfg.spool is set.
 func openJava(cfg runConfig, marker javaMarker, stderr io.Writer) (*javaOutput, error) {
 	if cfg.spool == "" {
-		return nil, removeStale(cfg.out, MethodsFile, ThreadsFile)
+		return nil, removeStale(cfg.out, MethodsFile, ThreadsFile, ClassesFile)
 	}
 	if err := agentspool.MakeSpool(cfg.spool); err != nil {
 		return nil, err
@@ -50,17 +51,31 @@ func openJava(cfg runConfig, marker javaMarker, stderr io.Writer) (*javaOutput, 
 	if err := os.MkdirAll(cfg.out, 0o755); err != nil {
 		return nil, err
 	}
-	mf, err := os.Create(filepath.Join(cfg.out, MethodsFile))
+	files, err := createAll(cfg.out, MethodsFile, ThreadsFile, ClassesFile)
 	if err != nil {
 		return nil, err
 	}
-	tf, err := os.Create(filepath.Join(cfg.out, ThreadsFile))
-	if err != nil {
-		return nil, errors.Join(err, mf.Close())
-	}
 	return &javaOutput{dir: agentspool.NewDir(cfg.spool), marker: marker, stderr: stderr,
-		methods: schema.NewTableWriter[schema.Method](mf),
-		threads: schema.NewTableWriter[schema.Thread](tf)}, nil
+		methods: schema.NewTableWriter[schema.Method](files[0]),
+		threads: schema.NewTableWriter[schema.Thread](files[1]),
+		classes: schema.NewTableWriter[schema.Class](files[2])}, nil
+}
+
+// createAll creates the named files in dir, closing those already
+// created when one fails.
+func createAll(dir string, names ...string) ([]*os.File, error) {
+	files := make([]*os.File, 0, len(names))
+	for _, n := range names {
+		f, err := os.Create(filepath.Join(dir, n))
+		if err != nil {
+			for _, g := range files {
+				err = errors.Join(err, g.Close())
+			}
+			return nil, err
+		}
+		files = append(files, f)
+	}
+	return files, nil
 }
 
 // removeStale deletes the named files of dir that may be left over.
@@ -143,6 +158,9 @@ func (o *javaOutput) Method(m schema.Method) error { return o.methods.Write(m) }
 
 func (o *javaOutput) Thread(t schema.Thread) error { return o.threads.Write(t) }
 
+// Class makes javaOutput the joiner's class table (task fe4).
+func (o *javaOutput) Class(c schema.Class) error { return o.classes.Write(c) }
+
 // poll lets the joiner read the rings while the stream is idle.
 func (o *javaOutput) poll() error {
 	if o == nil || o.join == nil {
@@ -157,7 +175,7 @@ func (o *javaOutput) close() error {
 	if o == nil {
 		return nil
 	}
-	return errors.Join(o.methods.Close(), o.threads.Close())
+	return errors.Join(o.methods.Close(), o.threads.Close(), o.classes.Close())
 }
 
 // summary is the Java part of the run's summary line: rings read (and

@@ -57,7 +57,8 @@ type JavaJoin struct {
 	// syscall that ended before it whose process had no ring then never
 	// will have a bracket (the agent maps its ring before its first one).
 	scanned uint64
-	methods map[string]uint64 // frame text → method id
+	methods map[methodKey]uint64    // frame of a class → method id
+	classes map[schema.Class]uint64 // class row (id 0) → class id
 	// cookies numbers the natives the hook tables reach, by JNI symbol:
 	// the id a native's uprobe carries in its marks, from 1 (0 is the
 	// mark's "innermost native unknown"), shared by every JVM.
@@ -93,11 +94,13 @@ type AgentRing interface {
 	Close() error
 }
 
-// JavaTables receives the method and thread tables (methods.ndjson,
-// threads.ndjson). An error ends the trace, as a sink error does.
+// JavaTables receives the method, thread and class tables
+// (methods.ndjson, threads.ndjson, classes.ndjson). An error ends the
+// trace, as a sink error does.
 type JavaTables interface {
 	Method(schema.Method) error
 	Thread(schema.Thread) error
+	Class(schema.Class) error
 }
 
 // JavaJoinConfig configures a JavaJoin. Next, Tables and Scan are
@@ -204,8 +207,9 @@ func NewJavaJoin(cfg JavaJoinConfig) *JavaJoin {
 	cfg.Timeout = orDefault(cfg.Timeout, defaultTimeout)
 	cfg.Grace = orDefault(cfg.Grace, defaultGrace)
 	cfg.Retain = orDefault(cfg.Retain, defaultRetain)
-	return &JavaJoin{cfg: cfg, jvms: map[uint32]*jvm{}, methods: map[string]uint64{},
-		conns: newConnIndex(), policy: redact.Default(),
+	return &JavaJoin{cfg: cfg, jvms: map[uint32]*jvm{}, methods: map[methodKey]uint64{},
+		classes: map[schema.Class]uint64{},
+		conns:   newConnIndex(), policy: redact.Default(),
 		cookies: map[string]uint64{}, marks: map[uint32]*markQueue{}, tick: tick}
 }
 

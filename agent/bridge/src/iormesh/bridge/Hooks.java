@@ -222,7 +222,7 @@ public final class Hooks {
     private static long[] caller() {
         Brackets t = STATE.get();
         Ring r = ring;
-        if (r != null && !t.described && System.nanoTime() >= t.retryAt) {
+        if (r != null && describeDue(t)) {
             describe(t, r);
         }
         // Walked inside the probe: its frames are dropped too. Off like
@@ -412,7 +412,7 @@ public final class Hooks {
         t.busy = true;
         try {
             Ring r = ring;
-            if (r != null && !t.described && System.nanoTime() >= t.retryAt) {
+            if (r != null && describeDue(t)) {
                 describe(t, r);
             }
             t.stacks[d] = stacks.getAsLong();
@@ -662,7 +662,7 @@ public final class Hooks {
             if (s == null || s.length < 2) {
                 return false;
             }
-            if (!t.described && System.nanoTime() >= t.retryAt) {
+            if (describeDue(t)) {
                 describe(t, r);
             }
             long stack = stacks.getAsLong();
@@ -718,7 +718,7 @@ public final class Hooks {
             if (meta[Ring.M_START] > mono) {
                 meta[Ring.M_START] = 0;   // a stamp from after the exit is no start
             }
-            if (!t.described && System.nanoTime() >= t.retryAt) {
+            if (describeDue(t)) {
                 describe(t, r);
             }
             long stack = stacks.getAsLong();
@@ -765,17 +765,30 @@ public final class Hooks {
     }
 
     /**
-     * Writes the thread's THREAD record (its first bracket, or the
-     * warm-up); a dropped one is retried at the next bracket, and the
-     * kernel tid lookup — a syscall — happens only once regardless.
-     * After a drop the retry waits RETRY_NS: under back-pressure every
-     * bracket would otherwise encode the name again (an allocation) only
-     * to be dropped again.
+     * Whether t's THREAD record is due: none written yet, or the thread
+     * was renamed since the last one (task fe4: the tracer names later
+     * events after the new name). Thread.getName() returns the field
+     * setName stored, so a rename is a new String and an identity
+     * compare finds it — one volatile read per bracket, no allocation.
+     * Either way a retry after a drop waits for retryAt.
+     */
+    private static boolean describeDue(Brackets t) {
+        return t.owner.getName() != t.described && System.nanoTime() >= t.retryAt;
+    }
+
+    /**
+     * Writes the thread's THREAD record (its first bracket, the warm-up,
+     * or the first bracket after a rename); a dropped one is retried at
+     * a later bracket, and the kernel tid lookup — a syscall — happens
+     * only once regardless. After a drop the retry waits RETRY_NS: under
+     * back-pressure every bracket would otherwise encode the name again
+     * (an allocation) only to be dropped again.
      */
     private static void describe(Brackets t, Ring r) {
-        t.described = r.thread(t.owner.getId(), t.kernelTid(),
-                t.virtual ? Ring.VIRTUAL : 0, t.owner.getName());
-        if (!t.described) {
+        String name = t.owner.getName();
+        if (r.thread(t.owner.getId(), t.kernelTid(), t.virtual ? Ring.VIRTUAL : 0, name)) {
+            t.described = name;
+        } else {
             t.retryAt = System.nanoTime() + RETRY_NS;
         }
     }

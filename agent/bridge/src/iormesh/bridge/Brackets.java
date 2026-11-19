@@ -70,8 +70,12 @@ final class Brackets {
      */
     java.lang.ref.WeakReference<Object> otelContext;
     int ktid = UNKNOWN_KTID;
-    /** Whether this thread's THREAD record reached the ring. */
-    boolean described;
+    /**
+     * The name this thread's last THREAD record carried (the very String
+     * getName returned then), null before one reached the ring: a
+     * different String means the thread was renamed (Hooks.describeDue).
+     */
+    String described;
     /** After a dropped THREAD, no retry before this nanoTime. */
     long retryAt;
     /**

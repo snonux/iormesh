@@ -27,8 +27,10 @@ const (
 	// HTTP records, 4 (task 4b4) OTEL ids: a BRACKET of bracketOtelLen
 	// and three more words in HTTP's fixed part, 5 (task wd4) the HTTP
 	// request's start stamp and body sizes, and DNS records; 6 (task wd4,
-	// review round 2) HTTP's async-marker and java.net.http flags.
-	Version = 6
+	// review round 2) HTTP's async-marker and java.net.http flags; 7
+	// (task fe4) CLASS records, a class id per frame in STACK, and
+	// sixteen drop counters, which moves dropped bytes and abandoned.
+	Version = 7
 	// magic is "IORMRING" as a little-endian word; the agent stores it
 	// last, so a reader that sees it sees a complete header.
 	magic = 0x474e49524d524f49
@@ -40,9 +42,9 @@ const (
 	offCreated      = 32
 	offHead         = 64
 	offTail         = 128
-	offDropped      = 192 // u64 per record type, 8 of them
-	offDroppedBytes = 256
-	offAbandoned    = 264
+	offDropped      = 192 // u64 per record type, droppedSlots of them
+	offDroppedBytes = offDropped + 8*droppedSlots
+	offAbandoned    = offDroppedBytes + 8
 	headerSize      = 4096
 
 	minCapacity = 1 << 16
@@ -51,7 +53,7 @@ const (
 	// wordLen is the record framing word: len | type << 32.
 	wordLen = 8
 	// droppedSlots is the number of per-type drop counters in the header.
-	droppedSlots = 8
+	droppedSlots = 16
 )
 
 // Record types, as written in the framing word's upper half.
@@ -64,6 +66,7 @@ const (
 	typeHook
 	typeHTTP
 	typeDNS
+	typeClass
 )
 
 // threadVirtual is THREAD's flag for a virtual thread (JDK 21+); every
@@ -89,6 +92,10 @@ const (
 // method, native, syscall allowlist.
 const hookStrings = 5
 
+// classStrings is the number of strings in a CLASS record (task fe4):
+// binary name, loader label, code source.
+const classStrings = 3
+
 // Fixed record lengths, framing word included.
 const (
 	bracketLen = wordLen + 40
@@ -97,9 +104,9 @@ const (
 	// The agent writes it only then, so an app without OTEL pays nothing.
 	bracketOtelLen = bracketLen + 24
 	watermarkLen   = wordLen + 8
-	// stringsHead is a STACK, THREAD or HOOK record's fixed part: the
-	// word, a u64 id, a u32 count or tid and a u32 of flags (THREAD's;
-	// zero in the others).
+	// stringsHead is a STACK, THREAD, HOOK or CLASS record's fixed part:
+	// the word, a u64 id, a u32 count or tid and a u32 of flags
+	// (THREAD's; zero in the others). A STACK's class ids follow it.
 	stringsHead = wordLen + 16
 	// httpHead is an HTTP record's fixed part: the word, mono, stack id
 	// and Java thread id (u64 each), ktid, status, the string count, the

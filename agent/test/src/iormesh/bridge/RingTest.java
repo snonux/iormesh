@@ -4,6 +4,7 @@ import static iormesh.agent.AgentTests.check;
 import static iormesh.agent.AgentTests.equal;
 
 import iormesh.agent.AgentTests;
+import iormesh.testprobe.ClassProbe;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -37,6 +38,9 @@ public final class RingTest {
                 new AgentTests.Case("ring/stale file replaced", RingTest::staleFile),
                 new AgentTests.Case("ring/hooks write records", RingTest::hooksWrite),
                 new AgentTests.Case("ring/hook table record", RingTest::hookRecord),
+                new AgentTests.Case("ring/class records ahead of stack", RingTest::classRecords),
+                new AgentTests.Case("ring/class labels", RingTest::classLabels),
+                new AgentTests.Case("ring/renamed thread described again", RingTest::renamed),
                 new AgentTests.Case("ring/virtual thread flagged", RingTest::virtualThread),
                 new AgentTests.Case("ring/watermark waits for closing", RingTest::watermark),
                 new AgentTests.Case("ring/release discards", RingTest::release));
@@ -163,6 +167,9 @@ public final class RingTest {
         }
         ByteBuffer b = map(r.path());
         List<Rec> recs = records(b);
+        // CLASS records come and go with what earlier cases described
+        // (ids are per JVM, not per ring): classRecords checks them.
+        recs = recs.stream().filter(x -> x.type() != Ring.CLASS).toList();
         equal(List.of(Ring.THREAD, Ring.STACK, Ring.BRACKET),
                 recs.stream().map(Rec::type).toList(), "record order");
         Rec th = recs.get(0);
@@ -197,6 +204,131 @@ public final class RingTest {
         equal(List.of("read", "java/io/FileInputStream", "read", "read0", "read,pread64"), got,
                 "strings");
         delete(dir);
+    }
+
+    /**
+     * A new stack's classes are described in CLASS records ahead of its
+     * STACK (task fe4), and the STACK names each frame's class id: the
+     * probe's frame its CLASS (binary name, the app loader, the test
+     * classes' path), the JDK's a non-zero id too.
+     */
+    static void classRecords() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
+        Hooks.configure(5, true, false);
+        Hooks.ring = r;
+        try {
+            Thread t = new Thread(() -> ClassProbe.run(() -> {
+                Hooks.enter(3);
+                Hooks.exit(3);
+            }), "ring-class-thread");
+            t.start();
+            t.join();
+        } finally {
+            Hooks.ring = null;
+        }
+        ByteBuffer b = map(r.path());
+        java.util.Map<Long, List<String>> classes = new java.util.HashMap<>();
+        Rec stack = null;
+        for (Rec x : records(b)) {
+            if (x.type() == Ring.CLASS) {
+                check(stack == null, "CLASS ahead of the STACK");
+                equal(3, b.getInt(x.off() + 16), "CLASS string count");
+                classes.put(b.getLong(x.off() + 8), strings(b, x.off() + 24, 3));
+            } else if (x.type() == Ring.STACK) {
+                stack = x;
+            }
+        }
+        check(stack != null, "a STACK");
+        int n = b.getInt(stack.off() + 16);
+        List<String> frames = strings(b, stack.off() + 24 + 8 * n, n);
+        String probe = ClassProbe.class.getName();
+        check(frames.get(0).startsWith(probe + "#run("), "innermost frame is the probe: " + frames);
+        for (int i = 0; i < n; i++) {
+            check(b.getLong(stack.off() + 24 + 8 * i) != ClassIds.NONE, "class id of frame " + i);
+        }
+        List<String> c = classes.get(b.getLong(stack.off() + 24));
+        String where = Path.of(ClassProbe.class.getProtectionDomain().getCodeSource()
+                .getLocation().toURI()).toString();
+        equal(List.of(probe, "app", where), c, "the probe's CLASS");
+        delete(dir);
+    }
+
+    /** Loader labels and code sources: boot, platform, app; credentials stripped. */
+    static void classLabels() throws Exception {
+        equal("bootstrap", ClassIds.loader(null), "boot loader");
+        equal("app", ClassIds.loader(RingTest.class.getClassLoader()), "app loader");
+        equal("java.net.URLClassLoader", ClassIds.loader(
+                new java.net.URLClassLoader(new java.net.URL[0])), "an unnamed loader");
+        equal("jrt:/java.base", ClassIds.codeSource(String.class), "a java.base class");
+        equal("jrt:/java.sql", ClassIds.codeSource(java.sql.Connection.class),
+                "a platform loader class");
+        equal("/opt/app/lib/x.jar", ClassIds.location(
+                new java.net.URL("file:/opt/app/lib/x.jar")), "a file URL is its path");
+        equal("https://repo.example:8443/lib/x.jar", ClassIds.location(
+                new java.net.URL("https://user:secret@repo.example:8443/lib/x.jar?token=t#f")),
+                "userinfo, query and fragment stripped");
+        equal("jar:https://repo.example/x.jar!/", ClassIds.location(
+                new java.net.URL("jar:https://u:p@repo.example/x.jar!/")),
+                "a nested authority's userinfo stripped");
+        equal("/srv/a@b/x?.jar", ClassIds.clean("/srv/a@b/x?.jar"), "a path is kept");
+        equal("jar:file:/app.jar!/BOOT-INF/lib/x.jar!/", ClassIds.location(
+                new java.net.URL("jar:file:/app.jar!/BOOT-INF/lib/x.jar!/")), "a nested jar");
+        Class<?> proxy = java.lang.reflect.Proxy.newProxyInstance(RingTest.class.getClassLoader(),
+                new Class<?>[] {Runnable.class}, (p, m, a) -> null).getClass();
+        equal("", ClassIds.codeSource(proxy), "a generated class has none");
+        Class<?> bootProxy = java.lang.reflect.Proxy.newProxyInstance(null,
+                new Class<?>[] {Runnable.class}, (p, m, a) -> null).getClass();
+        check(!ClassIds.codeSource(bootProxy).startsWith("jrt:"),
+                "a dynamic module is not the runtime image");
+    }
+
+    /**
+     * A thread renamed after its first bracket writes another THREAD at
+     * its next one (task fe4), and only then: an unchanged name is not
+     * described again.
+     */
+    static void renamed() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
+        Hooks.configure(5, false, false);
+        Hooks.ring = r;
+        try {
+            Thread t = new Thread(() -> {
+                Hooks.enter(3);
+                Hooks.exit(3);
+                Thread.currentThread().setName("ring-renamed");
+                Hooks.enter(3);
+                Hooks.exit(3);
+                Hooks.enter(3);
+                Hooks.exit(3);
+            }, "ring-before");
+            t.start();
+            t.join();
+        } finally {
+            Hooks.ring = null;
+            Hooks.configure(5, true, false);
+        }
+        ByteBuffer b = map(r.path());
+        List<Rec> recs = records(b);
+        equal(List.of(Ring.THREAD, Ring.BRACKET, Ring.THREAD, Ring.BRACKET, Ring.BRACKET),
+                recs.stream().map(Rec::type).toList(), "record order");
+        equal(List.of("ring-before"), strings(b, recs.get(0).off() + 24, 1), "first name");
+        equal(List.of("ring-renamed"), strings(b, recs.get(2).off() + 24, 1), "new name");
+        equal(b.getLong(recs.get(0).off() + 8), b.getLong(recs.get(2).off() + 8), "same thread");
+        delete(dir);
+    }
+
+    /** n strings (u32 length + UTF-8) from p. */
+    private static List<String> strings(ByteBuffer b, int p, int n) {
+        List<String> out = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            byte[] s = new byte[b.getInt(p)];
+            b.get(p + 4, s);
+            out.add(new String(s, java.nio.charset.StandardCharsets.UTF_8));
+            p += 4 + s.length;
+        }
+        return out;
     }
 
     /**

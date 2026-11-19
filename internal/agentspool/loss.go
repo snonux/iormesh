@@ -21,6 +21,10 @@ type Losses struct {
 	// DroppedDNS are DNS records (task wd4): host-to-address mappings the
 	// agent saw but could not deliver; the agent does not resend them.
 	DroppedDNS uint64
+	// DroppedClasses are CLASS records (task fe4): the agent retries one
+	// when a later new stack names the class, so each failed attempt
+	// counts; a frame whose class never arrived has no class_id.
+	DroppedClasses uint64
 	// DroppedOther is the per-type counters of types this reader does
 	// not know (a newer agent would bump Version first; kept for honesty).
 	DroppedOther uint64
@@ -38,7 +42,7 @@ type Losses struct {
 // Dropped is every record the agent dropped, all types.
 func (l Losses) Dropped() uint64 {
 	return l.DroppedBrackets + l.DroppedStacks + l.DroppedThreads + l.DroppedWatermarks +
-		l.DroppedHooks + l.DroppedHTTP + l.DroppedDNS + l.DroppedOther
+		l.DroppedHooks + l.DroppedHTTP + l.DroppedDNS + l.DroppedClasses + l.DroppedOther
 }
 
 // Total is every lost record, agent- and reader-side.

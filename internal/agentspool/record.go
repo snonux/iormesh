@@ -8,7 +8,7 @@ import (
 )
 
 // Record is one decoded ring record: a Bracket, Stack, Thread,
-// Watermark, Hook or HTTP.
+// Watermark, Hook, HTTP, DNS or Class.
 type Record interface {
 	isRecord()
 }
@@ -37,6 +37,24 @@ type Bracket struct {
 type Stack struct {
 	ID     uint64
 	Frames []string
+	// Classes are the frames' class ids (task fe4), one per frame: the
+	// Class record describing the frame's class, 0 when the agent could
+	// not describe it. Like stack ids, resolve them against everything
+	// read: a retried Class may follow the Stack naming it.
+	Classes []uint64
+}
+
+// Class is one entry of the agent's class-load map (task fe4): a class
+// some recorded frame names, with its class loader and code source. Its
+// id is per JVM, from 1.
+type Class struct {
+	ID   uint64
+	Name string // binary name, as in the frames
+	// Loader is "bootstrap", the loader's name, or its class name.
+	Loader string
+	// CodeSource is the JAR or class directory path, "jrt:/<module>",
+	// another location URL without credentials, or "" for none.
+	CodeSource string
 }
 
 // Thread maps a Java thread id to its kernel tid (0: lookup failed) and
@@ -83,6 +101,7 @@ func (Watermark) isRecord() {}
 func (Hook) isRecord()      {}
 func (HTTP) isRecord()      {}
 func (DNS) isRecord()       {}
+func (Class) isRecord()     {}
 
 // errMalformed marks a body that does not decode; the record is skipped
 // and counted, the ring stays readable.
@@ -111,6 +130,8 @@ func decode(typ uint32, rec []byte) (Record, error) {
 		return decodeHTTP(rec)
 	case typeDNS:
 		return decodeDNS(rec)
+	case typeClass:
+		return decodeClass(rec)
 	}
 	return nil, errMalformed
 }
@@ -141,19 +162,40 @@ func decodeBracket(rec []byte) (Record, error) {
 	return b, nil
 }
 
+// decodeStack reads n class ids after the fixed part, then n frames.
+// The count is checked against the record's length before anything is
+// allocated: n ids alone take 8n bytes.
 func decodeStack(rec []byte) (Record, error) {
 	if len(rec) < stringsHead {
 		return nil, errMalformed
 	}
 	n := le.Uint32(rec[16:])
-	if le.Uint32(rec[20:]) != 0 {
+	if le.Uint32(rec[20:]) != 0 || uint64(n) > uint64(len(rec)-stringsHead)/8 {
 		return nil, errMalformed
 	}
-	frames, err := decodeStrings(rec, stringsHead, n)
+	classes := make([]uint64, n)
+	for i := range classes {
+		classes[i] = le.Uint64(rec[stringsHead+8*i:])
+	}
+	frames, err := decodeStrings(rec, stringsHead+8*int(n), n)
 	if err != nil {
 		return nil, err
 	}
-	return Stack{ID: le.Uint64(rec[8:]), Frames: frames}, nil
+	return Stack{ID: le.Uint64(rec[8:]), Frames: frames, Classes: classes}, nil
+}
+
+// decodeClass checks a class-load map entry: a non-zero id, exactly three
+// strings, a name and a loader (the code source may be empty).
+func decodeClass(rec []byte) (Record, error) {
+	if len(rec) < stringsHead || le.Uint32(rec[16:]) != classStrings || le.Uint32(rec[20:]) != 0 {
+		return nil, errMalformed
+	}
+	id := le.Uint64(rec[8:])
+	f, err := decodeStrings(rec, stringsHead, classStrings)
+	if err != nil || id == 0 || f[0] == "" || f[1] == "" {
+		return nil, errMalformed
+	}
+	return Class{ID: id, Name: f[0], Loader: f[1], CodeSource: f[2]}, nil
 }
 
 func decodeThread(rec []byte) (Record, error) {

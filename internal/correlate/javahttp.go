@@ -314,7 +314,7 @@ func (j *JavaJoin) httpEvent(h pendingHTTP) (schema.Event, error) {
 	}
 	java := &schema.Java{Stack: stack}
 	if th, ok := v.threads[r.ThreadID]; ok && !th.Virtual {
-		java.Thread = th.Name
+		java.Thread = v.nameAt(th, r.ExitMono)
 	}
 	ev.Attribution, ev.Java = schema.AttributionJava, java
 	ev.Otel = otelOf(r.Otel) // with java only: the schema ties otel to it

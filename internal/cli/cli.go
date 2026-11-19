@@ -36,6 +36,9 @@ const (
 	// tables, written only by a -spool run (M3, task 2b4).
 	MethodsFile = "methods.ndjson"
 	ThreadsFile = "threads.ndjson"
+	// ClassesFile is the Java class table (the class-load map), written
+	// only by a -spool run (M3, task fe4).
+	ClassesFile = "classes.ndjson"
 )
 
 // errUsage marks a command-line error: reported with usage, exit 2.

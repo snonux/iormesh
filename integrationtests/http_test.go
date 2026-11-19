@@ -154,7 +154,7 @@ func TestHTTPRedaction(t *testing.T) {
 	want := expectation(t, "http-redaction")
 	assertGolden(t, got, want)
 	assertRequestsPaired(t, got.Events)
-	files := []string{eventsFile, graphFile, "methods.ndjson", "threads.ndjson"}
+	files := []string{eventsFile, graphFile, "methods.ndjson", "threads.ndjson", "classes.ndjson"}
 	for i, f := range files {
 		files[i] = filepath.Join(run.Dir, f)
 	}

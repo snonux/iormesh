@@ -43,11 +43,21 @@ func (r *fakeRing) Drain(fn func(agentspool.Record)) (int, error) {
 func (r *fakeRing) Losses() agentspool.Losses { return agentspool.Losses{DroppedBrackets: 1} }
 func (r *fakeRing) Close() error              { r.closed = true; return nil }
 
-// memTables collects the method and thread tables, validating each row.
+// memTables collects the method, thread and class tables, validating
+// each row.
 type memTables struct {
 	t       *testing.T
 	methods []schema.Method
 	threads []schema.Thread
+	classes []schema.Class
+}
+
+func (m *memTables) Class(row schema.Class) error {
+	if err := row.Validate(); err != nil {
+		m.t.Errorf("class %+v: %v", row, err)
+	}
+	m.classes = append(m.classes, row)
+	return nil
 }
 
 func (m *memTables) Method(row schema.Method) error {
@@ -111,7 +121,7 @@ const markLead = 10
 
 // ring puts a new ring for the JVM into the spool, already holding the
 // hook table (hook 1: write, hook 2: stat, hook 3: accept, hook 4: read)
-// and the main thread.
+// the main thread, and stack 10 with its two classes.
 func (jt *joinTest) ring(recs ...agentspool.Record) *fakeRing {
 	r := &fakeRing{hdr: agentspool.Header{Version: agentspool.Version, PID: jvmPID,
 		CreatedMono: jt.mono(jt.now)}}
@@ -125,8 +135,11 @@ func (jt *joinTest) ring(recs ...agentspool.Record) *fakeRing {
 		agentspool.Hook{ID: 4, Kind: "read", Class: "java/io/FileInputStream", Method: "read",
 			Native: "readBytes", Syscalls: []string{"read"}},
 		agentspool.Thread{ID: 1, KTID: mainTID, Name: "main"},
+		agentspool.Class{ID: 1, Name: "java.io.FileOutputStream", Loader: "bootstrap",
+			CodeSource: "jrt:/java.base"},
+		agentspool.Class{ID: 2, Name: "app.Main", Loader: "app", CodeSource: "/opt/app/app.jar"},
 		agentspool.Stack{ID: 10, Frames: []string{"java.io.FileOutputStream#writeBytes(FileOutputStream.java:-2)",
-			"app.Main#save(Main.java:12)"}},
+			"app.Main#save(Main.java:12)"}, Classes: []uint64{1, 2}},
 	}, recs...)
 	jt.spool = append(jt.spool, r)
 	return r

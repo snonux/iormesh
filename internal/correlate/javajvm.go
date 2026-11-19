@@ -73,8 +73,15 @@ type jvm struct {
 	// tid to its name, for the carrier of a virtual thread's I/O.
 	threads map[uint64]agentspool.Thread
 	names   map[int32]string
-	frames  map[uint64][]string // agent stack id → frames
-	stacks  map[uint64][]uint64 // agent stack id → method ids, resolved
+	// renames lists each renamed thread's later names (task fe4),
+	// in the order the agent wrote them (javaclass.go).
+	renames map[uint64][]rename
+	frames  map[uint64]agentspool.Stack // agent stack id → frames, class ids
+	stacks  map[uint64][]uint64         // agent stack id → method ids, resolved
+	// classes are the CLASS records by agent class id, classIDs the
+	// trace's class ids they were given (written when a frame names one).
+	classes  map[uint64]agentspool.Class
+	classIDs map[uint64]uint64
 	// brackets per kernel tid, by exit time: a thread closes its
 	// brackets one after another, so ring order is exit order per tid.
 	// Held by pointer, so adding a bracket is a map lookup, not a store.
@@ -102,8 +109,10 @@ func (v *jvm) incarnation() uint64 {
 func newJVM(r AgentRing, pid uint32, start, createdMono, created uint64) *jvm {
 	return &jvm{ring: r, pid: pid, start: start, created: created, createdMono: createdMono,
 		hooks: map[int32]hookInfo{}, threads: map[uint64]agentspool.Thread{},
-		names: map[int32]string{}, frames: map[uint64][]string{},
-		stacks: map[uint64][]uint64{}, brackets: map[int32]*bracketList{}}
+		names: map[int32]string{}, renames: map[uint64][]rename{},
+		frames: map[uint64]agentspool.Stack{}, stacks: map[uint64][]uint64{},
+		classes: map[uint64]agentspool.Class{}, classIDs: map[uint64]uint64{},
+		brackets: map[int32]*bracketList{}}
 }
 
 // owns says whether ev is of this ring's process, not of an earlier or
@@ -151,7 +160,9 @@ func (j *JavaJoin) record(v *jvm, rec agentspool.Record) error {
 	case agentspool.Thread:
 		return j.thread(v, r)
 	case agentspool.Stack:
-		v.frames[r.ID] = r.Frames
+		v.frames[r.ID] = r
+	case agentspool.Class:
+		v.classes[r.ID] = r
 	case agentspool.Watermark:
 		v.watermark = max(v.watermark, r.Mono)
 	case agentspool.Bracket:
@@ -174,11 +185,17 @@ func (j *JavaJoin) record(v *jvm, rec agentspool.Record) error {
 	return nil
 }
 
-// thread files a THREAD record and writes it to the thread table. Only a
-// platform thread's tid names a carrier: a virtual thread's is just
-// where it happened to start.
+// thread files a THREAD record and writes it to the thread table: a
+// thread's first, or a rename (a later one, task fe4), which names the
+// thread's later brackets. Only a platform thread's tid names a carrier:
+// a virtual thread's is just where it happened to start. A carrier is
+// named after its latest name.
 func (j *JavaJoin) thread(v *jvm, r agentspool.Thread) error {
-	v.threads[r.ID] = r
+	if first, ok := v.threads[r.ID]; ok {
+		v.rename(first, r.Name)
+	} else {
+		v.threads[r.ID] = r
+	}
 	if !r.Virtual && r.KTID > 0 {
 		v.names[r.KTID] = r.Name
 	}

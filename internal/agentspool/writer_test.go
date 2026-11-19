@@ -104,7 +104,25 @@ func (w *testWriter) bracket(b Bracket) bool {
 }
 
 func (w *testWriter) stack(s Stack) bool {
-	return w.raw(typeStack, stringsBody(s.ID, uint32(len(s.Frames)), s.Frames))
+	return w.raw(typeStack, stackBody(s.ID, uint32(len(s.Frames)), s.Classes, s.Frames))
+}
+
+func (w *testWriter) class(c Class) bool {
+	return w.raw(typeClass, classBody(c))
+}
+
+// stackBody is a STACK body: id, the count, zero flags, the class ids
+// (as given: tests pass too few or too many on purpose), the frames.
+func stackBody(id uint64, n uint32, classes []uint64, frames []string) []byte {
+	head := flagsBody(id, n, 0, nil)
+	for _, c := range classes {
+		head = le.AppendUint64(head, c)
+	}
+	return append(head, flagsBody(0, 0, 0, frames)[16:]...)
+}
+
+func classBody(c Class) []byte {
+	return stringsBody(c.ID, classStrings, []string{c.Name, c.Loader, c.CodeSource})
 }
 
 func (w *testWriter) thread(th Thread) bool {
@@ -150,7 +168,7 @@ func appendOtel(body []byte, o Otel) []byte {
 	return body
 }
 
-// stringsBody is a STACK, THREAD or HOOK body with zero flags.
+// stringsBody is a THREAD, HOOK or CLASS body with zero flags.
 func stringsBody(id uint64, word uint32, strs []string) []byte {
 	return flagsBody(id, word, 0, strs)
 }

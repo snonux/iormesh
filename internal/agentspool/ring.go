@@ -180,7 +180,13 @@ func (r *Ring) agentLosses(l Losses) Losses {
 	l.DroppedHooks = r.word(offDropped + 8*typeHook)
 	l.DroppedHTTP = r.word(offDropped + 8*typeHTTP)
 	l.DroppedDNS = r.word(offDropped + 8*typeDNS)
+	l.DroppedClasses = r.word(offDropped + 8*typeClass)
+	// PAD and the slots past the last known type: no agent of this
+	// format counts there, but a count would still be a loss.
 	l.DroppedOther = r.word(offDropped + 8*typePad)
+	for t := typeClass + 1; t < droppedSlots; t++ {
+		l.DroppedOther += r.word(offDropped + 8*t)
+	}
 	l.DroppedBytes = r.word(offDroppedBytes)
 	l.Abandoned = r.word(offAbandoned)
 	return l

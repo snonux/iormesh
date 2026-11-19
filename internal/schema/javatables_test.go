@@ -49,7 +49,7 @@ func TestTablesRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.MethodID = 1
+	m.MethodID, m.ClassID = 1, 4
 	var buf bytes.Buffer
 	w := NewTableWriter[Method](&buf)
 	if err := w.Write(m); err != nil {
@@ -103,5 +103,82 @@ func TestTablesReject(t *testing.T) {
 	if _, err := ReadTable[Thread](strings.NewReader(
 		`{"schema_version":1,"pid":0,"pid_incarnation":1,"tid":1,"java_thread_id":1,"name":"x"}` + "\n")); err == nil {
 		t.Error("thread pid 0 accepted")
+	}
+}
+
+// TestClassTable: class rows round-trip, with and without a code source,
+// and a class_id on a method row is read back (task fe4).
+func TestClassTable(t *testing.T) {
+	want := []Class{
+		{SchemaVersion: Version, ClassID: 1, Class: "a.B", Loader: "app", CodeSource: "/opt/app/a.jar"},
+		{SchemaVersion: Version, ClassID: 2, Class: "java.io.FileInputStream", Loader: "bootstrap",
+			CodeSource: "jrt:/java.base"},
+		{SchemaVersion: Version, ClassID: 3, Class: "$Proxy1", Loader: "app"},
+	}
+	var buf bytes.Buffer
+	w := NewTableWriter[Class](&buf)
+	for _, c := range want {
+		if err := w.Write(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `"code_source":"/opt/app/a.jar"`) ||
+		strings.Count(buf.String(), "code_source") != 2 {
+		t.Errorf("table text %q", buf.String())
+	}
+	got, err := ReadTable[Class](&buf)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("classes %+v, %v", got, err)
+	}
+	m, err := ReadTable[Method](strings.NewReader(`{"schema_version":1,"method_id":1,` +
+		`"frame":"a.B#c(B.java:3)","class":"a.B","method":"c","file":"B.java","line":3,"class_id":1}` + "\n"))
+	if err != nil || len(m) != 1 || m[0].ClassID != 1 {
+		t.Errorf("method with class_id: %+v, %v", m, err)
+	}
+}
+
+// TestClassTableReject: invalid class rows are refused by writer and
+// reader alike.
+func TestClassTableReject(t *testing.T) {
+	rows := map[string]string{
+		"id 0":        `{"schema_version":1,"class_id":0,"class":"a.B","loader":"app"}`,
+		"no class":    `{"schema_version":1,"class_id":1,"class":"","loader":"app"}`,
+		"no loader":   `{"schema_version":1,"class_id":1,"class":"a.B","loader":""}`,
+		"missing key": `{"schema_version":1,"class_id":1,"class":"a.B"}`,
+		"unknown key": `{"schema_version":1,"class_id":1,"class":"a.B","loader":"app","jar":"x"}`,
+		"version 2":   `{"schema_version":2,"class_id":1,"class":"a.B","loader":"app"}`,
+		"userinfo":    `{"schema_version":1,"class_id":1,"class":"a.B","loader":"app","code_source":"https://u:p@h/x.jar"}`,
+		"query":       `{"schema_version":1,"class_id":1,"class":"a.B","loader":"app","code_source":"https://h/x.jar?t=1"}`,
+	}
+	for name, line := range rows {
+		if _, err := ReadTable[Class](strings.NewReader(line + "\n")); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	var buf bytes.Buffer
+	if err := NewTableWriter[Class](&buf).Write(Class{SchemaVersion: Version, ClassID: 1,
+		Class: "a.B", Loader: "app", CodeSource: "https://u@h/x.jar"}); err == nil || buf.Len() != 0 {
+		t.Errorf("credentials written: %v, %q", err, buf.String())
+	}
+}
+
+func TestCleanCodeSource(t *testing.T) {
+	cases := map[string]string{
+		"/opt/app/a.jar":  "/opt/app/a.jar",
+		"/srv/a@b/x?.jar": "/srv/a@b/x?.jar",
+		"jrt:/java.base":  "jrt:/java.base",
+		"jar:file:/app.jar!/BOOT-INF/lib/x.jar!/": "jar:file:/app.jar!/BOOT-INF/lib/x.jar!/",
+		"https://u:p@h:8443/x.jar?token=t#f":      "https://h:8443/x.jar",
+		"jar:https://u:p@h/x.jar!/":               "jar:https://h/x.jar!/",
+		"https://u@h":                             "https://h",
+		"https://h/a@b/x.jar":                     "https://h/a@b/x.jar",
+	}
+	for in, want := range cases {
+		if got := CleanCodeSource(in); got != want {
+			t.Errorf("CleanCodeSource(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

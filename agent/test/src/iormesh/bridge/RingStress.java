@@ -87,7 +87,7 @@ public final class RingStress {
         for (int seq = 0; seq < per; seq++) {
             ring.bracket(id + 1, 1000 + id, seq, seq + 1, seq, id);
             if (seq % 64 == 63) {
-                ring.stack(seq, new String[] {"stress#w" + id + "(Gr\u00f6\u00dfe.java:" + seq + ")",
+                ring.stack(seq, new long[] {seq + 1, 1}, new String[] {"stress#w" + id + "(Gr\u00f6\u00dfe.java:" + seq + ")",
                         "java.lang.Thread#run(Thread.java:1)"});
             }
         }

@@ -20,9 +20,9 @@ import (
 // written once, before the first event naming it. The parquet tags are
 // the M4 segment writer's mapping (PLAN.md: "methods" parquet file).
 //
-// Ids are per trace and keyed by Frame alone: the same frame text in two
-// JVMs gets one id (the class-load map that would tell their JARs apart
-// is a later M3 step).
+// Ids are per trace and keyed by Frame and ClassID (task fe4): the same
+// frame text from two JARs (two class-table entries) is two ids, from
+// two JVMs running the same JAR one.
 type Method struct {
 	SchemaVersion uint32 `json:"schema_version" parquet:"schema_version"`
 	MethodID      uint64 `json:"method_id" parquet:"method_id"`
@@ -35,6 +35,31 @@ type Method struct {
 	// Line is the source line, absent when unknown (no line table, or a
 	// native method).
 	Line *uint32 `json:"line,omitempty" parquet:"line,optional"`
+	// ClassID names the frame's class in the class table (classes.ndjson,
+	// task fe4), absent when the agent's description of it was lost.
+	// Appended last: schema v1 grows only at the end.
+	ClassID uint64 `json:"class_id,omitempty" parquet:"class_id,optional"`
+}
+
+// Class is one entry of a trace's class table, classes.ndjson (M3, task
+// fe4): a class some recorded frame names, where it was loaded from and
+// by which loader — the class-load map that joins a frame to its JAR.
+// Only classes a written method row names are listed. Entries are
+// deduplicated across the trace's JVMs by (class, loader, code source):
+// the same class from the same JAR is one id, whichever JVM ran it.
+type Class struct {
+	SchemaVersion uint32 `json:"schema_version" parquet:"schema_version"`
+	ClassID       uint64 `json:"class_id" parquet:"class_id"`
+	// Class is the binary name, as Method.Class has it.
+	Class string `json:"class" parquet:"class,dict"`
+	// Loader labels the defining class loader: "bootstrap", the loader's
+	// name ("app", "platform", a container's), else its class name.
+	Loader string `json:"loader" parquet:"loader,dict"`
+	// CodeSource is where the class came from: the JAR or class directory
+	// path, "jrt:/<module>" for the runtime image, another URL without
+	// userinfo, query or fragment; absent when the class has none
+	// (generated classes).
+	CodeSource string `json:"code_source,omitempty" parquet:"code_source,optional,dict"`
 }
 
 // Thread is one entry of a trace's Java thread table, threads.ndjson (M3,
@@ -110,7 +135,7 @@ func (m *Method) Validate() error {
 	if err != nil {
 		return err
 	}
-	want.MethodID = m.MethodID
+	want.MethodID, want.ClassID = m.MethodID, m.ClassID
 	if !reflect.DeepEqual(want, *m) {
 		return invalidf("method %d: parts disagree with frame %q", m.MethodID, m.Frame)
 	}
@@ -129,12 +154,63 @@ func (t *Thread) Validate() error {
 	return nil
 }
 
-// tableRow is what a TableWriter writes: a validated table entry.
-type tableRow interface {
-	Method | Thread
+// Validate checks a class table entry: ids start at 1, the class and its
+// loader are named, and a code source carries no URL credentials, query
+// or fragment (the tracer strips them; a reader may rely on it).
+func (c *Class) Validate() error {
+	switch {
+	case c.SchemaVersion != Version:
+		return invalidf("class: schema_version %d, want %d", c.SchemaVersion, Version)
+	case c.ClassID == 0:
+		return invalidf("class: class_id 0: ids start at 1")
+	case c.Class == "" || c.Loader == "":
+		return invalidf("class %d: class and loader must be named", c.ClassID)
+	case CleanCodeSource(c.CodeSource) != c.CodeSource:
+		return invalidf("class %d: code source %q carries credentials or a query",
+			c.ClassID, c.CodeSource)
+	}
+	return nil
 }
 
-// TableWriter writes one NDJSON table (methods.ndjson, threads.ndjson),
+// CleanCodeSource strips what a code source URL must not carry: the
+// userinfo of every authority ("scheme://user:pw@host"), nested ones
+// included ("jar:https://…!/"), and everything from the first '?' or '#'
+// on. A path (no "://") is returned as is: a file name may hold '?' or
+// '@'. The agent's ClassIds.clean is the same algorithm.
+func CleanCodeSource(src string) string {
+	if !strings.Contains(src, "://") {
+		return src
+	}
+	if i := strings.IndexAny(src, "?#"); i >= 0 {
+		src = src[:i]
+	}
+	var b strings.Builder
+	for {
+		before, after, ok := strings.Cut(src, "://")
+		b.WriteString(before)
+		if !ok {
+			return b.String()
+		}
+		b.WriteString("://")
+		auth, rest := after, ""
+		if i := strings.IndexByte(after, '/'); i >= 0 {
+			auth, rest = after[:i], after[i:]
+		}
+		if i := strings.LastIndexByte(auth, '@'); i >= 0 {
+			auth = auth[i+1:]
+		}
+		b.WriteString(auth)
+		src = rest
+	}
+}
+
+// tableRow is what a TableWriter writes: a validated table entry.
+type tableRow interface {
+	Method | Thread | Class
+}
+
+// TableWriter writes one NDJSON table (methods.ndjson, threads.ndjson,
+// classes.ndjson),
 // one validated entry per line. Entries are rare next to events, so it
 // uses encoding/json and flushes each line, as StackWriter does: a crash
 // never loses an entry an already written event names.
@@ -194,11 +270,14 @@ func validateRow[T tableRow](row *T) error {
 		return v.Validate()
 	case *Thread:
 		return v.Validate()
+	case *Class:
+		return v.Validate()
 	}
 	return nil
 }
 
-// ReadTable decodes a whole methods.ndjson or threads.ndjson strictly
+// ReadTable decodes a whole methods.ndjson, threads.ndjson or
+// classes.ndjson strictly
 // (the rules of DecodeEvent: unknown keys, missing required fields,
 // another schema version all reject the line) and validates each entry.
 func ReadTable[T tableRow](r io.Reader) ([]T, error) {

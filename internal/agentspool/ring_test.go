@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -38,8 +39,11 @@ func TestRoundTrip(t *testing.T) {
 			Native: "readBytes", Syscalls: []string{"read", "pread64"}},
 		Thread{ID: 1, KTID: 4243, Name: "main"},
 		Thread{ID: 2, KTID: 4244, Name: "", Virtual: true},
-		Stack{ID: 99, Frames: []string{"a.B#c(B.java:3)", "größe#ü(X.java:1)"}},
-		Stack{ID: 100, Frames: []string{}},
+		Class{ID: 1, Name: "a.B", Loader: "app", CodeSource: "/opt/a.jar"},
+		Class{ID: 2, Name: "größe", Loader: "bootstrap"},
+		Stack{ID: 99, Frames: []string{"a.B#c(B.java:3)", "größe#ü(X.java:1)"},
+			Classes: []uint64{1, 2}},
+		Stack{ID: 100, Frames: []string{}, Classes: []uint64{}},
 		Bracket{Hook: 3, KTID: 4243, EnterMono: 10, ExitMono: 20, StackID: 99, ThreadID: 1},
 		Bracket{Hook: 3, KTID: 4243, EnterMono: 11, ExitMono: 19, StackID: 99, ThreadID: 1,
 			Otel: Otel{TraceHi: 1, TraceLo: 0, Span: 1<<64 - 1}},
@@ -68,6 +72,8 @@ func write(w *testWriter, rec Record) bool {
 		return w.bracket(v)
 	case Stack:
 		return w.stack(v)
+	case Class:
+		return w.class(v)
 	case Thread:
 		return w.thread(v)
 	case Watermark:
@@ -113,7 +119,8 @@ func TestWraparound(t *testing.T) {
 	for i := range 20000 {
 		rec := Record(Bracket{Hook: 1, StackID: uint64(i), ExitMono: 1})
 		if i%3 == 0 {
-			rec = Stack{ID: uint64(i), Frames: []string{string(make([]byte, i%50+1))}}
+			rec = Stack{ID: uint64(i), Frames: []string{string(make([]byte, i%50+1))},
+				Classes: []uint64{uint64(i % 7)}}
 		}
 		if !write(w, rec) {
 			t.Fatalf("record %d dropped with a reader keeping up", i)
@@ -194,12 +201,20 @@ func malformedCases() map[string]malformedCase {
 		"bracket otel half":  {typeBracket, appendOtel(bad(func(b []byte) []byte { return b }), Otel{TraceHi: 1}), false},
 		"watermark long":     {typeWatermark, make([]byte, 16), false},
 		"stack short":        {typeStack, make([]byte, 8), false},
-		"stack bad utf8":     {typeStack, stringsBody(1, 1, []string{"\xff\xfe"}), false},
-		"stack count high":   {typeStack, stringsBody(1, 9, []string{"x"}), false},
-		"stack reserved":     {typeStack, setByte(stringsBody(1, 1, []string{"x"}), 12, 1), false},
-		"stack padding":      {typeStack, setByte(stringsBody(1, 1, []string{"x"}), 21, 7), false},
-		"stack extra word":   {typeStack, append(stringsBody(1, 1, []string{"x"}), make([]byte, 8)...), false},
-		"string too long":    {typeStack, setByte(stringsBody(1, 1, []string{"x"}), 16, 200), false},
+		"stack bad utf8":     {typeStack, stackBody(1, 1, []uint64{1}, []string{"\xff\xfe"}), false},
+		"stack count high":   {typeStack, stackBody(1, 9, []uint64{1}, []string{"x"}), false},
+		"stack count huge":   {typeStack, stackBody(1, 1<<31, nil, nil), false},
+		"stack no class ids": {typeStack, stackBody(1, 1, nil, []string{"x"}), false},
+		"stack ids, no text": {typeStack, stackBody(1, 1, []uint64{1}, nil), false},
+		"stack reserved":     {typeStack, setByte(stackBody(1, 1, []uint64{1}, []string{"x"}), 12, 1), false},
+		"stack padding":      {typeStack, setByte(stackBody(1, 1, []uint64{1}, []string{"x"}), 29, 7), false},
+		"stack extra word":   {typeStack, append(stackBody(1, 1, []uint64{1}, []string{"x"}), make([]byte, 8)...), false},
+		"string too long":    {typeStack, setByte(stackBody(1, 1, []uint64{1}, []string{"x"}), 24, 200), false},
+		"class id 0":         {typeClass, classBody(Class{Name: "a.B", Loader: "app"}), false},
+		"class no name":      {typeClass, classBody(Class{ID: 1, Loader: "app"}), false},
+		"class no loader":    {typeClass, classBody(Class{ID: 1, Name: "a.B"}), false},
+		"class 2 strings":    {typeClass, stringsBody(1, 2, []string{"a.B", "app"}), false},
+		"class flags":        {typeClass, flagsBody(1, 3, 1, []string{"a.B", "app", ""}), false},
 		"thread ktid < 0":    {typeThread, stringsBody(1, 1<<31, []string{"t"}), false},
 		"thread flag":        {typeThread, flagsBody(1, 1, 2, []string{"t"}), false},
 		"hook 4 strings":     {typeHook, stringsBody(1, 4, []string{"a", "b", "c", "d"}), false},
@@ -337,4 +352,21 @@ func TestDrainCallbackPanics(t *testing.T) {
 	}()
 	var p *Bracket
 	_, _ = r.Drain(func(Record) { _ = p.Hook })
+}
+
+// TestClassDropsCounted: the agent's CLASS drop counter (task fe4) is
+// DroppedClasses, a count in a slot past the known types is still a loss
+// (DroppedOther), and dropped bytes and abandoned sit after the sixteen
+// counters, where Ring.java puts them.
+func TestClassDropsCounted(t *testing.T) {
+	path, w := newTestRing(t, testCap)
+	atomic.AddUint64(w.ptr(offDropped+8*typeClass), 2)
+	atomic.AddUint64(w.ptr(offDropped+8*(droppedSlots-1)), 1)
+	atomic.AddUint64(w.ptr(offDroppedBytes), 96)
+	atomic.AddUint64(w.ptr(offAbandoned), 4)
+	l := openRing(t, path).Losses()
+	want := Losses{DroppedClasses: 2, DroppedOther: 1, DroppedBytes: 96, Abandoned: 4}
+	if l != want || l.Dropped() != 3 || offAbandoned != 328 {
+		t.Errorf("losses %+v, want %+v; abandoned at %d", l, want, offAbandoned)
+	}
 }

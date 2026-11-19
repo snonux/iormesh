@@ -33,7 +33,15 @@ public final class StackIds {
     public static final long NONE = 0;
     private static final long FNV_PRIME = 0x100000001b3L;
 
-    private static final StackWalker WALKER = StackWalker.getInstance();
+    /**
+     * RETAIN_CLASS_REFERENCE lets a new stack name its frames' classes
+     * (ClassIds, task fe4). It costs the walk nothing measurable: the VM
+     * fills each frame's class either way, the option only permits
+     * getDeclaringClass (task fe4: 6.0 vs 6.4 µs per 10-frame walk on JDK
+     * 25, within noise).
+     */
+    private static final StackWalker WALKER =
+            StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
     private static final String OWN_PACKAGE = "iormesh.bridge.";
     /** The agent core's packages (its HTTP probes run between bridge frames). */
     private static final String AGENT_PACKAGE = "iormesh.agent.";
@@ -121,6 +129,8 @@ public final class StackIds {
     /**
      * Keeps a new stack's frames and writes its STACK record; only the
      * thread whose putIfAbsent won writes it, so a stack is written once.
+     * The frames' classes get their ids (and CLASS records) first, so
+     * the STACK follows the CLASS records it names.
      */
     private static void remember(long id, List<StackWalker.StackFrame> frames) {
         Ring r = Hooks.ring;
@@ -134,10 +144,22 @@ public final class StackIds {
             return;  // backing off after a drop: no allocation per sighting
         }
         String[] described = describe(frames);
-        if (KNOWN.putIfAbsent(id, described) == null && r != null && !r.stack(id, described)) {
+        if (KNOWN.putIfAbsent(id, described) != null || r == null) {
+            return;
+        }
+        if (!r.stack(id, classIds(frames), described)) {
             KNOWN.remove(id);
             retryAt = System.nanoTime() + Hooks.RETRY_NS;
         }
+    }
+
+    /** Each frame's class id (ClassIds), innermost first. */
+    private static long[] classIds(List<StackWalker.StackFrame> frames) {
+        long[] out = new long[frames.size()];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = ClassIds.of(frames.get(i).getDeclaringClass());
+        }
+        return out;
     }
 
     private static String[] describe(List<StackWalker.StackFrame> frames) {

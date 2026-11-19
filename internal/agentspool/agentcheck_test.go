@@ -18,6 +18,7 @@ type agentCheck struct {
 	t          *testing.T
 	threads    map[uint64]Thread
 	stacks     map[uint64]Stack
+	classes    map[uint64]Class
 	hooks      map[int32]Hook
 	named      []Bracket       // brackets whose ids resolve at the end
 	brackets   map[int32]int64 // per hook id
@@ -27,7 +28,7 @@ type agentCheck struct {
 
 func newAgentCheck(t *testing.T) *agentCheck {
 	return &agentCheck{t: t, threads: map[uint64]Thread{}, stacks: map[uint64]Stack{},
-		hooks: map[int32]Hook{}, brackets: map[int32]int64{}}
+		classes: map[uint64]Class{}, hooks: map[int32]Hook{}, brackets: map[int32]int64{}}
 }
 
 func (a *agentCheck) record(rec Record) {
@@ -35,10 +36,15 @@ func (a *agentCheck) record(rec Record) {
 	case Thread:
 		a.threads[v.ID] = v
 	case Stack:
-		if len(v.Frames) == 0 {
-			a.t.Errorf("stack %d without frames", v.ID)
+		if len(v.Frames) == 0 || len(v.Classes) != len(v.Frames) {
+			a.t.Errorf("stack %d: %d frames, %d class ids", v.ID, len(v.Frames), len(v.Classes))
 		}
 		a.stacks[v.ID] = v
+	case Class:
+		if _, dup := a.classes[v.ID]; dup {
+			a.t.Errorf("class id %d described twice", v.ID)
+		}
+		a.classes[v.ID] = v
 	case Watermark:
 		if v.Mono < a.mark {
 			a.t.Errorf("watermark %d after %d", v.Mono, a.mark)
@@ -77,6 +83,35 @@ func (a *agentCheck) resolve(l Losses) {
 			a.t.Errorf("bracket %+v: no STACK", b)
 		}
 	}
+	for _, s := range a.stacks {
+		a.resolveClasses(s, l)
+	}
+}
+
+// resolveClasses checks a stack's class ids (task fe4): each names a
+// CLASS somewhere in the ring (unless CLASS records were dropped) whose
+// name is the frame's class.
+func (a *agentCheck) resolveClasses(s Stack, l Losses) {
+	for i, id := range s.Classes {
+		c, ok := a.classes[id]
+		cls, _, _ := strings.Cut(s.Frames[i], "#")
+		switch {
+		case !ok && l.DroppedClasses == 0:
+			a.t.Errorf("stack %d frame %q: class id %d has no CLASS", s.ID, s.Frames[i], id)
+		case ok && c.Name != cls:
+			a.t.Errorf("stack %d frame %q: CLASS %+v", s.ID, s.Frames[i], c)
+		}
+	}
+}
+
+// codeSources lists the code sources of the classes read, each with its
+// loader: "<code source> <loader>".
+func (a *agentCheck) codeSources() map[string]bool {
+	out := map[string]bool{}
+	for _, c := range a.classes {
+		out[c.CodeSource+" "+c.Loader] = true
+	}
+	return out
 }
 
 // finish compares with the agent's debug dump (hook id → kind, count):

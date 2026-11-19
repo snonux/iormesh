@@ -16,7 +16,7 @@ import (
 // nil output whose methods do nothing.
 func TestOpenJavaWithoutSpool(t *testing.T) {
 	dir := t.TempDir()
-	for _, n := range []string{MethodsFile, ThreadsFile} {
+	for _, n := range []string{MethodsFile, ThreadsFile, ClassesFile} {
 		if err := os.WriteFile(filepath.Join(dir, n), []byte("old\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -25,7 +25,7 @@ func TestOpenJavaWithoutSpool(t *testing.T) {
 	if err != nil || o != nil {
 		t.Fatalf("openJava = %v, %v", o, err)
 	}
-	for _, n := range []string{MethodsFile, ThreadsFile} {
+	for _, n := range []string{MethodsFile, ThreadsFile, ClassesFile} {
 		if _, err := os.Stat(filepath.Join(dir, n)); !os.IsNotExist(err) {
 			t.Errorf("stale %s kept: %v", n, err)
 		}
@@ -80,7 +80,7 @@ func TestJavaOutputRun(t *testing.T) {
 	if s := o.summary(); !strings.Contains(s, "java rings 0 (skipped 1, corrupt 0, unmarked JVMs 0)") {
 		t.Errorf("summary %q", s)
 	}
-	for _, n := range []string{MethodsFile, ThreadsFile} {
+	for _, n := range []string{MethodsFile, ThreadsFile, ClassesFile} {
 		if _, err := os.Stat(filepath.Join(dir, n)); err != nil {
 			t.Errorf("%s: %v", n, err)
 		}

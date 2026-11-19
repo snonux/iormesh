@@ -34,8 +34,8 @@ import java.util.Set;
  *   24   writer pid u64        32  CLOCK_MONOTONIC ns at create
  *   64   head — bytes reserved by writers (CAS), its own cache line
  *   128  tail — bytes consumed by the reader, written by the reader only
- *   192  dropped records per type, u64[8] (index = record type)
- *   256  dropped bytes        264  abandoned records (fill threw)
+ *   192  dropped records per type, u64[16] (index = record type)
+ *   320  dropped bytes        328  abandoned records (fill threw)
  *   4096 data[capacity]
  * </pre>
  * A record is one 8-byte word {@code len | type << 32} (len counts the
@@ -67,6 +67,10 @@ public final class Ring {
     static final int HOOK = 5;
     static final int HTTP = 6;
     static final int DNS = 7;
+    /** A class a recorded frame names (task fe4, ClassIds). */
+    static final int CLASS = 8;
+    /** Per-type drop counters in the header; record types stay below it. */
+    static final int DROPPED_SLOTS = 16;
     /**
      * Format version; the reader rejects any other. 2 (task 2b4): HOOK
      * records, and THREAD's reserved word carries flags (VIRTUAL). 3
@@ -77,9 +81,11 @@ public final class Ring {
      * 5 (task wd4): HTTP's fixed part gains the request's start stamp
      * and its body sizes (latency and sizes, PLAN.md M3), and DNS
      * records (decision #8) are new. 6 (task wd4, review round 2): the
-     * HTTP flags HTTP_ASYNC_MARK and HTTP_NET_HTTP.
+     * HTTP flags HTTP_ASYNC_MARK and HTTP_NET_HTTP. 7 (task fe4): CLASS
+     * records, a class id per frame in STACK, and sixteen drop counters
+     * (CLASS is the ninth type), which moves dropped bytes and abandoned.
      */
-    static final int VERSION = 6;
+    static final int VERSION = 7;
     /** THREAD flag: the Java thread is a virtual thread (JDK 21+). */
     static final int VIRTUAL = 1;
     static final long MAGIC = 0x474e49524d524f49L; // "IORMRING", little endian
@@ -87,8 +93,8 @@ public final class Ring {
     static final int HEAD = 64;
     static final int TAIL = 128;
     static final int DROPPED = 192;
-    static final int DROPPED_BYTES = 256;
-    static final int ABANDONED = 264;
+    static final int DROPPED_BYTES = DROPPED + 8 * DROPPED_SLOTS;
+    static final int ABANDONED = DROPPED_BYTES + 8;
     static final long MIN_CAPACITY = 1L << 16;
     static final long MAX_CAPACITY = 1L << 30;
     /** BRACKET body: hook, ktid, enter, exit, stack, thread. */
@@ -153,7 +159,7 @@ public final class Ring {
     static final int HTTP_NET_HTTP = 8;
     /** HTTP's leading strings: method, scheme, host, path, version, local, remote. */
     static final int HTTP_FIXED = 7;
-    /** Bounds a STACK or THREAD record, so one never needs a large share of the ring. */
+    /** Bounds a record with strings, so one never needs a large share of the ring. */
     static final int MAX_RECORD = 16 * 1024;
     /** Each frame or thread name is cut to this many chars before encoding. */
     static final int MAX_STRING = 1024;
@@ -279,18 +285,47 @@ public final class Ring {
     }
 
     /**
-     * Writes a STACK: id u64, n u32, 4 zero bytes, then n strings
+     * Writes a STACK: id u64, n u32, 4 zero bytes, n class ids u64 (each
+     * frame's CLASS record, ClassIds; 0 = not described), then n strings
      * (u32 byte length + UTF-8), zero-padded to 8. Allocates the encoded
      * strings — once per distinct stack, not per bracket.
      */
-    boolean stack(long id, String[] frames) {
-        byte[][] enc = new byte[frames.length][];
-        int len = 8 + 16;
-        for (int i = 0; i < frames.length; i++) {
-            enc[i] = utf8(frames[i]);
-            len += 4 + enc[i].length;
+    boolean stack(long id, long[] classes, String[] frames) {
+        int n = frames.length;
+        byte[][] enc = encode(frames, n);
+        int len = align(8 + 16 + 8 * n + size(enc, n));
+        if (len > MAX_RECORD) {
+            countDrop(STACK, len);
+            return false;
         }
-        return strings(STACK, align(len), id, frames.length, 0, enc);
+        int off = reserve(len, STACK);
+        if (off < 0) {
+            return false;
+        }
+        try {
+            buf.putLong(off + 8, id);
+            buf.putInt(off + 16, n);
+            buf.putInt(off + 20, 0);
+            for (int i = 0; i < n; i++) {
+                buf.putLong(off + 24 + 8 * i, classes[i]);
+            }
+            putStrings(off + 24 + 8 * n, enc, n);
+            publish(off, len, STACK);
+            return true;
+        } catch (Throwable e) {
+            return abandon(off, len);
+        }
+    }
+
+    /**
+     * Writes a CLASS (task fe4): class id u64 (ClassIds, from 1), n u32 =
+     * 3, 4 zero bytes, then the class's binary name, its loader's label
+     * and its code source (empty: none) as strings. Written once per
+     * class a new stack names, ahead of that STACK.
+     */
+    boolean classRecord(long id, String name, String loader, String source) {
+        byte[][] enc = encode(new String[] {name, loader, source}, 3);
+        return strings(CLASS, align(8 + 16 + size(enc, 3)), id, 3, 0, enc);
     }
 
     /**
@@ -450,14 +485,14 @@ public final class Ring {
     /** Records dropped so far, all types (the debug dump). */
     long dropped() {
         long n = 0;
-        for (int t = 0; t < 8; t++) {
+        for (int t = 0; t < DROPPED_SLOTS; t++) {
             n += (long) LONGS.getVolatile(buf, DROPPED + 8 * t);
         }
         return n;
     }
 
     /**
-     * Fills and publishes a STACK, THREAD or HOOK record (shared shape:
+     * Fills and publishes a THREAD, HOOK or CLASS record (shared shape:
      * id, a count or tid, a flags word, strings).
      */
     private boolean strings(int type, int len, long id, int word, int flags, byte[][] enc) {

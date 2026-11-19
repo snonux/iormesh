@@ -55,7 +55,11 @@ truth.
   URI, headers), captured at the Java API boundary — never
   sniffed off the wire. Host names a JVM resolved are recorded
   with their addresses (DNS events, decision #8), from the
-  JDK's own lookup API, not from DNS traffic.
+  JDK's own lookup API, not from DNS traffic. The class-load map
+  records where each class on a recorded stack came from — JAR
+  paths, like the file events' paths, verbatim; a remote code
+  source URL loses its userinfo, query and fragment in the agent
+  and again in the tracer.
 - **Metadata is not harmless — redaction covers it.** Command
   lines carry passwords and tokens, URIs carry ids and secrets
   in path segments and query strings. One redaction policy

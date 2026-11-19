@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -178,7 +179,8 @@ func (s *stressCheck) record(rec Record) {
 	case Stack:
 		suffix := fmt.Sprintf("(Größe.java:%d)", v.ID)
 		if len(v.Frames) != 2 || !strings.HasPrefix(v.Frames[0], "stress#w") ||
-			!strings.HasSuffix(v.Frames[0], suffix) {
+			!strings.HasSuffix(v.Frames[0], suffix) ||
+			!slices.Equal(v.Classes, []uint64{v.ID + 1, 1}) {
 			s.t.Errorf("stack %+v", v)
 		}
 	default:
@@ -213,4 +215,14 @@ func TestJavaAgentWorkload(t *testing.T) {
 	}
 	a.resolve(l)
 	a.finish(readDebugCounts(t, debug))
+	// The class-load map (task fe4): the scenario's own frames name
+	// classes the app loader read from the workload jar (the JVM resolves
+	// the class path's symlinks), the JDK's the runtime image.
+	jar, err := filepath.EvalSymlinks(env[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src := a.codeSources(); !src[jar+" app"] || !src["jrt:/java.base bootstrap"] {
+		t.Errorf("code sources %v: want the workload jar (app) and java.base", src)
+	}
 }

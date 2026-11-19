@@ -2153,12 +2153,12 @@ internal/correlate/javajoin.go
 
    ```
    0    magic "IORMRING" (stored last, release: header complete)
-   8    version u32 = 3     12  header size u32 = 4096
+   8    version u32 = 7     12  header size u32 = 4096
    16   capacity u64        24  pid u64     32  created mono ns
    64   head (writers' CAS, own cache line)
    128  tail (reader's release store, own cache line)
-   192  dropped records per type u64[8]
-   256  dropped bytes       264  abandoned records
+   192  dropped records per type u64[16]
+   320  dropped bytes       328  abandoned records
    4096 data[capacity]
    ```
 
@@ -2181,7 +2181,8 @@ internal/correlate/javajoin.go
    PAD       0  (skipped)
    BRACKET   1  hook i32, ktid i32, enter_mono, exit_mono,
                 stack_id, thread_id u64        // 48 bytes
-   STACK     2  stack_id u64, n u32, 0 u32, n × (u32 len, UTF-8)
+   STACK     2  stack_id u64, n u32, 0 u32, n × class_id u64,
+                n × (u32 len, UTF-8)
    THREAD    3  thread_id u64, ktid i32, flags u32 (1 = virtual),
                 (u32 len, name)
    WATERMARK 4  mono_ns u64    // every bracket that exited
@@ -2193,8 +2194,14 @@ internal/correlate/javajoin.go
                 exchanges u32, method, scheme, host, path, version,
                 local, remote, nreq request headers, response
                 headers (step 7)
+   CLASS     8  class_id u64, 3 u32, 0 u32, name, loader,
+                code source, as strings (task fe4)
    ```
 
+   Version 7 (task fe4) added CLASS, the STACK's class ids and
+   the sixteen drop counters (CLASS is the ninth type, which
+   moved dropped bytes and abandoned); 4–6 grew HTTP and added
+   DNS (`internal/agentspool/format.go` lists each bump).
    Version 3 (task 3b4) added HTTP (step 7). Version 2 (task
    2b4) added HOOK and THREAD's flags: the agent
    writes its whole hook table into the still empty ring at
@@ -2219,6 +2226,9 @@ internal/correlate/javajoin.go
    a drop). The joiner resolves ids against everything it has
    read. Sightings of stacks past StackIds' 65 536-entry cap count
    as dropped STACKs. The method table is the tracer's (step 6).
+   A thread renamed after its first bracket writes another THREAD
+   at its next bracket (an identity compare of `getName()` with
+   the name last written, task fe4).
 
    Brackets are written at exit, so a syscall inside a still-open
    bracket has no record yet; the agent's watermark thread writes
@@ -2383,8 +2393,56 @@ internal/correlate/javajoin.go
    `parquet:` tags, and the parquet files wait for the M4 segment
    writer (task 8b4), as the events' do. A method id is one
    distinct frame (`class#method(file:line)`, parsed into class,
-   method, file, line), keyed by the frame text across JVMs; JAR
-   and class loader come with the class-load map (task 5b4).
+   method, file, line), keyed by the frame text and its class.
+
+   The class-load map (task fe4; PLAN.md M3 "Supporting
+   mappings" has the decision) is a third table,
+   `classes.ndjson` (`schema.Class`): one row per class a
+   written method row names — class, loader label, code source —
+   deduplicated across the trace's JVMs, and each method row
+   carries its `class_id`. As built:
+
+   ```
+   agent/bridge/src/iormesh/bridge/ClassIds.java  # ClassValue ids, CLASS
+   agent/bridge/src/iormesh/bridge/StackIds.java  # class id per frame
+   internal/agentspool/record.go                  # Class, Stack.Classes
+   internal/correlate/javaclass.go                # class rows, renames
+   internal/schema/javatables.go                  # Class, CleanCodeSource
+   ```
+
+   - **Frame classes only.** `StackIds` walks with
+     `RETAIN_CLASS_REFERENCE` (no measurable cost: the VM fills a
+     frame's class either way) and, for a new stack only, asks
+     `ClassIds` for each frame's class id. Every loaded class
+     would cost ring space and agent work for classes no I/O
+     stack ever names.
+   - **No pinning, no locks.** The id lives in a `ClassValue`,
+     whose `computeValue` runs without its lock; the CLASS record
+     is written there, so a STACK naming the id lies behind it in
+     the ring. Describing a class reads its loader, protection
+     domain and module — nothing initializes a class.
+   - **Code sources**: a `file:` location as a path, a boot
+     loader class of the runtime image as `jrt:/<module>` (the
+     platform loader's say jrt themselves), other URLs without
+     userinfo, query or fragment — stripped in the agent and again
+     by the tracer (`schema.CleanCodeSource`, the same algorithm
+     as `ClassIds.clean`).
+   - **Losses**: a dropped CLASS is retried when a later new
+     stack names the class; a frame whose class never arrived
+     gets a method row without `class_id`.
+   - **Renames**: a THREAD for a known Java thread is a rename;
+     the thread's brackets read before it keep the earlier name
+     (up to the latest exit among them still held), later ones
+     carry the new name, and `threads.ndjson` gets a row per name.
+
+   Tests: `RingTest` (CLASS ahead of the STACK, labels and code
+   sources, rename), `ring_test.go` (round trip, malformed CLASS
+   and STACK bodies, the counters' offsets), `javaclass_test.go`
+   (dedup, another JAR, a lost CLASS, credentials, renames),
+   `javatables_test.go`, `TestJavaAgentWorkload` (every stack's
+   class ids resolve; the workload jar and java.base appear) and
+   `TestJavaMethodFlow` (every method's class resolves; the
+   scenario's frames map to the workload jar, the JDK's to jrt).
 7. HTTP hooks: one transformer per library, each emitting an
    `http` event at request completion with `conn_id` (via the
    socket's fd) and `req_seq` (per-connection counter). Start

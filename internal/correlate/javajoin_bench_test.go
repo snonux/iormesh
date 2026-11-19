@@ -37,11 +37,12 @@ func BenchmarkJavaJoinPassThrough(b *testing.B) {
 	}
 }
 
-// nopTables drops the method and thread tables.
+// nopTables drops the method, thread and class tables.
 type nopTables struct{}
 
 func (nopTables) Method(schema.Method) error { return nil }
 func (nopTables) Thread(schema.Thread) error { return nil }
+func (nopTables) Class(schema.Class) error   { return nil }
 
 // BenchmarkJavaJoinJoined is the joiner's per-event cost on the S3 burst
 // under the agent (task ud4): every event is a marked one-byte write

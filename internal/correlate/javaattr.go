@@ -46,8 +46,8 @@ func canPark(h agentspool.Hook) bool {
 
 // attribute joins ev to v's brackets, setting attribution java and the
 // java object when one bracket's hook explains it; otherwise ev keeps
-// attribution none and the reason is counted. Method and thread table
-// rows the event names are written before it.
+// attribution none and the reason is counted. Class, method and thread
+// table rows the event names are written before it.
 func (j *JavaJoin) attribute(ev *schema.Event, v *jvm) error {
 	mark, marked := j.takeMark(ev)
 	if ev.Args.Count != nil {
@@ -127,7 +127,7 @@ func (j *JavaJoin) setJava(ev *schema.Event, v *jvm, b agentspool.Bracket, stack
 		java.Thread = v.names[int32(ev.TID)]
 		j.stats.Carrier++
 	case known:
-		java.Thread = th.Name
+		java.Thread = v.nameAt(th, b.ExitMono)
 	}
 	ev.Attribution, ev.Java = schema.AttributionJava, java
 	ev.Otel = otelOf(b.Otel)
@@ -144,22 +144,30 @@ func otelOf(o agentspool.Otel) *schema.Otel {
 	return &schema.Otel{TraceID: o.TraceID(), SpanID: o.SpanID()}
 }
 
-// stack resolves an agent stack id to method ids, writing the method
-// table rows of frames seen for the first time. nil without frames: the
-// agent walked no stack (id 0), its STACK record was dropped, or a frame
-// does not parse — attribution java needs a stack, so the event stays
-// none.
+// stack resolves an agent stack id to method ids, writing the class and
+// method table rows of frames seen for the first time. nil without
+// frames: the agent walked no stack (id 0), its STACK record was
+// dropped, or a frame does not parse — attribution java needs a stack,
+// so the event stays none.
 func (j *JavaJoin) stack(v *jvm, id uint64) ([]uint64, error) {
 	if ids, ok := v.stacks[id]; ok {
 		return ids, nil
 	}
-	frames := v.frames[id]
-	if id == 0 || len(frames) == 0 {
+	s := v.frames[id]
+	if id == 0 || len(s.Frames) == 0 {
 		return nil, nil
 	}
-	ids := make([]uint64, 0, len(frames))
-	for _, f := range frames {
-		mid, err := j.method(f)
+	ids := make([]uint64, 0, len(s.Frames))
+	for i, f := range s.Frames {
+		var aid uint64 // the agent's class id; a decoded Stack has one per frame
+		if i < len(s.Classes) {
+			aid = s.Classes[i]
+		}
+		cid, err := j.class(v, aid)
+		if err != nil {
+			return nil, err
+		}
+		mid, err := j.method(f, cid)
 		if err != nil || mid == 0 {
 			return nil, err
 		}
@@ -169,21 +177,23 @@ func (j *JavaJoin) stack(v *jvm, id uint64) ([]uint64, error) {
 	return ids, nil
 }
 
-// method returns the method id of one frame, writing its table row the
-// first time; 0 for a frame that does not parse (no row, no id).
-func (j *JavaJoin) method(frame string) (uint64, error) {
-	if id, ok := j.methods[frame]; ok {
+// method returns the method id of one frame of class cid (0: unknown),
+// writing its table row the first time; 0 for a frame that does not
+// parse (no row, no id).
+func (j *JavaJoin) method(frame string, cid uint64) (uint64, error) {
+	key := methodKey{frame: frame, class: cid}
+	if id, ok := j.methods[key]; ok {
 		return id, nil
 	}
 	m, err := schema.ParseFrame(frame)
 	if err != nil {
 		return 0, nil
 	}
-	m.MethodID = uint64(len(j.methods) + 1)
+	m.MethodID, m.ClassID = uint64(len(j.methods)+1), cid
 	if err := j.cfg.Tables.Method(m); err != nil {
 		return 0, err
 	}
-	j.methods[frame] = m.MethodID
+	j.methods[key] = m.MethodID
 	return m.MethodID, nil
 }
 
@@ -214,6 +224,8 @@ func addLosses(a, b agentspool.Losses) agentspool.Losses {
 	a.DroppedWatermarks += b.DroppedWatermarks
 	a.DroppedHooks += b.DroppedHooks
 	a.DroppedHTTP += b.DroppedHTTP
+	a.DroppedDNS += b.DroppedDNS
+	a.DroppedClasses += b.DroppedClasses
 	a.DroppedOther += b.DroppedOther
 	a.DroppedBytes += b.DroppedBytes
 	a.Abandoned += b.Abandoned

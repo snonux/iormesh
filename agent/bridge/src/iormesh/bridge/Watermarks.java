@@ -88,10 +88,10 @@ final class Watermarks {
     private static void run(Ring ring, long intervalMs) {
         Brackets self = Hooks.state();
         self.busy = true;  // whatever it calls is never bracketed
-        while (!self.described) {
-            self.described = ring.thread(Thread.currentThread().getId(), self.kernelTid(), 0,
-                    THREAD_NAME);
-            if (!self.described && !pause(intervalMs)) {
+        while (self.described == null) {
+            if (ring.thread(Thread.currentThread().getId(), self.kernelTid(), 0, THREAD_NAME)) {
+                self.described = THREAD_NAME;
+            } else if (!pause(intervalMs)) {
                 return;
             }
         }
