@@ -355,10 +355,13 @@ stays gap-free.
   their own, polled alongside: `args.drop_reason`
   `skipped_runs`, host-level (`pid` 0), `args.lost` the runs
   skipped since the previous `skipped_runs` drop. The kernel's
-  recursion guard skips a tracepoint program while another BPF
-  program runs on that CPU, which happens under concurrent load
-  or beside other BPF tools; a skip of a target's call loses the
-  one record, or the one folded call, that run would have
+  recursion guard skips a tracepoint program while its guard is
+  raised on that CPU — since task 8e4 the host-wide one of the
+  syscall dispatchers and other classic tracepoint programs,
+  held by another BPF program or by a task preempted inside a
+  `bpf()` map syscall (PLAN.md, "Syscall handlers run behind
+  `raw_syscalls` dispatchers"); a skip of a target's call loses
+  the one record, or the one folded call, that run would have
   written. But the skip comes before the program's target
   filter, so the count includes untraced processes' calls (a
   two-record trace saw 691 on a loaded host) and is an upper

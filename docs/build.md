@@ -46,7 +46,8 @@ bpftool; and non-interactive `sudo` for the two root reads
 (`/sys/kernel/tracing` formats, `/sys/kernel/btf/vmlinux`).
 
 ```bash
-mage generate      # tracepoint formats -> C handlers, Go tables, Go types
+mage generate      # tracepoint formats -> C handlers, Go tables, Go types,
+                   # per-arch syscall numbers (from golang.org/x/sys)
 mage bpfBuild      # vmlinux.h (first run) + clang CO-RE -> iormesh.bpf.o
 mage build         # bpfBuild + go build ./... + the tracer binary ./iormesh
 mage test          # go test ./... (the generator's C harness tests too)

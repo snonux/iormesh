@@ -110,6 +110,14 @@ ior source and what changed:
   attempts), and a test whose every run lost or skipped records in
   the kernel skips with the
   unexercised marker (`unexercised.go`) instead of passing.
+  Skips used to hit every run on a loaded host: Linux 7.2 let a
+  task preempted inside a per-syscall tracepoint program skip
+  that syscall for every other task on its CPU. Task 8e4 moved
+  the syscall handlers behind classic `raw_syscalls`
+  dispatchers, which run with preemption disabled; a skip left
+  is a task preempted inside a `bpf()` map syscall, and still
+  counts (PLAN.md, "Syscall handlers run behind `raw_syscalls`
+  dispatchers").
   Undecodable records fail at once: they are a decoder bug.
 - `kernel_support_test.go` — the tests skip unless tracefs shows
   every tracepoint M1 attaches to; a probe that cannot find them

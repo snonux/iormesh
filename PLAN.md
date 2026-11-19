@@ -1581,6 +1581,44 @@ can reconstruct behavior and check it against source code:
   (skipped as unexercised when every attempt had some); the
   root loader test requires zero lost records and only logs
   skipped runs.
+- **Syscall handlers run behind `raw_syscalls` dispatchers**
+  (task 8e4, 2026-11-19). Why runs were skipped: Linux 7.2 runs
+  a per-syscall tracepoint program (`syscalls:sys_enter_<name>`)
+  with preemption enabled behind a per-program, per-CPU
+  recursion guard, so a task preempted inside it makes the
+  kernel skip that syscall for every other task on the CPU until
+  it resumes — the target's calls too, in time-slice bursts; on
+  a loaded host every integration run had some, whoever else
+  traced. A traced read loop sharing its CPU with an untraced
+  one: ~900 k skipped runs, ~4 % of the target's reads lost.
+  Raw tracepoints and `tp_btf` take the same preemptible guard;
+  the classic `raw_syscalls:sys_enter`/`sys_exit` events run
+  their program with preemption disabled (same test: 0 skipped,
+  every read seen). So two dispatchers there tail-call the
+  generated per-syscall handlers by syscall number
+  (`internal/c/dispatch.c`, program arrays filled by userspace;
+  per-arch number tables generated from `golang.org/x/sys`);
+  handlers, records and the attach-or-skip rule per syscall pair
+  are unchanged. What can still skip the dispatchers is the
+  host-wide `bpf_prog_active` guard they share with kprobes and
+  classic tracepoints, held by a task preempted inside a `bpf()`
+  map syscall on that CPU (a tracer makes ~5 a second) — rare
+  in practice (three full integration runs, one beside two
+  concurrent `bpfRootTest`s: 0 skipped in all 96 tracer runs),
+  real under a deliberate map-lookup loop on the target's CPU
+  (114 k skipped, 2.5 % of its reads lost), and still counted
+  as skipped runs. The gate's judgement stays
+  as vd4 set it: a skip cannot be attributed to a pid, and the
+  experiment shows it can be the target's. Cost: every syscall
+  on the host now meets a dispatcher, traced kind or not. Kernel
+  instructions per untraced syscall beside an idle trace
+  (`perf stat`, 3 rounds, identical across rounds): dd's
+  read/write 1626 → 1708 (untraced 728), so the gated
+  `syscall-burst` bystander figure moves ~5 %; a syscall of a
+  kind no family traces (getppid) 595 → 1142 (untraced 443),
+  ~+0.1 µs CPU — the price of the `raw_syscalls` perf path. The
+  formal #25 bystander re-run (≥ 10 pairs at 4 threads) is
+  open as task ae4.
 - **Attribution is explicit**: every I/O event says whether a
   Java stack was joined to it (`attribution: java`) or not
   (`none` — non-JVM process, JNI or JVM-internal I/O, agent
@@ -1729,6 +1767,11 @@ are sized accordingly:
   cheaper dispatch (`docs/raw-tracepoint-design.md`). iormesh
   inherits the cost with the pattern — S3 measures it, and
   ior's findings there are the first place to look for relief.
+  Task 8e4 left the pattern for correctness, not cost: the
+  handlers run behind classic `raw_syscalls` dispatchers, which
+  makes traced kinds slightly dearer and untraced kinds about
+  twice as dear in kernel instructions ("Syscall handlers run
+  behind `raw_syscalls` dispatchers").
 
 ## Integration tests — follow ior
 

@@ -675,7 +675,11 @@ Output of this package is a channel of decoded raw records
   `tracepoints.DefaultSyscalls()` syscall plus
   `sock:inet_sock_set_state`. A syscall's enter and exit attach
   together or not at all; a pair whose tracepoint this kernel
-  lacks (`ENOENT`) is skipped and listed by `Skipped()`. A
+  lacks (`ENOENT`) is skipped and listed by `Skipped()`. Since
+  task 8e4 a syscall handler "attaches" by filling its slot in
+  `dispatch.c`'s program arrays (indexed by the arch's syscall
+  number, `sysnum_<arch>.go`); the two `raw_syscalls`
+  dispatchers attach after the slots, exit side first. A
   program missing from our own object, any other attach error,
   and a set where nothing attached (an unmounted tracefs looks
   like every tracepoint missing) fail `Open`.
@@ -1702,7 +1706,12 @@ scenarios landing first (principle #1).
     then moved it out of the lost records: the skip comes before
     the target filter, so the count is host-wide possible loss —
     its own `skipped_runs` drop and "skipped runs" summary figure;
-    the integration harness still retries such a run. Plus a
+    the integration harness still retries such a run. Task 8e4
+    found why loaded hosts skipped in every run (Linux 7.2 runs
+    per-syscall tracepoint programs preemptibly behind a
+    per-program guard) and attaches the syscall handlers through
+    two classic `raw_syscalls` dispatchers instead
+    (`internal/c/dispatch.c`, `internal/bpf/dispatch.go`). Plus a
     cheaper consumer to reach
     ≤ 2 µs per event (done, task wc4: a hand-written encoder
     byte-identical to `encoding/json`, pooled records recycled,
