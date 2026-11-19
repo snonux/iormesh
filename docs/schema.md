@@ -433,7 +433,11 @@ How it is captured and what it can and cannot say:
   not re-read for. The mapped files are opened right then
   through `/proc/<pid>/map_files/<range>` — the very file the
   mapping holds, no path lookup the traced process could steer
-  — non-blocking, and only regular files are kept; a worker
+  — with `O_NONBLOCK` (which stops a FIFO or device from
+  blocking, though not a regular file on a hung FUSE or NFS
+  mount: such a target can still stall the tracer while
+  `-native-stacks` is on, visible as loss), and only regular
+  files are kept; a worker
   goroutine parses them (`.symtab`, `.dynsym`, build id) with a
   panic guard, since the files are the traced process's. Parsed
   files are cached by device, inode, size and mtime for the
