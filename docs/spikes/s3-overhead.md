@@ -194,9 +194,9 @@ consumer slower.
 | 4 | 0, 0, 0 | 2478, 143, 143 | 49–815 KB |
 
 - **Loss: 0 % at 1 and 4 threads in every run**, against the
-  budget of < 1 % (before: 12–15 % and 38–40 % after wc4's
-  consumer work, 16–42 % in M1). The volume run (100 000
-  syscalls) lost nothing either. The integration suite
+  budget of < 1 % (0 % and 0–5 % after wc4's consumer work,
+  12–15 % and 38–40 % before it, 16–42 % in M1). The volume run
+  (100 000 syscalls) lost nothing either. The integration suite
   (`TestSyscallBurstFoldsEveryCall`) checks the other half: the
   folded events' counts add up to exactly the burst's ops.
 - **Events**: the burst's 400 000 calls arrive as 85–2478 events
@@ -204,10 +204,10 @@ consumer slower.
   1, load 21) is the hot-window rule at work: a thread
   descheduled for more than 1 ms ends its loop's event and sends
   its next four calls singly.
-- **Tracer CPU** is now the fixed cost of load and attach: the
-  traced runs' 1.4–4.9 s match the idle-target bystander tracer's
-  1.4–4.2 s in the same run, so a per-event figure is meaningless
-  here and decision #25's ≤ 2 µs per event (wc4's numbers) stands
+- **Tracer CPU** is now mostly the fixed cost of load and
+  attach: the traced runs' 1.4–4.9 s are comparable on most runs
+  to the idle-target bystander tracer's 1.4–4.2 s in the same
+  run, so a per-event figure is meaningless here and decision #25's ≤ 2 µs per event (wc4's numbers) stands
   as measured there.
 - **Slowdown and bystander**: traced/untraced 1.1–2.1×,
   bystander 0.3–2.5× — noise-dominated on this host; the folding

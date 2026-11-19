@@ -103,7 +103,7 @@ column each, never a blob.
 | `sock_state` | `tcp_state` (required): `ESTABLISHED`, `CLOSE`, … |
 | `marker` | `marker` (required): `<scenario>/<edge>` |
 | `lost` | `drop` (required, > 0): records lost since the previous `drop` event |
-| `drop_reason` | `drop`, optional: why the records were lost — `attach_gap` (M2); absent for ring-buffer and decoder loss |
+| `drop_reason` | `drop`, optional: why the records were lost — `attach_gap` (M2), `unattributed` (a folded read/write no fd instance explains, M2 step 11); absent for ring-buffer and decoder loss |
 | `end_reason` | `end` (required): why the trace ended, below |
 | `argv` | `exec` only: the new program's argv, a list of strings, redacted (see Redaction); absent when unreadable |
 | `fd2`, `fd2_gen` | a second fd instance (M2 step 7): the other end of `pipe`, `pipe2`, `socketpair`; the fd `epoll_ctl` registers |
@@ -196,19 +196,29 @@ says nothing about the individual calls' sizes or gaps.
   file, an error, a call that blocked, one after a pause): what a
   scenario declares stays exact.
 - Every other traced event of the thread — open, close, dup,
-  connect, accept, a marker, exec, a fork, a signal it raises —
-  comes after the folded calls that preceded it. Folded events of
-  one thread's different fds are spans and may overlap each
-  other.
+  connect, accept, a marker, exec, a fork, a signal it sends, and
+  every `read` or `write` it sends as a single event — comes after
+  the folded calls that preceded it. Only folded events of one
+  thread's different fds are spans that may overlap each other.
 - A folded event is sent at the latest when the loop has run
-  100 ms, at the thread's next other traced call, its exit, or the
-  end of the trace. A thread that folds and then blocks in an
-  untraced call therefore delivers it late (`seq` order, not
-  `boot_ns` order); its fd instance is still the one the calls
-  ran on, resolved by time if another thread closed and reused
-  the number meanwhile. A late record no instance explains is not
-  written; the tracer's summary counts it (`unattributed
-  aggregates`).
+  100 ms — checked as a call folds, so if the key's next call
+  blocks, when that call returns —, at the thread's next other
+  traced call, its exit, or the end of the trace. A thread that
+  folds and then blocks in an untraced call therefore delivers it
+  late (`seq` order, not `boot_ns` order).
+- The kernel keys a loop by the fd *number* (the file identity is
+  not captured), so another thread's `close`, `dup2` or reopen of
+  that number — while the loop ran, or before its late event was
+  sent — is resolved by time: the event names the fd instance
+  that was live from its first call's start to its last call's
+  exit. One that no single instance covers (its calls straddle
+  the change) is not written as a read or write but as a `drop`
+  with `args.drop_reason` `unattributed`, `args.lost` its call
+  count, the thread's `pid`/`tid` and the first call's `boot_ns`;
+  the tracer's summary line counts these as `unattributed
+  aggregates`. A change made by an untraced call (`close_range`,
+  io_uring) is not seen and can still put a loop's calls on the
+  number's next instance.
 - A folded event lost to a full ring buffer is one lost record
   (`drop`), which hid `args.count` calls.
 - `pread64`, `pwrite64` and the vectored calls are never folded.

@@ -1519,29 +1519,42 @@ scenarios landing first (principle #1).
     flush — then `iormesh_rw_on_enter`, which holds back the enter
     record of a *hot* call (within 1 ms of the key's previous exit)
     once the key has sent four hot calls individually; the exit
-    hook `iormesh_rw_on_exit` folds a held call that returned data
-    within 1 ms, and otherwise sends the key's sums, the enter it
-    owes and its exit. Flush points: every other enter hook
-    (`ior_on_syscall_enter*` in filter.c flush the thread first),
-    a gap, an unfoldable held call, 100 ms of span, a fifth key
-    (LRU), `signal_generate` and `task_newtask` in the thread's
-    context, exec and thread exit (which also drop the entry), and
-    the session end, where `bpf.Tracer.PendingAggregates` reads
-    what is left and `finish` feeds it to the correlator. A flush
+    hook `iormesh_rw_on_exit` (given the per-tid exit hook's
+    verdict, and clearing the in-flight markers whatever it is)
+    folds a held call that returned data within 1 ms. Flush points:
+    every other enter hook (`ior_on_syscall_enter*` in filter.c
+    flush the thread first); every read or write sent as a single
+    event sends all the thread's pending sums first (a held call
+    that turns out not hot: the sums, the enter it owes, its exit);
+    100 ms of span or the count cap, checked when a call folds; a
+    fifth key (LRU); `signal_generate` for a signal the thread sent
+    itself (never a kernel-raised one, which may fire in an
+    interrupt inside a hook) and `task_newtask` in the creator's
+    context; exec and thread exit (which also drop the entry). At
+    the session end `traceLoop` sets `rw_agg_stop`
+    (`bpf.Tracer.StopAggregation`) before its final drain — from
+    then on no hook folds or flushes — and `finish` reads the
+    frozen sums (`PendingAggregates`) into the correlator. A flush
     that finds the ring full counts one drop. The record is
     `rw_aggregate_event`; the correlator (`aggregate.go`) writes it
     as a read or write with summed `bytes`/`ret`/`latency_ns` and
     `args.count` (only when ≥ 2, so a single call is a plain
-    event), resolving its fd instance by time — `procState` keeps
-    each instance's birth and the number's previous instance — for
-    a record that arrives after another thread closed and reused
-    the fd. The golden check matches a declaration without
-    `args.count` only to a single call. `iormesh run
-    -aggregate=false` (rodata `IORMESH_RW_AGGREGATE`) turns it
-    off. Tests: `rwagg_harness_test.go` compiles rwagg.c against a
-    simulated map and ring and drives the fold and flush rules,
-    with mutations; correlator, schema, checker and parser unit
-    tests. Plus a cheaper consumer to reach
+    event). The kernel keys by fd number (iormesh leaves
+    `IOR_FILE_IDENT` off, so the identity is 0), so the correlator
+    resolves the fd instance by time — `procState` keeps each
+    instance's birth and the number's previous instance — and
+    requires one instance live over the record's whole span; a
+    record straddling another thread's close/dup2/reopen becomes
+    an `unattributed` drop. The golden check matches a declaration
+    without `args.count` only to a single call, and a lint
+    (`TestGoldensDeclareFoldableRunsShort`) keeps goldens to at
+    most four declared single reads or writes in a row on one fd.
+    `iormesh run -aggregate=false` (rodata `IORMESH_RW_AGGREGATE`)
+    turns it off. Tests: `rwagg_harness_test.go` compiles rwagg.c
+    against a simulated map and ring and drives the fold, flush
+    and stop rules, with mutations; correlator, schema, checker and
+    parser unit tests; `TestSyscallBurstFoldsEveryCall`. Plus a
+    cheaper consumer to reach
     ≤ 2 µs per event (done, task wc4: a hand-written encoder
     byte-identical to `encoding/json`, pooled records recycled,
     batched records read from the mapped ring; validation stays
