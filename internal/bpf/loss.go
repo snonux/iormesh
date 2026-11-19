@@ -1,6 +1,7 @@
 // Adapted from ior internal/ringbuf_drop_consumer.go @ b21afc50328c.
 // Changes: the counter is folded into Losses beside the userspace decode
-// losses; reading takes a module map directly.
+// losses; reading takes a module map directly; the attached programs'
+// recursion misses are kernel-side loss too (Missed, progmiss.go).
 
 package bpf
 
@@ -28,6 +29,11 @@ type Losses struct {
 	// Kernel is the number of records the BPF programs could not reserve in
 	// the ring buffer (userspace backpressure), summed over CPUs.
 	Kernel uint64
+	// Missed is how often the kernel skipped one of the attached programs
+	// because another BPF program was running on that CPU (recursion
+	// misses, progmiss.go): each skip lost the record it would have
+	// written.
+	Missed uint64
 	// Unknown, Malformed and Short are records that arrived but could not be
 	// decoded: an event type without decoder, a decoder that rejected the
 	// record's length, or a record too short to carry its type.
@@ -36,7 +42,13 @@ type Losses struct {
 
 // Total is every lost record, kernel- and userspace-side.
 func (l Losses) Total() uint64 {
-	return l.Kernel + l.Unknown + l.Malformed + l.Short
+	return l.KernelSide() + l.Unknown + l.Malformed + l.Short
+}
+
+// KernelSide is the records lost in the kernel: not reserved in the ring
+// buffer, or never written because their program was skipped.
+func (l Losses) KernelSide() uint64 {
+	return l.Kernel + l.Missed
 }
 
 // decodeLosses are the userspace-side counters; the poll goroutine bumps

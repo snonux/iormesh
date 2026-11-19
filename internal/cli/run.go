@@ -165,7 +165,7 @@ func finish(cfg runConfig, tr tracer, c *correlate.Correlator, reason string, st
 	graphErr := schema.WriteGraphFile(filepath.Join(cfg.out, GraphFile), c.Graph())
 	_, _ = fmt.Fprintf(stderr, "iormesh: stopped (%s); lost records %d (kernel %d), unpaired exits %d, "+
 		"unreadable paths %d, unattributed aggregates %d\n",
-		reason, losses.Total(), losses.Kernel, c.Unpaired(), c.NoPath(), c.Unattributed())
+		reason, losses.Total(), losses.KernelSide(), c.Unpaired(), c.NoPath(), c.Unattributed())
 	return errors.Join(aggErr, lossErr, closeErr, endErr, sinkErr, graphErr)
 }
 

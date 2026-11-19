@@ -51,8 +51,11 @@ const (
 
 // Tracer is one loaded BPF object with its links and ring-buffer reader.
 type Tracer struct {
-	module  *bpf.Module
-	links   []*bpf.BPFLink
+	module *bpf.Module
+	links  []*bpf.BPFLink
+	// progFDs are the attached programs, whose recursion misses Losses
+	// counts (progmiss.go). Written while attaching, before any reader.
+	progFDs []int
 	skipped []Probe
 	ring    *ringReader
 	records chan []any
@@ -183,6 +186,9 @@ func (t *Tracer) Losses() (Losses, error) {
 	if err != nil {
 		return l, fmt.Errorf("get %s: %w", ringbufDropMapName, err)
 	}
-	l.Kernel, err = readKernelDrops(m)
+	if l.Kernel, err = readKernelDrops(m); err != nil {
+		return l, err
+	}
+	l.Missed, err = readProgMisses(t.progFDs, progMisses)
 	return l, err
 }

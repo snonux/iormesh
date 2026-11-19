@@ -30,8 +30,9 @@ type fdInstance struct {
 }
 
 // TestSyscallBurstFoldsEveryCall: a traced syscall-burst loses no record,
-// is folded (events with args.count), and its folded and single write and
-// read events on its own files account for every one of its ops.
+// pairs every exit, is folded (events with args.count), and its folded and
+// single write and read events on its own files account for every one of
+// its ops.
 func TestSyscallBurstFoldsEveryCall(t *testing.T) {
 	enableParallelIfRequested(t)
 	h := newHarness(t)
@@ -41,6 +42,12 @@ func TestSyscallBurstFoldsEveryCall(t *testing.T) {
 		return []*Workload{w}, err
 	})
 	assertOnlyTracedPIDs(t, run.Trace.Events, run.pids)
+	// A judged run lost nothing the tracer counted (traceJudged retries a
+	// run with kernel loss, skipped programs included); an unpaired exit
+	// would then be a call lost silently (task vc4).
+	if run.Loss.Unpaired != 0 {
+		t.Fatalf("%d unpaired exits on a run without counted loss (%s)", run.Loss.Unpaired, run.Loss)
+	}
 
 	writes, reads := burstFiles(run.Trace.Events)
 	if len(writes) != burstThreads || len(reads) != burstThreads {
