@@ -120,10 +120,11 @@ func (st *sockTrace) checkUnreachable(t *testing.T) {
 
 // checkResetQueued: the client connected (ESTABLISHED, then CLOSE on its
 // RST); accept(2) took the already reset child — a CLOSE snapshot with
-// the client's port as remote — and its read saw the reset. The two
-// ends are two unresolved conns, never fused: the child never reached
-// ESTABLISHED in the trace, and a join is never guessed. The child often
-// lands on the client's freed fd number, under a new generation.
+// the client's port as remote — and its read saw the reset (an error or
+// EOF, whichever the helper reported). The two ends are two unresolved
+// conns, never fused: the child never reached ESTABLISHED in the trace,
+// and a join is never guessed. When the child lands on the client's
+// freed fd number (the usual case), it is a new generation of it.
 func (st *sockTrace) checkResetQueued(t *testing.T) {
 	f := st.facts["reset-queued"]
 	client := st.find(t, "the queued client's connect", func(e schema.Event) bool {
@@ -140,6 +141,9 @@ func (st *sockTrace) checkResetQueued(t *testing.T) {
 		return e.Event == schema.KindAccept && st.isFD(e, f["server_fd"]) && port(e.Args.RemotePort) == f["client_port"]
 	})
 	st.checkResetChild(t, server, f)
+	if server.FD == client.FD && server.FDGen == client.FDGen {
+		t.Errorf("the reset child reuses the client's fd %d under the same generation %d", server.FD, server.FDGen)
+	}
 	cc := st.wantConn(t, client, schema.StateUnresolved)
 	sc := st.wantConn(t, server, schema.StateUnresolved)
 	if cc == sc {

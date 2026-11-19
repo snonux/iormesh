@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -34,6 +35,9 @@ const (
 	// reuseSettle is the pause between the target's exit and the reuse
 	// of its PID (tracePIDReuse says why).
 	reuseSettle = 500 * time.Millisecond
+	// launcherWaitDelay bounds the launcher's Wait once it exited or was
+	// killed while its squatter still holds its output pipes.
+	launcherWaitDelay = 5 * time.Second
 )
 
 // reuseRun is one traced PID reuse run and what its choreography saw.
@@ -119,14 +123,17 @@ func tracePIDReuse(h *Harness, peer string) (reuseRun, error) {
 // waits for the tracer to end by itself, then lets the squatter go —
 // recording whether it still held the PID when the tracer was done.
 func squatWhileTracing(h *Harness, peer string, keeper *Workload, tracer *process, run *reuseRun) error {
-	launcher, stdin, err := startLauncher(h, peer, run.pid)
+	launcher, stdin, inc, err := startLauncher(h, peer, run.pid)
 	if err != nil {
 		return err
 	}
+	run.squatterInc = inc
+	// On every way out, the squatter goes: it is the launcher's child,
+	// which Harness.Close does not kill, and it holds the launcher's
+	// stdout, so a failure before the regular release below would leave
+	// the launcher's Wait — and the test's cleanup — hanging on it.
+	defer releaseSquatter(stdin, run.pid, inc)
 	if _, err := launcher.waitLine("squatting ", releaseLineTimeout); err != nil {
-		return err
-	}
-	if run.squatterInc, err = startNS(run.pid); err != nil {
 		return err
 	}
 	if err := keeper.Stdin.Close(); err != nil {
@@ -147,26 +154,53 @@ func squatWhileTracing(h *Harness, peer string, keeper *Workload, tracer *proces
 
 // startLauncher starts the untraced `edgepeer pid-reuse` onto pid and
 // returns once it reported the reuse, with the pipe to its stdin (which
-// its squatter child inherited and holds the PID on).
-func startLauncher(h *Harness, peer string, pid int) (*process, io.WriteCloser, error) {
+// its squatter child inherited and holds the PID on) and the squatter's
+// incarnation. On an error it has closed that pipe, so a squatter that
+// did start reads EOF and exits.
+func startLauncher(h *Harness, peer string, pid int) (*process, io.WriteCloser, uint64, error) {
 	cmd := exec.Command(peer, "pid-reuse", "-pid", strconv.Itoa(pid), "-dir", h.Tmp)
+	// A squatter that outlives its killed launcher still holds the
+	// launcher's stdout; WaitDelay bounds Wait's copy of it, so the
+	// harness's cleanup never hangs on a grandchild.
+	cmd.WaitDelay = launcherWaitDelay
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, nil, fmt.Errorf("launcher stdin: %w", err)
+		return nil, nil, 0, fmt.Errorf("launcher stdin: %w", err)
 	}
 	launcher, err := startProcess("edgepeer pid-reuse", cmd)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	h.procs = append(h.procs, launcher)
+	inc, err := reusedIncarnation(launcher, pid)
+	if err != nil {
+		_ = stdin.Close() // already failing; the squatter, if any, must go
+		return nil, nil, 0, err
+	}
+	return launcher, stdin, inc, nil
+}
+
+// reusedIncarnation waits for the launcher's "reused" line, checks it
+// names pid and reads the squatter's incarnation on it.
+func reusedIncarnation(launcher *process, pid int) (uint64, error) {
 	line, err := launcher.waitLine("reused ", releaseLineTimeout)
 	if err != nil {
-		return nil, nil, err
+		return 0, err
 	}
 	if got := strings.TrimPrefix(line, "reused pid="); got != strconv.Itoa(pid) {
-		return nil, nil, fmt.Errorf("launcher reused pid %s, want %d", got, pid)
+		return 0, fmt.Errorf("launcher reused pid %s, want %d", got, pid)
 	}
-	return launcher, stdin, nil
+	return startNS(pid)
+}
+
+// releaseSquatter closes the squatter's stdin (a second close is
+// harmless) and kills it if that same incarnation still lives — never
+// whatever else may hold the PID by then.
+func releaseSquatter(stdin io.Closer, pid int, inc uint64) {
+	_ = stdin.Close() // closed already on the regular path
+	if target.HostProcFS().Alive(uint32(pid), inc) {
+		_ = syscall.Kill(pid, syscall.SIGKILL) // best effort: cleanup only
+	}
 }
 
 // startNS reads pid's incarnation as the tracer does (/proc start time).

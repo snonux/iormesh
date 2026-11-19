@@ -3,9 +3,10 @@ package main
 // The PID reuse roles. The kernel hands out PIDs cyclically, so a freed
 // PID normally comes back only after pid_max allocations — a fork loop
 // would need minutes of CPU and still race the rest of the host. clone3
-// with set_tid (Linux 5.5, CAP_SYS_ADMIN in the init user namespace, i.e.
-// root) asks for one exact PID instead: the child gets it, or the call
-// fails with EEXIST. One attempt, no loop, no race.
+// with set_tid (Linux 5.5) asks for one exact PID instead: the child gets
+// it, or the call fails with EEXIST. One attempt, no loop, no race. It
+// needs CAP_SYS_ADMIN or CAP_CHECKPOINT_RESTORE in the user namespace
+// owning the target PID namespace — the host's, so root here.
 
 import (
 	"fmt"
@@ -111,7 +112,10 @@ func spawnAt(pid int, argv []string) (int, error) {
 	// as os/exec does; taken before the addresses are computed, so no
 	// call between them and the clone could move this goroutine's stack.
 	syscall.ForkLock.Lock()
-	args := cloneArgs{exitSignal: uint64(syscall.SIGCHLD),
+	// CLONE_CLEAR_SIGHAND resets the child's handlers to the defaults:
+	// a signal arriving before the exec must not run Go's handler in a
+	// process whose runtime has only this one thread left.
+	args := cloneArgs{flags: unix.CLONE_CLEAR_SIGHAND, exitSignal: uint64(syscall.SIGCHLD),
 		setTID: uint64(uintptr(unsafe.Pointer(&tids[0]))), setTIDSize: 1}
 	r1, _, errno := syscall.RawSyscall(unix.SYS_CLONE3, uintptr(unsafe.Pointer(&args)), unsafe.Sizeof(args), 0)
 	if errno == 0 && r1 == 0 {

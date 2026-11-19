@@ -10,8 +10,11 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -187,6 +190,9 @@ func acceptRace() error {
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	r := <-done
+	if r.err == nil {
+		closeQuietly(r.fd) // an unexpected connection; failing anyway
+	}
 	if err := syscall.Close(lfd); err != nil {
 		return err
 	}
@@ -297,16 +303,17 @@ func loopback(port int) *syscall.SockaddrInet4 {
 // cares: the first error wins.
 func closeQuietly(fd int) { _ = syscall.Close(fd) }
 
-// errName is an errno's symbolic name for the facts line, "none" for
-// success.
+// errName is an error's symbolic errno name for the facts line (the
+// tracer's err field uses the same names), "none" for success; any other
+// error becomes one space-free word, so the facts line stays parseable.
 func errName(err error) string {
 	var errno syscall.Errno
 	switch {
 	case err == nil:
 		return "none"
-	case errors.As(err, &errno) && errno == syscall.ECONNRESET:
-		return "ECONNRESET"
+	case errors.As(err, &errno) && unix.ErrnoName(errno) != "":
+		return unix.ErrnoName(errno)
 	default:
-		return err.Error()
+		return strings.Join(strings.Fields(err.Error()), "_")
 	}
 }
