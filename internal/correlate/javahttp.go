@@ -29,12 +29,19 @@ import (
 // closed the connection; a client's remote is known only for a literal
 // IP host). A request whose ends match nothing keeps no conn_id.
 //
-// Numbering: req_seq counts a connection's requests per process in
-// completion order, which is request order over HTTP/1.1 (one at a time
-// per connection, pipelined or not). It is left out — the hops then pair
-// by time only — for HTTP/2, which multiplexes, for a request without a
-// connection, and for every request of a JVM whose ring dropped an HTTP
-// record: a lost request would shift the count silently.
+// Numbering: req_seq counts a connection's requests per process and end
+// (client or server: a same-JVM loopback call has both) in completion
+// order, which is request order over HTTP/1.1 (one at a time per
+// connection, pipelined or not) — up to the clock: two requests on one
+// connection completing within the agent's stamp resolution of each
+// other on different threads could swap (documented in
+// docs/schema.md). It is left out — the hops then pair by time only —
+// for HTTP/2, which multiplexes, for a request without a connection,
+// for every request of a JVM that may have lost an HTTP record (a lost
+// request would shift the count silently), and from the first request
+// that took several exchanges on a connection on (a client library's
+// own redirect or authentication retry: the server saw each exchange
+// as a request).
 
 // pendingHTTP is an HTTP record waiting for its turn in the stream.
 type pendingHTTP struct {
@@ -56,11 +63,21 @@ type connPair struct {
 	local, remote netip.AddrPort
 }
 
-// connSeq keys a connection's request counter.
+// connSeq keys a request counter: a connection's requests as one end of
+// it saw them. The side matters when both ends are one process (a
+// same-JVM loopback call): they share the conn_id, and one counter would
+// number the client's requests 1, 3, 5 and the server's 2, 4, 6.
 type connSeq struct {
-	pid  uint32
-	conn string
+	pid    uint32
+	conn   string
+	server bool
 }
+
+// seqStopped marks a counter that numbers no more: one of its requests
+// took several exchanges (a redirect or authentication retry the client
+// library made by itself), so the server counted more requests than the
+// client and every later ordinal would pair wrongly.
+const seqStopped = ^uint32(0)
 
 // closedConn is a closed socket's index entry, forgotten Retain after the
 // close: an http event of its last request may be emitted after the
@@ -71,22 +88,28 @@ type closedConn struct {
 	at   uint64
 }
 
+// connSet is the connections seen on one key (an end or both): a lookup
+// answers only when exactly one is known, never a guess between several
+// — a client's two connections to one server share the remote end, a
+// server's accepted ones its local end.
+type connSet map[string]struct{}
+
 // connIndex finds a request's connection by its socket ends.
 type connIndex struct {
-	byPair   map[connPair]string
-	byLocal  map[connEnd]string
-	byRemote map[connEnd]string
+	byPair   map[connPair]connSet
+	byLocal  map[connEnd]connSet
+	byRemote map[connEnd]connSet
 	seq      map[connSeq]uint32
 	closed   []closedConn
 }
 
 func newConnIndex() *connIndex {
-	return &connIndex{byPair: map[connPair]string{}, byLocal: map[connEnd]string{},
-		byRemote: map[connEnd]string{}, seq: map[connSeq]uint32{}}
+	return &connIndex{byPair: map[connPair]connSet{}, byLocal: map[connEnd]connSet{},
+		byRemote: map[connEnd]connSet{}, seq: map[connSeq]uint32{}}
 }
 
-// observe indexes a socket event's ends under its conn_id; a later socket
-// on the same ends replaces the earlier (latest wins).
+// observe indexes a socket event's ends under its conn_id; a closed
+// socket's entries stay until purge.
 func (x *connIndex) observe(ev *schema.Event) {
 	a := ev.Args
 	if ev.ConnID == "" || a.LocalAddr == nil || a.LocalPort == nil {
@@ -106,49 +129,73 @@ func (x *connIndex) observe(ev *schema.Event) {
 
 func (x *connIndex) add(p connPair, conn string) {
 	if p.local.IsValid() {
-		x.byLocal[connEnd{p.pid, p.local}] = conn
+		addTo(x.byLocal, connEnd{p.pid, p.local}, conn)
 	}
 	if p.remote.IsValid() {
-		x.byRemote[connEnd{p.pid, p.remote}] = conn
+		addTo(x.byRemote, connEnd{p.pid, p.remote}, conn)
 		if p.local.IsValid() {
-			x.byPair[p] = conn
+			addTo(x.byPair, p, conn)
 		}
 	}
 }
 
-// lookup returns the conn_id of a request's ends ("" when unknown).
+func addTo[K comparable](m map[K]connSet, k K, conn string) {
+	set := m[k]
+	if set == nil {
+		set = connSet{}
+		m[k] = set
+	}
+	set[conn] = struct{}{}
+}
+
+// lookup returns the conn_id of a request's ends: by both ends, else the
+// remote, else the local one; "" when unknown or when several
+// connections are known on that key.
 func (x *connIndex) lookup(pid uint32, local, remote string) string {
 	l, r := parseEnd(local), parseEnd(remote)
 	switch {
 	case l.IsValid() && r.IsValid():
-		if c := x.byPair[connPair{pid, l, r}]; c != "" {
-			return c
-		}
+		return only(x.byPair[connPair{pid, l, r}])
 	case r.IsValid():
-		return x.byRemote[connEnd{pid, r}]
+		return only(x.byRemote[connEnd{pid, r}])
 	case l.IsValid():
-		return x.byLocal[connEnd{pid, l}]
+		return only(x.byLocal[connEnd{pid, l}])
 	}
 	return ""
 }
 
-// purge forgets the sockets closed more than retain before now, unless a
-// newer socket took their ends over.
+// only is the set's one connection, "" for none or several.
+func only(set connSet) string {
+	if len(set) != 1 {
+		return ""
+	}
+	for c := range set {
+		return c
+	}
+	return ""
+}
+
+// purge forgets the sockets closed more than retain before now, and
+// their request counters.
 func (x *connIndex) purge(now, retain uint64) {
 	n := 0
 	for ; n < len(x.closed) && x.closed[n].at+retain < now; n++ {
 		c := x.closed[n]
-		deleteIf(x.byPair, c.pair, c.conn)
-		deleteIf(x.byLocal, connEnd{c.pair.pid, c.pair.local}, c.conn)
-		deleteIf(x.byRemote, connEnd{c.pair.pid, c.pair.remote}, c.conn)
-		delete(x.seq, connSeq{c.pair.pid, c.conn})
+		removeFrom(x.byPair, c.pair, c.conn)
+		removeFrom(x.byLocal, connEnd{c.pair.pid, c.pair.local}, c.conn)
+		removeFrom(x.byRemote, connEnd{c.pair.pid, c.pair.remote}, c.conn)
+		delete(x.seq, connSeq{c.pair.pid, c.conn, false})
+		delete(x.seq, connSeq{c.pair.pid, c.conn, true})
 	}
 	x.closed = slices.Delete(x.closed, 0, n)
 }
 
-func deleteIf[K comparable](m map[K]string, k K, conn string) {
-	if m[k] == conn {
-		delete(m, k)
+func removeFrom[K comparable](m map[K]connSet, k K, conn string) {
+	if set := m[k]; set != nil {
+		delete(set, conn)
+		if len(set) == 0 {
+			delete(m, k)
+		}
 	}
 }
 
@@ -229,7 +276,7 @@ func (j *JavaJoin) httpEvent(h pendingHTTP) (schema.Event, error) {
 		ev.HTTP.Method = "?" // a library that lost its method still made a request
 	}
 	ev.ConnID = j.conns.lookup(v.pid, r.Local, r.Remote)
-	ev.HTTP.ReqSeq = j.reqSeq(v, ev.ConnID, r.Version)
+	ev.HTTP.ReqSeq = j.reqSeq(v, ev.ConnID, r)
 	j.stats.HTTP++
 	if ev.ConnID == "" {
 		j.stats.HTTPNoConn++
@@ -246,15 +293,28 @@ func (j *JavaJoin) httpEvent(h pendingHTTP) (schema.Event, error) {
 	return ev, nil
 }
 
-// reqSeq numbers a request on its connection; 0 (absent) when it cannot
-// be numbered soundly (see the package comment above).
-func (j *JavaJoin) reqSeq(v *jvm, conn, version string) uint32 {
-	if conn == "" || strings.HasPrefix(version, "HTTP/2") || v.ring.Losses().DroppedHTTP > 0 {
+// reqSeq numbers a request on its connection, as its end (client or
+// server) saw it; 0 (absent) when it cannot be numbered soundly: no
+// connection, HTTP/2, a JVM that lost an HTTP record (dropped, abandoned
+// or undecodable — any of them, the reader cannot tell the type of the
+// last two), or a connection on which a request took several exchanges
+// (that request and every later one: the ends' counts no longer agree).
+func (j *JavaJoin) reqSeq(v *jvm, conn string, r agentspool.HTTP) uint32 {
+	if conn == "" || strings.HasPrefix(r.Version, "HTTP/2") || httpLost(v.ring.Losses()) {
 		return 0
 	}
-	k := connSeq{v.pid, conn}
+	k := connSeq{v.pid, conn, r.Server}
+	if j.conns.seq[k] == seqStopped || r.Exchanges > 1 {
+		j.conns.seq[k] = seqStopped
+		return 0
+	}
 	j.conns.seq[k]++
 	return j.conns.seq[k]
+}
+
+// httpLost reports whether a ring may have lost an HTTP record.
+func httpLost(l agentspool.Losses) bool {
+	return l.DroppedHTTP+l.Abandoned+l.Malformed > 0
 }
 
 // headers re-applies the tracer's header policy to "name: value" lines.
@@ -270,9 +330,19 @@ func (j *JavaJoin) headers(hs []string) []string {
 			continue
 		}
 		out[i] = name + ": " + j.policy.Header(name, value)
+		if urlHeaders[strings.ToLower(name)] {
+			// A relative reference ("/next?token=x") has no "://" for
+			// the policy's text scan to find.
+			out[i] = name + ": " + j.policy.URL(j.policy.Header(name, value))
+		}
 	}
 	return out
 }
+
+// urlHeaders hold a URI reference, often relative: masked as a URL whole
+// (the agent's Redaction.URL_HEADERS).
+var urlHeaders = map[string]bool{"location": true, "content-location": true,
+	"referer": true, "origin": true}
 
 // seen takes what the http events borrow from the stream as ev passes:
 // the envelope's project, host and clock offset, the latest completion

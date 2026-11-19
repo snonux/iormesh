@@ -86,8 +86,13 @@ public final class Ring {
     /** BRACKET body: hook, ktid, enter, exit, stack, thread. */
     static final int BRACKET_LEN = 8 + 40;
     static final int WATERMARK_LEN = 8 + 8;
-    /** HTTP's fixed part: word, mono, stack, thread, ktid, status, n, nreq. */
-    static final int HTTP_HEAD = 8 + 40;
+    /**
+     * HTTP's fixed part: word, mono, stack, thread, ktid, status, n, nreq,
+     * flags, exchanges.
+     */
+    static final int HTTP_HEAD = 8 + 48;
+    /** HTTP flag: the request was answered here (a server's), not sent. */
+    static final int HTTP_SERVER = 1;
     /** HTTP's leading strings: method, scheme, host, path, version, local, remote. */
     static final int HTTP_FIXED = 7;
     /** Bounds a STACK or THREAD record, so one never needs a large share of the ring. */
@@ -248,7 +253,11 @@ public final class Ring {
     /**
      * Writes an HTTP record: one finished request as an HTTP hook saw it
      * (decision #22; iormesh.agent.http) — exit stamp, stack id, Java
-     * thread id, kernel tid, status, then the strings: the HTTP_FIXED
+     * thread id, kernel tid, status, the string and request-header
+     * counts, flags (HTTP_SERVER) and the number of HTTP exchanges the
+     * request took (more than 1 when the library followed a redirect or
+     * answered an authentication challenge on its own: the tracer then
+     * stops numbering the connection), then the strings: the HTTP_FIXED
      * leading ones (method, scheme, host, path, version, local and remote
      * socket address), nreq request headers and the response headers, each
      * "name: value", already redacted by the probe that built them. A
@@ -256,7 +265,7 @@ public final class Ring {
      * the request is what pairs the hops.
      */
     boolean http(long mono, long stack, long thread, int ktid, int status, String[] s,
-                 int nreq) {
+                 int nreq, int flags, int exchanges) {
         int n = s.length;
         byte[][] enc = encode(s, n);
         int len = align(HTTP_HEAD + size(enc, n));
@@ -281,6 +290,8 @@ public final class Ring {
             buf.putInt(off + 36, status);
             buf.putInt(off + 40, n);
             buf.putInt(off + 44, nreq);
+            buf.putInt(off + 48, flags);
+            buf.putInt(off + 52, exchanges);
             putStrings(off + HTTP_HEAD, enc, n);
             publish(off, len, HTTP);
             return true;

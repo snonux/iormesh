@@ -38,7 +38,8 @@ func (jt *joinTest) request(at uint64, path, local, remote string) agentspool.HT
 	return agentspool.HTTP{ExitMono: jt.mono(at), StackID: 10, ThreadID: 1, KTID: mainTID,
 		Status: 200, Method: "GET", Scheme: "http", Host: "127.0.0.1", Path: path,
 		Version: "HTTP/1.1", Local: local, Remote: remote,
-		ReqHeaders: []string{"authorization: Bearer leaked"}, RespHeaders: []string{"x-a: b"}}
+		ReqHeaders:  []string{"authorization: Bearer leaked"},
+		RespHeaders: []string{"location: /next?token=leaked", "x-a: b"}}
 }
 
 // kinds lists the sink's event kinds in order.
@@ -72,7 +73,8 @@ func TestJavaJoinHTTPEvents(t *testing.T) {
 	h1, h2 := jt.sink.events[2], jt.sink.events[4]
 	wantHTTP := &schema.HTTP{Method: "GET", Scheme: "http", Host: "127.0.0.1",
 		Path: "/a?token=***", Status: 200, ReqSeq: 1, Version: "HTTP/1.1",
-		ReqHeaders: []string{"authorization: ***"}, RespHeaders: []string{"x-a: b"}}
+		ReqHeaders:  []string{"authorization: ***"},
+		RespHeaders: []string{"location: /next?token=***", "x-a: b"}}
 	if !reflect.DeepEqual(h1.HTTP, wantHTTP) || h1.ConnID != "c1" || h2.HTTP.ReqSeq != 2 {
 		t.Errorf("http events %+v %+v, want %+v on c1, then req_seq 2", h1.HTTP, h2, wantHTTP)
 	}
@@ -83,6 +85,58 @@ func TestJavaJoinHTTPEvents(t *testing.T) {
 	}
 	if s := jt.j.Stats(); s.HTTP != 2 || s.HTTPNoConn != 0 {
 		t.Errorf("stats %+v", s)
+	}
+}
+
+// TestJavaJoinHTTPSidesNumberedApart: a same-JVM loopback call has both
+// ends' events on one conn_id; each end counts its own requests, so the
+// client's and the server's of one request carry the same req_seq.
+func TestJavaJoinHTTPSidesNumberedApart(t *testing.T) {
+	jt := newJoinTest(t)
+	at := jt.now + 1000
+	var recs []agentspool.Record
+	for i := range uint64(2) {
+		srv := jt.request(at+1000+i*2000, "/", "", "127.0.0.1:40000")
+		srv.Server = true
+		cli := jt.request(at+2000+i*2000, "/", "127.0.0.1:40000", "127.0.0.1:8080")
+		recs = append(recs, srv, cli)
+	}
+	jt.ring(append(recs, jt.watermark(at+20_000_000))...)
+	jt.sock(at, "c1", "127.0.0.1", 40000, "127.0.0.1", 8080, "ESTABLISHED")
+	jt.sock(at, "c1", "127.0.0.1", 8080, "127.0.0.1", 40000, "ESTABLISHED")
+	jt.close()
+	var got []uint32
+	for _, e := range jt.sink.events {
+		if e.Event == schema.KindHTTP {
+			got = append(got, e.HTTP.ReqSeq)
+		}
+	}
+	if !reflect.DeepEqual(got, []uint32{1, 1, 2, 2}) {
+		t.Errorf("req_seq server, client, server, client = %v, want 1 1 2 2", got)
+	}
+}
+
+// TestJavaJoinHTTPStopsAfterRetries: a request that took several
+// exchanges (a redirect followed by the client library) and every later
+// one on its connection stay unnumbered; the other end still counts.
+func TestJavaJoinHTTPStopsAfterRetries(t *testing.T) {
+	jt := newJoinTest(t)
+	at := jt.now + 1000
+	first := jt.request(at+1000, "/", "127.0.0.1:40000", "127.0.0.1:8080")
+	retried := jt.request(at+2000, "/", "127.0.0.1:40000", "127.0.0.1:8080")
+	retried.Exchanges = 2
+	later := jt.request(at+3000, "/", "127.0.0.1:40000", "127.0.0.1:8080")
+	jt.ring(first, retried, later, jt.watermark(at+20_000_000))
+	jt.sock(at, "c1", "127.0.0.1", 40000, "127.0.0.1", 8080, "ESTABLISHED")
+	jt.close()
+	var got []uint32
+	for _, e := range jt.sink.events {
+		if e.Event == schema.KindHTTP {
+			got = append(got, e.HTTP.ReqSeq)
+		}
+	}
+	if !reflect.DeepEqual(got, []uint32{1, 0, 0}) {
+		t.Errorf("req_seq %v, want 1 then none", got)
 	}
 }
 
@@ -123,6 +177,8 @@ func TestJavaJoinHTTPUnnumbered(t *testing.T) {
 		"no connection": {"HTTP/1.1", "127.0.0.1:9", agentspool.Losses{}, ""},
 		"http/2":        {"HTTP/2", "127.0.0.1:8080", agentspool.Losses{}, "c1"},
 		"dropped http":  {"HTTP/1.1", "127.0.0.1:8080", agentspool.Losses{DroppedHTTP: 1}, "c1"},
+		"abandoned":     {"HTTP/1.1", "127.0.0.1:8080", agentspool.Losses{Abandoned: 1}, "c1"},
+		"malformed":     {"HTTP/1.1", "127.0.0.1:8080", agentspool.Losses{Malformed: 1}, "c1"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -163,8 +219,8 @@ func TestJavaJoinHTTPBeforeEnd(t *testing.T) {
 
 // TestConnIndex: a request's connection by both ends, by the remote end
 // alone (a server after the close), by the local end alone (a client of
-// a named host); a newer socket on the same ends wins, and a closed one
-// is forgotten after Retain.
+// a named host); an end several connections share answers nothing, and
+// a closed one is forgotten after Retain.
 func TestConnIndex(t *testing.T) {
 	x := newConnIndex()
 	ev := func(conn, state string, at uint64, local string, lport uint16, remote string,
@@ -188,6 +244,13 @@ func TestConnIndex(t *testing.T) {
 		if got := x.lookup(1, c.local, c.remote); got != c.want {
 			t.Errorf("lookup(%q, %q) = %q, want %q", c.local, c.remote, got, c.want)
 		}
+	}
+	x.observe(ev("c3", "ESTABLISHED", 25, "::1", 6001, "::1", 443))
+	if got := x.lookup(1, "", "[::1]:443"); got != "" {
+		t.Errorf("remote end of two connections gave %q, want none", got)
+	}
+	if got := x.lookup(1, "[::1]:6001", "[::1]:443"); got != "c3" {
+		t.Errorf("both ends of c3 gave %q", got)
 	}
 	x.observe(ev("c1", "CLOSE", 30, "::ffff:10.0.0.1", 8080, "::ffff:10.0.0.2", 5000))
 	x.purge(30+defaultRetain, defaultRetain)

@@ -634,10 +634,12 @@ Gated by S1 — done; the design below is S1's result
   multiplexes requests on one connection, so an ordinal cannot
   pair them: v1 records HTTP/2 requests but renders their hops
   time-ordered unless stream ids are captured (decision #22).
-  The tracer numbers a connection's requests (`req_seq`) in
-  completion order, and leaves the ordinal out over HTTP/2,
-  without a connection, or once a JVM's ring dropped an HTTP
-  record — a lost request would shift the count silently.
+  The tracer numbers a connection's requests (`req_seq`) per
+  end in completion order, and leaves the ordinal out over
+  HTTP/2, without a connection, once a JVM may have lost an
+  HTTP record — a lost request would shift the count silently —
+  and from a request the client library retried by itself
+  (redirect, 401/407) on, which the server counted as several.
 - Acceptance: frames carry `class#method(file:line)`; every
   declared I/O op of M3's method-flow scenarios carries its
   declared causing method; unbracketed events are marked unattributed; the

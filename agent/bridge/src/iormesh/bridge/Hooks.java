@@ -73,8 +73,9 @@ public final class Hooks {
     private static final ThreadLocal<Brackets> STATE = ThreadLocal.withInitial(Brackets::new);
     /**
      * The HTTP probes by HTTP hook id (iormesh.agent.http): given {return
-     * value, this, argument} of a hooked method and an int[2] to fill with
-     * {status, request-header count}, a probe returns the request's
+     * value, this, argument} of a hooked method and an int[4] to fill with
+     * {status, request-header count, flags (Ring.HTTP_SERVER), exchanges},
+     * a probe returns the request's
      * strings — the Ring.HTTP_FIXED leading ones, then the headers,
      * redacted — or null when this call records nothing (a binding hook,
      * a request already recorded, no response). JDK types only: the agent
@@ -311,8 +312,8 @@ public final class Hooks {
      * another one's probe records nothing.
      */
     public static void http(Object ret, Object self, Object arg, int id) {
+        Ring r = ring;
         try {
-            Ring r = ring;
             BiFunction<Object[], int[], String[]>[] p = httpProbes;
             if (r == null || id <= 0 || id >= p.length || p[id] == null) {
                 return;
@@ -320,6 +321,7 @@ public final class Hooks {
             Brackets t = STATE.get();
             if (t.busy) {
                 countSkip(SKIPS);
+                httpLost(r);
                 return;
             }
             t.busy = true;
@@ -333,6 +335,24 @@ public final class Hooks {
             }
         } catch (Throwable e) {
             countSkip(FAILS);
+            httpLost(r);
+        }
+    }
+
+    /**
+     * Counts a request this hook may have failed to record (a skipped or
+     * failed call) as a dropped HTTP record: the tracer stops numbering
+     * the JVM's requests once any is lost, which a silent failure here
+     * would otherwise shift (task 3b4 review). A binding hook's failure
+     * counts too — over-cautious, never a wrong ordinal.
+     */
+    private static void httpLost(Ring r) {
+        try {
+            if (r != null) {
+                r.lost(Ring.HTTP);
+            }
+        } catch (Throwable ignored) {
+            // Counting is best effort, like countSkip.
         }
     }
 
@@ -350,7 +370,7 @@ public final class Hooks {
         VarHandle.fullFence();   // as in close: the stamp after the mark
         try {
             long mono = System.nanoTime();
-            int[] meta = new int[2];
+            int[] meta = new int[4];
             String[] s = probe.apply(args, meta);
             if (s == null) {
                 return false;
@@ -360,7 +380,8 @@ public final class Hooks {
             }
             long stack = stacks.getAsLong();
             int ktid = t.virtual ? Brackets.lookupKtid() : t.kernelTid();
-            r.http(mono, stack, t.owner.getId(), ktid, meta[0], s, meta[1]);
+            r.http(mono, stack, t.owner.getId(), ktid, meta[0], s, meta[1], meta[2],
+                    Math.max(meta[3], 1));
             return true;
         } finally {
             t.closing = Brackets.IDLE;

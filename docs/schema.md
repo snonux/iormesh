@@ -641,23 +641,46 @@ has reached the joiner, or 2 s; the trace's `end` stays last.
 library still held (both, else the remote end — a server's local
 end is unreadable once the close shut the connection — else the
 local one; a client knows the remote end only for an IP-literal
-host). The tracer numbers a connection's requests per process in
-completion order (`req_seq`), so the client's and the server's
-event of one HTTP/1 request pair by (`conn_id`, `req_seq`); it
-leaves `req_seq` out over HTTP/2 (multiplexed, decision #22),
-without a `conn_id`, and for every request of a JVM whose ring
-dropped an HTTP record. The summary line counts the http events
-and those without a connection. Not recorded in v1:
-`HttpClient.sendAsync` (its response completes on the client's
-executor, with no caller on the stack) and the other libraries of
-#22's set.
+host), and only when exactly one connection of the process is
+known on those ends: a client's two connections to one server
+share the remote end, so such a request keeps no `conn_id`.
+
+The tracer numbers a connection's requests per process and end
+(client or server — a same-process loopback call has both on one
+`conn_id`) in completion order (`req_seq`), so the client's and the
+server's event of one HTTP/1 request pair by (`conn_id`,
+`req_seq`). It leaves `req_seq` out
+
+- over HTTP/2 (multiplexed, decision #22), and without a `conn_id`;
+- for every request of a JVM that may have lost an HTTP record —
+  dropped by the ring, abandoned, undecodable, or a hook call that
+  failed or was skipped (the agent counts those as dropped);
+- from the first request on a connection that took several HTTP
+  exchanges on: HttpClient following a redirect or answering a
+  401/407 through its authenticator, HttpURLConnection doing the
+  same (an interim `100 Continue` counts too) — the server saw
+  each exchange as a request, the caller one, and the ends' counts
+  no longer agree.
+
+The limit: completion order is the agent's stamp at the hook, so two
+requests of one connection that complete within the stamps'
+resolution on different threads (pipelining clients answered out of
+the scheduler's order) could swap ordinals; HTTP/1.1 clients send the
+next request on a connection only after the previous response, which
+rules that out for the JDK's libraries.
+
+The summary line counts the http events and those without a
+connection. Not recorded in v1: `HttpClient.sendAsync` (its response
+completes on the client's executor, with no caller on the stack) and
+the other libraries of #22's set.
 
 The agent writes each request as an HTTP record of the ring
 (format version 3: exit stamp, stack id, Java thread id, kernel
-tid, status, then method, scheme, host, path, version, local and
-remote socket address, and the headers), redacted before it is
-written; a record that would pass 16 KiB keeps the request and
-drops its headers.
+tid, status, the string and request-header counts, flags — server
+or client — and the exchange count, then method, scheme, host, path,
+version, local and remote socket address, and the headers), redacted
+before it is written; a record that would pass 16 KiB keeps the
+request and drops its headers.
 
 ## Graph
 
@@ -732,7 +755,9 @@ argument after it). HTTP headers (M3) use the same package:
 `authorization`, `proxy-authorization`, `cookie`, `set-cookie`
 and names containing `token`, `apikey`, `secret`, `password`,
 `session` or `signature` are recorded as `***`, URLs in the other
-headers' values and every query value of the path are masked.
+headers' values and every query value of the path are masked;
+`location`, `content-location`, `referer` and `origin` are masked
+as a URL even when relative (`/next?token=***`).
 The Java agent applies a copy of these header and query rules
 (`iormesh.agent.http.Redaction`) before a request reaches the
 spool, so a secret never lands on disk, and the tracer applies

@@ -109,8 +109,9 @@ func TestHTTPTLS(t *testing.T) {
 
 // TestHTTPRedaction: the planted Authorization, X-Api-Token, Cookie and
 // Set-Cookie values and the query secret never reach the trace (decision
-// #9 / #22), while their headers are recorded, masked, and the query
-// keeps its names with every value masked.
+// #9 / #22) — not the trace files and not the agent's rings in the
+// spool — while their headers are recorded, masked, and the query keeps
+// its names with every value masked.
 func TestHTTPRedaction(t *testing.T) {
 	enableParallelIfRequested(t)
 	h := newHarness(t)
@@ -118,13 +119,23 @@ func TestHTTPRedaction(t *testing.T) {
 	want := expectation(t, "http-redaction")
 	assertGolden(t, got, want)
 	assertRequestsPaired(t, got.Events)
-	for _, name := range []string{eventsFile, graphFile, "methods.ndjson", "threads.ndjson"} {
-		raw, err := os.ReadFile(filepath.Join(run.Dir, name))
+	files := []string{eventsFile, graphFile, "methods.ndjson", "threads.ndjson"}
+	for i, f := range files {
+		files[i] = filepath.Join(run.Dir, f)
+	}
+	// The agent redacts before the spool: the rings it wrote must not
+	// hold a planted secret either, not even until the tracer read them.
+	rings, err := filepath.Glob(filepath.Join(h.Spool, "*.ring"))
+	if err != nil || len(rings) == 0 {
+		t.Fatalf("no agent ring left in the spool: %v", err)
+	}
+	for _, path := range append(files, rings...) {
+		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if strings.Contains(string(raw), "Hunter2Planted") {
-			t.Errorf("%s holds a planted secret", name)
+			t.Errorf("%s holds a planted secret", path)
 		}
 	}
 	t.Run("wrong expectations are caught", func(t *testing.T) {

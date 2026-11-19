@@ -30,6 +30,14 @@ final class Request {
     String local = "";
     String remote = "";
     int status;
+    /** The request was answered here (a server's event), not sent. */
+    boolean server;
+    /**
+     * The HTTP exchanges the request took: more than 1 when the library
+     * followed a redirect or answered an authentication challenge itself
+     * — the server saw each, the caller one request.
+     */
+    int exchanges = 1;
     private final List<String> request = new ArrayList<>();
     private final List<String> response = new ArrayList<>();
 
@@ -44,7 +52,8 @@ final class Request {
 
     /**
      * The strings Hooks.http writes; meta gets {status, request-header
-     * count}. A negative status (no response) is recorded as 0.
+     * count, flags, exchanges}. A negative status (no response) is
+     * recorded as 0.
      */
     String[] toRecord(int[] meta) {
         List<String> s = new ArrayList<>(List.of(method, scheme, host, Redaction.url(path),
@@ -53,6 +62,8 @@ final class Request {
         s.addAll(response);
         meta[0] = Math.max(status, 0);
         meta[1] = request.size();
+        meta[2] = server ? 1 : 0;   // Ring.HTTP_SERVER
+        meta[3] = Math.max(exchanges, 1);
         return s.toArray(new String[0]);
     }
 

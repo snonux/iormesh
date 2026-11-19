@@ -36,6 +36,11 @@ public final class HttpProbeTest {
         equal("/a;jsessionid=***#frag", Redaction.url("/a;jsessionid=x#frag"), "matrix, fragment");
         equal("https://bob:***@h/x?q=***", Redaction.url("https://bob:pw@h/x?q=1"), "userinfo");
         equal("https://***@h/", Redaction.url("https://TOKEN@h/"), "lone userinfo");
+        equal("https://u:***@h/x", Redaction.url("https://u:p/ss@h/x"), "'/' in a password");
+        equal("https://h:8080/x?mail=***", Redaction.url("https://h:8080/x?mail=a@b"),
+                "a port is no password");
+        equal("location: /next?token=***", Redaction.header("Location", "/next?token=x"),
+                "relative Location");
         equal("/plain", Redaction.url("/plain"), "no query");
         equal("authorization: ***", Redaction.header("Authorization", "Bearer x"), "denied");
         equal("x-api-token: ***", Redaction.header("X-Api-Token", "t"), "glob *token*");
@@ -61,23 +66,33 @@ public final class HttpProbeTest {
     }
 
     static void client() {
+        int[] meta = new int[4];
         String[] s = new JdkHttpClient.Sent(new Weak<>()).apply(
-                new Object[] {new FakeResponse(), null, null}, new int[2]);
+                new Object[] {new FakeResponse(new FakeResponse(null)), null, null}, meta);
         equal(List.of("GET", "https", "127.0.0.1", "/a?k=***", "HTTP/2", "", "127.0.0.1:8443",
                 "cookie: ***", "etag: 1"), List.of(s), "record strings");
-        check(new JdkHttpClient.Sent(new Weak<>()).apply(new Object[3], new int[2]) == null,
+        equal(0, meta[2], "a client's request");
+        equal(2, meta[3], "exchanges: the response and its previous one (a redirect)");
+        check(new JdkHttpClient.Sent(new Weak<>()).apply(new Object[3], new int[4]) == null,
                 "a send that threw records nothing");
     }
 
     /** A response of HttpClient.send over HTTP/2. */
     static final class FakeResponse implements HttpResponse<String> {
         private static final URI URI_ = URI.create("https://127.0.0.1:8443/a?k=v");
+        private final HttpResponse<String> previous;
+
+        FakeResponse(HttpResponse<String> previous) {
+            this.previous = previous;
+        }
 
         @Override public int statusCode() { return 200; }
         @Override public HttpRequest request() {
             return HttpRequest.newBuilder(URI_).header("Cookie", "c=1").build();
         }
-        @Override public Optional<HttpResponse<String>> previousResponse() { return Optional.empty(); }
+        @Override public Optional<HttpResponse<String>> previousResponse() {
+            return Optional.ofNullable(previous);
+        }
         @Override public HttpHeaders headers() {
             return HttpHeaders.of(Map.of("ETag", List.of("1")), (a, b) -> true);
         }

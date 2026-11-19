@@ -30,14 +30,8 @@ func (e *Event) Validate() error {
 	if e.Err != "" && e.Ret >= 0 {
 		return invalidf("err %q with non-negative ret %d", e.Err, e.Ret)
 	}
-	if err := e.validateAttribution(); err != nil {
+	if err := e.validatePayloads(); err != nil {
 		return err
-	}
-	if err := e.validateHTTP(); err != nil {
-		return err
-	}
-	if (e.Event == KindSession) != (e.Session != nil) {
-		return invalidf("session object on a %s event (set exactly on session events)", e.Event)
 	}
 	// The host-level args belong to their kind alone: a lost count on a
 	// read, say, would make "sum args.lost" over a trace lie.
@@ -59,6 +53,22 @@ func (e *Event) Validate() error {
 		return err
 	}
 	return e.validateKindArgs()
+}
+
+// validatePayloads keeps the nested objects with their kind: the Java
+// attribution with its flag, the http object on http events, the session
+// object on the session header.
+func (e *Event) validatePayloads() error {
+	if err := e.validateAttribution(); err != nil {
+		return err
+	}
+	if err := e.validateHTTP(); err != nil {
+		return err
+	}
+	if (e.Event == KindSession) != (e.Session != nil) {
+		return invalidf("session object on a %s event (set exactly on session events)", e.Event)
+	}
+	return nil
 }
 
 // KnownKind reports whether kind is part of schema v1: an M1

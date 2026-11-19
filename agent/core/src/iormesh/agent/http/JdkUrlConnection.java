@@ -28,6 +28,8 @@ import java.util.function.BiFunction;
  * response is done.
  */
 public final class JdkUrlConnection implements Library {
+    private static final String IMPL = "sun.net.www.protocol.http.HttpURLConnection";
+
     @Override
     public String name() {
         return "jdk-urlconnection";
@@ -47,16 +49,17 @@ public final class JdkUrlConnection implements Library {
     public List<Target> targets() throws ReflectiveOperationException {
         ClassLoader boot = null;
         Field code = field(HttpURLConnection.class, "responseCode");
-        Class<?> impl = Class.forName("sun.net.www.protocol.http.HttpURLConnection", false, boot);
+        Class<?> impl = Class.forName(IMPL, false, boot);
         Field requests = field(impl, "requests");
         Field responses = field(impl, "responses");
         Method headers = Class.forName("sun.net.www.MessageHeader", false, boot)
                 .getMethod("getHeaders");
         headers.setAccessible(true);
         Field socket = field(Class.forName("sun.net.NetworkClient", false, boot), "serverSocket");
-        Weak<String[]> bound = new Weak<>();
+        Weak<Bound> bound = new Weak<>();
         Bind bind = new Bind(socket, bound);
         Done done = new Done(code, requests, responses, headers, bound);
+        done.walker.walk(done.depth);   // link the walk now, not in a request
         String client = "sun/net/www/http/HttpClient";
         String huc = "Lsun/net/www/protocol/http/HttpURLConnection;";
         return List.of(
@@ -75,22 +78,44 @@ public final class JdkUrlConnection implements Library {
         return f;
     }
 
-    /** parseHTTP: binds the connection object to its socket's two ends. */
+    /**
+     * What parseHTTP left for a connection object: its socket's two ends
+     * (the last response's) and how many responses it parsed — more than
+     * one when getInputStream0 followed a redirect or answered a 401/407
+     * challenge itself (an interim 100 Continue counts too: over-cautious,
+     * the tracer only stops numbering).
+     */
+    static final class Bound {
+        String local = "";
+        String remote = "";
+        int parses;
+    }
+
+    /** parseHTTP: binds the connection object to its socket and counts it. */
     static final class Bind implements BiFunction<Object[], int[], String[]> {
         private final Field socket;
-        private final Weak<String[]> bound;
+        private final Weak<Bound> bound;
 
-        Bind(Field socket, Weak<String[]> bound) {
+        Bind(Field socket, Weak<Bound> bound) {
             this.socket = socket;
             this.bound = bound;
         }
 
         @Override
         public String[] apply(Object[] a, int[] meta) {
+            if (a[2] == null) {
+                return null;
+            }
+            Bound b = bound.get(a[2]);
+            if (b == null) {
+                b = new Bound();
+                bound.put(a[2], b);
+            }
+            b.parses++;
             try {
-                if (a[2] != null && socket.get(a[1]) instanceof Socket s) {
-                    bound.put(a[2], new String[] {Request.addr(s.getLocalAddress(), s.getLocalPort()),
-                            Request.addr(s.getInetAddress(), s.getPort())});
+                if (socket.get(a[1]) instanceof Socket s) {
+                    b.local = Request.addr(s.getLocalAddress(), s.getLocalPort());
+                    b.remote = Request.addr(s.getInetAddress(), s.getPort());
                 }
             } catch (IllegalAccessException e) {
                 // Opened at install; if not, the request records no socket.
@@ -105,10 +130,21 @@ public final class JdkUrlConnection implements Library {
         private final Field requests;
         private final Field responses;
         private final Method headers;
-        private final Weak<String[]> bound;
+        private final Weak<Bound> bound;
         private final Weak<Boolean> recorded = new Weak<>();
+        /**
+         * Counts getInputStream0 frames on the stack: following a redirect
+         * or an authentication challenge, getInputStream0 reaches itself
+         * again (getResponseCode → getInputStream), and that inner exit
+         * sees the interim response (302, 401). Only the outermost exit
+         * records. Built at install: a lambda's first use links classes.
+         */
+        private final java.util.function.Function<java.util.stream.Stream<StackWalker.StackFrame>,
+                Long> depth = frames -> frames.filter(f -> f.getMethodName().equals("getInputStream0")
+                        && f.getClassName().equals(IMPL)).count();
+        private final StackWalker walker = StackWalker.getInstance();
 
-        Done(Field code, Field requests, Field responses, Method headers, Weak<String[]> bound) {
+        Done(Field code, Field requests, Field responses, Method headers, Weak<Bound> bound) {
             this.code = code;
             this.requests = requests;
             this.responses = responses;
@@ -120,8 +156,8 @@ public final class JdkUrlConnection implements Library {
         public String[] apply(Object[] a, int[] meta) {
             try {
                 if (!(a[1] instanceof HttpURLConnection c) || recorded.get(c) != null
-                        || code.getInt(c) < 0) {
-                    return null;   // no response yet (it threw before one), or done
+                        || code.getInt(c) < 0 || walker.walk(depth) > 1) {
+                    return null;   // no response yet, done, or an inner exit
                 }
                 recorded.put(c, Boolean.TRUE);
                 return describe(c).toRecord(meta);
@@ -139,10 +175,11 @@ public final class JdkUrlConnection implements Library {
             r.path = u.getFile().isEmpty() ? "/" : u.getFile();
             r.version = "HTTP/1.1";
             r.status = code.getInt(c);
-            String[] ends = bound.take(c);
-            if (ends != null) {
-                r.local = ends[0];
-                r.remote = ends[1];
+            Bound b = bound.take(c);
+            if (b != null) {
+                r.local = b.local;
+                r.remote = b.remote;
+                r.exchanges = b.parses;
             }
             r.requestHeaders(map(requests.get(c)));
             r.responseHeaders(map(responses.get(c)));

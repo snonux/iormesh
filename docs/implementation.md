@@ -2169,9 +2169,10 @@ internal/correlate/javajoin.go
    HOOK      5  hook_id u64, 5 u32, 0 u32, kind, class, method,
                 native, syscalls (comma-separated), as strings
       HTTP      6  exit_mono, stack_id, thread_id u64, ktid i32,
-                status i32, n u32, nreq u32, method, scheme, host,
-                path, version, local, remote, nreq request headers,
-                response headers (step 7)
+                status i32, n u32, nreq u32, flags u32 (1 = server),
+                exchanges u32, method, scheme, host, path, version,
+                local, remote, nreq request headers, response
+                headers (step 7)
    ```
 
    Version 3 (task 3b4) added HTTP (step 7). Version 2 (task
@@ -2381,15 +2382,28 @@ internal/correlate/javajoin.go
      addresses through public API, a descriptor only through deep
      internals. The joiner indexes every socket event's ends under
      its `conn_id` and looks a request up by both ends, else the
-     remote, else the local one; `req_seq` is counted there, per
-     process and connection in completion order, and left out
-     over HTTP/2, without a connection, or once the JVM dropped an
-     HTTP record. The joiner inserts the http events by time (each
-     waits until an event that completed 5 ms after it arrived, or
-     2 s) and therefore numbers its output `seq` itself.
-   - **Redaction twice**: `Redaction` (agent) masks denied headers
-     and every query value before the spool; the joiner applies
-     `internal/redact` again.
+     remote, else the local one — answering only when one
+     connection is known there; `req_seq` is counted per process,
+     connection and end (client or server: a same-JVM loopback
+     call has both) in completion order, and left out over HTTP/2,
+     without a connection, once the JVM may have lost an HTTP
+     record (dropped, abandoned, malformed, or a hook call that
+     failed — the agent counts it as dropped), and from a request
+     that took several exchanges on (review of 3b4: a client
+     library's own redirect or 401/407 retry — HttpClient's
+     `previousResponse` chain, HttpURLConnection's `parseHTTP`
+     count — is one request to the caller and several to the
+     server). HttpURLConnection reaches `getInputStream0` again
+     from inside it while following, so only the outermost exit
+     records (a stack walk counts the frames). The joiner inserts
+     the http events by time (each waits until an event that
+     completed 5 ms after it arrived, or 2 s) and therefore numbers
+     its output `seq` itself.
+   - **Redaction twice**: `Redaction` (agent) masks denied headers,
+     URI-valued headers (Location, Content-Location, Referer,
+     Origin) as URLs even when relative, every query value, and
+     URL userinfo with `internal/redact`'s authority heuristic;
+     the joiner applies `internal/redact` again.
 
    Tests: `mage agentTest` — `HttpTransformerTest` (a fixture's
    ctor, return, last-argument-after-a-long and throw paths hand

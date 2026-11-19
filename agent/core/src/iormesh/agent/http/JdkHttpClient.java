@@ -113,9 +113,24 @@ public final class JdkHttpClient implements Library {
         r.version = resp.version() == HttpClient.Version.HTTP_2 ? "HTTP/2" : "HTTP/1.1";
         r.status = resp.statusCode();
         r.remote = Request.literal(r.host, port(u));
+        r.exchanges = exchanges(resp);
         r.requestHeaders(req.headers().map());
         r.responseHeaders(resp.headers().map());
         return r;
+    }
+
+    /**
+     * The exchanges behind a response: it and its previous responses —
+     * the redirects HttpClient followed and the 401/407 challenges its
+     * authenticator answered, each one request the server saw.
+     */
+    static int exchanges(HttpResponse<?> resp) {
+        int n = 1;
+        for (HttpResponse<?> p = resp.previousResponse().orElse(null); p != null && n < 1000;
+                p = p.previousResponse().orElse(null)) {
+            n++;
+        }
+        return n;
     }
 
     private static int port(URI u) {

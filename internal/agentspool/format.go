@@ -66,6 +66,10 @@ const (
 // other flag bit is reserved and must be zero.
 const threadVirtual = 1
 
+// httpServer is HTTP's flag for a request answered (a server's), not
+// sent; every other flag bit is reserved and must be zero.
+const httpServer = 1
+
 // hookStrings is the number of strings in a HOOK record: kind, class,
 // method, native, syscall allowlist.
 const hookStrings = 5
@@ -79,9 +83,9 @@ const (
 	// zero in the others).
 	stringsHead = wordLen + 16
 	// httpHead is an HTTP record's fixed part: the word, mono, stack id
-	// and Java thread id (u64 each), ktid, status, the string count and
-	// the request-header count (u32 each).
-	httpHead = wordLen + 40
+	// and Java thread id (u64 each), ktid, status, the string count, the
+	// request-header count, flags and the exchange count (u32 each).
+	httpHead = wordLen + 48
 	// httpFixed is the number of leading strings of an HTTP record:
 	// method, scheme, host, path, version, local and remote address.
 	httpFixed = 7

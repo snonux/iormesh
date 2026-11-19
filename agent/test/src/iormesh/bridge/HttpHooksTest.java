@@ -40,6 +40,8 @@ public final class HttpHooksTest {
         Hooks.httpProbe(1, (a, meta) -> {
             meta[0] = 404;
             meta[1] = 1;
+            meta[2] = Ring.HTTP_SERVER;
+            meta[3] = 3;
             return REQUEST;
         });
         Hooks.ring = r;
@@ -62,6 +64,8 @@ public final class HttpHooksTest {
         equal(404, b.getInt(o + 36), "status");
         equal(9, b.getInt(o + 40), "strings");
         equal(1, b.getInt(o + 44), "request headers");
+        equal(Ring.HTTP_SERVER, b.getInt(o + 48), "flags");
+        equal(3, b.getInt(o + 52), "exchanges");
         equal(List.of(REQUEST), strings(b, o + Ring.HTTP_HEAD, 9), "strings");
         check(Hooks.httpCounts()[1] == 1, "counted");
         delete(dir, r);
@@ -83,8 +87,12 @@ public final class HttpHooksTest {
         } finally {
             Hooks.ring = null;
         }
-        equal(0, records(map(r.path())).size(), "no record");
+        ByteBuffer b = map(r.path());
+        equal(0, records(b).size(), "no record");
         equal(1L, Hooks.fails() - fails, "the throw counted");
+        // The failed request counts as a dropped HTTP record, so the
+        // tracer stops numbering instead of shifting the ordinals.
+        equal(1L, b.getLong(Ring.DROPPED + 8 * Ring.HTTP), "HTTP drop counted");
         delete(dir, r);
     }
 
@@ -95,7 +103,7 @@ public final class HttpHooksTest {
         for (int i = 0; i < 64; i++) {
             s.add("x-h" + i + ": " + "v".repeat(1000));
         }
-        check(r.http(1, 2, 3, 4, 200, s.toArray(new String[0]), 64), "written");
+        check(r.http(1, 2, 3, 4, 200, s.toArray(new String[0]), 64, 0, 1), "written");
         ByteBuffer b = map(r.path());
         int o = records(b).get(0)[1];
         equal(7, b.getInt(o + 40), "only the fixed strings");

@@ -20,7 +20,9 @@ import java.util.Locale;
  *       nothing reliable about what is secret; ';' and '#' parameters
  *       too, as JDBC and OAuth put credentials there;
  *   <li>URL userinfo is masked wherever a URL appears (a Referer or a
- *       Location header value): "https://user:***@host/".
+ *       Location header value): "https://user:***@host/"; Location,
+ *       Content-Location, Referer and Origin are masked as a URL even
+ *       when relative ("/next?token=***").
  * </ul>
  *
  * Path segments are recorded verbatim (#22's default; templating
@@ -35,6 +37,14 @@ public final class Redaction {
             "cookie", "setcookie", "*token*", "*apikey*", "*secret*", "*password*",
             "*session*", "*signature*");
 
+    /**
+     * Headers whose value is a URI reference, often relative
+     * ("/login?token=x"): masked as a URL whole, like internal/redact's
+     * URLHeader.
+     */
+    static final java.util.Set<String> URL_HEADERS = java.util.Set.of("location",
+            "content-location", "referer", "origin");
+
     private Redaction() {}
 
     /**
@@ -45,7 +55,14 @@ public final class Redaction {
      */
     public static String header(String name, String value) {
         String n = name.toLowerCase(Locale.ROOT);
-        String v = denied(n) ? MASK : text(value == null ? "" : value);
+        String v = value == null ? "" : value;
+        if (denied(n)) {
+            v = MASK;
+        } else if (URL_HEADERS.contains(n)) {
+            v = url(v);   // a relative reference has no "://" for text to find
+        } else {
+            v = text(v);
+        }
         return n + ": " + v;
     }
 
@@ -107,11 +124,12 @@ public final class Redaction {
     }
 
     /**
-     * Where the authority starting at start ends: the first '/', '?', '#'
-     * or ';' after the last '@' before the first of "/?#" — the userinfo
-     * ends at that '@'. Stricter than the Go side's: a password holding
-     * an unescaped '/' leaves its tail in the path, which the tracer's
-     * policy (and the parameters' masking) still covers.
+     * Where the authority starting at start ends, as internal/redact's
+     * authorityEnd: an '@' before the first '/', '?' or '#' ends the
+     * userinfo; without one, an '@' further on still does when the text
+     * before that delimiter looks like user:password (a ':' followed by
+     * something other than a port) — an unescaped '/' in a password
+     * ("u:p/ss@h") would otherwise leave its tail in the path.
      */
     private static int authorityEnd(String raw, int start) {
         String rest = raw.substring(start);
@@ -119,9 +137,32 @@ public final class Redaction {
         if (delim < 0) {
             delim = rest.length();
         }
-        int host = rest.lastIndexOf('@', delim - 1) + 1;
-        int end = firstOf(rest.substring(host), "/?#;");
-        return start + host + (end < 0 ? rest.length() - host : end);
+        int host = 0;
+        int at = rest.lastIndexOf('@', delim - 1);
+        if (at >= 0) {
+            host = at + 1;
+        } else {
+            int later = rest.indexOf('@', delim);
+            if (later >= 0 && userPass(rest.substring(0, delim))) {
+                host = later + 1;
+            }
+        }
+        int end = firstOf(rest.substring(host) + "/", "/?#;");
+        return start + host + end;
+    }
+
+    /** "user:pass" rather than "host:port" or "host". */
+    private static boolean userPass(String s) {
+        int colon = s.indexOf(':');
+        if (colon < 0) {
+            return false;
+        }
+        for (int i = colon + 1; i < s.length(); i++) {
+            if (s.charAt(i) < '0' || s.charAt(i) > '9') {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** "user:pw@host" → "user:***@host"; a lone userinfo is masked whole. */

@@ -32,19 +32,30 @@ type HTTP struct {
 	// ReqHeaders and RespHeaders are "name: value", names lower-cased,
 	// values redacted.
 	ReqHeaders, RespHeaders []string
+	// Server marks a request answered here (a server library's), not
+	// sent: the two ends of one same-process loopback connection are
+	// numbered apart.
+	Server bool
+	// Exchanges is how many HTTP exchanges the request took (≥ 1): more
+	// when the client library followed a redirect or answered an
+	// authentication challenge itself, each a request the server saw.
+	Exchanges uint32
 }
 
 // decodeHTTP checks an HTTP record: a non-negative tid and status, at
-// least the fixed strings, and a request-header count that fits.
+// least the fixed strings, a request-header count that fits, no unknown
+// flag and at least one exchange.
 func decodeHTTP(rec []byte) (Record, error) {
 	if len(rec) < httpHead {
 		return nil, errMalformed
 	}
-	n, nreq := le.Uint32(rec[40:]), le.Uint32(rec[44:])
+	n, nreq, flags := le.Uint32(rec[40:]), le.Uint32(rec[44:]), le.Uint32(rec[48:])
 	h := HTTP{ExitMono: le.Uint64(rec[8:]), StackID: le.Uint64(rec[16:]),
 		ThreadID: le.Uint64(rec[24:]), KTID: int32(le.Uint32(rec[32:])),
-		Status: int32(le.Uint32(rec[36:]))}
-	if h.KTID < 0 || h.Status < 0 || n < httpFixed || nreq > n-httpFixed {
+		Status: int32(le.Uint32(rec[36:])), Server: flags&httpServer != 0,
+		Exchanges: le.Uint32(rec[52:])}
+	if h.KTID < 0 || h.Status < 0 || n < httpFixed || nreq > n-httpFixed ||
+		flags&^httpServer != 0 || h.Exchanges == 0 {
 		return nil, errMalformed
 	}
 	s, err := decodeStrings(rec, httpHead, n)

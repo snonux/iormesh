@@ -23,6 +23,12 @@ func httpRaw(h HTTP, n, nreq uint32, strs []string) []byte {
 	body = le.AppendUint32(body, uint32(h.Status))
 	body = le.AppendUint32(body, n)
 	body = le.AppendUint32(body, nreq)
+	var flags uint32
+	if h.Server {
+		flags = httpServer
+	}
+	body = le.AppendUint32(body, flags)
+	body = le.AppendUint32(body, h.Exchanges)
 	for _, s := range strs {
 		body = le.AppendUint32(body, uint32(len(s)))
 		body = append(body, s...)
@@ -38,7 +44,7 @@ func sampleHTTP() HTTP {
 		Method: "GET", Scheme: "http", Host: "127.0.0.1", Path: "/x?token=***",
 		Version: "HTTP/1.1", Local: "127.0.0.1:40000", Remote: "127.0.0.1:8080",
 		ReqHeaders:  []string{"authorization: ***", "accept: */*"},
-		RespHeaders: []string{"set-cookie: ***"}}
+		RespHeaders: []string{"set-cookie: ***"}, Server: true, Exchanges: 2}
 }
 
 // TestHTTPRoundTrip: an HTTP record decodes to what was written, headers
@@ -46,7 +52,7 @@ func sampleHTTP() HTTP {
 func TestHTTPRoundTrip(t *testing.T) {
 	path, w := newTestRing(t, testCap)
 	full := sampleHTTP()
-	bare := HTTP{ExitMono: 100, KTID: 1, Method: "POST", Scheme: "https", Path: "/"}
+	bare := HTTP{ExitMono: 100, KTID: 1, Method: "POST", Scheme: "https", Path: "/", Exchanges: 1}
 	w.raw(typeHTTP, httpBody(full))
 	w.raw(typeHTTP, httpBody(bare))
 	got := drainAll(t, openRing(t, path))
@@ -64,9 +70,11 @@ func TestHTTPMalformed(t *testing.T) {
 		"short":            make([]byte, 16),
 		"too few strings":  httpRaw(h, 6, 0, fixed[:6]),
 		"nreq past n":      httpRaw(h, 7, 1, fixed),
-		"negative ktid":    httpBody(HTTP{KTID: -1, Method: "GET"}),
-		"negative status":  httpBody(HTTP{Status: -1, Method: "GET"}),
-		"bad utf8 path":    httpBody(HTTP{Path: "\xff", Method: "GET"}),
+		"negative ktid":    httpBody(HTTP{KTID: -1, Method: "GET", Exchanges: 1}),
+		"negative status":  httpBody(HTTP{Status: -1, Method: "GET", Exchanges: 1}),
+		"bad utf8 path":    httpBody(HTTP{Path: "\xff", Method: "GET", Exchanges: 1}),
+		"no exchange":      httpBody(HTTP{Method: "GET"}),
+		"unknown flag":     setByte(httpBody(sampleHTTP()), 40, 2),
 		"count past body":  httpRaw(h, 9, 0, fixed),
 		"trailing garbage": append(httpBody(h), 1, 0, 0, 0, 0, 0, 0, 0),
 	}
