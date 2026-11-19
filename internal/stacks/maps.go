@@ -8,15 +8,16 @@ import (
 )
 
 // mapping is one executable line of /proc/<pid>/maps: the address range,
-// the file offset it starts at, the backing file's device and inode (the
-// module cache key: one path may name different files in different mount
-// namespaces) and its path ("" for anonymous memory such as JIT code,
-// "[vdso]" for pseudo mappings).
+// the file offset it starts at, the backing file's device and inode as the
+// line shows them, and its path ("" for anonymous memory such as JIT
+// code, "[vdso]" for pseudo mappings). mod is the module key of the file
+// the tracer opened for it (mapsCache.openFiles), "" when none was.
 type mapping struct {
 	start, end, pgoff uint64
 	dev               string
 	inode             uint64
 	path              string
+	mod               string
 }
 
 // isFile reports whether the mapping is backed by a file whose ELF can be
@@ -25,14 +26,15 @@ func (m mapping) isFile() bool {
 	return m.inode != 0 && strings.HasPrefix(m.path, "/") && !strings.HasSuffix(m.path, " (deleted)")
 }
 
-// key names the mapped file for the module cache: device and inode.
-func (m mapping) key() string {
+// ident names the mapped file as the maps line does, device and inode, so
+// the several mappings of one file in one snapshot share one open.
+func (m mapping) ident() string {
 	return m.dev + ":" + strconv.FormatUint(m.inode, 10)
 }
 
 // parseMaps reads the executable mappings of a /proc/<pid>/maps file;
 // only they can hold an instruction address. A malformed line is skipped:
-// a frame it would have covered stays unresolved, never misattributed.
+// a frame it would have covered stays a bare address.
 func parseMaps(data []byte) []mapping {
 	var out []mapping
 	sc := bufio.NewScanner(bytes.NewReader(data))

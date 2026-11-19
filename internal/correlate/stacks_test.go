@@ -10,13 +10,16 @@ import (
 )
 
 // fakeStacks hands out kernel id + 100 as the trace id, refuses negative
-// ids like internal/stacks.Table, and records execs.
+// ids like internal/stacks.Table, and records the forgotten pids and the
+// image tags it was asked about.
 type fakeStacks struct {
-	execs []uint32
-	fail  error
+	forgot []uint32
+	tags   []uint64
+	fail   error
 }
 
-func (s *fakeStacks) ID(_ uint32, _ uint64, kid int32) (uint32, bool, error) {
+func (s *fakeStacks) ID(_ uint32, _ uint64, kid int32, tag uint64) (uint32, bool, error) {
+	s.tags = append(s.tags, tag)
 	if s.fail != nil {
 		return 0, false, s.fail
 	}
@@ -26,7 +29,7 @@ func (s *fakeStacks) ID(_ uint32, _ uint64, kid int32) (uint32, bool, error) {
 	return uint32(kid) + 100, true, nil
 }
 
-func (s *fakeStacks) Exec(pid uint32) { s.execs = append(s.execs, pid) }
+func (s *fakeStacks) Forget(pid uint32) { s.forgot = append(s.forgot, pid) }
 
 func newStackTest(t *testing.T, st StackIDs) (*Correlator, *memSink, feeder) {
 	sink := &memSink{t: t}
@@ -42,7 +45,7 @@ func (f feeder) stackThenRead(kid int32, offset uint64) {
 	f.t.Helper()
 	at := *f.now + 10 // the read's enter takes the next tick
 	f.handle(&types.StackEvent{EventType: types.STACK_EVENT, Time: at + offset, Pid: f.pid, Tid: f.tid,
-		StackId: kid})
+		StackId: kid, Image: 0x7ffd0000})
 	*f.now = at - 10
 	f.read(3, 1)
 }
@@ -99,12 +102,26 @@ func TestStackTableErrorEndsHandle(t *testing.T) {
 	}
 }
 
-// TestExecTellsTheStackTable: an exec starts a new image for the table.
-func TestExecTellsTheStackTable(t *testing.T) {
+// TestStackTableForgetsExecAndExit: an exec and a whole process's exit
+// let the table drop the process (a thread's exit does not), a dead
+// thread's parked stack is dropped, and the record's image tag reaches
+// the table.
+func TestStackTableForgetsExecAndExit(t *testing.T) {
 	st := &fakeStacks{}
-	_, _, f := newStackTest(t, st)
+	c, _, f := newStackTest(t, st)
+	f.stackThenRead(5, 0)
+	if len(st.tags) != 1 || st.tags[0] != 0x7ffd0000 {
+		t.Fatalf("tags %#x, want the record's", st.tags)
+	}
 	f.handle(&types.ProcessExecEvent{EventType: types.PROCESS_EXEC_EVENT, Time: f.tick(), Pid: 7})
-	if len(st.execs) != 1 || st.execs[0] != 7 {
-		t.Fatalf("execs %v, want [7]", st.execs)
+	f.handle(&types.StackEvent{EventType: types.STACK_EVENT, Time: f.tick(), Pid: 7, Tid: 8, StackId: 1})
+	f.handle(&types.ProcessExitEvent{EventType: types.PROCESS_EXIT_EVENT, Time: f.tick(), Pid: 7, Tid: 8})
+	if _, parked := c.stacks[8]; parked {
+		t.Fatal("a dead thread's stack stays parked")
+	}
+	f.handle(&types.ProcessExitEvent{EventType: types.PROCESS_EXIT_EVENT, Time: f.tick(), Pid: 7, Tid: 7,
+		GroupDead: 1})
+	if len(st.forgot) != 2 || st.forgot[0] != 7 || st.forgot[1] != 7 {
+		t.Fatalf("forgot %v, want [7 7] (exec, then the group's death)", st.forgot)
 	}
 }

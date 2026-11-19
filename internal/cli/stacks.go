@@ -43,8 +43,7 @@ func openStacks(cfg runConfig, tr tracer) (*stackOutput, error) {
 		return nil, err
 	}
 	w := schema.NewStackWriter(f)
-	alive := func(pid uint32, inc uint64) bool { return processAlive(pid, inc) }
-	return &stackOutput{table: stacks.NewTable(tr.StackTrace, procRoot, alive, w.Stack), w: w}, nil
+	return &stackOutput{table: stacks.NewTable(tr.StackTrace, procRoot, w.Stack), w: w}, nil
 }
 
 // ids is the correlator's view of the table; a true nil interface without

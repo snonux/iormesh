@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"unsafe"
+
+	bpf "github.com/aquasecurity/libbpfgo"
 )
 
 // Native stacks (internal/c/stack.c, maps.h stack_map; M2 step 9,
@@ -74,4 +76,23 @@ func parseStack(raw []byte) []uint64 {
 		ips = append(ips, ip)
 	}
 	return ips
+}
+
+// StackMapEntries returns stack_map's capacity as loaded: the full map
+// with native stacks on, one entry with them off (setNativeStacks). For
+// the root tests and diagnostics: it is how "off costs no memory" is
+// checked against the kernel rather than the code.
+func (t *Tracer) StackMapEntries() (uint32, error) {
+	if t.closed() {
+		return 0, errClosed
+	}
+	m, err := t.module.GetMap(stackMapName)
+	if err != nil {
+		return 0, fmt.Errorf("get %s: %w", stackMapName, err)
+	}
+	info, err := bpf.GetMapInfoByFD(m.FileDescriptor())
+	if err != nil {
+		return 0, fmt.Errorf("info of %s: %w", stackMapName, err)
+	}
+	return info.MaxEntries, nil
 }

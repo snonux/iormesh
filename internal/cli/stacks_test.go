@@ -38,7 +38,7 @@ func TestOpenStacksOn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := st.ids().ID(1, 1, -14); err != nil {
+	if _, _, err := st.ids().ID(1, 1, -14, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.close(); err != nil {

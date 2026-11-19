@@ -27,16 +27,23 @@ func (c *Correlator) newTask(r *types.TaskNewtaskEvent) {
 	c.forked(r.CreatorPid, c.proc(r.Pid), r.Pid)
 }
 
-// exitTask forgets a dead thread's pending enter: its syscall never
-// returns, and the tid may be reused. The process state stays, even once
-// the whole group is dead: the kernel still reports its sockets' last
-// transitions after the exit (tcp_state, owned by the dead pid), and they
-// belong to that incarnation. A later process under the same PID is
-// announced by its own task_newtask record or attach (newTask,
-// Incarnation), which is where the old state is replaced.
+// exitTask forgets a dead thread's pending enter and parked stack: its
+// syscall never returns, and the tid may be reused. A dead process is
+// also dropped from the native stack table (M2 step 9), which would
+// otherwise grow with every process a long session sees. The process
+// state stays, even once the whole group is dead: the kernel still
+// reports its sockets' last transitions after the exit (tcp_state, owned
+// by the dead pid), and they belong to that incarnation. A later process
+// under the same PID is announced by its own task_newtask record or
+// attach (newTask, Incarnation), which is where the old state is
+// replaced.
 func (c *Correlator) exitTask(r *types.ProcessExitEvent) {
 	c.advance(r.Time)
 	delete(c.enters, r.Tid)
+	delete(c.stacks, r.Tid)
+	if r.GroupDead != 0 && c.cfg.Stacks != nil {
+		c.cfg.Stacks.Forget(r.Pid) // its stacks are written; its maps are gone
+	}
 }
 
 // Incarnation records that the session's pattern matched pid, a process

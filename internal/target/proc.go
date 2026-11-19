@@ -30,6 +30,12 @@ type Stat struct {
 	// StartNS is field 22, starttime, on the boot clock in ns: the pid
 	// incarnation, which tells a reused PID from its predecessor.
 	StartNS uint64
+	// ArgStart is field 48, the address space's mm->arg_start: a new value
+	// with every exec (the stack is randomized), so it tells two images of
+	// one process apart (internal/stacks, M2 step 9). 0 when the kernel
+	// hides it (no ptrace access), the task has no mm (a zombie) or the
+	// line is shorter.
+	ArgStart uint64
 }
 
 // ErrStat: a stat line that does not parse.
@@ -46,7 +52,8 @@ func ParseStat(line []byte) (Stat, error) {
 		return Stat{}, ErrStat
 	}
 	// fields[0] is field 3 (state), so ppid (4) is fields[1], flags (9)
-	// is fields[6] and starttime (22) is fields[19].
+	// is fields[6], starttime (22) is fields[19] and arg_start (48)
+	// fields[45].
 	fields := strings.Fields(string(line[i+1:]))
 	if len(fields) < 20 || len(fields[0]) != 1 {
 		return Stat{}, ErrStat
@@ -57,8 +64,12 @@ func ParseStat(line []byte) (Stat, error) {
 	if err1 != nil || err2 != nil || err3 != nil {
 		return Stat{}, ErrStat
 	}
-	return Stat{State: fields[0][0], PPID: uint32(ppid), Flags: flags,
-		StartNS: ticks * (1_000_000_000 / clockTicks)}, nil
+	st := Stat{State: fields[0][0], PPID: uint32(ppid), Flags: flags,
+		StartNS: ticks * (1_000_000_000 / clockTicks)}
+	if len(fields) > 45 {
+		st.ArgStart, _ = strconv.ParseUint(fields[45], 10, 64)
+	}
+	return st, nil
 }
 
 // Stat reads and parses /proc/<pid>/stat.

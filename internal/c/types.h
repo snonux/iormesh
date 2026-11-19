@@ -1170,7 +1170,11 @@ struct rw_aggregate_event {
 // which is how userspace pairs the two: the stack record is sent right
 // before the enter record (or not at all), so a stack whose enter never
 // arrived - a full ring - pairs with nothing. trace_id is 0: the enter
-// record names the syscall. 32 bytes, no implicit padding.
+// record names the syscall. image is the address space's mm->arg_start,
+// which /proc/<pid>/stat shows as field 48: an exec draws a new one, so
+// userspace reads /proc/<pid>/maps for these addresses only while the
+// process still runs the image they were taken in, however late it gets to
+// the record. 40 bytes, no implicit padding.
 struct stack_event {
     __u32 event_type;
     __u32 trace_id;
@@ -1179,4 +1183,5 @@ struct stack_event {
     __u32 tid;
     __s32 stack_id;
     __u32 reserved;
+    __u64 image;
 };

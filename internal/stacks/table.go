@@ -50,17 +50,16 @@ type job struct {
 	ips   []uint64
 }
 
-// Table assigns trace stack ids on the correlator's goroutine (ID, Exec,
-// Stats are not safe for concurrent use) and hands each new stack to its
-// worker goroutine, which symbolizes and writes it. The split keeps the
-// slow part — parsing a 20 MB libjvm.so once, say — from holding up the
-// correlator while short-lived processes exit and take their
+// Table assigns trace stack ids on the correlator's goroutine (ID,
+// Forget, Stats are not safe for concurrent use) and hands each new stack
+// to its worker goroutine, which symbolizes and writes it. The split keeps
+// the slow part — parsing a 20 MB libjvm.so once, say — from holding up
+// the correlator while short-lived processes exit and take their
 // /proc/<pid>/maps with them.
 type Table struct {
 	lookup Lookup
 	maps   *mapsCache
-	ids    map[key]uint32
-	gens   map[uint32]uint32 // execs seen per pid
+	ids    map[uint32]map[key]uint32 // by pid, so Forget drops a process at once
 	next   uint32
 	stats  Stats
 	jobs   chan job
@@ -71,24 +70,22 @@ type Table struct {
 
 // NewTable starts a table that reads stacks with lookup, /proc under
 // procRoot ("/proc"), and writes each new stack with write on its worker.
-// alive reports whether pid still is incarnation inc (its maps are read
-// only then). Close stops the worker.
-func NewTable(lookup Lookup, procRoot string, alive func(pid uint32, inc uint64) bool,
-	write func(schema.Stack) error) *Table {
-	t := &Table{lookup: lookup, maps: newMapsCache(procRoot, alive),
-		ids: map[key]uint32{}, gens: map[uint32]uint32{},
+// Close stops the worker.
+func NewTable(lookup Lookup, procRoot string, write func(schema.Stack) error) *Table {
+	t := &Table{lookup: lookup, maps: newMapsCache(procRoot), ids: map[uint32]map[key]uint32{},
 		jobs: make(chan job, jobQueue), done: make(chan struct{})}
 	go t.work(newResolver(), write)
 	return t
 }
 
 // ID returns the trace's stack id for kernel stack kid (negative: the
-// kernel's walk failed) of process pid, incarnation inc; ok is false when
-// there is no stack to name. A stack new to its image is read from the
-// kernel and its process's mappings snapshotted here, before the process
-// can exit; the worker writes it. The error is a failed write of an
-// earlier stack: the table is part of the trace, so it ends the trace.
-func (t *Table) ID(pid uint32, inc uint64, kid int32) (id uint32, ok bool, err error) {
+// kernel's walk failed) of process pid, incarnation inc, in the image the
+// record's tag names; ok is false when there is no stack to name. A stack
+// new to its image is read from the kernel and its process's mappings
+// snapshotted here, before the process can exit; the worker writes it.
+// The error is a failed write of an earlier stack: the table is part of
+// the trace, so it ends the trace.
+func (t *Table) ID(pid uint32, inc uint64, kid int32, tag uint64) (id uint32, ok bool, err error) {
 	if err := t.workerErr(); err != nil {
 		return 0, false, err
 	}
@@ -96,8 +93,8 @@ func (t *Table) ID(pid uint32, inc uint64, kid int32) (id uint32, ok bool, err e
 		t.stats.Uncaptured++
 		return 0, false, nil
 	}
-	k := key{img: image{pid: pid, inc: inc, gen: t.gens[pid]}, kid: uint32(kid)}
-	if id, ok := t.ids[k]; ok {
+	k := key{img: image{pid: pid, inc: inc, tag: tag}, kid: uint32(kid)}
+	if id, ok := t.ids[pid][k]; ok {
 		return id, true, nil
 	}
 	ips, err := t.lookup(k.kid)
@@ -106,7 +103,10 @@ func (t *Table) ID(pid uint32, inc uint64, kid int32) (id uint32, ok bool, err e
 		return 0, false, nil
 	}
 	t.next++
-	t.ids[k] = t.next
+	if t.ids[pid] == nil {
+		t.ids[pid] = map[key]uint32{}
+	}
+	t.ids[pid][k] = t.next
 	t.stats.Stacks++
 	maps, files := t.maps.snapshot(k.img, ips)
 	t.jobs <- job{maps: maps, files: files, ips: ips,
@@ -114,10 +114,12 @@ func (t *Table) ID(pid uint32, inc uint64, kid int32) (id uint32, ok bool, err e
 	return t.next, true, nil
 }
 
-// Exec records that pid exec'd: its later stacks are another image's, so
-// they get new ids and are symbolized against the new mappings.
-func (t *Table) Exec(pid uint32) {
-	t.gens[pid]++
+// Forget drops what the table keeps for pid — its ids and mappings —
+// because it exec'd or exited: its later stacks are another image's (or
+// another process's, once the pid is reused), so a long session holds
+// only the live processes' state. The stacks already written stay.
+func (t *Table) Forget(pid uint32) {
+	delete(t.ids, pid)
 	t.maps.forget(pid)
 }
 
@@ -156,10 +158,4 @@ func (t *Table) workerErr() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.err
-}
-
-func closeAll(files map[string]*os.File) {
-	for _, f := range files {
-		_ = f.Close()
-	}
 }

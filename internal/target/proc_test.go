@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -66,6 +67,14 @@ func TestParseStat(t *testing.T) {
 	st, err := ParseStat([]byte("42 (we ird) comm)) S 7 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 12345 0 0"))
 	if err != nil || st.State != 'S' || st.PPID != 7 || st.Flags != 0 || st.StartNS != 12345*10_000_000 {
 		t.Fatalf("ParseStat = %+v, %v", st, err)
+	}
+	if st.ArgStart != 0 {
+		t.Fatalf("a short line has arg_start %d", st.ArgStart)
+	}
+	// A full 52-field line: arg_start is field 48.
+	full := "42 (x) S 7" + strings.Repeat(" 0", 17) + " 12345" + strings.Repeat(" 0", 25) + " 140737" + strings.Repeat(" 0", 4)
+	if st, err := ParseStat([]byte(full)); err != nil || st.StartNS != 12345*10_000_000 || st.ArgStart != 140737 {
+		t.Fatalf("ParseStat(full) = %+v, %v", st, err)
 	}
 	for _, bad := range []string{"", "42 no paren", "42 (x) S 7", "42 (x) S x 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 1"} {
 		if _, err := ParseStat([]byte(bad)); err == nil {

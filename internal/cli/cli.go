@@ -79,7 +79,7 @@ func usage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `usage:
   iormesh run (-pid PID[,PID...] | -pattern GLOB | -listen-port N) -project NAME -out DIR
               [-duration 4h] [-ready FILE] [-trace-families ipc,signal,poll,zerocopy|all]
-              [-cpuprofile FILE]
+              [-cpuprofile FILE] [-aggregate=false] [-native-stacks]
   iormesh normalize [-bracket SCENARIO] [-tmp PREFIX] [-check expect.json] [-out DIR] TRACEDIR
 `)
 }

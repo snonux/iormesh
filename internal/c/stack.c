@@ -25,8 +25,10 @@
 // the enter's own time (now), so userspace pairs the two by tid and time.
 // A failed walk still sends the record, carrying the negative errno, so
 // userspace can count stacks it did not get; a full ring counts one drop
-// like every other lost record.
+// like every other lost record. The record carries the image tag (see
+// struct stack_event): mm->arg_start, read through CO-RE.
 static __always_inline void iormesh_stack_on_enter(void *ctx, __u32 pid, __u32 tid, __u64 now) {
+    struct task_struct *task;
     struct stack_event *ev;
     long id;
 
@@ -45,5 +47,7 @@ static __always_inline void iormesh_stack_on_enter(void *ctx, __u32 pid, __u32 t
     ev->tid = tid;
     ev->stack_id = (__s32)id;
     ev->reserved = 0;
+    task = (struct task_struct *)bpf_get_current_task();
+    ev->image = BPF_CORE_READ(task, mm, arg_start);
     bpf_ringbuf_submit(ev, 0);
 }

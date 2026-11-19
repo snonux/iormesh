@@ -8,11 +8,12 @@ import "iormesh/internal/types"
 // map, and its tests need neither.
 type StackIDs interface {
 	// ID returns the trace stack id of kernel stack kid (negative: the
-	// kernel's walk failed) in process pid, incarnation inc; ok is false
-	// when there is none. The error ends the trace (a failed write).
-	ID(pid uint32, inc uint64, kid int32) (id uint32, ok bool, err error)
-	// Exec says pid exec'd: its stacks are a new image's from now on.
-	Exec(pid uint32)
+	// kernel's walk failed) in process pid, incarnation inc, image tag
+	// (the record's mm->arg_start); ok is false when there is none. The
+	// error ends the trace (a failed write).
+	ID(pid uint32, inc uint64, kid int32, tag uint64) (id uint32, ok bool, err error)
+	// Forget says pid exec'd or exited: the table may drop its state.
+	Forget(pid uint32)
 }
 
 // stackRef is a stack record waiting for the enter it was sent ahead of
@@ -32,7 +33,7 @@ func (c *Correlator) stackRecord(r *types.StackEvent) error {
 		return nil
 	}
 	c.advance(r.Time)
-	id, ok, err := c.cfg.Stacks.ID(r.Pid, c.proc(r.Pid).inc, r.StackId)
+	id, ok, err := c.cfg.Stacks.ID(r.Pid, c.proc(r.Pid).inc, r.StackId, r.Image)
 	if err != nil || !ok {
 		return err
 	}

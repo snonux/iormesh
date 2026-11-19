@@ -29,6 +29,23 @@ type symbol struct {
 	name        string
 }
 
+// safeReadModule is readModule for files the traced process controls:
+// debug/elf is not hardened against hostile input and may panic, which on
+// the table's worker would end the tracer. A panic, like a parse error,
+// yields nil — the frames keep module and offset only.
+func safeReadModule(r io.ReaderAt) (mod *module) {
+	defer func() {
+		if recover() != nil {
+			mod = nil
+		}
+	}()
+	mod, err := readModule(r)
+	if err != nil {
+		return nil
+	}
+	return mod
+}
+
 // readModule parses the ELF file r. Both symbol tables are read: .symtab
 // (Go binaries and unstripped C) and .dynsym (what a stripped shared
 // library such as libc keeps); a file with neither still yields its build

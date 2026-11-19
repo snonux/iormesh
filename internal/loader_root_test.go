@@ -303,3 +303,67 @@ func TestLoaderRefusesEmptyAttach(t *testing.T) {
 		t.Fatal("Open returned a tracer together with its error")
 	}
 }
+
+// TestNativeStacksOnlyWhenAsked (M2 step 9): without -native-stacks the
+// kernel holds a one-entry stack_map and sends no stack record; with it,
+// the map has its full size and the target's open is preceded by a stack
+// record stamped with the open's own time and image tag, whose id reads
+// back as a non-empty stack.
+func TestNativeStacksOnlyWhenAsked(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		tg := startTarget(t)
+		tr := openTracerWith(t, ibpf.Config{Pids: []uint32{tg.pid()}, NativeStacks: on})
+		entries, err := tr.StackMapEntries()
+		if want := map[bool]uint32{false: 1, true: 8192}[on]; err != nil || entries != want {
+			t.Fatalf("native stacks %v: stack_map holds %d (%v), want %d", on, entries, err, want)
+		}
+		tg.poke(t)
+		stack, open := stackBeforeOpen(tr, tg.pid(), 2*time.Second)
+		switch {
+		case open == nil:
+			t.Fatalf("native stacks %v: no open of %s", on, probePath)
+		case !on && stack != nil:
+			t.Fatalf("a stack record without native stacks: %+v", stack)
+		case on && (stack == nil || stack.Time != open.Time || stack.StackId < 0 || stack.Image == 0):
+			t.Fatalf("stack record %+v for the open at %d", stack, open.Time)
+		case on:
+			if ips, err := tr.StackTrace(uint32(stack.StackId)); err != nil || len(ips) == 0 {
+				t.Fatalf("stack %d reads back %v, %v", stack.StackId, ips, err)
+			}
+		}
+		_ = tr.Close()
+	}
+}
+
+// stackBeforeOpen returns pid's open of probePath and the stack record
+// that came right before it on the same thread, if any.
+func stackBeforeOpen(tr *ibpf.Tracer, pid uint32, wait time.Duration) (*types.StackEvent, *types.OpenEvent) {
+	var last *types.StackEvent
+	deadline := time.After(wait)
+	for {
+		select {
+		case batch, ok := <-tr.Records():
+			if !ok {
+				return nil, nil
+			}
+			for _, rec := range batch {
+				switch ev := rec.(type) {
+				case *types.StackEvent:
+					if ev.Pid == pid {
+						cp := *ev
+						last = &cp
+					}
+				case *types.OpenEvent:
+					if ev.Pid == pid && types.StringValue(ev.Filename[:]) == probePath {
+						if last != nil && last.Tid != ev.Tid {
+							last = nil
+						}
+						return last, ev
+					}
+				}
+			}
+		case <-deadline:
+			return nil, nil
+		}
+	}
+}

@@ -4195,10 +4195,11 @@ type StackEvent struct {
 	Tid       uint32
 	StackId   int32
 	Reserved  uint32
+	Image     uint64
 }
 
 func (s StackEvent) String() string {
-	return fmt.Sprintf("EventType:%v TraceId:%v Time:%v Pid:%v Tid:%v StackId:%v Reserved:%v", s.EventType, s.TraceId, s.Time, s.Pid, s.Tid, s.StackId, s.Reserved)
+	return fmt.Sprintf("EventType:%v TraceId:%v Time:%v Pid:%v Tid:%v StackId:%v Reserved:%v Image:%v", s.EventType, s.TraceId, s.Time, s.Pid, s.Tid, s.StackId, s.Reserved, s.Image)
 }
 
 func (s StackEvent) Equals(other any) bool {
@@ -4206,7 +4207,7 @@ func (s StackEvent) Equals(other any) bool {
 	if !ok {
 		return false
 	}
-	return s.EventType == otherConcrete.EventType && s.TraceId == otherConcrete.TraceId && s.Time == otherConcrete.Time && s.Pid == otherConcrete.Pid && s.Tid == otherConcrete.Tid && s.StackId == otherConcrete.StackId && s.Reserved == otherConcrete.Reserved
+	return s.EventType == otherConcrete.EventType && s.TraceId == otherConcrete.TraceId && s.Time == otherConcrete.Time && s.Pid == otherConcrete.Pid && s.Tid == otherConcrete.Tid && s.StackId == otherConcrete.StackId && s.Reserved == otherConcrete.Reserved && s.Image == otherConcrete.Image
 }
 
 func (s *StackEvent) GetEventType() EventType {

@@ -142,7 +142,7 @@ func (c *Correlator) execTask(r *types.ProcessExecEvent) {
 		p.closeOnExec()
 	}
 	if c.cfg.Stacks != nil {
-		c.cfg.Stacks.Exec(r.Pid) // a new image: new stacks, new mappings
+		c.cfg.Stacks.Forget(r.Pid) // a new image: new stacks, new mappings
 	}
 }
 
