@@ -26,7 +26,7 @@ const (
 	// KindDrop records loss: gaps are explicit, never silent. args.lost
 	// counts the records lost since the previous drop event; without
 	// args.drop_reason it is ring-buffer or decoder loss of the host
-	// (pid 0), with one it says why (DropAttachGap).
+	// (pid 0), with one it says why (DropAttachGap, DropUnattributed).
 	KindDrop = "drop"
 	// KindSession is the per-trace header record, the first event of a
 	// trace; Event.Session describes the host.
@@ -63,6 +63,12 @@ const (
 	// drop names that process (pid, pid_incarnation) and is emitted when
 	// the tracer attached, before any of its traced events.
 	DropAttachGap = "attach_gap"
+	// DropUnattributed: a folded read or write (M2 step 11) whose calls no
+	// single fd instance explains - another thread closed, dup2'd or
+	// reopened the fd number while the loop ran or before its record was
+	// sent. args.lost is the calls it stood for; the drop names the thread
+	// (pid, pid_incarnation, tid) and its boot_ns is the first call's.
+	DropUnattributed = "unattributed"
 )
 
 // Attribution values. Missing attribution is data, not a hole: every

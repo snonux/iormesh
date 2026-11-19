@@ -1,6 +1,9 @@
 package correlate
 
-import "iormesh/internal/types"
+import (
+	"iormesh/internal/schema"
+	"iormesh/internal/types"
+)
 
 // Folded reads and writes (M2 step 11, decision #25). The kernel sums a
 // thread's hot read or write loop on one fd into one rw_aggregate_event
@@ -11,15 +14,16 @@ import "iormesh/internal/types"
 // without args.count: it is indistinguishable from one sent unfolded, and
 // a golden's single declared read must match it.
 //
-// The record can arrive late: the kernel flushes a thread's sums only at
-// that thread's next flush point, and a thread that folded and then
-// blocked in an untraced call may meanwhile see another thread close the
-// fd and the number reused. The calls then belong to the instance that was
-// live when they ran, not to the number's current one, so the record is
-// resolved by time (instanceAt): the current instance if it was created
-// before the first folded call, else the instance it replaced if that one
-// covered the call. A record neither explains is counted (Unattributed),
-// not guessed onto the wrong file or connection.
+// The record can arrive late, and its calls can span a change of the fd
+// number: the kernel keys a loop by the fd number (internal/c/rwagg.c), so
+// another thread's close, dup2 or reopen of the number while the loop ran
+// - or before a blocked thread's record was sent - is invisible to it. The
+// record is therefore resolved by time (instanceAt): it names the instance
+// that was live from its first call's start to its last call's exit - the
+// current one if it was created before the first call, else the one it
+// replaced if that covered the whole span. A record no single instance
+// explains is an unattributed drop (an explicit loss of its calls, never a
+// guess onto the wrong file or connection), counted by Unattributed too.
 
 // pastInstance is the fd instance a number held before its current one
 // (or before it was closed): its generation, socket and lifetime on the
@@ -35,9 +39,9 @@ type pastInstance struct {
 func (c *Correlator) aggregate(r *types.RwAggregateEvent) {
 	c.advance(r.EndTime)
 	p := c.proc(r.Pid)
-	gen, sock, ok := p.instanceAt(r.Fd, r.Time)
+	gen, sock, ok := p.instanceAt(r.Fd, r.Time, r.EndTime)
 	if !ok {
-		c.unattributed++
+		c.unattributedDrop(p, r)
 		return
 	}
 	en := enter{name: r.TraceId.Name(), shape: shapeFd, time: r.Time, pid: r.Pid, fd: r.Fd}
@@ -50,30 +54,42 @@ func (c *Correlator) aggregate(r *types.RwAggregateEvent) {
 	c.enqueue(ev, sock)
 }
 
-// Unattributed counts folded read/write records whose fd instance could
-// not be told: the number was reused more than once between the calls and
-// the record (see aggregate.go). They produce no event.
+// unattributedDrop records a folded record no fd instance explains as an
+// explicit loss of its calls (PLAN.md decision #25: any loss is a drop
+// event), naming the thread whose calls they were.
+func (c *Correlator) unattributedDrop(p *procState, r *types.RwAggregateEvent) {
+	c.unattributed++
+	lost, reason := uint64(r.Count), schema.DropUnattributed
+	ev := c.hostEvent(schema.KindDrop)
+	ev.BootNS, ev.WallNS = r.Time, c.wall(r.Time)
+	ev.PID, ev.PIDInc, ev.TID, ev.Comm = r.Pid, p.inc, r.Tid, p.comm
+	ev.Args.Lost, ev.Args.DropReason = &lost, &reason
+	c.enqueue(ev, nil)
+}
+
+// Unattributed counts folded read/write records whose calls no single fd
+// instance explains (see above); each became an unattributed drop event.
 func (c *Correlator) Unattributed() uint64 {
 	return c.unattributed
 }
 
-// instanceAt returns the generation and socket of the instance fd named at
-// boot time at, and false when neither the current instance nor the one it
-// replaced was live then. A number the trace never saw created (it
-// predates the trace, or an untraced call made it) counts as live since
-// the start, as use() has it.
-func (p *procState) instanceAt(fd int32, at uint64) (uint32, *sockState, bool) {
+// instanceAt returns the generation and socket of the one instance fd
+// named from boot time first to last, and false when no single instance
+// the trace knows covers that span: the current instance if it was created
+// before first, else the instance it replaced if that one lived over the
+// whole span. A number the trace never saw created (it predates the trace,
+// or an untraced call made it) counts as live since the start, as use()
+// has it; so does one closed before first and reused by an untraced call.
+func (p *procState) instanceAt(fd int32, first, last uint64) (uint32, *sockState, bool) {
 	_, live := p.fds[fd]
-	if live && p.born[fd] <= at {
+	if live && p.born[fd] <= first {
 		return p.use(fd), p.sockOf[fd], true
 	}
 	past, hasPast := p.past[fd]
-	if hasPast && past.born <= at && at < past.died {
+	if hasPast && past.born <= first && last < past.died {
 		return past.gen, past.sock, true
 	}
-	if !live && (!hasPast || at >= past.died) {
-		// Never seen, or closed before the calls: the number came from
-		// an untraced call, use()'s rule.
+	if !live && (!hasPast || first >= past.died) {
 		return p.use(fd), p.sockOf[fd], true
 	}
 	return 0, nil, false

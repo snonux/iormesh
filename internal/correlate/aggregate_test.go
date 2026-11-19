@@ -71,6 +71,47 @@ func TestAggregateLateAfterReuse(t *testing.T) {
 	if c.Unattributed() != 1 {
 		t.Fatalf("unattributed %d, want 1", c.Unattributed())
 	}
+	assertUnattributedDrop(t, sink.events, 9, first)
+}
+
+// assertUnattributedDrop requires exactly one unattributed drop, of lost
+// calls, naming the reader thread at the record's first call.
+func assertUnattributedDrop(t *testing.T, events []schema.Event, lost, at uint64) {
+	t.Helper()
+	drops := byKind(events, schema.KindDrop)
+	if len(drops) != 1 {
+		t.Fatalf("drops %+v: want one", drops)
+	}
+	d := drops[0]
+	if d.Args.DropReason == nil || *d.Args.DropReason != schema.DropUnattributed || *d.Args.Lost != lost ||
+		d.PID != 10 || d.TID != 11 || d.BootNS != at {
+		t.Fatalf("drop %+v (reason %v, lost %d): want unattributed, lost %d, tid 11 at %d",
+			d, d.Args.DropReason, *d.Args.Lost, lost, at)
+	}
+}
+
+// TestAggregateStraddlingAReuse: another thread's dup2 or close+open over
+// the number while the loop ran makes one record span two instances (the
+// kernel keys by number); it is an unattributed drop, not a sum credited to
+// either instance.
+func TestAggregateStraddlingAReuse(t *testing.T) {
+	c, sink := newTest(t)
+	now := uint64(0)
+	reader := feeder{t, c, 10, 11, &now}
+	other := feeder{t, c, 10, 12, &now}
+	reader.open("/tmp/a.dat", 0, 5)
+	first := now + 5
+	now += 100
+	other.close(5)
+	other.open("/tmp/b.dat", 0, 5)
+	reader.folded(types.SYS_ENTER_READ, 5, 40, 40, first, now+50)
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if reads := byKind(sink.events, schema.KindRead); len(reads) != 0 {
+		t.Fatalf("reads %+v: a straddling record must not be credited", reads)
+	}
+	assertUnattributedDrop(t, sink.events, 40, first)
 }
 
 // TestAggregateOnClosedNumber: a record of calls made before the fd's close
@@ -106,10 +147,10 @@ func TestInstanceAtFork(t *testing.T) {
 	at := now + 1
 	f.fork(20)
 	child := c.proc(20)
-	if gen, _, ok := child.instanceAt(5, at); !ok || gen != 1 {
+	if gen, _, ok := child.instanceAt(5, at, at+1); !ok || gen != 1 {
 		t.Fatalf("child instanceAt = %d, %v; want gen 1", gen, ok)
 	}
-	if _, _, ok := child.instanceAt(5, 0); ok {
+	if _, _, ok := child.instanceAt(5, 0, 1); ok {
 		// Before the open: neither the live instance nor a past one.
 		t.Fatal("a time before the fd's creation resolved")
 	}

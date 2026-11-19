@@ -136,13 +136,13 @@ func (e *Event) validateSyntheticArgs() error {
 		if e.Args.Lost == nil || *e.Args.Lost == 0 {
 			return invalidf("drop without a positive args.lost")
 		}
-		if r := e.Args.DropReason; r != nil && *r != DropAttachGap {
-			return invalidf("drop reason %q, want %q or none", *r, DropAttachGap)
+		if r := e.Args.DropReason; r != nil && *r != DropAttachGap && *r != DropUnattributed {
+			return invalidf("drop reason %q, want %q, %q or none", *r, DropAttachGap, DropUnattributed)
 		}
 		if e.Args.DropReason != nil && e.PID == 0 {
-			// An attach gap is one process's loss; without its pid
-			// nobody could tell whose first records are missing.
-			return invalidf("attach_gap drop without a pid")
+			// Both reasons are one process's loss; without its pid
+			// nobody could tell whose records are missing.
+			return invalidf("%s drop without a pid", *e.Args.DropReason)
 		}
 	case KindEnd:
 		if e.Args.EndReason == nil || !KnownEndReason(*e.Args.EndReason) {
