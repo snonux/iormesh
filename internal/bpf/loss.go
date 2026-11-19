@@ -33,10 +33,11 @@ type Losses struct {
 	Kernel uint64
 	// Missed is how often the kernel skipped one of the attached programs
 	// - the raw_syscalls dispatchers and the other tracepoint programs -
-	// under its recursion guard (recursion misses, progmiss.go). It is possible loss, not lost records: the
-	// skip comes before the program's target filter, so it counts
-	// untraced processes' calls too and only bounds the target records
-	// lost from above (task vd4). Hence it is not in Total; it reaches
+	// under its recursion guard (recursion misses, progmiss.go). It is
+	// possible loss, not lost records: the skip comes before the
+	// program's target filter, so it counts untraced processes' calls -
+	// for a dispatcher, every syscall on the host, traced kind or not -
+	// and only bounds the target records lost from above (task vd4). Hence it is not in Total; it reaches
 	// the trace as its own skipped_runs drop.
 	Missed uint64
 	// Unknown, Malformed and Short are records that arrived but could not be

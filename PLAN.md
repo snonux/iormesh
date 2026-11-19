@@ -524,6 +524,7 @@ criterion here.
   at 1 thread and 1.7 µs at 4 (unfolded, medians of 5), the
   bystander 1.19× and 1.15× at 4 threads (CPU time, two sets of
   10 pairs; wall clock 1.21× and 1.14×) — all four #25 items pass
+  (before 8e4's dispatch; re-run pending, ae4)
   (docs/spikes/s3-overhead.md, "M2 acceptance measurement" and
   "Follow-up (md4)"). Schema v1 is frozen outside `http`.
 
@@ -1617,12 +1618,17 @@ can reconstruct behavior and check it against source code:
   on the host now meets a dispatcher, traced kind or not. Kernel
   instructions per untraced syscall beside an idle trace
   (`perf stat`, 3 rounds, identical across rounds): dd's
-  read/write 1626 → 1708 (untraced 728), so the gated
-  `syscall-burst` bystander figure moves ~5 %; a syscall of a
-  kind no family traces (getppid) 595 → 1142 (untraced 443),
-  ~+0.1 µs CPU — the price of the `raw_syscalls` perf path. The
-  formal #25 bystander re-run (≥ 10 pairs at 4 threads) is
-  open as task ae4.
+  read/write 1626 → 1708 (untraced 728): ~5 % more kernel
+  instructions per call of a traced kind, which puts the gated
+  `syscall-burst` bystander ratio at an estimated ~1.21× (md4:
+  1.19×), still under 1.25×; a syscall of a kind no family
+  traces (getppid) 595 → 1142 (untraced 443), ~+0.1 µs CPU —
+  the price of the `raw_syscalls` perf path. The formal #25
+  bystander re-run (≥ 10 pairs at 4 threads) is open as task
+  ae4, which gates M3's acceptance (5b4); it also evaluates the
+  alternative of attaching per syscall again on kernels before
+  7.2 (whose per-syscall programs run with preemption
+  disabled), so that untraced kinds skip the dispatcher there.
 - **Attribution is explicit**: every I/O event says whether a
   Java stack was joined to it (`attribution: java`) or not
   (`none` — non-JVM process, JNI or JVM-internal I/O, agent

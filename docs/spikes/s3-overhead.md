@@ -443,7 +443,7 @@ which this host cannot promise.
 | #25 item | Budget | md4 verdict |
 |----------|--------|-------------|
 | tracer CPU | ≤ 2 µs per emitted event (median) | **passes**: 1.20 µs at 1 thread, 1.70 µs at 4 (unfolded, 5 runs each) |
-| bystander | ≤ 1.25× at 4 threads (CPU-time median of ≥ 10 pairs) | **passes**: 1.19× and 1.15× in two sets of 10 pairs; wall clock 1.21× and 1.14× |
+| bystander | ≤ 1.25× at 4 threads (CPU-time median of ≥ 10 pairs) | **passes** (before 8e4's dispatch; re-run pending, ae4): 1.19× and 1.15× in two sets of 10 pairs; wall clock 1.21× and 1.14× |
 
 ## Follow-up (2b4): the Java join's cost
 

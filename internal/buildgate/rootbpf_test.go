@@ -17,7 +17,7 @@ import (
 // and exec-watch tests (M2 steps 1–2) and the Java mark test (task td4),
 // all in the one test binary of ./internal.
 var rootBPFTestFiles = []string{"internal/sock_root_test.go", "internal/loader_root_test.go",
-	"internal/follow_root_test.go", "internal/javamark_root_test.go"}
+	"internal/follow_root_test.go", "internal/javamark_root_test.go", "internal/dispatch_root_test.go"}
 
 // testFunctionsIn returns the names of the top-level Test functions of the Go
 // file at the repository path rel. Adapted from ior

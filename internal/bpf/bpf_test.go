@@ -389,3 +389,32 @@ func TestDispatchersExist(t *testing.T) {
 		}
 	}
 }
+
+// TestSlotOf: a syscall probe's side picks its program array and its
+// syscall's number the slot; a syscall without a number on this arch is
+// ENOENT, which attachGroup skips as a pair like a missing tracepoint.
+func TestSlotOf(t *testing.T) {
+	numbers := map[string]uint32{"read": 0, "newuname": 63}
+	tests := []struct {
+		event   string
+		wantMap string
+		wantNr  uint32
+		missing bool
+	}{
+		{event: "sys_enter_read", wantMap: enterProgsMap, wantNr: 0},
+		{event: "sys_exit_newuname", wantMap: exitProgsMap, wantNr: 63},
+		{event: "sys_enter_file_getattr", missing: true},
+	}
+	for _, tt := range tests {
+		m, nr, err := slotOf(Probe{Program: "handle_" + tt.event, Category: "syscalls", Event: tt.event}, numbers)
+		if tt.missing {
+			if !errors.Is(err, syscall.ENOENT) || !errors.Is(err, errNoSyscallNumber) {
+				t.Errorf("%s: err %v, want errNoSyscallNumber (ENOENT)", tt.event, err)
+			}
+			continue
+		}
+		if err != nil || m != tt.wantMap || nr != tt.wantNr {
+			t.Errorf("%s: %s slot %d err %v, want %s slot %d", tt.event, m, nr, err, tt.wantMap, tt.wantNr)
+		}
+	}
+}

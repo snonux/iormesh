@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -63,16 +64,12 @@ func (s slotLink) Destroy() error {
 // without a number on this arch is skipped (ENOENT), as attaching to the
 // missing tracepoint used to be.
 func (t *Tracer) attachSlot(p Probe) (link, error) {
+	mapName, nr, err := slotOf(p, syscallNumbers)
+	if err != nil {
+		return nil, err
+	}
 	if !tracepointExists(p.Category, p.Event) {
 		return nil, fmt.Errorf("tracepoint %s: %w", p, syscall.ENOENT)
-	}
-	mapName, name := enterProgsMap, p.Event[len("sys_enter_"):]
-	if p.isExit() {
-		mapName, name = exitProgsMap, p.Event[len("sys_exit_"):]
-	}
-	nr, ok := syscallNumbers[name]
-	if !ok {
-		return nil, fmt.Errorf("syscall %s: %w", name, errNoSyscallNumber)
 	}
 	prog, err := t.module.GetProgram(p.Program)
 	if err != nil {
@@ -89,6 +86,20 @@ func (t *Tracer) attachSlot(p Probe) (link, error) {
 	}
 	t.slots++
 	return slotLink{m: m, nr: nr}, nil
+}
+
+// slotOf names the program array and the slot of a syscall probe, by its
+// syscall's number in numbers; a syscall without one is errNoSyscallNumber.
+func slotOf(p Probe, numbers map[string]uint32) (string, uint32, error) {
+	mapName, name := enterProgsMap, strings.TrimPrefix(p.Event, "sys_enter_")
+	if p.isExit() {
+		mapName, name = exitProgsMap, strings.TrimPrefix(p.Event, "sys_exit_")
+	}
+	nr, ok := numbers[name]
+	if !ok {
+		return "", 0, fmt.Errorf("syscall %s: %w", name, errNoSyscallNumber)
+	}
+	return mapName, nr, nil
 }
 
 // attachDispatchers attaches the raw_syscalls programs once at least one

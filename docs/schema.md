@@ -363,9 +363,12 @@ stays gap-free.
   `raw_syscalls` dispatchers"); a skip of a target's call loses
   the one record, or the one folded call, that run would have
   written. But the skip comes before the program's target
-  filter, so the count includes untraced processes' calls (a
-  two-record trace saw 691 on a loaded host) and is an upper
-  bound on the target records lost, not a count of them
+  filter — a dispatcher's before it even looks up the syscall,
+  so a skipped dispatcher run is any syscall of any process,
+  traced kind or not — and the count includes untraced
+  processes' calls (a two-record trace saw 691 on a loaded
+  host) and is an upper bound on the target records lost, not
+  a count of them
   (PLAN.md, "Trace output contract"). A reader adds it to the
   lost records only for a worst case; the summary line reports
   it apart, as "skipped runs".

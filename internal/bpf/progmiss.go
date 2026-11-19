@@ -43,7 +43,9 @@ import "fmt"
 // host-wide bpf_prog_active guard, held by another BPF program on that
 // CPU or by a task preempted inside a bpf() map syscall. Those are the
 // programs whose misses are read here (Tracer.progFDs): the tail-called
-// handlers are never skipped on their own.
+// handlers are never skipped on their own. A dispatcher is skipped before
+// it reads the syscall number, so its misses count every syscall of every
+// process on that CPU, traced kind or not.
 
 // readProgMisses sums the recursion misses of the programs behind fds.
 func readProgMisses(fds []int, read func(fd int) (uint64, error)) (uint64, error) {
