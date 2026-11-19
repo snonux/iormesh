@@ -25,8 +25,9 @@ const (
 	// Version is the only ring format version this reader accepts. 2
 	// (task 2b4) added HOOK records and THREAD's flags word, 3 (task 3b4)
 	// HTTP records, 4 (task 4b4) OTEL ids: a BRACKET of bracketOtelLen
-	// and three more words in HTTP's fixed part.
-	Version = 4
+	// and three more words in HTTP's fixed part, 5 (task wd4) the HTTP
+	// request's start stamp and body sizes.
+	Version = 5
 	// magic is "IORMRING" as a little-endian word; the agent stores it
 	// last, so a reader that sees it sees a complete header.
 	magic = 0x474e49524d524f49
@@ -90,8 +91,10 @@ const (
 	// httpHead is an HTTP record's fixed part: the word, mono, stack id
 	// and Java thread id (u64 each), ktid, status, the string count, the
 	// request-header count, flags and the exchange count (u32 each), then
-	// the OTEL trace id halves and span id (u64 each, zero: no span).
-	httpHead = wordLen + 72
+	// the OTEL trace id halves and span id (u64 each, zero: no span), the
+	// start stamp (u64, 0: unknown) and the request and response body
+	// sizes (i64 each, -1: unknown).
+	httpHead = wordLen + 96
 	// httpFixed is the number of leading strings of an HTTP record:
 	// method, scheme, host, path, version, local and remote address.
 	httpFixed = 7

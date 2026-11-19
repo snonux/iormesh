@@ -39,7 +39,8 @@ func (jt *joinTest) request(at uint64, path, local, remote string) agentspool.HT
 		Status: 200, Method: "GET", Scheme: "http", Host: "127.0.0.1", Path: path,
 		Version: "HTTP/1.1", Local: local, Remote: remote,
 		ReqHeaders:  []string{"authorization: Bearer leaked"},
-		RespHeaders: []string{"location: /next?token=leaked", "x-a: b"}}
+		RespHeaders: []string{"location: /next?token=leaked", "x-a: b"},
+		ReqBytes:    -1, RespBytes: -1}
 }
 
 // kinds lists the sink's event kinds in order.
@@ -85,6 +86,41 @@ func TestJavaJoinHTTPEvents(t *testing.T) {
 	}
 	if s := jt.j.Stats(); s.HTTP != 2 || s.HTTPNoConn != 0 {
 		t.Errorf("stats %+v", s)
+	}
+}
+
+// TestJavaJoinHTTPLatencyAndSizes: a record with a start becomes an event
+// spanning the request (boot_ns the start, boot_ns + latency_ns its
+// completion), ordered by that completion; known body sizes are kept, an
+// unknown one (-1) is absent, and a record without a start keeps its
+// completion as boot_ns with no latency.
+func TestJavaJoinHTTPLatencyAndSizes(t *testing.T) {
+	jt := newJoinTest(t)
+	at := jt.now + 1000
+	timed := jt.request(at+3000, "/t", "127.0.0.1:40000", "127.0.0.1:8080")
+	timed.StartMono, timed.ReqBytes, timed.RespBytes = jt.mono(at+1000), 0, -1
+	untimed := jt.request(at+5000, "/u", "127.0.0.1:40000", "127.0.0.1:8080")
+	untimed.ReqBytes, untimed.RespBytes = -1, 12
+	jt.ring(timed, untimed, jt.watermark(at+20_000_000))
+	jt.event(jvmPID, mainTID, "read", at+2000)
+	jt.event(999, 1000, "write", at+10_000_000)
+	jt.close()
+	want := []string{"read", "http", "http", "write"}
+	if got := kinds(jt.sink.events); !reflect.DeepEqual(got, want) {
+		t.Fatalf("order %v, want %v", got, want)
+	}
+	h1, h2 := jt.sink.events[1], jt.sink.events[2]
+	// The wall clock moves with the boot clock: the same offset on both.
+	if h1.BootNS != at+1000 || h1.LatencyNS != 2000 || h1.WallNS-h1.BootNS != h2.WallNS-h2.BootNS {
+		t.Errorf("timed: boot %d latency %d wall %d, want %d, 2000", h1.BootNS, h1.LatencyNS,
+			h1.WallNS, at+1000)
+	}
+	if h1.HTTP.ReqBytes == nil || *h1.HTTP.ReqBytes != 0 || h1.HTTP.RespBytes != nil {
+		t.Errorf("timed sizes %v %v, want 0 and absent", h1.HTTP.ReqBytes, h1.HTTP.RespBytes)
+	}
+	if h2.BootNS != at+5000 || h2.LatencyNS != 0 || h2.HTTP.ReqBytes != nil ||
+		h2.HTTP.RespBytes == nil || *h2.HTTP.RespBytes != 12 {
+		t.Errorf("untimed %+v %+v", h2, h2.HTTP)
 	}
 }
 

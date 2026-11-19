@@ -27,7 +27,8 @@ public final class HttpHooksTest {
         return List.of(
                 new AgentTests.Case("http hooks/request written", HttpHooksTest::written),
                 new AgentTests.Case("http hooks/null and throwing probes", HttpHooksTest::quiet),
-                new AgentTests.Case("http hooks/oversized headers dropped", HttpHooksTest::oversized));
+                new AgentTests.Case("http hooks/oversized headers dropped", HttpHooksTest::oversized),
+                new AgentTests.Case("http hooks/entry stamps", HttpHooksTest::stamps));
     }
 
     private static final String[] REQUEST = {"GET", "http", "h", "/p?q=***", "HTTP/1.1",
@@ -38,10 +39,12 @@ public final class HttpHooksTest {
         Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
         Hooks.configure(2, true, true);
         Hooks.httpProbe(1, (a, meta) -> {
-            meta[0] = 404;
-            meta[1] = 1;
-            meta[2] = Ring.HTTP_SERVER;
-            meta[3] = 3;
+            meta[Ring.M_STATUS] = 404;
+            meta[Ring.M_NREQ] = 1;
+            meta[Ring.M_FLAGS] = Ring.HTTP_SERVER;
+            meta[Ring.M_EXCHANGES] = 3;
+            meta[Ring.M_START] = 5;
+            meta[Ring.M_REQ_BYTES] = 7;
             return REQUEST;
         });
         Hooks.ring = r;
@@ -66,6 +69,9 @@ public final class HttpHooksTest {
         equal(1, b.getInt(o + 44), "request headers");
         equal(Ring.HTTP_SERVER, b.getInt(o + 48), "flags");
         equal(3, b.getInt(o + 52), "exchanges");
+        equal(5L, b.getLong(o + 80), "start");
+        equal(7L, b.getLong(o + 88), "request bytes");
+        equal(-1L, b.getLong(o + 96), "response bytes unknown");
         equal(List.of(REQUEST), strings(b, o + Ring.HTTP_HEAD, 9), "strings");
         check(Hooks.httpCounts()[1] == 1, "counted");
         delete(dir, r);
@@ -103,11 +109,55 @@ public final class HttpHooksTest {
         for (int i = 0; i < 64; i++) {
             s.add("x-h" + i + ": " + "v".repeat(1000));
         }
-        check(r.http(1, 2, 3, 4, 200, s.toArray(new String[0]), 64, 0, 1, 0, 0, 0), "written");
+        long[] meta = {200, 64, 0, 1, 0, -1, -1};
+        check(r.http(1, 2, 3, 4, s.toArray(new String[0]), meta, 0, 0, 0), "written");
         ByteBuffer b = map(r.path());
         int o = records(b).get(0)[1];
         equal(7, b.getInt(o + 40), "only the fixed strings");
         equal(0, b.getInt(o + 44), "no request headers");
+        delete(dir, r);
+    }
+
+    /**
+     * httpEnter/httpExit: the exit's probe sees its own this as the open
+     * hook with the entry's stamp; a plain hook inside it sees the same
+     * open hook; after the exit nothing is open, and nesting past
+     * MAX_HTTP_DEPTH stays balanced.
+     */
+    static void stamps() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-http-hooks");
+        Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
+        List<Object[]> seen = new ArrayList<>();
+        Hooks.httpProbe(1, (a, meta) -> {
+            seen.add(new Object[] {a[1], a[3], meta[Ring.M_START]});
+            return null;
+        });
+        Hooks.ring = r;
+        try {
+            long before = System.nanoTime();
+            Hooks.httpEnter("outer", 1);
+            Hooks.http(null, "inner", null, 1);
+            Hooks.httpExit(null, "outer", null, 1);
+            Hooks.http(null, "after", null, 1);
+            for (int i = 0; i < Hooks.MAX_HTTP_DEPTH + 2; i++) {
+                Hooks.httpEnter("deep" + i, 1);
+            }
+            for (int i = Hooks.MAX_HTTP_DEPTH + 1; i >= 0; i--) {
+                Hooks.httpExit(null, "deep" + i, null, 1);
+            }
+            equal(0, Hooks.state().httpDepth, "balanced");
+            equal("outer", seen.get(0)[1], "inner sees the open hook");
+            check((long) seen.get(0)[2] >= before, "with its stamp");
+            equal("outer", seen.get(1)[1], "the exit sees itself");
+            equal(seen.get(0)[2], seen.get(1)[2], "same stamp");
+            equal(null, seen.get(2)[1], "nothing open after");
+            equal(0L, seen.get(2)[2], "no stamp after");
+            equal(null, seen.get(3)[1], "past the depth: no open hook");
+            equal("deep" + (Hooks.MAX_HTTP_DEPTH - 1), seen.get(5)[1], "kept again inside it");
+        } finally {
+            Hooks.ring = null;
+            Hooks.httpProbe(1, null);
+        }
         delete(dir, r);
     }
 

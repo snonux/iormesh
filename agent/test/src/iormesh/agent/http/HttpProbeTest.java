@@ -28,7 +28,8 @@ public final class HttpProbeTest {
         return List.of(
                 new AgentTests.Case("http/redaction masks", HttpProbeTest::redaction),
                 new AgentTests.Case("http/addresses and literals", HttpProbeTest::addresses),
-                new AgentTests.Case("http/client response", HttpProbeTest::client));
+                new AgentTests.Case("http/client response", HttpProbeTest::client),
+                new AgentTests.Case("http/declared body sizes", HttpProbeTest::sizes));
     }
 
     static void redaction() {
@@ -65,15 +66,39 @@ public final class HttpProbeTest {
                 && !Request.token(null), "header names");
     }
 
+    static void sizes() {
+        equal(7L, Request.declaredBody("GET", 200, " 7 "), "Content-Length");
+        equal(-1L, Request.declaredBody("GET", 200, null), "none: unknown (chunked)");
+        equal(-1L, Request.declaredBody("GET", 200, "7x"), "malformed: unknown");
+        equal(-1L, Request.declaredBody("GET", 200, "9".repeat(19)), "too long: unknown");
+        equal(0L, Request.declaredBody("HEAD", 200, "7"), "HEAD has no body");
+        equal(0L, Request.declaredBody("GET", 204, null), "204 has none");
+        equal(0L, Request.declaredBody("GET", 304, "7"), "304 has none");
+        equal("2", Request.first(Map.of("content-LENGTH", List.of("2")), "Content-Length"),
+                "header found by any case");
+        long[] meta = {0, 0, 0, 0, 9, 0, 0};
+        new Request().toRecord(meta);
+        equal(0L, meta[4], "a start not adopted is cleared");
+        equal(-1L, meta[5], "sizes unknown by default");
+    }
+
     static void client() {
-        int[] meta = new int[4];
+        long[] meta = {0, 0, 0, 0, 42, -1, -1};
+        Object self = new Object();
         String[] s = new JdkHttpClient.Sent(new Weak<>()).apply(
-                new Object[] {new FakeResponse(new FakeResponse(null)), null, null}, meta);
+                new Object[] {new FakeResponse(new FakeResponse(null)), self, null, self}, meta);
         equal(List.of("GET", "https", "127.0.0.1", "/a?k=***", "HTTP/2", "", "127.0.0.1:8443",
-                "cookie: ***", "etag: 1"), List.of(s), "record strings");
-        equal(0, meta[2], "a client's request");
-        equal(2, meta[3], "exchanges: the response and its previous one (a redirect)");
-        check(new JdkHttpClient.Sent(new Weak<>()).apply(new Object[3], new int[4]) == null,
+                "cookie: ***", "content-length: 5", "etag: 1"), List.of(s), "record strings");
+        equal(0L, meta[2], "a client's request");
+        equal(2L, meta[3], "exchanges: the response and its previous one (a redirect)");
+        equal(42L, meta[4], "send's own start kept");
+        equal(0L, meta[5], "no request body");
+        equal(5L, meta[6], "response Content-Length");
+        long[] other = {0, 0, 0, 0, 42, -1, -1};
+        new JdkHttpClient.Sent(new Weak<>()).apply(
+                new Object[] {new FakeResponse(null), self, null, new Object()}, other);
+        equal(0L, other[4], "another call's stamp is no start");
+        check(new JdkHttpClient.Sent(new Weak<>()).apply(new Object[4], new long[7]) == null,
                 "a send that threw records nothing");
     }
 
@@ -94,7 +119,8 @@ public final class HttpProbeTest {
             return Optional.ofNullable(previous);
         }
         @Override public HttpHeaders headers() {
-            return HttpHeaders.of(Map.of("ETag", List.of("1")), (a, b) -> true);
+            return HttpHeaders.of(Map.of("ETag", List.of("1"), "Content-Length", List.of("5")),
+                    (a, b) -> true);
         }
         @Override public String body() { return ""; }
         @Override public Optional<SSLSession> sslSession() { return Optional.empty(); }

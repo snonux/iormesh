@@ -641,8 +641,20 @@ returned without closing it), the client's `send` returned, the
 connection's response was read — on the thread that did it, with
 its stack as `java` (the handler's or the caller's method; the
 JDK's dispatch when the handler never closed the exchange). `fd`
-is `-1`; `ret`, `latency_ns` and `bytes` are 0 (sizes and latency
-are not recorded yet).
+is `-1`; `ret` and `bytes` are 0.
+
+Since task wd4 the event spans its request like a syscall: `boot_ns`
+is when the library began it and `latency_ns` the time to its
+completion, so `boot_ns + latency_ns` is the completion stamp. The
+start is the entry of the call that began the request on the
+recording thread — HttpClient's `send`, HttpURLConnection's
+response read (`getInputStream0`, outermost; a body the app sent
+through `getOutputStream` before it went out earlier), and for the
+server the dispatch of the exchange (`ServerImpl$Exchange.run`, from
+the moment the request was readable) — and only when the hook can tie
+that entry to this very request; otherwise `boot_ns` is the
+completion and `latency_ns` 0 (a server exchange closed on another
+thread than its dispatch). The body sizes go into the `http` object.
 
 ```json
 {"event":"http","fd":-1,"conn_id":"cb061683df650ac2","attribution":"java",
@@ -662,6 +674,17 @@ are not recorded yet).
 | `req_seq` | int, optional | the request's ordinal on its connection, 1-based, the same on both ends — see below |
 | `version` | string, optional | `HTTP/1.1` or `HTTP/2` (appended in M3) |
 | `req_headers`, `resp_headers` | list of string, optional | `name: value`, names lower-cased, sorted, at most 32 each, redacted (see "Redaction"); HttpURLConnection's request line is no header and never recorded (appended in M3) |
+| `req_bytes`, `resp_bytes` | int, optional | the request's and the response's body size in bytes as the library knew it — absent when it did not, never estimated (appended in M3, task wd4; see below) |
+
+Body sizes come from what the library itself knows and enforces:
+HttpClient's request publisher length (absent for a streamed body)
+and the response's `Content-Length`; HttpURLConnection's count of
+the bytes the app wrote (its buffered or streaming output) and the
+response's `Content-Length`; HttpServer's request `Content-Length`
+(absent when chunked) and the length the handler passed to
+`sendResponseHeaders` (absent for a chunked reply). A reply without
+a body by protocol (HEAD, 1xx, 204, 304) is 0; a response without
+`Content-Length` (chunked, or read to the close) has no size.
 
 The event goes into the stream after the events that completed
 before it: it waits until an event that completed 5 ms after it
@@ -704,9 +727,10 @@ completes on the client's executor, with no caller on the stack) and
 the other libraries of #22's set.
 
 The agent writes each request as an HTTP record of the ring
-(format version 4: exit stamp, stack id, Java thread id, kernel
+(format version 5: exit stamp, stack id, Java thread id, kernel
 tid, status, the string and request-header counts, flags — server
-or client — the exchange count and the OTEL span ids, then method,
+or client — the exchange count, the OTEL span ids, the start stamp
+and the two body sizes, then method,
 scheme, host, path, version, local and remote socket address, and
 the headers), redacted before it is written; a record that would
 pass 16 KiB keeps the request and drops its headers.
@@ -747,7 +771,7 @@ the agent gets the span that was current on its Java thread:
   it on the attaching thread); I/O before the app's first use of an
   OTEL context carries no ids, which is right — no span can be
   current then.
-- In the ring (format 4) a bracket inside a span is 72 bytes
+- In the ring (format 4, and 5 since) a bracket inside a span is 72 bytes
   instead of 48 (trace id as two u64 halves, span id as one u64);
   the HTTP record always carries the three words, zero for none.
 

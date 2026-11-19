@@ -55,10 +55,15 @@ import java.util.function.LongSupplier;
  * the agent's probe for that hook and writes the request the probe
  * describes as one HTTP record. No bracket: an HTTP event is not a
  * syscall to join, it is an event of its own, stamped and stacked here.
+ * A hook whose method begins the request (a client's send, a server's
+ * dispatch) also stamps its entry ({@link #httpEnter}, task wd4), so the
+ * record carries the request's start and the tracer its latency.
  */
 public final class Hooks {
     /** Deeper nesting than this is not tracked (still balanced). */
     static final int MAX_DEPTH = 16;
+    /** Entry-stamped HTTP hooks kept per thread (Brackets.httpStarts). */
+    static final int MAX_HTTP_DEPTH = 8;
     /** How long a dropped THREAD or STACK waits before it is tried again. */
     static final long RETRY_NS = 1_000_000;
     /** Marks a skipped slot, so its exit is dropped too. */
@@ -78,17 +83,23 @@ public final class Hooks {
     private static final ThreadLocal<Brackets> STATE = ThreadLocal.withInitial(Brackets::new);
     /**
      * The HTTP probes by HTTP hook id (iormesh.agent.http): given {return
-     * value, this, argument} of a hooked method and an int[4] to fill with
-     * {status, request-header count, flags (Ring.HTTP_SERVER), exchanges},
-     * a probe returns the request's
-     * strings — the Ring.HTTP_FIXED leading ones, then the headers,
-     * redacted — or null when this call records nothing (a binding hook,
-     * a request already recorded, no response). JDK types only: the agent
-     * core, which implements them, is on another loader.
+     * value, this, argument, open} of a hooked method — open is the this
+     * of the innermost entry-stamped HTTP hook running on the thread (the
+     * method's own this at an entry-stamped hook's exit), or null — and a
+     * long[Ring.META] to fill (Ring.M_*: status, request-header count,
+     * flags, exchanges, start, body sizes; it arrives with that open
+     * hook's start stamp at M_START and -1 for the sizes), a probe
+     * returns the request's strings — the Ring.HTTP_FIXED leading ones,
+     * then the headers, redacted — or null when this call records nothing
+     * (a binding hook, a request already recorded, no response). A probe
+     * keeps the start only when open is its request's own (its library
+     * began the request there); a stamp it cannot tie to the request is
+     * cleared, never guessed. JDK types only: the agent core, which
+     * implements them, is on another loader.
      */
     @SuppressWarnings("unchecked")
-    static volatile BiFunction<Object[], int[], String[]>[] httpProbes =
-            (BiFunction<Object[], int[], String[]>[]) new BiFunction<?, ?, ?>[0];
+    static volatile BiFunction<Object[], long[], String[]>[] httpProbes =
+            (BiFunction<Object[], long[], String[]>[]) new BiFunction<?, ?, ?>[0];
     /** Requests recorded per HTTP hook id, kept like counts (debug dump only). */
     static volatile AtomicLongArray httpCounts = new AtomicLongArray(0);
     private static volatile boolean counting;
@@ -166,10 +177,9 @@ public final class Hooks {
      * first HTTP class is rewritten. A later registration of the same id
      * replaces the earlier one.
      */
-    @SuppressWarnings("unchecked")
-    public static synchronized void httpProbe(int id, BiFunction<Object[], int[], String[]> probe) {
-        BiFunction<Object[], int[], String[]>[] old = httpProbes;
-        BiFunction<Object[], int[], String[]>[] p = java.util.Arrays.copyOf(old,
+    public static synchronized void httpProbe(int id, BiFunction<Object[], long[], String[]> probe) {
+        BiFunction<Object[], long[], String[]>[] old = httpProbes;
+        BiFunction<Object[], long[], String[]>[] p = java.util.Arrays.copyOf(old,
                 Math.max(old.length, id + 1));
         p[id] = probe;
         httpProbes = p;
@@ -341,18 +351,85 @@ public final class Hooks {
     }
 
     /**
+     * The entry stamp of an entry-stamped HTTP hook (Target.stamp), called
+     * first thing by its rewritten method: pushes System.nanoTime() and
+     * self on the thread's HTTP stack, which {@link #httpExit} pops. It
+     * pushes even on a busy thread — a stamp is no I/O and no probe — so
+     * every exit finds its own entry. Never throws into the target.
+     */
+    public static void httpEnter(Object self, int id) {
+        try {
+            Brackets t = STATE.get();
+            int d = t.httpDepth++;
+            if (d < MAX_HTTP_DEPTH) {
+                t.httpSelves[d] = self;
+                t.httpStarts[d] = System.nanoTime();
+            }
+        } catch (Throwable e) {
+            countSkip(FAILS);
+        }
+    }
+
+    /**
+     * The exit of an entry-stamped HTTP hook: pops the stamp its entry
+     * pushed and records like {@link #http}, with the method's own this
+     * and start as the open hook.
+     */
+    public static void httpExit(Object ret, Object self, Object arg, int id) {
+        long start = 0;
+        Object open = null;
+        try {
+            Brackets t = STATE.get();
+            if (t.httpDepth > 0) {
+                int d = --t.httpDepth;
+                if (d < MAX_HTTP_DEPTH) {
+                    start = t.httpStarts[d];
+                    open = t.httpSelves[d];
+                    t.httpSelves[d] = null;
+                }
+            }
+        } catch (Throwable e) {
+            countSkip(FAILS);
+        }
+        record(ret, self, arg, id, open, start);
+    }
+
+    /**
      * The entry point of HTTP hook id, called by the rewritten method
      * before each return (ret = the value returned, or null) and on its
      * exceptional exit (ret null); self is the method's this, arg the
-     * argument its row names (or null). Never throws into the target. The
-     * thread is busy throughout, so the probe's own work — reflection,
-     * never I/O — is not bracketed, and an HTTP hook reached from inside
-     * another one's probe records nothing.
+     * argument its row names (or null). The open hook is the innermost
+     * entry-stamped one still running on this thread, if any (a server's
+     * exchange close inside the dispatch that read the request). Never
+     * throws into the target.
      */
     public static void http(Object ret, Object self, Object arg, int id) {
+        long start = 0;
+        Object open = null;
+        try {
+            Brackets t = STATE.get();
+            int d = t.httpDepth - 1;
+            if (d >= 0 && d < MAX_HTTP_DEPTH) {
+                start = t.httpStarts[d];
+                open = t.httpSelves[d];
+            }
+        } catch (Throwable e) {
+            countSkip(FAILS);
+        }
+        record(ret, self, arg, id, open, start);
+    }
+
+    /**
+     * Hands the hooked method's objects to id's probe and writes what it
+     * describes. The thread is busy throughout, so the probe's own work —
+     * reflection, never I/O — is not bracketed, and an HTTP hook reached
+     * from inside another one's probe records nothing.
+     */
+    private static void record(Object ret, Object self, Object arg, int id, Object open,
+                               long start) {
         Ring r = ring;
         try {
-            BiFunction<Object[], int[], String[]>[] p = httpProbes;
+            BiFunction<Object[], long[], String[]>[] p = httpProbes;
             if (r == null || id <= 0 || id >= p.length || p[id] == null) {
                 return;
             }
@@ -364,7 +441,7 @@ public final class Hooks {
             }
             t.busy = true;
             try {
-                if (request(t, r, p[id], new Object[] {ret, self, arg})
+                if (request(t, r, p[id], new Object[] {ret, self, arg, open}, start)
                         && id < httpCounts.length()) {
                     httpCounts.incrementAndGet(id);
                 }
@@ -403,15 +480,22 @@ public final class Hooks {
      * true when the probe described a request (written or dropped).
      */
     private static boolean request(Brackets t, Ring r,
-                                   BiFunction<Object[], int[], String[]> probe, Object[] args) {
+                                   BiFunction<Object[], long[], String[]> probe, Object[] args,
+                                   long start) {
         t.closing = System.nanoTime();
         VarHandle.fullFence();   // as in close: the stamp after the mark
         try {
             long mono = System.nanoTime();
-            int[] meta = new int[4];
+            long[] meta = new long[Ring.META];
+            meta[Ring.M_START] = start;
+            meta[Ring.M_REQ_BYTES] = -1;
+            meta[Ring.M_RESP_BYTES] = -1;
             String[] s = probe.apply(args, meta);
             if (s == null) {
                 return false;
+            }
+            if (meta[Ring.M_START] > mono) {
+                meta[Ring.M_START] = 0;   // a stamp from after the exit is no start
             }
             if (!t.described && System.nanoTime() >= t.retryAt) {
                 describe(t, r);
@@ -419,8 +503,7 @@ public final class Hooks {
             long stack = stacks.getAsLong();
             int ktid = t.virtual ? Brackets.lookupKtid() : t.kernelTid();
             Otel.read(t);
-            r.http(mono, stack, t.owner.getId(), ktid, meta[0], s, meta[1], meta[2],
-                    Math.max(meta[3], 1), t.otelHi, t.otelLo, t.otelSpan);
+            r.http(mono, stack, t.owner.getId(), ktid, s, meta, t.otelHi, t.otelLo, t.otelSpan);
             return true;
         } finally {
             t.closing = Brackets.IDLE;

@@ -47,6 +47,16 @@ final class Brackets {
     final long[] traceHis = new long[Hooks.MAX_DEPTH];
     final long[] traceLos = new long[Hooks.MAX_DEPTH];
     final long[] spans = new long[Hooks.MAX_DEPTH];
+    /**
+     * The HTTP hooks whose method is running on this thread and stamped
+     * its entry (Hooks.httpEnter, task wd4): each one's start stamp and
+     * its this, innermost last, so a request's latency starts where its
+     * library began it. Deeper nesting is counted but not kept; selves are
+     * cleared at the exit, so nothing of the target is held after it.
+     */
+    final long[] httpStarts = new long[Hooks.MAX_HTTP_DEPTH];
+    final Object[] httpSelves = new Object[Hooks.MAX_HTTP_DEPTH];
+    int httpDepth;
     /** The span Otel.read found last on this thread (all zero: none). */
     long otelHi;
     long otelLo;

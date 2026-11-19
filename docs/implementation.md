@@ -2484,8 +2484,37 @@ internal/correlate/javajoin.go
    (`ExpectedHTTP`); integration — `TestHTTPPlain`,
    `TestHTTPTLS`, `TestHTTPRedaction`, `TestOtelHTTP`
    ([testing.md](testing.md#m3-scenarios-ahead-of-the-agent)).
-   Not yet: sizes and latency, Servlet, Apache HttpClient,
-   OkHttp, Netty, and the DNS hooks (#8).
+
+   Latency and sizes (task wd4): a `Target` marked `stamped()` —
+   the method that begins a request: `HttpClientImpl.send`,
+   `getInputStream0`, `ServerImpl$Exchange.run` — also calls
+   `Hooks.httpEnter(this, id)` first thing, and its exits call
+   `Hooks.httpExit`, which pops that stamp (a per-thread stack in
+   `Brackets`, 8 deep, balanced past it; constructors are never
+   stamped). Every probe gets the innermost open stamp and its
+   `this` (`a[3]`) and adopts the start only when it is provably
+   its request's: the stamped method's own exit
+   (`Request.ownStart`), or for `HttpExchangeImpl.close` a dispatch
+   whose `tx` is the closing exchange — never a stamp of another
+   call. The probe's `long[]` meta (`Ring.M_*`) carries status,
+   counts, flags, exchanges, start and the body sizes; ring format
+   5 adds the start and both sizes to HTTP's fixed part. Sizes are
+   the libraries' own numbers: HttpClient's publisher length and
+   the response's Content-Length, HttpURLConnection's poster size
+   or streaming count (read at `parseHTTP`, before
+   `getInputStream0` lets go of them), HttpServer's
+   `reqContentLen` and `rspContentLen` (0 means chunked or none —
+   the reply headers tell which). The joiner turns the start into
+   `boot_ns`/`latency_ns` and the sizes into `http.req_bytes` and
+   `resp_bytes`. Tests: `HttpHooksTest` (record words, entry
+   stamps and their nesting), `HttpTransformerTest` (stamped
+   exits, the throw path, constructors never stamped),
+   `HttpProbeTest` (declared sizes, adoption), Go decode and join
+   tests, goldens `http-plain`/`http-tls` declare the sizes and
+   every integration HTTP run checks each event has a latency.
+
+   Not yet: `sendAsync`, Servlet, Apache HttpClient, OkHttp, Netty,
+   and the DNS hooks (#8).
 8. OTEL (done, task 4b4): read `Span.current().getSpanContext()`
    reflectively in the app's class loader at `enter` and add the
    ids to the bracket. No OTEL dependency in the agent. The `otel`

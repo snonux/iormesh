@@ -16,7 +16,7 @@ func TestCheckHTTP(t *testing.T) {
 		HTTP: &schema.HTTP{Method: "GET", Scheme: "http", Host: "127.0.0.1",
 			Path: "/login?token=***", Status: 404, ReqSeq: 2, Version: "HTTP/1.1",
 			ReqHeaders:  []string{"accept: */*", "authorization: ***"},
-			RespHeaders: []string{"set-cookie: ***"}}}
+			RespHeaders: []string{"set-cookie: ***"}, ReqBytes: new(uint64)}}
 	got := Trace{Events: []schema.Event{ev}}
 	doc := func(http string) Expectation {
 		x, err := ParseExpectation([]byte(`{"scenario": "s", "schema_version": 1, "events": [
@@ -31,6 +31,7 @@ func TestCheckHTTP(t *testing.T) {
 		`{"method": "GET", "path": "/login?token=***", "status": 404, "req_seq": 2}`,
 		`{"host": "127.0.0.1", "version": "HTTP/1.1", "req_headers": ["authorization: ***"],
 		  "resp_headers": ["set-cookie: ***"]}`,
+		`{"req_bytes": 0}`,
 		`{}`,
 	} {
 		if vs := Check(got, doc(pass)); len(vs) != 0 {
@@ -41,7 +42,7 @@ func TestCheckHTTP(t *testing.T) {
 		`{"method": "POST"}`, `{"scheme": "https"}`, `{"host": "localhost"}`,
 		`{"path": "/login?token=x"}`, `{"status": 200}`, `{"req_seq": 1}`,
 		`{"version": "HTTP/2"}`, `{"req_headers": ["authorization: Bearer x"]}`,
-		`{"resp_headers": ["accept: */*"]}`,
+		`{"resp_headers": ["accept: */*"]}`, `{"req_bytes": 1}`, `{"resp_bytes": 0}`,
 	} {
 		vs := Check(got, doc(fail))
 		if len(vs) != 1 || !strings.Contains(vs[0].Msg, "http") {

@@ -23,11 +23,18 @@ func httpMatch(want *ExpectedHTTP, got *schema.HTTP) bool {
 		}
 	}
 	if (want.Status != nil && *want.Status != got.Status) ||
-		(want.ReqSeq != nil && *want.ReqSeq != got.ReqSeq) {
+		(want.ReqSeq != nil && *want.ReqSeq != got.ReqSeq) ||
+		!sizeMatch(want.ReqBytes, got.ReqBytes) || !sizeMatch(want.RespBytes, got.RespBytes) {
 		return false
 	}
 	return containsAll(got.ReqHeaders, want.ReqHeaders) &&
 		containsAll(got.RespHeaders, want.RespHeaders)
+}
+
+// sizeMatch compares a declared body size (nil: not declared) with the
+// event's (nil: unknown, which no declared size matches).
+func sizeMatch(want, got *uint64) bool {
+	return want == nil || (got != nil && *want == *got)
 }
 
 func containsAll(have, want []string) bool {

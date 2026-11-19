@@ -13,7 +13,10 @@ import java.util.function.BiFunction;
  * The JDK's HttpClient (java.net.http): one http event per synchronous
  * send, recorded when HttpClientImpl.send returns its response — on the
  * calling thread, so the stack names the caller (the client's socket
- * I/O itself runs on its selector thread). The public HttpResponse gives
+ * I/O itself runs on its selector thread). send is entry-stamped: the
+ * latency runs from the call to its return. Body sizes are the request
+ * publisher's contentLength (-1 for a streamed one: unknown) and the
+ * response's Content-Length. The public HttpResponse gives
  * the request and its outcome; which connection carried it is internal:
  * the response's constructor gets the JDK's Response, whose localAddress
  * is the client end of the socket — a second hook binds it to the
@@ -54,11 +57,12 @@ public final class JdkHttpClient implements Library {
                                 + "Ljdk/internal/net/http/Exchange;)V", 1, new Bind(local, bound)),
                 new Target("jdk/internal/net/http/HttpClientImpl", "send",
                         "(Ljava/net/http/HttpRequest;Ljava/net/http/HttpResponse$BodyHandler;)"
-                                + "Ljava/net/http/HttpResponse;", Target.NO_ARG, new Sent(bound)));
+                                + "Ljava/net/http/HttpResponse;", Target.NO_ARG, new Sent(bound))
+                        .stamped());
     }
 
     /** HttpResponseImpl's constructor: binds the response to its socket's local end. */
-    static final class Bind implements BiFunction<Object[], int[], String[]> {
+    static final class Bind implements BiFunction<Object[], long[], String[]> {
         private final Field local;
         private final Weak<String> bound;
 
@@ -68,7 +72,7 @@ public final class JdkHttpClient implements Library {
         }
 
         @Override
-        public String[] apply(Object[] a, int[] meta) {
+        public String[] apply(Object[] a, long[] meta) {
             try {
                 if (a[2] != null && local.get(a[2]) instanceof InetSocketAddress at) {
                     bound.put(a[1], Request.addr(at));
@@ -81,7 +85,7 @@ public final class JdkHttpClient implements Library {
     }
 
     /** HttpClientImpl.send's return: the request, recorded once. */
-    static final class Sent implements BiFunction<Object[], int[], String[]> {
+    static final class Sent implements BiFunction<Object[], long[], String[]> {
         private final Weak<String> bound;
 
         Sent(Weak<String> bound) {
@@ -89,13 +93,14 @@ public final class JdkHttpClient implements Library {
         }
 
         @Override
-        public String[] apply(Object[] a, int[] meta) {
+        public String[] apply(Object[] a, long[] meta) {
             if (!(a[0] instanceof HttpResponse<?> resp)) {
                 return null;   // send threw: no response to record
             }
             Request r = describe(resp);
             String local = bound.take(resp);
             r.local = local == null ? "" : local;
+            r.start = Request.ownStart(a, meta);   // send's entry
             return r.toRecord(meta);
         }
     }
@@ -116,6 +121,11 @@ public final class JdkHttpClient implements Library {
         r.exchanges = exchanges(resp);
         r.requestHeaders(req.headers().map());
         r.responseHeaders(resp.headers().map());
+        // No lambda here: its first call would link classes inside the request.
+        HttpRequest.BodyPublisher body = req.bodyPublisher().orElse(null);
+        r.reqBytes = body == null ? 0 : body.contentLength();
+        r.respBytes = Request.declaredBody(r.method, r.status,
+                resp.headers().firstValue("content-length").orElse(null));
         return r;
     }
 

@@ -215,6 +215,8 @@ func appendHTTP(dst []byte, h *HTTP) []byte {
 			o.dst = appendStringArray(o.dst, l.v)
 		}
 	}
+	optUint(&o, "req_bytes", h.ReqBytes)
+	optUint(&o, "resp_bytes", h.RespBytes)
 	return o.close()
 }
 

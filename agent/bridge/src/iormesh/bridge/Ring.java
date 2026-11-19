@@ -73,8 +73,10 @@ public final class Ring {
      * BRACKET_OTEL_LEN, and three more words in HTTP's fixed part. 3 was
      * never released, but a bump costs nothing and a mismatched agent
      * and tracer then fail loudly instead of misreading HTTP records.
+     * 5 (task wd4): HTTP's fixed part gains the request's start stamp
+     * and its body sizes (latency and sizes, PLAN.md M3).
      */
-    static final int VERSION = 4;
+    static final int VERSION = 5;
     /** THREAD flag: the Java thread is a virtual thread (JDK 21+). */
     static final int VIRTUAL = 1;
     static final long MAGIC = 0x474e49524d524f49L; // "IORMRING", little endian
@@ -99,10 +101,26 @@ public final class Ring {
     /**
      * HTTP's fixed part: word, mono, stack, thread, ktid, status, n, nreq,
      * flags, exchanges, then the OTEL trace id halves and span id (all
-     * zero: no span). Fixed rather than optional as in BRACKET: HTTP
-     * records are few, and the strings start at one offset.
+     * zero: no span), then the request's start stamp (0: unknown) and its
+     * request and response body sizes (-1: unknown). Fixed rather than
+     * optional as in BRACKET: HTTP records are few, and the strings start
+     * at one offset.
      */
-    static final int HTTP_HEAD = 8 + 72;
+    static final int HTTP_HEAD = 8 + 96;
+    /**
+     * The request's numbers a probe fills (Hooks.http's long[] meta), by
+     * index: status, request-header count, flags (HTTP_SERVER), exchange
+     * count, start stamp (System.nanoTime(), 0 unknown), request and
+     * response body bytes (-1 unknown). META is the array's length.
+     */
+    static final int M_STATUS = 0;
+    static final int M_NREQ = 1;
+    static final int M_FLAGS = 2;
+    static final int M_EXCHANGES = 3;
+    static final int M_START = 4;
+    static final int M_REQ_BYTES = 5;
+    static final int M_RESP_BYTES = 6;
+    static final int META = 7;
     /** HTTP flag: the request was answered here (a server's), not sent. */
     static final int HTTP_SERVER = 1;
     /** HTTP's leading strings: method, scheme, host, path, version, local, remote. */
@@ -281,22 +299,23 @@ public final class Ring {
     /**
      * Writes an HTTP record: one finished request as an HTTP hook saw it
      * (decision #22; iormesh.agent.http) — exit stamp, stack id, Java
-     * thread id, kernel tid, status, the string and request-header
-     * counts, flags (HTTP_SERVER) and the number of HTTP exchanges the
-     * request took (more than 1 when the library followed a redirect or
-     * answered an authentication challenge on its own: the tracer then
-     * stops numbering the connection), the OTEL span current when the
-     * request was recorded (trace id halves, span id; zeros for none),
-     * then the strings: the HTTP_FIXED
-     * leading ones (method, scheme, host, path, version, local and remote
-     * socket address), nreq request headers and the response headers, each
-     * "name: value", already redacted by the probe that built them. A
-     * record past MAX_RECORD loses its headers rather than the request:
-     * the request is what pairs the hops.
+     * thread id, kernel tid, then meta (indices M_*): status, the
+     * request-header count, flags (HTTP_SERVER), the number of HTTP
+     * exchanges the request took (more than 1 when the library followed a
+     * redirect or answered an authentication challenge on its own: the
+     * tracer then stops numbering the connection), the start stamp and the
+     * body sizes; the OTEL span current when the request was recorded
+     * (trace id halves, span id; zeros for none), then the strings: the
+     * HTTP_FIXED leading ones (method, scheme, host, path, version, local
+     * and remote socket address), meta[M_NREQ] request headers and the
+     * response headers, each "name: value", already redacted by the probe
+     * that built them. A record past MAX_RECORD loses its headers rather
+     * than the request: the request is what pairs the hops.
      */
-    boolean http(long mono, long stack, long thread, int ktid, int status, String[] s,
-                 int nreq, int flags, int exchanges, long traceHi, long traceLo, long span) {
+    boolean http(long mono, long stack, long thread, int ktid, String[] s, long[] meta,
+                 long traceHi, long traceLo, long span) {
         int n = s.length;
+        int nreq = (int) meta[M_NREQ];
         byte[][] enc = encode(s, n);
         int len = align(HTTP_HEAD + size(enc, n));
         if (len > MAX_RECORD && n > HTTP_FIXED) {
@@ -313,15 +332,7 @@ public final class Ring {
             return false;
         }
         try {
-            buf.putLong(off + 8, mono);
-            buf.putLong(off + 16, stack);
-            buf.putLong(off + 24, thread);
-            buf.putInt(off + 32, ktid);
-            buf.putInt(off + 36, status);
-            buf.putInt(off + 40, n);
-            buf.putInt(off + 44, nreq);
-            buf.putInt(off + 48, flags);
-            buf.putInt(off + 52, exchanges);
+            putHttpHead(off, mono, stack, thread, ktid, n, nreq, meta);
             buf.putLong(off + 56, traceHi);
             buf.putLong(off + 64, traceLo);
             buf.putLong(off + 72, span);
@@ -331,6 +342,23 @@ public final class Ring {
         } catch (Throwable e) {
             return abandon(off, len);
         }
+    }
+
+    /** HTTP's fixed words but the OTEL ones (see http). */
+    private void putHttpHead(int off, long mono, long stack, long thread, int ktid, int n,
+                             int nreq, long[] meta) {
+        buf.putLong(off + 8, mono);
+        buf.putLong(off + 16, stack);
+        buf.putLong(off + 24, thread);
+        buf.putInt(off + 32, ktid);
+        buf.putInt(off + 36, (int) meta[M_STATUS]);
+        buf.putInt(off + 40, n);
+        buf.putInt(off + 44, nreq);
+        buf.putInt(off + 48, (int) meta[M_FLAGS]);
+        buf.putInt(off + 52, (int) Math.max(meta[M_EXCHANGES], 1));
+        buf.putLong(off + 80, meta[M_START]);
+        buf.putLong(off + 88, meta[M_REQ_BYTES]);
+        buf.putLong(off + 96, meta[M_RESP_BYTES]);
     }
 
     private static byte[][] encode(String[] s, int n) {

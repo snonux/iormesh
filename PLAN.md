@@ -643,9 +643,15 @@ Gated by S1 — done; the design below is S1's result
   host (client side), path, status, protocol version and the
   request and response headers, redacted in the agent before
   the spool and again by the tracer; joined to its connection
-  by the socket ends the library still holds. Not yet: sizes
-  and latency, `sendAsync`, Servlet, Apache HttpClient, OkHttp
-  and Netty, and the DNS hooks (#8).
+  by the socket ends the library still holds. Task wd4 added
+  latency and sizes: the call that began the request (the
+  client's send or response read, the server's dispatch) stamps
+  its entry, so the event spans the request (`boot_ns` its
+  start, `latency_ns` its duration) when that entry is provably
+  the request's own; body sizes are what the library knows
+  (declared or counted lengths), absent otherwise — never
+  estimated. Not yet: `sendAsync`, Servlet, Apache HttpClient,
+  OkHttp and Netty, and the DNS hooks (#8).
 - **Request pairing across the wire**: a request on the client
   and on the server pair up by connection id plus a
   per-connection request ordinal — sound for HTTP/1.1. HTTP/2

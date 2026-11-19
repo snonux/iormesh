@@ -35,16 +35,20 @@ final class HttpTransformerTest {
                 new AgentTests.Case("http transformer/warm-up", HttpTransformer::warmUp));
     }
 
-    /** What one probe call saw. */
-    record Call(int id, Object ret, Object self, Object arg) {}
+    /**
+     * What one probe call saw; own: the open hook was the method itself,
+     * with a start stamp (a stamped target's exit).
+     */
+    record Call(int id, Object ret, Object self, Object arg, boolean own) {}
 
-    private static List<Target> targets(BiFunction<Object[], int[], String[]> p) {
+    /** send and fail are stamped (fail's throw must pop its stamp too). */
+    private static List<Target> targets(BiFunction<Object[], long[], String[]> p) {
         return List.of(
-                new Target(FIXTURE, "<init>", "(Ljava/lang/String;)V", 0, p),
+                new Target(FIXTURE, "<init>", "(Ljava/lang/String;)V", 0, p).stamped(),
                 new Target(FIXTURE, "send", "(Ljava/lang/String;)Ljava/lang/String;",
-                        Target.NO_ARG, p),
+                        Target.NO_ARG, p).stamped(),
                 new Target(FIXTURE, "fail", "(JLjava/lang/String;)Ljava/lang/String;",
-                        Target.LAST_ARG, p),
+                        Target.LAST_ARG, p).stamped(),
                 new Target(FIXTURE, "count", "(I)I", 0, p),
                 new Target(FIXTURE, "util", "()Ljava/lang/String;", Target.NO_ARG, p));
     }
@@ -66,7 +70,7 @@ final class HttpTransformerTest {
         for (HttpHooks.Hook h : hooks.hooks()) {
             int id = 100 + h.id();
             Hooks.httpProbe(id, (a, meta) -> {
-                calls.add(new Call(id, a[0], a[1], a[2]));
+                calls.add(new Call(id, a[0], a[1], a[2], a[3] == a[1] && meta[4] > 0));
                 return null;
             });
         }
@@ -86,9 +90,10 @@ final class HttpTransformerTest {
             } catch (InvocationTargetException e) {
                 equal("boom", e.getCause().getMessage(), "fail(1) still throws its own");
             }
-            equal(List.of(new Call(101, null, f, "n"), new Call(102, "n:req", f, null),
-                    new Call(103, "ok", f, "ok"), new Call(103, null, f, "boom")), calls,
-                    "probe calls");
+            // The constructor is never stamped, even when its row says so.
+            equal(List.of(new Call(101, null, f, "n", false),
+                    new Call(102, "n:req", f, null, true), new Call(103, "ok", f, "ok", true),
+                    new Call(103, null, f, "boom", true)), calls, "probe calls");
         } finally {
             Hooks.release();
             Files.deleteIfExists(dir);

@@ -30,6 +30,9 @@ func httpRaw(h HTTP, n, nreq uint32, strs []string) []byte {
 	body = le.AppendUint32(body, flags)
 	body = le.AppendUint32(body, h.Exchanges)
 	body = appendOtel(body, h.Otel)
+	body = le.AppendUint64(body, h.StartMono)
+	body = le.AppendUint64(body, uint64(h.ReqBytes))
+	body = le.AppendUint64(body, uint64(h.RespBytes))
 	for _, s := range strs {
 		body = le.AppendUint32(body, uint32(len(s)))
 		body = append(body, s...)
@@ -46,6 +49,7 @@ func sampleHTTP() HTTP {
 		Version: "HTTP/1.1", Local: "127.0.0.1:40000", Remote: "127.0.0.1:8080",
 		ReqHeaders:  []string{"authorization: ***", "accept: */*"},
 		RespHeaders: []string{"set-cookie: ***"}, Server: true, Exchanges: 2,
+		StartMono: 90, ReqBytes: 5, RespBytes: -1,
 		Otel: Otel{TraceHi: 0xa3ce929d0e0e4736, TraceLo: 0x4bf92f3577b34d01, Span: 0x5e7e0000000000a1}}
 }
 
@@ -81,6 +85,9 @@ func TestHTTPMalformed(t *testing.T) {
 		"trailing garbage":   append(httpBody(h), 1, 0, 0, 0, 0, 0, 0, 0),
 		"span without trace": httpBody(HTTP{Method: "GET", Exchanges: 1, Otel: Otel{Span: 1}}),
 		"trace without span": httpBody(HTTP{Method: "GET", Exchanges: 1, Otel: Otel{TraceLo: 1}}),
+		"start after exit":   httpBody(HTTP{Method: "GET", Exchanges: 1, ExitMono: 5, StartMono: 6}),
+		"request size < -1":  httpBody(HTTP{Method: "GET", Exchanges: 1, ReqBytes: -2}),
+		"response size < -1": httpBody(HTTP{Method: "GET", Exchanges: 1, RespBytes: -2}),
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {

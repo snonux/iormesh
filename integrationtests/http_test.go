@@ -54,6 +54,7 @@ func traceHTTP(t *testing.T, h *Harness, scenario string, dir bool) (tracedRun, 
 		t.Errorf("summary does not report two rings and every request on its connection: %s",
 			run.Logged)
 	}
+	assertHTTPTimed(t, run.Trace.Events)
 	return run, normalized(t, h, run, scenario)
 }
 
@@ -225,8 +226,28 @@ func assertRequestsPaired(t *testing.T, events []schema.Event) {
 	}
 	for k, hs := range ends {
 		if len(hs) != 2 || hs[0].Method != hs[1].Method || hs[0].Path != hs[1].Path ||
-			hs[0].Status != hs[1].Status {
+			hs[0].Status != hs[1].Status || !sizesAgree(hs[0].ReqBytes, hs[1].ReqBytes) ||
+			!sizesAgree(hs[0].RespBytes, hs[1].RespBytes) {
 			t.Errorf("request %+v: ends %+v, want a client and a server that agree", k, hs)
+		}
+	}
+}
+
+// sizesAgree: two ends' body sizes of one request are equal where both
+// knew them (task wd4); an end that did not know (absent) agrees with any.
+func sizesAgree(a, b *uint64) bool {
+	return a == nil || b == nil || *a == *b
+}
+
+// assertHTTPTimed: every http event of the JDK's libraries spans its
+// request (task wd4) — the client's send or response read and the
+// server's dispatch are entry-stamped on the thread that records the
+// event, so each has a start and a latency.
+func assertHTTPTimed(t *testing.T, events []schema.Event) {
+	t.Helper()
+	for _, e := range events {
+		if e.Event == schema.KindHTTP && e.LatencyNS == 0 {
+			t.Errorf("http event seq %d (%s %s) has no latency", e.Seq, e.HTTP.Method, e.HTTP.Path)
 		}
 	}
 }

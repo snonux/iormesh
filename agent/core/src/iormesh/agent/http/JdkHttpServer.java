@@ -1,5 +1,6 @@
 package iormesh.agent.http;
 
+import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpContext;
 import com.sun.net.httpserver.HttpsServer;
 import java.lang.reflect.Field;
@@ -31,6 +32,15 @@ import java.util.function.BiFunction;
  * connection the close shut ("Connection: close") cannot be read any
  * more, so it is left empty; the remote address stays, and the tracer
  * joins by it.
+ *
+ * Exchange.run is entry-stamped (task wd4): it starts when the dispatcher
+ * found the request readable, so the latency runs from there to the
+ * close (or the return) — reading the request, the handler, the reply. A
+ * close on another thread (a handler that handed its exchange off) finds
+ * no stamp of its exchange and records no start. Body sizes are the
+ * exchange's own: the request's Content-Length (unknown when chunked) and
+ * the length the handler passed to sendResponseHeaders (unknown when it
+ * streamed the reply chunked).
  */
 public final class JdkHttpServer implements Library {
     private static final String PKG = "sun.net.httpserver";
@@ -59,7 +69,8 @@ public final class JdkHttpServer implements Library {
         return List.of(
                 new Target("sun/net/httpserver/HttpExchangeImpl", "close", "()V", Target.NO_ARG, p),
                 new Target("sun/net/httpserver/HttpsExchangeImpl", "close", "()V", Target.NO_ARG, p),
-                new Target("sun/net/httpserver/ServerImpl$Exchange", "run", "()V", Target.NO_ARG, p));
+                new Target("sun/net/httpserver/ServerImpl$Exchange", "run", "()V", Target.NO_ARG, p)
+                        .stamped());
     }
 
     private static Class<?> cls(String name) throws ClassNotFoundException {
@@ -76,7 +87,7 @@ public final class JdkHttpServer implements Library {
      * Records an exchange at its first sighting; the hooked object
      * (wrapper or dispatch task) leads to the ExchangeImpl, the key.
      */
-    static final class Probe implements BiFunction<Object[], int[], String[]> {
+    static final class Probe implements BiFunction<Object[], long[], String[]> {
         private final Impl impl;
         private final Map<Class<?>, Field> exchange;
         private final Weak<Boolean> recorded = new Weak<>();
@@ -87,7 +98,7 @@ public final class JdkHttpServer implements Library {
         }
 
         @Override
-        public String[] apply(Object[] a, int[] meta) {
+        public String[] apply(Object[] a, long[] meta) {
             try {
                 Field f = a[1] == null ? null : exchange.get(a[1].getClass());
                 Object ex = f == null ? null : f.get(a[1]);
@@ -95,10 +106,22 @@ public final class JdkHttpServer implements Library {
                     return null;   // rejected before an exchange, or done
                 }
                 recorded.put(ex, Boolean.TRUE);
-                return impl.describe(ex).toRecord(meta);
+                Request r = impl.describe(ex);
+                r.start = start(a[3], ex, meta);
+                return r.toRecord(meta);
             } catch (ReflectiveOperationException e) {
                 return null;
             }
+        }
+
+        /**
+         * The open stamp, when the open hook is the dispatch of this very
+         * exchange (its tx is ex); else 0 — another exchange's dispatch on
+         * the same thread is not this request's start.
+         */
+        private long start(Object open, Object ex, long[] meta) throws IllegalAccessException {
+            Field f = open == null ? null : exchange.get(open.getClass());
+            return f != null && f.get(open) == ex ? meta[Request.M_START] : 0;
         }
     }
 
@@ -113,8 +136,10 @@ public final class JdkHttpServer implements Library {
         private final Method reqHeaders;
         private final Method respHeaders;
         private final Method context;
+        private final Field reqLen;
+        private final Field rspLen;
 
-        Impl(Class<?> c) throws NoSuchMethodException {
+        Impl(Class<?> c) throws NoSuchMethodException, NoSuchFieldException {
             method = get(c, "getRequestMethod");
             uri = get(c, "getRequestURI");
             protocol = get(c, "getProtocol");
@@ -124,6 +149,8 @@ public final class JdkHttpServer implements Library {
             reqHeaders = get(c, "getRequestHeaders");
             respHeaders = get(c, "getResponseHeaders");
             context = get(c, "getHttpContext");
+            reqLen = field(c, "reqContentLen");
+            rspLen = field(c, "rspContentLen");
         }
 
         private static Method get(Class<?> c, String name) throws NoSuchMethodException {
@@ -147,8 +174,31 @@ public final class JdkHttpServer implements Library {
             r.local = address(local, ex);
             r.remote = address(remote, ex);
             r.requestHeaders((Map<String, List<String>>) reqHeaders.invoke(ex));
-            r.responseHeaders((Map<String, List<String>>) respHeaders.invoke(ex));
+            Headers out = (Headers) respHeaders.invoke(ex);
+            r.responseHeaders(out);
+            r.reqBytes = reqLen.getLong(ex);   // -1 for a chunked request: unknown
+            r.respBytes = replyBytes(r, rspLen.getLong(ex), out);
             return r;
+        }
+
+        /**
+         * The reply body's size: the length the handler declared, or what
+         * the headers say when it declared none — 0 by protocol or by
+         * Content-length, unknown for a chunked (or HTTP/1.0 read-to-close)
+         * reply, whose length the exchange does not count. rspContentLen is
+         * 0 both for "no body" and "chunked", hence the headers.
+         */
+        private static long replyBytes(Request r, long declared, Headers out) {
+            if (r.status < 0) {
+                return Request.UNKNOWN;   // no reply sent
+            }
+            if (declared > 0) {
+                return declared;
+            }
+            if (out == null || out.containsKey("Transfer-encoding")) {
+                return Request.UNKNOWN;
+            }
+            return Request.declaredBody(r.method, r.status, out.getFirst("Content-length"));
         }
 
         /**

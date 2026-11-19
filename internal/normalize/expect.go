@@ -85,6 +85,11 @@ type ExpectedHTTP struct {
 	Version     string   `json:"version,omitempty"`
 	ReqHeaders  []string `json:"req_headers,omitempty"`
 	RespHeaders []string `json:"resp_headers,omitempty"`
+	// ReqBytes and RespBytes, when declared, must equal the event's body
+	// sizes; an event that does not know its size fails a declared one
+	// (task wd4).
+	ReqBytes  *uint64 `json:"req_bytes,omitempty"`
+	RespBytes *uint64 `json:"resp_bytes,omitempty"`
 }
 
 // ExpectedJava declares who caused an event on the Java side. Thread,

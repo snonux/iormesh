@@ -43,11 +43,20 @@ type HTTP struct {
 	// Otel is the OTEL span current on the thread when the request was
 	// recorded (task 4b4), zero when none was.
 	Otel Otel
+	// StartMono is when the library began the request (CLOCK_MONOTONIC,
+	// task wd4): the entry of the client's send or the server's dispatch
+	// that read it; 0 when the hook could not tie a start to the request.
+	// Never after ExitMono.
+	StartMono uint64
+	// ReqBytes and RespBytes are the request's and the response's body
+	// sizes as the library knew them (declared or counted), -1 unknown.
+	ReqBytes, RespBytes int64
 }
 
 // decodeHTTP checks an HTTP record: a non-negative tid and status, at
 // least the fixed strings, a request-header count that fits, no unknown
-// flag, at least one exchange, and OTEL ids either all set or none.
+// flag, at least one exchange, OTEL ids either all set or none, a start
+// not after the exit and sizes of -1 or more.
 func decodeHTTP(rec []byte) (Record, error) {
 	if len(rec) < httpHead {
 		return nil, errMalformed
@@ -56,11 +65,13 @@ func decodeHTTP(rec []byte) (Record, error) {
 	h := HTTP{ExitMono: le.Uint64(rec[8:]), StackID: le.Uint64(rec[16:]),
 		ThreadID: le.Uint64(rec[24:]), KTID: int32(le.Uint32(rec[32:])),
 		Status: int32(le.Uint32(rec[36:])), Server: flags&httpServer != 0,
-		Exchanges: le.Uint32(rec[52:])}
+		Exchanges: le.Uint32(rec[52:]), StartMono: le.Uint64(rec[80:]),
+		ReqBytes: int64(le.Uint64(rec[88:])), RespBytes: int64(le.Uint64(rec[96:]))}
 	var otelOK bool
 	h.Otel, otelOK = decodeOtel(rec, 56)
 	if h.KTID < 0 || h.Status < 0 || n < httpFixed || nreq > n-httpFixed ||
-		flags&^httpServer != 0 || h.Exchanges == 0 || !otelOK {
+		flags&^httpServer != 0 || h.Exchanges == 0 || !otelOK ||
+		h.StartMono > h.ExitMono || h.ReqBytes < -1 || h.RespBytes < -1 {
 		return nil, errMalformed
 	}
 	s, err := decodeStrings(rec, httpHead, n)

@@ -131,7 +131,7 @@ final class Bridge {
     }
 
     /** See Hooks.httpProbe: registers HTTP hook id's probe. */
-    void httpProbe(int id, java.util.function.BiFunction<Object[], int[], String[]> probe)
+    void httpProbe(int id, java.util.function.BiFunction<Object[], long[], String[]> probe)
             throws ReflectiveOperationException {
         hooks.getMethod("httpProbe", int.class, java.util.function.BiFunction.class)
                 .invoke(null, id, probe);

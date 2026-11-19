@@ -23,10 +23,14 @@ import java.util.concurrent.ConcurrentHashMap;
  *   catch (Throwable t) { Hooks.http(null, this, arg, id); throw t; }
  * </pre>
  *
- * Exit only — an HTTP event is stamped when the request is done, and
- * nothing joins to its window, so there is no enter. A constructor is
- * hooked at its returns alone: on its exceptional path this may still
- * be uninitialized. Like BoundaryTransformer, body rewrites with a
+ * An HTTP event is stamped when the request is done, and nothing joins
+ * to its window, so most targets are exit only. A stamped target (the
+ * method that begins a request, Target.stamped, task wd4) also calls
+ * {@code Hooks.httpEnter(this, id)} first thing, and its exits call
+ * {@code Hooks.httpExit} instead, which pops that stamp: the request's
+ * start, for its latency. A constructor is hooked at its returns alone
+ * (on its exceptional path this may still be uninitialized) and never
+ * stamped — an unhooked throw would leave its stamp on the thread. Like BoundaryTransformer, body rewrites with a
  * hand-written handler frame (no COMPUTE_FRAMES, which would load
  * classes from inside the transformer); unlike it, classes of the
  * platform loader are candidates too — java.net.http and jdk.httpserver
@@ -34,6 +38,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 final class HttpTransformer implements ClassFileTransformer {
     static final String HTTP_DESC = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;I)V";
+    static final String ENTER_DESC = "(Ljava/lang/Object;I)V";
 
     private final HttpHooks hooks;
     private final Set<Integer> applied = ConcurrentHashMap.newKeySet();
@@ -133,8 +138,9 @@ final class HttpTransformer implements ClassFileTransformer {
             }
             rewritten++;
             applied.add(h.id());
+            boolean ctor = name.equals("<init>");
             return new Exit(mv, h.id(), className, slot, argType(descriptor, h.target().arg()),
-                    name.equals("<init>"), version >= Opcodes.V1_6);
+                    ctor, h.target().stamp() && !ctor, version >= Opcodes.V1_6);
         }
     }
 
@@ -166,31 +172,48 @@ final class HttpTransformer implements ClassFileTransformer {
         return i >= 0 && i < args.length ? args[i].getInternalName() : null;
     }
 
-    /** Calls Hooks.http before every return and, for a method, on its throw. */
+    /**
+     * Calls Hooks.http (Hooks.httpExit when stamped) before every return
+     * and, for a method, on its throw; a stamped one calls Hooks.httpEnter
+     * first.
+     */
     private static final class Exit extends MethodVisitor {
         private final int id;
         private final String owner;
         private final int slot;
         private final String slotType;
         private final boolean ctor;
+        private final boolean stamp;
         private final boolean frames;
         private final Label start = new Label();
         private final Label handler = new Label();
 
         Exit(MethodVisitor next, int id, String owner, int slot, String slotType, boolean ctor,
-             boolean frames) {
+             boolean stamp, boolean frames) {
             super(Opcodes.ASM9, next);
             this.id = id;
             this.owner = owner;
             this.slot = slot;
             this.slotType = slotType;
             this.ctor = ctor;
+            this.stamp = stamp;
             this.frames = frames;
         }
 
+        /**
+         * The entry stamp goes before the try range: httpEnter never
+         * throws, and were it to, its exit must not pop a stamp never
+         * pushed.
+         */
         @Override
         public void visitCode() {
             super.visitCode();
+            if (stamp) {
+                super.visitVarInsn(Opcodes.ALOAD, 0);
+                pushId();
+                super.visitMethodInsn(Opcodes.INVOKESTATIC, BoundaryTransformer.HOOKS,
+                        "httpEnter", ENTER_DESC, false);
+            }
             super.visitLabel(start);
         }
 
@@ -248,13 +271,17 @@ final class HttpTransformer implements ClassFileTransformer {
             } else {
                 super.visitInsn(Opcodes.ACONST_NULL);
             }
+            pushId();
+            super.visitMethodInsn(Opcodes.INVOKESTATIC, BoundaryTransformer.HOOKS,
+                    stamp ? "httpExit" : "http", HTTP_DESC, false);
+        }
+
+        private void pushId() {
             if (id <= Byte.MAX_VALUE) {
                 super.visitIntInsn(Opcodes.BIPUSH, id);
             } else {
                 super.visitIntInsn(Opcodes.SIPUSH, id);
             }
-            super.visitMethodInsn(Opcodes.INVOKESTATIC, BoundaryTransformer.HOOKS, "http",
-                    HTTP_DESC, false);
         }
     }
 }

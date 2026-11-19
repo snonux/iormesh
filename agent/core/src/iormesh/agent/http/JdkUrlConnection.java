@@ -26,6 +26,14 @@ import java.util.function.BiFunction;
  * last parameter is the connection — JDK 17 has a ProgressSource before
  * it, later JDKs not): getInputStream0 drops it once a body-less
  * response is done.
+ *
+ * getInputStream0 is entry-stamped (task wd4): the latency runs from the
+ * outermost call to its exit — the request write (unless the app already
+ * sent it through getOutputStream) and the response read. The request
+ * body's size is what the app wrote, counted by the JDK's own streams
+ * (the buffered poster, or the streaming stream's count), read when the
+ * response is parsed — before getInputStream0 lets go of them; the
+ * response's is its Content-Length.
  */
 public final class JdkUrlConnection implements Library {
     private static final String IMPL = "sun.net.www.protocol.http.HttpURLConnection";
@@ -57,7 +65,7 @@ public final class JdkUrlConnection implements Library {
         headers.setAccessible(true);
         Field socket = field(Class.forName("sun.net.NetworkClient", false, boot), "serverSocket");
         Weak<Bound> bound = new Weak<>();
-        Bind bind = new Bind(socket, bound);
+        Bind bind = new Bind(socket, bound, new Body(impl, boot));
         Done done = new Done(code, requests, responses, headers, bound);
         done.walker.walk(done.depth);   // link the walk now, not in a request
         String client = "sun/net/www/http/HttpClient";
@@ -69,7 +77,7 @@ public final class JdkUrlConnection implements Library {
                         "(Lsun/net/www/MessageHeader;Lsun/net/ProgressSource;" + huc + ")Z",
                         Target.LAST_ARG, bind),
                 new Target("sun/net/www/protocol/http/HttpURLConnection", "getInputStream0",
-                        "()Ljava/io/InputStream;", Target.NO_ARG, done));
+                        "()Ljava/io/InputStream;", Target.NO_ARG, done).stamped());
     }
 
     private static Field field(Class<?> c, String name) throws NoSuchFieldException {
@@ -89,20 +97,49 @@ public final class JdkUrlConnection implements Library {
         String local = "";
         String remote = "";
         int parses;
+        long reqBytes = Request.UNKNOWN;
+    }
+
+    /**
+     * The request body the app wrote to a connection: the buffered
+     * poster's size, or the streaming output's count of bytes written;
+     * 0 when it opened neither (no body).
+     */
+    static final class Body {
+        private final Field poster;
+        private final Field streaming;
+        private final Field written;
+
+        Body(Class<?> impl, ClassLoader boot) throws ReflectiveOperationException {
+            poster = field(impl, "poster");
+            streaming = field(impl, "strOutputStream");
+            written = field(Class.forName(IMPL + "$StreamingOutputStream", false, boot),
+                    "written");
+        }
+
+        long of(Object conn) throws IllegalAccessException {
+            if (poster.get(conn) instanceof java.io.ByteArrayOutputStream p) {
+                return p.size();
+            }
+            Object s = streaming.get(conn);
+            return s == null ? 0 : written.getLong(s);
+        }
     }
 
     /** parseHTTP: binds the connection object to its socket and counts it. */
-    static final class Bind implements BiFunction<Object[], int[], String[]> {
+    static final class Bind implements BiFunction<Object[], long[], String[]> {
         private final Field socket;
         private final Weak<Bound> bound;
+        private final Body body;
 
-        Bind(Field socket, Weak<Bound> bound) {
+        Bind(Field socket, Weak<Bound> bound, Body body) {
             this.socket = socket;
             this.bound = bound;
+            this.body = body;
         }
 
         @Override
-        public String[] apply(Object[] a, int[] meta) {
+        public String[] apply(Object[] a, long[] meta) {
             if (a[2] == null) {
                 return null;
             }
@@ -117,6 +154,7 @@ public final class JdkUrlConnection implements Library {
                     b.local = Request.addr(s.getLocalAddress(), s.getLocalPort());
                     b.remote = Request.addr(s.getInetAddress(), s.getPort());
                 }
+                b.reqBytes = body.of(a[2]);
             } catch (IllegalAccessException e) {
                 // Opened at install; if not, the request records no socket.
             }
@@ -125,7 +163,7 @@ public final class JdkUrlConnection implements Library {
     }
 
     /** getInputStream0's exit: the request, once it has a response code. */
-    static final class Done implements BiFunction<Object[], int[], String[]> {
+    static final class Done implements BiFunction<Object[], long[], String[]> {
         private final Field code;
         private final Field requests;
         private final Field responses;
@@ -153,14 +191,16 @@ public final class JdkUrlConnection implements Library {
         }
 
         @Override
-        public String[] apply(Object[] a, int[] meta) {
+        public String[] apply(Object[] a, long[] meta) {
             try {
                 if (!(a[1] instanceof HttpURLConnection c) || recorded.get(c) != null
                         || code.getInt(c) < 0 || walker.walk(depth) > 1) {
                     return null;   // no response yet, done, or an inner exit
                 }
                 recorded.put(c, Boolean.TRUE);
-                return describe(c).toRecord(meta);
+                Request r = describe(c);
+                r.start = Request.ownStart(a, meta);   // the outermost call's entry
+                return r.toRecord(meta);
             } catch (ReflectiveOperationException e) {
                 return null;
             }
@@ -180,9 +220,13 @@ public final class JdkUrlConnection implements Library {
                 r.local = b.local;
                 r.remote = b.remote;
                 r.exchanges = b.parses;
+                r.reqBytes = b.reqBytes;
             }
             r.requestHeaders(map(requests.get(c)));
-            r.responseHeaders(map(responses.get(c)));
+            Map<String, List<String>> resp = map(responses.get(c));
+            r.responseHeaders(resp);
+            r.respBytes = Request.declaredBody(r.method, r.status,
+                    Request.first(resp, "Content-Length"));
             return r;
         }
 

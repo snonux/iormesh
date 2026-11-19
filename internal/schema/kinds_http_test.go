@@ -15,7 +15,8 @@ func httpEvent() Event {
 	e.HTTP = &HTTP{Method: "GET", Scheme: "http", Host: "127.0.0.1",
 		Path: "/login?token=***", Status: 200, ReqSeq: 1, Version: "HTTP/1.1",
 		ReqHeaders:  []string{"authorization: ***", "x-request-id: 7"},
-		RespHeaders: []string{"set-cookie: ***"}}
+		RespHeaders: []string{"set-cookie: ***"}, ReqBytes: new(uint64), RespBytes: ptr(uint64(7))}
+	e.LatencyNS = 1500
 	return e
 }
 

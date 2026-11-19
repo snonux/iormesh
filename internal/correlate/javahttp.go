@@ -272,7 +272,9 @@ func (j *JavaJoin) httpEvent(h pendingHTTP) (schema.Event, error) {
 		FD: schema.NoFD, Attribution: schema.AttributionNone}
 	ev.HTTP = &schema.HTTP{Method: r.Method, Scheme: r.Scheme, Host: r.Host,
 		Path: j.policy.URL(r.Path), Status: uint16(min(r.Status, 999)), Version: r.Version,
-		ReqHeaders: j.headers(r.ReqHeaders), RespHeaders: j.headers(r.RespHeaders)}
+		ReqHeaders: j.headers(r.ReqHeaders), RespHeaders: j.headers(r.RespHeaders),
+		ReqBytes: bodySize(r.ReqBytes), RespBytes: bodySize(r.RespBytes)}
+	j.span(&ev, r)
 	if ev.HTTP.Method == "" {
 		ev.HTTP.Method = "?" // a library that lost its method still made a request
 	}
@@ -293,6 +295,30 @@ func (j *JavaJoin) httpEvent(h pendingHTTP) (schema.Event, error) {
 	ev.Attribution, ev.Java = schema.AttributionJava, java
 	ev.Otel = otelOf(r.Otel) // with java only: the schema ties otel to it
 	return ev, nil
+}
+
+// span gives an http event the envelope's syscall shape when the record
+// knows the request's start (task wd4): boot_ns is the start, latency_ns
+// the time to completion, so boot_ns + latency_ns is still the stamp the
+// event is ordered by. Without a start the event keeps its completion as
+// boot_ns and a zero latency.
+func (j *JavaJoin) span(ev *schema.Event, r agentspool.HTTP) {
+	if r.StartMono == 0 || r.StartMono > r.ExitMono {
+		return
+	}
+	ev.LatencyNS = r.ExitMono - r.StartMono
+	ev.BootNS -= ev.LatencyNS
+	ev.WallNS -= ev.LatencyNS
+}
+
+// bodySize is a record's body size for the event: nil (absent) when the
+// library did not know it (-1).
+func bodySize(n int64) *uint64 {
+	if n < 0 {
+		return nil
+	}
+	v := uint64(n)
+	return &v
 }
 
 // reqSeq numbers a request on its connection, as its end (client or

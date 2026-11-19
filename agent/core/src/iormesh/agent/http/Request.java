@@ -17,10 +17,24 @@ import java.util.TreeMap;
  * socket addresses are what the tracer joins the request to its
  * connection by (conn_id); either may be empty when the library no
  * longer holds it.
+ *
+ * Since task wd4 also its start stamp (the latency's beginning) and body
+ * sizes, each only when the library knows it: 0 and -1 mean unknown,
+ * never an estimate.
  */
 final class Request {
     /** Headers kept per direction: bounds the record, never the request. */
     static final int MAX_HEADERS = 32;
+    /** Indices into Hooks.http's long[] meta, mirroring Ring.M_*. */
+    static final int M_STATUS = 0;
+    static final int M_NREQ = 1;
+    static final int M_FLAGS = 2;
+    static final int M_EXCHANGES = 3;
+    static final int M_START = 4;
+    static final int M_REQ_BYTES = 5;
+    static final int M_RESP_BYTES = 6;
+    /** Unknown body size. */
+    static final long UNKNOWN = -1;
 
     String method = "";
     String scheme = "";
@@ -38,6 +52,15 @@ final class Request {
      * — the server saw each, the caller one request.
      */
     int exchanges = 1;
+    /**
+     * System.nanoTime() when the library began the request, 0 unknown: a
+     * probe sets it from the open stamp (see {@link #ownStart}) only when
+     * that stamp is its request's.
+     */
+    long start;
+    /** Request and response body bytes, {@link #UNKNOWN} unless the library knows. */
+    long reqBytes = UNKNOWN;
+    long respBytes = UNKNOWN;
     private final List<String> request = new ArrayList<>();
     private final List<String> response = new ArrayList<>();
 
@@ -51,20 +74,80 @@ final class Request {
     }
 
     /**
-     * The strings Hooks.http writes; meta gets {status, request-header
-     * count, flags, exchanges}. A negative status (no response) is
-     * recorded as 0.
+     * The strings Hooks.http writes; meta gets the request's numbers
+     * (M_*). A negative status (no response) is recorded as 0; the start
+     * is this request's own, so a stamp Hooks offered that the probe did
+     * not adopt is cleared here.
      */
-    String[] toRecord(int[] meta) {
+    String[] toRecord(long[] meta) {
         List<String> s = new ArrayList<>(List.of(method, scheme, host, Redaction.url(path),
                 version, local, remote));
         s.addAll(request);
         s.addAll(response);
-        meta[0] = Math.max(status, 0);
-        meta[1] = request.size();
-        meta[2] = server ? 1 : 0;   // Ring.HTTP_SERVER
-        meta[3] = Math.max(exchanges, 1);
+        meta[M_STATUS] = Math.max(status, 0);
+        meta[M_NREQ] = request.size();
+        meta[M_FLAGS] = server ? 1 : 0;   // Ring.HTTP_SERVER
+        meta[M_EXCHANGES] = Math.max(exchanges, 1);
+        meta[M_START] = Math.max(start, 0);
+        meta[M_REQ_BYTES] = reqBytes < 0 ? UNKNOWN : reqBytes;
+        meta[M_RESP_BYTES] = respBytes < 0 ? UNKNOWN : respBytes;
         return s.toArray(new String[0]);
+    }
+
+    /**
+     * The open stamp Hooks offers (meta[M_START]) when the open hook is
+     * the hooked method itself — an entry-stamped target's own exit, a[3]
+     * == a[1] — else 0: a stamp of some other call on the thread is not
+     * this request's start.
+     */
+    static long ownStart(Object[] a, long[] meta) {
+        return a.length > 3 && a[1] != null && a[3] == a[1] ? meta[M_START] : 0;
+    }
+
+    /**
+     * A response body's size as its headers declare it: 0 for a reply
+     * that has none by protocol (a HEAD request's, 1xx, 204, 304), the
+     * Content-Length otherwise, {@link #UNKNOWN} without one (chunked, or
+     * read to the close). The libraries check a declared length against
+     * the bytes they move, so a completed request's is its size.
+     */
+    static long declaredBody(String method, int status, String contentLength) {
+        if ("HEAD".equalsIgnoreCase(method) || (status >= 100 && status < 200)
+                || status == 204 || status == 304) {
+            return 0;
+        }
+        return parseLength(contentLength);
+    }
+
+    /** The first value of header name in h, by case-insensitive name; null if none. */
+    static String first(Map<String, List<String>> h, String name) {
+        if (h == null) {
+            return null;
+        }
+        for (Map.Entry<String, List<String>> e : h.entrySet()) {
+            List<String> v = e.getValue();
+            if (name.equalsIgnoreCase(e.getKey()) && v != null && !v.isEmpty()) {
+                return v.get(0);
+            }
+        }
+        return null;
+    }
+
+    /** A Content-Length value, {@link #UNKNOWN} when absent or malformed. */
+    static long parseLength(String raw) {
+        String v = raw == null ? null : raw.trim();
+        if (v == null || v.isEmpty() || v.length() > 18) {
+            return UNKNOWN;
+        }
+        long n = 0;
+        for (int i = 0; i < v.length(); i++) {
+            char c = v.charAt(i);
+            if (c < '0' || c > '9') {
+                return UNKNOWN;
+            }
+            n = n * 10 + (c - '0');
+        }
+        return n;
     }
 
     /**

@@ -277,6 +277,13 @@ type HTTP struct {
 	// ***") and URLs in the others are redacted (decision #9).
 	ReqHeaders  []string `json:"req_headers,omitempty" parquet:"req_headers,list"`
 	RespHeaders []string `json:"resp_headers,omitempty" parquet:"resp_headers,list"`
+	// ReqBytes and RespBytes are the request's and the response's body
+	// sizes in bytes, as the library knew them (a declared Content-Length
+	// it enforces, a publisher's length, or the bytes the app wrote);
+	// absent when it did not (a chunked or streamed body) — never an
+	// estimate. Appended in M3 (task wd4).
+	ReqBytes  *uint64 `json:"req_bytes,omitempty" parquet:"req_bytes,optional"`
+	RespBytes *uint64 `json:"resp_bytes,omitempty" parquet:"resp_bytes,optional"`
 }
 
 // Sink receives finished events in seq order. The NDJSON and parquet
