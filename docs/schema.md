@@ -506,29 +506,46 @@ How an event gets `attribution: java` — never by guessing:
 
 - The agent's hooked JDK methods write a *bracket* (hook, kernel
   tid, enter and exit `System.nanoTime()`, stack id) when they
-  return. The event joins the innermost bracket on its tid whose
-  window contains the syscall's start, compared in
-  CLOCK_MONOTONIC: the event's boot-clock `boot_ns` is converted
-  with a boot − monotonic offset sampled in user space as the
-  midpoint of two monotonic reads around a boot read (S1
-  experiment 2), re-sampled at every spool poll.
-- The bracket's hook must issue the event's kind: the agent writes
-  its hook table into the ring at install (HOOK records), each
-  hook with its native's syscall allowlist (`stat`, `lstat` and
-  `fstat` match the kinds `newstat`, `newlstat`, `newfstat`).
-  Another kind inside a bracket is JVM work — class loading, say
-  — and stays `none`.
+  return. The agent writes its hook table into the ring at install
+  (HOOK records): each hook's native and that native's syscall
+  allowlist (`stat`, `lstat` and `fstat` match the kinds
+  `newstat`, `newlstat`, `newfstat`).
+- The kernel marks the syscall (task td4): once a JVM's ring has
+  delivered its hook table, the tracer attaches uprobes to the
+  hooks' natives in that JVM's `libjava`/`libnio`/`libnet`
+  (scoped to its pid, each native's BPF cookie its id), which
+  push and pop a per-thread mark. A syscall a thread enters from
+  inside a hooked native carries that native and the native's
+  entry time, stamped in CLOCK_MONOTONIC — `System.nanoTime()`'s
+  clock — by BPF.
+- The event joins the innermost bracket on its tid whose window
+  contains the native's entry, no clock conversion; the bracket's
+  hook must reach that very native and allow the event's kind,
+  and the syscall's start (converted from `boot_ns` with a boot −
+  monotonic offset sampled in user space as the midpoint of two
+  monotonic reads around a boot read, S1 experiment 2) must not
+  lie after the bracket's exit, which defuses a stale mark.
+- So JVM work inside a bracket stays `none` whatever its kind: a
+  syscall without a mark was issued outside every hooked native
+  (class loading reading the runtime image or a JAR's bytes
+  through no hooked native, the JVM's own `/proc` reads), and one
+  marked with another native was issued by JVM work that called
+  it. The allowlist stays as a second guard: another kind under
+  the hook's own native is that native's JVM work (a class loaded
+  inside `open0`).
 - `none` also for: a syscall no bracket contains (JVM startup
   before the agent, JIT/GC threads, JNI, JVM-internal I/O), two
   brackets that overlap without nesting, a folded read/write
   (`args.count`: many calls, which one bracket cannot vouch for),
-  and a bracket whose stack the agent did not deliver (dropped
-  STACK record, or a JVM run without stack walks) — `java` needs
-  a stack.
-- The BPF uprobe mark S1 also used (which JDK native issued the
-  syscall) is not built yet; until it is, the hook's allowlist is
-  the only guard against JVM work of an allowed kind inside a
-  bracket.
+  a bracket whose stack the agent did not deliver (dropped STACK
+  record, or a JVM run without stack walks) — `java` needs a
+  stack — the syscalls a JVM issued before its natives were
+  probed (a JVM that starts after the tracer: up to one spool scan,
+  50 ms, past its agent's install; JVMs already running are probed
+  before the tracer's ready file) — and every syscall of a JVM
+  whose natives could not be probed (no uprobe_multi links, Linux
+  < 6.6; a JDK without `Java_*` symbols; a JVM gone before the
+  probe): reported on stderr and counted as an unmarked JVM.
 - **Virtual threads** (JDK 21+): the agent records the carrier tid
   at a bracket's enter and exit, 0 when they differ (such
   brackets are not indexed, so their own syscalls stay `none`).
@@ -555,9 +572,10 @@ of a process without a ring leaves once a spool scan (every 50 ms
 and on the run loop's tick) after its syscall found none; a
 syscall that ended before its JVM's ring existed is decided at
 once. At the end of the trace everything is decided with what has
-been read. The summary line counts the rings, brackets, joined
-events (and carrier ones), why a JVM's other events stayed
-`none`, the events released by the timeout rather than a
+been read. The summary line counts the rings (and the JVMs whose
+natives could not be probed), brackets, joined events (and
+carrier ones), why a JVM's other events stayed `none` (unmarked,
+other native, unbracketed, other kind, ambiguous, no stack), the events released by the timeout rather than a
 watermark, and the agents' own loss counters. A suspend between
 a syscall and its join shifts the boot − monotonic offset by the
 time suspended; held events are then converted with the new

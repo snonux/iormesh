@@ -15,22 +15,25 @@ import (
 // JVM wait until the agent's ring (decision #27, internal/agentspool)
 // says every bracket that could contain them has been read.
 //
-// The join (S1, docs/spikes/s1-java-join.md): an event belongs to the
-// innermost agent bracket on its kernel tid whose window contains the
-// syscall's start, compared in CLOCK_MONOTONIC — System.nanoTime's clock
-// — after converting the event's boot-clock stamp with a midpoint offset
-// sampled in user space (S1 experiment 2: 0 of 120 000 syscalls outside
-// their bracket). The bracket's hook must allow the syscall's kind: any
-// other kind inside the bracket is JVM work (class loading, say), not the
-// method's I/O. Everything else stays attribution none, never guessed: an
-// unbracketed syscall, another kind, two brackets that overlap without
-// nesting, a folded read/write (one event for many calls), a bracket
-// whose stack the agent never delivered.
+// The join (S1, docs/spikes/s1-java-join.md; task td4): the kernel marks
+// every syscall a thread issues from inside a hooked JDK native with that
+// native and the native's entry time on CLOCK_MONOTONIC (the Java mark,
+// internal/c/javamark.c, sent ahead of the enter as a NativeMark). An
+// event belongs to the innermost agent bracket on its kernel tid whose
+// window contains the native's entry — the same clock as the agent's
+// System.nanoTime, no conversion — when the bracket's hook reaches that
+// very native and allows the syscall's kind. A syscall without a mark was
+// not issued by a hooked native: JVM work inside the bracket (class
+// loading reading a JAR, say), never the method's I/O, whatever its kind;
+// the allowlist stays as a second guard. Everything else stays attribution
+// none, never guessed: no mark, another native, an unbracketed native
+// entry, another kind, two brackets that overlap without nesting, a
+// folded read/write (one event for many calls), a bracket whose stack the
+// agent never delivered.
 //
-// The BPF uprobe mark S1 also used (which native issued the syscall) is
-// not built yet; until it is, the hook's allowlist is the only guard
-// against JVM work of an allowed kind inside a bracket (docs/schema.md,
-// "Java attribution").
+// Release timing still converts the event's boot-clock end to
+// CLOCK_MONOTONIC with a midpoint offset sampled in user space (S1
+// experiment 2), to compare it with the ring's watermark.
 //
 // I/O of a virtual thread is joined the same way (the agent records the
 // carrier it ran on) and flagged java.carrier, naming the carrier thread
@@ -55,7 +58,14 @@ type JavaJoin struct {
 	// will have a bracket (the agent maps its ring before its first one).
 	scanned uint64
 	methods map[string]uint64 // frame text → method id
-	stats   JavaStats
+	// cookies numbers the natives the hook tables reach, by JNI symbol:
+	// the id a native's uprobe carries in its marks, from 1 (0 is the
+	// mark's "innermost native unknown"), shared by every JVM.
+	cookies map[string]uint64
+	// marks are the kernel's Java marks waiting for their syscall's event,
+	// by thread and enter time (javamark.go).
+	marks map[markKey]NativeMark
+	stats JavaStats
 	// The http events (javahttp.go): records waiting for their turn by
 	// time, the socket index, the policy that redacts them again, and
 	// what they borrow from the stream — envelope, wall-clock offset and
@@ -115,8 +125,17 @@ type JavaJoinConfig struct {
 	Grace uint64
 	// Retain is how long a bracket is kept after the watermark passed
 	// its exit (ns, default 10 s): the correlator may hold a socket
-	// event back for its fuse window (5 s) before it gets here.
+	// event back for its fuse window (5 s) before it gets here. A mark
+	// is kept that long past its syscall's enter, plus Timeout.
 	Retain uint64
+	// AttachMarks attaches the Java mark's uprobes to one JVM's natives
+	// (bpf.Tracer.AttachJavaMarks), once its ring delivered the hook
+	// table; it returns the natives no library defines. nil: the tracer
+	// has no mark, so no event is attributed.
+	AttachMarks func(pid uint32, natives []MarkedNative) (missing []string, err error)
+	// Warn reports what keeps a JVM's syscalls from being marked (an
+	// attach that failed, natives not found); nil drops it.
+	Warn func(error)
 }
 
 // JavaStats counts what the join did, for the run's summary line.
@@ -127,7 +146,9 @@ type JavaStats struct {
 	Attributed uint64 // events given attribution java
 	Carrier    uint64 // of those, I/O of a virtual thread (java.carrier)
 	// Events of JVMs with a ring that stayed none, by why.
-	Unbracketed uint64 // no bracket contains the syscall
+	Unmarked    uint64 // issued outside every hooked native: JVM work
+	OtherNative uint64 // issued from a native the bracket's hook does not reach
+	Unbracketed uint64 // no bracket contains the native's entry
 	OtherKind   uint64 // inside a bracket whose hook does not issue this kind
 	Ambiguous   uint64 // overlapping brackets, or a folded read/write
 	NoStack     uint64 // the bracket's stack was not delivered (or not walked)
@@ -137,6 +158,9 @@ type JavaStats struct {
 	// HTTP counts the http events emitted, HTTPNoConn those of them whose
 	// connection was not found (no conn_id, no req_seq).
 	HTTP, HTTPNoConn uint64
+	// MarkFailed counts JVMs whose natives could not be probed: their
+	// syscalls carry no mark and stay none.
+	MarkFailed int
 	// Lost is the agents' loss counters, summed over the rings.
 	Lost agentspool.Losses
 }
@@ -165,7 +189,8 @@ func NewJavaJoin(cfg JavaJoinConfig) *JavaJoin {
 	cfg.Grace = orDefault(cfg.Grace, defaultGrace)
 	cfg.Retain = orDefault(cfg.Retain, defaultRetain)
 	return &JavaJoin{cfg: cfg, jvms: map[uint32]*jvm{}, methods: map[string]uint64{},
-		conns: newConnIndex(), policy: redact.Default()}
+		conns: newConnIndex(), policy: redact.Default(),
+		cookies: map[string]uint64{}, marks: map[markKey]NativeMark{}}
 }
 
 var _ schema.Sink = (*JavaJoin)(nil)
@@ -241,8 +266,10 @@ func (j *JavaJoin) poll(now uint64) error {
 		if err := j.drain(v); err != nil {
 			return err
 		}
+		j.attachMarks(v)
 	}
 	j.conns.purge(j.maxEnd, j.cfg.Retain)
+	j.pruneMarks()
 	return nil
 }
 

@@ -6,7 +6,8 @@
 // (stack.c, M2 step 9); STACK_INLINE_EVENT, struct stack_inline_event and
 // IORMESH_STACK_DEPTH (moved here from maps.h) added (stack.c, task kd4);
 // EXEC_ARGV_EVENT, PROCESS_ARGV_EVENT and struct exec_argv_event added
-// (exec.c, M2).
+// (exec.c, M2); JAVA_MARK_EVENT and struct java_mark_event added
+// (javamark.c, task td4).
 
 //+build ignore
 
@@ -127,6 +128,10 @@
 // stack stack_map could not take (a colliding bucket, a full map; struct
 // stack_inline_event, stack.c).
 #define STACK_INLINE_EVENT 75
+// iormesh: the JDK native a traced thread was inside when it entered a
+// syscall, sent right before the enter record when the Java mark is on
+// (struct java_mark_event, javamark.c, M3 "Join to kernel events", task td4).
+#define JAVA_MARK_EVENT 76
 
 #define UNCLASSIFIED 0
 #define READ_CLASSIFIED 1
@@ -1218,4 +1223,26 @@ struct stack_inline_event {
     __u32 nr;
     __u64 image;
     __u64 ips[IORMESH_STACK_DEPTH];
+};
+
+// java_mark_event (iormesh, javamark.c, task td4) says which hooked JDK
+// native (libjava/libnio/libnet) a thread was inside when it entered a
+// syscall: cookie is the BPF attach cookie userspace gave that native's
+// uprobe (internal/bpf, AttachJavaMarks), 0 when the thread was nested
+// deeper than the mark keeps (the innermost native is then unknown), and
+// entry the native's entry on CLOCK_MONOTONIC (bpf_ktime_get_ns), the clock
+// of the agent's brackets (System.nanoTime). time is the enter handler's
+// clock read, the very value its enter record carries, which is how
+// userspace pairs the two, as with stack_event: the mark record is sent
+// right before the enter record (or not at all). trace_id is 0: the enter
+// record names the syscall. A syscall outside every hooked native sends no
+// mark. 40 bytes, no implicit padding.
+struct java_mark_event {
+    __u32 event_type;
+    __u32 trace_id;
+    __u64 time;
+    __u32 pid;
+    __u32 tid;
+    __u64 cookie;
+    __u64 entry;
 };

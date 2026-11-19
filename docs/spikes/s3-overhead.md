@@ -500,3 +500,40 @@ is a few field copies and one comparison per event (the socket
 index parses addresses only on events that carry them — tcp_state,
 connect, accept). The S3 burst itself was not re-run: it makes no
 HTTP request, and its join cost is task ud4's.
+
+## Follow-up (td4): the Java mark's cost
+
+Task td4 added the kernel's Java mark (`internal/c/javamark.c`): a
+uprobe and a uretprobe on every hooked JDK native of a traced JVM
+(scoped to its pid), and, for each syscall a thread enters from
+inside one, a mark record ahead of its enter record. Same method
+and load as 2b4's row with the agent (`S3_MODES=traced
+S3_TRACER_FLAGS="-aggregate=false -spool DIR" S3_OPS=500000
+S3_RUNS=5 S3_THREADS=1`, the burst under `-javaagent` through
+`JAVA_TOOL_OPTIONS`), the commit before td4 against td4, back to
+back on a host at load 7.6–25 (other agents' builds and tests).
+Every one of the million calls is hooked, so each event comes with
+a mark: twice the ring records of the run before. A check run
+joined 40 023 of its 40 000 bursts' calls through the mark.
+Samples are not kept in the repo.
+
+| Run | tracer ns/event, median | Range | burst CPU traced/untraced, median of pairs | Lost |
+|---|--:|--:|--:|--:|
+| before td4 (allowlist only), load 7.6–25 | 4260 | 3170–7390 | 1.15× (0.62–1.93) | 0 |
+| td4, the mark (load 10.7–15.3) | 4970 | 4460–8200 | 1.29× (0.81–1.48) | 0 |
+
+On this host only the large differences mean anything, and the
+pair ratios span 3× in both rows. Read so: the mark adds about
+0.7 µs of tracer CPU per marked event (decoding the extra record
+and pairing it with its event), on top of 2b4's join,
+which is already over the ≤ 2 µs budget for this worst case — task
+ud4 still owns bringing the `-spool` path under it. The target
+pays the uprobe pair per hooked call (S1: ≈3.5 µs on a loaded
+host, against the agent's ≈8 µs stack walk); the pairs here
+cannot resolve it from noise. Loss stayed 0. Bystanders pay
+nothing new by construction — the uprobes are attached per JVM
+pid (`uprobe_multi` links, so other processes do not even trap),
+the per-enter lookup sits behind the target filter and is pruned
+at load without `-spool` — so the bystander item was not re-run.
+The default fold (`-aggregate`) keeps most burst calls out of the
+ring, and with them their marks.

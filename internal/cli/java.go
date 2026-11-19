@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 
 	"iormesh/internal/agentspool"
+	"iormesh/internal/bpf"
 	"iormesh/internal/correlate"
 	"iormesh/internal/schema"
+	"iormesh/internal/types"
 )
 
 // javaOutput is a -spool run's Java join (M3): the spool directory the
@@ -19,6 +21,7 @@ import (
 // stackOutput's are.
 type javaOutput struct {
 	join    *correlate.JavaJoin
+	marker  javaMarker
 	dir     *agentspool.Dir
 	methods *schema.TableWriter[schema.Method]
 	threads *schema.TableWriter[schema.Thread]
@@ -26,10 +29,17 @@ type javaOutput struct {
 	skipped int
 }
 
+// javaMarker probes a JVM's natives for the Java mark (task td4);
+// *bpf.Tracer implements it.
+type javaMarker interface {
+	AttachJavaMarks(pid uint32, natives []bpf.JavaNative) (missing []string, err error)
+}
+
 // openJava creates the spool directory and the two table files, or,
 // without -spool, removes stale tables a previous run left in cfg.out:
-// they would describe ids no event of this trace carries.
-func openJava(cfg runConfig, stderr io.Writer) (*javaOutput, error) {
+// they would describe ids no event of this trace carries. marker is the
+// tracer, opened with Config.JavaMarks when cfg.spool is set.
+func openJava(cfg runConfig, marker javaMarker, stderr io.Writer) (*javaOutput, error) {
 	if cfg.spool == "" {
 		return nil, removeStale(cfg.out, MethodsFile, ThreadsFile)
 	}
@@ -47,7 +57,7 @@ func openJava(cfg runConfig, stderr io.Writer) (*javaOutput, error) {
 	if err != nil {
 		return nil, errors.Join(err, mf.Close())
 	}
-	return &javaOutput{dir: agentspool.NewDir(cfg.spool), stderr: stderr,
+	return &javaOutput{dir: agentspool.NewDir(cfg.spool), marker: marker, stderr: stderr,
 		methods: schema.NewTableWriter[schema.Method](mf),
 		threads: schema.NewTableWriter[schema.Thread](tf)}, nil
 }
@@ -68,8 +78,32 @@ func (o *javaOutput) sink(next schema.Sink) schema.Sink {
 		return next
 	}
 	o.join = correlate.NewJavaJoin(correlate.JavaJoinConfig{Next: next, Tables: o,
-		Scan: o.scan})
+		Scan: o.scan, AttachMarks: o.attachMarks, Warn: o.warn})
 	return o.join
+}
+
+// attachMarks probes one JVM's natives through the tracer, in the
+// joiner's terms.
+func (o *javaOutput) attachMarks(pid uint32, natives []correlate.MarkedNative) ([]string, error) {
+	out := make([]bpf.JavaNative, len(natives))
+	for i, n := range natives {
+		out[i] = bpf.JavaNative{Symbol: n.Symbol, Cookie: n.Cookie}
+	}
+	return o.marker.AttachJavaMarks(pid, out)
+}
+
+func (o *javaOutput) warn(err error) {
+	_, _ = fmt.Fprintf(o.stderr, "iormesh: %v\n", err)
+}
+
+// mark hands the joiner a kernel Java mark (the session routes every
+// *types.JavaMarkEvent here, never to the correlator).
+func (o *javaOutput) mark(r *types.JavaMarkEvent) {
+	if o == nil || o.join == nil {
+		return
+	}
+	o.join.Mark(correlate.NativeMark{PID: r.Pid, TID: r.Tid, EnterBoot: r.Time,
+		Cookie: r.Cookie, EntryMono: r.Entry})
 }
 
 // scan hands the joiner the rings that appeared, and reports each file
@@ -109,19 +143,22 @@ func (o *javaOutput) close() error {
 	return errors.Join(o.methods.Close(), o.threads.Close())
 }
 
-// summary is the Java part of the run's summary line: rings read, events
-// joined (and how many of them a virtual thread's), why the others of
-// those JVMs stayed none, how many (joined or not) left by the timeout
-// rather than a watermark, the http events (and how many found no
-// connection), and what the agents lost.
+// summary is the Java part of the run's summary line: rings read (and
+// how many JVMs' natives could not be probed), events joined (and how
+// many of them a virtual thread's), why the others of those JVMs stayed
+// none, how many (joined or not) left by the timeout rather than a
+// watermark, the http events (and how many found no connection), and
+// what the agents lost.
 func (o *javaOutput) summary() string {
 	if o == nil || o.join == nil {
 		return ""
 	}
 	s := o.join.Stats()
-	return fmt.Sprintf(", java rings %d (skipped %d, corrupt %d), brackets %d, attributed %d "+
-		"(carrier %d; none: unbracketed %d, other kind %d, ambiguous %d, no stack %d), "+
-		"released by timeout %d, http %d (no connection %d), agent lost %d", s.Rings, o.skipped,
-		s.Corrupt, s.Brackets, s.Attributed, s.Carrier, s.Unbracketed, s.OtherKind, s.Ambiguous,
-		s.NoStack, s.TimedOut, s.HTTP, s.HTTPNoConn, s.Lost.Total())
+	return fmt.Sprintf(", java rings %d (skipped %d, corrupt %d, unmarked JVMs %d), brackets %d, "+
+		"attributed %d (carrier %d; none: unmarked %d, other native %d, unbracketed %d, "+
+		"other kind %d, ambiguous %d, no stack %d), released by timeout %d, http %d "+
+		"(no connection %d), agent lost %d",
+		s.Rings, o.skipped, s.Corrupt, s.MarkFailed, s.Brackets, s.Attributed, s.Carrier,
+		s.Unmarked, s.OtherNative, s.Unbracketed, s.OtherKind, s.Ambiguous, s.NoStack,
+		s.TimedOut, s.HTTP, s.HTTPNoConn, s.Lost.Total())
 }

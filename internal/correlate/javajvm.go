@@ -25,11 +25,14 @@ const maxScan = 256
 // agent's bracket depth limit.
 const overlapScan = 16
 
-// hookInfo is a hook's syscall allowlist as event kinds, and whether its
-// bracket can span a virtual thread's park (canPark).
+// hookInfo is a hook's syscall allowlist as event kinds, whether its
+// bracket can span a virtual thread's park (canPark), and the native it
+// reaches: its JNI symbol and the cookie that native's marks carry.
 type hookInfo struct {
-	kinds []string
-	parks bool
+	kinds  []string
+	parks  bool
+	symbol string
+	cookie uint64
 }
 
 // jvm is the joiner's state for one agent ring: everything read from it
@@ -43,6 +46,9 @@ type jvm struct {
 	// begins before it.
 	createdMono uint64
 	failed      bool // the ring is corrupt: decide with what was read
+	// probed: the mark's uprobes were attached to this JVM's natives (or
+	// the attempt failed); done once, after the hook table was read.
+	probed bool
 	// hooks maps a hook id to what the joiner needs of its HOOK row.
 	hooks map[int32]hookInfo
 	// threads by Java thread id; names maps a platform thread's kernel
@@ -116,7 +122,9 @@ func (j *JavaJoin) drain(v *jvm) error {
 func (j *JavaJoin) record(v *jvm, rec agentspool.Record) error {
 	switch r := rec.(type) {
 	case agentspool.Hook:
-		v.hooks[r.ID] = hookInfo{kinds: eventKinds(r.Syscalls), parks: canPark(r)}
+		sym := r.Symbol()
+		v.hooks[r.ID] = hookInfo{kinds: eventKinds(r.Syscalls), parks: canPark(r),
+			symbol: sym, cookie: j.cookie(sym)}
 	case agentspool.Thread:
 		return j.thread(v, r)
 	case agentspool.Stack:

@@ -1,7 +1,8 @@
 // Adapted from ior internal/generate/bpfhandler.go @ b21afc50328c.
 // Changes: the prologue calls renderSockOwnerHook (sockowner.go); read and
 // write call the rwagg.c hooks (rwagg.go, M2 step 11); every enter handler
-// calls the stack.c hook (renderStackHook, M2 step 9).
+// calls the stack.c hook (renderStackHook, M2 step 9) and the javamark.c hook
+// (renderJavaMarkHook, task td4).
 
 package generate
 
@@ -423,6 +424,7 @@ func renderHandler(h handlerSpec) string {
 		b.WriteString("\n")
 	}
 	renderStackHook(&b, h)
+	renderJavaMarkHook(&b, h)
 	renderFdNameEnter(&b, h)
 	fmt.Fprintf(&b, "    struct %s *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct %s), 0);\n", h.eventStruct, h.eventStruct)
 	// A NULL reserve means event_map is full: the event is lost right here.
@@ -461,6 +463,19 @@ func renderStackHook(b *strings.Builder, h handlerSpec) {
 		return
 	}
 	b.WriteString("    iormesh_stack_on_enter(ctx, pid, tid, now);\n")
+}
+
+// renderJavaMarkHook writes, for every enter handler, the call that sends
+// the JDK native the thread is inside ahead of the enter record
+// (iormesh_java_mark_on_enter, internal/c/javamark.c; M3, task td4). Same
+// place as the stack hook and for the same reasons: only an enter that is
+// sent gets a mark, right before it, so userspace pairs them by tid and
+// time. Without -spool the call is pruned by the verifier.
+func renderJavaMarkHook(b *strings.Builder, h handlerSpec) {
+	if !h.isEnter {
+		return
+	}
+	b.WriteString("    iormesh_java_mark_on_enter(pid, tid, now);\n")
 }
 
 // renderFdNameEnter writes, for an enter handler that names its descriptor's

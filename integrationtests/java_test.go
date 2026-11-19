@@ -29,7 +29,7 @@ func TestJavaMethodFlow(t *testing.T) {
 	// One ring read; a retried attempt may also report the earlier
 	// attempt's ring as skipped (its JVM is gone, its owner unverifiable).
 	if !strings.Contains(run.Logged, "java rings 1 (") ||
-		!strings.Contains(run.Logged, ", corrupt 0)") {
+		!strings.Contains(run.Logged, ", corrupt 0, unmarked JVMs 0)") {
 		t.Errorf("summary does not report the one ring read: %s", run.Logged)
 	}
 	assertJavaConsistent(t, run.Trace)

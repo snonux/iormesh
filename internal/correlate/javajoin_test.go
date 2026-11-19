@@ -2,7 +2,9 @@ package correlate
 
 import (
 	"errors"
+	"maps"
 	"reflect"
+	"strings"
 	"testing"
 
 	"iormesh/internal/agentspool"
@@ -88,8 +90,27 @@ func newJoinTest(t *testing.T) *joinTest {
 	return jt
 }
 
+// The natives of the fixture's hooks (ring), as their uprobes name them.
+const (
+	symWriteBytes = "Java_java_io_FileOutputStream_writeBytes"
+	symStat0      = "Java_sun_nio_fs_UnixNativeDispatcher_stat0"
+	symAccept     = "Java_sun_nio_ch_Net_accept"
+	symReadBytes  = "Java_java_io_FileInputStream_readBytes"
+	symRAFRead    = "Java_java_io_RandomAccessFile_readBytes0"
+)
+
+// kindNative is the native the fixture's hooks issue each kind from:
+// event marks its events with it.
+var kindNative = map[string]string{
+	"write": symWriteBytes, "newstat": symStat0, "accept4": symAccept, "read": symReadBytes,
+}
+
+// markLead is how long before a syscall the fixture's natives are entered.
+const markLead = 10
+
 // ring puts a new ring for the JVM into the spool, already holding the
-// hook table (hook 1: write, hook 2: open) and the main thread.
+// hook table (hook 1: write, hook 2: stat, hook 3: accept, hook 4: read)
+// and the main thread.
 func (jt *joinTest) ring(recs ...agentspool.Record) *fakeRing {
 	r := &fakeRing{hdr: agentspool.Header{Version: agentspool.Version, PID: jvmPID,
 		CreatedMono: jt.mono(jt.now)}}
@@ -100,6 +121,8 @@ func (jt *joinTest) ring(recs ...agentspool.Record) *fakeRing {
 			Method: "stat", Native: "stat0", Syscalls: []string{"stat", "statx"}},
 		agentspool.Hook{ID: 3, Kind: "accept", Class: "sun/nio/ch/NioSocketImpl", Method: "accept",
 			Native: "sun/nio/ch/Net.accept", Syscalls: []string{"accept", "accept4"}},
+		agentspool.Hook{ID: 4, Kind: "read", Class: "java/io/FileInputStream", Method: "read",
+			Native: "readBytes", Syscalls: []string{"read"}},
 		agentspool.Thread{ID: 1, KTID: mainTID, Name: "main"},
 		agentspool.Stack{ID: 10, Frames: []string{"java.io.FileOutputStream#writeBytes(FileOutputStream.java:-2)",
 			"app.Main#save(Main.java:12)"}},
@@ -110,8 +133,30 @@ func (jt *joinTest) ring(recs ...agentspool.Record) *fakeRing {
 
 func (jt *joinTest) mono(boot uint64) uint64 { return boot - testOffset }
 
-// event sends a syscall event of tid starting at boot time at.
+// event sends a syscall event of tid starting at boot time at, marked by
+// the kernel as issued from the native kindNative names for its kind.
 func (jt *joinTest) event(pid, tid uint32, kind string, at uint64) {
+	jt.t.Helper()
+	if sym, ok := kindNative[kind]; ok {
+		jt.mark(pid, tid, at, sym, at-markLead)
+	}
+	jt.unmarked(pid, tid, kind, at)
+}
+
+// mark sends the kernel's mark for the syscall tid enters at boot time
+// at: issued from inside native sym ("" for an unknown one, cookie 0),
+// entered at boot time entry.
+func (jt *joinTest) mark(pid, tid uint32, at uint64, sym string, entry uint64) {
+	cookie := uint64(0)
+	if sym != "" {
+		cookie = jt.j.cookie(sym)
+	}
+	jt.j.Mark(NativeMark{PID: pid, TID: tid, EnterBoot: at, Cookie: cookie, EntryMono: jt.mono(entry)})
+}
+
+// unmarked sends a syscall event without a mark: one issued outside every
+// hooked native.
+func (jt *joinTest) unmarked(pid, tid uint32, kind string, at uint64) {
 	jt.t.Helper()
 	jt.seq++
 	ev := schema.Event{SchemaVersion: schema.Version, Project: "p", Seq: jt.seq, BootNS: at,
@@ -171,41 +216,80 @@ func TestJavaJoinStaysNone(t *testing.T) {
 }
 
 // noneCase is one TestJavaJoinStaysNone case: the event's kind, whether
-// it is folded, the ring's records, and the counter that must say why.
+// it is folded, the native the kernel marked it with (noMark: none,
+// unknownNative: cookie 0), the ring's records, and the counter that must
+// say why.
 type noneCase struct {
 	kind    string
 	folded  bool
+	native  string
 	records func(jt *joinTest, at uint64) []agentspool.Record
 	want    func(s JavaStats) uint64
 }
 
+// Marks of noneCase other than a native's symbol.
+const (
+	noMark        = "-"
+	unknownNative = ""
+)
+
 func staysNoneCases() map[string]noneCase {
-	return map[string]noneCase{
-		"unbracketed": {"write", false, func(jt *joinTest, at uint64) []agentspool.Record {
+	write := func(jt *joinTest, at uint64) []agentspool.Record {
+		return []agentspool.Record{jt.bracket(1, mainTID, at-50, at+500, 10, 1)}
+	}
+	cases := map[string]noneCase{
+		"unbracketed": {"write", false, symWriteBytes, func(jt *joinTest, at uint64) []agentspool.Record {
 			return []agentspool.Record{jt.bracket(1, mainTID, at+10, at+500, 10, 1)}
 		}, func(s JavaStats) uint64 { return s.Unbracketed }},
-		"other kind": {"read", false, func(jt *joinTest, at uint64) []agentspool.Record {
-			return []agentspool.Record{jt.bracket(1, mainTID, at-50, at+500, 10, 1)}
-		}, func(s JavaStats) uint64 { return s.OtherKind }},
-		"other thread": {"write", false, func(jt *joinTest, at uint64) []agentspool.Record {
+		"other kind": {"read", false, symWriteBytes, write, func(s JavaStats) uint64 { return s.OtherKind }},
+		"other thread": {"write", false, symWriteBytes, func(jt *joinTest, at uint64) []agentspool.Record {
 			return []agentspool.Record{jt.bracket(1, mainTID+1, at-50, at+500, 10, 1)}
 		}, func(s JavaStats) uint64 { return s.Unbracketed }},
-		"overlap": {"write", false, func(jt *joinTest, at uint64) []agentspool.Record {
+		"overlap": {"write", false, symWriteBytes, func(jt *joinTest, at uint64) []agentspool.Record {
 			return []agentspool.Record{jt.bracket(1, mainTID, at-50, at+500, 10, 1),
 				jt.bracket(1, mainTID, at-20, at+600, 10, 1)}
 		}, func(s JavaStats) uint64 { return s.Ambiguous }},
-		"folded": {"write", true, func(jt *joinTest, at uint64) []agentspool.Record {
-			return []agentspool.Record{jt.bracket(1, mainTID, at-50, at+500, 10, 1)}
-		}, func(s JavaStats) uint64 { return s.Ambiguous }},
-		"no stack walked": {"write", false, func(jt *joinTest, at uint64) []agentspool.Record {
+		"folded": {"write", true, symWriteBytes, write, func(s JavaStats) uint64 { return s.Ambiguous }},
+		"no stack walked": {"write", false, symWriteBytes, func(jt *joinTest, at uint64) []agentspool.Record {
 			return []agentspool.Record{jt.bracket(1, mainTID, at-50, at+500, 0, 1)}
 		}, func(s JavaStats) uint64 { return s.NoStack }},
-		"stack never delivered": {"write", false, func(jt *joinTest, at uint64) []agentspool.Record {
+		"stack never delivered": {"write", false, symWriteBytes, func(jt *joinTest, at uint64) []agentspool.Record {
 			return []agentspool.Record{jt.bracket(1, mainTID, at-50, at+500, 99, 1)}
 		}, func(s JavaStats) uint64 { return s.NoStack }},
-		"unknown hook": {"write", false, func(jt *joinTest, at uint64) []agentspool.Record {
+		"unknown hook": {"write", false, symWriteBytes, func(jt *joinTest, at uint64) []agentspool.Record {
 			return []agentspool.Record{jt.bracket(7, mainTID, at-50, at+500, 10, 1)}
-		}, func(s JavaStats) uint64 { return s.OtherKind }},
+		}, func(s JavaStats) uint64 { return s.OtherNative }},
+	}
+	maps.Copy(cases, jvmWorkCases())
+	return cases
+}
+
+// jvmWorkCases are the negative cases of the Java mark (task td4): JVM
+// work of a kind the hook allows, inside its bracket, which the
+// allowlist alone attributed. A read inside a FileInputStream.read
+// bracket (hook 4) that the JVM issued itself - loading a class from a
+// JAR, say - stays none, whether it came from no hooked native, from
+// another one (RandomAccessFile's, which ZipFile reads JARs through), from
+// one nested too deep to name, or carries a stale mark of a bracket that
+// closed before it.
+func jvmWorkCases() map[string]noneCase {
+	read := func(jt *joinTest, at uint64) []agentspool.Record {
+		return []agentspool.Record{jt.bracket(4, mainTID, at-50, at+500, 10, 1)}
+	}
+	return map[string]noneCase{
+		"jvm work, no native": {"read", false, noMark, read,
+			func(s JavaStats) uint64 { return s.Unmarked }},
+		"jvm work, another native": {"read", false, symRAFRead, read,
+			func(s JavaStats) uint64 { return s.OtherNative }},
+		"jvm work, native unknown": {"read", false, unknownNative, read,
+			func(s JavaStats) uint64 { return s.OtherNative }},
+		"stale mark": {"read", false, symReadBytes, func(jt *joinTest, at uint64) []agentspool.Record {
+			// The mark's native (entered at at-10) sits in a bracket that
+			// closed before the syscall; the syscall's own bracket began
+			// after that entry.
+			return []agentspool.Record{jt.bracket(4, mainTID, at-30, at-5, 10, 1),
+				jt.bracket(4, mainTID, at-2, at+500, 10, 1)}
+		}, func(s JavaStats) uint64 { return s.Unbracketed }},
 	}
 }
 
@@ -221,6 +305,9 @@ func (c noneCase) run(t *testing.T) {
 		n := uint64(2)
 		ev.Args.Count = &n
 	}
+	if c.native != noMark {
+		jt.mark(jvmPID, mainTID, at, c.native, at-markLead)
+	}
 	if err := jt.j.Event(ev); err != nil {
 		t.Fatal(err)
 	}
@@ -230,6 +317,9 @@ func (c noneCase) run(t *testing.T) {
 	}
 	if s := jt.j.Stats(); c.want(s) != 1 || s.Attributed != 0 {
 		t.Errorf("stats %+v", s)
+	}
+	if len(jt.j.marks) != 0 {
+		t.Errorf("%d marks left after their event", len(jt.j.marks))
 	}
 }
 
@@ -451,4 +541,68 @@ func TestJavaJoinParkingHook(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestJavaJoinAttachesMarks: a JVM's natives are probed once, after its
+// ring delivered the hook table, each distinct native once with the
+// cookie its marks are then checked against; a failed attach and natives
+// no library defines are reported, and the failure counted.
+func TestJavaJoinAttachesMarks(t *testing.T) {
+	jt := newJoinTest(t)
+	var calls [][]MarkedNative
+	var warned []error
+	jt.j.cfg.Warn = func(err error) { warned = append(warned, err) }
+	jt.j.cfg.AttachMarks = func(pid uint32, natives []MarkedNative) ([]string, error) {
+		if pid != jvmPID {
+			t.Errorf("attach for pid %d", pid)
+		}
+		calls = append(calls, natives)
+		return []string{symAccept}, nil
+	}
+	r := jt.ring()
+	if err := jt.j.Poll(); err != nil {
+		t.Fatal(err)
+	}
+	r.queue = []agentspool.Record{jt.watermark(jt.now)}
+	if err := jt.j.Poll(); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 || len(calls[0]) != 4 {
+		t.Fatalf("attach calls %+v, want one with the four natives", calls)
+	}
+	for _, n := range calls[0] {
+		if n.Cookie == 0 || jt.j.cookie(n.Symbol) != n.Cookie {
+			t.Errorf("native %+v: cookie not the join's", n)
+		}
+	}
+	if len(warned) != 1 || !strings.Contains(warned[0].Error(), symAccept) {
+		t.Errorf("warnings %v", warned)
+	}
+	jt.j.cfg.AttachMarks = func(uint32, []MarkedNative) ([]string, error) {
+		return nil, errors.New("no uprobe_multi")
+	}
+	jt.ring()
+	if err := jt.j.Poll(); err != nil {
+		t.Fatal(err)
+	}
+	if s := jt.j.Stats(); s.MarkFailed != 1 || len(warned) != 2 {
+		t.Errorf("stats %+v, warnings %v", s, warned)
+	}
+	jt.close()
+}
+
+// TestJavaJoinPrunesMarks: a mark whose event never came is forgotten
+// once no event can still claim it.
+func TestJavaJoinPrunesMarks(t *testing.T) {
+	jt := newJoinTest(t)
+	jt.mark(jvmPID, mainTID, jt.now, symWriteBytes, jt.now-markLead)
+	jt.now += defaultRetain
+	if err := jt.j.Poll(); err != nil || len(jt.j.marks) != 1 {
+		t.Fatalf("pruned early: %v, %d marks", err, len(jt.j.marks))
+	}
+	jt.now += defaultTimeout + 1
+	if err := jt.j.Poll(); err != nil || len(jt.j.marks) != 0 {
+		t.Fatalf("not pruned: %v, %d marks", err, len(jt.j.marks))
+	}
+	jt.close()
 }

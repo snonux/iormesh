@@ -2,7 +2,8 @@
 // Changes: target_map added (replaces ior's rodata PID_FILTER), with
 // struct iormesh_target values for tree following and pattern sessions (M2);
 // rw_agg_map, rw_agg_stop and struct iormesh_rw_state added (rwagg.c, M2
-// step 11); stack_map added (stack.c, M2 step 9).
+// step 11); stack_map added (stack.c, M2 step 9); java_mark_map and struct
+// iormesh_java_mark added (javamark.c, task td4).
 
 //+build ignore
 
@@ -297,3 +298,46 @@ struct {
     __uint(key_size, sizeof(__u32));
     __uint(value_size, IORMESH_STACK_DEPTH * sizeof(__u64));
 } stack_map SEC(".maps");
+
+// IORMESH_JAVA_MARK_DEPTH is how many nested hooked natives one thread's mark
+// keeps (javamark.c). Hooked natives are leaves (S1 rule 1): they nest only
+// when a native's JVM work runs Java code that calls another (an exception
+// class loaded from a JAR), so 4 is room to spare; deeper, the mark says
+// "unknown" until the thread is out of every native again.
+#define IORMESH_JAVA_MARK_DEPTH 4
+
+// struct iormesh_java_frame is one hooked native a thread is inside: the
+// attach cookie of its uprobe (the native's id, set by userspace), its entry
+// time on CLOCK_MONOTONIC and the user stack pointer at the entry, which
+// tells the return probe which frames it ends (javamark.c).
+struct iormesh_java_frame {
+    __u64 cookie;
+    __u64 entry;
+    __u64 sp;
+};
+
+// struct iormesh_java_mark is one thread's stack of hooked natives, innermost
+// at depth - 1. lost is set when a native was entered with the stack full:
+// its frame is not kept, so the innermost native is unknown until the stack
+// empties again.
+struct iormesh_java_mark {
+    __u32 depth;
+    __u32 lost;
+    struct iormesh_java_frame frames[IORMESH_JAVA_MARK_DEPTH];
+};
+
+// java_mark_map holds the Java mark per thread id (javamark.c, M3, task td4).
+// An entry is made by a thread's first hooked native and kept, empty, after
+// the native returns - an update in place is cheaper than an insert and a
+// delete per call - until the thread exits (exec.c). LRU: should the threads
+// that ever called a native outgrow it, the least recently used entry goes;
+// a thread that loses its entry inside a native loses its mark, and its
+// syscalls stay unattributed (never misattributed). 104 bytes a value, about
+// 1.7 MB preallocated, which is why userspace shrinks it to one entry when
+// the mark is off (internal/bpf, Config.JavaMarks).
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 16384);
+    __type(key, __u32);
+    __type(value, struct iormesh_java_mark);
+} java_mark_map SEC(".maps");

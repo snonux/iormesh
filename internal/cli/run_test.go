@@ -99,6 +99,11 @@ func (f *fakeTracer) StackTrace(uint32) ([]uint64, error) {
 	return nil, errors.New("no stacks in the fake")
 }
 
+// AttachJavaMarks probes nothing: the fake sends no mark records.
+func (f *fakeTracer) AttachJavaMarks(uint32, []bpf.JavaNative) ([]string, error) {
+	return nil, nil
+}
+
 func (f *fakeTracer) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

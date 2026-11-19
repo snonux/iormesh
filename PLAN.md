@@ -550,21 +550,24 @@ Gated by S1 — done; the design below is S1's result
   (one `/proc/thread-self` lookup per thread); the correlator
   pairs a marked syscall with the agent bracket on its TID that
   contains the native's entry, same clock, no conversion. (S1
-  paired on the `sys_enter` stamp; the native-entry stamp is the
-  same clock one step earlier, still to be run.) Events
+  paired on the `sys_enter` stamp; td4 pairs on the native-entry
+  stamp, the same clock one step earlier.) Events
   no hook brackets (JNI libraries, JVM-internal I/O) and
   ambiguous matches stay in the trace marked `attribution:
   none` — never guessed. Built in task 2b4 (`iormesh run
-  -spool`, `correlate.JavaJoin`) *without* the uprobe mark,
-  which task td4 builds (gating 5b4): the join pairs the event's tid
-  and its boot-clock start, converted to CLOCK_MONOTONIC with a
-  user-space midpoint offset (S1's conversion), with the
-  innermost containing bracket, and the hook's syscall
-  allowlist (shipped in the ring) is the only guard against JVM
-  work of an allowed kind inside a bracket. The mark, when
-  built, is one more condition. Method and thread tables are
-  NDJSON (`methods.ndjson`, `threads.ndjson`) until M4's
-  parquet writer.
+  -spool`, `correlate.JavaJoin`) first without the uprobe mark,
+  the hook's syscall allowlist the only guard against JVM work
+  of an allowed kind inside a bracket; task td4 built the mark
+  and resolved that deviation. The uprobes (`uprobe_multi`
+  links, Linux ≥ 6.6) attach per JVM, scoped to its pid, to the
+  natives its ring's hook table names, once the tracer read that
+  table; a syscall without a mark, or with another native's,
+  is JVM work and stays `none` whatever its kind, the allowlist
+  staying as a second guard; a JVM whose natives cannot be
+  probed keeps all its syscalls `none`. Cost: see
+  docs/spikes/s3-overhead.md, "Follow-up (td4)". Method and
+  thread tables are NDJSON (`methods.ndjson`, `threads.ndjson`)
+  until M4's parquet writer.
 - **Platform threads only in v1.** Virtual-thread attribution
   is deferred (see "Deferred — not in v1"). I/O issued by a
   virtual thread is still traced and still joined to its native
@@ -1110,7 +1113,8 @@ answer), and deferred.
      medians of 5 — s3-overhead.md, "Follow-up (wc4)" and
      "Follow-up (md4)"). With the Java join (`-spool`, every
      event joined): 5.2 µs, over budget — task ud4, gating M3's
-     acceptance (5b4). Measured as the tracer's own user+sys
+     acceptance (5b4); td4's Java mark adds ≈0.7 µs per marked
+     event to that (s3-overhead.md, "Follow-up (td4)"). Measured as the tracer's own user+sys
      CPU time per event from its ready file to its exit (load
      and attach excluded), which host load moves less than wall
      time — not nothing: on a loaded SMT host one thread's CPU

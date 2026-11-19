@@ -1,7 +1,8 @@
 // Adapted from ior internal/c/flags.h @ b21afc50328c.
 // Changes: PID_FILTER removed; the target set is target_map (maps.h);
 // IORMESH_EXEC_WATCH added (M2 pattern sessions); IORMESH_RW_AGGREGATE added
-// (M2 step 11); IORMESH_NATIVE_STACKS added (M2 step 9).
+// (M2 step 11); IORMESH_NATIVE_STACKS added (M2 step 9); IORMESH_JAVA_MARK
+// added (javamark.c, task td4).
 
 //+build ignore
 
@@ -38,3 +39,9 @@ const volatile u32 IORMESH_RW_AGGREGATE = 1;
 // switches above a load-time constant, so the verifier prunes the walk from
 // every handler and an off switch costs nothing per call.
 const volatile u32 IORMESH_NATIVE_STACKS = 0;
+// IORMESH_JAVA_MARK (1) makes every emitted syscall enter of a thread inside
+// a hooked JDK native send that native's mark first (javamark.c; iormesh run
+// -spool, M3, task td4). Off without -spool: a load-time constant like the
+// switches above, so the verifier prunes the per-enter map lookup from every
+// handler and a session without the Java join pays nothing per call.
+const volatile u32 IORMESH_JAVA_MARK = 0;

@@ -41,6 +41,13 @@ type Config struct {
 	// behind an id. Off, stack_map shrinks to
 	// one entry and the handlers' stack walk is pruned at load.
 	NativeStacks bool
+	// JavaMarks makes every emitted syscall enter of a thread inside a
+	// hooked JDK native send that native's mark first, as a
+	// *types.JavaMarkEvent (javamark.c, M3, task td4); AttachJavaMarks
+	// probes one JVM's natives. Off, java_mark_map shrinks to one entry,
+	// the uprobe programs are not loaded and the handlers' lookup is
+	// pruned at load.
+	JavaMarks bool
 	// Buffer is how many decoded records may wait for the consumer (in
 	// batches of up to 256); 0 means 4096. A full channel is
 	// backpressure: the ring buffer then fills and the kernel counts
@@ -127,6 +134,9 @@ func (t *Tracer) load(cfg Config) error {
 		return fmt.Errorf("set IORMESH_RW_AGGREGATE: %w", err)
 	}
 	if err := t.setNativeStacks(cfg.NativeStacks); err != nil {
+		return err
+	}
+	if err := t.setJavaMarks(cfg.JavaMarks); err != nil {
 		return err
 	}
 	if err := t.module.BPFLoadObject(); err != nil {

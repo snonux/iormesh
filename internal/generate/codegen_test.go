@@ -1424,6 +1424,7 @@ func TestGenerateIoUringRegisterCapturesRingFds(t *testing.T) {
 			"    ior_stash_ring_fds(tid, SYS_ENTER_IO_URING_REGISTER, now, emits, ctx->args[1], ctx->args[2]);\n"+
 			"    if (!emits)\n        return 0;\n\n"+
 			"    iormesh_stack_on_enter(ctx, pid, tid, now);\n"+
+			"    iormesh_java_mark_on_enter(pid, tid, now);\n"+
 			"    struct fcntl_event *ev = bpf_ringbuf_reserve(")
 	requireContains(t, handlers["sys_exit_io_uring_register"],
 		"    __u64 ring_fds_array;\n    __u64 ring_fds_opcode;\n\n    __u64 now = bpf_ktime_get_boot_ns();\n"+

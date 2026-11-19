@@ -138,6 +138,11 @@ func (s *session) handle(rec any) error {
 		if r.GroupDead != 0 {
 			delete(s.live, r.Pid)
 		}
+	case *types.JavaMarkEvent:
+		// The Java join's, not the correlator's: it pairs the mark with
+		// the event the correlator makes of the enter that follows.
+		s.java.mark(r)
+		return nil
 	}
 	return s.c.Handle(rec)
 }

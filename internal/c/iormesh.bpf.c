@@ -3,7 +3,7 @@
 // Adapted from ior internal/c/ior.bpf.c @ b21afc50328c.
 // Changes: renamed to iormesh.bpf.c; rawsyscall.c not included; bpf_endian.h
 // and sock.c added; sockaddr.c and signal.c added (M2 step 7); rwagg.c added
-// (M2 step 11); stack.c added (M2 step 9).
+// (M2 step 11); stack.c added (M2 step 9); javamark.c added (task td4).
 
 #include "vmlinux.h"
 #include <bpf/bpf_core_read.h>
@@ -62,6 +62,12 @@
 // Opt-in native user stacks of syscall enters (M2 step 9), sent by a hook
 // of the generated enter handlers.
 #include "stack.c"
+
+// The Java mark (M3, task td4): uprobes on the JDK's hooked I/O natives mark
+// the thread, and a hook of the generated enter handlers sends the mark of
+// the native a syscall was issued from. Before exec.c, whose thread-exit
+// handler resets the mark.
+#include "javamark.c"
 
 // Restart fold: the pending-restart state behind filter.c's enter/exit hooks
 // and its two probes (signal:signal_deliver, a second sys_enter_rt_sigreturn).

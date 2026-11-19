@@ -275,7 +275,10 @@ stacks, and a per-thread cache of the last stack for tight loops
   libraries (no `Java_*` symbols to attach to).
 - Multiple threads in the cost runs, and the cost on a quiet host.
 - The join on the uprobe's native-entry stamp (the prototype used
-  the `sys_enter` stamp), and per-PID uprobe attachment.
+  the `sys_enter` stamp), and per-PID uprobe attachment. Since
+  built by M3 (task td4): `uprobe_multi` links scoped to the
+  JVM's pid, the join on the native-entry stamp — see the
+  [implementation guide](../implementation.md) M3 step 5.
 - The ring's reader in Go, and a ring that wraps while the target
   writes from many threads at once.
 - Containers: the spool directory reached through

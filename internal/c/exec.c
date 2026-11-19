@@ -4,7 +4,9 @@
 // processes from target_map (iormesh_forget_target) and the pattern
 // session's exec watch (iormesh_watch_exec, exec_argv_event), the argv of
 // traced execs (iormesh_emit_argv, PROCESS_ARGV_EVENT) and the read/write
-// aggregation's flush points (iormesh_rw_flush/_forget, rwagg.c, M2 step 11).
+// aggregation's flush points (iormesh_rw_flush/_forget, rwagg.c, M2 step 11);
+// the Java mark's reset on thread exit (iormesh_java_mark_forget, javamark.c,
+// task td4).
 
 //+build ignore
 
@@ -584,6 +586,9 @@ int handle_sched_process_exit(void *ctx) {
     // The thread's folded reads and writes, ahead of its exit record; the
     // entry dies with the thread. One lookup for an untraced thread.
     iormesh_rw_forget((__u32)bpf_get_current_pid_tgid());
+    // The thread's Java mark (javamark.c): a recycled tid must not inherit
+    // the natives this thread was inside.
+    iormesh_java_mark_forget((__u32)bpf_get_current_pid_tgid());
     if (ior_process_exit_in_scope(ctx, &pid, &tid, &group_dead))
         ior_emit_process_exit(pid, tid, group_dead);
     // After the scope check, which needs the entry to judge the exit.

@@ -49,22 +49,19 @@ func canPark(h agentspool.Hook) bool {
 // attribution none and the reason is counted. Method and thread table
 // rows the event names are written before it.
 func (j *JavaJoin) attribute(ev *schema.Event, v *jvm) error {
+	mark, marked := j.takeMark(ev)
 	if ev.Args.Count != nil {
 		j.stats.Ambiguous++ // a folded loop: many calls, maybe many brackets
 		return nil
 	}
-	b, found, ambiguous := v.innermost(int32(ev.TID), j.mono(ev.BootNS))
-	hook := v.hooks[b.Hook]
-	switch {
-	case !found:
-		j.stats.Unbracketed++
+	if !marked {
+		// Issued outside every hooked native: JVM work, whatever bracket
+		// it falls in and whatever its kind.
+		j.stats.Unmarked++
 		return nil
-	case ambiguous || v.mayHaveParked(b, hook):
-		j.stats.Ambiguous++
-		return nil
-	case !slices.Contains(hook.kinds, ev.Event):
-		// JVM work inside the bracket, or a hook whose HOOK row was lost.
-		j.stats.OtherKind++
+	}
+	b, ok := j.bracketOf(ev, v, mark)
+	if !ok {
 		return nil
 	}
 	stack, err := j.stack(v, b.StackID)
@@ -74,6 +71,37 @@ func (j *JavaJoin) attribute(ev *schema.Event, v *jvm) error {
 	}
 	j.setJava(ev, v, b, stack)
 	return nil
+}
+
+// bracketOf finds the bracket whose hook explains ev's marked syscall:
+// the innermost on ev's tid that contains the native's entry — a stamp
+// on the agent's own clock, so no conversion — whose hook reaches that
+// native and allows the syscall's kind. A stale mark (a native whose
+// return probe never ran) names an entry outside the bracket the syscall
+// sits in: the bracket that contains it closed before the syscall
+// started, which the syscall's start, converted to the agent's clock,
+// shows (a native returns, and its bracket closes, hundreds of ns after
+// its last syscall began — S1's smallest margin was 132 ns — while the
+// conversion is off by tens). Otherwise the reason is counted.
+func (j *JavaJoin) bracketOf(ev *schema.Event, v *jvm, mark NativeMark) (agentspool.Bracket, bool) {
+	b, found, ambiguous := v.innermost(int32(ev.TID), mark.EntryMono)
+	hook := v.hooks[b.Hook]
+	switch {
+	case !found || j.mono(ev.BootNS) > b.ExitMono:
+		j.stats.Unbracketed++
+	case ambiguous || v.mayHaveParked(b, hook):
+		j.stats.Ambiguous++
+	case mark.Cookie == 0 || mark.Cookie != hook.cookie:
+		// Another native inside the bracket (JVM work that called one),
+		// a nesting too deep to name the innermost, or a lost HOOK row.
+		j.stats.OtherNative++
+	case !slices.Contains(hook.kinds, ev.Event):
+		// The native's own JVM work (a class loaded inside open0).
+		j.stats.OtherKind++
+	default:
+		return b, true
+	}
+	return b, false
 }
 
 // mayHaveParked: b is a virtual thread's bracket (or one whose THREAD

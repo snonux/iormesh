@@ -21,7 +21,7 @@ func TestOpenJavaWithoutSpool(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	o, err := openJava(runConfig{out: dir}, &bytes.Buffer{})
+	o, err := openJava(runConfig{out: dir}, nil, &bytes.Buffer{})
 	if err != nil || o != nil {
 		t.Fatalf("openJava = %v, %v", o, err)
 	}
@@ -43,7 +43,7 @@ func TestOpenJavaWithoutSpool(t *testing.T) {
 func TestJavaOutputRun(t *testing.T) {
 	dir, spool := t.TempDir(), filepath.Join(t.TempDir(), "spool")
 	var stderr bytes.Buffer
-	o, err := openJava(runConfig{out: dir, spool: spool}, &stderr)
+	o, err := openJava(runConfig{out: dir, spool: spool}, &fakeTracer{}, &stderr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestJavaOutputRun(t *testing.T) {
 	if n := strings.Count(stderr.String(), "skipped agent ring"); n != 1 {
 		t.Errorf("stderr %q: want the planted ring reported once", stderr.String())
 	}
-	if s := o.summary(); !strings.Contains(s, "java rings 0 (skipped 1, corrupt 0)") {
+	if s := o.summary(); !strings.Contains(s, "java rings 0 (skipped 1, corrupt 0, unmarked JVMs 0)") {
 		t.Errorf("summary %q", s)
 	}
 	for _, n := range []string{MethodsFile, ThreadsFile} {

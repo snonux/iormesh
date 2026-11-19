@@ -78,6 +78,7 @@ type tracer interface {
 	StopAggregation() error
 	PendingAggregates() ([]*types.RwAggregateEvent, error)
 	StackTrace(id uint32) ([]uint64, error)
+	AttachJavaMarks(pid uint32, natives []bpf.JavaNative) ([]string, error)
 	Close() error
 }
 
@@ -107,7 +108,7 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 	}
 	tr, err := bpf.Open(bpf.Config{Pids: pids, ExecWatch: cfg.spec.Mode() == target.ModePattern,
 		Probes: bpf.ProbesFor(cfg.families), NoAggregation: cfg.noAggregation,
-		NativeStacks: cfg.nativeStacks})
+		NativeStacks: cfg.nativeStacks, JavaMarks: cfg.spool != ""})
 	if err != nil {
 		return err
 	}
@@ -122,6 +123,11 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 	s := newSession(tr, c, cfg)
 	s.java = out.java
 	if err := s.start(pids); err != nil {
+		return errors.Join(err, finish(cfg, tr, c, out, schema.EndError, stderr))
+	}
+	// The rings of JVMs already running get their natives probed before
+	// the ready file promises the tracer is live (the Java mark, task td4).
+	if err := s.java.poll(); err != nil {
 		return errors.Join(err, finish(cfg, tr, c, out, schema.EndError, stderr))
 	}
 	_, _ = fmt.Fprintf(stderr, "iormesh: attached, tracing %s (%d tracepoints missing on this kernel)\n",
@@ -146,7 +152,7 @@ func openOutputs(cfg runConfig, tr tracer, stderr io.Writer) (outputs, error) {
 	if err != nil {
 		return outputs{}, err
 	}
-	jo, err := openJava(cfg, stderr)
+	jo, err := openJava(cfg, tr, stderr)
 	if err != nil {
 		return outputs{}, errors.Join(err, st.close())
 	}

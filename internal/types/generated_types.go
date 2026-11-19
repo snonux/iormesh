@@ -157,6 +157,7 @@ const SIGNAL_EVENT = 72
 const RW_AGGREGATE_EVENT = 73
 const STACK_EVENT = 74
 const STACK_INLINE_EVENT = 75
+const JAVA_MARK_EVENT = 76
 const UNCLASSIFIED = 0
 const READ_CLASSIFIED = 1
 const WRITE_CLASSIFIED = 2
@@ -4328,4 +4329,73 @@ func (s *StackInlineEvent) Bytes() ([]byte, error) {
 
 func (s *StackInlineEvent) Recycle() {
 	poolOfStackInlineEvents.Put(s)
+}
+
+type JavaMarkEvent struct {
+	EventType EventType
+	TraceId   TraceId
+	Time      uint64
+	Pid       uint32
+	Tid       uint32
+	Cookie    uint64
+	Entry     uint64
+}
+
+func (j JavaMarkEvent) String() string {
+	return fmt.Sprintf("EventType:%v TraceId:%v Time:%v Pid:%v Tid:%v Cookie:%v Entry:%v", j.EventType, j.TraceId, j.Time, j.Pid, j.Tid, j.Cookie, j.Entry)
+}
+
+func (j JavaMarkEvent) Equals(other any) bool {
+	otherConcrete, ok := other.(*JavaMarkEvent)
+	if !ok {
+		return false
+	}
+	return j.EventType == otherConcrete.EventType && j.TraceId == otherConcrete.TraceId && j.Time == otherConcrete.Time && j.Pid == otherConcrete.Pid && j.Tid == otherConcrete.Tid && j.Cookie == otherConcrete.Cookie && j.Entry == otherConcrete.Entry
+}
+
+func (j *JavaMarkEvent) GetEventType() EventType {
+	return j.EventType
+}
+
+func (j *JavaMarkEvent) GetTraceId() TraceId {
+	return j.TraceId
+}
+
+func (j *JavaMarkEvent) GetPid() uint32 {
+	return j.Pid
+}
+
+func (j *JavaMarkEvent) GetTid() uint32 {
+	return j.Tid
+}
+
+func (j *JavaMarkEvent) GetTime() uint64 {
+	return j.Time
+}
+
+var poolOfJavaMarkEvents = sync.Pool{
+	New: func() any { return &JavaMarkEvent{} },
+}
+
+func NewJavaMarkEvent(raw []byte) *JavaMarkEvent {
+	j := poolOfJavaMarkEvents.Get().(*JavaMarkEvent)
+	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, j); err != nil {
+		*j = JavaMarkEvent{}
+		poolOfJavaMarkEvents.Put(j)
+		return nil
+	}
+	return j
+}
+
+func (j *JavaMarkEvent) Bytes() ([]byte, error) {
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.LittleEndian, j)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (j *JavaMarkEvent) Recycle() {
+	poolOfJavaMarkEvents.Put(j)
 }

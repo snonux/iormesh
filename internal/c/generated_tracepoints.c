@@ -745,6 +745,7 @@ int handle_sys_enter_socket(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct socket_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct socket_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -806,6 +807,7 @@ int handle_sys_enter_socketpair(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct socketpair_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct socketpair_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -901,6 +903,7 @@ int handle_sys_enter_bind(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -963,6 +966,7 @@ int handle_sys_enter_listen(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1023,6 +1027,7 @@ int handle_sys_enter_accept4(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct accept_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct accept_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1089,6 +1094,7 @@ int handle_sys_enter_accept(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct accept_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct accept_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1158,6 +1164,7 @@ int handle_sys_enter_connect(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1221,6 +1228,7 @@ int handle_sys_enter_getsockname(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1281,6 +1289,7 @@ int handle_sys_enter_getpeername(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1343,6 +1352,7 @@ int handle_sys_enter_sendto(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1407,6 +1417,7 @@ int handle_sys_enter_recvfrom(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_size_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_size_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1474,6 +1485,7 @@ int handle_sys_enter_setsockopt(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1534,6 +1546,7 @@ int handle_sys_enter_getsockopt(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1594,6 +1607,7 @@ int handle_sys_enter_shutdown(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1654,6 +1668,7 @@ int handle_sys_enter_sendmsg(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1714,6 +1729,7 @@ int handle_sys_enter_sendmmsg(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1774,6 +1790,7 @@ int handle_sys_enter_recvmsg(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_size_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_size_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1839,6 +1856,7 @@ int handle_sys_enter_recvmmsg(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1899,6 +1917,7 @@ int handle_sys_enter_getrandom(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1960,6 +1979,7 @@ int handle_sys_enter_io_uring_register(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fcntl_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fcntl_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -2027,6 +2047,7 @@ int handle_sys_enter_io_uring_enter(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fcntl_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fcntl_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -2088,6 +2109,7 @@ int handle_sys_enter_io_uring_setup(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fcntl_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fcntl_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -2151,6 +2173,7 @@ int handle_sys_enter_ioprio_set(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -2209,6 +2232,7 @@ int handle_sys_enter_ioprio_get(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -2267,6 +2291,7 @@ int handle_sys_enter_landlock_create_ruleset(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct eventfd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct eventfd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -2337,6 +2362,7 @@ int handle_sys_enter_landlock_add_rule(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -2397,6 +2423,7 @@ int handle_sys_enter_landlock_restrict_self(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -2457,6 +2484,7 @@ int handle_sys_enter_lsm_set_self_attr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -2515,6 +2543,7 @@ int handle_sys_enter_lsm_get_self_attr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -2573,6 +2602,7 @@ int handle_sys_enter_lsm_list_modules(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -2631,6 +2661,7 @@ int handle_sys_enter_add_key(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct keyctl_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct keyctl_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -2692,6 +2723,7 @@ int handle_sys_enter_request_key(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct keyctl_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct keyctl_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -2753,6 +2785,7 @@ int handle_sys_enter_keyctl(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct keyctl_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct keyctl_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -2814,6 +2847,7 @@ int handle_sys_enter_mq_open(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct open_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct open_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -2892,6 +2926,7 @@ int handle_sys_enter_mq_unlink(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -2971,6 +3006,7 @@ int handle_sys_enter_mq_timedsend(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -3031,6 +3067,7 @@ int handle_sys_enter_mq_timedreceive(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -3091,6 +3128,7 @@ int handle_sys_enter_mq_notify(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -3151,6 +3189,7 @@ int handle_sys_enter_mq_getsetattr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -3211,6 +3250,7 @@ int handle_sys_enter_shmget(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -3269,6 +3309,7 @@ int handle_sys_enter_shmctl(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -3327,6 +3368,7 @@ int handle_sys_enter_shmat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -3385,6 +3427,7 @@ int handle_sys_enter_shmdt(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -3443,6 +3486,7 @@ int handle_sys_enter_semget(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -3501,6 +3545,7 @@ int handle_sys_enter_semctl(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -3559,6 +3604,7 @@ int handle_sys_enter_semtimedop(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -3617,6 +3663,7 @@ int handle_sys_enter_semop(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -3675,6 +3722,7 @@ int handle_sys_enter_msgget(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -3733,6 +3781,7 @@ int handle_sys_enter_msgctl(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -3791,6 +3840,7 @@ int handle_sys_enter_msgsnd(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -3849,6 +3899,7 @@ int handle_sys_enter_msgrcv(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -3907,6 +3958,7 @@ int handle_sys_enter_quotactl(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -3986,6 +4038,7 @@ int handle_sys_enter_quotactl_fd(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -4048,6 +4101,7 @@ int handle_sys_enter_name_to_handle_at(struct syscall_trace_enter *ctx) {
     ior_stash_pending_handle(tid, ctx->args[2]);
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -4131,6 +4185,7 @@ int handle_sys_enter_open_by_handle_at(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct open_by_handle_at_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct open_by_handle_at_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -4191,6 +4246,7 @@ int handle_sys_enter_flock(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -4251,6 +4307,7 @@ int handle_sys_enter_io_setup(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -4309,6 +4366,7 @@ int handle_sys_enter_io_destroy(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -4367,6 +4425,7 @@ int handle_sys_enter_io_submit(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -4425,6 +4484,7 @@ int handle_sys_enter_io_cancel(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -4483,6 +4543,7 @@ int handle_sys_enter_io_getevents(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -4541,6 +4602,7 @@ int handle_sys_enter_io_pgetevents(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -4599,6 +4661,7 @@ int handle_sys_enter_eventfd2(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct eventfd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct eventfd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -4669,6 +4732,7 @@ int handle_sys_enter_eventfd(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct eventfd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct eventfd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -4739,6 +4803,7 @@ int handle_sys_enter_timerfd_create(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct eventfd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct eventfd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -4809,6 +4874,7 @@ int handle_sys_enter_timerfd_settime(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -4869,6 +4935,7 @@ int handle_sys_enter_timerfd_gettime(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -4929,6 +4996,7 @@ int handle_sys_enter_signalfd4(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct eventfd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct eventfd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -4999,6 +5067,7 @@ int handle_sys_enter_signalfd(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct eventfd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct eventfd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -5069,6 +5138,7 @@ int handle_sys_enter_epoll_create1(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct eventfd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct eventfd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -5139,6 +5209,7 @@ int handle_sys_enter_epoll_create(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct eventfd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct eventfd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -5209,6 +5280,7 @@ int handle_sys_enter_epoll_ctl(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct epoll_ctl_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct epoll_ctl_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -5277,6 +5349,7 @@ int handle_sys_enter_epoll_wait(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct poll_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct poll_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -5345,6 +5418,7 @@ int handle_sys_enter_epoll_pwait(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct poll_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct poll_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -5413,6 +5487,7 @@ int handle_sys_enter_epoll_pwait2(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct poll_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct poll_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -5490,6 +5565,7 @@ int handle_sys_enter_fanotify_init(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct eventfd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct eventfd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -5560,6 +5636,7 @@ int handle_sys_enter_fanotify_mark(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -5637,6 +5714,7 @@ int handle_sys_enter_inotify_init1(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct eventfd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct eventfd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -5707,6 +5785,7 @@ int handle_sys_enter_inotify_init(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct eventfd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct eventfd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -5777,6 +5856,7 @@ int handle_sys_enter_inotify_add_watch(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -5854,6 +5934,7 @@ int handle_sys_enter_inotify_rm_watch(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -5914,6 +5995,7 @@ int handle_sys_enter_file_getattr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -5993,6 +6075,7 @@ int handle_sys_enter_file_setattr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -6072,6 +6155,7 @@ int handle_sys_enter_fsopen(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct eventfd_name_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct eventfd_name_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -6158,6 +6242,7 @@ int handle_sys_enter_fspick(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -6237,6 +6322,7 @@ int handle_sys_enter_fsconfig(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -6297,6 +6383,7 @@ int handle_sys_enter_statfs(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -6376,6 +6463,7 @@ int handle_sys_enter_fstatfs(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -6436,6 +6524,7 @@ int handle_sys_enter_ustat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -6496,6 +6585,7 @@ int handle_sys_enter_getcwd(struct syscall_trace_enter *ctx) {
     ior_stash_pending_filename(tid, ctx->args[0]);
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -6559,6 +6649,7 @@ int handle_sys_enter_utimensat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -6647,6 +6738,7 @@ int handle_sys_enter_futimesat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -6726,6 +6818,7 @@ int handle_sys_enter_utimes(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -6805,6 +6898,7 @@ int handle_sys_enter_utime(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -6884,6 +6978,7 @@ int handle_sys_enter_sync(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -6942,6 +7037,7 @@ int handle_sys_enter_syncfs(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -7002,6 +7098,7 @@ int handle_sys_enter_fsync(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -7062,6 +7159,7 @@ int handle_sys_enter_fdatasync(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -7122,6 +7220,7 @@ int handle_sys_enter_sync_file_range(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -7182,6 +7281,7 @@ int handle_sys_enter_vmsplice(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -7242,6 +7342,7 @@ int handle_sys_enter_splice(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -7302,6 +7403,7 @@ int handle_sys_enter_tee(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -7362,6 +7464,7 @@ int handle_sys_enter_setxattrat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -7441,6 +7544,7 @@ int handle_sys_enter_setxattr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -7520,6 +7624,7 @@ int handle_sys_enter_lsetxattr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -7599,6 +7704,7 @@ int handle_sys_enter_fsetxattr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -7659,6 +7765,7 @@ int handle_sys_enter_getxattrat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -7745,6 +7852,7 @@ int handle_sys_enter_getxattr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -7826,6 +7934,7 @@ int handle_sys_enter_lgetxattr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -7907,6 +8016,7 @@ int handle_sys_enter_fgetxattr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_size_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_size_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -7972,6 +8082,7 @@ int handle_sys_enter_listxattrat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -8053,6 +8164,7 @@ int handle_sys_enter_listxattr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -8134,6 +8246,7 @@ int handle_sys_enter_llistxattr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -8215,6 +8328,7 @@ int handle_sys_enter_flistxattr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_size_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_size_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -8280,6 +8394,7 @@ int handle_sys_enter_removexattrat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -8359,6 +8474,7 @@ int handle_sys_enter_removexattr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -8438,6 +8554,7 @@ int handle_sys_enter_lremovexattr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -8517,6 +8634,7 @@ int handle_sys_enter_fremovexattr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -8577,6 +8695,7 @@ int handle_sys_enter_umount(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -8656,6 +8775,7 @@ int handle_sys_enter_open_tree(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct open_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct open_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -8734,6 +8854,7 @@ int handle_sys_enter_mount(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -8813,6 +8934,7 @@ int handle_sys_enter_fsmount(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct eventfd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct eventfd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -8883,6 +9005,7 @@ int handle_sys_enter_move_mount(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct two_fd_names_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct two_fd_names_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -8973,6 +9096,7 @@ int handle_sys_enter_pivot_root(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -9052,6 +9176,7 @@ int handle_sys_enter_mount_setattr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -9131,6 +9256,7 @@ int handle_sys_enter_open_tree_attr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct open_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct open_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -9209,6 +9335,7 @@ int handle_sys_enter_statmount(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -9267,6 +9394,7 @@ int handle_sys_enter_listmount(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -9325,6 +9453,7 @@ int handle_sys_enter_sysfs(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -9383,6 +9512,7 @@ int handle_sys_enter_close_range(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct two_fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct two_fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -9445,6 +9575,7 @@ int handle_sys_enter_dup3(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct dup3_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct dup3_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -9506,6 +9637,7 @@ int handle_sys_enter_dup2(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -9566,6 +9698,7 @@ int handle_sys_enter_dup(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -9626,6 +9759,7 @@ int handle_sys_enter_select(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct poll_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct poll_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -9696,6 +9830,7 @@ int handle_sys_enter_pselect6(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct poll_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct poll_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -9773,6 +9908,7 @@ int handle_sys_enter_poll(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct poll_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct poll_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -9841,6 +9977,7 @@ int handle_sys_enter_ppoll(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct poll_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct poll_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -9918,6 +10055,7 @@ int handle_sys_enter_getdents(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -9978,6 +10116,7 @@ int handle_sys_enter_getdents64(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -10038,6 +10177,7 @@ int handle_sys_enter_ioctl(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fcntl_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fcntl_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -10099,6 +10239,7 @@ int handle_sys_enter_fcntl(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fcntl_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fcntl_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -10160,6 +10301,7 @@ int handle_sys_enter_mknodat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -10239,6 +10381,7 @@ int handle_sys_enter_mknod(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -10318,6 +10461,7 @@ int handle_sys_enter_mkdirat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -10397,6 +10541,7 @@ int handle_sys_enter_mkdir(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -10476,6 +10621,7 @@ int handle_sys_enter_rmdir(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -10555,6 +10701,7 @@ int handle_sys_enter_unlinkat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -10634,6 +10781,7 @@ int handle_sys_enter_unlink(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -10713,6 +10861,7 @@ int handle_sys_enter_symlinkat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct name_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct name_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -10803,6 +10952,7 @@ int handle_sys_enter_symlink(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct name_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct name_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -10893,6 +11043,7 @@ int handle_sys_enter_linkat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct name_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct name_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -10983,6 +11134,7 @@ int handle_sys_enter_link(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct name_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct name_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -11073,6 +11225,7 @@ int handle_sys_enter_renameat2(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct name_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct name_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -11163,6 +11316,7 @@ int handle_sys_enter_renameat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct name_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct name_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -11253,6 +11407,7 @@ int handle_sys_enter_rename(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct name_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct name_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -11343,6 +11498,7 @@ int handle_sys_enter_pipe2(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct pipe_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct pipe_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -11426,6 +11582,7 @@ int handle_sys_enter_pipe(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct pipe_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct pipe_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -11509,6 +11666,7 @@ int handle_sys_enter_execve(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct exec_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct exec_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -11581,6 +11739,7 @@ int handle_sys_enter_execveat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct exec_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct exec_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -11653,6 +11812,7 @@ int handle_sys_enter_newstat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -11732,6 +11892,7 @@ int handle_sys_enter_newlstat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -11811,6 +11972,7 @@ int handle_sys_enter_newfstatat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -11890,6 +12052,7 @@ int handle_sys_enter_newfstat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -11950,6 +12113,7 @@ int handle_sys_enter_readlinkat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -12029,6 +12193,7 @@ int handle_sys_enter_readlink(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -12108,6 +12273,7 @@ int handle_sys_enter_statx(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -12187,6 +12353,7 @@ int handle_sys_enter_lseek(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -12251,6 +12418,7 @@ int handle_sys_enter_read(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -12316,6 +12484,7 @@ int handle_sys_enter_write(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -12377,6 +12546,7 @@ int handle_sys_enter_pread64(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -12437,6 +12607,7 @@ int handle_sys_enter_pwrite64(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -12497,6 +12668,7 @@ int handle_sys_enter_readv(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -12557,6 +12729,7 @@ int handle_sys_enter_writev(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -12617,6 +12790,7 @@ int handle_sys_enter_preadv(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -12677,6 +12851,7 @@ int handle_sys_enter_preadv2(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -12737,6 +12912,7 @@ int handle_sys_enter_pwritev(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -12797,6 +12973,7 @@ int handle_sys_enter_pwritev2(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -12857,6 +13034,7 @@ int handle_sys_enter_sendfile64(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -12917,6 +13095,7 @@ int handle_sys_enter_copy_file_range(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -12977,6 +13156,7 @@ int handle_sys_enter_truncate(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -13056,6 +13236,7 @@ int handle_sys_enter_ftruncate(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -13116,6 +13297,7 @@ int handle_sys_enter_fallocate(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -13176,6 +13358,7 @@ int handle_sys_enter_faccessat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -13255,6 +13438,7 @@ int handle_sys_enter_faccessat2(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -13334,6 +13518,7 @@ int handle_sys_enter_access(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -13413,6 +13598,7 @@ int handle_sys_enter_chdir(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -13492,6 +13678,7 @@ int handle_sys_enter_fchdir(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -13552,6 +13739,7 @@ int handle_sys_enter_chroot(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -13631,6 +13819,7 @@ int handle_sys_enter_fchmod(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -13691,6 +13880,7 @@ int handle_sys_enter_fchmodat2(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -13770,6 +13960,7 @@ int handle_sys_enter_fchmodat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -13849,6 +14040,7 @@ int handle_sys_enter_chmod(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -13928,6 +14120,7 @@ int handle_sys_enter_fchownat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -14007,6 +14200,7 @@ int handle_sys_enter_chown(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -14086,6 +14280,7 @@ int handle_sys_enter_lchown(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -14165,6 +14360,7 @@ int handle_sys_enter_fchown(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -14225,6 +14421,7 @@ int handle_sys_enter_open(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct open_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct open_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -14303,6 +14500,7 @@ int handle_sys_enter_openat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct open_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct open_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -14381,6 +14579,7 @@ int handle_sys_enter_openat2(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct open_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct open_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -14465,6 +14664,7 @@ int handle_sys_enter_creat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -14544,6 +14744,7 @@ int handle_sys_enter_close(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     __u32 file_ident;
     if (ior_emit_fd_name_enter(pid, tid, SYS_ENTER_CLOSE, now, (__s32)ctx->args[0], &file_ident))
         return 0;
@@ -14608,6 +14809,7 @@ int handle_sys_enter_vhangup(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -14666,6 +14868,7 @@ int handle_sys_enter_memfd_create(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct eventfd_name_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct eventfd_name_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -14752,6 +14955,7 @@ int handle_sys_enter_userfaultfd(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct eventfd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct eventfd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -14822,6 +15026,7 @@ int handle_sys_enter_memfd_secret(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct eventfd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct eventfd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -14892,6 +15097,7 @@ int handle_sys_enter_move_pages(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -14950,6 +15156,7 @@ int handle_sys_enter_set_mempolicy_home_node(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -15008,6 +15215,7 @@ int handle_sys_enter_mbind(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -15066,6 +15274,7 @@ int handle_sys_enter_set_mempolicy(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -15124,6 +15333,7 @@ int handle_sys_enter_migrate_pages(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -15182,6 +15392,7 @@ int handle_sys_enter_get_mempolicy(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -15240,6 +15451,7 @@ int handle_sys_enter_swapoff(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -15319,6 +15531,7 @@ int handle_sys_enter_swapon(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -15398,6 +15611,7 @@ int handle_sys_enter_madvise(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct mem_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct mem_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -15460,6 +15674,7 @@ int handle_sys_enter_process_madvise(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -15520,6 +15735,7 @@ int handle_sys_enter_mseal(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct mem_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct mem_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -15582,6 +15798,7 @@ int handle_sys_enter_process_vm_readv(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -15640,6 +15857,7 @@ int handle_sys_enter_process_vm_writev(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -15698,6 +15916,7 @@ int handle_sys_enter_msync(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct mem_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct mem_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -15760,6 +15979,7 @@ int handle_sys_enter_mremap(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct mem_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct mem_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -15822,6 +16042,7 @@ int handle_sys_enter_mprotect(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct mem_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct mem_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -15884,6 +16105,7 @@ int handle_sys_enter_pkey_mprotect(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct mem_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct mem_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -15946,6 +16168,7 @@ int handle_sys_enter_pkey_alloc(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -16004,6 +16227,7 @@ int handle_sys_enter_pkey_free(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -16062,6 +16286,7 @@ int handle_sys_enter_brk(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct mem_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct mem_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -16124,6 +16349,7 @@ int handle_sys_enter_munmap(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct mem_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct mem_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -16186,6 +16412,7 @@ int handle_sys_enter_remap_file_pages(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct mem_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct mem_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -16248,6 +16475,7 @@ int handle_sys_enter_mlock(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct mem_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct mem_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -16310,6 +16538,7 @@ int handle_sys_enter_mlock2(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct mem_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct mem_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -16372,6 +16601,7 @@ int handle_sys_enter_munlock(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct mem_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct mem_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -16434,6 +16664,7 @@ int handle_sys_enter_mlockall(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -16492,6 +16723,7 @@ int handle_sys_enter_munlockall(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -16550,6 +16782,7 @@ int handle_sys_enter_mincore(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct mem_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct mem_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -16612,6 +16845,7 @@ int handle_sys_enter_readahead(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -16672,6 +16906,7 @@ int handle_sys_enter_fadvise64(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -16732,6 +16967,7 @@ int handle_sys_enter_process_mrelease(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -16792,6 +17028,7 @@ int handle_sys_enter_cachestat(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -16852,6 +17089,7 @@ int handle_sys_enter_rseq(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -16910,6 +17148,7 @@ int handle_sys_enter_perf_event_open(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct perf_open_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct perf_open_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -16987,6 +17226,7 @@ int handle_sys_enter_bpf(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct bpf_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct bpf_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -17046,6 +17286,7 @@ int handle_sys_enter_seccomp(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -17104,6 +17345,7 @@ int handle_sys_enter_kexec_file_load(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -17164,6 +17406,7 @@ int handle_sys_enter_kexec_load(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -17222,6 +17465,7 @@ int handle_sys_enter_acct(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct path_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct path_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -17301,6 +17545,7 @@ int handle_sys_enter_set_robust_list(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -17359,6 +17604,7 @@ int handle_sys_enter_get_robust_list(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -17417,6 +17663,7 @@ int handle_sys_enter_futex(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -17475,6 +17722,7 @@ int handle_sys_enter_futex_waitv(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -17533,6 +17781,7 @@ int handle_sys_enter_futex_wake(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -17591,6 +17840,7 @@ int handle_sys_enter_futex_wait(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -17649,6 +17899,7 @@ int handle_sys_enter_futex_requeue(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -17707,6 +17958,7 @@ int handle_sys_enter_getitimer(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -17765,6 +18017,7 @@ int handle_sys_enter_alarm(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -17823,6 +18076,7 @@ int handle_sys_enter_setitimer(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -17881,6 +18135,7 @@ int handle_sys_enter_timer_create(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -17939,6 +18194,7 @@ int handle_sys_enter_timer_gettime(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -17997,6 +18253,7 @@ int handle_sys_enter_timer_getoverrun(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -18055,6 +18312,7 @@ int handle_sys_enter_timer_settime(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -18113,6 +18371,7 @@ int handle_sys_enter_timer_delete(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -18171,6 +18430,7 @@ int handle_sys_enter_clock_settime(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -18229,6 +18489,7 @@ int handle_sys_enter_clock_gettime(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -18287,6 +18548,7 @@ int handle_sys_enter_clock_adjtime(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -18345,6 +18607,7 @@ int handle_sys_enter_clock_getres(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -18403,6 +18666,7 @@ int handle_sys_enter_clock_nanosleep(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct sleep_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct sleep_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -18480,6 +18744,7 @@ int handle_sys_enter_nanosleep(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct sleep_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct sleep_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -18555,6 +18820,7 @@ int handle_sys_enter_time(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -18613,6 +18879,7 @@ int handle_sys_enter_gettimeofday(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -18671,6 +18938,7 @@ int handle_sys_enter_settimeofday(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -18729,6 +18997,7 @@ int handle_sys_enter_adjtimex(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -18787,6 +19056,7 @@ int handle_sys_enter_kcmp(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct two_fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct two_fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -18849,6 +19119,7 @@ int handle_sys_enter_delete_module(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -18907,6 +19178,7 @@ int handle_sys_enter_init_module(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -18965,6 +19237,7 @@ int handle_sys_enter_finit_module(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -19025,6 +19298,7 @@ int handle_sys_enter_syslog(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -19083,6 +19357,7 @@ int handle_sys_enter_membarrier(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -19141,6 +19416,7 @@ int handle_sys_enter_sched_setscheduler(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -19199,6 +19475,7 @@ int handle_sys_enter_sched_setparam(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -19257,6 +19534,7 @@ int handle_sys_enter_sched_setattr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -19315,6 +19593,7 @@ int handle_sys_enter_sched_getscheduler(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -19373,6 +19652,7 @@ int handle_sys_enter_sched_getparam(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -19431,6 +19711,7 @@ int handle_sys_enter_sched_getattr(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -19489,6 +19770,7 @@ int handle_sys_enter_sched_setaffinity(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -19547,6 +19829,7 @@ int handle_sys_enter_sched_getaffinity(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -19605,6 +19888,7 @@ int handle_sys_enter_sched_yield(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -19663,6 +19947,7 @@ int handle_sys_enter_sched_get_priority_max(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -19721,6 +20006,7 @@ int handle_sys_enter_sched_get_priority_min(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -19779,6 +20065,7 @@ int handle_sys_enter_sched_rr_get_interval(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -19837,6 +20124,7 @@ int handle_sys_enter_getgroups(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -19895,6 +20183,7 @@ int handle_sys_enter_setgroups(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -19953,6 +20242,7 @@ int handle_sys_enter_reboot(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -20011,6 +20301,7 @@ int handle_sys_enter_listns(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -20069,6 +20360,7 @@ int handle_sys_enter_setns(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -20129,6 +20421,7 @@ int handle_sys_enter_pidfd_open(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct eventfd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct eventfd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -20199,6 +20492,7 @@ int handle_sys_enter_pidfd_getfd(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -20259,6 +20553,7 @@ int handle_sys_enter_setpriority(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -20317,6 +20612,7 @@ int handle_sys_enter_getpriority(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -20375,6 +20671,7 @@ int handle_sys_enter_setregid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -20433,6 +20730,7 @@ int handle_sys_enter_setgid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -20491,6 +20789,7 @@ int handle_sys_enter_setreuid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -20549,6 +20848,7 @@ int handle_sys_enter_setuid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -20607,6 +20907,7 @@ int handle_sys_enter_setresuid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -20665,6 +20966,7 @@ int handle_sys_enter_getresuid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -20723,6 +21025,7 @@ int handle_sys_enter_setresgid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -20781,6 +21084,7 @@ int handle_sys_enter_getresgid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -20839,6 +21143,7 @@ int handle_sys_enter_setfsuid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -20897,6 +21202,7 @@ int handle_sys_enter_setfsgid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -20955,6 +21261,7 @@ int handle_sys_enter_getpid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -21013,6 +21320,7 @@ int handle_sys_enter_gettid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -21071,6 +21379,7 @@ int handle_sys_enter_getppid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -21129,6 +21438,7 @@ int handle_sys_enter_getuid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -21187,6 +21497,7 @@ int handle_sys_enter_geteuid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -21245,6 +21556,7 @@ int handle_sys_enter_getgid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -21303,6 +21615,7 @@ int handle_sys_enter_getegid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -21361,6 +21674,7 @@ int handle_sys_enter_times(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -21419,6 +21733,7 @@ int handle_sys_enter_setpgid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -21477,6 +21792,7 @@ int handle_sys_enter_getpgid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -21535,6 +21851,7 @@ int handle_sys_enter_getpgrp(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -21593,6 +21910,7 @@ int handle_sys_enter_getsid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -21651,6 +21969,7 @@ int handle_sys_enter_setsid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -21709,6 +22028,7 @@ int handle_sys_enter_newuname(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -21767,6 +22087,7 @@ int handle_sys_enter_sethostname(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -21825,6 +22146,7 @@ int handle_sys_enter_setdomainname(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -21883,6 +22205,7 @@ int handle_sys_enter_getrlimit(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -21941,6 +22264,7 @@ int handle_sys_enter_prlimit64(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -21999,6 +22323,7 @@ int handle_sys_enter_setrlimit(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -22057,6 +22382,7 @@ int handle_sys_enter_getrusage(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -22115,6 +22441,7 @@ int handle_sys_enter_umask(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -22173,6 +22500,7 @@ int handle_sys_enter_prctl(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -22231,6 +22559,7 @@ int handle_sys_enter_getcpu(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -22289,6 +22618,7 @@ int handle_sys_enter_sysinfo(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -22347,6 +22677,7 @@ int handle_sys_enter_restart_syscall(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -22405,6 +22736,7 @@ int handle_sys_enter_rt_sigprocmask(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -22463,6 +22795,7 @@ int handle_sys_enter_rt_sigpending(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -22521,6 +22854,7 @@ int handle_sys_enter_rt_sigtimedwait(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -22579,6 +22913,7 @@ int handle_sys_enter_kill(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -22637,6 +22972,7 @@ int handle_sys_enter_pidfd_send_signal(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -22697,6 +23033,7 @@ int handle_sys_enter_tgkill(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -22755,6 +23092,7 @@ int handle_sys_enter_tkill(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -22813,6 +23151,7 @@ int handle_sys_enter_rt_sigqueueinfo(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -22871,6 +23210,7 @@ int handle_sys_enter_rt_tgsigqueueinfo(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -22929,6 +23269,7 @@ int handle_sys_enter_sigaltstack(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -22987,6 +23328,7 @@ int handle_sys_enter_rt_sigaction(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -23045,6 +23387,7 @@ int handle_sys_enter_pause(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -23103,6 +23446,7 @@ int handle_sys_enter_rt_sigsuspend(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -23161,6 +23505,7 @@ int handle_sys_enter_ptrace(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct ptrace_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct ptrace_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -23223,6 +23568,7 @@ int handle_sys_enter_capget(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -23281,6 +23627,7 @@ int handle_sys_enter_capset(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -23340,6 +23687,7 @@ int handle_sys_enter_exit(struct syscall_trace_enter *ctx) {
     __u64 now = bpf_ktime_get_boot_ns();
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -23369,6 +23717,7 @@ int handle_sys_enter_exit_group(struct syscall_trace_enter *ctx) {
     __u64 now = bpf_ktime_get_boot_ns();
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -23397,6 +23746,7 @@ int handle_sys_enter_waitid(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -23455,6 +23805,7 @@ int handle_sys_enter_wait4(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -23513,6 +23864,7 @@ int handle_sys_enter_personality(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -23571,6 +23923,7 @@ int handle_sys_enter_set_tid_address(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -23629,6 +23982,7 @@ int handle_sys_enter_fork(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -23687,6 +24041,7 @@ int handle_sys_enter_vfork(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -23745,6 +24100,7 @@ int handle_sys_enter_clone(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -23803,6 +24159,7 @@ int handle_sys_enter_clone3(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -23861,6 +24218,7 @@ int handle_sys_enter_unshare(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -23919,6 +24277,7 @@ int handle_sys_enter_map_shadow_stack(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct mem_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct mem_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -23981,6 +24340,7 @@ int handle_sys_enter_uretprobe(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -24039,6 +24399,7 @@ int handle_sys_enter_uprobe(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -24097,6 +24458,7 @@ int handle_sys_enter_arch_prctl(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -24155,6 +24517,7 @@ int handle_sys_enter_mmap(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct mmap_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct mmap_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -24218,6 +24581,7 @@ int handle_sys_enter_modify_ldt(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -24276,6 +24640,7 @@ int handle_sys_enter_ioperm(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -24334,6 +24699,7 @@ int handle_sys_enter_iopl(struct syscall_trace_enter *ctx) {
         return 0;
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -24393,6 +24759,7 @@ int handle_sys_enter_rt_sigreturn(struct syscall_trace_enter *ctx) {
     __u64 now = bpf_ktime_get_boot_ns();
 
     iormesh_stack_on_enter(ctx, pid, tid, now);
+    iormesh_java_mark_on_enter(pid, tid, now);
     struct null_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct null_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();

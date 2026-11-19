@@ -2263,20 +2263,55 @@ internal/correlate/javajoin.go
    func (v *jvm) innermost(tid int32, t uint64) (b agentspool.Bracket, found, ambiguous bool)
    ```
 
-   The BPF uprobe mark is **not built yet** (task td4; it
-   needs uprobes by library path with BPF cookies, the mark read
-   in the syscall handlers, nr 335 dropped, a reset on thread
-   exit). The join therefore pairs on what the agent alone gives:
-   the event's tid and start, converted from the boot clock with
-   a user-space midpoint offset (S1 experiment 2's conversion,
-   0 / 120 000 outside their bracket), inside the innermost
-   bracket, whose hook's allowlist must contain the event's kind.
-   When the mark lands it becomes one more condition — the
-   native's id must match the hook's — and the native-entry stamp
-   can replace the converted one. Never guessed: no bracket,
-   another kind, brackets that overlap without nesting, a folded
-   read/write, or a stack the agent did not deliver leave
-   `attribution: none`, each counted in the summary line. A
+   2b4 shipped the join without the BPF uprobe mark, the hook's
+   allowlist its only guard against JVM work of an allowed kind
+   inside a bracket. Task td4 built the mark
+   (`internal/c/javamark.c`):
+
+   - `iormesh_java_native_enter`/`_exit`, `uprobe.multi` and
+     `uretprobe.multi` programs, push and pop a per-tid stack of
+     `{cookie, entry ns (CLOCK_MONOTONIC), user sp}` (depth 4, LRU
+     `java_mark_map`). The return pops every frame entered at or
+     below its stack pointer, so a push whose return was never
+     seen (attached mid-call) is cleared by the next return at its
+     depth or above; deeper than 4, the mark says "unknown"
+     (cookie 0) until the thread leaves every native.
+   - A generated hook in every enter handler,
+     `iormesh_java_mark_on_enter` (`renderJavaMarkHook`, placed like
+     the stack hook), sends a `java_mark_event` (cookie, entry) ahead
+     of the enter record, stamped with the enter's own time. Load-
+     time switch `IORMESH_JAVA_MARK` (`bpf.Config.JavaMarks`, on with
+     `-spool`); off, the lookup is pruned, the map shrinks to one
+     entry and the uprobe programs are not loaded (no uprobe_multi
+     needed). The thread-exit handler deletes the tid's mark.
+     `uretprobe(2)` (x86_64 nr 335) is not in the default families,
+     and its kind is in no allowlist, so it never joins.
+   - `bpf.Tracer.AttachJavaMarks(pid, natives)` finds the JDK's lib
+     directory through the JVM's `libjava.so` mapping (read via
+     `/proc/<pid>/root`), resolves each native's JNI symbol
+     (`agentspool.Hook.Symbol`) to a file offset in `libjava`,
+     `libnio` or `libnet`, and attaches both programs per library
+     with the JVM's pid (uprobe_multi links: no other process
+     traps) and one cookie per native. The joiner calls it once per
+     ring, after the first drain that read the HOOK rows, numbering
+     natives by symbol; `iormesh run` also polls the spool once
+     before its ready file, so JVMs already running are probed
+     before the tracer says it is live.
+
+   The join: the session hands every mark record to
+   `JavaJoin.Mark`, keyed by (tid, enter time) = the event's
+   (tid, `boot_ns`). An event joins the innermost bracket on its
+   tid containing the mark's native entry — the agent's own clock,
+   no conversion — whose hook's native has the mark's cookie and
+   whose allowlist has the event's kind; the syscall's start,
+   converted with the user-space midpoint offset (S1 experiment
+   2), must not lie after that bracket's exit, which catches a
+   stale mark. Never guessed: no mark (issued outside every hooked
+   native: JVM work), another native, no bracket, another kind,
+   brackets that overlap without nesting, a folded read/write, or
+   a stack the agent did not deliver leave `attribution: none`,
+   each counted in the summary line; a JVM whose natives could not
+   be probed keeps all its syscalls `none` and is reported. A
    virtual thread's I/O gets `java.carrier` and the carrier's
    name.
 
@@ -2291,7 +2326,15 @@ internal/correlate/javajoin.go
    correlator holds socket events up to its 5 s fuse window.
    Tests: `javajoin_test.go` (fake rings: join, every `none`
    reason, nesting, carrier, waiting, timeout, stale ring of a
-   reused pid, corrupt ring), `agentspool` dir tests (symlink,
+   reused pid, corrupt ring; td4's negative cases — a read inside a
+   `FileInputStream.read` bracket with no mark, another native's
+   mark, an unknown native or a stale mark stays `none` — the
+   probe once per ring with every native's cookie, and mark
+   pruning), `javamarkhook_test.go` (the hook's placement in every
+   enter handler), the root test `TestJavaMarkNamesTheNative` (a
+   real JVM: its FileInputStream open and read carry `open0`'s
+   and `readBytes`' cookies with an entry stamp, while `info0`'s
+   `/proc` reads carry none), `agentspool` dir tests (symlink,
    hard link, foreign owner, pid mismatch), and the integration
    test `TestJavaMethodFlow`: `method-flow` under the agent
    satisfies its `expect-pending.json`, every declared op on its

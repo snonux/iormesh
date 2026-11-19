@@ -6,7 +6,8 @@
 // correlator's job here); TCP_STATE_EVENT (M1 step 4), EXEC_ARGV_EVENT
 // (M2 step 2), PROCESS_ARGV_EVENT (M2 step 8), SOCK_ADDR_EVENT and
 // SIGNAL_EVENT (M2 step 7), RW_AGGREGATE_EVENT (M2 step 11),
-// STACK_EVENT (M2 step 9) and STACK_INLINE_EVENT (task kd4) added.
+// STACK_EVENT (M2 step 9), STACK_INLINE_EVENT (task kd4) and
+// JAVA_MARK_EVENT (task td4) added.
 
 package bpf
 
@@ -115,6 +116,9 @@ func addControlDecoders(d map[types.EventType]decoder) {
 	// The same with the frames inline, for a stack the stack map refused
 	// (task kd4).
 	d[types.STACK_INLINE_EVENT] = typed(types.NewStackInlineEvent)
+	// M3 (task td4): the JDK native a syscall enter was issued from
+	// (javamark.c), only sent with Config.JavaMarks.
+	d[types.JAVA_MARK_EVENT] = typed(types.NewJavaMarkEvent)
 }
 
 // decodeFdSizeEvent widens an fd+size record to the FdEvent shape the
