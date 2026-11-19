@@ -1,0 +1,12 @@
+# S3 samples 2026-11-19T06:34:57Z commit 45d2ac6
+# kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
+# java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
+# ops=500000 threads=1 runs=1 pairs=10 modes=traced tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false -cpuprofile /home/paul/git/iormesh/spikes/s3/results-md4/profile/t1.pprof
+mode=untraced threads=1 ops=500000 run=1 elapsed_ns=974534467 burst_cpu_ms=1030 load=4.57
+mode=traced threads=1 ops=500000 run=1 elapsed_ns=2603589096 burst_cpu_ms=2640 tracer_cpu_ms=3320 tracer_run_cpu_ms=1800 lost=1 kernel_lost=1 events=1000068 ndjson_bytes=325991026 load=4.95
+# S3 samples 2026-11-19T06:35:09Z commit 45d2ac6
+# kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
+# java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
+# ops=500000 threads=4 runs=1 pairs=10 modes=traced tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false -cpuprofile /home/paul/git/iormesh/spikes/s3/results-md4/profile/t4.pprof
+mode=untraced threads=4 ops=500000 run=1 elapsed_ns=2206756133 burst_cpu_ms=3430 load=6.96
+mode=traced threads=4 ops=500000 run=1 elapsed_ns=1625080226 burst_cpu_ms=4730 tracer_cpu_ms=7090 tracer_run_cpu_ms=2140 lost=737305 kernel_lost=737305 events=631291 ndjson_bytes=206229659 load=9.02

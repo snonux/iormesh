@@ -209,7 +209,8 @@ The PID reuse and socket race rows were root/unit level only at
 acceptance; `edgepeer` now forces both end to end. The decision
 #25 budget run is recorded in docs/spikes/s3-overhead.md ("M2
 acceptance measurement"); its two timing items moved to task md4
-(paired CPU-time method), which gates M3's acceptance.
+(paired CPU-time method), which gated M3's acceptance and found
+both inside the budget ("Follow-up (md4)").
 
 ## Performance baselines
 

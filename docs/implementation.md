@@ -1087,7 +1087,12 @@ volume run's NDJSON stands in. Every quoted figure is recomputed
 from `spikes/s3/results/samples.txt`. Outcome: decision #25 is
 Decided with a budget; #16 gets a 64 MB size cap; #7 keeps its
 default; hot read/write loops get in-kernel aggregation in M2
-(step 11 below).
+(step 11 below). Task md4 (2026-11-19) reworked the script for
+#25's paired CPU-time method: taskset pinning (`S3_TRACER_CPU`,
+`S3_LOAD_CPUS`), CPU times from `/proc/PID/stat` (the tracer's
+from its ready file to exit, the burst's from its startup gate to
+its result line), ABAB bystander pairs (`S3_PAIRS`), mode
+selection (`S3_MODES`) and medians in `summary.txt`.
 
 ## M2 — full trace surface
 
@@ -1696,7 +1701,8 @@ scenarios landing first (principle #1).
 budget (decision #25) checked by a documented
 `spikes/s3/measure.sh` run by #25's paired CPU-time method — not
 a CI gate, CI machines are too noisy. M2's two timing items moved
-to task md4, which gates M3's acceptance.
+to task md4, which gated M3's acceptance; both pass
+([s3-overhead.md](spikes/s3-overhead.md), "Follow-up (md4)").
 
 ## S1 — Java↔syscall join
 

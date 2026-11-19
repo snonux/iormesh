@@ -1,0 +1,24 @@
+# S3 samples 2026-11-19T06:40:35Z commit 45d2ac6
+# kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
+# java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
+# ops=1000000 threads=4 runs=3 pairs=10 modes=bystander tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=
+mode=untraced threads=4 ops=1000000 pair=1 elapsed_ns=958735042 burst_cpu_ms=3610 load=7.31
+mode=bystander threads=4 ops=1000000 pair=1 elapsed_ns=1162088716 burst_cpu_ms=4320 tracer_cpu_ms=1770 events=2 load=7.04
+mode=untraced threads=4 ops=1000000 pair=2 elapsed_ns=981563623 burst_cpu_ms=3790 load=7.04
+mode=bystander threads=4 ops=1000000 pair=2 elapsed_ns=1146728643 burst_cpu_ms=4180 tracer_cpu_ms=1890 events=2 load=6.43
+mode=untraced threads=4 ops=1000000 pair=3 elapsed_ns=977165691 burst_cpu_ms=3630 load=6.31
+mode=bystander threads=4 ops=1000000 pair=3 elapsed_ns=1083321281 burst_cpu_ms=4050 tracer_cpu_ms=1810 events=2 load=6.13
+mode=untraced threads=4 ops=1000000 pair=4 elapsed_ns=964348281 burst_cpu_ms=3620 load=6.13
+mode=bystander threads=4 ops=1000000 pair=4 elapsed_ns=1136472321 burst_cpu_ms=4250 tracer_cpu_ms=1770 events=2 load=5.81
+mode=untraced threads=4 ops=1000000 pair=5 elapsed_ns=2025208936 burst_cpu_ms=3760 load=6.38
+mode=bystander threads=4 ops=1000000 pair=5 elapsed_ns=1223787713 burst_cpu_ms=4420 tracer_cpu_ms=2630 events=2 load=5.95
+mode=untraced threads=4 ops=1000000 pair=6 elapsed_ns=909698984 burst_cpu_ms=3430 load=5.95
+mode=bystander threads=4 ops=1000000 pair=6 elapsed_ns=1080840196 burst_cpu_ms=3980 tracer_cpu_ms=1720 events=2 load=5.73
+mode=untraced threads=4 ops=1000000 pair=7 elapsed_ns=1064298648 burst_cpu_ms=4020 load=5.73
+mode=bystander threads=4 ops=1000000 pair=7 elapsed_ns=1183356997 burst_cpu_ms=4580 tracer_cpu_ms=2170 events=2 load=5.84
+mode=untraced threads=4 ops=1000000 pair=8 elapsed_ns=1061299084 burst_cpu_ms=3990 load=5.84
+mode=bystander threads=4 ops=1000000 pair=8 elapsed_ns=1091118361 burst_cpu_ms=4070 tracer_cpu_ms=1759 events=2 load=5.40
+mode=untraced threads=4 ops=1000000 pair=9 elapsed_ns=1094734960 burst_cpu_ms=3720 load=5.40
+mode=bystander threads=4 ops=1000000 pair=9 elapsed_ns=1429915218 burst_cpu_ms=4660 tracer_cpu_ms=2460 events=2 load=5.85
+mode=untraced threads=4 ops=1000000 pair=10 elapsed_ns=917632219 burst_cpu_ms=3400 load=5.85
+mode=bystander threads=4 ops=1000000 pair=10 elapsed_ns=992139736 burst_cpu_ms=3700 tracer_cpu_ms=1609 events=2 load=5.72

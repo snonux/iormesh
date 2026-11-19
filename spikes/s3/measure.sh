@@ -1,17 +1,36 @@
 #!/usr/bin/env bash
 # S3 measurement (docs/implementation.md "S3", PLAN.md decision #25):
 # target slowdown, bystander cost, tracer CPU, loss and output volume of
-# the M1 tracer on the syscall-burst load scenario.
+# the tracer on the syscall-burst load scenario.
 #
-# Usage: spikes/s3/measure.sh OUTDIR   (needs sudo -n; run on a quiet host)
+# Usage: spikes/s3/measure.sh OUTDIR   (needs sudo -n)
 # Env:   S3_OPS (default 200000), S3_THREADS ("1 4 16"), S3_RUNS (3),
+#        S3_PAIRS (10), S3_MODES ("traced bystander volume"),
+#        S3_TRACER_CPU (3), S3_LOAD_CPUS ("0-2,4-6"),
 #        S3_TRACER_FLAGS (extra `iormesh run` flags, word-split, e.g.
 #        "-native-stacks -aggregate=false"; task ua4)
 #
-# Every sample prints one line to OUTDIR/samples.txt:
-#   mode=<untraced|traced|bystander> threads=T ops=N elapsed_ns=E
-#   [tracer_cpu_ms=C lost=L events=K ndjson_bytes=B]
-# Throwaway spike code: the numbers, not the script, are the result.
+# The method is load-tolerant (decision #25 as changed 2026-11-19, task
+# md4): the host is never quiet, so the gated figures are CPU times, not
+# wall clocks, and every process is pinned — the tracer to S3_TRACER_CPU,
+# the burst JVM to S3_LOAD_CPUS — so the tracer never competes with the
+# load it measures. The defaults fit an 8-CPU host whose CPU k and k+4
+# are SMT siblings: the tracer gets core 3, the burst cores 0-2, and
+# CPU 7 (core 3's sibling) is left to the rest of the host.
+#
+# Modes:
+#   traced     S3_RUNS x (untraced, traced) per thread count: slowdown,
+#              loss, and the tracer's CPU from its ready file to its exit
+#              (tracer_run_cpu_ms; load and attach excluded) per event.
+#   bystander  S3_PAIRS interleaved pairs per thread count, each an
+#              untraced burst then one beside a tracer attached to an
+#              idle process (ABAB): the burst's own user+sys CPU time
+#              (burst_cpu_ms) and loop wall clock (elapsed_ns).
+#   volume     one small traced burst: loss and NDJSON size, raw and zstd.
+#
+# Every sample is one line in OUTDIR/samples.txt; summary.txt holds the
+# medians (summarize below). Throwaway spike code: the numbers, not the
+# script, are the result.
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/../.." && pwd)
@@ -19,10 +38,15 @@ out=${1:?usage: measure.sh OUTDIR}
 ops=${S3_OPS:-200000}
 threads=${S3_THREADS:-1 4 16}
 runs=${S3_RUNS:-3}
+pairs=${S3_PAIRS:-10}
+modes=${S3_MODES:-traced bystander volume}
+tracer_cpu=${S3_TRACER_CPU:-3}
+load_cpus=${S3_LOAD_CPUS:-0-2,4-6}
 # shellcheck disable=SC2206 # word splitting is the point: one flag per word
 tracer_flags=(${S3_TRACER_FLAGS:-})
 jar=$repo/workload.jar
 tracer=$repo/iormesh
+clk_tck=$(getconf CLK_TCK)
 mkdir -p "$out"
 samples=$out/samples.txt
 # pids and dirs hold only what is still live: forget() drops a pid once
@@ -70,18 +94,21 @@ done_dir() {
 
 die() { echo "measure: $*" >&2; exit 1; }
 
-# wait_pid_line waits until the burst printed its PID (the file exists as
-# soon as the redirect opens it, before the JVM wrote anything).
-wait_pid_line() {
+# wait_line waits until file's first line matches regex and prints it.
+# The burst's stdout exists as soon as the redirect opens it, before the
+# JVM wrote anything, so existence alone says nothing.
+wait_line() {
+    local file=$1 re=$2 line
     local -i i
     for ((i = 0; i < 1200; i++)); do
-        if [[ $(head -1 "$1" 2>/dev/null) =~ ^[0-9]+$ ]]; then
-            head -1 "$1"
+        line=$(grep -m1 -E "$re" "$file" 2>/dev/null || true)
+        if [ -n "$line" ]; then
+            echo "$line"
             return 0
         fi
-        sleep 0.1
+        sleep 0.05
     done
-    die "no PID line in $1"
+    die "no line matching '$re' in $file"
 }
 
 # wait_file waits up to 120 s for a file to exist (loading the BPF object
@@ -100,117 +127,203 @@ wait_file() {
     die "timed out waiting for $file: $(tail -3 "$errf" 2>/dev/null)"
 }
 
-# elapsed_of prints elapsed_ns from a syscall-burst stdout file.
+# cpu_ms prints a live process's user+sys CPU time in ms, summed over
+# all its threads (fields 14 and 15 of /proc/PID/stat, in clock ticks;
+# the comm field holds no spaces for java or iormesh). The file is
+# world-readable, so this works on the root-owned tracer too.
+cpu_ms() {
+    awk -v hz="$clk_tck" '{printf "%d", ($14 + $15) * 1000 / hz}' "/proc/$1/stat"
+}
+
+# elapsed_of prints elapsed_ns from a syscall-burst stdout line.
 elapsed_of() {
-    sed -n 's/^syscall-burst .* elapsed_ns=\([0-9][0-9]*\)$/\1/p' "$1"
+    sed -n 's/^syscall-burst .* elapsed_ns=\([0-9][0-9]*\)$/\1/p' <<<"$1"
+}
+
+loadavg() { cut -d' ' -f1 /proc/loadavg; }
+
+# burst_start starts the burst JVM pinned to the load CPUs, held at its
+# startup gate, and sets the globals jpid (the background job) and bpid
+# (the PID the burst printed, the one a tracer follows). The hold file
+# keeps the JVM alive after its loops, so burst_finish can read its CPU
+# time from /proc before it exits.
+burst_start() {
+    local t=$1 dir=$2
+    IORMESH_WORKLOAD_STARTUP_FILE=$dir/gate IORMESH_WORKLOAD_HOLD_FILE=$dir/hold \
+        taskset -c "$load_cpus" java -jar "$jar" syscall-burst --ops "$ops" \
+        --threads "$t" --dir "$dir" >"$dir/out" 2>/dev/null &
+    jpid=$!
+    pids+=("$jpid")
+    bpid=$(wait_line "$dir/out" '^[0-9]+$')
+}
+
+# burst_finish opens the gate and waits for the loops; it sets burst_cpu
+# (the JVM's user+sys ms from the gate to the result line: file opens,
+# loops and their JIT, not JVM startup) and burst_elapsed (the loops'
+# wall ns, as the burst reports it).
+burst_finish() {
+    local dir=$1 cpu0 line
+    cpu0=$(cpu_ms "$bpid")
+    touch "$dir/gate"
+    line=$(wait_line "$dir/out" '^syscall-burst ')
+    burst_cpu=$(($(cpu_ms "$bpid") - cpu0))
+    burst_elapsed=$(elapsed_of "$line")
+    touch "$dir/hold"
+    wait "$jpid" || die "burst failed"
+    forget "$jpid"
+}
+
+# tracer_start attaches a pinned tracer to pid and waits until it is
+# ready. It sets tpid (the sudo job) and ready_cpu (the tracer's CPU ms
+# at ready: object load and attach, the fixed cost that tracer_run_cpu_ms
+# leaves out). The tracer is time's child; its own PID is found by its
+# command line, which starts with the binary's path (time's does not).
+tracer_start() {
+    local pid=$1 dir=$2 ipid
+    sudo -n taskset -c "$tracer_cpu" /usr/bin/time -f '%U %S' -o "$dir/time" \
+        "$tracer" run -pid "$pid" -project s3 -out "$dir/trace" -duration 10m \
+        -ready "$dir/ready" "${tracer_flags[@]}" 2>"$dir/tracer.err" &
+    tpid=$!
+    pids+=("$tpid")
+    wait_file "$dir/ready" "$tpid" "$dir/tracer.err"
+    ipid=$(pgrep -f -- "^$tracer run -pid $pid .*-ready $dir/ready") ||
+        die "tracer process not found"
+    ready_cpu=$(cpu_ms "$ipid")
+}
+
+# tracer_wait waits for the tracer to exit (it does once its target
+# exited) and sets tracer_total (its whole user+sys ms, from time).
+tracer_wait() {
+    local dir=$1
+    wait "$tpid" || die "tracer failed: $(tail -3 "$dir/tracer.err")"
+    forget "$tpid"
+    tracer_total=$(awk '{printf "%d", ($1 + $2) * 1000}' "$dir/time")
 }
 
 untraced() {
-    local t=$1 work
+    local t=$1 tag=$2 work
     newdir
-    java -jar "$jar" syscall-burst --ops "$ops" --threads "$t" --dir "$work" >"$work/out" 2>/dev/null ||
-        die "untraced burst failed"
-    echo "mode=untraced threads=$t ops=$ops elapsed_ns=$(elapsed_of "$work/out")" >>"$samples"
+    burst_start "$t" "$work"
+    burst_finish "$work"
+    echo "mode=untraced threads=$t ops=$ops $tag elapsed_ns=$burst_elapsed" \
+        "burst_cpu_ms=$burst_cpu load=$(loadavg)" >>"$samples"
     done_dir "$work"
 }
 
-# traced runs the burst behind its startup gate, traced by its own PID.
-# Tracer CPU is utime+stime from /usr/bin/time (the tracer is sudo's
-# child, so time wraps the tracer itself).
+# traced runs the burst traced by its own PID. tracer_run_cpu_ms is the
+# tracer's CPU from its ready file to its exit — the per-event figure's
+# numerator (wc4's method); tracer_cpu_ms is the whole run, for
+# comparison with older samples.
 traced() {
-    local t=$1 work pid tpid jpid
+    local t=$1 tag=$2 work
     newdir
-    IORMESH_WORKLOAD_STARTUP_FILE=$work/gate java -jar "$jar" syscall-burst --ops "$ops" \
-        --threads "$t" --dir "$work" >"$work/out" 2>/dev/null &
-    jpid=$!
-    pids+=("$jpid")
-    pid=$(wait_pid_line "$work/out")
-    sudo -n /usr/bin/time -f '%U %S' -o "$work/time" "$tracer" run -pid "$pid" -project s3 \
-        -out "$work/trace" -duration 10m -ready "$work/ready" "${tracer_flags[@]}" 2>"$work/tracer.err" &
-    tpid=$!
-    pids+=("$tpid")
-    wait_file "$work/ready" "$tpid" "$work/tracer.err"
-    touch "$work/gate"
-    wait "$tpid" || die "tracer failed: $(tail -3 "$work/tracer.err")"
-    forget "$tpid"
-    wait "$jpid" || die "traced burst failed"
-    forget "$jpid"
-    traced_line "$t" "$work"
+    burst_start "$t" "$work"
+    tracer_start "$bpid" "$work"
+    burst_finish "$work"
+    tracer_wait "$work"
+    traced_line "$t" "$tag" "$work"
     done_dir "$work"
 }
 
 traced_line() {
-    local t=$1 work=$2 cpu lost kernel events bytes
-    cpu=$(awk '{printf "%d", ($1 + $2) * 1000}' "$work/time")
+    local t=$1 tag=$2 work=$3 lost kernel events bytes
     # lost counts every record the trace wanted but did not get (kernel
     # ring drops plus undecodable records); kernel is the drop part.
     lost=$(sed -n 's/.*lost records \([0-9][0-9]*\).*/\1/p' "$work/tracer.err")
     kernel=$(sed -n 's/.*(kernel \([0-9][0-9]*\)).*/\1/p' "$work/tracer.err")
     events=$(wc -l <"$work/trace/events.ndjson")
     bytes=$(stat -c %s "$work/trace/events.ndjson")
-    echo "mode=traced threads=$t ops=$ops elapsed_ns=$(elapsed_of "$work/out")" \
-        "tracer_cpu_ms=$cpu lost=$lost kernel_lost=$kernel events=$events ndjson_bytes=$bytes" >>"$samples"
-}
-
-# volume traces one small burst (S3_VOLUME_OPS, default 50000 ops =
-# 100k syscalls, below what the ring absorbs) and records its loss and
-# the NDJSON's size raw and zstd-compressed — the volume figures and the
-# "a short burst loses nothing" observation come from this line.
-volume() {
-    local vops=${S3_VOLUME_OPS:-50000} work pid tpid jpid f z3 z19
-    newdir
-    IORMESH_WORKLOAD_STARTUP_FILE=$work/gate java -jar "$jar" syscall-burst --ops "$vops" \
-        --threads 1 --dir "$work" >"$work/out" 2>/dev/null &
-    jpid=$!
-    pids+=("$jpid")
-    pid=$(wait_pid_line "$work/out")
-    sudo -n "$tracer" run -pid "$pid" -project s3 -out "$work/trace" -duration 10m \
-        -ready "$work/ready" "${tracer_flags[@]}" 2>"$work/tracer.err" &
-    tpid=$!
-    pids+=("$tpid")
-    wait_file "$work/ready" "$tpid" "$work/tracer.err"
-    touch "$work/gate"
-    wait "$tpid" || die "volume tracer failed: $(tail -3 "$work/tracer.err")"
-    forget "$tpid"
-    wait "$jpid" || die "volume burst failed"
-    forget "$jpid"
-    f=$work/trace/events.ndjson
-    z3=$(zstd -q -3 -c "$f" | wc -c)
-    z19=$(zstd -q -19 -c "$f" | wc -c)
-    echo "mode=volume threads=1 ops=$vops lost=$(sed -n 's/.*lost records \([0-9][0-9]*\).*/\1/p' "$work/tracer.err")" \
-        "events=$(wc -l <"$f") ndjson_bytes=$(stat -c %s "$f") zstd3_bytes=$z3 zstd19_bytes=$z19" >>"$samples"
-    done_dir "$work"
+    echo "mode=traced threads=$t ops=$ops $tag elapsed_ns=$burst_elapsed" \
+        "burst_cpu_ms=$burst_cpu tracer_cpu_ms=$tracer_total" \
+        "tracer_run_cpu_ms=$((tracer_total - ready_cpu)) lost=$lost" \
+        "kernel_lost=$kernel events=$events ndjson_bytes=$bytes" \
+        "load=$(loadavg)" >>"$samples"
 }
 
 # bystander runs the burst untraced while a tracer is attached to another,
 # idle process: the burst's syscalls still hit the tracepoints, which
 # filter it out. The difference to untraced is the host-wide tax.
 bystander() {
-    local t=$1 work idle tpid
+    local t=$1 tag=$2 work idle
     newdir
     sleep 600 &
     idle=$!
     pids+=("$idle")
-    # The idle-target tracer's CPU is the fixed cost (object load, attach,
-    # liveness polls) that traced runs subtract to get per-event cost.
-    sudo -n /usr/bin/time -f '%U %S' -o "$work/time" "$tracer" run -pid "$idle" -project s3 \
-        -out "$work/trace" -duration 10m -ready "$work/ready" "${tracer_flags[@]}" 2>"$work/tracer.err" &
-    tpid=$!
-    pids+=("$tpid")
-    wait_file "$work/ready" "$tpid" "$work/tracer.err"
-    java -jar "$jar" syscall-burst --ops "$ops" --threads "$t" --dir "$work" >"$work/out" 2>/dev/null ||
-        die "bystander burst failed"
+    tracer_start "$idle" "$work"
+    burst_start "$t" "$work"
+    burst_finish "$work"
     kill "$idle"
     wait "$idle" 2>/dev/null || true
     forget "$idle"
-    wait "$tpid" || die "bystander tracer failed: $(tail -3 "$work/tracer.err")"
-    forget "$tpid"
+    tracer_wait "$work"
     # events proves the filter: the idle target issues no traced I/O, so
-    # only the session/end records appear and the CPU is fixed cost.
-    echo "mode=bystander threads=$t ops=$ops elapsed_ns=$(elapsed_of "$work/out")" \
-        "tracer_cpu_ms=$(awk '{printf "%d", ($1 + $2) * 1000}' "$work/time")" \
-        "events=$(wc -l <"$work/trace/events.ndjson")" >>"$samples"
+    # only the session/end records appear.
+    echo "mode=bystander threads=$t ops=$ops $tag elapsed_ns=$burst_elapsed" \
+        "burst_cpu_ms=$burst_cpu tracer_cpu_ms=$tracer_total" \
+        "events=$(wc -l <"$work/trace/events.ndjson") load=$(loadavg)" >>"$samples"
     done_dir "$work"
+}
+
+# volume traces one small burst (S3_VOLUME_OPS, default 50000 ops =
+# 100k syscalls, below what the ring absorbs) and records its loss and
+# the NDJSON's size raw and zstd-compressed — the volume figures and the
+# "a short burst loses nothing" observation come from this line. ops is
+# shadowed, not reassigned: the burst helpers read it dynamically.
+volume() {
+    local ops=${S3_VOLUME_OPS:-50000} work f z3 z19
+    newdir
+    burst_start 1 "$work"
+    tracer_start "$bpid" "$work"
+    burst_finish "$work"
+    tracer_wait "$work"
+    f=$work/trace/events.ndjson
+    z3=$(zstd -q -3 -c "$f" | wc -c)
+    z19=$(zstd -q -19 -c "$f" | wc -c)
+    echo "mode=volume threads=1 ops=$ops" \
+        "lost=$(sed -n 's/.*lost records \([0-9][0-9]*\).*/\1/p' "$work/tracer.err")" \
+        "events=$(wc -l <"$f") ndjson_bytes=$(stat -c %s "$f")" \
+        "zstd3_bytes=$z3 zstd19_bytes=$z19" >>"$samples"
+    done_dir "$work"
+}
+
+# summarize writes the medians decision #25 is judged by: per thread
+# count, the tracer's ns per emitted event (ready to exit), the traced
+# slowdown, and the bystander ratios — each pair's bystander over its
+# untraced burst, on CPU time (gated) and on wall clock (recorded) —
+# with the pairs' load-average range (recorded, not gated).
+summarize() {
+    gawk '
+    function median(a, n,   s) {
+        if (n == 0) return "-"
+        asort(a, s, "@val_num_asc")
+        return n % 2 ? s[(n + 1) / 2] : (s[n / 2] + s[n / 2 + 1]) / 2
+    }
+    /^mode=/ {
+        delete f
+        for (i = 1; i <= NF; i++) { split($i, kv, "="); f[kv[1]] = kv[2] }
+        t = f["threads"]; k = t SUBSEP "r" f["run"] SUBSEP "p" f["pair"]
+        if (f["mode"] == "traced" && f["events"] > 0) {
+            ns[t][++nn[t]] = f["tracer_run_cpu_ms"] * 1e6 / f["events"]
+            tr[k] = f["elapsed_ns"]
+        }
+        if (f["mode"] == "untraced") { ue[k] = f["elapsed_ns"]; uc[k] = f["burst_cpu_ms"] }
+        if (f["mode"] == "bystander") {
+            bc[t][++nb[t]] = f["burst_cpu_ms"] / uc[k]
+            be[t][nb[t]] = f["elapsed_ns"] / ue[k]
+            if (!(t in lo) || f["load"] < lo[t]) lo[t] = f["load"]
+            if (f["load"] > hi[t]) hi[t] = f["load"]
+        }
+        if (f["mode"] == "traced") sl[t][++ns2[t]] = f["elapsed_ns"] / ue[k]
+        th[t] = 1
+    }
+    END {
+        for (t in th) {
+            printf "threads=%s tracer_ns_per_event=%s (n=%d) slowdown=%s", \
+                t, median(ns[t], nn[t]), nn[t], median(sl[t], ns2[t])
+            printf " bystander_cpu=%s bystander_wall=%s (pairs=%d load=%s-%s)\n", \
+                median(bc[t], nb[t]), median(be[t], nb[t]), nb[t], lo[t], hi[t]
+        }
+    }' "$samples" >"$out/summary.txt"
 }
 
 header() {
@@ -218,24 +331,51 @@ header() {
         echo "# S3 samples $(date -u +%Y-%m-%dT%H:%M:%SZ) commit $(git -C "$repo" rev-parse --short HEAD)"
         echo "# kernel $(uname -r); cpu $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | xargs) x$(nproc)"
         echo "# java $(java -version 2>&1 | head -1); workdir fs $(df -T "${TMPDIR:-/tmp}" | awk 'NR==2{print $2}')"
-        echo "# ops=$ops threads=$threads runs=$runs tracer_flags=${tracer_flags[*]}"
+        echo "# ops=$ops threads=$threads runs=$runs pairs=$pairs modes=$modes" \
+            "tracer_cpu=$tracer_cpu load_cpus=$load_cpus tracer_flags=${tracer_flags[*]}"
     } >>"$samples"
+}
+
+# run_traced takes S3_RUNS rounds of an untraced and a traced burst per
+# thread count; run=R pairs them for the slowdown ratio.
+run_traced() {
+    local -i r
+    local t
+    for ((r = 1; r <= runs; r++)); do
+        for t in $threads; do
+            untraced "$t" "run=$r"
+            traced "$t" "run=$r"
+        done
+    done
+}
+
+# run_bystander takes S3_PAIRS interleaved pairs per thread count, the
+# untraced burst first in each (ABAB), so slow drift in the host's load
+# lands on both halves of a pair instead of on one mode.
+run_bystander() {
+    local -i p
+    local t
+    for t in $threads; do
+        for ((p = 1; p <= pairs; p++)); do
+            untraced "$t" "pair=$p"
+            bystander "$t" "pair=$p"
+        done
+    done
 }
 
 main() {
     [ -x "$tracer" ] && [ -f "$jar" ] || die "run 'mage build workloadBuild' first"
     header
-    local -i r
-    local t
-    for ((r = 1; r <= runs; r++)); do
-        for t in $threads; do
-            echo "# run $r threads $t loadavg $(cut -d' ' -f1-3 /proc/loadavg)" >>"$samples"
-            untraced "$t"
-            traced "$t"
-            bystander "$t"
-        done
+    local m
+    for m in $modes; do
+        case $m in
+        traced) run_traced ;;
+        bystander) run_bystander ;;
+        volume) volume ;;
+        *) die "unknown mode $m" ;;
+        esac
     done
-    volume
+    summarize
 }
 
 main

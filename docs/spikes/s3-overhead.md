@@ -331,5 +331,100 @@ quiet, so PLAN.md #25 now measures them load-tolerantly — the
 tracer's own CPU time per event, and the bystander as the median
 of ≥ 10 interleaved, pinned traced/untraced pairs on CPU time,
 with the wall-clock ratio recorded alongside. The limits are
-unchanged; the rough per-event figure above suggests the
-consumer may need another round of cuts.
+unchanged. Task md4 took both and both pass — the rough
+per-event figure above was an artefact of its method; see
+"Follow-up (md4)" below.
+
+## Follow-up (md4): the timing items by the paired CPU-time method
+
+Task md4 took decision #25's two timing items by the load-tolerant
+method PLAN.md adopted on 2026-11-19. The host was as busy as ever
+(load average 4.6–9.0, a nice-19 desktop indexer plus unrelated
+builds), which is what the method is for. `spikes/s3/measure.sh`
+now pins every process — the tracer to CPU 3, the burst JVM to
+CPUs 0-2,4-6 (on this host CPU k and k+4 are SMT siblings, so the
+tracer has core 3 to itself apart from CPU 7, which nothing of the
+run uses) — and reads CPU times from `/proc/PID/stat`: the
+tracer's from its ready file to its exit (`tracer_run_cpu_ms`),
+the burst's from its startup gate to its result line
+(`burst_cpu_ms`, JVM startup excluded; the burst is held at exit
+by `IORMESH_WORKLOAD_HOLD_FILE` so its CPU can still be read).
+`summary.txt` holds the medians. Samples and profiles:
+`spikes/s3/results-md4/`, commit `45d2ac6`.
+
+**Tracer CPU per event** (`S3_MODES=traced
+S3_TRACER_FLAGS=-aggregate=false S3_OPS=500000 S3_RUNS=5`,
+`results-md4/cpu/`): unfolded, so every call is an event (1 000 067
+events per 1-thread run), and the fixed load-and-attach cost stays
+out of the numerator.
+
+| Threads | ns/event, median of 5 | Range | Lost records |
+|--:|--:|--:|--:|
+| 1 | **1200** | 940–2660 | 0 |
+| 4 | **1697** | 1490–2460 | 55–60 % (ring full, unfolded) |
+
+Both medians are inside the ≤ 2 µs budget. The M2 figure of
+~2.7 µs was an artefact of its method: it subtracted the
+idle-target tracer's *whole-run* CPU from the traced one's, and
+the fixed cost it removed — loading the BPF object, mostly
+verifier time in `bpf_object__load` — is itself 1.4–5.0 s per
+run here (tracer CPU at its ready file) and swings with host load,
+so the difference of two such runs says little about 40 000
+events. At 4 threads unfolded the burst
+outruns the consumer (a debugging mode; the default fold sends
+~150 events for the same burst, see "Follow-up (vc4)"), so the
+figure is per *emitted* event under a full ring.
+
+**Profile** (`iormesh run -cpuprofile`, the same unfolded 1-thread
+burst, `results-md4/profile/t1.pprof`; profiling adds its own
+overhead, this run spent 1.8 µs/event): of 3.3 s, 1.44 s is
+`bpf_object__load` (the fixed cost). The per-event 1.8 s for
+1 000 068 events splits into
+
+1. NDJSON encoding (`schema.AppendEvent`): 0.64 s, half of it
+   `strconv.AppendUint` on the ~10 integer fields (the 19-digit
+   `boot_ns` and `wall_ns` cost most);
+2. `write(2)` of the 326 MB of NDJSON: 0.28 s — output volume,
+   which M4's parquet segments change;
+3. the correlator itself (`exit`, `release`, maps, queue): ~0.3 s;
+4. returning records to their pool (`types.Recycle`,
+   `sync.Pool`): 0.17 s;
+5. the ring reader (`bpf.ringReader.read`, decode): 0.16 s.
+
+The 4-thread profile (`t4.pprof`) has the same shape, with load
+(4.6 s of verifier under load 9) dominating. No cut was made: the
+budget holds, and the cuts on offer are small — a faster integer
+formatter for the two timestamps (~0.1 µs), fewer pool round
+trips (~0.1 µs). They are the first candidates if M3's per-event
+javajoin work (2b4) pushes the 4-thread median over 2 µs; M3's
+acceptance re-runs this measurement.
+
+**Bystander** (`S3_MODES=bystander S3_OPS=1000000 S3_PAIRS=10`,
+`results-md4/bystander/` at 1 and 4 threads, and a second
+4-thread set, `results-md4/bystander-4b/`): each pair is an
+untraced burst followed by one beside a tracer attached to an idle
+`sleep` (ABAB); the ratio is per pair, then the median.
+
+| Threads | Set | CPU-time ratio, median | Wall-clock ratio, median | Pairs ≤ 1.25× (CPU) | Load average |
+|--:|--|--:|--:|--:|--:|
+| 4 | 1 | **1.19×** | 1.21× | 9 of 10 (outlier 1.84×) | 6.3–8.4 |
+| 4 | 2 | **1.15×** | 1.14× | 10 of 10 | 5.4–7.0 |
+| 1 | 1 | 1.41× | 1.44× | 3 of 10 (0.43–3.66×) | 6.4–8.6 |
+
+The gated figure — 4 threads, CPU time — passes in both sets, and
+the wall-clock median passes too, so the guard (wall clock over
+1.25× while CPU time passes) did not trip and no quiet-host run is
+needed. The 1-thread figure is not gated and is not a measurement:
+the same 1 000 000 untraced ops took 1.55–5.08 s of CPU, so CPU
+time is *not* load-invariant for a single thread on this host —
+an SMT sibling shared with the indexer or a build, and the clock
+frequency that follows host load, change the CPU time per op
+by 3×. Four threads average over more of both, which is why their
+pairs agree within ±10 % apart from one outlier. A 1-thread figure
+would need the burst pinned to one core with its sibling kept idle,
+which this host cannot promise.
+
+| #25 item | Budget | md4 verdict |
+|----------|--------|-------------|
+| tracer CPU | ≤ 2 µs per emitted event (median) | **passes**: 1.20 µs at 1 thread, 1.70 µs at 4 (unfolded, 5 runs each) |
+| bystander | ≤ 1.25× at 4 threads (CPU-time median of ≥ 10 pairs) | **passes**: 1.19× and 1.15× in two sets of 10 pairs; wall clock 1.21× and 1.14× |

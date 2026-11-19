@@ -219,7 +219,8 @@ throwaway; its findings update this plan.
   aggregation (ior's `syscall_aggregate_map`) in M2; decision #25
   records the budget. The two timing items are measured by the
   load-tolerant paired CPU-time method in #25 (2026-11-19; this
-  host never gets quiet), tracked by task md4.
+  host never gets quiet); task md4 measured both inside the
+  budget.
 
 ### M0 — Traceable test workload (Java): framework first
 
@@ -458,9 +459,10 @@ criterion here.
   run stays inside the overhead and volume budget (decision
   #25).
 
-  Status (2026-11-19): accepted; the two #25 timing items are
-  tracked by task md4, which gates M3's acceptance (not its
-  start — no M3 step reads a #25 number). The integration
+  Status (2026-11-19): accepted; the two #25 timing items were
+  split to task md4, which gated M3's acceptance (not its
+  start — no M3 step reads a #25 number) and has since passed
+  both (below). The integration
   suite (27 tests) is green on two consecutive runs with zero
   loss; every edge case above
   is covered end to end (docs/testing.md, "M2 acceptance") — PID
@@ -468,12 +470,15 @@ criterion here.
   Go helper (`workload/edgepeer`). Of the #25 budget, loss (0) and
   volume (15.9 B/event compressed) pass; the tracer-CPU and
   bystander timings were only taken on a loaded host (load ~3),
-  which says little either way, and one rough unfolded run puts
-  tracer CPU at ~2.7 µs/event, above the 2 µs budget — a weak
-  figure (two separate runs at 10 ms CPU granularity) that md4
-  re-measures and profiles before M3's javajoin adds per-event
-  work (docs/spikes/s3-overhead.md, "M2 acceptance
-  measurement"). Schema v1 is frozen outside `http`.
+  which says little either way; a rough unfolded run put tracer
+  CPU at ~2.7 µs/event, an artefact of subtracting two runs'
+  load-and-attach cost. md4 re-measured both by the paired
+  CPU-time method on the same busy host: tracer CPU 1.2 µs/event
+  at 1 thread and 1.7 µs at 4 (unfolded, medians of 5), the
+  bystander 1.19× and 1.15× at 4 threads (CPU time, two sets of
+  10 pairs; wall clock 1.21× and 1.14×) — all four #25 items pass
+  (docs/spikes/s3-overhead.md, "M2 acceptance measurement" and
+  "Follow-up (md4)"). Schema v1 is frozen outside `http`.
 
 ### M3 — Java agent: code-flow attribution
 
@@ -1015,10 +1020,14 @@ answer), and deferred.
      ≤ 2 µs per emitted event on `syscall-burst` (median) — one
      core then sustains 500 k events/s, five times M1, which
      together with aggregation covers the burst (task
-     wc4 brought it to ~1.5–2 µs on a busy host; re-measured
-     by task md4 — s3-overhead.md, "Follow-up (wc4)"). Measured
-     as the tracer's own user+sys CPU time per event, which
-     host load barely moves;
+     wc4 brought it to ~1.5–2 µs on a busy host; task md4
+     measured 1.2 µs at 1 thread and 1.7 µs at 4, unfolded,
+     medians of 5 — s3-overhead.md, "Follow-up (wc4)" and
+     "Follow-up (md4)"). Measured as the tracer's own user+sys
+     CPU time per event from its ready file to its exit (load
+     and attach excluded), which host load moves less than wall
+     time — not nothing: on a loaded SMT host one thread's CPU
+     time still spreads 2–3×, hence medians of ≥ 5 runs;
   2. *bystander cost* (host-wide, every untraced process) — M1:
      ~1.14× per syscall at 4 and 16 threads. Budget: ≤ 1.25× on
      `syscall-burst` at 4 threads, paid only while a trace runs.
@@ -1028,7 +1037,9 @@ answer), and deferred.
      recorded alongside, and if its median exceeds 1.25× while
      CPU time passes, the item stays open and one run is taken
      on a host with its background load paused (2026-11-19: the
-     quiet-host rule replaced, the limits unchanged);
+     quiet-host rule replaced, the limits unchanged). Task md4:
+     1.19× and 1.15× (CPU time) in two sets of 10 pairs, wall
+     clock 1.21× and 1.14×, so the guard did not trip;
   3. *loss* — M1: 16–42 % of ring records on a sustained burst,
      0 on a short burst and on the M0 scenarios. Budget: zero
      lost records on every M0/M2 scenario, and < 1 % on
