@@ -40,6 +40,7 @@ import java.util.function.BiFunction;
  * handler only when it wrote from inside its read. HTTP/2 (Netty's
  * Http2 codecs) is not seen. A write that throws is a lost record; the
  * channel's pending exchanges are dropped with it (their order is gone).
+ * A decode that throws decoded nothing and changes nothing.
  */
 public final class Netty implements Library {
     private static final String P = "io/netty/handler/codec/http/";
@@ -138,11 +139,7 @@ public final class Netty implements Library {
                     return null;
                 }
                 if (a[0] instanceof Throwable) {
-                    channels.drop(channel);
-                    if (!inbound) {
-                        throw new IllegalStateException("an HTTP write failed: exchanges lost");
-                    }
-                    return null;
+                    return failed(channel);
                 }
                 String[] out = null;
                 for (Object msg : inbound ? (List<?>) pair[1] : List.of(pair[1])) {
@@ -155,6 +152,21 @@ public final class Netty implements Library {
             } catch (Throwable t) {
                 throw new IllegalStateException(t);   // counted as a lost record by Hooks
             }
+        }
+
+        /**
+         * The hooked call threw. A decode that throws decoded nothing (the
+         * channel's pending exchanges still pair with their answers); a
+         * write that throws may have lost an answer, so the channel's
+         * exchanges are dropped and the loss counted (Hooks counts a
+         * throwing probe as a lost record: numbering stops, never shifts).
+         */
+        private String[] failed(Object channel) {
+            if (inbound) {
+                return null;
+            }
+            channels.drop(channel);
+            throw new IllegalStateException("an HTTP write failed: exchanges lost");
         }
 
         /**

@@ -24,15 +24,17 @@ import java.nio.file.attribute.BasicFileAttributes;
  * The target of `mage agentTest`'s smoke run under each JDK: does a
  * little of every hook kind of the tables (file streams,
  * RandomAccessFile, Files stat/move/delete, a TCP loopback connection
- * with a shutdown) and one request through each HTTP hook's library (a
- * third-party one, Apache HttpClient, too: task de4), so the agent's
- * debug dump shows its
- * hooks fired on that JDK. Compiled for 17 like the agent, unlike the
- * workload (21), so it also runs on the 17 variant's JDK. Prints "ok".
+ * with a shutdown) and one request through each HTTP hook's library (the
+ * third-party clients Apache HttpClient and OkHttp too: task de4), so
+ * the agent's debug dump shows its hooks fired on that JDK. Compiled for
+ * 17 like the agent, unlike the workload (21), so it also runs on the 17
+ * variant's JDK. Prints "ok".
  */
 public final class AgentSmoke {
     /** Apache HttpClient 5 and its dependencies, vendored for the workload (task de4). */
     static final Path APACHE_JARS = Path.of("workload", "libs", "third_party", "httpclient5");
+    /** OkHttp 5, Okio and the Kotlin standard library, vendored likewise. */
+    static final Path OKHTTP_JARS = Path.of("workload", "libs", "third_party", "okhttp");
 
     private AgentSmoke() {}
 
@@ -90,6 +92,7 @@ public final class AgentSmoke {
             c.getInputStream().readAllBytes();
             c.disconnect();
             apache(uri);
+            okhttp(uri);
         } finally {
             server.stop(0);
         }
@@ -104,16 +107,7 @@ public final class AgentSmoke {
      * on this JDK. Run from the repository root, as `mage agentTest` does.
      */
     private static void apache(URI uri) throws Exception {
-        java.util.List<java.net.URL> urls = new java.util.ArrayList<>();
-        try (java.util.stream.Stream<Path> jars = Files.list(APACHE_JARS)) {
-            for (Path p : (Iterable<Path>) jars.sorted()::iterator) {
-                if (p.toString().endsWith(".jar")) {
-                    urls.add(p.toUri().toURL());
-                }
-            }
-        }
-        try (java.net.URLClassLoader l = new java.net.URLClassLoader(
-                urls.toArray(new java.net.URL[0]), AgentSmoke.class.getClassLoader())) {
+        try (java.net.URLClassLoader l = jars(APACHE_JARS)) {
             Class<?> clients = l.loadClass("org.apache.hc.client5.http.impl.classic.HttpClients");
             Object client = clients.getMethod("createDefault").invoke(null);
             Object get = l.loadClass("org.apache.hc.client5.http.classic.methods.HttpGet")
@@ -128,6 +122,49 @@ public final class AgentSmoke {
                 throw new IllegalStateException("http smoke: apache " + code);
             }
         }
+    }
+
+    /**
+     * One GET through OkHttp 5 the same way: Kotlin-compiled targets, which
+     * the agent's store scan must accept and its rewrite keep verifiable,
+     * on this JDK.
+     */
+    private static void okhttp(URI uri) throws Exception {
+        try (java.net.URLClassLoader l = jars(OKHTTP_JARS)) {
+            Class<?> clientType = l.loadClass("okhttp3.OkHttpClient");
+            Object client = clientType.getConstructor().newInstance();
+            Class<?> builder = l.loadClass("okhttp3.Request$Builder");
+            Object b = builder.getConstructor().newInstance();
+            builder.getMethod("url", String.class).invoke(b, uri.toString());
+            Object req = builder.getMethod("build").invoke(b);
+            Object call = clientType.getMethod("newCall", l.loadClass("okhttp3.Request"))
+                    .invoke(client, req);
+            Object resp = l.loadClass("okhttp3.Call").getMethod("execute").invoke(call);
+            int code = (int) resp.getClass().getMethod("code").invoke(resp);
+            ((AutoCloseable) resp).close();
+            Object pool = clientType.getMethod("connectionPool").invoke(client);
+            pool.getClass().getMethod("evictAll").invoke(pool);
+            Object dispatcher = clientType.getMethod("dispatcher").invoke(client);
+            ((java.util.concurrent.ExecutorService) dispatcher.getClass()
+                    .getMethod("executorService").invoke(dispatcher)).shutdown();
+            if (code != 200) {
+                throw new IllegalStateException("http smoke: okhttp " + code);
+            }
+        }
+    }
+
+    /** A loader of its own for the jars in dir (the app's parent loader above it). */
+    private static java.net.URLClassLoader jars(Path dir) throws Exception {
+        java.util.List<java.net.URL> urls = new java.util.ArrayList<>();
+        try (java.util.stream.Stream<Path> jars = Files.list(dir)) {
+            for (Path p : (Iterable<Path>) jars.sorted()::iterator) {
+                if (p.toString().endsWith(".jar")) {
+                    urls.add(p.toUri().toURL());
+                }
+            }
+        }
+        return new java.net.URLClassLoader(urls.toArray(new java.net.URL[0]),
+                AgentSmoke.class.getClassLoader());
     }
 
     private static void files(Path file) throws Exception {

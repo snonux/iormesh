@@ -2709,12 +2709,18 @@ internal/correlate/javajoin.go
      encoder's write, before the flush; client: at the response's
      decoding. A write that throws drops the channel's exchanges, a
      lost record; more than 64 unanswered requests on a channel
-     likewise. Netty's HTTP/2 codecs are not seen.
+     likewise. A decode that throws decoded nothing and changes
+     nothing: the pending exchanges still pair with their answers.
+     Netty's HTTP/2 codecs are not seen.
 
    Tests (OkHttp, Netty): `TestHTTPOkHttp` (`http-okhttp`: OkHttp 5
    against the JDK's HttpServer) and `TestHTTPNetty` (`http-netty`:
    the JDK HttpClient against a Netty server, one acceptor and one
-   worker event loop).
+   worker event loop); `AgentSmoke` also runs one OkHttp call from
+   the vendored jars in a loader of their own, so the Kotlin targets
+   are rewritten, verified and recording on every agent-test JDK (17,
+   21, 25, 27 checked). The servlet and Netty hooks run only under
+   the integration suite's JDK (25).
 
    Not hooked: Apache HttpClient 4 (`org.apache.http`) and its async
    client, OkHttp 3, Netty 4.1's encoder without its `write`
