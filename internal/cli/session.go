@@ -51,12 +51,17 @@ func newSession(tr tracer, c *correlate.Correlator, cfg runConfig) *session {
 
 // start registers the targets the tracer was opened with (pids, already
 // in target_map) and, for a pattern, every process that matches already.
-// A pattern scan runs after the probes attached, so a process exec'ing
-// meanwhile is seen by the scan, by its exec record, or by both — adopt
-// takes it once.
+// Each target's identity is read now and seeded into the correlator,
+// which handles the target's first record only later: by then the target
+// may have exited and its PID been reused, and /proc would name the new
+// process. A pattern scan runs after the probes attached, so a process
+// exec'ing meanwhile is seen by the scan, by its exec record, or by both
+// — adopt takes it once.
 func (s *session) start(pids []uint32) error {
 	for _, pid := range pids {
-		s.live[pid] = processStart(pid)
+		id := processIdentity(pid)
+		s.live[pid] = id.StartNS
+		s.c.Seed(pid, id)
 	}
 	if s.app == "" {
 		return nil
@@ -80,17 +85,17 @@ func (s *session) start(pids []uint32) error {
 // would be traced. Such an entry is removed again. Its earlier syscalls
 // precede the session, so they are no attach gap.
 func (s *session) adoptRunning(pid uint32) error {
-	start := processStart(pid)
-	if start == 0 {
+	id := processIdentity(pid)
+	if id.StartNS == 0 {
 		return nil // gone already
 	}
 	if err := s.tr.AddTarget(pid); err != nil {
 		return err
 	}
-	if !processAlive(pid, start) {
+	if !processAlive(pid, id.StartNS) {
 		return s.tr.RemoveTarget(pid)
 	}
-	return s.adopt(pid, 0)
+	return s.adopt(pid, id, 0)
 }
 
 // handleAll handles one batch of records in order; the first error stops
@@ -120,7 +125,7 @@ func (s *session) handle(rec any) error {
 		return s.judgeExec(r)
 	case *types.TaskNewtaskEvent:
 		if r.CloneFlags&cloneThread == 0 && r.ScopeFlags == 0 {
-			s.live[r.Pid] = processStart(r.Pid)
+			s.live[r.Pid] = childStart(r)
 		}
 	case *types.ProcessExitEvent:
 		if r.GroupDead != 0 {
@@ -146,7 +151,7 @@ func (s *session) judgeExec(ev *types.ExecArgvEvent) error {
 		// kernel already dropped its entry. It is no incarnation.
 		return err
 	}
-	if err := s.adopt(ev.Pid, gap); err != nil {
+	if err := s.adopt(ev.Pid, processIdentity(ev.Pid), gap); err != nil {
 		return err
 	}
 	return s.c.Exec(execInfo(ev, argv, cut))
@@ -201,15 +206,31 @@ func (s *session) isTracer(pid uint32, exe string) bool {
 		target.IsTracer(target.HostProcFS().Exe(pid), s.selfExe)
 }
 
-// adopt makes pid an incarnation of the session's app, once per process
-// incarnation: the start scan and the exec record may both report it.
-func (s *session) adopt(pid uint32, gap uint64) error {
-	start := processStart(pid)
-	if seen, ok := s.live[pid]; ok && seen == start {
+// adopt makes pid, read as id at adoption, an incarnation of the
+// session's app, once per process incarnation: the start scan and the
+// exec record may both report it. id seeds the correlator
+// (correlate.Seed), which may meet the process's records only after it
+// is gone.
+func (s *session) adopt(pid uint32, id correlate.Identity, gap uint64) error {
+	if seen, ok := s.live[pid]; ok && seen == id.StartNS {
 		return nil
 	}
-	s.live[pid] = start
-	return s.c.Incarnation(s.app, pid, gap)
+	s.live[pid] = id.StartNS
+	return s.c.Incarnation(s.app, pid, id, gap)
+}
+
+// childStart is a followed child's start time, read when the session
+// handles its task_newtask record — possibly after the child exited and
+// its PID was reused. The child started before its record (the kernel
+// sets the start time first, /proc rounds it down), so a later start is
+// another process's, and the child counts as unknown (0): over() takes it
+// for gone, which it is.
+func childStart(r *types.TaskNewtaskEvent) uint64 {
+	start := processStart(r.Pid)
+	if start > r.Time {
+		return 0
+	}
+	return start
 }
 
 // over reports whether a PID or port session has nothing left to trace:

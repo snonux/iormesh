@@ -41,6 +41,12 @@ func newTest(t *testing.T) (*Correlator, *memSink) {
 	return c, sink
 }
 
+// testIdentity is what newTest's ProcInfo reports for pid, for the
+// callers that seed the correlator themselves (Seed, Incarnation).
+func testIdentity(pid uint32) Identity {
+	return Identity{Comm: fmt.Sprintf("proc%d", pid), StartNS: 1000 + uint64(pid)}
+}
+
 // feeder builds records on one thread with a monotonic clock.
 type feeder struct {
 	t        *testing.T
@@ -210,19 +216,6 @@ func TestSinkErrorPropagates(t *testing.T) {
 		Time: f.tick(), Pid: 10, Tid: 11, Ret: 1})
 	if !errors.Is(err, sink.fail) {
 		t.Fatalf("Handle error %v, want the sink's", err)
-	}
-}
-
-func TestParseStartTime(t *testing.T) {
-	// comm with a space and a ')' must not shift the fields.
-	stat := []byte("42 (my (odd) proc) S 1 42 42 0 -1 4194304 1 0 0 0 0 0 0 0 20 0 1 0 12345 0 0")
-	if got := parseStartTime(stat); got != 12345*10_000_000 {
-		t.Fatalf("parseStartTime = %d, want %d", got, 12345*10_000_000)
-	}
-	for _, bad := range []string{"", "42 no-paren S 1", "42 (x) S 1 2", "42 (x) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 nan"} {
-		if got := parseStartTime([]byte(bad)); got != 0 {
-			t.Errorf("parseStartTime(%q) = %d, want 0", bad, got)
-		}
 	}
 }
 

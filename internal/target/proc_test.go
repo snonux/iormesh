@@ -65,7 +65,7 @@ func (f fakeProc) socket(pid uint32, fd int, inode string) {
 
 func TestParseStat(t *testing.T) {
 	st, err := ParseStat([]byte("42 (we ird) comm)) S 7 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 12345 0 0"))
-	if err != nil || st.State != 'S' || st.PPID != 7 || st.Flags != 0 || st.StartNS != 12345*10_000_000 {
+	if err != nil || st.Comm != "we ird) comm)" || st.State != 'S' || st.PPID != 7 || st.Flags != 0 || st.StartNS != 12345*10_000_000 {
 		t.Fatalf("ParseStat = %+v, %v", st, err)
 	}
 	if st.ArgStart != 0 {

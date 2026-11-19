@@ -19,20 +19,34 @@ const cloneThread = 0x00010000
 const maxCommLen = 15
 
 // newTask registers a traced process's new child (M2 step 1: the kernel
-// follows it into target_map) while it surely still exists, so its pid
-// incarnation is read from /proc before a short-lived child can vanish.
-// A new pid is a new process by definition, so any state the correlator
-// still holds under that pid belongs to a predecessor that exited (or
-// whose records were lost), and is replaced — by a copy of its parent's
-// fd table (M2 step 6, forked). New threads need nothing: they share
-// their process's state.
+// follows it into target_map). A new pid is a new process by definition,
+// so any state the correlator still holds under that pid belongs to a
+// predecessor that exited (or whose records were lost), and is replaced —
+// by a copy of its parent's fd table (M2 step 6, forked). New threads
+// need nothing: they share their process's state.
 func (c *Correlator) newTask(r *types.TaskNewtaskEvent) {
 	c.advance(r.Time)
 	if r.CloneFlags&cloneThread != 0 || r.ScopeFlags != 0 {
 		return
 	}
-	delete(c.procs, r.Pid)
-	c.forked(r.CreatorPid, c.proc(r.Pid), r.Pid)
+	c.forked(r.CreatorPid, c.seed(r.Pid, c.childIdentity(r)), r.Pid)
+}
+
+// childIdentity reads a new child's incarnation from /proc. The record
+// does not carry it (a classic task_newtask tracepoint has no task
+// pointer), and the read happens when the correlator handles the record,
+// so a lagging correlator may find the child gone and its PID reused.
+// The kernel sets the child's start time before the tracepoint fires and
+// /proc rounds it down to a clock tick, so the child's start is never
+// after the record; one that is belongs to a later process. Such a child
+// keeps an unknown incarnation (0) and the name it inherited, which the
+// record carries — not the stranger's.
+func (c *Correlator) childIdentity(r *types.TaskNewtaskEvent) Identity {
+	comm, start := c.cfg.ProcInfo(r.Pid)
+	if start > r.Time {
+		return Identity{Comm: types.StringValue(r.Comm[:])}
+	}
+	return Identity{Comm: comm, StartNS: start}
 }
 
 // exitTask forgets a dead thread's pending enter and parked stack: its
@@ -57,18 +71,20 @@ func (c *Correlator) exitTask(r *types.ProcessExitEvent) {
 // Incarnation records that the session's pattern matched pid, a process
 // it now traces, and links it to app (schema.AppNodeID) in the graph:
 // every incarnation of a restarting app hangs off the same app node (M2
-// step 3). gap is the number of records the process produced between its
-// exec and the attach (bpf.Tracer.AdoptExec); a non-zero gap is queued as
-// an attach_gap drop naming the process, ahead of all of its traced
-// events, so the loss is visible exactly where it happened — before the
-// process's first event. pid was untraced until now, so whatever state
-// the correlator held under it belongs to an earlier process.
-func (c *Correlator) Incarnation(app string, pid uint32, gap uint64) error {
+// step 3). id is the process as the caller read it at adoption (Seed:
+// the correlator may handle the process's records only after it is gone
+// and its PID reused). gap is the number of records the process produced
+// between its exec and the attach (bpf.Tracer.AdoptExec); a non-zero gap
+// is queued as an attach_gap drop naming the process, ahead of all of
+// its traced events, so the loss is visible exactly where it happened —
+// before the process's first event. pid was untraced until now, so
+// whatever state the correlator held under it belongs to an earlier
+// process.
+func (c *Correlator) Incarnation(app string, pid uint32, id Identity, gap uint64) error {
 	if c.ended {
 		return ErrEnded
 	}
-	delete(c.procs, pid)
-	p := c.proc(pid)
+	p := c.seed(pid, id)
 	c.graph.incarnation(app, pid, p.inc)
 	if gap > 0 {
 		ev := c.hostEvent(schema.KindDrop)

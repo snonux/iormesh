@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"iormesh/internal/correlate"
 	"iormesh/internal/target"
 	"iormesh/internal/tracepoints"
 )
@@ -58,14 +59,19 @@ var processAlive = func(pid uint32, startNS uint64) bool {
 	return target.HostProcFS().Alive(pid, startNS)
 }
 
-// processStart returns pid's start time on the boot clock (its
-// incarnation), 0 when it cannot be read. A variable like processAlive.
-var processStart = func(pid uint32) uint64 {
-	st, err := target.HostProcFS().Stat(pid)
-	if err != nil {
-		return 0
-	}
-	return st.StartNS
+// processIdentity reads pid's comm and start time on the boot clock (its
+// incarnation) in one /proc read, both zero when it cannot be read. It is
+// what the correlator is seeded with (correlate.Seed). A variable like
+// processAlive.
+var processIdentity = func(pid uint32) correlate.Identity {
+	comm, start := correlate.ReadProcInfo(pid)
+	return correlate.Identity{Comm: comm, StartNS: start}
+}
+
+// processStart returns pid's start time (processIdentity), 0 when it
+// cannot be read.
+func processStart(pid uint32) uint64 {
+	return processIdentity(pid).StartNS
 }
 
 // parseRunFlags parses and validates `run`'s arguments. Every error wraps

@@ -125,11 +125,67 @@ func TestPIDSessionOver(t *testing.T) {
 	_ = c.Close()
 }
 
+// TestPIDTargetSeededAtStart (task jd4): a -pid target's identity is the
+// one read at session start. The fake /proc then shows a squatter on the
+// PID (the target exited, the PID was reused) before the target's first
+// record is handled; the record keeps the target's incarnation and comm.
+func TestPIDTargetSeededAtStart(t *testing.T) {
+	fakeProcs(t, 10)
+	processIdentity = func(uint32) correlate.Identity { return correlate.Identity{Comm: "target", StartNS: 500} }
+	dir := t.TempDir()
+	c := testCorrelator(t, dir)
+	s, _ := pidSession(t, newFakeTracer(), c, 10)
+	processIdentity = func(uint32) correlate.Identity { return correlate.Identity{Comm: "squatter", StartNS: 900} }
+	open := &types.OpenEvent{EventType: types.ENTER_OPEN_EVENT, TraceId: types.SYS_ENTER_OPENAT,
+		Time: 600, Pid: 10, Tid: 10}
+	copy(open.Filename[:], "/tmp/t")
+	ret := &types.RetEvent{EventType: types.EXIT_RET_EVENT, TraceId: types.SYS_EXIT_OPENAT,
+		Time: 601, Pid: 10, Tid: 10, Ret: 3}
+	if err := s.handleAll([]any{open, ret}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	opens := 0
+	for _, e := range readEvents(t, dir) {
+		if e.Event != schema.KindOpenat {
+			continue
+		}
+		opens++
+		if e.PIDInc != 500 || e.Comm != "target" {
+			t.Fatalf("open has incarnation %d comm %q, want the target's 500 \"target\"", e.PIDInc, e.Comm)
+		}
+	}
+	if opens != 1 {
+		t.Fatalf("%d open events, want 1", opens)
+	}
+}
+
+// TestChildStartAfterForkIsGone: a followed child whose /proc entry shows
+// a start after its task_newtask record is another process on a reused
+// PID; the child's start stays unknown, so over() takes it for gone.
+func TestChildStartAfterForkIsGone(t *testing.T) {
+	fakeProcs(t, 10, 11)
+	s, _ := pidSession(t, newFakeTracer(), testCorrelator(t, t.TempDir()), 10)
+	processIdentity = func(uint32) correlate.Identity { return correlate.Identity{Comm: "squatter", StartNS: 900} }
+	for at, want := range map[uint64]uint64{899: 0, 900: 900} {
+		child := &types.TaskNewtaskEvent{EventType: types.TASK_NEWTASK_EVENT, Time: at, Pid: 11, Tid: 11,
+			CreatorPid: 10}
+		if err := s.handle(child); err != nil {
+			t.Fatal(err)
+		}
+		if s.live[11] != want {
+			t.Errorf("fork record at %d: child start %d, want %d", at, s.live[11], want)
+		}
+	}
+}
+
 // TestUnknownStartTimeIsGone: a target whose start time could not be
 // read is not kept alive by whatever process holds its PID now.
 func TestUnknownStartTimeIsGone(t *testing.T) {
 	fakeProcs(t, 10)
-	processStart = func(uint32) uint64 { return 0 }
+	processIdentity = func(uint32) correlate.Identity { return correlate.Identity{} }
 	s, _ := pidSession(t, newFakeTracer(), testCorrelator(t, t.TempDir()), 10)
 	if !s.over() {
 		t.Fatalf("live %v: an unknown start time kept the session alive", s.live)

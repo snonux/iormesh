@@ -176,7 +176,9 @@ Field notes:
   `session` object (`schema.Session`) adds boot id, FQDN, kernel
   release and arch.
 - `pid_incarnation` is the task's start time on the boot clock
-  (`task->start_boottime` via CO-RE) — unique per PID reuse.
+  (`/proc/<pid>/stat` starttime, clock-tick resolution) — unique
+  per PID reuse. It is read when the session takes the process
+  on (see "Envelope" below), not at its first record.
 - `seq` is per host, starts at 1 and has no gaps but explicit
   `drop` events; 0 means "never assigned" and is rejected.
 - `fd` is the fd the event acts on: the argument, or for open*
@@ -754,9 +756,21 @@ unit-tested with synthetic record streams:
   in attrs would survive normalization), `runs_on`; file nodes
   `file:<host_id>:<path>` from the exact event path with an
   `opened` edge per successful open; socket nodes per conn id.
-- **Envelope**: `pid_incarnation` and `comm` come from
-  `ProcInfo` (`/proc/<pid>/stat` starttime, clock-tick
-  resolution); an exec record (`sched_process_exec`, successful
+- **Envelope**: `pid_incarnation` and `comm` come from one
+  `/proc/<pid>/stat` read (starttime, clock-tick resolution, and
+  the comm field), taken when the session takes the process on:
+  at session start for a `-pid` or port target and at adoption
+  for a pattern match (`Seed`, `Incarnation`; task jd4). A read at
+  the first record instead would, with the correlator lagging past
+  the target's exit and a reuse of its PID, give the target's
+  events the newcomer's identity. A forked child is read when its
+  `task_newtask` record is handled (the record carries no start
+  time); a start later than the record's time is a later process
+  on the reused PID, so the child keeps `pid_incarnation` 0 and
+  the record's inherited comm. The remaining lazy read is
+  `ProcInfo` for a pid first met in a record — an untraced
+  `kill` target, or a child whose `task_newtask` record was lost
+  — and it keeps that race. An exec record (`sched_process_exec`, successful
   execs only) replaces `comm` with the kernel's post-exec name for
   later events and the process node (task hd4; an empty record
   comm falls back to the exe's basename cut to 15 bytes);
@@ -1109,8 +1123,9 @@ scenarios landing first (principle #1).
    So no entry outlives its process, and a reused PID is not
    traced. The three handlers attach as `bpf.ControlProbes`. The
    correlator registers a forked child at its `task_newtask`
-   record (its incarnation is read from `/proc` while it surely
-   exists) and drops a dead thread's pending enter at its exit.
+   record (its incarnation is read from `/proc` then, and dropped
+   to 0 if it postdates the record — see "Envelope") and drops a
+   dead thread's pending enter at its exit.
    Root tests: `TestFollowForkExec` (a traced bash's forked and
    exec'd child is traced and leaves `target_map` once it exited)
    and `TestUntracedForkNotFollowed` (the negative, then the

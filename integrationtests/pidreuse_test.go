@@ -32,9 +32,6 @@ const (
 	squatterScenario = "pid-reuse-squatter"
 	squatterFile     = "pid-reuse-squatter.dat"
 	targetFile       = "pid-reuse-target.dat"
-	// reuseSettle is the pause between the target's exit and the reuse
-	// of its PID (tracePIDReuse says why).
-	reuseSettle = 500 * time.Millisecond
 	// launcherWaitDelay bounds the launcher's Wait once it exited or was
 	// killed while its squatter still holds its output pipes.
 	launcherWaitDelay = 5 * time.Second
@@ -102,12 +99,10 @@ func tracePIDReuse(h *Harness, peer string) (reuseRun, error) {
 	if err := tgt.proc.wait(runTimeout); err != nil {
 		return run, err
 	}
-	// The correlator reads a target's incarnation from /proc when it
-	// handles the target's first record, so the reuse waits until that
-	// surely happened (the reader lags well under a millisecond): the
-	// test is about the tracer telling two live incarnations apart, not
-	// about a correlator that met the target only after it was gone.
-	time.Sleep(reuseSettle)
+	// The reuse follows the exit at once: the session read the target's
+	// incarnation when it started (correlate.Seed, task jd4), so even a
+	// correlator that handles the target's records only after the reuse
+	// gives them the target's incarnation, not the squatter's.
 	if err := squatWhileTracing(h, peer, keeper, tracer, &run); err != nil {
 		return run, err
 	}

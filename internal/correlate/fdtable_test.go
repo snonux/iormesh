@@ -26,7 +26,13 @@ func (f feeder) exec() {
 		Pid: f.pid, Tid: f.tid})
 }
 
+// forkClock is the earliest time fork stamps: newTest's ProcInfo says a
+// pid started at 1000+pid, and a child never starts after its fork
+// record (newTask's plausibility check, childIdentity).
+const forkClock = 100_000
+
 func (f feeder) fork(child uint32) {
+	*f.now = max(*f.now, forkClock)
 	f.handle(&types.TaskNewtaskEvent{EventType: types.TASK_NEWTASK_EVENT, Time: f.tick(),
 		Pid: child, Tid: child, CreatorPid: f.pid})
 }

@@ -22,6 +22,10 @@ type ProcFS struct {
 
 // Stat is what a session needs of /proc/<pid>/stat.
 type Stat struct {
+	// Comm is field 2, the task's name between the first '(' and the last
+	// ')': read in the same read as StartNS, so the two always describe
+	// one incarnation (correlate.ReadProcInfo).
+	Comm  string
 	State byte   // field 3: R, S, D, Z (zombie), X (dead), …
 	PPID  uint32 // field 4
 	// Flags is field 9, the task's PF_* flags; PF_EXITING marks a task
@@ -47,8 +51,9 @@ func HostProcFS() ProcFS { return ProcFS{Root: "/proc"} }
 // ParseStat parses a /proc/<pid>/stat line. The comm field may contain
 // spaces and parentheses, so fields are counted after the last ')'.
 func ParseStat(line []byte) (Stat, error) {
+	open := bytes.IndexByte(line, '(')
 	i := bytes.LastIndexByte(line, ')')
-	if i < 0 {
+	if open < 0 || i < open {
 		return Stat{}, ErrStat
 	}
 	// fields[0] is field 3 (state), so ppid (4) is fields[1], flags (9)
@@ -64,7 +69,7 @@ func ParseStat(line []byte) (Stat, error) {
 	if err1 != nil || err2 != nil || err3 != nil {
 		return Stat{}, ErrStat
 	}
-	st := Stat{State: fields[0][0], PPID: uint32(ppid), Flags: flags,
+	st := Stat{Comm: string(line[open+1 : i]), State: fields[0][0], PPID: uint32(ppid), Flags: flags,
 		StartNS: ticks * (1_000_000_000 / clockTicks)}
 	if len(fields) > 45 {
 		st.ArgStart, _ = strconv.ParseUint(fields[45], 10, 64)

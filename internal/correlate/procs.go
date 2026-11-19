@@ -1,10 +1,7 @@
 package correlate
 
 import (
-	"fmt"
 	"net/netip"
-	"os"
-	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -15,9 +12,9 @@ import (
 // procState is one traced process incarnation.
 type procState struct {
 	inc uint64
-	// comm is the process's current name: read once when the correlator
-	// first sees the pid (ProcInfo, or a first open's record), then
-	// replaced on every successful exec (execComm), because the kernel
+	// comm is the process's current name: read with inc (Identity) when
+	// the session took the process on (Seed) or else when the correlator
+	// first saw the pid (ProcInfo), then replaced on every successful exec (execComm), because the kernel
 	// renames the process to the new program there. Events stamp it when
 	// they are built, so those before an exec keep the old name.
 	comm string
@@ -55,18 +52,53 @@ type procState struct {
 	clock *uint64
 }
 
+// Identity is a process incarnation as one /proc/<pid>/stat read saw it:
+// its comm and its start time on the boot clock (pid_incarnation).
+type Identity struct {
+	Comm    string
+	StartNS uint64
+}
+
+// Seed tells the correlator who pid is, read by the caller when the
+// session took the process on: at session start for a -pid or port
+// target, at adoption for a pattern match. Call it before Handle sees the
+// process's first record. Without it the correlator reads /proc only
+// when that record is handled, and a correlator lagging past the target's
+// exit and a reuse of its PID would give the target's events the new
+// process's incarnation (and comm). Whatever state the correlator held
+// under pid belongs to an earlier process and is replaced.
+func (c *Correlator) Seed(pid uint32, id Identity) {
+	c.seed(pid, id)
+}
+
+// seed is Seed, returning the new state.
+func (c *Correlator) seed(pid uint32, id Identity) *procState {
+	delete(c.procs, pid)
+	return c.newProc(pid, id)
+}
+
+// proc returns pid's state, registering a process seen for the first
+// time with the identity /proc shows for it now (ProcInfo). That read is
+// late by the correlator's lag, so the processes a session knows of
+// before their first record are seeded instead (Seed, Incarnation, and
+// newTask's check of the read against the fork record's time).
 func (c *Correlator) proc(pid uint32) *procState {
 	if p, ok := c.procs[pid]; ok {
 		return p
 	}
 	comm, inc := c.cfg.ProcInfo(pid)
-	p := &procState{inc: inc, comm: comm, fds: map[int32]uint32{},
+	return c.newProc(pid, Identity{Comm: comm, StartNS: inc})
+}
+
+// newProc registers pid as the incarnation id, in the state and the graph.
+func (c *Correlator) newProc(pid uint32, id Identity) *procState {
+	p := &procState{inc: id.StartNS, comm: id.Comm, fds: map[int32]uint32{},
 		lastGen: map[int32]uint32{}, sockOf: map[int32]*sockState{},
 		paths: map[int32]fdPath{}, cloexec: map[int32]bool{},
 		flowsOf: map[int32][][2]netip.AddrPort{}, born: map[int32]uint64{},
 		past: map[int32]pastInstance{}, clock: &c.recTime}
 	c.procs[pid] = p
-	c.graph.process(pid, inc, comm)
+	c.graph.process(pid, id.StartNS, id.Comm)
 	return p
 }
 
@@ -152,27 +184,17 @@ func (p *procState) close(fd int32) {
 	delete(p.cloexec, fd)
 }
 
-// ReadProcInfo reads comm and start time from /proc. The start time has
-// clock-tick resolution, which is enough to tell PID reuses apart. A
-// process already gone yields ("", 0): its events still carry its pid.
+// ReadProcInfo reads comm and start time from one read of
+// /proc/<pid>/stat, so the two always describe the same incarnation. The
+// start time has clock-tick resolution, which is enough to tell PID reuses
+// apart. A process already gone yields ("", 0): its events still carry
+// its pid.
 func ReadProcInfo(pid uint32) (string, uint64) {
-	comm, _ := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
-	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	st, err := target.HostProcFS().Stat(pid)
 	if err != nil {
-		return strings.TrimSpace(string(comm)), 0
+		return "", 0
 	}
-	return strings.TrimSpace(string(comm)), parseStartTime(stat)
-}
-
-// parseStartTime returns field 22 (starttime) of a /proc/<pid>/stat line
-// in boot-clock nanoseconds, 0 for a line that does not parse
-// (target.ParseStat, shared with the session's liveness check).
-func parseStartTime(stat []byte) uint64 {
-	st, err := target.ParseStat(stat)
-	if err != nil {
-		return 0
-	}
-	return st.StartNS
+	return st.Comm, st.StartNS
 }
 
 // BootToWallOffset measures wall-clock minus boot-clock time now, the

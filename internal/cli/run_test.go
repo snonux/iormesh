@@ -209,10 +209,10 @@ func liveUntilExit(t *testing.T) func() {
 	t.Helper()
 	var mu sync.Mutex
 	live := true
-	origAlive, origStart := processAlive, processStart
+	origAlive, origIdentity := processAlive, processIdentity
 	processAlive = func(uint32, uint64) bool { mu.Lock(); defer mu.Unlock(); return live }
-	processStart = func(uint32) uint64 { return 1 }
-	t.Cleanup(func() { processAlive, processStart = origAlive, origStart })
+	processIdentity = func(uint32) correlate.Identity { return correlate.Identity{Comm: "x", StartNS: 1} }
+	t.Cleanup(func() { processAlive, processIdentity = origAlive, origIdentity })
 	return func() { mu.Lock(); defer mu.Unlock(); live = false }
 }
 

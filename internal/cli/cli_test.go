@@ -10,23 +10,24 @@ import (
 	"testing"
 	"time"
 
+	"iormesh/internal/correlate"
 	"iormesh/internal/schema"
 	"iormesh/internal/target"
 	"iormesh/internal/tracepoints"
 )
 
 // fakeProcs makes processAlive answer from a fixed set for the test, and
-// processStart report one start time for every pid.
+// processIdentity report one identity (start time 1) for every pid.
 func fakeProcs(t *testing.T, pids ...uint32) {
 	t.Helper()
 	live := map[uint32]bool{}
 	for _, p := range pids {
 		live[p] = true
 	}
-	origAlive, origStart := processAlive, processStart
+	origAlive, origIdentity := processAlive, processIdentity
 	processAlive = func(pid uint32, _ uint64) bool { return live[pid] }
-	processStart = func(uint32) uint64 { return 1 }
-	t.Cleanup(func() { processAlive, processStart = origAlive, origStart })
+	processIdentity = func(uint32) correlate.Identity { return correlate.Identity{Comm: "x", StartNS: 1} }
+	t.Cleanup(func() { processAlive, processIdentity = origAlive, origIdentity })
 }
 
 func TestParseRunFlags(t *testing.T) {

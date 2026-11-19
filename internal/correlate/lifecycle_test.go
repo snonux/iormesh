@@ -29,7 +29,7 @@ func TestIncarnationLinksRestarts(t *testing.T) {
 	c, _ := newTest(t)
 	app := schema.AppNodeID("p", "*RestartApp*")
 	for _, pid := range []uint32{40, 41} {
-		if err := c.Incarnation(app, pid, 0); err != nil {
+		if err := c.Incarnation(app, pid, testIdentity(pid), 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -50,10 +50,10 @@ func TestIncarnationLinksRestarts(t *testing.T) {
 func TestIncarnationGapDrop(t *testing.T) {
 	c, sink := newTest(t)
 	app := schema.AppNodeID("p", "*x*")
-	if err := c.Incarnation(app, 40, 0); err != nil {
+	if err := c.Incarnation(app, 40, testIdentity(40), 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Incarnation(app, 41, 6); err != nil {
+	if err := c.Incarnation(app, 41, testIdentity(41), 6); err != nil {
 		t.Fatal(err)
 	}
 	now := uint64(100)
@@ -87,12 +87,12 @@ func TestNewTaskRegistersChild(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	handle(&types.TaskNewtaskEvent{EventType: types.TASK_NEWTASK_EVENT, Time: 1, Pid: 50, Tid: 50, CreatorPid: 1})
-	handle(&types.TaskNewtaskEvent{EventType: types.TASK_NEWTASK_EVENT, Time: 2, Pid: 50, Tid: 51,
+	handle(&types.TaskNewtaskEvent{EventType: types.TASK_NEWTASK_EVENT, Time: 10, Pid: 50, Tid: 50, CreatorPid: 1})
+	handle(&types.TaskNewtaskEvent{EventType: types.TASK_NEWTASK_EVENT, Time: 20, Pid: 50, Tid: 51,
 		CreatorPid: 50, CloneFlags: cloneThread})
-	handle(&types.ProcessExitEvent{EventType: types.PROCESS_EXIT_EVENT, Time: 3, Pid: 50, Tid: 50, GroupDead: 1})
+	handle(&types.ProcessExitEvent{EventType: types.PROCESS_EXIT_EVENT, Time: 30, Pid: 50, Tid: 50, GroupDead: 1})
 	info[50] = 9 // the PID is reused by a later child
-	handle(&types.TaskNewtaskEvent{EventType: types.TASK_NEWTASK_EVENT, Time: 4, Pid: 50, Tid: 50, CreatorPid: 1})
+	handle(&types.TaskNewtaskEvent{EventType: types.TASK_NEWTASK_EVENT, Time: 40, Pid: 50, Tid: 50, CreatorPid: 1})
 	var procs []string
 	for _, n := range c.Graph().Nodes {
 		if n.Type == schema.NodeProcess {
@@ -108,6 +108,87 @@ func TestNewTaskRegistersChild(t *testing.T) {
 		if !hasEdge(c.Graph(), schema.EdgeForked, parent, child, "") {
 			t.Errorf("no forked edge %s → %s", parent, child)
 		}
+	}
+}
+
+// TestSeedOutlivesPIDReuse (task jd4): the session reads a target's
+// identity when it takes the target on; by the time the correlator
+// handles the target's first record, the target may be gone and its PID
+// reused. Each case seeds pid 60 (or not), then lets the fake /proc show
+// the squatter that took the PID, then hands over the target's open (at
+// 600, after the target's start 500 and before the squatter's 900).
+// Unseeded, the target's event would carry the squatter's identity.
+func TestSeedOutlivesPIDReuse(t *testing.T) {
+	target := Identity{Comm: "target", StartNS: 500}
+	app := schema.AppNodeID("p", "*target*")
+	cases := []struct {
+		name string
+		seed func(c *Correlator) error
+	}{
+		{"pid target (Seed)", func(c *Correlator) error { c.Seed(60, target); return nil }},
+		{"pattern adoption (Incarnation)", func(c *Correlator) error {
+			return c.Incarnation(app, 60, target, 0)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, sink := newTest(t)
+			proc := target
+			c.cfg.ProcInfo = func(uint32) (string, uint64) { return proc.Comm, proc.StartNS }
+			if err := tc.seed(c); err != nil {
+				t.Fatal(err)
+			}
+			proc = Identity{Comm: "squatter", StartNS: 900} // exit, then PID reuse
+			now := uint64(599)
+			feeder{t, c, 60, 60, &now}.open("/tmp/t", 0, 3)
+			if err := c.Close(); err != nil {
+				t.Fatal(err)
+			}
+			ev := byKind(sink.events, schema.KindOpenat)[0]
+			if ev.PIDInc != target.StartNS || ev.Comm != target.Comm {
+				t.Fatalf("open has incarnation %d comm %q, want the seeded %d %q",
+					ev.PIDInc, ev.Comm, target.StartNS, target.Comm)
+			}
+		})
+	}
+}
+
+// TestNewTaskChildGoneBeforeRecord: a lagging correlator reads a forked
+// child's /proc entry after the child exited and a later process took its
+// PID. That process started after the fork record, so it cannot be the
+// child: the child keeps an unknown incarnation and its inherited comm
+// from the record, never the stranger's identity. A start at the record's
+// time (tick rounding) is still the child's.
+func TestNewTaskChildGoneBeforeRecord(t *testing.T) {
+	cases := []struct {
+		name     string
+		start    uint64
+		wantInc  uint64
+		wantComm string
+	}{
+		{"reused after the fork", 901, 0, "parent"},
+		{"started at the fork", 900, 900, "squatter"},
+		{"started before the fork", 850, 850, "squatter"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := newTest(t)
+			c.cfg.ProcInfo = func(pid uint32) (string, uint64) {
+				if pid == 70 {
+					return "squatter", tc.start
+				}
+				return "parent", 100
+			}
+			rec := &types.TaskNewtaskEvent{EventType: types.TASK_NEWTASK_EVENT, Time: 900,
+				Pid: 70, Tid: 70, CreatorPid: 1}
+			copy(rec.Comm[:], "parent")
+			if err := c.Handle(rec); err != nil {
+				t.Fatal(err)
+			}
+			if p := c.procs[70]; p.inc != tc.wantInc || p.comm != tc.wantComm {
+				t.Fatalf("child %d %q, want %d %q", p.inc, p.comm, tc.wantInc, tc.wantComm)
+			}
+		})
 	}
 }
 
@@ -134,7 +215,7 @@ func TestIncarnationAfterEnd(t *testing.T) {
 	if err := c.End(schema.EndStop); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Incarnation(schema.AppNodeID("p", "*x*"), 1, 0); !errors.Is(err, ErrEnded) {
+	if err := c.Incarnation(schema.AppNodeID("p", "*x*"), 1, testIdentity(1), 0); !errors.Is(err, ErrEnded) {
 		t.Fatalf("Incarnation after End: %v, want ErrEnded", err)
 	}
 }
