@@ -36,6 +36,20 @@ func (g *graphBuilder) process(pid uint32, inc uint64, comm string) {
 	g.edge(schema.Edge{Type: schema.EdgeRunsOn, From: id, To: schema.HostNodeID(g.hostID)})
 }
 
+// renamed sets a process node's comm attr to the name the process got
+// from an exec. The node is the process incarnation, which an exec does
+// not change, so there is one node and one comm: the newest, which is
+// the program the process runs for the rest of its life (a forked child
+// that execs is known by its new program, not by its parent's name) and
+// what ps shows. The events keep each moment's comm, so the old name is
+// not lost. The node exists: proc() added it.
+func (g *graphBuilder) renamed(pid uint32, inc uint64, comm string) {
+	id := schema.ProcessNodeID(g.hostID, pid, inc)
+	node := g.nodes[id]
+	node.Attrs = map[string]string{"comm": comm}
+	g.nodes[id] = node
+}
+
 // incarnation adds the app node and its incarnation edge to one process
 // (M2 step 3). The process node itself comes from process().
 func (g *graphBuilder) incarnation(app string, pid uint32, inc uint64) {

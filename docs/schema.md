@@ -59,7 +59,7 @@ Required fields are always present; a zero is a real zero.
 | `pid` | int | process id (tgid) |
 | `pid_incarnation` | int | process start on the boot clock: a reused pid is another process |
 | `tid` | int | thread id; `0` for records with no task context (`tcp_state`) |
-| `comm` | string | process name |
+| `comm` | string | process name at the event: the kernel's comm (≤ 15 bytes); an exec renames it, so events before the exec carry the old name and the `exec` event and later ones the new |
 | `event` | string | the event kind, below |
 | `fd` | int | descriptor acted on — the argument, or the returned one for opens and accepts; `-1` when none |
 | `fd_gen` | int | how often this fd number was (re)created in this incarnation; `0` = predates the trace or no fd. A forked child continues its parent's count (it inherits the parent's instances) |
@@ -484,7 +484,11 @@ How it is captured and what it can and cannot say:
 
 Node attributes stay minimal (`comm` on processes): raw pids or
 ports in attributes would survive normalization and make two runs'
-graphs differ. An `app` id names nothing run-specific (project and
+graphs differ. A process node's `comm` is the process's newest
+name: an exec does not make a new incarnation, so a forked child
+that execs keeps its node, and the node is named after the program
+it runs, not after its parent; the events keep each moment's
+name. An `app` id names nothing run-specific (project and
 pattern), so the normalizer passes it through unchanged and two
 runs — or two hosts — name the same app the same way; goldens bind
 it with `$a1`. A `-pid` or `-listen-port` session has no app node.

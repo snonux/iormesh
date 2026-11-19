@@ -1,6 +1,9 @@
 package correlate
 
 import (
+	"path"
+	"strings"
+
 	"iormesh/internal/redact"
 	"iormesh/internal/schema"
 	"iormesh/internal/types"
@@ -9,6 +12,11 @@ import (
 // cloneThread is CLONE_THREAD: a task_newtask record with it set is a new
 // thread of an existing process, not a new process.
 const cloneThread = 0x00010000
+
+// maxCommLen is the kernel's TASK_COMM_LEN - 1: the bytes of a comm
+// before its NUL. An exec names the process after the executable's
+// basename cut to that length (__set_task_comm).
+const maxCommLen = 15
 
 // newTask registers a traced process's new child (M2 step 1: the kernel
 // follows it into target_map) while it surely still exists, so its pid
@@ -92,22 +100,28 @@ type ExecInfo struct {
 // event exists, so no sink, queue or later stage ever holds the raw
 // secret (decision #9; the environment is never captured). A pattern
 // session calls it after Incarnation, so the attach gap's drop comes
-// first, as it must precede every traced event of the process.
+// first, as it must precede every traced event of the process. The event
+// carries the comm after the exec: by the time the program's argv exists,
+// the kernel has renamed the process (execComm).
 func (c *Correlator) Exec(x ExecInfo) error {
 	if c.ended {
 		return ErrEnded
 	}
 	c.advance(x.BootNS)
 	p := c.proc(x.PID)
+	exe := ""
+	if x.Exe != "" {
+		// A path, but one that may embed a URL like any argument.
+		exe = c.redact.Text(x.Exe)
+	}
+	c.exeFallbackComm(x.PID, p, exe)
 	ev := schema.Event{
 		SchemaVersion: schema.Version, Project: c.cfg.Host.Project, HostID: c.cfg.Host.ID,
 		BootNS: x.BootNS, WallNS: c.wall(x.BootNS), PID: x.PID, PIDInc: p.inc, TID: x.TID,
 		Comm: p.comm, Event: schema.KindExec, FD: schema.NoFD,
 		Attribution: schema.AttributionNone,
 	}
-	if x.Exe != "" {
-		// A path, but one that may embed a URL like any argument.
-		exe := c.redact.Text(x.Exe)
+	if exe != "" {
 		ev.Args.Path = &exe
 	}
 	if len(x.Argv) > 0 {
@@ -118,4 +132,60 @@ func (c *Correlator) Exec(x ExecInfo) error {
 	}
 	c.enqueue(ev, nil)
 	return c.release(false)
+}
+
+// execComm applies the comm a successful exec gave pid (the kernel's,
+// read by the exec record after the rename). Only a successful exec
+// reaches here — sched_process_exec does not fire for a failed one — so
+// a failed exec leaves the comm alone, as the kernel does. An empty comm
+// (an unreadable record) defers to the exec's executable, which the
+// following Exec carries (exeComm); until then the old name stays, the
+// best one known.
+func (c *Correlator) execComm(pid uint32, p *procState, comm string) {
+	if comm == "" {
+		p.commFromExe = true
+		return
+	}
+	p.commFromExe = false
+	c.setComm(pid, p, comm)
+}
+
+// exeFallbackComm names the process after its executable (exeComm) when
+// its exec record carried no comm (execComm). exe is the redacted path:
+// what the trace may show of it.
+func (c *Correlator) exeFallbackComm(pid uint32, p *procState, exe string) {
+	if !p.commFromExe {
+		return
+	}
+	p.commFromExe = false
+	if comm := exeComm(exe); comm != "" {
+		c.setComm(pid, p, comm)
+	}
+}
+
+// setComm renames the process for every later event and in the graph.
+func (c *Correlator) setComm(pid uint32, p *procState, comm string) {
+	if comm == p.comm {
+		return
+	}
+	p.comm = comm
+	c.graph.renamed(pid, p.inc, comm)
+}
+
+// exeComm is the comm the kernel gives a process exec'ing exe: its
+// basename, cut to maxCommLen bytes. The kernel cuts bytes and may split
+// a multi-byte character; the cut here drops such a fragment, so the
+// comm stays valid UTF-8 in the JSON. "" when exe has no basename.
+func exeComm(exe string) string {
+	if exe == "" {
+		return ""
+	}
+	base := path.Base(exe)
+	if base == "/" || base == "." {
+		return ""
+	}
+	if len(base) <= maxCommLen {
+		return base
+	}
+	return strings.ToValidUTF8(base[:maxCommLen], "")
 }

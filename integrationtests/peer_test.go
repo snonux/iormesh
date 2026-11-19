@@ -21,9 +21,10 @@ import (
 )
 
 // peerBinary is the peer's executable name: its exec event's path ends
-// in it. The peer is told apart by that exec, not by comm: a process's
-// comm is what the correlator first read for its pid, which for a child
-// forked by the JVM may still be the JVM's.
+// in it, and it is the peer's comm (8 bytes, uncut). The JVM forks the
+// peer, so the child starts with the JVM's comm; the correlator renames
+// it on the exec (task hd4), and the peer's exec and later events must
+// carry the new name.
 const peerBinary = "echopeer"
 
 // stacksFile is cli.StacksFile, the native stack table of a
@@ -68,24 +69,34 @@ func TestNonJavaPeer(t *testing.T) {
 }
 
 // assertPeerTraced fails unless the Go peer itself was followed: its exec
-// and its accept4 are in the trace. A run where only the JVM was traced
-// would pass the attribution checks vacuously for the peer.
+// and its accept4 are in the trace, the accept4 under the peer's own comm
+// (not the JVM's, which its forked child started with). A run where only
+// the JVM was traced would pass the attribution checks vacuously for the
+// peer.
 func assertPeerTraced(t *testing.T, events []schema.Event) {
 	t.Helper()
 	pid := peerPID(t, events)
 	for _, e := range events {
 		if e.PID == pid && e.Event == schema.KindAccept4 {
+			if e.Comm != peerBinary {
+				t.Fatalf("the peer's accept4 has comm %q, want %q", e.Comm, peerBinary)
+			}
 			return
 		}
 	}
 	t.Fatalf("no accept4 of %s (pid %d) in the trace", peerBinary, pid)
 }
 
-// peerPID returns the pid that exec'd the peer binary.
+// peerPID returns the pid that exec'd the peer binary. Its exec event
+// must already carry the peer's comm: the kernel renamed the process
+// before the exec's argv record.
 func peerPID(t *testing.T, events []schema.Event) uint32 {
 	t.Helper()
 	for _, e := range events {
 		if e.Event == schema.KindExec && e.Args.Path != nil && filepath.Base(*e.Args.Path) == peerBinary {
+			if e.Comm != peerBinary {
+				t.Fatalf("the peer's exec has comm %q, want %q", e.Comm, peerBinary)
+			}
 			return e.PID
 		}
 	}

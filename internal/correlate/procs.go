@@ -14,8 +14,16 @@ import (
 
 // procState is one traced process incarnation.
 type procState struct {
-	inc  uint64
+	inc uint64
+	// comm is the process's current name: read once when the correlator
+	// first sees the pid (ProcInfo, or a first open's record), then
+	// replaced on every successful exec (execComm), because the kernel
+	// renames the process to the new program there. Events stamp it when
+	// they are built, so those before an exec keep the old name.
 	comm string
+	// commFromExe says the last exec record carried no comm, so the
+	// following Exec derives it from the executable (exeComm).
+	commFromExe bool
 	// fds holds the live fd instances; lastGen remembers each number's
 	// newest generation after close too, so a number reused by a syscall
 	// M1 does not trace (socket, dup, pipe, …) still gets a fresh fd_gen.

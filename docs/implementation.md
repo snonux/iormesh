@@ -756,7 +756,10 @@ unit-tested with synthetic record streams:
   `opened` edge per successful open; socket nodes per conn id.
 - **Envelope**: `pid_incarnation` and `comm` come from
   `ProcInfo` (`/proc/<pid>/stat` starttime, clock-tick
-  resolution); `wall_ns = boot_ns + WallOffsetNS`
+  resolution); an exec record (`sched_process_exec`, successful
+  execs only) replaces `comm` with the kernel's post-exec name for
+  later events and the process node (task hd4; an empty record
+  comm falls back to the exe's basename cut to 15 bytes); `wall_ns = boot_ns + WallOffsetNS`
   (`BootToWallOffset`, measured once); `err` is the errno name.
 - **Host-level events** go through the same queue, so `seq`
   stays gap-free and ordered: `Session(schema.Session)` queues
@@ -1588,10 +1591,12 @@ scenarios landing first (principle #1).
     peer attributed to Java, its connection unresolved) fail.
     In M2 no agent exists, so every process has this shape; M3
     must keep it for the peer once JVM events gain `java`.
-    Seen while writing the test: a process's `comm` is what the
+    Seen while writing the test: a process's `comm` was what the
     correlator first read for its pid, so a child the JVM forked
-    may keep the JVM's comm after its exec — the test keys on the
-    exec event, not on comm.
+    kept the JVM's comm after its exec. Fixed (task hd4): the exec
+    record's post-exec comm renames the process for its `exec`
+    event, every later event and its graph node; the test now
+    also checks the peer's exec and accept4 carry `echopeer`.
 11. **Budget (decision #25, from S3)**: in-kernel aggregation of
     hot read/write loops (done, task vc4), after ior's
     `syscall_aggregate_map` — repeated read/write on one fd

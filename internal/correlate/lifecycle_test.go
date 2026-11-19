@@ -223,3 +223,95 @@ func TestExecCutArgvAndExe(t *testing.T) {
 		t.Errorf("exe %q", *ev.Args.Path)
 	}
 }
+
+// execRecord is the sched_process_exec record of f's process with the
+// kernel's post-exec comm.
+func (f feeder) execRecord(comm string) {
+	rec := &types.ProcessExecEvent{EventType: types.PROCESS_EXEC_EVENT, Time: f.tick(),
+		Pid: f.pid, Tid: f.tid}
+	copy(rec.Comm[:], comm)
+	f.handle(rec)
+}
+
+// processComm returns the comm attr of pid's process node.
+func processComm(t *testing.T, g schema.Graph, pid uint32, inc uint64) string {
+	t.Helper()
+	id := schema.ProcessNodeID("h1", pid, inc)
+	for _, n := range g.Nodes {
+		if n.ID == id {
+			return n.Attrs["comm"]
+		}
+	}
+	t.Fatalf("no process node %s", id)
+	return ""
+}
+
+// TestExecRefreshesComm: a successful exec renames the process for every
+// later event, its exec event and its graph node; events before it keep
+// the old comm. An empty record comm falls back to the executable's
+// basename cut like the kernel's. A failed exec (no sched_process_exec
+// record, no Exec) and an Exec without a record (a pattern session's
+// adoption, whose comm /proc read after the exec) rename nothing.
+func TestExecRefreshesComm(t *testing.T) {
+	cases := []struct {
+		name     string
+		record   bool   // the exec record arrived: the exec succeeded
+		recComm  string // its comm
+		callExec bool
+		exe      string
+		want     string
+	}{
+		{"kernel comm", true, "echopeer", true, "/bin/echopeer", "echopeer"},
+		{"kernel comm wins over exe", true, "jspawnhelper", true, "/x/other", "jspawnhelper"},
+		{"empty record comm uses exe", true, "", true, "/opt/a-very-long-program-name", "a-very-long-pro"},
+		{"empty record comm, unreadable exe", true, "", true, "", "proc10"},
+		{"failed exec", false, "", false, "", "proc10"},
+		{"exec without record", false, "", true, "/bin/other", "proc10"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, sink := newTest(t)
+			f := feeder{t, c, 10, 10, new(uint64)}
+			f.open("/before", 0, 3)
+			if tc.record {
+				f.execRecord(tc.recComm)
+			}
+			if tc.callExec {
+				if err := c.Exec(ExecInfo{PID: 10, TID: 10, BootNS: f.tick(), Exe: tc.exe}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			f.open("/after", 0, 4)
+			if err := c.Close(); err != nil {
+				t.Fatal(err)
+			}
+			opens := byKind(sink.events, schema.KindOpenat)
+			if opens[0].Comm != "proc10" || opens[1].Comm != tc.want {
+				t.Errorf("open comms %q, %q; want proc10, %q", opens[0].Comm, opens[1].Comm, tc.want)
+			}
+			if execs := byKind(sink.events, schema.KindExec); tc.callExec && execs[0].Comm != tc.want {
+				t.Errorf("exec event comm %q, want %q", execs[0].Comm, tc.want)
+			}
+			if got := processComm(t, c.Graph(), 10, 1010); got != tc.want {
+				t.Errorf("node comm %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestExeComm: the kernel's naming of an exec'd process — the basename,
+// cut to 15 bytes, here without a split UTF-8 character.
+func TestExeComm(t *testing.T) {
+	for exe, want := range map[string]string{
+		"":                          "",
+		"/":                         "",
+		"echopeer":                  "echopeer",
+		"/usr/bin/fifteen-bytes-x":  "fifteen-bytes-x",
+		"/usr/bin/sixteen-bytes-xy": "sixteen-bytes-x",
+		"/opt/abcdefghijklmnä":      "abcdefghijklmn", // ä's 2 bytes straddle 15
+	} {
+		if got := exeComm(exe); got != want {
+			t.Errorf("exeComm(%q) = %q, want %q", exe, got, want)
+		}
+	}
+}

@@ -136,10 +136,13 @@ func (p *procState) inherit(parent *procState) {
 // program reusing such a number through an untraced syscall would inherit
 // the old program's instance, path and socket. The native stack table
 // learns of it too: the new program's stacks live in a new address space.
+// So does the process's comm (lifecycle.go, execComm): the kernel renamed
+// it to the new program, and events from here on carry that name.
 func (c *Correlator) execTask(r *types.ProcessExecEvent) {
 	c.advance(r.Time)
 	if p, ok := c.procs[r.Pid]; ok {
 		p.closeOnExec()
+		c.execComm(r.Pid, p, types.StringValue(r.Comm[:]))
 	}
 	if c.cfg.Stacks != nil {
 		c.cfg.Stacks.Forget(r.Pid) // a new image: new stacks, new mappings
