@@ -1,4 +1,4 @@
-# Trace schema (v1 draft)
+# Trace schema (v1, frozen outside http)
 
 The field-level reference of the trace output. The contract's
 goals and guarantees are in [output-contract.md](output-contract.md)

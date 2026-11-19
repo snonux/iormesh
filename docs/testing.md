@@ -188,18 +188,19 @@ to the suite as follows:
 | Edge case | Proven by |
 |-----------|-----------|
 | fd reuse and aliasing | `TestFdLifecycle` (golden: reuse, dup, inherited stdio) |
-| exec | `TestFdLifecycle` (child exec, CLOEXEC), `TestArgvSecretRedacted` |
+| exec | `TestArgvSecretRedacted` (exec event, argv), `TestNonJavaPeer` (exec path, comm refresh), `TestFdLifecycle` (fds surviving exec) |
 | pattern restarts (new PID, same app) | `TestRestartPattern` (two incarnations, one app node) |
 | threaded I/O | `TestSyscallBurstFoldsEveryCall` (2 threads, folded counts exact) |
 | loopback pairs | `TestWalkingSkeleton`, `TestTCPFamilies` (v4, v6), `TestUnixSocket`, `TestUDPLoopback`, `TestPipeIPC` |
 | non-Java peer | `TestNonJavaPeer`, `TestNativeStacks` |
-| PID reuse | root/unit level only: exit cleanup of `target_map` (`TestFollowForkExec`), `TestExecWatchExitedBeforeAdopt`, `internal/target` `TestAlive` |
+| PID reuse | root/unit level only: exit cleanup of `target_map` (`TestFollowForkExec`), `TestExecWatchExitedBeforeAdopt`, `internal/target` `TestAlive`, `internal/correlate` `TestNewTaskRegistersChild` |
 | socket races | root level only: `TestSockResetBeforeAcceptNotRegistered`, `TestSockFailedConnectUnregisters` |
 
 The last two rows are not yet integration tests — forcing a PID
 reuse or a reset race end to end needs a dedicated harness; a
 follow-up task tracks it. The decision #25 budget run is recorded
-in docs/spikes/s3-overhead.md ("M2 acceptance measurement").
+in docs/spikes/s3-overhead.md ("M2 acceptance measurement"); its
+two timing items are still open (quiet host needed).
 
 ## Performance baselines
 

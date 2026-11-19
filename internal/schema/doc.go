@@ -6,15 +6,15 @@
 // these types and the controller (CGO_ENABLED=0, darwin too) reads them,
 // so it must never import anything that pulls in cgo.
 //
-// Version 1 is a draft (M1). Spikes S1 (Java ↔ syscall join) and S2
-// (cross-host join) have reported and settled the java and conn_id
-// shapes (docs/spikes/); fields still marked provisional (http) settle
-// with M3. Fields are only
+// Version 1 was drafted in M1 and is frozen outside http since M2's
+// acceptance: spikes S1 (Java ↔ syscall join) and S2 (cross-host join)
+// settled the java and conn_id shapes (docs/spikes/); http, still
+// marked provisional, settles with M3. Fields are only
 // ever appended, and every appended field is optional (omitempty), so a
 // reader of an older file sees the new ones as absent, never as a
 // different meaning — ior's parquet rule.
 package schema
 
-// Version is the schema_version every event and graph of this draft
+// Version is the schema_version every event and graph of this schema
 // carries. Readers reject any other value instead of guessing.
 const Version = 1

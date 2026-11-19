@@ -58,7 +58,7 @@ func (e *Event) Validate() error {
 	return e.validateKindArgs()
 }
 
-// KnownKind reports whether kind is part of this schema draft: an M1
+// KnownKind reports whether kind is part of schema v1: an M1
 // kind, exec (M2 step 8), one of the M2 file surface (kinds_file.go) or of
 // M2 step 7's socket addresses and opt-in families (kinds_ipc.go).
 func KnownKind(kind string) bool {

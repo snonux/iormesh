@@ -455,15 +455,19 @@ criterion here.
   run stays inside the overhead and volume budget (decision
   #25).
 
-  Status (2026-11-19): accepted. The 25-test integration suite
-  is green on two consecutive runs with zero loss; every edge
-  case above is covered (docs/testing.md, "M2 acceptance"),
-  PID reuse and socket races at root/unit level only, with
-  integration-level tests as a follow-up task. The #25 budget
-  holds on all four items, measured on a loaded host (load ~3),
-  so the timings are upper bounds (docs/spikes/s3-overhead.md,
-  "M2 acceptance measurement"). Schema v1 is frozen outside
-  `http`.
+  Status (2026-11-19): functionally accepted; the #25 timing
+  items are **open**. The 25-test integration suite is green on
+  two consecutive runs with zero loss; every edge case above is
+  covered (docs/testing.md, "M2 acceptance"), PID reuse and
+  socket races at root/unit level only, with integration-level
+  tests as a follow-up task. Of the #25 budget, loss (0) and
+  volume (15.9 B/event compressed) pass; the tracer-CPU and
+  bystander timings were only taken on a loaded host (load ~3),
+  which says little either way, and one rough unfolded run puts
+  tracer CPU at ~2.7 µs/event, above the 2 µs budget. A
+  quiet-host `measure.sh` run must settle them before M2 is
+  accepted in full (docs/spikes/s3-overhead.md, "M2 acceptance
+  measurement"). Schema v1 is frozen outside `http`.
 
 ### M3 — Java agent: code-flow attribution
 

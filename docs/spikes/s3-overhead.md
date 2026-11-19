@@ -314,14 +314,17 @@ not a quiet host: the figures are rough, medians of 3.
 on), S3_OPS=200000, 1 and 4 threads, 3 runs —
 `spikes/s3/results-m2/`; a volume run with `-aggregate=false` —
 `spikes/s3/results-m2-noagg/`. Load average 2.8–3.1: **not the
-quiet host (< 1) #25 asks for**, so the timings are upper bounds.
+quiet host (< 1) #25 asks for**, so the timings are rough
+loaded-host figures — load inflates the untraced baseline too,
+so it can make a ratio look better as well as worse.
 
 | #25 item | Budget | Measured |
 |----------|--------|----------|
-| tracer CPU | ≤ 2 µs per emitted event | burst folds to 83–151 events, so tracer CPU equals the idle-target fixed cost; per individual event 1.5–2.0 µs (wc4) |
-| bystander | ≤ 1.25× at 4 threads | 1.17× (runs 1.20, 1.14, 1.20); 1 thread noisy (1.26–1.93) |
+| tracer CPU | ≤ 2 µs per emitted event | **open**: the folded burst (83–151 events) shows only the idle-target fixed cost; not re-measured per event here — wc4 gave 1.5–2.0 µs (boundary), and the unfolded volume run gives a rough (1370 − 1260 ms) / 40 065 events ≈ 2.7 µs, above budget |
+| bystander | ≤ 1.25× at 4 threads, quiet host | **open**: 1.17× (runs 1.20, 1.14, 1.20) on a loaded host; 1 thread noisy (1.26–1.93) |
 | loss | 0 on scenarios, < 1 % on the burst | 0 records lost in every run at 1 and 4 threads (skipped programs counted); 0 in both integration runs |
-| volume | ≤ 30 B/event compressed | 324 B/event NDJSON, zstd -3 15.9 B/event (unfolded volume run, 100 067 events) |
+| volume | ≤ 30 B/event compressed | 325 B/event NDJSON, zstd -3 15.9 B/event (unfolded volume run, 100 067 events) |
 
-All four items are inside the budget even on this loaded host; a
-quiet-host re-run should only tighten the timings.
+Loss and volume pass. The two timing items stay open until a
+quiet-host run; the rough per-event figure above suggests the
+consumer may need another round of cuts.

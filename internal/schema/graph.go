@@ -115,8 +115,8 @@ func AppNodeID(project, pattern string) string {
 	return prefixApp + project + "/" + pattern
 }
 
-// SocketNodeID names a connection by its conn_id (provisional until S2,
-// like Event.ConnID).
+// SocketNodeID names a connection by its conn_id (Event.ConnID; across
+// hosts the merge joins by the TCP ISN pair, decision #26).
 func SocketNodeID(connID string) string { return prefixConn + connID }
 
 // Sort puts nodes and edges into canonical export order, in place (the

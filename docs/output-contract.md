@@ -6,8 +6,8 @@ the plan is the source of truth.
 
 - **Self-describing schema** — NDJSON event stream, graph export
   (typed nodes + edges), per-run summary rollup; documented
-  in-repo in [schema.md](schema.md). The v1 *draft* (M1) is
-  the cgo-free `internal/schema` package; S1 and S2 have
+  in-repo in [schema.md](schema.md). Schema v1, drafted in M1,
+  is the cgo-free `internal/schema` package; S1 and S2 have
   settled the Java and cross-host fields. With M2's acceptance
   (2026-11-19) every field outside `http` is **frozen**: its
   name, type and meaning no longer change, only new optional
