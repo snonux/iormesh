@@ -261,7 +261,11 @@ the skips are reported apart — `skipped_runs` drops and the
 summary's "skipped runs" figure, `skipped_runs=` in `measure.sh`
 samples — and "lost records" is ring-buffer and decoder loss
 again. The 8 275–23 929 above are skipped runs, an upper bound on
-the burst's lost calls; the zeros in the table hold for both.
+the burst's lost calls; the zeros in the table hold for both. The
+same goes for every later figure taken before vd4: the "Lost"
+column of the ua4 table below (0, 0, 21; 3–143 k; 138–259 k) and
+md4's 48–60 % counted skipped runs as lost records, so they are
+upper bounds on the records lost.
 
 ## Follow-up (ua4): the cost of native stacks
 

@@ -309,6 +309,7 @@ volume() {
     z19=$(zstd -q -19 -c "$f" | wc -c)
     echo "mode=volume threads=1 ops=$ops" \
         "lost=$(sed -n 's/.*lost records \([0-9][0-9]*\).*/\1/p' "$work/tracer.err")" \
+        "skipped_runs=$(sed -n 's/.*skipped runs \([0-9][0-9]*\).*/\1/p' "$work/tracer.err")" \
         "events=$(wc -l <"$f") ndjson_bytes=$(stat -c %s "$f")" \
         "zstd3_bytes=$z3 zstd19_bytes=$z19" >>"$samples"
     done_dir "$work"

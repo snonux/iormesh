@@ -183,7 +183,7 @@ func judge[T judgeable](t *testing.T, attempt func() (T, error)) T {
 	}
 	if len(lost) == lossAttempts {
 		SkipUnexercised(t, os.Stdout, "every one of "+strconv.Itoa(lossAttempts)+
-			" runs lost records in the kernel (last: "+lost[len(lost)-1].String()+")")
+			" runs lost or skipped records in the kernel (last: "+lost[len(lost)-1].String()+")")
 	}
 	dumpOnFailure(t, run.traced())
 	if n := run.traced().Loss.Undecodable(); n > 0 {

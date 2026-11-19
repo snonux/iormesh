@@ -107,7 +107,8 @@ ior source and what changed:
   whose kernel lost records, or that had skipped program runs
   (possible loss: the count is host-wide, so it cannot say
   whether a target's call was skipped), is re-run (three
-  attempts), and a test whose every run lost records skips with the
+  attempts), and a test whose every run lost or skipped records in
+  the kernel skips with the
   unexercised marker (`unexercised.go`) instead of passing.
   Undecodable records fail at once: they are a decoder bug.
 - `kernel_support_test.go` — the tests skip unless tracefs shows

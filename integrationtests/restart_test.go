@@ -39,7 +39,9 @@ func TestRestartPattern(t *testing.T) {
 	want := expectation(t, "restart")
 	assertGolden(t, got, want)
 	for _, e := range got.Events {
-		if e.Event == schema.KindDrop && e.Args.DropReason != nil {
+		// Only an attach gap says the attach came too late; a host-wide
+		// skipped_runs drop (task vd4) may land anywhere.
+		if e.Event == schema.KindDrop && e.Args.DropReason != nil && *e.Args.DropReason == schema.DropAttachGap {
 			t.Errorf("attach_gap drop inside the bracket (seq %d): the attach came too late", e.Seq)
 		}
 	}

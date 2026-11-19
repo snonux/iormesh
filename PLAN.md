@@ -1113,12 +1113,12 @@ answer), and deferred.
   3. *loss* — M1: 16–42 % of ring records on a sustained burst,
      0 on a short burst and on the M0 scenarios. Budget: zero
      lost records on every M0/M2 scenario, and < 1 % on
-     `syscall-burst` at 1 and 4 threads with aggregation on; any
-     loss is an explicit `drop` event, skipped program runs as
-     possible loss of their own (task vd4, "Trace output
-     contract") (task vc4's aggregation: 0
-     lost in 3 runs each at 1 and 4 threads, on a busy host —
-     s3-overhead.md, "Follow-up (vc4)");
+     `syscall-burst` at 1 and 4 threads with aggregation on, both
+     counted in lost records — skipped program runs are reported
+     apart as possible loss, not in the budget (task vd4, "Trace
+     output contract"). Any loss is an explicit `drop` event.
+     Task vc4's aggregation lost 0 in 3 runs each at 1 and 4
+     threads, on a busy host (s3-overhead.md, "Follow-up (vc4)");
   4. *volume* — M1: ~326 B/event NDJSON, zstd ×18. Budget:
      ≤ 30 B/event compressed (≈ 18 MB per minute at 10 k
      events/s, ≈ 4.3 GB per 4 h session), measured as zstd -3
