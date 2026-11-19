@@ -460,4 +460,5 @@ index before the five runs above. Not yet cut: each event is
 copied into the queue and out again (≈400 bytes twice), and the
 default fold (`-aggregate`) turns this burst into ~150 events,
 so a real JVM's join cost scales with its unfolded I/O calls.
-M3's acceptance (task 5b4) re-measures it against #25.
+Task ud4 brings it under the budget; it gates M3's acceptance
+(task 5b4).

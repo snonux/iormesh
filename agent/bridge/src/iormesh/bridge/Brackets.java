@@ -78,7 +78,11 @@ final class Brackets {
      * enter. A virtual thread may park inside a bracket (a socket accept
      * or read waits in the poller and resumes on any carrier), and a
      * bracket that spans two carriers cannot be joined by tid: it gets 0
-     * (unknown), and its syscalls stay attribution none. These two
+     * (unknown), and its syscalls stay attribution none. Equal tids do
+     * not prove it stayed — it may have left the carrier and come back,
+     * the carrier running other virtual threads meanwhile — so the
+     * joiner never joins a virtual thread's bracket of a hook that can
+     * park (internal/correlate canPark). These two
      * readlinks per bracket are the price of virtual threads, which v1
      * only flags (PLAN.md M3, "Platform threads only").
      */

@@ -470,11 +470,18 @@ How it is captured and what it can and cannot say:
 caused it (`internal/correlate`, `JavaJoin`). The tracer creates
 `DIR` (mode `1733`: every user may create its ring, none may list
 or delete another's); each agent maps one ring there,
-`<pid>.ring` (decision #27, `internal/agentspool`). A ring is
-opened only if it is a regular file with one link, reached
-without a symlink, owned by the uid of the process its name
-names, and its header names the same pid; anything else is
-reported on stderr and never mapped. The JVM must share the
+`<pid>.ring` (decision #27, `internal/agentspool`; the agent
+creates it `O_EXCL`, without following a symlink, mode `0600`). The
+tracer opens a ring without following a symlink and checks on the
+descriptor, before mapping anything, that it is a regular file with
+one link owned by the uid of the process its name names; a file
+that fails is reported on stderr and never mapped. After mapping,
+the header must name the same pid. A JVM already gone at the
+first scan after its ring appeared cannot be checked, so a JVM
+that lives less than a scan interval (50 ms) after its agent
+installed stays `none`. A ring truncated under the tracer's
+mapping (its owner can) faults on access; the reader turns that
+into a corrupt ring instead of a crash. The JVM must share the
 tracer's pid namespace (containers are M7's).
 
 How an event gets `attribution: java` — never by guessing:
@@ -505,8 +512,19 @@ How an event gets `attribution: java` — never by guessing:
   the only guard against JVM work of an allowed kind inside a
   bracket.
 - **Virtual threads** (JDK 21+): the agent records the carrier tid
-  at a bracket's enter and exit, 0 when the virtual thread moved
-  carriers inside it (such brackets join nothing). A joined event
+  at a bracket's enter and exit, 0 when they differ (such
+  brackets are not indexed, so their own syscalls stay `none`).
+  Equal tids do not prove the thread stayed: a hook that runs JDK
+  code around a native of another class (`NioSocketImpl.accept` →
+  `Net.accept`, `ServerSocketChannelImpl.implAccept`: the hook
+  table's qualified natives) can park in the poller, let the
+  carrier run other virtual threads and resume on the same
+  carrier. Such a bracket's window may then hold another virtual
+  thread's syscall whose own bracket was lost, so a parking
+  hook's bracket of a virtual thread — or of a thread whose
+  THREAD record is missing — joins nothing (counted ambiguous);
+  hooks whose native is their own class's are pinned to the
+  carrier for the native call and join as usual. A joined event
   gets the virtual thread's stack, `carrier: true`, and as
   `thread` the name of the platform thread with that tid — v1
   does not name virtual threads (PLAN.md M3).
@@ -521,7 +539,11 @@ syscall that ended before its JVM's ring existed is decided at
 once. At the end of the trace everything is decided with what has
 been read. The summary line counts the rings, brackets, joined
 events (and carrier ones), why a JVM's other events stayed
-`none`, and the agents' own loss counters.
+`none`, the events released by the timeout rather than a
+watermark, and the agents' own loss counters. A suspend between
+a syscall and its join shifts the boot − monotonic offset by the
+time suspended; held events are then converted with the new
+offset and most likely stay `none` (not handled specially).
 
 `methods.ndjson` — one line per distinct frame, written before the
 first event naming it:

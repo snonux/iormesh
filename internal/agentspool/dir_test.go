@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -13,12 +14,7 @@ func testDir(t *testing.T, uid uint32, alive bool) (*Dir, string) {
 	t.Helper()
 	path, _ := newTestRing(t, testCap)
 	d := NewDir(filepath.Dir(path))
-	d.owner = func(pid uint64) (uint32, bool) {
-		if pid != 4242 {
-			t.Errorf("owner asked for pid %d", pid)
-		}
-		return uid, alive
-	}
+	d.owner = func(uint64) (uint32, bool) { return uid, alive }
 	return d, filepath.Dir(path)
 }
 
@@ -51,8 +47,26 @@ func TestDirScan(t *testing.T) {
 	if rings, skipped := scanOnce(t, d); len(rings)+len(skipped) != 0 {
 		t.Errorf("second scan: rings %d, skipped %v", len(rings), skipped)
 	}
-	if d.done["4243.ring"] {
-		t.Error("a ring not set up yet is given up")
+	for k := range d.done {
+		if strings.HasPrefix(k, "4243.ring") {
+			t.Error("a ring not set up yet is given up")
+		}
+	}
+	// A reused pid: the agent deletes the stale file and creates a new
+	// one, a new inode under the same name, which is opened again.
+	path := filepath.Join(dir, "4242.ring")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if rings, _ := scanOnce(t, d); len(rings) != 1 {
+		t.Errorf("new ring under a known name: %d rings", len(rings))
 	}
 }
 
@@ -64,7 +78,13 @@ func TestDirRejects(t *testing.T) {
 		alive bool
 		edit  func(t *testing.T, dir string)
 	}{
-		"other owner":  {uid: uint32(os.Getuid()) + 1, alive: true},
+		"other owner": {uid: uint32(os.Getuid()) + 1, alive: true},
+		// The owner is checked before the header is even mapped: a
+		// foreign file is ErrNotRing, never parsed (here: ErrCorrupt).
+		"other owner, bad header": {uid: uint32(os.Getuid()) + 1, alive: true,
+			edit: func(t *testing.T, dir string) {
+				corruptMagic(t, filepath.Join(dir, "4242.ring"))
+			}},
 		"process gone": {uid: uint32(os.Getuid()), alive: false},
 		"pid mismatch": {uid: uint32(os.Getuid()), alive: true, edit: func(t *testing.T, dir string) {
 			mustRename(t, filepath.Join(dir, "4242.ring"), filepath.Join(dir, "4241.ring"))
@@ -102,6 +122,19 @@ func TestDirRejects(t *testing.T) {
 	}
 }
 
+// corruptMagic overwrites a ring file's magic.
+func corruptMagic(t *testing.T, path string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	if _, err := f.WriteAt([]byte("NOTARING"), 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func mustRename(t *testing.T, from, to string) {
 	t.Helper()
 	if err := os.Rename(from, to); err != nil {
@@ -128,6 +161,13 @@ func TestMakeSpool(t *testing.T) {
 	}
 	if err := MakeSpool(file); err == nil {
 		t.Error("file accepted as spool")
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := MakeSpool(link); err == nil {
+		t.Error("symlink accepted as spool")
 	}
 	if _, _, err := NewDir(filepath.Join(t.TempDir(), "missing")).Scan(); err == nil {
 		t.Error("missing directory scanned")

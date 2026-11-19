@@ -36,11 +36,15 @@ truth.
   PLAN.md (#1, #28).
 - **The agent spool is untrusted input.** `iormesh run -spool`
   creates the directory mode 1733 (anyone may create, nobody may
-  list or delete another's file); the tracer, root, maps a ring
-  only if it is a regular file with one link, opened without
-  following symlinks, owned by the uid of the process its name
-  names and with that pid in its header — a planted file is
-  reported and never mapped (docs/schema.md, "Java
+  list or delete another's file) after checking, on a descriptor
+  opened without following symlinks, that it is a directory the
+  tracer's uid owns. The tracer, root, opens a ring without
+  following symlinks and maps it only if the descriptor shows a
+  regular file with one link owned by the uid of the process its
+  name names — a planted file is reported and never mapped —
+  and the mapped header must name that pid. A ring its owner
+  truncates under the mapping faults on access, which the reader
+  turns into a corrupt ring, not a crash (docs/schema.md, "Java
   attribution").
 - **Bounded by design.** Sessions end after 4h by default
   (enforced twice — by the tracer and by its systemd unit) and

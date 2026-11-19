@@ -25,6 +25,13 @@ const maxScan = 256
 // agent's bracket depth limit.
 const overlapScan = 16
 
+// hookInfo is a hook's syscall allowlist as event kinds, and whether its
+// bracket can span a virtual thread's park (canPark).
+type hookInfo struct {
+	kinds []string
+	parks bool
+}
+
 // jvm is the joiner's state for one agent ring: everything read from it
 // so far.
 type jvm struct {
@@ -36,8 +43,8 @@ type jvm struct {
 	// begins before it.
 	createdMono uint64
 	failed      bool // the ring is corrupt: decide with what was read
-	// hooks maps a hook id to the event kinds its native issues.
-	hooks map[int32][]string
+	// hooks maps a hook id to what the joiner needs of its HOOK row.
+	hooks map[int32]hookInfo
 	// threads by Java thread id; names maps a platform thread's kernel
 	// tid to its name, for the carrier of a virtual thread's I/O.
 	threads map[uint64]agentspool.Thread
@@ -52,7 +59,7 @@ type jvm struct {
 
 func newJVM(r AgentRing, pid uint32, start, createdMono, created uint64) *jvm {
 	return &jvm{ring: r, pid: pid, start: start, created: created, createdMono: createdMono,
-		hooks: map[int32][]string{}, threads: map[uint64]agentspool.Thread{},
+		hooks: map[int32]hookInfo{}, threads: map[uint64]agentspool.Thread{},
 		names: map[int32]string{}, frames: map[uint64][]string{},
 		stacks: map[uint64][]uint64{}, brackets: map[int32][]agentspool.Bracket{}}
 }
@@ -96,7 +103,7 @@ func (j *JavaJoin) drain(v *jvm) error {
 func (j *JavaJoin) record(v *jvm, rec agentspool.Record) error {
 	switch r := rec.(type) {
 	case agentspool.Hook:
-		v.hooks[r.ID] = eventKinds(r.Syscalls)
+		v.hooks[r.ID] = hookInfo{kinds: eventKinds(r.Syscalls), parks: canPark(r)}
 	case agentspool.Thread:
 		return j.thread(v, r)
 	case agentspool.Stack:

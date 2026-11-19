@@ -2254,7 +2254,7 @@ internal/correlate/javajoin.go
    func (v *jvm) innermost(tid int32, t uint64) (b agentspool.Bracket, found, ambiguous bool)
    ```
 
-   The BPF uprobe mark is **not built yet** (no task has it; it
+   The BPF uprobe mark is **not built yet** (task td4; it
    needs uprobes by library path with BPF cookies, the mark read
    in the syscall handlers, nr 335 dropped, a reset on thread
    exit). The join therefore pairs on what the agent alone gives:

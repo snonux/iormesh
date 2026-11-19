@@ -113,7 +113,9 @@ type JavaStats struct {
 	OtherKind   uint64 // inside a bracket whose hook does not issue this kind
 	Ambiguous   uint64 // overlapping brackets, or a folded read/write
 	NoStack     uint64 // the bracket's stack was not delivered (or not walked)
-	TimedOut    uint64 // released by Timeout before the watermark passed
+	// TimedOut counts events released by Timeout before the watermark
+	// passed, joined or not (they are also counted above).
+	TimedOut uint64
 	// Lost is the agents' loss counters, summed over the rings.
 	Lost agentspool.Losses
 }

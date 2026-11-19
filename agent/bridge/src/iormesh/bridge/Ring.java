@@ -1,7 +1,6 @@
 package iormesh.bridge;
 
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.nio.ByteBuffer;
@@ -9,7 +8,12 @@ import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.util.Set;
 
 /**
  * The agent → tracer transport (decision #27): one memory-mapped ring
@@ -117,9 +121,15 @@ public final class Ring {
         long pid = ProcessHandle.current().pid();
         Path path = dir.resolve(pid + ".ring");
         Files.deleteIfExists(path);
-        try (RandomAccessFile f = new RandomAccessFile(path.toFile(), "rw")) {
-            f.setLength(DATA + capacity);
-            ByteBuffer b = f.getChannel().map(FileChannel.MapMode.READ_WRITE, 0, DATA + capacity);
+        // CREATE_NEW and NOFOLLOW_LINKS: the spool is writable by every
+        // user, so a file or symlink someone placed under our name after
+        // the delete fails the install instead of being written through;
+        // 0600, so no other user can read or truncate the ring. Mapping
+        // past the end grows the file to its full size.
+        try (FileChannel f = FileChannel.open(path, Set.<OpenOption>of(StandardOpenOption.CREATE_NEW,
+                StandardOpenOption.READ, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS),
+                PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))) {
+            ByteBuffer b = f.map(FileChannel.MapMode.READ_WRITE, 0, DATA + capacity);
             b.order(ByteOrder.LITTLE_ENDIAN);
             b.putInt(8, VERSION);
             b.putInt(12, DATA);

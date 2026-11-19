@@ -2,6 +2,7 @@ package correlate
 
 import (
 	"slices"
+	"strings"
 
 	"golang.org/x/sys/unix"
 
@@ -30,6 +31,19 @@ func eventKinds(syscalls []string) []string {
 	return out
 }
 
+// canPark says whether a hook's bracket can contain a park of a virtual
+// thread. A hook whose native is its own class's (FileInputStream.read →
+// readBytes) wraps the native call alone, during which a virtual thread
+// is pinned to its carrier. A hook that reaches another class's native
+// (NioSocketImpl.accept → Net.accept, the hook table's qualified
+// "owner.name") runs JDK Java code around it, which for a virtual
+// thread waits in the poller: it unmounts, its carrier runs other
+// virtual threads, and it may resume on the same carrier — which the
+// agent's enter/exit tid comparison cannot tell from never leaving.
+func canPark(h agentspool.Hook) bool {
+	return strings.Contains(h.Native, ".")
+}
+
 // attribute joins ev to v's brackets, setting attribution java and the
 // java object when one bracket's hook explains it; otherwise ev keeps
 // attribution none and the reason is counted. Method and thread table
@@ -40,14 +54,15 @@ func (j *JavaJoin) attribute(ev *schema.Event, v *jvm) error {
 		return nil
 	}
 	b, found, ambiguous := v.innermost(int32(ev.TID), j.mono(ev.BootNS))
+	hook := v.hooks[b.Hook]
 	switch {
 	case !found:
 		j.stats.Unbracketed++
 		return nil
-	case ambiguous:
+	case ambiguous || v.mayHaveParked(b, hook):
 		j.stats.Ambiguous++
 		return nil
-	case !slices.Contains(v.hooks[b.Hook], ev.Event):
+	case !slices.Contains(hook.kinds, ev.Event):
 		// JVM work inside the bracket, or a hook whose HOOK row was lost.
 		j.stats.OtherKind++
 		return nil
@@ -59,6 +74,17 @@ func (j *JavaJoin) attribute(ev *schema.Event, v *jvm) error {
 	}
 	j.setJava(ev, v, b, stack)
 	return nil
+}
+
+// mayHaveParked: b is a virtual thread's bracket (or one whose THREAD
+// record never came) of a hook that can park. Its window on the carrier
+// may hold other virtual threads' syscalls — one whose own bracket was
+// dropped or moved carriers (tid 0) would land in it — so nothing joins
+// it: never a guess, at the price of those hooks' own I/O on virtual
+// threads staying none.
+func (v *jvm) mayHaveParked(b agentspool.Bracket, h hookInfo) bool {
+	th, known := v.threads[b.ThreadID]
+	return h.parks && (!known || th.Virtual)
 }
 
 // setJava marks ev as joined to b. A virtual thread's I/O is flagged and

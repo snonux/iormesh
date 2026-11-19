@@ -48,6 +48,9 @@ func TestJavaMethodFlow(t *testing.T) {
 				x.Events[1].Java = &normalize.ExpectedJava{Thread: "main",
 					Method: "iormesh.workload.scenarios.MethodFlow$Journal#create"}
 			},
+			"declared unattributed": func(x *normalize.Expectation) {
+				x.Events[1].Attribution, x.Events[1].Java = schema.AttributionNone, nil
+			},
 			"another thread": func(x *normalize.Expectation) {
 				j := *x.Events[1].Java
 				j.Thread = "method-flow-worker"

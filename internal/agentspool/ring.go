@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"sync/atomic"
 	"syscall"
 	"unsafe"
@@ -27,9 +28,10 @@ type Ring struct {
 	hdr    Header
 	tail   uint64
 	mask   uint64
-	losses Losses // reader-side counters (Unknown, Malformed)
-	err    error  // sticky ErrCorrupt
-	owner  uint32 // the file's uid
+	losses Losses   // reader-side counters (Unknown, Malformed)
+	err    error    // sticky ErrCorrupt
+	owner  uint32   // the file's uid
+	batch  []Record // Drain's records, reused between drains
 }
 
 // Open maps the ring file read-write (the reader zeroes what it consumed
@@ -38,27 +40,28 @@ type Ring struct {
 // descriptor, which is closed before Open returns. A file shorter than
 // the header is also ErrNotReady: the agent has created but not yet
 // sized it.
+func Open(path string) (*Ring, error) {
+	return OpenOwned(path, nil)
+}
+
+// OpenOwned is Open with the file's owner checked before anything is
+// mapped: owner gets the uid from fstat of the open descriptor, and an
+// error from it rejects the file unmapped.
 //
 // The tracer runs as root and the spool directory is writable by the
 // targets, so the file is opened without following a symlink and must be
 // a regular file with one link: mapping a planted link to another file
 // read-write would let a target have the tracer zero that file's bytes.
-// Its owner (Owner) is for the caller to check against the JVM's.
-func Open(path string) (*Ring, error) {
-	f, err := os.OpenFile(path, os.O_RDWR|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
-	if errors.Is(err, syscall.ELOOP) {
-		return nil, fmt.Errorf("%s: a symlink: %w", path, ErrNotRing)
-	}
+func OpenOwned(path string, owner func(uid uint32) error) (*Ring, error) {
+	f, st, err := openRingFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("agentspool: %w", err)
+		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	var st syscall.Stat_t
-	if err := syscall.Fstat(int(f.Fd()), &st); err != nil {
-		return nil, fmt.Errorf("agentspool: %w", err)
-	}
-	if st.Mode&syscall.S_IFMT != syscall.S_IFREG || st.Nlink != 1 {
-		return nil, fmt.Errorf("%s: not a regular file with one link: %w", path, ErrNotRing)
+	if owner != nil {
+		if err := owner(st.Uid); err != nil {
+			return nil, err
+		}
 	}
 	if st.Size < headerSize {
 		// The agent sizes the file right after creating it: a file this
@@ -72,11 +75,55 @@ func Open(path string) (*Ring, error) {
 		return nil, fmt.Errorf("agentspool: mmap %s: %w", path, err)
 	}
 	r := &Ring{mem: mem, owner: st.Uid}
-	if err := r.checkHeader(); err != nil {
+	if err := guarded(r.checkHeader); err != nil {
 		_ = syscall.Munmap(mem)
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return r, nil
+}
+
+// openRingFile opens path without following a symlink (and without
+// blocking on a FIFO) and requires a regular file with one link.
+func openRingFile(path string) (*os.File, syscall.Stat_t, error) {
+	var st syscall.Stat_t
+	f, err := os.OpenFile(path, os.O_RDWR|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if errors.Is(err, syscall.ELOOP) {
+		return nil, st, fmt.Errorf("%s: a symlink: %w", path, ErrNotRing)
+	}
+	if err != nil {
+		return nil, st, fmt.Errorf("agentspool: %w", err)
+	}
+	if err := syscall.Fstat(int(f.Fd()), &st); err != nil {
+		return nil, st, errors.Join(fmt.Errorf("agentspool: %w", err), f.Close())
+	}
+	if st.Mode&syscall.S_IFMT != syscall.S_IFREG || st.Nlink != 1 {
+		return nil, st, errors.Join(fmt.Errorf("%s: not a regular file with one link: %w",
+			path, ErrNotRing), f.Close())
+	}
+	return f, st, nil
+}
+
+// guarded runs fn, which reads the mapping, with memory faults turned
+// into ErrCorrupt instead of a crash: the ring file belongs to the
+// traced user, who can truncate it under the tracer's MAP_SHARED mapping,
+// and the access past the new end raises SIGBUS. SetPanicOnFault is per
+// goroutine, so it is set and restored around the access by the
+// goroutine making it. Only the mapping's own reads run inside — never
+// a caller's callback, whose nil dereference must stay a crash.
+func guarded(fn func() error) (err error) {
+	old := debug.SetPanicOnFault(true)
+	defer debug.SetPanicOnFault(old)
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		if _, fault := r.(interface{ Addr() uintptr }); !fault {
+			panic(r)
+		}
+		err = fmt.Errorf("fault reading the mapped ring (file truncated?): %w", ErrCorrupt)
+	}()
+	return fn()
 }
 
 // Close unmaps the ring. The file stays: it is the tracer's to delete.
@@ -105,13 +152,27 @@ func (r *Ring) Header() Header {
 // non-zero after the JVM exited means a writer died mid-record; those
 // records are lost.
 func (r *Ring) Pending() uint64 {
-	return r.word(offHead) - r.tail
+	var n uint64
+	if err := guarded(func() error { n = r.word(offHead) - r.tail; return nil }); err != nil {
+		r.err = err
+		return 0
+	}
+	return n
 }
 
 // Losses returns the cumulative loss counters: the agent's, read from the
 // header now, and the reader's own.
 func (r *Ring) Losses() Losses {
 	l := r.losses
+	if err := guarded(func() error { l = r.agentLosses(l); return nil }); err != nil {
+		r.err = err
+		return r.losses
+	}
+	return l
+}
+
+// agentLosses adds the agent's header counters to l.
+func (r *Ring) agentLosses(l Losses) Losses {
 	l.DroppedBrackets = r.word(offDropped + 8*typeBracket)
 	l.DroppedStacks = r.word(offDropped + 8*typeStack)
 	l.DroppedThreads = r.word(offDropped + 8*typeThread)

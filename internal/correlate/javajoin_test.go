@@ -98,6 +98,8 @@ func (jt *joinTest) ring(recs ...agentspool.Record) *fakeRing {
 			Native: "writeBytes", Syscalls: []string{"write"}},
 		agentspool.Hook{ID: 2, Kind: "stat", Class: "sun/nio/fs/UnixNativeDispatcher",
 			Method: "stat", Native: "stat0", Syscalls: []string{"stat", "statx"}},
+		agentspool.Hook{ID: 3, Kind: "accept", Class: "sun/nio/ch/NioSocketImpl", Method: "accept",
+			Native: "sun/nio/ch/Net.accept", Syscalls: []string{"accept", "accept4"}},
 		agentspool.Thread{ID: 1, KTID: mainTID, Name: "main"},
 		agentspool.Stack{ID: 10, Frames: []string{"java.io.FileOutputStream#writeBytes(FileOutputStream.java:-2)",
 			"app.Main#save(Main.java:12)"}},
@@ -417,5 +419,36 @@ func TestJavaJoinCompacts(t *testing.T) {
 	jt.close()
 	if len(jt.sink.events) != 200 { // memSink checks the seq order
 		t.Fatalf("%d events", len(jt.sink.events))
+	}
+}
+
+// TestJavaJoinParkingHook: a hook that can park (its native is another
+// class's) joins on a platform thread, but never on a virtual thread or
+// one whose THREAD record is missing: the carrier may have run another
+// virtual thread inside that window, whose own bracket was lost.
+func TestJavaJoinParkingHook(t *testing.T) {
+	const carrier = 90
+	cases := map[string]struct {
+		thread uint64
+		tid    int32
+		joined bool
+	}{
+		"platform thread": {1, mainTID, true},
+		"virtual thread":  {3, carrier, false},
+		"unknown thread":  {9, mainTID, false},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			jt := newJoinTest(t)
+			at := jt.now + 1000
+			jt.ring(agentspool.Thread{ID: 3, KTID: carrier, Virtual: true},
+				jt.bracket(3, c.tid, at-50, at+500, 10, c.thread), jt.watermark(at+20_000_000))
+			jt.event(jvmPID, uint32(c.tid), "accept4", at)
+			jt.close()
+			joined := jt.sink.events[0].Attribution == schema.AttributionJava
+			if joined != c.joined || (!joined && jt.j.Stats().Ambiguous != 1) {
+				t.Errorf("joined %v, want %v; stats %+v", joined, c.joined, jt.j.Stats())
+			}
+		})
 	}
 }

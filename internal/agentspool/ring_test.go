@@ -297,3 +297,40 @@ func TestOpenRejects(t *testing.T) {
 		t.Errorf("missing file: %v", err)
 	}
 }
+
+// TestTruncatedUnderReader: the traced user owns the ring file and may
+// truncate it while the tracer has it mapped; the reads past the new end
+// fault (SIGBUS), which must mark the ring corrupt, not kill the tracer.
+func TestTruncatedUnderReader(t *testing.T) {
+	path, w := newTestRing(t, testCap)
+	r := openRing(t, path)
+	if !w.bracket(Bracket{Hook: 1, ExitMono: 1}) || len(drainAll(t, r)) != 1 {
+		t.Fatal("first record")
+	}
+	if err := os.Truncate(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Drain(func(Record) {}); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("Drain after truncate: %v, want ErrCorrupt", err)
+	}
+	_ = r.Losses()
+	_ = r.Pending()
+	if _, err := r.Drain(func(Record) {}); !errors.Is(err, ErrCorrupt) {
+		t.Errorf("not sticky: %v", err)
+	}
+}
+
+// TestDrainCallbackPanics: a fault in the caller's callback is not taken
+// for the ring's: it still panics.
+func TestDrainCallbackPanics(t *testing.T) {
+	path, w := newTestRing(t, testCap)
+	r := openRing(t, path)
+	w.bracket(Bracket{Hook: 1, ExitMono: 1})
+	defer func() {
+		if recover() == nil {
+			t.Error("callback's nil dereference was swallowed")
+		}
+	}()
+	var p *Bracket
+	_, _ = r.Drain(func(Record) { _ = p.Hook })
+}

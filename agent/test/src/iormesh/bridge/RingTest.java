@@ -53,6 +53,8 @@ public final class RingTest {
         equal(Ring.MIN_CAPACITY, b.getLong(16), "capacity");
         equal(ProcessHandle.current().pid(), b.getLong(24), "pid");
         equal((long) Ring.DATA + Ring.MIN_CAPACITY, Files.size(r.path()), "file size");
+        equal("rw-------", java.nio.file.attribute.PosixFilePermissions.toString(
+                Files.getPosixFilePermissions(r.path())), "mode 0600");
         delete(dir);
     }
 

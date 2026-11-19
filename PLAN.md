@@ -554,7 +554,7 @@ Gated by S1 — done; the design below is S1's result
   ambiguous matches stay in the trace marked `attribution:
   none` — never guessed. Built in task 2b4 (`iormesh run
   -spool`, `correlate.JavaJoin`) *without* the uprobe mark,
-  which no task has built yet: the join pairs the event's tid
+  which task td4 builds (gating 5b4): the join pairs the event's tid
   and its boot-clock start, converted to CLOCK_MONOTONIC with a
   user-space midpoint offset (S1's conversion), with the
   innermost containing bracket, and the hook's syscall
@@ -630,7 +630,11 @@ Gated by S1 — done; the design below is S1's result
   trace/span ids; the HTTP scenarios produce the expected
   http events, and the redaction expectations hold — the
   planted header, query secret and argv secret never appear;
-  agent overhead stays inside the budget (decision #25).
+  agent overhead stays inside the budget (decision #25). The
+  join itself (`-spool`) measured 5.2 µs per event when every
+  event of the S3 burst is joined (task 2b4,
+  docs/spikes/s3-overhead.md "Follow-up (2b4)") — over the
+  ≤ 2 µs budget; task ud4 brings it under, gating 5b4.
 
 ### M4 — Controller (`iormeshctl`): push, collect, merge locally
 
@@ -1087,7 +1091,9 @@ answer), and deferred.
      wc4 brought it to ~1.5–2 µs on a busy host; task md4
      measured 1.2 µs at 1 thread and 1.7 µs at 4, unfolded,
      medians of 5 — s3-overhead.md, "Follow-up (wc4)" and
-     "Follow-up (md4)"). Measured as the tracer's own user+sys
+     "Follow-up (md4)"). With the Java join (`-spool`, every
+     event joined): 5.2 µs, over budget — task ud4, gating M3's
+     acceptance (5b4). Measured as the tracer's own user+sys
      CPU time per event from its ready file to its exit (load
      and attach excluded), which host load moves less than wall
      time — not nothing: on a loaded SMT host one thread's CPU
