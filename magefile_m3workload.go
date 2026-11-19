@@ -28,6 +28,7 @@ var m3UsageErrors = [][]string{
 	{"http-plain", "--role", "client"},
 	{"http-plain", "--role", "client", "--port", "0"},
 	{"http-plain", "--role", "server", "--dir", "x"},
+	{"http-async", "--role", "solo"},
 	{"http-redaction", "--role", "solo"},
 	{"http-redaction", "--role", "client", "--port", "abc"},
 	{"http-tls", "--role", "solo"},
@@ -37,7 +38,7 @@ var m3UsageErrors = [][]string{
 // checkM3Scenarios runs the HTTP pairs, the run-time failures, then the
 // OTEL flavor from its own jar.
 func checkM3Scenarios() error {
-	for _, name := range []string{"http-plain", "http-redaction"} {
+	for _, name := range []string{"http-plain", "http-redaction", "http-async"} {
 		if err := checkTwoRoles(name, nil, portClient); err != nil {
 			return err
 		}

@@ -29,8 +29,14 @@ final class HttpFetch {
 
     private HttpFetch() {}
 
-    /** Sends calls in order to base (http(s)://127.0.0.1:port). */
-    static void run(URI base, List<HttpCall> calls, SSLContext tls) throws Exception {
+    /**
+     * Sends calls in order to base (http(s)://127.0.0.1:port, or
+     * localhost for http-async); async sends each through sendAsync and
+     * waits for it before the next, so the calls still share one
+     * keep-alive connection in order.
+     */
+    static void run(URI base, List<HttpCall> calls, SSLContext tls, boolean async)
+            throws Exception {
         HttpClient.Builder b = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(TIMEOUT);
@@ -41,20 +47,45 @@ final class HttpFetch {
         // scenario's end marker, so the client's close is in the bracket.
         try (HttpClient client = b.build()) {
             for (HttpCall c : calls) {
-                call(client, base, c);
+                if (async) {
+                    callAsync(client, base, c);
+                } else {
+                    call(client, base, c);
+                }
             }
         }
     }
 
     /** One declared call: send it, then check status, body and headers. */
     static void call(HttpClient client, URI base, HttpCall c) throws Exception {
+        HttpResponse<String> resp = client.send(request(base, c),
+                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        check(c, resp);
+    }
+
+    /**
+     * The same through sendAsync, the causing method of http-async's
+     * client events: the agent records the request from the completing
+     * thread under this caller's stack.
+     */
+    static void callAsync(HttpClient client, URI base, HttpCall c) throws Exception {
+        HttpResponse<String> resp = client.sendAsync(request(base, c),
+                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+                .get(TIMEOUT.toSeconds(), java.util.concurrent.TimeUnit.SECONDS);
+        check(c, resp);
+    }
+
+    private static HttpRequest request(URI base, HttpCall c) {
         HttpRequest.Builder req = HttpRequest.newBuilder(base.resolve(c.target()))
                 .timeout(TIMEOUT)
                 .method(c.method(), c.body().isEmpty() ? HttpRequest.BodyPublishers.noBody()
                         : HttpRequest.BodyPublishers.ofString(c.body(), StandardCharsets.UTF_8));
         c.headers().forEach(req::header);
-        HttpResponse<String> resp = client.send(req.build(),
-                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        return req.build();
+    }
+
+    /** The reply must be the declared status, body and reply headers. */
+    private static void check(HttpCall c, HttpResponse<String> resp) throws IOException {
         if (resp.statusCode() != c.status() || !resp.body().equals(c.reply())) {
             throw new IOException(c.where() + ": want " + c.status() + " " + c.reply()
                     + ", got " + resp.statusCode() + " " + resp.body());

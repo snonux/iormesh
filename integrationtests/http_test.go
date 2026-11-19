@@ -90,6 +90,29 @@ func TestHTTPPlain(t *testing.T) {
 	})
 }
 
+// TestHTTPAsync: http-async's client sends through HttpClient.sendAsync
+// (task wd4): each response completes on the client's executor, yet its
+// http event carries the sending thread and method (HttpFetch#callAsync),
+// the latency from the sendAsync call, and pairs with the server's.
+func TestHTTPAsync(t *testing.T) {
+	enableParallelIfRequested(t)
+	h := newHarness(t)
+	_, got := traceHTTP(t, h, "http-async", false)
+	want := expectation(t, "http-async")
+	assertGolden(t, got, want)
+	assertRequestsPaired(t, got.Events)
+	t.Run("wrong expectations are caught", func(t *testing.T) {
+		assertCaught(t, got, want, map[string]func(*normalize.Expectation){
+			"the synchronous send": func(x *normalize.Expectation) {
+				// Declared event 11 is the client's first http event.
+				j := *x.Events[11].Java
+				j.Method = "iormesh.workload.scenarios.HttpFetch#call"
+				x.Events[11].Java = &j
+			},
+		})
+	})
+}
+
 // TestHTTPTLS: the same over TLS — the events come from the API
 // boundary, so the requests are seen in the clear without touching the
 // wire, scheme https on both ends.

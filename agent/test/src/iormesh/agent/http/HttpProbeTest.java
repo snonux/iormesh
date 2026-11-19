@@ -29,7 +29,8 @@ public final class HttpProbeTest {
                 new AgentTests.Case("http/redaction masks", HttpProbeTest::redaction),
                 new AgentTests.Case("http/addresses and literals", HttpProbeTest::addresses),
                 new AgentTests.Case("http/client response", HttpProbeTest::client),
-                new AgentTests.Case("http/declared body sizes", HttpProbeTest::sizes));
+                new AgentTests.Case("http/declared body sizes", HttpProbeTest::sizes),
+                new AgentTests.Case("http/sendAsync completion", HttpProbeTest::async));
     }
 
     static void redaction() {
@@ -80,6 +81,43 @@ public final class HttpProbeTest {
         new Request().toRecord(meta);
         equal(0L, meta[4], "a start not adopted is cleared");
         equal(-1L, meta[5], "sizes unknown by default");
+    }
+
+    /**
+     * sendAsync: the caller's identity is taken at the return, the request
+     * described only when the future completes, through late, with the
+     * sendAsync's own start and its hook id; a failed future records
+     * nothing; one done at the return is recorded at once.
+     */
+    static void async() {
+        List<long[]> lates = new java.util.ArrayList<>();
+        List<String[]> described = new java.util.ArrayList<>();
+        long[] meta = {0, 0, 0, 0, 0, -1, -1};
+        Async a = new Async(() -> new long[] {1, 2, 3, 4, 5, 6}, (c, f) -> {
+            lates.add(c);
+            described.add(f.apply(meta));
+        });
+        JdkHttpClient.SentAsync probe = new JdkHttpClient.SentAsync(new Weak<>(), a);
+        Object self = new Object();
+        java.util.concurrent.CompletableFuture<HttpResponse<String>> ok =
+                new java.util.concurrent.CompletableFuture<>();
+        check(probe.apply(new Object[] {ok, self, null, self, 7}, new long[] {0, 0, 0, 0, 42, -1, -1})
+                == null, "nothing recorded at the return");
+        equal(0, lates.size(), "nothing late yet");
+        ok.complete(new FakeResponse(null));
+        equal(List.of(1L, 2L, 3L, 4L, 5L, 6L, 7L), java.util.Arrays.stream(lates.get(0)).boxed()
+                .toList(), "caller identity and hook id");
+        equal("/a?k=***", described.get(0)[3], "the response described");
+        equal(42L, meta[4], "sendAsync's start");
+        java.util.concurrent.CompletableFuture<HttpResponse<String>> bad =
+                new java.util.concurrent.CompletableFuture<>();
+        probe.apply(new Object[] {bad, self, null, self, 7}, new long[7]);
+        bad.completeExceptionally(new java.io.IOException("refused"));
+        equal(1, lates.size(), "a failed future records nothing");
+        long[] now = {0, 0, 0, 0, 42, -1, -1};
+        String[] s = probe.apply(new Object[] {java.util.concurrent.CompletableFuture
+                .completedFuture(new FakeResponse(null)), self, null, self, 7}, now);
+        check(s != null && now[4] == 42, "done at the return: recorded at once");
     }
 
     static void client() {

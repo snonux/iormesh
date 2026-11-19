@@ -28,6 +28,10 @@ import javax.net.ssl.SSLContext;
  *                   Cookie headers, a query value and a Set-Cookie reply —
  *                   decision #9/#22's policy must keep every one of them
  *                   out of the trace (expect.json's must_not_appear)
+ *   http-async      http-plain's calls through HttpClient.sendAsync, to
+ *                   "localhost" instead of the literal: the client
+ *                   resolves the name (task wd4: sendAsync and the DNS
+ *                   hooks of decision #8)
  *
  *   --role server [--port N] [--dir D]   serve the calls, then stop
  *   --role client  --port N  [--dir D]   send the calls, then close
@@ -60,24 +64,31 @@ public final class HttpScenario implements Scenario {
 
     private final String name;
     private final boolean tls;
+    /** http-async's client: sendAsync, and the server named "localhost". */
+    private final boolean async;
     private final List<HttpCall> calls;
 
-    private HttpScenario(String name, boolean tls, List<HttpCall> calls) {
+    private HttpScenario(String name, boolean tls, boolean async, List<HttpCall> calls) {
         this.name = name;
         this.tls = tls;
+        this.async = async;
         this.calls = calls;
     }
 
     public static HttpScenario plain() {
-        return new HttpScenario("http-plain", false, basicCalls("/plain"));
+        return new HttpScenario("http-plain", false, false, basicCalls("/plain"));
     }
 
     public static HttpScenario tls() {
-        return new HttpScenario("http-tls", true, basicCalls("/tls"));
+        return new HttpScenario("http-tls", true, false, basicCalls("/tls"));
+    }
+
+    public static HttpScenario async() {
+        return new HttpScenario("http-async", false, true, basicCalls("/async"));
     }
 
     public static HttpScenario redaction() {
-        return new HttpScenario("http-redaction", false, List.of(
+        return new HttpScenario("http-redaction", false, false, List.of(
                 HttpCall.get("/redact/login?user=alice&token=" + QUERY_SECRET, 200, "welcome")
                         .withHeader("Authorization", "Bearer " + AUTH_SECRET)
                         .withHeader("X-Api-Token", API_SECRET)
@@ -176,8 +187,12 @@ public final class HttpScenario implements Scenario {
             }
             ctx = SelfSignedCert.clientContext(der);
         }
-        URI base = URI.create((tls ? "https" : "http") + "://127.0.0.1:" + port + "/");
-        HttpFetch.run(base, calls, ctx);
+        // http-async names the server: its client resolves "localhost"
+        // (the server listens on 127.0.0.1, which the JDK prefers among
+        // the name's addresses), the others use the literal.
+        URI base = URI.create((tls ? "https" : "http") + "://"
+                + (async ? "localhost" : "127.0.0.1") + ":" + port + "/");
+        HttpFetch.run(base, calls, ctx, async);
     }
 
     private static InetAddress loopback() {

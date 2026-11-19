@@ -2434,7 +2434,19 @@ internal/correlate/javajoin.go
      caller's thread (`HttpFetch#call`). The response does not
      know its connection; `HttpResponseImpl`'s constructor gets
      the JDK's `Response`, whose `localAddress` a binding hook
-     ties to the response. `sendAsync` is not recorded.
+     ties to the response. `sendAsync` (task wd4): the public
+     three-argument overload (the two-argument one and the facade
+     reach it, `send` does not) is stamped; its probe takes the
+     caller's identity — stack id (walked past the probe's own
+     frames, `StackIds.belowAgent`), thread, kernel tid, OTEL span —
+     through `Hooks.httpCaller()` and registers a completion on the
+     returned future, which hands it with a describer to
+     `Hooks.httpLate()`: the describer runs like a probe (busy
+     thread, meta) on the completing thread and the record goes out
+     under the caller's identity. A future already done at the
+     return is recorded right there; one that fails records
+     nothing; a completion that lands on a busy thread counts as a
+     lost HTTP record (numbering stops, never shifts).
    - **HttpURLConnection**: `getInputStream0`'s first exit with a
      response code (`getResponseCode` and the header getters go
      through it; a 404 throws after reading the response), reading
@@ -2513,8 +2525,13 @@ internal/correlate/javajoin.go
    tests, goldens `http-plain`/`http-tls` declare the sizes and
    every integration HTTP run checks each event has a latency.
 
-   Not yet: `sendAsync`, Servlet, Apache HttpClient, OkHttp, Netty,
-   and the DNS hooks (#8).
+   `sendAsync` is covered by the `http-async` scenario (task wd4:
+   http-plain's calls through `sendAsync`, to `localhost`),
+   `TestHTTPAsync`, `HttpProbeTest`'s completion case and the
+   smoke's extra request (six HTTP records per JDK).
+
+   Not yet: Servlet, Apache HttpClient, OkHttp, Netty, and the DNS
+   hooks (#8).
 8. OTEL (done, task 4b4): read `Span.current().getSpanContext()`
    reflectively in the app's class loader at `enter` and add the
    ids to the bracket. No OTEL dependency in the agent. The `otel`

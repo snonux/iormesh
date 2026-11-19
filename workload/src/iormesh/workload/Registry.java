@@ -45,6 +45,7 @@ final class Registry {
         r.add(new FileBasic());
         r.add(new FileLifecycle());
         r.add(new FileLinks());
+        r.add(HttpScenario.async());
         r.add(HttpScenario.plain());
         r.add(HttpScenario.redaction());
         r.add(HttpScenario.tls());

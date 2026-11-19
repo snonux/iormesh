@@ -83,7 +83,7 @@ public final class Hooks {
     private static final ThreadLocal<Brackets> STATE = ThreadLocal.withInitial(Brackets::new);
     /**
      * The HTTP probes by HTTP hook id (iormesh.agent.http): given {return
-     * value, this, argument, open} of a hooked method — open is the this
+     * value, this, argument, open, id} of a hooked method — open is the this
      * of the innermost entry-stamped HTTP hook running on the thread (the
      * method's own this at an entry-stamped hook's exit), or null — and a
      * long[Ring.META] to fill (Ring.M_*: status, request-header count,
@@ -188,6 +188,110 @@ public final class Hooks {
         }
     }
 
+    /**
+     * A request that completes later on another thread (HttpClient's
+     * sendAsync, task wd4) is recorded in two steps: its probe, still on
+     * the caller's thread, takes the caller's identity with
+     * {@link #httpCaller()}'s supplier — stack id, Java thread id, kernel
+     * tid and OTEL span, so the event names who sent the request — and
+     * the completion hands that identity (with the sending hook's id
+     * appended) and a describer to {@link #httpLate()}'s consumer, which
+     * runs the describer like a probe — the thread busy, meta to fill —
+     * and writes the request. JDK types only, as for probes; the agent
+     * core gets both once, reflectively.
+     */
+    public static java.util.function.Supplier<long[]> httpCaller() {
+        return Hooks::caller;
+    }
+
+    /** See {@link #httpCaller()}. */
+    public static java.util.function.BiConsumer<long[], java.util.function.Function<long[], String[]>>
+            httpLate() {
+        return Hooks::late;
+    }
+
+    /** Length of {@link #caller}'s result: stack, thread, ktid, OTEL hi, lo, span. */
+    static final int CALLER = 6;
+
+    /**
+     * The calling thread's identity for a later record; called inside a
+     * probe (the thread is busy, so the walk brackets nothing).
+     */
+    private static long[] caller() {
+        Brackets t = STATE.get();
+        Ring r = ring;
+        if (r != null && !t.described && System.nanoTime() >= t.retryAt) {
+            describe(t, r);
+        }
+        // Walked inside the probe: its frames are dropped too. Off like
+        // every walk when configure(stack=false) said so.
+        long stack = stacks == NO_WALK ? StackIds.NONE : StackIds.belowAgent();
+        int ktid = t.virtual ? Brackets.lookupKtid() : t.kernelTid();
+        Otel.read(t);
+        return new long[] {stack, t.owner.getId(), ktid, t.otelHi, t.otelLo, t.otelSpan};
+    }
+
+    /**
+     * Writes a request finished on the completing thread under the
+     * caller's identity: c is caller() then the sending hook's id; the
+     * describer fills meta (sizes -1, no start, until it says otherwise)
+     * and returns the strings, or null. Stamped now, under the watermark
+     * promise like any HTTP record; a busy thread or a failure counts as a
+     * lost HTTP record. Never throws.
+     */
+    private static void late(long[] c, java.util.function.Function<long[], String[]> describer) {
+        Ring r = ring;
+        try {
+            if (r == null || c == null || describer == null || c.length != CALLER + 1) {
+                return;
+            }
+            Brackets t = STATE.get();
+            if (t.busy) {
+                countSkip(SKIPS);
+                httpLost(r);
+                return;
+            }
+            t.busy = true;
+            try {
+                if (lateRecord(t, r, c, describer)) {
+                    int id = (int) c[CALLER];
+                    if (id > 0 && id < httpCounts.length()) {
+                        httpCounts.incrementAndGet(id);
+                    }
+                }
+            } finally {
+                t.busy = false;
+            }
+        } catch (Throwable e) {
+            countSkip(FAILS);
+            httpLost(r);
+        }
+    }
+
+    /** late's record, marked closing from before its stamp (see request). */
+    private static boolean lateRecord(Brackets t, Ring r, long[] c,
+                                      java.util.function.Function<long[], String[]> describer) {
+        t.closing = System.nanoTime();
+        VarHandle.fullFence();   // as in close: the stamp after the mark
+        try {
+            long mono = System.nanoTime();
+            long[] meta = new long[Ring.META];
+            meta[Ring.M_REQ_BYTES] = -1;
+            meta[Ring.M_RESP_BYTES] = -1;
+            String[] s = describer.apply(meta);
+            if (s == null) {
+                return false;
+            }
+            if (meta[Ring.M_START] > mono) {
+                meta[Ring.M_START] = 0;
+            }
+            r.http(mono, c[0], c[1], (int) c[2], s, meta, c[3], c[4], c[5]);
+            return true;
+        } finally {
+            t.closing = Brackets.IDLE;
+        }
+    }
+
     /** Requests recorded so far per HTTP hook id (index = id). */
     public static long[] httpCounts() {
         AtomicLongArray c = httpCounts;
@@ -250,6 +354,7 @@ public final class Hooks {
                 r.dropped();
             }
             stacks.getAsLong();
+            StackIds.belowAgent();   // sendAsync's caller walk, linked now too
             Otel.read(t);   // loads Otel now, not inside the target's first I/O
         } finally {
             t.busy = false;
@@ -441,7 +546,7 @@ public final class Hooks {
             }
             t.busy = true;
             try {
-                if (request(t, r, p[id], new Object[] {ret, self, arg, open}, start)
+                if (request(t, r, p[id], new Object[] {ret, self, arg, open, id}, start)
                         && id < httpCounts.length()) {
                     httpCounts.incrementAndGet(id);
                 }

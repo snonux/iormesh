@@ -137,6 +137,20 @@ final class Bridge {
                 .invoke(null, id, probe);
     }
 
+    /** See Hooks.httpCaller: the caller's identity for a request completing later. */
+    @SuppressWarnings("unchecked")
+    java.util.function.Supplier<long[]> httpCaller() throws ReflectiveOperationException {
+        return (java.util.function.Supplier<long[]>) hooks.getMethod("httpCaller").invoke(null);
+    }
+
+    /** See Hooks.httpLate: writes a request that completed on another thread. */
+    @SuppressWarnings("unchecked")
+    java.util.function.BiConsumer<long[], java.util.function.Function<long[], String[]>> httpLate()
+            throws ReflectiveOperationException {
+        return (java.util.function.BiConsumer<long[], java.util.function.Function<long[], String[]>>)
+                hooks.getMethod("httpLate").invoke(null);
+    }
+
     /** See Hooks.httpCounts: requests recorded per HTTP hook id. */
     long[] httpCounts() throws ReflectiveOperationException {
         return (long[]) hooks.getMethod("httpCounts").invoke(null);

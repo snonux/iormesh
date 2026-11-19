@@ -722,9 +722,13 @@ next request on a connection only after the previous response, which
 rules that out for the JDK's libraries.
 
 The summary line counts the http events and those without a
-connection. Not recorded in v1: `HttpClient.sendAsync` (its response
-completes on the client's executor, with no caller on the stack) and
-the other libraries of #22's set.
+connection. `HttpClient.sendAsync` (task wd4) is recorded when its
+future completes — on the client's executor — but under the sending
+thread: its `tid`, `java.thread` and stack (the method that called
+`sendAsync`) and the OTEL span current at the call, with the latency
+from the call; a failed or cancelled future records nothing, like a
+`send` that throws. Not recorded in v1: the other libraries of #22's
+set.
 
 The agent writes each request as an HTTP record of the ring
 (format version 5: exit stamp, stack id, Java thread id, kernel

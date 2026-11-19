@@ -270,7 +270,7 @@ Scenario catalogue, by the milestone it lands with:
 | M1 | File data ops (open/read/write/close) — `file-basic`; TCP client ↔ server on loopback — `tcp-loopback`; markers (all landed with M0) |
 | S3 | Syscall load: tight 1-byte read/write loops, N ops over T threads — `syscall-burst` |
 | M2 | Full file surface — `file-lifecycle` (create/delete, rename while open, move, truncate, touch), `file-links` (symlink/readlink/lstat, hardlink), `file-attrs` (chmod/chown by path and fd, xattr); fd lifecycle (dup, inheritance across fork/exec, reuse) — `fd-lifecycle` (these four landed ahead of the M2 tracer work); local IPC — `pipe-ipc` (pipe, child stdio pipes), `unix-socket`; signals — `signals`; UDP — `udp-loopback`; IPv4 + IPv6 — `tcp-ipv4`, `tcp-ipv6` (these six landed ahead too); restart — `restart`; non-Java peer — `non-java-peer` (these two landed ahead too); argv redaction — `argv-secret` |
-| M3 | Method flows (deep stacks, async I/O) — `method-flow`; HTTP plain + TLS — `http-plain`, `http-tls`; redaction — `http-redaction` (these four landed ahead of the agent, their Java parts pending until tasks 2b4 and 3b4, see below); OTEL flavor — `otel` (landed ahead too, in its own module; its ids pending until task 4b4) |
+| M3 | Method flows (deep stacks, async I/O) — `method-flow`; HTTP plain + TLS — `http-plain`, `http-tls`; async client — `http-async` (task wd4); redaction — `http-redaction` (these four landed ahead of the agent, their Java parts pending until tasks 2b4 and 3b4, see below); OTEL flavor — `otel` (landed ahead too, in its own module; its ids pending until task 4b4) |
 | M4 | Client and server on two hosts as two projects; microservices topology, one service per host; NAT'ed pair |
 | M5 | (renders M4's microservices scenario) |
 | M6 | Microservices topology with only the gateway enrolled |
@@ -650,8 +650,10 @@ Gated by S1 — done; the design below is S1's result
   start, `latency_ns` its duration) when that entry is provably
   the request's own; body sizes are what the library knows
   (declared or counted lengths), absent otherwise — never
-  estimated. Not yet: `sendAsync`, Servlet, Apache HttpClient,
-  OkHttp and Netty, and the DNS hooks (#8).
+  estimated. `sendAsync` is recorded at its future's completion
+  under the sending thread's stack and span (scenario
+  `http-async`). Not yet: Servlet, Apache HttpClient, OkHttp and
+  Netty, and the DNS hooks (#8).
 - **Request pairing across the wire**: a request on the client
   and on the server pair up by connection id plus a
   per-connection request ordinal — sound for HTTP/1.1. HTTP/2

@@ -1,0 +1,24 @@
+{"scenario": "http-async",
+ "schema_version": 1,
+ "events": [
+   {"process": "$p1", "thread": "$t1", "event": "accept", "args": {"local_port": "$port1"}, "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t1", "event": "read", "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t1", "event": "write", "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t1", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "iormesh.workload.scenarios.HttpServe#handle"}, "http": {"method": "GET", "scheme": "http", "path": "/async/hello", "status": 200, "req_seq": 1, "req_bytes": 0, "resp_bytes": 5}},
+   {"process": "$p1", "thread": "$t1", "event": "read", "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t1", "event": "write", "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t1", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "iormesh.workload.scenarios.HttpServe#handle"}, "http": {"method": "POST", "scheme": "http", "path": "/async/echo", "status": 200, "req_seq": 2, "req_bytes": 5, "resp_bytes": 5}},
+   {"process": "$p1", "thread": "$t1", "event": "read", "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t1", "event": "write", "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t1", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "iormesh.workload.scenarios.HttpServe#handle"}, "http": {"method": "GET", "scheme": "http", "path": "/async/missing", "status": 404, "req_seq": 3, "req_bytes": 0, "resp_bytes": 0}},
+   {"process": "$p2", "thread": "$t2", "event": "connect", "args": {"remote_port": "$port1"}, "fd": "$fd2", "attribution": "java"},
+   {"process": "$p2", "thread": "$t3", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "iormesh.workload.scenarios.HttpFetch#callAsync"}, "http": {"method": "GET", "scheme": "http", "host": "localhost", "path": "/async/hello", "status": 200, "req_seq": 1, "req_bytes": 0, "resp_bytes": 5}},
+   {"process": "$p2", "thread": "$t3", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "iormesh.workload.scenarios.HttpFetch#callAsync"}, "http": {"method": "POST", "scheme": "http", "host": "localhost", "path": "/async/echo", "status": 200, "req_seq": 2, "req_bytes": 5, "resp_bytes": 5}},
+   {"process": "$p2", "thread": "$t3", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "iormesh.workload.scenarios.HttpFetch#callAsync"}, "http": {"method": "GET", "scheme": "http", "host": "localhost", "path": "/async/missing", "status": 404, "req_seq": 3, "req_bytes": 0, "resp_bytes": 0}},
+   {"process": "$p2", "thread": "$t4", "event": "read", "fd": "$fd2", "attribution": "java"}
+ ],
+ "edges": [
+   {"type": "connected", "from": "$p1", "to": "conn:$c1", "state": "fused"},
+   {"type": "connected", "from": "$p2", "to": "conn:$c1", "state": "fused"}
+ ],
+ "must_not_appear": []}

@@ -219,7 +219,8 @@ both inside the budget ("Follow-up (md4)").
 
 `method-flow`, `http-plain`, `http-tls` and `http-redaction`
 (PLAN.md scenario catalogue, M3) landed before the Java agent
-(task ya4), and the OTEL flavor `otel` after them (task za4).
+(task ya4), the OTEL flavor `otel` after them (task za4), and
+`http-async` with the agent's `sendAsync` hook (task wd4).
 `mage workloadTest` runs each one untraced: the self-test, the
 HTTP pairs as two processes (`http-tls` with a shared `--dir`
 for the pinned certificate, which the server must remove
@@ -249,6 +250,7 @@ integration tests run them under the agent:
 | Test | What it checks |
 |---|---|
 | `TestJavaMethodFlow` | method-flow golden under the agent with `-spool`: every declared op on its declared Java thread and causing method; one ring read; every stack id in `methods.ndjson`; mutated goldens fail |
+| `TestHTTPAsync` | http-async golden (task wd4): the client's three requests through `sendAsync` to `localhost`, each recorded at completion yet on the calling thread with `HttpFetch#callAsync` as causing method, paired with the server's by (`conn_id`, `req_seq`) and agreeing on sizes; every http event has a latency; mutated goldens fail |
 | `TestHTTPPlain` | http-plain golden: one `http` event per request on each end (method, scheme, path, status, the client's host), after the I/O that completed it, caused by `HttpServe#handle` and `HttpFetch#call`; both ends on one `conn_id`, `req_seq` 1–3, each pair agreeing on method, path and status; every request found its connection; no `otel` on any event (the workload has no OTEL); mutated goldens fail |
 | `TestHTTPTLS` | the same over TLS, scheme `https`, plus the certificate file I/O caused by `HttpScenario#serverContext` and `#client` |
 | `TestHTTPRedaction` | http-redaction golden: the query keeps its names with every value masked, the planted `Authorization`, `X-Api-Token`, `Cookie` and `Set-Cookie` headers are recorded as `name: ***`; no planted secret in `events.ndjson`, `graph.json` or the Java tables; a golden forbidding the masked header fails |

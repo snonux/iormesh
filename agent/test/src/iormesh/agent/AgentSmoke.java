@@ -48,7 +48,8 @@ public final class AgentSmoke {
 
     /**
      * One request each through the HTTP hooks' libraries (decision #22):
-     * the JDK's HttpServer answers the JDK's HttpClient and an
+     * the JDK's HttpServer answers the JDK's HttpClient (send and
+     * sendAsync) and an
      * HttpURLConnection, so the debug dump shows the http hooks applied
      * and recording on this JDK (with spool=, which the smoke passes).
      * The handler ends its exchanges by closing the body alone, never
@@ -71,6 +72,11 @@ public final class AgentSmoke {
             HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
             HttpResponse<String> r = client.send(HttpRequest.newBuilder(uri).build(),
                     HttpResponse.BodyHandlers.ofString());
+            // sendAsync (task wd4): recorded from the completing thread.
+            if (client.sendAsync(HttpRequest.newBuilder(uri).build(),
+                    HttpResponse.BodyHandlers.ofString()).get().statusCode() != 200) {
+                throw new IllegalStateException("http smoke: sendAsync");
+            }
             HttpURLConnection c = (HttpURLConnection) uri.toURL().openConnection();
             if (r.statusCode() != 200 || c.getResponseCode() != 200) {
                 throw new IllegalStateException("http smoke: " + r.statusCode());

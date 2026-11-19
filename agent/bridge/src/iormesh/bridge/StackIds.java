@@ -35,6 +35,8 @@ public final class StackIds {
 
     private static final StackWalker WALKER = StackWalker.getInstance();
     private static final String OWN_PACKAGE = "iormesh.bridge.";
+    /** The agent core's packages (its HTTP probes run between bridge frames). */
+    private static final String AGENT_PACKAGE = "iormesh.agent.";
     private static final ConcurrentHashMap<Long, String[]> KNOWN = new ConcurrentHashMap<>();
     /** After a dropped STACK, no new stack is written before this nanoTime. */
     private static volatile long retryAt;
@@ -48,10 +50,27 @@ public final class StackIds {
      * the id does not depend on how the bridge calls this.
      */
     public static long current() {
-        List<StackWalker.StackFrame> frames = WALKER.walk(s -> s
+        return id(WALKER.walk(s -> s
                 .dropWhile(f -> f.getClassName().startsWith(OWN_PACKAGE))
                 .limit(MAX_FRAMES)
-                .toList());
+                .toList()));
+    }
+
+    /**
+     * {@link #current()} for a walk made inside an HTTP probe
+     * (Hooks.httpCaller, task wd4): the agent core's probe frames lie
+     * between the bridge's, so the leading frames of both are dropped and
+     * the stack starts at the hooked library method.
+     */
+    static long belowAgent() {
+        return id(WALKER.walk(s -> s
+                .dropWhile(f -> f.getClassName().startsWith(OWN_PACKAGE)
+                        || f.getClassName().startsWith(AGENT_PACKAGE))
+                .limit(MAX_FRAMES)
+                .toList()));
+    }
+
+    private static long id(List<StackWalker.StackFrame> frames) {
         long id = hash(frames);
         if (!KNOWN.containsKey(id)) {
             remember(id, frames);

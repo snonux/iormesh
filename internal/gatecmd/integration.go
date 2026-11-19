@@ -63,6 +63,7 @@ func IntegrationTests() []string {
 		"TestNativeStacks",
 		"TestJavaMethodFlow",
 		"TestHTTPPlain",
+		"TestHTTPAsync",
 		"TestHTTPTLS",
 		"TestHTTPRedaction",
 		"TestOtelHTTP",

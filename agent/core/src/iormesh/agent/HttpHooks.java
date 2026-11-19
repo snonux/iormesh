@@ -1,5 +1,6 @@
 package iormesh.agent;
 
+import iormesh.agent.http.Async;
 import iormesh.agent.http.JdkHttpClient;
 import iormesh.agent.http.JdkHttpServer;
 import iormesh.agent.http.JdkUrlConnection;
@@ -13,7 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Supplier;
+import java.util.function.Function;
 
 /**
  * The HTTP hooks (PLAN.md M3 "HTTP/HTTPS request events", decision #22):
@@ -31,9 +32,13 @@ final class HttpHooks {
     /** One target with its id and library. */
     record Hook(int id, Library library, Target target) {}
 
-    /** v1's libraries (decision #22): the JDK's own three first. */
-    private static final List<Supplier<Library>> LIBRARIES = List.of(
-            JdkHttpServer::new, JdkHttpClient::new, JdkUrlConnection::new);
+    /**
+     * v1's libraries (decision #22): the JDK's own three first. Each is
+     * built with the bridge's handles for requests completing on another
+     * thread (Async), which only HttpClient's sendAsync needs.
+     */
+    private static final List<Function<Async, Library>> LIBRARIES = List.of(
+            a -> new JdkHttpServer(), JdkHttpClient::new, a -> new JdkUrlConnection());
 
     private final List<Hook> hooks = new ArrayList<>();
     private final Map<String, Hook> byKey = new HashMap<>();
@@ -49,8 +54,9 @@ final class HttpHooks {
      */
     static HttpHooks prepare(Instrumentation inst, Bridge bridge) throws ReflectiveOperationException {
         HttpHooks h = new HttpHooks();
-        for (Supplier<Library> s : LIBRARIES) {
-            Library lib = s.get();
+        Async async = new Async(bridge.httpCaller(), bridge.httpLate());
+        for (Function<Async, Library> s : LIBRARIES) {
+            Library lib = s.apply(async);
             Optional<Module> m = ModuleLayer.boot().findModule(lib.module());
             if (m.isEmpty()) {
                 continue;
