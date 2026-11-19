@@ -1,0 +1,23 @@
+{"scenario": "http-servlet",
+ "schema_version": 1,
+ "events": [
+   {"process": "$p1", "thread": "$t1", "event": "accept", "args": {"local_port": "$port1"}, "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t2", "event": "read", "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t2", "event": "write", "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t2", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "jakarta.servlet.http.HttpServlet#service"}, "http": {"method": "GET", "scheme": "http", "path": "/servlet/hello", "status": 200, "req_seq": 1, "req_bytes": 0, "resp_bytes": 5}},
+   {"process": "$p1", "thread": "$t2", "event": "read", "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t2", "event": "write", "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t2", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "jakarta.servlet.http.HttpServlet#service"}, "http": {"method": "POST", "scheme": "http", "path": "/servlet/echo", "status": 200, "req_seq": 2, "req_bytes": 5, "resp_bytes": 5}},
+   {"process": "$p1", "thread": "$t2", "event": "read", "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t2", "event": "write", "fd": "$fd1", "attribution": "java"},
+   {"process": "$p1", "thread": "$t2", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "jakarta.servlet.http.HttpServlet#service"}, "http": {"method": "GET", "scheme": "http", "path": "/servlet/missing", "status": 404, "req_seq": 3, "req_bytes": 0, "resp_bytes": 0}},
+   {"process": "$p2", "thread": "$t3", "event": "connect", "args": {"remote_port": "$port1"}, "fd": "$fd2", "attribution": "java"},
+   {"process": "$p2", "thread": "$t3", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "iormesh.workload.scenarios.HttpFetch#call"}, "http": {"method": "GET", "scheme": "http", "host": "127.0.0.1", "path": "/servlet/hello", "status": 200, "req_seq": 1, "req_bytes": 0, "resp_bytes": 5}},
+   {"process": "$p2", "thread": "$t3", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "iormesh.workload.scenarios.HttpFetch#call"}, "http": {"method": "POST", "scheme": "http", "host": "127.0.0.1", "path": "/servlet/echo", "status": 200, "req_seq": 2, "req_bytes": 5, "resp_bytes": 5}},
+   {"process": "$p2", "thread": "$t3", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "iormesh.workload.scenarios.HttpFetch#call"}, "http": {"method": "GET", "scheme": "http", "host": "127.0.0.1", "path": "/servlet/missing", "status": 404, "req_seq": 3, "req_bytes": 0, "resp_bytes": 0}}
+ ],
+ "edges": [
+   {"type": "connected", "from": "$p1", "to": "conn:$c1", "state": "fused"},
+   {"type": "connected", "from": "$p2", "to": "conn:$c1", "state": "fused"}
+ ],
+ "must_not_appear": []}

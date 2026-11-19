@@ -641,7 +641,9 @@ are NDJSON only.
 
 With `-spool`, the agent's HTTP hooks (decision #22, M3 step 7)
 add one `http` event per request a JVM made or answered through
-the JDK's HttpServer, HttpClient (`send`) or HttpURLConnection.
+the JDK's HttpServer, HttpClient (`send`) or HttpURLConnection,
+or a third-party library (task de4): a servlet container's
+`HttpServlet` (Servlet API, jakarta or javax).
 It is not a syscall: it is stamped when the request completed —
 the server's exchange was closed by the handler (or the handler
 returned without closing it), the client's `send` returned, the
@@ -665,6 +667,17 @@ otherwise `boot_ns` is the completion and `latency_ns` 0 (a server
 exchange closed on another thread than its dispatch, and every
 `sendAsync` request, below). The body sizes go into the `http`
 object.
+
+A servlet's event (task de4) is stamped when `HttpServlet.service`
+returns to the container, on the request thread, and spans the
+service call (the container read the request line and headers
+before it; a reply it still buffers is written after, so the event
+may precede that write). Its sizes are the request's
+`Content-Length` and the one the servlet set on the reply (absent
+otherwise — the container may add one later). A request still in
+asynchronous processing at that return has no `status`, no
+`resp_bytes`, no latency and no `req_seq`; one whose service threw
+before the reply was committed has no `status`.
 
 ```json
 {"event":"http","fd":-1,"conn_id":"cb061683df650ac2","attribution":"java",
@@ -731,6 +744,9 @@ server's event of one HTTP/1 request pair by (`conn_id`,
   unaffected). A java.net.http request is numbered only once the JVM's
   watermark passed its stamp — proof that no earlier marker is still
   unread — so one released by the timeout gets none;
+- from a servlet request still in asynchronous processing when its
+  service returned on (task de4): its reply comes later, out of its
+  connection's order, so its server end is numbered no further;
 - from the first request on a connection that took several HTTP
   exchanges on: HttpClient following a redirect or answering a
   401/407 through its authenticator, HttpURLConnection doing the

@@ -26,12 +26,16 @@ import java.util.function.BiFunction;
  * the addresses it resolved to. It may be static (no this: null is
  * passed).
  *
+ * A target may name a second argument (arg2, task de4: a servlet's
+ * request and response): both are then handed over as one Object[]
+ * {first, second} in the arg position. {@link #NO_ARG} for none.
+ *
  * owner is an internal name (sun/net/httpserver/HttpExchangeImpl);
  * descriptors are exact, so a JDK that changes a signature leaves the
  * row unmatched instead of hooking a different method. Several rows may
  * name one method with different descriptors, one per JDK generation.
  */
-public record Target(String owner, String method, String descriptor, int arg,
+public record Target(String owner, String method, String descriptor, int arg, int arg2,
                      BiFunction<Object[], long[], String[]> probe, boolean stamp, boolean dns,
                      boolean mark) {
     /** No argument is passed (null). */
@@ -42,17 +46,22 @@ public record Target(String owner, String method, String descriptor, int arg,
     /** An exit-only target (no entry stamp). */
     public Target(String owner, String method, String descriptor, int arg,
                   BiFunction<Object[], long[], String[]> probe) {
-        this(owner, method, descriptor, arg, probe, false, false, false);
+        this(owner, method, descriptor, arg, NO_ARG, probe, false, false, false);
+    }
+
+    /** This target handing over arg and the parameter at index second, as a pair. */
+    public Target withSecond(int second) {
+        return new Target(owner, method, descriptor, arg, second, probe, stamp, dns, mark);
     }
 
     /** This target with its entry stamped (see the class comment). */
     public Target stamped() {
-        return new Target(owner, method, descriptor, arg, probe, true, dns, mark);
+        return new Target(owner, method, descriptor, arg, arg2, probe, true, dns, mark);
     }
 
     /** This target as a name lookup, recorded by Hooks.dns (see the class comment). */
     public Target lookup() {
-        return new Target(owner, method, descriptor, arg, probe, stamp, true, mark);
+        return new Target(owner, method, descriptor, arg, arg2, probe, stamp, true, mark);
     }
 
     /**
@@ -61,7 +70,7 @@ public record Target(String owner, String method, String descriptor, int arg,
      * cannot place in their connection's order.
      */
     public Target marked() {
-        return new Target(owner, method, descriptor, arg, probe, stamp, dns, true);
+        return new Target(owner, method, descriptor, arg, arg2, probe, stamp, dns, true);
     }
 
     /** owner.method+descriptor, the lookup key. */

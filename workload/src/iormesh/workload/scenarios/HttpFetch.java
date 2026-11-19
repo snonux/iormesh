@@ -20,9 +20,10 @@ import javax.net.ssl.SSLContext;
  * so the pool reuses one keep-alive connection for all of them. Each
  * request is sent from {@link #call}, the causing method the http event's
  * Java stack must name; the socket I/O itself may run on the client's
- * selector thread.
+ * selector thread. Public, with run, for the third-party HTTP module
+ * (workload/libs, task de4), whose servlet scenario it drives.
  */
-final class HttpFetch {
+public final class HttpFetch {
     // Bounds a run against a server that accepted but never answers; far
     // above any loopback exchange, so it never decides a healthy run.
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
@@ -35,7 +36,7 @@ final class HttpFetch {
      * waits for it before the next, so the calls still share one
      * keep-alive connection in order.
      */
-    static void run(URI base, List<HttpCall> calls, SSLContext tls, boolean async)
+    public static void run(URI base, List<HttpCall> calls, SSLContext tls, boolean async)
             throws Exception {
         HttpClient.Builder b = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)

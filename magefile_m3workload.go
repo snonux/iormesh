@@ -36,7 +36,8 @@ var m3UsageErrors = [][]string{
 }
 
 // checkM3Scenarios runs the HTTP pairs, the run-time failures, then the
-// OTEL flavor from its own jar.
+// OTEL flavor and the third-party HTTP module (task de4) from their own
+// jars.
 func checkM3Scenarios() error {
 	for _, name := range []string{"http-plain", "http-redaction", "http-async"} {
 		if err := checkTwoRoles(name, nil, portClient); err != nil {
@@ -49,7 +50,10 @@ func checkM3Scenarios() error {
 	if err := checkM3RunFailures(); err != nil {
 		return err
 	}
-	return checkOtelScenario()
+	if err := checkOtelScenario(); err != nil {
+		return err
+	}
+	return checkLibsScenarios()
 }
 
 // checkHTTPTLS runs http-tls's two roles in one shared --dir: the server

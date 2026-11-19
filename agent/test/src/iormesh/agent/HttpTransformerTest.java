@@ -32,7 +32,11 @@ final class HttpTransformerTest {
                         HttpTransformerTest::refuses),
                 new AgentTests.Case("http transformer/other loader is a no-op",
                         HttpTransformerTest::otherLoader),
-                new AgentTests.Case("http transformer/warm-up", HttpTransformer::warmUp));
+                new AgentTests.Case("http transformer/warm-up", HttpTransformer::warmUp),
+                new AgentTests.Case("http transformer/app loader needs the bridge",
+                        HttpTransformerTest::appLoader),
+                new AgentTests.Case("http transformer/argument pair, stores refused",
+                        HttpTransformerTest::pairAndStores));
     }
 
     /**
@@ -71,7 +75,9 @@ final class HttpTransformerTest {
         for (HttpHooks.Hook h : hooks.hooks()) {
             int id = 100 + h.id();
             Hooks.httpProbe(id, (a, meta) -> {
-                calls.add(new Call(id, a[0], a[1], a[2], a[3] == a[1] && meta[4] > 0));
+                // A throw hands over its throwable (task de4): compared by message.
+                Object ret = a[0] instanceof Throwable t ? "threw " + t.getMessage() : a[0];
+                calls.add(new Call(id, ret, a[1], a[2], a[3] == a[1] && meta[4] > 0));
                 return null;
             });
         }
@@ -94,7 +100,7 @@ final class HttpTransformerTest {
             // The constructor is never stamped, even when its row says so.
             equal(List.of(new Call(101, null, f, "n", false),
                     new Call(102, "n:req", f, null, true), new Call(103, "ok", f, "ok", true),
-                    new Call(103, null, f, "boom", true)), calls, "probe calls");
+                    new Call(103, "threw boom", f, "boom", true)), calls, "probe calls");
             calls.clear();
             Object got = c.getMethod("lookup", String.class).invoke(null, "h");
             try {
@@ -103,7 +109,8 @@ final class HttpTransformerTest {
             } catch (InvocationTargetException e) {
                 equal("empty", e.getCause().getMessage(), "lookup still throws its own");
             }
-            equal(List.of(new Call(105, got, null, "h", false), new Call(105, null, null, "", false)),
+            equal(List.of(new Call(105, got, null, "h", false),
+                    new Call(105, "threw empty", null, "", false)),
                     calls, "static lookup: null this, its argument, through Hooks.dns");
         } finally {
             Hooks.release();
@@ -133,6 +140,75 @@ final class HttpTransformerTest {
                 "a static method's first argument is slot 0");
         equal(HttpTransformer.NO_SLOT, HttpTransformer.argSlot("()V", Target.LAST_ARG, false),
                 "no argument to pass");
+    }
+
+    /**
+     * A third-party library's class (task de4) is rewritten in an
+     * application loader that resolves the bridge's Hooks, never in the
+     * JDK's loaders, nor in a loader that cannot see the bridge (its
+     * parent is the platform loader), nor without a bridge at all.
+     */
+    static void appLoader() throws Exception {
+        HttpHooks app = HttpHooks.of(targets(null), true);
+        ClassLoader sees = HttpTransformerTest.class.getClassLoader();
+        ClassLoader blind = new ClassLoader(ClassLoader.getPlatformClassLoader()) {};
+        HttpTransformer t = new HttpTransformer(app, new BridgeSight(Hooks.class, null));
+        check(t.transform(null, sees, FIXTURE, null, null, fixtureBytes()) != null,
+                "an app loader that sees the bridge");
+        check(t.transform(null, null, FIXTURE, null, null, fixtureBytes()) == null,
+                "a third-party class in the bootstrap loader");
+        check(t.transform(null, blind, FIXTURE, null, null, fixtureBytes()) == null,
+                "a loader that does not see the bridge");
+        check(new HttpTransformer(app).transform(null, sees, FIXTURE, null, null,
+                fixtureBytes()) == null, "no bridge to link");
+    }
+
+    /**
+     * A row naming two arguments hands them over as an Object[] pair, the
+     * throw path too; a third-party library's listed method that stores
+     * into a passed slot is left alone (its catch-all frame could fail
+     * verification).
+     */
+    static void pairAndStores() throws Exception {
+        List<Call> calls = new ArrayList<>();
+        BiFunction<Object[], long[], String[]> p = (a, meta) -> {
+            calls.add(new Call(0, a[0] instanceof Throwable ? "threw" : a[0], a[1],
+                    List.of((Object[]) a[2]), false));
+            return null;
+        };
+        HttpHooks hooks = HttpHooks.of(shift(List.of(
+                new Target(FIXTURE, "pair", "(Ljava/lang/String;JLjava/lang/String;)Ljava/lang/String;",
+                        0, p).withSecond(2),
+                new Target(FIXTURE, "reassign", "(Ljava/lang/String;)Ljava/lang/String;", 0, p))),
+                true);
+        for (HttpHooks.Hook h : hooks.hooks()) {
+            if (h.target().probe() != null) {
+                Hooks.httpProbe(h.id(), h.target().probe());
+            }
+        }
+        HttpTransformer t = new HttpTransformer(hooks);
+        byte[] after = t.rewrite(FIXTURE, fixtureBytes());
+        equal(java.util.Set.of(101), t.applied(), "the reassigning method is not hooked");
+        Class<?> c = new BoundaryTransformerTest.OneClassLoader("iormesh.agent.HttpFixture", after)
+                .loadClass("iormesh.agent.HttpFixture");
+        Path dir = Files.createTempDirectory("iormesh-http-test");
+        Hooks.openRing(dir.toString(), 1 << 16);
+        try {
+            Object f = c.getConstructor(String.class).newInstance("n");
+            equal("a/b", c.getMethod("pair", String.class, long.class, String.class)
+                    .invoke(f, "a", 0L, "b"), "pair");
+            try {
+                c.getMethod("pair", String.class, long.class, String.class).invoke(f, "a", 1L, "b");
+                throw new AssertionError("pair(1) returned");
+            } catch (InvocationTargetException e) {
+                equal("a", e.getCause().getMessage(), "pair still throws its own");
+            }
+            equal(List.of(new Call(0, "a/b", f, List.of("a", "b"), false),
+                    new Call(0, "threw", f, List.of("a", "b"), false)), calls, "pairs");
+        } finally {
+            Hooks.release();
+            Files.deleteIfExists(dir);
+        }
     }
 
     static void otherLoader() throws Exception {

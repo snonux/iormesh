@@ -239,7 +239,11 @@ builds `workload-otel.jar`), so the check runs it from there:
 core `Main`, the two-process pair — whose server fails the
 run unless the client's `traceparent` and `tracestate` arrive
 as declared — and its usage errors; `workload.jar` alone must
-not know the scenario.
+not know the scenario. The third-party HTTP libraries' scenarios
+(task de4, `http-servlet` so far) live in `workload/libs`
+(`mage workloadLibsBuild` builds `workload-libs.jar` against
+the jars vendored under `workload/libs/third_party`) and get the
+same checks from there.
 
 Their goldens came in two parts: `expect.json` with what the
 tracer records without an agent, and `expect-pending.json`
@@ -262,6 +266,7 @@ integration tests run them under the agent:
 | `TestHTTPPlain` | http-plain golden: one `http` event per request on each end (method, scheme, path, status, the client's host), after the I/O that completed it, caused by `HttpServe#handle` and `HttpFetch#call`; both ends on one `conn_id`, `req_seq` 1–3, each pair agreeing on method, path and status; every request found its connection; no `otel` on any event (the workload has no OTEL); mutated goldens fail |
 | `TestHTTPTLS` | the same over TLS, scheme `https`, plus the certificate file I/O caused by `HttpScenario#serverContext` and `#client` |
 | `TestHTTPRedaction` | http-redaction golden: the query keeps its names with every value masked, the planted `Authorization`, `X-Api-Token`, `Cookie` and `Set-Cookie` headers are recorded as `name: ***`; no planted secret in `events.ndjson`, `graph.json` or the Java tables; a golden forbidding the masked header fails |
+| `TestHTTPServlet` | http-servlet golden (task de4, `workload-libs.jar`: the JDK HttpClient against a servlet in an embedded Tomcat): the server's `http` events come from the agent's Servlet hook in the app's class loader — one per request on Tomcat's one request thread, after the reply's write, caused by `jakarta.servlet.http.HttpServlet#service`, with the declared sizes and a latency, `req_seq` 1–3 on the client's `conn_id`, both ends pairing; mutated goldens fail |
 | `TestOtelHTTP` | the OTEL flavor (`workload-otel.jar`, HttpURLConnection against HttpServer) satisfies its `expect.json`, the HttpURLConnection hook's `http` events included: every client event of a call and the server's reply write and `http` event carry the call's declared span ids, the server's accept and request reads none; a golden with another span, a span ending early or starting early fails |
 
 `TestOtelGoldenIDsDeclaredByScenario` (`internal/normalize`)

@@ -10,6 +10,7 @@ import iormesh.agent.shaded.asm.Opcodes;
 import iormesh.agent.shaded.asm.Type;
 import java.lang.instrument.ClassFileTransformer;
 import java.security.ProtectionDomain;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -20,8 +21,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * <pre>
  *   try { original body, with Hooks.http(returned value, this, arg, id)
  *         before every return }
- *   catch (Throwable t) { Hooks.http(null, this, arg, id); throw t; }
+ *   catch (Throwable t) { Hooks.http(t, this, arg, id); throw t; }
  * </pre>
+ *
+ * (Until task de4 the throw path handed over null; the throwable lets a
+ * void method's probe — a servlet's service — tell a throw from a
+ * return. Every probe tests ret by type.)
  *
  * An HTTP event is stamped when the request is done, and nothing joins
  * to its window, so most targets are exit only. A stamped target (the
@@ -39,6 +44,18 @@ import java.util.concurrent.ConcurrentHashMap;
  * frame (no COMPUTE_FRAMES, which would load classes from inside the
  * transformer); unlike it, classes of the platform loader are
  * candidates too — java.net.http and jdk.httpserver are defined there.
+ *
+ * Third-party libraries' classes (task de4, Library.appLoaded) are
+ * rewritten in the application loaders that define them, never in the
+ * JDK's, and only where the app is safe: the loader must see the bridge
+ * (BridgeSight), and a listed method that stores into this or a passed
+ * parameter's slot is left alone (Scan) — the catch-all's frame declares
+ * those slots with their declared types, which javac's code never
+ * contradicts but another compiler's might, and a VerifyError would fail
+ * the app's class. The JDK's targets are not scanned: some reassign a
+ * parameter with a value of its own type (getAllByName's host), which
+ * verifies, and each JDK generation's rewrite is verified by the agent's
+ * smoke run.
  */
 final class HttpTransformer implements ClassFileTransformer {
     static final String HTTP_DESC = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;I)V";
@@ -49,20 +66,29 @@ final class HttpTransformer implements ClassFileTransformer {
     static final int REFUSED = -2;
 
     private final HttpHooks hooks;
+    private final BridgeSight sight;
     private final Set<Integer> applied = ConcurrentHashMap.newKeySet();
     private final Set<String> seen = ConcurrentHashMap.newKeySet();
 
+    /** A transformer of the JDK's classes only (tests, warm-up). */
     HttpTransformer(HttpHooks hooks) {
+        this(hooks, new BridgeSight(null, null));
+    }
+
+    HttpTransformer(HttpHooks hooks, BridgeSight sight) {
         this.hooks = hooks;
+        this.sight = sight;
     }
 
     @Override
     public byte[] transform(Module module, ClassLoader loader, String className,
                             Class<?> redefined, ProtectionDomain pd, byte[] bytes) {
-        if (loader != null && loader != ClassLoader.getPlatformClassLoader()) {
-            return null;
-        }
         try {
+            boolean jdk = loader == null || loader == ClassLoader.getPlatformClassLoader();
+            if (className == null || (jdk ? !hooks.hasClass(className)
+                    : !hooks.hasAppClass(className) || !sight.linkable(loader, module, className))) {
+                return null;
+            }
             return rewrite(className, bytes);
         } catch (Throwable t) {
             System.err.println("iormesh-agent: not rewriting " + className + ": " + t);
@@ -70,15 +96,26 @@ final class HttpTransformer implements ClassFileTransformer {
         }
     }
 
-    /** The rewritten class, or null when none of its methods is listed. */
+    /**
+     * The rewritten class, or null when none of its methods is listed. For
+     * a third-party class a first pass (Scan) finds the listed methods
+     * that store into a slot the catch-all's frame declares; those are
+     * not rewritten.
+     */
     byte[] rewrite(String className, byte[] bytes) {
-        if (className == null || !hooks.hasClass(className)) {
+        if (className == null || !(hooks.hasClass(className) || hooks.hasAppClass(className))) {
             return null;
         }
         seen.add(className);
         ClassReader reader = new ClassReader(bytes);
+        Set<String> unsafe = Set.of();
+        if (hooks.hasAppClass(className)) {
+            Scan scan = new Scan(className);
+            reader.accept(scan, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            unsafe = scan.unsafe;
+        }
         ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
-        Rewriter rewriter = new Rewriter(writer, className);
+        Rewriter rewriter = new Rewriter(writer, className, unsafe);
         reader.accept(rewriter, 0);
         return rewriter.rewritten == 0 ? null : writer.toByteArray();
     }
@@ -98,12 +135,13 @@ final class HttpTransformer implements ClassFileTransformer {
     /**
      * Rewrites this class's own hooks(), so the rewriting classes are
      * loaded before any target class is: their loading reads the agent
-     * jar, which must not happen inside the target's request.
+     * jar, which must not happen inside the target's request. Listed as a
+     * third-party class, so the scan's classes load too.
      */
     static void warmUp() throws java.io.IOException {
         String self = HttpTransformer.class.getName().replace('.', '/');
         HttpHooks h = HttpHooks.of(java.util.List.of(new Target(self, "hooks",
-                "()Liormesh/agent/HttpHooks;", Target.NO_ARG, null)));
+                "()Liormesh/agent/HttpHooks;", Target.NO_ARG, null)), true);
         try (java.io.InputStream in = HttpTransformer.class
                 .getResourceAsStream("HttpTransformer.class")) {
             if (in == null || new HttpTransformer(h).rewrite(self, in.readAllBytes()) == null) {
@@ -112,15 +150,100 @@ final class HttpTransformer implements ClassFileTransformer {
         }
     }
 
+    /**
+     * How one listed method is rewritten: its hook id, owner (null when
+     * static), the slots and types of the arguments passed (NO_SLOT for
+     * none; with slot2, the two go as an Object[] pair), and its exit.
+     */
+    record Plan(int id, String owner, int slot, String slotType, int slot2, String slotType2,
+                boolean ctor, boolean stamp, String exit, boolean frames) {
+        /** Whether the method's code stores into a slot the catch-all's frame declares. */
+        boolean guards(int var, int size) {
+            for (int s : new int[] {owner == null ? NO_SLOT : 0, slot, slot2}) {
+                if (s >= 0 && (var == s || (size == 2 && var + 1 == s))) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    /**
+     * The plan for hook h's method, or null when it cannot be hooked: no
+     * body, or a named argument that is a primitive (nothing to pass).
+     */
+    static Plan plan(HttpHooks.Hook h, String className, int access, String name,
+                     String descriptor, boolean frames) {
+        if ((access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) {
+            return null;
+        }
+        Target t = h.target();
+        boolean isStatic = (access & Opcodes.ACC_STATIC) != 0;
+        int slot = argSlot(descriptor, t.arg(), isStatic);
+        int slot2 = argSlot(descriptor, t.arg2(), isStatic);
+        if (slot == REFUSED || slot2 == REFUSED) {
+            return null;
+        }
+        boolean ctor = name.equals("<init>");
+        String exit = t.dns() ? "dns" : t.stamp() && !ctor ? "httpExit" : "http";
+        return new Plan(h.id(), isStatic ? null : className, slot, argType(descriptor, t.arg()),
+                slot2, argType(descriptor, t.arg2()), ctor, t.stamp() && !ctor, exit, frames);
+    }
+
+    /**
+     * The first pass: the listed methods ("name+descriptor") whose code
+     * stores into this or a passed argument's slot (a reassigned
+     * parameter, or a slot reused by another compiler) — rewriting those
+     * could fail verification.
+     */
+    private final class Scan extends ClassVisitor {
+        private final String className;
+        final Set<String> unsafe = new HashSet<>();
+
+        Scan(String className) {
+            super(Opcodes.ASM9);
+            this.className = className;
+        }
+
+        @Override
+        public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                         String signature, String[] exceptions) {
+            HttpHooks.Hook h = hooks.lookup(className, name, descriptor);
+            Plan p = h == null ? null : plan(h, className, access, name, descriptor, false);
+            if (p == null) {
+                return null;
+            }
+            String key = name + descriptor;
+            return new MethodVisitor(Opcodes.ASM9) {
+                @Override
+                public void visitVarInsn(int opcode, int var) {
+                    if (opcode >= Opcodes.ISTORE && opcode <= Opcodes.ASTORE && p.guards(var,
+                            opcode == Opcodes.LSTORE || opcode == Opcodes.DSTORE ? 2 : 1)) {
+                        unsafe.add(key);
+                    }
+                }
+
+                @Override
+                public void visitIincInsn(int var, int increment) {
+                    if (p.guards(var, 1)) {
+                        unsafe.add(key);
+                    }
+                }
+            };
+        }
+    }
+
     /** Finds the listed methods of one class. */
     private final class Rewriter extends ClassVisitor {
         private final String className;
+        private final Set<String> unsafe;
         private int version;
         int rewritten;
 
-        Rewriter(ClassVisitor next, String className) {
+        Rewriter(ClassVisitor next, String className, Set<String> unsafe) {
             super(Opcodes.ASM9, next);
             this.className = className;
+            this.unsafe = unsafe;
         }
 
         @Override
@@ -135,21 +258,19 @@ final class HttpTransformer implements ClassFileTransformer {
                                          String signature, String[] exceptions) {
             MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
             HttpHooks.Hook h = hooks.lookup(className, name, descriptor);
-            if (h == null || (access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) {
-                return mv;   // not listed, or no body
+            Plan p = h == null ? null
+                    : plan(h, className, access, name, descriptor, version >= Opcodes.V1_6);
+            if (p == null) {
+                return mv;   // not listed, no body, or a primitive to pass
             }
-            boolean isStatic = (access & Opcodes.ACC_STATIC) != 0;
-            int slot = argSlot(descriptor, h.target().arg(), isStatic);
-            if (slot == REFUSED) {
-                return mv;   // the named argument is a primitive: nothing to pass
+            if (unsafe.contains(name + descriptor)) {
+                System.err.println("iormesh-agent: not hooking " + className + "." + name
+                        + descriptor + ": it stores into a slot the hook reads");
+                return mv;
             }
             rewritten++;
             applied.add(h.id());
-            boolean ctor = name.equals("<init>");
-            String exit = h.target().dns() ? "dns" : h.target().stamp() && !ctor ? "httpExit" : "http";
-            Exit e = new Exit(mv, h.id(), isStatic ? null : className, slot,
-                    argType(descriptor, h.target().arg()), ctor,
-                    h.target().stamp() && !ctor, exit, version >= Opcodes.V1_6);
+            Exit e = new Exit(mv, p);
             e.mark = h.target().mark();
             return e;
         }
@@ -187,34 +308,20 @@ final class HttpTransformer implements ClassFileTransformer {
     /**
      * Calls the exit entry point (Hooks.http, httpExit when stamped, dns
      * for a lookup) before every return and, for a method, on its throw;
-     * a stamped one calls Hooks.httpEnter first. owner is null for a
-     * static method, which hands over null as this.
+     * a stamped one calls Hooks.httpEnter first. A static method (no
+     * owner) hands over null as this; a target with two arguments hands
+     * over the pair as one Object[].
      */
     private static final class Exit extends MethodVisitor {
-        private final int id;
-        private final String owner;
-        private final int slot;
-        private final String slotType;
-        private final boolean ctor;
-        private final boolean stamp;
-        private final String exit;
-        private final boolean frames;
+        private final Plan p;
         private final Label start = new Label();
         private final Label handler = new Label();
         /** Calls Hooks.httpMark first thing (a marked target). */
         boolean mark;
 
-        Exit(MethodVisitor next, int id, String owner, int slot, String slotType, boolean ctor,
-             boolean stamp, String exit, boolean frames) {
+        Exit(MethodVisitor next, Plan p) {
             super(Opcodes.ASM9, next);
-            this.id = id;
-            this.owner = owner;
-            this.slot = slot;
-            this.slotType = slotType;
-            this.ctor = ctor;
-            this.stamp = stamp;
-            this.exit = exit;
-            this.frames = frames;
+            this.p = p;
         }
 
         /**
@@ -231,7 +338,7 @@ final class HttpTransformer implements ClassFileTransformer {
                 super.visitMethodInsn(Opcodes.INVOKESTATIC, BoundaryTransformer.HOOKS,
                         "httpMark", ENTER_DESC, false);
             }
-            if (stamp) {
+            if (p.stamp()) {
                 pushThis();
                 pushId();
                 super.visitMethodInsn(Opcodes.INVOKESTATIC, BoundaryTransformer.HOOKS,
@@ -254,7 +361,7 @@ final class HttpTransformer implements ClassFileTransformer {
 
         @Override
         public void visitMaxs(int maxStack, int maxLocals) {
-            if (!ctor) {
+            if (!p.ctor()) {
                 handler();
             }
             super.visitMaxs(maxStack, maxLocals);
@@ -264,25 +371,30 @@ final class HttpTransformer implements ClassFileTransformer {
          * The catch-all, appended after the original code (its own
          * handlers come first in the table and still win). Its frame
          * declares only what it loads: this (none for a static method),
-         * and the passed argument's slot — javac never stores another
-         * type into a parameter slot, and the slots between are TOP.
+         * and the passed arguments' slots — the code stores into none of
+         * them (Scan), and the slots between are TOP.
          */
         private void handler() {
             super.visitLabel(handler);
-            if (frames) {
-                int n = Math.max(slot + 1, owner == null ? 0 : 1);
+            if (p.frames()) {
+                int n = Math.max(Math.max(p.slot(), p.slot2()) + 1, p.owner() == null ? 0 : 1);
                 Object[] locals = new Object[n];
                 java.util.Arrays.fill(locals, Opcodes.TOP);
-                if (owner != null) {
-                    locals[0] = owner;
+                if (p.owner() != null) {
+                    locals[0] = p.owner();
                 }
-                if (slot >= 0) {
-                    locals[slot] = slotType;
+                if (p.slot() >= 0) {
+                    locals[p.slot()] = p.slotType();
+                }
+                if (p.slot2() >= 0) {
+                    locals[p.slot2()] = p.slotType2();
                 }
                 super.visitFrame(Opcodes.F_FULL, n, locals, 1,
                         new Object[] {"java/lang/Throwable"});
             }
-            super.visitInsn(Opcodes.ACONST_NULL);
+            // The throwable is the exit's "returned value" (task de4): a
+            // void method's probe tells a throw from a return by it.
+            super.visitInsn(Opcodes.DUP);
             callHook();
             super.visitInsn(Opcodes.ATHROW);
             super.visitTryCatchBlock(start, handler, handler, null);
@@ -291,18 +403,36 @@ final class HttpTransformer implements ClassFileTransformer {
         /** Stack: [.., ret] → pushes this, arg and id, calls the exit entry point. */
         private void callHook() {
             pushThis();
-            if (slot >= 0) {
-                super.visitVarInsn(Opcodes.ALOAD, slot);
+            if (p.slot2() >= 0) {
+                pushPair();
+            } else if (p.slot() >= 0) {
+                super.visitVarInsn(Opcodes.ALOAD, p.slot());
             } else {
                 super.visitInsn(Opcodes.ACONST_NULL);
             }
             pushId();
-            super.visitMethodInsn(Opcodes.INVOKESTATIC, BoundaryTransformer.HOOKS, exit,
+            super.visitMethodInsn(Opcodes.INVOKESTATIC, BoundaryTransformer.HOOKS, p.exit(),
                     HTTP_DESC, false);
         }
 
+        /** Pushes new Object[] {first, second} (first null when the target names none). */
+        private void pushPair() {
+            super.visitInsn(Opcodes.ICONST_2);
+            super.visitTypeInsn(Opcodes.ANEWARRAY, "java/lang/Object");
+            if (p.slot() >= 0) {
+                super.visitInsn(Opcodes.DUP);
+                super.visitInsn(Opcodes.ICONST_0);
+                super.visitVarInsn(Opcodes.ALOAD, p.slot());
+                super.visitInsn(Opcodes.AASTORE);
+            }
+            super.visitInsn(Opcodes.DUP);
+            super.visitInsn(Opcodes.ICONST_1);
+            super.visitVarInsn(Opcodes.ALOAD, p.slot2());
+            super.visitInsn(Opcodes.AASTORE);
+        }
+
         private void pushThis() {
-            if (owner == null) {
+            if (p.owner() == null) {
                 super.visitInsn(Opcodes.ACONST_NULL);
             } else {
                 super.visitVarInsn(Opcodes.ALOAD, 0);
@@ -310,10 +440,10 @@ final class HttpTransformer implements ClassFileTransformer {
         }
 
         private void pushId() {
-            if (id <= Byte.MAX_VALUE) {
-                super.visitIntInsn(Opcodes.BIPUSH, id);
+            if (p.id() <= Byte.MAX_VALUE) {
+                super.visitIntInsn(Opcodes.BIPUSH, p.id());
             } else {
-                super.visitIntInsn(Opcodes.SIPUSH, id);
+                super.visitIntInsn(Opcodes.SIPUSH, p.id());
             }
         }
     }

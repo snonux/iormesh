@@ -27,6 +27,20 @@ public final class HttpFixture {
         return request;
     }
 
+    /** Hooked with arguments 0 and 2 (task de4): the probe gets the pair. */
+    public String pair(String first, long pad, String second) {
+        if (pad > 0) {
+            throw new IllegalStateException(first);
+        }
+        return first + "/" + second;
+    }
+
+    /** Listed with argument 0, which it overwrites: not hooked (task de4). */
+    public String reassign(String request) {
+        request = request.trim();
+        return request;
+    }
+
     /** Listed with argument 0, an int: refused, nothing to pass. */
     public int count(int n) {
         return n;

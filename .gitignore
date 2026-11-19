@@ -22,5 +22,9 @@ internal/c/generated_tracepoints.c.tmp-*
 /workload-otel.jar
 /workload/otel/classes/
 
+# The third-party HTTP workload module (mage workloadLibsBuild).
+/workload-libs.jar
+/workload/libs/classes/
+
 # Agent worktrees (Claude Code isolation)
 /.claude/worktrees/

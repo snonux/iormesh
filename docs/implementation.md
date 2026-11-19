@@ -383,6 +383,7 @@ workload/
   src/iormesh/workload/scenarios/FileWork.java    # their file work
   scenarios/<name>/expect.json          # bundled into the jar
   otel/                                 # M3's OTEL flavor, own jar
+  libs/                                 # M3's third-party HTTP, own jar
 ```
 
 No Maven, no Gradle: `mage workloadBuild` (in `Magefile.go`)
@@ -2578,7 +2579,85 @@ internal/correlate/javajoin.go
    DNS decode, the join's order, the `http-async` golden's lookup
    of `localhost`, and the smoke's `dns` kind on every JDK.
 
-   Not yet: Servlet, Apache HttpClient, OkHttp, Netty.
+   Third-party libraries (task de4, #22's order). The JDK's
+   libraries live in the bootstrap and platform loaders; these
+   live in whatever application loader the app (or its
+   container, per web app) defines them in, so:
+
+   ```
+   agent/core/src/iormesh/agent/BridgeSight.java   # may this loader link the bridge?
+   agent/core/src/iormesh/agent/http/Handles.java  # per-class public API lookups
+   agent/core/src/iormesh/agent/http/Servlet.java  # jakarta + javax HttpServlet
+   workload/libs/                                  # module, jar, vendored libs
+   ```
+
+   - **A `Library` is `appLoaded()`**: no module to open, nothing
+     resolved at install — its targets are listed whether or not
+     the app has it. `HttpTransformer` rewrites a third-party
+     class only in a non-JDK loader (a JDK class only in the
+     bootstrap or platform loader), and only when `BridgeSight`
+     says the loader resolves `iormesh.bridge.Hooks` to the
+     bridge's own class (an OSGi framework without boot
+     delegation would otherwise fail the app's method at its
+     first return); a named module gets the read of the bridge
+     added, or is skipped. The answer is kept per loader in a
+     weak map and computed with no lock of the agent held
+     (`Class.forName` may load through the app's loader — 4b4's
+     live-attach lesson). A live attach retransforms the
+     third-party classes already loaded, through the same check.
+   - **Store scan**: before rewriting a third-party class, a first
+     ASM pass refuses every listed method whose code stores into
+     `this` or a passed argument's slot — the catch-all's
+     hand-written frame declares those with their declared types,
+     which javac never contradicts but another compiler might, and
+     a VerifyError would fail the app's class. (The JDK's targets
+     are not scanned: `getAllByName` reassigns its `host` with a
+     `String`, which verifies.)
+   - **Two arguments**: a `Target` may name a second argument
+     (`withSecond`); the pair goes to the probe as one `Object[]`.
+     The throw path now hands over the throwable as `ret` (it was
+     null), so a void method's probe tells a throw from a return.
+   - **Probes** find the library's API in the class of the object
+     they are handed (`Handles`: the public lookup, one
+     `MethodHandle` per getter — `getMethod` would resolve every
+     public method's types and load classes the app never loads),
+     cached in a `ClassValue` (as long as the class lives, never
+     pinning its loader). They call nothing that changes the
+     request. A probe that cannot read a request throws, which
+     `Hooks` counts as a lost record (numbering stops, never
+     shifts).
+   - **Servlet**: `HttpServlet.service(ServletRequest,
+     ServletResponse)`, jakarta and javax, entry-stamped, request
+     and response as the pair. Only the original dispatch
+     (`getDispatcherType()` REQUEST; Servlet 2.5 has none)
+     records — a forward, include, error page or async dispatch
+     is no new request. Status, headers and the reply's declared
+     `Content-Length` (asked for by name: containers keep it
+     outside the header map) at service's return; the request's
+     `getContentLengthLong`. A request still in async processing
+     is recorded then without status or reply size, unordered; a
+     service that threw before the reply was committed leaves the
+     status unknown. Not seen: a servlet overriding the public
+     `service` without calling it (Jersey's `ServletContainer`),
+     a filter answering without a servlet. The causing method is
+     `jakarta.servlet.http.HttpServlet#service` (`javax.` is a JDK
+     prefix to `CausingMethod`, so a javax servlet's event names
+     the container's frame below it).
+
+   Tests: `mage agentTest` — `HttpTransformerTest` (an app loader
+   that sees the bridge is rewritten, the bootstrap loader, a
+   blind loader and no bridge are not; the pair and the throwable
+   on both paths; a reassigning method refused),
+   `ServletHookTest` (the real targets rewriting a stand-in
+   `HttpServlet` from `agent/test/src/jakarta/servlet`: a redacted
+   request with addresses, sizes and its own start; a forward
+   records nothing; async and throws as above); `mage
+   workloadTest` — `workload-libs.jar`'s self-tests, listing,
+   two-process pairs and failures; integration —
+   `TestHTTPServlet` (`http-servlet`: the JDK HttpClient against a
+   servlet in an embedded Tomcat 10.1, one request thread).
+
+   Not yet: Apache HttpClient, OkHttp, Netty.
 8. OTEL (done, task 4b4): read `Span.current().getSpanContext()`
    reflectively in the app's class loader at `enter` and add the
    ids to the bracket. No OTEL dependency in the agent. The `otel`

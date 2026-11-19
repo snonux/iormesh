@@ -27,6 +27,7 @@ public final class AgentTests {
         cases.addAll(HookTableTest.cases());
         cases.addAll(BoundaryTransformerTest.cases());
         cases.addAll(HttpTransformerTest.cases());
+        cases.addAll(ServletHookTest.cases());
         cases.addAll(iormesh.agent.http.HttpProbeTest.cases());
         cases.addAll(StackIdsTest.cases());
         cases.addAll(AgentArgsTest.cases());

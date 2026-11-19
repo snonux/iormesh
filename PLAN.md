@@ -270,7 +270,7 @@ Scenario catalogue, by the milestone it lands with:
 | M1 | File data ops (open/read/write/close) — `file-basic`; TCP client ↔ server on loopback — `tcp-loopback`; markers (all landed with M0) |
 | S3 | Syscall load: tight 1-byte read/write loops, N ops over T threads — `syscall-burst` |
 | M2 | Full file surface — `file-lifecycle` (create/delete, rename while open, move, truncate, touch), `file-links` (symlink/readlink/lstat, hardlink), `file-attrs` (chmod/chown by path and fd, xattr); fd lifecycle (dup, inheritance across fork/exec, reuse) — `fd-lifecycle` (these four landed ahead of the M2 tracer work); local IPC — `pipe-ipc` (pipe, child stdio pipes), `unix-socket`; signals — `signals`; UDP — `udp-loopback`; IPv4 + IPv6 — `tcp-ipv4`, `tcp-ipv6` (these six landed ahead too); restart — `restart`; non-Java peer — `non-java-peer` (these two landed ahead too); argv redaction — `argv-secret` |
-| M3 | Method flows (deep stacks, async I/O) — `method-flow`; HTTP plain + TLS — `http-plain`, `http-tls`; async client — `http-async` (task wd4); redaction — `http-redaction` (these four landed ahead of the agent, their Java parts pending until tasks 2b4 and 3b4, see below); OTEL flavor — `otel` (landed ahead too, in its own module; its ids pending until task 4b4) |
+| M3 | Method flows (deep stacks, async I/O) — `method-flow`; HTTP plain + TLS — `http-plain`, `http-tls`; async client — `http-async` (task wd4); redaction — `http-redaction` (these four landed ahead of the agent, their Java parts pending until tasks 2b4 and 3b4, see below); OTEL flavor — `otel` (landed ahead too, in its own module; its ids pending until task 4b4); third-party HTTP libraries — `http-servlet` (task de4, in its own module) |
 | M4 | Client and server on two hosts as two projects; microservices topology, one service per host; NAT'ed pair |
 | M5 | (renders M4's microservices scenario) |
 | M6 | Microservices topology with only the gateway enrolled |
@@ -662,8 +662,15 @@ Gated by S1 — done; the design below is S1's result
   `http-async`), without latency or `req_seq`: the agent's
   completion runs after the app's own callbacks, so its stamp is
   no evidence of the response's time or order. The DNS hooks (#8) landed with it: a `dns`
-  event per new host-to-addresses mapping of a JVM. Not yet:
-  Servlet, Apache HttpClient, OkHttp and Netty.
+  event per new host-to-addresses mapping of a JVM. Task de4
+  started the third-party libraries, which the agent rewrites
+  in the application class loader that defines them (only one
+  that sees the agent's bridge; per-class reflective probes, no
+  library resolved at install, nothing held past its class):
+  Servlet — `HttpServlet.service(ServletRequest,
+  ServletResponse)`, jakarta and javax, any container, the
+  original dispatch only (scenario `http-servlet`, embedded
+  Tomcat). Not yet: Apache HttpClient, OkHttp and Netty.
 - **Request pairing across the wire**: a request on the client
   and on the server pair up by connection id plus a
   per-connection request ordinal — sound for HTTP/1.1. HTTP/2
@@ -1136,7 +1143,10 @@ answer), and deferred.
   excuse to behave differently from a real app. The OTEL
   flavor (M3, task za4) is the one dependency, kept outside the
   core jar: its own module and jar, run against the vendored
-  OpenTelemetry API jars (`workload/otel/third_party`).
+  OpenTelemetry API jars (`workload/otel/third_party`). The
+  third-party HTTP libraries of decision #22 (task de4) follow
+  the same pattern: `workload/libs`, `workload-libs.jar`,
+  vendored under `workload/libs/third_party/<library>`.
 - **#25 Tracer overhead and volume budget** — settled by S3
   (2026-11-18; numbers and method in
   [docs/spikes/s3-overhead.md](docs/spikes/s3-overhead.md)). The
@@ -1352,7 +1362,9 @@ answer), and deferred.
   and HttpURLConnection: headers on internal/redact's denylist
   and every query value are masked in the agent (and again by
   the tracer), paths are verbatim, and `req_seq` is recorded
-  over HTTP/1 only; the third-party libraries remain.
+  over HTTP/1 only. Task de4 adds the third-party libraries in
+  #22's order, rewritten in the app's class loaders: Servlet so
+  far; Apache HttpClient, OkHttp and Netty remain.
 - **#8 Hostname & TLS visibility** — DNS hostname↔IP via Java
   agent hooks (InetAddress) is the clean path; TLS peer
   identity (trust-manager/SSLSocket hooks) is extra value at

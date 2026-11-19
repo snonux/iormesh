@@ -19,7 +19,8 @@ import java.util.Set;
  * directory (decision #27, iormesh.bridge.Ring). The HTTP hooks
  * (HttpHooks, HttpTransformer; decision #22) write one HTTP record per
  * request the JDK's HttpServer, HttpClient or HttpURLConnection
- * completes, into the same ring. With a ring, an app's OpenTelemetry is
+ * completes — or a third-party library of the app's class path, such as
+ * a servlet container (task de4) — into the same ring. With a ring, an app's OpenTelemetry is
  * read too (OtelTransformer, iormesh.bridge.Otel; decision #20): each
  * record carries the trace and span ids of the span current then.
  *
@@ -107,7 +108,7 @@ public final class Agent {
         try {
             HttpHooks hooks = HttpHooks.prepare(inst, bridge);
             HttpTransformer.warmUp();
-            return new HttpTransformer(hooks);
+            return new HttpTransformer(hooks, new BridgeSight(bridge.hooksClass(), inst));
         } catch (Exception | LinkageError e) {
             System.err.println("iormesh-agent: http hooks off: " + e);
             return null;

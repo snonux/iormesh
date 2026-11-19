@@ -113,10 +113,10 @@ func javaSources(root string) ([]string, error) {
 // line, the exit codes of bad invocations, that a failed run leaves a
 // directory it did not create alone, the skip exit code, and
 // restart's and non-java-peer's own failure modes (magefile_restartpeer.go)
-// and M3's HTTP pairs, failure modes and OTEL flavor
-// (magefile_m3workload.go).
+// and M3's HTTP pairs, failure modes, OTEL flavor and third-party HTTP
+// module (magefile_m3workload.go, magefile_libs.go).
 func WorkloadTest() error {
-	mg.Deps(WorkloadBuild, WorkloadOtelBuild)
+	mg.Deps(WorkloadBuild, WorkloadOtelBuild, WorkloadLibsBuild)
 	if err := sh.RunV("java", "-jar", workloadJar, "--self-test"); err != nil {
 		return err
 	}

@@ -1,0 +1,43 @@
+Apache Tomcat 10.1.61 (embedded) — vendored, unmodified, for the
+third-party HTTP workload module (workload/libs, M3, task de4).
+
+What:     org.apache.tomcat.embed:tomcat-embed-core:10.1.61   (the container
+                                                    and the jakarta.servlet
+                                                    API, Servlet 6.0)
+          org.apache.tomcat:tomcat-annotations-api:10.1.61  (jakarta.annotation;
+                                                    the core's Maven
+                                                    dependency)
+          The http-servlet scenario's server: an embedded Tomcat with one
+          servlet, so the agent's Servlet hook (decision #22) is exercised
+          against a real container.
+From:     https://repo1.maven.org/maven2/org/apache/tomcat/embed/tomcat-embed-core/10.1.61/
+          https://repo1.maven.org/maven2/org/apache/tomcat/tomcat-annotations-api/10.1.61/
+Fetched:  2026-11-19
+SHA-1:    embed-core       6b07a33e029c6467ac15397754f29b7561031976
+          annotations-api  5d547bce5b9c60146b965e419704989651ca8803
+          (each matches Maven Central's .jar.sha1)
+SHA-256:  embed-core       57b8e4bdb3a49163c3a6a501929240531523c111ff53844c9f82efba60f789f7
+          annotations-api  8d408d675d89da99f86171ead3067f9e947accf722e3785e6775e9af387ff3a6
+License:  Apache-2.0 (LICENSE.txt and NOTICE.txt, the embed-core jar's own
+          META-INF/LICENSE and META-INF/NOTICE; the annotations jar's
+          LICENSE is the plain Apache-2.0 text the former begins with)
+
+Why vendored: the workload build is JDK-only (no Maven or Gradle) and must
+work offline. The core workload stays free of third-party code (PLAN.md
+decision #5); only this separate module's jar, workload-libs.jar, runs
+against these jars, named in its manifest's Class-Path, not copied into it.
+`mage workloadLibsBuild` checks the SHA-256s above before compiling.
+
+Why Tomcat: one jar holds both the container and the Servlet API, so the
+scenario needs no further dependency (Jetty would need half a dozen).
+
+Why this version: 10.1.61 is the newest 10.1 release at least two weeks
+old on the fetch date (10.1.62 was 9 days old). 10.1 is the jakarta
+namespace on a Java 11 floor, so it runs on every JDK the agent supports
+(decision #29: 17+); Tomcat 11 would need 17 too but changes nothing the
+hook reads.
+
+To update: download both jars of the new version from Maven Central,
+compare each SHA-1 with the published .sha1, replace the jars and the
+license files, and update the version, the hashes here and libsJars in
+magefile_libs.go in the same commit.

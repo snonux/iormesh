@@ -540,8 +540,9 @@ public final class Hooks {
     /**
      * The entry point of HTTP hook id, called by the rewritten method
      * before each return (ret = the value returned, or null) and on its
-     * exceptional exit (ret null); self is the method's this, arg the
-     * argument its row names (or null). The open hook is the innermost
+     * exceptional exit (ret the throwable, task de4); self is the
+     * method's this, arg the argument its row names (or null; an Object[]
+     * pair for a row naming two, task de4). The open hook is the innermost
      * entry-stamped one still running on this thread, if any (a server's
      * exchange close inside the dispatch that read the request). Never
      * throws into the target.

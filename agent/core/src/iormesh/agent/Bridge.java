@@ -130,6 +130,11 @@ final class Bridge {
         return hooks.getModule();
     }
 
+    /** The bridge's Hooks, which a rewritten app class must resolve (BridgeSight). */
+    Class<?> hooksClass() {
+        return hooks;
+    }
+
     /** See Hooks.httpProbe: registers HTTP hook id's probe. */
     void httpProbe(int id, java.util.function.BiFunction<Object[], long[], String[]> probe)
             throws ReflectiveOperationException {

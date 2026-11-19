@@ -50,7 +50,7 @@ func IntegrationTestSerial() error {
 // the compiled test binary as root from
 // ./integrationtests, so the tests find both at "../".
 func runIntegrationTests(parallel int) error {
-	mg.SerialDeps(Build, WorkloadBuild, WorkloadOtelBuild, AgentBuild)
+	mg.SerialDeps(Build, WorkloadBuild, WorkloadOtelBuild, WorkloadLibsBuild, AgentBuild)
 	if err := sh.RunWithV(goEnv(), "go", "test", "-c", "./integrationtests/",
 		"-o", gatecmd.IntegrationTestBinary); err != nil {
 		return err
