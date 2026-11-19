@@ -50,6 +50,21 @@ var sockTestPrograms = map[string][2]string{
 	"handle_inet_sock_set_state": {"sock", "inet_sock_set_state"},
 }
 
+// targetTraced is IORMESH_TARGET_TRACED, the state filter() traces (maps.h).
+const targetTraced = 1
+
+// targetValue mirrors struct iormesh_target (maps.h): 16 bytes, no padding.
+// The map update copies the map's full value size from the pointer it is
+// given, so the value written must be exactly this struct: a narrower Go
+// value would have the kernel read the bytes after it - heap garbage that
+// now and then made state something other than TRACED, and filter() then
+// dropped every syscall of the test process (task ld4).
+type targetValue struct {
+	State uint32
+	Gap   uint32
+	Since uint64
+}
+
 // sockTracer is the loaded object with the ring buffer drained into events.
 type sockTracer struct {
 	module *bpf.Module
@@ -112,8 +127,11 @@ func (tr *sockTracer) setTarget(t *testing.T, tgid uint32, on bool) {
 		}
 		return
 	}
-	one := uint8(1)
-	if err := targets.Update(unsafe.Pointer(&tgid), unsafe.Pointer(&one)); err != nil {
+	traced := targetValue{State: targetTraced}
+	if size := int(unsafe.Sizeof(traced)); targets.ValueSize() != size {
+		t.Fatalf("target_map value is %d bytes, targetValue %d", targets.ValueSize(), size)
+	}
+	if err := targets.Update(unsafe.Pointer(&tgid), unsafe.Pointer(&traced)); err != nil {
 		t.Fatalf("add %d to target_map: %v", tgid, err)
 	}
 }
