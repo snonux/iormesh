@@ -5,7 +5,8 @@
 #
 # Usage: spikes/s3/measure.sh OUTDIR   (needs sudo -n)
 # Env:   S3_OPS (default 200000), S3_THREADS ("1 4 16"), S3_RUNS (3),
-#        S3_PAIRS (10), S3_MODES ("traced bystander volume"),
+#        S3_PAIRS (10), S3_MODES ("traced bystander volume"; "kind"
+#        is opt-in), S3_KIND_OPS (5000000),
 #        S3_TRACER_CPU (3), S3_LOAD_CPUS ("0-2,4-6"),
 #        S3_TRACER_FLAGS (extra `iormesh run` flags, word-split, e.g.
 #        "-native-stacks -aggregate=false"; task ua4)
@@ -27,6 +28,10 @@
 #              idle process (ABAB): the burst's own user+sys CPU time
 #              (burst_cpu_ms) and loop wall clock (elapsed_ns).
 #   volume     one small traced burst: loss and NDJSON size, raw and zstd.
+#   kind       bystander pairs as above, with a getppid loop (getppid.c,
+#              S3_KIND_OPS calls per thread) in place of the burst: a
+#              syscall of a kind no family traces, which since task 8e4
+#              still meets the raw_syscalls dispatchers (task ae4).
 #
 # Every sample is one line in OUTDIR/samples.txt; summary.txt holds the
 # medians (summarize below). Throwaway spike code: the numbers, not the
@@ -40,6 +45,7 @@ threads=${S3_THREADS:-1 4 16}
 runs=${S3_RUNS:-3}
 pairs=${S3_PAIRS:-10}
 modes=${S3_MODES:-traced bystander volume}
+kind_ops=${S3_KIND_OPS:-5000000}
 tracer_cpu=${S3_TRACER_CPU:-3}
 load_cpus=${S3_LOAD_CPUS:-0-2,4-6}
 # shellcheck disable=SC2206 # word splitting is the point: one flag per word
@@ -315,11 +321,62 @@ volume() {
     done_dir "$work"
 }
 
+# kind_loop runs the getppid loop pinned to the load CPUs and sets
+# burst_elapsed and burst_cpu from its result line (the loop reports its
+# own CPU time: it starts in a few hundred microseconds, so no gate).
+kind_loop() {
+    local t=$1 line
+    line=$(taskset -c "$load_cpus" "$kind_bin" "$t" "$kind_ops") ||
+        die "getppid loop failed"
+    burst_elapsed=$(sed -n 's/.* elapsed_ns=\([0-9]*\) .*/\1/p' <<<"$line")
+    burst_cpu=$(sed -n 's/.* cpu_ms=\([0-9]*\)$/\1/p' <<<"$line")
+}
+
+# kind_pair takes one ABAB pair of the getppid loop: untraced, then beside
+# a tracer attached to an idle process, as bystander does for the burst.
+kind_pair() {
+    local t=$1 tag=$2 work idle
+    kind_loop "$t"
+    echo "mode=kuntraced threads=$t ops=$kind_ops $tag" \
+        "elapsed_ns=$burst_elapsed burst_cpu_ms=$burst_cpu load=$(loadavg)" >>"$samples"
+    newdir
+    sleep 600 &
+    idle=$!
+    pids+=("$idle")
+    tracer_start "$idle" "$work"
+    kind_loop "$t"
+    kill "$idle"
+    wait "$idle" 2>/dev/null || true
+    forget "$idle"
+    tracer_wait "$work"
+    echo "mode=kbystander threads=$t ops=$kind_ops $tag" \
+        "elapsed_ns=$burst_elapsed burst_cpu_ms=$burst_cpu" \
+        "tracer_cpu_ms=$tracer_total load=$(loadavg)" >>"$samples"
+    done_dir "$work"
+}
+
+# run_kind builds the getppid loop into a work dir (gone with the run) and
+# takes S3_PAIRS pairs of it per thread count.
+run_kind() {
+    local -i p
+    local t
+    newdir
+    kind_bin=$work/getppid
+    cc -O2 -pthread -o "$kind_bin" "$repo/spikes/s3/getppid.c" ||
+        die "cannot build getppid.c"
+    for t in $threads; do
+        for ((p = 1; p <= pairs; p++)); do
+            kind_pair "$t" "pair=$p"
+        done
+    done
+}
+
 # summarize writes the medians decision #25 is judged by: per thread
 # count, the tracer's ns per emitted event (ready to exit), the traced
 # slowdown, and the bystander ratios — each pair's bystander over its
 # untraced burst, on CPU time (gated) and on wall clock (recorded) —
-# with the pairs' load-average range (recorded, not gated).
+# with the pairs' load-average range (recorded, not gated). The kind
+# mode's getppid pairs get a line of their own, kind_cpu and kind_wall.
 summarize() {
     gawk '
     function median(a, n,   s) {
@@ -343,7 +400,13 @@ summarize() {
             if (f["load"] > hi[t]) hi[t] = f["load"]
         }
         if (f["mode"] == "traced") sl[t][++ns2[t]] = f["elapsed_ns"] / ue[k]
-        th[t] = 1
+        if (f["mode"] == "kuntraced") { kue[k] = f["elapsed_ns"]; kuc[k] = f["burst_cpu_ms"] }
+        if (f["mode"] == "kbystander") {
+            kc[t][++nk[t]] = f["burst_cpu_ms"] / kuc[k]
+            ke[t][nk[t]] = f["elapsed_ns"] / kue[k]
+        }
+        if (f["mode"] !~ /^k/) th[t] = 1
+        else kt[t] = 1
     }
     END {
         for (t in th) {
@@ -352,6 +415,9 @@ summarize() {
             printf " bystander_cpu=%s bystander_wall=%s (pairs=%d load=%s-%s)\n", \
                 median(bc[t], nb[t]), median(be[t], nb[t]), nb[t], lo[t], hi[t]
         }
+        for (t in kt)
+            printf "kind=getppid threads=%s kind_cpu=%s kind_wall=%s (pairs=%d)\n", \
+                t, median(kc[t], nk[t]), median(ke[t], nk[t]), nk[t]
     }' "$samples" >"$out/summary.txt"
 }
 
@@ -366,7 +432,8 @@ header() {
         echo "# kernel $(uname -r); cpu $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | xargs) x$(nproc)"
         echo "# java $(java -version 2>&1 | head -1); workdir fs $(df -T "${TMPDIR:-/tmp}" | awk 'NR==2{print $2}')"
         echo "# ops=$ops threads=$threads runs=$runs pairs=$pairs modes=$modes" \
-            "tracer_cpu=$tracer_cpu load_cpus=$load_cpus tracer_flags=${tracer_flags[*]}"
+            "kind_ops=$kind_ops tracer_cpu=$tracer_cpu load_cpus=$load_cpus" \
+        "tracer_flags=${tracer_flags[*]}"
     } >>"$samples"
 }
 
@@ -406,6 +473,7 @@ main() {
         traced) run_traced ;;
         bystander) run_bystander ;;
         volume) volume ;;
+        kind) run_kind ;;
         *) die "unknown mode $m" ;;
         esac
     done

@@ -443,7 +443,7 @@ which this host cannot promise.
 | #25 item | Budget | md4 verdict |
 |----------|--------|-------------|
 | tracer CPU | ≤ 2 µs per emitted event (median) | **passes**: 1.20 µs at 1 thread, 1.70 µs at 4 (unfolded, 5 runs each) |
-| bystander | ≤ 1.25× at 4 threads (CPU-time median of ≥ 10 pairs) | **passes** (before 8e4's dispatch; re-run pending, ae4): 1.19× and 1.15× in two sets of 10 pairs; wall clock 1.21× and 1.14× |
+| bystander | ≤ 1.25× at 4 threads (CPU-time median of ≥ 10 pairs) | **passes** (before 8e4's dispatch; ae4 re-ran it after: 1.16× and 1.14×, below): 1.19× and 1.15× in two sets of 10 pairs; wall clock 1.21× and 1.14× |
 
 ## Follow-up (2b4): the Java join's cost
 
@@ -542,3 +542,99 @@ the per-enter lookup sits behind the target filter and is pruned
 at load without `-spool` — so the bystander item was not re-run.
 The default fold (`-aggregate`) keeps most burst calls out of the
 ring, and with them their marks.
+
+## Follow-up (ae4): the bystander after 8e4's `raw_syscalls` dispatch
+
+Task 8e4 moved the syscall handlers behind two dispatchers on the
+classic `raw_syscalls:sys_enter`/`sys_exit` tracepoints (PLAN.md,
+"Syscall handlers run behind `raw_syscalls` dispatchers"), so every
+syscall on the host now meets a BPF program while a trace runs,
+whether or not any family traces its kind. Task ae4 re-ran
+decision #25's bystander item by md4's method, added a bystander of
+an untraced kind, and re-checked the tracer's CPU per event. Same
+host as md4 (i7-1185G7, 8 CPUs, kernel 7.2.15, JDK 25), as busy or
+busier: load 3.8–7.4 for the bystander sets, 8–14 later (another
+agent's builds and tests). Samples: `spikes/s3/results-ae4/`,
+commit `1255da6` (8e4 and its review fixes; `+dirty` where the run
+already had the `kind` mode below in `measure.sh`).
+
+**Bystander, `syscall-burst`** (`S3_MODES=bystander S3_OPS=1000000
+S3_PAIRS=10`, `results-ae4/bystander/` at 1 and 4 threads, a second
+4-thread set in `results-ae4/bystander-4b/`):
+
+| Threads | Set | CPU-time ratio, median | Wall-clock ratio, median | Pairs ≤ 1.25× (CPU) | Load average |
+|--:|--|--:|--:|--:|--:|
+| 4 | 1 | **1.16×** | 1.16× | 9 of 10 (outlier 2.02×) | 5.5–7.4 |
+| 4 | 2 | **1.14×** | 1.19× | 9 of 10 (0.67–1.72×) | 4.9–6.3 |
+| 1 | 1 | 1.21× | 1.22× | 6 of 10 (0.93–2.62×) | 3.8–4.6 |
+
+md4 measured 1.19× and 1.15× at 4 threads before the dispatch; 8e4's
+`perf stat` estimate of ~1.21× (5 % more kernel instructions per
+read or write) is inside the noise of these pairs. The gated figure
+passes in both sets, and so does the wall clock, so the guard did
+not trip. The 1-thread figure is information only, for md4's reason
+(one thread's CPU time is not load-invariant on this host).
+
+**Bystander of an untraced kind** (new `kind` mode: `S3_MODES=kind
+S3_PAIRS=10 S3_THREADS="1 4"`, `results-ae4/kind/`): the same ABAB
+pairs with `spikes/s3/getppid.c` in place of the burst — a C loop
+of 5 000 000 `getppid` calls per thread, pinned to the load CPUs,
+reporting its own CPU time (`getrusage`) and wall time. No family
+traces `getppid`, so before 8e4 it met no iormesh program at all.
+
+| Threads | CPU-time ratio, median | Wall-clock ratio, median | Added CPU per call, pairs | Load average |
+|--:|--:|--:|--:|--:|
+| 1 | **2.04×** | 1.98× | +120–470 ns | 6.1–13.9 |
+| 4 | **2.05×** | 2.00× | +60–360 ns | 10.3–13.2 |
+
+An untraced `getppid` costs 120–320 ns of CPU here (clock frequency
+follows host load); beside a trace it costs about twice that, about
++0.2 µs per call — 8e4's kernel-instruction count (443 → 1142 per
+call) said the same. This is a pure-syscall loop, the worst case:
+nothing in it dilutes the per-call tax, which is why it is recorded,
+not gated (#25 gates `syscall-burst`). Where the time goes (`perf
+record` of the 1-thread loop beside an idle trace,
+`results-ae4/kind/getppid-profile.txt`): the two dispatcher programs
+are 4.9 % of the loop's cycles; the kernel's perf-tracepoint path
+around them — `trace_call_bpf` 10.8 %, `trace_syscall_enter`/`exit`
+12.3 %, `perf_trace_*`, the buffer and recursion-context helpers and
+RCU ~19 % — is the rest of the added cost. So a cheaper dispatcher
+fast path (testing the program-array slot first, or a pid pre-filter
+before the tail call; the handlers already filter on entry) could
+recover at most ~5 % of the loop: not taken. The only cut that
+removes the tax is not to meet the `raw_syscalls` path, i.e.
+attaching per syscall again on kernels before 7.2, whose per-syscall
+programs run with preemption disabled. That was not done: the gated
+item passes, this host runs 7.2 only (the other path could not be
+tested here), and it would bring back a second attach mode the
+integration suite would have to cover on each kernel line (PLAN.md,
+decision #25).
+
+**Tracer CPU per event** (`S3_MODES=traced
+S3_TRACER_FLAGS=-aggregate=false S3_OPS=500000 S3_RUNS=5
+S3_THREADS="1 4"`, `results-ae4/cpu/`): 3.0 µs at 1 thread and
+3.1 µs at 4, medians of 5, at load 9.8–11.8 — against md4's 1.2 and
+1.7 µs at load 4.6–9. The dispatch changes only kernel-side work,
+so the gap was checked against the commit before 8e4 (`8bfd6c5`),
+built in a worktree and run interleaved with `1255da6` (three
+rounds of two runs each, base first; one base run failed to start
+its JVM within the timeout under load; `results-ae4/cpu-ab/`):
+
+| Build | 1 thread, ns/event median | 4 threads, ns/event median | Load average |
+|--|--:|--:|--:|
+| before 8e4 (`8bfd6c5`), 5 runs each | 2180 (1800–3490) | 3546 (2187–3751) | 7.9–13.8 |
+| 8e4 (`1255da6`), 4 runs each | 2084 (1690–3530) | 2153 (1876–3555) | 9.1–13.3 |
+
+No regression from 8e4: the two builds overlap, the newer one no
+slower. The absolute figure on a host at load 10 and more is over
+2 µs for both builds — the tracer's core 3 shares its SMT sibling,
+CPU 7, with the rest of the host — so it says nothing new about the
+budget; md4's figures stand, and M3's acceptance (5b4) re-measures
+the item anyway. Loss in the unfolded 4-thread runs is the full
+ring, as in md4; skipped runs were 0 in every run.
+
+| #25 item | Budget | ae4 verdict |
+|----------|--------|-------------|
+| bystander | ≤ 1.25× at 4 threads (CPU-time median of ≥ 10 pairs) | **passes** with 8e4's dispatch: 1.16× and 1.14× in two sets of 10 pairs; wall clock 1.16× and 1.19× (guard not tripped) |
+| bystander, untraced kind | recorded, not gated | ~2.0× on a pure `getppid` loop (+~0.2 µs per call), the perf-tracepoint path's price |
+| tracer CPU | ≤ 2 µs per emitted event (median) | no regression from 8e4 (A/B, interleaved); md4's 1.2/1.7 µs stand |

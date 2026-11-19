@@ -1,0 +1,44 @@
+# S3 samples 2026-11-19T13:55:25Z commit 1255da6+dirty
+# kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
+# java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
+# ops=200000 threads=1 4 runs=3 pairs=10 modes=kind kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=
+mode=kuntraced threads=1 ops=5000000 pair=1 elapsed_ns=588861251 burst_cpu_ms=587 load=6.12
+mode=kbystander threads=1 ops=5000000 pair=1 elapsed_ns=2047856619 burst_cpu_ms=1852 tracer_cpu_ms=2240 load=6.11
+mode=kuntraced threads=1 ops=5000000 pair=2 elapsed_ns=1280806625 burst_cpu_ms=935 load=7.70
+mode=kbystander threads=1 ops=5000000 pair=2 elapsed_ns=1920320580 burst_cpu_ms=1840 tracer_cpu_ms=2849 load=8.45
+mode=kuntraced threads=1 ops=5000000 pair=3 elapsed_ns=976629811 burst_cpu_ms=930 load=8.45
+mode=kbystander threads=1 ops=5000000 pair=3 elapsed_ns=3441407222 burst_cpu_ms=3261 tracer_cpu_ms=3630 load=9.17
+mode=kuntraced threads=1 ops=5000000 pair=4 elapsed_ns=1655512721 burst_cpu_ms=1565 load=9.17
+mode=kbystander threads=1 ops=5000000 pair=4 elapsed_ns=3765588047 burst_cpu_ms=3231 tracer_cpu_ms=5590 load=10.64
+mode=kuntraced threads=1 ops=5000000 pair=5 elapsed_ns=1904490720 burst_cpu_ms=1565 load=11.31
+mode=kbystander threads=1 ops=5000000 pair=5 elapsed_ns=3449675954 burst_cpu_ms=3222 tracer_cpu_ms=5720 load=12.66
+mode=kuntraced threads=1 ops=5000000 pair=6 elapsed_ns=1793142562 burst_cpu_ms=1592 load=12.66
+mode=kbystander threads=1 ops=5000000 pair=6 elapsed_ns=3594797634 burst_cpu_ms=3245 tracer_cpu_ms=5640 load=13.48
+mode=kuntraced threads=1 ops=5000000 pair=7 elapsed_ns=1718945248 burst_cpu_ms=1577 load=13.76
+mode=kbystander threads=1 ops=5000000 pair=7 elapsed_ns=3373328916 burst_cpu_ms=3179 tracer_cpu_ms=5550 load=13.72
+mode=kuntraced threads=1 ops=5000000 pair=8 elapsed_ns=1617351046 burst_cpu_ms=1559 load=13.72
+mode=kbystander threads=1 ops=5000000 pair=8 elapsed_ns=2859167391 burst_cpu_ms=2499 tracer_cpu_ms=5620 load=13.67
+mode=kuntraced threads=1 ops=5000000 pair=9 elapsed_ns=773525469 burst_cpu_ms=770 load=13.67
+mode=kbystander threads=1 ops=5000000 pair=9 elapsed_ns=1600140153 burst_cpu_ms=1567 tracer_cpu_ms=2690 load=13.94
+mode=kuntraced threads=1 ops=5000000 pair=10 elapsed_ns=882650014 burst_cpu_ms=859 load=14.11
+mode=kbystander threads=1 ops=5000000 pair=10 elapsed_ns=1629068078 burst_cpu_ms=1466 tracer_cpu_ms=2870 load=13.94
+mode=kuntraced threads=4 ops=5000000 pair=1 elapsed_ns=979044026 burst_cpu_ms=3253 load=13.94
+mode=kbystander threads=4 ops=5000000 pair=1 elapsed_ns=1678353799 burst_cpu_ms=6072 tracer_cpu_ms=2790 load=13.22
+mode=kuntraced threads=4 ops=5000000 pair=2 elapsed_ns=1386558947 burst_cpu_ms=5082 load=13.22
+mode=kbystander threads=4 ops=5000000 pair=2 elapsed_ns=3462891105 burst_cpu_ms=12263 tracer_cpu_ms=3900 load=12.97
+mode=kuntraced threads=4 ops=5000000 pair=3 elapsed_ns=1540452809 burst_cpu_ms=5564 load=12.97
+mode=kbystander threads=4 ops=5000000 pair=3 elapsed_ns=3716248483 burst_cpu_ms=12348 tracer_cpu_ms=4180 load=12.30
+mode=kuntraced threads=4 ops=5000000 pair=4 elapsed_ns=1913717154 burst_cpu_ms=5861 load=12.12
+mode=kbystander threads=4 ops=5000000 pair=4 elapsed_ns=3401237573 burst_cpu_ms=11679 tracer_cpu_ms=4760 load=11.63
+mode=kuntraced threads=4 ops=5000000 pair=5 elapsed_ns=1550108288 burst_cpu_ms=5487 load=11.58
+mode=kbystander threads=4 ops=5000000 pair=5 elapsed_ns=3690467334 burst_cpu_ms=11954 tracer_cpu_ms=4740 load=10.96
+mode=kuntraced threads=4 ops=5000000 pair=6 elapsed_ns=1695000139 burst_cpu_ms=5673 load=10.96
+mode=kbystander threads=4 ops=5000000 pair=6 elapsed_ns=2553543576 burst_cpu_ms=8309 tracer_cpu_ms=4770 load=10.26
+mode=kuntraced threads=4 ops=5000000 pair=7 elapsed_ns=969522622 burst_cpu_ms=3392 load=10.26
+mode=kbystander threads=4 ops=5000000 pair=7 elapsed_ns=2226404396 burst_cpu_ms=7269 tracer_cpu_ms=2790 load=10.80
+mode=kuntraced threads=4 ops=5000000 pair=8 elapsed_ns=1027614733 burst_cpu_ms=3483 load=10.80
+mode=kbystander threads=4 ops=5000000 pair=8 elapsed_ns=2293609158 burst_cpu_ms=7360 tracer_cpu_ms=2690 load=10.97
+mode=kuntraced threads=4 ops=5000000 pair=9 elapsed_ns=1342149516 burst_cpu_ms=4531 load=11.70
+mode=kbystander threads=4 ops=5000000 pair=9 elapsed_ns=1953587671 burst_cpu_ms=7111 tracer_cpu_ms=2460 load=11.56
+mode=kuntraced threads=4 ops=5000000 pair=10 elapsed_ns=1663320958 burst_cpu_ms=6202 load=11.56
+mode=kbystander threads=4 ops=5000000 pair=10 elapsed_ns=2101246258 burst_cpu_ms=7369 tracer_cpu_ms=2490 load=11.43
