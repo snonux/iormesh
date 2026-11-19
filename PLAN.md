@@ -270,7 +270,7 @@ Scenario catalogue, by the milestone it lands with:
 | M1 | File data ops (open/read/write/close) — `file-basic`; TCP client ↔ server on loopback — `tcp-loopback`; markers (all landed with M0) |
 | S3 | Syscall load: tight 1-byte read/write loops, N ops over T threads — `syscall-burst` |
 | M2 | Full file surface — `file-lifecycle` (create/delete, rename while open, move, truncate, touch), `file-links` (symlink/readlink/lstat, hardlink), `file-attrs` (chmod/chown by path and fd, xattr); fd lifecycle (dup, inheritance across fork/exec, reuse) — `fd-lifecycle` (these four landed ahead of the M2 tracer work); local IPC — `pipe-ipc` (pipe, child stdio pipes), `unix-socket`; signals — `signals`; UDP — `udp-loopback`; IPv4 + IPv6 — `tcp-ipv4`, `tcp-ipv6` (these six landed ahead too); restart — `restart`; non-Java peer — `non-java-peer` (these two landed ahead too); argv redaction — `argv-secret` |
-| M3 | Method flows (deep stacks, async I/O) — `method-flow`; HTTP plain + TLS — `http-plain`, `http-tls`; redaction — `http-redaction` (these four landed ahead of the agent, their Java parts pending, see below); OTEL flavor |
+| M3 | Method flows (deep stacks, async I/O) — `method-flow`; HTTP plain + TLS — `http-plain`, `http-tls`; redaction — `http-redaction` (these four landed ahead of the agent, their Java parts pending, see below); OTEL flavor — `otel` (landed ahead too, in its own module) |
 | M4 | Client and server on two hosts as two projects; microservices topology, one service per host; NAT'ed pair |
 | M5 | (renders M4's microservices scenario) |
 | M6 | Microservices topology with only the gateway enrolled |
@@ -300,17 +300,18 @@ Scenario notes:
   across three named platform threads (virtual threads stay
   deferred).
 - **M3 goldens ahead of the agent**: the M3 scenarios landed
-  before the agent (task ya4), so each ships two files. Its
-  `expect.json` declares what the tracer records today and
+  before the agent (tasks ya4, za4), so each ships two files.
+  Its `expect.json` declares what the tracer records today and
   passes against it; `expect-pending.json` adds what needs the
   agent — `attribution: java`, a `java` object (thread name,
   causing method as `class#method`, the innermost workload
-  frame) and `http` events — and stays in step with
-  `expect.json` by test. The agent's join (task 2b4) and HTTP
-  hooks (task 3b4) teach the golden format those fields and
-  promote the pending file; until then no integration test
-  runs these scenarios, since one that needs the agent could
-  only skip.
+  frame), `http` events and, for `otel`, an `otel` object
+  (trace and span id) — and stays in step with `expect.json`
+  by test. The agent's join (task 2b4), HTTP hooks (task 3b4)
+  and span-context read (M3 step 8) teach the golden format
+  those fields and promote the pending file; until then no
+  integration test runs these scenarios, since one that needs
+  the agent could only skip.
 - **Microservices end-to-end scenario** (M4): several instances
   of the app playing declared service roles (gateway, orders,
   inventory, billing…), talking to each other over REST — call
@@ -385,7 +386,25 @@ Scenario notes:
 - **OpenTelemetry-instrumented flavor** (M3): a separate module
   — the core workload stays JDK-only per decision #5 — that
   emits spans with declared trace ids, so OTEL attribution has
-  expectations too.
+  expectations too. `otel` (task za4) lives in `workload/otel`
+  and builds `workload-otel.jar`, which runs the core `Main`
+  and joins its registry through `ServiceLoader`; its only
+  dependency is the OpenTelemetry *API* (1.67.0: api, context,
+  common), vendored and SHA-256-pinned like the agent's ASM,
+  named in the jar's `Class-Path`, never copied into it. No
+  SDK: each span is a declared span context made current
+  (`Span.wrap(…).makeCurrent()`), which is what the agent reads
+  (`Span.current()`), with ids a golden can name. Two calls,
+  each in its own trace, cross one keep-alive connection from
+  an `HttpURLConnection` client (blocking I/O on the calling
+  thread, so the span is current at every client syscall —
+  the JDK HttpClient's I/O runs on its selector thread, where
+  no span is) to the JDK HttpServer, which extracts the W3C
+  `traceparent`/`tracestate` the client's propagator wrote,
+  fails the run unless they match the declaration, and answers
+  inside a declared child span. Its golden splits like the
+  other M3 goldens (below), the pending part adding an `otel`
+  object (`trace_id`, `span_id`) per event.
 
 Acceptance: the framework runs the M1 scenarios standalone
 (no tracer) and prints their markers and declared
@@ -1037,7 +1056,10 @@ answer), and deferred.
   (adopted with M0, 2026-11-18). A plain Java 21 app built with
   the JDK alone (`javac` + `jar` via `mage workloadBuild`, no
   Maven or Gradle), so the thing being traced never has an
-  excuse to behave differently from a real app.
+  excuse to behave differently from a real app. The OTEL
+  flavor (M3, task za4) is the one dependency, kept outside the
+  core jar: its own module and jar, run against the vendored
+  OpenTelemetry API jars (`workload/otel/third_party`).
 - **#25 Tracer overhead and volume budget** — settled by S3
   (2026-11-18; numbers and method in
   [docs/spikes/s3-overhead.md](docs/spikes/s3-overhead.md)). The

@@ -378,6 +378,7 @@ workload/
   src/iormesh/workload/scenarios/TcpLoopback.java # M1 scenario
   src/iormesh/workload/scenarios/FileWork.java    # their file work
   scenarios/<name>/expect.json          # bundled into the jar
+  otel/                                 # M3's OTEL flavor, own jar
 ```
 
 No Maven, no Gradle: `mage workloadBuild` (in `Magefile.go`)
@@ -2268,11 +2269,27 @@ internal/correlate/javajoin.go
 8. OTEL: if `io.opentelemetry.api.trace.Span` is loadable in the
    app's class loader, read `Span.current().getSpanContext()`
    reflectively at `enter` and add ids to the bracket. No OTEL
-   dependency in the agent.
+   dependency in the agent. The `otel` scenario (task za4,
+   below) is the target: run it as `java -jar
+   workload-otel.jar otel --role server|client` (`mage
+   workloadOtelBuild`). Its `expect-pending.json` puts an
+   `otel` object (`trace_id`, `span_id`, the declared ids of
+   `OtelScenario`) on every event inside a span: each client
+   event of a call (connect, write, read, the last call's
+   close — `HttpURLConnection` does them on the calling
+   thread), and each server reply write and http event (the
+   span is current from the start of `HttpServe#handle` until
+   after `ex.close()`). The server's accept and request reads
+   happen before `handle`, outside any span, and declare no
+   ids. The client's http events assume an
+   `HttpURLConnection` hook (decision #22's v1 set) that
+   records the response inside `OtelFetch#call` once
+   `getResponseCode` returns.
 9. Scenarios first, as always: `method-flow`,
    `http-plain`, `http-tls`, `http-redaction`, `otel`.
-   Done for the first four (task ya4), ahead of steps 5–7;
-   `otel` waits for step 8. `method-flow` (solo, `--dir`) issues
+   Done for the first four (task ya4), ahead of steps 5–7, and
+   for `otel` (task za4), ahead of step 8. `method-flow`
+   (solo, `--dir`) issues
    each I/O op from its own method — `MethodFlow$Journal#create`,
    `#append`, `#seal` on `main` at recursion depth 24,
    `MethodFlow$Reader#readBack` on `method-flow-worker`,
