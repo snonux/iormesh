@@ -1,0 +1,21 @@
+{"scenario": "http-plain",
+ "schema_version": 1,
+ "events": [
+   {"process": "$p1", "thread": "$t1", "event": "accept",
+    "args": {"local_port": "$port1"}, "fd": "$fd1"},
+   {"process": "$p1", "thread": "$t1", "event": "read", "fd": "$fd1"},
+   {"process": "$p1", "thread": "$t1", "event": "write", "fd": "$fd1"},
+   {"process": "$p1", "thread": "$t1", "event": "read", "fd": "$fd1"},
+   {"process": "$p1", "thread": "$t1", "event": "write", "fd": "$fd1"},
+   {"process": "$p1", "thread": "$t1", "event": "read", "fd": "$fd1"},
+   {"process": "$p1", "thread": "$t1", "event": "write", "fd": "$fd1"},
+
+   {"process": "$p2", "thread": "$t2", "event": "connect",
+    "args": {"remote_port": "$port1"}, "fd": "$fd2"},
+   {"process": "$p2", "thread": "$t3", "event": "read", "fd": "$fd2"}
+ ],
+ "edges": [
+   {"type": "connected", "from": "$p1", "to": "conn:$c1", "state": "fused"},
+   {"type": "connected", "from": "$p2", "to": "conn:$c1", "state": "fused"}
+ ],
+ "must_not_appear": []}

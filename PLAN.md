@@ -270,7 +270,7 @@ Scenario catalogue, by the milestone it lands with:
 | M1 | File data ops (open/read/write/close) — `file-basic`; TCP client ↔ server on loopback — `tcp-loopback`; markers (all landed with M0) |
 | S3 | Syscall load: tight 1-byte read/write loops, N ops over T threads — `syscall-burst` |
 | M2 | Full file surface — `file-lifecycle` (create/delete, rename while open, move, truncate, touch), `file-links` (symlink/readlink/lstat, hardlink), `file-attrs` (chmod/chown by path and fd, xattr); fd lifecycle (dup, inheritance across fork/exec, reuse) — `fd-lifecycle` (these four landed ahead of the M2 tracer work); local IPC — `pipe-ipc` (pipe, child stdio pipes), `unix-socket`; signals — `signals`; UDP — `udp-loopback`; IPv4 + IPv6 — `tcp-ipv4`, `tcp-ipv6` (these six landed ahead too); restart — `restart`; non-Java peer — `non-java-peer` (these two landed ahead too); argv redaction — `argv-secret` |
-| M3 | Method flows (deep stacks, async I/O); HTTP plain + TLS; redaction; OTEL flavor |
+| M3 | Method flows (deep stacks, async I/O) — `method-flow`; HTTP plain + TLS — `http-plain`, `http-tls`; redaction — `http-redaction` (these four landed ahead of the agent, their Java parts pending, see below); OTEL flavor |
 | M4 | Client and server on two hosts as two projects; microservices topology, one service per host; NAT'ed pair |
 | M5 | (renders M4's microservices scenario) |
 | M6 | Microservices topology with only the gateway enrolled |
@@ -284,6 +284,33 @@ Scenario notes:
   redaction: a planted `Authorization` header, a planted secret
   in a query parameter and a planted secret in argv must never
   appear in the trace (argv's is M2's `argv-secret`).
+  `http-plain`, `http-tls` and `http-redaction` pair the JDK's
+  HttpClient (HTTP/1.1 forced) with its built-in HttpServer,
+  one keep-alive connection per run; `http-tls`'s server makes
+  a fresh key pair and self-signed certificate in memory at run
+  time and hands only the public certificate to the client,
+  which pins it — no key is ever committed or written.
+  `http-redaction` plants its secrets in `Authorization`,
+  `X-Api-Token`, `Cookie`, `Set-Cookie` and a query value, and
+  the server fails the run unless they arrived.
+- **Method-flow scenario** (M3): `method-flow` issues each I/O
+  op from its own named method, so the golden declares the
+  causing method per op: a write 24 frames down a recursion
+  (past the agent's 10-frame cut), and an executor hand-off
+  across three named platform threads (virtual threads stay
+  deferred).
+- **M3 goldens ahead of the agent**: the M3 scenarios landed
+  before the agent (task ya4), so each ships two files. Its
+  `expect.json` declares what the tracer records today and
+  passes against it; `expect-pending.json` adds what needs the
+  agent — `attribution: java`, a `java` object (thread name,
+  causing method as `class#method`, the innermost workload
+  frame) and `http` events — and stays in step with
+  `expect.json` by test. The agent's join (task 2b4) and HTTP
+  hooks (task 3b4) teach the golden format those fields and
+  promote the pending file; until then no integration test
+  runs these scenarios, since one that needs the agent could
+  only skip.
 - **Microservices end-to-end scenario** (M4): several instances
   of the app playing declared service roles (gateway, orders,
   inventory, billing…), talking to each other over REST — call

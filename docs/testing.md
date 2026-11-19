@@ -212,6 +212,39 @@ acceptance measurement"); its two timing items moved to task md4
 (paired CPU-time method), which gated M3's acceptance and found
 both inside the budget ("Follow-up (md4)").
 
+### M3 scenarios ahead of the agent
+
+`method-flow`, `http-plain`, `http-tls` and `http-redaction`
+(PLAN.md scenario catalogue, M3) landed before the Java agent
+(task ya4). `mage workloadTest` runs each one untraced: the
+self-test, the HTTP pairs as two processes (`http-tls` with a
+shared `--dir` for the pinned certificate, which the server
+must remove again), and their usage and run-failure exit
+codes. Their goldens come in two parts:
+
+- `expect.json` — what the tracer records without an agent:
+  files, the fused connection, the accept/connect and the
+  socket reads and writes (no byte counts on HTTP traffic: the
+  JDK's headers differ between versions), and
+  `http-redaction`'s planted secrets under `must_not_appear`.
+  Checked by hand against real traced runs (`iormesh run` +
+  `iormesh normalize -check`, JDK 25).
+- `expect-pending.json` — the same plus what needs the agent:
+  `attribution: java`, `java.thread` and `java.method` (the
+  causing method, the innermost workload frame, as
+  `class#method`), and `http` events with `conn_id`, method,
+  scheme, host (client side), path (query values masked),
+  status and `req_seq`, placed after the I/O that completes
+  them. `TestPendingGoldensExtendLoadable`
+  (`internal/normalize`) keeps it equal to `expect.json` once
+  the pending fields are stripped.
+
+No integration test runs them yet: the gate fails on skips,
+and a test that needs the agent could only skip. The agent's
+join (task 2b4) and HTTP hooks (task 3b4) add the fields to
+`normalize.ExpectedEvent`, promote each pending file to
+`expect.json`, and add the tests.
+
 ## Performance baselines
 
 S3 (PLAN.md, decision #25) measures overhead against a load the

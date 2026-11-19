@@ -342,6 +342,15 @@ tcp-loopback ship real ones):
 - `attribution` (`"java"` or `"none"`), when declared, must equal
   the event's; unset, it is not compared. `non-java-peer`
   declares `none` on every event of its Go peer.
+- M3's scenarios carry a second file, `expect-pending.json`:
+  the golden plus what the agent adds, in the format the
+  promoted golden will have — `"attribution": "java"`, `"java":
+  {"thread": "<Java thread name>", "method": "<class>#<method>"}`
+  (the causing method: the innermost workload frame) and
+  `{"event": "http", "conn_id": "$c1", "http": {"method",
+  "scheme", "host", "path", "status", "req_seq"}}` events. It
+  does not load yet; a test keeps it equal to `expect.json`
+  once those declarations are stripped (M3 step 9).
 - `$a1` names an app node — the one node every incarnation of a
   pattern-matched app links to (M2 step 3). Only edges use it;
   it binds the whole node id, so `restart`'s two `incarnation`
@@ -2248,12 +2257,44 @@ internal/correlate/javajoin.go
    pair the workload uses — then widen per decision #22.
    Headers pass through `redact.Policy` *in the agent*, before
    the spool.
+   The workload's pair landed with step 9's scenarios: the
+   `http` events their `expect-pending.json` declares (one per
+   request, after the I/O that completes it; `req_seq` 1, 2, 3
+   on both ends of one connection; query values masked) are
+   this step's target.
 8. OTEL: if `io.opentelemetry.api.trace.Span` is loadable in the
    app's class loader, read `Span.current().getSpanContext()`
    reflectively at `enter` and add ids to the bracket. No OTEL
    dependency in the agent.
 9. Scenarios first, as always: `method-flow`,
    `http-plain`, `http-tls`, `http-redaction`, `otel`.
+   Done for the first four (task ya4), ahead of steps 5–7;
+   `otel` waits for step 8. `method-flow` (solo, `--dir`) issues
+   each I/O op from its own method — `MethodFlow$Journal#create`,
+   `#append`, `#seal` on `main` at recursion depth 24,
+   `MethodFlow$Reader#readBack` on `method-flow-worker`,
+   `MethodFlow$Recorder#record` on `method-flow-sink`,
+   `MethodFlow$Sweeper#sweep` back on `main` — so each declared
+   op names its causing method. The HTTP scenarios run
+   `HttpFetch#call` (JDK HttpClient, HTTP/1.1) against
+   `HttpServe#handle` (JDK HttpServer, handler on the dispatcher
+   thread) on 127.0.0.1: GET, POST and a 404 for `http-plain`
+   and `http-tls`, two calls carrying planted secrets for
+   `http-redaction`. `http-tls`'s certificate is an EC P-256
+   self-signed one made in memory (`SelfSignedCert`, with a
+   small DER encoder, `Der`, since the JDK has no public
+   certificate builder); the public half goes to the client
+   through `<dir>/http-tls.crt`. Each golden is split: the
+   loadable `expect.json`, checked against real traced runs
+   (JDK 25), and `expect-pending.json` with the `attribution`,
+   `java` and `http` declarations (format below and in
+   [testing.md](testing.md#m3-scenarios-ahead-of-the-agent)).
+   Steps 5 and 7 add those fields to `normalize.ExpectedEvent`
+   — the goldens assume `java.method` matches the innermost
+   frame outside the JDK's own packages with `(file:line)`
+   dropped; 2b4 settles the rule — then
+   replace each `expect.json` with its pending file and add the
+   integration tests.
 
 **Done when**: PLAN.md's M3 acceptance holds.
 

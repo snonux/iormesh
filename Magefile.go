@@ -112,7 +112,8 @@ func javaSources(root string) ([]string, error) {
 // unix-socket), every scenario's --expect output, syscall-burst's result
 // line, the exit codes of bad invocations, that a failed run leaves a
 // directory it did not create alone, the skip exit code, and
-// restart's and non-java-peer's own failure modes (magefile_restartpeer.go).
+// restart's and non-java-peer's own failure modes (magefile_restartpeer.go)
+// and M3's HTTP pairs and failure modes (magefile_m3workload.go).
 func WorkloadTest() error {
 	mg.Deps(WorkloadBuild)
 	if err := sh.RunV("java", "-jar", workloadJar, "--self-test"); err != nil {
@@ -130,6 +131,7 @@ func WorkloadTest() error {
 		checkForeignDirSurvives,
 		checkSkip,
 		checkRestartPeer,
+		checkM3Scenarios,
 	}
 	for _, check := range checks {
 		if err := check(); err != nil {
@@ -370,6 +372,7 @@ func checkUsageErrors() error {
 	}
 	bad = append(bad, m2RoleUsageErrors...)
 	bad = append(bad, m2AppUsageErrors...)
+	bad = append(bad, m3UsageErrors...)
 	for _, args := range bad {
 		if err := expectExit(2, args...); err != nil {
 			return err
