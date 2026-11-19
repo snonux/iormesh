@@ -651,7 +651,7 @@ ring, as in md4; skipped runs were 0 in every run.
 Task ud4 took decision #25's tracer-CPU item for the worst case 2b4
 left over: every event of the S3 burst joined (`-spool`, the burst
 under the agent), plus the plain unfolded burst, which ae4 found over
-2 µs at load ≥ 10 (the cuts: commit `ba4dab9`). Same host (i7-1185G7,
+2 µs at load ≥ 10 (the cuts: commit `1426147`). Same host (i7-1185G7,
 8 CPUs, kernel 7.2.15, JDK 25), as busy as ever: load 5.8–13 from
 other agents' builds and tests.
 Samples, scripts and benchmark output: `spikes/s3/results-ud4/`.
