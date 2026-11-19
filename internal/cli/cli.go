@@ -32,6 +32,10 @@ const (
 	// StacksFile is the native stack table, written only by a
 	// -native-stacks run (M2 step 9).
 	StacksFile = "stacks.ndjson"
+	// MethodsFile and ThreadsFile are the Java method and thread
+	// tables, written only by a -spool run (M3, task 2b4).
+	MethodsFile = "methods.ndjson"
+	ThreadsFile = "threads.ndjson"
 )
 
 // errUsage marks a command-line error: reported with usage, exit 2.

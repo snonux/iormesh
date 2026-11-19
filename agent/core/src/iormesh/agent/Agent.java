@@ -83,6 +83,7 @@ public final class Agent {
             bridge.configure(table.maxId() + 1, args.walkStack(), args.debug() != null);
             if (args.spool() != null) {
                 bridge.openRing(args.spool(), args.ringSize());
+                describeHooks(table, bridge);
             }
             bridge.warmUp();
             bridge.deleteExtracted();
@@ -98,6 +99,23 @@ public final class Agent {
                 e.addSuppressed(cleanup);
             }
             throw e;
+        }
+    }
+
+    /**
+     * Writes the hook table into the fresh ring, one HOOK record per row,
+     * ahead of every bracket: the joiner reads each hook's syscall
+     * allowlist from the ring, so the tracer needs no copy of the tables
+     * and follows a table= override too. The ring is empty here, so a
+     * row cannot be dropped for lack of room; one that is anyway (a
+     * pathological ring size) only leaves that hook's brackets
+     * unjoinable — attribution none, never a guess.
+     */
+    private static void describeHooks(HookTable table, Bridge bridge)
+            throws ReflectiveOperationException {
+        for (HookTable.Hook h : table.hooks()) {
+            bridge.describeHook(h.id(), h.kind(), h.owner(), h.method(), h.nativeRef(),
+                    String.join(",", h.syscalls()));
         }
     }
 

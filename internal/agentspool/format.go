@@ -22,8 +22,9 @@ import "errors"
 
 // The ring format, mirrored from Ring.java; Version changes with any of it.
 const (
-	// Version is the only ring format version this reader accepts.
-	Version = 1
+	// Version is the only ring format version this reader accepts. 2
+	// (task 2b4) added HOOK records and THREAD's flags word.
+	Version = 2
 	// magic is "IORMRING" as a little-endian word; the agent stores it
 	// last, so a reader that sees it sees a complete header.
 	magic = 0x474e49524d524f49
@@ -56,14 +57,24 @@ const (
 	typeStack
 	typeThread
 	typeWatermark
+	typeHook
 )
+
+// threadVirtual is THREAD's flag for a virtual thread (JDK 21+); every
+// other flag bit is reserved and must be zero.
+const threadVirtual = 1
+
+// hookStrings is the number of strings in a HOOK record: kind, class,
+// method, native, syscall allowlist.
+const hookStrings = 5
 
 // Fixed record lengths, framing word included.
 const (
 	bracketLen   = wordLen + 40
 	watermarkLen = wordLen + 8
-	// stringsHead is a STACK or THREAD record's fixed part: the word, a
-	// u64 id, a u32 count or tid and four reserved zero bytes.
+	// stringsHead is a STACK, THREAD or HOOK record's fixed part: the
+	// word, a u64 id, a u32 count or tid and a u32 of flags (THREAD's;
+	// zero in the others).
 	stringsHead = wordLen + 16
 )
 
@@ -76,6 +87,9 @@ var (
 	ErrVersion = errors.New("agentspool: unsupported ring version")
 	// ErrTruncated: the file is shorter (or longer) than its header says.
 	ErrTruncated = errors.New("agentspool: ring file size does not match its header")
+	// ErrNotRing: the path is not a plain file (a symlink, a device, a
+	// hard link): never mapped.
+	ErrNotRing = errors.New("agentspool: not a ring file")
 	// ErrCorrupt: the header or a record's framing is invalid; nothing
 	// after it can be read.
 	ErrCorrupt = errors.New("agentspool: corrupt ring")

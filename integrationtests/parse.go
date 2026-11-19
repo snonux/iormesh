@@ -1,10 +1,10 @@
 package integrationtests
 
 // Adapted from ior integrationtests/parse.go @ b21afc50328c (LoadTestResult).
-// Changes: reads an iormesh trace directory - the NDJSON event stream and
-// the graph export - instead of an .ior.zst recording, with the same strict
-// readers `iormesh normalize` uses, so a malformed line fails the test
-// rather than being skipped.
+// Changes: reads an iormesh trace directory - the NDJSON event stream, the
+// graph export and the Java method table - instead of an .ior.zst
+// recording, with the same strict readers `iormesh normalize` uses, so a
+// malformed line fails the test rather than being skipped.
 
 import (
 	"fmt"
@@ -19,8 +19,9 @@ import (
 // GraphFile; repeated here so the tests depend on the output contract, not
 // on the CLI package).
 const (
-	eventsFile = "events.ndjson"
-	graphFile  = "graph.json"
+	eventsFile  = "events.ndjson"
+	graphFile   = "graph.json"
+	methodsFile = "methods.ndjson"
 )
 
 // ReadTrace reads the trace directory dir.
@@ -42,5 +43,10 @@ func ReadTrace(dir string) (normalize.Trace, error) {
 	if err != nil {
 		return normalize.Trace{}, fmt.Errorf("%s: %w", graphFile, err)
 	}
-	return normalize.Trace{Events: events, Graph: graph}, nil
+	// The Java method table: present only when the run joined JVMs (-spool).
+	methods, err := normalize.LoadMethods(filepath.Join(dir, methodsFile))
+	if err != nil {
+		return normalize.Trace{}, err
+	}
+	return normalize.Trace{Events: events, Graph: graph, Methods: methods}, nil
 }

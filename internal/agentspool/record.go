@@ -3,11 +3,12 @@ package agentspool
 import (
 	"encoding/binary"
 	"errors"
+	"strings"
 	"unicode/utf8"
 )
 
-// Record is one decoded ring record: a Bracket, Stack, Thread or
-// Watermark.
+// Record is one decoded ring record: a Bracket, Stack, Thread, Watermark
+// or Hook.
 type Record interface {
 	isRecord()
 }
@@ -45,6 +46,26 @@ type Thread struct {
 	ID   uint64
 	KTID int32
 	Name string
+	// Virtual marks a virtual thread (JDK 21+). Its KTID is the carrier
+	// of its first bracket only; each of its Brackets carries the carrier
+	// it ran on, or 0 when it parked and moved carriers inside it.
+	Virtual bool
+}
+
+// Hook is one row of the agent's hook table, written at install ahead of
+// every bracket: the joiner needs a hook's syscall allowlist (S1: a
+// syscall of another kind inside the bracket is JVM work, not the
+// method's I/O), and the ring carries it so the tracer follows whatever
+// table variant the JVM chose.
+type Hook struct {
+	ID     int32
+	Kind   string // open, read, write, …: the I/O the bracket stands for
+	Class  string // internal name, java/io/FileInputStream
+	Method string
+	Native string // the JNI native the method reaches
+	// Syscalls are the syscall kinds the native issues (openat, read,
+	// pread64, …); never empty.
+	Syscalls []string
 }
 
 // Watermark promises that every bracket that exited before Mono is
@@ -57,6 +78,7 @@ func (Bracket) isRecord()   {}
 func (Stack) isRecord()     {}
 func (Thread) isRecord()    {}
 func (Watermark) isRecord() {}
+func (Hook) isRecord()      {}
 
 // errMalformed marks a body that does not decode; the record is skipped
 // and counted, the ring stays readable.
@@ -79,6 +101,8 @@ func decode(typ uint32, rec []byte) (Record, error) {
 		return decodeStack(rec)
 	case typeThread:
 		return decodeThread(rec)
+	case typeHook:
+		return decodeHook(rec)
 	}
 	return nil, errMalformed
 }
@@ -108,6 +132,9 @@ func decodeStack(rec []byte) (Record, error) {
 		return nil, errMalformed
 	}
 	n := le.Uint32(rec[16:])
+	if le.Uint32(rec[20:]) != 0 {
+		return nil, errMalformed
+	}
 	frames, err := decodeStrings(rec, n)
 	if err != nil {
 		return nil, err
@@ -120,19 +147,42 @@ func decodeThread(rec []byte) (Record, error) {
 		return nil, errMalformed
 	}
 	ktid := int32(le.Uint32(rec[16:]))
+	flags := le.Uint32(rec[20:])
 	name, err := decodeStrings(rec, 1)
-	if err != nil || ktid < 0 {
+	if err != nil || ktid < 0 || flags&^threadVirtual != 0 {
 		return nil, errMalformed
 	}
-	return Thread{ID: le.Uint64(rec[8:]), KTID: ktid, Name: name[0]}, nil
+	return Thread{ID: le.Uint64(rec[8:]), KTID: ktid, Name: name[0],
+		Virtual: flags&threadVirtual != 0}, nil
+}
+
+// decodeHook checks a hook-table row: a positive id that fits the
+// bracket's i32, exactly five strings, none empty.
+func decodeHook(rec []byte) (Record, error) {
+	if len(rec) < stringsHead || le.Uint32(rec[16:]) != hookStrings || le.Uint32(rec[20:]) != 0 {
+		return nil, errMalformed
+	}
+	id := le.Uint64(rec[8:])
+	f, err := decodeStrings(rec, hookStrings)
+	if err != nil || id == 0 || id > 1<<31-1 {
+		return nil, errMalformed
+	}
+	for _, s := range f {
+		if s == "" {
+			return nil, errMalformed
+		}
+	}
+	return Hook{ID: int32(id), Kind: f[0], Class: f[1], Method: f[2], Native: f[3],
+		Syscalls: strings.Split(f[4], ",")}, nil
 }
 
 // decodeStrings reads n strings (u32 byte length + UTF-8) after the
-// fixed head. The reserved bytes must be zero, the strings valid UTF-8,
-// and what follows them only zero padding to the next multiple of 8 —
-// anything else means the writer and reader disagree on the format.
+// fixed head (whose flags word the caller checks). The strings must be
+// valid UTF-8, and what follows them only zero padding to the next
+// multiple of 8 — anything else means the writer and reader disagree on
+// the format.
 func decodeStrings(rec []byte, n uint32) ([]string, error) {
-	if le.Uint32(rec[20:]) != 0 || int(n) > (len(rec)-stringsHead)/4 {
+	if int(n) > (len(rec)-stringsHead)/4 {
 		return nil, errMalformed
 	}
 	out := make([]string, 0, n)

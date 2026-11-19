@@ -61,6 +61,7 @@ func IntegrationTests() []string {
 		"TestTCPFamilies",
 		"TestNonJavaPeer",
 		"TestNativeStacks",
+		"TestJavaMethodFlow",
 		"TestPIDReuse",
 		"TestSocketRaces",
 		"TestSyscallBurstFoldsEveryCall",

@@ -552,13 +552,27 @@ Gated by S1 — done; the design below is S1's result
   same clock one step earlier, still to be run.) Events
   no hook brackets (JNI libraries, JVM-internal I/O) and
   ambiguous matches stay in the trace marked `attribution:
-  none` — never guessed.
+  none` — never guessed. Built in task 2b4 (`iormesh run
+  -spool`, `correlate.JavaJoin`) *without* the uprobe mark,
+  which no task has built yet: the join pairs the event's tid
+  and its boot-clock start, converted to CLOCK_MONOTONIC with a
+  user-space midpoint offset (S1's conversion), with the
+  innermost containing bracket, and the hook's syscall
+  allowlist (shipped in the ring) is the only guard against JVM
+  work of an allowed kind inside a bracket. The mark, when
+  built, is one more condition. Method and thread tables are
+  NDJSON (`methods.ndjson`, `threads.ndjson`) until M4's
+  parquet writer.
 - **Platform threads only in v1.** Virtual-thread attribution
   is deferred (see "Deferred — not in v1"). I/O issued by a
   virtual thread is still traced and still joined to its native
   I/O call, but it is attributed to the carrier thread and
   flagged `carrier: true` — visible as a known gap, never
-  passed off as the carrier's own work.
+  passed off as the carrier's own work. As built (task 2b4):
+  the agent re-reads the carrier tid at a virtual thread's
+  bracket enter and exit (none if it moved carriers), the event
+  keeps the virtual thread's stack, `java.carrier` is set and
+  `java.thread` names the carrier.
 - **Agent → tracer transport**: socket-free like everything
   else — a memory-mapped ring per JVM in a tracer-owned
   directory, written lock-free by the agent and drained by the
@@ -584,8 +598,9 @@ Gated by S1 — done; the design below is S1's result
   frames when debug info is present; TLS peer identity if adopted
   (decision #8).
 - **OpenTelemetry introspection**: when the app runs the OTEL
-  SDK, the agent reads the active span context and tags every
-  I/O event with its OTEL trace/span ids — iormesh events join
+  API (SDK or not), the agent reads the active span context and
+  tags every I/O event with its OTEL trace/span ids — iormesh
+  events join
   1:1 with the app's distributed traces in any OTEL backend.
   Optionally, spans can also be ingested (an OTLP receiver the
   app dual-exports to, or the collector's file export —

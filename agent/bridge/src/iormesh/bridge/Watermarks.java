@@ -89,7 +89,7 @@ final class Watermarks {
         Brackets self = Hooks.state();
         self.busy = true;  // whatever it calls is never bracketed
         while (!self.described) {
-            self.described = ring.thread(Thread.currentThread().getId(), self.kernelTid(),
+            self.described = ring.thread(Thread.currentThread().getId(), self.kernelTid(), 0,
                     THREAD_NAME);
             if (!self.described && !pause(intervalMs)) {
                 return;

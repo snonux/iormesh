@@ -154,7 +154,7 @@ func appendArgs(dst []byte, a *Args) []byte {
 	return o.close()
 }
 
-// appendJava appends the Java attribution; both members are omitempty.
+// appendJava appends the Java attribution; every member is omitempty.
 func appendJava(dst []byte, j *Java) []byte {
 	o := openObject(dst)
 	if j.Thread != "" {
@@ -170,6 +170,10 @@ func appendJava(dst []byte, j *Java) []byte {
 			o.dst = strconv.AppendUint(o.dst, id, 10)
 		}
 		o.dst = append(o.dst, ']')
+	}
+	if j.Carrier {
+		o.key("carrier")
+		o.dst = append(o.dst, "true"...)
 	}
 	return o.close()
 }

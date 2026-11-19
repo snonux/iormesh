@@ -21,6 +21,8 @@ optional, so an older reader never sees a changed meaning.
 | `events.ndjson` | one event per line (NDJSON) | `schema.NDJSONSink`, as events complete |
 | `graph.json` | one graph object, indented JSON | `schema.WriteGraphFile`, at exit |
 | `stacks.ndjson` | the native stack table, one stack per line; only with `-native-stacks` | `schema.StackWriter`, one line per new stack |
+| `methods.ndjson` | the Java method table; only with `-spool` (M3) | `schema.TableWriter[Method]`, one line per new frame |
+| `threads.ndjson` | the Java thread table; only with `-spool` (M3) | `schema.TableWriter[Thread]`, one line per agent THREAD record |
 | `*.parquet` | the same events, columnar | M4 segment writer (to come) |
 
 `iormesh normalize -out DIR` writes the same two files for the
@@ -71,7 +73,7 @@ Required fields are always present; a zero is a real zero.
 | `args` | object | syscall-specific arguments, below |
 | `conn_id` | string, optional | the connection a socket event belongs to; across hosts assigned by the merge's ISN-pair join (S2, decision #26) |
 | `attribution` | string | `java` or `none` — missing attribution is data |
-| `java` | object, optional | `{thread, stack}`, set exactly when attribution is `java`; `thread` is the Java thread name, `stack` method-table ids, innermost first (settled by S1) |
+| `java` | object, optional | `{thread, stack, carrier}`, set exactly when attribution is `java`; `thread` is the Java thread name, `stack` method ids of `methods.ndjson`, innermost first (settled by S1); `carrier` (appended in M3) is `true` on a virtual thread's I/O, whose `thread` then names the carrier — see "Java attribution" |
 | `http` | object, optional | request fields on http events (*provisional until M3*) |
 | `session` | object, optional | the host description, set exactly on `session` events (below) |
 | `stack_id` | int, optional | the native user stack the thread entered the syscall with: an id of `stacks.ndjson` (≥ 1); only with `-native-stacks` (below) |
@@ -460,6 +462,104 @@ How it is captured and what it can and cannot say:
   addresses, and the walk through them is unreliable. Java
   attribution comes from the agent (M3, `java.stack`), never
   from here.
+
+## Java attribution (M3)
+
+`iormesh run -spool DIR` joins the I/O of JVMs started with
+`-javaagent:iormesh-agent.jar=spool=DIR` to the Java code that
+caused it (`internal/correlate`, `JavaJoin`). The tracer creates
+`DIR` (mode `1733`: every user may create its ring, none may list
+or delete another's); each agent maps one ring there,
+`<pid>.ring` (decision #27, `internal/agentspool`). A ring is
+opened only if it is a regular file with one link, reached
+without a symlink, owned by the uid of the process its name
+names, and its header names the same pid; anything else is
+reported on stderr and never mapped. The JVM must share the
+tracer's pid namespace (containers are M7's).
+
+How an event gets `attribution: java` — never by guessing:
+
+- The agent's hooked JDK methods write a *bracket* (hook, kernel
+  tid, enter and exit `System.nanoTime()`, stack id) when they
+  return. The event joins the innermost bracket on its tid whose
+  window contains the syscall's start, compared in
+  CLOCK_MONOTONIC: the event's boot-clock `boot_ns` is converted
+  with a boot − monotonic offset sampled in user space as the
+  midpoint of two monotonic reads around a boot read (S1
+  experiment 2), re-sampled at every spool poll.
+- The bracket's hook must issue the event's kind: the agent writes
+  its hook table into the ring at install (HOOK records), each
+  hook with its native's syscall allowlist (`stat`, `lstat` and
+  `fstat` match the kinds `newstat`, `newlstat`, `newfstat`).
+  Another kind inside a bracket is JVM work — class loading, say
+  — and stays `none`.
+- `none` also for: a syscall no bracket contains (JVM startup
+  before the agent, JIT/GC threads, JNI, JVM-internal I/O), two
+  brackets that overlap without nesting, a folded read/write
+  (`args.count`: many calls, which one bracket cannot vouch for),
+  and a bracket whose stack the agent did not deliver (dropped
+  STACK record, or a JVM run without stack walks) — `java` needs
+  a stack.
+- The BPF uprobe mark S1 also used (which JDK native issued the
+  syscall) is not built yet; until it is, the hook's allowlist is
+  the only guard against JVM work of an allowed kind inside a
+  bracket.
+- **Virtual threads** (JDK 21+): the agent records the carrier tid
+  at a bracket's enter and exit, 0 when the virtual thread moved
+  carriers inside it (such brackets join nothing). A joined event
+  gets the virtual thread's stack, `carrier: true`, and as
+  `thread` the name of the platform thread with that tid — v1
+  does not name virtual threads (PLAN.md M3).
+
+Events of a JVM with a ring wait (in seq order, holding the events
+behind them) until the ring's WATERMARK is 5 ms past the
+syscall's end — a bracket is written when its method returns —
+or 2 s after it if the agent stops writing watermarks; an event
+of a process without a ring leaves once a spool scan (every 50 ms
+and on the run loop's tick) after its syscall found none; a
+syscall that ended before its JVM's ring existed is decided at
+once. At the end of the trace everything is decided with what has
+been read. The summary line counts the rings, brackets, joined
+events (and carrier ones), why a JVM's other events stayed
+`none`, and the agents' own loss counters.
+
+`methods.ndjson` — one line per distinct frame, written before the
+first event naming it:
+
+```json
+{"schema_version":1,"method_id":3,
+ "frame":"iormesh.workload.scenarios.MethodFlow$Journal#append(MethodFlow.java:80)",
+ "class":"iormesh.workload.scenarios.MethodFlow$Journal","method":"append",
+ "file":"MethodFlow.java","line":80}
+```
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `method_id` | int | the id `java.stack` uses, from 1, unique in the trace |
+| `frame` | string | the agent's frame text, `class#method(file:line)` |
+| `class`, `method` | string | the frame's binary class name and method name |
+| `file` | string, optional | the source file; absent when the class has no source attribute |
+| `line` | int, optional | the line; absent when unknown (no line table, a native method) |
+
+A frame is a method *and* a line, so two call sites in one method
+are two ids. Ids are keyed by the frame text alone, across JVMs;
+JAR and class loader come with the class-load map (a later M3
+step), appended as optional fields.
+
+`threads.ndjson` — one line per agent THREAD record, the agent's
+own `iormesh-agent-watermark` thread included:
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `pid`, `pid_incarnation` | int | the JVM |
+| `tid` | int | the kernel tid; `0` if the agent could not look it up; for a virtual thread the carrier of its first bracket only |
+| `java_thread_id` | int | `Thread.getId()` |
+| `name` | string | the thread's name at its first bracket |
+| `virtual` | bool, optional | `true` for a virtual thread |
+
+Both tables carry `parquet:` tags for the M4 segment writer
+(`methods` and `threads` files, PLAN.md M3); until it exists they
+are NDJSON only.
 
 ## Graph
 

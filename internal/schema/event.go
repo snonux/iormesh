@@ -210,9 +210,18 @@ type Session struct {
 // shape (docs/spikes/s1-java-join.md); a syscall the uprobe marked but
 // no agent bracket contains stays attribution none.
 type Java struct {
+	// Thread is the Java thread's name (the agent's THREAD record); for
+	// I/O of a virtual thread, the carrier's name (Carrier), or absent
+	// when the carrier never named itself to the agent.
 	Thread string `json:"thread,omitempty" parquet:"thread,optional"`
-	// Stack lists method-table ids, innermost frame first.
+	// Stack lists method-table ids (methods.ndjson, Method), innermost
+	// frame first.
 	Stack []uint64 `json:"stack,omitempty" parquet:"stack,list"`
+	// Carrier flags I/O a virtual thread issued (PLAN.md M3, "Platform
+	// threads only in v1"): the stack is the virtual thread's, but v1
+	// names only the carrier thread it ran on. Appended in M3 (task
+	// 2b4); absent means a platform thread.
+	Carrier bool `json:"carrier,omitempty" parquet:"carrier,optional"`
 }
 
 // HTTP describes one request on an http event. Provisional until M3.

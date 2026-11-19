@@ -119,6 +119,18 @@ public final class Hooks {
         return r.path().toString();
     }
 
+    /**
+     * Writes one HOOK record (a row of the agent's hook table) into the
+     * ring; the agent calls it for every row at install, before any
+     * bracket, so the joiner knows each hook's syscall allowlist. False
+     * without a ring or when the record was dropped.
+     */
+    public static boolean describeHook(int id, String kind, String cls, String method,
+                                       String nativeName, String syscalls) {
+        Ring r = ring;
+        return r != null && r.hook(id, kind, cls, method, nativeName, syscalls);
+    }
+
     /** Starts the watermark thread (Watermarks); needs the ring. */
     public static void startWatermarks(long intervalMs) {
         Ring r = ring;
@@ -201,6 +213,10 @@ public final class Hooks {
                 describe(t, r);
             }
             t.stacks[d] = stacks.getAsLong();
+            if (t.virtual) {
+                // The carrier now; close compares it with the one then.
+                t.ktids[d] = Brackets.lookupKtid();
+            }
             // Stamped after the walk, so the walk is outside the bracket.
             t.enters[d] = System.nanoTime();
             t.hooks[d] = hook;
@@ -257,8 +273,9 @@ public final class Hooks {
         boolean wasBusy = t.busy;
         t.busy = true;
         try {
+            int ktid = t.carrierTid(d);
             long exit = System.nanoTime();
-            r.bracket(t.hooks[d], t.ktid, t.enters[d], exit, t.stacks[d], t.owner.getId());
+            r.bracket(t.hooks[d], ktid, t.enters[d], exit, t.stacks[d], t.owner.getId());
         } finally {
             t.busy = wasBusy;
             t.closing = Brackets.IDLE;
@@ -274,7 +291,8 @@ public final class Hooks {
      * to be dropped again.
      */
     private static void describe(Brackets t, Ring r) {
-        t.described = r.thread(t.owner.getId(), t.kernelTid(), t.owner.getName());
+        t.described = r.thread(t.owner.getId(), t.kernelTid(),
+                t.virtual ? Ring.VIRTUAL : 0, t.owner.getName());
         if (!t.described) {
             t.retryAt = System.nanoTime() + RETRY_NS;
         }

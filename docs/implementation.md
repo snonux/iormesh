@@ -359,8 +359,9 @@ tcp-loopback ship real ones):
 
 ## M0 — workload framework
 
-**Goal**: a JDK-only Java 21 app that runs one named scenario,
-brackets it with markers, and ships the scenario's expectations.
+**Goal**: a JDK-only Java 21 app (the core; the OTEL flavor is
+its own jar, #5) that runs one named scenario, brackets it with
+markers, and ships the scenario's expectations.
 PLAN.md: "M0 — Traceable test workload".
 
 **Files** (the framework landed with M0 and its code is now the
@@ -2129,7 +2130,7 @@ internal/correlate/javajoin.go
 
    ```
    0    magic "IORMRING" (stored last, release: header complete)
-   8    version u32 = 1     12  header size u32 = 4096
+   8    version u32 = 2     12  header size u32 = 4096
    16   capacity u64        24  pid u64     32  created mono ns
    64   head (writers' CAS, own cache line)
    128  tail (reader's release store, own cache line)
@@ -2158,10 +2159,24 @@ internal/correlate/javajoin.go
    BRACKET   1  hook i32, ktid i32, enter_mono, exit_mono,
                 stack_id, thread_id u64        // 48 bytes
    STACK     2  stack_id u64, n u32, 0 u32, n × (u32 len, UTF-8)
-   THREAD    3  thread_id u64, ktid i32, 0 u32, (u32 len, name)
+   THREAD    3  thread_id u64, ktid i32, flags u32 (1 = virtual),
+                (u32 len, name)
    WATERMARK 4  mono_ns u64    // every bracket that exited
                                // before this is in the ring
+   HOOK      5  hook_id u64, 5 u32, 0 u32, kind, class, method,
+                native, syscalls (comma-separated), as strings
    ```
+
+   Version 2 (task 2b4) added HOOK and THREAD's flags: the agent
+   writes its whole hook table into the still empty ring at
+   install, so the joiner reads each hook's syscall allowlist
+   from the ring — whatever variant or `table=` override the JVM
+   chose — and the tracer keeps no copy of the TSVs. A virtual
+   thread (JDK 21+, `Thread.isVirtual` found reflectively, the
+   bridge being built for 17) is flagged in its THREAD, and its
+   brackets carry the carrier tid read again at enter and exit
+   (two `readlink`s per bracket, virtual threads only), 0 when it
+   parked and moved carriers inside the bracket.
 
    STACK and THREAD are zero-padded to 8 and capped at 16 KiB
    (strings cut to 1024 chars); BRACKET and WATERMARK allocate
@@ -2174,7 +2189,7 @@ internal/correlate/javajoin.go
    costs no allocation per bracket; each failed attempt counts as
    a drop). The joiner resolves ids against everything it has
    read. Sightings of stacks past StackIds' 65 536-entry cap count
-   as dropped STACKs. METHOD (the method table) waits for step 6.
+   as dropped STACKs. The method table is the tracer's (step 6).
 
    Brackets are written at exit, so a syscall inside a still-open
    bracket has no record yet; the agent's watermark thread writes
@@ -2225,32 +2240,62 @@ internal/correlate/javajoin.go
    debug dump's counts and keep every watermark's promise. Checked on
    25 (the Go-driven runs), the Java unit tests also on 17
    (GraalVM CE 17.0.9) and 27-ea.
-5. The Go side joins the agent bracket to the uprobe-marked
-   syscall:
+5. The Go side joins the agent bracket to the syscall. Done (task
+   2b4) as `correlate.JavaJoin` (`javajoin.go`, `javajvm.go`,
+   `javaattr.go`), a `schema.Sink` between the correlator and the
+   events file, switched on by `iormesh run -spool DIR`
+   (`internal/cli/java.go`; `agentspool.Dir` finds and vets the
+   rings — see [schema.md](schema.md#java-attribution-m3)):
 
    ```go
-   // joiner pairs a uprobe-marked syscall with the agent bracket
-   // that contains it. The BPF side stamps the native's entry
-   // with bpf_ktime_get_ns (CLOCK_MONOTONIC, the clock of
-   // System.nanoTime), so containment needs no conversion; the
-   // event's own timestamp stays on the boot clock. A marked
-   // syscall with no bracket stays attribution "none" (no Java
-   // stack); nothing is attributed by guessing. S1 paired on the
-   // sys_enter stamp; the native-entry stamp is untested.
-   type joiner struct {
-       open   map[uint32][]agentspool.Bracket // per ktid, by enter
-       stacks map[uint64][]uint32             // stack id → methods
-   }
-
-   func (j *joiner) attribute(ev *schema.Event) (ready bool)
+   // innermost: per tid, brackets sorted by exit (ring order is
+   // exit order per thread); the first that ends at or after t and
+   // began at or before it is the innermost container.
+   func (v *jvm) innermost(tid int32, t uint64) (b agentspool.Bracket, found, ambiguous bool)
    ```
 
-   Events are released once an agent `WATERMARK` has passed the
-   syscall's time, or after a 2 s timeout when no agent is
-   attached — then `attribution: none`.
+   The BPF uprobe mark is **not built yet** (no task has it; it
+   needs uprobes by library path with BPF cookies, the mark read
+   in the syscall handlers, nr 335 dropped, a reset on thread
+   exit). The join therefore pairs on what the agent alone gives:
+   the event's tid and start, converted from the boot clock with
+   a user-space midpoint offset (S1 experiment 2's conversion,
+   0 / 120 000 outside their bracket), inside the innermost
+   bracket, whose hook's allowlist must contain the event's kind.
+   When the mark lands it becomes one more condition — the
+   native's id must match the hook's — and the native-entry stamp
+   can replace the converted one. Never guessed: no bracket,
+   another kind, brackets that overlap without nesting, a folded
+   read/write, or a stack the agent did not deliver leave
+   `attribution: none`, each counted in the summary line. A
+   virtual thread's I/O gets `java.carrier` and the carrier's
+   name.
+
+   Release: a JVM's event waits until the ring's watermark is
+   5 ms (`Grace`) past the syscall's end — the watermark only
+   covers brackets that already exited, and a bracket exits a
+   little after its native's last syscall — or 2 s (`Timeout`);
+   a syscall that ended before the ring existed is decided at
+   once; another process's event leaves once a spool scan after
+   it found no ring (scans every 50 ms and on the run loop's
+   tick). Brackets are kept 10 s past the watermark: the
+   correlator holds socket events up to its 5 s fuse window.
+   Tests: `javajoin_test.go` (fake rings: join, every `none`
+   reason, nesting, carrier, waiting, timeout, stale ring of a
+   reused pid, corrupt ring), `agentspool` dir tests (symlink,
+   hard link, foreign owner, pid mismatch), and the integration
+   test `TestJavaMethodFlow`: `method-flow` under the agent
+   satisfies its `expect-pending.json`, every declared op on its
+   declared thread and method.
 6. Method table and thread table are emitted as their own NDJSON
-   record kinds and parquet files (`methods`, `threads`), keyed by
-   id.
+   files, `methods.ndjson` and `threads.ndjson` (`schema.Method`,
+   `schema.Thread`, `schema.TableWriter`;
+   [schema.md](schema.md#java-attribution-m3)), keyed by id. Done (task 2b4) for NDJSON; the types carry
+   `parquet:` tags, and the parquet files wait for the M4 segment
+   writer (task 8b4), as the events' do. A method id is one
+   distinct frame (`class#method(file:line)`, parsed into class,
+   method, file, line), keyed by the frame text across JVMs; JAR
+   and class loader come with the class-load map (task 5b4).
 7. HTTP hooks: one transformer per library, each emitting an
    `http` event at request completion with `conn_id` (via the
    socket's fd) and `req_seq` (per-connection counter). Start
@@ -2309,12 +2354,16 @@ internal/correlate/javajoin.go
    (JDK 25), and `expect-pending.json` with the `attribution`,
    `java` and `http` declarations (format below and in
    [testing.md](testing.md#m3-scenarios-ahead-of-the-agent)).
-   Steps 5 and 7 add those fields to `normalize.ExpectedEvent`
-   — the goldens assume `java.method` matches the innermost
-   frame outside the JDK's own packages with `(file:line)`
-   dropped; 2b4 settles the rule — then
-   replace each `expect.json` with its pending file and add the
-   integration tests.
+   Steps 5 and 7 add those fields to `normalize.ExpectedEvent`,
+   then replace each `expect.json` with its pending file and add
+   the integration tests. Step 5 did its part (task 2b4):
+   `ExpectedEvent.java` (`thread`, `method`) loads, and the rule
+   is settled as the goldens assumed — `java.method` is the
+   innermost frame outside the JDK's own packages (`java.`,
+   `javax.`, `jdk.`, `sun.`, `com.sun.`), as `class#method`
+   (`normalize.CausingMethod`); `TestJavaMethodFlow` checks
+   `method-flow`'s pending file directly. Promoting the files
+   waits for the `http` fields (step 7).
 
 **Done when**: PLAN.md's M3 acceptance holds.
 

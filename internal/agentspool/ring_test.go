@@ -34,7 +34,10 @@ func drainAll(t *testing.T, r *Ring) []Record {
 func TestRoundTrip(t *testing.T) {
 	path, w := newTestRing(t, testCap)
 	want := []Record{
+		Hook{ID: 3, Kind: "read", Class: "java/io/FileInputStream", Method: "read",
+			Native: "readBytes", Syscalls: []string{"read", "pread64"}},
 		Thread{ID: 1, KTID: 4243, Name: "main"},
+		Thread{ID: 2, KTID: 4244, Name: "", Virtual: true},
 		Stack{ID: 99, Frames: []string{"a.B#c(B.java:3)", "größe#ü(X.java:1)"}},
 		Stack{ID: 100, Frames: []string{}},
 		Bracket{Hook: 3, KTID: 4243, EnterMono: 10, ExitMono: 20, StackID: 99, ThreadID: 1},
@@ -46,7 +49,7 @@ func TestRoundTrip(t *testing.T) {
 		}
 	}
 	r := openRing(t, path)
-	if got := r.Header(); got != (Header{Version: 1, Capacity: testCap, PID: 4242, CreatedMono: 77}) {
+	if got := r.Header(); got != (Header{Version: Version, Capacity: testCap, PID: 4242, CreatedMono: 77}) {
 		t.Errorf("header %+v", got)
 	}
 	if got := drainAll(t, r); !reflect.DeepEqual(got, want) {
@@ -67,6 +70,8 @@ func write(w *testWriter, rec Record) bool {
 		return w.thread(v)
 	case Watermark:
 		return w.watermark(v)
+	case Hook:
+		return w.hook(v)
 	}
 	panic("unknown record")
 }
@@ -192,6 +197,12 @@ func malformedCases() map[string]malformedCase {
 		"stack extra word":   {typeStack, append(stringsBody(1, 1, []string{"x"}), make([]byte, 8)...), false},
 		"string too long":    {typeStack, setByte(stringsBody(1, 1, []string{"x"}), 16, 200), false},
 		"thread ktid < 0":    {typeThread, stringsBody(1, 1<<31, []string{"t"}), false},
+		"thread flag":        {typeThread, flagsBody(1, 1, 2, []string{"t"}), false},
+		"hook 4 strings":     {typeHook, stringsBody(1, 4, []string{"a", "b", "c", "d"}), false},
+		"hook empty string":  {typeHook, stringsBody(1, 5, []string{"a", "b", "", "d", "e"}), false},
+		"hook id 0":          {typeHook, hookBody(Hook{Kind: "a", Class: "b", Method: "c", Native: "d", Syscalls: []string{"e"}}), false},
+		"hook id too big":    {typeHook, hookBody(Hook{ID: -1, Kind: "a", Class: "b", Method: "c", Native: "d", Syscalls: []string{"e"}}), false},
+		"hook flags":         {typeHook, flagsBody(1, 5, 1, []string{"a", "b", "c", "d", "e"}), false},
 		"unknown type":       {9, make([]byte, 8), true},
 	}
 }
@@ -258,7 +269,7 @@ func TestOpenRejects(t *testing.T) {
 	}{
 		"no magic yet":       {func(_ string, m []byte) error { le.PutUint64(m, 0); return nil }, ErrNotReady},
 		"bad magic":          {func(_ string, m []byte) error { m[0] ^= 1; return nil }, ErrCorrupt},
-		"version 2":          {func(_ string, m []byte) error { le.PutUint32(m[offVersion:], 2); return nil }, ErrVersion},
+		"version 1":          {func(_ string, m []byte) error { le.PutUint32(m[offVersion:], 1); return nil }, ErrVersion},
 		"header size":        {func(_ string, m []byte) error { le.PutUint32(m[offHeaderSize:], 64); return nil }, ErrCorrupt},
 		"capacity not 2^k":   {func(_ string, m []byte) error { le.PutUint64(m[offCapacity:], testCap-8); return nil }, ErrCorrupt},
 		"capacity too big":   {func(_ string, m []byte) error { le.PutUint64(m[offCapacity:], testCap*2); return nil }, ErrTruncated},

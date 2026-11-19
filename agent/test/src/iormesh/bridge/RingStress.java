@@ -43,6 +43,8 @@ public final class RingStress {
         if (hooks) {
             Hooks.configure(2, true, false);
             Hooks.ring = ring;
+            // As the agent's install does: the table ahead of any bracket.
+            Hooks.describeHook(1, "write", "iormesh/bridge/RingStress", "stress", "none", "write");
             Watermarks.start(ring, 1);
         }
         List<Thread> ts = new ArrayList<>();

@@ -28,6 +28,8 @@ func fill(r *rand.Rand, v reflect.Value) {
 	switch v.Kind() {
 	case reflect.String:
 		v.SetString(awkwardStrings[r.IntN(len(awkwardStrings))])
+	case reflect.Bool:
+		v.SetBool(r.IntN(2) == 0)
 	case reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		v.SetUint(randUint(r) & (1<<(8*v.Type().Size()) - 1))
 	case reflect.Int32, reflect.Int64:

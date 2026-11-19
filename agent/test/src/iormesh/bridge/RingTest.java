@@ -36,6 +36,8 @@ public final class RingTest {
                 new AgentTests.Case("ring/abandoned fill becomes PAD", RingTest::abandoned),
                 new AgentTests.Case("ring/stale file replaced", RingTest::staleFile),
                 new AgentTests.Case("ring/hooks write records", RingTest::hooksWrite),
+                new AgentTests.Case("ring/hook table record", RingTest::hookRecord),
+                new AgentTests.Case("ring/virtual thread flagged", RingTest::virtualThread),
                 new AgentTests.Case("ring/watermark waits for closing", RingTest::watermark),
                 new AgentTests.Case("ring/release discards", RingTest::release));
     }
@@ -164,7 +166,73 @@ public final class RingTest {
         Rec th = recs.get(0);
         equal(tid[0], b.getLong(th.off() + 8), "THREAD java id");
         check(b.getInt(th.off() + 16) > 0, "THREAD kernel tid looked up");
+        equal(0, b.getInt(th.off() + 20), "THREAD flags of a platform thread");
         checkBracket(b, recs.get(2), tid[0], b.getLong(recs.get(1).off() + 8));
+        delete(dir);
+    }
+
+    /** HOOK: id, count 5, flags 0, then kind, class, method, native, syscalls. */
+    static void hookRecord() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
+        check(r.hook(7, "read", "java/io/FileInputStream", "read", "read0", "read,pread64"),
+                "hook written");
+        ByteBuffer b = map(r.path());
+        List<Rec> recs = records(b);
+        equal(1, recs.size(), "one record");
+        int o = recs.get(0).off();
+        equal(Ring.HOOK, recs.get(0).type(), "type");
+        equal(7L, b.getLong(o + 8), "id");
+        equal(5, b.getInt(o + 16), "string count");
+        equal(0, b.getInt(o + 20), "flags");
+        List<String> got = new ArrayList<>();
+        for (int i = 0, p = o + 24; i < 5; i++) {
+            byte[] s = new byte[b.getInt(p)];
+            b.get(p + 4, s);
+            got.add(new String(s, java.nio.charset.StandardCharsets.UTF_8));
+            p += 4 + s.length;
+        }
+        equal(List.of("read", "java/io/FileInputStream", "read", "read0", "read,pread64"), got,
+                "strings");
+        delete(dir);
+    }
+
+    /**
+     * A virtual thread's THREAD carries VIRTUAL, and a bracket that
+     * stayed on one carrier carries that carrier's tid. Skipped on 17–20,
+     * which have no virtual threads.
+     */
+    static void virtualThread() throws Exception {
+        java.lang.reflect.Method ofVirtual;
+        try {
+            ofVirtual = Thread.class.getMethod("ofVirtual");
+        } catch (NoSuchMethodException e) {
+            return;
+        }
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
+        Hooks.configure(5, false, false);
+        Hooks.ring = r;
+        try {
+            Object builder = ofVirtual.invoke(null);
+            Runnable body = () -> {
+                Hooks.enter(3);
+                Hooks.exit(3);
+            };
+            // Through the public interface: the builder class is internal.
+            Thread t = (Thread) Class.forName("java.lang.Thread$Builder")
+                    .getMethod("start", Runnable.class).invoke(builder, body);
+            t.join();
+        } finally {
+            Hooks.ring = null;
+            Hooks.configure(5, true, false);
+        }
+        ByteBuffer b = map(r.path());
+        List<Rec> recs = records(b);
+        equal(List.of(Ring.THREAD, Ring.BRACKET), recs.stream().map(Rec::type).toList(),
+                "record order");
+        equal(Ring.VIRTUAL, b.getInt(recs.get(0).off() + 20), "THREAD flags");
+        check(b.getInt(recs.get(1).off() + 12) > 0, "carrier tid of an unparked bracket");
         delete(dir);
     }
 

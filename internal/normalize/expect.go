@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"iormesh/internal/schema"
 )
@@ -47,6 +48,21 @@ type ExpectedEvent struct {
 	// how a golden says a process is not a JVM (non-java-peer), so a
 	// tracer that guessed Java frames for it fails the check.
 	Attribution string `json:"attribution,omitempty"`
+	// Java, when set, must match the event's Java attribution (M3, task
+	// 2b4); see ExpectedJava. It implies attribution java.
+	Java *ExpectedJava `json:"java,omitempty"`
+}
+
+// ExpectedJava declares who caused an event on the Java side. Thread,
+// when set, is the Java thread's name. Method is the causing method as
+// "class#method" (binary class name, '$' for nested classes): the
+// innermost frame of the event's stack outside the JDK's own packages
+// (CausingMethod), its (file:line) dropped — a golden names the
+// scenario's method, not the JDK internals it called or the line, which
+// moves with every edit of the workload.
+type ExpectedJava struct {
+	Thread string `json:"thread,omitempty"`
+	Method string `json:"method"`
 }
 
 // ExpectedArgs mirrors schema.Args. Paths compare after normalization
@@ -193,6 +209,9 @@ func (e ExpectedEvent) validate(threadProc map[string]string) error {
 	default:
 		return fmt.Errorf("unknown attribution %q", e.Attribution)
 	}
+	if err := e.validateJava(); err != nil {
+		return err
+	}
 	if err := wantKind(e.Thread, "t", false); err != nil {
 		return fmt.Errorf("thread: %w", err)
 	}
@@ -224,6 +243,22 @@ func wantKind(s, kind string, optional bool) error {
 	}
 	if symbolRE.FindString(s) != s || symbolKind(s) != kind {
 		return fmt.Errorf("%q is not a $%s symbol", s, kind)
+	}
+	return nil
+}
+
+// validateJava requires a java declaration to name its method as
+// "class#method" and not to contradict its attribution.
+func (e ExpectedEvent) validateJava() error {
+	if e.Java == nil {
+		return nil
+	}
+	if e.Attribution == schema.AttributionNone {
+		return fmt.Errorf("java declared with attribution none")
+	}
+	cls, method, ok := strings.Cut(e.Java.Method, "#")
+	if !ok || cls == "" || method == "" || strings.ContainsAny(method, "#()") {
+		return fmt.Errorf("java method %q: want class#method", e.Java.Method)
 	}
 	return nil
 }

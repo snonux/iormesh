@@ -12,11 +12,13 @@ import (
 // and STACK somewhere in the ring (not necessarily before it: another
 // thread may publish a bracket on a stack whose STACK is still being
 // written, and a dropped one is retried later), a bracket's kernel tid is
-// its thread's, and no bracket after a WATERMARK exited before it.
+// its thread's, no bracket after a WATERMARK exited before it, and the
+// hook table's HOOK records precede every bracket.
 type agentCheck struct {
 	t          *testing.T
 	threads    map[uint64]Thread
 	stacks     map[uint64]Stack
+	hooks      map[int32]Hook
 	named      []Bracket       // brackets whose ids resolve at the end
 	brackets   map[int32]int64 // per hook id
 	watermarks int
@@ -25,7 +27,7 @@ type agentCheck struct {
 
 func newAgentCheck(t *testing.T) *agentCheck {
 	return &agentCheck{t: t, threads: map[uint64]Thread{}, stacks: map[uint64]Stack{},
-		brackets: map[int32]int64{}}
+		hooks: map[int32]Hook{}, brackets: map[int32]int64{}}
 }
 
 func (a *agentCheck) record(rec Record) {
@@ -43,7 +45,15 @@ func (a *agentCheck) record(rec Record) {
 		}
 		a.mark = v.Mono
 		a.watermarks++
+	case Hook:
+		if a.watermarks > 0 || len(a.named) > 0 {
+			a.t.Errorf("HOOK %+v after the install's first records", v)
+		}
+		a.hooks[v.ID] = v
 	case Bracket:
+		if _, ok := a.hooks[v.Hook]; !ok {
+			a.t.Errorf("bracket %+v: no HOOK ahead of it", v)
+		}
 		a.brackets[v.Hook]++
 		a.named = append(a.named, v)
 		if v.ExitMono < a.mark {
@@ -75,6 +85,9 @@ func (a *agentCheck) resolve(l Losses) {
 func (a *agentCheck) finish(debug map[int32]debugRow) {
 	byKind := map[string]int64{}
 	for id, row := range debug {
+		if h, ok := a.hooks[id]; !ok || h.Kind != row.kind {
+			a.t.Errorf("hook %d (%s): HOOK record %+v", id, row.kind, h)
+		}
 		if a.brackets[id] < row.count {
 			a.t.Errorf("hook %d (%s): %d brackets in the ring, %d counted", id, row.kind,
 				a.brackets[id], row.count)

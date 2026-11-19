@@ -34,6 +34,14 @@ truth.
   upgrades verify the signature against a root-owned key.
   Bootstrap and the signature scheme are open decisions in
   PLAN.md (#1, #28).
+- **The agent spool is untrusted input.** `iormesh run -spool`
+  creates the directory mode 1733 (anyone may create, nobody may
+  list or delete another's file); the tracer, root, maps a ring
+  only if it is a regular file with one link, opened without
+  following symlinks, owned by the uid of the process its name
+  names and with that pid in its header — a planted file is
+  reported and never mapped (docs/schema.md, "Java
+  attribution").
 - **Bounded by design.** Sessions end after 4h by default
   (enforced twice — by the tracer and by its systemd unit) and
   stop before the trace partition fills.

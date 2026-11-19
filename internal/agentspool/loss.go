@@ -11,6 +11,9 @@ type Losses struct {
 	// failed attempt counts; DroppedStacks also counts the sightings of
 	// stacks past the agent's table cap, whose frames are never written.
 	DroppedBrackets, DroppedStacks, DroppedThreads, DroppedWatermarks uint64
+	// DroppedHooks are hook-table rows the agent could not write at
+	// install; that hook's brackets then cannot be joined.
+	DroppedHooks uint64
 	// DroppedOther is the per-type counters of types this reader does
 	// not know (a newer agent would bump Version first; kept for honesty).
 	DroppedOther uint64
@@ -28,7 +31,7 @@ type Losses struct {
 // Dropped is every record the agent dropped, all types.
 func (l Losses) Dropped() uint64 {
 	return l.DroppedBrackets + l.DroppedStacks + l.DroppedThreads + l.DroppedWatermarks +
-		l.DroppedOther
+		l.DroppedHooks + l.DroppedOther
 }
 
 // Total is every lost record, agent- and reader-side.

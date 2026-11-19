@@ -4,6 +4,8 @@ import (
 	"maps"
 	"regexp"
 	"strings"
+
+	"iormesh/internal/schema"
 )
 
 // bindings maps expectation symbols to collected values. It is a
@@ -16,6 +18,8 @@ type bindings struct {
 	sym   map[string]string // symbol → value
 	owner map[string]string // kind + "\x00" + value → symbol
 	trail []string
+	// methods resolves java.stack ids for java declarations (Trace.Methods).
+	methods map[uint64]schema.Method
 }
 
 func newBindings() *bindings {

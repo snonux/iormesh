@@ -51,6 +51,11 @@ type Options struct {
 type Trace struct {
 	Events []schema.Event
 	Graph  schema.Graph
+	// Methods is the trace's Java method table (methods.ndjson, M3) by
+	// id, nil when the run joined no JVM: what an event's java.stack ids
+	// name. Normalize keeps it as is — method ids are per trace, and a
+	// check resolves them to names before comparing.
+	Methods map[uint64]schema.Method
 }
 
 // normalizer holds the symbol table shared by events and graph.
@@ -77,7 +82,7 @@ func Normalize(in Trace, opt Options) (Trace, error) {
 		}
 	}
 	n := normalizer{opt: opt, syms: newSymbols()}
-	out := Trace{Events: make([]schema.Event, len(events))}
+	out := Trace{Events: make([]schema.Event, len(events)), Methods: in.Methods}
 	for i, e := range events {
 		out.Events[i] = n.event(e, uint64(i+1))
 	}

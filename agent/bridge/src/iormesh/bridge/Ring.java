@@ -60,8 +60,14 @@ public final class Ring {
     static final int STACK = 2;
     static final int THREAD = 3;
     static final int WATERMARK = 4;
-    /** Format version; the reader rejects any other. */
-    static final int VERSION = 1;
+    static final int HOOK = 5;
+    /**
+     * Format version; the reader rejects any other. 2 (task 2b4): HOOK
+     * records, and THREAD's reserved word carries flags (VIRTUAL).
+     */
+    static final int VERSION = 2;
+    /** THREAD flag: the Java thread is a virtual thread (JDK 21+). */
+    static final int VIRTUAL = 1;
     static final long MAGIC = 0x474e49524d524f49L; // "IORMRING", little endian
     static final int DATA = 4096;
     static final int HEAD = 64;
@@ -189,16 +195,38 @@ public final class Ring {
             enc[i] = utf8(frames[i]);
             len += 4 + enc[i].length;
         }
-        return strings(STACK, align(len), id, frames.length, enc);
+        return strings(STACK, align(len), id, frames.length, 0, enc);
     }
 
     /**
      * Writes a THREAD: Java thread id u64, kernel tid i32 (0 = unknown),
-     * then one string, the thread's name (u32 length + UTF-8), padded.
+     * flags u32 (VIRTUAL), then one string, the thread's name (u32
+     * length + UTF-8), padded. A virtual thread's ktid is the carrier it
+     * first ran a bracket on; its brackets carry their own (Brackets).
      */
-    boolean thread(long threadId, int ktid, String name) {
+    boolean thread(long threadId, int ktid, int flags, String name) {
         byte[][] enc = {utf8(name)};
-        return strings(THREAD, align(8 + 16 + 4 + enc[0].length), threadId, ktid, enc);
+        return strings(THREAD, align(8 + 16 + 4 + enc[0].length), threadId, ktid, flags, enc);
+    }
+
+    /**
+     * Writes a HOOK: one row of the agent's hook table — id u64, n u32 =
+     * 5, 4 zero bytes, then kind, class, method, native and the
+     * comma-separated syscall allowlist as strings. The agent writes the
+     * whole table at install, into the still empty ring, so the joiner
+     * learns which syscalls each bracket may stand for from the ring
+     * itself, whatever table variant (or table= override) the JVM chose.
+     */
+    boolean hook(int id, String kind, String cls, String method, String nativeName,
+                 String syscalls) {
+        String[] f = {kind, cls, method, nativeName, syscalls};
+        byte[][] enc = new byte[f.length][];
+        int len = 8 + 16;
+        for (int i = 0; i < f.length; i++) {
+            enc[i] = utf8(f[i]);
+            len += 4 + enc[i].length;
+        }
+        return strings(HOOK, align(len), id, f.length, 0, enc);
     }
 
     /** Counts a record of type the caller chose not to write (StackIds' cap). */
@@ -215,8 +243,11 @@ public final class Ring {
         return n;
     }
 
-    /** Fills and publishes a STACK or THREAD record (shared shape). */
-    private boolean strings(int type, int len, long id, int word, byte[][] enc) {
+    /**
+     * Fills and publishes a STACK, THREAD or HOOK record (shared shape:
+     * id, a count or tid, a flags word, strings).
+     */
+    private boolean strings(int type, int len, long id, int word, int flags, byte[][] enc) {
         if (len > MAX_RECORD) {
             countDrop(type, len);
             return false;
@@ -228,6 +259,7 @@ public final class Ring {
         try {
             buf.putLong(off + 8, id);
             buf.putInt(off + 16, word);
+            buf.putInt(off + 20, flags);
             int p = off + 24;
             for (byte[] s : enc) {
                 buf.putInt(p, s.length);

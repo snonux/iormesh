@@ -45,11 +45,12 @@ func IntegrationTestSerial() error {
 }
 
 // runIntegrationTests builds everything the tests drive - the tests exec
-// ./iormesh and `java -jar workload.jar` themselves, like ior's run its
-// binaries - and runs the compiled test binary as root from
+// ./iormesh and `java -jar workload.jar` (with iormesh-agent.jar for the
+// Java join's test) themselves, like ior's run its binaries - and runs
+// the compiled test binary as root from
 // ./integrationtests, so the tests find both at "../".
 func runIntegrationTests(parallel int) error {
-	mg.SerialDeps(Build, WorkloadBuild)
+	mg.SerialDeps(Build, WorkloadBuild, AgentBuild)
 	if err := sh.RunWithV(goEnv(), "go", "test", "-c", "./integrationtests/",
 		"-o", gatecmd.IntegrationTestBinary); err != nil {
 		return err

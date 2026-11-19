@@ -81,7 +81,11 @@ func readTrace(dir string) (normalize.Trace, error) {
 	if err != nil {
 		return normalize.Trace{}, fmt.Errorf("%s: %w", GraphFile, err)
 	}
-	return normalize.Trace{Events: events, Graph: graph}, nil
+	methods, err := normalize.LoadMethods(filepath.Join(dir, MethodsFile))
+	if err != nil {
+		return normalize.Trace{}, err
+	}
+	return normalize.Trace{Events: events, Graph: graph, Methods: methods}, nil
 }
 
 func checkTrace(got normalize.Trace, path string, stdout io.Writer) (int, error) {

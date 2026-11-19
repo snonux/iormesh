@@ -32,7 +32,7 @@ func (v Violation) String() string { return v.Kind + ": " + v.Msg }
 // must_not_appear are checked even when events fail, so one run reports
 // all three kinds.
 func Check(got Trace, want Expectation) []Violation {
-	b, vs := checkEvents(got.Events, want.Events)
+	b, vs := checkEvents(got.Events, want.Events, got.Methods)
 	vs = append(vs, checkEdges(got.Graph.Edges, want.Edges, b)...)
 	return append(vs, checkForbidden(got, want.MustNotAppear)...)
 }
@@ -42,9 +42,11 @@ func Check(got Trace, want Expectation) []Violation {
 // its bindings, so their diagnoses would be noise — and returns the
 // bindings of the best partial match, so edges are still checked against
 // the symbols that did bind.
-func checkEvents(got []schema.Event, want []ExpectedEvent) (*bindings, []Violation) {
-	s := eventSearch{plans: groupDeclared(want), threads: groupCollected(got),
-		b: newBindings()}
+func checkEvents(got []schema.Event, want []ExpectedEvent,
+	methods map[uint64]schema.Method) (*bindings, []Violation) {
+	b := newBindings()
+	b.methods = methods
+	s := eventSearch{plans: groupDeclared(want), threads: groupCollected(got), b: b}
 	if s.solve(0) {
 		return s.b, nil
 	}
@@ -89,7 +91,7 @@ func stateSuffix(state string) string {
 // matchEvent reports whether collected event e satisfies declared d under
 // the current bindings, binding d's symbols if so (and nothing if not).
 func (b *bindings) matchEvent(d ExpectedEvent, e schema.Event) bool {
-	if !plainFieldsMatch(d, e) {
+	if !plainFieldsMatch(d, e) || !javaMatch(d.Java, e, b.methods) {
 		return false
 	}
 	m := b.mark()

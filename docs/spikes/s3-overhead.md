@@ -430,3 +430,34 @@ which this host cannot promise.
 |----------|--------|-------------|
 | tracer CPU | ≤ 2 µs per emitted event (median) | **passes**: 1.20 µs at 1 thread, 1.70 µs at 4 (unfolded, 5 runs each) |
 | bystander | ≤ 1.25× at 4 threads (CPU-time median of ≥ 10 pairs) | **passes**: 1.19× and 1.15× in two sets of 10 pairs; wall clock 1.21× and 1.14× |
+
+## Follow-up (2b4): the Java join's cost
+
+Task 2b4 added the Java join (`iormesh run -spool`,
+`correlate.JavaJoin`), which sits between the correlator and the
+events file. Same method as md4 (`S3_MODES=traced
+S3_TRACER_FLAGS=-aggregate=false S3_OPS=500000 S3_THREADS=1`),
+host load 2.5–10 and changing between runs, so only the large
+differences mean anything. Samples are not kept in the repo.
+
+| Run | ns/event, median | Range | n |
+|---|--:|--:|--:|
+| before 2b4, no `-spool` (load 5–10) | 1760 | — | 5 |
+| after 2b4, no `-spool` (load 2.5–4) | 960 | — | 5 |
+| after, `-spool`, burst JVM under the agent (load 3.5–5.6) | 5230 | 2960–6090 | 5 |
+| the same, one profiled run | 2760 | — | 1 |
+
+Without `-spool` the join is not in the path, so the two first
+rows differ by host load only. With the agent on the burst every
+one of the million events is a hooked one-byte call and is
+joined: the profile puts the join's own share (holding the event
+until its watermark passes, the bracket search, the ring drain)
+at about 1.1 µs per event on top of the 1–1.8 µs md4 measured, so
+this worst case exceeds the ≤ 2 µs budget. The first profile
+also showed the held queue reallocating on every append (slicing
+its head off shrank its capacity); 2b4 replaced that with a head
+index before the five runs above. Not yet cut: each event is
+copied into the queue and out again (≈400 bytes twice), and the
+default fold (`-aggregate`) turns this burst into ~150 events,
+so a real JVM's join cost scales with its unfolded I/O calls.
+M3's acceptance (task 5b4) re-measures it against #25.

@@ -3,6 +3,7 @@ package agentspool
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -107,7 +108,21 @@ func (w *testWriter) stack(s Stack) bool {
 }
 
 func (w *testWriter) thread(th Thread) bool {
-	return w.raw(typeThread, stringsBody(th.ID, uint32(th.KTID), []string{th.Name}))
+	var flags uint32
+	if th.Virtual {
+		flags = threadVirtual
+	}
+	return w.raw(typeThread, flagsBody(th.ID, uint32(th.KTID), flags, []string{th.Name}))
+}
+
+func (w *testWriter) hook(h Hook) bool {
+	return w.raw(typeHook, hookBody(h))
+}
+
+// hookBody is a HOOK body: the five strings, the allowlist comma-joined.
+func hookBody(h Hook) []byte {
+	return stringsBody(uint64(h.ID), hookStrings,
+		[]string{h.Kind, h.Class, h.Method, h.Native, strings.Join(h.Syscalls, ",")})
 }
 
 func (w *testWriter) watermark(m Watermark) bool {
@@ -124,12 +139,17 @@ func bracketBody(b Bracket) []byte {
 	return body
 }
 
-// stringsBody is a STACK or THREAD body: id, a u32, four zero bytes,
-// then the strings, zero-padded to 8.
+// stringsBody is a STACK, THREAD or HOOK body with zero flags.
 func stringsBody(id uint64, word uint32, strs []string) []byte {
+	return flagsBody(id, word, 0, strs)
+}
+
+// flagsBody is a strings record's body: id, a u32, the flags word, then
+// the strings, zero-padded to 8.
+func flagsBody(id uint64, word, flags uint32, strs []string) []byte {
 	body := le.AppendUint64(nil, id)
 	body = le.AppendUint32(body, word)
-	body = le.AppendUint32(body, 0)
+	body = le.AppendUint32(body, flags)
 	for _, s := range strs {
 		body = le.AppendUint32(body, uint32(len(s)))
 		body = append(body, s...)

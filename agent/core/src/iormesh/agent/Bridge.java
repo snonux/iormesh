@@ -117,6 +117,14 @@ final class Bridge {
         }
     }
 
+    /** See Hooks.describeHook: one hook-table row into the ring. */
+    boolean describeHook(int id, String kind, String cls, String method, String nativeName,
+                         String syscalls) throws ReflectiveOperationException {
+        return (boolean) hooks.getMethod("describeHook", int.class, String.class, String.class,
+                String.class, String.class, String.class)
+                .invoke(null, id, kind, cls, method, nativeName, syscalls);
+    }
+
     void startWatermarks(long intervalMs) throws ReflectiveOperationException {
         hooks.getMethod("startWatermarks", long.class).invoke(null, intervalMs);
     }

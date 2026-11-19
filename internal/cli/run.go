@@ -111,25 +111,54 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	st, err := openStacks(cfg, tr)
+	out, err := openOutputs(cfg, tr, stderr)
 	if err != nil {
 		return errors.Join(err, tr.Close())
 	}
-	c, err := newCorrelator(ctx, cfg, st.ids())
+	c, err := newCorrelator(ctx, cfg, out)
 	if err != nil {
-		return errors.Join(err, st.close(), tr.Close())
+		return errors.Join(err, out.close(), tr.Close())
 	}
 	s := newSession(tr, c, cfg)
+	s.java = out.java
 	if err := s.start(pids); err != nil {
-		return errors.Join(err, finish(cfg, tr, c, st, schema.EndError, stderr))
+		return errors.Join(err, finish(cfg, tr, c, out, schema.EndError, stderr))
 	}
 	_, _ = fmt.Fprintf(stderr, "iormesh: attached, tracing %s (%d tracepoints missing on this kernel)\n",
 		describe(cfg.spec, pids), len(tr.Skipped()))
 	if err := announceReady(cfg); err != nil {
-		return errors.Join(err, finish(cfg, tr, c, st, schema.EndError, stderr))
+		return errors.Join(err, finish(cfg, tr, c, out, schema.EndError, stderr))
 	}
 	reason, loopErr := traceLoop(ctx, s, cfg)
-	return errors.Join(loopErr, finish(cfg, tr, c, st, reason, stderr))
+	return errors.Join(loopErr, finish(cfg, tr, c, out, reason, stderr))
+}
+
+// outputs are a run's optional tables beside the events file: the native
+// stack table (-native-stacks) and the Java join's (-spool); each nil
+// when its switch is off.
+type outputs struct {
+	stacks *stackOutput
+	java   *javaOutput
+}
+
+func openOutputs(cfg runConfig, tr tracer, stderr io.Writer) (outputs, error) {
+	st, err := openStacks(cfg, tr)
+	if err != nil {
+		return outputs{}, err
+	}
+	jo, err := openJava(cfg, stderr)
+	if err != nil {
+		return outputs{}, errors.Join(err, st.close())
+	}
+	return outputs{stacks: st, java: jo}, nil
+}
+
+func (o outputs) close() error {
+	return errors.Join(o.stacks.close(), o.java.close())
+}
+
+func (o outputs) summary() string {
+	return o.stacks.summary() + o.java.summary()
 }
 
 // initialTargets resolves the processes target_map starts with: the
@@ -156,11 +185,11 @@ func describe(spec target.Spec, pids []uint32) string {
 }
 
 // finish ends a trace: a last loss poll (the counters die with the
-// tracer), the tracer's close, the end event, the sink's close, the graph
-// file and the stack table's close (st, nil without -native-stacks), then
-// the one-line summary. A loss count it cannot read
+// tracer), the tracer's close, the end event, the sink's close (the Java
+// join's last ring read with it), the graph file and the optional tables'
+// close, then the one-line summary. A loss count it cannot read
 // turns the end reason into error: the trace might hide a gap.
-func finish(cfg runConfig, tr tracer, c *correlate.Correlator, st *stackOutput, reason string,
+func finish(cfg runConfig, tr tracer, c *correlate.Correlator, out outputs, reason string,
 	stderr io.Writer) error {
 	aggErr := drainAggregates(tr, c)
 	losses, lossErr := pollLosses(tr, c)
@@ -171,11 +200,11 @@ func finish(cfg runConfig, tr tracer, c *correlate.Correlator, st *stackOutput, 
 	endErr := c.End(reason)
 	sinkErr := c.Close()
 	graphErr := schema.WriteGraphFile(filepath.Join(cfg.out, GraphFile), c.Graph())
-	stackErr := st.close()
+	tablesErr := out.close()
 	_, _ = fmt.Fprintf(stderr, "iormesh: stopped (%s); lost records %d (kernel %d), unpaired exits %d, "+
 		"unreadable paths %d, unattributed aggregates %d%s\n",
-		reason, losses.Total(), losses.KernelSide(), c.Unpaired(), c.NoPath(), c.Unattributed(), st.summary())
-	return errors.Join(aggErr, lossErr, closeErr, endErr, sinkErr, graphErr, stackErr)
+		reason, losses.Total(), losses.KernelSide(), c.Unpaired(), c.NoPath(), c.Unattributed(), out.summary())
+	return errors.Join(aggErr, lossErr, closeErr, endErr, sinkErr, graphErr, tablesErr)
 }
 
 // drainAggregates hands the correlator the folded read/write calls the
@@ -202,9 +231,10 @@ func drainAggregates(tr tracer, c *correlate.Correlator) error {
 }
 
 // newCorrelator describes the host, creates cfg.out and the correlator
-// writing its events file there, and queues the session header. stacks
-// is the native stack table, nil without -native-stacks.
-func newCorrelator(ctx context.Context, cfg runConfig, stacks correlate.StackIDs) (*correlate.Correlator, error) {
+// writing its events file there — through the Java join with -spool —
+// and queues the session header. out.stacks is the native stack table,
+// nil without -native-stacks.
+func newCorrelator(ctx context.Context, cfg runConfig, out outputs) (*correlate.Correlator, error) {
 	host, err := machineID()
 	if err != nil {
 		return nil, err
@@ -225,7 +255,8 @@ func newCorrelator(ctx context.Context, cfg runConfig, stacks correlate.StackIDs
 		return nil, err
 	}
 	c := correlate.New(correlate.Config{Host: correlate.Host{ID: host, Project: cfg.project},
-		Sink: schema.NewNDJSONSink(f), WallOffsetNS: offset, Stacks: stacks})
+		Sink: out.java.sink(schema.NewNDJSONSink(f)), WallOffsetNS: offset,
+		Stacks: out.stacks.ids()})
 	if err := c.Session(session); err != nil {
 		return nil, errors.Join(err, c.Close())
 	}
@@ -278,7 +309,7 @@ func traceLoop(ctx context.Context, s *session, cfg runConfig) (string, error) {
 		case <-ctx.Done():
 			return ctxReason(ctx), errors.Join(s.tr.StopAggregation(), drainStopped(s))
 		case <-tick.C:
-			if _, err := pollLosses(s.tr, s.c); err != nil {
+			if err := s.poll(); err != nil {
 				return schema.EndError, err
 			}
 			if s.over() {
@@ -314,7 +345,7 @@ func drainQuiet(ctx context.Context, s *session) (string, error) {
 			}
 			quiet.Reset(quietFor)
 		case <-tick.C:
-			if _, err := pollLosses(s.tr, s.c); err != nil {
+			if err := s.poll(); err != nil {
 				return schema.EndError, err
 			}
 		case <-quiet.C:
@@ -349,6 +380,15 @@ func drainStopped(s *session) error {
 			return nil
 		}
 	}
+}
+
+// poll is the loop's periodic work: the loss counters, and the Java
+// join's rings, so an idle stream's held events still leave.
+func (s *session) poll() error {
+	if _, err := pollLosses(s.tr, s.c); err != nil {
+		return err
+	}
+	return s.java.poll()
 }
 
 // ctxReason is the end reason of a run whose context is done: its

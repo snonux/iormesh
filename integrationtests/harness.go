@@ -83,6 +83,13 @@ type Harness struct {
 	// NativeStacks runs the tracer with -native-stacks (M2 step 9): events
 	// carry stack_id and the trace directory holds stacks.ndjson.
 	NativeStacks bool
+	// JavaAgent, when set, is iormesh-agent.jar: every Java workload
+	// starts with -javaagent writing its ring into Spool, and the tracer
+	// runs with -spool Spool and joins their I/O to Java stacks (M3).
+	// The harness creates Spool before the JVMs start — the agent never
+	// creates it — and the tracer gives it its mode.
+	JavaAgent string
+	Spool     string
 
 	runs  int
 	procs []*process
@@ -163,6 +170,12 @@ func (h *Harness) StartHeldHelper(binary, role string, args ...string) (*Workloa
 // startWorkload starts a workload; an empty dir passes no --dir.
 func (h *Harness) startWorkload(dir, scenario string, args []string) (*Workload, error) {
 	argv := append([]string{"-jar", h.WorkloadJar, scenario}, args...)
+	if h.JavaAgent != "" {
+		if err := os.MkdirAll(h.Spool, 0o755); err != nil {
+			return nil, err
+		}
+		argv = append([]string{"-javaagent:" + h.JavaAgent + "=spool=" + h.Spool}, argv...)
+	}
 	if dir != "" {
 		argv = append(argv, "--dir", dir)
 	}
@@ -262,6 +275,9 @@ func (h *Harness) startTracer(ws []*Workload, out string) (*process, error) {
 	}
 	if h.NativeStacks {
 		args = append(args, "-native-stacks")
+	}
+	if h.JavaAgent != "" {
+		args = append(args, "-spool", h.Spool)
 	}
 	cmd := exec.Command(h.TracerBinary, args...)
 	if h.BpfObject != "" {

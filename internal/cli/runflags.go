@@ -42,6 +42,10 @@ type runConfig struct {
 	// (-native-stacks, M2 step 9): stack_id on events, the table in
 	// stacks.ndjson. Off by default (decision #25).
 	nativeStacks bool
+	// spool is the directory the Java agent's rings appear in (-spool,
+	// M3): JVMs started with -javaagent:iormesh-agent.jar=spool=DIR get
+	// their I/O joined to Java stacks. "" joins nothing.
+	spool string
 }
 
 // defaultDuration bounds every run, ior-style: no unbounded tracer on a
@@ -93,6 +97,8 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 		"fold hot read/write loops into one event with args.count (false: one event per call, for debugging)")
 	nativeStacks := fs.Bool("native-stacks", false,
 		"record each syscall's native user stack (stack_id, stacks.ndjson); not useful for JIT-compiled Java")
+	spool := fs.String("spool", "",
+		"directory for the Java agent's rings (created, mode 1733); join their JVMs' I/O to Java stacks")
 	if err := fs.Parse(args); err != nil {
 		return runConfig{}, fmt.Errorf("%w: %v", errUsage, err)
 	}
@@ -101,7 +107,7 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 	}
 	cfg := runConfig{project: *project, out: *out, duration: *duration, ready: *ready,
 		spec: target.Spec{Pattern: *pattern}, cpuProfile: *cpuProfile, noAggregation: !*aggregate,
-		nativeStacks: *nativeStacks}
+		nativeStacks: *nativeStacks, spool: *spool}
 	if *port > math.MaxUint16 {
 		return runConfig{}, fmt.Errorf("%w: -listen-port %d: want 1-65535", errUsage, *port)
 	}

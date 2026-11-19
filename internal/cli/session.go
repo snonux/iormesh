@@ -36,6 +36,9 @@ type session struct {
 	// 0 means unknown: /proc could not be read, and over() does not take
 	// whatever runs under that PID now for the target.
 	live map[uint32]uint64
+	// java is the -spool run's join, polled on the loop's ticker (nil
+	// without -spool).
+	java *javaOutput
 }
 
 func newSession(tr tracer, c *correlate.Correlator, cfg runConfig) *session {

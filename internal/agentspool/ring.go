@@ -1,6 +1,7 @@
 package agentspool
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sync/atomic"
@@ -28,6 +29,7 @@ type Ring struct {
 	mask   uint64
 	losses Losses // reader-side counters (Unknown, Malformed)
 	err    error  // sticky ErrCorrupt
+	owner  uint32 // the file's uid
 }
 
 // Open maps the ring file read-write (the reader zeroes what it consumed
@@ -36,28 +38,40 @@ type Ring struct {
 // descriptor, which is closed before Open returns. A file shorter than
 // the header is also ErrNotReady: the agent has created but not yet
 // sized it.
+//
+// The tracer runs as root and the spool directory is writable by the
+// targets, so the file is opened without following a symlink and must be
+// a regular file with one link: mapping a planted link to another file
+// read-write would let a target have the tracer zero that file's bytes.
+// Its owner (Owner) is for the caller to check against the JVM's.
 func Open(path string) (*Ring, error) {
-	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	f, err := os.OpenFile(path, os.O_RDWR|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if errors.Is(err, syscall.ELOOP) {
+		return nil, fmt.Errorf("%s: a symlink: %w", path, ErrNotRing)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("agentspool: %w", err)
 	}
 	defer func() { _ = f.Close() }()
-	st, err := f.Stat()
-	if err != nil {
+	var st syscall.Stat_t
+	if err := syscall.Fstat(int(f.Fd()), &st); err != nil {
 		return nil, fmt.Errorf("agentspool: %w", err)
 	}
-	if st.Size() < headerSize {
+	if st.Mode&syscall.S_IFMT != syscall.S_IFREG || st.Nlink != 1 {
+		return nil, fmt.Errorf("%s: not a regular file with one link: %w", path, ErrNotRing)
+	}
+	if st.Size < headerSize {
 		// The agent sizes the file right after creating it: a file this
 		// short is one caught in between, not a damaged ring.
-		return nil, fmt.Errorf("%s: %d bytes, header not written yet: %w", path, st.Size(),
+		return nil, fmt.Errorf("%s: %d bytes, header not written yet: %w", path, st.Size,
 			ErrNotReady)
 	}
-	mem, err := syscall.Mmap(int(f.Fd()), 0, int(st.Size()),
+	mem, err := syscall.Mmap(int(f.Fd()), 0, int(st.Size),
 		syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
 	if err != nil {
 		return nil, fmt.Errorf("agentspool: mmap %s: %w", path, err)
 	}
-	r := &Ring{mem: mem}
+	r := &Ring{mem: mem, owner: st.Uid}
 	if err := r.checkHeader(); err != nil {
 		_ = syscall.Munmap(mem)
 		return nil, fmt.Errorf("%s: %w", path, err)
@@ -73,6 +87,12 @@ func (r *Ring) Close() error {
 	err := syscall.Munmap(r.mem)
 	r.mem = nil
 	return err
+}
+
+// Owner is the uid owning the ring file: the JVM that created it, unless
+// someone else planted it.
+func (r *Ring) Owner() uint32 {
+	return r.owner
 }
 
 // Header returns the ring's header.
@@ -96,7 +116,8 @@ func (r *Ring) Losses() Losses {
 	l.DroppedStacks = r.word(offDropped + 8*typeStack)
 	l.DroppedThreads = r.word(offDropped + 8*typeThread)
 	l.DroppedWatermarks = r.word(offDropped + 8*typeWatermark)
-	for _, t := range []int{typePad, 5, 6, 7} {
+	l.DroppedHooks = r.word(offDropped + 8*typeHook)
+	for _, t := range []int{typePad, 6, 7} {
 		l.DroppedOther += r.word(offDropped + 8*t)
 	}
 	l.DroppedBytes = r.word(offDroppedBytes)

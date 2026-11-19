@@ -174,5 +174,8 @@ func describe(d ExpectedEvent) string {
 	if d.Attribution != "" {
 		add("attribution", d.Attribution)
 	}
+	if d.Java != nil {
+		add("java", strings.TrimSpace(d.Java.Thread+" "+d.Java.Method))
+	}
 	return strings.Join(parts, " ")
 }
