@@ -645,3 +645,139 @@ ring, as in md4; skipped runs were 0 in every run.
 | bystander | ≤ 1.25× at 4 threads (CPU-time median of ≥ 10 pairs) | **passes** with 8e4's dispatch: 1.16× and 1.14× in two sets of 10 pairs; wall clock 1.16× and 1.19× (guard not tripped) |
 | bystander, untraced kind | recorded, not gated | ~2.0× on a pure `getppid` loop (+0.2–0.3 µs per call), the perf-tracepoint path's price |
 | tracer CPU | ≤ 2 µs per emitted event (median) | passes at moderate load (md4: 1.2/1.7 µs at load 4.6–9), **over at load ≥ 10** (ae4: 3.0/3.1 µs; A/B 2.08/2.15 µs after 8e4, 2.18/3.55 µs before); no 8e4 regression; 5b4 re-measures |
+
+## Follow-up (ud4): cutting the consumer's per-event cost
+
+Task ud4 took decision #25's tracer-CPU item for the worst case 2b4
+left over: every event of the S3 burst joined (`-spool`, the burst
+under the agent), plus the plain unfolded burst, which ae4 found over
+2 µs at load ≥ 10 (the cuts: commit `ba4dab9`). Same host (i7-1185G7,
+8 CPUs, kernel 7.2.15, JDK 25), as busy as ever: load 5.8–13 from
+other agents' builds and tests.
+Samples, scripts and benchmark output: `spikes/s3/results-ud4/`.
+
+`measure.sh` gained what the job needed: `S3_AGENT=1` runs every burst
+under the agent and gives each traced run a fresh `-spool` dir (the
+agent maps its ring in `premain`, so the dir must exist before the JVM
+starts); `S3_TRACER` points it at another build, for an A/B;
+`S3_PERF=1` counts the tracer's instructions (`perf stat`) from its
+ready file to its exit; each traced sample records `attributed=`. That
+last one matters: the repo's `iormesh-agent.jar` was stale at first (a
+ring version the tracer skips), so the first `-spool` profile here
+joined nothing — `measure.sh` now warns when an agent run attributes
+no event; rebuild the jar with `mage agentBuild`.
+
+**Where the time went** (`iormesh run -cpuprofile`, one 1-thread
+`-spool` run of the commit before ud4, `e57633d`, load 4.0, 3.9 µs per
+event; of 5.6 s of samples 1.7 s are the BPF load):
+
+1. `clock_gettime(CLOCK_BOOTTIME)` as a real syscall, once per event:
+   0.55 s. `JavaJoin.Event` read the boot clock to see whether a spool
+   scan was due, and `x/sys/unix.ClockGettime` never takes the vDSO
+   (Go's vDSO path serves only the runtime's own monotonic and
+   realtime reads);
+2. NDJSON encoding: 0.69 s, `strconv.AppendUint` 0.42 s of it (the
+   19-digit `boot_ns`/`wall_ns`, `pid_incarnation`);
+3. the Java mark's decode: 0.24 s — the generated decoder is
+   `binary.Read`, by reflection, two allocations per record, and with
+   `-spool` every hooked call sends one;
+4. the join's own state: the marks map with its 16-byte struct key
+   (hashed field by field), the bracket list growing, a map store per
+   bracket and per mark;
+5. smaller: the event, ~400 bytes, copied by value at every hop
+   (correlator queue → `Sink.Event` → the join's queue → `Sink.Event`
+   → the writer), and `sync.Pool` Put on the consumer's goroutine
+   while every Get ran on the reader's, so each Get stole across Ps.
+
+**Cuts** (all byte-identical output: the encoder's `json.Marshal`
+property test, its fuzz target and the export goldens are unchanged
+and pass):
+
+- `bootClock` (`correlate/bootclock.go`): `Event` reads the boot clock
+  once a second and extrapolates on Go's monotonic clock in between
+  (vDSO, ~30 ns against ~260 ns); it never runs ahead of the boot
+  clock, so a scan is never claimed for a moment it did not cover.
+  `Poll`/`Close` still read it precisely;
+- `types.NewJavaMarkEventFast`: field by field, 24 ns against
+  340–410 ns and no allocation;
+- marks per thread in a FIFO (`markQueue`): a thread's marks arrive,
+  and its events leave the correlator, in enter order, so the join
+  only looks at the head; bracket lists searched from a per-thread
+  hint (the last answer) by galloping (`exitSearch`), pruned by
+  slicing instead of moving the kept part down (that move would have
+  copied 10 s of brackets every 50 ms once a run outlived `Retain`);
+  map stores replaced by lookups where the value rarely changes;
+- `schema.Sink.Event(*Event)`: the event is lent for the call, so it is
+  copied once, into the join's queue;
+- `appendUint`: eight digits per group by fixed-point multiplication,
+  no division by 100 (1287 against 1874 instructions for the event's
+  11 integers), and an 8-byte-at-a-time safe-ASCII scan in
+  `appendJSONString`;
+- `bpf.Tracer.Release`: the session hands each handled batch back; the
+  reader recycles its records and reuses the batch, so pool Get and Put
+  run on one goroutine; the decoder table is a slice, not a map; the
+  correlator keeps its last process lookup.
+
+**Benchmarks** (`spikes/s3/results-ud4/bench/`): user instructions and
+cycles per op from `perf stat` over two run lengths (setup cancels),
+pinned to CPU 3, three interleaved rounds; the instruction counts are
+load-independent, the cycles are not. `JavaJoinJoined` is new (every
+event marked, bracketed and joined; built onto the base commit for the
+"before" column):
+
+| Benchmark (per op) | Instructions before → after | Cycles before → after (medians) |
+|---|--:|--:|
+| `AppendEvent` | 3409 → 2965 | 1353 → 1449 |
+| `NDJSONSink` (validate + encode + buffer) | 3920 → 3369 | 1789 → 1467 |
+| `SyscallBurst` (per record: decode, correlate, encode) | 3242 → 2843 | 1802 → 1616 |
+| `JavaJoinPassThrough` | 765 → 509 | 496 → 329 |
+| `JavaJoinJoined` | 5362 → 5288 | 3775 → 2696 |
+
+`JavaJoinJoined`'s instructions are a third the Go GC's (the fake
+ring boxes its records, the held queue is pointerful); the cut there
+shows in cycles. The clock (`BenchmarkBootClock`) and the mark decode
+(`BenchmarkJavaMarkEventDecode`) are the two items the Go benchmarks
+above do not see.
+
+**End to end, by #25's method** (`measure.sh S3_MODES=traced
+S3_TRACER_FLAGS=-aggregate=false S3_OPS=500000 S3_THREADS="1 4"
+S3_PERF=1`, with and without `S3_AGENT=1`), five rounds, the build
+before ud4 and ud4's run interleaved, base first (`results-ud4/ab.sh`):
+
+| Run | Threads | ns/event before → after (median of 5) | Instructions/event before → after | Lost before → after | Load |
+|---|--:|--:|--:|--:|--:|
+| `-spool`, agent | 1 | 4360 → 4699 | 18435 → 12227 | 0 → 0 | 5.8–8.4 |
+| `-spool`, agent | 4 | 5675 → 3860 | 18653 → 12463 | 6–56 % → 0 | 6.4–9.0 |
+| plain | 1 | 2030 → 1690 | 8188 → 6623 | 0 → 0 | 6.3–9.7 |
+| plain | 4 | 2895 → 2282 | 7984 → 6435 | 31–60 % → 30–58 % | 6.5–10.2 |
+
+The instructions per event fell by a third with `-spool` and a fifth
+without, the same in every run. The CPU time did not follow at
+`-spool`, 1 thread, and that row is not to be trusted: in all five of
+its rounds the burst *itself* ran 1.5–2× slower in ud4's half — its
+untraced run as much as its traced one, though no tracer is attached
+to the untraced run — so the host, not the build, was slower then, and
+a slower target spreads the tracer over more small batches. A second
+interleaved set took it by `perf stat` on the tracer alone
+(`results-ud4/perf-stat/`, `pstat.sh`, five pairs per thread count,
+load 8.4–13.3): task clock 7592 → 3793 ns per event at 1 thread and
+9200 → 5573 at 4; cycles 13525 → 8220 and 13545 → 8525 per event.
+At 4 threads the consumer now keeps up with the unfolded burst under
+the agent: no lost records, against 6–56 % before.
+
+**Verdict**: `-spool` is **not** under 2 µs. With every event joined
+the tracer spends ~8.2–8.5 k cycles per event (from ~13.5 k), 3.8 µs
+at 1 thread and 5.6 µs at 4 at load 8–13 (task clock), 3.9–4.7 µs at
+load 6–9 (`measure.sh`); even with the core to itself that cycle count
+is ~2.7 µs at 3 GHz. Without `-spool` the unfolded burst is at 1.7 µs
+(1 thread) and 2.3 µs (4 threads) at load 6.5–10, so the plain item
+stays at the boundary on this host. The limit is unchanged. What is
+left is spread thin (a `perf record` of cycles after the cuts: no
+symbol much above 5 %): NDJSON encoding ~25 % (string escaping, integers,
+the args object), the correlator's pairing ~15 %, the join ~15 %
+(bracket search, the stack and thread lookups, one `schema.Java`
+allocation per joined event), ring reading and decoding, the agent
+ring's drain (each record boxed into an interface), `write(2)`. The
+next large step is the output format (M4's parquet segments replace
+the per-event text encoding), not another micro-cut; the default fold
+(`-aggregate`) still keeps a real JVM's hot loops out of the join.

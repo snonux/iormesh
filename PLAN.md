@@ -708,7 +708,10 @@ Gated by S1 — done; the design below is S1's result
   join itself (`-spool`) measured 5.2 µs per event when every
   event of the S3 burst is joined (task 2b4,
   docs/spikes/s3-overhead.md "Follow-up (2b4)") — over the
-  ≤ 2 µs budget; task ud4 brings it under, gating 5b4.
+  ≤ 2 µs budget; task ud4 cut it by a third in instructions
+  (3.8 µs at 1 thread, 5.6 µs at 4, at load 8–13; "Follow-up
+  (ud4)"), still over budget; 5b4 re-measures it, the limit
+  unchanged.
 
 ### M4 — Controller (`iormeshctl`): push, collect, merge locally
 
@@ -1176,10 +1179,19 @@ answer), and deferred.
      builds over 2 µs at load ≥ 10 (s3-overhead.md, "Follow-up
      (ae4)"); M3's acceptance (5b4) re-measures it, the limit
      unchanged. With the Java join (`-spool`, every
-     event joined): 5.2 µs, over budget — task ud4, gating M3's
-     acceptance (5b4); td4's Java mark measured +0.7 µs per
-     marked event on top, within the host's noise
-     (s3-overhead.md, "Follow-up (td4)"). Measured as the
+     event joined): 5.2 µs, over budget (2b4; td4's Java mark
+     measured +0.7 µs per marked event on top, within the host's
+     noise, s3-overhead.md "Follow-up (td4)"). Task ud4 cut the
+     consumer's per-event work (a per-event clock syscall, the
+     mark's reflective decode, the join's map keys, the event's
+     copies, integer and string encoding): instructions per event
+     −34 % with `-spool` and −19 % without; at load 8–13 the
+     `-spool` tracer still spends 3.8 µs at 1 thread and 5.6 µs at
+     4 (from 7.6 / 9.2, task clock, medians of 5), and the plain
+     unfolded burst 1.7 / 2.3 µs at load 6.5–10 — `-spool` stays
+     **over** budget, its next step being M4's output format
+     (s3-overhead.md, "Follow-up (ud4)"); 5b4 re-measures, the
+     limit unchanged. Measured as the
      tracer's own user+sys CPU time per event from its ready
      file to its exit (load and attach excluded), which host
      load moves less than wall time — not nothing: on a loaded SMT host one thread's CPU

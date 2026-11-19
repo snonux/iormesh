@@ -9,7 +9,14 @@
 #        is opt-in), S3_KIND_OPS (5000000),
 #        S3_TRACER_CPU (3), S3_LOAD_CPUS ("0-2,4-6"),
 #        S3_TRACER_FLAGS (extra `iormesh run` flags, word-split, e.g.
-#        "-native-stacks -aggregate=false"; task ua4)
+#        "-native-stacks -aggregate=false"; task ua4),
+#        S3_AGENT (1: every burst runs under the iormesh agent, and a
+#        traced one with -spool, both on a fresh spool dir per run;
+#        task ud4), S3_TRACER (the tracer binary, default ./iormesh: an
+#        A/B against another build; task ud4), S3_PERF (1: also count
+#        the tracer's instructions from its ready file to its exit with
+#        perf stat — a figure host load barely moves, unlike CPU time;
+#        task ud4)
 #
 # The method is load-tolerant (decision #25 as changed 2026-11-19, task
 # md4): the host is never quiet, so the gated figures are CPU times, not
@@ -51,7 +58,10 @@ load_cpus=${S3_LOAD_CPUS:-0-2,4-6}
 # shellcheck disable=SC2206 # word splitting is the point: one flag per word
 tracer_flags=(${S3_TRACER_FLAGS:-})
 jar=$repo/workload.jar
-tracer=$repo/iormesh
+agent_jar=$repo/iormesh-agent.jar
+agent=${S3_AGENT:-0}
+tracer=${S3_TRACER:-$repo/iormesh}
+perf=${S3_PERF:-0}
 clk_tck=$(getconf CLK_TCK)
 mkdir -p "$out"
 samples=$out/samples.txt
@@ -174,9 +184,19 @@ loadavg() { cut -d' ' -f1 /proc/loadavg; }
 # (the PID the burst printed, the one a tracer follows). The hold file
 # keeps the JVM alive after its loops, so burst_finish can read its CPU
 # time from /proc before it exits.
+#
+# With S3_AGENT=1 the JVM loads the agent with a ring in $dir/spool,
+# which the tracer must own (root) and which must exist before the JVM
+# starts: the agent maps its ring in premain. A fresh dir per run keeps
+# the joiner from opening the rings of earlier runs' JVMs.
 burst_start() {
-    local t=$1 dir=$2
-    IORMESH_WORKLOAD_STARTUP_FILE=$dir/gate IORMESH_WORKLOAD_HOLD_FILE=$dir/hold \
+    local t=$1 dir=$2 jto=${JAVA_TOOL_OPTIONS:-}
+    if [ "$agent" = 1 ]; then
+        sudo -n mkdir -m 1733 "$dir/spool"
+        jto="-javaagent:$agent_jar=spool=$dir/spool"
+    fi
+    JAVA_TOOL_OPTIONS=$jto \
+        IORMESH_WORKLOAD_STARTUP_FILE=$dir/gate IORMESH_WORKLOAD_HOLD_FILE=$dir/hold \
         taskset -c "$load_cpus" java -jar "$jar" syscall-burst --ops "$ops" \
         --threads "$t" --dir "$dir" >"$dir/out" 2>/dev/null &
     jpid=$!
@@ -207,10 +227,11 @@ burst_finish() {
 # The tracer is time's child; its own PID is found by its command line,
 # which starts with the binary's path (time's does not).
 tracer_start() {
-    local pid=$1 dir=$2
+    local pid=$1 dir=$2 spool=()
+    [ "$agent" = 1 ] && [ -d "$dir/spool" ] && spool=(-spool "$dir/spool")
     sudo -n taskset -c "$tracer_cpu" /usr/bin/time -f '%U %S' -o "$dir/time" \
         "$tracer" run -pid "$pid" -project s3 -out "$dir/trace" -duration 10m \
-        -ready "$dir/ready" "${tracer_flags[@]}" 2>"$dir/tracer.err" &
+        -ready "$dir/ready" "${tracer_flags[@]}" "${spool[@]}" 2>"$dir/tracer.err" &
     tpid=$!
     pids+=("$tpid")
     wait_file "$dir/ready" "$tpid" "$dir/tracer.err"
@@ -218,6 +239,11 @@ tracer_start() {
         die "tracer process not found"
     pids+=("$ipid")
     ready_cpu=$(cpu_ms "$ipid")
+    if [ "$perf" = 1 ]; then
+        # perf follows the tracer from here and exits with it.
+        sudo -n perf stat -x, -e instructions:u,instructions:k -p "$ipid" \
+            -o "$dir/perf" 2>/dev/null &
+    fi
 }
 
 # tracer_wait waits for the tracer to exit (it does once its target
@@ -229,6 +255,16 @@ tracer_wait() {
     # The tracer exited before its sudo and time parents did.
     forget "$ipid"
     tracer_total=$(awk '{printf "%d", ($1 + $2) * 1000}' "$dir/time")
+    insn_u=0 insn_k=0
+    if [ "$perf" = 1 ]; then
+        local -i i
+        for ((i = 0; i < 100; i++)); do
+            grep -q 'instructions:k' "$dir/perf" 2>/dev/null && break
+            sleep 0.1
+        done
+        insn_u=$(awk -F, '/instructions:u/{print $1}' "$dir/perf" 2>/dev/null)
+        insn_k=$(awk -F, '/instructions:k/{print $1}' "$dir/perf" 2>/dev/null)
+    fi
 }
 
 untraced() {
@@ -257,7 +293,7 @@ traced() {
 }
 
 traced_line() {
-    local t=$1 tag=$2 work=$3 lost kernel skipped events bytes
+    local t=$1 tag=$2 work=$3 lost kernel skipped attributed events bytes
     # lost counts every record the trace wanted but did not get (kernel
     # ring drops plus undecodable records); kernel is the drop part.
     # skipped is the program runs the kernel skipped host-wide: possible
@@ -265,12 +301,20 @@ traced_line() {
     lost=$(sed -n 's/.*lost records \([0-9][0-9]*\).*/\1/p' "$work/tracer.err")
     kernel=$(sed -n 's/.*(kernel \([0-9][0-9]*\)).*/\1/p' "$work/tracer.err")
     skipped=$(sed -n 's/.*skipped runs \([0-9][0-9]*\).*/\1/p' "$work/tracer.err")
+    # attributed is the Java join's count (-spool runs; 0 otherwise). A
+    # stale iormesh-agent.jar writes a ring version the tracer skips, and
+    # the run then measures no join at all: rebuild it (mage agentBuild).
+    attributed=$(sed -n 's/.*, attributed \([0-9][0-9]*\).*/\1/p' "$work/tracer.err")
+    if [ "$agent" = 1 ] && [ "${attributed:-0}" = 0 ]; then
+        echo "measure: agent on, but no event attributed: stale agent jar?" >&2
+    fi
     events=$(wc -l <"$work/trace/events.ndjson")
     bytes=$(stat -c %s "$work/trace/events.ndjson")
     echo "mode=traced threads=$t ops=$ops $tag elapsed_ns=$burst_elapsed" \
         "burst_cpu_ms=$burst_cpu tracer_cpu_ms=$tracer_total" \
         "tracer_run_cpu_ms=$((tracer_total - ready_cpu)) lost=$lost" \
         "kernel_lost=$kernel skipped_runs=$skipped events=$events ndjson_bytes=$bytes" \
+        "attributed=${attributed:-0} insn_u=${insn_u:-0} insn_k=${insn_k:-0}" \
         "load=$(loadavg)" >>"$samples"
 }
 
@@ -391,6 +435,7 @@ summarize() {
         if (f["mode"] == "traced" && f["events"] > 0) {
             ns[t][++nn[t]] = f["tracer_run_cpu_ms"] * 1e6 / f["events"]
             tr[k] = f["elapsed_ns"]
+            if (f["insn_u"] > 0) is[t][++ni[t]] = (f["insn_u"] + f["insn_k"]) / f["events"]
         }
         if (f["mode"] == "untraced") { ue[k] = f["elapsed_ns"]; uc[k] = f["burst_cpu_ms"] }
         if (f["mode"] == "bystander") {
@@ -412,6 +457,7 @@ summarize() {
         for (t in th) {
             printf "threads=%s tracer_ns_per_event=%s (n=%d) slowdown=%s", \
                 t, median(ns[t], nn[t]), nn[t], median(sl[t], ns2[t])
+            if (ni[t] > 0) printf " tracer_insn_per_event=%s", median(is[t], ni[t])
             printf " bystander_cpu=%s bystander_wall=%s (pairs=%d load=%s-%s)\n", \
                 median(bc[t], nb[t]), median(be[t], nb[t]), nb[t], lo[t], hi[t]
         }
@@ -433,7 +479,7 @@ header() {
         echo "# java $(java -version 2>&1 | head -1); workdir fs $(df -T "${TMPDIR:-/tmp}" | awk 'NR==2{print $2}')"
         echo "# ops=$ops threads=$threads runs=$runs pairs=$pairs modes=$modes" \
             "kind_ops=$kind_ops tracer_cpu=$tracer_cpu load_cpus=$load_cpus" \
-            "tracer_flags=${tracer_flags[*]}"
+            "tracer_flags=${tracer_flags[*]} agent=$agent perf=$perf tracer=$tracer"
     } >>"$samples"
 }
 
