@@ -29,6 +29,15 @@ func (s *fakeStacks) ID(_ uint32, _ uint64, kid int32, tag uint64) (uint32, bool
 	return uint32(kid) + 100, true, nil
 }
 
+// InlineID hands out the innermost frame + 200, refusing an empty stack.
+func (s *fakeStacks) InlineID(_ uint32, _ uint64, ips []uint64, tag uint64) (uint32, bool, error) {
+	s.tags = append(s.tags, tag)
+	if len(ips) == 0 {
+		return 0, false, nil
+	}
+	return uint32(ips[0]) + 200, true, nil
+}
+
 func (s *fakeStacks) Forget(pid uint32) { s.forgot = append(s.forgot, pid) }
 
 func newStackTest(t *testing.T, st StackIDs) (*Correlator, *memSink, feeder) {
@@ -76,6 +85,28 @@ func TestStackIDOnItsEnter(t *testing.T) {
 		if got != want[i] {
 			t.Errorf("read %d: stack_id %d, want %d (0 = none)", i, got, want[i])
 		}
+	}
+}
+
+// TestInlineStackOnItsEnter: a stack sent with its frames pairs with its
+// enter like a stack record; one stamped for another enter does not.
+func TestInlineStackOnItsEnter(t *testing.T) {
+	c, sink, f := newStackTest(t, &fakeStacks{})
+	for _, offset := range []uint64{0, 3} {
+		at := *f.now + 10
+		r := &types.StackInlineEvent{EventType: types.STACK_INLINE_EVENT, Time: at + offset, Pid: f.pid,
+			Tid: f.tid, StackId: -17, Nr: 1, Image: 0x7ffd0000}
+		r.Ips[0], r.Ips[1] = 7, 9
+		f.handle(r)
+		*f.now = at - 10
+		f.read(3, 1)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reads := byKind(sink.events, schema.KindRead)
+	if len(reads) != 2 || reads[0].StackID == nil || *reads[0].StackID != 207 || reads[1].StackID != nil {
+		t.Fatalf("reads %+v, want stack 207 then none", reads)
 	}
 }
 

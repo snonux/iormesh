@@ -145,12 +145,25 @@ func TestNativeStacks(t *testing.T) {
 	h := newHarness(t)
 	h.NativeStacks = true
 	run := traceJudged(t, h, startScenario("non-java-peer"))
+	logStackSummary(t, run.Logged)
 	table := readStacks(t, run)
 	assertStackRefs(t, run.Trace.Events, table)
 	for _, kind := range []string{schema.KindAccept4, schema.KindOpenat} {
 		assertPeerStack(t, run.Trace.Events, table, kind)
 	}
 	assertGolden(t, normalized(t, h, run, "non-java-peer"), expectation(t, "non-java-peer"))
+}
+
+// logStackSummary logs the summary line's native stack counts (how many
+// came inline, how many were uncaptured and why), so a failed stack
+// assertion shows whether the kernel lost stacks (task kd4).
+func logStackSummary(t *testing.T, logged string) {
+	t.Helper()
+	for line := range strings.Lines(logged) {
+		if strings.Contains(line, "native stacks") {
+			t.Logf("tracer: %s", strings.TrimSpace(line))
+		}
+	}
 }
 
 // readStacks reads the run's stack table strictly, by stack id.

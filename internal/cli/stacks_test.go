@@ -44,7 +44,7 @@ func TestOpenStacksOn(t *testing.T) {
 	if err := st.close(); err != nil {
 		t.Fatal(err)
 	}
-	if got := st.summary(); !strings.Contains(got, "native stacks 0 (uncaptured 1)") {
+	if got := st.summary(); !strings.Contains(got, "native stacks 0 (inline 0; uncaptured 1: collisions 0, faults 1, other 0)") {
 		t.Fatalf("summary %q", got)
 	}
 	if _, err := os.Stat(filepath.Join(dir, StacksFile)); err != nil {

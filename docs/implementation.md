@@ -1565,7 +1565,17 @@ scenarios landing first (principle #1).
      JVM's libraries when the peer exited. Frames keep the raw
      address and add module, file offset, GNU build id and
      `.symtab`/`.dynsym` symbol where known; the run's summary
-     line adds `native stacks N (uncaptured M)`.
+     line adds `native stacks N (inline I; uncaptured M:
+     collisions C, faults F, other O)`.
+   - **Collisions** (task kd4): with no `BPF_F_REUSE_STACKID` a
+     stack hashing to a taken bucket got `-EEXIST`, and
+     collisions grow with the square of the distinct stacks
+     (2–7 of ~194 per non-java-peer run, enough to flake
+     `TestNativeStacks`). Any `bpf_get_stackid` error but
+     `-EFAULT` now falls back to `bpf_get_stack` into a 552-byte
+     `stack_inline_event` carrying the frames; `Table.InlineID`
+     gives such stacks ids by their frames per image. Ids still
+     never change meaning.
    - **Schema**: `Event.StackID` (`stack_id`, appended, optional)
      and `schema.Stack`/`StackFrame` with a strict reader
      (`ReadStacks`); docs/schema.md "Native stacks".

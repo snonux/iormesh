@@ -166,6 +166,10 @@ func (c *Correlator) Handle(rec any) error {
 		if err := c.stackRecord(r); err != nil {
 			return err
 		}
+	case *types.StackInlineEvent:
+		if err := c.stackInlineRecord(r); err != nil {
+			return err
+		}
 	default:
 		if !c.handleIPC(rec) {
 			return nil

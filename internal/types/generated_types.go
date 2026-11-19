@@ -156,6 +156,7 @@ const SOCK_ADDR_EVENT = 71
 const SIGNAL_EVENT = 72
 const RW_AGGREGATE_EVENT = 73
 const STACK_EVENT = 74
+const STACK_INLINE_EVENT = 75
 const UNCLASSIFIED = 0
 const READ_CLASSIFIED = 1
 const WRITE_CLASSIFIED = 2
@@ -212,6 +213,7 @@ const SOCK_ADDR_PATH_LENGTH = 108
 const SIGNAL_SCOPE_SENDER = 1
 const SIGNAL_SCOPE_TARGET = 2
 const SIGNAL_SCOPE_USER = 4
+const IORMESH_STACK_DEPTH = 64
 const SYS_ENTER_SOCKET TraceId = 1899
 const SYS_EXIT_SOCKET TraceId = 1898
 const SYS_ENTER_SOCKETPAIR TraceId = 1897
@@ -4255,4 +4257,75 @@ func (s *StackEvent) Bytes() ([]byte, error) {
 
 func (s *StackEvent) Recycle() {
 	poolOfStackEvents.Put(s)
+}
+
+type StackInlineEvent struct {
+	EventType EventType
+	TraceId   TraceId
+	Time      uint64
+	Pid       uint32
+	Tid       uint32
+	StackId   int32
+	Nr        uint32
+	Image     uint64
+	Ips       [IORMESH_STACK_DEPTH]uint64
+}
+
+func (s StackInlineEvent) String() string {
+	return fmt.Sprintf("EventType:%v TraceId:%v Time:%v Pid:%v Tid:%v StackId:%v Nr:%v Image:%v Ips:%v", s.EventType, s.TraceId, s.Time, s.Pid, s.Tid, s.StackId, s.Nr, s.Image, s.Ips)
+}
+
+func (s StackInlineEvent) Equals(other any) bool {
+	otherConcrete, ok := other.(*StackInlineEvent)
+	if !ok {
+		return false
+	}
+	return s.EventType == otherConcrete.EventType && s.TraceId == otherConcrete.TraceId && s.Time == otherConcrete.Time && s.Pid == otherConcrete.Pid && s.Tid == otherConcrete.Tid && s.StackId == otherConcrete.StackId && s.Nr == otherConcrete.Nr && s.Image == otherConcrete.Image && s.Ips == otherConcrete.Ips
+}
+
+func (s *StackInlineEvent) GetEventType() EventType {
+	return s.EventType
+}
+
+func (s *StackInlineEvent) GetTraceId() TraceId {
+	return s.TraceId
+}
+
+func (s *StackInlineEvent) GetPid() uint32 {
+	return s.Pid
+}
+
+func (s *StackInlineEvent) GetTid() uint32 {
+	return s.Tid
+}
+
+func (s *StackInlineEvent) GetTime() uint64 {
+	return s.Time
+}
+
+var poolOfStackInlineEvents = sync.Pool{
+	New: func() any { return &StackInlineEvent{} },
+}
+
+func NewStackInlineEvent(raw []byte) *StackInlineEvent {
+	s := poolOfStackInlineEvents.Get().(*StackInlineEvent)
+	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, s); err != nil {
+		*s = StackInlineEvent{}
+		poolOfStackInlineEvents.Put(s)
+		return nil
+	}
+	return s
+}
+
+func (s *StackInlineEvent) Bytes() ([]byte, error) {
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.LittleEndian, s)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (s *StackInlineEvent) Recycle() {
+	poolOfStackInlineEvents.Put(s)
 }

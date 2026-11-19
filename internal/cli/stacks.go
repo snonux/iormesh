@@ -65,11 +65,15 @@ func (s *stackOutput) close() error {
 }
 
 // summary is the stack part of the run's summary line: how many distinct
-// stacks the table holds and how many syscalls got none.
+// stacks the table holds, how many of them came inline because the stack
+// map refused them (bucket collisions), and how many syscalls got none,
+// split by why (a collision whose inline walk failed too, a faulted walk,
+// other), so a trace with missing stacks says what went wrong.
 func (s *stackOutput) summary() string {
 	if s == nil {
 		return ""
 	}
 	st := s.table.Stats()
-	return fmt.Sprintf(", native stacks %d (uncaptured %d)", st.Stacks, st.Uncaptured)
+	return fmt.Sprintf(", native stacks %d (inline %d; uncaptured %d: collisions %d, faults %d, other %d)",
+		st.Stacks, st.Inline, st.Uncaptured, st.Collisions, st.Faults, st.Other)
 }

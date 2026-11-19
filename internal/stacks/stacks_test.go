@@ -256,7 +256,8 @@ func FuzzSafeReadModule(f *testing.F) {
 
 // TestTableIDs drives the id rules: one id per stack and image, a new
 // image (another tag) or a forgotten process gets new ids, failed walks
-// and unreadable stacks are counted, stacks are written once in id order.
+// and unreadable stacks are counted by reason, stacks are written once in
+// id order.
 func TestTableIDs(t *testing.T) {
 	var written []schema.Stack
 	lookup := func(kid uint32) ([]uint64, error) {
@@ -271,7 +272,7 @@ func TestTableIDs(t *testing.T) {
 		kid  int32
 		tag  uint64
 		want uint32
-	}{{7, 1, 1, 1}, {7, 1, 1, 1}, {8, 1, 1, 2}, {7, 2, 1, 3}, {7, 1, 2, 4}, {7, -14, 1, 0}, {7, 99, 1, 0}}
+	}{{7, 1, 1, 1}, {7, 1, 1, 1}, {8, 1, 1, 2}, {7, 2, 1, 3}, {7, 1, 2, 4}, {7, -14, 1, 0}, {7, -17, 1, 0}, {7, 99, 1, 0}}
 	for _, s := range steps {
 		id, ok, err := tab.ID(s.pid, 5, s.kid, s.tag)
 		if err != nil || ok != (s.want != 0) || id != s.want {
@@ -288,13 +289,49 @@ func TestTableIDs(t *testing.T) {
 	if err := tab.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if st := tab.Stats(); st.Stacks != 5 || st.Uncaptured != 2 || len(written) != 5 {
-		t.Fatalf("stats %+v, %d written; want 5 stacks, 2 uncaptured, 5 written", st, len(written))
+	want := Stats{Stacks: 5, Uncaptured: 3, Collisions: 1, Faults: 1, Other: 1}
+	if st := tab.Stats(); st != want || len(written) != 5 {
+		t.Fatalf("stats %+v, %d written; want %+v, 5 written", st, len(written), want)
 	}
 	for i, s := range written {
 		if s.StackID != uint32(i+1) || s.Frames[0].Addr == "" {
 			t.Errorf("written[%d] = %+v", i, s)
 		}
+	}
+}
+
+// TestTableInlineIDs: a stack sent inline gets one id per distinct frames
+// and image, never shares one with a stack map stack (even kernel id 0,
+// whose frames could be the same), and is counted as inline; an empty one
+// is uncaptured.
+func TestTableInlineIDs(t *testing.T) {
+	var written []schema.Stack
+	lookup := func(kid uint32) ([]uint64, error) { return []uint64{0x10, 0x20}, nil }
+	tab := NewTable(lookup, "/nonexistent", func(s schema.Stack) error { written = append(written, s); return nil })
+	ips := []uint64{0x10, 0x20}
+	steps := []struct {
+		ips  []uint64
+		tag  uint64
+		want uint32
+	}{{ips, 1, 1}, {ips, 1, 1}, {[]uint64{0x10, 0x21}, 1, 2}, {ips, 2, 3}, {nil, 1, 0}}
+	for _, s := range steps {
+		id, ok, err := tab.InlineID(7, 5, s.ips, s.tag)
+		if err != nil || ok != (s.want != 0) || id != s.want {
+			t.Fatalf("InlineID(%#x, tag %d) = %d %v %v, want %d", s.ips, s.tag, id, ok, err, s.want)
+		}
+	}
+	if id, _, _ := tab.ID(7, 5, 0, 1); id != 4 {
+		t.Fatalf("stack map id 0 got trace id %d, want its own (4)", id)
+	}
+	if err := tab.Close(); err != nil {
+		t.Fatal(err)
+	}
+	want := Stats{Stacks: 4, Inline: 3, Uncaptured: 1, Other: 1}
+	if st := tab.Stats(); st != want || len(written) != 4 {
+		t.Fatalf("stats %+v, %d written; want %+v, 4 written", st, len(written), want)
+	}
+	if got := written[1].Frames[1].Addr; got != "0x21" {
+		t.Fatalf("inline stack 2's outer frame %q, want 0x21", got)
 	}
 }
 

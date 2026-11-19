@@ -35,8 +35,10 @@ type Config struct {
 	// gives up decision #25's loss budget on a busy loop.
 	NoAggregation bool
 	// NativeStacks makes every emitted syscall enter send its thread's
-	// user stack id first, as a *types.StackEvent (stack.c, M2 step 9);
-	// StackTrace reads the stack behind an id. Off, stack_map shrinks to
+	// user stack id first, as a *types.StackEvent (stack.c, M2 step 9),
+	// or, for a stack stack_map refused (a bucket collision), the frames
+	// themselves as a *types.StackInlineEvent; StackTrace reads the stack
+	// behind an id. Off, stack_map shrinks to
 	// one entry and the handlers' stack walk is pruned at load.
 	NativeStacks bool
 	// Buffer is how many decoded records may wait for the consumer (in

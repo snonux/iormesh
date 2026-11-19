@@ -280,12 +280,6 @@ struct {
     __type(value, __u32);
 } rw_agg_stop SEC(".maps");
 
-// IORMESH_STACK_DEPTH is how many user frames stack_map keeps per stack;
-// deeper stacks are cut to their innermost frames. 64 covers the call
-// chains of the servers iormesh targets with room to spare, at half the
-// memory of the kernel's 127-frame maximum.
-#define IORMESH_STACK_DEPTH 64
-
 // stack_map holds the distinct user stacks of syscall enters (stack.c, M2
 // step 9; iormesh run -native-stacks). bpf_get_stackid hashes a stack into
 // one of max_entries buckets and returns the bucket as its id; a stack
@@ -293,9 +287,10 @@ struct {
 // reads each stack once), another stack hashing to an occupied bucket gets
 // -EEXIST. No BPF_F_REUSE_STACKID: overwriting a bucket would change what
 // an id already in the trace stands for, so an id stays valid for the whole
-// session and a collision costs a stack, not a wrong one. Preallocated:
-// about 4.3 MB here, which is why userspace shrinks it to one entry when
-// native stacks are off (internal/bpf, Config.NativeStacks).
+// session; a colliding stack is sent inline instead (struct
+// stack_inline_event, stack.c). IORMESH_STACK_DEPTH is in types.h.
+// Preallocated: about 4.3 MB here, which is why userspace shrinks it to one
+// entry when native stacks are off (internal/bpf, Config.NativeStacks).
 struct {
     __uint(type, BPF_MAP_TYPE_STACK_TRACE);
     __uint(max_entries, 8192);

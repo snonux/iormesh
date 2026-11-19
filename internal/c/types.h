@@ -3,7 +3,8 @@
 // SOCK_ADDR_EVENT and SIGNAL_EVENT with their structs added (sockaddr.c,
 // signal.c, M2 step 7); RW_AGGREGATE_EVENT and struct rw_aggregate_event
 // added (rwagg.c, M2 step 11); STACK_EVENT and struct stack_event added
-// (stack.c, M2 step 9);
+// (stack.c, M2 step 9); STACK_INLINE_EVENT, struct stack_inline_event and
+// IORMESH_STACK_DEPTH (moved here from maps.h) added (stack.c, task kd4);
 // EXEC_ARGV_EVENT, PROCESS_ARGV_EVENT and struct exec_argv_event added
 // (exec.c, M2).
 
@@ -122,6 +123,10 @@
 // enter record when native stacks are on (struct stack_event, stack.c, M2
 // step 9).
 #define STACK_EVENT 74
+// iormesh: the same, with the stack's frames inline, for an enter whose
+// stack stack_map could not take (a colliding bucket, a full map; struct
+// stack_inline_event, stack.c).
+#define STACK_INLINE_EVENT 75
 
 #define UNCLASSIFIED 0
 #define READ_CLASSIFIED 1
@@ -1184,4 +1189,33 @@ struct stack_event {
     __s32 stack_id;
     __u32 reserved;
     __u64 image;
+};
+
+// IORMESH_STACK_DEPTH is how many user frames a stack keeps (stack_map's
+// values in maps.h, stack_inline_event's ips); deeper stacks are cut to
+// their innermost frames. 64 covers the call chains of the servers iormesh
+// targets with room to spare, at half the memory of the kernel's 127-frame
+// maximum. Defined here, not in maps.h, so the Go types get it too.
+#define IORMESH_STACK_DEPTH 64
+
+// stack_inline_event (iormesh, stack.c, task kd4) is a stack_event whose
+// stack stack_map refused - bpf_get_stackid's -EEXIST when the stack's
+// bucket holds another stack, -ENOMEM when the map is full - so it carries
+// the frames itself, from bpf_get_stack: nr instruction pointers in ips,
+// innermost first. stack_id keeps bpf_get_stackid's error, for diagnosis
+// only. Userspace deduplicates these stacks by their frames. Without it a
+// collision would cost every enter of that stack its stack for the whole
+// session, and collisions grow with the square of the distinct stacks
+// (about two in a 200-stack test run of 8192 buckets). 552 bytes, no
+// implicit padding.
+struct stack_inline_event {
+    __u32 event_type;
+    __u32 trace_id;
+    __u64 time;
+    __u32 pid;
+    __u32 tid;
+    __s32 stack_id;
+    __u32 nr;
+    __u64 image;
+    __u64 ips[IORMESH_STACK_DEPTH];
 };

@@ -410,10 +410,15 @@ How it is captured and what it can and cannot say:
   only: at a `sys_enter` tracepoint the kernel stack is the
   syscall entry path. The map deduplicates, so each distinct
   stack is read back once. It never overwrites a bucket, so an
-  id stays valid for the session; a colliding stack, a full map
-  or a walk that unwinds nothing leaves the event without
-  `stack_id` and is counted in the run's summary line
-  (`native stacks N (uncaptured M)`).
+  id stays valid for the session. A stack the map refuses — its
+  bucket holds another stack, or the map is full — is sent with
+  its frames instead (`bpf_get_stack`, a 552-byte record) and
+  deduplicated by them in the tracer, so it gets its `stack_id`
+  all the same; collisions grow with the square of the distinct
+  stacks, a few per couple of hundred. Only a walk that unwinds
+  nothing leaves the event without `stack_id`. The run's
+  summary line counts both: `native stacks N (inline I;
+  uncaptured M: collisions C, faults F, other O)`.
 - **Not every event has one**: calls folded into a `read`/`write`
   with `args.count` (M2 step 11) and a held-back call's enter the
   fold sends later carry none, nor do synthetic events (`drop`,

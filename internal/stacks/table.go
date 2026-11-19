@@ -7,8 +7,11 @@
 package stacks
 
 import (
+	"encoding/binary"
 	"os"
+	"slices"
 	"sync"
+	"syscall"
 
 	"iormesh/internal/schema"
 )
@@ -29,16 +32,34 @@ type Stats struct {
 	// Uncaptured counts stack records whose walk failed in the kernel
 	// (bpf_get_stackid's error: nothing unwound, or a colliding stack map
 	// bucket) or whose stack could not be read back: their events carry
-	// no stack_id.
+	// no stack_id. It is the sum of the three reasons below, which tell a
+	// stack map too small for the session (Collisions) from walks that
+	// fault (Faults).
 	Uncaptured uint64
+	// Collisions counts -EEXIST: the stack hashed to a bucket another
+	// stack already holds (the map never overwrites, see maps.h).
+	Collisions uint64
+	// Faults counts -EFAULT: the walk yielded no frame.
+	Faults uint64
+	// Other counts every other kernel error and stacks the lookup could
+	// not read back.
+	Other uint64
+	// Inline counts the distinct stacks (of Stacks) the kernel sent with
+	// their frames because the stack map refused them, mostly bucket
+	// collisions (struct stack_inline_event, internal/c/stack.c): each
+	// would have been lost before.
+	Inline uint64
 }
 
 // key is one kernel stack in one process image. The kernel's id names
 // raw addresses only; the same addresses in two images may be two
-// different call sites, so the trace's id is per image.
+// different call sites, so the trace's id is per image. A stack sent
+// inline has no kernel id: frames holds its addresses (frameKey) and kid
+// is 0, so it never matches a stack map stack, whose frames is "".
 type key struct {
-	img image
-	kid uint32
+	img    image
+	kid    uint32
+	frames string
 }
 
 // job is one new stack for the worker: the entry without its frames, and
@@ -90,16 +111,36 @@ func (t *Table) ID(pid uint32, inc uint64, kid int32, tag uint64) (id uint32, ok
 		return 0, false, err
 	}
 	if kid < 0 {
-		t.stats.Uncaptured++
+		t.uncaptured(-kid)
 		return 0, false, nil
 	}
 	k := key{img: image{pid: pid, inc: inc, tag: tag}, kid: uint32(kid)}
+	return t.assign(k, func() ([]uint64, error) { return t.lookup(k.kid) })
+}
+
+// InlineID is ID for a stack the kernel sent with its frames, ips
+// (innermost first), because the stack map refused it: the same stack in
+// the same image always gets the same id, by its frames. ips is copied;
+// the caller's record may be recycled.
+func (t *Table) InlineID(pid uint32, inc uint64, ips []uint64, tag uint64) (id uint32, ok bool, err error) {
+	if err := t.workerErr(); err != nil {
+		return 0, false, err
+	}
+	k := key{img: image{pid: pid, inc: inc, tag: tag}, frames: frameKey(ips)}
+	return t.assign(k, func() ([]uint64, error) { return slices.Clone(ips), nil })
+}
+
+// assign returns k's id, or gives k the next one and queues its stack,
+// read with read, for the worker; a stack read can't deliver is counted
+// as uncaptured.
+func (t *Table) assign(k key, read func() ([]uint64, error)) (uint32, bool, error) {
+	pid := k.img.pid
 	if id, ok := t.ids[pid][k]; ok {
 		return id, true, nil
 	}
-	ips, err := t.lookup(k.kid)
+	ips, err := read()
 	if err != nil || len(ips) == 0 {
-		t.stats.Uncaptured++
+		t.uncaptured(0)
 		return 0, false, nil
 	}
 	t.next++
@@ -108,9 +149,12 @@ func (t *Table) ID(pid uint32, inc uint64, kid int32, tag uint64) (id uint32, ok
 	}
 	t.ids[pid][k] = t.next
 	t.stats.Stacks++
+	if k.frames != "" {
+		t.stats.Inline++
+	}
 	maps, files := t.maps.snapshot(k.img, ips)
 	t.jobs <- job{maps: maps, files: files, ips: ips,
-		stack: schema.Stack{SchemaVersion: schema.Version, StackID: t.next, PID: pid, PIDInc: inc}}
+		stack: schema.Stack{SchemaVersion: schema.Version, StackID: t.next, PID: pid, PIDInc: k.img.inc}}
 	return t.next, true, nil
 }
 
@@ -152,6 +196,30 @@ func (t *Table) work(r *resolver, write func(schema.Stack) error) {
 			t.mu.Unlock()
 		}
 	}
+}
+
+// uncaptured counts a stack an event will lack, by the kernel's errno (0:
+// the stack could not be read back).
+func (t *Table) uncaptured(errno int32) {
+	t.stats.Uncaptured++
+	switch syscall.Errno(errno) {
+	case syscall.EEXIST:
+		t.stats.Collisions++
+	case syscall.EFAULT:
+		t.stats.Faults++
+	default:
+		t.stats.Other++
+	}
+}
+
+// frameKey packs an inline stack's addresses into a map key: the bytes
+// of the array, so equal stacks are equal keys.
+func frameKey(ips []uint64) string {
+	b := make([]byte, 0, 8*len(ips))
+	for _, ip := range ips {
+		b = binary.LittleEndian.AppendUint64(b, ip)
+	}
+	return string(b)
 }
 
 func (t *Table) workerErr() error {

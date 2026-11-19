@@ -431,7 +431,9 @@ criterion here.
   non-JVM targets; Java attribution comes from the agent (M3).
   Settled (task ua4): `iormesh run -native-stacks` takes the
   user stack of every emitted syscall enter
-  (`bpf_get_stackid`, frame pointers, 64 frames); events carry
+  (`bpf_get_stackid`, frame pointers, 64 frames; a stack whose
+  map bucket another stack holds comes inline through
+  `bpf_get_stack` instead of being lost, task kd4); events carry
   a per-trace `stack_id` and the stacks go once each into their
   own table, `stacks.ndjson`. Symbolization happens in the
   tracer, from `/proc/<pid>/maps` read at a process image's

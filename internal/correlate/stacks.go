@@ -12,6 +12,10 @@ type StackIDs interface {
 	// (the record's mm->arg_start); ok is false when there is none. The
 	// error ends the trace (a failed write).
 	ID(pid uint32, inc uint64, kid int32, tag uint64) (id uint32, ok bool, err error)
+	// InlineID is ID for a stack the kernel sent with its frames (ips,
+	// innermost first) because its stack map could not take it (struct
+	// stack_inline_event, internal/c/stack.c).
+	InlineID(pid uint32, inc uint64, ips []uint64, tag uint64) (id uint32, ok bool, err error)
 	// Forget says pid exec'd or exited: the table may drop its state.
 	Forget(pid uint32)
 }
@@ -34,10 +38,31 @@ func (c *Correlator) stackRecord(r *types.StackEvent) error {
 	}
 	c.advance(r.Time)
 	id, ok, err := c.cfg.Stacks.ID(r.Pid, c.proc(r.Pid).inc, r.StackId, r.Image)
+	return c.parkStack(r.Tid, r.Time, id, ok, err)
+}
+
+// stackInlineRecord is stackRecord for a stack sent with its frames: it
+// stands in for the stack record of the same enter, so it parks alike.
+func (c *Correlator) stackInlineRecord(r *types.StackInlineEvent) error {
+	if c.cfg.Stacks == nil {
+		return nil
+	}
+	c.advance(r.Time)
+	// Nr comes from the kernel; bound it anyway so a bad record cannot
+	// slice past the array.
+	ips := r.Ips[:min(int(r.Nr), len(r.Ips))]
+	id, ok, err := c.cfg.Stacks.InlineID(r.Pid, c.proc(r.Pid).inc, ips, r.Image)
+	return c.parkStack(r.Tid, r.Time, id, ok, err)
+}
+
+// parkStack keeps a resolved stack id on thread tid for the enter stamped
+// at, or passes the table's error on; a stack without id (ok false) parks
+// nothing.
+func (c *Correlator) parkStack(tid uint32, at uint64, id uint32, ok bool, err error) error {
 	if err != nil || !ok {
 		return err
 	}
-	c.stacks[r.Tid] = stackRef{time: r.Time, id: id}
+	c.stacks[tid] = stackRef{time: at, id: id}
 	return nil
 }
 

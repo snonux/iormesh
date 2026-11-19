@@ -6,6 +6,8 @@ import (
 	"unsafe"
 
 	bpf "github.com/aquasecurity/libbpfgo"
+
+	"iormesh/internal/types"
 )
 
 // Native stacks (internal/c/stack.c, maps.h stack_map; M2 step 9,
@@ -13,9 +15,9 @@ import (
 const (
 	stackMapName  = "stack_map"
 	stackFlagName = "IORMESH_NATIVE_STACKS"
-	// stackDepth is IORMESH_STACK_DEPTH (maps.h): the u64 frames of one
+	// stackDepth is IORMESH_STACK_DEPTH (types.h): the u64 frames of one
 	// stack_map value.
-	stackDepth = 64
+	stackDepth = types.IORMESH_STACK_DEPTH
 )
 
 // setNativeStacks sets the load-time switch and, when it is off, shrinks
