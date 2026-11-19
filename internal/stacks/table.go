@@ -29,17 +29,19 @@ type Lookup func(kernelID uint32) ([]uint64, error)
 type Stats struct {
 	// Stacks is how many distinct stacks the table assigned ids to.
 	Stacks uint64
-	// Uncaptured counts stack records whose walk failed in the kernel
-	// (bpf_get_stackid's error: nothing unwound, or a colliding stack map
-	// bucket) or whose stack could not be read back: their events carry
-	// no stack_id. It is the sum of the three reasons below, which tell a
-	// stack map too small for the session (Collisions) from walks that
-	// fault (Faults).
+	// Uncaptured counts stack records the kernel could not deliver a stack
+	// for or whose stack could not be read back: their events carry no
+	// stack_id. A colliding stack map bucket alone does not count: such a
+	// stack comes inline (Inline). It is the sum of the three reasons
+	// below.
 	Uncaptured uint64
-	// Collisions counts -EEXIST: the stack hashed to a bucket another
-	// stack already holds (the map never overwrites, see maps.h).
+	// Collisions counts -EEXIST that reached userspace: the stack's bucket
+	// held another stack and the inline fallback's bpf_get_stack returned
+	// no frames either (a fallback that failed with -EFAULT counts under
+	// Faults).
 	Collisions uint64
-	// Faults counts -EFAULT: the walk yielded no frame.
+	// Faults counts -EFAULT: the walk yielded no frame, in
+	// bpf_get_stackid or in the inline fallback.
 	Faults uint64
 	// Other counts every other kernel error and stacks the lookup could
 	// not read back.

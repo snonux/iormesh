@@ -307,8 +307,9 @@ func TestLoaderRefusesEmptyAttach(t *testing.T) {
 // TestNativeStacksOnlyWhenAsked (M2 step 9): without -native-stacks the
 // kernel holds a one-entry stack_map and sends no stack record; with it,
 // the map has its full size and the target's open is preceded by a stack
-// record stamped with the open's own time and image tag, whose id reads
-// back as a non-empty stack.
+// record stamped with the open's own time and image tag, whose stack is
+// non-empty: read back by its id, or carried inline when the stack's
+// bucket was taken (task kd4).
 func TestNativeStacksOnlyWhenAsked(t *testing.T) {
 	for _, on := range []bool{false, true} {
 		tg := startTarget(t)
@@ -324,21 +325,41 @@ func TestNativeStacksOnlyWhenAsked(t *testing.T) {
 			t.Fatalf("native stacks %v: no open of %s", on, probePath)
 		case !on && stack != nil:
 			t.Fatalf("a stack record without native stacks: %+v", stack)
-		case on && (stack == nil || stack.Time != open.Time || stack.StackId < 0 || stack.Image == 0):
-			t.Fatalf("stack record %+v for the open at %d", stack, open.Time)
 		case on:
-			if ips, err := tr.StackTrace(uint32(stack.StackId)); err != nil || len(ips) == 0 {
-				t.Fatalf("stack %d reads back %v, %v", stack.StackId, ips, err)
-			}
+			checkStackRecord(t, tr, stack, open)
 		}
 		_ = tr.Close()
 	}
 }
 
+// checkStackRecord: stack is the open's own stack record (its time and an
+// image tag) and names a non-empty stack, either a stack_map id that
+// reads back or frames inline.
+func checkStackRecord(t *testing.T, tr *ibpf.Tracer, stack any, open *types.OpenEvent) {
+	t.Helper()
+	switch s := stack.(type) {
+	case *types.StackEvent:
+		if s.Time != open.Time || s.StackId < 0 || s.Image == 0 {
+			t.Fatalf("stack record %+v for the open at %d", s, open.Time)
+		}
+		if ips, err := tr.StackTrace(uint32(s.StackId)); err != nil || len(ips) == 0 {
+			t.Fatalf("stack %d reads back %v, %v", s.StackId, ips, err)
+		}
+	case *types.StackInlineEvent:
+		if s.Time != open.Time || s.Nr == 0 || s.Image == 0 {
+			t.Fatalf("inline stack record %+v for the open at %d", s, open.Time)
+		}
+	default:
+		t.Fatalf("no stack record for the open at %d", open.Time)
+	}
+}
+
 // stackBeforeOpen returns pid's open of probePath and the stack record
-// that came right before it on the same thread, if any.
-func stackBeforeOpen(tr *ibpf.Tracer, pid uint32, wait time.Duration) (*types.StackEvent, *types.OpenEvent) {
-	var last *types.StackEvent
+// (a copied *types.StackEvent or *types.StackInlineEvent) that came right
+// before it on the same thread, if any.
+func stackBeforeOpen(tr *ibpf.Tracer, pid uint32, wait time.Duration) (any, *types.OpenEvent) {
+	var last any
+	var lastTid uint32
 	deadline := time.After(wait)
 	for {
 		select {
@@ -351,11 +372,16 @@ func stackBeforeOpen(tr *ibpf.Tracer, pid uint32, wait time.Duration) (*types.St
 				case *types.StackEvent:
 					if ev.Pid == pid {
 						cp := *ev
-						last = &cp
+						last, lastTid = &cp, ev.Tid
+					}
+				case *types.StackInlineEvent:
+					if ev.Pid == pid {
+						cp := *ev
+						last, lastTid = &cp, ev.Tid
 					}
 				case *types.OpenEvent:
 					if ev.Pid == pid && types.StringValue(ev.Filename[:]) == probePath {
-						if last != nil && last.Tid != ev.Tid {
+						if last != nil && lastTid != ev.Tid {
 							last = nil
 						}
 						return last, ev
