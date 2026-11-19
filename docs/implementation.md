@@ -759,8 +759,9 @@ unit-tested with synthetic record streams:
   resolution); an exec record (`sched_process_exec`, successful
   execs only) replaces `comm` with the kernel's post-exec name for
   later events and the process node (task hd4; an empty record
-  comm falls back to the exe's basename cut to 15 bytes); `wall_ns = boot_ns + WallOffsetNS`
-  (`BootToWallOffset`, measured once); `err` is the errno name.
+  comm falls back to the exe's basename cut to 15 bytes);
+  `wall_ns = boot_ns + WallOffsetNS` (`BootToWallOffset`,
+  measured once); `err` is the errno name.
 - **Host-level events** go through the same queue, so `seq`
   stays gap-free and ordered: `Session(schema.Session)` queues
   the header and must come before the first `Handle`
