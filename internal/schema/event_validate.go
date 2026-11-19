@@ -56,8 +56,8 @@ func (e *Event) Validate() error {
 }
 
 // validatePayloads keeps the nested objects with their kind: the Java
-// attribution with its flag, the http object on http events, the session
-// object on the session header.
+// attribution with its flag, the http object on http events, the dns
+// object on dns events, the session object on the session header.
 func (e *Event) validatePayloads() error {
 	if err := e.validateAttribution(); err != nil {
 		return err
@@ -66,6 +66,9 @@ func (e *Event) validatePayloads() error {
 		return err
 	}
 	if err := e.validateOtel(); err != nil {
+		return err
+	}
+	if err := e.validateDNS(); err != nil {
 		return err
 	}
 	if (e.Event == KindSession) != (e.Session != nil) {
@@ -77,7 +80,7 @@ func (e *Event) validatePayloads() error {
 // KnownKind reports whether kind is part of schema v1: an M1
 // kind, exec (M2 step 8), one of the M2 file surface (kinds_file.go) or of
 // M2 step 7's socket addresses and opt-in families (kinds_ipc.go), or
-// M3's http (kinds_http.go).
+// M3's http (kinds_http.go) and dns (kinds_dns.go).
 func KnownKind(kind string) bool {
 	switch kind {
 	case KindOpen, KindOpenat, KindOpenat2, KindRead, KindWrite,
@@ -85,7 +88,7 @@ func KnownKind(kind string) bool {
 		KindTCPState, KindMarker, KindDrop, KindSession, KindEnd, KindExec:
 		return true
 	}
-	return fileKind(kind) || ipcKind(kind) || kind == KindHTTP
+	return fileKind(kind) || ipcKind(kind) || kind == KindHTTP || kind == KindDNS
 }
 
 // validateFD enforces the fd conventions: NoFD is the only negative fd,

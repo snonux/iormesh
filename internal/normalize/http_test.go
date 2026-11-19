@@ -59,3 +59,34 @@ func TestExpectationHTTPOnlyOnHTTPEvents(t *testing.T) {
 		t.Error("http declared on a write accepted")
 	}
 }
+
+// TestCheckDNS: a dns declaration matches by host and by each declared
+// address among the event's; it is refused on another kind.
+func TestCheckDNS(t *testing.T) {
+	ev := schema.Event{SchemaVersion: 1, Seq: 1, PID: 1, TID: 1, Event: schema.KindDNS,
+		FD: schema.NoFD, Attribution: schema.AttributionNone,
+		DNS: &schema.DNS{Host: "localhost", Addrs: []string{"127.0.0.1", "0:0:0:0:0:0:0:1"}}}
+	got := Trace{Events: []schema.Event{ev}}
+	doc := func(kind, dns string) (Expectation, error) {
+		return ParseExpectation([]byte(`{"scenario": "s", "schema_version": 1, "events": [
+		  {"thread": "$t1", "event": "` + kind + `", "dns": ` + dns + `}],
+		  "edges": [], "must_not_appear": []}`))
+	}
+	for dns, ok := range map[string]bool{
+		`{"host": "localhost", "addrs": ["127.0.0.1"]}`: true,
+		`{"host": "localhost"}`:                         true,
+		`{"host": "example.org"}`:                       false,
+		`{"host": "localhost", "addrs": ["10.0.0.1"]}`:  false,
+	} {
+		x, err := doc("dns", dns)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if vs := Check(got, x); (len(vs) == 0) != ok {
+			t.Errorf("%s: violations %v, want ok=%v", dns, vs, ok)
+		}
+	}
+	if _, err := doc("write", `{"host": "h"}`); err == nil {
+		t.Error("dns declared on a write accepted")
+	}
+}

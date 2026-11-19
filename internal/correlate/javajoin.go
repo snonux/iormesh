@@ -158,6 +158,8 @@ type JavaStats struct {
 	// HTTP counts the http events emitted, HTTPNoConn those of them whose
 	// connection was not found (no conn_id, no req_seq).
 	HTTP, HTTPNoConn uint64
+	// DNS counts the dns events emitted (task wd4).
+	DNS uint64
 	// MarkFailed counts JVMs whose natives could not be probed: their
 	// syscalls carry no mark and stay none.
 	MarkFailed int

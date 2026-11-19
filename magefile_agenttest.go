@@ -21,10 +21,11 @@ import (
 var agentTestDir = filepath.Join(agentBuildDir, "test")
 
 // smokeKinds are the hook kinds AgentSmoke's I/O must close at least one
-// bracket of: every kind the hook tables use (HookTable.KINDS), and http,
-// the HTTP hooks' requests recorded (task 3b4).
+// bracket of: every kind the hook tables use (HookTable.KINDS), http, the
+// HTTP hooks' requests recorded (task 3b4), and dns, the name lookups'
+// mappings (task wd4).
 var smokeKinds = []string{"open", "read", "write", "seek", "close", "socket",
-	"bind", "connect", "listen", "accept", "shutdown", "unlink", "rename", "stat", "http"}
+	"bind", "connect", "listen", "accept", "shutdown", "unlink", "rename", "stat", "http", "dns"}
 
 // AgentTest builds the agent and runs its unit tests and smoke runs with
 // the java on PATH, then again with each JDK in IORMESH_AGENT_JDKS (a

@@ -30,7 +30,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code Hooks.httpExit} instead, which pops that stamp: the request's
  * start, for its latency. A constructor is hooked at its returns alone
  * (on its exceptional path this may still be uninitialized) and never
- * stamped — an unhooked throw would leave its stamp on the thread. Like BoundaryTransformer, body rewrites with a
+ * stamped — an unhooked throw would leave its stamp on the thread.
+ * A static method passes null as this (InetAddress.getAllByName, the
+ * DNS hook of task wd4); a DNS target's exits call {@code Hooks.dns}. Like BoundaryTransformer, body rewrites with a
  * hand-written handler frame (no COMPUTE_FRAMES, which would load
  * classes from inside the transformer); unlike it, classes of the
  * platform loader are candidates too — java.net.http and jdk.httpserver
@@ -39,6 +41,10 @@ import java.util.concurrent.ConcurrentHashMap;
 final class HttpTransformer implements ClassFileTransformer {
     static final String HTTP_DESC = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;I)V";
     static final String ENTER_DESC = "(Ljava/lang/Object;I)V";
+    /** argSlot: no argument is passed. */
+    static final int NO_SLOT = -1;
+    /** argSlot: the named argument is a primitive, the target is refused. */
+    static final int REFUSED = -2;
 
     private final HttpHooks hooks;
     private final Set<Integer> applied = ConcurrentHashMap.newKeySet();
@@ -88,10 +94,9 @@ final class HttpTransformer implements ClassFileTransformer {
     }
 
     /**
-     * Rewrites this class's own hooks() (an instance method: static ones
-     * are never targets), so the rewriting classes are loaded before any
-     * target class is: their loading reads the agent jar, which must not
-     * happen inside the target's request.
+     * Rewrites this class's own hooks(), so the rewriting classes are
+     * loaded before any target class is: their loading reads the agent
+     * jar, which must not happen inside the target's request.
      */
     static void warmUp() throws java.io.IOException {
         String self = HttpTransformer.class.getName().replace('.', '/');
@@ -128,37 +133,40 @@ final class HttpTransformer implements ClassFileTransformer {
                                          String signature, String[] exceptions) {
             MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
             HttpHooks.Hook h = hooks.lookup(className, name, descriptor);
-            if (h == null || (access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE
-                    | Opcodes.ACC_STATIC)) != 0) {
-                return mv;   // not listed, no body, or no this to hand over
+            if (h == null || (access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) {
+                return mv;   // not listed, or no body
             }
-            int slot = argSlot(descriptor, h.target().arg());
-            if (slot == 0) {
+            boolean isStatic = (access & Opcodes.ACC_STATIC) != 0;
+            int slot = argSlot(descriptor, h.target().arg(), isStatic);
+            if (slot == REFUSED) {
                 return mv;   // the named argument is a primitive: nothing to pass
             }
             rewritten++;
             applied.add(h.id());
             boolean ctor = name.equals("<init>");
-            return new Exit(mv, h.id(), className, slot, argType(descriptor, h.target().arg()),
-                    ctor, h.target().stamp() && !ctor, version >= Opcodes.V1_6);
+            String exit = h.target().dns() ? "dns" : h.target().stamp() && !ctor ? "httpExit" : "http";
+            return new Exit(mv, h.id(), isStatic ? null : className, slot,
+                    argType(descriptor, h.target().arg()), ctor,
+                    h.target().stamp() && !ctor, exit, version >= Opcodes.V1_6);
         }
     }
 
     /**
-     * The local slot of the argument index arg names (this is slot 0),
-     * -1 for none, 0 when it is not a reference (refused).
+     * The local slot of the argument index arg names (this is slot 0 of
+     * an instance method; a static one's arguments start at 0), NO_SLOT
+     * for none, REFUSED when it is not a reference.
      */
-    static int argSlot(String descriptor, int arg) {
+    static int argSlot(String descriptor, int arg, boolean isStatic) {
         Type[] args = Type.getArgumentTypes(descriptor);
         int i = arg == Target.LAST_ARG ? args.length - 1 : arg;
         if (arg == Target.NO_ARG || i < 0 || i >= args.length) {
-            return -1;
+            return NO_SLOT;
         }
         int sort = args[i].getSort();
         if (sort != Type.OBJECT && sort != Type.ARRAY) {
-            return 0;
+            return REFUSED;
         }
-        int slot = 1;
+        int slot = isStatic ? 0 : 1;
         for (int k = 0; k < i; k++) {
             slot += args[k].getSize();
         }
@@ -173,9 +181,10 @@ final class HttpTransformer implements ClassFileTransformer {
     }
 
     /**
-     * Calls Hooks.http (Hooks.httpExit when stamped) before every return
-     * and, for a method, on its throw; a stamped one calls Hooks.httpEnter
-     * first.
+     * Calls the exit entry point (Hooks.http, httpExit when stamped, dns
+     * for a lookup) before every return and, for a method, on its throw;
+     * a stamped one calls Hooks.httpEnter first. owner is null for a
+     * static method, which hands over null as this.
      */
     private static final class Exit extends MethodVisitor {
         private final int id;
@@ -184,12 +193,13 @@ final class HttpTransformer implements ClassFileTransformer {
         private final String slotType;
         private final boolean ctor;
         private final boolean stamp;
+        private final String exit;
         private final boolean frames;
         private final Label start = new Label();
         private final Label handler = new Label();
 
         Exit(MethodVisitor next, int id, String owner, int slot, String slotType, boolean ctor,
-             boolean stamp, boolean frames) {
+             boolean stamp, String exit, boolean frames) {
             super(Opcodes.ASM9, next);
             this.id = id;
             this.owner = owner;
@@ -197,6 +207,7 @@ final class HttpTransformer implements ClassFileTransformer {
             this.slotType = slotType;
             this.ctor = ctor;
             this.stamp = stamp;
+            this.exit = exit;
             this.frames = frames;
         }
 
@@ -209,7 +220,7 @@ final class HttpTransformer implements ClassFileTransformer {
         public void visitCode() {
             super.visitCode();
             if (stamp) {
-                super.visitVarInsn(Opcodes.ALOAD, 0);
+                pushThis();
                 pushId();
                 super.visitMethodInsn(Opcodes.INVOKESTATIC, BoundaryTransformer.HOOKS,
                         "httpEnter", ENTER_DESC, false);
@@ -240,18 +251,20 @@ final class HttpTransformer implements ClassFileTransformer {
         /**
          * The catch-all, appended after the original code (its own
          * handlers come first in the table and still win). Its frame
-         * declares only what it loads: this, and the passed argument's
-         * slot — javac never stores another type into a parameter slot,
-         * and the slots between are TOP.
+         * declares only what it loads: this (none for a static method),
+         * and the passed argument's slot — javac never stores another
+         * type into a parameter slot, and the slots between are TOP.
          */
         private void handler() {
             super.visitLabel(handler);
             if (frames) {
-                int n = slot > 0 ? slot + 1 : 1;
+                int n = Math.max(slot + 1, owner == null ? 0 : 1);
                 Object[] locals = new Object[n];
                 java.util.Arrays.fill(locals, Opcodes.TOP);
-                locals[0] = owner;
-                if (slot > 0) {
+                if (owner != null) {
+                    locals[0] = owner;
+                }
+                if (slot >= 0) {
                     locals[slot] = slotType;
                 }
                 super.visitFrame(Opcodes.F_FULL, n, locals, 1,
@@ -263,17 +276,25 @@ final class HttpTransformer implements ClassFileTransformer {
             super.visitTryCatchBlock(start, handler, handler, null);
         }
 
-        /** Stack: [.., ret] → pushes this, arg and id, calls Hooks.http. */
+        /** Stack: [.., ret] → pushes this, arg and id, calls the exit entry point. */
         private void callHook() {
-            super.visitVarInsn(Opcodes.ALOAD, 0);
-            if (slot > 0) {
+            pushThis();
+            if (slot >= 0) {
                 super.visitVarInsn(Opcodes.ALOAD, slot);
             } else {
                 super.visitInsn(Opcodes.ACONST_NULL);
             }
             pushId();
-            super.visitMethodInsn(Opcodes.INVOKESTATIC, BoundaryTransformer.HOOKS,
-                    stamp ? "httpExit" : "http", HTTP_DESC, false);
+            super.visitMethodInsn(Opcodes.INVOKESTATIC, BoundaryTransformer.HOOKS, exit,
+                    HTTP_DESC, false);
+        }
+
+        private void pushThis() {
+            if (owner == null) {
+                super.visitInsn(Opcodes.ACONST_NULL);
+            } else {
+                super.visitVarInsn(Opcodes.ALOAD, 0);
+            }
         }
 
         private void pushId() {

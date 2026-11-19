@@ -82,6 +82,7 @@ func (Thread) isRecord()    {}
 func (Watermark) isRecord() {}
 func (Hook) isRecord()      {}
 func (HTTP) isRecord()      {}
+func (DNS) isRecord()       {}
 
 // errMalformed marks a body that does not decode; the record is skipped
 // and counted, the ring stays readable.
@@ -108,6 +109,8 @@ func decode(typ uint32, rec []byte) (Record, error) {
 		return decodeHook(rec)
 	case typeHTTP:
 		return decodeHTTP(rec)
+	case typeDNS:
+		return decodeDNS(rec)
 	}
 	return nil, errMalformed
 }

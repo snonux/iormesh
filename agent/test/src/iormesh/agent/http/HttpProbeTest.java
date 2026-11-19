@@ -30,7 +30,8 @@ public final class HttpProbeTest {
                 new AgentTests.Case("http/addresses and literals", HttpProbeTest::addresses),
                 new AgentTests.Case("http/client response", HttpProbeTest::client),
                 new AgentTests.Case("http/declared body sizes", HttpProbeTest::sizes),
-                new AgentTests.Case("http/sendAsync completion", HttpProbeTest::async));
+                new AgentTests.Case("http/sendAsync completion", HttpProbeTest::async),
+                new AgentTests.Case("http/dns mappings", HttpProbeTest::dns));
     }
 
     static void redaction() {
@@ -118,6 +119,31 @@ public final class HttpProbeTest {
         String[] s = probe.apply(new Object[] {java.util.concurrent.CompletableFuture
                 .completedFuture(new FakeResponse(null)), self, null, self, 7}, now);
         check(s != null && now[4] == 42, "done at the return: recorded at once");
+    }
+
+    /**
+     * The DNS probe: a new mapping is recorded once, a rotation of the
+     * same addresses is no change, other addresses are; literals, an
+     * empty host and a failed lookup record nothing.
+     */
+    static void dns() throws Exception {
+        JdkDns.Resolved probe = new JdkDns.Resolved();
+        java.net.InetAddress a = java.net.InetAddress.getByAddress("h", new byte[] {10, 0, 0, 1});
+        java.net.InetAddress b = java.net.InetAddress.getByAddress("h", new byte[] {10, 0, 0, 2});
+        long[] meta = new long[7];
+        equal(List.of("h", "10.0.0.1", "10.0.0.2"), List.of(probe.apply(
+                new Object[] {new java.net.InetAddress[] {a, b}, null, "h"}, meta)), "new mapping");
+        equal(null, probe.apply(new Object[] {new java.net.InetAddress[] {b, a}, null, "h"}, meta),
+                "a rotation is no change");
+        check(probe.apply(new Object[] {new java.net.InetAddress[] {b}, null, "h"}, meta) != null,
+                "other addresses are");
+        equal(null, probe.apply(new Object[] {null, null, "x"}, meta), "a failed lookup");
+        equal(null, probe.apply(new Object[] {new java.net.InetAddress[] {a}, null, "10.0.0.1"},
+                meta), "an IPv4 literal");
+        check(JdkDns.literal("::1") && !JdkDns.literal("cafe") && !JdkDns.literal("a1.b"),
+                "literals");
+        equal(null, probe.apply(new Object[] {new java.net.InetAddress[] {a}, null, ""}, meta),
+                "the empty host");
     }
 
     static void client() {

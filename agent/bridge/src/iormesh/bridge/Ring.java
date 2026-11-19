@@ -66,6 +66,7 @@ public final class Ring {
     static final int WATERMARK = 4;
     static final int HOOK = 5;
     static final int HTTP = 6;
+    static final int DNS = 7;
     /**
      * Format version; the reader rejects any other. 2 (task 2b4): HOOK
      * records, and THREAD's reserved word carries flags (VIRTUAL). 3
@@ -74,7 +75,8 @@ public final class Ring {
      * never released, but a bump costs nothing and a mismatched agent
      * and tracer then fail loudly instead of misreading HTTP records.
      * 5 (task wd4): HTTP's fixed part gains the request's start stamp
-     * and its body sizes (latency and sizes, PLAN.md M3).
+     * and its body sizes (latency and sizes, PLAN.md M3), and DNS
+     * records (decision #8) are new.
      */
     static final int VERSION = 5;
     /** THREAD flag: the Java thread is a virtual thread (JDK 21+). */
@@ -121,6 +123,14 @@ public final class Ring {
     static final int M_REQ_BYTES = 5;
     static final int M_RESP_BYTES = 6;
     static final int META = 7;
+    /**
+     * DNS's fixed part (task wd4): word, mono, stack, thread, ktid, n, then
+     * the OTEL trace id halves and span id (zero: no span); then n strings,
+     * the host name and the addresses it resolved to.
+     */
+    static final int DNS_HEAD = 8 + 56;
+    /** A DNS record keeps at most this many addresses. */
+    static final int MAX_DNS_ADDRS = 32;
     /** HTTP flag: the request was answered here (a server's), not sent. */
     static final int HTTP_SERVER = 1;
     /** HTTP's leading strings: method, scheme, host, path, version, local, remote. */
@@ -359,6 +369,42 @@ public final class Ring {
         buf.putLong(off + 80, meta[M_START]);
         buf.putLong(off + 88, meta[M_REQ_BYTES]);
         buf.putLong(off + 96, meta[M_RESP_BYTES]);
+    }
+
+    /**
+     * Writes a DNS record: one name lookup a DNS hook saw resolve
+     * (decision #8; iormesh.agent.http.JdkDns) — exit stamp, stack id,
+     * Java thread id, kernel tid, the string count and the OTEL span,
+     * then the host and its addresses (s), at most MAX_DNS_ADDRS of them.
+     */
+    boolean dns(long mono, long stack, long thread, int ktid, String[] s,
+                long traceHi, long traceLo, long span) {
+        int n = Math.min(s.length, 1 + MAX_DNS_ADDRS);
+        byte[][] enc = encode(s, n);
+        int len = align(DNS_HEAD + size(enc, n));
+        if (len > MAX_RECORD) {
+            countDrop(DNS, len);
+            return false;
+        }
+        int off = reserve(len, DNS);
+        if (off < 0) {
+            return false;
+        }
+        try {
+            buf.putLong(off + 8, mono);
+            buf.putLong(off + 16, stack);
+            buf.putLong(off + 24, thread);
+            buf.putInt(off + 32, ktid);
+            buf.putInt(off + 36, n);
+            buf.putLong(off + 40, traceHi);
+            buf.putLong(off + 48, traceLo);
+            buf.putLong(off + 56, span);
+            putStrings(off + DNS_HEAD, enc, n);
+            publish(off, len, DNS);
+            return true;
+        } catch (Throwable e) {
+            return abandon(off, len);
+        }
     }
 
     private static byte[][] encode(String[] s, int n) {

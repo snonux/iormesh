@@ -77,6 +77,8 @@ public final class AgentSmoke {
                     HttpResponse.BodyHandlers.ofString()).get().statusCode() != 200) {
                 throw new IllegalStateException("http smoke: sendAsync");
             }
+            // A name lookup (task wd4): one DNS record for localhost.
+            InetAddress.getAllByName("localhost");
             HttpURLConnection c = (HttpURLConnection) uri.toURL().openConnection();
             if (r.statusCode() != 200 || c.getResponseCode() != 200) {
                 throw new IllegalStateException("http smoke: " + r.statusCode());

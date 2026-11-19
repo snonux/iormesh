@@ -164,8 +164,8 @@ func (o *javaOutput) close() error {
 // how many JVMs' natives could not be probed), events joined (and how
 // many of them a virtual thread's), why the others of those JVMs stayed
 // none, how many (joined or not) left by the timeout rather than a
-// watermark, the http events (and how many found no connection), and
-// what the agents lost.
+// watermark, the http events (and how many found no connection), the dns
+// events (task wd4), and what the agents lost.
 func (o *javaOutput) summary() string {
 	if o == nil || o.join == nil {
 		return ""
@@ -174,8 +174,8 @@ func (o *javaOutput) summary() string {
 	return fmt.Sprintf(", java rings %d (skipped %d, corrupt %d, unmarked JVMs %d), brackets %d, "+
 		"attributed %d (carrier %d; none: unmarked %d, other native %d, unbracketed %d, "+
 		"other kind %d, ambiguous %d, no stack %d), released by timeout %d, http %d "+
-		"(no connection %d), agent lost %d",
+		"(no connection %d), dns %d, agent lost %d",
 		s.Rings, o.skipped, s.Corrupt, s.MarkFailed, s.Brackets, s.Attributed, s.Carrier,
 		s.Unmarked, s.OtherNative, s.Unbracketed, s.OtherKind, s.Ambiguous, s.NoStack,
-		s.TimedOut, s.HTTP, s.HTTPNoConn, s.Lost.Total())
+		s.TimedOut, s.HTTP, s.HTTPNoConn, s.DNS, s.Lost.Total())
 }

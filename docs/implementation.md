@@ -2530,8 +2530,25 @@ internal/correlate/javajoin.go
    `TestHTTPAsync`, `HttpProbeTest`'s completion case and the
    smoke's extra request (six HTTP records per JDK).
 
-   Not yet: Servlet, Apache HttpClient, OkHttp, Netty, and the DNS
-   hooks (#8).
+   DNS hooks (#8, task wd4): `JdkDns` is a library of one target,
+   the public static `InetAddress.getAllByName(String)`, marked
+   `lookup()`: `HttpTransformer` now takes static methods (null as
+   `this`, arguments from slot 0) and calls `Hooks.dns` at a
+   lookup's exits. Its probe returns `{host, address…}` only for a
+   mapping new to the JVM (a bounded map of host → sorted address
+   set), never for literals, the empty host or a failed lookup;
+   `Hooks.dns` writes a DNS record (ring type 7) with the stack, and
+   a lookup on a busy thread is the agent's own (an HTTP probe
+   parsing a literal) and records nothing — no HTTP loss either.
+   The joiner queues DNS records with the HTTP ones and emits `dns`
+   events (`internal/correlate/javadns.go`; schema `KindDNS`,
+   `Event.DNS`; normalize `ExpectedDNS`). Tests: `HttpProbeTest`
+   (mappings, rotation, literals), `HttpHooksTest` (record, busy),
+   `HttpTransformerTest` (static target, throw path), agentspool
+   DNS decode, the join's order, the `http-async` golden's lookup
+   of `localhost`, and the smoke's `dns` kind on every JDK.
+
+   Not yet: Servlet, Apache HttpClient, OkHttp, Netty.
 8. OTEL (done, task 4b4): read `Span.current().getSpanContext()`
    reflectively in the app's class loader at `enter` and add the
    ids to the bracket. No OTEL dependency in the agent. The `otel`

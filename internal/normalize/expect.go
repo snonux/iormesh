@@ -54,6 +54,9 @@ type ExpectedEvent struct {
 	// HTTP, when set, must match an http event's request (M3, task 3b4);
 	// see ExpectedHTTP. Only http events declare it.
 	HTTP *ExpectedHTTP `json:"http,omitempty"`
+	// DNS, when set, must match a dns event's mapping (task wd4); see
+	// ExpectedDNS. Only dns events declare it.
+	DNS *ExpectedDNS `json:"dns,omitempty"`
 	// Otel is the OpenTelemetry span the event ran in (M3 step 8, task
 	// 4b4); it requires attribution java. Like args.count it is compared
 	// when absent too: a declaration without it matches only an event
@@ -90,6 +93,14 @@ type ExpectedHTTP struct {
 	// (task wd4).
 	ReqBytes  *uint64 `json:"req_bytes,omitempty"`
 	RespBytes *uint64 `json:"resp_bytes,omitempty"`
+}
+
+// ExpectedDNS declares a dns event's mapping: the host must equal the
+// event's, and each declared address must be among its addresses, which
+// may hold more (a host's resolver may add ::1 to 127.0.0.1).
+type ExpectedDNS struct {
+	Host  string   `json:"host"`
+	Addrs []string `json:"addrs,omitempty"`
 }
 
 // ExpectedJava declares who caused an event on the Java side. Thread,
@@ -253,6 +264,9 @@ func (e ExpectedEvent) validate(threadProc map[string]string) error {
 	}
 	if e.HTTP != nil && e.Event != schema.KindHTTP {
 		return fmt.Errorf("http declared on a %s event", e.Event)
+	}
+	if e.DNS != nil && (e.Event != schema.KindDNS || e.DNS.Host == "") {
+		return fmt.Errorf("dns declared on a %s event, or without its host", e.Event)
 	}
 	if err := e.validateOtel(); err != nil {
 		return err

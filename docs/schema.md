@@ -85,6 +85,7 @@ Required fields are always present; a zero is a real zero.
 | `session` | object, optional | the host description, set exactly on `session` events (below) |
 | `stack_id` | int, optional | the native user stack the thread entered the syscall with: an id of `stacks.ndjson` (≥ 1); only with `-native-stacks` (below) |
 | `otel` | object, optional | `{trace_id, span_id}`, the OpenTelemetry span the Java code ran in; only with attribution `java`, absent outside a span (appended in M3) — see "OpenTelemetry span context" |
+| `dns` | object, optional | `{host, addrs}`, set exactly on `dns` events (appended in M3, task wd4; *provisional until M3 closes*) — see "DNS events" |
 
 `(pid, pid_incarnation, fd, fd_gen)` names one fd instance, even
 when a library's open and a later socket land on the same number.
@@ -738,6 +739,41 @@ and the two body sizes, then method,
 scheme, host, path, version, local and remote socket address, and
 the headers), redacted before it is written; a record that would
 pass 16 KiB keeps the request and drops its headers.
+
+## DNS events (M3)
+
+With `-spool`, the agent's DNS hook (decision #8's default, task
+wd4) adds a `dns` event when a JVM resolves a host name to a set
+of addresses it had not mapped that name to before: the first
+lookup of a name, and again whenever its address set changes
+(compared as a set, so a resolver rotating the order is no
+change). The hook is `InetAddress.getAllByName(String)`, through
+which `getByName`, `InetSocketAddress(host, port)` and so the
+JDK's sockets, HttpClient and HttpURLConnection resolve. IP
+literals (parsed, never looked up), the empty host and failed
+lookups are not recorded; reverse lookups are not hooked.
+
+```json
+{"event":"dns","fd":-1,"attribution":"java",
+ "java":{"thread":"HttpClient-1-Worker-0","stack":[139,140]},
+ "dns":{"host":"localhost","addrs":["127.0.0.1","0:0:0:0:0:0:0:1"]}}
+```
+
+| `dns` field | Type | Meaning |
+|---|---|---|
+| `host` | string | the name as the app passed it |
+| `addrs` | list of string | the addresses, in the resolver's order (the JDK connects to the first), textual — IPv6 in the JDK's full form; at most 32 |
+
+The event is stamped when the lookup returned, on the thread and
+stack that asked (`latency_ns` 0), and goes into the stream like
+an `http` event, after the events that completed before it. It
+names no connection: a view pairs a connection's remote address
+with the latest mapping of the same process that contains it. In
+the ring a mapping is a DNS record (format 5: exit stamp, stack
+id, Java thread id, kernel tid, string count, OTEL span ids, then
+host and addresses); one the ring dropped is counted (`agent
+lost`) and not sent again. The summary line counts the dns
+events.
 
 ## OpenTelemetry span context (M3)
 

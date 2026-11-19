@@ -28,7 +28,7 @@ final class HttpTransformerTest {
         return List.of(
                 new AgentTests.Case("http transformer/hands over ret, this and arg",
                         HttpTransformerTest::handsOver),
-                new AgentTests.Case("http transformer/refuses static and primitive",
+                new AgentTests.Case("http transformer/refuses primitive, takes static",
                         HttpTransformerTest::refuses),
                 new AgentTests.Case("http transformer/other loader is a no-op",
                         HttpTransformerTest::otherLoader),
@@ -50,7 +50,8 @@ final class HttpTransformerTest {
                 new Target(FIXTURE, "fail", "(JLjava/lang/String;)Ljava/lang/String;",
                         Target.LAST_ARG, p).stamped(),
                 new Target(FIXTURE, "count", "(I)I", 0, p),
-                new Target(FIXTURE, "util", "()Ljava/lang/String;", Target.NO_ARG, p));
+                new Target(FIXTURE, "lookup", "(Ljava/lang/String;)[Ljava/lang/String;", 0, p)
+                        .lookup());
     }
 
     static byte[] fixtureBytes() throws Exception {
@@ -94,6 +95,16 @@ final class HttpTransformerTest {
             equal(List.of(new Call(101, null, f, "n", false),
                     new Call(102, "n:req", f, null, true), new Call(103, "ok", f, "ok", true),
                     new Call(103, null, f, "boom", true)), calls, "probe calls");
+            calls.clear();
+            Object got = c.getMethod("lookup", String.class).invoke(null, "h");
+            try {
+                c.getMethod("lookup", String.class).invoke(null, "");
+                throw new AssertionError("lookup(\"\") returned");
+            } catch (InvocationTargetException e) {
+                equal("empty", e.getCause().getMessage(), "lookup still throws its own");
+            }
+            equal(List.of(new Call(105, got, null, "h", false), new Call(105, null, null, "", false)),
+                    calls, "static lookup: null this, its argument, through Hooks.dns");
         } finally {
             Hooks.release();
             Files.deleteIfExists(dir);
@@ -113,11 +124,15 @@ final class HttpTransformerTest {
     static void refuses() throws Exception {
         HttpTransformer t = new HttpTransformer(HttpHooks.of(targets(null)));
         check(t.rewrite(FIXTURE, fixtureBytes()) != null, "fixture rewritten");
-        equal(java.util.Set.of(1, 2, 3), t.applied(), "applied: ctor, send, fail only");
-        equal(0, HttpTransformer.argSlot("(I)I", 0), "primitive argument refused");
-        equal(3, HttpTransformer.argSlot("(JLjava/lang/String;)V", Target.LAST_ARG),
+        equal(java.util.Set.of(1, 2, 3, 5), t.applied(), "applied: all but the primitive");
+        equal(HttpTransformer.REFUSED, HttpTransformer.argSlot("(I)I", 0, false),
+                "primitive argument refused");
+        equal(3, HttpTransformer.argSlot("(JLjava/lang/String;)V", Target.LAST_ARG, false),
                 "last argument after a long");
-        equal(-1, HttpTransformer.argSlot("()V", Target.LAST_ARG), "no argument to pass");
+        equal(0, HttpTransformer.argSlot("(Ljava/lang/String;)V", 0, true),
+                "a static method's first argument is slot 0");
+        equal(HttpTransformer.NO_SLOT, HttpTransformer.argSlot("()V", Target.LAST_ARG, false),
+                "no argument to pass");
     }
 
     static void otherLoader() throws Exception {

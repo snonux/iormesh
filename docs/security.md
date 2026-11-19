@@ -53,7 +53,9 @@ truth.
   are recorded — paths, sizes, offsets, endpoints, stacks. The
   one deliberate exception: HTTP(S) request metadata (method,
   URI, headers), captured at the Java API boundary — never
-  sniffed off the wire.
+  sniffed off the wire. Host names a JVM resolved are recorded
+  with their addresses (DNS events, decision #8), from the
+  JDK's own lookup API, not from DNS traffic.
 - **Metadata is not harmless — redaction covers it.** Command
   lines carry passwords and tokens, URIs carry ids and secrets
   in path segments and query strings. One redaction policy

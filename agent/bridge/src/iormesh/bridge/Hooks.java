@@ -560,6 +560,64 @@ public final class Hooks {
     }
 
     /**
+     * The exit of a DNS hook (decision #8, task wd4): the probe of id
+     * returns {host, address...} for a lookup that resolved and is new
+     * to this JVM, or null, and that mapping becomes one DNS record with
+     * the thread's stack. A lookup on a busy thread is the agent's own
+     * (an HTTP probe parsing a literal) and records nothing; unlike an
+     * HTTP record, a lost mapping shifts no count, so nothing stops.
+     * Never throws into the target.
+     */
+    public static void dns(Object ret, Object self, Object arg, int id) {
+        try {
+            Ring r = ring;
+            BiFunction<Object[], long[], String[]>[] p = httpProbes;
+            if (r == null || id <= 0 || id >= p.length || p[id] == null) {
+                return;
+            }
+            Brackets t = STATE.get();
+            if (t.busy) {
+                return;
+            }
+            t.busy = true;
+            try {
+                if (lookup(t, r, p[id], new Object[] {ret, self, arg, null, id})
+                        && id < httpCounts.length()) {
+                    httpCounts.incrementAndGet(id);
+                }
+            } finally {
+                t.busy = false;
+            }
+        } catch (Throwable e) {
+            countSkip(FAILS);
+        }
+    }
+
+    /** dns's record, marked closing from before its stamp (see request). */
+    private static boolean lookup(Brackets t, Ring r, BiFunction<Object[], long[], String[]> probe,
+                                  Object[] args) {
+        t.closing = System.nanoTime();
+        VarHandle.fullFence();   // as in close: the stamp after the mark
+        try {
+            long mono = System.nanoTime();
+            String[] s = probe.apply(args, new long[Ring.META]);
+            if (s == null || s.length < 2) {
+                return false;
+            }
+            if (!t.described && System.nanoTime() >= t.retryAt) {
+                describe(t, r);
+            }
+            long stack = stacks.getAsLong();
+            int ktid = t.virtual ? Brackets.lookupKtid() : t.kernelTid();
+            Otel.read(t);
+            r.dns(mono, stack, t.owner.getId(), ktid, s, t.otelHi, t.otelLo, t.otelSpan);
+            return true;
+        } finally {
+            t.closing = Brackets.IDLE;
+        }
+    }
+
+    /**
      * Counts a request this hook may have failed to record (a skipped or
      * failed call) as a dropped HTTP record: the tracer stops numbering
      * the JVM's requests once any is lost, which a silent failure here

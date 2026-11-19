@@ -298,3 +298,30 @@ func TestConnIndex(t *testing.T) {
 		t.Errorf("still known after Retain: %q", got)
 	}
 }
+
+// TestJavaJoinDNSEvents: a DNS record becomes a dns event after the
+// syscalls that completed before it, with its mapping, the lookup's
+// thread and stack, and no connection.
+func TestJavaJoinDNSEvents(t *testing.T) {
+	jt := newJoinTest(t)
+	at := jt.now + 1000
+	jt.ring(agentspool.DNS{ExitMono: jt.mono(at + 1000), StackID: 10, ThreadID: 1, KTID: mainTID,
+		Host: "localhost", Addrs: []string{"127.0.0.1"}}, jt.watermark(at+20_000_000))
+	jt.event(jvmPID, mainTID, "read", at+500)
+	jt.event(jvmPID, mainTID, "write", at+2000)
+	jt.event(999, 1000, "write", at+10_000_000)
+	jt.close()
+	want := []string{"read", "dns", "write", "write"}
+	if got := kinds(jt.sink.events); !reflect.DeepEqual(got, want) {
+		t.Fatalf("order %v, want %v", got, want)
+	}
+	d := jt.sink.events[1]
+	if d.DNS == nil || d.DNS.Host != "localhost" || !reflect.DeepEqual(d.DNS.Addrs, []string{"127.0.0.1"}) ||
+		d.Attribution != schema.AttributionJava || d.Java.Thread != "main" || d.ConnID != "" ||
+		d.FD != schema.NoFD || d.Validate() != nil {
+		t.Errorf("dns event %+v (%+v)", d, d.DNS)
+	}
+	if s := jt.j.Stats(); s.DNS != 1 || s.HTTP != 0 {
+		t.Errorf("stats %+v", s)
+	}
+}

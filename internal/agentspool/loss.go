@@ -18,6 +18,9 @@ type Losses struct {
 	// but could not deliver. Once any is lost, the joiner stops numbering
 	// that JVM's requests (req_seq), which would shift silently.
 	DroppedHTTP uint64
+	// DroppedDNS are DNS records (task wd4): host-to-address mappings the
+	// agent saw but could not deliver; the agent does not resend them.
+	DroppedDNS uint64
 	// DroppedOther is the per-type counters of types this reader does
 	// not know (a newer agent would bump Version first; kept for honesty).
 	DroppedOther uint64
@@ -35,7 +38,7 @@ type Losses struct {
 // Dropped is every record the agent dropped, all types.
 func (l Losses) Dropped() uint64 {
 	return l.DroppedBrackets + l.DroppedStacks + l.DroppedThreads + l.DroppedWatermarks +
-		l.DroppedHooks + l.DroppedHTTP + l.DroppedOther
+		l.DroppedHooks + l.DroppedHTTP + l.DroppedDNS + l.DroppedOther
 }
 
 // Total is every lost record, agent- and reader-side.

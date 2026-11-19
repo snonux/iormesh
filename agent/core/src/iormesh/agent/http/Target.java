@@ -18,13 +18,18 @@ import java.util.function.BiFunction;
  * know when the request started (the latency). A constructor is never
  * stamped: its exceptional exit, which would pop the stamp, is not hooked.
  *
+ * A DNS target (task wd4, decision #8) is a name lookup, not a request:
+ * its exits call Hooks.dns instead, and its probe returns the host and
+ * the addresses it resolved to. It may be static (no this: null is
+ * passed).
+ *
  * owner is an internal name (sun/net/httpserver/HttpExchangeImpl);
  * descriptors are exact, so a JDK that changes a signature leaves the
  * row unmatched instead of hooking a different method. Several rows may
  * name one method with different descriptors, one per JDK generation.
  */
 public record Target(String owner, String method, String descriptor, int arg,
-                     BiFunction<Object[], long[], String[]> probe, boolean stamp) {
+                     BiFunction<Object[], long[], String[]> probe, boolean stamp, boolean dns) {
     /** No argument is passed (null). */
     public static final int NO_ARG = -1;
     /** The method's last parameter is passed. */
@@ -33,12 +38,17 @@ public record Target(String owner, String method, String descriptor, int arg,
     /** An exit-only target (no entry stamp). */
     public Target(String owner, String method, String descriptor, int arg,
                   BiFunction<Object[], long[], String[]> probe) {
-        this(owner, method, descriptor, arg, probe, false);
+        this(owner, method, descriptor, arg, probe, false, false);
     }
 
     /** This target with its entry stamped (see the class comment). */
     public Target stamped() {
-        return new Target(owner, method, descriptor, arg, probe, true);
+        return new Target(owner, method, descriptor, arg, probe, true, dns);
+    }
+
+    /** This target as a name lookup, recorded by Hooks.dns (see the class comment). */
+    public Target lookup() {
+        return new Target(owner, method, descriptor, arg, probe, stamp, true);
     }
 
     /** owner.method+descriptor, the lookup key. */

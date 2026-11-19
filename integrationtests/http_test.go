@@ -93,7 +93,10 @@ func TestHTTPPlain(t *testing.T) {
 // TestHTTPAsync: http-async's client sends through HttpClient.sendAsync
 // (task wd4): each response completes on the client's executor, yet its
 // http event carries the sending thread and method (HttpFetch#callAsync),
-// the latency from the sendAsync call, and pairs with the server's.
+// the latency from the sendAsync call, and pairs with the server's. The
+// client names its server "localhost": its lookup is one dns event
+// (decision #8) mapping the name to 127.0.0.1, on the thread that then
+// connects.
 func TestHTTPAsync(t *testing.T) {
 	enableParallelIfRequested(t)
 	h := newHarness(t)
@@ -104,10 +107,15 @@ func TestHTTPAsync(t *testing.T) {
 	t.Run("wrong expectations are caught", func(t *testing.T) {
 		assertCaught(t, got, want, map[string]func(*normalize.Expectation){
 			"the synchronous send": func(x *normalize.Expectation) {
-				// Declared event 11 is the client's first http event.
-				j := *x.Events[11].Java
+				// Declared event 12 is the client's first http event.
+				j := *x.Events[12].Java
 				j.Method = "iormesh.workload.scenarios.HttpFetch#call"
-				x.Events[11].Java = &j
+				x.Events[12].Java = &j
+			},
+			// Declared event 10 is the client's lookup of localhost.
+			"another address": func(x *normalize.Expectation) {
+				x.Events[10].DNS = &normalize.ExpectedDNS{Host: "localhost",
+					Addrs: []string{"10.0.0.1"}}
 			},
 		})
 	})

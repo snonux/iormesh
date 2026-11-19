@@ -28,7 +28,8 @@ public final class HttpHooksTest {
                 new AgentTests.Case("http hooks/request written", HttpHooksTest::written),
                 new AgentTests.Case("http hooks/null and throwing probes", HttpHooksTest::quiet),
                 new AgentTests.Case("http hooks/oversized headers dropped", HttpHooksTest::oversized),
-                new AgentTests.Case("http hooks/entry stamps", HttpHooksTest::stamps));
+                new AgentTests.Case("http hooks/entry stamps", HttpHooksTest::stamps),
+                new AgentTests.Case("http hooks/dns record", HttpHooksTest::dns));
     }
 
     private static final String[] REQUEST = {"GET", "http", "h", "/p?q=***", "HTTP/1.1",
@@ -158,6 +159,41 @@ public final class HttpHooksTest {
             Hooks.ring = null;
             Hooks.httpProbe(1, null);
         }
+        delete(dir, r);
+    }
+
+    /**
+     * Hooks.dns: the probe's mapping becomes a DNS record with the
+     * thread's identity; a null mapping and a lookup on a busy thread
+     * (the agent's own) record nothing and count no HTTP loss.
+     */
+    static void dns() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-http-hooks");
+        Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
+        Hooks.httpProbe(3, (a, meta) -> "h".equals(a[2]) ? new String[] {"h", "10.0.0.1"} : null);
+        Hooks.ring = r;
+        try {
+            Hooks.dns(null, null, "h", 3);
+            Hooks.dns(null, null, "other", 3);
+            Hooks.state().busy = true;
+            try {
+                Hooks.dns(null, null, "h", 3);
+            } finally {
+                Hooks.state().busy = false;
+            }
+        } finally {
+            Hooks.ring = null;
+            Hooks.httpProbe(3, null);
+        }
+        ByteBuffer b = map(r.path());
+        List<int[]> recs = records(b);
+        equal(Ring.DNS, recs.get(recs.size() - 1)[0], "DNS last");
+        equal(1L, recs.stream().filter(x -> x[0] == Ring.DNS).count(), "one DNS record");
+        int o = recs.get(recs.size() - 1)[1];
+        equal(Thread.currentThread().getId(), b.getLong(o + 24), "thread id");
+        equal(2, b.getInt(o + 36), "strings");
+        equal(List.of("h", "10.0.0.1"), strings(b, o + Ring.DNS_HEAD, 2), "host and address");
+        equal(0L, b.getLong(Ring.DROPPED + 8 * Ring.HTTP), "no HTTP loss");
         delete(dir, r);
     }
 

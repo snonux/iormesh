@@ -2,8 +2,9 @@ package iormesh.agent;
 
 /**
  * Stand-in for an HTTP library's classes in HttpTransformerTest: a
- * constructor, a method returning its response, one that throws, and
- * methods the transformer must refuse (static, a primitive argument).
+ * constructor, a method returning its response, one that throws, a
+ * static lookup, and a method the transformer must refuse (a primitive
+ * argument).
  */
 public final class HttpFixture {
     private final String name;
@@ -31,8 +32,15 @@ public final class HttpFixture {
         return n;
     }
 
-    /** Listed but static: no this to hand over, refused. */
-    public static String util() {
-        return "util";
+    /**
+     * Static, hooked with argument 0 as a DNS target (task wd4): the
+     * probe gets null as this, the host, and the result or, on the
+     * throw, null.
+     */
+    public static String[] lookup(String host) {
+        if (host.isEmpty()) {
+            throw new IllegalArgumentException("empty");
+        }
+        return new String[] {host};
     }
 }

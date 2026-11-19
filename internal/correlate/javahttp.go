@@ -43,11 +43,14 @@ import (
 // own redirect or authentication retry: the server saw each exchange
 // as a request).
 
-// pendingHTTP is an HTTP record waiting for its turn in the stream.
+// pendingHTTP is an HTTP record — or, with dns set, a DNS record (task
+// wd4), which waits in the same queue by the same rule — waiting for its
+// turn in the stream.
 type pendingHTTP struct {
 	boot uint64 // ExitMono on the boot clock
 	v    *jvm
 	rec  agentspool.HTTP
+	dns  *agentspool.DNS
 }
 
 // connEnd and connPair key the socket index; addresses are unmapped
@@ -222,7 +225,11 @@ func parseEnd(s string) netip.AddrPort {
 // addHTTP queues an HTTP record by its time; records arrive in nearly
 // time order, so the insertion point is searched from the back.
 func (j *JavaJoin) addHTTP(v *jvm, r agentspool.HTTP) {
-	p := pendingHTTP{boot: j.boot(r.ExitMono), v: v, rec: r}
+	j.queue(pendingHTTP{boot: j.boot(r.ExitMono), v: v, rec: r})
+}
+
+// queue inserts a pending agent event by its time.
+func (j *JavaJoin) queue(p pendingHTTP) {
 	i := len(j.https)
 	for i > 0 && j.https[i-1].boot > p.boot {
 		i--
@@ -248,10 +255,17 @@ func (j *JavaJoin) httpReady() bool {
 	return j.maxEnd >= h.boot+j.cfg.Grace || j.scanned >= h.boot+j.cfg.Timeout
 }
 
-// emitHTTP sends the next HTTP record as an http event.
+// emitHTTP sends the next queued record as an http (or dns) event.
 func (j *JavaJoin) emitHTTP() error {
 	h := j.https[0]
 	j.https = slices.Delete(j.https, 0, 1)
+	if h.dns != nil {
+		ev, err := j.dnsEvent(h)
+		if err != nil {
+			return err
+		}
+		return j.emit(ev)
+	}
 	ev, err := j.httpEvent(h)
 	if err != nil {
 		return err

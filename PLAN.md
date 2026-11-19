@@ -652,8 +652,9 @@ Gated by S1 — done; the design below is S1's result
   (declared or counted lengths), absent otherwise — never
   estimated. `sendAsync` is recorded at its future's completion
   under the sending thread's stack and span (scenario
-  `http-async`). Not yet: Servlet, Apache HttpClient, OkHttp and
-  Netty, and the DNS hooks (#8).
+  `http-async`). The DNS hooks (#8) landed with it: a `dns`
+  event per new host-to-addresses mapping of a JVM. Not yet:
+  Servlet, Apache HttpClient, OkHttp and Netty.
 - **Request pairing across the wire**: a request on the client
   and on the server pair up by connection id plus a
   per-connection request ordinal — sound for HTTP/1.1. HTTP/2
@@ -1331,7 +1332,11 @@ answer), and deferred.
   agent hooks (InetAddress) is the clean path; TLS peer
   identity (trust-manager/SSLSocket hooks) is extra value at
   extra surface. Non-Java nodes get no hostnames this way.
-  *Default: DNS hooks in v1, TLS identity later.*
+  *Default: DNS hooks in v1, TLS identity later.* Task wd4
+  implements the DNS half: the agent hooks
+  `InetAddress.getAllByName(String)` (stable 17–27) and records
+  each new host-to-addresses mapping of a JVM as a `dns` event
+  (literals and failed lookups not); TLS identity stays later.
 - **#20 OTEL integration mode** — agent-read span context
   (primary, socket-free) vs ingesting the app's OTLP stream (a
   local receiver the app dual-exports to, or the collector's

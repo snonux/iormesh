@@ -223,7 +223,8 @@ public final class Agent {
 
     /**
      * The HTTP hooks' rows of the debug dump, in the same columns: id
-     * "h<id>", kind "http", and the requests recorded. A row whose method
+     * "h<id>", kind "http" ("dns" for a name lookup, task wd4), and the
+     * requests (mappings) recorded. A row whose method
      * another row of the same name matched in this JDK (another JDK
      * generation's signature) is "alternative", not "missing".
      */
@@ -242,8 +243,8 @@ public final class Agent {
                     : appliedMethods.contains(t.owner() + "." + t.method()) ? "alternative"
                     : seen.contains(t.owner()) ? "missing" : "unloaded";
             long n = h.id() < counts.length ? counts[h.id()] : 0;
-            out.printf("h%d\thttp\t%s\t%s\t%s\t%s\t%d%n", h.id(), t.owner(), t.method(),
-                    t.descriptor(), status, n);
+            out.printf("h%d\t%s\t%s\t%s\t%s\t%s\t%d%n", h.id(), t.dns() ? "dns" : "http",
+                    t.owner(), t.method(), t.descriptor(), status, n);
         }
     }
 

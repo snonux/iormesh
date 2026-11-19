@@ -146,6 +146,8 @@ func (j *JavaJoin) record(v *jvm, rec agentspool.Record) error {
 		}
 	case agentspool.HTTP:
 		j.addHTTP(v, r)
+	case agentspool.DNS:
+		j.addDNS(v, r)
 	}
 	return nil
 }

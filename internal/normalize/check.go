@@ -92,7 +92,7 @@ func stateSuffix(state string) string {
 // the current bindings, binding d's symbols if so (and nothing if not).
 func (b *bindings) matchEvent(d ExpectedEvent, e schema.Event) bool {
 	if !plainFieldsMatch(d, e) || !javaMatch(d.Java, e, b.methods) || !httpMatch(d.HTTP, e.HTTP) ||
-		!otelMatch(d.Otel, e.Otel) {
+		!dnsMatch(d.DNS, e.DNS) || !otelMatch(d.Otel, e.Otel) {
 		return false
 	}
 	m := b.mark()

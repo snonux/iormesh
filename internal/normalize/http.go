@@ -31,6 +31,15 @@ func httpMatch(want *ExpectedHTTP, got *schema.HTTP) bool {
 		containsAll(got.RespHeaders, want.RespHeaders)
 }
 
+// dnsMatch compares a dns declaration (nil: nothing declared) with the
+// event's mapping: the host, and each declared address among the event's.
+func dnsMatch(want *ExpectedDNS, got *schema.DNS) bool {
+	if want == nil {
+		return true
+	}
+	return got != nil && want.Host == got.Host && containsAll(got.Addrs, want.Addrs)
+}
+
 // sizeMatch compares a declared body size (nil: not declared) with the
 // event's (nil: unknown, which no declared size matches).
 func sizeMatch(want, got *uint64) bool {

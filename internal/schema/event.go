@@ -154,6 +154,10 @@ type Event struct {
 	// event outside any span, or of an app without OTEL, has none.
 	// Appended after StackID (task 4b4).
 	Otel *Otel `json:"otel,omitempty" parquet:"otel,optional"`
+	// DNS is set exactly on dns events (KindDNS): a host name the JVM
+	// resolved and its addresses (decision #8). Appended after Otel (task
+	// wd4); provisional until M3 closes.
+	DNS *DNS `json:"dns,omitempty" parquet:"dns,optional"`
 }
 
 // Otel is an OpenTelemetry span context in W3C form, so an event joins
