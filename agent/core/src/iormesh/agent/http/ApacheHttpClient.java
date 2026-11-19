@@ -92,7 +92,7 @@ public final class ApacheHttpClient implements Library {
         public String[] apply(Object[] a, long[] meta) {
             // a[3]: the innermost entry-stamped hook running here — the
             // request's doExecute, unless the exchange is not a client's.
-            Slots.Slot s = slots.exchange(a[3]);
+            Slots.Slot s = slots.exchange(a[3], meta[Request.M_START]);
             if (s == null || a[2] == null) {
                 return null;
             }
@@ -122,7 +122,7 @@ public final class ApacheHttpClient implements Library {
 
         @Override
         public String[] apply(Object[] a, long[] meta) {
-            Slots.Slot s = exchanges.slots.take(a[1]);
+            Slots.Slot s = exchanges.slots.take(a[1], Request.ownStart(a, meta));
             if (a[0] == null || a[0] instanceof Throwable) {
                 Slots.failed(s);
                 return null;
@@ -222,7 +222,13 @@ public final class ApacheHttpClient implements Library {
                 for (Object h : hs) {
                     String n = Handles.string(name, h);
                     if (n != null && out.size() < Request.MAX_HEADERS * 4) {
-                        out.computeIfAbsent(n, k -> new ArrayList<>()).add(nz(Handles.string(value, h)));
+                        // get/put, not computeIfAbsent: no lambda linking in a probe.
+                        List<String> vs = out.get(n);
+                        if (vs == null) {
+                            vs = new ArrayList<>();
+                            out.put(n, vs);
+                        }
+                        vs.add(nz(Handles.string(value, h)));
                     }
                 }
             }

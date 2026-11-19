@@ -3,13 +3,14 @@ package iormesh.agent.http;
 import java.lang.invoke.MethodHandle;
 import java.net.SocketAddress;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.function.BiFunction;
 
 /**
- * Netty 4.1/4.2's HTTP/1.x codec (decision #22's v1 set, task de4): one
+ * Netty 4.2's HTTP/1.x codec (decision #22's v1 set, task de4): one
  * http event per request a Netty server answered or a Netty client sent
  * through netty-codec-http (HttpServerCodec, HttpClientCodec, or their
  * decoder and encoder alone), whatever the app's handlers do between.
@@ -31,20 +32,35 @@ import java.util.function.BiFunction;
  * </ul>
  * The answer's head (status, headers) is kept with its exchange, which
  * is recorded when the answer's last content passes (a full message is
- * both), on the event loop, with the channel's socket ends. An interim
- * 1xx answer (100 Continue) completes nothing. The pending exchanges are
- * kept per channel, weakly, and the map's lock is held only to find a
- * channel's queue — never across the library's code.
+ * both; a close-delimited response ends in decodeLast, hooked too), on
+ * the event loop, with the channel's socket ends. An interim 1xx answer
+ * (100 Continue) completes nothing. The pending exchanges are kept per
+ * channel, weakly, and the locks are held only to touch an entry — never
+ * across the library's code.
+ *
+ * Pairing in order is only sound while no message of the channel went
+ * unseen (review of de4), so a channel is poisoned — nothing more is
+ * recorded on it — when its codec predates the agent (a live attach: the
+ * codec constructors mark the ones made since), when a probe fails, when
+ * a write throws, when an answer finds no request of its own, when 64
+ * requests wait unanswered, or when one call completes two exchanges
+ * (Hooks writes one record per call). Each of those but the first throws:
+ * Hooks counts a lost record, so the tracer numbers no more of the JVM's
+ * requests. A decode that throws still passes its output on, so its
+ * messages count.
  *
  * The event's stack is the event loop's: Netty's codec, and the app's
  * handler only when it wrote from inside its read. HTTP/2 (Netty's
- * Http2 codecs) is not seen. A write that throws is a lost record; the
- * channel's pending exchanges are dropped with it (their order is gone).
- * A decode that throws decoded nothing and changes nothing.
+ * Http2 codecs) is not seen.
  */
 public final class Netty implements Library {
     private static final String P = "io/netty/handler/codec/http/";
     private static final String CTX = "Lio/netty/channel/ChannelHandlerContext;";
+    private static final String BUF = "Lio/netty/buffer/ByteBuf;Ljava/util/List;";
+    /** HttpObjectDecoder's constructors in 4.2 (the delegating ones too: marking twice is harmless). */
+    private static final List<String> DECODER_INITS = List.of("()V", "(IIIZ)V", "(IIIZZ)V",
+            "(IIIZZI)V", "(IIIZZIZ)V", "(IIIZZIZZ)V",
+            "(Lio/netty/handler/codec/http/HttpDecoderConfig;)V");
 
     @Override
     public String name() {
@@ -69,13 +85,21 @@ public final class Netty implements Library {
     @Override
     public List<Target> targets() {
         Channels channels = new Channels();
-        return List.of(
-                new Target(P + "HttpObjectDecoder", "decode",
-                        "(" + CTX + "Lio/netty/buffer/ByteBuf;Ljava/util/List;)V", 0,
-                        new Seen(channels, true)).withSecond(2),
+        List<Target> out = new ArrayList<>(List.of(
+                new Target(P + "HttpObjectDecoder", "decode", "(" + CTX + BUF + ")V", 0,
+                        new Seen(channels, true, false)).withSecond(2),
+                new Target(P + "HttpObjectDecoder", "decodeLast", "(" + CTX + BUF + ")V", 0,
+                        new Seen(channels, true, true)).withSecond(2),
                 new Target(P + "HttpObjectEncoder", "write",
                         "(" + CTX + "Ljava/lang/Object;Lio/netty/channel/ChannelPromise;)V", 0,
-                        new Seen(channels, false)).withSecond(1));
+                        new Seen(channels, false, false)).withSecond(1),
+                new Target(P + "HttpObjectEncoder", "<init>", "()V", Target.NO_ARG,
+                        channels.born)));
+        for (String d : DECODER_INITS) {
+            out.add(new Target(P + "HttpObjectDecoder", "<init>", d, Target.NO_ARG,
+                    channels.born));
+        }
+        return out;
     }
 
     /** One exchange on a channel: its request, then its answer's head. */
@@ -91,40 +115,79 @@ public final class Netty implements Library {
     /** An answer's head: status, headers, declared length. */
     record Answer(int status, Map<String, List<String>> headers, String length) {}
 
+    /** A channel's pending exchanges, oldest first, or poisoned: nothing more recorded. */
+    static final class State {
+        final ArrayDeque<Pending> q = new ArrayDeque<>();
+        boolean poisoned;
+    }
+
     /**
-     * The pending exchanges of every channel, oldest first. Locks are held
-     * only to find or change a queue, never across the library's code.
+     * Every channel's State, and the codecs made since the agent was
+     * installed (born). Weak both; the locks are held only to find or
+     * change an entry, never across the library's code.
      */
     static final class Channels {
-        /** Exchanges kept per channel; more means answers never come — a lost record. */
+        /** Exchanges kept per channel; more means answers never come. */
         static final int MAX_PENDING = 64;
-        private final Map<Object, ArrayDeque<Pending>> byChannel = new WeakHashMap<>();
+        private final Map<Object, State> byChannel = new WeakHashMap<>();
+        private final Map<Object, Boolean> codecs = new WeakHashMap<>();
+        /** A codec constructor's exit: the codec saw its channel from the start. */
+        final BiFunction<Object[], long[], String[]> born = (a, meta) -> {
+            if (a[1] != null) {
+                synchronized (codecs) {
+                    codecs.put(a[1], Boolean.TRUE);
+                }
+            }
+            return null;
+        };
 
-        ArrayDeque<Pending> of(Object channel) {
+        State of(Object channel) {
             synchronized (byChannel) {
-                return byChannel.computeIfAbsent(channel, k -> new ArrayDeque<>());
+                State st = byChannel.get(channel);
+                if (st == null) {
+                    st = new State();
+                    byChannel.put(channel, st);
+                }
+                return st;
             }
         }
 
-        void drop(Object channel) {
-            synchronized (byChannel) {
-                byChannel.remove(channel);
+        boolean born(Object codec) {
+            synchronized (codecs) {
+                return codecs.containsKey(codec);
+            }
+        }
+
+        /** Records nothing more on st's channel: its exchanges' order is gone. */
+        static void poison(State st) {
+            synchronized (st) {
+                st.poisoned = true;
+                st.q.clear();
             }
         }
     }
 
     /**
-     * decode's exit (inbound: a[2] = {ctx, out list}) or write's
-     * (outbound: {ctx, message}); see the class comment.
+     * decode's or decodeLast's exit (inbound: a[2] = {ctx, out list}) or
+     * write's (outbound: {ctx, message}); see the class comment.
      */
     static final class Seen implements BiFunction<Object[], long[], String[]> {
         private final Channels channels;
         private final boolean inbound;
+        /**
+         * decodeLast: its decode (hooked, already seen) ran inside it on
+         * the same output list, and it may add one last content after —
+         * so only the list's last element counts, and only to complete.
+         * A last content seen twice completes nothing the second time: the
+         * oldest exchange then has no answer yet.
+         */
+        private final boolean lastOnly;
         private final ClassValue<Api> apis = Api.perClass();
 
-        Seen(Channels channels, boolean inbound) {
+        Seen(Channels channels, boolean inbound, boolean lastOnly) {
             this.channels = channels;
             this.inbound = inbound;
+            this.lastOnly = lastOnly;
         }
 
         @Override
@@ -132,87 +195,105 @@ public final class Netty implements Library {
             if (!(a[2] instanceof Object[] pair) || pair[0] == null || pair[1] == null) {
                 return null;
             }
+            State st = null;
             try {
                 Api api = apis.get(pair[0].getClass());
                 Object channel = Handles.call(api.channel(), pair[0]);
                 if (channel == null) {
                     return null;
                 }
-                if (a[0] instanceof Throwable) {
-                    return failed(channel);
+                st = channels.of(channel);
+                if (!channels.born(a[1])) {
+                    Channels.poison(st);   // a codec older than the agent: history unknown
                 }
-                String[] out = null;
-                for (Object msg : inbound ? (List<?>) pair[1] : List.of(pair[1])) {
-                    String[] r = msg == null ? null : message(api, channel, msg, meta);
-                    out = r != null ? r : out;
-                }
-                return out;
-            } catch (RuntimeException | Error e) {
-                throw e;
+                return st.poisoned ? null : seen(a, pair[1], api, channel, st, meta);
             } catch (Throwable t) {
-                throw new IllegalStateException(t);   // counted as a lost record by Hooks
+                if (st != null) {
+                    Channels.poison(st);
+                }
+                throw t instanceof RuntimeException e ? e : new IllegalStateException(t);
             }
         }
 
         /**
-         * The hooked call threw. A decode that throws decoded nothing (the
-         * channel's pending exchanges still pair with their answers); a
-         * write that throws may have lost an answer, so the channel's
-         * exchanges are dropped and the loss counted (Hooks counts a
-         * throwing probe as a lost record: numbering stops, never shifts).
+         * The messages of one call. A decode passes its output on even when
+         * it throws (ByteToMessageDecoder fires it in a finally), so they
+         * count either way; a write that throws may have lost an answer.
+         * One call may complete one exchange: Hooks writes one record per
+         * call, so a second completion is a lost record.
          */
-        private String[] failed(Object channel) {
-            if (inbound) {
-                return null;
+        private String[] seen(Object[] a, Object msgs, Api api, Object channel, State st,
+                              long[] meta) throws Throwable {
+            if (!inbound && a[0] instanceof Throwable) {
+                throw new IllegalStateException("an HTTP write failed: exchanges lost");
             }
-            channels.drop(channel);
-            throw new IllegalStateException("an HTTP write failed: exchanges lost");
+            if (lastOnly) {
+                List<?> l = (List<?>) msgs;
+                Object m = l.isEmpty() ? null : l.get(l.size() - 1);
+                return m == null || !api.isLast(m.getClass()) ? null
+                        : complete(api, channel, st, meta);
+            }
+            String[] out = null;
+            for (Object msg : inbound ? (List<?>) msgs : List.of(msgs)) {
+                String[] r = msg == null ? null : message(api, channel, msg, st, meta);
+                if (r != null && out != null) {
+                    throw new IllegalStateException("two HTTP exchanges completed in one call");
+                }
+                out = r != null ? r : out;
+            }
+            return out;
         }
 
         /**
          * One message through its channel's exchanges: a request opens one
          * (inbound: a server's, stamped now), an answer's head goes to the
-         * oldest one it answers, and the answer's last content completes
-         * it — the record returned. An answer travels the other way than
-         * its request.
+         * oldest one, and the answer's last content completes it — the
+         * record returned. An answer travels the other way than its
+         * request; one that finds no request of its own means a request
+         * went unseen, which throws (the channel is then poisoned).
          */
-        private String[] message(Api api, Object channel, Object msg, long[] meta)
+        private String[] message(Api api, Object channel, Object msg, State st, long[] meta)
                 throws Throwable {
             Class<?> c = msg.getClass();
-            ArrayDeque<Pending> q = channels.of(channel);
             if (api.isRequest(c)) {
-                open(api.request(msg, inbound), q, channel);
+                open(api.request(msg, inbound), st);
             } else if (api.isResponse(c)) {
-                Answer ans = api.answer(msg);
-                synchronized (q) {
-                    Pending p = q.peekFirst();
-                    if (ans != null && p != null && p.answer == null && p.r.server != inbound) {
-                        p.answer = ans;
-                    }
-                }
+                answer(api.answer(msg), st);
             }
-            if (!api.isLast(c)) {
-                return null;
-            }
+            return api.isLast(c) ? complete(api, channel, st, meta) : null;
+        }
+
+        /** An answer's last content: the oldest exchange's record, if it was answered. */
+        private String[] complete(Api api, Object channel, State st, long[] meta)
+                throws Throwable {
             Pending done;
-            synchronized (q) {
-                Pending p = q.peekFirst();
-                done = p != null && p.answer != null && p.r.server != inbound ? q.pollFirst() : null;
+            synchronized (st) {
+                Pending p = st.q.peekFirst();
+                done = p != null && p.answer != null && p.r.server != inbound ? st.q.pollFirst()
+                        : null;
             }
             return done == null ? null : api.record(done, channel, meta);
         }
 
-        private void open(Request r, ArrayDeque<Pending> q, Object channel) {
-            boolean full;
-            synchronized (q) {
-                full = q.size() >= Channels.MAX_PENDING;
-                if (!full) {
-                    q.addLast(new Pending(r));
-                }
+        private void answer(Answer ans, State st) {
+            if (ans == null) {
+                return;   // interim 1xx
             }
-            if (full) {
-                channels.drop(channel);
-                throw new IllegalStateException("too many unanswered HTTP requests on a channel");
+            synchronized (st) {
+                Pending p = st.q.peekFirst();
+                if (p == null || p.answer != null || p.r.server == inbound) {
+                    throw new IllegalStateException("an HTTP answer without its request");
+                }
+                p.answer = ans;
+            }
+        }
+
+        private static void open(Request r, State st) {
+            synchronized (st) {
+                if (st.q.size() >= Channels.MAX_PENDING) {
+                    throw new IllegalStateException("too many unanswered HTTP requests");
+                }
+                st.q.addLast(new Pending(r));
             }
         }
     }

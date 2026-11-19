@@ -83,9 +83,11 @@ public final class Hooks {
     private static final ThreadLocal<Brackets> STATE = ThreadLocal.withInitial(Brackets::new);
     /**
      * The HTTP probes by HTTP hook id (iormesh.agent.http): given {return
-     * value, this, argument, open, id} of a hooked method — open is the this
-     * of the innermost entry-stamped HTTP hook running on the thread (the
-     * method's own this at an entry-stamped hook's exit), or null — and a
+     * value, this, argument, open, id, nested} of a hooked method — open is
+     * the this of the innermost entry-stamped HTTP hook running on the
+     * thread (the method's own this at an entry-stamped hook's exit), or
+     * null; nested (a Boolean, task de4) whether a stamp of the same hook is
+     * open below an entry-stamped hook's own — and a
      * long[Ring.META] to fill (Ring.M_*: status, request-header count,
      * flags, exchanges, start, body sizes; it arrives with that open
      * hook's start stamp at M_START and -1 for the sizes), a probe
@@ -506,6 +508,7 @@ public final class Hooks {
             int d = t.httpDepth++;
             if (d < MAX_HTTP_DEPTH) {
                 t.httpSelves[d] = self;
+                t.httpIds[d] = id;
                 t.httpStarts[d] = System.nanoTime();
             }
         } catch (Throwable e) {
@@ -516,11 +519,16 @@ public final class Hooks {
     /**
      * The exit of an entry-stamped HTTP hook: pops the stamp its entry
      * pushed and records like {@link #http}, with the method's own this
-     * and start as the open hook.
+     * and start as the open hook. The probe also learns whether a stamp of
+     * the same hook is still open below (a[5], task de4 review): the call
+     * runs nested in another call of the same method on this thread — a
+     * servlet's service reached from another's (a JSP, a forward) — so
+     * only the outermost records.
      */
     public static void httpExit(Object ret, Object self, Object arg, int id) {
         long start = 0;
         Object open = null;
+        boolean nested = false;
         try {
             Brackets t = STATE.get();
             if (t.httpDepth > 0) {
@@ -529,12 +537,23 @@ public final class Hooks {
                     start = t.httpStarts[d];
                     open = t.httpSelves[d];
                     t.httpSelves[d] = null;
+                    nested = nestedIn(t, d, id);
                 }
             }
         } catch (Throwable e) {
             countSkip(FAILS);
         }
-        record(ret, self, arg, id, open, start);
+        record(ret, self, arg, id, open, start, nested);
+    }
+
+    /** Whether a stamp of hook id is open below depth d on t's thread. */
+    private static boolean nestedIn(Brackets t, int d, int id) {
+        for (int k = 0; k < d; k++) {
+            if (t.httpIds[k] == id) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -560,7 +579,7 @@ public final class Hooks {
         } catch (Throwable e) {
             countSkip(FAILS);
         }
-        record(ret, self, arg, id, open, start);
+        record(ret, self, arg, id, open, start, false);
     }
 
     /**
@@ -570,7 +589,7 @@ public final class Hooks {
      * from inside another one's probe records nothing.
      */
     private static void record(Object ret, Object self, Object arg, int id, Object open,
-                               long start) {
+                               long start, boolean nested) {
         Ring r = ring;
         try {
             BiFunction<Object[], long[], String[]>[] p = httpProbes;
@@ -585,7 +604,7 @@ public final class Hooks {
             }
             t.busy = true;
             try {
-                if (request(t, r, p[id], new Object[] {ret, self, arg, open, id}, start)
+                if (request(t, r, p[id], new Object[] {ret, self, arg, open, id, nested}, start)
                         && id < httpCounts.length()) {
                     httpCounts.incrementAndGet(id);
                 }

@@ -56,6 +56,8 @@ final class Brackets {
      */
     final long[] httpStarts = new long[Hooks.MAX_HTTP_DEPTH];
     final Object[] httpSelves = new Object[Hooks.MAX_HTTP_DEPTH];
+    /** Each open stamp's hook id: an exit can tell it runs nested in its own hook (task de4). */
+    final int[] httpIds = new int[Hooks.MAX_HTTP_DEPTH];
     int httpDepth;
     /** The span Otel.read found last on this thread (all zero: none). */
     long otelHi;

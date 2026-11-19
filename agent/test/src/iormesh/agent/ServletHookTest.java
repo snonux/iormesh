@@ -33,20 +33,21 @@ import java.util.function.BiFunction;
  * a throw before the reply is committed leaves the status unknown.
  */
 final class ServletHookTest {
-    private static final String SERVLET = "jakarta/servlet/http/HttpServlet";
-
     private ServletHookTest() {}
 
     static List<AgentTests.Case> cases() {
         return List.of(new AgentTests.Case("servlet/request recorded", ServletHookTest::recorded),
-                new AgentTests.Case("servlet/forward, async, throw", ServletHookTest::special));
+                new AgentTests.Case("servlet/forward, async, throw", ServletHookTest::special),
+                new AgentTests.Case("servlet/nested service records once",
+                        ServletHookTest::nested),
+                new AgentTests.Case("servlet/javax, Servlet 2.5 shape", ServletHookTest::javax));
     }
 
     /** One probe result: the record's strings and meta (status, flags, start, sizes). */
     record Got(List<String> s, long status, long flags, boolean started, long req, long resp) {}
 
     /** A request the probe sees; headers by name, one value each. */
-    static final class Req implements HttpServletRequest {
+    static final class Req implements HttpServletRequest, javax.servlet.http.HttpServletRequest {
         String method = "GET";
         String uri = "/orders/7";
         String query = "token=s3cret";
@@ -74,7 +75,7 @@ final class ServletHookTest {
     }
 
     /** A response with a status, a Content-Length kept outside its header map, as Tomcat does. */
-    static final class Resp implements HttpServletResponse {
+    static final class Resp implements HttpServletResponse, javax.servlet.http.HttpServletResponse {
         int status = 200;
         boolean committed;
 
@@ -87,6 +88,11 @@ final class ServletHookTest {
 
     /** The rewritten HttpServlet, its probe calls collected into got. */
     private static Class<?> rewritten(List<Got> got) throws Exception {
+        return rewritten(got, HttpServlet.class);
+    }
+
+    /** The stand-in servlet class (jakarta or javax) rewritten by the agent's own targets. */
+    static Class<?> rewritten(List<Got> got, Class<?> servlet) throws Exception {
         List<Target> targets = new ArrayList<>();
         for (int i = 0; i < 200; i++) {
             targets.add(new Target("x/Pad", "m" + i, "()V", Target.NO_ARG, null));
@@ -107,15 +113,16 @@ final class ServletHookTest {
             }
         }
         byte[] bytes;
-        try (InputStream in = HttpServlet.class.getResourceAsStream("HttpServlet.class")) {
+        try (InputStream in = servlet.getResourceAsStream("HttpServlet.class")) {
             bytes = in.readAllBytes();
         }
         HttpTransformer t = new HttpTransformer(hooks, new BridgeSight(Hooks.class, null));
-        byte[] after = t.transform(null, ServletHookTest.class.getClassLoader(), SERVLET, null,
+        byte[] after = t.transform(null, ServletHookTest.class.getClassLoader(),
+                servlet.getName().replace('.', '/'), null,
                 null, bytes);
-        check(after != null && t.applied().size() == 1, "jakarta service rewritten");
-        return new BoundaryTransformerTest.OneClassLoader("jakarta.servlet.http.HttpServlet", after)
-                .loadClass("jakarta.servlet.http.HttpServlet");
+        check(after != null && t.applied().size() == 1, servlet.getName() + " service rewritten");
+        return new BoundaryTransformerTest.OneClassLoader(servlet.getName(), after)
+                .loadClass(servlet.getName());
     }
 
     /** Runs service on a new servlet doing body; true if it threw. */
@@ -180,5 +187,58 @@ final class ServletHookTest {
 
     private static List<Object> fields(Got g) {
         return List.of(g.status(), g.flags(), g.started(), g.resp());
+    }
+
+    /**
+     * A service reached from inside another's on the same request (a JSP
+     * under JspServlet, a wrapped servlet, a Servlet 2.5 forward): only
+     * the outermost records, with its own start (review of de4).
+     */
+    static void nested() throws Exception {
+        List<Got> got = new ArrayList<>();
+        Path dir = Files.createTempDirectory("iormesh-servlet-test");
+        Hooks.openRing(dir.toString(), 1 << 16);
+        try {
+            Class<?> c = rewritten(got);
+            Object inner = c.getConstructor(HttpServlet.Body.class).newInstance(
+                    (HttpServlet.Body) (q, s) -> { });
+            java.lang.reflect.Method service = c.getMethod("service",
+                    jakarta.servlet.ServletRequest.class, jakarta.servlet.ServletResponse.class);
+            check(!serve(c, (q, s) -> service.invoke(inner, q, s), new Req(), new Resp()),
+                    "served");
+            equal(1, got.size(), "one request, not two");
+            check(got.get(0).started(), "the outer's own start");
+        } finally {
+            Hooks.release();
+            Files.deleteIfExists(dir);
+        }
+    }
+
+    /**
+     * The javax target (task de4 review) on a Servlet 2.5-shaped stand-in:
+     * no dispatcher type, so the request counts as the original; a
+     * forward, nested, records nothing more.
+     */
+    static void javax() throws Exception {
+        List<Got> got = new ArrayList<>();
+        Path dir = Files.createTempDirectory("iormesh-servlet-test");
+        Hooks.openRing(dir.toString(), 1 << 16);
+        try {
+            Class<?> c = rewritten(got, javax.servlet.http.HttpServlet.class);
+            Object inner = c.getConstructor(javax.servlet.http.HttpServlet.Body.class)
+                    .newInstance((javax.servlet.http.HttpServlet.Body) (q, s) -> { });
+            java.lang.reflect.Method service = c.getMethod("service",
+                    javax.servlet.ServletRequest.class, javax.servlet.ServletResponse.class);
+            Object outer = c.getConstructor(javax.servlet.http.HttpServlet.Body.class)
+                    .newInstance((javax.servlet.http.HttpServlet.Body)
+                            (q, s) -> service.invoke(inner, q, s));
+            service.invoke(outer, new Req(), new Resp());
+            equal(1, got.size(), "one request");
+            equal("/orders/7?token=***", got.get(0).s().get(3), "redacted path");
+            equal(200L, got.get(0).status(), "status");
+        } finally {
+            Hooks.release();
+            Files.deleteIfExists(dir);
+        }
     }
 }

@@ -76,7 +76,7 @@ public final class OkHttp implements Library {
 
         @Override
         public String[] apply(Object[] a, long[] meta) {
-            Slots.Slot s = slots.exchange(a[3]);
+            Slots.Slot s = slots.exchange(a[3], meta[Request.M_START]);
             if (s == null || a[2] == null) {
                 return null;
             }
@@ -106,7 +106,7 @@ public final class OkHttp implements Library {
 
         @Override
         public String[] apply(Object[] a, long[] meta) {
-            Slots.Slot s = exchanges.slots.take(a[1]);
+            Slots.Slot s = exchanges.slots.take(a[1], Request.ownStart(a, meta));
             if (a[0] == null || a[0] instanceof Throwable) {
                 Slots.failed(s);
                 return null;

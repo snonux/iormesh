@@ -29,7 +29,11 @@ import java.util.function.BiFunction;
  * anything that would change the request: no getParameter (it would read
  * a form body), no getRemoteHost (a reverse lookup). Only the original
  * dispatch records — a forward, include, error page or async dispatch of
- * the same request is not another request. A request still in
+ * the same request is not another request — and of it only the
+ * outermost service on the thread (review of de4): a JSP's service runs
+ * inside Tomcat's JspServlet's, Spring's ServletWrappingController calls
+ * a servlet's from inside DispatcherServlet's, and a Servlet 2.5 forward
+ * has no dispatcher type to tell it by. A request still in
  * asynchronous processing when service returns is recorded then, without
  * a status or reply size (not decided yet) and unordered (the reply
  * comes later, out of order with the connection's next requests). A
@@ -109,8 +113,9 @@ public final class Servlet implements Library {
                 throws Throwable {
             In q = in.get(req.getClass());
             Out s = out.get(resp.getClass());
-            if (q == null || s == null || !q.original(req)) {
-                return null;   // not an HTTP request, or a nested dispatch of one
+            boolean nested = a.length > 5 && Boolean.TRUE.equals(a[5]);
+            if (nested || q == null || s == null || !q.original(req)) {
+                return null;   // inside another service, not HTTP, or a nested dispatch
             }
             Request r = q.describe(req);
             boolean async = q.async(req);
@@ -155,7 +160,12 @@ public final class Servlet implements Library {
             return Handles.virtual(api, name, ret);
         }
 
-        /** The container's own dispatch (REQUEST); a Servlet 2.5 API has only that. */
+        /**
+         * Not a forward, include, error or async dispatch (REQUEST). A
+         * Servlet 2.5 API has no dispatcher type: its forwards and
+         * includes are nested and skipped as such, an error page's
+         * dispatch (after service returned) would record twice.
+         */
         boolean original(Object req) throws Throwable {
             Object t = Handles.call(dispatch, req);
             return t == null || (t instanceof Enum<?> e && e.name().equals("REQUEST"));

@@ -2641,7 +2641,11 @@ internal/correlate/javajoin.go
      and response as the pair. Only the original dispatch
      (`getDispatcherType()` REQUEST; Servlet 2.5 has none)
      records — a forward, include, error page or async dispatch
-     is no new request. Status, headers and the reply's declared
+     is no new request — and of it only the outermost `service` on
+     the thread (review of de4: a JSP under `JspServlet`, Spring's
+     `ServletWrappingController`, a Servlet 2.5 forward, which has
+     no dispatcher type): `Hooks.httpExit` tells a probe (`a[5]`)
+     whether a stamp of the same hook is still open below. Status, headers and the reply's declared
      `Content-Length` (asked for by name: containers keep it
      outside the header map) at service's return; the request's
      `getContentLengthLong`. A request still in async processing
@@ -2678,7 +2682,12 @@ internal/correlate/javajoin.go
      per-thread `Slots.Slot` — exchanges counted (a followed
      redirect, an answered 401/407: the server saw each), the
      connection's socket ends, the version spoken — which the
-     request's exit takes and clears both ways out. A request that
+     request's exit takes and clears both ways out. A request is its
+     client and its start stamp together (review of de4): calls nest
+     on one thread — an interceptor calling the same client, an
+     OkHttp authenticator's own call — and each open one keeps its
+     own slot, found by the stamp Hooks offers with the open hook;
+     an outer exit clears any slot left above it. A request that
      failed records nothing, unless an exchange had happened: then
      the probe throws, a lost record (numbering stops, never
      shifts). The causing method is the library's
@@ -2713,24 +2722,38 @@ internal/correlate/javajoin.go
      and the answer's last content completes it, recorded with
      `Channel.localAddress()/remoteAddress()`. Server: at the
      encoder's write, before the flush; client: at the response's
-     decoding. A write that throws drops the channel's exchanges, a
-     lost record; more than 64 unanswered requests on a channel
-     likewise. A decode that throws decoded nothing and changes
-     nothing: the pending exchanges still pair with their answers.
-     Netty's HTTP/2 codecs are not seen.
+     decoding; a close-delimited response's last content comes from
+     `decodeLast`, hooked too (only its list's last element, and only
+     to complete: its own `decode` ran inside it). Pairing in order
+     holds only while nothing of the channel went unseen (review of
+     de4), so the channel is poisoned — nothing more recorded on it
+     — when its codec predates the agent (a live attach: the codecs'
+     constructors, hooked, mark the ones made since), and, counting
+     a lost record, when a probe fails, a write throws, an answer
+     finds no request of its own, 64 requests wait unanswered, or one
+     call completes two exchanges (one record per call). A decode
+     that throws still passes its output on, which counts. Netty's
+     HTTP/2 codecs are not seen.
 
    Tests (OkHttp, Netty): `TestHTTPOkHttp` (`http-okhttp`: OkHttp 5
    against the JDK's HttpServer) and `TestHTTPNetty` (`http-netty`:
    the JDK HttpClient against a Netty server, one acceptor and one
-   worker event loop); `AgentSmoke` also runs one OkHttp call from
+   worker event loop), `NettyPairingTest` (stand-ins of Netty's types
+   in `agent/test/src/io/netty`: pipelining, 1xx, a throwing decode,
+   decodeLast, and each poisoning case), `SlotsTest` (nested requests
+   on one client and across calls), `ServletHookTest` (a nested
+   service records once; the javax target on a Servlet 2.5-shaped
+   stand-in in `agent/test/src/javax/servlet`); `AgentSmoke` also runs one OkHttp call from
    the vendored jars in a loader of their own, so the Kotlin targets
    are rewritten, verified and recording on every agent-test JDK (17,
    21, 25, 27 checked). The servlet and Netty hooks run only under
    the integration suite's JDK (25).
 
    Not hooked: Apache HttpClient 4 (`org.apache.http`) and its async
-   client, OkHttp 3, Netty 4.1's encoder without its `write`
-   override, Jersey's `ServletContainer` (overrides `service`).
+   client, OkHttp 3, Netty 4.1 (untested: a constructor the list
+   misses leaves its codecs unmarked, so their channels record
+   nothing — never a wrong pair), Jersey's `ServletContainer`
+   (overrides `service`).
 8. OTEL (done, task 4b4): read `Span.current().getSpanContext()`
    reflectively in the app's class loader at `enter` and add the
    ids to the bracket. No OTEL dependency in the agent. The `otel`

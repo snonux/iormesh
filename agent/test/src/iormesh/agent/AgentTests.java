@@ -30,6 +30,7 @@ public final class AgentTests {
         cases.addAll(ServletHookTest.cases());
         cases.addAll(iormesh.agent.http.HttpProbeTest.cases());
         cases.addAll(iormesh.agent.http.SlotsTest.cases());
+        cases.addAll(iormesh.agent.http.NettyPairingTest.cases());
         cases.addAll(StackIdsTest.cases());
         cases.addAll(AgentArgsTest.cases());
         cases.addAll(iormesh.bridge.HooksTest.cases());

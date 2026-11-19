@@ -311,7 +311,11 @@ Scenario notes:
   span-context read (task 4b4) taught the golden format the
   java, http and otel fields, so all five are promoted: one
   `expect.json` each, run under the agent by the integration
-  tests, and no pending file is left.
+  tests, and no pending file is left. A third-party library's
+  http event (task de4) names the library's own entry frame as
+  its causing method (`InternalHttpClient#doExecute`,
+  `HttpServlet#service`, …) — the rule's innermost non-JDK frame;
+  the app's call is below it on the stack.
 - **Microservices end-to-end scenario** (M4): several instances
   of the app playing declared service roles (gateway, orders,
   inventory, billing…), talking to each other over REST — call
@@ -1159,6 +1163,10 @@ answer), and deferred.
   third-party HTTP libraries of decision #22 (task de4) follow
   the same pattern: `workload/libs`, `workload-libs.jar`,
   vendored under `workload/libs/third_party/<library>`.
+  Decided (review of de4): the repo carries these jars — about
+  13 MB, each SHA-256-pinned in the magefiles and documented in a
+  PROVENANCE file — so the workload builds offline and
+  reproducibly; the size is accepted as the price of that.
 - **#25 Tracer overhead and volume budget** — settled by S3
   (2026-11-18; numbers and method in
   [docs/spikes/s3-overhead.md](docs/spikes/s3-overhead.md)). The
