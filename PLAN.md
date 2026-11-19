@@ -524,9 +524,10 @@ criterion here.
   at 1 thread and 1.7 µs at 4 (unfolded, medians of 5), the
   bystander 1.19× and 1.15× at 4 threads (CPU time, two sets of
   10 pairs; wall clock 1.21× and 1.14×) — all four #25 items pass
-  (before 8e4's dispatch; re-run pending, ae4)
-  (docs/spikes/s3-overhead.md, "M2 acceptance measurement" and
-  "Follow-up (md4)"). Schema v1 is frozen outside `http`.
+  (before 8e4's dispatch; ae4 re-ran the bystander after it,
+  1.16× and 1.14×, and found no tracer-CPU regression)
+  (docs/spikes/s3-overhead.md, "M2 acceptance measurement",
+  "Follow-up (md4)" and "Follow-up (ae4)"). Schema v1 is frozen outside `http`.
 
 ### M3 — Java agent: code-flow attribution
 
@@ -1163,7 +1164,11 @@ answer), and deferred.
      on a host with its background load paused (2026-11-19: the
      quiet-host rule replaced, the limits unchanged). Task md4:
      1.19× and 1.15× (CPU time) in two sets of 10 pairs, wall
-     clock 1.21× and 1.14×, so the guard did not trip;
+     clock 1.21× and 1.14×, so the guard did not trip. Task
+     ae4, after 8e4's `raw_syscalls` dispatch: 1.16× and 1.14×
+     (wall clock 1.16× and 1.19×) — passes; a bystander of a
+     kind no family traces (a `getppid` loop) pays ~2.0×,
+     recorded, not gated (s3-overhead.md, "Follow-up (ae4)");
   3. *loss* — M1: 16–42 % of ring records on a sustained burst,
      0 on a short burst and on the M0 scenarios. Budget: zero
      lost records on every M0/M2 scenario, and < 1 % on
@@ -1625,13 +1630,21 @@ can reconstruct behavior and check it against source code:
   instructions per call of a traced kind, which puts the gated
   `syscall-burst` bystander ratio at an estimated ~1.21× (md4:
   1.19×), still under 1.25×; a syscall of a kind no family
-  traces (getppid) 595 → 1142 (untraced 443), ~+0.1 µs CPU —
-  the price of the `raw_syscalls` perf path. The formal #25
-  bystander re-run (≥ 10 pairs at 4 threads) is open as task
-  ae4, which gates M3's acceptance (5b4); it also evaluates the
-  alternative of attaching per syscall again on kernels before
-  7.2 (whose per-syscall programs run with preemption
-  disabled), so that untraced kinds skip the dispatcher there.
+  traces (getppid) 595 → 1142 (untraced 443) — the price of the
+  `raw_syscalls` perf path. Task ae4 measured it by #25's
+  paired method (s3-overhead.md, "Follow-up (ae4)"): the gated
+  `syscall-burst` bystander 1.16× and 1.14× at 4 threads
+  (passes); a pure `getppid` loop ~2.0× (+~0.2 µs per call),
+  recorded, not gated. Of that, the dispatcher programs are
+  ~5 % of the loop's cycles and the kernel's perf-tracepoint
+  path the rest, so no dispatcher fast path is worth adding.
+  Attaching per syscall again on kernels before 7.2 (whose
+  per-syscall programs run with preemption disabled), which
+  would spare untraced kinds there, is not taken: the budget
+  holds without it, a second attach mode would need the
+  integration suite on each kernel line, and no host here runs
+  one. Revisit if a real workload's bystander cost exceeds
+  #25.
 - **Attribution is explicit**: every I/O event says whether a
   Java stack was joined to it (`attribution: java`) or not
   (`none` — non-JVM process, JNI or JVM-internal I/O, agent
