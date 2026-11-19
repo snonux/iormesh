@@ -320,8 +320,8 @@ so it can make a ratio look better as well as worse.
 
 | #25 item | Budget | Measured |
 |----------|--------|----------|
-| tracer CPU | ≤ 2 µs per emitted event | **open** (task md4): the folded burst (83–151 events) shows only the idle-target fixed cost; not re-measured per event here — wc4 gave 1.5–2.0 µs (boundary), and the unfolded run gives a rough (1370 − 1260 ms) / 40 067 events ≈ 2.7 µs, above budget but weak: two separate runs at 10 ms CPU granularity |
-| bystander | ≤ 1.25× at 4 threads, quiet host | **open**: 1.17× (runs 1.20, 1.14, 1.20) on a loaded host; 1 thread noisy (1.26–1.93) |
+| tracer CPU | ≤ 2 µs per emitted event | **passed** by md4 (see "Follow-up (md4)"); at M2: the folded burst (83–151 events) shows only the idle-target fixed cost; not re-measured per event here — wc4 gave 1.5–2.0 µs (boundary), and the unfolded run gives a rough (1370 − 1260 ms) / 40 067 events ≈ 2.7 µs, above budget but weak: two separate runs at 10 ms CPU granularity |
+| bystander | ≤ 1.25× at 4 threads | **passed** by md4 (see "Follow-up (md4)"); at M2: 1.17× (runs 1.20, 1.14, 1.20) on a loaded host; 1 thread noisy (1.26–1.93) |
 | loss | 0 on scenarios, < 1 % on the burst | 0 records lost in every run at 1 and 4 threads (skipped programs counted); 0 in both integration runs |
 | volume | ≤ 30 B/event compressed | 325 B/event NDJSON, zstd -3 15.9 B/event (unfolded volume run, 100 067 events) |
 
@@ -353,7 +353,8 @@ by `IORMESH_WORKLOAD_HOLD_FILE` so its CPU can still be read).
 `spikes/s3/results-md4/`, commit `45d2ac6`.
 
 **Tracer CPU per event** (`S3_MODES=traced
-S3_TRACER_FLAGS=-aggregate=false S3_OPS=500000 S3_RUNS=5`,
+S3_TRACER_FLAGS=-aggregate=false S3_OPS=500000 S3_RUNS=5
+S3_THREADS="1 4"`,
 `results-md4/cpu/`): unfolded, so every call is an event (1 000 067
 events per 1-thread run), and the fixed load-and-attach cost stays
 out of the numerator.
@@ -361,7 +362,7 @@ out of the numerator.
 | Threads | ns/event, median of 5 | Range | Lost records |
 |--:|--:|--:|--:|
 | 1 | **1200** | 940–2660 | 0 |
-| 4 | **1697** | 1490–2460 | 55–60 % (ring full, unfolded) |
+| 4 | **1697** | 1430–2460 | 48–60 % (ring full, unfolded) |
 
 Both medians are inside the ≤ 2 µs budget. The M2 figure of
 ~2.7 µs was an artefact of its method: it subtracted the
@@ -399,7 +400,8 @@ trips (~0.1 µs). They are the first candidates if M3's per-event
 javajoin work (2b4) pushes the 4-thread median over 2 µs; M3's
 acceptance re-runs this measurement.
 
-**Bystander** (`S3_MODES=bystander S3_OPS=1000000 S3_PAIRS=10`,
+**Bystander** (`S3_MODES=bystander S3_OPS=1000000 S3_PAIRS=10
+S3_THREADS="1 4"`,
 `results-md4/bystander/` at 1 and 4 threads, and a second
 4-thread set, `results-md4/bystander-4b/`): each pair is an
 untraced burst followed by one beside a tracer attached to an idle
@@ -408,8 +410,8 @@ untraced burst followed by one beside a tracer attached to an idle
 | Threads | Set | CPU-time ratio, median | Wall-clock ratio, median | Pairs ≤ 1.25× (CPU) | Load average |
 |--:|--|--:|--:|--:|--:|
 | 4 | 1 | **1.19×** | 1.21× | 9 of 10 (outlier 1.84×) | 6.3–8.4 |
-| 4 | 2 | **1.15×** | 1.14× | 10 of 10 | 5.4–7.0 |
-| 1 | 1 | 1.41× | 1.44× | 3 of 10 (0.43–3.66×) | 6.4–8.6 |
+| 4 | 2 | **1.15×** | 1.14× | 9 of 10 (max 1.253×) | 5.4–7.0 |
+| 1 | 1 | 1.41× | 1.44× | 4 of 10 (0.43–3.66×) | 6.4–8.6 |
 
 The gated figure — 4 threads, CPU time — passes in both sets, and
 the wall-clock median passes too, so the guard (wall clock over
@@ -420,7 +422,7 @@ time is *not* load-invariant for a single thread on this host —
 an SMT sibling shared with the indexer or a build, and the clock
 frequency that follows host load, change the CPU time per op
 by 3×. Four threads average over more of both, which is why their
-pairs agree within ±10 % apart from one outlier. A 1-thread figure
+pairs span 1.01–1.25× apart from one outlier. A 1-thread figure
 would need the burst pinned to one core with its sibling kept idle,
 which this host cannot promise.
 
