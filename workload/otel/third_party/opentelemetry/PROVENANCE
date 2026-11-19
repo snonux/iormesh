@@ -1,0 +1,43 @@
+OpenTelemetry Java API 1.67.0 — vendored, unmodified, for the OTEL
+workload flavor (workload/otel, M3, task za4).
+
+What:     io.opentelemetry:opentelemetry-api:1.67.0     (Span, SpanContext,
+                                                        W3CTraceContextPropagator)
+          io.opentelemetry:opentelemetry-context:1.67.0 (Context, Scope; the
+                                                        API's dependency)
+          io.opentelemetry:opentelemetry-common:1.67.0  (the context module's
+                                                        dependency)
+          No SDK, no exporter: the scenario makes declared span contexts
+          current and propagates them; nothing is recorded or sent.
+From:     https://repo1.maven.org/maven2/io/opentelemetry/opentelemetry-<a>/1.67.0/
+Fetched:  2026-11-19
+SHA-1:    api      069f15f38424287af33eda1ed782b440029710a0
+          context  1c669bff2a92842a625ce2e2e200d2f2277cc7e2
+          common   3f6ecafdf85070807d9111b5027557eefdedfebf
+          (each matches Maven Central's .jar.sha1)
+SHA-256:  api      538d1dff2f9a37aecbc0ef98fd17273a3affb058e734e6763a3a07a38a5fdc59
+          context  40fb813fb5e27ec2691daa29c81b572b5b1541ef9b41e62490c3ee3e6407c55e
+          common   da97bdb395418e16ecdcbe7ad3497f45b9e767ceda4ae7e86133e7a757ac377f
+License:  Apache-2.0 (LICENSE.txt, from the v1.67.0 tag of
+          https://github.com/open-telemetry/opentelemetry-java; the
+          project ships no NOTICE file)
+
+Why vendored: the workload build is JDK-only (no Maven or Gradle) and must
+work offline. The core workload stays free of third-party code (PLAN.md
+decision #5); only this separate module's jar, workload-otel.jar, runs
+against these jars, named in its manifest's Class-Path, not copied into it.
+`mage workloadOtelBuild` checks the SHA-256s above before compiling.
+
+Why the API and not the SDK: the Java agent reads the active span through
+the API (Span.current(), docs/implementation.md M3 step 8), and the golden
+needs ids it can declare. Span.wrap(SpanContext.create(...)).makeCurrent()
+gives both with the API alone; an SDK would draw random ids.
+
+Why this version: 1.67.0 is the newest release at least two weeks old on
+the fetch date (1.68.0 was 13 days old); the API is Java 8 bytecode, so it
+runs on the workload's Java 21 floor.
+
+To update: download the three jars of the new version from Maven Central,
+compare each SHA-1 with the published .sha1, replace the jars and
+LICENSE.txt, and update the version, the hashes here and otelLibs in
+magefile_otel.go in the same commit.

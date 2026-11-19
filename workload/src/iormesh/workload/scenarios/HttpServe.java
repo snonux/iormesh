@@ -1,5 +1,6 @@
 package iormesh.workload.scenarios;
 
+import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.HttpsConfigurator;
@@ -23,24 +24,58 @@ import javax.net.ssl.SSLContext;
  * calls, in order, then lets its owner stop it. With no executor set the
  * JDK runs {@link #handle} on its dispatcher thread, so every server-side
  * request — and the http event the agent records for it — has one
- * thread and one causing method: HttpServe#handle.
+ * thread and one causing method: HttpServe#handle. Public for the OTEL
+ * flavor's separate module (workload/otel), which serves its calls
+ * through the same handler inside a {@link PerRequest} region.
  */
-final class HttpServe implements AutoCloseable {
+public final class HttpServe implements AutoCloseable {
+    /**
+     * What one request's handling runs inside: opened from the request
+     * headers before the handler touches the body, closed after the
+     * exchange is. The OTEL flavor makes the request's server span current
+     * here, so the reply's I/O and the exchange's close carry its ids; the
+     * request line and headers were read before (by the dispatcher, ahead
+     * of the handler), so those reads cannot. The plain scenarios open
+     * nothing.
+     */
+    @FunctionalInterface
+    public interface PerRequest {
+        /** Opens the region for request n (0-based); must not throw. */
+        Region enter(int n, Headers request);
+    }
+
+    /** An opened {@link PerRequest} region; closing it cannot fail. */
+    @FunctionalInterface
+    public interface Region extends AutoCloseable {
+        @Override
+        void close();
+    }
+
+    private static final PerRequest NO_REGION = (n, request) -> () -> {};
+
     private final HttpServer server;
     private final List<HttpCall> calls;
+    private final PerRequest perRequest;
     private final AtomicInteger next = new AtomicInteger();
     private final CountDownLatch done;
     private volatile String failure;
 
-    private HttpServe(HttpServer server, List<HttpCall> calls) {
+    private HttpServe(HttpServer server, List<HttpCall> calls, PerRequest perRequest) {
         this.server = server;
         this.calls = calls;
+        this.perRequest = perRequest;
         this.done = new CountDownLatch(calls.size());
     }
 
     /** Binds addr:port (0 = kernel-picked) and starts serving calls. */
     static HttpServe start(InetAddress addr, int port, List<HttpCall> calls, SSLContext tls)
             throws IOException {
+        return start(addr, port, calls, tls, NO_REGION);
+    }
+
+    /** start, with each request handled inside perRequest's region. */
+    public static HttpServe start(InetAddress addr, int port, List<HttpCall> calls,
+            SSLContext tls, PerRequest perRequest) throws IOException {
         // Backlog 1: the client opens exactly one connection.
         InetSocketAddress at = new InetSocketAddress(addr, port);
         HttpServer server;
@@ -51,24 +86,24 @@ final class HttpServe implements AutoCloseable {
             s.setHttpsConfigurator(new HttpsConfigurator(tls));
             server = s;
         }
-        HttpServe serve = new HttpServe(server, calls);
+        HttpServe serve = new HttpServe(server, calls, perRequest);
         server.createContext("/", serve::handle);
         server.start();
         return serve;
     }
 
-    int port() {
+    public int port() {
         return server.getAddress().getPort();
     }
 
     /** Waits, without a bound, until every declared call was answered. */
-    void awaitAll() throws Exception {
+    public void awaitAll() throws Exception {
         done.await();
         check();
     }
 
     /** awaitAll with a bound, for --self-test where both ends share a JVM. */
-    void awaitAll(long seconds) throws Exception {
+    public void awaitAll(long seconds) throws Exception {
         if (!done.await(seconds, TimeUnit.SECONDS)) {
             throw new IOException("server answered " + next.get() + " of " + calls.size()
                     + " requests");
@@ -87,10 +122,12 @@ final class HttpServe implements AutoCloseable {
      * expect gets 500 and fails the run; the latch is then released in
      * full, so a standalone server never waits for requests that will not
      * come. The latch counts down only after the exchange is closed, so an
-     * owner that stops the server next never cuts a reply short.
+     * owner that stops the server next never cuts a reply short. The
+     * region is closed after ex.close(), so the close runs inside it too.
      */
     private void handle(HttpExchange ex) throws IOException {
         int n = next.getAndIncrement();
+        Region region = perRequest.enter(n, ex.getRequestHeaders());
         try {
             String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             HttpCall call = n < calls.size() ? calls.get(n) : null;
@@ -105,6 +142,7 @@ final class HttpServe implements AutoCloseable {
             }
         } finally {
             ex.close();
+            region.close();
             done.countDown();
             while (failure != null && done.getCount() > 0) {
                 done.countDown();

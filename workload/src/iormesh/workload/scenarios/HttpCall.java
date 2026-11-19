@@ -11,7 +11,9 @@ import java.util.Map;
  * event's req_seq, PLAN.md "Request pairing across the wire"). Both ends
  * check the exchange against the declaration: a request that reaches the
  * server without its planted header is a failed run, not a pass that
- * proves nothing about redaction.
+ * proves nothing about redaction. Public, with its factories, for the
+ * OTEL flavor's separate module (workload/otel), which declares its own
+ * calls with the trace headers they must carry.
  *
  * @param method  request method
  * @param target  raw path and query, e.g. "/redact/login?token=…"
@@ -21,18 +23,18 @@ import java.util.Map;
  * @param reply   reply body, "" for none
  * @param replyHeaders reply headers the server sets and the client checks
  */
-record HttpCall(String method, String target, String body, Map<String, String> headers,
+public record HttpCall(String method, String target, String body, Map<String, String> headers,
         int status, String reply, Map<String, String> replyHeaders) {
 
-    static HttpCall get(String target, int status, String reply) {
+    public static HttpCall get(String target, int status, String reply) {
         return new HttpCall("GET", target, "", Map.of(), status, reply, Map.of());
     }
 
-    static HttpCall post(String target, String body, int status, String reply) {
+    public static HttpCall post(String target, String body, int status, String reply) {
         return new HttpCall("POST", target, body, Map.of(), status, reply, Map.of());
     }
 
-    HttpCall withHeader(String name, String value) {
+    public HttpCall withHeader(String name, String value) {
         return new HttpCall(method, target, body, plus(headers, name, value), status, reply,
                 replyHeaders);
     }
@@ -68,7 +70,7 @@ record HttpCall(String method, String target, String body, Map<String, String> h
      * planted secret (http-redaction), and stderr, though not the trace,
      * is still a log.
      */
-    String where() {
+    public String where() {
         return pathOf(target);
     }
 

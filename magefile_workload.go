@@ -47,7 +47,13 @@ func startGated(startup, hold string) (*gatedRun, error) {
 // startRun starts the workload jar with args, adding env to the inherited
 // environment.
 func startRun(env []string, args ...string) (*gatedRun, error) {
-	cmd := workloadCmd(context.Background(), args...)
+	return startJar(workloadJar, env, args...)
+}
+
+// startJar is startRun for any workload jar: the core one, or a separate
+// module's (workload-otel.jar, magefile_otel.go) that runs the core Main.
+func startJar(jar string, env []string, args ...string) (*gatedRun, error) {
+	cmd := jarCmd(context.Background(), jar, args...)
 	cmd.Env = append(os.Environ(), env...)
 	// io.Pipe writers instead of Cmd.StdoutPipe/StderrPipe: Wait then
 	// drains the output itself, so reaping the process can never cut a
@@ -80,14 +86,14 @@ func readLines(in io.Reader, lines chan<- string) {
 	close(lines)
 }
 
-// workloadCmd builds `java -jar workload.jar args...`; ctx bounds runs
-// that are not driven through a gatedRun.
-func workloadCmd(ctx context.Context, args ...string) *exec.Cmd {
-	return exec.CommandContext(ctx, "java", append([]string{"-jar", workloadJar}, args...)...)
+// jarCmd builds `java -jar jar args...`; ctx bounds runs that are not
+// driven through a gatedRun.
+func jarCmd(ctx context.Context, jar string, args ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, "java", append([]string{"-jar", jar}, args...)...)
 }
 
 // name labels a run in error messages by its workload arguments (the
-// ones after "java -jar workload.jar").
+// ones after "java -jar <jar>").
 func (r *gatedRun) name() string {
 	return fmt.Sprintf("workload %q", r.cmd.Args[3:])
 }

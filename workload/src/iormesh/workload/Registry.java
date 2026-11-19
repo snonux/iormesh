@@ -21,6 +21,7 @@ import iormesh.workload.scenarios.UnixSocket;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.ServiceLoader;
 import java.util.TreeMap;
 
 /** Maps scenario names to scenarios; the single place scenarios register. */
@@ -29,7 +30,13 @@ final class Registry {
     // deterministic.
     private final Map<String, Scenario> byName = new TreeMap<>();
 
-    /** The registry with every built-in scenario. */
+    /**
+     * The registry with every built-in scenario, plus any a separate
+     * module on the class path provides (META-INF/services/
+     * iormesh.workload.Scenario). That is how the OTEL flavor
+     * (workload/otel, PLAN.md M0) joins without the core jar depending on
+     * OpenTelemetry (decision #5): workload.jar alone finds no providers.
+     */
     static Registry builtin() {
         Registry r = new Registry();
         r.add(new ArgvSecret());
@@ -53,6 +60,9 @@ final class Registry {
         r.add(new TcpLoopback());
         r.add(new UdpLoopback());
         r.add(new UnixSocket());
+        for (Scenario s : ServiceLoader.load(Scenario.class)) {
+            r.add(s);
+        }
         return r;
     }
 

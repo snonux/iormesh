@@ -17,3 +17,7 @@ internal/c/generated_tracepoints.c.tmp-*
 # Java agent build (mage agentBuild).
 /iormesh-agent.jar
 /agent/build/
+
+# The OTEL workload flavor (mage workloadOtelBuild).
+/workload-otel.jar
+/workload/otel/classes/

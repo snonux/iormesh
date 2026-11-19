@@ -6,7 +6,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -15,7 +17,7 @@ import java.util.Set;
  *
  * <pre>
  *   java -jar workload.jar &lt;scenario&gt; [--role R] [--key value ...]
- *   java -jar workload.jar --self-test
+ *   java -jar workload.jar --self-test [scenario ...]
  *   java -jar workload.jar --expect &lt;scenario&gt;
  *   java -jar workload.jar --list
  * </pre>
@@ -71,8 +73,7 @@ public final class Main {
         }
         switch (args[0]) {
             case "--self-test":
-                requireArgCount(args, 1);
-                return SelfTest.run(registry);
+                return SelfTest.run(selfTestSet(registry, args));
             case "--list":
                 requireArgCount(args, 1);
                 registry.names().forEach(System.out::println);
@@ -82,6 +83,23 @@ public final class Main {
             default:
                 return runScenario(registry, args);
         }
+    }
+
+    /**
+     * The scenarios --self-test runs: all of them, or only those named
+     * after it — a separate module's harness (the OTEL flavor's jar)
+     * self-tests its own scenario without running the core ones again.
+     */
+    private static List<Scenario> selfTestSet(Registry registry, String[] args)
+            throws UsageException {
+        if (args.length == 1) {
+            return registry.all();
+        }
+        List<Scenario> picked = new ArrayList<>();
+        for (int i = 1; i < args.length; i++) {
+            picked.add(lookup(registry, args[i]));
+        }
+        return picked;
     }
 
     private static void requireArgCount(String[] args, int n) throws UsageException {
@@ -198,7 +216,8 @@ public final class Main {
 
     private static void usage(Registry registry) {
         System.err.println("usage: workload.jar <scenario> [--role client|server|solo]"
-                + " [--key value ...] | --self-test | --list | --expect <scenario>");
+                + " [--key value ...] | --self-test [scenario ...] | --list"
+                + " | --expect <scenario>");
         System.err.println("scenarios: " + String.join(", ", registry.names()));
     }
 }

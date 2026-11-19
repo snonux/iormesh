@@ -113,9 +113,10 @@ func javaSources(root string) ([]string, error) {
 // line, the exit codes of bad invocations, that a failed run leaves a
 // directory it did not create alone, the skip exit code, and
 // restart's and non-java-peer's own failure modes (magefile_restartpeer.go)
-// and M3's HTTP pairs and failure modes (magefile_m3workload.go).
+// and M3's HTTP pairs, failure modes and OTEL flavor
+// (magefile_m3workload.go).
 func WorkloadTest() error {
-	mg.Deps(WorkloadBuild)
+	mg.Deps(WorkloadBuild, WorkloadOtelBuild)
 	if err := sh.RunV("java", "-jar", workloadJar, "--self-test"); err != nil {
 		return err
 	}
@@ -220,7 +221,13 @@ func portClient(addr string) []string {
 // expects both to finish their bracket and exit 0. A nil clientOpts
 // result means the server announced a malformed address.
 func checkTwoRoles(scenario string, serverOpts []string, clientOpts func(string) []string) error {
-	server, err := startRun(nil, append([]string{scenario, "--role", "server"}, serverOpts...)...)
+	return checkTwoRolesJar(workloadJar, scenario, serverOpts, clientOpts)
+}
+
+// checkTwoRolesJar is checkTwoRoles with both roles run from jar.
+func checkTwoRolesJar(jar, scenario string, serverOpts []string,
+	clientOpts func(string) []string) error {
+	server, err := startJar(jar, nil, append([]string{scenario, "--role", "server"}, serverOpts...)...)
 	if err != nil {
 		return err
 	}
@@ -237,7 +244,7 @@ func checkTwoRoles(scenario string, serverOpts []string, clientOpts func(string)
 	if opts == nil {
 		return fmt.Errorf("%s: bad listening address %q", server.name(), addr)
 	}
-	client, err := startRun(nil, append([]string{scenario, "--role", "client"}, opts...)...)
+	client, err := startJar(jar, nil, append([]string{scenario, "--role", "client"}, opts...)...)
 	if err != nil {
 		return err
 	}
@@ -501,7 +508,12 @@ func expectExit(code int, args ...string) error {
 
 // expectExitEnv is expectExit with env added to the jar's environment.
 func expectExitEnv(env []string, code int, args ...string) error {
-	_, err := runBounded(env, args...)
+	return expectExitJar(workloadJar, env, code, args...)
+}
+
+// expectExitJar is expectExitEnv for any workload jar.
+func expectExitJar(jar string, env []string, code int, args ...string) error {
+	_, err := runBoundedJar(jar, env, args...)
 	if err == nil && code == 0 {
 		return nil
 	}
@@ -513,9 +525,14 @@ func expectExitEnv(env []string, code int, args ...string) error {
 // blocks (say, a client whose "closed" port got reused by a silent
 // listener) fails the check instead of hanging it.
 func runBounded(env []string, args ...string) ([]byte, error) {
+	return runBoundedJar(workloadJar, env, args...)
+}
+
+// runBoundedJar is runBounded for any workload jar.
+func runBoundedJar(jar string, env []string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gateWait)
 	defer cancel()
-	cmd := workloadCmd(ctx, args...)
+	cmd := jarCmd(ctx, jar, args...)
 	if env != nil {
 		cmd.Env = append(os.Environ(), env...)
 	}
