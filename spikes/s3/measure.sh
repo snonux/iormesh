@@ -4,7 +4,9 @@
 # the M1 tracer on the syscall-burst load scenario.
 #
 # Usage: spikes/s3/measure.sh OUTDIR   (needs sudo -n; run on a quiet host)
-# Env:   S3_OPS (default 200000), S3_THREADS ("1 4 16"), S3_RUNS (3)
+# Env:   S3_OPS (default 200000), S3_THREADS ("1 4 16"), S3_RUNS (3),
+#        S3_TRACER_FLAGS (extra `iormesh run` flags, word-split, e.g.
+#        "-native-stacks -aggregate=false"; task ua4)
 #
 # Every sample prints one line to OUTDIR/samples.txt:
 #   mode=<untraced|traced|bystander> threads=T ops=N elapsed_ns=E
@@ -17,6 +19,8 @@ out=${1:?usage: measure.sh OUTDIR}
 ops=${S3_OPS:-200000}
 threads=${S3_THREADS:-1 4 16}
 runs=${S3_RUNS:-3}
+# shellcheck disable=SC2206 # word splitting is the point: one flag per word
+tracer_flags=(${S3_TRACER_FLAGS:-})
 jar=$repo/workload.jar
 tracer=$repo/iormesh
 mkdir -p "$out"
@@ -122,7 +126,7 @@ traced() {
     pids+=("$jpid")
     pid=$(wait_pid_line "$work/out")
     sudo -n /usr/bin/time -f '%U %S' -o "$work/time" "$tracer" run -pid "$pid" -project s3 \
-        -out "$work/trace" -duration 10m -ready "$work/ready" 2>"$work/tracer.err" &
+        -out "$work/trace" -duration 10m -ready "$work/ready" "${tracer_flags[@]}" 2>"$work/tracer.err" &
     tpid=$!
     pids+=("$tpid")
     wait_file "$work/ready" "$tpid" "$work/tracer.err"
@@ -161,7 +165,7 @@ volume() {
     pids+=("$jpid")
     pid=$(wait_pid_line "$work/out")
     sudo -n "$tracer" run -pid "$pid" -project s3 -out "$work/trace" -duration 10m \
-        -ready "$work/ready" 2>"$work/tracer.err" &
+        -ready "$work/ready" "${tracer_flags[@]}" 2>"$work/tracer.err" &
     tpid=$!
     pids+=("$tpid")
     wait_file "$work/ready" "$tpid" "$work/tracer.err"
@@ -190,7 +194,7 @@ bystander() {
     # The idle-target tracer's CPU is the fixed cost (object load, attach,
     # liveness polls) that traced runs subtract to get per-event cost.
     sudo -n /usr/bin/time -f '%U %S' -o "$work/time" "$tracer" run -pid "$idle" -project s3 \
-        -out "$work/trace" -duration 10m -ready "$work/ready" 2>"$work/tracer.err" &
+        -out "$work/trace" -duration 10m -ready "$work/ready" "${tracer_flags[@]}" 2>"$work/tracer.err" &
     tpid=$!
     pids+=("$tpid")
     wait_file "$work/ready" "$tpid" "$work/tracer.err"
@@ -214,7 +218,7 @@ header() {
         echo "# S3 samples $(date -u +%Y-%m-%dT%H:%M:%SZ) commit $(git -C "$repo" rev-parse --short HEAD)"
         echo "# kernel $(uname -r); cpu $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | xargs) x$(nproc)"
         echo "# java $(java -version 2>&1 | head -1); workdir fs $(df -T "${TMPDIR:-/tmp}" | awk 'NR==2{print $2}')"
-        echo "# ops=$ops threads=$threads runs=$runs"
+        echo "# ops=$ops threads=$threads runs=$runs tracer_flags=${tracer_flags[*]}"
     } >>"$samples"
 }
 

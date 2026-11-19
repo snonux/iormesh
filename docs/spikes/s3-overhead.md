@@ -252,3 +252,54 @@ the volume run lost nothing either. Skips are load-dependent: the
 same build reported 8 275–23 929 lost records (as `drop` events) on
 a 12-thread burst, and none of 10 runs of the integration pair
 (`TestSyscallBurstFoldsEveryCall` beside `TestUnixSocket`) did.
+
+## Follow-up (ua4): the cost of native stacks
+
+Task ua4 added opt-in native stacks (`iormesh run
+-native-stacks`, docs/implementation.md M2 step 9, docs/schema.md
+"Native stacks"). `measure.sh` gained `S3_TRACER_FLAGS`, and four
+runs on 2026-11-19 (`S3_OPS=200000 S3_THREADS="1 4" S3_RUNS=3`,
+on top of commit `8eb697f`; samples in
+`spikes/s3/results-ua4/{base,stacks,noagg,noagg-stacks}/`)
+compare the default with `-native-stacks`, and — to see the
+per-call price, which the fold otherwise hides —
+`-aggregate=false` with and without it. Load average 2.8–9.9, so
+not a quiet host: the figures are rough, medians of 3.
+
+| Flags | Threads | Traced elapsed (ms) | Tracer CPU (s) | Events | Lost |
+|---|--:|--:|--:|--:|--:|
+| default | 1 | 400 | 1.46 | 83–87 | 0 |
+| `-native-stacks` | 1 | 461 | 1.74 | 83–89 | 0 |
+| default | 4 | 220 | 1.77 | 143–153 | 0 |
+| `-native-stacks` | 4 | 343 | 1.97 | 151–205 | 0, 0, 21 |
+| `-aggregate=false` | 1 | 487 | 1.86 | 400 067 | 0 |
+| `-aggregate=false -native-stacks` | 1 | 939 | 2.26 | 400 067 | 0 |
+| `-aggregate=false` | 4 | 368 | 2.89 | 329–399 k | 3–143 k |
+| `-aggregate=false -native-stacks` | 4 | 443 | 2.88 | 313–354 k | 138–259 k |
+
+- **Per traced call, in the kernel**: ~1.1 µs (1 thread, no
+  fold: +450 ms over 400 000 calls) — the frame-pointer walk of
+  `bpf_get_stackid` plus a second, 32-byte ring record. Paid by
+  the traced process only, and only for enters that are sent:
+  with the default fold the burst sends ~85 events, so the walk
+  barely runs and the difference to the default is noise.
+- **Per event, in the tracer**: ~1 µs (+0.4 s over 400 000
+  events): decoding the side record (reflective
+  `binary.Read`), the pairing, and one map read per *distinct*
+  stack; symbolization runs once per stack on a worker. That
+  doubles decision #25's ≤ 2 µs per event while it is on — the
+  reason it is opt-in.
+- **Bystanders pay nothing**: the walk runs after `filter()`,
+  and with the flag off the verifier prunes it from every
+  handler (`IORMESH_NATIVE_STACKS` is a load-time constant) and
+  the stack map shrinks to one entry.
+- **Loss** grows with the extra ring traffic where the ring is
+  already the bottleneck: without the fold at 4 threads (a
+  debugging mode that misses the budget anyway). With the fold,
+  one of three 4-thread runs lost 21 records (< 0.01 % of the
+  calls, inside the < 1 % budget); the scenarios lose none
+  (`TestNativeStacks`).
+- **Volume**: `stack_id` adds ~15 B per NDJSON event (+4.5 %),
+  +2 % after zstd -3; the table holds one line per distinct
+  stack (~200 for the non-java-peer run: a JVM start-up plus the
+  Go peer).

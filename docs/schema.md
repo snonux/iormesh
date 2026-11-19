@@ -19,6 +19,7 @@ optional, so an older reader never sees a changed meaning.
 |------|--------|--------|
 | `events.ndjson` | one event per line (NDJSON) | `schema.NDJSONSink`, as events complete |
 | `graph.json` | one graph object, indented JSON | `schema.WriteGraphFile`, at exit |
+| `stacks.ndjson` | the native stack table, one stack per line; only with `-native-stacks` | `schema.StackWriter`, one line per new stack |
 | `*.parquet` | the same events, columnar | M4 segment writer (to come) |
 
 `iormesh normalize -out DIR` writes the same two files for the
@@ -72,6 +73,7 @@ Required fields are always present; a zero is a real zero.
 | `java` | object, optional | `{thread, stack}`, set exactly when attribution is `java`; `thread` is the Java thread name, `stack` method-table ids, innermost first (settled by S1) |
 | `http` | object, optional | request fields on http events (*provisional until M3*) |
 | `session` | object, optional | the host description, set exactly on `session` events (below) |
+| `stack_id` | int, optional | the native user stack the thread entered the syscall with: an id of `stacks.ndjson` (≥ 1); only with `-native-stacks` (below) |
 
 `(pid, pid_incarnation, fd, fd_gen)` names one fd instance, even
 when a library's open and a later socket land on the same number.
@@ -365,6 +367,76 @@ stays gap-free.
 
   A trace **without** an `end` event was cut short: the tracer
   crashed, or a write error also lost the end record.
+
+## Native stacks (M2 step 9)
+
+`iormesh run -native-stacks` records the user stack each traced
+thread had when it entered a syscall; without the flag nothing
+below exists and no event has `stack_id` (decision #25: it is
+not free). An event's `stack_id` names one line of
+`stacks.ndjson` in the same trace directory. A worker writes
+each stack as it first appears and the tracer waits for it
+before it exits, so a trace that ended normally has every
+stack its events name; a crash can lose the stacks still
+queued:
+
+```json
+{"schema_version":1,"stack_id":3,"pid":4711,"pid_incarnation":893115330000000,
+ "frames":[{"addr":"0x408a8e","module":"/usr/bin/echopeer","offset":35470,
+            "build_id":"f77d64fd…","symbol":"internal/runtime/syscall/linux.Syscall6+0xe"},
+           {"addr":"0x4968e6","module":"/usr/bin/echopeer","offset":616678,
+            "build_id":"f77d64fd…","symbol":"syscall.Syscall+0x45"},
+           {"addr":"0x7f3c2d41b2a0"}]}
+```
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `schema_version` | int | always `1` |
+| `stack_id` | int | the id events use, from 1, unique in the trace |
+| `pid`, `pid_incarnation` | int | whose address space the addresses are in |
+| `frames` | array | innermost first: the frame that made the syscall, then its callers (at most 64) |
+| `frames[].addr` | string | the instruction address, hex (`0x…`): JSON numbers cannot hold 64 bits |
+| `frames[].module` | string, optional | the mapping's path as `/proc/<pid>/maps` names it, or a pseudo mapping (`[vdso]`); absent for anonymous memory — JIT code |
+| `frames[].offset` | int, optional | the address's offset in `module`'s file; set exactly for file mappings |
+| `frames[].build_id` | string, optional | the module's GNU build id, hex |
+| `frames[].symbol` | string, optional | the enclosing function from the module's ELF symbol tables, `name+0xN` (raw, not demangled) |
+
+How it is captured and what it can and cannot say:
+
+- **Kernel**: every emitted syscall enter first sends a small
+  record with `bpf_get_stackid(BPF_F_USER_STACK)`'s id into a
+  stack map of 8192 buckets (`internal/c/stack.c`). User stacks
+  only: at a `sys_enter` tracepoint the kernel stack is the
+  syscall entry path. The map deduplicates, so each distinct
+  stack is read back once. It never overwrites a bucket, so an
+  id stays valid for the session; a colliding stack, a full map
+  or a walk that unwinds nothing leaves the event without
+  `stack_id` and is counted in the run's summary line
+  (`native stacks N (uncaptured M)`).
+- **Not every event has one**: calls folded into a `read`/`write`
+  with `args.count` (M2 step 11) and a held-back call's enter the
+  fold sends later carry none, nor do synthetic events (`drop`,
+  `tcp_state`, `signal`, `exec`).
+- **Ids are per process image**: the same kernel stack in two
+  processes, or before and after an exec, gets two ids, since
+  the addresses mean different code.
+- **Symbolization** happens in the tracer, from
+  `/proc/<pid>/maps` read at the image's first stack (re-read
+  when a later address lies outside every mapping, e.g. after a
+  `dlopen`) and the mapped files, opened through
+  `/proc/<pid>/root` right then and parsed on a worker
+  goroutine (`.symtab` and `.dynsym`). A process that exited
+  before its first stack was handled keeps raw addresses only;
+  a stripped binary keeps module, offset and build id, which is
+  what an offline symbolizer needs (`addr2line -e FILE OFFSET`
+  after mapping the offset through the file's segments).
+- **Walks follow frame pointers**. Go binaries and C built with
+  frame pointers (Fedora's default) unwind to `main`; the JVM's
+  own C++ frames (libjvm) do too, but interpreted and
+  JIT-compiled Java frames lie in anonymous memory, stay raw
+  addresses, and the walk through them is unreliable. Java
+  attribution comes from the agent (M3, `java.stack`), never
+  from here.
 
 ## Graph
 

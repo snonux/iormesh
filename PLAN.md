@@ -429,6 +429,20 @@ criterion here.
 - **Native stacks are opt-in** (`stack_id`): BPF stack walks do
   not unwind JIT-compiled Java frames reliably, so they serve
   non-JVM targets; Java attribution comes from the agent (M3).
+  Settled (task ua4): `iormesh run -native-stacks` takes the
+  user stack of every emitted syscall enter
+  (`bpf_get_stackid`, frame pointers, 64 frames); events carry
+  a per-trace `stack_id` and the stacks go once each into their
+  own table, `stacks.ndjson`. Symbolization happens in the
+  tracer, from `/proc/<pid>/maps` read at a process image's
+  first stack and the ELF symbol tables of the mapped files:
+  every frame keeps its raw address, plus module, file offset
+  and GNU build id where the address lies in a file, so an
+  offline symbolizer can redo what the tracer could not.
+  Off, it costs nothing per call (the verifier prunes the
+  walk; decision #25); on, its cost is measured in
+  [s3-overhead.md](docs/spikes/s3-overhead.md) ("Follow-up
+  (ua4)").
 - Argv is recorded redacted (decision #9), on `exec` events.
 - Output: trace schema v1 — NDJSON event stream + graph export.
 - Acceptance: M2's scenarios pass the golden check, including
@@ -1512,8 +1526,8 @@ are sized accordingly:
   fork/exec following, exec-time pattern matching and restart
   re-attach (M2).
 - **Stack capture**: ior's BPF code captures no stacks. Native
-  stacks are an opt-in addition (M2); Java stacks come from the
-  agent (M3).
+  stacks are an opt-in addition (M2, done: `-native-stacks`);
+  Java stacks come from the agent (M3).
 - **Per-syscall cost**: ior documents what classic syscall
   tracepoints cost every task on the host, and prototypes
   cheaper dispatch (`docs/raw-tracepoint-design.md`). iormesh

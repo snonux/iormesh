@@ -1,0 +1,29 @@
+# S3 samples 2026-11-19T01:45:04Z commit 8eb697f
+# kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
+# java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
+# ops=200000 threads=1 4 runs=3 tracer_flags=
+# run 1 threads 1 loadavg 2.77 3.01 3.30
+mode=untraced threads=1 ops=200000 elapsed_ns=308151092
+mode=traced threads=1 ops=200000 elapsed_ns=371669399 tracer_cpu_ms=1460 lost=0 kernel_lost=0 events=83 ndjson_bytes=28276
+mode=bystander threads=1 ops=200000 elapsed_ns=341492132 tracer_cpu_ms=1410 events=2
+# run 1 threads 4 loadavg 3.39 3.12 3.33
+mode=untraced threads=4 ops=200000 elapsed_ns=199426718
+mode=traced threads=4 ops=200000 elapsed_ns=215375192 tracer_cpu_ms=1770 lost=0 kernel_lost=0 events=143 ndjson_bytes=48919
+mode=bystander threads=4 ops=200000 elapsed_ns=194099773 tracer_cpu_ms=1450 events=2
+# run 2 threads 1 loadavg 3.17 3.09 3.32
+mode=untraced threads=1 ops=200000 elapsed_ns=279871720
+mode=traced threads=1 ops=200000 elapsed_ns=399864993 tracer_cpu_ms=1450 lost=0 kernel_lost=0 events=83 ndjson_bytes=28268
+mode=bystander threads=1 ops=200000 elapsed_ns=521318502 tracer_cpu_ms=2040 events=2
+# run 2 threads 4 loadavg 3.13 3.08 3.31
+mode=untraced threads=4 ops=200000 elapsed_ns=251619009
+mode=traced threads=4 ops=200000 elapsed_ns=350345000 tracer_cpu_ms=2160 lost=0 kernel_lost=0 events=151 ndjson_bytes=51712
+mode=bystander threads=4 ops=200000 elapsed_ns=311823761 tracer_cpu_ms=2090 events=2
+# run 3 threads 1 loadavg 2.94 3.04 3.30
+mode=untraced threads=1 ops=200000 elapsed_ns=373662978
+mode=traced threads=1 ops=200000 elapsed_ns=562223333 tracer_cpu_ms=2060 lost=0 kernel_lost=0 events=87 ndjson_bytes=29670
+mode=bystander threads=1 ops=200000 elapsed_ns=342563576 tracer_cpu_ms=1460 events=2
+# run 3 threads 4 loadavg 2.80 3.01 3.28
+mode=untraced threads=4 ops=200000 elapsed_ns=166032330
+mode=traced threads=4 ops=200000 elapsed_ns=220206682 tracer_cpu_ms=1450 lost=0 kernel_lost=0 events=153 ndjson_bytes=52198
+mode=bystander threads=4 ops=200000 elapsed_ns=201687385 tracer_cpu_ms=1440 events=2
+mode=volume threads=1 ops=50000 lost=0 events=79 ndjson_bytes=26892 zstd3_bytes=2623 zstd19_bytes=2233

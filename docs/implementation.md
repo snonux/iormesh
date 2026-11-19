@@ -1489,24 +1489,91 @@ scenarios landing first (principle #1).
    `TestCutArgvCompletion` (/proc agrees, unreadable, exec'd
    again).
 
-9. **Native stacks** (opt-in, `-native-stacks`):
-   `bpf_get_stackid` into a `BPF_MAP_TYPE_STACK_TRACE`,
-   symbolized in userspace from `/proc/<pid>/maps`. Off by
-   default; documented as not useful for JIT frames.
+9. **Native stacks** (opt-in, `-native-stacks`; done, task
+   ua4): `bpf_get_stackid(ctx, &stack_map, BPF_F_USER_STACK)`
+   into a `BPF_MAP_TYPE_STACK_TRACE` (8192 buckets of 64
+   frames, no `BPF_F_REUSE_STACKID`, so an id never changes
+   meaning during a session), symbolized in userspace from
+   `/proc/<pid>/maps`. Off by default; documented as not useful
+   for JIT frames.
+   - **Kernel** (`internal/c/stack.c`): every generated enter
+     handler calls `iormesh_stack_on_enter(ctx, pid, tid, now)`
+     after the hooks that may drop the enter (sampling, the
+     read/write fold) and before its record
+     (`renderStackHook`; `TestStackHookOnEveryEmittedEnter`
+     pins the placement, `TestCommittedHandlersCallTheStackHook`
+     the committed file). It sends a 32-byte `stack_event` (tid,
+     the enter's own `now`, the id or the walk's negative errno)
+     ahead of the enter record. `IORMESH_NATIVE_STACKS` is a
+     load-time constant, so with the flag off the verifier prunes
+     the call and userspace shrinks `stack_map` to one entry
+     (it is preallocated, ~4.3 MB). User stacks only: at
+     `sys_enter` the kernel stack is the entry path.
+   - **Correlator** (`internal/correlate/stacks.go`): a stack
+     record is turned into a trace id by `Config.Stacks` and
+     parked per tid; `base` hands it to the event whose enter has
+     the same time, so a stack whose enter was lost pairs with
+     nothing. Without the flag the map stays empty and `base`
+     pays a length check. An exec tells the table a new image
+     begins.
+   - **Table** (`internal/stacks`, cgo-free): ids are per process
+     image (pid, incarnation, execs seen) and kernel id — the
+     same addresses in two images are two call sites — numbered
+     from 1. A new stack is read from the map
+     (`bpf.Tracer.StackTrace`), its image's maps are snapshotted
+     and the files they map opened right away (through
+     `/proc/<pid>/root`, inode-checked: on btrfs the maps line's
+     device is not the file's `st_dev`), because a short-lived
+     process takes both with it when it exits; the slow part —
+     parsing ELF symbol tables, a 20 MB libjvm once — runs on a
+     worker goroutine that writes `stacks.ndjson`. The first
+     version symbolized inline and resolved nothing for the
+     non-java-peer's Go peer: the correlator was still parsing
+     the JVM's libraries when the peer exited. Frames keep the
+     raw address and add module, file offset, GNU build id and
+     `.symtab`/`.dynsym` symbol where known; the run's summary
+     line adds `native stacks N (uncaptured M)`.
+   - **Schema**: `Event.StackID` (`stack_id`, appended, optional)
+     and `schema.Stack`/`StackFrame` with a strict reader
+     (`ReadStacks`); docs/schema.md "Native stacks".
+   Tests: `internal/stacks` (maps lines, build-id notes, symbol
+   lookup, this test binary's own mapping, a dead process's raw
+   addresses, id rules, a write error ending the trace), the
+   correlator's pairing (`stacks_test.go`), schema round trip
+   and strictness, `TestOpenStacks*` (a stale table removed when
+   off); integration `TestNativeStacks` (non-java-peer with
+   `-native-stacks`: the golden still passes, every `stack_id`
+   resolves to a stack of its own process, and the Go peer's
+   `accept4` and log `openat` stacks reach `main.*` in the
+   echopeer binary). Cost: [s3-overhead.md](spikes/s3-overhead.md),
+   "Follow-up (ua4)".
 
-10. **Non-Java peer**: scenario `non-java-peer` (landed ahead,
-    task oa4). Its peer is `workload/echopeer`, a cgo-free Go
-    echo server that `mage workloadBuild` builds next to the
-    jar — ior's `ioworkload` has no scenario that serves a TCP
-    client. It uses raw `syscall` calls on a locked main thread
-    (socket, bind, listen, `accept4`, read, write, close, then
-    an `openat`/write/close of `$tmp/non-java-peer.log`), so its
+10. **Non-Java peer** (done, task ua4): scenario
+    `non-java-peer` (landed ahead, task oa4). Its peer is
+    `workload/echopeer`, a cgo-free Go echo server that `mage
+    workloadBuild` builds next to the jar — ior's `ioworkload`
+    has no scenario that serves a TCP client. It uses raw
+    `syscall` calls on a locked main thread (socket, bind,
+    listen, `accept4`, read, write, close, then an
+    `openat`/write/close of `$tmp/non-java-peer.log`), so its
     declared syscalls are exact and carry TID == PID; it
     brackets itself with the scenario's markers. The JVM spawns
     it, connects over AF_INET, then reads the log back. The
     golden declares `attribution: none` on every peer event;
     the tracer must never attribute a non-JVM process (no
-    agent, no Java fields).
+    agent, no Java fields). `TestNonJavaPeer` passes it under
+    the real tracer (the peer is followed as the JVM's forked
+    child, found by its `exec` of `echopeer`), checks the
+    degraded shape on the raw trace — every event `attribution:
+    none`, no `java` or `http` payload — and that a default run
+    has no `stack_id` and no `stacks.ndjson`; mutations (the
+    peer attributed to Java, its connection unresolved) fail.
+    In M2 no agent exists, so every process has this shape; M3
+    must keep it for the peer once JVM events gain `java`.
+    Seen while writing the test: a process's `comm` is what the
+    correlator first read for its pid, so a child the JVM forked
+    may keep the JVM's comm after its exec — the test keys on the
+    exec event, not on comm.
 11. **Budget (decision #25, from S3)**: in-kernel aggregation of
     hot read/write loops (done, task vc4), after ior's
     `syscall_aggregate_map` — repeated read/write on one fd
