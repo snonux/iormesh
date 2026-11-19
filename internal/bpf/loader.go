@@ -67,6 +67,10 @@ const (
 type Tracer struct {
 	module *bpf.Module
 	links  []*bpf.BPFLink
+	// javaLinks are the Java mark's uprobe links per JVM pid
+	// (AttachJavaMarks), guarded by javaMu.
+	javaLinks map[uint32][]*bpf.BPFLink
+	javaMu    sync.Mutex
 	// progFDs are the attached programs, whose recursion misses Losses
 	// counts (progmiss.go). Written while attaching, before any reader.
 	progFDs []int

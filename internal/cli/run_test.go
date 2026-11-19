@@ -104,6 +104,9 @@ func (f *fakeTracer) AttachJavaMarks(uint32, []bpf.JavaNative) ([]string, error)
 	return nil, nil
 }
 
+// DetachJavaMarks has nothing to detach.
+func (f *fakeTracer) DetachJavaMarks(uint32) error { return nil }
+
 func (f *fakeTracer) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

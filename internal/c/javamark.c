@@ -14,18 +14,21 @@
 // itself issued has the native on its thread's mark, JVM work of an allowed
 // kind inside the same bracket does not.
 //
-// How: userspace attaches iormesh_java_native_enter and _exit as uprobe_multi
-// links to the hooked natives of one JVM (scoped to its pid, so other JVMs of
-// the same JDK install never trap), each native's BPF cookie its id. Entry
-// pushes {cookie, entry time, stack pointer} on the thread's mark; return
-// pops it. A syscall enter of a marked thread sends the innermost frame
-// ahead of its enter record (struct java_mark_event).
+// How: userspace attaches iormesh_java_native_exit and then _enter as
+// uprobe_multi links to the hooked natives of one JVM (scoped to its pid, so
+// other JVMs of the same JDK install never trap), each native's BPF cookie
+// its id. Entry pushes {cookie, entry time, stack pointer} on the thread's
+// mark; return pops it. A syscall enter of a marked thread sends the
+// innermost frame ahead of its enter record (struct java_mark_event).
 //
-// Why the stack pointer: a push whose return probe never runs (attached
-// between a native's entry and its return, say) must not stay on the mark
-// for good. The return probe pops every frame entered at or below its own
-// stack pointer - the returning native's and any left behind deeper - and
-// never an outer native's, whose frame sits higher on the stack. A stale
+// Why the stack pointer: the return probe pops every frame entered at or
+// below its own stack pointer - the returning native's and any left behind
+// deeper - and never an outer native's, whose frame sits higher on the
+// stack. So a return without its push (a native entered after the return
+// probe was attached but before the entry probe was, which is why the
+// return probe goes first) pops nothing that belongs to another native,
+// and a push whose return probe never runs (a native that never returns
+// normally) is cleared by the next return at its depth or above. A stale
 // frame that survives anyway is caught by userspace: its entry lies outside
 // the agent bracket the syscall sits in.
 //

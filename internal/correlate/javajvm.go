@@ -49,6 +49,13 @@ type jvm struct {
 	// probed: the mark's uprobes were attached to this JVM's natives (or
 	// the attempt failed); done once, after the hook table was read.
 	probed bool
+	// The mark's liveness (markCheck, javamark.go): when the probe was
+	// attached, the threads that sent a mark since, and per thread the
+	// brackets that began after the probe.
+	probedMono uint64
+	markedTIDs map[int32]bool
+	afterProbe map[int32]int
+	markDead   bool // the "no marks" warning was given
 	// hooks maps a hook id to what the joiner needs of its HOOK row.
 	hooks map[int32]hookInfo
 	// threads by Java thread id; names maps a platform thread's kernel
@@ -135,6 +142,7 @@ func (j *JavaJoin) record(v *jvm, rec agentspool.Record) error {
 		j.stats.Brackets++
 		if r.KTID > 0 {
 			v.addBracket(r)
+			v.countAfterProbe(r)
 		}
 	case agentspool.HTTP:
 		j.addHTTP(v, r)

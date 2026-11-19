@@ -33,6 +33,7 @@ type javaOutput struct {
 // *bpf.Tracer implements it.
 type javaMarker interface {
 	AttachJavaMarks(pid uint32, natives []bpf.JavaNative) (missing []string, err error)
+	DetachJavaMarks(pid uint32) error
 }
 
 // openJava creates the spool directory and the two table files, or,
@@ -94,6 +95,22 @@ func (o *javaOutput) attachMarks(pid uint32, natives []correlate.MarkedNative) (
 
 func (o *javaOutput) warn(err error) {
 	_, _ = fmt.Fprintf(o.stderr, "iormesh: %v\n", err)
+}
+
+// exited detaches the mark's uprobes from a process whose thread group
+// died (a pattern session's JVMs come and go; each kept link pins its
+// process). A pid that was never probed has nothing to detach. Should a
+// new JVM reuse the pid and be probed before this exit is handled - it
+// would have to start, install its agent and be scanned within the
+// moment the exit record takes to arrive - its marks would stop and its
+// I/O stay none, never misattributed.
+func (o *javaOutput) exited(pid uint32) {
+	if o == nil || o.marker == nil {
+		return
+	}
+	if err := o.marker.DetachJavaMarks(pid); err != nil {
+		o.warn(fmt.Errorf("java mark, pid %d: detach: %w", pid, err))
+	}
 }
 
 // mark hands the joiner a kernel Java mark (the session routes every

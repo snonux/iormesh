@@ -8,9 +8,9 @@ import "strings"
 // the TCP programs or the loader's default probe set, and read the ring
 // buffer (M1 steps 4 and 5; process-tree following and the exec watch, M2
 // steps 1–2; every event family, M2 step 7; native stacks, M2 step 9; the
-// Java mark's uprobes on a running JVM, M3 task td4). They skip for anybody but root, so `mage
-// test` passes them by, and `mage bpfRootTest` is the one place that runs
-// them. The names are listed rather than matched by a pattern so that a
+// Java mark's uprobes on a running JVM, M3 task td4). They skip for
+// anybody but root, so `mage test` passes them by, and `mage bpfRootTest`
+// is the one place that runs them. The names are listed rather than matched by a pattern so that a
 // renamed test fails a gate (internal/buildgate) instead of silently no
 // longer running. Adapted from ior's RootLinkTests
 // (internal/gatecmd/gatecmd.go @ b21afc50328c).

@@ -2276,9 +2276,11 @@ internal/correlate/javajoin.go
      `uretprobe.multi` programs, push and pop a per-tid stack of
      `{cookie, entry ns (CLOCK_MONOTONIC), user sp}` (depth 4, LRU
      `java_mark_map`). The return pops every frame entered at or
-     below its stack pointer, so a push whose return was never
-     seen (attached mid-call) is cleared by the next return at its
-     depth or above; deeper than 4, the mark says "unknown"
+     below its stack pointer and never an outer native's, so a
+     return whose push was never seen pops nothing it does not own
+     (the return probe is attached first for this reason), and a
+     push whose return never runs is cleared by the next return
+     at its depth or above; deeper than 4, the mark says "unknown"
      (cookie 0) until the thread leaves every native.
    - A generated hook in every enter handler,
      `iormesh_java_mark_on_enter` (`renderJavaMarkHook`, placed like
@@ -2291,16 +2293,28 @@ internal/correlate/javajoin.go
      `uretprobe(2)` (x86_64 nr 335) is not in the default families,
      and its kind is in no allowlist, so it never joins.
    - `bpf.Tracer.AttachJavaMarks(pid, natives)` finds the JDK's lib
-     directory through the JVM's `libjava.so` mapping (read via
-     `/proc/<pid>/root`), resolves each native's JNI symbol
-     (`agentspool.Hook.Symbol`) to a file offset in `libjava`,
-     `libnio` or `libnet`, and attaches both programs per library
-     with the JVM's pid (uprobe_multi links: no other process
-     traps) and one cookie per native. The joiner calls it once per
-     ring, after the first drain that read the HOOK rows, numbering
+     directory through the JVM's `libjava.so` mapping and opens
+     `libjava`, `libnio` and `libnet` as the JVM sees them, never
+     by plain path (`javalibs.go`): a mapped one through
+     `/proc/<pid>/map_files`, an unmapped one (libnio and libnet
+     load lazily) with `openat2(RESOLVE_IN_ROOT)` under
+     `/proc/<pid>/root`, all non-blocking and kept only as regular
+     files, so a planted FIFO or symlink cannot hang or redirect
+     the tracer. It resolves each native's JNI symbol
+     (`agentspool.Hook.Symbol`) to a file offset in the opened file
+     and attaches the return and then the entry program by that
+     descriptor (`/proc/self/fd/N`: the file probed is the file
+     parsed), with the JVM's pid (uprobe_multi links: no other
+     process traps; Linux ≥ 6.10 or a stable kernel with commit
+     46ba0e49, which made the pid filter cover every thread) and
+     one cookie per native. The joiner calls it once per ring,
+     after the first drain that read the HOOK rows, numbering
      natives by symbol; `iormesh run` also polls the spool once
      before its ready file, so JVMs already running are probed
-     before the tracer says it is live.
+     before the tracer says it is live. `DetachJavaMarks` drops a
+     JVM's links when its thread group dies (pattern sessions),
+     and `Close` drops the rest — libbpfgo does not track
+     uprobe_multi links.
 
    The join: the session hands every mark record to
    `JavaJoin.Mark`, keyed by (tid, enter time) = the event's
@@ -2315,7 +2329,10 @@ internal/correlate/javajoin.go
    brackets that overlap without nesting, a folded read/write, or
    a stack the agent did not deliver leave `attribution: none`,
    each counted in the summary line; a JVM whose natives could not
-   be probed keeps all its syscalls `none` and is reported. A
+   be probed (an attach error, none of its natives found) keeps
+   all its syscalls `none` and is reported and counted, and so is
+   one whose threads close 64 brackets after the probe without
+   sending one mark (a kernel whose pid filter matches one thread). A
    virtual thread's I/O gets `java.carrier` and the carrier's
    name.
 

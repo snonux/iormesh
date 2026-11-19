@@ -606,3 +606,66 @@ func TestJavaJoinPrunesMarks(t *testing.T) {
 	}
 	jt.close()
 }
+
+// TestJavaJoinNoNativeFound: a JDK whose libraries define none of the
+// natives (no Java_* symbols) leaves the JVM unmarked, counted and
+// reported like a failed attach.
+func TestJavaJoinNoNativeFound(t *testing.T) {
+	jt := newJoinTest(t)
+	var warned []error
+	jt.j.cfg.Warn = func(err error) { warned = append(warned, err) }
+	jt.j.cfg.AttachMarks = func(_ uint32, natives []MarkedNative) ([]string, error) {
+		var all []string
+		for _, n := range natives {
+			all = append(all, n.Symbol)
+		}
+		return all, nil
+	}
+	jt.ring()
+	if err := jt.j.Poll(); err != nil {
+		t.Fatal(err)
+	}
+	if s := jt.j.Stats(); s.MarkFailed != 1 || len(warned) != 1 ||
+		!strings.Contains(warned[0].Error(), "none of the 4 natives") {
+		t.Errorf("stats %+v, warnings %v", s, warned)
+	}
+	jt.close()
+}
+
+// TestJavaJoinMarksDead: a probed JVM whose threads keep closing brackets
+// without sending one mark (a kernel whose uprobe_multi filters by thread)
+// is reported once and counted unmarked; a thread that sends marks keeps
+// its brackets out of the count.
+func TestJavaJoinMarksDead(t *testing.T) {
+	jt := newJoinTest(t)
+	var warned []error
+	jt.j.cfg.Warn = func(err error) { warned = append(warned, err) }
+	jt.j.cfg.AttachMarks = func(uint32, []MarkedNative) ([]string, error) { return nil, nil }
+	r := jt.ring()
+	if err := jt.j.Poll(); err != nil {
+		t.Fatal(err)
+	}
+	const worker = mainTID + 1
+	jt.mark(jvmPID, mainTID, jt.now+1, symWriteBytes, jt.now)
+	for i := range noMarkBrackets {
+		at := jt.now + 1000 + uint64(i)*1000
+		r.queue = append(r.queue, jt.bracket(1, mainTID, at, at+100, 10, 1))
+		if i < noMarkBrackets-1 {
+			r.queue = append(r.queue, jt.bracket(1, worker, at, at+100, 10, 1))
+		}
+	}
+	if err := jt.j.Poll(); err != nil || len(warned) != 0 {
+		t.Fatalf("warned below the threshold: %v, %v", err, warned)
+	}
+	r.queue = []agentspool.Record{jt.bracket(1, worker, jt.now+90_000, jt.now+91_000, 10, 1)}
+	for range 2 {
+		if err := jt.j.Poll(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s := jt.j.Stats(); s.MarkFailed != 1 || len(warned) != 1 ||
+		!strings.Contains(warned[0].Error(), "46ba0e49") {
+		t.Errorf("stats %+v, warnings %v", s, warned)
+	}
+	jt.close()
+}

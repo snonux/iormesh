@@ -513,8 +513,11 @@ S3_RUNS=5 S3_THREADS=1`, the burst under `-javaagent` through
 `JAVA_TOOL_OPTIONS`), the commit before td4 against td4, back to
 back on a host at load 7.6–25 (other agents' builds and tests).
 Every one of the million calls is hooked, so each event comes with
-a mark: twice the ring records of the run before. A check run
-joined 40 023 of its 40 000 bursts' calls through the mark.
+a mark: twice the ring records of the run before. A separate check
+run (20 000 ops, so 40 000 hooked write and read calls) attributed
+40 023 events through the mark: the 40 000 calls and 23 more
+hooked calls of the burst and the JVM (the burst's file opens and
+closes, its result line's writes).
 Samples are not kept in the repo.
 
 | Run | tracer ns/event, median | Range | burst CPU traced/untraced, median of pairs | Lost |
@@ -523,9 +526,11 @@ Samples are not kept in the repo.
 | td4, the mark (load 10.7–15.3) | 4970 | 4460–8200 | 1.29× (0.81–1.48) | 0 |
 
 On this host only the large differences mean anything, and the
-pair ratios span 3× in both rows. Read so: the mark adds about
-0.7 µs of tracer CPU per marked event (decoding the extra record
-and pairing it with its event), on top of 2b4's join,
+pair ratios span 3× in both rows. Read so: the +0.7 µs of tracer
+CPU per marked event is within the noise of these runs (the
+ranges overlap); what the mark adds by construction is decoding
+one extra record per marked event and pairing it with its event,
+on top of 2b4's join,
 which is already over the ≤ 2 µs budget for this worst case — task
 ud4 still owns bringing the `-spool` path under it. The target
 pays the uprobe pair per hooked call (S1: ≈3.5 µs on a loaded

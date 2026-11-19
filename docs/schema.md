@@ -547,8 +547,16 @@ How an event gets `attribution: java` — never by guessing:
   50 ms, past its agent's install; JVMs already running are probed
   before the tracer's ready file) — and every syscall of a JVM
   whose natives could not be probed (no uprobe_multi links, Linux
-  < 6.6; a JDK without `Java_*` symbols; a JVM gone before the
-  probe): reported on stderr and counted as an unmarked JVM.
+  < 6.6; a JDK whose libraries define none of the natives — no
+  `Java_*` symbols; a JVM gone before the probe): reported on
+  stderr and counted as an unmarked JVM. The mark needs Linux ≥
+  6.10, or a 6.6–6.9 stable kernel carrying commit 46ba0e49 ("bpf:
+  fix multi-uprobe PID filtering logic"): before it, a pid-scoped
+  uprobe_multi link fired only for the thread whose tid equals the
+  pid — in a JVM the launcher thread, not even Java's `main` — so
+  every other thread's I/O would stay `none`. A JVM whose threads close 64
+  brackets after the probe without one mark is reported on stderr
+  and counted as an unmarked JVM too.
 - **Virtual threads** (JDK 21+): the agent records the carrier tid
   at a bracket's enter and exit, 0 when they differ (such
   brackets are not indexed, so their own syscalls stay `none`).

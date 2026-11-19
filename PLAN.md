@@ -558,7 +558,10 @@ Gated by S1 — done; the design below is S1's result
   the hook's syscall allowlist the only guard against JVM work
   of an allowed kind inside a bracket; task td4 built the mark
   and resolved that deviation. The uprobes (`uprobe_multi`
-  links, Linux ≥ 6.6) attach per JVM, scoped to its pid, to the
+  links: Linux ≥ 6.10, or a 6.6–6.9 kernel with the stable fix
+  of commit 46ba0e49 — before it the pid filter matched one
+  thread only; the joiner warns when a JVM's threads close
+  brackets without a mark) attach per JVM, scoped to its pid, to the
   natives its ring's hook table names, once the tracer read that
   table; a syscall without a mark, or with another native's,
   is JVM work and stays `none` whatever its kind, the allowlist
@@ -1122,9 +1125,10 @@ answer), and deferred.
      medians of 5 — s3-overhead.md, "Follow-up (wc4)" and
      "Follow-up (md4)"). With the Java join (`-spool`, every
      event joined): 5.2 µs, over budget — task ud4, gating M3's
-     acceptance (5b4); td4's Java mark adds ≈0.7 µs per marked
-     event to that (s3-overhead.md, "Follow-up (td4)"). Measured as the tracer's own user+sys
-     CPU time per event from its ready file to its exit (load
+     acceptance (5b4); td4's Java mark measured +0.7 µs per
+     marked event on top, within the host's noise
+     (s3-overhead.md, "Follow-up (td4)"). Measured as the
+     tracer's own user+sys CPU time per event from its ready file to its exit (load
      and attach excluded), which host load moves less than wall
      time — not nothing: on a loaded SMT host one thread's CPU
      time still spreads 2–3×, hence medians of ≥ 5 runs;

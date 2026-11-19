@@ -79,6 +79,7 @@ type tracer interface {
 	PendingAggregates() ([]*types.RwAggregateEvent, error)
 	StackTrace(id uint32) ([]uint64, error)
 	AttachJavaMarks(pid uint32, natives []bpf.JavaNative) ([]string, error)
+	DetachJavaMarks(pid uint32) error
 	Close() error
 }
 

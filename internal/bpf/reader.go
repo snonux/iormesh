@@ -112,9 +112,10 @@ func (t *Tracer) add(batch []any, r []byte) []any {
 // Close stops the trace and closes Records; records in flight are dropped.
 // It is safe to call more than once. The reader goes first (it notices
 // done within pollTimeoutMs, or at once when blocked on a full Records),
-// then its mapping, then libbpfgo's Module.Close, which detaches every
-// link still attached and frees the object — so links are never destroyed
-// here a second time: a failed bpf_link__destroy has already freed the
+// then its mapping, then the Java mark's links (DetachJavaMarks, which
+// libbpfgo does not track), then libbpfgo's Module.Close, which detaches
+// every link still attached and frees the object — so links are never
+// destroyed here a second time: a failed bpf_link__destroy has already freed the
 // link, and destroying it again would be a double free.
 func (t *Tracer) Close() error {
 	var err error
@@ -124,6 +125,9 @@ func (t *Tracer) Close() error {
 		if t.ring != nil {
 			err = t.ring.close()
 		}
+		// The Java mark's uprobe_multi links are not the module's: libbpfgo
+		// does not record them, so they are destroyed here, once each.
+		t.detachAllJavaMarks()
 		if t.module != nil {
 			t.module.Close()
 		}

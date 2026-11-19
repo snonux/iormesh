@@ -267,6 +267,7 @@ func (j *JavaJoin) poll(now uint64) error {
 			return err
 		}
 		j.attachMarks(v)
+		j.markCheck(v)
 	}
 	j.conns.purge(j.maxEnd, j.cfg.Retain)
 	j.pruneMarks()
