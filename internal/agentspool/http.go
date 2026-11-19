@@ -40,11 +40,14 @@ type HTTP struct {
 	// when the client library followed a redirect or answered an
 	// authentication challenge itself, each a request the server saw.
 	Exchanges uint32
+	// Otel is the OTEL span current on the thread when the request was
+	// recorded (task 4b4), zero when none was.
+	Otel Otel
 }
 
 // decodeHTTP checks an HTTP record: a non-negative tid and status, at
 // least the fixed strings, a request-header count that fits, no unknown
-// flag and at least one exchange.
+// flag, at least one exchange, and OTEL ids either all set or none.
 func decodeHTTP(rec []byte) (Record, error) {
 	if len(rec) < httpHead {
 		return nil, errMalformed
@@ -54,8 +57,10 @@ func decodeHTTP(rec []byte) (Record, error) {
 		ThreadID: le.Uint64(rec[24:]), KTID: int32(le.Uint32(rec[32:])),
 		Status: int32(le.Uint32(rec[36:])), Server: flags&httpServer != 0,
 		Exchanges: le.Uint32(rec[52:])}
+	var otelOK bool
+	h.Otel, otelOK = decodeOtel(rec, 56)
 	if h.KTID < 0 || h.Status < 0 || n < httpFixed || nreq > n-httpFixed ||
-		flags&^httpServer != 0 || h.Exchanges == 0 {
+		flags&^httpServer != 0 || h.Exchanges == 0 || !otelOK {
 		return nil, errMalformed
 	}
 	s, err := decodeStrings(rec, httpHead, n)

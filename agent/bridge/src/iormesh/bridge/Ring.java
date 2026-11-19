@@ -69,9 +69,12 @@ public final class Ring {
     /**
      * Format version; the reader rejects any other. 2 (task 2b4): HOOK
      * records, and THREAD's reserved word carries flags (VIRTUAL). 3
-     * (task 3b4): HTTP records.
+     * (task 3b4): HTTP records. 4 (task 4b4): OTEL ids — a BRACKET of
+     * BRACKET_OTEL_LEN, and three more words in HTTP's fixed part. 3 was
+     * never released, but a bump costs nothing and a mismatched agent
+     * and tracer then fail loudly instead of misreading HTTP records.
      */
-    static final int VERSION = 3;
+    static final int VERSION = 4;
     /** THREAD flag: the Java thread is a virtual thread (JDK 21+). */
     static final int VIRTUAL = 1;
     static final long MAGIC = 0x474e49524d524f49L; // "IORMRING", little endian
@@ -85,12 +88,21 @@ public final class Ring {
     static final long MAX_CAPACITY = 1L << 30;
     /** BRACKET body: hook, ktid, enter, exit, stack, thread. */
     static final int BRACKET_LEN = 8 + 40;
+    /**
+     * A BRACKET whose enter ran inside an OTEL span (Otel) appends the
+     * span's trace id (upper, lower half) and span id: three words more,
+     * only then, so the brackets of an app without OTEL cost what they
+     * did.
+     */
+    static final int BRACKET_OTEL_LEN = BRACKET_LEN + 24;
     static final int WATERMARK_LEN = 8 + 8;
     /**
      * HTTP's fixed part: word, mono, stack, thread, ktid, status, n, nreq,
-     * flags, exchanges.
+     * flags, exchanges, then the OTEL trace id halves and span id (all
+     * zero: no span). Fixed rather than optional as in BRACKET: HTTP
+     * records are few, and the strings start at one offset.
      */
-    static final int HTTP_HEAD = 8 + 48;
+    static final int HTTP_HEAD = 8 + 72;
     /** HTTP flag: the request was answered here (a server's), not sent. */
     static final int HTTP_SERVER = 1;
     /** HTTP's leading strings: method, scheme, host, path, version, local, remote. */
@@ -166,9 +178,20 @@ public final class Ring {
         Files.deleteIfExists(path);
     }
 
-    /** Writes a BRACKET; false if it was dropped. No allocation. */
+    /** Writes a BRACKET outside any OTEL span (tests, RingStress). */
     boolean bracket(int hook, int ktid, long enter, long exit, long stack, long thread) {
-        int off = reserve(BRACKET_LEN, BRACKET);
+        return bracket(hook, ktid, enter, exit, stack, thread, 0, 0, 0);
+    }
+
+    /**
+     * Writes a BRACKET; false if it was dropped. No allocation. With a
+     * span (span id non-zero; Otel never hands over half an id) it is
+     * the BRACKET_OTEL_LEN form carrying the ids.
+     */
+    boolean bracket(int hook, int ktid, long enter, long exit, long stack, long thread,
+                    long traceHi, long traceLo, long span) {
+        int len = span != 0 ? BRACKET_OTEL_LEN : BRACKET_LEN;
+        int off = reserve(len, BRACKET);
         if (off < 0) {
             return false;
         }
@@ -179,10 +202,15 @@ public final class Ring {
             buf.putLong(off + 24, exit);
             buf.putLong(off + 32, stack);
             buf.putLong(off + 40, thread);
-            publish(off, BRACKET_LEN, BRACKET);
+            if (span != 0) {
+                buf.putLong(off + 48, traceHi);
+                buf.putLong(off + 56, traceLo);
+                buf.putLong(off + 64, span);
+            }
+            publish(off, len, BRACKET);
             return true;
         } catch (Throwable e) {
-            return abandon(off, BRACKET_LEN);
+            return abandon(off, len);
         }
     }
 
@@ -257,7 +285,9 @@ public final class Ring {
      * counts, flags (HTTP_SERVER) and the number of HTTP exchanges the
      * request took (more than 1 when the library followed a redirect or
      * answered an authentication challenge on its own: the tracer then
-     * stops numbering the connection), then the strings: the HTTP_FIXED
+     * stops numbering the connection), the OTEL span current when the
+     * request was recorded (trace id halves, span id; zeros for none),
+     * then the strings: the HTTP_FIXED
      * leading ones (method, scheme, host, path, version, local and remote
      * socket address), nreq request headers and the response headers, each
      * "name: value", already redacted by the probe that built them. A
@@ -265,7 +295,7 @@ public final class Ring {
      * the request is what pairs the hops.
      */
     boolean http(long mono, long stack, long thread, int ktid, int status, String[] s,
-                 int nreq, int flags, int exchanges) {
+                 int nreq, int flags, int exchanges, long traceHi, long traceLo, long span) {
         int n = s.length;
         byte[][] enc = encode(s, n);
         int len = align(HTTP_HEAD + size(enc, n));
@@ -292,6 +322,9 @@ public final class Ring {
             buf.putInt(off + 44, nreq);
             buf.putInt(off + 48, flags);
             buf.putInt(off + 52, exchanges);
+            buf.putLong(off + 56, traceHi);
+            buf.putLong(off + 64, traceLo);
+            buf.putLong(off + 72, span);
             putStrings(off + HTTP_HEAD, enc, n);
             publish(off, len, HTTP);
             return true;

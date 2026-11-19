@@ -342,15 +342,18 @@ tcp-loopback ship real ones):
 - `attribution` (`"java"` or `"none"`), when declared, must equal
   the event's; unset, it is not compared. `non-java-peer`
   declares `none` on every event of its Go peer.
-- M3's scenarios carry a second file, `expect-pending.json`:
-  the golden plus what the agent adds, in the format the
-  promoted golden will have — `"attribution": "java"`, `"java":
+- M3's agent fields: `"attribution": "java"`, `"java":
   {"thread": "<Java thread name>", "method": "<class>#<method>"}`
-  (the causing method: the innermost workload frame) and
+  (the causing method: the innermost workload frame),
   `{"event": "http", "conn_id": "$c1", "http": {"method",
-  "scheme", "host", "path", "status", "req_seq"}}` events. It
-  does not load yet; a test keeps it equal to `expect.json`
-  once those declarations are stripped (M3 step 9).
+  "scheme", "host", "path", "status", "req_seq"}}` events, and
+  `"otel": {"trace_id", "span_id"}` (with attribution java).
+  `otel` is compared when absent too, like `args.count`: an
+  event declared without it must be outside any span. The M3
+  scenarios first carried these in a second file,
+  `expect-pending.json`, until the agent could produce them
+  (M3 step 9); task 4b4 promoted the last one, and a test now
+  fails on any new pending file.
 - `$a1` names an app node — the one node every incarnation of a
   pattern-matched app links to (M2 step 3). Only edges use it;
   it binds the whole node id, so `restart`'s two `incarnation`
@@ -1992,6 +1995,7 @@ agent/
   bridge/src/iormesh/bridge/Ring.java        # mmap spool writer
   bridge/src/iormesh/bridge/Brackets.java    # per-thread bracket state
   bridge/src/iormesh/bridge/Watermarks.java  # WATERMARK timer + scan
+  bridge/src/iormesh/bridge/Otel.java        # reflective span read
   core/src/iormesh/agent/Agent.java          # premain/agentmain
   core/src/iormesh/agent/AgentArgs.java      # bridge=, spool=, debug=…
   core/src/iormesh/agent/Bridge.java         # bootstrap append + module
@@ -2001,7 +2005,7 @@ agent/
   core/resources/iormesh/agent/hooks-jdk21.tsv  # 21–24
   core/resources/iormesh/agent/hooks-jdk25.tsv  # 25+
   core/src/iormesh/agent/http/…              # one file per library
-  core/src/iormesh/agent/otel/SpanContext.java
+  core/src/iormesh/agent/OtelTransformer.java  # arms Otel per copy
   test/src/iormesh/agent/…    # plain-main unit tests + AgentSmoke
   test/src/iormesh/bridge/…   # Hooks/Ring tests, RingStress
   tools/Relocate.java         # shades ASM (build tool)
@@ -2465,13 +2469,13 @@ internal/correlate/javajoin.go
    ([testing.md](testing.md#m3-scenarios-ahead-of-the-agent)).
    Not yet: sizes and latency, Servlet, Apache HttpClient,
    OkHttp, Netty, and the DNS hooks (#8).
-8. OTEL: if `io.opentelemetry.api.trace.Span` is loadable in the
-   app's class loader, read `Span.current().getSpanContext()`
-   reflectively at `enter` and add ids to the bracket. No OTEL
-   dependency in the agent. The `otel` scenario (task za4,
-   below) is the target: run it as `java -jar
+8. OTEL (done, task 4b4): read `Span.current().getSpanContext()`
+   reflectively in the app's class loader at `enter` and add the
+   ids to the bracket. No OTEL dependency in the agent. The `otel`
+   scenario (task za4, below) is the target: run it as `java -jar
    workload-otel.jar otel --role server|client` (`mage
-   workloadOtelBuild`). Its `expect-pending.json` puts an
+   workloadOtelBuild`). Its golden (`expect-pending.json` until
+   this step promoted it to `expect.json`) puts an
    `otel` object (`trace_id`, `span_id`, the declared ids of
    `OtelScenario`) on every event inside a span: each client
    event of a call (connect, write, read, the last call's
@@ -2483,9 +2487,67 @@ internal/correlate/javajoin.go
    ids. The client's http events assume an
    `HttpURLConnection` hook (decision #22's v1 set) that
    records the response inside `OtelFetch#call` once
-   `getResponseCode` returns — built by step 7, whose
-   `TestOtelHTTP` runs the scenario under the agent against the
-   `otel`-free `expect.json`.
+   `getResponseCode` returns — built by step 7.
+
+   As built:
+   - **When to read**: only once the app has initialized OTEL's
+     context storage. `OtelTransformer` rewrites the static
+     initializer of `io.opentelemetry.context.LazyStorage` (any
+     app class loader) to end with `Hooks.otel(LazyStorage.class)`
+     inside a catch-all — a loader that cannot see the bridge
+     gets a linkage error there, which must not fail OTEL's
+     initializer. `Otel.arm` then resolves `Span` and
+     `SpanContext` in that loader through the public lookup and
+     reads once, so the classes a read touches load inside the
+     app's own OTEL start. The agent never initializes OTEL
+     itself: `LazyStorage`'s initializer runs a ServiceLoader
+     (jar I/O, jar locks) and freezes the storage wrappers, so
+     doing it from a hooked I/O call could deadlock or change
+     the app's OTEL. A live attach arms each `LazyStorage`
+     already loaded. Up to eight copies (class loaders) are
+     read, held weakly — a `ClassValue` on `LazyStorage` keeps a
+     reader alive exactly as long as its class, so the agent
+     pins no undeployed web app.
+   - **Hot path**: one volatile read without OTEL; with it, one
+     handle call (`Span.current().getSpanContext()` composed),
+     after the stack walk and before the enter stamp (outside the
+     bracket's window). The span context is compared by identity
+     with the thread's last one (held weakly), so `getTraceId`,
+     `getSpanId` and the hex parse run once per span and thread.
+     Ids are numbers in the ring: trace id as two longs, span id
+     as one, all zero for no span. Cost (an `enter`/`exit` loop
+     without ring or stack walk, JDK 25, a loaded host): ≈90 ns
+     per bracket without OTEL, ≈145–155 ns armed, in a span or
+     not — some 55–65 ns, against the ≈3 µs stack walk every
+     bracket pays (S1: ≈8 µs), so inside decision #25's budget.
+   - **Ring v4**: a BRACKET inside a span is 72 bytes instead of
+     48 (the three id words appended), so brackets of an app
+     without OTEL cost what they did; HTTP's fixed part gains the
+     three words (zeros for none). v3 was never released; the
+     bump makes a mismatched agent and tracer fail loudly.
+   - **Join**: a syscall joined to a bracket, and an http event
+     with a stack, get `otel` (`trace_id` 32, `span_id` 16
+     lowercase hex digits) when the record had a span;
+     `schema.Event.Validate` allows `otel` with attribution
+     java only.
+
+   Tests: `mage agentTest` — `OtelTest` (bridge: hex ids, an
+   armed copy's span read and closed, nested spans, an OTEL
+   without its API jar arms nothing and throws nothing, BRACKET
+   and HTTP records carry the ids) and `OtelTransformerTest`
+   (the real `LazyStorage` rewritten, verified and run: armed at
+   the first context use, not at class load; a loader without
+   the bridge in sight keeps a working OTEL), both on the
+   workload's vendored OTEL 1.67.0 jars in loaders of their own;
+   Go — `internal/agentspool` (long BRACKET, HTTP ids, half-set
+   ids malformed), `internal/correlate` (`javaotel_test.go`),
+   `internal/schema` (`TestOtelRoundTrip`, rejects),
+   `internal/normalize` (`otel_test.go`); integration —
+   `TestOtelHTTP` against the promoted golden, with mutated
+   spans caught, and `TestHTTPPlain` asserts no `otel` without
+   OTEL. Not yet: an OTEL distribution whose context storage
+   never initializes `LazyStorage` is not seen (untested with
+   the OpenTelemetry Java agent).
 9. Scenarios first, as always: `method-flow`,
    `http-plain`, `http-tls`, `http-redaction`, `otel`.
    Done for the first four (task ya4), ahead of steps 5–7, and
@@ -2520,8 +2582,8 @@ internal/correlate/javajoin.go
    (`normalize.CausingMethod`); `TestJavaMethodFlow` checks
    `method-flow`'s pending file directly. Step 7 (task 3b4) added
    `ExpectedHTTP` and promoted `method-flow`'s and the HTTP
-   scenarios' pending files to `expect.json`; `otel`'s keeps only
-   its `otel` ids pending (step 8).
+   scenarios' pending files to `expect.json`; step 8 (task 4b4)
+   promoted `otel`'s, the last one.
 
 **Done when**: PLAN.md's M3 acceptance holds.
 

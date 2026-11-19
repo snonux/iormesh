@@ -270,7 +270,7 @@ Scenario catalogue, by the milestone it lands with:
 | M1 | File data ops (open/read/write/close) — `file-basic`; TCP client ↔ server on loopback — `tcp-loopback`; markers (all landed with M0) |
 | S3 | Syscall load: tight 1-byte read/write loops, N ops over T threads — `syscall-burst` |
 | M2 | Full file surface — `file-lifecycle` (create/delete, rename while open, move, truncate, touch), `file-links` (symlink/readlink/lstat, hardlink), `file-attrs` (chmod/chown by path and fd, xattr); fd lifecycle (dup, inheritance across fork/exec, reuse) — `fd-lifecycle` (these four landed ahead of the M2 tracer work); local IPC — `pipe-ipc` (pipe, child stdio pipes), `unix-socket`; signals — `signals`; UDP — `udp-loopback`; IPv4 + IPv6 — `tcp-ipv4`, `tcp-ipv6` (these six landed ahead too); restart — `restart`; non-Java peer — `non-java-peer` (these two landed ahead too); argv redaction — `argv-secret` |
-| M3 | Method flows (deep stacks, async I/O) — `method-flow`; HTTP plain + TLS — `http-plain`, `http-tls`; redaction — `http-redaction` (these four landed ahead of the agent, their Java parts pending, see below); OTEL flavor — `otel` (landed ahead too, in its own module) |
+| M3 | Method flows (deep stacks, async I/O) — `method-flow`; HTTP plain + TLS — `http-plain`, `http-tls`; redaction — `http-redaction` (these four landed ahead of the agent, their Java parts pending until tasks 2b4 and 3b4, see below); OTEL flavor — `otel` (landed ahead too, in its own module; its ids pending until task 4b4) |
 | M4 | Client and server on two hosts as two projects; microservices topology, one service per host; NAT'ed pair |
 | M5 | (renders M4's microservices scenario) |
 | M6 | Microservices topology with only the gateway enrolled |
@@ -307,13 +307,11 @@ Scenario notes:
   method as `class#method`, the innermost workload frame),
   `http` events and, for `otel`, an `otel` object (trace and
   span id) — kept in step with `expect.json` by test. The
-  agent's join (task 2b4) and HTTP hooks (task 3b4) taught the
-  golden format the java and http fields: `method-flow`,
-  `http-plain`, `http-tls` and `http-redaction` are promoted
-  (one `expect.json`, run under the agent by the integration
-  tests), and `otel`'s `expect.json` holds everything but the
-  `otel` ids, which stay pending until the span-context read
-  (M3 step 8, task 4b4).
+  agent's join (task 2b4), HTTP hooks (task 3b4) and
+  span-context read (task 4b4) taught the golden format the
+  java, http and otel fields, so all five are promoted: one
+  `expect.json` each, run under the agent by the integration
+  tests, and no pending file is left.
 - **Microservices end-to-end scenario** (M4): several instances
   of the app playing declared service roles (gateway, orders,
   inventory, billing…), talking to each other over REST — call
@@ -404,9 +402,10 @@ Scenario notes:
   no span is) to the JDK HttpServer, which extracts the W3C
   `traceparent`/`tracestate` the client's propagator wrote,
   fails the run unless they match the declaration, and answers
-  inside a declared child span. Its golden splits like the
-  other M3 goldens (below), the pending part adding an `otel`
-  object (`trace_id`, `span_id`) per event.
+  inside a declared child span. Its golden declares an `otel`
+  object (`trace_id`, `span_id`) on every event inside a span
+  and none on the others (split like the other M3 goldens until
+  task 4b4, below).
 
 Acceptance: the framework runs the M1 scenarios standalone
 (no tracer) and prints their markers and declared
@@ -606,7 +605,17 @@ Gated by S1 — done; the design below is S1's result
   API (SDK or not), the agent reads the active span context and
   tags every I/O event with its OTEL trace/span ids — iormesh
   events join 1:1 with the app's distributed traces in any OTEL
-  backend.
+  backend. Task 4b4 built decision #20's default: the agent
+  reads `Span.current().getSpanContext()` reflectively, in the
+  class loader of each OTEL copy, at a bracket's enter and when
+  an HTTP request is recorded, and the joined event gets an
+  optional `otel` object (`trace_id`, `span_id`; attribution
+  java only, absent outside a span). A copy is read only once
+  the app itself has initialized OTEL's context storage (the
+  agent rewrites the end of `LazyStorage`'s static
+  initializer): the agent never triggers that initialization,
+  which runs a ServiceLoader and freezes the app's storage
+  wrappers. An app without OTEL never arms anything.
   Optionally, spans can also be ingested (an OTLP receiver the
   app dual-exports to, or the collector's file export —
   decision #20) to overlay the service graph on the mesh.
@@ -1316,6 +1325,8 @@ answer), and deferred.
   the app's own exported telemetry — deliberately distinct
   from the no-payload-capture rule, worth stating in
   docs/schema.md. *Default: span-context tagging only.*
+  Built so (task 4b4): span-context tagging, the `otel`
+  envelope object; ingestion stays deferred (below).
 
 ### Open — blocks M4
 
@@ -1503,7 +1514,8 @@ can reconstruct behavior and check it against source code:
   (native, opt-in), attribution (java | none), carrier (set
   when the I/O ran for a virtual thread), java_thread,
   java_stack (method ids), otel (trace_id, span_id — present
-  when the app is OTEL-instrumented), http (method, scheme,
+  on java events inside an OTEL span; appended after stack_id
+  by task 4b4), http (method, scheme,
   host, path, status, req_seq — on http events; headers per
   redaction policy)`. S1 settled the Java fields: nested
   `java.thread` (thread name) and `java.stack` (method ids,

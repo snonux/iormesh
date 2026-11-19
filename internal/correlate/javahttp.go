@@ -262,7 +262,8 @@ func (j *JavaJoin) emitHTTP() error {
 // httpEvent builds the http event of one record: envelope from the JVM
 // and the stream, the request redacted again by the tracer's own policy
 // (the agent's is a copy; this one is the reference, decision #9), the
-// connection and its ordinal, and the Java side from the record's stack.
+// connection and its ordinal, and the Java side from the record's stack
+// with the OTEL span the request was recorded in.
 func (j *JavaJoin) httpEvent(h pendingHTTP) (schema.Event, error) {
 	v, r := h.v, h.rec
 	ev := schema.Event{SchemaVersion: schema.Version, Project: j.project, HostID: j.hostID,
@@ -290,6 +291,7 @@ func (j *JavaJoin) httpEvent(h pendingHTTP) (schema.Event, error) {
 		java.Thread = th.Name
 	}
 	ev.Attribution, ev.Java = schema.AttributionJava, java
+	ev.Otel = otelOf(r.Otel) // with java only: the schema ties otel to it
 	return ev, nil
 }
 

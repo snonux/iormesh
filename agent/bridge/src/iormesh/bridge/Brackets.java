@@ -40,6 +40,23 @@ final class Brackets {
     final long[] stacks = new long[Hooks.MAX_DEPTH];
     /** A virtual thread's carrier tid at each slot's enter (unused otherwise). */
     final int[] ktids = new int[Hooks.MAX_DEPTH];
+    /**
+     * The OTEL span current at each slot's enter (Otel): trace id halves
+     * and span id, all zero for none.
+     */
+    final long[] traceHis = new long[Hooks.MAX_DEPTH];
+    final long[] traceLos = new long[Hooks.MAX_DEPTH];
+    final long[] spans = new long[Hooks.MAX_DEPTH];
+    /** The span Otel.read found last on this thread (all zero: none). */
+    long otelHi;
+    long otelLo;
+    long otelSpan;
+    /**
+     * The span context otelHi/otelLo/otelSpan were read from, compared
+     * by identity so a thread reads a span's ids once (Otel.Reader.read);
+     * weak, so it pins no app class loader.
+     */
+    java.lang.ref.WeakReference<Object> otelContext;
     int ktid = UNKNOWN_KTID;
     /** Whether this thread's THREAD record reached the ring. */
     boolean described;

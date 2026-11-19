@@ -52,9 +52,10 @@ views — happens on the controller.
     record (decision #27). Its few own syscalls (ring setup, one
     thread-id lookup per thread, the sleeps of its watermark
     thread) are tagged and kept out of the target's story.
-  - OpenTelemetry-aware: when the app runs the OTEL SDK, the
-    agent reads the active span context and tags every I/O
-    event with its OTEL trace/span ids.
+  - OpenTelemetry-aware: when the app runs the OTEL API (SDK
+    or not), the agent reads the active span context
+    reflectively and tags every I/O event with its OTEL
+    trace/span ids (task 4b4).
   - HTTP/HTTPS instrumentation: hooks at known client/server API
     boundaries record method, URI, headers (redacted), status
     and latency — joined to the socket, the stack and the span.

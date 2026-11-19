@@ -115,8 +115,9 @@ func (v *jvm) mayHaveParked(b agentspool.Bracket, h hookInfo) bool {
 	return h.parks && (!known || th.Virtual)
 }
 
-// setJava marks ev as joined to b. A virtual thread's I/O is flagged and
-// named after its carrier: v1 does not name virtual threads (PLAN.md M3).
+// setJava marks ev as joined to b, with the OTEL span b's enter ran in.
+// A virtual thread's I/O is flagged and named after its carrier: v1 does
+// not name virtual threads (PLAN.md M3).
 func (j *JavaJoin) setJava(ev *schema.Event, v *jvm, b agentspool.Bracket, stack []uint64) {
 	th, known := v.threads[b.ThreadID]
 	java := &schema.Java{Stack: stack}
@@ -129,7 +130,18 @@ func (j *JavaJoin) setJava(ev *schema.Event, v *jvm, b agentspool.Bracket, stack
 		java.Thread = th.Name
 	}
 	ev.Attribution, ev.Java = schema.AttributionJava, java
+	ev.Otel = otelOf(b.Otel)
 	j.stats.Attributed++
+}
+
+// otelOf is the event's otel object for a record's span: nil outside a
+// span. Only joined events get one — the ids say which span the Java
+// code ran in, which an unjoined syscall cannot vouch for.
+func otelOf(o agentspool.Otel) *schema.Otel {
+	if !o.Valid() {
+		return nil
+	}
+	return &schema.Otel{TraceID: o.TraceID(), SpanID: o.SpanID()}
 }
 
 // stack resolves an agent stack id to method ids, writing the method

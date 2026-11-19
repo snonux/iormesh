@@ -48,8 +48,9 @@ func AppendEvent(dst []byte, ev *Event) []byte {
 	return appendEventTail(dst, ev)
 }
 
-// appendEventTail appends the optional nested objects and the optional
-// stack_id (M2 step 9), then closes the event's object.
+// appendEventTail appends the optional nested objects, the optional
+// stack_id (M2 step 9) and otel (M3 step 8), in struct order, then
+// closes the event's object.
 func appendEventTail(dst []byte, ev *Event) []byte {
 	if ev.Java != nil {
 		dst = append(dst, `,"java":`...)
@@ -69,6 +70,11 @@ func appendEventTail(dst []byte, ev *Event) []byte {
 	}
 	if ev.StackID != nil {
 		dst = appendUintField(dst, `,"stack_id":`, uint64(*ev.StackID))
+	}
+	if ev.Otel != nil {
+		dst = appendStringField(dst, `,"otel":{"trace_id":`, ev.Otel.TraceID)
+		dst = appendStringField(dst, `,"span_id":`, ev.Otel.SpanID)
+		dst = append(dst, '}')
 	}
 	return append(dst, '}')
 }

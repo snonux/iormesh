@@ -41,6 +41,8 @@ func TestRoundTrip(t *testing.T) {
 		Stack{ID: 99, Frames: []string{"a.B#c(B.java:3)", "größe#ü(X.java:1)"}},
 		Stack{ID: 100, Frames: []string{}},
 		Bracket{Hook: 3, KTID: 4243, EnterMono: 10, ExitMono: 20, StackID: 99, ThreadID: 1},
+		Bracket{Hook: 3, KTID: 4243, EnterMono: 11, ExitMono: 19, StackID: 99, ThreadID: 1,
+			Otel: Otel{TraceHi: 1, TraceLo: 0, Span: 1<<64 - 1}},
 		Watermark{Mono: 21},
 	}
 	for _, rec := range want {
@@ -188,6 +190,8 @@ func malformedCases() map[string]malformedCase {
 		"bracket hook 0":     {typeBracket, bad(func(b []byte) []byte { le.PutUint32(b, 0); return b }), false},
 		"bracket ktid < 0":   {typeBracket, bad(func(b []byte) []byte { le.PutUint32(b[4:], 1<<31); return b }), false},
 		"bracket exit<enter": {typeBracket, bad(func(b []byte) []byte { le.PutUint64(b[16:], 2); return b }), false},
+		"bracket otel zero":  {typeBracket, appendOtel(bad(func(b []byte) []byte { return b }), Otel{}), false},
+		"bracket otel half":  {typeBracket, appendOtel(bad(func(b []byte) []byte { return b }), Otel{TraceHi: 1}), false},
 		"watermark long":     {typeWatermark, make([]byte, 16), false},
 		"stack short":        {typeStack, make([]byte, 8), false},
 		"stack bad utf8":     {typeStack, stringsBody(1, 1, []string{"\xff\xfe"}), false},

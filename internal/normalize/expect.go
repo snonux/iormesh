@@ -54,6 +54,20 @@ type ExpectedEvent struct {
 	// HTTP, when set, must match an http event's request (M3, task 3b4);
 	// see ExpectedHTTP. Only http events declare it.
 	HTTP *ExpectedHTTP `json:"http,omitempty"`
+	// Otel is the OpenTelemetry span the event ran in (M3 step 8, task
+	// 4b4); it requires attribution java. Like args.count it is compared
+	// when absent too: a declaration without it matches only an event
+	// outside any span, so a golden says where the spans end as well —
+	// an agent that tagged the server's request reads, read before the
+	// handler made its span current, would fail it.
+	Otel *ExpectedOtel `json:"otel,omitempty"`
+}
+
+// ExpectedOtel declares an event's span: both ids, W3C form (32 and 16
+// lowercase hex digits), as the event's otel object carries them.
+type ExpectedOtel struct {
+	TraceID string `json:"trace_id"`
+	SpanID  string `json:"span_id"`
 }
 
 // ExpectedHTTP declares an http event's request. Unset fields are not
@@ -235,6 +249,9 @@ func (e ExpectedEvent) validate(threadProc map[string]string) error {
 	if e.HTTP != nil && e.Event != schema.KindHTTP {
 		return fmt.Errorf("http declared on a %s event", e.Event)
 	}
+	if err := e.validateOtel(); err != nil {
+		return err
+	}
 	if err := wantKind(e.Thread, "t", false); err != nil {
 		return fmt.Errorf("thread: %w", err)
 	}
@@ -282,6 +299,31 @@ func (e ExpectedEvent) validateJava() error {
 	cls, method, ok := strings.Cut(e.Java.Method, "#")
 	if !ok || cls == "" || method == "" || strings.ContainsAny(method, "#()") {
 		return fmt.Errorf("java method %q: want class#method", e.Java.Method)
+	}
+	return nil
+}
+
+// otelIDRE: W3C trace-context ids are lowercase hex — 32 digits for a
+// trace id, 16 for a span id (all-zero ids are invalid, checked apart).
+var (
+	traceIDRE = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	spanIDRE  = regexp.MustCompile(`^[0-9a-f]{16}$`)
+)
+
+// validateOtel requires a declared span to come with attribution java —
+// the ids are the agent's — and to name valid W3C ids, so a typo cannot
+// declare a span no event could carry.
+func (e ExpectedEvent) validateOtel() error {
+	o := e.Otel
+	switch {
+	case o == nil:
+		return nil
+	case e.Attribution != schema.AttributionJava:
+		return fmt.Errorf("otel declared without attribution java")
+	case !traceIDRE.MatchString(o.TraceID) || strings.Trim(o.TraceID, "0") == "":
+		return fmt.Errorf("otel.trace_id %q is not a valid W3C trace id", o.TraceID)
+	case !spanIDRE.MatchString(o.SpanID) || strings.Trim(o.SpanID, "0") == "":
+		return fmt.Errorf("otel.span_id %q is not a valid W3C span id", o.SpanID)
 	}
 	return nil
 }

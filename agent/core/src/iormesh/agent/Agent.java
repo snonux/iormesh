@@ -19,7 +19,9 @@ import java.util.Set;
  * directory (decision #27, iormesh.bridge.Ring). The HTTP hooks
  * (HttpHooks, HttpTransformer; decision #22) write one HTTP record per
  * request the JDK's HttpServer, HttpClient or HttpURLConnection
- * completes, into the same ring.
+ * completes, into the same ring. With a ring, an app's OpenTelemetry is
+ * read too (OtelTransformer, iormesh.bridge.Otel; decision #20): each
+ * record carries the trace and span ids of the span current then.
  *
  * The agent must never take the target down: any failure while
  * installing is reported on stderr and leaves the JVM as it was (or with
@@ -73,6 +75,27 @@ public final class Agent {
                 () -> atExit(args, table, transformer, http, bridge), "iormesh-agent-exit"));
         retransform(inst, table, transformer);
         retransformHttp(inst, http);
+        if (args.spool() != null) {
+            installOtel(inst, bridge);
+        }
+    }
+
+    /**
+     * Span-context reading (decision #20), only with a ring — the ids
+     * have nowhere else to go. The transformer arms each OTEL copy as
+     * the app initializes it; copies a live attach finds initialized
+     * already are armed here. A failure costs the OTEL ids only.
+     */
+    static void installOtel(Instrumentation inst, Bridge bridge) {
+        try {
+            OtelTransformer.warmUp();
+            inst.addTransformer(new OtelTransformer(), false);
+            for (Class<?> c : OtelTransformer.loaded(inst)) {
+                bridge.otel(c);
+            }
+        } catch (Exception | LinkageError e) {
+            System.err.println("iormesh-agent: otel ids off: " + e);
+        }
     }
 
     /**
@@ -238,8 +261,9 @@ public final class Agent {
             Set<Integer> applied = t.applied();
             Set<String> seen = t.seen();
             out.printf("# iormesh-agent debug: variant=%s java=%d skips=%d fails=%d stacks=%d"
-                    + " ring_dropped=%d%n", table.variant(), Runtime.version().feature(),
-                    bridge.skips(), bridge.fails(), bridge.stacks(), bridge.ringDropped());
+                    + " ring_dropped=%d otel=%d%n", table.variant(), Runtime.version().feature(),
+                    bridge.skips(), bridge.fails(), bridge.stacks(), bridge.ringDropped(),
+                    bridge.otelArmed());
             for (HookTable.Hook h : table.hooks()) {
                 String status = applied.contains(h.id()) ? "applied"
                         : seen.contains(h.owner()) ? "missing" : "unloaded";

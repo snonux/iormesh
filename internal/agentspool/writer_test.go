@@ -136,6 +136,17 @@ func bracketBody(b Bracket) []byte {
 	for _, v := range []uint64{b.EnterMono, b.ExitMono, b.StackID, b.ThreadID} {
 		body = le.AppendUint64(body, v)
 	}
+	if b.Otel != (Otel{}) {
+		body = appendOtel(body, b.Otel) // the long form, as Ring.bracket writes it in a span
+	}
+	return body
+}
+
+// appendOtel appends the three OTEL id words.
+func appendOtel(body []byte, o Otel) []byte {
+	for _, v := range []uint64{o.TraceHi, o.TraceLo, o.Span} {
+		body = le.AppendUint64(body, v)
+	}
 	return body
 }
 

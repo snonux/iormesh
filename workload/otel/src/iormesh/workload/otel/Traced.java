@@ -10,7 +10,7 @@ import iormesh.workload.scenarios.HttpCall;
  * client's span (trace id, client span id), current while the client
  * sends the call, and the server's child span (same trace id, server span
  * id), current while the server answers it. The ids are fixed so the
- * golden can name them (expect-pending.json's otel objects); a real SDK
+ * golden can name them (expect.json's otel objects); a real SDK
  * would draw them at random.
  *
  * <p>{@link #call} carries the W3C trace-context headers the client's

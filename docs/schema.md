@@ -15,7 +15,9 @@ reader never sees a changed meaning. Enum values (`drop_reason`,
 `end_reason`, …) are appended the same way as event kinds, so a reader
 should pass an unknown value through. One meaning did narrow:
 task vd4 moved skipped program runs out of a plain `drop`'s `args.lost`
-into their own `skipped_runs` drops (see `drop` below).
+into their own `skipped_runs` drops (see `drop` below). M3
+appended the optional `otel` object (task 4b4, "OpenTelemetry span
+context" below).
 
 ## Files
 
@@ -82,6 +84,7 @@ Required fields are always present; a zero is a real zero.
 | `http` | object, optional | the request, set exactly on `http` events — see "HTTP events" (*provisional until M3 closes*) |
 | `session` | object, optional | the host description, set exactly on `session` events (below) |
 | `stack_id` | int, optional | the native user stack the thread entered the syscall with: an id of `stacks.ndjson` (≥ 1); only with `-native-stacks` (below) |
+| `otel` | object, optional | `{trace_id, span_id}`, the OpenTelemetry span the Java code ran in; only with attribution `java`, absent outside a span (appended in M3) — see "OpenTelemetry span context" |
 
 `(pid, pid_incarnation, fd, fd_gen)` names one fd instance, even
 when a library's open and a later socket land on the same number.
@@ -693,12 +696,50 @@ completes on the client's executor, with no caller on the stack) and
 the other libraries of #22's set.
 
 The agent writes each request as an HTTP record of the ring
-(format version 3: exit stamp, stack id, Java thread id, kernel
+(format version 4: exit stamp, stack id, Java thread id, kernel
 tid, status, the string and request-header counts, flags — server
-or client — and the exchange count, then method, scheme, host, path,
-version, local and remote socket address, and the headers), redacted
-before it is written; a record that would pass 16 KiB keeps the
-request and drops its headers.
+or client — the exchange count and the OTEL span ids, then method,
+scheme, host, path, version, local and remote socket address, and
+the headers), redacted before it is written; a record that would
+pass 16 KiB keeps the request and drops its headers.
+
+## OpenTelemetry span context (M3)
+
+When a JVM traced with `-spool` runs the OpenTelemetry API (with
+or without an SDK, decision #20's default), each event joined to
+the agent gets the span that was current on its Java thread:
+
+```json
+{"event":"write","fd":6,"attribution":"java",
+ "java":{"thread":"main","stack":[31,32]},
+ "otel":{"trace_id":"a3ce929d0e0e47364bf92f3577b34d01",
+  "span_id":"c11e0000000000a1"}}
+```
+
+| `otel` field | Type | Meaning |
+|---|---|---|
+| `trace_id` | string | the W3C trace id, 32 lowercase hex digits, never all zero |
+| `span_id` | string | the W3C span id, 16 lowercase hex digits, never all zero |
+
+- A syscall gets the span current when its bracket opened (the
+  hooked JDK method's entry); an `http` event the span current
+  when the request was recorded (the server's exchange closed,
+  the client's response read). Events outside any span, events
+  that stay `none`, and every event of an app without OTEL carry
+  no `otel`.
+- The ids are what the app's `Span.current().getSpanContext()`
+  returns, read reflectively — the agent has no OTEL dependency —
+  so iormesh events join the app's distributed traces in any OTEL
+  backend by these two ids. They are span metadata, not payload;
+  spans themselves are not ingested (#20's optional half).
+- The agent starts reading a copy of OTEL (one per class loader)
+  only after the app initialized OTEL's context storage, and never
+  initializes it itself; I/O before the app's first use of an
+  OTEL context carries no ids, which is right — no span can be
+  current then.
+- In the ring (format 4) a bracket inside a span is 72 bytes
+  instead of 48 (trace id as two u64 halves, span id as one u64);
+  the HTTP record always carries the three words, zero for none.
 
 ## Graph
 

@@ -24,8 +24,9 @@ import "errors"
 const (
 	// Version is the only ring format version this reader accepts. 2
 	// (task 2b4) added HOOK records and THREAD's flags word, 3 (task 3b4)
-	// HTTP records.
-	Version = 3
+	// HTTP records, 4 (task 4b4) OTEL ids: a BRACKET of bracketOtelLen
+	// and three more words in HTTP's fixed part.
+	Version = 4
 	// magic is "IORMRING" as a little-endian word; the agent stores it
 	// last, so a reader that sees it sees a complete header.
 	magic = 0x474e49524d524f49
@@ -76,16 +77,21 @@ const hookStrings = 5
 
 // Fixed record lengths, framing word included.
 const (
-	bracketLen   = wordLen + 40
-	watermarkLen = wordLen + 8
+	bracketLen = wordLen + 40
+	// bracketOtelLen is a BRACKET whose enter ran inside an OTEL span:
+	// bracketLen plus the trace id halves and the span id (u64 each).
+	// The agent writes it only then, so an app without OTEL pays nothing.
+	bracketOtelLen = bracketLen + 24
+	watermarkLen   = wordLen + 8
 	// stringsHead is a STACK, THREAD or HOOK record's fixed part: the
 	// word, a u64 id, a u32 count or tid and a u32 of flags (THREAD's;
 	// zero in the others).
 	stringsHead = wordLen + 16
 	// httpHead is an HTTP record's fixed part: the word, mono, stack id
 	// and Java thread id (u64 each), ktid, status, the string count, the
-	// request-header count, flags and the exchange count (u32 each).
-	httpHead = wordLen + 48
+	// request-header count, flags and the exchange count (u32 each), then
+	// the OTEL trace id halves and span id (u64 each, zero: no span).
+	httpHead = wordLen + 72
 	// httpFixed is the number of leading strings of an HTTP record:
 	// method, scheme, host, path, version, local and remote address.
 	httpFixed = 7

@@ -206,6 +206,20 @@ func TestEventValidateRejects(t *testing.T) {
 		"args.count 1 on a read": func(e *Event) {
 			e.Event, e.Err, e.Ret, e.Args.Count = KindRead, "", 1, ptr(uint64(1))
 		},
+		// M3 step 8: otel ids come from the agent and are W3C ids.
+		"otel with attribution none": func(e *Event) {
+			e.Attribution, e.Java, e.Otel = AttributionNone, nil, validOtel()
+		},
+		"otel short trace id": func(e *Event) { e.Otel = &Otel{TraceID: "a3ce", SpanID: validOtel().SpanID} },
+		"otel upper-case trace id": func(e *Event) {
+			e.Otel = &Otel{TraceID: strings.ToUpper(validOtel().TraceID), SpanID: validOtel().SpanID}
+		},
+		"otel zero span id": func(e *Event) {
+			e.Otel = &Otel{TraceID: validOtel().TraceID, SpanID: "0000000000000000"}
+		},
+		"otel zero trace id": func(e *Event) {
+			e.Otel = &Otel{TraceID: strings.Repeat("0", 32), SpanID: validOtel().SpanID}
+		},
 	}
 	for name, breakIt := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -213,6 +227,35 @@ func TestEventValidateRejects(t *testing.T) {
 			breakIt(&e)
 			checkRejected(t, e)
 		})
+	}
+}
+
+// validOtel is the otel scenario's first client span.
+func validOtel() *Otel {
+	return &Otel{TraceID: "a3ce929d0e0e47364bf92f3577b34d01", SpanID: "c11e0000000000a1"}
+}
+
+// TestOtelRoundTrip: a java event inside a span is valid and keeps its
+// ids through NDJSON, appended after the other fields.
+func TestOtelRoundTrip(t *testing.T) {
+	e := validEvent()
+	e.Otel = validOtel()
+	if err := e.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	data := AppendEvent(nil, &e)
+	if !strings.HasSuffix(string(data), `"otel":{"trace_id":"a3ce929d0e0e47364bf92f3577b34d01","span_id":"c11e0000000000a1"}}`) {
+		t.Errorf("otel not last: %s", data)
+	}
+	got, err := DecodeEvent(data)
+	if err != nil || got.Otel == nil || *got.Otel != *e.Otel {
+		t.Fatalf("round trip: %+v, %v", got.Otel, err)
+	}
+	for _, bad := range []string{`,"span_id":"c11e0000000000a1"`, `"trace_id":"a3ce929d0e0e47364bf92f3577b34d01",`} {
+		line := strings.Replace(string(data), bad, "", 1)
+		if _, err := DecodeEvent([]byte(line)); !errors.Is(err, ErrInvalid) {
+			t.Errorf("otel without %s: %v", bad, err)
+		}
 	}
 }
 

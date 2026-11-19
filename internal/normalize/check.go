@@ -91,7 +91,8 @@ func stateSuffix(state string) string {
 // matchEvent reports whether collected event e satisfies declared d under
 // the current bindings, binding d's symbols if so (and nothing if not).
 func (b *bindings) matchEvent(d ExpectedEvent, e schema.Event) bool {
-	if !plainFieldsMatch(d, e) || !javaMatch(d.Java, e, b.methods) || !httpMatch(d.HTTP, e.HTTP) {
+	if !plainFieldsMatch(d, e) || !javaMatch(d.Java, e, b.methods) || !httpMatch(d.HTTP, e.HTTP) ||
+		!otelMatch(d.Otel, e.Otel) {
 		return false
 	}
 	m := b.mark()
@@ -171,6 +172,15 @@ func countMatch(want, got *uint64) bool {
 		return want == got
 	}
 	return *want == *got
+}
+
+// otelMatch requires the declared span, and no span when none is
+// declared (ExpectedEvent.Otel).
+func otelMatch(want *ExpectedOtel, got *schema.Otel) bool {
+	if want == nil || got == nil {
+		return want == nil && got == nil
+	}
+	return want.TraceID == got.TraceID && want.SpanID == got.SpanID
 }
 
 func signalMatch(want, got *int32) bool {

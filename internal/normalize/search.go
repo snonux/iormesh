@@ -177,5 +177,8 @@ func describe(d ExpectedEvent) string {
 	if d.Java != nil {
 		add("java", strings.TrimSpace(d.Java.Thread+" "+d.Java.Method))
 	}
+	if d.Otel != nil {
+		add("otel", d.Otel.TraceID+"/"+d.Otel.SpanID)
+	}
 	return strings.Join(parts, " ")
 }

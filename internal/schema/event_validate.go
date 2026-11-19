@@ -65,6 +65,9 @@ func (e *Event) validatePayloads() error {
 	if err := e.validateHTTP(); err != nil {
 		return err
 	}
+	if err := e.validateOtel(); err != nil {
+		return err
+	}
 	if (e.Event == KindSession) != (e.Session != nil) {
 		return invalidf("session object on a %s event (set exactly on session events)", e.Event)
 	}
@@ -115,6 +118,42 @@ func (e *Event) validateAttribution() error {
 			e.Attribution, AttributionJava, AttributionNone)
 	}
 	return nil
+}
+
+// validateOtel keeps the otel object with its source and form: the ids
+// come from the Java agent, so only with attribution java, and they are
+// valid W3C ids — a consumer joins them to OTEL backends unchecked.
+func (e *Event) validateOtel() error {
+	if e.Otel == nil {
+		return nil
+	}
+	if e.Attribution != AttributionJava {
+		return invalidf("otel object with attribution %s (java only)", e.Attribution)
+	}
+	if !w3cID(e.Otel.TraceID, 32) {
+		return invalidf("otel.trace_id %q: want 32 lowercase hex digits, not all zero", e.Otel.TraceID)
+	}
+	if !w3cID(e.Otel.SpanID, 16) {
+		return invalidf("otel.span_id %q: want 16 lowercase hex digits, not all zero", e.Otel.SpanID)
+	}
+	return nil
+}
+
+// w3cID reports whether s is a W3C trace-context id of n lowercase hex
+// digits, not all zero (the invalid id).
+func w3cID(s string, n int) bool {
+	if len(s) != n {
+		return false
+	}
+	zero := true
+	for i := range len(s) {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+		zero = zero && c == '0'
+	}
+	return !zero
 }
 
 // validateKindArgs requires the arguments a kind cannot be read without:

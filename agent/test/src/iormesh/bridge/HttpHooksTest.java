@@ -103,7 +103,7 @@ public final class HttpHooksTest {
         for (int i = 0; i < 64; i++) {
             s.add("x-h" + i + ": " + "v".repeat(1000));
         }
-        check(r.http(1, 2, 3, 4, 200, s.toArray(new String[0]), 64, 0, 1), "written");
+        check(r.http(1, 2, 3, 4, 200, s.toArray(new String[0]), 64, 0, 1, 0, 0, 0), "written");
         ByteBuffer b = map(r.path());
         int o = records(b).get(0)[1];
         equal(7, b.getInt(o + 40), "only the fixed strings");

@@ -142,6 +142,16 @@ final class Bridge {
         return (long[]) hooks.getMethod("httpCounts").invoke(null);
     }
 
+    /** See Hooks.otel: arms span-context reading for an already loaded LazyStorage. */
+    void otel(Class<?> lazyStorage) throws ReflectiveOperationException {
+        hooks.getMethod("otel", Class.class).invoke(null, lazyStorage);
+    }
+
+    /** See Hooks.otelArmed: the OTEL copies being read. */
+    int otelArmed() throws ReflectiveOperationException {
+        return (int) hooks.getMethod("otelArmed").invoke(null);
+    }
+
     void startWatermarks(long intervalMs) throws ReflectiveOperationException {
         hooks.getMethod("startWatermarks", long.class).invoke(null, intervalMs);
     }

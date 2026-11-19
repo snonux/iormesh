@@ -147,6 +147,22 @@ type Event struct {
 	// syscall events whose stack the kernel could walk; absent otherwise,
 	// and always ≥ 1 when set. Appended after Session: fields only append.
 	StackID *uint32 `json:"stack_id,omitempty" parquet:"stack_id,optional"`
+	// Otel names the OpenTelemetry span the I/O ran in (decision #20, M3
+	// step 8): the span context current on the Java thread when the
+	// agent's bracket opened, or when an http event's request was
+	// recorded. Only with attribution java, and only inside a span: an
+	// event outside any span, or of an app without OTEL, has none.
+	// Appended after StackID (task 4b4).
+	Otel *Otel `json:"otel,omitempty" parquet:"otel,optional"`
+}
+
+// Otel is an OpenTelemetry span context in W3C form, so an event joins
+// the app's distributed trace in any OTEL backend by these ids.
+type Otel struct {
+	// TraceID is 32 lowercase hex digits, never all zero.
+	TraceID string `json:"trace_id" parquet:"trace_id"`
+	// SpanID is 16 lowercase hex digits, never all zero.
+	SpanID string `json:"span_id" parquet:"span_id"`
 }
 
 // Args holds every syscall-specific argument as an optional field: one

@@ -44,6 +44,11 @@ import java.util.function.LongSupplier;
  * ring (no spool= option) brackets are only counted, and only when the
  * agent's debug dump asked for counts ({@link #counts}).
  *
+ * With an OTEL-instrumented app (decision #20, task 4b4), each bracket
+ * and HTTP record also carries the trace and span ids of the OTEL span
+ * current at its enter (at the request's end for HTTP), read by
+ * {@link Otel} once the app's OTEL is armed through {@link #otel}.
+ *
  * HTTP hooks (decision #22, task 3b4) are a second kind of entry point,
  * {@link #http}: called once when a hooked HTTP method returns (or
  * throws), with what the method has at hand, it hands those objects to
@@ -235,9 +240,38 @@ public final class Hooks {
                 r.dropped();
             }
             stacks.getAsLong();
+            Otel.read(t);   // loads Otel now, not inside the target's first I/O
         } finally {
             t.busy = false;
         }
+    }
+
+    /**
+     * Arms span-context reading for the OTEL copy that defined
+     * lazyStorage (io.opentelemetry.context.LazyStorage): called by that
+     * class's rewritten static initializer, at its end (OtelTransformer),
+     * on the app thread that first used OTEL's context. Never throws into
+     * it — a throw would fail the app's OTEL for good — and keeps the
+     * thread busy, so the class loading arming does is not bracketed.
+     */
+    public static void otel(Class<?> lazyStorage) {
+        try {
+            Brackets t = STATE.get();
+            boolean wasBusy = t.busy;
+            t.busy = true;
+            try {
+                Otel.arm(lazyStorage, t);
+            } finally {
+                t.busy = wasBusy;
+            }
+        } catch (Throwable e) {
+            countSkip(FAILS);
+        }
+    }
+
+    /** The OTEL copies armed so far and still loaded (debug dump). */
+    public static int otelArmed() {
+        return Otel.armed();
     }
 
     public static void enter(int hook) {
@@ -265,6 +299,10 @@ public final class Hooks {
                 describe(t, r);
             }
             t.stacks[d] = stacks.getAsLong();
+            Otel.read(t);
+            t.traceHis[d] = t.otelHi;
+            t.traceLos[d] = t.otelLo;
+            t.spans[d] = t.otelSpan;
             if (t.virtual) {
                 // The carrier now; close compares it with the one then.
                 t.ktids[d] = Brackets.lookupKtid();
@@ -380,8 +418,9 @@ public final class Hooks {
             }
             long stack = stacks.getAsLong();
             int ktid = t.virtual ? Brackets.lookupKtid() : t.kernelTid();
+            Otel.read(t);
             r.http(mono, stack, t.owner.getId(), ktid, meta[0], s, meta[1], meta[2],
-                    Math.max(meta[3], 1));
+                    Math.max(meta[3], 1), t.otelHi, t.otelLo, t.otelSpan);
             return true;
         } finally {
             t.closing = Brackets.IDLE;
@@ -413,7 +452,8 @@ public final class Hooks {
         try {
             int ktid = t.carrierTid(d);
             long exit = System.nanoTime();
-            r.bracket(t.hooks[d], ktid, t.enters[d], exit, t.stacks[d], t.owner.getId());
+            r.bracket(t.hooks[d], ktid, t.enters[d], exit, t.stacks[d], t.owner.getId(),
+                    t.traceHis[d], t.traceLos[d], t.spans[d]);
         } finally {
             t.busy = wasBusy;
             t.closing = Brackets.IDLE;

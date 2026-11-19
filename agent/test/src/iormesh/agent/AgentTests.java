@@ -33,6 +33,8 @@ public final class AgentTests {
         cases.addAll(iormesh.bridge.HooksTest.cases());
         cases.addAll(iormesh.bridge.RingTest.cases());
         cases.addAll(iormesh.bridge.HttpHooksTest.cases());
+        cases.addAll(iormesh.bridge.OtelTest.cases());
+        cases.addAll(OtelTransformerTest.cases());
         int failed = 0;
         for (Case c : cases) {
             try {

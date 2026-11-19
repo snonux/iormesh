@@ -69,6 +69,7 @@ func TestHTTPPlain(t *testing.T) {
 	want := expectation(t, "http-plain")
 	assertGolden(t, got, want)
 	assertRequestsPaired(t, got.Events)
+	assertNoOtel(t, got.Events)
 	t.Run("wrong expectations are caught", func(t *testing.T) {
 		assertCaught(t, got, want, map[string]func(*normalize.Expectation){
 			"another status": func(x *normalize.Expectation) {
@@ -153,16 +154,45 @@ func TestHTTPRedaction(t *testing.T) {
 
 // TestOtelHTTP: the OTEL flavor's pair (HttpURLConnection against the
 // JDK's HttpServer) under the agent satisfies its golden — the
-// HttpURLConnection hook's http events included. The otel ids the golden
-// will add stay pending (expect-pending.json) until the agent reads span
-// context (M3 step 8, task 4b4).
+// HttpURLConnection hook's http events included, and since M3 step 8
+// (task 4b4) the otel ids: every client event of a call and the server's
+// reply and http event carry the declared span, the server's accept and
+// request reads (before its handler makes the span current) none.
 func TestOtelHTTP(t *testing.T) {
 	enableParallelIfRequested(t)
 	h := newHarness(t)
 	h.WorkloadJar = absPath(t, otelJarDefault)
 	_, got := traceHTTP(t, h, "otel", false)
-	assertGolden(t, got, expectation(t, "otel"))
+	want := expectation(t, "otel")
+	assertGolden(t, got, want)
 	assertRequestsPaired(t, got.Events)
+	t.Run("wrong expectations are caught", func(t *testing.T) {
+		assertCaught(t, got, want, map[string]func(*normalize.Expectation){
+			// Declared event 3 is the server's first reply write, in span 5e7e…a1.
+			"another span": func(x *normalize.Expectation) {
+				x.Events[2].Otel = &normalize.ExpectedOtel{TraceID: x.Events[2].Otel.TraceID,
+					SpanID: "5e7e0000000000a2"}
+			},
+			"a span ends early": func(x *normalize.Expectation) { x.Events[2].Otel = nil },
+			// Declared event 2 is the server's request read, outside any span.
+			"a span starts early": func(x *normalize.Expectation) {
+				x.Events[1].Otel = x.Events[2].Otel
+			},
+		})
+	})
+}
+
+// assertNoOtel: an app without OpenTelemetry gets no otel object on any
+// event — the agent arms span reading only when the app's OTEL
+// initializes (task 4b4).
+func assertNoOtel(t *testing.T, events []schema.Event) {
+	t.Helper()
+	for _, e := range events {
+		if e.Otel != nil {
+			t.Fatalf("event seq %d (%s) carries otel %+v without OTEL in the app",
+				e.Seq, e.Event, e.Otel)
+		}
+	}
 }
 
 // httpOf replaces declared event i's http object with a copy and returns

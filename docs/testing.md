@@ -234,30 +234,28 @@ not know the scenario.
 
 Their goldens came in two parts: `expect.json` with what the
 tracer records without an agent, and `expect-pending.json`
-adding what needs it. The agent's join (task 2b4) and HTTP
-hooks (task 3b4) taught `normalize.ExpectedEvent` the
-`attribution`, `java` (thread, causing method as
-`class#method`) and `http` fields (`ExpectedHTTP`: method,
-scheme, host, path, status, `req_seq`, version, and header
-lines that must be among the event's), so the four agent-only
-scenarios have one `expect.json` again, and the integration
-tests run them under the agent:
+adding what needs it. The agent's join (task 2b4), HTTP hooks
+(task 3b4) and span-context read (task 4b4) taught
+`normalize.ExpectedEvent` the `attribution`, `java` (thread,
+causing method as `class#method`), `http` (`ExpectedHTTP`:
+method, scheme, host, path, status, `req_seq`, version, and
+header lines that must be among the event's) and `otel`
+(`trace_id`, `span_id`; compared when absent too, so an event
+declared without it must be outside any span) fields, so all
+five scenarios have one `expect.json` again —
+`TestNoPendingGoldens` fails on a new pending file — and the
+integration tests run them under the agent:
 
 | Test | What it checks |
 |---|---|
 | `TestJavaMethodFlow` | method-flow golden under the agent with `-spool`: every declared op on its declared Java thread and causing method; one ring read; every stack id in `methods.ndjson`; mutated goldens fail |
-| `TestHTTPPlain` | http-plain golden: one `http` event per request on each end (method, scheme, path, status, the client's host), after the I/O that completed it, caused by `HttpServe#handle` and `HttpFetch#call`; both ends on one `conn_id`, `req_seq` 1–3, each pair agreeing on method, path and status; every request found its connection; mutated goldens fail |
+| `TestHTTPPlain` | http-plain golden: one `http` event per request on each end (method, scheme, path, status, the client's host), after the I/O that completed it, caused by `HttpServe#handle` and `HttpFetch#call`; both ends on one `conn_id`, `req_seq` 1–3, each pair agreeing on method, path and status; every request found its connection; no `otel` on any event (the workload has no OTEL); mutated goldens fail |
 | `TestHTTPTLS` | the same over TLS, scheme `https`, plus the certificate file I/O caused by `HttpScenario#serverContext` and `#client` |
 | `TestHTTPRedaction` | http-redaction golden: the query keeps its names with every value masked, the planted `Authorization`, `X-Api-Token`, `Cookie` and `Set-Cookie` headers are recorded as `name: ***`; no planted secret in `events.ndjson`, `graph.json` or the Java tables; a golden forbidding the masked header fails |
-| `TestOtelHTTP` | the OTEL flavor (`workload-otel.jar`, HttpURLConnection against HttpServer) satisfies its `expect.json`, the HttpURLConnection hook's `http` events included |
+| `TestOtelHTTP` | the OTEL flavor (`workload-otel.jar`, HttpURLConnection against HttpServer) satisfies its `expect.json`, the HttpURLConnection hook's `http` events included: every client event of a call and the server's reply write and `http` event carry the call's declared span ids, the server's accept and request reads none; a golden with another span, a span ending early or starting early fails |
 
-`otel`'s `otel` ids (`trace_id`, `span_id` on every event inside
-a span) stay in `expect-pending.json` until the agent reads span
-context (M3 step 8, task 4b4): its `expect.json` is the pending
-file without them, which `TestPendingGoldensExtendLoadable`
-(`internal/normalize`) keeps true, and
-`TestOtelGoldenIDsDeclaredByScenario` checks the ids against
-`OtelScenario`'s declaration.
+`TestOtelGoldenIDsDeclaredByScenario` (`internal/normalize`)
+checks the golden's ids against `OtelScenario`'s declaration.
 
 ## Performance baselines
 

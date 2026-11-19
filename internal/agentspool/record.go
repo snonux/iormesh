@@ -16,7 +16,8 @@ type Record interface {
 // Bracket is one closed agent bracket: a hooked JDK method ran on thread
 // ThreadID (kernel tid KTID) from EnterMono to ExitMono, CLOCK_MONOTONIC
 // ns (System.nanoTime, the clock bpf_ktime_get_ns reads), called from the
-// stack StackID (0: no stack walked).
+// stack StackID (0: no stack walked). Otel is the OTEL span current at
+// the enter, zero when none was (or the app has no OTEL).
 type Bracket struct {
 	Hook      int32
 	KTID      int32
@@ -24,6 +25,7 @@ type Bracket struct {
 	ExitMono  uint64
 	StackID   uint64
 	ThreadID  uint64
+	Otel      Otel
 }
 
 // Stack names the frames of a stack id, innermost first, each
@@ -111,9 +113,10 @@ func decode(typ uint32, rec []byte) (Record, error) {
 }
 
 // decodeBracket checks what the agent guarantees: a positive hook id, a
-// non-negative tid (0 = unknown) and an exit not before the enter.
+// non-negative tid (0 = unknown), an exit not before the enter, and in
+// the long form (bracketOtelLen) a valid span.
 func decodeBracket(rec []byte) (Record, error) {
-	if len(rec) != bracketLen {
+	if len(rec) != bracketLen && len(rec) != bracketOtelLen {
 		return nil, errMalformed
 	}
 	b := Bracket{
@@ -126,6 +129,11 @@ func decodeBracket(rec []byte) (Record, error) {
 	}
 	if b.Hook <= 0 || b.KTID < 0 || b.ExitMono < b.EnterMono {
 		return nil, errMalformed
+	}
+	if len(rec) == bracketOtelLen {
+		if b.Otel, _ = decodeOtel(rec, bracketLen); !b.Otel.Valid() {
+			return nil, errMalformed
+		}
 	}
 	return b, nil
 }
