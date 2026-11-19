@@ -37,7 +37,12 @@ type MarkedNative struct {
 // A queue per thread, not one map keyed by (tid, time): a thread issues
 // one syscall at a time, so its marks arrive in enter order and its
 // events leave the correlator in that same order — the join then only
-// ever looks at the head. That spares a map insert, lookup and delete
+// ever looks at the head. That order is an assumption the join depends
+// on (the correlator emits in completion order, which for one thread is
+// enter order; a fold precedes the thread's next call): if it broke, a
+// mark would be skipped as stale before its event came and the event
+// would stay none, never be misattributed — JavaStats.MarkSkipped counts
+// those skips. That spares a map insert, lookup and delete
 // with a 16-byte key per event, which with the S3 burst's every event
 // marked was a tenth of the join's CPU (task ud4).
 type markQueue struct {
@@ -74,7 +79,11 @@ func (j *JavaJoin) takeMark(ev *schema.Event) (NativeMark, bool) {
 	}
 	for q.head < len(q.marks) && q.marks[q.head].EnterBoot < ev.BootNS {
 		q.head++
+		j.stats.MarkSkipped++
 	}
+	// A head newer than ev (or none) is the normal unmarked case — a
+	// syscall from outside every hooked native, counted as Unmarked by
+	// attribute — not a miss.
 	var m NativeMark
 	ok := q.head < len(q.marks) && q.marks[q.head].EnterBoot == ev.BootNS
 	if ok {

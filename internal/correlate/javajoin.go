@@ -165,6 +165,13 @@ type JavaStats struct {
 	HTTP, HTTPNoConn uint64
 	// DNS counts the dns events emitted (task wd4).
 	DNS uint64
+	// MarkSkipped counts marks passed over unclaimed because an event of
+	// their thread entered later: their own event never asked (not
+	// joinable, no ring) or never came (a lost exit). The join assumes a
+	// thread's events arrive in enter order; were that broken, marks
+	// would be skipped here before their events came, so a rise in this
+	// count beside falling attribution is the sign to look for.
+	MarkSkipped uint64
 	// MarkFailed counts JVMs whose natives could not be probed: their
 	// syscalls carry no mark and stay none.
 	MarkFailed int
@@ -272,7 +279,11 @@ func (j *JavaJoin) poll(now uint64) error {
 	for _, r := range rings {
 		j.addRing(r)
 	}
-	j.scanned = now
+	// Event polls with bootClock's estimate, which can lag the precise
+	// reading a Poll took before it, so now may be behind scanned. Never
+	// step back: an earlier scan's claim still holds, and a smaller
+	// scanned would only delay decisions and timeouts (task ud4 review).
+	j.scanned = max(j.scanned, now)
 	for _, v := range j.jvms {
 		if err := j.drain(v); err != nil {
 			return err

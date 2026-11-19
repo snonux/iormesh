@@ -769,9 +769,9 @@ the agent: no lost records, against 6–56 % before.
 the tracer spends ~8.2–8.5 k cycles per event (from ~13.5 k), 3.8 µs
 at 1 thread and 5.6 µs at 4 at load 8–13 (task clock), 3.9–4.7 µs at
 load 6–9 (`measure.sh`); even with the core to itself that cycle count
-is ~2.7 µs at 3 GHz. Without `-spool` the unfolded burst is at 1.7 µs
-(1 thread) and 2.3 µs (4 threads) at load 6.5–10, so the plain item
-stays at the boundary on this host. The limit is unchanged. What is
+is ~2.7 µs at 3 GHz. Without `-spool` the unfolded burst is under budget
+at 1 thread (1.7 µs) and over at 4 (2.28 µs, with 30–58 % of the
+records lost to the full ring), at load 6.5–10. The limit is unchanged. What is
 left is spread thin (a `perf record` of cycles after the cuts: no
 symbol much above 5 %): NDJSON encoding ~25 % (string escaping, integers,
 the args object), the correlator's pairing ~15 %, the join ~15 %

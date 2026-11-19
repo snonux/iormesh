@@ -1195,8 +1195,9 @@ answer), and deferred.
      copies, integer and string encoding): instructions per event
      −34 % with `-spool` and −19 % without; at load 8–13 the
      `-spool` tracer still spends 3.8 µs at 1 thread and 5.6 µs at
-     4 (from 7.6 / 9.2, task clock, medians of 5), and the plain
-     unfolded burst 1.7 / 2.3 µs at load 6.5–10 — `-spool` stays
+     4 (from 7.6 / 9.2, task clock, medians of 5); the plain
+     unfolded burst is under at 1 thread (1.7 µs) and over at 4
+     (2.28 µs, 30–58 % of records lost), load 6.5–10 — `-spool` stays
      **over** budget, its next step being M4's output format
      (s3-overhead.md, "Follow-up (ud4)"); 5b4 re-measures, the
      limit unchanged. Measured as the

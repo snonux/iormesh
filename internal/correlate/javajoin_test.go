@@ -619,6 +619,9 @@ func TestJavaJoinMarkQueue(t *testing.T) {
 	if !reflect.DeepEqual(got, want) || jt.j.pendingMarks() != 0 {
 		t.Fatalf("attributions %v, want %v; %d marks left", got, want, jt.j.pendingMarks())
 	}
+	if n := jt.j.Stats().MarkSkipped; n != 1 {
+		t.Errorf("MarkSkipped %d, want 1 (the lost exit's mark)", n)
+	}
 }
 
 // TestJavaJoinPrunesMarks: a mark whose event never came is forgotten

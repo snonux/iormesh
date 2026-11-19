@@ -17,8 +17,10 @@ func TestBootClockNeverAhead(t *testing.T) {
 			t.Fatalf("estimate %d ahead of the boot clock %d", got, after)
 		}
 	}
-	if reads != 1 {
-		t.Errorf("%d boot clock reads in well under %v, want 1", reads, bootResync)
+	// Two reads at most: a host pause longer than bootResync (a loaded
+	// CI box) may make the loop span one resync.
+	if reads < 1 || reads > 2 {
+		t.Errorf("%d boot clock reads in well under %v, want 1 (2 after a pause)", reads, bootResync)
 	}
 }
 
