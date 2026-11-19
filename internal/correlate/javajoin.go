@@ -63,8 +63,8 @@ type JavaJoin struct {
 	// mark's "innermost native unknown"), shared by every JVM.
 	cookies map[string]uint64
 	// marks are the kernel's Java marks waiting for their syscall's event,
-	// by thread and enter time (javamark.go).
-	marks map[markKey]NativeMark
+	// per thread in enter order (javamark.go).
+	marks map[uint32]*markQueue
 	stats JavaStats
 	// The http events (javahttp.go): records waiting for their turn by
 	// time, the socket index, the policy that redacts them again, and
@@ -78,6 +78,10 @@ type JavaJoin struct {
 	wallOff int64
 	maxEnd  uint64
 	seq     uint64 // the last seq emitted
+	// tick is the clock Event reads to see whether a scan is due: cfg.Clock
+	// when the caller set one, otherwise a bootClock — a once-per-event
+	// syscall otherwise (task ud4). poll, Poll and Close read cfg.Clock.
+	tick func() uint64
 }
 
 // AgentRing is what the joiner reads of one agent ring; *agentspool.Ring
@@ -108,7 +112,8 @@ type JavaJoinConfig struct {
 	// one of an earlier process with the same pid; defaults to
 	// ReadProcInfo.
 	ProcInfo ProcInfo
-	// Clock is the boot clock (BootNow); MonoOffset samples boot − mono
+	// Clock is the boot clock (default BootNow; Event then reads a
+	// cheaper estimate of it, bootClock); MonoOffset samples boot − mono
 	// (MonoOffset).
 	Clock      Clock
 	MonoOffset func() (int64, error)
@@ -180,8 +185,10 @@ func NewJavaJoin(cfg JavaJoinConfig) *JavaJoin {
 	if cfg.ProcInfo == nil {
 		cfg.ProcInfo = ReadProcInfo
 	}
+	tick := cfg.Clock
 	if cfg.Clock == nil {
 		cfg.Clock = BootNow
+		tick = newBootClock(BootNow).now
 	}
 	if cfg.MonoOffset == nil {
 		cfg.MonoOffset = MonoOffset
@@ -192,7 +199,7 @@ func NewJavaJoin(cfg JavaJoinConfig) *JavaJoin {
 	cfg.Retain = orDefault(cfg.Retain, defaultRetain)
 	return &JavaJoin{cfg: cfg, jvms: map[uint32]*jvm{}, methods: map[string]uint64{},
 		conns: newConnIndex(), policy: redact.Default(),
-		cookies: map[string]uint64{}, marks: map[markKey]NativeMark{}}
+		cookies: map[string]uint64{}, marks: map[uint32]*markQueue{}, tick: tick}
 }
 
 var _ schema.Sink = (*JavaJoin)(nil)
@@ -205,11 +212,13 @@ func orDefault(v, def uint64) uint64 {
 }
 
 // Event implements schema.Sink: ev waits behind the events held before
-// it and is released, joined, as soon as it is decidable.
-func (j *JavaJoin) Event(ev schema.Event) error {
-	j.seen(&ev)
-	j.held = append(j.held, ev)
-	if now := j.cfg.Clock(); now >= j.scanned+j.cfg.ScanEvery {
+// it and is released, joined, as soon as it is decidable. The queue keeps
+// the one copy the Sink contract requires; from there the event is handed
+// on by pointer.
+func (j *JavaJoin) Event(ev *schema.Event) error {
+	j.seen(ev)
+	j.held = append(j.held, *ev)
+	if now := j.tick(); now >= j.scanned+j.cfg.ScanEvery {
 		if err := j.poll(now); err != nil {
 			return err
 		}
@@ -349,11 +358,11 @@ func (j *JavaJoin) decide(ev *schema.Event, v *jvm) error {
 			return err
 		}
 	}
-	return j.emit(*ev)
+	return j.emit(ev)
 }
 
 // emit numbers ev and hands it on.
-func (j *JavaJoin) emit(ev schema.Event) error {
+func (j *JavaJoin) emit(ev *schema.Event) error {
 	j.seq++
 	ev.Seq = j.seq
 	return j.cfg.Next.Event(ev)

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"maps"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -162,7 +163,7 @@ func (jt *joinTest) unmarked(pid, tid uint32, kind string, at uint64) {
 	ev := schema.Event{SchemaVersion: schema.Version, Project: "p", Seq: jt.seq, BootNS: at,
 		HostID: "h", PID: pid, PIDInc: jvmStart, TID: tid, Comm: "java", Event: kind,
 		FD: 3, LatencyNS: 100, Attribution: schema.AttributionNone}
-	if err := jt.j.Event(ev); err != nil {
+	if err := jt.j.Event(&ev); err != nil {
 		jt.t.Fatal(err)
 	}
 }
@@ -308,7 +309,7 @@ func (c noneCase) run(t *testing.T) {
 	if c.native != noMark {
 		jt.mark(jvmPID, mainTID, at, c.native, at-markLead)
 	}
-	if err := jt.j.Event(ev); err != nil {
+	if err := jt.j.Event(&ev); err != nil {
 		t.Fatal(err)
 	}
 	jt.close()
@@ -318,8 +319,8 @@ func (c noneCase) run(t *testing.T) {
 	if s := jt.j.Stats(); c.want(s) != 1 || s.Attributed != 0 {
 		t.Errorf("stats %+v", s)
 	}
-	if len(jt.j.marks) != 0 {
-		t.Errorf("%d marks left after their event", len(jt.j.marks))
+	if jt.j.pendingMarks() != 0 {
+		t.Errorf("%d marks left after their event", jt.j.pendingMarks())
 	}
 }
 
@@ -417,7 +418,7 @@ func TestJavaJoinStaleRing(t *testing.T) {
 	ev := schema.Event{SchemaVersion: schema.Version, Project: "p", Seq: jt.seq, BootNS: at,
 		HostID: "h", PID: jvmPID, PIDInc: jvmStart + 1, TID: mainTID, Comm: "java",
 		Event: "write", FD: 3, Attribution: schema.AttributionNone}
-	if err := jt.j.Event(ev); err != nil {
+	if err := jt.j.Event(&ev); err != nil {
 		t.Fatal(err)
 	}
 	jt.close()
@@ -465,7 +466,7 @@ func TestInnermostPrunes(t *testing.T) {
 	v.addBracket(agentspool.Bracket{Hook: 1, KTID: 6, EnterMono: 1, ExitMono: 2})
 	v.watermark = 1500
 	v.prune(1000)
-	if len(v.brackets[5]) != 1 || v.brackets[6] != nil {
+	if v.brackets[5] == nil || len(v.brackets[5].list) != 1 || v.brackets[6] != nil {
 		t.Errorf("brackets %+v", v.brackets)
 	}
 	if _, found, _ := v.innermost(5, 1500); !found {
@@ -591,18 +592,47 @@ func TestJavaJoinAttachesMarks(t *testing.T) {
 	jt.close()
 }
 
+// TestJavaJoinMarkQueue: a thread's marks pair with its events in enter
+// order while several wait at once — a lost exit's mark (no event) is
+// skipped, an event without a mark of its own takes no other's, and an
+// event of another thread takes none of this one's.
+func TestJavaJoinMarkQueue(t *testing.T) {
+	jt := newJoinTest(t)
+	at := jt.now + 1000
+	var recs []agentspool.Record
+	for i := range uint64(4) {
+		recs = append(recs, jt.bracket(1, mainTID, at+i*1000-50, at+i*1000+500, 10, 1))
+	}
+	jt.ring(append(recs, jt.watermark(at+20_000_000))...)
+	jt.mark(jvmPID, mainTID, at, symWriteBytes, at-markLead) // its exit lost
+	jt.event(jvmPID, mainTID, "write", at+1000)              // marked
+	jt.unmarked(jvmPID, mainTID, "write", at+2000)           // JVM work
+	jt.unmarked(jvmPID, mainTID+1, "write", at+3000)         // another thread
+	jt.event(jvmPID, mainTID, "write", at+3000)              // marked
+	jt.close()
+	var got []string
+	for _, ev := range jt.sink.events {
+		got = append(got, ev.Attribution)
+	}
+	want := []string{schema.AttributionJava, schema.AttributionNone, schema.AttributionNone,
+		schema.AttributionJava}
+	if !reflect.DeepEqual(got, want) || jt.j.pendingMarks() != 0 {
+		t.Fatalf("attributions %v, want %v; %d marks left", got, want, jt.j.pendingMarks())
+	}
+}
+
 // TestJavaJoinPrunesMarks: a mark whose event never came is forgotten
 // once no event can still claim it.
 func TestJavaJoinPrunesMarks(t *testing.T) {
 	jt := newJoinTest(t)
 	jt.mark(jvmPID, mainTID, jt.now, symWriteBytes, jt.now-markLead)
 	jt.now += defaultRetain
-	if err := jt.j.Poll(); err != nil || len(jt.j.marks) != 1 {
-		t.Fatalf("pruned early: %v, %d marks", err, len(jt.j.marks))
+	if err := jt.j.Poll(); err != nil || jt.j.pendingMarks() != 1 {
+		t.Fatalf("pruned early: %v, %d marks", err, jt.j.pendingMarks())
 	}
 	jt.now += defaultTimeout + 1
-	if err := jt.j.Poll(); err != nil || len(jt.j.marks) != 0 {
-		t.Fatalf("not pruned: %v, %d marks", err, len(jt.j.marks))
+	if err := jt.j.Poll(); err != nil || jt.j.pendingMarks() != 0 {
+		t.Fatalf("not pruned: %v, %d marks", err, jt.j.pendingMarks())
 	}
 	jt.close()
 }
@@ -668,4 +698,25 @@ func TestJavaJoinMarksDead(t *testing.T) {
 		t.Errorf("stats %+v, warnings %v", s, warned)
 	}
 	jt.close()
+}
+
+// TestExitSearchMatchesSearch holds exitSearch to sort.Search on lists
+// with repeated exit times, for every probe time around them and every
+// hint, in range or not.
+func TestExitSearchMatchesSearch(t *testing.T) {
+	for n := range 40 {
+		list := make([]agentspool.Bracket, n)
+		for i := range list {
+			list[i].ExitMono = uint64(10 + 2*(i/3)) // runs of three equal exits
+		}
+		for probe := uint64(0); probe < uint64(2*n+14); probe++ {
+			want := sort.Search(n, func(i int) bool { return list[i].ExitMono >= probe })
+			for hint := -1; hint <= n+1; hint++ {
+				if got := exitSearch(list, probe, hint); got != want {
+					t.Fatalf("n %d, t %d, hint %d: exitSearch %d, sort.Search %d",
+						n, probe, hint, got, want)
+				}
+			}
+		}
+	}
 }

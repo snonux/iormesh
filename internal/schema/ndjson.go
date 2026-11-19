@@ -45,7 +45,7 @@ func NewNDJSONSink(w io.Writer) *NDJSONSink {
 }
 
 // Event implements Sink.
-func (s *NDJSONSink) Event(ev Event) error {
+func (s *NDJSONSink) Event(ev *Event) error {
 	if s.err != nil {
 		return s.err
 	}
@@ -63,7 +63,7 @@ func (s *NDJSONSink) Event(ev Event) error {
 			return s.err
 		}
 	}
-	line := append(AppendEvent(s.w.AvailableBuffer(), &ev), '\n')
+	line := append(AppendEvent(s.w.AvailableBuffer(), ev), '\n')
 	if _, err := s.w.Write(line); err != nil {
 		s.err = fmt.Errorf("ndjson: write seq %d: %w", ev.Seq, err)
 	}

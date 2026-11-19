@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"reflect"
 	"testing"
+	"unicode/utf8"
 )
 
 // awkwardStrings are the values encoding/json escapes or must not: HTML
@@ -18,6 +19,10 @@ var awkwardStrings = []string{
 	"", "a", "/tmp/run1/demo.dat", "<script>&amp;</script>", `"quoted" \back\`,
 	"\b\f\n\r\t", "\x00\x01\x1f\x7f", "\xff", "ab\xe2\x82", "\u2028x\u2029",
 	"é漢字🙂", "mixed é<\x02>\xc3", "java", "-Dpassword=***",
+	// Longer than a word, the escape past appendJSONString's 8-byte fast
+	// path or inside its first words (task ud4).
+	"0123456789abcdef0123456789abcdef", "abcdefgh<", "abcdefghijklmno\x00p", "abcdefg\"h",
+	"abcdefgh\u2028", "abcdefghijklmnop\xff", "a&cdefghijklmnopqrstuvwx",
 }
 
 // fill sets v (addressable) to a random value, recursing through structs,
@@ -134,4 +139,51 @@ func FuzzAppendEventStrings(f *testing.F) {
 		ev.Comm, ev.Args.Path, ev.Args.Argv = s, &s, []string{s, s}
 		assertSameAsMarshal(t, ev)
 	})
+}
+
+// TestSafeWordMatchesTable holds the 8-byte test of appendJSONString's
+// fast path to the byte table: every byte value in every lane of an
+// otherwise safe word, and random words.
+func TestSafeWordMatchesTable(t *testing.T) {
+	byTable := func(w uint64) bool {
+		for k := range 8 {
+			b := byte(w >> (8 * k))
+			if b >= utf8.RuneSelf || !jsonSafe(b) {
+				return false
+			}
+		}
+		return true
+	}
+	const safe = 0x6162636465666768 // "hgfedcba"
+	for lane := range 8 {
+		for b := range 256 {
+			w := safe&^(0xff<<(8*lane)) | uint64(b)<<(8*lane)
+			if safeWord(w) != byTable(w) {
+				t.Fatalf("lane %d byte %#x: safeWord %v", lane, b, safeWord(w))
+			}
+		}
+	}
+	r := rand.New(rand.NewPCG(8, 8))
+	for range 1_000_000 {
+		w := r.Uint64() & 0x7f7f7f7f7f7f7f7f // mostly ASCII, so both answers occur
+		if r.IntN(4) == 0 {
+			w = r.Uint64()
+		}
+		if safeWord(w) != byTable(w) {
+			t.Fatalf("word %#x: safeWord %v", w, safeWord(w))
+		}
+	}
+}
+
+// BenchmarkAppendJSONString is the escaper on an event's typical strings.
+func BenchmarkAppendJSONString(b *testing.B) {
+	ss := []string{"bench", "0123456789abcdef0123456789abcdef", "java", "write", "none",
+		"syscall-burst-0"}
+	buf := make([]byte, 0, 256)
+	for b.Loop() {
+		buf = buf[:0]
+		for _, s := range ss {
+			buf = appendJSONString(buf, s)
+		}
+	}
 }

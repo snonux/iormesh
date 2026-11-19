@@ -106,8 +106,13 @@ func (s *session) adoptRunning(pid uint32) error {
 }
 
 // handleAll handles one batch of records in order; the first error stops
-// it (the trace ends there, so the rest is never needed).
+// it (the trace ends there, so the rest is never needed). The session is
+// the records' last consumer — neither it nor the correlator keeps a
+// record's pointer — so the batch then goes back to the tracer, which
+// returns the records to their decoders' pools (bpf.Tracer.Release;
+// decision #25's budget).
 func (s *session) handleAll(batch []any) error {
+	defer s.tr.Release(batch)
 	for _, rec := range batch {
 		if err := s.handle(rec); err != nil {
 			return err
@@ -118,11 +123,8 @@ func (s *session) handleAll(batch []any) error {
 
 // handle routes one record: exec reports to the pattern judge, process
 // lifecycle records to the live set and then, like everything else, to
-// the correlator. The session is the record's last consumer — neither it
-// nor the correlator keeps the pointer — so it returns the record to its
-// decoder's pool afterwards (types.Recycle; decision #25's budget).
+// the correlator.
 func (s *session) handle(rec any) error {
-	defer types.Recycle(rec)
 	switch r := rec.(type) {
 	case *types.ExecArgvEvent:
 		if r.EventType == types.PROCESS_ARGV_EVENT {

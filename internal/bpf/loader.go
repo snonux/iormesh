@@ -80,6 +80,10 @@ type Tracer struct {
 	skipped []Probe
 	ring    *ringReader
 	records chan []any
+	// spent carries handled batches back to the reader (Release); free is
+	// the reader's own stock of empty batches, touched by it alone.
+	spent   chan []any
+	free    [][]any
 	done    chan struct{}
 	decoded sync.WaitGroup
 	losses  decodeLosses
@@ -173,8 +177,8 @@ func quietLibbpf() {
 // Records delivers decoded records in ring-buffer order, in batches of
 // those that arrived together (never empty). Each value is a pointer to
 // an internal/types record (e.g. *types.OpenEvent); the receiver owns
-// batch and records and may Recycle them (types.Recycle). The channel is
-// closed by Close.
+// batch and records until it hands the batch back with Release (or, if it
+// never does, for good). The channel is closed by Close.
 func (t *Tracer) Records() <-chan []any {
 	return t.records
 }

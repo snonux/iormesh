@@ -7,7 +7,7 @@
 // (M2 step 2), PROCESS_ARGV_EVENT (M2 step 8), SOCK_ADDR_EVENT and
 // SIGNAL_EVENT (M2 step 7), RW_AGGREGATE_EVENT (M2 step 11),
 // STACK_EVENT (M2 step 9), STACK_INLINE_EVENT (task kd4) and
-// JAVA_MARK_EVENT (task td4) added.
+// JAVA_MARK_EVENT (task td4; its fast decoder, task ud4) added.
 
 package bpf
 
@@ -38,6 +38,23 @@ func typed[T any](decode func([]byte) *T) decoder {
 // missing here would be counted as unknown instead of silently mis-decoded
 // once a selector widens the attach set.
 var decoders = buildDecoders()
+
+// decoderTable is decoders as a slice indexed by event type, which decode
+// reads once per record: an index instead of a map lookup (task ud4,
+// decision #25's budget). Event types are small integers.
+var decoderTable = tableOf(decoders)
+
+func tableOf(m map[types.EventType]decoder) []decoder {
+	var n types.EventType
+	for et := range m {
+		n = max(n, et+1)
+	}
+	t := make([]decoder, n)
+	for et, d := range m {
+		t[et] = d
+	}
+	return t
+}
 
 func buildDecoders() map[types.EventType]decoder {
 	d := map[types.EventType]decoder{}
@@ -117,8 +134,9 @@ func addControlDecoders(d map[types.EventType]decoder) {
 	// (task kd4).
 	d[types.STACK_INLINE_EVENT] = typed(types.NewStackInlineEvent)
 	// M3 (task td4): the JDK native a syscall enter was issued from
-	// (javamark.c), only sent with Config.JavaMarks.
-	d[types.JAVA_MARK_EVENT] = typed(types.NewJavaMarkEvent)
+	// (javamark.c), only sent with Config.JavaMarks — then once per hooked
+	// call, so decoded field by field, not by reflection (task ud4).
+	d[types.JAVA_MARK_EVENT] = typed(types.NewJavaMarkEventFast)
 }
 
 // decodeFdSizeEvent widens an fd+size record to the FdEvent shape the
@@ -178,10 +196,11 @@ func decode(raw []byte) (any, decodeError) {
 	if len(raw) < 4 {
 		return nil, decodeShort
 	}
-	d, ok := decoders[types.EventType(binary.LittleEndian.Uint32(raw))]
-	if !ok {
+	et := binary.LittleEndian.Uint32(raw)
+	if uint64(et) >= uint64(len(decoderTable)) || decoderTable[et] == nil {
 		return nil, decodeUnknown
 	}
+	d := decoderTable[et]
 	if rec := d(raw); rec != nil {
 		return rec, decodedOK
 	}

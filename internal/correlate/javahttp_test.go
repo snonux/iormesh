@@ -28,7 +28,7 @@ func (jt *joinTest) sock(at uint64, conn, local string, lport uint16, remote str
 	ev.Args.LocalAddr, ev.Args.LocalPort = &local, &lport
 	ev.Args.RemoteAddr, ev.Args.RemotePort = &remote, &rport
 	ev.Args.SockState = &state
-	if err := jt.j.Event(ev); err != nil {
+	if err := jt.j.Event(&ev); err != nil {
 		jt.t.Fatal(err)
 	}
 }
@@ -244,7 +244,7 @@ func TestJavaJoinHTTPBeforeEnd(t *testing.T) {
 	end := schema.Event{SchemaVersion: schema.Version, Project: "p", Seq: jt.seq, BootNS: at,
 		HostID: "h", Event: schema.KindEnd, FD: schema.NoFD, Attribution: schema.AttributionNone}
 	end.Args.EndReason = &reason
-	if err := jt.j.Event(end); err != nil {
+	if err := jt.j.Event(&end); err != nil {
 		t.Fatal(err)
 	}
 	jt.close()

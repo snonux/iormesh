@@ -18,7 +18,7 @@ type memSink struct {
 	closed bool
 }
 
-func (s *memSink) Event(ev schema.Event) error {
+func (s *memSink) Event(ev *schema.Event) error {
 	if s.fail != nil {
 		return s.fail
 	}
@@ -28,7 +28,7 @@ func (s *memSink) Event(ev schema.Event) error {
 	if want := uint64(len(s.events) + 1); ev.Seq != want {
 		s.t.Errorf("seq %d, want %d (gap-free, in order)", ev.Seq, want)
 	}
-	s.events = append(s.events, ev)
+	s.events = append(s.events, *ev)
 	return nil
 }
 

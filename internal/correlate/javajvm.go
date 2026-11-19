@@ -35,6 +35,17 @@ type hookInfo struct {
 	cookie uint64
 }
 
+// bracketList is one thread's brackets in exit order, with a search hint:
+// the index innermost found last. A thread's events reach the join in
+// order and their natives' entries never go back in time, so the next
+// search starts there (exitSearch) — a step or two instead of a search
+// over Retain's worth of brackets (task ud4). The hint is only ever a
+// guess, checked before it is used: inserts and prunes may move it.
+type bracketList struct {
+	list []agentspool.Bracket
+	hint int
+}
+
 // jvm is the joiner's state for one agent ring: everything read from it
 // so far.
 type jvm struct {
@@ -66,7 +77,8 @@ type jvm struct {
 	stacks  map[uint64][]uint64 // agent stack id → method ids, resolved
 	// brackets per kernel tid, by exit time: a thread closes its
 	// brackets one after another, so ring order is exit order per tid.
-	brackets  map[int32][]agentspool.Bracket
+	// Held by pointer, so adding a bracket is a map lookup, not a store.
+	brackets  map[int32]*bracketList
 	watermark uint64 // the latest WATERMARK, CLOCK_MONOTONIC
 	// asyncFrom is the earliest sendAsync marker of the JVM (CLOCK_
 	// MONOTONIC, 0: none; task wd4 review round 2): java.net.http client
@@ -91,7 +103,7 @@ func newJVM(r AgentRing, pid uint32, start, createdMono, created uint64) *jvm {
 	return &jvm{ring: r, pid: pid, start: start, created: created, createdMono: createdMono,
 		hooks: map[int32]hookInfo{}, threads: map[uint64]agentspool.Thread{},
 		names: map[int32]string{}, frames: map[uint64][]string{},
-		stacks: map[uint64][]uint64{}, brackets: map[int32][]agentspool.Bracket{}}
+		stacks: map[uint64][]uint64{}, brackets: map[int32]*bracketList{}}
 }
 
 // owns says whether ev is of this ring's process, not of an earlier or
@@ -179,28 +191,38 @@ func (j *JavaJoin) thread(v *jvm, r agentspool.Thread) error {
 // per tid, so this appends; the backward search covers the carriers of
 // virtual threads, where two of them may publish out of order.
 func (v *jvm) addBracket(b agentspool.Bracket) {
-	list := v.brackets[b.KTID]
-	i := len(list)
-	for i > 0 && list[i-1].ExitMono > b.ExitMono {
+	bl := v.brackets[b.KTID]
+	if bl == nil {
+		bl = &bracketList{}
+		v.brackets[b.KTID] = bl
+	}
+	i := len(bl.list)
+	for i > 0 && bl.list[i-1].ExitMono > b.ExitMono {
 		i--
 	}
-	v.brackets[b.KTID] = slices.Insert(list, i, b)
+	bl.list = slices.Insert(bl.list, i, b)
 }
 
 // prune forgets the brackets that exited more than retain before the
-// watermark; no event still to come can sit in them.
+// watermark; no event still to come can sit in them. It slices the old
+// ones off instead of moving the kept ones down: a busy thread keeps
+// Retain's worth of brackets (10 s, up to millions), and a drain every
+// 50 ms copying all of them would cost more than the join itself (task
+// ud4). The array's dropped front is reclaimed when an append outgrows
+// what is left of it.
 func (v *jvm) prune(retain uint64) {
 	if v.watermark <= retain {
 		return
 	}
 	cut := v.watermark - retain
-	for tid, list := range v.brackets {
+	for tid, bl := range v.brackets {
+		list := bl.list
 		i := sort.Search(len(list), func(i int) bool { return list[i].ExitMono >= cut })
 		switch {
 		case i == len(list):
 			delete(v.brackets, tid)
 		case i > 0:
-			v.brackets[tid] = slices.Delete(list, 0, i)
+			bl.list, bl.hint = list[i:], max(bl.hint-i, 0)
 		}
 	}
 }
@@ -211,14 +233,54 @@ func (v *jvm) prune(retain uint64) {
 // before it (those before it that began after t are its later children).
 // ambiguous: see overlapped.
 func (v *jvm) innermost(tid int32, t uint64) (b agentspool.Bracket, found, ambiguous bool) {
-	list := v.brackets[tid]
-	i := sort.Search(len(list), func(i int) bool { return list[i].ExitMono >= t })
+	bl := v.brackets[tid]
+	if bl == nil {
+		return b, false, false
+	}
+	list := bl.list
+	i := exitSearch(list, t, bl.hint)
+	bl.hint = i
 	for k := i; k < min(len(list), i+maxScan); k++ {
 		if list[k].EnterMono <= t {
 			return list[k], true, overlapped(list[k+1:], list[k], t)
 		}
 	}
 	return b, false, false
+}
+
+// exitSearch is sort.Search for the first bracket of list (in exit
+// order) that exits at or after t, galloping from hint (the last answer)
+// first. A busy thread's list holds Retain's worth of brackets (10 s, a
+// million on the S3 burst), while consecutive searches of a thread land
+// next to each other: doubling steps from the hint bound the binary
+// search to a short, cached stretch instead of halving down from the
+// whole list (task ud4). Any hint gives the right answer; a good one
+// only makes it cheap.
+func exitSearch(list []agentspool.Bracket, t uint64, hint int) int {
+	lo, hi := 0, len(list) // the answer lies in [lo, hi]
+	hint = min(max(hint, 0), len(list))
+	if hint > 0 && list[hint-1].ExitMono >= t {
+		hi = hint - 1 // the answer is before the hint: gallop down
+		for step := 1; hi > lo; step *= 2 {
+			k := max(hi-step, lo)
+			if list[k].ExitMono < t {
+				lo = k + 1
+				break
+			}
+			hi = k
+		}
+	} else {
+		lo = hint // every bracket before the hint exits before t: gallop up
+		for step := 1; lo < hi; step *= 2 {
+			k := min(lo+step-1, hi-1)
+			if list[k].ExitMono >= t {
+				hi = k
+				break
+			}
+			lo = k + 1
+		}
+	}
+	return lo + sort.Search(hi-lo, func(i int) bool { return list[lo+i].ExitMono >= t })
 }
 
 // overlapped reports whether a further container of t, among the next

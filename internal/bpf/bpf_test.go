@@ -418,3 +418,28 @@ func TestSlotOf(t *testing.T) {
 		}
 	}
 }
+
+// TestReleaseRecyclesOnReader: a released batch comes back to the reader
+// as an empty batch to fill, its records cleared from it (they went back
+// to their pools), and a release the channel has no room for is
+// recycled in place instead of blocking the consumer (task ud4).
+func TestReleaseRecyclesOnReader(t *testing.T) {
+	tr := &Tracer{spent: make(chan []any, 1)}
+	batch := append(tr.emptyBatch(), types.NewNullEventFast(make([]byte, 24)))
+	if cap(batch) != maxBatch {
+		t.Fatalf("new batch cap %d, want %d", cap(batch), maxBatch)
+	}
+	tr.Release(batch)
+	overflow := []any{types.NewNullEventFast(make([]byte, 24))}
+	tr.Release(overflow) // channel full: recycled here
+	if overflow[0] != nil {
+		t.Errorf("overflowing batch not cleared: %v", overflow)
+	}
+	tr.reclaim()
+	if len(tr.free) != 1 || len(tr.free[0]) != 0 || batch[0] != nil {
+		t.Fatalf("free %v, released batch %v", tr.free, batch)
+	}
+	if again := tr.emptyBatch(); &again[:1][0] != &batch[0] {
+		t.Error("released batch not reused")
+	}
+}

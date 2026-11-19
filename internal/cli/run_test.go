@@ -40,6 +40,8 @@ func newFakeTracer() *fakeTracer { return &fakeTracer{records: make(chan []any, 
 
 func (f *fakeTracer) Records() <-chan []any { return f.records }
 
+func (f *fakeTracer) Release([]any) {}
+
 func (f *fakeTracer) Losses() (bpf.Losses, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -292,8 +294,8 @@ func TestRunWritesSessionDropsEnd(t *testing.T) {
 // failSink rejects every event, like an NDJSON sink whose disk is full.
 type failSink struct{}
 
-func (failSink) Event(schema.Event) error { return errors.New("disk full") }
-func (failSink) Close() error             { return nil }
+func (failSink) Event(*schema.Event) error { return errors.New("disk full") }
+func (failSink) Close() error              { return nil }
 
 // TestTraceLoopWriteError: a sink error stops the loop at once with end
 // reason error and returns the error.

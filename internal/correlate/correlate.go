@@ -65,12 +65,15 @@ const defaultFuseWindowNS = 5_000_000_000
 
 // Correlator holds the per-host state between records.
 type Correlator struct {
-	cfg      Config
-	redact   redact.Policy
-	seq      uint64
-	now      uint64 // boot ns of the newest record seen
-	recTime  uint64 // boot ns of the record being handled (procState.clock)
-	procs    map[uint32]*procState
+	cfg     Config
+	redact  redact.Policy
+	seq     uint64
+	now     uint64 // boot ns of the newest record seen
+	recTime uint64 // boot ns of the record being handled (procState.clock)
+	procs   map[uint32]*procState
+	// lastPID and lastProc cache proc's last answer.
+	lastPID  uint32
+	lastProc *procState
 	socks    *sockTable
 	datagram *sockTable                       // UDP flows, apart from TCP: one tuple may be both
 	unix     *unixTable                       // AF_UNIX stream connections by their socket pair

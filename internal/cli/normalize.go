@@ -126,8 +126,8 @@ func writeNormalized(t normalize.Trace, out string, stdout io.Writer) error {
 }
 
 func writeEvents(s *schema.NDJSONSink, events []schema.Event) error {
-	for _, ev := range events {
-		if err := s.Event(ev); err != nil {
+	for i := range events {
+		if err := s.Event(&events[i]); err != nil {
 			_ = s.Close()
 			return err
 		}

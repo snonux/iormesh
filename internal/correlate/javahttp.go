@@ -274,13 +274,13 @@ func (j *JavaJoin) emitHTTP() error {
 		if err != nil {
 			return err
 		}
-		return j.emit(ev)
+		return j.emit(&ev)
 	}
 	ev, err := j.httpEvent(h)
 	if err != nil {
 		return err
 	}
-	return j.emit(ev)
+	return j.emit(&ev)
 }
 
 // httpEvent builds the http event of one record: envelope from the JVM

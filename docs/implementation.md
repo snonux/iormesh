@@ -208,9 +208,11 @@ Field notes:
   (`java.thread`, `java.stack`) — settled by S1; PLAN.md's flat
   `java_thread`/`java_stack` were a sketch. `HTTP` stays
   provisional until M3.
-- `schema.Sink` (`Event(Event) error`, `Close() error`) is what
+- `schema.Sink` (`Event(*Event) error`, `Close() error`) is what
   the correlator writes to; the NDJSON and parquet writers
-  implement it.
+  implement it. `Event` borrows the event for the call — a sink
+  that keeps it copies it (task ud4: the ~400-byte event was
+  copied once per pipeline hop by value).
 
 Reading is strict: `schema.DecodeEvent` rejects unknown keys at
 any depth — matched case-sensitively, since encoding/json alone
@@ -1111,7 +1113,11 @@ default; hot read/write loops get in-kernel aggregation in M2
 `S3_LOAD_CPUS`), CPU times from `/proc/PID/stat` (the tracer's
 from its ready file to exit, the burst's from its startup gate to
 its result line), ABAB bystander pairs (`S3_PAIRS`), mode
-selection (`S3_MODES`) and medians in `summary.txt`.
+selection (`S3_MODES`) and medians in `summary.txt`. Task ud4
+added the Java join's worst case and an A/B: `S3_AGENT=1` (every
+burst under the agent, a fresh `-spool` dir per traced run, the
+joined count recorded), `S3_TRACER` (another build) and `S3_PERF=1`
+(the tracer's instructions per event, which host load barely moves).
 
 ## M2 — full trace surface
 

@@ -70,6 +70,7 @@ func startCPUProfile(path string) (stop func() error, err error) {
 // drive the loop without a kernel.
 type tracer interface {
 	Records() <-chan []any
+	Release(batch []any)
 	Losses() (bpf.Losses, error)
 	AddTarget(pid uint32) error
 	RemoveTarget(pid uint32) error

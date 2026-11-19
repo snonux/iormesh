@@ -83,8 +83,17 @@ func (c *Correlator) seed(pid uint32, id Identity) *procState {
 // late by the correlator's lag, so the processes a session knows of
 // before their first record are seeded instead (Seed, Incarnation, and
 // newTask's check of the read against the fork record's time).
+//
+// The last process looked up is kept aside: an event's handling asks for
+// its process two or three times, and a burst's events are mostly of one
+// process (decision #25's budget, task ud4). newProc, the only place a
+// pid's state is replaced, refreshes it.
 func (c *Correlator) proc(pid uint32) *procState {
+	if c.lastProc != nil && c.lastPID == pid {
+		return c.lastProc
+	}
 	if p, ok := c.procs[pid]; ok {
+		c.lastPID, c.lastProc = pid, p
 		return p
 	}
 	comm, inc := c.cfg.ProcInfo(pid)
@@ -99,6 +108,7 @@ func (c *Correlator) newProc(pid uint32, id Identity) *procState {
 		flowsOf: map[int32][][2]netip.AddrPort{}, born: map[int32]uint64{},
 		past: map[int32]pastInstance{}, clock: &c.recTime}
 	c.procs[pid] = p
+	c.lastPID, c.lastProc = pid, p
 	c.graph.process(pid, id.StartNS, id.Comm)
 	return p
 }

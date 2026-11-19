@@ -1,9 +1,6 @@
 package schema
 
-import (
-	"strconv"
-	"unicode/utf8"
-)
+import "unicode/utf8"
 
 // AppendEvent appends ev as one JSON object (no newline) to dst and returns
 // the extended slice. Its output is byte-identical to json.Marshal(ev):
@@ -17,10 +14,12 @@ import (
 // reflection walk was over half the tracer's userspace time per event on
 // syscall-burst (task wc4, docs/spikes/s3-overhead.md "Follow-up"). The
 // NDJSON reader stays encoding/json, strict, so the format is still
-// defined by the struct tags, not by this function.
+// defined by the struct tags, not by this function. Integers go through
+// appendUint (ndjson_uint.go), strconv's output at about twice its speed
+// (task ud4).
 func AppendEvent(dst []byte, ev *Event) []byte {
 	dst = append(dst, `{"schema_version":`...)
-	dst = strconv.AppendUint(dst, uint64(ev.SchemaVersion), 10)
+	dst = appendUint(dst, uint64(ev.SchemaVersion))
 	dst = appendStringField(dst, `,"project":`, ev.Project)
 	dst = appendUintField(dst, `,"seq":`, ev.Seq)
 	dst = appendUintField(dst, `,"boot_ns":`, ev.BootNS)
@@ -128,14 +127,14 @@ func (o *object) close() []byte {
 func optUint[T uint16 | uint32 | uint64](o *object, name string, v *T) {
 	if v != nil {
 		o.key(name)
-		o.dst = strconv.AppendUint(o.dst, uint64(*v), 10)
+		o.dst = appendUint(o.dst, uint64(*v))
 	}
 }
 
 func optInt[T int32 | int64](o *object, name string, v *T) {
 	if v != nil {
 		o.key(name)
-		o.dst = strconv.AppendInt(o.dst, int64(*v), 10)
+		o.dst = appendInt(o.dst, int64(*v))
 	}
 }
 
@@ -183,7 +182,7 @@ func appendJava(dst []byte, j *Java) []byte {
 			if i > 0 {
 				o.dst = append(o.dst, ',')
 			}
-			o.dst = strconv.AppendUint(o.dst, id, 10)
+			o.dst = appendUint(o.dst, id)
 		}
 		o.dst = append(o.dst, ']')
 	}
@@ -248,11 +247,11 @@ func appendStringField(dst []byte, key, v string) []byte {
 }
 
 func appendUintField(dst []byte, key string, v uint64) []byte {
-	return strconv.AppendUint(append(dst, key...), v, 10)
+	return appendUint(append(dst, key...), v)
 }
 
 func appendIntField(dst []byte, key string, v int64) []byte {
-	return strconv.AppendInt(append(dst, key...), v, 10)
+	return appendInt(append(dst, key...), v)
 }
 
 const hexDigits = "0123456789abcdef"
@@ -265,7 +264,7 @@ const hexDigits = "0123456789abcdef"
 func appendJSONString(dst []byte, s string) []byte {
 	dst = append(dst, '"')
 	start := 0
-	for i := 0; i < len(s); {
+	for i := safePrefix(s); i < len(s); {
 		b := s[i]
 		if b < utf8.RuneSelf {
 			if jsonSafe(b) {
@@ -291,6 +290,43 @@ func appendJSONString(dst []byte, s string) []byte {
 		start = i
 	}
 	return append(append(dst, s[start:]...), '"')
+}
+
+// Byte-lane masks of safeWord.
+const (
+	lanes01 = 0x0101010101010101
+	lanes80 = 0x8080808080808080
+)
+
+// safePrefix returns how many leading bytes of s are, by whole 8-byte
+// words, plain ASCII that jsonSafe copies as is: appendJSONString skips
+// them eight at a time instead of byte by byte (task ud4; the event's
+// strings — host id, project, comm, kind, attribution, thread — are
+// nearly always all safe).
+func safePrefix(s string) int {
+	i := 0
+	for ; i+8 <= len(s); i += 8 {
+		w := uint64(s[i]) | uint64(s[i+1])<<8 | uint64(s[i+2])<<16 | uint64(s[i+3])<<24 |
+			uint64(s[i+4])<<32 | uint64(s[i+5])<<40 | uint64(s[i+6])<<48 | uint64(s[i+7])<<56
+		if !safeWord(w) {
+			break
+		}
+	}
+	return i
+}
+
+// safeWord reports whether none of w's eight bytes needs escaping: none
+// has its top bit set (non-ASCII, decoded rune by rune), is a control
+// byte (< 0x20), or is one of " \ < > &. Each test is the classic
+// "has a zero byte" trick, (x − 0x01…) & ^x & 0x80…, whose borrow can
+// only start at a byte that matches, so a word without one tests 0.
+func safeWord(w uint64) bool {
+	zero := func(x uint64) uint64 { return (x - lanes01) & ^x & lanes80 }
+	less := (w - lanes01*0x20) & ^w & lanes80 // a byte < 0x20
+	bad := w&lanes80 | less |
+		zero(w^(lanes01*'"')) | zero(w^(lanes01*'\\')) |
+		zero(w^(lanes01*'<')) | zero(w^(lanes01*'>')) | zero(w^(lanes01*'&'))
+	return bad == 0
 }
 
 // jsonSafe reports whether an ASCII byte is copied as is.

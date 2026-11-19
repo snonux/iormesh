@@ -24,7 +24,7 @@ func BenchmarkNDJSONSink(b *testing.B) {
 	b.ReportAllocs()
 	for i := range b.N {
 		ev.Seq = uint64(i) + 1
-		if err := s.Event(ev); err != nil {
+		if err := s.Event(&ev); err != nil {
 			b.Fatal(err)
 		}
 	}

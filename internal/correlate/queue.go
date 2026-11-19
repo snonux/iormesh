@@ -24,7 +24,9 @@ func (c *Correlator) enqueue(ev schema.Event, sock *sockState) {
 func (c *Correlator) release(force bool) error {
 	n := 0
 	for ; n < len(c.queue); n++ {
-		q := c.queue[n]
+		// By pointer: a queued event is ~400 bytes, and each copy of it
+		// was a measurable share of the per-event budget (task ud4).
+		q := &c.queue[n]
 		if q.sock != nil && q.sock.connID == "" {
 			if !force && c.now < q.sock.deadline(c.cfg.FuseWindowNS) {
 				break
@@ -54,8 +56,10 @@ func (c *Correlator) dequeue(n int) {
 	c.queue = c.queue[n:]
 }
 
-func (c *Correlator) emit(q queued) error {
-	ev := q.ev
+// emit hands q's event to the sink, completed in place: the entry is
+// being released, and the sink borrows it only for the call.
+func (c *Correlator) emit(q *queued) error {
+	ev := &q.ev
 	if q.sock != nil {
 		ev.ConnID = q.sock.connID
 		c.graph.connected(ev.PID, ev.PIDInc, q.sock.connID, q.sock.fused)

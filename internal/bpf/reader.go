@@ -3,6 +3,8 @@ package bpf
 import (
 	"fmt"
 	"time"
+
+	"iormesh/internal/types"
 )
 
 // maxBatch bounds one Records batch: large enough that a burst crosses
@@ -38,6 +40,8 @@ func (t *Tracer) startReader(buffer int) error {
 		return fmt.Errorf("ring buffer %s: %w", ringbufMapName, err)
 	}
 	t.records = make(chan []any, max(1, buffer/maxBatch))
+	// Room for every batch that can be in flight, so Release never blocks.
+	t.spent = make(chan []any, cap(t.records)+2)
 	t.decoded.Add(1)
 	go t.readLoop()
 	return nil
@@ -71,12 +75,68 @@ func (t *Tracer) readLoop() {
 	}
 }
 
-// collect decodes up to maxBatch committed records, counting those that
-// do not decode.
+// collect decodes up to maxBatch committed records into a recycled
+// batch, counting those that do not decode. An empty batch goes back to
+// the stock at once.
 func (t *Tracer) collect() []any {
-	var batch []any
+	t.reclaim()
+	batch := t.emptyBatch()
 	t.ring.read(maxBatch, func(raw []byte) { batch = t.add(batch, raw) })
+	if len(batch) == 0 {
+		t.free = append(t.free, batch)
+		return nil
+	}
 	return batch
+}
+
+// Release hands a batch from Records back once every record in it has
+// been handled: neither the batch nor its records may be touched after.
+// The reader returns the records to their decoders' pools itself, so a
+// record's sync.Pool Put and its next Get run on the same goroutine and
+// mostly hit the same P's local cache, instead of the consumer's Put
+// leaving every Get of the reader to steal from another P — and the
+// batch's array is reused instead of grown anew per batch (task ud4,
+// decision #25's budget). If the reader is gone or behind, the batch is
+// recycled here.
+func (t *Tracer) Release(batch []any) {
+	select {
+	case t.spent <- batch:
+	default:
+		recycleAll(batch)
+	}
+}
+
+// reclaim recycles the records of every batch released since the last
+// call and keeps the emptied batches.
+func (t *Tracer) reclaim() {
+	for {
+		select {
+		case b := <-t.spent:
+			recycleAll(b)
+			t.free = append(t.free, b[:0])
+		default:
+			return
+		}
+	}
+}
+
+// emptyBatch takes an empty batch from the stock, or makes one.
+func (t *Tracer) emptyBatch() []any {
+	if n := len(t.free); n > 0 {
+		b := t.free[n-1]
+		t.free = t.free[:n-1]
+		return b
+	}
+	return make([]any, 0, maxBatch)
+}
+
+// recycleAll returns every record of batch to its pool and clears the
+// batch, so the reused array holds no stale pointers.
+func recycleAll(batch []any) {
+	for _, rec := range batch {
+		types.Recycle(rec)
+	}
+	clear(batch)
 }
 
 // deliver sends batch to the consumer; false when Close came first.

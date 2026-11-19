@@ -21,7 +21,7 @@ func TestNDJSONRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
 	s := NewNDJSONSink(&buf)
 	for seq := uint64(1); seq <= 3; seq++ {
-		if err := s.Event(sampleEvent(seq)); err != nil {
+		if err := s.Event(new(sampleEvent(seq))); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -42,12 +42,12 @@ func TestNDJSONRejectsInvalidEvent(t *testing.T) {
 	s := NewNDJSONSink(&buf)
 	bad := sampleEvent(1)
 	bad.Seq = 0
-	if err := s.Event(bad); !errors.Is(err, ErrInvalid) {
+	if err := s.Event(&bad); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("invalid event: err %v, want ErrInvalid", err)
 	}
 	// A rejected event is the producer's bug, not a broken sink: the
 	// next valid event is still written.
-	if err := s.Event(sampleEvent(1)); err != nil {
+	if err := s.Event(new(sampleEvent(1))); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil || strings.Count(buf.String(), "\n") != 1 {
@@ -80,12 +80,12 @@ func TestNDJSONWriteErrorsPropagate(t *testing.T) {
 	s := NewNDJSONSink(w)
 	var err error
 	for seq := uint64(1); seq <= 2000 && err == nil; seq++ {
-		err = s.Event(sampleEvent(seq))
+		err = s.Event(new(sampleEvent(seq)))
 	}
 	if !errors.Is(err, errDiskFull) {
 		t.Fatalf("Event error %v, want disk full once the buffer flushes", err)
 	}
-	if err := s.Event(sampleEvent(1)); !errors.Is(err, errDiskFull) {
+	if err := s.Event(new(sampleEvent(1))); !errors.Is(err, errDiskFull) {
 		t.Fatalf("after a failure: %v, want the sticky error", err)
 	}
 	if err := s.Close(); !errors.Is(err, errDiskFull) || !w.closed {
@@ -96,7 +96,7 @@ func TestNDJSONWriteErrorsPropagate(t *testing.T) {
 func TestNDJSONFlushErrorOnClose(t *testing.T) {
 	w := &failWriter{n: 0}
 	s := NewNDJSONSink(w)
-	if err := s.Event(sampleEvent(1)); err != nil {
+	if err := s.Event(new(sampleEvent(1))); err != nil {
 		t.Fatalf("buffered write failed early: %v", err)
 	}
 	if err := s.Close(); !errors.Is(err, errDiskFull) {
@@ -107,7 +107,7 @@ func TestNDJSONFlushErrorOnClose(t *testing.T) {
 func TestReadNDJSONRejects(t *testing.T) {
 	var buf bytes.Buffer
 	s := NewNDJSONSink(&buf)
-	_ = s.Event(sampleEvent(1))
+	_ = s.Event(new(sampleEvent(1)))
 	_ = s.Close()
 	good := buf.String()
 	// Each must fail for its own reason, not an unrelated one.
@@ -185,7 +185,7 @@ func TestNDJSONClosedSink(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Event(sampleEvent(1)); !errors.Is(err, errSinkClosed) {
+	if err := s.Event(new(sampleEvent(1))); !errors.Is(err, errSinkClosed) {
 		t.Fatalf("Event after Close: %v, want errSinkClosed", err)
 	}
 	w.closed = false

@@ -29,47 +29,104 @@ type MarkedNative struct {
 	Cookie uint64
 }
 
-// markKey pairs a mark with its syscall's event: the kernel sends the
-// mark right before the enter record, stamped with the enter's own clock
-// read, which the event keeps as its boot_ns.
-type markKey struct {
-	tid  uint32
-	boot uint64
+// markQueue holds one thread's marks in enter order, oldest first from
+// head. A mark pairs with its syscall's event by thread and time: the
+// kernel sends it right before the enter record, stamped with the
+// enter's own clock read, which the event keeps as its boot_ns.
+//
+// A queue per thread, not one map keyed by (tid, time): a thread issues
+// one syscall at a time, so its marks arrive in enter order and its
+// events leave the correlator in that same order — the join then only
+// ever looks at the head. That spares a map insert, lookup and delete
+// with a 16-byte key per event, which with the S3 burst's every event
+// marked was a tenth of the join's CPU (task ud4).
+type markQueue struct {
+	marks []NativeMark
+	head  int
 }
 
 // Mark files a kernel Java mark until its syscall's event arrives. The
 // mark always comes first: the kernel sends it ahead of the enter, and
 // the event leaves the correlator only after the exit.
 func (j *JavaJoin) Mark(m NativeMark) {
-	j.marks[markKey{tid: m.TID, boot: m.EnterBoot}] = m
-	if v := j.jvms[m.PID]; v != nil && v.markedTIDs != nil {
+	q := j.marks[m.TID]
+	if q == nil {
+		q = &markQueue{}
+		j.marks[m.TID] = q
+	}
+	q.marks = append(q.marks, m)
+	// Read before written: nearly every mark is of a thread already
+	// marked, and a lookup costs less than a store.
+	if v := j.jvms[m.PID]; v != nil && v.markedTIDs != nil && !v.markedTIDs[int32(m.TID)] {
 		v.markedTIDs[int32(m.TID)] = true
 	}
 }
 
-// takeMark returns and forgets the mark of ev's syscall.
+// takeMark returns and forgets the mark of ev's syscall. Marks of the
+// thread entered before ev's syscall are forgotten on the way: their
+// events have passed (an event that is not joined never asks for its
+// mark) or will never come (a lost exit), since the thread's events
+// arrive in enter order.
 func (j *JavaJoin) takeMark(ev *schema.Event) (NativeMark, bool) {
-	k := markKey{tid: ev.TID, boot: ev.BootNS}
-	m, ok := j.marks[k]
-	if ok {
-		delete(j.marks, k)
+	q := j.marks[ev.TID]
+	if q == nil {
+		return NativeMark{}, false
 	}
+	for q.head < len(q.marks) && q.marks[q.head].EnterBoot < ev.BootNS {
+		q.head++
+	}
+	var m NativeMark
+	ok := q.head < len(q.marks) && q.marks[q.head].EnterBoot == ev.BootNS
+	if ok {
+		m = q.marks[q.head]
+		q.head++
+	}
+	q.compact()
 	return m, ok && m.PID == ev.PID
+}
+
+// pendingMarks counts the marks still waiting for their event.
+func (j *JavaJoin) pendingMarks() int {
+	n := 0
+	for _, q := range j.marks {
+		n += len(q.marks) - q.head
+	}
+	return n
+}
+
+// compact reclaims the taken marks' room, as JavaJoin.compact does for
+// held events: a busy thread's queue is rarely empty — its events wait
+// for the watermark while its next marks arrive — so an emptied queue is
+// rewound, and otherwise the live part moves down once the taken part is
+// the larger, keeping appends from growing the array without end.
+func (q *markQueue) compact() {
+	switch {
+	case q.head == len(q.marks):
+		q.marks, q.head = q.marks[:0], 0
+	case q.head > len(q.marks)/2:
+		n := copy(q.marks, q.marks[q.head:])
+		q.marks, q.head = q.marks[:n], 0
+	}
 }
 
 // pruneMarks forgets marks whose event cannot come any more: the
 // correlator holds an event at most its fuse window, well inside Retain,
 // and a JVM's event waits at most Timeout here. A mark whose enter was
-// lost, or whose event never reached a JVM's join, would otherwise stay.
+// lost, or whose event never reached a JVM's join, would otherwise stay;
+// so would the queue of a thread that exited.
 func (j *JavaJoin) pruneMarks() {
 	keep := j.cfg.Retain + j.cfg.Timeout
 	if j.scanned <= keep {
 		return
 	}
 	cut := j.scanned - keep
-	for k := range j.marks {
-		if k.boot < cut {
-			delete(j.marks, k)
+	for tid, q := range j.marks {
+		for q.head < len(q.marks) && q.marks[q.head].EnterBoot < cut {
+			q.head++
+		}
+		q.compact()
+		if len(q.marks) == 0 {
+			delete(j.marks, tid)
 		}
 	}
 }
@@ -147,9 +204,11 @@ func (j *JavaJoin) warn(err error) {
 const noMarkBrackets = 64
 
 // countAfterProbe counts a bracket that began after v's natives were
-// probed, per thread, for markCheck.
+// probed, per thread, for markCheck — only on threads not marked yet:
+// markCheck ignores the others, and a thread once marked stays so, so
+// skipping them changes no verdict and spares a map store per bracket.
 func (v *jvm) countAfterProbe(b agentspool.Bracket) {
-	if v.afterProbe != nil && b.EnterMono > v.probedMono {
+	if v.afterProbe != nil && b.EnterMono > v.probedMono && !v.markedTIDs[b.KTID] {
 		v.afterProbe[b.KTID]++
 	}
 }
