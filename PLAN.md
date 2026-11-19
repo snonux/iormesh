@@ -616,9 +616,12 @@ Gated by S1 — done; the design below is S1's result
   java only, absent outside a span). A copy is read only once
   the app itself has initialized OTEL's context storage (the
   agent rewrites the end of `LazyStorage`'s static
-  initializer): the agent never triggers that initialization,
+  initializer): the agent does not trigger that initialization,
   which runs a ServiceLoader and freezes the app's storage
-  wrappers. An app without OTEL never arms anything.
+  wrappers — except that a live attach arms a `LazyStorage`
+  already loaded, and one caught between loading and
+  initializing is initialized on the attaching thread. An app
+  without OTEL never arms anything.
   Optionally, spans can also be ingested (an OTLP receiver the
   app dual-exports to, or the collector's file export —
   decision #20) to overlay the service graph on the mesh.

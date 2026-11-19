@@ -23,20 +23,23 @@ import java.util.List;
  * Arming waits for the app: the agent rewrites the end of
  * {@code io.opentelemetry.context.LazyStorage}'s static initializer to
  * call {@link #arm} (OtelTransformer), so a copy is armed only after the
- * app itself initialized OTEL's context storage. The agent never
- * initializes it: that initializer reads system properties, runs a
+ * app itself initialized OTEL's context storage. The agent does not
+ * initialize it on its own: that initializer reads system properties, runs a
  * ServiceLoader (jar I/O) and freezes the storage wrappers the app may
  * still register — done from inside a hooked I/O call of another thread
  * it could deadlock on a jar lock or change what the app's OTEL becomes.
- * An app without OTEL never loads LazyStorage, and then nothing here
- * runs beyond one volatile read per bracket.
+ * (One exception: a live attach arms each LazyStorage already loaded,
+ * and one loaded but not yet initialized — OTEL loads it only to call
+ * into it, so this is a window, not a state — is initialized on the
+ * attaching thread.) An app without OTEL never loads LazyStorage, and
+ * then nothing here runs beyond one volatile read per bracket.
  *
  * Ids travel as numbers: a trace id as two longs (its 32 hex digits'
  * upper and lower halves), a span id as one; all zero means no span —
  * W3C ids are never all zero, and OTEL's invalid span context is.
  */
 final class Otel {
-    /** At most this many OTEL copies are read; a later one is ignored. */
+    /** At most this many OTEL copies are read; a later one is refused (counted as a fail). */
     static final int MAX_READERS = 8;
     static final String SPAN = "io.opentelemetry.api.trace.Span";
     static final String SPAN_CONTEXT = "io.opentelemetry.api.trace.SpanContext";
@@ -55,6 +58,9 @@ final class Otel {
         }
     };
 
+    /** Guards arming's dedupe and publish (never held across a read). */
+    private static final Object LOCK = new Object();
+
     /** The armed readers, copy-on-write; read on every bracket. */
     @SuppressWarnings("unchecked")
     private static volatile WeakReference<Reader>[] readers =
@@ -67,24 +73,23 @@ final class Otel {
      * its Span and SpanContext in that class's loader and reads once, so
      * the classes the read touches load now, inside the app's own OTEL
      * initialization, not later inside a hooked I/O call. False when
-     * there is nothing to read (no OTEL API beside the context jar, a
-     * copy armed already, the cap reached).
+     * this copy is armed already or has no OTEL API beside the context
+     * jar (throws then); throws past MAX_READERS, so Hooks.otel counts
+     * the refused copy.
+     *
+     * The lock covers only the dedupe and the publish, never the
+     * resolve and first read: on a live attach the attaching thread may
+     * arm a LazyStorage whose initializer is still running on an app
+     * thread, so its first read waits for that initializer — which ends
+     * in arm on the app thread. Holding a lock across the read would
+     * deadlock the two, and hang the app's OTEL for good (4b4 review).
      */
-    static synchronized boolean arm(Class<?> lazyStorage, Brackets t)
-            throws ReflectiveOperationException {
+    static boolean arm(Class<?> lazyStorage, Brackets t) throws ReflectiveOperationException {
         ClassLoader loader = lazyStorage.getClassLoader();
-        List<WeakReference<Reader>> live = new ArrayList<>();
-        for (WeakReference<Reader> w : readers) {
-            Reader r = w.get();
-            if (r != null && r.loader.get() == loader) {
+        synchronized (LOCK) {
+            if (refuse(loader)) {
                 return false;
             }
-            if (r != null) {
-                live.add(w);
-            }
-        }
-        if (live.size() >= MAX_READERS) {
-            return false;
         }
         Reader r = Reader.resolve(loader);
         try {
@@ -93,13 +98,57 @@ final class Otel {
             // A copy whose first read fails would fail every read: not armed.
             throw new ReflectiveOperationException("otel: first span read failed", e);
         }
-        KEEP.get(lazyStorage)[0] = r;
+        synchronized (LOCK) {
+            // Again: another thread may have armed this copy meanwhile.
+            if (refuse(loader)) {
+                return false;
+            }
+            KEEP.get(lazyStorage)[0] = r;
+            publish(r);
+            return true;
+        }
+    }
+
+    /**
+     * Whether loader's copy is armed already (false to the caller);
+     * throws when MAX_READERS live copies are armed. Under LOCK.
+     */
+    private static boolean refuse(ClassLoader loader) {
+        int live = 0;
+        for (WeakReference<Reader> w : readers) {
+            Reader r = w.get();
+            if (r != null && r.loader.get() == loader) {
+                return true;
+            }
+            live += r != null ? 1 : 0;
+        }
+        if (live >= MAX_READERS) {
+            throw new IllegalStateException("otel: more than " + MAX_READERS + " OTEL copies");
+        }
+        return false;
+    }
+
+    /** Adds r to the readers, dropping cleared ones. Under LOCK (tests: directly). */
+    static void publish(Reader r) {
+        List<WeakReference<Reader>> live = new ArrayList<>();
+        for (WeakReference<Reader> w : readers) {
+            if (w.get() != null) {
+                live.add(w);
+            }
+        }
         live.add(new WeakReference<>(r));
         @SuppressWarnings("unchecked")
         WeakReference<Reader>[] next = live.toArray(
                 (WeakReference<Reader>[]) new WeakReference<?>[0]);
         readers = next;
-        return true;
+    }
+
+    /** Forgets every armed copy (tests only: the cap test fills the list). */
+    @SuppressWarnings("unchecked")
+    static void reset() {
+        synchronized (LOCK) {
+            readers = (WeakReference<Reader>[]) new WeakReference<?>[0];
+        }
     }
 
     /** The number of OTEL copies armed and still loaded (debug dump). */
@@ -126,7 +175,10 @@ final class Otel {
                     return;
                 }
             } catch (Throwable e) {
-                // An app's OTEL that throws is no span here; never the target's problem.
+                // An app's OTEL that throws is no span here; never the
+                // target's problem. The cache may hold ids parsed just
+                // before the throw: forget it with them.
+                t.otelContext = null;
             }
         }
         t.otelHi = 0;
@@ -171,7 +223,7 @@ final class Otel {
         private final MethodHandle traceId;
         private final MethodHandle spanId;
 
-        private Reader(ClassLoader loader, MethodHandle context, MethodHandle traceId,
+        Reader(ClassLoader loader, MethodHandle context, MethodHandle traceId,
                        MethodHandle spanId) {
             this.loader = new WeakReference<>(loader);
             this.context = context;

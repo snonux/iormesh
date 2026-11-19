@@ -741,8 +741,10 @@ the agent gets the span that was current on its Java thread:
   backend by these two ids. They are span metadata, not payload;
   spans themselves are not ingested (#20's optional half).
 - The agent starts reading a copy of OTEL (one per class loader)
-  only after the app initialized OTEL's context storage, and never
-  initializes it itself; I/O before the app's first use of an
+  only after the app initialized OTEL's context storage, and does
+  not initialize it itself (one exception: a live attach that
+  catches a copy between loading and initializing it initializes
+  it on the attaching thread); I/O before the app's first use of an
   OTEL context carries no ids, which is right — no span can be
   current then.
 - In the ring (format 4) a bracket inside a span is 72 bytes

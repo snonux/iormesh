@@ -2521,8 +2521,16 @@ internal/correlate/javajoin.go
      (jar I/O, jar locks) and freezes the storage wrappers, so
      doing it from a hooked I/O call could deadlock or change
      the app's OTEL. A live attach arms each `LazyStorage`
-     already loaded. Up to eight copies (class loaders) are
-     read, held weakly — a `ClassValue` on `LazyStorage` keeps a
+     already loaded — one caught between loading and
+     initializing (OTEL loads it only to call into it, so a
+     window, not a state) is then initialized on the attaching
+     thread. Arming locks only to dedupe and publish, never
+     across the resolve and first read: on attach that read may
+     wait for an app thread's `LazyStorage` initializer, which
+     itself ends in arming (review of 4b4; `OtelAttachRaceTest`
+     forces that order). Up to eight copies (class loaders) are
+     read, a ninth is refused and counted as a fail; readers are
+     held weakly — a `ClassValue` on `LazyStorage` keeps a
      reader alive exactly as long as its class, so the agent
      pins no undeployed web app.
    - **Hot path**: one volatile read without OTEL; with it, one
@@ -2551,10 +2559,14 @@ internal/correlate/javajoin.go
    Tests: `mage agentTest` — `OtelTest` (bridge: hex ids, an
    armed copy's span read and closed, nested spans, an OTEL
    without its API jar arms nothing and throws nothing, BRACKET
-   and HTTP records carry the ids) and `OtelTransformerTest`
-   (the real `LazyStorage` rewritten, verified and run: armed at
-   the first context use, not at class load; a loader without
-   the bridge in sight keeps a working OTEL), both on the
+   and HTTP records carry the ids, a throwing reader is no span
+   and drops the thread's cache, a ninth copy is refused and
+   counted), `OtelTransformerTest` (the real `LazyStorage`
+   rewritten, verified and run: armed at the first context use,
+   not at class load; a loader without the bridge in sight
+   keeps a working OTEL) and `OtelAttachRaceTest` (an attach
+   arming a copy whose initializer runs on an app thread: both
+   finish, one copy armed — it hung before the fix), all on the
    workload's vendored OTEL 1.67.0 jars in loaders of their own;
    Go — `internal/agentspool` (long BRACKET, HTTP ids, half-set
    ids malformed), `internal/correlate` (`javaotel_test.go`),

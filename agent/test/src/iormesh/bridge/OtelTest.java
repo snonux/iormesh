@@ -31,7 +31,10 @@ public final class OtelTest {
                 new AgentTests.Case("otel/hex ids", OtelTest::hex),
                 new AgentTests.Case("otel/armed read", OtelTest::armedRead),
                 new AgentTests.Case("otel/no api jar arms nothing", OtelTest::noApi),
-                new AgentTests.Case("otel/bracket and http carry ids", OtelTest::records));
+                new AgentTests.Case("otel/bracket and http carry ids", OtelTest::records),
+                new AgentTests.Case("otel/throwing reader is no span", OtelTest::throwing),
+                // Last: it fills the reader list, then resets it.
+                new AgentTests.Case("otel/copies past the cap refused", OtelTest::cap));
     }
 
     static void hex() {
@@ -120,6 +123,53 @@ public final class OtelTest {
         checkIds(b, find(b, Ring.HTTP)[0] + 56, "HTTP");
         Files.deleteIfExists(r.path());
         Files.delete(dir);
+    }
+
+    /**
+     * A reader whose read throws counts as no span and forgets the
+     * thread's cached context, so a stale cache cannot answer later.
+     */
+    static void throwing() throws Exception {
+        java.lang.invoke.MethodHandle boom = java.lang.invoke.MethodHandles.throwException(
+                Object.class, IllegalStateException.class).bindTo(new IllegalStateException("x"));
+        java.lang.invoke.MethodHandle str = java.lang.invoke.MethodHandles.dropArguments(
+                java.lang.invoke.MethodHandles.constant(String.class, ""), 0, Object.class);
+        ClassLoader loader = new ClassLoader(null) {};
+        Otel.Reader r = new Otel.Reader(loader, boom, str, str);
+        Brackets t = Hooks.state();
+        t.otelContext = new java.lang.ref.WeakReference<>(new Object());
+        t.otelSpan = 7;
+        Otel.publish(r);
+        Otel.read(t);   // must not throw
+        equal(0L, t.otelSpan, "no span");
+        check(t.otelContext == null, "cache forgotten");
+        // The list holds readers weakly: keep this one alive until here.
+        java.lang.ref.Reference.reachabilityFence(r);
+        Otel.reset();
+        armed = null;
+    }
+
+    /** MAX_READERS copies are read; the next one is refused and counted. */
+    static void cap() throws Exception {
+        List<ClassLoader> keep = new java.util.ArrayList<>();
+        try {
+            while (Otel.armed() < Otel.MAX_READERS) {
+                ClassLoader l = OtelFixture.loader(true, OtelTest.class.getClassLoader(), b -> b);
+                OtelFixture.initContext(l);
+                check(Otel.arm(OtelFixture.lazyStorage(l), Hooks.state()), "armed below the cap");
+                keep.add(l);
+            }
+            ClassLoader extra = OtelFixture.loader(true, OtelTest.class.getClassLoader(), b -> b);
+            OtelFixture.initContext(extra);
+            long fails = Hooks.fails();
+            Hooks.otel(OtelFixture.lazyStorage(extra));   // must not throw
+            equal(Otel.MAX_READERS, Otel.armed(), "still the cap");
+            equal(1L, Hooks.fails() - fails, "the refused copy counted");
+        } finally {
+            Otel.reset();
+            armed = null;
+            keep.clear();
+        }
     }
 
     private static void checkIds(ByteBuffer b, int o, String what) {
