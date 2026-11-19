@@ -47,7 +47,10 @@ final class SelfSignedCert {
         KeyPairGenerator gen = KeyPairGenerator.getInstance("EC");
         gen.initialize(new ECGenParameterSpec("secp256r1"));
         KeyPair keys = gen.generateKeyPair();
-        byte[] tbs = tbs(keys, new BigInteger(63, new SecureRandom()), Instant.now());
+        // Bit 62 set: RFC 5280 wants a positive serial, and 63 random bits
+        // alone could be 0.
+        BigInteger serial = new BigInteger(63, new SecureRandom()).setBit(62);
+        byte[] tbs = tbs(keys, serial, Instant.now());
         Signature signer = Signature.getInstance("SHA256withECDSA");
         signer.initSign(keys.getPrivate());
         signer.update(tbs);

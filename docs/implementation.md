@@ -2261,7 +2261,10 @@ internal/correlate/javajoin.go
    `http` events their `expect-pending.json` declares (one per
    request, after the I/O that completes it; `req_seq` 1, 2, 3
    on both ends of one connection; query values masked) are
-   this step's target.
+   this step's target. They assume the server's event is
+   recorded inside `HttpServe#handle` when the exchange closes
+   (`ex.close()`, after the reply is written) and the client's
+   when the response returns inside `HttpFetch#call`.
 8. OTEL: if `io.opentelemetry.api.trace.Span` is loadable in the
    app's class loader, read `Span.current().getSpanContext()`
    reflectively at `enter` and add ids to the bracket. No OTEL

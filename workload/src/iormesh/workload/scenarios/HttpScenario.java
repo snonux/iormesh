@@ -49,6 +49,10 @@ public final class HttpScenario implements Scenario {
     static final String API_SECRET = "Hunter2PlantedApiTokenHeader";
     static final String QUERY_SECRET = "Hunter2PlantedQuerySecret";
     static final String COOKIE_SECRET = "Hunter2PlantedSessionCookie";
+    // The server's Set-Cookie carries a value of its own (not the one the
+    // client sends back as Cookie), so a leak of either header is told
+    // apart from the other.
+    static final String SET_COOKIE_SECRET = "Hunter2PlantedSetCookie";
 
     // A literal address, never a lookup: no resolver I/O in the bracket.
     private static final InetAddress LOOPBACK = loopback();
@@ -77,7 +81,7 @@ public final class HttpScenario implements Scenario {
                 HttpCall.get("/redact/login?user=alice&token=" + QUERY_SECRET, 200, "welcome")
                         .withHeader("Authorization", "Bearer " + AUTH_SECRET)
                         .withHeader("X-Api-Token", API_SECRET)
-                        .withReplyHeader("Set-Cookie", "sid=" + COOKIE_SECRET),
+                        .withReplyHeader("Set-Cookie", "sid=" + SET_COOKIE_SECRET),
                 HttpCall.get("/redact/profile", 200, "alice")
                         .withHeader("Cookie", "sid=" + COOKIE_SECRET)));
     }

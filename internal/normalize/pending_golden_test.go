@@ -63,6 +63,7 @@ type pendingEvent struct {
 	HTTP *struct {
 		Method string `json:"method"`
 		Scheme string `json:"scheme"`
+		Host   string `json:"host"`
 		Path   string `json:"path"`
 		Status int    `json:"status"`
 		ReqSeq int    `json:"req_seq"`
@@ -119,6 +120,9 @@ func (p pendingEvent) problem() string {
 	case p.Event == "http" && (p.HTTP == nil || p.HTTP.Method == "" || p.HTTP.Scheme == "" ||
 		p.HTTP.Path == "" || p.HTTP.Status == 0 || p.HTTP.ReqSeq < 1):
 		return "http event without method, scheme, path, status and req_seq"
+	case p.HTTP != nil && strings.ContainsAny(p.HTTP.Host, "/?#@"):
+		// host is a bare host (client side only): no scheme, path or userinfo.
+		return "http.host " + p.HTTP.Host + " is not a bare host"
 	case p.Event != "http" && p.HTTP != nil:
 		return "http object on a " + p.Event + " event"
 	}
@@ -137,6 +141,8 @@ func TestStripPendingRejectsMalformed(t *testing.T) {
 		"http without req_seq": `{"thread": "$t1", "event": "http", "http": {"method": "GET",
 			"scheme": "http", "path": "/", "status": 200}}`,
 		"http object on a read": `{"thread": "$t1", "event": "read", "http": {"method": "GET"}}`,
+		"host with a path": `{"thread": "$t1", "event": "http", "http": {"method": "GET",
+			"scheme": "http", "host": "127.0.0.1/x", "path": "/", "status": 200, "req_seq": 1}}`,
 	}
 	for name, event := range bad {
 		if _, err := stripPending(doc(event)); err == nil {

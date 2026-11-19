@@ -17,4 +17,5 @@
    {"type": "connected", "from": "$p1", "to": "conn:$c1", "state": "fused"},
    {"type": "connected", "from": "$p2", "to": "conn:$c1", "state": "fused"}
  ],
- "must_not_appear": ["Hunter2PlantedAuthHeader", "Hunter2PlantedApiTokenHeader", "Hunter2PlantedQuerySecret", "Hunter2PlantedSessionCookie"]}
+ "must_not_appear": ["Hunter2PlantedAuthHeader", "Hunter2PlantedApiTokenHeader", "Hunter2PlantedQuerySecret", "Hunter2PlantedSessionCookie",
+                     "Hunter2PlantedSetCookie"]}
