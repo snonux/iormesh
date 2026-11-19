@@ -8,10 +8,12 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/magefile/mage/sh"
 )
@@ -115,7 +117,8 @@ var otelUsageErrors = [][]string{
 // za4): its self-test alone (the core scenarios already ran), --list and
 // --expect through the core Main, the two-process pair — whose server
 // fails the run unless the client's traceparent and tracestate arrive as
-// declared — its usage errors, and a client with nobody listening.
+// declared — its usage errors, a server sent a missing or wrong
+// traceparent (exit 1), and a client with nobody listening.
 func checkOtelScenario() error {
 	if err := sh.RunV("java", "-jar", otelJar, "--self-test", "otel"); err != nil {
 		return err
@@ -131,11 +134,63 @@ func checkOtelScenario() error {
 			return err
 		}
 	}
+	for _, tp := range []string{"", otelWrongParent} {
+		if err := checkOtelServerRejects(tp); err != nil {
+			return err
+		}
+	}
 	port, err := closedPort()
 	if err != nil {
 		return err
 	}
 	return expectExitJar(otelJar, nil, 1, "otel", "--role", "client", "--port", fmt.Sprint(port))
+}
+
+// otelWrongParent is a well-formed traceparent for the first call's
+// trace but another client span than the declared c11e0000000000a1.
+const otelWrongParent = "00-a3ce929d0e0e47364bf92f3577b34d01-00000000000000b1-01"
+
+// checkOtelServerRejects sends the otel server its first declared call
+// with traceparent tp ("" = none) and expects the server to answer 500
+// and exit 1: the propagation is proven on the wire, so a request with
+// a missing or wrong trace context must fail the run, never pass it.
+func checkOtelServerRejects(tp string) error {
+	server, err := startJar(otelJar, nil, "otel", "--role", "server")
+	if err != nil {
+		return err
+	}
+	defer server.kill()
+	if err := server.expectPID(); err != nil {
+		return err
+	}
+	port, err := server.expectListening()
+	if err != nil {
+		return err
+	}
+	server.drainStdout()
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+port+"/otel/hello", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("tracestate", "iormesh=otel")
+	if tp != "" {
+		req.Header.Set("traceparent", tp)
+	}
+	resp, err := (&http.Client{Timeout: gateWait}).Do(req)
+	if err != nil {
+		return fmt.Errorf("%s: traceparent %q: %w", server.name(), tp, err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		return fmt.Errorf("%s: traceparent %q answered %d, want 500", server.name(), tp,
+			resp.StatusCode)
+	}
+	select {
+	case err := <-server.done:
+		return wantExitCode(err, 1, fmt.Sprintf("%s with traceparent %q", server.name(), tp))
+	case <-time.After(gateWait):
+		return fmt.Errorf("%s: no exit within %v", server.name(), gateWait)
+	}
 }
 
 // checkOtelListed: the jar's --list names otel beside the core

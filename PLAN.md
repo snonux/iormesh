@@ -600,8 +600,8 @@ Gated by S1 — done; the design below is S1's result
 - **OpenTelemetry introspection**: when the app runs the OTEL
   API (SDK or not), the agent reads the active span context and
   tags every I/O event with its OTEL trace/span ids — iormesh
-  events join
-  1:1 with the app's distributed traces in any OTEL backend.
+  events join 1:1 with the app's distributed traces in any OTEL
+  backend.
   Optionally, spans can also be ingested (an OTLP receiver the
   app dual-exports to, or the collector's file export —
   decision #20) to overlay the service graph on the mesh.

@@ -141,11 +141,18 @@ public final class HttpServe implements AutoCloseable {
                 reply(ex, call);
             }
         } finally {
-            ex.close();
-            region.close();
-            done.countDown();
-            while (failure != null && done.getCount() > 0) {
+            // Nested: a close that throws must still close the region —
+            // or the OTEL scope stays current on the reused dispatcher
+            // thread and the next request's I/O carries stale ids — and
+            // still count the request down.
+            try {
+                ex.close();
+            } finally {
+                region.close();
                 done.countDown();
+                while (failure != null && done.getCount() > 0) {
+                    done.countDown();
+                }
             }
         }
     }
