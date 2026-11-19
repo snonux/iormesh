@@ -19,7 +19,8 @@ import java.util.function.BiFunction;
  * seen for the first time, or resolving to another set of addresses
  * than last time (compared sorted, so a resolver's rotation is no
  * change). An app that resolves per request would otherwise write a
- * record per request. IP literals (which getAllByName parses without a
+ * record per request. The memory holds MAX_HOSTS names; past that it is
+ * cleared, and a mapping seen before is recorded once more. IP literals (which getAllByName parses without a
  * lookup), an empty host (the loopback) and a failed lookup record
  * nothing. Reverse lookups (getHostName) are not hooked.
  */
@@ -64,13 +65,12 @@ public final class JdkDns implements Library {
                 out[i + 1] = address(addrs[i]);
             }
             String key = String.join(",", sorted(out));
-            if (key.equals(seen.get(host))) {
+            if (seen.size() >= MAX_HOSTS && !seen.containsKey(host)) {
+                seen.clear();   // starts afresh: known mappings are recorded again
+            }
+            if (key.equals(seen.put(host, key))) {
                 return null;   // known mapping
             }
-            if (seen.size() >= MAX_HOSTS) {
-                seen.clear();
-            }
-            seen.put(host, key);
             return out;
         }
 

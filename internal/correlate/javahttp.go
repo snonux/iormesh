@@ -38,10 +38,11 @@ import (
 // docs/schema.md). It is left out — the hops then pair by time only —
 // for HTTP/2, which multiplexes, for a request without a connection,
 // for every request of a JVM that may have lost an HTTP record (a lost
-// request would shift the count silently), and from the first request
+// request would shift the count silently), from the first request
 // that took several exchanges on a connection on (a client library's
 // own redirect or authentication retry: the server saw each exchange
-// as a request).
+// as a request), and from the first unordered record on (a sendAsync
+// completion, stamped after the app's own callbacks: task wd4 review).
 
 // pendingHTTP is an HTTP record — or, with dns set, a DNS record (task
 // wd4), which waits in the same queue by the same rule — waiting for its
@@ -346,7 +347,10 @@ func (j *JavaJoin) reqSeq(v *jvm, conn string, r agentspool.HTTP) uint32 {
 		return 0
 	}
 	k := connSeq{v.pid, conn, r.Server}
-	if j.conns.seq[k] == seqStopped || r.Exchanges > 1 {
+	// An unordered record (a sendAsync completion, stamped after the
+	// app's callbacks) used one request of the connection at a place in
+	// its order the stamp cannot tell: no ordinal, and none after it.
+	if j.conns.seq[k] == seqStopped || r.Exchanges > 1 || r.Unordered {
 		j.conns.seq[k] = seqStopped
 		return 0
 	}

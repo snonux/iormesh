@@ -54,7 +54,7 @@ func traceHTTP(t *testing.T, h *Harness, scenario string, dir bool) (tracedRun, 
 		t.Errorf("summary does not report two rings and every request on its connection: %s",
 			run.Logged)
 	}
-	assertHTTPTimed(t, run.Trace.Events)
+	assertHTTPTimed(t, run.Trace.Events, scenario == "http-async")
 	return run, normalized(t, h, run, scenario)
 }
 
@@ -92,9 +92,11 @@ func TestHTTPPlain(t *testing.T) {
 
 // TestHTTPAsync: http-async's client sends through HttpClient.sendAsync
 // (task wd4): each response completes on the client's executor, yet its
-// http event carries the sending thread and method (HttpFetch#callAsync),
-// the latency from the sendAsync call, and pairs with the server's. The
-// client names its server "localhost": its lookup is one dns event
+// http event carries the sending thread and method (HttpFetch#callAsync).
+// Its record is stamped when the agent's completion ran, after the app's
+// own callbacks, so it has no latency and no req_seq (review of wd4:
+// never a guessed ordinal), while the server numbers its end 1, 2, 3.
+// The client names its server "localhost": its lookup is one dns event
 // (decision #8) mapping the name to 127.0.0.1, on the thread that then
 // connects.
 func TestHTTPAsync(t *testing.T) {
@@ -103,7 +105,7 @@ func TestHTTPAsync(t *testing.T) {
 	_, got := traceHTTP(t, h, "http-async", false)
 	want := expectation(t, "http-async")
 	assertGolden(t, got, want)
-	assertRequestsPaired(t, got.Events)
+	assertAsyncUnnumbered(t, got.Events)
 	t.Run("wrong expectations are caught", func(t *testing.T) {
 		assertCaught(t, got, want, map[string]func(*normalize.Expectation){
 			"the synchronous send": func(x *normalize.Expectation) {
@@ -270,14 +272,37 @@ func sizesAgree(a, b *uint64) bool {
 	return a == nil || b == nil || *a == *b
 }
 
-// assertHTTPTimed: every http event of the JDK's libraries spans its
-// request (task wd4) — the client's send or response read and the
-// server's dispatch are entry-stamped on the thread that records the
-// event, so each has a start and a latency.
-func assertHTTPTimed(t *testing.T, events []schema.Event) {
+// assertAsyncUnnumbered: http-async's client events (the ones with a
+// host) carry no req_seq and no latency, its server events req_seq 1-3.
+func assertAsyncUnnumbered(t *testing.T, events []schema.Event) {
+	t.Helper()
+	var server []uint32
+	for _, e := range events {
+		switch {
+		case e.Event != schema.KindHTTP:
+		case e.HTTP.Host != "" && (e.HTTP.ReqSeq != 0 || e.LatencyNS != 0):
+			t.Errorf("sendAsync event seq %d: req_seq %d, latency %d, want neither",
+				e.Seq, e.HTTP.ReqSeq, e.LatencyNS)
+		case e.HTTP.Host == "":
+			server = append(server, e.HTTP.ReqSeq)
+		}
+	}
+	if len(server) != 3 || server[0] != 1 || server[1] != 2 || server[2] != 3 {
+		t.Errorf("server req_seq %v, want 1, 2, 3", server)
+	}
+}
+
+// assertHTTPTimed: every http event of the JDK's synchronous libraries
+// spans its request (task wd4) — the client's send or response read and
+// the server's dispatch are entry-stamped on the thread that records the
+// event, so each has a start and a latency. With asyncClient the client
+// events are sendAsync's, which have none (their stamp follows the app's
+// callbacks: assertAsyncUnnumbered), and are skipped.
+func assertHTTPTimed(t *testing.T, events []schema.Event, asyncClient bool) {
 	t.Helper()
 	for _, e := range events {
-		if e.Event == schema.KindHTTP && e.LatencyNS == 0 {
+		skip := asyncClient && e.HTTP != nil && e.HTTP.Host != ""
+		if e.Event == schema.KindHTTP && e.LatencyNS == 0 && !skip {
 			t.Errorf("http event seq %d (%s %s) has no latency", e.Seq, e.HTTP.Method, e.HTTP.Path)
 		}
 	}

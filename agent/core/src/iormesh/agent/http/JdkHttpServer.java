@@ -33,12 +33,15 @@ import java.util.function.BiFunction;
  * more, so it is left empty; the remote address stays, and the tracer
  * joins by it.
  *
- * Exchange.run is entry-stamped (task wd4): it starts when the dispatcher
- * found the request readable, so the latency runs from there to the
- * close (or the return) — reading the request, the handler, the reply. A
+ * Exchange.run is entry-stamped (task wd4): it starts when an executor
+ * thread takes up the exchange the dispatcher found readable (the wait
+ * in the executor's queue is not included), so the latency runs from
+ * there to the close (or the return) — reading the request, the
+ * handler, the reply. A
  * close on another thread (a handler that handed its exchange off) finds
  * no stamp of its exchange and records no start. Body sizes are the
- * exchange's own: the request's Content-Length (unknown when chunked) and
+ * exchange's own: the request's Content-Length as the client declared it
+ * (unknown when chunked) and
  * the length the handler passed to sendResponseHeaders (unknown when it
  * streamed the reply chunked).
  */

@@ -651,14 +651,17 @@ Since task wd4 the event spans its request like a syscall: `boot_ns`
 is when the library began it and `latency_ns` the time to its
 completion, so `boot_ns + latency_ns` is the completion stamp. The
 start is the entry of the call that began the request on the
-recording thread — HttpClient's `send`, HttpURLConnection's
-response read (`getInputStream0`, outermost; a body the app sent
-through `getOutputStream` before it went out earlier), and for the
-server the dispatch of the exchange (`ServerImpl$Exchange.run`, from
-the moment the request was readable) — and only when the hook can tie
-that entry to this very request; otherwise `boot_ns` is the
-completion and `latency_ns` 0 (a server exchange closed on another
-thread than its dispatch). The body sizes go into the `http` object.
+recording thread — HttpClient's `send`; HttpURLConnection's
+response read (`getInputStream0`, outermost), so a request body the
+app uploaded earlier through `getOutputStream` is not part of the
+latency; for the server the start of the exchange's task
+(`ServerImpl$Exchange.run`, when an executor thread took it up — the
+time the task waited in the executor's queue is not included) — and
+only when the hook can tie that entry to this very request;
+otherwise `boot_ns` is the completion and `latency_ns` 0 (a server
+exchange closed on another thread than its dispatch, and every
+`sendAsync` request, below). The body sizes go into the `http`
+object.
 
 ```json
 {"event":"http","fd":-1,"conn_id":"cb061683df650ac2","attribution":"java",
@@ -685,7 +688,8 @@ HttpClient's request publisher length (absent for a streamed body)
 and the response's `Content-Length`; HttpURLConnection's count of
 the bytes the app wrote (its buffered or streaming output) and the
 response's `Content-Length`; HttpServer's request `Content-Length`
-(absent when chunked) and the length the handler passed to
+as the client declared it (absent when chunked) and the length the
+handler passed to
 `sendResponseHeaders` (absent for a chunked reply). A reply without
 a body by protocol (HEAD, 1xx, 204, 304) is 0; a response without
 `Content-Length` (chunked, or read to the close) has no size.
@@ -711,6 +715,8 @@ server's event of one HTTP/1 request pair by (`conn_id`,
 - for every request of a JVM that may have lost an HTTP record —
   dropped by the ring, abandoned, undecodable, or a hook call that
   failed or was skipped (the agent counts those as dropped);
+- from the first `sendAsync` request on a connection's client end on
+  (its stamp follows the app's callbacks, not the response);
 - from the first request on a connection that took several HTTP
   exchanges on: HttpClient following a redirect or answering a
   401/407 through its authenticator, HttpURLConnection doing the
@@ -726,12 +732,17 @@ next request on a connection only after the previous response, which
 rules that out for the JDK's libraries.
 
 The summary line counts the http events and those without a
-connection. `HttpClient.sendAsync` (task wd4) is recorded when its
-future completes — on the client's executor — but under the sending
-thread: its `tid`, `java.thread` and stack (the method that called
-`sendAsync`) and the OTEL span current at the call, with the latency
-from the call; a failed or cancelled future records nothing, like a
-`send` that throws. Not recorded in v1: the other libraries of #22's
+connection. `HttpClient.sendAsync` (task wd4) is recorded when the
+agent's completion of its future runs — on the client's executor —
+but under the sending thread: its `tid`, `java.thread` and stack
+(the method that called `sendAsync`) and the OTEL span current at
+the call; a failed or cancelled future records nothing, like a
+`send` that throws. A future runs its callbacks last-registered
+first, so the agent's (registered first) runs after the app's own
+callbacks and `get()`'s waiter: its stamp is not when the response
+arrived. Such an event therefore has no latency and no `req_seq`,
+and its connection's client end numbers no more requests from it on
+(the server end still does). Not recorded in v1: the other libraries of #22's
 set.
 
 The agent writes each request as an HTTP record of the ring
@@ -750,7 +761,9 @@ wd4) adds a `dns` event when a JVM resolves a host name to a set
 of addresses it had not mapped that name to before: the first
 lookup of a name, and again whenever its address set changes
 (compared as a set, so a resolver rotating the order is no
-change). The hook is `InetAddress.getAllByName(String)`, through
+change). The agent remembers 4096 names per JVM; past that it
+starts afresh, and a mapping it had recorded before is recorded
+once more. The hook is `InetAddress.getAllByName(String)`, through
 which `getByName`, `InetSocketAddress(host, port)` and so the
 JDK's sockets, HttpClient and HttpURLConnection resolve. IP
 literals (parsed, never looked up), the empty host and failed

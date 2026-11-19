@@ -32,11 +32,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * (on its exceptional path this may still be uninitialized) and never
  * stamped — an unhooked throw would leave its stamp on the thread.
  * A static method passes null as this (InetAddress.getAllByName, the
- * DNS hook of task wd4); a DNS target's exits call {@code Hooks.dns}. Like BoundaryTransformer, body rewrites with a
- * hand-written handler frame (no COMPUTE_FRAMES, which would load
- * classes from inside the transformer); unlike it, classes of the
- * platform loader are candidates too — java.net.http and jdk.httpserver
- * are defined there.
+ * DNS hook of task wd4); a DNS target's exits call {@code Hooks.dns}.
+ *
+ * Like BoundaryTransformer, body rewrites with a hand-written handler
+ * frame (no COMPUTE_FRAMES, which would load classes from inside the
+ * transformer); unlike it, classes of the platform loader are
+ * candidates too — java.net.http and jdk.httpserver are defined there.
  */
 final class HttpTransformer implements ClassFileTransformer {
     static final String HTTP_DESC = "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;I)V";

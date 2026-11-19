@@ -36,6 +36,12 @@ type HTTP struct {
 	// sent: the two ends of one same-process loopback connection are
 	// numbered apart.
 	Server bool
+	// Unordered marks a request whose record was stamped when the agent's
+	// completion ran, after the app's own callbacks (HttpClient.sendAsync,
+	// task wd4 review), not when its response arrived: its stamp says
+	// nothing about the connection's request order, so it gets no ordinal
+	// and stops its connection's count; it has no start either.
+	Unordered bool
 	// Exchanges is how many HTTP exchanges the request took (≥ 1): more
 	// when the client library followed a redirect or answered an
 	// authentication challenge itself, each a request the server saw.
@@ -65,12 +71,13 @@ func decodeHTTP(rec []byte) (Record, error) {
 	h := HTTP{ExitMono: le.Uint64(rec[8:]), StackID: le.Uint64(rec[16:]),
 		ThreadID: le.Uint64(rec[24:]), KTID: int32(le.Uint32(rec[32:])),
 		Status: int32(le.Uint32(rec[36:])), Server: flags&httpServer != 0,
+		Unordered: flags&httpUnordered != 0,
 		Exchanges: le.Uint32(rec[52:]), StartMono: le.Uint64(rec[80:]),
 		ReqBytes: int64(le.Uint64(rec[88:])), RespBytes: int64(le.Uint64(rec[96:]))}
 	var otelOK bool
 	h.Otel, otelOK = decodeOtel(rec, 56)
 	if h.KTID < 0 || h.Status < 0 || n < httpFixed || nreq > n-httpFixed ||
-		flags&^httpServer != 0 || h.Exchanges == 0 || !otelOK ||
+		flags&^(httpServer|httpUnordered) != 0 || h.Exchanges == 0 || !otelOK ||
 		h.StartMono > h.ExitMono || h.ReqBytes < -1 || h.RespBytes < -1 {
 		return nil, errMalformed
 	}

@@ -70,8 +70,13 @@ const (
 const threadVirtual = 1
 
 // httpServer is HTTP's flag for a request answered (a server's), not
-// sent; every other flag bit is reserved and must be zero.
-const httpServer = 1
+// sent; httpUnordered (task wd4 review) marks a record stamped out of its
+// connection's request order (a sendAsync completion). Every other flag
+// bit is reserved and must be zero.
+const (
+	httpServer    = 1
+	httpUnordered = 2
+)
 
 // hookStrings is the number of strings in a HOOK record: kind, class,
 // method, native, syscall allowlist.

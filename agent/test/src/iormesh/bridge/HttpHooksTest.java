@@ -29,7 +29,8 @@ public final class HttpHooksTest {
                 new AgentTests.Case("http hooks/null and throwing probes", HttpHooksTest::quiet),
                 new AgentTests.Case("http hooks/oversized headers dropped", HttpHooksTest::oversized),
                 new AgentTests.Case("http hooks/entry stamps", HttpHooksTest::stamps),
-                new AgentTests.Case("http hooks/dns record", HttpHooksTest::dns));
+                new AgentTests.Case("http hooks/dns record", HttpHooksTest::dns),
+                new AgentTests.Case("http hooks/late record", HttpHooksTest::late));
     }
 
     private static final String[] REQUEST = {"GET", "http", "h", "/p?q=***", "HTTP/1.1",
@@ -194,6 +195,54 @@ public final class HttpHooksTest {
         equal(2, b.getInt(o + 36), "strings");
         equal(List.of("h", "10.0.0.1"), strings(b, o + Ring.DNS_HEAD, 2), "host and address");
         equal(0L, b.getLong(Ring.DROPPED + 8 * Ring.HTTP), "no HTTP loss");
+        delete(dir, r);
+    }
+
+    /**
+     * Hooks.httpLate (sendAsync's completion): the describer's request is
+     * written under the caller's stack, thread, kernel tid and span, and
+     * counted for the caller's hook id; a caller of the wrong length
+     * writes nothing; on a busy thread the describer is not run and the
+     * request counts as a lost HTTP record.
+     */
+    static void late() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-http-hooks");
+        Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
+        Hooks.configure(4, true, true);
+        Hooks.httpProbe(3, (a, meta) -> null);   // sizes httpCounts for id 3
+        int[] described = {0};
+        long counted = Hooks.httpCounts()[3];
+        java.util.function.Function<long[], String[]> d = meta -> {
+            described[0]++;
+            meta[Ring.M_FLAGS] = Ring.HTTP_UNORDERED;
+            return REQUEST;
+        };
+        Hooks.ring = r;
+        try {
+            Hooks.httpLate().accept(new long[] {11, 12, 13, 14, 15, 16, 3}, d);
+            Hooks.httpLate().accept(new long[] {11, 12, 13}, d);
+            Hooks.state().busy = true;
+            try {
+                Hooks.httpLate().accept(new long[] {11, 12, 13, 14, 15, 16, 3}, d);
+            } finally {
+                Hooks.state().busy = false;
+            }
+        } finally {
+            Hooks.ring = null;
+            Hooks.httpProbe(3, null);
+        }
+        ByteBuffer b = map(r.path());
+        List<int[]> recs = records(b);
+        equal(1L, recs.stream().filter(x -> x[0] == Ring.HTTP).count(), "one HTTP record");
+        int o = recs.get(recs.size() - 1)[1];
+        equal(List.of(11L, 12L, 13), List.of(b.getLong(o + 16), b.getLong(o + 24), b.getInt(o + 32)),
+                "caller's stack, thread and kernel tid");
+        equal(List.of(14L, 15L, 16L), List.of(b.getLong(o + 56), b.getLong(o + 64),
+                b.getLong(o + 72)), "caller's span");
+        equal(Ring.HTTP_UNORDERED, b.getInt(o + 48), "flags as described");
+        equal(1, described[0], "not described on a busy thread nor for a bad caller");
+        equal(1L, b.getLong(Ring.DROPPED + 8 * Ring.HTTP), "the busy one counted lost");
+        equal(counted + 1, Hooks.httpCounts()[3], "counted for the caller's hook");
         delete(dir, r);
     }
 

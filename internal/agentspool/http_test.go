@@ -27,6 +27,9 @@ func httpRaw(h HTTP, n, nreq uint32, strs []string) []byte {
 	if h.Server {
 		flags = httpServer
 	}
+	if h.Unordered {
+		flags |= httpUnordered
+	}
 	body = le.AppendUint32(body, flags)
 	body = le.AppendUint32(body, h.Exchanges)
 	body = appendOtel(body, h.Otel)
@@ -58,7 +61,8 @@ func sampleHTTP() HTTP {
 func TestHTTPRoundTrip(t *testing.T) {
 	path, w := newTestRing(t, testCap)
 	full := sampleHTTP()
-	bare := HTTP{ExitMono: 100, KTID: 1, Method: "POST", Scheme: "https", Path: "/", Exchanges: 1}
+	bare := HTTP{ExitMono: 100, KTID: 1, Method: "POST", Scheme: "https", Path: "/", Exchanges: 1,
+		Unordered: true}
 	w.raw(typeHTTP, httpBody(full))
 	w.raw(typeHTTP, httpBody(bare))
 	got := drainAll(t, openRing(t, path))
@@ -80,7 +84,7 @@ func TestHTTPMalformed(t *testing.T) {
 		"negative status":    httpBody(HTTP{Status: -1, Method: "GET", Exchanges: 1}),
 		"bad utf8 path":      httpBody(HTTP{Path: "\xff", Method: "GET", Exchanges: 1}),
 		"no exchange":        httpBody(HTTP{Method: "GET"}),
-		"unknown flag":       setByte(httpBody(sampleHTTP()), 40, 2),
+		"unknown flag":       setByte(httpBody(sampleHTTP()), 40, 4),
 		"count past body":    httpRaw(h, 9, 0, fixed),
 		"trailing garbage":   append(httpBody(h), 1, 0, 0, 0, 0, 0, 0, 0),
 		"span without trace": httpBody(HTTP{Method: "GET", Exchanges: 1, Otel: Otel{Span: 1}}),

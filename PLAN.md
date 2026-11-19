@@ -652,7 +652,9 @@ Gated by S1 — done; the design below is S1's result
   (declared or counted lengths), absent otherwise — never
   estimated. `sendAsync` is recorded at its future's completion
   under the sending thread's stack and span (scenario
-  `http-async`). The DNS hooks (#8) landed with it: a `dns`
+  `http-async`), without latency or `req_seq`: the agent's
+  completion runs after the app's own callbacks, so its stamp is
+  no evidence of the response's time or order. The DNS hooks (#8) landed with it: a `dns`
   event per new host-to-addresses mapping of a JVM. Not yet:
   Servlet, Apache HttpClient, OkHttp and Netty.
 - **Request pairing across the wire**: a request on the client
@@ -665,8 +667,10 @@ Gated by S1 — done; the design below is S1's result
   end in completion order, and leaves the ordinal out over
   HTTP/2, without a connection, once a JVM may have lost an
   HTTP record — a lost request would shift the count silently —
-  and from a request the client library retried by itself
-  (redirect, 401/407) on, which the server counted as several.
+  from a request the client library retried by itself
+  (redirect, 401/407) on, which the server counted as several,
+  and from a `sendAsync` request on (its stamp follows the app's
+  callbacks).
 - Acceptance: frames carry `class#method(file:line)`; every
   declared I/O op of M3's method-flow scenarios carries its
   declared causing method; unbracketed events are marked unattributed; the

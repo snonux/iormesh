@@ -2445,7 +2445,7 @@ internal/correlate/javajoin.go
      the JDK's `Response`, whose `localAddress` a binding hook
      ties to the response. `sendAsync` (task wd4): the public
      three-argument overload (the two-argument one and the facade
-     reach it, `send` does not) is stamped; its probe takes the
+     reach it, `send` does not) is hooked; its probe takes the
      caller's identity — stack id (walked past the probe's own
      frames, `StackIds.belowAgent`), thread, kernel tid, OTEL span —
      through `Hooks.httpCaller()` and registers a completion on the
@@ -2453,9 +2453,17 @@ internal/correlate/javajoin.go
      `Hooks.httpLate()`: the describer runs like a probe (busy
      thread, meta) on the completing thread and the record goes out
      under the caller's identity. A future already done at the
-     return is recorded right there; one that fails records
-     nothing; a completion that lands on a busy thread counts as a
-     lost HTTP record (numbering stops, never shifts).
+     return, or completing inline while the completion is
+     registered (same thread), is recorded right there; one that
+     fails records nothing; a completion that lands on a busy thread
+     counts as a lost HTTP record (numbering stops, never shifts).
+     Review of wd4: the future runs dependents last-registered
+     first, so the agent's completion runs after the app's callbacks
+     and `get()`'s waiter — its stamp is not the response's arrival.
+     Every `sendAsync` record is therefore flagged
+     `HTTP_UNORDERED` (flags bit 2) with no start: the joiner gives
+     it no `req_seq` and stops numbering its connection's client
+     end.
    - **HttpURLConnection**: `getInputStream0`'s first exit with a
      response code (`getResponseCode` and the header getters go
      through it; a 404 throws after reading the response), reading

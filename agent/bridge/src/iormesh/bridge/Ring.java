@@ -133,6 +133,11 @@ public final class Ring {
     static final int MAX_DNS_ADDRS = 32;
     /** HTTP flag: the request was answered here (a server's), not sent. */
     static final int HTTP_SERVER = 1;
+    /**
+     * HTTP flag (task wd4 review): the record's stamp does not follow its
+     * connection's request order (a sendAsync completion): no ordinal.
+     */
+    static final int HTTP_UNORDERED = 2;
     /** HTTP's leading strings: method, scheme, host, path, version, local, remote. */
     static final int HTTP_FIXED = 7;
     /** Bounds a STACK or THREAD record, so one never needs a large share of the ring. */

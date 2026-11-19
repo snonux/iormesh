@@ -86,9 +86,10 @@ public final class HttpProbeTest {
 
     /**
      * sendAsync: the caller's identity is taken at the return, the request
-     * described only when the future completes, through late, with the
-     * sendAsync's own start and its hook id; a failed future records
-     * nothing; one done at the return is recorded at once.
+     * described only when the future completes, through late, with its
+     * hook id, marked unordered and without a start (review of wd4); a
+     * failed future records nothing; one done at the return, or completing
+     * inline while the completion is registered, is recorded at once.
      */
     static void async() {
         List<long[]> lates = new java.util.ArrayList<>();
@@ -109,7 +110,8 @@ public final class HttpProbeTest {
         equal(List.of(1L, 2L, 3L, 4L, 5L, 6L, 7L), java.util.Arrays.stream(lates.get(0)).boxed()
                 .toList(), "caller identity and hook id");
         equal("/a?k=***", described.get(0)[3], "the response described");
-        equal(42L, meta[4], "sendAsync's start");
+        equal(0L, meta[4], "no start: the stamp follows the app's callbacks");
+        equal(2L, meta[2], "unordered, a client's");
         java.util.concurrent.CompletableFuture<HttpResponse<String>> bad =
                 new java.util.concurrent.CompletableFuture<>();
         probe.apply(new Object[] {bad, self, null, self, 7}, new long[7]);
@@ -118,7 +120,18 @@ public final class HttpProbeTest {
         long[] now = {0, 0, 0, 0, 42, -1, -1};
         String[] s = probe.apply(new Object[] {java.util.concurrent.CompletableFuture
                 .completedFuture(new FakeResponse(null)), self, null, self, 7}, now);
-        check(s != null && now[4] == 42, "done at the return: recorded at once");
+        check(s != null && now[4] == 0 && now[2] == 2, "done at the return: recorded at once");
+        // Completed before whenComplete although isDone said no: the
+        // completion runs inline on this thread and the probe records it.
+        java.util.concurrent.CompletableFuture<HttpResponse<String>> racy =
+                new java.util.concurrent.CompletableFuture<>() {
+                    @Override public boolean isDone() { return false; }
+                };
+        racy.complete(new FakeResponse(null));
+        long[] inline = new long[7];
+        check(probe.apply(new Object[] {racy, self, null, self, 7}, inline) != null
+                && inline[2] == 2, "inline completion recorded by the probe");
+        equal(1, lates.size(), "and not handed to late");
     }
 
     /**

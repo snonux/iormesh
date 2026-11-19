@@ -47,6 +47,13 @@ final class Request {
     /** The request was answered here (a server's event), not sent. */
     boolean server;
     /**
+     * Recorded at a stamp that does not follow the connection's request
+     * order (a sendAsync completion, run after the app's own callbacks):
+     * the tracer numbers no ordinal for it and stops its connection's
+     * count (Ring.HTTP_UNORDERED). Such a record has no start either.
+     */
+    boolean unordered;
+    /**
      * The HTTP exchanges the request took: more than 1 when the library
      * followed a redirect or answered an authentication challenge itself
      * — the server saw each, the caller one request.
@@ -58,7 +65,11 @@ final class Request {
      * that stamp is its request's.
      */
     long start;
-    /** Request and response body bytes, {@link #UNKNOWN} unless the library knows. */
+    /**
+     * Request and response body bytes, {@link #UNKNOWN} unless the
+     * library knows: a declared Content-Length (on the server, the
+     * client's declaration), a publisher's length or the bytes counted.
+     */
     long reqBytes = UNKNOWN;
     long respBytes = UNKNOWN;
     private final List<String> request = new ArrayList<>();
@@ -86,9 +97,10 @@ final class Request {
         s.addAll(response);
         meta[M_STATUS] = Math.max(status, 0);
         meta[M_NREQ] = request.size();
-        meta[M_FLAGS] = server ? 1 : 0;   // Ring.HTTP_SERVER
+        // Ring.HTTP_SERVER and Ring.HTTP_UNORDERED
+        meta[M_FLAGS] = (server ? 1 : 0) | (unordered ? 2 : 0);
         meta[M_EXCHANGES] = Math.max(exchanges, 1);
-        meta[M_START] = Math.max(start, 0);
+        meta[M_START] = unordered ? 0 : Math.max(start, 0);
         meta[M_REQ_BYTES] = reqBytes < 0 ? UNKNOWN : reqBytes;
         meta[M_RESP_BYTES] = respBytes < 0 ? UNKNOWN : respBytes;
         return s.toArray(new String[0]);

@@ -31,9 +31,9 @@ import java.util.function.Function;
  * send does not (it calls a private overload) — is entry-stamped; its
  * probe takes the caller's identity there (Async) and registers a
  * completion on the returned future, which records the response from the
- * completing thread under the caller's stack, thread and span, with the
- * latency from the sendAsync call. A future that fails or is cancelled
- * records nothing, as a send that throws.
+ * completing thread under the caller's stack, thread and span — without
+ * latency or ordinal (see SentAsync). A future that fails or is
+ * cancelled records nothing, as a send that throws.
  */
 public final class JdkHttpClient implements Library {
     private static final String INTERNAL = "jdk.internal.net.http";
@@ -82,7 +82,7 @@ public final class JdkHttpClient implements Library {
                     "(" + HTTP + "HttpRequest;" + HTTP + "HttpResponse$BodyHandler;"
                             + HTTP + "HttpResponse$PushPromiseHandler;)"
                             + "Ljava/util/concurrent/CompletableFuture;", Target.NO_ARG,
-                    new SentAsync(bound, async)).stamped());
+                    new SentAsync(bound, async)));
         }
         return out;
     }
@@ -134,7 +134,18 @@ public final class JdkHttpClient implements Library {
     /**
      * sendAsync's return: the caller's identity now, the request when the
      * future completes. Already done at the return (a request refused at
-     * once): recorded right here, like a send.
+     * once), or completed inline while the completion was registered:
+     * recorded right here, like a send.
+     *
+     * No latency and no ordinal (review of wd4): the future runs its
+     * dependents last-registered first, so the agent's completion — the
+     * first one registered — runs after the app's own callbacks (and the
+     * waiter of get()). Its stamp is when the agent got to it, not when
+     * the response arrived: a latency would include app code, and a
+     * completion-order ordinal could swap with the next request on the
+     * same connection. Each record is marked unordered (Request
+     * .unordered); the tracer gives it no req_seq and stops numbering its
+     * connection's client end.
      */
     static final class SentAsync implements BiFunction<Object[], long[], String[]> {
         private final Weak<String> bound;
@@ -150,46 +161,67 @@ public final class JdkHttpClient implements Library {
             if (!(a[0] instanceof CompletableFuture<?> cf)) {
                 return null;   // sendAsync threw: no request to record
             }
-            long start = Request.ownStart(a, meta);
             if (cf.isDone()) {
-                return cf.isCompletedExceptionally()
-                        || !(cf.getNow(null) instanceof HttpResponse<?> resp)
-                        ? null : new Completion(null, start, bound, null).record(resp, meta);
+                return done(cf, meta);
             }
             long[] caller = java.util.Arrays.copyOf(async.caller().get(), Async.CALLER + 1);
             caller[Async.CALLER] = a.length > 4 && a[4] instanceof Integer id ? id : 0;
-            cf.whenComplete(new Completion(caller, start, bound, async.late()));
-            return null;
+            Completion c = new Completion(caller, bound, async.late());
+            cf.whenComplete(c);
+            // A future completing between isDone and whenComplete runs c
+            // inline, on this (busy) thread: c kept the response for us.
+            HttpResponse<?> inline = c.registered();
+            return inline == null ? null : c.record(inline, meta);
+        }
+
+        private String[] done(CompletableFuture<?> cf, long[] meta) {
+            return cf.isCompletedExceptionally()
+                    || !(cf.getNow(null) instanceof HttpResponse<?> resp)
+                    ? null : new Completion(null, bound, null).record(resp, meta);
         }
     }
 
     /**
      * One sendAsync's completion: on success it asks the bridge to record
      * the response (late), then describes it when the bridge runs it
-     * (apply), the thread busy. Never throws into the app's future chain.
+     * (apply), the thread busy. A completion that runs inline while it is
+     * being registered (same thread) only keeps the response for the
+     * probe. Never throws into the app's future chain.
      */
     static final class Completion implements BiConsumer<Object, Throwable>,
             Function<long[], String[]> {
         private final long[] caller;
-        private final long start;
         private final Weak<String> bound;
         private final BiConsumer<long[], Function<long[], String[]>> late;
+        private final Thread registrar = Thread.currentThread();
+        private volatile boolean registering = true;
+        private HttpResponse<?> inline;
         private HttpResponse<?> resp;
 
-        Completion(long[] caller, long start, Weak<String> bound,
+        Completion(long[] caller, Weak<String> bound,
                    BiConsumer<long[], Function<long[], String[]>> late) {
             this.caller = caller;
-            this.start = start;
             this.bound = bound;
             this.late = late;
         }
 
         @Override
         public void accept(Object value, Throwable failure) {
-            if (value instanceof HttpResponse<?> r) {
-                resp = r;   // read by apply, which late runs on this thread
-                late.accept(caller, this);
+            if (!(value instanceof HttpResponse<?> r)) {
+                return;   // failed or cancelled: nothing, like a send that throws
             }
+            if (registering && Thread.currentThread() == registrar) {
+                inline = r;   // whenComplete ran us inline: the probe records it
+                return;
+            }
+            resp = r;   // read by apply, which late runs on this thread
+            late.accept(caller, this);
+        }
+
+        /** Ends registration; the response if the completion ran inline. */
+        HttpResponse<?> registered() {
+            registering = false;
+            return inline;
         }
 
         @Override
@@ -201,7 +233,7 @@ public final class JdkHttpClient implements Library {
             Request q = describe(r);
             String local = bound.take(r);
             q.local = local == null ? "" : local;
-            q.start = start;
+            q.unordered = true;   // no start, no ordinal: see SentAsync
             return q.toRecord(meta);
         }
     }

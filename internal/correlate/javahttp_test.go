@@ -299,6 +299,31 @@ func TestConnIndex(t *testing.T) {
 	}
 }
 
+// TestJavaJoinHTTPUnorderedStops: an unordered record (a sendAsync
+// completion) gets no req_seq, and its connection's client end numbers no
+// more; the server end, counted apart, goes on.
+func TestJavaJoinHTTPUnorderedStops(t *testing.T) {
+	jt := newJoinTest(t)
+	at := jt.now + 1000
+	first := jt.request(at+1000, "/1", "127.0.0.1:40000", "127.0.0.1:8080")
+	async := jt.request(at+2000, "/2", "127.0.0.1:40000", "127.0.0.1:8080")
+	async.Unordered = true
+	after := jt.request(at+3000, "/3", "127.0.0.1:40000", "127.0.0.1:8080")
+	jt.ring(first, async, after, jt.watermark(at+20_000_000))
+	jt.sock(at, "c1", "127.0.0.1", 40000, "127.0.0.1", 8080, "ESTABLISHED")
+	jt.event(999, 1000, "write", at+10_000_000)
+	jt.close()
+	var seqs []uint32
+	for _, e := range jt.sink.events {
+		if e.Event == schema.KindHTTP {
+			seqs = append(seqs, e.HTTP.ReqSeq)
+		}
+	}
+	if !reflect.DeepEqual(seqs, []uint32{1, 0, 0}) {
+		t.Errorf("req_seq %v, want 1, then none from the unordered record on", seqs)
+	}
+}
+
 // TestJavaJoinDNSEvents: a DNS record becomes a dns event after the
 // syscalls that completed before it, with its mapping, the lookup's
 // thread and stack, and no connection.
