@@ -21,3 +21,6 @@ internal/c/generated_tracepoints.c.tmp-*
 # The OTEL workload flavor (mage workloadOtelBuild).
 /workload-otel.jar
 /workload/otel/classes/
+
+# Agent worktrees (Claude Code isolation)
+/.claude/worktrees/
