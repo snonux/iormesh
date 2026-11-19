@@ -1,2 +1,4 @@
 iormesh.workload.libs.ServletScenario
 iormesh.workload.libs.ApacheScenario
+iormesh.workload.libs.OkHttpScenario
+iormesh.workload.libs.NettyScenario

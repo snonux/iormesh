@@ -2585,11 +2585,13 @@ internal/correlate/javajoin.go
    container, per web app) defines them in, so:
 
    ```
-   agent/core/src/iormesh/agent/BridgeSight.java   # may this loader link the bridge?
-   agent/core/src/iormesh/agent/http/Handles.java  # per-class public API lookups
-   agent/core/src/iormesh/agent/http/Servlet.java  # jakarta + javax HttpServlet
-   agent/core/src/iormesh/agent/http/ApacheHttpClient.java # HttpClient 5 classic
-   agent/core/src/iormesh/agent/http/Slots.java    # a request's exchanges, per thread
+   agent/core/src/iormesh/agent/BridgeSight.java   # loader sees bridge?
+   agent/core/src/iormesh/agent/http/Handles.java  # API per class
+   agent/core/src/iormesh/agent/http/Servlet.java  # HttpServlet
+   agent/core/src/iormesh/agent/http/ApacheHttpClient.java
+   agent/core/src/iormesh/agent/http/Slots.java    # exchanges
+   agent/core/src/iormesh/agent/http/OkHttp.java   # OkHttp 4/5
+   agent/core/src/iormesh/agent/http/Netty.java    # Netty's HTTP/1.x codec
    workload/libs/                                  # module, jar, vendored libs
    ```
 
@@ -2684,7 +2686,39 @@ internal/correlate/javajoin.go
    `TestHTTPApache` (`http-apache`: the client against the JDK's
    HttpServer).
 
-   Not yet: OkHttp, Netty.
+   - **OkHttp 4/5**: `RealCall.getResponseWithInterceptorChain$okhttp()`
+     — what `execute()` and the dispatcher's `AsyncCall` both run —
+     entry-stamped, records the call's original request and the
+     chain's response on that thread (the caller's for `execute`,
+     the dispatcher's for `enqueue`, before the app's callback);
+     `CallServerInterceptor.intercept(Chain)` fills the call's slot
+     like httpcore5's executor (exchanges, `Chain.connection()
+     .socket()`'s ends). OkHttp's protocol names map to versions
+     (`h2` is HTTP/2, not numbered). A cached response has no
+     exchange and no connection. Kotlin-compiled; the store scan
+     refuses neither method.
+   - **Netty** (4.2, HTTP/1.x codec): no call spans a request, so
+     `HttpObjectDecoder.decode` (its output list at the exit, with
+     the context) and `HttpObjectEncoder.write` (the message) feed a
+     per-channel FIFO (weak map; its lock held only to find or
+     change a queue): a request opens an exchange — a server's,
+     decoded, stamps the start —, the answer's head (status,
+     headers; an interim 1xx is skipped) goes to the oldest one,
+     and the answer's last content completes it, recorded with
+     `Channel.localAddress()/remoteAddress()`. Server: at the
+     encoder's write, before the flush; client: at the response's
+     decoding. A write that throws drops the channel's exchanges, a
+     lost record; more than 64 unanswered requests on a channel
+     likewise. Netty's HTTP/2 codecs are not seen.
+
+   Tests (OkHttp, Netty): `TestHTTPOkHttp` (`http-okhttp`: OkHttp 5
+   against the JDK's HttpServer) and `TestHTTPNetty` (`http-netty`:
+   the JDK HttpClient against a Netty server, one acceptor and one
+   worker event loop).
+
+   Not hooked: Apache HttpClient 4 (`org.apache.http`) and its async
+   client, OkHttp 3, Netty 4.1's encoder without its `write`
+   override, Jersey's `ServletContainer` (overrides `service`).
 8. OTEL (done, task 4b4): read `Span.current().getSpanContext()`
    reflectively in the app's class loader at `enter` and add the
    ids to the bracket. No OTEL dependency in the agent. The `otel`

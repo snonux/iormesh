@@ -1,0 +1,77 @@
+package iormesh.workload.libs;
+
+import iormesh.workload.Options;
+import iormesh.workload.Scenario;
+import iormesh.workload.scenarios.HttpCall;
+import iormesh.workload.scenarios.HttpServe;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * The OkHttp flavor of the HTTP scenarios (decision #22's third-party
+ * set, task de4): OkHttp 5 sends http-plain's three calls to the JDK's
+ * HttpServer on 127.0.0.1, one HTTP/1.1 keep-alive connection between
+ * two processes. The server end is the JDK's own (already hooked); the
+ * client end is what this scenario is for — the agent's OkHttp hooks,
+ * rewritten into an application class loader.
+ *
+ * <pre>
+ *   http-okhttp  GET /okhttp/hello (200), POST /okhttp/echo (200),
+ *                GET /okhttp/missing (404)
+ *
+ *   --role server [--port N]   serve the calls, then stop
+ *   --role client  --port N    send the calls, then close
+ * </pre>
+ */
+public final class OkHttpScenario implements Scenario {
+    static final String NAME = "http-okhttp";
+
+    static final List<HttpCall> CALLS = List.of(
+            HttpCall.get("/okhttp/hello", 200, "hello"),
+            HttpCall.post("/okhttp/echo", "ping!", 200, "ping!"),
+            HttpCall.get("/okhttp/missing", 404, ""));
+
+    private static final long SELF_TEST_WAIT_SECONDS = 30;
+
+    /** Public no-argument constructor: ServiceLoader instantiates it. */
+    public OkHttpScenario() {}
+
+    @Override
+    public String name() {
+        return NAME;
+    }
+
+    @Override
+    public void run(String role, Map<String, String> opts) throws Exception {
+        Options.requireRole(NAME, role, Set.of("client", "server"));
+        Options.requireKnown(opts, Set.of("port"));
+        // Parse the port before any I/O: a bad option is a usage error
+        // with an empty bracket.
+        int port = role.equals("server") ? Options.port(opts, 0) : Options.requiredPort(opts);
+        if (role.equals("server")) {
+            server(port);
+        } else {
+            OkFetch.run(Loopback.base(port), CALLS);
+        }
+    }
+
+    /** Both roles in one process: the JDK server's threads, this client. */
+    @Override
+    public void selfTest() throws Exception {
+        try (HttpServe serve = Loopback.serve(0, CALLS)) {
+            OkFetch.run(Loopback.base(serve.port()), CALLS);
+            serve.awaitAll(SELF_TEST_WAIT_SECONDS);
+        }
+    }
+
+    // No bound on the wait on purpose, as in HttpScenario: a standalone
+    // server waits for its client; the harness kills it on failure.
+    private static void server(int port) throws Exception {
+        try (HttpServe serve = Loopback.serve(port, CALLS)) {
+            System.out.println("listening " + serve.port());
+            System.out.flush();
+            serve.awaitAll();
+        }
+    }
+}

@@ -4,9 +4,6 @@ import iormesh.workload.Options;
 import iormesh.workload.Scenario;
 import iormesh.workload.scenarios.HttpCall;
 import iormesh.workload.scenarios.HttpServe;
-import java.io.IOException;
-import java.net.InetAddress;
-import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -56,15 +53,15 @@ public final class ApacheScenario implements Scenario {
         if (role.equals("server")) {
             server(port);
         } else {
-            ApacheFetch.run(base(port), CALLS);
+            ApacheFetch.run(Loopback.base(port), CALLS);
         }
     }
 
     /** Both roles in one process: the JDK server's threads, this client. */
     @Override
     public void selfTest() throws Exception {
-        try (HttpServe serve = serve(0)) {
-            ApacheFetch.run(base(serve.port()), CALLS);
+        try (HttpServe serve = Loopback.serve(0, CALLS)) {
+            ApacheFetch.run(Loopback.base(serve.port()), CALLS);
             serve.awaitAll(SELF_TEST_WAIT_SECONDS);
         }
     }
@@ -72,20 +69,10 @@ public final class ApacheScenario implements Scenario {
     // No bound on the wait on purpose, as in HttpScenario: a standalone
     // server waits for its client; the harness kills it on failure.
     private static void server(int port) throws Exception {
-        try (HttpServe serve = serve(port)) {
+        try (HttpServe serve = Loopback.serve(port, CALLS)) {
             System.out.println("listening " + serve.port());
             System.out.flush();
             serve.awaitAll();
         }
-    }
-
-    static HttpServe serve(int port) throws IOException {
-        // A literal address, never a lookup: no resolver I/O in the bracket.
-        InetAddress loopback = InetAddress.getByAddress(new byte[] {127, 0, 0, 1});
-        return HttpServe.start(loopback, port, CALLS, null, (n, request) -> () -> { });
-    }
-
-    private static URI base(int port) {
-        return URI.create("http://127.0.0.1:" + port + "/");
     }
 }

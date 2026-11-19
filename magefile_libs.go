@@ -36,7 +36,8 @@ type vendoredJar struct{ path, sha256 string }
 // libsJars are workload/libs's vendored jars: Tomcat's embeddable core
 // (the Servlet API and container) with the annotations API it depends
 // on; Apache HttpClient 5 with httpcore5 (and its HTTP/2 module) and the
-// SLF4J API, its Maven dependencies.
+// SLF4J API, its Maven dependencies; OkHttp 5 with Okio and the Kotlin
+// standard library; Netty's HTTP codec with the modules it needs.
 var libsJars = []vendoredJar{
 	{"tomcat/tomcat-embed-core-10.1.61.jar", "57b8e4bdb3a49163c3a6a501929240531523c111ff53844c9f82efba60f789f7"},
 	{"tomcat/tomcat-annotations-api-10.1.61.jar", "8d408d675d89da99f86171ead3067f9e947accf722e3785e6775e9af387ff3a6"},
@@ -44,6 +45,19 @@ var libsJars = []vendoredJar{
 	{"httpclient5/httpcore5-5.4.4.jar", "b08e3c3a440fec2029e89980134c7c787dd6796454641ad1eafb81478d7e8b0b"},
 	{"httpclient5/httpcore5-h2-5.4.4.jar", "9a61441889f9b222ce99581977cc549b4dfca7ac9d2841582c1e57a31fa65b48"},
 	{"httpclient5/slf4j-api-1.7.36.jar", "d3ef575e3e4979678dc01bf1dcce51021493b4d11fb7f1be8ad982877c16a1c0"},
+	{"okhttp/okhttp-jvm-5.5.1.jar", "4039527bd1f2e40b66e20b0e52c689cf56074b938ea02678141495f5160f1047"},
+	{"okhttp/okio-jvm-3.18.1.jar", "b97b640557a650d15411f2be29aef558c4e422a83653cb18ba494311dbed18be"},
+	{"okhttp/kotlin-stdlib-2.1.21.jar", "263bdc679e1f62012db7b091796279b6d71cf36f4797a98ff1ace05835f201c8"},
+	{"okhttp/annotations-13.0.jar", "ace2a10dc8e2d5fd34925ecac03e4988b2c0f851650c94b8cef49ba1bd111478"},
+	{"netty/netty-codec-http-4.2.20.Final.jar", "d08b0d473c48c61ebb2bc4d145111fa1777832aee4d2be1024891e904e36eaf5"},
+	{"netty/netty-codec-base-4.2.20.Final.jar", "5a66da26b86d7eecedd9e0d8fe0e22ef1733bbf873e476cb9b860afbed22210c"},
+	{"netty/netty-codec-compression-4.2.20.Final.jar", "7ebae4ac80c01e2d279d0e50d377bcdaf0cf8f2f65797e0578afc810a66ab57d"},
+	{"netty/netty-handler-4.2.20.Final.jar", "211dbbba074298046b37f841ad9ca89ed91968f6b9e97400c99ab4e6177b1f96"},
+	{"netty/netty-transport-4.2.20.Final.jar", "ff4f1f8158c714c1b485ef10cf2456fbd3c1b2930256b70287aeb7dc3ad94783"},
+	{"netty/netty-transport-native-unix-common-4.2.20.Final.jar", "6f600d5cbd3ce39e50680de66b00d7e6a9652dac7d08a5b022101d717cb7fb52"},
+	{"netty/netty-resolver-4.2.20.Final.jar", "cb7a6027e4f366fb28dcea7e1f7088ca16bd23c2cc38e8ddfdac77a77bd144dc"},
+	{"netty/netty-buffer-4.2.20.Final.jar", "794136fc6be78e44a286c2b1420a182e135c6d06eb8c397030c1551ee50acccd"},
+	{"netty/netty-common-4.2.20.Final.jar", "5807fef7eb619bc0a5d1c0e6c83199ea9bca8503203a3eb73cfdccec2d215743"},
 }
 
 // WorkloadLibsBuild builds workload-libs.jar, the third-party HTTP
@@ -108,8 +122,8 @@ func verifyJars(dir string, jars []vendoredJar) error {
 // the jar's own directory.
 func packModuleJar(jar, classes, resources string, classPath []string) error {
 	manifest := filepath.Join(classes, "MANIFEST.MF")
-	err := os.WriteFile(manifest, []byte("Main-Class: "+workloadMainClass+"\n"+
-		"Class-Path: "+strings.Join(classPath, " ")+"\n"), 0o644)
+	err := os.WriteFile(manifest, []byte(manifestHeader("Main-Class", workloadMainClass)+
+		manifestHeader("Class-Path", strings.Join(classPath, " "))), 0o644)
 	if err != nil {
 		return err
 	}
@@ -118,9 +132,24 @@ func packModuleJar(jar, classes, resources string, classPath []string) error {
 		"-C", resources, ".")
 }
 
+// manifestHeader is one manifest header, folded as the jar format wants:
+// no line longer than 72 bytes, each continuation line starting with a
+// space (workload/libs's Class-Path names over a dozen jars).
+func manifestHeader(name, value string) string {
+	const maxLine = 72
+	line := name + ": " + value
+	var b strings.Builder
+	for len(line) > maxLine {
+		b.WriteString(line[:maxLine] + "\n")
+		line = " " + line[maxLine:]
+	}
+	b.WriteString(line + "\n")
+	return b.String()
+}
+
 // libsScenarios are workload-libs.jar's scenarios, one per hooked
 // library (decision #22's order).
-var libsScenarios = []string{"http-servlet", "http-apache"}
+var libsScenarios = []string{"http-servlet", "http-apache", "http-okhttp", "http-netty"}
 
 // checkLibsScenarios runs workload-libs.jar's scenarios (task de4) the
 // way checkOtelScenario runs the OTEL flavor: each self-test, --list and

@@ -1,0 +1,52 @@
+OkHttp 5.5.1 with its dependencies — vendored, unmodified, for the
+third-party HTTP workload module (workload/libs, M3, task de4).
+
+What:     com.squareup.okhttp3:okhttp-jvm:5.5.1         (the client the
+                                                 scenario drives)
+          com.squareup.okio:okio-jvm:3.18.1             (its I/O library)
+          org.jetbrains.kotlin:kotlin-stdlib:2.1.21     (both are Kotlin)
+          org.jetbrains:annotations:13.0                (kotlin-stdlib's
+                                                 compile dependency;
+                                                 annotations only)
+          okhttp-jvm's Maven dependencies at the versions its pom names,
+          and kotlin-stdlib's. The http-okhttp scenario's client, so the
+          agent's OkHttp hooks (decision #22) are exercised against the
+          real library — Kotlin-compiled code, the case the agent's store
+          scan exists for.
+From:     https://repo1.maven.org/maven2/com/squareup/okhttp3/okhttp-jvm/5.5.1/
+          https://repo1.maven.org/maven2/com/squareup/okio/okio-jvm/3.18.1/
+          https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.1.21/
+          https://repo1.maven.org/maven2/org/jetbrains/annotations/13.0/
+Fetched:  2026-11-19
+SHA-1:    okhttp-jvm      1df922f9db18f897722b7e566c21bcaf0a73d484
+          okio-jvm        a3a8128bb3a0157d23ecc18c17e8330d9c0ac96c
+          kotlin-stdlib   97a0975aa19d925e109537af60eb46902920015c
+          annotations     919f0dfe192fb4e063e7dacadee7f8bb9a2672a9
+          (each matches Maven Central's .jar.sha1)
+SHA-256:  okhttp-jvm      4039527bd1f2e40b66e20b0e52c689cf56074b938ea02678141495f5160f1047
+          okio-jvm        b97b640557a650d15411f2be29aef558c4e422a83653cb18ba494311dbed18be
+          kotlin-stdlib   263bdc679e1f62012db7b091796279b6d71cf36f4797a98ff1ace05835f201c8
+          annotations     ace2a10dc8e2d5fd34925ecac03e4988b2c0f851650c94b8cef49ba1bd111478
+License:  Apache-2.0, all four; the jars ship no license file, so each
+          project's is here from its repository: LICENSE-okhttp.txt
+          (square/okhttp, tag parent-5.5.1), LICENSE-okio.txt
+          (square/okio, tag parent-3.18.1), LICENSE-kotlin.txt
+          (JetBrains/kotlin, tag v2.1.21, license/LICENSE.txt),
+          LICENSE-annotations.txt (JetBrains/java-annotations, master —
+          the repository has no 13.0 tag).
+
+Why vendored: the workload build is JDK-only (no Maven or Gradle) and must
+work offline. The core workload stays free of third-party code (PLAN.md
+decision #5); only workload-libs.jar runs against these jars, named in
+its manifest's Class-Path, not copied into it. `mage workloadLibsBuild`
+checks the SHA-256s above before compiling.
+
+Why this version: OkHttp 5.5.1 is the newest release at least two weeks
+old on the fetch date (okhttp-jvm is OkHttp 5's JVM artifact; `okhttp`
+is its multiplatform umbrella). OkHttp 4.12 has the same class and
+method names the agent hooks.
+
+To update: download the jars of the new version (and the versions its pom
+pins) from Maven Central, compare each SHA-1 with the published .sha1,
+replace the jars and license files, and update the versions, the hashes
+here and libsJars in magefile_libs.go in the same commit.

@@ -1,0 +1,53 @@
+Netty 4.2.20.Final (HTTP codec and what it depends on) — vendored,
+unmodified, for the third-party HTTP workload module (workload/libs, M3,
+task de4).
+
+What:     io.netty:netty-codec-http:4.2.20.Final         (HttpServerCodec,
+                                                  the codec the agent
+                                                  hooks)
+          io.netty:netty-codec-base, netty-codec-compression, netty-handler,
+          netty-transport, netty-transport-native-unix-common,
+          netty-resolver, netty-buffer, netty-common (all 4.2.20.Final):
+          netty-codec-http's non-optional Maven dependencies and theirs.
+          The http-netty scenario's server, so the agent's Netty hooks
+          (decision #22) are exercised against the real codec.
+From:     https://repo1.maven.org/maven2/io/netty/netty-<module>/4.2.20.Final/
+Fetched:  2026-11-19
+SHA-1:    codec-http                 2d7b07f88c991d0bd30755afe367fe1bd8610b7d
+          codec-base                 2a1724e0645dc4a99e7d9dfc989d596b93d2492b
+          codec-compression          921bf1c5e238dbfd54d19d344a3ef253080d2a66
+          handler                    937cf68d314ea0edbf077643a3db42988e872f87
+          transport                  f4e01e4208b3799ef7f83c826c15fb9b3648c589
+          transport-native-unix-common 34e59d72bab77ba8fc1ff899a267d52ccb4e3312
+          resolver                   c4305893023f9705eb85db85be3c65149666c004
+          buffer                     12d223b605fe08ec593750fd25115297c4f3418a
+          common                     e87b2bbdc7b7ebcb59ab5c29576e40a423e0661b
+          (each matches Maven Central's .jar.sha1)
+SHA-256:  codec-http                 d08b0d473c48c61ebb2bc4d145111fa1777832aee4d2be1024891e904e36eaf5
+          codec-base                 5a66da26b86d7eecedd9e0d8fe0e22ef1733bbf873e476cb9b860afbed22210c
+          codec-compression          7ebae4ac80c01e2d279d0e50d377bcdaf0cf8f2f65797e0578afc810a66ab57d
+          handler                    211dbbba074298046b37f841ad9ca89ed91968f6b9e97400c99ab4e6177b1f96
+          transport                  ff4f1f8158c714c1b485ef10cf2456fbd3c1b2930256b70287aeb7dc3ad94783
+          transport-native-unix-common 6f600d5cbd3ce39e50680de66b00d7e6a9652dac7d08a5b022101d717cb7fb52
+          resolver                   cb7a6027e4f366fb28dcea7e1f7088ca16bd23c2cc38e8ddfdac77a77bd144dc
+          buffer                     794136fc6be78e44a286c2b1420a182e135c6d06eb8c397030c1551ee50acccd
+          common                     5807fef7eb619bc0a5d1c0e6c83199ea9bca8503203a3eb73cfdccec2d215743
+License:  Apache-2.0 (LICENSE.txt and NOTICE.txt from the
+          netty-4.2.20.Final tag of https://github.com/netty/netty; the
+          jars ship none).
+
+Why vendored: the workload build is JDK-only (no Maven or Gradle) and must
+work offline. The core workload stays free of third-party code (PLAN.md
+decision #5); only workload-libs.jar runs against these jars, named in
+its manifest's Class-Path, not copied into it. `mage workloadLibsBuild`
+checks the SHA-256s above before compiling.
+
+Why this version: 4.2.20.Final is the newest release at least two weeks
+old on the fetch date (4.2.21.Final was 3 days old). Netty 4.1 is not
+tested: a 4.1 whose HttpObjectEncoder does not override write is not
+seen.
+
+To update: download the jars of the new version from Maven Central,
+compare each SHA-1 with the published .sha1, replace the jars and license
+files, and update the version, the hashes here and libsJars in
+magefile_libs.go in the same commit.

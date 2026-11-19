@@ -646,7 +646,12 @@ or a third-party library (task de4): a servlet container's
 `HttpServlet` (Servlet API, jakarta or javax), Apache HttpClient 5's
 classic client (stamped when it hands the response back, its start
 when `execute` reached the client's `doExecute`; sizes from the
-request's entity and the response's `Content-Length`).
+request's entity and the response's `Content-Length`), OkHttp
+(likewise, on the thread that ran the call's interceptor chain —
+OkHttp's dispatcher for `enqueue`) and Netty's HTTP/1.x codec (a
+server's event when the encoder writes the answer's last content,
+spanning from the request's decoding; a client's when the response's
+last content is decoded, from the request's write).
 It is not a syscall: it is stamped when the request completed —
 the server's exchange was closed by the handler (or the handler
 returned without closing it), the client's `send` returned, the
@@ -754,7 +759,8 @@ server's event of one HTTP/1 request pair by (`conn_id`,
   exchanges on: HttpClient following a redirect or answering a
   401/407 through its authenticator, HttpURLConnection doing the
   same (an interim `100 Continue` counts too), Apache HttpClient
-  doing either (every exchange its executor ran) — the server saw
+  doing either (every exchange its executor ran), OkHttp likewise
+  (every network exchange of the call) — the server saw
   each exchange as a request, the caller one, and the ends' counts
   no longer agree.
 

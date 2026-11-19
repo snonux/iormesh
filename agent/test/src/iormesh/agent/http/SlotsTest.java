@@ -22,7 +22,20 @@ public final class SlotsTest {
     static final class Sub extends Client {}
 
     public static List<AgentTests.Case> cases() {
-        return List.of(new AgentTests.Case("http/exchange slots", SlotsTest::slots));
+        return List.of(new AgentTests.Case("http/exchange slots", SlotsTest::slots),
+                new AgentTests.Case("http/okhttp and netty names", SlotsTest::names));
+    }
+
+    /** OkHttp's protocol names as versions; a Host header's host for Netty's client side. */
+    static void names() {
+        equal(List.of("HTTP/1.1", "HTTP/2", "HTTP/2", "HTTP/1.0", ""),
+                List.of(OkHttp.Api.version("http/1.1"), OkHttp.Api.version("h2"),
+                        OkHttp.Api.version("h2_prior_knowledge"), OkHttp.Api.version("http/1.0"),
+                        OkHttp.Api.version(null)), "versions");
+        equal(List.of("h", "h", "::1", "::1", ""),
+                List.of(Netty.Api.hostOf("h:8080"), Netty.Api.hostOf("h"),
+                        Netty.Api.hostOf("[::1]:80"), Netty.Api.hostOf("[::1]"),
+                        Netty.Api.hostOf(null)), "hosts");
     }
 
     static void slots() {
