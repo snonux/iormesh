@@ -65,11 +65,13 @@ public final class Ring {
     static final int THREAD = 3;
     static final int WATERMARK = 4;
     static final int HOOK = 5;
+    static final int HTTP = 6;
     /**
      * Format version; the reader rejects any other. 2 (task 2b4): HOOK
-     * records, and THREAD's reserved word carries flags (VIRTUAL).
+     * records, and THREAD's reserved word carries flags (VIRTUAL). 3
+     * (task 3b4): HTTP records.
      */
-    static final int VERSION = 2;
+    static final int VERSION = 3;
     /** THREAD flag: the Java thread is a virtual thread (JDK 21+). */
     static final int VIRTUAL = 1;
     static final long MAGIC = 0x474e49524d524f49L; // "IORMRING", little endian
@@ -84,6 +86,10 @@ public final class Ring {
     /** BRACKET body: hook, ktid, enter, exit, stack, thread. */
     static final int BRACKET_LEN = 8 + 40;
     static final int WATERMARK_LEN = 8 + 8;
+    /** HTTP's fixed part: word, mono, stack, thread, ktid, status, n, nreq. */
+    static final int HTTP_HEAD = 8 + 40;
+    /** HTTP's leading strings: method, scheme, host, path, version, local, remote. */
+    static final int HTTP_FIXED = 7;
     /** Bounds a STACK or THREAD record, so one never needs a large share of the ring. */
     static final int MAX_RECORD = 16 * 1024;
     /** Each frame or thread name is cut to this many chars before encoding. */
@@ -239,6 +245,67 @@ public final class Ring {
         return strings(HOOK, align(len), id, f.length, 0, enc);
     }
 
+    /**
+     * Writes an HTTP record: one finished request as an HTTP hook saw it
+     * (decision #22; iormesh.agent.http) — exit stamp, stack id, Java
+     * thread id, kernel tid, status, then the strings: the HTTP_FIXED
+     * leading ones (method, scheme, host, path, version, local and remote
+     * socket address), nreq request headers and the response headers, each
+     * "name: value", already redacted by the probe that built them. A
+     * record past MAX_RECORD loses its headers rather than the request:
+     * the request is what pairs the hops.
+     */
+    boolean http(long mono, long stack, long thread, int ktid, int status, String[] s,
+                 int nreq) {
+        int n = s.length;
+        byte[][] enc = encode(s, n);
+        int len = align(HTTP_HEAD + size(enc, n));
+        if (len > MAX_RECORD && n > HTTP_FIXED) {
+            n = HTTP_FIXED;
+            nreq = 0;
+            len = align(HTTP_HEAD + size(enc, n));
+        }
+        if (len > MAX_RECORD) {
+            countDrop(HTTP, len);
+            return false;
+        }
+        int off = reserve(len, HTTP);
+        if (off < 0) {
+            return false;
+        }
+        try {
+            buf.putLong(off + 8, mono);
+            buf.putLong(off + 16, stack);
+            buf.putLong(off + 24, thread);
+            buf.putInt(off + 32, ktid);
+            buf.putInt(off + 36, status);
+            buf.putInt(off + 40, n);
+            buf.putInt(off + 44, nreq);
+            putStrings(off + HTTP_HEAD, enc, n);
+            publish(off, len, HTTP);
+            return true;
+        } catch (Throwable e) {
+            return abandon(off, len);
+        }
+    }
+
+    private static byte[][] encode(String[] s, int n) {
+        byte[][] enc = new byte[n][];
+        for (int i = 0; i < n; i++) {
+            enc[i] = utf8(s[i] == null ? "" : s[i]);
+        }
+        return enc;
+    }
+
+    /** The encoded size of the first n strings (u32 length + bytes each). */
+    private static int size(byte[][] enc, int n) {
+        int len = 0;
+        for (int i = 0; i < n; i++) {
+            len += 4 + enc[i].length;
+        }
+        return len;
+    }
+
     /** Counts a record of type the caller chose not to write (StackIds' cap). */
     void lost(int type) {
         countDrop(type, 0);
@@ -270,16 +337,20 @@ public final class Ring {
             buf.putLong(off + 8, id);
             buf.putInt(off + 16, word);
             buf.putInt(off + 20, flags);
-            int p = off + 24;
-            for (byte[] s : enc) {
-                buf.putInt(p, s.length);
-                buf.put(p + 4, s, 0, s.length);
-                p += 4 + s.length;
-            }
+            putStrings(off + 24, enc, enc.length);
             publish(off, len, type);
             return true;
         } catch (Throwable e) {
             return abandon(off, len);
+        }
+    }
+
+    /** Writes the first n strings at p, each a u32 length and its bytes. */
+    private void putStrings(int p, byte[][] enc, int n) {
+        for (int i = 0; i < n; i++) {
+            buf.putInt(p, enc[i].length);
+            buf.put(p + 4, enc[i], 0, enc[i].length);
+            p += 4 + enc[i].length;
         }
     }
 

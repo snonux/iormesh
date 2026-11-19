@@ -229,7 +229,7 @@ final class BoundaryTransformerTest {
     }
 
     /** Defines one class from bytes, delegating everything else. */
-    private static final class OneClassLoader extends ClassLoader {
+    static final class OneClassLoader extends ClassLoader {
         private final String name;
         private final byte[] bytes;
 

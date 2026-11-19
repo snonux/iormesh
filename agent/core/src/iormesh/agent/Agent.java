@@ -16,7 +16,10 @@ import java.util.Set;
  *
  * With {@code spool=<dir>} the brackets, the stacks and threads they
  * name, and watermarks go to a memory-mapped ring in that tracer-owned
- * directory (decision #27, iormesh.bridge.Ring).
+ * directory (decision #27, iormesh.bridge.Ring). The HTTP hooks
+ * (HttpHooks, HttpTransformer; decision #22) write one HTTP record per
+ * request the JDK's HttpServer, HttpClient or HttpURLConnection
+ * completes, into the same ring.
  *
  * The agent must never take the target down: any failure while
  * installing is reported on stderr and leaves the JVM as it was (or with
@@ -65,9 +68,48 @@ public final class Agent {
             return;
         }
         BoundaryTransformer transformer = prepare(args, table, bridge);
+        HttpTransformer http = prepareHttp(inst, bridge);
         Runtime.getRuntime().addShutdownHook(new Thread(
-                () -> atExit(args, table, transformer, bridge), "iormesh-agent-exit"));
+                () -> atExit(args, table, transformer, http, bridge), "iormesh-agent-exit"));
         retransform(inst, table, transformer);
+        retransformHttp(inst, http);
+    }
+
+    /**
+     * The HTTP hooks (decision #22): modules opened, probes registered,
+     * the transformer warm. A failure here costs the HTTP events only —
+     * the I/O hooks stand — so it is reported and the install goes on.
+     */
+    static HttpTransformer prepareHttp(Instrumentation inst, Bridge bridge) {
+        try {
+            HttpHooks hooks = HttpHooks.prepare(inst, bridge);
+            HttpTransformer.warmUp();
+            return new HttpTransformer(hooks);
+        } catch (Exception | LinkageError e) {
+            System.err.println("iormesh-agent: http hooks off: " + e);
+            return null;
+        }
+    }
+
+    /**
+     * Registers the HTTP transformer and rewrites its already-loaded
+     * targets (a live attach finds HttpClient loaded, say). A failure
+     * removes it again, as retransform does, and leaves the I/O hooks.
+     */
+    private static void retransformHttp(Instrumentation inst, HttpTransformer http) {
+        if (http == null) {
+            return;
+        }
+        inst.addTransformer(http, true);
+        try {
+            java.util.List<Class<?>> loaded = http.hooks().loadedTargets(inst);
+            if (!loaded.isEmpty()) {
+                inst.retransformClasses(loaded.toArray(new Class<?>[0]));
+            }
+        } catch (Exception | Error e) {
+            inst.removeTransformer(http);
+            System.err.println("iormesh-agent: http hooks off: " + e);
+        }
     }
 
     /**
@@ -124,7 +166,7 @@ public final class Agent {
      * the ring, so the joiner need not time out — then the debug dump.
      */
     private static void atExit(AgentArgs args, HookTable table, BoundaryTransformer t,
-                               Bridge bridge) {
+                               HttpTransformer http, Bridge bridge) {
         try {
             bridge.agentThread();  // the dump's own I/O is not the target's
             bridge.watermark();
@@ -132,7 +174,7 @@ public final class Agent {
             System.err.println("iormesh-agent: last watermark failed: " + e);
         }
         if (args.debug() != null) {
-            writeDebug(args.debug(), table, t, bridge);
+            writeDebug(args.debug(), table, t, http, bridge);
         }
     }
 
@@ -157,14 +199,40 @@ public final class Agent {
     }
 
     /**
+     * The HTTP hooks' rows of the debug dump, in the same columns: id
+     * "h<id>", kind "http", and the requests recorded. A row whose method
+     * another row of the same name matched in this JDK (another JDK
+     * generation's signature) is "alternative", not "missing".
+     */
+    private static void writeHttpDebug(PrintStream out, HttpTransformer http, long[] counts) {
+        Set<Integer> applied = http.applied();
+        Set<String> seen = http.seen();
+        Set<String> appliedMethods = new java.util.HashSet<>();
+        for (HttpHooks.Hook h : http.hooks().hooks()) {
+            if (applied.contains(h.id())) {
+                appliedMethods.add(h.target().owner() + "." + h.target().method());
+            }
+        }
+        for (HttpHooks.Hook h : http.hooks().hooks()) {
+            var t = h.target();
+            String status = applied.contains(h.id()) ? "applied"
+                    : appliedMethods.contains(t.owner() + "." + t.method()) ? "alternative"
+                    : seen.contains(t.owner()) ? "missing" : "unloaded";
+            long n = h.id() < counts.length ? counts[h.id()] : 0;
+            out.printf("h%d\thttp\t%s\t%s\t%s\t%s\t%d%n", h.id(), t.owner(), t.method(),
+                    t.descriptor(), status, n);
+        }
+    }
+
+    /**
      * Writes the debug dump (agent option debug=<path>): one line per
      * table row with its status and closed-bracket count. Status is
      * "applied" (method rewritten), "missing" (its class was seen but has
      * no such method — the table does not match this JDK) or "unloaded"
      * (its class never loaded, so nothing to rewrite yet).
      */
-    private static void writeDebug(String path, HookTable table,
-                                   BoundaryTransformer t, Bridge bridge) {
+    private static void writeDebug(String path, HookTable table, BoundaryTransformer t,
+                                   HttpTransformer http, Bridge bridge) {
         try (PrintStream out = new PrintStream(path, "UTF-8")) {
             long[] counts = bridge.counts();
             Set<Integer> applied = t.applied();
@@ -178,6 +246,9 @@ public final class Agent {
                 long n = h.id() < counts.length ? counts[h.id()] : 0;
                 out.printf("%d\t%s\t%s\t%s\t%s\t%s\t%d%n", h.id(), h.kind(), h.owner(),
                         h.method(), h.descriptor(), status, n);
+            }
+            if (http != null) {
+                writeHttpDebug(out, http, bridge.httpCounts());
             }
         } catch (IOException | ReflectiveOperationException e) {
             System.err.println("iormesh-agent: debug dump failed: " + e);

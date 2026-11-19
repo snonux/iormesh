@@ -156,7 +156,7 @@ public final class HttpScenario implements Scenario {
         }
         // java.io streams, not Files.write/readAllBytes: fewer JDK frames
         // between the hooked native and this method, so the causing method
-        // stays inside the agent's 10-frame stack (expect-pending.json).
+        // stays inside the agent's 10-frame stack (expect.json).
         try (FileOutputStream out = new FileOutputStream(wd.file(CERT_FILE).toFile())) {
             out.write(cert.der());
         }

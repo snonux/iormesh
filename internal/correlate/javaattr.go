@@ -173,6 +173,7 @@ func addLosses(a, b agentspool.Losses) agentspool.Losses {
 	a.DroppedThreads += b.DroppedThreads
 	a.DroppedWatermarks += b.DroppedWatermarks
 	a.DroppedHooks += b.DroppedHooks
+	a.DroppedHTTP += b.DroppedHTTP
 	a.DroppedOther += b.DroppedOther
 	a.DroppedBytes += b.DroppedBytes
 	a.Abandoned += b.Abandoned

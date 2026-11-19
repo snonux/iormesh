@@ -300,18 +300,20 @@ Scenario notes:
   across three named platform threads (virtual threads stay
   deferred).
 - **M3 goldens ahead of the agent**: the M3 scenarios landed
-  before the agent (tasks ya4, za4), so each ships two files.
-  Its `expect.json` declares what the tracer records today and
-  passes against it; `expect-pending.json` adds what needs the
-  agent — `attribution: java`, a `java` object (thread name,
-  causing method as `class#method`, the innermost workload
-  frame), `http` events and, for `otel`, an `otel` object
-  (trace and span id) — and stays in step with `expect.json`
-  by test. The agent's join (task 2b4), HTTP hooks (task 3b4)
-  and span-context read (M3 step 8) teach the golden format
-  those fields and promote the pending file; until then no
-  integration test runs these scenarios, since one that needs
-  the agent could only skip.
+  before the agent (tasks ya4, za4), so each shipped two files.
+  Its `expect.json` declared what the tracer recorded then;
+  `expect-pending.json` added what needs the agent —
+  `attribution: java`, a `java` object (thread name, causing
+  method as `class#method`, the innermost workload frame),
+  `http` events and, for `otel`, an `otel` object (trace and
+  span id) — kept in step with `expect.json` by test. The
+  agent's join (task 2b4) and HTTP hooks (task 3b4) taught the
+  golden format the java and http fields: `method-flow`,
+  `http-plain`, `http-tls` and `http-redaction` are promoted
+  (one `expect.json`, run under the agent by the integration
+  tests), and `otel`'s `expect.json` holds everything but the
+  `otel` ids, which stay pending until the span-context read
+  (M3 step 8, task 4b4).
 - **Microservices end-to-end scenario** (M4): several instances
   of the app playing declared service roles (gateway, orders,
   inventory, billing…), talking to each other over REST — call
@@ -616,13 +618,26 @@ Gated by S1 — done; the design below is S1's result
   Captured at the API boundary, so HTTPS is included without
   ever touching the wire; sensitive headers, query params and
   path segments are redacted by policy before anything is
-  recorded.
+  recorded. Task 3b4 built the JDK's three — HttpServer (at
+  the exchange's close, or the handler's return), HttpClient
+  (synchronous `send`) and HttpURLConnection (its response
+  read): one `http` event per request with method, scheme,
+  host (client side), path, status, protocol version and the
+  request and response headers, redacted in the agent before
+  the spool and again by the tracer; joined to its connection
+  by the socket ends the library still holds. Not yet: sizes
+  and latency, `sendAsync`, Servlet, Apache HttpClient, OkHttp
+  and Netty, and the DNS hooks (#8).
 - **Request pairing across the wire**: a request on the client
   and on the server pair up by connection id plus a
   per-connection request ordinal — sound for HTTP/1.1. HTTP/2
   multiplexes requests on one connection, so an ordinal cannot
   pair them: v1 records HTTP/2 requests but renders their hops
   time-ordered unless stream ids are captured (decision #22).
+  The tracer numbers a connection's requests (`req_seq`) in
+  completion order, and leaves the ordinal out over HTTP/2,
+  without a connection, or once a JVM's ring dropped an HTTP
+  record — a lost request would shift the count silently.
 - Acceptance: frames carry `class#method(file:line)`; every
   declared I/O op of M3's method-flow scenarios carries its
   declared causing method; unbracketed events are marked unattributed; the
@@ -1276,7 +1291,12 @@ answer), and deferred.
   (`/orders/{id}`) — path segments carry ids and tokens too;
   and HTTP/2 request pairing — capture stream ids at the hooks
   vs leave HTTP/2 hops time-ordered in v1. *Default: denylist,
-  query values masked, HTTP/1.1 pairing only.*
+  query values masked, HTTP/1.1 pairing only.* Task 3b4
+  implements the default for the JDK's HttpServer, HttpClient
+  and HttpURLConnection: headers on internal/redact's denylist
+  and every query value are masked in the agent (and again by
+  the tracer), paths are verbatim, and `req_seq` is recorded
+  over HTTP/1 only; the third-party libraries remain.
 - **#8 Hostname & TLS visibility** — DNS hostname↔IP via Java
   agent hooks (InetAddress) is the clean path; TLS peer
   identity (trust-manager/SSLSocket hooks) is extra value at
@@ -1482,7 +1502,10 @@ can reconstruct behavior and check it against source code:
   redaction policy)`. S1 settled the Java fields: nested
   `java.thread` (thread name) and `java.stack` (method ids,
   innermost first), as `internal/schema` has them — the flat
-  names above are shorthand; `http` stays provisional until M3.
+  names above are shorthand; `http` stays provisional until M3
+  closes. Task 3b4 appended `version`, `req_headers` and
+  `resp_headers` ("name: value", redacted) to it and made `http`
+  an event kind of its own (fd -1, conn_id when found).
   Cross-host, `conn_id` comes from the merge's ISN-pair join
   (S2, decision #26).
 - **Method table**: `method_id, class, method, signature,

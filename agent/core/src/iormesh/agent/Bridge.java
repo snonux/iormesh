@@ -125,6 +125,23 @@ final class Bridge {
                 .invoke(null, id, kind, cls, method, nativeName, syscalls);
     }
 
+    /** The bridge's module (the bootstrap loader's unnamed module). */
+    Module module() {
+        return hooks.getModule();
+    }
+
+    /** See Hooks.httpProbe: registers HTTP hook id's probe. */
+    void httpProbe(int id, java.util.function.BiFunction<Object[], int[], String[]> probe)
+            throws ReflectiveOperationException {
+        hooks.getMethod("httpProbe", int.class, java.util.function.BiFunction.class)
+                .invoke(null, id, probe);
+    }
+
+    /** See Hooks.httpCounts: requests recorded per HTTP hook id. */
+    long[] httpCounts() throws ReflectiveOperationException {
+        return (long[]) hooks.getMethod("httpCounts").invoke(null);
+    }
+
     void startWatermarks(long intervalMs) throws ReflectiveOperationException {
         hooks.getMethod("startWatermarks", long.class).invoke(null, intervalMs);
     }

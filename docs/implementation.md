@@ -2133,7 +2133,7 @@ internal/correlate/javajoin.go
 
    ```
    0    magic "IORMRING" (stored last, release: header complete)
-   8    version u32 = 2     12  header size u32 = 4096
+   8    version u32 = 3     12  header size u32 = 4096
    16   capacity u64        24  pid u64     32  created mono ns
    64   head (writers' CAS, own cache line)
    128  tail (reader's release store, own cache line)
@@ -2168,9 +2168,14 @@ internal/correlate/javajoin.go
                                // before this is in the ring
    HOOK      5  hook_id u64, 5 u32, 0 u32, kind, class, method,
                 native, syscalls (comma-separated), as strings
+      HTTP      6  exit_mono, stack_id, thread_id u64, ktid i32,
+                status i32, n u32, nreq u32, method, scheme, host,
+                path, version, local, remote, nreq request headers,
+                response headers (step 7)
    ```
 
-   Version 2 (task 2b4) added HOOK and THREAD's flags: the agent
+   Version 3 (task 3b4) added HTTP (step 7). Version 2 (task
+   2b4) added HOOK and THREAD's flags: the agent
    writes its whole hook table into the still empty ring at
    install, so the joiner reads each hook's syscall allowlist
    from the ring — whatever variant or `table=` override the JVM
@@ -2314,6 +2319,95 @@ internal/correlate/javajoin.go
    recorded inside `HttpServe#handle` when the exchange closes
    (`ex.close()`, after the reply is written) and the client's
    when the response returns inside `HttpFetch#call`.
+
+   Done (task 3b4) for the JDK's three, as built:
+
+   ```
+   agent/core/src/iormesh/agent/HttpHooks.java       # libraries → ids, probes
+   agent/core/src/iormesh/agent/HttpTransformer.java # exit-only rewrite
+   agent/core/src/iormesh/agent/http/Library.java    # one class per library:
+   agent/core/src/iormesh/agent/http/JdkHttpServer.java
+   agent/core/src/iormesh/agent/http/JdkHttpClient.java
+   agent/core/src/iormesh/agent/http/JdkUrlConnection.java
+   agent/core/src/iormesh/agent/http/Redaction.java  # the agent's policy copy
+   internal/agentspool/http.go                       # HTTP record (ring v3)
+   internal/correlate/javahttp.go                    # http events
+   ```
+
+   - **One library per class, one rewriter.** A `Library` lists
+     its `Target`s — (class, method, exact descriptor, which
+     argument to pass) — each with a probe, and the packages its
+     probes reflect on. `HttpTransformer` rewrites every target
+     the same way: before each return, and in a catch-all for a
+     method (a constructor only at its returns), it calls
+     `Hooks.http(ret, this, arg, id)`. Exit only: an http event
+     is stamped when the request is done and joins no syscall.
+     Platform-loaded classes are candidates (java.net.http and
+     jdk.httpserver live there); each library's module is made to
+     read the bridge and to open its probes' packages to the
+     agent (`Instrumentation.redefineModule`). A library whose
+     module or internals are missing is skipped with a note; a
+     JDK generation that changed a signature gets a second row
+     (`parseHTTP` lost its `ProgressSource` after 17), reported
+     `alternative` in the debug dump.
+   - **Hooks.http** hands the three objects to the id's probe
+     (a `BiFunction` of JDK types — the core is on another
+     loader), which returns the request's strings, already
+     redacted, or null (a binding hook, a request already
+     recorded). Only then does it walk the stack and write an
+     HTTP record; the thread is busy throughout, and marked
+     closing from before its stamp until the record is published,
+     so the watermark promise covers HTTP records like brackets.
+   - **HttpServer**: `HttpExchangeImpl.close`/`HttpsExchangeImpl
+     .close` (the handler's explicit close — the golden's
+     `HttpServe#handle`) and `ServerImpl$Exchange.run` (the
+     handler returned; one that ended its exchange by closing the
+     body alone is recorded there, with the JDK's stack); first
+     wins per `ExchangeImpl`, whose package-private getters the
+     probe calls by reflection.
+   - **HttpClient**: `HttpClientImpl.send`'s return, on the
+     caller's thread (`HttpFetch#call`). The response does not
+     know its connection; `HttpResponseImpl`'s constructor gets
+     the JDK's `Response`, whose `localAddress` a binding hook
+     ties to the response. `sendAsync` is not recorded.
+   - **HttpURLConnection**: `getInputStream0`'s first exit with a
+     response code (`getResponseCode` and the header getters go
+     through it; a 404 throws after reading the response), reading
+     `responseCode` and the request and response `MessageHeader`s
+     by reflection (calling `getResponseCode` would reconnect when
+     no response came); `HttpClient.parseHTTP` binds the socket's
+     ends, which `getInputStream0` drops after a body-less reply.
+   - **Connection by socket ends, not fd**: the libraries hand out
+     addresses through public API, a descriptor only through deep
+     internals. The joiner indexes every socket event's ends under
+     its `conn_id` and looks a request up by both ends, else the
+     remote, else the local one; `req_seq` is counted there, per
+     process and connection in completion order, and left out
+     over HTTP/2, without a connection, or once the JVM dropped an
+     HTTP record. The joiner inserts the http events by time (each
+     waits until an event that completed 5 ms after it arrived, or
+     2 s) and therefore numbers its output `seq` itself.
+   - **Redaction twice**: `Redaction` (agent) masks denied headers
+     and every query value before the spool; the joiner applies
+     `internal/redact` again.
+
+   Tests: `mage agentTest` — `HttpTransformerTest` (a fixture's
+   ctor, return, last-argument-after-a-long and throw paths hand
+   over the right objects; static and primitive targets refused),
+   `HttpProbeTest` (redaction, addresses, the HttpClient probe on
+   a fake response), `HttpHooksTest` (the HTTP record, quiet and
+   throwing probes, oversized headers), and `AgentSmoke` now does
+   one request through each library with a spool, so every JDK in
+   `IORMESH_AGENT_JDKS` must record four (checked on 17, 25 and
+   27-ea); Go — `internal/agentspool` (HTTP decode, malformed,
+   drops), `internal/correlate` (`javahttp_test.go`: order,
+   waiting, conn index, numbering rules, end last), `internal/
+   schema` (`kinds_http_test.go`), `internal/normalize`
+   (`ExpectedHTTP`); integration — `TestHTTPPlain`,
+   `TestHTTPTLS`, `TestHTTPRedaction`, `TestOtelHTTP`
+   ([testing.md](testing.md#m3-scenarios-ahead-of-the-agent)).
+   Not yet: sizes and latency, Servlet, Apache HttpClient,
+   OkHttp, Netty, and the DNS hooks (#8).
 8. OTEL: if `io.opentelemetry.api.trace.Span` is loadable in the
    app's class loader, read `Span.current().getSpanContext()`
    reflectively at `enter` and add ids to the bracket. No OTEL
@@ -2332,7 +2426,9 @@ internal/correlate/javajoin.go
    ids. The client's http events assume an
    `HttpURLConnection` hook (decision #22's v1 set) that
    records the response inside `OtelFetch#call` once
-   `getResponseCode` returns.
+   `getResponseCode` returns — built by step 7, whose
+   `TestOtelHTTP` runs the scenario under the agent against the
+   `otel`-free `expect.json`.
 9. Scenarios first, as always: `method-flow`,
    `http-plain`, `http-tls`, `http-redaction`, `otel`.
    Done for the first four (task ya4), ahead of steps 5–7, and
@@ -2365,8 +2461,10 @@ internal/correlate/javajoin.go
    innermost frame outside the JDK's own packages (`java.`,
    `javax.`, `jdk.`, `sun.`, `com.sun.`), as `class#method`
    (`normalize.CausingMethod`); `TestJavaMethodFlow` checks
-   `method-flow`'s pending file directly. Promoting the files
-   waits for the `http` fields (step 7).
+   `method-flow`'s pending file directly. Step 7 (task 3b4) added
+   `ExpectedHTTP` and promoted `method-flow`'s and the HTTP
+   scenarios' pending files to `expect.json`; `otel`'s keeps only
+   its `otel` ids pending (step 8).
 
 **Done when**: PLAN.md's M3 acceptance holds.
 

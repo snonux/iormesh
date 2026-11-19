@@ -91,7 +91,7 @@ func stateSuffix(state string) string {
 // matchEvent reports whether collected event e satisfies declared d under
 // the current bindings, binding d's symbols if so (and nothing if not).
 func (b *bindings) matchEvent(d ExpectedEvent, e schema.Event) bool {
-	if !plainFieldsMatch(d, e) || !javaMatch(d.Java, e, b.methods) {
+	if !plainFieldsMatch(d, e) || !javaMatch(d.Java, e, b.methods) || !httpMatch(d.HTTP, e.HTTP) {
 		return false
 	}
 	m := b.mark()

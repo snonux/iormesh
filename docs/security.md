@@ -57,10 +57,14 @@ truth.
 - **Metadata is not harmless — redaction covers it.** Command
   lines carry passwords and tokens, URIs carry ids and secrets
   in path segments and query strings. One redaction policy
-  applies to HTTP headers, query params, path segments and argv
-  alike; environment capture is off by default. The workload
-  plants secrets in a header, a query parameter and argv, and
-  the tests assert none of them ever reaches a trace.
+  applies to HTTP headers, query params and argv alike (path
+  segments are recorded verbatim in v1, decision #22's
+  default); environment capture is off by default. HTTP
+  metadata is redacted twice: by the Java agent before it
+  reaches the spool, and again by the tracer before it is
+  written. The workload plants secrets in four headers, a
+  query parameter and argv, and the tests assert none of them
+  ever reaches a trace.
 - **Traces are sensitive data.** Collected segments stay on the
   controller until the operator deletes them — production
   metadata on a laptop deserves the care that implies.

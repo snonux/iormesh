@@ -26,10 +26,13 @@ public final class AgentTests {
         List<Case> cases = new ArrayList<>();
         cases.addAll(HookTableTest.cases());
         cases.addAll(BoundaryTransformerTest.cases());
+        cases.addAll(HttpTransformerTest.cases());
+        cases.addAll(iormesh.agent.http.HttpProbeTest.cases());
         cases.addAll(StackIdsTest.cases());
         cases.addAll(AgentArgsTest.cases());
         cases.addAll(iormesh.bridge.HooksTest.cases());
         cases.addAll(iormesh.bridge.RingTest.cases());
+        cases.addAll(iormesh.bridge.HttpHooksTest.cases());
         int failed = 0;
         for (Case c : cases) {
             try {

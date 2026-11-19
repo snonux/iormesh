@@ -23,8 +23,9 @@ import "errors"
 // The ring format, mirrored from Ring.java; Version changes with any of it.
 const (
 	// Version is the only ring format version this reader accepts. 2
-	// (task 2b4) added HOOK records and THREAD's flags word.
-	Version = 2
+	// (task 2b4) added HOOK records and THREAD's flags word, 3 (task 3b4)
+	// HTTP records.
+	Version = 3
 	// magic is "IORMRING" as a little-endian word; the agent stores it
 	// last, so a reader that sees it sees a complete header.
 	magic = 0x474e49524d524f49
@@ -58,6 +59,7 @@ const (
 	typeThread
 	typeWatermark
 	typeHook
+	typeHTTP
 )
 
 // threadVirtual is THREAD's flag for a virtual thread (JDK 21+); every
@@ -76,6 +78,13 @@ const (
 	// word, a u64 id, a u32 count or tid and a u32 of flags (THREAD's;
 	// zero in the others).
 	stringsHead = wordLen + 16
+	// httpHead is an HTTP record's fixed part: the word, mono, stack id
+	// and Java thread id (u64 each), ktid, status, the string count and
+	// the request-header count (u32 each).
+	httpHead = wordLen + 40
+	// httpFixed is the number of leading strings of an HTTP record:
+	// method, scheme, host, path, version, local and remote address.
+	httpFixed = 7
 )
 
 // Errors Open and Drain return; test with errors.Is.

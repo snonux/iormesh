@@ -1,0 +1,38 @@
+package iormesh.agent;
+
+/**
+ * Stand-in for an HTTP library's classes in HttpTransformerTest: a
+ * constructor, a method returning its response, one that throws, and
+ * methods the transformer must refuse (static, a primitive argument).
+ */
+public final class HttpFixture {
+    private final String name;
+
+    /** Hooked with argument 0: the probe gets the name. */
+    public HttpFixture(String name) {
+        this.name = name;
+    }
+
+    /** Hooked without an argument: the probe gets the returned value. */
+    public String send(String request) {
+        return name + ":" + request;
+    }
+
+    /** Hooked with its last argument, after a long (two slots). */
+    public String fail(long pad, String request) {
+        if (pad > 0) {
+            throw new IllegalStateException(request);
+        }
+        return request;
+    }
+
+    /** Listed with argument 0, an int: refused, nothing to pass. */
+    public int count(int n) {
+        return n;
+    }
+
+    /** Listed but static: no this to hand over, refused. */
+    public static String util() {
+        return "util";
+    }
+}

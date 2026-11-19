@@ -4,6 +4,7 @@ import java.lang.invoke.VarHandle;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
+import java.util.function.BiFunction;
 import java.util.function.LongSupplier;
 
 /**
@@ -42,6 +43,13 @@ import java.util.function.LongSupplier;
  * against everything it has read. Without a
  * ring (no spool= option) brackets are only counted, and only when the
  * agent's debug dump asked for counts ({@link #counts}).
+ *
+ * HTTP hooks (decision #22, task 3b4) are a second kind of entry point,
+ * {@link #http}: called once when a hooked HTTP method returns (or
+ * throws), with what the method has at hand, it hands those objects to
+ * the agent's probe for that hook and writes the request the probe
+ * describes as one HTTP record. No bracket: an HTTP event is not a
+ * syscall to join, it is an event of its own, stamped and stacked here.
  */
 public final class Hooks {
     /** Deeper nesting than this is not tracked (still balanced). */
@@ -63,6 +71,21 @@ public final class Hooks {
     private static final AtomicLong FAILS = new AtomicLong();
     private static final AtomicBoolean CLAIMED = new AtomicBoolean();
     private static final ThreadLocal<Brackets> STATE = ThreadLocal.withInitial(Brackets::new);
+    /**
+     * The HTTP probes by HTTP hook id (iormesh.agent.http): given {return
+     * value, this, argument} of a hooked method and an int[2] to fill with
+     * {status, request-header count}, a probe returns the request's
+     * strings — the Ring.HTTP_FIXED leading ones, then the headers,
+     * redacted — or null when this call records nothing (a binding hook,
+     * a request already recorded, no response). JDK types only: the agent
+     * core, which implements them, is on another loader.
+     */
+    @SuppressWarnings("unchecked")
+    static volatile BiFunction<Object[], int[], String[]>[] httpProbes =
+            (BiFunction<Object[], int[], String[]>[]) new BiFunction<?, ?, ?>[0];
+    /** Requests recorded per HTTP hook id, kept like counts (debug dump only). */
+    static volatile AtomicLongArray httpCounts = new AtomicLongArray(0);
+    private static volatile boolean counting;
 
     private Hooks() {}
 
@@ -105,6 +128,7 @@ public final class Hooks {
      */
     public static void configure(int hookIds, boolean stack, boolean count) {
         counts = new AtomicLongArray(count ? hookIds : 0);
+        counting = count;
         stacks = stack ? WALK : NO_WALK;
     }
 
@@ -129,6 +153,33 @@ public final class Hooks {
                                        String nativeName, String syscalls) {
         Ring r = ring;
         return r != null && r.hook(id, kind, cls, method, nativeName, syscalls);
+    }
+
+    /**
+     * Registers the probe of HTTP hook id (1..); install time, before the
+     * first HTTP class is rewritten. A later registration of the same id
+     * replaces the earlier one.
+     */
+    @SuppressWarnings("unchecked")
+    public static synchronized void httpProbe(int id, BiFunction<Object[], int[], String[]> probe) {
+        BiFunction<Object[], int[], String[]>[] old = httpProbes;
+        BiFunction<Object[], int[], String[]>[] p = java.util.Arrays.copyOf(old,
+                Math.max(old.length, id + 1));
+        p[id] = probe;
+        httpProbes = p;
+        if (counting && httpCounts.length() < p.length) {
+            httpCounts = new AtomicLongArray(p.length);
+        }
+    }
+
+    /** Requests recorded so far per HTTP hook id (index = id). */
+    public static long[] httpCounts() {
+        AtomicLongArray c = httpCounts;
+        long[] out = new long[c.length()];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = c.get(i);
+        }
+        return out;
     }
 
     /** Starts the watermark thread (Watermarks); needs the ring. */
@@ -247,6 +298,72 @@ public final class Hooks {
             }
         } catch (Throwable e) {
             countSkip(FAILS);
+        }
+    }
+
+    /**
+     * The entry point of HTTP hook id, called by the rewritten method
+     * before each return (ret = the value returned, or null) and on its
+     * exceptional exit (ret null); self is the method's this, arg the
+     * argument its row names (or null). Never throws into the target. The
+     * thread is busy throughout, so the probe's own work — reflection,
+     * never I/O — is not bracketed, and an HTTP hook reached from inside
+     * another one's probe records nothing.
+     */
+    public static void http(Object ret, Object self, Object arg, int id) {
+        try {
+            Ring r = ring;
+            BiFunction<Object[], int[], String[]>[] p = httpProbes;
+            if (r == null || id <= 0 || id >= p.length || p[id] == null) {
+                return;
+            }
+            Brackets t = STATE.get();
+            if (t.busy) {
+                countSkip(SKIPS);
+                return;
+            }
+            t.busy = true;
+            try {
+                if (request(t, r, p[id], new Object[] {ret, self, arg})
+                        && id < httpCounts.length()) {
+                    httpCounts.incrementAndGet(id);
+                }
+            } finally {
+                t.busy = false;
+            }
+        } catch (Throwable e) {
+            countSkip(FAILS);
+        }
+    }
+
+    /**
+     * Asks the probe and writes its request as an HTTP record. The record
+     * keeps the watermark promise like a bracket (close): the thread is
+     * marked closing before its stamp is taken and until the record is
+     * published, so no watermark passes the stamp while the probe and the
+     * stack walk run. The walk happens only for a call that records;
+     * true when the probe described a request (written or dropped).
+     */
+    private static boolean request(Brackets t, Ring r,
+                                   BiFunction<Object[], int[], String[]> probe, Object[] args) {
+        t.closing = System.nanoTime();
+        VarHandle.fullFence();   // as in close: the stamp after the mark
+        try {
+            long mono = System.nanoTime();
+            int[] meta = new int[2];
+            String[] s = probe.apply(args, meta);
+            if (s == null) {
+                return false;
+            }
+            if (!t.described && System.nanoTime() >= t.retryAt) {
+                describe(t, r);
+            }
+            long stack = stacks.getAsLong();
+            int ktid = t.virtual ? Brackets.lookupKtid() : t.kernelTid();
+            r.http(mono, stack, t.owner.getId(), ktid, meta[0], s, meta[1]);
+            return true;
+        } finally {
+            t.closing = Brackets.IDLE;
         }
     }
 

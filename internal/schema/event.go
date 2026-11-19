@@ -134,7 +134,8 @@ type Event struct {
 	// Java is set exactly when Attribution is AttributionJava (shape
 	// settled by spike S1: nested thread + stack).
 	Java *Java `json:"java,omitempty" parquet:"java,optional"`
-	// HTTP is provisional until M3; present on http events.
+	// HTTP is set exactly on http events (KindHTTP); provisional until
+	// M3 closes.
 	HTTP *HTTP `json:"http,omitempty" parquet:"http,optional"`
 	// Session describes the traced host; set exactly on session events.
 	// A nested object rather than envelope fields because only one event
@@ -231,15 +232,35 @@ type Java struct {
 	Carrier bool `json:"carrier,omitempty" parquet:"carrier,optional"`
 }
 
-// HTTP describes one request on an http event. Provisional until M3.
+// HTTP describes one request on an http event (KindHTTP): what the Java
+// agent's HTTP hooks saw at the library's API boundary (decision #22, M3
+// step 7), so HTTPS is included without touching the wire. Provisional
+// until M3 closes: fields may still change, and only append.
 type HTTP struct {
 	Method string `json:"method,omitempty" parquet:"method,optional"`
 	Scheme string `json:"scheme,omitempty" parquet:"scheme,optional"`
-	Host   string `json:"host,omitempty" parquet:"host,optional"`
+	// Host is the request URI's host, client side only: a server knows
+	// the name it was asked for only from the Host header.
+	Host string `json:"host,omitempty" parquet:"host,optional"`
+	// Path is the request target, path and query, with every query value
+	// masked ("/login?user=***"); path segments are verbatim (#22).
 	Path   string `json:"path,omitempty" parquet:"path,optional"`
 	Status uint16 `json:"status,omitempty" parquet:"status,optional"`
-	// ReqSeq is the request ordinal on its connection (1-based).
+	// ReqSeq is the request ordinal on its connection (1-based): the
+	// client's and the server's event of one request carry the same, so
+	// the hops pair by (conn_id, req_seq). Only over HTTP/1 and only when
+	// the connection is known and no request of the JVM was lost; absent
+	// otherwise (HTTP/2 hops are time-ordered, decision #22).
 	ReqSeq uint32 `json:"req_seq,omitempty" parquet:"req_seq,optional"`
+	// Version is the protocol, "HTTP/1.1" or "HTTP/2". Appended in M3
+	// (task 3b4), as are the headers.
+	Version string `json:"version,omitempty" parquet:"version,optional"`
+	// ReqHeaders and RespHeaders are the request's and the response's
+	// headers as "name: value", names lower-cased, sorted by name, at
+	// most 32 each; a denied name's value is masked ("authorization:
+	// ***") and URLs in the others are redacted (decision #9).
+	ReqHeaders  []string `json:"req_headers,omitempty" parquet:"req_headers,list"`
+	RespHeaders []string `json:"resp_headers,omitempty" parquet:"resp_headers,list"`
 }
 
 // Sink receives finished events in seq order. The NDJSON and parquet

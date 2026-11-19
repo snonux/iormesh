@@ -130,7 +130,9 @@ func readDebugCounts(t *testing.T, path string) map[int32]debugRow {
 	rows := map[int32]debugRow{}
 	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
 		f := strings.Split(line, "\t")
-		if strings.HasPrefix(line, "#") || len(f) != 7 {
+		// "h<id>" rows are the HTTP hooks' (task 3b4): an id space of
+		// their own, no brackets.
+		if strings.HasPrefix(line, "#") || strings.HasPrefix(line, "h") || len(f) != 7 {
 			continue
 		}
 		id, err1 := strconv.ParseInt(f[0], 10, 32)

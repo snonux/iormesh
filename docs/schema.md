@@ -8,11 +8,12 @@ cgo-free package `internal/schema`.
 
 Version 1 is frozen outside `http` since M2's acceptance (2026-11-19):
 spikes S1 (Java ↔ syscall join) and S2 (cross-host join) settled their
-fields, and M2 the rest of the traced surface. What M3 still owns (`http`) is
-marked *provisional*. Fields are only ever appended, and appended fields are
-optional, so an older reader never sees a changed meaning. Enum values
-(`drop_reason`, `end_reason`, …) are appended the same way as event kinds,
-so a reader should pass an unknown value through. One meaning did narrow:
+fields, and M2 the rest of the traced surface. What M3 still owns
+(`http`, an event kind since task 3b4) is marked *provisional*. Fields
+are only ever appended, and appended fields are optional, so an older
+reader never sees a changed meaning. Enum values (`drop_reason`,
+`end_reason`, …) are appended the same way as event kinds, so a reader
+should pass an unknown value through. One meaning did narrow:
 task vd4 moved skipped program runs out of a plain `drop`'s `args.lost`
 into their own `skipped_runs` drops (see `drop` below).
 
@@ -78,7 +79,7 @@ Required fields are always present; a zero is a real zero.
 | `conn_id` | string, optional | the connection a socket event belongs to; across hosts assigned by the merge's ISN-pair join (S2, decision #26) |
 | `attribution` | string | `java` or `none` — missing attribution is data |
 | `java` | object, optional | `{thread, stack, carrier}`, set exactly when attribution is `java`; `thread` is the Java thread name, `stack` method ids of `methods.ndjson`, innermost first (settled by S1); `carrier` (appended in M3) is `true` on a virtual thread's I/O, whose `thread` then names the carrier — see "Java attribution" |
-| `http` | object, optional | request fields on http events (*provisional until M3*) |
+| `http` | object, optional | the request, set exactly on `http` events — see "HTTP events" (*provisional until M3 closes*) |
 | `session` | object, optional | the host description, set exactly on `session` events (below) |
 | `stack_id` | int, optional | the native user stack the thread entered the syscall with: an id of `stacks.ndjson` (≥ 1); only with `-native-stacks` (below) |
 
@@ -146,7 +147,8 @@ in the M1 schema yet.
 | `end` | why the trace ended (duration, disk limit, stop, targets exited, error) |
 
 The set only grows; M2 appends the rest of the file and socket
-surface and the opt-in families (below).
+surface and the opt-in families (below), M3 `http` (see "HTTP
+events").
 
 ### Event kinds (M2 file surface)
 
@@ -599,6 +601,64 @@ Both tables carry `parquet:` tags for the M4 segment writer
 (`methods` and `threads` files, PLAN.md M3); until it exists they
 are NDJSON only.
 
+## HTTP events (M3)
+
+With `-spool`, the agent's HTTP hooks (decision #22, M3 step 7)
+add one `http` event per request a JVM made or answered through
+the JDK's HttpServer, HttpClient (`send`) or HttpURLConnection.
+It is not a syscall: it is stamped when the request completed —
+the server's exchange was closed by the handler (or the handler
+returned without closing it), the client's `send` returned, the
+connection's response was read — on the thread that did it, with
+its stack as `java` (the handler's or the caller's method; the
+JDK's dispatch when the handler never closed the exchange). `fd`
+is `-1`; `ret`, `latency_ns` and `bytes` are 0 (sizes and latency
+are not recorded yet).
+
+```json
+{"event":"http","fd":-1,"conn_id":"cb061683df650ac2","attribution":"java",
+ "java":{"thread":"main","stack":[220,221]},
+ "http":{"method":"GET","scheme":"http","host":"127.0.0.1",
+  "path":"/redact/login?user=***&token=***","status":200,"req_seq":1,
+  "version":"HTTP/1.1","req_headers":["authorization: ***","x-api-token: ***"],
+  "resp_headers":["content-length: 7","set-cookie: ***"]}}
+```
+
+| `http` field | Type | Meaning |
+|---|---|---|
+| `method`, `scheme` | string | as the library had them; `scheme` `https` over TLS (seen at the API boundary, never on the wire) |
+| `host` | string, optional | the request URI's host — client side only |
+| `path` | string, optional | path and query, every query (and `;`/`#` parameter) value masked; path segments verbatim (#22's default) |
+| `status` | int, optional | the response's status; absent when none came |
+| `req_seq` | int, optional | the request's ordinal on its connection, 1-based, the same on both ends — see below |
+| `version` | string, optional | `HTTP/1.1` or `HTTP/2` (appended in M3) |
+| `req_headers`, `resp_headers` | list of string, optional | `name: value`, names lower-cased, sorted, at most 32 each, redacted (see "Redaction"); HttpURLConnection's request line is no header and never recorded (appended in M3) |
+
+The event goes into the stream after the events that completed
+before it: it waits until an event that completed 5 ms after it
+has reached the joiner, or 2 s; the trace's `end` stays last.
+`conn_id` is the connection whose socket ends match the ones the
+library still held (both, else the remote end — a server's local
+end is unreadable once the close shut the connection — else the
+local one; a client knows the remote end only for an IP-literal
+host). The tracer numbers a connection's requests per process in
+completion order (`req_seq`), so the client's and the server's
+event of one HTTP/1 request pair by (`conn_id`, `req_seq`); it
+leaves `req_seq` out over HTTP/2 (multiplexed, decision #22),
+without a `conn_id`, and for every request of a JVM whose ring
+dropped an HTTP record. The summary line counts the http events
+and those without a connection. Not recorded in v1:
+`HttpClient.sendAsync` (its response completes on the client's
+executor, with no caller on the stack) and the other libraries of
+#22's set.
+
+The agent writes each request as an HTTP record of the ring
+(format version 3: exit stamp, stack id, Java thread id, kernel
+tid, status, then method, scheme, host, path, version, local and
+remote socket address, and the headers), redacted before it is
+written; a record that would pass 16 KiB keeps the request and
+drops its headers.
+
 ## Graph
 
 ```json
@@ -671,7 +731,12 @@ defaults over-mask rather than leak (`--password-stdin` masks the
 argument after it). HTTP headers (M3) use the same package:
 `authorization`, `proxy-authorization`, `cookie`, `set-cookie`
 and names containing `token`, `apikey`, `secret`, `password`,
-`session` or `signature` are recorded as `***`.
+`session` or `signature` are recorded as `***`, URLs in the other
+headers' values and every query value of the path are masked.
+The Java agent applies a copy of these header and query rules
+(`iormesh.agent.http.Redaction`) before a request reaches the
+spool, so a secret never lands on disk, and the tracer applies
+`internal/redact` again to every http event it writes.
 
 ## Parquet mapping
 

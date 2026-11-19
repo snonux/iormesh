@@ -55,6 +55,19 @@ type jvm struct {
 	// brackets one after another, so ring order is exit order per tid.
 	brackets  map[int32][]agentspool.Bracket
 	watermark uint64 // the latest WATERMARK, CLOCK_MONOTONIC
+	// comm and inc are the JVM's as its last joined event carried them,
+	// for its http events' envelope.
+	comm string
+	inc  uint64
+}
+
+// incarnation is the JVM's pid_incarnation: its start from /proc, or,
+// when it was gone before its ring was opened, its events'.
+func (v *jvm) incarnation() uint64 {
+	if v.start != 0 {
+		return v.start
+	}
+	return v.inc
 }
 
 func newJVM(r AgentRing, pid uint32, start, createdMono, created uint64) *jvm {
@@ -115,6 +128,8 @@ func (j *JavaJoin) record(v *jvm, rec agentspool.Record) error {
 		if r.KTID > 0 {
 			v.addBracket(r)
 		}
+	case agentspool.HTTP:
+		j.addHTTP(v, r)
 	}
 	return nil
 }

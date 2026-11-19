@@ -21,9 +21,10 @@ import (
 var agentTestDir = filepath.Join(agentBuildDir, "test")
 
 // smokeKinds are the hook kinds AgentSmoke's I/O must close at least one
-// bracket of: every kind the hook tables use (HookTable.KINDS).
+// bracket of: every kind the hook tables use (HookTable.KINDS), and http,
+// the HTTP hooks' requests recorded (task 3b4).
 var smokeKinds = []string{"open", "read", "write", "seek", "close", "socket",
-	"bind", "connect", "listen", "accept", "shutdown", "unlink", "rename", "stat"}
+	"bind", "connect", "listen", "accept", "shutdown", "unlink", "rename", "stat", "http"}
 
 // AgentTest builds the agent and runs its unit tests and smoke runs with
 // the java on PATH, then again with each JDK in IORMESH_AGENT_JDKS (a
@@ -88,18 +89,24 @@ func agentTestJavas() []string {
 // smokeAgent runs AgentSmoke under the agent, with boot-class bytecode
 // verification on: it must print "ok", every
 // table row of a loaded class must have been applied, and each kind in
-// smokeKinds must have closed a bracket.
+// smokeKinds must have closed a bracket. A spool directory beside the
+// dump gives the agent a ring (nobody reads it): the HTTP hooks record
+// only into one, and "http" is among smokeKinds.
 func smokeAgent(java string) error {
 	debug, cleanup, err := agentDebugPath("smoke")
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+	spool := filepath.Join(filepath.Dir(debug), "spool")
+	if err := os.Mkdir(spool, 0o700); err != nil {
+		return err
+	}
 	// Boot classes are not verified by default; turning it on makes a
 	// bad rewrite (e.g. a wrong stack map frame) fail here, not in the
 	// field.
 	out, err := exec.Command(java, "-XX:+UnlockDiagnosticVMOptions",
-		"-XX:+BytecodeVerificationLocal", "-javaagent:"+agentJar+"=debug="+debug,
+		"-XX:+BytecodeVerificationLocal", "-javaagent:"+agentJar+"=spool="+spool+",debug="+debug,
 		"-cp", agentTestDir, "iormesh.agent.AgentSmoke").Output()
 	if err != nil {
 		return fmt.Errorf("%s: AgentSmoke under the agent: %w", java, err)

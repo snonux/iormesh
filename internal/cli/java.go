@@ -112,7 +112,8 @@ func (o *javaOutput) close() error {
 // summary is the Java part of the run's summary line: rings read, events
 // joined (and how many of them a virtual thread's), why the others of
 // those JVMs stayed none, how many (joined or not) left by the timeout
-// rather than a watermark, and what the agents lost.
+// rather than a watermark, the http events (and how many found no
+// connection), and what the agents lost.
 func (o *javaOutput) summary() string {
 	if o == nil || o.join == nil {
 		return ""
@@ -120,7 +121,7 @@ func (o *javaOutput) summary() string {
 	s := o.join.Stats()
 	return fmt.Sprintf(", java rings %d (skipped %d, corrupt %d), brackets %d, attributed %d "+
 		"(carrier %d; none: unbracketed %d, other kind %d, ambiguous %d, no stack %d), "+
-		"released by timeout %d, agent lost %d", s.Rings, o.skipped, s.Corrupt, s.Brackets,
-		s.Attributed, s.Carrier, s.Unbracketed, s.OtherKind, s.Ambiguous, s.NoStack,
-		s.TimedOut, s.Lost.Total())
+		"released by timeout %d, http %d (no connection %d), agent lost %d", s.Rings, o.skipped,
+		s.Corrupt, s.Brackets, s.Attributed, s.Carrier, s.Unbracketed, s.OtherKind, s.Ambiguous,
+		s.NoStack, s.TimedOut, s.HTTP, s.HTTPNoConn, s.Lost.Total())
 }

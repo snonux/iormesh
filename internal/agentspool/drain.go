@@ -74,7 +74,7 @@ func (r *Ring) decodeAt(typ uint32, b []byte) Record {
 	if typ == typePad {
 		return nil
 	}
-	if typ > typeHook {
+	if typ > typeHTTP {
 		r.losses.Unknown++
 		return nil
 	}

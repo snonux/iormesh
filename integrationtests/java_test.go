@@ -17,8 +17,8 @@ const agentJarDefault = "../iormesh-agent.jar"
 // carries the Java side its pending golden declares (M3, task 2b4): each
 // declared I/O op is attribution java, on the declared Java thread, caused
 // by the declared method — the innermost frame outside the JDK
-// (normalize.CausingMethod). expect-pending.json is read directly until
-// the scenario's expect.json is promoted to it.
+// (normalize.CausingMethod). Its golden was expect-pending.json until
+// task 3b4 promoted it.
 func TestJavaMethodFlow(t *testing.T) {
 	enableParallelIfRequested(t)
 	h := newHarness(t)
@@ -35,11 +35,7 @@ func TestJavaMethodFlow(t *testing.T) {
 	assertJavaConsistent(t, run.Trace)
 
 	got := normalized(t, h, run, "method-flow")
-	want, err := normalize.LoadExpectation(filepath.Join(scenariosDir, "method-flow",
-		"expect-pending.json"))
-	if err != nil {
-		t.Fatalf("load expectation: %v", err)
-	}
+	want := expectation(t, "method-flow")
 	assertGolden(t, got, want)
 
 	t.Run("wrong expectations are caught", func(t *testing.T) {

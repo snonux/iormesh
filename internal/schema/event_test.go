@@ -35,7 +35,6 @@ func validEvent() Event {
 		ConnID:      "0123456789abcdef",
 		Attribution: AttributionJava,
 		Java:        &Java{Thread: "main", Stack: []uint64{3, 1}},
-		HTTP:        &HTTP{Method: "GET", Scheme: "http", Host: "h", Path: "/", Status: 200, ReqSeq: 1},
 	}
 }
 

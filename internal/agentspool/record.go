@@ -7,8 +7,8 @@ import (
 	"unicode/utf8"
 )
 
-// Record is one decoded ring record: a Bracket, Stack, Thread, Watermark
-// or Hook.
+// Record is one decoded ring record: a Bracket, Stack, Thread,
+// Watermark, Hook or HTTP.
 type Record interface {
 	isRecord()
 }
@@ -79,6 +79,7 @@ func (Stack) isRecord()     {}
 func (Thread) isRecord()    {}
 func (Watermark) isRecord() {}
 func (Hook) isRecord()      {}
+func (HTTP) isRecord()      {}
 
 // errMalformed marks a body that does not decode; the record is skipped
 // and counted, the ring stays readable.
@@ -103,6 +104,8 @@ func decode(typ uint32, rec []byte) (Record, error) {
 		return decodeThread(rec)
 	case typeHook:
 		return decodeHook(rec)
+	case typeHTTP:
+		return decodeHTTP(rec)
 	}
 	return nil, errMalformed
 }
@@ -135,7 +138,7 @@ func decodeStack(rec []byte) (Record, error) {
 	if le.Uint32(rec[20:]) != 0 {
 		return nil, errMalformed
 	}
-	frames, err := decodeStrings(rec, n)
+	frames, err := decodeStrings(rec, stringsHead, n)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +151,7 @@ func decodeThread(rec []byte) (Record, error) {
 	}
 	ktid := int32(le.Uint32(rec[16:]))
 	flags := le.Uint32(rec[20:])
-	name, err := decodeStrings(rec, 1)
+	name, err := decodeStrings(rec, stringsHead, 1)
 	if err != nil || ktid < 0 || flags&^threadVirtual != 0 {
 		return nil, errMalformed
 	}
@@ -163,7 +166,7 @@ func decodeHook(rec []byte) (Record, error) {
 		return nil, errMalformed
 	}
 	id := le.Uint64(rec[8:])
-	f, err := decodeStrings(rec, hookStrings)
+	f, err := decodeStrings(rec, stringsHead, hookStrings)
 	if err != nil || id == 0 || id > 1<<31-1 {
 		return nil, errMalformed
 	}
@@ -177,16 +180,16 @@ func decodeHook(rec []byte) (Record, error) {
 }
 
 // decodeStrings reads n strings (u32 byte length + UTF-8) after the
-// fixed head (whose flags word the caller checks). The strings must be
-// valid UTF-8, and what follows them only zero padding to the next
-// multiple of 8 — anything else means the writer and reader disagree on
-// the format.
-func decodeStrings(rec []byte, n uint32) ([]string, error) {
-	if int(n) > (len(rec)-stringsHead)/4 {
+// fixed head of head bytes (whose fields the caller checks). The strings
+// must be valid UTF-8, and what follows them only zero padding to the
+// next multiple of 8 — anything else means the writer and reader
+// disagree on the format.
+func decodeStrings(rec []byte, head int, n uint32) ([]string, error) {
+	if len(rec) < head || int(n) > (len(rec)-head)/4 {
 		return nil, errMalformed
 	}
 	out := make([]string, 0, n)
-	p := stringsHead
+	p := head
 	for range n {
 		if len(rec)-p < 4 {
 			return nil, errMalformed

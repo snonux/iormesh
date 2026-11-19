@@ -51,6 +51,26 @@ type ExpectedEvent struct {
 	// Java, when set, must match the event's Java attribution (M3, task
 	// 2b4); see ExpectedJava. It implies attribution java.
 	Java *ExpectedJava `json:"java,omitempty"`
+	// HTTP, when set, must match an http event's request (M3, task 3b4);
+	// see ExpectedHTTP. Only http events declare it.
+	HTTP *ExpectedHTTP `json:"http,omitempty"`
+}
+
+// ExpectedHTTP declares an http event's request. Unset fields are not
+// compared; a declared field must equal the event's, the path after
+// redaction ("/login?user=***"). Each declared header line must be among
+// the event's ("authorization: ***"), which may carry more: a golden says
+// which headers prove the redaction, not every header the JDK adds.
+type ExpectedHTTP struct {
+	Method      string   `json:"method,omitempty"`
+	Scheme      string   `json:"scheme,omitempty"`
+	Host        string   `json:"host,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	Status      *uint16  `json:"status,omitempty"`
+	ReqSeq      *uint32  `json:"req_seq,omitempty"`
+	Version     string   `json:"version,omitempty"`
+	ReqHeaders  []string `json:"req_headers,omitempty"`
+	RespHeaders []string `json:"resp_headers,omitempty"`
 }
 
 // ExpectedJava declares who caused an event on the Java side. Thread,
@@ -211,6 +231,9 @@ func (e ExpectedEvent) validate(threadProc map[string]string) error {
 	}
 	if err := e.validateJava(); err != nil {
 		return err
+	}
+	if e.HTTP != nil && e.Event != schema.KindHTTP {
+		return fmt.Errorf("http declared on a %s event", e.Event)
 	}
 	if err := wantKind(e.Thread, "t", false); err != nil {
 		return fmt.Errorf("thread: %w", err)

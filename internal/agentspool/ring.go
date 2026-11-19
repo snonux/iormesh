@@ -178,7 +178,8 @@ func (r *Ring) agentLosses(l Losses) Losses {
 	l.DroppedThreads = r.word(offDropped + 8*typeThread)
 	l.DroppedWatermarks = r.word(offDropped + 8*typeWatermark)
 	l.DroppedHooks = r.word(offDropped + 8*typeHook)
-	for _, t := range []int{typePad, 6, 7} {
+	l.DroppedHTTP = r.word(offDropped + 8*typeHTTP)
+	for _, t := range []int{typePad, 7} {
 		l.DroppedOther += r.word(offDropped + 8*t)
 	}
 	l.DroppedBytes = r.word(offDroppedBytes)

@@ -476,3 +476,27 @@ default fold (`-aggregate`) turns this burst into ~150 events,
 so a real JVM's join cost scales with its unfolded I/O calls.
 Task ud4 brings it under the budget; it gates M3's acceptance
 (task 5b4).
+
+## Follow-up (3b4): the HTTP events' share
+
+Task 3b4 put two things on the per-event path. In the agent,
+nothing: the HTTP hooks fire once per request, at the libraries'
+API boundary, and the I/O brackets are unchanged. In the tracer,
+`JavaJoin` now looks at every event it receives (envelope fields,
+the latest completion time, the socket ends of an event that
+carries them) and numbers what it emits itself, and its release
+loop checks for a due http event before each held one. Measured
+with a Go benchmark of that path, an event of a process without a
+ring (`BenchmarkJavaJoinPassThrough`, `internal/correlate`; 8 runs
+each, on HEAD before the change and after it, load 12–14):
+
+| Run | ns/event, median | Range |
+|---|--:|--:|
+| before 3b4 | 287 | 240–363 |
+| after 3b4 | 267 | 164–312 |
+
+No difference shows above the host's noise; the http bookkeeping
+is a few field copies and one comparison per event (the socket
+index parses addresses only on events that carry them — tcp_state,
+connect, accept). The S3 burst itself was not re-run: it makes no
+HTTP request, and its join cost is task ud4's.

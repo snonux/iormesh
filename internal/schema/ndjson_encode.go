@@ -196,6 +196,19 @@ func appendHTTP(dst []byte, h *HTTP) []byte {
 	if h.ReqSeq != 0 {
 		optUint(&o, "req_seq", &h.ReqSeq)
 	}
+	if h.Version != "" {
+		o.key("version")
+		o.dst = appendJSONString(o.dst, h.Version)
+	}
+	for _, l := range [...]struct {
+		name string
+		v    []string
+	}{{"req_headers", h.ReqHeaders}, {"resp_headers", h.RespHeaders}} {
+		if len(l.v) > 0 {
+			o.key(l.name)
+			o.dst = appendStringArray(o.dst, l.v)
+		}
+	}
 	return o.close()
 }
 

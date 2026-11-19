@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"iormesh/internal/agentspool"
+	"iormesh/internal/redact"
 	"iormesh/internal/schema"
 )
 
@@ -35,6 +36,11 @@ import (
 // carrier it ran on) and flagged java.carrier, naming the carrier thread
 // (PLAN.md, "Platform threads only in v1").
 //
+// The agent's HTTP hooks add events of their own: each request becomes an
+// http event, merged into the stream by time (javahttp.go). Because it
+// inserts events, the joiner numbers what it emits itself: seq stays
+// gap-free and in emission order.
+//
 // One goroutine owns a JavaJoin, like the Correlator feeding it: Event,
 // Poll and Close must not run concurrently.
 type JavaJoin struct {
@@ -50,6 +56,18 @@ type JavaJoin struct {
 	scanned uint64
 	methods map[string]uint64 // frame text → method id
 	stats   JavaStats
+	// The http events (javahttp.go): records waiting for their turn by
+	// time, the socket index, the policy that redacts them again, and
+	// what they borrow from the stream — envelope, wall-clock offset and
+	// the latest completion time seen.
+	https   []pendingHTTP
+	conns   *connIndex
+	policy  redact.Policy
+	project string
+	hostID  string
+	wallOff int64
+	maxEnd  uint64
+	seq     uint64 // the last seq emitted
 }
 
 // AgentRing is what the joiner reads of one agent ring; *agentspool.Ring
@@ -116,6 +134,9 @@ type JavaStats struct {
 	// TimedOut counts events released by Timeout before the watermark
 	// passed, joined or not (they are also counted above).
 	TimedOut uint64
+	// HTTP counts the http events emitted, HTTPNoConn those of them whose
+	// connection was not found (no conn_id, no req_seq).
+	HTTP, HTTPNoConn uint64
 	// Lost is the agents' loss counters, summed over the rings.
 	Lost agentspool.Losses
 }
@@ -143,7 +164,8 @@ func NewJavaJoin(cfg JavaJoinConfig) *JavaJoin {
 	cfg.Timeout = orDefault(cfg.Timeout, defaultTimeout)
 	cfg.Grace = orDefault(cfg.Grace, defaultGrace)
 	cfg.Retain = orDefault(cfg.Retain, defaultRetain)
-	return &JavaJoin{cfg: cfg, jvms: map[uint32]*jvm{}, methods: map[string]uint64{}}
+	return &JavaJoin{cfg: cfg, jvms: map[uint32]*jvm{}, methods: map[string]uint64{},
+		conns: newConnIndex(), policy: redact.Default()}
 }
 
 var _ schema.Sink = (*JavaJoin)(nil)
@@ -158,6 +180,7 @@ func orDefault(v, def uint64) uint64 {
 // Event implements schema.Sink: ev waits behind the events held before
 // it and is released, joined, as soon as it is decidable.
 func (j *JavaJoin) Event(ev schema.Event) error {
+	j.seen(&ev)
 	j.held = append(j.held, ev)
 	if now := j.cfg.Clock(); now >= j.scanned+j.cfg.ScanEvery {
 		if err := j.poll(now); err != nil {
@@ -219,6 +242,7 @@ func (j *JavaJoin) poll(now uint64) error {
 			return err
 		}
 	}
+	j.conns.purge(j.maxEnd, j.cfg.Retain)
 	return nil
 }
 
@@ -228,11 +252,15 @@ func (j *JavaJoin) poll(now uint64) error {
 func (j *JavaJoin) addRing(r AgentRing) {
 	h := r.Header()
 	pid := uint32(h.PID)
-	_, start := j.cfg.ProcInfo(pid)
+	comm, start := j.cfg.ProcInfo(pid)
 	if old := j.jvms[pid]; old != nil {
 		j.dead = append(j.dead, old)
 	}
-	j.jvms[pid] = newJVM(r, pid, start, h.CreatedMono, j.boot(h.CreatedMono))
+	v := newJVM(r, pid, start, h.CreatedMono, j.boot(h.CreatedMono))
+	// The comm from /proc until a joined event brings the traced one: an
+	// http event may come before any of its JVM's syscall events.
+	v.comm = comm
+	j.jvms[pid] = v
 	j.stats.Rings++
 }
 
@@ -244,27 +272,61 @@ func (j *JavaJoin) allJVMs() []*jvm {
 	return all
 }
 
-// release emits held events from the head while each is decidable;
+// release emits held events from the head while each is decidable, with
+// the http events that completed before each merged in ahead of it;
 // force decides everything with what is known now.
 func (j *JavaJoin) release(force bool) error {
-	for ; j.head < len(j.held); j.head++ {
-		ev := &j.held[j.head]
-		v, wait := j.pending(ev)
-		if wait && !force {
-			break
+	err := j.releaseHeld(force)
+	j.compact()
+	return err
+}
+
+func (j *JavaJoin) releaseHeld(force bool) error {
+	for {
+		var ev *schema.Event
+		if j.head < len(j.held) {
+			ev = &j.held[j.head]
 		}
-		if v != nil {
-			if err := j.attribute(ev, v); err != nil {
+		if j.httpDue(ev) {
+			if !force && !j.httpReady() {
+				return nil
+			}
+			if err := j.emitHTTP(); err != nil {
 				return err
 			}
+			continue
 		}
-		if err := j.cfg.Next.Event(*ev); err != nil {
-			j.head++
+		if ev == nil {
+			return nil
+		}
+		v, wait := j.pending(ev)
+		if wait && !force {
+			return nil
+		}
+		j.head++
+		if err := j.decide(ev, v); err != nil {
 			return err
 		}
 	}
-	j.compact()
-	return nil
+}
+
+// decide joins a released event to its JVM's brackets (v nil: not
+// joinable) and emits it.
+func (j *JavaJoin) decide(ev *schema.Event, v *jvm) error {
+	if v != nil {
+		v.comm, v.inc = ev.Comm, ev.PIDInc
+		if err := j.attribute(ev, v); err != nil {
+			return err
+		}
+	}
+	return j.emit(*ev)
+}
+
+// emit numbers ev and hands it on.
+func (j *JavaJoin) emit(ev schema.Event) error {
+	j.seq++
+	ev.Seq = j.seq
+	return j.cfg.Next.Event(ev)
 }
 
 // compact reclaims the released events' room. A JVM's events usually
