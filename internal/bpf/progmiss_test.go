@@ -5,14 +5,24 @@ import (
 	"testing"
 )
 
-// TestLossesCountSkippedPrograms: a program run the kernel skipped is a
-// lost record like a failed reservation - in Total, which drop events are
-// made of, and in the kernel-side figure the summary line reports (task
-// vc4: skipped read/write handlers showed up only as unpaired exits).
-func TestLossesCountSkippedPrograms(t *testing.T) {
-	l := Losses{Kernel: 2, Missed: 5, Short: 1}
-	if l.Total() != 8 || l.KernelSide() != 7 {
-		t.Fatalf("Total %d, KernelSide %d: want 8 and 7", l.Total(), l.KernelSide())
+// TestLossesKeepSkippedProgramsApart: a program run the kernel skipped is
+// possible loss, counted host-wide before the target filter, so it is not
+// in Total - the lost records drop events and the summary report (task
+// vd4) - while failed reservations and undecodable records are.
+func TestLossesKeepSkippedProgramsApart(t *testing.T) {
+	tests := []struct {
+		name string
+		l    Losses
+		want uint64
+	}{
+		{"skips only", Losses{Missed: 691}, 0},
+		{"ring drops", Losses{Kernel: 2, Missed: 5}, 2},
+		{"every kind", Losses{Kernel: 2, Missed: 5, Unknown: 1, Malformed: 3, Short: 1}, 7},
+	}
+	for _, tt := range tests {
+		if got := tt.l.Total(); got != tt.want {
+			t.Errorf("%s: Total() = %d, want %d", tt.name, got, tt.want)
+		}
 	}
 }
 

@@ -54,21 +54,37 @@ func (c *Correlator) Session(s schema.Session) error {
 // RecordLosses takes the tracer's cumulative loss count (bpf.Losses.Total)
 // and queues a drop event for the growth since the last call, so a gap
 // shows up in the stream near where it happened instead of only in a
-// summary. No growth means no event: a drop of 0 would be noise. The
-// counter is cumulative, so a lower value than before (impossible unless
-// the caller swapped tracers) is ignored rather than turned into a
-// negative drop.
+// summary. No growth means no event: a drop of 0 would be noise.
 func (c *Correlator) RecordLosses(total uint64) error {
+	return c.recordGrowth(total, &c.lost, nil)
+}
+
+// RecordSkips takes the tracer's cumulative count of program runs the
+// kernel skipped (bpf.Losses.Missed) and queues a skipped_runs drop for
+// the growth since the last call. It is kept apart from RecordLosses
+// because the count is host-wide - the skip comes before the target
+// filter - so it bounds the target records lost instead of counting them
+// (task vd4): mixing it in would inflate the trace's loss.
+func (c *Correlator) RecordSkips(total uint64) error {
+	reason := schema.DropSkippedRuns
+	return c.recordGrowth(total, &c.skipped, &reason)
+}
+
+// recordGrowth queues a host-level drop (reason nil for plain loss) for
+// the growth of a cumulative counter over *seen, the part already
+// reported. A lower value than before (impossible unless the caller
+// swapped tracers) is ignored rather than turned into a negative drop.
+func (c *Correlator) recordGrowth(total uint64, seen *uint64, reason *string) error {
 	if c.ended {
 		return ErrEnded
 	}
-	if total <= c.lost {
+	if total <= *seen {
 		return nil
 	}
-	lost := total - c.lost
-	c.lost = total
+	lost := total - *seen
+	*seen = total
 	ev := c.hostEvent(schema.KindDrop)
-	ev.Args.Lost = &lost
+	ev.Args.Lost, ev.Args.DropReason = &lost, reason
 	c.enqueue(ev, nil)
 	return c.release(false)
 }
@@ -76,7 +92,8 @@ func (c *Correlator) RecordLosses(total uint64) error {
 // End queues the end event with reason, one of the schema.End* values.
 // It is numbered after every event already queued, including socket
 // events still waiting for their conn id, so it is the last event once
-// Close flushes. Handle, RecordLosses and Session fail after End.
+// Close flushes. Handle, RecordLosses, RecordSkips and Session fail
+// after End.
 func (c *Correlator) End(reason string) error {
 	if c.ended {
 		return ErrEnded

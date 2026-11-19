@@ -1,7 +1,8 @@
 package integrationtests
 
 // Adapted from ior integrationtests/kernelloss_test.go @ b21afc50328c.
-// Changes: iormesh's one summary line instead of ior's statistics block.
+// Changes: iormesh's one summary line instead of ior's statistics block,
+// with its skipped program runs (task vd4).
 
 import (
 	"errors"
@@ -16,11 +17,19 @@ func TestParseKernelLoss(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "clean run",
-			logged: "iormesh: attached\niormesh: stopped (targets exited); lost records 0 (kernel 0), unpaired exits 2, unreadable paths 0\n",
+			logged: "iormesh: attached\niormesh: stopped (targets exited); lost records 0 (kernel 0), skipped runs 0, unpaired exits 2, unreadable paths 0\n",
 			want:   KernelLoss{Unpaired: 2}},
 		{name: "kernel and decode loss",
-			logged: "iormesh: stopped (duration); lost records 7 (kernel 5), unpaired exits 1, unreadable paths 3",
+			logged: "iormesh: stopped (duration); lost records 7 (kernel 5), skipped runs 0, unpaired exits 1, unreadable paths 3",
 			want:   KernelLoss{Lost: 7, Kernel: 5, Unpaired: 1, NoPath: 3}},
+		{name: "skipped runs apart from lost records",
+			logged: "iormesh: stopped (targets_exited); lost records 0 (kernel 0), skipped runs 691, unpaired exits 0, unreadable paths 0",
+			want:   KernelLoss{Skipped: 691}},
+		// The pre-vd4 line lacks the skipped figure: reading it as 0 would
+		// hide possible loss, so it is no summary line at all.
+		{name: "line without skipped runs",
+			logged:  "iormesh: stopped (duration); lost records 0 (kernel 0), unpaired exits 0, unreadable paths 0",
+			wantErr: true},
 		{name: "no summary line", logged: "iormesh: attached\n", wantErr: true},
 	}
 	for _, tt := range tests {
@@ -40,6 +49,11 @@ func TestParseKernelLoss(t *testing.T) {
 	}
 	if (KernelLoss{Lost: 2, Unpaired: 9}).Any() {
 		t.Error("decode loss and unpaired exits alone must not count as kernel loss")
+	}
+	// A skip may have been a target's call: the run cannot be judged.
+	skipped := KernelLoss{Skipped: 691}
+	if !skipped.Any() || skipped.Undecodable() != 0 {
+		t.Errorf("%+v: Any() = %v, Undecodable() = %d; want true, 0", skipped, skipped.Any(), skipped.Undecodable())
 	}
 }
 

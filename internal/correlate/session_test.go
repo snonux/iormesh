@@ -80,6 +80,56 @@ func TestRecordLosses(t *testing.T) {
 	}
 }
 
+// TestRecordSkipsApartFromLosses: skipped program runs (task vd4) become
+// their own host-level skipped_runs drops, tracked apart from the lost
+// records: neither counter's total moves the other's delta, and a plain
+// loss drop carries no reason.
+func TestRecordSkipsApartFromLosses(t *testing.T) {
+	c, sink := newTest(t)
+	steps := []struct{ lost, skipped uint64 }{{0, 0}, {0, 691}, {2, 691}, {2, 700}, {3, 650}}
+	for _, s := range steps {
+		if err := c.RecordLosses(s.lost); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.RecordSkips(s.skipped); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	type drop struct {
+		lost   uint64
+		reason string
+	}
+	want := []drop{{691, schema.DropSkippedRuns}, {2, ""}, {9, schema.DropSkippedRuns}, {1, ""}}
+	drops := byKind(sink.events, schema.KindDrop)
+	if len(drops) != len(want) {
+		t.Fatalf("%d drops, want %d: %+v", len(drops), len(want), drops)
+	}
+	for i, d := range drops {
+		got := drop{lost: *d.Args.Lost}
+		if d.Args.DropReason != nil {
+			got.reason = *d.Args.DropReason
+		}
+		if got != want[i] || d.PID != 0 {
+			t.Errorf("drop %d: %+v pid %d, want %+v pid 0", i, got, d.PID, want[i])
+		}
+	}
+}
+
+// TestRecordSkipsAfterEnd: like every host event, a skip report after the
+// end event is refused, so the end stays last.
+func TestRecordSkipsAfterEnd(t *testing.T) {
+	c, _ := newTest(t)
+	if err := c.End(schema.EndStop); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RecordSkips(5); !errors.Is(err, ErrEnded) {
+		t.Fatalf("RecordSkips after End: %v, want ErrEnded", err)
+	}
+}
+
 // TestDropsInterleavedWithHeldSockets: a drop reported while socket events
 // wait for their conn id is numbered behind them and emitted in seq order
 // (memSink fails on any gap or reorder).

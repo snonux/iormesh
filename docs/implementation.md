@@ -1695,8 +1695,11 @@ scenarios landing first (principle #1).
     program the kernel skips under its recursion guard (another BPF
     program running on that CPU) loses its record without a trace;
     `bpf.Losses.Missed` sums the attached programs'
-    `recursion_misses` (`progmiss.go`) into the kernel-side loss and
-    so into `drop` events. Plus a
+    `recursion_misses` (`progmiss.go`) into `drop` events. Task vd4
+    then moved it out of the lost records: the skip comes before
+    the target filter, so the count is host-wide possible loss —
+    its own `skipped_runs` drop and "skipped runs" summary figure;
+    the integration harness still retries such a run. Plus a
     cheaper consumer to reach
     ≤ 2 µs per event (done, task wc4: a hand-written encoder
     byte-identical to `encoding/json`, pooled records recycled,

@@ -251,17 +251,20 @@ traced() {
 }
 
 traced_line() {
-    local t=$1 tag=$2 work=$3 lost kernel events bytes
+    local t=$1 tag=$2 work=$3 lost kernel skipped events bytes
     # lost counts every record the trace wanted but did not get (kernel
     # ring drops plus undecodable records); kernel is the drop part.
+    # skipped is the program runs the kernel skipped host-wide: possible
+    # loss, not in lost (PLAN.md "Trace output contract", task vd4).
     lost=$(sed -n 's/.*lost records \([0-9][0-9]*\).*/\1/p' "$work/tracer.err")
     kernel=$(sed -n 's/.*(kernel \([0-9][0-9]*\)).*/\1/p' "$work/tracer.err")
+    skipped=$(sed -n 's/.*skipped runs \([0-9][0-9]*\).*/\1/p' "$work/tracer.err")
     events=$(wc -l <"$work/trace/events.ndjson")
     bytes=$(stat -c %s "$work/trace/events.ndjson")
     echo "mode=traced threads=$t ops=$ops $tag elapsed_ns=$burst_elapsed" \
         "burst_cpu_ms=$burst_cpu tracer_cpu_ms=$tracer_total" \
         "tracer_run_cpu_ms=$((tracer_total - ready_cpu)) lost=$lost" \
-        "kernel_lost=$kernel events=$events ndjson_bytes=$bytes" \
+        "kernel_lost=$kernel skipped_runs=$skipped events=$events ndjson_bytes=$bytes" \
         "load=$(loadavg)" >>"$samples"
 }
 

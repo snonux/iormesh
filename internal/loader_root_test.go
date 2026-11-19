@@ -118,7 +118,13 @@ func opensOf(tr *ibpf.Tracer, pid uint32, wait time.Duration) []string {
 
 // TestLoaderDeliversRecords: the default probe set, attached by Open, turns
 // a target's open of probePath into a decoded *types.OpenEvent, and the loss
-// counters read without error and show no loss for this light load.
+// counters read without error and show no lost record for this light load:
+// no failed ring reservation, nothing undecodable. Skipped program runs
+// (Losses.Missed) are only logged - the attached tracepoint programs run
+// for every syscall on the host and the kernel skips them before the
+// target filter, so other BPF activity makes them grow during any trace
+// (691 on a two-record load, task vd4). They are possible loss, reported
+// as skipped_runs drops, not loss of this target.
 func TestLoaderDeliversRecords(t *testing.T) {
 	tg := startTarget(t)
 	tr := openTracer(t, tg.pid())
@@ -131,7 +137,10 @@ func TestLoaderDeliversRecords(t *testing.T) {
 		t.Fatalf("losses: %v", err)
 	}
 	if l.Total() != 0 {
-		t.Fatalf("losses on a two-record load: %+v", l)
+		t.Fatalf("lost records on a two-record load: %+v", l)
+	}
+	if l.Missed != 0 {
+		t.Logf("program runs skipped host-wide (possible loss, not asserted): %d", l.Missed)
 	}
 	if s := tr.Skipped(); len(s) != 0 {
 		t.Logf("tracepoints missing on this kernel: %v", s)

@@ -201,9 +201,12 @@ func finish(cfg runConfig, tr tracer, c *correlate.Correlator, out outputs, reas
 	sinkErr := c.Close()
 	graphErr := schema.WriteGraphFile(filepath.Join(cfg.out, GraphFile), c.Graph())
 	tablesErr := out.close()
-	_, _ = fmt.Fprintf(stderr, "iormesh: stopped (%s); lost records %d (kernel %d), unpaired exits %d, "+
-		"unreadable paths %d, unattributed aggregates %d%s\n",
-		reason, losses.Total(), losses.KernelSide(), c.Unpaired(), c.NoPath(), c.Unattributed(), out.summary())
+	// Skipped runs are host-wide possible loss, reported beside the lost
+	// records and never in them (bpf.Losses.Missed, task vd4).
+	_, _ = fmt.Fprintf(stderr, "iormesh: stopped (%s); lost records %d (kernel %d), skipped runs %d, "+
+		"unpaired exits %d, unreadable paths %d, unattributed aggregates %d%s\n",
+		reason, losses.Total(), losses.Kernel, losses.Missed, c.Unpaired(), c.NoPath(), c.Unattributed(),
+		out.summary())
 	return errors.Join(aggErr, lossErr, closeErr, endErr, sinkErr, graphErr, tablesErr)
 }
 
@@ -275,14 +278,20 @@ func announceReady(cfg runConfig) error {
 	return f.Close()
 }
 
-// pollLosses turns growth of the tracer's loss counters into a drop event,
-// so a gap is visible in the stream close to where it happened.
+// pollLosses turns growth of the tracer's loss counters into drop
+// events, so a gap is visible in the stream close to where it happened:
+// lost records as plain drops, skipped program runs as skipped_runs drops
+// of their own, since those are host-wide and only bound the trace's loss
+// (task vd4).
 func pollLosses(tr tracer, c *correlate.Correlator) (bpf.Losses, error) {
 	l, err := tr.Losses()
 	if err != nil {
 		return l, fmt.Errorf("loss counters: %w", err)
 	}
-	return l, c.RecordLosses(l.Total())
+	if err := c.RecordLosses(l.Total()); err != nil {
+		return l, err
+	}
+	return l, c.RecordSkips(l.Missed)
 }
 
 // traceLoop feeds records to the session until a stop condition and

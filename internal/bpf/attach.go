@@ -182,7 +182,7 @@ func (t *Tracer) attachTracepoint(p Probe) (*bpf.BPFLink, error) {
 	if err != nil {
 		return nil, fmt.Errorf("attach %s to %s: %w", p.Program, p, err)
 	}
-	// Attached programs only: their skips are loss (Losses.Missed).
+	// Attached programs only: their skips are possible loss (Losses.Missed).
 	t.progFDs = append(t.progFDs, prog.FileDescriptor())
 	return link, nil
 }

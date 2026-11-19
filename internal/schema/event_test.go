@@ -245,6 +245,13 @@ func TestHostEventValidateRejects(t *testing.T) {
 		"unattributed without pid": {KindDrop, func(e *Event) {
 			e.Args.DropReason = ptr(DropUnattributed)
 		}},
+		// skipped_runs is host-wide: a pid would attribute it to a process.
+		"skipped_runs with pid": {KindDrop, func(e *Event) {
+			e.PID, e.Args.DropReason = 7, ptr(DropSkippedRuns)
+		}},
+		"skipped_runs without lost": {KindDrop, func(e *Event) {
+			e.Args.Lost, e.Args.DropReason = nil, ptr(DropSkippedRuns)
+		}},
 		"drop_reason on end": {KindEnd, func(e *Event) { e.Args.DropReason = ptr(DropAttachGap) }},
 	}
 	for name, c := range cases {
@@ -253,6 +260,24 @@ func TestHostEventValidateRejects(t *testing.T) {
 			c.breakIt(&e)
 			checkRejected(t, e)
 		})
+	}
+}
+
+// TestSkippedRunsDropValid: a host-level (pid 0) skipped_runs drop (task
+// vd4) is valid and keeps its reason through a round trip.
+func TestSkippedRunsDropValid(t *testing.T) {
+	e := hostEvent(KindDrop)
+	e.Args.DropReason = ptr(DropSkippedRuns)
+	if err := e.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	data, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodeEvent(data)
+	if err != nil || got.Args.DropReason == nil || *got.Args.DropReason != DropSkippedRuns {
+		t.Fatalf("round trip: %+v, %v", got.Args, err)
 	}
 }
 

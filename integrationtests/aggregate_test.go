@@ -43,8 +43,8 @@ func TestSyscallBurstFoldsEveryCall(t *testing.T) {
 	})
 	assertOnlyTracedPIDs(t, run.Trace.Events, run.pids)
 	// A judged run lost nothing the tracer counted (traceJudged retries a
-	// run with kernel loss, skipped programs included); an unpaired exit
-	// would then be a call lost silently (task vc4).
+	// run with kernel loss or skipped program runs, task vd4); an unpaired
+	// exit would then be a call lost silently (task vc4).
 	if run.Loss.Unpaired != 0 {
 		t.Fatalf("%d unpaired exits on a run without counted loss (%s)", run.Loss.Unpaired, run.Loss)
 	}

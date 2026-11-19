@@ -249,19 +249,25 @@ func TestRunWritesSessionDropsEnd(t *testing.T) {
 	if !stopped {
 		t.Fatal("traceLoop drained the last records with the aggregation still running")
 	}
-	tr.setLosses(bpf.Losses{Kernel: 3, Short: 1}, nil) // only finish's poll sees this one
+	// Only finish's poll sees this one, skipped program runs included.
+	tr.setLosses(bpf.Losses{Kernel: 3, Short: 1, Missed: 40}, nil)
 	var stderr bytes.Buffer
 	if err := finish(cfg, tr, c, outputs{}, reason, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	events := readEvents(t, dir)
-	if got := kinds(events); got != "session,read,drop,read,drop,end" {
-		t.Fatalf("event kinds %s: want session,read,drop,read,drop,end", got)
+	if got := kinds(events); got != "session,read,drop,read,drop,drop,end" {
+		t.Fatalf("event kinds %s: want session,read,drop,read,drop,drop,end", got)
 	}
 	// 3 from the in-loop poll, then 1 from finish's: one drop of 4, or a
 	// drop behind the second read, would mean the loop never polled.
 	if a, b := *events[2].Args.Lost, *events[4].Args.Lost; a != 3 || b != 1 {
 		t.Fatalf("drops lost %d then %d, want 3 then 1", a, b)
+	}
+	// The 40 skipped runs are their own drop, never in the lost records
+	// (task vd4).
+	if r := events[5].Args.DropReason; r == nil || *r != schema.DropSkippedRuns || *events[5].Args.Lost != 40 {
+		t.Fatalf("third drop %+v, want skipped_runs of 40", events[5].Args)
 	}
 	end := events[len(events)-1]
 	if *end.Args.EndReason != schema.EndTargetsExited || !tr.closed {
@@ -270,7 +276,7 @@ func TestRunWritesSessionDropsEnd(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, GraphFile)); err != nil {
 		t.Fatalf("graph not written: %v", err)
 	}
-	if !strings.Contains(stderr.String(), "stopped (targets_exited); lost records 4") {
+	if !strings.Contains(stderr.String(), "stopped (targets_exited); lost records 4 (kernel 3), skipped runs 40,") {
 		t.Fatalf("summary %q", stderr.String())
 	}
 }

@@ -26,7 +26,8 @@ const (
 	// KindDrop records loss: gaps are explicit, never silent. args.lost
 	// counts the records lost since the previous drop event; without
 	// args.drop_reason it is ring-buffer or decoder loss of the host
-	// (pid 0), with one it says why (DropAttachGap, DropUnattributed).
+	// (pid 0), with one it says why (DropAttachGap, DropUnattributed,
+	// DropSkippedRuns).
 	KindDrop = "drop"
 	// KindSession is the per-trace header record, the first event of a
 	// trace; Event.Session describes the host.
@@ -69,6 +70,12 @@ const (
 	// sent. args.lost is the calls it stood for; the drop names the thread
 	// (pid, pid_incarnation, tid) and its boot_ns is the first call's.
 	DropUnattributed = "unattributed"
+	// DropSkippedRuns: program runs the kernel skipped under its recursion
+	// guard (another BPF program running on that CPU) since the previous
+	// such drop. Host-level (pid 0) and possible loss only: the skip comes
+	// before the target filter, so args.lost counts untraced processes'
+	// calls too and bounds the target records lost from above (task vd4).
+	DropSkippedRuns = "skipped_runs"
 )
 
 // Attribution values. Missing attribution is data, not a hole: every

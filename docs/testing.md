@@ -104,8 +104,10 @@ ior source and what changed:
   against.
 - `parse.go` — `events.ndjson` + `graph.json`, read strictly.
 - `kernelloss.go` — parses the tracer's exit summary line; a run
-  whose kernel lost records is re-run (three attempts), and a
-  test whose every run lost records skips with the
+  whose kernel lost records, or that had skipped program runs
+  (possible loss: the count is host-wide, so it cannot say
+  whether a target's call was skipped), is re-run (three
+  attempts), and a test whose every run lost records skips with the
   unexercised marker (`unexercised.go`) instead of passing.
   Undecodable records fail at once: they are a decoder bug.
 - `kernel_support_test.go` — the tests skip unless tracefs shows

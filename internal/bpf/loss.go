@@ -1,7 +1,8 @@
 // Adapted from ior internal/ringbuf_drop_consumer.go @ b21afc50328c.
 // Changes: the counter is folded into Losses beside the userspace decode
 // losses; reading takes a module map directly; the attached programs'
-// recursion misses are kernel-side loss too (Missed, progmiss.go).
+// recursion misses are read beside it as possible loss (Missed,
+// progmiss.go), outside Total.
 
 package bpf
 
@@ -21,18 +22,22 @@ const ringbufDropMapName = "ringbuf_drop_map"
 // per-CPU value: the element size rounded up to 8 bytes.
 const perCPUStride = 8
 
-// Losses counts every record a trace wanted but did not deliver. All
-// counters are cumulative since the tracer was opened, so the correlator can
-// turn a delta into a drop event (PLAN.md, "Trace output contract": loss is
-// recorded, never silent).
+// Losses counts every record a trace wanted but did not deliver, and
+// beside it the program runs the kernel skipped. All counters are
+// cumulative since the tracer was opened, so the correlator can turn a
+// delta into a drop event (PLAN.md, "Trace output contract": loss is
+// recorded, never silent - and never inflated).
 type Losses struct {
 	// Kernel is the number of records the BPF programs could not reserve in
 	// the ring buffer (userspace backpressure), summed over CPUs.
 	Kernel uint64
 	// Missed is how often the kernel skipped one of the attached programs
 	// because another BPF program was running on that CPU (recursion
-	// misses, progmiss.go): each skip lost the record it would have
-	// written.
+	// misses, progmiss.go). It is possible loss, not lost records: the
+	// skip comes before the program's target filter, so it counts
+	// untraced processes' calls too and only bounds the target records
+	// lost from above (task vd4). Hence it is not in Total; it reaches
+	// the trace as its own skipped_runs drop.
 	Missed uint64
 	// Unknown, Malformed and Short are records that arrived but could not be
 	// decoded: an event type without decoder, a decoder that rejected the
@@ -40,15 +45,11 @@ type Losses struct {
 	Unknown, Malformed, Short uint64
 }
 
-// Total is every lost record, kernel- and userspace-side.
+// Total is every record known lost, kernel- and userspace-side: failed
+// ring reservations and undecodable records, all of them the trace's own.
+// Skipped program runs (Missed) are not in it.
 func (l Losses) Total() uint64 {
-	return l.KernelSide() + l.Unknown + l.Malformed + l.Short
-}
-
-// KernelSide is the records lost in the kernel: not reserved in the ring
-// buffer, or never written because their program was skipped.
-func (l Losses) KernelSide() uint64 {
-	return l.Kernel + l.Missed
+	return l.Kernel + l.Unknown + l.Malformed + l.Short
 }
 
 // decodeLosses are the userspace-side counters; the poll goroutine bumps

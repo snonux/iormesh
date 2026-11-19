@@ -134,8 +134,9 @@ type tracedRun struct {
 }
 
 // traceJudged starts and traces the workloads of start until a run loses
-// no record in the kernel (FirstRunWithoutKernelLoss). A run that lost
-// records on every attempt cannot be judged: the test skips with the
+// no record in the kernel and has no skipped program run (KernelLoss.Any,
+// FirstRunWithoutKernelLoss). A run that lost records on every attempt
+// cannot be judged: the test skips with the
 // unexercised marker rather than pass or fail on loss. Undecodable records
 // are a decoder bug and fail at once. A workload that exits with the skip
 // code (the host cannot run its scenario) skips the test.

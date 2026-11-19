@@ -7,7 +7,8 @@
 // marker opens into marker events and fuses the two ends of a loopback
 // connection into one conn id. Around the syscall
 // events it numbers the host-level ones the caller reports: the session
-// header (Session), ring-buffer loss (RecordLosses) and the end (End).
+// header (Session), ring-buffer and decoder loss (RecordLosses), the
+// program runs the kernel skipped (RecordSkips) and the end (End).
 //
 // With Config.Stacks it also names each syscall event's native stack
 // (M2 step 9, stacks.go).
@@ -84,6 +85,7 @@ type Correlator struct {
 	// explains (aggregate.go).
 	unattributed uint64
 	lost         uint64 // cumulative losses already reported by drop events
+	skipped      uint64 // cumulative skipped program runs already reported
 	ended        bool   // End was called: nothing may follow the end event
 }
 

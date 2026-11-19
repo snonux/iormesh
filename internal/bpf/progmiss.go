@@ -25,10 +25,17 @@ import "fmt"
 // kernel's recursion guard (bpf_prog_active, trace_call_bpf) - and the
 // skip is visible only as the program's recursion_misses counter. Under
 // concurrent load on Linux 7.2 the read/write handlers of a syscall burst
-// were skipped thousands of times per run: each skip loses the enter or
-// exit record it would have written (or, for a held read/write, the call
-// itself), and the trace showed them only as unpaired exits. Counting
-// the misses as kernel-side loss turns that into an explicit drop.
+// were skipped thousands of times per run: a skip of a target's call
+// loses the enter or exit record it would have written (or, for a held
+// read/write, the call itself), and the trace showed them only as
+// unpaired exits. So the misses are reported, as skipped_runs drops.
+//
+// They are not lost records, though (task vd4): the guard skips the
+// program before its target filter runs, so the count includes every
+// untraced process's syscalls that hit the guard - on a host with other
+// BPF tracers, hundreds during a two-record trace. Nothing runs that
+// could tell whose call it was, so the count is only an upper bound on
+// the target records lost and stays out of Losses.Total.
 
 // readProgMisses sums the recursion misses of the programs behind fds.
 func readProgMisses(fds []int, read func(fd int) (uint64, error)) (uint64, error) {

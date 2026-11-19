@@ -107,8 +107,8 @@ column each, never a blob.
 | `remote_addr`, `remote_port` | socket events, when known; on `sendto`/`recvfrom` the datagram's peer |
 | `sock_state` | `tcp_state` (required): `ESTABLISHED`, `CLOSE`, … |
 | `marker` | `marker` (required): `<scenario>/<edge>` |
-| `lost` | `drop` (required, > 0): records lost since the previous `drop` event |
-| `drop_reason` | `drop`, optional: why the records were lost — `attach_gap` (M2), `unattributed` (a folded read/write no fd instance explains, M2 step 11); absent for ring-buffer and decoder loss |
+| `lost` | `drop` (required, > 0): records lost since the previous `drop` event of its kind; for `skipped_runs`, program runs skipped host-wide (an upper bound, not lost records) |
+| `drop_reason` | `drop`, optional: why the records were lost — `attach_gap` (M2), `unattributed` (a folded read/write no fd instance explains, M2 step 11), `skipped_runs` (program runs the kernel skipped, possible loss); absent for ring-buffer and decoder loss |
 | `end_reason` | `end` (required): why the trace ended, below |
 | `argv` | `exec` only: the new program's argv, a list of strings, redacted (see Redaction); absent when unreadable |
 | `fd2`, `fd2_gen` | a second fd instance (M2 step 7): the other end of `pipe`, `pipe2`, `socketpair`; the fd `epoll_ctl` registers |
@@ -137,7 +137,7 @@ in the M1 schema yet.
 | `connect`, `accept`, `accept4` | syscall pair; args carry the 4-tuple |
 | `tcp_state` | `sock:inet_sock_set_state`, joined to the owning pid/fd |
 | `marker` | an open of `/iormesh-marker/<scenario>/<edge>` |
-| `drop` | loss — gaps are explicit: ring-buffer and decoder loss, or a pattern session's attach gap (`drop_reason`) |
+| `drop` | loss — gaps are explicit: ring-buffer and decoder loss, skipped program runs (possible loss), or a pattern session's attach gap (`drop_reason`) |
 | `session` | the per-trace header |
 | `end` | why the trace ended (duration, disk limit, stop, targets exited, error) |
 
@@ -332,18 +332,30 @@ stays gap-free.
   | `arch` | machine hardware name (`uname -m`), e.g. `x86_64` |
 
 - **`drop`** reports loss: `args.lost` records — kernel
-  ring-buffer reservations that failed, program runs the kernel
-  skipped (its recursion guard skips a tracepoint program while
-  another BPF program runs on that CPU, which happens under
-  concurrent load; each skip loses the one record, or the one
-  folded call, that run would have written) plus records that
-  arrived undecodable — since the previous `drop`. `iormesh run` polls
-  the counters every 200ms — also while it drains the targets'
-  last records — and once more just before it detaches, so a
-  `drop` follows its gap within a poll interval; it is never
+  ring-buffer reservations that failed plus records that arrived
+  undecodable — since the previous such `drop`. `iormesh run`
+  polls the counters every 200ms — also while it drains the
+  targets' last records — and once more just before it detaches,
+  so a `drop` follows its gap within a poll interval; it is never
   written with `lost` 0. No `drop` event means no loss was
   counted. Records lost after that last poll, while the probes
   detach, are counted nowhere (a known M1 limit).
+
+  **Skipped program runs** are possible loss and get drops of
+  their own, polled alongside: `args.drop_reason`
+  `skipped_runs`, host-level (`pid` 0), `args.lost` the runs
+  skipped since the previous `skipped_runs` drop. The kernel's
+  recursion guard skips a tracepoint program while another BPF
+  program runs on that CPU, which happens under concurrent load
+  or beside other BPF tools; a skip of a target's call loses the
+  one record, or the one folded call, that run would have
+  written. But the skip comes before the program's target
+  filter, so the count includes untraced processes' calls (a
+  two-record trace saw 691 on a loaded host) and is an upper
+  bound on the target records lost, not a count of them
+  (PLAN.md, "Trace output contract"). A reader adds it to the
+  lost records only for a worst case; the summary line reports
+  it apart, as "skipped runs".
 
   One `drop` is not host-level: the **attach gap** of a
   pattern-bound session (`-pattern`, M2). Between a matching

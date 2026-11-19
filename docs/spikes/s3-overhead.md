@@ -253,6 +253,16 @@ same build reported 8 275–23 929 lost records (as `drop` events) on
 a 12-thread burst, and none of 10 runs of the integration pair
 (`TestSyscallBurstFoldsEveryCall` beside `TestUnixSocket`) did.
 
+**Correction (vd4).** Counting skips as lost records overstated
+the loss: the kernel skips a program before its target filter, so
+`recursion_misses` includes untraced processes' calls (a
+two-record root test saw 691 on a loaded host). Since task vd4
+the skips are reported apart — `skipped_runs` drops and the
+summary's "skipped runs" figure, `skipped_runs=` in `measure.sh`
+samples — and "lost records" is ring-buffer and decoder loss
+again. The 8 275–23 929 above are skipped runs, an upper bound on
+the burst's lost calls; the zeros in the table hold for both.
+
 ## Follow-up (ua4): the cost of native stacks
 
 Task ua4 added opt-in native stacks (`iormesh run

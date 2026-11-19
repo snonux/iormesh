@@ -130,6 +130,31 @@ func (e *Event) validateKindArgs() error {
 	return nil
 }
 
+// validateDropReason checks a drop's reason against its pid. attach_gap
+// and unattributed are one process's loss: without its pid nobody could
+// tell whose records are missing. skipped_runs is the opposite: the
+// kernel skipped the program before its target filter, so no process
+// can be named and a pid would claim an attribution nobody made.
+func validateDropReason(r *string, pid uint32) error {
+	if r == nil {
+		return nil
+	}
+	switch *r {
+	case DropAttachGap, DropUnattributed:
+		if pid == 0 {
+			return invalidf("%s drop without a pid", *r)
+		}
+	case DropSkippedRuns:
+		if pid != 0 {
+			return invalidf("%s drop with pid %d (host-level only)", *r, pid)
+		}
+	default:
+		return invalidf("drop reason %q, want %q, %q, %q or none", *r,
+			DropAttachGap, DropUnattributed, DropSkippedRuns)
+	}
+	return nil
+}
+
 // validateSyntheticArgs checks the host-level kinds: a drop without its
 // count, an end without a known reason or a header without the boot id
 // would turn "the trace says how complete it is" into a guess.
@@ -139,13 +164,8 @@ func (e *Event) validateSyntheticArgs() error {
 		if e.Args.Lost == nil || *e.Args.Lost == 0 {
 			return invalidf("drop without a positive args.lost")
 		}
-		if r := e.Args.DropReason; r != nil && *r != DropAttachGap && *r != DropUnattributed {
-			return invalidf("drop reason %q, want %q, %q or none", *r, DropAttachGap, DropUnattributed)
-		}
-		if e.Args.DropReason != nil && e.PID == 0 {
-			// Both reasons are one process's loss; without its pid
-			// nobody could tell whose records are missing.
-			return invalidf("%s drop without a pid", *e.Args.DropReason)
+		if err := validateDropReason(e.Args.DropReason, e.PID); err != nil {
+			return err
 		}
 	case KindEnd:
 		if e.Args.EndReason == nil || !KnownEndReason(*e.Args.EndReason) {
