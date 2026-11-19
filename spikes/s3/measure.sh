@@ -55,17 +55,38 @@ pids=()
 dirs=()
 
 # cleanup sends TERM, not INT: background children of a non-interactive
-# shell start with SIGINT ignored.
+# shell start with SIGINT ignored. For a tracer, pids holds both the sudo
+# job and the tracer's own PID: sudo need not relay a signal sent from
+# its own process group, and GNU time does not forward TERM, so only a
+# TERM to the tracer itself is sure to stop it (and detach its probes).
+# A tracer still loading has no PID in pids yet (tracer_start learns it
+# at ready), so cleanup also stops any tracer whose -ready file lies in a
+# live work dir, and waits for it before removing the dir — otherwise it
+# would recreate the dir as root when it gets ready.
 cleanup() {
     local p d
     for p in "${pids[@]}"; do
         sudo -n kill -TERM "$p" 2>/dev/null || true
     done
     for d in "${dirs[@]}"; do
+        _stop_tracers_in "$d"
         sudo -n rm -rf -- "$d"
     done
 }
 trap cleanup EXIT
+
+# _stop_tracers_in TERMs the tracers whose -ready file is in dir and
+# waits up to 10 s for them to exit. The -ready path is unique per run,
+# so no other user's iormesh is ever matched.
+_stop_tracers_in() {
+    local re="^$tracer run .*-ready $1/ready"
+    local -i i
+    sudo -n pkill -TERM -f -- "$re" 2>/dev/null || return 0
+    for ((i = 0; i < 100; i++)); do
+        pgrep -f -- "$re" >/dev/null || return 0
+        sleep 0.1
+    done
+}
 
 forget() {
     local p keep=()
@@ -174,12 +195,13 @@ burst_finish() {
 }
 
 # tracer_start attaches a pinned tracer to pid and waits until it is
-# ready. It sets tpid (the sudo job) and ready_cpu (the tracer's CPU ms
-# at ready: object load and attach, the fixed cost that tracer_run_cpu_ms
-# leaves out). The tracer is time's child; its own PID is found by its
-# command line, which starts with the binary's path (time's does not).
+# ready. It sets tpid (the sudo job), ipid (the tracer's own PID, which
+# cleanup signals) and ready_cpu (the tracer's CPU ms at ready: object
+# load and attach, the fixed cost that tracer_run_cpu_ms leaves out).
+# The tracer is time's child; its own PID is found by its command line,
+# which starts with the binary's path (time's does not).
 tracer_start() {
-    local pid=$1 dir=$2 ipid
+    local pid=$1 dir=$2
     sudo -n taskset -c "$tracer_cpu" /usr/bin/time -f '%U %S' -o "$dir/time" \
         "$tracer" run -pid "$pid" -project s3 -out "$dir/trace" -duration 10m \
         -ready "$dir/ready" "${tracer_flags[@]}" 2>"$dir/tracer.err" &
@@ -188,6 +210,7 @@ tracer_start() {
     wait_file "$dir/ready" "$tpid" "$dir/tracer.err"
     ipid=$(pgrep -f -- "^$tracer run -pid $pid .*-ready $dir/ready") ||
         die "tracer process not found"
+    pids+=("$ipid")
     ready_cpu=$(cpu_ms "$ipid")
 }
 
@@ -197,6 +220,8 @@ tracer_wait() {
     local dir=$1
     wait "$tpid" || die "tracer failed: $(tail -3 "$dir/tracer.err")"
     forget "$tpid"
+    # The tracer exited before its sudo and time parents did.
+    forget "$ipid"
     tracer_total=$(awk '{printf "%d", ($1 + $2) * 1000}' "$dir/time")
 }
 
@@ -257,7 +282,7 @@ bystander() {
     forget "$idle"
     tracer_wait "$work"
     # events proves the filter: the idle target issues no traced I/O, so
-    # only the session/end records appear.
+    # only a handful of session/control records appear (2-5 seen).
     echo "mode=bystander threads=$t ops=$ops $tag elapsed_ns=$burst_elapsed" \
         "burst_cpu_ms=$burst_cpu tracer_cpu_ms=$tracer_total" \
         "events=$(wc -l <"$work/trace/events.ndjson") load=$(loadavg)" >>"$samples"
@@ -326,9 +351,14 @@ summarize() {
     }' "$samples" >"$out/summary.txt"
 }
 
+# header marks the commit "+dirty" when measure.sh itself differs from
+# it, so a sample file never claims a script version it was not taken by.
 header() {
+    local rev
+    rev=$(git -C "$repo" rev-parse --short HEAD)
+    git -C "$repo" diff --quiet HEAD -- spikes/s3/measure.sh || rev+=+dirty
     {
-        echo "# S3 samples $(date -u +%Y-%m-%dT%H:%M:%SZ) commit $(git -C "$repo" rev-parse --short HEAD)"
+        echo "# S3 samples $(date -u +%Y-%m-%dT%H:%M:%SZ) commit $rev"
         echo "# kernel $(uname -r); cpu $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | xargs) x$(nproc)"
         echo "# java $(java -version 2>&1 | head -1); workdir fs $(df -T "${TMPDIR:-/tmp}" | awk 'NR==2{print $2}')"
         echo "# ops=$ops threads=$threads runs=$runs pairs=$pairs modes=$modes" \
