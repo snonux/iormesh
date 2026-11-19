@@ -327,8 +327,12 @@ stays gap-free.
   | `arch` | machine hardware name (`uname -m`), e.g. `x86_64` |
 
 - **`drop`** reports loss: `args.lost` records — kernel
-  ring-buffer reservations that failed plus records that arrived
-  undecodable — since the previous `drop`. `iormesh run` polls
+  ring-buffer reservations that failed, program runs the kernel
+  skipped (its recursion guard skips a tracepoint program while
+  another BPF program runs on that CPU, which happens under
+  concurrent load; each skip loses the one record, or the one
+  folded call, that run would have written) plus records that
+  arrived undecodable — since the previous `drop`. `iormesh run` polls
   the counters every 200ms — also while it drains the targets'
   last records — and once more just before it detaches, so a
   `drop` follows its gap within a poll interval; it is never

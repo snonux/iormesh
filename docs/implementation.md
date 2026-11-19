@@ -1553,7 +1553,14 @@ scenarios landing first (principle #1).
     turns it off. Tests: `rwagg_harness_test.go` compiles rwagg.c
     against a simulated map and ring and drives the fold, flush
     and stop rules, with mutations; correlator, schema, checker and
-    parser unit tests; `TestSyscallBurstFoldsEveryCall`. Plus a
+    parser unit tests; `TestSyscallBurstFoldsEveryCall`, which also
+    requires zero unpaired exits on a run without counted loss.
+    Review round 2 found the one silent loss left: a tracepoint
+    program the kernel skips under its recursion guard (another BPF
+    program running on that CPU) loses its record without a trace;
+    `bpf.Losses.Missed` sums the attached programs'
+    `recursion_misses` (`progmiss.go`) into the kernel-side loss and
+    so into `drop` events. Plus a
     cheaper consumer to reach
     ≤ 2 µs per event (done, task wc4: a hand-written encoder
     byte-identical to `encoding/json`, pooled records recycled,

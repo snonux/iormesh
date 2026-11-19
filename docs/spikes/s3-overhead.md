@@ -219,3 +219,36 @@ consumer slower.
   fell by three orders of magnitude on this load: the volume
   run's 100 000 syscalls are 94 events, 32 KB of NDJSON, 3 KB at
   zstd -3.
+
+**Correction (vc4, review round 2).** The tracer did not count one
+kind of loss when this run was taken: a tracepoint program the
+kernel *skipped* because another BPF program was running on that
+CPU (its recursion guard; visible only as the program's
+`recursion_misses`). A skipped read/write handler loses its record
+silently — the trace showed it only as unpaired exits. Under
+concurrent load this happened thousands of times per burst (a
+4-thread burst while `bpftool` ran: 4096 misses, 2251 unpaired
+exits, "lost records 0"; a 12-thread burst: 8 000–24 000). Since
+then the attached programs' misses are kernel-side loss
+(`bpf.Losses.Missed`) and reach the trace as `drop` events. The
+zeros above are therefore ring-buffer loss only; a re-run that also
+counts skipped programs is in "Follow-up (vc4, re-run)" below.
+
+### Follow-up (vc4, re-run)
+
+The same `measure.sh` run, repeated 2026-11-19 with the tracer that
+counts skipped programs (samples in
+`spikes/s3/results-vc4b/samples.txt`). Load average 3.3–4.1 —
+quieter than the first run, still not the quiet host (load < 1)
+decision #25 asks for the timing items.
+
+| Threads | Records lost incl. skipped programs (3 runs) | Events per 400 000 syscalls |
+|--:|--:|--:|
+| 1 | 0, 0, 0 | 89, 83, 83 |
+| 4 | 0, 0, 0 | 159, 143, 159 |
+
+Loss stays 0 % at 1 and 4 threads with every kind of loss counted;
+the volume run lost nothing either. Skips are load-dependent: the
+same build reported 8 275–23 929 lost records (as `drop` events) on
+a 12-thread burst, and none of 10 runs of the integration pair
+(`TestSyscallBurstFoldsEveryCall` beside `TestUnixSocket`) did.
