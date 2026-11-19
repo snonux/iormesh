@@ -616,6 +616,30 @@ Gated by S1 — done; the design below is S1's result
   thread), DNS hostname↔IP (InetAddress hooks), `file:line` on
   frames when debug info is present; TLS peer identity if adopted
   (decision #8).
+  As built (task fe4): the class-load map lists the classes a
+  recorded frame names, not every class the JVM loads — a
+  frame's class is what the model joins to a JAR, and a whole
+  application's load (tens of thousands of classes, most never
+  on an I/O stack) would cost ring space and agent work for
+  nothing. The agent describes a class once, when a new stack
+  first names it (so per distinct call site, never per bracket):
+  its binary name, its class loader (`bootstrap`, the loader's
+  name, else the loader's class name) and its code source — the
+  JAR or directory path of a `file:` location, `jrt:/<module>`
+  for a runtime-image class, other URLs with userinfo, query and
+  fragment stripped (redacted again by the tracer), empty when
+  the class has none. Code sources are paths like the file
+  events' and are recorded verbatim. A per-class `ClassValue`
+  holds the id, so no class or loader is pinned and no lock is
+  held across anything the app runs (no class is initialized).
+  The STACK record carries each frame's class id; the tracer
+  writes `classes.ndjson` (`class_id, class, loader,
+  code_source`, deduplicated across the trace's JVMs) and each
+  method row gains `class_id`, so a method id is a frame of one
+  class: the same frame text from two JARs is two ids. Threads:
+  a thread renamed after its first bracket gets another THREAD
+  record at its next bracket, and its later events carry the
+  new name; `threads.ndjson` lists one row per name.
 - **OpenTelemetry introspection**: when the app runs the OTEL
   API (SDK or not), the agent reads the active span context and
   tags every I/O event with its OTEL trace/span ids — iormesh
@@ -1631,7 +1655,12 @@ can reconstruct behavior and check it against source code:
   (S2, decision #26).
 - **Method table**: `method_id, class, method, signature,
   source_file, line, jar, classloader`. Frames reference ids, so
-  stacks stay compact and every frame joins to its JAR.
+  stacks stay compact and every frame joins to its JAR. As built
+  (tasks 2b4, fe4): the method row carries `class_id`, and JAR
+  and class loader live once per class in the class table
+  (`classes.ndjson`); `signature` is not recorded (StackWalker
+  frames do not need it to be unique: the line tells call sites
+  apart).
 - **Stable ids**: PID incarnation, fd generation, connection id
   (per socket pair, assigned by the merge on the controller,
   shared across mesh hosts), method ids.
