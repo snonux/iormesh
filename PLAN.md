@@ -1202,8 +1202,8 @@ answer), and deferred.
      and 2.08 / 2.15 µs after — no 8e4 regression, but both
      builds over 2 µs at load ≥ 10 (s3-overhead.md, "Follow-up
      (ae4)"); task ee4 re-measures it on M4's segment writer
-     (it gates M4's acceptance), the limit unchanged. With the Java join (`-spool`, every
-     event joined): 5.2 µs, over budget (2b4; td4's Java mark
+     (it gates M4's acceptance), the limit unchanged. With the
+     Java join (`-spool`, every event joined): 5.2 µs, over budget (2b4; td4's Java mark
      measured +0.7 µs per marked event on top, within the host's
      noise, s3-overhead.md "Follow-up (td4)"). Task ud4 cut the
      consumer's per-event work (a per-event clock syscall, the

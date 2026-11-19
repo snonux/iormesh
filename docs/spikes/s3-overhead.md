@@ -638,8 +638,8 @@ over the 2 µs budget (ae4's own 3.0 / 3.1 µs; the A/B's 2.18 /
 shares its SMT sibling, CPU 7, with the rest of the host. So the
 item passes at moderate load (md4, 4.6–9) and is over at load
 ≥ 10 (ae4); the limit stays, and task ee4 re-measures it on M4's
-segment writer (it gates M4's acceptance). Loss in the unfolded 4-thread runs is the full
-ring, as in md4; skipped runs were 0 in every run.
+segment writer (it gates M4's acceptance). Loss in the unfolded
+4-thread runs is the full ring, as in md4; skipped runs were 0 in every run.
 
 | #25 item | Budget | ae4 verdict |
 |----------|--------|-------------|
