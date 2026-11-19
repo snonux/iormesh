@@ -474,8 +474,9 @@ index before the five runs above. Not yet cut: each event is
 copied into the queue and out again (≈400 bytes twice), and the
 default fold (`-aggregate`) turns this burst into ~150 events,
 so a real JVM's join cost scales with its unfolded I/O calls.
-Task ud4 brings it under the budget; it gates M3's acceptance
-(task 5b4).
+Task ud4 cut it (to 3.8 / 5.6 µs, "Follow-up (ud4)") but not under
+the budget; the item moved to task ee4, which re-measures it on M4's
+segment writer and gates M4's acceptance.
 
 ## Follow-up (3b4): the HTTP events' share
 
@@ -636,15 +637,15 @@ over the 2 µs budget (ae4's own 3.0 / 3.1 µs; the A/B's 2.18 /
 3.55 µs before 8e4 and 2.08 / 2.15 µs after) — the tracer's core 3
 shares its SMT sibling, CPU 7, with the rest of the host. So the
 item passes at moderate load (md4, 4.6–9) and is over at load
-≥ 10 (ae4); the limit stays, and M3's acceptance (5b4)
-re-measures it. Loss in the unfolded 4-thread runs is the full
+≥ 10 (ae4); the limit stays, and task ee4 re-measures it on M4's
+segment writer (it gates M4's acceptance). Loss in the unfolded 4-thread runs is the full
 ring, as in md4; skipped runs were 0 in every run.
 
 | #25 item | Budget | ae4 verdict |
 |----------|--------|-------------|
 | bystander | ≤ 1.25× at 4 threads (CPU-time median of ≥ 10 pairs) | **passes** with 8e4's dispatch: 1.16× and 1.14× in two sets of 10 pairs; wall clock 1.16× and 1.19× (guard not tripped) |
 | bystander, untraced kind | recorded, not gated | ~2.0× on a pure `getppid` loop (+0.2–0.3 µs per call), the perf-tracepoint path's price |
-| tracer CPU | ≤ 2 µs per emitted event (median) | passes at moderate load (md4: 1.2/1.7 µs at load 4.6–9), **over at load ≥ 10** (ae4: 3.0/3.1 µs; A/B 2.08/2.15 µs after 8e4, 2.18/3.55 µs before); no 8e4 regression; 5b4 re-measures |
+| tracer CPU | ≤ 2 µs per emitted event (median) | passes at moderate load (md4: 1.2/1.7 µs at load 4.6–9), **over at load ≥ 10** (ae4: 3.0/3.1 µs; A/B 2.08/2.15 µs after 8e4, 2.18/3.55 µs before); no 8e4 regression; task ee4 re-measures on M4's segment writer (gates M4 acceptance) |
 
 ## Follow-up (ud4): cutting the consumer's per-event cost
 
@@ -781,3 +782,8 @@ ring's drain (each record boxed into an interface), `write(2)`. The
 next large step is the output format (M4's parquet segments replace
 the per-event text encoding), not another micro-cut; the default fold
 (`-aggregate`) still keeps a real JVM's hot loops out of the join.
+
+Status (2026-11-19): M3 is accepted with the tracer-CPU item open and
+over (plain unfolded 2.28 µs at 4 threads, `-spool` 3.8 / 5.6 µs);
+it is split to task ee4 on the M2 pattern, gating M4's acceptance,
+limit unchanged (PLAN.md, M3 status).

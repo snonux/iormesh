@@ -533,7 +533,8 @@ criterion here.
   1.14×); tracer CPU shows no 8e4 regression but is over 2 µs
   at load ≥ 10 (3.0 / 3.1 µs; the build before 8e4 likewise),
   so that item passes at moderate load (md4) and is over at
-  load ≥ 10 (ae4); 5b4 re-measures it
+  load ≥ 10 (ae4); task ee4 re-measures it on M4's segment
+  writer
   (docs/spikes/s3-overhead.md, "M2 acceptance measurement",
   "Follow-up (md4)" and "Follow-up (ae4)"). Schema v1 is
   frozen outside `http`.
@@ -714,8 +715,21 @@ Gated by S1 — done; the design below is S1's result
   docs/spikes/s3-overhead.md "Follow-up (2b4)") — over the
   ≤ 2 µs budget; task ud4 cut it by a third in instructions
   (3.8 µs at 1 thread, 5.6 µs at 4, at load 8–13; "Follow-up
-  (ud4)"), still over budget; 5b4 re-measures it, the limit
-  unchanged.
+  (ud4)"), still over budget.
+
+  Status (2026-11-19): accepted functionally — the integration
+  suite is green, and of decision #25 the bystander (1.16× /
+  1.14× after 8e4's dispatch), loss and volume items pass. The
+  tracer-CPU item is **open and over**: plain unfolded 2.28 µs
+  at 4 threads (its 30–58 % record loss passes only under the
+  default fold), `-spool` 3.8 / 5.6 µs at 1 / 4 threads. With
+  the remaining cost spread thin, the next step is M4's output
+  path, which itself needs M3 accepted, so the item is split to
+  task ee4 (owner-delegated advisor decision, the M2 pattern):
+  it re-measures on M4's segment writer, may cut the join and
+  correlator too, and gates M4's acceptance, not its start; the
+  limit is unchanged, and it ends in a pass or an explicit owner
+  decision recorded here, never a quiet relaxation.
 
 ### M4 — Controller (`iormeshctl`): push, collect, merge locally
 
@@ -889,7 +903,9 @@ Kubernetes (M7) build on it.
   present; ior's Rocky 9 build/Docker patterns apply), amd64
   and arm64. Deployed binaries come out of the container build
   pipeline (see "Container builds (Docker/Podman)").
-- Acceptance: two test hosts run M4's scenarios; from a
+- Acceptance: decision #25's tracer-CPU item passes on the
+  segment-writer path, plain and `-spool` (task ee4). Two test
+  hosts run M4's scenarios; from a
   controller, `add` → `deploy` → `refresh` → `rm` produces the
   merged graph export with zero manual steps on the servers,
   leaves nothing behind under `/opt/iormesh`, and the merged
@@ -1185,8 +1201,8 @@ answer), and deferred.
      the build before 8e4 at load 8–14, 2.18 / 3.55 µs before
      and 2.08 / 2.15 µs after — no 8e4 regression, but both
      builds over 2 µs at load ≥ 10 (s3-overhead.md, "Follow-up
-     (ae4)"); M3's acceptance (5b4) re-measures it, the limit
-     unchanged. With the Java join (`-spool`, every
+     (ae4)"); task ee4 re-measures it on M4's segment writer
+     (it gates M4's acceptance), the limit unchanged. With the Java join (`-spool`, every
      event joined): 5.2 µs, over budget (2b4; td4's Java mark
      measured +0.7 µs per marked event on top, within the host's
      noise, s3-overhead.md "Follow-up (td4)"). Task ud4 cut the
@@ -1199,8 +1215,8 @@ answer), and deferred.
      unfolded burst is under at 1 thread (1.7 µs) and over at 4
      (2.28 µs, 30–58 % of records lost), load 6.5–10 — `-spool` stays
      **over** budget, its next step being M4's output format
-     (s3-overhead.md, "Follow-up (ud4)"); 5b4 re-measures, the
-     limit unchanged. Measured as the
+     (s3-overhead.md, "Follow-up (ud4)"); task ee4 re-measures
+     on M4's segment writer, the limit unchanged. Measured as the
      tracer's own user+sys CPU time per event from its ready
      file to its exit (load and attach excluded), which host
      load moves less than wall time — not nothing: on a loaded SMT host one thread's CPU
