@@ -173,3 +173,49 @@ budget is met only at the boundary until a quiet-host
 `measure.sh` run settles it (due before M2 acceptance). The 1-thread burst now loses no
 records; the 4-thread one still can, which is what in-kernel
 aggregation (task vc4) addresses.
+
+## Follow-up (vc4): in-kernel aggregation
+
+Task vc4 folds hot read/write loops in the kernel (decision #25;
+docs/implementation.md M2 step 11, docs/schema.md "Folded reads
+and writes"). One `spikes/s3/measure.sh` run on 2026-11-19
+(`S3_OPS=200000 S3_THREADS="1 4" S3_RUNS=3`, commit `50b8ca8`;
+samples in `spikes/s3/results-vc4/samples.txt`). The host was
+**not quiet**: load average 12–22 (1-minute) from unrelated test
+suites during every run, so the timing figures spread 4× between
+runs and are not the acceptance figures for decision #25's CPU and
+bystander items. Loss, the item this task owns, does not depend on
+a quiet host in the direction that matters — load only makes the
+consumer slower.
+
+| Threads | Records lost (3 runs) | Events per 400 000 syscalls | NDJSON bytes |
+|--:|--:|--:|--:|
+| 1 | 0, 0, 0 | 184, 333, 85 | 29–110 KB |
+| 4 | 0, 0, 0 | 2478, 143, 143 | 49–815 KB |
+
+- **Loss: 0 % at 1 and 4 threads in every run**, against the
+  budget of < 1 % (before: 12–15 % and 38–40 % after wc4's
+  consumer work, 16–42 % in M1). The volume run (100 000
+  syscalls) lost nothing either. The integration suite
+  (`TestSyscallBurstFoldsEveryCall`) checks the other half: the
+  folded events' counts add up to exactly the burst's ops.
+- **Events**: the burst's 400 000 calls arrive as 85–2478 events
+  (up to ~4700 calls each). The outlier (2478 at 4 threads, run
+  1, load 21) is the hot-window rule at work: a thread
+  descheduled for more than 1 ms ends its loop's event and sends
+  its next four calls singly.
+- **Tracer CPU** is now the fixed cost of load and attach: the
+  traced runs' 1.4–4.9 s match the idle-target bystander tracer's
+  1.4–4.2 s in the same run, so a per-event figure is meaningless
+  here and decision #25's ≤ 2 µs per event (wc4's numbers) stands
+  as measured there.
+- **Slowdown and bystander**: traced/untraced 1.1–2.1×,
+  bystander 0.3–2.5× — noise-dominated on this host; the folding
+  removes the ring-buffer work per call, not the tracepoint and
+  map lookups, so the bystander tax is unchanged by design. A
+  quiet-host run is still due for those two items before M2's
+  acceptance.
+- **Volume** per event is unchanged (~330 B), but per syscall it
+  fell by three orders of magnitude on this load: the volume
+  run's 100 000 syscalls are 94 events, 32 KB of NDJSON, 3 KB at
+  zstd -3.

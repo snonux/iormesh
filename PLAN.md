@@ -989,7 +989,9 @@ answer), and deferred.
      0 on a short burst and on the M0 scenarios. Budget: zero
      lost records on every M0/M2 scenario, and < 1 % on
      `syscall-burst` at 1 and 4 threads with aggregation on; any
-     loss is an explicit `drop` event;
+     loss is an explicit `drop` event (task vc4's aggregation: 0
+     lost in 3 runs each at 1 and 4 threads, on a busy host —
+     s3-overhead.md, "Follow-up (vc4)");
   4. *volume* — M1: ~326 B/event NDJSON, zstd ×18. Budget:
      ≤ 30 B/event compressed (≈ 18 MB per minute at 10 k
      events/s, ≈ 4.3 GB per 4 h session), measured as zstd -3
@@ -999,7 +1001,16 @@ answer), and deferred.
   one fd instance by one thread are summed per flush into one
   event with a count; every event that changes fd, socket or
   process state stays individual, so goldens and attribution
-  are unaffected. Enforcement: the budget is checked by a
+  are unaffected. Implemented by task vc4
+  ([docs/implementation.md](docs/implementation.md) M2 step 11,
+  [docs/schema.md](docs/schema.md) "Folded reads and writes"):
+  a call folds only once its key (thread, fd instance,
+  direction) has sent four hot calls individually — hot meaning
+  within 1 ms of the previous one and itself returning data
+  within 1 ms — so declared single calls stay exact; the folded
+  event carries `args.count` (≥ 2) and summed `bytes`; every
+  other traced call of the thread flushes first; `iormesh run
+  -aggregate=false` turns it off for debugging. Enforcement: the budget is checked by a
   documented `spikes/s3/measure.sh` run per milestone on a quiet
   host (CI machines are too noisy for a perf gate); the
   zero-loss criterion is part of the integration suite.
@@ -1704,7 +1715,10 @@ with minimal renaming; exact shapes settle when M0/M1 start.)
   I/O boundaries only; cost must scale with I/O, not with calls.
 - Credentials on servers, or tracers that deploy or connect
   anywhere — expansion is the controller's job (M6).
-- Kernel-mode dedup/ aggregation — correlation happens in userspace.
+- Kernel-mode dedup or aggregation — correlation happens in
+  userspace. The one exception is decision #25's fold of hot
+  read/write loops, which keeps every call (as a count) and its
+  thread's order.
 - Non-Linux hosts — BPF + JDK 21 on Linux is the whole universe.
 - No payload capture for files and non-HTTP socket streams:
   paths, sizes, offsets, endpoints only. (Argv is metadata but

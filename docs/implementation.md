@@ -1508,10 +1508,40 @@ scenarios landing first (principle #1).
     the tracer must never attribute a non-JVM process (no
     agent, no Java fields).
 11. **Budget (decision #25, from S3)**: in-kernel aggregation of
-    hot read/write loops, ior's `syscall_aggregate_map` model —
-    repeated read/write on one fd instance by one thread summed
-    per flush into one event with a count; every state-changing
-    event stays individual. Plus a cheaper consumer to reach
+    hot read/write loops (done, task vc4), after ior's
+    `syscall_aggregate_map` — repeated read/write on one fd
+    instance by one thread summed per flush into one event with a
+    count; every state-changing event stays individual.
+    `internal/c/rwagg.c` keeps a per-thread `rw_agg_map` entry of
+    four keys (enter trace id, fd, file identity). The generated
+    read and write handlers (`internal/generate/rwagg.go`) call
+    `ior_on_rw_syscall_enter` — the one enter hook that does not
+    flush — then `iormesh_rw_on_enter`, which holds back the enter
+    record of a *hot* call (within 1 ms of the key's previous exit)
+    once the key has sent four hot calls individually; the exit
+    hook `iormesh_rw_on_exit` folds a held call that returned data
+    within 1 ms, and otherwise sends the key's sums, the enter it
+    owes and its exit. Flush points: every other enter hook
+    (`ior_on_syscall_enter*` in filter.c flush the thread first),
+    a gap, an unfoldable held call, 100 ms of span, a fifth key
+    (LRU), `signal_generate` and `task_newtask` in the thread's
+    context, exec and thread exit (which also drop the entry), and
+    the session end, where `bpf.Tracer.PendingAggregates` reads
+    what is left and `finish` feeds it to the correlator. A flush
+    that finds the ring full counts one drop. The record is
+    `rw_aggregate_event`; the correlator (`aggregate.go`) writes it
+    as a read or write with summed `bytes`/`ret`/`latency_ns` and
+    `args.count` (only when ≥ 2, so a single call is a plain
+    event), resolving its fd instance by time — `procState` keeps
+    each instance's birth and the number's previous instance — for
+    a record that arrives after another thread closed and reused
+    the fd. The golden check matches a declaration without
+    `args.count` only to a single call. `iormesh run
+    -aggregate=false` (rodata `IORMESH_RW_AGGREGATE`) turns it
+    off. Tests: `rwagg_harness_test.go` compiles rwagg.c against a
+    simulated map and ring and drives the fold and flush rules,
+    with mutations; correlator, schema, checker and parser unit
+    tests. Plus a cheaper consumer to reach
     ≤ 2 µs per event (done, task wc4: a hand-written encoder
     byte-identical to `encoding/json`, pooled records recycled,
     batched records read from the mapped ring; validation stays

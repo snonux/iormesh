@@ -64,8 +64,8 @@ Required fields are always present; a zero is a real zero.
 | `fd_gen` | int | how often this fd number was (re)created in this incarnation; `0` = predates the trace or no fd. A forked child continues its parent's count (it inherits the parent's instances) |
 | `ret` | int | the syscall's return value |
 | `err` | string, optional | errno name (`ENOENT`), only when `ret < 0` |
-| `latency_ns` | int | exit minus enter |
-| `bytes` | int | bytes moved (read/write) |
+| `latency_ns` | int | exit minus enter; for a folded `read`/`write` the calls' sum |
+| `bytes` | int | bytes moved (read/write); for a folded one the calls' sum |
 | `args` | object | syscall-specific arguments, below |
 | `conn_id` | string, optional | the connection a socket event belongs to; across hosts assigned by the merge's ISN-pair join (S2, decision #26) |
 | `attribution` | string | `java` or `none` — missing attribution is data |
@@ -110,6 +110,7 @@ column each, never a blob.
 | `signal` | the signal number: `kill`, `tgkill`, `tkill` (when the kernel generated a signal) and `signal` (required) |
 | `target_pid` | `kill`, `tgkill`, `tkill`: the tgid signalled — raw, the target need not be traced |
 | `sender_pid` | `signal` only: the tgid that sent it — raw, the sender need not be traced; absent for a kernel-raised signal |
+| `count` | `read`, `write` only, when ≥ 2: how many calls a folded hot loop's event stands for (M2 step 11, below); absent for a single call |
 
 IPv4 peers of dual-stack sockets are written unmapped
 (`127.0.0.1`, not `::ffff:127.0.0.1`).
@@ -178,6 +179,42 @@ swapped) and processes in different mount namespaces can still
 leave an fd under a wrong name. `read` and `write` carry no
 path at all (decision #25's per-event cost); their fd instance
 joins to the open that named it.
+
+### Folded reads and writes (M2 step 11)
+
+A hot `read` or `write` loop — one thread, one fd, calls following
+each other within 1 ms and each returning data within 1 ms — is
+summed in the kernel (decision #25; `internal/c/rwagg.c`) instead
+of sending each call: one event then stands for `args.count` calls
+on that fd instance. Its `bytes` and `ret` are the calls' summed
+byte counts, `latency_ns` the sum of their latencies (time spent
+in the calls, not the span), `boot_ns` the first call's start; it
+says nothing about the individual calls' sizes or gaps.
+
+- The first four hot calls of each fd and direction are always
+  single events, and so is every call that is not hot (end of
+  file, an error, a call that blocked, one after a pause): what a
+  scenario declares stays exact.
+- Every other traced event of the thread — open, close, dup,
+  connect, accept, a marker, exec, a fork, a signal it raises —
+  comes after the folded calls that preceded it. Folded events of
+  one thread's different fds are spans and may overlap each
+  other.
+- A folded event is sent at the latest when the loop has run
+  100 ms, at the thread's next other traced call, its exit, or the
+  end of the trace. A thread that folds and then blocks in an
+  untraced call therefore delivers it late (`seq` order, not
+  `boot_ns` order); its fd instance is still the one the calls
+  ran on, resolved by time if another thread closed and reused
+  the number meanwhile. A late record no instance explains is not
+  written; the tracer's summary counts it (`unattributed
+  aggregates`).
+- A folded event lost to a full ring buffer is one lost record
+  (`drop`), which hid `args.count` calls.
+- `pread64`, `pwrite64` and the vectored calls are never folded.
+- `iormesh run -aggregate=false` sends every call as its own
+  event, for debugging; a busy loop then exceeds decision #25's
+  loss budget.
 
 ### Event kinds (M2 process lifecycle)
 

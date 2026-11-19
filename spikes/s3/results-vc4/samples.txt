@@ -1,0 +1,29 @@
+# S3 samples 2026-11-19T00:10:49Z commit 50b8ca8
+# kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
+# java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
+# ops=200000 threads=1 4 runs=3
+# run 1 threads 1 loadavg 22.44 23.31 16.34
+mode=untraced threads=1 ops=200000 elapsed_ns=793096678
+mode=traced threads=1 ops=200000 elapsed_ns=973213676 tracer_cpu_ms=3160 lost=0 kernel_lost=0 events=184 ndjson_bytes=61561
+mode=bystander threads=1 ops=200000 elapsed_ns=915162345 tracer_cpu_ms=3250 events=2
+# run 1 threads 4 loadavg 21.08 22.93 16.37
+mode=untraced threads=4 ops=200000 elapsed_ns=355867065
+mode=traced threads=4 ops=200000 elapsed_ns=735454935 tracer_cpu_ms=4490 lost=0 kernel_lost=0 events=2478 ndjson_bytes=815067
+mode=bystander threads=4 ops=200000 elapsed_ns=550824316 tracer_cpu_ms=4150 events=2
+# run 2 threads 1 loadavg 19.31 22.40 16.37
+mode=untraced threads=1 ops=200000 elapsed_ns=1236291895
+mode=traced threads=1 ops=200000 elapsed_ns=1608255944 tracer_cpu_ms=4930 lost=0 kernel_lost=0 events=333 ndjson_bytes=110482
+mode=bystander threads=1 ops=200000 elapsed_ns=402932188 tracer_cpu_ms=2090 events=2
+# run 2 threads 4 loadavg 16.29 21.53 16.21
+mode=untraced threads=4 ops=200000 elapsed_ns=198591518
+mode=traced threads=4 ops=200000 elapsed_ns=219968009 tracer_cpu_ms=1620 lost=0 kernel_lost=0 events=143 ndjson_bytes=48910
+mode=bystander threads=4 ops=200000 elapsed_ns=197088112 tracer_cpu_ms=1540 events=2
+# run 3 threads 1 loadavg 14.59 20.88 16.08
+mode=untraced threads=1 ops=200000 elapsed_ns=308841357
+mode=traced threads=1 ops=200000 elapsed_ns=403414637 tracer_cpu_ms=1490 lost=0 kernel_lost=0 events=85 ndjson_bytes=28957
+mode=bystander threads=1 ops=200000 elapsed_ns=337744614 tracer_cpu_ms=1380 events=2
+# run 3 threads 4 loadavg 12.02 20.01 15.87
+mode=untraced threads=4 ops=200000 elapsed_ns=167772547
+mode=traced threads=4 ops=200000 elapsed_ns=206768133 tracer_cpu_ms=1450 lost=0 kernel_lost=0 events=143 ndjson_bytes=48897
+mode=bystander threads=4 ops=200000 elapsed_ns=420787469 tracer_cpu_ms=2009 events=2
+mode=volume threads=1 ops=50000 lost=0 events=94 ndjson_bytes=31906 zstd3_bytes=3060 zstd19_bytes=2563
