@@ -33,6 +33,10 @@ const (
 	// NonJavaPeer looks for it by default.
 	echoPeerBinary = "echopeer"
 	echoPeerPkg    = "./workload/echopeer"
+	// The integration suite's Go helper for the PID reuse and socket
+	// race edge cases (integrationtests/pidreuse_test.go, sockrace_test.go).
+	edgePeerBinary = "edgepeer"
+	edgePeerPkg    = "./workload/edgepeer"
 	// The workload targets Java 21 (PLAN.md decision #5) whatever newer
 	// JDK builds it, so it never depends on post-21 APIs.
 	workloadRelease = "21"
@@ -41,9 +45,13 @@ const (
 // WorkloadBuild compiles the Java workload with the JDK alone (no Maven or
 // Gradle, so the traced app has no build-time dependencies), bundles
 // each scenario's expect.json so `--expect <name>` can print it, and
-// builds the non-java-peer scenario's Go peer.
+// builds the Go helpers: the non-java-peer scenario's peer and the
+// integration suite's edgepeer.
 func WorkloadBuild() error {
 	if err := EchoPeerBuild(); err != nil {
+		return err
+	}
+	if err := EdgePeerBuild(); err != nil {
 		return err
 	}
 	srcs, err := javaSources(workloadSrcDir)
@@ -71,6 +79,14 @@ func WorkloadBuild() error {
 func EchoPeerBuild() error {
 	return sh.RunWithV(map[string]string{"CGO_ENABLED": "0"},
 		"go", "build", "-o", echoPeerBinary, echoPeerPkg)
+}
+
+// EdgePeerBuild builds ./edgepeer, the integration suite's helper for
+// the edge cases a JVM cannot force deterministically (PID reuse, socket
+// races). Cgo-free for the same reasons as EchoPeerBuild.
+func EdgePeerBuild() error {
+	return sh.RunWithV(map[string]string{"CGO_ENABLED": "0"},
+		"go", "build", "-o", edgePeerBinary, edgePeerPkg)
 }
 
 // javaSources lists every .java file under root, sorted by WalkDir.

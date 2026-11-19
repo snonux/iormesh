@@ -96,6 +96,12 @@ ior source and what changed:
   harness stops it with SIGINT once the workloads exited
   (`TestRestartPattern`: the `restart` scenario's two
   incarnations under one app node, the launcher never traced).
+  `StartHelper` gates a Go helper the same way: `edgepeer`
+  (`workload/edgepeer`, cgo-free, built by `mage workloadBuild`)
+  forces the edge cases a JVM cannot force deterministically —
+  PID reuse and socket races — and prints a facts line per
+  case (its fds and ports) for the test to match the trace
+  against.
 - `parse.go` — `events.ndjson` + `graph.json`, read strictly.
 - `kernelloss.go` — parses the tracer's exit summary line; a run
   whose kernel lost records is re-run (three attempts), and a
@@ -125,6 +131,8 @@ The tests:
 | `TestTCPFamilies` | tcp-ipv4 and tcp-ipv6 goldens: full 4-tuples per family; tcp-ipv6 skips on a host without an IPv6 loopback (the workload's exit 3) |
 | `TestNonJavaPeer` | non-java-peer golden: the JVM's connect/echo/log read, the Go peer's `accept4`, echo, EOF read and log write, one fused connection; the peer is followed as the JVM's child (its `exec` of `echopeer`); every event of the raw trace is `attribution: none` with no `java` or `http`; a default run has no `stack_id` and no `stacks.ndjson`; mutated goldens fail |
 | `TestNativeStacks` | non-java-peer with `-native-stacks`: the golden still passes, every `stack_id` names a `stacks.ndjson` entry of its own process, and the peer's `accept4` and log `openat` stacks reach a `main.*` frame in the echopeer binary |
+| `TestPIDReuse` | a traced `edgepeer pid-target` brackets a file write and exits; an untraced launcher lands a new process on exactly its PID (`clone3` with `set_tid`, root) which does file work of its own while a traced keeper holds the session open; the keeper exits and the session ends `targets_exited` while the PID is still in use. The target's work is all under its own `pid_incarnation`; nothing of the newcomer (no event of its incarnation, no marker, no file) is traced; one process node on the PID |
+| `TestSocketRaces` | `edgepeer sock-races`: a refused connect (ECONNREFUSED after `SYN_SENT`, one unresolved conn), an unreachable one (ENETUNREACH, no `tcp_state`, no conn), a reset in the accept queue (client `ESTABLISHED` → `CLOSE`; `accept(2)` returns the child as a `CLOSE` snapshot, its read fails; two unresolved conns, never fused, the child on the client's freed fd under a new generation), a reset mid-stream (one fused conn, the server's read after the reset ECONNRESET on it), a `shutdown` racing a blocked `accept4` (EINVAL on the other thread, no fd, no conn); one conn_id per socket instance, fused iff shared by two, no edge without events |
 | `TestSyscallBurstFoldsEveryCall` | a traced 2-thread `syscall-burst` (20 000 ops) loses no record, is folded (events with `args.count`, M2 step 11), and the counts of its write and read events on its own files add up to exactly its ops, each call one byte |
 | `TestSkipCodeIsSkip` | (no root) a workload exit 3 becomes `ErrWorkloadSkipped`, which the tests turn into `t.Skip`; exit 1 stays a failure |
 | `TestUntracedProcessStaysOut` | a released but untraced twin leaves no event and no node |
@@ -181,9 +189,10 @@ to keep a failed test's trace directories.
 
 ### M2 acceptance (2026-11-19)
 
-`mage integrationTest`: 25 tests, two consecutive full runs green
-on HEAD, no skips, zero lost records. PLAN.md's M2 edge cases map
-to the suite as follows:
+`mage integrationTest`: 27 tests (25 at acceptance, plus the PID
+reuse and socket race tests of task id4), two consecutive full
+runs green on HEAD, no skips, zero lost records. PLAN.md's M2
+edge cases map to the suite as follows:
 
 | Edge case | Proven by |
 |-----------|-----------|
@@ -193,14 +202,14 @@ to the suite as follows:
 | threaded I/O | `TestSyscallBurstFoldsEveryCall` (2 threads, folded counts exact) |
 | loopback pairs | `TestWalkingSkeleton`, `TestTCPFamilies` (v4, v6), `TestUnixSocket`, `TestUDPLoopback`, `TestPipeIPC` |
 | non-Java peer | `TestNonJavaPeer`, `TestNativeStacks` |
-| PID reuse | root/unit level only: exit cleanup of `target_map` (`TestFollowForkExec`), `TestExecWatchExitedBeforeAdopt`, `internal/target` `TestAlive`, `internal/correlate` `TestNewTaskRegistersChild` |
-| socket races | root level only: `TestSockResetBeforeAcceptNotRegistered`, `TestSockFailedConnectUnregisters` |
+| PID reuse | `TestPIDReuse`; below it, exit cleanup of `target_map` (`TestFollowForkExec`), `TestExecWatchExitedBeforeAdopt`, `internal/target` `TestAlive`, `internal/correlate` `TestNewTaskRegistersChild` |
+| socket races | `TestSocketRaces`; below it, `TestSockResetBeforeAcceptNotRegistered`, `TestSockFailedConnectUnregisters` |
 
-The last two rows are not yet integration tests — forcing a PID
-reuse or a reset race end to end needs a dedicated harness; a
-follow-up task tracks it. The decision #25 budget run is recorded
-in docs/spikes/s3-overhead.md ("M2 acceptance measurement"); its
-two timing items are still open (quiet host needed).
+The PID reuse and socket race rows were root/unit level only at
+acceptance; `edgepeer` now forces both end to end. The decision
+#25 budget run is recorded in docs/spikes/s3-overhead.md ("M2
+acceptance measurement"); its two timing items are still open
+(quiet host needed).
 
 ## Performance baselines
 

@@ -456,11 +456,11 @@ criterion here.
   #25).
 
   Status (2026-11-19): functionally accepted; the #25 timing
-  items are **open**. The 25-test integration suite is green on
-  two consecutive runs with zero loss; every edge case above is
-  covered (docs/testing.md, "M2 acceptance"), PID reuse and
-  socket races at root/unit level only, with integration-level
-  tests as a follow-up task. Of the #25 budget, loss (0) and
+  items are **open**. The integration suite (27 tests) is green
+  on two consecutive runs with zero loss; every edge case above
+  is covered end to end (docs/testing.md, "M2 acceptance") — PID
+  reuse and socket races too, since task id4 forces them with a
+  Go helper (`workload/edgepeer`). Of the #25 budget, loss (0) and
   volume (15.9 B/event compressed) pass; the tracer-CPU and
   bystander timings were only taken on a loaded host (load ~3),
   which says little either way, and one rough unfolded run puts

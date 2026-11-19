@@ -13,11 +13,14 @@ package integrationtests
 // (Harness.Pattern, M2), which ior has no counterpart of, and may add
 // opt-in event families (Harness.Families, M2 step 7) and native stacks
 // (Harness.NativeStacks, M2 step 9). A workload exiting
-// with the skip code 3 ends the run with ErrWorkloadSkipped.
+// with the skip code 3 ends the run with ErrWorkloadSkipped. A gated
+// workload may also be a Go helper binary speaking the same gate protocol
+// (StartHelper, workload/edgepeer), optionally held on its stdin.
 
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -96,6 +99,9 @@ type Workload struct {
 	// Untraced workloads are released and waited for like the others but
 	// left out of the tracer's -pid list: a run's negative control.
 	Untraced bool
+	// Stdin, set by StartHeldHelper, is the write end of the process's
+	// stdin: a held helper runs until it is closed.
+	Stdin io.WriteCloser
 
 	startup string // the startup gate file it polls for
 	proc    *process
@@ -140,16 +146,42 @@ func (h *Harness) StartNoDir(scenario string, args ...string) (*Workload, error)
 	return h.startWorkload("", scenario, args)
 }
 
+// StartHelper starts `binary role args…`, a Go helper that speaks the
+// workload's gate protocol (PID first, then the startup file; see
+// workload/edgepeer): for edge cases a JVM cannot force deterministically.
+func (h *Harness) StartHelper(binary, role string, args ...string) (*Workload, error) {
+	return h.startGated(role, exec.Command(binary, append([]string{role}, args...)...), false)
+}
+
+// StartHeldHelper is StartHelper with the helper's stdin kept open in
+// Workload.Stdin: a helper that reads it to EOF runs until the test
+// closes it, so the test decides when it exits.
+func (h *Harness) StartHeldHelper(binary, role string, args ...string) (*Workload, error) {
+	return h.startGated(role, exec.Command(binary, append([]string{role}, args...)...), true)
+}
+
 // startWorkload starts a workload; an empty dir passes no --dir.
 func (h *Harness) startWorkload(dir, scenario string, args []string) (*Workload, error) {
-	startup := filepath.Join(h.Dir, fmt.Sprintf("startup-%d-%s", len(h.procs), scenario))
-	_ = os.Remove(startup) // a stale gate would release it before the tracer attached
 	argv := append([]string{"-jar", h.WorkloadJar, scenario}, args...)
 	if dir != "" {
 		argv = append(argv, "--dir", dir)
 	}
-	cmd := exec.Command("java", argv...)
+	return h.startGated(scenario, exec.Command("java", argv...), false)
+}
+
+// startGated starts cmd behind a fresh startup gate and returns once it
+// printed its PID; held keeps a pipe to its stdin.
+func (h *Harness) startGated(scenario string, cmd *exec.Cmd, held bool) (*Workload, error) {
+	startup := filepath.Join(h.Dir, fmt.Sprintf("startup-%d-%s", len(h.procs), scenario))
+	_ = os.Remove(startup) // a stale gate would release it before the tracer attached
 	cmd.Env = append(os.Environ(), workloadStartupFileEnv+"="+startup)
+	var stdin io.WriteCloser
+	if held {
+		var err error
+		if stdin, err = cmd.StdinPipe(); err != nil {
+			return nil, fmt.Errorf("workload %s: stdin: %w", scenario, err)
+		}
+	}
 	proc, err := startProcess("workload "+scenario, cmd)
 	if err != nil {
 		return nil, err
@@ -163,7 +195,7 @@ func (h *Harness) startWorkload(dir, scenario string, args []string) (*Workload,
 	if err != nil {
 		return nil, fmt.Errorf("workload %s: first line %q is no PID: %w", scenario, line, err)
 	}
-	return &Workload{PID: pid, Scenario: scenario, startup: startup, proc: proc}, nil
+	return &Workload{PID: pid, Scenario: scenario, Stdin: stdin, startup: startup, proc: proc}, nil
 }
 
 // Trace runs the tracer against every traced workload's PID, releases the

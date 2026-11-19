@@ -4,7 +4,9 @@ package integrationtests
 // (newTestHarness, absPath, enableParallelIfRequested, the judged-run
 // retry). Changes: the harness paths are ../iormesh and ../workload.jar;
 // the parallel switch is the -iormesh.parallel flag; the assertion helpers
-// are iormesh's: the golden check of internal/normalize and graph checks.
+// are iormesh's: the golden check of internal/normalize and graph checks;
+// the judged-run retry is generic (judge), so a test with its own
+// choreography (TestPIDReuse) is retried and skipped the same way.
 
 import (
 	"errors"
@@ -24,7 +26,9 @@ import (
 const (
 	tracerBinaryDefault = "../iormesh"
 	workloadJarDefault  = "../workload.jar"
-	scenariosDir        = "../workload/scenarios"
+	// edgePeerDefault is workload/edgepeer, built by mage workloadBuild.
+	edgePeerDefault = "../edgepeer"
+	scenariosDir    = "../workload/scenarios"
 	// lossAttempts: one retry tells a busy moment from a host that loses
 	// records all the time (ior's FirstRunWithoutKernelLoss callers).
 	lossAttempts = 3
@@ -137,10 +141,10 @@ type tracedRun struct {
 // code (the host cannot run its scenario) skips the test.
 func traceJudged(t *testing.T, h *Harness, start starter) tracedRun {
 	t.Helper()
-	run, lost, err := FirstRunWithoutKernelLoss(lossAttempts, func() (tracedRun, KernelLoss, error) {
+	return judge(t, func() (tracedRun, error) {
 		ws, err := start(h)
 		if err != nil {
-			return tracedRun{}, KernelLoss{}, err
+			return tracedRun{}, err
 		}
 		r, err := h.Trace(ws...)
 		var pids []int
@@ -149,7 +153,26 @@ func traceJudged(t *testing.T, h *Harness, start starter) tracedRun {
 				pids = append(pids, w.PID)
 			}
 		}
-		return tracedRun{Run: r, pids: pids}, r.Loss, err
+		return tracedRun{Run: r, pids: pids}, err
+	})
+}
+
+// judgeable is a judged run's result: a tracedRun, or a test's own run
+// type embedding one with what its choreography learned on the way.
+type judgeable interface{ traced() tracedRun }
+
+// traced makes tracedRun (and every type embedding it) judgeable.
+func (r tracedRun) traced() tracedRun { return r }
+
+// judge is traceJudged's verdict for any attempt function, so a test
+// with its own choreography (TestPIDReuse) is judged the same way: retried
+// on kernel loss, skipped as unexercised when every attempt lost records,
+// failed at once on undecodable records.
+func judge[T judgeable](t *testing.T, attempt func() (T, error)) T {
+	t.Helper()
+	run, lost, err := FirstRunWithoutKernelLoss(lossAttempts, func() (T, KernelLoss, error) {
+		r, err := attempt()
+		return r, r.traced().Loss, err
 	})
 	if errors.Is(err, ErrWorkloadSkipped) {
 		t.Skipf("traced run: %v", err)
@@ -161,9 +184,9 @@ func traceJudged(t *testing.T, h *Harness, start starter) tracedRun {
 		SkipUnexercised(t, os.Stdout, "every one of "+strconv.Itoa(lossAttempts)+
 			" runs lost records in the kernel (last: "+lost[len(lost)-1].String()+")")
 	}
-	dumpOnFailure(t, run)
-	if n := run.Loss.Undecodable(); n > 0 {
-		t.Fatalf("%d records reached userspace but could not be decoded (%s)", n, run.Loss)
+	dumpOnFailure(t, run.traced())
+	if n := run.traced().Loss.Undecodable(); n > 0 {
+		t.Fatalf("%d records reached userspace but could not be decoded (%s)", n, run.traced().Loss)
 	}
 	return run
 }
