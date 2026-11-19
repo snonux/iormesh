@@ -40,10 +40,12 @@ func (c *Correlator) newTask(r *types.TaskNewtaskEvent) {
 // /proc rounds it down to a clock tick, so the child's start is never
 // after the record; one that is belongs to a later process. Such a child
 // keeps an unknown incarnation (0) and the name it inherited, which the
-// record carries — not the stranger's.
+// record carries — not the stranger's. So does a child simply gone (an
+// unreadable /proc entry). A reuse within the fork's own clock tick
+// rounds down to a start at or before the record and is not detected.
 func (c *Correlator) childIdentity(r *types.TaskNewtaskEvent) Identity {
 	comm, start := c.cfg.ProcInfo(r.Pid)
-	if start > r.Time {
+	if start == 0 || start > r.Time {
 		return Identity{Comm: types.StringValue(r.Comm[:])}
 	}
 	return Identity{Comm: comm, StartNS: start}

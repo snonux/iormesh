@@ -182,13 +182,20 @@ func TestChildStartAfterForkIsGone(t *testing.T) {
 }
 
 // TestUnknownStartTimeIsGone: a target whose start time could not be
-// read is not kept alive by whatever process holds its PID now.
+// read is not kept alive by whatever process holds its PID now, and is
+// not seeded: no empty pid@0 process node without events.
 func TestUnknownStartTimeIsGone(t *testing.T) {
 	fakeProcs(t, 10)
 	processIdentity = func(uint32) correlate.Identity { return correlate.Identity{} }
-	s, _ := pidSession(t, newFakeTracer(), testCorrelator(t, t.TempDir()), 10)
+	c := testCorrelator(t, t.TempDir())
+	s, _ := pidSession(t, newFakeTracer(), c, 10)
 	if !s.over() {
 		t.Fatalf("live %v: an unknown start time kept the session alive", s.live)
+	}
+	for _, n := range c.Graph().Nodes {
+		if n.Type == schema.NodeProcess {
+			t.Fatalf("process node %s for a target gone at start", n.ID)
+		}
 	}
 }
 

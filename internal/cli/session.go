@@ -61,7 +61,11 @@ func (s *session) start(pids []uint32) error {
 	for _, pid := range pids {
 		id := processIdentity(pid)
 		s.live[pid] = id.StartNS
-		s.c.Seed(pid, id)
+		// A target already gone has nothing to seed: an empty identity
+		// would only add a pid@0 process node with no events.
+		if id.StartNS != 0 {
+			s.c.Seed(pid, id)
+		}
 	}
 	if s.app == "" {
 		return nil
@@ -224,7 +228,9 @@ func (s *session) adopt(pid uint32, id correlate.Identity, gap uint64) error {
 // its PID was reused. The child started before its record (the kernel
 // sets the start time first, /proc rounds it down), so a later start is
 // another process's, and the child counts as unknown (0): over() takes it
-// for gone, which it is.
+// for gone, which it is. The correlator reads /proc for the child on its
+// own (correlate's childIdentity, same check), a second read that may
+// disagree with this one only if the PID is reused in between.
 func childStart(r *types.TaskNewtaskEvent) uint64 {
 	start := processStart(r.Pid)
 	if start > r.Time {

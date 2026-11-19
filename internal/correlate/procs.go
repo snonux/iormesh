@@ -14,9 +14,10 @@ type procState struct {
 	inc uint64
 	// comm is the process's current name: read with inc (Identity) when
 	// the session took the process on (Seed) or else when the correlator
-	// first saw the pid (ProcInfo), then replaced on every successful exec (execComm), because the kernel
-	// renames the process to the new program there. Events stamp it when
-	// they are built, so those before an exec keep the old name.
+	// first saw the pid (ProcInfo), then replaced on every successful
+	// exec (execComm), because the kernel renames the process to the new
+	// program there. Events stamp it when they are built, so those before
+	// an exec keep the old name.
 	comm string
 	// commFromExe says the last exec record carried no comm, so the
 	// following Exec derives it from the executable (exeComm).

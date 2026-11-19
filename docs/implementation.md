@@ -177,7 +177,7 @@ Field notes:
   release and arch.
 - `pid_incarnation` is the task's start time on the boot clock
   (`/proc/<pid>/stat` starttime, clock-tick resolution) — unique
-  per PID reuse. It is read when the session takes the process
+  per PID reuse more than one clock tick apart. It is read when the session takes the process
   on (see "Envelope" below), not at its first record.
 - `seq` is per host, starts at 1 and has no gaps but explicit
   `drop` events; 0 means "never assigned" and is rejected.
@@ -767,12 +767,15 @@ unit-tested with synthetic record streams:
   `task_newtask` record is handled (the record carries no start
   time); a start later than the record's time is a later process
   on the reused PID, so the child keeps `pid_incarnation` 0 and
-  the record's inherited comm. The remaining lazy read is
-  `ProcInfo` for a pid first met in a record — an untraced
-  `kill` target, or a child whose `task_newtask` record was lost
-  — and it keeps that race. An exec record (`sched_process_exec`, successful
-  execs only) replaces `comm` with the kernel's post-exec name for
-  later events and the process node (task hd4; an empty record
+  the record's inherited comm, as does a child already gone (no
+  `/proc` entry). A reuse within the fork's own 10 ms tick rounds
+  down to a start at or before the record and is not detected.
+  The remaining lazy read is `ProcInfo` for a pid first met in a
+  record — an untraced `kill` target, or a child whose
+  `task_newtask` record was lost — and it keeps that race. An
+  exec record (`sched_process_exec`, successful execs only)
+  replaces `comm` with the kernel's post-exec name for later
+  events and the process node (task hd4; an empty record
   comm falls back to the exe's basename cut to 15 bytes);
   `wall_ns = boot_ns + WallOffsetNS` (`BootToWallOffset`,
   measured once); `err` is the errno name.

@@ -167,6 +167,7 @@ func TestNewTaskChildGoneBeforeRecord(t *testing.T) {
 		wantComm string
 	}{
 		{"reused after the fork", 901, 0, "parent"},
+		{"gone, /proc unreadable", 0, 0, "parent"},
 		{"started at the fork", 900, 900, "squatter"},
 		{"started before the fork", 850, 850, "squatter"},
 	}
@@ -175,6 +176,9 @@ func TestNewTaskChildGoneBeforeRecord(t *testing.T) {
 			c, _ := newTest(t)
 			c.cfg.ProcInfo = func(pid uint32) (string, uint64) {
 				if pid == 70 {
+					if tc.start == 0 {
+						return "", 0
+					}
 					return "squatter", tc.start
 				}
 				return "parent", 100
