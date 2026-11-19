@@ -718,8 +718,19 @@ server's event of one HTTP/1 request pair by (`conn_id`,
 - for every request of a JVM that may have lost an HTTP record —
   dropped by the ring, abandoned, undecodable, or a hook call that
   failed or was skipped (the agent counts those as dropped);
-- from the first `sendAsync` request on a connection's client end on
-  (its stamp follows the app's callbacks, not the response);
+- for every java.net.http (HttpClient) client request of a JVM that
+  completes after the JVM's first `sendAsync` call: an async request's
+  HTTP/1.1 connection goes back to the pool once its body is read,
+  while its record waits for the agent's completion (which runs after
+  the app's own callbacks), so another request reusing that connection
+  can be recorded first and would take its ordinal. The agent writes a
+  marker at the `sendAsync` call, before the request can reach a
+  connection; from its stamp on the tracer numbers no java.net.http
+  client end of that JVM, on any connection (requests completed before
+  it keep their numbers; HttpURLConnection and server ends are
+  unaffected). A java.net.http request is numbered only once the JVM's
+  watermark passed its stamp — proof that no earlier marker is still
+  unread — so one released by the timeout gets none;
 - from the first request on a connection that took several HTTP
   exchanges on: HttpClient following a redirect or answering a
   401/407 through its authenticator, HttpURLConnection doing the
@@ -730,9 +741,13 @@ server's event of one HTTP/1 request pair by (`conn_id`,
 The limit: completion order is the agent's stamp at the hook, so two
 requests of one connection that complete within the stamps'
 resolution on different threads (pipelining clients answered out of
-the scheduler's order) could swap ordinals; HTTP/1.1 clients send the
+the scheduler's order) could swap ordinals. HTTP/1.1 clients send the
 next request on a connection only after the previous response, which
-rules that out for the JDK's libraries.
+rules that out for the JDK's synchronous calls (`send`,
+HttpURLConnection, the server's exchanges) — but not for `sendAsync`,
+whose record is not stamped at its response: hence the rule above
+that stops a JVM's java.net.http client numbering at its first
+`sendAsync`.
 
 The summary line counts the http events and those without a
 connection. `HttpClient.sendAsync` (task wd4) is recorded when the
@@ -749,13 +764,14 @@ and its connection's client end numbers no more requests from it on
 set.
 
 The agent writes each request as an HTTP record of the ring
-(format version 5: exit stamp, stack id, Java thread id, kernel
+(format version 6: exit stamp, stack id, Java thread id, kernel
 tid, status, the string and request-header counts, flags — server
-or client — the exchange count, the OTEL span ids, the start stamp
-and the two body sizes, then method,
-scheme, host, path, version, local and remote socket address, and
-the headers), redacted before it is written; a record that would
-pass 16 KiB keeps the request and drops its headers.
+or client, unordered (a `sendAsync` completion), java.net.http, or
+a `sendAsync` marker that is no request — the exchange count, the
+OTEL span ids, the start stamp and the two body sizes, then
+method, scheme, host, path, version, local and remote socket
+address, and the headers), redacted before it is written; a record
+that would pass 16 KiB keeps the request and drops its headers.
 
 ## DNS events (M3)
 
@@ -788,7 +804,7 @@ stack that asked (`latency_ns` 0), and goes into the stream like
 an `http` event, after the events that completed before it. It
 names no connection: a view pairs a connection's remote address
 with the latest mapping of the same process that contains it. In
-the ring a mapping is a DNS record (format 5: exit stamp, stack
+the ring a mapping is a DNS record (format 5 on: exit stamp, stack
 id, Java thread id, kernel tid, string count, OTEL span ids, then
 host and addresses); one the ring dropped is counted (`agent
 lost`) and not sent again. The summary line counts the dns

@@ -76,9 +76,10 @@ public final class Ring {
      * and tracer then fail loudly instead of misreading HTTP records.
      * 5 (task wd4): HTTP's fixed part gains the request's start stamp
      * and its body sizes (latency and sizes, PLAN.md M3), and DNS
-     * records (decision #8) are new.
+     * records (decision #8) are new. 6 (task wd4, review round 2): the
+     * HTTP flags HTTP_ASYNC_MARK and HTTP_NET_HTTP.
      */
-    static final int VERSION = 5;
+    static final int VERSION = 6;
     /** THREAD flag: the Java thread is a virtual thread (JDK 21+). */
     static final int VIRTUAL = 1;
     static final long MAGIC = 0x474e49524d524f49L; // "IORMRING", little endian
@@ -138,6 +139,18 @@ public final class Ring {
      * connection's request order (a sendAsync completion): no ordinal.
      */
     static final int HTTP_UNORDERED = 2;
+    /**
+     * HTTP flag (task wd4 review round 2): not a request but a marker,
+     * written at the entry of HttpClient.sendAsync before the request can
+     * reach any connection: from its stamp on, the tracer numbers no
+     * java.net.http client end of this JVM. A pooled HTTP/1.1 connection
+     * goes back to the pool when an async response's body is read, before
+     * its (delayed) record, so another request's record on it can arrive
+     * first and take the async one's ordinal. Its strings are empty.
+     */
+    static final int HTTP_ASYNC_MARK = 4;
+    /** HTTP flag: the request went through java.net.http's HttpClient. */
+    static final int HTTP_NET_HTTP = 8;
     /** HTTP's leading strings: method, scheme, host, path, version, local, remote. */
     static final int HTTP_FIXED = 7;
     /** Bounds a STACK or THREAD record, so one never needs a large share of the ring. */

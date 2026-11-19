@@ -68,6 +68,10 @@ type jvm struct {
 	// brackets one after another, so ring order is exit order per tid.
 	brackets  map[int32][]agentspool.Bracket
 	watermark uint64 // the latest WATERMARK, CLOCK_MONOTONIC
+	// asyncFrom is the earliest sendAsync marker of the JVM (CLOCK_
+	// MONOTONIC, 0: none; task wd4 review round 2): java.net.http client
+	// requests completing from then on get no req_seq.
+	asyncFrom uint64
 	// comm and inc are the JVM's as its last joined event carried them,
 	// for its http events' envelope.
 	comm string
@@ -145,6 +149,12 @@ func (j *JavaJoin) record(v *jvm, rec agentspool.Record) error {
 			v.countAfterProbe(r)
 		}
 	case agentspool.HTTP:
+		if r.AsyncMark {
+			if v.asyncFrom == 0 || r.ExitMono < v.asyncFrom {
+				v.asyncFrom = r.ExitMono
+			}
+			return nil
+		}
 		j.addHTTP(v, r)
 	case agentspool.DNS:
 		j.addDNS(v, r)

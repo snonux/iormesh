@@ -26,8 +26,9 @@ const (
 	// (task 2b4) added HOOK records and THREAD's flags word, 3 (task 3b4)
 	// HTTP records, 4 (task 4b4) OTEL ids: a BRACKET of bracketOtelLen
 	// and three more words in HTTP's fixed part, 5 (task wd4) the HTTP
-	// request's start stamp and body sizes, and DNS records.
-	Version = 5
+	// request's start stamp and body sizes, and DNS records; 6 (task wd4,
+	// review round 2) HTTP's async-marker and java.net.http flags.
+	Version = 6
 	// magic is "IORMRING" as a little-endian word; the agent stores it
 	// last, so a reader that sees it sees a complete header.
 	magic = 0x474e49524d524f49
@@ -76,6 +77,12 @@ const threadVirtual = 1
 const (
 	httpServer    = 1
 	httpUnordered = 2
+	// httpAsyncMark marks no request but HttpClient.sendAsync's entry
+	// (task wd4 review round 2): see HTTP.AsyncMark.
+	httpAsyncMark = 4
+	// httpNetHTTP marks a request of java.net.http's HttpClient.
+	httpNetHTTP = 8
+	httpFlags   = httpServer | httpUnordered | httpAsyncMark | httpNetHTTP
 )
 
 // hookStrings is the number of strings in a HOOK record: kind, class,

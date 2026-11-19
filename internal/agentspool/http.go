@@ -42,6 +42,16 @@ type HTTP struct {
 	// nothing about the connection's request order, so it gets no ordinal
 	// and stops its connection's count; it has no start either.
 	Unordered bool
+	// AsyncMark marks no request but a marker the agent wrote at the
+	// entry of HttpClient.sendAsync, at ExitMono, before that request
+	// could reach a connection (task wd4 review round 2): from then on the
+	// JVM's java.net.http client ends are numbered no more, since an
+	// async request's connection returns to the pool before its delayed
+	// record, and a later request's record on it could take its ordinal.
+	// Its strings are empty.
+	AsyncMark bool
+	// NetHTTP marks a request sent through java.net.http's HttpClient.
+	NetHTTP bool
 	// Exchanges is how many HTTP exchanges the request took (≥ 1): more
 	// when the client library followed a redirect or answered an
 	// authentication challenge itself, each a request the server saw.
@@ -71,13 +81,14 @@ func decodeHTTP(rec []byte) (Record, error) {
 	h := HTTP{ExitMono: le.Uint64(rec[8:]), StackID: le.Uint64(rec[16:]),
 		ThreadID: le.Uint64(rec[24:]), KTID: int32(le.Uint32(rec[32:])),
 		Status: int32(le.Uint32(rec[36:])), Server: flags&httpServer != 0,
-		Unordered: flags&httpUnordered != 0,
+		Unordered: flags&httpUnordered != 0, AsyncMark: flags&httpAsyncMark != 0,
+		NetHTTP:   flags&httpNetHTTP != 0,
 		Exchanges: le.Uint32(rec[52:]), StartMono: le.Uint64(rec[80:]),
 		ReqBytes: int64(le.Uint64(rec[88:])), RespBytes: int64(le.Uint64(rec[96:]))}
 	var otelOK bool
 	h.Otel, otelOK = decodeOtel(rec, 56)
 	if h.KTID < 0 || h.Status < 0 || n < httpFixed || nreq > n-httpFixed ||
-		flags&^(httpServer|httpUnordered) != 0 || h.Exchanges == 0 || !otelOK ||
+		flags&^httpFlags != 0 || h.Exchanges == 0 || !otelOK ||
 		h.StartMono > h.ExitMono || h.ReqBytes < -1 || h.RespBytes < -1 {
 		return nil, errMalformed
 	}

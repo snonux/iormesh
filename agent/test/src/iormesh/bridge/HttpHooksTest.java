@@ -30,7 +30,8 @@ public final class HttpHooksTest {
                 new AgentTests.Case("http hooks/oversized headers dropped", HttpHooksTest::oversized),
                 new AgentTests.Case("http hooks/entry stamps", HttpHooksTest::stamps),
                 new AgentTests.Case("http hooks/dns record", HttpHooksTest::dns),
-                new AgentTests.Case("http hooks/late record", HttpHooksTest::late));
+                new AgentTests.Case("http hooks/late record", HttpHooksTest::late),
+                new AgentTests.Case("http hooks/async marker", HttpHooksTest::marker));
     }
 
     private static final String[] REQUEST = {"GET", "http", "h", "/p?q=***", "HTTP/1.1",
@@ -243,6 +244,42 @@ public final class HttpHooksTest {
         equal(1, described[0], "not described on a busy thread nor for a bad caller");
         equal(1L, b.getLong(Ring.DROPPED + 8 * Ring.HTTP), "the busy one counted lost");
         equal(counted + 1, Hooks.httpCounts()[3], "counted for the caller's hook");
+        delete(dir, r);
+    }
+
+    /**
+     * Hooks.httpMark (sendAsync's entry): an HTTP record flagged
+     * HTTP_ASYNC_MARK with the fixed strings empty and the thread's id,
+     * written on a busy thread too (no probe runs), and nothing left
+     * marked closing.
+     */
+    static void marker() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-http-hooks");
+        Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
+        Hooks.ring = r;
+        try {
+            long before = System.nanoTime();
+            Hooks.httpMark(null, 1);
+            Hooks.state().busy = true;
+            try {
+                Hooks.httpMark(null, 1);
+            } finally {
+                Hooks.state().busy = false;
+            }
+            equal(Brackets.IDLE, Hooks.state().closing, "closing cleared");
+            ByteBuffer b = map(r.path());
+            List<int[]> recs = records(b);
+            equal(2, recs.size(), "two markers, busy or not");
+            int o = recs.get(0)[1];
+            equal(Ring.HTTP, recs.get(0)[0], "an HTTP record");
+            check(b.getLong(o + 8) >= before, "stamped at the call");
+            equal(Thread.currentThread().getId(), b.getLong(o + 24), "thread id");
+            equal(Ring.HTTP_ASYNC_MARK, b.getInt(o + 48), "flagged a marker");
+            equal(List.of("", "", "", "", "", "", ""), strings(b, o + Ring.HTTP_HEAD, 7),
+                    "empty fixed strings");
+        } finally {
+            Hooks.ring = null;
+        }
         delete(dir, r);
     }
 

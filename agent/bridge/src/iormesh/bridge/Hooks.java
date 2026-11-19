@@ -455,6 +455,44 @@ public final class Hooks {
         }
     }
 
+    /** A marker's strings: HTTP_FIXED empty ones. */
+    private static final String[] NO_STRINGS = {"", "", "", "", "", "", ""};
+
+    /**
+     * The entry of a marking HTTP hook (Target.mark: HttpClient.sendAsync,
+     * task wd4 review round 2): writes an HTTP record flagged
+     * Ring.HTTP_ASYNC_MARK, stamped now, before the method body can hand
+     * the request to any connection. Written even on a busy thread — it
+     * runs no probe and walks no stack — under the watermark promise like
+     * any HTTP record (closing marked before the stamp), so once the
+     * tracer has a watermark past a request's stamp it has every marker
+     * stamped before it. A marker the ring drops counts as a dropped HTTP
+     * record, which stops the JVM's numbering altogether: the safe side.
+     * Never throws into the target.
+     */
+    public static void httpMark(Object self, int id) {
+        Ring r = ring;
+        try {
+            if (r == null) {
+                return;
+            }
+            Brackets t = STATE.get();
+            long wasClosing = t.closing;
+            t.closing = System.nanoTime();
+            VarHandle.fullFence();   // as in close: the stamp after the mark
+            try {
+                long[] meta = {0, 0, Ring.HTTP_ASYNC_MARK, 1, 0, -1, -1};
+                r.http(System.nanoTime(), StackIds.NONE, t.owner.getId(), 0, NO_STRINGS, meta,
+                        0, 0, 0);
+            } finally {
+                t.closing = wasClosing;
+            }
+        } catch (Throwable e) {
+            countSkip(FAILS);
+            httpLost(r);
+        }
+    }
+
     /**
      * The entry stamp of an entry-stamped HTTP hook (Target.stamp), called
      * first thing by its rewritten method: pushes System.nanoTime() and

@@ -53,6 +53,8 @@ final class Request {
      * count (Ring.HTTP_UNORDERED). Such a record has no start either.
      */
     boolean unordered;
+    /** Sent through java.net.http's HttpClient (Ring.HTTP_NET_HTTP). */
+    boolean netHttp;
     /**
      * The HTTP exchanges the request took: more than 1 when the library
      * followed a redirect or answered an authentication challenge itself
@@ -97,8 +99,8 @@ final class Request {
         s.addAll(response);
         meta[M_STATUS] = Math.max(status, 0);
         meta[M_NREQ] = request.size();
-        // Ring.HTTP_SERVER and Ring.HTTP_UNORDERED
-        meta[M_FLAGS] = (server ? 1 : 0) | (unordered ? 2 : 0);
+        // Ring.HTTP_SERVER, HTTP_UNORDERED and HTTP_NET_HTTP
+        meta[M_FLAGS] = (server ? 1 : 0) | (unordered ? 2 : 0) | (netHttp ? 8 : 0);
         meta[M_EXCHANGES] = Math.max(exchanges, 1);
         meta[M_START] = unordered ? 0 : Math.max(start, 0);
         meta[M_REQ_BYTES] = reqBytes < 0 ? UNKNOWN : reqBytes;

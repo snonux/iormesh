@@ -30,6 +30,12 @@ func httpRaw(h HTTP, n, nreq uint32, strs []string) []byte {
 	if h.Unordered {
 		flags |= httpUnordered
 	}
+	if h.AsyncMark {
+		flags |= httpAsyncMark
+	}
+	if h.NetHTTP {
+		flags |= httpNetHTTP
+	}
 	body = le.AppendUint32(body, flags)
 	body = le.AppendUint32(body, h.Exchanges)
 	body = appendOtel(body, h.Otel)
@@ -62,12 +68,15 @@ func TestHTTPRoundTrip(t *testing.T) {
 	path, w := newTestRing(t, testCap)
 	full := sampleHTTP()
 	bare := HTTP{ExitMono: 100, KTID: 1, Method: "POST", Scheme: "https", Path: "/", Exchanges: 1,
-		Unordered: true}
+		Unordered: true, NetHTTP: true}
+	mark := HTTP{ExitMono: 101, Exchanges: 1, AsyncMark: true, RespBytes: -1, ReqBytes: -1}
 	w.raw(typeHTTP, httpBody(full))
 	w.raw(typeHTTP, httpBody(bare))
+	w.raw(typeHTTP, httpBody(mark))
 	got := drainAll(t, openRing(t, path))
-	if len(got) != 2 || !reflect.DeepEqual(got[0], full) || !reflect.DeepEqual(got[1], bare) {
-		t.Fatalf("records %+v, want %+v and %+v", got, full, bare)
+	if len(got) != 3 || !reflect.DeepEqual(got[0], full) || !reflect.DeepEqual(got[1], bare) ||
+		!reflect.DeepEqual(got[2], mark) {
+		t.Fatalf("records %+v, want %+v, %+v and %+v", got, full, bare, mark)
 	}
 }
 
@@ -84,7 +93,7 @@ func TestHTTPMalformed(t *testing.T) {
 		"negative status":    httpBody(HTTP{Status: -1, Method: "GET", Exchanges: 1}),
 		"bad utf8 path":      httpBody(HTTP{Path: "\xff", Method: "GET", Exchanges: 1}),
 		"no exchange":        httpBody(HTTP{Method: "GET"}),
-		"unknown flag":       setByte(httpBody(sampleHTTP()), 40, 4),
+		"unknown flag":       setByte(httpBody(sampleHTTP()), 40, 16),
 		"count past body":    httpRaw(h, 9, 0, fixed),
 		"trailing garbage":   append(httpBody(h), 1, 0, 0, 0, 0, 0, 0, 0),
 		"span without trace": httpBody(HTTP{Method: "GET", Exchanges: 1, Otel: Otel{Span: 1}}),

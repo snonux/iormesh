@@ -28,7 +28,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * method that begins a request, Target.stamped, task wd4) also calls
  * {@code Hooks.httpEnter(this, id)} first thing, and its exits call
  * {@code Hooks.httpExit} instead, which pops that stamp: the request's
- * start, for its latency. A constructor is hooked at its returns alone
+ * start, for its latency. A marked target (sendAsync) calls
+ * {@code Hooks.httpMark(this, id)} first thing. A constructor is hooked at its returns alone
  * (on its exceptional path this may still be uninitialized) and never
  * stamped — an unhooked throw would leave its stamp on the thread.
  * A static method passes null as this (InetAddress.getAllByName, the
@@ -146,9 +147,11 @@ final class HttpTransformer implements ClassFileTransformer {
             applied.add(h.id());
             boolean ctor = name.equals("<init>");
             String exit = h.target().dns() ? "dns" : h.target().stamp() && !ctor ? "httpExit" : "http";
-            return new Exit(mv, h.id(), isStatic ? null : className, slot,
+            Exit e = new Exit(mv, h.id(), isStatic ? null : className, slot,
                     argType(descriptor, h.target().arg()), ctor,
                     h.target().stamp() && !ctor, exit, version >= Opcodes.V1_6);
+            e.mark = h.target().mark();
+            return e;
         }
     }
 
@@ -198,6 +201,8 @@ final class HttpTransformer implements ClassFileTransformer {
         private final boolean frames;
         private final Label start = new Label();
         private final Label handler = new Label();
+        /** Calls Hooks.httpMark first thing (a marked target). */
+        boolean mark;
 
         Exit(MethodVisitor next, int id, String owner, int slot, String slotType, boolean ctor,
              boolean stamp, String exit, boolean frames) {
@@ -220,6 +225,12 @@ final class HttpTransformer implements ClassFileTransformer {
         @Override
         public void visitCode() {
             super.visitCode();
+            if (mark) {
+                pushThis();
+                pushId();
+                super.visitMethodInsn(Opcodes.INVOKESTATIC, BoundaryTransformer.HOOKS,
+                        "httpMark", ENTER_DESC, false);
+            }
             if (stamp) {
                 pushThis();
                 pushId();

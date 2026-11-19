@@ -18,6 +18,9 @@ import java.util.function.BiFunction;
  * know when the request started (the latency). A constructor is never
  * stamped: its exceptional exit, which would pop the stamp, is not hooked.
  *
+ * A marked target (sendAsync) writes a numbering-off marker at its entry
+ * (see {@link #marked}).
+ *
  * A DNS target (task wd4, decision #8) is a name lookup, not a request:
  * its exits call Hooks.dns instead, and its probe returns the host and
  * the addresses it resolved to. It may be static (no this: null is
@@ -29,7 +32,8 @@ import java.util.function.BiFunction;
  * name one method with different descriptors, one per JDK generation.
  */
 public record Target(String owner, String method, String descriptor, int arg,
-                     BiFunction<Object[], long[], String[]> probe, boolean stamp, boolean dns) {
+                     BiFunction<Object[], long[], String[]> probe, boolean stamp, boolean dns,
+                     boolean mark) {
     /** No argument is passed (null). */
     public static final int NO_ARG = -1;
     /** The method's last parameter is passed. */
@@ -38,17 +42,26 @@ public record Target(String owner, String method, String descriptor, int arg,
     /** An exit-only target (no entry stamp). */
     public Target(String owner, String method, String descriptor, int arg,
                   BiFunction<Object[], long[], String[]> probe) {
-        this(owner, method, descriptor, arg, probe, false, false);
+        this(owner, method, descriptor, arg, probe, false, false, false);
     }
 
     /** This target with its entry stamped (see the class comment). */
     public Target stamped() {
-        return new Target(owner, method, descriptor, arg, probe, true, dns);
+        return new Target(owner, method, descriptor, arg, probe, true, dns, mark);
     }
 
     /** This target as a name lookup, recorded by Hooks.dns (see the class comment). */
     public Target lookup() {
-        return new Target(owner, method, descriptor, arg, probe, stamp, true);
+        return new Target(owner, method, descriptor, arg, probe, stamp, true, mark);
+    }
+
+    /**
+     * This target with a marker at its entry (Hooks.httpMark, task wd4
+     * review round 2): HttpClient.sendAsync, whose requests the tracer
+     * cannot place in their connection's order.
+     */
+    public Target marked() {
+        return new Target(owner, method, descriptor, arg, probe, stamp, dns, true);
     }
 
     /** owner.method+descriptor, the lookup key. */

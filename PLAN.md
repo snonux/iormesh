@@ -670,8 +670,11 @@ Gated by S1 — done; the design below is S1's result
   HTTP record — a lost request would shift the count silently —
   from a request the client library retried by itself
   (redirect, 401/407) on, which the server counted as several,
-  and from a `sendAsync` request on (its stamp follows the app's
-  callbacks).
+  and — for java.net.http's client ends, JVM-wide — from the
+  JVM's first `sendAsync` call on: an async request's connection
+  returns to the pool before its delayed record, so a later
+  request's record on it could take its ordinal (the agent marks
+  the call in the ring before the request reaches a connection).
 - Acceptance: frames carry `class#method(file:line)`; every
   declared I/O op of M3's method-flow scenarios carries its
   declared causing method; unbracketed events are marked unattributed; the

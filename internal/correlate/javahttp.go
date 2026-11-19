@@ -253,7 +253,16 @@ func (j *JavaJoin) httpDue(ev *schema.Event) bool {
 // after it did), or Timeout passed.
 func (j *JavaJoin) httpReady() bool {
 	h := j.https[0]
-	return j.maxEnd >= h.boot+j.cfg.Grace || j.scanned >= h.boot+j.cfg.Timeout
+	if j.scanned >= h.boot+j.cfg.Timeout {
+		return true
+	}
+	// A java.net.http client request also waits for its JVM's watermark
+	// to pass its stamp: then every sendAsync marker stamped before it
+	// has been read (netHTTPNumbered).
+	if h.dns == nil && h.rec.NetHTTP && !h.rec.Server && h.v.watermark < h.rec.ExitMono {
+		return false
+	}
+	return j.maxEnd >= h.boot+j.cfg.Grace
 }
 
 // emitHTTP sends the next queued record as an http (or dns) event.
@@ -343,7 +352,8 @@ func bodySize(n int64) *uint64 {
 // last two), or a connection on which a request took several exchanges
 // (that request and every later one: the ends' counts no longer agree).
 func (j *JavaJoin) reqSeq(v *jvm, conn string, r agentspool.HTTP) uint32 {
-	if conn == "" || strings.HasPrefix(r.Version, "HTTP/2") || httpLost(v.ring.Losses()) {
+	if conn == "" || strings.HasPrefix(r.Version, "HTTP/2") || httpLost(v.ring.Losses()) ||
+		!netHTTPNumbered(v, r) {
 		return 0
 	}
 	k := connSeq{v.pid, conn, r.Server}
@@ -356,6 +366,29 @@ func (j *JavaJoin) reqSeq(v *jvm, conn string, r agentspool.HTTP) uint32 {
 	}
 	j.conns.seq[k]++
 	return j.conns.seq[k]
+}
+
+// netHTTPNumbered reports whether a request may be numbered as far as
+// sendAsync is concerned (task wd4 review round 2). An async request's
+// HTTP/1.1 connection goes back to the pool once its body is read, while
+// its record waits for the agent's completion, which runs after the
+// app's callbacks: another request on that connection can complete and
+// be recorded first and would take the async one's ordinal. So once a
+// JVM issued any sendAsync (its marker, written at the call before the
+// request can reach a connection), none of its java.net.http client
+// requests completing after it is numbered — conservatively, on every
+// connection. The marker is under the watermark promise: only a
+// watermark past the request's stamp proves no earlier marker is still
+// unread; without one (released by the timeout) the request is not
+// numbered either. Server ends and HttpURLConnection are unaffected.
+func netHTTPNumbered(v *jvm, r agentspool.HTTP) bool {
+	if r.Server || !r.NetHTTP {
+		return true
+	}
+	if v.watermark < r.ExitMono {
+		return false
+	}
+	return v.asyncFrom == 0 || r.ExitMono < v.asyncFrom
 }
 
 // httpLost reports whether a ring may have lost an HTTP record.

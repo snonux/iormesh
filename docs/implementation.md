@@ -2463,7 +2463,20 @@ internal/correlate/javajoin.go
      Every `sendAsync` record is therefore flagged
      `HTTP_UNORDERED` (flags bit 2) with no start: the joiner gives
      it no `req_seq` and stops numbering its connection's client
-     end.
+     end. Review round 2: that is not enough — the connection goes
+     back to the pool when the async body is read, so a sync `send`
+     reusing it can be recorded before the async record and take its
+     ordinal. `sendAsync` is therefore also `marked()`: its entry
+     calls `Hooks.httpMark`, which writes an HTTP record flagged
+     `HTTP_ASYNC_MARK` (bit 4, empty strings, under the watermark
+     promise) before the request can reach a connection, and every
+     java.net.http record carries `HTTP_NET_HTTP` (bit 8; ring
+     format 6). The joiner keeps the JVM's earliest marker stamp and
+     numbers no java.net.http client request completing after it
+     (`netHTTPNumbered`); such a request is also released only once
+     the JVM's watermark passed its stamp (or by the timeout, then
+     unnumbered), so no earlier marker can still be unread.
+     HttpURLConnection and server ends are unaffected.
    - **HttpURLConnection**: `getInputStream0`'s first exit with a
      response code (`getResponseCode` and the header getters go
      through it; a 404 throws after reading the response), reading

@@ -111,7 +111,7 @@ public final class HttpProbeTest {
                 .toList(), "caller identity and hook id");
         equal("/a?k=***", described.get(0)[3], "the response described");
         equal(0L, meta[4], "no start: the stamp follows the app's callbacks");
-        equal(2L, meta[2], "unordered, a client's");
+        equal(10L, meta[2], "unordered (2), java.net.http (8), a client's");
         java.util.concurrent.CompletableFuture<HttpResponse<String>> bad =
                 new java.util.concurrent.CompletableFuture<>();
         probe.apply(new Object[] {bad, self, null, self, 7}, new long[7]);
@@ -120,7 +120,7 @@ public final class HttpProbeTest {
         long[] now = {0, 0, 0, 0, 42, -1, -1};
         String[] s = probe.apply(new Object[] {java.util.concurrent.CompletableFuture
                 .completedFuture(new FakeResponse(null)), self, null, self, 7}, now);
-        check(s != null && now[4] == 0 && now[2] == 2, "done at the return: recorded at once");
+        check(s != null && now[4] == 0 && now[2] == 10, "done at the return: recorded at once");
         // Completed before whenComplete although isDone said no: the
         // completion runs inline on this thread and the probe records it.
         java.util.concurrent.CompletableFuture<HttpResponse<String>> racy =
@@ -130,7 +130,7 @@ public final class HttpProbeTest {
         racy.complete(new FakeResponse(null));
         long[] inline = new long[7];
         check(probe.apply(new Object[] {racy, self, null, self, 7}, inline) != null
-                && inline[2] == 2, "inline completion recorded by the probe");
+                && inline[2] == 10, "inline completion recorded by the probe");
         equal(1, lates.size(), "and not handed to late");
     }
 
@@ -166,7 +166,7 @@ public final class HttpProbeTest {
                 new Object[] {new FakeResponse(new FakeResponse(null)), self, null, self}, meta);
         equal(List.of("GET", "https", "127.0.0.1", "/a?k=***", "HTTP/2", "", "127.0.0.1:8443",
                 "cookie: ***", "content-length: 5", "etag: 1"), List.of(s), "record strings");
-        equal(0L, meta[2], "a client's request");
+        equal(8L, meta[2], "a client's request, java.net.http");
         equal(2L, meta[3], "exchanges: the response and its previous one (a redirect)");
         equal(42L, meta[4], "send's own start kept");
         equal(0L, meta[5], "no request body");

@@ -33,7 +33,12 @@ import java.util.function.Function;
  * completion on the returned future, which records the response from the
  * completing thread under the caller's stack, thread and span — without
  * latency or ordinal (see SentAsync). A future that fails or is
- * cancelled records nothing, as a send that throws.
+ * cancelled records nothing, as a send that throws. sendAsync is also
+ * marked: its entry writes a marker after which the tracer numbers no
+ * request of this library in the JVM (Ring.HTTP_ASYNC_MARK) — its
+ * connection goes back to the pool before its delayed record, so a later
+ * request's record on it could otherwise take its ordinal. Every record
+ * of this library carries Ring.HTTP_NET_HTTP.
  */
 public final class JdkHttpClient implements Library {
     private static final String INTERNAL = "jdk.internal.net.http";
@@ -82,7 +87,7 @@ public final class JdkHttpClient implements Library {
                     "(" + HTTP + "HttpRequest;" + HTTP + "HttpResponse$BodyHandler;"
                             + HTTP + "HttpResponse$PushPromiseHandler;)"
                             + "Ljava/util/concurrent/CompletableFuture;", Target.NO_ARG,
-                    new SentAsync(bound, async)));
+                    new SentAsync(bound, async)).marked());
         }
         return out;
     }
@@ -242,6 +247,7 @@ public final class JdkHttpClient implements Library {
         HttpRequest req = resp.request();
         URI u = resp.uri();
         Request r = new Request();
+        r.netHttp = true;
         r.method = req.method();
         r.scheme = u.getScheme() == null ? "" : u.getScheme();
         r.host = u.getHost() == null ? "" : u.getHost();

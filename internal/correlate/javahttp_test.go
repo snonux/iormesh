@@ -350,3 +350,95 @@ func TestJavaJoinDNSEvents(t *testing.T) {
 		t.Errorf("stats %+v", s)
 	}
 }
+
+// netHTTPSeqs runs records on c1 (127.0.0.1:40000 → :8080) through a join
+// and returns the http events' req_seq in stream order.
+func netHTTPSeqs(t *testing.T, recs func(jt *joinTest, at uint64) []agentspool.Record) []uint32 {
+	t.Helper()
+	jt := newJoinTest(t)
+	at := jt.now + 1000
+	jt.ring(recs(jt, at)...)
+	jt.sock(at, "c1", "127.0.0.1", 40000, "127.0.0.1", 8080, "ESTABLISHED")
+	jt.event(999, 1000, "write", at+10_000_000)
+	jt.close()
+	var seqs []uint32
+	for _, e := range jt.sink.events {
+		if e.Event == schema.KindHTTP {
+			seqs = append(seqs, e.HTTP.ReqSeq)
+		}
+	}
+	return seqs
+}
+
+// netHTTP is a java.net.http client request of the main thread on c1.
+func (jt *joinTest) netHTTP(at uint64, path string) agentspool.HTTP {
+	r := jt.request(at, path, "127.0.0.1:40000", "127.0.0.1:8080")
+	r.NetHTTP = true
+	return r
+}
+
+// asyncMark is the marker HttpClient.sendAsync's entry writes.
+func (jt *joinTest) asyncMark(at uint64) agentspool.HTTP {
+	return agentspool.HTTP{ExitMono: jt.mono(at), Exchanges: 1, AsyncMark: true,
+		ReqBytes: -1, RespBytes: -1}
+}
+
+// TestJavaJoinHTTPAsyncMarkerStopsNetHTTP: the review's interleaving.
+// Sync P completes before any sendAsync and keeps its ordinal; async A is
+// issued (its marker), its connection goes back to the pool while its
+// record waits, and sync B reuses it — B's record arrives first. Server
+// side A is 2 and B 3; numbering B 2 would pair it with A's server event,
+// so B gets none, nor does A (unordered), nor anything after.
+func TestJavaJoinHTTPAsyncMarkerStopsNetHTTP(t *testing.T) {
+	seqs := netHTTPSeqs(t, func(jt *joinTest, at uint64) []agentspool.Record {
+		a := jt.netHTTP(at+4000, "/a")
+		a.Unordered = true
+		return []agentspool.Record{jt.netHTTP(at+1000, "/p"), jt.asyncMark(at + 2000),
+			jt.netHTTP(at+3000, "/b"), a, jt.netHTTP(at+5000, "/c"),
+			jt.watermark(at + 20_000_000)}
+	})
+	if !reflect.DeepEqual(seqs, []uint32{1, 0, 0, 0}) {
+		t.Errorf("req_seq %v, want P 1, then none from the sendAsync marker on", seqs)
+	}
+}
+
+// TestJavaJoinHTTPSyncNetHTTPNumbered: a JVM that never calls sendAsync
+// numbers its java.net.http requests, once the watermark passed them.
+func TestJavaJoinHTTPSyncNetHTTPNumbered(t *testing.T) {
+	seqs := netHTTPSeqs(t, func(jt *joinTest, at uint64) []agentspool.Record {
+		return []agentspool.Record{jt.netHTTP(at+1000, "/1"), jt.netHTTP(at+2000, "/2"),
+			jt.watermark(at + 20_000_000)}
+	})
+	if !reflect.DeepEqual(seqs, []uint32{1, 2}) {
+		t.Errorf("req_seq %v, want 1, 2", seqs)
+	}
+}
+
+// TestJavaJoinHTTPNetHTTPNeedsWatermark: without a watermark past its
+// stamp a java.net.http request is released by the timeout or the close
+// and not numbered: an unread sendAsync marker could precede it.
+func TestJavaJoinHTTPNetHTTPNeedsWatermark(t *testing.T) {
+	seqs := netHTTPSeqs(t, func(jt *joinTest, at uint64) []agentspool.Record {
+		return []agentspool.Record{jt.netHTTP(at+1000, "/1")}
+	})
+	if !reflect.DeepEqual(seqs, []uint32{0}) {
+		t.Errorf("req_seq %v, want none without a watermark", seqs)
+	}
+}
+
+// TestJavaJoinHTTPAsyncMarkerSparesOthers: a sendAsync marker leaves
+// HttpURLConnection requests (not java.net.http) and server ends numbered.
+func TestJavaJoinHTTPAsyncMarkerSparesOthers(t *testing.T) {
+	seqs := netHTTPSeqs(t, func(jt *joinTest, at uint64) []agentspool.Record {
+		// The server end, counted apart on the same connection index.
+		srv := jt.request(at+3000, "/s", "127.0.0.1:40000", "127.0.0.1:8080")
+		srv.Server = true
+		return []agentspool.Record{jt.asyncMark(at + 1000),
+			jt.request(at+2000, "/u1", "127.0.0.1:40000", "127.0.0.1:8080"), srv,
+			jt.request(at+4000, "/u2", "127.0.0.1:40000", "127.0.0.1:8080"),
+			jt.watermark(at + 20_000_000)}
+	})
+	if !reflect.DeepEqual(seqs, []uint32{1, 1, 2}) {
+		t.Errorf("req_seq %v, want HttpURLConnection 1, server 1, HttpURLConnection 2", seqs)
+	}
+}
