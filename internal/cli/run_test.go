@@ -33,6 +33,7 @@ type fakeTracer struct {
 	// pending is what PendingAggregates hands finish, pendingErr its error.
 	pending    []*types.RwAggregateEvent
 	pendingErr error
+	aggStopped bool
 }
 
 func newFakeTracer() *fakeTracer { return &fakeTracer{records: make(chan []any, 16)} }
@@ -77,9 +78,19 @@ func (f *fakeTracer) IgnoreExec(pid uint32, since uint64) error {
 	return nil
 }
 
+func (f *fakeTracer) StopAggregation() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.aggStopped = true
+	return nil
+}
+
 func (f *fakeTracer) PendingAggregates() ([]*types.RwAggregateEvent, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if !f.aggStopped {
+		return nil, errors.New("pending aggregates read before the aggregation was stopped")
+	}
 	return f.pending, f.pendingErr
 }
 
@@ -225,6 +236,13 @@ func TestRunWritesSessionDropsEnd(t *testing.T) {
 	reason, err := traceLoop(context.Background(), s, cfg)
 	if err != nil || reason != schema.EndTargetsExited {
 		t.Fatalf("traceLoop = %q, %v", reason, err)
+	}
+	// The aggregation is frozen before the final drain, not only in finish.
+	tr.mu.Lock()
+	stopped := tr.aggStopped
+	tr.mu.Unlock()
+	if !stopped {
+		t.Fatal("traceLoop drained the last records with the aggregation still running")
 	}
 	tr.setLosses(bpf.Losses{Kernel: 3, Short: 1}, nil) // only finish's poll sees this one
 	var stderr bytes.Buffer

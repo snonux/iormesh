@@ -88,11 +88,14 @@ int handle_signal_generate(void *ctx) {
 
     if (!(scope & (SIGNAL_SCOPE_SENDER | SIGNAL_SCOPE_TARGET)))
         return 0;
-    // The current task's folded reads and writes happened before this
-    // signal - a write's SIGPIPE fires inside the write - so they go first
-    // (rwagg.c). Only the current task's: another thread's entry is not
-    // this program's to touch, and an untraced task has none.
-    iormesh_rw_flush((__u32)pid_tgid);
+    // A signal the current task sent itself (kill, a write's SIGPIPE) comes
+    // after its folded reads and writes, so they go first (rwagg.c). Only
+    // then: a kernel-raised signal (an itimer's SIGALRM) can fire in an
+    // interrupt that landed inside one of the current task's rwagg.c hooks,
+    // and a flush from there would race the hook on its own entry. Another
+    // thread's entry is never this program's to touch.
+    if (scope & SIGNAL_SCOPE_SENDER)
+        iormesh_rw_flush((__u32)pid_tgid);
     ev = bpf_ringbuf_reserve(&event_map, sizeof(*ev), 0);
     if (!ev) {
         ior_count_ringbuf_drop();

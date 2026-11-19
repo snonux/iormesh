@@ -30,8 +30,12 @@ import (
 // "hold") and exit ("send" or "fold"), or "-" when nothing happened.
 //
 // "enter T trace fd now" and "exit T trace ret now" call the generated
-// handlers' hooks; "flush T" and "forget T" are the flush points filter.c,
-// signal.c and exec.c call.
+// handlers' hooks ("enteri T trace fd ident now" with a file identity,
+// "exitn" with the per-tid exit hook shedding the exit, verdict "shed");
+// "flush T" and "forget T" are the flush points filter.c, signal.c and
+// exec.c call ("kept" after forget: the entry survived); "stop 1" is
+// userspace setting rw_agg_stop. The count cap is lowered to 200 so a
+// scenario can reach it.
 const rwaggHarnessTemplate = `#include <stdio.h>
 #include <string.h>
 
@@ -45,6 +49,7 @@ typedef long long __s64;
 #define BPF_NOEXIST 1
 #define ENTER_FD_EVENT 5
 #define RW_AGGREGATE_EVENT 73
+#define IORMESH_RW_MAX_COUNT 200
 
 %s
 
@@ -52,7 +57,8 @@ typedef long long __s64;
 
 #define SIM_THREADS 8
 static struct { __u32 tid, used; struct iormesh_rw_state st; } sim_map[SIM_THREADS];
-static int rw_agg_map, event_map;
+static int rw_agg_map, event_map, rw_agg_stop;
+static __u32 sim_stop;
 static int sim_drop, sim_full;
 static __u32 IORMESH_RW_AGGREGATE = 1;
 static union { struct fd_event fd; struct rw_aggregate_event agg; } sim_record;
@@ -65,7 +71,8 @@ static void sim_print(const char *s) {
 }
 
 static void *bpf_map_lookup_elem(void *map, const void *key) {
-    (void)map;
+    if (map == &rw_agg_stop)
+        return &sim_stop;
     for (int i = 0; i < SIM_THREADS; i++)
         if (sim_map[i].used && sim_map[i].tid == *(const __u32 *)key)
             return &sim_map[i].st;
@@ -128,18 +135,24 @@ static void ior_count_ringbuf_drop(void) {
 
 int main(void) {
     char cmd[16];
-    unsigned long long tid, a, b, now;
+    unsigned long long tid, a, b, ident, now;
     long long ret;
     while (scanf("%%15s %%llu", cmd, &tid) == 2) {
         sim_out[0] = 0;
         if (!strcmp(cmd, "drop")) {
             sim_drop = tid;
+        } else if (!strcmp(cmd, "stop")) {
+            sim_stop = tid;
+        } else if (!strcmp(cmd, "enteri") && scanf("%%llu %%llu %%llu %%llu", &a, &b, &ident, &now) == 4) {
+            sim_print(iormesh_rw_on_enter(77, tid, a, (__s32)b, ident, now) ? "send" : "hold");
+        } else if (!strcmp(cmd, "exitn") && scanf("%%llu %%lld %%llu", &a, &ret, &now) == 3) {
+            sim_print(iormesh_rw_on_exit(77, tid, a, ret, now, 0) ? "send" : "shed");
         } else if (!strcmp(cmd, "full")) {
             sim_full = tid;
         } else if (!strcmp(cmd, "enter") && scanf("%%llu %%llu %%llu", &a, &b, &now) == 3) {
             sim_print(iormesh_rw_on_enter(77, tid, a, (__s32)b, 0, now) ? "send" : "hold");
         } else if (!strcmp(cmd, "exit") && scanf("%%llu %%lld %%llu", &a, &ret, &now) == 3) {
-            sim_print(iormesh_rw_on_exit(77, tid, a, ret, now) ? "send" : "fold");
+            sim_print(iormesh_rw_on_exit(77, tid, a, ret, now, 1) ? "send" : "fold");
         } else if (!strcmp(cmd, "flush")) {
             iormesh_rw_flush(tid);
         } else if (!strcmp(cmd, "forget")) {
@@ -236,13 +249,43 @@ var rwaggScenarios = []rwaggScenario{
 		{"enter 9 2 3 9400", "hold"}, {"exit 9 2 10 9500", "fold"},
 		{"flush 9", "agg(2 3 2 20 9000-9500 200) agg(1 4 1 1 9200-9300 100)"},
 	})},
-	// A fifth key evicts the least recently used one, sending its sums.
-	{name: "a fifth key evicts the oldest", steps: rwaggSteps(rwaggWarmup(4, 0), []rwaggStep{
+	// A fifth key evicts the least recently used one, sending its sums
+	// under its own key before the new key's single call sends the rest.
+	{name: "a fifth key evicts the oldest", steps: rwaggFifthKeySteps()},
+	// A read or write sent as a single event follows every folded call of
+	// the thread before it, on any key.
+	{name: "a single call sends the thread's folded calls", steps: rwaggSteps(rwaggWarmup(4, 0), []rwaggStep{
 		{"enter 9 2 3 8000", "hold"}, {"exit 9 2 10 9000", "fold"},
-		{"enter 9 1 4 9100", "send"}, {"exit 9 1 1 9200", "send"},
-		{"enter 9 1 5 9300", "send"}, {"exit 9 1 1 9400", "send"},
-		{"enter 9 1 6 9500", "send"}, {"exit 9 1 1 9600", "send"},
-		{"enter 9 1 7 9700", "agg(2 3 1 10 8000-9000 1000) send"},
+		{"enter 9 1 4 9100", "agg(2 3 1 10 8000-9000 1000) send"}, {"exit 9 1 1 9200", "send"},
+		{"flush 9", "-"},
+	})},
+	// The fd number with another file identity is another key: the loop
+	// on the first file is sent before the new file's first call.
+	{name: "a new file identity is a new key", steps: rwaggSteps([]rwaggStep{
+		{"enteri 9 2 3 1 0", "send"}, {"exit 9 2 10 1000", "send"},
+		{"enteri 9 2 3 1 2000", "send"}, {"exit 9 2 10 3000", "send"},
+		{"enteri 9 2 3 1 4000", "send"}, {"exit 9 2 10 5000", "send"},
+		{"enteri 9 2 3 1 6000", "send"}, {"exit 9 2 10 7000", "send"},
+		{"enteri 9 2 3 1 8000", "hold"}, {"exit 9 2 10 9000", "fold"},
+		{"enteri 9 2 3 2 10000", "agg(2 3 1 10 8000-9000 1000) send"},
+	})},
+	// The count cap (200 here) sends a loop as it runs.
+	{name: "the count cap sends a long loop", steps: rwaggCapSteps()},
+	// Once userspace stopped the aggregation, nothing folds or flushes: a
+	// held call is sent, the frozen sums stay for the map read, and exit
+	// keeps the entry.
+	{name: "stop freezes the sums", steps: rwaggSteps(rwaggWarmup(4, 0), []rwaggStep{
+		{"enter 9 2 3 8000", "hold"}, {"exit 9 2 10 9000", "fold"},
+		{"enter 9 2 3 10000", "hold"}, {"stop 1", "-"}, {"exit 9 2 10 11000", "enter(2 3 10000) send"},
+		{"enter 9 2 3 12000", "send"}, {"exit 9 2 10 13000", "send"},
+		{"flush 9", "-"}, {"forget 9", "kept"},
+		{"stop 0", "-"}, {"flush 9", "agg(2 3 1 10 8000-9000 1000)"},
+	})},
+	// An exit the per-tid hook sheds still clears the call's in-flight
+	// markers: a later exit without an enter is not taken for it.
+	{name: "a shed exit clears the call in flight", steps: rwaggSteps(rwaggWarmup(4, 0), []rwaggStep{
+		{"enter 9 2 3 8000", "hold"}, {"exitn 9 2 10 9000", "shed"},
+		{"exit 9 2 10 10000", "send"}, {"flush 9", "-"},
 	})},
 	// A loop that runs past the span bound is sent as it runs.
 	{name: "the span bound sends a long loop", steps: rwaggSpanSteps()},
@@ -277,6 +320,49 @@ var rwaggScenarios = []rwaggScenario{
 		rwaggWarmup(6, 0), []rwaggStep{{"flush 9", "-"}})},
 }
 
+// rwaggCall is one call's enter and exit steps, the exit 50 ns later.
+func rwaggCall(trace, fd, at int, enterWant, exitWant string) []rwaggStep {
+	return []rwaggStep{{fmt.Sprintf("enter 9 %d %d %d", trace, fd, at), enterWant},
+		{fmt.Sprintf("exit 9 %d 1 %d", trace, at+50), exitWant}}
+}
+
+// rwaggFifthKeySteps warms four keys (a write on fd 3, reads on 4-6), folds
+// one call on each, then calls a fifth key: the least recently used key
+// (fd 3) is evicted and sent first, then the single call sends the others.
+func rwaggFifthKeySteps() []rwaggStep {
+	var steps []rwaggStep
+	at := 0
+	keys := [][2]int{{2, 3}, {1, 4}, {1, 5}, {1, 6}}
+	for _, k := range keys {
+		for range 4 {
+			steps = append(steps, rwaggCall(k[0], k[1], at, "send", "send")...)
+			at += 100
+		}
+	}
+	var sent []string
+	for _, k := range keys {
+		steps = append(steps, rwaggCall(k[0], k[1], at, "hold", "fold")...)
+		sent = append(sent, fmt.Sprintf("agg(%d %d 1 1 %d-%d 50)", k[0], k[1], at, at+50))
+		at += 100
+	}
+	return append(steps, rwaggStep{fmt.Sprintf("enter 9 1 7 %d", at), strings.Join(sent, " ") + " send"})
+}
+
+// rwaggCapSteps folds 200 hot writes: the 200th exit sends them.
+func rwaggCapSteps() []rwaggStep {
+	steps := rwaggWarmup(4, 0)
+	for k := range 200 {
+		enter := 8000 + k*1000
+		want := "fold"
+		if k == 199 {
+			want = fmt.Sprintf("agg(2 3 200 2000 8000-%d 20000) fold", enter+100)
+		}
+		steps = append(steps, rwaggStep{fmt.Sprintf("enter 9 2 3 %d", enter), "hold"},
+			rwaggStep{fmt.Sprintf("exit 9 2 10 %d", enter+100), want})
+	}
+	return append(steps, rwaggStep{"flush 9", "-"})
+}
+
 // rwaggSpanSteps folds hot writes 900 µs apart, each 100 ns long, until
 // their span passes 100 ms: the 113th folded call's exit sends the 113.
 func rwaggSpanSteps() []rwaggStep {
@@ -297,24 +383,28 @@ func rwaggSpanSteps() []rwaggStep {
 // replacement} pairs; each anchor occurs exactly once in the source.
 var rwaggMutations = map[string][2]string{
 	"no individual calls": {
-		"    if (s->streak < IORMESH_RW_INDIVIDUAL)\n        return 1;",
-		"    if (0)\n        return 1;",
+		"    if (s->streak < IORMESH_RW_INDIVIDUAL) {",
+		"    if (0) {",
+	},
+	"single call skips the flush": {
+		"    if (s->streak < IORMESH_RW_INDIVIDUAL) {\n        iormesh_rw_send_all(st, tid);",
+		"    if (s->streak < IORMESH_RW_INDIVIDUAL) {",
 	},
 	"errors fold": {
-		"    hot = ret > 0 && now <= enter_ns + IORMESH_RW_HOT_NS;",
-		"    hot = now <= enter_ns + IORMESH_RW_HOT_NS;",
+		"    int hot = ret > 0 && now <= enter_ns + IORMESH_RW_HOT_NS;",
+		"    int hot = now <= enter_ns + IORMESH_RW_HOT_NS;",
 	},
 	"unfoldable call skips the flush": {
-		"    if (!hot) {\n        iormesh_rw_send(st, s, tid);",
+		"    if (!hot) {\n        iormesh_rw_send_all(st, tid);",
 		"    if (!hot) {",
 	},
 	"owed enter not sent": {
-		"        s->streak = 0;\n        iormesh_rw_send_held_enter(st, pid, tid, trace_id, enter_ns);",
+		"        s->streak = 0;\n        iormesh_rw_send_held_enter(pid, tid, s->trace_id, s->fd, s->file_ident, enter_ns);",
 		"        s->streak = 0;",
 	},
 	"end time past the folded calls": {
-		"        iormesh_rw_send(st, s, tid);\n        s->last_ns = now;",
-		"        s->last_ns = now;\n        iormesh_rw_send(st, s, tid);",
+		"        iormesh_rw_send_all(st, tid);\n        s->last_ns = now;",
+		"        s->last_ns = now;\n        iormesh_rw_send_all(st, tid);",
 	},
 	"flush keeps the streak": {
 		"        s->trace_id = 0;\n        s->streak = 0;",
@@ -325,16 +415,32 @@ var rwaggMutations = map[string][2]string{
 		"    s->bytes = 0;",
 	},
 	"no gap check": {
-		"    if (now > s->last_ns + IORMESH_RW_HOT_NS) {",
-		"    if (0) {",
+		"    if (now > s->last_ns + IORMESH_RW_HOT_NS)\n        s->streak = 0;",
+		"",
 	},
 	"no span bound": {
 		"    if (s->count >= IORMESH_RW_MAX_COUNT || now >= s->first_ns + IORMESH_RW_SPAN_NS)",
 		"    if (s->count >= IORMESH_RW_MAX_COUNT)",
 	},
+	"no count cap": {
+		"    if (s->count >= IORMESH_RW_MAX_COUNT || now >= s->first_ns + IORMESH_RW_SPAN_NS)",
+		"    if (now >= s->first_ns + IORMESH_RW_SPAN_NS)",
+	},
 	"eviction drops the oldest": {
 		"        free = iormesh_rw_lru(st);\n        iormesh_rw_send(st, &st->slot[free], tid);",
 		"        free = iormesh_rw_lru(st);",
+	},
+	"identity not in the key": {
+		"s->fd == fd && s->file_ident == ident)",
+		"s->fd == fd)",
+	},
+	"flush ignores the stop": {
+		"    if (!IORMESH_RW_AGGREGATE || iormesh_rw_stopped())\n        return;\n    st = bpf_map_lookup_elem(",
+		"    if (!IORMESH_RW_AGGREGATE)\n        return;\n    st = bpf_map_lookup_elem(",
+	},
+	"a shed exit keeps the call in flight": {
+		"    st->cur_slot = 0;\n    st->cur_held = 0;\n    if (!emits || idx >= IORMESH_RW_SLOTS)\n        return emits;",
+		"    if (!emits || idx >= IORMESH_RW_SLOTS)\n        return emits;\n    st->cur_slot = 0;\n    st->cur_held = 0;",
 	},
 }
 

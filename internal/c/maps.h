@@ -1,7 +1,8 @@
 // Adapted from ior internal/c/maps.h @ b21afc50328c.
 // Changes: target_map added (replaces ior's rodata PID_FILTER), with
 // struct iormesh_target values for tree following and pattern sessions (M2);
-// rw_agg_map and struct iormesh_rw_state added (rwagg.c, M2 step 11).
+// rw_agg_map, rw_agg_stop and struct iormesh_rw_state added (rwagg.c, M2
+// step 11).
 
 //+build ignore
 
@@ -266,3 +267,15 @@ struct {
     __type(key, __u32);
     __type(value, struct iormesh_rw_state);
 } rw_agg_map SEC(".maps");
+
+// rw_agg_stop is the session end's switch for rw_agg_map (rwagg.c): userspace
+// writes 1 into its one slot before it handles the last records in flight
+// and reads the map, and from then on no hook folds or flushes, so the sums
+// it reads can no longer also reach the ring buffer (or change under the
+// read). An ARRAY, so the per-call check is an inlined lookup.
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, __u32);
+} rw_agg_stop SEC(".maps");

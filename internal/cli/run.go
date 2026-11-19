@@ -75,6 +75,7 @@ type tracer interface {
 	RemoveTarget(pid uint32) error
 	AdoptExec(pid uint32) (gap uint64, adopted bool, err error)
 	IgnoreExec(pid uint32, since uint64) error
+	StopAggregation() error
 	PendingAggregates() ([]*types.RwAggregateEvent, error)
 	Close() error
 }
@@ -174,6 +175,11 @@ func finish(cfg runConfig, tr tracer, c *correlate.Correlator, reason string, st
 // would be missing from the trace, with no drop to say so. An unreadable
 // map ends the trace as error for the same reason.
 func drainAggregates(tr tracer, c *correlate.Correlator) error {
+	// Normally stopped by traceLoop before its drain already; a trace that
+	// ends early (an error) stops here, and a second stop is harmless.
+	if err := tr.StopAggregation(); err != nil {
+		return fmt.Errorf("stop aggregation: %w", err)
+	}
 	recs, err := tr.PendingAggregates()
 	for _, rec := range recs {
 		if herr := c.Handle(rec); herr != nil {
@@ -239,7 +245,9 @@ func pollLosses(tr tracer, c *correlate.Correlator) (bpf.Losses, error) {
 }
 
 // traceLoop feeds records to the session until a stop condition and
-// returns why it stopped, as a schema end reason. A sink error stops the
+// returns why it stopped, as a schema end reason. Before the final drain it
+// freezes the kernel's read/write aggregation (bpf.Tracer.StopAggregation),
+// so finish reads sums that can no longer also reach the ring. A sink error stops the
 // trace at once: tracing on into a broken file would only hide the loss.
 // So does an unreadable loss counter, since drops must never be silent.
 func traceLoop(ctx context.Context, s *session, cfg runConfig) (string, error) {
@@ -258,12 +266,15 @@ func traceLoop(ctx context.Context, s *session, cfg runConfig) (string, error) {
 				return schema.EndError, err
 			}
 		case <-ctx.Done():
-			return ctxReason(ctx), drainStopped(s)
+			return ctxReason(ctx), errors.Join(s.tr.StopAggregation(), drainStopped(s))
 		case <-tick.C:
 			if _, err := pollLosses(s.tr, s.c); err != nil {
 				return schema.EndError, err
 			}
 			if s.over() {
+				if err := s.tr.StopAggregation(); err != nil {
+					return schema.EndError, err
+				}
 				return drainQuiet(ctx, s)
 			}
 		}

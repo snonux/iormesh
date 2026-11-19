@@ -18,11 +18,32 @@ import (
 // the pid. TestParseRWState pins the offsets against a hand-built value.
 const (
 	rwAggMapName  = "rw_agg_map"
+	rwAggStopName = "rw_agg_stop"
 	rwSlots       = 4
 	rwSlotSize    = 56
 	rwStateSize   = 256
 	rwStatePidOff = rwSlots*rwSlotSize + 24
 )
+
+// StopAggregation freezes the kernel's read/write aggregation for the end of
+// the session (rw_agg_stop, maps.h): from now on every read and write is
+// sent as its own records, and no hook folds into or flushes rw_agg_map, so
+// what PendingAggregates reads later is exactly what never reached the
+// ring. Call it before the last records in flight are handled.
+func (t *Tracer) StopAggregation() error {
+	if t.closed() {
+		return errClosed
+	}
+	m, err := t.module.GetMap(rwAggStopName)
+	if err != nil {
+		return fmt.Errorf("get %s: %w", rwAggStopName, err)
+	}
+	key, stop := uint32(0), uint32(1)
+	if err := m.Update(unsafe.Pointer(&key), unsafe.Pointer(&stop)); err != nil {
+		return fmt.Errorf("set %s: %w", rwAggStopName, err)
+	}
+	return nil
+}
 
 // PendingAggregates returns the folded read/write calls rw_agg_map still
 // holds, one record per key with pending calls, oldest first. They are the
@@ -32,9 +53,8 @@ const (
 // the records in flight were handled and before Close — the map dies with
 // the tracer — and hand the records to the correlator like any other.
 //
-// The probes are still attached, so a thread still running may fold one
-// more call into a key between this read and Close; that call is lost like
-// any record in flight at Close, uncounted (Close).
+// Call StopAggregation first: once it is set no hook folds or flushes, so
+// the sums read here are frozen and none of them also reached the ring.
 func (t *Tracer) PendingAggregates() ([]*types.RwAggregateEvent, error) {
 	if t.closed() {
 		return nil, errClosed

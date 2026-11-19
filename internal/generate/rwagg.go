@@ -39,14 +39,14 @@ func renderRWEnterHook(b *strings.Builder, h handlerSpec) {
 	b.WriteString("        return 0;\n")
 }
 
-// renderRWExitHook writes the exit hook of a folded kind: after the per-tid
-// exit hook, iormesh_rw_on_exit folds a held call (no exit record) or lets
-// the exit through, having sent a held call's owed enter first.
+// renderRWExitHook writes the exit hook of a folded kind: the per-tid exit
+// hook's verdict goes into iormesh_rw_on_exit, which clears the call's
+// in-flight markers whatever it is, then folds a held call (no exit record)
+// or lets the exit through, having sent a held call's owed enter first.
 func renderRWExitHook(b *strings.Builder, h handlerSpec) {
 	b.WriteString(clockReadLine)
-	fmt.Fprintf(b, "    if (!ior_on_syscall_exit(tid, %s, ctx->ret, now))\n", h.enterName)
-	b.WriteString("        return 0;\n")
-	fmt.Fprintf(b, "    if (!iormesh_rw_on_exit(pid, tid, %s, ctx->ret, now))\n", h.enterName)
+	fmt.Fprintf(b, "    int emits = ior_on_syscall_exit(tid, %s, ctx->ret, now);\n", h.enterName)
+	fmt.Fprintf(b, "    if (!iormesh_rw_on_exit(pid, tid, %s, ctx->ret, now, emits))\n", h.enterName)
 	b.WriteString("        return 0;\n")
 }
 
