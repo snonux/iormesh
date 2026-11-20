@@ -3290,63 +3290,106 @@ The SSH transport:
 
 ### The merge
 
+Built in task fb4 as `internal/federate` (cgo-free): `key.go`,
+`half.go`, `fuse.go`, `source.go`, `merge.go`. The tracer's
+`tcp_state` records carry the four `tcp_sock` fields as
+`args.snd_una`, `rcv_nxt`, `bytes_acked`, `bytes_received`
+(docs/schema.md, all four or none); the BPF capture that fills
+them is separate M4 work.
+
 ```go
 // ISNPair is decision #26's key, oriented the same on both hosts:
 // the connecting side's ISN first. NAT never rewrites it.
 type ISNPair struct{ Client, Server uint32 }
 
-// KeyFromState rebuilds the pair from one TCP state record taken
-// at ESTABLISHED or later (S2): the connecting side's bytes_acked
-// already counts its own SYN, the accepting side's does not;
-// bytes_received never counts the peer's SYN. All mod 2^32.
-func KeyFromState(r TCPState) ISNPair {
-    own := r.SndUna - uint32(r.BytesAcked)
-    if r.Role == "server" {
+// keyFrom rebuilds the pair from one record taken at ESTABLISHED
+// or later (S2): the connecting side's bytes_acked already counts
+// its own SYN, the accepting side's does not; bytes_received never
+// counts the peer's SYN. All mod 2^32.
+func keyFrom(role string, f seqFields) ISNPair {
+    own := f.SndUna - uint32(f.BytesAcked)
+    if role == RoleServer {
         own--
     }
-    peer := r.RcvNxt - uint32(r.BytesReceived) - 1
-    if r.Role == "server" {
+    peer := f.RcvNxt - uint32(f.BytesReceived) - 1
+    if role == RoleServer {
         return ISNPair{Client: peer, Server: own}
     }
     return ISNPair{Client: own, Server: peer}
 }
 
-// Half is one end of a TCP connection as one host recorded it.
+// Half is one end of a TCP connection as one host recorded it:
+// everything under one (host, conn_id).
 type Half struct {
-    Host        string
-    Proc        string         // node id
-    Role        string         // "client" | "server"
+    Host, Project, ConnID string
+    Procs       []string       // process node ids holding it
+    Role        string         // "client" | "server" | "" (unknown)
     Local, Peer netip.AddrPort // differ across NAT; display only
-    Key         ISNPair        // zero when no record had the fields
-    Established uint64         // that host's boot ns
+    Key         ISNPair        // valid when HasKey
+    HasKey      bool
+    KeyConflict bool           // its records rebuilt different keys
+    Established uint64         // wall ns of the first keyed record
 }
 
-// Fuse pairs client and server halves into cross-host edges by
-// ISN pair. window is coarse (minutes): it only guards against
-// the ISN clock wrapping (~275 s), the pair itself separates
-// reused 4-tuples. A half without a partner is returned
-// unresolved — it stays in the graph and feeds M6.
-func Fuse(halves []Half, window time.Duration) (
-    edges []schema.Edge, unresolved []Half)
+// Source is one host session's trace, whatever its format: the
+// NDJSON trace directory (NDJSONDir) today, parquet segments next.
+type Source interface {
+    Name() string
+    Graph(ctx context.Context) (schema.Graph, error)
+    Events(ctx context.Context, fn func(*schema.Event) error) error
+}
+
+func Fuse(halves []Half, window time.Duration) Fusion // Conns, Unresolved
+func Merge(ctx context.Context, sources []Source, opt Options) (Result, error)
 ```
 
-Rules, each a table-driven test:
+How a half is read from a host's events: the role comes from a
+`connect` (or a `SYN_SENT` record) versus an `accept`/`accept4`
+on the same conn_id; the key from every `tcp_state` record whose
+state has the handshake complete (`ESTABLISHED` and later; `CLOSE`
+only on an accepted socket — a child reset in the accept queue —
+or after the half was keyed, never on a refused connect). A
+conn_id with both a connecting and an accepting end on one host
+is a loopback pair the correlator fused already, and a conn_id
+without any `tcp_state` (unix, pipe, UDP) is no TCP half; the
+merge leaves both alone.
+
+Rules, each a table-driven test (`fuse_test.go`,
+`half_test.go`):
 
 - a client half fuses with the server half whose `Key` is equal;
   the 4-tuples are not compared (NAT rewrites them);
-- two candidates for one half is an error surfaced in the
-  summary, never a coin toss; candidates whose raw `Established`
-  times differ by more than `window` do not count — the window is
-  minutes, far wider than any plausible clock offset, so fusing
-  needs no clock bound (the bound is computed afterwards, from
-  the fused connections);
-- a zero key, or a key nobody else has (sequence-randomizing
-  firewall, SYN proxy, untraced far end), leaves the half
-  unresolved — no 4-tuple fallback, that would be a guess;
+- fusion needs a mutual single match: two candidates for one
+  half leave every half involved unresolved as `ambiguous`,
+  never a coin toss; candidates whose `Established` times differ
+  by more than `window` do not count. `Established` is wall
+  clock, not boot ns — two hosts' boot clocks share no epoch,
+  while NTP keeps wall clocks far inside the window (default
+  2 minutes: wider than any NTP offset, inside one ~275 s ISN
+  clock wrap) — so fusing needs no clock bound (the bound is
+  computed afterwards, from the fused connections);
+- no role (`no_role`), no keyed record (`no_key`), records that
+  rebuild different keys (`key_conflict`), or a key nobody else
+  has (`no_match`: sequence-randomizing firewall, SYN proxy,
+  untraced far end) leave the half unresolved — no 4-tuple
+  fallback, that would be a guess;
 - port reuse: the same 4-tuple six times gives six distinct keys
   and six edges (S2's TIME_WAIT and RST reuse phases);
-- fused edges get `State: "fused"` and a `conn_id` shared by both
-  hosts' events.
+- fused edges get `State: "fused"` and a merged conn_id — the
+  hash of the key and both ends' hosts and local ids — that both
+  hosts' conn ids map to (`Result.Renames`, for rewriting
+  events); an unfused id two hosts happen to share is
+  requalified per host, so two connections never pose as one;
+- projects do not matter to the join: sources of several
+  projects merge together, and `Conn.CrossProject` marks a fused
+  edge whose ends two projects traced — on two hosts or, for two
+  sessions on one host, over loopback.
+
+The merged graph is the union of the host graphs (sources read
+in name order, everything sorted, `Graph.Validate` before it is
+returned), so the same traces always give the same bytes;
+`testdata/mesh.golden` pins a NAT'ed, port-reusing, two-project
+mesh with every unresolved reason.
 
 Clock offsets (`internal/federate/clock.go`) implement S2's
 inequalities per host pair: every receive pairs with the send

@@ -900,6 +900,15 @@ Kubernetes (M7) build on it.
   on, `build` ends by printing a plain-text summary of the
   merged mesh (services, edges, health, unresolved peers);
   the site and the TUI follow in M5.
+  The merge is built (task fb4, `internal/federate`): it reads
+  each host session through a format-neutral source (NDJSON
+  trace directories now, parquet segments next), fuses only a
+  mutual single ISN-pair match inside a wall-clock window
+  (default 2 minutes — boot clocks of two hosts share no epoch),
+  and keeps every other TCP end unresolved with its reason
+  (`no_role`, `no_key`, `key_conflict`, `no_match`,
+  `ambiguous`). The `tcp_state` schema carries the four
+  `tcp_sock` fields; the tracer's capture of them is still open.
 - **Clock reconciliation from the traffic itself**: every
   fused connection gives send-before-receive constraints in
   both directions (send = send-syscall enter, receive =

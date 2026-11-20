@@ -1,7 +1,3 @@
-// Package federate is the controller's cross-host side (PLAN.md M4): the
-// server registry (registry.go), the Transport that reaches servers
-// (transport.go, ssh.go), trace sync and the offline merge. It is cgo-free,
-// shared with iormeshctl.
 package federate
 
 import "context"

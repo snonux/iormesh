@@ -1,0 +1,235 @@
+{
+  "schema_version": 1,
+  "nodes": [
+    {
+      "type": "host",
+      "id": "host:hostA"
+    },
+    {
+      "type": "host",
+      "id": "host:hostB"
+    },
+    {
+      "type": "host",
+      "id": "host:hostC"
+    },
+    {
+      "type": "process",
+      "id": "proc:hostA/100@1",
+      "attrs": {
+        "comm": "app"
+      }
+    },
+    {
+      "type": "process",
+      "id": "proc:hostA/101@1",
+      "attrs": {
+        "comm": "app"
+      }
+    },
+    {
+      "type": "process",
+      "id": "proc:hostA/102@1",
+      "attrs": {
+        "comm": "app"
+      }
+    },
+    {
+      "type": "process",
+      "id": "proc:hostA/400@1",
+      "attrs": {
+        "comm": "app"
+      }
+    },
+    {
+      "type": "process",
+      "id": "proc:hostB/200@1",
+      "attrs": {
+        "comm": "app"
+      }
+    },
+    {
+      "type": "process",
+      "id": "proc:hostC/300@1",
+      "attrs": {
+        "comm": "app"
+      }
+    },
+    {
+      "type": "socket",
+      "id": "conn:144ebe02d9280b21"
+    },
+    {
+      "type": "socket",
+      "id": "conn:3d46b6fa0381aa8d"
+    },
+    {
+      "type": "socket",
+      "id": "conn:4f14fb03b955c669"
+    },
+    {
+      "type": "socket",
+      "id": "conn:6d711830471d22a8"
+    },
+    {
+      "type": "socket",
+      "id": "conn:a-amb"
+    },
+    {
+      "type": "socket",
+      "id": "conn:a370e84b0ff700d3"
+    },
+    {
+      "type": "socket",
+      "id": "conn:a88d6fc170ae6385"
+    },
+    {
+      "type": "socket",
+      "id": "conn:b-amb"
+    },
+    {
+      "type": "socket",
+      "id": "conn:b-nokey"
+    },
+    {
+      "type": "socket",
+      "id": "conn:c-amb"
+    }
+  ],
+  "edges": [
+    {
+      "type": "connected",
+      "from": "proc:hostA/100@1",
+      "to": "conn:3d46b6fa0381aa8d",
+      "state": "fused"
+    },
+    {
+      "type": "connected",
+      "from": "proc:hostA/100@1",
+      "to": "conn:6d711830471d22a8",
+      "state": "unresolved"
+    },
+    {
+      "type": "connected",
+      "from": "proc:hostA/100@1",
+      "to": "conn:a370e84b0ff700d3",
+      "state": "fused"
+    },
+    {
+      "type": "connected",
+      "from": "proc:hostA/100@1",
+      "to": "conn:a88d6fc170ae6385",
+      "state": "fused"
+    },
+    {
+      "type": "connected",
+      "from": "proc:hostA/101@1",
+      "to": "conn:a-amb",
+      "state": "unresolved"
+    },
+    {
+      "type": "connected",
+      "from": "proc:hostA/102@1",
+      "to": "conn:4f14fb03b955c669",
+      "state": "fused"
+    },
+    {
+      "type": "connected",
+      "from": "proc:hostA/400@1",
+      "to": "conn:4f14fb03b955c669",
+      "state": "fused"
+    },
+    {
+      "type": "connected",
+      "from": "proc:hostB/200@1",
+      "to": "conn:3d46b6fa0381aa8d",
+      "state": "fused"
+    },
+    {
+      "type": "connected",
+      "from": "proc:hostB/200@1",
+      "to": "conn:a370e84b0ff700d3",
+      "state": "fused"
+    },
+    {
+      "type": "connected",
+      "from": "proc:hostB/200@1",
+      "to": "conn:a88d6fc170ae6385",
+      "state": "fused"
+    },
+    {
+      "type": "connected",
+      "from": "proc:hostB/200@1",
+      "to": "conn:b-amb",
+      "state": "unresolved"
+    },
+    {
+      "type": "connected",
+      "from": "proc:hostB/200@1",
+      "to": "conn:b-nokey",
+      "state": "unresolved"
+    },
+    {
+      "type": "connected",
+      "from": "proc:hostC/300@1",
+      "to": "conn:144ebe02d9280b21",
+      "state": "unresolved"
+    },
+    {
+      "type": "connected",
+      "from": "proc:hostC/300@1",
+      "to": "conn:c-amb",
+      "state": "unresolved"
+    },
+    {
+      "type": "runs_on",
+      "from": "proc:hostA/100@1",
+      "to": "host:hostA"
+    },
+    {
+      "type": "runs_on",
+      "from": "proc:hostA/101@1",
+      "to": "host:hostA"
+    },
+    {
+      "type": "runs_on",
+      "from": "proc:hostA/102@1",
+      "to": "host:hostA"
+    },
+    {
+      "type": "runs_on",
+      "from": "proc:hostA/400@1",
+      "to": "host:hostA"
+    },
+    {
+      "type": "runs_on",
+      "from": "proc:hostB/200@1",
+      "to": "host:hostB"
+    },
+    {
+      "type": "runs_on",
+      "from": "proc:hostC/300@1",
+      "to": "host:hostC"
+    }
+  ]
+}
+fused 3d46b6fa0381aa8d key=0001fff2/00003000 hostA/a-reuse-2(shop) -> hostB/b-reuse-2(billing) cross_project=true
+fused 4f14fb03b955c669 key=00000abc/00000def hostA/a-local(shop) -> hostA/a-local-srv(batch) cross_project=true
+fused a370e84b0ff700d3 key=fffffff0/00001000 hostA/a-reuse-0(shop) -> hostB/b-reuse-0(billing) cross_project=true
+fused a88d6fc170ae6385 key=0000fff1/00002000 hostA/a-reuse-1(shop) -> hostB/b-reuse-1(billing) cross_project=true
+unresolved hostA/a-amb role=client local=10.0.1.1:40200 peer=10.0.1.254:8080 reason=ambiguous
+unresolved hostA/a-untraced role=client local=10.0.1.1:40100 peer=203.0.113.9:443 reason=no_match
+unresolved hostB/b-amb role=server local=10.0.2.2:8080 peer=10.0.2.254:40060 reason=ambiguous
+unresolved hostB/b-nokey role=server local=10.0.2.2:8080 peer=10.0.2.254:40050 reason=no_key
+unresolved hostC/a-untraced role=client local=10.0.3.3:40300 peer=198.51.100.7:5432 reason=no_match
+unresolved hostC/c-amb role=client local=10.0.3.3:40200 peer=10.0.1.254:8080 reason=ambiguous
+rename hostA/a-local -> 4f14fb03b955c669
+rename hostA/a-local-srv -> 4f14fb03b955c669
+rename hostA/a-reuse-0 -> a370e84b0ff700d3
+rename hostA/a-reuse-1 -> a88d6fc170ae6385
+rename hostA/a-reuse-2 -> 3d46b6fa0381aa8d
+rename hostA/a-untraced -> 6d711830471d22a8
+rename hostB/b-reuse-0 -> a370e84b0ff700d3
+rename hostB/b-reuse-1 -> a88d6fc170ae6385
+rename hostB/b-reuse-2 -> 3d46b6fa0381aa8d
+rename hostC/a-untraced -> 144ebe02d9280b21
