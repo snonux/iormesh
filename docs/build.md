@@ -49,7 +49,7 @@ bpftool; and non-interactive `sudo` for the two root reads
 mage generate      # tracepoint formats -> C handlers, Go tables, Go types,
                    # per-arch syscall numbers (from golang.org/x/sys)
 mage bpfBuild      # vmlinux.h (first run) + clang CO-RE -> iormesh.bpf.o
-mage build         # bpfBuild + go build ./... + the tracer binary ./iormesh
+mage build         # bpfBuild + go build ./... + ./iormesh, ./iormeshctl
 mage test          # go test ./... (the generator's C harness tests too)
 mage vet           # go vet ./... with the cgo environment
 mage lint          # golangci-lint: errcheck + staticcheck SA

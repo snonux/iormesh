@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"iormesh/internal/correlate"
+	"iormesh/internal/project"
 	"iormesh/internal/target"
 	"iormesh/internal/tracepoints"
 )
@@ -55,10 +55,6 @@ type runConfig struct {
 // defaultDuration bounds every run, ior-style: no unbounded tracer on a
 // server (PLAN.md, M4's 4h auto-exit, here from M1 on).
 const defaultDuration = 4 * time.Hour
-
-// projectName keeps project labels usable as directory names on servers
-// and controllers (PLAN.md: traces live under …/traces/<project>/).
-var projectName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 // processAlive reports whether pid is a live process, and when startNS
 // is not 0 the incarnation that started then (target.ProcFS.Alive). It
@@ -147,9 +143,10 @@ func validateRun(cfg runConfig) error {
 		return fmt.Errorf("%w: %v (-pid, -pattern and -listen-port exclude each other)", errUsage, err)
 	}
 	switch {
-	case !projectName.MatchString(cfg.project):
-		return fmt.Errorf("%w: -project %q: want 1-64 of [A-Za-z0-9._-], not starting with . _ -",
-			errUsage, cfg.project)
+	case !project.Valid(cfg.project):
+		// The registry (iormeshctl add) checks the same rule, so a
+		// label the controller stored is one the tracer accepts.
+		return fmt.Errorf("%w: -project %q: want %s", errUsage, cfg.project, project.Rule)
 	case cfg.out == "":
 		return fmt.Errorf("%w: -out is required", errUsage)
 	case cfg.duration <= 0:

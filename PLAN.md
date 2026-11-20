@@ -1190,7 +1190,11 @@ answer), and deferred.
 - **#12 Controller transport** — SSH with the operator's key;
   collect syncs over rsync, which must be present on servers
   (`deploy` fails fast if it is missing); server registry in
-  `~/.config/iormesh/servers.yaml`. The k8s fetch path
+  `~/.config/iormesh/servers.yaml`. The controller never
+  trusts a host key on first use: ssh runs with
+  `StrictHostKeyChecking=yes` and `BatchMode=yes`, so a server's
+  key must already be in the operator's known_hosts, and no
+  password prompt can hang a run. The k8s fetch path
   (kubectl exec/cp) settles with #18.
 - **#16 Trace-file segmentation** — rotate once per minute,
   close-then-rename into `ready/`, collect-while-running via
@@ -1523,7 +1527,9 @@ answer), and deferred.
   candidates: defaulting to the k8s namespace, or
   auto-derivation from the traced app. Cross-project
   collection: explicit project list vs merge-everything-found.
-  *Default: manual label, explicit list.*
+  *Default: manual label, explicit list.* The registry (task
+  cb4) implements the default: each server entry lists its
+  projects by label, each with its own target and flags.
 - **#17 Disk-watchdog semantics** — percent of partition vs an
   absolute free-bytes floor (or both); check interval; and
   what the controller does when a tracer exits on the limit

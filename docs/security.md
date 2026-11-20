@@ -14,6 +14,21 @@ truth.
   listens on nothing and connects to nothing; control flows only
   through SSH (or `kubectl exec`). Servers hold no iormesh
   credentials.
+- **The registry is the deploy boundary.** Only hosts in
+  `~/.config/iormesh/servers.yaml` are ever contacted. The file
+  is written 0600 in a 0700 directory and refused when group- or
+  other-writable — whoever edits it chooses where the operator's
+  key pushes a root-run tracer. Host names are checked before
+  they reach ssh (no leading `-`, no shell or `host:path`
+  characters), and remote commands go as single-quoted argv,
+  never as concatenated shell text.
+- **Host keys are verified, never trusted on first use.**
+  iormeshctl runs the system `ssh`/`rsync` with
+  `StrictHostKeyChecking=yes` and `BatchMode=yes`: an unknown or
+  changed server key fails the run (PLAN.md #12). Its control
+  sockets — live, authenticated sessions — sit in a private
+  0700 directory that is refused if a symlink, foreign-owned or
+  open to others.
 - **Expansion is controller-driven.** The mesh grows along
   observed connections, but only `iormeshctl` deploys — from the
   controller, with the operator's key. Tracers never deploy and

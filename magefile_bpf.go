@@ -5,7 +5,8 @@
 // targets (no TUI, demo, bench, parquet or docker targets; the integration
 // targets are in magefile_integration.go);
 // IOR_FORCE_GENERATE renamed to IORMESH_FORCE_GENERATE; Build compiles every
-// package instead of a binary, since cmd/iormesh lands in M1 step 10;
+// package instead of a binary, since cmd/iormesh lands in M1 step 10, and
+// links the cgo-free controller ./iormeshctl beside the tracer;
 // BpfRootTest is ior's runRootLinkTests/runRootTestBinary, reduced to the BPF
 // root tests of ./internal.
 
@@ -44,6 +45,7 @@ const (
 	forceGenerateEnv     = "IORMESH_FORCE_GENERATE"
 	rootTestBinary       = "iormesh-internal.test"
 	binaryName           = "iormesh"
+	ctlBinaryName        = "iormeshctl"
 )
 
 // Default builds the project.
@@ -53,13 +55,19 @@ func Default() {
 
 // Build compiles the BPF object and every Go package with the libbpfgo cgo
 // environment, then links the tracer binary ./iormesh (cmd/iormesh, M1
-// step 10) with the object embedded.
+// step 10) with the object embedded, and the controller ./iormeshctl
+// (cmd/iormeshctl, M4) with CGO_ENABLED=0: built the way it ships, so a cgo
+// dependency fails here and not first on a Mac.
 func Build() error {
 	mg.Deps(BpfBuild)
 	if err := sh.RunWithV(goEnv(), "go", "build", "./..."); err != nil {
 		return err
 	}
-	return sh.RunWithV(goEnv(), "go", "build", "-o", binaryName, "./cmd/iormesh")
+	if err := sh.RunWithV(goEnv(), "go", "build", "-o", binaryName, "./cmd/iormesh"); err != nil {
+		return err
+	}
+	return sh.RunWithV(map[string]string{"CGO_ENABLED": "0"},
+		"go", "build", "-o", ctlBinaryName, "./cmd/iormeshctl")
 }
 
 // BpfBuild builds the embedded BPF object (CO-RE, from vmlinux.h).

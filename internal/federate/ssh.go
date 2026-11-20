@@ -1,0 +1,230 @@
+package federate
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"syscall"
+	"time"
+)
+
+// SSH is the Transport for plain Linux servers (decision #12). It wraps the
+// system ssh and rsync binaries instead of an SSH library, so the
+// operator's ~/.ssh/config, agent, jump hosts and known_hosts just work,
+// and iormeshctl never holds a key or a password itself.
+//
+// Every call goes through one multiplexed connection per host
+// (ControlMaster): deploy and collect run several commands back to back,
+// and one handshake per command would dominate them.
+type SSH struct {
+	host       string
+	controlDir string
+	exec       execFunc
+}
+
+// execFunc runs one local command and returns its stdout. SSH takes it as a
+// field so tests see the exact argv without reaching any host.
+type execFunc func(ctx context.Context, name string, args ...string) ([]byte, error)
+
+// ErrTransport marks an argument the transport refuses before running
+// anything.
+var ErrTransport = errors.New("transport")
+
+// remotePath is the alphabet Fetch accepts for remote directories. They
+// are iormesh's own paths (/opt/iormesh/traces/<project>/ready), and rsync
+// hands the remote side of host:path to the remote shell on older
+// versions, so nothing a shell would interpret may appear.
+var remotePath = regexp.MustCompile(`^/[A-Za-z0-9._/-]*$`)
+
+// stderrLimit bounds how much of a failed command's stderr an error
+// carries: enough for ssh's diagnosis, not a remote log dump.
+const stderrLimit = 2048
+
+// waitDelay is runLocal's cmd.WaitDelay (see there).
+const waitDelay = 2 * time.Second
+
+// SSH satisfies Transport; checked at compile time.
+var _ Transport = SSH{}
+
+// NewSSH returns the SSH transport for host, a registry host name. The
+// control sockets live in a private directory under the user cache dir
+// (see ControlDir).
+func NewSSH(host string) (SSH, error) {
+	dir, err := ControlDir()
+	if err != nil {
+		return SSH{}, err
+	}
+	return newSSH(host, dir, runLocal)
+}
+
+// newSSH is NewSSH with the control directory and the command runner
+// injected.
+func newSSH(host, controlDir string, ex execFunc) (SSH, error) {
+	if !ValidHost(host) {
+		return SSH{}, fmt.Errorf("%w: host %q", ErrTransport, host)
+	}
+	// The directory is quoted inside rsync's -e string, whose parser
+	// knows single quotes but no escapes.
+	if strings.ContainsAny(controlDir, "'\"") {
+		return SSH{}, fmt.Errorf("%w: control dir %q contains a quote", ErrTransport, controlDir)
+	}
+	return SSH{host: host, controlDir: controlDir, exec: ex}, nil
+}
+
+// ControlDir returns, creating it if needed, the directory holding the ssh
+// control sockets: <user cache dir>/iormesh/ssh. A control socket is a
+// live, authenticated session to a server, so the directory must be the
+// user's own and closed to everyone else; one that is not is refused
+// rather than repaired, since someone else may already hold a socket in
+// it.
+func ControlDir() (string, error) {
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("ssh control dir: %w", err)
+	}
+	dir := filepath.Join(cache, "iormesh", "ssh")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("ssh control dir: %w", err)
+	}
+	return dir, checkPrivateDir(dir)
+}
+
+// Run executes argv on the host through ssh. ssh joins its command
+// arguments with spaces and hands the result to the remote login shell,
+// so every element is single-quoted first: an argument stays one argument
+// and nothing in it is expanded remotely.
+func (s SSH) Run(ctx context.Context, argv ...string) ([]byte, error) {
+	if len(argv) == 0 {
+		return nil, fmt.Errorf("%w: empty remote command", ErrTransport)
+	}
+	args := append(s.sshOptions(), "--", s.host, quoteArgv(argv))
+	out, err := s.exec(ctx, "ssh", args...)
+	if err != nil {
+		return out, fmt.Errorf("ssh %s %s: %w", s.host, argv[0], err)
+	}
+	return out, nil
+}
+
+// Fetch moves remoteDir's files into localDir with rsync over the same
+// multiplexed ssh connection. --remove-source-files deletes a remote file
+// only after it transferred, the delete-on-transfer of PLAN.md M4
+// "Collect". localDir is created 0700 when missing: traces carry command
+// lines, paths and endpoints, readable by the operator only. (rsync's
+// --chmod would say the same per file, but macOS's rsync/openrsync do not
+// all take it; a closed directory does the job on every controller.)
+func (s SSH) Fetch(ctx context.Context, remoteDir, localDir string) error {
+	if !remotePath.MatchString(remoteDir) || strings.Contains(remoteDir, "..") {
+		return fmt.Errorf("%w: remote dir %q", ErrTransport, remoteDir)
+	}
+	// Absolute, so rsync can never read a colon in it as host:path.
+	local, err := filepath.Abs(localDir)
+	if err != nil {
+		return fmt.Errorf("fetch: %w", err)
+	}
+	if err := os.MkdirAll(local, 0o700); err != nil {
+		return fmt.Errorf("fetch: %w", err)
+	}
+	args := []string{"-a", "--remove-source-files", "-e", s.rsyncShell(), "--",
+		s.host + ":" + strings.TrimSuffix(remoteDir, "/") + "/", local + "/"}
+	if _, err := s.exec(ctx, "rsync", args...); err != nil {
+		return fmt.Errorf("rsync %s:%s: %w", s.host, remoteDir, err)
+	}
+	return nil
+}
+
+// sshOptions are the options every ssh invocation carries, Run's and the
+// one rsync starts. Command-line options win over ~/.ssh/config, so these
+// are the few iormeshctl insists on:
+//   - BatchMode=yes: key or agent only, never a password or passphrase
+//     prompt that would hang a collect loop;
+//   - StrictHostKeyChecking=yes: the server's key must already be in
+//     known_hosts. An unknown or changed key fails instead of being
+//     trusted on first use — deploy pushes a root-run binary, the one
+//     place a spoofed server must not be accepted silently;
+//   - ControlMaster/ControlPath/ControlPersist: one connection per host,
+//     reused by the next command for a minute; %C hashes user, host and
+//     port, so the socket path stays short (macOS caps it at 104 bytes).
+func (s SSH) sshOptions() []string {
+	return []string{
+		"-o", "BatchMode=yes",
+		"-o", "StrictHostKeyChecking=yes",
+		"-o", "ControlMaster=auto",
+		"-o", "ControlPath=" + filepath.Join(s.controlDir, "%C"),
+		"-o", "ControlPersist=60s",
+		"-o", "ConnectTimeout=15",
+	}
+}
+
+// rsyncShell is rsync's -e value: ssh with sshOptions. rsync splits it on
+// spaces and honors single quotes, so each element is quoted.
+func (s SSH) rsyncShell() string {
+	return "ssh " + quoteArgv(s.sshOptions())
+}
+
+// quoteArgv renders argv for a POSIX shell: each element single-quoted,
+// and an embedded single quote closed, escaped and reopened:
+//
+//	it's  ->  'it'\''s'
+//
+// The remote shell then sees exactly argv.
+func quoteArgv(argv []string) string {
+	quoted := make([]string, len(argv))
+	for i, a := range argv {
+		quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+	}
+	return strings.Join(quoted, " ")
+}
+
+// runLocal is the real execFunc. stdin stays /dev/null, so ssh never reads
+// the operator's terminal; a failure carries the start of stderr, which is
+// where ssh explains itself (host key mismatch, permission denied).
+//
+// WaitDelay guards against the ControlPersist master, which ssh forks off
+// the first command: OpenSSH points its stdio at /dev/null when it
+// detaches, but should one ever keep our pipe open, Wait would block for
+// the whole persist time. Once the command itself has exited its output
+// is complete, so ErrWaitDelay counts as success.
+func runLocal(ctx context.Context, name string, args ...string) ([]byte, error) {
+	var stdout, stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	cmd.WaitDelay = waitDelay
+	err := cmd.Run()
+	if errors.Is(err, exec.ErrWaitDelay) {
+		err = nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		msg := strings.TrimSpace(stderr.String())
+		if len(msg) > stderrLimit {
+			msg = msg[:stderrLimit] + "…"
+		}
+		return stdout.Bytes(), fmt.Errorf("%w: %s", err, msg)
+	}
+	return stdout.Bytes(), err
+}
+
+// checkPrivateDir requires dir to be a real directory (not a symlink),
+// owned by this user, with no group or other permissions.
+func checkPrivateDir(dir string) error {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return fmt.Errorf("ssh control dir: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%w: %s is not a directory", ErrTransport, dir)
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return fmt.Errorf("%w: %s has mode %v (want 0700)", ErrTransport, dir, info.Mode().Perm())
+	}
+	if st, ok := info.Sys().(*syscall.Stat_t); ok && int(st.Uid) != os.Getuid() {
+		return fmt.Errorf("%w: %s is owned by uid %d", ErrTransport, dir, st.Uid)
+	}
+	return nil
+}

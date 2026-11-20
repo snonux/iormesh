@@ -1,5 +1,6 @@
 /workload.jar
 /iormesh
+/iormeshctl
 /echopeer
 /edgepeer
 /workload/classes/

@@ -3192,7 +3192,9 @@ func (w *Writer) rotate() error {
 
 ### Controller side
 
-Registry, `~/.config/iormesh/servers.yaml`:
+Registry, `~/.config/iormesh/servers.yaml` (`$XDG_CONFIG_HOME`
+honored; the same path on macOS), written by `iormeshctl add` and
+`rm` (`internal/ctl`, task cb4):
 
 ```yaml
 servers:
@@ -3201,10 +3203,36 @@ servers:
       - name: shop
         target: {pattern: "*java*orders-service*"}
         flags: ["-duration", "4h"]
-expand:
-  allow: ["*.example.org", "10.20.0.0/16"]
-  max_nodes: 20
+      - name: billing
+        target: {listen_port: 8443}
 ```
+
+```sh
+iormeshctl add -project shop -pattern '*java*orders-service*' \
+    app1.example.org -duration 4h      # flags after HOST pass through
+iormeshctl rm -project billing app1.example.org   # one project
+iormeshctl rm app1.example.org                    # the whole host
+```
+
+- Every server has at least one project (#21: the project is a
+  manual label kept with the entry); removing the last project
+  drops the host. Host + project twice is an error, as is `rm` of
+  an unknown host or project.
+- A target is a pattern or a listening port, never PIDs: an entry
+  outlives the processes. Tracer flags the entry or deploy own
+  (`-project`, `-pattern`, `-listen-port`, `-pid`, `-out`) are
+  refused after HOST — usually an iormeshctl flag in the wrong
+  place.
+- Hosts are `[user@]name` from `[A-Za-z0-9._-]`, never starting
+  with `-` (an ssh option); IPv6 literals need an ssh_config
+  alias. Project labels follow the tracer's rule
+  (`internal/project`).
+- The file is written atomically, 0600 in a 0700 directory, and
+  refused when group- or other-writable. Unknown keys are an
+  error, not dropped: M6 adds its `expand:` section (allowlist,
+  `max_nodes`) to the schema rather than having `add` lose it.
+- `rm` edits the registry only, for now; the sync-then-uninstall
+  of PLAN.md "Cleanup (rm)" lands with `collect` (task eb4).
 
 `deploy`, as the commands it runs (all through one multiplexed
 SSH connection per host):
@@ -3215,7 +3243,7 @@ ssh H 'uname -m; command -v rsync systemd-run'      # preflight
 rsync -a iormesh-linux-$ARCH H:/tmp/iormesh.staged
 ssh H sudo /opt/iormesh/bin/iormesh upgrade /tmp/iormesh.staged
 ssh H sudo /opt/iormesh/bin/iormesh start -project shop \
-    -target-pattern '*java*orders-service*' -duration 4h
+    -pattern '*java*orders-service*' -duration 4h
 ```
 
 (First install on a host has no binary to `upgrade` with — that
@@ -3229,9 +3257,36 @@ rsync -a --remove-source-files \
     ~/.local/share/iormesh/traces/shop/
 ```
 
-Packages: `internal/federate/registry.go`, `ssh.go` (wraps the
-`ssh`/`rsync` binaries — no SSH library, the operator's
-`~/.ssh/config` must just work), `collect.go`, `merge.go`.
+Packages: `internal/federate/registry.go`, `transport.go` (the
+`Transport` interface of M7, coded against from M4 on), `ssh.go`
+(wraps the `ssh`/`rsync` binaries — no SSH library, the
+operator's `~/.ssh/config` must just work), `collect.go`,
+`merge.go`; the commands in `internal/ctl`, `cmd/iormeshctl` only
+dispatching.
+
+The SSH transport:
+
+- `Run(ctx, argv...)` — `ssh [opts] -- HOST 'a' 'b' …`: ssh joins
+  its command words into one string for the remote shell, so each
+  argv element is single-quoted (`'` as `'\''`); an argument
+  stays one argument and nothing in it expands remotely.
+- `Fetch(ctx, remoteDir, localDir)` — `rsync -a
+  --remove-source-files -e 'ssh [opts]' -- HOST:DIR/ LOCAL/`:
+  a move, a file deleted remotely only once transferred. The
+  remote dir must be an absolute path from `[A-Za-z0-9._/-]`
+  without `..`; the local dir is made absolute (no `host:` misread)
+  and created 0700.
+- Options on every call: `BatchMode=yes` (key or agent only, no
+  prompt to hang on), `StrictHostKeyChecking=yes` (the host key
+  must already be in known_hosts — no trust on first use, never
+  `no`), `ControlMaster=auto`, `ControlPersist=60s` and
+  `ControlPath=<user cache dir>/iormesh/ssh/%C` — one multiplexed
+  connection per host; the directory is 0700 and refused if it is
+  a symlink, someone else's, or open to others.
+- Tests record the argv through an injected runner and run the
+  quoting through a local `sh`; nothing reaches a host.
+  `internal/buildgate` checks iormeshctl links no cgo package and
+  cross-compiles for darwin/arm64.
 
 ### The merge
 
