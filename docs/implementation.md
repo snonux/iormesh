@@ -5090,7 +5090,12 @@ depends on:
    `deploy/prepare-patch.yaml` adds just the two volumes (one
    rollout, no container); iormeshctl checks a pod's spec for
    them before `kubectl debug` and refuses an unprepared pod,
-   naming the patch.
+   naming the patch. Generated (task vb4): `mage k8sManifests`
+   writes `deploy/` from `internal/k8s/manifest.go`, whose
+   golden test fails on any drift; the patch also sets
+   `hostUsers: true`, which is pod-level; its volumes are the
+   ones `Kubectl.Check` (step 9) looks for, by the same
+   constants.
 6. `internal/k8s/cgroup.go`: parse `/proc/<pid>/cgroup` → pod
    UID + container id (cgroup v1 and v2 path forms; unit-test
    against captured strings from kind). Under a private cgroup
@@ -5102,6 +5107,26 @@ depends on:
    pod's, so `proc:<host_id>/<pid>@<inc>` alone can collide
    across two pods of one node (task 7f4; `Tracer.PidNS` names
    the namespace).
+   Built (task vb4), not yet wired into records:
+   `k8s.ParseProcCgroup` and `ParseCgroupPath` return pod UID,
+   container id, runtime and QoS class for the systemd and
+   cgroupfs drivers (containerd, CRI-O, cri-dockerd; kind's
+   `/kubelet` cgroup root; static pods' hash UIDs), `ErrNotInPod`
+   for `0::/` and non-pod cgroups, an error for ids no kubelet
+   writes; `k8s.PodFromEnv` reads the downward API, which both
+   generated container specs set. The test strings follow the
+   formats; the kind capture is task yb4's. Also open, with
+   task 7f4: the host id. `iormesh run` reads `/etc/machine-id`,
+   which the `scratch` image lacks (and a baked one would be
+   the same in every pod), so a run in the image fails until the
+   pod's host id is chosen — the node's `machine-id` through one
+   more read-only `hostPath`, or one derived from the pod — which
+   is also where the process key gains the pod.
+   The project (decision #21): `iormesh run` without `-project`
+   in a pod (all three downward-API variables set) takes the
+   namespace (`k8s.ProjectForNamespace`); `start`, a systemd
+   unit, does not. The registry's `pods:` entries are to default
+   the same way, through it (task wb4).
 7. Pod names: resolved on the controller through the API server
    (`kubectl get pods -o json`), joined by pod UID — the tracer
    never talks to the API.
@@ -5141,6 +5166,23 @@ depends on:
    oldest containerd and CRI-O whose `RuntimeDefault` lets
    `bpf` and `perf_event_open` through on `CAP_BPF` and
    `CAP_PERFMON` (believed containerd 1.6, CRI-O 1.23).
+   Generated (task vb4), not yet run: one container spec,
+   `customSpec` (internal/k8s/debug.go), is what `Kubectl.Debug`
+   hands `--custom`, what `deploy/debug-profile.json` holds for a
+   hand-run `kubectl debug` (JSON, which every kubectl with
+   `--custom` reads), and the sidecar's container: the security
+   context, the mounts and the downward-API env — name, image and
+   command stay kubectl's flags. The sidecar adds resource limits
+   of one CPU and 1 GiB (start's unit defaults: the container is
+   the unit) and runs `iormesh run` as its process, with example
+   args (`k8s.DefaultSidecarArgs`) the owner replaces by the
+   app's target. The image:
+   `scripts/container/tracer-image.Containerfile` (docs/build.md,
+   "Container builds"), with the tracer on its `PATH` for
+   `kubectl exec … -- iormesh`. While `k8s.DefaultImage` is empty
+   `deploy/` names an unpullable digest-pinned placeholder on
+   `registry.invalid`; task yb4 builds and publishes the image,
+   sets the constant and reruns `mage k8sManifests`.
 9. `iormeshctl` gains a k8s transport implementing the same
    interface as SSH:
 
@@ -5170,7 +5212,7 @@ depends on:
    debug container), and adds `Check` and `Debug`. `Resolve` layers
    flag, pod entry, cluster and `k8s:` defaults (#18), refuses a
    context the registry does not list, an image not pinned by
-   digest (`DefaultImage` is empty until task vb4 publishes one)
+   digest (`DefaultImage` is empty until task yb4 publishes one)
    and non-Kubernetes names. Every call passes `--context=` and
    `--namespace=`; `Run` is `exec POD --container=iormesh --
    argv…`, and returns `*exec.ExitError` only when kubectl's

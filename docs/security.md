@@ -415,14 +415,15 @@ truth.
     itself node-wide read access: whoever holds it can start a
     BPF-capable container there, so grant it like root on the
     nodes;
-  - is reached only through the operator's kubectl, with the
-    cluster named by the registry (`--context` always explicit,
-    never the kubeconfig's current context) — the registry stays
-    the deploy boundary;
   - comes as an image pinned by digest and signed like the
-    tracer binary; a sidecar is added only by the deployment
-    owner's explicit patch, a debug container only by the
-    operator's `iormeshctl`.
+    tracer binary — the static tracer and the agent jar on
+    `scratch`, no shell or package manager (task vb4; the
+    manifests refuse a tag); a sidecar is added only by the
+    deployment owner's explicit patch, a debug container only
+    by the operator's `iormeshctl`. The patches and the debug
+    profile are generated into `deploy/` from internal/k8s and
+    test-checked field by field
+    ([testing.md](testing.md#k8s-manifests-and-pod-identity-task-vb4)).
   `privileged: true` is the fallback where the minimal profile
   cannot run (old kernels, SELinux-enforcing nodes, runtimes
   without the newer capability names; it cannot be combined

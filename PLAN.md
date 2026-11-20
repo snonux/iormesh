@@ -1639,6 +1639,17 @@ Later phase — plain Linux servers (M4) come first.
   node (same machine-id, same pod-local pid, same start tick);
   the process key must carry the pod or its PID namespace —
   task 7f4, with this step.
+  Status (2026-11-21, task vb4): built and unit-tested, not yet
+  run on kind (task yb4) — the tracer image
+  (`scripts/container/tracer-image.Containerfile`: the static
+  tracer and agent jar on `scratch`), the prepare and sidecar
+  patches and the `kubectl debug --custom` profile, generated
+  into `deploy/` with #13's fields and a digest-pinned image (a
+  placeholder until one is published), the cgroup → pod UID and
+  container parser, and the project defaulting to the namespace
+  (#21). Found: the image has no `/etc/machine-id`, which the
+  host id comes from, so a run in it fails until 7f4 picks the
+  pod's host id (docs/implementation.md M7 step 6).
 - Java agent live-attach through the shared process namespace
   (`kubectl debug --target`, or `shareProcessNamespace: true`
   for a sidecar; attach socket reached via `/proc/<pid>/root`),
@@ -2121,7 +2132,12 @@ would overturn it), and deferred.
   collection: explicit project list vs merge-everything-found.
   *Default: manual label, explicit list.* The registry (task
   cb4) implements the default: each server entry lists its
-  projects by label, each with its own target and flags.
+  projects by label, each with its own target and flags. In k8s
+  mode the project defaults to the namespace (M7): task vb4
+  built the tracer side — `iormesh run` in a pod (the
+  downward-API `POD_NAME`, `POD_NAMESPACE` and `POD_UID` all
+  set) without `-project` takes the namespace; an explicit
+  label still wins.
 - **#17 Disk-watchdog semantics** — percent of partition vs an
   absolute free-bytes floor (or both); check interval; and
   what the controller does when a tracer exits on the limit

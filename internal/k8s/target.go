@@ -59,8 +59,10 @@ const TracerContainer = "iormesh"
 
 // DefaultImage is the built-in tracer image, the last layer of #18's
 // precedence. It is empty until the published image exists (task vb4
-// builds it): until then a session without a configured image is
-// refused rather than given a placeholder.
+// wrote scripts/container/tracer-image.Containerfile, task yb4 builds and
+// publishes it): until then a session without a configured image is
+// refused rather than given a placeholder. Setting it also moves deploy/
+// off its placeholder (manifest.go, `mage k8sManifests`).
 const DefaultImage = ""
 
 // Name patterns, Kubernetes' own: a DNS-1123 label for namespaces and

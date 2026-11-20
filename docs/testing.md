@@ -1013,7 +1013,7 @@ kubectl would get. They run with the package's unit tests
   and the `--custom` spec's security context and two mounts;
 - refusals before any kubectl runs: an unregistered or malformed
   context, an image not pinned by `@sha256:<64 hex>` (or none —
-  the built-in default is empty until task vb4 publishes one),
+  the built-in default is empty until task yb4 publishes one),
   namespace, pod or container names that are not Kubernetes names
   (`$(id)`, `x;touch …`, `--all-namespaces`), a remote dir other
   than `/opt/iormesh/traces/<project>/ready`, and `Push`;
@@ -1037,6 +1037,52 @@ kubectl would get. They run with the package's unit tests
 
 What only kind can show is task yb4's (docs/implementation.md M7
 step 9).
+
+## K8s manifests and pod identity (task vb4)
+
+Unit tests in `mage test`, no cluster and no container engine
+(PLAN.md M7; docs/implementation.md M7 steps 5, 6 and 8):
+
+- `internal/k8s/manifest_test.go`: `deploy/` must equal what
+  `mage k8sManifests` writes (golden; edit the generator, never
+  the files). Each file is then decoded as untyped YAML or JSON,
+  the way the API server reads it, and the fields asserted:
+  `hostUsers: true` in both patches, `shareProcessNamespace:
+  true` only in the sidecar's; tracefs as a read-only `hostPath`
+  `Directory` and the trace dir as an `emptyDir` with a
+  `sizeLimit`; uid 0, `allowPrivilegeEscalation: false`, no
+  `privileged`, `RuntimeDefault` seccomp, `drop: [ALL]` and
+  exactly #13's seven capabilities, in order; the downward-API
+  env (`POD_NAME`, `POD_NAMESPACE`, `POD_UID`); the sidecar's
+  image pinned by digest; and no field in the `--custom` profile
+  that kubectl debug's own flags set. `Validate` refuses a tag,
+  a malformed digest, an odd size and a command line that is
+  not `run`.
+- `internal/k8s/cgroup_test.go`: `/proc/<pid>/cgroup` paths in
+  the formats the kubelet and runtimes write — the systemd driver
+  (`kubepods-<qos>-pod<uid_escaped>.slice/cri-containerd-<id>.scope`,
+  `crio-<id>.scope`, CRI-O's `…/container` sub-cgroup,
+  cri-dockerd's `docker-<id>.scope`) and the cgroupfs driver
+  (`kubepods/<qos>/pod<uid>/<id>`, `crio-<id>`), every QoS class,
+  a static pod's 32-hex UID, kind's `--cgroup-root=/kubelet`
+  nesting inside the node and as seen from the host under the
+  node container's scope; whole v1, v2 and hybrid files. Negative
+  cases: `0::/` (a private cgroup namespace) and host or plain
+  Docker cgroups give `ErrNotInPod`; bad or escaped UIDs, short
+  or non-hex container ids, unknown runtimes, CRI-O's conmon, v1
+  controllers naming different pods and text not in the kernel's
+  format are errors. The strings are built to the formats, not
+  captured from kind: the kind capture is task yb4's.
+- `internal/cli/podproject_test.go`: with all three downward-API
+  variables set `run`'s project defaults to the namespace
+  (decision #21) and `-project` still wins; one stray variable,
+  or a namespace that is no valid label, leaves `-project`
+  required.
+
+Not checked here (task yb4, on kind): that the image builds and
+runs, that `kubectl patch` and `kubectl debug --custom` accept the
+files and carry the capabilities and mounts, and the oldest
+runtime whose `RuntimeDefault` lets `bpf` through.
 
 ## Performance baselines
 

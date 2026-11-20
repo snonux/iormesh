@@ -49,7 +49,7 @@ func TestResolveRefusesContext(t *testing.T) {
 
 // TestValidateRefusesUnpinnedImage: a tag alone, a short or upper-case
 // digest, another algorithm, or no image at all (DefaultImage is empty
-// until task vb4 publishes ours) is refused.
+// until task yb4 publishes ours) is refused.
 func TestValidateRefusesUnpinnedImage(t *testing.T) {
 	digest := testImage[strings.Index(testImage, "@"):]
 	for _, img := range []string{

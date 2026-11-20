@@ -21,7 +21,8 @@ import (
 const TraceRoot = "/opt/iormesh/traces"
 
 // TracerBinary is the tracer's name inside the image, found on the
-// image's PATH (task vb4 builds the image).
+// image's PATH (scripts/container/tracer-image.Containerfile sets it;
+// task yb4 builds the image).
 const TracerBinary = "iormesh"
 
 // removeBatch bounds how many file names one remove exec carries, far

@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"iormesh/internal/correlate"
+	"iormesh/internal/k8s"
 	"iormesh/internal/project"
 	"iormesh/internal/segment"
 	"iormesh/internal/target"
@@ -123,15 +125,45 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 	if fs.NArg() != 0 {
 		return runConfig{}, fmt.Errorf("%w: unexpected argument %q", errUsage, fs.Arg(0))
 	}
+	if *f.project == "" {
+		label, err := podProject(podEnv)
+		if err != nil {
+			return runConfig{}, err
+		}
+		*f.project = label
+	}
 	return f.config()
+}
+
+// podEnv reads the downward-API variables podProject looks at. A variable
+// like processAlive, so flag tests do not depend on the test's own
+// environment.
+var podEnv = os.Getenv
+
+// podProject is run's default project label: in a pod (all three
+// downward-API variables set, k8s.PodFromEnv) the pod's namespace
+// (decision #21), elsewhere "", which validateRun then refuses as a
+// missing -project. Only run defaults it: start's unit is a systemd one,
+// and there is no systemd in a pod (PLAN.md M7).
+func podProject(getenv func(string) string) (string, error) {
+	pod, ok := k8s.PodFromEnv(getenv)
+	if !ok {
+		return "", nil
+	}
+	label, err := k8s.ProjectForNamespace(pod.Namespace)
+	if err != nil {
+		return "", fmt.Errorf("%w: no -project and the pod's %v", errUsage, err)
+	}
+	return label, nil
 }
 
 func addRunFlags(fs *flag.FlagSet) runFlags {
 	return runFlags{
-		pids:     fs.String("pid", "", "comma-separated PIDs to trace, with their children"),
-		pattern:  fs.String("pattern", "", "glob over the command line or executable, matched on exec"),
-		port:     fs.Uint("listen-port", 0, "trace the owners of the TCP socket listening on this port"),
-		project:  fs.String("project", "", "project label (required)"),
+		pids:    fs.String("pid", "", "comma-separated PIDs to trace, with their children"),
+		pattern: fs.String("pattern", "", "glob over the command line or executable, matched on exec"),
+		port:    fs.Uint("listen-port", 0, "trace the owners of the TCP socket listening on this port"),
+		project: fs.String("project", "",
+			"project label (required; in a pod run defaults to the pod's namespace, from the downward API)"),
 		out:      fs.String("out", "", "directory for the NDJSON trace files"),
 		duration: fs.Duration("duration", defaultDuration, "stop after this long"),
 		ready:    fs.String("ready", "", "create this file once the probes are attached"),

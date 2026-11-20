@@ -25,10 +25,12 @@ func fakeProcs(t *testing.T, pids ...uint32) {
 	for _, p := range pids {
 		live[p] = true
 	}
-	origAlive, origIdentity := processAlive, processIdentity
+	origAlive, origIdentity, origEnv := processAlive, processIdentity, podEnv
 	processAlive = func(pid uint32, _ uint64) bool { return live[pid] }
 	processIdentity = func(uint32) correlate.Identity { return correlate.Identity{Comm: "x", StartNS: 1} }
-	t.Cleanup(func() { processAlive, processIdentity = origAlive, origIdentity })
+	// No pod: the test's own environment must not supply a -project.
+	podEnv = func(string) string { return "" }
+	t.Cleanup(func() { processAlive, processIdentity, podEnv = origAlive, origIdentity, origEnv })
 }
 
 func TestParseRunFlags(t *testing.T) {

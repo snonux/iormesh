@@ -171,8 +171,11 @@ func (k *Kubectl) debugArgs(custom string, argv []string) []string {
 }
 
 // customSpec is the --custom partial container spec
-// (docs/implementation.md M7 step 8): #13's security context and the two
-// volume mounts.
+// (docs/implementation.md M7 step 8): #13's security context, the two
+// volume mounts, and the pod's identity from the downward API
+// (PodFromEnv: how an in-pod tracer under a private cgroup namespace
+// knows its pod, and what its project defaults to). The sidecar patch
+// (manifest_spec.go) is this spec too, for the minimal profile.
 func customSpec(p Profile) map[string]any {
 	sc := map[string]any{"runAsUser": 0}
 	if p == ProfileMinimal {
@@ -183,6 +186,7 @@ func customSpec(p Profile) map[string]any {
 		sc["capabilities"] = map[string]any{"drop": []string{"ALL"}, "add": minimalCaps}
 	}
 	return map[string]any{
+		"env":             downwardEnv(),
 		"securityContext": sc,
 		"volumeMounts": []map[string]any{
 			{"name": TracefsVolume, "mountPath": TracefsPath, "readOnly": true},

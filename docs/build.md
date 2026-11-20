@@ -205,9 +205,22 @@ fails up front with the fix named.
   (binfmt_misc `qemu-aarch64`); without it the run is skipped
   with a notice. Module downloads and the Go build cache live in
   the `iormesh-gomod` and `iormesh-gocache` volumes.
-- **Not here yet**: the published tracer *image* for `kubectl
-  debug` and sidecars is M7; the capability set it runs with is
-  provisional (PLAN.md decision #13,
+- **The tracer image** (M7, task vb4; not built or run yet —
+  task yb4): `scripts/container/tracer-image.Containerfile`
+  packs a release tracer from `dist/` and `iormesh-agent.jar`
+  into `FROM scratch` — no shell, no libc — at the paths a server
+  install uses (`/opt/iormesh/bin/iormesh`, traces under
+  `/opt/iormesh/traces`), run as uid 0. Build it from the
+  repository root after `mage buildPodman` and `mage agentBuild`,
+  one image per arch (`podman build --platform linux/amd64 -f
+  scripts/container/tracer-image.Containerfile .`), push it, and
+  put the digest in `k8s.DefaultImage` (internal/k8s) before
+  `mage k8sManifests`; until then the manifests name an
+  unpullable `registry.invalid` placeholder. Known gap: the image
+  has no `/etc/machine-id`, which `iormesh run` reads for the host
+  id, so a run in it fails until the pod's host id is settled
+  (task 7f4, docs/implementation.md M7 step 6). The capability set
+  it runs with is provisional (PLAN.md decision #13,
   [security.md](security.md) "Kubernetes").
 - **kubectl on the controller** (k8s mode only, task wb4): 1.30
   or later. The debug container's security context and volume
