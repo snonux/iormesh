@@ -760,6 +760,22 @@ Gated by S1 — done; the design below is S1's result
   limit is unchanged, and it ends in a pass or an explicit owner
   decision recorded here, never a quiet relaxation.
 
+  Acceptance run (2026-11-20, task 5b4): `mage integrationTest`
+  40 / 40 on two consecutive runs with no skips and zero lost
+  or skipped records at load 9–12 (Java method flow, HTTP —
+  JDK client and server, sendAsync, TLS, redaction, Servlet,
+  Apache, OkHttp, Netty — OTEL ids, DNS, live attach at start
+  and mid-run, the class-load map); `mage agentTest` green on
+  JDK 17, 21, 25 and 27-ea; workloadTest, unit tests and lint
+  green. One earlier run lost method-flow's first open to a
+  probe attach still in flight (I/O before a JVM's Java mark
+  probes attach stays none by design); the harness now releases
+  a `-javaagent` workload only after the tracer's "joined" line.
+  Schema v1 is frozen in full (docs/output-contract.md). Open
+  beyond ee4: the third-party hook gaps listed above, the Netty
+  client side unit-tested only, attaching JVMs a pattern session
+  sees start, and cross-mount-namespace attach (M7).
+
 ### M4 — Controller (`iormeshctl`): push, collect, merge locally
 
 The primary deployment and collection path for plain Linux.

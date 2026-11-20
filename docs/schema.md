@@ -1,4 +1,4 @@
-# Trace schema (v1, frozen outside http)
+# Trace schema (v1, frozen)
 
 The field-level reference of the trace output. The contract's
 goals and guarantees are in [output-contract.md](output-contract.md)
@@ -6,12 +6,13 @@ and PLAN.md ("Trace output contract"); this file says what is on
 disk. The Go form — and the authority when this file lags — is the
 cgo-free package `internal/schema`.
 
-Version 1 is frozen outside `http` since M2's acceptance (2026-11-19):
-spikes S1 (Java ↔ syscall join) and S2 (cross-host join) settled their
-fields, and M2 the rest of the traced surface. What M3 still owns
-(`http`, an event kind since task 3b4) is marked *provisional*. Fields
-are only ever appended, and appended fields are optional, so an older
-reader never sees a changed meaning. Enum values (`drop_reason`,
+Version 1 is frozen: spikes S1 (Java ↔ syscall join) and S2 (cross-host
+join) settled their fields, M2's acceptance (2026-11-19) the rest of the
+traced surface, and M3's acceptance (2026-11-20) the Java, OTEL, `http`
+and `dns` fields and the methods, threads, classes and stacks tables,
+which were provisional until then. Fields are only ever appended,
+and appended fields are optional, so an older reader never sees a
+changed meaning. Enum values (`drop_reason`,
 `end_reason`, …) are appended the same way as event kinds, so a reader
 should pass an unknown value through. One meaning did narrow:
 task vd4 moved skipped program runs out of a plain `drop`'s `args.lost`
@@ -82,11 +83,11 @@ Required fields are always present; a zero is a real zero.
 | `conn_id` | string, optional | the connection a socket event belongs to; across hosts assigned by the merge's ISN-pair join (S2, decision #26) |
 | `attribution` | string | `java` or `none` — missing attribution is data |
 | `java` | object, optional | `{thread, stack, carrier}`, set exactly when attribution is `java`; `thread` is the Java thread name, `stack` method ids of `methods.ndjson`, innermost first (settled by S1); `carrier` (appended in M3) is `true` on a virtual thread's I/O, whose `thread` then names the carrier — see "Java attribution" |
-| `http` | object, optional | the request, set exactly on `http` events — see "HTTP events" (*provisional until M3 closes*) |
+| `http` | object, optional | the request, set exactly on `http` events — see "HTTP events" |
 | `session` | object, optional | the host description, set exactly on `session` events (below) |
 | `stack_id` | int, optional | the native user stack the thread entered the syscall with: an id of `stacks.ndjson` (≥ 1); only with `-native-stacks` (below) |
 | `otel` | object, optional | `{trace_id, span_id}`, the OpenTelemetry span the Java code ran in; only with attribution `java`, absent outside a span (appended in M3) — see "OpenTelemetry span context" |
-| `dns` | object, optional | `{host, addrs}`, set exactly on `dns` events (appended in M3, task wd4; *provisional until M3 closes*) — see "DNS events" |
+| `dns` | object, optional | `{host, addrs}`, set exactly on `dns` events (appended in M3, task wd4) — see "DNS events" |
 
 `(pid, pid_incarnation, fd, fd_gen)` names one fd instance, even
 when a library's open and a later socket land on the same number.

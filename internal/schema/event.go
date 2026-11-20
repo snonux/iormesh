@@ -134,8 +134,8 @@ type Event struct {
 	// Java is set exactly when Attribution is AttributionJava (shape
 	// settled by spike S1: nested thread + stack).
 	Java *Java `json:"java,omitempty" parquet:"java,optional"`
-	// HTTP is set exactly on http events (KindHTTP); provisional until
-	// M3 closes.
+	// HTTP is set exactly on http events (KindHTTP); frozen with M3's
+	// acceptance.
 	HTTP *HTTP `json:"http,omitempty" parquet:"http,optional"`
 	// Session describes the traced host; set exactly on session events.
 	// A nested object rather than envelope fields because only one event
@@ -156,7 +156,7 @@ type Event struct {
 	Otel *Otel `json:"otel,omitempty" parquet:"otel,optional"`
 	// DNS is set exactly on dns events (KindDNS): a host name the JVM
 	// resolved and its addresses (decision #8). Appended after Otel (task
-	// wd4); provisional until M3 closes.
+	// wd4); frozen with M3's acceptance.
 	DNS *DNS `json:"dns,omitempty" parquet:"dns,optional"`
 }
 

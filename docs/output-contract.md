@@ -9,10 +9,12 @@ the plan is the source of truth.
   in-repo in [schema.md](schema.md). Schema v1, drafted in M1,
   is the cgo-free `internal/schema` package; S1 and S2 have
   settled the Java and cross-host fields. With M2's acceptance
-  (2026-11-19) every field outside `http` is **frozen**: its
+  (2026-11-19) every field outside `http` was **frozen**: its
   name, type and meaning no longer change, only new optional
-  fields and kinds are appended. `http` stays provisional until
-  M3 settles it.
+  fields and kinds are appended. M3's acceptance (2026-11-20)
+  froze the rest: `java` (thread, stack, carrier), `otel`,
+  `http`, `dns`, `stack_id` and the methods, threads, classes
+  and stacks tables. All of v1 is frozen now.
   Readers are strict: a record with an unknown or mis-cased
   key, a missing or null field, another schema version or an
   unknown event kind is rejected, never half-read.

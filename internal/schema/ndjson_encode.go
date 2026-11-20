@@ -193,7 +193,7 @@ func appendJava(dst []byte, j *Java) []byte {
 	return o.close()
 }
 
-// appendHTTP appends the provisional HTTP object; every member is
+// appendHTTP appends the HTTP object; every member is
 // omitempty, so zero values are left out, not only nil ones.
 func appendHTTP(dst []byte, h *HTTP) []byte {
 	o := openObject(dst)
