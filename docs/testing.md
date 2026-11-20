@@ -877,6 +877,48 @@ pinned threshold (0.8) are in `eval/questions/microservices.yaml`;
 results land in `eval/results/<date>-<scenario>.json`. Rerun it on
 every schema change (PLAN.md M5).
 
+## K8s capability set (task ub4)
+
+PLAN.md decision #13 (provisional) names the capabilities the
+tracer needs without `privileged`. They were checked on the host,
+not in a cluster (2026-11-20, Fedora kernel 7.2.15, SELinux off,
+JDK 25.0.4, libbpfgo v0.9.2): a container's root is uid 0 with a
+reduced capability set, which `setpriv` reproduces by shrinking
+the bounding set before exec. The tracer and the agent jar were
+installed root-owned in a root-owned directory (the jar trust
+rule; a binary under a 0700 home is not even executable without
+`DAC_OVERRIDE`), and a fresh JVM running `Files.readAllBytes` in a
+loop as an ordinary user was traced with live attach:
+
+```
+sudo -n setpriv --bounding-set=-all,+bpf,+perfmon,+sys_resource,\
++sys_ptrace,+dac_override,+kill,+checkpoint_restore --inh-caps=-all -- \
+  /run/iormesh-x/iormesh run -pid JVM -project x -out OUT -duration 6s \
+  -spool SPOOL -agent /run/iormesh-x/iormesh-agent.jar
+```
+
+With that set the run matched an unrestricted root run: the
+agent loaded, `java agent of pid N joined, 37 natives probed`, and
+≈310 of ≈360 brackets attributed in both. Each capability left
+out alone (one fresh JVM per run):
+
+| Left out | What broke |
+|---|---|
+| `BPF` | libbpf's probe load: `Couldn't load trivial BPF program` |
+| `PERFMON` | loading the first tracing program (`handle_inet_sock_set_state`): EPERM |
+| `SYS_RESOURCE` | `load embedded module: error setting rlimit` — libbpfgo's 512 MiB memlock bump; the same run under `prlimit --memlock=unlimited` traces fine without it |
+| `SYS_PTRACE` | kernel tracing works; attach fails: `JVM root: permission denied` (`/proc/<pid>/root`) |
+| `DAC_OVERRIDE` | kernel tracing works; attach fails: `connect .java_pid<N>: permission denied` (the JVM's 0600 socket) |
+| `KILL` | kernel tracing works; attach fails: `SIGQUIT: operation not permitted` |
+| `CHECKPOINT_RESTORE` | the agent loads, but `java mark: none of the 37 natives found` and nothing is attributed (`/proc/<pid>/map_files`) |
+
+Kernel-only tracing (`run -pid` of a shell loop, no `-spool`)
+needs `BPF`, `PERFMON` and `SYS_RESOURCE` — or just the first two
+with the memlock limit raised. Not covered here, and left for the
+kind run: tracefs and BTF inside a container, the runtime's
+seccomp and AppArmor defaults, PID namespaces (PLAN.md #13 — the
+tracer targets host pids today), and a non-root tracer uid.
+
 ## Performance baselines
 
 S3 (PLAN.md, decision #25) measures overhead against a load the

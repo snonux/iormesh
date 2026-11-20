@@ -359,11 +359,46 @@ truth.
   the traces already redacted (decision #9), and `iormeshctl
   services` quotes control characters from the traces before
   they reach the terminal.
-- **Kubernetes**: eBPF privileges are node-kernel-wide — a
-  sidecar with CAP_BPF can in principle observe any process on
-  the node. iormesh scopes itself by config to the pod it runs
-  in, is added only by the deployment owner's explicit patch,
-  and its container image is signed like the tracer binary.
+- **Kubernetes** (M7; decisions #13, #14, #18 are provisional —
+  PLAN.md "Provisional — M7"): eBPF privileges are
+  node-kernel-wide — a container with `CAP_BPF` and
+  `CAP_PERFMON` can in principle read any process's memory and
+  the kernel's. What the minimal profile buys over `privileged`
+  is no devices, no mounts, no namespace escapes and no
+  `CAP_SYS_ADMIN`; it does not make BPF pod-local. The tracer
+  container:
+  - runs as uid 0, `allowPrivilegeEscalation: false`, drops ALL
+    and adds `BPF`, `PERFMON`, `SYS_RESOURCE` (libbpfgo's
+    memlock bump, not the kernel), plus `SYS_PTRACE`,
+    `DAC_OVERRIDE`, `KILL` and `CHECKPOINT_RESTORE` when it
+    attributes Java — each traced to the code that needs it in
+    PLAN.md #13 and checked by leaving it out
+    ([testing.md](testing.md#k8s-capability-set-task-ub4));
+  - mounts the host's tracefs read-only and nothing else of the
+    host; traces and the spool live in the pod;
+  - scopes itself to the pod by its PID namespace: once
+    targeting keys by the pid in the tracer's own namespace (M7
+    code), a process outside the pod cannot be named as a
+    target, and `SYS_PTRACE`/`DAC_OVERRIDE`/`KILL` reach only
+    what that namespace's `/proc` shows — the pod. `hostPID` is
+    not used: it would give the app containers the node's
+    process table too;
+  - is reached only through the operator's kubectl, with the
+    cluster named by the registry (`--context` always explicit,
+    never the kubeconfig's current context) — the registry stays
+    the deploy boundary;
+  - comes as an image pinned by digest and signed like the
+    tracer binary; a sidecar is added only by the deployment
+    owner's explicit patch, a debug container only by the
+    operator's `iormeshctl`.
+  `privileged: true` is the fallback where the minimal profile
+  cannot run (old kernels, SELinux-enforcing nodes, runtimes
+  without the newer capability names); it widens what a
+  compromised tracer could do to the whole node, so use it only
+  where the minimal set was tried. Pod Security `baseline` and
+  `restricted` refuse both profiles: the tracer needs a
+  namespace at the `privileged` level or an exemption — the
+  owner's call per namespace.
 - **Rehearsed first.** Expansion rules — allowlist, hop limit,
   cycle termination — are proven against the test workload in a
   sandbox before they are ever used on real hosts.

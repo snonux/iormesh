@@ -1575,24 +1575,29 @@ operator's SSH key from the controller.
 Later phase — plain Linux servers (M4) come first.
 
 - iormesh runs as a sidecar (or `kubectl debug` ephemeral
-  container) in the target pod, with the privileged security
-  context eBPF needs (capability set: decision #13). It traces
-  the pod's containers — and only those, by config. (No
+  container) in the target pod, with the capabilities eBPF and
+  the Java attach need — a minimal set, `privileged` only as the
+  fallback (decision #13, provisional). It traces the pod's
+  containers — and only those: targeting becomes PID-namespace
+  aware, so a tracer in the pod's namespace keys its targets by
+  the pods' own pids and cannot name a process outside it. (No
   systemd here: the container is the unit, and its resource
   limits are the caps.)
 - `kubectl debug` deployments are driven by `iormeshctl`, with
   the kubectl context (cluster/namespace from the kubeconfig)
   and the debug container image both configurable —
   defaulting to our published tracer image, pinned by digest.
-  The concrete config shape and examples are TBD (owner to
-  provide them; decision #18).
+  The config shape is provisional and the owner's examples are
+  pending (decision #18).
 - Pod identity enrichment: map host PIDs/cgroups → pod, namespace,
   container, so the graph speaks "pod checkout-7d9f (ns prod)"
   instead of bare host PIDs. In k8s mode the project defaults
   to the namespace (decision #21).
 - Java agent live-attach through the shared process namespace
-  (`shareProcessNamespace: true`; attach socket reached via
-  `/proc/<pid>/root`) — decision #14.
+  (`kubectl debug --target`, or `shareProcessNamespace: true`
+  for a sidecar; attach socket reached via `/proc/<pid>/root`),
+  with the agent jar and spool staged inside the JVM's root —
+  decision #14, provisional.
 - Service-NAT correlation: kube-proxy ClusterIP DNAT/SNAT means
   the two ends of a connection observe different 4-tuples; the
   mesh must join them (extends M4's NAT-tolerant join to k8s
@@ -1622,9 +1627,11 @@ Later phase — plain Linux servers (M4) come first.
 
 Numbers are stable ids — references elsewhere in this plan and in
 the docs keep working — so the groups below are not in numeric
-order. Three groups: decided, open (grouped by the milestone they
+order. Four groups: decided, open (grouped by the milestone they
 block, each with a default so work is never stalled on a missing
-answer), and deferred.
+answer), provisional (settled under the 2026-11-20 sequencing
+relaxation, each naming what the owner must confirm and what
+would overturn it), and deferred.
 
 ### Decided
 
@@ -2071,27 +2078,139 @@ answer), and deferred.
   5 s and before every rotation; the controller half waits
   for `collect`/`build`.
 
-### Open — blocks M7
+### Provisional — M7 (2026-11-20)
 
-- **#13 K8s privilege profile** — full privileged
-  SecurityContext vs the minimal capability set (CAP_BPF,
-  CAP_PERFMON, and the legacy CAP_SYS_ADMIN/CAP_SYS_RESOURCE
-  paths) plus BTF mounts; what to require and document.
-- **#14 K8s Java attach** — live attach via the shared process
-  namespace (`/proc/<pid>/root`) vs `-javaagent` injection via
-  JAVA_TOOL_OPTIONS (needs deployment changes to the app);
-  inherits #2's caveats.
-- **#15 Route-map source of truth** — a static YAML map (works
-  from outside any cluster) vs k8s API discovery (Ingress/
-  IngressRoute objects, Traefik's API, service→workload
-  resolution) vs Traefik access logs as a live source; and
-  their precedence when they disagree.
-- **#18 K8s debug-container config in iormeshctl** — the
-  kubectl context (cluster/namespace) and the debug container
-  image must both be configurable; where they live (flags,
-  per-host registry entries, a k8s section in the server
-  config) settles with concrete fleet examples, to be
-  provided. Includes the k8s trace-fetch path (#12).
+Settled provisionally under the sequencing relaxation (see
+Milestones) with the plan's own leanings, task ub4. Each names
+what would overturn it and what the owner must confirm; none is
+proven on kind yet (the kind run needs Docker, which the
+settling host did not run). Fleet facts — kubectl contexts,
+namespaces, registries, kernels — are the owner's and appear
+here only as placeholders.
+
+- **#13 K8s privilege profile** — *Provisional (2026-11-20):*
+  the minimal capability set, `privileged: true` the documented
+  fallback. The tracer container runs as uid 0 with
+  `allowPrivilegeEscalation: false`, drops ALL and adds:
+  - `BPF` and `PERFMON` — loading tracing programs (tracepoint,
+    raw tracepoint, uprobe_multi), the ring buffer and stack map,
+    and the `perf_event_open` that attaches each tracepoint;
+  - `SYS_RESOURCE` — only because libbpfgo v0.9.2's
+    `NewModuleFromBuffer` raises RLIMIT_MEMLOCK to 512 MiB
+    before every load; the kernel (≥ 5.11) charges BPF memory to
+    the memcg and needs no limit. A load path that skips the bump
+    removes it (M7 code);
+  - for Java attribution (`-spool`, `-agent`, `attach`):
+    `SYS_PTRACE` (the JVM's `/proc/<pid>/root`, `cwd`, `maps`,
+    `environ` across uids — also `-listen-port`'s fd scan and
+    `-native-stacks`), `DAC_OVERRIDE` (the JVM's 0600 attach
+    socket, its 0600 ring, its working directory), `KILL` (the
+    one SIGQUIT to a JVM of another uid) and
+    `CHECKPOINT_RESTORE` (`/proc/<pid>/map_files`, by which the
+    Java mark opens the very `libjava.so` mapped).
+  No `SYS_ADMIN`: every attach type the tracer uses checks
+  `CAP_BPF`/`CAP_PERFMON` on kernels ≥ 5.8, the oldest that has
+  them (the ring buffer needs 5.8 anyway). Measured on the host,
+  not assumed: this set traces and attaches as root does, and
+  each capability left out alone breaks a step it is listed for
+  ([testing.md](docs/testing.md#k8s-capability-set-task-ub4)).
+  Also required: tracefs mounted read-only from the host
+  (`/sys/kernel/tracing`, where libbpf reads tracepoint ids — a
+  container's sysfs has none), BTF from the container's own
+  sysfs (`/sys/kernel/btf/vmlinux`), and a seccomp profile that
+  lets `bpf`, `perf_event_open`, `openat2`, `pidfd_open` and
+  `pidfd_send_signal` through (`Unconfined` for the tracer
+  container until a runtime's `RuntimeDefault` is shown to).
+  Found in the code: the tracer targets *host* PIDs (target_map
+  is keyed by the kernel's tgid, `/proc` read as the host's), so
+  in a pod's PID namespace `-pid` would name nothing. M7 makes
+  targeting namespace-aware — the tracer passes its PID
+  namespace and the BPF side keys by the pid in it
+  (`bpf_get_ns_current_pid_tgid`) — which also scopes the
+  tracer to the pod by construction; `hostPID` is the rejected
+  shortcut (it hands the app containers the node's process
+  table). Fallback to `privileged`: a kernel before 5.8; a
+  runtime that rejects the newer capability names; an
+  SELinux-enforcing node whose container type is denied `bpf`;
+  an AppArmor or seccomp default that cannot be relaxed per
+  container; a node-level debug pod. Privileged does not help
+  under kernel lockdown (confidentiality): no tracing there at
+  all. Overturned if: the kind run (or a fleet node) needs a
+  capability beyond this list, or namespace-aware targeting
+  proves unworkable (then a node-level tracer with `hostPID`
+  takes over the in-pod design). Owner to confirm: node kernels
+  and LSMs, runtime and seccomp defaults, and the Pod Security
+  level of target namespaces — `baseline` and `restricted`
+  refuse this set and `privileged` alike, so the tracer needs a
+  `privileged`-level namespace or an exemption.
+- **#14 K8s Java attach** — *Provisional (2026-11-20):* live
+  attach through the shared process namespace is the k8s
+  default; `-javaagent` via `JAVA_TOOL_OPTIONS` stays the
+  documented alternative for pods that restart anyway, for JVMs
+  run with `-XX:-EnableDynamicAgentLoading`, and for a future
+  JDK that disables dynamic loading by default (#2's caveats
+  apply unchanged). The ephemeral container joins the target
+  container's namespace (`kubectl debug --target`), so no pod
+  change or restart; a sidecar needs `shareProcessNamespace:
+  true`. The handshake is ge4's, unchanged: trigger file and
+  socket reached through `/proc/<pid>/root` and `cwd`,
+  `SO_PEERCRED` naming the target, as uid 0 (HotSpot accepts
+  root or its own euid). M7 code: the JVM resolves the jar and
+  spool paths in its own mount namespace, and an ephemeral
+  container cannot add a volume to the app container, so the
+  tracer stages both inside the JVM's root — a root-owned
+  directory under its `/tmp`, created with `RESOLVE_IN_ROOT` —
+  and reads the ring through `/proc/<pid>/root` (#27 foresaw
+  this). Capabilities: #13's Java four. Overturned if: the
+  owner's JVMs run with dynamic loading disabled or a
+  read-only root without a writable `/tmp` (then `-javaagent`
+  becomes the default), or the kind run shows the runtime's
+  AppArmor profile blocks the cross-container `/proc` reads.
+  Owner to confirm: JDK versions and flags in the fleet, and
+  whether app containers keep a writable `/tmp`.
+- **#15 Route-map source of truth** — *Provisional
+  (2026-11-20):* a static YAML map first, k8s API discovery
+  second, Traefik's API and access logs not in v1. The map lives
+  on the controller (`~/.config/iormesh/routes.yaml`, the
+  registry's ownership and mode rules) and maps FQDN → ingress →
+  service → deployment/statefulset; it works from outside any
+  cluster. Discovery, once built, runs on the controller with
+  the operator's kubectl (read-only `get` of Ingress,
+  IngressRoute, Service, EndpointSlice and the owning workload),
+  never from a tracer. Precedence: a static entry wins over a
+  discovered one for the same FQDN; discovery fills only FQDNs
+  the file lacks; observed http events (host + path from the
+  agent) never change a route — a route they contradict is
+  flagged in the build. Traefik's API needs a connection the
+  controller does not otherwise make, and its logs need log
+  access; both wait for a need. Overturned if: the owner's
+  ingress routes change too often for a hand-kept file
+  (discovery moves first), or the ingress is not Traefik.
+  Owner to confirm: the ingress controller and CRDs in use, and
+  a sample of real routes.
+- **#18 K8s debug-container config in iormeshctl** —
+  *Provisional — owner's examples pending (2026-11-20):* k8s
+  targets live in the registry beside `servers:`, as a `k8s:`
+  section of defaults and clusters plus a `pods:` list whose
+  entries carry the same `projects:` as a server; flags
+  override per run (`-context`, `-namespace`, `-image`). Order:
+  flag, then pod entry, then cluster, then the built-in default
+  image (ours, pinned by digest). Every kubectl call passes
+  `--context` explicitly — the registry, never the kubeconfig's
+  current context, picks the cluster, as it picks hosts for SSH.
+  Mode `debug` (ephemeral container, the default) or `sidecar`
+  (a patch the deployment owner applies); profile `minimal`
+  (#13's set, via `kubectl debug --custom`) or `privileged`
+  (`--profile=sysadmin`). Trace fetch (#12): `kubectl exec` of
+  a tracer subcommand that streams `ready/`'s segments as a tar
+  to stdout, unpacked by the controller under collect's rules
+  (only `*.parquet` directly in `ready/`, no links or modes),
+  then removed by a second exec — no `tar` or rsync needed in
+  the image. Schema sketch, placeholders only:
+  [implementation.md](docs/implementation.md#m7--kubernetes).
+  Overturned by: the owner's examples. Owner to provide: real
+  contexts, namespaces, the image registry, and how pods are
+  picked (labels or names).
 
 ### Deferred — not in v1
 

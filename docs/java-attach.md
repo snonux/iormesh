@@ -95,7 +95,11 @@ the JVM's own socket: the tracer still listens on nothing.
   1733) is writable by all.
 - **Containers.** Paths are resolved inside the JVM's mount
   namespace: the jar and the spool must exist there under the
-  same names. Attaching into containers is M7's (decision #14).
+  same names. Attaching into containers is M7's (decision #14,
+  provisional): the tracer will stage both inside the JVM's root
+  and needs `SYS_PTRACE`, `DAC_OVERRIDE`, `KILL` and
+  `CHECKPOINT_RESTORE` there ([security.md](security.md)
+  "Kubernetes").
 
 ## Safety
 

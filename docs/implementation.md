@@ -4942,34 +4942,151 @@ where a real round deploys over SSH.
 
 ## M7 — Kubernetes
 
-Later phase; only the shape is fixed here.
+Later phase. Decisions #13, #14, #15 and #18 are provisional
+(PLAN.md "Provisional — M7", task ub4): build to them, prove
+them on kind, and expect #18 to move once the owner's fleet
+examples arrive.
 
-- `internal/k8s/cgroup.go`: parse `/proc/<pid>/cgroup` →
-  pod UID + container id (cgroup v1 and v2 path forms; unit-test
-  against captured strings from kind).
-- Pod names: resolved on the controller through the API server
-  (`kubectl get pods -o json`), joined by pod UID — the tracer
-  never talks to the API.
-- `deploy/sidecar-patch.yaml`: the strategic-merge patch adding
-  the tracer container with `shareProcessNamespace: true`, the
-  capabilities from decision #13 and a shared `emptyDir` for
-  traces and the agent spool.
-- `iormeshctl` gains a k8s transport implementing the same
-  interface as SSH:
+Order of work — the first three are tracer changes the rest
+depends on:
 
-  ```go
-  // Transport is how the controller reaches a tracer.
-  type Transport interface {
-      Run(ctx context.Context, argv ...string) ([]byte, error)
-      Fetch(ctx context.Context, remoteDir, localDir string) error
-  }
-  ```
+1. **PID-namespace-aware targeting** (#13). Today `target_map` is
+   keyed by the kernel's tgid and `/proc` is read as the host's,
+   so a tracer inside a pod's PID namespace targets nothing. The
+   tracer puts its own namespace (`stat /proc/self/ns/pid`: dev
+   and inode) in rodata; the BPF side keys targets, children and
+   the pattern's pending set by
+   `bpf_get_ns_current_pid_tgid(dev, ino, …)`, whose failure for
+   a task outside the namespace is the filter's "no". Records
+   keep the host tgid as well, so cross-host joins and the
+   controller's pod lookup do not change; every `/proc` lookup
+   uses the namespace pid. On the host the namespace is the
+   init one and nothing changes — the existing root suites are
+   the regression check.
+2. **Memlock without `CAP_SYS_RESOURCE`** (#13). libbpfgo
+   v0.9.2's `NewModuleFromBuffer` sets RLIMIT_MEMLOCK to 512 MiB
+   before every load, which fails without the capability. Load
+   through `NewModuleFromFileArgs{SkipMemlockBump: true}` from a
+   memfd of the embedded object (libbpf ≥ 1.0 bumps only on
+   kernels without memcg accounting), or patch libbpfgo; then
+   drop `SYS_RESOURCE` from the set, PLAN.md #13 and the docs.
+3. **Java staging inside the JVM's root** (#14). The jar and
+   spool paths are resolved in the JVM's mount namespace, and an
+   ephemeral container cannot give the app container a volume.
+   For a JVM in another mount namespace (`sameMountNS` false),
+   `attach` and `run -agent` create a root-owned 0755 directory
+   under the JVM's `/tmp` through the `RESOLVE_IN_ROOT` fd
+   `internal/javaattach` already holds, copy the jar in (the
+   trust rule still holds: `/tmp` is sticky), make the spool
+   beside it 1733, pass those paths, and let
+   `internal/agentspool` open the ring through
+   `/proc/<pid>/root` with its existing checks. A JVM without a
+   writable `/tmp` gets no Java attribution and a note naming
+   `-javaagent`.
+4. `internal/k8s/cgroup.go`: parse `/proc/<pid>/cgroup` → pod
+   UID + container id (cgroup v1 and v2 path forms; unit-test
+   against captured strings from kind). Under a private cgroup
+   namespace (cgroup v2's default) an in-pod tracer sees `0::/`;
+   it then takes its pod from the downward API (`POD_NAME`,
+   `POD_NAMESPACE`, `POD_UID` in its env) and the controller
+   maps processes to containers — settle how on kind.
+5. Pod names: resolved on the controller through the API server
+   (`kubectl get pods -o json`), joined by pod UID — the tracer
+   never talks to the API.
+6. The image and its security context (#13): the tracer image
+   (static binary and agent jar, no shell needed), pinned by
+   digest. The container spec, shared by the sidecar patch and
+   the debug container's `--custom` file:
 
-  M4 codes against this interface from day one, with SSH as the
-  only implementation.
-- ClusterIP join: S2's key if it survives kube-proxy's DNAT;
-  otherwise conntrack on the node.
-- `internal/routemap`: static YAML first, API discovery second
-  (decision #15).
+   ```yaml
+   securityContext:
+     runAsUser: 0
+     allowPrivilegeEscalation: false
+     seccompProfile: {type: Unconfined}  # until RuntimeDefault passes bpf etc.
+     capabilities:
+       drop: [ALL]
+       add: [BPF, PERFMON, SYS_RESOURCE,          # kernel tracing
+             SYS_PTRACE, DAC_OVERRIDE, KILL,      # Java attribution
+             CHECKPOINT_RESTORE]
+   volumeMounts:
+     - {name: tracefs, mountPath: /sys/kernel/tracing, readOnly: true}
+     - {name: iormesh-traces, mountPath: /opt/iormesh/traces}
+   # pod volumes: tracefs = hostPath /sys/kernel/tracing (Directory),
+   # iormesh-traces = emptyDir with a sizeLimit
+   ```
+
+   `deploy/sidecar-patch.yaml`: the strategic-merge patch adding
+   that container with `shareProcessNamespace: true`. The debug
+   path: `kubectl debug --target=<container> --image=<digest>
+   --custom=<that file>`; the `privileged` profile swaps the file
+   for `--profile=sysadmin`. Check on kind that `--custom`
+   carries the capabilities, and which volume mounts an
+   ephemeral container may use.
+7. `iormeshctl` gains a k8s transport implementing the same
+   interface as SSH:
+
+   ```go
+   // Transport is how the controller reaches a tracer.
+   type Transport interface {
+       Run(ctx context.Context, argv ...string) ([]byte, error)
+       Fetch(ctx context.Context, remoteDir, localDir string) error
+   }
+   ```
+
+   M4 codes against this interface from day one, with SSH as the
+   only implementation. The k8s `Run` is `kubectl --context C -n
+   NS exec POD -c iormesh -- iormesh …`; `Fetch` runs a tracer
+   subcommand that writes `ready/`'s segments as a tar stream to
+   stdout, unpacks only `*.parquet` directly in `ready/` (no
+   links, no modes — collect's rules), then removes what it took
+   with a second exec. No `tar` or rsync in the image.
+8. Registry: the `k8s:` and `pods:` sections (#18). **Provisional
+   — owner's examples pending**; every value below is a
+   placeholder, not a fleet fact:
+
+   ```yaml
+   # ~/.config/iormesh/servers.yaml (same file, same 0600 rules)
+   k8s:
+     image: <registry>/iormesh@sha256:<digest>  # default: ours
+     mode: debug                    # debug | sidecar
+     profile: minimal               # minimal (#13) | privileged
+     clusters:
+       - name: <cluster-label>      # what pods: entries name
+         context: <kube-context>    # always passed as --context
+         namespace: <namespace>     # default; also the project (#21)
+   pods:
+     - cluster: <cluster-label>
+       namespace: <namespace>       # optional: the cluster's otherwise
+       selector: <label>=<value>    # or pod: <pod-name>
+       container: <app-container>   # kubectl debug --target
+       projects:                    # as under servers:
+         - name: <project>
+           target: {pattern: "<glob>"}
+           flags: ["-spool=<dir>", "-agent=<jar>"]
+   ```
+
+   Flags `-context`, `-namespace` and `-image` override per run;
+   precedence flag > pod entry > cluster > `k8s:` default. A
+   context the registry does not list is refused, as an
+   unregistered host is.
+9. ClusterIP join: S2's key if it survives kube-proxy's DNAT;
+   otherwise conntrack on the node.
+10. `internal/routemap` (#15): the static map first —
+    `~/.config/iormesh/routes.yaml`, loaded with the registry's
+    ownership and mode checks (placeholders):
+
+    ```yaml
+    routes:
+      - fqdn: <fqdn>
+        ingress: <ingress>              # Traefik in the M0 scenario
+        service: <namespace>/<service>
+        workload: <namespace>/deployment/<name>  # or statefulset/
+    ```
+
+    Then discovery through the controller's kubectl (Ingress,
+    IngressRoute, Service, EndpointSlice, owner references),
+    filling only FQDNs the file lacks; a static entry always
+    wins. Observed http events never change a route; a route
+    they contradict is flagged in the build.
 
 **Done when**: PLAN.md's M7 acceptance holds.

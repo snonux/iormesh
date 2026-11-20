@@ -206,8 +206,9 @@ fails up front with the fix named.
   with a notice. Module downloads and the Go build cache live in
   the `iormesh-gomod` and `iormesh-gocache` volumes.
 - **Not here yet**: the published tracer *image* for `kubectl
-  debug` and sidecars, and the capability set it runs with, are
-  M7 (decision #13).
+  debug` and sidecars is M7; the capability set it runs with is
+  provisional (PLAN.md decision #13,
+  [security.md](security.md) "Kubernetes").
 
 ## Signing
 
