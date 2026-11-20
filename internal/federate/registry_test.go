@@ -14,7 +14,7 @@ func shop() Project {
 }
 
 // TestRegistryRoundTrip: what Save writes, LoadRegistry reads back
-// unchanged, with the file 0600 in a 0700 directory it created.
+// unchanged (expand: section and hops included), with the file 0600 in a 0700 directory it created.
 func TestRegistryRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "iormesh", "servers.yaml")
 	var r Registry
@@ -30,6 +30,10 @@ func TestRegistryRoundTrip(t *testing.T) {
 			t.Fatalf("Add(%s, %s): %v", add.host, add.p.Name, err)
 		}
 	}
+	// The expand: section and a host's hop survive the round trip.
+	r.Servers[1].Hop = 2
+	r.Expand = &Expand{MaxNodes: 8,
+		Allow: Allow{Hosts: []string{"10.20.3.*"}, CIDRs: []string{"10.0.0.0/8", "fd00::/8"}}}
 	if err := r.Save(path); err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +76,15 @@ func TestLoadRegistryRejects(t *testing.T) {
 	}{
 		{"group writable", "servers: []\n", 0o620, ErrUnsafeFile},
 		{"world writable", "servers: []\n", 0o602, ErrUnsafeFile},
-		{"unknown key", "servers: []\nexpand: {max_nodes: 3}\n", 0o600, nil},
+		{"unknown key", "servers: []\nexpanse: {max_nodes: 3}\n", 0o600, nil},
+		{"unknown expand key", "servers: []\nexpand: {allow: {nets: [10.0.0.0/8]}}\n", 0o600, nil},
+		{"negative max_nodes", "servers: []\nexpand: {max_nodes: -1}\n", 0o600, ErrInvalid},
+		{"non-canonical cidr", "servers: []\nexpand: {allow: {cidrs: [10.0.0.7/8]}}\n", 0o600, ErrInvalid},
+		{"bad cidr", "servers: []\nexpand: {allow: {cidrs: [10.0.0.0]}}\n", 0o600, ErrInvalid},
+		{"bad glob", "servers: []\nexpand: {allow: {hosts: [\"10.[\"]}}\n", 0o600, ErrInvalid},
+		{"space glob", "servers: []\nexpand: {allow: {hosts: [\"10.* \"]}}\n", 0o600, ErrInvalid},
+		{"negative hop", "servers:\n- {host: a, hop: -1, projects: [{name: p, target: {pattern: x}}]}\n",
+			0o600, ErrInvalid},
 		{"duplicate host", "servers:\n- {host: a, projects: [{name: p, target: {pattern: x}}]}\n" +
 			"- {host: a, projects: [{name: q, target: {pattern: x}}]}\n", 0o600, ErrInvalid},
 		{"no project", "servers:\n- {host: a, projects: []}\n", 0o600, ErrInvalid},

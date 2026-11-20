@@ -1389,6 +1389,18 @@ operator's SSH key from the controller.
   the originally enrolled hosts; a max-node cap bounds the
   total; a visited set makes cycles (A→B→A) terminate instead
   of oscillating.
+- **Never guess a peer** (settled by task sb4): only a client
+  end the merge left `no_match` proposes its peer; an
+  ambiguous, keyless, roleless or conflicting end does not (its
+  far end may be traced). A peer is the address the client
+  reached, never a DNS name; an address the registry or a
+  traced host already owns is visited, one a fused connection
+  proves NAT'ed to a traced server is left alone, and IPv6
+  peers wait for an ssh_config alias. The allowlist and
+  `max_nodes` live in the registry's `expand:` section (absent:
+  nothing is allowed); defaults are one hop and 16 nodes. Every
+  skipped peer is listed with its reason and evidence
+  (docs/implementation.md M6).
 - **Convergence honesty**: a peer's tracer starts after the
   connection that revealed it, so earlier conversations are
   one-sided. Those edges stay in the graph marked unresolved —

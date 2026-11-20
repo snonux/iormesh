@@ -50,15 +50,21 @@ var hostName = regexp.MustCompile(
 // Registry is the parsed servers.yaml. Every server carries at least one
 // project: a host is registered to trace something, and a server without a
 // project could not be started (#21: the project is a manual label kept
-// with the registry entry).
+// with the registry entry). Expand is the optional expand: section
+// (expandcfg.go, PLAN.md M6).
 type Registry struct {
 	Servers []Server `yaml:"servers"`
+	Expand  *Expand  `yaml:"expand,omitempty"`
 }
 
 // Server is one registered host and the independent sessions, one per
-// project, it hosts.
+// project, it hosts. Hop is how many expansion rounds away from the
+// originally enrolled hosts it was enrolled (PLAN.md M6 "Rounds"): 0, the
+// default, for a host the operator added; expand --apply records n+1 for
+// a peer a hop-n host revealed, so the next round can enforce the limit.
 type Server struct {
 	Host     string    `yaml:"host"`
+	Hop      int       `yaml:"hop,omitempty"`
 	Projects []Project `yaml:"projects"`
 }
 
@@ -109,7 +115,8 @@ func DefaultRegistryPath() (string, error) {
 // LoadRegistry reads the registry at path. A missing file is an empty
 // registry: the first `add` creates it. Unknown keys are an error rather
 // than dropped, so a later Save cannot silently lose a section a newer
-// iormeshctl (or the operator) wrote — M6's expand allowlist, say.
+// iormeshctl (or the operator) wrote; M6's expand: section is part of the
+// schema (expandcfg.go), added deliberately rather than tolerated.
 func LoadRegistry(path string) (Registry, error) {
 	data, err := readPrivate(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -164,7 +171,11 @@ func (r *Registry) Save(path string) error {
 
 // Validate checks every entry and that hosts, and projects per host, are
 // unique: the same rules Add enforces, applied to a hand-edited file too.
+// The expand: section is checked as well.
 func (r *Registry) Validate() error {
+	if err := r.Expand.validate(); err != nil {
+		return err
+	}
 	seen := map[string]bool{}
 	for _, s := range r.Servers {
 		if seen[s.Host] {
@@ -244,6 +255,9 @@ func (s Server) validate() error {
 	}
 	if len(s.Projects) == 0 {
 		return fmt.Errorf("%w: host %s has no project", ErrInvalid, s.Host)
+	}
+	if s.Hop < 0 {
+		return fmt.Errorf("%w: host %s: hop %d is negative", ErrInvalid, s.Host, s.Hop)
 	}
 	seen := map[string]bool{}
 	for _, p := range s.Projects {

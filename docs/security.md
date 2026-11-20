@@ -23,7 +23,14 @@ truth.
   (no leading `-`, no shell or `host:path` characters), and
   remote commands go as single-quoted argv, never as
   concatenated shell text; that quoting needs a POSIX login
-  shell on the server.
+  shell on the server. Mesh expansion (M6) widens the boundary
+  only through the same file: its allowlist (`expand:`) lives
+  there, a registry without one allows nothing, and
+  `iormeshctl expand` without `--apply` contacts no server.
+  Peers are proposed by the address a traced client reached,
+  never by a name it looked up, and a peer the traces cannot
+  place (an ambiguous or keyless connection, a NAT'ed address)
+  is listed, never enrolled.
 - **A server controls trace contents, nothing else on the
   controller.** Collect copies with `rsync -rt`: remote modes
   and symlinks are not carried over, and the local trace

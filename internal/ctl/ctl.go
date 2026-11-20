@@ -7,6 +7,7 @@
 //	iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR]
 //	iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR] [HOST...]
 //	iormeshctl show [summary|services|edges|health] [-project NAME]... [-json] [-unresolved]
+//	iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
 //	iormeshctl services [list|edges|name|rules|unname] [-db FILE] ...
 //	iormeshctl verify [-key FILE] FILE...
 //	iormeshctl version
@@ -23,7 +24,9 @@
 // build merges the collected segments offline into the merged graph
 // export, the service database and the view model, and refresh is
 // collect then build (build.go); show prints the last build's view
-// model as text (show.go, internal/viewmodel).
+// model as text (show.go, internal/viewmodel). expand lists which
+// unresolved peers the next expansion round would enroll and why the
+// others stay (expand.go, internal/expand, PLAN.md M6).
 // It is cgo-free (internal/buildgate checks it), so it cross-compiles for
 // the darwin and linux laptops it runs on.
 package ctl
@@ -122,6 +125,8 @@ func run(args []string, e env) int {
 		err = refreshCommand(args[1:], e)
 	case "show":
 		err = showCommand(args[1:], e)
+	case "expand":
+		err = expandCommand(args[1:], e)
 	case checkCommand: // build's child, not for operators (check.go)
 		err = checkSegmentCommand(args[1:], e)
 	case "services":
@@ -170,6 +175,7 @@ func usage(w io.Writer) {
   iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR]
   iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR] [HOST...]
   iormeshctl show [summary|services|edges|health] [-project NAME]... [-builds DIR] [-json] [-unresolved]
+  iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
   iormeshctl services [list] [-db FILE] [-project NAME] [-paths]
   iormeshctl services edges [-db FILE] [-project NAME] [-from NAME]
   iormeshctl services name [-db FILE] [-port N] HOST-GLOB SERVICE
@@ -190,6 +196,9 @@ stops, syncs off and uninstalls before it unregisters, and refuses to
 uninstall over traces it could not sync unless -force. build (and
 refresh, which is collect then build) merges every project in the store
 without -project, never contacts a server, and exits 1 when it had to
-leave a damaged segment out.
+leave a damaged segment out. expand lists the unresolved peers of the
+store's merged mesh against the registry's expand: allowlist, hop limit
+(-hops, default 1) and max_nodes; it contacts no server and deploys
+nothing.
 `)
 }
