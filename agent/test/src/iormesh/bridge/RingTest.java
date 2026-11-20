@@ -40,6 +40,7 @@ public final class RingTest {
                 new AgentTests.Case("ring/hook table record", RingTest::hookRecord),
                 new AgentTests.Case("ring/class records ahead of stack", RingTest::classRecords),
                 new AgentTests.Case("ring/class labels", RingTest::classLabels),
+                new AgentTests.Case("ring/classes under a SecurityManager", RingTest::securityManager),
                 new AgentTests.Case("ring/renamed thread described again", RingTest::renamed),
                 new AgentTests.Case("ring/virtual thread flagged", RingTest::virtualThread),
                 new AgentTests.Case("ring/watermark waits for closing", RingTest::watermark),
@@ -252,6 +253,63 @@ public final class RingTest {
                 .getLocation().toURI()).toString();
         equal(List.of(probe, "app", where), c, "the probe's CLASS");
         delete(dir);
+    }
+
+    /**
+     * Under a SecurityManager whose policy grants the app neither
+     * getStackWalkerWithClassReference nor getProtectionDomain (review of
+     * fe4), the bridge still walks stacks and describes classes: it asks
+     * for both in doPrivileged. A child JVM runs SecurityProbe with the
+     * bridge on the boot class path; this reads the ring it leaves. JDK
+     * 24 and later cannot enable a SecurityManager: skipped there.
+     */
+    static void securityManager() throws Exception {
+        if (Runtime.version().feature() >= 24) {
+            AgentTests.skip("JDK " + Runtime.version().feature() + " has no SecurityManager");
+        }
+        Path dir = Files.createTempDirectory("iormesh-ring-sm");
+        Path tests = Path.of(ClassProbe.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+        Path bridge = Path.of(Hooks.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+        Path policy = dir.resolve("probe.policy");
+        Files.writeString(policy, "grant codeBase \"" + tests.toUri() + "-\" {\n"
+                + "  permission java.io.FilePermission \"" + dir + "/-\", \"read,write,delete\";\n"
+                + "  permission java.io.FilePermission \"/proc/-\", \"read\";\n"
+                + "  permission java.lang.RuntimePermission \"manageProcess\";\n};\n");
+        String javaBin = ProcessHandle.current().info().command().orElse("java");
+        Process p = new ProcessBuilder(javaBin, "-Xbootclasspath/a:" + bridge,
+                "-Djava.security.manager", "-Djava.security.policy==" + policy,
+                "-cp", tests.toString(), "iormesh.testprobe.SecurityProbe", dir.toString())
+                .redirectErrorStream(true).start();
+        String out = new String(p.getInputStream().readAllBytes(),
+                java.nio.charset.StandardCharsets.UTF_8);
+        equal(0, p.waitFor(), "probe exit: " + out);
+        check(out.contains("probe fails 0"), "no failed bracket: " + out);
+        Files.delete(policy);
+        Path ring;
+        try (var files = Files.list(dir)) {
+            ring = files.findFirst().orElseThrow();
+        }
+        checkProbeClass(map(ring), tests.toString());
+        delete(dir);
+    }
+
+    /**
+     * The ring's STACK starts at the probe's lambda (SecurityProbe's own
+     * method, not hidden), whose CLASS names where.
+     */
+    private static void checkProbeClass(ByteBuffer b, String where) {
+        java.util.Map<Long, List<String>> classes = new java.util.HashMap<>();
+        Rec stack = null;
+        for (Rec x : records(b)) {
+            if (x.type() == Ring.CLASS) {
+                classes.put(b.getLong(x.off() + 8), strings(b, x.off() + 24, 3));
+            } else if (x.type() == Ring.STACK) {
+                stack = x;
+            }
+        }
+        check(stack != null, "a STACK");
+        List<String> c = classes.get(b.getLong(stack.off() + 24));
+        equal(List.of("iormesh.testprobe.SecurityProbe", "app", where), c, "the probe's CLASS");
     }
 
     /** Loader labels and code sources: boot, platform, app; credentials stripped. */

@@ -2431,11 +2431,24 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
      as `ClassIds.clean`).
    - **Losses**: a dropped CLASS is retried when a later new
      stack names the class; a frame whose class never arrived
-     gets a method row without `class_id`.
+     gets a method row without `class_id`. The tracer resolves a
+     stack once, when its first event joins, so a stack resolved
+     before the retried CLASS arrived keeps no class for those
+     frames even after it does (the drop is counted).
+   - **SecurityManager** (JDK 17–23): the walker retaining
+     classes and a class's protection domain need permissions
+     the app's frames may lack, so the bridge (boot class path)
+     asks for both in `doPrivileged`; a policy refusing even that
+     gets the plain walker and stacks without class ids, never a
+     failed bracket. `RingTest` runs a child JVM under a
+     SecurityManager to check it (skipped on 24+, which has none).
    - **Renames**: a THREAD for a known Java thread is a rename;
      the thread's brackets read before it keep the earlier name
      (up to the latest exit among them still held), later ones
-     carry the new name, and `threads.ndjson` gets a row per name.
+     carry the new name, and `threads.ndjson` gets a row per name
+     change. An http or dns record still pending that completed
+     after the thread's last held bracket but before the rename
+     (any, when none is held) gets the new name.
 
    Tests: `RingTest` (CLASS ahead of the STACK, labels and code
    sources, rename), `ring_test.go` (round trip, malformed CLASS

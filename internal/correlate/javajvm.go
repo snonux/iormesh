@@ -187,12 +187,15 @@ func (j *JavaJoin) record(v *jvm, rec agentspool.Record) error {
 
 // thread files a THREAD record and writes it to the thread table: a
 // thread's first, or a rename (a later one, task fe4), which names the
-// thread's later brackets. Only a platform thread's tid names a carrier:
-// a virtual thread's is just where it happened to start. A carrier is
-// named after its latest name.
+// thread's later brackets — one row per name change, none for a record
+// repeating the name in force. Only a platform thread's tid names a
+// carrier: a virtual thread's is just where it happened to start. A
+// carrier is named after its latest name.
 func (j *JavaJoin) thread(v *jvm, r agentspool.Thread) error {
 	if first, ok := v.threads[r.ID]; ok {
-		v.rename(first, r.Name)
+		if !v.rename(first, r.Name) {
+			return nil
+		}
 	} else {
 		v.threads[r.ID] = r
 	}

@@ -54,20 +54,28 @@ func (j *JavaJoin) class(v *jvm, aid uint64) (uint64, error) {
 }
 
 // rename files a later THREAD record of thread first (its first record)
-// carrying name. The agent writes it at the thread's first bracket enter
-// after the rename, so the thread's brackets read before it — up to the
-// latest exit among them still held — keep the earlier name; a rename to
-// the name already in force changes nothing.
-func (v *jvm) rename(first agentspool.Thread, name string) {
+// carrying name, and reports whether it changed the name in force (a
+// record repeating it changes nothing and gets no table row). The agent
+// writes it at the thread's first bracket enter after the rename, so the
+// thread's brackets read before it — up to the latest exit among them
+// still held — keep the earlier name.
+//
+// The boundary is a bracket exit, so records that are not brackets are
+// placed by it only approximately: an http or dns record of the thread
+// still pending that completed after the thread's last held bracket but
+// before the rename — or any, when no bracket of the thread is held —
+// gets the new name.
+func (v *jvm) rename(first agentspool.Thread, name string) bool {
 	list := v.renames[first.ID]
 	current := first.Name
 	if len(list) > 0 {
 		current = list[len(list)-1].name
 	}
 	if name == current {
-		return
+		return false
 	}
 	v.renames[first.ID] = append(list, rename{after: v.lastExit(first), name: name})
+	return true
 }
 
 // lastExit is the latest exit among the brackets held for thread th, 0

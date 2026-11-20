@@ -38,10 +38,11 @@ public final class StackIds {
      * (ClassIds, task fe4). It costs the walk nothing measurable: the VM
      * fills each frame's class either way, the option only permits
      * getDeclaringClass (task fe4: 6.0 vs 6.4 µs per 10-frame walk on JDK
-     * 25, within noise).
+     * 25, within noise). See {@link #walker()} for a SecurityManager.
      */
-    private static final StackWalker WALKER =
-            StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
+    private static final StackWalker WALKER = walker();
+    /** Whether WALKER retains classes; without it every class id is NONE. */
+    private static final boolean CLASSES = retains(WALKER);
     private static final String OWN_PACKAGE = "iormesh.bridge.";
     /** The agent core's packages (its HTTP probes run between bridge frames). */
     private static final String AGENT_PACKAGE = "iormesh.agent.";
@@ -50,6 +51,35 @@ public final class StackIds {
     private static volatile long retryAt;
 
     private StackIds() {}
+
+    /**
+     * The walker, retaining classes when allowed. Under a SecurityManager
+     * (JDK 17–23) RETAIN_CLASS_REFERENCE needs
+     * RuntimePermission("getStackWalkerWithClassReference"): asked for in
+     * doPrivileged, which the bootstrap-loaded bridge holds, so the app's
+     * frames on the stack do not matter. A policy that still refuses gets
+     * the plain walker — stacks without class ids, never a StackIds that
+     * fails to initialize and so no bracket at all (review of fe4).
+     */
+    @SuppressWarnings("removal")
+    private static StackWalker walker() {
+        try {
+            return java.security.AccessController.doPrivileged(
+                    (java.security.PrivilegedAction<StackWalker>) () -> StackWalker.getInstance(
+                            StackWalker.Option.RETAIN_CLASS_REFERENCE));
+        } catch (Throwable e) {
+            return StackWalker.getInstance();
+        }
+    }
+
+    /** Whether w hands out frames' classes (its options are not public). */
+    private static boolean retains(StackWalker w) {
+        try {
+            return w.walk(s -> s.findFirst().map(f -> f.getDeclaringClass() != null)).orElse(false);
+        } catch (Throwable e) {
+            return false;  // UnsupportedOperationException: the plain walker
+        }
+    }
 
     /**
      * Returns the id of the current stack below the bridge: the first
@@ -153,10 +183,10 @@ public final class StackIds {
         }
     }
 
-    /** Each frame's class id (ClassIds), innermost first. */
+    /** Each frame's class id (ClassIds), innermost first; all NONE without classes. */
     private static long[] classIds(List<StackWalker.StackFrame> frames) {
         long[] out = new long[frames.size()];
-        for (int i = 0; i < out.length; i++) {
+        for (int i = 0; CLASSES && i < out.length; i++) {
             out[i] = ClassIds.of(frames.get(i).getDeclaringClass());
         }
         return out;

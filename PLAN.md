@@ -644,7 +644,7 @@ Gated by S1 — done; the design below is S1's result
   class: the same frame text from two JARs is two ids. Threads:
   a thread renamed after its first bracket gets another THREAD
   record at its next bracket, and its later events carry the
-  new name; `threads.ndjson` lists one row per name.
+  new name; `threads.ndjson` lists one row per name change.
 - **OpenTelemetry introspection**: when the app runs the OTEL
   API (SDK or not), the agent reads the active span context and
   tags every I/O event with its OTEL trace/span ids — iormesh

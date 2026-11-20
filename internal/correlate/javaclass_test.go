@@ -71,7 +71,8 @@ func TestJavaJoinClasses(t *testing.T) {
 // TestJavaJoinThreadRenamed: a THREAD record for a thread already known
 // is a rename (task fe4): its brackets read before it keep the first
 // name, those after carry the new one, the thread table gets a row per
-// name, and a record repeating the name in force changes nothing.
+// name, and a record repeating the name in force changes nothing and
+// writes no row.
 func TestJavaJoinThreadRenamed(t *testing.T) {
 	jt := newJoinTest(t)
 	at := jt.now + 1000
@@ -94,7 +95,7 @@ func TestJavaJoinThreadRenamed(t *testing.T) {
 	if !reflect.DeepEqual(names, []string{"main", "worker-1"}) {
 		t.Errorf("thread names %v, want [main worker-1]", names)
 	}
-	if n := len(jt.tables.threads); n != 3 || jt.tables.threads[1].Name != "worker-1" ||
+	if n := len(jt.tables.threads); n != 2 || jt.tables.threads[1].Name != "worker-1" ||
 		jt.tables.threads[1].JavaThreadID != 1 {
 		t.Errorf("thread table %+v", jt.tables.threads)
 	}

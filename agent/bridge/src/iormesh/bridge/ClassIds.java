@@ -4,6 +4,7 @@ import java.net.URL;
 import java.nio.file.Path;
 import java.security.CodeSource;
 import java.security.ProtectionDomain;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -31,11 +32,14 @@ import java.util.concurrent.atomic.AtomicLong;
  * Order: the CLASS record is written inside computeValue, so any thread
  * that gets the id saw the record reserved first, and a STACK naming
  * it lies behind it in the ring. Two threads racing on a new class may
- * both write one (ClassValue keeps one id); the loser's row names an id
- * no frame uses, which the tracer never lists. A dropped CLASS is
- * retried when a later new stack names the class (after the back-off),
- * and may then follow a STACK already naming it — the tracer resolves
- * ids over everything it read.
+ * each compute an entry and write a CLASS (ClassValue keeps one id); the
+ * loser's row names an id no frame uses, which the tracer never lists.
+ * One entry's CLASS is written at most once: a writer claims it first.
+ * A dropped CLASS is retried when a later new stack names the class
+ * (after the back-off), and then follows the STACKs already naming it.
+ * The tracer resolves a stack once, when its first event joins: a stack
+ * resolved before the retried CLASS arrived keeps no class for those
+ * frames (method rows without class_id), and the drop is counted.
  */
 final class ClassIds {
     /** 0 means "not described" in a STACK's class ids. */
@@ -55,10 +59,14 @@ final class ClassIds {
 
     private ClassIds() {}
 
-    /** One class's id and whether its CLASS reached the ring. */
+    /**
+     * One class's id and whether its CLASS reached the ring or is being
+     * written: claimed by compare-and-set, so two threads retrying a
+     * dropped one never both write it (the ring would hold one id twice).
+     */
     private static final class Entry {
         final long id;
-        volatile boolean written;
+        final AtomicBoolean written = new AtomicBoolean();
 
         Entry(long id) {
             this.id = id;
@@ -71,24 +79,31 @@ final class ClassIds {
          */
         void write(Class<?> c) {
             Ring r = Hooks.ring;
-            if (r == null) {
+            if (r == null || !written.compareAndSet(false, true)) {
                 return;
             }
-            written = r.classRecord(id, c.getName(), loader(c.getClassLoader()), codeSource(c));
-            if (!written) {
-                retryAt = System.nanoTime() + Hooks.RETRY_NS;
+            boolean ok = false;
+            try {
+                ok = r.classRecord(id, c.getName(), loader(c.getClassLoader()), codeSource(c));
+            } finally {
+                if (!ok) {
+                    written.set(false);
+                    retryAt = System.nanoTime() + Hooks.RETRY_NS;
+                }
             }
         }
     }
 
     /**
      * Returns c's id, describing c the first time, or retrying a dropped
-     * description after the back-off; NONE if even that failed.
+     * description after the back-off. The id is returned whether or not
+     * its CLASS reached the ring (the tracer then has no class for it);
+     * NONE only when getting the id itself threw.
      */
     static long of(Class<?> c) {
         try {
             Entry e = IDS.get(c);
-            if (!e.written && System.nanoTime() >= retryAt) {
+            if (!e.written.get() && System.nanoTime() >= retryAt) {
                 e.write(c);
             }
             return e.id;
@@ -120,7 +135,7 @@ final class ClassIds {
      */
     static String codeSource(Class<?> c) {
         try {
-            ProtectionDomain pd = c.getProtectionDomain();
+            ProtectionDomain pd = protectionDomain(c);
             CodeSource cs = pd == null ? null : pd.getCodeSource();
             URL u = cs == null ? null : cs.getLocation();
             if (u != null) {
@@ -133,10 +148,22 @@ final class ClassIds {
                 return "jrt:/" + m.getName();
             }
         } catch (Throwable ignored) {
-            // A SecurityManager refusing getProtectionDomain (17), or a
-            // URL that is no URI: no code source, never a failed bracket.
+            // A policy refusing even the privileged read, or a URL that
+            // is no URI: no code source, never a failed bracket.
         }
         return "";
+    }
+
+    /**
+     * c's protection domain. Under a SecurityManager (JDK 17–23) it needs
+     * RuntimePermission("getProtectionDomain"), which the app's frames on
+     * the stack may lack: read in doPrivileged, which the
+     * bootstrap-loaded bridge holds.
+     */
+    @SuppressWarnings("removal")
+    private static ProtectionDomain protectionDomain(Class<?> c) {
+        return java.security.AccessController.doPrivileged(
+                (java.security.PrivilegedAction<ProtectionDomain>) c::getProtectionDomain);
     }
 
     /**

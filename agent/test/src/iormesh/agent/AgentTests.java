@@ -20,6 +20,24 @@ public final class AgentTests {
         void run() throws Exception;
     }
 
+    /**
+     * Thrown by {@link #skip}: the case cannot run on this JDK. Reported
+     * as "skip", not counted as a failure — the reason is printed, so a
+     * run on a JDK that should have run it shows what went unchecked.
+     */
+    public static final class Skipped extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
+        Skipped(String why) {
+            super(why);
+        }
+    }
+
+    /** Ends the calling case as skipped, for why. */
+    public static void skip(String why) {
+        throw new Skipped(why);
+    }
+
     private AgentTests() {}
 
     public static void main(String[] args) {
@@ -40,18 +58,22 @@ public final class AgentTests {
         cases.addAll(OtelTransformerTest.cases());
         cases.addAll(OtelAttachRaceTest.cases());
         int failed = 0;
+        int skipped = 0;
         for (Case c : cases) {
             try {
                 c.body().run();
                 System.out.println("ok   " + c.name());
+            } catch (Skipped s) {
+                skipped++;
+                System.out.println("skip " + c.name() + ": " + s.getMessage());
             } catch (Throwable t) {
                 failed++;
                 System.out.println("FAIL " + c.name() + ": " + t);
                 t.printStackTrace(System.out);
             }
         }
-        System.out.printf("%d tests, %d failed (java %d)%n", cases.size(), failed,
-                Runtime.version().feature());
+        System.out.printf("%d tests, %d failed, %d skipped (java %d)%n", cases.size(), failed,
+                skipped, Runtime.version().feature());
         System.exit(failed == 0 ? 0 : 1);
     }
 
