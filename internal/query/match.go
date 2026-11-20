@@ -92,7 +92,7 @@ func (m *matcher) match(src *Source, ev *schema.Event) (bool, error) {
 
 // window is the time predicate.
 func (m *matcher) window(ev *schema.Event) bool {
-	return ev.WallNS >= m.f.From && (m.f.To == 0 || ev.WallNS < m.f.To)
+	return ev.WallNS >= m.f.From && (!m.f.HasTo || ev.WallNS < m.f.To)
 }
 
 // app matches the process's app pattern or its comm.
@@ -151,8 +151,13 @@ func (m *matcher) method(src *Source, ev *schema.Event) bool {
 
 // file matches an event naming a matching path, and the events of the
 // fd instance a successful open of one returned; a close ends that fd's
-// tracking (after matching it). An fd with fd_gen 0 predates the trace
-// and is never tracked: its number may name anything.
+// tracking (after matching it). Only the open kinds start tracking:
+// their fd is the one they returned. Any other event naming a path —
+// newfstatat, unlinkat, mkdirat — carries its dirfd as fd, and an
+// fstat or an AF_UNIX connect an fd it did not create, so tracking
+// those would follow a directory or a socket instead of the file. An
+// fd with fd_gen 0 predates the trace and is never tracked: its number
+// may name anything.
 func (m *matcher) file(ev *schema.Event) (bool, error) {
 	if m.f.File == "" {
 		return true, nil
@@ -160,7 +165,7 @@ func (m *matcher) file(ev *schema.Event) (bool, error) {
 	k := fdKey{ev.HostID, ev.PID, ev.PIDInc, ev.FD, ev.FDGen}
 	named := m.paths(&ev.Args)
 	switch {
-	case named && ev.FD >= 0 && ev.FDGen > 0 && ev.Ret >= 0 && ev.Event != schema.KindClose:
+	case named && opens(ev):
 		if len(m.files) >= maxTracked && !m.files[k] {
 			return false, fmt.Errorf("query: over %d open fds of -file %q tracked at once: narrow the filter",
 				maxTracked, m.f.File)
@@ -183,4 +188,14 @@ func (m *matcher) paths(a *schema.Args) bool {
 // threadOf is the event's thread.
 func threadOf(ev *schema.Event) threadKey {
 	return threadKey{ev.HostID, ev.PID, ev.PIDInc, ev.TID}
+}
+
+// opens reports whether ev is a successful open of a new fd instance:
+// open, openat, openat2 or creat, whose fd is the one it returned.
+func opens(ev *schema.Event) bool {
+	switch ev.Event {
+	case schema.KindOpen, schema.KindOpenat, schema.KindOpenat2, schema.KindCreat:
+		return ev.Ret >= 0 && ev.FD >= 0 && int64(ev.FD) == ev.Ret && ev.FDGen > 0
+	}
+	return false
 }

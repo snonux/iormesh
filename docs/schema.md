@@ -1154,4 +1154,8 @@ not an event:
 `emitted` counts the event lines above it, `remaining` the
 matching events the cap left out. The lines written are always the
 first matches in order, never a selection; without the record the
-slice is complete.
+slice is complete. The order is the store's (project, host
+directory, session, `seq`), not time's, so a cut keeps the hosts
+that sort first. A reader checks the last line for
+`"event":"truncated"` before decoding lines strictly as events: the
+record lacks the envelope's required fields.

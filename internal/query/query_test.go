@@ -7,6 +7,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -112,7 +113,7 @@ func TestRunGolden(t *testing.T) {
 		max  int64
 	}{
 		{"all", Filter{}, 1 << 20},
-		{"window", Filter{From: at(3), To: at(11)}, 1 << 20},
+		{"window", Filter{From: at(3), To: at(11), HasTo: true}, 1 << 20},
 		{"host", Filter{Host: "app2"}, 1 << 20},
 		{"host-fqdn", Filter{Host: "app1.example.*"}, 1 << 20},
 		{"app-pattern", Filter{App: "ord*"}, 1 << 20},
@@ -226,9 +227,10 @@ func TestInvalidFilter(t *testing.T) {
 		{"bad file glob", Filter{File: "/etc/[a-"}, 1 << 20},
 		{"bad method glob", Filter{Method: "["}, 1 << 20},
 		{"follow without conn", Filter{Follow: true}, 1 << 20},
-		{"reversed window", Filter{From: at(5), To: at(4)}, 1 << 20},
-		{"empty window", Filter{From: at(5), To: at(5)}, 1 << 20},
+		{"reversed window", Filter{From: at(5), To: at(4), HasTo: true}, 1 << 20},
+		{"empty window", Filter{From: at(5), To: at(5), HasTo: true}, 1 << 20},
 		{"cap below the record", Filter{}, MinMaxBytes() - 1},
+		{"window ending at the epoch", Filter{HasTo: true}, 1 << 20},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			read := false
@@ -309,5 +311,50 @@ func TestMatchesMethod(t *testing.T) {
 		if got := (Filter{Method: pattern}).MatchesMethod(&m); got != want {
 			t.Errorf("%q: %v, want %v", pattern, got, want)
 		}
+	}
+}
+
+// fdEvent is a bare event for the file matcher: one fd instance (gen 1)
+// of pid 1, naming path when it is not empty.
+func fdEvent(seq uint64, kind string, fd int32, ret int64, path string) schema.Event {
+	e := schema.Event{Seq: seq, HostID: "h", PID: 1, PIDInc: 1, TID: 1, Event: kind, FD: fd,
+		FDGen: 1, Ret: ret}
+	if path != "" {
+		e.Args.Path = ptr(path)
+	}
+	return e
+}
+
+// TestFileTracksOnlyOpens: an event naming a matching path matches, but
+// only the fd an open returned is followed — not a path kind's dirfd,
+// an fstat's fd or an AF_UNIX socket's fd (review round 1).
+func TestFileTracksOnlyOpens(t *testing.T) {
+	events := []schema.Event{
+		fdEvent(1, schema.KindNewfstatat, 9, 0, "/data/x"),     // dirfd 9 is /data
+		fdEvent(2, schema.KindUnlinkat, 9, 0, "/data/sub/zzz"), // must not ride on it
+		fdEvent(3, schema.KindNewfstat, 10, 0, "/data/x"),      // fd-metadata kind
+		fdEvent(4, schema.KindRead, 10, 0, ""),                 // must not match
+		fdEvent(5, schema.KindConnect, 11, 0, "/data/x"),       // AF_UNIX
+		fdEvent(6, schema.KindWrite, 11, 0, ""),                // must not match
+		fdEvent(7, schema.KindOpenat, 12, 12, "/data/x"),       // the open
+		fdEvent(8, schema.KindRead, 12, 0, ""),                 // follows it
+		fdEvent(9, schema.KindClose, 12, 0, ""),                // and its close
+		fdEvent(10, schema.KindRead, 12, 0, ""),                // not after
+		fdEvent(11, schema.KindCreat, 13, -2, "/data/x"),       // failed: no fd
+		fdEvent(12, schema.KindRead, 13, 0, ""),                // must not match
+	}
+	m := newMatcher(Filter{File: "/data/x"}, Input{})
+	var got []uint64
+	for i := range events {
+		ok, err := m.match(&Source{}, &events[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok {
+			got = append(got, events[i].Seq)
+		}
+	}
+	if want := []uint64{1, 3, 5, 7, 8, 9, 11}; !slices.Equal(got, want) {
+		t.Errorf("matched seqs %v, want %v", got, want)
 	}
 }

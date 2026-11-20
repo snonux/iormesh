@@ -22,11 +22,15 @@ var ErrInvalid = errors.New("invalid filter")
 // field matches every event. The globs are path.Match patterns: '*'
 // stops at '/', so "/etc/*" is the files directly in /etc.
 type Filter struct {
-	// From and To bound the event's wall_ns: From ≤ wall_ns < To, 0
-	// meaning unbounded. Each event is judged by its own host's clock,
-	// as recorded — the merge's clock bounds order cross-host instants
-	// but do not rewrite them (PLAN.md M4 "Clock reconciliation").
+	// From and To bound the event's wall_ns: From ≤ wall_ns < To.
+	// From 0 is unbounded; To bounds only with HasTo, so that a -to of
+	// the epoch itself (0) is an empty window, not an open one. Each
+	// event is judged by its own host's clock, as recorded and not
+	// corrected for the skew between hosts — the merge's clock bounds
+	// order cross-host instants but do not rewrite them (PLAN.md M4
+	// "Clock reconciliation").
 	From, To uint64
+	HasTo    bool
 	// Host matches the store's host directory (the registry's host
 	// name) or the session's FQDN.
 	Host string
@@ -45,9 +49,15 @@ type Filter struct {
 	// that thread's first to its last event on it — the file and other
 	// I/O a request caused on the way through.
 	Follow bool
-	// File matches args.path or args.new_path; an fd an open of a
-	// matching path returned matches too (its reads, writes, close),
-	// until it is closed.
+	// File matches args.path or args.new_path; the fd a successful
+	// open, openat, openat2 or creat of a matching path returned
+	// matches too (its reads, writes, close), until it is closed.
+	// Only that fd instance of the opening process is followed: a dup
+	// of it, or the copy a forked child inherits, is another fd
+	// instance and is not. The trace records no process exit, so an
+	// fd its process never closed stays tracked to the end (it counts
+	// toward maxTracked); an exec keeps it, as the kernel keeps an fd
+	// without O_CLOEXEC.
 	File string
 	// Method matches a Java frame of the event's stack, by
 	// "class#method" or by the full frame text
@@ -67,7 +77,7 @@ func (f Filter) Validate() error {
 	switch {
 	case f.Follow && f.Conn == "":
 		return fmt.Errorf("%w: -follow needs -conn", ErrInvalid)
-	case f.To != 0 && f.From >= f.To:
+	case f.HasTo && f.From >= f.To:
 		return fmt.Errorf("%w: the window -from %d -to %d is empty", ErrInvalid, f.From, f.To)
 	}
 	return nil

@@ -144,10 +144,10 @@ func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter, fro
 	if err != nil {
 		return err
 	}
-	if _, err := query.Run(ctx, e.stdout, in, filter, f.maxBytes); err != nil {
-		return err
-	}
-	return reportBad(e, segs.Bad)
+	// The bad segments are reported even when the query fails: what
+	// it wrote is still missing them.
+	_, err = query.Run(ctx, e.stdout, in, filter, f.maxBytes)
+	return errors.Join(err, reportBad(e, segs.Bad))
 }
 
 // resolveWindow places -from and -to: a time of day lands on the UTC
@@ -173,6 +173,7 @@ func resolveWindow(filter *query.Filter, sources []*federate.Segment, from, to *
 		}
 		*t.dst = v
 	}
+	filter.HasTo = to != nil
 	if err := filter.Validate(); err != nil {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}

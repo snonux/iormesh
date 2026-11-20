@@ -4333,17 +4333,24 @@ internal/termsafe/           # + JSON: escape a line for a terminal
   segment that fails is left out, named on stderr, and the
   command exits 1 after writing the slice.
 - **Filters** (all AND; globs are `path.Match`, `*` stops at
-  `/`): `-from`/`-to` on each event's own `wall_ns` (RFC 3339, or
-  `HH:MM:SS[.frac]` UTC on the UTC date of the earliest segment's
-  start; `-to` exclusive); `-host` the store's host name or the
+  `/`): `-from`/`-to` on each event's own `wall_ns`, as its host
+  recorded it — not corrected for clock skew between hosts (RFC
+  3339, or `HH:MM:SS[.frac]` UTC on the UTC date of the earliest
+  segment's start; `-to` exclusive); `-host` the store's host name or the
   session's FQDN; `-app` the app's target pattern (the merged
   graph's app node) or the comm; `-thread` `java.thread` or the
   decimal tid; `-conn` a merged conn id, exactly; `-follow`
   widens it to every event of each thread that used the
   connection, between that thread's first and last event on it;
   `-file` `args.path`/`args.new_path`, plus the fd instance
-  (`pid`, `pid_incarnation`, `fd`, `fd_gen`) a successful open of
-  a matching path returned, until its close; `-method` a Java
+  (`pid`, `pid_incarnation`, `fd`, `fd_gen`) a successful `open`,
+  `openat`, `openat2` or `creat` of a matching path returned,
+  until its close. Only that fd instance is followed: not a
+  path kind's dirfd (`newfstatat`, `unlinkat`), not a `dup` of
+  it, not the copy a forked child inherits; the trace records no
+  process exit, so an fd never closed stays tracked to the end
+  (an exec keeps it, as the kernel does without `O_CLOEXEC`).
+  `-method` a Java
   frame of `java.stack`, as `class#method` or the full frame
   text, through the session's methods tables (the union of its
   segments' tables, each checked in the child like a segment).
@@ -4359,7 +4366,9 @@ internal/termsafe/           # + JSON: escape a line for a terminal
   `{"schema_version":1,"event":"truncated","args":{"emitted":N,"remaining":M}}`
   ([schema.md](schema.md#query-slices-m5)); what was written is
   always a prefix of the matches, and `remaining` is exact (the
-  scan runs on).
+  scan runs on). The order is the store's, not time's: a cut
+  favours the projects and hosts that sort first, so narrow the
+  filter (`-host`, a window) rather than lean on the cap.
 - **Memory**: events stream as in build; the filter state (open
   fds of a matching path, followed threads) and the matching
   method ids are capped at 2²⁰ entries each — over it the query
