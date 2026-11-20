@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -23,6 +24,8 @@ const (
 	// activePrefix names the files of the segment being written. A dot
 	// file, so `ls` and a glob over the directory skip it.
 	activePrefix = ".active-"
+	// lockFile is the project directory's writer lock (lockDir).
+	lockFile = ".lock"
 )
 
 // Table names, the infix of a table file's name (TableName).
@@ -73,20 +76,33 @@ func validName(what, s string, dashOK bool) error {
 	return nil
 }
 
-// prepareDir creates the project directory and ready/ (0755) and hands
-// ready/ to owner. ready/ must be a real directory: a symlink there
-// would publish segments wherever it points, as root.
+// prepareDir creates the trace dir, the project directory and ready/
+// and checks the two above ready/ before trusting them. The tracer runs
+// as root: if another user owned (or could write) the trace dir or the
+// project directory, they could swap ready/ for a symlink after the
+// check below and have root publish — and rename over — files wherever
+// it points. So both must be real directories owned by the tracer's
+// euid and not group- or other-writable; a planted directory stops the
+// start instead of being repaired. All three are set 0755 explicitly,
+// whatever the umask (077 would lock the collector out). ready/ itself
+// must be a real directory too, then goes to owner.
 func prepareDir(dir string, owner *Owner) error {
 	ready := filepath.Join(dir, ReadyDir)
 	if err := os.MkdirAll(ready, 0o755); err != nil {
 		return fmt.Errorf("segment: %w", err)
 	}
-	fi, err := os.Lstat(ready)
-	if err != nil {
-		return fmt.Errorf("segment: %w", err)
+	for _, d := range []string{filepath.Dir(dir), dir} {
+		if err := trustedDir(d); err != nil {
+			return err
+		}
 	}
-	if !fi.IsDir() {
-		return fmt.Errorf("segment: %s is not a directory", ready)
+	if err := realDir(ready); err != nil {
+		return err
+	}
+	for _, d := range []string{filepath.Dir(dir), dir, ready} {
+		if err := os.Chmod(d, 0o755); err != nil {
+			return fmt.Errorf("segment: %w", err)
+		}
 	}
 	if owner == nil {
 		return nil
@@ -97,8 +113,61 @@ func prepareDir(dir string, owner *Owner) error {
 	return nil
 }
 
+// trustedDir: a real directory, owned by the euid, not writable by group
+// or others (see prepareDir).
+func trustedDir(d string) error {
+	fi, err := os.Lstat(d)
+	if err != nil {
+		return fmt.Errorf("segment: %w", err)
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	switch {
+	case !fi.IsDir():
+		return fmt.Errorf("segment: %s is not a directory", d)
+	case !ok || int(st.Uid) != os.Geteuid():
+		return fmt.Errorf("segment: %s is not owned by uid %d", d, os.Geteuid())
+	case fi.Mode().Perm()&0o022 != 0:
+		return fmt.Errorf("segment: %s is group- or other-writable (%v)", d, fi.Mode().Perm())
+	}
+	return nil
+}
+
+// realDir rejects a symlink (or anything else) where a directory must be:
+// a symlinked ready/ would publish segments wherever it points, as root.
+func realDir(d string) error {
+	fi, err := os.Lstat(d)
+	if err != nil {
+		return fmt.Errorf("segment: %w", err)
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("segment: %s is not a directory", d)
+	}
+	return nil
+}
+
+// lockDir takes an exclusive flock on dir/.lock, without waiting: one
+// writer per project directory. A second run of the same project would
+// otherwise sweep the first run's live active files and the two would
+// publish each other's half-written segments. The lock dies with the
+// process, so a crashed run never blocks the next start.
+func lockDir(dir string) (*os.File, error) {
+	f, err := os.OpenFile(filepath.Join(dir, lockFile), os.O_RDWR|os.O_CREATE|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("segment: lock: %w", err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, fmt.Errorf("segment: %s is in use by another run of this project", dir)
+		}
+		return nil, fmt.Errorf("segment: lock: %w", err)
+	}
+	return f, nil
+}
+
 // sweepActive removes active files a crashed or killed run left in dir.
-// They have no footer, so no reader can open them; the minute they held
+// It runs under lockDir's lock, so no live writer owns them. They have
+// no footer, so no reader can open them; the minute they held
 // is the loss PLAN.md accepts for a crash.
 func sweepActive(dir string) error {
 	stale, err := filepath.Glob(filepath.Join(dir, activePrefix+"*"))

@@ -108,6 +108,16 @@ truth.
   written. The workload plants secrets in four headers, a
   query parameter and argv, and the tests assert none of them
   ever reaches a trace.
+- **The trace directory is root's.** The tracer writes and
+  renames segments as root, so the trace dir and the project
+  directory must be real directories owned by its euid and not
+  group- or other-writable — anyone who could write them could
+  swap `ready/` for a symlink after the check and have root
+  publish wherever it points. A planted or loosened directory
+  stops the start; it is never repaired. `ready/` must be a real
+  directory too, and only it is handed to the deploying user
+  (`-ready-owner`). One run per project directory: an exclusive
+  lock on `<project>/.lock` refuses a second (task 8b4).
 - **Traces are sensitive data.** Collected segments stay on the
   controller until the operator deletes them — production
   metadata on a laptop deserves the care that implies.

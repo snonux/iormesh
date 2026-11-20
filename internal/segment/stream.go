@@ -37,9 +37,10 @@ type tableFile interface {
 	abort() error
 }
 
-// openStream creates path for a segment's rows. O_EXCL because New swept
-// the project directory's stale active files: an existing one now means a
-// second writer, which must not share the file. The file is made 0644
+// openStream creates path for a segment's rows. O_EXCL as a last guard:
+// the project lock (lockDir) is what keeps a second writer out, and New
+// swept stale active files under it, so an existing file here is a bug,
+// never a file to share. The file is made 0644
 // whatever the umask: once published, the deploying user's collector
 // must read it.
 func openStream[T any](path string, codec *zstdCodec) (*stream[T], error) {

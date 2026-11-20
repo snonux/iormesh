@@ -8,6 +8,7 @@ package integrationtests
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -38,9 +39,10 @@ func TestParquetSegments(t *testing.T) {
 		t.Fatalf("segments hold %d stacks, stacks.ndjson %d", len(stacks), len(want))
 	}
 	for _, st := range stacks {
-		w, ok := want[st.StackID]
-		if !ok || len(w.Frames) != len(st.Frames) || w.PID != st.PID || w.PIDInc != st.PIDInc {
-			t.Fatalf("stack %d differs from stacks.ndjson: %+v vs %+v", st.StackID, st, w)
+		// Whole rows: every frame's address, module, offset, build id and
+		// symbol, not only the stack's shape.
+		if w, ok := want[st.StackID]; !ok || !reflect.DeepEqual(st, w) {
+			t.Fatalf("stack %d differs from stacks.ndjson:\nparquet %+v\nndjson  %+v", st.StackID, st, w)
 		}
 	}
 }

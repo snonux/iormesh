@@ -67,7 +67,9 @@ func (f segmentFlags) apply(cfg runConfig) (runConfig, error) {
 	if cfg.traceDir == "" && cfg.out == "" {
 		cfg.traceDir = defaultTraceDir
 	}
-	if *f.limit < 0 || *f.limit > 100 {
+	// Written as the accepted range negated, so NaN (which compares false
+	// both ways and would silently turn the limit off) is rejected too.
+	if !(*f.limit >= 0 && *f.limit <= 100) {
 		return cfg, fmt.Errorf("%w: -disk-limit %g: want 0-100", errUsage, *f.limit)
 	}
 	cfg.diskLimit = *f.limit

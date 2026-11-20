@@ -3,6 +3,7 @@ package segment
 import (
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -61,11 +62,20 @@ type Config struct {
 // table's worker and may land one segment later than the first event
 // naming them.
 //
+// A publish that fails part-way (a rename or the disk failing) breaks
+// the writer and may leave table files in ready/ whose events file never
+// arrives: orphan rows naming nothing, harmless to a reader that unions
+// a session's tables, and never the reverse.
+//
+// One Writer per project directory: New takes an exclusive lock on
+// <Dir>/.lock and fails if another run holds it.
+//
 // Event, the table methods, Tick and Close are safe for concurrent use:
 // the stack table writes from its own goroutine.
 type Writer struct {
 	mu        sync.Mutex
 	cfg       Config
+	lock      *os.File // flock on <Dir>/.lock, held until Close
 	codec     *zstdCodec
 	seq       int
 	start     time.Time // the active segment was opened; names it
@@ -109,10 +119,14 @@ func New(cfg Config) (*Writer, error) {
 	if err := prepareDir(cfg.Dir, cfg.Owner); err != nil {
 		return nil, err
 	}
-	if err := sweepActive(cfg.Dir); err != nil {
+	lock, err := lockDir(cfg.Dir)
+	if err != nil {
 		return nil, err
 	}
-	w := &Writer{cfg: cfg, codec: newZstdCodec(), batch: make([]schema.Event, 0, eventBatch),
+	if err := sweepActive(cfg.Dir); err != nil {
+		return nil, errors.Join(err, lock.Close())
+	}
+	w := &Writer{cfg: cfg, lock: lock, codec: newZstdCodec(), batch: make([]schema.Event, 0, eventBatch),
 		methods: table[schema.Method]{name: TableMethods},
 		threads: table[schema.Thread]{name: TableThreads},
 		classes: table[schema.Class]{name: TableClasses},
@@ -120,7 +134,7 @@ func New(cfg Config) (*Writer, error) {
 	now := cfg.Now()
 	w.nextCheck = now.Add(cfg.CheckEvery)
 	if err := w.openSegment(now); err != nil {
-		return nil, err
+		return nil, errors.Join(err, lock.Close())
 	}
 	return w, nil
 }
@@ -219,6 +233,9 @@ func (w *Writer) Close() error {
 	}
 	w.closed = true
 	defer w.codec.release()
+	// Released only after the publish below, so a next run cannot sweep
+	// the files this one is still publishing.
+	defer func() { _ = w.lock.Close() }()
 	if w.err != nil {
 		return errors.Join(w.err, w.abortSegment())
 	}

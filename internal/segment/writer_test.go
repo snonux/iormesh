@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -59,9 +60,23 @@ func richEvents() []schema.Event {
 		LocalAddr: ptr("::ffff:127.0.0.1"), LocalPort: ptr(uint16(40000))}
 	conn.ConnID, conn.Attribution = "0123456789abcdef", schema.AttributionJava
 	conn.Java = &schema.Java{Thread: "main", Stack: []uint64{3, 1}}
+	conn.StackID = ptr(uint32(5))
 	conn.Otel = &schema.Otel{TraceID: "a3ce929d0e0e47364bf92f3577b34d01", SpanID: "c11e0000000000a1"}
 	return []schema.Event{hostEvent(1, schema.KindSession), exec, conn, httpEvent(conn, 4),
-		dnsEvent(conn, 5), burstEvent(6), hostEvent(7, schema.KindEnd)}
+		dnsEvent(conn, 5), tcpStateEvent(6), burstEvent(7), hostEvent(8, schema.KindEnd)}
+}
+
+// tcpStateEvent carries sock_state and the four tcp_sock fields of the
+// ISN-pair join key (task fb4).
+func tcpStateEvent(seq uint64) schema.Event {
+	e := burstEvent(seq)
+	e.Event, e.Ret, e.Bytes, e.LatencyNS = schema.KindTCPState, 0, 0, 0
+	e.Args = schema.Args{SockState: ptr("ESTABLISHED"), LocalAddr: ptr("::ffff:127.0.0.1"),
+		LocalPort: ptr(uint16(40000)), RemoteAddr: ptr("::ffff:127.0.0.1"),
+		RemotePort: ptr(uint16(8080)), SndUna: ptr(uint32(1_000_001)), RcvNxt: ptr(uint32(7)),
+		BytesAcked: ptr(uint64(0)), BytesReceived: ptr(uint64(4096))}
+	e.ConnID = "0123456789abcdef"
+	return e
 }
 
 // httpEvent and dnsEvent derive the Java join's two event kinds from a
@@ -441,5 +456,75 @@ func TestConfigNames(t *testing.T) {
 				t.Fatal("accepted")
 			}
 		})
+	}
+}
+
+// TestSecondWriterIsRefused: two runs of one project on one trace dir
+// must not share it — the second would sweep the first's live active
+// files and the two would publish each other's segments. The second New
+// fails fast; the first publishes untouched, and once it closed a new
+// run may start.
+func TestSecondWriterIsRefused(t *testing.T) {
+	w, dir := newTestWriter(t, nil)
+	writeAll(t, w, richEvents())
+	_, err := New(Config{Dir: dir, FQDN: "app-1.example.org", Session: "b2", Project: "shop"})
+	if err == nil || !strings.Contains(err.Error(), "in use") {
+		t.Fatalf("second writer: %v, want refused", err)
+	}
+	if _, err := os.Stat(w.activePath("events")); err != nil {
+		t.Fatalf("first run's active file gone: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sameNDJSON(t, readEvents(t, filepath.Join(dir, ReadyDir, readyFiles(t, dir)[0])), richEvents())
+	w2, err := New(Config{Dir: dir, FQDN: "app-1.example.org", Session: "b2", Project: "shop"})
+	if err != nil {
+		t.Fatalf("after the first closed: %v", err)
+	}
+	if err := w2.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestUntrustedDirsStopTheStart: a project or trace dir another user
+// could write would let them swap ready/ for a symlink after the check,
+// so group- or other-writable ones stop the start.
+func TestUntrustedDirsStopTheStart(t *testing.T) {
+	for name, which := range map[string]func(trace, project string) string{
+		"trace dir":   func(trace, _ string) string { return trace },
+		"project dir": func(_, project string) string { return project },
+	} {
+		t.Run(name, func(t *testing.T) {
+			trace := filepath.Join(t.TempDir(), "traces")
+			project := filepath.Join(trace, "shop")
+			if err := os.MkdirAll(project, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(which(trace, project), 0o777); err != nil {
+				t.Fatal(err)
+			}
+			_, err := New(Config{Dir: project, FQDN: "h", Session: "s1", Project: "shop"})
+			if err == nil || !strings.Contains(err.Error(), "writable") {
+				t.Fatalf("New = %v, want refused", err)
+			}
+		})
+	}
+}
+
+// TestDirsAre0755UnderAnyUmask: under umask 077 the collector still gets
+// into the project directory and ready/.
+func TestDirsAre0755UnderAnyUmask(t *testing.T) {
+	old := syscall.Umask(0o077)
+	defer syscall.Umask(old)
+	w, dir := newTestWriter(t, nil)
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{dir, filepath.Join(dir, ReadyDir)} {
+		fi, err := os.Stat(d)
+		if err != nil || fi.Mode().Perm() != 0o755 {
+			t.Fatalf("%s: %v, %v; want 0755", d, fi.Mode().Perm(), err)
+		}
 	}
 }

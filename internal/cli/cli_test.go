@@ -144,6 +144,7 @@ func TestParseRunFlagsRejects(t *testing.T) {
 		"bad project":        {"-pid", "10", "-project", "../etc", "-out", "o"},
 		"disk limit over":    {"-pid", "10", "-project", "p", "-disk-limit", "101"},
 		"disk limit neg":     {"-pid", "10", "-project", "p", "-disk-limit", "-1"},
+		"disk limit NaN":     {"-pid", "10", "-project", "p", "-disk-limit", "NaN"},
 		"min free unit":      {"-pid", "10", "-project", "p", "-disk-min-free", "1TB"},
 		"owner by name":      {"-pid", "10", "-project", "p", "-ready-owner", "paul:paul"},
 		"owner without gid":  {"-pid", "10", "-project", "p", "-ready-owner", "1000"},

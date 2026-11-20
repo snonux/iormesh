@@ -775,7 +775,10 @@ Gated by S1 — done; the design below is S1's result
   it re-measures on M4's segment writer, may cut the join and
   correlator too, and gates M4's acceptance, not its start; the
   limit is unchanged, and it ends in a pass or an explicit owner
-  decision recorded here, never a quiet relaxation.
+  decision recorded here, never a quiet relaxation. Note for
+  ee4 (task 8b4): the segment writer costs ≈ 3× the NDJSON sink
+  per event (≈ 10.4 k vs ≈ 3.4 k instructions), not less;
+  `DataPageStatistics(false)` (≈ −7 %) is the known lever.
 
   Acceptance run (2026-11-20, task 5b4): `mage integrationTest`
   40 / 40 on three of four runs with no skips and zero lost
@@ -1328,7 +1331,12 @@ answer), and deferred.
      (2.28 µs, 30–58 % of records lost), load 6.5–10 — `-spool` stays
      **over** budget, its next step being M4's output format
      (s3-overhead.md, "Follow-up (ud4)"); task ee4 re-measures
-     on M4's segment writer, the limit unchanged. Measured as the
+     on M4's segment writer, the limit unchanged. That writer
+     (task 8b4) costs ≈ 3× the NDJSON sink per event (≈ 10.4 k
+     vs ≈ 3.4 k instructions on the burst event), so the
+     parquet path starts further over, not under;
+     `DataPageStatistics(false)` (≈ −7 %) is the one known
+     cheap lever. Measured as the
      tracer's own user+sys CPU time per event from its ready
      file to its exit (load and attach excluded), which host
      load moves less than wall time — not nothing: on a loaded SMT host one thread's CPU

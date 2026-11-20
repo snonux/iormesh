@@ -166,8 +166,6 @@ func validateRun(cfg runConfig) error {
 		// The registry (iormeshctl add) checks the same rule, so a
 		// label the controller stored is one the tracer accepts.
 		return fmt.Errorf("%w: -project %q: want %s", errUsage, cfg.project, project.Rule)
-	case cfg.out == "" && cfg.traceDir == "":
-		return fmt.Errorf("%w: -out or -trace-dir is required", errUsage)
 	case cfg.duration <= 0:
 		return fmt.Errorf("%w: -duration %v: must be positive", errUsage, cfg.duration)
 	}

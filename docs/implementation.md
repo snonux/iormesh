@@ -3185,9 +3185,10 @@ func (w *Writer) rotate(now time.Time) error {
 ```
 
 - A segment's files are written in the project directory as
-  `.active-<what>.parquet` and published by `os.Rename` into
+  `.active-<session>-<what>.parquet` and published by `os.Rename` into
   `ready/` (same filesystem: atomic) after the footer is written
-  and the file fsync'd; `ready/` is fsync'd after the renames.
+  and the file fsync'd; `ready/` is fsync'd after the table
+  renames and again after the events rename.
   Names: `<fqdn>-<session>-<start-ts>-<seq>.parquet`, tables
   `<same base>.<table>.parquet`, published before the events
   ([schema.md](schema.md#parquet-mapping)).
@@ -3202,7 +3203,13 @@ func (w *Writer) rotate(now time.Time) error {
   `parquet.Zstd`.
 - `ready/` is created 0755 and `Lchown`ed to `-ready-owner
   UID:GID` (`start` passes `SUDO_UID`/`SUDO_GID` on to `run`);
-  a `ready` that is not a real directory fails the start.
+  a `ready` that is not a real directory fails the start, as does
+  a trace or project directory not owned by the euid or writable
+  by group or others (docs/security.md). The three directories
+  are chmod'ed 0755 whatever the umask. `New` takes an exclusive
+  `flock` on `<project>/.lock` (one run per project directory)
+  before sweeping stale `.active-<session>-*` files, and holds it
+  until `Close` has published.
   Published files are 0644 root-owned: the owner of `ready/`
   can read and unlink them, which is all rsync
   `--remove-source-files` needs.

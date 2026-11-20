@@ -137,6 +137,14 @@ func (w *Writer) publish() error {
 			return w.fail(errors.Join(err, w.abortSegment()))
 		}
 	}
+	if len(w.open) > 0 {
+		// The table renames must be durable before the events rename:
+		// a crash in between may then leave tables without their events
+		// (harmless rows), never events without their tables.
+		if err := syncDir(ready); err != nil {
+			return w.fail(err)
+		}
+	}
 	w.open = w.open[:0]
 	name := Name(w.cfg.FQDN, w.cfg.Session, w.start, w.seq)
 	events := w.events
@@ -178,9 +186,11 @@ func (w *Writer) checkDisk() error {
 	return w.cfg.Watchdog.Check()
 }
 
-// activePath is the file of the active segment's events or a table.
+// activePath is the file of the active segment's events or a table. The
+// session is in the name, so even a writer that somehow bypassed the
+// lock could never open another run's file.
 func (w *Writer) activePath(what string) string {
-	return filepath.Join(w.cfg.Dir, activePrefix+what+Ext)
+	return filepath.Join(w.cfg.Dir, activePrefix+w.cfg.Session+"-"+what+Ext)
 }
 
 // meta is a segment file's footer key-value metadata: what the name
