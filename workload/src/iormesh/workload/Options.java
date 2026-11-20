@@ -38,16 +38,25 @@ public final class Options {
     /** The --port value, or dflt when absent; 0 means "any free port". */
     public static int port(Map<String, String> opts, int dflt) throws UsageException {
         String v = opts.get("port");
-        return v == null ? dflt : parsePort(v, 0);
+        return v == null ? dflt : parsePort("port", v, 0);
     }
 
     /** The --port value, which must be present and connectable (1..65535). */
     public static int requiredPort(Map<String, String> opts) throws UsageException {
-        String v = opts.get("port");
+        return requiredPort(opts, "port");
+    }
+
+    /**
+     * The {@code --key} port, which must be present and connectable: a
+     * scenario that dials several servers names each port by its own key
+     * (microservices' {@code --orders-port}, {@code --billing-port}, …).
+     */
+    public static int requiredPort(Map<String, String> opts, String key) throws UsageException {
+        String v = opts.get(key);
         if (v == null) {
-            throw new UsageException("missing --port");
+            throw new UsageException("missing --" + key);
         }
-        return parsePort(v, 1);
+        return parsePort(key, v, 1);
     }
 
     /**
@@ -74,15 +83,16 @@ public final class Options {
         return n;
     }
 
-    private static int parsePort(String v, int min) throws UsageException {
+    private static int parsePort(String key, String v, int min) throws UsageException {
         int port;
         try {
             port = Integer.parseInt(v);
         } catch (NumberFormatException e) {
-            throw new UsageException("bad --port: " + v);
+            throw new UsageException("bad --" + key + ": " + v);
         }
         if (port < min || port > MAX_PORT) {
-            throw new UsageException("--port out of range [" + min + ", " + MAX_PORT + "]: " + v);
+            throw new UsageException("--" + key + " out of range [" + min + ", " + MAX_PORT + "]: "
+                    + v);
         }
         return port;
     }

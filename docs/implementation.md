@@ -486,7 +486,9 @@ hold file appears) and a two-process tcp-loopback run (server on
 `--port 0`, PID then `listening <port>` on stdout; the client
 started on that port; both print the end marker and exit 0),
 and runs M2's `udp-loopback` and `unix-socket` (`listening
-<path>`, passed to the client as `--path`) the same way. It
+<path>`, passed to the client as `--path`) the same way, and
+M4's `microservices` as four processes, servers released leaves
+first. It
 also checks that `--expect` prints valid JSON naming the scenario
 for every name `--list` prints, that malformed invocations —
 unknown scenario or role, a missing or duplicate option, a stray
@@ -3496,6 +3498,28 @@ in a fourth table so rebuilding is idempotent). Names are
 resolved at read time by joining `naming_rule`, so a new rule
 applies retroactively without rewriting anything.
 
+### The microservices scenario
+
+`microservices` (task jb4) landed ahead of the multi-host work,
+on loopback. `Microservices` parses one role's options. `Service`
+holds the topology: the roles, the calls each serves and the
+hops it makes. `ServiceNode` runs one service from boot to
+retirement. `DataStore#save` writes a record the
+create-tmp-then-rename way, and `ServiceConfig` provisions and
+loads the config. A server's request work (orders' downstream
+calls, every server's record) runs through `HttpServe.Work`
+on the HttpServer's dispatcher thread, inside the request, as a
+synchronous REST service does it. `Scenario.roles()` lets the
+scenario name its four roles instead of client/server/solo.
+
+For `multihost_test.go`, the scenario still needs address
+options: a bind address per server, a host per callee, and the
+callee's address in its certificate's SAN (`SelfSignedCert`
+names 127.0.0.1 only). It also needs the certificates handed
+across hosts, since each caller pins its callee's from the
+shared `--dir`. The golden then gains one `$h` per host.
+Testing notes: [testing.md](testing.md#m4-microservices-scenario-task-jb4).
+
 **Done when**: PLAN.md's M4 acceptance holds, driven by
 `integrationtests/multihost_test.go` on two network namespaces
 plus one run on two real hosts.
@@ -3560,10 +3584,10 @@ nullable `args` columns are for), then a streaming merge by
 - id: order-file-writer
   scenario: microservices
   question: Which Java method wrote order-42.json?
-  answer_contains: ["OrderStore#save"]
+  answer_contains: ["DataStore#save"]
 - id: gateway-chain
   scenario: microservices
-  question: List the services a GET /checkout touches, in order.
+  question: List the services the gateway's checkout touches, in order.
   answer_sequence: ["gateway", "orders", "inventory", "billing"]
 ```
 

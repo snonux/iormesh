@@ -308,6 +308,54 @@ unsignalled). `internal/cli` checks the agent-jar trust rule
 (`TestTrustedAgent`). The integration tests copy the jar into a
 root-owned directory for it.
 
+### M4 microservices scenario (task jb4)
+
+`microservices` (PLAN.md scenario notes, "Microservices
+end-to-end scenario") landed ahead of M4's multi-host work: four
+service roles, one process each, on loopback.
+
+| Hop | Call | Link |
+|---|---|---|
+| gateway → orders | `POST /orders` (201) | TLS |
+| orders → inventory | `POST /inventory/reserve` | plain |
+| orders → billing | `POST /billing/charge` | TLS |
+| gateway → inventory | `GET /inventory/stock/widget` | plain |
+
+Orders makes its two calls while it handles the gateway's
+order, so the hops always run in table order: a chain
+(gateway → orders → inventory), a fan-out from orders and from
+the gateway, and a fan-in at inventory. Each hop is its own
+HTTP/1.1 connection with one request (`req_seq` 1). Each
+service boots in `<role>.d` in the shared `--dir`: it writes
+its config, reads it back, and saves one record as `.tmp` and
+then `rename`. A TLS service (orders, billing) publishes its
+in-memory certificate as `<role>.crt` before it listens and
+removes it once it has served. Its callers pin exactly that
+certificate.
+
+`mage workloadTest` (`magefile_m4workload.go`) runs the
+self-test (the whole topology in one JVM). It then runs the
+four processes the way a harness does: billing, inventory and
+orders each start only after the previous one printed its
+`listening <port>` line, then the gateway. All four must end
+their bracket and exit 0, and the `--dir` must be empty
+afterwards. Usage errors exit 2: no or a non-service role, a
+missing or unconnectable callee port, `--port` on the gateway,
+an option the role does not take. Run-time failures exit 1: a
+caller whose `--dir` holds no certificate for its TLS callee, a
+missing `--dir`, a `billing.d` the run did not create (which
+must survive). A broken hop (orders pointed at a closed
+inventory port) must fail orders and the gateway with 1, never
+pass, and orders must still remove its certificate.
+
+| Test | What it checks |
+|---|---|
+| `TestMicroservices` | microservices golden under the agent, the four services released leaves first on free ports in one `--dir`: every hop one fused connection with an `http` event on each end (`https` on the TLS hops) pairing by `(conn_id, req_seq)`; each server's request handled by `HttpServe#handle`, each call made by `HttpFetch#call`, orders' calls on its dispatcher thread inside the gateway's request; config, certificate and record I/O with their causing methods (`ServiceConfig#provision`/`#load`, `ServiceNode#publish`/`#readCert`/`#withdraw`/`#retire`, `DataStore#save`); four rings; mutated goldens fail |
+
+The golden was written from strace runs of the four processes
+(JDK 25). The agent-side fields are reasoned from the M3 goldens
+and still need a traced run to confirm (see the task's notes).
+
 ## Performance baselines
 
 S3 (PLAN.md, decision #25) measures overhead against a load the

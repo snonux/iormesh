@@ -75,6 +75,7 @@ func IntegrationTests() []string {
 		"TestHTTPApache",
 		"TestHTTPOkHttp",
 		"TestHTTPNetty",
+		"TestMicroservices",
 		"TestPIDReuse",
 		"TestSocketRaces",
 		"TestSyscallBurstFoldsEveryCall",

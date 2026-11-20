@@ -114,7 +114,8 @@ func javaSources(root string) ([]string, error) {
 // directory it did not create alone, the skip exit code, and
 // restart's and non-java-peer's own failure modes (magefile_restartpeer.go)
 // and M3's HTTP pairs, failure modes, OTEL flavor and third-party HTTP
-// module (magefile_m3workload.go, magefile_libs.go).
+// module (magefile_m3workload.go, magefile_libs.go), and M4's
+// four-process microservices topology (magefile_m4workload.go).
 func WorkloadTest() error {
 	mg.Deps(WorkloadBuild, WorkloadOtelBuild, WorkloadLibsBuild)
 	if err := sh.RunV("java", "-jar", workloadJar, "--self-test"); err != nil {
@@ -133,6 +134,7 @@ func WorkloadTest() error {
 		checkSkip,
 		checkRestartPeer,
 		checkM3Scenarios,
+		checkM4Scenarios,
 	}
 	for _, check := range checks {
 		if err := check(); err != nil {
@@ -459,23 +461,30 @@ func checkForeignDirSurvives() error {
 }
 
 func foreignDirSurvives(name string) error {
+	return foreignDirSurvivesRun(name, name)
+}
+
+// foreignDirSurvivesRun is foreignDirSurvives for a run whose tree is
+// sub.d rather than <scenario>.d — a microservices service makes
+// <role>.d — with args (the scenario and its options) plus --dir.
+func foreignDirSurvivesRun(sub string, args ...string) error {
 	dir, err := os.MkdirTemp("", "iormesh-foreign-")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	keep := filepath.Join(dir, name+".d", "keep.dat")
+	keep := filepath.Join(dir, sub+".d", "keep.dat")
 	if err := os.Mkdir(filepath.Dir(keep), 0o755); err != nil {
 		return err
 	}
 	if err := os.WriteFile(keep, []byte("not yours"), 0o644); err != nil {
 		return err
 	}
-	if err := expectExit(1, name, "--dir", dir); err != nil {
+	if err := expectExit(1, append(args, "--dir", dir)...); err != nil {
 		return err
 	}
 	if _, err := os.Stat(keep); err != nil {
-		return fmt.Errorf("%s deleted a directory it did not create: %w", name, err)
+		return fmt.Errorf("%q deleted a directory it did not create: %w", args, err)
 	}
 	return nil
 }

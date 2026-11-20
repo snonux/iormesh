@@ -18,7 +18,8 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
 
 /**
- * http-tls's server identity: a fresh EC P-256 key pair and a self-signed
+ * http-tls's server identity, and each TLS service's in the microservices
+ * scenario (orders, billing): a fresh EC P-256 key pair and a self-signed
  * certificate for 127.0.0.1, made in memory at run time. The private key
  * exists only inside the server's JVM — never in the repository, never in
  * a file — and is new on every run; only the public certificate is handed

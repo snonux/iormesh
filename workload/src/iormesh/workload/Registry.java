@@ -9,6 +9,7 @@ import iormesh.workload.scenarios.FileLinks;
 import iormesh.workload.scenarios.HttpScenario;
 import iormesh.workload.scenarios.LiveAttach;
 import iormesh.workload.scenarios.MethodFlow;
+import iormesh.workload.scenarios.Microservices;
 import iormesh.workload.scenarios.NonJavaPeer;
 import iormesh.workload.scenarios.Noop;
 import iormesh.workload.scenarios.PipeIpc;
@@ -52,6 +53,7 @@ final class Registry {
         r.add(HttpScenario.tls());
         r.add(new LiveAttach());
         r.add(new MethodFlow());
+        r.add(new Microservices());
         r.add(new NonJavaPeer());
         r.add(new Noop());
         r.add(new PipeIpc());

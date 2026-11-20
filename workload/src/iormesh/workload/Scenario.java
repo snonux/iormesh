@@ -1,6 +1,7 @@
 package iormesh.workload;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * One deterministic, declared behavior. Its syscalls between the begin
@@ -14,12 +15,25 @@ public interface Scenario {
     /**
      * Runs the scenario once.
      *
-     * @param role "client", "server" or "solo"; socket scenarios run as
-     *             two processes, everything else as "solo"
+     * @param role one of {@link #roles()}: "client", "server" or "solo"
+     *             for most scenarios (socket scenarios run as two
+     *             processes, everything else as "solo"), a service role
+     *             for the microservices scenario
      * @param opts scenario options from the command line ({@code --key
      *             value}), e.g. a port
      */
     void run(String role, Map<String, String> opts) throws Exception;
+
+    /**
+     * The roles {@code --role} may name. Most scenarios are solo or a
+     * client/server pair; the microservices scenario plays one service
+     * role per process (gateway, orders, …), so it names its own. Main
+     * rejects any other role with the usage code before the bracket; the
+     * scenario still narrows the set further where it needs to.
+     */
+    default Set<String> roles() {
+        return Set.of("client", "server", "solo");
+    }
 
     /**
      * Runs the scenario without a tracer for {@code --self-test}. Solo

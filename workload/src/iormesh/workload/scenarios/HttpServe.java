@@ -26,7 +26,11 @@ import javax.net.ssl.SSLContext;
  * request — and the http event the agent records for it — has one
  * thread and one causing method: HttpServe#handle. Public for the OTEL
  * flavor's separate module (workload/otel), which serves its calls
- * through the same handler inside a {@link PerRequest} region.
+ * through the same handler inside a {@link PerRequest} region. A
+ * microservices service hangs its own {@link Work} on a request — the
+ * downstream calls and the data write it makes before it answers — so
+ * that work runs on the dispatcher thread inside the request, the way a
+ * synchronous REST service handles it.
  */
 public final class HttpServe implements AutoCloseable {
     /**
@@ -51,19 +55,34 @@ public final class HttpServe implements AutoCloseable {
         void close();
     }
 
+    /**
+     * What request n's handling does before the reply (the microservices
+     * scenario's downstream calls and data write). It runs after the
+     * request matched its declaration; a throw answers 500 and fails the
+     * run like a mismatch, so a broken hop never passes as a served call.
+     */
+    @FunctionalInterface
+    public interface Work {
+        void before(int n) throws Exception;
+    }
+
     private static final PerRequest NO_REGION = (n, request) -> () -> {};
+    private static final Work NO_WORK = n -> {};
 
     private final HttpServer server;
     private final List<HttpCall> calls;
     private final PerRequest perRequest;
+    private final Work work;
     private final AtomicInteger next = new AtomicInteger();
     private final CountDownLatch done;
     private volatile String failure;
 
-    private HttpServe(HttpServer server, List<HttpCall> calls, PerRequest perRequest) {
+    private HttpServe(HttpServer server, List<HttpCall> calls, PerRequest perRequest,
+            Work work) {
         this.server = server;
         this.calls = calls;
         this.perRequest = perRequest;
+        this.work = work;
         this.done = new CountDownLatch(calls.size());
     }
 
@@ -76,7 +95,20 @@ public final class HttpServe implements AutoCloseable {
     /** start, with each request handled inside perRequest's region. */
     public static HttpServe start(InetAddress addr, int port, List<HttpCall> calls,
             SSLContext tls, PerRequest perRequest) throws IOException {
-        // Backlog 1: the client opens exactly one connection.
+        return start(addr, port, calls, tls, perRequest, NO_WORK);
+    }
+
+    /** start, with work run before each reply (a microservices service). */
+    static HttpServe startWorking(InetAddress addr, int port, List<HttpCall> calls,
+            SSLContext tls, Work work) throws IOException {
+        return start(addr, port, calls, tls, NO_REGION, work);
+    }
+
+    private static HttpServe start(InetAddress addr, int port, List<HttpCall> calls,
+            SSLContext tls, PerRequest perRequest, Work work) throws IOException {
+        // Backlog 1: each client opens exactly one connection, and a
+        // service called by two (microservices' inventory) is called by
+        // one after the other, never both at once.
         InetSocketAddress at = new InetSocketAddress(addr, port);
         HttpServer server;
         if (tls == null) {
@@ -86,7 +118,7 @@ public final class HttpServe implements AutoCloseable {
             s.setHttpsConfigurator(new HttpsConfigurator(tls));
             server = s;
         }
-        HttpServe serve = new HttpServe(server, calls, perRequest);
+        HttpServe serve = new HttpServe(server, calls, perRequest, work);
         server.createContext("/", serve::handle);
         server.start();
         return serve;
@@ -118,10 +150,10 @@ public final class HttpServe implements AutoCloseable {
     }
 
     /**
-     * Answers request n with call n. A request the declaration does not
-     * expect gets 500 and fails the run; the latch is then released in
-     * full, so a standalone server never waits for requests that will not
-     * come. The latch counts down only after the exchange is closed, so an
+     * Answers request n with call n, after its {@link Work}. A request the
+     * declaration does not expect, or whose work throws, gets 500 and
+     * fails the run; the latch is then released in full, so a standalone
+     * server never waits for requests that will not come. The latch counts down only after the exchange is closed, so an
      * owner that stops the server next never cuts a reply short. The
      * region is closed after ex.close(), so the close runs inside it too.
      */
@@ -134,6 +166,9 @@ public final class HttpServe implements AutoCloseable {
             String problem = call == null ? "unexpected request " + (n + 1)
                     : call.mismatch(ex.getRequestMethod(), target(ex), ex.getRequestHeaders(),
                             body);
+            if (problem == null) {
+                problem = runWork(n);
+            }
             if (problem != null) {
                 failure = problem;
                 ex.sendResponseHeaders(500, -1);
@@ -154,6 +189,16 @@ public final class HttpServe implements AutoCloseable {
                     done.countDown();
                 }
             }
+        }
+    }
+
+    /** Runs request n's work; returns what went wrong, or null. */
+    private String runWork(int n) {
+        try {
+            work.before(n);
+            return null;
+        } catch (Exception e) {
+            return "request " + (n + 1) + ": " + e;
         }
     }
 

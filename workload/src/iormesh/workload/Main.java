@@ -10,7 +10,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Entry point of the traceable workload (PLAN.md, M0). Usage:
@@ -43,8 +43,6 @@ public final class Main {
     // The host lacks what the scenario needs (ScenarioSkipped): neither
     // a pass nor a failure, so a harness turns it into a test skip.
     static final int EXIT_SKIP = 3;
-
-    private static final Set<String> ROLES = Set.of("client", "server", "solo");
 
     private Main() {}
 
@@ -112,8 +110,11 @@ public final class Main {
         Scenario scenario = lookup(registry, args[0]);
         Map<String, String> opts = parseOpts(args);
         String role = opts.getOrDefault("role", "solo");
-        if (!ROLES.contains(role)) {
-            throw new UsageException("unknown role: " + role);
+        // The scenario names its roles (Scenario.roles): client, server
+        // and solo for most, a service role each for microservices.
+        if (!scenario.roles().contains(role)) {
+            throw new UsageException("unknown role: " + role + "; " + scenario.name()
+                    + " knows " + new TreeSet<>(scenario.roles()));
         }
         // The harness reads the PID from the first stdout line and attaches
         // the tracer to it before releasing the startup gate. Note: Java's
@@ -215,7 +216,7 @@ public final class Main {
     }
 
     private static void usage(Registry registry) {
-        System.err.println("usage: workload.jar <scenario> [--role client|server|solo]"
+        System.err.println("usage: workload.jar <scenario> [--role R]"
                 + " [--key value ...] | --self-test [scenario ...] | --list"
                 + " | --expect <scenario>");
         System.err.println("scenarios: " + String.join(", ", registry.names()));

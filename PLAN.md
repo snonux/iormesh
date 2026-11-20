@@ -271,7 +271,7 @@ Scenario catalogue, by the milestone it lands with:
 | S3 | Syscall load: tight 1-byte read/write loops, N ops over T threads — `syscall-burst` |
 | M2 | Full file surface — `file-lifecycle` (create/delete, rename while open, move, truncate, touch), `file-links` (symlink/readlink/lstat, hardlink), `file-attrs` (chmod/chown by path and fd, xattr); fd lifecycle (dup, inheritance across fork/exec, reuse) — `fd-lifecycle` (these four landed ahead of the M2 tracer work); local IPC — `pipe-ipc` (pipe, child stdio pipes), `unix-socket`; signals — `signals`; UDP — `udp-loopback`; IPv4 + IPv6 — `tcp-ipv4`, `tcp-ipv6` (these six landed ahead too); restart — `restart`; non-Java peer — `non-java-peer` (these two landed ahead too); argv redaction — `argv-secret` |
 | M3 | Method flows (deep stacks, async I/O) — `method-flow`; HTTP plain + TLS — `http-plain`, `http-tls`; async client — `http-async` (task wd4); redaction — `http-redaction` (these four landed ahead of the agent, their Java parts pending until tasks 2b4 and 3b4, see below); OTEL flavor — `otel` (landed ahead too, in its own module; its ids pending until task 4b4); third-party HTTP libraries — `http-servlet`, `http-apache`, `http-okhttp`, `http-netty` (task de4, in their own module) |
-| M4 | Client and server on two hosts as two projects; microservices topology, one service per host; NAT'ed pair |
+| M4 | Client and server on two hosts as two projects; microservices topology, one service per host — `microservices` (task jb4, landed ahead on loopback; the cross-host run comes with M4's multi-host test); NAT'ed pair |
 | M5 | (renders M4's microservices scenario) |
 | M6 | Microservices topology with only the gateway enrolled |
 | M7 | The same scenarios as pods in kind; ClusterIP; ingress |
@@ -332,6 +332,23 @@ Scenario notes:
   discover and fuse every hop itself. Runs on plain hosts
   (M4/M6) and as pods (M7), one project per service when
   cross-project fusion is under test.
+  `microservices` (task jb4) has four roles, one process each:
+  the gateway places order 42 with orders (TLS), which first
+  reserves stock with inventory (plain) and charges billing
+  (TLS); then the gateway reads the stock left from inventory
+  (plain) — chain gateway→orders→inventory, fan-out from
+  orders and from the gateway, fan-in at inventory, every hop
+  its own connection in a fixed order. Each service boots in
+  its own `<role>.d` (config written, then read) and saves one
+  record as `.tmp` + `rename`; a TLS service publishes its
+  in-memory self-signed certificate to the shared `--dir`,
+  where its callers pin it. The golden declares every hop as
+  one fused connection with an http event on each end (scheme
+  `https` on the TLS ones) and each service's file work with
+  its causing Java method. Loopback only so far: the servers
+  bind 127.0.0.1; the cross-host run adds address options and
+  certificates naming them with M4's multi-host test, and
+  until then the same golden runs on one host.
 - **Restart scenario** (M2): the app exits mid-session and
   comes back with a new PID; expectations assert both
   incarnations were traced under one app identity, with
