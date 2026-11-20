@@ -69,6 +69,10 @@ type Segments struct {
 	// Tables counts the table files seen (methods, threads, classes,
 	// stacks); the build does not read them yet (M5's conversations do).
 	Tables int
+	// TableFiles are those table files, sorted by Name, unchecked:
+	// iormeshctl query -method reads the methods tables of the
+	// sessions in Sources, each checked first like a segment.
+	TableFiles []TableFile
 	// Hosts is the identity each host directory's good sessions carry:
 	// what the caller pins (LoadOptions.Known) for the next build.
 	Hosts map[string]HostIdentity
@@ -116,10 +120,43 @@ func (s *Segment) read(ctx context.Context, fn func(*schema.Event) error) error 
 	return err
 }
 
+// Session names the tracer run the segment belongs to,
+// <project>/<host>/<fqdn>-<session>: the scope of its method-table ids.
+func (s *Segment) Session() string { return sessionKey(s.Project, s.Host, s.File) }
+
 // wantMeta checks a footer against the file's name and directory.
-func (s *Segment) wantMeta(m segment.Meta) error {
-	f := s.File
-	if m.Project != s.Project || m.FQDN != f.FQDN || m.Session != f.Session || m.Seq != f.Seq {
+func (s *Segment) wantMeta(m segment.Meta) error { return wantMeta(s.Project, s.File, m) }
+
+// TableFile is one collected table file of a segment (methods, threads,
+// classes, stacks), in the same store layout as its events file.
+type TableFile struct {
+	Path          string
+	Project, Host string
+	File          segment.FileName
+}
+
+// Name is the file's path below the store, as Segment.Name.
+func (t TableFile) Name() string {
+	return t.Project + "/" + t.Host + "/" + filepath.Base(t.Path)
+}
+
+// Session is the run the table belongs to, as Segment.Session.
+func (t TableFile) Session() string { return sessionKey(t.Project, t.Host, t.File) }
+
+// WantMeta checks the table's footer against its name and directory, as
+// a segment's is checked: a table moved into another session's place
+// would otherwise lend that session its ids.
+func (t TableFile) WantMeta(m segment.Meta) error { return wantMeta(t.Project, t.File, m) }
+
+// sessionKey is the store-relative name of a session.
+func sessionKey(project, host string, f segment.FileName) string {
+	return project + "/" + host + "/" + f.FQDN + "-" + f.Session
+}
+
+// wantMeta checks a footer against what the file's name and project
+// directory say.
+func wantMeta(project string, f segment.FileName, m segment.Meta) error {
+	if m.Project != project || m.FQDN != f.FQDN || m.Session != f.Session || m.Seq != f.Seq {
 		return fmt.Errorf("footer names %s/%s-%s-%06d", m.Project, m.FQDN, m.Session, m.Seq)
 	}
 	return nil
@@ -169,6 +206,7 @@ func LoadSegments(ctx context.Context, store string, projects []string, opt Load
 	}
 	slices.SortFunc(out.Sources, func(a, b *Segment) int { return cmp.Compare(a.Name(), b.Name()) })
 	slices.SortFunc(out.Bad, func(a, b BadSegment) int { return cmp.Compare(a.Name, b.Name) })
+	slices.SortFunc(out.TableFiles, func(a, b TableFile) int { return cmp.Compare(a.Name(), b.Name()) })
 	return out, nil
 }
 
@@ -253,9 +291,7 @@ func loadSession(ctx context.Context, segs []*Segment, out *Segments) ([]*Segmen
 // groupSessions groups segments by session (project, host directory,
 // fqdn, session id), each group in seq order, the groups in name order.
 func groupSessions(segs []*Segment) [][]*Segment {
-	key := func(s *Segment) string {
-		return s.Project + "/" + s.Host + "/" + s.File.FQDN + "-" + s.File.Session
-	}
+	key := (*Segment).Session
 	slices.SortFunc(segs, func(a, b *Segment) int {
 		return cmp.Or(cmp.Compare(key(a), key(b)), cmp.Compare(a.File.Seq, b.File.Seq))
 	})
@@ -320,6 +356,8 @@ func listHost(dir, proj, host string, out *Segments) ([]*Segment, error) {
 		}
 		if f.Table != "" {
 			out.Tables++
+			out.TableFiles = append(out.TableFiles,
+				TableFile{Path: filepath.Join(dir, name), Project: proj, Host: host, File: f})
 			continue
 		}
 		segs = append(segs, &Segment{Path: filepath.Join(dir, name), Project: proj, Host: host, File: f})

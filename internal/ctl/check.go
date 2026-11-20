@@ -79,7 +79,7 @@ func lastLine(s string) string {
 
 // checkSegmentCommand is the child: `__check-segment SPACE PATH` caps
 // its own address space at what it has mapped now plus SPACE, decodes
-// the segment (segment.CheckEvents) and prints the summary as JSON.
+// the file (checkFile) and prints the summary as JSON.
 func checkSegmentCommand(args []string, e env) error {
 	if len(args) != 2 {
 		return fmt.Errorf("%w: %s SPACE PATH", errUsage, checkCommand)
@@ -91,11 +91,29 @@ func checkSegmentCommand(args []string, e env) error {
 	if err := capMemory(space); err != nil {
 		return err
 	}
-	s, err := segment.CheckEvents(context.Background(), args[1], nil)
+	s, err := checkFile(context.Background(), args[1])
 	if err != nil {
 		return err
 	}
 	return json.NewEncoder(e.stdout).Encode(s)
+}
+
+// checkFile decodes the file its name says it is: a methods table
+// (query's -method reads them, task pb4) or an events file. Any other
+// table is refused — nothing reads one yet, so nothing may ask for it
+// to be trusted.
+func checkFile(ctx context.Context, path string) (segment.Summary, error) {
+	name, err := segment.ParseName(filepath.Base(path))
+	if err != nil {
+		return segment.Summary{}, err
+	}
+	switch name.Table {
+	case "":
+		return segment.CheckEvents(ctx, path, nil)
+	case segment.TableMethods:
+		return segment.CheckMethods(ctx, path, nil)
+	}
+	return segment.Summary{}, fmt.Errorf("segment: %s: no check for %s tables", path, name.Table)
 }
 
 // capMemory limits the process's address space to its current size plus

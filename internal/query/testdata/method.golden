@@ -1,0 +1,1 @@
+{"schema_version":1,"project":"shop","seq":5,"boot_ns":11,"wall_ns":1763600000010000000,"host_id":"mA","pid":100,"pid_incarnation":1,"tid":101,"comm":"java","event":"write","fd":7,"fd_gen":1,"ret":0,"latency_ns":0,"bytes":0,"args":{},"conn_id":"conn:f1","attribution":"java","java":{"thread":"http-1","stack":[9]}}

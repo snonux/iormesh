@@ -1337,7 +1337,18 @@ Kubernetes (M7) build on it.
   file or method and emits schema-conformant NDJSON, with a
   size cap and an explicit truncation record. An event stream
   at syscall frequency never fits a context window — the slice
-  is what an LLM (or a human) actually reads.
+  is what an LLM (or a human) actually reads. *Built (task
+  pb4):* the input is the collected store, read through build's
+  checked path (memory-capped child per segment and per methods
+  table, host pins) and merged again, so a slice speaks merged
+  conn ids; query writes nothing. Filters AND; `-follow` widens
+  a connection to its threads' other events while they used it;
+  `-file` follows the fds a matching open returned; the default
+  cap is 1 MiB, the record
+  `{"event":"truncated","args":{"emitted":N,"remaining":M}}`;
+  lines are escaped for terminals; bad segments are named and
+  exit 1. Predicate pushdown waits for a cheaper check
+  (docs/implementation.md M5).
 - Plus the per-run summary/report export — the LLM rollup of the
   whole mesh (see "Trace output contract").
 - **LLM introspection eval**: a fixed question set over M0

@@ -165,21 +165,35 @@ func build(ctx context.Context, e env, f buildFlags) (buildOutput, error) {
 // identity pinned for it, then pins the directories seen for the first
 // time.
 func loadSegments(ctx context.Context, paths buildPaths, projects []string) (federate.Segments, error) {
+	segs, pins, err := checkedSegments(ctx, paths, projects)
+	if err != nil {
+		return federate.Segments{}, err
+	}
+	return segs, pinNewHosts(pins.path, pins.known, segs.Hosts)
+}
+
+// hostPins are the pinned host identities and the file they live in.
+type hostPins struct {
+	path  string
+	known map[string]federate.HostIdentity
+}
+
+// checkedSegments loads the projects' segments as build does — each
+// decoded first in a memory-capped child, each host directory held to
+// its pinned identity — without pinning anything new: query, which
+// reads the store too, must not change what a later build trusts.
+func checkedSegments(ctx context.Context, paths buildPaths, projects []string) (federate.Segments, hostPins, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return federate.Segments{}, fmt.Errorf("build: %w", err)
+		return federate.Segments{}, hostPins{}, err
 	}
-	pinsPath := filepath.Join(filepath.Dir(paths.db), hostPinsFileName)
-	pins, err := loadHostPins(pinsPath)
-	if err != nil {
-		return federate.Segments{}, err
+	pins := hostPins{path: filepath.Join(filepath.Dir(paths.db), hostPinsFileName)}
+	if pins.known, err = loadHostPins(pins.path); err != nil {
+		return federate.Segments{}, hostPins{}, err
 	}
 	segs, err := federate.LoadSegments(ctx, paths.store, projects, federate.LoadOptions{
-		Check: childChecker(exe, checkAddressSpace), Known: pins})
-	if err != nil {
-		return federate.Segments{}, err
-	}
-	return segs, pinNewHosts(pinsPath, pins, segs.Hosts)
+		Check: childChecker(exe, checkAddressSpace), Known: pins.known})
+	return segs, pins, err
 }
 
 // mergeAndImport merges the segments, folds the result into the service

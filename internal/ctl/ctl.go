@@ -8,6 +8,8 @@
 //	iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR] [HOST...]
 //	iormeshctl show [summary|services|edges|health] [-project NAME]... [-json] [-unresolved]
 //	iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
+//	iormeshctl query [-project NAME]... [-from T] [-to T] [-host GLOB] [-app GLOB] [-thread GLOB]
+//	                 [-conn ID [-follow]] [-file GLOB] [-method GLOB] [-max-bytes N]
 //	iormeshctl services [list|edges|name|rules|unname] [-db FILE] ...
 //	iormeshctl verify [-key FILE] FILE...
 //	iormeshctl version
@@ -24,9 +26,10 @@
 // build merges the collected segments offline into the merged graph
 // export, the service database and the view model, and refresh is
 // collect then build (build.go); show prints the last build's view
-// model as text (show.go, internal/viewmodel). expand lists which
-// unresolved peers the next expansion round would enroll and why the
-// others stay (expand.go, internal/expand, PLAN.md M6).
+// model as text (show.go, internal/viewmodel); query cuts the merged
+// trace into a size-capped NDJSON slice (query.go, internal/query). expand
+// lists which unresolved peers the next expansion round would enroll and
+// why the others stay (expand.go, internal/expand, PLAN.md M6).
 // It is cgo-free (internal/buildgate checks it), so it cross-compiles for
 // the darwin and linux laptops it runs on.
 package ctl
@@ -127,6 +130,8 @@ func run(args []string, e env) int {
 		err = showCommand(args[1:], e)
 	case "expand":
 		err = expandCommand(args[1:], e)
+	case "query":
+		err = queryCommand(args[1:], e)
 	case checkCommand: // build's child, not for operators (check.go)
 		err = checkSegmentCommand(args[1:], e)
 	case "services":
@@ -176,6 +181,9 @@ func usage(w io.Writer) {
   iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR] [HOST...]
   iormeshctl show [summary|services|edges|health] [-project NAME]... [-builds DIR] [-json] [-unresolved]
   iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
+  iormeshctl query [-project NAME]... [-store DIR] [-db FILE] [-from T] [-to T]
+                   [-host GLOB] [-app GLOB] [-thread GLOB] [-conn ID [-follow]]
+                   [-file GLOB] [-method GLOB] [-max-bytes N]
   iormeshctl services [list] [-db FILE] [-project NAME] [-paths]
   iormeshctl services edges [-db FILE] [-project NAME] [-from NAME]
   iormeshctl services name [-db FILE] [-port N] HOST-GLOB SERVICE
@@ -199,6 +207,9 @@ without -project, never contacts a server, and exits 1 when it had to
 leave a damaged segment out. expand lists the unresolved peers of the
 store's merged mesh against the registry's expand: allowlist, hop limit
 (-hops, default 1) and max_nodes; it contacts no server and deploys
-nothing.
+nothing. query reads the store as build does and writes the matching
+events as schema NDJSON, at most -max-bytes (default 1 MiB) of it; a cut
+slice ends in a truncation record. T is RFC 3339 or HH:MM:SS[.frac] UTC
+on the trace's first day; -to is exclusive.
 `)
 }

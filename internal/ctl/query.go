@@ -1,0 +1,287 @@
+package ctl
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"strings"
+
+	"iormesh/internal/federate"
+	"iormesh/internal/query"
+	"iormesh/internal/schema"
+	"iormesh/internal/segment"
+	"iormesh/internal/termsafe"
+)
+
+// `iormeshctl query` (PLAN.md M5 "Query / slice interface", task pb4):
+// cut the merged trace of the collected segments into a size-capped
+// slice of schema NDJSON (internal/query).
+//
+// It reads the store exactly as build does, and trusts it no more: every
+// segment is decoded first in the memory-capped child (check.go), each
+// host directory is held to its pinned identity, and a segment that
+// fails is left out — named on stderr, the exit status 1 — never half
+// read. The merge runs again so that the slice speaks the merged
+// connection ids (both ends of a fused connection share one) and knows
+// each process's app. -method reads the sessions' methods tables, each
+// checked in the child the same way. Unlike build, query writes nothing:
+// no database import, no new host pin, no build output.
+//
+// The store, not the last build's model, is the input: the model is a
+// bounded summary and holds no event (docs/visualization.md), the
+// segments hold all of them. Predicate pushdown onto the parquet columns
+// (docs/implementation.md M5) would skip decoding rows a filter rejects,
+// but every row is decoded in the child anyway before the controller
+// may read the file, so the filters run on decoded events.
+
+const (
+	// defaultMaxBytes caps a slice when -max-bytes is not given: about
+	// a quarter million tokens, what an LLM's context can take whole.
+	defaultMaxBytes = 1 << 20
+	// maxMethodIDs bounds the method ids -method may select across all
+	// sessions: the tables come from servers.
+	maxMethodIDs = 1 << 20
+)
+
+// queryFlags are query's flags.
+type queryFlags struct {
+	paths                              buildFlags
+	from, to                           string
+	host, app, thread, conn, file, mth string
+	follow                             bool
+	maxBytes                           int64
+}
+
+// queryCommand parses query's flags, checks the filter before reading
+// anything, and runs the query.
+func queryCommand(args []string, e env) error {
+	fs := newFlagSet("query", e.stderr)
+	var f queryFlags
+	addQueryFlags(fs, &f)
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("%w: %v", errUsage, err)
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("%w: query takes no arguments", errUsage)
+	}
+	filter, from, to, err := parseQueryFilter(f)
+	if err != nil {
+		return err
+	}
+	return runQuery(context.Background(), e, f, filter, from, to)
+}
+
+// addQueryFlags registers query's flags on fs into f.
+func addQueryFlags(fs *flag.FlagSet, f *queryFlags) {
+	fs.Var(&f.paths.projects, "project", "query this project (repeatable; default: every project in the store)")
+	fs.StringVar(&f.paths.store, "store", "", "local trace store (default ~/.local/share/iormesh/traces)")
+	fs.StringVar(&f.paths.db, "db", "", "service database; the host pins next to it are honored "+
+		"(default ~/.local/share/iormesh/services.db)")
+	fs.StringVar(&f.from, "from", "", "first instant, RFC 3339 or HH:MM:SS[.frac] UTC on the trace's first day")
+	fs.StringVar(&f.to, "to", "", "end instant (exclusive), as -from")
+	fs.StringVar(&f.host, "host", "", "host glob: store host name or FQDN")
+	fs.StringVar(&f.app, "app", "", "app glob: the app's target pattern or the process's comm")
+	fs.StringVar(&f.thread, "thread", "", "thread glob: Java thread name or kernel tid")
+	fs.StringVar(&f.conn, "conn", "", "connection id of the merged trace")
+	fs.BoolVar(&f.follow, "follow", false, "with -conn: also the threads' other events while they used it")
+	fs.StringVar(&f.file, "file", "", "path glob: events naming it and the fds opened from it")
+	fs.StringVar(&f.mth, "method", "", "Java frame glob: class#method or class#method(file:line)")
+	fs.Int64Var(&f.maxBytes, "max-bytes", defaultMaxBytes, "output cap in bytes, the truncation record included")
+}
+
+// parseQueryFilter turns the flags into a filter and validates it, the
+// time window aside: a time of day needs the trace's first day, known
+// only once the store is listed.
+func parseQueryFilter(f queryFlags) (query.Filter, *query.TimeSpec, *query.TimeSpec, error) {
+	filter := query.Filter{Host: f.host, App: f.app, Thread: f.thread, Conn: f.conn,
+		Follow: f.follow, File: f.file, Method: f.mth}
+	var specs [2]*query.TimeSpec
+	for i, s := range []string{f.from, f.to} {
+		if s == "" {
+			continue
+		}
+		t, err := query.ParseTime(s)
+		if err != nil {
+			return query.Filter{}, nil, nil, fmt.Errorf("%w: %v", errUsage, err)
+		}
+		specs[i] = &t
+	}
+	if err := filter.Validate(); err != nil {
+		return query.Filter{}, nil, nil, fmt.Errorf("%w: %v", errUsage, err)
+	}
+	if f.maxBytes < query.MinMaxBytes() {
+		return query.Filter{}, nil, nil, fmt.Errorf("%w: -max-bytes %d is below %d, the truncation record's size",
+			errUsage, f.maxBytes, query.MinMaxBytes())
+	}
+	return filter, specs[0], specs[1], nil
+}
+
+// runQuery loads the store, merges it, and writes the slice; bad
+// segments are reported after it.
+func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter, from, to *query.TimeSpec) error {
+	paths, err := resolveBuildPaths(e, f.paths)
+	if err != nil {
+		return err
+	}
+	projects, err := buildProjects(paths.store, f.paths.projects)
+	if err != nil {
+		return err
+	}
+	segs, _, err := checkedSegments(ctx, paths, projects)
+	if err != nil {
+		return err
+	}
+	if len(segs.Sources) == 0 {
+		return fmt.Errorf("query: no readable segment for %s in %s (%d bad)",
+			strings.Join(projects, ", "), paths.store, len(segs.Bad))
+	}
+	if err := resolveWindow(&filter, segs.Sources, from, to); err != nil {
+		return err
+	}
+	in, err := queryInput(ctx, &segs, filter)
+	if err != nil {
+		return err
+	}
+	if _, err := query.Run(ctx, e.stdout, in, filter, f.maxBytes); err != nil {
+		return err
+	}
+	return reportBad(e, segs.Bad)
+}
+
+// resolveWindow places -from and -to: a time of day lands on the UTC
+// date of the earliest segment's start (its file name), the day the
+// trace began.
+func resolveWindow(filter *query.Filter, sources []*federate.Segment, from, to *query.TimeSpec) error {
+	day := sources[0].File.Start
+	for _, s := range sources[1:] {
+		if s.File.Start.Before(day) {
+			day = s.File.Start
+		}
+	}
+	for _, t := range []struct {
+		spec *query.TimeSpec
+		dst  *uint64
+	}{{from, &filter.From}, {to, &filter.To}} {
+		if t.spec == nil {
+			continue
+		}
+		v, err := t.spec.Resolve(day)
+		if err != nil {
+			return fmt.Errorf("%w: %v", errUsage, err)
+		}
+		*t.dst = v
+	}
+	if err := filter.Validate(); err != nil {
+		return fmt.Errorf("%w: %v", errUsage, err)
+	}
+	return nil
+}
+
+// queryInput merges the segments and, for -method, reads the method
+// ids the filter selects; a methods table that fails its check joins
+// segs.Bad.
+func queryInput(ctx context.Context, segs *federate.Segments, filter query.Filter) (query.Input, error) {
+	sources := make([]federate.Source, len(segs.Sources))
+	in := query.Input{Sources: make([]query.Source, len(segs.Sources))}
+	for i, s := range segs.Sources {
+		sources[i] = s
+		in.Sources[i] = query.Source{Host: s.Host, FQDN: s.File.FQDN, Session: s.Session(), Events: s.Events}
+	}
+	res, err := federate.Merge(ctx, sources, federate.Options{})
+	if err != nil {
+		return query.Input{}, err
+	}
+	in.Renames, in.Graph = res.Renames, res.Graph
+	if filter.Method != "" {
+		in.Methods, err = methodIDs(ctx, segs, filter)
+	}
+	return in, err
+}
+
+// reportBad names the segments left out on stderr and fails the
+// command: a slice missing part of the trace must not pass for whole.
+func reportBad(e env, bad []federate.BadSegment) error {
+	for _, b := range bad {
+		_, _ = fmt.Fprintf(e.stderr, "iormeshctl: query: left out %s: %s\n",
+			termsafe.String(b.Name), errText(b.Err))
+	}
+	if len(bad) > 0 {
+		return fmt.Errorf("%w: %d bad segments left out of the query (listed above)",
+			errBadSegments, len(bad))
+	}
+	return nil
+}
+
+// methodIDs reads the methods tables of the queried sessions and keeps,
+// per session, the ids whose frame the filter's -method matches. Each
+// table is decoded in the memory-capped child first and its footer held
+// to its name and place; one that fails is added to segs.Bad and its
+// ids are missing — the exit status says so.
+func methodIDs(ctx context.Context, segs *federate.Segments, filter query.Filter) (map[string]map[uint64]bool, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	check := childChecker(exe, checkAddressSpace)
+	sessions := map[string]bool{}
+	for _, s := range segs.Sources {
+		sessions[s.Session()] = true
+	}
+	out := map[string]map[uint64]bool{}
+	n := 0
+	for _, t := range segs.TableFiles {
+		if t.File.Table != segment.TableMethods || !sessions[t.Session()] {
+			continue
+		}
+		if err := readMethods(ctx, check, t, filter, out, &n); err != nil {
+			if ctx.Err() != nil || errors.Is(err, errTooManyMethods) {
+				return nil, err
+			}
+			segs.Bad = append(segs.Bad, federate.BadSegment{Name: t.Name(), Err: err})
+		}
+	}
+	return out, nil
+}
+
+// errTooManyMethods stops a -method query whose matches exceed
+// maxMethodIDs.
+var errTooManyMethods = errors.New("query: -method matches too many frames: narrow the pattern")
+
+// readMethods checks one methods table and adds its matching ids to
+// out, counting them in n. The ids are kept only when the whole table
+// read cleanly: a table that fails adds none, never half.
+func readMethods(ctx context.Context, check federate.Checker, t federate.TableFile,
+	filter query.Filter, out map[string]map[uint64]bool, n *int) error {
+	sum, err := check(ctx, t.Path)
+	if err == nil {
+		err = t.WantMeta(sum.Meta)
+	}
+	found := map[uint64]bool{}
+	if err == nil {
+		_, err = segment.ReadMethods(ctx, t.Path, t.WantMeta, func(m *schema.Method) error {
+			if filter.MatchesMethod(m) && !found[m.MethodID] && !out[t.Session()][m.MethodID] {
+				if *n+len(found) >= maxMethodIDs {
+					return errTooManyMethods
+				}
+				found[m.MethodID] = true
+			}
+			return nil
+		})
+	}
+	if err != nil {
+		if errors.Is(err, errTooManyMethods) {
+			return err
+		}
+		return errors.New(strings.ReplaceAll(err.Error(), t.Path, t.Name()))
+	}
+	if out[t.Session()] == nil {
+		out[t.Session()] = map[uint64]bool{}
+	}
+	for id := range found {
+		out[t.Session()][id] = true
+	}
+	*n += len(found)
+	return nil
+}

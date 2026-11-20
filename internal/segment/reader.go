@@ -169,11 +169,43 @@ func ReadTable[T any](ctx context.Context, path, table string, fn func(*T) error
 	return readFile(ctx, path, table, nil, fn)
 }
 
-// Summary is what CheckEvents learned of an events file.
+// Summary is what CheckEvents (or CheckMethods) learned of a file.
 type Summary struct {
-	Meta   Meta   `json:"meta"`
+	Meta Meta `json:"meta"`
+	// HostID is the one host id an events file's events carry; a table
+	// file has none.
 	HostID string `json:"host_id"`
+	// Events counts the file's rows: events, or a table file's rows.
 	Events uint64 `json:"events"`
+}
+
+// ReadMethods streams a methods table file (TableMethods) as ReadEvents
+// streams events: each row is validated (schema.Method.Validate) before
+// fn sees it, and want, if not nil, vets the footer first. iormeshctl
+// query reads a collected session's method table this way, after
+// CheckMethods passed in a memory-capped child (task pb4).
+func ReadMethods(ctx context.Context, path string, want func(Meta) error,
+	fn func(*schema.Method) error) (Meta, error) {
+	return readFile(ctx, path, TableMethods, want, func(m *schema.Method) error {
+		if err := m.Validate(); err != nil {
+			return &rowError{fmt.Errorf("method row: %w", err)}
+		}
+		return fn(m)
+	})
+}
+
+// CheckMethods reads a whole methods table file as ReadMethods does and
+// counts its rows: the check the controller's child runs before the
+// table is read for real. An empty table is fine — a segment whose
+// events named no new frame has one.
+func CheckMethods(ctx context.Context, path string, want func(Meta) error) (Summary, error) {
+	var s Summary
+	m, err := ReadMethods(ctx, path, want, func(*schema.Method) error {
+		s.Events++
+		return nil
+	})
+	s.Meta = m
+	return s, err
 }
 
 // CheckEvents reads a whole events file as ReadEvents does and

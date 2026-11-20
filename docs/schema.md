@@ -1094,3 +1094,30 @@ type and segment, through the `parquet:` tags in
   stack possibly one segment later (the stack table writes from
   its own worker). A reader takes the union of a session's
   table files.
+
+## Query slices (M5)
+
+`iormeshctl query` (task pb4; [implementation.md](implementation.md),
+M5 "Query") writes the events of the merged trace a filter selects
+as NDJSON lines of this schema — each one decodes strictly as an
+event — in store order, with two differences from a trace's
+`events.ndjson`:
+
+- `conn_id` is the merged trace's id (the merge's renames applied),
+  so both ends of a fused connection carry the same one.
+- Non-printable runes the JSON encoding leaves raw (C1 controls,
+  DEL, bidi and other format runes) are written as `\u` escapes:
+  the same string, safe on a terminal.
+
+A slice is capped (`-max-bytes`, the record below included). When
+the cap cuts it, the last line is the truncation record, which is
+not an event:
+
+```json
+{"schema_version":1,"event":"truncated","args":{"emitted":4,"remaining":9}}
+```
+
+`emitted` counts the event lines above it, `remaining` the
+matching events the cap left out. The lines written are always the
+first matches in order, never a selection; without the record the
+slice is complete.

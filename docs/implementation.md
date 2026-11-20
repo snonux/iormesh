@@ -4037,7 +4037,7 @@ against segments a compromised server sends:
 
 ```
 internal/segment/reader.go      # ParseName, ReadEvents, CheckEvents, ReadTable
-internal/federate/segments.go   # Segment (a Source), LoadSegments
+internal/federate/segments.go   # Segment (a Source), TableFile, LoadSegments
 internal/federate/hosts.go      # vetHosts: one host identity per host dir
 internal/federate/rebuild.go    # a session's graph from its events (#3)
 internal/termsafe/              # trace text made safe for a terminal
@@ -4296,12 +4296,65 @@ iormeshctl query --project shop --conn conn:4be1… --follow
 iormeshctl query --project shop --file '/etc/orders.conf'
 ```
 
-Output is schema NDJSON. When `--max-bytes` cuts the result, the
-last line is `{"event":"truncated","args":{…remaining count…}}` —
-a reader always knows it saw a partial answer. Implementation:
-predicate pushdown onto the parquet columns (that is what the
-nullable `args` columns are for), then a streaming merge by
-`(host, seq)`.
+Built by task pb4 (cgo-free):
+
+```
+internal/query/filter.go     # Filter, Validate, ParseTime/Resolve
+internal/query/match.go      # the predicates and their state
+internal/query/write.go      # the byte cap, the truncation record
+internal/query/query.go      # Run: (follow pass,) filter, encode
+internal/ctl/query.go        # flags, store → checked sources, merge
+internal/segment/reader.go   # + ReadMethods, CheckMethods
+internal/termsafe/           # + JSON: escape a line for a terminal
+```
+
+- **Input is the store**, read exactly as build reads it:
+  `LoadSegments` with every segment decoded first in the
+  memory-capped child and every host directory held to its pin,
+  then `federate.Merge` again so the slice speaks the merged
+  conn ids (both ends of a fused connection answer to one
+  `-conn`) and knows each process's app. Not the build's
+  `model.json`: it is a bounded summary without events. Query
+  writes nothing — no import, no new pin, no build output. A
+  segment that fails is left out, named on stderr, and the
+  command exits 1 after writing the slice.
+- **Filters** (all AND; globs are `path.Match`, `*` stops at
+  `/`): `-from`/`-to` on each event's own `wall_ns` (RFC 3339, or
+  `HH:MM:SS[.frac]` UTC on the UTC date of the earliest segment's
+  start; `-to` exclusive); `-host` the store's host name or the
+  session's FQDN; `-app` the app's target pattern (the merged
+  graph's app node) or the comm; `-thread` `java.thread` or the
+  decimal tid; `-conn` a merged conn id, exactly; `-follow`
+  widens it to every event of each thread that used the
+  connection, between that thread's first and last event on it;
+  `-file` `args.path`/`args.new_path`, plus the fd instance
+  (`pid`, `pid_incarnation`, `fd`, `fd_gen`) a successful open of
+  a matching path returned, until its close; `-method` a Java
+  frame of `java.stack`, as `class#method` or the full frame
+  text, through the session's methods tables (the union of its
+  segments' tables, each checked in the child like a segment).
+  A malformed glob, `-follow` without `-conn`, an empty window
+  or a cap below the record's size is a usage error (exit 2)
+  before anything is read.
+- **Output** is schema NDJSON in source order (store name, a
+  session's segments in seq order — the `(host, seq)` order),
+  each line `termsafe.JSON`-escaped: C1 controls, DEL and bidi
+  format runes become `\u` escapes, the line still decodes to
+  the same event. `-max-bytes` (default 1 MiB) caps the whole
+  output, the record included. A cut result ends in
+  `{"schema_version":1,"event":"truncated","args":{"emitted":N,"remaining":M}}`
+  ([schema.md](schema.md#query-slices-m5)); what was written is
+  always a prefix of the matches, and `remaining` is exact (the
+  scan runs on).
+- **Memory**: events stream as in build; the filter state (open
+  fds of a matching path, followed threads) and the matching
+  method ids are capped at 2²⁰ entries each — over it the query
+  fails asking for a narrower filter, so a hostile trace cannot
+  grow them without bound.
+- **No predicate pushdown** onto the parquet columns yet: every
+  row is decoded in the check child anyway before the controller
+  may read a file, so skipping pages in the second read would
+  not spare the first. Pushdown comes with a cheaper check.
 
 **Eval** (`eval/`):
 

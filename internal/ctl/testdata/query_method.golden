@@ -1,0 +1,1 @@
+{"schema_version":1,"project":"shop","seq":2,"boot_ns":10001,"wall_ns":1763600000000010000,"host_id":"hostJ","pid":300,"pid_incarnation":1,"tid":300,"comm":"java","event":"openat","fd":3,"fd_gen":0,"ret":3,"latency_ns":0,"bytes":0,"args":{"path":"/data/order-42.json"},"attribution":"java","java":{"thread":"worker-1","stack":[1,3]}}
