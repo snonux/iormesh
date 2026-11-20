@@ -100,7 +100,38 @@ func readSource(ctx context.Context, s Source, col *collector) (hostGraph, error
 	if err != nil {
 		return hostGraph{}, err
 	}
+	if host == "" {
+		if host, err = graphHost(s.Name(), g); err != nil {
+			return hostGraph{}, err
+		}
+	}
 	return hostGraph{host: host, g: g}, nil
+}
+
+// graphHost names the host of a source without events from its graph's
+// one host node. Its socket ids still need a host to be scoped by, so a
+// graph with sockets but no single host is rejected; an empty graph
+// scopes nothing and needs none.
+func graphHost(name string, g schema.Graph) (string, error) {
+	var hosts []string
+	sockets := false
+	for _, n := range g.Nodes {
+		switch n.Type {
+		case schema.NodeHost:
+			hosts = append(hosts, strings.TrimPrefix(n.ID, schema.HostNodeID("")))
+		case schema.NodeSocket:
+			sockets = true
+		}
+	}
+	switch {
+	case len(hosts) == 1:
+		return hosts[0], nil
+	case len(hosts) > 1:
+		return "", fmt.Errorf("federate: %s: no events and %d host nodes", name, len(hosts))
+	case sockets:
+		return "", fmt.Errorf("federate: %s: no events and no host node to scope its sockets", name)
+	}
+	return "", nil
 }
 
 // requalify renames every unfused socket id that sources of two

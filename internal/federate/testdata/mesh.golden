@@ -93,7 +93,15 @@
     },
     {
       "type": "socket",
+      "id": "conn:b-norole"
+    },
+    {
+      "type": "socket",
       "id": "conn:c-amb"
+    },
+    {
+      "type": "socket",
+      "id": "conn:c-conflict"
     }
   ],
   "edges": [
@@ -171,6 +179,12 @@
     },
     {
       "type": "connected",
+      "from": "proc:hostB/200@1",
+      "to": "conn:b-norole",
+      "state": "unresolved"
+    },
+    {
+      "type": "connected",
       "from": "proc:hostC/300@1",
       "to": "conn:144ebe02d9280b21",
       "state": "unresolved"
@@ -179,6 +193,12 @@
       "type": "connected",
       "from": "proc:hostC/300@1",
       "to": "conn:c-amb",
+      "state": "unresolved"
+    },
+    {
+      "type": "connected",
+      "from": "proc:hostC/300@1",
+      "to": "conn:c-conflict",
       "state": "unresolved"
     },
     {
@@ -221,8 +241,10 @@ unresolved hostA/a-amb role=client local=10.0.1.1:40200 peer=10.0.1.254:8080 rea
 unresolved hostA/a-untraced role=client local=10.0.1.1:40100 peer=203.0.113.9:443 reason=no_match
 unresolved hostB/b-amb role=server local=10.0.2.2:8080 peer=10.0.2.254:40060 reason=ambiguous
 unresolved hostB/b-nokey role=server local=10.0.2.2:8080 peer=10.0.2.254:40050 reason=no_key
+unresolved hostB/b-norole role= local=10.0.2.2:8080 peer=10.0.2.254:40070 reason=no_role
 unresolved hostC/a-untraced role=client local=10.0.3.3:40300 peer=198.51.100.7:5432 reason=no_match
 unresolved hostC/c-amb role=client local=10.0.3.3:40200 peer=10.0.1.254:8080 reason=ambiguous
+unresolved hostC/c-conflict role=client local=10.0.3.3:40400 peer=10.0.1.254:8080 reason=key_conflict
 rename hostA/a-local -> 4f14fb03b955c669
 rename hostA/a-local-srv -> 4f14fb03b955c669
 rename hostA/a-reuse-0 -> a370e84b0ff700d3

@@ -28,8 +28,10 @@ type Half struct {
 	// producer bug or a misattributed record, and either way no key to
 	// fuse on.
 	KeyConflict bool
-	// Established is the wall-clock time (ns) of the half's first keyed
-	// record, or of its first record when none is keyed. Wall clock, not
+	// Established is the earliest wall-clock time (ns) of the half's keyed
+	// records, or of all its records when none is keyed — the minimum, not
+	// the first read, since two sessions on one host may report the same
+	// socket in different orders. Wall clock, not
 	// boot ns: two hosts' boot clocks share no epoch, while NTP keeps
 	// wall clocks within far less than the fusion window.
 	Established uint64
@@ -51,7 +53,7 @@ type halfAcc struct {
 	client, server bool // role evidence: connect / accept, SYN_SENT
 	tcp            bool // a tcp_state record: only TCP ends are halves
 	local, peer    netip.AddrPort
-	first          uint64
+	first          uint64 // earliest wall ns of any record
 	recs           []stateRec
 }
 
@@ -77,6 +79,7 @@ func (c *collector) add(ev *schema.Event) {
 		a = &halfAcc{project: ev.Project, procs: map[string]bool{}, first: ev.WallNS}
 		c.acc[k] = a
 	}
+	a.first = min(a.first, ev.WallNS)
 	if ev.PID != 0 {
 		a.procs[schema.ProcessNodeID(ev.HostID, ev.PID, ev.PIDInc)] = true
 	}
@@ -144,7 +147,11 @@ func (c *collector) halves() []Half {
 	return out
 }
 
-// half finishes one accumulated half: its role and its key.
+// half finishes one accumulated half: its role and its key. A server end
+// whose accept the trace never saw (accepted before the session
+// attached, or by an untraced thread of a traced process) has no role
+// evidence — the accept snapshot is no proof on its own — and stays
+// unresolved as no_role.
 func (a *halfAcc) half(k LocalConn) Half {
 	h := Half{Host: k.Host, Project: a.project, ConnID: k.ConnID,
 		Procs: slices.Sorted(maps.Keys(a.procs)), Local: a.local, Peer: a.peer,
@@ -179,5 +186,6 @@ func (a *halfAcc) key(h *Half) {
 		case k != h.Key:
 			h.KeyConflict = true
 		}
+		h.Established = min(h.Established, r.wall)
 	}
 }

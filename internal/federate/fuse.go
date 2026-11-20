@@ -13,7 +13,9 @@ import (
 // against the ISN clock wrapping (~275 s at 64 ns a tick), which could
 // hand a later connection the same pair: the pair itself already tells
 // reused 4-tuples apart (S2). Two minutes is far wider than any NTP
-// offset and well inside one wrap.
+// offset and well inside one wrap. The window assumes NTP-disciplined
+// hosts: two wall clocks skewed by more than it put the two ends of a
+// connection outside each other's window, and both stay no_match.
 const DefaultWindow = 2 * time.Minute
 
 // Reasons a half stays unresolved. Every one is a fact about the traces,

@@ -56,6 +56,17 @@ func TestHalvesFromEvents(t *testing.T) {
 				t.Fatalf("got %+v, want no role and no key", h)
 			}
 		}},
+		{"Established is the earliest keyed record, not the first read", func(tr *trace) {
+			tr.event(1, schema.KindConnect, 3, 0, wall0+50, "x", tuple(local, peer))
+			tr.event(1, schema.KindTCPState, 3, 0, wall0+40, "x",
+				withSeq(tuple(local, peer), "FIN_WAIT1", clientEst))
+			tr.event(1, schema.KindTCPState, 3, 0, wall0+30, "x",
+				withSeq(tuple(local, peer), "ESTABLISHED", clientEst))
+		}, func(t *testing.T, h Half) {
+			if h.Established != wall0+30 || h.KeyConflict {
+				t.Fatalf("got %+v, want established at wall0+30", h)
+			}
+		}},
 		{"forked child shares the socket: both processes listed", func(tr *trace) {
 			tr.event(1, schema.KindConnect, 3, 0, wall0, "x", tuple(local, peer))
 			tr.event(1, schema.KindTCPState, 3, 0, wall0+5, "x",

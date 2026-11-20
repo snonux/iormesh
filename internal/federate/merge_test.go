@@ -23,7 +23,8 @@ func mustAddrPort(s string) netip.AddrPort { return netip.MustParseAddrPort(s) }
 // meshSources writes the golden scenario's traces under dir: S2's rig as
 // hosts — client hostA dials the VIP 10.0.1.254:8080, the NAT host
 // (untraced: no conntrack needed) DNATs and SNATs it to hostB — plus
-// every way a half stays unresolved.
+// every reason a half stays unresolved (no_match, no_key, no_role,
+// key_conflict, ambiguous).
 func meshSources(t *testing.T, dir string) []Source {
 	t.Helper()
 	const vip, srv = "10.0.1.254:8080", "10.0.2.2:8080"
@@ -59,6 +60,14 @@ func meshSources(t *testing.T, dir string) []Source {
 	k := ISNPair{0xabc, 0xdef}
 	a.client(102, "a-local", "127.0.0.1:41000", "127.0.0.1:9000", k, wall0)
 	batch.server(400, "a-local-srv", "127.0.0.1:9000", "127.0.0.1:41000", k, wall0)
+	// A server end whose accept the trace never saw: no role evidence.
+	b.event(200, schema.KindTCPState, 12, 0, wall0, "b-norole", withSeq(
+		tuple(srv, "10.0.2.254:40070"), "ESTABLISHED", seqFields{SndUna: 0x7001, RcvNxt: 0x8001}))
+	b.socket(200, "b-norole")
+	// Two keyed records of one end that rebuild different keys.
+	c.client(300, "c-conflict", "10.0.3.3:40400", vip, ISNPair{0x11, 0x22}, wall0)
+	c.event(300, schema.KindTCPState, 7, 0, wall0+5000, "c-conflict", withSeq(
+		tuple("10.0.3.3:40400", vip), "FIN_WAIT1", seqFields{SndUna: 0x99, RcvNxt: 0x23}))
 	return []Source{a.write(t, filepath.Join(dir, "a")), b.write(t, filepath.Join(dir, "b")),
 		c.write(t, filepath.Join(dir, "c")), batch.write(t, filepath.Join(dir, "a-batch"))}
 }
@@ -158,8 +167,9 @@ func TestMergeLoopbackPairUntouched(t *testing.T) {
 }
 
 // TestMergeRejects covers inputs the merge refuses instead of guessing:
-// one source holding two hosts' events, a corrupt event line, a missing
-// graph, and a canceled context.
+// one source holding two hosts' events, a corrupt event line, a line
+// over the 1 MiB bound, a source without events whose sockets no host
+// node scopes, a missing graph, and a canceled context.
 func TestMergeRejects(t *testing.T) {
 	two := newTrace("hostA", "shop")
 	two.client(100, "x", "10.0.0.1:1", "10.0.0.2:2", ISNPair{1, 2}, wall0)
@@ -171,14 +181,28 @@ func TestMergeRejects(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(corrupt.Dir, eventsFile), []byte("{\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	long := newTrace("hostA", "shop").write(t, filepath.Join(t.TempDir(), "long"))
+	if err := os.WriteFile(filepath.Join(long.Dir, eventsFile),
+		[]byte(strings.Repeat("x", maxLine+1)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// No events, and a socket node with no host to scope it by.
+	orphan := newTrace("hostA", "shop").write(t, filepath.Join(t.TempDir(), "orphan"))
+	g := schema.Graph{SchemaVersion: schema.Version, Nodes: []schema.Node{
+		{Type: schema.NodeSocket, ID: schema.SocketNodeID("s")}}}
+	if err := schema.WriteGraphFile(filepath.Join(orphan.Dir, graphFile), g); err != nil {
+		t.Fatal(err)
+	}
 	cases := map[string]struct {
 		src  Source
 		ctx  func() context.Context
 		want string
 	}{
-		"two hosts":     {twoDir, context.Background, "events of two hosts"},
-		"corrupt event": {corrupt, context.Background, "line 1"},
-		"no graph":      {NDJSONDir{Dir: t.TempDir()}, context.Background, graphFile},
+		"two hosts":        {twoDir, context.Background, "events of two hosts"},
+		"corrupt event":    {corrupt, context.Background, "line 1"},
+		"line over 1 MiB":  {long, context.Background, "token too long"},
+		"sockets, no host": {orphan, context.Background, "no host node"},
+		"no graph":         {NDJSONDir{Dir: t.TempDir()}, context.Background, graphFile},
 		"canceled": {twoDir, func() context.Context {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
@@ -195,5 +219,24 @@ func TestMergeRejects(t *testing.T) {
 				t.Fatalf("err = %v, want context.Canceled", err)
 			}
 		})
+	}
+}
+
+// TestMergeNoEventsTakesGraphHost: a source with a graph but no events
+// is scoped by its one host node, so its socket ids are requalified like
+// any other host's when they clash.
+func TestMergeNoEventsTakesGraphHost(t *testing.T) {
+	a := newTrace("hostA", "shop")
+	a.client(100, "same", "10.0.0.1:1", "10.0.0.9:9", ISNPair{1, 2}, wall0)
+	b := newTrace("hostB", "shop")
+	b.socket(200, "same") // graph only: no events written below
+	bDir := b.write(t, filepath.Join(t.TempDir(), "b"))
+	r, err := Merge(context.Background(),
+		[]Source{a.write(t, filepath.Join(t.TempDir(), "a")), bDir}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := r.Renames[LocalConn{"hostB", "same"}]; !ok {
+		t.Fatalf("hostB's socket not scoped by its graph host: %v", r.Renames)
 	}
 }

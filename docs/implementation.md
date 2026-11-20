@@ -3404,7 +3404,9 @@ or after the half was keyed, never on a refused connect). A
 conn_id with both a connecting and an accepting end on one host
 is a loopback pair the correlator fused already, and a conn_id
 without any `tcp_state` (unix, pipe, UDP) is no TCP half; the
-merge leaves both alone.
+merge leaves both alone. A server end whose `accept` the trace
+never saw (accepted before the session attached) has no role
+evidence and stays `no_role`.
 
 Rules, each a table-driven test (`fuse_test.go`,
 `half_test.go`):
@@ -3419,7 +3421,10 @@ Rules, each a table-driven test (`fuse_test.go`,
   while NTP keeps wall clocks far inside the window (default
   2 minutes: wider than any NTP offset, inside one ~275 s ISN
   clock wrap) — so fusing needs no clock bound (the bound is
-  computed afterwards, from the fused connections);
+  computed afterwards, from the fused connections). `Established`
+  is the earliest keyed record's time. The window assumes
+  NTP-disciplined hosts: wall clocks skewed by more than it leave
+  both ends `no_match`;
 - no role (`no_role`), no keyed record (`no_key`), records that
   rebuild different keys (`key_conflict`), or a key nobody else
   has (`no_match`: sequence-randomizing firewall, SYN proxy,
@@ -3441,7 +3446,10 @@ The merged graph is the union of the host graphs (sources read
 in name order, everything sorted, `Graph.Validate` before it is
 returned), so the same traces always give the same bytes;
 `testdata/mesh.golden` pins a NAT'ed, port-reusing, two-project
-mesh with every unresolved reason.
+mesh with every unresolved reason (`no_match`, `no_key`,
+`no_role`, `key_conflict`, `ambiguous`). A source without events
+takes its host from its graph's one host node; with sockets but
+no single host node it is rejected.
 
 Clock offsets (`internal/federate/clock.go`) implement S2's
 inequalities per host pair: every receive pairs with the send
