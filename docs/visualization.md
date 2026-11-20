@@ -233,6 +233,7 @@ iormeshctl show edges [--unresolved]
 iormeshctl show sequence [CONV-ID]    # the text diagram above
 iormeshctl show thread SERVICE/THREAD # one thread's story, one line
 iormeshctl show health
+iormeshctl show report                # the summary, then the rollup
 ```
 
 - Colors and box characters only when stdout is a terminal;
@@ -276,7 +277,13 @@ service (the database counts them per endpoint, not per client),
 and bytes and latency percentiles are not in the model yet.
 `show` has `summary`, `services`, `edges [-unresolved]` and
 `health`, each with `-json`, read from the build's
-`model.json`; the site path line comes with V3. (Lines cut
+`model.json`; the site path line comes with V3. `show report`
+(task qb4) prints the summary followed by the per-run rollup
+from `report.json`, which build writes beside the model: one
+block per process — files, connections, threads with their
+requests in order, top methods ([schema.md](schema.md#summary-rollup-m5)).
+The rollup is no fourth reading of the data for the three
+surfaces: it is the export an LLM reads first (PLAN.md M5). (Lines cut
 with … here; `internal/ctl/testdata/build_summary.golden` has
 them whole.) Every string from the traces is printed
 terminal-safe: one holding a control character comes out

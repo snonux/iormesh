@@ -4457,25 +4457,104 @@ internal/termsafe/           # + JSON: escape a line for a terminal
   may read a file, so skipping pages in the second read would
   not spare the first. Pushdown comes with a cheaper check.
 
-**Eval** (`eval/`):
+**Summary rollup** (`internal/report`, `show report`; task qb4):
 
-```yaml
-# eval/questions/microservices.yaml
-- id: order-file-writer
-  scenario: microservices
-  question: Which Java method wrote order-42.json?
-  answer_contains: ["DataStore#save"]
-- id: gateway-chain
-  scenario: microservices
-  question: List the services the gateway's checkout touches, in order.
-  answer_sequence: ["gateway", "orders", "inventory", "billing"]
+```
+internal/report/collect.go     # Collector.Add: processes, threads, methods
+internal/report/collect_io.go  # files (fd instances), connections, requests
+internal/report/build.go       # Build: merged ids, peers, service labels, caps
+internal/report/text.go        # WriteText, termsafe throughout
+internal/ctl/report.go         # methods tables, report.json, show report
 ```
 
-`mage eval` gives the model the summary rollup plus a `query`
-tool, scores each answer with the declared matcher, and writes
-`eval/results/<date>.json`. The model command is configurable;
-the pass threshold is pinned when the question set is written
-(PLAN.md, M5).
+- The collector rides on the merge's read of each segment, as the
+  tally does (`reportSegment` wraps both), so the rollup costs no
+  pass of its own; `Build` then applies `federate.Result.Renames`
+  (connections speak query's ids) and labels server addresses with
+  the service database's endpoints.
+- Causing methods need the methods tables, which build now reads
+  for every loaded session: checked in the child, footer held to
+  name and place, at most 2²⁰ rows over the build — a table that
+  fails or would pass the cap is a bad segment (left out, named,
+  exit 1), and its session's I/O names no method.
+- A loopback pair is one host-local conn id held by two processes,
+  a cross-host pair one merged id: either way the other end's
+  process is found by id, so `peers` needs no extra merge state.
+- Tests: goldens of the rollup as JSON and text (a gateway → orders
+  loopback pair, config read, create-tmp-then-rename, a failed open,
+  an untraced callee), twice for determinism; the caps (`partial`,
+  `more files`), terminal safety, no method without a table; in
+  `internal/ctl`, `report.json` and `show report` goldens of the M4
+  mesh, a damaged methods table, and `show report` without a
+  report.
+
+**Eval** (`eval/`, `internal/eval`, `cmd/iormesheval`; built by
+task qb4):
+
+```yaml
+# eval/questions/microservices.yaml (excerpt)
+scenario: microservices
+threshold: 0.8          # pinned with the questions: 8 of 10
+questions:
+  - id: order-file-writer
+    question: >-
+      Which Java method (class#method) wrote the file order-42.json,
+      and through which temporary file?
+    answer_contains: ["DataStore#save", "order-42.json.tmp"]
+    answer_excludes: ["ServiceConfig#provision"]
+  - id: gateway-chain
+    question: >-
+      List the services the gateway's checkout touches, in the order
+      they are first reached, starting with the gateway itself.
+    answer_sequence: ["gateway", "orders", "inventory", "billing"]
+```
+
+```
+internal/eval/questions.go  # Set, LoadSet (strict YAML), Score (matchers)
+internal/eval/tools.go      # Ctl (build, show, query), SourceTree, SplitArgs
+internal/eval/run.go        # Command model, ParseReply, Toolbox
+internal/eval/ask.go        # Session: turns, prompt, Result
+internal/eval/cli.go        # flags, opt-in refusal, results file
+magefile_eval.go            # mage evalTrace (root), mage eval
+```
+
+- The set sits in one file with its scenario and threshold
+  (the sketch had a scenario per question). The matchers are
+  `answer_contains` (all), `answer_sequence` (in order),
+  `answer_excludes` (none of) and `answer_regex`, all
+  case-insensitive; a set without a matcher on some question, an
+  unknown key or an empty matcher string is refused.
+  `TestQuestionSetGrounded` holds every contains and sequence
+  string to the scenario's `expect.json`.
+- A run builds the store with `iormeshctl build` into a scratch
+  database and builds directory (never the operator's), reads
+  `iormeshctl show report`, and asks each question with a fresh
+  transcript. Each turn's prompt is the protocol, the rollup, the
+  source listing, the transcript and the question; the reply's
+  first `QUERY`, `SOURCE` or `ANSWER:` line is the action. A
+  query runs `iormeshctl query` with the harness's store,
+  database, projects and a 32 KiB cap, plus the model's flags if
+  they are slice flags only; `SOURCE` reads through `os.Root`
+  below `workload/src`. Refusals and errors are the model's to
+  read; a failing model command fails the question.
+- `eval/results/<date>-<scenario>.json` keeps per question the
+  answer, turns, actions and failures, and the score; the model
+  appears only by its `-model-name` label (a command line may
+  carry credentials). Below the threshold the command exits 1.
+- `mage evalTrace` runs `TestMicroservices` once as root with
+  `IORMESH_EVAL_EXPORT`: a run that passed its golden copies its
+  segments to `eval/store/<project>/local/` (git-ignored), owned
+  by the sudo user. `mage eval` needs `IORMESH_EVAL_MODEL_CMD`
+  (and optionally `IORMESH_EVAL_STORE`, `IORMESH_EVAL_MODEL_NAME`)
+  and refuses without it.
+- Tests (all in `mage test`, no model, no network): the set's
+  grounding and the loader's refusals, every matcher with
+  negatives, reply parsing, argument splitting and the slice-flag
+  allowlist, the source tree's escapes (`..`, absolute,
+  symlink), the iormeshctl argv through a stub, a scripted
+  session's result golden (a passing answer after a query and a
+  source read, a reordered sequence, a model that never answers),
+  a failing and a slow model command, and the opt-in refusal.
 
 **Done when**: PLAN.md's M5 acceptance holds.
 

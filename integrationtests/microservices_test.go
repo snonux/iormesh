@@ -1,11 +1,14 @@
 package integrationtests
 
 import (
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"iormesh/internal/normalize"
+	"iormesh/internal/segment"
 )
 
 // startMicroservices starts the microservices topology (task jb4) as four
@@ -64,6 +67,7 @@ func TestMicroservices(t *testing.T) {
 	assertGolden(t, got, want)
 	assertRequestsPaired(t, got.Events)
 	assertNoOtel(t, got.Events)
+	exportEvalStore(t, run.Run)
 	t.Run("wrong expectations are caught", func(t *testing.T) {
 		assertCaught(t, got, want, map[string]func(*normalize.Expectation){
 			"a plain hop declared TLS": func(x *normalize.Expectation) {
@@ -85,4 +89,58 @@ func httpIndex(x *normalize.Expectation, path string) int {
 		}
 	}
 	panic("no declared http event for " + path)
+}
+
+// evalExportEnv names the store `mage evalTrace` has this test fill.
+const evalExportEnv = "IORMESH_EVAL_EXPORT"
+
+// exportEvalStore copies a judged run's segments into the store named by
+// IORMESH_EVAL_EXPORT, laid out as collect leaves it
+// (<store>/<project>/local/), owned by the user sudo ran the test for —
+// the store the LLM eval builds and queries (PLAN.md M5, `mage eval`).
+// Only a run that passed its golden is exported: the eval's answers are
+// the declarations, so its trace must hold them. Without the variable it
+// does nothing.
+func exportEvalStore(t *testing.T, run Run) {
+	store := os.Getenv(evalExportEnv)
+	if store == "" || t.Failed() {
+		return
+	}
+	src := filepath.Join(SegmentsDir(run), segment.ReadyDir)
+	dst := filepath.Join(store, tracerProject, "local")
+	if err := os.MkdirAll(dst, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{filepath.Dir(dst), dst}
+	for _, e := range entries {
+		data, err := os.ReadFile(filepath.Join(src, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, filepath.Join(dst, e.Name()))
+	}
+	chownToSudoUser(t, paths)
+	t.Logf("exported %d segment files to %s", len(entries), dst)
+}
+
+// chownToSudoUser gives paths to the user sudo ran as: iormeshctl refuses
+// a store it does not own.
+func chownToSudoUser(t *testing.T, paths []string) {
+	uid, errU := strconv.Atoi(os.Getenv("SUDO_UID"))
+	gid, errG := strconv.Atoi(os.Getenv("SUDO_GID"))
+	if errU != nil || errG != nil {
+		return // not under sudo: the files are the caller's already
+	}
+	for _, p := range paths {
+		if err := os.Lchown(p, uid, gid); err != nil {
+			t.Fatal(err)
+		}
+	}
 }

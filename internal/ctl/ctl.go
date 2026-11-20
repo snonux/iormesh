@@ -147,11 +147,11 @@ func run(args []string, e env) int {
 	default:
 		err = fmt.Errorf("%w: unknown subcommand %q", errUsage, args[0])
 	}
-	return report(err, e.stderr)
+	return exitCodeOf(err, e.stderr)
 }
 
-// report maps an error to its exit code.
-func report(err error, stderr io.Writer) int {
+// exitCodeOf maps an error to its exit code.
+func exitCodeOf(err error, stderr io.Writer) int {
 	switch {
 	case err == nil:
 		return exitOK

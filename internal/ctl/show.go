@@ -51,12 +51,13 @@ func refreshCommand(args []string, e env) error {
 }
 
 // showViews are show's views; summary is the default.
-var showViews = []string{"summary", "services", "edges", "health", "conversations", "sequence"}
+var showViews = []string{"summary", "services", "edges", "health", "conversations", "sequence", "report"}
 
 // showCommand prints one view of the last build's model (model.json):
 // the summary build printed, services, edges, health, the
 // conversations, or one conversation's sequence (`show sequence [ID]`,
-// the newest without an ID); -json the model's JSON for that view. It
+// the newest without an ID); or the report view, the summary followed by
+// the per-run rollup (report.json); -json the JSON for that view. It
 // reads only the build output, never the store's segments or the
 // network.
 func showCommand(args []string, e env) error {
@@ -81,6 +82,9 @@ func showCommand(args []string, e env) error {
 	m, err := loadModel(e, f)
 	if err != nil {
 		return err
+	}
+	if view == "report" {
+		return showReport(e, f, m, *asJSON)
 	}
 	if *asJSON {
 		return writeViewJSON(e, view, id, m)

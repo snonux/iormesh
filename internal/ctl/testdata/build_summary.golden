@@ -8,3 +8,4 @@ unresolved java -> 203.0.113.9:5432 (1 of 1 connections)
 
 graph      $BUILDS/billing+shop/graph.json
 model      $BUILDS/billing+shop/model.json
+report     $BUILDS/billing+shop/report.json

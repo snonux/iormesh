@@ -77,7 +77,9 @@ func readFrames(ctx context.Context, segs *federate.Segments, rec *viewmodel.Rec
 	check := childChecker(exe, checkAddressSpace)
 	for _, t := range segs.TableFiles {
 		ids := want[t.Session()]
-		if t.File.Table != segment.TableMethods || len(ids) == 0 {
+		// A table the rollup's read (loadMethodTables) already left out
+		// is named once, not twice.
+		if t.File.Table != segment.TableMethods || len(ids) == 0 || isBad(segs.Bad, t.Name()) {
 			continue
 		}
 		if err := readFrameTable(ctx, check, t, ids, rec); err != nil {

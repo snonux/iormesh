@@ -1,0 +1,80 @@
+# The LLM introspection eval's question set for M4's microservices
+# scenario (PLAN.md M5 "LLM introspection eval"; internal/eval). Every
+# answer is known from the scenario's declarations
+# (workload/scenarios/microservices/expect.json) — a test holds each
+# answer_contains and answer_sequence string to that file — and the model
+# finds it only through the summary rollup, iormeshctl query and the
+# workload's source. answer_excludes name the wrong method a guess from
+# the source alone would give, only where a concise answer has no reason
+# to mention it.
+#
+# The threshold is pinned here, with the questions (PLAN.md: "pinned when
+# the question set is written"): 8 of 10. Change it only with the set,
+# and say why in the commit.
+scenario: microservices
+threshold: 0.8
+questions:
+  - id: order-file-writer
+    question: >-
+      Which Java method (class#method) wrote the file order-42.json, and
+      through which temporary file?
+    answer_contains: ["DataStore#save", "order-42.json.tmp"]
+    answer_excludes: ["ServiceConfig#provision"]
+
+  - id: orders-config-reader
+    question: >-
+      Which Java method read the orders service's configuration file, and
+      what is the file's name?
+    answer_contains: ["ServiceConfig#load", "orders.conf"]
+    answer_excludes: ["ServiceConfig#provision"]
+
+  - id: gateway-chain
+    question: >-
+      List the services the gateway's checkout touches, in the order they
+      are first reached, starting with the gateway itself.
+    answer_sequence: ["gateway", "orders", "inventory", "billing"]
+
+  - id: orders-next-call
+    question: >-
+      The orders service's thread that served POST /orders called two other
+      services while serving it. Which service did it call second, and with
+      which request (method and path)?
+    answer_contains: ["billing", "/billing/charge"]
+
+  - id: http-call-method
+    question: >-
+      Which workload method (class#method) issued the HTTP requests that
+      orders sent to inventory and billing?
+    answer_contains: ["HttpFetch#call"]
+    answer_excludes: ["HttpServe#handle"]
+
+  - id: billing-cert-reader
+    question: >-
+      Which service read the certificate the billing service published
+      (billing.crt), and with which method?
+    answer_contains: ["orders", "ServiceNode#readCert"]
+
+  - id: inventory-paths
+    question: >-
+      Which HTTP request paths did the inventory service serve?
+    answer_contains: ["/inventory/reserve", "/inventory/stock/widget"]
+
+  - id: billing-record
+    question: >-
+      What record file did the billing service write while serving its
+      request, and how did it make it appear (the file operations, in
+      order)?
+    answer_contains: ["invoice-42.json"]
+    answer_regex: 'invoice-42\.json\.tmp[\s\S]*renam'
+
+  - id: tls-hops
+    question: >-
+      Which request paths went over TLS (https)? Name the paths.
+    answer_contains: ["/orders", "/billing/charge"]
+
+  - id: gateway-cleanup
+    question: >-
+      Which method removed the gateway's checkout-42.json at the end of
+      the run?
+    answer_contains: ["ServiceNode#retire"]
+    answer_excludes: ["ServiceNode#withdraw"]

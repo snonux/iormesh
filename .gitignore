@@ -32,3 +32,7 @@ internal/c/generated_tracepoints.c.tmp-*
 
 # Release binaries of the container builds (mage buildDocker/buildPodman).
 /dist/
+
+# The LLM introspection's recorded store (mage evalTrace); its results
+# under eval/results/ are kept.
+/eval/store/

@@ -124,7 +124,7 @@ func TestBuildHostileClockSegment(t *testing.T) {
 // stderr, a request path) is printed quoted, never raw.
 func TestErrorsAreTerminalSafe(t *testing.T) {
 	var stderr strings.Builder
-	report(errors.New("ssh: \x1b]0;pwned\a"), &stderr)
+	exitCodeOf(errors.New("ssh: \x1b]0;pwned\a"), &stderr)
 	if strings.ContainsAny(stderr.String(), "\x1b\a") || !strings.Contains(stderr.String(), `\x1b`) {
 		t.Errorf("stderr %q", stderr.String())
 	}

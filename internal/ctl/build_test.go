@@ -255,20 +255,24 @@ func golden(t *testing.T, name, got string) {
 }
 
 // TestBuildGolden builds the two-project mesh: the summary, the merged
-// graph export and the model match their goldens, and a rebuild writes
+// graph export, the model and the rollup (report.json, and show report)
+// match their goldens, and a rebuild writes
 // the same bytes (offline, deterministic, idempotent on the database).
 func TestBuildGolden(t *testing.T) {
 	f := newBuildFixture(t)
 	summary := f.mustRun(t, "build")
 	golden(t, "build_summary.golden", strings.ReplaceAll(summary, f.builds, "$BUILDS"))
-	graph, model := f.output(t, graphFileName), f.output(t, modelFileName)
+	graph, model, rep := f.output(t, graphFileName), f.output(t, modelFileName), f.output(t, reportFileName)
 	golden(t, "build_graph.golden", graph)
 	golden(t, "build_model.golden", model)
+	golden(t, "build_report.golden", rep)
+	golden(t, "show_report.golden", f.mustRun(t, "show", "report"))
 	for range 2 {
 		if again := f.mustRun(t, "build"); again != summary {
 			t.Fatalf("rebuild printed\n%s\nwant\n%s", again, summary)
 		}
-		if f.output(t, graphFileName) != graph || f.output(t, modelFileName) != model {
+		if f.output(t, graphFileName) != graph || f.output(t, modelFileName) != model ||
+			f.output(t, reportFileName) != rep {
 			t.Fatal("rebuild changed the outputs")
 		}
 	}

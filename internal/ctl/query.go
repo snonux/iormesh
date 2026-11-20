@@ -257,27 +257,18 @@ var errTooManyMethods = errors.New("query: -method matches too many frames: narr
 // read cleanly: a table that fails adds none, never half.
 func readMethods(ctx context.Context, check federate.Checker, t federate.TableFile,
 	filter query.Filter, out map[string]map[uint64]bool, n *int) error {
-	sum, err := check(ctx, t.Path)
-	if err == nil {
-		err = t.WantMeta(sum.Meta)
-	}
 	found := map[uint64]bool{}
-	if err == nil {
-		_, err = segment.ReadMethods(ctx, t.Path, t.WantMeta, func(m *schema.Method) error {
-			if filter.MatchesMethod(m) && !found[m.MethodID] && !out[t.Session()][m.MethodID] {
-				if *n+len(found) >= maxMethodIDs {
-					return errTooManyMethods
-				}
-				found[m.MethodID] = true
+	err := readMethodTable(ctx, check, t, func(m *schema.Method) error {
+		if filter.MatchesMethod(m) && !found[m.MethodID] && !out[t.Session()][m.MethodID] {
+			if *n+len(found) >= maxMethodIDs {
+				return errTooManyMethods
 			}
-			return nil
-		})
-	}
-	if err != nil {
-		if errors.Is(err, errTooManyMethods) {
-			return err
+			found[m.MethodID] = true
 		}
-		return errors.New(strings.ReplaceAll(err.Error(), t.Path, t.Name()))
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	if out[t.Session()] == nil {
 		out[t.Session()] = map[uint64]bool{}

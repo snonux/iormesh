@@ -1,0 +1,279 @@
+{
+  "processes": [
+    {
+      "id": "proc:h1/10@7",
+      "project": "shop",
+      "host": "app1",
+      "fqdn": "h1.example.org",
+      "pid": 10,
+      "pid_incarnation": 7,
+      "comm": "java",
+      "app": "gateway*",
+      "argv": [],
+      "serves": [],
+      "events": 5,
+      "java_events": 4,
+      "files": [],
+      "more_files": 0,
+      "conns": [
+        {
+          "id": "m-c1",
+          "role": "client",
+          "local": "",
+          "remote": "127.0.0.1:8001",
+          "service": "orders",
+          "peer_state": "traced",
+          "peers": [
+            "shop/app1/java[20]"
+          ],
+          "sent_bytes": 36,
+          "recv_bytes": 33,
+          "requests": [
+            {
+              "method": "POST",
+              "scheme": "http",
+              "path": "/orders",
+              "status": 201,
+              "thread": "main"
+            }
+          ],
+          "more_requests": 0
+        }
+      ],
+      "more_conns": 0,
+      "threads": [
+        {
+          "name": "tid 10",
+          "tid": 10,
+          "events": 1,
+          "bytes": 0,
+          "calls": [],
+          "more_calls": 0
+        },
+        {
+          "name": "main",
+          "tid": 11,
+          "events": 4,
+          "bytes": 69,
+          "calls": [
+            {
+              "dir": "out",
+              "method": "POST",
+              "scheme": "http",
+              "path": "/orders",
+              "status": 201,
+              "conn": "m-c1",
+              "service": "orders",
+              "peers": [
+                "shop/app1/java[20]"
+              ]
+            }
+          ],
+          "more_calls": 0
+        }
+      ],
+      "more_threads": 0,
+      "methods": [
+        {
+          "method": "shop.HttpFetch#call",
+          "events": 4,
+          "bytes": 69
+        }
+      ],
+      "more_methods": 0
+    },
+    {
+      "id": "proc:h1/20@7",
+      "project": "shop",
+      "host": "app1",
+      "fqdn": "h1.example.org",
+      "pid": 20,
+      "pid_incarnation": 7,
+      "comm": "java",
+      "app": "",
+      "argv": [
+        "java",
+        "-jar",
+        "w.jar",
+        "--role",
+        "orders"
+      ],
+      "serves": [
+        "orders"
+      ],
+      "events": 17,
+      "java_events": 16,
+      "files": [
+        {
+          "path": "/o/orders.conf",
+          "read_opens": 1,
+          "write_opens": 0,
+          "read_bytes": 39,
+          "write_bytes": 0,
+          "ops": [],
+          "more_ops": 0,
+          "methods": [
+            "shop.ServiceConfig#load"
+          ]
+        },
+        {
+          "path": "/o/missing",
+          "read_opens": 0,
+          "write_opens": 0,
+          "read_bytes": 0,
+          "write_bytes": 0,
+          "ops": [
+            "open (ENOENT)"
+          ],
+          "more_ops": 0,
+          "methods": [
+            "shop.ServiceConfig#load"
+          ]
+        },
+        {
+          "path": "/o/order-42.json.tmp",
+          "read_opens": 0,
+          "write_opens": 1,
+          "read_bytes": 0,
+          "write_bytes": 36,
+          "ops": [
+            "rename -\u003e /o/order-42.json"
+          ],
+          "more_ops": 0,
+          "methods": [
+            "shop.DataStore#save"
+          ]
+        },
+        {
+          "path": "/o/order-42.json",
+          "read_opens": 0,
+          "write_opens": 0,
+          "read_bytes": 0,
+          "write_bytes": 0,
+          "ops": [
+            "renamed from /o/order-42.json.tmp"
+          ],
+          "more_ops": 0,
+          "methods": [
+            "shop.DataStore#save"
+          ]
+        }
+      ],
+      "more_files": 0,
+      "conns": [
+        {
+          "id": "m-c1",
+          "role": "server",
+          "local": ":8001",
+          "remote": "",
+          "service": "orders",
+          "peer_state": "traced",
+          "peers": [
+            "shop/app1/java[10]"
+          ],
+          "sent_bytes": 33,
+          "recv_bytes": 36,
+          "requests": [
+            {
+              "method": "POST",
+              "scheme": "http",
+              "path": "/orders",
+              "status": 201,
+              "thread": "http-1"
+            }
+          ],
+          "more_requests": 0
+        },
+        {
+          "id": "c2",
+          "role": "client",
+          "local": "",
+          "remote": "127.0.0.1:8002",
+          "service": "127.0.0.1:8002",
+          "peer_state": "untraced",
+          "peers": [],
+          "sent_bytes": 0,
+          "recv_bytes": 0,
+          "requests": [
+            {
+              "method": "POST",
+              "scheme": "http",
+              "path": "/inventory/reserve",
+              "status": 200,
+              "thread": "http-1"
+            }
+          ],
+          "more_requests": 0
+        }
+      ],
+      "more_conns": 0,
+      "threads": [
+        {
+          "name": "tid 20",
+          "tid": 20,
+          "events": 1,
+          "bytes": 0,
+          "calls": [],
+          "more_calls": 0
+        },
+        {
+          "name": "http-1",
+          "tid": 21,
+          "events": 16,
+          "bytes": 243,
+          "calls": [
+            {
+              "dir": "out",
+              "method": "POST",
+              "scheme": "http",
+              "path": "/inventory/reserve",
+              "status": 200,
+              "conn": "c2",
+              "service": "127.0.0.1:8002",
+              "peers": []
+            },
+            {
+              "dir": "in",
+              "method": "POST",
+              "scheme": "http",
+              "path": "/orders",
+              "status": 201,
+              "conn": "m-c1",
+              "service": "orders",
+              "peers": [
+                "shop/app1/java[10]"
+              ]
+            }
+          ],
+          "more_calls": 0
+        }
+      ],
+      "more_threads": 0,
+      "methods": [
+        {
+          "method": "shop.DataStore#save",
+          "events": 6,
+          "bytes": 135
+        },
+        {
+          "method": "shop.HttpServe#handle",
+          "events": 5,
+          "bytes": 69
+        },
+        {
+          "method": "shop.ServiceConfig#load",
+          "events": 4,
+          "bytes": 39
+        },
+        {
+          "method": "shop.HttpFetch#call",
+          "events": 1,
+          "bytes": 0
+        }
+      ],
+      "more_methods": 0
+    }
+  ],
+  "more_processes": 0,
+  "untracked": 0
+}

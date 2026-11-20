@@ -1391,7 +1391,17 @@ Kubernetes (M7) build on it.
   exit 1. Predicate pushdown waits for a cheaper check
   (docs/implementation.md M5).
 - Plus the per-run summary/report export — the LLM rollup of the
-  whole mesh (see "Trace output contract").
+  whole mesh (see "Trace output contract"). *Built (task qb4):*
+  `build` feeds `internal/report` the events the merge reads (no
+  extra pass) plus the sessions' methods tables (checked in the
+  child like segments; a bad one is left out, named, exit 1) and
+  writes `report.json` beside `model.json`; `iormeshctl show
+  report` prints the summary, then one block per process — files
+  (opens, bytes, meta ops, causing methods), connections (merged
+  id, role, service label, traced peer), threads with their
+  requests in order, top methods by I/O — every list capped and
+  counted, the collector's state capped at 2²⁰ entries
+  (docs/schema.md "Summary rollup").
 - **LLM introspection eval**: a fixed question set over M0
   traces plus the workload's source, with answers known from
   the scenario declarations (which method wrote this file?
@@ -1399,7 +1409,26 @@ Kubernetes (M7) build on it.
   did this thread call next?). The model works only through the
   summary rollup and the query interface. The eval is rerun on
   every schema change; its score is the evidence behind
-  principle #6.
+  principle #6. *Built (task qb4):* `eval/questions/
+  microservices.yaml` holds ten questions over the
+  microservices scenario, every answer string held by a test to
+  its `expect.json`; the threshold is **pinned at 0.8 (8 of
+  10)**. `internal/eval` (`cmd/iormesheval`, `mage eval`) builds
+  the store into a scratch database and builds directory, hands
+  the model the `show report` text and the workload's source
+  listing, and runs its replies — one `QUERY <slice flags>`,
+  `SOURCE <path>` or `ANSWER:` per turn, at most 8 turns, slices
+  capped at 32 KiB, only the slice flags accepted, source read
+  only below `workload/src` — then scores each answer with the
+  declared matchers (contains, in-order sequence, excludes,
+  regex) into `eval/results/<date>-<scenario>.json`. The model is
+  a command (prompt on stdin, reply on stdout) the operator
+  must name: there is no default, since the prompt carries trace
+  data, so the eval never runs on its own and never in `mage
+  test`; a local model keeps the data on the machine. `mage
+  evalTrace` (root) records the store from one judged
+  `TestMicroservices` run. The first scored run with a real
+  model is still to be recorded.
 - Acceptance: an operator can answer "what does this process touch,
   and what touches it back" from one screen; `add` → `deploy` →
   `refresh` yields the merged mesh's SVG, matching its golden;
@@ -2519,6 +2548,7 @@ cmd/iormeshctl/       # controller (Linux/macOS, no eBPF, no cgo):
                       #   build, refresh, expand, query,
                       #   open, tui, show
 cmd/testworkload/     # wrapper for the Java test app scenarios
+cmd/iormesheval/      # the LLM introspection eval's runner (M5)
 internal/c/           # BPF C sources: ior-style helpers +
                       #   generated_tracepoints.c + vmlinux.h +
                       #   committed generation result (diff gate)
@@ -2547,6 +2577,9 @@ internal/federate/    # server registry, trace sync (rsync,
 internal/servicedb/   # service-interaction database: observed
                       #   connections, naming rules, CLI-facing
                       #   queries (cgo-free)
+internal/report/      # per-run summary rollup (M5, cgo-free)
+internal/eval/        # LLM eval harness: question sets, model
+                      #   command protocol, scoring (M5)
 internal/expand/      # controller-driven mesh expansion:
                       #   unresolved peers, allowlist, hop and
                       #   node limits (cgo-free)

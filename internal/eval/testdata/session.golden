@@ -1,0 +1,41 @@
+{
+  "scenario": "microservices",
+  "date": "2026-11-20",
+  "model": "fake",
+  "threshold": 0.6,
+  "score": 0.3333333333333333,
+  "passed": false,
+  "questions": [
+    {
+      "id": "writer",
+      "passed": true,
+      "answer": "shop.DataStore#save, via order-42.json.tmp",
+      "turns": 3,
+      "actions": [
+        "QUERY -file '*/order-42.json*'",
+        "SOURCE a/DataStore.java"
+      ],
+      "failures": []
+    },
+    {
+      "id": "chain",
+      "passed": false,
+      "answer": "gateway, billing, orders",
+      "turns": 1,
+      "actions": [],
+      "failures": [
+        "sequence: \"billing\" not after \"gateway, orders\""
+      ]
+    },
+    {
+      "id": "silent",
+      "passed": false,
+      "answer": "",
+      "turns": 3,
+      "actions": [],
+      "failures": [
+        "no answer within 3 turns"
+      ]
+    }
+  ]
+}

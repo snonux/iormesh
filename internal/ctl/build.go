@@ -16,6 +16,7 @@ import (
 	"iormesh/internal/federate"
 	"iormesh/internal/project"
 	"iormesh/internal/render"
+	"iormesh/internal/report"
 	"iormesh/internal/schema"
 	"iormesh/internal/servicedb"
 	"iormesh/internal/viewmodel"
@@ -40,10 +41,15 @@ import (
 //     conversations) is built from the tally, the merge, the database's
 //     view of the projects and the conversations' recording — whose http
 //     events ride along with step 3's read, and whose file work and Java
-//     frames take one more read (conversations.go).
+//     frames take one more read (conversations.go). The per-run rollup
+//     (internal/report, PLAN.md M5) is built from the events of step 2's
+//     read, the sessions' methods tables (each checked in the child
+//     first, as query reads them), the merge's conn-id renames and the
+//     database's endpoints.
 //  5. <builds>/<projects>/graph.json (the merged graph export),
-//     model.json and the SVG exports (graph.svg, sequence/<ID>.svg per
-//     conversation; internal/render) are written, and the summary is
+//     model.json, report.json and the SVG exports (graph.svg,
+//     sequence/<ID>.svg per conversation; internal/render) are written,
+//     and the summary is
 //     printed.
 //
 // Build never contacts a server, and everything it writes is a function
@@ -66,7 +72,9 @@ import (
 // it, and decoding is deterministic. What grows with the input is
 // the merge's per-connection state (keys, the TCP data records' stream
 // offsets the clock bounds need), the graph, the service database's
-// per-connection rows and the tally's per-session counts.
+// per-connection rows, the tally's per-session counts, the methods
+// tables (capped at maxMethodIDs rows) and the rollup's state (capped by
+// internal/report).
 
 const (
 	// buildsDirName holds the build outputs under ~/.local/share/iormesh.
@@ -123,8 +131,9 @@ func buildAndReport(ctx context.Context, e env, f buildFlags) error {
 	if err := viewmodel.WriteSummary(e.stdout, out.model); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(e.stdout, "\ngraph      %s\nmodel      %s\n",
-		filepath.Join(out.dir, graphFileName), filepath.Join(out.dir, modelFileName))
+	_, err = fmt.Fprintf(e.stdout, "\ngraph      %s\nmodel      %s\nreport     %s\n",
+		filepath.Join(out.dir, graphFileName), filepath.Join(out.dir, modelFileName),
+		filepath.Join(out.dir, reportFileName))
 	if err == nil && len(out.model.Health.BadSegments) > 0 {
 		err = fmt.Errorf("%w: %d bad segments left out of the build (listed above)",
 			errBadSegments, len(out.model.Health.BadSegments))
@@ -157,12 +166,19 @@ func build(ctx context.Context, e env, f buildFlags) (buildOutput, error) {
 		return buildOutput{}, fmt.Errorf("build: no readable segment for %s in %s (%d bad)",
 			strings.Join(projects, ", "), paths.store, len(segs.Bad))
 	}
-	in, err := mergeAndImport(ctx, paths.db, projects, &segs)
+	methods, err := loadMethodTables(ctx, &segs)
+	if err != nil {
+		return buildOutput{}, err
+	}
+	in, rep, err := mergeAndImport(ctx, paths.db, projects, &segs, methods)
 	if err != nil {
 		return buildOutput{}, err
 	}
 	model := viewmodel.New(in)
 	dir, err := writeOutputs(paths.builds, projects, in.Merge.Graph, model)
+	if err == nil {
+		err = writeReport(dir, rep)
+	}
 	if err != nil {
 		return buildOutput{}, err
 	}
@@ -207,17 +223,19 @@ func checkedSegments(ctx context.Context, paths buildPaths, projects []string) (
 
 // mergeAndImport merges the segments, folds the result into the service
 // database, reads the database's view of the projects back and records
-// the conversations (conversations.go).
+// the conversations (conversations.go); the rollup is built from the
+// events the merge read and the database's endpoints.
 func mergeAndImport(ctx context.Context, dbPath string, projects []string,
-	segs *federate.Segments) (viewmodel.Input, error) {
+	segs *federate.Segments, methods map[string]map[uint64]schema.Method) (viewmodel.Input, report.Report, error) {
 	tally := viewmodel.NewTally()
+	col := report.NewCollector(methods)
 	tallied := make([]federate.Source, len(segs.Sources))
 	for i, s := range segs.Sources {
-		tallied[i] = talliedSegment{s, tally}
+		tallied[i] = reportSegment{s, tally, col}
 	}
 	res, err := federate.Merge(ctx, tallied, federate.Options{})
 	if err != nil {
-		return viewmodel.Input{}, err
+		return viewmodel.Input{}, report.Report{}, err
 	}
 	in := viewmodel.Input{Projects: projects, Tally: tally, Merge: res,
 		Conversations: viewmodel.NewRecorder(res.Renames)}
@@ -226,14 +244,14 @@ func mergeAndImport(ctx context.Context, dbPath string, projects []string,
 		recorded[i] = recordedSegment{s, in.Conversations}
 	}
 	if err := importMesh(ctx, dbPath, recorded, &in); err != nil {
-		return viewmodel.Input{}, err
+		return viewmodel.Input{}, report.Report{}, err
 	}
 	if err := recordConversations(ctx, segs, in.Conversations, res.Clocks); err != nil {
-		return viewmodel.Input{}, err
+		return viewmodel.Input{}, report.Report{}, err
 	}
 	// Read last: recording the frames may add a methods table to Bad.
 	in.BadSegments, in.Ignored = segs.Bad, segs.Ignored
-	return in, nil
+	return in, report.Build(col, report.Input{Renames: res.Renames, Endpoints: in.Endpoints}), nil
 }
 
 // importMesh runs Observe and Import and fills in's database view and
@@ -258,23 +276,6 @@ func importMesh(ctx context.Context, dbPath string, sources []federate.Source, i
 	}
 	in.Interactions, err = d.Interactions(ctx, filter)
 	return err
-}
-
-// talliedSegment is a segment whose events also feed the run's tally as
-// the merge reads them: the tally costs no pass of its own.
-type talliedSegment struct {
-	*federate.Segment
-	tally *viewmodel.Tally
-}
-
-func (s talliedSegment) Events(ctx context.Context, fn func(*schema.Event) error) error {
-	k := viewmodel.SessionKey{Project: s.Project, Host: s.Host, FQDN: s.File.FQDN, ID: s.File.Session}
-	name := s.Name()
-	s.tally.Segment(k, name)
-	return s.Segment.Events(ctx, func(ev *schema.Event) error {
-		s.tally.Add(k, name, ev)
-		return fn(ev)
-	})
 }
 
 // buildPaths are the resolved store, database and outputs paths.

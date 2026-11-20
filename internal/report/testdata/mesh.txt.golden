@@ -1,0 +1,27 @@
+process    shop/app1/java[10] h1.example.org (proc:h1/10@7)
+  app      gateway*
+  events   5, 4 with a Java stack
+  conn     m-c1 client - -> 127.0.0.1:8001, service orders, peer shop/app1/java[20]; sent 36 B, received 33 B; 1 requests
+  thread   tid 10: 1 events, 0 B
+  thread   main (tid 11): 4 events, 69 B
+    out    POST /orders (http) -> 201, service orders, peer shop/app1/java[20] (conn m-c1)
+  method   shop.HttpFetch#call: 4 events, 69 B
+
+process    shop/app1/java[20] h1.example.org (proc:h1/20@7)
+  argv     java -jar w.jar --role orders
+  serves   orders
+  events   17, 16 with a Java stack
+  file     /o/orders.conf: opened for reading 1x, 39 B read; by shop.ServiceConfig#load
+  file     /o/missing: open (ENOENT); by shop.ServiceConfig#load
+  file     /o/order-42.json.tmp: opened for writing 1x, 36 B written; rename -> /o/order-42.json; by shop.DataStore#save
+  file     /o/order-42.json: renamed from /o/order-42.json.tmp; by shop.DataStore#save
+  conn     m-c1 server :8001 -> -, service orders, peer shop/app1/java[10]; sent 33 B, received 36 B; 1 requests
+  conn     c2 client - -> 127.0.0.1:8002, service 127.0.0.1:8002, peer untraced; sent 0 B, received 0 B; 1 requests
+  thread   tid 20: 1 events, 0 B
+  thread   http-1 (tid 21): 16 events, 243 B
+    out    POST /inventory/reserve (http) -> 200, service 127.0.0.1:8002, peer untraced (conn c2)
+    in     POST /orders (http) -> 201, service orders, peer shop/app1/java[10] (conn m-c1)
+  method   shop.DataStore#save: 6 events, 135 B
+  method   shop.HttpServe#handle: 5 events, 69 B
+  method   shop.ServiceConfig#load: 4 events, 39 B
+  method   shop.HttpFetch#call: 1 events, 0 B

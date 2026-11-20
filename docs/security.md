@@ -10,6 +10,15 @@ truth.
   kernel tracepoints and uprobes in the JDK's libraries — take
   time, so overhead is budgeted, measured, and capped by the
   tracer's cgroup limits.
+- **The LLM eval sends trace data only where the operator
+  says.** `mage eval` (PLAN.md M5) puts the rollup and query
+  slices of a trace into a model's prompt. It has no default
+  model: without an explicit `IORMESH_EVAL_MODEL_CMD` it refuses
+  to run, and `mage test` never runs it. It is meant for the
+  workload's traces, with a local model unless sending them out
+  is fine; the model's replies can run only slice flags of
+  `iormeshctl query` on the eval's own store and read only the
+  workload's source.
 - **The operator's SSH key is the only way in.** The tracer
   listens on nothing and connects to nothing; control flows only
   through SSH (or `kubectl exec`). Servers hold no iormesh

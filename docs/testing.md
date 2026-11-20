@@ -661,6 +661,28 @@ The owner's run is what remains: the prerequisites above, then
 `mage m4Acceptance HOST1 HOST2`, all criteria PASS — and M4-9
 needs the microservices address options first.
 
+## LLM introspection eval (task qb4)
+
+PLAN.md M5's eval is no part of `mage test` — it needs a model —
+but everything around the model is: `internal/eval`'s tests run
+the harness against a scripted model and a stub iormeshctl. The
+eval itself is two opt-in steps:
+
+```sh
+mage evalTrace   # root: one judged TestMicroservices run -> eval/store
+IORMESH_EVAL_MODEL_CMD='ollama run MODEL' \
+IORMESH_EVAL_MODEL_NAME=MODEL mage eval
+```
+
+The model command reads the prompt on stdin and writes its reply
+on stdout. The prompt carries the trace's rollup and query
+slices, so pick a local model unless the trace is one you may
+send elsewhere; the workload's traces hold nothing but the
+scenario's own files and requests. The question set and its
+pinned threshold (0.8) are in `eval/questions/microservices.yaml`;
+results land in `eval/results/<date>-<scenario>.json`. Rerun it on
+every schema change (PLAN.md M5).
+
 ## Performance baselines
 
 S3 (PLAN.md, decision #25) measures overhead against a load the

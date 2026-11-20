@@ -1,0 +1,244 @@
+{
+  "processes": [
+    {
+      "id": "proc:hostB/200@1",
+      "project": "billing",
+      "host": "app2",
+      "fqdn": "hostB.example.org",
+      "pid": 200,
+      "pid_incarnation": 1,
+      "comm": "java",
+      "app": "",
+      "argv": [],
+      "serves": [
+        "orders.example:8080"
+      ],
+      "events": 7,
+      "java_events": 0,
+      "files": [],
+      "more_files": 0,
+      "conns": [
+        {
+          "id": "34a93de6a0731466",
+          "role": "server",
+          "local": "10.0.2.2:8080",
+          "remote": "10.0.1.1:45678",
+          "service": "orders.example:8080",
+          "peer_state": "traced",
+          "peers": [
+            "shop/app1/java[100]"
+          ],
+          "sent_bytes": 300,
+          "recv_bytes": 20,
+          "requests": [
+            {
+              "method": "GET",
+              "scheme": "http",
+              "path": "/orders/1",
+              "status": 200,
+              "thread": "tid 200"
+            },
+            {
+              "method": "GET",
+              "scheme": "http",
+              "path": "/orders/2",
+              "status": 200,
+              "thread": "tid 200"
+            },
+            {
+              "method": "GET",
+              "scheme": "http",
+              "path": "/orders/2",
+              "status": 200,
+              "thread": "tid 200"
+            }
+          ],
+          "more_requests": 0
+        }
+      ],
+      "more_conns": 0,
+      "threads": [
+        {
+          "name": "tid 200",
+          "tid": 200,
+          "events": 7,
+          "bytes": 320,
+          "calls": [
+            {
+              "dir": "in",
+              "method": "GET",
+              "scheme": "http",
+              "path": "/orders/1",
+              "status": 200,
+              "conn": "34a93de6a0731466",
+              "service": "orders.example:8080",
+              "peers": [
+                "shop/app1/java[100]"
+              ]
+            },
+            {
+              "dir": "in",
+              "method": "GET",
+              "scheme": "http",
+              "path": "/orders/2",
+              "status": 200,
+              "conn": "34a93de6a0731466",
+              "service": "orders.example:8080",
+              "peers": [
+                "shop/app1/java[100]"
+              ]
+            },
+            {
+              "dir": "in",
+              "method": "GET",
+              "scheme": "http",
+              "path": "/orders/2",
+              "status": 200,
+              "conn": "34a93de6a0731466",
+              "service": "orders.example:8080",
+              "peers": [
+                "shop/app1/java[100]"
+              ]
+            }
+          ],
+          "more_calls": 0
+        }
+      ],
+      "more_threads": 0,
+      "methods": [],
+      "more_methods": 0
+    },
+    {
+      "id": "proc:hostA/100@1",
+      "project": "shop",
+      "host": "app1",
+      "fqdn": "hostA.example.org",
+      "pid": 100,
+      "pid_incarnation": 1,
+      "comm": "java",
+      "app": "",
+      "argv": [],
+      "serves": [],
+      "events": 12,
+      "java_events": 0,
+      "files": [
+        {
+          "path": "/etc/shop.conf",
+          "read_opens": 1,
+          "write_opens": 0,
+          "read_bytes": 0,
+          "write_bytes": 0,
+          "ops": [],
+          "more_ops": 0,
+          "methods": []
+        }
+      ],
+      "more_files": 0,
+      "conns": [
+        {
+          "id": "34a93de6a0731466",
+          "role": "client",
+          "local": "10.0.1.1:45678",
+          "remote": "10.0.2.2:8080",
+          "service": "orders.example:8080",
+          "peer_state": "traced",
+          "peers": [
+            "billing/app2/java[200]"
+          ],
+          "sent_bytes": 20,
+          "recv_bytes": 300,
+          "requests": [
+            {
+              "method": "GET",
+              "scheme": "http",
+              "path": "/orders/1",
+              "status": 200,
+              "thread": "tid 100"
+            },
+            {
+              "method": "GET",
+              "scheme": "http",
+              "path": "/orders/2",
+              "status": 200,
+              "thread": "tid 100"
+            },
+            {
+              "method": "GET",
+              "scheme": "http",
+              "path": "/orders/2",
+              "status": 200,
+              "thread": "tid 100"
+            }
+          ],
+          "more_requests": 0
+        },
+        {
+          "id": "c2",
+          "role": "client",
+          "local": "10.0.1.1:45700",
+          "remote": "203.0.113.9:5432",
+          "service": "203.0.113.9:5432",
+          "peer_state": "untraced",
+          "peers": [],
+          "sent_bytes": 0,
+          "recv_bytes": 0,
+          "requests": [],
+          "more_requests": 0
+        }
+      ],
+      "more_conns": 0,
+      "threads": [
+        {
+          "name": "tid 100",
+          "tid": 100,
+          "events": 12,
+          "bytes": 320,
+          "calls": [
+            {
+              "dir": "out",
+              "method": "GET",
+              "scheme": "http",
+              "path": "/orders/1",
+              "status": 200,
+              "conn": "34a93de6a0731466",
+              "service": "orders.example:8080",
+              "peers": [
+                "billing/app2/java[200]"
+              ]
+            },
+            {
+              "dir": "out",
+              "method": "GET",
+              "scheme": "http",
+              "path": "/orders/2",
+              "status": 200,
+              "conn": "34a93de6a0731466",
+              "service": "orders.example:8080",
+              "peers": [
+                "billing/app2/java[200]"
+              ]
+            },
+            {
+              "dir": "out",
+              "method": "GET",
+              "scheme": "http",
+              "path": "/orders/2",
+              "status": 200,
+              "conn": "34a93de6a0731466",
+              "service": "orders.example:8080",
+              "peers": [
+                "billing/app2/java[200]"
+              ]
+            }
+          ],
+          "more_calls": 0
+        }
+      ],
+      "more_threads": 0,
+      "methods": [],
+      "more_methods": 0
+    }
+  ],
+  "more_processes": 0,
+  "untracked": 0
+}
