@@ -17,8 +17,10 @@ func testEnv(t *testing.T) (env, *bytes.Buffer, *bytes.Buffer, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
 	path := filepath.Join(t.TempDir(), "iormesh", "servers.yaml")
+	deployed := filepath.Join(t.TempDir(), "share", deployedFileName)
 	e := env{stdout: &stdout, stderr: &stderr,
-		registry: func() (string, error) { return path, nil }}
+		registry: func() (string, error) { return path, nil },
+		deployed: func() (string, error) { return deployed, nil }}
 	return e, &stdout, &stderr, path
 }
 

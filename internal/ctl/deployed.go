@@ -21,15 +21,23 @@ const deployedFileName = "deployed.json"
 // project is a few hundred bytes.
 const maxDeployedSize = 1 << 20
 
-// deployedRecord is the start argv deploy last launched per host and
-// project. A live session keeps its flags until it is restarted (decision
-// #19), and neither its unit nor state.json says which flags it got, so
-// the controller remembers them: a re-deploy with the same registry entry
-// leaves a running session alone, a changed entry restarts it. It is a
-// hint, not a trust boundary — a stale or edited record only causes, or
-// skips, one restart — so it is kept private (0600) but not vetted like
-// the registry.
-type deployedRecord map[string]map[string][]string
+// deployedRecord is what deploy last started per host and project: the
+// start argv and the build version it ran. A live session keeps its flags
+// and its binary until it is restarted (decision #19) — upgrade replaces
+// the file, not the running process — and neither the unit nor
+// state.json says which flags or build it got, so the controller
+// remembers them: a re-deploy of the same build and registry entry leaves
+// a running session alone, a changed entry or a new build (possibly a
+// security fix) restarts it. It is a hint, not a trust boundary — a stale
+// or edited record only causes, or skips, one restart — so it is kept
+// private (0600) but not vetted like the registry.
+type deployedRecord map[string]map[string]deployedSession
+
+// deployedSession is one project's last start.
+type deployedSession struct {
+	Start   []string `json:"start"`
+	Version string   `json:"version"`
+}
 
 // defaultDeployedPath is ~/.local/share/iormesh/deployed.json.
 func defaultDeployedPath() (string, error) {
@@ -64,18 +72,40 @@ func loadDeployed(path string) (deployedRecord, error) {
 	return r, nil
 }
 
-// same reports whether argv is what deploy last started for the project.
-func (r deployedRecord) same(host, project string, argv []string) bool {
+// same reports whether deploy last started the project with argv on
+// build version.
+func (r deployedRecord) same(host, project string, argv []string, version string) bool {
 	last, ok := r[host][project]
-	return ok && slices.Equal(last, argv)
+	return ok && last.Version == version && slices.Equal(last.Start, argv)
 }
 
-// set records argv as the project's last start.
-func (r deployedRecord) set(host, project string, argv []string) {
+// set records argv and version as the project's last start.
+func (r deployedRecord) set(host, project string, argv []string, version string) {
 	if r[host] == nil {
-		r[host] = map[string][]string{}
+		r[host] = map[string]deployedSession{}
 	}
-	r[host][project] = slices.Clone(argv)
+	r[host][project] = deployedSession{Start: slices.Clone(argv), Version: version}
+}
+
+// forget drops host, or only its project when project is set, as
+// iormeshctl rm drops them from the registry. It reports whether
+// anything was dropped.
+func (r deployedRecord) forget(host, project string) bool {
+	if _, ok := r[host]; !ok {
+		return false
+	}
+	if project == "" {
+		delete(r, host)
+		return true
+	}
+	if _, ok := r[host][project]; !ok {
+		return false
+	}
+	delete(r[host], project)
+	if len(r[host]) == 0 {
+		delete(r, host)
+	}
+	return true
 }
 
 // save writes the record atomically (temp file, rename) into a 0700

@@ -106,14 +106,24 @@ truth.
     sessions keep the old binary; the next `start` runs the
     new one.
   - **`iormeshctl deploy`** (task db4) verifies the build and
-    its signature on the controller before it pushes anything,
+    its signature on the controller before each host's push,
     stages both in the deploying user's `~/.iormesh/staging`
     (not `/tmp`, where another user could pre-create the name;
     never `/opt`), and runs under `sudo -n` only the installed
     binary's `upgrade`, `start`, `stop` and `status` — never
-    `-allow-downgrade`. Registry values reach the server only as
-    single-quoted argv elements. A host without the installed
-    tracer is reported, not bootstrapped (PLAN.md #1).
+    `-allow-downgrade`. The controller's check is not the one
+    that counts: the server's `upgrade` verifies the pushed
+    bytes again against its own root-owned key, so a file
+    swapped between the two checks is refused there. The staged
+    path is passed absolute (the home from `pwd`), so it does
+    not rely on sudo keeping the working directory (a
+    `Defaults runcwd` would change it). Registry values reach
+    the server only as single-quoted argv elements, and an
+    entry carrying a flag the confined start refuses fails the
+    deploy before any host is contacted. A new build restarts
+    the live sessions, so a fixed hole does not keep running in
+    the old binary. A host without the installed tracer is
+    reported, not bootstrapped (PLAN.md #1).
   - **What the rule then grants**: installing a build the
     release key signed, for this arch, not older — nothing
     else. Whoever holds the release key holds every server

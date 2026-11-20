@@ -22,7 +22,7 @@ type Transport interface {
 	// staging step (PLAN.md M4 "Deploy"): the files land as the login
 	// user's own, never as root and never under /opt, and the server's
 	// `iormesh upgrade` installs them only after verifying them itself.
-	// A file already there with the same size and mtime is skipped, so a
+	// A file already there with the same contents is skipped, so a
 	// re-deploy of the same build transfers nothing.
 	Push(ctx context.Context, remoteDir string, localFiles ...string) error
 }

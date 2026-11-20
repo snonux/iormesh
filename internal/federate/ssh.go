@@ -174,8 +174,11 @@ func (s SSH) Fetch(ctx context.Context, remoteDir, localDir string) error {
 }
 
 // Push copies localFiles into remoteDir with rsync over the multiplexed
-// ssh connection. -t carries the mtime over, so the next push of the same
-// build is skipped by rsync's size-and-mtime check. As in Fetch, no -p,
+// ssh connection. -c compares checksums instead of size and mtime: the
+// files are a tracer build and its signature, cheap to hash, and a staged
+// copy damaged in place (same size, same mtime) is then sent again rather
+// than kept; an intact one still transfers nothing. -t keeps the mtime.
+// As in Fetch, no -p,
 // -o or -l: the files arrive as the login user's own, with the remote
 // umask, which is what `iormesh upgrade` requires of a staged file (owned
 // by the sudo caller). Each local file is made absolute, so a colon in
@@ -187,7 +190,7 @@ func (s SSH) Push(ctx context.Context, remoteDir string, localFiles ...string) e
 	if len(localFiles) == 0 {
 		return fmt.Errorf("%w: nothing to push", ErrTransport)
 	}
-	args := []string{"-t", "-e", s.rsyncShell(), "--"}
+	args := []string{"-ct", "-e", s.rsyncShell(), "--"}
 	for _, f := range localFiles {
 		abs, err := filepath.Abs(f)
 		if err != nil {

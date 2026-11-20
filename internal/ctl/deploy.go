@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -33,7 +35,8 @@ import (
 //     again is a no-op there, and a refusal (bad signature, older build)
 //     is reported verbatim and nothing is started;
 //  5. per project: start it, or stop and start a live session whose flags
-//     changed (decision #19; see deployedRecord), then print its status.
+//     or build changed (decision #19; see deployedRecord), then print its
+//     status.
 //
 // Only the installed binary ever runs under sudo, through the one sudoers
 // rule, and only with the subcommands it lets through (upgrade, start,
@@ -42,12 +45,16 @@ import (
 const (
 	// installedTracer is the binary the sudoers rule names.
 	installedTracer = "/opt/iormesh/bin/iormesh"
-	// stagingDir is relative, so under the login user's home on the
-	// server: private to the user and not shared like /tmp, where another
-	// user could pre-create the name.
-	stagingDir = ".iormesh/staging"
+	// stagingRel is the staging directory under the login user's home on
+	// the server: private to the user and not shared like /tmp, where
+	// another user could pre-create the name.
+	stagingRel = ".iormesh/staging"
 	// defaultDist is where `mage build` and `mage sign` leave the builds.
 	defaultDist = "dist"
+	// The paths the tracer pins confined sessions to (internal/cli
+	// confine.go); a registry flag naming another is refused there.
+	confinedTraceDir  = "/opt/iormesh/traces"
+	confinedSpoolRoot = "/run/iormesh/spool"
 )
 
 // unameArch maps `uname -m` to the Go arch of the builds iormesh ships.
@@ -56,6 +63,15 @@ var unameArch = map[string]string{
 	"aarch64": "arm64", "arm64": "arm64",
 }
 
+// refusedFlags are run flags a session started through the sudoers rule
+// may not carry at all (internal/cli confine.go): each creates, truncates
+// or removes whatever file it names.
+var refusedFlags = map[string]bool{"out": true, "cpuprofile": true, "ready": true}
+
+// homePath is what deploy accepts as the login user's home: an absolute
+// path Push accepts too, so the staged path is the same string everywhere.
+var homePath = regexp.MustCompile(`^/[A-Za-z0-9._/-]*$`)
+
 // deployer is one deploy run over several hosts.
 type deployer struct {
 	e       env
@@ -63,9 +79,6 @@ type deployer struct {
 	dist    string
 	restart bool
 	record  deployedRecord
-	// verified caches the local check per arch: hosts of one arch share
-	// one build.
-	verified map[string]string
 }
 
 // deployCommand parses deploy's flags, checks every host against the
@@ -77,7 +90,7 @@ func deployCommand(args []string, e env) error {
 	path := fs.String("registry", "", "registry file (default ~/.config/iormesh/servers.yaml)")
 	dist := fs.String("dist", defaultDist, "directory holding iormesh-linux-<arch> and its "+release.SigSuffix)
 	keyPath := fs.String("key", "", "pinned minisign public key (default ~/.config/iormesh/"+keyFileName+")")
-	restart := fs.Bool("restart", false, "restart a running session even if its flags are unchanged")
+	restart := fs.Bool("restart", false, "restart a running session even if its flags and build are unchanged")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
@@ -100,7 +113,7 @@ func deployCommand(args []string, e env) error {
 	if err != nil {
 		return err
 	}
-	d := deployer{e: e, key: key, dist: *dist, restart: *restart, record: record, verified: map[string]string{}}
+	d := deployer{e: e, key: key, dist: *dist, restart: *restart, record: record}
 	return d.all(context.Background(), servers, recPath)
 }
 
@@ -125,9 +138,9 @@ func (d deployer) all(ctx context.Context, servers []federate.Server, recPath st
 }
 
 // deployTargets resolves hosts in the registry, narrowed to project when
-// set. Any unregistered host or unknown project fails the whole command
-// before a single host is contacted (principle #3). A host named twice is
-// deployed once.
+// set. Any unregistered host, unknown project or entry whose flags the
+// tracer would refuse fails the whole command before a single host is
+// contacted (principle #3). A host named twice is deployed once.
 func deployTargets(path string, e env, hosts []string, project string) ([]federate.Server, error) {
 	if path == "" {
 		var err error
@@ -141,23 +154,72 @@ func deployTargets(path string, e env, hosts []string, project string) ([]federa
 	}
 	var servers []federate.Server
 	for _, host := range hosts {
-		srv, err := r.Lookup(host)
-		if err != nil {
-			return nil, fmt.Errorf("%w (iormeshctl add it first)", err)
-		}
 		if slices.ContainsFunc(servers, func(s federate.Server) bool { return s.Host == host }) {
 			continue
 		}
-		if project != "" {
-			i := slices.IndexFunc(srv.Projects, func(p federate.Project) bool { return p.Name == project })
-			if i < 0 {
-				return nil, fmt.Errorf("%w: %q on %s", federate.ErrUnknownProject, project, host)
-			}
-			srv.Projects = []federate.Project{srv.Projects[i]}
+		srv, err := selectProjects(r, host, project)
+		if err != nil {
+			return nil, err
 		}
 		servers = append(servers, srv)
 	}
 	return servers, nil
+}
+
+// selectProjects is host's registry entry, narrowed to project when set,
+// with every remaining project's flags checked.
+func selectProjects(r federate.Registry, host, project string) (federate.Server, error) {
+	srv, err := r.Lookup(host)
+	if err != nil {
+		return federate.Server{}, fmt.Errorf("%w (iormeshctl add it first)", err)
+	}
+	if project != "" {
+		i := slices.IndexFunc(srv.Projects, func(p federate.Project) bool { return p.Name == project })
+		if i < 0 {
+			return federate.Server{}, fmt.Errorf("%w: %q on %s", federate.ErrUnknownProject, project, host)
+		}
+		srv.Projects = []federate.Project{srv.Projects[i]}
+	}
+	for _, p := range srv.Projects {
+		if err := checkDeployFlags(p); err != nil {
+			return federate.Server{}, fmt.Errorf("registry entry %s project %s: %w", host, p.Name, err)
+		}
+	}
+	return srv, nil
+}
+
+// checkDeployFlags refuses, up front, pass-through flags the start would
+// refuse on the server: the ones the entry itself owns (ownedFlags; a
+// hand-edited registry may carry them), the ones a confined session may
+// not use at all, and -trace-dir/-spool naming any but the pinned path.
+// Failing here names the registry entry and contacts no host.
+func checkDeployFlags(p federate.Project) error {
+	if f := firstOwnedFlag(p.Flags); f != "" {
+		return fmt.Errorf("flag %s: the entry sets it itself (iormeshctl add)", f)
+	}
+	pinned := map[string]string{"trace-dir": confinedTraceDir, "spool": confinedSpoolRoot + "/" + p.Name}
+	for i := 0; i < len(p.Flags); i++ {
+		f := p.Flags[i]
+		if !strings.HasPrefix(f, "-") {
+			continue
+		}
+		key, val, hasVal := strings.Cut(strings.TrimLeft(f, "-"), "=")
+		if refusedFlags[key] {
+			return fmt.Errorf("flag %s: not allowed through the sudoers rule", f)
+		}
+		want, ok := pinned[key]
+		if !ok {
+			continue
+		}
+		if !hasVal && i+1 < len(p.Flags) {
+			i++
+			val = p.Flags[i]
+		}
+		if path.Clean(val) != want {
+			return fmt.Errorf("flag -%s %s: a deployed session may only use %s", key, val, want)
+		}
+	}
+	return nil
 }
 
 // host runs the deploy steps on one server. An upgrade failure ends it
@@ -172,7 +234,7 @@ func (d deployer) host(ctx context.Context, srv federate.Server) error {
 	if err != nil {
 		return err
 	}
-	bin, err := d.verify(arch)
+	bin, version, err := d.verify(arch)
 	if err != nil {
 		return err
 	}
@@ -187,7 +249,7 @@ func (d deployer) host(ctx context.Context, srv federate.Server) error {
 	}
 	var errs []error
 	for _, p := range srv.Projects {
-		if err := d.project(ctx, t, srv.Host, p); err != nil {
+		if err := d.project(ctx, t, srv.Host, p, version); err != nil {
 			errs = append(errs, fmt.Errorf("project %s: %w", p.Name, err))
 		}
 	}
@@ -221,44 +283,57 @@ func preflight(ctx context.Context, t federate.Transport) (string, error) {
 }
 
 // verify checks the local build for arch against the pinned key and
-// returns its path. VerifyFile also requires the signed name to be the
-// file's own, so another arch's build renamed into place fails here, not
-// only on the server. The server verifies the bytes it receives again,
-// so a file changed between this check and the push is refused there.
-func (d deployer) verify(arch string) (string, error) {
+// returns its path and signed version. It runs for every host, right
+// before that host's push, so a file replaced in dist/ during a long
+// multi-host deploy is caught at the next host, not trusted from the
+// first check. VerifyFile also requires the signed name to be the file's
+// own, so another arch's build renamed into place fails here. The server
+// verifies the bytes it receives again, so a file changed between this
+// check and the push is refused there.
+func (d deployer) verify(arch string) (string, string, error) {
 	path := filepath.Join(d.dist, release.TracerFile(arch))
-	if _, ok := d.verified[arch]; ok {
-		return path, nil
-	}
 	m, err := release.VerifyFile(d.key, path)
 	if err != nil {
-		return "", fmt.Errorf("local build, nothing pushed: %w", err)
+		return "", "", fmt.Errorf("local build, nothing pushed: %w", err)
 	}
 	_, _ = fmt.Fprintf(d.e.stdout, "verified %s: %s %s\n", path, m.File, m.Version)
-	d.verified[arch] = m.Version
-	return path, nil
+	return path, m.Version, nil
 }
 
 // stage pushes the build and its signature into the staging directory and
-// returns the staged binary's path as the server resolves it (relative to
-// the login user's home, where every ssh command starts).
+// returns the staged binary's absolute path. Absolute, because the path
+// is handed to sudo: a relative one would depend on sudo keeping the
+// working directory, which a `Defaults runcwd` in sudoers changes.
 func stage(ctx context.Context, t federate.Transport, bin string) (string, error) {
+	// Every ssh command starts in the login user's home; pwd names it.
+	out, err := t.Run(ctx, "pwd")
+	if err != nil {
+		return "", err
+	}
+	home := strings.TrimSpace(string(out))
+	if !homePath.MatchString(home) || strings.Contains(home, "..") {
+		return "", fmt.Errorf("home directory %q: want an absolute path of [A-Za-z0-9._/-]", home)
+	}
+	dir := path.Join(home, stagingRel)
 	// -m applies to the last component only; staging/ is the directory
 	// the files land in, so that one is kept private.
-	if _, err := t.Run(ctx, "mkdir", "-p", "-m", "0700", stagingDir); err != nil {
+	if _, err := t.Run(ctx, "mkdir", "-p", "-m", "0700", dir); err != nil {
 		return "", err
 	}
-	if err := t.Push(ctx, stagingDir, bin, bin+release.SigSuffix); err != nil {
+	if err := t.Push(ctx, dir, bin, bin+release.SigSuffix); err != nil {
 		return "", err
 	}
-	return stagingDir + "/" + filepath.Base(bin), nil
+	return dir + "/" + filepath.Base(bin), nil
 }
 
-// project starts one project's session. A live session started by deploy
-// with this very argv is left alone (re-deploy is a no-op) unless
-// -restart; any other live session is stopped first, since flags change
-// only by stop and start (decision #19) and start refuses a live unit.
-func (d deployer) project(ctx context.Context, t federate.Transport, host string, p federate.Project) error {
+// project starts one project's session. A live session deploy started
+// with this very argv on this very build is left alone (re-deploy is a
+// no-op) unless -restart; any other live session is stopped first, since
+// flags change only by stop and start (decision #19), start refuses a
+// live unit, and a running session keeps the binary it was started from —
+// after a fixed build is deployed, the old one must not keep running.
+func (d deployer) project(ctx context.Context, t federate.Transport, host string, p federate.Project,
+	version string) error {
 	argv := startArgs(p)
 	out, err := t.Run(ctx, "systemctl", "show", "--property=ActiveState", "--value", "--",
 		"iormesh-"+p.Name+".service")
@@ -266,23 +341,36 @@ func (d deployer) project(ctx context.Context, t federate.Transport, host string
 		return err
 	}
 	live := liveState(strings.TrimSpace(string(out)))
-	switch {
-	case live && !d.restart && d.record.same(host, p.Name, argv):
-		_, _ = fmt.Fprintf(d.e.stdout, "%s: project %s already running with these flags, left alone "+
-			"(-restart restarts it)\n", host, p.Name)
-	case live:
-		if err := d.sudo(ctx, t, host, "stop", "-project", p.Name); err != nil {
-			return fmt.Errorf("stop for restart: %w", err)
+	if live && !d.restart && d.record.same(host, p.Name, argv, version) {
+		_, _ = fmt.Fprintf(d.e.stdout, "%s: project %s already running this build with these flags, "+
+			"left alone (-restart restarts it)\n", host, p.Name)
+	} else {
+		if err := d.start(ctx, t, host, argv, live); err != nil {
+			return err
 		}
-		fallthrough
-	default:
-		if err := d.sudo(ctx, t, host, argv...); err != nil {
-			return fmt.Errorf("start: %w", err)
-		}
-		d.record.set(host, p.Name, argv)
+		d.record.set(host, p.Name, argv, version)
 	}
 	if err := d.sudo(ctx, t, host, "status", "-project", p.Name); err != nil {
 		return fmt.Errorf("status: %w", err)
+	}
+	return nil
+}
+
+// start starts the session argv describes, stopping the live one first.
+// A start that fails after a successful stop says so: the project then
+// has no session at all, which the operator must know.
+func (d deployer) start(ctx context.Context, t federate.Transport, host string, argv []string, live bool) error {
+	project := argv[2]
+	if live {
+		if err := d.sudo(ctx, t, host, "stop", "-project", project); err != nil {
+			return fmt.Errorf("stop for restart, session left running: %w", err)
+		}
+	}
+	if err := d.sudo(ctx, t, host, argv...); err != nil {
+		if live {
+			return fmt.Errorf("session stopped, not restarted: start: %w", err)
+		}
+		return fmt.Errorf("start: %w", err)
 	}
 	return nil
 }
@@ -312,10 +400,10 @@ func sudoTracer(args ...string) []string {
 	return append([]string{"sudo", "-n", installedTracer}, args...)
 }
 
-// startArgs is the tracer's start argv for a registry project: its label,
-// its target, then its pass-through flags. The target is one
-// -name=value element, so a pattern starting with "-" is never taken for
-// a flag.
+// startArgs is the tracer's start argv for a registry project: its label
+// (always argv[2], start relies on it), its target, then its pass-through
+// flags. The target is one -name=value element, so a pattern starting
+// with "-" is never taken for a flag.
 func startArgs(p federate.Project) []string {
 	args := []string{"start", "-project", p.Name}
 	if p.Target.Pattern != "" {

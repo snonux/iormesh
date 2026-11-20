@@ -849,7 +849,7 @@ Kubernetes (M7) build on it.
   `~/.iormesh/staging` (never `/opt` or `/tmp`); never passes
   `-allow-downgrade`; an upgrade refusal starts nothing; a live
   session is restarted (stop, start; #19) when its start argv
-  differs from the one the controller last launched
+  or build differs from the one the controller last launched
   (`~/.local/share/iormesh/deployed.json`) or with `-restart`,
   else left alone, so a re-deploy is a no-op. Deploy only
   upgrades: a host without the installed tracer is reported as

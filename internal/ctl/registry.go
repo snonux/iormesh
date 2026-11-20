@@ -48,9 +48,10 @@ func addCommand(args []string, e env) error {
 	}, fmt.Sprintf("added %s project %s", host, *name))
 }
 
-// rmCommand unregisters a host, or one project on it with -project. For
-// now it edits the registry only: syncing the host's traces off and
-// uninstalling the tracer (PLAN.md M4 "Cleanup (rm)") come with collect.
+// rmCommand unregisters a host, or one project on it with -project, and
+// drops it from deploy's record. For now that is all: syncing the host's
+// traces off and uninstalling the tracer (PLAN.md M4 "Cleanup (rm)")
+// come with collect.
 func rmCommand(args []string, e env) error {
 	fs := newFlagSet("rm", e.stderr)
 	name := fs.String("project", "", "remove only this project (default: the whole host)")
@@ -66,9 +67,30 @@ func rmCommand(args []string, e env) error {
 	if *name != "" {
 		what += " project " + *name
 	}
-	return editRegistry(*path, e, func(r *federate.Registry) error {
+	if err := editRegistry(*path, e, func(r *federate.Registry) error {
 		return r.Remove(host, *name)
-	}, what)
+	}, what); err != nil {
+		return err
+	}
+	return forgetDeployed(e, host, *name)
+}
+
+// forgetDeployed drops what rm removed from deploy's record too, so a
+// host or project registered again later starts afresh. The file is
+// rewritten only when it held the entry.
+func forgetDeployed(e env, host, project string) error {
+	path, err := e.deployed()
+	if err != nil {
+		return err
+	}
+	r, err := loadDeployed(path)
+	if err != nil {
+		return err
+	}
+	if !r.forget(host, project) {
+		return nil
+	}
+	return r.save(path)
 }
 
 // editRegistry loads the registry, applies edit and saves it, then reports
@@ -108,17 +130,27 @@ func tracerFlags(rest []string) []string {
 
 // checkTracerFlags refuses ownedFlags in either spelling (-x, --x, -x=v).
 func checkTracerFlags(flags []string) error {
+	if f := firstOwnedFlag(flags); f != "" {
+		return fmt.Errorf("%w: %s after HOST: iormeshctl flags go before HOST, "+
+			"and the registry entry sets the tracer's", errUsage, f)
+	}
+	return nil
+}
+
+// firstOwnedFlag returns the first of flags naming an ownedFlags entry,
+// or "". add refuses it when storing an entry, deploy when starting one
+// (a hand-edited registry may carry it).
+func firstOwnedFlag(flags []string) string {
 	for _, f := range flags {
 		if !strings.HasPrefix(f, "-") {
 			continue
 		}
 		key, _, _ := strings.Cut(strings.TrimLeft(f, "-"), "=")
 		if ownedFlags[key] {
-			return fmt.Errorf("%w: %s after HOST: iormeshctl flags go before HOST, "+
-				"and the registry entry sets the tracer's", errUsage, f)
+			return f
 		}
 	}
-	return nil
+	return ""
 }
 
 func newFlagSet(name string, stderr io.Writer) *flag.FlagSet {

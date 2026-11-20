@@ -3356,11 +3356,12 @@ ssh H command -v rsync                   # preflight: fail fast (#12)
 ssh H command -v systemd-run
 ssh H test -x /opt/iormesh/bin/iormesh   # installed? else bootstrap, #1
 # verify dist/iormesh-linux-$ARCH + .minisig locally (#28), then:
-ssh H mkdir -p -m 0700 .iormesh/staging
-rsync -t dist/iormesh-linux-$ARCH dist/iormesh-linux-$ARCH.minisig \
-    H:.iormesh/staging/
+ssh H pwd                                # the home, e.g. /home/ops
+ssh H mkdir -p -m 0700 /home/ops/.iormesh/staging
+rsync -ct dist/iormesh-linux-$ARCH dist/iormesh-linux-$ARCH.minisig \
+    H:/home/ops/.iormesh/staging/
 ssh H sudo -n /opt/iormesh/bin/iormesh upgrade \
-    .iormesh/staging/iormesh-linux-$ARCH
+    /home/ops/.iormesh/staging/iormesh-linux-$ARCH
 # per project:
 ssh H systemctl show --property=ActiveState --value -- iormesh-shop.service
 ssh H sudo -n /opt/iormesh/bin/iormesh stop -project shop  # live, changed
@@ -3370,25 +3371,36 @@ ssh H sudo -n /opt/iormesh/bin/iormesh status -project shop
 ```
 
 - Every host on the command line must be registered (and carry
-  `-project` if given) before any host is contacted. Hosts
+  `-project` if given) before any host is contacted, and every
+  selected entry's flags must be ones the server's `start`
+  accepts: no entry-owned flag (`-project`, `-pattern`, `-pid`,
+  …, possible in a hand-edited registry), no `-out`,
+  `-cpuprofile` or `-ready`, `-trace-dir` and `-spool` only at
+  their pinned paths (`internal/cli/confine.go`). Hosts
   deploy one after the other; a failed host is reported and the
   next one still deployed, and the command then exits 1.
 - First install on a host has no binary to `upgrade` with — that
   bootstrap is decision #1, the operator's own sudo or
   configuration management; deploy stops at the `test -x` with
   that message and never tries to install.
-- The build is verified on the controller before any push:
+- The build is verified on the controller before each host's
+  push (per host, not once per arch, so a build replaced
+  mid-run is caught at the next host):
   `release.VerifyFile` with the key `iormeshctl verify` pins
   (`~/.config/iormesh/minisign.pub`), which also requires the
   signed name to be `iormesh-linux-$ARCH` (no other arch's build
   renamed into place). A missing binary or signature, a bad or
   foreign signature: nothing pushed, nothing run under sudo.
-- Staging is `~/.iormesh/staging` on the server (relative paths
-  resolve in the login user's home), never `/tmp` or `/opt`:
-  rsync `-t` without `-p`/`-o`/`-l` leaves the files the login
-  user's own, which is what `upgrade` requires of a staged file.
-  The staged files are kept, so rsync's size-and-mtime check
-  skips the next push of the same build.
+- Staging is `~/.iormesh/staging` on the server, never `/tmp`
+  or `/opt`, named absolute (the home from `pwd`, which must be
+  of `[A-Za-z0-9._/-]`): the path is handed to sudo, and a
+  relative one would rely on sudo keeping the working directory
+  (`Defaults runcwd` changes it). rsync `-ct` without
+  `-p`/`-o`/`-l` leaves the files the login user's own, which is
+  what `upgrade` requires of a staged file. The staged files are
+  kept; `-c` compares checksums, so the next push of the same
+  build transfers nothing while a staged copy damaged in place
+  is sent again.
 - `iormesh upgrade F` verifies `F` and `F.minisig` again
   against `/opt/iormesh/etc/minisign.pub`
   (`internal/cli/upgrade.go`), the same build is a no-op there,
@@ -3404,18 +3416,27 @@ ssh H sudo -n /opt/iormesh/bin/iormesh status -project shop
 - Restart (#19): a live unit (`systemctl show`, unprivileged) is
   stopped and started again unless the controller's record
   (`~/.local/share/iormesh/deployed.json`, 0600: the start argv
-  deploy last launched per host and project) shows the same
-  argv — then it is left alone, which makes a re-deploy of the
-  same build and entry a no-op. `-restart` restarts anyway (a
-  new build runs only from the next start).
+  and build version deploy last launched per host and project)
+  shows the same argv and version — then it is left alone,
+  which makes a re-deploy of the same build and entry a no-op.
+  A new build restarts the session: upgrade replaces the file,
+  not the running process, and a deployed fix must not leave
+  the old binary running. `-restart` restarts anyway. A failed
+  stop leaves the session running and starts nothing; a start
+  failing after the stop is reported as "session stopped, not
+  restarted". `iormeshctl rm` drops the host or project from
+  the record too.
 - Tests (`internal/ctl/deploy_test.go`): a fake `Transport`
-  records every call; exact sequences for two hosts of two
-  arches, the idempotent re-deploy, a changed entry and
-  `-restart`; refusals — unregistered host or unknown project
-  (no call at all), unknown arch, rsync missing, no installed
-  tracer, missing/tampered/foreign/renamed build (nothing
-  pushed), upgrade refused (no start), start failing (reported,
-  the other project and host still deployed).
+  records every call's argv; exact sequences for two hosts of
+  two arches, the idempotent re-deploy, `-restart`, a new build
+  and a changed entry; refusals — unregistered host, unknown
+  project or a flag the server refuses (no call at all),
+  unknown arch, rsync missing, no installed tracer, an odd
+  home, missing/tampered/foreign/renamed build (nothing pushed;
+  checked per host), upgrade refused (no start), start failing
+  (reported, the other project and host still deployed), stop
+  or start-after-stop failing on a restart; `rm` pruning the
+  record.
 
 `collect`, per host and project:
 
