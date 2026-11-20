@@ -800,7 +800,7 @@ browser check is opt-in, because a test run must not need a
 browser:
 
 ```sh
-IORMESH_SITE_BROWSER=1 go test -run Browser ./internal/site/
+CGO_ENABLED=0 IORMESH_SITE_BROWSER=1 go test -run Browser ./internal/site/
 # or IORMESH_SITE_BROWSER=/path/to/chromium
 ```
 

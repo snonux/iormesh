@@ -266,7 +266,9 @@
     for (const e of arr(M.edges)) {
       for (const n of [e.from, e.to]) { if (names.indexOf(n) < 0) { names.push(n); } }
     }
-    const rank = {};
+    // Prototype-free maps: a service may be named "__proto__" or
+    // "constructor", and a plain object would hand back its prototype.
+    const rank = Object.create(null);
     names.forEach(function (n) { rank[n] = 0; });
     for (let i = 0; i < names.length; i++) {
       let changed = false;
@@ -277,7 +279,7 @@
       }
       if (!changed) { break; }
     }
-    const rows = {}, pos = {};
+    const rows = Object.create(null), pos = Object.create(null);
     names.forEach(function (n) { const r = rank[n]; rows[r] = (rows[r] || 0) + 1; pos[n] = { x: r * 280, y: (rows[r] - 1) * 60 }; });
     return { names: names, pos: pos };
   }

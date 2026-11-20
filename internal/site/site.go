@@ -58,7 +58,10 @@ type File struct {
 }
 
 // Files renders a run's site: index.html, graph.svg and one
-// sequence/<ID>.svg per conversation, in that order.
+// sequence/<ID>.svg per conversation, in that order. A conversation ID
+// is a file name here, so one that is not all digits (the model numbers
+// them "0001", …) is refused rather than trusted to stay in the folder —
+// as app.js links only such IDs to their SVG.
 func Files(g schema.Graph, m viewmodel.Model) ([]File, error) {
 	page, err := Page(m)
 	if err != nil {
@@ -66,6 +69,9 @@ func Files(g schema.Graph, m viewmodel.Model) ([]File, error) {
 	}
 	files := []File{{IndexName, page}, {"graph.svg", render.Graph(g)}}
 	for _, c := range m.Conversations {
+		if !digits(c.ID) {
+			return nil, fmt.Errorf("site: conversation ID %q is not a number", c.ID)
+		}
 		files = append(files, File{"sequence/" + c.ID + ".svg", render.Sequence(c)})
 	}
 	return files, nil
@@ -115,7 +121,8 @@ func Write(root string, g schema.Graph, m viewmodel.Model) (string, error) {
 }
 
 // Latest is the index.html of root's newest run, through the latest
-// link; the link must name a folder directly under root.
+// link; the link must name a real folder (not another symlink) directly
+// under root, holding a regular index.html.
 func Latest(root string) (string, error) {
 	target, err := os.Readlink(filepath.Join(root, LatestName))
 	if err != nil {
@@ -124,11 +131,24 @@ func Latest(root string) (string, error) {
 	if target == "" || target == "." || target == ".." || strings.ContainsRune(target, filepath.Separator) {
 		return "", fmt.Errorf("site: %s points outside %s: %q", LatestName, root, target)
 	}
+	if fi, err := os.Lstat(filepath.Join(root, target)); err != nil || !fi.IsDir() {
+		return "", fmt.Errorf("site: %s does not name a run folder in %s: %q", LatestName, root, target)
+	}
 	index := filepath.Join(root, target, IndexName)
 	if fi, err := os.Lstat(index); err != nil || !fi.Mode().IsRegular() {
 		return "", fmt.Errorf("site: %s is not a regular file", index)
 	}
 	return index, nil
+}
+
+// digits says s is a non-empty string of ASCII digits.
+func digits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return s != ""
 }
 
 // ownDir makes dir (0700) and refuses one that is not a real directory:

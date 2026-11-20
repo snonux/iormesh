@@ -40,9 +40,14 @@ func sampleModel(s string) viewmodel.Model {
 		Health: viewmodel.Health{Sessions: []viewmodel.Session{{Project: "shop", Host: "h1", ID: "s" + s, End: s}},
 			BadSegments: []viewmodel.BadSegment{{Name: s, Error: s}}, Ignored: []string{s}},
 		Services: []viewmodel.Service{{Name: "gw" + s}, {Name: "orders" + s, Endpoints: []string{"h2:8080" + s},
-			TopPaths: []viewmodel.PathStat{{Method: "GET", Path: "/x" + s, Count: 2}}}},
+			TopPaths: []viewmodel.PathStat{{Method: "GET", Path: "/x" + s, Count: 2}}},
+			{Name: "__proto__"}, {Name: "constructor"}},
 		Edges: []viewmodel.Edge{{From: "gw" + s, To: "orders" + s, State: viewmodel.StateFused, Conns: 1},
-			{From: "gw" + s, To: "203.0.113.9:5432", State: viewmodel.StateUnresolved, Conns: 1}},
+			{From: "gw" + s, To: "203.0.113.9:5432", State: viewmodel.StateUnresolved, Conns: 1},
+			// A script keying a plain object by service name would get
+			// the prototype back for these (nb4 review).
+			{From: "__proto__", To: "constructor", State: viewmodel.StateFused, Conns: 1},
+			{From: "constructor", To: "toString", State: viewmodel.StateUnresolved, Conns: 1}},
 		Conversations: []viewmodel.Conversation{{ID: "0001", Start: t0, Entry: "gw" + s, Label: "GET /x" + s,
 			Hops: 1, Services: []string{"gw" + s, "orders" + s}, Lifelines: lanes, Steps: steps}},
 		Threads: []viewmodel.ThreadStory{{Lifeline: lanes[0], Entries: []viewmodel.ThreadEntry{{Conversation: "0001",
@@ -206,6 +211,31 @@ func TestWriteKeepsRuns(t *testing.T) {
 	if fi, _ := os.Stat(second); fi.Mode().Perm() != 0o700 {
 		t.Errorf("run folder mode %v", fi.Mode().Perm())
 	}
+	for _, name := range []string{IndexName, "graph.svg", "sequence/0001.svg"} {
+		if fi, err := os.Stat(filepath.Join(second, name)); err != nil || fi.Mode().Perm() != 0o600 {
+			t.Errorf("%s: %v, want mode 0600", name, err)
+		}
+	}
+}
+
+// TestWriteRefuses: a sites root that is a symlink, and a conversation
+// ID that is no number (it names a file), are refused.
+func TestWriteRefuses(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(dir, "sites")
+	if err := os.Symlink(t.TempDir(), link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Write(link, schema.Graph{}, sampleModel("")); err == nil {
+		t.Error("symlinked sites root accepted")
+	}
+	for _, id := range []string{"../../evil", "0001/x", "", "1.svg"} {
+		m := sampleModel("")
+		m.Conversations[0].ID = id
+		if _, err := Write(filepath.Join(dir, "real"), schema.Graph{}, m); err == nil {
+			t.Errorf("conversation ID %q accepted", id)
+		}
+	}
 }
 
 // TestLatestRefusesEscapes: a latest link naming anything but a folder
@@ -215,7 +245,15 @@ func TestLatestRefusesEscapes(t *testing.T) {
 	if _, err := Latest(root); err == nil {
 		t.Error("no link: no error")
 	}
-	for _, target := range []string{"../elsewhere", "/etc", ".."} {
+	// A planted symlink beside the runs, pointing elsewhere, is no run.
+	elsewhere := t.TempDir()
+	if err := os.WriteFile(filepath.Join(elsewhere, IndexName), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, filepath.Join(root, "planted")); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"../elsewhere", "/etc", "..", "planted"} {
 		link := filepath.Join(root, LatestName)
 		_ = os.Remove(link)
 		if err := os.Symlink(target, link); err != nil {
