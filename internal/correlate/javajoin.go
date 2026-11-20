@@ -240,7 +240,9 @@ func orDefault(v, def uint64) uint64 {
 // Event implements schema.Sink: ev waits behind the events held before
 // it and is released, joined, as soon as it is decidable. The queue keeps
 // the one copy the Sink contract requires; from there the event is handed
-// on by pointer.
+// on by pointer. The copy is shallow: the join relies on its upstream (the
+// correlator) not reusing the objects an event points to, though the
+// widened schema.Sink contract would allow it (task ee4 review).
 func (j *JavaJoin) Event(ev *schema.Event) error {
 	j.seen(ev)
 	j.held = append(j.held, *ev)

@@ -1189,11 +1189,14 @@ Kubernetes (M7) build on it.
   event consumes (one core still sustains 250 k joined events/s)
   and by the default fold keeping JVM hot loops out of the join.
   Plain stays ≤ 2 µs. After one more round of join cuts, by those
-  rules (load 4.4–8.7, every run attributed, zero loss, medians
-  of 5): `-spool` 1.90 µs / 11.1 k instructions at 1 thread and
-  3.75 µs / 11.8 k at 4 — passes; plain 1.59 / 1.95 µs — passes
-  (decision #25 item 1; s3-overhead.md, "Follow-up (ee4): owner
-  decision"). The item is met. Two test
+  rules (load 4.4–8.7, every `-spool` run attributed with zero
+  loss, medians of 5): `-spool` 1.90 µs / 11.1 k instructions at
+  1 thread and 3.75 µs / 11.8 k at 4 — passes; plain 1.59 /
+  1.95 µs — passes, with the plain 4-thread runs' 30–50 % ring
+  loss recorded, not gated; both 4-thread CPU-time passes are
+  narrow, inside the ~±20 % run-to-run noise (decision #25
+  item 1; s3-overhead.md, "Follow-up (ee4): owner decision").
+  The item is met. Two test
   hosts run M4's scenarios; from a
   controller, `add` → `deploy` → `refresh` → `rm` produces the
   merged graph export with zero manual steps on the servers,
@@ -1538,12 +1541,17 @@ answer), and deferred.
      Re-measured by those rules after one more round of join cuts
      (task ee4: unboxed agent-ring drain, chunked bracket lists,
      no per-event java allocation), interleaved, medians of 5, load
-     4.4–8.7, every run attributed and lossless: `-spool` 1.90 µs
-     and 11.1 k instructions at 1 thread, 3.75 µs and 11.8 k at 4
-     — **passes** the changed limit; plain 1.59 µs at 1 thread and
-     1.95 µs at 4 (5.8 k instructions both, unchanged by the cuts)
-     — **passes** 2 µs (s3-overhead.md, "Follow-up (ee4): owner
-     decision"). Measured as the
+     4.4–8.7, every `-spool` run attributed and lossless: `-spool`
+     1.90 µs and 11.1 k instructions at 1 thread, 3.75 µs and
+     11.8 k at 4 — **passes** the changed limit; plain 1.59 µs at
+     1 thread and 1.95 µs at 4 (5.8 k instructions both, unchanged
+     by the cuts) — **passes** 2 µs, though the unfolded plain
+     4-thread runs lost 30–50 % of their records to a full ring
+     (recorded, not gated). Both CPU-time passes are narrow: the
+     medians sit inside the ~±20 % run-to-run noise (2 of 5 runs
+     over the limit at 4 threads in each case), so the instruction
+     counts — well under 12.5 k — are the robust part of the pass
+     (s3-overhead.md, "Follow-up (ee4): owner decision"). Measured as the
      tracer's own user+sys CPU time per event from its ready
      file to its exit (load and attach excluded), which host
      load moves less than wall time — not nothing: on a loaded SMT host one thread's CPU
