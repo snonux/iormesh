@@ -6,6 +6,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"iormesh/internal/routemap"
 )
 
 // The plain-text renderer (docs/visualization.md "Plain text"): what
@@ -49,9 +51,42 @@ func WriteSummary(w io.Writer, m Model) error {
 			fmt.Fprintf(&b, "unresolved %s -> %s (%d of %d connections)\n", e.From, e.To, e.Unresolved, e.Conns)
 		}
 	}
+	writeRoutes(&b, m.Routes, h.RouteFlags)
 	writeBad(&b, h)
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// writeRoutes prints one line per routed edge — its hops joined by
+// arrows, then its basis — and one per route flag.
+func writeRoutes(b *strings.Builder, rs []Route, fs []RouteFlag) {
+	for _, r := range rs {
+		hops := []string{r.From}
+		for _, h := range []string{r.FQDN, r.Ingress, r.Service, r.Workload, r.Pod} {
+			if h != "" {
+				hops = append(hops, h)
+			}
+		}
+		fmt.Fprintf(b, "routed     %s (%s, %d connections%s)\n", strings.Join(hops, " -> "), r.Basis,
+			r.Conns, endpointsNote(r))
+	}
+	for _, f := range fs {
+		fmt.Fprintf(b, "route flag %s %s: %s", f.Kind, f.Subject, f.Detail)
+		if f.Conns > 0 {
+			fmt.Fprintf(b, " (%d connections)", f.Conns)
+		}
+		b.WriteString("\n")
+	}
+}
+
+// endpointsNote says why an untraced Service's edge names no pod: the
+// map lists several endpoints, and the traces cannot say which one
+// answered.
+func endpointsNote(r Route) string {
+	if r.Basis == routemap.BasisService && r.Pod == "" && r.Endpoints > 1 {
+		return fmt.Sprintf("; %d endpoints, pod unknown", r.Endpoints)
+	}
+	return ""
 }
 
 // WriteServices prints one line per service.

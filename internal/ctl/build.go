@@ -39,8 +39,9 @@ import (
 //     database (task hb4), one source per segment so request counts stay
 //     exact after old segments are deleted.
 //  4. The view model (V1: run, health, services, edges; V2: the
-//     conversations) is built from the tally, the merge, the database's
-//     view of the projects and the conversations' recording — whose http
+//     conversations; M7: the routed edges, from the route map read
+//     before step 1, routes.go) is built from the tally, the merge, the
+//     database's view of the projects and the conversations' recording — whose http
 //     events ride along with step 3's read, and whose file work and Java
 //     frames take one more read (conversations.go). The per-run rollup
 //     (internal/report, PLAN.md M5) is built from the events of step 2's
@@ -97,10 +98,13 @@ const (
 // exit status 1.
 var errBadSegments = errors.New("segments skipped")
 
-// buildFlags are the paths build reads and writes.
+// buildFlags are the paths build reads and writes. routes is the static
+// route map (-routes, registered by build and refresh only: routes.go);
+// "" is routes.yaml beside the registry.
 type buildFlags struct {
 	projects          projectList
 	store, db, builds string
+	routes            string
 }
 
 // addBuildFlags registers build's flags on fs into f (refresh shares
@@ -117,6 +121,7 @@ func buildCommand(args []string, e env) error {
 	fs := newFlagSet("build", e.stderr)
 	var f buildFlags
 	addBuildFlags(fs, &f)
+	addRoutesFlag(fs, &f)
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
@@ -161,6 +166,12 @@ func build(ctx context.Context, e env, f buildFlags) (buildOutput, error) {
 	if err != nil {
 		return buildOutput{}, err
 	}
+	// The route map is read first: a map others could write fails the
+	// build before any segment is read, as a bad registry fails deploy.
+	routes, err := loadRoutes(e, f)
+	if err != nil {
+		return buildOutput{}, err
+	}
 	projects, err := buildProjects(paths.store, f.projects)
 	if err != nil {
 		return buildOutput{}, err
@@ -182,6 +193,7 @@ func build(ctx context.Context, e env, f buildFlags) (buildOutput, error) {
 		return buildOutput{}, err
 	}
 	in.Report = &rep // the processes view is projected from the rollup
+	in.Routes = routes
 	model := viewmodel.New(in)
 	dir, err := writeOutputs(paths.builds, projects, in.Merge.Graph, model)
 	if err == nil {

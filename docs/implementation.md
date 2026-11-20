@@ -5404,19 +5404,50 @@ depends on:
     for an earlier debug container, `pinNewHosts` re-reading
     `hosts.json` under `hosts.json.lock`, `collect -db`, and
     `iormesh ready` failing for a project with no trace dir.
-11. ClusterIP join: S2's key if it survives kube-proxy's DNAT;
-    otherwise conntrack on the node.
+11. ClusterIP join: S2's key survives kube-proxy's DNAT (PLAN.md
+    M7 "Service-NAT correlation", settled by task xb4), so M4's
+    `federate.Fuse` joins both ends unchanged and no conntrack is
+    read. `internal/routemap` (`join.go`) then names the Service
+    the client dialed: `Table.Join` takes one `Flow` per traced
+    client end (`viewmodel/routes.go` builds them from
+    `servicedb.Observation` and the fused conns' server halves)
+    and returns routed edges and flags. A fused flow to a
+    ClusterIP is a `fused` edge whose pod is the server end's
+    endpoint (by UID from its `pod-<uid>` host id, else by
+    address) — or, not listed, the host id plus a
+    `stale_service` flag; an unfused one is a `service` edge to
+    the workload, with a pod only for a sole endpoint. Tests:
+    `internal/routemap/join_test.go` merges two synthetic pods'
+    traces with the unchanged merge and checks the joined result
+    against `testdata/clusterip.golden`.
 12. `internal/routemap` (#15): the static map first —
     `~/.config/iormesh/routes.yaml`, loaded with the registry's
-    ownership and mode checks (placeholders):
+    ownership and mode checks (`federate.ReadPrivate`); built by
+    task xb4 (placeholders):
 
     ```yaml
     routes:
-      - fqdn: <fqdn>
+      - fqdn: <fqdn>                    # or "*.<domain>", one label
         ingress: <ingress>              # Traefik in the M0 scenario
         service: <namespace>/<service>
-        workload: <namespace>/deployment/<name>  # or statefulset/
+        workload: <namespace>/deployment/<name>  # or statefulset/;
+                                                 # optional
+    services:                           # what the ClusterIP join reads
+      - service: <namespace>/<service>
+        cluster_ips: [<ip>]             # one, or two (dual stack)
+        ports: [{port: <port>, target_port: <port>}]
+        workload: <namespace>/deployment/<name>
+        endpoints:                      # optional; none skips checks
+          - {addr: <pod ip>, pod: <namespace>/<pod>, uid: <pod uid>}
+    service_cidrs: [<cidr>]             # optional: unknown_service
     ```
+
+    Names follow `internal/k8sname`; unknown keys, a second YAML
+    document, duplicates (an FQDN, a Service, a ClusterIP and
+    port) and the caps (4096 routes and Services, 64 ports and
+    1024 endpoints a Service, 4 MiB) refuse the whole file.
+    `build -routes <file>` reads another file; `refresh` takes it
+    too.
 
     Then discovery through the controller's kubectl (Ingress,
     IngressRoute, Service, EndpointSlice, owner references),

@@ -340,29 +340,7 @@ func (p Project) validate() error {
 // replace by renaming over it, lets them choose where the operator's key
 // deploys a root-run tracer. The read is bounded by maxRegistrySize.
 func readPrivate(path string) ([]byte, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("registry %s: %w", path, err)
-	}
-	if err := checkOwned(info, path, 0o022, ErrUnsafeFile); err != nil {
-		return nil, err
-	}
-	if err := checkRegistryDir(filepath.Dir(path)); err != nil {
-		return nil, err
-	}
-	data, err := io.ReadAll(io.LimitReader(f, maxRegistrySize+1))
-	if err != nil {
-		return nil, fmt.Errorf("registry %s: %w", path, err)
-	}
-	if len(data) > maxRegistrySize {
-		return nil, fmt.Errorf("%w: %s is over %d bytes", ErrTooLarge, path, maxRegistrySize)
-	}
-	return data, nil
+	return ReadPrivate(path, maxRegistrySize, ErrUnsafeFile, ErrTooLarge)
 }
 
 // writeAtomic is Save's temp-file-and-rename step. os.CreateTemp creates

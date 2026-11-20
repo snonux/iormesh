@@ -1203,6 +1203,56 @@ and carry the capabilities, mounts and env, that the trace dir
 stays 0755 under `fsGroup`, and the oldest runtime whose
 `RuntimeDefault` lets `bpf` through.
 
+## Route map and ClusterIP join (task xb4)
+
+Unit tests in `mage test`, no cluster (PLAN.md M7 "Service-NAT
+correlation", "Ingress route mapping", #15;
+docs/implementation.md M7 steps 11 and 12):
+
+- `internal/routemap/join_test.go`: two synthetic pods' traces —
+  the client dials ClusterIPs, the server sees its own pod
+  address and the client's (kube-proxy's DNAT, no SNAT) — go
+  through the unchanged M4 merge (`federate.Halves`, `Fuse`): the
+  two ClusterIP connections to the traced pod fuse by the ISN
+  pair. The joined result matches `testdata/clusterip.golden`:
+  the fused edge names the Service and the pod (matched by UID);
+  an untraced Service with two endpoints stops at its
+  StatefulSet with no pod, one with a sole endpoint names it; the
+  FQDN is routed through Traefik; an address in the Service CIDR
+  no Service holds is `unknown_service`, a fused pod missing from
+  a Service's endpoints `stale_service`, an HTTP host whose route
+  names another Service than the one reached
+  `route_contradicted`; an address no map names yields nothing.
+  `table_test.go`: static over discovered for one FQDN, Service
+  name or ClusterIP (each shadowing flagged), wildcards of one
+  label only, a nil table, an endpoint-less Service never stale,
+  a fused direct-to-pod flow contradicting its HTTP host's
+  route, a Host with a port.
+- `internal/routemap/load_test.go`: a hostile `routes.yaml` is
+  refused whole — group- or world-writable file or directory,
+  over 4 MiB, an unknown key, a second document, an escape
+  sequence in an FQDN, a single-label FQDN, a space in an
+  ingress, a Service without a namespace, a DaemonSet or
+  foreign-namespace workload, a duplicate FQDN, a bad or
+  unspecified ClusterIP, no ports, a port past 65535, an
+  endpoint pod of another namespace, a forged UID, two Services
+  claiming one ClusterIP and port, a non-canonical CIDR, and past
+  1024 endpoints.
+- `internal/ctl/routes_test.go`: a build over a ClusterIP mesh
+  with the map beside the registry prints the routed edges
+  (`testdata/routes_summary.golden`: the fused edge with its
+  pod, the database's StatefulSet with "2 endpoints, pod
+  unknown", and checkout → FQDN → Traefik → Service →
+  Deployment) and models them; a stale endpoint list flags the
+  Service and keeps the fused edge on the server's host; a
+  writable or forged map fails the build; `-routes` reads
+  another file.
+
+Not checked here (task yb4, on kind): a ClusterIP connection
+between two traced pods fusing in a real cluster (iptables and,
+where offered, nftables mode), the hairpin case, and the M0
+ingress scenario through a real Traefik.
+
 ## Performance baselines
 
 S3 (PLAN.md, decision #25) measures overhead against a load the

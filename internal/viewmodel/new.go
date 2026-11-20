@@ -10,6 +10,7 @@ import (
 
 	"iormesh/internal/federate"
 	"iormesh/internal/report"
+	"iormesh/internal/routemap"
 	"iormesh/internal/servicedb"
 )
 
@@ -35,6 +36,9 @@ type Input struct {
 	// Report is the build's rollup (internal/report): the processes
 	// view is projected from it; nil for none.
 	Report *report.Report
+	// Routes is the compiled route map (internal/routemap): the routed
+	// edges are joined from it and Observations; nil for none.
+	Routes *routemap.Table
 }
 
 // New builds the model. Every list is sorted, so equal inputs give equal
@@ -60,6 +64,7 @@ func New(in Input) Model {
 		m.MoreConversations, m.Health.RequestsCut = r.more, r.cut
 	}
 	m.Processes, m.MoreProcesses = processes(in.Report, n)
+	m.Routes, m.Health.RouteFlags = routes(in.Routes, in.Observations, in.Merge.Conns, in.Endpoints)
 	return m
 }
 

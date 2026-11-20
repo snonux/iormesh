@@ -26,6 +26,7 @@ func refreshCommand(args []string, e env) error {
 	fs := newFlagSet("refresh", e.stderr)
 	var f buildFlags
 	addBuildFlags(fs, &f)
+	addRoutesFlag(fs, &f)
 	regPath := fs.String("registry", "", "registry file (default ~/.config/iormesh/servers.yaml)")
 	kf := addK8sFlags(fs, false)
 	if err := fs.Parse(args); err != nil {

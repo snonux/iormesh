@@ -1689,6 +1689,33 @@ Later phase — plain Linux servers (M4) come first.
   the two ends of a connection observe different 4-tuples; the
   mesh must join them (extends M4's NAT-tolerant join to k8s
   services).
+  Settled (2026-11-21, task xb4): S2's ISN pair applies, so M4's
+  join fuses ClusterIP connections unchanged and conntrack on the
+  node is not needed. kube-proxy's iptables, nftables and IPVS
+  modes all NAT through `nf_nat`, which rewrites addresses and
+  ports only; sequence numbers change only under `nf_nat`'s
+  sequence adjustment (an ALG helper resizing payload, FTP or
+  SIP) or a `SYNPROXY` target, neither of which kube-proxy
+  installs; a socket-level load balancer (Cilium's kube-proxy
+  replacement) rewrites the address at `connect()` and touches
+  no sequence number either. Both ends compute the pair from
+  their own `tcp_sock`, so only a box rewriting sequence numbers
+  in flight could break it — S2's "Limits" list, which stays
+  unresolved, never guessed. What the route map adds
+  (`internal/routemap`, #15): the Service named on a fused
+  ClusterIP edge and its pod checked against the Service's
+  endpoints (by pod UID — an in-pod tracer's host id is
+  `pod-<uid>` — else by address; a pod not listed flags the map
+  `stale_service`, the fused fact stands); a ClusterIP edge whose
+  pod is untraced completed to the Service and its workload, to
+  a pod only when the Service lists exactly one endpoint; an
+  address inside a declared Service CIDR no Service holds
+  flagged `unknown_service`. To confirm on kind (task yb4): that
+  a ClusterIP connection between two traced pods fuses in the
+  build (iptables mode, kind's default, and nftables if the kind
+  version offers it), and the hairpin case — a pod calling its
+  own Service, both ends in one pod, the server end seeing the
+  node's masquerade source.
 - **Ingress route mapping**: an FQDN often terminates on an
   ingress (Traefik) behind a managed LB — no tracer can attach
   there, and the L7 hop breaks the connection join anyway
@@ -1701,6 +1728,18 @@ Later phase — plain Linux servers (M4) come first.
   parsing — routing configuration is the source.
   Observed http events (host + path from the agent) can
   validate the mapping against what actually flowed.
+  Status (2026-11-21, task xb4): the static map is built and
+  unit-tested, not yet on kind — `routes.yaml` beside the
+  registry (its `routes:`, plus the `services:` with ClusterIPs
+  and endpoints the ClusterIP join reads), read under the
+  registry's rules and refused whole on any bad entry; `build`
+  prints and models the routed edges (`routed` lines,
+  `model.json` `routes` and `health.route_flags`). An unresolved
+  client edge whose hostname (its HTTP host, else its DNS
+  lookup) has a route becomes client → FQDN → ingress → Service
+  → workload; an HTTP host whose route names another Service
+  than the one reached is flagged `route_contradicted`. The
+  graph and site renderers do not draw routed edges yet.
 - Collection works with the controller tooling too —
   per-pod/per-node trace fetch (decision #12), events carrying
   pod identity.
@@ -2343,6 +2382,11 @@ here only as placeholders.
   (discovery moves first), or the ingress is not Traefik.
   Owner to confirm: the ingress controller and CRDs in use, and
   a sample of real routes.
+  Built (task xb4): the static map (docs/implementation.md M7
+  step 12). Its `services:` section — ClusterIPs, ports,
+  endpoints, the Service CIDR — is an addition the ClusterIP join
+  needs (a route names a Service, not its address); a route's
+  workload may be left out and is then the Service's.
 - **#18 K8s debug-container config in iormeshctl** —
   *Provisional — owner's examples pending (2026-11-20):* k8s
   targets live in the registry beside `servers:`, as a `k8s:`

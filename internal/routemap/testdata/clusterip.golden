@@ -1,0 +1,82 @@
+{
+  "edges": [
+    {
+      "from": "checkout",
+      "service": "prod/backend",
+      "pod": "prod/backend-7d9f-a",
+      "basis": "fused",
+      "endpoints": 2,
+      "origin": "static",
+      "conns": 1,
+      "first": 1763600001000000000,
+      "last": 1763600001000000000
+    },
+    {
+      "from": "checkout",
+      "service": "prod/cache",
+      "workload": "prod/deployment/cache",
+      "pod": "prod/cache-5f-x",
+      "basis": "service",
+      "endpoints": 1,
+      "origin": "static",
+      "conns": 1,
+      "first": 1763600004000000000,
+      "last": 1763600004000000000
+    },
+    {
+      "from": "checkout",
+      "service": "prod/db",
+      "workload": "prod/statefulset/db",
+      "basis": "service",
+      "endpoints": 2,
+      "origin": "static",
+      "conns": 2,
+      "first": 1763600003000000000,
+      "last": 1763600009000000000
+    },
+    {
+      "from": "checkout",
+      "service": "prod/legacy",
+      "pod": "pod-0b6e7a52-1111-4c3e-9a63-1d2f3e4a5b6c",
+      "basis": "fused",
+      "endpoints": 1,
+      "origin": "static",
+      "conns": 1,
+      "first": 1763600007000000000,
+      "last": 1763600007000000000
+    },
+    {
+      "from": "checkout",
+      "fqdn": "shop.example.org",
+      "ingress": "traefik",
+      "service": "prod/backend",
+      "workload": "prod/deployment/backend",
+      "basis": "route",
+      "endpoints": 2,
+      "origin": "static",
+      "conns": 1,
+      "first": 1763600006000000000,
+      "last": 1763600006000000000
+    }
+  ],
+  "flags": [
+    {
+      "kind": "route_contradicted",
+      "subject": "shop.example.org",
+      "detail": "routed to prod/backend, observed reaching prod/db",
+      "conns": 1
+    },
+    {
+      "kind": "stale_service",
+      "subject": "prod/legacy",
+      "detail": "reached pod-0b6e7a52-1111-4c3e-9a63-1d2f3e4a5b6c, not one of its endpoints",
+      "conns": 1
+    },
+    {
+      "kind": "unknown_service",
+      "subject": "10.96.0.99:80",
+      "detail": "inside a service CIDR, no service of the map holds it",
+      "conns": 1
+    }
+  ]
+}

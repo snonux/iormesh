@@ -60,7 +60,8 @@
       }
     ],
     "bad_segments": null,
-    "ignored": null
+    "ignored": null,
+    "route_flags": []
   },
   "services": [
     {
@@ -734,5 +735,6 @@
       "more_sockets": 0
     }
   ],
-  "more_processes": 0
+  "more_processes": 0,
+  "routes": []
 }

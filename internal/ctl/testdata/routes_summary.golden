@@ -1,0 +1,5 @@
+unresolved java -> 10.96.0.30:5432 (1 of 1 connections)
+unresolved java -> shop.example.org:80 (1 of 1 connections)
+routed     java -> prod/backend -> prod/deployment/backend -> prod/backend-7d9f-a (fused, 1 connections)
+routed     java -> prod/db -> prod/statefulset/db (service, 1 connections; 2 endpoints, pod unknown)
+routed     java -> shop.example.org -> traefik -> prod/backend -> prod/deployment/backend (route, 1 connections)

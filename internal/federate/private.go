@@ -2,14 +2,18 @@ package federate
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"syscall"
 )
 
 // Ownership checks for the controller's private state: the registry
-// (registry.go) and the ssh control sockets (ssh.go). Both decide where
-// the operator's key goes, so a file or directory someone else owns or
+// (registry.go), the route map (ReadPrivate, internal/routemap) and the
+// ssh control sockets (ssh.go). The registry and the sockets decide where
+// the operator's key goes, and the route map decides what the build says
+// an unresolved edge reached, so a file or directory someone else owns or
 // can write is refused rather than repaired — repairing would bless what
 // the other user may already have put there.
 
@@ -50,4 +54,39 @@ func checkRegistryDir(dir string) error {
 		return fmt.Errorf("registry dir: %w", err)
 	}
 	return checkOwned(info, dir, 0o022, ErrUnsafeFile)
+}
+
+// ReadPrivate reads path, at most limit bytes, after checking that
+// nobody but this user owns or can write it or the directory holding it.
+// The registry reads servers.yaml through it, and internal/routemap the
+// route map (decision #15: "the registry's ownership and mode rules"):
+// a file someone else can edit — or replace by renaming over it — is
+// refused, not repaired. unsafe and tooLarge classify the errors, so
+// each caller keeps its own sentinels for errors.Is.
+func ReadPrivate(path string, limit int, unsafe, tooLarge error) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := checkOwned(info, path, 0o022, unsafe); err != nil {
+		return nil, err
+	}
+	if dir, err := os.Stat(filepath.Dir(path)); err != nil {
+		return nil, fmt.Errorf("%s: directory: %w", path, err)
+	} else if err := checkOwned(dir, filepath.Dir(path), 0o022, unsafe); err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(io.LimitReader(f, int64(limit)+1))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if len(data) > limit {
+		return nil, fmt.Errorf("%w: %s is over %d bytes", tooLarge, path, limit)
+	}
+	return data, nil
 }

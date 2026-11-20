@@ -62,6 +62,7 @@ func safeModel(m Model) Model {
 	for i := range m.Processes {
 		m.Processes[i] = safeProcess(m.Processes[i])
 	}
+	m.Routes, h.RouteFlags = safeRoutes(m.Routes, h.RouteFlags)
 	return m
 }
 

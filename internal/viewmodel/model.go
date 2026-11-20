@@ -10,6 +10,8 @@
 // appends the conversations (conversation.go): request chains across
 // the fused connections in happens-before order, each thread's file work
 // interleaved, each step on the lifelines of the threads at its ends;
+// task xb4 appended the routed edges and their flags (routes.go: the
+// route map's Services and ingress routes, PLAN.md M7, decision #15);
 // task 0f4 appended the thread stories (stories.go: one thread's steps
 // across the conversations, `show thread`) and the processes
 // (process.go: per host, its threads, files and sockets, projected from
@@ -61,6 +63,10 @@ type Model struct {
 	// order (project, host, pid, incarnation); MoreProcesses counts those the rollup cut.
 	Processes     []Process `json:"processes"`
 	MoreProcesses int       `json:"more_processes"`
+	// Routes are the route map's edges (routes.go, PLAN.md M7): ClusterIP
+	// connections with their Service named, and untraced Services and
+	// ingress FQDNs completed to their workload; empty without a map.
+	Routes []Route `json:"routes"`
 }
 
 // Run is what the build read and what the merge made of it.
@@ -110,6 +116,9 @@ type Health struct {
 	// BadSegments were skipped whole; Ignored are stray store entries.
 	BadSegments []BadSegment `json:"bad_segments"`
 	Ignored     []string     `json:"ignored"`
+	// RouteFlags are where the route map and the traces disagree (a stale
+	// endpoint list, a contradicted route) or what the map left open.
+	RouteFlags []RouteFlag `json:"route_flags"`
 }
 
 // Session is one tracer run on one host.
