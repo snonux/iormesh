@@ -52,22 +52,6 @@ func (w *Writer) fail(err error) error {
 	return err
 }
 
-// flushBatch hands the batched events to the library.
-func (w *Writer) flushBatch() error {
-	if len(w.batch) == 0 {
-		return nil
-	}
-	err := w.events.write(w.batch)
-	// Drop the copies' pointers, so the batch does not keep the last
-	// events' strings and args alive until it refills.
-	clear(w.batch)
-	w.batch = w.batch[:0]
-	if err != nil {
-		return w.fail(err)
-	}
-	return nil
-}
-
 // writeRow appends one table row, opening the table's file in the active
 // segment on its first row. A generic function rather than a method, as
 // Go methods take no type parameters.
@@ -114,7 +98,7 @@ func (w *Writer) rotate(now time.Time) error {
 
 // openSegment opens the active segment's events file at now.
 func (w *Writer) openSegment(now time.Time) error {
-	s, err := openStream[schema.Event](w.activePath("events"), w.codec)
+	s, err := openEventStream(w.activePath("events"), w.codec, w.footer)
 	if err != nil {
 		return w.fail(err)
 	}
@@ -126,9 +110,6 @@ func (w *Writer) openSegment(now time.Time) error {
 // events (see Writer), then an fsync of ready/ so the renames are
 // durable before the next segment starts. Any error breaks the writer.
 func (w *Writer) publish() error {
-	if err := w.flushBatch(); err != nil {
-		return errors.Join(err, w.abortSegment())
-	}
 	ready := filepath.Join(w.cfg.Dir, ReadyDir)
 	for i, p := range w.open {
 		name := TableName(w.cfg.FQDN, w.cfg.Session, w.start, w.seq, p.tableName())
@@ -169,14 +150,12 @@ func (w *Writer) abortSegment() error {
 		errs = append(errs, w.events.abort())
 		w.events = nil
 	}
-	clear(w.batch)
-	w.batch = w.batch[:0]
 	return errors.Join(errs...)
 }
 
 // empty reports whether the active segment holds no row at all.
 func (w *Writer) empty() bool {
-	return len(w.open) == 0 && len(w.batch) == 0 && (w.events == nil || w.events.rows == 0)
+	return len(w.open) == 0 && (w.events == nil || w.events.rows == 0)
 }
 
 func (w *Writer) checkDisk() error {

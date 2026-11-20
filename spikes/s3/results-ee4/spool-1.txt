@@ -1,0 +1,10 @@
+base threads=1 ns_per_event=2840 insn_per_event=22758 cycles_per_event=9096 load=3.17 events=1000075 lost=0 attributed=1000023
+base threads=1 ns_per_event=4429 insn_per_event=22621 cycles_per_event=9047 load=3.32 events=1000075 lost=0 attributed=1000023
+base threads=1 ns_per_event=3160 insn_per_event=22836 cycles_per_event=9759 load=3.15 events=1000075 lost=0 attributed=1000023
+base threads=1 ns_per_event=5319 insn_per_event=22864 cycles_per_event=9583 load=3.40 events=1000075 lost=0 attributed=1000023
+base threads=1 ns_per_event=8369 insn_per_event=23093 cycles_per_event=12867 load=33.19 events=1000077 lost=0 attributed=1000023
+new threads=1 ns_per_event=2809 insn_per_event=11503 cycles_per_event=5807 load=3.43 events=1000075 lost=0 attributed=1000023
+new threads=1 ns_per_event=2379 insn_per_event=11445 cycles_per_event=5834 load=3.09 events=1000075 lost=0 attributed=1000023
+new threads=1 ns_per_event=3270 insn_per_event=11466 cycles_per_event=6078 load=3.18 events=1000075 lost=0 attributed=1000023
+new threads=1 ns_per_event=3990 insn_per_event=11664 cycles_per_event=7782 load=19.76 events=1000075 lost=0 attributed=1000023
+new threads=1 ns_per_event=2890 insn_per_event=11606 cycles_per_event=7516 load=41.16 events=1000075 lost=0 attributed=1000023

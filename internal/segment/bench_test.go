@@ -5,20 +5,35 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"iormesh/internal/schema"
 )
 
 // BenchmarkWriterEvent is the segment writer's whole per-event cost on
-// the tracer's hottest shape (a 1-byte read): validation, the batch copy,
-// column encoding and zstd pages written to a real file, rotation off.
-// Compare with schema's BenchmarkNDJSONSink (decision #25, task ee4).
+// the tracer's hottest shape (a 1-byte read): validation, column
+// encoding and zstd pages written to a real file, rotation off. Compare
+// with schema's BenchmarkNDJSONSink (decision #25, task ee4).
 func BenchmarkWriterEvent(b *testing.B) {
+	benchWriter(b, burstEvent(1))
+}
+
+// BenchmarkWriterJoinedEvent is the same for the -spool shape: the read
+// attributed java, with a thread name and a four-frame stack (task ee4).
+func BenchmarkWriterJoinedEvent(b *testing.B) {
+	ev := burstEvent(1)
+	ev.Attribution = schema.AttributionJava
+	ev.Java = &schema.Java{Thread: "pool-1-thread-1", Stack: []uint64{11, 7, 3, 1}}
+	benchWriter(b, ev)
+}
+
+func benchWriter(b *testing.B, ev schema.Event) {
+	b.Helper()
 	dir := filepath.Join(b.TempDir(), "shop")
 	w, err := New(Config{Dir: dir, FQDN: "h", Session: "s1", Project: "shop",
 		Interval: time.Hour, MaxBytes: 1 << 40})
 	if err != nil {
 		b.Fatal(err)
 	}
-	ev := burstEvent(1)
 	b.ReportAllocs()
 	for i := range b.N {
 		ev.Seq, ev.BootNS = uint64(i)+1, ev.BootNS+700

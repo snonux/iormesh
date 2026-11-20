@@ -3254,10 +3254,15 @@ func (w *Writer) rotate(now time.Time) error {
   ([schema.md](schema.md#parquet-mapping)).
 - Rotation runs in `Tick`, which the run loop calls on its
   200 ms ticker — never on the per-event path, which only
-  validates and appends a shallow copy to a 256-event batch
-  handed to `parquet-go` in one `Write`. A minute (from the
-  segment's opening) or 64 MiB (the library's size estimate)
-  rotates.
+  validates the event and appends its fields to the open row
+  group's column buffers (`segment/eventcols.go`, task ee4: the
+  hand-written mapping replaced `parquet-go`'s reflection, which
+  cost ~3× the NDJSON sink per event; `newEventColumns` checks it
+  against the library's schema for `schema.Event`, and a test
+  holds it to the library's `Deconstruct`). A minute (from the
+  segment's opening) or 64 MiB (bytes written plus the open row
+  group's buffers) rotates. The tables keep `parquet-go`'s
+  `GenericWriter`: their rows are rare.
 - Compression: ior's `zstdCodec` (one encoder, 1 MiB window)
   passed as `parquet.Compression`, not the library's pooled
   `parquet.Zstd`.
@@ -3295,8 +3300,12 @@ func (w *Writer) rotate(now time.Time) error {
   a trip that ends cleanly with an intact last segment, startup
   over the limit touching nothing; in `internal/cli` the loop's
   disk-limit end through `finish`, the real-partition startup
-  check and the tee. `BenchmarkWriterEvent` is the per-event
-  cost next to `schema`'s `BenchmarkNDJSONSink` (task ee4).
+  check and the tee. The events encoder is held to
+  `parquet-go`'s `Deconstruct` over random events and read back
+  across several row groups (`eventcols_test.go`).
+  `BenchmarkWriterEvent` and `BenchmarkWriterJoinedEvent` are
+  the per-event cost next to `schema`'s `BenchmarkNDJSONSink`
+  (task ee4).
 
 ### Controller side
 

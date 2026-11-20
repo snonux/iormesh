@@ -264,12 +264,9 @@ func TestRotationBoundary(t *testing.T) {
 func TestSizeCapRotates(t *testing.T) {
 	w, dir := newTestWriter(t, func(c *Config) { c.MaxBytes = 1 })
 	evs := richEvents()
+	// The size estimate counts the open row group's buffered columns, so
+	// one event is over a 1-byte cap at once.
 	writeAll(t, w, evs[:1])
-	// The batch is still in memory: the library's size estimate counts
-	// only what it was handed, so flush it the way 256 events would.
-	if err := w.flushBatch(); err != nil {
-		t.Fatal(err)
-	}
 	if err := w.Tick(t0.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}

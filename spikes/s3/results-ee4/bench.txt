@@ -1,0 +1,4 @@
+base WriterEvent insn/op=11151 cycles/op=6071
+new WriterEvent insn/op=2483 cycles/op=1299
+base WriterJoinedEvent insn/op=12619 cycles/op=7244
+new WriterJoinedEvent insn/op=2777 cycles/op=2148

@@ -16,7 +16,11 @@
 #        A/B against another build; task ud4), S3_PERF (1: also count
 #        the tracer's instructions from its ready file to its exit with
 #        perf stat — a figure host load barely moves, unlike CPU time;
-#        task ud4)
+#        task ud4 — and its cycles, user and kernel; task ee4),
+#        S3_SEGMENT (1: the traced run writes M4's parquet segments —
+#        -trace-dir in its work dir, -disk-limit 0, no -out — and its
+#        events are counted from the segments' footers by rowcount.go;
+#        task ee4)
 #
 # The method is load-tolerant (decision #25 as changed 2026-11-19, task
 # md4): the host is never quiet, so the gated figures are CPU times, not
@@ -62,6 +66,7 @@ agent_jar=$repo/iormesh-agent.jar
 agent=${S3_AGENT:-0}
 tracer=${S3_TRACER:-$repo/iormesh}
 perf=${S3_PERF:-0}
+segment=${S3_SEGMENT:-0}
 clk_tck=$(getconf CLK_TCK)
 mkdir -p "$out"
 samples=$out/samples.txt
@@ -227,10 +232,15 @@ burst_finish() {
 # The tracer is time's child; its own PID is found by its command line,
 # which starts with the binary's path (time's does not).
 tracer_start() {
-    local pid=$1 dir=$2 spool=()
+    local pid=$1 dir=$2 spool=() sink=()
+    sink=(-out "$dir/trace")
     [ "$agent" = 1 ] && [ -d "$dir/spool" ] && spool=(-spool "$dir/spool")
+    # The disk watchdog is off (-disk-limit 0): it gates the partition's
+    # used percent, and a developer's root may be fuller than its 90 %
+    # default; the free-bytes floor stays.
+    [ "$segment" = 1 ] && sink=(-trace-dir "$dir/td" -disk-limit 0)
     sudo -n taskset -c "$tracer_cpu" /usr/bin/time -f '%U %S' -o "$dir/time" \
-        "$tracer" run -pid "$pid" -project s3 -out "$dir/trace" -duration 10m \
+        "$tracer" run -pid "$pid" -project s3 "${sink[@]}" -duration 10m \
         -ready "$dir/ready" "${tracer_flags[@]}" "${spool[@]}" 2>"$dir/tracer.err" &
     tpid=$!
     pids+=("$tpid")
@@ -241,7 +251,7 @@ tracer_start() {
     ready_cpu=$(cpu_ms "$ipid")
     if [ "$perf" = 1 ]; then
         # perf follows the tracer from here and exits with it.
-        sudo -n perf stat -x, -e instructions:u,instructions:k -p "$ipid" \
+        sudo -n perf stat -x, -e instructions:u,instructions:k,cycles:u,cycles:k -p "$ipid" \
             -o "$dir/perf" 2>/dev/null &
     fi
 }
@@ -255,15 +265,17 @@ tracer_wait() {
     # The tracer exited before its sudo and time parents did.
     forget "$ipid"
     tracer_total=$(awk '{printf "%d", ($1 + $2) * 1000}' "$dir/time")
-    insn_u=0 insn_k=0
+    insn_u=0 insn_k=0 cyc_u=0 cyc_k=0
     if [ "$perf" = 1 ]; then
         local -i i
         for ((i = 0; i < 100; i++)); do
-            grep -q 'instructions:k' "$dir/perf" 2>/dev/null && break
+            grep -q 'cycles:k' "$dir/perf" 2>/dev/null && break
             sleep 0.1
         done
         insn_u=$(awk -F, '/instructions:u/{print $1}' "$dir/perf" 2>/dev/null)
         insn_k=$(awk -F, '/instructions:k/{print $1}' "$dir/perf" 2>/dev/null)
+        cyc_u=$(awk -F, '/cycles:u/{print $1}' "$dir/perf" 2>/dev/null)
+        cyc_k=$(awk -F, '/cycles:k/{print $1}' "$dir/perf" 2>/dev/null)
     fi
 }
 
@@ -308,13 +320,21 @@ traced_line() {
     if [ "$agent" = 1 ] && [ "${attributed:-0}" = 0 ]; then
         echo "measure: agent on, but no event attributed: stale agent jar?" >&2
     fi
-    events=$(wc -l <"$work/trace/events.ndjson")
-    bytes=$(stat -c %s "$work/trace/events.ndjson")
+    if [ "$segment" = 1 ]; then
+        # bytes is then the published segments' size (zstd pages): not
+        # comparable with ndjson_bytes of an -out run.
+        events=$("$rowcount" "$work/td/s3")
+        bytes=$(cat "$work"/td/s3/ready/*.parquet | wc -c)
+    else
+        events=$(wc -l <"$work/trace/events.ndjson")
+        bytes=$(stat -c %s "$work/trace/events.ndjson")
+    fi
     echo "mode=traced threads=$t ops=$ops $tag elapsed_ns=$burst_elapsed" \
         "burst_cpu_ms=$burst_cpu tracer_cpu_ms=$tracer_total" \
         "tracer_run_cpu_ms=$((tracer_total - ready_cpu)) lost=$lost" \
         "kernel_lost=$kernel skipped_runs=$skipped events=$events ndjson_bytes=$bytes" \
         "attributed=${attributed:-0} insn_u=${insn_u:-0} insn_k=${insn_k:-0}" \
+        "cyc_u=${cyc_u:-0} cyc_k=${cyc_k:-0}" \
         "load=$(loadavg)" >>"$samples"
 }
 
@@ -436,6 +456,7 @@ summarize() {
             ns[t][++nn[t]] = f["tracer_run_cpu_ms"] * 1e6 / f["events"]
             tr[k] = f["elapsed_ns"]
             if (f["insn_u"] > 0) is[t][++ni[t]] = (f["insn_u"] + f["insn_k"]) / f["events"]
+            if (f["cyc_u"] > 0) cy[t][++nc[t]] = (f["cyc_u"] + f["cyc_k"]) / f["events"]
         }
         if (f["mode"] == "untraced") { ue[k] = f["elapsed_ns"]; uc[k] = f["burst_cpu_ms"] }
         if (f["mode"] == "bystander") {
@@ -458,6 +479,7 @@ summarize() {
             printf "threads=%s tracer_ns_per_event=%s (n=%d) slowdown=%s", \
                 t, median(ns[t], nn[t]), nn[t], median(sl[t], ns2[t])
             if (ni[t] > 0) printf " tracer_insn_per_event=%s", median(is[t], ni[t])
+            if (nc[t] > 0) printf " tracer_cycles_per_event=%s", median(cy[t], nc[t])
             printf " bystander_cpu=%s bystander_wall=%s (pairs=%d load=%s-%s)\n", \
                 median(bc[t], nb[t]), median(be[t], nb[t]), nb[t], lo[t], hi[t]
         }
@@ -479,7 +501,8 @@ header() {
         echo "# java $(java -version 2>&1 | head -1); workdir fs $(df -T "${TMPDIR:-/tmp}" | awk 'NR==2{print $2}')"
         echo "# ops=$ops threads=$threads runs=$runs pairs=$pairs modes=$modes" \
             "kind_ops=$kind_ops tracer_cpu=$tracer_cpu load_cpus=$load_cpus" \
-            "tracer_flags=${tracer_flags[*]} agent=$agent perf=$perf tracer=$tracer"
+            "tracer_flags=${tracer_flags[*]} agent=$agent perf=$perf segment=$segment" \
+            "tracer=$tracer"
     } >>"$samples"
 }
 
@@ -512,6 +535,13 @@ run_bystander() {
 
 main() {
     [ -x "$tracer" ] && [ -f "$jar" ] || die "run 'mage build workloadBuild' first"
+    if [ "$segment" = 1 ]; then
+        # Built once per measurement into a dir of its own (gone with it).
+        newdir
+        rowcount=$work/rowcount
+        (cd "$repo" && go build -o "$rowcount" spikes/s3/rowcount.go) ||
+            die "cannot build rowcount.go"
+    fi
     header
     local m
     for m in $modes; do

@@ -1058,9 +1058,19 @@ type and segment, through the `parquet:` tags in
   the same records the NDJSON reader does: an absent list and
   an empty one are the same record.
 - **Pages**: zstd-compressed inside the file (decision #16;
-  never a whole-file `.zst`), 256 KiB pages, 8192 rows per row
-  group, page statistics on — each file is directly queryable
-  (DuckDB, pandas, `parquet-tools`).
+  never a whole-file `.zst`), 8192 rows per row group — each file
+  is directly queryable (DuckDB, pandas, `parquet-tools`). The
+  tables are written by `parquet-go` (256 KiB pages, page
+  statistics on). The events file has the tracer's own columnar
+  encoder (task ee4, decision #25's CPU item): one data page v2
+  per column chunk (a dictionary page before it for the
+  dictionary columns), `seq`, `boot_ns`, `wall_ns` and
+  `latency_ns` `DELTA_BINARY_PACKED`, the other values PLAIN; its
+  page and chunk statistics carry null counts only, and it has no
+  column or offset index — a reader filtering pages by min/max
+  reads the whole chunk instead. Its footer schema is the one
+  `parquet-go` derives from `schema.Event`, so both kinds of
+  file read back the same way.
 - **Files**: in `<trace-dir>/<project>/ready/`, per segment
   `<fqdn>-<session>-<start-ts>-<seq>.parquet` (events) and
   `<same base>.methods.parquet`, `.threads`, `.classes`,

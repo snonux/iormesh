@@ -9,7 +9,7 @@ import (
 	parquetgo "github.com/parquet-go/parquet-go"
 )
 
-// Row-group and page layout of every segment file, ior's defaults
+// Row-group and page layout of the segment files, ior's defaults
 // (internal/parquet/writer.go): 8192 rows per row group keeps the
 // in-memory buffer of an open row group small, and 256 KiB pages match
 // the zstd window (zstdcodec.go).
@@ -18,9 +18,13 @@ const (
 	pageBufferSize     = 256 * 1024
 )
 
-// stream is one open parquet file of a segment: the events or one of the
-// tables. It is written under its active name in the project directory
-// and published by a rename into ready/ on the same filesystem.
+// stream is one open parquet file of a segment's tables, written with
+// parquet-go's GenericWriter: their rows are rare (a method, thread,
+// class or stack seen for the first time), so its per-row reflection
+// does not matter there. The events file, written per event, has its own
+// encoder (eventStream). Both are written under their active names in
+// the project directory and published by a rename into ready/ on the
+// same filesystem.
 type stream[T any] struct {
 	path string
 	f    *os.File

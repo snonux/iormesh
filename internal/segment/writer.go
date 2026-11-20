@@ -21,11 +21,6 @@ const (
 	DefaultCheckEvery = 5 * time.Second
 )
 
-// eventBatch is how many events Writer collects before handing them to
-// the parquet library in one Write: its per-call overhead (schema lookup,
-// row-group bookkeeping) is paid once per batch instead of per event.
-const eventBatch = 256
-
 // Config describes a Writer. Dir, FQDN, Session and Project are
 // required; zero durations and sizes take the defaults.
 type Config struct {
@@ -81,8 +76,8 @@ type Writer struct {
 	start     time.Time // the active segment was opened; names it
 	rotateAt  time.Time
 	nextCheck time.Time
-	events    *stream[schema.Event]
-	batch     []schema.Event
+	events    *eventStream
+	footer    *footerTemplate // every events file's schema footer, built once
 	methods   table[schema.Method]
 	threads   table[schema.Thread]
 	classes   table[schema.Class]
@@ -126,7 +121,11 @@ func New(cfg Config) (*Writer, error) {
 	if err := sweepActive(cfg.Dir); err != nil {
 		return nil, errors.Join(err, lock.Close())
 	}
-	w := &Writer{cfg: cfg, lock: lock, codec: newZstdCodec(), batch: make([]schema.Event, 0, eventBatch),
+	footer, err := newFooterTemplate()
+	if err != nil {
+		return nil, errors.Join(err, lock.Close())
+	}
+	w := &Writer{cfg: cfg, lock: lock, codec: newZstdCodec(), footer: footer,
 		methods: table[schema.Method]{name: TableMethods},
 		threads: table[schema.Thread]{name: TableThreads},
 		classes: table[schema.Class]{name: TableClasses},
@@ -140,9 +139,10 @@ func New(cfg Config) (*Writer, error) {
 }
 
 // Event implements schema.Sink. The event is validated (readers are
-// strict; a writer must not produce what they reject) and copied into
-// the batch: a shallow copy, as the Java join's queue keeps, since the
-// Sink contract only lets the caller reuse the Event itself.
+// strict; a writer must not produce what they reject) and encoded into
+// the open row group's columns at once (eventStream), which copies what
+// it keeps: the Sink contract lets the caller reuse the Event and
+// everything it points to after the call.
 func (w *Writer) Event(ev *schema.Event) error {
 	if err := ev.Validate(); err != nil {
 		return fmt.Errorf("segment: event seq %d: %w", ev.Seq, err)
@@ -152,11 +152,10 @@ func (w *Writer) Event(ev *schema.Event) error {
 	if err := w.usable(); err != nil {
 		return err
 	}
-	w.batch = append(w.batch, *ev)
-	if len(w.batch) < eventBatch {
-		return nil
+	if err := w.events.add(ev); err != nil {
+		return w.fail(err)
 	}
-	return w.flushBatch()
+	return nil
 }
 
 // Method adds a Java method row to the active segment's methods table,
