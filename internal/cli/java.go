@@ -198,10 +198,11 @@ func (o *javaOutput) summary() string {
 	}
 	s := o.join.Stats()
 	return fmt.Sprintf(", java rings %d (skipped %d, corrupt %d, unmarked JVMs %d), brackets %d, "+
-		"attributed %d (carrier %d; none: unmarked %d, other native %d, unbracketed %d, "+
+		"attributed %d (carrier %d; none: unmarked %d, other native %d, unbracketed %d "+
+		"(stale %d), "+
 		"other kind %d, ambiguous %d, no stack %d), released by timeout %d, http %d "+
 		"(no connection %d), dns %d, agent lost %d",
 		s.Rings, o.skipped, s.Corrupt, s.MarkFailed, s.Brackets, s.Attributed, s.Carrier,
-		s.Unmarked, s.OtherNative, s.Unbracketed, s.OtherKind, s.Ambiguous, s.NoStack,
+		s.Unmarked, s.OtherNative, s.Unbracketed, s.Stale, s.OtherKind, s.Ambiguous, s.NoStack,
 		s.TimedOut, s.HTTP, s.HTTPNoConn, s.DNS, s.Lost.Total())
 }

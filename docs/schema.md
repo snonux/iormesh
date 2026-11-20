@@ -595,8 +595,13 @@ once. At the end of the trace everything is decided with what has
 been read. The summary line counts the rings (and the JVMs whose
 natives could not be probed), brackets, joined events (and
 carrier ones), why a JVM's other events stayed `none` (unmarked,
-other native, unbracketed, other kind, ambiguous, no stack), the events released by the timeout rather than a
-watermark, and the agents' own loss counters. A suspend between
+other native, unbracketed — of which stale: a containing bracket
+closed before the syscall started on the converted clock — other
+kind, ambiguous, no stack), the events released by the timeout
+rather than a watermark, and the agents' own loss counters. The
+boot − monotonic offset is the narrowest of eight user-space clock
+triples per poll, so a triple preempted between its reads cannot
+skew it (task se4). A suspend between
 a syscall and its join shifts the boot − monotonic offset by the
 time suspended; held events are then converted with the new
 offset and most likely stay `none` (not handled specially).

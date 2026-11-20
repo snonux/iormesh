@@ -87,8 +87,11 @@ func (j *JavaJoin) bracketOf(ev *schema.Event, v *jvm, mark NativeMark) (agentsp
 	b, found, ambiguous := v.innermost(int32(ev.TID), mark.EntryMono)
 	hook := v.hooks[b.Hook]
 	switch {
-	case !found || j.mono(ev.BootNS) > b.ExitMono:
+	case !found:
 		j.stats.Unbracketed++
+	case j.mono(ev.BootNS) > b.ExitMono:
+		j.stats.Unbracketed++
+		j.stats.Stale++
 	case ambiguous || v.mayHaveParked(b, hook):
 		j.stats.Ambiguous++
 	case mark.Cookie == 0 || mark.Cookie != hook.cookie:
@@ -197,23 +200,52 @@ func (j *JavaJoin) method(frame string, cid uint64) (uint64, error) {
 	return m.MethodID, nil
 }
 
+// offsetSamples is how many clock triples MonoOffset takes per call.
+const offsetSamples = 8
+
 // MonoOffset samples boot − monotonic time in user space: a monotonic
 // read, a boot read, a monotonic read, taking the boot read against the
 // midpoint of the two others (S1 experiment 2: within 16–41 ns of an
 // in-kernel stamp; the two clocks differ by time spent suspended, so the
-// offset is constant between suspends).
+// offset is constant between suspends). It keeps the narrowest of
+// offsetSamples triples: a triple's error is at most half its window, and
+// one preempted between its reads on a loaded host is off by
+// milliseconds, which made bracketOf's stale-mark check (a native's last
+// syscall starts ~100 ns before its bracket closes) judge whole batches
+// of joined events unbracketed (task se4).
 func MonoOffset() (int64, error) {
-	var m1, b, m2 unix.Timespec
-	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &m1); err != nil {
-		return 0, err
+	return bestOffset(offsetSamples, clockTriple)
+}
+
+// clockTriple reads monotonic, boot, monotonic time in nanoseconds.
+func clockTriple() (m1, b, m2 int64, err error) {
+	var t1, tb, t2 unix.Timespec
+	if err = unix.ClockGettime(unix.CLOCK_MONOTONIC, &t1); err != nil {
+		return 0, 0, 0, err
 	}
-	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &b); err != nil {
-		return 0, err
+	if err = unix.ClockGettime(unix.CLOCK_BOOTTIME, &tb); err != nil {
+		return 0, 0, 0, err
 	}
-	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &m2); err != nil {
-		return 0, err
+	if err = unix.ClockGettime(unix.CLOCK_MONOTONIC, &t2); err != nil {
+		return 0, 0, 0, err
 	}
-	return b.Nano() - (m1.Nano()+m2.Nano())/2, nil
+	return t1.Nano(), tb.Nano(), t2.Nano(), nil
+}
+
+// bestOffset takes n triples from read and returns the offset of the one
+// whose two monotonic reads are closest together.
+func bestOffset(n int, read func() (m1, b, m2 int64, err error)) (int64, error) {
+	var best, window int64 = 0, -1
+	for range n {
+		m1, b, m2, err := read()
+		if err != nil {
+			return 0, err
+		}
+		if w := m2 - m1; window < 0 || w < window {
+			best, window = b-(m1+m2)/2, w
+		}
+	}
+	return best, nil
 }
 
 // addLosses sums two rings' loss counters.

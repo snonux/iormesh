@@ -157,9 +157,14 @@ type JavaStats struct {
 	Unmarked    uint64 // issued outside every hooked native: JVM work
 	OtherNative uint64 // issued from a native the bracket's hook does not reach
 	Unbracketed uint64 // no bracket contains the native's entry
-	OtherKind   uint64 // inside a bracket whose hook does not issue this kind
-	Ambiguous   uint64 // overlapping brackets, or a folded read/write
-	NoStack     uint64 // the bracket's stack was not delivered (or not walked)
+	// Stale counts, of Unbracketed, the events whose containing bracket
+	// was found but closed before the syscall started on the converted
+	// clock: a stale mark — or a clock offset off by more than the ~100 ns
+	// between a native's last syscall and its bracket's close (task se4).
+	Stale     uint64
+	OtherKind uint64 // inside a bracket whose hook does not issue this kind
+	Ambiguous uint64 // overlapping brackets, or a folded read/write
+	NoStack   uint64 // the bracket's stack was not delivered (or not walked)
 	// TimedOut counts events released by Timeout before the watermark
 	// passed, joined or not (they are also counted above).
 	TimedOut uint64

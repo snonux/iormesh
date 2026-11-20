@@ -303,7 +303,7 @@ func jvmWorkCases() map[string]noneCase {
 			// after that entry.
 			return []agentspool.Record{jt.bracket(4, mainTID, at-30, at-5, 10, 1),
 				jt.bracket(4, mainTID, at-2, at+500, 10, 1)}
-		}, func(s JavaStats) uint64 { return s.Unbracketed }},
+		}, func(s JavaStats) uint64 { return s.Stale }},
 	}
 }
 
