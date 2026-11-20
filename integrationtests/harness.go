@@ -19,7 +19,10 @@ package integrationtests
 // may also live-load the agent into JVMs started without it
 // (Harness.AttachAgent, task ge4): by the tracer at start (-agent) or by
 // `iormesh attach` from a Midway step between the workloads' release and
-// their exit, on a chosen JDK (Harness.Java) and user (Credential).
+// their exit, on a chosen JDK (Harness.Java) and user (Credential). The
+// java command line (workloadCmd) and a tracer's wait-and-read
+// (finishRun) are shared with the emulated hosts of multihost.go (M4,
+// task kb4), where each host runs its own tracer.
 
 import (
 	"errors"
@@ -202,6 +205,17 @@ func (h *Harness) StartHeldHelper(binary, role string, args ...string) (*Workloa
 
 // startWorkload starts a workload; an empty dir passes no --dir.
 func (h *Harness) startWorkload(dir, scenario string, args []string) (*Workload, error) {
+	cmd, err := h.workloadCmd(dir, scenario, args)
+	if err != nil {
+		return nil, err
+	}
+	return h.startGated(scenario, cmd, false)
+}
+
+// workloadCmd is the java command line of a workload, with the agent, the
+// JVM flags and the user the harness asks for; an empty dir passes no
+// --dir. It creates the agent's spool first: the agent never does.
+func (h *Harness) workloadCmd(dir, scenario string, args []string) (*exec.Cmd, error) {
 	argv := append(slices.Clone(h.JVMFlags), "-jar", h.WorkloadJar, scenario)
 	argv = append(argv, args...)
 	if h.JavaAgent != "" {
@@ -222,7 +236,7 @@ func (h *Harness) startWorkload(dir, scenario string, args []string) (*Workload,
 		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: h.Credential}
 		cmd.Dir = h.Tmp // the test's own working directory may be closed to that user
 	}
-	return h.startGated(scenario, cmd, false)
+	return cmd, nil
 }
 
 // startGated starts cmd behind a fresh startup gate and returns once it
@@ -282,16 +296,7 @@ func (h *Harness) Trace(ws ...*Workload) (Run, error) {
 			return run, err
 		}
 	}
-	waitErr := tracer.wait(runTimeout)
-	run.Logged = tracer.stderr.String()
-	if waitErr != nil {
-		return run, waitErr
-	}
-	if run.Loss, err = ParseKernelLoss(run.Logged); err != nil {
-		return run, err
-	}
-	run.Trace, err = ReadTrace(run.Dir)
-	return run, err
+	return run, finishRun(tracer, &run)
 }
 
 // skipped turns a workload's exit with the skip code into

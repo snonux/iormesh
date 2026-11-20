@@ -1,0 +1,30 @@
+{"scenario": "tcp-two-host",
+ "schema_version": 1,
+ "events": [
+   {"process": "$p1", "thread": "$t1", "event": "openat",
+    "args": {"path": "$tmp/tcp-two-host-client.dat", "flags": 577},
+    "fd": "$fd1"},
+   {"process": "$p1", "thread": "$t1", "event": "write",
+    "fd": "$fd1", "bytes": 4096},
+   {"process": "$p1", "thread": "$t1", "event": "close", "fd": "$fd1"},
+   {"process": "$p1", "thread": "$t1", "event": "openat",
+    "args": {"path": "$tmp/tcp-two-host-client.dat", "flags": 0}, "fd": "$fd2"},
+   {"process": "$p1", "thread": "$t1", "event": "read",
+    "fd": "$fd2", "bytes": 4096},
+   {"process": "$p1", "thread": "$t1", "event": "close", "fd": "$fd2"},
+   {"process": "$p1", "thread": "$t1", "event": "unlink",
+    "args": {"path": "$tmp/tcp-two-host-client.dat"}},
+   {"process": "$p1", "thread": "$t1", "event": "connect",
+    "args": {"local_addr": "10.231.0.1", "local_port": "$port1",
+             "remote_addr": "10.231.0.2", "remote_port": 80},
+    "fd": "$fd3", "conn_id": "$c1"},
+   {"process": "$p1", "thread": "$t1", "event": "write", "fd": "$fd3", "bytes": 5},
+   {"process": "$p1", "thread": "$t1", "event": "read", "fd": "$fd3", "bytes": 5},
+   {"process": "$p1", "thread": "$t1", "event": "close", "fd": "$fd3"}
+ ],
+ "edges": [
+   {"type": "runs_on", "from": "$p1", "to": "host:$h1"},
+   {"type": "opened", "from": "$p1", "to": "file:$h1:$tmp/tcp-two-host-client.dat"},
+   {"type": "connected", "from": "$p1", "to": "conn:$c1", "state": "unresolved"}
+ ],
+ "must_not_appear": []}

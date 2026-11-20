@@ -17,6 +17,7 @@ import iormesh.workload.scenarios.Restart;
 import iormesh.workload.scenarios.Signals;
 import iormesh.workload.scenarios.SyscallBurst;
 import iormesh.workload.scenarios.TcpFamily;
+import iormesh.workload.scenarios.TcpHosts;
 import iormesh.workload.scenarios.TcpLoopback;
 import iormesh.workload.scenarios.UdpLoopback;
 import iormesh.workload.scenarios.UnixSocket;
@@ -62,6 +63,8 @@ final class Registry {
         r.add(new SyscallBurst());
         r.add(TcpFamily.ipv4());
         r.add(TcpFamily.ipv6());
+        r.add(TcpHosts.nat());
+        r.add(TcpHosts.twoHost());
         r.add(new TcpLoopback());
         r.add(new UdpLoopback());
         r.add(new UnixSocket());

@@ -203,6 +203,19 @@ func (r *Ref) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON writes r as a golden declares it — a symbol as a string, a
+// literal as a number — so an expectation round-trips, and two declared
+// events compare by their JSON (the multi-host goldens' sync test).
+func (r Ref) MarshalJSON() ([]byte, error) {
+	switch {
+	case r.symbol():
+		return json.Marshal(r.v)
+	case r.v == "": // the zero Ref, which no golden can declare
+		return []byte("null"), nil
+	}
+	return []byte(r.v), nil
+}
+
 // String returns the symbol or the literal.
 func (r Ref) String() string { return r.v }
 

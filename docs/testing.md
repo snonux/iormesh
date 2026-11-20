@@ -358,6 +358,68 @@ normalize -check as root, 5214 events): the one correction was the
 services' mkdir and rmdir, which stay attribution none because no
 agent hook issues them.
 
+### M4 two-host and NAT'ed pairs (task kb4)
+
+`tcp-two-host` and `tcp-nat` (PLAN.md scenario notes, "Two-host
+scenarios") are one Java scenario (`TcpHosts`) under two names:
+M0's client and server with explicit IPv4 literals, the server
+`--bind`ing an address and the client dialing `--host`. Only the
+network between the hosts differs, so only the goldens do. Each
+scenario has a golden per host and a merged one:
+
+| Golden | What it declares |
+|---|---|
+| `expect-client.json` | the client host's trace: file work, connect, 5 bytes each way, close; its end `unresolved`, on `$h1` |
+| `expect-server.json` | the server host's trace: file work, bind, accept, read 5, write 5, read EOF, close; its end `unresolved` |
+| `expect.json` | the merged mesh: both processes, `runs_on` two distinct hosts (`$h1`, `$h2`), one connection `fused`, both ends' events on it |
+
+The integration rig (`integrationtests/multihost.go`,
+`multihost_test.go`) emulates the hosts on one machine:
+
+```
+client host 10.231.0.1 --veth-- 10.231.0.2 server host
+                                172.31.0.1 --veth-- 172.31.0.2 container
+```
+
+Three network namespaces, every interface created inside its
+own. Each host's tracer runs under `unshare --mount --uts` with
+a fresh `/etc/machine-id` bind-mounted over the real one, so it
+stamps its own host id, as a second host would; the workloads
+and tracers enter the host's network namespace with `nsenter`
+(`ip netns exec` would remount `/sys` and lose tracefs). The NAT
+is what `docker run -p 880:80` installs: a DNAT rule in the
+server host's prerouting chain from 10.231.0.2:880 to the
+container's 172.31.0.2:80. In `tcp-two-host` the server runs on
+the server host itself at 10.231.0.2:80. The goldens declare
+these addresses and the literal ports 80 and 880 (the
+normalizer keeps ports below 1024), so the NAT'ed client must
+show 10.231.0.2:880 and its server 172.31.0.2:80.
+
+`mage workloadTest` runs both scenarios' roles on loopback
+with explicit addresses, and their usage errors (exit 2: a
+role without its address option, the other role's option, a
+name or a malformed or IPv6 address, client port 0) and run
+failures (exit 1: nobody listening, a `--bind` address the host
+lacks, a missing `--dir`). `TestMeshGoldensAgree`
+(`internal/normalize`) keeps the three goldens in step: the
+merged one declares exactly each host's events and edges, the
+connection fused instead of unresolved.
+
+| Test | What it checks |
+|---|---|
+| `TestTwoHostsTwoProjects` | `tcp-two-host` on the rig, the two hosts traced as projects `shop` and `billing`: each host's trace satisfies its golden and holds only its own process, the two host ids differ, and a golden naming the other end's address is caught. Subtest `merged`: `federate.Merge` of the two traces fuses exactly one cross-project connection with nothing unresolved, whose ends saw one 4-tuple, mirrored; the merged trace (events renamed to the merged conn id) satisfies `expect.json`, which fails with both ends on one host or on two connections; the client's trace merged alone stays `no_match` |
+| `TestNATPair` | the same for `tcp-nat`, the server in the container: the fused connection's client end saw 10.231.0.2:880 and its server end 172.31.0.2:80 |
+
+Both were run as root: the per-host goldens pass on real
+traces. The `merged` subtests skip, with that reason, until the
+tracer records the four `tcp_sock` fields on `tcp_state` (task
+ve4): without them no end has a key and the merge rightly fuses
+nothing. The skip fails `mage integrationTest`'s gate, so the
+gap shows. A run with a real docker daemon (the rig's DNAT rule
+is docker's) and on two real hosts is still the owner's; the
+injected clock skew of PLAN.md's M4 acceptance needs the
+tracer's test-only offset flag, not yet built.
+
 ## Performance baselines
 
 S3 (PLAN.md, decision #25) measures overhead against a load the

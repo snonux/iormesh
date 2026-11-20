@@ -16,7 +16,9 @@ const maxSingleRun = 4
 // past the threshold may be folded when they come fast, so such a golden
 // would pass or fail by timing.
 func TestGoldensDeclareFoldableRunsShort(t *testing.T) {
-	paths, err := filepath.Glob(filepath.Join("..", "..", "workload", "scenarios", "*", "expect.json"))
+	// expect*.json: a multi-host scenario (task kb4) has one golden per
+	// host besides its merged expect.json, and each must hold the rule.
+	paths, err := filepath.Glob(filepath.Join("..", "..", "workload", "scenarios", "*", "expect*.json"))
 	if err != nil || len(paths) == 0 {
 		t.Fatalf("no goldens found: %v", err)
 	}

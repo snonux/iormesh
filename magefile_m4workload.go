@@ -4,7 +4,10 @@
 // four services run as four processes the way a harness runs them —
 // leaves first, each released only after the one before announced its
 // port — and each role's malformed and failing invocations exit with the
-// right code, a broken hop included.
+// right code, a broken hop included. Also the cross-host pairs
+// tcp-two-host and tcp-nat (task kb4): both roles with explicit
+// addresses on loopback, and their usage errors and run failures — the
+// second host and the NAT hop are the integration tests' rig.
 package main
 
 import (
@@ -65,7 +68,86 @@ func checkM4Scenarios() error {
 	if err := foreignDirSurvivesRun("billing", "microservices", "--role", "billing"); err != nil {
 		return err
 	}
-	return checkBrokenHop()
+	if err := checkBrokenHop(); err != nil {
+		return err
+	}
+	return checkTCPHosts()
+}
+
+// tcpHostsScenarios are M4's cross-host pairs (task kb4), one Java
+// scenario under two names: the network between the hosts is the
+// harness's, so on one host both run the same.
+var tcpHostsScenarios = []string{"tcp-two-host", "tcp-nat"}
+
+// tcpHostsUsageErrors are malformed invocations of a cross-host pair
+// (exit 2, before any I/O): each role needs its own address option and
+// only that, and an address is an IPv4 literal — a name would be resolved
+// inside the bracket.
+var tcpHostsUsageErrors = [][]string{
+	{"--role", "solo"},
+	{"--role", "server"},
+	{"--role", "server", "--host", "127.0.0.1"},
+	{"--role", "server", "--bind", "127.0.0.1", "--host", "127.0.0.1"},
+	{"--role", "server", "--bind", "127.0.0.1", "--port", "70000"},
+	{"--role", "client", "--port", "1"},
+	{"--role", "client", "--host", "127.0.0.1"},
+	{"--role", "client", "--host", "127.0.0.1", "--port", "0"},
+	{"--role", "client", "--bind", "127.0.0.1", "--port", "1"},
+	{"--role", "client", "--host", "localhost", "--port", "1"},
+	{"--role", "client", "--host", "127.0.0.256", "--port", "1"},
+	{"--role", "client", "--host", "127.0.0", "--port", "1"},
+	{"--role", "client", "--host", "127.0.0.1.", "--port", "1"},
+	{"--role", "client", "--host", "::1", "--port", "1"},
+	{"--role", "client", "--host", "+1.0.0.1", "--port", "1"},
+}
+
+// checkTCPHosts runs each cross-host pair's two roles on loopback with
+// explicit addresses (the server binds --bind, the client dials --host),
+// then its usage errors and run-time failures.
+func checkTCPHosts() error {
+	for _, scenario := range tcpHostsScenarios {
+		err := checkTwoRoles(scenario, []string{"--bind", "127.0.0.1"}, func(addr string) []string {
+			if opts := portClient(addr); opts != nil {
+				return append(opts, "--host", "127.0.0.1")
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		for _, args := range tcpHostsUsageErrors {
+			if err := expectExit(2, append([]string{scenario}, args...)...); err != nil {
+				return err
+			}
+		}
+		if err := checkTCPHostsRunFailures(scenario); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkTCPHostsRunFailures: well-formed runs that fail at run time exit
+// 1 — a client nobody answers, a server told to bind an address this
+// host does not have (192.0.2.1, TEST-NET-1: a rig whose namespace is
+// missing fails like this rather than binding elsewhere), and a --dir
+// that does not exist.
+func checkTCPHostsRunFailures(scenario string) error {
+	port, err := closedPort()
+	if err != nil {
+		return err
+	}
+	failing := [][]string{
+		{scenario, "--role", "client", "--host", "127.0.0.1", "--port", fmt.Sprint(port)},
+		{scenario, "--role", "server", "--bind", "192.0.2.1"},
+		{scenario, "--role", "server", "--bind", "127.0.0.1", "--dir", "/nonexistent/iormesh-workload"},
+	}
+	for _, args := range failing {
+		if err := expectExit(1, args...); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // checkMicroservices runs the whole topology in one shared --dir and

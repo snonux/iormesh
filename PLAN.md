@@ -271,7 +271,7 @@ Scenario catalogue, by the milestone it lands with:
 | S3 | Syscall load: tight 1-byte read/write loops, N ops over T threads — `syscall-burst` |
 | M2 | Full file surface — `file-lifecycle` (create/delete, rename while open, move, truncate, touch), `file-links` (symlink/readlink/lstat, hardlink), `file-attrs` (chmod/chown by path and fd, xattr); fd lifecycle (dup, inheritance across fork/exec, reuse) — `fd-lifecycle` (these four landed ahead of the M2 tracer work); local IPC — `pipe-ipc` (pipe, child stdio pipes), `unix-socket`; signals — `signals`; UDP — `udp-loopback`; IPv4 + IPv6 — `tcp-ipv4`, `tcp-ipv6` (these six landed ahead too); restart — `restart`; non-Java peer — `non-java-peer` (these two landed ahead too); argv redaction — `argv-secret` |
 | M3 | Method flows (deep stacks, async I/O) — `method-flow`; HTTP plain + TLS — `http-plain`, `http-tls`; async client — `http-async` (task wd4); redaction — `http-redaction` (these four landed ahead of the agent, their Java parts pending until tasks 2b4 and 3b4, see below); OTEL flavor — `otel` (landed ahead too, in its own module; its ids pending until task 4b4); third-party HTTP libraries — `http-servlet`, `http-apache`, `http-okhttp`, `http-netty` (task de4, in their own module) |
-| M4 | Client and server on two hosts as two projects; microservices topology, one service per host — `microservices` (task jb4, landed ahead on loopback; the cross-host run comes with M4's multi-host test); NAT'ed pair |
+| M4 | Client and server on two hosts as two projects — `tcp-two-host`; microservices topology, one service per host — `microservices` (task jb4, landed ahead on loopback; the cross-host run comes with M4's multi-host test); NAT'ed pair — `tcp-nat` (these two task kb4) |
 | M5 | (renders M4's microservices scenario) |
 | M6 | Microservices topology with only the gateway enrolled |
 | M7 | The same scenarios as pods in kind; ClusterIP; ingress |
@@ -396,6 +396,21 @@ Scenario notes:
 - **NAT'ed pair** (M4): client and server with a DNAT hop
   between them (docker port-mapped), so the two ends observe
   different 4-tuples.
+- **Two-host scenarios** (M4, task kb4): `tcp-two-host` and
+  `tcp-nat` are M0's client and server (file work, then one
+  TCP connection) with explicit IPv4 addresses, each end on its
+  own host and traced by that host's tracer as its own project.
+  Each scenario has three goldens: one per host
+  (`expect-client.json`, `expect-server.json` — that host's
+  process, its end of the connection unresolved, since no host
+  alone sees the far end) and the merged `expect.json` (both
+  processes on two distinct hosts, the connection fused). The
+  integration rig emulates the hosts on one machine as network
+  namespaces, each tracer with a machine id of its own; the NAT
+  is docker's `-p 880:80` as an nft DNAT rule on the server's
+  host, the server in a container namespace, so the client
+  dials 10.231.0.2:880 and the server accepts on
+  172.31.0.2:80. The goldens declare the rig's addresses.
 - **Ingress scenario** (M7): gateway → Traefik → backend
   service in kind (the microservices scenario's front door),
   with the route map declared alongside the expected graph.

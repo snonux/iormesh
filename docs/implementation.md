@@ -3573,6 +3573,21 @@ across hosts, since each caller pins its callee's from the
 shared `--dir`. The golden then gains one `$h` per host.
 Testing notes: [testing.md](testing.md#m4-microservices-scenario-task-jb4).
 
+### The two-host and NAT'ed pairs
+
+`tcp-two-host` and `tcp-nat` (task kb4) are `TcpHosts`, M0's
+client and server with `--bind`/`--host` IPv4 literals. The rig
+the microservices run will reuse is built:
+`integrationtests/multihost.go` adds `Host`,
+`Harness.StartWorkloadIn` (a workload in a host's network
+namespace) and `Harness.TraceHosts` (one tracer per host, each
+with its own machine id, all attached before the workloads are
+released across hosts in order); `multihost_test.go` builds the
+three namespaces and the docker-style DNAT and merges the host
+traces with `federate.Merge`, renaming each event's conn id by
+`Result.Renames` before the merged golden check.
+Testing notes: [testing.md](testing.md#m4-two-host-and-nated-pairs-task-kb4).
+
 **Done when**: PLAN.md's M4 acceptance holds, driven by
 `integrationtests/multihost_test.go` on two network namespaces
 plus one run on two real hosts.

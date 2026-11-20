@@ -195,7 +195,14 @@ func judge[T judgeable](t *testing.T, attempt func() (T, error)) T {
 // expectation loads a scenario's golden.
 func expectation(t *testing.T, scenario string) normalize.Expectation {
 	t.Helper()
-	want, err := normalize.LoadExpectation(filepath.Join(scenariosDir, scenario, "expect.json"))
+	return expectationFile(t, scenario, "expect.json")
+}
+
+// expectationFile loads one golden file of a scenario: a multi-host
+// scenario has one per host besides its merged expect.json (task kb4).
+func expectationFile(t *testing.T, scenario, file string) normalize.Expectation {
+	t.Helper()
+	want, err := normalize.LoadExpectation(filepath.Join(scenariosDir, scenario, file))
 	if err != nil {
 		t.Fatalf("load expectation: %v", err)
 	}
