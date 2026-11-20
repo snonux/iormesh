@@ -48,51 +48,6 @@ func addCommand(args []string, e env) error {
 	}, fmt.Sprintf("added %s project %s", host, *name))
 }
 
-// rmCommand unregisters a host, or one project on it with -project, and
-// drops it from deploy's record. For now that is all: syncing the host's
-// traces off and uninstalling the tracer (PLAN.md M4 "Cleanup (rm)")
-// come with collect.
-func rmCommand(args []string, e env) error {
-	fs := newFlagSet("rm", e.stderr)
-	name := fs.String("project", "", "remove only this project (default: the whole host)")
-	path := fs.String("registry", "", "registry file (default ~/.config/iormesh/servers.yaml)")
-	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
-	}
-	if fs.NArg() != 1 {
-		return fmt.Errorf("%w: rm takes exactly one HOST", errUsage)
-	}
-	host := fs.Arg(0)
-	what := "removed " + host
-	if *name != "" {
-		what += " project " + *name
-	}
-	if err := editRegistry(*path, e, func(r *federate.Registry) error {
-		return r.Remove(host, *name)
-	}, what); err != nil {
-		return err
-	}
-	return forgetDeployed(e, host, *name)
-}
-
-// forgetDeployed drops what rm removed from deploy's record too, so a
-// host or project registered again later starts afresh. The file is
-// rewritten only when it held the entry.
-func forgetDeployed(e env, host, project string) error {
-	path, err := e.deployed()
-	if err != nil {
-		return err
-	}
-	r, err := loadDeployed(path)
-	if err != nil {
-		return err
-	}
-	if !r.forget(host, project) {
-		return nil
-	}
-	return r.save(path)
-}
-
 // editRegistry loads the registry, applies edit and saves it, then reports
 // done on stdout. A failed edit leaves the file untouched.
 func editRegistry(path string, e env, edit func(*federate.Registry) error, done string) error {

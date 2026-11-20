@@ -27,7 +27,13 @@ truth.
 - **A server controls trace contents, nothing else on the
   controller.** Collect copies with `rsync -rt`: remote modes
   and symlinks are not carried over, and the local trace
-  directory is forced to 0700.
+  directory is forced to 0700. Each host gets its own directory
+  (`~/.local/share/iormesh/traces/<project>/<host>/`), so one
+  server cannot overwrite another's segments by naming files
+  after it; project and host come from the registry, never from
+  the server, and the directories above are refused when
+  foreign-owned or writable by others. Collect needs no sudo:
+  `ready/` belongs to the deploying user.
 - **Host keys are verified, never trusted on first use.**
   iormeshctl runs the system `ssh`/`rsync` with
   `StrictHostKeyChecking=yes` and `BatchMode=yes`: an unknown or

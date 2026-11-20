@@ -3351,8 +3351,8 @@ iormeshctl rm app1.example.org                    # the whole host
   may not hold control characters. Unknown keys are an
   error, not dropped: M6 adds its `expand:` section (allowlist,
   `max_nodes`) to the schema rather than having `add` lose it.
-- `rm` edits the registry only, for now; the sync-then-uninstall
-  of PLAN.md "Cleanup (rm)" lands with `collect` (task eb4).
+- `rm` tears the deployment down before it edits the registry
+  (task eb4; see `rm` after `collect` below).
 
 `deploy`, as the commands it runs (all through one multiplexed
 SSH connection per host; built by task db4, `internal/ctl/deploy.go`):
@@ -3447,20 +3447,100 @@ ssh H sudo -n /opt/iormesh/bin/iormesh status -project shop
   or start-after-stop failing on a restart; `rm` pruning the
   record.
 
-`collect`, per host and project:
+`collect`, as the commands it runs (built by task eb4,
+`internal/ctl/collect.go`; no sudo anywhere):
 
 ```sh
-rsync -rt --remove-source-files \
+iormeshctl collect [-project P]... [-store DIR] [HOST...]
+
+ssh H true                                   # reachable? else H fails
+# per project:
+ssh H test -d /opt/iormesh/traces/shop/ready # never started: skipped
+rsync -rt --remove-source-files -e 'ssh …' -- \
     H:/opt/iormesh/traces/shop/ready/ \
-    ~/.local/share/iormesh/traces/shop/
+    ~/.local/share/iormesh/traces/shop/H/
 ```
+
+- No HOST collects the whole registry; `-project` repeats. A
+  host or project the registry lacks — or a named host that
+  carries none of the projects — fails before any host is
+  contacted. A host named twice is collected once.
+- Only `ready/` is fetched. The tracer writes the active
+  segment as `.active-*` at the project directory's top and
+  renames it into `ready/` whole and synced, tables before
+  events, so rsync only ever sees final files; and
+  `--remove-source-files` deletes a server file only after it
+  transferred. Collect keeps no state: run repeatedly during a
+  live session, each run moves what was published since the
+  last, and between runs the server holds only unsynced
+  segments plus the active one. `ready/` is the deploying
+  user's (`-ready-owner`), so reading and deleting there needs
+  no privilege.
+- Local layout, the build's input:
+  `<store>/<project>/<host>/<fqdn>-<session>-<start-ts>-<seq>[.<table>].parquet`,
+  store `~/.local/share/iormesh/traces`. One directory per
+  registry host, not one per project: segment names come from
+  the server, and a shared directory would let one host
+  overwrite another's. Project and host are checked again
+  (`project.Valid`, `federate.ValidHost`) before they become
+  path components. The store and project directories are
+  created 0700 and refused, not repaired, when foreign-owned
+  or writable by others (whoever can write them could swap a
+  host directory for a symlink); Fetch forces the host
+  directory to 0700. The build reads `*.parquet` and skips
+  dot files, rsync's in-flight temporaries.
+- Failures: an unreachable host or a failed transfer is
+  reported by host and project; the other projects and hosts
+  are still collected, and the command exits 1 naming the
+  failed hosts. A partial transfer loses nothing: what moved
+  is local, the rest stays in `ready/` for the next run.
+- Tests (`internal/ctl/collect_test.go`): exact call sequence
+  over the whole registry, identical on a second run;
+  `-project`/HOST selection and refusals with no call at all;
+  unreachable host, failed fetch and missing `ready/`; an
+  open store refused; and `TestCollectLiveSession`, real
+  rsync over a temp "server" with an active file at the
+  project top and published segments in `ready/` — two
+  collects around a rotation move exactly the published files,
+  never the active one, and leave `ready/` empty.
+
+`rm`, as the commands it runs (`internal/ctl/rm.go`, task eb4):
+
+```sh
+iormeshctl rm [-project P] [-store DIR] HOST
+
+ssh H true                               # unreachable: warn, unregister
+ssh H test -x /opt/iormesh/bin/iormesh   # absent: just unregister
+# per removed project:
+ssh H systemctl show --property=ActiveState --value -- iormesh-shop.service
+ssh H sudo -n /opt/iormesh/bin/iormesh stop -project shop   # if live
+# ... collect's test -d and rsync for the project ...
+ssh H sudo -n /opt/iormesh/bin/iormesh uninstall  # host leaves registry
+```
+
+- The stop comes before the sync so the last minute is
+  published and collected too. `uninstall` runs only when the
+  host leaves the registry (`rm HOST`, or its last project)
+  and removes the traces of projects the registry does not
+  list along with `/opt/iormesh` — rm only syncs what it can
+  name.
+- The registry and deploy's record change only after every
+  step succeeded; a failed stop, sync or uninstall exits 1
+  with the registry as it was and, before the uninstall,
+  nothing uninstalled. Rerunning rm is safe: a stopped session
+  is not live any more, and what synced is local.
+- Tests (`internal/ctl/rm_test.go`): exact sequences for
+  `rm HOST` with a live session, `rm -project` keeping the
+  host and removing its last project; a failed stop, sync or
+  uninstall leaving the registry unchanged; the unreachable
+  and the uninstalled host.
 
 Packages: `internal/federate/registry.go`, `transport.go` (the
 `Transport` interface of M7, coded against from M4 on), `ssh.go`
 (wraps the `ssh`/`rsync` binaries — no SSH library, the
-operator's `~/.ssh/config` must just work), `collect.go`,
-`merge.go`; the commands in `internal/ctl`, `cmd/iormeshctl` only
-dispatching.
+operator's `~/.ssh/config` must just work), `merge.go`; the
+commands in `internal/ctl` (`collect.go`, `rm.go`, which never
+call the merge), `cmd/iormeshctl` only dispatching.
 
 The SSH transport:
 

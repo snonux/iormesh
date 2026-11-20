@@ -1,20 +1,23 @@
 // Package ctl implements iormeshctl, the controller (PLAN.md M4):
 //
 //	iormeshctl add -project NAME (-pattern GLOB | -listen-port N) [-registry FILE] HOST [TRACER-FLAG...]
-//	iormeshctl rm [-project NAME] [-registry FILE] HOST
+//	iormeshctl rm [-project NAME] [-registry FILE] [-store DIR] HOST
+//	iormeshctl collect [-project NAME]... [-registry FILE] [-store DIR] [HOST...]
 //	iormeshctl deploy [-project NAME] [-registry FILE] [-dist DIR] [-key FILE] [-restart] HOST...
 //	iormeshctl services [list|edges|name|rules|unname] [-db FILE] ...
 //	iormeshctl verify [-key FILE] FILE...
 //	iormeshctl version
 //
-// add and rm manage the server registry (internal/federate, decisions #12
-// and #21); services reads the service-interaction database and edits
-// its naming rules (internal/servicedb, decision #24); verify checks
+// add manages the server registry (internal/federate, decisions #12 and
+// #21) and rm tears a host's deployment down before unregistering it
+// (rm.go); collect moves the servers' published trace segments into the
+// local store (collect.go); services reads the service-interaction
+// database and edits its naming rules (internal/servicedb, decision #24); verify checks
 // release binaries' minisign signatures against the pinned key
 // (internal/release, decision #28); deploy verifies the tracer build,
 // stages it on registered hosts over the Transport, upgrades the installed
 // tracer through the sudoers rule and starts the projects (deploy.go).
-// collect, build and refresh follow in later M4 tasks.
+// build and refresh follow in later M4 tasks.
 // It is cgo-free (internal/buildgate checks it), so it cross-compiles for
 // the darwin and linux laptops it runs on.
 package ctl
@@ -51,6 +54,8 @@ type env struct {
 	releaseKey func() (string, error)
 	// deployed is deploy's record of what it last started.
 	deployed func() (string, error)
+	// traces is the default local trace store; -store overrides it.
+	traces func() (string, error)
 	// transport reaches a host: SSH in production, a fake in tests, so
 	// no test contacts a server.
 	transport func(host string) (federate.Transport, error)
@@ -58,12 +63,12 @@ type env struct {
 
 // defaultEnv is the real environment: the registry at
 // federate.DefaultRegistryPath, the database at servicedb.DefaultPath, the
-// release key next to the registry, the deploy record next to the
-// database, and SSH to reach hosts.
+// release key next to the registry, the deploy record and the trace store
+// next to the database, and SSH to reach hosts.
 func defaultEnv(stdout, stderr io.Writer) env {
 	return env{stdout: stdout, stderr: stderr, registry: federate.DefaultRegistryPath,
 		servicedb: servicedb.DefaultPath, releaseKey: defaultKeyPath, deployed: defaultDeployedPath,
-		transport: sshTransport}
+		traces: defaultStorePath, transport: sshTransport}
 }
 
 // sshTransport is the production transport: federate.SSH (decision #12).
@@ -87,6 +92,8 @@ func run(args []string, e env) int {
 		err = addCommand(args[1:], e)
 	case "rm":
 		err = rmCommand(args[1:], e)
+	case "collect":
+		err = collectCommand(args[1:], e)
 	case "deploy":
 		err = deployCommand(args[1:], e)
 	case "services":
@@ -123,7 +130,8 @@ func report(err error, stderr io.Writer) int {
 func usage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `usage:
   iormeshctl add -project NAME (-pattern GLOB | -listen-port N) [-registry FILE] HOST [TRACER-FLAG...]
-  iormeshctl rm [-project NAME] [-registry FILE] HOST
+  iormeshctl rm [-project NAME] [-registry FILE] [-store DIR] HOST
+  iormeshctl collect [-project NAME]... [-registry FILE] [-store DIR] [HOST...]
   iormeshctl deploy [-project NAME] [-registry FILE] [-dist DIR] [-key FILE] [-restart] HOST...
   iormeshctl services [list] [-db FILE] [-project NAME] [-paths]
   iormeshctl services edges [-db FILE] [-project NAME] [-from NAME]
@@ -135,7 +143,10 @@ func usage(w io.Writer) {
 
 The registry defaults to ~/.config/iormesh/servers.yaml, the pinned
 release key to ~/.config/iormesh/minisign.pub, the service database to
-~/.local/share/iormesh/services.db, dist/ to ./dist. deploy only
-upgrades a tracer already installed on the host (PLAN.md decision #1).
+~/.local/share/iormesh/services.db, the trace store to
+~/.local/share/iormesh/traces (<project>/<host>/), dist/ to ./dist.
+deploy only upgrades a tracer already installed on the host (PLAN.md
+decision #1). collect without HOST collects every registered host; rm
+stops, syncs off and uninstalls before it unregisters.
 `)
 }

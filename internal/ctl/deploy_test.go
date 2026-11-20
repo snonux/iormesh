@@ -19,13 +19,15 @@ import (
 )
 
 // fakeTransport records every call as one argv-like []string,
-// {HOST, "run", ARGV...} or {HOST, "push", DIR, FILE...}, into a log
-// shared by all hosts, and answers Run through respond. No test here
-// reaches a host.
+// {HOST, "run", ARGV...}, {HOST, "push", DIR, FILE...} or
+// {HOST, "fetch", REMOTE, LOCAL}, into a log shared by all hosts, and
+// answers Run through respond and Fetch through fetch (nil: success). No
+// test here reaches a host.
 type fakeTransport struct {
 	host    string
 	log     *[][]string
 	respond func(host string, argv []string) ([]byte, error)
+	fetch   func(host, remote, local string) error
 }
 
 var _ federate.Transport = fakeTransport{}
@@ -35,8 +37,12 @@ func (f fakeTransport) Run(_ context.Context, argv ...string) ([]byte, error) {
 	return f.respond(f.host, argv)
 }
 
-func (f fakeTransport) Fetch(context.Context, string, string) error {
-	return errors.New("deploy must not fetch")
+func (f fakeTransport) Fetch(_ context.Context, remote, local string) error {
+	*f.log = append(*f.log, []string{f.host, "fetch", remote, local})
+	if f.fetch == nil {
+		return nil
+	}
+	return f.fetch(f.host, remote, local)
 }
 
 func (f fakeTransport) Push(_ context.Context, dir string, files ...string) error {
@@ -54,10 +60,14 @@ type deployFixture struct {
 	e                      env
 	stdout, stderr         *bytes.Buffer
 	dist, registry, record string
-	priv                   minisign.PrivateKey
-	log                    [][]string
+	// store is the local trace store collect and rm fill.
+	store string
+	priv  minisign.PrivateKey
+	log   [][]string
 	// answers overrides a Run's reply by "HOST ARGV..." prefix.
 	answers map[string]reply
+	// fetchErrs fails a Fetch by "HOST REMOTE".
+	fetchErrs map[string]error
 }
 
 type reply struct {
@@ -79,7 +89,8 @@ func newDeployFixture(t *testing.T) *deployFixture {
 	cfg := t.TempDir()
 	f := &deployFixture{stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, dist: t.TempDir(), priv: priv,
 		registry: filepath.Join(cfg, "servers.yaml"), answers: map[string]reply{},
-		record: filepath.Join(t.TempDir(), "share", deployedFileName)}
+		record: filepath.Join(t.TempDir(), "share", deployedFileName),
+		store:  filepath.Join(t.TempDir(), "traces"), fetchErrs: map[string]error{}}
 	keyPath := filepath.Join(cfg, keyFileName)
 	text, _ := pub.MarshalText()
 	writeFile(t, keyPath, text, 0o600)
@@ -89,13 +100,20 @@ func newDeployFixture(t *testing.T) *deployFixture {
 		registry:   func() (string, error) { return f.registry, nil },
 		releaseKey: func() (string, error) { return keyPath, nil },
 		deployed:   func() (string, error) { return f.record, nil },
+		traces:     func() (string, error) { return f.store, nil },
 		transport: func(host string) (federate.Transport, error) {
-			return fakeTransport{host: host, log: &f.log, respond: f.respond}, nil
+			return f.transport(host), nil
 		}}
 	f.mustRun(t, "add", "-project", "shop", "-pattern", "*orders*", "app1", "-duration", "1h")
 	f.mustRun(t, "add", "-project", "billing", "-listen-port", "8443", "app1")
 	f.mustRun(t, "add", "-project", "shop", "-pattern", "*orders*", "app2")
 	return f
+}
+
+// transport is the fake for host, sharing the fixture's log and replies.
+func (f *deployFixture) transport(host string) fakeTransport {
+	return fakeTransport{host: host, log: &f.log, respond: f.respond,
+		fetch: func(host, remote, _ string) error { return f.fetchErrs[host+" "+remote] }}
 }
 
 // respond answers like a healthy amd64 host with nothing running, unless
@@ -409,7 +427,7 @@ func TestDeployVerifiesPerHost(t *testing.T) {
 		if host == "app2" {
 			writeFile(t, bin, []byte("changed"), 0o755)
 		}
-		return fakeTransport{host: host, log: &f.log, respond: f.respond}, nil
+		return f.transport(host), nil
 	}
 	if code := f.run("deploy", "-dist", f.dist, "app1", "app2"); code != exitError ||
 		!strings.Contains(f.stderr.String(), "app2: local build, nothing pushed") {

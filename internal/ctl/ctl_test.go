@@ -2,6 +2,7 @@ package ctl
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,15 +13,26 @@ import (
 )
 
 // testEnv points the default registry at a temp file; the operator's
-// ~/.config is never touched.
+// ~/.config is never touched. Its hosts answer but have no tracer
+// installed, so rm only edits the registry.
 func testEnv(t *testing.T) (env, *bytes.Buffer, *bytes.Buffer, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
 	path := filepath.Join(t.TempDir(), "iormesh", "servers.yaml")
 	deployed := filepath.Join(t.TempDir(), "share", deployedFileName)
+	store := filepath.Join(t.TempDir(), "traces")
 	e := env{stdout: &stdout, stderr: &stderr,
 		registry: func() (string, error) { return path, nil },
-		deployed: func() (string, error) { return deployed, nil }}
+		deployed: func() (string, error) { return deployed, nil },
+		traces:   func() (string, error) { return store, nil },
+		transport: func(host string) (federate.Transport, error) {
+			return fakeTransport{host: host, log: &[][]string{}, respond: func(_ string, argv []string) ([]byte, error) {
+				if argv[0] == "test" {
+					return nil, errors.New("exit status 1")
+				}
+				return nil, nil
+			}}, nil
+		}}
 	return e, &stdout, &stderr, path
 }
 

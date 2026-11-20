@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -335,12 +336,10 @@ func stage(ctx context.Context, t federate.Transport, bin string) (string, error
 func (d deployer) project(ctx context.Context, t federate.Transport, host string, p federate.Project,
 	version string) error {
 	argv := startArgs(p)
-	out, err := t.Run(ctx, "systemctl", "show", "--property=ActiveState", "--value", "--",
-		"iormesh-"+p.Name+".service")
+	live, err := unitLive(ctx, t, p.Name)
 	if err != nil {
 		return err
 	}
-	live := liveState(strings.TrimSpace(string(out)))
 	if live && !d.restart && d.record.same(host, p.Name, argv, version) {
 		_, _ = fmt.Fprintf(d.e.stdout, "%s: project %s already running this build with these flags, "+
 			"left alone (-restart restarts it)\n", host, p.Name)
@@ -383,13 +382,18 @@ func (d deployer) sudo(ctx context.Context, t federate.Transport, host string, a
 	return err
 }
 
-// relay prints a remote command's stdout, each line prefixed by the host
-// so output from several hosts stays attributable.
+// relay prints a remote command's stdout on deploy's stdout.
 func (d deployer) relay(host string, out []byte) {
+	relay(d.e.stdout, host, out)
+}
+
+// relay prints a remote command's stdout to w, each line prefixed by the
+// host so output from several hosts stays attributable.
+func relay(w io.Writer, host string, out []byte) {
 	for line := range strings.Lines(string(out)) {
-		_, _ = fmt.Fprintf(d.e.stdout, "%s: %s", host, line)
+		_, _ = fmt.Fprintf(w, "%s: %s", host, line)
 		if !strings.HasSuffix(line, "\n") {
-			_, _ = fmt.Fprintln(d.e.stdout)
+			_, _ = fmt.Fprintln(w)
 		}
 	}
 }
@@ -412,6 +416,17 @@ func startArgs(p federate.Project) []string {
 		args = append(args, "-listen-port="+strconv.Itoa(int(p.Target.ListenPort)))
 	}
 	return append(args, p.Flags...)
+}
+
+// unitLive asks systemd, unprivileged, whether project's unit is live:
+// deploy restarts a live session, rm stops it before the last sync.
+func unitLive(ctx context.Context, t federate.Transport, project string) (bool, error) {
+	out, err := t.Run(ctx, "systemctl", "show", "--property=ActiveState", "--value", "--",
+		"iormesh-"+project+".service")
+	if err != nil {
+		return false, err
+	}
+	return liveState(strings.TrimSpace(string(out))), nil
 }
 
 // liveState mirrors the tracer's unitState.live: a unit running or on its

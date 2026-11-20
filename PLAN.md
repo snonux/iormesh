@@ -988,6 +988,25 @@ Kubernetes (M7) build on it.
   deletes them; nothing is auto-cleaned.
   Collect is project-aware: one project at a time, or
   several together.
+  Built (task eb4, `internal/ctl/collect.go`): `iormeshctl
+  collect [-project P]... [HOST...]` — no HOST is the whole
+  registry; every host and project is checked against the
+  registry before any host is contacted. Per host an `ssh
+  true` probe (an unreachable host fails, it is never "nothing
+  to collect"), then per project `test -d` of its `ready/` (a
+  project never started is skipped) and the Transport's Fetch
+  (`rsync -rt --remove-source-files`, no sudo). Each host
+  lands in its own directory,
+  `~/.local/share/iormesh/traces/<project>/<host>/` (the
+  registry's host name): a server picks its own segment
+  names, so a shared directory would let one host overwrite
+  another's. The store and project directories are created
+  0700 and refused when foreign-owned or writable by others;
+  the host directory is forced to 0700 by every fetch. A
+  failed host is reported, the others still collected, and
+  the command exits 1 naming it. The build reads every
+  `*.parquet` under `<project>/*/` and skips dot files
+  (rsync's in-flight temporaries).
 - **Build**: merge the collected segments offline by stable
   ids — connection ids, the ISN-pair join key (decision #26),
   clock reconciliation — fusing the
@@ -1120,6 +1139,16 @@ Kubernetes (M7) build on it.
   traces). Trace files are synced off first (rsync, same as
   collect), so `rm` never destroys uncollected traces; an
   unreachable host warns and only drops from the registry.
+  Built (task eb4, `internal/ctl/rm.go`): per removed project
+  a live session is stopped first (`sudo iormesh stop`, which
+  publishes its last segment), then collected; `uninstall`
+  runs only when the host leaves the registry (`rm HOST`, or
+  its last project), and the registry changes only after all
+  of that succeeded — a failed stop, sync or uninstall leaves
+  it as it was and uninstalls nothing. A host without the
+  installed tracer is just unregistered. Traces of a project
+  the registry does not list are not synced and go with the
+  uninstall.
 - **No management plane**: every tracer flag and feature is
   reachable through its own CLI, and `iormeshctl` composes
   those commands over plain SSH (later `kubectl exec` in the

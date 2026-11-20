@@ -166,7 +166,7 @@ views — happens on the controller.
 Everything is driven from the laptop. `collect` syncs and
 `build` merges and renders; `refresh` does both and repeats
 while a session runs; `expand` turns the unresolved edges of one round
-into the newly enrolled hosts of the next; `rm` syncs, stops and
+into the newly enrolled hosts of the next; `rm` stops, syncs and
 removes. See PLAN.md, M4 and M6.
 
 ## The two joins
