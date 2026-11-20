@@ -14,7 +14,7 @@ import pyarrow.parquet as pq
 ZERO_OMITTED = {
     "err", "conn_id", "java.thread", "java.carrier", "http.method",
     "http.scheme", "http.host", "http.path", "http.status", "http.req_seq",
-    "http.version",
+    "http.version",,
 }
 
 # The pointer (nullable) leaves and objects whose IS NULL DuckDB must
