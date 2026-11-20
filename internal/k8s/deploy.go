@@ -61,6 +61,13 @@ func (k *Kubectl) Deploy(ctx context.Context, argv ...string) (Outcome, error) {
 		}
 		return SidecarVerified, nil
 	}
+	if hasContainer(p.Spec.Containers, TracerContainer) {
+		// One tracer per pod (PLAN.md M7, task 7f4): a sidecar pod has
+		// its tracer already, and a debug one beside it would be a
+		// second session under the same pod identity.
+		return 0, fmt.Errorf("%w: %s/%s already has a %q sidecar; trace it in sidecar mode",
+			ErrTransport, k.t.Namespace, k.t.Pod, TracerContainer)
+	}
 	if hasContainer(p.Spec.EphemeralContainers, TracerContainer) {
 		if err := k.verifySpecImage(p.Spec.EphemeralContainers); err != nil {
 			return 0, err

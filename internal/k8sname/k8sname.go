@@ -43,8 +43,14 @@ var (
 // Label reports whether s is a DNS-1123 label.
 func Label(s string) bool { return label.MatchString(s) }
 
+// subdomainPart is one dot-separated part of a DNS-1123 subdomain as
+// Kubernetes checks it (IsDNS1123Subdomain): alphanumeric at both ends,
+// dashes inside, and no per-part length cap — only the whole name's 253
+// bytes. A pod named with one 64-byte part is valid and must pass.
+var subdomainPart = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+
 // Pod reports whether s is a valid pod name: a DNS-1123 subdomain, at
-// most 253 bytes of dot-joined labels — strictly, so "a..b" and "a-.b",
+// most 253 bytes of dot-joined parts — strictly, so "a..b" and "a-.b",
 // which the API server never issues, fail too. A pod name is also part
 // of an in-pod tracer's FQDN (internal/k8s PodFQDN, task 7f4), which the
 // tracer and the controller must accept by the same rule.
@@ -53,7 +59,7 @@ func Pod(s string) bool {
 		return false
 	}
 	for l := range strings.SplitSeq(s, ".") {
-		if !label.MatchString(l) {
+		if !subdomainPart.MatchString(l) {
 			return false
 		}
 	}

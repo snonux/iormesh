@@ -32,8 +32,12 @@ type CgroupIdentity struct {
 	// PodUID is the pod's metadata.uid, dashed and lowercase (the systemd
 	// driver's underscores turned back into dashes), or a static pod's
 	// 32-hex-digit UID, which has no dashes. A static pod's UID is not
-	// the API's mirror pod's: the controller joins it through the mirror
-	// pod's kubernetes.io/config.mirror annotation, not metadata.uid.
+	// the API's mirror pod's, so it would have to be joined through the
+	// mirror pod's kubernetes.io/config.mirror annotation. No in-pod
+	// tracer runs in a static pod (PodRef.Validate refuses its UID, task
+	// 7f4), so that join only matters should a node-level (hostPID)
+	// tracer that sees other pods' cgroups ever come; the parser still
+	// reads the form, for what the kubelet writes.
 	// Empty for the in-pod relative form ("/../<container>"), whose pod
 	// is the tracer's own (PodFromEnv).
 	PodUID string

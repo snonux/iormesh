@@ -1,6 +1,8 @@
 package k8s
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -46,7 +48,9 @@ func TestPodRefValidate(t *testing.T) {
 	good := []PodRef{
 		{"a", "b", uid},
 		{"web-0.shard", "prod", uid},
-		{long + "." + long, long, uid}, // 127+1+63+1+8 = 200 = MaxFQDN
+		{strings.Repeat("a", 64), "b", uid}, // a pod name part has no 63-byte cap
+		// One part of MaxFQDN-73 bytes: name.<63>.<8> = MaxFQDN.
+		{strings.Repeat("a", MaxFQDN-73), long, uid},
 	}
 	for _, p := range good {
 		if err := p.Validate(); err != nil {
@@ -68,7 +72,7 @@ func TestPodRefValidate(t *testing.T) {
 		"name upper":    {"A", "prod", uid},
 		"ns dot":        {"a", "pr.od", uid},
 		"ns long":       {"a", long + "a", uid},
-		"fqdn too long": {long + "." + long + ".a", long, uid},
+		"fqdn too long": {strings.Repeat("a", MaxFQDN-72), long, uid},
 		"name too long": {strings.Repeat(long+".", 4) + "a", "b", uid},
 	}
 	for name, p := range bad {
@@ -104,6 +108,43 @@ func TestPodFromEnv(t *testing.T) {
 	if _, ok, err := PodFromEnv(func(k string) string { return forged[k] }); ok || !errors.Is(err, ErrPodEnv) {
 		t.Errorf("forged uid: %v, %v; want ErrPodEnv", ok, err)
 	}
+	// The refusal says how to get out of it: which variables to unset.
+	_, _, err = PodFromEnv(func(k string) string { return map[string]string{EnvPodUID: uid}[k] })
+	for _, want := range []string{"unset all three", EnvPodName, EnvPodNamespace, EnvPodUID} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("partial env: %v does not say %q", err, want)
+		}
+	}
+}
+
+// TestSegmentNameFitsUnpack: the controller takes a 249-byte segment
+// name, whose unpack temporary "." + name + ".part" is 255 bytes, and
+// refuses a 250-byte one as no segment name (ErrStream), never failing
+// on the temporary half-way through a fetch.
+func TestSegmentNameFitsUnpack(t *testing.T) {
+	name := func(n int) string { return strings.Repeat("a", n-len(".parquet")) + ".parquet" }
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Name: name(maxSegmentName), Mode: 0o600, Typeflag: tar.TypeReg}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if taken, err := Unpack(&buf, t.TempDir()); err != nil || len(taken) != 1 {
+		t.Errorf("%d-byte name: %q, %v", maxSegmentName, taken, err)
+	}
+	buf.Reset()
+	tw = tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Name: name(maxSegmentName + 1), Mode: 0o600, Typeflag: tar.TypeReg}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Unpack(&buf, t.TempDir()); !errors.Is(err, ErrStream) {
+		t.Errorf("%d-byte name: %v, want ErrStream", maxSegmentName+1, err)
+	}
 }
 
 // maps2 is a copy of m without key drop.
@@ -126,8 +167,9 @@ func maps2(m map[string]string, drop string) map[string]string {
 // process nodes, not one.
 func TestPodSegmentsEndToEnd(t *testing.T) {
 	long := strings.Repeat("a", 63)
-	// An FQDN of exactly MaxFQDN: <name>.<63>.<8>.
-	b := PodRef{long + "." + strings.Repeat("b", MaxFQDN-63-8-2-64), long, uid2}
+	// An FQDN of exactly MaxFQDN: <name>.<63>.<8>, the name one part of
+	// more than 63 bytes (Kubernetes caps only the whole name).
+	b := PodRef{strings.Repeat("b", MaxFQDN-73), long, uid2}
 	if n := len(b.FQDN()); n != MaxFQDN {
 		t.Fatalf("FQDN of %d bytes, want %d", n, MaxFQDN)
 	}
@@ -204,29 +246,57 @@ func writePodSegments(t *testing.T, dst string, p PodRef) {
 		t.Fatal(err)
 	}
 	ready := filepath.Join(srv, segment.ReadyDir)
+	files := map[string][]byte{}
 	ents, err := os.ReadDir(ready)
 	if err != nil || len(ents) == 0 {
 		t.Fatalf("ready: %v, %v", ents, err)
 	}
-	names := []string{ // the longest a table file's name gets, with a 7-digit seq
-		segment.TableName(p.FQDN(), "0123abcd", t0, 1_000_000, "classes"),
-		segment.TableName(p.FQDN(), "0123abcd", t0, 1_000_000, "methods")}
 	for _, en := range ents {
-		names = append(names, en.Name())
-	}
-	for _, name := range names {
-		if f, err := segment.ParseName(name); !segmentName.MatchString(name) || err != nil || f.FQDN != p.FQDN() {
-			t.Errorf("%s (%d bytes): refused by the controller or the parser (%+v, %v)", name, len(name), f, err)
-		}
-	}
-	for _, en := range ents {
-		name := en.Name()
-		if f, err := segment.ParseName(name); !segmentName.MatchString(name) || err != nil || f.FQDN != p.FQDN() {
-			t.Errorf("%s (%d bytes): refused by the controller or the parser (%+v, %v)", name, len(name), f, err)
-		}
-		if err := os.Rename(filepath.Join(ready, name), filepath.Join(dst, name)); err != nil {
+		b, err := os.ReadFile(filepath.Join(ready, en.Name()))
+		if err != nil {
 			t.Fatal(err)
 		}
+		files[en.Name()] = b
+	}
+	// The real files go into dst through the controller's own unpack
+	// (temporaries and all), as collect fetches them.
+	unpackFiles(t, dst, p, files)
+	// The longest names a session could publish — table files with a
+	// seq far past six digits — unpack too, into a scratch dir.
+	long := map[string][]byte{}
+	for _, seq := range []int{1_000_000, 1_000_000_000} {
+		for _, table := range []string{"classes", "methods", "threads", "stacks"} {
+			long[segment.TableName(p.FQDN(), "0123abcd", t0, seq, table)] = nil
+		}
+	}
+	unpackFiles(t, t.TempDir(), p, long)
+}
+
+// unpackFiles streams files as the tracer's `iormesh ready` would (a
+// tar) through Unpack into dst, checking that every name passes the
+// segment parser with p's FQDN and that Unpack takes them all.
+func unpackFiles(t *testing.T, dst string, p PodRef, files map[string][]byte) {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for name, b := range files {
+		if f, err := segment.ParseName(name); err != nil || f.FQDN != p.FQDN() || len(name) > maxSegmentName {
+			t.Errorf("%s (%d bytes): %+v, %v", name, len(name), f, err)
+		}
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o600, Size: int64(len(b)),
+			Typeflag: tar.TypeReg}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	taken, err := Unpack(&buf, dst)
+	if err != nil || len(taken) != len(files) {
+		t.Fatalf("unpack: took %d of %d: %v", len(taken), len(files), err)
 	}
 }
 

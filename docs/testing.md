@@ -1168,15 +1168,24 @@ Unit tests in `mage test`, no cluster and no container engine
   checks `PodFromEnv` and `PodRef.Validate` (none set is no
   pod; partial, forged or malformed values are `ErrPodEnv`;
   RFC 1123 names, the API server's UID form only — a static
-  pod's hash UID is refused — and the 200-byte FQDN bound),
+  pod's hash UID is refused — and the 190-byte FQDN bound;
+  the refusal names the variables to unset),
   `HostID` and `FQDN` equal to the controller's `PodHostID` and
   `PodFQDN` pin, and end to end two pods whose app is pid 7
   with one start tick: their segments, one with an FQDN of
   exactly `MaxFQDN`, pass the controller's segment-name pattern
-  and the name parser at the longest table name, load under the
+  and the name parser, go through the controller's `Unpack`
+  (as do table names with a 10-digit seq), load under the
   controller's pins (directory `pod-<uid>`), and merge into two
-  process nodes. `internal/k8sname`: pod names are strict RFC
-  1123 subdomains (`a..b`, `a-.b` refused).
+  process nodes; that pod's name is one 117-byte part.
+  `TestSegmentNameFitsUnpack`: a 249-byte name unpacks, a
+  250-byte one is `ErrStream`. `Check` and `Deploy` refuse a
+  static pod's UID, a missing identity and an FQDN over
+  `MaxFQDN` (`ErrName`), and a debug deploy beside a sidecar.
+  `internal/k8sname`: pod names are strict RFC 1123 subdomains
+  (`a..b`, `a-.b` refused) with no per-part cap (a 64-byte part
+  and a 253-byte name pass, 254 bytes fail), as Kubernetes'
+  `IsDNS1123Subdomain`.
   `internal/cli/hostinfo_test.go`: in a pod the host id and FQDN
   are the pod's with or without a machine-id in the image,
   outside a pod the machine-id's, and a partial or malformed pod

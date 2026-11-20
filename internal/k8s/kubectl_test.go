@@ -106,8 +106,10 @@ func TestPushRefused(t *testing.T) {
 	}
 }
 
-// preparedPod is a pod the prepare patch has run on.
-const preparedPod = `{"spec":{
+// preparedPod is a pod the prepare patch has run on, named and with a
+// UID as the API server issues them (checkPod validates the identity a
+// tracer there would take).
+const preparedPod = `{"metadata":{"name":"checkout-7d9f","uid":"3b1c9a52-7e0d-4c1f-9a8e-2f6d5b4c3a21"},"spec":{
  "volumes":[{"name":"tracefs","hostPath":{"path":"/sys/kernel/tracing","type":"Directory"}},
             {"name":"iormesh-traces","emptyDir":{"sizeLimit":"2Gi"}}],
  "containers":[{"name":"app"}]}}`
@@ -226,6 +228,12 @@ func TestDebugRefusesUnprepared(t *testing.T) {
 			`"ephemeralContainers":[{"name":"iormesh"}],"containers"`, 1), ErrTransport},
 		"has a sidecar": {strings.Replace(preparedPod, `"containers":[{"name":"app"}]`,
 			`"containers":[{"name":"app"},{"name":"iormesh"}]`, 1), ErrTransport},
+		// Identities a tracer in the pod would refuse (task 7f4).
+		"static pod uid": {strings.Replace(preparedPod, `"3b1c9a52-7e0d-4c1f-9a8e-2f6d5b4c3a21"`,
+			`"0f1e2d3c4b5a69788796a5b4c3d2e1f0"`, 1), ErrName},
+		"no metadata": {"{" + preparedPod[strings.Index(preparedPod, `"spec"`):], ErrName},
+		"fqdn too long": {strings.Replace(preparedPod, `"name":"checkout-7d9f"`,
+			`"name":"`+strings.Repeat("a", 200)+`"`, 1), ErrName},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

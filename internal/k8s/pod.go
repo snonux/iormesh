@@ -57,18 +57,21 @@ func PodFromEnv(getenv func(string) string) (PodRef, bool, error) {
 		return p, false, nil
 	}
 	if err := p.Validate(); err != nil {
-		return PodRef{}, false, err
+		return PodRef{}, false, fmt.Errorf("%w; set %s, %s and %s from the pod's downward API, "+
+			"or unset all three for a run outside a pod", err, EnvPodName, EnvPodNamespace, EnvPodUID)
 	}
 	return p, true, nil
 }
 
 // MaxFQDN bounds a pod's FQDN (Name.Namespace.<8 hex>): a segment file
 // name is <fqdn>-<session 8>-<start 16>-<seq 6+>.<table>.parquet, at most
-// 255 bytes (NAME_MAX, and ready.go's segmentName), and the rest takes 49
-// of them; 200 leaves room for a seq past six digits. A pod name long
-// enough to exceed it (pod names may have 253 bytes) is refused, not cut:
-// a truncated name could collide with another pod's.
-const MaxFQDN = 200
+// 249 bytes (ready.go's segmentName: the controller's unpack temporary
+// "." + name + ".part" must fit NAME_MAX, 255), and the rest takes 49 of
+// them with a six-digit seq; 190 leaves room for a seq of up to 16
+// digits. A pod name long enough to exceed it (pod names may have 253
+// bytes) is refused, not cut: a truncated name could collide with
+// another pod's.
+const MaxFQDN = 190
 
 // Validate checks p strictly, by the very rules the controller applies to
 // the same pod's API metadata before it pins the pod's identity (Lister,

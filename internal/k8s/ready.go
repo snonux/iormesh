@@ -40,8 +40,14 @@ const maxEntries = 100_000
 
 // segmentName is a file the stream may carry: a non-dot *.parquet name
 // without a directory part — what the tracer publishes in ready/, and
-// never the unpacker's own dot-prefixed temporaries.
-var segmentName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,246}\.parquet$`)
+// never the unpacker's own dot-prefixed temporaries. At most 249 bytes:
+// unpackOne's temporary "." + name + ".part" adds 6, and must still fit
+// NAME_MAX (255), so a longer name is refused here rather than failing
+// half-way through a fetch with ENAMETOOLONG.
+var segmentName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,240}\.parquet$`)
+
+// maxSegmentName is the longest name segmentName passes.
+const maxSegmentName = 255 - len(".") - len(".part")
 
 // ErrStream marks a fetch stream the controller refuses.
 var ErrStream = errors.New("k8s: fetch stream refused")

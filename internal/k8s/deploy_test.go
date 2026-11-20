@@ -105,6 +105,12 @@ func TestDeployRefusesUnpinned(t *testing.T) {
 		"sidecar missing":       {preparedPod, true, ErrUnprepared},
 		"sidecar unprepared":    {`{"spec":{"containers":[{"name":"app"},{"name":"iormesh"}]}}`, true, ErrUnprepared},
 		"debug unprepared":      {`{"spec":{"containers":[{"name":"app"}]}}`, false, ErrUnprepared},
+		// One tracer per pod, and an identity the tracer would refuse
+		// (task 7f4).
+		"debug beside a sidecar": {withTracer(true, true, "registry.example/iormesh@sha256:"+testDigest), false,
+			ErrTransport},
+		"debug static pod": {strings.Replace(preparedPod, `"3b1c9a52-7e0d-4c1f-9a8e-2f6d5b4c3a21"`,
+			`"0f1e2d3c4b5a69788796a5b4c3d2e1f0"`, 1), false, ErrName},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

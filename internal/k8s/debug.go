@@ -62,7 +62,11 @@ func (k *Kubectl) getPod(ctx context.Context) (podInfo, error) {
 }
 
 // checkPod refuses a pod without #13's volumes, naming the prepare patch,
-// or without the app container to target: what every mode needs.
+// or without the app container to target: what every mode needs. It
+// also refuses a pod whose identity a tracer in it would refuse
+// (PodRef.Validate, task 7f4: a static pod's UID, an FQDN over
+// MaxFQDN), so iormeshctl says so up front instead of starting a tracer
+// that exits with ErrPodEnv.
 func (k *Kubectl) checkPod(p podInfo) error {
 	if err := checkPrepared(p); err != nil {
 		return fmt.Errorf("%w: %s/%s: %s; apply %s to its workload first", ErrUnprepared,
@@ -70,6 +74,11 @@ func (k *Kubectl) checkPod(p podInfo) error {
 	}
 	if !hasContainer(p.Spec.Containers, k.t.Container) {
 		return fmt.Errorf("%w: %s/%s has no container %q", ErrUnprepared, k.t.Namespace, k.t.Pod, k.t.Container)
+	}
+	id := PodRef{Name: p.Metadata.Name, Namespace: k.t.Namespace, UID: p.Metadata.UID}
+	if err := id.Validate(); err != nil {
+		return fmt.Errorf("%w: %s/%s: a tracer in this pod would refuse to start: %w", ErrName,
+			k.t.Namespace, k.t.Pod, err)
 	}
 	return nil
 }

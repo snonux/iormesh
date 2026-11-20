@@ -60,7 +60,12 @@ func TestNames(t *testing.T) {
 		name string
 	}{
 		{Label, []string{"shop", "a", "kind-1"}, []string{"", "Shop", "-a", "a.b", strings.Repeat("a", 64)}, "Label"},
-		{Pod, []string{"checkout-7d9f", "web.0"}, []string{"", "Web", "a b", "../x", "-x", "a..b", "a-.b", "a.", ".a"}, "Pod"},
+		// Pod names: no per-part cap (a 64-byte part, a 253-byte single
+		// part), only the 253-byte total.
+		{Pod, []string{"checkout-7d9f", "web.0", strings.Repeat("a", 64), strings.Repeat("a", 64) + ".b",
+			strings.Repeat("a", 253), strings.Repeat("a", 126) + "." + strings.Repeat("b", 126)},
+			[]string{"", "Web", "a b", "../x", "-x", "a..b", "a-.b", "a.", ".a", strings.Repeat("a", 254),
+				strings.Repeat("a", 64) + "-"}, "Pod"},
 		{Context, []string{"kind-x", "ops@prod", "arn:aws:eks:eu-west-1:1:cluster/x"},
 			[]string{"", "-x", "a b", "$(id)"}, "Context"},
 		{UID, []string{"0123abcd-0000-4000-8000-000000000001"},

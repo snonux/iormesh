@@ -1062,13 +1062,15 @@ node share the session's `boot_id`, which groups them by node.
 The tracer refuses to start when only some of the three variables
 are set or one is malformed (a lower-case UID as the API server
 issues it — a static pod's kubelet hash is refused; an RFC 1123
-subdomain and label; an FQDN of at most 200 bytes, so every
-segment name fits 255) rather than fall back to a machine-id,
+subdomain and label; an FQDN of at most 190 bytes, so every
+segment name, and the controller's unpack temporary of it, fits
+255) rather than fall back to a machine-id,
 which the image does not carry and which would not tell pods
 apart. The controller derives the same `host_id` and `fqdn` from
 the pod's API metadata and pins the pod's store directory
 (`pod-<uid>`) to them, so a session claiming another identity is
-dropped. Outside a pod
+dropped; iormeshctl checks the same before it deploys a tracer
+into a pod. Outside a pod
 nothing changes.
 
 ## Redaction

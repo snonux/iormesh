@@ -5125,8 +5125,11 @@ depends on:
    `/../<container>`: the container id comes out, the pod is the
    tracer's (`k8s.PodFromEnv`, from the downward API both
    generated container specs set). A static pod's UID is not its
-   mirror pod's `metadata.uid`: step 7 joins it through the
-   mirror pod's `kubernetes.io/config.mirror` annotation. The
+   mirror pod's `metadata.uid`; since task 7f4 no tracer runs in
+   a static pod (its UID is refused at start, and iormeshctl
+   refuses the pod up front), so the join through the mirror
+   pod's `kubernetes.io/config.mirror` annotation is needed only
+   if a node-level tracer seeing other pods ever comes. The
    test strings follow the formats; the kind capture is task
    yb4's.
    **The pod is the host** (task 7f4, an advisor's provisional
@@ -5152,9 +5155,15 @@ depends on:
    the API server's form — a static pod's hash UID too, since
    the controller would pin its mirror pod's UID instead; name
    not an RFC 1123 subdomain, namespace not a label, FQDN over
-   `k8s.MaxFQDN` = 200 bytes so every segment name fits 255):
-   `ErrPodEnv`, and `run` refuses at its flags — a silent
-   fallback would stamp an identity that is not the pod's. Tests:
+   `k8s.MaxFQDN` = 190 bytes, so every segment name stays within
+   the 249 bytes `segmentName` takes and its unpack temporary
+   `.<name>.part` within 255): `ErrPodEnv` (naming the variables
+   to unset), and `run` refuses at its flags — a silent
+   fallback would stamp an identity that is not the pod's. The
+   controller refuses such a pod up front (`checkPod`: `Check`
+   and `Deploy` validate the pod's API name, namespace and UID
+   the same way, `ErrName`), and `Deploy` in debug mode refuses
+   a pod with an `iormesh` sidecar as `Check` does. Tests:
    `internal/k8s/podidentity_test.go` (validation, and two pods
    with the same pid and start tick written as segments, checked
    against the controller's segment-name pattern, loaded under
