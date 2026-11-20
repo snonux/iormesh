@@ -23,13 +23,20 @@ func TestMeshGoldensAgree(t *testing.T) {
 	for _, sc := range meshScenarios {
 		dir := filepath.Join("..", "..", "workload", "scenarios", sc)
 		merged := loadGolden(t, filepath.Join(dir, "expect.json"))
+		hostEdges := 0
 		for proc, role := range map[string]string{"$p1": "client", "$p2": "server"} {
 			host := loadGolden(t, filepath.Join(dir, "expect-"+role+".json"))
 			if host.Scenario != sc || merged.Scenario != sc {
 				t.Fatalf("%s: goldens name scenarios %q and %q", sc, host.Scenario, merged.Scenario)
 			}
 			assertSameEvents(t, sc+" "+role, host.Events, eventsOf(merged.Events, proc))
+			hostEdges += len(host.Edges)
 			assertMergedEdges(t, sc+" "+role, host.Edges, merged.Edges, proc, "$h"+proc[2:])
+		}
+		// Exactly: the merge adds no edge beyond the hosts' own.
+		if len(merged.Edges) != hostEdges {
+			t.Errorf("%s: merged golden declares %d edges, the hosts %d", sc, len(merged.Edges),
+				hostEdges)
 		}
 	}
 }

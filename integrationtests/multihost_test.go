@@ -7,9 +7,12 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 
 	"iormesh/internal/federate"
@@ -68,6 +71,7 @@ func newMeshRig(t *testing.T) meshRig {
 			t.Skipf("the mesh rig needs %s: %v", tool, err)
 		}
 	}
+	sweepStaleRigs(t)
 	n := fmt.Sprintf("iorm%d-%d", os.Getpid(), rigSeq.Add(1))
 	r := meshRig{client: n + "-a", server: n + "-b", container: n + "-c"}
 	t.Cleanup(func() {
@@ -85,6 +89,36 @@ func newMeshRig(t *testing.T) meshRig {
 	rigCmd(t, "ip", "netns", "exec", r.server, "sysctl", "-qw", "net.ipv4.ip_forward=1")
 	r.publish(t)
 	return r
+}
+
+// staleRig matches a rig namespace's name and captures the PID of the
+// test binary that made it.
+var staleRig = regexp.MustCompile(`^iorm([0-9]+)-[0-9]+-[abc]$`)
+
+// sweepStaleRigs deletes the rig namespaces of test binaries no longer
+// alive. t.Cleanup never runs when the binary is killed (Ctrl-C, SIGKILL,
+// a -timeout panic), and a namespace pinned in /run/netns outlives its
+// processes; deleting it removes its veths and nft table with it. A
+// namespace whose PID is alive again (reused) waits for a later sweep.
+func sweepStaleRigs(t *testing.T) {
+	t.Helper()
+	entries, err := os.ReadDir(netnsDir)
+	if err != nil {
+		return // no /run/netns yet: nothing pinned, nothing stale
+	}
+	for _, e := range entries {
+		m := staleRig.FindStringSubmatch(e.Name())
+		if m == nil {
+			continue
+		}
+		pid, err := strconv.Atoi(m[1])
+		if err != nil || syscall.Kill(pid, 0) != syscall.ESRCH {
+			continue
+		}
+		if out, err := exec.Command("ip", "netns", "del", e.Name()).CombinedOutput(); err != nil {
+			t.Logf("stale rig namespace %s: %v: %s", e.Name(), err, out)
+		}
+	}
 }
 
 // link joins two namespaces with a veth pair, ifA in nsA and ifB in nsB,
@@ -214,10 +248,10 @@ func hostID(t *testing.T, run tracedRun) string {
 	return run.Trace.Events[0].HostID
 }
 
-// requireSeqFields skips the merge's half of a test while the tracer does
-// not yet record the four tcp_sock fields on tcp_state (task ve4): without
-// them neither end has a key and the merge rightly fuses nothing. The skip
-// fails `mage integrationTest`'s gate, so the gap stays visible.
+// requireSeqFields fails the merge's half of a test when no tcp_state
+// record carries the four tcp_sock fields (task ve4): without them
+// neither end has a key and the merge rightly fuses nothing, so the
+// golden failures that followed would hide the cause.
 func requireSeqFields(t *testing.T, m meshRun) {
 	t.Helper()
 	for _, e := range slices.Concat(m.client.Trace.Events, m.server.Trace.Events) {
@@ -225,8 +259,8 @@ func requireSeqFields(t *testing.T, m meshRun) {
 			return
 		}
 	}
-	t.Skip("no tcp_state record carries snd_una: the tracer's tcp_sock capture " +
-		"(task ve4) has not landed, so the merge cannot key either end")
+	t.Fatal("no tcp_state record carries snd_una: the tracer's tcp_sock capture " +
+		"(task ve4) is missing, so the merge cannot key either end")
 }
 
 // mergeMesh merges the two host traces as `iormeshctl build` does and

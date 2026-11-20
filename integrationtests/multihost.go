@@ -43,6 +43,12 @@ type Host struct {
 // JVM runs in network namespace netns (nsenter execs it, so the PID it
 // prints is its own).
 func (h *Harness) StartWorkloadIn(netns, scenario string, args ...string) (*Workload, error) {
+	if h.Credential != nil {
+		// nsenter would exec the JVM as root, not as the credential's
+		// user: a test needing both would silently test the wrong thing.
+		return nil, fmt.Errorf("workload %s: a Credential is not supported on an emulated host",
+			scenario)
+	}
 	cmd, err := h.workloadCmd(h.Tmp, scenario, args)
 	if err != nil {
 		return nil, err
@@ -91,6 +97,13 @@ func (h *Harness) TraceHosts(order []*Workload, hosts ...Host) ([]Run, error) {
 // machine id, hostname and network namespace — and returns once it is
 // attached.
 func (h *Harness) startHostTracer(host Host, out string) (*process, error) {
+	// A host tracer is the plain default tracer: the opt-in families,
+	// native stacks, segments and the Java agent of Harness are not passed
+	// on, so a test setting them would check what never ran.
+	if h.Families != "" || h.NativeStacks || h.Segments || h.JavaAgent != "" ||
+		h.AttachAgent != "" || h.Pattern != "" {
+		return nil, fmt.Errorf("host %s: emulated hosts take no tracer options yet", host.Name)
+	}
 	mid := filepath.Join(h.Dir, host.Name+".machine-id")
 	if err := writeMachineID(mid); err != nil {
 		return nil, err

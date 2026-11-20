@@ -122,7 +122,8 @@ public final class TcpHosts implements Scenario {
     }
 
     /**
-     * The {@code --key} option as an IPv4 address, parsed by hand: the
+     * The --bind or --host option (named by key) as an IPv4 address,
+     * parsed by hand: the
      * JDK's InetAddress.getByName would resolve anything that is not a
      * literal, and InetAddress.ofLiteral is JDK 22+ (the workload targets
      * 21). Four decimal parts in 0..255, nothing else.

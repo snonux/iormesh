@@ -410,15 +410,28 @@ connection fused instead of unresolved.
 | `TestTwoHostsTwoProjects` | `tcp-two-host` on the rig, the two hosts traced as projects `shop` and `billing`: each host's trace satisfies its golden and holds only its own process, the two host ids differ, and a golden naming the other end's address is caught. Subtest `merged`: `federate.Merge` of the two traces fuses exactly one cross-project connection with nothing unresolved, whose ends saw one 4-tuple, mirrored; the merged trace (events renamed to the merged conn id) satisfies `expect.json`, which fails with both ends on one host or on two connections; the client's trace merged alone stays `no_match` |
 | `TestNATPair` | the same for `tcp-nat`, the server in the container: the fused connection's client end saw 10.231.0.2:880 and its server end 172.31.0.2:80 |
 
-Both were run as root: the per-host goldens pass on real
-traces. The `merged` subtests skip, with that reason, until the
-tracer records the four `tcp_sock` fields on `tcp_state` (task
-ve4): without them no end has a key and the merge rightly fuses
-nothing. The skip fails `mage integrationTest`'s gate, so the
-gap shows. A run with a real docker daemon (the rig's DNAT rule
-is docker's) and on two real hosts is still the owner's; the
-injected clock skew of PLAN.md's M4 acceptance needs the
-tracer's test-only offset flag, not yet built.
+Both pass as root on real traces, `merged` subtests included,
+now that the tracer records the four `tcp_sock` fields on
+`tcp_state` (task ve4): the merge keys both ends and fuses them,
+across the DNAT hop too. A trace without those fields fails
+`merged` up front, naming the cause. A run with a real docker
+daemon (the rig's DNAT rule is docker's) and on two real hosts is
+still the owner's; the injected clock skew of PLAN.md's M4
+acceptance needs the tracer's test-only offset flag, not yet
+built.
+
+The rig leaves the machine as it found it, with two side
+effects of `ip netns` and nft themselves: the first `ip netns
+add` turns `/run/netns` into a shared bind mount, and the DNAT
+rule autoloads the `nf_nat` and `nf_conntrack` modules, which
+stay loaded. Its namespaces are named `iorm<pid>-<n>-{a,b,c}`
+after the test binary's PID. `t.Cleanup` deletes them, but a
+killed binary (Ctrl-C, SIGKILL, a `-timeout` panic) never runs
+it, so every new rig first deletes the namespaces of binaries no
+longer alive, and their veths and nft table go with them.
+Emulated hosts take no tracer options and no `Credential`
+(`TraceHosts` and `StartWorkloadIn` refuse them): the host
+tracer is the default one.
 
 ## Performance baselines
 
