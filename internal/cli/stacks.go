@@ -15,35 +15,57 @@ import (
 // files (through /proc/<pid>/root).
 const procRoot = "/proc"
 
-// stackOutput is a -native-stacks run's stack table and its file (M2
-// step 9). A nil *stackOutput is a run without native stacks; its methods
-// are no-ops then, so the run's code paths stay one.
+// stackOutput is a -native-stacks run's stack table and where it goes
+// (M2 step 9): stacks.ndjson in -out, the segments' stacks tables with
+// -trace-dir. A nil *stackOutput is a run without native stacks; its
+// methods are no-ops then, so the run's code paths stay one.
 type stackOutput struct {
 	table *stacks.Table
-	w     *schema.StackWriter
+	w     *schema.StackWriter // nil without -out
 }
 
-// openStacks creates cfg.out/stacks.ndjson and the table that fills it
+// openStacks creates the table that fills cfg.out/stacks.ndjson (with
+// -out) and the segments' stacks tables (seg, nil without -trace-dir)
 // from tr's stack map, or, without -native-stacks, removes a stale
 // stacks.ndjson a previous run left in cfg.out: it would describe stack
 // ids no event of this trace carries.
-func openStacks(cfg runConfig, tr tracer) (*stackOutput, error) {
+func openStacks(cfg runConfig, tr tracer, seg *segOutput) (*stackOutput, error) {
 	path := filepath.Join(cfg.out, StacksFile)
 	if !cfg.nativeStacks {
+		if cfg.out == "" {
+			return nil, nil
+		}
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("stale %s: %w", StacksFile, err)
 		}
 		return nil, nil
 	}
-	if err := os.MkdirAll(cfg.out, 0o755); err != nil {
-		return nil, err
+	o := &stackOutput{}
+	if cfg.out != "" {
+		if err := os.MkdirAll(cfg.out, 0o755); err != nil {
+			return nil, err
+		}
+		f, err := os.Create(path)
+		if err != nil {
+			return nil, err
+		}
+		o.w = schema.NewStackWriter(f)
 	}
-	f, err := os.Create(path)
-	if err != nil {
-		return nil, err
+	o.table = stacks.NewTable(tr.StackTrace, procRoot, o.writer(seg))
+	return o, nil
+}
+
+// writer is the table worker's write: each new stack to stacks.ndjson
+// and to the segments, whichever the run has.
+func (s *stackOutput) writer(seg *segOutput) func(schema.Stack) error {
+	return func(st schema.Stack) error {
+		if s.w != nil {
+			if err := s.w.Stack(st); err != nil {
+				return err
+			}
+		}
+		return seg.stack(st)
 	}
-	w := schema.NewStackWriter(f)
-	return &stackOutput{table: stacks.NewTable(tr.StackTrace, procRoot, w.Stack), w: w}, nil
 }
 
 // ids is the correlator's view of the table; a true nil interface without
@@ -61,7 +83,11 @@ func (s *stackOutput) close() error {
 	if s == nil {
 		return nil
 	}
-	return errors.Join(s.table.Close(), s.w.Close())
+	err := s.table.Close()
+	if s.w != nil {
+		err = errors.Join(err, s.w.Close())
+	}
+	return err
 }
 
 // summary is the stack part of the run's summary line: how many distinct

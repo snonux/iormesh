@@ -18,7 +18,7 @@ func TestOpenStacksOffRemovesStale(t *testing.T) {
 	if err := os.WriteFile(stale, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	st, err := openStacks(runConfig{out: dir}, newFakeTracer())
+	st, err := openStacks(runConfig{out: dir}, newFakeTracer(), nil)
 	if err != nil || st != nil {
 		t.Fatalf("openStacks = %v, %v; want nil, nil", st, err)
 	}
@@ -34,7 +34,7 @@ func TestOpenStacksOffRemovesStale(t *testing.T) {
 // counts on the summary line.
 func TestOpenStacksOn(t *testing.T) {
 	dir := t.TempDir()
-	st, err := openStacks(runConfig{out: dir, nativeStacks: true}, newFakeTracer())
+	st, err := openStacks(runConfig{out: dir, nativeStacks: true}, newFakeTracer(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

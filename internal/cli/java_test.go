@@ -21,7 +21,7 @@ func TestOpenJavaWithoutSpool(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	o, err := openJava(runConfig{out: dir}, nil, &bytes.Buffer{})
+	o, err := openJava(runConfig{out: dir}, nil, nil, &bytes.Buffer{})
 	if err != nil || o != nil {
 		t.Fatalf("openJava = %v, %v", o, err)
 	}
@@ -43,7 +43,7 @@ func TestOpenJavaWithoutSpool(t *testing.T) {
 func TestJavaOutputRun(t *testing.T) {
 	dir, spool := t.TempDir(), filepath.Join(t.TempDir(), "spool")
 	var stderr bytes.Buffer
-	o, err := openJava(runConfig{out: dir, spool: spool}, &fakeTracer{}, &stderr)
+	o, err := openJava(runConfig{out: dir, spool: spool}, &fakeTracer{}, nil, &stderr)
 	if err != nil {
 		t.Fatal(err)
 	}

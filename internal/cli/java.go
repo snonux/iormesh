@@ -16,16 +16,20 @@ import (
 
 // javaOutput is a -spool run's Java join (M3): the spool directory the
 // agents' rings appear in, the joiner between the correlator and the
-// events file, and the method, thread and class tables it fills. A nil
-// *javaOutput is a run without -spool; its methods are no-ops then, as
-// stackOutput's are.
+// events, and the method, thread and class tables it fills: as NDJSON
+// files in -out, as tables of the parquet segments with -trace-dir, or
+// both. A nil *javaOutput is a run without -spool; its methods are
+// no-ops then, as stackOutput's are.
 type javaOutput struct {
-	join    *correlate.JavaJoin
-	marker  javaMarker
-	dir     *agentspool.Dir
+	join   *correlate.JavaJoin
+	marker javaMarker
+	dir    *agentspool.Dir
+	// methods, threads and classes are -out's NDJSON tables, nil without
+	// -out; seg is the segment writer, nil without -trace-dir.
 	methods *schema.TableWriter[schema.Method]
 	threads *schema.TableWriter[schema.Thread]
 	classes *schema.TableWriter[schema.Class]
+	seg     *segOutput
 	stderr  io.Writer
 	skipped int
 }
@@ -37,16 +41,24 @@ type javaMarker interface {
 	DetachJavaMarks(pid uint32) error
 }
 
-// openJava creates the spool directory and the three table files, or,
-// without -spool, removes stale tables a previous run left in cfg.out:
-// they would describe ids no event of this trace carries. marker is the
-// tracer, opened with Config.JavaMarks when cfg.spool is set.
-func openJava(cfg runConfig, marker javaMarker, stderr io.Writer) (*javaOutput, error) {
+// openJava creates the spool directory and, with -out, the three table
+// files, or, without -spool, removes stale tables a previous run left in
+// cfg.out: they would describe ids no event of this trace carries.
+// marker is the tracer, opened with Config.JavaMarks when cfg.spool is
+// set; seg the segment writer the tables also go to (nil: none).
+func openJava(cfg runConfig, marker javaMarker, seg *segOutput, stderr io.Writer) (*javaOutput, error) {
 	if cfg.spool == "" {
+		if cfg.out == "" {
+			return nil, nil
+		}
 		return nil, removeStale(cfg.out, MethodsFile, ThreadsFile, ClassesFile)
 	}
 	if err := agentspool.MakeSpool(cfg.spool); err != nil {
 		return nil, err
+	}
+	o := &javaOutput{dir: agentspool.NewDir(cfg.spool), marker: marker, seg: seg, stderr: stderr}
+	if cfg.out == "" {
+		return o, nil
 	}
 	if err := os.MkdirAll(cfg.out, 0o755); err != nil {
 		return nil, err
@@ -55,10 +67,10 @@ func openJava(cfg runConfig, marker javaMarker, stderr io.Writer) (*javaOutput, 
 	if err != nil {
 		return nil, err
 	}
-	return &javaOutput{dir: agentspool.NewDir(cfg.spool), marker: marker, stderr: stderr,
-		methods: schema.NewTableWriter[schema.Method](files[0]),
-		threads: schema.NewTableWriter[schema.Thread](files[1]),
-		classes: schema.NewTableWriter[schema.Class](files[2])}, nil
+	o.methods = schema.NewTableWriter[schema.Method](files[0])
+	o.threads = schema.NewTableWriter[schema.Thread](files[1])
+	o.classes = schema.NewTableWriter[schema.Class](files[2])
+	return o, nil
 }
 
 // createAll creates the named files in dir, closing those already
@@ -161,13 +173,28 @@ func (o *javaOutput) scan() ([]correlate.AgentRing, error) {
 	return out, err
 }
 
-// Method and Thread make javaOutput the joiner's correlate.JavaTables.
-func (o *javaOutput) Method(m schema.Method) error { return o.methods.Write(m) }
+// Method and Thread make javaOutput the joiner's correlate.JavaTables;
+// each row goes to every table output the run has.
+func (o *javaOutput) Method(m schema.Method) error {
+	return errors.Join(writeTable(o.methods, m), o.seg.method(m))
+}
 
-func (o *javaOutput) Thread(t schema.Thread) error { return o.threads.Write(t) }
+func (o *javaOutput) Thread(t schema.Thread) error {
+	return errors.Join(writeTable(o.threads, t), o.seg.thread(t))
+}
 
 // Class makes javaOutput the joiner's class table (task fe4).
-func (o *javaOutput) Class(c schema.Class) error { return o.classes.Write(c) }
+func (o *javaOutput) Class(c schema.Class) error {
+	return errors.Join(writeTable(o.classes, c), o.seg.class(c))
+}
+
+// writeTable writes row to an NDJSON table that may be absent (no -out).
+func writeTable[T schema.Method | schema.Thread | schema.Class](w *schema.TableWriter[T], row T) error {
+	if w == nil {
+		return nil
+	}
+	return w.Write(row)
+}
 
 // poll lets the joiner read the rings while the stream is idle.
 func (o *javaOutput) poll() error {
@@ -177,10 +204,11 @@ func (o *javaOutput) poll() error {
 	return o.join.Poll()
 }
 
-// close closes the tables; the joiner itself is closed by the
-// correlator, as its sink, before.
+// close closes the NDJSON tables (the segment writer closes on its own,
+// last); the joiner itself is closed by the correlator, as its sink,
+// before.
 func (o *javaOutput) close() error {
-	if o == nil {
+	if o == nil || o.methods == nil {
 		return nil
 	}
 	return errors.Join(o.methods.Close(), o.threads.Close(), o.classes.Close())

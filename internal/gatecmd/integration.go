@@ -61,6 +61,7 @@ func IntegrationTests() []string {
 		"TestTCPFamilies",
 		"TestNonJavaPeer",
 		"TestNativeStacks",
+		"TestParquetSegments",
 		"TestJavaAttachDynamicLoading",
 		"TestJavaLiveAttach",
 		"TestJavaLiveAttachAtStart",

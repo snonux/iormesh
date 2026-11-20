@@ -89,7 +89,9 @@ func report(err error, code int, stderr io.Writer) int {
 
 func usage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `usage:
-  iormesh run (-pid PID[,PID...] | -pattern GLOB | -listen-port N) -project NAME -out DIR
+  iormesh run (-pid PID[,PID...] | -pattern GLOB | -listen-port N) -project NAME
+              [-out DIR] [-trace-dir DIR (default /opt/iormesh/traces without -out)]
+              [-disk-limit 90] [-disk-min-free 256MiB] [-ready-owner UID:GID]
               [-duration 4h] [-ready FILE] [-trace-families ipc,signal,poll,zerocopy|all]
               [-cpuprofile FILE] [-aggregate=false] [-native-stacks] [-spool DIR [-agent JAR]]
   iormesh normalize [-bracket SCENARIO] [-tmp PREFIX] [-check expect.json] [-out DIR] TRACEDIR

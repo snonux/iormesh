@@ -20,14 +20,17 @@ import (
 // A stack belongs to one process image: StackID is unique within the trace,
 // and (PID, PIDInc) says whose address space the addresses are in (an exec
 // starts a new image, so the same kernel stack after it gets a new id).
+//
+// The parquet tags are the M4 segment writer's stacks table (task 8b4):
+// frames a list of groups, the optional frame fields nullable.
 type Stack struct {
-	SchemaVersion uint32 `json:"schema_version"`
-	StackID       uint32 `json:"stack_id"`
-	PID           uint32 `json:"pid"`
-	PIDInc        uint64 `json:"pid_incarnation"`
+	SchemaVersion uint32 `json:"schema_version" parquet:"schema_version"`
+	StackID       uint32 `json:"stack_id" parquet:"stack_id"`
+	PID           uint32 `json:"pid" parquet:"pid"`
+	PIDInc        uint64 `json:"pid_incarnation" parquet:"pid_incarnation"`
 	// Frames lists the stack innermost first: the frame that made the
 	// syscall, then its callers.
-	Frames []StackFrame `json:"frames"`
+	Frames []StackFrame `json:"frames" parquet:"frames,list"`
 }
 
 // StackFrame is one frame of a native stack, symbolized as far as the
@@ -38,18 +41,18 @@ type Stack struct {
 type StackFrame struct {
 	// Addr is the instruction address in the process, as a hex string
 	// ("0x4a5b2c"): a JSON number cannot hold 64 bits exactly.
-	Addr string `json:"addr"`
+	Addr string `json:"addr" parquet:"addr"`
 	// Module is the mapped file's path as /proc/<pid>/maps names it, or a
 	// pseudo mapping ("[vdso]"); absent for anonymous memory (JIT code).
-	Module string `json:"module,omitempty"`
+	Module string `json:"module,omitempty" parquet:"module,optional,dict"`
 	// Offset is Addr's offset in Module's file; set exactly when Module
 	// is a file.
-	Offset *uint64 `json:"offset,omitempty"`
+	Offset *uint64 `json:"offset,omitempty" parquet:"offset,optional"`
 	// BuildID is the module's NT_GNU_BUILD_ID, lower-case hex.
-	BuildID string `json:"build_id,omitempty"`
+	BuildID string `json:"build_id,omitempty" parquet:"build_id,optional,dict"`
 	// Symbol is the enclosing function and the offset into it,
 	// "main.accept+0x2f".
-	Symbol string `json:"symbol,omitempty"`
+	Symbol string `json:"symbol,omitempty" parquet:"symbol,optional"`
 }
 
 // Validate checks a stack table entry: ids start at 1 like every

@@ -39,6 +39,9 @@ type session struct {
 	// java is the -spool run's join, polled on the loop's ticker (nil
 	// without -spool).
 	java *javaOutput
+	// seg is the -trace-dir run's segment writer, ticked on the loop's
+	// ticker (nil without -trace-dir).
+	seg *segOutput
 }
 
 func newSession(tr tracer, c *correlate.Correlator, cfg runConfig) *session {

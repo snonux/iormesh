@@ -11,6 +11,7 @@ import (
 
 	"iormesh/internal/correlate"
 	"iormesh/internal/project"
+	"iormesh/internal/segment"
 	"iormesh/internal/target"
 	"iormesh/internal/tracepoints"
 )
@@ -50,6 +51,19 @@ type runConfig struct {
 	// starts with (-agent, decision #2, task ge4), absolute; "" loads
 	// nothing. It needs spool.
 	agent string
+	// traceDir is where parquet segments go (-trace-dir, M4), under a
+	// directory per project; "" writes none. Without -out it defaults to
+	// defaultTraceDir.
+	traceDir string
+	// diskLimit and diskMinFree are the disk watchdog's limits on the
+	// trace dir's partition (-disk-limit percent, -disk-min-free bytes;
+	// decision #17: both), each 0 for off.
+	diskLimit   float64
+	diskMinFree uint64
+	// readyOwner owns <traceDir>/<project>/ready (-ready-owner), so the
+	// deploying user's collector reads and deletes segments unprivileged;
+	// nil leaves it root's.
+	readyOwner *segment.Owner
 }
 
 // defaultDuration bounds every run, ior-style: no unbounded tracer on a
@@ -87,7 +101,7 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 	pattern := fs.String("pattern", "", "glob over the command line or executable, matched on exec")
 	port := fs.Uint("listen-port", 0, "trace the owners of the TCP socket listening on this port")
 	project := fs.String("project", "", "project label (required)")
-	out := fs.String("out", "", "directory for the trace files (required)")
+	out := fs.String("out", "", "directory for the NDJSON trace files")
 	duration := fs.Duration("duration", defaultDuration, "stop after this long")
 	ready := fs.String("ready", "", "create this file once the probes are attached")
 	families := fs.String("trace-families", "",
@@ -101,6 +115,7 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 		"directory for the Java agent's rings (created, mode 1733); join their JVMs' I/O to Java stacks")
 	agent := fs.String("agent", "",
 		"live-load this iormesh-agent.jar into the JVMs traced at start (needs -spool; JEP 451 warns)")
+	seg := addSegmentFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return runConfig{}, fmt.Errorf("%w: %v", errUsage, err)
 	}
@@ -114,6 +129,10 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 		return runConfig{}, fmt.Errorf("%w: -listen-port %d: want 1-65535", errUsage, *port)
 	}
 	cfg.spec.ListenPort = uint16(*port)
+	cfg, err := seg.apply(cfg)
+	if err != nil {
+		return runConfig{}, err
+	}
 	return parseRunLists(cfg, *pids, *families, *agent)
 }
 
@@ -147,8 +166,8 @@ func validateRun(cfg runConfig) error {
 		// The registry (iormeshctl add) checks the same rule, so a
 		// label the controller stored is one the tracer accepts.
 		return fmt.Errorf("%w: -project %q: want %s", errUsage, cfg.project, project.Rule)
-	case cfg.out == "":
-		return fmt.Errorf("%w: -out is required", errUsage)
+	case cfg.out == "" && cfg.traceDir == "":
+		return fmt.Errorf("%w: -out or -trace-dir is required", errUsage)
 	case cfg.duration <= 0:
 		return fmt.Errorf("%w: -duration %v: must be positive", errUsage, cfg.duration)
 	}

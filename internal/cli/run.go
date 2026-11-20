@@ -95,14 +95,10 @@ var _ tracer = (*bpf.Tracer)(nil)
 //
 // The tracer is opened before the output files are created, so a run that
 // cannot attach (no root, no BTF) leaves an existing trace directory
-// untouched instead of truncating its events next to an old graph. A
-// stale ready file is removed first, so a harness reusing the path never
-// mistakes a previous run's for this one's.
+// untouched instead of truncating its events next to an old graph.
 func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
-	if cfg.ready != "" {
-		if err := os.Remove(cfg.ready); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("ready file: %w", err)
-		}
+	if err := preflight(cfg); err != nil {
+		return err
 	}
 	pids, err := initialTargets(cfg.spec)
 	if err != nil {
@@ -114,16 +110,16 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	out, err := openOutputs(cfg, tr, stderr)
+	out, err := openOutputs(ctx, cfg, tr, stderr)
 	if err != nil {
 		return errors.Join(err, tr.Close())
 	}
-	c, err := newCorrelator(ctx, cfg, out)
+	c, err := newCorrelator(cfg, out)
 	if err != nil {
 		return errors.Join(err, out.close(), tr.Close())
 	}
 	s := newSession(tr, c, cfg)
-	s.java = out.java
+	s.java, s.seg = out.java, out.seg
 	if err := s.start(pids); err != nil {
 		return errors.Join(err, finish(cfg, tr, c, out, schema.EndError, stderr))
 	}
@@ -139,28 +135,61 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 	return errors.Join(loopErr, finish(cfg, tr, c, out, reason, stderr))
 }
 
-// outputs are a run's optional tables beside the events file: the native
-// stack table (-native-stacks) and the Java join's (-spool); each nil
-// when its switch is off.
+// preflight runs before anything is loaded: a stale ready file is
+// removed, so a harness reusing the path never mistakes a previous run's
+// for this one's, and a trace disk already over its limit fails the run
+// at once (checkTraceDisk).
+func preflight(cfg runConfig) error {
+	if cfg.ready != "" {
+		if err := os.Remove(cfg.ready); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("ready file: %w", err)
+		}
+	}
+	return checkTraceDisk(cfg)
+}
+
+// outputs are where a run writes besides -out's events file: the parquet
+// segments (-trace-dir), the native stack table (-native-stacks) and the
+// Java join's tables (-spool), each nil when its switch is off; and the
+// host the events are stamped with.
 type outputs struct {
-	stacks *stackOutput
-	java   *javaOutput
+	seg     *segOutput
+	stacks  *stackOutput
+	java    *javaOutput
+	hostID  string
+	session schema.Session
 }
 
-func openOutputs(cfg runConfig, tr tracer, stderr io.Writer) (outputs, error) {
-	st, err := openStacks(cfg, tr)
-	if err != nil {
-		return outputs{}, err
+// openOutputs describes the host — before any trace file is touched, so
+// a host it cannot describe leaves an old trace intact — then opens the
+// segment writer (named by the host's FQDN) and the tables, which write
+// into it too.
+func openOutputs(ctx context.Context, cfg runConfig, tr tracer, stderr io.Writer) (outputs, error) {
+	var o outputs
+	var err error
+	if o.hostID, err = machineID(); err != nil {
+		return o, err
 	}
-	jo, err := openJava(cfg, tr, stderr)
-	if err != nil {
-		return outputs{}, errors.Join(err, st.close())
+	if o.session, err = hostSession(ctx); err != nil {
+		return o, err
 	}
-	return outputs{stacks: st, java: jo}, nil
+	if o.seg, err = openSegments(cfg, o.session.FQDN, stderr); err != nil {
+		return o, err
+	}
+	if o.stacks, err = openStacks(cfg, tr, o.seg); err != nil {
+		return o, errors.Join(err, o.close())
+	}
+	if o.java, err = openJava(cfg, tr, o.seg, stderr); err != nil {
+		return o, errors.Join(err, o.close())
+	}
+	return o, nil
 }
 
+// close closes the tables, then the segment writer: its last segment
+// must take the stack table's last rows, which its worker writes until
+// the table closes.
 func (o outputs) close() error {
-	return errors.Join(o.stacks.close(), o.java.close())
+	return errors.Join(o.stacks.close(), o.java.close(), o.seg.close())
 }
 
 func (o outputs) summary() string {
@@ -205,7 +234,12 @@ func finish(cfg runConfig, tr tracer, c *correlate.Correlator, out outputs, reas
 	closeErr := tr.Close()
 	endErr := c.End(reason)
 	sinkErr := c.Close()
-	graphErr := schema.WriteGraphFile(filepath.Join(cfg.out, GraphFile), c.Graph())
+	// The graph is -out's: on a server the controller rebuilds it from the
+	// segments (decision #3), so -trace-dir alone writes none.
+	var graphErr error
+	if cfg.out != "" {
+		graphErr = schema.WriteGraphFile(filepath.Join(cfg.out, GraphFile), c.Graph())
+	}
 	tablesErr := out.close()
 	// Skipped runs are host-wide possible loss, reported beside the lost
 	// records and never in them (bpf.Losses.Missed, task vd4).
@@ -239,22 +273,33 @@ func drainAggregates(tr tracer, c *correlate.Correlator) error {
 	return nil
 }
 
-// newCorrelator describes the host, creates cfg.out and the correlator
-// writing its events file there — through the Java join with -spool —
+// newCorrelator creates the correlator writing the events — to cfg.out's
+// events file and/or the segments, through the Java join with -spool —
 // and queues the session header. out.stacks is the native stack table,
 // nil without -native-stacks.
-func newCorrelator(ctx context.Context, cfg runConfig, out outputs) (*correlate.Correlator, error) {
-	host, err := machineID()
-	if err != nil {
-		return nil, err
-	}
-	session, err := hostSession(ctx)
-	if err != nil {
-		return nil, err
-	}
+func newCorrelator(cfg runConfig, out outputs) (*correlate.Correlator, error) {
 	offset, err := correlate.BootToWallOffset()
 	if err != nil {
 		return nil, fmt.Errorf("boot clock: %w", err)
+	}
+	events, err := openEvents(cfg)
+	if err != nil {
+		return nil, err
+	}
+	c := correlate.New(correlate.Config{Host: correlate.Host{ID: out.hostID, Project: cfg.project},
+		Sink: out.java.sink(out.seg.sink(events)), WallOffsetNS: offset,
+		Stacks: out.stacks.ids()})
+	if err := c.Session(out.session); err != nil {
+		return nil, errors.Join(err, c.Close())
+	}
+	return c, nil
+}
+
+// openEvents creates cfg.out and its NDJSON events sink; nil without
+// -out.
+func openEvents(cfg runConfig) (schema.Sink, error) {
+	if cfg.out == "" {
+		return nil, nil
 	}
 	if err := os.MkdirAll(cfg.out, 0o755); err != nil {
 		return nil, err
@@ -263,13 +308,7 @@ func newCorrelator(ctx context.Context, cfg runConfig, out outputs) (*correlate.
 	if err != nil {
 		return nil, err
 	}
-	c := correlate.New(correlate.Config{Host: correlate.Host{ID: host, Project: cfg.project},
-		Sink: out.java.sink(schema.NewNDJSONSink(f)), WallOffsetNS: offset,
-		Stacks: out.stacks.ids()})
-	if err := c.Session(session); err != nil {
-		return nil, errors.Join(err, c.Close())
-	}
-	return c, nil
+	return schema.NewNDJSONSink(f), nil
 }
 
 // announceReady creates cfg.ready once every probe is attached.
@@ -325,7 +364,7 @@ func traceLoop(ctx context.Context, s *session, cfg runConfig) (string, error) {
 			return ctxReason(ctx), errors.Join(s.tr.StopAggregation(), drainStopped(s))
 		case <-tick.C:
 			if err := s.poll(); err != nil {
-				return schema.EndError, err
+				return endReason(err)
 			}
 			if s.over() {
 				if err := s.tr.StopAggregation(); err != nil {
@@ -361,7 +400,7 @@ func drainQuiet(ctx context.Context, s *session) (string, error) {
 			quiet.Reset(quietFor)
 		case <-tick.C:
 			if err := s.poll(); err != nil {
-				return schema.EndError, err
+				return endReason(err)
 			}
 		case <-quiet.C:
 			return schema.EndTargetsExited, nil
@@ -397,13 +436,18 @@ func drainStopped(s *session) error {
 	}
 }
 
-// poll is the loop's periodic work: the loss counters, and the Java
-// join's rings, so an idle stream's held events still leave.
+// poll is the loop's periodic work: the loss counters, the Java join's
+// rings, so an idle stream's held events still leave, and the segment
+// writer's clock — rotation and the disk watchdog, whose trip ends the
+// run as disk_limit (endReason).
 func (s *session) poll() error {
 	if _, err := pollLosses(s.tr, s.c); err != nil {
 		return err
 	}
-	return s.java.poll()
+	if err := s.java.poll(); err != nil {
+		return err
+	}
+	return s.seg.tick()
 }
 
 // ctxReason is the end reason of a run whose context is done: its

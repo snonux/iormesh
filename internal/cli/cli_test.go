@@ -12,6 +12,7 @@ import (
 
 	"iormesh/internal/correlate"
 	"iormesh/internal/schema"
+	"iormesh/internal/segment"
 	"iormesh/internal/target"
 	"iormesh/internal/tracepoints"
 )
@@ -74,6 +75,32 @@ func TestParseRunFlags(t *testing.T) {
 	}
 }
 
+// TestParseSegmentFlags: -out alone writes no segments, no -out writes
+// them to the default trace dir, and the watchdog and owner flags parse.
+func TestParseSegmentFlags(t *testing.T) {
+	fakeProcs(t, 10)
+	cfg, err := parseRunFlags([]string{"-pid", "10", "-project", "p", "-out", "o"}, &bytes.Buffer{})
+	if err != nil || cfg.traceDir != "" {
+		t.Fatalf("-out alone: trace dir %q, %v", cfg.traceDir, err)
+	}
+	cfg, err = parseRunFlags([]string{"-pid", "10", "-project", "p"}, &bytes.Buffer{})
+	if err != nil || cfg.traceDir != defaultTraceDir || cfg.diskLimit != 90 ||
+		cfg.diskMinFree != 256<<20 || cfg.readyOwner != nil {
+		t.Fatalf("defaults: %+v, %v", cfg, err)
+	}
+	cfg, err = parseRunFlags([]string{"-pid", "10", "-project", "p", "-out", "o", "-trace-dir", "/srv/t",
+		"-disk-limit", "75.5", "-disk-min-free", "2GiB", "-ready-owner", "1000:1001"}, &bytes.Buffer{})
+	if err != nil || cfg.traceDir != "/srv/t" || cfg.out != "o" || cfg.diskLimit != 75.5 ||
+		cfg.diskMinFree != 2<<30 || *cfg.readyOwner != (segment.Owner{UID: 1000, GID: 1001}) {
+		t.Fatalf("segment flags: %+v, %v", cfg, err)
+	}
+	for in, want := range map[string]uint64{"0": 0, "512": 512, "4KiB": 4096, "1MiB": 1 << 20} {
+		if got, err := parseSize(in); err != nil || got != want {
+			t.Errorf("parseSize(%q) = %d, %v; want %d", in, got, err, want)
+		}
+	}
+}
+
 // TestCPUProfile: the profile file is created and written on stop; no
 // path profiles nothing.
 func TestCPUProfile(t *testing.T) {
@@ -115,7 +142,11 @@ func TestParseRunFlagsRejects(t *testing.T) {
 		"neg duration":       {"-pid", "10", "-project", "p", "-out", "o", "-duration", "-1m"},
 		"missing project":    {"-pid", "10", "-out", "o"},
 		"bad project":        {"-pid", "10", "-project", "../etc", "-out", "o"},
-		"missing out":        {"-pid", "10", "-project", "p"},
+		"disk limit over":    {"-pid", "10", "-project", "p", "-disk-limit", "101"},
+		"disk limit neg":     {"-pid", "10", "-project", "p", "-disk-limit", "-1"},
+		"min free unit":      {"-pid", "10", "-project", "p", "-disk-min-free", "1TB"},
+		"owner by name":      {"-pid", "10", "-project", "p", "-ready-owner", "paul:paul"},
+		"owner without gid":  {"-pid", "10", "-project", "p", "-ready-owner", "1000"},
 		"stray argument":     {"-pid", "10", "-project", "p", "-out", "o", "extra"},
 		"unknown flag":       {"-pid", "10", "-project", "p", "-out", "o", "-bogus"},
 		"unknown family":     {"-pid", "10", "-project", "p", "-out", "o", "-trace-families", "FS"},
