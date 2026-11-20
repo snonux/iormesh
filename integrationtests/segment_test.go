@@ -19,10 +19,10 @@ import (
 )
 
 // TestParquetSegments: non-java-peer with -native-stacks and -trace-dir
-// beside -out (every harness run has it). ready/ holds only published segments (no active file
-// left, every file 0644), the events segments in name order are exactly
-// the NDJSON events, and the union of the stacks tables is exactly
-// stacks.ndjson.
+// beside -out (every harness run has it). ready/ holds only published
+// segments (no active file left, every file 0644), the events segments
+// in name order are exactly the NDJSON events, and the union of the
+// stacks tables is exactly stacks.ndjson.
 func TestParquetSegments(t *testing.T) {
 	enableParallelIfRequested(t)
 	h := newHarness(t)

@@ -4149,8 +4149,16 @@ iormeshctl show [summary|services|edges|health] [-project P]... [-json]
   exactly (`assertRebuiltGraph`, M4's acceptance for
   single-host scenarios); `internal/correlate`
   `TestRebuiltGraphIsTheCorrelators` drives the correlator
-  through forks, `F_SETFD`/`F_GETFD`, execs, pipes and attaches
-  and holds the rebuild to its graph. Every segment of
+  through forks, `F_SETFD`/`F_GETFD`, execs, pipes, attaches and
+  a pid reused within the session, and holds the rebuild to its
+  graph. The rebuild keeps one fd table per pid, as the
+  correlator does: a fork or attach replaces the pid's table, so
+  a dead incarnation's leaked fds never move with a later
+  rename; a fork or exec touches only its own table. Still out
+  of reach (rebuild.go's header): an open with an unreadable
+  path (no event, yet a new fd in the correlator) and a rename
+  by another process between an exec's record and its exec
+  event. Every segment of
   a session returns the session's graph; the merge's union keeps
   one copy. `TestSegmentMergeGolden` writes
   `testdata/mesh.golden`'s traces as rotated segments and merges

@@ -265,7 +265,19 @@ func TestRunWritesSessionDropsEnd(t *testing.T) {
 	if err := finish(cfg, tr, c, outputs{}, reason, &stderr); err != nil {
 		t.Fatal(err)
 	}
-	events := readEvents(t, dir)
+	assertSessionDropsEnd(t, readEvents(t, dir), tr.closed)
+	if _, err := os.Stat(filepath.Join(dir, GraphFile)); err != nil {
+		t.Fatalf("graph not written: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "stopped (targets_exited); lost records 4 (kernel 3), skipped runs 40,") {
+		t.Fatalf("summary %q", stderr.String())
+	}
+}
+
+// assertSessionDropsEnd checks TestRunWritesSessionDropsEnd's events
+// file: the kinds in order, the drops' counts and the end.
+func assertSessionDropsEnd(t *testing.T, events []schema.Event, closed bool) {
+	t.Helper()
 	// The target's attach (task ze4) follows the header.
 	if got := kinds(events); got != "session,attach,read,drop,read,drop,drop,end" {
 		t.Fatalf("event kinds %s: want session,attach,read,drop,read,drop,drop,end", got)
@@ -281,14 +293,8 @@ func TestRunWritesSessionDropsEnd(t *testing.T) {
 		t.Fatalf("third drop %+v, want skipped_runs of 40", events[6].Args)
 	}
 	end := events[len(events)-1]
-	if *end.Args.EndReason != schema.EndTargetsExited || !tr.closed {
-		t.Fatalf("end %q, tracer closed %v", *end.Args.EndReason, tr.closed)
-	}
-	if _, err := os.Stat(filepath.Join(dir, GraphFile)); err != nil {
-		t.Fatalf("graph not written: %v", err)
-	}
-	if !strings.Contains(stderr.String(), "stopped (targets_exited); lost records 4 (kernel 3), skipped runs 40,") {
-		t.Fatalf("summary %q", stderr.String())
+	if *end.Args.EndReason != schema.EndTargetsExited || !closed {
+		t.Fatalf("end %q, tracer closed %v", *end.Args.EndReason, closed)
 	}
 }
 

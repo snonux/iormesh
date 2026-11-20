@@ -1,7 +1,6 @@
 package federate
 
 import (
-	"cmp"
 	"maps"
 	"net/netip"
 	"slices"
@@ -39,9 +38,17 @@ import (
 //   - signaled: a delivered signal event whose sender is a traced
 //     process.
 //
-// What stays out of reach is what the correlator itself cannot see: the
-// fds of an untraced close_range, a cwd-relative rename (both alike in
-// either graph).
+// What stays out of reach is what the correlator itself cannot see — the
+// fds of an untraced close_range, a cwd-relative rename (alike in either
+// graph) — and what it knows without an event:
+//
+//   - an open whose path could not be read writes no event, yet creates
+//     its fd in the correlator, whose number then no longer names the
+//     file an earlier open put there (correlate/syscalls.go openDetail);
+//   - the correlator applies an exec's closes at the sched_process_exec
+//     record, the rebuild at the exec event the argv record completes
+//     right after: a rename by another process between the two moves
+//     the closing fds in the rebuild only.
 
 // Open-flag and fcntl constants the fd tracking reads (Linux, the same
 // on amd64 and arm64).
@@ -55,11 +62,22 @@ const (
 	eBADF         = 9
 )
 
-// fdKey names one process incarnation's fd number.
-type fdKey struct {
-	pid uint32
+// fdState is what the rebuild knows of one open fd: its file name, for
+// the opened edges a rename adds, and its close-on-exec state, for what
+// an exec closes (known false: unknown, as in the correlator).
+type fdState struct {
+	path           string
+	hasPath        bool
+	cloexec, known bool
+}
+
+// procFDs is one pid's fd table, of the incarnation inc. It is keyed by
+// pid as the correlator's process state is: a fork or attach of a new
+// incarnation replaces the old incarnation's table whole (correlate's
+// seed), so fds an exited process leaked never move with a later rename.
+type procFDs struct {
 	inc uint64
-	fd  int32
+	fds map[int32]fdState
 }
 
 // connEnds is what a host saw of one conn_id: whether it was created as
@@ -75,12 +93,9 @@ type connEnds struct {
 type graphRebuilder struct {
 	nodes map[string]schema.Node
 	edges map[[3]string]schema.Edge
-	// paths are the open fds' file names, for renames.
-	paths map[fdKey]string
-	// cloexec is each fd's known close-on-exec state, which decides what
-	// an exec closes (absent: unknown, as in the correlator).
-	cloexec map[fdKey]bool
-	conns   map[string]*connEnds
+	// procs are the fd tables by pid.
+	procs map[uint32]*procFDs
+	conns map[string]*connEnds
 	// incs is each pid's newest incarnation: a signal names its sender by
 	// pid only.
 	incs map[uint32]uint64
@@ -88,7 +103,7 @@ type graphRebuilder struct {
 
 func newGraphRebuilder() *graphRebuilder {
 	return &graphRebuilder{nodes: map[string]schema.Node{}, edges: map[[3]string]schema.Edge{},
-		paths: map[fdKey]string{}, cloexec: map[fdKey]bool{}, conns: map[string]*connEnds{}, incs: map[uint32]uint64{}}
+		procs: map[uint32]*procFDs{}, conns: map[string]*connEnds{}, incs: map[uint32]uint64{}}
 }
 
 // RebuildGraph rebuilds one host session's graph from its events, in seq
@@ -119,11 +134,22 @@ func (g *graphRebuilder) add(ev *schema.Event) {
 		g.signaled(proc, ev)
 	case ev.Event == schema.KindFork:
 		g.forked(proc, ev)
-	case ev.Event == schema.KindAttach && ev.Args.Pattern != nil:
-		app := schema.AppNodeID(ev.Project, *ev.Args.Pattern)
-		g.nodes[app] = schema.Node{Type: schema.NodeApp, ID: app}
-		g.edge(schema.Edge{Type: schema.EdgeIncarnation, From: app, To: proc})
+	case ev.Event == schema.KindAttach:
+		g.attached(proc, ev)
 	}
+}
+
+// attached starts the target with an empty fd table — whatever the pid's
+// table held belongs to an earlier incarnation (correlate's seed) — and
+// adds a pattern's app node and incarnation edge.
+func (g *graphRebuilder) attached(proc string, ev *schema.Event) {
+	g.procs[ev.PID] = &procFDs{inc: ev.PIDInc, fds: map[int32]fdState{}}
+	if ev.Args.Pattern == nil {
+		return
+	}
+	app := schema.AppNodeID(ev.Project, *ev.Args.Pattern)
+	g.nodes[app] = schema.Node{Type: schema.NodeApp, ID: app}
+	g.edge(schema.Edge{Type: schema.EdgeIncarnation, From: app, To: proc})
 }
 
 // process adds the event's process node and runs_on edge and returns
@@ -229,12 +255,14 @@ func (g *graphRebuilder) signaled(proc string, ev *schema.Event) {
 		From: schema.ProcessNodeID(ev.HostID, *s, inc), To: proc})
 }
 
-// forked starts a fork's child with a copy of its parent's open fds and
+// forked starts a fork's child with a copy of its parent's fd table and
 // adds the forked edge (correlate's forked and inherit). Whatever the
-// child's key held belongs to a predecessor, as in the correlator; a
-// fork whose parent the record could not name inherits nothing.
+// child's pid held belongs to a predecessor and is replaced, as in the
+// correlator; a fork whose parent the record could not name starts
+// empty.
 func (g *graphRebuilder) forked(proc string, ev *schema.Event) {
-	g.dropFDs(ev.PID, ev.PIDInc, func(fdKey) bool { return true })
+	child := &procFDs{inc: ev.PIDInc, fds: map[int32]fdState{}}
+	g.procs[ev.PID] = child
 	a := ev.Args
 	if a.ParentPID == nil || a.ParentInc == nil {
 		return
@@ -244,25 +272,10 @@ func (g *graphRebuilder) forked(proc string, ev *schema.Event) {
 		g.incs[*a.ParentPID] = *a.ParentInc
 	}
 	g.edge(schema.Edge{Type: schema.EdgeForked, From: parent, To: proc})
-	// Keys added while ranging are the child's, which the filter skips
-	// (a fork names no parent of the child's own pid).
-	for k, ce := range g.cloexec {
-		if k.pid == *a.ParentPID && k.inc == *a.ParentInc {
-			g.cloexec[fdKey{ev.PID, ev.PIDInc, k.fd}] = ce
-		}
+	// The correlator copies whatever it holds under the parent's pid.
+	if pt := g.procs[*a.ParentPID]; pt != nil {
+		child.fds = maps.Clone(pt.fds)
 	}
-	for k, p := range g.paths {
-		if k.pid == *a.ParentPID && k.inc == *a.ParentInc {
-			g.paths[fdKey{ev.PID, ev.PIDInc, k.fd}] = p
-		}
-	}
-}
-
-// dropFDs forgets the fds of one process incarnation that drop selects.
-func (g *graphRebuilder) dropFDs(pid uint32, inc uint64, drop func(fdKey) bool) {
-	mine := func(k fdKey) bool { return k.pid == pid && k.inc == inc && drop(k) }
-	maps.DeleteFunc(g.paths, func(k fdKey, _ string) bool { return mine(k) })
-	maps.DeleteFunc(g.cloexec, func(k fdKey, _ bool) bool { return mine(k) })
 }
 
 func (g *graphRebuilder) edge(e schema.Edge) {
@@ -286,10 +299,4 @@ func (g *graphRebuilder) graph() schema.Graph {
 		Nodes: slices.Collect(maps.Values(g.nodes)), Edges: edges}
 	gr.Sort()
 	return gr
-}
-
-// compareFD orders fd keys, so renames visit fds in a fixed order (the
-// result does not depend on it; the order only keeps runs identical).
-func compareFD(a, b fdKey) int {
-	return cmp.Or(cmp.Compare(a.pid, b.pid), cmp.Compare(a.inc, b.inc), cmp.Compare(a.fd, b.fd))
 }

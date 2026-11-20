@@ -21,17 +21,39 @@ func (f feeder) execBoth(comm string) {
 	}
 }
 
+// rebuildCase drives a correlator through parent (pid 10) and child
+// (pid 20) feeders sharing one clock.
+type rebuildCase struct {
+	name string
+	run  func(parent, child feeder)
+}
+
 // TestRebuiltGraphIsTheCorrelators (task ze4, decision #3): the graph the
 // controller rebuilds from the events (federate.RebuildGraph) is the
 // correlator's own, for the graph state the fork and attach events and
 // F_SETFD's flags carry: forked edges, a child's inherited fds,
-// close-on-exec set by fcntl, app nodes and incarnation edges, and a
-// target that never made a traced call.
+// close-on-exec set by fcntl, app nodes and incarnation edges, a target
+// that never made a traced call, and a pid reused within the session.
 func TestRebuiltGraphIsTheCorrelators(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		run  func(parent, child feeder)
-	}{
+	for _, tc := range append(fdRebuildCases(), lifecycleRebuildCases()...) {
+		t.Run(tc.name, func(t *testing.T) {
+			c, sink := newTest(t)
+			now := new(uint64)
+			tc.run(feeder{t, c, 10, 11, now}, feeder{t, c, 20, 20, now})
+			if err := c.Close(); err != nil {
+				t.Fatal(err)
+			}
+			want, got := graphJSON(t, c.Graph()), graphJSON(t, federate.RebuildGraph(sink.events))
+			if got != want {
+				t.Errorf("rebuilt\n%s\nthe correlator's\n%s", got, want)
+			}
+		})
+	}
+}
+
+// fdRebuildCases: the fd table through forks, fcntl, execs and dups.
+func fdRebuildCases() []rebuildCase {
+	return []rebuildCase{
 		{"a child's rename moves the fd it inherited", func(p, c feeder) {
 			p.open("/d/a.tmp", 0, 4)
 			p.fork(20)
@@ -52,7 +74,7 @@ func TestRebuiltGraphIsTheCorrelators(t *testing.T) {
 			c.execBoth("sh")
 			c.rename("/d/x", "/d/y")
 		}},
-		{"F_GETFD reveals close-on-exec", func(p, c feeder) {
+		{"F_GETFD reveals close-on-exec", func(p, _ feeder) {
 			p.open("/d/x", 0, 4)
 			p.fcntl(4, unix.F_GETFD, 0, unix.FD_CLOEXEC)
 			p.execBoth("java")
@@ -69,6 +91,20 @@ func TestRebuiltGraphIsTheCorrelators(t *testing.T) {
 			c.read(5, 1)
 			p.write(6, 1)
 		}},
+	}
+}
+
+// lifecycleRebuildCases: attaches, and a pid reused by a fork or an
+// attach after its first process leaked an open fd — a later rename must
+// not move the dead process's fd (the reviewer's repro).
+func lifecycleRebuildCases() []rebuildCase {
+	reused := Identity{Comm: "again", StartNS: 7000}
+	leak := func(p, c feeder) {
+		p.fork(20)
+		c.open("/d/x", 0, 4) // never closed: pid 20 exits holding it
+		c.c.cfg.ProcInfo = func(pid uint32) (string, uint64) { return "again", reused.StartNS }
+	}
+	return []rebuildCase{
 		{"a target that never calls", func(p, _ feeder) {
 			if err := p.c.Seed(30, testIdentity(30)); err != nil {
 				p.t.Fatal(err)
@@ -83,19 +119,18 @@ func TestRebuiltGraphIsTheCorrelators(t *testing.T) {
 			}
 			p.open("/d/x", 0, 4)
 		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			c, sink := newTest(t)
-			now := new(uint64)
-			tc.run(feeder{t, c, 10, 11, now}, feeder{t, c, 20, 20, now})
-			if err := c.Close(); err != nil {
-				t.Fatal(err)
+		{"a pid reused by a fork", func(p, c feeder) {
+			leak(p, c)
+			p.fork(20)
+			p.rename("/d/x", "/d/y")
+		}},
+		{"a pid reused by an attach", func(p, c feeder) {
+			leak(p, c)
+			if err := p.c.Incarnation("*app*", 20, reused, 0); err != nil {
+				p.t.Fatal(err)
 			}
-			want, got := graphJSON(t, c.Graph()), graphJSON(t, federate.RebuildGraph(sink.events))
-			if got != want {
-				t.Errorf("rebuilt\n%s\nthe correlator's\n%s", got, want)
-			}
-		})
+			p.rename("/d/x", "/d/y")
+		}},
 	}
 }
 

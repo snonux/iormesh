@@ -12,11 +12,14 @@ traced surface, and M3's acceptance (2026-11-20) the Java, OTEL, `http`
 and `dns` fields and the methods, threads, classes and stacks tables,
 which were provisional until then. M4 appended the `fork` and
 `attach` kinds and `args.pattern`, `args.parent_pid` and
-`args.parent_incarnation` (task ze4, below). Fields are only ever appended,
-and appended fields are optional, so an older reader never sees a
-changed meaning. Enum values (`drop_reason`,
-`end_reason`, …) are appended the same way as event kinds, so a reader
-should pass an unknown value through. One meaning did narrow:
+`args.parent_incarnation` (task ze4, below). Fields are only ever
+appended, and appended fields are optional, so an older reader never
+sees a changed meaning. Enum values (`drop_reason`, `end_reason`, …)
+are appended the same way as event kinds, so a reader should pass an
+unknown value through. The strict readers here are the exception for
+kinds: `schema.DecodeEvent` and the segment reader reject an event
+kind they do not know (see "Readers are strict"), so a trace with
+the M4 kinds needs a reader of this version. One meaning did narrow:
 task vd4 moved skipped program runs out of a plain `drop`'s `args.lost`
 into their own `skipped_runs` drops (see `drop` below). M3
 appended the optional `otel` object (task 4b4, "OpenTelemetry span
@@ -309,7 +312,7 @@ says nothing about the individual calls' sizes or gaps.
 | `exec` | a successful exec of a traced process (`sched_process_exec` plus the argv record): `args.path` is the executable as exec'd (empty when unreadable, then absent), `args.argv` the command line, redacted; `fd` is `-1`, `ret` `0` |
 
 | `fork` | a new process of a traced one (`task_newtask` without `CLONE_THREAD`), on the **child**: `pid`, `pid_incarnation`, `tid` (= pid) and `comm` are the child's as it starts, `args.parent_pid`/`parent_incarnation` the forker; `fd` `-1`, `ret` `0`, `boot_ns` the record's (appended in M4, task ze4) |
-| `attach` | a process the session took on as a target — a `-pid` or port target at session start, or a `-pattern` match (then with `args.pattern`) — with the identity read then; `fd` `-1`, `ret` `0`, `boot_ns` the tracer's clock at the attach (appended in M4, task ze4) |
+| `attach` | a process the session took on as a target — a `-pid` or port target at session start, or a `-pattern` match (then with `args.pattern`) — with the identity read then; `fd` `-1`, `ret` `0`, `boot_ns` the tracer's clock at the attach — read when the event is numbered, so it can be later than the `boot_ns` of events with a higher `seq` (records the tracer handles later but stamped earlier); `seq` orders it (appended in M4, task ze4) |
 
 `fork` and `attach` carry what the graph's `forked` edge, a
 child's inherited fds, and the `app` node with its
