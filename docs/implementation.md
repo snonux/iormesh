@@ -3484,17 +3484,35 @@ connection into messages, `bound.go` intersects them,
   a range that crosses 4 GiB, or a stream that may have passed
   4 GiB (data bytes or a `tcp_sock` counter at 2³² or more)
   give no data messages: an offset there could name two sends.
-  A receive whose byte no traced send holds gives nothing.
+  So does a host whose trace reports any `drop`: lost records
+  make the byte sums that rule out a 4 GiB lap undercount. A
+  receive whose byte no traced send holds gives nothing.
+  Still open: a stream past 4 GiB whose traced bytes stay
+  below it and whose counter-bearing `tcp_state` records all
+  came early (a long-lived connection traced in part) is not
+  caught.
 - **Bounds.** θ = clock_B − clock_A (A < B by name) is below
-  `recv_B − send_A` and above `send_B − recv_A`. The merge
-  keeps one `ClockBound` per host pair and window
-  (`Options.ClockWindow`, default 1 minute, on A's clock) —
-  `Result.Clocks`, sorted — with `Lower`/`Upper` (each may be
-  absent), the conn ids that set them, the message count and
-  `Width()`. An empty intersection stays as it is
-  (`Empty()`), witnesses named, never clamped. A pair without
-  a fused connection has no bound; neither does a host with
-  itself.
+  `recv_B − send_A` and above `send_B − recv_A`, each at the
+  message's own instant. The merge keeps one `ClockBound` per
+  host pair and window (`Options.ClockWindow`, default 1
+  minute, on A's clock) — `Result.Clocks`, sorted — with the
+  raw `Lower`/`Upper` (each may be absent), the conn ids that
+  set them and the message count.
+- **Drift allowance.** θ moves within a window, so an early
+  upper bound and a late lower bound can leave an interval
+  that misses θ later in the window. Each bound therefore
+  carries `Drift` = `Options.DriftPPM` (default 1 ppm, the
+  NTP assumption of S2's "Limits") × the window length — 60 µs
+  for a minute — and `Interval()` widens the raw bound by it
+  on both sides; `Width()` and `Empty()` use the widened
+  interval. A clock that NTP steps or slews harder than the
+  assumed rate breaks it: raise `DriftPPM` for such hosts. An
+  empty interval stays as it is (`Empty()`), witnesses named,
+  never clamped. A pair without a fused connection has no
+  bound; neither does a host with itself.
+- **Where it surfaces.** `Result.Clocks` is in memory only:
+  the `build` summary (M4) and the M5 views will print the
+  bounds and widths; neither exists yet.
 - **Fusion stays clock-free.** The bound is computed after
   `Fuse`, from the fused connections only, and never picks
   partners: it is proven by those connections, so using it to
@@ -3504,22 +3522,38 @@ connection into messages, `bound.go` intersects them,
 - **Order.** `NewTimeline(r.Clocks).Order(x, y)` says
   `Before`, `After` or `Unordered` for two `Stamp`s. One host
   compares its own stamps directly; across hosts x precedes y
-  only when y − x exceeds every offset the bound allows, so a
-  single message's happens-before is always reproduced. Two
-  hosts that never talked are related through a chain of hosts
-  that did (breadth-first, fewest hops), their bounds summed.
-  Only two-sided, non-empty bounds in the window holding the
-  instant count — no extrapolation across time, since drift
-  moves the offset — and raw timestamps never break a tie.
+  only when y − x strictly exceeds every offset of the
+  widened interval. It is sound under the drift assumption,
+  not complete: the message that set a bound sits exactly on
+  it, so its own send and receive compare `Unordered`, and
+  stamps closer than the drift allowance stay unordered too.
+  Two hosts that never talked are related through a chain of
+  hosts that did, their intervals summed; the instant is
+  carried from clock to clock as an interval, and a hop counts
+  only when that whole interval lies in one window — no
+  extrapolation across time. The chain is chosen blind to time
+  (breadth-first, fewest hops, first by name), so it may lack
+  a window at the instant while another chain has one: then
+  the answer is `Unordered`. Raw timestamps never break a tie.
   The sequence view (M5) builds its cross-host order on it.
+- **Open: cycle consistency.** Each pair is intersected on its
+  own; bounds around a cycle of three or more hosts (A–B, B–C,
+  C–A) that contradict each other — no offsets satisfy all
+  three — are not detected yet (a negative-cycle check over
+  the hosts per window would).
 
 Tests (`clock_test.go`, `order_test.go`) inject skew into
 synthetic traces: +1.23 s, −0.99 s and 0 come back in exactly
 the tightest-gap interval; a 10 ms step a minute later gives
-two windows, and one window over both is empty and flagged;
-no fused connection gives no bound; 90 s skew fuses and is
-recovered, 3 minutes fuses nothing; the handshake alone is
-one-sided; three hosts A–B–C order A against C through B.
+two windows with exact intervals, and one window over both is
+empty and flagged; no fused connection gives no bound; 90 s
+skew fuses and is recovered, 3 minutes fuses nothing; the
+handshake alone is one-sided; a stream past 4 GiB or a host
+with drops leaves the handshake only; a receive spanning two
+sends pairs with the later; three hosts A–B–C order A against
+C through B; an offset drifting within the allowance after
+its bound never yields a false order (and unpadded it would);
+a message's own send and receive stay unordered.
 
 ### Service database
 

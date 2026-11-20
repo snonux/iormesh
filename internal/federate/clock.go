@@ -108,7 +108,9 @@ func (t *timing) data(ev *schema.Event) {
 
 // messages returns every causal edge one fused connection gives: the
 // handshake (client to server only) and each matched data message in
-// both directions. A connection both of whose ends one host traced (two
+// both directions — data messages only when neither stream may have
+// passed 4 GiB and neither host's trace dropped records (a drop makes the
+// byte sums that rule out a lap undercount). A connection both of whose ends one host traced (two
 // sessions over loopback) gives edges too; the bounds skip them, since a
 // host's clock needs no offset to itself.
 func (c *collector) messages(conn Conn) []message {
@@ -121,7 +123,8 @@ func (c *collector) messages(conn Conn) []message {
 	if m, ok := handshake(conn, &cl.timing, &sv.timing); ok {
 		out = append(out, m)
 	}
-	if long(&cl.timing) || long(&sv.timing) {
+	if long(&cl.timing) || long(&sv.timing) ||
+		c.lossy[conn.Client.Host] || c.lossy[conn.Server.Host] {
 		return out // offsets may repeat: matching bytes would be a guess
 	}
 	out = append(out, streamMessages(conn.Client.Host, conn.Server.Host, conn.ID,

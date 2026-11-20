@@ -222,6 +222,10 @@ func TestEventValidateRejects(t *testing.T) {
 			*e = validStreamWrite()
 			e.Bytes = 0
 		},
+		"args.tcp_seq on a write without conn_id": func(e *Event) {
+			*e = validStreamWrite()
+			e.ConnID = ""
+		},
 		// M3 step 8: otel ids come from the agent and are W3C ids.
 		"otel with attribution none": func(e *Event) {
 			e.Attribution, e.Java, e.Otel = AttributionNone, nil, validOtel()

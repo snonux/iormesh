@@ -2,26 +2,37 @@ package federate
 
 import (
 	"cmp"
+	"math"
 	"slices"
 	"time"
 )
 
-// DefaultClockWindow is how much of a host pair's traffic one clock
-// bound covers. The bound assumes one constant offset per window, and
-// NTP-disciplined clocks drift by about a ppm: 60 µs over a minute, in
-// the range of the bound's own width (S2: ≈10–25 µs on veth, 82–104 µs
-// for single exchanges), while a whole 4 h session drifts by ~14 ms and
-// its single interval could come out empty. A minute keeps drift visible
-// as bounds that move from window to window.
-const DefaultClockWindow = time.Minute
+// Clock-bound defaults.
+const (
+	// DefaultClockWindow is how much of a host pair's traffic one clock
+	// bound covers. Clocks drift, so the offset is not constant: a minute
+	// keeps the drift allowance (DefaultDriftPPM) small next to the bound
+	// itself, and drift over a long session shows up as bounds that move
+	// from window to window instead of one interval coming out empty.
+	DefaultClockWindow = time.Minute
+	// DefaultDriftPPM is the assumed worst rate, in parts per million, at
+	// which two NTP-disciplined hosts' clocks move apart (S2 "Limits":
+	// about a ppm). A clock NTP is stepping or slewing hard breaks the
+	// assumption; raise Options.DriftPPM for such hosts.
+	DefaultDriftPPM = 1.0
+)
 
 // ClockBound is what the fused connections between two hosts prove about
-// their clocks in one window: Offset = clock(HostB) − clock(HostA), in
-// ns, lies in [Lower, Upper]. Every message of the window adds one
-// inequality — a send precedes its receive — so the bound is never
-// wrong, only wide; its width says how far the two hosts' timestamps can
-// be compared. A side no message bounded is absent (HasLower, HasUpper
-// false): the handshake alone bounds one side only.
+// their clocks in one window. Offset = clock(HostB) − clock(HostA), in ns.
+// Every message adds one inequality — a send precedes its receive — that
+// held at the message's own instant: Lower and Upper are the tightest of
+// them. The offset moves within the window by drift, so at an arbitrary
+// instant of the window it lies in Interval(), the raw bound widened on
+// each side by Drift (the drift rate times the window's length). That
+// interval is right as long as the drift assumption holds; its width
+// says how far the two hosts' timestamps can be compared. A side no
+// message bounded is absent (HasLower, HasUpper false): the handshake
+// alone bounds one side only.
 type ClockBound struct {
 	HostA, HostB string // HostA < HostB
 	// Start and End delimit the window [Start, End) on HostA's wall
@@ -31,6 +42,10 @@ type ClockBound struct {
 	Upper      int64
 	HasLower   bool
 	HasUpper   bool
+	// Drift is the allowance, ns, that Interval adds to each side: how
+	// far the offset may move within the window at the assumed drift
+	// rate (Options.DriftPPM).
+	Drift int64
 	// LowerConn and UpperConn name the fused connection whose message set
 	// each side (the smallest id on a tie): where to look when a bound is
 	// empty.
@@ -44,24 +59,39 @@ type windowKey struct {
 	start uint64
 }
 
-// Empty reports contradictory inequalities: no offset satisfies them
-// all. It is reported, never clamped — a stepped clock, a suspend, drift
-// within the window or a wrong record, and either way nothing in the
-// window is ordered by it.
-func (b ClockBound) Empty() bool { return b.HasLower && b.HasUpper && b.Lower > b.Upper }
+// Interval is where the offset lies at any instant of the window: the
+// raw bound widened by Drift on each side. Meaningful for a side only
+// when that side is present.
+func (b ClockBound) Interval() (lo, hi int64) { return b.Lower - b.Drift, b.Upper + b.Drift }
 
-// Width is Upper − Lower, the bound's uncertainty; ok is false for a
-// one-sided or empty bound, which has no finite width.
+// Empty reports inequalities no offset drifting within the allowance
+// satisfies. It is reported, never clamped — a stepped clock, a suspend,
+// drift beyond the assumed rate or a wrong record, and either way
+// nothing in the window is ordered by it.
+func (b ClockBound) Empty() bool {
+	lo, hi := b.Interval()
+	return b.HasLower && b.HasUpper && lo > hi
+}
+
+// Width is the width of Interval, the bound's uncertainty; ok is false
+// for a one-sided or empty bound, which has no finite width.
 func (b ClockBound) Width() (int64, bool) {
 	if !b.HasLower || !b.HasUpper || b.Empty() {
 		return 0, false
 	}
-	return b.Upper - b.Lower, true
+	lo, hi := b.Interval()
+	return hi - lo, true
+}
+
+// driftAllowance is how far two clocks drifting apart at ppm parts per
+// million move within one window, rounded up so it never understates.
+func driftAllowance(window time.Duration, ppm float64) int64 {
+	return int64(math.Ceil(float64(window) * ppm / 1e6))
 }
 
 // clockBounds intersects the messages per host pair and window, sorted
 // by (HostA, HostB, Start). A message within one host bounds nothing.
-func clockBounds(msgs []message, window time.Duration) []ClockBound {
+func clockBounds(msgs []message, window time.Duration, drift int64) []ClockBound {
 	w := uint64(window)
 	acc := map[windowKey]*ClockBound{}
 	for _, m := range msgs {
@@ -76,7 +106,7 @@ func clockBounds(msgs []message, window time.Duration) []ClockBound {
 		k := windowKey{a, b, at / w * w}
 		cb := acc[k]
 		if cb == nil {
-			cb = &ClockBound{HostA: a, HostB: b, Start: k.start, End: k.start + w}
+			cb = &ClockBound{HostA: a, HostB: b, Start: k.start, End: k.start + w, Drift: drift}
 			acc[k] = cb
 		}
 		tighten(cb, m)

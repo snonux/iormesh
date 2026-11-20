@@ -140,7 +140,7 @@ IPv4 peers of dual-stack sockets are written unmapped
 
 | `snd_una`, `rcv_nxt` | `tcp_state` only, optional (appended in M4): the socket's `tcp_sock` fields of those names at the transition, u32 |
 | `bytes_acked`, `bytes_received` | `tcp_state` only, optional (appended in M4): the `tcp_sock` byte counters, u64 |
-| `tcp_seq` | optional (appended in M4): the TCP sequence number of the first stream byte the call moved, u32; the call moved `[tcp_seq, tcp_seq + bytes)` mod 2³². Only on an unfolded `write`, `writev`, `sendto`, `sendfile64`, `read`, `readv` or `recvfrom` that moved bytes |
+| `tcp_seq` | optional (appended in M4): the TCP sequence number of the first stream byte the call moved, u32; the call moved `[tcp_seq, tcp_seq + bytes)` mod 2³². Only on an unfolded `write`, `writev`, `sendto`, `sendfile64`, `read`, `readv` or `recvfrom` with a `conn_id` that moved bytes |
 
 The four `tcp_sock` fields come together or not at all: the
 controller's merge rebuilds the connection's ISN pair — the

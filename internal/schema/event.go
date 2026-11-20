@@ -231,7 +231,7 @@ type Args struct {
 	// number on both hosts, so the merge pairs each receive with the send
 	// that queued its last byte and bounds the two hosts' clock offset by
 	// the pair. Only on an unfolded data record of a TCP socket (write,
-	// writev, sendto, sendfile64, read, readv, recvfrom) that moved bytes:
+	// writev, sendto, sendfile64, read, readv, recvfrom) with a conn_id that moved bytes:
 	// a folded record has lost its calls' instants. Appended in M4 (task
 	// gb4); the tracer's capture (tcp_sendmsg/tcp_recvmsg hooks) is open.
 	TCPSeq *uint32 `json:"tcp_seq,omitempty" parquet:"tcp_seq,optional"`

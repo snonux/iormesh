@@ -322,7 +322,8 @@ func (e *Event) validateTCPSeq() error {
 // whose instants the merge's clock bounds read: one call that moved
 // bytes on a stream. On a folded record boot_ns is the first call's
 // enter and latency_ns a sum, so no instant there belongs to the call
-// that moved a given byte; without bytes there is no range to match.
+// that moved a given byte; without bytes there is no range to match, and
+// without a conn_id no connection to match it on.
 func (e *Event) validateStreamSeq() error {
 	if e.Args.TCPSeq == nil {
 		return nil
@@ -334,6 +335,9 @@ func (e *Event) validateStreamSeq() error {
 		return invalidf("args.tcp_seq on a folded %s (count %d)", e.Event, *e.Args.Count)
 	case e.Bytes == 0:
 		return invalidf("args.tcp_seq on a %s that moved no bytes", e.Event)
+	case e.ConnID == "":
+		// A sequence range on no connection can be matched to no peer.
+		return invalidf("args.tcp_seq on a %s without conn_id", e.Event)
 	}
 	return nil
 }

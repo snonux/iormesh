@@ -20,6 +20,10 @@ type Options struct {
 	// ClockWindow is how much traffic one clock bound covers; zero or
 	// less means DefaultClockWindow.
 	ClockWindow time.Duration
+	// DriftPPM is the assumed worst rate at which two hosts' clocks move
+	// apart, in parts per million: each clock bound is widened by it over
+	// its window (ClockBound.Drift). Zero or less means DefaultDriftPPM.
+	DriftPPM float64
 }
 
 // Result is a merged mesh: one graph over every source, the fusion that
@@ -38,7 +42,8 @@ type Result struct {
 	// reconciliation"), sorted by (HostA, HostB, Start). A pair without a
 	// fused connection has none: no traffic, no estimate. An empty bound
 	// is kept and reported (ClockBound.Empty). NewTimeline orders
-	// cross-host instants by them.
+	// cross-host instants by them. In memory only for now: the build
+	// summary and the M5 views are where they will surface.
 	Clocks []ClockBound
 }
 
@@ -67,6 +72,7 @@ func Merge(ctx context.Context, sources []Source, opt Options) (Result, error) {
 		window = DefaultWindow
 	}
 	clockWindow := cmp.Or(max(opt.ClockWindow, 0), DefaultClockWindow)
+	drift := driftAllowance(clockWindow, cmp.Or(max(opt.DriftPPM, 0), DefaultDriftPPM))
 	sorted := slices.SortedFunc(slices.Values(sources), func(a, b Source) int {
 		return cmp.Compare(a.Name(), b.Name())
 	})
@@ -88,7 +94,7 @@ func Merge(ctx context.Context, sources []Source, opt Options) (Result, error) {
 		fused[c.ID] = true
 		msgs = append(msgs, col.messages(c)...)
 	}
-	r.Clocks = clockBounds(msgs, clockWindow)
+	r.Clocks = clockBounds(msgs, clockWindow, drift)
 	requalify(traces, r.Renames)
 	r.Graph = union(traces, r.Renames, fused)
 	if err := r.Graph.Validate(); err != nil {

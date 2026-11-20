@@ -995,13 +995,21 @@ Kubernetes (M7) build on it.
   the server's accept exit), and the merge keeps one bound per
   host pair per 1-minute window (`Result.Clocks`), one-sided
   when only one direction has edges, empty and flagged when
-  they contradict. The bound never feeds back into fusion —
-  it is proven by the fused connections, so it cannot choose
-  them; the fusion window stays a wrap guard, and hosts skewed
-  beyond it get neither edge nor bound. Cross-host order
-  (`Timeline`) is decided only when the bound — summed along a
-  chain of hosts when two never talked directly — leaves no
-  doubt; otherwise it stays unordered.
+  they contradict. The offset drifts within a window, so each
+  bound is widened by an assumed drift rate (default 1 ppm,
+  NTP-disciplined hosts: 60 µs per side per minute); a clock
+  stepped or slewed harder breaks the assumption. "Records"
+  means in memory for now: the `build` summary and the M5 views
+  will print the bounds and widths. The bound never feeds back
+  into fusion — it is proven by the fused connections, so it
+  cannot choose them; the fusion window stays a wrap guard,
+  and hosts skewed beyond it get neither edge nor bound.
+  Cross-host order (`Timeline`) is decided only when the
+  widened bound — summed along a chain of hosts when two never
+  talked directly — leaves no doubt; otherwise, including a
+  message's own send and receive, it stays unordered.
+  Contradictions around a cycle of three or more hosts are not
+  detected yet.
 - **Service-interaction database**: every `build` also
   analyzes the merged traces and updates a controller-side
   database of app-to-app network interaction — per observed

@@ -102,7 +102,9 @@ func TestClockBoundRecoversSkew(t *testing.T) {
 		}
 		c := r.Clocks[0]
 		w, ok := c.Width()
-		if c.Lower != theta-2500 || c.Upper != theta+2000 || !ok || w != 4500 || c.Messages != 7 {
+		// 1 ppm over the 1-minute window pads each side by 60 µs.
+		if c.Lower != theta-2500 || c.Upper != theta+2000 || c.Drift != 60_000 ||
+			!ok || w != 124_500 || c.Messages != 7 {
 			t.Fatalf("θ=%d: got %s", theta, clockLine(c))
 		}
 	}
@@ -126,8 +128,8 @@ func TestClockBoundDrift(t *testing.T) {
 		t.Fatalf("%d windows, want 2", len(r.Clocks))
 	}
 	for i, theta := range []int64{int64(sec), int64(sec) + int64(10*time.Millisecond)} {
-		if c := r.Clocks[i]; c.Empty() || c.Lower > theta || c.Upper < theta {
-			t.Fatalf("window %d misses θ=%d: %s", i, theta, clockLine(c))
+		if c := r.Clocks[i]; c.Empty() || c.Lower != theta-2500 || c.Upper != theta+2000 {
+			t.Fatalf("window %d: want [θ−2500, θ+2000] around θ=%d: %s", i, theta, clockLine(c))
 		}
 	}
 	a, b = build()
@@ -220,5 +222,56 @@ func TestStreamMessages(t *testing.T) {
 	}
 	if !long(&timing{sent: wrap4G}) || !long(&timing{maxCount: wrap4G}) || long(&timing{}) {
 		t.Fatal("long misjudges a 4 GiB stream")
+	}
+}
+
+// TestClockBoundStreamGuards runs whole merges: a stream past 4 GiB or a
+// host that dropped records leaves the handshake as the only message,
+// and a receive spanning two sends pairs with the later one.
+func TestClockBoundStreamGuards(t *testing.T) {
+	const theta = int64(sec)
+	k := ISNPair{0x10, 0x20}
+	t.Run("stream past 4 GiB", func(t *testing.T) {
+		a, b := newTrace("hostA", "shop"), newTrace("hostB", "billing")
+		newConv(a, b, 0, theta, "x", k, t0).pingPong(t0 + 10*tus)
+		// A later record whose counters, mod 2^32, rebuild the same key.
+		big := uint64(1)<<32 + 23
+		a.event(100, schema.KindTCPState, 7, 0, t0+sec, "x-c", withSeq(
+			tuple("10.0.1.1:45678", "10.0.1.254:8080"), "FIN_WAIT1",
+			seqFields{SndUna: k.Client + 23, RcvNxt: k.Server + 302, BytesAcked: big,
+				BytesReceived: 301}))
+		assertHandshakeOnly(t, mergeTraces(t, Options{}, a, b), theta)
+	})
+	t.Run("host dropped records", func(t *testing.T) {
+		a, b := newTrace("hostA", "shop"), newTrace("hostB", "billing")
+		newConv(a, b, 0, theta, "x", k, t0).pingPong(t0 + 10*tus)
+		b.event(0, schema.KindDrop, schema.NoFD, 0, on(t0+sec, theta), "",
+			schema.Args{Lost: ptr(uint64(3))})
+		drop := &b.events[len(b.events)-1]
+		drop.PIDInc, drop.Comm = 0, ""
+		assertHandshakeOnly(t, mergeTraces(t, Options{}, a, b), theta)
+	})
+	t.Run("receive spanning two sends", func(t *testing.T) {
+		a, b := newTrace("hostA", "shop"), newTrace("hostB", "billing")
+		c := newConv(a, b, 0, theta, "x", k, t0)
+		at := t0 + 10*tus
+		a.data(100, schema.KindWrite, 7, at, tus, "x-c", k.Client+1, 10)
+		a.data(100, schema.KindWrite, 7, at+tus, tus, "x-c", k.Client+11, 10)
+		b.data(200, schema.KindRead, 9, on(at, c.offB), 2*tus+tus/2, "x-s", k.Client+1, 20)
+		// Paired with the second send (enter at+1 µs): θ + 1.5 µs, under
+		// the handshake's θ + 2 µs; the first send would give θ + 2.5 µs.
+		cl := mergeTraces(t, Options{}, a, b).Clocks
+		if len(cl) != 1 || cl[0].Upper != theta+1500 || cl[0].Messages != 2 {
+			t.Fatalf("got %v, want upper θ+1500 from 2 messages", cl)
+		}
+	})
+}
+
+// assertHandshakeOnly: the one bound left is the SYN's upper side.
+func assertHandshakeOnly(t *testing.T, r Result, theta int64) {
+	t.Helper()
+	if len(r.Clocks) != 1 || r.Clocks[0].Messages != 1 || r.Clocks[0].HasLower ||
+		r.Clocks[0].Upper != theta+2000 {
+		t.Fatalf("got %v, want the handshake's upper bound only", r.Clocks)
 	}
 }

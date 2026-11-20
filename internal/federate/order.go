@@ -27,12 +27,16 @@ type Stamp struct {
 // Timeline orders instants across hosts by the merge's clock bounds,
 // never by comparing raw timestamps of two clocks (PLAN.md M4 "Clock
 // reconciliation"): x on host X precedes y on host Y only when y − x
-// exceeds every offset the bound allows. The bounds come from
-// send→receive edges, so an order a single message proves directly is
-// one the bound proves too; hosts without traffic of their own are
-// related through a chain of hosts that have some, the offsets adding up
-// along it. The order is sound, not complete: what it cannot prove it
-// leaves Unordered.
+// strictly exceeds every offset the bound's Interval allows. Hosts
+// without traffic of their own are related through a chain of hosts that
+// have some, the intervals adding up along it.
+//
+// The order is sound under the drift assumption (Options.DriftPPM), not
+// complete: what it cannot prove it leaves Unordered. In particular the
+// message that set a bound sits exactly on it, so its own send and
+// receive compare as Unordered — the bound alone does not know they are
+// one message — and the drift allowance leaves stamps closer than it
+// unordered too.
 type Timeline struct {
 	// pairs holds the usable bounds — two-sided and not empty — per host
 	// pair in Start order. A one-sided bound proves no finite offset and
@@ -98,30 +102,36 @@ func (tl Timeline) Order(x, y Stamp) Relation {
 }
 
 // Offset bounds clock(to) − clock(from) around instant at on from's clock:
-// along the shortest chain of hosts with usable bounds (fewest hops, the
-// first by name on a tie), adding each hop's bound in the window that
-// holds the instant. ok is false when no chain exists or a hop has no
-// usable window then: an offset is never extrapolated across time, since
-// drift moves it.
+// along the shortest chain of hosts with usable bounds, adding each hop's
+// Interval in the window that holds the instant. The instant is carried
+// from clock to clock as an interval, since each hop knows the offset
+// only that well, and a hop counts only when that whole interval lies in
+// one window — a window's interval says nothing outside its own time.
+// ok is false when no chain exists or a hop has no such window: an
+// offset is never extrapolated across time, since drift moves it.
 func (tl Timeline) Offset(from, to string, at uint64) (lo, hi int64, ok bool) {
 	path := tl.path(from, to)
 	if path == nil {
 		return 0, 0, false
 	}
-	t := int64(at) // the instant on the current hop's clock
+	tlo, thi := int64(at), int64(at) // the instant on the current clock
 	for i := 1; i < len(path); i++ {
-		l, h, found := tl.hop(path[i-1], path[i], t)
+		l, h, found := tl.hop(path[i-1], path[i], tlo, thi)
 		if !found {
 			return 0, 0, false
 		}
 		lo, hi = lo+l, hi+h
-		t += l + (h-l)/2 // carry the instant over to the next clock
+		tlo, thi = tlo+l, thi+h
 	}
 	return lo, hi, true
 }
 
 // path finds the hosts from from to to by breadth-first search over
-// sorted peers, so the same bounds always give the same chain.
+// sorted peers, so the same bounds always give the same chain: fewest
+// hops, the first by name on a tie. The choice is blind to time — two
+// hosts are peers if any window bounds them — so the chosen chain may
+// lack a window at the instant asked about while another chain has one;
+// Offset then says not ok. Sound, not complete.
 func (tl Timeline) path(from, to string) []string {
 	prev := map[string]string{from: ""}
 	queue := []string{from}
@@ -146,23 +156,30 @@ func (tl Timeline) path(from, to string) []string {
 	return nil
 }
 
-// hop bounds clock(next) − clock(cur) at instant t on cur's clock. A
-// window is on its HostA's clock, so seen from HostB the instant is
-// first carried over by the window's own midpoint offset.
-func (tl Timeline) hop(cur, next string, t int64) (lo, hi int64, ok bool) {
+// hop bounds clock(next) − clock(cur) for an instant known to lie in
+// [tlo, thi] on cur's clock. A window is on its HostA's clock: from
+// HostA the interval is checked against it directly, from HostB it is
+// first carried over by the window's own offset interval.
+func (tl Timeline) hop(cur, next string, tlo, thi int64) (lo, hi int64, ok bool) {
 	if cur < next {
 		for _, b := range tl.pairs[[2]string{cur, next}] {
-			if int64(b.Start) <= t && t < int64(b.End) {
-				return b.Lower, b.Upper, true
+			if inWindow(b, tlo, thi) {
+				lo, hi := b.Interval()
+				return lo, hi, true
 			}
 		}
 		return 0, 0, false
 	}
 	for _, b := range tl.pairs[[2]string{next, cur}] {
-		ta := t - (b.Lower + (b.Upper-b.Lower)/2)
-		if int64(b.Start) <= ta && ta < int64(b.End) {
-			return -b.Upper, -b.Lower, true
+		l, h := b.Interval()
+		if inWindow(b, tlo-h, thi-l) {
+			return -h, -l, true
 		}
 	}
 	return 0, 0, false
+}
+
+// inWindow reports whether [lo, hi] on HostA's clock lies in b's window.
+func inWindow(b ClockBound, lo, hi int64) bool {
+	return int64(b.Start) <= lo && hi < int64(b.End)
 }

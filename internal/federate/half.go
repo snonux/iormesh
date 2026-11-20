@@ -63,14 +63,26 @@ type halfAcc struct {
 type LocalConn struct{ Host, ConnID string }
 
 // collector turns event streams into halves.
-type collector struct{ acc map[LocalConn]*halfAcc }
+type collector struct {
+	acc map[LocalConn]*halfAcc
+	// lossy marks hosts whose trace reports a drop: records are missing,
+	// so the byte sums that guard the clock bounds' offset matching
+	// against 4 GiB laps (long, clock.go) may undercount.
+	lossy map[string]bool
+}
 
-func newCollector() *collector { return &collector{acc: map[LocalConn]*halfAcc{}} }
+func newCollector() *collector {
+	return &collector{acc: map[LocalConn]*halfAcc{}, lossy: map[string]bool{}}
+}
 
 // add folds one event into its half. Events without a conn_id name no
 // connection and are ignored, as are kinds that say nothing about role,
-// key, owner or the instants the clock bounds read (timing.add).
+// key, owner or the instants the clock bounds read (timing.add); a drop
+// marks its host lossy.
 func (c *collector) add(ev *schema.Event) {
+	if ev.Event == schema.KindDrop {
+		c.lossy[ev.HostID] = true
+	}
 	if ev.ConnID == "" {
 		return
 	}
