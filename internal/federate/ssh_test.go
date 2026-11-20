@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -90,7 +91,7 @@ func TestSSHFetchArgv(t *testing.T) {
 		t.Fatal(err)
 	}
 	argv := rec.calls[0]
-	want := []string{"rsync", "-a", "--remove-source-files", "-e",
+	want := []string{"rsync", "-rt", "--remove-source-files", "-e",
 		"ssh '-o' 'BatchMode=yes' '-o' 'StrictHostKeyChecking=yes' '-o' 'ControlMaster=auto'" +
 			" '-o' 'ControlPath=/ctl/%C' '-o' 'ControlPersist=60s' '-o' 'ConnectTimeout=15'",
 		"--", "app1:/opt/iormesh/traces/shop/ready/", local + "/"}
@@ -162,5 +163,82 @@ func TestRunLocalCarriesStderr(t *testing.T) {
 	out, err := runLocal(context.Background(), "sh", "-c", "echo hi")
 	if err != nil || string(out) != "hi\n" {
 		t.Errorf("runLocal = %q, %v", out, err)
+	}
+}
+
+// localRsync is an execFunc that runs the real rsync, minus the remote
+// shell: -e and its value are dropped and "app1:" is cut off the source,
+// so rsync copies between two local directories with exactly the flags
+// Fetch chose.
+func localRsync(t *testing.T) execFunc {
+	t.Helper()
+	if _, err := exec.LookPath("rsync"); err != nil {
+		t.Skip("rsync not installed")
+	}
+	return func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		var local []string
+		for i := 0; i < len(args); i++ {
+			switch {
+			case args[i] == "-e":
+				i++
+			case strings.HasPrefix(args[i], "app1:"):
+				local = append(local, strings.TrimPrefix(args[i], "app1:"))
+			default:
+				local = append(local, args[i])
+			}
+		}
+		return runLocal(ctx, name, local...)
+	}
+}
+
+// TestFetchDistrustsServerModes runs real rsync against a "server" dir
+// that is 0755 and holds a 0666 segment and a symlink to /etc/passwd: the
+// local dir stays 0700, the symlink is not recreated, the segment moves.
+func TestFetchDistrustsServerModes(t *testing.T) {
+	remote := filepath.Join(t.TempDir(), "ready")
+	seg := filepath.Join(remote, "h-s-20261120T000000Z-000000.parquet")
+	mustDo(t, os.Mkdir(remote, 0o700), os.Chmod(remote, 0o755),
+		os.WriteFile(seg, []byte("PAR1"), 0o600), os.Chmod(seg, 0o666),
+		os.Symlink("/etc/passwd", filepath.Join(remote, "lnk")))
+	s, err := newSSH("app1", "/ctl", localRsync(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := filepath.Join(t.TempDir(), "shop")
+	if err := s.Fetch(context.Background(), remote, local); err != nil {
+		t.Fatal(err)
+	}
+	assertMode(t, local, 0o700)
+	if _, err := os.Lstat(filepath.Join(local, "lnk")); !os.IsNotExist(err) {
+		t.Errorf("symlink recreated locally: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(local, filepath.Base(seg))); err != nil || string(got) != "PAR1" {
+		t.Errorf("segment not fetched: %q, %v", got, err)
+	}
+	if _, err := os.Stat(seg); !os.IsNotExist(err) {
+		t.Errorf("remote segment not removed after transfer: %v", err)
+	}
+}
+
+// mustDo fails the test on the first setup error; the calls run in
+// argument order before it is entered.
+func mustDo(t *testing.T, errs ...error) {
+	t.Helper()
+	for _, err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestControlDirTooLong: a base dir that leaves no room for ssh's socket
+// name is refused up front, not with ssh's own obscure bind error.
+func TestControlDirTooLong(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("darwin's control dir is under $HOME, not the cache dir")
+	}
+	t.Setenv("XDG_CACHE_HOME", "/"+strings.Repeat("c", sunPathMax))
+	if _, err := ControlDir(); !errors.Is(err, ErrTransport) {
+		t.Errorf("ControlDir = %v, want ErrTransport", err)
 	}
 }

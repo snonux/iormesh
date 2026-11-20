@@ -3265,8 +3265,11 @@ iormeshctl rm app1.example.org                    # the whole host
   with `-` (an ssh option); IPv6 literals need an ssh_config
   alias. Project labels follow the tracer's rule
   (`internal/project`).
-- The file is written atomically, 0600 in a 0700 directory, and
-  refused when group- or other-writable. Unknown keys are an
+- The file is written atomically (temp file, fsync, rename, fsync
+  of the directory), 0600 in a 0700 directory. It is refused when
+  it, or its directory, is someone else's or group- or
+  other-writable, and when it is over 1 MiB. Pattern and flags
+  may not hold control characters. Unknown keys are an
   error, not dropped: M6 adds its `expand:` section (allowlist,
   `max_nodes`) to the schema rather than having `add` lose it.
 - `rm` edits the registry only, for now; the sync-then-uninstall
@@ -3290,7 +3293,7 @@ bootstrap is decision #1.)
 `collect`, per host and project:
 
 ```sh
-rsync -a --remove-source-files \
+rsync -rt --remove-source-files \
     H:/opt/iormesh/traces/shop/ready/ \
     ~/.local/share/iormesh/traces/shop/
 ```
@@ -3307,22 +3310,33 @@ The SSH transport:
 - `Run(ctx, argv...)` — `ssh [opts] -- HOST 'a' 'b' …`: ssh joins
   its command words into one string for the remote shell, so each
   argv element is single-quoted (`'` as `'\''`); an argument
-  stays one argument and nothing in it expands remotely.
-- `Fetch(ctx, remoteDir, localDir)` — `rsync -a
+  stays one argument and nothing in it expands remotely. That is
+  POSIX quoting: the deploying user's login shell on a server
+  must be a POSIX shell (csh/tcsh read `!` and newlines inside
+  single quotes).
+- `Fetch(ctx, remoteDir, localDir)` — `rsync -rt
   --remove-source-files -e 'ssh [opts]' -- HOST:DIR/ LOCAL/`:
-  a move, a file deleted remotely only once transferred. The
-  remote dir must be an absolute path from `[A-Za-z0-9._/-]`
-  without `..`; the local dir is made absolute (no `host:` misread)
-  and created 0700.
+  a move, a file deleted remotely only once transferred. `-rt`,
+  not `-a`: without `-p` the server's modes never reach the
+  controller (a 0755 `ready/` would open the local dir), and
+  without `-l` a symlink the server planted is skipped, not
+  recreated. The remote dir must be an absolute path from
+  `[A-Za-z0-9._/-]` without `..`; the local dir is made absolute
+  (no `host:` misread) and forced to 0700 after every fetch.
 - Options on every call: `BatchMode=yes` (key or agent only, no
   prompt to hang on), `StrictHostKeyChecking=yes` (the host key
   must already be in known_hosts — no trust on first use, never
   `no`), `ControlMaster=auto`, `ControlPersist=60s` and
-  `ControlPath=<user cache dir>/iormesh/ssh/%C` — one multiplexed
-  connection per host; the directory is 0700 and refused if it is
-  a symlink, someone else's, or open to others.
-- Tests record the argv through an injected runner and run the
-  quoting through a local `sh`; nothing reaches a host.
+  `ControlPath=<dir>/%C` — one multiplexed connection per host.
+  The dir is `<user cache dir>/iormesh/ssh`, or `~/.iormesh/ssh`
+  on macOS, whose `~/Library/Caches` leaves too little of a unix
+  socket's 104-byte path; a dir too long for one is refused up
+  front. It is 0700 and refused if it is a symlink, someone
+  else's, or open to others.
+- Tests record the argv through an injected runner, run the
+  quoting through a local `sh`, and run `Fetch`'s real rsync
+  flags between two local dirs (a 0755 source with a 0666 file
+  and a symlink); nothing reaches a host.
   `internal/buildgate` checks iormeshctl links no cgo package and
   cross-compiles for darwin/arm64.
 

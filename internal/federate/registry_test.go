@@ -99,6 +99,40 @@ func TestLoadRegistryRejects(t *testing.T) {
 	}
 }
 
+// TestRegistryDirAndSize: a directory others can write (they could rename
+// their own file over servers.yaml) is refused by Load and Save alike, and
+// so is a file over maxRegistrySize.
+func TestRegistryDirAndSize(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "iormesh")
+	path := filepath.Join(dir, "servers.yaml")
+	var r Registry
+	if err := r.Add("app1", shop()); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o770); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadRegistry(path); !errors.Is(err, ErrUnsafeFile) {
+		t.Errorf("Load in a group-writable dir = %v, want ErrUnsafeFile", err)
+	}
+	if err := r.Save(path); !errors.Is(err, ErrUnsafeFile) {
+		t.Errorf("Save in a group-writable dir = %v, want ErrUnsafeFile", err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil { // readable is fine
+		t.Fatal(err)
+	}
+	big := append([]byte("# "), make([]byte, maxRegistrySize)...)
+	if err := os.WriteFile(path, big, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadRegistry(path); !errors.Is(err, ErrTooLarge) {
+		t.Errorf("Load of an oversized file = %v, want ErrTooLarge", err)
+	}
+}
+
 func TestAddDuplicate(t *testing.T) {
 	var r Registry
 	if err := r.Add("app1", shop()); err != nil {
@@ -126,6 +160,9 @@ func TestAddRejects(t *testing.T) {
 		{"bad project", "app1", Project{Name: "-x", Target: Target{Pattern: "java"}}},
 		{"no target", "app1", Project{Name: "shop"}},
 		{"too broad", "app1", Project{Name: "shop", Target: Target{Pattern: "*"}}},
+		{"newline flag", "app1", Project{Name: "shop", Target: Target{Pattern: "java"},
+			Flags: []string{"-duration", "1h\nid"}}},
+		{"control pattern", "app1", Project{Name: "shop", Target: Target{Pattern: "java\x1b"}}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

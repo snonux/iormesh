@@ -16,12 +16,18 @@ truth.
   credentials.
 - **The registry is the deploy boundary.** Only hosts in
   `~/.config/iormesh/servers.yaml` are ever contacted. The file
-  is written 0600 in a 0700 directory and refused when group- or
-  other-writable — whoever edits it chooses where the operator's
-  key pushes a root-run tracer. Host names are checked before
-  they reach ssh (no leading `-`, no shell or `host:path`
-  characters), and remote commands go as single-quoted argv,
-  never as concatenated shell text.
+  is written 0600 in a 0700 directory and refused when it or its
+  directory is foreign-owned or group- or other-writable —
+  whoever edits it chooses where the operator's key pushes a
+  root-run tracer. Host names are checked before they reach ssh
+  (no leading `-`, no shell or `host:path` characters), and
+  remote commands go as single-quoted argv, never as
+  concatenated shell text; that quoting needs a POSIX login
+  shell on the server.
+- **A server controls trace contents, nothing else on the
+  controller.** Collect copies with `rsync -rt`: remote modes
+  and symlinks are not carried over, and the local trace
+  directory is forced to 0700.
 - **Host keys are verified, never trusted on first use.**
   iormeshctl runs the system `ssh`/`rsync` with
   `StrictHostKeyChecking=yes` and `BatchMode=yes`: an unknown or

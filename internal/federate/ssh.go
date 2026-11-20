@@ -9,8 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -49,6 +49,15 @@ const stderrLimit = 2048
 // waitDelay is runLocal's cmd.WaitDelay (see there).
 const waitDelay = 2 * time.Second
 
+// Unix socket path limits for the control sockets: sun_path holds 104
+// bytes on macOS (108 on Linux; the smaller one counts), and a socket
+// name is "/" + %C (40 hex digits) + the ".<16 random>" suffix ssh binds
+// first and renames from.
+const (
+	sunPathMax     = 104
+	controlNameLen = 1 + 40 + 17
+)
+
 // SSH satisfies Transport; checked at compile time.
 var _ Transport = SSH{}
 
@@ -78,17 +87,19 @@ func newSSH(host, controlDir string, ex execFunc) (SSH, error) {
 }
 
 // ControlDir returns, creating it if needed, the directory holding the ssh
-// control sockets: <user cache dir>/iormesh/ssh. A control socket is a
-// live, authenticated session to a server, so the directory must be the
-// user's own and closed to everyone else; one that is not is refused
-// rather than repaired, since someone else may already hold a socket in
-// it.
+// control sockets (controlBase). A control socket is a live,
+// authenticated session to a server, so the directory must be the user's
+// own and closed to everyone else; one that is not is refused rather than
+// repaired, since someone else may already hold a socket in it.
 func ControlDir() (string, error) {
-	cache, err := os.UserCacheDir()
+	dir, err := controlBase()
 	if err != nil {
 		return "", fmt.Errorf("ssh control dir: %w", err)
 	}
-	dir := filepath.Join(cache, "iormesh", "ssh")
+	if n := len(dir) + controlNameLen; n > sunPathMax {
+		return "", fmt.Errorf("%w: control socket path under %s would be %d bytes, over the %d a unix socket allows",
+			ErrTransport, dir, n, sunPathMax)
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("ssh control dir: %w", err)
 	}
@@ -99,6 +110,12 @@ func ControlDir() (string, error) {
 // arguments with spaces and hands the result to the remote login shell,
 // so every element is single-quoted first: an argument stays one argument
 // and nothing in it is expanded remotely.
+//
+// That quoting is POSIX shell quoting, so the deploying user's login shell
+// on the server must be a POSIX shell (sh, bash, dash, zsh, ksh): csh and
+// tcsh still read ! and newlines inside single quotes. The registry
+// refuses control characters in what it stores (Project.validate), so a
+// newline never gets this far from there.
 func (s SSH) Run(ctx context.Context, argv ...string) ([]byte, error) {
 	if len(argv) == 0 {
 		return nil, fmt.Errorf("%w: empty remote command", ErrTransport)
@@ -114,10 +131,18 @@ func (s SSH) Run(ctx context.Context, argv ...string) ([]byte, error) {
 // Fetch moves remoteDir's files into localDir with rsync over the same
 // multiplexed ssh connection. --remove-source-files deletes a remote file
 // only after it transferred, the delete-on-transfer of PLAN.md M4
-// "Collect". localDir is created 0700 when missing: traces carry command
-// lines, paths and endpoints, readable by the operator only. (rsync's
-// --chmod would say the same per file, but macOS's rsync/openrsync do not
-// all take it; a closed directory does the job on every controller.)
+// "Collect".
+//
+// The server is not trusted with anything on the controller beyond file
+// contents, so rsync runs -rt, not -a: without -p the remote modes do not
+// carry over (a 0755 ready/ would otherwise open localDir to everyone,
+// a 0666 segment stay 0666 here), and without -l a symlink the server
+// planted (lnk -> /etc/passwd) is skipped rather than recreated for a
+// later reader to follow. localDir is then forced to 0700 — traces carry
+// command lines, paths and endpoints, readable by the operator only — so
+// whatever modes the files get (source masked by umask) they sit behind
+// a closed directory. (rsync's --chmod would say it per file, but macOS's
+// rsync/openrsync do not all take it.)
 func (s SSH) Fetch(ctx context.Context, remoteDir, localDir string) error {
 	if !remotePath.MatchString(remoteDir) || strings.Contains(remoteDir, "..") {
 		return fmt.Errorf("%w: remote dir %q", ErrTransport, remoteDir)
@@ -130,9 +155,14 @@ func (s SSH) Fetch(ctx context.Context, remoteDir, localDir string) error {
 	if err := os.MkdirAll(local, 0o700); err != nil {
 		return fmt.Errorf("fetch: %w", err)
 	}
-	args := []string{"-a", "--remove-source-files", "-e", s.rsyncShell(), "--",
+	args := []string{"-rt", "--remove-source-files", "-e", s.rsyncShell(), "--",
 		s.host + ":" + strings.TrimSuffix(remoteDir, "/") + "/", local + "/"}
-	if _, err := s.exec(ctx, "rsync", args...); err != nil {
+	_, err = s.exec(ctx, "rsync", args...)
+	// Chmod even after a failed rsync: a partial transfer is data too.
+	if cerr := os.Chmod(local, 0o700); cerr != nil && err == nil {
+		err = cerr
+	}
+	if err != nil {
 		return fmt.Errorf("rsync %s:%s: %w", s.host, remoteDir, err)
 	}
 	return nil
@@ -181,6 +211,24 @@ func quoteArgv(argv []string) string {
 	return strings.Join(quoted, " ")
 }
 
+// controlBase is where the control sockets go: <user cache dir>/iormesh/ssh,
+// except on macOS, whose cache dir (~/Library/Caches) leaves too few of
+// sun_path's 104 bytes for a longer user name; ~/.iormesh/ssh there.
+func controlBase() (string, error) {
+	if runtime.GOOS == "darwin" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, ".iormesh", "ssh"), nil
+	}
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cache, "iormesh", "ssh"), nil
+}
+
 // runLocal is the real execFunc. stdin stays /dev/null, so ssh never reads
 // the operator's terminal; a failure carries the start of stderr, which is
 // where ssh explains itself (host key mismatch, permission denied).
@@ -208,23 +256,4 @@ func runLocal(ctx context.Context, name string, args ...string) ([]byte, error) 
 		return stdout.Bytes(), fmt.Errorf("%w: %s", err, msg)
 	}
 	return stdout.Bytes(), err
-}
-
-// checkPrivateDir requires dir to be a real directory (not a symlink),
-// owned by this user, with no group or other permissions.
-func checkPrivateDir(dir string) error {
-	info, err := os.Lstat(dir)
-	if err != nil {
-		return fmt.Errorf("ssh control dir: %w", err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("%w: %s is not a directory", ErrTransport, dir)
-	}
-	if info.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf("%w: %s has mode %v (want 0700)", ErrTransport, dir, info.Mode().Perm())
-	}
-	if st, ok := info.Sys().(*syscall.Stat_t); ok && int(st.Uid) != os.Getuid() {
-		return fmt.Errorf("%w: %s is owned by uid %d", ErrTransport, dir, st.Uid)
-	}
-	return nil
 }

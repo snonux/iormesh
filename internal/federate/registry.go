@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 
@@ -29,8 +31,13 @@ var (
 	ErrUnknownHost    = errors.New("registry: host not registered")
 	ErrUnknownProject = errors.New("registry: project not registered on host")
 	ErrInvalid        = errors.New("registry: invalid entry")
-	ErrUnsafeFile     = errors.New("registry: file writable by group or others")
+	ErrUnsafeFile     = errors.New("registry: file or directory not private to its owner")
+	ErrTooLarge       = errors.New("registry: file too large")
 )
+
+// maxRegistrySize bounds what LoadRegistry reads: a registry of thousands
+// of hosts is a few hundred KiB, and anything past 1 MiB is not one.
+const maxRegistrySize = 1 << 20
 
 // hostName is what `iormeshctl add` accepts: an optional user@ and a host
 // name, IPv4 address or ~/.ssh/config alias. It reaches ssh and rsync as an
@@ -147,6 +154,11 @@ func (r *Registry) Save(path string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("registry: %w", err)
 	}
+	// A directory that pre-existed may be open to others; MkdirAll does
+	// not touch it, so check before writing into it.
+	if err := checkRegistryDir(dir); err != nil {
+		return err
+	}
 	return writeAtomic(dir, path, buf.Bytes())
 }
 
@@ -248,12 +260,21 @@ func (p Project) validate() error {
 	if err := p.Target.Spec().Validate(); err != nil {
 		return fmt.Errorf("%w: project %q: %w", ErrInvalid, p.Name, err)
 	}
+	// Pattern and flags reach the server's login shell (quoted, see
+	// SSH.Run); control characters have no use there, and a newline is
+	// where non-POSIX shells stop honoring the quotes.
+	for _, v := range append([]string{p.Target.Pattern}, p.Flags...) {
+		if strings.IndexFunc(v, unicode.IsControl) >= 0 {
+			return fmt.Errorf("%w: project %q: control character in %q", ErrInvalid, p.Name, v)
+		}
+	}
 	return nil
 }
 
-// readPrivate reads path after checking that only its owner can write it:
-// a registry someone else can edit lets them choose where the operator's
-// key deploys a root-run tracer.
+// readPrivate reads path after checking that nobody but this user owns or
+// can write it or the directory holding it: a registry someone else can edit, or
+// replace by renaming over it, lets them choose where the operator's key
+// deploys a root-run tracer. The read is bounded by maxRegistrySize.
 func readPrivate(path string) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -264,10 +285,20 @@ func readPrivate(path string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("registry %s: %w", path, err)
 	}
-	if info.Mode().Perm()&0o022 != 0 {
-		return nil, fmt.Errorf("%w: %s has mode %v (want 0600)", ErrUnsafeFile, path, info.Mode().Perm())
+	if err := checkOwned(info, path, 0o022, ErrUnsafeFile); err != nil {
+		return nil, err
 	}
-	return io.ReadAll(f)
+	if err := checkRegistryDir(filepath.Dir(path)); err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxRegistrySize+1))
+	if err != nil {
+		return nil, fmt.Errorf("registry %s: %w", path, err)
+	}
+	if len(data) > maxRegistrySize {
+		return nil, fmt.Errorf("%w: %s is over %d bytes", ErrTooLarge, path, maxRegistrySize)
+	}
+	return data, nil
 }
 
 // writeAtomic is Save's temp-file-and-rename step. os.CreateTemp creates
@@ -295,6 +326,20 @@ func writeAtomic(dir, path string, data []byte) (err error) {
 	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		return fmt.Errorf("registry: %w", err)
+	}
+	return syncDir(dir)
+}
+
+// syncDir fsyncs dir so the rename itself is durable: without it a crash
+// can bring back the old directory entry, and the add or rm is lost.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("registry: %w", err)
+	}
+	defer func() { _ = d.Close() }()
+	if err := d.Sync(); err != nil {
+		return fmt.Errorf("registry: sync %s: %w", dir, err)
 	}
 	return nil
 }
