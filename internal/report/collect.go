@@ -63,7 +63,11 @@ type procAcc struct {
 	fileIdx map[string]int
 	fds     map[fdKey]int
 	conns   []*connAcc
-	connIdx map[string]int
+	// ends lists, per host-local conn id, the indexes of the process's
+	// ends of it: one process may hold both (a JVM calling its own server
+	// over loopback, a pipe within one process), and each end is an entry
+	// of its own.
+	ends    map[string][]int
 	threads []*threadAcc
 	thrIdx  map[uint32]int
 	methods map[string]*MethodStat
@@ -74,8 +78,11 @@ type fileAcc struct {
 	ops, methods map[string]bool
 }
 
+// connAcc is one end of a connection: the conn id and the fd instance
+// that holds it (fd -1 until an event with an fd names it).
 type connAcc struct {
 	local        string // the host-local conn id
+	fd           fdKey
 	role         string
 	addrL, addrR string
 	sent, recv   uint64
@@ -91,7 +98,7 @@ type threadAcc struct {
 // callAcc is a request on a thread's line before the connection's role
 // and merged id are known.
 type callAcc struct {
-	conn                 string // host-local conn id
+	end                  *connAcc
 	method, scheme, path string
 	status               uint16
 }
@@ -104,15 +111,22 @@ func NewCollector(methods map[string]map[uint64]schema.Method) *Collector {
 
 // Add folds one event of src into the rollup. It keeps no reference to
 // ev. Host-level records (pid 0: loss, session, end) belong to no
-// process; the view model reports them.
+// process; the view model reports them. An event some part of which
+// found no room under the cap counts once in untracked.
 func (c *Collector) Add(src Source, ev *schema.Event) {
+	if !c.add(src, ev) {
+		c.untracked++
+	}
+}
+
+// add is Add, false when the cap left part of ev untracked.
+func (c *Collector) add(src Source, ev *schema.Event) bool {
 	if ev.PID == 0 {
-		return
+		return true
 	}
 	p := c.proc(src, ev)
 	if p == nil {
-		c.untracked++
-		return
+		return false
 	}
 	p.p.Events++
 	if ev.Comm != "" {
@@ -123,9 +137,8 @@ func (c *Collector) Add(src Source, ev *schema.Event) {
 		p.p.JavaEvents++
 		method = normalize.CausingMethod(*ev, c.methods[src.Session])
 	}
-	if !c.thread(p, ev) || !c.method(p, method, ev.Bytes) {
-		c.untracked++
-	}
+	ok := c.thread(p, ev)
+	ok = c.method(p, method, ev.Bytes) && ok
 	switch ev.Event {
 	case schema.KindExec:
 		p.p.Argv = append([]string(nil), ev.Args.Argv...)
@@ -134,12 +147,10 @@ func (c *Collector) Add(src Source, ev *schema.Event) {
 			p.p.App = *ev.Args.Pattern
 		}
 	}
-	if ev.ConnID != "" && !c.conn(p, ev) {
-		c.untracked++
+	if ev.ConnID != "" {
+		ok = c.conn(p, ev) && ok
 	}
-	if !c.file(p, ev, method) {
-		c.untracked++
-	}
+	return c.file(p, ev, method) && ok
 }
 
 // take reserves one tracked entry, false once the cap is reached.
@@ -161,7 +172,7 @@ func (c *Collector) proc(src Source, ev *schema.Event) *procAcc {
 		return nil
 	}
 	p := &procAcc{hostID: ev.HostID, fileIdx: map[string]int{}, fds: map[fdKey]int{},
-		connIdx: map[string]int{}, thrIdx: map[uint32]int{}, methods: map[string]*MethodStat{}}
+		ends: map[string][]int{}, thrIdx: map[uint32]int{}, methods: map[string]*MethodStat{}}
 	p.p = Process{ID: schema.ProcessNodeID(ev.HostID, ev.PID, ev.PIDInc), Project: src.Project,
 		Host: src.Host, FQDN: src.FQDN, PID: ev.PID, Incarnation: ev.PIDInc}
 	c.procs[k] = p

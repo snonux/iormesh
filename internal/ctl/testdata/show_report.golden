@@ -9,7 +9,7 @@ unresolved java -> 203.0.113.9:5432 (1 of 1 connections)
 process    billing/app2/java[200] hostB.example.org (proc:hostB/200@1)
   serves   orders.example:8080
   events   7, 0 with a Java stack
-  conn     34a93de6a0731466 server 10.0.2.2:8080 -> 10.0.1.1:45678, service orders.example:8080, peer shop/app1/java[100]; sent 300 B, received 20 B; 3 requests
+  conn     34a93de6a0731466 fd 9 server 10.0.2.2:8080 -> 10.0.1.1:45678, service orders.example:8080, peer shop/app1/java[100]; sent 300 B, received 20 B; 3 requests
   thread   tid 200: 7 events, 320 B
     in     GET /orders/1 (http) -> 200, service orders.example:8080, peer shop/app1/java[100] (conn 34a93de6a0731466)
     in     GET /orders/2 (http) -> 200, service orders.example:8080, peer shop/app1/java[100] (conn 34a93de6a0731466)
@@ -18,8 +18,8 @@ process    billing/app2/java[200] hostB.example.org (proc:hostB/200@1)
 process    shop/app1/java[100] hostA.example.org (proc:hostA/100@1)
   events   12, 0 with a Java stack
   file     /etc/shop.conf: opened for reading 1x, 0 B read
-  conn     34a93de6a0731466 client 10.0.1.1:45678 -> 10.0.2.2:8080, service orders.example:8080, peer billing/app2/java[200]; sent 20 B, received 300 B; 3 requests
-  conn     c2 client 10.0.1.1:45700 -> 203.0.113.9:5432, service 203.0.113.9:5432, peer untraced; sent 0 B, received 0 B
+  conn     34a93de6a0731466 fd 7 client 10.0.1.1:45678 -> 10.0.2.2:8080, service orders.example:8080, peer billing/app2/java[200]; sent 20 B, received 300 B; 3 requests
+  conn     c2 fd 8 client 10.0.1.1:45700 -> 203.0.113.9:5432, service 203.0.113.9:5432, peer untraced; sent 0 B, received 0 B
   thread   tid 100: 12 events, 320 B
     out    GET /orders/1 (http) -> 200, service orders.example:8080, peer billing/app2/java[200] (conn 34a93de6a0731466)
     out    GET /orders/2 (http) -> 200, service orders.example:8080, peer billing/app2/java[200] (conn 34a93de6a0731466)

@@ -39,9 +39,10 @@ const (
 type Report struct {
 	Processes     []Process `json:"processes"`
 	MoreProcesses int       `json:"more_processes"`
-	// Untracked counts events the collector could not attribute to a
-	// file, connection or thread because its tracking cap was reached:
-	// the rollup is partial when it is not zero.
+	// Untracked counts events (each once) the collector could not fully
+	// attribute to a process, file, connection, thread or method because
+	// its tracking cap was reached: the rollup is partial when it is not
+	// zero.
 	Untracked uint64 `json:"untracked"`
 }
 
@@ -93,8 +94,9 @@ type File struct {
 	// … with " (ERRNO)" when the call failed.
 	Ops     []string `json:"ops"`
 	MoreOps int      `json:"more_ops"`
-	// Methods are the causing Java methods ("class#method") of its
-	// events, first seen first.
+	// Methods are the first MaxFileMethods causing Java methods
+	// ("class#method") of its events, first seen first; later ones are
+	// not listed (and not counted: that would need tracking them all).
 	Methods []string `json:"methods"`
 }
 
@@ -102,7 +104,11 @@ type File struct {
 type Conn struct {
 	// ID is the merged trace's conn id: what `iormeshctl query -conn`
 	// takes, shared by both ends of a fused connection.
-	ID   string `json:"id"`
+	ID string `json:"id"`
+	// FD is the descriptor this end was held by (-1 when no event with
+	// an fd named it): one process may hold both ends of a connection or
+	// a pipe, and each end is its own entry.
+	FD   int32  `json:"fd"`
 	Role string `json:"role"` // RoleClient, RoleServer or "" (unseen)
 	// Local and Remote are the addresses this end saw ("" unknown).
 	Local  string `json:"local"`

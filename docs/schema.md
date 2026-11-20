@@ -1188,7 +1188,7 @@ The Go types are `internal/report`'s `Report`.
     "write_opens": 1, "read_bytes": 0, "write_bytes": 36,
     "ops": ["rename -> /o/order-42.json"], "more_ops": 0,
     "methods": ["shop.DataStore#save"]}], "more_files": 0,
-  "conns": [{"id": "m-c1", "role": "server", "local": ":8001",
+  "conns": [{"id": "m-c1", "fd": 6, "role": "server", "local": ":8001",
     "remote": "", "service": "orders", "peer_state": "traced",
     "peers": ["shop/app1/java[10]"], "sent_bytes": 33,
     "recv_bytes": 36, "requests": […], "more_requests": 0}],
@@ -1212,16 +1212,21 @@ The Go types are `internal/report`'s `Report`.
   changed them. Opens count by access mode (`O_RDONLY` vs.
   `O_WRONLY`/`O_RDWR`; `creat` writes); the bytes are the reads and
   writes on the fd instance an open returned, until its close.
-  `ops` are the file-system changes (create, mkdir, unlink, rmdir,
-  `rename -> NEW` / `renamed from OLD`, link, symlink, truncate,
-  chmod, chown, utime, xattr changes) once each, ` (ERRNO)` when the
-  call failed — a failed open is the op `open (ENOENT)`. Metadata
-  reads (stat, readlink, getxattr) are left out.
+  `ops` are the file-system changes by kind (`creat`, `mkdir`,
+  `unlink`, `rmdir`, `rename -> NEW` / `renamed from OLD`, link,
+  symlink, truncate, chmod, chown, utime, xattr changes) once each,
+  ` (ERRNO)` when the call failed — a failed open is the op
+  `open (ENOENT)`. An `open` with `O_CREAT` is a write open, not an
+  op: the record does not say whether the file existed before.
+  Metadata reads (stat, readlink, getxattr) are left out.
 - **Methods** are causing methods by the goldens' rule
   (`normalize.CausingMethod`: the innermost frame of `java.stack`
   outside the JDK's packages), resolved through the session's
   methods tables; a stack the table cannot resolve names none.
-- **Connections** carry the merged conn id (what `query -conn`
+- **Connections** are one entry per end: a process holding both
+  ends of a connection (calling its own server over loopback) or of
+  a pipe gets two, told apart by `fd`, each the other's peer. They
+  carry the merged conn id (what `query -conn`
   takes), the role from `connect`/`accept`, the addresses this end
   saw, the server's label from the service database (its name,
   else `hostname:port`, else the address the client dialled), and
@@ -1234,10 +1239,12 @@ The Go types are `internal/report`'s `Report`.
   made for it come before it on the thread's line.
 - **Caps**: 256 processes, and per process 32 files, connections
   and threads, 32 calls per thread and requests per connection,
-  10 methods (by events, then bytes), 8 ops and 4 methods per file;
-  each cut is counted in its `more_*` field. While reading, the
-  collector tracks at most 2²⁰ entries; events past that are counted
-  in `untracked`, and the text starts with a `partial` line.
+  10 methods (by events, then bytes), 8 ops per file; each cut is
+  counted in its `more_*` field. A file lists its first 4 causing
+  methods and does not count the rest. While reading, the collector
+  tracks at most 2²⁰ entries; an event that found no room for some
+  part of it is counted once in `untracked`, and the text starts
+  with a `partial` line.
 - Like the trace, the rollup is metadata only — paths, sizes,
   redacted request lines — and deterministic: the same store,
   database and methods tables give the same bytes.

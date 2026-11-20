@@ -1,0 +1,11 @@
+process    shop/app1/java[50] h1.example.org (proc:h1/50@7)
+  serves   127.0.0.1:9000
+  events   11, 0 with a Java stack
+  conn     s1 fd 5 client - -> 127.0.0.1:9000, service 127.0.0.1:9000, peer shop/app1/java[50]; sent 10 B, received 4 B; 1 requests
+  conn     s1 fd 6 server 127.0.0.1:9000 -> -, service 127.0.0.1:9000, peer shop/app1/java[50]; sent 4 B, received 10 B; 1 requests
+  conn     p1 fd 8 - - -> -, service -, peer shop/app1/java[50]; sent 3 B, received 0 B
+  conn     p1 fd 7 - - -> -, service -, peer shop/app1/java[50]; sent 0 B, received 3 B
+  thread   tid 51: 7 events, 20 B
+    out    GET /self (http) -> 200, service 127.0.0.1:9000, peer shop/app1/java[50] (conn s1)
+  thread   tid 52: 4 events, 14 B
+    in     GET /self (http) -> 200, service 127.0.0.1:9000, peer shop/app1/java[50] (conn s1)

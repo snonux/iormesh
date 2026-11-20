@@ -4491,12 +4491,20 @@ internal/ctl/report.go         # methods tables, report.json, show report
   name and place, at most 2²⁰ rows over the build — a table that
   fails or would pass the cap is a bad segment (left out, named,
   exit 1), and its session's I/O names no method.
-- A loopback pair is one host-local conn id held by two processes,
-  a cross-host pair one merged id: either way the other end's
-  process is found by id, so `peers` needs no extra merge state.
+- A loopback pair is one host-local conn id held by two ends, a
+  cross-host pair one merged id: either way the other end is found
+  by id, so `peers` needs no extra merge state. An entry is one
+  end — the conn id and the fd instance holding it — so a process
+  calling its own server, or writing to its own pipe, gets two
+  entries, each the other's peer (review fix: keyed by conn id
+  alone, the two merged into one server entry with doubled bytes).
+  An http event has no fd: the client's carries the request host,
+  the server's none, which picks the end.
 - Tests: goldens of the rollup as JSON and text (a gateway → orders
   loopback pair, config read, create-tmp-then-rename, a failed open,
-  an untraced callee), twice for determinism; the caps (`partial`,
+  an untraced callee; a process connected to itself and to its own
+  pipe), twice for determinism; the caps (`partial`, each event
+  counted once,
   `more files`), terminal safety, no method without a table; in
   `internal/ctl`, `report.json` and `show report` goldens of the M4
   mesh, a damaged methods table, and `show report` without a
@@ -4535,11 +4543,17 @@ magefile_eval.go            # mage evalTrace (root), mage eval
 - The set sits in one file with its scenario and threshold
   (the sketch had a scenario per question). The matchers are
   `answer_contains` (all), `answer_sequence` (in order),
-  `answer_excludes` (none of) and `answer_regex`, all
-  case-insensitive; a set without a matcher on some question, an
-  unknown key or an empty matcher string is refused.
-  `TestQuestionSetGrounded` holds every contains and sequence
-  string to the scenario's `expect.json`.
+  `answer_excludes` (none of), `answer_regex` and
+  `answer_not_regex`, all case-insensitive; a set without a
+  matcher on some question, an unknown key or an empty matcher
+  string is refused. `TestQuestionSetGrounded` holds every
+  contains and sequence string to the scenario's `expect.json`.
+  The exclusions name the wrong candidates (other methods, paths,
+  services, an order reversed), so listing everything is no way to
+  the threshold: `TestListingEverythingFails` scores every
+  candidate string of the set and the declarations, sorted and
+  reversed, against each question and requires a failure, and
+  `TestAnswersPass` requires the concise right answers to pass.
 - A run builds the store with `iormeshctl build` into a scratch
   database and builds directory (never the operator's), reads
   `iormeshctl show report`, and asks each question with a fresh
@@ -4549,14 +4563,20 @@ magefile_eval.go            # mage evalTrace (root), mage eval
   query runs `iormeshctl query` with the harness's store,
   database, projects and a 32 KiB cap, plus the model's flags if
   they are slice flags only; `SOURCE` reads through `os.Root`
-  below `workload/src`. Refusals and errors are the model's to
-  read; a failing model command fails the question.
+  below `workload/src`. Every iormeshctl run has a timeout (5
+  minutes; a query that hits it is the model's to read) and a
+  scratch `HOME` and `XDG_*_HOME`, so no default path reaches the
+  operator's own files. Refusals and errors are the model's to
+  read; a failing model command fails the question, its stderr
+  going to the terminal only — never into the kept results file.
 - `eval/results/<date>-<scenario>.json` keeps per question the
   answer, turns, actions and failures, and the score; the model
   appears only by its `-model-name` label (a command line may
   carry credentials). Below the threshold the command exits 1.
 - `mage evalTrace` runs `TestMicroservices` once as root with
-  `IORMESH_EVAL_EXPORT`: a run that passed its golden copies its
+  `IORMESH_EVAL_EXPORT` (an existing store is replaced only when it
+  holds nothing but `<project>/<host>/*.parquet`): a run that passed
+  its golden copies its
   segments to `eval/store/<project>/local/` (git-ignored), owned
   by the sudo user. `mage eval` needs `IORMESH_EVAL_MODEL_CMD`
   (and optionally `IORMESH_EVAL_STORE`, `IORMESH_EVAL_MODEL_NAME`)

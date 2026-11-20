@@ -1424,7 +1424,8 @@ Kubernetes (M7) build on it.
   capped at 32 KiB, only the slice flags accepted, source read
   only below `workload/src` — then scores each answer with the
   declared matchers (contains, in-order sequence, excludes,
-  regex) into `eval/results/<date>-<scenario>.json`. The model is
+  regex, excluded regex — an answer listing every candidate
+  fails every question, by test) into `eval/results/<date>-<scenario>.json`. The model is
   a command (prompt on stdin, reply on stdout) the operator
   must name: there is no default, since the prompt carries trace
   data, so the eval never runs on its own and never in `mage

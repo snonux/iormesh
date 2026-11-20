@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestParseReply: the first action line wins; ANSWER: takes the rest.
@@ -127,5 +128,25 @@ func TestCtlArgs(t *testing.T) {
 	if got, err := c.Query(ctx, []string{"-thread", "fail"}); err != nil ||
 		!strings.HasSuffix(got, "-thread fail\nerror: iormeshctl query exited 2") {
 		t.Errorf("failing query: %q %v", got, err)
+	}
+}
+
+// TestCtlSandbox: every iormeshctl run gets the scratch HOME and XDG
+// directories, and one that hangs is cut by the timeout.
+func TestCtlSandbox(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "iormeshctl")
+	script := "#!/bin/sh\necho \"$HOME $XDG_CONFIG_HOME $XDG_DATA_HOME\"\ncase \"$*\" in *hang*) sleep 5;; esac\n"
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	c := Ctl{Path: bin, Store: "/s", Home: "/w/home", SliceBytes: 4096, Timeout: 100 * time.Millisecond}
+	ctx := context.Background()
+	if got, err := c.Report(ctx); err != nil || got != "/w/home /w/home/config /w/home/data\n" {
+		t.Errorf("env: %q %v", got, err)
+	}
+	start := time.Now()
+	got, err := c.Query(ctx, []string{"-thread", "hang"})
+	if err != nil || !strings.Contains(got, "error: iormeshctl query: timed out") || time.Since(start) > 3*time.Second {
+		t.Errorf("a hanging query: %q %v after %v", got, err, time.Since(start))
 	}
 }

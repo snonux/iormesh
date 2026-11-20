@@ -103,17 +103,20 @@ func TestSessionModelError(t *testing.T) {
 }
 
 // TestCommandModel: the prompt goes to stdin, the reply comes from
-// stdout; a failing command is an error naming its stderr, and a slow
-// one is cut by the timeout.
+// stdout; a failing command is an error that keeps its stderr out (the
+// error lands in the results file) and passes it to the terminal, and a
+// slow one is cut by the timeout.
 func TestCommandModel(t *testing.T) {
 	ctx := context.Background()
 	c := Command{Argv: []string{"/bin/sh", "-c", `read q; echo "ANSWER: got $q"`}, Timeout: 10 * time.Second}
 	if got, err := c.Reply(ctx, "hello\n"); err != nil || got != "ANSWER: got hello\n" {
 		t.Errorf("%q %v", got, err)
 	}
-	c.Argv = []string{"/bin/sh", "-c", "echo broken >&2; exit 3"}
-	if _, err := c.Reply(ctx, ""); err == nil || !strings.Contains(err.Error(), "broken") {
-		t.Errorf("failing command: %v", err)
+	var stderr strings.Builder
+	c.Argv, c.Stderr = []string{"/bin/sh", "-c", "echo secret-key-xyz >&2; exit 3"}, &stderr
+	if _, err := c.Reply(ctx, ""); err == nil || strings.Contains(err.Error(), "secret") ||
+		stderr.String() != "secret-key-xyz\n" {
+		t.Errorf("failing command: %v; stderr %q (must reach the terminal, never the error)", err, stderr.String())
 	}
 	c.Argv, c.Timeout = []string{"/bin/sh", "-c", "sleep 5"}, 50*time.Millisecond
 	if _, err := c.Reply(ctx, ""); err == nil {

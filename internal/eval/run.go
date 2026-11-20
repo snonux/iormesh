@@ -48,6 +48,11 @@ type Action struct {
 type Command struct {
 	Argv    []string
 	Timeout time.Duration
+	// Stderr receives the command's stderr (the operator's terminal):
+	// never the results file, which is kept and may be committed, while
+	// a model wrapper's stderr can carry anything (an API error echoing
+	// a key, a local path). nil discards it.
+	Stderr io.Writer
 }
 
 var _ Model = Command{}
@@ -57,12 +62,15 @@ var _ Model = Command{}
 func (c Command) Reply(ctx context.Context, prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.Timeout)
 	defer cancel()
-	var out, errOut bytes.Buffer
+	var out bytes.Buffer
 	cmd := exec.CommandContext(ctx, c.Argv[0], c.Argv[1:]...)
 	cmd.Stdin = strings.NewReader(prompt)
-	cmd.Stdout, cmd.Stderr = &capped{w: &out, n: maxReplyBytes}, &capped{w: &errOut, n: 4 << 10}
+	cmd.Stdout = &capped{w: &out, n: maxReplyBytes}
+	if c.Stderr != nil {
+		cmd.Stderr = c.Stderr
+	}
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("model command: %w: %s", err, strings.TrimSpace(errOut.String()))
+		return "", fmt.Errorf("model command: %w (its stderr went to the terminal)", err)
 	}
 	return out.String(), nil
 }

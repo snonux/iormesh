@@ -34,6 +34,9 @@ type Question struct {
 	Excludes []string `yaml:"answer_excludes"`
 	// Regex must match the answer (RE2, matched case-insensitively).
 	Regex string `yaml:"answer_regex"`
+	// NotRegex must not match the answer: an exclusion a substring cannot
+	// say (a whole path, not every path it prefixes).
+	NotRegex string `yaml:"answer_not_regex"`
 }
 
 // LoadSet reads a question file strictly — an unknown key is an error,
@@ -87,7 +90,7 @@ func (q Question) validate() error {
 		return errors.New("no id")
 	case strings.TrimSpace(q.Question) == "":
 		return errors.New("no question")
-	case len(q.Contains)+len(q.Sequence)+len(q.Excludes) == 0 && q.Regex == "":
+	case len(q.Contains)+len(q.Sequence)+len(q.Excludes) == 0 && q.Regex == "" && q.NotRegex == "":
 		return errors.New("no matcher: the answer could not be scored")
 	}
 	for _, list := range [][]string{q.Contains, q.Sequence, q.Excludes} {
@@ -97,9 +100,9 @@ func (q Question) validate() error {
 			}
 		}
 	}
-	if q.Regex != "" {
-		if _, err := regexp.Compile("(?i)" + q.Regex); err != nil {
-			return fmt.Errorf("answer_regex: %w", err)
+	for name, re := range map[string]string{"answer_regex": q.Regex, "answer_not_regex": q.NotRegex} {
+		if _, err := regexp.Compile("(?i)" + re); re != "" && err != nil {
+			return fmt.Errorf("%s: %w", name, err)
 		}
 	}
 	return nil
@@ -128,6 +131,9 @@ func (q Question) Score(answer string) []string {
 	}
 	if q.Regex != "" && !regexp.MustCompile("(?i)"+q.Regex).MatchString(answer) {
 		fails = append(fails, fmt.Sprintf("no match for /%s/", q.Regex))
+	}
+	if q.NotRegex != "" && regexp.MustCompile("(?i)"+q.NotRegex).MatchString(answer) {
+		fails = append(fails, fmt.Sprintf("matches excluded /%s/", q.NotRegex))
 	}
 	return fails
 }

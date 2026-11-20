@@ -18,6 +18,7 @@
       "conns": [
         {
           "id": "m-c1",
+          "fd": 5,
           "role": "client",
           "local": "",
           "remote": "127.0.0.1:8001",
@@ -163,6 +164,7 @@
       "conns": [
         {
           "id": "m-c1",
+          "fd": 6,
           "role": "server",
           "local": ":8001",
           "remote": "",
@@ -186,6 +188,7 @@
         },
         {
           "id": "c2",
+          "fd": 8,
           "role": "client",
           "local": "",
           "remote": "127.0.0.1:8002",

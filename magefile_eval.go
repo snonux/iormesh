@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/magefile/mage/mg"
 	"github.com/magefile/mage/sh"
@@ -61,13 +62,17 @@ func Eval() error {
 // EvalTrace records the eval's trace (requires root, sudo -n): it runs
 // TestMicroservices once, which — its golden passed — exports the run's
 // segments into IORMESH_EVAL_STORE (default eval/store) as a collected
-// store owned by the calling user. An existing store is replaced.
+// store owned by the calling user. An existing store is replaced — only
+// one that holds nothing but a store's layout (isEvalStore).
 func EvalTrace() error {
-	mg.SerialDeps(Build, WorkloadBuild, AgentBuild)
 	store, err := filepath.Abs(evalStore())
 	if err != nil {
 		return err
 	}
+	if err := isEvalStore(store); err != nil {
+		return err // before any build: a wrong path fails at once
+	}
+	mg.SerialDeps(Build, WorkloadBuild, AgentBuild)
 	if err := os.RemoveAll(store); err != nil {
 		return err
 	}
@@ -91,6 +96,33 @@ func EvalTrace() error {
 	}
 	fmt.Printf("eval store %s: %d segment files\n", store, len(entries))
 	return nil
+}
+
+// isEvalStore refuses to let EvalTrace replace a directory that is not
+// a store a previous EvalTrace left: IORMESH_EVAL_STORE could name a home
+// directory by mistake. A missing directory is fine; otherwise every
+// entry must be <project>/<host>/<segment>.parquet — directories two
+// levels deep, regular parquet files on the third, nothing else.
+func isEvalStore(store string) error {
+	if _, err := os.Lstat(store); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return filepath.WalkDir(store, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(store, p)
+		if err != nil || rel == "." {
+			return err
+		}
+		depth := len(strings.Split(rel, string(filepath.Separator)))
+		ok := d.IsDir() && depth <= 2 ||
+			d.Type().IsRegular() && depth == 3 && strings.HasSuffix(p, ".parquet")
+		if !ok {
+			return fmt.Errorf("%s holds %s, which is no part of an eval store: not replacing it", store, rel)
+		}
+		return nil
+	})
 }
 
 // evalStore is IORMESH_EVAL_STORE or the default.

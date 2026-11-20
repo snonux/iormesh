@@ -96,7 +96,7 @@ func fileLine(f File) string {
 // N requests".
 func connLine(c Conn) string {
 	s := termsafe.String
-	line := fmt.Sprintf("%s %s %s -> %s, service %s, %s", s(c.ID), dash(c.Role), dash(s(c.Local)),
+	line := fmt.Sprintf("%s fd %d %s %s -> %s, service %s, %s", s(c.ID), c.FD, dash(c.Role), dash(s(c.Local)),
 		dash(s(c.Remote)), dash(s(c.Service)), peerText(c.PeerState, c.Peers))
 	line += fmt.Sprintf("; sent %d B, received %d B", c.SentBytes, c.RecvBytes)
 	if n := len(c.Requests) + c.MoreRequests; n > 0 {

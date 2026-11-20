@@ -2,6 +2,7 @@ package eval
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Defaults of the tools' caps.
@@ -42,7 +44,17 @@ type Ctl struct {
 	Store, DB, Builds string
 	Projects          []string
 	SliceBytes        int64
+	// Home is a scratch directory every iormeshctl run gets as HOME and
+	// XDG_*_HOME, so no default path (registry, store, database) can
+	// reach the operator's own; "" leaves the environment as it is.
+	Home string
+	// Timeout bounds each iormeshctl run (DefaultCtlTimeout when zero),
+	// so a query the model shaped cannot stall the eval.
+	Timeout time.Duration
 }
+
+// DefaultCtlTimeout bounds one iormeshctl run of the eval.
+const DefaultCtlTimeout = 5 * time.Minute
 
 // paths are the flags every command shares.
 func (c Ctl) paths() []string {
@@ -86,6 +98,9 @@ func (c Ctl) Query(ctx context.Context, flags []string) (string, error) {
 		[]string{"-max-bytes", strconv.FormatInt(c.SliceBytes, 10)}, flags)
 	out, err := c.run(ctx, args)
 	var exit *exec.ExitError
+	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+		return out + "error: " + err.Error() + " (narrow the slice)", nil
+	}
 	if errors.As(err, &exit) {
 		return fmt.Sprintf("%serror: iormeshctl query exited %d", out, exit.ExitCode()), nil
 	}
@@ -94,10 +109,24 @@ func (c Ctl) Query(ctx context.Context, flags []string) (string, error) {
 
 // run runs iormeshctl and returns stdout and stderr together.
 func (c Ctl) run(ctx context.Context, args []string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, cmp.Or(c.Timeout, DefaultCtlTimeout))
+	defer cancel()
 	var out bytes.Buffer
 	cmd := exec.CommandContext(ctx, c.Path, args...)
 	cmd.Stdout, cmd.Stderr = &out, &out
+	if c.Home != "" {
+		cmd.Env = append(os.Environ(), "HOME="+c.Home, "XDG_CONFIG_HOME="+filepath.Join(c.Home, "config"),
+			"XDG_DATA_HOME="+filepath.Join(c.Home, "data"), "XDG_CACHE_HOME="+filepath.Join(c.Home, "cache"),
+			"XDG_STATE_HOME="+filepath.Join(c.Home, "state"))
+	}
+	// A child that outlives the kill (holding stdout) must not hold the
+	// eval up either.
+	cmd.WaitDelay = time.Second
 	err := cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		err = fmt.Errorf("iormeshctl %s: timed out after %v: %w", args[0], cmp.Or(c.Timeout, DefaultCtlTimeout),
+			context.DeadlineExceeded)
+	}
 	return out.String(), err
 }
 

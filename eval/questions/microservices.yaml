@@ -4,9 +4,11 @@
 # (workload/scenarios/microservices/expect.json) — a test holds each
 # answer_contains and answer_sequence string to that file — and the model
 # finds it only through the summary rollup, iormeshctl query and the
-# workload's source. answer_excludes name the wrong method a guess from
-# the source alone would give, only where a concise answer has no reason
-# to mention it.
+# workload's source. answer_excludes and answer_not_regex name the wrong
+# answers a guess would give — the other methods, paths, services — so
+# that an answer listing every candidate fails every question
+# (TestListingEverythingFails); a concise answer has no reason to
+# mention them.
 #
 # The threshold is pinned here, with the questions (PLAN.md: "pinned when
 # the question set is written"): 8 of 10. Change it only with the set,
@@ -33,13 +35,16 @@ questions:
       List the services the gateway's checkout touches, in the order they
       are first reached, starting with the gateway itself.
     answer_sequence: ["gateway", "orders", "inventory", "billing"]
+    answer_not_regex: 'billing[\s\S]*inventory[\s\S]*billing|inventory[\s\S]*orders[\s\S]*inventory'
 
   - id: orders-next-call
     question: >-
       The orders service's thread that served POST /orders called two other
-      services while serving it. Which service did it call second, and with
-      which request (method and path)?
-    answer_contains: ["billing", "/billing/charge"]
+      services while serving it. List the requests (method and path) it
+      made, in the order it made them.
+    answer_sequence: ["/inventory/reserve", "/billing/charge"]
+    answer_excludes: ["/inventory/stock"]
+    answer_not_regex: '/billing/charge[\s\S]*/inventory/reserve'
 
   - id: http-call-method
     question: >-
@@ -53,11 +58,14 @@ questions:
       Which service read the certificate the billing service published
       (billing.crt), and with which method?
     answer_contains: ["orders", "ServiceNode#readCert"]
+    answer_excludes: ["gateway"]
 
   - id: inventory-paths
     question: >-
       Which HTTP request paths did the inventory service serve?
     answer_contains: ["/inventory/reserve", "/inventory/stock/widget"]
+    answer_excludes: ["/billing/charge"]
+    answer_not_regex: '/orders\b'
 
   - id: billing-record
     question: >-
@@ -66,11 +74,13 @@ questions:
       order)?
     answer_contains: ["invoice-42.json"]
     answer_regex: 'invoice-42\.json\.tmp[\s\S]*renam'
+    answer_excludes: ["reservation-42", "checkout-42", "/order-42"]
 
   - id: tls-hops
     question: >-
       Which request paths went over TLS (https)? Name the paths.
     answer_contains: ["/orders", "/billing/charge"]
+    answer_excludes: ["/inventory/"]
 
   - id: gateway-cleanup
     question: >-

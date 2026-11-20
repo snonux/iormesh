@@ -6,21 +6,21 @@ import (
 	"iormesh/internal/schema"
 )
 
-// conn folds an event with a conn_id into its connection: the role from
-// connect or accept, the addresses from the first event naming them,
-// stream bytes, and an http event's request (on the connection and on
-// the thread's line).
+// conn folds an event with a conn_id into its connection end: the role
+// from connect or accept, the addresses from the first event naming
+// them, stream bytes, and an http event's request (on the end and on the
+// thread's line).
 func (c *Collector) conn(p *procAcc, ev *schema.Event) bool {
-	i, ok := p.connIdx[ev.ConnID]
-	if !ok {
-		if !c.take() {
+	if isPair(ev.Event) && ev.Args.FD2 != nil && ev.Args.FD2Gen != nil {
+		// pipe, pipe2, socketpair: both ends are born here.
+		if c.end(p, ev.ConnID, fdKey{*ev.Args.FD2, *ev.Args.FD2Gen}, "") == nil {
 			return false
 		}
-		i = len(p.conns)
-		p.connIdx[ev.ConnID] = i
-		p.conns = append(p.conns, &connAcc{local: ev.ConnID})
 	}
-	a := p.conns[i]
+	a := c.end(p, ev.ConnID, fdKey{ev.FD, ev.FDGen}, httpRole(ev))
+	if a == nil {
+		return false
+	}
 	switch ev.Event {
 	case schema.KindConnect:
 		a.role = RoleClient
@@ -46,6 +46,62 @@ func (c *Collector) conn(p *procAcc, ev *schema.Event) bool {
 	return true
 }
 
+// end finds or starts the process's end of conn held by fd. An event
+// without an fd (an http event) goes to the end of its role (role, from
+// httpRole), else to the conn's only end, else to an end no fd named
+// yet; an fd event adopts such an end. nil past the cap.
+func (c *Collector) end(p *procAcc, conn string, fd fdKey, role string) *connAcc {
+	var loose *connAcc
+	for _, i := range p.ends[conn] {
+		a := p.conns[i]
+		switch {
+		case fd.fd >= 0 && a.fd == fd:
+			return a
+		case fd.fd < 0 && role != "" && a.role == role:
+			return a
+		case a.fd.fd < 0:
+			loose = a
+		}
+	}
+	if fd.fd < 0 && len(p.ends[conn]) == 1 {
+		return p.conns[p.ends[conn][0]] // no role to tell ends apart: the only one
+	}
+	if loose != nil {
+		if fd.fd >= 0 {
+			loose.fd = fd
+		}
+		return loose
+	}
+	if !c.take() {
+		return nil
+	}
+	p.ends[conn] = append(p.ends[conn], len(p.conns))
+	a := &connAcc{local: conn, fd: fd}
+	p.conns = append(p.conns, a)
+	return a
+}
+
+// httpRole is the end an http event (fd -1) speaks for: the client's
+// carries the request URI's host, the server's none (schema HTTP.Host).
+// "" for other events.
+func httpRole(ev *schema.Event) string {
+	switch {
+	case ev.Event != schema.KindHTTP || ev.HTTP == nil || ev.FD >= 0:
+		return ""
+	case ev.HTTP.Host != "":
+		return RoleClient
+	}
+	return RoleServer
+}
+
+func isPair(kind string) bool {
+	switch kind {
+	case schema.KindPipe, schema.KindPipe2, schema.KindSocketpair:
+		return true
+	}
+	return false
+}
+
 // request records an http event on its connection and its thread, each
 // capped.
 func (c *Collector) request(p *procAcc, a *connAcc, ev *schema.Event) {
@@ -67,7 +123,7 @@ func (c *Collector) request(p *procAcc, a *connAcc, ev *schema.Event) {
 	}
 	t := p.threads[ti]
 	if len(t.calls) < MaxCalls {
-		t.calls = append(t.calls, callAcc{conn: a.local, method: r.Method, scheme: r.Scheme, path: r.Path,
+		t.calls = append(t.calls, callAcc{end: a, method: r.Method, scheme: r.Scheme, path: r.Path,
 			status: r.Status})
 	} else {
 		t.MoreCalls++

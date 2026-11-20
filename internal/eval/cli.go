@@ -106,7 +106,7 @@ func Main(ctx context.Context, o Options, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	s.Model = Command{Argv: argv, Timeout: o.Timeout}
+	s.Model = Command{Argv: argv, Timeout: o.Timeout, Stderr: os.Stderr}
 	r := s.Run(ctx, o.Date, o.ModelName)
 	if err := writeResult(o.Out, r); err != nil {
 		return err
@@ -121,7 +121,8 @@ func Main(ctx context.Context, o Options, stdout io.Writer) error {
 // newSession builds the store and gathers what the prompt carries.
 func newSession(ctx context.Context, o Options, set Set, work string) (Session, error) {
 	ctl := Ctl{Path: o.Iormeshctl, Store: o.Store, DB: filepath.Join(work, "services.db"),
-		Builds: filepath.Join(work, "builds"), Projects: o.Projects, SliceBytes: o.SliceBytes}
+		Builds: filepath.Join(work, "builds"), Projects: o.Projects, SliceBytes: o.SliceBytes,
+		Home: filepath.Join(work, "home")}
 	if err := ctl.Build(ctx); err != nil {
 		return Session{}, err
 	}
