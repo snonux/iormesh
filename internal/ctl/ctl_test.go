@@ -79,7 +79,8 @@ func TestCommandErrors(t *testing.T) {
 		{"owned tracer flag", []string{"add", "-project", "x", "-pattern", "java", "app2", "--out=/tmp"}, exitUsage, "go before HOST"},
 		{"port range", []string{"add", "-project", "x", "-listen-port", "70000", "app2"}, exitUsage, "out of range"},
 		{"rm two hosts", []string{"rm", "a", "b"}, exitUsage, "exactly one HOST"},
-		{"unknown subcommand", []string{"deploy"}, exitUsage, "unknown subcommand"},
+		{"unknown subcommand", []string{"frobnicate"}, exitUsage, "unknown subcommand"},
+		{"deploy without host", []string{"deploy"}, exitUsage, "one or more HOSTs"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -102,6 +102,23 @@ func TestSSHFetchArgv(t *testing.T) {
 	assertMode(t, local, 0o700)
 }
 
+func TestSSHPushArgv(t *testing.T) {
+	s, rec := newTestSSH(t, "ops@app1")
+	if err := s.Push(context.Background(), ".iormesh/staging", "/dist/iormesh-linux-amd64",
+		"/dist/iormesh-linux-amd64.minisig"); err != nil {
+		t.Fatal(err)
+	}
+	argv := rec.calls[0]
+	want := []string{"rsync", "-t", "-e",
+		"ssh '-o' 'BatchMode=yes' '-o' 'StrictHostKeyChecking=yes' '-o' 'ControlMaster=auto'" +
+			" '-o' 'ControlPath=/ctl/%C' '-o' 'ControlPersist=60s' '-o' 'ConnectTimeout=15'",
+		"--", "/dist/iormesh-linux-amd64", "/dist/iormesh-linux-amd64.minisig", "ops@app1:.iormesh/staging/"}
+	if !slices.Equal(argv, want) {
+		t.Errorf("argv\n got %q\nwant %q", argv, want)
+	}
+	assertNoInsecureOptions(t, argv)
+}
+
 // TestTransportRejects: arguments refused before anything runs.
 func TestTransportRejects(t *testing.T) {
 	s, rec := newTestSSH(t, "app1")
@@ -114,6 +131,14 @@ func TestTransportRejects(t *testing.T) {
 	}
 	if _, err := s.Run(ctx); !errors.Is(err, ErrTransport) {
 		t.Errorf("Run() = %v, want ErrTransport", err)
+	}
+	for _, dir := range []string{"-e", "../x", "a/../../b", "a b", "a;b", "$(id)", "a:b", ""} {
+		if err := s.Push(ctx, dir, "/dist/f"); !errors.Is(err, ErrTransport) {
+			t.Errorf("Push(%q) = %v, want ErrTransport", dir, err)
+		}
+	}
+	if err := s.Push(ctx, ".iormesh/staging"); !errors.Is(err, ErrTransport) {
+		t.Errorf("Push() with no file = %v, want ErrTransport", err)
 	}
 	for _, host := range []string{"-oProxyCommand=x", "a b", "a:b", ""} {
 		if _, err := newSSH(host, "/ctl", rec.exec); !errors.Is(err, ErrTransport) {

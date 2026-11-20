@@ -42,6 +42,11 @@ var ErrTransport = errors.New("transport")
 // versions, so nothing a shell would interpret may appear.
 var remotePath = regexp.MustCompile(`^/[A-Za-z0-9._/-]*$`)
 
+// stagePath is the alphabet Push accepts for its target directory: the
+// same characters as remotePath, but relative paths (under the login
+// user's home) too, as long as they cannot read as an option.
+var stagePath = regexp.MustCompile(`^[A-Za-z0-9._/][A-Za-z0-9._/-]*$`)
+
 // stderrLimit bounds how much of a failed command's stderr an error
 // carries: enough for ssh's diagnosis, not a remote log dump.
 const stderrLimit = 2048
@@ -164,6 +169,35 @@ func (s SSH) Fetch(ctx context.Context, remoteDir, localDir string) error {
 	}
 	if err != nil {
 		return fmt.Errorf("rsync %s:%s: %w", s.host, remoteDir, err)
+	}
+	return nil
+}
+
+// Push copies localFiles into remoteDir with rsync over the multiplexed
+// ssh connection. -t carries the mtime over, so the next push of the same
+// build is skipped by rsync's size-and-mtime check. As in Fetch, no -p,
+// -o or -l: the files arrive as the login user's own, with the remote
+// umask, which is what `iormesh upgrade` requires of a staged file (owned
+// by the sudo caller). Each local file is made absolute, so a colon in
+// its name is never read as host:path.
+func (s SSH) Push(ctx context.Context, remoteDir string, localFiles ...string) error {
+	if !stagePath.MatchString(remoteDir) || strings.Contains(remoteDir, "..") {
+		return fmt.Errorf("%w: remote dir %q", ErrTransport, remoteDir)
+	}
+	if len(localFiles) == 0 {
+		return fmt.Errorf("%w: nothing to push", ErrTransport)
+	}
+	args := []string{"-t", "-e", s.rsyncShell(), "--"}
+	for _, f := range localFiles {
+		abs, err := filepath.Abs(f)
+		if err != nil {
+			return fmt.Errorf("push: %w", err)
+		}
+		args = append(args, abs)
+	}
+	args = append(args, s.host+":"+strings.TrimSuffix(remoteDir, "/")+"/")
+	if _, err := s.exec(ctx, "rsync", args...); err != nil {
+		return fmt.Errorf("rsync to %s:%s: %w", s.host, remoteDir, err)
 	}
 	return nil
 }

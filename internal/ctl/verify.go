@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"aead.dev/minisign"
+
 	"iormesh/internal/federate"
 	"iormesh/internal/release"
 )
@@ -25,12 +27,23 @@ func defaultKeyPath() (string, error) {
 	return filepath.Join(filepath.Dir(reg), keyFileName), nil
 }
 
+// pinnedKey reads the pinned release key at path, or at the default
+// path when path is empty. It must be the operator's own file, writable by
+// nobody else: whoever could swap it could have any build verified.
+func pinnedKey(path string, e env) (minisign.PublicKey, error) {
+	if path == "" {
+		var err error
+		if path, err = e.releaseKey(); err != nil {
+			return minisign.PublicKey{}, err
+		}
+	}
+	return release.ReadKeyFile(path, os.Getuid())
+}
+
 // verifyCommand checks release binaries against their FILE.minisig with
 // the pinned key — the check deploy runs before it pushes a tracer
 // (decision #28), available on its own so an operator can vet dist/ or a
-// downloaded build. The key must be the operator's own file, writable by
-// nobody else: whoever could swap it could have any build verified. Every
-// FILE is checked; one failure fails the command.
+// downloaded build. Every FILE is checked; one failure fails the command.
 func verifyCommand(args []string, e env) error {
 	fs := newFlagSet("verify", e.stderr)
 	keyPath := fs.String("key", "", "pinned minisign public key (default ~/.config/iormesh/"+keyFileName+")")
@@ -40,13 +53,7 @@ func verifyCommand(args []string, e env) error {
 	if fs.NArg() == 0 {
 		return fmt.Errorf("%w: verify takes one or more FILEs", errUsage)
 	}
-	if *keyPath == "" {
-		var err error
-		if *keyPath, err = e.releaseKey(); err != nil {
-			return err
-		}
-	}
-	key, err := release.ReadKeyFile(*keyPath, os.Getuid())
+	key, err := pinnedKey(*keyPath, e)
 	if err != nil {
 		return err
 	}

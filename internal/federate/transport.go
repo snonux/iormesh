@@ -17,4 +17,12 @@ type Transport interface {
 	// contract, PLAN.md M4 "Collect"), so a failed fetch loses nothing
 	// and a repeated one picks up only what is new.
 	Fetch(ctx context.Context, remoteDir, localDir string) error
+	// Push copies the local files into remoteDir, which must exist; a
+	// relative remoteDir is under the login user's home. It is deploy's
+	// staging step (PLAN.md M4 "Deploy"): the files land as the login
+	// user's own, never as root and never under /opt, and the server's
+	// `iormesh upgrade` installs them only after verifying them itself.
+	// A file already there with the same size and mtime is skipped, so a
+	// re-deploy of the same build transfers nothing.
+	Push(ctx context.Context, remoteDir string, localFiles ...string) error
 }

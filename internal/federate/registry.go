@@ -223,6 +223,16 @@ func (r *Registry) Remove(host, name string) error {
 	return nil
 }
 
+// Lookup returns host's entry, or ErrUnknownHost: deploy reaches only
+// registered hosts (principle #3).
+func (r *Registry) Lookup(host string) (Server, error) {
+	i := r.find(host)
+	if i < 0 {
+		return Server{}, fmt.Errorf("%w: %s", ErrUnknownHost, host)
+	}
+	return r.Servers[i], nil
+}
+
 // find returns the index of host's entry, or -1.
 func (r *Registry) find(host string) int {
 	return slices.IndexFunc(r.Servers, func(s Server) bool { return s.Host == host })

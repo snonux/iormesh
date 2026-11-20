@@ -105,6 +105,15 @@ truth.
     bumps the version. Running
     sessions keep the old binary; the next `start` runs the
     new one.
+  - **`iormeshctl deploy`** (task db4) verifies the build and
+    its signature on the controller before it pushes anything,
+    stages both in the deploying user's `~/.iormesh/staging`
+    (not `/tmp`, where another user could pre-create the name;
+    never `/opt`), and runs under `sudo -n` only the installed
+    binary's `upgrade`, `start`, `stop` and `status` — never
+    `-allow-downgrade`. Registry values reach the server only as
+    single-quoted argv elements. A host without the installed
+    tracer is reported, not bootstrapped (PLAN.md #1).
   - **What the rule then grants**: installing a build the
     release key signed, for this arch, not older — nothing
     else. Whoever holds the release key holds every server

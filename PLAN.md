@@ -838,11 +838,22 @@ Kubernetes (M7) build on it.
   independent sessions, one per project.
 - **Deploy**: detect the server's arch (amd64/arm64), verify
   the tracer build's signature on the controller (decision
-  #28), push it over SSH to `/opt/iormesh/bin/iormesh`, and
-  start it with `sudo iormesh start`. Every session is labeled
-  with a project (`-project`), so completely different,
-  non-interacting applications on the same server are traced
-  and stored independently.
+  #28), push it over SSH into the deploying user's staging
+  directory, install it as `/opt/iormesh/bin/iormesh` with
+  `sudo iormesh upgrade`, and start it with `sudo iormesh
+  start`. Every session is labeled with a project (`-project`),
+  so completely different, non-interacting applications on the
+  same server are traced and stored independently. Built (task
+  db4): `iormeshctl deploy [-project P] HOST...` refuses an
+  unregistered host before contacting any; stages in
+  `~/.iormesh/staging` (never `/opt` or `/tmp`); never passes
+  `-allow-downgrade`; an upgrade refusal starts nothing; a live
+  session is restarted (stop, start; #19) when its start argv
+  differs from the one the controller last launched
+  (`~/.local/share/iormesh/deployed.json`) or with `-restart`,
+  else left alone, so a re-deploy is a no-op. Deploy only
+  upgrades: a host without the installed tracer is reported as
+  needing the bootstrap of #1, never installed.
 - **The tracer runs as a transient systemd unit**: `start`
   launches the session through `systemd-run` as
   `iormesh-<project>`. That gives it a life independent of the

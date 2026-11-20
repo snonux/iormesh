@@ -231,12 +231,12 @@ iormeshctl verify dist/iormesh-linux-amd64   # the controller's check
   checks them, and the `minisign` tool can sign instead of
   `mage sign` with `-t "file:NAME version:X.Y.Z"`.
 - **Pinned public key**: `~/.config/iormesh/minisign.pub` on the
-  controller (`iormeshctl verify`, `-key` overrides; deploy
-  will check every push with it), `/opt/iormesh/etc/minisign.pub`
-  (root-owned) on each server, where `iormesh upgrade FILE`
-  verifies `FILE.minisig` before it replaces
-  `/opt/iormesh/bin/iormesh` ([security.md](security.md) has
-  the checks).
+  controller (`iormeshctl verify`, `-key` overrides; `iormeshctl
+  deploy` checks every build with it before pushing),
+  `/opt/iormesh/etc/minisign.pub` (root-owned) on each server,
+  where `iormesh upgrade FILE` verifies `FILE.minisig` before it
+  replaces `/opt/iormesh/bin/iormesh` ([security.md](security.md)
+  has the checks).
 
 ## Tech choices
 
