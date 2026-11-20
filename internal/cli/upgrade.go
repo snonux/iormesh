@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"syscall"
 
 	"aead.dev/minisign"
 
@@ -29,9 +30,15 @@ import (
 //   - the signature must verify against the root-owned pinned key
 //     (pinnedKeyRel), with the trusted comment naming this host's tracer
 //     (release.TracerFile) — not iormeshctl, not the other arch;
-//   - the signed version may not be older than the running binary's,
+//   - the signed version may not be older than the installed binary's,
 //     unless root itself, not the rule, passes -allow-downgrade: an old
-//     signed build may carry a fixed hole;
+//     signed build may carry a fixed hole. Through the rule a same
+//     version with other bytes is refused too, so every signed build a
+//     caller can install bumps Version. The check and the rename run
+//     under an exclusive lock on bin/, and through the rule only while
+//     the installed binary is still the one this process runs — else an
+//     upgrade started (and stopped, ^Z) before a fix could install the
+//     old build over it (lockedInstall);
 //   - verification happens on bytes read into memory once, and exactly
 //     those bytes are installed: the staged file is the caller's and may
 //     change after the check;
@@ -52,9 +59,10 @@ const (
 // upgrader is one upgrade, its environment injected so tests run on a
 // temporary layout their own uid owns.
 type upgrader struct {
-	// root is installRoot; owner the uid that must own it (0).
-	root  string
-	owner int
+	// root is installRoot; owner the uid that must own it (0), group the
+	// gid the new binary gets (0).
+	root         string
+	owner, group int
 	// sudoUID is the sudo caller (-1 without sudo), who must own the
 	// staged file (stagedCheck).
 	sudoUID int
@@ -62,7 +70,10 @@ type upgrader struct {
 	gated bool
 	// running is this binary's version, goarch its arch.
 	running, goarch string
-	stdout          io.Writer
+	// self stats this process's own executable (/proc/self/exe, which
+	// still names the old inode after a rename over it).
+	self   func() (fs.FileInfo, error)
+	stdout io.Writer
 }
 
 // newUpgrader is the production upgrader for this process.
@@ -71,8 +82,9 @@ func newUpgrader(stdout io.Writer) upgrader {
 	if err != nil {
 		self = "" // unknown: sudoGated fails closed
 	}
-	u := upgrader{root: installRoot, owner: 0, sudoUID: -1, gated: sudoGated(self, os.Getenv, os.Lstat),
-		running: version.Version, goarch: runtime.GOARCH, stdout: stdout}
+	u := upgrader{root: installRoot, owner: 0, group: 0, sudoUID: -1, gated: sudoGated(self, os.Getenv, os.Lstat),
+		running: version.Version, goarch: runtime.GOARCH, stdout: stdout,
+		self: func() (fs.FileInfo, error) { return os.Stat("/proc/self/exe") }}
 	if n, err := strconv.Atoi(os.Getenv("SUDO_UID")); err == nil {
 		u.sudoUID = n
 	}
@@ -115,6 +127,38 @@ func (u upgrader) upgrade(staged string, allowDowngrade bool) error {
 	if err != nil {
 		return fmt.Errorf("upgrade: %w", err)
 	}
+	unlock, err := u.lock()
+	if err != nil {
+		return fmt.Errorf("upgrade: %w", err)
+	}
+	defer unlock()
+	return u.lockedInstall(m, data, allowDowngrade)
+}
+
+// lock takes an exclusive flock on bin/, held until the returned func
+// runs: two upgrades (two rule calls, or one stopped with ^Z while root
+// upgrades) check and rename one after the other, never interleaved.
+func (u upgrader) lock() (func(), error) {
+	d, err := os.Open(filepath.Dir(u.bin()))
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(d.Fd()), syscall.LOCK_EX); err != nil {
+		_ = d.Close()
+		return nil, fmt.Errorf("lock %s: %w", d.Name(), err)
+	}
+	return func() { _ = d.Close() }, nil // closing releases the lock
+}
+
+// lockedInstall is the version check and the install, under lock. The
+// version compared is the running binary's, so through the rule the
+// installed binary must still be that very file (same device and inode):
+// if another upgrade replaced it since this process started, its version
+// is unknown here and the call is refused, to be rerun by the new binary.
+func (u upgrader) lockedInstall(m release.Meta, data []byte, allowDowngrade bool) error {
+	if err := u.checkInstalled(); err != nil {
+		return fmt.Errorf("upgrade: install layout: %w", err)
+	}
 	same, err := u.checkVersion(m, data, allowDowngrade)
 	if err != nil || same {
 		if same {
@@ -146,14 +190,38 @@ func (u upgrader) checkLayout() error {
 			return err
 		}
 	}
+	_, err := u.installedInfo()
+	return err
+}
+
+// installedInfo is the installed binary's lstat, which must be a regular
+// file (not a symlink) the owner owns and nobody else may write.
+func (u upgrader) installedInfo() (fs.FileInfo, error) {
 	info, err := os.Lstat(u.bin())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("%w: %s is not a regular file (mode %v)", release.ErrUnsafeFile, u.bin(), info.Mode())
+		return nil, fmt.Errorf("%w: %s is not a regular file (mode %v)", release.ErrUnsafeFile, u.bin(), info.Mode())
 	}
-	return release.OwnedBy(u.owner)(u.bin(), info)
+	return info, release.OwnedBy(u.owner)(u.bin(), info)
+}
+
+// checkInstalled re-checks the installed binary under the lock and,
+// through the rule, that it is still this process's executable.
+func (u upgrader) checkInstalled() error {
+	info, err := u.installedInfo()
+	if err != nil || !u.gated {
+		return err
+	}
+	self, err := u.self()
+	if err != nil {
+		return fmt.Errorf("own executable: %w", err)
+	}
+	if !os.SameFile(info, self) {
+		return fmt.Errorf("%s changed since this upgrade started (another upgrade ran); rerun it", u.bin())
+	}
+	return nil
 }
 
 func (u upgrader) checkDir(path string, stat func(string) (fs.FileInfo, error)) error {
@@ -202,10 +270,12 @@ func (u upgrader) stagedCheck(path string, info fs.FileInfo) error {
 
 // checkVersion refuses a signed version older than the running binary's
 // unless allowDowngrade. same reports that the very bytes are installed
-// already (deploy re-pushes the current build), so nothing is rewritten.
-// Under the sudoers rule the running binary is the installed one, so this
-// compares installed and staged; root running another binary compares
-// against that one, which is root's own choice.
+// already (deploy re-pushes the current build), so nothing is rewritten;
+// through the rule the same version with other bytes is refused — a
+// release bumps Version, and without the bump a rebuild could stand in
+// for a fix. Through the rule the running binary is the installed one
+// (checkInstalled), so this compares installed and staged; root running
+// another binary compares against that one, which is root's own choice.
 func (u upgrader) checkVersion(m release.Meta, data []byte, allowDowngrade bool) (same bool, err error) {
 	cmp, err := version.Compare(m.Version, u.running)
 	if err != nil {
@@ -222,16 +292,24 @@ func (u upgrader) checkVersion(m release.Meta, data []byte, allowDowngrade bool)
 	if err != nil {
 		return false, fmt.Errorf("upgrade: %w", err)
 	}
-	return bytes.Equal(installed, data), nil
+	if bytes.Equal(installed, data) {
+		return true, nil
+	}
+	if u.gated {
+		return false, fmt.Errorf("upgrade: %s is installed with other bytes; through the sudoers rule a new "+
+			"build must carry a new version", m.Version)
+	}
+	return false, nil
 }
 
 // install writes data as a new file in bin/ and renames it over the
 // installed binary, so a crash leaves the old binary or the new one,
 // never half of each, and a running tracer keeps its own inode. bin/ is
 // writable by its owner only (checkLayout), so the temp name cannot be
-// planted; CreateTemp's O_EXCL refuses one anyway. The file is created by
-// this process — root in production — so it is root-owned; 0755 matches
-// what the layout check requires of it next time.
+// planted; CreateTemp's O_EXCL refuses one anyway. The file is chowned to
+// owner:group (root:root) on its descriptor before it is made 0755, so
+// it never carries the mode with another owner; 0755 matches what the
+// layout check requires of it next time.
 func (u upgrader) install(data []byte) (err error) {
 	dir := filepath.Dir(u.bin())
 	tmp, err := os.CreateTemp(dir, ".iormesh-upgrade-*")
@@ -243,7 +321,7 @@ func (u upgrader) install(data []byte) (err error) {
 			_ = os.Remove(tmp.Name())
 		}
 	}()
-	if err := writeSynced(tmp, data); err != nil {
+	if err := writeSynced(tmp, data, u.owner, u.group); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp.Name(), u.bin()); err != nil {
@@ -252,9 +330,13 @@ func (u upgrader) install(data []byte) (err error) {
 	return syncPath(dir)
 }
 
-// writeSynced writes data to f, makes it 0755, fsyncs and closes it.
-func writeSynced(f *os.File, data []byte) error {
+// writeSynced writes data to f, chowns it to uid:gid, makes it 0755,
+// fsyncs and closes it.
+func writeSynced(f *os.File, data []byte, uid, gid int) error {
 	_, err := f.Write(data)
+	if err == nil {
+		err = f.Chown(uid, gid)
+	}
 	if err == nil {
 		err = f.Chmod(0o755)
 	}

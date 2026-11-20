@@ -73,25 +73,36 @@ truth.
     laid down with the binary at bootstrap. Neither path is a
     flag of the tracer.
   - **`iormesh upgrade FILE`**, through the rule: the staged
-    file and `FILE.minisig` must be regular files (not
-    symlinks; a FIFO cannot block the open) owned by the sudo
-    caller — not by root or anyone else, so the rule never
-    has root read others' files — at most 256 MiB and 4 KiB
-    (root directly may stage its own); both are read
-    once into memory, and exactly the verified bytes are
+    file and `FILE.minisig` are first opened `O_PATH|O_NOFOLLOW`
+    and checked by `fstat` — regular files, not symlinks, owned
+    by the sudo caller (not by root or anyone else, so the rule
+    never has root read others' files; root directly may stage
+    its own) — and only then reopened for reading through
+    `/proc/self/fd`, so root never opens a device or FIFO a
+    caller names. They are at most 256 MiB and 4 KiB; both are
+    read once into memory, and exactly the verified bytes are
     installed — changing the staged file after the check
     changes nothing. Before any read, the layout is checked:
     `/opt` (followed), `/opt/iormesh`, `bin/` and `etc/` are
     root-owned directories nobody else may write, the
     installed binary and the key root-owned regular files —
     a symlinked install is refused, not replaced. The new
-    binary is a fresh root-owned 0755 file in `bin/`, fsynced
-    and renamed over the old one (then `bin/` fsynced), so a
-    crash leaves one or the other. A signed version older than
-    the running binary's is refused; `-allow-downgrade` is
-    root's alone and refused through the rule, since an older
-    signed build may carry a fixed hole. The same version with
-    the same bytes is a no-op (deploy re-pushes). Running
+    binary is a fresh file in `bin/`, chowned root:root on its
+    descriptor before it is made 0755, fsynced and renamed
+    over the old one (then `bin/` fsynced), so a crash leaves
+    one or the other. A signed version older than the
+    installed binary's is refused, checked under an exclusive
+    lock on `bin/` that is held through the rename: through the
+    rule the installed binary must still be the very file
+    (device and inode) the running process was started from,
+    so an upgrade stopped with ^Z, or racing another, cannot
+    put an older build over one installed meanwhile — it is
+    told to rerun. `-allow-downgrade` is root's alone and
+    refused through the rule, since an older signed build may
+    carry a fixed hole. The same version with the same bytes
+    is a no-op (deploy re-pushes); through the rule the same
+    version with other bytes is refused, so every release
+    bumps the version. Running
     sessions keep the old binary; the next `start` runs the
     new one.
   - **What the rule then grants**: installing a build the

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -174,5 +175,16 @@ func TestReadFileBounds(t *testing.T) {
 	}
 	if _, err := ReadFile(dir, 4, nil); err == nil {
 		t.Error("a directory was read")
+	}
+	// Neither a device nor a FIFO is opened for reading: a FIFO without a
+	// writer would block the open forever, so this would hang, not fail.
+	fifo := filepath.Join(dir, "fifo")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{fifo, "/dev/null"} {
+		if _, err := ReadFile(p, 4, nil); !errors.Is(err, ErrUnsafeFile) {
+			t.Errorf("%s: err = %v, want ErrUnsafeFile", p, err)
+		}
 	}
 }

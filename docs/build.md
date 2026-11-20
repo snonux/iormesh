@@ -212,8 +212,12 @@ iormeshctl verify dist/iormesh-linux-amd64   # the controller's check
   reads only scrypt-encrypted secret keys). The secret key
   belongs to the release pipeline and never enters the
   repository: `mage sign` refuses a key path inside the tree.
-  The password comes from `$IORMESH_MINISIGN_PASSWORD` for
-  unattended runs, else from the terminal.
+  The password comes from the terminal prompt, or from
+  `$IORMESH_MINISIGN_PASSWORD` for unattended runs. Prefer the
+  prompt or a CI secret store that masks it: an environment
+  variable is readable by every process of the same uid
+  (`/proc/<pid>/environ`) and leaks into logs that dump the
+  environment.
 - **What is signed**: each file in `dist/` (not hidden, not a
   `.minisig`), prehashed (BLAKE2b-512, minisign's default),
   with the trusted comment

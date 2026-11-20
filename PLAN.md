@@ -1677,9 +1677,13 @@ answer), and deferred.
   into memory, verifies them against
   `/opt/iormesh/etc/minisign.pub`, requires the signed name to
   be this arch's tracer (`iormesh-linux-<arch>`) and the signed
-  version not older than the running binary's, then installs
-  exactly the verified bytes: a new root-owned 0755 file in
-  `bin/`, renamed over `/opt/iormesh/bin/iormesh`. It first
+  version not older than the installed binary's (checked under
+  an exclusive lock on `bin/`; through the rule the installed
+  binary must still be the running process's own file, and the
+  same version with other bytes is refused, so every release
+  bumps the version), then installs exactly the verified
+  bytes: a new root-owned 0755 file in `bin/`, renamed over
+  `/opt/iormesh/bin/iormesh`. It first
   checks the layout — `/opt`, `/opt/iormesh`, `bin/`, `etc/`
   root-owned directories nobody else may write, the installed
   binary and the key regular root-owned files, never a

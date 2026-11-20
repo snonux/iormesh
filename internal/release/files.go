@@ -23,30 +23,17 @@ var ErrUnsafeFile = errors.New("unsafe file")
 type FileCheck func(path string, info fs.FileInfo) error
 
 // ReadFile reads at most max bytes of path. A final-component symlink is
-// refused (O_NOFOLLOW) and a FIFO cannot block the open (O_NONBLOCK);
-// the file must be regular and pass check, both judged on the descriptor
-// that is then read, so a swap after the check reads nothing new.
+// refused, the file must be regular and pass check, and all of it is
+// judged on the very file that is then read, so a swap after the check
+// reads nothing new. On Linux the file is not even opened for reading
+// before those checks (openChecked), so a root caller never opens a
+// device or FIFO a path names.
 func ReadFile(path string, max int64, check FileCheck) ([]byte, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	f, err := openChecked(path, check)
 	if err != nil {
-		if errors.Is(err, syscall.ELOOP) {
-			return nil, fmt.Errorf("%w: %s is a symlink", ErrUnsafeFile, path)
-		}
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%w: %s is not a regular file", ErrUnsafeFile, path)
-	}
-	if check != nil {
-		if err := check(path, info); err != nil {
-			return nil, err
-		}
-	}
 	data, err := io.ReadAll(io.LimitReader(f, max+1))
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
@@ -55,6 +42,20 @@ func ReadFile(path string, max int64, check FileCheck) ([]byte, error) {
 		return nil, fmt.Errorf("%w: %s is over %d bytes", ErrUnsafeFile, path, max)
 	}
 	return data, nil
+}
+
+// vet applies ReadFile's rules to info, the fstat of path.
+func vet(path string, info fs.FileInfo, check FileCheck) error {
+	if info.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("%w: %s is a symlink", ErrUnsafeFile, path)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%w: %s is not a regular file", ErrUnsafeFile, path)
+	}
+	if check != nil {
+		return check(path, info)
+	}
+	return nil
 }
 
 // OwnedBy is a FileCheck (and a directory check) requiring the owner uid

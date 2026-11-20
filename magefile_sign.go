@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"aead.dev/minisign"
@@ -106,8 +105,10 @@ func insideRepo(path string) (bool, error) {
 	if resolved, err := filepath.EvalSymlinks(wd); err == nil {
 		wd = resolved
 	}
+	// IsLocal, not a ".." prefix test: "..key" is a local name, and an
+	// absolute rel (another volume) is not inside.
 	rel, err := filepath.Rel(wd, abs)
-	return err == nil && !strings.HasPrefix(rel, ".."), nil
+	return err == nil && filepath.IsLocal(rel), nil
 }
 
 // signingPassword is $IORMESH_MINISIGN_PASSWORD, or read without echo
