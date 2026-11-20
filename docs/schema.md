@@ -183,7 +183,10 @@ Open send (the ISN is chosen inside the call) carry none: no
 `tcp_seq` is ever a guess. Neither does a call on a kernel
 without the `bpf_rdonly_cast` kfunc (before 6.2), where the
 tracer cannot read the socket cheaply, nor one whose socket the
-trace never bound (opened before the session).
+trace never bound (opened before the session), nor a `read` or
+`write` the in-kernel fold held at its enter on a hot streak and
+then sent alone because it turned out slow — typically the read
+that waits for the peer's answer right after a burst of calls.
 
 ### Event kinds (M1)
 

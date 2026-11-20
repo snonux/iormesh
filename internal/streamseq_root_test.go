@@ -305,8 +305,9 @@ func checkRanges(t *testing.T, what string, evs []schema.Event, kind func(string
 // blocking socket at once, so a send queued while the other waits for
 // buffer space interleaves with it. Every write that carries tcp_seq names
 // its own bytes - the received stream holds, at that offset, exactly the
-// buffer slice the call wrote. Writes that interleaved carry none; how
-// many did is logged, not required.
+// buffer slice the call wrote. Writes that interleaved carry none. Both
+// kinds must occur: some writes with tcp_seq (the capture works under
+// contention) and some without (the check really fired).
 func TestStreamSeqConcurrentSenders(t *testing.T) {
 	requireRoot(t)
 	child := startSeqChild(t, seqScenarioConcurrent)
@@ -331,6 +332,9 @@ func TestStreamSeqConcurrentSenders(t *testing.T) {
 		with, total = with+w, total+n
 	}
 	t.Logf("%d of %d writes carried tcp_seq; the rest interleaved", with, total)
+	if with == 0 || with == total {
+		t.Errorf("%d of %d writes carried tcp_seq, want some but not all", with, total)
+	}
 }
 
 // checkSender matches sender g's write events, in order, to its calls and
@@ -364,7 +368,9 @@ func checkSender(t *testing.T, g int, s seqSender, evs []schema.Event, stream []
 // TestStreamSeqFolded: with the fold on, a hot write loop on a socket is
 // sent as folded records, which never carry tcp_seq, while the loop's
 // first calls, sent one by one, carry the sequence number where all bytes
-// before them - folded ones included - end.
+// before them - folded ones included - end. A single released from a hold
+// (held on a hot streak, then not hot) carries none, by design (tcpseq.c);
+// it still counts toward the bytes, and some singles must carry one.
 func TestStreamSeqFolded(t *testing.T) {
 	requireRoot(t)
 	child := startSeqChild(t, seqScenarioFolded)
@@ -376,7 +382,7 @@ func TestStreamSeqFolded(t *testing.T) {
 	r := child.result(t)
 	evs := log.events(t, child.pid(), r.Fd)
 	first, _ := established(t, evs)
-	next, folded, single := first, 0, 0
+	next, folded, single, released := first, 0, 0, 0
 	for _, e := range evs {
 		if e.Event != schema.KindWrite {
 			continue
@@ -388,7 +394,9 @@ func TestStreamSeqFolded(t *testing.T) {
 				t.Errorf("folded write of %d calls carries tcp_seq %#x", *e.Args.Count, *e.Args.TCPSeq)
 			}
 		case e.Args.TCPSeq == nil:
-			t.Errorf("single write at %#x has no tcp_seq", next)
+			// A single released from a hold: its enter was held on a hot
+			// streak and parked nothing (tcpseq.c, "Not covered").
+			released++
 		case *e.Args.TCPSeq != next:
 			t.Errorf("single write at %#x has tcp_seq %#x", next, *e.Args.TCPSeq)
 		default:
@@ -397,7 +405,8 @@ func TestStreamSeqFolded(t *testing.T) {
 		next += uint32(e.Bytes)
 	}
 	if folded == 0 || single == 0 {
-		t.Errorf("%d folded and %d single writes, want some of both", folded, single)
+		t.Errorf("%d folded and %d single writes with tcp_seq (%d released from a hold), "+
+			"want some of both", folded, single, released)
 	}
 	if moved := next - first; moved != seqFoldWrites*seqFoldSize {
 		t.Errorf("write events moved %d bytes, want %d", moved, seqFoldWrites*seqFoldSize)

@@ -33,7 +33,13 @@
 // framing), a TCP Fast Open send (the ISN is assigned inside the call) -
 // fails the check and the call gets no tcp_seq: never a guess. The one
 // residue is an assignment of the field inside the window (connect,
-// disconnect, TCP_REPAIR) whose jump equals ret by chance, 1 in 2^32.
+// disconnect, TCP_REPAIR) whose jump equals ret by chance, 1 in 2^32 (and
+// a dup2 race, see iormesh_seq_on_exit).
+// Not covered: a read or write the fold held at its enter (a hot streak,
+// rwagg.c) parks nothing; if it then turns out not hot - it blocked over
+// IORMESH_RW_HOT_NS, the read that waits on the peer after a burst - it
+// is sent as a single event without tcp_seq. Parking held enters too would
+// put the walk back on every folded call.
 // A start read long before the call (a parked entry whose exit was missed)
 // is still exact when the check holds; userspace makes sure the record's
 // socket is the call's (struct tcp_seq_event).
@@ -177,10 +183,14 @@ static __always_inline void iormesh_emit_tcp_seq(__u32 pid, __u32 tid, __u32 tra
 // handler then sends no ret_event. Otherwise it returns 0 and the handler
 // sends its plain ret_event. A park of the other direction is another
 // call's (a missed exit) and is only emptied. The socket is re-read
-// through the parked address: the call held the file, so the socket
-// outlived it; if another thread closed it right after, the read is
+// through the parked address: the call's fd reference, or a
+// single-threaded file table, kept the socket alive until the syscall
+// returned; if another thread closed it right after, the read is
 // fault-safe, and a freed or reused socket fails the check (or
-// userspace's socket check).
+// userspace's socket check). Residue besides the 1 in 2^32 above: another
+// thread dup2s a second socket onto the fd between this enter's walk and
+// the kernel's fd lookup while a third party moves exactly ret bytes on
+// the parked one - userspace catches it only if it traced the dup2.
 static __always_inline int iormesh_seq_on_exit(__u32 pid, __u32 tid, __u32 trace_id, __u64 now,
                                                __s64 ret, __u32 dir) {
     struct seq_park *slot = bpf_map_lookup_elem(&seq_park_map, &tid);

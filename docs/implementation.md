@@ -3662,10 +3662,17 @@ not, and share `bpf_prog_active` with the dispatchers (8e4).
   and the call moved exactly `[start, end)`. Anything else —
   two senders interleaving, a send split around another, a
   `MSG_PEEK`/`MSG_OOB` read, kTLS, a TFO send — gives no
-  `tcp_seq`. A stale park (an exit missed) is still exact when
+  `tcp_seq`. Not covered either: a `read`/`write` the fold held
+  at its enter on a hot streak parks nothing, so if it then
+  turns out slow (> 1 ms, the read waiting on the peer after a
+  burst) it is sent alone without `tcp_seq`; parking held
+  enters too would put the walk back on every folded call. A
+  stale park (an exit missed) is still exact when
   the check holds; the residue is a field *assignment* inside
   the window (connect, disconnect, `TCP_REPAIR`) whose jump
-  equals `ret`, 1 in 2³².
+  equals `ret`, 1 in 2³², and an untraced `dup2` of another
+  socket onto the fd mid-call while exactly `ret` bytes moved on
+  the parked one.
 - **Record.** When the check holds, the exit record itself is
   a `tcp_seq_event` (a `ret_event` plus the socket and the
   sequence number, 48 bytes) in place of the `ret_event`, so a

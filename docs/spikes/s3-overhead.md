@@ -851,4 +851,9 @@ traffic the tracer pays ~3 % more per data event and the traced
 process ~500 kernel instructions per unfolded data call. The
 default fold keeps hot loops out of both, and the calls that clock
 reconciliation needs — request/response calls that wait on the
-peer — are the ones that stay single.
+peer — are mostly the ones that stay single. Not all: a read or
+write the fold held at its enter on a hot streak parks nothing, so
+when it then blocks past 1 ms (the read waiting on the peer right
+after a burst) it is sent alone without `tcp_seq`. Parking held
+enters as well would cover it, at the price of the walk on every
+folded call — not taken.

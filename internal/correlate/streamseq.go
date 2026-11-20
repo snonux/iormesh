@@ -31,6 +31,8 @@ func (c *Correlator) tcpSeqRecord(r *types.TcpSeqEvent) {
 // socket unable to name bytes of another (a tid's stale park, an fd the
 // call's own thread closed and reused mid-call): the kernel's arithmetic
 // is exact for the socket it read, so only the socket must be the call's.
+// Residue: an untraced dup2 of another socket onto the fd mid-call while
+// exactly ret bytes moved on the parked one (tcpseq.c).
 // The conn id comes later, when the queue releases the event (emit drops
 // tcp_seq from an event that ends up without one).
 func (c *Correlator) streamSeq(ev *schema.Event, sock *sockState, sk uint64, seq uint32) {
