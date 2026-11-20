@@ -71,8 +71,8 @@ func m4AbsPaths(cfg *acceptance.Config) error {
 }
 
 // runM4Acceptance wires the real iormeshctl and SSH and runs; ^C cancels
-// the current step (the hosts may then need `iormeshctl rm` by hand from
-// the work directory's HOME, which the runbook explains).
+// the current step and goes on to the teardown (a second ^C, or a
+// failed teardown, leaves the manual cleanup the runbook explains).
 func runM4Acceptance(cfg acceptance.Config) error {
 	ctl, err := acceptance.NewExecCtl(cfg.Ctl, cfg.WorkDir)
 	if err != nil {
@@ -80,6 +80,13 @@ func runM4Acceptance(cfg acceptance.Config) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// The first ^C cancels the run, whose teardown (rm, the servers'
+	// cleanup) still runs; stop() then restores the default handling, so
+	// a second ^C kills the process outright.
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
 	r := acceptance.New(cfg, acceptance.Deps{Ctl: ctl, Out: os.Stdout,
 		Dial: func(h string) (federate.Transport, error) { return federate.NewSSH(h) }})
 	return r.Run(ctx)

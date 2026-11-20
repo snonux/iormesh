@@ -46,6 +46,9 @@ type Runner struct {
 	// diskAdded says the watchdog project exists.
 	added     map[string]bool
 	diskAdded bool
+	// fillFile is the watchdog's fill file on HOST2 once chosen, so the
+	// cleanup removes it even after an interrupt.
+	fillFile string
 }
 
 // New returns a Runner for cfg.
@@ -92,10 +95,28 @@ func (r *Runner) Run(ctx context.Context) error {
 		r.phaseMesh(ctx)
 		r.phaseWatchdog(ctx)
 	}
-	r.phaseRm(ctx)
-	r.cleanupRemote(ctx)
+	// Teardown runs even after ^C: with the run's context cancelled, rm
+	// would fail at once and leave sessions tracing for up to an hour.
+	cctx, cancel := cleanupCtx(ctx)
+	defer cancel()
+	r.phaseRm(cctx)
+	r.cleanupRemote(cctx)
+	if ctx.Err() != nil {
+		r.res.fillNotRun("not reached: the run was interrupted")
+	}
 	r.res.fillNotRun("not reached: blocked by an earlier failure above")
 	return r.res.print(r.out)
+}
+
+// cleanupTimeout bounds the teardown after an interrupt: rm stops and
+// syncs every session, which takes seconds per project, not minutes.
+const cleanupTimeout = 5 * time.Minute
+
+// cleanupCtx is a context for cleanup work that outlives ctx's
+// cancellation (^C) but not cleanupTimeout. A second ^C kills the
+// process (the mage target restores the default signal handling).
+func cleanupCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 }
 
 // ctlRun runs iormeshctl and logs the command.
@@ -117,12 +138,20 @@ func (r *Runner) remoteBase(host string) string {
 	return path.Join(r.info[host].home, remoteDir)
 }
 
-// cleanupRemote removes the run's own directory from both servers. The
-// path is built from the home `pwd` printed, never from an empty one.
+// cleanupRemote stops any workload role still running and removes the
+// run's own directory (with the watchdog's fill file, if it went there)
+// from both servers, also after ^C. The path is built from the home
+// `pwd` printed, never from an empty one.
 func (r *Runner) cleanupRemote(ctx context.Context) {
+	ctx, cancel := cleanupCtx(ctx)
+	defer cancel()
 	for _, h := range []string{r.cfg.Host1, r.cfg.Host2} {
 		if in := r.info[h]; in == nil || !strings.HasPrefix(in.home, "/") || len(in.home) < 2 {
 			continue
+		}
+		r.stopRoles(ctx, h)
+		if r.fillFile != "" && h == r.cfg.Host2 {
+			_, _ = r.remote(ctx, h, "rm", "-f", "--", r.fillFile)
 		}
 		if _, err := r.remote(ctx, h, "rm", "-rf", "--", r.remoteBase(h)); err != nil {
 			r.logf("  warning: %s: removing %s: %v", h, r.remoteBase(h), err)

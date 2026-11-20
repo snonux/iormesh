@@ -19,13 +19,19 @@
 //     runs with HOME pointed at a private work directory, so its registry
 //     holds only those two hosts and the operator's own registry, store
 //     and service database are never read or written.
-//   - The tracer's lifecycle on the servers goes only through iormeshctl
-//     (that is what is being accepted); the runner itself runs only the
-//     workloads, read-only probes (ls, test, df, stat, ss, systemctl
-//     list-units) and the watchdog's fill file in a directory the SSH
-//     user owns.
-//   - No step uses the operator's own sudo on a server: the sudoers rule
-//     is checked with `sudo -n -l`, never exercised outside iormeshctl.
+//   - The tracer's lifecycle on the servers (start, stop, upgrade,
+//     uninstall) goes only through iormeshctl (that is what is being
+//     accepted); the runner itself runs only the workloads (each under
+//     `timeout`, stopped with pkill when its scenario fails), read-only
+//     probes (ls, test, df, stat, ss, systemctl list-units) and the
+//     watchdog's fill file in a directory the SSH user owns.
+//   - The one privileged command the runner issues itself is the
+//     read-only `sudo -n /opt/iormesh/bin/iormesh status -json`,
+//     through the same narrow sudoers rule iormeshctl uses; the rule is
+//     otherwise only probed with `sudo -n -l`. The operator's own sudo
+//     is never used on a server.
+//   - Teardown (rm, stopping leftover roles, removing the run's files)
+//     runs on a context that outlives ^C, bounded by cleanupTimeout.
 //
 // It is cgo-free like iormeshctl, whose packages it uses to read the build
 // outputs (internal/schema, internal/viewmodel, internal/normalize).

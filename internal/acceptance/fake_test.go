@@ -31,6 +31,24 @@ type fakeWorld struct {
 	removed  map[string]bool // host -> uninstalled by rm
 	named    bool
 	exit1    error // a genuine *exec.ExitError with status 1
+	// failClient makes that scenario's client role fail, as a client
+	// that cannot reach its server does.
+	failClient string
+}
+
+// answerTimeout runs a workload role: every role must come under
+// `timeout 300`, and a failing client fails with exit status 1.
+func (w *fakeWorld) answerTimeout(host string, argv []string) (string, error) {
+	if len(argv) < 8 || argv[1] != roleTimeout || argv[2] != "java" {
+		w.t.Errorf("%s: unexpected timeout command %v", host, argv)
+		return "", nil
+	}
+	java := argv[2:]
+	if java[3] == w.failClient && java[5] == "client" {
+		return "", w.exit1
+	}
+	w.answerJava(host, java)
+	return "", nil
 }
 
 func newFakeWorld(t *testing.T, cfg Config) *fakeWorld {
@@ -48,7 +66,12 @@ type fakeTransport struct {
 	host string
 }
 
-func (f fakeTransport) Run(_ context.Context, argv ...string) ([]byte, error) {
+// Run fails like ssh does once ctx is cancelled, so the tests see which
+// commands a cancelled run still issues (only those on a cleanup ctx).
+func (f fakeTransport) Run(ctx context.Context, argv ...string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	f.w.mu.Lock()
 	defer f.w.mu.Unlock()
 	f.w.remote = append(f.w.remote, f.host+": "+strings.Join(argv, " "))
@@ -76,8 +99,10 @@ func (w *fakeWorld) answer(host string, argv []string) (string, error) {
 		return w.answerTest(host, argv)
 	case "sudo":
 		return w.answerSudo(host, argv)
+	case "timeout":
+		return w.answerTimeout(host, argv)
 	case "java":
-		w.answerJava(host, argv)
+		w.t.Errorf("%s: a workload role without timeout: %v", host, argv)
 		return "", nil
 	case "ls":
 		return w.answerLs(host, argv[2]), nil
@@ -140,7 +165,10 @@ func (w *fakeWorld) answerLs(host, dir string) string {
 // the real one would.
 type fakeCtl struct{ w *fakeWorld }
 
-func (c fakeCtl) Run(_ context.Context, args ...string) (string, error) {
+func (c fakeCtl) Run(ctx context.Context, args ...string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	c.w.mu.Lock()
 	defer c.w.mu.Unlock()
 	c.w.ctlCalls = append(c.w.ctlCalls, strings.Join(args, " "))

@@ -474,14 +474,19 @@ the owner's run prints every criterion PASS.
 `internal/acceptance`) runs the whole sequence and checks each
 criterion itself. It contacts exactly the two hosts named
 (any other name is refused in code), and refuses to start
-without both, with the same host twice, or with two names for
-one machine (same `/etc/machine-id`). iormeshctl runs with
+without both, with the same host twice, with two names for
+one machine (same `/etc/machine-id`), or with the controller
+itself as a host. iormeshctl runs with
 `HOME` set to a private work directory, so its registry holds
 only the two hosts and the operator's own registry, store and
 service database are never touched. On the servers the tracer
-is driven only by iormeshctl; the runner itself runs the
-workloads, read-only probes and one fill file, never the
-operator's sudo. HOST1 gets the clients, the single-host
+is started, stopped, upgraded and uninstalled only by
+iormeshctl; the runner itself runs the workloads (each under
+`timeout 300`, killed with `pkill` when its scenario fails),
+read-only probes, one fill file, and one privileged command —
+the read-only `sudo -n /opt/iormesh/bin/iormesh status -json`,
+through the same sudoers rule. The operator's own sudo is never
+used on a server. HOST1 gets the clients, the single-host
 scenarios and the microservices; HOST2 the servers and the
 watchdog project.
 
@@ -527,10 +532,15 @@ Each host (two machines, Linux, x86_64 or aarch64):
   run the tracer, so a 7.x kernel is the safe choice.
 - systemd, rsync, Java 21 or newer on the SSH user's `PATH` (the
   goldens were confirmed on JDK 25), `ss`, GNU `df` and `stat`,
-  `fallocate`, a POSIX login shell.
+  `fallocate`, `timeout`, `pkill`, a POSIX login shell.
 - HOST2 reachable from HOST1 on TCP `PortBase+2` (18202) and,
-  with NAT, the DNAT'ed port (firewalld: `firewall-cmd
-  --add-port=18202/tcp --add-port=18880/tcp`).
+  with NAT, `PortBase+3` (18203): the prerouting redirect
+  rewrites the port before firewalld's input filter sees the
+  packet, so it is 18203 that must be open, not the DNAT'ed
+  port. Open them for this run only — `firewall-cmd
+  --add-port=18202/tcp --add-port=18203/tcp` without
+  `--permanent` is runtime-only, gone at the next reload, and
+  `--remove-port` with the same arguments closes them at once.
 - At least 1 GiB free on the partition of `/opt/iormesh` (HOST2
   fills 128 MiB of it for the watchdog trip).
 - Idle: no `iormesh-*` unit loaded and nothing under
@@ -538,30 +548,47 @@ Each host (two machines, Linux, x86_64 or aarch64):
   uninstalls `/opt/iormesh`, so it refuses a host whose traces
   are not its own.
 - Bootstrapped (decision #1: the first install is the
-  operator's own sudo), with `ops` standing for the SSH user:
+  operator's own sudo), with `ops` standing for the SSH user
+  and `ARCH` for the host's `amd64` or `arm64`. Verify the build
+  against the pinned key before it leaves the controller — the
+  first install has no `upgrade` to check it:
 
   ```sh
-  # from the controller
-  scp dist/iormesh-linux-amd64 ~/.config/iormesh/minisign.pub HOST:
+  # on the controller (./iormeshctl from `mage build`, or
+  # CGO_ENABLED=0 go build -o iormeshctl ./cmd/iormeshctl; or instead
+  # minisign -Vm dist/iormesh-linux-ARCH -p ~/.config/iormesh/minisign.pub)
+  ./iormeshctl verify dist/iormesh-linux-ARCH
+  scp dist/iormesh-linux-ARCH ~/.config/iormesh/minisign.pub HOST:
   # on HOST
   sudo install -d -o root -g root -m 0755 /opt/iormesh \
        /opt/iormesh/bin /opt/iormesh/etc
-  sudo install -o root -g root -m 0755 iormesh-linux-amd64 \
+  sudo install -o root -g root -m 0755 iormesh-linux-ARCH \
        /opt/iormesh/bin/iormesh
   sudo install -o root -g root -m 0644 minisign.pub \
        /opt/iormesh/etc/minisign.pub
-  echo 'ops ALL=(root) NOPASSWD: /opt/iormesh/bin/iormesh' |
-       sudo tee /etc/sudoers.d/iormesh
-  sudo chmod 0440 /etc/sudoers.d/iormesh
-  sudo visudo -cf /etc/sudoers.d/iormesh
+  rm iormesh-linux-ARCH minisign.pub
+  # the rule: written to a temp file, checked, then installed, so a
+  # typo never reaches /etc/sudoers.d (a broken file there breaks sudo)
+  t=$(mktemp)
+  echo 'ops ALL=(root) NOPASSWD: /opt/iormesh/bin/iormesh' > "$t"
+  visudo -cf "$t" &&
+       sudo install -o root -g root -m 0440 "$t" /etc/sudoers.d/iormesh
+  rm "$t"
   ```
 
   `/opt` itself must be root-owned and not writable by others
-  (`upgrade` checks the layout; [security.md](security.md)).
+  (`upgrade` checks the layout; [security.md](security.md)). A
+  host that will not be bootstrapped again after the run should
+  lose the rule too: `sudo rm /etc/sudoers.d/iormesh` (the run's
+  `rm` removes `/opt/iormesh`, not the rule).
 - For the NAT criterion, a DNAT on HOST2 from a port of the
   operator's choice to the NAT server's `PortBase+3`, the way
   `docker -p` would do it (removed again with `sudo nft delete
-  table ip iormesh_m4`):
+  table ip iormesh_m4`). `redirect` rewrites the destination to
+  the primary address of the interface the packet came in on,
+  so `IORMESH_M4_ADDR2` (where the server binds and the client
+  dials) must be that address; for a secondary address use
+  `dnat to ADDR2:18203` instead:
 
   ```sh
   sudo nft add table ip iormesh_m4
@@ -590,15 +617,33 @@ LIBBPFGO=../libbpfgo mage m4Acceptance app1.example.org app2.example.org
 
 A run takes about ten minutes and prints every command it
 issues, then one result line per criterion and a verdict. Exit
-status 0 only when every criterion passed. The run's own files on
-the servers (`~/.iormesh-m4`: the jar and the scenarios' `--dir`
-trees) are removed at the end; deploy's staging directory
-(`~/.iormesh/staging`) stays, as after any deploy. **Because
-`rm` is a criterion, a finished run leaves the hosts without
-`/opt/iormesh`: bootstrap them again before a rerun**, and move
-the old work directory away. An interrupted run is cleaned up by
-`HOME=~/.iormesh-m4 iormeshctl rm HOST` per host (every session
-also ends by itself after its `-duration 1h`).
+status 0 only when every criterion passed — **which cannot
+happen today**: M4-9 stays NOT RUN until the microservices
+scenario can spread over hosts (task 1f4). Every workload role
+runs under `timeout 300`, and a failed scenario's servers are
+killed, so a broken client cannot hang the run. The run's own
+files on the servers (`~/.iormesh-m4-run`: the jar and the
+scenarios' `--dir` trees) are removed at the end; deploy's
+staging directory (`~/.iormesh/staging`) stays, as after any
+deploy. **Because `rm` is a criterion, a finished run leaves
+the hosts without `/opt/iormesh`: bootstrap them again before a
+rerun**, and move the old work directory away.
+
+The first ^C cancels the current step and still runs the
+teardown (`rm` of both hosts, leftover roles killed, the run's
+directory and fill file removed; at most 5 minutes); a second
+^C kills the run outright. If the teardown did not finish, clean
+up by hand — with an iormeshctl built as above, and the
+operator's XDG variables cleared so it reads the run's registry:
+
+```sh
+env -u XDG_CONFIG_HOME -u XDG_DATA_HOME HOME=$HOME/.iormesh-m4 \
+    ./iormeshctl rm HOST                   # per host
+ssh HOST pkill -f .iormesh-m4-run/workload.jar
+ssh HOST rm -rf .iormesh-m4-run            # HOST2 also: rm -f /var/tmp/.iormesh-m4-fill
+```
+
+Every session also ends by itself after its `-duration 1h`.
 
 Send back the results block and the work directory's path.
 
@@ -606,8 +651,8 @@ Send back the results block and the work directory's path.
 
 | Id | Criterion (PLAN.md M4) | How | Expected |
 |---|---|---|---|
-| M4-0 | — preflight | ssh `pwd`; arch, kernel, machine ids; `test -f` of the binary and key; `sudo -n -l /opt/iormesh/bin/iormesh`; the tools; no unit or trace; signed build per arch; local rsync; jar pushed | PASS, arch and kernel per host printed |
-| M4-1 | `add` → `deploy`, zero manual steps on the servers | `add -project P -pattern 'java -jar */.iormesh-m4/workload.jar <scenario> --role <role> *' HOST -duration 1h` per role, `deploy HOST1 HOST2`, then `status -json` per project | every project `running` |
+| M4-0 | — preflight | ssh `pwd`; arch, kernel, machine ids (distinct, neither the controller's); `test -f` of the binary and key; `sudo -n -l /opt/iormesh/bin/iormesh`; the tools; no unit or trace; signed build per arch; local rsync; jar pushed | PASS, arch and kernel per host printed |
+| M4-1 | `add` → `deploy`, zero manual steps on the servers | `add -project P -pattern 'java -jar */.iormesh-m4-run/workload.jar <scenario> --role <role> *' HOST -duration 1h` per role, `deploy HOST1 HOST2`, then `status -json` per project | every project `running` |
 | M4-2 | streaming collect | per round: `file-basic` on HOST1, 65 s, list every `ready/`, `collect`, list again | every listed file gone from the server and in the store; the project dir holds only `ready/`, `state.json`, `.lock` and `.active-*`; ≥ 1 file moved |
 | M4-3 | `collect` alone changes nothing but the local store | hash every file of the work dir outside the store before and after each `collect` | unchanged |
 | M4-4 | `refresh` produces the merged graph export | `refresh` (no host, no project) | exit 0; every project and both hosts in the model; no damaged segment |
@@ -617,7 +662,7 @@ Send back the results block and the work directory's path.
 | M4-8 | microservices: every REST edge fused, plain and TLS | the four services on HOST1, one project each, read from the refresh's model | orders and billing `tls`, inventory `plain` (2 conns), all fused |
 | M4-9 | microservices one service per host | — | NOT RUN: the scenario is loopback-only (PLAN.md scenario notes) |
 | M4-10 | clock bound | the m4shop+m4billing model's clock windows | non-empty and two-sided, widths printed (real clocks; the injected skew is `TestClockSkewRecovered`'s) |
-| M4-11 | `build` with the network down is byte-identical | the same build rerun under `unshare -rn` (else with a `PATH` lacking ssh and rsync) | `graph.json` and `model.json` byte-equal |
+| M4-11 | `build` with the network down is byte-identical | both outputs deleted, then the same build rerun under `unshare -rn` (else with a `PATH` lacking ssh and rsync) | `graph.json` and `model.json` byte-equal |
 | M4-12 | naming two services shows them by name | `services name -port 18202 ADDR2 m4-billing-svc`, `services name -port 18213 127.0.0.1 m4-orders-svc`, `build`, `services` | both names in the model's services and edges and in the listing |
 | M4-13 | disk watchdog | `add` m4disk on HOST2 with `-disk-limit 0 -disk-min-free <free − 64 MiB>`, `deploy -project m4disk`, `fallocate` 128 MiB, wait | `ended`/`disk_limit`; collected segment intact; `show` names `disk_limit` |
 | M4-14 | `rm` leaves nothing under `/opt/iormesh` | `rm HOST1`, `rm HOST2`, `test -e /opt/iormesh`, units, registry, `build` of every project | no `/opt/iormesh`, no unit, empty registry; every session's end in the store |
@@ -641,7 +686,14 @@ not run against real hosts. What ran here:
   command outside iormeshctl; `TestPreflightRefusesBusyHost`
   stops at a host with someone else's traces before iormeshctl
   runs; the host gate, the config's refusals and the rsync
-  version check have their own tests.
+  version check have their own tests. Added in the review
+  round: `TestInterruptStillTearsDown` (a ^C during the
+  streaming rounds still runs `rm` on both hosts, `pkill`s the
+  roles and removes the run directories),
+  `TestFailedClientStopsServer` (a failed two-host client gets
+  its server killed and M4-6 reports the workload's failure;
+  the fakes also fail any role started without `timeout 300`),
+  `TestPreflightRefusesController` and `TestNewExecCtlEnv`.
 - `mage m4Acceptance m4-host1.invalid m4-host2.invalid` (real
   SSH transport, a throwaway key and dist): the preflight fails
   on the first `ssh … pwd`, every other criterion is NOT RUN,

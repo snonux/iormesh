@@ -32,7 +32,7 @@ func (r *Runner) preflightHost(ctx context.Context, h string) (*hostInfo, error)
 	if err := r.checkBootstrap(ctx, h); err != nil {
 		return nil, err
 	}
-	for _, tool := range []string{"java", "ss", "rsync", "systemd-run", "df", "stat", "fallocate"} {
+	for _, tool := range []string{"java", "ss", "rsync", "systemd-run", "df", "stat", "fallocate", "timeout", "pkill"} {
 		if ok, err := r.remoteTest(ctx, h, "sh", "-c", "command -v "+tool); err != nil || !ok {
 			return nil, fmt.Errorf("%s not found on the host (%v)", tool, err)
 		}

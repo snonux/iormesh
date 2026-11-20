@@ -4,8 +4,11 @@ import "fmt"
 
 // remoteDir is the run's own directory in the SSH user's home on each
 // server: the workload jar and the scenarios' --dir trees. Nothing of
-// the tracer goes there; the runner removes it at the end.
-const remoteDir = ".iormesh-m4"
+// the tracer goes there; the runner removes it at the end. Its name
+// differs from the controller's work directory (~/.iormesh-m4), so the
+// removal can never hit the run's results — and the preflight refuses
+// the controller itself as a host anyway.
+const remoteDir = ".iormesh-m4-run"
 
 // Port offsets from Config.PortBase. Fixed ports, so a client can be
 // given its server's port before the server prints it, and the naming

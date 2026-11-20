@@ -36,12 +36,19 @@ func (r *Runner) checkOffline(ctx context.Context) (string, error) {
 	if r.crossBytes == nil {
 		return "", fmt.Errorf("no earlier build of %s+%s to compare with", projShop, projBilling)
 	}
+	dir := r.buildDir([]string{projShop, projBilling})
+	// Delete the outputs first: equal bytes must come from the offline
+	// build rewriting them, not from a build that left them alone.
+	for _, f := range buildFiles {
+		if err := os.Remove(filepath.Join(dir, f)); err != nil {
+			return "", err
+		}
+	}
 	r.logf("  iormeshctl build -project %s -project %s (offline)", projShop, projBilling)
 	_, how, err := r.ctl.Offline(ctx, "build", "-project", projShop, "-project", projBilling)
 	if err != nil {
 		return "", fmt.Errorf("offline build (%s): %w", how, err)
 	}
-	dir := r.buildDir([]string{projShop, projBilling})
 	for _, f := range buildFiles {
 		data, err := os.ReadFile(filepath.Join(dir, f))
 		if err != nil {

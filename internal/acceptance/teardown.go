@@ -41,7 +41,10 @@ func (r *Runner) watchdog(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer func() { _, _ = r.remote(ctx, h, "rm", "-f", "--", fill) }()
+	// Remembered first, so cleanupRemote removes it after any failure or
+	// interrupt; removed here as soon as the trip is seen, to give the
+	// other sessions on the partition their space back.
+	r.fillFile = fill
 	if _, err := r.remote(ctx, h, "fallocate", "-l", strconv.Itoa(2*watchdogMargin), fill); err != nil {
 		return "", err
 	}

@@ -37,6 +37,9 @@ func (r *Runner) preflight(ctx context.Context) error {
 	if r.info[r.cfg.Host1].machineID == r.info[r.cfg.Host2].machineID {
 		return errors.New("HOST1 and HOST2 have the same /etc/machine-id: one machine under two names, or cloned")
 	}
+	if err := r.notController(); err != nil {
+		return err
+	}
 	if err := r.resolveAddrs(ctx); err != nil {
 		return err
 	}
@@ -67,6 +70,28 @@ func (r *Runner) preflightLocal() error {
 		}
 	}
 	return r.prepareWorkDir()
+}
+
+// localMachineID is the controller's /etc/machine-id; a variable so the
+// tests can point it at a file of their own.
+var localMachineID = "/etc/machine-id"
+
+// notController refuses a host that is the controller itself (its
+// machine id): rm would uninstall the operator's own /opt/iormesh, and
+// the run's cleanup works in the same home as its results. A controller
+// without the file (macOS) cannot be a Linux host anyway.
+func (r *Runner) notController() error {
+	data, err := os.ReadFile(localMachineID)
+	if err != nil {
+		return nil
+	}
+	id := strings.TrimSpace(string(data))
+	for _, h := range []string{r.cfg.Host1, r.cfg.Host2} {
+		if id != "" && r.info[h].machineID == id {
+			return fmt.Errorf("%s is this controller (same /etc/machine-id): use two other machines", h)
+		}
+	}
+	return nil
 }
 
 var rsyncVersion = regexp.MustCompile(`^rsync\s+version\s+v?(\d+)\.(\d+)\.(\d+)`)
