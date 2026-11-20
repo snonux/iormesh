@@ -4947,22 +4947,30 @@ Later phase. Decisions #13, #14, #15 and #18 are provisional
 them on kind, and expect #18 to move once the owner's fleet
 examples arrive.
 
-Order of work — the first three are tracer changes the rest
+Order of work — the first five are tracer and pod changes the rest
 depends on:
 
 1. **PID-namespace-aware targeting** (#13). Today `target_map` is
    keyed by the kernel's tgid and `/proc` is read as the host's,
    so a tracer inside a pod's PID namespace targets nothing. The
    tracer puts its own namespace (`stat /proc/self/ns/pid`: dev
-   and inode) in rodata; the BPF side keys targets, children and
-   the pattern's pending set by
-   `bpf_get_ns_current_pid_tgid(dev, ino, …)`, whose failure for
-   a task outside the namespace is the filter's "no". Records
-   keep the host tgid as well, so cross-host joins and the
-   controller's pod lookup do not change; every `/proc` lookup
-   uses the namespace pid. On the host the namespace is the
-   init one and nothing changes — the existing root suites are
-   the regression check.
+   and inode, plus its level) in rodata; the BPF side keys
+   targets, children and the pattern's pending set by the
+   task's pid *at that level*. `bpf_get_ns_current_pid_tgid`
+   alone is not enough: it matches only the task's innermost
+   namespace, so a process in a nested namespace (a container
+   runtime or sandbox inside the pod) would be lost. Walk the
+   levels as `ior_current_namespace_tgid` (internal/c/filter.c)
+   does — `pids[PIDTYPE_TGID]->numbers[level]`, checking that
+   level's `ns` is the tracer's — and treat a task above or
+   outside it as the filter's "no". Records keep the host tgid
+   as well, so cross-host joins and the controller's pod lookup
+   do not change; every `/proc` lookup uses the namespace pid,
+   and so does `AttachJavaMarks`: uprobe_multi's pid is looked
+   up in the caller's namespace (task 4f4 implements this
+   targeting). On the host the namespace is the init one and
+   nothing changes — the existing root suites are the
+   regression check.
 2. **Memlock without `CAP_SYS_RESOURCE`** (#13). libbpfgo
    v0.9.2's `NewModuleFromBuffer` sets RLIMIT_MEMLOCK to 512 MiB
    before every load, which fails without the capability. Load
@@ -4976,33 +4984,57 @@ depends on:
    For a JVM in another mount namespace (`sameMountNS` false),
    `attach` and `run -agent` create a root-owned 0755 directory
    under the JVM's `/tmp` through the `RESOLVE_IN_ROOT` fd
-   `internal/javaattach` already holds, copy the jar in (the
-   trust rule still holds: `/tmp` is sticky), make the spool
-   beside it 1733, pass those paths, and let
-   `internal/agentspool` open the ring through
-   `/proc/<pid>/root` with its existing checks. A JVM without a
+   `internal/javaattach` already holds — `mkdirat`, refusing an
+   existing entry (the JVM's user may have planted it) — copy
+   the jar in with `O_EXCL|O_NOFOLLOW` (the trust rule still
+   holds: `/tmp` is sticky), make the spool beside it 1733, pass
+   those paths, and let `internal/agentspool` open the ring
+   through `/proc/<pid>/root` with its existing checks. The
+   session removes the directory when it ends. A JVM without a
    writable `/tmp` gets no Java attribution and a note naming
    `-javaagent`.
-4. `internal/k8s/cgroup.go`: parse `/proc/<pid>/cgroup` → pod
+4. **Java mark without `CAP_CHECKPOINT_RESTORE`** (optional,
+   #13). `openJavaLibs` opens mapped libraries through
+   `/proc/<pid>/map_files`, which needs the capability. Open
+   them through `/proc/<pid>/root/<path>` with
+   `RESOLVE_IN_ROOT` instead, as it already does for unmapped
+   ones, and keep the file only if its device and inode equal
+   the mapping's in `/proc/<pid>/maps` — the same file, proved
+   another way; then drop the capability.
+5. **Prepared pods** (#13, #18). An ephemeral container can
+   mount only volumes the pod already has, and the tracer needs
+   two: tracefs (hostPath `/sys/kernel/tracing`, read-only —
+   mounting it needs `SYS_ADMIN`, and without it no classic
+   tracepoint attaches: `errNothingAttached`) and a size-bounded
+   `emptyDir` for traces. Raw or BTF tracepoints would need no
+   tracefs, but task 8e4 measured them skipping runs
+   (internal/c/dispatch.c), so they are not the way out.
+   `deploy/prepare-patch.yaml` adds just the two volumes (one
+   rollout, no container); iormeshctl checks a pod's spec for
+   them before `kubectl debug` and refuses an unprepared pod,
+   naming the patch.
+6. `internal/k8s/cgroup.go`: parse `/proc/<pid>/cgroup` → pod
    UID + container id (cgroup v1 and v2 path forms; unit-test
    against captured strings from kind). Under a private cgroup
    namespace (cgroup v2's default) an in-pod tracer sees `0::/`;
    it then takes its pod from the downward API (`POD_NAME`,
    `POD_NAMESPACE`, `POD_UID` in its env) and the controller
    maps processes to containers — settle how on kind.
-5. Pod names: resolved on the controller through the API server
+7. Pod names: resolved on the controller through the API server
    (`kubectl get pods -o json`), joined by pod UID — the tracer
    never talks to the API.
-6. The image and its security context (#13): the tracer image
+8. The image and its security context (#13): the tracer image
    (static binary and agent jar, no shell needed), pinned by
    digest. The container spec, shared by the sidecar patch and
    the debug container's `--custom` file:
 
    ```yaml
+   # pod: hostUsers: true (user-namespaced caps do not reach BPF)
    securityContext:
      runAsUser: 0
-     allowPrivilegeEscalation: false
-     seccompProfile: {type: Unconfined}  # until RuntimeDefault passes bpf etc.
+     allowPrivilegeEscalation: false     # dropped for privileged
+     seccompProfile: {type: RuntimeDefault}  # Localhost, then
+                                             # Unconfined: fallbacks
      capabilities:
        drop: [ALL]
        add: [BPF, PERFMON, SYS_RESOURCE,          # kernel tracing
@@ -5011,18 +5043,23 @@ depends on:
    volumeMounts:
      - {name: tracefs, mountPath: /sys/kernel/tracing, readOnly: true}
      - {name: iormesh-traces, mountPath: /opt/iormesh/traces}
-   # pod volumes: tracefs = hostPath /sys/kernel/tracing (Directory),
-   # iormesh-traces = emptyDir with a sizeLimit
+   # pod volumes (step 5's prepare patch): tracefs = hostPath
+   # /sys/kernel/tracing (Directory), iormesh-traces = emptyDir
+   # with a sizeLimit
    ```
 
-   `deploy/sidecar-patch.yaml`: the strategic-merge patch adding
-   that container with `shareProcessNamespace: true`. The debug
-   path: `kubectl debug --target=<container> --image=<digest>
-   --custom=<that file>`; the `privileged` profile swaps the file
-   for `--profile=sysadmin`. Check on kind that `--custom`
-   carries the capabilities, and which volume mounts an
-   ephemeral container may use.
-7. `iormeshctl` gains a k8s transport implementing the same
+   `deploy/sidecar-patch.yaml`: the prepare patch plus that
+   container and `shareProcessNamespace: true`. The debug path,
+   on a prepared pod: `kubectl debug --target=<container>
+   --image=<digest> --custom=<that file>`; the `privileged`
+   profile swaps the file for `--profile=sysadmin` (and drops
+   `allowPrivilegeEscalation: false`, which the API refuses
+   beside `privileged: true`). Check on kind that `--custom`
+   carries the capabilities and the volume mounts, and pin the
+   oldest containerd and CRI-O whose `RuntimeDefault` lets
+   `bpf` and `perf_event_open` through on `CAP_BPF` and
+   `CAP_PERFMON` (believed containerd 1.6, CRI-O 1.23).
+9. `iormeshctl` gains a k8s transport implementing the same
    interface as SSH:
 
    ```go
@@ -5036,42 +5073,46 @@ depends on:
    M4 codes against this interface from day one, with SSH as the
    only implementation. The k8s `Run` is `kubectl --context C -n
    NS exec POD -c iormesh -- iormesh …`; `Fetch` runs a tracer
-   subcommand that writes `ready/`'s segments as a tar stream to
-   stdout, unpacks only `*.parquet` directly in `ready/` (no
-   links, no modes — collect's rules), then removes what it took
-   with a second exec. No `tar` or rsync in the image.
-8. Registry: the `k8s:` and `pods:` sections (#18). **Provisional
-   — owner's examples pending**; every value below is a
-   placeholder, not a fleet fact:
+   subcommand that takes no path: it streams only the
+   configured trace dir's `ready/*.parquet`, each opened
+   `O_NOFOLLOW` and sent only if `fstat` shows a regular file,
+   as a tar to stdout. The controller treats the stream as
+   untrusted: it unpacks only `*.parquet` entries without a
+   directory part (no links, no modes, sizes bounded —
+   collect's rules), then removes what it took with a second
+   exec. No `tar`, `kubectl cp` or rsync in the image.
+10. Registry: the `k8s:` and `pods:` sections (#18). **Provisional
+    — owner's examples pending**; every value below is a
+    placeholder, not a fleet fact:
 
-   ```yaml
-   # ~/.config/iormesh/servers.yaml (same file, same 0600 rules)
-   k8s:
-     image: <registry>/iormesh@sha256:<digest>  # default: ours
-     mode: debug                    # debug | sidecar
-     profile: minimal               # minimal (#13) | privileged
-     clusters:
-       - name: <cluster-label>      # what pods: entries name
-         context: <kube-context>    # always passed as --context
-         namespace: <namespace>     # default; also the project (#21)
-   pods:
-     - cluster: <cluster-label>
-       namespace: <namespace>       # optional: the cluster's otherwise
-       selector: <label>=<value>    # or pod: <pod-name>
-       container: <app-container>   # kubectl debug --target
-       projects:                    # as under servers:
-         - name: <project>
-           target: {pattern: "<glob>"}
-           flags: ["-spool=<dir>", "-agent=<jar>"]
-   ```
+    ```yaml
+    # ~/.config/iormesh/servers.yaml (same file, same 0600 rules)
+    k8s:
+      image: <registry>/iormesh@sha256:<digest>  # default: ours
+      mode: debug                    # debug | sidecar
+      profile: minimal               # minimal (#13) | privileged
+      clusters:
+        - name: <cluster-label>      # what pods: entries name
+          context: <kube-context>    # always passed as --context
+          namespace: <namespace>     # default; also the project (#21)
+    pods:
+      - cluster: <cluster-label>
+        namespace: <namespace>       # optional: the cluster's otherwise
+        selector: <label>=<value>    # or pod: <pod-name>
+        container: <app-container>   # kubectl debug --target
+        projects:                    # as under servers:
+          - name: <project>
+            target: {pattern: "<glob>"}
+            flags: ["-spool=<dir>", "-agent=<jar>"]
+    ```
 
-   Flags `-context`, `-namespace` and `-image` override per run;
-   precedence flag > pod entry > cluster > `k8s:` default. A
-   context the registry does not list is refused, as an
-   unregistered host is.
-9. ClusterIP join: S2's key if it survives kube-proxy's DNAT;
-   otherwise conntrack on the node.
-10. `internal/routemap` (#15): the static map first —
+    Flags `-context`, `-namespace` and `-image` override per run;
+    precedence flag > pod entry > cluster > `k8s:` default. A
+    context the registry does not list is refused, as an
+    unregistered host is.
+11. ClusterIP join: S2's key if it survives kube-proxy's DNAT;
+    otherwise conntrack on the node.
+12. `internal/routemap` (#15): the static map first —
     `~/.config/iormesh/routes.yaml`, loaded with the registry's
     ownership and mode checks (placeholders):
 

@@ -1608,10 +1608,10 @@ Later phase — plain Linux servers (M4) come first.
   (client→ingress and ingress→backend are separate streams).
   iormesh completes those edges from routing metadata: a
   configured map FQDN → ingress → service → deployment or
-  statefulset, or (in k8s mode) discovered automatically from
-  Ingress/IngressRoute objects, the Traefik API, and
-  service→workload resolution via the k8s API. No payload
-  parsing — Traefik's own configuration and logs are the source.
+  statefulset — a static map first, then (in k8s mode)
+  discovery from Ingress/IngressRoute objects and
+  service→workload resolution via the k8s API (#15). No payload
+  parsing — routing configuration is the source.
   Observed http events (host + path from the agent) can
   validate the mapping against what actually flowed.
 - Collection works with the controller tooling too —
@@ -1654,8 +1654,9 @@ would overturn it), and deferred.
   trusts a host key on first use: ssh runs with
   `StrictHostKeyChecking=yes` and `BatchMode=yes`, so a server's
   key must already be in the operator's known_hosts, and no
-  password prompt can hang a run. The k8s fetch path
-  (kubectl exec/cp) settles with #18.
+  password prompt can hang a run. The k8s fetch path is
+  provisionally settled in #18: an exec-streamed tar, no
+  `kubectl cp`.
 - **#16 Trace-file segmentation** — rotate once per minute,
   close-then-rename into `ready/`, collect-while-running via
   rsync with delete-after-sync (see M4). Compression is
@@ -2091,7 +2092,9 @@ here only as placeholders.
 - **#13 K8s privilege profile** — *Provisional (2026-11-20):*
   the minimal capability set, `privileged: true` the documented
   fallback. The tracer container runs as uid 0 with
-  `allowPrivilegeEscalation: false`, drops ALL and adds:
+  `allowPrivilegeEscalation: false` in a pod with `hostUsers:
+  true` (a user-namespaced pod's capabilities do not reach BPF
+  or the host kernel's tracing), drops ALL and adds:
   - `BPF` and `PERFMON` — loading tracing programs (tracepoint,
     raw tracepoint, uprobe_multi), the ring buffer and stack map,
     and the `perf_event_open` that attaches each tracepoint;
@@ -2107,35 +2110,64 @@ here only as placeholders.
     socket, its 0600 ring, its working directory), `KILL` (the
     one SIGQUIT to a JVM of another uid) and
     `CHECKPOINT_RESTORE` (`/proc/<pid>/map_files`, by which the
-    Java mark opens the very `libjava.so` mapped).
-  No `SYS_ADMIN`: every attach type the tracer uses checks
-  `CAP_BPF`/`CAP_PERFMON` on kernels ≥ 5.8, the oldest that has
-  them (the ring buffer needs 5.8 anyway). Measured on the host,
-  not assumed: this set traces and attaches as root does, and
-  each capability left out alone breaks a step it is listed for
+    Java mark opens the very `libjava.so` mapped). M7 may drop
+    it: open the library through `/proc/<pid>/root/<path>`
+    (`RESOLVE_IN_ROOT`, as for unmapped libraries today) and
+    accept it only if its device and inode equal the mapping's
+    in `/proc/<pid>/maps` — the same file, proved without
+    `map_files`.
+  No `SYS_ADMIN`: every attach type the tracer uses (classic
+  tracepoint, raw tracepoint, uprobe_multi) checks
+  `CAP_BPF`/`CAP_PERFMON`. Kernel floors: 5.8 for the two
+  capabilities and the ring buffer, 5.9 for
+  `CAP_CHECKPOINT_RESTORE`, and 6.10 (or a 6.6–6.9 kernel with
+  commit 46ba0e49, internal/bpf/javamark.go) for Java
+  attribution's uprobe_multi marks. Measured on the host, not
+  assumed: this set traces and attaches as root does, and each
+  capability left out alone breaks a step it is listed for
   ([testing.md](docs/testing.md#k8s-capability-set-task-ub4)).
-  Also required: tracefs mounted read-only from the host
-  (`/sys/kernel/tracing`, where libbpf reads tracepoint ids — a
-  container's sysfs has none), BTF from the container's own
-  sysfs (`/sys/kernel/btf/vmlinux`), and a seccomp profile that
-  lets `bpf`, `perf_event_open`, `openat2`, `pidfd_open` and
-  `pidfd_send_signal` through (`Unconfined` for the tracer
-  container until a runtime's `RuntimeDefault` is shown to).
+  Also required — volumes the pod must already carry, since an
+  ephemeral container can mount only the pod's own volumes:
+  - tracefs from the host, read-only (hostPath
+    `/sys/kernel/tracing`): libbpf reads each classic
+    tracepoint's id there, a container's sysfs has none, and
+    mounting it needs `SYS_ADMIN`. Without it nothing attaches
+    (`errNothingAttached`). Raw or BTF tracepoints would need
+    only BTF, but task 8e4 measured them skipping runs on 7.2
+    (internal/c/dispatch.c), so the classic hooks — and tracefs
+    — stay;
+  - a size-bounded `emptyDir` (`sizeLimit`) for the trace dir,
+    so segments never fill the container's writable layer
+    unbounded.
+  BTF comes from the container's own sysfs
+  (`/sys/kernel/btf/vmlinux`). Seccomp: `RuntimeDefault` is the
+  provisional default — the containerd and Moby default
+  profiles allow `bpf` with `CAP_BPF` and `perf_event_open`
+  with `CAP_PERFMON`, and `openat2`, `pidfd_open` and
+  `pidfd_send_signal` outright (believed from containerd 1.6
+  and CRI-O 1.23, whose profiles gained the two capabilities;
+  pin the minimum on kind) — with a `Localhost` profile, then
+  `Unconfined`, as fallbacks for older runtimes.
   Found in the code: the tracer targets *host* PIDs (target_map
   is keyed by the kernel's tgid, `/proc` read as the host's), so
   in a pod's PID namespace `-pid` would name nothing. M7 makes
   targeting namespace-aware — the tracer passes its PID
-  namespace and the BPF side keys by the pid in it
-  (`bpf_get_ns_current_pid_tgid`) — which also scopes the
+  namespace and the BPF side keys by the pid at that
+  namespace's level, walked the way `ior_current_namespace_tgid`
+  (internal/c/filter.c) walks levels, since
+  `bpf_get_ns_current_pid_tgid` matches only a task's innermost
+  namespace and a pod may nest one — which also scopes the
   tracer to the pod by construction; `hostPID` is the rejected
   shortcut (it hands the app containers the node's process
-  table). Fallback to `privileged`: a kernel before 5.8; a
-  runtime that rejects the newer capability names; an
-  SELinux-enforcing node whose container type is denied `bpf`;
-  an AppArmor or seccomp default that cannot be relaxed per
-  container; a node-level debug pod. Privileged does not help
-  under kernel lockdown (confidentiality): no tracing there at
-  all. Overturned if: the kind run (or a fleet node) needs a
+  table). Fallback to `privileged` (which must not set
+  `allowPrivilegeEscalation: false`; the API refuses the pair):
+  a kernel before 5.8; a runtime that rejects the newer
+  capability names; an SELinux-enforcing node whose container
+  type is denied `bpf`; an AppArmor or seccomp default that
+  cannot be relaxed per container; a node-level debug pod.
+  Privileged does not help under kernel lockdown
+  (confidentiality): the tracer's kernel reads are refused
+  there. Overturned if: the kind run (or a fleet node) needs a
   capability beyond this list, or namespace-aware targeting
   proves unworkable (then a node-level tracer with `hostPID`
   takes over the in-pod design). Owner to confirm: node kernels
@@ -2150,18 +2182,28 @@ here only as placeholders.
   run with `-XX:-EnableDynamicAgentLoading`, and for a future
   JDK that disables dynamic loading by default (#2's caveats
   apply unchanged). The ephemeral container joins the target
-  container's namespace (`kubectl debug --target`), so no pod
-  change or restart; a sidecar needs `shareProcessNamespace:
-  true`. The handshake is ge4's, unchanged: trigger file and
+  container's namespace (`kubectl debug --target`), so the JVM
+  is never restarted for the attach — but the pod must already
+  carry #13's two volumes (tracefs, the bounded trace dir), so
+  a pod is prepared once by the deployment owner's patch (one
+  rollout, no tracer container in it); a sidecar needs that
+  patch plus `shareProcessNamespace: true`. The handshake is
+  ge4's, unchanged: trigger file and
   socket reached through `/proc/<pid>/root` and `cwd`,
   `SO_PEERCRED` naming the target, as uid 0 (HotSpot accepts
   root or its own euid). M7 code: the JVM resolves the jar and
   spool paths in its own mount namespace, and an ephemeral
   container cannot add a volume to the app container, so the
   tracer stages both inside the JVM's root — a root-owned
-  directory under its `/tmp`, created with `RESOLVE_IN_ROOT` —
-  and reads the ring through `/proc/<pid>/root` (#27 foresaw
-  this). Capabilities: #13's Java four. Overturned if: the
+  directory under its `/tmp`, created exclusively with
+  `RESOLVE_IN_ROOT` and refused if it exists or is not root's,
+  removed when the session ends — and reads the ring through
+  `/proc/<pid>/root` (#27 foresaw this). That staging is
+  bounded: the jar (≈280 KiB) and one
+  ring per JVM of a fixed size (8 MiB by default, `ringsize=`
+  at most 1 GiB; AgentArgs.java, Ring.java), charged to the app
+  container's ephemeral storage — or its memory where `/tmp` is
+  a tmpfs. Capabilities: #13's Java four. Overturned if: the
   owner's JVMs run with dynamic loading disabled or a
   read-only root without a writable `/tmp` (then `-javaagent`
   becomes the default), or the kind run shows the runtime's
@@ -2201,12 +2243,19 @@ here only as placeholders.
   Mode `debug` (ephemeral container, the default) or `sidecar`
   (a patch the deployment owner applies); profile `minimal`
   (#13's set, via `kubectl debug --custom`) or `privileged`
-  (`--profile=sysadmin`). Trace fetch (#12): `kubectl exec` of
-  a tracer subcommand that streams `ready/`'s segments as a tar
-  to stdout, unpacked by the controller under collect's rules
-  (only `*.parquet` directly in `ready/`, no links or modes),
-  then removed by a second exec — no `tar` or rsync needed in
-  the image. Schema sketch, placeholders only:
+  (`--profile=sysadmin`). Either mode needs a pod prepared with
+  #13's volumes: before creating the ephemeral container,
+  iormeshctl checks the pod spec for them and refuses an
+  unprepared pod, naming the patch. Trace fetch (#12):
+  `kubectl exec` of a tracer subcommand that takes no path — it
+  streams only the configured trace dir's `ready/*.parquet`,
+  each opened `O_NOFOLLOW` and sent only if a regular file — as
+  a tar to stdout; the controller treats the stream as
+  untrusted and unpacks it under collect's rules (only
+  `*.parquet` directly in `ready/`, no links, no modes, sizes
+  bounded), then removes what it took by a second exec — no
+  `tar`, `kubectl cp` or rsync needed in the image. Schema
+  sketch, placeholders only:
   [implementation.md](docs/implementation.md#m7--kubernetes).
   Overturned by: the owner's examples. Owner to provide: real
   contexts, namespaces, the image registry, and how pods are
@@ -2836,8 +2885,7 @@ with minimal renaming; exact shapes settle when M0/M1 start.)
 - No packet sniffing: nothing is parsed off the wire — HTTP
   request metadata comes from the Java agent's API-boundary
   hooks; routing knowledge comes from DNS answers, the
-  configured route map, the k8s API, and Traefik's own
-  configuration/logs.
+  configured route map, then k8s API discovery (#15).
 - Tracing the mesh itself into the mesh: the tracer's own
   footprint, the Java agent's spool writes and the controller's
   SSH/rsync traffic are out of the traced set.

@@ -367,22 +367,53 @@ truth.
   is no devices, no mounts, no namespace escapes and no
   `CAP_SYS_ADMIN`; it does not make BPF pod-local. The tracer
   container:
-  - runs as uid 0, `allowPrivilegeEscalation: false`, drops ALL
-    and adds `BPF`, `PERFMON`, `SYS_RESOURCE` (libbpfgo's
-    memlock bump, not the kernel), plus `SYS_PTRACE`,
-    `DAC_OVERRIDE`, `KILL` and `CHECKPOINT_RESTORE` when it
-    attributes Java — each traced to the code that needs it in
-    PLAN.md #13 and checked by leaving it out
+  - runs as uid 0, `allowPrivilegeEscalation: false`, in a pod
+    with `hostUsers: true`, drops ALL and adds `BPF`, `PERFMON`,
+    `SYS_RESOURCE` (libbpfgo's memlock bump, not the kernel),
+    plus `SYS_PTRACE`, `DAC_OVERRIDE`, `KILL` and
+    `CHECKPOINT_RESTORE` when it attributes Java — each traced
+    to the code that needs it in PLAN.md #13 and checked by
+    leaving it out
     ([testing.md](testing.md#k8s-capability-set-task-ub4));
   - mounts the host's tracefs read-only and nothing else of the
-    host; traces and the spool live in the pod;
+    host; traces live in a size-bounded `emptyDir` of the pod.
+    The pod must carry both volumes before the tracer comes
+    (an ephemeral container cannot add one), so it is prepared
+    once by the deployment owner's patch;
   - scopes itself to the pod by its PID namespace: once
     targeting keys by the pid in the tracer's own namespace (M7
     code), a process outside the pod cannot be named as a
-    target, and `SYS_PTRACE`/`DAC_OVERRIDE`/`KILL` reach only
-    what that namespace's `/proc` shows — the pod. `hostPID` is
-    not used: it would give the app containers the node's
-    process table too;
+    target, and `SYS_PTRACE` and `KILL` reach only what that
+    namespace's `/proc` shows — the pod. `DAC_OVERRIDE` is not
+    so bounded: it overrides file permissions on everything the
+    container's mount namespace holds — its own image and
+    volumes, and through `/proc/<pid>/root` the pod's other
+    containers, whose files a pod's root could not otherwise
+    open. `hostPID` is not used: it would give the app
+    containers the node's process table too;
+  - stages the agent jar and spool inside the JVM's root for a
+    live attach (PLAN.md #14): a root-owned 0755 directory
+    under the JVM's `/tmp`, created exclusively (`O_EXCL`
+    semantics through `mkdirat` on the `RESOLVE_IN_ROOT` fd)
+    and refused if it already exists or is not root's — the
+    JVM's user could otherwise have planted it; the jar copied
+    in with `O_EXCL|O_NOFOLLOW`; the spool beside it 1733, its
+    rings checked as on a host. It costs the app container's
+    ephemeral storage, or its memory where `/tmp` is a tmpfs
+    (the jar and one fixed-size ring per JVM). The tracer
+    removes the directory when its session ends; a session
+    killed before that leaves it to the container's lifetime,
+    and the next session removes a leftover it can prove its
+    own (root-owned, its name);
+  - is reached only through the operator's kubectl, with the
+    cluster named by the registry (`--context` always explicit,
+    never the kubeconfig's current context) — the registry stays
+    the deploy boundary. The operator's RBAC for this —
+    `patch` on `pods/ephemeralcontainers` and `create` on
+    `pods/exec` in a namespace at the `privileged` level — is
+    itself node-wide read access: whoever holds it can start a
+    BPF-capable container there, so grant it like root on the
+    nodes;
   - is reached only through the operator's kubectl, with the
     cluster named by the registry (`--context` always explicit,
     never the kubeconfig's current context) — the registry stays
@@ -393,7 +424,8 @@ truth.
     operator's `iormeshctl`.
   `privileged: true` is the fallback where the minimal profile
   cannot run (old kernels, SELinux-enforcing nodes, runtimes
-  without the newer capability names); it widens what a
+  without the newer capability names; it cannot be combined
+  with `allowPrivilegeEscalation: false`); it widens what a
   compromised tracer could do to the whole node, so use it only
   where the minimal set was tried. Pod Security `baseline` and
   `restricted` refuse both profiles: the tracer needs a

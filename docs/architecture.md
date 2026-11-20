@@ -144,7 +144,8 @@ views — happens on the controller.
     LLM-introspectable.
 - **Kubernetes sidecar / debug container**
   - Runs as a sidecar (or `kubectl debug` ephemeral container) in
-    the target pod with a privileged security context for eBPF;
+    the target pod with a minimal capability set, privileged
+    only as the fallback (#13);
     enriches every event with pod/namespace/container identity;
     live-attaches the Java agent through the shared process
     namespace.
@@ -154,9 +155,9 @@ views — happens on the controller.
   - A DNS name often terminates on an ingress (e.g. Traefik)
     behind a managed LB — no tracer can run there, so the far
     end of the edge is unidentifiable. iormesh takes a mapping
-    FQDN → ingress → service → deployment/statefulset (or
-    discovers it from Ingress/IngressRoute objects and
-    Traefik's API in k8s mode) and completes the edge: app →
+    FQDN → ingress → service → deployment/statefulset — a
+    static map, then k8s API discovery (#15) — and completes
+    the edge: app →
     FQDN → ingress → workload, with no tracer on the ingress.
 
 ## Operator workflow
