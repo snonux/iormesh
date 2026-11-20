@@ -1016,7 +1016,7 @@ kubectl would get. They run with the package's unit tests
   the built-in default is empty until task yb4 publishes one),
   namespace, pod or container names that are not Kubernetes names
   (`$(id)`, `x;touch …`, `--all-namespaces`), a remote dir other
-  than `/opt/iormesh/traces/<project>/ready`, and `Push`;
+  than `/opt/iormesh/data/traces/<project>/ready`, and `Push`;
 - refusals after the `get` alone: a pod without the `tracefs`
   hostPath or a size-bounded `iormesh-traces` emptyDir, with
   `hostUsers: false`, without the app container, or already
@@ -1054,7 +1054,8 @@ Unit tests in `mage test`, no cluster and no container engine
   `privileged`, `RuntimeDefault` seccomp, `drop: [ALL]` and
   exactly #13's seven capabilities, in order; the downward-API
   env (`POD_NAME`, `POD_NAMESPACE`, `POD_UID`); the sidecar's
-  image pinned by digest; and no field in the `--custom` profile
+  image pinned by digest, its args ending in the ¾ byte cap and
+  its small requests; and no field in the `--custom` profile
   that kubectl debug's own flags set. `Validate` refuses a tag,
   a malformed digest, an odd size and a command line that is
   not `run`.
@@ -1071,18 +1072,35 @@ Unit tests in `mage test`, no cluster and no container engine
   Docker cgroups give `ErrNotInPod`; bad or escaped UIDs, short
   or non-hex container ids, unknown runtimes, CRI-O's conmon, v1
   controllers naming different pods and text not in the kernel's
-  format are errors. The strings are built to the formats, not
+  format are errors. `cgroup_forged_test.go`: pod-named cgroups
+  under `user.slice` or a `user@<uid>.service`, inexact slice
+  prefixes and unknown classes give `ErrNotInPod`; a pod slice
+  missing its systemd parents, under the wrong parent or a
+  foreign root is an error (each case fails with the parent
+  check disabled); the in-pod `/../<container>` form yields the
+  container id. The strings are built to the formats, not
   captured from kind: the kind capture is task yb4's.
+- `internal/segment/emptydir_test.go`: the trace dir one level
+  inside a 0777 setgid directory (an emptyDir root) is accepted
+  and created 0755, while the volume root as the trace dir is
+  still refused. Mutation-checked: dropping `trustedDir`'s
+  write-bit check fails the refusal, and checking the volume
+  root too fails the acceptance. The watchdog's byte cap trips
+  at the cap, counts regular files only, and is off at 0.
 - `internal/cli/podproject_test.go`: with all three downward-API
   variables set `run`'s project defaults to the namespace
-  (decision #21) and `-project` still wins; one stray variable,
-  or a namespace that is no valid label, leaves `-project`
-  required.
+  (decision #21) and `-trace-dir` to `k8s.TraceRoot`; `-project`
+  and `-trace-dir` still win, `-out` alone writes NDJSON only;
+  one stray variable, or a namespace that is no valid label,
+  leaves `-project` required; `-disk-max-bytes` reaches the
+  watchdog.
 
 Not checked here (task yb4, on kind): that the image builds and
-runs, that `kubectl patch` and `kubectl debug --custom` accept the
-files and carry the capabilities and mounts, and the oldest
-runtime whose `RuntimeDefault` lets `bpf` through.
+runs (it cannot until the host id is settled, task 7f4), that
+`kubectl patch` and `kubectl debug --custom` accept the files
+and carry the capabilities, mounts and env, that the trace dir
+stays 0755 under `fsGroup`, and the oldest runtime whose
+`RuntimeDefault` lets `bpf` through.
 
 ## Performance baselines
 

@@ -16,7 +16,7 @@ import (
 // internal/k8s): it writes the project's ready/ segments as a tar to
 // stdout, or with -remove deletes the named ones once the controller has
 // them. It takes a project, never a path — the trace dir is the fixed
-// k8s.TraceRoot, the pod's emptyDir — so an exec into the tracer can
+// k8s.TraceRoot, inside the pod's emptyDir — so an exec into the tracer can
 // read or delete nothing but published segments. No tar, rsync or shell
 // is needed in the image.
 func readyCommand(args []string, stdout, stderr io.Writer) error {

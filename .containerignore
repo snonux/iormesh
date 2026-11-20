@@ -1,0 +1,10 @@
+# Build context filter for the one image built from the repository root,
+# scripts/container/tracer-image.Containerfile (M7, task vb4): send only
+# the release tracers and the agent jar, never the source tree, .git or
+# local traces. Podman and Buildah read this file; Docker reads
+# .dockerignore, a symlink to it. The builder images use
+# scripts/container as their context and are unaffected.
+*
+!dist/iormesh-linux-amd64
+!dist/iormesh-linux-arm64
+!iormesh-agent.jar

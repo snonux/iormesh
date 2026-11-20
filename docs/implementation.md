@@ -5112,13 +5112,22 @@ depends on:
    container id, runtime and QoS class for the systemd and
    cgroupfs drivers (containerd, CRI-O, cri-dockerd; kind's
    `/kubelet` cgroup root; static pods' hash UIDs), `ErrNotInPod`
-   for `0::/` and non-pod cgroups, an error for ids no kubelet
-   writes; `k8s.PodFromEnv` reads the downward API, which both
-   generated container specs set. The test strings follow the
-   formats; the kind capture is task yb4's. Also open, with
-   task 7f4: the host id. `iormesh run` reads `/etc/machine-id`,
-   which the `scratch` image lacks (and a baked one would be
-   the same in every pod), so a run in the image fails until the
+   for `0::/`, non-pod cgroups and anything under `user.slice`
+   or a `user@<uid>.service` (a user may name cgroups at will
+   there), and an error for ids no kubelet writes or a pod slice
+   not under its systemd parent chain. In the tracer's own
+   private cgroup namespace a sibling container reads
+   `/../<container>`: the container id comes out, the pod is the
+   tracer's (`k8s.PodFromEnv`, from the downward API both
+   generated container specs set). A static pod's UID is not its
+   mirror pod's `metadata.uid`: step 7 joins it through the
+   mirror pod's `kubernetes.io/config.mirror` annotation. The
+   test strings follow the formats; the kind capture is task
+   yb4's.
+   **The image cannot run yet** (review B2, with task 7f4 and an
+   advisor): `iormesh run` reads `/etc/machine-id` for the host
+   id, the `scratch` image has none (and a baked one would be
+   the same in every pod), so every run in it fails until the
    pod's host id is chosen — the node's `machine-id` through one
    more read-only `hostPath`, or one derived from the pod — which
    is also where the process key gains the pod.
@@ -5149,7 +5158,7 @@ depends on:
              CHECKPOINT_RESTORE]
    volumeMounts:
      - {name: tracefs, mountPath: /sys/kernel/tracing, readOnly: true}
-     - {name: iormesh-traces, mountPath: /opt/iormesh/traces}
+     - {name: iormesh-traces, mountPath: /opt/iormesh/data}  # traces/ in it
    # pod volumes (step 5's prepare patch): tracefs = hostPath
    # /sys/kernel/tracing (Directory), iormesh-traces = emptyDir
    # with a sizeLimit
@@ -5174,9 +5183,48 @@ depends on:
    context, the mounts and the downward-API env — name, image and
    command stay kubectl's flags. The sidecar adds resource limits
    of one CPU and 1 GiB (start's unit defaults: the container is
-   the unit) and runs `iormesh run` as its process, with example
-   args (`k8s.DefaultSidecarArgs`) the owner replaces by the
-   app's target. The image:
+   the unit) beside small requests (50m, 128 MiB), and runs
+   `iormesh run` as its process, with example args
+   (`k8s.DefaultSidecarArgs`) the owner replaces by the app's
+   target; either target races the app (`-listen-port` resolves
+   once at start, `-pattern` sees only later execs).
+   - **Trace dir** (review B1): the kubelet makes an emptyDir's
+     root 0777 (setgid too under `fsGroup`), which the segment
+     writer's trust check refuses, and must. So the volume mounts
+     at `k8s.TracesMount` (`/opt/iormesh/data`) and the tracer
+     writes to `k8s.TraceRoot` (`/opt/iormesh/data/traces`), a
+     directory it creates root-owned 0755; `iormesh run` in a pod
+     defaults `-trace-dir` to it, `iormesh ready` and `Fetch`
+     read it. The unchecked 0777 root is only the tracer
+     container's: no other container mounts the volume. Check on
+     kind under `fsGroup` that the kubelet's ownership pass does
+     not later make `traces/` group-writable (it would refuse the
+     next start, never trust it).
+   - **Byte cap**: statfs on a disk-backed emptyDir sees the
+     node's partition, not the `sizeLimit` past which the kubelet
+     evicts the whole pod. `-disk-max-bytes` caps the trace dir
+     itself (`segment.Watchdog.MaxDirBytes`); the sidecar passes
+     `k8s.TraceCap` of the limit (¾: 1536 MiB for 2 GiB). For a
+     debug container the controller should pass the same,
+     computed from the pod's own `sizeLimit` (`Kubectl.Check`
+     reads it) — not yet wired.
+   - **Native sidecar or regular container** (for task yb4): the
+     patch adds a regular container. A native sidecar (an
+     `initContainers` entry with `restartPolicy: Always`, beta
+     and on by default from 1.29) starts before the app
+     containers, so `-pattern` would see the app's exec, and it
+     is stopped after them; but it only waits for the tracer's
+     start (or a startup probe, and the image has no shell for
+     an exec probe — a tracer subcommand would be needed), and it
+     needs 1.29+ nodes. Readiness: a pod is Ready only when every
+     container is, so a crash-looping regular tracer takes the
+     pod out of its Services' endpoints; check on kind whether a
+     native sidecar without a readiness probe does the same
+     (believed: its readiness also counts, so neither shields
+     the app). Settle on kind; the default stays a regular
+     container until then.
+
+   The image:
    `scripts/container/tracer-image.Containerfile` (docs/build.md,
    "Container builds"), with the tracer on its `PATH` for
    `kubectl exec … -- iormesh`. While `k8s.DefaultImage` is empty
@@ -5221,7 +5269,7 @@ depends on:
    unknown context) exit 1 too and come back as `ErrUnreachable`,
    so `test` never reads an unreached pod as "no"; `Fetch` accepts
    only
-   `/opt/iormesh/traces/<project>/ready`, execs `iormesh ready
+   `/opt/iormesh/data/traces/<project>/ready`, execs `iormesh ready
    -project P` (internal/cli/ready.go, writer `k8s.WriteReady`),
    unpacks with `k8s.Unpack` (regular `*.parquet` entries without
    a directory part, ≤ 1 GiB each and 8 GiB in all, 0600, through

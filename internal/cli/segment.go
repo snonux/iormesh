@@ -25,8 +25,8 @@ const defaultTraceDir = "/opt/iormesh/traces"
 // segmentFlags are run's M4 output flags, registered by addSegmentFlags
 // and folded into the runConfig by apply.
 type segmentFlags struct {
-	traceDir, minFree, owner *string
-	limit                    *float64
+	traceDir, minFree, maxBytes, owner *string
+	limit                              *float64
 }
 
 // segOutput is a run's parquet segment writer (-trace-dir); nil writes
@@ -57,6 +57,8 @@ func addSegmentFlags(fs *flag.FlagSet) segmentFlags {
 			"stop tracing when the trace dir's partition is this percent used (0: off)"),
 		minFree: fs.String("disk-min-free", strconv.Itoa(segment.DefaultMinFreeBytes>>20)+"MiB",
 			"stop tracing when the trace dir's partition has less free (KiB, MiB, GiB suffixes; 0: off)"),
+		maxBytes: fs.String("disk-max-bytes", "0",
+			"stop tracing when the trace dir itself holds this much (in a pod: below the emptyDir sizeLimit; 0: off)"),
 		owner: fs.String("ready-owner", "",
 			"UID:GID to own DIR/<project>/ready, so that user can collect segments (start passes SUDO_UID:SUDO_GID)"),
 	}
@@ -78,6 +80,9 @@ func (f segmentFlags) apply(cfg runConfig) (runConfig, error) {
 	var err error
 	if cfg.diskMinFree, err = parseSize(*f.minFree); err != nil {
 		return cfg, fmt.Errorf("%w: -disk-min-free: %v", errUsage, err)
+	}
+	if cfg.diskMaxBytes, err = parseSize(*f.maxBytes); err != nil {
+		return cfg, fmt.Errorf("%w: -disk-max-bytes: %v", errUsage, err)
 	}
 	if *f.owner != "" {
 		if cfg.readyOwner, err = parseOwner(*f.owner); err != nil {
@@ -125,7 +130,7 @@ func (cfg runConfig) watchdog() *segment.Watchdog {
 		return nil
 	}
 	return &segment.Watchdog{Dir: cfg.traceDir, MaxUsedPercent: cfg.diskLimit,
-		MinFreeBytes: cfg.diskMinFree}
+		MinFreeBytes: cfg.diskMinFree, MaxDirBytes: cfg.diskMaxBytes}
 }
 
 // checkTraceDisk is the startup check (PLAN.md: "fails fast if the

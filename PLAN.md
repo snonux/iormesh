@@ -1647,9 +1647,12 @@ Later phase — plain Linux servers (M4) come first.
   into `deploy/` with #13's fields and a digest-pinned image (a
   placeholder until one is published), the cgroup → pod UID and
   container parser, and the project defaulting to the namespace
-  (#21). Found: the image has no `/etc/machine-id`, which the
-  host id comes from, so a run in it fails until 7f4 picks the
-  pod's host id (docs/implementation.md M7 step 6).
+  (#21). The trace dir sits one level inside the emptyDir, whose
+  root the kubelet makes 0777, and a byte cap below its
+  `sizeLimit` ends the trace before an eviction would. Found:
+  the image has no `/etc/machine-id`, which the host id comes
+  from, so it cannot run until 7f4 picks the pod's host id
+  (docs/implementation.md M7 step 6).
 - Java agent live-attach through the shared process namespace
   (`kubectl debug --target`, or `shareProcessNamespace: true`
   for a sidecar; attach socket reached via `/proc/<pid>/root`),

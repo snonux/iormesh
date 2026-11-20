@@ -26,10 +26,17 @@ const placeholderImage = "registry.invalid/iormesh/tracer@sha256:" +
 const DefaultTraceLimit = "2Gi"
 
 // DefaultSidecarArgs are the sidecar's tracer command line (the image's
-// entrypoint is the tracer): an example the deployment owner replaces
-// with the app's target. The project defaults to the pod's namespace
-// (decision #21), and the longest -duration a run accepts keeps
-// restarts — a new session each — rare.
+// entrypoint is the tracer; sidecarArgs adds the byte cap): an example
+// the deployment owner replaces with the app's target. The project and
+// trace dir default from the pod (decision #21, k8s.TraceRoot), and the
+// longest -duration a run accepts keeps restarts — a new session each —
+// rare. The target races the app: -listen-port resolves the listener's
+// owner once, at start, and fails if the app is not listening yet
+// (containers start in order but nobody waits for the app), while
+// -pattern matches only execs after the tracer attached, missing an app
+// that started first. A restart of the tracer (restartPolicy) retries
+// either; the native-sidecar trade-off in docs/implementation.md M7
+// step 8 is how yb4 settles it.
 var DefaultSidecarArgs = []string{"run", "-listen-port", "8080", "-duration", "168h"}
 
 // Manifests are the inputs the generated manifests vary by.
@@ -61,7 +68,7 @@ func (m Manifests) Validate() error {
 	switch {
 	case !pinnedImage.MatchString(m.Image):
 		return fmt.Errorf("image %q: want <repository>@sha256:<64 hex>, pinned by digest", m.Image)
-	case !binaryQuantity.MatchString(m.TraceLimit):
+	case TraceCap(m.TraceLimit) == "":
 		return fmt.Errorf("trace limit %q: want a size like 512Mi or 2Gi", m.TraceLimit)
 	case len(m.SidecarArgs) == 0 || m.SidecarArgs[0] != "run":
 		return fmt.Errorf("sidecar args %q: want an `iormesh run` command line", m.SidecarArgs)

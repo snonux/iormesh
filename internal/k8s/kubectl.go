@@ -15,10 +15,24 @@ import (
 	"iormesh/internal/segment"
 )
 
-// TraceRoot is the tracer container's trace dir, the emptyDir #13 mounts
-// there (docs/implementation.md M7 step 8). It is the same path as a
-// server's, so collect's remote dir (<root>/<project>/ready) is too.
-const TraceRoot = "/opt/iormesh/traces"
+// TracesMount is where the size-bounded emptyDir (#13) is mounted in the
+// tracer container (docs/implementation.md M7 step 8). The kubelet makes
+// an emptyDir's root 0777 (setgid too under fsGroup), which the segment
+// writer rightly refuses as a trace dir (segment.prepareDir: another
+// writer could swap ready/ for a symlink under root's feet). So the
+// tracer writes one level down, in TraceRoot.
+const TracesMount = "/opt/iormesh/data"
+
+// TraceRoot is the tracer container's trace dir: a directory the tracer
+// itself creates root-owned 0755 inside the volume (segment.MakeDirs), so
+// it passes the same trust check as a server's /opt/iormesh/traces. The
+// 0777 volume root above it is not checked, and need not be: only the
+// tracer container mounts the volume, and no other container of the pod
+// can reach it through /proc/<pid>/root without ptrace rights over the
+// tracer, which #13's extra capabilities deny a pod's ordinary root.
+// `iormesh run` in a pod defaults its -trace-dir to it, `iormesh ready`
+// reads it, and collect's remote dir is <root>/<project>/ready.
+const TraceRoot = TracesMount + "/traces"
 
 // TracerBinary is the tracer's name inside the image, found on the
 // image's PATH (scripts/container/tracer-image.Containerfile sets it;

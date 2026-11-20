@@ -62,6 +62,10 @@ type runConfig struct {
 	// decision #17: both), each 0 for off.
 	diskLimit   float64
 	diskMinFree uint64
+	// diskMaxBytes caps the bytes under the trace dir itself
+	// (-disk-max-bytes, 0 for off): in a pod, below the emptyDir's
+	// sizeLimit, so the tracer stops before the kubelet evicts the pod.
+	diskMaxBytes uint64
 	// readyOwner owns <traceDir>/<project>/ready (-ready-owner), so the
 	// deploying user's collector reads and deletes segments unprivileged;
 	// nil leaves it root's.
@@ -125,36 +129,42 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 	if fs.NArg() != 0 {
 		return runConfig{}, fmt.Errorf("%w: unexpected argument %q", errUsage, fs.Arg(0))
 	}
-	if *f.project == "" {
-		label, err := podProject(podEnv)
-		if err != nil {
-			return runConfig{}, err
-		}
-		*f.project = label
+	if err := f.podDefaults(podEnv); err != nil {
+		return runConfig{}, err
 	}
 	return f.config()
 }
 
-// podEnv reads the downward-API variables podProject looks at. A variable
-// like processAlive, so flag tests do not depend on the test's own
-// environment.
+// podEnv reads the downward-API variables podDefaults looks at. A
+// variable like processAlive, so flag tests do not depend on the test's
+// own environment.
 var podEnv = os.Getenv
 
-// podProject is run's default project label: in a pod (all three
-// downward-API variables set, k8s.PodFromEnv) the pod's namespace
-// (decision #21), elsewhere "", which validateRun then refuses as a
-// missing -project. Only run defaults it: start's unit is a systemd one,
-// and there is no systemd in a pod (PLAN.md M7).
-func podProject(getenv func(string) string) (string, error) {
+// podDefaults fills in what a run in a pod (all three downward-API
+// variables set, k8s.PodFromEnv) needs no flag for: the project is the
+// pod's namespace (decision #21), and without -out or -trace-dir the
+// segments go to k8s.TraceRoot inside the pod's emptyDir — not the
+// server default, where the image has no volume, nor the volume root,
+// which the kubelet makes 0777. Outside a pod nothing changes, and a
+// missing -project is then validateRun's usage error. Only run defaults
+// them: start's unit is a systemd one, and there is no systemd in a pod
+// (PLAN.md M7).
+func (f runFlags) podDefaults(getenv func(string) string) error {
 	pod, ok := k8s.PodFromEnv(getenv)
 	if !ok {
-		return "", nil
+		return nil
 	}
-	label, err := k8s.ProjectForNamespace(pod.Namespace)
-	if err != nil {
-		return "", fmt.Errorf("%w: no -project and the pod's %v", errUsage, err)
+	if *f.project == "" {
+		label, err := k8s.ProjectForNamespace(pod.Namespace)
+		if err != nil {
+			return fmt.Errorf("%w: no -project and the pod's %v", errUsage, err)
+		}
+		*f.project = label
 	}
-	return label, nil
+	if *f.seg.traceDir == "" && *f.out == "" {
+		*f.seg.traceDir = k8s.TraceRoot
+	}
+	return nil
 }
 
 func addRunFlags(fs *flag.FlagSet) runFlags {

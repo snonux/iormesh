@@ -121,10 +121,24 @@ func TestSidecarPatch(t *testing.T) {
 	if !pinnedImage.MatchString(image) || !strings.Contains(image, "@sha256:") {
 		t.Errorf("image %q is not pinned by digest", image)
 	}
-	if args := strs(t, at(t, c, "args")); len(args) == 0 || args[0] != "run" {
-		t.Errorf("args %q, want an iormesh run command line", args)
+	args := strs(t, at(t, c, "args"))
+	if len(args) < 3 || args[0] != "run" || !slices.Equal(args[len(args)-2:], []string{"-disk-max-bytes", "1536MiB"}) {
+		t.Errorf("args %q, want an iormesh run capped at 3/4 of the 2Gi emptyDir", args)
+	}
+	if at(t, c, "resources", "requests", "cpu") != "50m" || at(t, c, "resources", "requests", "memory") != "128Mi" ||
+		at(t, c, "resources", "limits", "cpu") != "1" || at(t, c, "resources", "limits", "memory") != "1Gi" {
+		t.Errorf("resources %v, want small requests and start's limits", at(t, c, "resources"))
 	}
 	checkTracerContainer(t, c)
+}
+
+func TestTraceCap(t *testing.T) {
+	for limit, want := range map[string]string{"2Gi": "1536MiB", "512Mi": "384MiB", "1Ti": "786432MiB",
+		"1Mi": "", "2G": "", "": ""} {
+		if got := TraceCap(limit); got != want {
+			t.Errorf("TraceCap(%q) = %q, want %q", limit, got, want)
+		}
+	}
 }
 
 // TestDebugProfile: kubectl debug --custom gets the same security
@@ -183,7 +197,7 @@ func checkTracerContainer(t *testing.T, c any) {
 	mounts := at(t, c, "volumeMounts").([]any)
 	if len(mounts) != 2 || at(t, mounts[0], "name") != TracefsVolume ||
 		at(t, mounts[0], "mountPath") != "/sys/kernel/tracing" || at(t, mounts[0], "readOnly") != true ||
-		at(t, mounts[1], "name") != TracesVolume || at(t, mounts[1], "mountPath") != "/opt/iormesh/traces" ||
+		at(t, mounts[1], "name") != TracesVolume || at(t, mounts[1], "mountPath") != "/opt/iormesh/data" ||
 		at(t, mounts[1], "readOnly") != nil {
 		t.Errorf("volumeMounts %v, want tracefs read-only and the trace dir writable", mounts)
 	}
@@ -227,7 +241,7 @@ func TestManifestsValidate(t *testing.T) {
 			t.Errorf("image %q accepted", img)
 		}
 	}
-	for _, limit := range []string{"", "0Gi", "2G", "2gi", "-1Gi", "1.5Gi", "2Ki", "9999999Gi"} {
+	for _, limit := range []string{"", "0Gi", "2G", "2gi", "-1Gi", "1.5Gi", "2Ki", "9999999Gi", "1Mi"} {
 		m := good
 		m.TraceLimit = limit
 		if m.Validate() == nil {

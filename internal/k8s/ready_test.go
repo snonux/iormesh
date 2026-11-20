@@ -184,7 +184,7 @@ func TestFetchMovesAndRemoves(t *testing.T) {
 	f.tar(t, buf.Bytes())
 	local := filepath.Join(t.TempDir(), "store", "shop", "pod")
 	k := newTestKubectl(t, testTarget())
-	if err := k.Fetch(context.Background(), "/opt/iormesh/traces/shop/ready", local); err != nil {
+	if err := k.Fetch(context.Background(), "/opt/iormesh/data/traces/shop/ready", local); err != nil {
 		t.Fatal(err)
 	}
 	assertDir(t, local, map[string]string{"h-s1-1-0.parquet": "seg0", "h-s1-1-0.methods.parquet": "methods0"})
@@ -211,7 +211,7 @@ func TestFetchPartialStillRemoves(t *testing.T) {
 		&tar.Header{Typeflag: tar.TypeReg, Name: "good.parquet", Size: 4},
 		&tar.Header{Typeflag: tar.TypeSymlink, Name: "bad.parquet", Linkname: "/etc/shadow"}))
 	local := t.TempDir()
-	err := newTestKubectl(t, testTarget()).Fetch(context.Background(), "/opt/iormesh/traces/shop/ready/", local)
+	err := newTestKubectl(t, testTarget()).Fetch(context.Background(), "/opt/iormesh/data/traces/shop/ready/", local)
 	if !errors.Is(err, ErrStream) {
 		t.Fatalf("err = %v, want ErrStream", err)
 	}
@@ -225,8 +225,8 @@ func TestFetchPartialStillRemoves(t *testing.T) {
 func TestFetchRefusesRemoteDir(t *testing.T) {
 	f := newFake(t)
 	k := newTestKubectl(t, testTarget())
-	for _, d := range []string{"/etc", "/opt/iormesh/traces/shop", "/opt/iormesh/traces/../x/ready",
-		"/opt/iormesh/traces/-x/ready", "/opt/iormesh/traces/a/b/ready", "opt/iormesh/traces/shop/ready"} {
+	for _, d := range []string{"/etc", "/opt/iormesh/data/traces/shop", "/opt/iormesh/data/traces/../x/ready",
+		"/opt/iormesh/data/traces/-x/ready", "/opt/iormesh/data/traces/a/b/ready", "opt/iormesh/traces/shop/ready"} {
 		if err := k.Fetch(context.Background(), d, t.TempDir()); !errors.Is(err, ErrTransport) {
 			t.Errorf("remote dir %q: err = %v", d, err)
 		}
@@ -266,7 +266,7 @@ func TestFetchKubectlFailsAfterStream(t *testing.T) {
 	}
 	f.tar(t, buf.Bytes())
 	t.Setenv("FAKE_KUBECTL_EXIT", "1")
-	err := newTestKubectl(t, testTarget()).Fetch(context.Background(), "/opt/iormesh/traces/shop/ready", t.TempDir())
+	err := newTestKubectl(t, testTarget()).Fetch(context.Background(), "/opt/iormesh/data/traces/shop/ready", t.TempDir())
 	var exit *exec.ExitError
 	if !errors.Is(err, ErrUnreachable) || errors.As(err, &exit) {
 		t.Fatalf("err = %v, want ErrUnreachable without an ExitError", err)
@@ -283,7 +283,7 @@ func TestFetchRefusesTrailingData(t *testing.T) {
 	}
 	buf.Write(make([]byte, drainLimit+tarBlock))
 	f.tar(t, buf.Bytes())
-	err := newTestKubectl(t, testTarget()).Fetch(context.Background(), "/opt/iormesh/traces/shop/ready", t.TempDir())
+	err := newTestKubectl(t, testTarget()).Fetch(context.Background(), "/opt/iormesh/data/traces/shop/ready", t.TempDir())
 	if !errors.Is(err, ErrStream) {
 		t.Fatalf("err = %v, want ErrStream", err)
 	}

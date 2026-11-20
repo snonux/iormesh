@@ -18,7 +18,7 @@ const (
 	// inside the container would need SYS_ADMIN.
 	TracefsVolume = "tracefs"
 	TracefsPath   = "/sys/kernel/tracing"
-	// TracesVolume is the size-bounded emptyDir mounted at TraceRoot,
+	// TracesVolume is the size-bounded emptyDir mounted at TracesMount,
 	// so segments never fill the container's writable layer.
 	TracesVolume = "iormesh-traces"
 	// PreparePatch names the patch a refusal points the operator at.
@@ -190,7 +190,7 @@ func customSpec(p Profile) map[string]any {
 		"securityContext": sc,
 		"volumeMounts": []map[string]any{
 			{"name": TracefsVolume, "mountPath": TracefsPath, "readOnly": true},
-			{"name": TracesVolume, "mountPath": TraceRoot},
+			{"name": TracesVolume, "mountPath": TracesMount},
 		},
 	}
 }

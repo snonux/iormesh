@@ -42,7 +42,7 @@ func TestRunExitStatus(t *testing.T) {
 		t.Setenv("FAKE_KUBECTL_REMOTE", "1")
 		t.Setenv("FAKE_KUBECTL_CHATTY", chatty)
 		k := newTestKubectl(t, testTarget())
-		_, err := k.Run(context.Background(), "test", "-d", "/opt/iormesh/traces/shop/ready")
+		_, err := k.Run(context.Background(), "test", "-d", "/opt/iormesh/data/traces/shop/ready")
 		var exit *exec.ExitError
 		if !errors.As(err, &exit) || exit.ExitCode() != 1 || errors.Is(err, ErrUnreachable) {
 			t.Fatalf("chatty=%q: err = %v, want exit status 1", chatty, err)
@@ -188,7 +188,7 @@ func assertCustom(t *testing.T, js string, minimal bool) {
 		t.Errorf("runAsUser in %s", js)
 	}
 	if len(spec.VolumeMounts) != 2 || spec.VolumeMounts[0].MountPath != TracefsPath ||
-		!spec.VolumeMounts[0].ReadOnly || spec.VolumeMounts[1].MountPath != TraceRoot {
+		!spec.VolumeMounts[0].ReadOnly || spec.VolumeMounts[1].MountPath != TracesMount {
 		t.Errorf("volume mounts in %s", js)
 	}
 	if !minimal {

@@ -208,20 +208,23 @@ fails up front with the fix named.
 - **The tracer image** (M7, task vb4; not built or run yet —
   task yb4): `scripts/container/tracer-image.Containerfile`
   packs a release tracer from `dist/` and `iormesh-agent.jar`
-  into `FROM scratch` — no shell, no libc — at the paths a server
-  install uses (`/opt/iormesh/bin/iormesh`, traces under
-  `/opt/iormesh/traces`), run as uid 0. Build it from the
-  repository root after `mage buildPodman` and `mage agentBuild`,
-  one image per arch (`podman build --platform linux/amd64 -f
-  scripts/container/tracer-image.Containerfile .`), push it, and
-  put the digest in `k8s.DefaultImage` (internal/k8s) before
-  `mage k8sManifests`; until then the manifests name an
-  unpullable `registry.invalid` placeholder. Known gap: the image
-  has no `/etc/machine-id`, which `iormesh run` reads for the host
-  id, so a run in it fails until the pod's host id is settled
-  (task 7f4, docs/implementation.md M7 step 6). The capability set
-  it runs with is provisional (PLAN.md decision #13,
-  [security.md](security.md) "Kubernetes").
+  into `FROM scratch` — no shell, no libc — with the binary at
+  `/opt/iormesh/bin/iormesh` (on `PATH`), run as uid 0; traces go
+  to the pod's emptyDir, one level inside it (`k8s.TraceRoot`).
+  Build it from the repository root after `mage buildPodman` and
+  `mage agentBuild`, one image per arch (`podman build --platform
+  linux/amd64 -f scripts/container/tracer-image.Containerfile
+  .`), with BuildKit or Buildah (`COPY --chmod`); the root's
+  `.containerignore` (and `.dockerignore`, a symlink to it)
+  sends only `dist/`'s tracers and the jar. Push it and put the
+  digest in `k8s.DefaultImage` (internal/k8s) before `mage
+  k8sManifests`; until then the manifests name an unpullable
+  `registry.invalid` placeholder. **It cannot run yet**: the
+  image has no `/etc/machine-id`, which `iormesh run` reads for
+  the host id, so every run in it fails until the pod's host id
+  is settled (task 7f4, docs/implementation.md M7 step 6). The
+  capability set it runs with is provisional (PLAN.md decision
+  #13, [security.md](security.md) "Kubernetes").
 - **kubectl on the controller** (k8s mode only, task wb4): 1.30
   or later. The debug container's security context and volume
   mounts go in through `kubectl debug --custom`, which kubectl

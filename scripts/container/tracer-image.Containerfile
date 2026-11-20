@@ -11,7 +11,15 @@
 #   podman build --platform linux/amd64 \
 #     -f scripts/container/tracer-image.Containerfile -t <registry>/iormesh .
 # TARGETARCH comes from --platform (BuildKit and Buildah set it); a builder
-# without that takes --build-arg TARGETARCH=amd64.
+# without that takes --build-arg TARGETARCH=amd64. COPY --chmod needs
+# BuildKit (Docker 23+'s default builder) or Buildah (Podman); the legacy
+# Docker builder refuses it. The context is filtered by .containerignore
+# (Podman, Buildah) and .dockerignore (Docker, a symlink to it) at the
+# repository root: only dist/'s tracers and the jar are sent.
+#
+# Not runnable yet: the tracer reads /etc/machine-id for its host id and
+# scratch has none, so `iormesh run` fails in this image until task 7f4
+# settles the pod's host id (docs/implementation.md M7 step 6).
 
 # scratch: the tracer links fully static (docs/build.md) and reads only
 # the kernel's files (/proc, BTF in /sys, tracefs mounted by the pod), so
@@ -20,10 +28,11 @@ FROM scratch
 
 ARG TARGETARCH
 
-# Paths match a server install (internal/cli): the binary where the
-# sudoers rule names it, traces under the default -trace-dir (the pod's
-# emptyDir mounts there). Read-only modes: nothing in the image is ever
-# written, and the container runs as root.
+# The binary sits where a server install has it (internal/cli). Traces go
+# to the pod's emptyDir, mounted at /opt/iormesh/data, one level down
+# (k8s.TraceRoot): the kubelet makes the volume root 0777. Read-only
+# modes: nothing in the image is ever written, and the container runs as
+# root.
 COPY --chmod=0555 dist/iormesh-linux-${TARGETARCH} /opt/iormesh/bin/iormesh
 COPY --chmod=0444 iormesh-agent.jar /opt/iormesh/lib/iormesh-agent.jar
 

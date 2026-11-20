@@ -31,7 +31,11 @@ const (
 type CgroupIdentity struct {
 	// PodUID is the pod's metadata.uid, dashed and lowercase (the systemd
 	// driver's underscores turned back into dashes), or a static pod's
-	// 32-hex-digit UID, which has no dashes.
+	// 32-hex-digit UID, which has no dashes. A static pod's UID is not
+	// the API's mirror pod's: the controller joins it through the mirror
+	// pod's kubernetes.io/config.mirror annotation, not metadata.uid.
+	// Empty for the in-pod relative form ("/../<container>"), whose pod
+	// is the tracer's own (PodFromEnv).
 	PodUID string
 	// ContainerID is the 64-hex-digit runtime container id (what
 	// `kubectl get pod -o json` shows after "containerd://" or
@@ -64,6 +68,15 @@ var (
 	containerID = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	// hierarchyID is the first field of a /proc/<pid>/cgroup line.
 	hierarchyID = regexp.MustCompile(`^[0-9]+$`)
+	// podSlicePrefix is what precedes "-pod<uid>" in a systemd-driver pod
+	// slice: kubepods and its QoS class, optionally under the kubelet's
+	// --cgroup-root slice (kind's "kubelet-"). Nothing else is the
+	// kubelet's.
+	podSlicePrefix = regexp.MustCompile(`^(?:[a-z0-9]+-)?kubepods(?:-(burstable|besteffort))?$`)
+	// userInstance is a user's systemd manager, whose subtree the user
+	// may shape at will (cgroup delegation): nothing under it is trusted
+	// as a pod, whatever it is named.
+	userInstance = regexp.MustCompile(`^user@[0-9]+\.service$`)
 )
 
 // ParseProcCgroup reads the contents of /proc/<pid>/cgroup (cgroup v1,
@@ -140,9 +153,21 @@ func parseV1Paths(paths []string) (CgroupIdentity, error) {
 // whatever prefixes the kubepods part (a kind node's docker scope, a
 // kubelet --cgroup-root such as kind's /kubelet.slice). The container is
 // the pod cgroup's child; deeper cgroups (CRI-O's ".../container", a
-// container's own sub-cgroups) still belong to it.
+// container's own sub-cgroups) still belong to it. Every slice above a
+// systemd pod slice must be its parent by systemd's naming, and nothing
+// under user.slice or a user's systemd instance is a pod: a user can
+// create cgroups with any name there. The in-pod form an in-pod tracer
+// sees for the pod's other containers is relativeContainer's.
 func ParseCgroupPath(path string) (CgroupIdentity, error) {
+	if rel, ok := strings.CutPrefix(path, "/../"); ok {
+		return relativeContainer(path, rel)
+	}
 	parts := strings.Split(strings.Trim(path, "/"), "/")
+	for _, part := range parts {
+		if part == "user.slice" || userInstance.MatchString(part) {
+			return CgroupIdentity{}, fmt.Errorf("%w: %q: under a user's cgroups", ErrNotInPod, path)
+		}
+	}
 	for i, part := range parts {
 		id, ok, err := podComponent(parts[:i], part)
 		if err != nil {
@@ -162,13 +187,30 @@ func ParseCgroupPath(path string) (CgroupIdentity, error) {
 	return CgroupIdentity{}, fmt.Errorf("%w: %q", ErrNotInPod, path)
 }
 
+// relativeContainer parses the path a process in a sibling container
+// shows inside the tracer's private cgroup namespace, whose root is the
+// tracer's own container cgroup: "/../<container>[/…]", ".." being the
+// pod cgroup they share. It names the container only; the pod is the
+// tracer's (PodFromEnv). A path climbing further is outside the pod.
+func relativeContainer(path, rel string) (CgroupIdentity, error) {
+	first, _, _ := strings.Cut(rel, "/")
+	if first == ".." || first == "" {
+		return CgroupIdentity{}, fmt.Errorf("%w: %q: outside the tracer's pod", ErrNotInPod, path)
+	}
+	id, runtime, err := containerComponent(first, strings.HasSuffix(first, ".scope"))
+	if err != nil {
+		return CgroupIdentity{}, fmt.Errorf("%w: %q: %v", errMalformed, path, err)
+	}
+	return CgroupIdentity{ContainerID: id, Runtime: runtime}, nil
+}
+
 // podComponent reports whether part, below ancestors, is a kubelet pod
 // cgroup, and its identity if so. A part that looks like a pod cgroup in
 // a kubepods hierarchy but carries a bad UID is an error, not "no pod":
 // the kubelet never writes one, so the path was mangled or forged.
 func podComponent(ancestors []string, part string) (CgroupIdentity, bool, error) {
 	if name, ok := strings.CutSuffix(part, ".slice"); ok {
-		return systemdPod(name)
+		return systemdPod(ancestors, name)
 	}
 	uid, ok := strings.CutPrefix(part, "pod")
 	if !ok {
@@ -186,24 +228,27 @@ func podComponent(ancestors []string, part string) (CgroupIdentity, bool, error)
 
 // systemdPod parses a systemd-driver slice name without ".slice":
 // "kubepods[-<qos>]-pod<uid>", possibly prefixed by the kubelet's cgroup
-// root ("kubelet-kubepods-…" on kind). systemd escapes the UID's dashes,
-// which separate slice levels, as underscores.
-func systemdPod(name string) (CgroupIdentity, bool, error) {
+// root ("kubelet-kubepods-…" on kind), the prefix matched exactly
+// (podSlicePrefix). systemd escapes the UID's dashes, which separate
+// slice levels, as underscores — and places "a-b-c.slice" under
+// "a-b.slice" under "a.slice", which ancestors must show: a slice by the
+// right name in the wrong place is forged.
+func systemdPod(ancestors []string, name string) (CgroupIdentity, bool, error) {
 	i := strings.LastIndex(name, "-pod")
 	if i < 0 {
 		return CgroupIdentity{}, false, nil
 	}
 	prefix := name[:i]
-	var qos string
-	switch {
-	case strings.HasSuffix(prefix, "kubepods-"+QoSBurstable):
-		qos = QoSBurstable
-	case strings.HasSuffix(prefix, "kubepods-"+QoSBestEffort):
-		qos = QoSBestEffort
-	case strings.HasSuffix(prefix, "kubepods"):
-		qos = QoSGuaranteed
-	default:
+	m := podSlicePrefix.FindStringSubmatch(prefix)
+	if m == nil {
 		return CgroupIdentity{}, false, nil
+	}
+	qos := QoSGuaranteed
+	if m[1] != "" {
+		qos = m[1]
+	}
+	if err := sliceChain(ancestors, prefix); err != nil {
+		return CgroupIdentity{}, false, err
 	}
 	raw := name[i+len("-pod"):]
 	uid := strings.ReplaceAll(raw, "_", "-")
@@ -211,6 +256,22 @@ func systemdPod(name string) (CgroupIdentity, bool, error) {
 		return CgroupIdentity{}, false, fmt.Errorf("pod UID %q", raw)
 	}
 	return CgroupIdentity{PodUID: uid, QoS: qos}, true, nil
+}
+
+// sliceChain checks that ancestors end in prefix's systemd slice chain,
+// nearest first: "kubepods-burstable.slice", then "kubepods.slice".
+func sliceChain(ancestors []string, prefix string) error {
+	j := len(ancestors) - 1
+	for s := prefix; ; j-- {
+		if j < 0 || ancestors[j] != s+".slice" {
+			return fmt.Errorf("pod slice not under %s.slice", s)
+		}
+		k := strings.LastIndex(s, "-")
+		if k < 0 {
+			return nil
+		}
+		s = s[:k]
+	}
 }
 
 // cgroupfsQoS reports the QoS class a cgroupfs-driver pod directory sits

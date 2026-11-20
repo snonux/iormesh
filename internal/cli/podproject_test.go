@@ -3,7 +3,10 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"path/filepath"
 	"testing"
+
+	"iormesh/internal/k8s"
 )
 
 // fakePodEnv makes podEnv return env's values, as the downward API would
@@ -30,6 +33,54 @@ func TestRunProjectDefaultsToNamespace(t *testing.T) {
 	cfg, err = parseRunFlags([]string{"-pid", "10", "-project", "shop", "-out", "o"}, &bytes.Buffer{})
 	if err != nil || cfg.project != "shop" {
 		t.Fatalf("project %q, %v; want the flag's", cfg.project, err)
+	}
+}
+
+// In a pod, segments default to k8s.TraceRoot inside the emptyDir, not
+// the server's /opt/iormesh/traces nor the 0777 volume root; -out alone
+// still writes NDJSON only, and -trace-dir still wins. Outside a pod the
+// server default stays.
+func TestRunTraceDirInPod(t *testing.T) {
+	fakeProcs(t, 10)
+	fakePodEnv(t, inPod)
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-pid", "10"}, k8s.TraceRoot},
+		{[]string{"-pid", "10", "-out", "o"}, ""},
+		{[]string{"-pid", "10", "-trace-dir", "/srv/t"}, "/srv/t"},
+	} {
+		cfg, err := parseRunFlags(c.args, &bytes.Buffer{})
+		if err != nil || cfg.traceDir != c.want {
+			t.Errorf("%q: trace dir %q, %v; want %q", c.args, cfg.traceDir, err, c.want)
+		}
+	}
+	if filepath.Dir(k8s.TraceRoot) != k8s.TracesMount {
+		t.Errorf("TraceRoot %s is not one level inside the volume %s", k8s.TraceRoot, k8s.TracesMount)
+	}
+	fakePodEnv(t, map[string]string{})
+	cfg, err := parseRunFlags([]string{"-pid", "10", "-project", "p"}, &bytes.Buffer{})
+	if err != nil || cfg.traceDir != defaultTraceDir {
+		t.Errorf("no pod: trace dir %q, %v; want %q", cfg.traceDir, err, defaultTraceDir)
+	}
+}
+
+// -disk-max-bytes reaches the watchdog's byte cap; 0 (the default) is off.
+func TestRunDiskMaxBytes(t *testing.T) {
+	fakeProcs(t, 10)
+	cfg, err := parseRunFlags([]string{"-pid", "10", "-project", "p", "-disk-max-bytes", "1536MiB"},
+		&bytes.Buffer{})
+	if err != nil || cfg.watchdog().MaxDirBytes != 1536<<20 {
+		t.Fatalf("cap %+v, %v", cfg.watchdog(), err)
+	}
+	if cfg, err = parseRunFlags([]string{"-pid", "10", "-project", "p"}, &bytes.Buffer{}); err != nil ||
+		cfg.watchdog().MaxDirBytes != 0 {
+		t.Fatalf("default cap %+v, %v", cfg.watchdog(), err)
+	}
+	if _, err := parseRunFlags([]string{"-pid", "10", "-project", "p", "-disk-max-bytes", "2G"},
+		&bytes.Buffer{}); !errors.Is(err, errUsage) {
+		t.Fatalf("bad cap: %v", err)
 	}
 }
 
