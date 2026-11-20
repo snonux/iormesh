@@ -2188,6 +2188,18 @@ whether the engine is Docker or Podman:
   `mage buildPodman`, or one target taking an engine); the
   signed tracer binary comes out of the same pipeline the
   controller pushes with.
+- **Settled by the build (task ab4)**: amd64 builds on ior's
+  Rocky 9 builder; arm64 on a Debian builder, because Rocky 9
+  has no aarch64 cross compiler or static libelf — both
+  tracers link fully static, so the builder distro never
+  reaches a server. The containers compile the *committed*
+  generated sources and do not run `mage generate`: the diff
+  gate runs on the generation host, which also keeps the
+  builds unprivileged (no tracefs). Base images are pinned by
+  digest. The arm64 BPF object compiles against the build
+  host's `vmlinux.h` unless an arm64 host's is supplied — CO-RE
+  relocates by field name. Details:
+  [docs/build.md](docs/build.md), "Container builds".
 
 ## Component map (planned)
 

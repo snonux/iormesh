@@ -109,6 +109,83 @@ because only Mage sets `CGO_CFLAGS`/`CGO_LDFLAGS`.
   discard is an explicit `_ =`; an exemption goes into
   `.golangci.yml` with its reasoning.
 
+## Container builds
+
+The release binaries come out of containers, with the same
+targets for Docker and Podman (rootless Podman works):
+
+```bash
+mage buildPodman   # every release binary into dist/, with Podman
+mage buildDocker   # the same with Docker
+mage containerBuild podman tracer-amd64,ctl  # a subset (ctl,
+                   # tracer-amd64, tracer-arm64; all by default)
+mage containerClean podman  # drop builder images and cache volumes
+```
+
+A missing engine, or Docker's CLI without a running daemon,
+fails up front with the fix named.
+
+| Target         | Builder                                   | Output in `dist/` |
+|----------------|-------------------------------------------|-------------------|
+| `ctl`          | `golang:1.26.10-trixie`, as is            | `iormeshctl-{darwin,linux}-{amd64,arm64}` |
+| `tracer-amd64` | Rocky Linux 9 (ior's builder)             | `iormesh-linux-amd64`, static |
+| `tracer-arm64` | Debian trixie, aarch64 cross toolchain    | `iormesh-linux-arm64`, static |
+
+- **Builders** (`scripts/container/*.Containerfile`) hold only
+  the toolchain; the tree is mounted read-only and copied, so a
+  build never writes into it. Inside, `go run
+  github.com/magefile/mage@v1.17.2 releaseTracer` (or
+  `releaseCtl`) runs on the copy and the binaries are copied to
+  `dist/`. Not go.mod's mage v1.15.0: its generated main breaks
+  on the backquotes in the magefiles' doc comments. The two Mage targets also run on a host that
+  has the static archives (and, for arm64, the cross compiler).
+- **Pins**: every base image by index digest (the constants in
+  `internal/containerbuild`, which a test keeps in step with the
+  Containerfiles); Go from the golang image, also in the Rocky
+  builder; libbpfgo by tag and commit; the zstd source by SHA-256;
+  mage by version.
+  Distro packages (clang, gcc, bpftool, the static libs) follow
+  their repos and are not pinned.
+- **libbpf**: the amd64 builder runs `make libbpfgo-static` like
+  ior's; the arm64 builder builds only `libbpf.a` and its headers,
+  with `aarch64-linux-gnu-gcc`, and cgo cross-compiles libbpfgo
+  with the tracer (`IORMESH_TARGET_ARCH=arm64` sets `GOARCH`, `CC`,
+  `CGO_ENABLED=1` and the BPF `-D__TARGET_ARCH_arm64`). Debian's
+  static `libelf.a` (elfutils ≥ 0.191) lacks `eu-search.o` from
+  elfutils' internal `libeu.a`; the arm64 builder compiles it from
+  the matching, checksummed elfutils release and adds it.
+- **Why two distros**: Rocky 9 has no aarch64 userspace cross
+  compiler and no static libelf; Debian's multiarch has both as
+  packages. Both tracers link fully static (`netgo,osusergo`,
+  `-extldflags -static`), so the builder's glibc never reaches a
+  server.
+- **No generation in the container**: the generated handlers and
+  tables are committed and pinned by the diff gate on the
+  generation host; `mage generate` needs that host's tracefs as
+  root, and a cross build could not read its target's tracepoints
+  anyway. The builds therefore need no privileges — only the
+  host's world-readable BTF, mounted read-only, for `vmlinux.h`
+  when the tree has none. SELinux labeling is switched off for
+  the run instead of relabeling the tree.
+- **arm64 kernel types**: without more input the arm64 object is
+  compiled against the build host's (amd64) `vmlinux.h`. That
+  works because CO-RE relocates every field by name against the
+  running kernel's BTF and the BPF C uses no arm64-only type — a
+  new one would fail the compile, not the load. To compile
+  against arm64 types, dump an arm64 host's BTF (`bpftool btf
+  dump file /sys/kernel/btf/vmlinux format c`) and point
+  `IORMESH_VMLINUX_ARM64` at the file.
+- **Checks**: each binary's header is verified (ELF machine or
+  Mach-O CPU; the tracers must have no ELF interpreter), then
+  every Linux binary runs `--help` on Rocky 9 of its own arch.
+  arm64 runs emulated, so it needs `qemu-user-static`
+  (binfmt_misc `qemu-aarch64`); without it the run is skipped
+  with a notice. Module downloads and the Go build cache live in
+  the `iormesh-gomod` and `iormesh-gocache` volumes.
+- **Not here yet**: the published tracer *image* for `kubectl
+  debug` and sidecars, and the capability set it runs with, are
+  M7 (decision #13); signing the tracer is decision #28.
+
 ## Tech choices
 
 - Go + libbpfgo + eBPF (CO-RE) — the same stack as ior, adopted

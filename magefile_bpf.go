@@ -8,7 +8,9 @@
 // package instead of a binary, since cmd/iormesh lands in M1 step 10, and
 // links the cgo-free controller ./iormeshctl beside the tracer;
 // BpfRootTest is ior's runRootLinkTests/runRootTestBinary, reduced to the BPF
-// root tests of ./internal.
+// root tests of ./internal; GOARCH, the cgo cross compiler and the BPF
+// __TARGET_ARCH follow $IORMESH_TARGET_ARCH for the arm64 release build
+// (magefile_container.go replaces ior's docker targets).
 
 package main
 
@@ -20,11 +22,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/magefile/mage/mg"
 	"github.com/magefile/mage/sh"
 
+	"iormesh/internal/containerbuild"
 	"iormesh/internal/gatecmd"
 )
 
@@ -179,9 +183,16 @@ func buildBPFObject() error {
 	if err := ensureLibbpfgoStaticToolchain(); err != nil {
 		return err
 	}
+	// The BPF bytecode is the same for every host arch, but __TARGET_ARCH
+	// selects the arch-specific paths (dispatch.c's compat-task check, the
+	// bpf_tracing.h register macros), so it follows the tracer's GOARCH.
+	arch, err := targetArch()
+	if err != nil {
+		return err
+	}
 	includeDir := filepath.Join(libbpfgoPath(), "output")
 	return sh.RunWithV(map[string]string{"CC": "clang"}, "clang", "-g", "-O2",
-		"-Wall", "-fpie", "-target", "bpf", "-D__TARGET_ARCH_amd64",
+		"-Wall", "-fpie", "-target", "bpf", "-D__TARGET_ARCH_"+arch,
 		"-I"+includeDir, "-c", bpfSourcePath, "-o", bpfObjectPath)
 }
 
@@ -237,18 +248,31 @@ func ensureVMLINUX() error {
 }
 
 // goEnv is the cgo environment every Go command needs once a package imports
-// libbpfgo: headers and the static libbpf from the pinned checkout.
+// libbpfgo: headers and the static libbpf from the pinned checkout. GOARCH is
+// $IORMESH_TARGET_ARCH (amd64 when unset; BpfBuild, which every target using
+// goEnv depends on, rejects other values). Cross-compiling cgo needs the
+// arch's C compiler and an explicit CGO_ENABLED, which Go turns off by
+// default whenever GOARCH differs from the host's.
 func goEnv() map[string]string {
 	libbpfgo := libbpfgoPath()
-	return map[string]string{
+	arch := os.Getenv(containerbuild.TargetArchEnv)
+	if arch == "" {
+		arch = "amd64"
+	}
+	env := map[string]string{
 		"CGO_CFLAGS": fmt.Sprintf("-I%s -I%s", filepath.Join(libbpfgo, "output"),
 			filepath.Join(libbpfgo, "selftest", "common")),
 		"CGO_LDFLAGS": fmt.Sprintf("-lelf -lzstd %s",
 			filepath.Join(libbpfgo, "output", "libbpf", "libbpf.a")),
-		"GOARCH":   "amd64",
+		"GOARCH":   arch,
 		"GOOS":     "linux",
 		"LIBBPFGO": libbpfgo,
 	}
+	if cc, ok := crossCC[arch]; ok && arch != runtime.GOARCH {
+		env["CC"] = cc
+		env["CGO_ENABLED"] = "1"
+	}
+	return env
 }
 
 func libbpfgoPath() string {

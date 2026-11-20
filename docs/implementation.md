@@ -541,9 +541,11 @@ changes in a provenance header):
   ban) and `.golangci.yml`.
 - `vmlinux.h` is dumped from the build host's BTF on first
   `mage bpfBuild` and gitignored, as in ior.
-- Not lifted yet: `scripts/build-with-docker.sh` (the container
-  build needs the tracer binary of step 10; deployed binaries
-  need it by M4).
+- `scripts/build-with-docker.sh` was not lifted as a script: the
+  container builds (task ab4) are Mage targets over
+  `internal/containerbuild`, with ior's Dockerfile adapted as
+  `scripts/container/tracer-amd64.Containerfile` (docs/build.md,
+  "Container builds").
 
 Regenerating on the generation host reproduced ior's committed
 artifacts byte for byte (since step 4 they differ only by the

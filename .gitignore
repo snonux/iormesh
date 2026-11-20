@@ -29,3 +29,6 @@ internal/c/generated_tracepoints.c.tmp-*
 
 # Agent worktrees (Claude Code isolation)
 /.claude/worktrees/
+
+# Release binaries of the container builds (mage buildDocker/buildPodman).
+/dist/
