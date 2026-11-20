@@ -123,6 +123,11 @@ static __always_inline int iormesh_dispatch(void *ctx, void *progs) {
 
 SEC("tracepoint/raw_syscalls/sys_enter")
 int handle_raw_sys_enter(void *ctx) {
+    // A namespace tracer learns its namespace's level here and remembers an
+    // exec's namespace tid, before any handler, for sched_process_exec
+    // (pidns.c, M7); both pruned in host mode.
+    iormesh_pidns_learn();
+    iormesh_note_exec_tid(((struct iormesh_raw_syscall *)ctx)->id);
     return iormesh_dispatch(ctx, &syscall_enter_progs);
 }
 

@@ -1074,3 +1074,71 @@ hot loop sends the join a few thousand events, not a million.
 passes at 1 and 4 threads (1.90 µs / 11.1 k and 3.75 µs / 11.8 k
 instructions), plain passes 2 µs at 1 and 4 threads (1.59 / 1.95 µs).
 Decision #25's tracer-CPU item is met on the segment path.
+
+## Follow-up (4f4): PID-namespace-aware targeting
+
+Task 4f4 (PLAN.md M7, decision #13; docs/implementation.md M7 step
+1) numbers every task by its pid in the tracer's PID namespace.
+On the host that namespace is the initial one and the BPF side is
+the old host read, pruned at load; in a namespace every `filter()`
+— each traced kind's enter and exit of every task on the host —
+has to find the current task's number there. Same host as above,
+samples in `spikes/s3/results-4f4/` (`old` = the build before the
+task, `host` = this build on the host, `ns` = tracer and burst in
+`unshare --pid --fork --mount-proc`), all `-aggregate=false`.
+
+**Kernel instructions per untraced `close(-1)`** (`closeloop.c`,
+3 M calls pinned to one CPU beside a tracer of an idle `sleep`;
+`perf stat -e instructions:k`; three interleaved rounds, which
+agreed to ±0.5 %; `closeloop-kinsn.txt`):
+
+| | per call | over no tracer |
+|---|--:|--:|
+| no tracer | 399 | — |
+| build before 4f4, host | 1380 | +981 |
+| this build, host | 1397 | +998 |
+| namespace, walk + helper, no cache | 1800 | +1401 |
+| namespace, with `ns_ids_cache` | 1490 | +1091 |
+| loop outside the namespace, no cache | 2011 | +1612 |
+| loop outside the namespace, with cache | 1287 | +888 |
+
+The first namespace build walked `pids[...]->numbers[level]` for
+every call (eleven probe reads): an untraced burst in the
+namespace then paid 1.9× its CPU time (`bench1-*`). The helper
+fast path (`bpf_get_ns_current_pid_tgid`) and the per-CPU cache
+brought the in-namespace bystander to +93 kernel instructions per
+call over host mode (+9 % of the tracer's per-call cost), and a process outside the namespace — a node
+process beside a pod's tracer — below it (its cached answer is 0,
+and no `target_map` lookup follows).
+
+**`syscall-burst`, unfolded** (5 interleaved rounds, medians):
+
+- Host mode (`bench-*`, load 4.5–12): tracer user+kernel
+  instructions per event 7.0 k (old) and 7.0 k / 6.9 k (new) at
+  1 / 4 threads — unchanged; tracer CPU 1.72 / 2.02 µs (old) and
+  1.75 / 2.16 µs (new); bystander CPU ratio 1.23 / 1.14 (old) and
+  1.20 / 1.21 (new), 10 pairs each — unchanged within noise.
+- Namespace mode with the cache (`bench2-*`, host and namespace
+  interleaved, both bursts on the same filesystem — an earlier
+  namespace run's work dir was tmpfs, whose cheaper burst made
+  every ratio look worse): bystander 1.22 / 1.23 against host
+  mode's 1.19 / 1.18 beside it; tracer 7.6 k instructions per
+  event (host 7.5 k), lossless at 1 and 4 threads. That set ran at
+  load 25–31 — beyond #25's ≤ 10 validity, so its CPU times
+  (3.5 / 2.5 µs per event; host mode 2.4 / 2.3 µs beside it) are
+  not a verdict; the instruction counts are.
+
+**Load**: the walk inlined into every handler made the object's
+load cost ~6× host mode's kernel CPU (12.4 s against 2.1 s); as
+global functions verified once per program, each opening with the
+host-mode guard, three interleaved loads gave 2.4 / 5.1 / 3.0 s
+(old), 2.6 / 5.2 / 4.4 s (host mode) and 5.0 / 7.1 / 3.9 s
+(namespace mode) of kernel CPU — a busy host's spread
+(`load-cpu.txt`).
+
+**Verdict**: host mode is unchanged — same instructions per
+traced event, per bystander call within 2 %, same bystander
+ratio. In a namespace the bystander pays ~90 more kernel
+instructions per traced-kind call than in host mode, and the S3
+bystander pairs stay within 1.25×; the tracer's per-event work is
+the same.

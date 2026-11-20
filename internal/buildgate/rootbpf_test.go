@@ -20,7 +20,7 @@ import (
 var rootBPFTestFiles = []string{"internal/sock_root_test.go", "internal/sockseq_root_test.go",
 	"internal/loader_root_test.go", "internal/follow_root_test.go",
 	"internal/javamark_root_test.go", "internal/dispatch_root_test.go",
-	"internal/streamseq_root_test.go"}
+	"internal/streamseq_root_test.go", "internal/pidns_root_test.go"}
 
 // testFunctionsIn returns the names of the top-level Test functions of the Go
 // file at the repository path rel. Adapted from ior

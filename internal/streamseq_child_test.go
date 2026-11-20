@@ -74,7 +74,12 @@ type seqSender struct {
 // seqCall is one write syscall: which buffer, where in it, how much.
 type seqCall struct{ Buf, Off, N int }
 
+// TestMain also dispatches the namespace side of TestPidNSTracerConfined
+// (pidns_root_test.go), whose variable carries the host bystander's pid.
 func TestMain(m *testing.M) {
+	if host := os.Getenv(pidnsChildEnv); host != "" {
+		os.Exit(pidnsChildMain(host))
+	}
 	if scenario := os.Getenv(seqChildEnv); scenario != "" {
 		if err := runSeqChild(scenario); err != nil {
 			fmt.Fprintln(os.Stderr, "seq child:", err)

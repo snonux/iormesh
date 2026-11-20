@@ -5,13 +5,15 @@ import "strings"
 // RootBPFTests are the tests of internal/sock_root_test.go,
 // internal/sockseq_root_test.go, internal/loader_root_test.go,
 // internal/follow_root_test.go, internal/javamark_root_test.go,
-// internal/dispatch_root_test.go and internal/streamseq_root_test.go: they
+// internal/dispatch_root_test.go, internal/streamseq_root_test.go and
+// internal/pidns_root_test.go: they
 // load the real BPF object, attach the TCP programs or the loader's default
 // probe set, and read the ring buffer (M1 steps 4 and 5; process-tree
 // following and the exec watch, M2 steps 1–2; every event family, M2 step
 // 7; native stacks, M2 step 9; the Java mark's uprobes on a running JVM, M3
 // task td4; no skipped runs on a shared CPU, task 8e4; the tcp_sock
-// sequence fields, M4 task ve4; the data calls' tcp_seq, M4 task xe4). They
+// sequence fields, M4 task ve4; the data calls' tcp_seq, M4 task xe4; a
+// tracer in its own PID namespace, M7 task 4f4). They
 // skip for anybody but root, so `mage test` passes them by, and `mage
 // bpfRootTest` is the one place that runs them. The names are listed
 // rather than matched by a pattern so that a renamed test fails a gate
@@ -42,6 +44,7 @@ func RootBPFTests() []string {
 		"TestStreamSeqValues",
 		"TestStreamSeqConcurrentSenders",
 		"TestStreamSeqFolded",
+		"TestPidNSTracerConfined",
 	}
 }
 

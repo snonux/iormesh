@@ -42,7 +42,9 @@
 SEC("uprobe.multi")
 int iormesh_java_native_enter(struct pt_regs *ctx) {
     struct iormesh_java_mark *m, init = {};
-    __u32 tid = (__u32)bpf_get_current_pid_tgid();
+    // Keyed like the enter handlers' lookup: the tid in the tracer's PID
+    // namespace (pidns.c, M7).
+    __u32 tid = (__u32)iormesh_current_pid_tgid();
     __u32 d;
 
     m = bpf_map_lookup_elem(&java_mark_map, &tid);
@@ -72,7 +74,7 @@ int iormesh_java_native_enter(struct pt_regs *ctx) {
 // With every kept frame gone, a lost one is gone too.
 SEC("uretprobe.multi")
 int iormesh_java_native_exit(struct pt_regs *ctx) {
-    __u32 tid = (__u32)bpf_get_current_pid_tgid();
+    __u32 tid = (__u32)iormesh_current_pid_tgid();
     struct iormesh_java_mark *m;
     __u64 sp = ctx->sp;
     __u32 d;

@@ -6,7 +6,7 @@
 // traced execs (iormesh_emit_argv, PROCESS_ARGV_EVENT) and the read/write
 // aggregation's flush points (iormesh_rw_flush/_forget, rwagg.c, M2 step 11);
 // the Java mark's reset on thread exit (iormesh_java_mark_forget, javamark.c,
-// task td4).
+// task td4); pids and tids in the tracer's PID namespace (pidns.c, M7).
 
 //+build ignore
 
@@ -273,13 +273,18 @@ int handle_sched_process_exec(struct trace_event_raw_sched_process_exec *ctx) {
     enum ior_exec_scope scope;
     int exit_unseen;
 
-    if (pid == IOR_PID_FILTER)
+    // pid 0: a task outside the tracer's PID namespace (pidns.c, M7) - no
+    // state of ours, and no exec a pattern session could adopt.
+    if (pid == IOR_PID_FILTER || !pid)
         return 0;
     // Keep the CO-RE load as a scalar across the map helpers below. Older
     // LLVM versions otherwise reuse a relocated ctx + offset pointer for
     // later loads, which tracepoint verifiers reject as a modified ctx.
     __u32 old_tid = (__u32)ctx->old_pid;
     barrier_var(old_tid);
+    // old_pid is a host tid; the per-tid state is keyed by the tracer's
+    // namespace numbers (pidns.c, M7).
+    old_tid = iormesh_exec_old_tid(old_tid, tid);
     // The low 16 bits of a __data_loc word are the string's offset from
     // the start of the record (the high 16 its length).
     __u32 fname_off = ctx->__data_loc_filename & 0xFFFF;
@@ -561,10 +566,8 @@ ior_emit_process_exit(__u32 pid, __u32 tid, __u32 group_dead) {
 // anything. Only a group-dead exit qualifies: a thread exiting leaves its
 // siblings traced. The lookup comes first, so the exits of the host's
 // untraced processes cost one hash lookup and no group_dead read.
-static __always_inline void iormesh_forget_target(void *ctx) {
-    __u32 tgid = (__u32)(bpf_get_current_pid_tgid() >> 32);
-
-    if (!bpf_map_lookup_elem(&target_map, &tgid))
+static __always_inline void iormesh_forget_target(void *ctx, __u32 tgid) {
+    if (!tgid || !bpf_map_lookup_elem(&target_map, &tgid))
         return;
     if (ior_exit_group_dead(ctx))
         bpf_map_delete_elem(&target_map, &tgid);
@@ -578,21 +581,24 @@ int handle_sched_process_exit(void *ctx) {
     // return, and the verifier cannot prove the bypass never reaches the
     // ev->tid store on that path.
     __u32 pid = 0, tid = 0, group_dead = 0;
+    // The thread's numbers in the tracer's PID namespace, which key every
+    // per-tid map (pidns.c, M7); 0 for a task outside it, which has no state.
+    __u64 ids = iormesh_current_pid_tgid();
 
     // Before the scope check: a task that dies with an interrupted call
     // pending (killed while stopped, say) never reaches the enter that would
     // clear it, and its tid may be recycled (restart.c).
-    ior_restart_forget((__u32)bpf_get_current_pid_tgid());
+    ior_restart_forget((__u32)ids);
     // The thread's folded reads and writes, ahead of its exit record; the
     // entry dies with the thread. One lookup for an untraced thread.
-    iormesh_rw_forget((__u32)bpf_get_current_pid_tgid());
+    iormesh_rw_forget((__u32)ids);
     // The thread's Java mark (javamark.c): a recycled tid must not inherit
     // the natives this thread was inside.
-    iormesh_java_mark_forget((__u32)bpf_get_current_pid_tgid());
+    iormesh_java_mark_forget((__u32)ids);
     if (ior_process_exit_in_scope(ctx, &pid, &tid, &group_dead))
         ior_emit_process_exit(pid, tid, group_dead);
     // After the scope check, which needs the entry to judge the exit.
-    iormesh_forget_target(ctx);
+    iormesh_forget_target(ctx, (__u32)(ids >> 32));
     return 0;
 }
 
@@ -770,21 +776,30 @@ SEC("tracepoint/task/task_newtask")
 int handle_task_newtask(void *raw_ctx) {
     struct trace_event_raw_task_newtask___ior *ctx = raw_ctx;
     __u64 clone_flags = ctx->clone_flags;
-    __u32 child_tid = (__u32)ctx->pid;
+    __u32 host_child_tid = (__u32)ctx->pid;
     // The creator's tgid: this handler runs in the context of the task that
-    // called clone, so the current task is the creator.
-    __u64 creator_id = bpf_get_current_pid_tgid();
+    // called clone, so the current task is the creator. In the tracer's PID
+    // namespace (pidns.c, M7), like every pid below.
+    __u64 creator_id = iormesh_current_pid_tgid();
     __u32 creator_pid = (__u32)(creator_id >> 32);
     __u32 creator_tid = (__u32)creator_id;
     // The child's tgid: the creator's for a new thread, its own tid for a new
-    // process. Derived rather than read from the child's task_struct so the
-    // handler does not depend on when copy_process() assigns p->tgid relative to
-    // the tracepoint.
-    __u32 child_pid = (clone_flags & IOR_CLONE_THREAD)
-        ? creator_pid
-        : child_tid;
-
+    // process. In host mode derived from the tracepoint's tid rather than read
+    // from the child's task_struct, so the handler does not depend on when
+    // copy_process() assigns p->tgid relative to the tracepoint; a namespace
+    // tracer reads the child's struct pid (iormesh_newtask_ids).
+    __u32 child_pid, child_tid;
     __u32 scope_flags = 0;
+
+    // A creator outside the tracer's namespace (pid 0) is never traced, so
+    // none of its children is followed or in scope; one it places inside the
+    // namespace (a runtime's CLONE_NEWPID) is judged at its exec, by the
+    // pattern session's exec watch. Skip the child walk.
+    if (!creator_pid)
+        return 0;
+    iormesh_newtask_ids(clone_flags, host_child_tid, creator_pid, &child_pid, &child_tid);
+    if (!child_pid)
+        return 0;
 
     // The creator's folded reads and writes precede the child, which
     // inherits its fd table (rwagg.c); a no-op for an untraced creator.
@@ -876,10 +891,11 @@ int handle_task_rename(void *ctx) {
     struct ior_task_rename_args *args = ctx;
     struct task_struct *task = args->task;
     struct task_rename_event *ev;
-    __u32 pid = (__u32)BPF_CORE_READ(task, tgid);
-    __u32 tid = (__u32)BPF_CORE_READ(task, pid);
+    // In the tracer's PID namespace (pidns.c, M7); 0 outside it.
+    __u32 pid = iormesh_task_tgid(task);
+    __u32 tid = iormesh_task_tid(task);
 
-    if (!ior_task_in_scope(pid, tid))
+    if (!pid || !ior_task_in_scope(pid, tid))
         return 0;
 
     ev = bpf_ringbuf_reserve(&event_map, sizeof(struct task_rename_event), 0);

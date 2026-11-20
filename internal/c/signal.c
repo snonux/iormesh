@@ -81,11 +81,18 @@ SEC("raw_tracepoint/signal_generate")
 int handle_signal_generate(void *ctx) {
     struct iormesh_signal_args *args = ctx;
     struct task_struct *task = args->task;
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    __u32 target = (__u32)BPF_CORE_READ(task, tgid);
+    // Both ends in the tracer's PID namespace (pidns.c, M7): a sender or
+    // target outside it is 0, never traced, and reads as no sender.
+    __u64 pid_tgid = iormesh_current_pid_tgid();
+    __u32 target = iormesh_task_tgid(task);
     __u32 scope = iormesh_signal_scope(pid_tgid >> 32, target, args->info);
     struct signal_event *ev;
 
+    // A sender outside the tracer's namespace has no pid there (0): report
+    // the signal as one without a sender rather than name pid 0. On the
+    // host only the idle task is pid 0, and it sends no signal of its own.
+    if (!(pid_tgid >> 32))
+        scope &= ~SIGNAL_SCOPE_USER;
     if (!(scope & (SIGNAL_SCOPE_SENDER | SIGNAL_SCOPE_TARGET)))
         return 0;
     // A signal the current task sent itself (kill, a write's SIGPIPE) comes
@@ -110,7 +117,7 @@ int handle_signal_generate(void *ctx) {
     ev->pid = pid_tgid >> 32;
     ev->tid = (__u32)pid_tgid;
     ev->target_pid = target;
-    ev->target_tid = (__u32)BPF_CORE_READ(task, pid);
+    ev->target_tid = iormesh_task_tid(task);
     ev->sig = (__s32)args->sig;
     ev->result = (__s32)args->result;
     ev->group = (__u32)args->group;

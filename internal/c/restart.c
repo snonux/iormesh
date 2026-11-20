@@ -1,5 +1,6 @@
 // Adapted from ior internal/c/restart.c @ b21afc50328c.
-// Changes: none.
+// Changes: the current task's pid and tid are its numbers in the tracer's
+// PID namespace (iormesh_current_pid_tgid, pidns.c, M7).
 
 //+build ignore
 
@@ -373,7 +374,7 @@ static __always_inline void ior_restart_emit(__u32 tid, __u64 now, __u32 phase, 
     // Not a syscall tracepoint event: there is no enter/exit trace id.
     ev->trace_id = 0;
     ev->time = now;
-    ev->pid = (__u32)(bpf_get_current_pid_tgid() >> 32);
+    ev->pid = (__u32)(iormesh_current_pid_tgid() >> 32);
     ev->tid = tid;
     ev->phase = phase;
     ev->sa_restart = sa_restart;
@@ -548,7 +549,7 @@ int handle_signal_deliver(void *raw_ctx) {
     __u64 sa_handler = ctx->sa_handler;
     __u64 sa_flags = ctx->sa_flags;
 
-    ior_restart_on_deliver((__u32)bpf_get_current_pid_tgid(), sa_handler, sa_flags);
+    ior_restart_on_deliver((__u32)iormesh_current_pid_tgid(), sa_handler, sa_flags);
     return 0;
 }
 
@@ -559,6 +560,6 @@ int handle_signal_deliver(void *raw_ctx) {
 // state, so their relative order on the tracepoint does not matter.
 SEC("tracepoint/syscalls/sys_enter_rt_sigreturn")
 int handle_restart_sigreturn(void *ctx) {
-    ior_restart_on_sigreturn((__u32)bpf_get_current_pid_tgid());
+    ior_restart_on_sigreturn((__u32)iormesh_current_pid_tgid());
     return 0;
 }

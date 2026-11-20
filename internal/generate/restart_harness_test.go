@@ -1,5 +1,5 @@
 // Adapted from ior internal/generate/restart_harness_test.go @ b21afc50328c.
-// Changes: none.
+// Changes: restart.c's current-task ids come from iormesh_current_pid_tgid (M7, task 4f4).
 
 package generate
 
@@ -124,7 +124,9 @@ static void bpf_ringbuf_submit(void *data, __u64 flags) {
         snprintf(sim_out, sizeof(sim_out), "unknown phase %%u", ev->phase);
 }
 
-static __u64 bpf_get_current_pid_tgid(void) {
+/* restart.c reads the current task's ids in the tracer's PID namespace
+ * (pidns.c); the simulation has one task. */
+static __u64 iormesh_current_pid_tgid(void) {
     return ((__u64)77 << 32) | sim_tid;
 }
 
@@ -530,20 +532,20 @@ var restartMutations = map[string][2]string{
 	// The SEC programs: which context field is which argument, and whose
 	// state they touch.
 	"deliver swaps handler and flags": {
-		"    ior_restart_on_deliver((__u32)bpf_get_current_pid_tgid(), sa_handler, sa_flags);",
-		"    ior_restart_on_deliver((__u32)bpf_get_current_pid_tgid(), sa_flags, sa_handler);",
+		"    ior_restart_on_deliver((__u32)iormesh_current_pid_tgid(), sa_handler, sa_flags);",
+		"    ior_restart_on_deliver((__u32)iormesh_current_pid_tgid(), sa_flags, sa_handler);",
 	},
 	"deliver reads the flags from the handler field": {
 		"    __u64 sa_flags = ctx->sa_flags;",
 		"    __u64 sa_flags = ctx->sa_handler;",
 	},
 	"deliver judges the tgid": {
-		"    ior_restart_on_deliver((__u32)bpf_get_current_pid_tgid(), sa_handler, sa_flags);",
-		"    ior_restart_on_deliver((__u32)(bpf_get_current_pid_tgid() >> 32), sa_handler, sa_flags);",
+		"    ior_restart_on_deliver((__u32)iormesh_current_pid_tgid(), sa_handler, sa_flags);",
+		"    ior_restart_on_deliver((__u32)(iormesh_current_pid_tgid() >> 32), sa_handler, sa_flags);",
 	},
 	"sigreturn closes the tgid's handler": {
-		"    ior_restart_on_sigreturn((__u32)bpf_get_current_pid_tgid());",
-		"    ior_restart_on_sigreturn((__u32)(bpf_get_current_pid_tgid() >> 32));",
+		"    ior_restart_on_sigreturn((__u32)iormesh_current_pid_tgid());",
+		"    ior_restart_on_sigreturn((__u32)(iormesh_current_pid_tgid() >> 32));",
 	},
 }
 
@@ -610,7 +612,7 @@ func TestRestartHooksAreWiredIntoEverySyscallHook(t *testing.T) {
 		t.Fatalf("read exec.c: %v", err)
 	}
 	exit := regexp.MustCompile(`(?s)int handle_sched_process_exit\(.*?\n\}\n`).FindString(stripCComments(execC))
-	forget := strings.Index(exit, "ior_restart_forget((__u32)bpf_get_current_pid_tgid());")
+	forget := strings.Index(exit, "ior_restart_forget((__u32)ids);")
 	scope := strings.Index(exit, "ior_process_exit_in_scope(")
 	if forget < 0 || scope < 0 || forget > scope {
 		t.Errorf("handle_sched_process_exit must forget the task's pending restart before its scope check:\n%s", exit)

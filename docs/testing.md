@@ -945,8 +945,41 @@ Kernel-only tracing (`run -pid` of a shell loop, no `-spool`)
 needs `BPF`, `PERFMON` and `SYS_RESOURCE` — or just the first two
 with the memlock limit raised. Not covered here, and left for the
 kind run: tracefs and BTF inside a container, the runtime's
-seccomp and AppArmor defaults, PID namespaces (PLAN.md #13 — the
-tracer targets host pids today), and a non-root tracer uid.
+seccomp and AppArmor defaults, and a non-root tracer uid. PID
+namespaces are covered on the host (task 4f4, below).
+
+## PID namespaces (task 4f4)
+
+An in-pod tracer numbers every process as its PID namespace does
+(PLAN.md #13, docs/implementation.md M7 step 1). Checked on the
+host, without a cluster, with `unshare --pid --fork --mount-proc`
+(a new PID namespace and a `/proc` mounted for it — what a pod's
+container has):
+
+- `TestPidNSTracerConfined` (in `mage bpfRootTest`): the test
+  binary re-runs itself as such a tracer. Inside, a forking bash
+  is traced by its namespace pid and its forked child follows by
+  the namespace pid its `$!` reports; a bash in a namespace nested
+  one level deeper (a second `unshare`) is traced by its number in
+  the tracer's namespace, its child followed; and the tracer is
+  told to target the host pid of a host bash that keeps opening
+  the probe file outside — no record of it may appear. With the
+  namespace switch forced off (the tracer reading host pids, as
+  before task 4f4) all three checks fail.
+- The root test binary run whole inside a namespace
+  (`sudo -n unshare --pid --fork --mount-proc ./iormesh-internal.test
+  -test.run …`): the loader, follow, exec-watch, native-stack,
+  signal, Java-mark (uprobe_multi attached by the JVM's namespace
+  pid) and stream-sequence tests pass. The `TestSock*` tests do
+  not apply: they load the object without the loader, so it stays
+  in host mode while their pids are the namespace's.
+- On the host, the same tests — and the integration suite — are
+  the check that host mode did not change: the walk is pruned at
+  load there.
+
+The tracer refuses a namespace whose `/proc` is the host's
+(`/proc/self` naming another pid than its own), since every
+`/proc/<pid>` read would then name another process.
 
 ## Performance baselines
 

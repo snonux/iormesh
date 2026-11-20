@@ -82,7 +82,7 @@ Required fields are always present; a zero is a real zero.
 | `boot_ns` | int | boot-clock time of the syscall's start |
 | `wall_ns` | int | the same instant on the wall clock (boot + offset measured once per session) |
 | `host_id` | string | `/etc/machine-id` |
-| `pid` | int | process id (tgid) |
+| `pid` | int | process id (tgid), as the tracer's PID namespace numbers it — the host's on a host, the pod's for an in-pod tracer (M7, below) |
 | `pid_incarnation` | int | process start on the boot clock: a reused pid is another process |
 | `tid` | int | thread id; `0` for records with no task context (`tcp_state`) |
 | `comm` | string | process name at the event: the kernel's comm (≤ 15 bytes); an exec renames it, so events before the exec carry the old name and the `exec` event and later ones the new |
@@ -143,7 +143,7 @@ column each, never a blob.
 | `fd2`, `fd2_gen` | a second fd instance (M2 step 7): the other end of `pipe`, `pipe2`, `socketpair`; the fd `epoll_ctl` registers |
 | `signal` | the signal number: `kill`, `tgkill`, `tkill` (when the kernel generated a signal) and `signal` (required) |
 | `target_pid` | `kill`, `tgkill`, `tkill`: the tgid signalled — raw, the target need not be traced |
-| `sender_pid` | `signal` only: the tgid that sent it — raw, the sender need not be traced; absent for a kernel-raised signal |
+| `sender_pid` | `signal` only: the tgid that sent it — raw, the sender need not be traced; absent for a kernel-raised signal, and for a sender outside the tracer's PID namespace (it has no number there) |
 | `count` | `read`, `write` only, when ≥ 2: how many calls a folded hot loop's event stands for (M2 step 11, below); absent for a single call |
 
 IPv4 peers of dual-stack sockets are written unmapped
@@ -583,8 +583,11 @@ first scan after its ring appeared cannot be checked, so a JVM
 that lives less than a scan interval (50 ms) after its agent
 installed stays `none`. A ring truncated under the tracer's
 mapping (its owner can) faults on access; the reader turns that
-into a corrupt ring instead of a crash. The JVM must share the
-tracer's pid namespace (containers are M7's).
+into a corrupt ring instead of a crash. The JVM must sit in the
+tracer's pid namespace itself, not in one nested below it: the
+agent names its ring and its brackets' threads by the pids its
+own namespace shows, which match the tracer's only there (M7,
+task 4f4).
 
 How an event gets `attribution: java` — never by guessing:
 

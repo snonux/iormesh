@@ -2,7 +2,8 @@
 // Changes: filter() gates on target_map (iormesh_filter_tgid, which also
 // counts a pattern session's attach gap) instead of
 // the single-TGID rodata PID_FILTER; the enter hooks flush the thread's
-// folded reads and writes first (iormesh_rw_flush, rwagg.c, M2 step 11).
+// folded reads and writes first (iormesh_rw_flush, rwagg.c, M2 step 11);
+// filter() takes the pid and tid in the tracer's PID namespace (pidns.c, M7).
 
 //+build ignore
 
@@ -429,7 +430,7 @@ static __always_inline int ior_on_syscall_enter_stateful(__u32 tid, __u32 enter_
 static __always_inline int ior_on_noreturn_syscall_enter(__u32 enter_trace_id) {
     // exit and exit_group: the thread's exit handler flushes too, but only
     // after this enter record.
-    iormesh_rw_flush((__u32)bpf_get_current_pid_tgid());
+    iormesh_rw_flush((__u32)iormesh_current_pid_tgid());
     if (ior_should_emit_trace(enter_trace_id))
         return 1;
     ior_count_untimed_syscall(enter_trace_id);
@@ -883,8 +884,12 @@ static __always_inline int iormesh_filter_tgid(__u32 tgid) {
 // could not make it trace itself. Children of traced processes are in the map
 // because the task_newtask handler inserted them before their first syscall
 // (exec.c, M2 process-tree following).
+//
+// The pid and tid are the tracer's namespace numbers (iormesh_filter_pid_tgid,
+// pidns.c, M7): the host's in host mode. A task outside the tracer's
+// namespace gets pid 0, which is never a target, so the lookup is skipped.
 static __always_inline int filter(__u32 *pid, __u32 *tid) {
-    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u64 pid_tgid = iormesh_filter_pid_tgid();
     *pid = pid_tgid >> 32;
 
     // Ignore the tracer's own userland process.
@@ -893,6 +898,8 @@ static __always_inline int filter(__u32 *pid, __u32 *tid) {
     }
 
     *tid = pid_tgid & 0xFFFFFFFF;
+    if (!*pid)
+        return FILTER;
     if (!iormesh_filter_tgid(*pid))
         return FILTER;
     if (-1 == TID_FILTER || *tid == TID_FILTER)

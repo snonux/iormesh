@@ -380,11 +380,12 @@ truth.
     The pod must carry both volumes before the tracer comes
     (an ephemeral container cannot add one), so it is prepared
     once by the deployment owner's patch;
-  - scopes itself to the pod by its PID namespace: once
-    targeting keys by the pid in the tracer's own namespace (M7
-    code), a process outside the pod cannot be named as a
-    target, and `SYS_PTRACE` and `KILL` reach only what that
-    namespace's `/proc` shows — the pod. `DAC_OVERRIDE` is not
+  - scopes itself to the pod by its PID namespace: targeting
+    keys by the pid in the tracer's own namespace (task 4f4), so
+    a process outside the pod cannot be named as a target (the
+    kernel side gives it no number at all), and `SYS_PTRACE` and
+    `KILL` reach only what that namespace's `/proc` shows — the
+    pod. `DAC_OVERRIDE` is not
     so bounded: it overrides file permissions on everything the
     container's mount namespace holds — its own image and
     volumes, and through `/proc/<pid>/root` the pod's other

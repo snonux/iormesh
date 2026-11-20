@@ -18,7 +18,8 @@ import (
 
 // Config is what a tracing session asks of the kernel side.
 type Config struct {
-	// Pids are the initial target processes (tgids). More can be added
+	// Pids are the initial target processes (tgids), numbered in the
+	// tracer's PID namespace like every pid here (pidns.go). More can be added
 	// with AddTarget; an empty set traces nothing (filter.c).
 	Pids []uint32
 	// Probes is the attach set; nil means DefaultProbes().
@@ -88,6 +89,9 @@ type Tracer struct {
 	decoded sync.WaitGroup
 	losses  decodeLosses
 	closing sync.Once
+	// pidNS is the inode of the tracer's PID namespace, 0 on the host
+	// (pidns.go): every pid of the session is numbered there.
+	pidNS uint32
 }
 
 // Open loads the object, excludes the tracer itself, fills target_map,
@@ -129,6 +133,11 @@ func Open(cfg Config) (_ *Tracer, err error) {
 // load sets the load-time globals, loads the object into the kernel and
 // seeds target_map.
 func (t *Tracer) load(cfg Config) error {
+	// Before anything names a pid: the kernel side numbers every pid in the
+	// tracer's PID namespace (pidns.go), os.Getpid's below included.
+	if err := t.setPidNS(); err != nil {
+		return err
+	}
 	// The tracer's own I/O (ring buffer, segment writes) must never reach
 	// its trace, even if a target spec ever matched it (filter.c).
 	if err := t.module.InitGlobalVariable("IOR_PID_FILTER", uint32(os.Getpid())); err != nil {

@@ -4,7 +4,7 @@
 // Changes: renamed to iormesh.bpf.c; rawsyscall.c not included; bpf_endian.h
 // and sock.c added; sockaddr.c and signal.c added (M2 step 7); rwagg.c added
 // (M2 step 11); stack.c added (M2 step 9); javamark.c added (task td4);
-// tcpseq.c added (task xe4).
+// tcpseq.c added (task xe4); pidns.c added (M7, task 4f4).
 
 #include "vmlinux.h"
 #include <bpf/bpf_core_read.h>
@@ -20,6 +20,11 @@
  * come along with one huuuuughe .c file with all the BPF code in it. I am rather 
  * splitting the code up into several smaller files.
  */
+// PID-namespace-aware pids and tids (M7, task 4f4): every pid the kernel
+// side keys by or reports is the task's number in the tracer's namespace.
+// Before filter.c, whose filter() is its first user.
+#include "pidns.c"
+
 #include "filter.c"
 
 // In-kernel aggregation of hot read/write loops (M2 step 11, decision #25):

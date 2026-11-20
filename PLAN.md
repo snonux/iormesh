@@ -1607,6 +1607,13 @@ Later phase — plain Linux servers (M4) come first.
   the pods' own pids and cannot name a process outside it. (No
   systemd here: the container is the unit, and its resource
   limits are the caps.)
+  Status (2026-11-20, task 4f4): the namespace-aware targeting is
+  built (docs/implementation.md M7 step 1) and checked in a PID
+  namespace on the host, not yet on kind. Every pid the tracer
+  keys by or reports — `pid`, `tid`, `target_pid`, the agent's
+  ring names — is the one its own namespace shows, so on the
+  host nothing changes; records carry no host tgid (an in-pod
+  tracer could not resolve one, and no join needs it).
 - `kubectl debug` deployments are driven by `iormeshctl`, with
   the kubectl context (cluster/namespace from the kubeconfig)
   and the debug container image both configurable —
@@ -1818,7 +1825,11 @@ would overturn it), and deferred.
      ae4, after 8e4's `raw_syscalls` dispatch: 1.16× and 1.14×
      (wall clock 1.16× and 1.19×) — passes; a bystander of a
      kind no family traces (a `getppid` loop) pays ~2.0×,
-     recorded, not gated (s3-overhead.md, "Follow-up (ae4)");
+     recorded, not gated (s3-overhead.md, "Follow-up (ae4)").
+     Task 4f4 (M7's PID-namespace targeting): host mode
+     unchanged; a tracer in a PID namespace 1.22× / 1.23× beside
+     host mode's 1.19× / 1.18× (s3-overhead.md, "Follow-up
+     (4f4)");
   3. *loss* — M1: 16–42 % of ring records on a sustained burst,
      0 on a short burst and on the M0 scenarios. Budget: zero
      lost records on every M0/M2 scenario, and < 1 % on
@@ -2181,7 +2192,9 @@ here only as placeholders.
   (internal/c/filter.c) walks levels, since
   `bpf_get_ns_current_pid_tgid` matches only a task's innermost
   namespace and a pod may nest one — which also scopes the
-  tracer to the pod by construction; `hostPID` is the rejected
+  tracer to the pod by construction (built by task 4f4,
+  internal/c/pidns.c; checked on the host in `unshare --pid`
+  namespaces, nested ones included); `hostPID` is the rejected
   shortcut (it hands the app containers the node's process
   table). Fallback to `privileged` (which must not set
   `allowPrivilegeEscalation: false`; the API refuses the pair):

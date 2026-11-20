@@ -4960,27 +4960,85 @@ examples arrive.
 Order of work — the first five are tracer and pod changes the rest
 depends on:
 
-1. **PID-namespace-aware targeting** (#13). Today `target_map` is
-   keyed by the kernel's tgid and `/proc` is read as the host's,
-   so a tracer inside a pod's PID namespace targets nothing. The
-   tracer puts its own namespace (`stat /proc/self/ns/pid`: dev
-   and inode, plus its level) in rodata; the BPF side keys
-   targets, children and the pattern's pending set by the
-   task's pid *at that level*. `bpf_get_ns_current_pid_tgid`
-   alone is not enough: it matches only the task's innermost
-   namespace, so a process in a nested namespace (a container
-   runtime or sandbox inside the pod) would be lost. Walk the
-   levels as `ior_current_namespace_tgid` (internal/c/filter.c)
-   does — `pids[PIDTYPE_TGID]->numbers[level]`, checking that
-   level's `ns` is the tracer's — and treat a task above or
-   outside it as the filter's "no". Records keep the host tgid
-   as well, so cross-host joins and the controller's pod lookup
-   do not change; every `/proc` lookup uses the namespace pid,
-   and so does `AttachJavaMarks`: uprobe_multi's pid is looked
-   up in the caller's namespace (task 4f4 implements this
-   targeting). On the host the namespace is the init one and
-   nothing changes — the existing root suites are the
-   regression check.
+1. **PID-namespace-aware targeting** (#13) — built by task 4f4.
+   Before it `target_map` was keyed by the kernel's tgid and
+   `/proc` read as the host's, so a tracer inside a pod's PID
+   namespace targeted nothing. Now (`internal/c/pidns.c`,
+   `internal/bpf/pidns.go`):
+   - The tracer stats `/proc/self/ns/pid`. The initial namespace
+     has a fixed inode (`PROC_PID_INIT_INO`, `0xEFFFFFFC`): there
+     rodata `IORMESH_PIDNS_INUM` stays 0 and every helper is the
+     host read it replaced, pruned by the verifier at load — host
+     sessions emit the same records as before. Anywhere else the
+     inode goes to rodata, and `/proc` must be that namespace's
+     (`/proc/self` must name the tracer's own pid), or `Open`
+     refuses: a host procfs would make every `/proc/<pid>` another
+     process.
+   - The BPF side numbers every task by its pid *at the tracer's
+     level*: `pids[PIDTYPE_TGID]->numbers[level]` (and
+     `thread_pid` for the tid), as `ior_current_namespace_tgid`
+     (internal/c/filter.c) walks levels, accepted only if that
+     level's namespace inode is the tracer's. A task above or
+     beside the namespace gets 0 — filter()'s "no" — and one in
+     a namespace nested below it keeps its number at the
+     tracer's level. `bpf_get_ns_current_pid_tgid` would have
+     matched only a task's innermost namespace.
+   - The level is not knowable from userspace (`NS_GET_PARENT`
+     stops at the caller's own namespace), so the kernel learns
+     it into a global: the sys_enter dispatcher searches each
+     task's levels until one matches (the tracer's own first
+     syscall at the latest), and any hook meeting a task whose
+     innermost namespace is the tracer's takes its level, for
+     sessions without syscall probes.
+   - Everything that keys per-thread state or fills a record
+     uses those numbers: `filter()`, the signal, restart, Java
+     mark and exit hooks. Two need the kernel's help: the
+     task_newtask child is found at the tail of its creator's
+     thread list or its parent's children (the classic
+     tracepoint carries only a host tid), and a non-leader
+     exec's old tid — a host number in `sched_process_exec` —
+     comes from `exec_tid_map`, written at the exec's sys_enter
+     by the dispatcher.
+   - For the current task, `bpf_get_ns_current_pid_tgid` (with
+     the namespace file's device and inode) answers first: it
+     fails only for tasks not exactly in the tracer's namespace,
+     and only those pay the walk. `filter()` — every traced
+     kind's enter and exit of every task on the host — goes
+     through a one-slot per-CPU cache keyed by the task pointer
+     and its start time (`ns_ids_cache`; the start time also
+     changes when a non-leader exec renumbers the task), so a
+     task's back-to-back calls pay two helper calls and a
+     compare. Measured on a `close(-1)` loop, kernel
+     instructions per untraced call beside the tracer (S3
+     follow-up 4f4): host mode +1.0 k as before; in the namespace
+     +1.4 k with the walk and helper alone, +1.1 k with the
+     cache; a process outside the namespace +1.6 k without the
+     cache, +0.9 k with it.
+   - Both run in global BPF functions (`iormesh_ns_ids`,
+     `iormesh_ns_current_ids`): the verifier checks each once
+     per program and the callers see an unknown scalar. Inlined,
+     their early returns split the verification of each handler
+     and the load took about six times host mode's kernel CPU.
+     Each opens with the host-mode guard, so in host mode the
+     verifier prunes their bodies too.
+   - Records carry the namespace's pids, not host tgids beside
+     them: an in-pod tracer could not resolve a host pid in its
+     `/proc`, the cross-host join keys on ISN pairs (S2), not
+     pids, and the pod comes from the cgroup or the downward API
+     (step 6). A signal sender outside the namespace reads as a
+     kernel-raised signal (no `sender_pid`). `AttachJavaMarks`
+     takes the namespace pid: uprobe_multi looks it up in the
+     caller's namespace, and the agent names its ring and
+     threads by the same numbers — for a JVM in the tracer's own
+     namespace; one nested deeper is not joined.
+   Tests: `TestPidNSTracerConfined` (internal/pidns_root_test.go,
+   in `mage bpfRootTest`) re-runs the test binary as a tracer in
+   `unshare --pid --fork --mount-proc`, traces a forking bash
+   there and one in a nested namespace, and is told to target a
+   host process's host pid, which it must never trace. The
+   loader, follow, exec-watch, Java-mark and stream tests also
+   pass when the whole root test binary runs in such a namespace
+   ([testing.md](testing.md#pid-namespaces-task-4f4)).
 2. **Memlock without `CAP_SYS_RESOURCE`** (#13). libbpfgo
    v0.9.2's `NewModuleFromBuffer` sets RLIMIT_MEMLOCK to 512 MiB
    before every load, which fails without the capability. Load

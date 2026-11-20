@@ -65,7 +65,9 @@ func (t *Tracer) setJavaMarks(on bool) error {
 // native, in the libraries of the JDK the JVM runs (openJavaLibs), scoped
 // to pid so no other process traps. missing lists the natives found in
 // none of the libraries: their syscalls carry no mark. A JVM attached
-// before (a reused pid) has its old probes detached first. Call it from
+// before (a reused pid) has its old probes detached first. pid is the
+// JVM's number in the tracer's PID namespace (pidns.go): /proc is read there
+// and uprobe_multi looks the pid up in the caller's namespace. Call it from
 // one goroutine, before Close.
 func (t *Tracer) AttachJavaMarks(pid uint32, natives []JavaNative) (missing []string, err error) {
 	if t.closed() {
