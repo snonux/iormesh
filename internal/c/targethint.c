@@ -20,10 +20,15 @@
 // task_newtask handler sets a child's bit before the child exists, the
 // sched_process_exec handler its own process's, sched_process_exit clears it
 // when the last thread dies. Those events are ordered by the process itself,
-// so no two CPUs ever flip the same bit at once; a word's other bits are
-// other processes', and the atomic add (BPF_XADD, Linux 5.8's floor - the
-// atomic or/and need 5.12) keeps them. Adding the bit is exact because only
-// a clear bit is added and only a set bit subtracted. Userspace's
+// with one exception: on kernels whose sched_process_exit lacks group_dead,
+// two exiting threads can both take the group for dead (exec.c,
+// ior_exit_group_dead), so the clear is gated on target_map's delete, which
+// succeeds once (iormesh_forget_target). A word's other bits are other
+// processes', and the atomic add (BPF_XADD, Linux 5.8's floor - the atomic
+// or/and need 5.12) keeps them. Adding the bit is exact only because a bit
+// is added only while clear and subtracted only while set, by its single
+// writer of the moment: a second subtraction would borrow from the next set
+// bit, another process's. Userspace's
 // (target_hint_user) holds AddTarget's pids, written under the tracer's
 // mutex (internal/bpf/targets.go): it never shares a word with the kernel,
 // whose writes userspace could not order its read-modify-write against. Its
@@ -87,7 +92,8 @@ static __always_inline void iormesh_hint_set(__u32 pid) {
         __sync_fetch_and_add(k, bit);
 }
 
-// iormesh_hint_clear clears pid's kernel bit, at its process's end.
+// iormesh_hint_clear clears pid's kernel bit, at its process's end - only
+// after target_map's delete of pid succeeded, so once (iormesh_forget_target).
 static __always_inline void iormesh_hint_clear(__u32 pid) {
     __u64 bit = 1ULL << (pid & 63);
     __u64 *k = iormesh_hint_kern_word(pid);

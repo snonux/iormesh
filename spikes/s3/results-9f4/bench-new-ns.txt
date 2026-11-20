@@ -1,4 +1,4 @@
-# S3 samples 2026-11-20T22:27:15Z commit 98747ba
+# S3 samples 2026-11-20T22:27:15Z commit 98747ba (repo HEAD; the tracer is the task 9f4 build, committed later as a1266ed)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=/tmp/9f4/iormesh-new
@@ -14,7 +14,7 @@ mode=untraced threads=4 ops=200000 pair=1 elapsed_ns=155088142 burst_cpu_ms=600 
 mode=bystander threads=4 ops=200000 pair=1 elapsed_ns=184740834 burst_cpu_ms=690 tracer_cpu_ms=2270 events=3 load=2.46
 mode=untraced threads=4 ops=200000 pair=2 elapsed_ns=150469440 burst_cpu_ms=560 load=2.46
 mode=bystander threads=4 ops=200000 pair=2 elapsed_ns=182481303 burst_cpu_ms=710 tracer_cpu_ms=2239 events=3 load=2.42
-# S3 samples 2026-11-20T22:29:21Z commit 98747ba
+# S3 samples 2026-11-20T22:29:21Z commit 98747ba (repo HEAD; the tracer is the task 9f4 build, committed later as a1266ed)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=/tmp/9f4/iormesh-new
@@ -30,7 +30,7 @@ mode=untraced threads=4 ops=200000 pair=1 elapsed_ns=289538358 burst_cpu_ms=1120
 mode=bystander threads=4 ops=200000 pair=1 elapsed_ns=325039381 burst_cpu_ms=1350 tracer_cpu_ms=4380 events=3 load=6.96
 mode=untraced threads=4 ops=200000 pair=2 elapsed_ns=260090853 burst_cpu_ms=1050 load=6.96
 mode=bystander threads=4 ops=200000 pair=2 elapsed_ns=345040725 burst_cpu_ms=1370 tracer_cpu_ms=4160 events=3 load=6.27
-# S3 samples 2026-11-20T22:31:52Z commit 98747ba
+# S3 samples 2026-11-20T22:31:52Z commit 98747ba (repo HEAD; the tracer is the task 9f4 build, committed later as a1266ed)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=/tmp/9f4/iormesh-new
@@ -46,7 +46,7 @@ mode=untraced threads=4 ops=200000 pair=1 elapsed_ns=183575105 burst_cpu_ms=720 
 mode=bystander threads=4 ops=200000 pair=1 elapsed_ns=365716553 burst_cpu_ms=1460 tracer_cpu_ms=4700 events=3 load=6.54
 mode=untraced threads=4 ops=200000 pair=2 elapsed_ns=309686938 burst_cpu_ms=1240 load=6.54
 mode=bystander threads=4 ops=200000 pair=2 elapsed_ns=371176019 burst_cpu_ms=1450 tracer_cpu_ms=5119 events=3 load=6.42
-# S3 samples 2026-11-20T22:34:26Z commit 98747ba
+# S3 samples 2026-11-20T22:34:26Z commit 98747ba (repo HEAD; the tracer is the task 9f4 build, committed later as a1266ed)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=/tmp/9f4/iormesh-new
@@ -62,7 +62,7 @@ mode=untraced threads=4 ops=200000 pair=1 elapsed_ns=252275755 burst_cpu_ms=890 
 mode=bystander threads=4 ops=200000 pair=1 elapsed_ns=303058248 burst_cpu_ms=990 tracer_cpu_ms=4370 events=3 load=8.49
 mode=untraced threads=4 ops=200000 pair=2 elapsed_ns=298040690 burst_cpu_ms=870 load=8.49
 mode=bystander threads=4 ops=200000 pair=2 elapsed_ns=569526121 burst_cpu_ms=1690 tracer_cpu_ms=6960 events=3 load=9.03
-# S3 samples 2026-11-20T22:37:19Z commit 98747ba
+# S3 samples 2026-11-20T22:37:19Z commit 98747ba (repo HEAD; the tracer is the task 9f4 build, committed later as a1266ed)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=/tmp/9f4/iormesh-new
@@ -78,7 +78,7 @@ mode=untraced threads=4 ops=200000 pair=1 elapsed_ns=198605734 burst_cpu_ms=750 
 mode=bystander threads=4 ops=200000 pair=1 elapsed_ns=251166530 burst_cpu_ms=890 tracer_cpu_ms=3170 events=3 load=7.24
 mode=untraced threads=4 ops=200000 pair=2 elapsed_ns=332501613 burst_cpu_ms=1200 load=7.24
 mode=bystander threads=4 ops=200000 pair=2 elapsed_ns=371516718 burst_cpu_ms=1470 tracer_cpu_ms=5229 events=3 load=7.13
-# S3 samples 2026-11-20T22:40:46Z commit 98747ba
+# S3 samples 2026-11-20T22:40:46Z commit 98747ba (repo HEAD; the tracer is the task 9f4 build, committed later as a1266ed)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=/tmp/9f4/iormesh-new
@@ -94,7 +94,7 @@ mode=untraced threads=4 ops=200000 pair=1 elapsed_ns=154981565 burst_cpu_ms=600 
 mode=bystander threads=4 ops=200000 pair=1 elapsed_ns=183923759 burst_cpu_ms=770 tracer_cpu_ms=2350 events=3 load=2.61
 mode=untraced threads=4 ops=200000 pair=2 elapsed_ns=149626449 burst_cpu_ms=580 load=2.61
 mode=bystander threads=4 ops=200000 pair=2 elapsed_ns=190697327 burst_cpu_ms=720 tracer_cpu_ms=2260 events=3 load=2.56
-# S3 samples 2026-11-20T22:42:43Z commit 98747ba
+# S3 samples 2026-11-20T22:42:43Z commit 98747ba (repo HEAD; the tracer is the task 9f4 build, committed later as a1266ed)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=/tmp/9f4/iormesh-new
@@ -110,7 +110,7 @@ mode=untraced threads=4 ops=200000 pair=1 elapsed_ns=224340689 burst_cpu_ms=880 
 mode=bystander threads=4 ops=200000 pair=1 elapsed_ns=399500704 burst_cpu_ms=1600 tracer_cpu_ms=5090 events=3 load=3.27
 mode=untraced threads=4 ops=200000 pair=2 elapsed_ns=233381822 burst_cpu_ms=930 load=3.27
 mode=bystander threads=4 ops=200000 pair=2 elapsed_ns=291425983 burst_cpu_ms=1110 tracer_cpu_ms=3540 events=3 load=3.32
-# S3 samples 2026-11-20T22:46:55Z commit 98747ba
+# S3 samples 2026-11-20T22:46:55Z commit 98747ba (repo HEAD; the tracer is the task 9f4 build, committed later as a1266ed)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=/tmp/9f4/iormesh-new
@@ -126,7 +126,7 @@ mode=untraced threads=4 ops=200000 pair=1 elapsed_ns=292321942 burst_cpu_ms=1150
 mode=bystander threads=4 ops=200000 pair=1 elapsed_ns=342945215 burst_cpu_ms=1410 tracer_cpu_ms=4399 events=3 load=3.34
 mode=untraced threads=4 ops=200000 pair=2 elapsed_ns=278849522 burst_cpu_ms=1100 load=3.34
 mode=bystander threads=4 ops=200000 pair=2 elapsed_ns=346432740 burst_cpu_ms=1360 tracer_cpu_ms=4510 events=3 load=3.32
-# S3 samples 2026-11-20T22:49:01Z commit 98747ba
+# S3 samples 2026-11-20T22:49:01Z commit 98747ba (repo HEAD; the tracer is the task 9f4 build, committed later as a1266ed)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=/tmp/9f4/iormesh-new
@@ -142,7 +142,7 @@ mode=untraced threads=4 ops=200000 pair=1 elapsed_ns=154586676 burst_cpu_ms=590 
 mode=bystander threads=4 ops=200000 pair=1 elapsed_ns=187106490 burst_cpu_ms=700 tracer_cpu_ms=2360 events=3 load=2.57
 mode=untraced threads=4 ops=200000 pair=2 elapsed_ns=154263995 burst_cpu_ms=610 load=2.57
 mode=bystander threads=4 ops=200000 pair=2 elapsed_ns=174072660 burst_cpu_ms=740 tracer_cpu_ms=2280 events=3 load=2.53
-# S3 samples 2026-11-20T22:51:01Z commit 98747ba
+# S3 samples 2026-11-20T22:51:01Z commit 98747ba (repo HEAD; the tracer is the task 9f4 build, committed later as a1266ed)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=/tmp/9f4/iormesh-new

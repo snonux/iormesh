@@ -1192,8 +1192,12 @@ function call per handler) was the extra ~9 %.
    inlined array access; only a set bit goes on to the lookup,
    which still decides. The kernel's bitmap is written only by a
    bit's owner (task_newtask for a child, the exec watch for its
-   process, the group-dead exit clears it) with `BPF_XADD`, so
-   5.8 stays the floor; AddTarget's bits live in a second,
+   process, the group-dead exit clears it — only if its
+   `target_map` delete succeeded, since kernels without the
+   tracepoint's `group_dead` can report two threads' exits as
+   group-dead, and a second subtraction would borrow a
+   neighbour's bit) with `BPF_XADD`, so 5.8 stays the floor;
+   AddTarget's bits live in a second,
    userspace-only map. 1397 → 1288 per call in host mode (perf's
    21 % share was sampling attribution; the lookups cost ~55 each),
    1495 → 1386 in the namespace.

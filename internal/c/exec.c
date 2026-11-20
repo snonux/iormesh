@@ -570,17 +570,24 @@ ior_emit_process_exit(__u32 pid, __u32 tid, __u32 group_dead) {
 // anything. Only a group-dead exit qualifies: a thread exiting leaves its
 // siblings traced. The target hint (targethint.c) comes first, so the exits
 // of the host's untraced processes cost one array access and no group_dead
-// read. The process's kernel hint bit goes with its entry: this exit is the
-// bit's last owner, and the pid's next process starts clear. A hint without
-// an entry (a dismissed exec) is cleared too, and the delete then finds
-// nothing.
+// read. The process's kernel hint bit goes with its entry, and only the
+// exit whose delete removed the entry clears it. Why: on kernels without the
+// tracepoint's group_dead field (ior_exit_group_dead's signal->live fallback,
+// ~5.8-6.15, RHEL 8/9) two threads exiting at once can both see the group
+// dead; both would find the bit set, and the second subtraction would borrow
+// from the next set bit of the word - another process's, often a followed
+// sibling with a nearby pid, which would then go untraced. The hash delete
+// succeeds exactly once per entry, so the clear does too. A bit left without
+// an entry (a dismissed exec, an exit whose delete found nothing) is only a
+// false positive: the pid's next target finds it set and keeps it, and that
+// target's own exit clears it.
 static __always_inline void iormesh_forget_target(void *ctx, __u32 tgid) {
     if (!tgid || !iormesh_target_hint(tgid))
         return;
     if (!ior_exit_group_dead(ctx))
         return;
-    bpf_map_delete_elem(&target_map, &tgid);
-    iormesh_hint_clear(tgid);
+    if (!bpf_map_delete_elem(&target_map, &tgid))
+        iormesh_hint_clear(tgid);
 }
 
 SEC("tracepoint/sched/sched_process_exit")

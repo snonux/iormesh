@@ -1615,8 +1615,10 @@ Later phase — plain Linux servers (M4) come first.
   host nothing changes; records carry no host tgid (an in-pod
   tracer could not resolve one, and no join needs it). The #25
   bystander item in namespace mode, open after 4f4 (1.25× /
-  1.30×), passes since task 9f4 (2026-11-21): 1.23× / 1.23×,
-  wall 1.22× / 1.21× (see #25).
+  1.30×), passes in task 9f4's set (2026-11-21): 1.23× / 1.23×,
+  wall 1.22× / 1.21× — as did the 4f4 build in the same set,
+  at the guard; 9f4 cut the tracer's kernel instructions per
+  bystander call by ~17 % (see #25).
 - `kubectl debug` deployments are driven by `iormeshctl`, with
   the kubectl context (cluster/namespace from the kubeconfig)
   and the debug container image both configurable —
