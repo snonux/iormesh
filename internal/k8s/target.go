@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+
+	"iormesh/internal/federate"
 )
 
 // Errors a Target or a kubectl call is refused with, for errors.Is.
@@ -22,8 +24,14 @@ var (
 	// the tracer container), so no tracer can run in it.
 	ErrUnprepared = errors.New("k8s: pod not prepared")
 	// ErrTransport: an argument or operation the transport refuses
-	// before running anything.
-	ErrTransport = errors.New("k8s: transport")
+	// before running anything. It wraps federate.ErrTransport, so a
+	// caller holding any Transport can test for either.
+	ErrTransport = fmt.Errorf("k8s: %w", federate.ErrTransport)
+	// ErrUnreachable: kubectl failed without running the command in
+	// the pod (forbidden, pod or container gone, unknown context). It
+	// never wraps *exec.ExitError, so no caller mistakes it for the
+	// command's own non-zero status.
+	ErrUnreachable = fmt.Errorf("k8s: pod not reached: %w", ErrTransport)
 )
 
 // Mode is how the tracer gets into the pod (#18).

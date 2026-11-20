@@ -1629,7 +1629,7 @@ Later phase — plain Linux servers (M4) come first.
   subcommand, and `debug --target` into prepared pods only;
   `Push` is refused (the image carries the tracer, and #12 rules
   out `kubectl cp`). The registry sections and the iormeshctl
-  commands that pick it for a pod remain.
+  commands that pick it for a pod remain (task af4).
 - Pod identity enrichment: map host PIDs/cgroups → pod, namespace,
   container, so the graph speaks "pod checkout-7d9f (ns prod)"
   instead of bare host PIDs. In k8s mode the project defaults

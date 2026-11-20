@@ -12,8 +12,11 @@ import (
 // (each element NUL-terminated, each call closed by an RS element) and
 // serves canned output — the pod JSON for `get`, the tar for `exec … ready`
 // without -remove, a copy of the --custom file for `debug` — and exits with
-// $FAKE_KUBECTL_EXIT. No cluster is reached; the tests below assert the
-// exact argv the real kubectl would get.
+// $FAKE_KUBECTL_EXIT. $FAKE_KUBECTL_REMOTE=N ends stderr with kubectl
+// exec's "command terminated with exit code N" (the remote command ran
+// and failed), $FAKE_KUBECTL_CHATTY=1 writes 10 KB of stderr before it.
+// No cluster is reached; the tests assert the exact argv the real kubectl
+// would get.
 const fakeKubectl = `#!/bin/sh
 for a in "$@"; do printf '%s\0' "$a" >> "$FAKE_KUBECTL_LOG"; done
 printf '\036\0' >> "$FAKE_KUBECTL_LOG"
@@ -31,6 +34,8 @@ case "$verb" in
   exec) if [ -n "$ready" ] && [ -z "$remove" ]; then cat "$FAKE_KUBECTL_TAR"; else echo ran; fi ;;
 esac
 echo "fake kubectl stderr" >&2
+[ -n "$FAKE_KUBECTL_CHATTY" ] && head -c 10000 /dev/zero | tr '\0' x >&2
+[ -n "$FAKE_KUBECTL_REMOTE" ] && echo "command terminated with exit code $FAKE_KUBECTL_REMOTE" >&2
 exit "${FAKE_KUBECTL_EXIT:-0}"
 `
 
@@ -57,6 +62,8 @@ func newFake(t *testing.T) *fake {
 	t.Setenv("FAKE_KUBECTL_POD", filepath.Join(dir, "pod.json"))
 	t.Setenv("FAKE_KUBECTL_TAR", filepath.Join(dir, "stream.tar"))
 	t.Setenv("FAKE_KUBECTL_EXIT", "0")
+	t.Setenv("FAKE_KUBECTL_REMOTE", "")
+	t.Setenv("FAKE_KUBECTL_CHATTY", "")
 	return f
 }
 

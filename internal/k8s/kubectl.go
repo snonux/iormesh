@@ -76,10 +76,12 @@ func (k *Kubectl) execArgs(argv ...string) []string {
 		[]string{"exec", k.t.Pod, "--container=" + TracerContainer, "--"}, argv)
 }
 
-// Run executes argv in the tracer container. kubectl exec exits with the
-// remote command's status, so a non-zero exit wraps *exec.ExitError as
-// the Transport contract asks — but kubectl's own failures exit 1 too, so
-// a caller asking `test` must probe reachability first, as collect does.
+// Run executes argv in the tracer container. A command that ran and
+// exited non-zero returns an error wrapping *exec.ExitError with its
+// status, as federate.Transport promises; kubectl's own failures (it
+// exits 1 for those too) wrap ErrUnreachable instead and never the
+// ExitError — explain (exec.go) tells the two apart by kubectl exec's
+// "command terminated with exit code N" line.
 func (k *Kubectl) Run(ctx context.Context, argv ...string) ([]byte, error) {
 	if len(argv) == 0 {
 		return nil, fmt.Errorf("%w: empty remote command", ErrTransport)

@@ -5173,12 +5173,18 @@ depends on:
    digest (`DefaultImage` is empty until task vb4 publishes one)
    and non-Kubernetes names. Every call passes `--context=` and
    `--namespace=`; `Run` is `exec POD --container=iormesh --
-   argv…`; `Fetch` accepts only
+   argv…`, and returns `*exec.ExitError` only when kubectl's
+   stderr ends with "command terminated with exit code N", N its
+   own status — kubectl's own failures (forbidden, pod gone,
+   unknown context) exit 1 too and come back as `ErrUnreachable`,
+   so `test` never reads an unreached pod as "no"; `Fetch` accepts
+   only
    `/opt/iormesh/traces/<project>/ready`, execs `iormesh ready
    -project P` (internal/cli/ready.go, writer `k8s.WriteReady`),
    unpacks with `k8s.Unpack` (regular `*.parquet` entries without
-   a directory part, ≤ 1 GiB each, 0600, through an `os.Root` and
-   a dot temporary) and removes what arrived with `iormesh ready
+   a directory part, ≤ 1 GiB each and 8 GiB in all, 0600, through
+   an `os.Root` and a dot temporary; at most 64 KiB after the
+   tar's end) and removes what arrived with `iormesh ready
    -project P -remove -- NAME…`, also after a stream refused
    part-way. `Debug` reads the pod (`get pod -o json`), refuses it
    without the `tracefs` hostPath and a `sizeLimit`ed
@@ -5190,15 +5196,16 @@ depends on:
    --profile=general|sysadmin --custom=FILE -- argv…`, the custom
    file step 8's spec. Tests: a fake kubectl on `PATH`
    ([testing.md](testing.md#k8s-transport-task-wb4)).
-   Not yet: the registry's `k8s:`/`pods:` sections and the
-   iormeshctl commands that pick this transport for a pod (step
-   10), pod lookup by selector. For kind (task yb4): that
-   `--profile=general` plus `--custom` yields exactly the custom
-   capabilities (the lists' strategic merge); that the image's
-   `PATH` finds `iormesh`; and collect's probes — it runs `true`
-   and `test -d` through `Run`, which a shell-less image lacks,
-   and `kubectl exec` exits 1 for its own failures as well as for
-   the remote status 1 that `test` uses for "absent".
+   `--custom` needs kubectl 1.30 or later (from 1.27 it sat behind
+   `KUBECTL_DEBUG_CUSTOM_PROFILE=true`; docs/build.md).
+   Task af4 wires it in: the registry's `k8s:`/`pods:` sections,
+   the run flags, deploy/collect/rm picking this transport for a
+   pod, and collect probes that need no shell utilities (collect
+   runs `true` and `test -d` through `Run`; the image has
+   neither). For kind (task yb4): that `--profile=general` plus
+   `--custom` yields exactly the custom capabilities (the lists'
+   strategic merge), and that the image's `PATH` finds
+   `iormesh`.
 10. Registry: the `k8s:` and `pods:` sections (#18). **Provisional
     — owner's examples pending**; every value below is a
     placeholder, not a fleet fact:

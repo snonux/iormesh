@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"syscall"
@@ -48,7 +50,7 @@ func plantedReady(t *testing.T) string {
 // stream, and Unpack takes exactly those.
 func TestWriteReadySkipsPlanted(t *testing.T) {
 	var buf bytes.Buffer
-	if err := WriteReady(&buf, plantedReady(t)); err != nil {
+	if err := WriteReady(&buf, io.Discard, plantedReady(t)); err != nil {
 		t.Fatal(err)
 	}
 	out := t.TempDir()
@@ -67,7 +69,7 @@ func TestWriteReadySkipsPlanted(t *testing.T) {
 // TestWriteReadyMissingDir: nothing published yet is an empty stream.
 func TestWriteReadyMissingDir(t *testing.T) {
 	var buf bytes.Buffer
-	if err := WriteReady(&buf, filepath.Join(t.TempDir(), "ready")); err != nil {
+	if err := WriteReady(&buf, io.Discard, filepath.Join(t.TempDir(), "ready")); err != nil {
 		t.Fatal(err)
 	}
 	taken, err := Unpack(&buf, t.TempDir())
@@ -176,7 +178,7 @@ func TestUnpackTruncated(t *testing.T) {
 func TestFetchMovesAndRemoves(t *testing.T) {
 	f := newFake(t)
 	var buf bytes.Buffer
-	if err := WriteReady(&buf, plantedReady(t)); err != nil {
+	if err := WriteReady(&buf, io.Discard, plantedReady(t)); err != nil {
 		t.Fatal(err)
 	}
 	f.tar(t, buf.Bytes())
@@ -251,5 +253,80 @@ func TestRemoveReady(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(dir, "link.parquet")); err != nil {
 		t.Errorf("symlink removed: %v", err)
+	}
+}
+
+// TestFetchKubectlFailsAfterStream: a complete stream followed by
+// kubectl failing on its own is ErrUnreachable, not a remote status.
+func TestFetchKubectlFailsAfterStream(t *testing.T) {
+	f := newFake(t)
+	var buf bytes.Buffer
+	if err := WriteReady(&buf, io.Discard, plantedReady(t)); err != nil {
+		t.Fatal(err)
+	}
+	f.tar(t, buf.Bytes())
+	t.Setenv("FAKE_KUBECTL_EXIT", "1")
+	err := newTestKubectl(t, testTarget()).Fetch(context.Background(), "/opt/iormesh/traces/shop/ready", t.TempDir())
+	var exit *exec.ExitError
+	if !errors.Is(err, ErrUnreachable) || errors.As(err, &exit) {
+		t.Fatalf("err = %v, want ErrUnreachable without an ExitError", err)
+	}
+}
+
+// TestFetchRefusesTrailingData: more than drainLimit bytes after the
+// tar's end is not a stream the tracer wrote; kubectl is cancelled.
+func TestFetchRefusesTrailingData(t *testing.T) {
+	f := newFake(t)
+	var buf bytes.Buffer
+	if err := WriteReady(&buf, io.Discard, plantedReady(t)); err != nil {
+		t.Fatal(err)
+	}
+	buf.Write(make([]byte, drainLimit+tarBlock))
+	f.tar(t, buf.Bytes())
+	err := newTestKubectl(t, testTarget()).Fetch(context.Background(), "/opt/iormesh/traces/shop/ready", t.TempDir())
+	if !errors.Is(err, ErrStream) {
+		t.Fatalf("err = %v, want ErrStream", err)
+	}
+}
+
+// tarBlock is tar's block size.
+const tarBlock = 512
+
+// TestUnpackTotalLimit: a stream past the per-fetch total is refused
+// after the entries that fit.
+func TestUnpackTotalLimit(t *testing.T) {
+	old := fetchLimit
+	fetchLimit = 6
+	defer func() { fetchLimit = old }()
+	stream := hostileTar(t,
+		&tar.Header{Typeflag: tar.TypeReg, Name: "a.parquet", Size: 4},
+		&tar.Header{Typeflag: tar.TypeReg, Name: "b.parquet", Size: 4})
+	taken, err := Unpack(bytes.NewReader(stream), t.TempDir())
+	if !errors.Is(err, ErrStream) || !slices.Equal(taken, []string{"a.parquet"}) {
+		t.Errorf("Unpack = %q, %v; want a.parquet then ErrStream", taken, err)
+	}
+}
+
+// TestWriteReadyWarnsOversize: a file over MaxSegmentSize is skipped with
+// a note on warn, not silently. A sparse file keeps the test cheap.
+func TestWriteReadyWarnsOversize(t *testing.T) {
+	dir := t.TempDir()
+	f, err := os.Create(filepath.Join(dir, "big.parquet"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(MaxSegmentSize + 1); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	var out, warn bytes.Buffer
+	if err := WriteReady(&out, &warn, dir); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(warn.Bytes(), []byte("big.parquet")) {
+		t.Errorf("warn = %q", warn.String())
+	}
+	if taken, err := Unpack(&out, t.TempDir()); err != nil || len(taken) != 0 {
+		t.Errorf("Unpack = %q, %v", taken, err)
 	}
 }

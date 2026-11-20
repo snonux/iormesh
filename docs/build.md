@@ -209,6 +209,11 @@ fails up front with the fix named.
   debug` and sidecars is M7; the capability set it runs with is
   provisional (PLAN.md decision #13,
   [security.md](security.md) "Kubernetes").
+- **kubectl on the controller** (k8s mode only, task wb4): 1.30
+  or later. The debug container's security context and volume
+  mounts go in through `kubectl debug --custom`, which kubectl
+  1.27–1.29 only accepted with `KUBECTL_DEBUG_CUSTOM_PROFILE=true`
+  set (to confirm on kind, task yb4).
 
 ## Signing
 

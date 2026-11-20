@@ -23,6 +23,16 @@ import (
 // entry.
 const MaxSegmentSize = 1 << 30
 
+// MaxFetchBytes bounds one fetch stream's file contents in total: a
+// collect moves minutes to hours of segments (decision #25's reference
+// rate is 18 MB a minute), and a stream past 8 GiB is a pod filling the
+// controller's disk. A refused fetch keeps what it took; the rest waits
+// on the tracer for the next collect.
+const MaxFetchBytes = 8 << 30
+
+// fetchLimit is MaxFetchBytes, a variable so a test can lower it.
+var fetchLimit int64 = MaxFetchBytes
+
 // maxEntries bounds the files one stream may carry: a minute per
 // segment and a few tables each is far below it for any collect
 // interval.
@@ -40,11 +50,14 @@ var ErrStream = errors.New("k8s: fetch stream refused")
 // segments directly in dir as a tar to w. Each name must be a segment
 // name, each file is opened O_NOFOLLOW (and O_NONBLOCK, so a planted FIFO
 // cannot hang it) and sent only if fstat shows a regular file; anything
-// else in dir is skipped. Exactly the fstat size is sent, so a file that
-// changes underneath fails the stream rather than sending a torn copy.
-// A dir that does not exist yet (nothing published) is an empty stream,
-// not an error: the image has no `test` for collect to ask first.
-func WriteReady(w io.Writer, dir string) error {
+// else in dir is skipped, and a file over MaxSegmentSize — which the
+// controller would refuse — is skipped with a note on warn. Exactly the
+// fstat size is sent: a file that shrank fails the stream, one that grew
+// sends its first fstat-size bytes. Neither happens to a real segment,
+// which is immutable once renamed into ready/ (decision #16). A dir that
+// does not exist yet (nothing published) is an empty stream, not an
+// error: the image has no `test` for collect to ask first.
+func WriteReady(w, warn io.Writer, dir string) error {
 	root, err := os.OpenRoot(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return tar.NewWriter(w).Close()
@@ -62,7 +75,7 @@ func WriteReady(w io.Writer, dir string) error {
 		if !segmentName.MatchString(e.Name()) {
 			continue
 		}
-		if err := writeOne(tw, root, e.Name()); err != nil {
+		if err := writeOne(tw, warn, root, e.Name()); err != nil {
 			return fmt.Errorf("%s: %w", e.Name(), err)
 		}
 	}
@@ -71,11 +84,16 @@ func WriteReady(w io.Writer, dir string) error {
 
 // writeOne adds one segment to the tar, or skips it when it is not a
 // regular file. The lstat skips what is plainly not one (a symlink, which
-// os.Root would refuse anyway when it leads out of dir); the O_NOFOLLOW
+// os.Root would refuse anyway when it leads out of dir) and a file gone
+// since ReadDir (removed by an earlier fetch's remove); the O_NOFOLLOW
 // open and the fstat after it close the race of a file swapped between
 // the two, which then fails the stream instead of being followed.
-func writeOne(tw *tar.Writer, root *os.Root, name string) error {
-	if li, err := root.Lstat(name); err != nil || !li.Mode().IsRegular() {
+func writeOne(tw *tar.Writer, warn io.Writer, root *os.Root, name string) error {
+	li, err := root.Lstat(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil || !li.Mode().IsRegular() {
 		return err
 	}
 	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
@@ -87,7 +105,12 @@ func writeOne(tw *tar.Writer, root *os.Root, name string) error {
 	if err != nil {
 		return err
 	}
-	if !fi.Mode().IsRegular() || fi.Size() > MaxSegmentSize {
+	if !fi.Mode().IsRegular() {
+		return nil
+	}
+	if fi.Size() > MaxSegmentSize {
+		_, _ = fmt.Fprintf(warn, "iormesh ready: skipping %s: %d bytes, over the %d a fetch accepts\n",
+			name, fi.Size(), MaxSegmentSize)
 		return nil
 	}
 	hdr := &tar.Header{Typeflag: tar.TypeReg, Name: name, Size: fi.Size(), Mode: 0o600,
@@ -134,7 +157,8 @@ func RemoveReady(dir string, names []string) error {
 // dir and returns the names it took. The stream comes from a pod and is
 // untrusted, so only collect's rules pass (as SSH.Fetch's rsync flags):
 // regular-file entries with a segment name — no directory part, no dot
-// file, no link, device or directory — each at most MaxSegmentSize. The
+// file, no link, device or directory — each at most MaxSegmentSize and
+// MaxFetchBytes in all. The
 // tar's modes, owners and times are ignored: every file is created 0600
 // under a dot-prefixed temporary name (which the build skips) and renamed
 // into place only once complete, all through an os.Root, so nothing is
@@ -147,6 +171,7 @@ func Unpack(r io.Reader, dir string) ([]string, error) {
 	defer func() { _ = root.Close() }()
 	tr := tar.NewReader(r)
 	var taken []string
+	var total int64
 	seen := map[string]bool{}
 	for {
 		hdr, err := tr.Next()
@@ -158,6 +183,9 @@ func Unpack(r io.Reader, dir string) ([]string, error) {
 		}
 		if err := checkEntry(hdr, seen, len(taken)); err != nil {
 			return taken, err
+		}
+		if total += hdr.Size; total > fetchLimit {
+			return taken, fmt.Errorf("%w: more than %d bytes in one fetch", ErrStream, fetchLimit)
 		}
 		if err := unpackOne(root, hdr.Name, tr, hdr.Size); err != nil {
 			return taken, err

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"slices"
 )
 
@@ -57,8 +58,8 @@ type named struct {
 // Check reads the pod's spec and refuses a pod no tracer can run in
 // (ErrUnprepared): #13's two volumes missing or of the wrong kind, a
 // user-namespaced pod (hostUsers: false — its capabilities reach neither
-// BPF nor tracing), an unknown app container, or — for a sidecar — no
-// tracer container or no shared process namespace.
+// BPF nor tracing), no such app container to target, or — for a
+// sidecar — no tracer container or no shared process namespace.
 func (k *Kubectl) Check(ctx context.Context) error {
 	out, err := k.run.output(ctx, slices.Concat(k.base(), []string{"get", "pod", k.t.Pod, "--output=json"}))
 	if err != nil {
@@ -85,7 +86,7 @@ func checkPrepared(p podInfo) error {
 	for _, v := range p.Spec.Volumes {
 		switch v.Name {
 		case TracefsVolume:
-			tracefs = v.HostPath != nil && v.HostPath.Path == TracefsPath
+			tracefs = v.HostPath != nil && path.Clean(v.HostPath.Path) == TracefsPath
 		case TracesVolume:
 			traces = v.EmptyDir != nil && v.EmptyDir.SizeLimit != ""
 		}
@@ -106,7 +107,7 @@ func checkContainers(p podInfo, t Target) error {
 		return slices.ContainsFunc(cs, func(c named) bool { return c.Name == name })
 	}
 	if !has(p.Spec.Containers, t.Container) {
-		return fmt.Errorf("%w: %s/%s has no container %q", ErrName, t.Namespace, t.Pod, t.Container)
+		return fmt.Errorf("%w: %s/%s has no container %q", ErrUnprepared, t.Namespace, t.Pod, t.Container)
 	}
 	if t.Mode == ModeSidecar {
 		if !has(p.Spec.Containers, TracerContainer) ||

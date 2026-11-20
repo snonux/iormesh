@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"iormesh/internal/federate"
 )
 
 // TestRunArgv: the context and namespace are explicit on every call, in
@@ -29,22 +31,45 @@ func TestRunArgv(t *testing.T) {
 	}
 }
 
-// TestRunExitStatus: the remote status comes back as *exec.ExitError,
-// with kubectl's stderr in the message, as the Transport contract asks.
+// TestRunExitStatus: a remote command that ran and failed — stderr ends
+// with kubectl exec's "command terminated" line, its code kubectl's
+// status — comes back as *exec.ExitError, with kubectl's stderr in the
+// message, as the Transport contract asks; also behind a chatty stderr.
 func TestRunExitStatus(t *testing.T) {
-	newFake(t)
-	t.Setenv("FAKE_KUBECTL_EXIT", "1")
-	k := newTestKubectl(t, testTarget())
-	_, err := k.Run(context.Background(), "test", "-d", "/opt/iormesh/traces/shop/ready")
-	var exit *exec.ExitError
-	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
-		t.Fatalf("err = %v, want exit status 1", err)
+	for _, chatty := range []string{"", "1"} {
+		newFake(t)
+		t.Setenv("FAKE_KUBECTL_EXIT", "1")
+		t.Setenv("FAKE_KUBECTL_REMOTE", "1")
+		t.Setenv("FAKE_KUBECTL_CHATTY", chatty)
+		k := newTestKubectl(t, testTarget())
+		_, err := k.Run(context.Background(), "test", "-d", "/opt/iormesh/traces/shop/ready")
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 || errors.Is(err, ErrUnreachable) {
+			t.Fatalf("chatty=%q: err = %v, want exit status 1", chatty, err)
+		}
+		if !strings.Contains(err.Error(), "fake kubectl stderr") {
+			t.Errorf("err %q lacks kubectl's stderr", err)
+		}
 	}
-	if !strings.Contains(err.Error(), "fake kubectl stderr") {
-		t.Errorf("err %q lacks kubectl's stderr", err)
-	}
-	if _, err := k.Run(context.Background()); !errors.Is(err, ErrTransport) {
+	if _, err := newTestKubectl(t, testTarget()).Run(context.Background()); !errors.Is(err, ErrTransport) {
 		t.Errorf("empty argv: %v", err)
+	}
+}
+
+// TestRunKubectlFailure: kubectl failing on its own (exit 1 without the
+// "command terminated" line: forbidden, pod gone, unknown context), or
+// with a line whose code is not kubectl's status, is ErrUnreachable and
+// never an *exec.ExitError — collect's `test` must not read it as "no".
+func TestRunKubectlFailure(t *testing.T) {
+	for _, remote := range []string{"", "2"} {
+		newFake(t)
+		t.Setenv("FAKE_KUBECTL_EXIT", "1")
+		t.Setenv("FAKE_KUBECTL_REMOTE", remote)
+		_, err := newTestKubectl(t, testTarget()).Run(context.Background(), "test", "-d", "/x")
+		var exit *exec.ExitError
+		if errors.As(err, &exit) || !errors.Is(err, ErrUnreachable) || !errors.Is(err, federate.ErrTransport) {
+			t.Errorf("remote=%q: err = %v, want ErrUnreachable without an ExitError", remote, err)
+		}
 	}
 }
 
@@ -195,7 +220,7 @@ func TestDebugRefusesUnprepared(t *testing.T) {
 		"traces on hostPath": {strings.Replace(preparedPod, `"emptyDir":{"sizeLimit":"2Gi"}`,
 			`"hostPath":{"path":"/var"}`, 1), ErrUnprepared},
 		"user namespace":   {strings.Replace(preparedPod, `"spec":{`, `"spec":{"hostUsers":false,`, 1), ErrUnprepared},
-		"no app container": {strings.Replace(preparedPod, `"name":"app"`, `"name":"web"`, 1), ErrName},
+		"no app container": {strings.Replace(preparedPod, `"name":"app"`, `"name":"web"`, 1), ErrUnprepared},
 		"already debugged": {strings.Replace(preparedPod, `"containers"`,
 			`"ephemeralContainers":[{"name":"iormesh"}],"containers"`, 1), ErrTransport},
 	}
@@ -207,7 +232,7 @@ func TestDebugRefusesUnprepared(t *testing.T) {
 			if !errors.Is(err, c.want) {
 				t.Fatalf("err = %v, want %v", err, c.want)
 			}
-			if c.want == ErrUnprepared && !strings.Contains(err.Error(), PreparePatch) {
+			if name != "no app container" && c.want == ErrUnprepared && !strings.Contains(err.Error(), PreparePatch) {
 				t.Errorf("err %q does not name %s", err, PreparePatch)
 			}
 			if calls := f.calls(t); len(calls) != 1 || calls[0][2] != "get" {

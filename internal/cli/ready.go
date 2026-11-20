@@ -20,6 +20,12 @@ import (
 // read or delete nothing but published segments. No tar, rsync or shell
 // is needed in the image.
 func readyCommand(args []string, stdout, stderr io.Writer) error {
+	return readyIn(k8s.TraceRoot, args, stdout, stderr)
+}
+
+// readyIn is readyCommand under the trace root root, which only a test
+// changes.
+func readyIn(root string, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("ready", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	name := fs.String("project", "", "project label")
@@ -30,12 +36,12 @@ func readyCommand(args []string, stdout, stderr io.Writer) error {
 	if !project.Valid(*name) {
 		return fmt.Errorf("%w: -project %q: %s", errUsage, *name, project.Rule)
 	}
-	dir := filepath.Join(k8s.TraceRoot, *name, segment.ReadyDir)
+	dir := filepath.Join(root, *name, segment.ReadyDir)
 	if *remove {
 		return k8s.RemoveReady(dir, fs.Args())
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%w: unexpected argument %q", errUsage, fs.Arg(0))
 	}
-	return k8s.WriteReady(stdout, dir)
+	return k8s.WriteReady(stdout, stderr, dir)
 }

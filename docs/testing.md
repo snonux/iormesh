@@ -999,6 +999,12 @@ The real `execRunner` runs it, so the tests see exactly the argv
 kubectl would get. They run with the package's unit tests
 (`CGO_ENABLED=0 go test ./internal/k8s/`, and in `mage test`):
 
+- status: a failed remote command (stderr ending "command
+  terminated with exit code N", N kubectl's status — also behind
+  10 KB of stderr) is `*exec.ExitError`; kubectl failing on its
+  own, before or after a complete stream, is `ErrUnreachable`
+  without one (both fail when `explain` stops telling them
+  apart);
 - argv: `--context=` and `--namespace=` on every call, `exec POD
   --container=iormesh -- argv…` with shell metacharacters arriving
   as single, verbatim elements; `debug POD --container=iormesh
@@ -1021,9 +1027,13 @@ kubectl would get. They run with the package's unit tests
   subdirectory, a dot file and a text file; `Unpack` refuses
   traversal, directory parts, absolute and dot names, links,
   devices, directories, oversize and duplicate entries, and leaves
-  no partial file from a truncated stream; `Fetch` removes on the
-  tracer exactly the files that arrived, also when the stream is
-  refused part-way.
+  no partial file from a truncated stream, nor more than the
+  per-fetch total; `WriteReady` notes an oversize file on stderr;
+  `Fetch` refuses more than 64 KiB after the tar's end and removes
+  on the tracer exactly the files that arrived, also when the
+  stream is refused part-way; `TestReadyRoundTrip`
+  (internal/cli) runs `iormesh ready` and `-remove` around
+  `Unpack`.
 
 What only kind can show is task yb4's (docs/implementation.md M7
 step 9).
