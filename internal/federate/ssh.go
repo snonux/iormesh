@@ -234,6 +234,10 @@ func (s SSH) Push(ctx context.Context, remoteDir string, localFiles ...string) e
 //   - ControlMaster/ControlPath/ControlPersist: one connection per host,
 //     reused by the next command for a minute; %C hashes user, host and
 //     port, so the socket path stays short (macOS caps it at 104 bytes).
+//   - ForwardAgent=no, ClearAllForwardings=yes: no agent or port
+//     forwarding, whatever ~/.ssh/config says. Mesh expansion points the
+//     operator's key at hosts found from traffic; such a host must get
+//     a login, never a way back into the operator's agent or network.
 func (s SSH) sshOptions() []string {
 	return []string{
 		"-o", "BatchMode=yes",
@@ -242,6 +246,8 @@ func (s SSH) sshOptions() []string {
 		"-o", "ControlPath=" + filepath.Join(s.controlDir, "%C"),
 		"-o", "ControlPersist=60s",
 		"-o", "ConnectTimeout=15",
+		"-o", "ForwardAgent=no",
+		"-o", "ClearAllForwardings=yes",
 	}
 }
 

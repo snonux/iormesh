@@ -222,6 +222,11 @@ func (ev *evidence) judge(allow Allowlist, u federate.Unresolved) verdict {
 	if v.reason, v.evidence = ev.fact(u, via, registered, v.addr); v.reason != "" {
 		return v
 	}
+	if allow.broadcast(v.addr) {
+		// No host answers at a broadcast address; Enroll refuses it too.
+		v.reason, v.evidence = ReasonLocal, "a broadcast address"
+		return v
+	}
 	rule := allow.Match(v.addr)
 	if rule == "" {
 		v.reason, v.evidence = ReasonNotAllowed, "no allow rule matches"

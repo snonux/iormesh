@@ -554,7 +554,12 @@ started as `iormesh run -listen-port PORT` (`Host.ListenPort`),
 the target the registry entry names, once its server listens
 and before the gateway is released (`TraceHosts`). The deploy
 argv itself is `internal/ctl`'s `TestExpandApply`, over a fake
-transport.
+transport. The rig needs no ssh, so it never meets the rule a
+real round does: each enrolled host's ssh host key must already
+be in `known_hosts` (`StrictHostKeyChecking=yes`, `BatchMode`;
+`ssh-keyscan` it and verify the fingerprint out of band before
+`-apply`), and `TestExpandApplyFailedDeploy` checks the hint
+`-apply` prints when ssh refuses one.
 
 | Round | Traced | Asserted |
 |---|---|---|

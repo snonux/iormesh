@@ -39,7 +39,8 @@ type Enrollment struct {
 // and the others are returned as another_port skips: the next round sees
 // the address as enrolled, so the operator adds those ports by hand.
 //
-// Every candidate is checked again against allow and p.Limits before
+// Every candidate is checked again against allow and p.Limits (hops,
+// and max_nodes over reg's hosts), routability and broadcast before
 // anything changes: Enroll must never widen what Plan allowed, whoever
 // built the proposal. A violation is ErrNotPlanned and reg is untouched.
 func Enroll(reg *federate.Registry, p Proposal, allow Allowlist) ([]Enrollment, []Skip, error) {
@@ -49,6 +50,10 @@ func Enroll(reg *federate.Registry, p Proposal, allow Allowlist) ([]Enrollment, 
 		}
 	}
 	picked, skipped := onePortPerHost(p.Deploy)
+	if n := len(reg.Servers) + len(picked); n > p.Limits.MaxNodes {
+		return nil, nil, fmt.Errorf("%w: %d hosts would pass max_nodes %d", ErrNotPlanned, n,
+			p.Limits.MaxNodes)
+	}
 	next := *reg
 	next.Servers = slices.Clone(reg.Servers)
 	out := make([]Enrollment, 0, len(picked))
@@ -65,12 +70,18 @@ func Enroll(reg *federate.Registry, p Proposal, allow Allowlist) ([]Enrollment, 
 	return out, skipped, nil
 }
 
-// checkPlanned is Plan's own verdict on c, re-derived: allowed, within
-// the hop limit, an IPv4 address and port, revealed by a project.
+// checkPlanned is Plan's own verdict on c, re-derived: a routable IPv4
+// unicast address and a port, allowed, within the hop limit, revealed by
+// a project. Broadcast is refused too — the limited one and the
+// broadcast address of the allow rule's network — which Plan does not
+// see as a fact of its own: no host answers there, and a deploy to it
+// would reach whichever does.
 func checkPlanned(c Candidate, lim Limits, allow Allowlist) error {
 	switch {
-	case !c.Addr.Is4() || c.Port == 0:
-		return fmt.Errorf("%w: %s is no IPv4 address and port", ErrNotPlanned, addrPort(c.Peer))
+	case !c.Addr.Is4() || c.Port == 0 || !routable(c.Addr):
+		return fmt.Errorf("%w: %s is no routable IPv4 address and port", ErrNotPlanned, addrPort(c.Peer))
+	case allow.broadcast(c.Addr):
+		return fmt.Errorf("%w: %s is a broadcast address", ErrNotPlanned, c.Addr)
 	case allow.Match(c.Addr) == "":
 		return fmt.Errorf("%w: %s matches no allow rule", ErrNotPlanned, c.Addr)
 	case c.Hop < 1 || c.Hop > lim.MaxHops:

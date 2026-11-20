@@ -4879,8 +4879,11 @@ printed:
    `hop` (`Registry.AddHop`). Of several ports of one address
    the busiest is enrolled and the others are printed as
    `another_port` for the operator to `add`. Each candidate is
-   re-checked against the allowlist, the hop limit and IPv4
-   first; a violation (`ErrNotPlanned`) enrolls nothing.
+   re-checked against the allowlist, the hop limit, `max_nodes`
+   over the registry, a routable IPv4 address and broadcast
+   (255.255.255.255 and the allow rule's network broadcast,
+   which `Plan` lists as `local`) first; a violation
+   (`ErrNotPlanned`) enrolls nothing.
 2. The pinned key and the deploy record are read — a
    controller that cannot deploy fails before the registry
    changes — then the registry is saved: deploy reaches only
@@ -4888,8 +4891,17 @@ printed:
 3. Per new host, through the same Transport: `cat
    /etc/machine-id` (no sudo; the residual above), then
    deploy's own steps (`newDeployer`, `deployer.host`):
-   preflight, verify, stage, upgrade, start. A failed host
-   stays registered (`deploy HOST` retries, `rm HOST` removes).
+   preflight, verify, stage, upgrade, start. A machine-id
+   counts as known once read, so one new machine reached at two
+   addresses in a round is deployed to once. A failed host
+   stays registered (`deploy HOST` retries, `rm HOST` removes;
+   an unregistered duplicate is not named there). ssh runs with
+   `StrictHostKeyChecking=yes` and `BatchMode=yes` (no trust on
+   first use), so a new host's key must already be in
+   `known_hosts` — `ssh-keyscan` it and verify the fingerprint
+   out of band; `-apply` prints that hint when ssh refuses a
+   key. Every ssh call also carries `ForwardAgent=no` and
+   `ClearAllForwardings=yes`.
 
 `-apply` refuses a damaged segment (the visited set would be
 incomplete) and `-json` (the deploy's lines would follow the

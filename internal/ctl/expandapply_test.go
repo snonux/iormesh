@@ -1,6 +1,7 @@
 package ctl
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -154,7 +155,7 @@ func TestExpandApplyOutsideAllowlist(t *testing.T) {
 func TestExpandApplyKnownMachine(t *testing.T) {
 	f := newApplyFixture(t, dbAllowed)
 	f.answers["203.0.113.9 cat"] = reply{out: "hostA\n"}
-	if code := f.apply(); code != exitError || !strings.Contains(f.stderr.String(), "same machine as traced host app1") {
+	if code := f.apply(); code != exitError || !strings.Contains(f.stderr.String(), "same machine as app1") {
 		t.Fatalf("exit %d: %s", code, f.stderr)
 	}
 	for _, c := range f.log {
@@ -192,5 +193,58 @@ func TestExpandApplyRefusals(t *testing.T) {
 	}
 	if code := f.apply("-json"); code != exitUsage {
 		t.Errorf("-apply -json: exit %d, want %d", code, exitUsage)
+	}
+}
+
+// TestExpandApplyFailedDeploy: a host whose deploy fails stays
+// registered, and expand says how to retry or remove it; an unknown ssh
+// host key adds the known_hosts hint (no trust on first use).
+func TestExpandApplyFailedDeploy(t *testing.T) {
+	f := newApplyFixture(t, dbAllowed)
+	f.answers["203.0.113.9 test -x"] = reply{err: errors.New("exit status 1")}
+	if code := f.apply(); code != exitError ||
+		!strings.Contains(f.stderr.String(), "203.0.113.9 stay registered: iormeshctl deploy HOST retries") {
+		t.Fatalf("exit %d: %s", code, f.stderr)
+	}
+	if _, err := f.registry(t).Lookup("203.0.113.9"); err != nil {
+		t.Errorf("unregistered after a failed deploy: %v", err)
+	}
+
+	g := newApplyFixture(t, dbAllowed)
+	g.answers["203.0.113.9 cat"] = reply{err: errors.New("ssh: Host key verification failed.")}
+	if code := g.apply(); code != exitError || !strings.Contains(g.stderr.String(), "ssh-keyscan 203.0.113.9") {
+		t.Errorf("host key: exit %d: %s", code, g.stderr)
+	}
+}
+
+// TestApplierOneMachineTwoAddresses: a new machine reached at two
+// addresses in one round is deployed to once; the second address is a
+// duplicate, unregistered again, and not named as a failed host.
+func TestApplierOneMachineTwoAddresses(t *testing.T) {
+	f := newApplyFixture(t, dbAllowed)
+	f.answers["203.0.113.9 cat"] = reply{out: "id-same\n"}
+	f.answers["203.0.113.10 cat"] = reply{out: "id-same\n"}
+	d, rec, err := newDeployer(f.e, f.dist, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &applier{d: d, known: map[string]string{}}
+	shop := []federate.Project{{Name: "shop", Target: federate.Target{ListenPort: 5432}}}
+	servers := []federate.Server{{Host: "203.0.113.9", Hop: 1, Projects: shop},
+		{Host: "203.0.113.10", Hop: 1, Projects: shop}}
+	if err := d.all(context.Background(), servers, rec, a.host); err == nil ||
+		!strings.Contains(err.Error(), "203.0.113.10") {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(f.stderr.String(), "same machine as 203.0.113.9") {
+		t.Errorf("stderr: %s", f.stderr)
+	}
+	for _, c := range f.log {
+		if c[0] == "203.0.113.10" && slices.Contains(c, "sudo") {
+			t.Errorf("deployed to the second address: %q", c)
+		}
+	}
+	if !slices.Equal(a.dups, []string{"203.0.113.10"}) || len(a.failed) != 0 {
+		t.Errorf("dups %v, failed %v", a.dups, a.failed)
 	}
 }

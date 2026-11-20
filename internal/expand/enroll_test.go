@@ -96,6 +96,10 @@ func TestEnrollRefusesUnplanned(t *testing.T) {
 		"ipv6":                  {v6, ErrNotPlanned},
 		"no project":            {Candidate{Peer: candidate("10.0.4.4", 80, 1, 1).Peer, Hop: 1}, ErrNotPlanned},
 		"registered":            {candidate("10.0.1.1", 80, 1, 1), federate.ErrDuplicate},
+		"loopback":              {candidate("127.0.0.1", 80, 1, 1), ErrNotPlanned},
+		"link-local":            {candidate("169.254.1.1", 80, 1, 1), ErrNotPlanned},
+		"network broadcast":     {candidate("10.255.255.255", 80, 1, 1), ErrNotPlanned},
+		"limited broadcast":     {candidate("255.255.255.255", 80, 1, 1), ErrNotPlanned},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -148,5 +152,31 @@ func TestRoundsTerminate(t *testing.T) {
 	}
 	if len(reg.Servers) != 3 {
 		t.Errorf("registry %+v", reg.Servers)
+	}
+}
+
+// TestEnrollNodeCap: Enroll re-checks max_nodes over the registry it is
+// given: candidates that would pass it enroll nothing.
+func TestEnrollNodeCap(t *testing.T) {
+	ten := allowlist(t, nil, "10.0.0.0/8")
+	reg := registry("hostA", "hostB")
+	p := Proposal{Limits: Limits{MaxHops: 1, MaxNodes: 3},
+		Deploy: []Candidate{candidate("10.0.4.4", 80, 1, 1), candidate("10.0.5.5", 80, 1, 1)}}
+	if got, _, err := Enroll(&reg, p, ten); !errors.Is(err, ErrNotPlanned) || got != nil || len(reg.Servers) != 2 {
+		t.Errorf("err %v, enrolled %+v, registry %d hosts", err, got, len(reg.Servers))
+	}
+	p.Deploy = p.Deploy[:1]
+	if got, _, err := Enroll(&reg, p, ten); err != nil || len(got) != 1 {
+		t.Errorf("at the cap: err %v, enrolled %+v", err, got)
+	}
+}
+
+// TestPlanBroadcast: the broadcast address of an allowed network is
+// never proposed.
+func TestPlanBroadcast(t *testing.T) {
+	in := input(registry("hostA", "hostB"), nil, out("id-A", "10.0.1.1:40001", "10.0.4.255:80"))
+	got := summary(Plan(in, allowlist(t, nil, "10.0.4.0/24"), Limits{MaxHops: 1, MaxNodes: 16}))
+	if !slices.Equal(got, []string{"skip 10.0.4.255:80 local"}) {
+		t.Errorf("plan %q", got)
 	}
 }

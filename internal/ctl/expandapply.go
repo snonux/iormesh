@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"iormesh/internal/expand"
@@ -28,7 +30,10 @@ import (
 //  4. Per new host, over the same Transport: its /etc/machine-id (the
 //     host_id its tracer would stamp) is read unprivileged; a machine the
 //     store already holds traces of, reached at another address, is
-//     unregistered again and nothing is deployed. Otherwise deploy's own
+//     unregistered again and nothing is deployed (the id is known from
+//     then on, so one new machine at two addresses gets one tracer). An
+//     unknown ssh host key fails here with a known_hosts hint: no trust
+//     on first use, expansion included. Otherwise deploy's own
 //     steps run unchanged (deploy.go): preflight, verify, stage, upgrade
 //     and start through the one sudoers rule — no new sudo path.
 //
@@ -67,16 +72,17 @@ func applyExpansion(ctx context.Context, e env, f expandFlags, x expansion) erro
 		_, _ = fmt.Fprintf(e.stdout, "enrolled %s hop %d project %s listen-port %d (%s)\n", n.Server.Host,
 			n.Server.Hop, p.Name, p.Target.ListenPort, x.regPath)
 	}
-	a := &applier{d: d, known: x.hostIDs}
+	a := &applier{d: d, known: maps.Clone(x.hostIDs)}
 	deployErr := d.all(ctx, servers, recPath, a.host)
 	if err := a.unregisterDuplicates(&x.reg, x.regPath); err != nil {
 		return errors.Join(deployErr, err)
 	}
-	if deployErr != nil {
-		return fmt.Errorf("%w (failed hosts stay registered: iormeshctl deploy HOST retries, "+
-			"iormeshctl rm HOST removes)", deployErr)
+	if len(a.failed) > 0 {
+		// Only hosts still registered: a duplicate was removed again.
+		return fmt.Errorf("%w (%s stay registered: iormeshctl deploy HOST retries, "+
+			"iormeshctl rm HOST removes)", deployErr, strings.Join(a.failed, " "))
 	}
-	return nil
+	return deployErr
 }
 
 // applier deploys to newly enrolled hosts, refusing a machine the store
@@ -87,14 +93,47 @@ type applier struct {
 	known map[string]string
 	// dups are the enrolled hosts found to be known machines.
 	dups []string
+	// failed are the enrolled hosts whose deploy failed otherwise: they
+	// stay registered.
+	failed []string
 }
 
-// host checks srv's machine identity, then runs deploy's steps on it.
-// Reading /etc/machine-id needs no privilege and changes nothing on the
-// host; it is the expand.Plan residual (a host registered by name whose
-// other address a trace reached) caught before a second tracer lands on
-// one machine.
+// host runs check, then deploy's steps on srv, and records why a host
+// failed: a duplicate is unregistered again, any other failure stays
+// registered for a retry.
 func (a *applier) host(ctx context.Context, srv federate.Server) error {
+	err := a.check(ctx, srv)
+	if err == nil {
+		err = a.d.host(ctx, srv)
+	}
+	switch {
+	case err == nil, slices.Contains(a.dups, srv.Host):
+	case isHostKeyFailure(err):
+		a.failed = append(a.failed, srv.Host)
+		err = fmt.Errorf("%w (an enrolled host's ssh host key must already be in known_hosts — "+
+			"iormeshctl never trusts on first use: ssh-keyscan %s, verify the fingerprint out of "+
+			"band, add it, then iormeshctl deploy %s)", err, srv.Host, srv.Host)
+	default:
+		a.failed = append(a.failed, srv.Host)
+	}
+	return err
+}
+
+// isHostKeyFailure reports ssh refusing the server's host key: unknown
+// (StrictHostKeyChecking=yes under BatchMode) or changed.
+func isHostKeyFailure(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "Host key verification failed") ||
+		strings.Contains(msg, "REMOTE HOST IDENTIFICATION HAS CHANGED")
+}
+
+// check reads srv's machine identity. Reading /etc/machine-id needs no
+// privilege and changes nothing on the host; it is the expand.Plan
+// residual (a host registered by name whose other address a trace
+// reached) caught before a second tracer lands on one machine. The id is
+// known from then on, so one new machine reached at two addresses in one
+// round is deployed to once.
+func (a *applier) check(ctx context.Context, srv federate.Server) error {
 	t, err := a.d.e.transport(srv.Host)
 	if err != nil {
 		return err
@@ -109,10 +148,14 @@ func (a *applier) host(ctx context.Context, srv federate.Server) error {
 	}
 	if dir, ok := a.known[id]; ok {
 		a.dups = append(a.dups, srv.Host)
-		return fmt.Errorf("same machine as traced host %s (machine-id %s): unregistered again, "+
+		return fmt.Errorf("same machine as %s (machine-id %s): unregistered again, "+
 			"nothing deployed", dir, id)
 	}
-	return a.d.host(ctx, srv)
+	if a.known == nil {
+		a.known = map[string]string{}
+	}
+	a.known[id] = srv.Host
+	return nil
 }
 
 // unregisterDuplicates removes the hosts host found to be known machines

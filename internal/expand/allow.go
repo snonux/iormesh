@@ -65,6 +65,28 @@ func NewLimits(x *federate.Expand, hops int) Limits {
 	return l
 }
 
+// broadcast reports the limited broadcast address 255.255.255.255, or
+// the broadcast (last) address of an allowlisted IPv4 network holding
+// addr. Networks of /31 and /32 have none (RFC 3021).
+func (a Allowlist) broadcast(addr netip.Addr) bool {
+	addr = addr.Unmap()
+	if addr == netip.AddrFrom4([4]byte{255, 255, 255, 255}) {
+		return true
+	}
+	for _, p := range a.cidrs {
+		if !p.Addr().Is4() || p.Bits() > 30 || !p.Contains(addr) {
+			continue
+		}
+		b := p.Addr().As4()
+		host := ^uint32(0) >> p.Bits()
+		last := [4]byte{b[0] | byte(host>>24), b[1] | byte(host>>16), b[2] | byte(host>>8), b[3] | byte(host)}
+		if addr == netip.AddrFrom4(last) {
+			return true
+		}
+	}
+	return false
+}
+
 // Match returns the first rule that allows addr — CIDRs before host
 // globs, each in the file's order, so the rule shown is stable — or ""
 // when none does. Globs see the address's canonical text ("10.0.3.7"),

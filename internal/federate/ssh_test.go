@@ -49,6 +49,8 @@ func TestSSHRunArgv(t *testing.T) {
 		"-o", "ControlPath=/ctl/%C",
 		"-o", "ControlPersist=60s",
 		"-o", "ConnectTimeout=15",
+		"-o", "ForwardAgent=no",
+		"-o", "ClearAllForwardings=yes",
 		"--", "ops@app1",
 		"'sudo' '/opt/iormesh/bin/iormesh' 'status' '-project' 'shop'"}
 	if !slices.Equal(rec.calls[0], want) {
@@ -93,7 +95,8 @@ func TestSSHFetchArgv(t *testing.T) {
 	argv := rec.calls[0]
 	want := []string{"rsync", "-rt", "--remove-source-files", "--exclude=.*", "--include=*.parquet", "--exclude=*", "-e",
 		"ssh '-o' 'BatchMode=yes' '-o' 'StrictHostKeyChecking=yes' '-o' 'ControlMaster=auto'" +
-			" '-o' 'ControlPath=/ctl/%C' '-o' 'ControlPersist=60s' '-o' 'ConnectTimeout=15'",
+			" '-o' 'ControlPath=/ctl/%C' '-o' 'ControlPersist=60s' '-o' 'ConnectTimeout=15'" +
+			" '-o' 'ForwardAgent=no' '-o' 'ClearAllForwardings=yes'",
 		"--", "app1:/opt/iormesh/traces/shop/ready/", local + "/"}
 	if !slices.Equal(argv, want) {
 		t.Errorf("argv\n got %q\nwant %q", argv, want)
@@ -111,7 +114,8 @@ func TestSSHPushArgv(t *testing.T) {
 	argv := rec.calls[0]
 	want := []string{"rsync", "-ct", "-e",
 		"ssh '-o' 'BatchMode=yes' '-o' 'StrictHostKeyChecking=yes' '-o' 'ControlMaster=auto'" +
-			" '-o' 'ControlPath=/ctl/%C' '-o' 'ControlPersist=60s' '-o' 'ConnectTimeout=15'",
+			" '-o' 'ControlPath=/ctl/%C' '-o' 'ControlPersist=60s' '-o' 'ConnectTimeout=15'" +
+			" '-o' 'ForwardAgent=no' '-o' 'ClearAllForwardings=yes'",
 		"--", "/dist/iormesh-linux-amd64", "/dist/iormesh-linux-amd64.minisig", "ops@app1:/home/ops/.iormesh/staging/"}
 	if !slices.Equal(argv, want) {
 		t.Errorf("argv\n got %q\nwant %q", argv, want)
