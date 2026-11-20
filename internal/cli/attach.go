@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"iormesh/internal/javaattach"
 )
 
@@ -99,12 +101,9 @@ func agentPaths(agent, spool string) (string, string, error) {
 	if agent == "" || spool == "" {
 		return "", "", fmt.Errorf("%w: -agent needs -spool, and both a path", errUsage)
 	}
-	absAgent, err := filepath.Abs(agent)
+	absAgent, err := trustedAgent(agent)
 	if err != nil {
-		return "", "", fmt.Errorf("%w: -agent: %v", errUsage, err)
-	}
-	if st, err := os.Stat(absAgent); err != nil || !st.Mode().IsRegular() {
-		return "", "", fmt.Errorf("%w: -agent %s: not a file", errUsage, absAgent)
+		return "", "", fmt.Errorf("%w: -agent %s: %v", errUsage, agent, err)
 	}
 	absSpool, err := filepath.Abs(spool)
 	if err != nil {
@@ -114,6 +113,46 @@ func agentPaths(agent, spool string) (string, string, error) {
 		return "", "", fmt.Errorf("%w: -spool %s: the agent's options cannot carry a comma", errUsage, absSpool)
 	}
 	return absAgent, absSpool, nil
+}
+
+// trustedAgent resolves the agent jar to its real absolute path and
+// checks that nobody but root and the caller can change what it is: the
+// tracer, root, loads it into JVMs of every user, root's own included,
+// so a jar another user could rewrite or swap would run their code in
+// those JVMs. The jar and every directory above it must be owned by root
+// or the caller and not writable by group or others — a directory with
+// the sticky bit (/tmp) excepted, since nobody else may rename or remove
+// the caller's entry there. The resolved path is what the JVM gets, so a
+// symlink cannot be re-pointed after the check.
+func trustedAgent(agent string) (string, error) {
+	abs, err := filepath.Abs(agent)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", err
+	}
+	if st, err := os.Stat(resolved); err != nil || !st.Mode().IsRegular() {
+		return "", errors.New("not a file")
+	}
+	euid := uint32(os.Geteuid())
+	for p := resolved; ; p = filepath.Dir(p) {
+		var st unix.Stat_t
+		if err := unix.Lstat(p, &st); err != nil {
+			return "", err
+		}
+		if st.Uid != 0 && st.Uid != euid {
+			return "", fmt.Errorf("%s belongs to uid %d, neither root nor the caller", p, st.Uid)
+		}
+		sticky := st.Mode&unix.S_IFMT == unix.S_IFDIR && st.Mode&unix.S_ISVTX != 0
+		if st.Mode&0o022 != 0 && !sticky {
+			return "", fmt.Errorf("%s is writable by group or others", p)
+		}
+		if p == "/" {
+			return resolved, nil
+		}
+	}
 }
 
 // loadAgent loads the agent into pid with its ring in spool and returns
@@ -193,6 +232,13 @@ func (s *session) attachAgents(ctx context.Context, agent, spool string, stderr 
 				_, _ = fmt.Fprintf(stderr, "iormesh: %s\n", l)
 			}
 			return s.java.poll()
+		case <-ctx.Done():
+			// A signal during the loads: stop waiting for them (they end
+			// on the same ctx; notes is buffered, so the goroutine never
+			// blocks). nil, not ctx.Err(): traceLoop sees the done ctx
+			// and ends the trace as stop, which an error would turn into
+			// error.
+			return nil
 		}
 	}
 }

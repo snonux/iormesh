@@ -90,7 +90,9 @@ the JVM's own socket: the tracer still listens on nothing.
   gid) are its own, or root. `iormesh` runs as root, so it reaches
   a JVM of any user — but the agent then runs as that user: the
   jar must be readable by it (`/opt/iormesh`, not a mode-0700
-  home directory); the spool (mode 1733) is writable by all.
+  home directory) and, since root loads it into every user's JVM,
+  changeable by nobody but root (see "Safety"); the spool (mode
+  1733) is writable by all.
 - **Containers.** Paths are resolved inside the JVM's mount
   namespace: the jar and the spool must exist there under the
   same names. Attaching into containers is M7's (decision #14).
@@ -114,14 +116,32 @@ runs answers it with a thread dump on its stdout, so the tracer:
   (a recycled pid is never signalled), and removes its trigger
   file afterwards. A socket a `/tmp` cleaner deleted under a
   running listener gets the signal too — a thread dump, as with
-  `jcmd`;
-- connects only to a socket owned by the JVM's uid (or root): a
-  socket planted in a shared `/tmp` by another user is refused;
+  `jcmd`. A trigger file that is there already is used only if it
+  is a regular file of root or the JVM's user; anything else (a
+  planted symlink, another user's file) refuses the attach before
+  any signal;
+- sends the load request only when the connected peer is the
+  target process itself: the kernel's `SO_PEERCRED` must name the
+  target's pid and effective uid. The socket's path is the
+  target's to point anywhere — a symlink to a root JVM's socket
+  is refused, whatever the path's owner;
 - bounds the whole attach by `-timeout` (default 10 s; `run
   -agent` uses 10 s per JVM, while it keeps reading the BPF
   stream). Giving up never touches the JVM again, but a load the
   JVM already started still completes inside it — a running
   `run -spool` then picks up its ring at the next scan.
+
+The tracer runs as root and the target owns every path of the
+handshake, so it also never lets the target steer it into the
+host's tree: the JVM's working directory and `/tmp` are opened
+as directory fds — `/tmp` with `openat2`'s `RESOLVE_IN_ROOT`,
+refusing a `/tmp` that is a symlink — and the trigger file is
+created (`O_EXCL|O_NOFOLLOW`), checked and removed relative to
+those fds, never re-resolved by path. And it loads only an agent
+jar nobody else can change: the jar and every directory above it
+must belong to root or the caller and not be writable by group or
+others (a sticky directory such as `/tmp` excepted); the JVM gets
+the jar's resolved real path.
 
 ## Checked JDKs
 

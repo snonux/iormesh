@@ -298,7 +298,14 @@ the tests need root like the rest of the suite.
 `/proc` and listener: the trigger file and the one SIGQUIT, no
 signal to a running listener, a process that is no JVM, has no
 SIGQUIT handler or disables the attach mechanism, a planted
-non-socket, and both timeouts.
+non-socket, and both timeouts; and the confused-deputy cases
+(`safety_test.go`): a peer of another pid or uid
+(`SO_PEERCRED`), a symlink at the socket path, a symlinked
+`/tmp` in the JVM's root, an existing trigger file (the JVM
+user's: used and left alone; a planted symlink: refused
+unsignalled). `internal/cli` checks the agent-jar trust rule
+(`TestTrustedAgent`). The integration tests copy the jar into a
+root-owned directory for it.
 
 ## Performance baselines
 

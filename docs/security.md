@@ -50,9 +50,17 @@ truth.
   `run -agent` and `iormesh attach` create a trigger file in the
   JVM's working directory (or `/tmp`), send it one SIGQUIT — only
   if it maps `libjvm.so` and handles the signal, through a pidfd
-  — and connect to its own attach socket, refused unless the
-  socket belongs to the JVM's uid or root. As root the tracer
-  reaches every user's JVM, whose agent then runs as that user.
+  — and connect to its own attach socket; the request goes out
+  only if the connected peer is the target pid with its euid
+  (`SO_PEERCRED`), so a socket path the target pointed at another
+  process — a root JVM — is refused. The target's directories are
+  held as fds (`/tmp` via `openat2` `RESOLVE_IN_ROOT`, no
+  symlinks), so its planted symlinks never lead root into the
+  host's tree. As root the tracer reaches every user's JVM, whose
+  agent then runs as that user — and root's own JVMs too, so the
+  agent jar must be changeable by nobody but root or the caller:
+  the jar and each directory above it owned by them and not
+  group- or other-writable (sticky directories excepted).
   Details in [java-attach.md](java-attach.md).
 - **Bounded by design.** Sessions end after 4h by default
   (enforced twice — by the tracer and by its systemd unit) and

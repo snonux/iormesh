@@ -30,6 +30,14 @@
 // context; giving up never touches the target again, though a load the
 // JVM already started then still completes inside it.
 //
+// Safety, since the tracer is root and the target owns every path of the
+// handshake (a confused deputy otherwise): the JVM's working directory
+// and /tmp are held as directory fds, /tmp opened with openat2's
+// RESOLVE_IN_ROOT and no symlinks, and every file in them is created,
+// checked and removed relative to those fds (dirs.go). The request is
+// sent only after SO_PEERCRED showed the connected peer is the target's
+// pid with its euid (checkPeer), whatever the socket's path led to.
+//
 // The JVM checks the attacher's credentials itself: the peer's effective
 // uid (and gid) must be its own, or root. A root tracer therefore
 // reaches every JVM on the host (S1, Experiment 4); a non-root caller

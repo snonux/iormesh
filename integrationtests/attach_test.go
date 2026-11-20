@@ -48,7 +48,7 @@ type liveAttachRun struct {
 func TestJavaLiveAttach(t *testing.T) {
 	enableParallelIfRequested(t)
 	h := newHarness(t)
-	h.AttachAgent = absPath(t, agentJarDefault)
+	h.AttachAgent = trustedAgentJar(t)
 	h.Spool = filepath.Join(h.Dir, "spool")
 	run := judge(t, func() (liveAttachRun, error) { return traceLiveAttach(h) })
 	assertOnlyTracedPIDs(t, run.Trace.Events, run.pids)
@@ -131,7 +131,7 @@ func assertAttachSplit(t *testing.T, events []schema.Event, pid uint32, attachNS
 func TestJavaLiveAttachAtStart(t *testing.T) {
 	enableParallelIfRequested(t)
 	h := newHarness(t)
-	h.AttachAgent = absPath(t, agentJarDefault)
+	h.AttachAgent = trustedAgentJar(t)
 	h.AgentAtStart = true
 	h.Spool = filepath.Join(h.Dir, "spool")
 	var w *Workload
@@ -186,7 +186,7 @@ func TestJavaAttachDynamicLoading(t *testing.T) {
 // halves and judges the load (wantLoad), the warning (only a default
 // JVM's) and the JVM's clean exit either way.
 func checkAttach(t *testing.T, java, flag string, wantLoad bool) {
-	h := newAttachHarness(t, t.TempDir(), absPath(t, agentJarDefault))
+	h := newAttachHarness(t, t.TempDir(), trustedAgentJar(t))
 	h.Java = java
 	if flag != "" {
 		h.JVMFlags = []string{flag}
@@ -199,15 +199,17 @@ func checkAttach(t *testing.T, java, flag string, wantLoad bool) {
 }
 
 // checkAttachOtherUID: the JVM runs as nobody, the attacher as root (the
-// test binary). Both jars are copied where nobody can read them.
+// test binary). Both jars are copied into a directory the user nobody
+// can read; its sticky bit keeps the tracer's agent-jar check satisfied
+// (nobody may create files there, not replace root's).
 func checkAttachOtherUID(t *testing.T) {
 	requireRootForProbe(t) // the attacher must be root to reach another uid
-	shared, err := os.MkdirTemp("", "iormesh-attach-uid-")
+	shared, err := os.MkdirTemp("/tmp", "iormesh-attach-uid-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(shared) })
-	if err := os.Chmod(shared, 0o777); err != nil {
+	if err := os.Chmod(shared, 0o777|os.ModeSticky); err != nil {
 		t.Fatal(err)
 	}
 	agent := copyReadable(t, absPath(t, agentJarDefault), shared)
@@ -278,6 +280,23 @@ func attachBetweenHalves(t *testing.T, h *Harness, wantLoad bool) string {
 		t.Fatalf("the JVM did not finish cleanly after the attach: %v", err)
 	}
 	return w.proc.stderr.String()
+}
+
+// trustedAgentJar copies iormesh-agent.jar into a fresh root-owned
+// directory under /tmp: the tracer loads only a jar that nobody but root
+// or the caller can change, up its whole path (cli.trustedAgent), and the
+// build's copy lies in the developer's checkout.
+func trustedAgentJar(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "iormesh-agent-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return copyReadable(t, absPath(t, agentJarDefault), dir)
 }
 
 // copyReadable copies src into dir, readable by everyone.

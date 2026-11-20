@@ -2958,12 +2958,17 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
     agent's `agentmain` existed but nothing loaded it: S1 used a
     throwaway `Attach.java`. `internal/javaattach` speaks
     HotSpot's attach protocol from Go — no JDK on the tracer
-    host, every step under a context deadline: if
-    `/proc/<pid>/root/tmp/.java_pid<nspid>` is missing, it
-    creates `.attach_pid<nspid>` in `/proc/<pid>/cwd` (else the
-    JVM's `/tmp`; `O_EXCL|O_NOFOLLOW`), sends one SIGQUIT
-    through a pidfd and polls for the socket; checks the socket
-    is one and owned by the JVM's euid or root; sends protocol
+    host, every step under a context deadline. It opens the
+    JVM's cwd and its root's `/tmp` as directory fds (`/tmp` by
+    `openat2` with `RESOLVE_IN_ROOT|RESOLVE_NO_SYMLINKS`) and
+    works relative to them only; if `.java_pid<nspid>` is
+    missing there, it creates `.attach_pid<nspid>` in the cwd
+    (else `/tmp`; `O_EXCL|O_NOFOLLOW`, an existing one accepted
+    only as a regular file of root or the JVM's user), sends one
+    SIGQUIT through a pidfd and polls for the socket; checks it
+    is a socket, connects through `/proc/self/fd/<tmp>/…` and
+    refuses unless `SO_PEERCRED` names the target's pid and euid
+    (the security review's confused-deputy fixes); sends protocol
     1's `load instrument false <jar>=spool=<dir>` and judges the
     reply (status line, then `return code: 0`, or the JVM's
     message — `Dynamic agent loading is not enabled` becomes

@@ -13,17 +13,23 @@ import (
 	"time"
 )
 
-const (
-	fakePID   = 4242
-	fakeNSPID = 7
-)
+// fakeNSPID is the fake JVM's pid inside its own pid namespace.
+const fakeNSPID = 7
 
-// jvmStatus is a JVM's status file: the test's own euid (the owner its
-// fake socket gets), pid 7 inside its pid namespace, SIGQUIT (bit 2)
-// caught.
-var jvmStatus = "Name:\tjava\nPid:\t4242\nNSpid:\t4242\t7\n" +
-	"Uid:\t0\t" + strconv.Itoa(os.Geteuid()) + "\t0\t0\nGid:\t0\t0\t0\t0\n" +
-	"SigIgn:\t0000000000000002\nSigCgt:\t2000000181005ccd\n"
+// fakePID is the fake JVM's pid as the tracer sees it: the test process
+// itself, which plays the JVM's attach listener, so SO_PEERCRED names it.
+var fakePID = os.Getpid()
+
+// jvmStatus is a JVM's status file: the test's own pid and euid (what
+// SO_PEERCRED reports of its listener), pid 7 inside its pid namespace,
+// SIGQUIT (bit 2) caught.
+var jvmStatus = statusOf(fakePID, os.Geteuid())
+
+func statusOf(pid, euid int) string {
+	return "Name:\tjava\nPid:\t" + strconv.Itoa(pid) + "\nNSpid:\t" + strconv.Itoa(pid) + "\t7\n" +
+		"Uid:\t0\t" + strconv.Itoa(euid) + "\t0\t0\nGid:\t0\t0\t0\t0\n" +
+		"SigIgn:\t0000000000000002\nSigCgt:\t2000000181005ccd\n"
+}
 
 const jvmMaps = "7f0000000000-7f0000001000 r-xp 00000000 fd:01 123 /usr/lib/jvm/java-25/lib/server/libjvm.so\n"
 
@@ -42,8 +48,8 @@ func TestParseStatus(t *testing.T) {
 		t.Errorf("-Xrs status: %+v, %v; want SIGQUIT not caught", info, err)
 	}
 	// No NSpid (kernels before 4.1): the Pid line.
-	old := strings.Replace(jvmStatus, "NSpid:\t4242\t7\n", "", 1)
-	if info, err := parseStatus([]byte(old)); err != nil || info.nspid != fakePID {
+	old := strings.Replace(jvmStatus, "NSpid:\t"+strconv.Itoa(fakePID)+"\t7\n", "", 1)
+	if info, err := parseStatus([]byte(old)); err != nil || int(info.nspid) != fakePID {
 		t.Errorf("status without NSpid: %+v, %v; want nspid %d", info, err, fakePID)
 	}
 	if _, err := parseStatus([]byte("Name:\tx\n")); err == nil {
@@ -112,7 +118,7 @@ func (p fakeProc) attacher(signal func(uint32) error) Attacher {
 }
 
 func request() Request {
-	return Request{PID: fakePID, Jar: "/opt/iormesh-agent.jar", Options: "spool=/s"}
+	return Request{PID: uint32(fakePID), Jar: "/opt/iormesh-agent.jar", Options: "spool=/s"}
 }
 
 // TestLoadStartsListener: no socket yet, so the trigger file is created
@@ -195,7 +201,7 @@ func TestLoadDisabledByEnvironment(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(p.dir, "environ"), []byte(env), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if !attachDisabled(p.root, fakePID) {
+	if !attachDisabled(p.root, uint32(fakePID)) {
 		t.Error("JAVA_TOOL_OPTIONS' flag not seen")
 	}
 }

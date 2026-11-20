@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"path/filepath"
 	"strconv"
 	"syscall"
@@ -33,6 +32,13 @@ var (
 	ErrNoQuitHandler = errors.New("the JVM has no SIGQUIT handler (still starting, or -Xrs)")
 	// ErrAttachDisabled: the JVM runs with -XX:+DisableAttachMechanism.
 	ErrAttachDisabled = errors.New("the JVM runs with " + disableAttachFlag)
+	// ErrWrongPeer: the process behind the attach socket is not the
+	// target — its socket path led elsewhere (a planted symlink).
+	ErrWrongPeer = errors.New("the attach socket's peer is not the target JVM")
+	// ErrForeignTrigger: a trigger file is there already but neither
+	// root's nor the JVM's user's; the JVM would ignore it and answer
+	// SIGQUIT with a thread dump, so no signal is sent.
+	ErrForeignTrigger = errors.New("a trigger file of another user is in the way")
 )
 
 // Request names the agent to load and the JVM to load it into.
@@ -107,39 +113,45 @@ func (a Attacher) check(pid uint32) (procInfo, error) {
 }
 
 // connect returns a connection to the JVM's attach socket, starting the
-// JVM's attach listener first if the socket does not exist yet.
+// JVM's attach listener first if the socket does not exist yet. Every
+// path inside the target is reached through directory fds (jvmDirs), so
+// a symlink the target planted never leads the tracer, root, into the
+// host's tree; and the connected peer must be the target process itself
+// (checkPeer) — the socket's path is the target's to point anywhere.
 func (a Attacher) connect(ctx context.Context, pid uint32, info procInfo) (net.Conn, error) {
-	sock := a.socketPath(pid, info)
-	if _, err := os.Lstat(sock); errors.Is(err, os.ErrNotExist) {
-		if err := a.startListener(ctx, pid, info, sock); err != nil {
+	dirs, err := a.openDirs(pid)
+	if err != nil {
+		return nil, err
+	}
+	defer dirs.close()
+	name := ".java_pid" + strconv.FormatUint(uint64(info.nspid), 10)
+	if _, err := dirs.statTmp(name); errors.Is(err, unix.ENOENT) {
+		if err := a.startListener(ctx, pid, info, dirs, name); err != nil {
 			return nil, err
 		}
 	}
-	if err := checkSocket(sock, info.euid); err != nil {
+	if err := dirs.checkSocket(name); err != nil {
 		return nil, err
 	}
 	var d net.Dialer
-	conn, err := d.DialContext(ctx, "unix", sock)
+	conn, err := d.DialContext(ctx, "unix", dirs.tmpPath(name))
 	if err != nil {
-		return nil, fmt.Errorf("connect %s: %w", sock, err)
+		return nil, fmt.Errorf("connect %s: %w", name, err)
+	}
+	if err := checkPeer(conn, pid, info.euid); err != nil {
+		return nil, errors.Join(err, conn.Close())
 	}
 	return conn, nil
 }
 
-// socketPath is /tmp/.java_pid<nspid> in the JVM's root: HotSpot puts it
-// in /tmp whatever java.io.tmpdir says.
-func (a Attacher) socketPath(pid uint32, info procInfo) string {
-	return filepath.Join(procPath(a.ProcRoot, pid, "root"), "tmp",
-		".java_pid"+strconv.FormatUint(uint64(info.nspid), 10))
-}
-
 // startListener creates the trigger file, sends the one SIGQUIT and waits
 // for the socket; the trigger file is removed again either way.
-func (a Attacher) startListener(ctx context.Context, pid uint32, info procInfo, sock string) error {
+func (a Attacher) startListener(ctx context.Context, pid uint32, info procInfo, dirs jvmDirs,
+	sock string) error {
 	if !info.quitCaught {
 		return ErrNoQuitHandler
 	}
-	remove, err := a.createTrigger(pid, info)
+	remove, err := dirs.createTrigger(".attach_pid"+strconv.FormatUint(uint64(info.nspid), 10), info.euid)
 	if err != nil {
 		return err
 	}
@@ -147,42 +159,15 @@ func (a Attacher) startListener(ctx context.Context, pid uint32, info procInfo, 
 	if err := a.Signal(pid); err != nil {
 		return fmt.Errorf("SIGQUIT: %w", err)
 	}
-	return waitSocket(ctx, sock)
-}
-
-// createTrigger creates .attach_pid<nspid> in the JVM's working directory
-// or, when that is not writable, in its /tmp — where HotSpot's SIGQUIT
-// handler looks, in that order. O_EXCL|O_NOFOLLOW: the directories
-// belong to the target, so a planted symlink is never followed and a
-// file not created here is never removed. The JVM accepts a trigger
-// owned by its own uid or root.
-func (a Attacher) createTrigger(pid uint32, info procInfo) (remove func(), err error) {
-	name := ".attach_pid" + strconv.FormatUint(uint64(info.nspid), 10)
-	var errs []error
-	for _, dir := range []string{procPath(a.ProcRoot, pid, "cwd"),
-		filepath.Join(procPath(a.ProcRoot, pid, "root"), "tmp")} {
-		path := filepath.Join(dir, name)
-		fd, err := unix.Open(path, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|
-			unix.O_CLOEXEC|unix.O_NONBLOCK, 0o600)
-		if errors.Is(err, unix.EEXIST) {
-			return func() {}, nil // another attacher's: it serves us too
-		}
-		if err != nil {
-			errs = append(errs, fmt.Errorf("trigger %s: %w", path, err))
-			continue
-		}
-		_ = unix.Close(fd)
-		return func() { _ = os.Remove(path) }, nil
-	}
-	return nil, errors.Join(errs...)
+	return waitSocket(ctx, dirs, sock)
 }
 
 // waitSocket polls for the socket until ctx ends.
-func waitSocket(ctx context.Context, sock string) error {
+func waitSocket(ctx context.Context, dirs jvmDirs, sock string) error {
 	tick := time.NewTicker(socketPoll)
 	defer tick.Stop()
 	for {
-		if _, err := os.Lstat(sock); err == nil {
+		if _, err := dirs.statTmp(sock); err == nil {
 			return nil
 		}
 		select {
@@ -193,19 +178,34 @@ func waitSocket(ctx context.Context, sock string) error {
 	}
 }
 
-// checkSocket verifies the socket is one and belongs to the JVM's uid (or
-// root): /tmp is shared, and another user could plant a socket there to
-// receive the request.
-func checkSocket(sock string, euid uint32) error {
-	var st unix.Stat_t
-	if err := unix.Lstat(sock, &st); err != nil {
-		return fmt.Errorf("attach socket: %w", err)
+// checkPeer verifies, from the kernel's SO_PEERCRED, that the process
+// listening behind the socket is the target (pid and effective uid, both
+// as the tracer's namespaces see them). A path check cannot: the target
+// controls the socket's path and could swap it for a symlink to another
+// process's socket — a root JVM's, say — between any check and the
+// connect.
+func checkPeer(conn net.Conn, pid, euid uint32) error {
+	uc, ok := conn.(*net.UnixConn)
+	if !ok {
+		return errors.New("attach socket: not a unix connection")
 	}
-	if st.Mode&unix.S_IFMT != unix.S_IFSOCK {
-		return fmt.Errorf("attach socket %s is not a socket", sock)
+	raw, err := uc.SyscallConn()
+	if err != nil {
+		return err
 	}
-	if st.Uid != euid && st.Uid != 0 {
-		return fmt.Errorf("attach socket %s belongs to uid %d, not the JVM's %d", sock, st.Uid, euid)
+	var cred *unix.Ucred
+	var credErr error
+	if err := raw.Control(func(fd uintptr) {
+		cred, credErr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
+	}); err != nil {
+		return err
+	}
+	if credErr != nil {
+		return fmt.Errorf("attach socket: peer credentials: %w", credErr)
+	}
+	if cred.Pid != int32(pid) || cred.Uid != euid {
+		return fmt.Errorf("%w: pid %d uid %d, want pid %d uid %d", ErrWrongPeer,
+			cred.Pid, cred.Uid, pid, euid)
 	}
 	return nil
 }
