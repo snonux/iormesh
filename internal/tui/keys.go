@@ -21,6 +21,7 @@ const bigJump = 1 << 30
 // handleKey applies one key press.
 func (m *Model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	key := k.String()
+	m.note = "" // a note answers the key before; the next key clears it
 	if key == "ctrl+c" {
 		return tea.Quit
 	}
@@ -174,16 +175,19 @@ func (m *Model) open() {
 	}
 }
 
-// openThread opens the story of step i's own thread.
+// openThread opens the story of step i's own thread; without one it
+// says why in the footer instead of doing nothing silently.
 func (m *Model) openThread(i int) {
 	c, _ := m.conversation()
 	s := c.Steps[i]
-	if s.Lane < 0 || s.Lane >= len(c.Lifelines) {
+	if s.Lane < 0 || s.Lane >= len(c.Lifelines) || c.Lifelines[s.Lane].Thread == "" {
+		m.note = "no thread story: no traced thread on this step's side"
 		return
 	}
 	lane := c.Lifelines[s.Lane]
 	t := slices.IndexFunc(m.vm.Threads, func(t viewmodel.ThreadStory) bool { return t.Lifeline == lane })
 	if t < 0 {
+		m.note = "no thread story: the model holds none for this lifeline"
 		return
 	}
 	m.push(scrThreads)
@@ -191,15 +195,17 @@ func (m *Model) openThread(i int) {
 }
 
 // openStory opens the conversation of story i's newest entry, at that
-// step.
+// step, or notes why it cannot.
 func (m *Model) openStory(i int) {
 	es := m.vm.Threads[i].Entries
 	if len(es) == 0 {
+		m.note = "no conversation: the story kept no entries"
 		return
 	}
 	e := es[len(es)-1]
 	c := slices.IndexFunc(m.vm.Conversations, func(c viewmodel.Conversation) bool { return c.ID == e.Conversation })
-	if c < 0 {
+	if c < 0 { // the entry's conversation is past the model's cap
+		m.note = "no conversation: " + e.Conversation + " is past the model's cap of kept conversations"
 		return
 	}
 	m.conv = c

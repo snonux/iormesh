@@ -4524,8 +4524,9 @@ internal/viewmodel/safe.go # + Safe; StepText, ActText,
   so the TUI and `show` read alike. The model is bounded, so rows
   are rebuilt per frame — no cache to fall out of step.
 - **Frames.** `Render` is a pure function of the model, the size
-  and the keys: title, tab bar, body, footer, exactly the
-  terminal's height; `fit` cuts each line with `ansi.Truncate`
+  and the keys: title, tab bar, body, footer — from the 20×6
+  minimum up exactly the terminal's size (below it, one line
+  saying it is too small); `fit` cuts each line with `ansi.Truncate`
   (escape- and width-aware) and pads it; details wrap with
   `ansi.Wrap`. Styles (Lip Gloss) are applied after the cut,
   only to safe text. `Init` asks for nothing; the size arrives as
@@ -4542,9 +4543,15 @@ internal/viewmodel/safe.go # + Safe; StepText, ActText,
   `ESC[2J` never reach the frame raw and no control rune does;
   the walk service → conversations → sequence → step (stack,
   `query -ref`) → thread → conversation and `esc` back; edge scope
-  and filter; byte-identical frames for the same keys; an empty
-  model; one `teatest` program run. `internal/ctl/tui_test.go` —
-  no terminal (exit 1, before reading), and the microservices
+  and filter; `⏎` without a target noting why; byte-identical
+  frames for the same keys; an empty model; one `teatest`
+  program run. `internal/viewmodel/safe_test.go` — every exported
+  string of a model filled by reflection (structs, slices, maps,
+  pointers) with an escape sequence, none left after `Safe`, so a
+  field added without its line in `safe.go` fails.
+  `internal/ctl/tui_test.go` — no terminal (exit 1, before
+  reading: a missing `-builds` directory still gets the
+  no-terminal error), and the microservices
   build walked from the services to the rename step's Java stack
   and its thread's story, frames against
   `testdata/tui_{services,sequence}.golden`.

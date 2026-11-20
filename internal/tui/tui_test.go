@@ -296,3 +296,26 @@ func TestProgram(t *testing.T) {
 	}
 	_, _ = io.Copy(io.Discard, tm.FinalOutput(t))
 }
+
+// TestEnterWithoutTarget: ⏎ on a step whose thread has no story, or on
+// a story whose conversation the model's cap dropped, stays put and
+// says why in the footer; the next key clears the note.
+func TestEnterWithoutTarget(t *testing.T) {
+	vm := fixture()
+	vm.Threads[1].Entries[1].Conversation = "0099" // past the cap
+	vm.Threads = vm.Threads[1:]                    // gateway/http-1 has no story
+	m := New(vm)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	press(m, "4", "enter")
+	if m.cur != scrSequence || !strings.Contains(plain(m), "no thread story") {
+		t.Fatalf("step without a story:\n%s", plain(m))
+	}
+	press(m, "5", "enter")
+	if m.cur != scrThreads || !strings.Contains(plain(m), "0099 is past the model's cap") {
+		t.Fatalf("story past the cap:\n%s", plain(m))
+	}
+	press(m, "down")
+	if strings.Contains(plain(m), "past the model's cap") {
+		t.Fatal("the note outlived the next key")
+	}
+}

@@ -84,7 +84,10 @@ type Model struct {
 	detailFocus bool
 	filtering   bool
 	help        bool
-	st          styles
+	// note is a one-key message in the footer: why enter found nothing
+	// to open, so a key that does nothing never does so silently.
+	note string
+	st   styles
 }
 
 // New returns the explorer over m, made terminal-safe once here.

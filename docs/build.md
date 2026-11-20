@@ -86,8 +86,10 @@ the module's one interactive-UI dependency set, pinned in
 go.mod/go.sum at the versions ior uses: `charm.land/bubbletea/v2`
 v2.0.1, `charm.land/lipgloss/v2` v2.0.0 and
 `github.com/charmbracelet/x/ansi` v0.11.7, with
-`github.com/charmbracelet/x/exp/teatest/v2` for the tests only.
-All are pure Go, so `iormeshctl` stays cgo-free —
+`github.com/charmbracelet/x/exp/teatest/v2` for the tests only;
+their indirect charmbracelet modules (`ultraviolet`,
+`colorprofile`, `x/term`, …) sit at ior's versions too. All are
+MIT-licensed and pure Go, so `iormeshctl` stays cgo-free —
 `internal/buildgate`'s `TestControllerIsCgoFree` and
 `TestControllerCrossCompiles` (darwin/arm64, `CGO_ENABLED=0`)
 check every package it links. A dependency bump is a deliberate

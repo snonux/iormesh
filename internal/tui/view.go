@@ -107,6 +107,8 @@ func (m *Model) footer() string {
 		f = "/" + termsafe.String(p.filter) + "_   ⏎ keep · esc clear"
 	case m.help:
 		f = "any key closes the help"
+	case m.note != "":
+		f = m.note + "   (any key goes on)"
 	default:
 		f = "↑↓ move · ⏎ open · esc back · tab detail · / filter · 1-7 screens · ? help · q quit"
 		if p.filter != "" {

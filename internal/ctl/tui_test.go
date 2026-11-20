@@ -1,6 +1,7 @@
 package ctl
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,7 +14,8 @@ import (
 )
 
 // TestTUIRefusesWithoutTerminal: without a terminal tui exits 1 with a
-// message pointing at show, before it reads anything.
+// message pointing at show, before it reads anything: a missing build
+// directory still gets the no-terminal error, not a read error.
 func TestTUIRefusesWithoutTerminal(t *testing.T) {
 	f := newBuildFixture(t)
 	f.e.terminal = func() bool { return false }
@@ -21,8 +23,14 @@ func TestTUIRefusesWithoutTerminal(t *testing.T) {
 		t.Fatal("the explorer ran without a terminal")
 		return nil
 	}
-	if code := f.run("tui"); code != exitError || !strings.Contains(f.stderr.String(), "iormeshctl show") {
-		t.Fatalf("exit %d, stderr %q", code, f.stderr)
+	// No build exists in the fixture, and -builds names a directory that
+	// does not exist either: had tui read first, it would report that.
+	missing := filepath.Join(t.TempDir(), "no-builds")
+	for _, args := range [][]string{{"tui"}, {"tui", "-builds", missing}} {
+		code := f.run(args...)
+		if code != exitError || !strings.Contains(f.stderr.String(), errNoTerminal.Error()) {
+			t.Fatalf("%v: exit %d, stderr %q", args, code, f.stderr)
+		}
 	}
 	if code := f.run("tui", "extra"); code != exitUsage {
 		t.Fatalf("tui with an argument: exit %d", code)

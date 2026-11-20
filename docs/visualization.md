@@ -283,10 +283,16 @@ reads only the model, never the store); `e` is not built —
 `iormeshctl show VIEW` writes any view as text; `bubbles` is not
 needed (the list and the filter are a few lines each). The whole model
 goes through `viewmodel.Safe` (termsafe) once on load, so a
-server's escape sequence prints Go-quoted on every screen; every
-line is cut to the terminal's width (ANSI- and wide-rune-aware)
-and a frame is exactly its height; frames are a pure function of
-model, size and keys.
+server's escape sequence prints Go-quoted on every screen (a
+reflection test fills every string of the model with one and
+checks `Safe` left none). From the 20×6 minimum up a frame is
+exactly the terminal's size — each line cut to its width (ANSI-
+and wide-rune-aware) and padded, exactly its height in lines;
+below the minimum it is one line saying the terminal is too
+small. Frames are a pure function of model, size and keys. When
+`⏎` has nothing to open (a step whose thread has no story, a
+story whose conversation the model's cap dropped) the footer
+says why until the next key.
 
 ## Plain text
 
