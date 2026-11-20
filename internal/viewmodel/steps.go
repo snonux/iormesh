@@ -152,7 +152,10 @@ func (e *emitter) add(s Step, at federate.Stamp, causal bool) {
 // causal when an edge says so; else time-ordered only when the clocks
 // prove the previous instant earlier — one host's clock directly, two
 // hosts' through the merge's clock bounds (federate.Timeline) — and
-// unordered when they cannot. The first step has nothing before it.
+// unordered when they cannot. Only the step right before is compared:
+// a step unordered against it may still be provably after an earlier
+// one. The first step has nothing before it: causal when its own hop is
+// paired, else time-ordered (it is placed by its own stamp).
 func (e *emitter) ordering(at federate.Stamp, causal bool) string {
 	switch {
 	case causal:

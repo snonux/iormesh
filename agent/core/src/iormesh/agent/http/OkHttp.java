@@ -170,6 +170,7 @@ public final class OkHttp implements Library {
         /** The call's original request and the response the chain returned. */
         Request describe(Object req, Object resp) throws Throwable {
             Request r = new Request();
+            r.held = true; // synchronous: see Request.held
             Object u = Handles.call(url, req);
             r.method = nz(Handles.string(method, req));
             r.scheme = nz(Handles.string(scheme, u));

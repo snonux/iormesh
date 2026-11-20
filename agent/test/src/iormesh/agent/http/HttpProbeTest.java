@@ -166,7 +166,7 @@ public final class HttpProbeTest {
                 new Object[] {new FakeResponse(new FakeResponse(null)), self, null, self}, meta);
         equal(List.of("GET", "https", "127.0.0.1", "/a?k=***", "HTTP/2", "", "127.0.0.1:8443",
                 "cookie: ***", "content-length: 5", "etag: 1"), List.of(s), "record strings");
-        equal(8L, meta[2], "a client's request, java.net.http");
+        equal(24L, meta[2], "a client's request, java.net.http (8), held by its thread (16)");
         equal(2L, meta[3], "exchanges: the response and its previous one (a redirect)");
         equal(42L, meta[4], "send's own start kept");
         equal(0L, meta[5], "no request body");

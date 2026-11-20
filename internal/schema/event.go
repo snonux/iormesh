@@ -332,6 +332,15 @@ type HTTP struct {
 	// estimate. Appended in M3 (task wd4).
 	ReqBytes  *uint64 `json:"req_bytes,omitempty" parquet:"req_bytes,optional"`
 	RespBytes *uint64 `json:"resp_bytes,omitempty" parquet:"resp_bytes,optional"`
+	// Held says the recording thread worked on this request alone from
+	// its start to its completion: a synchronous library (the JDK's
+	// HttpServer, a servlet's service, HttpURLConnection,
+	// HttpClient.send, Apache's classic client, OkHttp's call chain).
+	// Absent for Netty, whose event loop serves other channels inside a
+	// request's span, and for an async completion. Only on a held span
+	// may a view place the thread's other calls and file work (task mb4
+	// review). Appended in M5.
+	Held bool `json:"held,omitempty" parquet:"held,optional"`
 }
 
 // Sink receives finished events in seq order. The NDJSON and parquet

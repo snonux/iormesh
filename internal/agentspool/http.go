@@ -52,6 +52,10 @@ type HTTP struct {
 	AsyncMark bool
 	// NetHTTP marks a request sent through java.net.http's HttpClient.
 	NetHTTP bool
+	// Held marks a request the recording thread worked on alone from its
+	// start to its completion — a synchronous library's, never Netty's
+	// event loop nor an async completion (schema HTTP.Held).
+	Held bool
 	// Exchanges is how many HTTP exchanges the request took (≥ 1): more
 	// when the client library followed a redirect or answered an
 	// authentication challenge itself, each a request the server saw.
@@ -82,7 +86,7 @@ func decodeHTTP(rec []byte) (Record, error) {
 		ThreadID: le.Uint64(rec[24:]), KTID: int32(le.Uint32(rec[32:])),
 		Status: int32(le.Uint32(rec[36:])), Server: flags&httpServer != 0,
 		Unordered: flags&httpUnordered != 0, AsyncMark: flags&httpAsyncMark != 0,
-		NetHTTP:   flags&httpNetHTTP != 0,
+		NetHTTP: flags&httpNetHTTP != 0, Held: flags&httpHeld != 0,
 		Exchanges: le.Uint32(rec[52:]), StartMono: le.Uint64(rec[80:]),
 		ReqBytes: int64(le.Uint64(rec[88:])), RespBytes: int64(le.Uint64(rec[96:]))}
 	var otelOK bool

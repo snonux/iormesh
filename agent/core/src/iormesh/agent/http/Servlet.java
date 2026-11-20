@@ -177,6 +177,7 @@ public final class Servlet implements Library {
 
         Request describe(Object req) throws Throwable {
             Request r = new Request();
+            r.held = true; // synchronous: see Request.held
             r.server = true;
             r.method = nz(Handles.string(method, req));
             r.scheme = nz(Handles.string(scheme, req));

@@ -247,6 +247,7 @@ public final class JdkHttpClient implements Library {
         HttpRequest req = resp.request();
         URI u = resp.uri();
         Request r = new Request();
+        r.held = true; // synchronous: see Request.held
         r.netHttp = true;
         r.method = req.method();
         r.scheme = u.getScheme() == null ? "" : u.getScheme();

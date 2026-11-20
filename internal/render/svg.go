@@ -28,6 +28,25 @@ import (
 // column. The cut is marked, never silent.
 const maxLabel = 40
 
+// classes are the CSS classes a drawing may carry. Some come from the
+// data — a node's type, an edge's type or state, a step's ordering — and
+// a hostile graph or model must not write its own attribute text, so
+// every class passes cls: one of these, else "other" (task mb4 review).
+var classes = map[string]bool{
+	"host": true, "process": true, "file": true, "socket": true, "app": true,
+	"runs_on": true, "opened": true, "connected": true, "incarnation": true, "forked": true,
+	"signaled": true, "fused": true, "unresolved": true, "more": true, "title": true, "label": true,
+	"lane": true, "life": true, "note": true, "step": true, "time-ordered": true, "unordered": true,
+}
+
+// cls is c when it is a known class, else "other".
+func cls(c string) string {
+	if classes[c] {
+		return c
+	}
+	return "other"
+}
+
 // svg accumulates one document.
 type svg struct{ b strings.Builder }
 
@@ -50,13 +69,13 @@ func (s *svg) close() []byte {
 
 // rect draws a box.
 func (s *svg) rect(class string, x, y, w, h int) {
-	s.b.WriteString(`<rect class="` + class + `" x="` + strconv.Itoa(x) + `" y="` + strconv.Itoa(y) +
+	s.b.WriteString(`<rect class="` + cls(class) + `" x="` + strconv.Itoa(x) + `" y="` + strconv.Itoa(y) +
 		`" width="` + strconv.Itoa(w) + `" height="` + strconv.Itoa(h) + `"/>` + "\n")
 }
 
 // line draws a segment; arrow ends it in an arrowhead.
 func (s *svg) line(class string, x1, y1, x2, y2 int, arrow bool) {
-	s.b.WriteString(`<line class="` + class + `" x1="` + strconv.Itoa(x1) + `" y1="` + strconv.Itoa(y1) +
+	s.b.WriteString(`<line class="` + cls(class) + `" x1="` + strconv.Itoa(x1) + `" y1="` + strconv.Itoa(y1) +
 		`" x2="` + strconv.Itoa(x2) + `" y2="` + strconv.Itoa(y2) + `"`)
 	if arrow {
 		s.b.WriteString(` marker-end="url(#arrow)"`)
@@ -66,7 +85,7 @@ func (s *svg) line(class string, x1, y1, x2, y2 int, arrow bool) {
 
 // text draws escaped text; anchor is start, middle or end.
 func (s *svg) text(class string, x, y int, anchor, t string) {
-	s.b.WriteString(`<text class="` + class + `" x="` + strconv.Itoa(x) + `" y="` + strconv.Itoa(y) +
+	s.b.WriteString(`<text class="` + cls(class) + `" x="` + strconv.Itoa(x) + `" y="` + strconv.Itoa(y) +
 		`" text-anchor="` + anchor + `">` + esc(t) + "</text>\n")
 }
 

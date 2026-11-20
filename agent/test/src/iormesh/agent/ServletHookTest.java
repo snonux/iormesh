@@ -150,7 +150,7 @@ final class ServletHookTest {
             equal(List.of("GET", "http", "", "/orders/7?token=***", "HTTP/1.1", "127.0.0.1:8080",
                     "[0:0:0:0:0:0:0:1]:40000", "accept: */*", "authorization: ***",
                     "set-cookie: ***"), g.s(), "strings, redacted");
-            equal(new Got(g.s(), 200, 1, true, 0, 5), g, "status, server, own start, sizes");
+            equal(new Got(g.s(), 200, 17, true, 0, 5), g, "status, server+held, start, sizes");
         } finally {
             Hooks.release();
             Files.deleteIfExists(dir);
@@ -173,11 +173,11 @@ final class ServletHookTest {
             equal(List.of(0L, 3L, false, -1L), fields(got.remove(0)), "async: no status, unordered");
             check(serve(c, (q, s) -> { throw new IllegalStateException("x"); }, new Req(),
                     new Resp()), "threw");
-            equal(List.of(0L, 1L, true, -1L), fields(got.remove(0)), "thrown before the reply");
+            equal(List.of(0L, 17L, true, -1L), fields(got.remove(0)), "thrown before the reply");
             Resp sent = new Resp();
             sent.committed = true;
             serve(c, (q, s) -> { throw new IllegalStateException("x"); }, new Req(), sent);
-            equal(List.of(200L, 1L, true, 5L), fields(got.remove(0)), "thrown after the reply");
+            equal(List.of(200L, 17L, true, 5L), fields(got.remove(0)), "thrown after the reply");
             check(got.isEmpty(), "nothing else");
         } finally {
             Hooks.release();

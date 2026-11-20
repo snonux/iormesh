@@ -87,8 +87,12 @@ public final class NettyPairingTest {
                     meta()));
         }
 
+        /** write's exit; a recorded request is never held (Ring.HTTP_HELD, task mb4 review). */
         String out(Object ret, Object msg) {
-            return path(write.apply(args(ret, encoder, msg), meta()));
+            long[] m = meta();
+            String p = path(write.apply(args(ret, encoder, msg), m));
+            check(p == null || (m[Request.M_FLAGS] & 16) == 0, "a Netty request is never held");
+            return p;
         }
 
         private Object[] args(Object ret, Object codec, Object second) {

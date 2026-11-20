@@ -13,15 +13,20 @@ import "time"
 //     events"): the request's bytes went from the one thread to the
 //     other, a causal edge.
 //   - A client request nests in a server request when both ran on the
-//     same kernel thread and the server's span holds the client's: one
-//     thread, one clock, a synchronous call made while handling the
-//     request. A virtual thread's carrier (java.carrier) runs other
-//     virtual threads too, so a carrier request nests nothing.
+//     same kernel thread, the server's span holds the client's, and the
+//     thread worked on each alone (request.owned: http.held — a
+//     synchronous library, never Netty's event loop — on a platform
+//     thread known by name). A virtual thread's carrier (java.carrier)
+//     runs other virtual threads, an event loop other channels, so
+//     such a span nests nothing and owns no file work.
 //   - An unpaired client request (HTTP/2, a lost record) is joined to
 //     an unpaired server request on the same fused connection only when
 //     the merge's clock bounds prove the server's span inside the
-//     client's (federate.Timeline) and each is the other's only such
-//     match; the hop is then time-ordered, not causal.
+//     client's (federate.Timeline), each is the other's only such
+//     match, and no unpaired end of the connection lacks a start; the
+//     hop is then time-ordered, not causal.
+//   - Past MaxRequests, a request starting near the cut joins no hop
+//     (Recorder.edge): its partner may be among the records cut.
 //   - Everything else stays apart: an unpaired client request ends at
 //     its peer, and the server request that may have answered it is a
 //     conversation of its own.

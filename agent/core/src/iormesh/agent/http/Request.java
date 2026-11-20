@@ -56,6 +56,16 @@ final class Request {
     /** Sent through java.net.http's HttpClient (Ring.HTTP_NET_HTTP). */
     boolean netHttp;
     /**
+     * The recording thread did this request's work alone, start to
+     * completion (Ring.HTTP_HELD): a synchronous library — the JDK's
+     * HttpServer exchange, a servlet's service, HttpURLConnection,
+     * HttpClient.send, Apache's classic client, OkHttp's call chain.
+     * Never Netty's, whose event loop serves other channels inside a
+     * request's span, nor an unordered (async) record: a view must not
+     * pin another request's calls or file work on such a span.
+     */
+    boolean held;
+    /**
      * The HTTP exchanges the request took: more than 1 when the library
      * followed a redirect or answered an authentication challenge itself
      * — the server saw each, the caller one request.
@@ -99,8 +109,9 @@ final class Request {
         s.addAll(response);
         meta[M_STATUS] = Math.max(status, 0);
         meta[M_NREQ] = request.size();
-        // Ring.HTTP_SERVER, HTTP_UNORDERED and HTTP_NET_HTTP
-        meta[M_FLAGS] = (server ? 1 : 0) | (unordered ? 2 : 0) | (netHttp ? 8 : 0);
+        // Ring.HTTP_SERVER, HTTP_UNORDERED, HTTP_NET_HTTP and HTTP_HELD
+        meta[M_FLAGS] = (server ? 1 : 0) | (unordered ? 2 : 0) | (netHttp ? 8 : 0)
+                | (held && !unordered ? 16 : 0);
         meta[M_EXCHANGES] = Math.max(exchanges, 1);
         meta[M_START] = unordered ? 0 : Math.max(start, 0);
         meta[M_REQ_BYTES] = reqBytes < 0 ? UNKNOWN : reqBytes;

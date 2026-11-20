@@ -61,13 +61,16 @@ type request struct {
 	thread string
 	// carrier: the I/O of a virtual thread, named by its carrier.
 	carrier bool
-	client  bool // http.host set: the client's end (docs/schema.md)
-	conn    string
-	local   federate.LocalConn
-	reqSeq  uint32
-	method  string
-	path    string
-	status  uint16
+	// held: the recording thread worked on this request alone over its
+	// span (schema HTTP.Held — a synchronous library's request).
+	held   bool
+	client bool // http.host set: the client's end (docs/schema.md)
+	conn   string
+	local  federate.LocalConn
+	reqSeq uint32
+	method string
+	path   string
+	status uint16
 	// start and end are the request's span on its host's wall clock;
 	// hasStart is false when the event carried no latency (sendAsync, a
 	// server exchange closed on another thread): start is then end.
@@ -134,6 +137,7 @@ func (r *Recorder) HTTP(o Origin, ev *schema.Event) {
 		status: ev.HTTP.Status, start: ev.WallNS, end: ev.WallNS + ev.LatencyNS,
 		hasStart: ev.LatencyNS > 0}
 	q.thread, q.carrier, q.stack = javaOf(ev)
+	q.held = ev.HTTP.Held
 	if ev.ConnID != "" {
 		q.local = federate.LocalConn{Host: ev.HostID, ConnID: ev.ConnID}
 		q.conn = cmp.Or(r.renames[q.local], ev.ConnID)
@@ -181,13 +185,14 @@ func (r *Recorder) origin(o Origin) int {
 }
 
 // Plan trims the records, links them and picks the conversations: the
-// MaxConversations newest roots. tl orders instants across hosts by the
-// merge's clock bounds (federate.NewTimeline(Result.Clocks)).
-func (r *Recorder) Plan(tl federate.Timeline) {
+// MaxConversations newest roots. bounds are the merge's clock bounds
+// (Result.Clocks): the Timeline orders instants across hosts by them.
+func (r *Recorder) Plan(bounds []federate.ClockBound) {
 	r.trim()
+	edge := r.edge(bounds)
 	slices.SortFunc(r.reqs, r.refCompare) // stable indices for the links
-	r.tl = tl
-	r.links = link(r.reqs, tl)
+	r.tl = federate.NewTimeline(bounds)
+	r.links = link(r.reqs, r.tl, edge)
 	roots := slices.Clone(r.links.roots)
 	slices.SortFunc(roots, func(a, b int) int {
 		return cmp.Or(cmp.Compare(r.reqs[b].start, r.reqs[a].start), cmp.Compare(a, b))
@@ -200,7 +205,7 @@ func (r *Recorder) Plan(tl federate.Timeline) {
 	r.wanted, r.procs = map[threadKey][]int{}, map[procKey]bool{}
 	for _, root := range roots {
 		r.links.walk(root, func(i int) {
-			if q := r.reqs[i]; !q.client && q.hasStart && !q.carrier {
+			if q := r.reqs[i]; !q.client && q.owned() {
 				r.wanted[q.th] = append(r.wanted[q.th], i)
 				r.procs[procKey{q.th.host, q.th.pid, q.th.inc}] = true
 			}
@@ -212,8 +217,51 @@ func (r *Recorder) Plan(tl federate.Timeline) {
 	}
 }
 
+// edge is the instant before which a kept request joins no hop, 0 when
+// nothing was cut. Past MaxRequests the oldest records are cut by their
+// completion on their own host's clock, so a kept request's partner on
+// another host may be gone — or a duplicate that would have spoiled its
+// pairing. A partner ends after the request starts in true time; on
+// another clock that is at most the widest offset any bound allows
+// earlier. So only a request starting more than that after the oldest
+// kept completion is sure to have every partner kept. Hosts no bound
+// relates are assumed within that offset too: their skew is unknown,
+// and the merge itself fuses only NTP-close hosts (federate
+// DefaultWindow). Call it right after trim, while reqs are newest first.
+func (r *Recorder) edge(bounds []federate.ClockBound) uint64 {
+	if r.cut == 0 || len(r.reqs) == 0 {
+		return 0
+	}
+	var widest int64
+	for _, b := range bounds {
+		if _, ok := b.Width(); ok {
+			lo, hi := b.Interval()
+			widest = max(widest, abs(lo), abs(hi))
+		}
+	}
+	return r.reqs[len(r.reqs)-1].end + uint64(widest) + 1
+}
+
+func abs(v int64) int64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
 // Wants reports whether the file pass has a thread to follow.
 func (r *Recorder) Wants() bool { return len(r.wanted) > 0 }
+
+// owned reports whether q's span belongs to its kernel thread alone, so
+// that the thread's other calls and file work inside it are q's: a
+// start, a held request (no Netty event loop, no async completion), a
+// platform thread known by name (a virtual thread's carrier runs other
+// virtual threads, and a thread whose record never came may be one) and
+// a known tid. Anything less nests nothing — never a guess (task mb4
+// review).
+func (q request) owned() bool {
+	return q.hasStart && q.held && !q.carrier && q.thread != "" && q.th.tid != 0
+}
 
 // threadOf is ev's thread.
 func threadOf(ev *schema.Event) threadKey {

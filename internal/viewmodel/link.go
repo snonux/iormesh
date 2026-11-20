@@ -43,15 +43,18 @@ type links struct {
 }
 
 // link builds the links of reqs (sorted by ref, so indices are stable).
-func link(reqs []request, tl federate.Timeline) links {
+// A request starting before edge joins no hop (see Recorder.Plan: its
+// partner may have been cut); it still counts against the uniqueness
+// of the others' joins.
+func link(reqs []request, tl federate.Timeline, edge uint64) links {
 	n := len(reqs)
 	l := links{partner: make([]int, n), hop: make([]string, n), parent: make([]int, n),
 		children: make([][]int, n)}
 	for i := range n {
 		l.partner[i], l.parent[i] = -1, -1
 	}
-	pairBySeq(reqs, &l)
-	pairByClock(reqs, tl, &l)
+	pairBySeq(reqs, edge, &l)
+	pairByClock(reqs, tl, edge, &l)
 	nest(reqs, &l)
 	for i, q := range reqs {
 		switch {
@@ -69,8 +72,9 @@ func link(reqs []request, tl federate.Timeline) links {
 
 // pairBySeq joins the two ends of each HTTP/1 request: the same merged
 // conn id and req_seq, exactly one client end and one server end.
-// Anything else — a duplicate, a missing end — joins nothing.
-func pairBySeq(reqs []request, l *links) {
+// Anything else — a duplicate, a missing end, an end before edge —
+// joins nothing.
+func pairBySeq(reqs []request, edge uint64, l *links) {
 	type key struct {
 		conn string
 		seq  uint32
@@ -86,7 +90,7 @@ func pairBySeq(reqs []request, l *links) {
 		ends[k] = e
 	}
 	for _, e := range ends {
-		if len(e[0]) == 1 && len(e[1]) == 1 {
+		if len(e[0]) == 1 && len(e[1]) == 1 && reqs[e[0][0]].start >= edge && reqs[e[1][0]].start >= edge {
 			s, c := e[0][0], e[1][0]
 			l.partner[s], l.partner[c], l.hop[c] = c, s, HopPaired
 		}
@@ -97,19 +101,27 @@ func pairBySeq(reqs []request, l *links) {
 // request on the same connection when the clock bounds prove the
 // server's span inside the client's — started after the client's start,
 // ended before its end — and each is the other's only such match. A
-// request without its start proves no span and joins nothing.
-func pairByClock(reqs []request, tl federate.Timeline, l *links) {
+// connection with an unpaired end that proves no span — no start (an
+// async request), or one before edge — joins nothing at all: that end
+// may be the true partner of a span that looks like another's only
+// match (task mb4 review).
+func pairByClock(reqs []request, tl federate.Timeline, edge uint64, l *links) {
 	groups := map[string][2][]int{}
+	tainted := map[string]bool{}
 	for i, q := range reqs {
-		if q.conn == "" || !q.hasStart || l.partner[i] >= 0 {
+		if q.conn == "" || l.partner[i] >= 0 {
 			continue
+		}
+		if !q.hasStart || q.start < edge {
+			tainted[q.conn] = true
 		}
 		g := groups[q.conn]
 		g[btoi(q.client)] = append(g[btoi(q.client)], i)
 		groups[q.conn] = g
 	}
-	for _, g := range groups {
-		if len(g[0]) == 0 || len(g[1]) == 0 || len(g[0]) > maxClockGroup || len(g[1]) > maxClockGroup {
+	for conn, g := range groups {
+		if tainted[conn] || len(g[0]) == 0 || len(g[1]) == 0 ||
+			len(g[0]) > maxClockGroup || len(g[1]) > maxClockGroup {
 			continue
 		}
 		matches := map[int][]int{}
@@ -138,12 +150,14 @@ func inside(tl federate.Timeline, server, client request) bool {
 
 // nest finds each client request's server request on the same thread
 // whose span holds it. The two share one clock, so the containment is a
-// fact; a request without its start, or on a virtual thread's carrier,
-// proves none.
+// fact — but it says the client call was the server's work only when
+// both spans are owned by the thread (request.owned): on a Netty event
+// loop or a virtual thread's carrier, other requests' calls run inside
+// the span too.
 func nest(reqs []request, l *links) {
 	servers := map[threadKey][]int{}
 	for i, q := range reqs {
-		if !q.client && q.hasStart && !q.carrier {
+		if !q.client && q.owned() {
 			servers[q.th] = append(servers[q.th], i)
 		}
 	}
@@ -153,7 +167,7 @@ func nest(reqs []request, l *links) {
 		})
 	}
 	for i, q := range reqs {
-		if !q.client || !q.hasStart || q.carrier {
+		if !q.client || !q.owned() {
 			continue
 		}
 		if p := container(reqs, servers[q.th], q); p >= 0 {

@@ -1362,9 +1362,12 @@ Kubernetes (M7) build on it.
   in, same diagram out.
   *Built (task mb4):* conversations in the view model —
   hops paired by `req_seq`, calls nested by their thread's
-  span, an unpaired hop joined only when the clock bounds
-  prove it (unique, server span inside the client's), each
-  thread's file work interleaved; every step `causal`,
+  span only where the thread held the request alone (the
+  `http.held` flag the agent sets for synchronous libraries,
+  never Netty's event loop or a virtual thread's carrier), an
+  unpaired hop joined only when the clock bounds prove it
+  (unique, server span inside the client's, no startless end
+  on the connection), each thread's file work interleaved; every step `causal`,
   `time-ordered` (clocks prove it: one host's, or two through
   the bounds) or `unordered` (they cannot) — raw cross-host
   timestamps never order a step. `show conversations`, `show

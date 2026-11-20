@@ -34,7 +34,7 @@ func randomEvent(r *rand.Rand, seq uint64) schema.Event {
 			Host: pick(r, "", "h"), Path: pick(r, "", "/x?a=***"), Status: uint16(r.IntN(2) * 200),
 			ReqSeq: uint32(r.IntN(3)), Version: pick(r, "", "HTTP/2"),
 			ReqHeaders: randomList(r, "a: b"), RespHeaders: randomList(r, "c: d"),
-			ReqBytes: maybe(r, r.Uint64()), RespBytes: maybe(r, uint64(0))}
+			ReqBytes: maybe(r, r.Uint64()), RespBytes: maybe(r, uint64(0)), Held: r.IntN(2) == 0}
 	}
 	if r.IntN(4) == 0 {
 		ev.Session = &schema.Session{BootID: "b", FQDN: pick(r, "", "f"), Kernel: "k", Arch: "x86_64"}

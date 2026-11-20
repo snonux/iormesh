@@ -299,6 +299,9 @@ func (j *JavaJoin) httpEvent(h pendingHTTP) (schema.Event, error) {
 		ReqHeaders: j.headers(r.ReqHeaders), RespHeaders: j.headers(r.RespHeaders),
 		ReqBytes: bodySize(r.ReqBytes), RespBytes: bodySize(r.RespBytes)}
 	j.span(&ev, r)
+	// Held only with a span to hold: a request without its start has
+	// none (schema HTTP.Held).
+	ev.HTTP.Held = r.Held && ev.LatencyNS > 0
 	if ev.HTTP.Method == "" {
 		ev.HTTP.Method = "?" // a library that lost its method still made a request
 	}
@@ -312,13 +315,26 @@ func (j *JavaJoin) httpEvent(h pendingHTTP) (schema.Event, error) {
 	if err != nil || stack == nil {
 		return ev, err
 	}
-	java := &schema.Java{Stack: stack}
-	if th, ok := v.threads[r.ThreadID]; ok && !th.Virtual {
-		java.Thread = v.nameAt(th, r.ExitMono)
-	}
-	ev.Attribution, ev.Java = schema.AttributionJava, java
+	ev.Attribution, ev.Java = schema.AttributionJava, j.httpJava(v, r, ev.TID, stack)
 	ev.Otel = otelOf(r.Otel) // with java only: the schema ties otel to it
 	return ev, nil
+}
+
+// httpJava is an http event's Java side, named as setJava names a
+// syscall's: a platform thread by its name; a virtual thread's request
+// flagged carrier and named after the carrier its tid is — the carrier
+// runs other virtual threads inside the request's span, so a view must
+// not pin their work on it (task mb4 review); a thread whose THREAD
+// record never came gets no name, which says just that.
+func (j *JavaJoin) httpJava(v *jvm, r agentspool.HTTP, tid uint32, stack []uint64) *schema.Java {
+	java := &schema.Java{Stack: stack}
+	switch th, ok := v.threads[r.ThreadID]; {
+	case ok && th.Virtual:
+		java.Carrier, java.Thread = true, v.names[int32(tid)]
+	case ok:
+		java.Thread = v.nameAt(th, r.ExitMono)
+	}
+	return java
 }
 
 // span gives an http event the envelope's syscall shape when the record

@@ -761,7 +761,11 @@ the server's exchange was closed by the handler (or the handler
 returned without closing it), the client's `send` returned, the
 connection's response was read — on the thread that did it, with
 its stack as `java` (the handler's or the caller's method; the
-JDK's dispatch when the handler never closed the exchange). `fd`
+JDK's dispatch when the handler never closed the exchange). The
+thread is named as a syscall's join names it: a virtual thread's
+request has `carrier: true` and its carrier's name (task mb4
+review), and a thread whose THREAD record never came has no name.
+`fd`
 is `-1`; `ret` and `bytes` are 0.
 
 Since task wd4 the event spans its request like a syscall: `boot_ns`
@@ -810,6 +814,7 @@ before the reply was committed has no `status`.
 | `version` | string, optional | `HTTP/1.1` or `HTTP/2` (appended in M3) |
 | `req_headers`, `resp_headers` | list of string, optional | `name: value`, names lower-cased, sorted, at most 32 each, redacted (see "Redaction"); HttpURLConnection's request line is no header and never recorded (appended in M3) |
 | `req_bytes`, `resp_bytes` | int, optional | the request's and the response's body size in bytes as the library knew it — absent when it did not, never estimated (appended in M3, task wd4; see below) |
+| `held` | bool, optional | `true` when the recording thread worked on this request alone from its start to its completion: a synchronous library's request (the JDK's HttpServer, a servlet's service, HttpURLConnection, HttpClient `send`, Apache's classic client, OkHttp's call chain) with a start. Absent for Netty, whose event loop serves other channels inside a request's span, for an async completion and without a start. Only on a held span may a view place the thread's other calls and file work (appended in M5, task mb4 review; the agent's HTTP flag 16) |
 
 Body sizes come from what the library itself knows and enforces:
 HttpClient's request publisher length (absent for a streamed body)
@@ -894,9 +899,10 @@ and its connection's client end numbers no more requests from it on
 set.
 
 The agent writes each request as an HTTP record of the ring
-(format version 6: exit stamp, stack id, Java thread id, kernel
+(format version 8: exit stamp, stack id, Java thread id, kernel
 tid, status, the string and request-header counts, flags — server
-or client, unordered (a `sendAsync` completion), java.net.http, or
+or client, unordered (a `sendAsync` completion), java.net.http, held
+(`held`, task mb4 review), or
 a `sendAsync` marker that is no request — the exchange count, the
 OTEL span ids, the start stamp and the two body sizes, then
 method, scheme, host, path, version, local and remote socket

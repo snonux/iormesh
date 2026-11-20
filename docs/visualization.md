@@ -303,18 +303,28 @@ trace, never re-inferred:
   edge (`hop: paired`).
 - **Nesting**: a client request belongs to the server request on
   the same kernel thread whose span holds it — one thread, one
-  clock, so the containment is a fact. A virtual thread's carrier
-  (`carrier`) and a request recorded without its start
-  (`sendAsync`) nest nothing.
+  clock, so the containment is a fact — and only when the thread
+  worked on each request alone: `http.held` (a synchronous
+  library: the JDK's HttpServer, a servlet, HttpURLConnection,
+  HttpClient.send, Apache's classic client, OkHttp's call chain),
+  a platform thread known by name, a start. Netty's event loop
+  serves other channels inside a request's span and a virtual
+  thread's carrier (`carrier`) other virtual threads; a thread
+  whose record never came may be either. Such spans nest nothing
+  and own no file work.
 - **Clock join**: an unpaired client request (HTTP/2, a lost
   record) and an unpaired server request on the same fused
   connection are joined only when the merge's clock bounds
   (`federate.Timeline`) prove the server's span inside the
-  client's and each is the other's only such match (`hop:
-  clock`, the arrows time-ordered). A bound too wide, no bound or
-  two candidates: the client's step ends at its peer (`hop:
-  unpaired`) and the server request is a conversation of its own,
-  named after its traced caller or `(untraced)`.
+  client's, each is the other's only such match and no unpaired
+  end of the connection lacks a start (an async request might be
+  the true partner) — `hop: clock`, the arrows time-ordered. A
+  bound too wide, no bound, two candidates or a startless end:
+  the client's step ends at its peer (`hop: unpaired`) and the
+  server request is a conversation of its own, named after its
+  traced caller or `(untraced)`. Once records were cut (past
+  2¹⁸), a request starting before the oldest kept completion plus
+  the widest clock offset joins no hop: its partner may be cut.
 - **File work**: a server request's thread's file operations in
   its span — open/create, read and write (path by the fd's open,
   offset when given), rename, unlink, mkdir, link/symlink,
@@ -328,8 +338,11 @@ the list: `causal` (thread order or a paired send→receive),
 `time-ordered` (no edge, but the timestamps prove it — one host's
 clock, or two hosts' through the clock bounds), or `unordered`
 (neither: no bound covers the two hosts or the instant, or they lie
-closer than the bound is wide). Raw timestamps of two hosts never
-order anything; the list's own order of conversations (by the
+closer than the bound is wide). Only the step right before is
+compared: a step unordered against it may still be provably after
+an earlier one. The first step, with nothing before it, is `causal`
+when its own hop is paired and `time-ordered` otherwise. Raw
+timestamps of two hosts never order anything; the list's own order of conversations (by the
 entering request's start) is presentation only. Steps differ from
 the sketch above: `host`, `carrier` and `hop` are added, there is no
 `note` kind, a stack is at most 12 frames, and `ref` is
@@ -350,7 +363,8 @@ processes, files — and the connections; unresolved connections
 dashed, 200 nodes a column, the rest counted) and
 `sequence/<ID>.svg` per conversation (lifelines in first-appearance
 order; causal arrows solid, time-ordered dashed, unordered dotted
-and marked `?`; file work as notes). `show thread` and the
+and marked `?`; file work as notes; every CSS class from a fixed
+list, so no data writes attribute text). `show thread` and the
 lifelines' Java threads as columns of their own are not built yet.
 
 Tests: golden files on the serialized model and on every `show`

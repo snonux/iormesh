@@ -84,8 +84,9 @@ public final class Ring {
      * HTTP flags HTTP_ASYNC_MARK and HTTP_NET_HTTP. 7 (task fe4): CLASS
      * records, a class id per frame in STACK, and sixteen drop counters
      * (CLASS is the ninth type), which moves dropped bytes and abandoned.
+     * 8 (task mb4 review): the HTTP flag HTTP_HELD.
      */
-    static final int VERSION = 7;
+    static final int VERSION = 8;
     /** THREAD flag: the Java thread is a virtual thread (JDK 21+). */
     static final int VIRTUAL = 1;
     static final long MAGIC = 0x474e49524d524f49L; // "IORMRING", little endian
@@ -157,6 +158,13 @@ public final class Ring {
     static final int HTTP_ASYNC_MARK = 4;
     /** HTTP flag: the request went through java.net.http's HttpClient. */
     static final int HTTP_NET_HTTP = 8;
+    /**
+     * HTTP flag (task mb4 review): the recording thread did the request's
+     * work alone, start to completion — a synchronous library's request,
+     * never Netty's event loop nor an async completion. Only on such a
+     * span may a view place the thread's other calls and file work.
+     */
+    static final int HTTP_HELD = 16;
     /** HTTP's leading strings: method, scheme, host, path, version, local, remote. */
     static final int HTTP_FIXED = 7;
     /** Bounds a record with strings, so one never needs a large share of the ring. */

@@ -209,6 +209,7 @@ public final class JdkUrlConnection implements Library {
         private Request describe(HttpURLConnection c) throws ReflectiveOperationException {
             URL u = c.getURL();
             Request r = new Request();
+            r.held = true; // synchronous: see Request.held
             r.method = c.getRequestMethod();
             r.scheme = u.getProtocol();
             r.host = u.getHost();

@@ -3,7 +3,7 @@
  "events": [
    {"process": "$p1", "thread": "$t1", "event": "accept", "args": {"local_port": "$port1"}, "fd": "$fd1", "attribution": "java"},
    {"process": "$p1", "thread": "$t2", "event": "read", "fd": "$fd1", "attribution": "java"},
-   {"process": "$p1", "thread": "$t2", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "io.netty.handler.codec.http.HttpObjectEncoder#write"}, "http": {"method": "GET", "scheme": "http", "path": "/netty/hello", "status": 200, "req_seq": 1, "req_bytes": 0, "resp_bytes": 5}},
+   {"process": "$p1", "thread": "$t2", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "io.netty.handler.codec.http.HttpObjectEncoder#write"}, "http": {"method": "GET", "scheme": "http", "path": "/netty/hello", "status": 200, "req_seq": 1, "req_bytes": 0, "resp_bytes": 5, "held": false}},
    {"process": "$p1", "thread": "$t2", "event": "write", "fd": "$fd1", "attribution": "java"},
    {"process": "$p1", "thread": "$t2", "event": "read", "fd": "$fd1", "attribution": "java"},
    {"process": "$p1", "thread": "$t2", "event": "http", "conn_id": "$c1", "attribution": "java", "java": {"method": "io.netty.handler.codec.http.HttpObjectEncoder#write"}, "http": {"method": "POST", "scheme": "http", "path": "/netty/echo", "status": 200, "req_seq": 2, "req_bytes": 5, "resp_bytes": 5}},

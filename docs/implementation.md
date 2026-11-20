@@ -4350,10 +4350,17 @@ internal/query/                    # + Filter.Ref, ParseRef (-ref)
   like a segment; a table that fails joins the bad segments and
   its frames stay `method#<id>`.
 - **Linking** is per request, never per guess: the req_seq pair
-  must be unique on both ends; nesting looks at the 8 latest
-  server requests of the thread starting no later; the clock join
-  compares at most 64×64 unpaired requests of one connection and
-  takes a mutual unique match only. What a rule cannot prove
+  must be unique on both ends; nesting needs both spans owned by
+  the thread (`http.held` from the agent's HTTP flag 16, set by
+  the synchronous libraries and never by Netty; a platform thread
+  known by name — the correlator now names a virtual thread's
+  request `carrier` as it does a syscall's) and looks at the 8
+  latest server requests of the thread starting no later; the
+  clock join compares at most 64×64 unpaired requests of one
+  connection, skips a connection with a startless unpaired end,
+  and takes a mutual unique match only; past the 2¹⁸ cut a
+  request starting before the oldest kept completion plus the
+  widest clock offset joins nothing (`Recorder.edge`). What a rule cannot prove
   stays apart, and says so (`hop`, `ordering`).
 - **Exports.** `build` writes `graph.svg` atomically and the
   `sequence/` directory whole under a temporary name, swapped in,
@@ -4365,9 +4372,16 @@ internal/query/                    # + Filter.Ref, ParseRef (-ref)
   width, raw-later-but-earlier, no bound, outside the window;
   clock join proven, too wide, no bound, two candidates; an
   unordered step; duplicate req_seq, carrier, async, outside the
-  span; file work; caps; escapes); `internal/render/render_test.go`
-  (two renders byte-identical, well-formed XML, no raw control
-  character, the column cap); `internal/ctl/conversations_test.go`
+  span; a startless end on a clock-joined connection; file work;
+  caps; escapes), `guard_test.go` (a Netty loop's overlapping
+  requests, two virtual threads on one carrier and an unknown
+  thread nest nothing and own no file work; no join near the
+  cut); `internal/correlate/javahttp_thread_test.go` (a virtual
+  thread's http event `carrier` under its carrier's name, held
+  only with a start, a lost thread record unnamed);
+  `internal/render/render_test.go` (two renders byte-identical,
+  well-formed XML, no raw control character, a class from the
+  data written as `other`, the column cap); `internal/ctl/conversations_test.go`
   — a four-host store (gateway → orders → inventory and billing,
   billing's clock 30 ms ahead, the billing hop HTTP/2): the list,
   the sequence text and JSON, `sequence/0001.svg` and `graph.svg`

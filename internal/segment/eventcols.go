@@ -81,6 +81,7 @@ const (
 	colHTTPRespHeaders
 	colHTTPReqBytes
 	colHTTPRespBytes
+	colHTTPHeld
 	colSessionBootID
 	colSessionFQDN
 	colSessionKernel
@@ -138,6 +139,7 @@ var eventColumnSpecs = [numEventColumns]columnSpec{
 	colHTTPReqHeaders:  {"http.req_headers.list.element", kindBytes},
 	colHTTPRespHeaders: {"http.resp_headers.list.element", kindBytes},
 	colHTTPReqBytes:    {"http.req_bytes", kindInt64}, colHTTPRespBytes: {"http.resp_bytes", kindInt64},
+	colHTTPHeld:      {"http.held", kindBool},
 	colSessionBootID: {"session.boot_id", kindBytes}, colSessionFQDN: {"session.fqdn", kindBytes},
 	colSessionKernel: {"session.kernel", kindBytes}, colSessionArch: {"session.arch", kindBytes},
 	colStackID: {"stack_id", kindInt32}, colOtelTraceID: {"otel.trace_id", kindBytes},
@@ -281,7 +283,7 @@ func (e *eventColumns) java(j *schema.Java) {
 func (e *eventColumns) http(h *schema.HTTP) {
 	c := &e.cols
 	if h == nil {
-		for i := colHTTPMethod; i <= colHTTPRespBytes; i++ {
+		for i := colHTTPMethod; i <= colHTTPHeld; i++ {
 			if i == colHTTPReqHeaders || i == colHTTPRespHeaders {
 				c[i].nullList(0)
 			} else {
@@ -301,6 +303,7 @@ func (e *eventColumns) http(h *schema.HTTP) {
 	c[colHTTPRespHeaders].listStrings(h.RespHeaders, 1)
 	c[colHTTPReqBytes].optInt64(int64(deref(h.ReqBytes)), h.ReqBytes != nil, 1)
 	c[colHTTPRespBytes].optInt64(int64(deref(h.RespBytes)), h.RespBytes != nil, 1)
+	c[colHTTPHeld].optBool(h.Held, true, 1)
 }
 
 // session's fields are required inside the object, so a set session's

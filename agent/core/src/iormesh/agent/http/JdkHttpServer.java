@@ -165,6 +165,7 @@ public final class JdkHttpServer implements Library {
         @SuppressWarnings("unchecked")
         Request describe(Object ex) throws ReflectiveOperationException {
             Request r = new Request();
+            r.held = true; // synchronous: see Request.held
             r.server = true;
             r.method = (String) method.invoke(ex);
             HttpContext ctx = (HttpContext) context.invoke(ex);

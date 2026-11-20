@@ -47,7 +47,7 @@ func originOf(s *federate.Segment) viewmodel.Origin {
 // joins segs.Bad (the build then exits 1) and its frames stay bare ids.
 func recordConversations(ctx context.Context, segs *federate.Segments, rec *viewmodel.Recorder,
 	clocks []federate.ClockBound) error {
-	rec.Plan(federate.NewTimeline(clocks))
+	rec.Plan(clocks)
 	if rec.Wants() {
 		for _, s := range segs.Sources {
 			o := originOf(s)

@@ -234,6 +234,10 @@ func appendHTTP(dst []byte, h *HTTP) []byte {
 	}
 	optUint(&o, "req_bytes", h.ReqBytes)
 	optUint(&o, "resp_bytes", h.RespBytes)
+	if h.Held {
+		o.key("held")
+		o.dst = append(o.dst, "true"...)
+	}
 	return o.close()
 }
 

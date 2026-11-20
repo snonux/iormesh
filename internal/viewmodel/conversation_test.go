@@ -2,6 +2,7 @@ package viewmodel
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -25,12 +26,14 @@ func skewBound(width int64) federate.ClockBound {
 		Lower: off - width, Upper: off + width, HasLower: true, HasUpper: true, Drift: 60_000}
 }
 
-// httpEv is an http event of thread tid on host spanning [start, end]
-// ns; client sets http.host.
+// httpEv is an http event of platform thread tid on host spanning
+// [start, end] ns, held by its thread as a synchronous library's;
+// client sets http.host.
 func httpEv(host string, tid uint32, start, end uint64, conn string, client bool, seq uint32) *schema.Event {
 	ev := &schema.Event{Seq: uint64(start/1000) + uint64(tid), HostID: host, PID: 1, PIDInc: 1, TID: tid,
 		Event: schema.KindHTTP, WallNS: start, LatencyNS: end - start, ConnID: conn,
-		HTTP: &schema.HTTP{Method: "GET", Path: "/x", Status: 200, ReqSeq: seq}}
+		Attribution: schema.AttributionJava, Java: &schema.Java{Thread: fmt.Sprint("t", tid)},
+		HTTP: &schema.HTTP{Method: "GET", Path: "/x", Status: 200, ReqSeq: seq, Held: end > start}}
 	if client {
 		ev.HTTP.Host = "svc"
 	}
@@ -38,12 +41,12 @@ func httpEv(host string, tid uint32, start, end uint64, conn string, client bool
 }
 
 // record runs a recorder over evs (http pass) and files (file pass).
-func record(tl federate.Timeline, evs []*schema.Event, files []*schema.Event) *Recorder {
+func record(bounds []federate.ClockBound, evs []*schema.Event, files []*schema.Event) *Recorder {
 	r := NewRecorder(nil)
 	for _, ev := range evs {
 		r.HTTP(Origin{Session: "s/" + ev.HostID, FQDN: ev.HostID + ".example"}, ev)
 	}
-	r.Plan(tl)
+	r.Plan(bounds)
 	for _, ev := range files {
 		r.File(Origin{Session: "s/" + ev.HostID, FQDN: ev.HostID + ".example"}, ev)
 	}
@@ -104,15 +107,20 @@ func TestClockJoin(t *testing.T) {
 		{"no bound", nil, []*schema.Event{client, server}, HopUnpaired, 2},
 		{"two candidates", []federate.ClockBound{skewBound(10_000)}, []*schema.Event{client, server, other},
 			HopUnpaired, 3},
+		// An async request on the connection may be the server's true
+		// client: the span that looks like the client's only match is
+		// not joined (task mb4 review).
+		{"a startless end on the connection", []federate.ClockBound{skewBound(10_000)},
+			[]*schema.Event{client, server, httpEv("a", 4, base+5*ms, base+5*ms, "c", true, 0)}, HopUnpaired, 3},
 	} {
-		r := record(federate.NewTimeline(c.bounds), c.evs, nil)
+		r := record(c.bounds, c.evs, nil)
 		cs := r.conversations(newNamer(schema.Graph{}, nil, nil))
 		if len(cs) != c.roots {
 			t.Errorf("%s: %d conversations, want %d", c.name, len(cs), c.roots)
 			continue
 		}
 		for _, conv := range cs {
-			if st := conv.Steps[0]; st.Service == "pid 1" && st.Hop != c.hop {
+			if st := conv.Steps[0]; st.Service == "pid 1" && st.Hop != HopAsync && st.Hop != c.hop {
 				t.Errorf("%s: hop %s, want %s", c.name, st.Hop, c.hop)
 			}
 		}
@@ -126,7 +134,6 @@ func TestClockJoin(t *testing.T) {
 // every bound's window cannot be ordered against the far host's start:
 // the step says unordered rather than borrowing a raw timestamp.
 func TestUnorderedStep(t *testing.T) {
-	tl := federate.NewTimeline([]federate.ClockBound{skewBound(10_000)})
 	b := skewBound(10_000)
 	early := b.Start - 5*ms // before the window: no bound covers it
 	srv := httpEv("a", 1, early-ms, base+20*ms, "in", false, 0)
@@ -134,7 +141,7 @@ func TestUnorderedStep(t *testing.T) {
 		WallNS: early, FD: schema.NoFD, Args: schema.Args{Path: ptr("/d/x.tmp"), NewPath: ptr("/d/x")}}
 	client := httpEv("a", 1, base, base+10*ms, "c", true, 0)
 	server := httpEv("b", 2, base+50*ms+3*ms, base+50*ms+7*ms, "c", false, 0)
-	r := record(tl, []*schema.Event{srv, client, server}, []*schema.Event{op})
+	r := record([]federate.ClockBound{b}, []*schema.Event{srv, client, server}, []*schema.Event{op})
 	cs := r.conversations(newNamer(schema.Graph{}, nil, nil))
 	if len(cs) != 1 {
 		t.Fatalf("%d conversations", len(cs))
@@ -172,12 +179,12 @@ func TestLinkNegatives(t *testing.T) {
 		{"paired and nested", []*schema.Event{httpEv("a", 8, base, base+10*ms, "", false, 0),
 			httpEv("a", 8, base+ms, base+3*ms, "f", true, 1), httpEv("b", 9, base, base+ms, "f", false, 1)}, 1},
 	} {
-		r := record(federate.Timeline{}, c.evs, nil)
+		r := record(nil, c.evs, nil)
 		if n := len(r.links.roots); n != c.roots {
 			t.Errorf("%s: %d roots, want %d", c.name, n, c.roots)
 		}
 	}
-	r := record(federate.Timeline{}, []*schema.Event{async}, nil)
+	r := record(nil, []*schema.Event{async}, nil)
 	if st := r.conversations(newNamer(schema.Graph{}, nil, nil))[0].Steps; len(st) != 1 || st[0].Hop != HopAsync {
 		t.Errorf("async request steps %+v", st)
 	}
@@ -204,7 +211,7 @@ func TestFileWork(t *testing.T) {
 	files[4].Err = "ENOENT"
 	sock := fe(1, base+5*ms, schema.KindWrite, 4, 10, schema.Args{})
 	sock.ConnID = "c9"
-	r := record(federate.Timeline{}, []*schema.Event{srv}, append(files, sock))
+	r := record(nil, []*schema.Event{srv}, append(files, sock))
 	var labels []string
 	for _, s := range r.conversations(newNamer(schema.Graph{}, nil, nil))[0].Steps {
 		if s.Kind == StepFile {
@@ -226,7 +233,7 @@ func TestConversationCaps(t *testing.T) {
 	for i := range uint64(10) {
 		r.HTTP(Origin{Session: "s"}, httpEv("a", uint32(i+1), base+i*ms, base+i*ms+1, "", false, 0))
 	}
-	r.Plan(federate.Timeline{})
+	r.Plan(nil)
 	cs := r.conversations(newNamer(schema.Graph{}, nil, nil))
 	if r.cut != 7 || len(cs) != 3 || cs[0].Start != wallTime(base+9*ms) {
 		t.Errorf("cut %d, %d conversations, newest %v", r.cut, len(cs), cs[0].Start)
@@ -240,7 +247,7 @@ func TestConversationCaps(t *testing.T) {
 			WallNS: base + MaxConversations*ms + i, Event: schema.KindUnlink, FD: schema.NoFD,
 			Args: schema.Args{Path: ptr("/f")}})
 	}
-	r = record(federate.Timeline{}, evs, files)
+	r = record(nil, evs, files)
 	cs = r.conversations(newNamer(schema.Graph{}, nil, nil))
 	if len(cs) != MaxConversations || r.more != 1 {
 		t.Fatalf("%d conversations, %d more", len(cs), r.more)

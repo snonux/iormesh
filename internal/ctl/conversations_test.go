@@ -108,7 +108,8 @@ func tcpPair(cli, srv *hostTrace, cp, sp uint32, cfd, sfd int32, at uint64, ccon
 }
 
 // javaHTTP adds one http event on thread tid ("thread") spanning
-// [start, end] µs; reqHost "" makes it the server's end.
+// [start, end] µs; reqHost "" makes it the server's end. Every request
+// is a synchronous library's, held by its thread (http.held).
 func javaHTTP(h *hostTrace, pid, tid uint32, thread string, start, end uint64, conn, reqHost, method,
 	path string, reqSeq uint32, top uint64) {
 	ev := h.add(pid, schema.KindHTTP, schema.NoFD, 0, start, conn, schema.Args{})
@@ -119,7 +120,7 @@ func javaHTTP(h *hostTrace, pid, tid uint32, thread string, start, end uint64, c
 		version = "HTTP/2"
 	}
 	ev.HTTP = &schema.HTTP{Method: method, Scheme: "http", Host: reqHost, Path: path, Status: 200,
-		ReqSeq: reqSeq, Version: version}
+		ReqSeq: reqSeq, Version: version, Held: true}
 }
 
 // fileOp adds one Java-attributed file event on thread tid.

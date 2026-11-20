@@ -24,7 +24,8 @@ func httpMatch(want *ExpectedHTTP, got *schema.HTTP) bool {
 	}
 	if (want.Status != nil && *want.Status != got.Status) ||
 		(want.ReqSeq != nil && *want.ReqSeq != got.ReqSeq) ||
-		!sizeMatch(want.ReqBytes, got.ReqBytes) || !sizeMatch(want.RespBytes, got.RespBytes) {
+		!sizeMatch(want.ReqBytes, got.ReqBytes) || !sizeMatch(want.RespBytes, got.RespBytes) ||
+		(want.Held != nil && *want.Held != got.Held) {
 		return false
 	}
 	return containsAll(got.ReqHeaders, want.ReqHeaders) &&

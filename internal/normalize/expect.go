@@ -93,6 +93,10 @@ type ExpectedHTTP struct {
 	// (task wd4).
 	ReqBytes  *uint64 `json:"req_bytes,omitempty"`
 	RespBytes *uint64 `json:"resp_bytes,omitempty"`
+	// Held, when declared, must equal the event's http.held: a
+	// synchronous library's request is held by its thread, Netty's never
+	// (task mb4 review).
+	Held *bool `json:"held,omitempty"`
 }
 
 // ExpectedDNS declares a dns event's mapping: the host must equal the

@@ -76,6 +76,10 @@ func TestDeterministicAndEscaped(t *testing.T) {
 	if !strings.Contains(string(Graph(hostileGraph())), `class="unresolved"`) {
 		t.Error("graph: the unresolved connection is not marked")
 	}
+	conv.Steps[0].Ordering = `x" onload="alert(1)`
+	if out := string(Sequence(conv)); strings.Contains(out, "onload") || !strings.Contains(out, `class="other"`) {
+		t.Errorf("a class from the model is written raw:\n%s", out)
+	}
 }
 
 // TestGraphColumnCap: a host with more nodes than a column holds shows

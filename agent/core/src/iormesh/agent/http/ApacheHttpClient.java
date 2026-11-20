@@ -198,6 +198,7 @@ public final class ApacheHttpClient implements Library {
         /** The request as the caller made it and the response it got. */
         Request describe(Object target, Object req, Object resp) throws Throwable {
             Request r = new Request();
+            r.held = true; // synchronous: see Request.held
             r.method = nz(Handles.string(method, req));
             String scheme = Handles.string(this.scheme, req);
             r.scheme = nz(scheme != null ? scheme : Handles.string(hostScheme, target));

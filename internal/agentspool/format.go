@@ -29,8 +29,9 @@ const (
 	// request's start stamp and body sizes, and DNS records; 6 (task wd4,
 	// review round 2) HTTP's async-marker and java.net.http flags; 7
 	// (task fe4) CLASS records, a class id per frame in STACK, and
-	// sixteen drop counters, which moves dropped bytes and abandoned.
-	Version = 7
+	// sixteen drop counters, which moves dropped bytes and abandoned; 8
+	// (task mb4 review) HTTP's held flag.
+	Version = 8
 	// magic is "IORMRING" as a little-endian word; the agent stores it
 	// last, so a reader that sees it sees a complete header.
 	magic = 0x474e49524d524f49
@@ -85,7 +86,10 @@ const (
 	httpAsyncMark = 4
 	// httpNetHTTP marks a request of java.net.http's HttpClient.
 	httpNetHTTP = 8
-	httpFlags   = httpServer | httpUnordered | httpAsyncMark | httpNetHTTP
+	// httpHeld marks a request its recording thread worked on alone
+	// from start to completion (task mb4 review): see HTTP.Held.
+	httpHeld  = 16
+	httpFlags = httpServer | httpUnordered | httpAsyncMark | httpNetHTTP | httpHeld
 )
 
 // hookStrings is the number of strings in a HOOK record: kind, class,
