@@ -170,6 +170,7 @@ func appendArgs(dst []byte, a *Args) []byte {
 	optUint(&o, "rcv_nxt", a.RcvNxt)
 	optUint(&o, "bytes_acked", a.BytesAcked)
 	optUint(&o, "bytes_received", a.BytesReceived)
+	optUint(&o, "tcp_seq", a.TCPSeq)
 	return o.close()
 }
 

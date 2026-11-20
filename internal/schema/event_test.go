@@ -212,6 +212,16 @@ func TestEventValidateRejects(t *testing.T) {
 			*e = validTCPState()
 			e.Args.BytesReceived = nil
 		},
+		// M4 (task gb4): tcp_seq names one unfolded call's stream bytes.
+		"args.tcp_seq on a connect": func(e *Event) { e.Args.TCPSeq = ptr(uint32(1)) },
+		"args.tcp_seq on a folded write": func(e *Event) {
+			*e = validStreamWrite()
+			e.Args.Count = ptr(uint64(2))
+		},
+		"args.tcp_seq on a write of no bytes": func(e *Event) {
+			*e = validStreamWrite()
+			e.Bytes = 0
+		},
 		// M3 step 8: otel ids come from the agent and are W3C ids.
 		"otel with attribution none": func(e *Event) {
 			e.Attribution, e.Java, e.Otel = AttributionNone, nil, validOtel()
@@ -550,5 +560,43 @@ func TestTCPSeqFieldsValid(t *testing.T) {
 	}
 	if *got.Args.BytesAcked != 1<<33 || *got.Args.SndUna != 4000000000 {
 		t.Fatalf("round trip lost the seq fields: %+v", got.Args)
+	}
+}
+
+// validStreamWrite is one write of 5 bytes on a TCP socket carrying the
+// sequence number of its first byte (M4, task gb4).
+func validStreamWrite() Event {
+	e := validEvent()
+	e.Event, e.Err, e.Ret, e.Bytes = KindWrite, "", 5, 5
+	e.Attribution, e.Java = AttributionNone, nil
+	e.Args = Args{TCPSeq: ptr(uint32(4294967294))}
+	return e
+}
+
+// TestStreamSeqValid: tcp_seq is valid on every unfolded socket data
+// kind, send or receive, and round-trips through NDJSON.
+func TestStreamSeqValid(t *testing.T) {
+	for _, kind := range []string{KindWrite, KindWritev, KindSendto, KindSendfile64,
+		KindRead, KindReadv, KindRecvfrom} {
+		e := validStreamWrite()
+		e.Event = kind
+		if err := e.Validate(); err != nil {
+			t.Fatalf("%s: %v", kind, err)
+		}
+		if IsStreamSend(kind) == IsStreamReceive(kind) {
+			t.Fatalf("%s is both or neither a send and a receive", kind)
+		}
+	}
+	e := validStreamWrite()
+	line := string(AppendEvent(nil, &e))
+	if !strings.Contains(line, `"tcp_seq":4294967294}`) {
+		t.Fatalf("encoded args lack tcp_seq:\n%s", line)
+	}
+	got, err := DecodeEvent([]byte(line))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Args.TCPSeq == nil || *got.Args.TCPSeq != 4294967294 {
+		t.Fatalf("round trip lost tcp_seq: %+v", got.Args)
 	}
 }

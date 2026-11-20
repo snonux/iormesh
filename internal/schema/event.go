@@ -225,6 +225,16 @@ type Args struct {
 	RcvNxt        *uint32 `json:"rcv_nxt,omitempty" parquet:"rcv_nxt,optional"`
 	BytesAcked    *uint64 `json:"bytes_acked,omitempty" parquet:"bytes_acked,optional"`
 	BytesReceived *uint64 `json:"bytes_received,omitempty" parquet:"bytes_received,optional"`
+	// TCPSeq is the TCP sequence number of the first stream byte a send
+	// queued or a receive returned (spike S2): the call moved bytes
+	// [tcp_seq, tcp_seq+bytes) mod 2^32. A byte has the same sequence
+	// number on both hosts, so the merge pairs each receive with the send
+	// that queued its last byte and bounds the two hosts' clock offset by
+	// the pair. Only on an unfolded data record of a TCP socket (write,
+	// writev, sendto, sendfile64, read, readv, recvfrom) that moved bytes:
+	// a folded record has lost its calls' instants. Appended in M4 (task
+	// gb4); the tracer's capture (tcp_sendmsg/tcp_recvmsg hooks) is open.
+	TCPSeq *uint32 `json:"tcp_seq,omitempty" parquet:"tcp_seq,optional"`
 }
 
 // Session is the host description of the session header. Its fields are

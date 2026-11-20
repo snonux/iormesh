@@ -166,6 +166,9 @@ func (e *Event) validateKindArgs() error {
 	if err := e.validateTCPSeq(); err != nil {
 		return err
 	}
+	if err := e.validateStreamSeq(); err != nil {
+		return err
+	}
 	switch e.Event {
 	case KindOpen, KindOpenat, KindOpenat2, KindCreat:
 		if e.Args.Path == nil || *e.Args.Path == "" {
@@ -313,4 +316,44 @@ func (e *Event) validateTCPSeq() error {
 		return invalidf("tcp_state with %d of the four tcp_sock fields, want all or none", set)
 	}
 	return nil
+}
+
+// validateStreamSeq keeps args.tcp_seq (M4, task gb4) to the records
+// whose instants the merge's clock bounds read: one call that moved
+// bytes on a stream. On a folded record boot_ns is the first call's
+// enter and latency_ns a sum, so no instant there belongs to the call
+// that moved a given byte; without bytes there is no range to match.
+func (e *Event) validateStreamSeq() error {
+	if e.Args.TCPSeq == nil {
+		return nil
+	}
+	switch {
+	case !IsStreamSend(e.Event) && !IsStreamReceive(e.Event):
+		return invalidf("args.tcp_seq on a %s event (socket data kinds only)", e.Event)
+	case e.Args.Count != nil:
+		return invalidf("args.tcp_seq on a folded %s (count %d)", e.Event, *e.Args.Count)
+	case e.Bytes == 0:
+		return invalidf("args.tcp_seq on a %s that moved no bytes", e.Event)
+	}
+	return nil
+}
+
+// IsStreamSend reports whether kind queues bytes on a socket stream: the
+// send side of a message the merge matches by args.tcp_seq.
+func IsStreamSend(kind string) bool {
+	switch kind {
+	case KindWrite, KindWritev, KindSendto, KindSendfile64:
+		return true
+	}
+	return false
+}
+
+// IsStreamReceive reports whether kind returns bytes from a socket
+// stream: the receive side of a message the merge matches.
+func IsStreamReceive(kind string) bool {
+	switch kind {
+	case KindRead, KindReadv, KindRecvfrom:
+		return true
+	}
+	return false
 }

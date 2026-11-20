@@ -140,17 +140,25 @@ IPv4 peers of dual-stack sockets are written unmapped
 
 | `snd_una`, `rcv_nxt` | `tcp_state` only, optional (appended in M4): the socket's `tcp_sock` fields of those names at the transition, u32 |
 | `bytes_acked`, `bytes_received` | `tcp_state` only, optional (appended in M4): the `tcp_sock` byte counters, u64 |
+| `tcp_seq` | optional (appended in M4): the TCP sequence number of the first stream byte the call moved, u32; the call moved `[tcp_seq, tcp_seq + bytes)` mod 2³². Only on an unfolded `write`, `writev`, `sendto`, `sendfile64`, `read`, `readv` or `recvfrom` that moved bytes |
 
 The four `tcp_sock` fields come together or not at all: the
 controller's merge rebuilds the connection's ISN pair — the
 cross-host join key (S2, decision #26) — from all four, so a
 partial set is rejected rather than read into a wrong key. The
 schema and the merge (`internal/federate`) carry them; the
-tracer's capture lands with the M4 BPF change. Still planned
-for M4: socket send/receive events gain their TCP sequence
-range (start sequence plus `bytes`, from new
-`tcp_sendmsg`/`tcp_recvmsg` hooks), which the merge's clock
-bounds match across hosts.
+tracer's capture lands with the M4 BPF change.
+
+`tcp_seq` gives a send or receive its TCP sequence range (start
+sequence plus `bytes`). A byte has the same sequence number on
+both hosts, so the merge pairs each receive with the send that
+queued its last byte and bounds the two hosts' clock offset by
+it (S2; PLAN.md M4 "Clock reconciliation"). A folded record
+cannot carry it — its `boot_ns` is the first call's and its
+`latency_ns` a sum, so no instant of it belongs to the call that
+moved a given byte. The schema and the merge carry it; the
+tracer's capture (new `tcp_sendmsg`/`tcp_recvmsg` hooks) is
+still open.
 
 ### Event kinds (M1)
 
