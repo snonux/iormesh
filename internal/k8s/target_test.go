@@ -1,6 +1,7 @@
 package k8s
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -48,12 +49,14 @@ func TestResolveRefusesContext(t *testing.T) {
 }
 
 // TestValidateRefusesUnpinnedImage: a tag alone, a short or upper-case
-// digest, another algorithm, or no image at all (DefaultImage is empty
-// until task yb4 publishes ours) is refused.
+// digest, or another algorithm is refused. No image at all passes
+// Validate — exec and fetch need none — but Debug and Deploy refuse it
+// (DefaultImage is empty until task yb4 publishes ours), before any
+// kubectl runs.
 func TestValidateRefusesUnpinnedImage(t *testing.T) {
 	digest := testImage[strings.Index(testImage, "@"):]
 	for _, img := range []string{
-		"", "registry.example/iormesh", "registry.example/iormesh:latest",
+		"registry.example/iormesh", "registry.example/iormesh:latest",
 		"registry.example/iormesh@sha256:0123", "registry.example/iormesh@sha512:" + digest[8:],
 		"registry.example/iormesh@" + strings.ToUpper(digest), "-image" + digest,
 		"registry.example/ior mesh" + digest, "registry.example/iormesh" + digest + "\n",
@@ -71,8 +74,21 @@ func TestValidateRefusesUnpinnedImage(t *testing.T) {
 			t.Errorf("image %q refused: %v", img, err)
 		}
 	}
-	if _, err := Resolve("p", "app", []string{"c"}, Layer{Context: "c", Namespace: "n"}); !errors.Is(err, ErrImage) {
-		t.Errorf("no image anywhere: err = %v, want ErrImage", err)
+	f := newFake(t)
+	f.pod(t, preparedPod)
+	tg, err := Resolve("p", "app", []string{"c"}, Layer{Context: "c", Namespace: "n"})
+	if err != nil {
+		t.Fatalf("no image anywhere: Resolve = %v, want it to pass (collect needs no image)", err)
+	}
+	k := newTestKubectl(t, tg)
+	if err := k.Debug(context.Background(), "iormesh", "run"); !errors.Is(err, ErrImage) {
+		t.Errorf("no image anywhere: Debug = %v, want ErrImage", err)
+	}
+	if _, err := k.Deploy(context.Background(), "iormesh", "run"); !errors.Is(err, ErrImage) {
+		t.Errorf("no image anywhere: Deploy = %v, want ErrImage", err)
+	}
+	if calls := f.calls(t); len(calls) != 0 {
+		t.Errorf("kubectl ran without an image: %q", calls)
 	}
 }
 

@@ -42,7 +42,10 @@ import (
 // -ready-owner), who may read and delete in it.
 //
 // Collect only syncs; it never merges or touches the service database
-// (`build` does, offline; docs/implementation.md M4).
+// (`build` does, offline; docs/implementation.md M4). A registry pods:
+// entry takes another path, without the shell probes (pods.go): the
+// API server says which pods it is, and each is fetched through
+// `kubectl exec … iormesh ready`.
 
 const (
 	// readyDir is the sync contract. The controller reads segments
@@ -56,16 +59,21 @@ const (
 // errUnreachable marks a host the reachability probe could not reach.
 var errUnreachable = errors.New("host unreachable")
 
-// collectTarget is one host and the projects to collect from it.
+// collectTarget is one host, or one pods: entry (pod set, host its
+// reference), and the projects to collect from it.
 type collectTarget struct {
 	host     string
+	pod      *podEntry
 	projects []string
 }
 
-// collector syncs projects' ready/ folders into the store.
+// collector syncs projects' ready/ folders into the store. db is the
+// service database whose host pins file a pod's store directory is
+// pinned in (pods.go), the default one when empty.
 type collector struct {
 	e     env
 	store string
+	db    string
 }
 
 // projectList is the repeatable -project flag: one project, or several
@@ -99,6 +107,7 @@ func collectCommand(args []string, e env) error {
 	fs.Var(&projects, "project", "collect only this project (repeatable; default: every project)")
 	regPath := fs.String("registry", "", "registry file (default ~/.config/iormesh/servers.yaml)")
 	store := fs.String("store", "", "local trace store (default ~/.local/share/iormesh/traces)")
+	kf := addK8sFlags(fs, false)
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
@@ -106,7 +115,7 @@ func collectCommand(args []string, e env) error {
 	if err != nil {
 		return err
 	}
-	targets, err := collectTargets(r, fs.Args(), projects)
+	targets, err := collectTargets(r, fs.Args(), projects, kf)
 	if err != nil {
 		return err
 	}
@@ -152,30 +161,29 @@ func (c collector) all(ctx context.Context, targets []collectTarget) error {
 	return nil
 }
 
-// collectTargets resolves hosts (every registered one when none is
-// given) and narrows each to projects when set. An unregistered host, a
-// named host carrying none of the projects, or a project no selected host
-// carries fails before any host is contacted (principle #3: only
-// registered hosts are reached). A host named twice is collected once.
-func collectTargets(r federate.Registry, hosts, projects []string) ([]collectTarget, error) {
-	explicit := len(hosts) > 0
+// collectTargets resolves hosts and pod entry references (every
+// registered one when none is given) and narrows each to projects when
+// set. An unregistered host or pod entry, a context no cluster lists, a
+// named target carrying none of the projects, or a project no selected
+// target carries fails before anything is contacted (principle #3: only
+// registered targets are reached). A target named twice is collected
+// once.
+func collectTargets(r federate.Registry, args, projects []string, kf *k8sFlags) ([]collectTarget, error) {
+	explicit := len(args) > 0
 	if !explicit {
-		for _, s := range r.Servers {
-			hosts = append(hosts, s.Host)
-		}
+		args = allTargets(r)
 	}
 	var targets []collectTarget
 	seen := map[string]bool{}
-	for _, host := range hosts {
-		if slices.ContainsFunc(targets, func(tg collectTarget) bool { return tg.host == host }) {
+	for _, arg := range args {
+		if slices.ContainsFunc(targets, func(tg collectTarget) bool { return tg.host == arg }) {
 			continue
 		}
-		srv, err := r.Lookup(host)
+		tg, carried, err := registeredTarget(&r, arg, kf)
 		if err != nil {
 			return nil, err
 		}
-		tg := collectTarget{host: host}
-		for _, p := range srv.Projects {
+		for _, p := range carried {
 			if len(projects) == 0 || slices.Contains(projects, p.Name) {
 				tg.projects = append(tg.projects, p.Name)
 				seen[p.Name] = true
@@ -184,7 +192,7 @@ func collectTargets(r federate.Registry, hosts, projects []string) ([]collectTar
 		if len(tg.projects) > 0 {
 			targets = append(targets, tg)
 		} else if explicit {
-			return nil, fmt.Errorf("%w: %s carries none of %s", federate.ErrUnknownProject, host,
+			return nil, fmt.Errorf("%w: %s carries none of %s", federate.ErrUnknownProject, arg,
 				strings.Join(projects, ", "))
 		}
 	}
@@ -196,9 +204,42 @@ func collectTargets(r federate.Registry, hosts, projects []string) ([]collectTar
 	return targets, nil
 }
 
-// host collects tg's projects from one server. Projects are independent:
-// one that fails does not keep the others from being collected.
+// allTargets is every registered host, then every pod entry's reference.
+func allTargets(r federate.Registry) []string {
+	var all []string
+	for _, s := range r.Servers {
+		all = append(all, s.Host)
+	}
+	for _, p := range r.Pods {
+		all = append(all, r.PodRef(p))
+	}
+	return all
+}
+
+// registeredTarget is arg's registry entry as a collect target, without
+// projects yet, and the projects it carries.
+func registeredTarget(r *federate.Registry, arg string, kf *k8sFlags) (collectTarget, []federate.Project, error) {
+	if federate.IsPodRef(arg) {
+		pe, err := resolvePodRef(r, arg, kf)
+		if err != nil {
+			return collectTarget{}, nil, err
+		}
+		return collectTarget{host: arg, pod: &pe}, pe.projects, nil
+	}
+	srv, err := r.Lookup(arg)
+	if err != nil {
+		return collectTarget{}, nil, err
+	}
+	return collectTarget{host: arg}, srv.Projects, nil
+}
+
+// host collects tg's projects from one server or pod entry. Projects are
+// independent: one that fails does not keep the others from being
+// collected.
 func (c collector) host(ctx context.Context, tg collectTarget) error {
+	if tg.pod != nil {
+		return c.podEntryCollect(ctx, *tg.pod, tg.projects)
+	}
 	t, err := c.e.transport(tg.host)
 	if err != nil {
 		return err
@@ -240,7 +281,18 @@ func (c collector) project(ctx context.Context, t federate.Transport, host, name
 		_, _ = fmt.Fprintf(c.e.stdout, "%s: project %s: no %s yet, nothing to collect\n", host, name, remote)
 		return nil
 	}
-	local, err := c.localDir(name, host)
+	return c.fetch(ctx, t, host, host, name, remote)
+}
+
+// fetch moves remote's segments into <store>/<name>/<dir> and reports
+// how many new files arrived, under label. dir is the host name for a
+// server, "pod-<uid>" for a pod; both are checked again here, before
+// either becomes a local path.
+func (c collector) fetch(ctx context.Context, t federate.Transport, label, dir, name, remote string) error {
+	if !project.Valid(name) || !federate.ValidHost(dir) {
+		return fmt.Errorf("unsafe path component %q/%q", name, dir)
+	}
+	local, err := c.localDir(name, dir)
 	if err != nil {
 		return err
 	}
@@ -248,7 +300,7 @@ func (c collector) project(ctx context.Context, t federate.Transport, host, name
 	if err := t.Fetch(ctx, remote, local); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(c.e.stdout, "%s: project %s: %d new files in %s\n", host, name,
+	_, err = fmt.Fprintf(c.e.stdout, "%s: project %s: %d new files in %s\n", label, name,
 		max(countFiles(local)-before, 0), local)
 	return err
 }
@@ -327,8 +379,9 @@ func checkStoreDir(dir string) error {
 	return nil
 }
 
-// countFiles counts dir's regular files, for collect's report only: an
-// unreadable dir counts as empty, and Fetch reports the real error.
+// countFiles counts dir's regular non-dot files, for collect's report
+// only: temporaries and the k8s fetch lock are dot files. An unreadable
+// dir counts as empty, and Fetch reports the real error.
 func countFiles(dir string) int {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -336,7 +389,7 @@ func countFiles(dir string) int {
 	}
 	n := 0
 	for _, en := range entries {
-		if en.Type()&fs.ModeType == 0 {
+		if en.Type()&fs.ModeType == 0 && !strings.HasPrefix(en.Name(), ".") {
 			n++
 		}
 	}

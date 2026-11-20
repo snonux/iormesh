@@ -1012,8 +1012,10 @@ kubectl would get. They run with the package's unit tests
   --custom=FILE -- argv…` (`sysadmin` for the privileged profile),
   and the `--custom` spec's security context and two mounts;
 - refusals before any kubectl runs: an unregistered or malformed
-  context, an image not pinned by `@sha256:<64 hex>` (or none —
-  the built-in default is empty until task yb4 publishes one),
+  context, an image not pinned by `@sha256:<64 hex>` (none is
+  refused by `Debug` and `Deploy` alone, since task af4 — exec and
+  fetch need no image; the built-in default is empty until task
+  yb4 publishes one),
   namespace, pod or container names that are not Kubernetes names
   (`$(id)`, `x;touch …`, `--all-namespaces`), a remote dir other
   than `/opt/iormesh/data/traces/<project>/ready`, and `Push`;
@@ -1037,6 +1039,56 @@ kubectl would get. They run with the package's unit tests
 
 What only kind can show is task yb4's (docs/implementation.md M7
 step 9).
+
+## K8s controller wiring (task af4)
+
+iormeshctl's pod path (PLAN.md #18's "Wired" note;
+docs/implementation.md M7 step 10) is tested in `mage test`
+without a cluster, against fake kubectls on `PATH`:
+
+- `internal/k8s` (`pods_test.go`, `deploy_test.go`): `Select`
+  passes the selector as one `--selector=` element, keeps running
+  pods only, sorted; no running match is `ErrNoPod`, more than 32
+  `ErrTooManyPods`; empty, negative-only, set-based and
+  option-like selectors never reach kubectl; a pod name or UID
+  not in the API server's form fails; kubectl failing is
+  `ErrUnreachable`. `Deploy` starts a debug container on a
+  prepared pod, leaves an ephemeral tracer running the pinned
+  digest alone (containerd's and cri-dockerd's `imageID` forms),
+  verifies a sidecar, and — after the `get` alone — refuses
+  another digest, a bare `sha256:` `imageID`, a tag, a tracer not
+  running, a missing sidecar and an unprepared pod. No image:
+  `Resolve` passes, `Debug` and `Deploy` refuse before kubectl
+  runs. A held fetch lock refuses a second `Fetch` (`ErrBusy`)
+  without running kubectl.
+- `internal/federate` (`registry_k8s_test.go`): both sections
+  round-trip through `Save`; references, the namespace and
+  project defaults; `RemovePod`; refusals at load — unpinned
+  image, unknown mode, bad context or cluster name, unknown
+  cluster, `pod:` and `selector:` both or neither, a negative or
+  empty selector, no namespace anywhere, the tracer's name as the
+  app container, two projects in a debug entry, a duplicate
+  entry, an unknown key, and a server host shaped like
+  `pod-<uid>`.
+- `internal/ctl` (`pods_test.go`, its own fake answering per pod
+  from files): collect of a pod entry runs `get pod`, then `exec
+  … iormesh ready` and the remove — never `true`, `test` or
+  `find` — into `<store>/shop/pod-<uid>`, and pins that directory
+  to `pod-<uid>` and its FQDN in `hosts.json`; a pod kubectl
+  cannot exec into, or that is gone, fails the collect and is
+  never reported empty (checked by mutation: dropping the fetch
+  error fails the test); a pod without a tracer container is
+  "nothing to collect" without an exec; a selector collects each
+  match into its own directory, and one matching nothing fails;
+  `collect` alone includes pod entries; an unregistered or
+  malformed `-context`, an unknown entry and an unpinned
+  `-image` are refused before kubectl runs; deploy runs `debug
+  … -- iormesh run -project shop -pattern=… -duration 1h`,
+  refuses an unprepared pod naming the prepare patch and a
+  registry without an image (collect still works there); rm
+  keeps the registry when the last collect fails, drops the entry
+  with `-force` or after a good collect, and says the tracer is
+  not stopped.
 
 ## K8s manifests and pod identity (task vb4)
 

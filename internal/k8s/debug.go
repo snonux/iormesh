@@ -31,49 +31,46 @@ const (
 var minimalCaps = []string{"BPF", "PERFMON", "SYS_RESOURCE",
 	"SYS_PTRACE", "DAC_OVERRIDE", "KILL", "CHECKPOINT_RESTORE"}
 
-// podInfo is the part of `kubectl get pod -o json` the checks read.
-type podInfo struct {
-	Spec struct {
-		HostUsers             *bool `json:"hostUsers"`
-		ShareProcessNamespace *bool `json:"shareProcessNamespace"`
-		Volumes               []struct {
-			Name     string `json:"name"`
-			HostPath *struct {
-				Path string `json:"path"`
-			} `json:"hostPath"`
-			EmptyDir *struct {
-				SizeLimit string `json:"sizeLimit"`
-			} `json:"emptyDir"`
-		} `json:"volumes"`
-		Containers          []named `json:"containers"`
-		EphemeralContainers []named `json:"ephemeralContainers"`
-	} `json:"spec"`
-}
-
-// named is a container entry; only its name matters here.
-type named struct {
-	Name string `json:"name"`
-}
-
 // Check reads the pod's spec and refuses a pod no tracer can run in
 // (ErrUnprepared): #13's two volumes missing or of the wrong kind, a
 // user-namespaced pod (hostUsers: false — its capabilities reach neither
 // BPF nor tracing), no such app container to target, or — for a
 // sidecar — no tracer container or no shared process namespace.
 func (k *Kubectl) Check(ctx context.Context) error {
+	p, err := k.getPod(ctx)
+	if err != nil {
+		return err
+	}
+	if err := k.checkPod(p); err != nil {
+		return err
+	}
+	return checkContainers(p, k.t)
+}
+
+// getPod reads the target pod (`kubectl get pod -o json`).
+func (k *Kubectl) getPod(ctx context.Context) (podInfo, error) {
 	out, err := k.run.output(ctx, slices.Concat(k.base(), []string{"get", "pod", k.t.Pod, "--output=json"}))
 	if err != nil {
-		return fmt.Errorf("kubectl get pod %s/%s: %w", k.t.Namespace, k.t.Pod, err)
+		return podInfo{}, fmt.Errorf("kubectl get pod %s/%s: %w", k.t.Namespace, k.t.Pod, err)
 	}
 	var p podInfo
 	if err := json.Unmarshal(out, &p); err != nil {
-		return fmt.Errorf("kubectl get pod %s/%s: %w", k.t.Namespace, k.t.Pod, err)
+		return podInfo{}, fmt.Errorf("kubectl get pod %s/%s: %w", k.t.Namespace, k.t.Pod, err)
 	}
+	return p, nil
+}
+
+// checkPod refuses a pod without #13's volumes, naming the prepare patch,
+// or without the app container to target: what every mode needs.
+func (k *Kubectl) checkPod(p podInfo) error {
 	if err := checkPrepared(p); err != nil {
 		return fmt.Errorf("%w: %s/%s: %s; apply %s to its workload first", ErrUnprepared,
 			k.t.Namespace, k.t.Pod, err, PreparePatch)
 	}
-	return checkContainers(p, k.t)
+	if !hasContainer(p.Spec.Containers, k.t.Container) {
+		return fmt.Errorf("%w: %s/%s has no container %q", ErrUnprepared, k.t.Namespace, k.t.Pod, k.t.Container)
+	}
+	return nil
 }
 
 // checkPrepared checks the pod-level requirements, the ones the prepare
@@ -100,24 +97,15 @@ func checkPrepared(p podInfo) error {
 	return nil
 }
 
-// checkContainers checks the app container and the tracer container
-// against the mode.
+// checkContainers checks the tracer container against the mode (the app
+// container is checkPod's): a sidecar must be there, with the shared
+// process namespace it traces through; a debug target must not have one
+// yet.
 func checkContainers(p podInfo, t Target) error {
-	has := func(cs []named, name string) bool {
-		return slices.ContainsFunc(cs, func(c named) bool { return c.Name == name })
-	}
-	if !has(p.Spec.Containers, t.Container) {
-		return fmt.Errorf("%w: %s/%s has no container %q", ErrUnprepared, t.Namespace, t.Pod, t.Container)
-	}
 	if t.Mode == ModeSidecar {
-		if !has(p.Spec.Containers, TracerContainer) ||
-			p.Spec.ShareProcessNamespace == nil || !*p.Spec.ShareProcessNamespace {
-			return fmt.Errorf("%w: %s/%s: no %q sidecar with shareProcessNamespace; apply the sidecar patch",
-				ErrUnprepared, t.Namespace, t.Pod, TracerContainer)
-		}
-		return nil
+		return checkSidecar(p, t)
 	}
-	if has(p.Spec.EphemeralContainers, TracerContainer) {
+	if hasContainer(p.Spec.EphemeralContainers, TracerContainer) {
 		// Ephemeral containers can be neither removed nor restarted:
 		// a second debug of the same name would fail in the API server.
 		return fmt.Errorf("%w: %s/%s already has a %q debug container; restart the pod for a new session",
@@ -126,10 +114,23 @@ func checkContainers(p podInfo, t Target) error {
 	return nil
 }
 
+// checkSidecar refuses a sidecar-mode pod without the tracer container or
+// without shareProcessNamespace, naming the sidecar patch.
+func checkSidecar(p podInfo, t Target) error {
+	if !hasContainer(p.Spec.Containers, TracerContainer) ||
+		p.Spec.ShareProcessNamespace == nil || !*p.Spec.ShareProcessNamespace {
+		return fmt.Errorf("%w: %s/%s: no %q sidecar with shareProcessNamespace; apply the sidecar patch",
+			ErrUnprepared, t.Namespace, t.Pod, TracerContainer)
+	}
+	return nil
+}
+
 // Debug starts the tracer in the pod as an ephemeral container running
 // argv (decision #14: `kubectl debug --target` joins the app container's
 // process namespace, so the JVM is never restarted). It runs Check first
-// and refuses a sidecar-mode target, which has its tracer already.
+// and refuses a sidecar-mode target, which has its tracer already, and a
+// target without an image. Deploy (deploy.go) is what iormeshctl calls:
+// it also accepts a tracer already running the pinned image.
 func (k *Kubectl) Debug(ctx context.Context, argv ...string) error {
 	if k.t.Mode != ModeDebug {
 		return fmt.Errorf("%w: debug in %s mode", ErrTransport, k.t.Mode)
@@ -137,9 +138,17 @@ func (k *Kubectl) Debug(ctx context.Context, argv ...string) error {
 	if len(argv) == 0 {
 		return fmt.Errorf("%w: empty tracer command", ErrTransport)
 	}
+	if err := k.t.requireImage(); err != nil {
+		return err
+	}
 	if err := k.Check(ctx); err != nil {
 		return err
 	}
+	return k.debug(ctx, argv)
+}
+
+// debug runs `kubectl debug` once the pod has been checked.
+func (k *Kubectl) debug(ctx context.Context, argv []string) error {
 	custom, err := writeCustom(k.t.Profile)
 	if err != nil {
 		return err

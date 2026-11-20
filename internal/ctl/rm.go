@@ -51,20 +51,25 @@ type remover struct {
 }
 
 // rmCommand parses rm's flags, tears the deployment down and unregisters
-// the host, or one project on it with -project.
+// the host, or one project on it with -project. A pod entry reference
+// takes rmPod's path instead (pods_rm.go).
 func rmCommand(args []string, e env) error {
 	fs := newFlagSet("rm", e.stderr)
 	name := fs.String("project", "", "remove only this project (default: the whole host)")
 	regPath := fs.String("registry", "", "registry file (default ~/.config/iormesh/servers.yaml)")
 	store := fs.String("store", "", "local trace store (default ~/.local/share/iormesh/traces)")
 	force := fs.Bool("force", false, "uninstall even if traces could not be synced off (they are lost)")
+	kf := addK8sFlags(fs, false)
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("%w: rm takes exactly one HOST", errUsage)
+		return fmt.Errorf("%w: rm takes exactly one HOST or pod entry", errUsage)
 	}
 	host := fs.Arg(0)
+	if federate.IsPodRef(host) {
+		return rmPod(host, rmPodOptions{regPath: *regPath, store: *store, project: *name, force: *force, kf: kf}, e)
+	}
 	projects, hostGoes, err := rmScope(*regPath, e, host, *name)
 	if err != nil {
 		return err

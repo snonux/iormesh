@@ -16,6 +16,14 @@
 //     (the image carries the tracer; #12 rules out `kubectl cp`).
 //   - debug.go: `kubectl debug --target`, the ephemeral tracer container,
 //     created only in a pod already prepared with #13's two volumes.
+//   - deploy.go: iormeshctl deploy's step for one pod — start the debug
+//     container, or accept a tracer container already there (sidecar or
+//     earlier debug container) only if its status imageID is the pinned
+//     digest (task af4).
+//   - pods.go: which running pods a registry pods: entry is (a named pod
+//     or a label selector), with each pod's UID — its store directory and
+//     host identity — and whether a tracer container is in it.
+//   - lock.go: one fetch at a time into a local directory.
 //   - ready.go: both ends of the fetch stream — the tracer's
 //     `iormesh ready` writer (cgo-free, so internal/cli wires it in) and
 //     the controller's unpacker, which trusts nothing in the stream.
@@ -31,8 +39,10 @@
 // No call ever goes through a shell: kubectl gets an argv, and
 // `kubectl exec … -- argv` hands the container runtime an argv too, so
 // pod or container names cannot inject anything; they are checked
-// against Kubernetes' own name rules regardless, and every value goes in
-// `--flag=value` form so none can read as an option.
+// against Kubernetes' own name rules regardless (internal/k8sname's,
+// shared with internal/federate, which checks the registry's k8s: and
+// pods: sections), and every value goes in `--flag=value` form so none
+// can read as an option.
 //
 // The package is cgo-free: iormeshctl runs on a laptop (CGO_ENABLED=0).
 package k8s

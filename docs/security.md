@@ -424,6 +424,16 @@ truth.
     profile are generated into `deploy/` from internal/k8s and
     test-checked field by field
     ([testing.md](testing.md#k8s-manifests-and-pod-identity-task-vb4)).
+    `iormeshctl deploy` checks a tracer container already in the
+    pod — the sidecar, or an earlier debug container — against
+    its status `imageID`, the digest the kubelet pulled, and
+    refuses another digest or an `imageID` naming none (a
+    locally loaded image), so a sidecar patch that names a tag
+    still runs only the pinned bytes (task af4);
+  - is collected into a store directory named by the pod's UID
+    (`pod-<uid>`), pinned to the host identity the API server's
+    answer implies before any segment arrives — never by what
+    the pod's own segments claim (task af4);
   `privileged: true` is the fallback where the minimal profile
   cannot run (old kernels, SELinux-enforcing nodes, runtimes
   without the newer capability names; it cannot be combined

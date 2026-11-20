@@ -82,9 +82,12 @@ type deployer struct {
 	record  deployedRecord
 }
 
-// deployCommand parses deploy's flags, checks every host against the
-// registry before contacting any, and deploys host by host. A failed host
-// is reported and the next one still deployed; the command then fails.
+// deployCommand parses deploy's flags, checks every host and pod entry
+// against the registry before contacting any, and deploys host by host,
+// then pod by pod (pods_deploy.go). A failed host or pod is reported and
+// the next one still deployed; the command then fails. The signed build
+// and the pinned key are needed only for hosts: a pod's tracer is the
+// image's, pinned by digest.
 func deployCommand(args []string, e env) error {
 	fs := newFlagSet("deploy", e.stderr)
 	name := fs.String("project", "", "deploy only this project (default: every project of the host)")
@@ -92,21 +95,36 @@ func deployCommand(args []string, e env) error {
 	dist := fs.String("dist", defaultDist, "directory holding iormesh-linux-<arch> and its "+release.SigSuffix)
 	keyPath := fs.String("key", "", "pinned minisign public key (default ~/.config/iormesh/"+keyFileName+")")
 	restart := fs.Bool("restart", false, "restart a running session even if its flags and build are unchanged")
+	kf := addK8sFlags(fs, true)
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
 	if fs.NArg() == 0 {
-		return fmt.Errorf("%w: deploy needs one or more HOSTs", errUsage)
+		return fmt.Errorf("%w: deploy needs one or more HOSTs or pod entries", errUsage)
 	}
-	servers, err := deployTargets(*path, e, fs.Args(), *name)
+	r, err := loadRegistry(*path, e)
 	if err != nil {
 		return err
 	}
-	d, recPath, err := newDeployer(e, *dist, *keyPath, *restart)
+	hosts, refs := splitTargets(fs.Args())
+	servers, err := deployTargets(r, hosts, *name)
 	if err != nil {
 		return err
 	}
-	return d.all(context.Background(), servers, recPath, d.host)
+	pods, err := podDeployTargets(&r, refs, *name, kf)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	var hostErr error
+	if len(servers) > 0 {
+		d, recPath, err := newDeployer(e, *dist, *keyPath, *restart)
+		if err != nil {
+			return err
+		}
+		hostErr = d.all(ctx, servers, recPath, d.host)
+	}
+	return errors.Join(hostErr, deployPods(ctx, e, pods))
 }
 
 // newDeployer reads the pinned key and the deploy record, and returns a
@@ -154,17 +172,7 @@ func (d deployer) all(ctx context.Context, servers []federate.Server, recPath st
 // set. Any unregistered host, unknown project or entry whose flags the
 // tracer would refuse fails the whole command before a single host is
 // contacted (principle #3). A host named twice is deployed once.
-func deployTargets(path string, e env, hosts []string, project string) ([]federate.Server, error) {
-	if path == "" {
-		var err error
-		if path, err = e.registry(); err != nil {
-			return nil, err
-		}
-	}
-	r, err := federate.LoadRegistry(path)
-	if err != nil {
-		return nil, err
-	}
+func deployTargets(r federate.Registry, hosts []string, project string) ([]federate.Server, error) {
 	var servers []federate.Server
 	for _, host := range hosts {
 		if slices.ContainsFunc(servers, func(s federate.Server) bool { return s.Host == host }) {

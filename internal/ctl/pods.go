@@ -1,0 +1,164 @@
+package ctl
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"path"
+
+	"iormesh/internal/federate"
+	"iormesh/internal/k8s"
+)
+
+// Pods as targets (PLAN.md M7, decision #18, task af4). The registry's
+// pods: entries are named on the command line by their reference,
+// <cluster>/<namespace>/<pod or selector> (federate.Registry.PodRef):
+// the "/" tells one from a host, which may not contain it. Every pod is
+// reached through the operator's kubectl (internal/k8s), with the
+// context the registry lists, never the kubeconfig's current one:
+//
+//   - collect: the API server says which running pods the entry is
+//     (the named pod, or every pod its selector matches, internal/k8s
+//     Lister) and whether each has a tracer container; each pod with one
+//     is fetched through `kubectl exec … iormesh ready` (k8s.Kubectl's
+//     Fetch). None of the SSH path's probes run — `true`, `test -d` and
+//     `find` are not in the scratch image: the API answers for
+//     reachability and presence, a pod kubectl cannot reach fails the
+//     fetch (ErrUnreachable, never an empty stream), and a ready/ that
+//     does not exist yet is an empty stream from the tracer itself.
+//   - deploy: per pod, k8s.Kubectl.Deploy — a prepared pod gets an
+//     ephemeral tracer running the entry's project, a pod whose tracer
+//     already runs the pinned image is left alone, a sidecar is checked
+//     for the pinned image. No uname, command -v, mkdir or Push: the
+//     image carries the tracer, pinned by digest.
+//   - rm: the entry's projects are collected one last time, then the
+//     entry leaves the registry. Nothing is stopped or uninstalled: an
+//     ephemeral container can be neither removed nor signalled from a
+//     shell-less image, so the session runs on until its -duration ends
+//     or the pod goes, and a sidecar until its patch is reverted.
+//
+// Each pod is its own store directory, "pod-<uid>" (k8s.PodHostID): the
+// UID, not the name, since a StatefulSet pod recreated under its name is
+// a new pod with an empty emptyDir and a new host identity. Collect pins
+// the directory to that identity (hosts.json, federate.vetHosts) from
+// the API server's answer, before any segment arrives.
+
+// k8sFlags are the per-run overrides of #18: flag > pod entry > cluster
+// > k8s: defaults.
+type k8sFlags struct {
+	context, namespace, image string
+}
+
+// addK8sFlags registers -context and -namespace, and -image when the
+// command uses one (deploy).
+func addK8sFlags(fs *flag.FlagSet, image bool) *k8sFlags {
+	f := &k8sFlags{}
+	fs.StringVar(&f.context, "context", "", "kubectl context for pod entries (must be a registered cluster's)")
+	fs.StringVar(&f.namespace, "namespace", "", "namespace for pod entries, over the entry's and the cluster's")
+	if image {
+		fs.StringVar(&f.image, "image", "", "tracer image for pod entries, pinned by digest")
+	}
+	return f
+}
+
+// podEntry is a pods: entry resolved for this run.
+type podEntry struct {
+	ref      string
+	entry    federate.Pod
+	scope    k8s.Scope
+	projects []federate.Project
+}
+
+// resolvePodRef finds ref in the registry and layers the run's flags,
+// the entry, its cluster and the k8s: defaults into its scope. A context
+// no cluster lists, an unpinned image or a bad name fails here, before
+// anything is contacted.
+func resolvePodRef(r *federate.Registry, ref string, kf *k8sFlags) (podEntry, error) {
+	p, err := r.LookupPod(ref)
+	if err != nil {
+		return podEntry{}, err
+	}
+	c, _ := r.Cluster(p.Cluster)
+	var defaults k8s.Layer
+	if r.K8s != nil {
+		defaults = k8s.Layer{Image: r.K8s.Image, Mode: k8s.Mode(r.K8s.Mode), Profile: k8s.Profile(r.K8s.Profile)}
+	}
+	s, err := k8s.ResolveScope(r.Contexts(),
+		k8s.Layer{Context: kf.context, Namespace: kf.namespace, Image: kf.image},
+		k8s.Layer{Namespace: p.Namespace, Image: p.Image, Mode: k8s.Mode(p.Mode), Profile: k8s.Profile(p.Profile)},
+		k8s.Layer{Context: c.Context, Namespace: c.Namespace},
+		defaults)
+	if err != nil {
+		return podEntry{}, fmt.Errorf("pod entry %s: %w", ref, err)
+	}
+	return podEntry{ref: ref, entry: p, scope: s, projects: r.PodProjects(p)}, nil
+}
+
+// pods asks the API server which running pods the entry is now.
+func (pe podEntry) pods(ctx context.Context) ([]k8s.PodState, error) {
+	l, err := k8s.NewLister(pe.scope)
+	if err != nil {
+		return nil, err
+	}
+	if pe.entry.Pod != "" {
+		st, err := l.Get(ctx, pe.entry.Pod)
+		if err != nil {
+			return nil, err
+		}
+		return []k8s.PodState{st}, nil
+	}
+	return l.Select(ctx, pe.entry.Selector)
+}
+
+// transport is the kubectl transport into one of the entry's pods.
+func (pe podEntry) transport(pod string) (*k8s.Kubectl, error) {
+	t, err := pe.scope.Target(pod, pe.entry.Container)
+	if err != nil {
+		return nil, err
+	}
+	return k8s.New(t)
+}
+
+// label names a pod in output: the entry's reference and the pod.
+func (pe podEntry) label(pod string) string {
+	return pe.ref + " pod " + pod
+}
+
+// podIdentity is the host identity a tracer in st reports (task 7f4's
+// decision, k8s.PodHostID and PodFQDN), which collect pins its store
+// directory to.
+func (pe podEntry) podIdentity(st k8s.PodState) federate.HostIdentity {
+	return federate.HostIdentity{HostID: k8s.PodHostID(st.UID),
+		FQDN: k8s.PodFQDN(st.Name, pe.scope.Namespace, st.UID)}
+}
+
+// checkPodFlags refuses, before any pod is contacted, pass-through flags
+// the entry sets itself (ownedFlags) and a -trace-dir other than the
+// pod's emptyDir, where collect fetches from.
+func checkPodFlags(p federate.Project) error {
+	if f := firstOwnedFlag(p.Flags); f != "" {
+		return fmt.Errorf("flag %s: the entry sets it itself", f)
+	}
+	for i, f := range p.Flags {
+		key, val, hasVal := cutFlag(f)
+		if key != "trace-dir" {
+			continue
+		}
+		if !hasVal && i+1 < len(p.Flags) {
+			val = p.Flags[i+1]
+		}
+		if path.Clean(val) != k8s.TraceRoot {
+			return fmt.Errorf("flag %s: a pod's session may only use %s", f, k8s.TraceRoot)
+		}
+	}
+	return nil
+}
+
+// podRunArgs is the tracer argv a debug container runs for p: start's
+// argv (startArgs) as a foreground run — the container is the unit — of
+// the image's tracer.
+func podRunArgs(p federate.Project) []string {
+	argv := startArgs(p)
+	argv[0] = "run"
+	return append([]string{k8s.TracerBinary}, argv...)
+}

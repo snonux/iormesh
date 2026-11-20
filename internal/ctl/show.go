@@ -27,6 +27,7 @@ func refreshCommand(args []string, e env) error {
 	var f buildFlags
 	addBuildFlags(fs, &f)
 	regPath := fs.String("registry", "", "registry file (default ~/.config/iormesh/servers.yaml)")
+	kf := addK8sFlags(fs, false)
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
@@ -34,7 +35,7 @@ func refreshCommand(args []string, e env) error {
 	if err != nil {
 		return err
 	}
-	targets, err := collectTargets(r, fs.Args(), f.projects)
+	targets, err := collectTargets(r, fs.Args(), f.projects, kf)
 	if err != nil {
 		return err
 	}
@@ -42,6 +43,8 @@ func refreshCommand(args []string, e env) error {
 	if err != nil {
 		return err
 	}
+	// The build reads its pins beside -db: a pod's pin goes there too.
+	c.db = f.db
 	ctx := context.Background()
 	collectErr := c.all(ctx, targets)
 	if collectErr != nil {

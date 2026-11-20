@@ -3,10 +3,10 @@ package k8s
 import (
 	"errors"
 	"fmt"
-	"regexp"
 	"slices"
 
 	"iormesh/internal/federate"
+	"iormesh/internal/k8sname"
 )
 
 // Errors a Target or a kubectl call is refused with, for errors.Is.
@@ -60,27 +60,11 @@ const TracerContainer = "iormesh"
 // DefaultImage is the built-in tracer image, the last layer of #18's
 // precedence. It is empty until the published image exists (task vb4
 // wrote scripts/container/tracer-image.Containerfile, task yb4 builds and
-// publishes it): until then a session without a configured image is
-// refused rather than given a placeholder. Setting it also moves deploy/
+// publishes it): until then a deploy without a configured image is
+// refused rather than given a placeholder (collect needs no image).
+// Setting it also moves deploy/
 // off its placeholder (manifest.go, `mage k8sManifests`).
 const DefaultImage = ""
-
-// Name patterns, Kubernetes' own: a DNS-1123 label for namespaces and
-// containers, a DNS-1123 subdomain for pods.
-var (
-	labelName     = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
-	subdomainName = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$`)
-	// contextName is what kubeconfig context names look like in
-	// practice (kind-x, user@cluster, arn:aws:eks:…:cluster/x): no
-	// space, quote, control character or leading dash.
-	contextName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._:@/+-]{0,252}$`)
-	// pinnedImage is a repository (optionally with a registry host,
-	// port and tag) followed by a sha256 digest: the digest, not a tag,
-	// says which bytes run as root in the pod.
-	pinnedImage = regexp.MustCompile(
-		`^[a-z0-9][a-z0-9._-]*(?::[0-9]+)?(?:/[a-z0-9][a-z0-9._-]*)*(?::[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?` +
-			`@sha256:[0-9a-f]{64}$`)
-)
 
 // Target is one pod session's resolved kubectl coordinates.
 type Target struct {
@@ -104,31 +88,56 @@ type Layer struct {
 	Profile   Profile
 }
 
-// Resolve layers ls (highest precedence first: flag, pod entry,
-// cluster, k8s: defaults) into the Target for pod and its app
-// container, falls back to DefaultImage, debug mode and the minimal
-// profile, and validates the result. registered is the registry's list
-// of contexts: one it does not list is refused, as an unregistered host
-// is for SSH.
-func Resolve(pod, container string, registered []string, ls ...Layer) (Target, error) {
-	t := Target{Pod: pod, Container: container}
+// Scope is the layers resolved: where pods are looked up and how a
+// tracer gets into them, before a pod is picked. A registry pods: entry
+// with a label selector resolves to one Scope and then one Target per pod
+// the selector matches (Lister, pods.go).
+type Scope Layer
+
+// ResolveScope layers ls (highest precedence first: flag, pod entry,
+// cluster, k8s: defaults), falls back to DefaultImage, debug mode and the
+// minimal profile, and validates the result. registered is the
+// registry's list of contexts: one it does not list is refused, as an
+// unregistered host is for SSH.
+func ResolveScope(registered []string, ls ...Layer) (Scope, error) {
+	var s Scope
 	for _, l := range slices.Backward(ls) {
-		t.Context = pick(l.Context, t.Context)
-		t.Namespace = pick(l.Namespace, t.Namespace)
-		t.Image = pick(l.Image, t.Image)
-		t.Mode = pick(l.Mode, t.Mode)
-		t.Profile = pick(l.Profile, t.Profile)
+		s.Context = pick(l.Context, s.Context)
+		s.Namespace = pick(l.Namespace, s.Namespace)
+		s.Image = pick(l.Image, s.Image)
+		s.Mode = pick(l.Mode, s.Mode)
+		s.Profile = pick(l.Profile, s.Profile)
 	}
-	t.Image = pick(t.Image, DefaultImage)
-	t.Mode = pick(t.Mode, ModeDebug)
-	t.Profile = pick(t.Profile, ProfileMinimal)
+	s.Image = pick(s.Image, DefaultImage)
+	s.Mode = pick(s.Mode, ModeDebug)
+	s.Profile = pick(s.Profile, ProfileMinimal)
+	if err := s.validate(); err != nil {
+		return Scope{}, err
+	}
+	if !slices.Contains(registered, s.Context) {
+		return Scope{}, fmt.Errorf("%w: %q is not a registered context", ErrContext, s.Context)
+	}
+	return s, nil
+}
+
+// Target is the session for pod and its app container in s, validated.
+func (s Scope) Target(pod, container string) (Target, error) {
+	t := Target{Context: s.Context, Namespace: s.Namespace, Pod: pod, Container: container,
+		Image: s.Image, Mode: s.Mode, Profile: s.Profile}
 	if err := t.Validate(); err != nil {
 		return Target{}, err
 	}
-	if !slices.Contains(registered, t.Context) {
-		return Target{}, fmt.Errorf("%w: %q is not a registered context", ErrContext, t.Context)
-	}
 	return t, nil
+}
+
+// Resolve is ResolveScope and then the Target for pod and its app
+// container: one step for a pods: entry that names its pod.
+func Resolve(pod, container string, registered []string, ls ...Layer) (Target, error) {
+	s, err := ResolveScope(registered, ls...)
+	if err != nil {
+		return Target{}, err
+	}
+	return s.Target(pod, container)
 }
 
 // pick returns v unless it is empty, then fallback.
@@ -139,40 +148,52 @@ func pick[T ~string](v, fallback T) T {
 	return fallback
 }
 
-// Validate checks every field before any reaches a kubectl argv.
-func (t Target) Validate() error {
-	if !contextName.MatchString(t.Context) {
-		return fmt.Errorf("%w: %q", ErrContext, t.Context)
+// validate checks the scope's fields. An empty image passes: exec and
+// fetch (collect, rm) run in a tracer container already there and need
+// none, so a registry without an image — DefaultImage is empty until task
+// yb4 publishes one — can still collect; Debug and Deploy refuse it
+// (requireImage). A non-empty image must always be pinned by digest.
+func (s Scope) validate() error {
+	if !k8sname.Context(s.Context) {
+		return fmt.Errorf("%w: %q", ErrContext, s.Context)
 	}
-	if err := checkNames(t); err != nil {
-		return err
+	if !k8sname.Label(s.Namespace) {
+		return fmt.Errorf("%w: namespace %q", ErrName, s.Namespace)
 	}
-	if t.Image == "" {
-		return fmt.Errorf("%w: no tracer image configured (set k8s.image or -image, pinned by digest)", ErrImage)
+	if s.Image != "" && !k8sname.Pinned(s.Image) {
+		return fmt.Errorf("%w: %q is not pinned by digest (<repo>@sha256:<64 hex>)", ErrImage, s.Image)
 	}
-	if !pinnedImage.MatchString(t.Image) {
-		return fmt.Errorf("%w: %q is not pinned by digest (<repo>@sha256:<64 hex>)", ErrImage, t.Image)
+	if s.Mode != ModeDebug && s.Mode != ModeSidecar {
+		return fmt.Errorf("%w: mode %q (debug or sidecar)", ErrTransport, s.Mode)
 	}
-	if t.Mode != ModeDebug && t.Mode != ModeSidecar {
-		return fmt.Errorf("%w: mode %q (debug or sidecar)", ErrTransport, t.Mode)
-	}
-	if t.Profile != ProfileMinimal && t.Profile != ProfilePrivileged {
-		return fmt.Errorf("%w: profile %q (minimal or privileged)", ErrTransport, t.Profile)
+	if s.Profile != ProfileMinimal && s.Profile != ProfilePrivileged {
+		return fmt.Errorf("%w: profile %q (minimal or privileged)", ErrTransport, s.Profile)
 	}
 	return nil
 }
 
-// checkNames checks the namespace, pod and app container names.
-func checkNames(t Target) error {
+// Validate checks every field before any reaches a kubectl argv.
+func (t Target) Validate() error {
+	s := Scope{Context: t.Context, Namespace: t.Namespace, Image: t.Image, Mode: t.Mode, Profile: t.Profile}
+	if err := s.validate(); err != nil {
+		return err
+	}
 	switch {
-	case !labelName.MatchString(t.Namespace):
-		return fmt.Errorf("%w: namespace %q", ErrName, t.Namespace)
-	case len(t.Pod) > 253 || !subdomainName.MatchString(t.Pod):
+	case !k8sname.Pod(t.Pod):
 		return fmt.Errorf("%w: pod %q", ErrName, t.Pod)
-	case !labelName.MatchString(t.Container):
+	case !k8sname.Label(t.Container):
 		return fmt.Errorf("%w: container %q", ErrName, t.Container)
 	case t.Container == TracerContainer:
 		return fmt.Errorf("%w: container %q is the tracer's own name", ErrName, t.Container)
+	}
+	return nil
+}
+
+// requireImage refuses a target without a tracer image: what Debug runs
+// and what Deploy checks a running tracer container against.
+func (t Target) requireImage() error {
+	if t.Image == "" {
+		return fmt.Errorf("%w: no tracer image configured (set k8s.image or -image, pinned by digest)", ErrImage)
 	}
 	return nil
 }

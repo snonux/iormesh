@@ -79,12 +79,14 @@ func TestWriteReadyMissingDir(t *testing.T) {
 }
 
 // assertDir checks dir holds exactly want, each file 0600.
+// Fetch's lock file (lock.go), an empty dot file, is not counted.
 func assertDir(t *testing.T, dir string, want map[string]string) {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+	entries = slices.DeleteFunc(entries, func(e os.DirEntry) bool { return e.Name() == lockName })
 	if len(entries) != len(want) {
 		t.Errorf("%s holds %v, want %v", dir, entries, want)
 	}

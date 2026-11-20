@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"iormesh/internal/k8sname"
 )
 
 // deployDir is the repo's deploy/, where `mage k8sManifests` writes.
@@ -118,7 +120,7 @@ func TestSidecarPatch(t *testing.T) {
 		t.Errorf("containers %v, want just %q", at(t, spec, "containers"), TracerContainer)
 	}
 	image, _ := at(t, c, "image").(string)
-	if !pinnedImage.MatchString(image) || !strings.Contains(image, "@sha256:") {
+	if !k8sname.Pinned(image) || !strings.Contains(image, "@sha256:") {
 		t.Errorf("image %q is not pinned by digest", image)
 	}
 	args := strs(t, at(t, c, "args"))

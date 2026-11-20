@@ -123,6 +123,9 @@ func (k *Kubectl) Push(context.Context, string, ...string) error {
 // exec removes, on the tracer, exactly the files that arrived — so a
 // failed fetch loses nothing and a repeated one moves only what is new.
 // Files already unpacked are removed even when the stream broke later.
+// One fetch at a time per local dir (lockDir): Unpack's temporaries are
+// per segment name, and two collects of one pod would otherwise write
+// the same temporary at once.
 func (k *Kubectl) Fetch(ctx context.Context, remoteDir, localDir string) error {
 	proj, err := readyProject(remoteDir)
 	if err != nil {
@@ -135,6 +138,11 @@ func (k *Kubectl) Fetch(ctx context.Context, remoteDir, localDir string) error {
 	if err := os.MkdirAll(local, 0o700); err != nil {
 		return fmt.Errorf("fetch: %w", err)
 	}
+	unlock, err := lockDir(local)
+	if err != nil {
+		return fmt.Errorf("fetch: %w", err)
+	}
+	defer unlock()
 	var taken []string
 	err = k.run.stream(ctx, k.execArgs(TracerBinary, "ready", "-project", proj), func(r io.Reader) error {
 		var uerr error

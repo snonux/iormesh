@@ -7,6 +7,8 @@ import (
 	"regexp"
 
 	"gopkg.in/yaml.v3"
+
+	"iormesh/internal/k8sname"
 )
 
 // placeholderImage is the tracer image deploy/ names while DefaultImage
@@ -41,7 +43,7 @@ var DefaultSidecarArgs = []string{"run", "-listen-port", "8080", "-duration", "1
 
 // Manifests are the inputs the generated manifests vary by.
 type Manifests struct {
-	// Image is the tracer image, pinned by digest (pinnedImage): a tag
+	// Image is the tracer image, pinned by digest (k8sname.Pinned): a tag
 	// alone would let what runs as root with #13's capabilities change
 	// under the same manifest.
 	Image string
@@ -66,7 +68,7 @@ var binaryQuantity = regexp.MustCompile(`^[1-9][0-9]{0,5}(Mi|Gi|Ti)$`)
 // Validate refuses inputs the manifests must not carry.
 func (m Manifests) Validate() error {
 	switch {
-	case !pinnedImage.MatchString(m.Image):
+	case !k8sname.Pinned(m.Image):
 		return fmt.Errorf("image %q: want <repository>@sha256:<64 hex>, pinned by digest", m.Image)
 	case TraceCap(m.TraceLimit) == "":
 		return fmt.Errorf("trace limit %q: want a size like 512Mi or 2Gi", m.TraceLimit)

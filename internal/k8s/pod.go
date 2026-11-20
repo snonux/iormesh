@@ -3,6 +3,7 @@ package k8s
 import (
 	"fmt"
 
+	"iormesh/internal/k8sname"
 	"iormesh/internal/project"
 )
 
@@ -48,8 +49,8 @@ func PodFromEnv(getenv func(string) string) (PodRef, bool) {
 // but the namespace arrives through the environment, so both rules are
 // checked rather than assumed.
 func ProjectForNamespace(ns string) (string, error) {
-	// labelName (target.go): a namespace name is an RFC 1123 label.
-	if !labelName.MatchString(ns) || !project.Valid(ns) {
+	// k8sname.Label: a namespace name is an RFC 1123 label.
+	if !k8sname.Label(ns) || !project.Valid(ns) {
 		return "", fmt.Errorf("namespace %q: not a Kubernetes namespace name usable as a project (%s)",
 			ns, project.Rule)
 	}

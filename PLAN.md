@@ -1629,8 +1629,16 @@ Later phase — plain Linux servers (M4) come first.
   exec-streamed tar fetch through a new `iormesh ready`
   subcommand, and `debug --target` into prepared pods only;
   `Push` is refused (the image carries the tracer, and #12 rules
-  out `kubectl cp`). The registry sections and the iormeshctl
-  commands that pick it for a pod remain (task af4).
+  out `kubectl cp`).
+  Status (2026-11-21, task af4): wired into iormeshctl and tested
+  against a fake kubectl, not yet on kind — the registry's `k8s:`
+  and `pods:` sections, `-context`/`-namespace`/`-image`, and
+  deploy, collect, refresh and rm taking pod entries (named
+  `<cluster>/<namespace>/<pod or selector>`) beside hosts, with
+  no shell utility in the image (#18's "Wired" note). Each pod
+  is its own store directory, `pod-<uid>`, pinned to the host
+  identity task 7f4 gives an in-pod tracer (`host_id`
+  `pod-<uid>`); 7f4 builds the tracer side.
 - Pod identity enrichment: map host PIDs/cgroups → pod, namespace,
   container, so the graph speaks "pod checkout-7d9f (ns prod)"
   instead of bare host PIDs. In k8s mode the project defaults
@@ -2340,6 +2348,38 @@ here only as placeholders.
   `tar`, `kubectl cp` or rsync needed in the image. Schema
   sketch, placeholders only:
   [implementation.md](docs/implementation.md#m7--kubernetes).
+  *Wired (task af4, 2026-11-21, provisional like the rest):*
+  commands name a pod entry `<cluster>/<namespace>/<pod>` or
+  `<cluster>/<namespace>/<selector>` (the "/" sets it apart from
+  a host); a project's name may be left out, and is then the
+  namespace (#21). A `pod:` entry is one pod, refused when not
+  running; a `selector:` (equality-based, `k=v[,k!=v…]`, at
+  least one positive term — never empty) picks *every* running
+  pod it matches, each its own session, at most 32 (more is
+  refused as a selector broader than meant); one matching no
+  running pod fails the command for that entry — a pod gone took
+  its emptyDir, so it is never "nothing to collect". A debug-mode
+  entry carries exactly one project (an ephemeral container runs
+  one process); a sidecar's sessions are its patch's command
+  line, and deploy only verifies it. Digest pinning holds in
+  both modes: a tracer container already in the pod (the
+  sidecar, or an earlier debug container, which is then left
+  alone) must run the pinned digest by its status `imageID`;
+  another digest, or an `imageID` without a registry digest, is
+  refused. An image is needed to deploy, not to collect. Collect
+  asks the API server which pods an entry is and whether each
+  has a tracer container (none: nothing to collect, said), then
+  fetches through `kubectl exec … iormesh ready`; a pod kubectl
+  cannot reach fails, and a missing `ready/` is an empty stream —
+  no `true`, `test` or `find` in the image. One fetch per local
+  directory at a time (a flock, failing fast). Each pod's store
+  directory is `pod-<uid>`, not its name (a StatefulSet pod
+  recreated under its name is a new host), pinned in the build's
+  host pins to `host_id` `pod-<uid>` and the FQDN task 7f4
+  gives an in-pod tracer. rm collects one last time, then drops
+  the entry; nothing in the pod is stopped (an ephemeral
+  container cannot be removed or signalled without a shell), so
+  the session runs until its `-duration` or the pod ends.
   Overturned by: the owner's examples. Owner to provide: real
   contexts, namespaces, the image registry, and how pods are
   picked (labels or names).

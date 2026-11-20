@@ -5293,11 +5293,8 @@ depends on:
    ([testing.md](testing.md#k8s-transport-task-wb4)).
    `--custom` needs kubectl 1.30 or later (from 1.27 it sat behind
    `KUBECTL_DEBUG_CUSTOM_PROFILE=true`; docs/build.md).
-   Task af4 wires it in: the registry's `k8s:`/`pods:` sections,
-   the run flags, deploy/collect/rm picking this transport for a
-   pod, and collect probes that need no shell utilities (collect
-   runs `true` and `test -d` through `Run`; the image has
-   neither). For kind (task yb4): that `--profile=general` plus
+   Wired by task af4 (step 10). For kind (task yb4): that
+   `--profile=general` plus
    `--custom` yields exactly the custom capabilities (the lists'
    strategic merge), and that the image's `PATH` finds
    `iormesh`.
@@ -5330,6 +5327,40 @@ depends on:
     precedence flag > pod entry > cluster > `k8s:` default. A
     context the registry does not list is refused, as an
     unregistered host is.
+
+    Built by task af4 (the rules: PLAN.md #18's "Wired" note).
+    `internal/k8sname` holds the name rules both sides check —
+    `internal/federate` when it loads the sections
+    (`registry_k8s.go`: types, validation, `PodRef`,
+    `PodProjects`, `RemovePod`; a pod entry may also set `image`,
+    `mode` and `profile`), `internal/k8s` before every argv — since
+    k8s imports federate. In `internal/k8s`: `ResolveScope` (the
+    layers without a pod; `Resolve` is it plus `Scope.Target`),
+    which now lets an empty image through for exec and fetch while
+    `Debug` and `Deploy` refuse it; `Lister` (`pods.go`: `Get`,
+    `Select` over `get pod(s) -o json`, returning name, UID and
+    whether the mode's tracer container is there); `Deploy`
+    (`deploy.go`: one `get`, the prepared-pod checks, then start,
+    leave a running tracer of the pinned digest alone, or verify a
+    sidecar — the `imageID` check); `lockDir` (`lock.go`, a
+    non-blocking flock on `.fetch.lock` around `Fetch`, wb4 review
+    N9); `PodHostID` and `PodFQDN`, the identity task 7f4's tracer
+    reports. In `internal/ctl`: `pods.go` (flags, `podEntry`,
+    `resolvePodRef`, the run argv `iormesh run -project P
+    <target> <flags>`, `-trace-dir` pinned to the emptyDir),
+    `pods_collect.go` (per pod: the pin in `hosts.json` beside the
+    service database — refresh's `-db` included — then `Fetch`
+    into `<store>/<project>/pod-<uid>`), `pods_deploy.go`,
+    `pods_rm.go`; collect, refresh, deploy and rm take pod
+    references beside hosts, and deploy needs the signed build and
+    key only for hosts. `federate.ValidServer` refuses a registry
+    host shaped like `pod-<uid>`, so no server shares a pod's
+    directory. Tests: a fake kubectl on `PATH` in both packages
+    ([testing.md](testing.md#k8s-controller-wiring-task-af4)).
+    Left for yb4 on kind: that a pod's `imageID` names the
+    registry digest (an image `kind load`ed reports a bare config
+    digest, which deploy refuses — push to a registry), and the
+    whole path against a real API server.
 11. ClusterIP join: S2's key if it survives kube-proxy's DNAT;
     otherwise conntrack on the node.
 12. `internal/routemap` (#15): the static map first —

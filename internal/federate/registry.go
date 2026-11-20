@@ -51,10 +51,13 @@ var hostName = regexp.MustCompile(
 // project: a host is registered to trace something, and a server without a
 // project could not be started (#21: the project is a manual label kept
 // with the registry entry). Expand is the optional expand: section
-// (expandcfg.go, PLAN.md M6).
+// (expandcfg.go, PLAN.md M6). K8s and Pods are the optional Kubernetes
+// sections (registry_k8s.go, PLAN.md M7, decision #18).
 type Registry struct {
 	Servers []Server `yaml:"servers"`
 	Expand  *Expand  `yaml:"expand,omitempty"`
+	K8s     *K8s     `yaml:"k8s,omitempty"`
+	Pods    []Pod    `yaml:"pods,omitempty"`
 }
 
 // Server is one registered host and the independent sessions, one per
@@ -91,9 +94,21 @@ func (t Target) Spec() target.Spec {
 	return target.Spec{Pattern: t.Pattern, ListenPort: t.ListenPort}
 }
 
-// ValidHost reports whether host is usable as a registry host name.
+// podDir is the store directory name collect gives a pod: "pod-" and its
+// UID (internal/k8s PodHostID). No registry host may look like one, so a
+// server can never share a pod's directory.
+var podDir = regexp.MustCompile(`^pod-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// ValidHost reports whether host is usable as a store directory name: a
+// registry host name, or a pod's "pod-<uid>".
 func ValidHost(host string) bool {
 	return hostName.MatchString(host)
+}
+
+// ValidServer reports whether host is usable as a registry host name:
+// ValidHost, and not a pod's directory name.
+func ValidServer(host string) bool {
+	return ValidHost(host) && !podDir.MatchString(host)
 }
 
 // DefaultRegistryPath is ~/.config/iormesh/servers.yaml (decision #12), or
@@ -171,9 +186,12 @@ func (r *Registry) Save(path string) error {
 
 // Validate checks every entry and that hosts, and projects per host, are
 // unique: the same rules Add enforces, applied to a hand-edited file too.
-// The expand: section is checked as well.
+// The expand:, k8s: and pods: sections are checked as well.
 func (r *Registry) Validate() error {
 	if err := r.Expand.validate(); err != nil {
+		return err
+	}
+	if err := r.validateK8s(); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
@@ -193,7 +211,7 @@ func (r *Registry) Validate() error {
 // same host and project twice is ErrDuplicate: a second session under one
 // label would share its trace directory and systemd unit.
 func (r *Registry) Add(host string, p Project) error {
-	if !ValidHost(host) {
+	if !ValidServer(host) {
 		return fmt.Errorf("%w: host %q", ErrInvalid, host)
 	}
 	if err := p.validate(); err != nil {
@@ -269,7 +287,7 @@ func (r *Registry) find(host string) int {
 }
 
 func (s Server) validate() error {
-	if !ValidHost(s.Host) {
+	if !ValidServer(s.Host) {
 		return fmt.Errorf("%w: host %q", ErrInvalid, s.Host)
 	}
 	if len(s.Projects) == 0 {
