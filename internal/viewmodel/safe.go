@@ -6,6 +6,11 @@ import (
 	"iormesh/internal/termsafe"
 )
 
+// Safe is safeModel for a renderer outside this package: the TUI
+// (internal/tui) makes the whole model terminal-safe once when it loads
+// it, so no screen, row or detail line can print a server's string raw.
+func Safe(m Model) Model { return safeModel(m) }
+
 // safeModel returns a copy of m whose every string is terminal-safe
 // (termsafe.String). Nearly all of them come from the servers — service
 // and client names (hostnames, comms), FQDNs, end reasons, bad segments'

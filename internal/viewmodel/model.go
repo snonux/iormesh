@@ -2,8 +2,9 @@
 // consolidation run (docs/visualization.md, "One view model, three
 // renderers"). `iormeshctl build` computes it once per run from the
 // merge, the per-session tallies and the service database; the plain
-// text of `build` and `show` (summary.go) renders it, and M5's site and
-// TUI will render the same model, so no two surfaces can disagree.
+// text of `build` and `show` (summary.go) renders it, the TUI
+// (internal/tui, task ob4) explores it and the local site (internal/site,
+// task nb4) embeds it, so no two surfaces can disagree.
 //
 // Step V1 (M4) built run, health, services and edges; V2 (M5, task mb4)
 // appends the conversations (conversation.go): request chains across

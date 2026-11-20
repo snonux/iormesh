@@ -1,0 +1,30 @@
+iormesh · shop · 2025-11-20 00:53:20 – 00:53:20 UTC · 4 services · 3 edges · 1 conversations
+ 1 services  2 edges  3 conversations  4 sequence  5 threads  6 processes  7 health
+ #   ORDERING      STEP 0001 GET /checkout                      │step       11 of conversation 0001 (file)
+ 1   time-ordered  (untraced) -> java/http-1: GET /checkout [un…│what       rename /data/order-42.json.tmp -> /data/order-42.json
+ 2   causal        java/http-1 -> orders:8080/worker-3: GET /or…│on         orders:8080/worker-3  orders.example.org pid 20@1 tid 21
+ 3   causal        orders:8080/worker-3: open /etc/orders.conf  │ordering   causal (thread order or a paired send -> receive)
+ 4   causal        orders:8080/worker-3: read /etc/orders.conf …│java stack (top first)
+ 5   causal        orders:8080/worker-3 -> inventory:8081/inv-1…│  at com.shop.orders.DataStore#save(DataStore.java:42)
+ 6   causal        inventory:8081/inv-1: open /var/inv/stock.db │  at com.shop.orders.OrderHandler#handle(OrderHandler.java:20)
+ 7   causal        inventory:8081/inv-1: read /var/inv/stock.db…│ref        shop/orders/orders.example.org-o1/20
+ 8   causal        inventory:8081/inv-1 -> orders:8080/worker-3…│raw event  iormeshctl query -ref shop/orders/orders.example.org-o1/20
+ 9   causal        orders:8080/worker-3: create /data/order-42.…│
+ 10  causal        orders:8080/worker-3: write /data/order-42.j…│⏎ opens this thread's story
+ 11  causal        orders:8080/worker-3: rename /data/order-42.…│
+ 12  time-ordered  orders:8080/worker-3 -> billing:8082/bill-1:…│
+ 13  time-ordered  billing:8082/bill-1 -> orders:8080/worker-3:…│
+ 14  causal        orders:8080/worker-3 -> java/http-1: 200 [8.…│
+ 15  causal        java/http-1 -> (untraced): 200 [8.6ms]       │
+                                                                │
+                                                                │
+                                                                │
+                                                                │
+                                                                │
+                                                                │
+                                                                │
+                                                                │
+                                                                │
+                                                                │
+                                                                │
+↑↓ move · ⏎ open · esc back · tab detail · / filter · 1-7 screens · ? help · q quit

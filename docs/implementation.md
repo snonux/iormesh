@@ -4501,6 +4501,54 @@ internal/ctl/open.go           # iormeshctl open, xdg-open / open
   `build_summary.golden` gained the `site` line (folder name
   masked).
 
+**Terminal UI** — V4, built by task ob4 (cgo-free; screens and
+keys in [visualization.md](visualization.md), "V4 as built"):
+
+```
+internal/tui/tui.go        # Model (all-pointer), New, Run, Init, Update, View
+internal/tui/screens.go    # each screen's rows, scope, text filter
+internal/tui/detail.go     # the detail pane: show's text, step detail
+internal/tui/keys.go       # keys, the ⏎/esc walk, filter editing
+internal/tui/view.go       # layout, fit to the terminal, styles
+internal/ctl/tui.go        # iormeshctl tui: TTY check, loadModel
+internal/viewmodel/safe.go # + Safe; StepText, ActText,
+                           #   LifelineDetail, WriteProcess exported
+```
+
+- **One data path.** `tui` loads `model.json` with `show`'s
+  `loadModel` and hands it to `tui.New`, which keeps
+  `viewmodel.Safe(m)`: every string a server chose is
+  terminal-safe before any screen formats it. Rows and details
+  reuse the text views (`StepText`, `WriteSequence`,
+  `WriteThreads`, `WriteProcess`, `WriteSummary`, `WriteHealth`),
+  so the TUI and `show` read alike. The model is bounded, so rows
+  are rebuilt per frame — no cache to fall out of step.
+- **Frames.** `Render` is a pure function of the model, the size
+  and the keys: title, tab bar, body, footer, exactly the
+  terminal's height; `fit` cuts each line with `ansi.Truncate`
+  (escape- and width-aware) and pads it; details wrap with
+  `ansi.Wrap`. Styles (Lip Gloss) are applied after the cut,
+  only to safe text. `Init` asks for nothing; the size arrives as
+  a `WindowSizeMsg`; `clamp` keeps cursor, list offset and detail
+  scroll in range after every message.
+- **No terminal.** `env.terminal` (stdin and stdout both a TTY,
+  `golang.org/x/term`) gates the command before anything is
+  read; tests fake it and `env.tui`.
+- Tests: `internal/tui/tui_test.go` — every screen at eight sizes
+  (below the minimum, stacked, both sides of the 100-column
+  split, wide) with the cursor on every row, the detail focused
+  and the help open: each frame exactly the height, each line
+  exactly the width; names, threads, paths and frames holding
+  `ESC[2J` never reach the frame raw and no control rune does;
+  the walk service → conversations → sequence → step (stack,
+  `query -ref`) → thread → conversation and `esc` back; edge scope
+  and filter; byte-identical frames for the same keys; an empty
+  model; one `teatest` program run. `internal/ctl/tui_test.go` —
+  no terminal (exit 1, before reading), and the microservices
+  build walked from the services to the rename step's Java stack
+  and its thread's story, frames against
+  `testdata/tui_{services,sequence}.golden`.
+
 **Query** (`internal/query`, `iormeshctl query`):
 
 ```sh

@@ -251,6 +251,43 @@ not fit a terminal well), Edge, Sequence, Process, Health.
 `⏎` on a step opens the detail pane with the Java stack; `e`
 writes the current view as text to a file.
 
+V4 as built (task ob4; files in [implementation.md](implementation.md),
+M5 "Terminal UI"): `iormeshctl tui [-project NAME]... [-builds
+DIR]` reads the build's `model.json` through the loader `show`
+uses — no second reading of the data — and needs a terminal on
+stdin and stdout; without one it exits 1 and points at `show`.
+Seven screens, each a list and a detail pane (side by side from
+100 columns, stacked below):
+
+| Key | Screen | List | Detail |
+|-----|--------|------|--------|
+| `1` | services | the mesh as a table: conns, requests, TLS, unresolved | endpoints, top paths, edges in and out, newest conversations |
+| `2` | edges | client -> server, state, conns | counts, first/last, conversations along it |
+| `3` | conversations | ID, start, entry, request, hops | `show sequence`'s text |
+| `4`/`s` | sequence | one step per row (`show sequence`'s step line) | the step: lifelines, ordering explained, hop, sizes, the whole Java stack, its ref and `iormeshctl query -ref REF` |
+| `5` | threads | lifelines (a carrier's marked `virtual`) | `show thread`'s story |
+| `6` | processes | host, comm[pid], service, restarts | `show processes`' block |
+| `7`/`h` | health | — | the build summary, then `show health` |
+
+`⏎` walks down: a service or an edge opens the conversations
+scoped to it, a conversation its sequence, a step its thread's
+story, a story its newest step's conversation; `esc` walks back
+and drops the scope. `tab` moves the focus to the detail (to
+scroll a long stack), `/` filters the current list
+(case-insensitive substring; `⏎` keeps, `esc` clears), `?` help,
+`q` quits. Differences from the sketch: the sequence is the
+numbered step list `show sequence` prints, not a lifeline
+drawing (it fits any width, and the arrows' names are the
+lifelines'); the raw event is one `query -ref` away (the TUI
+reads only the model, never the store); `e` is not built —
+`iormeshctl show VIEW` writes any view as text; `bubbles` is not
+needed (the list and the filter are a few lines each). The whole model
+goes through `viewmodel.Safe` (termsafe) once on load, so a
+server's escape sequence prints Go-quoted on every screen; every
+line is cut to the terminal's width (ANSI- and wide-rune-aware)
+and a frame is exactly its height; frames are a pure function of
+model, size and keys.
+
 ## Plain text
 
 `iormeshctl show` prints one view and exits. It is what `build`
@@ -507,7 +544,10 @@ headless browser test loads that hostile site from `file://` at
 CSP refusal — how a request or an injected script would show):
 opt-in, as `mage test` must not need a browser
 ([testing.md](testing.md), "Local site"). The TUI through
-`teatest` at several terminal sizes.
+`teatest` at several terminal sizes (built: model-level frames at
+eight sizes, an escape-injection check, the walk, and one
+`teatest` program run; the microservices walk's frames are
+goldens in `internal/ctl/testdata/tui_*.golden`).
 
 ## See also
 

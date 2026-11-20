@@ -28,6 +28,15 @@ func WriteProcesses(w io.Writer, m Model) error {
 	return err
 }
 
+// WriteProcess prints one process block, as `show processes` does: the
+// TUI's process screen shows the same text for the selected process.
+func WriteProcess(w io.Writer, p Process) error {
+	var b strings.Builder
+	writeProcess(&b, safeProcess(p))
+	_, err := io.WriteString(w, b.String())
+	return err
+}
+
 // writeProcess prints one process block.
 func writeProcess(b *strings.Builder, p Process) {
 	fmt.Fprintf(b, "process    %s/%s/%s[%d] incarnation %d  %s  (as a client: %s)\n", p.Project,

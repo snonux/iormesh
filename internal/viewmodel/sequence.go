@@ -81,7 +81,7 @@ func WriteSequence(w io.Writer, c Conversation) error {
 		c.Entry, c.Label, c.Hops)
 	fmt.Fprintf(&b, "services     %s\n", strings.Join(c.Services, ", "))
 	for i, l := range c.Lifelines {
-		fmt.Fprintf(&b, "lifeline %-3d %s\n", i+1, lifelineDetail(l))
+		fmt.Fprintf(&b, "lifeline %-3d %s\n", i+1, LifelineDetail(l))
 	}
 	for i, s := range c.Steps {
 		fmt.Fprintf(&b, "%3d  %-12s  %s\n", i+1, s.Ordering, stepLine(s, peerLane(c, s)))
@@ -112,9 +112,11 @@ func LifelineName(l Lifeline) string {
 	return name
 }
 
-// lifelineDetail is a lifeline's name with the host, process and kernel
-// thread that tell two lifelines of one name apart.
-func lifelineDetail(l Lifeline) string {
+// LifelineDetail is a lifeline's name with the host, process and kernel
+// thread that tell two lifelines of one name apart. Like StepText and
+// ActText it formats what it is given: the caller passes strings made
+// terminal-safe (Safe), as the writers here do.
+func LifelineDetail(l Lifeline) string {
 	d := LifelineName(l)
 	if l.Host != "" {
 		d += fmt.Sprintf("  %s pid %d@%d tid %d", l.Host, l.PID, l.Incarnation, l.TID)
@@ -133,6 +135,13 @@ func peerLane(c Conversation, s Step) string {
 		return LifelineName(c.Lifelines[s.ToLane])
 	}
 	return s.To
+}
+
+// StepText is step s of conversation c as `show sequence` prints it:
+// "actor -> peer lifeline: label [extras]". The TUI lists a sequence's
+// steps with it, so its rows read as the text view's do.
+func StepText(c Conversation, s Step) string {
+	return stepLine(s, peerLane(c, s))
 }
 
 // stepLine is "actor -> peer: label (extras)"; to names the peer's

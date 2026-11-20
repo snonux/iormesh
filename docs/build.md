@@ -81,6 +81,18 @@ with `internal/agentspool`'s `TestJava*` tests (cgo-free, run with
 the `java` on `PATH`), which skip under a plain `go test` because
 only Mage sets the agent and workload paths they need.
 
+The controller's terminal UI (`iormeshctl tui`, task ob4) adds
+the module's one interactive-UI dependency set, pinned in
+go.mod/go.sum at the versions ior uses: `charm.land/bubbletea/v2`
+v2.0.1, `charm.land/lipgloss/v2` v2.0.0 and
+`github.com/charmbracelet/x/ansi` v0.11.7, with
+`github.com/charmbracelet/x/exp/teatest/v2` for the tests only.
+All are pure Go, so `iormeshctl` stays cgo-free —
+`internal/buildgate`'s `TestControllerIsCgoFree` and
+`TestControllerCrossCompiles` (darwin/arm64, `CGO_ENABLED=0`)
+check every package it links. A dependency bump is a deliberate
+change: move it with ior's, rerun those two tests.
+
 Run Go commands through Mage: bare `go test ./...` or
 `go vet ./...` cannot build `internal`, which imports libbpfgo,
 because only Mage sets `CGO_CFLAGS`/`CGO_LDFLAGS`.

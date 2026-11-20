@@ -65,7 +65,7 @@ func WriteThreads(w io.Writer, ts []ThreadStory) error {
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		fmt.Fprintf(&b, "thread       %s\n", lifelineDetail(t.Lifeline))
+		fmt.Fprintf(&b, "thread       %s\n", LifelineDetail(t.Lifeline))
 		if t.MoreEntries > 0 {
 			fmt.Fprintf(&b, "truncated: %d more steps (older, or past a conversation's cap)\n", t.MoreEntries)
 		}
@@ -77,7 +77,7 @@ func WriteThreads(w io.Writer, ts []ThreadStory) error {
 			fmt.Fprintf(&b, "story        %s\n", storyLine(t.Entries))
 		}
 		for j, e := range t.Entries {
-			fmt.Fprintf(&b, "%3d  %-12s  %s#%d  %s\n", j+1, e.Ordering, e.Conversation, e.Step, actText(e))
+			fmt.Fprintf(&b, "%3d  %-12s  %s#%d  %s\n", j+1, e.Ordering, e.Conversation, e.Step, ActText(e))
 			fmt.Fprintf(&b, "     %-12s    ref %s\n", "", e.Ref)
 		}
 	}
@@ -91,13 +91,14 @@ func WriteThreads(w io.Writer, ts []ThreadStory) error {
 func storyLine(es []ThreadEntry) string {
 	parts := make([]string, 0, len(es))
 	for _, e := range es {
-		parts = append(parts, actText(e))
+		parts = append(parts, ActText(e))
 	}
 	return strings.Join(parts, " => ")
 }
 
-// actText says what the thread did in an entry.
-func actText(e ThreadEntry) string {
+// ActText says what the thread did in an entry ("received GET /x from
+// gateway"); the caller passes a terminal-safe entry (Safe).
+func ActText(e ThreadEntry) string {
 	switch e.Act {
 	case ActSend:
 		return "sent " + e.Label + " to " + e.Peer

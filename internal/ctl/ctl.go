@@ -8,6 +8,7 @@
 //	iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR] [HOST...]
 //	iormeshctl show [summary|services|edges|health] [-project NAME]... [-json] [-unresolved]
 //	iormeshctl open [-project NAME]... [-builds DIR]
+//	iormeshctl tui [-project NAME]... [-builds DIR]
 //	iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
 //	iormeshctl query [-project NAME]... [-from T] [-to T] [-host GLOB] [-app GLOB] [-thread GLOB]
 //	                 [-conn ID [-follow]] [-file GLOB] [-method GLOB] [-max-bytes N]
@@ -28,7 +29,8 @@
 // export, the service database and the view model, and refresh is
 // collect then build (build.go); show prints the last build's view
 // model as text (show.go, internal/viewmodel); open opens the newest
-// local site a build wrote (open.go, internal/site); query cuts the merged
+// local site a build wrote (open.go, internal/site); tui explores the same
+// model in a terminal (tui.go, internal/tui); query cuts the merged
 // trace into a size-capped NDJSON slice (query.go, internal/query). expand
 // lists which unresolved peers the next expansion round would enroll and
 // why the others stay (expand.go, internal/expand, PLAN.md M6).
@@ -45,7 +47,9 @@ import (
 	"iormesh/internal/federate"
 	"iormesh/internal/servicedb"
 	"iormesh/internal/termsafe"
+	"iormesh/internal/tui"
 	"iormesh/internal/version"
+	"iormesh/internal/viewmodel"
 )
 
 // Exit codes, as the tracer's (internal/cli) uses them.
@@ -80,18 +84,23 @@ type env struct {
 	// transport reaches a host: SSH in production, a fake in tests, so
 	// no test contacts a server.
 	transport func(host string) (federate.Transport, error)
+	// terminal reports whether stdin and stdout are a terminal, and tui
+	// runs the explorer on it: tests fake both, so no test needs a TTY.
+	// A nil terminal is no terminal.
+	terminal func() bool
+	tui      func(viewmodel.Model) error
 }
 
 // defaultEnv is the real environment: the registry at
 // federate.DefaultRegistryPath, the database at servicedb.DefaultPath, the
 // release key next to the registry, the deploy record, the trace store and
 // the build outputs next to the database, SSH to reach hosts and the
-// desktop's opener for sites.
+// desktop's opener for sites, the TTY check and the Bubble Tea explorer.
 func defaultEnv(stdout, stderr io.Writer) env {
 	return env{stdout: stdout, stderr: stderr, registry: federate.DefaultRegistryPath,
 		servicedb: servicedb.DefaultPath, releaseKey: defaultKeyPath, deployed: defaultDeployedPath,
 		traces: defaultStorePath, builds: defaultBuildsPath, transport: sshTransport,
-		opener: systemOpener}
+		opener: systemOpener, terminal: stdioIsTerminal, tui: tui.Run}
 }
 
 // defaultBuildsPath is ~/.local/share/iormesh/builds, next to the trace
@@ -141,6 +150,8 @@ func run(args []string, e env) int {
 		err = expandCommand(args[1:], e)
 	case "query":
 		err = queryCommand(args[1:], e)
+	case "tui":
+		err = tuiCommand(args[1:], e)
 	case checkCommand: // build's child, not for operators (check.go)
 		err = checkSegmentCommand(args[1:], e)
 	case "services":
@@ -190,6 +201,7 @@ func usage(w io.Writer) {
   iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR] [HOST...]
   iormeshctl show [summary|services|edges|health] [-project NAME]... [-builds DIR] [-json] [-unresolved]
   iormeshctl open [-project NAME]... [-builds DIR]
+  iormeshctl tui [-project NAME]... [-builds DIR]     (needs a terminal)
   iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
   iormeshctl query [-project NAME]... [-store DIR] [-db FILE] [-from T] [-to T]
                    [-host GLOB] [-app GLOB] [-thread GLOB] [-conn ID [-follow]]

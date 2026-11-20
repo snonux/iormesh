@@ -1414,6 +1414,16 @@ Kubernetes (M7) build on it.
   apart, files, sockets, restarts — projected from the rollup
   (`show processes`)
   ([docs/visualization.md](docs/visualization.md) "V2 as
+  built"). *Built (task ob4):* the terminal UI, `iormeshctl
+  tui`, on the same `model.json` through `show`'s loader —
+  services, edges, conversations, a conversation's steps, thread
+  stories, processes and health, each a list and a detail;
+  `⏎` walks service or edge → conversations → sequence → a
+  step's Java stack and `query -ref` → its thread's story;
+  Bubble Tea and Lip Gloss pinned at ior's versions (pure Go,
+  the controller stays cgo-free); the model made terminal-safe
+  once on load; no TTY, no UI (exit 1, pointing at `show`)
+  ([docs/visualization.md](docs/visualization.md) "V4 as
   built").
 - **Query / slice interface**: `iormeshctl query` cuts the
   merged trace by time window, host, app, thread, connection,
