@@ -3163,6 +3163,10 @@ func (cfg startConfig) unitArgs(self string) []string {
   the ones set as single `-name=value` argv elements, paths made
   absolute (the unit runs in `/`). Without `-ready-owner` it
   passes `SUDO_UID:SUDO_GID` (none under root's own sudo).
+  Through the sudoers rule (`SUDO_UID` set, binary under
+  `/opt/iormesh` or the install a symlink) `Main` runs only
+  `run`, `start`, `stop`, `status` and `uninstall`; any other
+  subcommand is refused (`sudoAllowed`, fail closed).
   Its run is root, so start is confined (`confine.go`, also
   applied to the installed binary's `run` under sudo): no
   `-out`, `-cpuprofile` or `-ready`, `-trace-dir` only

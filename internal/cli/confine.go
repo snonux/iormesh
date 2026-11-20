@@ -14,9 +14,11 @@ import (
 // run's path flags would then be root writes wherever the caller points
 // them — -out and -cpuprofile truncate a file, -ready removes and creates
 // one, -trace-dir chowns and fills a directory, -spool makes one
-// world-writable. So every session started that way is confined: start
-// always (whoever calls it, its unit runs as root), and run when the
-// installed binary is run through sudo.
+// world-writable. So through the rule only the lifecycle subcommands run
+// at all (sudoAllowed; normalize -out, say, would overwrite any file),
+// and every session started that way is confined: start always (whoever
+// calls it, its unit runs as root), and run when it came through the
+// rule (sudoGated).
 const (
 	// installedBinary is the path the sudoers rule names.
 	installedBinary = "/opt/iormesh/bin/iormesh"
@@ -44,12 +46,58 @@ func defaultConfinement(env func(string) string) confinement {
 	return k
 }
 
-// runConfinement decides whether a run is confined: the installed binary
-// (the one the sudoers rule names) run through sudo. A build run with
-// `sudo ./iormesh run -out DIR` — standalone use, the operator's own
-// full sudo — is not; nor is the unit's run, which start confined.
+// sudoAllowed are the only subcommands the sudoers rule may run (run
+// confined): the server lifecycle. Everything else — normalize, attach,
+// and any subcommand added later — is refused through the rule, so a new
+// one is closed until it is deliberately added here.
+var sudoAllowed = map[string]bool{"run": true, "start": true, "stop": true, "status": true,
+	"uninstall": true, "help": true, "-h": true, "--help": true}
+
+// sudoGated reports whether this process came through the sudoers rule:
+// SUDO_UID is set and the binary (self, os.Executable's resolved path)
+// lies under installRoot. It fails closed: an installed path that is a
+// symlink — whose resolved target lies elsewhere and so would not match —
+// gates too, as does a binary whose path is unknown ("").
+func sudoGated(self string, env func(string) string, lstat func(string) (os.FileInfo, error)) bool {
+	if env("SUDO_UID") == "" {
+		return false
+	}
+	if self == "" {
+		return true
+	}
+	if rel, err := filepath.Rel(installRoot, filepath.Clean(self)); err == nil && filepath.IsLocal(rel) {
+		return true
+	}
+	fi, err := lstat(installedBinary)
+	return err == nil && fi.Mode()&os.ModeSymlink != 0
+}
+
+// checkSudoCommand refuses cmd when the process came through the sudoers
+// rule and cmd is not a lifecycle subcommand: normalize, say, would
+// create and overwrite files as root wherever -out points.
+func checkSudoCommand(cmd, self string, env func(string) string, lstat func(string) (os.FileInfo, error)) error {
+	if !sudoGated(self, env, lstat) || sudoAllowed[cmd] {
+		return nil
+	}
+	return fmt.Errorf("%s is not allowed through the sudoers rule (only run, start, stop, status and "+
+		"uninstall are); run it without sudo or as root directly", cmd)
+}
+
+// sudoCommandGate is checkSudoCommand for this process.
+func sudoCommandGate(cmd string) error {
+	self, err := os.Executable()
+	if err != nil {
+		self = "" // unknown: gated whenever SUDO_UID is set
+	}
+	return checkSudoCommand(cmd, self, os.Getenv, os.Lstat)
+}
+
+// runConfinement decides whether a run is confined: it came through the
+// sudoers rule (sudoGated). A build run with `sudo ./iormesh run -out DIR`
+// — standalone use, the operator's own full sudo — is not; nor is the
+// unit's run, which start confined.
 func runConfinement(self string, env func(string) string) (confinement, bool) {
-	if env("SUDO_UID") == "" || filepath.Clean(self) != installedBinary {
+	if !sudoGated(self, env, os.Lstat) {
 		return confinement{}, false
 	}
 	return defaultConfinement(env), true

@@ -60,6 +60,11 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		usage(stderr)
 		return exitUsage
 	}
+	// Through the one sudoers rule only the lifecycle subcommands run
+	// (confine.go): fail closed for every other, present or future.
+	if err := sudoCommandGate(args[0]); err != nil {
+		return report(err, exitOK, stderr)
+	}
 	var code int
 	var err error
 	switch args[0] {

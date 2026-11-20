@@ -55,14 +55,30 @@ truth.
   upgrades verify the signature against a root-owned key.
   Bootstrap and the signature scheme are open decisions in
   PLAN.md (#1, #28).
-- **The sudoers rule writes nothing outside iormesh's own
-  paths.** Under the one rule every argument is the caller's
-  and runs as root, so a session started that way is confined
-  (`internal/cli/confine.go`, task 9b4): `start` always (its
-  unit runs as root), and `run` when the installed
-  `/opt/iormesh/bin/iormesh` runs under sudo (`SUDO_UID` set;
-  a build run with the operator's own full sudo, `sudo ./iormesh
-  run -out DIR`, and the unit's own run are not). Confined:
+- **Through the sudoers rule, the tracer writes only to its own
+  paths.** The rule names the installed binary and nothing else:
+
+  ```
+  deploy ALL=(root) NOPASSWD: /opt/iormesh/bin/iormesh
+  ```
+
+  (`deploy` being the deploying user). It is only as strong as
+  the install: `/opt/iormesh` and `/opt/iormesh/bin` must be
+  root-owned and not writable by group or others, and
+  `/opt/iormesh/bin/iormesh` a root-owned regular file, not a
+  symlink. Under the rule every argument is the caller's and
+  runs as root, so the binary gates itself
+  (`internal/cli/confine.go`, task 9b4): when `SUDO_UID` is set
+  and its resolved path lies under `/opt/iormesh` — or
+  `/opt/iormesh/bin/iormesh` is a symlink, or its own path is
+  unknown (fail closed) — only `run`, `start`, `stop`, `status`
+  and `uninstall` run. Every other subcommand (`normalize`,
+  `attach`, any added later) is refused: "not allowed through
+  the sudoers rule; run it without sudo or as root directly".
+  Sessions are confined: `start` always (its unit runs as
+  root), and `run` under the same gate (a build run with the
+  operator's own full sudo, `sudo ./iormesh run -out DIR`, and
+  the unit's own run are not). Confined:
   - `-out`, `-cpuprofile` and `-ready` are refused — each
     creates, truncates or removes whatever file it names;
   - `-trace-dir` must be `/opt/iormesh/traces` (after cleaning;
@@ -73,7 +89,12 @@ truth.
   - `-ready-owner` may only name the sudo caller
     (`SUDO_UID:SUDO_GID`), which `start` passes by default;
   - `-duration` is at most 7 days (everywhere), so the unit's
-    `RuntimeMaxSec` stays bounded.
+    `RuntimeMaxSec` stays bounded;
+  - `-agent` needs a jar that root owns: the jar and each
+    directory above it must belong to root or the caller (the
+    euid, root under sudo) and not be group- or other-writable,
+    sticky directories excepted — so a sudoer cannot have root
+    load a jar they could rewrite.
 
   Every directory the tracer creates is set 0755; one that
   already exists is never chmod'ed. `start`, `stop`, `status`

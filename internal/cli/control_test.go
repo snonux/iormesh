@@ -271,6 +271,65 @@ func TestStartPinnedSpool(t *testing.T) {
 	}
 }
 
+// symlinkInfo is an os.FileInfo of a symlink, for a fake Lstat.
+type symlinkInfo struct{ os.FileInfo }
+
+func (symlinkInfo) Mode() os.FileMode { return os.ModeSymlink | 0o777 }
+
+// TestSudoCommandGate: through the sudoers rule — SUDO_UID set and the
+// binary under /opt/iormesh, a symlinked install, or an unknown binary
+// path (fail closed) — only the lifecycle subcommands run; normalize,
+// attach and any other (a future one too) are refused. Outside the rule
+// (no SUDO_UID, or a build's binary with a real install) all run.
+func TestSudoCommandGate(t *testing.T) {
+	sudo := func(k string) string { return map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"}[k] }
+	none := func(string) string { return "" }
+	noInstall := func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
+	linkInstall := func(string) (os.FileInfo, error) { return symlinkInfo{}, nil }
+	for _, tc := range []struct {
+		name  string
+		self  string
+		env   func(string) string
+		lstat func(string) (os.FileInfo, error)
+		gated bool
+	}{
+		{"installed", installedBinary, sudo, noInstall, true},
+		{"under install root", "/opt/iormesh/bin/iormesh.new", sudo, noInstall, true},
+		{"dotted path", "/opt/iormesh/bin/../bin/iormesh", sudo, noInstall, true},
+		{"symlinked install", "/home/u/iormesh", sudo, linkInstall, true},
+		{"unknown binary", "", sudo, noInstall, true},
+		{"no sudo", installedBinary, none, linkInstall, false},
+		{"build with sudo", "/home/u/iormesh/iormesh", sudo, noInstall, false},
+		{"sibling dir", "/opt/iormesh2/iormesh", sudo, noInstall, false},
+	} {
+		for _, cmd := range []string{"normalize", "attach", "frobnicate"} {
+			err := checkSudoCommand(cmd, tc.self, tc.env, tc.lstat)
+			if tc.gated != (err != nil) || (err != nil && !strings.Contains(err.Error(), "not allowed through the sudoers rule")) {
+				t.Errorf("%s: %s: %v, gated %v", tc.name, cmd, err, tc.gated)
+			}
+		}
+		for _, cmd := range []string{"run", "start", "stop", "status", "uninstall", "help"} {
+			if err := checkSudoCommand(cmd, tc.self, tc.env, tc.lstat); err != nil {
+				t.Errorf("%s: %s refused: %v", tc.name, cmd, err)
+			}
+		}
+	}
+}
+
+// TestNormalizeAttachRunOutsideTheRule: with SUDO_UID set but this test
+// binary (not the install) running, Main still dispatches normalize and
+// attach — they fail on their missing arguments, not on the gate.
+func TestNormalizeAttachRunOutsideTheRule(t *testing.T) {
+	t.Setenv("SUDO_UID", "1000")
+	for _, cmd := range []string{"normalize", "attach"} {
+		var stderr bytes.Buffer
+		code := Main([]string{cmd}, &bytes.Buffer{}, &stderr)
+		if code != exitUsage || strings.Contains(stderr.String(), "sudoers") {
+			t.Errorf("%s: exit %d, %q; want its own usage error", cmd, code, stderr.String())
+		}
+	}
+}
+
 // TestRunConfinement: only the installed binary run through sudo is
 // confined — a build run with sudo, or the unit's run (no sudo
 // environment), is not — and a confined run gets start's checks.

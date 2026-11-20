@@ -875,8 +875,12 @@ Kubernetes (M7) build on it.
   `-out`, `-cpuprofile` and `-ready`, pin `-trace-dir` to
   `/opt/iormesh/traces` and `-spool` to
   `/run/iormesh/spool/<project>`, and give `ready/` only to the
-  sudo caller; no existing directory is ever chmod'ed
-  ([docs/security.md](docs/security.md)).
+  sudo caller; no existing directory is ever chmod'ed. Through
+  the rule only `run`, `start`, `stop`, `status` and
+  `uninstall` (and `upgrade` once built) run — every other
+  subcommand is refused, fail closed
+  ([docs/security.md](docs/security.md) has the rule's text
+  and the install's ownership requirements).
 - **Trace files** land on the server as parquet under
   `/opt/iormesh/traces/<project>/` — every trace is always
   inside a project subfolder, so unrelated apps on one server
