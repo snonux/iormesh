@@ -1118,15 +1118,31 @@ and no `target_map` lookup follows).
   1 / 4 threads — unchanged; tracer CPU 1.72 / 2.02 µs (old) and
   1.75 / 2.16 µs (new); bystander CPU ratio 1.23 / 1.14 (old) and
   1.20 / 1.21 (new), 10 pairs each — unchanged within noise.
-- Namespace mode with the cache (`bench2-*`, host and namespace
-  interleaved, both bursts on the same filesystem — an earlier
-  namespace run's work dir was tmpfs, whose cheaper burst made
-  every ratio look worse): bystander 1.22 / 1.23 against host
-  mode's 1.19 / 1.18 beside it; tracer 7.6 k instructions per
-  event (host 7.5 k), lossless at 1 and 4 threads. That set ran at
-  load 25–31 — beyond #25's ≤ 10 validity, so its CPU times
-  (3.5 / 2.5 µs per event; host mode 2.4 / 2.3 µs beside it) are
-  not a verdict; the instruction counts are.
+- Namespace mode with the cache, re-measured on a quiet host
+  (`bench3-*`, build `dfa551f`, host and namespace mode
+  interleaved, 5 rounds, 10 bystander pairs per thread count,
+  both bursts' work dir on the same btrfs, load 1.6–2.6
+  throughout, checked before every run):
+
+  | | bystander CPU ratio (pairs over 1.25) | wall clock | tracer µs / instructions per event |
+  |---|--:|--:|--:|
+  | host mode, 1 thread | 1.27 (6 of 10) | 1.30 | 0.95 / 6.8 k |
+  | namespace, 1 thread | 1.25 (5 of 10) | 1.28 | 0.92 / 7.1 k |
+  | host mode, 4 threads | 1.20 (3 of 10) | 1.23 | 1.05 / 6.7 k |
+  | namespace, 4 threads | 1.30 (7 of 10) | 1.27 | 1.09 / 7.0 k |
+
+  The namespace medians sit at and over 1.25×, and the wall-clock
+  medians (1.28 / 1.27) trip #25's guard: **the namespace
+  bystander item is open**. Host mode beside it measured 1.27 /
+  1.20 (wall 1.30 / 1.23), so this set does not tell the
+  namespace's ~90 extra instructions per call apart from the
+  host's own narrow margin; it does not pass either way. Tracer
+  CPU per event passes in both modes (≤ 1.1 µs), lossless at 1
+  thread; at 4 threads one run in five lost records in each mode
+  (unfolded, recorded, not gated). An earlier set (`bench2-*`,
+  1.22 / 1.23) ran at load 25–31 and is no verdict; the sets
+  before it ran the namespace burst on tmpfs or without the
+  cache.
 
 **Load**: the walk inlined into every handler made the object's
 load cost ~6× host mode's kernel CPU (12.4 s against 2.1 s); as
@@ -1137,8 +1153,13 @@ host-mode guard, three interleaved loads gave 2.4 / 5.1 / 3.0 s
 (`load-cpu.txt`).
 
 **Verdict**: host mode is unchanged — same instructions per
-traced event, per bystander call within 2 %, same bystander
-ratio. In a namespace the bystander pays ~90 more kernel
-instructions per traced-kind call than in host mode, and the S3
-bystander pairs stay within 1.25×; the tracer's per-event work is
-the same.
+traced event, per bystander call within 2 %, the same bystander
+ratio as the build before. In a namespace the bystander pays ~90
+more kernel instructions per traced-kind call than in host mode
+(+9 % of the tracer's per-call cost), and the tracer's per-event
+work is the same. The namespace bystander item of #25 is **open**:
+on a quiet host its medians are 1.25× / 1.30× with wall clock
+1.28× / 1.27×, at and over the limit. Ways down, untried: skip
+the walk for tasks at a level below the tracer's before the
+helper call, or let the dispatcher answer the target-set test
+once per syscall instead of each handler.

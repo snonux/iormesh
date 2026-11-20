@@ -1,4 +1,4 @@
-# S3 samples 2026-11-20T19:10:32Z commit afcce67
+# S3 samples 2026-11-20T19:10:32Z commit afcce67 + uncommitted 4f4 work (helper fast path, no cache)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags= agent=0 perf=1 segment=0 tracer=./iormesh
@@ -14,7 +14,7 @@ mode=untraced threads=4 ops=200000 pair=1 elapsed_ns=241422636 burst_cpu_ms=950 
 mode=bystander threads=4 ops=200000 pair=1 elapsed_ns=296716229 burst_cpu_ms=1170 tracer_cpu_ms=2490 events=3 load=3.81
 mode=untraced threads=4 ops=200000 pair=2 elapsed_ns=258170225 burst_cpu_ms=950 load=3.81
 mode=bystander threads=4 ops=200000 pair=2 elapsed_ns=340236785 burst_cpu_ms=1310 tracer_cpu_ms=2530 events=3 load=3.67
-# S3 samples 2026-11-20T19:11:46Z commit afcce67
+# S3 samples 2026-11-20T19:11:46Z commit afcce67 + uncommitted 4f4 work (helper fast path, no cache)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags= agent=0 perf=1 segment=0 tracer=./iormesh
@@ -30,7 +30,7 @@ mode=untraced threads=4 ops=200000 pair=1 elapsed_ns=293394795 burst_cpu_ms=1230
 mode=bystander threads=4 ops=200000 pair=1 elapsed_ns=396274397 burst_cpu_ms=1490 tracer_cpu_ms=3929 events=3 load=4.17
 mode=untraced threads=4 ops=200000 pair=2 elapsed_ns=313374213 burst_cpu_ms=1250 load=4.17
 mode=bystander threads=4 ops=200000 pair=2 elapsed_ns=352442377 burst_cpu_ms=1490 tracer_cpu_ms=3740 events=3 load=4.24
-# S3 samples 2026-11-20T19:13:05Z commit afcce67
+# S3 samples 2026-11-20T19:13:05Z commit afcce67 + uncommitted 4f4 work (helper fast path, no cache)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags= agent=0 perf=1 segment=0 tracer=./iormesh
@@ -46,7 +46,7 @@ mode=untraced threads=4 ops=200000 pair=1 elapsed_ns=363033248 burst_cpu_ms=1180
 mode=bystander threads=4 ops=200000 pair=1 elapsed_ns=393128258 burst_cpu_ms=1520 tracer_cpu_ms=3620 events=3 load=4.92
 mode=untraced threads=4 ops=200000 pair=2 elapsed_ns=318533548 burst_cpu_ms=1210 load=5.01
 mode=bystander threads=4 ops=200000 pair=2 elapsed_ns=395831390 burst_cpu_ms=1430 tracer_cpu_ms=3590 events=3 load=5.01
-# S3 samples 2026-11-20T19:14:28Z commit afcce67
+# S3 samples 2026-11-20T19:14:28Z commit afcce67 + uncommitted 4f4 work (helper fast path, no cache)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags= agent=0 perf=1 segment=0 tracer=./iormesh
@@ -62,7 +62,7 @@ mode=untraced threads=4 ops=200000 pair=1 elapsed_ns=247624158 burst_cpu_ms=860 
 mode=bystander threads=4 ops=200000 pair=1 elapsed_ns=267280014 burst_cpu_ms=880 tracer_cpu_ms=2409 events=3 load=4.93
 mode=untraced threads=4 ops=200000 pair=2 elapsed_ns=209107521 burst_cpu_ms=780 load=4.93
 mode=bystander threads=4 ops=200000 pair=2 elapsed_ns=1265289587 burst_cpu_ms=1290 tracer_cpu_ms=3560 events=3 load=5.02
-# S3 samples 2026-11-20T19:15:54Z commit afcce67
+# S3 samples 2026-11-20T19:15:54Z commit afcce67 + uncommitted 4f4 work (helper fast path, no cache)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags= agent=0 perf=1 segment=0 tracer=./iormesh

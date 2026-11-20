@@ -1,4 +1,4 @@
-# S3 samples 2026-11-20T18:38:05Z commit afcce67
+# S3 samples 2026-11-20T18:38:05Z commit afcce67 + uncommitted 4f4 work (first build: walk only, inlined)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs tmpfs
 # ops=200000 threads=1 4 runs=1 pairs=4 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=./iormesh
@@ -22,7 +22,7 @@ mode=untraced threads=4 ops=200000 pair=3 elapsed_ns=75471201 burst_cpu_ms=320 l
 mode=bystander threads=4 ops=200000 pair=3 elapsed_ns=160774622 burst_cpu_ms=620 tracer_cpu_ms=2590 events=3 load=5.96
 mode=untraced threads=4 ops=200000 pair=4 elapsed_ns=77875884 burst_cpu_ms=340 load=5.96
 mode=bystander threads=4 ops=200000 pair=4 elapsed_ns=192741804 burst_cpu_ms=630 tracer_cpu_ms=2810 events=3 load=5.97
-# S3 samples 2026-11-20T18:41:42Z commit afcce67
+# S3 samples 2026-11-20T18:41:42Z commit afcce67 + uncommitted 4f4 work (first build: walk only, inlined)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs tmpfs
 # ops=200000 threads=1 4 runs=1 pairs=4 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=./iormesh
@@ -46,7 +46,7 @@ mode=untraced threads=4 ops=200000 pair=3 elapsed_ns=238668976 burst_cpu_ms=600 
 mode=bystander threads=4 ops=200000 pair=3 elapsed_ns=379345937 burst_cpu_ms=1140 tracer_cpu_ms=6520 events=3 load=9.23
 mode=untraced threads=4 ops=200000 pair=4 elapsed_ns=208732115 burst_cpu_ms=590 load=9.21
 mode=bystander threads=4 ops=200000 pair=4 elapsed_ns=420526097 burst_cpu_ms=1170 tracer_cpu_ms=6659 events=3 load=9.52
-# S3 samples 2026-11-20T18:46:12Z commit afcce67
+# S3 samples 2026-11-20T18:46:12Z commit afcce67 + uncommitted 4f4 work (first build: walk only, inlined)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs tmpfs
 # ops=200000 threads=1 4 runs=1 pairs=4 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=./iormesh
@@ -70,7 +70,7 @@ mode=untraced threads=4 ops=200000 pair=3 elapsed_ns=123747828 burst_cpu_ms=350 
 mode=bystander threads=4 ops=200000 pair=3 elapsed_ns=283318004 burst_cpu_ms=710 tracer_cpu_ms=3710 events=3 load=12.78
 mode=untraced threads=4 ops=200000 pair=4 elapsed_ns=114744944 burst_cpu_ms=370 load=12.78
 mode=bystander threads=4 ops=200000 pair=4 elapsed_ns=179930597 burst_cpu_ms=700 tracer_cpu_ms=3120 events=3 load=12.08
-# S3 samples 2026-11-20T18:50:06Z commit afcce67
+# S3 samples 2026-11-20T18:50:06Z commit afcce67 + uncommitted 4f4 work (first build: walk only, inlined)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs tmpfs
 # ops=200000 threads=1 4 runs=1 pairs=4 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=./iormesh
@@ -94,7 +94,7 @@ mode=untraced threads=4 ops=200000 pair=3 elapsed_ns=139315893 burst_cpu_ms=580 
 mode=bystander threads=4 ops=200000 pair=3 elapsed_ns=364308638 burst_cpu_ms=1130 tracer_cpu_ms=5660 events=3 load=7.77
 mode=untraced threads=4 ops=200000 pair=4 elapsed_ns=150424202 burst_cpu_ms=540 load=7.77
 mode=bystander threads=4 ops=200000 pair=4 elapsed_ns=309531975 burst_cpu_ms=1060 tracer_cpu_ms=5550 events=3 load=8.08
-# S3 samples 2026-11-20T18:53:46Z commit afcce67
+# S3 samples 2026-11-20T18:53:46Z commit afcce67 + uncommitted 4f4 work (first build: walk only, inlined)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs tmpfs
 # ops=200000 threads=1 4 runs=1 pairs=4 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=./iormesh

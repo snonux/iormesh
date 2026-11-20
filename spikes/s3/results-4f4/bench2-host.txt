@@ -1,4 +1,4 @@
-# S3 samples 2026-11-20T20:00:20Z commit afcce67
+# S3 samples 2026-11-20T20:00:20Z commit afcce67 + uncommitted 4f4 work (with ns_ids_cache, as committed in f4cb586)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=./iormesh
@@ -14,7 +14,7 @@ mode=untraced threads=4 ops=200000 pair=1 elapsed_ns=1676550126 burst_cpu_ms=830
 mode=bystander threads=4 ops=200000 pair=1 elapsed_ns=1276198732 burst_cpu_ms=990 tracer_cpu_ms=3350 events=3 load=26.86
 mode=untraced threads=4 ops=200000 pair=2 elapsed_ns=1338468838 burst_cpu_ms=810 load=27.04
 mode=bystander threads=4 ops=200000 pair=2 elapsed_ns=861360805 burst_cpu_ms=1030 tracer_cpu_ms=3400 events=3 load=27.03
-# S3 samples 2026-11-20T20:04:12Z commit afcce67
+# S3 samples 2026-11-20T20:04:12Z commit afcce67 + uncommitted 4f4 work (with ns_ids_cache, as committed in f4cb586)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=./iormesh
@@ -30,7 +30,7 @@ mode=untraced threads=4 ops=200000 pair=1 elapsed_ns=1347292528 burst_cpu_ms=850
 mode=bystander threads=4 ops=200000 pair=1 elapsed_ns=872200267 burst_cpu_ms=1030 tracer_cpu_ms=3380 events=3 load=25.78
 mode=untraced threads=4 ops=200000 pair=2 elapsed_ns=1227315945 burst_cpu_ms=850 load=25.78
 mode=bystander threads=4 ops=200000 pair=2 elapsed_ns=1974265826 burst_cpu_ms=1000 tracer_cpu_ms=3370 events=3 load=25.91
-# S3 samples 2026-11-20T20:07:28Z commit afcce67
+# S3 samples 2026-11-20T20:07:28Z commit afcce67 + uncommitted 4f4 work (with ns_ids_cache, as committed in f4cb586)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=./iormesh
@@ -46,7 +46,7 @@ mode=untraced threads=4 ops=200000 pair=1 elapsed_ns=1374791643 burst_cpu_ms=870
 mode=bystander threads=4 ops=200000 pair=1 elapsed_ns=1036577277 burst_cpu_ms=1000 tracer_cpu_ms=3410 events=3 load=25.43
 mode=untraced threads=4 ops=200000 pair=2 elapsed_ns=730159769 burst_cpu_ms=930 load=25.43
 mode=bystander threads=4 ops=200000 pair=2 elapsed_ns=1075191985 burst_cpu_ms=1800 tracer_cpu_ms=5620 events=3 load=24.99
-# S3 samples 2026-11-20T20:10:15Z commit afcce67
+# S3 samples 2026-11-20T20:10:15Z commit afcce67 + uncommitted 4f4 work (with ns_ids_cache, as committed in f4cb586)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=./iormesh
@@ -62,7 +62,7 @@ mode=untraced threads=4 ops=200000 pair=1 elapsed_ns=6056910959 burst_cpu_ms=143
 mode=bystander threads=4 ops=200000 pair=1 elapsed_ns=10963208426 burst_cpu_ms=1320 tracer_cpu_ms=5580 events=3 load=26.17
 mode=untraced threads=4 ops=200000 pair=2 elapsed_ns=2145705266 burst_cpu_ms=850 load=26.17
 mode=bystander threads=4 ops=200000 pair=2 elapsed_ns=39047763270 burst_cpu_ms=1770 tracer_cpu_ms=3560 events=3 load=29.90
-# S3 samples 2026-11-20T20:18:06Z commit afcce67
+# S3 samples 2026-11-20T20:18:06Z commit afcce67 + uncommitted 4f4 work (with ns_ids_cache, as committed in f4cb586)
 # kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
 # java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
 # ops=200000 threads=1 4 runs=1 pairs=2 modes=traced bystander kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=0 tracer=./iormesh

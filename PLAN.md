@@ -1613,7 +1613,9 @@ Later phase — plain Linux servers (M4) come first.
   keys by or reports — `pid`, `tid`, `target_pid`, the agent's
   ring names — is the one its own namespace shows, so on the
   host nothing changes; records carry no host tgid (an in-pod
-  tracer could not resolve one, and no join needs it).
+  tracer could not resolve one, and no join needs it). Open: the
+  #25 bystander item in namespace mode (1.25× / 1.30× on a quiet
+  host, see #25).
 - `kubectl debug` deployments are driven by `iormeshctl`, with
   the kubectl context (cluster/namespace from the kubeconfig)
   and the debug container image both configurable —
@@ -1832,9 +1834,11 @@ would overturn it), and deferred.
      kind no family traces (a `getppid` loop) pays ~2.0×,
      recorded, not gated (s3-overhead.md, "Follow-up (ae4)").
      Task 4f4 (M7's PID-namespace targeting): host mode
-     unchanged; a tracer in a PID namespace 1.22× / 1.23× beside
-     host mode's 1.19× / 1.18× (s3-overhead.md, "Follow-up
-     (4f4)");
+     unchanged; for a tracer in a PID namespace the item is
+     **open** — on a quiet host (load ~2) 1.25× / 1.30× CPU and
+     1.28× / 1.27× wall clock at 1 / 4 threads, beside host mode's
+     1.27× / 1.20× (wall 1.30× / 1.23×) in the same set
+     (s3-overhead.md, "Follow-up (4f4)");
   3. *loss* — M1: 16–42 % of ring records on a sustained burst,
      0 on a short burst and on the M0 scenarios. Budget: zero
      lost records on every M0/M2 scenario, and < 1 % on
