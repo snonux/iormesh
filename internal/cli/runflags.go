@@ -148,9 +148,14 @@ var podEnv = os.Getenv
 // which the kubelet makes 0777. Outside a pod nothing changes, and a
 // missing -project is then validateRun's usage error. Only run defaults
 // them: start's unit is a systemd one, and there is no systemd in a pod
-// (PLAN.md M7).
+// (PLAN.md M7). A partial or malformed pod environment is refused here,
+// at the flags, before anything starts (k8s.PodFromEnv says why it is
+// never ignored); describeHost refuses it again for the host identity.
 func (f runFlags) podDefaults(getenv func(string) string) error {
-	pod, ok := k8s.PodFromEnv(getenv)
+	pod, ok, err := k8s.PodFromEnv(getenv)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errUsage, err)
+	}
 	if !ok {
 		return nil
 	}

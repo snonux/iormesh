@@ -28,7 +28,7 @@ import (
 
 // Host identifies where and for which project the trace runs.
 type Host struct {
-	ID      string // /etc/machine-id
+	ID      string // host_id: /etc/machine-id, or "pod-<uid>" in a pod
 	Project string
 }
 

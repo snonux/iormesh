@@ -1638,16 +1638,29 @@ Later phase — plain Linux servers (M4) come first.
   no shell utility in the image (#18's "Wired" note). Each pod
   is its own store directory, `pod-<uid>`, pinned to the host
   identity task 7f4 gives an in-pod tracer (`host_id`
-  `pod-<uid>`); 7f4 builds the tracer side.
+  `pod-<uid>`); the tracer derives it with the same helpers
+  (`k8s.PodHostID`, `PodFQDN`) and name rules (below).
 - Pod identity enrichment: map host PIDs/cgroups → pod, namespace,
   container, so the graph speaks "pod checkout-7d9f (ns prod)"
   instead of bare host PIDs. In k8s mode the project defaults
-  to the namespace (decision #21). Known gap (task 4f4): with
-  pids numbered per pod, the graph's process id
-  `proc:<host_id>/<pid>@<inc>` can collide for two pods on one
-  node (same machine-id, same pod-local pid, same start tick);
-  the process key must carry the pod or its PID namespace —
-  task 7f4, with this step.
+  to the namespace (decision #21). **The pod is the host**
+  (task 7f4; provisional, an advisor's call the owner delegated):
+  an in-pod tracer's `host_id` is `pod-<uid>` and its FQDN
+  `<name>.<namespace>.<uid[:8]>`, both from the downward API
+  (`POD_NAME`, `POD_NAMESPACE`, `POD_UID`, set by the sidecar
+  patch and the debug container spec), with no resolver lookup
+  and no `/etc/machine-id` read even if the image has one. A
+  partial or malformed set stops the tracer rather than fall
+  back. Outside a pod: the machine-id, as before. Pods of one
+  node are grouped by the session's `boot_id`. **One tracer per
+  pod** is an invariant: the debug path refuses a pod that has a
+  tracer already (a debug container or a sidecar), and sidecar
+  mode never starts a second. With it the pod is one PID
+  namespace, so `proc:<host_id>/<pid>@<inc>` — pids numbered per
+  pod since task 4f4 — stays unique without a PID-namespace key.
+  To confirm with the owner: the pod as the host node in k8s
+  mode, the 8-hex FQDN suffix, the node's machine-id should a
+  hostPID mode ever come, and service rows of dead pods.
   Status (2026-11-21, task vb4): built and unit-tested, not yet
   run on kind (task yb4) — the tracer image
   (`scripts/container/tracer-image.Containerfile`: the static
@@ -1658,10 +1671,13 @@ Later phase — plain Linux servers (M4) come first.
   container parser, and the project defaulting to the namespace
   (#21). The trace dir sits one level inside the emptyDir, whose
   root the kubelet makes 0777, and a byte cap below its
-  `sizeLimit` ends the trace before an eviction would. Found:
-  the image has no `/etc/machine-id`, which the host id comes
-  from, so it cannot run until 7f4 picks the pod's host id
-  (docs/implementation.md M7 step 6).
+  `sizeLimit` ends the trace before an eviction would. The
+  image has no `/etc/machine-id`, which made every run in it
+  fail; since task 7f4 a run in a pod needs none (above,
+  docs/implementation.md M7 step 6). Pod identity status
+  (2026-11-21, task 7f4): built and unit-tested, including two
+  pods with one pod-local pid merging into two process nodes;
+  two pods on one kind node remain (task yb4).
 - Java agent live-attach through the shared process namespace
   (`kubectl debug --target`, or `shareProcessNamespace: true`
   for a sidecar; attach socket reached via `/proc/<pid>/root`),
@@ -2228,6 +2244,10 @@ here only as placeholders.
   - a size-bounded `emptyDir` (`sizeLimit`) for the trace dir,
     so segments never fill the container's writable layer
     unbounded.
+  No third volume for the host id: the node's
+  `/etc/machine-id` is not mounted — an in-pod tracer's host is
+  the pod, named from the downward API (M7 "pod is the host",
+  task 7f4).
   BTF comes from the container's own sysfs
   (`/sys/kernel/btf/vmlinux`). Seccomp: `RuntimeDefault` is the
   provisional default — the containerd and Moby default

@@ -1143,12 +1143,35 @@ Unit tests in `mage test`, no cluster and no container engine
   variables set `run`'s project defaults to the namespace
   (decision #21) and `-trace-dir` to `k8s.TraceRoot`; `-project`
   and `-trace-dir` still win, `-out` alone writes NDJSON only;
-  one stray variable, or a namespace that is no valid label,
-  leaves `-project` required; `-disk-max-bytes` reaches the
-  watchdog.
+  none set leaves `-project` required; one or two set, or a
+  malformed value (a namespace that is no valid label, a UID
+  that is no UID), is refused even with `-project` (task 7f4);
+  `-disk-max-bytes` reaches the watchdog.
+- Pod identity (task 7f4): `internal/k8s/podidentity_test.go`
+  checks `PodFromEnv` and `PodRef.Validate` (none set is no
+  pod; partial, forged or malformed values are `ErrPodEnv`;
+  RFC 1123 names, the API server's UID form only — a static
+  pod's hash UID is refused — and the 200-byte FQDN bound),
+  `HostID` and `FQDN` equal to the controller's `PodHostID` and
+  `PodFQDN` pin, and end to end two pods whose app is pid 7
+  with one start tick: their segments, one with an FQDN of
+  exactly `MaxFQDN`, pass the controller's segment-name pattern
+  and the name parser at the longest table name, load under the
+  controller's pins (directory `pod-<uid>`), and merge into two
+  process nodes. `internal/k8sname`: pod names are strict RFC
+  1123 subdomains (`a..b`, `a-.b` refused).
+  `internal/cli/hostinfo_test.go`: in a pod the host id and FQDN
+  are the pod's with or without a machine-id in the image,
+  outside a pod the machine-id's, and a partial or malformed pod
+  environment fails even with a machine-id present. Mutations
+  (each test fails): host id without the UID, a wider
+  `MaxFQDN`, the UID, name or FQDN check dropped, the partial
+  set read as no pod, a shorter UID prefix, the pod branch
+  skipped, and either one-tracer-per-pod refusal in
+  `checkContainers` removed.
 
 Not checked here (task yb4, on kind): that the image builds and
-runs (it cannot until the host id is settled, task 7f4), that
+runs, two pods on one node traced side by side, that
 `kubectl patch` and `kubectl debug --custom` accept the files
 and carry the capabilities, mounts and env, that the trace dir
 stays 0755 under `fsGroup`, and the oldest runtime whose

@@ -34,8 +34,9 @@ var minimalCaps = []string{"BPF", "PERFMON", "SYS_RESOURCE",
 // Check reads the pod's spec and refuses a pod no tracer can run in
 // (ErrUnprepared): #13's two volumes missing or of the wrong kind, a
 // user-namespaced pod (hostUsers: false — its capabilities reach neither
-// BPF nor tracing), no such app container to target, or — for a
-// sidecar — no tracer container or no shared process namespace.
+// BPF nor tracing), no such app container to target, for a sidecar no
+// tracer container or no shared process namespace, and for a debug
+// session a pod that has a tracer already (one tracer per pod).
 func (k *Kubectl) Check(ctx context.Context) error {
 	p, err := k.getPod(ctx)
 	if err != nil {
@@ -99,16 +100,25 @@ func checkPrepared(p podInfo) error {
 
 // checkContainers checks the tracer container against the mode (the app
 // container is checkPod's): a sidecar must be there, with the shared
-// process namespace it traces through; a debug target must not have one
-// yet.
+// process namespace it traces through; a debug target must have no
+// tracer yet, neither a debug container nor a sidecar.
 func checkContainers(p podInfo, t Target) error {
 	if t.Mode == ModeSidecar {
 		return checkSidecar(p, t)
 	}
+	// One tracer per pod (PLAN.md M7): a tracer's host_id is the pod
+	// (pod.go HostID) and its pids are the pod's PID namespace's, so a
+	// second tracer in the same pod would write a second session under
+	// the same identity. Both refusals below keep it at one.
 	if hasContainer(p.Spec.EphemeralContainers, TracerContainer) {
 		// Ephemeral containers can be neither removed nor restarted:
 		// a second debug of the same name would fail in the API server.
 		return fmt.Errorf("%w: %s/%s already has a %q debug container; restart the pod for a new session",
+			ErrTransport, t.Namespace, t.Pod, TracerContainer)
+	}
+	if hasContainer(p.Spec.Containers, TracerContainer) {
+		// A sidecar-patched pod has its tracer already: use sidecar mode.
+		return fmt.Errorf("%w: %s/%s already has a %q sidecar; trace it in sidecar mode",
 			ErrTransport, t.Namespace, t.Pod, TracerContainer)
 	}
 	return nil

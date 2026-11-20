@@ -17,9 +17,11 @@
 # (Podman, Buildah) and .dockerignore (Docker, a symlink to it) at the
 # repository root: only dist/'s tracers and the jar are sent.
 #
-# Not runnable yet: the tracer reads /etc/machine-id for its host id and
-# scratch has none, so `iormesh run` fails in this image until task 7f4
-# settles the pod's host id (docs/implementation.md M7 step 6).
+# No /etc/machine-id, and none needed: in a pod the tracer's host id and
+# FQDN come from the downward-API env (POD_NAME, POD_NAMESPACE, POD_UID)
+# the sidecar patch and the debug container spec set (task 7f4,
+# docs/implementation.md M7 step 6). Without that env `iormesh run`
+# fails here, as it should: a pod is the only place this image runs.
 
 # scratch: the tracer links fully static (docs/build.md) and reads only
 # the kernel's files (/proc, BTF in /sys, tracefs mounted by the pod), so

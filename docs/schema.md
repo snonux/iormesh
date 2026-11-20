@@ -81,7 +81,7 @@ Required fields are always present; a zero is a real zero.
 | `seq` | int | per-host sequence number from 1, gap-free except explicit `drop` events |
 | `boot_ns` | int | boot-clock time of the syscall's start |
 | `wall_ns` | int | the same instant on the wall clock (boot + offset measured once per session) |
-| `host_id` | string | `/etc/machine-id` |
+| `host_id` | string | `/etc/machine-id` on a host; `pod-<uid>` (the pod's UID, from the downward API's `POD_UID`) for an in-pod tracer, which never reads a machine-id ([Pods](#pods-as-hosts-m7)) |
 | `pid` | int | process id (tgid), as the tracer's PID namespace numbers it — the host's on a host, the pod's for an in-pod tracer (M7, below) |
 | `pid_incarnation` | int | process start on the boot clock: a reused pid is another process |
 | `tid` | int | thread id; `0` for records with no task context (`tcp_state`) |
@@ -411,7 +411,7 @@ stays gap-free.
   | Key | Meaning |
   |-----|---------|
   | `boot_id` | `/proc/sys/kernel/random/boot_id` — `boot_ns` of two traces compare only when these match |
-  | `fqdn` | the host's canonical name (`hostname -f`), or its hostname when it has none |
+  | `fqdn` | the host's canonical name (`hostname -f`), or its hostname when it has none; in a pod `<pod name>.<namespace>.<first 8 hex digits of the pod UID>`, with no resolver lookup ([Pods](#pods-as-hosts-m7)) |
   | `kernel` | kernel release (`uname -r`) |
   | `arch` | machine hardware name (`uname -m`), e.g. `x86_64` |
 
@@ -1006,8 +1006,8 @@ the agent gets the span that was current on its Java thread:
 
 | Node | Id |
 |------|----|
-| `host` | `host:<host_id>` |
-| `process` | `proc:<host_id>/<pid>@<pid_incarnation>` |
+| `host` | `host:<host_id>` — a pod for an in-pod tracer |
+| `process` | `proc:<host_id>/<pid>@<pid_incarnation>` — for an in-pod tracer `host_id` is the pod's, so the pod-local pid stays unique ([Pods](#pods-as-hosts-m7)) |
 | `file` | `file:<host_id>:<path>` — the path exactly as the open event reports it, or the new name of a rename that moved an open fd |
 | `socket` | `conn:<conn_id>` — one node per connection, both ends: a TCP or unix stream connection, a UDP flow, a pipe or socketpair (M2 step 7); in a merged graph (M4) a TCP connection fused across traces has a merged conn_id both hosts' ids map to |
 | `app` | `app:<project>/<pattern>` — the identity of a pattern-bound session's app (M2): every process incarnation the pattern matched links to it, so a restarted app is a new process node under the same app node |
@@ -1045,6 +1045,31 @@ a loopback UDP flow), `signaled` from a `signal` whose sender is
 traced. `iormeshctl build` does this
 (`internal/federate/rebuild.go`), and the integration suite holds
 every single-host run's rebuild to its `graph.json`.
+
+### Pods as hosts (M7)
+
+An in-pod tracer (all three downward-API variables `POD_NAME`,
+`POD_NAMESPACE`, `POD_UID` set; PLAN.md M7, task 7f4) describes
+the pod, not the node: `host_id` is `pod-<uid>` and the session's
+`fqdn` `<name>.<namespace>.<uid[:8]>` (the UID prefix tells apart
+a pod recreated under the same name). So `host:pod-<uid>` is the
+pod's host node, and `proc:pod-<uid>/<pid>@<inc>` keys a process
+by the pod — its pids are the pod's PID namespace's, unique only
+within the pod, and one tracer per pod (PLAN.md M7) makes the
+pod and the PID namespace one. Two pods of one node with the same
+pod-local pid and start tick are two process nodes. The pods of a
+node share the session's `boot_id`, which groups them by node.
+The tracer refuses to start when only some of the three variables
+are set or one is malformed (a lower-case UID as the API server
+issues it — a static pod's kubelet hash is refused; an RFC 1123
+subdomain and label; an FQDN of at most 200 bytes, so every
+segment name fits 255) rather than fall back to a machine-id,
+which the image does not carry and which would not tell pods
+apart. The controller derives the same `host_id` and `fqdn` from
+the pod's API metadata and pins the pod's store directory
+(`pod-<uid>`) to them, so a session claiming another identity is
+dropped. Outside a pod
+nothing changes.
 
 ## Redaction
 

@@ -60,7 +60,7 @@ func TestNames(t *testing.T) {
 		name string
 	}{
 		{Label, []string{"shop", "a", "kind-1"}, []string{"", "Shop", "-a", "a.b", strings.Repeat("a", 64)}, "Label"},
-		{Pod, []string{"checkout-7d9f", "web.0"}, []string{"", "Web", "a b", "../x", "-x"}, "Pod"},
+		{Pod, []string{"checkout-7d9f", "web.0"}, []string{"", "Web", "a b", "../x", "-x", "a..b", "a-.b", "a.", ".a"}, "Pod"},
 		{Context, []string{"kind-x", "ops@prod", "arn:aws:eks:eu-west-1:1:cluster/x"},
 			[]string{"", "-x", "a b", "$(id)"}, "Context"},
 		{UID, []string{"0123abcd-0000-4000-8000-000000000001"},

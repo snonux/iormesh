@@ -205,7 +205,8 @@ func assertCustom(t *testing.T, js string, minimal bool) {
 
 // TestDebugRefusesUnprepared: a pod without #13's volumes (or with them
 // of the wrong kind), a user-namespaced pod, an unknown app container
-// and a pod already carrying the debug container are refused — only the
+// and a pod already carrying a tracer (debug container or sidecar: one
+// tracer per pod) are refused — only the
 // `get` ran, never a `debug`.
 func TestDebugRefusesUnprepared(t *testing.T) {
 	cases := map[string]struct {
@@ -223,6 +224,8 @@ func TestDebugRefusesUnprepared(t *testing.T) {
 		"no app container": {strings.Replace(preparedPod, `"name":"app"`, `"name":"web"`, 1), ErrUnprepared},
 		"already debugged": {strings.Replace(preparedPod, `"containers"`,
 			`"ephemeralContainers":[{"name":"iormesh"}],"containers"`, 1), ErrTransport},
+		"has a sidecar": {strings.Replace(preparedPod, `"containers":[{"name":"app"}]`,
+			`"containers":[{"name":"app"},{"name":"iormesh"}]`, 1), ErrTransport},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

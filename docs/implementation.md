@@ -172,7 +172,8 @@ type Args struct {
 
 Field notes:
 
-- `host_id` is `/etc/machine-id`; the session header's optional
+- `host_id` is `/etc/machine-id` (in a pod, since M7, `pod-<uid>`:
+  M7 step 6); the session header's optional
   `session` object (`schema.Session`) adds boot id, FQDN, kernel
   release and arch.
 - `pid_incarnation` is the task's start time on the boot clock
@@ -5109,9 +5110,8 @@ depends on:
    `POD_NAMESPACE`, `POD_UID` in its env) and the controller
    maps processes to containers — settle how on kind. The same
    step makes process ids pod-unique: since step 1 pids are the
-   pod's, so `proc:<host_id>/<pid>@<inc>` alone can collide
-   across two pods of one node (task 7f4; `Tracer.PidNS` names
-   the namespace).
+   pod's, so `proc:<host_id>/<pid>@<inc>` with the node's
+   `host_id` could collide across two pods of one node.
    Built (task vb4), not yet wired into records:
    `k8s.ParseProcCgroup` and `ParseCgroupPath` return pod UID,
    container id, runtime and QoS class for the systemd and
@@ -5129,13 +5129,38 @@ depends on:
    mirror pod's `kubernetes.io/config.mirror` annotation. The
    test strings follow the formats; the kind capture is task
    yb4's.
-   **The image cannot run yet** (review B2, with task 7f4 and an
-   advisor): `iormesh run` reads `/etc/machine-id` for the host
-   id, the `scratch` image has none (and a baked one would be
-   the same in every pod), so every run in it fails until the
-   pod's host id is chosen — the node's `machine-id` through one
-   more read-only `hostPath`, or one derived from the pod — which
-   is also where the process key gains the pod.
+   **The pod is the host** (task 7f4, an advisor's provisional
+   choice; review B2): in a pod `iormesh run` takes its host id
+   from the downward API, never from `/etc/machine-id` — the
+   `scratch` image has none, a baked one would be the same in
+   every pod, and the node's would need a third `hostPath`.
+   `k8s.PodFromEnv` reads the three variables; `PodRef.HostID`
+   is `pod-<uid>`, `PodRef.FQDN` `<name>.<namespace>.<uid[:8]>`
+   (no resolver lookup) — through `k8s.PodHostID` and `PodFQDN`,
+   the helpers the controller pins each pod's store directory
+   with (step 10), and checked by the same `k8sname` rules, so
+   tracer and controller cannot disagree on case or suffix —
+   and `cli.describeHost` uses them instead
+   of the machine-id and hostname, even when the image carries a
+   machine-id. Because one tracer runs per pod (PLAN.md M7;
+   `Kubectl.Check` refuses a debug session in a pod with a
+   debug container or a sidecar already), the pod is one PID
+   namespace, so `proc:pod-<uid>/<pid>@<inc>` is unique without
+   a PID-namespace key. Pods are grouped by node through the
+   session's `boot_id`. None of the three set: a host run,
+   machine-id as before. Some set, or one malformed (UID not
+   the API server's form — a static pod's hash UID too, since
+   the controller would pin its mirror pod's UID instead; name
+   not an RFC 1123 subdomain, namespace not a label, FQDN over
+   `k8s.MaxFQDN` = 200 bytes so every segment name fits 255):
+   `ErrPodEnv`, and `run` refuses at its flags — a silent
+   fallback would stamp an identity that is not the pod's. Tests:
+   `internal/k8s/podidentity_test.go` (validation, and two pods
+   with the same pid and start tick written as segments, checked
+   against the controller's segment-name pattern, loaded under
+   the controller's pins and merged into two process nodes) and
+   `internal/cli/hostinfo_test.go`. Left to yb4: two pods on one
+   kind node.
    The project (decision #21): `iormesh run` without `-project`
    in a pod (all three downward-API variables set) takes the
    namespace (`k8s.ProjectForNamespace`); `start`, a systemd

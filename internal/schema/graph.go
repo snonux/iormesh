@@ -88,7 +88,8 @@ type Edge struct {
 	Attrs map[string]string `json:"attrs,omitempty"`
 }
 
-// HostNodeID names a host by its machine id.
+// HostNodeID names a host by its host_id: a machine id, or "pod-<uid>"
+// for an in-pod tracer (the pod is the host, PLAN.md M7).
 func HostNodeID(hostID string) string { return prefixHost + hostID }
 
 // ProcessNodeID names one process incarnation: the incarnation keeps a

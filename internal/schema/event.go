@@ -117,8 +117,10 @@ type Event struct {
 	Seq    uint64 `json:"seq" parquet:"seq"`
 	BootNS uint64 `json:"boot_ns" parquet:"boot_ns"`
 	WallNS uint64 `json:"wall_ns" parquet:"wall_ns"`
-	// HostID is /etc/machine-id; the session header adds boot id, FQDN,
-	// kernel release and arch.
+	// HostID is /etc/machine-id on a host and "pod-<uid>" for an in-pod
+	// tracer (k8s.PodRef.HostID: the pod is the host, so pod-local pids
+	// stay unique in process ids); the session header adds boot id,
+	// FQDN, kernel release and arch.
 	HostID string `json:"host_id" parquet:"host_id,dict"`
 	PID    uint32 `json:"pid" parquet:"pid"`
 	// PIDInc is the task's start time on the boot clock

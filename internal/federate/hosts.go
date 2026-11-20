@@ -17,7 +17,8 @@ import (
 // planted row stays) and the summary would take the forgery as hostB's.
 
 // HostIdentity is who a host directory's sessions say they are: the
-// host_id (machine id) of their events and the FQDN of their names.
+// host_id of their events (a machine-id, or "pod-<uid>" for an in-pod
+// tracer) and the FQDN of their names.
 type HostIdentity struct {
 	HostID string `json:"host_id"`
 	FQDN   string `json:"fqdn"`

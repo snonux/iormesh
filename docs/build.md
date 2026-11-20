@@ -219,10 +219,12 @@ fails up front with the fix named.
   sends only `dist/`'s tracers and the jar. Push it and put the
   digest in `k8s.DefaultImage` (internal/k8s) before `mage
   k8sManifests`; until then the manifests name an unpullable
-  `registry.invalid` placeholder. **It cannot run yet**: the
-  image has no `/etc/machine-id`, which `iormesh run` reads for
-  the host id, so every run in it fails until the pod's host id
-  is settled (task 7f4, docs/implementation.md M7 step 6). The
+  `registry.invalid` placeholder. The image has no
+  `/etc/machine-id` and needs none: in a pod `iormesh run` takes
+  its host id and FQDN from the downward-API env both container
+  specs set (task 7f4, docs/implementation.md M7 step 6); a run
+  without that env in this image fails. Running it on kind is
+  task yb4's. The
   capability set it runs with is provisional (PLAN.md decision
   #13, [security.md](security.md) "Kubernetes").
 - **kubectl on the controller** (k8s mode only, task wb4): 1.30

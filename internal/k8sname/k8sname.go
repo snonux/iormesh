@@ -18,8 +18,6 @@ var (
 	// label is a DNS-1123 label: namespaces, containers, and the
 	// registry's cluster labels.
 	label = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
-	// subdomain is a DNS-1123 subdomain: pod names.
-	subdomain = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$`)
 	// contextName is what kubeconfig context names look like in practice
 	// (kind-x, user@cluster, arn:aws:eks:…:cluster/x): no space, quote,
 	// control character or leading dash.
@@ -45,8 +43,22 @@ var (
 // Label reports whether s is a DNS-1123 label.
 func Label(s string) bool { return label.MatchString(s) }
 
-// Pod reports whether s is a valid pod name (a DNS-1123 subdomain).
-func Pod(s string) bool { return len(s) <= 253 && subdomain.MatchString(s) }
+// Pod reports whether s is a valid pod name: a DNS-1123 subdomain, at
+// most 253 bytes of dot-joined labels — strictly, so "a..b" and "a-.b",
+// which the API server never issues, fail too. A pod name is also part
+// of an in-pod tracer's FQDN (internal/k8s PodFQDN, task 7f4), which the
+// tracer and the controller must accept by the same rule.
+func Pod(s string) bool {
+	if len(s) > 253 {
+		return false
+	}
+	for l := range strings.SplitSeq(s, ".") {
+		if !label.MatchString(l) {
+			return false
+		}
+	}
+	return true
+}
 
 // Context reports whether s is a usable kubeconfig context name.
 func Context(s string) bool { return contextName.MatchString(s) }

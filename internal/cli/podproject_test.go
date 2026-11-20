@@ -84,21 +84,30 @@ func TestRunDiskMaxBytes(t *testing.T) {
 	}
 }
 
-// Outside a pod -project stays required: one stray variable is not a
-// pod, and a namespace that is no valid label is refused, not used.
+// Outside a pod -project stays required. A partial or malformed pod
+// environment is refused outright (task 7f4), even with -project: it
+// would otherwise fall back to an identity that is not the pod's.
 func TestRunProjectNoPodDefault(t *testing.T) {
 	fakeProcs(t, 10)
+	uid := inPod["POD_UID"]
+	fakePodEnv(t, map[string]string{})
+	if _, err := parseRunFlags([]string{"-pid", "10", "-out", "o"}, &bytes.Buffer{}); !errors.Is(err, errUsage) {
+		t.Errorf("no pod: err %v, want a usage error", err)
+	}
 	cases := map[string]map[string]string{
-		"no pod":         {},
 		"namespace only": {"POD_NAMESPACE": "prod"},
 		"no uid":         {"POD_NAME": "a", "POD_NAMESPACE": "prod"},
-		"bad namespace":  {"POD_NAME": "a", "POD_NAMESPACE": "../etc", "POD_UID": "u"},
-		"upper case":     {"POD_NAME": "a", "POD_NAMESPACE": "Prod", "POD_UID": "u"},
+		"bad uid":        {"POD_NAME": "a", "POD_NAMESPACE": "prod", "POD_UID": "u"},
+		"bad namespace":  {"POD_NAME": "a", "POD_NAMESPACE": "../etc", "POD_UID": uid},
+		"upper case":     {"POD_NAME": "a", "POD_NAMESPACE": "Prod", "POD_UID": uid},
 	}
 	for name, env := range cases {
 		fakePodEnv(t, env)
-		if _, err := parseRunFlags([]string{"-pid", "10", "-out", "o"}, &bytes.Buffer{}); !errors.Is(err, errUsage) {
-			t.Errorf("%s: err %v, want a usage error", name, err)
+		for _, args := range [][]string{{"-pid", "10", "-out", "o"}, {"-pid", "10", "-project", "p", "-out", "o"}} {
+			if _, err := parseRunFlags(args, &bytes.Buffer{}); !errors.Is(err, errUsage) ||
+				!errors.Is(err, k8s.ErrPodEnv) {
+				t.Errorf("%s %q: err %v, want a refused pod environment", name, args, err)
+			}
 		}
 	}
 }

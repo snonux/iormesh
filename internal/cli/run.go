@@ -195,10 +195,7 @@ type outputs struct {
 func openOutputs(ctx context.Context, cfg runConfig, tr tracer, stderr io.Writer) (outputs, error) {
 	var o outputs
 	var err error
-	if o.hostID, err = machineID(); err != nil {
-		return o, err
-	}
-	if o.session, err = hostSession(ctx); err != nil {
+	if o.hostID, o.session, err = describeHost(ctx, podEnv); err != nil {
 		return o, err
 	}
 	if o.seg, err = openSegments(cfg, o.session.FQDN, stderr); err != nil {
