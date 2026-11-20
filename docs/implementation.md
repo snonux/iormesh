@@ -2393,8 +2393,8 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
    files, `methods.ndjson` and `threads.ndjson` (`schema.Method`,
    `schema.Thread`, `schema.TableWriter`;
    [schema.md](schema.md#java-attribution-m3)), keyed by id. Done (task 2b4) for NDJSON; the types carry
-   `parquet:` tags, and the parquet files wait for the M4 segment
-   writer (task 8b4), as the events' do. A method id is one
+   `parquet:` tags; the M4 segment writer (task 8b4) writes them as
+   segment tables with `-trace-dir`. A method id is one
    distinct frame (`class#method(file:line)`, parsed into class,
    method, file, line), keyed by the frame text and its class.
 
@@ -3150,45 +3150,83 @@ func startUnit(cfg RunConfig) error {
 }
 ```
 
-Segment writer (`internal/segment`):
+Segment writer (`internal/segment`, built by task 8b4):
+
+```
+internal/segment/writer.go     # Writer: New, Event, rows, Tick, Close
+internal/segment/rotate.go     # rotate, publish (tables first), abort
+internal/segment/stream.go     # one parquet file: footer, sync, rename
+internal/segment/dir.go        # names, ready/ owner, stale-active sweep
+internal/segment/watchdog.go   # statfs: percent + free-bytes floor
+internal/segment/zstdcodec.go  # ior's one-encoder zstd codec
+internal/cli/segment.go        # -trace-dir flags, tee, tick, endReason
+```
 
 ```go
-// Writer is a schema.Sink that rotates parquet segments. Only
-// the active file is ever open; a finished one is renamed into
-// ready/, which makes it immutable and safe to rsync.
-type Writer struct {
-    dir, fqdn, session string
-    seq                int
-    active             *parquet.GenericWriter[schema.Event]
-    start              time.Time // active segment opened; names it
-    rotateAt           time.Time
-    watchdog           DiskWatchdog
-}
-
-func (w *Writer) rotate() error {
-    if err := w.active.Close(); err != nil { // writes the footer
+// rotate publishes the active segment and opens the next. The disk is
+// checked first; over the limit nothing rotates and the tracer ends
+// the trace. A segment without a row is not published.
+func (w *Writer) rotate(now time.Time) error {
+    if err := w.checkDisk(); err != nil {
         return err
     }
-    name := fmt.Sprintf("%s-%s-%s-%06d.parquet",
-        w.fqdn, w.session, w.start.UTC().Format("20060102T150405Z"), w.seq)
-    // Same filesystem, so the rename is atomic: a reader sees the
-    // whole segment or none of it.
-    if err := os.Rename(w.activePath(), filepath.Join(w.dir, "ready", name)); err != nil {
+    if w.empty() {
+        w.start, w.rotateAt = now, now.Add(w.cfg.Interval)
+        return nil
+    }
+    if err := w.publish(); err != nil { // tables, then events, fsync ready/
         return err
     }
     w.seq++
-    return w.openNext()
+    return w.openSegment(now)
 }
 ```
 
-- Compression: `parquet.Compression(&parquet.Zstd)` on the writer.
-- `ready/` is created owned by the deploying user (`start` passes
-  `SUDO_UID`/`SUDO_GID` on to `run` as `-ready-owner`).
-- `DiskWatchdog.Check()` runs on a ticker and before each rotate:
-  `statfs` on the trace dir; over the limit → flush, write the
-  `end` event with reason `disk_limit`, exit 0.
-- On SIGTERM: rotate once (flushing the active segment), write
-  `end` with reason `stop`.
+- A segment's files are written in the project directory as
+  `.active-<what>.parquet` and published by `os.Rename` into
+  `ready/` (same filesystem: atomic) after the footer is written
+  and the file fsync'd; `ready/` is fsync'd after the renames.
+  Names: `<fqdn>-<session>-<start-ts>-<seq>.parquet`, tables
+  `<same base>.<table>.parquet`, published before the events
+  ([schema.md](schema.md#parquet-mapping)).
+- Rotation runs in `Tick`, which the run loop calls on its
+  200 ms ticker — never on the per-event path, which only
+  validates and appends a shallow copy to a 256-event batch
+  handed to `parquet-go` in one `Write`. A minute (from the
+  segment's opening) or 64 MiB (the library's size estimate)
+  rotates.
+- Compression: ior's `zstdCodec` (one encoder, 1 MiB window)
+  passed as `parquet.Compression`, not the library's pooled
+  `parquet.Zstd`.
+- `ready/` is created 0755 and `Lchown`ed to `-ready-owner
+  UID:GID` (`start` passes `SUDO_UID`/`SUDO_GID` on to `run`);
+  a `ready` that is not a real directory fails the start.
+  Published files are 0644 root-owned: the owner of `ready/`
+  can read and unlink them, which is all rsync
+  `--remove-source-files` needs.
+- `Watchdog.Check()`: `statfs` on `-trace-dir`; trips at
+  `-disk-limit` percent used (df's used/(used+avail)) or under
+  `-disk-min-free`. It runs in `preflight` before the BPF load
+  (failing the run), in `segment.New`, every 5 s in `Tick` and
+  before each rotation. A trip in the loop returns
+  `ErrDiskLimit`; `endReason` turns it into end reason
+  `disk_limit` with no error, `finish` writes the end event and
+  closes the writer, which publishes the last segment — exit 0.
+- On SIGTERM: the loop ends as `stop`, `finish` writes `end`
+  and the writer's `Close` publishes the active segment.
+- The writer is closed after the tables (`outputs.close`): the
+  stack table's worker may still write rows after the event
+  stream closed, so `segmentSink.Close` leaves the writer open.
+- Tests: round trip of every nested shape (compared as NDJSON
+  lines), zstd on every column chunk, the minute boundary, the
+  size cap, idle segments, publish-is-a-rename (same inode,
+  0644), tables beside their segment, stale active files, the
+  `ready/` owner and symlink, the watchdog's limits (table),
+  a trip that ends cleanly with an intact last segment, startup
+  over the limit touching nothing; in `internal/cli` the loop's
+  disk-limit end through `finish`, the real-partition startup
+  check and the tee. `BenchmarkWriterEvent` is the per-event
+  cost next to `schema`'s `BenchmarkNDJSONSink` (task ee4).
 
 ### Controller side
 

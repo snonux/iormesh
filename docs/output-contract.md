@@ -24,7 +24,16 @@ the plan is the source of truth.
   queryable; collected over rsync while the session runs
   (ior already records parquet). Variable event arguments map
   to one nullable column per field. NDJSON stays the
-  live/golden format.
+  live/golden format. As built (task 8b4, `iormesh run
+  -trace-dir`): a segment is published by an atomic rename
+  into `<trace-dir>/<project>/ready/` as
+  `<fqdn>-<session>-<start-ts>-<seq>.parquet` plus a
+  `.methods`, `.threads`, `.classes` or `.stacks` table file
+  for every table that got rows meanwhile (tables renamed
+  first); a session's tables are the union over its segments.
+  Each footer repeats project, FQDN, session, seq and start;
+  the column mapping is in
+  [schema.md](schema.md#parquet-mapping).
 - **Stable identifiers** — PID incarnation, fd generation,
   cross-host connection ids, a deduplicated method table.
 - **Normalization** — raw traces are full of run-specific

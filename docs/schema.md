@@ -32,10 +32,17 @@ context" below).
 | `methods.ndjson` | the Java method table; only with `-spool` (M3) | `schema.TableWriter[Method]`, one line per new frame |
 | `threads.ndjson` | the Java thread table; only with `-spool` (M3) | `schema.TableWriter[Thread]`, one line per agent THREAD record |
 | `classes.ndjson` | the Java class table (class-load map); only with `-spool` (M3) | `schema.TableWriter[Class]`, one line per new class a method row names |
-| `*.parquet` | the same events, columnar | M4 segment writer (to come) |
+
 
 `iormesh normalize -out DIR` writes the same two files for the
 normalized trace.
+
+`iormesh run -trace-dir DIR` (M4; the default, under
+`/opt/iormesh/traces`, when `-out` is not given) writes the same
+events and tables as parquet segments instead — or as well, with
+both flags — under `DIR/<project>/`; see
+[Parquet mapping](#parquet-mapping). The graph is `-out`'s only:
+on a server the controller rebuilds it (decision #3).
 
 **NDJSON framing**: UTF-8, one JSON object per line, `\n`
 terminated, no blank lines, keys in the order of the table below
@@ -671,8 +678,9 @@ from then on carry the new name:
 | `virtual` | bool, optional | `true` for a virtual thread |
 
 The tables carry `parquet:` tags for the M4 segment writer
-(`methods`, `threads` and `classes` files, PLAN.md M3); until it
-exists they are NDJSON only.
+(`methods`, `threads` and `classes` files, PLAN.md M3); with
+`-trace-dir` they are written as segment tables (task 8b4,
+[Parquet mapping](#parquet-mapping)).
 
 ## HTTP events (M3)
 
@@ -996,7 +1004,44 @@ spool, so a secret never lands on disk, and the tracer applies
 
 ## Parquet mapping
 
-To come with the M4 segment writer: one column per envelope field
-and per `args` field (the `parquet:` tags in `internal/schema`),
-zstd page compression, minute-rotated segments (PLAN.md decision
-#16).
+The M4 segment writer (`internal/segment`, task 8b4) writes the
+same records as the NDJSON files, one parquet file per record
+type and segment, through the `parquet:` tags in
+`internal/schema`:
+
+- **Columns**: one column per envelope field, named as its JSON
+  key; `args`, `session`, `java`, `http`, `otel` and `dns` are
+  groups with one column per field. Every `args` field and every
+  optional field is a nullable column — absent in NDJSON is null
+  in parquet — and lists (`args.argv`, `java.stack`,
+  `http.req_headers`, `http.resp_headers`, `dns.addrs`, a
+  stack's `frames`) are parquet LIST columns. Low-cardinality
+  strings (`project`, `host_id`, `comm`, `event`, `err`,
+  `attribution`, method and class names, a frame's module and
+  build id) are dictionary-encoded. Read back, a file gives
+  the same records the NDJSON reader does: an absent list and
+  an empty one are the same record.
+- **Pages**: zstd-compressed inside the file (decision #16;
+  never a whole-file `.zst`), 256 KiB pages, 8192 rows per row
+  group, page statistics on — each file is directly queryable
+  (DuckDB, pandas, `parquet-tools`).
+- **Files**: in `<trace-dir>/<project>/ready/`, per segment
+  `<fqdn>-<session>-<start-ts>-<seq>.parquet` (events) and
+  `<same base>.methods.parquet`, `.threads`, `.classes`,
+  `.stacks` for the tables that got rows while it was active.
+  `<start-ts>` is `YYYYMMDDTHHMMSSZ` (UTC), `<seq>` six or more
+  digits from `000000`, `<session>` 8 hex digits; the FQDN may
+  contain dashes, so a name parses from the right.
+- **Footer metadata**: `iormesh.schema_version`,
+  `iormesh.project`, `iormesh.fqdn`, `iormesh.session`,
+  `iormesh.seq`, `iormesh.start` (RFC 3339, nanoseconds) and
+  `iormesh.content` (`events` or the table name), so a file
+  copied loose still says where it came from.
+- **Order and completeness**: events keep `seq` order within
+  and across a session's segments; the session header is in
+  segment 0, the end event in the last. A table row lands in the
+  segment open when it was written: Java table rows always in or
+  before the segment of the first event naming them, a native
+  stack possibly one segment later (the stack table writes from
+  its own worker). A reader takes the union of a session's
+  table files.

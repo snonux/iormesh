@@ -844,6 +844,26 @@ Kubernetes (M7) build on it.
   never a synced segment. `ready/` belongs to the deploying
   user (`start` records who invoked sudo), so collection needs
   no privilege.
+  A segment is its events file plus one file per table that
+  got rows while it was active —
+  `<…>-<seq>.methods.parquet`, `.threads`, `.classes`,
+  `.stacks` — published tables first, so a collected events
+  segment never names a Java table row that is not yet in
+  `ready/`; the union of a session's segments is its tables.
+  `<session>` is 8 random hex digits per run (names never
+  collide, even in the same second); every file's footer
+  repeats project, FQDN, session, seq and start. A segment
+  without a single row is not published (an idle session
+  leaves no empty files), and a crashed run's footer-less
+  active file is removed by the next start.
+  Status (2026-11-20, task 8b4): built — `internal/segment`
+  and `iormesh run -trace-dir` (the default without `-out`;
+  `-out` keeps writing NDJSON, both together tee). The
+  parquet library is ior's, `parquet-go` v0.29.0, with ior's
+  one-encoder zstd codec; per event the writer costs ≈ 3× the
+  NDJSON sink (≈ 10 k vs 3.4 k instructions on the burst
+  event, ≈ 4.6 B/event on disk for that burst) — ee4 measures
+  what that does to decision #25's CPU item.
 - **Disk watchdog**: the trace directory is configurable
   (`-trace-dir`, default `/opt/iormesh/traces`), and the
   tracer continuously monitors the partition holding it
@@ -854,6 +874,14 @@ Kubernetes (M7) build on it.
   exits. Together with the 4h bound, tracing is bounded by
   disk too — it never fills the partition. A startup check
   fails fast if the partition is already at the limit.
+  As built (task 8b4, decision #17's default): both limits —
+  `-disk-limit 90` (percent used, df's view, so root's
+  reserved blocks are never eaten) and `-disk-min-free
+  256MiB` (four segments at the size cap), either 0 for off;
+  checked every 5 s from the run loop and before every
+  rotation; a trip stops the trace with end reason
+  `disk_limit`, publishes the last segment and exits 0; the
+  startup check runs before the BPF object loads.
 - **Three commands, two jobs**:
   - `iormeshctl collect` only collects: it syncs trace segments
     from the servers to the controller. It touches the network
@@ -1543,7 +1571,10 @@ answer), and deferred.
   absolute free-bytes floor (or both); check interval; and
   what the controller does when a tracer exits on the limit
   (surface it, redeploy with a lower duration, or nothing).
-  *Default: both limits, surface only.*
+  *Default: both limits, surface only.* The tracer side took the
+  default (task 8b4): 90% and a 256 MiB floor, checked every
+  5 s and before every rotation; the controller half waits
+  for `collect`/`build`.
 
 ### Open — blocks M7
 
