@@ -67,8 +67,15 @@ func newNamer(g schema.Graph, obs []servicedb.Observation, eps []servicedb.Endpo
 
 // process names a process lifeline.
 func (n namer) process(th threadKey) string {
-	p := n.procs[schema.ProcessNodeID(th.host, th.pid, th.inc)]
-	return n.named(p.app, p.comm, "pid "+strconv.FormatUint(uint64(th.pid), 10))
+	return n.processID(schema.ProcessNodeID(th.host, th.pid, th.inc), th.pid)
+}
+
+// processID names the process with graph node id, pid as the
+// fallback: the one rule for a conversation's lifelines and the
+// processes view.
+func (n namer) processID(id string, pid uint32) string {
+	p := n.procs[id]
+	return n.named(p.app, p.comm, "pid "+strconv.FormatUint(uint64(pid), 10))
 }
 
 // named is the service an app serves, else the app, else the comm,

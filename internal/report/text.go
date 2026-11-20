@@ -112,10 +112,21 @@ func writeThread(b *strings.Builder, t Thread) {
 	if t.Name != "tid "+itoa(t.TID) {
 		name += " (tid " + itoa(t.TID) + ")"
 	}
-	fmt.Fprintf(b, "  thread   %s: %d events, %d B\n", name, t.Events, t.Bytes)
+	carried := ""
+	if t.Carried > 0 {
+		// A carrier's count holds its virtual threads' I/O: say so, so a
+		// reader never takes it for the carrier's own work.
+		carried = fmt.Sprintf(" (%d of them virtual threads' I/O it carried)", t.Carried)
+	}
+	fmt.Fprintf(b, "  thread   %s: %d events, %d B%s\n", name, t.Events, t.Bytes, carried)
 	for _, c := range t.Calls {
-		fmt.Fprintf(b, "    %-4s   %s %s (%s) -> %d, service %s, %s (conn %s)\n", dash(c.Dir), s(c.Method),
-			s(c.Path), dash(s(c.Scheme)), c.Status, dash(s(c.Service)), peerText(peerState(c.Peers), c.Peers), s(c.Conn))
+		virtual := ""
+		if c.Carrier {
+			virtual = " [virtual thread on this carrier]"
+		}
+		fmt.Fprintf(b, "    %-4s   %s %s (%s) -> %d, service %s, %s (conn %s)%s\n", dash(c.Dir), s(c.Method),
+			s(c.Path), dash(s(c.Scheme)), c.Status, dash(s(c.Service)), peerText(peerState(c.Peers), c.Peers),
+			s(c.Conn), virtual)
 	}
 	if t.MoreCalls > 0 {
 		fmt.Fprintf(b, "    ... %d more calls\n", t.MoreCalls)

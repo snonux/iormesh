@@ -4299,7 +4299,9 @@ and its goldens first (conversations and processes, V2); a
 renderer never reads the merged graph directly — `graph.svg`, a
 drawing of the graph export itself, is the one exception (PLAN.md
 M5 "Deterministic SVG export"). Conversations are built (task
-mb4, "Conversations and exports" below); processes are not yet.
+mb4, "Conversations and exports" below), per-thread lifelines,
+thread stories and processes too (task 0f4, "Threads and
+processes").
 
 ![The two joins behind one line of the sequence view](diagrams/join.svg)
 
@@ -4397,6 +4399,55 @@ internal/query/                    # + Filter.Ref, ParseRef (-ref)
   same store without the billing connection's data records (no
   bound: the hop unpaired, billing's request its own
   conversation); `query -ref` of the rename step.
+
+**Threads and processes** — the rest of V2, built by task 0f4
+(cgo-free; the model and views in
+[visualization.md](visualization.md), "V2 as built"):
+
+```
+internal/viewmodel/conversation.go # + Lifeline, Step.Lane/ToLane
+internal/viewmodel/steps.go        # each step's two ends (end), lanes
+internal/viewmodel/stories.go      # ThreadStory, storyBook, storyOrder
+internal/viewmodel/process.go      # Process: projected from report
+internal/viewmodel/threadview.go   # show thread [SERVICE/THREAD]
+internal/viewmodel/processview.go  # show processes
+internal/render/sequence.go        # one column per lifeline
+internal/report/                   # + Thread.Carried, Call.Carrier
+```
+
+- **No new pass.** The emitter that writes a conversation's steps
+  knows each step's two threads and their instants on their own
+  hosts' clocks; it files both ends in the conversation's
+  lifelines and in a story book shared across the conversations.
+  The processes come from the rollup `build` already collects
+  (`viewmodel.Input.Report`), which now counts a carrier thread's
+  virtual-thread events (`carried`) and flags their calls.
+- **Lifeline identity** is service, host, pid, tid, thread name and
+  the carrier flag: a virtual thread's I/O on a carrier and the
+  carrier's own work are two lifelines, and two threads of one name
+  stay apart.
+- **Story order** is per lifeline, by its own host's clock and then
+  emission order; `storyOrder` judges each entry against the one
+  before (causal inside one owned span, else time-ordered when the
+  clock moved on, else unordered). A step past `MaxSteps` counts in
+  its lifelines' `more_entries`, as do entries past 200.
+- **Renderer**: `render.Sequence` heads each column with service and
+  thread (class `carrier`, dashed, for a carrier's lifeline); a lane
+  index outside the list is drawn on the first column, and a model
+  without lifelines (built before) one column per service.
+- Tests: `internal/viewmodel/lifeline_test.go` (a virtual thread's
+  requests on their own lifelines beside the carrier's own, its
+  story never causal; story ordering ties and spans; the entry cap;
+  the processes projection — incarnations, carried counts, escapes,
+  no rollup; thread views terminal-safe, unknown thread);
+  `internal/render/render_test.go` (columns per lifeline, the
+  carrier lane, an out-of-range lane); `internal/report`
+  (`TestReportCarrier`); `internal/ctl/threads_test.go` — the
+  four-host store's `show thread`, `show thread
+  orders:8080/worker-3` (one owned span: every entry after the
+  first causal) and `show processes` against
+  `testdata/{thread_list,thread_story,processes}.golden`, an unknown
+  thread; the conversation goldens gained the lifelines.
 
 **Query** (`internal/query`, `iormeshctl query`):
 

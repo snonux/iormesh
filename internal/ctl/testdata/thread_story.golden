@@ -1,0 +1,24 @@
+thread       orders:8080/worker-3  orders.example.org pid 20 tid 21
+story        received GET /orders/42 from java => open /etc/orders.conf => read /etc/orders.conf => sent GET /stock/7 to inventory:8081 => got 200 from inventory:8081 => create /data/order-42.json.tmp => write /data/order-42.json.tmp => rename /data/order-42.json.tmp -> /data/order-42.json => sent POST /charge to billing:8082 => got 200 from billing:8082 => replied 200 to java
+  1  time-ordered  0001#2  received GET /orders/42 from java
+                     ref shop/gw/gw.example.org-g1/6
+  2  causal        0001#3  open /etc/orders.conf
+                     ref shop/orders/orders.example.org-o1/13
+  3  causal        0001#4  read /etc/orders.conf
+                     ref shop/orders/orders.example.org-o1/14
+  4  causal        0001#5  sent GET /stock/7 to inventory:8081
+                     ref shop/orders/orders.example.org-o1/16
+  5  causal        0001#8  got 200 from inventory:8081
+                     ref shop/inv/inv.example.org-i1/4
+  6  causal        0001#9  create /data/order-42.json.tmp
+                     ref shop/orders/orders.example.org-o1/17
+  7  causal        0001#10  write /data/order-42.json.tmp
+                     ref shop/orders/orders.example.org-o1/18
+  8  causal        0001#11  rename /data/order-42.json.tmp -> /data/order-42.json
+                     ref shop/orders/orders.example.org-o1/20
+  9  causal        0001#12  sent POST /charge to billing:8082
+                     ref shop/orders/orders.example.org-o1/21
+ 10  causal        0001#13  got 200 from billing:8082
+                     ref shop/bill/bill.example.org-b1/6
+ 11  causal        0001#14  replied 200 to java
+                     ref shop/orders/orders.example.org-o1/12

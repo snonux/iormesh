@@ -51,12 +51,14 @@ func refreshCommand(args []string, e env) error {
 }
 
 // showViews are show's views; summary is the default.
-var showViews = []string{"summary", "services", "edges", "health", "conversations", "sequence", "report"}
+var showViews = []string{"summary", "services", "edges", "health", "conversations", "sequence", "thread",
+	"processes", "report"}
 
 // showCommand prints one view of the last build's model (model.json):
 // the summary build printed, services, edges, health, the
 // conversations, or one conversation's sequence (`show sequence [ID]`,
-// the newest without an ID); or the report view, the summary followed by
+// the newest without an ID), the thread stories or one thread's (`show
+// thread [SERVICE/THREAD]`), the processes; or the report view, the summary followed by
 // the per-run rollup (report.json); -json the JSON for that view. It
 // reads only the build output, never the store's segments or the
 // network.
@@ -65,7 +67,7 @@ func showCommand(args []string, e env) error {
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		view, args = args[0], args[1:]
 	}
-	if view == "sequence" && len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+	if (view == "sequence" || view == "thread") && len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		id, args = args[0], args[1:]
 	}
 	fs := newFlagSet("show "+view, e.stderr)
@@ -136,9 +138,21 @@ func resolveShowPaths(e env, f buildFlags) (buildPaths, error) {
 	return p, nil
 }
 
-// writeView renders a view as text; id picks sequence's conversation.
+// writeView renders a view as text; id picks sequence's conversation
+// or thread's SERVICE/THREAD.
 func writeView(e env, view, id string, m viewmodel.Model, unresolved bool) error {
 	switch view {
+	case "thread":
+		if id == "" {
+			return viewmodel.WriteThreadList(e.stdout, m)
+		}
+		ts, err := viewmodel.FindThreads(m, id)
+		if err != nil {
+			return fmt.Errorf("show: %w", err)
+		}
+		return viewmodel.WriteThreads(e.stdout, ts)
+	case "processes":
+		return viewmodel.WriteProcesses(e.stdout, m)
 	case "conversations":
 		return viewmodel.WriteConversations(e.stdout, m)
 	case "sequence":
@@ -163,6 +177,17 @@ func writeView(e env, view, id string, m viewmodel.Model, unresolved bool) error
 func writeViewJSON(e env, view, id string, m viewmodel.Model) error {
 	var v any
 	switch view {
+	case "thread":
+		v = m.Threads
+		if id != "" {
+			ts, err := viewmodel.FindThreads(m, id)
+			if err != nil {
+				return fmt.Errorf("show: %w", err)
+			}
+			v = ts
+		}
+	case "processes":
+		v = m.Processes
 	case "conversations":
 		v = m.Conversations
 	case "sequence":

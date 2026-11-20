@@ -49,7 +49,58 @@ func safeModel(m Model) Model {
 	for i := range m.Conversations {
 		m.Conversations[i] = safeConversation(m.Conversations[i])
 	}
+	m.Threads = slices.Clone(m.Threads)
+	for i := range m.Threads {
+		m.Threads[i] = safeStory(m.Threads[i])
+	}
+	m.Processes = slices.Clone(m.Processes)
+	for i := range m.Processes {
+		m.Processes[i] = safeProcess(m.Processes[i])
+	}
 	return m
+}
+
+// safeLifeline is l with its strings terminal-safe.
+func safeLifeline(l Lifeline) Lifeline {
+	s := termsafe.String
+	l.Service, l.Host, l.Thread = s(l.Service), s(l.Host), s(l.Thread)
+	return l
+}
+
+// safeStory is t with every string terminal-safe.
+func safeStory(t ThreadStory) ThreadStory {
+	s := termsafe.String
+	t.Lifeline = safeLifeline(t.Lifeline)
+	t.Entries = slices.Clone(t.Entries)
+	for i := range t.Entries {
+		x := &t.Entries[i]
+		x.Conversation, x.Act, x.Label, x.Peer = s(x.Conversation), s(x.Act), s(x.Label), s(x.Peer)
+		x.Ordering, x.Ref = s(x.Ordering), s(x.Ref)
+	}
+	return t
+}
+
+// safeProcess is p with every string terminal-safe: comms, apps, paths,
+// addresses and peers all come from the servers.
+func safeProcess(p Process) Process {
+	s := termsafe.String
+	p.ID, p.Project, p.Host, p.FQDN, p.Comm, p.App = s(p.ID), s(p.Project), s(p.Host), s(p.FQDN), s(p.Comm), s(p.App)
+	p.Service, p.Serves = s(p.Service), safeAll(p.Serves)
+	p.Threads = slices.Clone(p.Threads)
+	for i := range p.Threads {
+		p.Threads[i].Name = s(p.Threads[i].Name)
+	}
+	p.Files = slices.Clone(p.Files)
+	for i := range p.Files {
+		p.Files[i].Path, p.Files[i].Ops = s(p.Files[i].Path), safeAll(p.Files[i].Ops)
+	}
+	p.Sockets = slices.Clone(p.Sockets)
+	for i := range p.Sockets {
+		x := &p.Sockets[i]
+		x.ID, x.Role, x.Local, x.Remote, x.Service = s(x.ID), s(x.Role), s(x.Local), s(x.Remote), s(x.Service)
+		x.PeerState, x.Peers = s(x.PeerState), safeAll(x.Peers)
+	}
+	return p
 }
 
 func safeAll(ss []string) []string {

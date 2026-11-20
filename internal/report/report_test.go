@@ -217,10 +217,38 @@ func TestReportNoMethodWithoutTable(t *testing.T) {
 		if len(p.Methods) != 0 {
 			t.Errorf("%s names methods without a table: %+v", p.ID, p.Methods)
 		}
+		for _, th := range p.Threads {
+			if th.Carried != 0 {
+				t.Errorf("%s/%s: %d carried without a virtual thread", p.ID, th.Name, th.Carried)
+			}
+		}
 		for _, f := range p.Files {
 			if len(f.Methods) != 0 {
 				t.Errorf("%s: %+v", f.Path, f.Methods)
 			}
+		}
+	}
+}
+
+// TestReportCarrier: a virtual thread's I/O, named by its carrier
+// (java.carrier), is counted on the carrier's thread as carried and its
+// request flagged — never left to read as the carrier's own work.
+func TestReportCarrier(t *testing.T) {
+	tr := &trace{host: "h1"}
+	virt := &schema.Java{Thread: "carrier-1", Carrier: true}
+	tr.add(20, 25, schema.KindAccept4, 6, 6, "c1", schema.Args{LocalPort: ptr(uint16(8001))}, nil)
+	tr.add(20, 25, schema.KindRead, 6, 36, "c1", schema.Args{}, virt)
+	tr.http(20, 25, "c1", "GET", "/v", 200, virt)
+	tr.http(20, 25, "c1", "GET", "/own", 200, &schema.Java{Thread: "carrier-1"})
+	r := Build(collect(tr, 0), meshInput())
+	th := r.Processes[0].Threads[0]
+	if th.Carried != 2 || len(th.Calls) != 2 || !th.Calls[0].Carrier || th.Calls[1].Carrier {
+		t.Fatalf("carrier thread: %+v", th)
+	}
+	_, text := render(t, r)
+	for _, want := range []string{"2 of them virtual threads' I/O it carried", "[virtual thread on this carrier]"} {
+		if !bytes.Contains(text, []byte(want)) {
+			t.Errorf("text lacks %q:\n%s", want, text)
 		}
 	}
 }

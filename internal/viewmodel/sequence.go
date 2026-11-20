@@ -69,18 +69,22 @@ func FindConversation(m Model, id string) (Conversation, error) {
 	return m.Conversations[i], nil
 }
 
-// WriteSequence prints one conversation: a header, the lifelines, then
-// one line per step — its number, ordering, actor (lifeline/thread),
-// arrow, label and extras — with the step's top Java frame and its raw
-// event's ref indented below it.
+// WriteSequence prints one conversation: a header, the services and the
+// per-thread lifelines, then one line per step — its number, ordering,
+// actor (service/thread), arrow to the peer's lifeline, label and
+// extras — with the step's top Java frame and its raw event's ref
+// indented below it.
 func WriteSequence(w io.Writer, c Conversation) error {
 	c = safeConversation(c)
 	var b strings.Builder
 	fmt.Fprintf(&b, "conversation %s  %s UTC  %s  %s  (%d hops)\n", c.ID, c.Start.Format(msLayout),
 		c.Entry, c.Label, c.Hops)
-	fmt.Fprintf(&b, "lifelines    %s\n", strings.Join(c.Services, ", "))
+	fmt.Fprintf(&b, "services     %s\n", strings.Join(c.Services, ", "))
+	for i, l := range c.Lifelines {
+		fmt.Fprintf(&b, "lifeline %-3d %s\n", i+1, lifelineDetail(l))
+	}
 	for i, s := range c.Steps {
-		fmt.Fprintf(&b, "%3d  %-12s  %s\n", i+1, s.Ordering, stepLine(s))
+		fmt.Fprintf(&b, "%3d  %-12s  %s\n", i+1, s.Ordering, stepLine(s, peerLane(c, s)))
 		if len(s.Stack) > 0 {
 			fmt.Fprintf(&b, "     %-12s    at %s\n", "", s.Stack[0])
 		}
@@ -93,14 +97,53 @@ func WriteSequence(w io.Writer, c Conversation) error {
 	return err
 }
 
-// stepLine is "actor -> peer: label (extras)".
-func stepLine(s Step) string {
+// LifelineName is a lifeline as a sequence view heads its column:
+// "service/thread", and for a virtual thread's I/O "service/thread
+// (virtual)" — the carrier's name with the mark that the work was not
+// the carrier's own.
+func LifelineName(l Lifeline) string {
+	name := l.Service
+	if l.Thread != "" {
+		name += "/" + l.Thread
+	}
+	if l.Carrier {
+		name += " (virtual)"
+	}
+	return name
+}
+
+// lifelineDetail is a lifeline's name with the host, process and kernel
+// thread that tell two lifelines of one name apart.
+func lifelineDetail(l Lifeline) string {
+	d := LifelineName(l)
+	if l.Host != "" {
+		d += fmt.Sprintf("  %s pid %d tid %d", l.Host, l.PID, l.TID)
+	}
+	if l.Carrier {
+		d += "  virtual threads' I/O on this carrier, not its own work"
+	}
+	return d
+}
+
+// peerLane names step s's peer lifeline, or just its To service when
+// the model has no lifeline for it (a file step, a model built before
+// lifelines existed).
+func peerLane(c Conversation, s Step) string {
+	if s.ToLane >= 0 && s.ToLane < len(c.Lifelines) && s.To != "" {
+		return LifelineName(c.Lifelines[s.ToLane])
+	}
+	return s.To
+}
+
+// stepLine is "actor -> peer: label (extras)"; to names the peer's
+// lifeline.
+func stepLine(s Step, to string) string {
 	actor := s.Service
 	if s.Thread != "" {
 		actor += "/" + s.Thread
 	}
-	if s.To != "" {
-		actor += " -> " + s.To
+	if to != "" {
+		actor += " -> " + to
 	}
 	var extra []string
 	if s.Bytes > 0 {
@@ -128,6 +171,10 @@ func stepLine(s Step) string {
 func safeConversation(c Conversation) Conversation {
 	s := termsafe.String
 	c.ID, c.Entry, c.Label, c.Services = s(c.ID), s(c.Entry), s(c.Label), safeAll(c.Services)
+	c.Lifelines = slices.Clone(c.Lifelines)
+	for i := range c.Lifelines {
+		c.Lifelines[i] = safeLifeline(c.Lifelines[i])
+	}
 	c.Steps = slices.Clone(c.Steps)
 	for i := range c.Steps {
 		x := &c.Steps[i]

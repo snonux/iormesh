@@ -101,6 +101,7 @@ type callAcc struct {
 	end                  *connAcc
 	method, scheme, path string
 	status               uint16
+	carrier              bool // a virtual thread's request (java.carrier)
 }
 
 // NewCollector returns an empty collector; methods are the sessions'
@@ -194,6 +195,9 @@ func (c *Collector) thread(p *procAcc, ev *schema.Event) bool {
 	t := p.threads[i]
 	t.Events++
 	t.Bytes += ev.Bytes
+	if ev.Java != nil && ev.Java.Carrier {
+		t.Carried++
+	}
 	if t.Name == "" && ev.Java != nil && ev.Java.Thread != "" {
 		t.Name = ev.Java.Thread
 	}

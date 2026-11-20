@@ -8,7 +8,11 @@
 // Step V1 (M4) built run, health, services and edges; V2 (M5, task mb4)
 // appends the conversations (conversation.go): request chains across
 // the fused connections in happens-before order, each thread's file work
-// interleaved. Processes (the rest of V2) are appended when they land.
+// interleaved, each step on the lifelines of the threads at its ends;
+// task 0f4 appended the thread stories (stories.go: one thread's steps
+// across the conversations, `show thread`) and the processes
+// (process.go: per host, its threads, files and sockets, projected from
+// the run's rollup, internal/report).
 //
 // Rules the model keeps:
 //
@@ -49,6 +53,13 @@ type Model struct {
 	// newest first; MoreConversations counts the older ones left out.
 	Conversations     []Conversation `json:"conversations"`
 	MoreConversations int            `json:"more_conversations"`
+	// Threads are the stories of the conversations' threads, sorted by
+	// lifeline.
+	Threads []ThreadStory `json:"threads"`
+	// Processes are the traced process incarnations, sorted by host,
+	// pid and incarnation; MoreProcesses counts those the rollup cut.
+	Processes     []Process `json:"processes"`
+	MoreProcesses int       `json:"more_processes"`
 }
 
 // Run is what the build read and what the merge made of it.

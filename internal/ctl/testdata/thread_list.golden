@@ -1,0 +1,5 @@
+THREAD                HOST                PID  TID  STEPS  NOTE
+billing:8082/bill-1   bill.example.org    40   41   2      
+inventory:8081/inv-1  inv.example.org     30   31   4      
+java/http-1           gw.example.org      10   11   4      
+orders:8080/worker-3  orders.example.org  20   21   11     

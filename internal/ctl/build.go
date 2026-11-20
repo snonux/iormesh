@@ -174,6 +174,7 @@ func build(ctx context.Context, e env, f buildFlags) (buildOutput, error) {
 	if err != nil {
 		return buildOutput{}, err
 	}
+	in.Report = &rep // the processes view is projected from the rollup
 	model := viewmodel.New(in)
 	dir, err := writeOutputs(paths.builds, projects, in.Merge.Graph, model)
 	if err == nil {

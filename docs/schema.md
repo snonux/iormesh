@@ -1236,7 +1236,11 @@ The Go types are `internal/report`'s `Report`.
   thread's http events in order, `in` when its process served the
   request, `out` when it made it. A served request's http event is
   written when its response completes, so the calls the server
-  made for it come before it on the thread's line.
+  made for it come before it on the thread's line. A carrier
+  thread's virtual threads' I/O (`java.carrier`) is counted in its
+  `events` but also in `carried`, and such a call has
+  `"carrier": true` (both omitted when false; task 0f4): the text
+  says so, never letting it read as the carrier's own work.
 - **Caps**: 256 processes, and per process 32 files, connections
   and threads, 32 calls per thread and requests per connection,
   10 methods (by events, then bytes), 8 ops per file; each cut is

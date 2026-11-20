@@ -1,0 +1,110 @@
+package viewmodel
+
+import (
+	"fmt"
+	"io"
+	"strings"
+
+	"iormesh/internal/report"
+)
+
+// WriteProcesses prints the processes view (`show processes`): one block
+// per process incarnation, grouped by host as the model sorts them —
+// header, restarts, threads (a carrier's virtual-thread I/O counted
+// apart), files and sockets.
+func WriteProcesses(w io.Writer, m Model) error {
+	m = safeModel(m)
+	var b strings.Builder
+	for i, p := range m.Processes {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		writeProcess(&b, p)
+	}
+	if m.MoreProcesses > 0 {
+		fmt.Fprintf(&b, "\ntruncated: %d more processes\n", m.MoreProcesses)
+	}
+	_, err := io.WriteString(w, b.String())
+	return err
+}
+
+// writeProcess prints one process block.
+func writeProcess(b *strings.Builder, p Process) {
+	fmt.Fprintf(b, "process    %s/%s/%s[%d] incarnation %d  %s  (as a client: %s)\n", p.Project,
+		p.Host, p.Comm, p.PID, p.Incarnation, p.FQDN, p.Service)
+	if p.Incarnations > 1 {
+		fmt.Fprintf(b, "  restarts %d incarnations of pid %d on this host\n", p.Incarnations, p.PID)
+	}
+	if len(p.Serves) > 0 {
+		fmt.Fprintf(b, "  serves   %s\n", strings.Join(p.Serves, ", "))
+	}
+	fmt.Fprintf(b, "  events   %d, %d with a Java stack\n", p.Events, p.JavaEvents)
+	for _, t := range p.Threads {
+		fmt.Fprintf(b, "  thread   %s\n", procThreadLine(t))
+	}
+	moreLine(b, "threads", p.MoreThreads)
+	for _, f := range p.Files {
+		fmt.Fprintf(b, "  file     %s\n", procFileLine(f))
+	}
+	moreLine(b, "files", p.MoreFiles)
+	for _, s := range p.Sockets {
+		fmt.Fprintf(b, "  socket   %s\n", socketLine(s))
+	}
+	moreLine(b, "sockets", p.MoreSockets)
+}
+
+// procThreadLine is "NAME (tid N): E events, B B, C calls", and for a
+// carrier how much of it was its virtual threads'.
+func procThreadLine(t ProcThread) string {
+	name := t.Name
+	if name != "tid "+itoa(t.TID) {
+		name += " (tid " + itoa(t.TID) + ")"
+	}
+	line := fmt.Sprintf("%s: %d events, %d B, %d calls", name, t.Events, t.Bytes, t.Calls)
+	if t.Carried > 0 || t.CarriedCalls > 0 {
+		line += fmt.Sprintf("; carrier: %d events and %d calls were virtual threads' I/O, not its own",
+			t.Carried, t.CarriedCalls)
+	}
+	return line
+}
+
+// procFileLine is "PATH: R B read, W B written; OPS".
+func procFileLine(f ProcFile) string {
+	line := fmt.Sprintf("%s: %d B read, %d B written", f.Path, f.ReadBytes, f.WriteBytes)
+	if len(f.Ops) > 0 {
+		line += "; " + strings.Join(f.Ops, ", ")
+	}
+	if f.MoreOps > 0 {
+		line += fmt.Sprintf(" (+%d more)", f.MoreOps)
+	}
+	return line
+}
+
+// socketLine is "ID ROLE LOCAL -> REMOTE, service S, peer P; bytes;
+// requests".
+func socketLine(s ProcSocket) string {
+	peer := "peer untraced"
+	if s.PeerState == report.PeerTraced && len(s.Peers) > 0 {
+		peer = "peer " + strings.Join(s.Peers, ", ")
+	}
+	fd := "-"
+	if s.FD >= 0 {
+		fd = fmt.Sprint(s.FD)
+	}
+	return fmt.Sprintf("%s fd %s %s %s -> %s, service %s, %s; sent %d B, received %d B; %d requests", s.ID,
+		fd, dashed(s.Role), dashed(s.Local), dashed(s.Remote), dashed(s.Service), peer, s.SentBytes, s.RecvBytes,
+		s.Requests)
+}
+
+func moreLine(b *strings.Builder, what string, n int) {
+	if n > 0 {
+		fmt.Fprintf(b, "  truncated: %d more %s\n", n, what)
+	}
+}
+
+func dashed(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}

@@ -144,6 +144,10 @@ type Thread struct {
 	TID    uint32 `json:"tid"`
 	Events uint64 `json:"events"`
 	Bytes  uint64 `json:"bytes"`
+	// Carried counts the events among Events that virtual threads issued
+	// while this kernel thread carried them (java.carrier): their I/O,
+	// named by the carrier, never the carrier's own work (task 0f4).
+	Carried uint64 `json:"carried,omitempty"`
 	// Calls are its HTTP requests in the order it made or served them:
 	// the thread's part of a conversation.
 	Calls     []Call `json:"calls"`
@@ -162,6 +166,9 @@ type Call struct {
 	// processes, as on Conn.
 	Service string   `json:"service"`
 	Peers   []string `json:"peers"`
+	// Carrier flags a request a virtual thread made or served on this
+	// carrier thread: not the carrier's own call.
+	Carrier bool `json:"carrier,omitempty"`
 }
 
 // MethodStat counts the events a Java method caused.

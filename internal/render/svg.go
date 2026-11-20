@@ -36,7 +36,7 @@ var classes = map[string]bool{
 	"host": true, "process": true, "file": true, "socket": true, "app": true,
 	"runs_on": true, "opened": true, "connected": true, "incarnation": true, "forked": true,
 	"signaled": true, "fused": true, "unresolved": true, "more": true, "title": true, "label": true,
-	"lane": true, "life": true, "note": true, "step": true, "time-ordered": true, "unordered": true,
+	"lane": true, "carrier": true, "life": true, "note": true, "step": true, "time-ordered": true, "unordered": true,
 }
 
 // cls is c when it is a known class, else "other".

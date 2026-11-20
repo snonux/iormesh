@@ -53,6 +53,12 @@ func record(bounds []federate.ClockBound, evs []*schema.Event, files []*schema.E
 	return r
 }
 
+// convs builds r's conversations with an empty namer.
+func convs(r *Recorder) []Conversation {
+	cs, _ := r.conversations(newNamer(schema.Graph{}, nil, nil))
+	return cs
+}
+
 // TestOrdering: a step after another is causal only by an edge, and
 // otherwise time-ordered only when the clocks prove it — never by
 // comparing two hosts' raw stamps.
@@ -114,7 +120,7 @@ func TestClockJoin(t *testing.T) {
 			[]*schema.Event{client, server, httpEv("a", 4, base+5*ms, base+5*ms, "c", true, 0)}, HopUnpaired, 3},
 	} {
 		r := record(c.bounds, c.evs, nil)
-		cs := r.conversations(newNamer(schema.Graph{}, nil, nil))
+		cs := convs(r)
 		if len(cs) != c.roots {
 			t.Errorf("%s: %d conversations, want %d", c.name, len(cs), c.roots)
 			continue
@@ -142,7 +148,7 @@ func TestUnorderedStep(t *testing.T) {
 	client := httpEv("a", 1, base, base+10*ms, "c", true, 0)
 	server := httpEv("b", 2, base+50*ms+3*ms, base+50*ms+7*ms, "c", false, 0)
 	r := record([]federate.ClockBound{b}, []*schema.Event{srv, client, server}, []*schema.Event{op})
-	cs := r.conversations(newNamer(schema.Graph{}, nil, nil))
+	cs := convs(r)
 	if len(cs) != 1 {
 		t.Fatalf("%d conversations", len(cs))
 	}
@@ -185,7 +191,7 @@ func TestLinkNegatives(t *testing.T) {
 		}
 	}
 	r := record(nil, []*schema.Event{async}, nil)
-	if st := r.conversations(newNamer(schema.Graph{}, nil, nil))[0].Steps; len(st) != 1 || st[0].Hop != HopAsync {
+	if st := convs(r)[0].Steps; len(st) != 1 || st[0].Hop != HopAsync {
 		t.Errorf("async request steps %+v", st)
 	}
 }
@@ -213,7 +219,7 @@ func TestFileWork(t *testing.T) {
 	sock.ConnID = "c9"
 	r := record(nil, []*schema.Event{srv}, append(files, sock))
 	var labels []string
-	for _, s := range r.conversations(newNamer(schema.Graph{}, nil, nil))[0].Steps {
+	for _, s := range convs(r)[0].Steps {
 		if s.Kind == StepFile {
 			labels = append(labels, s.Label)
 		}
@@ -234,7 +240,7 @@ func TestConversationCaps(t *testing.T) {
 		r.HTTP(Origin{Session: "s"}, httpEv("a", uint32(i+1), base+i*ms, base+i*ms+1, "", false, 0))
 	}
 	r.Plan(nil)
-	cs := r.conversations(newNamer(schema.Graph{}, nil, nil))
+	cs := convs(r)
 	if r.cut != 7 || len(cs) != 3 || cs[0].Start != wallTime(base+9*ms) {
 		t.Errorf("cut %d, %d conversations, newest %v", r.cut, len(cs), cs[0].Start)
 	}
@@ -248,7 +254,7 @@ func TestConversationCaps(t *testing.T) {
 			Args: schema.Args{Path: ptr("/f")}})
 	}
 	r = record(nil, evs, files)
-	cs = r.conversations(newNamer(schema.Graph{}, nil, nil))
+	cs = convs(r)
 	if len(cs) != MaxConversations || r.more != 1 {
 		t.Fatalf("%d conversations, %d more", len(cs), r.more)
 	}

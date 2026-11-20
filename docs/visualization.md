@@ -232,6 +232,7 @@ iormeshctl show services
 iormeshctl show edges [--unresolved]
 iormeshctl show sequence [CONV-ID]    # the text diagram above
 iormeshctl show thread SERVICE/THREAD # one thread's story, one line
+iormeshctl show processes             # per host: threads, files, sockets
 iormeshctl show health
 iormeshctl show report                # the summary, then the rollup
 ```
@@ -293,7 +294,8 @@ V2 as built (task mb4; files and passes in
 [implementation.md](implementation.md), M5 "Conversations and
 exports"): `Model` gains `Conversations` (the newest 100, newest
 first, `MoreConversations` counting the rest) and
-`Health.RequestsCut`; `Processes` is still to come. A
+`Health.RequestsCut`; task 0f4 added the per-thread lifelines,
+`Threads` and `Processes` (below). A
 conversation is built from the http events only — the correlated
 trace, never re-inferred:
 
@@ -364,8 +366,51 @@ dashed, 200 nodes a column, the rest counted) and
 `sequence/<ID>.svg` per conversation (lifelines in first-appearance
 order; causal arrows solid, time-ordered dashed, unordered dotted
 and marked `?`; file work as notes; every CSS class from a fixed
-list, so no data writes attribute text). `show thread` and the
-lifelines' Java threads as columns of their own are not built yet.
+list, so no data writes attribute text).
+
+Per-thread lifelines, thread stories and processes (task 0f4; files
+in [implementation.md](implementation.md), M5 "Threads and
+processes"):
+
+- **Lifelines**: a conversation's `lifelines` are its threads in
+  first-appearance order — service, host, pid, tid, thread name —
+  and each step names its own and its peer's (`lane`, `to_lane`,
+  `-1` for a file step): gateway thread X → orders thread Y →
+  inventory thread Z. The far end of a hop no trace saw (an
+  unpaired peer, an untraced caller) is a lifeline with a service
+  only. A virtual thread's I/O, which the trace names by its
+  carrier, is a lifeline of its own (`carrier: true`), never the
+  carrier's platform-thread lifeline. `show sequence` lists the
+  lifelines and names the peer's thread on each arrow;
+  `sequence/<ID>.svg` draws one column per lifeline (service, and
+  thread below; a carrier's lifeline dashed and marked
+  `(virtual)`).
+- **Thread stories** (`threads`): per lifeline with a thread,
+  what it did across the kept conversations — `receive`, `send`,
+  `response`, `reply`, `file` — each entry a conversation step
+  (ID and number) with its ref. All of a lifeline's entries
+  happened on one kernel thread of one host, so they are ordered
+  by that host's clock only: `causal` between two entries of one
+  request span the thread held alone (the `owned` rule above),
+  `time-ordered` when the clock moved on, `unordered` on a tie. A
+  carrier's lifeline has no owned span, so its entries are never
+  causal. The newest 200 entries are kept (`more_entries`).
+  `show thread` lists the stories; `show thread SERVICE/THREAD`
+  prints every lifeline of that name (one per host, process and
+  kernel thread, a carrier's virtual-thread lifeline beside its
+  own) — the story as one line (`received GET /orders/42 from
+  gateway => read /etc/orders.conf => … => replied 200 to
+  gateway`), then entry by entry; `-json` prints the stories.
+- **Processes** (`processes`, `more_processes`): projected from the
+  run's rollup (`report.json`, task qb4), not a reading of their
+  own — per process incarnation its host, pid, comm, app, the name
+  it carries as a client lifeline, the services it serves, how
+  many incarnations of its pid the run saw (a restart), its
+  threads (events, bytes, calls, and `carried` / `carried_calls`:
+  the virtual threads' I/O a carrier ran, counted apart), files
+  (bytes, ops) and sockets (merged conn id, fd, role, addresses,
+  service, peers), with the rollup's caps. `show processes` prints
+  them, `-json` the list.
 
 Tests: golden files on the serialized model and on every `show`
 view; the site's `data/*.js` are goldens too, and one headless

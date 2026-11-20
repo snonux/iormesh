@@ -110,18 +110,39 @@ type Conversation struct {
 	// ("GET /checkout").
 	Entry string `json:"entry"`
 	Label string `json:"label"`
-	// Hops counts the request steps; Services are the lifelines, in the
-	// order they first appear.
-	Hops      int      `json:"hops"`
-	Services  []string `json:"services"`
-	Steps     []Step   `json:"steps"`
-	MoreSteps int      `json:"more_steps"`
+	// Hops counts the request steps; Services are the services the
+	// steps touch, in the order they first appear.
+	Hops     int      `json:"hops"`
+	Services []string `json:"services"`
+	// Lifelines are the per-thread lifelines, in the order they first
+	// appear: a step's Lane and ToLane index them (task 0f4).
+	Lifelines []Lifeline `json:"lifelines"`
+	Steps     []Step     `json:"steps"`
+	MoreSteps int        `json:"more_steps"`
+}
+
+// Lifeline is one column of a sequence diagram: a thread of a service on
+// a host — "gateway thread X → orders thread Y". The far end of a hop
+// whose thread no trace saw (an unpaired peer, an untraced caller) is a
+// lifeline with Service only. A virtual thread's I/O is named by its
+// carrier (java.carrier): such steps sit on a lifeline of their own,
+// Carrier set, never on the carrier's platform-thread lifeline — what
+// the carrier ran for its virtual threads is not its own work. PID and
+// TID tell two threads of one name apart (two processes of one service
+// on a host, a reused name).
+type Lifeline struct {
+	Service string `json:"service"`
+	Host    string `json:"host,omitempty"`
+	PID     uint32 `json:"pid,omitempty"`
+	TID     uint32 `json:"tid,omitempty"`
+	Thread  string `json:"thread,omitempty"`
+	Carrier bool   `json:"carrier,omitempty"`
 }
 
 // Step is one arrow or note of a conversation.
 type Step struct {
 	Kind string `json:"kind"` // request | response | file
-	// Service is the lifeline the step starts on; Host its FQDN.
+	// Service is the service the step starts on; Host its FQDN.
 	Service string `json:"service"`
 	Host    string `json:"host"`
 	// Thread is the Java thread name, else "tid N"; "" for the far end
@@ -145,4 +166,9 @@ type Step struct {
 	Stack []string `json:"stack"`
 	// Ref names the step's raw event for `iormeshctl query -ref`.
 	Ref string `json:"ref"`
+	// Lane is the step's own lifeline (Service, Host, Thread, Carrier)
+	// and ToLane its peer's (To), -1 when it has none (a file step):
+	// indices into the conversation's Lifelines.
+	Lane   int `json:"lane"`
+	ToLane int `json:"to_lane"`
 }

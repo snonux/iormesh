@@ -176,7 +176,7 @@ func (b *builder) threads(p *procAcc) ([]Thread, int) {
 			id := b.merged(p.hostID, ca.end.local)
 			th.Calls = append(th.Calls, Call{Dir: direction(ca.end.role), Method: ca.method,
 				Scheme: ca.scheme, Path: ca.path, Status: ca.status, Conn: id, Service: b.service(id),
-				Peers: b.peers(id, ca.end)})
+				Peers: b.peers(id, ca.end), Carrier: ca.carrier})
 		}
 		out = append(out, th)
 	}

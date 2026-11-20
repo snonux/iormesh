@@ -11,6 +11,39 @@
     "inventory:8081",
     "billing:8082"
   ],
+  "lifelines": [
+    {
+      "service": "(untraced)"
+    },
+    {
+      "service": "java",
+      "host": "gw.example.org",
+      "pid": 10,
+      "tid": 11,
+      "thread": "http-1"
+    },
+    {
+      "service": "orders:8080",
+      "host": "orders.example.org",
+      "pid": 20,
+      "tid": 21,
+      "thread": "worker-3"
+    },
+    {
+      "service": "inventory:8081",
+      "host": "inv.example.org",
+      "pid": 30,
+      "tid": 31,
+      "thread": "inv-1"
+    },
+    {
+      "service": "billing:8082",
+      "host": "bill.example.org",
+      "pid": 40,
+      "tid": 41,
+      "thread": "bill-1"
+    }
+  ],
   "steps": [
     {
       "kind": "request",
@@ -24,7 +57,9 @@
       "ordering": "time-ordered",
       "hop": "untraced",
       "stack": [],
-      "ref": "shop/gw/gw.example.org-g1/5"
+      "ref": "shop/gw/gw.example.org-g1/5",
+      "lane": 0,
+      "to_lane": 1
     },
     {
       "kind": "request",
@@ -40,7 +75,9 @@
       "stack": [
         "com.shop.gw.OrdersClient#get(OrdersClient.java:12)"
       ],
-      "ref": "shop/gw/gw.example.org-g1/6"
+      "ref": "shop/gw/gw.example.org-g1/6",
+      "lane": 1,
+      "to_lane": 2
     },
     {
       "kind": "file",
@@ -55,7 +92,9 @@
         "com.shop.orders.Config#load(Config.java:9)",
         "com.shop.orders.OrderHandler#handle(OrderHandler.java:20)"
       ],
-      "ref": "shop/orders/orders.example.org-o1/13"
+      "ref": "shop/orders/orders.example.org-o1/13",
+      "lane": 2,
+      "to_lane": -1
     },
     {
       "kind": "file",
@@ -69,7 +108,9 @@
       "stack": [
         "com.shop.orders.OrderHandler#handle(OrderHandler.java:20)"
       ],
-      "ref": "shop/orders/orders.example.org-o1/14"
+      "ref": "shop/orders/orders.example.org-o1/14",
+      "lane": 2,
+      "to_lane": -1
     },
     {
       "kind": "request",
@@ -85,7 +126,9 @@
       "stack": [
         "com.shop.orders.Downstream#call(Downstream.java:15)"
       ],
-      "ref": "shop/orders/orders.example.org-o1/16"
+      "ref": "shop/orders/orders.example.org-o1/16",
+      "lane": 2,
+      "to_lane": 3
     },
     {
       "kind": "file",
@@ -99,7 +142,9 @@
       "stack": [
         "com.shop.inv.StockHandler#handle(StockHandler.java:8)"
       ],
-      "ref": "shop/inv/inv.example.org-i1/5"
+      "ref": "shop/inv/inv.example.org-i1/5",
+      "lane": 3,
+      "to_lane": -1
     },
     {
       "kind": "file",
@@ -113,7 +158,9 @@
       "stack": [
         "com.shop.inv.StockHandler#handle(StockHandler.java:8)"
       ],
-      "ref": "shop/inv/inv.example.org-i1/6"
+      "ref": "shop/inv/inv.example.org-i1/6",
+      "lane": 3,
+      "to_lane": -1
     },
     {
       "kind": "response",
@@ -128,7 +175,9 @@
       "stack": [
         "com.shop.inv.StockHandler#handle(StockHandler.java:8)"
       ],
-      "ref": "shop/inv/inv.example.org-i1/4"
+      "ref": "shop/inv/inv.example.org-i1/4",
+      "lane": 3,
+      "to_lane": 2
     },
     {
       "kind": "file",
@@ -143,7 +192,9 @@
         "com.shop.orders.DataStore#save(DataStore.java:42)",
         "com.shop.orders.OrderHandler#handle(OrderHandler.java:20)"
       ],
-      "ref": "shop/orders/orders.example.org-o1/17"
+      "ref": "shop/orders/orders.example.org-o1/17",
+      "lane": 2,
+      "to_lane": -1
     },
     {
       "kind": "file",
@@ -157,7 +208,9 @@
       "stack": [
         "com.shop.orders.OrderHandler#handle(OrderHandler.java:20)"
       ],
-      "ref": "shop/orders/orders.example.org-o1/18"
+      "ref": "shop/orders/orders.example.org-o1/18",
+      "lane": 2,
+      "to_lane": -1
     },
     {
       "kind": "file",
@@ -172,7 +225,9 @@
         "com.shop.orders.DataStore#save(DataStore.java:42)",
         "com.shop.orders.OrderHandler#handle(OrderHandler.java:20)"
       ],
-      "ref": "shop/orders/orders.example.org-o1/20"
+      "ref": "shop/orders/orders.example.org-o1/20",
+      "lane": 2,
+      "to_lane": -1
     },
     {
       "kind": "request",
@@ -188,7 +243,9 @@
       "stack": [
         "com.shop.orders.Downstream#call(Downstream.java:15)"
       ],
-      "ref": "shop/orders/orders.example.org-o1/21"
+      "ref": "shop/orders/orders.example.org-o1/21",
+      "lane": 2,
+      "to_lane": 4
     },
     {
       "kind": "response",
@@ -203,7 +260,9 @@
       "stack": [
         "com.shop.bill.ChargeHandler#handle(ChargeHandler.java:5)"
       ],
-      "ref": "shop/bill/bill.example.org-b1/6"
+      "ref": "shop/bill/bill.example.org-b1/6",
+      "lane": 4,
+      "to_lane": 2
     },
     {
       "kind": "response",
@@ -218,7 +277,9 @@
       "stack": [
         "com.shop.orders.OrderHandler#handle(OrderHandler.java:20)"
       ],
-      "ref": "shop/orders/orders.example.org-o1/12"
+      "ref": "shop/orders/orders.example.org-o1/12",
+      "lane": 2,
+      "to_lane": 1
     },
     {
       "kind": "response",
@@ -233,7 +294,9 @@
       "stack": [
         "com.shop.gw.Checkout#run(Checkout.java:30)"
       ],
-      "ref": "shop/gw/gw.example.org-g1/5"
+      "ref": "shop/gw/gw.example.org-g1/5",
+      "lane": 1,
+      "to_lane": 0
     }
   ],
   "more_steps": 0

@@ -124,7 +124,7 @@ func (c *Collector) request(p *procAcc, a *connAcc, ev *schema.Event) {
 	t := p.threads[ti]
 	if len(t.calls) < MaxCalls {
 		t.calls = append(t.calls, callAcc{end: a, method: r.Method, scheme: r.Scheme, path: r.Path,
-			status: r.Status})
+			status: r.Status, carrier: ev.Java != nil && ev.Java.Carrier})
 	} else {
 		t.MoreCalls++
 	}

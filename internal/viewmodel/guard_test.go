@@ -36,7 +36,7 @@ func TestNoNestingOnSharedThreads(t *testing.T) {
 		if n := len(r.links.roots); n != 3 {
 			t.Errorf("%s: %d roots, want 3 (nothing nested)", c.name, n)
 		}
-		for _, conv := range r.conversations(newNamer(schema.Graph{}, nil, nil)) {
+		for _, conv := range convs(r) {
 			for _, s := range conv.Steps {
 				if s.Kind == StepFile {
 					t.Errorf("%s: file work pinned on a shared span: %+v", c.name, s)

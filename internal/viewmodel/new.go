@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"iormesh/internal/federate"
+	"iormesh/internal/report"
 	"iormesh/internal/servicedb"
 )
 
@@ -31,6 +32,9 @@ type Input struct {
 	// build's recording, planned and read (Recorder); nil for none.
 	Observations  []servicedb.Observation
 	Conversations *Recorder
+	// Report is the build's rollup (internal/report): the processes
+	// view is projected from it; nil for none.
+	Report *report.Report
 }
 
 // New builds the model. Every list is sorted, so equal inputs give equal
@@ -49,11 +53,13 @@ func New(in Input) Model {
 	m.Health.Ignored = slices.Sorted(slices.Values(in.Ignored))
 	m.Services = services(in.Endpoints, in.Interactions)
 	m.Edges = edges(in.Interactions)
-	m.Conversations = []Conversation{}
+	m.Conversations, m.Threads = []Conversation{}, []ThreadStory{}
+	n := newNamer(in.Merge.Graph, in.Observations, in.Endpoints)
 	if r := in.Conversations; r != nil {
-		m.Conversations = r.conversations(newNamer(in.Merge.Graph, in.Observations, in.Endpoints))
+		m.Conversations, m.Threads = r.conversations(n)
 		m.MoreConversations, m.Health.RequestsCut = r.more, r.cut
 	}
+	m.Processes, m.MoreProcesses = processes(in.Report, n)
 	return m
 }
 

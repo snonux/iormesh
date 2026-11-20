@@ -1,8 +1,13 @@
 conversation 0001  2025-11-20 00:53:20.000 UTC  java  GET /checkout  (4 hops)
-lifelines    (untraced), java, orders:8080, inventory:8081, billing:8082
-  1  time-ordered  (untraced) -> java: GET /checkout [untraced]
+services     (untraced), java, orders:8080, inventory:8081, billing:8082
+lifeline 1   (untraced)
+lifeline 2   java/http-1  gw.example.org pid 10 tid 11
+lifeline 3   orders:8080/worker-3  orders.example.org pid 20 tid 21
+lifeline 4   inventory:8081/inv-1  inv.example.org pid 30 tid 31
+lifeline 5   billing:8082/bill-1  bill.example.org pid 40 tid 41
+  1  time-ordered  (untraced) -> java/http-1: GET /checkout [untraced]
                      ref shop/gw/gw.example.org-g1/5
-  2  causal        java/http-1 -> orders:8080: GET /orders/42
+  2  causal        java/http-1 -> orders:8080/worker-3: GET /orders/42
                      at com.shop.gw.OrdersClient#get(OrdersClient.java:12)
                      ref shop/gw/gw.example.org-g1/6
   3  causal        orders:8080/worker-3: open /etc/orders.conf
@@ -11,7 +16,7 @@ lifelines    (untraced), java, orders:8080, inventory:8081, billing:8082
   4  causal        orders:8080/worker-3: read /etc/orders.conf [512 B]
                      at com.shop.orders.OrderHandler#handle(OrderHandler.java:20)
                      ref shop/orders/orders.example.org-o1/14
-  5  causal        orders:8080/worker-3 -> inventory:8081: GET /stock/7
+  5  causal        orders:8080/worker-3 -> inventory:8081/inv-1: GET /stock/7
                      at com.shop.orders.Downstream#call(Downstream.java:15)
                      ref shop/orders/orders.example.org-o1/16
   6  causal        inventory:8081/inv-1: open /var/inv/stock.db
@@ -20,7 +25,7 @@ lifelines    (untraced), java, orders:8080, inventory:8081, billing:8082
   7  causal        inventory:8081/inv-1: read /var/inv/stock.db @4096 [64 B]
                      at com.shop.inv.StockHandler#handle(StockHandler.java:8)
                      ref shop/inv/inv.example.org-i1/6
-  8  causal        inventory:8081/inv-1 -> orders:8080: 200 [1ms]
+  8  causal        inventory:8081/inv-1 -> orders:8080/worker-3: 200 [1ms]
                      at com.shop.inv.StockHandler#handle(StockHandler.java:8)
                      ref shop/inv/inv.example.org-i1/4
   9  causal        orders:8080/worker-3: create /data/order-42.json.tmp
@@ -32,13 +37,13 @@ lifelines    (untraced), java, orders:8080, inventory:8081, billing:8082
  11  causal        orders:8080/worker-3: rename /data/order-42.json.tmp -> /data/order-42.json
                      at com.shop.orders.DataStore#save(DataStore.java:42)
                      ref shop/orders/orders.example.org-o1/20
- 12  time-ordered  orders:8080/worker-3 -> billing:8082: POST /charge [clock]
+ 12  time-ordered  orders:8080/worker-3 -> billing:8082/bill-1: POST /charge [clock]
                      at com.shop.orders.Downstream#call(Downstream.java:15)
                      ref shop/orders/orders.example.org-o1/21
- 13  time-ordered  billing:8082/bill-1 -> orders:8080: 200 [3ms]
+ 13  time-ordered  billing:8082/bill-1 -> orders:8080/worker-3: 200 [3ms]
                      at com.shop.bill.ChargeHandler#handle(ChargeHandler.java:5)
                      ref shop/bill/bill.example.org-b1/6
- 14  causal        orders:8080/worker-3 -> java: 200 [8.25ms]
+ 14  causal        orders:8080/worker-3 -> java/http-1: 200 [8.25ms]
                      at com.shop.orders.OrderHandler#handle(OrderHandler.java:20)
                      ref shop/orders/orders.example.org-o1/12
  15  causal        java/http-1 -> (untraced): 200 [8.6ms]

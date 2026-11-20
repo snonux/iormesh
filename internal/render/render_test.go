@@ -82,6 +82,36 @@ func TestDeterministicAndEscaped(t *testing.T) {
 	}
 }
 
+// TestSequenceLifelines: one column per thread lifeline, its head naming
+// service and thread; a carrier's virtual-thread lifeline is drawn as a
+// "carrier" lane marked "(virtual)"; a lane index outside the list (a
+// hostile model) is drawn on the first lifeline, never trusted.
+func TestSequenceLifelines(t *testing.T) {
+	conv := viewmodel.Conversation{ID: "0001", Services: []string{"gw", "orders"},
+		Lifelines: []viewmodel.Lifeline{{Service: "gw", Thread: "http-1"},
+			{Service: "orders", Thread: "carrier-1", Carrier: true}, {Service: "orders", Thread: "w-3"}},
+		Steps: []viewmodel.Step{
+			{Kind: viewmodel.StepRequest, To: "orders", Label: "GET /a", Lane: 0, ToLane: 1,
+				Ordering: viewmodel.OrderCausal},
+			{Kind: viewmodel.StepFile, Label: "read /x", Lane: 2, ToLane: -1, Ordering: viewmodel.OrderCausal},
+			{Kind: viewmodel.StepResponse, To: "gw", Label: "200", Lane: 99, ToLane: 42,
+				Ordering: viewmodel.OrderCausal},
+		}}
+	out := string(Sequence(conv))
+	wellFormed(t, []byte(out))
+	for _, want := range []string{`<rect class="carrier"`, "carrier-1 (virtual)", ">w-3<", ">http-1<"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("sequence lacks %q:\n%s", want, out)
+		}
+	}
+	if n := strings.Count(out, `class="life"`); n != 3 {
+		t.Errorf("%d lifelines, want 3", n)
+	}
+	if !strings.Contains(out, `<line class="step" x1="120" y1="150" x2="160" y2="150"`) {
+		t.Errorf("the out-of-range step is not drawn on the first lifeline:\n%s", out)
+	}
+}
+
 // TestGraphColumnCap: a host with more nodes than a column holds shows
 // the first ones and counts the rest.
 func TestGraphColumnCap(t *testing.T) {

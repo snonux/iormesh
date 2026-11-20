@@ -1,0 +1,34 @@
+process    shop/bill/java[40] incarnation 1  bill.example.org  (as a client: java)
+  serves   billing:8082
+  events   5, 1 with a Java stack
+  thread   tid 40: 4 events, 150 B, 0 calls
+  thread   bill-1 (tid 41): 1 events, 0 B, 1 calls
+  socket   a07ff128bb1084c0 fd 13 server 10.0.0.4:8082 -> 10.0.0.2:42000, service billing:8082, peer shop/orders/java[20]; sent 50 B, received 100 B; 1 requests
+
+process    shop/gw/java[10] incarnation 1  gw.example.org  (as a client: java)
+  events   5, 2 with a Java stack
+  thread   tid 10: 3 events, 0 B, 0 calls
+  thread   http-1 (tid 11): 2 events, 0 B, 1 calls
+  socket   d883bbfd76f8443a fd 7 client 10.0.0.1:40000 -> 10.0.0.2:8080, service orders:8080, peer shop/orders/java[20]; sent 0 B, received 0 B; 1 requests
+
+process    shop/inv/java[30] incarnation 1  inv.example.org  (as a client: java)
+  serves   inventory:8081
+  events   5, 3 with a Java stack
+  thread   tid 30: 2 events, 0 B, 0 calls
+  thread   inv-1 (tid 31): 3 events, 64 B, 1 calls
+  file     /var/inv/stock.db: 64 B read, 0 B written
+  socket   4bce4ac24b574501 fd 11 server 10.0.0.3:8081 -> 10.0.0.2:41000, service inventory:8081, peer shop/orders/java[20]; sent 0 B, received 0 B; 1 requests
+
+process    shop/orders/java[20] incarnation 1  orders.example.org  (as a client: java)
+  serves   orders:8080
+  events   21, 11 with a Java stack
+  thread   tid 20: 10 events, 150 B, 0 calls
+  thread   worker-3 (tid 21): 10 events, 640 B, 3 calls
+  thread   other (tid 22): 1 events, 0 B, 0 calls
+  file     /etc/orders.conf: 512 B read, 0 B written
+  file     /data/order-42.json.tmp: 0 B read, 128 B written; rename -> /data/order-42.json
+  file     /data/order-42.json: 0 B read, 0 B written; renamed from /data/order-42.json.tmp
+  file     /tmp/other: 0 B read, 0 B written
+  socket   d883bbfd76f8443a fd 9 server 10.0.0.2:8080 -> 10.0.0.1:40000, service orders:8080, peer shop/gw/java[10]; sent 0 B, received 0 B; 1 requests
+  socket   4bce4ac24b574501 fd 10 client 10.0.0.2:41000 -> 10.0.0.3:8081, service inventory:8081, peer shop/inv/java[30]; sent 0 B, received 0 B; 1 requests
+  socket   a07ff128bb1084c0 fd 12 client 10.0.0.2:42000 -> 10.0.0.4:8082, service billing:8082, peer shop/bill/java[40]; sent 100 B, received 50 B; 1 requests
