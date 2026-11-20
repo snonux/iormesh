@@ -153,8 +153,12 @@ func (c control) start(ctx context.Context, args []string) error {
 }
 
 // parseStart parses start's flags: run's, validated as run would (so a
-// bad flag fails here, not in the journal), plus the unit's own.
+// bad flag fails here, not in the journal), plus the unit's own. The
+// test-only clock skew is refused first: the unit would never see it.
 func (c control) parseStart(args []string) (startConfig, error) {
+	if err := refuseStartClockSkew(c.env); err != nil {
+		return startConfig{}, err
+	}
 	fs := flag.NewFlagSet("start", flag.ContinueOnError)
 	fs.SetOutput(c.stderr)
 	rf := addRunFlags(fs)

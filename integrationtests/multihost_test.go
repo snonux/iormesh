@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 
 	"iormesh/internal/federate"
 	"iormesh/internal/normalize"
@@ -48,9 +49,11 @@ var rigSeq atomic.Int32
 type meshRig struct{ client, server, container string }
 
 // meshPair is one run of a cross-host pair scenario: where the server
-// lives and binds, and what the client dials.
+// lives and binds, what the client dials, and how far each host's wall
+// clock is skewed (Host.ClockSkew; 0 for none).
 type meshPair struct {
 	scenario, serverNetns, bind, dial, dialPort string
+	clientSkew, serverSkew                      time.Duration
 }
 
 // meshRun is one judged multi-host run: each host's trace. Its tracedRun
@@ -177,9 +180,10 @@ func traceMesh(t *testing.T, h *Harness, rig meshRig, pair meshPair) meshRun {
 			return meshRun{}, err
 		}
 		runs, err := h.TraceHosts([]*Workload{server, client},
-			Host{Name: "hosta", Project: "shop", Netns: rig.client, Workloads: []*Workload{client}},
+			Host{Name: "hosta", Project: "shop", Netns: rig.client, Workloads: []*Workload{client},
+				ClockSkew: pair.clientSkew},
 			Host{Name: "hostb", Project: "billing", Netns: rig.server,
-				Workloads: []*Workload{server}})
+				Workloads: []*Workload{server}, ClockSkew: pair.serverSkew})
 		if err != nil {
 			return meshRun{}, err
 		}

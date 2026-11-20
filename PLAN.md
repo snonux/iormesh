@@ -2311,7 +2311,17 @@ not the replacement:
   reconciliation would never be exercised. A test-only flag
   injects a clock offset per tracer; the merge must recover
   it within its recorded bound. NAT is emulated the same way
-  (a DNAT hop between namespaces).
+  (a DNAT hop between namespaces). Built (task ye4): the knob
+  is the environment variable `IORMESH_TEST_CLOCK_SKEW` on
+  `run` — not a flag, so no usage text shows it and `start`
+  cannot forward it; refused through the sudoers rule and by
+  `start` — and shifts `wall_ns` only, the clock the fusion
+  window and the bounds use; `boot_ns`, shared by the emulated
+  hosts, is the truth the tests order against. Skews of
+  −0.25 s and +1.25 s fuse and are recovered inside two-sided
+  bounds ≈250–800 µs wide, with no cross-host order
+  contradicting the truth; +3 min fuses nothing (`no_match`,
+  no bound) — docs/testing.md.
 - **Kernel-support probes** (ior's `kernel_support_test.go`):
   probe for the newer syscalls/tracepoints a scenario needs
   and skip with the reason — never infer support from kernel

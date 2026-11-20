@@ -64,6 +64,10 @@ type runConfig struct {
 	// deploying user's collector reads and deletes segments unprivileged;
 	// nil leaves it root's.
 	readyOwner *segment.Owner
+	// clockSkew is added to every wall_ns the run stamps: the test-only
+	// IORMESH_TEST_CLOCK_SKEW (clockskew.go), never a flag, so neither
+	// usage nor start ever carries it. 0 outside tests.
+	clockSkew time.Duration
 }
 
 // defaultDuration bounds every run, ior-style: no unbounded tracer on a

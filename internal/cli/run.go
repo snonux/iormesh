@@ -41,6 +41,14 @@ func runCommand(args []string, stderr io.Writer) error {
 	if err := confineRun(cfg); err != nil {
 		return err
 	}
+	if cfg.clockSkew, err = runClockSkew(); err != nil {
+		return err
+	}
+	if cfg.clockSkew != 0 {
+		// Loud on purpose: a skewed trace must never pass for a real one.
+		_, _ = fmt.Fprintf(stderr, "iormesh: TEST ONLY: wall clock skewed by %v (%s)\n",
+			cfg.clockSkew, testClockSkewEnv)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	stopProfile, err := startCPUProfile(cfg.cpuProfile)
@@ -296,6 +304,10 @@ func newCorrelator(cfg runConfig, out outputs) (*correlate.Correlator, error) {
 	if err != nil {
 		return nil, fmt.Errorf("boot clock: %w", err)
 	}
+	// Every wall_ns derives from this one offset (Java's too, from the
+	// events), so the test-only skew moves the whole host's wall clock
+	// and nothing else.
+	offset += int64(cfg.clockSkew)
 	events, err := openEvents(cfg)
 	if err != nil {
 		return nil, err

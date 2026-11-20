@@ -3850,6 +3850,11 @@ sends pairs with the later; three hosts A–B–C order A against
 C through B; an offset drifting within the allowance after
 its bound never yields a false order (and unpadded it would);
 a message's own send and receive stay unordered.
+On real traces the rig does the same (task ye4,
+`integrationtests/clockskew_test.go`): each emulated host's
+tracer stamps `wall_ns` skewed by the test-only
+`IORMESH_TEST_CLOCK_SKEW`, and the boot clock the hosts share is
+the truth — see [testing.md](testing.md).
 
 **tcp_seq capture (task xe4).** The tracer fills `args.tcp_seq`
 in the syscall hooks it already runs (`internal/c/tcpseq.c`),

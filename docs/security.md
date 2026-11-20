@@ -195,6 +195,10 @@ truth.
     euid, root under sudo) and not be group- or other-writable,
     sticky directories excepted — so a sudoer cannot have root
     load a jar they could rewrite.
+  - the test-only clock skew `IORMESH_TEST_CLOCK_SKEW`
+    ([testing.md](testing.md)) is refused, by `start` always —
+    so a sudoer cannot have a root session record falsified
+    timestamps (sudo's `env_reset` normally drops it anyway).
 
   Every directory the tracer creates is set 0755; one that
   already exists is never chmod'ed. `start`, `stop`, `status`

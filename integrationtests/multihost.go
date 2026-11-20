@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // netnsDir is where `ip netns add` pins named network namespaces.
@@ -30,13 +31,21 @@ const netnsDir = "/run/netns"
 const hostShell = `mount --bind "$1" /etc/machine-id && hostname "$2" && ` +
 	`ns="$3" && shift 3 && exec nsenter --net="$ns" -- "$@"`
 
+// testClockSkewEnv is the tracer's test-only wall-clock skew
+// (internal/cli clockskew.go): the emulated hosts share one kernel clock,
+// so a host's clock is made to differ by skewing what its tracer stamps.
+const testClockSkewEnv = "IORMESH_TEST_CLOCK_SKEW"
+
 // Host is one emulated host of a multi-host run: its name (hostname and
 // trace directory), the project its tracer records, the network
 // namespace its processes live in, and the workloads its tracer targets
-// by PID.
+// by PID. ClockSkew, if not 0, is how far this host's wall clock is off:
+// its tracer adds it to every wall_ns (boot_ns, the machine's one boot
+// clock, stays true).
 type Host struct {
 	Name, Project, Netns string
 	Workloads            []*Workload
+	ClockSkew            time.Duration
 }
 
 // StartWorkloadIn is StartWorkload for a process of an emulated host: the
@@ -114,15 +123,26 @@ func (h *Harness) startHostTracer(host Host, out string) (*process, error) {
 		h.TracerBinary, "run", "-pid", workloadPIDs(host.Workloads), "-project", host.Project,
 		"-out", out, "-duration", tracerDuration, "-ready", ready}
 	cmd := exec.Command("unshare", args...)
-	if h.BpfObject != "" {
-		cmd.Env = append(os.Environ(), bpfObjectOverrideEnv+"="+h.BpfObject)
-	}
+	cmd.Env = hostTracerEnv(h.BpfObject, host.ClockSkew)
 	tracer, err := startProcess("iormesh run on "+host.Name, cmd)
 	if err != nil {
 		return nil, err
 	}
 	h.procs = append(h.procs, tracer)
 	return tracer, waitReady(tracer, ready)
+}
+
+// hostTracerEnv is a host tracer's environment: the test's own, plus the
+// BPF object override and the host's clock skew when set.
+func hostTracerEnv(bpfObject string, skew time.Duration) []string {
+	env := os.Environ()
+	if bpfObject != "" {
+		env = append(env, bpfObjectOverrideEnv+"="+bpfObject)
+	}
+	if skew != 0 {
+		env = append(env, testClockSkewEnv+"="+skew.String())
+	}
+	return env
 }
 
 // finishRun waits for a tracer whose targets exited and reads its loss

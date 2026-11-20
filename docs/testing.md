@@ -60,8 +60,9 @@ introspection.
   only the gateway enrolled; the expanded mesh must equal the one
   obtained by enrolling every host by hand.
 - Hosts emulated as network namespaces share one kernel clock, so
-  a test-only flag injects a clock offset per tracer, and the
-  merge must recover it; NAT is emulated with a DNAT hop.
+  a test-only knob (`IORMESH_TEST_CLOCK_SKEW`, below) injects a
+  clock offset per tracer, and the merge must recover it; NAT is
+  emulated with a DNAT hop.
 - The k8s mode rehearses the same scenarios as pods in kind.
 - The LLM claim is tested: a fixed question set over workload
   traces, with answers known from the scenario declarations,
@@ -410,6 +411,8 @@ connection fused instead of unresolved.
 |---|---|
 | `TestTwoHostsTwoProjects` | `tcp-two-host` on the rig, the two hosts traced as projects `shop` and `billing`: each host's trace satisfies its golden and holds only its own process, the two host ids differ, and a golden naming the other end's address is caught. Subtest `merged`: `federate.Merge` of the two traces fuses exactly one cross-project connection with nothing unresolved, whose ends saw one 4-tuple, mirrored; the merged trace (events renamed to the merged conn id) satisfies `expect.json`, which fails with both ends on one host or on two connections; the client's trace merged alone stays `no_match` |
 | `TestNATPair` | the same for `tcp-nat`, the server in the container: the fused connection's client end saw 10.231.0.2:880 and its server end 172.31.0.2:80 |
+| `TestClockSkewRecovered` | `tcp-two-host` with the client's clock skewed −0.25 s and the server's +1.25 s: the offset the tracers actually stamped (the difference of their `wall_ns − boot_ns`, one value per trace) is 1.5 s within 1 ms; the merge fuses the connection, and every clock bound for the pair is two-sided (tcp_seq, task xe4), contains that offset and excludes 0; `Timeline.Order` over every client/server pair of event starts and ends never contradicts the boot-clock order, orders some pairs, and the raw wall stamps misorder some (else the skew tested nothing) |
+| `TestClockSkewBeyondWindow` | the server's clock +3 min, beyond the 2-minute fusion window: nothing fuses, both ends stay `no_match`, and the merge reports no clock bound |
 
 Both pass as root on real traces, `merged` subtests included,
 now that the tracer records the four `tcp_sock` fields on
@@ -417,9 +420,25 @@ now that the tracer records the four `tcp_sock` fields on
 across the DNAT hop too. A trace without those fields fails
 `merged` up front, naming the cause. A run with a real docker
 daemon (the rig's DNAT rule is docker's) and on two real hosts is
-still the owner's; the injected clock skew of PLAN.md's M4
-acceptance needs the tracer's test-only offset flag, not yet
-built.
+still the owner's.
+
+The injected clock skew of PLAN.md's M4 acceptance (task ye4)
+is the environment variable `IORMESH_TEST_CLOCK_SKEW`, a Go
+duration (`1.5s`, `-3m`, at most a day either way) that `iormesh
+run` adds to the boot-to-wall offset it measures at start.
+Every `wall_ns` the run stamps derives from that offset (the
+Java events' too), so the whole host's wall clock moves; `boot_ns`
+does not, and since the emulated hosts share one boot clock it
+is the true order the tests check the merge against — the
+fusion window and the clock bounds work on `wall_ns` only. It is
+**test-only**: an environment variable rather than a flag, so it
+appears in no usage text and `start` cannot forward it; a run
+through the sudoers rule refuses it, as does `start` (its unit
+would never see it); a skewed run says so on stderr (`TEST
+ONLY: wall clock skewed by …`). The rig passes it per host
+(`Host.ClockSkew`). On veth one exchange each way gives bounds
+≈250–800 µs wide including the 60 µs drift allowance per side.
+
 
 The rig leaves the machine as it found it, with two side
 effects of `ip netns` and nft themselves: the first `ip netns
