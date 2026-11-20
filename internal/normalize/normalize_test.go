@@ -287,3 +287,21 @@ func TestNormalizeArgv(t *testing.T) {
 		t.Error("absent argv became non-nil")
 	}
 }
+
+// TestNormalizeDropsTCPSeq: a tcp_state record's four tcp_sock fields
+// (M4, decision #26) come from the kernel's random ISNs, so all four are
+// dropped together and the rest of its args survive.
+func TestNormalizeDropsTCPSeq(t *testing.T) {
+	n := normalizer{}
+	sndUna, rcvNxt := uint32(0xdeadbeef), uint32(0x12345678)
+	acked, received := uint64(6), uint64(7)
+	state := "ESTABLISHED"
+	got := n.args(schema.Args{SockState: &state, SndUna: &sndUna, RcvNxt: &rcvNxt,
+		BytesAcked: &acked, BytesReceived: &received})
+	if got.SndUna != nil || got.RcvNxt != nil || got.BytesAcked != nil || got.BytesReceived != nil {
+		t.Errorf("tcp_sock fields kept: %+v", got)
+	}
+	if got.SockState == nil || *got.SockState != state {
+		t.Errorf("sock_state %v, want %q", got.SockState, state)
+	}
+}

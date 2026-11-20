@@ -48,6 +48,30 @@ func TestHalvesFromEvents(t *testing.T) {
 				t.Fatalf("got %+v, want a key conflict", h)
 			}
 		}},
+		{"torn accept snapshot: the state changes key the server, no conflict", func(tr *trace) {
+			tr.event(1, schema.KindTCPState, 3, 0, wall0, "x", withSeq(tuple(local, peer),
+				"ESTABLISHED", seqFields{SndUna: 201, RcvNxt: 101 + 9, BytesReceived: 5}))
+			tr.event(1, schema.KindAccept4, 3, 3, wall0+1, "x", tuple(local, peer))
+			tr.event(1, schema.KindTCPState, 3, 0, wall0+20, "x", withSeq(tuple(local, peer),
+				"CLOSE_WAIT", seqFields{SndUna: 201, RcvNxt: 101 + 6, BytesReceived: 6}))
+		}, func(t *testing.T, h Half) {
+			if h.Role != RoleServer || !h.HasKey || h.Key != k || h.KeyConflict || h.Established != wall0 {
+				t.Fatalf("got %+v, want server keyed %v by CLOSE_WAIT, established at the snapshot", h, k)
+			}
+		}},
+		{"two state changes of a server disagree: key conflict", func(tr *trace) {
+			tr.event(1, schema.KindTCPState, 3, 0, wall0, "x", withSeq(tuple(local, peer),
+				"ESTABLISHED", seqFields{SndUna: 201, RcvNxt: 101}))
+			tr.event(1, schema.KindAccept4, 3, 3, wall0+1, "x", tuple(local, peer))
+			tr.event(1, schema.KindTCPState, 3, 0, wall0+20, "x", withSeq(tuple(local, peer),
+				"CLOSE_WAIT", seqFields{SndUna: 201, RcvNxt: 101 + 6, BytesReceived: 6}))
+			tr.event(1, schema.KindTCPState, 3, 0, wall0+30, "x", withSeq(tuple(local, peer),
+				"LAST_ACK", seqFields{SndUna: 999, RcvNxt: 101 + 6, BytesReceived: 6}))
+		}, func(t *testing.T, h Half) {
+			if !h.KeyConflict {
+				t.Fatalf("got %+v, want a key conflict", h)
+			}
+		}},
 		{"no connect or accept record: no role", func(tr *trace) {
 			tr.event(1, schema.KindTCPState, 3, 0, wall0, "x",
 				withSeq(tuple(local, peer), "ESTABLISHED", clientEst))

@@ -150,9 +150,14 @@ tracer fills them (task ve4) on every `tcp_state` record whose
 handshake is complete: `ESTABLISHED` and every later state, the
 accept snapshot (`CLOSE` included — a child reset in the accept
 queue), and a `CLOSE` that ends an established connection. The
-opening records (`SYN_SENT`, `SYN_RECV`) and a `CLOSE` straight
-from `SYN_SENT` (a refused connect) carry none of the four:
-there the fields hold no peer ISN yet. The values derive from
+opening records (`SYN_SENT`, `SYN_RECV`), a `CLOSE` straight
+from `SYN_SENT` (a refused connect), from `SYN_RECV` (an aborted
+handshake) or from `LISTEN` (a closed listener), and an accept
+snapshot whose reads never agreed carry none of the four: there
+the fields hold no peer ISN yet, or were caught mid-update. The
+accept snapshot reads a socket nobody locks, so the merge keys a
+server end from its state changes and uses the snapshot only
+when it has nothing else. The values derive from
 the kernel's random initial sequence numbers, so the golden
 normalizer drops all four.
 

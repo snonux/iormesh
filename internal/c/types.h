@@ -1024,8 +1024,22 @@ struct syscall_restart_event {
 // which states carry them into the trace (internal/correlate/sockets.go),
 // which keeps the record shape and the handler free of state logic.
 // Appended after the addresses so the M1 offsets stay; schema version 2.
+// seq_status (M1's reserved word, always 0 before) says whether they were
+// read consistently: a state change runs with the socket locked, but the
+// accept snapshot reads an unlocked child, which softirq on another CPU
+// may be updating (tcp_rcv_nxt_update bumps bytes_received, then
+// rcv_nxt) - a torn read would rebuild a wrong ISN pair. The snapshot
+// re-reads until two consecutive reads agree; when they never do it sets
+// TCP_SEQ_TORN and leaves the four zero, and the correlator then passes
+// none of them on. Two agreeing reads still leave a residual race (both
+// may fall inside one update on a slow writer); the merge therefore
+// prefers the locked state-change records and uses a snapshot only when
+// a half has nothing else (internal/federate/half.go).
 // No implicit padding, 112 bytes.
 #define TCP_STATE_SNAPSHOT 0
+// seq_status values.
+#define TCP_SEQ_OK 0
+#define TCP_SEQ_TORN 1
 // An address field holds an IPv6 address; IPv4 uses its first 4 bytes.
 #define TCP_ADDR_LEN 16
 #define TCP_STATE_EVENT_SCHEMA_VERSION 2
@@ -1041,7 +1055,7 @@ struct tcp_state_event {
     __u32 family;
     __u32 sport;
     __u32 dport;
-    __u32 reserved;
+    __u32 seq_status;
     __u8 saddr[TCP_ADDR_LEN];
     __u8 daddr[TCP_ADDR_LEN];
     __u32 snd_una;

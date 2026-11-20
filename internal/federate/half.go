@@ -200,8 +200,40 @@ func (a *halfAcc) half(k LocalConn) Half {
 // counts on an accepted socket (a child reset in the accept queue gets
 // its only record there, and S2 showed the rebuild holds) or after the
 // half was keyed already, never on a connect that CLOSE ended unanswered.
+//
+// A server half's accept snapshot is read from a socket nobody locks
+// (the tracer's sock.c): softirq may be updating the four fields as it
+// reads them, and although the tracer re-reads until two reads agree, a
+// torn pair can remain. The locked state-change records therefore decide
+// the key; the snapshot keys a half only when nothing else does (a child
+// reset in the accept queue, a connection still open when the trace
+// ended), and a snapshot disagreeing with them is no conflict. The
+// snapshot is the half's earliest record: the tracer timestamps it before
+// it registers the socket, so every state change of it is later. A lost
+// snapshot makes the first state change the fallback instead, which only
+// costs that record's say in the conflict check.
 func (a *halfAcc) key(h *Half) {
-	for _, r := range a.recs {
+	locked, snap := a.recs, []stateRec(nil)
+	if h.Role == RoleServer && len(a.recs) > 0 {
+		recs := slices.Clone(a.recs)
+		slices.SortStableFunc(recs, func(x, y stateRec) int { return cmp.Compare(x.wall, y.wall) })
+		snap, locked = recs[:1], recs[1:]
+	}
+	keyRecords(h, locked)
+	if !h.HasKey && !h.KeyConflict {
+		keyRecords(h, snap)
+	}
+	if h.HasKey && len(snap) == 1 && snap[0].has {
+		// Torn or not, the snapshot's time is when the half was
+		// established at the latest.
+		h.Established = min(h.Established, snap[0].wall)
+	}
+}
+
+// keyRecords keys h from recs: the first eligible record sets the key,
+// any later one rebuilding another marks a conflict.
+func keyRecords(h *Half, recs []stateRec) {
+	for _, r := range recs {
 		ok := keyState(r.state) ||
 			(r.state == "CLOSE" && (h.Role == RoleServer || h.HasKey))
 		if !r.has || !ok {

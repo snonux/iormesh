@@ -234,9 +234,14 @@ func (c *Correlator) tcpState(r *types.TcpStateEvent) {
 // other CLOSE ends an established connection (FIN or RST), which S2
 // showed the rebuild holds through; an accept snapshot at CLOSE is a
 // child reset in the accept queue, established before it was queued.
+// An accept snapshot whose reads never agreed (TCP_SEQ_TORN: softirq
+// was updating the unlocked child meanwhile, types.h) carries none either.
 // Records that do not qualify carry none of the four, so the schema's
 // all-four-or-none holds and the merge never reads a key that is no key.
 func carriesSeq(r *types.TcpStateEvent) bool {
+	if r.SeqStatus != types.TCP_SEQ_OK {
+		return false
+	}
 	switch r.Newstate {
 	case tcpSynSent, tcpSynRecv, tcpListen, tcpNewSynRecv:
 		return false

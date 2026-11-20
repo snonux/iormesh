@@ -10,7 +10,7 @@ import (
 // TestCarriesSeq pins which tcp_state records pass their tcp_sock fields
 // on (M4, decision #26): ESTABLISHED and every later state, and a CLOSE
 // only when it ends an established connection — never the opening
-// transitions, whose fields hold no peer ISN yet.
+// transitions, whose fields hold no peer ISN yet — nor a torn snapshot.
 func TestCarriesSeq(t *testing.T) {
 	const snap = types.TCP_STATE_SNAPSHOT
 	cases := []struct {
@@ -30,6 +30,7 @@ func TestCarriesSeq(t *testing.T) {
 		{"accept snapshot of a child reset in the queue", snap, tcpClose, true},
 		{"accept snapshot still at SYN_RECV", snap, tcpSynRecv, false},
 		{"listener: LISTEN -> CLOSE", tcpListen, tcpClose, false},
+		{"handshake aborted: SYN_RECV -> CLOSE", tcpSynRecv, tcpClose, false},
 		{"NEW_SYN_RECV", snap, tcpNewSynRecv, false},
 	}
 	for _, tc := range cases {
@@ -37,6 +38,11 @@ func TestCarriesSeq(t *testing.T) {
 		if got := carriesSeq(r); got != tc.want {
 			t.Errorf("%s: carriesSeq = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+	torn := &types.TcpStateEvent{Oldstate: snap, Newstate: tcpEstablished,
+		SeqStatus: types.TCP_SEQ_TORN}
+	if carriesSeq(torn) {
+		t.Error("a torn accept snapshot carries its tcp_sock fields")
 	}
 }
 

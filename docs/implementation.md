@@ -641,14 +641,15 @@ scope) call `iormesh_pid_targeted` too.
   ahead of the per-tid hook, so a sampled-out call still
   registers its socket.
 
-The record is `struct tcp_state_event` in `types.h` (88 bytes,
-generated into `types.TcpStateEvent`): `event_type`
-(`TCP_STATE_EVENT`, 68), `schema_version`, `time`, `sk` (the
-join key — fd numbers are reused, the socket is the
-connection), owner `pid`/`fd`, `oldstate`/`newstate`,
-`family`, `sport`/`dport` (host order, `sport` local), and
-`saddr`/`daddr` (16 bytes, network order, IPv4 in the first 4).
-Every scalar is 32/64-bit because the Go type generator maps no
+The record is `struct tcp_state_event` in `types.h` (88 bytes in
+M1, 112 since ve4, generated into `types.TcpStateEvent`):
+`event_type` (`TCP_STATE_EVENT`, 68), `schema_version`, `time`,
+`sk` (the join key — fd numbers are reused, the socket is the
+connection), owner `pid`/`fd`, `oldstate`/`newstate`, `family`,
+`sport`/`dport` (host order, `sport` local), `seq_status` (M1's
+reserved word), `saddr`/`daddr` (16 bytes, network order, IPv4
+in the first 4), and since ve4 the four `tcp_sock` fields of the
+M4 merge (see "The merge"). Every scalar is 32/64-bit because the Go type generator maps no
 16-bit integers.
 
 Tested by `mage bpfRootTest` (root, via `sudo -n`): the test
@@ -3362,7 +3363,14 @@ the four fields appended after the addresses. `sock.c` reads
 them with CO-RE probe reads from `struct tcp_sock` in both
 places a record is made — `inet_sock_set_state` and the accept
 exit's snapshot — four reads per record, a few records per
-connection, so the cost is negligible. BPF reads them in every
+connection, so the cost is negligible. The snapshot reads an
+unlocked child that softirq may be updating (the client's first
+segment), so it re-reads up to three times until two reads
+agree and otherwise marks the record `TCP_SEQ_TORN` (in M1's
+reserved word, now `seq_status`) with no fields; the merge keys
+a server half from its locked state-change records and falls
+back to the snapshot only when it has nothing else
+(`TestSockSeqStress` races the two over 300 connections). BPF reads them in every
 record; the correlator (`carriesSeq`, `internal/correlate/
 sockets.go`) passes them on only from `ESTABLISHED` on (see
 docs/schema.md), and the normalizer drops them (random ISNs).

@@ -23,6 +23,8 @@ func RootBPFTests() []string {
 		"TestSockFailedConnectUnregisters",
 		"TestSockResetBeforeAcceptNotRegistered",
 		"TestSockSeqFields",
+		"TestSockSeqStress",
+		"TestSockRefusedConnectNoSeq",
 		"TestLoaderDeliversRecords",
 		"TestLoaderTargetsOnlyTheMap",
 		"TestLoaderCloseEndsRecords",

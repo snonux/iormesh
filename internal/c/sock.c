@@ -186,22 +186,81 @@ static __always_inline void iormesh_read_sk_tuple(struct tcp_state_event *ev, st
     bpf_core_read(ev->daddr, 4, &sk->__sk_common.skc_daddr);
 }
 
-// iormesh_read_tcp_seq fills ev's four tcp_sock fields (M4, decision #26):
-// the inputs the merge rebuilds the ISN pair from. sk is a TCP socket at
-// both call sites (the tracepoint checks the protocol, the accept exit
-// iormesh_sock_is_tcp), so the cast to struct tcp_sock is sound. Probe
-// reads, like the rest of this file: the tracepoint's skaddr is no
-// trusted BTF pointer. Four reads per tcp_state record, a few records per
-// connection - negligible next to the syscall handlers. bytes_acked and
-// bytes_received exist since Linux 4.1/4.2, older than any kernel the
-// tracer's other CO-RE reads accept.
-static __always_inline void iormesh_read_tcp_seq(struct tcp_state_event *ev, struct sock *sk) {
+// IORMESH_SEQ_TRIES bounds the accept snapshot's reads of the four
+// tcp_sock fields (iormesh_read_tcp_seq_stable).
+#define IORMESH_SEQ_TRIES 3
+
+// iormesh_tcp_seq is one read of the four tcp_sock fields the merge
+// rebuilds the ISN pair from (M4, decision #26).
+struct iormesh_tcp_seq {
+    __u32 snd_una;
+    __u32 rcv_nxt;
+    __u64 bytes_acked;
+    __u64 bytes_received;
+};
+
+// iormesh_read_tcp_seq_once reads the four fields of sk. sk is a TCP
+// socket at every call site (the tracepoint checks the protocol, the
+// accept exit iormesh_sock_is_tcp), so the cast to struct tcp_sock is
+// sound. Probe reads, like the rest of this file: the tracepoint's skaddr
+// is no trusted BTF pointer. Four reads per tcp_state record, a few
+// records per connection - negligible next to the syscall handlers.
+// bytes_acked and bytes_received exist since Linux 4.1/4.2, older than any
+// kernel the tracer's other CO-RE reads accept.
+static __always_inline void iormesh_read_tcp_seq_once(struct iormesh_tcp_seq *seq, struct sock *sk) {
     struct tcp_sock *tp = (struct tcp_sock *)sk;
 
-    ev->snd_una = BPF_CORE_READ(tp, snd_una);
-    ev->rcv_nxt = BPF_CORE_READ(tp, rcv_nxt);
-    ev->bytes_acked = BPF_CORE_READ(tp, bytes_acked);
-    ev->bytes_received = BPF_CORE_READ(tp, bytes_received);
+    seq->snd_una = BPF_CORE_READ(tp, snd_una);
+    seq->rcv_nxt = BPF_CORE_READ(tp, rcv_nxt);
+    seq->bytes_acked = BPF_CORE_READ(tp, bytes_acked);
+    seq->bytes_received = BPF_CORE_READ(tp, bytes_received);
+}
+
+// iormesh_put_tcp_seq copies one read into the record.
+static __always_inline void iormesh_put_tcp_seq(struct tcp_state_event *ev,
+                                                const struct iormesh_tcp_seq *seq) {
+    ev->snd_una = seq->snd_una;
+    ev->rcv_nxt = seq->rcv_nxt;
+    ev->bytes_acked = seq->bytes_acked;
+    ev->bytes_received = seq->bytes_received;
+}
+
+// iormesh_read_tcp_seq fills ev's four fields with one read: for the
+// state-change records, whose tcp_set_state runs with the socket locked,
+// so no update of the four can interleave with the read.
+static __always_inline void iormesh_read_tcp_seq(struct tcp_state_event *ev, struct sock *sk) {
+    struct iormesh_tcp_seq seq;
+
+    iormesh_read_tcp_seq_once(&seq, sk);
+    iormesh_put_tcp_seq(ev, &seq);
+}
+
+// iormesh_read_tcp_seq_stable fills ev's four fields for the accept
+// snapshot, which reads a socket nobody locks: inet_accept released the
+// child, and softirq on another CPU may be processing the client's first
+// segment - tcp_rcv_nxt_update adds to bytes_received, then sets rcv_nxt
+// (tcp_snd_una_update likewise for bytes_acked and snd_una), so one read
+// can pair an old value with a new counter and rebuild a key off by the
+// segment's length. It re-reads, up to IORMESH_SEQ_TRIES times, until two
+// consecutive reads agree; if none do it marks the record TCP_SEQ_TORN
+// and leaves the four zero (types.h). Two agreeing reads can still both
+// fall inside one slow update - the residual race the merge covers by
+// preferring state-change records (internal/federate/half.go).
+static __always_inline void iormesh_read_tcp_seq_stable(struct tcp_state_event *ev, struct sock *sk) {
+    struct iormesh_tcp_seq prev, cur;
+
+    iormesh_read_tcp_seq_once(&prev, sk);
+#pragma unroll
+    for (int i = 1; i < IORMESH_SEQ_TRIES; i++) {
+        iormesh_read_tcp_seq_once(&cur, sk);
+        if (cur.snd_una == prev.snd_una && cur.rcv_nxt == prev.rcv_nxt &&
+            cur.bytes_acked == prev.bytes_acked && cur.bytes_received == prev.bytes_received) {
+            iormesh_put_tcp_seq(ev, &cur);
+            return;
+        }
+        prev = cur;
+    }
+    ev->seq_status = TCP_SEQ_TORN;
 }
 
 // iormesh_sock_state returns sk's TCP state (TCP_ESTABLISHED ... ).
@@ -262,15 +321,18 @@ static __always_inline void iormesh_sock_on_accept(__u32 pid, __s64 ret) {
     if (!sk)
         return;
     state = iormesh_sock_state(sk);
+    // Reserved - and so timestamped - before the socket is registered:
+    // every state-change record of it is then later than its snapshot,
+    // which is how the merge tells the snapshot apart (half.go).
+    ev = iormesh_reserve_tcp_state((__u64)sk, pid, (__s32)ret);
     if (state != TCP_CLOSE)
         iormesh_sock_register(sk, pid, (__s32)ret);
-    ev = iormesh_reserve_tcp_state((__u64)sk, pid, (__s32)ret);
     if (!ev)
         return;
     ev->oldstate = TCP_STATE_SNAPSHOT;
     ev->newstate = state;
     iormesh_read_sk_tuple(ev, sk);
-    iormesh_read_tcp_seq(ev, sk);
+    iormesh_read_tcp_seq_stable(ev, sk);
     bpf_ringbuf_submit(ev, 0);
 }
 
@@ -314,6 +376,7 @@ int handle_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) 
         // stored, but after the segment that caused it was processed: at
         // SYN_SENT -> ESTABLISHED the SYN-ACK already set rcv_nxt and
         // advanced snd_una/bytes_acked (S2 read them at this very point).
+        // The socket is locked there, so one read is consistent.
         iormesh_read_tcp_seq(ev, (struct sock *)ctx->skaddr);
         bpf_ringbuf_submit(ev, 0);
     }
