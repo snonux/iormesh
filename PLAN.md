@@ -1347,6 +1347,23 @@ Kubernetes (M7) build on it.
   Static files, no server, no dependencies, no network; one
   folder per run, kept until the operator deletes it
   (decision #11).
+  *Built (task nb4):* every `build` writes
+  `builds/<projects>/sites/<Run.Last>-<hash>/` — `index.html`
+  with its script, stylesheet and the whole model inline (from
+  `file://` nothing else loads reliably, so nothing does),
+  `graph.svg`, `sequence/<ID>.svg` — and swaps `sites/latest` to
+  it; `iormeshctl open` prints the newest page and runs
+  `xdg-open` (macOS `open`) when there is one. The CSP is
+  `default-src 'none'` plus the inline script's and stylesheet's
+  hashes; trace strings reach the page only as text (the JSON
+  block escapes `<`, `>`, `&`, U+2028/9; the script never writes
+  markup). Mesh with pan/zoom, service and edge panels that
+  follow a connection to its other side, the sequence view per
+  lifeline with each step's Java stack and `query -ref` command,
+  thread stories, processes, health; a host/text/time filter;
+  URL-hash deep links. Same model, same bytes, same folder
+  ([docs/visualization.md](docs/visualization.md) "V3 as
+  built").
 - **Sequence view (the end-goal rendering)**: a deterministic
   sequence-diagram export of mesh conversations — lifelines
   are services (named via the service-interaction database),
@@ -2614,7 +2631,9 @@ internal/query/       # trace slicing for humans and LLMs
 internal/render/      # deterministic SVG diagram generation
 internal/viewmodel/   # the one model every surface renders
                       #   (cgo-free)
-internal/site/        # local site: embedded HTML/JS, data files
+internal/site/        # local site: one self-contained page
+                      #   (embedded JS/CSS, model inline), the
+                      #   SVG exports, a folder per run (cgo-free)
 internal/tui/         # Bubble Tea terminal explorer
 internal/textview/    # plain-text views: show, collect summary
 internal/k8s/         # cgroup→pod identity mapping, k8s metadata

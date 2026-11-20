@@ -1,0 +1,84 @@
+/* The explorer's one stylesheet (internal/site). Inlined into
+   index.html and allowed by its sha256 in the page's CSP: no inline
+   style attribute anywhere, so the policy needs no 'unsafe-inline'. */
+:root {
+  --bg: #fbfbfa; --fg: #1d1f21; --muted: #6a6f75; --line: #d6d8db;
+  --panel: #ffffff; --accent: #2f6db5; --warn: #b5562f; --sel: #f2c14e;
+  --node: #eef3fa; --file: #f3efe4;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17191c; --fg: #e3e5e8; --muted: #9aa0a6; --line: #3a3e44;
+    --panel: #1f2226; --accent: #7fb0ef; --warn: #ef9f7f; --sel: #c99a2e;
+    --node: #243041; --file: #3a3426;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+header { padding: 8px 16px; border-bottom: 1px solid var(--line); }
+header h1 { font-size: 15px; margin: 0 0 2px; }
+header p { margin: 0; color: var(--muted); }
+nav { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 16px; }
+nav a { padding: 3px 9px; border: 1px solid var(--line); border-radius: 4px; }
+nav a.on { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+a { color: var(--accent); text-decoration: none; cursor: pointer; }
+a:hover { text-decoration: underline; }
+#filters { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 16px 8px;
+  border-bottom: 1px solid var(--line); }
+#filters label { color: var(--muted); }
+select { max-width: 16em; }
+input, select, button {
+  font: inherit; color: var(--fg); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 3px; padding: 2px 5px;
+}
+main { display: flex; gap: 0; min-height: 70vh; }
+#view { flex: 1 1 auto; min-width: 0; padding: 8px 16px; overflow: auto; }
+#detail { overflow-wrap: anywhere; flex: 0 0 380px; max-width: 45vw; padding: 8px 12px; overflow: auto;
+  border-left: 1px solid var(--line); background: var(--panel); }
+@media (max-width: 800px) {
+  main { flex-direction: column; }
+  #detail { max-width: none; border-left: 0; border-top: 1px solid var(--line); }
+}
+h2 { font-size: 14px; margin: 8px 0 6px; }
+h3 { font-size: 13px; margin: 10px 0 4px; color: var(--muted); }
+table { border-collapse: collapse; margin: 4px 0 8px; }
+th, td { overflow-wrap: anywhere; text-align: left; padding: 2px 10px 2px 0; vertical-align: top; }
+th { color: var(--muted); font-weight: normal; border-bottom: 1px solid var(--line); }
+tr.sel td { background: var(--sel); }
+ol, ul { margin: 2px 0 8px; padding-left: 22px; }
+.muted { color: var(--muted); }
+.warn { color: var(--warn); }
+.more { color: var(--warn); font-style: italic; }
+.empty { color: var(--muted); font-style: italic; }
+pre.cmd { background: var(--bg); border: 1px solid var(--line); padding: 4px 6px;
+  white-space: pre-wrap; word-break: break-all; margin: 4px 0; }
+.toolbar { display: flex; gap: 6px; align-items: center; margin: 0 0 6px; }
+.canvas { width: 100%; height: 72vh; border: 1px solid var(--line);
+  background: var(--panel); touch-action: none; cursor: grab; display: block; }
+.canvas.drag { cursor: grabbing; }
+svg text { fill: var(--fg); font: 11px ui-monospace, Menlo, Consolas, monospace; }
+svg .node rect { fill: var(--node); stroke: var(--accent); }
+svg .node.client rect { stroke-dasharray: 3 2; }
+svg .node.dim, svg .edge.dim { opacity: 0.2; }
+svg .node.sel rect { stroke: var(--sel); stroke-width: 3; }
+svg .node, svg .edge, svg .step, svg .lanehead { cursor: pointer; }
+svg .edge path { fill: none; stroke: var(--muted); }
+svg .edge.unresolved path { stroke: var(--warn); stroke-dasharray: 6 4; }
+svg .edge.mixed path { stroke: var(--warn); }
+svg .edge.sel path { stroke: var(--sel); }
+svg g.edge path.hit { stroke: transparent; stroke-width: 12; fill: none; stroke-dasharray: none; }
+svg g.step rect.hit { fill: transparent; stroke: transparent; }
+svg g.step.sel rect.hit { stroke: var(--sel); stroke-width: 3; }
+svg marker path { fill: var(--muted); }
+svg .life { stroke: var(--line); stroke-dasharray: 4 3; }
+svg .lanehead rect { fill: var(--node); stroke: var(--accent); }
+svg .lanehead.carrier rect { stroke-dasharray: 4 2; }
+svg .arrow { stroke: var(--fg); }
+svg .arrow.time-ordered { stroke-dasharray: 6 4; }
+svg .arrow.unordered { stroke-dasharray: 2 3; stroke: var(--warn); }
+svg .note rect { fill: var(--file); stroke: var(--line); }
+svg .label { fill: var(--muted); }
+#selftest { white-space: pre-wrap; }

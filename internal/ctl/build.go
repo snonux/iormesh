@@ -19,6 +19,7 @@ import (
 	"iormesh/internal/report"
 	"iormesh/internal/schema"
 	"iormesh/internal/servicedb"
+	"iormesh/internal/site"
 	"iormesh/internal/viewmodel"
 )
 
@@ -49,8 +50,9 @@ import (
 //  5. <builds>/<projects>/graph.json (the merged graph export),
 //     model.json, report.json and the SVG exports (graph.svg,
 //     sequence/<ID>.svg per conversation; internal/render) are written,
-//     and the summary is
-//     printed.
+//     then the run's local site (internal/site: a new folder under
+//     sites/ per run, kept, and sites/latest pointing at it — what
+//     `iormeshctl open` opens), and the summary is printed.
 //
 // Build never contacts a server, and everything it writes is a function
 // of the store and the database, so a rerun over the same segments
@@ -84,6 +86,8 @@ const (
 	// graphSVGName and sequenceDirName are the SVG exports (M5).
 	graphSVGName    = "graph.svg"
 	sequenceDirName = "sequence"
+	// sitesDirName holds the build's local sites, one folder per run.
+	sitesDirName = "sites"
 	// maxBuildKey bounds a build directory's name: many projects built
 	// together get a hashed name instead (a name may be 255 bytes).
 	maxBuildKey = 200
@@ -131,9 +135,10 @@ func buildAndReport(ctx context.Context, e env, f buildFlags) error {
 	if err := viewmodel.WriteSummary(e.stdout, out.model); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(e.stdout, "\ngraph      %s\nmodel      %s\nreport     %s\n",
+	_, err = fmt.Fprintf(e.stdout, "\ngraph      %s\nmodel      %s\nreport     %s\nsite       %s\n"+
+		"           iormeshctl open  ·  iormeshctl show\n",
 		filepath.Join(out.dir, graphFileName), filepath.Join(out.dir, modelFileName),
-		filepath.Join(out.dir, reportFileName))
+		filepath.Join(out.dir, reportFileName), filepath.Join(out.site, site.IndexName))
 	if err == nil && len(out.model.Health.BadSegments) > 0 {
 		err = fmt.Errorf("%w: %d bad segments left out of the build (listed above)",
 			errBadSegments, len(out.model.Health.BadSegments))
@@ -145,6 +150,8 @@ func buildAndReport(ctx context.Context, e env, f buildFlags) error {
 type buildOutput struct {
 	model viewmodel.Model
 	dir   string
+	// site is this run's site folder (internal/site).
+	site string
 }
 
 // build runs the whole build (see the file comment) and writes its
@@ -183,7 +190,11 @@ func build(ctx context.Context, e env, f buildFlags) (buildOutput, error) {
 	if err != nil {
 		return buildOutput{}, err
 	}
-	return buildOutput{model: model, dir: dir}, nil
+	run, err := site.Write(filepath.Join(dir, sitesDirName), in.Merge.Graph, model)
+	if err != nil {
+		return buildOutput{}, fmt.Errorf("build: %w", err)
+	}
+	return buildOutput{model: model, dir: dir, site: run}, nil
 }
 
 // loadSegments loads the projects' segments, each checked in a

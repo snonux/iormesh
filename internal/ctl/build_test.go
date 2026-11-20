@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -21,6 +22,11 @@ import (
 	"iormesh/internal/servicedb"
 	"iormesh/internal/viewmodel"
 )
+
+// siteRun matches a site folder's name in build's output: it carries a
+// hash of the page, so it changes with the explorer's code, which the
+// summary's golden need not follow (internal/site tests the page).
+var siteRun = regexp.MustCompile(`sites/[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}/`)
 
 var update = flag.Bool("update", false, "rewrite testdata/*.golden from the current output")
 
@@ -261,7 +267,8 @@ func golden(t *testing.T, name, got string) {
 func TestBuildGolden(t *testing.T) {
 	f := newBuildFixture(t)
 	summary := f.mustRun(t, "build")
-	golden(t, "build_summary.golden", strings.ReplaceAll(summary, f.builds, "$BUILDS"))
+	golden(t, "build_summary.golden", siteRun.ReplaceAllString(strings.ReplaceAll(summary, f.builds, "$BUILDS"),
+		"sites/$$RUN/"))
 	graph, model, rep := f.output(t, graphFileName), f.output(t, modelFileName), f.output(t, reportFileName)
 	golden(t, "build_graph.golden", graph)
 	golden(t, "build_model.golden", model)

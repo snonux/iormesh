@@ -4303,7 +4303,7 @@ drawing of the graph export itself, is the one exception (PLAN.md
 M5 "Deterministic SVG export"). Conversations are built (task
 mb4, "Conversations and exports" below), per-thread lifelines,
 thread stories and processes too (task 0f4, "Threads and
-processes").
+processes"), and the local site (task nb4, "Local site").
 
 ![The two joins behind one line of the sequence view](diagrams/join.svg)
 
@@ -4457,6 +4457,49 @@ internal/report/                   # + Thread.Carried, Call.Carrier
   first causal) and `show processes` against
   `testdata/{thread_list,thread_story,processes}.golden`, an unknown
   thread; the conversation goldens gained the lifelines.
+
+**Local site** — V3, built by task nb4 (cgo-free; the design and
+the screens in [visualization.md](visualization.md), "The local
+site" and "V3 as built"):
+
+```
+internal/site/site.go          # Files, RunName, Write, Latest
+internal/site/page.go          # Page: CSP hashes, model JSON block
+internal/site/assets/app.js    # the explorer, hand-written, no deps
+internal/site/assets/site.css  # its stylesheet (light and dark)
+internal/ctl/build.go          # build writes sites/, prints site
+internal/ctl/open.go           # iormeshctl open, xdg-open / open
+```
+
+- **One page, nothing loaded.** `Page` inlines the stylesheet,
+  the script and the model; the CSP lists the sha256 of the
+  exact inline script and stylesheet text, so editing either
+  changes the hash with it. The model goes in through
+  `json.Encoder` with `SetEscapeHTML(true)`, and `Page` refuses a
+  block holding a raw `<`, `>`, `&`, U+2028 or U+2029.
+- **The script** reads the block with `textContent`, renders by
+  `createElement`/`createElementNS` and text nodes only, routes by
+  the URL hash, and draws the mesh and sequence SVGs from the
+  model with the export's rules (layout a function of the sorted
+  model). `#/selftest` renders every route for the browser check.
+- **Folders**: `Write` renders the files, names the folder
+  `Run.Last` (`20060102T150405Z`) plus 12 hex digits of a hash of
+  the files, writes it under a temporary name, renames it into
+  place (replacing a same-named folder, whose content is the
+  same) and swaps `latest` by renaming a fresh symlink over it.
+  Older folders are never touched.
+- **open** resolves the projects like `show`, follows `latest`
+  only to a folder directly under `sites/`, prints `site  PATH`,
+  then starts the opener without waiting; no opener on `PATH` is
+  no error.
+- Tests: `internal/site/site_test.go` (deterministic renders and
+  names, CSP, no network, hostile strings, runs kept, `latest`
+  escapes), `browser_test.go` (opt-in headless Chrome,
+  [testing.md](testing.md) "Local site"),
+  `internal/ctl/open_test.go` (build → open, rebuild same folder,
+  changed data a new one, the page's model equals `model.json`);
+  `build_summary.golden` gained the `site` line (folder name
+  masked).
 
 **Query** (`internal/query`, `iormeshctl query`):
 

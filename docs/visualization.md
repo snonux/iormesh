@@ -27,7 +27,7 @@ merged     4 services · 7 edges (6 fused, 1 unresolved)
 health     0 drops · 2.1% unattributed · clock bounds ≤ 180µs
 unresolved orders → 10.20.3.7:5432  (try: iormeshctl expand)
 
-site  ~/.local/share/iormesh/sites/shop/latest/index.html
+site  ~/.local/share/iormesh/builds/shop/sites/20261118T120731Z-3f9c…/index.html
       iormeshctl open   ·   iormeshctl tui   ·   iormeshctl show
 ```
 
@@ -114,38 +114,68 @@ Rules:
 
 ## The local site
 
-A folder of static files, written at the end of every `build`:
+A folder of static files, written at the end of every `build`
+(as built by task nb4, `internal/site`):
 
 ```
-~/.local/share/iormesh/sites/<project>/
-  latest -> 2026-11-18T12-07-31Z/
-  2026-11-18T12-07-31Z/
-    index.html          # shell, inline CSS
-    app.js              # the explorer, one file, no dependencies
-    data/model.js       # window.IORMESH.model = {…}
-    data/conv-0001.js   # conversation chunks, loaded on demand
+~/.local/share/iormesh/builds/<projects>/sites/
+  latest -> 20261118T120731Z-3f9c0a1b2c4d/
+  20261118T120731Z-3f9c0a1b2c4d/
+    index.html          # the explorer: CSS, script and model inline
     graph.svg           # deterministic overview (also standalone)
-    sequence/…svg       # deterministic sequence diagrams
+    sequence/<ID>.svg   # deterministic sequence diagrams
 ```
 
 Design decisions:
 
-- **No server, opens from `file://`.** That rules out `fetch()`
-  of JSON, so data ships as `.js` files that assign into
-  `window.IORMESH` and are loaded with script tags —
-  conversations lazily, one chunk at a time.
+- **No server, opens from `file://`, loads nothing.** That rules
+  out `fetch()`, and from `file://` a script or stylesheet file
+  next to the page is not reliably "same origin" either (Chrome
+  treats `file:` as an opaque origin, so CSP `'self'` would not
+  match it). So `index.html` is one self-contained file: the
+  stylesheet and the script inline, the model as an inert
+  `<script type="application/json">` block the script reads with
+  `textContent` and `JSON.parse`. The earlier sketch's
+  `data/*.js` chunks loaded on demand were dropped: the model is
+  capped (100 conversations, 200 steps each, 12 frames a step),
+  so it parses in one go.
 - **No dependencies, no network.** Hand-written JavaScript and
-  SVG, embedded in the `iormeshctl` binary with `go:embed`; no
-  CDN, no build step, no npm. A `Content-Security-Policy` meta
-  tag forbids every remote origin: the site contains production
-  metadata and must not be able to leak it.
+  CSS (`internal/site/assets`), embedded in the `iormeshctl`
+  binary with `go:embed`; no CDN, no build step, no npm, nothing
+  vendored. A `Content-Security-Policy` meta tag says
+  `default-src 'none'` and allows only the page's own inline
+  script and stylesheet, by their sha256: no remote origin, no
+  `'self'`, no `'unsafe-inline'`, no image, font, frame or
+  connection. The site contains production metadata and must not
+  be able to leak it.
+- **Trace text is data, never markup.** Every string in the model
+  came from a traced server (docs/security.md). The JSON block
+  cannot close early — `encoding/json` writes `<`, `>`, `&`,
+  U+2028 and U+2029 as `\u` escapes, and the page is refused if
+  one slipped through — and the script puts strings on the page
+  only through `textContent`, text nodes and SVG attributes it
+  chooses, never `innerHTML` or string-built markup; control and
+  bidi characters are shown as `\uXXXX`; a route built from an
+  ID is `#/…` with each part URI-encoded; the `query -ref`
+  command offered for copying is shell-quoted.
+- **Deterministic.** Same model, same bytes: the folder is named
+  after the run's last traced instant (`Run.Last`, a trace time —
+  never the build machine's clock) and a hash of its files, so a
+  rebuild over the same store rewrites the same folder byte for
+  byte and new data makes a new one.
 - **Kept, not overwritten.** Each run gets its own folder, so two
-  runs can be opened side by side; `latest` points at the newest.
-  Like the traces, old sites stay until the operator deletes
-  them.
-- **Deep links.** The URL hash holds the whole view state
-  (`#/conv/0042/step/7`), so a link to a specific step can be
-  pasted to a colleague who has the same folder.
+  runs can be opened side by side; `latest` points at the newest
+  (swapped by rename, so it always names a whole run). Like the
+  traces, old sites stay until the operator deletes them; a
+  build never removes one. `iormeshctl open` prints the newest
+  page's path and hands it to `xdg-open` (`open` on macOS); with
+  no opener — over SSH, a browser-less host — the path is the
+  answer.
+- **Deep links.** The URL hash holds the view
+  (`#/conv/0042/step/7`, `#/mesh/edge/3`, `#/thread/5`,
+  `#/proc/2`, `#/health`), so a link to a specific step can be
+  pasted to a colleague who has the same folder. The filter is
+  not in the hash.
 
 Screens:
 
@@ -419,11 +449,65 @@ processes"):
   service, peers), with the rollup's caps. `show processes` prints
   them, `-json` the list.
 
+V3 as built (task nb4; files in [implementation.md](implementation.md),
+M5 "Local site"): every `build` writes the run's site folder
+(above) after the model and the exports, and prints its page as
+the `site` line; `iormeshctl open` opens the newest. The screens
+render the model only — the same `model.json` `show` reads,
+embedded whole:
+
+- **Mesh**: services as boxes ranked left to right by the longest
+  client → server path, edges as curves (width by connections;
+  unresolved dashed, mixed in the warning colour; a client-only
+  service's box dashed). Drag pans, the wheel and `+`/`−` zoom,
+  `fit` resets. Clicking a service lists its endpoints, TLS, top
+  paths, edges, processes and conversations; clicking an edge
+  shows its state, counts and the request steps that crossed it,
+  and links its client and server — following a connection to its
+  other side, across hosts. The host/process level the sketch
+  above toggles to is the Processes screen instead.
+- **Conversations** and the **sequence** view: one column per
+  lifeline (service, thread; a carrier's virtual-thread lifeline
+  dashed), arrows solid/dashed/dotted for causal/time-ordered/
+  unordered (`?` on the last), file work as notes, pan and zoom
+  as on the mesh. A step opens its detail: kind, service, host,
+  thread, peer, bytes, latency, ordering, hop, the Java stack top
+  first, links to both threads' stories, and `iormeshctl query
+  -ref …` with a copy button (the clipboard when the browser
+  grants it from `file://`, else the text selected). The static
+  `sequence/<ID>.svg` is linked.
+- **Threads** (the stories, ordered by the thread's own host's
+  clock), **Processes** (threads with carried virtual-thread I/O
+  apart, files, sockets — a socket's service links to the mesh)
+  and **Health** (lost, skipped, unattributed, attach gap,
+  requests cut, sessions and how they ended, clock bounds, bad
+  segments, ignored entries).
+- **Filter bar** on every list and the mesh: host (the run's
+  hosts), text (service, thread, pid, path, method, a stack
+  frame, a ref) and a time window on the conversations' start
+  (`HH:MM[:SS]` against the time of day, or RFC 3339). The model
+  has no pod yet (M7); the text filter matches host and service
+  names meanwhile.
+- `#/selftest` renders every route of the model in turn and
+  prints `selftest: ok N routes`, or the routes that threw.
+
 Tests: golden files on the serialized model and on every `show`
-view; the site's `data/*.js` are goldens too, and one headless
-browser test loads `index.html` from `file://` and checks that
-each screen renders without a console error or a network
-request; the TUI through `teatest` at several terminal sizes.
+view; `internal/site` tests the page itself — byte-identical
+renders and folder names, the CSP (`default-src 'none'`, exactly
+the inline script's and stylesheet's hashes, nothing else), no
+remote URL and no markup-writing or network API in the script,
+a model of hostile strings (closing tags, `<!--`, U+2028/9, an
+escape sequence, a bidi override, invalid UTF-8) kept inside its
+data block and parsing back, runs kept and `latest` refusing to
+point outside; `internal/ctl` that build writes a site, open
+finds it, a rebuild rewrites the same folder and changed data
+adds one, and that the page embeds exactly `model.json`. One
+headless browser test loads that hostile site from `file://` at
+`#/selftest` and fails on any console message (an exception, or a
+CSP refusal — how a request or an injected script would show):
+opt-in, as `mage test` must not need a browser
+([testing.md](testing.md), "Local site"). The TUI through
+`teatest` at several terminal sizes.
 
 ## See also
 

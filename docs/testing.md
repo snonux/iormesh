@@ -791,6 +791,29 @@ not run against real hosts. What ran here:
 The owner's run is what remains: the prerequisites above, then
 `mage m4Acceptance HOST1 HOST2`, all criteria PASS.
 
+## Local site (task nb4)
+
+`mage test` covers the generated site without a browser
+(`internal/site`, `internal/ctl/open_test.go`: determinism, the
+CSP, no remote URL, hostile strings escaped, runs kept). The one
+browser check is opt-in, because a test run must not need a
+browser:
+
+```sh
+IORMESH_SITE_BROWSER=1 go test -run Browser ./internal/site/
+# or IORMESH_SITE_BROWSER=/path/to/chromium
+```
+
+It writes a site of a model full of hostile strings, loads it in
+headless Chrome or Chromium from `file://` at `#/selftest` (the
+page renders every route in turn) and fails unless the DOM says
+`selftest: ok` and the browser logged no console message — an
+exception, or a CSP refusal, which is how a request or an
+injected script would show. It passed with Chrome 144 on
+2026-11-20. Without Chrome, the same check by hand: build, run
+`iormeshctl open`, append `#/selftest` to the URL and see
+`selftest: ok N routes` with an empty console (Firefox included).
+
 ## LLM introspection eval (task qb4)
 
 PLAN.md M5's eval is no part of `mage test` — it needs a model —

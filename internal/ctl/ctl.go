@@ -7,6 +7,7 @@
 //	iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR]
 //	iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR] [HOST...]
 //	iormeshctl show [summary|services|edges|health] [-project NAME]... [-json] [-unresolved]
+//	iormeshctl open [-project NAME]... [-builds DIR]
 //	iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
 //	iormeshctl query [-project NAME]... [-from T] [-to T] [-host GLOB] [-app GLOB] [-thread GLOB]
 //	                 [-conn ID [-follow]] [-file GLOB] [-method GLOB] [-max-bytes N]
@@ -26,7 +27,8 @@
 // build merges the collected segments offline into the merged graph
 // export, the service database and the view model, and refresh is
 // collect then build (build.go); show prints the last build's view
-// model as text (show.go, internal/viewmodel); query cuts the merged
+// model as text (show.go, internal/viewmodel); open opens the newest
+// local site a build wrote (open.go, internal/site); query cuts the merged
 // trace into a size-capped NDJSON slice (query.go, internal/query). expand
 // lists which unresolved peers the next expansion round would enroll and
 // why the others stay (expand.go, internal/expand, PLAN.md M6).
@@ -72,6 +74,9 @@ type env struct {
 	traces func() (string, error)
 	// builds is the default build output directory; -builds overrides it.
 	builds func() (string, error)
+	// opener hands a site's index.html to the desktop's browser
+	// (open.go); nil in tests, which then see the no-opener path.
+	opener func(path string) error
 	// transport reaches a host: SSH in production, a fake in tests, so
 	// no test contacts a server.
 	transport func(host string) (federate.Transport, error)
@@ -80,11 +85,13 @@ type env struct {
 // defaultEnv is the real environment: the registry at
 // federate.DefaultRegistryPath, the database at servicedb.DefaultPath, the
 // release key next to the registry, the deploy record, the trace store and
-// the build outputs next to the database, and SSH to reach hosts.
+// the build outputs next to the database, SSH to reach hosts and the
+// desktop's opener for sites.
 func defaultEnv(stdout, stderr io.Writer) env {
 	return env{stdout: stdout, stderr: stderr, registry: federate.DefaultRegistryPath,
 		servicedb: servicedb.DefaultPath, releaseKey: defaultKeyPath, deployed: defaultDeployedPath,
-		traces: defaultStorePath, builds: defaultBuildsPath, transport: sshTransport}
+		traces: defaultStorePath, builds: defaultBuildsPath, transport: sshTransport,
+		opener: systemOpener}
 }
 
 // defaultBuildsPath is ~/.local/share/iormesh/builds, next to the trace
@@ -128,6 +135,8 @@ func run(args []string, e env) int {
 		err = refreshCommand(args[1:], e)
 	case "show":
 		err = showCommand(args[1:], e)
+	case "open":
+		err = openCommand(args[1:], e)
 	case "expand":
 		err = expandCommand(args[1:], e)
 	case "query":
@@ -180,6 +189,7 @@ func usage(w io.Writer) {
   iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR]
   iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR] [HOST...]
   iormeshctl show [summary|services|edges|health] [-project NAME]... [-builds DIR] [-json] [-unresolved]
+  iormeshctl open [-project NAME]... [-builds DIR]
   iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
   iormeshctl query [-project NAME]... [-store DIR] [-db FILE] [-from T] [-to T]
                    [-host GLOB] [-app GLOB] [-thread GLOB] [-conn ID [-follow]]
@@ -196,8 +206,10 @@ The registry defaults to ~/.config/iormesh/servers.yaml, the pinned
 release key to ~/.config/iormesh/minisign.pub, the service database to
 ~/.local/share/iormesh/services.db, the trace store to
 ~/.local/share/iormesh/traces (<project>/<host>/), the build outputs to
-~/.local/share/iormesh/builds (<project>[+<project>...]/graph.json and
-model.json), dist/ to ./dist.
+~/.local/share/iormesh/builds (<project>[+<project>...]/graph.json,
+model.json, report.json and sites/<run>/index.html, one site folder per
+run, kept until deleted), dist/ to ./dist. open prints the newest site's
+path and opens it with xdg-open (open on macOS) when there is one.
 deploy only upgrades a tracer already installed on the host (PLAN.md
 decision #1). collect without HOST collects every registered host; rm
 stops, syncs off and uninstalls before it unregisters, and refuses to

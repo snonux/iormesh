@@ -61,6 +61,20 @@ truth.
   can write without the sticky bit is unsafe whatever its own
   mode. Collect needs no sudo: `ready/` belongs to the
   deploying user.
+- **The local site treats trace text as hostile.** Every string
+  a build shows came from a server, and the site
+  (`iormeshctl open`, PLAN.md M5) is opened in the operator's
+  browser. Its page loads nothing and runs only its own code: a
+  `default-src 'none'` CSP allowing just the inline script and
+  stylesheet by hash; the model embedded as an inert JSON block
+  whose `<`, `>`, `&` and U+2028/9 are escaped, so no string can
+  close it; strings put on the page only as text nodes and
+  attributes the script picks (never `innerHTML`); control and
+  bidi characters shown escaped; the offered `query -ref`
+  command shell-quoted. Site folders are 0700, files 0600 — they
+  name production hosts, processes and files — and `latest` is
+  followed only to a folder directly beside it
+  ([visualization.md](visualization.md) "The local site").
 - **The controller's rsync must be 3.4.0 or newer.** The
   receiving rsync parses what the server sends, and older ones
   let a malicious sender write outside the destination or read
