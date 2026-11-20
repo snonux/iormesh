@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"strconv"
+	"strings"
 	"time"
 
 	"iormesh/internal/schema"
@@ -63,6 +65,13 @@ type Filter struct {
 	// "class#method" or by the full frame text
 	// "class#method(file:line)".
 	Method string
+	// Ref names one event, as a conversation step of the build's view
+	// model carries it (viewmodel.Step.Ref): "<session>/<seq>", the
+	// session as the store names it ("<project>/<host>/<fqdn>-<id>",
+	// Source.Session) and the event's seq. It is how `show sequence`
+	// and the site turn a step into its raw event (docs/visualization.md
+	// "Detail on demand").
+	Ref string
 }
 
 // Validate rejects a filter no event could be judged by: a malformed
@@ -74,6 +83,11 @@ func (f Filter) Validate() error {
 			return fmt.Errorf("%w: -%s %q: %v", ErrInvalid, g.name, g.pattern, err)
 		}
 	}
+	if f.Ref != "" {
+		if _, _, err := ParseRef(f.Ref); err != nil {
+			return err
+		}
+	}
 	switch {
 	case f.Follow && f.Conn == "":
 		return fmt.Errorf("%w: -follow needs -conn", ErrInvalid)
@@ -81,6 +95,19 @@ func (f Filter) Validate() error {
 		return fmt.Errorf("%w: the window -from %d -to %d is empty", ErrInvalid, f.From, f.To)
 	}
 	return nil
+}
+
+// ParseRef splits a Ref into its session and seq. The seq is what
+// follows the last '/': a session key holds slashes of its own.
+func ParseRef(ref string) (session string, seq uint64, err error) {
+	i := strings.LastIndexByte(ref, '/')
+	if i > 0 {
+		seq, err = strconv.ParseUint(ref[i+1:], 10, 64)
+	}
+	if i <= 0 || err != nil || seq == 0 {
+		return "", 0, fmt.Errorf("%w: -ref %q: want <session>/<seq> (a step's ref)", ErrInvalid, ref)
+	}
+	return ref[:i], seq, nil
 }
 
 // MatchesMethod reports whether a method table row is one Method names.

@@ -1344,6 +1344,19 @@ Kubernetes (M7) build on it.
   exists, the arrow is explicitly time-ordered instead —
   never a silent guess. Same rule as the SVG: same graph
   in, same diagram out.
+  *Built (task mb4):* conversations in the view model —
+  hops paired by `req_seq`, calls nested by their thread's
+  span, an unpaired hop joined only when the clock bounds
+  prove it (unique, server span inside the client's), each
+  thread's file work interleaved; every step `causal`,
+  `time-ordered` (clocks prove it: one host's, or two through
+  the bounds) or `unordered` (they cannot) — raw cross-host
+  timestamps never order a step. `show conversations`, `show
+  sequence [ID]`, `query -ref`, and per build `graph.svg` and
+  `sequence/<ID>.svg`. Processes, `show thread` and
+  per-thread lifelines are still to come
+  ([docs/visualization.md](docs/visualization.md) "V2 as
+  built").
 - **Query / slice interface**: `iormeshctl query` cuts the
   merged trace by time window, host, app, thread, connection,
   file or method and emits schema-conformant NDJSON, with a

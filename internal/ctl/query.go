@@ -50,6 +50,7 @@ type queryFlags struct {
 	paths                              buildFlags
 	from, to                           string
 	host, app, thread, conn, file, mth string
+	ref                                string
 	follow                             bool
 	maxBytes                           int64
 }
@@ -88,6 +89,7 @@ func addQueryFlags(fs *flag.FlagSet, f *queryFlags) {
 	fs.BoolVar(&f.follow, "follow", false, "with -conn: also the threads' other events while they used it")
 	fs.StringVar(&f.file, "file", "", "path glob: events naming it and the fds opened from it")
 	fs.StringVar(&f.mth, "method", "", "Java frame glob: class#method or class#method(file:line)")
+	fs.StringVar(&f.ref, "ref", "", "one event, by a conversation step's ref (<session>/<seq>; iormeshctl show sequence)")
 	fs.Int64Var(&f.maxBytes, "max-bytes", defaultMaxBytes, "output cap in bytes, the truncation record included")
 }
 
@@ -96,7 +98,7 @@ func addQueryFlags(fs *flag.FlagSet, f *queryFlags) {
 // only once the store is listed.
 func parseQueryFilter(f queryFlags) (query.Filter, *query.TimeSpec, *query.TimeSpec, error) {
 	filter := query.Filter{Host: f.host, App: f.app, Thread: f.thread, Conn: f.conn,
-		Follow: f.follow, File: f.file, Method: f.mth}
+		Follow: f.follow, File: f.file, Method: f.mth, Ref: f.ref}
 	var specs [2]*query.TimeSpec
 	for i, s := range []string{f.from, f.to} {
 		if s == "" {

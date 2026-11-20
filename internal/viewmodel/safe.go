@@ -45,6 +45,10 @@ func safeModel(m Model) Model {
 	for i := range m.Edges {
 		m.Edges[i].From, m.Edges[i].To, m.Edges[i].State = s(m.Edges[i].From), s(m.Edges[i].To), s(m.Edges[i].State)
 	}
+	m.Conversations = slices.Clone(m.Conversations)
+	for i := range m.Conversations {
+		m.Conversations[i] = safeConversation(m.Conversations[i])
+	}
 	return m
 }
 

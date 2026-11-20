@@ -23,6 +23,7 @@
     "skipped_runs": 0,
     "unattributed": 0,
     "attach_gap": 0,
+    "requests_cut": 0,
     "sessions": [
       {
         "project": "billing",
@@ -130,5 +131,254 @@
       "first": "2025-11-20T00:53:20.0001Z",
       "last": "2025-11-20T00:53:20.009Z"
     }
-  ]
+  ],
+  "conversations": [
+    {
+      "id": "0001",
+      "start": "2025-11-20T00:53:20.0036Z",
+      "entry": "orders.example:8080",
+      "label": "GET /orders/2",
+      "hops": 1,
+      "services": [
+        "java",
+        "orders.example:8080"
+      ],
+      "steps": [
+        {
+          "kind": "request",
+          "service": "java",
+          "host": "",
+          "thread": "",
+          "to": "orders.example:8080",
+          "label": "GET /orders/2",
+          "bytes": 0,
+          "latency_ns": 0,
+          "ordering": "time-ordered",
+          "hop": "unpaired",
+          "stack": [],
+          "ref": "billing/app2/hostB.example.org-a1b2c3d4/8"
+        },
+        {
+          "kind": "response",
+          "service": "orders.example:8080",
+          "host": "hostB.example.org",
+          "thread": "tid 200",
+          "to": "java",
+          "label": "200",
+          "bytes": 0,
+          "latency_ns": 1000,
+          "ordering": "causal",
+          "stack": [],
+          "ref": "billing/app2/hostB.example.org-a1b2c3d4/8"
+        }
+      ],
+      "more_steps": 0
+    },
+    {
+      "id": "0002",
+      "start": "2025-11-20T00:53:20.0035Z",
+      "entry": "java",
+      "label": "GET /orders/2",
+      "hops": 1,
+      "services": [
+        "java",
+        "orders.example:8080"
+      ],
+      "steps": [
+        {
+          "kind": "request",
+          "service": "java",
+          "host": "hostA.example.org",
+          "thread": "tid 100",
+          "to": "orders.example:8080",
+          "label": "GET /orders/2",
+          "bytes": 0,
+          "latency_ns": 0,
+          "ordering": "time-ordered",
+          "hop": "unpaired",
+          "stack": [],
+          "ref": "shop/app1/hostA.example.org-a1b2c3d4/10"
+        },
+        {
+          "kind": "response",
+          "service": "orders.example:8080",
+          "host": "",
+          "thread": "",
+          "to": "java",
+          "label": "200",
+          "bytes": 0,
+          "latency_ns": 1000,
+          "ordering": "time-ordered",
+          "stack": [],
+          "ref": "shop/app1/hostA.example.org-a1b2c3d4/10"
+        }
+      ],
+      "more_steps": 0
+    },
+    {
+      "id": "0003",
+      "start": "2025-11-20T00:53:20.0031Z",
+      "entry": "orders.example:8080",
+      "label": "GET /orders/2",
+      "hops": 1,
+      "services": [
+        "java",
+        "orders.example:8080"
+      ],
+      "steps": [
+        {
+          "kind": "request",
+          "service": "java",
+          "host": "",
+          "thread": "",
+          "to": "orders.example:8080",
+          "label": "GET /orders/2",
+          "bytes": 0,
+          "latency_ns": 0,
+          "ordering": "time-ordered",
+          "hop": "unpaired",
+          "stack": [],
+          "ref": "billing/app2/hostB.example.org-a1b2c3d4/7"
+        },
+        {
+          "kind": "response",
+          "service": "orders.example:8080",
+          "host": "hostB.example.org",
+          "thread": "tid 200",
+          "to": "java",
+          "label": "200",
+          "bytes": 0,
+          "latency_ns": 1000,
+          "ordering": "causal",
+          "stack": [],
+          "ref": "billing/app2/hostB.example.org-a1b2c3d4/7"
+        }
+      ],
+      "more_steps": 0
+    },
+    {
+      "id": "0004",
+      "start": "2025-11-20T00:53:20.003Z",
+      "entry": "java",
+      "label": "GET /orders/2",
+      "hops": 1,
+      "services": [
+        "java",
+        "orders.example:8080"
+      ],
+      "steps": [
+        {
+          "kind": "request",
+          "service": "java",
+          "host": "hostA.example.org",
+          "thread": "tid 100",
+          "to": "orders.example:8080",
+          "label": "GET /orders/2",
+          "bytes": 0,
+          "latency_ns": 0,
+          "ordering": "time-ordered",
+          "hop": "unpaired",
+          "stack": [],
+          "ref": "shop/app1/hostA.example.org-a1b2c3d4/9"
+        },
+        {
+          "kind": "response",
+          "service": "orders.example:8080",
+          "host": "",
+          "thread": "",
+          "to": "java",
+          "label": "200",
+          "bytes": 0,
+          "latency_ns": 1000,
+          "ordering": "time-ordered",
+          "stack": [],
+          "ref": "shop/app1/hostA.example.org-a1b2c3d4/9"
+        }
+      ],
+      "more_steps": 0
+    },
+    {
+      "id": "0005",
+      "start": "2025-11-20T00:53:20.0021Z",
+      "entry": "orders.example:8080",
+      "label": "GET /orders/1",
+      "hops": 1,
+      "services": [
+        "java",
+        "orders.example:8080"
+      ],
+      "steps": [
+        {
+          "kind": "request",
+          "service": "java",
+          "host": "",
+          "thread": "",
+          "to": "orders.example:8080",
+          "label": "GET /orders/1",
+          "bytes": 0,
+          "latency_ns": 0,
+          "ordering": "time-ordered",
+          "hop": "unpaired",
+          "stack": [],
+          "ref": "billing/app2/hostB.example.org-a1b2c3d4/6"
+        },
+        {
+          "kind": "response",
+          "service": "orders.example:8080",
+          "host": "hostB.example.org",
+          "thread": "tid 200",
+          "to": "java",
+          "label": "200",
+          "bytes": 0,
+          "latency_ns": 1000,
+          "ordering": "causal",
+          "stack": [],
+          "ref": "billing/app2/hostB.example.org-a1b2c3d4/6"
+        }
+      ],
+      "more_steps": 0
+    },
+    {
+      "id": "0006",
+      "start": "2025-11-20T00:53:20.002Z",
+      "entry": "java",
+      "label": "GET /orders/1",
+      "hops": 1,
+      "services": [
+        "java",
+        "orders.example:8080"
+      ],
+      "steps": [
+        {
+          "kind": "request",
+          "service": "java",
+          "host": "hostA.example.org",
+          "thread": "tid 100",
+          "to": "orders.example:8080",
+          "label": "GET /orders/1",
+          "bytes": 0,
+          "latency_ns": 0,
+          "ordering": "time-ordered",
+          "hop": "unpaired",
+          "stack": [],
+          "ref": "shop/app1/hostA.example.org-a1b2c3d4/8"
+        },
+        {
+          "kind": "response",
+          "service": "orders.example:8080",
+          "host": "",
+          "thread": "",
+          "to": "java",
+          "label": "200",
+          "bytes": 0,
+          "latency_ns": 1000,
+          "ordering": "time-ordered",
+          "stack": [],
+          "ref": "shop/app1/hostA.example.org-a1b2c3d4/8"
+        }
+      ],
+      "more_steps": 0
+    }
+  ],
+  "more_conversations": 0
 }

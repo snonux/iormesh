@@ -50,11 +50,17 @@ type matcher struct {
 	files map[fdKey]bool
 	// follow holds the threads that used Conn and when (Follow).
 	follow map[threadKey]span
+	// refSession and refSeq are Ref, parsed (Validate checked it).
+	refSession string
+	refSeq     uint64
 }
 
 // newMatcher prepares a matcher for in's sources.
 func newMatcher(f Filter, in Input) *matcher {
 	m := &matcher{f: f, methods: in.Methods, files: map[fdKey]bool{}}
+	if f.Ref != "" {
+		m.refSession, m.refSeq, _ = ParseRef(f.Ref) // Validate accepted it
+	}
 	if f.App != "" {
 		m.apps = appPatterns(in.Graph)
 	}
@@ -87,7 +93,12 @@ func (m *matcher) match(src *Source, ev *schema.Event) (bool, error) {
 	f := m.f
 	return file && m.window(ev) &&
 		(f.Host == "" || glob(f.Host, src.Host) || glob(f.Host, src.FQDN)) &&
-		m.app(ev) && m.thread(ev) && m.conn(ev) && m.method(src, ev), nil
+		m.app(ev) && m.thread(ev) && m.conn(ev) && m.method(src, ev) && m.ref(src, ev), nil
+}
+
+// ref matches the one event Ref names.
+func (m *matcher) ref(src *Source, ev *schema.Event) bool {
+	return m.f.Ref == "" || (src.Session == m.refSession && ev.Seq == m.refSeq)
 }
 
 // window is the time predicate.

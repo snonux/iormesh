@@ -1,0 +1,240 @@
+{
+  "id": "0001",
+  "start": "2025-11-20T00:53:20.0009Z",
+  "entry": "java",
+  "label": "GET /checkout",
+  "hops": 4,
+  "services": [
+    "(untraced)",
+    "java",
+    "orders:8080",
+    "inventory:8081",
+    "billing:8082"
+  ],
+  "steps": [
+    {
+      "kind": "request",
+      "service": "(untraced)",
+      "host": "",
+      "thread": "",
+      "to": "java",
+      "label": "GET /checkout",
+      "bytes": 0,
+      "latency_ns": 0,
+      "ordering": "time-ordered",
+      "hop": "untraced",
+      "stack": [],
+      "ref": "shop/gw/gw.example.org-g1/5"
+    },
+    {
+      "kind": "request",
+      "service": "java",
+      "host": "gw.example.org",
+      "thread": "http-1",
+      "to": "orders:8080",
+      "label": "GET /orders/42",
+      "bytes": 0,
+      "latency_ns": 0,
+      "ordering": "causal",
+      "hop": "paired",
+      "stack": [
+        "com.shop.gw.OrdersClient#get(OrdersClient.java:12)"
+      ],
+      "ref": "shop/gw/gw.example.org-g1/6"
+    },
+    {
+      "kind": "file",
+      "service": "orders:8080",
+      "host": "orders.example.org",
+      "thread": "worker-3",
+      "label": "open /etc/orders.conf",
+      "bytes": 0,
+      "latency_ns": 0,
+      "ordering": "causal",
+      "stack": [
+        "com.shop.orders.Config#load(Config.java:9)",
+        "com.shop.orders.OrderHandler#handle(OrderHandler.java:20)"
+      ],
+      "ref": "shop/orders/orders.example.org-o1/13"
+    },
+    {
+      "kind": "file",
+      "service": "orders:8080",
+      "host": "orders.example.org",
+      "thread": "worker-3",
+      "label": "read /etc/orders.conf",
+      "bytes": 512,
+      "latency_ns": 0,
+      "ordering": "causal",
+      "stack": [
+        "com.shop.orders.OrderHandler#handle(OrderHandler.java:20)"
+      ],
+      "ref": "shop/orders/orders.example.org-o1/14"
+    },
+    {
+      "kind": "request",
+      "service": "orders:8080",
+      "host": "orders.example.org",
+      "thread": "worker-3",
+      "to": "inventory:8081",
+      "label": "GET /stock/7",
+      "bytes": 0,
+      "latency_ns": 0,
+      "ordering": "causal",
+      "hop": "paired",
+      "stack": [
+        "com.shop.orders.Downstream#call(Downstream.java:15)"
+      ],
+      "ref": "shop/orders/orders.example.org-o1/16"
+    },
+    {
+      "kind": "file",
+      "service": "inventory:8081",
+      "host": "inv.example.org",
+      "thread": "inv-1",
+      "label": "open /var/inv/stock.db",
+      "bytes": 0,
+      "latency_ns": 0,
+      "ordering": "causal",
+      "stack": [
+        "com.shop.inv.StockHandler#handle(StockHandler.java:8)"
+      ],
+      "ref": "shop/inv/inv.example.org-i1/5"
+    },
+    {
+      "kind": "file",
+      "service": "inventory:8081",
+      "host": "inv.example.org",
+      "thread": "inv-1",
+      "label": "read /var/inv/stock.db @4096",
+      "bytes": 64,
+      "latency_ns": 0,
+      "ordering": "causal",
+      "stack": [
+        "com.shop.inv.StockHandler#handle(StockHandler.java:8)"
+      ],
+      "ref": "shop/inv/inv.example.org-i1/6"
+    },
+    {
+      "kind": "response",
+      "service": "inventory:8081",
+      "host": "inv.example.org",
+      "thread": "inv-1",
+      "to": "orders:8080",
+      "label": "200",
+      "bytes": 0,
+      "latency_ns": 1000000,
+      "ordering": "causal",
+      "stack": [
+        "com.shop.inv.StockHandler#handle(StockHandler.java:8)"
+      ],
+      "ref": "shop/inv/inv.example.org-i1/4"
+    },
+    {
+      "kind": "file",
+      "service": "orders:8080",
+      "host": "orders.example.org",
+      "thread": "worker-3",
+      "label": "create /data/order-42.json.tmp",
+      "bytes": 0,
+      "latency_ns": 0,
+      "ordering": "causal",
+      "stack": [
+        "com.shop.orders.DataStore#save(DataStore.java:42)",
+        "com.shop.orders.OrderHandler#handle(OrderHandler.java:20)"
+      ],
+      "ref": "shop/orders/orders.example.org-o1/17"
+    },
+    {
+      "kind": "file",
+      "service": "orders:8080",
+      "host": "orders.example.org",
+      "thread": "worker-3",
+      "label": "write /data/order-42.json.tmp",
+      "bytes": 128,
+      "latency_ns": 0,
+      "ordering": "causal",
+      "stack": [
+        "com.shop.orders.OrderHandler#handle(OrderHandler.java:20)"
+      ],
+      "ref": "shop/orders/orders.example.org-o1/18"
+    },
+    {
+      "kind": "file",
+      "service": "orders:8080",
+      "host": "orders.example.org",
+      "thread": "worker-3",
+      "label": "rename /data/order-42.json.tmp -\u003e /data/order-42.json",
+      "bytes": 0,
+      "latency_ns": 0,
+      "ordering": "causal",
+      "stack": [
+        "com.shop.orders.DataStore#save(DataStore.java:42)",
+        "com.shop.orders.OrderHandler#handle(OrderHandler.java:20)"
+      ],
+      "ref": "shop/orders/orders.example.org-o1/20"
+    },
+    {
+      "kind": "request",
+      "service": "orders:8080",
+      "host": "orders.example.org",
+      "thread": "worker-3",
+      "to": "billing:8082",
+      "label": "POST /charge",
+      "bytes": 0,
+      "latency_ns": 0,
+      "ordering": "time-ordered",
+      "hop": "clock",
+      "stack": [
+        "com.shop.orders.Downstream#call(Downstream.java:15)"
+      ],
+      "ref": "shop/orders/orders.example.org-o1/21"
+    },
+    {
+      "kind": "response",
+      "service": "billing:8082",
+      "host": "bill.example.org",
+      "thread": "bill-1",
+      "to": "orders:8080",
+      "label": "200",
+      "bytes": 0,
+      "latency_ns": 3000000,
+      "ordering": "time-ordered",
+      "stack": [
+        "com.shop.bill.ChargeHandler#handle(ChargeHandler.java:5)"
+      ],
+      "ref": "shop/bill/bill.example.org-b1/6"
+    },
+    {
+      "kind": "response",
+      "service": "orders:8080",
+      "host": "orders.example.org",
+      "thread": "worker-3",
+      "to": "java",
+      "label": "200",
+      "bytes": 0,
+      "latency_ns": 8250000,
+      "ordering": "causal",
+      "stack": [
+        "com.shop.orders.OrderHandler#handle(OrderHandler.java:20)"
+      ],
+      "ref": "shop/orders/orders.example.org-o1/12"
+    },
+    {
+      "kind": "response",
+      "service": "java",
+      "host": "gw.example.org",
+      "thread": "http-1",
+      "to": "(untraced)",
+      "label": "200",
+      "bytes": 0,
+      "latency_ns": 8600000,
+      "ordering": "causal",
+      "stack": [
+        "com.shop.gw.Checkout#run(Checkout.java:30)"
+      ],
+      "ref": "shop/gw/gw.example.org-g1/5"
+    }
+  ],
+  "more_steps": 0
+}

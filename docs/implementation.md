@@ -4083,8 +4083,9 @@ iormeshctl show [summary|services|edges|health] [-project P]... [-json]
   FQDN, session and seq of the file's name and directory.
   `CheckEvents` is the child's read: it also requires one host
   id in the file and at least one event. Table files read
-  through `ReadTable`; the build counts them but does not read
-  them yet (M5's conversations need the Java tables).
+  through `ReadTable`; the build reads the methods tables its
+  conversations' frames need (task mb4, M5 "Conversations and
+  exports").
 - **One source per segment.** `LoadSegments` lists
   `<store>/<project>/<host>/*.parquet` (every project directory
   without `-project`; dot files skipped, other entries reported
@@ -4174,8 +4175,11 @@ iormeshctl show [summary|services|edges|health] [-project P]... [-json]
   the build) drops that segment and rebuilds its session's graph
   without it.
 - **Passes.** Check (the child), graph, merge (the run's tally
-  rides along: `talliedSegment`), `servicedb.Observe` — four
-  reads of every segment, none holding events. What grows with
+  rides along: `talliedSegment`), `servicedb.Observe` (the
+  conversations' http events ride along: `recordedSegment`) and,
+  when a kept conversation has a server request, the
+  conversations' file pass — five reads of every segment, none
+  holding events. What grows with
   the input is the merge's per-connection state (keys, the data
   records' stream offsets for the clock bounds), the graph, the
   service database rows and one tally per session.
@@ -4279,7 +4283,10 @@ the view model they share are designed in
 "Build, refresh and show"): `internal/viewmodel` with run,
 health, services and edges, and its text views. Extend the model
 and its goldens first (conversations and processes, V2); a
-renderer never reads the merged graph directly.
+renderer never reads the merged graph directly — `graph.svg`, a
+drawing of the graph export itself, is the one exception (PLAN.md
+M5 "Deterministic SVG export"). Conversations are built (task
+mb4, "Conversations and exports" below); processes are not yet.
 
 ![The two joins behind one line of the sequence view](diagrams/join.svg)
 
@@ -4303,11 +4310,66 @@ func Layout(g schema.Graph) Placed
 // SVG serializes a layout. Same Placed in, same bytes out.
 func SVG(p Placed) []byte
 
-// Sequence renders conversations: one lifeline per service, one
-// arrow per fused request, file ops as notes on the lifeline of
-// the thread that did them.
-func Sequence(g schema.Graph, order []federate.Ordered) []byte
+// Sequence renders one conversation of the view model: one
+// lifeline per service, one arrow per request and response, file
+// ops as notes on the lifeline of the thread that did them.
+func Sequence(c viewmodel.Conversation) []byte
 ```
+
+**Conversations and exports** — V2, built by task mb4 (cgo-free;
+the model, its rules and the views in
+[visualization.md](visualization.md), "V2 as built"):
+
+```
+internal/viewmodel/conversation.go # Conversation, Step, caps, Order*/Hop*
+internal/viewmodel/record.go       # Recorder: the http pass, Plan
+internal/viewmodel/link.go         # pair by req_seq, by clock; nest
+internal/viewmodel/fileops.go      # the file pass, fd → path, Methods
+internal/viewmodel/steps.go        # the steps, depth first; ordering
+internal/viewmodel/names.go        # lifelines named as servicedb does
+internal/viewmodel/sequence.go     # show conversations, show sequence
+internal/render/                   # Graph, Sequence: the SVG exports
+internal/ctl/conversations.go      # the passes and the frames in build
+internal/query/                    # + Filter.Ref, ParseRef (-ref)
+```
+
+- **Passes.** The http events ride along with `servicedb.Observe`'s
+  read (`recordedSegment`, conn ids renamed by the merge); `Plan`
+  keeps the newest 2¹⁸ of them (sorted and cut whenever twice that
+  piled up, so memory stays bounded and the kept set is the one a
+  single sort would keep), links them and picks the 100 newest
+  roots. Only then is the store read once more, for the file work
+  of the threads that served a kept request (and the fd → path
+  table of their processes), and each methods table holding a
+  kept step's frame once — checked in the memory-capped child
+  like a segment; a table that fails joins the bad segments and
+  its frames stay `method#<id>`.
+- **Linking** is per request, never per guess: the req_seq pair
+  must be unique on both ends; nesting looks at the 8 latest
+  server requests of the thread starting no later; the clock join
+  compares at most 64×64 unpaired requests of one connection and
+  takes a mutual unique match only. What a rule cannot prove
+  stays apart, and says so (`hop`, `ordering`).
+- **Exports.** `build` writes `graph.svg` atomically and the
+  `sequence/` directory whole under a temporary name, swapped in,
+  so a conversation of an earlier build never lingers next to the
+  new ones. Text goes through one escape (`esc`: `termsafe.String`,
+  then the XML specials).
+- Tests: `internal/viewmodel/conversation_test.go` (ordering
+  across hosts with a known skew — proven, within the bound's
+  width, raw-later-but-earlier, no bound, outside the window;
+  clock join proven, too wide, no bound, two candidates; an
+  unordered step; duplicate req_seq, carrier, async, outside the
+  span; file work; caps; escapes); `internal/render/render_test.go`
+  (two renders byte-identical, well-formed XML, no raw control
+  character, the column cap); `internal/ctl/conversations_test.go`
+  — a four-host store (gateway → orders → inventory and billing,
+  billing's clock 30 ms ahead, the billing hop HTTP/2): the list,
+  the sequence text and JSON, `sequence/0001.svg` and `graph.svg`
+  against `testdata/conv_*.golden`, byte-identical rebuilds; the
+  same store without the billing connection's data records (no
+  bound: the hop unpaired, billing's request its own
+  conversation); `query -ref` of the rename step.
 
 **Query** (`internal/query`, `iormeshctl query`):
 
@@ -4316,6 +4378,7 @@ iormeshctl query --project shop --thread 'http-*' \
     --from 12:00:00 --to 12:00:05 --max-bytes 200000
 iormeshctl query --project shop --conn conn:4be1… --follow
 iormeshctl query --project shop --file '/etc/orders.conf'
+iormeshctl query -ref shop/orders/orders.example.org-o1/20
 ```
 
 Built by task pb4 (cgo-free):
@@ -4362,9 +4425,11 @@ internal/termsafe/           # + JSON: escape a line for a terminal
   frame of `java.stack`, as `class#method` or the full frame
   text, through the session's methods tables (the union of its
   segments' tables, each checked in the child like a segment).
-  A malformed glob, `-follow` without `-conn`, an empty window
-  or a cap below the record's size is a usage error (exit 2)
-  before anything is read.
+  `-ref` one event, by a conversation step's ref
+  (`<session>/<seq>`, task mb4). A malformed glob or ref,
+  `-follow` without `-conn`, an empty window or a cap below the
+  record's size is a usage error (exit 2) before anything is
+  read.
 - **Output** is schema NDJSON in source order (store name, a
   session's segments in seq order — the `(host, seq)` order),
   each line `termsafe.JSON`-escaped: C1 controls, DEL and bidi

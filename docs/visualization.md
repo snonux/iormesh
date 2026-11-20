@@ -282,6 +282,70 @@ them whole.) Every string from the traces is printed
 terminal-safe: one holding a control character comes out
 Go-quoted, never as an escape sequence.
 
+V2 as built (task mb4; files and passes in
+[implementation.md](implementation.md), M5 "Conversations and
+exports"): `Model` gains `Conversations` (the newest 100, newest
+first, `MoreConversations` counting the rest) and
+`Health.RequestsCut`; `Processes` is still to come. A
+conversation is built from the http events only — the correlated
+trace, never re-inferred:
+
+- **Paired hop**: a client and a server http event on the same
+  merged conn id with the same `req_seq` (exactly one of each) —
+  the request went from the one thread to the other, a causal
+  edge (`hop: paired`).
+- **Nesting**: a client request belongs to the server request on
+  the same kernel thread whose span holds it — one thread, one
+  clock, so the containment is a fact. A virtual thread's carrier
+  (`carrier`) and a request recorded without its start
+  (`sendAsync`) nest nothing.
+- **Clock join**: an unpaired client request (HTTP/2, a lost
+  record) and an unpaired server request on the same fused
+  connection are joined only when the merge's clock bounds
+  (`federate.Timeline`) prove the server's span inside the
+  client's and each is the other's only such match (`hop:
+  clock`, the arrows time-ordered). A bound too wide, no bound or
+  two candidates: the client's step ends at its peer (`hop:
+  unpaired`) and the server request is a conversation of its own,
+  named after its traced caller or `(untraced)`.
+- **File work**: a server request's thread's file operations in
+  its span — open/create, read and write (path by the fd's open,
+  offset when given), rename, unlink, mkdir, link/symlink,
+  truncate, touch, chmod/chown, xattr writes; metadata only —
+  interleaved in that thread's clock order with the calls it
+  made. Another thread's I/O, socket I/O and an fd whose open the
+  trace never showed are not in it.
+
+Each step carries `ordering`, judged against the step before it in
+the list: `causal` (thread order or a paired send→receive),
+`time-ordered` (no edge, but the timestamps prove it — one host's
+clock, or two hosts' through the clock bounds), or `unordered`
+(neither: no bound covers the two hosts or the instant, or they lie
+closer than the bound is wide). Raw timestamps of two hosts never
+order anything; the list's own order of conversations (by the
+entering request's start) is presentation only. Steps differ from
+the sketch above: `host`, `carrier` and `hop` are added, there is no
+`note` kind, a stack is at most 12 frames, and `ref` is
+`<project>/<host>/<fqdn>-<session>/<seq>` — `iormeshctl query -ref
+REF` prints that one raw event. Caps: 200 steps per conversation
+(`more_steps`), 2¹⁸ http events read (the newest by completion),
+2²⁰ followed fds.
+
+`show conversations` lists them; `show sequence [ID]` (the newest
+without an ID) prints one as numbered steps — ordering, actor
+(`service/thread`), arrow, label, bytes, latency, a hop that is not
+`paired` — each with its top Java frame and its ref, every string
+terminal-safe; `-json` prints the conversation. The summary gains a
+`sequence` line counting conversations and their time-ordered and
+unordered steps. `build` also writes the deterministic SVG exports
+(`internal/render`): `graph.svg` (apps, one column per host — host,
+processes, files — and the connections; unresolved connections
+dashed, 200 nodes a column, the rest counted) and
+`sequence/<ID>.svg` per conversation (lifelines in first-appearance
+order; causal arrows solid, time-ordered dashed, unordered dotted
+and marked `?`; file work as notes). `show thread` and the
+lifelines' Java threads as columns of their own are not built yet.
+
 Tests: golden files on the serialized model and on every `show`
 view; the site's `data/*.js` are goldens too, and one headless
 browser test loads `index.html` from `file://` and checks that

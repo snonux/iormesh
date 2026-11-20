@@ -1,0 +1,2 @@
+ID    START                    ENTRY  REQUEST        HOPS  STEPS  SERVICES
+0001  2025-11-20 00:53:20.000  java   GET /checkout  4     15     (untraced) java orders:8080 inventory:8081 billing:8082

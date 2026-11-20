@@ -37,6 +37,7 @@ func WriteSummary(w io.Writer, m Model) error {
 	for _, c := range h.Clocks {
 		fmt.Fprintf(&b, "clock      %s ~ %s: %s\n", c.HostA, c.HostB, clockLine(c))
 	}
+	fmt.Fprintf(&b, "sequence   %s\n", conversationsLine(m))
 	for _, s := range h.Sessions {
 		if s.End == "" {
 			fmt.Fprintf(&b, "session    %s/%s %s: no end recorded (running, or cut short)\n",
@@ -99,6 +100,31 @@ func WriteHealth(w io.Writer, m Model) error {
 	writeBad(&b, h)
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// conversationsLine counts the conversations and how their steps are
+// ordered: the share that is not causal is what a reader must not
+// over-read.
+func conversationsLine(m Model) string {
+	var steps, timed, unordered int
+	for _, c := range m.Conversations {
+		for _, s := range c.Steps {
+			steps++
+			switch s.Ordering {
+			case OrderTime:
+				timed++
+			case OrderNone:
+				unordered++
+			}
+		}
+	}
+	line := fmt.Sprintf("%d conversations, %d steps (%d time-ordered, %d unordered)",
+		len(m.Conversations), steps, timed, unordered)
+	if m.MoreConversations > 0 || m.Health.RequestsCut > 0 {
+		line += fmt.Sprintf("; truncated: %d older conversations, %d requests",
+			m.MoreConversations, m.Health.RequestsCut)
+	}
+	return line
 }
 
 // writeBad lists the skipped segments and stray entries.

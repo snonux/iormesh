@@ -51,16 +51,21 @@ func refreshCommand(args []string, e env) error {
 }
 
 // showViews are show's views; summary is the default.
-var showViews = []string{"summary", "services", "edges", "health"}
+var showViews = []string{"summary", "services", "edges", "health", "conversations", "sequence"}
 
 // showCommand prints one view of the last build's model (model.json):
-// the summary build printed, services, edges or health; -json the
-// model's JSON for that view. It reads only the build output, never the
-// store's segments or the network.
+// the summary build printed, services, edges, health, the
+// conversations, or one conversation's sequence (`show sequence [ID]`,
+// the newest without an ID); -json the model's JSON for that view. It
+// reads only the build output, never the store's segments or the
+// network.
 func showCommand(args []string, e env) error {
-	view := "summary"
+	view, id := "summary", ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		view, args = args[0], args[1:]
+	}
+	if view == "sequence" && len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		id, args = args[0], args[1:]
 	}
 	fs := newFlagSet("show "+view, e.stderr)
 	var f buildFlags
@@ -78,9 +83,9 @@ func showCommand(args []string, e env) error {
 		return err
 	}
 	if *asJSON {
-		return writeViewJSON(e, view, m)
+		return writeViewJSON(e, view, id, m)
 	}
-	return writeView(e, view, m, *unresolved)
+	return writeView(e, view, id, m, *unresolved)
 }
 
 // loadModel reads the model.json of the build of f's projects.
@@ -127,9 +132,17 @@ func resolveShowPaths(e env, f buildFlags) (buildPaths, error) {
 	return p, nil
 }
 
-// writeView renders a view as text.
-func writeView(e env, view string, m viewmodel.Model, unresolved bool) error {
+// writeView renders a view as text; id picks sequence's conversation.
+func writeView(e env, view, id string, m viewmodel.Model, unresolved bool) error {
 	switch view {
+	case "conversations":
+		return viewmodel.WriteConversations(e.stdout, m)
+	case "sequence":
+		c, err := viewmodel.FindConversation(m, id)
+		if err != nil {
+			return fmt.Errorf("show: %w", err)
+		}
+		return viewmodel.WriteSequence(e.stdout, c)
 	case "summary":
 		return viewmodel.WriteSummary(e.stdout, m)
 	case "services":
@@ -143,9 +156,17 @@ func writeView(e env, view string, m viewmodel.Model, unresolved bool) error {
 }
 
 // writeViewJSON prints the part of the model a view shows.
-func writeViewJSON(e env, view string, m viewmodel.Model) error {
+func writeViewJSON(e env, view, id string, m viewmodel.Model) error {
 	var v any
 	switch view {
+	case "conversations":
+		v = m.Conversations
+	case "sequence":
+		c, err := viewmodel.FindConversation(m, id)
+		if err != nil {
+			return fmt.Errorf("show: %w", err)
+		}
+		v = c
 	case "summary":
 		v = m
 	case "services":

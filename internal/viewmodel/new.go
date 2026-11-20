@@ -26,6 +26,11 @@ type Input struct {
 	Ignored      []string
 	Endpoints    []servicedb.Endpoint
 	Interactions []servicedb.Interaction
+	// Observations are this build's connections as servicedb.Observe saw
+	// them: what names a conversation's endpoints. Conversations is the
+	// build's recording, planned and read (Recorder); nil for none.
+	Observations  []servicedb.Observation
+	Conversations *Recorder
 }
 
 // New builds the model. Every list is sorted, so equal inputs give equal
@@ -44,6 +49,11 @@ func New(in Input) Model {
 	m.Health.Ignored = slices.Sorted(slices.Values(in.Ignored))
 	m.Services = services(in.Endpoints, in.Interactions)
 	m.Edges = edges(in.Interactions)
+	m.Conversations = []Conversation{}
+	if r := in.Conversations; r != nil {
+		m.Conversations = r.conversations(newNamer(in.Merge.Graph, in.Observations, in.Endpoints))
+		m.MoreConversations, m.Health.RequestsCut = r.more, r.cut
+	}
 	return m
 }
 

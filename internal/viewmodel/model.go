@@ -5,8 +5,10 @@
 // text of `build` and `show` (summary.go) renders it, and M5's site and
 // TUI will render the same model, so no two surfaces can disagree.
 //
-// This is step V1 (M4): run, health, services and edges. Conversations
-// and processes (V2, M5) are appended to Model when they land.
+// Step V1 (M4) built run, health, services and edges; V2 (M5, task mb4)
+// appends the conversations (conversation.go): request chains across
+// the fused connections in happens-before order, each thread's file work
+// interleaved. Processes (the rest of V2) are appended when they land.
 //
 // Rules the model keeps:
 //
@@ -43,6 +45,10 @@ type Model struct {
 	Health   Health    `json:"health"`
 	Services []Service `json:"services"`
 	Edges    []Edge    `json:"edges"`
+	// Conversations are the newest MaxConversations request chains,
+	// newest first; MoreConversations counts the older ones left out.
+	Conversations     []Conversation `json:"conversations"`
+	MoreConversations int            `json:"more_conversations"`
 }
 
 // Run is what the build read and what the merge made of it.
@@ -82,6 +88,9 @@ type Health struct {
 	// AttachGap counts records a pattern-matched process produced before
 	// the tracer attached to it.
 	AttachGap uint64 `json:"attach_gap"`
+	// RequestsCut counts the http events past MaxRequests, the oldest by
+	// completion, that no conversation was built from.
+	RequestsCut uint64 `json:"requests_cut"`
 	// Sessions says how each tracer run ended.
 	Sessions []Session `json:"sessions"`
 	// Clocks summarizes each traced host pair's clock bounds.

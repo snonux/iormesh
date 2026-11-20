@@ -32,7 +32,7 @@ func (d *DB) Interactions(ctx context.Context, f Filter) ([]Interaction, error) 
 	for _, e := range eps {
 		labels[keyOf(e)] = e.Label()
 	}
-	served := appServices(eps)
+	served := AppServices(eps)
 	agg := map[[2]string]*Interaction{}
 	err = d.clientRows(ctx, f, func(client string, k epKey, in Interaction) {
 		if s := served[client]; s != "" {
@@ -62,10 +62,11 @@ func (d *DB) Interactions(ctx context.Context, f Filter) ([]Interaction, error) 
 	return out, nil
 }
 
-// appServices maps a server app to the one service its endpoints are
+// AppServices maps a server app to the one service its endpoints are
 // named; an app serving several names, or an unnamed endpoint, maps to
-// none.
-func appServices(eps []Endpoint) map[string]string {
+// none. The view model names conversation lifelines by it too, so a
+// sequence diagram and the edges agree.
+func AppServices(eps []Endpoint) map[string]string {
 	names := map[string]map[string]bool{}
 	for _, e := range eps {
 		for _, app := range e.ServerApps {

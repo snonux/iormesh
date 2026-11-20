@@ -15,6 +15,7 @@ import (
 
 	"iormesh/internal/federate"
 	"iormesh/internal/project"
+	"iormesh/internal/render"
 	"iormesh/internal/schema"
 	"iormesh/internal/servicedb"
 	"iormesh/internal/viewmodel"
@@ -35,10 +36,15 @@ import (
 //  3. servicedb.Observe and Import fold the mesh into the service
 //     database (task hb4), one source per segment so request counts stay
 //     exact after old segments are deleted.
-//  4. The view model (V1: run, health, services, edges) is built from the
-//     tally, the merge and the database's view of the projects.
-//  5. <builds>/<projects>/graph.json (the merged graph export) and
-//     model.json are written, and the summary is printed.
+//  4. The view model (V1: run, health, services, edges; V2: the
+//     conversations) is built from the tally, the merge, the database's
+//     view of the projects and the conversations' recording — whose http
+//     events ride along with step 3's read, and whose file work and Java
+//     frames take one more read (conversations.go).
+//  5. <builds>/<projects>/graph.json (the merged graph export),
+//     model.json and the SVG exports (graph.svg, sequence/<ID>.svg per
+//     conversation; internal/render) are written, and the summary is
+//     printed.
 //
 // Build never contacts a server, and everything it writes is a function
 // of the store and the database, so a rerun over the same segments
@@ -67,6 +73,9 @@ const (
 	buildsDirName = "builds"
 	graphFileName = "graph.json"
 	modelFileName = "model.json"
+	// graphSVGName and sequenceDirName are the SVG exports (M5).
+	graphSVGName    = "graph.svg"
+	sequenceDirName = "sequence"
 	// maxBuildKey bounds a build directory's name: many projects built
 	// together get a hashed name instead (a name may be 255 bytes).
 	maxBuildKey = 200
@@ -148,7 +157,7 @@ func build(ctx context.Context, e env, f buildFlags) (buildOutput, error) {
 		return buildOutput{}, fmt.Errorf("build: no readable segment for %s in %s (%d bad)",
 			strings.Join(projects, ", "), paths.store, len(segs.Bad))
 	}
-	in, err := mergeAndImport(ctx, paths.db, projects, segs)
+	in, err := mergeAndImport(ctx, paths.db, projects, &segs)
 	if err != nil {
 		return buildOutput{}, err
 	}
@@ -197,31 +206,44 @@ func checkedSegments(ctx context.Context, paths buildPaths, projects []string) (
 }
 
 // mergeAndImport merges the segments, folds the result into the service
-// database and reads the database's view of the projects back.
+// database, reads the database's view of the projects back and records
+// the conversations (conversations.go).
 func mergeAndImport(ctx context.Context, dbPath string, projects []string,
-	segs federate.Segments) (viewmodel.Input, error) {
+	segs *federate.Segments) (viewmodel.Input, error) {
 	tally := viewmodel.NewTally()
-	plain := make([]federate.Source, len(segs.Sources))
 	tallied := make([]federate.Source, len(segs.Sources))
 	for i, s := range segs.Sources {
-		plain[i], tallied[i] = s, talliedSegment{s, tally}
+		tallied[i] = talliedSegment{s, tally}
 	}
 	res, err := federate.Merge(ctx, tallied, federate.Options{})
 	if err != nil {
 		return viewmodel.Input{}, err
 	}
 	in := viewmodel.Input{Projects: projects, Tally: tally, Merge: res,
-		BadSegments: segs.Bad, Ignored: segs.Ignored}
-	err = importMesh(ctx, dbPath, plain, &in)
-	return in, err
+		Conversations: viewmodel.NewRecorder(res.Renames)}
+	recorded := make([]federate.Source, len(segs.Sources))
+	for i, s := range segs.Sources {
+		recorded[i] = recordedSegment{s, in.Conversations}
+	}
+	if err := importMesh(ctx, dbPath, recorded, &in); err != nil {
+		return viewmodel.Input{}, err
+	}
+	if err := recordConversations(ctx, segs, in.Conversations, res.Clocks); err != nil {
+		return viewmodel.Input{}, err
+	}
+	// Read last: recording the frames may add a methods table to Bad.
+	in.BadSegments, in.Ignored = segs.Bad, segs.Ignored
+	return in, nil
 }
 
-// importMesh runs Observe and Import and fills in's database view.
+// importMesh runs Observe and Import and fills in's database view and
+// observations.
 func importMesh(ctx context.Context, dbPath string, sources []federate.Source, in *viewmodel.Input) error {
 	snap, err := servicedb.Observe(ctx, sources, in.Merge)
 	if err != nil {
 		return err
 	}
+	in.Observations = snap.Conns
 	d, err := servicedb.Open(ctx, dbPath)
 	if err != nil {
 		return err
@@ -350,7 +372,35 @@ func writeOutputs(builds string, projects []string, g schema.Graph, m viewmodel.
 	if err := writeFileAtomic(filepath.Join(dir, modelFileName), append(data, '\n')); err != nil {
 		return "", fmt.Errorf("build: %w", err)
 	}
+	if err := writeExports(dir, g, m); err != nil {
+		return "", fmt.Errorf("build: %w", err)
+	}
 	return dir, nil
+}
+
+// writeExports writes the deterministic SVG exports (internal/render):
+// graph.svg, and sequence/<ID>.svg per conversation. The sequence
+// directory is written whole under a temporary name and swapped in, so
+// a conversation an earlier build had and this one has not never
+// lingers there next to the new ones.
+func writeExports(dir string, g schema.Graph, m viewmodel.Model) error {
+	if err := writeFileAtomic(filepath.Join(dir, graphSVGName), render.Graph(g)); err != nil {
+		return err
+	}
+	tmp, err := os.MkdirTemp(dir, "."+sequenceDirName+"-*")
+	if err != nil {
+		return err
+	}
+	for _, c := range m.Conversations {
+		if err := os.WriteFile(filepath.Join(tmp, c.ID+".svg"), render.Sequence(c), 0o600); err != nil {
+			return errors.Join(err, os.RemoveAll(tmp))
+		}
+	}
+	final := filepath.Join(dir, sequenceDirName)
+	if err := os.RemoveAll(final); err != nil {
+		return errors.Join(err, os.RemoveAll(tmp))
+	}
+	return os.Rename(tmp, final)
 }
 
 // writeFileAtomic writes data to a synced temp file next to path and
