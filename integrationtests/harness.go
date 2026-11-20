@@ -139,6 +139,9 @@ type Workload struct {
 
 	startup string // the startup gate file it polls for
 	proc    *process
+	// agentJVM marks a workload started with -javaagent: Trace releases
+	// it only once the tracer reported its Java mark probes attached.
+	agentJVM bool
 }
 
 // Run is one traced run.
@@ -216,7 +219,11 @@ func (h *Harness) startWorkload(dir, scenario string, args []string) (*Workload,
 		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: h.Credential}
 		cmd.Dir = h.Tmp // the test's own working directory may be closed to that user
 	}
-	return h.startGated(scenario, cmd, false)
+	w, err := h.startGated(scenario, cmd, false)
+	if err == nil && h.JavaAgent != "" {
+		w.agentJVM = true
+	}
+	return w, err
 }
 
 // startGated starts cmd behind a fresh startup gate and returns once it
@@ -249,13 +256,18 @@ func (h *Harness) startGated(scenario string, cmd *exec.Cmd, held bool) (*Worklo
 }
 
 // Trace runs the tracer against every traced workload's PID, releases the
-// workloads in order once it is attached, waits for all of them and for
-// the tracer (which stops once every target exited), and reads the trace.
+// workloads in order once it is attached (and, for a -javaagent JVM, once
+// its Java mark probes are: awaitJavaMarks), waits for all of them and
+// for the tracer (which stops once every target exited), and reads the
+// trace.
 func (h *Harness) Trace(ws ...*Workload) (Run, error) {
 	h.runs++
 	run := Run{Dir: filepath.Join(h.Dir, fmt.Sprintf("trace-%d", h.runs))}
 	tracer, err := h.startTracer(ws, run.Dir)
 	if err != nil {
+		return run, err
+	}
+	if err := awaitJavaMarks(tracer, ws); err != nil {
 		return run, err
 	}
 	if err := release(ws); err != nil {
@@ -406,6 +418,27 @@ func release(ws []*Workload) error {
 			continue
 		}
 		if _, err := w.proc.waitLine(w.ReleasedWhen, releaseLineTimeout); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// awaitJavaMarks waits until the tracer reported every traced -javaagent
+// JVM's Java mark probes attached ("java agent of pid N joined", task
+// td4). Its ready file can come first: the agent's ring may deliver the
+// hook table after the tracer's pre-ready spool scan, and then the probes
+// attach at the next scan. A syscall issued before that carries no mark
+// and stays attribution none by design (docs/schema.md), so releasing
+// the scenario early made method-flow's first open unattributed under
+// host load — a flaky golden, not a tracer defect (task 5b4).
+func awaitJavaMarks(tracer *process, ws []*Workload) error {
+	for _, w := range ws {
+		if !w.agentJVM || w.Untraced {
+			continue
+		}
+		joined := fmt.Sprintf("java agent of pid %d joined", w.PID)
+		if err := tracer.waitStderr(joined, attachTimeout); err != nil {
 			return err
 		}
 	}
