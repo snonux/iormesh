@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"math"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -268,5 +269,26 @@ func TestReadEventsStopsOnCallerError(t *testing.T) {
 	})
 	if !errors.Is(err, stop) || n != 1 {
 		t.Fatalf("err = %v after %d events", err, n)
+	}
+}
+
+// TestBoundTimes: clocks past int64, or a latency carrying the event's
+// end past it, are refused; the largest sane values pass.
+func TestBoundTimes(t *testing.T) {
+	for _, tc := range []struct {
+		boot, wall, lat uint64
+		ok              bool
+	}{
+		{1, 1_763_000_000_000_000_000, 1000, true},
+		{1, math.MaxInt64 - 10, 10, true},
+		{1, math.MaxInt64 - 10, 11, false},
+		{1, 1, math.MaxUint64 - 5, false},
+		{1, math.MaxInt64 + 1, 0, false},
+		{math.MaxInt64 + 1, 1, 0, false},
+	} {
+		ev := schema.Event{BootNS: tc.boot, WallNS: tc.wall, LatencyNS: tc.lat}
+		if err := boundTimes(&ev); (err == nil) != tc.ok {
+			t.Errorf("boot %d wall %d latency %d: %v", tc.boot, tc.wall, tc.lat, err)
+		}
 	}
 }

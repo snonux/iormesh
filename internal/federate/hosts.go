@@ -29,12 +29,13 @@ type HostIdentity struct {
 //
 //   - a segment's host id differs from the session's first segment's
 //     (that segment only: a file planted into a run);
-//   - its directory is pinned (known) to another identity (checked
-//     first, so a forgery in a pinned directory taints nothing else);
+//   - its directory is pinned (known) to another identity, or its host id
+//     or FQDN is pinned to another directory (checked first: only the
+//     claimant is dropped, the pinned host's sessions stay good);
 //   - its directory holds sessions of two identities (all of them: which
-//     one is the forgery cannot be told);
+//     one is the forgery cannot be told) — among the unpinned only;
 //   - its host id or its FQDN also appears under another directory (all
-//     sessions involved, for the same reason).
+//     sessions involved, for the same reason) — among the unpinned only.
 func vetHosts(groups [][]*Segment, known map[string]HostIdentity, out *Segments) [][]*Segment {
 	groups = pinnedOnly(sessionHostIDs(groups, out), known, out)
 	ids := map[HostIdentity]map[string]bool{}
@@ -77,17 +78,32 @@ func sessionHostIDs(groups [][]*Segment, out *Segments) [][]*Segment {
 	return keep
 }
 
-// pinnedOnly drops the sessions whose directory is pinned to another
-// identity. It runs before the cross-directory checks, so a forgery in
-// a pinned directory cannot taint the genuine host it imitates.
+// pinnedOnly drops the sessions the pins rule out: one in a directory
+// pinned to another identity, and one anywhere else claiming a host id
+// or FQDN pinned to another directory. It runs before the
+// cross-directory checks, so a forgery — in the imitated host's own
+// directory or in a new one — never reaches them, and the pinned
+// host's genuine sessions stay good.
 func pinnedOnly(groups [][]*Segment, known map[string]HostIdentity, out *Segments) [][]*Segment {
+	idDir, fqdnDir := map[string]string{}, map[string]string{}
+	for dir, pin := range known {
+		idDir[pin.HostID], fqdnDir[pin.FQDN] = dir, dir
+	}
 	var keep [][]*Segment
 	for _, g := range groups {
 		id, dir := identityOf(g), g[0].Host
+		why := ""
 		if pin, pinned := known[dir]; pinned && pin != id {
+			why = fmt.Sprintf("host_id %s / %s, but %s is pinned to host_id %s / %s",
+				id.HostID, id.FQDN, dir, pin.HostID, pin.FQDN)
+		} else if d, ok := idDir[id.HostID]; ok && d != dir {
+			why = fmt.Sprintf("host_id %s is pinned to %s, not %s", id.HostID, d, dir)
+		} else if d, ok := fqdnDir[id.FQDN]; ok && d != dir {
+			why = fmt.Sprintf("FQDN %s is pinned to %s, not %s", id.FQDN, d, dir)
+		}
+		if why != "" {
 			for _, s := range g {
-				out.bad(s, fmt.Errorf("%s: host_id %s / %s, but %s is pinned to host_id %s / %s",
-					s.Name(), id.HostID, id.FQDN, dir, pin.HostID, pin.FQDN))
+				out.bad(s, fmt.Errorf("%s: %s", s.Name(), why))
 			}
 			continue
 		}

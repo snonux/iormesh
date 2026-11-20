@@ -124,7 +124,7 @@ func (d deployer) all(ctx context.Context, servers []federate.Server, recPath st
 	var failed []string
 	for _, srv := range servers {
 		if err := d.host(ctx, srv); err != nil {
-			_, _ = fmt.Fprintf(d.e.stderr, "iormeshctl: %s: %v\n", srv.Host, err)
+			_, _ = fmt.Fprintf(d.e.stderr, "iormeshctl: %s: %s\n", srv.Host, errText(err))
 			failed = append(failed, srv.Host)
 		}
 	}

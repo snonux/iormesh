@@ -9,6 +9,7 @@ import (
 
 	"iormesh/internal/federate"
 	"iormesh/internal/project"
+	"iormesh/internal/termsafe"
 )
 
 // `iormeshctl rm [-project P] [-force] HOST` (PLAN.md M4 "Cleanup (rm)"):
@@ -75,8 +76,8 @@ func rmCommand(args []string, e env) error {
 	r := remover{collector: c, force: *force}
 	err = r.teardown(context.Background(), host, projects, hostGoes)
 	if errors.Is(err, errUnreachable) {
-		_, _ = fmt.Fprintf(e.stderr, "iormeshctl: warning: %s: %v; its traces and tracer stay on it, "+
-			"dropping it from the registry only\n", host, err)
+		_, _ = fmt.Fprintf(e.stderr, "iormeshctl: warning: %s: %s; its traces and tracer stay on it, "+
+			"dropping it from the registry only\n", host, errText(err))
 	} else if err != nil {
 		return fmt.Errorf("%s: %w (registry unchanged)", host, err)
 	}
@@ -171,8 +172,8 @@ func (r remover) stopProject(ctx context.Context, t federate.Transport, host, na
 		return nil
 	}
 	if r.force {
-		_, _ = fmt.Fprintf(r.e.stderr, "iormeshctl: warning: %s: project %s: stop: %v; -force: going on\n",
-			host, name, err)
+		_, _ = fmt.Fprintf(r.e.stderr, "iormeshctl: warning: %s: project %s: stop: %s; -force: going on\n",
+			host, name, errText(err))
 		return nil
 	}
 	return fmt.Errorf("stop: %w; its last segment may be unpublished: nothing uninstalled "+
@@ -226,7 +227,7 @@ func (r remover) leftovers(ctx context.Context, t federate.Transport, host strin
 	}
 	if r.force {
 		_, _ = fmt.Fprintf(r.e.stderr, "iormeshctl: warning: %s: %s; -force: uninstalling, they are lost\n",
-			host, msg)
+			host, termsafe.String(msg))
 		return nil
 	}
 	return fmt.Errorf("%s; nothing uninstalled (rm -force uninstalls anyway and loses them)", msg)

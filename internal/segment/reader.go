@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"regexp"
 	"strconv"
@@ -109,11 +110,30 @@ func ReadEvents(ctx context.Context, path string, want func(Meta) error,
 	fn func(*schema.Event) error) (Meta, error) {
 	return readFile(ctx, path, ContentEvents, want, func(ev *schema.Event) error {
 		nilEmptyLists(ev)
+		if err := boundTimes(ev); err != nil {
+			return &rowError{fmt.Errorf("event seq %d: %w", ev.Seq, err)}
+		}
 		if err := ev.Validate(); err != nil {
 			return &rowError{fmt.Errorf("event seq %d: %w", ev.Seq, err)}
 		}
 		return fn(ev)
 	})
+}
+
+// boundTimes rejects an event whose clocks no tracer writes: boot_ns or
+// wall_ns past int64, or a latency that carries wall_ns + latency_ns
+// (an http event's end) past it. The controller stores times in sqlite's
+// int64 and adds them in uint64; a forged value would overflow there and
+// fail the whole build's import instead of this one segment (ib4's
+// second review). int64 ns reach the year 2262.
+func boundTimes(ev *schema.Event) error {
+	switch {
+	case ev.BootNS > math.MaxInt64, ev.WallNS > math.MaxInt64:
+		return fmt.Errorf("boot_ns %d or wall_ns %d past int64", ev.BootNS, ev.WallNS)
+	case ev.LatencyNS > math.MaxInt64-ev.WallNS:
+		return fmt.Errorf("wall_ns %d + latency_ns %d past int64", ev.WallNS, ev.LatencyNS)
+	}
+	return nil
 }
 
 // nilEmptyLists turns the empty lists parquet-go decodes a null LIST

@@ -45,7 +45,7 @@ func refreshCommand(args []string, e env) error {
 	ctx := context.Background()
 	collectErr := c.all(ctx, targets)
 	if collectErr != nil {
-		_, _ = fmt.Fprintf(e.stderr, "iormeshctl: %v; building what the store has\n", collectErr)
+		_, _ = fmt.Fprintf(e.stderr, "iormeshctl: %s; building what the store has\n", errText(collectErr))
 	}
 	return errors.Join(collectErr, buildAndReport(ctx, e, f))
 }

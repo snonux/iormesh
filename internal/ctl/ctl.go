@@ -36,6 +36,7 @@ import (
 
 	"iormesh/internal/federate"
 	"iormesh/internal/servicedb"
+	"iormesh/internal/termsafe"
 	"iormesh/internal/version"
 )
 
@@ -145,14 +146,20 @@ func report(err error, stderr io.Writer) int {
 	case err == nil:
 		return exitOK
 	case errors.Is(err, errUsage):
-		_, _ = fmt.Fprintf(stderr, "iormeshctl: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "iormeshctl: %s\n", errText(err))
 		usage(stderr)
 		return exitUsage
 	default:
-		_, _ = fmt.Fprintf(stderr, "iormeshctl: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "iormeshctl: %s\n", errText(err))
 		return exitError
 	}
 }
+
+// errText is an error as the terminal may see it. Errors carry text the
+// servers chose — ssh's and the remote tracer's stderr, host names,
+// segment and request names from the traces — so one holding a control
+// character is printed Go-quoted (internal/termsafe), never raw.
+func errText(err error) string { return termsafe.String(err.Error()) }
 
 func usage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `usage:

@@ -3,6 +3,7 @@ package servicedb
 import (
 	"cmp"
 	"maps"
+	"math"
 	"net/netip"
 	"slices"
 
@@ -63,7 +64,7 @@ func (t *traffic) add(ev *schema.Event) error {
 	}
 	a := t.acc(federate.LocalConn{Host: ev.HostID, ConnID: ev.ConnID}, ev)
 	// An http event starts at wall_ns and ends latency_ns later.
-	a.first, a.last = min(a.first, ev.WallNS), max(a.last, ev.WallNS+ev.LatencyNS)
+	a.first, a.last = min(a.first, ev.WallNS), max(a.last, endOf(ev))
 	switch ev.Event {
 	case schema.KindConnect:
 		a.clients[pid] = true
@@ -79,6 +80,17 @@ func (t *traffic) add(ev *schema.Event) error {
 		a.request(t.source, ev)
 	}
 	return nil
+}
+
+// endOf is when an event ends, wall_ns + latency_ns, saturated at int64
+// (sqlite's integer): the segment reader refuses such clocks already,
+// but a forged NDJSON trace or a future reader must not overflow the
+// sum into a window Import rejects, failing the whole build.
+func endOf(ev *schema.Event) uint64 {
+	if ev.WallNS > math.MaxInt64 || ev.LatencyNS > math.MaxInt64-ev.WallNS {
+		return math.MaxInt64
+	}
+	return ev.WallNS + ev.LatencyNS
 }
 
 // acc returns k's accumulator, creating it from its first event.
@@ -99,7 +111,7 @@ func (a *connAcc) request(source string, ev *schema.Event) {
 		return
 	}
 	k := reqKey{source, h.Method, h.Scheme, h.Host, h.Path}
-	end := ev.WallNS + ev.LatencyNS
+	end := endOf(ev)
 	r := a.reqs[k]
 	if r == nil {
 		r = &Request{Source: source, Method: h.Method, Scheme: h.Scheme, Host: h.Host,

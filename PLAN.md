@@ -1070,9 +1070,16 @@ Kubernetes (M7) build on it.
   file built to exhaust memory fails itself, not the build.
   Each host identity (host id, FQDN) belongs to one store
   directory — the one thing a server cannot choose: the first
-  build pins it (`hosts.json`), and a session claiming another
-  directory's host, or a directory holding two hosts, is bad.
-  Text from the traces is printed terminal-safe.
+  build pins it (`hosts.json`). A session whose directory is
+  pinned to another host, or whose host id or FQDN is pinned
+  to another directory, is bad — only that claimant: the
+  pinned host's own sessions stay good. Among unpinned hosts,
+  a directory holding two identities, or an identity under
+  two directories, makes all sessions involved bad (which one
+  is forged cannot be told). Event clocks past int64 (an
+  overflowing wall_ns + latency_ns) make their segment bad, not
+  the build's import fail. Text from the traces — in views and
+  in every error — is printed terminal-safe.
   `refresh` is collect then build; a host whose collect fails
   is reported (exit 1) and what the store holds is built
   anyway.

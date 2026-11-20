@@ -2,6 +2,7 @@ package ctl
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"flag"
@@ -32,8 +33,10 @@ func bptr[T any](v T) *T { return &v }
 // it: every event complete and valid, so the segment writer takes it.
 type hostTrace struct {
 	host, project string
-	seq           uint64
-	events        []schema.Event
+	// session names the run; "" is a1b2c3d4.
+	session string
+	seq     uint64
+	events  []schema.Event
 }
 
 // add appends one event of pid at wall offset at (µs after buildWall0).
@@ -135,7 +138,7 @@ func writeStoreSegments(t *testing.T, store, host string, h *hostTrace, perSeg i
 	t.Helper()
 	t0 := time.Unix(0, int64(buildWall0)).UTC()
 	srv := filepath.Join(t.TempDir(), h.project)
-	w, err := segment.New(segment.Config{Dir: srv, FQDN: h.host + ".example.org", Session: "a1b2c3d4",
+	w, err := segment.New(segment.Config{Dir: srv, FQDN: h.host + ".example.org", Session: cmp.Or(h.session, "a1b2c3d4"),
 		Project: h.project, Now: func() time.Time { return t0 }})
 	if err != nil {
 		t.Fatal(err)

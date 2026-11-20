@@ -61,7 +61,7 @@ func verifyCommand(args []string, e env) error {
 	for _, path := range fs.Args() {
 		m, err := release.VerifyFile(key, path)
 		if err != nil {
-			_, _ = fmt.Fprintf(e.stderr, "iormeshctl: %s: FAILED: %v\n", path, err)
+			_, _ = fmt.Fprintf(e.stderr, "iormeshctl: %s: FAILED: %s\n", path, errText(err))
 			failed++
 			continue
 		}

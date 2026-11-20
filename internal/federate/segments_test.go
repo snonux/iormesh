@@ -277,6 +277,56 @@ func TestHostSpoofing(t *testing.T) {
 	}
 }
 
+// TestPinnedHostKeptAgainstNewDir: after a clean first build pinned app2
+// to hostB, a new server (app3) claiming hostB — its host id and FQDN —
+// loses only its forgery; every one of app2's genuine segments stays
+// good (round 2 of ib4's review).
+func TestPinnedHostKeptAgainstNewDir(t *testing.T) {
+	store := t.TempDir()
+	mesh := meshTraces()
+	writeSegments(t, store, "app1", "a1b2c3d4", mesh["a"], 4)
+	app2 := writeSegments(t, store, "app2", "b1b2c3d4", mesh["b"], 4)
+	first, err := LoadSegments(context.Background(), store, nil, LoadOptions{})
+	if err != nil || len(first.Bad) != 0 {
+		t.Fatalf("first build: %v, %v", first.Bad, err)
+	}
+	forged := newTrace("hostB", "billing")
+	forged.client(100, "f", "10.0.3.3:40000", "10.0.9.9:80", ISNPair{1, 2}, wall0)
+	writeSegments(t, store, "app3", "f0f0f0f0", forged, 100)
+	segs, err := LoadSegments(context.Background(), store, nil, LoadOptions{Known: first.Hosts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bad := badNames(segs); len(bad) != 1 || !strings.HasPrefix(bad[0], "billing/app3/") ||
+		!strings.Contains(segs.Bad[0].Err.Error(), "host_id hostB is pinned to app2, not app3") {
+		t.Fatalf("bad = %v (%v)", bad, segs.Bad)
+	}
+	good := 0
+	for _, s := range segs.Sources {
+		if s.Host == "app2" {
+			good++
+		}
+	}
+	if good != len(app2) {
+		t.Errorf("%d of app2's %d segments good", good, len(app2))
+	}
+	// The FQDN alone pins too: hostB's name over another host id.
+	other := newTrace("hostB", "billing")
+	other.client(100, "q", "10.0.4.4:40000", "10.0.9.9:80", ISNPair{3, 4}, wall0)
+	for i := range other.events {
+		other.events[i].HostID = "hostQ"
+	}
+	writeSegments(t, store, "app4", "0a0a0a0a", other, 100)
+	segs, err = LoadSegments(context.Background(), store, nil, LoadOptions{Known: first.Hosts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bad := badNames(segs); len(bad) != 2 || !strings.HasPrefix(bad[1], "billing/app4/") ||
+		!strings.Contains(segs.Bad[1].Err.Error(), "FQDN hostB.example.org is pinned to app2") {
+		t.Fatalf("bad = %v (%v)", bad, segs.Bad)
+	}
+}
+
 // TestCheckerFailureIsBad: a segment the checker (the controller's
 // memory-capped child) fails is bad, and nothing else reads it.
 func TestCheckerFailureIsBad(t *testing.T) {

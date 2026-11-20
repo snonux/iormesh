@@ -4087,18 +4087,31 @@ iormeshctl show [summary|services|edges|health] [-project P]... [-json]
   `ready/`; the merge and the service database (keyed by host
   id, additive) would take them as hostB's. The store directory
   is the one thing a server cannot choose, so each host identity
-  (host id, FQDN) is tied to one directory: a segment whose host
-  id is not its session's, a session whose directory is pinned
-  to another identity, every session of a directory holding two
-  identities, and every session of an identity — host id or
-  FQDN — found under two directories is bad. The first build
-  pins each directory to the identity it saw
+  (host id, FQDN) is tied to one directory. The first build pins
+  each directory to the identity it saw
   (`~/.local/share/iormesh/hosts.json`, 0600, never
   overwritten; a host reinstalled under the same registry name
-  needs its entry removed by hand). Pin mismatches are checked
-  first, so a forgery in a pinned directory does not taint the
-  genuine host's sessions. One machine registered under two
-  names collides with this rule.
+  needs its entry removed by hand). Bad, then: a segment whose
+  host id is not its session's; a session whose directory is
+  pinned to another identity, or whose host id or FQDN is
+  pinned to another directory — only the claimant, so a new
+  server imitating a pinned host cannot get the genuine host's
+  sessions dropped (ib4's second review,
+  `TestPinnedHostKeptAgainstNewDir`); and, among the unpinned
+  rest, every session of a directory holding two identities and
+  every session of an identity found under two directories (the
+  forgery cannot be told there). One machine registered under
+  two names collides with this rule.
+- **Clocks and errors.** The reader refuses an event whose
+  `boot_ns` or `wall_ns` is past int64 or whose `wall_ns +
+  latency_ns` overflows it: the service database stores int64
+  and would reject the window, failing the whole build's import
+  instead of the one segment (`TestBoundTimes`,
+  `TestBuildHostileClockSegment`); servicedb also saturates the
+  sum. Every error and warning `iormeshctl` prints passes
+  through `termsafe` (`errText`): ssh's stderr, request paths
+  and host names in an error come out quoted
+  (`TestErrorsAreTerminalSafe`).
 - **The graph is rebuilt** (decision #3, the server keeps none)
   once per session, segments in seq order, by the correlator's
   rules (`rebuild.go`): host, process (newest comm), runs_on;

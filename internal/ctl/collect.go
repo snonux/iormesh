@@ -141,7 +141,7 @@ func (c collector) all(ctx context.Context, targets []collectTarget) error {
 	var failed []string
 	for _, tg := range targets {
 		if err := c.host(ctx, tg); err != nil {
-			_, _ = fmt.Fprintf(c.e.stderr, "iormeshctl: %s: %v\n", tg.host, err)
+			_, _ = fmt.Fprintf(c.e.stderr, "iormeshctl: %s: %s\n", tg.host, errText(err))
 			failed = append(failed, tg.host)
 		}
 	}
