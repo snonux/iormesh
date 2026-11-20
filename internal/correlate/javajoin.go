@@ -68,6 +68,13 @@ type JavaJoin struct {
 	// per thread in enter order (javamark.go).
 	marks map[uint32]*markQueue
 	stats JavaStats
+	// java and otel are the joined event's objects (setJava): the event
+	// is decided and emitted at once, and the sink borrows it only for
+	// that call, so one pair serves every event instead of an
+	// allocation per joined event (task ee4). A released held event may
+	// still point here; nothing reads it after its emit.
+	java schema.Java
+	otel schema.Otel
 	// The http events (javahttp.go): records waiting for their turn by
 	// time, the socket index, the policy that redacts them again, and
 	// what they borrow from the stream — envelope, wall-clock offset and
@@ -90,7 +97,7 @@ type JavaJoin struct {
 // implements it, tests fake it.
 type AgentRing interface {
 	Header() agentspool.Header
-	Drain(fn func(agentspool.Record)) (int, error)
+	DrainTo(v agentspool.Visitor) (int, error)
 	Losses() agentspool.Losses
 	Close() error
 }

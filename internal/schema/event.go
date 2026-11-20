@@ -315,7 +315,9 @@ type HTTP struct {
 // it never knows which serialization it feeds.
 //
 // Event borrows ev for the call only: a sink that keeps the event copies
-// it, and the caller may change or reuse ev once Event returns. A pointer,
+// it — what it points to too: the caller may change or reuse ev and the
+// objects it points to (the Java join reuses one java and one otel
+// object for every joined event, task ee4) once Event returns. A pointer,
 // not a value, because an Event is some 400 bytes and each hop of the
 // tracer's pipeline (correlator → Java join → writer) copied it once per
 // event by value (decision #25's budget, task ud4).

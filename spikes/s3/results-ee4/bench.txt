@@ -2,3 +2,10 @@ base WriterEvent insn/op=11151 cycles/op=6071
 new WriterEvent insn/op=2483 cycles/op=1299
 base WriterJoinedEvent insn/op=12619 cycles/op=7244
 new WriterJoinedEvent insn/op=2777 cycles/op=2148
+# join cuts (owner decision round, ee4): correlate at a7194d6 vs the cuts
+base JavaJoinJoined insn/op=3944 cycles/op=2427
+new JavaJoinJoined insn/op=3369 cycles/op=1850
+# agentspool drain per hooked call (bracket + watermark), new code: the
+# Boxed sub-benchmark is the pre-cut Drain(func(Record)) path
+Boxed DrainBrackets/Boxed insn/op=2237 cycles/op=1350
+Visitor DrainBrackets/Visitor insn/op=1283 cycles/op=655

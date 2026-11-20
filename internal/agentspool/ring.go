@@ -28,10 +28,10 @@ type Ring struct {
 	hdr    Header
 	tail   uint64
 	mask   uint64
-	losses Losses   // reader-side counters (Unknown, Malformed)
-	err    error    // sticky ErrCorrupt
-	owner  uint32   // the file's uid
-	batch  []Record // Drain's records, reused between drains
+	losses Losses  // reader-side counters (Unknown, Malformed)
+	err    error   // sticky ErrCorrupt
+	owner  uint32  // the file's uid
+	batch  []entry // DrainTo's records, reused between drains
 }
 
 // Open maps the ring file read-write (the reader zeroes what it consumed

@@ -142,6 +142,11 @@ func (s *eventStream) flushRowGroup() error {
 	if s.cols.rows == 0 {
 		return nil
 	}
+	// Ordinal is an int16 in the format. A segment rotates every minute
+	// or 64 MiB, which at 8192 rows per group needs a sustained 4.4 M
+	// events a second — a hundred times decision #25's — to reach 32767
+	// groups; past that the ordinal (informational) would wrap, never
+	// the data.
 	start := s.off
 	rg := format.RowGroup{NumRows: int64(s.cols.rows), FileOffset: start,
 		Ordinal: int16(len(s.groups)), Columns: make([]format.ColumnChunk, 0, numEventColumns)}

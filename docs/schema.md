@@ -1064,13 +1064,16 @@ type and segment, through the `parquet:` tags in
   statistics on). The events file has the tracer's own columnar
   encoder (task ee4, decision #25's CPU item): one data page v2
   per column chunk (a dictionary page before it for the
-  dictionary columns), `seq`, `boot_ns`, `wall_ns` and
-  `latency_ns` `DELTA_BINARY_PACKED`, the other values PLAIN; its
-  page and chunk statistics carry null counts only, and it has no
-  column or offset index — a reader filtering pages by min/max
-  reads the whole chunk instead. Its footer schema is the one
-  `parquet-go` derives from `schema.Event`, so both kinds of
-  file read back the same way.
+  dictionary columns), the dictionary columns `RLE_DICTIONARY`,
+  `seq`, `boot_ns`, `wall_ns` and `latency_ns`
+  `DELTA_BINARY_PACKED`, the rest PLAIN; its page and chunk
+  statistics carry null counts only, and it has no column or
+  offset index — a reader filtering pages by min/max reads the
+  whole chunk instead. Its footer schema is the one `parquet-go`
+  derives from `schema.Event`, so both kinds of file read back
+  the same way; pyarrow and DuckDB read it value for value, nulls
+  included (`TestIndependentReaders`, opt-in with
+  `IORMESH_PARQUET_CHECK=<venv with pyarrow and duckdb>`).
 - **Files**: in `<trace-dir>/<project>/ready/`, per segment
   `<fqdn>-<session>-<start-ts>-<seq>.parquet` (events) and
   `<same base>.methods.parquet`, `.threads`, `.classes`,

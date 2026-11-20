@@ -970,3 +970,32 @@ and `growslice` copying 10 s of 72-byte brackets, ~8 % of the loop),
 one `schema.Java` allocation per joined event, the bracket search and
 the per-tid map lookups — no single item above ~10 %. The limit is
 unchanged; the item goes to the owner (PLAN.md, M4 status).
+
+### Follow-up (ee4): independent readers
+
+`parquet-go`'s reader ignores most of the metadata the new encoder
+writes by hand — a chunk's num_values, the null counts, the encodings
+list, the sizes and offsets — while Arrow stops reading a chunk at its
+num_values and DuckDB prunes `IS NULL` by null_count, and
+docs/schema.md promises DuckDB and pandas can query the files. So the
+files were read with two readers that share no code with
+`parquet-go`: pyarrow 26.0.1 and DuckDB 2.0.0, from a Python venv
+(`TestIndependentReaders`, `internal/segment/indep_test.go` with
+`testdata/pqcheck.py`, opt-in with `IORMESH_PARQUET_CHECK=<venv>`,
+docs/testing.md). Two files: the rich events plus 16 884 random ones
+over several row groups (nested java stacks, every nullable arg
+including the four tcp_state fields, http, otel and dns objects,
+uint64 values past 2⁶³), and 8 202 burst reads whose args and
+objects are all null in every row group. Both readers return every
+row equal to the NDJSON of the same events, and DuckDB's `IS NULL`
+on all 31 nullable columns and objects counts exactly the events
+NDJSON omits them in. A planted wrong null count made DuckDB's
+`IS NULL` answer 0 rows instead of 8 525, a chunk num_values one
+short made DuckDB refuse the file — the check catches both.
+`TestEventFileMetadata` checks the same metadata in-process: per
+chunk, the pages laid end to end fill exactly its compressed size,
+headers and bodies sum to its uncompressed size, the data pages'
+num_values and num_nulls equal the chunk's and the slots and nulls
+its decoded definition levels hold, and row groups tile the file up
+to the footer. Two writes of the same events give the same bytes
+(`TestEventFileDeterministic`).

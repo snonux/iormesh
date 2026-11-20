@@ -120,10 +120,13 @@ func (v *jvm) mayHaveParked(b agentspool.Bracket, h hookInfo) bool {
 
 // setJava marks ev as joined to b, with the OTEL span b's enter ran in.
 // A virtual thread's I/O is flagged and named after its carrier: v1 does
-// not name virtual threads (PLAN.md M3).
+// not name virtual threads (PLAN.md M3). The java and otel objects are
+// the join's own (JavaJoin.java): ev is emitted before the next event is
+// decided.
 func (j *JavaJoin) setJava(ev *schema.Event, v *jvm, b agentspool.Bracket, stack []uint64) {
 	th, known := v.threads[b.ThreadID]
-	java := &schema.Java{Stack: stack}
+	java := &j.java
+	*java = schema.Java{Stack: stack}
 	switch {
 	case known && th.Virtual:
 		java.Carrier = true
@@ -132,8 +135,11 @@ func (j *JavaJoin) setJava(ev *schema.Event, v *jvm, b agentspool.Bracket, stack
 	case known:
 		java.Thread = v.nameAt(th, b.ExitMono)
 	}
-	ev.Attribution, ev.Java = schema.AttributionJava, java
-	ev.Otel = otelOf(b.Otel)
+	ev.Attribution, ev.Java, ev.Otel = schema.AttributionJava, java, nil
+	if b.Otel.Valid() {
+		j.otel = schema.Otel{TraceID: b.Otel.TraceID(), SpanID: b.Otel.SpanID()}
+		ev.Otel = &j.otel
+	}
 	j.stats.Attributed++
 }
 

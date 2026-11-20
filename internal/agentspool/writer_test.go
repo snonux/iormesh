@@ -21,7 +21,7 @@ type testWriter struct {
 
 // newTestRing creates a ring file of capacity data bytes in a temp dir,
 // header complete, and maps it for writing.
-func newTestRing(t *testing.T, capacity uint64) (string, *testWriter) {
+func newTestRing(t testing.TB, capacity uint64) (string, *testWriter) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "4242.ring")
 	hdr := make([]byte, headerSize)
@@ -37,7 +37,7 @@ func newTestRing(t *testing.T, capacity uint64) (string, *testWriter) {
 	return path, mapWriter(t, path, capacity)
 }
 
-func mapWriter(t *testing.T, path string, capacity uint64) *testWriter {
+func mapWriter(t testing.TB, path string, capacity uint64) *testWriter {
 	t.Helper()
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {

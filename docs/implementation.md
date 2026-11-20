@@ -3264,8 +3264,9 @@ func (w *Writer) rotate(now time.Time) error {
   group's buffers) rotates. The tables keep `parquet-go`'s
   `GenericWriter`: their rows are rare.
 - Compression: ior's `zstdCodec` (one encoder, 1 MiB window)
-  passed as `parquet.Compression`, not the library's pooled
-  `parquet.Zstd`.
+  passed to the tables' writers as `parquet.Compression`, not the
+  library's pooled `parquet.Zstd`; the events file's encoder calls
+  its `Encode` directly, page by page.
 - `ready/` is created 0755 and `Lchown`ed to `-ready-owner
   UID:GID` (`start` passes `SUDO_UID`/`SUDO_GID` on to `run`);
   a `ready` that is not a real directory fails the start, as does
@@ -3302,7 +3303,12 @@ func (w *Writer) rotate(now time.Time) error {
   disk-limit end through `finish`, the real-partition startup
   check and the tee. The events encoder is held to
   `parquet-go`'s `Deconstruct` over random events and read back
-  across several row groups (`eventcols_test.go`).
+  across several row groups (`eventcols_test.go`); its hand-written
+  metadata is checked against the pages it describes, and its
+  output for determinism (`eventmeta_test.go`); pyarrow and DuckDB
+  read it back value for value with
+  `IORMESH_PARQUET_CHECK=<venv>` (`indep_test.go`, a venv with
+  `pip install pyarrow duckdb`).
   `BenchmarkWriterEvent` and `BenchmarkWriterJoinedEvent` are
   the per-event cost next to `schema`'s `BenchmarkNDJSONSink`
   (task ee4).

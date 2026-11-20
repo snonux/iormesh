@@ -112,8 +112,8 @@ func TestJavaJoinRenameWithoutBrackets(t *testing.T) {
 		t.Errorf("name %q, want b", got)
 	}
 	virt := agentspool.Thread{ID: 6, Name: "", Virtual: true}
-	v.addBracket(agentspool.Bracket{Hook: 1, KTID: 3, EnterMono: 1, ExitMono: 40, ThreadID: 6})
-	v.addBracket(agentspool.Bracket{Hook: 1, KTID: 4, EnterMono: 1, ExitMono: 70, ThreadID: 7})
+	v.addBracket(&agentspool.Bracket{Hook: 1, KTID: 3, EnterMono: 1, ExitMono: 40, ThreadID: 6})
+	v.addBracket(&agentspool.Bracket{Hook: 1, KTID: 4, EnterMono: 1, ExitMono: 70, ThreadID: 7})
 	v.rename(virt, "v")
 	if got, old := v.nameAt(virt, 41), v.nameAt(virt, 40); got != "v" || old != "" {
 		t.Errorf("virtual thread names %q at 41, %q at 40", got, old)

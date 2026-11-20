@@ -2,7 +2,6 @@ package correlate
 
 import (
 	"errors"
-	"slices"
 	"sort"
 
 	"iormesh/internal/agentspool"
@@ -33,17 +32,6 @@ type hookInfo struct {
 	parks  bool
 	symbol string
 	cookie uint64
-}
-
-// bracketList is one thread's brackets in exit order, with a search hint:
-// the index innermost found last. A thread's events reach the join in
-// order and their natives' entries never go back in time, so the next
-// search starts there (exitSearch) — a step or two instead of a search
-// over Retain's worth of brackets (task ud4). The hint is only ever a
-// guess, checked before it is used: inserts and prunes may move it.
-type bracketList struct {
-	list []agentspool.Bracket
-	hint int
 }
 
 // jvm is the joiner's state for one agent ring: everything read from it
@@ -135,19 +123,53 @@ func (j *JavaJoin) drain(v *jvm) error {
 	if v.failed {
 		return nil
 	}
-	var werr error
-	_, err := v.ring.Drain(func(rec agentspool.Record) {
-		if werr == nil {
-			werr = j.record(v, rec)
-		}
-	})
+	d := drainer{j: j, v: v}
+	_, err := v.ring.DrainTo(&d)
 	if errors.Is(err, agentspool.ErrCorrupt) {
 		v.failed = true
 		j.stats.Corrupt++
 		err = nil
 	}
 	v.prune(j.cfg.Retain)
-	return errors.Join(err, werr)
+	return errors.Join(err, d.err)
+}
+
+// drainer files one drain's records into v (agentspool.Visitor): the
+// bracket and the watermark every hooked call sends come unboxed (task
+// ee4), the rest through record. The first table error stops the filing
+// of every later record but not the drain.
+type drainer struct {
+	j   *JavaJoin
+	v   *jvm
+	err error
+}
+
+func (d *drainer) Bracket(b *agentspool.Bracket) {
+	if d.err == nil {
+		d.j.bracket(d.v, b)
+	}
+}
+
+func (d *drainer) Watermark(w agentspool.Watermark) {
+	if d.err == nil {
+		d.v.watermark = max(d.v.watermark, w.Mono)
+	}
+}
+
+func (d *drainer) Record(rec agentspool.Record) {
+	if d.err == nil {
+		d.err = d.j.record(d.v, rec)
+	}
+}
+
+// bracket files a BRACKET record: one of a known thread (KTID > 0) joins
+// that thread's list.
+func (j *JavaJoin) bracket(v *jvm, b *agentspool.Bracket) {
+	j.stats.Brackets++
+	if b.KTID > 0 {
+		v.addBracket(b)
+		v.countAfterProbe(*b)
+	}
 }
 
 // record files one ring record.
@@ -166,11 +188,7 @@ func (j *JavaJoin) record(v *jvm, rec agentspool.Record) error {
 	case agentspool.Watermark:
 		v.watermark = max(v.watermark, r.Mono)
 	case agentspool.Bracket:
-		j.stats.Brackets++
-		if r.KTID > 0 {
-			v.addBracket(r)
-			v.countAfterProbe(r)
-		}
+		j.bracket(v, &r)
 	case agentspool.HTTP:
 		if r.AsyncMark {
 			if v.asyncFrom == 0 || r.ExitMono < v.asyncFrom {
@@ -207,42 +225,34 @@ func (j *JavaJoin) thread(v *jvm, r agentspool.Thread) error {
 		Virtual: r.Virtual})
 }
 
-// addBracket keeps the tid's list sorted by exit. Ring order is exit order
-// per tid, so this appends; the backward search covers the carriers of
-// virtual threads, where two of them may publish out of order.
-func (v *jvm) addBracket(b agentspool.Bracket) {
+// addBracket files b in its thread's list (bracketList.add).
+func (v *jvm) addBracket(b *agentspool.Bracket) {
 	bl := v.brackets[b.KTID]
 	if bl == nil {
-		bl = &bracketList{}
+		bl = newBracketList(bracketChunkShift)
 		v.brackets[b.KTID] = bl
 	}
-	i := len(bl.list)
-	for i > 0 && bl.list[i-1].ExitMono > b.ExitMono {
-		i--
-	}
-	bl.list = slices.Insert(bl.list, i, b)
+	bl.add(b)
 }
 
 // prune forgets the brackets that exited more than retain before the
-// watermark; no event still to come can sit in them. It slices the old
-// ones off instead of moving the kept ones down: a busy thread keeps
-// Retain's worth of brackets (10 s, up to millions), and a drain every
-// 50 ms copying all of them would cost more than the join itself (task
-// ud4). The array's dropped front is reclaimed when an append outgrows
-// what is left of it.
+// watermark; no event still to come can sit in them. It drops them off
+// the list's front instead of moving the kept ones down: a busy thread
+// keeps Retain's worth of brackets (10 s, up to millions), and a drain
+// every 50 ms copying all of them would cost more than the join itself
+// (task ud4).
 func (v *jvm) prune(retain uint64) {
 	if v.watermark <= retain {
 		return
 	}
 	cut := v.watermark - retain
 	for tid, bl := range v.brackets {
-		list := bl.list
-		i := sort.Search(len(list), func(i int) bool { return list[i].ExitMono >= cut })
+		i := exitSearch(bl, cut, 0)
 		switch {
-		case i == len(list):
+		case i == bl.len():
 			delete(v.brackets, tid)
 		case i > 0:
-			bl.list, bl.hint = list[i:], max(bl.hint-i, 0)
+			bl.dropFront(i)
 		}
 	}
 }
@@ -257,12 +267,11 @@ func (v *jvm) innermost(tid int32, t uint64) (b agentspool.Bracket, found, ambig
 	if bl == nil {
 		return b, false, false
 	}
-	list := bl.list
-	i := exitSearch(list, t, bl.hint)
+	i := exitSearch(bl, t, bl.hint)
 	bl.hint = i
-	for k := i; k < min(len(list), i+maxScan); k++ {
-		if list[k].EnterMono <= t {
-			return list[k], true, overlapped(list[k+1:], list[k], t)
+	for k := i; k < min(bl.len(), i+maxScan); k++ {
+		if c := bl.at(k); c.EnterMono <= t {
+			return *c, true, overlapped(bl, k+1, *c, t)
 		}
 	}
 	return b, false, false
@@ -276,14 +285,14 @@ func (v *jvm) innermost(tid int32, t uint64) (b agentspool.Bracket, found, ambig
 // search to a short, cached stretch instead of halving down from the
 // whole list (task ud4). Any hint gives the right answer; a good one
 // only makes it cheap.
-func exitSearch(list []agentspool.Bracket, t uint64, hint int) int {
-	lo, hi := 0, len(list) // the answer lies in [lo, hi]
-	hint = min(max(hint, 0), len(list))
-	if hint > 0 && list[hint-1].ExitMono >= t {
+func exitSearch(l *bracketList, t uint64, hint int) int {
+	lo, hi := 0, l.len() // the answer lies in [lo, hi]
+	hint = min(max(hint, 0), l.len())
+	if hint > 0 && l.at(hint-1).ExitMono >= t {
 		hi = hint - 1 // the answer is before the hint: gallop down
 		for step := 1; hi > lo; step *= 2 {
 			k := max(hi-step, lo)
-			if list[k].ExitMono < t {
+			if l.at(k).ExitMono < t {
 				lo = k + 1
 				break
 			}
@@ -293,14 +302,14 @@ func exitSearch(list []agentspool.Bracket, t uint64, hint int) int {
 		lo = hint // every bracket before the hint exits before t: gallop up
 		for step := 1; lo < hi; step *= 2 {
 			k := min(lo+step-1, hi-1)
-			if list[k].ExitMono >= t {
+			if l.at(k).ExitMono >= t {
 				hi = k
 				break
 			}
 			lo = k + 1
 		}
 	}
-	return lo + sort.Search(hi-lo, func(i int) bool { return list[lo+i].ExitMono >= t })
+	return lo + sort.Search(hi-lo, func(i int) bool { return l.at(lo+i).ExitMono >= t })
 }
 
 // overlapped reports whether a further container of t, among the next
@@ -310,9 +319,9 @@ func exitSearch(list []agentspool.Bracket, t uint64, hint int) int {
 // overlapScan brackets are looked at — the platform-thread case needs
 // none, and the cap keeps a busy thread's events from scanning its whole
 // future.
-func overlapped(next []agentspool.Bracket, b agentspool.Bracket, t uint64) bool {
-	for _, c := range next[:min(len(next), overlapScan)] {
-		if c.EnterMono <= t {
+func overlapped(l *bracketList, from int, b agentspool.Bracket, t uint64) bool {
+	for k := from; k < min(l.len(), from+overlapScan); k++ {
+		if c := l.at(k); c.EnterMono <= t {
 			return c.EnterMono > b.EnterMono
 		}
 	}

@@ -100,9 +100,9 @@ func lastExitIn(bl *bracketList, id uint64) uint64 {
 	if bl == nil {
 		return 0
 	}
-	for i := len(bl.list) - 1; i >= 0; i-- {
-		if bl.list[i].ThreadID == id {
-			return bl.list[i].ExitMono
+	for i := bl.len() - 1; i >= 0; i-- {
+		if b := bl.at(i); b.ThreadID == id {
+			return b.ExitMono
 		}
 	}
 	return 0

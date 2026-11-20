@@ -20,7 +20,7 @@ const (
 	mainTID    = 78
 )
 
-// fakeRing hands out queued records on each Drain, like a ring the agent
+// fakeRing hands out queued records on each DrainTo, like a ring the agent
 // keeps writing to.
 type fakeRing struct {
 	hdr    agentspool.Header
@@ -31,10 +31,10 @@ type fakeRing struct {
 
 func (r *fakeRing) Header() agentspool.Header { return r.hdr }
 
-func (r *fakeRing) Drain(fn func(agentspool.Record)) (int, error) {
+func (r *fakeRing) DrainTo(v agentspool.Visitor) (int, error) {
 	n := len(r.queue)
 	for _, rec := range r.queue {
-		fn(rec)
+		agentspool.Dispatch(v, rec)
 	}
 	r.queue = nil
 	return n, r.err
@@ -474,12 +474,12 @@ func TestJavaJoinErrors(t *testing.T) {
 // TestInnermostPrunes: brackets Retain behind the watermark are dropped.
 func TestInnermostPrunes(t *testing.T) {
 	v := newJVM(&fakeRing{}, 1, 1, 0, 1)
-	v.addBracket(agentspool.Bracket{Hook: 1, KTID: 5, EnterMono: 10, ExitMono: 20})
-	v.addBracket(agentspool.Bracket{Hook: 1, KTID: 5, EnterMono: 1000, ExitMono: 2000})
-	v.addBracket(agentspool.Bracket{Hook: 1, KTID: 6, EnterMono: 1, ExitMono: 2})
+	v.addBracket(&agentspool.Bracket{Hook: 1, KTID: 5, EnterMono: 10, ExitMono: 20})
+	v.addBracket(&agentspool.Bracket{Hook: 1, KTID: 5, EnterMono: 1000, ExitMono: 2000})
+	v.addBracket(&agentspool.Bracket{Hook: 1, KTID: 6, EnterMono: 1, ExitMono: 2})
 	v.watermark = 1500
 	v.prune(1000)
-	if v.brackets[5] == nil || len(v.brackets[5].list) != 1 || v.brackets[6] != nil {
+	if v.brackets[5] == nil || v.brackets[5].len() != 1 || v.brackets[6] != nil {
 		t.Errorf("brackets %+v", v.brackets)
 	}
 	if _, found, _ := v.innermost(5, 1500); !found {
@@ -722,13 +722,19 @@ func TestJavaJoinMarksDead(t *testing.T) {
 func TestExitSearchMatchesSearch(t *testing.T) {
 	for n := range 40 {
 		list := make([]agentspool.Bracket, n)
+		// Chunks of four, so the lists span many of them (and a head
+		// offset, by one dropped bracket).
+		bl := newBracketList(2)
+		bl.add(&agentspool.Bracket{})
 		for i := range list {
 			list[i].ExitMono = uint64(10 + 2*(i/3)) // runs of three equal exits
+			bl.add(&list[i])
 		}
+		bl.dropFront(1)
 		for probe := uint64(0); probe < uint64(2*n+14); probe++ {
 			want := sort.Search(n, func(i int) bool { return list[i].ExitMono >= probe })
 			for hint := -1; hint <= n+1; hint++ {
-				if got := exitSearch(list, probe, hint); got != want {
+				if got := exitSearch(bl, probe, hint); got != want {
 					t.Fatalf("n %d, t %d, hint %d: exitSearch %d, sort.Search %d",
 						n, probe, hint, got, want)
 				}

@@ -28,7 +28,18 @@ func (s *memSink) Event(ev *schema.Event) error {
 	if want := uint64(len(s.events) + 1); ev.Seq != want {
 		s.t.Errorf("seq %d, want %d (gap-free, in order)", ev.Seq, want)
 	}
-	s.events = append(s.events, *ev)
+	// A deep enough copy: the Java join lends its java and otel objects
+	// for the call only (schema.Sink).
+	e := *ev
+	if e.Java != nil {
+		j := *e.Java
+		e.Java = &j
+	}
+	if e.Otel != nil {
+		o := *e.Otel
+		e.Otel = &o
+	}
+	s.events = append(s.events, e)
 	return nil
 }
 

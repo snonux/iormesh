@@ -479,3 +479,20 @@ host; the header's load average says whether it was. Baselines
 are committed so a later change is judged against the numbers
 that motivated it. S3's traced and bystander runs add their own
 `mode=` lines.
+
+## Independent parquet readers (task ee4)
+
+The events segment file has its own encoder, so `mage test` alone
+proves only that `parquet-go` reads it. `TestIndependentReaders`
+(`internal/segment/indep_test.go`) also reads it with pyarrow and
+DuckDB — every value against the NDJSON of the same events, and
+DuckDB's `IS NULL` on every nullable column — when
+`IORMESH_PARQUET_CHECK` names a Python venv holding both:
+
+```sh
+python3 -m venv /tmp/pq && /tmp/pq/bin/pip install pyarrow duckdb
+IORMESH_PARQUET_CHECK=/tmp/pq mage test
+```
+
+Without it the test skips: neither reader is a build dependency.
+Run it after any change to `internal/segment`'s events encoder.

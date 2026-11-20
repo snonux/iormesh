@@ -12,7 +12,7 @@ import (
 
 const testCap = minCapacity
 
-func openRing(t *testing.T, path string) *Ring {
+func openRing(t testing.TB, path string) *Ring {
 	t.Helper()
 	r, err := Open(path)
 	if err != nil {

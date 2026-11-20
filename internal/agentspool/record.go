@@ -114,12 +114,9 @@ var le = binary.LittleEndian
 func decode(typ uint32, rec []byte) (Record, error) {
 	switch typ {
 	case typeBracket:
-		return decodeBracket(rec)
+		return boxed(decodeBracketValue(rec))
 	case typeWatermark:
-		if len(rec) != watermarkLen {
-			return nil, errMalformed
-		}
-		return Watermark{Mono: le.Uint64(rec[8:])}, nil
+		return boxed(decodeWatermark(rec))
 	case typeStack:
 		return decodeStack(rec)
 	case typeThread:
@@ -136,12 +133,30 @@ func decode(typ uint32, rec []byte) (Record, error) {
 	return nil, errMalformed
 }
 
-// decodeBracket checks what the agent guarantees: a positive hook id, a
-// non-negative tid (0 = unknown), an exit not before the enter, and in
-// the long form (bracketOtelLen) a valid span.
-func decodeBracket(rec []byte) (Record, error) {
+// boxed turns a typed decoder's result into decode's: a Record, nil on
+// error.
+func boxed[T Record](v T, err error) (Record, error) {
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+// decodeWatermark reads a WATERMARK record.
+func decodeWatermark(rec []byte) (Watermark, error) {
+	if len(rec) != watermarkLen {
+		return Watermark{}, errMalformed
+	}
+	return Watermark{Mono: le.Uint64(rec[8:])}, nil
+}
+
+// decodeBracketValue checks what the agent guarantees: a positive hook
+// id, a non-negative tid (0 = unknown), an exit not before the enter, and
+// in the long form (bracketOtelLen) a valid span. It returns the bracket
+// unboxed (DrainTo's hot path).
+func decodeBracketValue(rec []byte) (Bracket, error) {
 	if len(rec) != bracketLen && len(rec) != bracketOtelLen {
-		return nil, errMalformed
+		return Bracket{}, errMalformed
 	}
 	b := Bracket{
 		Hook:      int32(le.Uint32(rec[8:])),
@@ -152,11 +167,11 @@ func decodeBracket(rec []byte) (Record, error) {
 		ThreadID:  le.Uint64(rec[40:]),
 	}
 	if b.Hook <= 0 || b.KTID < 0 || b.ExitMono < b.EnterMono {
-		return nil, errMalformed
+		return Bracket{}, errMalformed
 	}
 	if len(rec) == bracketOtelLen {
 		if b.Otel, _ = decodeOtel(rec, bracketLen); !b.Otel.Valid() {
-			return nil, errMalformed
+			return Bracket{}, errMalformed
 		}
 	}
 	return b, nil
