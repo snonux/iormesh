@@ -194,10 +194,34 @@ func (b *viewsBuild) canonicalIDs(g schema.Graph, names render.Names) map[string
 			}
 		}
 	}
-	for conn, roles := range fusedConnRoles(g, ids) {
-		ids[conn] = schema.SocketNodeID(strings.Join(roles, "+"))
+	for conn, name := range connNames(fusedConnRoles(g, ids)) {
+		ids[conn] = schema.SocketNodeID(name)
 	}
 	return ids
+}
+
+// connNames names each fused connection by its role pair, "a+b"; a
+// second connection of one pair (a keep-alive reconnect) is "a+b#2", and
+// so on, so two never share a node id. Within a pair the ordinals follow
+// the connection ids: any order draws the same, since the connections of
+// one pair have the same ends.
+func connNames(roles map[string][]string) map[string]string {
+	byPair := map[string][]string{}
+	for conn, r := range roles {
+		pair := strings.Join(r, "+")
+		byPair[pair] = append(byPair[pair], conn)
+	}
+	names := map[string]string{}
+	for pair, conns := range byPair {
+		slices.Sort(conns)
+		for i, conn := range conns {
+			names[conn] = pair
+			if i > 0 {
+				names[conn] = pair + "#" + strconv.Itoa(i+1)
+			}
+		}
+	}
+	return names
 }
 
 // fusedConnRoles maps each fused connection node to the sorted roles of

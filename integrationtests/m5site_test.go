@@ -31,7 +31,8 @@ var modelBlock = regexp.MustCompile(`(?s)<script type="application/json" id="mod
 // orders is a named service whose conversation reaches the rename and its
 // stack. With IORMESH_SITE_BROWSER set the page is loaded from file:// in
 // a headless browser: its selftest renders every route with no console
-// message, and the rename step's route shows its stack.
+// message, and the rename step's route shows its stack; set without a
+// browser on PATH, the test fails rather than pass unchecked.
 func assertSiteWalk(t *testing.T, b *viewsBuild, c viewmodel.Conversation) {
 	index, err := site.Latest(filepath.Join(b.dir, "sites")) // what `iormeshctl open` opens
 	if err != nil {
@@ -90,11 +91,11 @@ func assertSiteInBrowser(t *testing.T, index string, c viewmodel.Conversation) {
 	t.Helper()
 	bin := siteBrowser()
 	if bin == "" {
-		t.Logf("%s is set, but no Chrome or Chromium is on PATH: the browser check did not run", siteBrowserEnv)
-		return
+		// Opted in: a check that silently did not run would read as passed.
+		t.Fatalf("%s is set, but no Chrome or Chromium is on PATH", siteBrowserEnv)
 	}
 	dom, console := dumpDOM(t, bin, "file://"+index+"#/selftest")
-	if !regexp.MustCompile(`selftest: ok \d+ routes`).MatchString(dom) {
+	if !regexp.MustCompile(`selftest: ok [1-9]\d* routes`).MatchString(dom) {
 		t.Errorf("selftest did not pass; DOM:\n%s", dom)
 	}
 	for _, l := range console {
@@ -131,7 +132,10 @@ func dumpDOM(t *testing.T, bin, url string) (string, []string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	args := []string{"--headless=new", "--disable-gpu", "--no-first-run", "--user-data-dir=" + t.TempDir(),
+	args := []string{"--headless=new", "--disable-gpu", "--no-first-run",
+		// No network from the browser process itself: only the page is under test.
+		"--disable-background-networking", "--disable-component-update", "--disable-sync",
+		"--no-default-browser-check", "--user-data-dir=" + t.TempDir(),
 		"--enable-logging=stderr", "--v=0", "--virtual-time-budget=5000", "--dump-dom", url}
 	if os.Geteuid() == 0 {
 		args = append([]string{"--no-sandbox"}, args...)

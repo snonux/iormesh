@@ -1505,15 +1505,15 @@ Kubernetes (M7) build on it.
   store as collect lays one out (the rig has no SSH deploy or
   collect), names the servers and builds with `iormeshctl`: the
   mesh walks to the rename step's Java stack in `show`, the TUI
-  and the site (its embedded model is `model.json`; headless
-  Chrome renders every route from `file://` with an empty
-  console); the checkout's sequence is the declared story —
-  every hop on its causing thread, each serving thread's
-  create-tmp/write/rename in its place, all causal; a rebuild
-  writes the same bytes, and the mesh and the checkout match
-  their SVG goldens. Found and fixed: `graph.svg` drew machine
-  ids and "java PID" where every other surface said "orders" on
-  "hostb" — it now takes the model's names. The scenario reads
+  and the site (its embedded model is `model.json`; with
+  `IORMESH_SITE_BROWSER=1`, headless Chrome renders every route
+  from `file://` with an empty console); the checkout's sequence
+  is the declared story — every hop on its causing thread, each
+  serving thread's create-tmp/write/rename in its place, all
+  causal; a rebuild writes the same bytes, and the mesh and the
+  checkout match their SVG goldens. Found and fixed: `graph.svg`
+  drew machine ids and "java PID" where every other surface said
+  "orders" on "hostb" — it now takes the model's names. The scenario reads
   its config on the main thread at startup, so the config read
   is in the process view, not the sequence; its clients are
   synchronous, so async hops are held by unit tests only; and
