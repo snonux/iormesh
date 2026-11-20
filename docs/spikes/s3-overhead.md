@@ -968,8 +968,9 @@ agent ring's drain boxing every record into an interface (an
 allocation per bracket), the bracket list's growth (`slices.Insert`
 and `growslice` copying 10 s of 72-byte brackets, ~8 % of the loop),
 one `schema.Java` allocation per joined event, the bracket search and
-the per-tid map lookups — no single item above ~10 %. The limit is
-unchanged; the item goes to the owner (PLAN.md, M4 status).
+the per-tid map lookups — no single item above ~10 %. The limit was
+left unchanged and the item went to the owner, whose decision follows
+("Follow-up (ee4): owner decision").
 
 ### Follow-up (ee4): independent readers
 
@@ -999,3 +1000,77 @@ num_values and num_nulls equal the chunk's and the slots and nulls
 its decoded definition levels hold, and row groups tile the file up
 to the footer. Two writes of the same events give the same bytes
 (`TestEventFileDeterministic`).
+
+### Follow-up (ee4): owner decision
+
+Owner decision (2026-11-20, delegated to an advisor): the original
+≤ 2 µs covered `-spool` with every event joined and was not met
+(2.89 / 4.82 µs after ee4). The limit is hereby changed for that case
+only: ≤ 4 µs per emitted event and ≤ 12.5 k instructions per event,
+valid at load ≤ 10 with every event attributed and zero loss. This is
+a relaxation, argued by the extra agent records each joined event
+consumes (one core still sustains 250 k joined events/s) and by the
+default fold keeping JVM hot loops out of the join. Plain stays
+≤ 2 µs. The decision came with one bounded round of the join cuts
+listed above first (PLAN.md, decision #25 item 1 and M4 status).
+
+**The cuts** (commit `83b5c61`; output unchanged — the join, ring
+and segment tests, the integration suite):
+
+- the agent ring's drain hands brackets and watermarks to a typed
+  visitor (`agentspool.Ring.DrainTo`) instead of boxing every record
+  into a `Record` interface — an allocation per record;
+- a thread's brackets live in 1024-bracket chunks, pruned a chunk
+  at a time with one spare kept for reuse, instead of one slice
+  regrown by copying all of Retain's brackets;
+- the join lends one `schema.Java` and one `schema.Otel` per emitted
+  event instead of allocating them (`schema.Sink` now says the
+  objects an event points to are borrowed too).
+
+| Benchmark (per op) | Instructions before → after | Cycles before → after |
+|---|--:|--:|
+| `JavaJoinJoined` | 3 944 → 3 369 | 2 427 → 1 850 |
+| `DrainBrackets` (a bracket and a watermark) | 2 237 → 1 283 | 1 350 → 655 |
+
+**Valid re-measure** (`results-ee4/ab-valid.sh`, `results-ee4/valid/`):
+the build before the cuts (`a7194d6`) and after (`83b5c61`)
+interleaved, five rounds, segment path, by the decision's rules — a
+run counts only at load ≤ 10 (before it starts and as recorded after
+it), with zero lost records and, with the agent, every burst event
+attributed (≥ 2 × ops); none was rejected. The plain unfolded burst
+at 4 threads overruns the ring by design, so its loss is recorded,
+not gated. Medians of 5, instructions and cycles user + kernel:
+
+| Run | Threads | µs/event before → after | Instructions/event | Cycles/event | Load | Budget | Verdict |
+|---|--:|--:|--:|--:|--:|--|--|
+| `-spool`, every event joined | 1 | 2.33 → **1.90** | 11 498 → 11 100 | 5 564 → 5 581 | 4.4–7.5 | ≤ 4 µs, ≤ 12.5 k | pass |
+| `-spool`, every event joined | 4 | 3.52 → **3.75** | 12 240 → 11 839 | 8 522 → 7 735 | 5.2–8.7 | ≤ 4 µs, ≤ 12.5 k | pass |
+| plain | 1 | 1.32 → **1.59** | 5 741 → 5 775 | 3 137 → 2 915 | 5.1–8.0 | ≤ 2 µs | pass |
+| plain | 4 | 1.78 → **1.95** | 5 772 → 5 826 | 3 357 → 3 318 | 4.8–5.4 | ≤ 2 µs | pass |
+
+Every `-spool` run attributed all 1 000 000 burst events (1 000 023
+and 1 000 040–47 with the JVM's own I/O) and lost none; plain at 4
+threads lost 30–50 % of records unfolded in both builds, as before.
+In situ the cuts show less than in the benchmarks: −3 % instructions
+with `-spool` and −9 % cycles at 4 threads; CPU time moved within its
+spread (at 4 threads 2.8–5.8 µs per run, the median 3.75 µs close to
+the limit).
+The plain path did not regress: its instructions are unchanged
+(+0.6–0.9 %) and its cycles slightly lower; its CPU-time medians
+moved up within their spread (0.9–1.7 µs per run at 1 thread and
+1.3–2.6 µs at 4, across both builds).
+
+**The default fold** (`-spool`, `-aggregate` on, 4 threads, three
+rounds each build, same rules less the every-event-attributed one, as
+folded calls are never joined): the 1 000 000 burst calls leave
+1 911–17 140 events, 1 343–13 492 of them attributed, and the tracer
+spends 0.28–0.97 s for the whole burst after the cuts (0.46–0.77 s
+before) — 0.3–1.0 µs per traced call, lost 0. Per emitted event that
+is 57–152 µs, a figure the fold makes meaningless (a folded event
+stands for hundreds of calls): what the fold shows is that a JVM's
+hot loop sends the join a few thousand events, not a million.
+
+**Verdict**: under the changed limit `-spool` with every event joined
+passes at 1 and 4 threads (1.90 µs / 11.1 k and 3.75 µs / 11.8 k
+instructions), plain passes 2 µs at 1 and 4 threads (1.59 / 1.95 µs).
+Decision #25's tracer-CPU item is met on the segment path.

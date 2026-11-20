@@ -1,0 +1,6 @@
+# S3 samples 2026-11-20T12:02:10Z commit 83b5c61
+# kernel 7.2.15-200.fc44.x86_64; cpu 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz x8
+# java openjdk version "25.0.4.1" 2026-08-18; workdir fs btrfs
+# ops=500000 threads=1 runs=1 pairs=10 modes=traced kind_ops=5000000 tracer_cpu=3 load_cpus=0-2,4-6 tracer_flags=-aggregate=false agent=0 perf=1 segment=1 tracer=/home/paul/tmp/claude/claude-1001/-home-paul-git-iormesh/4af6f5f6-6345-4a05-a52d-1f2e15889242/scratchpad/ee4/iormesh-new3
+mode=untraced threads=1 ops=500000 run=1 elapsed_ns=1099560978 burst_cpu_ms=1140 load=7.41
+mode=traced threads=1 ops=500000 run=1 elapsed_ns=1634406832 burst_cpu_ms=1690 tracer_cpu_ms=3090 tracer_run_cpu_ms=1210 lost=0 kernel_lost=0 skipped_runs=0 events=1000055 ndjson_bytes=5461213 attributed=0 insn_u=5702891107 insn_k=38537915 cyc_u=3125924510 cyc_k=63619652 load=7.38

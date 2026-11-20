@@ -1,0 +1,7 @@
+base threads=4 ns_per_event=105191 insn_per_event=321720 cycles_per_event=250546 load=4.95 events=4373 lost=0 attributed=3335
+base threads=4 ns_per_event=167558 insn_per_event=493323 cycles_per_event=358966 load=4.64 events=2805 lost=0 attributed=2002
+base threads=4 ns_per_event=180709 insn_per_event=335033 cycles_per_event=266363 load=6.22 events=4261 lost=0 attributed=3114
+new threads=4 ns_per_event=151753 insn_per_event=480302 cycles_per_event=366222 load=4.57 events=1911 lost=0 attributed=1343
+new threads=4 ns_per_event=56593 insn_per_event=77514 cycles_per_event=70908 load=5.96 events=17140 lost=0 attributed=13492
+new threads=4 ns_per_event=116183 insn_per_event=383599 cycles_per_event=283513 load=5.70 events=2410 lost=0 attributed=1744
+rejected runs: 0

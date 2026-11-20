@@ -815,8 +815,10 @@ Gated by S1 — done; the design below is S1's result
   full runs were 40 / 40, the last at load 21 with stale 0 in
   every scenario. With se4 closed, M3 is accepted; the
   tracer-CPU item stays open in ee4 (2026-11-20: plain unfolded
-  passes on the segment path, `-spool` is over — owner decision
-  needed, M4 acceptance). Schema v1 is frozen in
+  passes 2 µs on the segment path; `-spool` missed it, the owner
+  changed its limit for that case to ≤ 4 µs and ≤ 12.5 k
+  instructions per event, which it passes — decision #25 item 1).
+  Schema v1 is frozen in
   full (docs/output-contract.md). Open
   beyond ee4: the third-party hook gaps listed above, the Netty
   client side unit-tested only, attaching JVMs a pattern session
@@ -1177,21 +1179,21 @@ Kubernetes (M7) build on it.
   segment-writer path, plain and `-spool` (task ee4).
   Status (2026-11-20, task ee4): plain unfolded passes (0.85 µs
   at 1 thread, 1.62 µs at 4); `-spool` with every event joined
-  is over (2.89 µs at 1 thread, 4.82 µs at 4; 5.8 k / 7.7 k
-  cycles per event, ~4 k needed at this host's loaded clock) —
-  the writer is no longer the cost, the agent ring's drain, the
-  join and the correlator are (s3-overhead.md, "Follow-up
-  (ee4)"). **Owner decision needed** — the limit is not moved
-  here and the item is not re-split past lb4. The options: (a)
-  another round of cuts on the join path — no record boxing in
-  the agent ring's drain, a chunked bracket list instead of one
-  growing slice, no per-event `schema.Java` allocation — worth
-  perhaps 10–20 %, short of the third still missing; (b) keep
-  2 µs for the plain path and give the every-event-joined
-  `-spool` burst, a worst case a real JVM's hot loops do not
-  reach under the default fold (`-aggregate`), its own measured
-  budget; (c) accept M4 with the `-spool` item open as the M2
-  and M3 milestones were, gated on a named later task. Two test
+  missed 2 µs (2.89 / 4.82 µs). Owner decision (2026-11-20,
+  delegated to an advisor): the original ≤ 2 µs covered `-spool`
+  with every event joined and was not met (2.89 / 4.82 µs after
+  ee4). The limit is hereby changed for that case only: ≤ 4 µs
+  per emitted event and ≤ 12.5 k instructions per event, valid
+  at load ≤ 10 with every event attributed and zero loss. This is
+  a relaxation, argued by the extra agent records each joined
+  event consumes (one core still sustains 250 k joined events/s)
+  and by the default fold keeping JVM hot loops out of the join.
+  Plain stays ≤ 2 µs. After one more round of join cuts, by those
+  rules (load 4.4–8.7, every run attributed, zero loss, medians
+  of 5): `-spool` 1.90 µs / 11.1 k instructions at 1 thread and
+  3.75 µs / 11.8 k at 4 — passes; plain 1.59 / 1.95 µs — passes
+  (decision #25 item 1; s3-overhead.md, "Follow-up (ee4): owner
+  decision"). The item is met. Two test
   hosts run M4's scenarios; from a
   controller, `add` → `deploy` → `refresh` → `rm` produces the
   merged graph export with zero manual steps on the servers,
@@ -1522,9 +1524,26 @@ answer), and deferred.
      load 2.5–3.6); `-spool` with every event joined stays
      **over** — 2.89 µs at 1 thread (load 3–41) and 4.82 µs at 4
      (load 41–46), 11.5 k / 12.0 k instructions and 5.8 k /
-     7.7 k cycles per event (from 4.43 / 5.82 µs). The limit is
-     unchanged; the `-spool` case awaits an owner decision (M4
-     status; s3-overhead.md, "Follow-up (ee4)"). Measured as the
+     7.7 k cycles per event (from 4.43 / 5.82 µs). Owner
+     decision (2026-11-20, delegated to an advisor): the
+     original ≤ 2 µs covered `-spool` with every event joined and
+     was not met (2.89 / 4.82 µs after ee4). The limit is hereby
+     changed for that case only: ≤ 4 µs per emitted event and
+     ≤ 12.5 k instructions per event, valid at load ≤ 10 with
+     every event attributed and zero loss. This is a relaxation,
+     argued by the extra agent records each joined event consumes
+     (one core still sustains 250 k joined events/s) and by the
+     default fold keeping JVM hot loops out of the join. Plain
+     stays ≤ 2 µs.
+     Re-measured by those rules after one more round of join cuts
+     (task ee4: unboxed agent-ring drain, chunked bracket lists,
+     no per-event java allocation), interleaved, medians of 5, load
+     4.4–8.7, every run attributed and lossless: `-spool` 1.90 µs
+     and 11.1 k instructions at 1 thread, 3.75 µs and 11.8 k at 4
+     — **passes** the changed limit; plain 1.59 µs at 1 thread and
+     1.95 µs at 4 (5.8 k instructions both, unchanged by the cuts)
+     — **passes** 2 µs (s3-overhead.md, "Follow-up (ee4): owner
+     decision"). Measured as the
      tracer's own user+sys CPU time per event from its ready
      file to its exit (load and attach excluded), which host
      load moves less than wall time — not nothing: on a loaded SMT host one thread's CPU

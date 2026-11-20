@@ -1,0 +1,11 @@
+base threads=1 ns_per_event=1320 insn_per_event=5755 cycles_per_event=3986 load=8.03 events=1000055 lost=0 attributed=0
+base threads=1 ns_per_event=1210 insn_per_event=5741 cycles_per_event=3189 load=7.38 events=1000055 lost=0 attributed=0
+base threads=1 ns_per_event=1650 insn_per_event=5727 cycles_per_event=2967 load=6.35 events=1000055 lost=0 attributed=0
+base threads=1 ns_per_event=1730 insn_per_event=5722 cycles_per_event=3137 load=5.47 events=1000055 lost=0 attributed=0
+base threads=1 ns_per_event=1010 insn_per_event=5762 cycles_per_event=2928 load=5.21 events=1000055 lost=0 attributed=0
+new threads=1 ns_per_event=930 insn_per_event=5797 cycles_per_event=2673 load=7.41 events=1000055 lost=0 attributed=0
+new threads=1 ns_per_event=1590 insn_per_event=5775 cycles_per_event=2801 load=6.86 events=1000055 lost=0 attributed=0
+new threads=1 ns_per_event=1670 insn_per_event=5756 cycles_per_event=3029 load=5.83 events=1000055 lost=0 attributed=0
+new threads=1 ns_per_event=1730 insn_per_event=5719 cycles_per_event=3112 load=5.23 events=1000055 lost=0 attributed=0
+new threads=1 ns_per_event=1030 insn_per_event=5784 cycles_per_event=2915 load=5.10 events=1000055 lost=0 attributed=0
+rejected runs: 0
