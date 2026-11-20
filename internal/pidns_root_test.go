@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -25,20 +26,33 @@ import (
 )
 
 // pidnsChildEnv makes the test binary the namespace side (TestMain): its
-// value is the host pid of the bystander outside the namespace.
+// value is "HOST,SIBLING", the host pid of the bystander outside the
+// namespace and the pid of the sibling namespace's loop as that namespace
+// numbers it.
 const pidnsChildEnv = "IORMESH_PIDNS_CHILD"
+
+// siblingScript runs in a sibling PID namespace (its own, beside the
+// tracer's): it burns 200 pids first, so the loop's number there is no
+// small pid the tracer's namespace may also hold, prints that number, and
+// opens probePath every 20 ms until killed.
+var siblingScript = fmt.Sprintf(`for i in $(seq 200); do /bin/true; done
+( while :; do exec 3< %s; exec 3<&-; sleep 0.02; done ) &
+echo $!; wait`, probePath)
 
 // TestPidNSTracerConfined: a tracer in its own PID namespace traces a
 // workload there by the namespace's pids - its forked child too - and one in
-// a namespace nested below, and never the host process whose host pid it
-// was told to target. The host side keeps that bystander busy; the
-// namespace side (runPidNSChild) checks the records and fails the run.
+// a namespace nested below; it never traces the host process whose host pid
+// it was told to target, nor a process of a sibling namespace whose number
+// there it was told to target (what the namespace-inode check in pidns.c
+// guards). The host side keeps both busy; the namespace side
+// (runPidNSChild) checks the records and fails the run.
 func TestPidNSTracerConfined(t *testing.T) {
 	requireRoot(t)
 	if _, err := exec.LookPath("unshare"); err != nil {
 		t.Skip("needs unshare(1)")
 	}
 	bystander := startTarget(t)
+	sibling := startSibling(t)
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
@@ -59,7 +73,7 @@ func TestPidNSTracerConfined(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := exec.Command("unshare", "--pid", "--fork", "--mount-proc", self)
-	cmd.Env = append(os.Environ(), pidnsChildEnv+"="+strconv.Itoa(int(bystander.pid())))
+	cmd.Env = append(os.Environ(), fmt.Sprintf("%s=%d,%d", pidnsChildEnv, bystander.pid(), sibling))
 	out, err := cmd.CombinedOutput()
 	close(stop)
 	<-done
@@ -67,6 +81,22 @@ func TestPidNSTracerConfined(t *testing.T) {
 		t.Fatalf("namespace tracer: %v\n%s", err, out)
 	}
 	t.Logf("namespace tracer: %s", bytes.TrimSpace(out))
+}
+
+// startSibling starts siblingScript in a PID namespace of its own and
+// returns its loop's pid as that namespace numbers it.
+func startSibling(t *testing.T) uint32 {
+	t.Helper()
+	tg := startScript(t, "unshare", "--pid", "--fork", "--kill-child", "bash", "-c", siblingScript)
+	if !tg.acks.Scan() {
+		t.Fatalf("sibling namespace: no pid: %v", tg.acks.Err())
+	}
+	pid, err := strconv.ParseUint(tg.acks.Text(), 10, 32)
+	if err != nil {
+		t.Fatalf("sibling namespace: %q is no pid: %v", tg.acks.Text(), err)
+	}
+	t.Cleanup(func() { _ = tg.cmd.Process.Kill() })
+	return uint32(pid)
 }
 
 // nsWorkload is a forkingScript bash the namespace side started.
@@ -126,16 +156,18 @@ func childPid(pid int) (uint32, error) {
 	return 0, fmt.Errorf("no child of %d", pid)
 }
 
-// nsTrace is what the namespace side saw: probePath opens by pid, and the
-// new processes task_newtask reported per creator.
+// nsTrace is what the namespace side saw: probePath opens by pid, the new
+// processes task_newtask reported per creator, every record's pid, and how
+// many records carried pid 0 (which no task-context record may).
 type nsTrace struct {
 	opens  map[uint32]int
 	forked map[uint32][]uint32
 	pids   map[uint32]bool
+	zero   *int
 }
 
 func collectNSTrace(tr *ibpf.Tracer, wait time.Duration) nsTrace {
-	got := nsTrace{opens: map[uint32]int{}, forked: map[uint32][]uint32{}, pids: map[uint32]bool{}}
+	got := nsTrace{opens: map[uint32]int{}, forked: map[uint32][]uint32{}, pids: map[uint32]bool{}, zero: new(int)}
 	deadline := time.After(wait)
 	for {
 		select {
@@ -154,26 +186,49 @@ func collectNSTrace(tr *ibpf.Tracer, wait time.Duration) nsTrace {
 }
 
 func (n nsTrace) add(rec any) {
+	if pid, ok := recordPid(rec); ok {
+		n.pids[pid] = true
+		if pid == 0 {
+			*n.zero++
+		}
+	}
 	switch ev := rec.(type) {
 	case *types.OpenEvent:
-		n.pids[ev.Pid] = true
 		if strings.HasSuffix(types.StringValue(ev.Filename[:]), probePath) {
 			n.opens[ev.Pid]++
 		}
 	case *types.TaskNewtaskEvent:
-		n.pids[ev.Pid] = true
 		if ev.Pid != ev.CreatorPid {
 			n.forked[ev.CreatorPid] = append(n.forked[ev.CreatorPid], ev.Pid)
 		}
 	}
 }
 
+// recordPid is a record's Pid field: every kernel record with a task
+// context has one (the generated types are plain structs). The TCP state
+// record has none of its own - its pid is the socket owner's - and is skipped.
+func recordPid(rec any) (uint32, bool) {
+	if _, ok := rec.(*types.TcpStateEvent); ok {
+		return 0, false
+	}
+	v := reflect.ValueOf(rec)
+	if v.Kind() != reflect.Pointer || v.Elem().Kind() != reflect.Struct {
+		return 0, false
+	}
+	f := v.Elem().FieldByName("Pid")
+	if !f.IsValid() || f.Kind() != reflect.Uint32 {
+		return 0, false
+	}
+	return uint32(f.Uint()), true
+}
+
 // pidnsChildMain runs the namespace side and turns its verdict into an
 // exit status.
-func pidnsChildMain(host string) int {
-	pid, err := strconv.ParseUint(host, 10, 32)
+func pidnsChildMain(env string) int {
+	var host, sibling uint32
+	_, err := fmt.Sscanf(env, "%d,%d", &host, &sibling)
 	if err == nil {
-		err = runPidNSChild(uint32(pid))
+		err = runPidNSChild(host, sibling)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "pidns child:", err)
@@ -183,7 +238,7 @@ func pidnsChildMain(host string) int {
 }
 
 // runPidNSChild is the namespace side of TestPidNSTracerConfined.
-func runPidNSChild(hostPid uint32) error {
+func runPidNSChild(hostPid, siblingPid uint32) error {
 	tr, err := ibpf.Open(ibpf.Config{})
 	if err != nil {
 		return fmt.Errorf("open tracer: %w", err)
@@ -207,17 +262,20 @@ func runPidNSChild(hostPid uint32) error {
 		return err
 	}
 	samePid := uint32(same.cmd.Process.Pid)
-	for _, pid := range []uint32{samePid, nestedBash, hostPid} {
+	if samePid == siblingPid || nestedBash == siblingPid {
+		return fmt.Errorf("sibling pid %d is also a workload's here: the check would prove nothing", siblingPid)
+	}
+	for _, pid := range []uint32{samePid, nestedBash, hostPid, siblingPid} {
 		if err := tr.AddTarget(pid); err != nil {
 			return fmt.Errorf("add target %d: %w", pid, err)
 		}
 	}
-	return checkPidNSTrace(tr, same, nested, nestedBash, hostPid)
+	return checkPidNSTrace(tr, same, nested, nestedBash, [2]uint32{hostPid, siblingPid})
 }
 
 // checkPidNSTrace pokes both workloads and holds the records to the
 // namespace's pids.
-func checkPidNSTrace(tr *ibpf.Tracer, same, nested *nsWorkload, nestedBash, hostPid uint32) error {
+func checkPidNSTrace(tr *ibpf.Tracer, same, nested *nsWorkload, nestedBash uint32, outside [2]uint32) error {
 	ack, err := same.poke()
 	if err != nil {
 		return err
@@ -238,8 +296,18 @@ func checkPidNSTrace(tr *ibpf.Tracer, same, nested *nsWorkload, nestedBash, host
 	if !slices.ContainsFunc(kids, func(p uint32) bool { return got.opens[p] > 0 }) {
 		errs = append(errs, fmt.Errorf("nested bash %d: no traced child (forked %v, opens %v)", nestedBash, kids, got.opens))
 	}
-	if got.pids[hostPid] {
-		errs = append(errs, fmt.Errorf("host pid %d, outside the namespace, was traced", hostPid))
+	for _, pid := range outside {
+		if got.pids[pid] {
+			errs = append(errs, fmt.Errorf("pid %d of a process outside the namespace was traced", pid))
+		}
+	}
+	for pid := range got.opens {
+		if pid != uint32(sameChild) && !slices.Contains(kids, pid) {
+			errs = append(errs, fmt.Errorf("pid %d opened %s, but is no workload's child (opens %v)", pid, probePath, got.opens))
+		}
+	}
+	if *got.zero != 0 {
+		errs = append(errs, fmt.Errorf("%d records carry pid 0", *got.zero))
 	}
 	if err := errors.Join(errs...); err != nil {
 		return err

@@ -772,35 +772,27 @@ ior_emit_task_newtask(__u32 child_pid, __u32 child_tid, __u64 clone_flags,
     bpf_ringbuf_submit(ev, 0);
 }
 
-SEC("tracepoint/task/task_newtask")
-int handle_task_newtask(void *raw_ctx) {
-    struct trace_event_raw_task_newtask___ior *ctx = raw_ctx;
-    __u64 clone_flags = ctx->clone_flags;
-    __u32 host_child_tid = (__u32)ctx->pid;
+// iormesh_on_newtask is the body both task_newtask handlers share: child_tid
+// is the new task's tid as the tracer names it (pidns.c, M7).
+static __always_inline void iormesh_on_newtask(__u64 clone_flags, __u32 child_tid) {
     // The creator's tgid: this handler runs in the context of the task that
-    // called clone, so the current task is the creator. In the tracer's PID
-    // namespace (pidns.c, M7), like every pid below.
+    // called clone, so the current task is the creator.
     __u64 creator_id = iormesh_current_pid_tgid();
     __u32 creator_pid = (__u32)(creator_id >> 32);
     __u32 creator_tid = (__u32)creator_id;
     // The child's tgid: the creator's for a new thread, its own tid for a new
-    // process. In host mode derived from the tracepoint's tid rather than read
-    // from the child's task_struct, so the handler does not depend on when
-    // copy_process() assigns p->tgid relative to the tracepoint; a namespace
-    // tracer reads the child's struct pid (iormesh_newtask_ids).
-    __u32 child_pid, child_tid;
+    // process. Derived rather than read from the child's task_struct so the
+    // handler does not depend on when copy_process() assigns p->tgid relative
+    // to the tracepoint.
+    __u32 child_pid = (clone_flags & IOR_CLONE_THREAD) ? creator_pid : child_tid;
     __u32 scope_flags = 0;
 
-    // A creator outside the tracer's namespace (pid 0) is never traced, so
-    // none of its children is followed or in scope; one it places inside the
-    // namespace (a runtime's CLONE_NEWPID) is judged at its exec, by the
-    // pattern session's exec watch. Skip the child walk.
-    if (!creator_pid)
-        return 0;
-    iormesh_newtask_ids(clone_flags, host_child_tid, creator_pid, &child_pid, &child_tid);
-    if (!child_pid)
-        return 0;
-
+    // pid 0: a creator outside the tracer's namespace, never traced, so none
+    // of its children is followed or in scope (one it places inside, a
+    // runtime's CLONE_NEWPID, is judged at its exec by the pattern session's
+    // exec watch); or a child with no number in the namespace.
+    if (!creator_pid || !child_pid)
+        return;
     // The creator's folded reads and writes precede the child, which
     // inherits its fd table (rwagg.c); a no-op for an untraced creator.
     iormesh_rw_flush(creator_tid);
@@ -813,13 +805,54 @@ int handle_task_newtask(void *raw_ctx) {
         // process, and a hidden sibling thread is the -tid limitation
         // documented in AGENTS.md, not something this record can fix.
         if (!(clone_flags & IOR_CLONE_FILES) || (clone_flags & IOR_CLONE_THREAD))
-            return 0;
+            return;
         if (!ior_task_in_scope(creator_pid, creator_tid))
-            return 0;
+            return;
         scope_flags = IOR_NEWTASK_CHILD_OUT_OF_SCOPE;
     }
-
     ior_emit_task_newtask(child_pid, child_tid, clone_flags, creator_pid, scope_flags);
+}
+
+// The host-mode handler: the classic tracepoint (attached unless the tracer
+// runs in a PID namespace, internal/bpf pidns.go), whose context names the
+// child by its host tid. It returns at once in namespace mode, where that
+// number is not the tracer's.
+SEC("tracepoint/task/task_newtask")
+int handle_task_newtask(void *raw_ctx) {
+    struct trace_event_raw_task_newtask___ior *ctx = raw_ctx;
+    __u64 clone_flags = ctx->clone_flags;
+    __u32 child_tid = (__u32)ctx->pid;
+
+    if (IORMESH_PIDNS_INUM)
+        return 0;
+    iormesh_on_newtask(clone_flags, child_tid);
+    return 0;
+}
+
+// iormesh_newtask_args are the raw tracepoint's arguments,
+// TP_PROTO(struct task_struct *task, u64 clone_flags).
+struct iormesh_newtask_args {
+    struct task_struct *task;
+    __u64 clone_flags;
+};
+
+// The namespace-mode handler (M7, task 4f4): a raw tracepoint, attached
+// instead of the classic one when the tracer runs in a PID namespace,
+// because its arguments hand over the child's task_struct - whose number in
+// the namespace lives only in its struct pid (a nested child's included) -
+// where the classic context carries just the host tid. A run the raw
+// tracepoint's per-program guard skips is counted with the other skipped
+// runs (internal/bpf progmiss.go), never silent. Host mode keeps the classic
+// hook, which no such guard skips (dispatch.c).
+SEC("raw_tracepoint/task_newtask")
+int handle_task_newtask_ns(void *ctx) {
+    struct iormesh_newtask_args *args = ctx;
+    struct task_struct *task = args->task;
+    __u64 clone_flags = args->clone_flags;
+
+    if (!IORMESH_PIDNS_INUM)
+        return 0;
+    iormesh_on_newtask(clone_flags, iormesh_task_tid(task));
     return 0;
 }
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"testing"
 )
@@ -53,5 +54,34 @@ func TestTracerPidNSHost(t *testing.T) {
 	}
 	if inum != 0 {
 		t.Skipf("running in PID namespace %d, not the initial one", inum)
+	}
+}
+
+// TestProbesForPidNSSwapsNewtask: namespace mode attaches the raw
+// task_newtask handler in place of the classic one and nothing else
+// changes; host mode keeps the probes as they are.
+func TestProbesForPidNSSwapsNewtask(t *testing.T) {
+	probes := DefaultProbes()
+	if got := probesForPidNS(probes, false); !slices.Equal(got, probes) {
+		t.Fatal("host mode changed the probes")
+	}
+	got := probesForPidNS(probes, true)
+	if len(got) != len(probes) {
+		t.Fatalf("%d probes in namespace mode, want %d", len(got), len(probes))
+	}
+	swapped := 0
+	for i, p := range got {
+		switch {
+		case probes[i].Program == newtaskProg:
+			if p.Program != newtaskNSProg || p.Category != rawCategory || p.Event != "task_newtask" {
+				t.Errorf("newtask probe in namespace mode: %+v", p)
+			}
+			swapped++
+		case p != probes[i]:
+			t.Errorf("probe %d changed: %+v -> %+v", i, probes[i], p)
+		}
+	}
+	if swapped != 1 {
+		t.Fatalf("swapped %d newtask probes, want 1", swapped)
 	}
 }

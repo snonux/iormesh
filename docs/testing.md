@@ -963,9 +963,15 @@ container has):
   one level deeper (a second `unshare`) is traced by its number in
   the tracer's namespace, its child followed; and the tracer is
   told to target the host pid of a host bash that keeps opening
-  the probe file outside — no record of it may appear. With the
-  namespace switch forced off (the tracer reading host pids, as
-  before task 4f4) all three checks fail.
+  the probe file outside — no record of it may appear; nor of a
+  bash in a *sibling* namespace (a second `unshare --pid` beside
+  the tracer's) that it is told to target by its number there.
+  Only the expected children may open the probe file, and no
+  record may carry pid 0. With the namespace switch forced off
+  (the tracer reading host pids, as before task 4f4) the three
+  positive checks fail; with the namespace-inode check at the
+  tracer's level removed, the sibling check fails (its loop is
+  traced as pid 203).
 - The root test binary run whole inside a namespace
   (`sudo -n unshare --pid --fork --mount-proc ./iormesh-internal.test
   -test.run …`): the loader, follow, exec-watch, native-stack,

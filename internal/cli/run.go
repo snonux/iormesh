@@ -138,6 +138,7 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 	}
 	_, _ = fmt.Fprintf(stderr, "iormesh: attached, tracing %s (%d tracepoints missing on this kernel)\n",
 		describe(cfg.spec, pids), len(tr.Skipped()))
+	announcePidNS(tr.PidNS(), stderr)
 	if err := s.startJava(ctx, cfg, stderr); err != nil {
 		return errors.Join(err, finish(cfg, tr, c, out, schema.EndError, stderr))
 	}
@@ -164,6 +165,15 @@ func preflight(cfg runConfig) error {
 		}
 	}
 	return checkTraceDisk(cfg)
+}
+
+// announcePidNS says once that a trace's pids are a PID namespace's (ns, its
+// inode; M7, task 4f4): in a pod every pid is the pod's own number, not the
+// node's. A host run (ns 0) prints nothing more than before.
+func announcePidNS(ns uint32, stderr io.Writer) {
+	if ns != 0 {
+		_, _ = fmt.Fprintf(stderr, "iormesh: pids are numbered in PID namespace pid:[%d], not the host's\n", ns)
+	}
 }
 
 // outputs are where a run writes besides -out's events file: the parquet

@@ -4992,13 +4992,18 @@ depends on:
      sessions without syscall probes.
    - Everything that keys per-thread state or fills a record
      uses those numbers: `filter()`, the signal, restart, Java
-     mark and exit hooks. Two need the kernel's help: the
-     task_newtask child is found at the tail of its creator's
-     thread list or its parent's children (the classic
-     tracepoint carries only a host tid), and a non-leader
-     exec's old tid — a host number in `sched_process_exec` —
-     comes from `exec_tid_map`, written at the exec's sys_enter
-     by the dispatcher.
+     mark and exit hooks. Two need more: the classic
+     task_newtask tracepoint names the child only by its host
+     tid, so a namespace tracer attaches the raw tracepoint
+     instead (`handle_task_newtask_ns`), whose arguments hand over
+     the child's task_struct — the classic hook stays for host
+     mode, which no per-program guard skips (dispatch.c), and a
+     run the raw hook's guard skips is counted as skipped runs;
+     and a non-leader exec's old tid — a host number in
+     `sched_process_exec` — comes from `exec_tid_map`, written at
+     the exec's sys_enter by the dispatcher (not for a 32-bit
+     task's execve, whose syscalls are not traced, so it has no
+     per-tid state for the old tid to find).
    - For the current task, `bpf_get_ns_current_pid_tgid` (with
      the namespace file's device and inode) answers first: it
      fails only for tasks not exactly in the tracer's namespace,
@@ -5035,7 +5040,10 @@ depends on:
    in `mage bpfRootTest`) re-runs the test binary as a tracer in
    `unshare --pid --fork --mount-proc`, traces a forking bash
    there and one in a nested namespace, and is told to target a
-   host process's host pid, which it must never trace. The
+   host process's host pid and a sibling namespace's process
+   by its number there, neither of which it may trace (the
+   sibling case fails when the namespace-inode check is
+   removed). The
    loader, follow, exec-watch, Java-mark and stream tests also
    pass when the whole root test binary runs in such a namespace
    ([testing.md](testing.md#pid-namespaces-task-4f4)).
@@ -5087,7 +5095,11 @@ depends on:
    namespace (cgroup v2's default) an in-pod tracer sees `0::/`;
    it then takes its pod from the downward API (`POD_NAME`,
    `POD_NAMESPACE`, `POD_UID` in its env) and the controller
-   maps processes to containers — settle how on kind.
+   maps processes to containers — settle how on kind. The same
+   step makes process ids pod-unique: since step 1 pids are the
+   pod's, so `proc:<host_id>/<pid>@<inc>` alone can collide
+   across two pods of one node (task 7f4; `Tracer.PidNS` names
+   the namespace).
 7. Pod names: resolved on the controller through the API server
    (`kubectl get pods -o json`), joined by pod UID — the tracer
    never talks to the API.

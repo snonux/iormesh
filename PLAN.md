@@ -1623,7 +1623,12 @@ Later phase — plain Linux servers (M4) come first.
 - Pod identity enrichment: map host PIDs/cgroups → pod, namespace,
   container, so the graph speaks "pod checkout-7d9f (ns prod)"
   instead of bare host PIDs. In k8s mode the project defaults
-  to the namespace (decision #21).
+  to the namespace (decision #21). Known gap (task 4f4): with
+  pids numbered per pod, the graph's process id
+  `proc:<host_id>/<pid>@<inc>` can collide for two pods on one
+  node (same machine-id, same pod-local pid, same start tick);
+  the process key must carry the pod or its PID namespace —
+  task 7f4, with this step.
 - Java agent live-attach through the shared process namespace
   (`kubectl debug --target`, or `shareProcessNamespace: true`
   for a sidecar; attach socket reached via `/proc/<pid>/root`),

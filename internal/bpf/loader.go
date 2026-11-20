@@ -117,6 +117,7 @@ func Open(cfg Config) (_ *Tracer, err error) {
 	if probes == nil {
 		probes = DefaultProbes()
 	}
+	probes = probesForPidNS(probes, t.pidNS != 0)
 	t.links, t.skipped, err = attachProbes(probes, t.attachProbe, destroyLink)
 	if err != nil {
 		return nil, err

@@ -49,11 +49,14 @@ const volatile u64 IORMESH_PIDNS_DEV = 0;
 // the namespace's own boundary. The kernel learns it instead, two ways: the
 // sys_enter dispatcher (dispatch.c) searches the levels of every task until
 // one is in or below the namespace (iormesh_pidns_learn) - the tracer's own
-// first syscall, at the latest - and any hook meeting a task whose innermost
-// namespace is the tracer's takes that task's level (iormesh_pid_nr), which
-// covers sessions without syscall probes. Until then every task reads as
-// outside: a task nested below the namespace is unseen for the moment between
-// attach and the tracer's first syscall. A global, not rodata: written once,
+// first syscall, at the latest - and a walk (iormesh_pid_nr) meeting a task
+// whose innermost namespace is the tracer's takes that task's level. Walks
+// run only where bpf_get_ns_current_pid_tgid's fast path does not answer:
+// for tasks named by pointer (iormesh_task_tgid/_tid: signal targets,
+// task_newtask's child) and for current tasks not exactly in the
+// namespace. Until the level is known a task nested below the namespace
+// reads as outside - for the moment between attach and the tracer's first
+// syscall; tasks exactly in the namespace are numbered from the start. A global, not rodata: written once,
 // then read by every call; every writer stores the same value, so the
 // unordered stores are harmless.
 __u32 iormesh_pidns_level = IORMESH_PIDNS_LEVEL_UNKNOWN;
@@ -230,9 +233,13 @@ __noinline __u64 iormesh_ns_cached_ids(void) {
     struct iormesh_ns_ids_slot *slot;
     __u32 zero = 0;
     __u64 task, start, ids;
+    __u32 level;
 
     if (!IORMESH_PIDNS_INUM)
         return 0;
+    // Read before the lookup: a 0 computed while the level is unknown must
+    // not be remembered, even if another CPU learns the level meanwhile.
+    level = iormesh_pidns_level;
     task = bpf_get_current_task();
     start = iormesh_current_start_time();
     slot = bpf_map_lookup_elem(&ns_ids_cache, &zero);
@@ -241,7 +248,7 @@ __noinline __u64 iormesh_ns_cached_ids(void) {
     ids = iormesh_ns_current_ids();
     // A 0 from before the level is learnt is no verdict on a task nested
     // below the namespace, so it is not remembered.
-    if (slot && (ids || iormesh_pidns_level != IORMESH_PIDNS_LEVEL_UNKNOWN)) {
+    if (slot && (ids || level != IORMESH_PIDNS_LEVEL_UNKNOWN)) {
         slot->task = task;
         slot->start = start;
         slot->ids = ids;
@@ -293,7 +300,10 @@ struct {
 
 // iormesh_note_exec_tid records the namespace tid of a thread entering
 // execve or execveat (called by the sys_enter dispatcher, dispatch.c, for
-// every syscall: a compare in namespace mode, pruned in host mode).
+// every syscall: a compare in namespace mode, pruned in host mode). A 32-bit
+// task's execve (compat numbers, 11 and 358 on x86) is not noted: the
+// dispatcher traces no compat syscall, so such a thread has no enter state,
+// folded calls or per-tid entry for old_tid to find; its old tid reads 0.
 static __always_inline void iormesh_note_exec_tid(long id) {
     __u64 ids;
     __u32 host_tid, tid;
@@ -328,77 +338,4 @@ static __always_inline __u32 iormesh_exec_old_tid(__u32 host_old_tid, __u32 tid)
     nr = *old;
     bpf_map_delete_elem(&exec_tid_map, &host_old_tid);
     return nr;
-}
-
-// IORMESH_CLONE_THREAD is CLONE_THREAD (exec.c's IOR_CLONE_THREAD, defined
-// after this file is included): the new task joins the creator's thread
-// group.
-#define IORMESH_CLONE_THREAD 0x00010000ULL
-// IORMESH_CLONE_PARENT is CLONE_PARENT (include/uapi/linux/sched.h): the
-// child's parent is the creator's parent.
-#define IORMESH_CLONE_PARENT 0x00008000ULL
-// IORMESH_NEWTASK_TRIES bounds the walk back along the list the child was
-// appended to: a sibling thread's concurrent clone may have appended its own
-// child after ours (copy_process links under tasklist_lock and fires
-// task_newtask after dropping it).
-#define IORMESH_NEWTASK_TRIES 4
-
-// iormesh_newtask_child finds the task task_newtask announced (host tid
-// host_tid) at the tail of the list copy_process() linked it into: the
-// creator's thread list for a new thread, its parent's children for a new
-// process. The classic tracepoint hands over no task pointer, and the child's
-// number in the tracer's namespace (which may be a nested one's, for
-// CLONE_NEWPID) lives only in its struct pid. NULL if not found.
-static __always_inline struct task_struct *
-iormesh_newtask_child(__u64 clone_flags, __u32 host_tid) {
-    struct task_struct *cur = (struct task_struct *)bpf_get_current_task();
-    struct task_struct *parent = cur;
-    struct list_head *head, *node;
-    __u64 off;
-
-    if (clone_flags & IORMESH_CLONE_THREAD) {
-        head = &BPF_CORE_READ(cur, signal)->thread_head;
-        off = bpf_core_field_offset(struct task_struct, thread_node);
-    } else {
-        if (clone_flags & IORMESH_CLONE_PARENT)
-            parent = BPF_CORE_READ(cur, real_parent);
-        head = &parent->children;
-        off = bpf_core_field_offset(struct task_struct, sibling);
-    }
-    node = BPF_CORE_READ(head, prev);
-#pragma unroll
-    for (int i = 0; i < IORMESH_NEWTASK_TRIES; i++) {
-        struct task_struct *task;
-
-        if (!node || node == head)
-            return NULL;
-        task = (struct task_struct *)((void *)node - off);
-        if ((__u32)BPF_CORE_READ(task, pid) == host_tid)
-            return task;
-        node = BPF_CORE_READ(node, prev);
-    }
-    return NULL;
-}
-
-// iormesh_newtask_ids sets the new task's tgid and tid as the tracer names
-// them. Host mode keeps the handler's derivation from the tracepoint's host
-// tid; namespace mode reads the child's own struct pids. Both are 0 for a
-// child the walk did not find or that has no number in the namespace.
-static __always_inline void
-iormesh_newtask_ids(__u64 clone_flags, __u32 host_tid, __u32 creator_pid,
-                    __u32 *child_pid, __u32 *child_tid) {
-    struct task_struct *child;
-
-    if (!IORMESH_PIDNS_INUM) {
-        *child_tid = host_tid;
-        *child_pid = (clone_flags & IORMESH_CLONE_THREAD) ? creator_pid : host_tid;
-        return;
-    }
-    *child_pid = 0;
-    *child_tid = 0;
-    child = iormesh_newtask_child(clone_flags, host_tid);
-    if (!child)
-        return;
-    *child_tid = iormesh_task_tid(child);
-    *child_pid = (clone_flags & IORMESH_CLONE_THREAD) ? creator_pid : *child_tid;
 }
