@@ -971,7 +971,11 @@ Kubernetes (M7) build on it.
   and keeps every other TCP end unresolved with its reason
   (`no_role`, `no_key`, `key_conflict`, `no_match`,
   `ambiguous`). The `tcp_state` schema carries the four
-  `tcp_sock` fields; the tracer's capture of them is still open.
+  `tcp_sock` fields, and the tracer captures them (task ve4,
+  `tcp_state_event` 88 → 112 bytes, one CO-RE read per field
+  and record — negligible), so real traces now fuse: the
+  integration test rebuilds one key from both ends of a real
+  connection.
 - **Clock reconciliation from the traffic itself**: every
   fused connection gives send-before-receive constraints in
   both directions (send = send-syscall enter, receive =

@@ -16,6 +16,8 @@ const (
 	tcpSynSent     = 2
 	tcpSynRecv     = 3
 	tcpClose       = 7
+	tcpListen      = 10
+	tcpNewSynRecv  = 12
 	afInet         = 2
 	afInet6        = 10
 )
@@ -218,5 +220,38 @@ func (c *Correlator) tcpState(r *types.TcpStateEvent) {
 		Attribution: schema.AttributionNone}
 	ev.Args.SockState = &state
 	s.fillArgs(&ev.Args)
+	if carriesSeq(r) {
+		fillSeq(&ev.Args, r)
+	}
 	c.enqueue(ev, s)
+}
+
+// carriesSeq reports whether r's tcp_sock fields can rebuild the ISN pair
+// (S2, experiment 1): only from ESTABLISHED on. The opening transitions
+// (CLOSE -> SYN_SENT, SYN_RECV) read snd_una/rcv_nxt still 0 or the
+// child uninitialised, and a CLOSE straight from SYN_SENT (a refused or
+// timed-out connect) or from LISTEN never learned a peer ISN. Every
+// other CLOSE ends an established connection (FIN or RST), which S2
+// showed the rebuild holds through; an accept snapshot at CLOSE is a
+// child reset in the accept queue, established before it was queued.
+// Records that do not qualify carry none of the four, so the schema's
+// all-four-or-none holds and the merge never reads a key that is no key.
+func carriesSeq(r *types.TcpStateEvent) bool {
+	switch r.Newstate {
+	case tcpSynSent, tcpSynRecv, tcpListen, tcpNewSynRecv:
+		return false
+	case tcpClose:
+		return r.Oldstate != tcpSynSent && r.Oldstate != tcpSynRecv &&
+			r.Oldstate != tcpListen && r.Oldstate != tcpClose
+	}
+	return true
+}
+
+// fillSeq copies the record's four tcp_sock fields into args, all four
+// together (schema.Args, "all four or none").
+func fillSeq(a *schema.Args, r *types.TcpStateEvent) {
+	sndUna, rcvNxt := r.SndUna, r.RcvNxt
+	acked, received := r.BytesAcked, r.BytesReceived
+	a.SndUna, a.RcvNxt = &sndUna, &rcvNxt
+	a.BytesAcked, a.BytesReceived = &acked, &received
 }

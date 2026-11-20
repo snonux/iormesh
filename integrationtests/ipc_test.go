@@ -118,12 +118,15 @@ func TestUDPLoopback(t *testing.T) {
 }
 
 // TestTCPFamilies: one AF_INET and one AF_INET6 connection, each with its
-// full 4-tuple, fused. tcp-ipv6 skips on a host without an IPv6 loopback
-// (the workload's exit 3).
+// full 4-tuple, fused, and both ends' tcp_state records carrying the
+// tcp_sock fields from which internal/federate rebuilds one ISN pair (M4,
+// task ve4; assertISNKeysMatch). tcp-ipv6 skips on a host without an IPv6
+// loopback (the workload's exit 3).
 func TestTCPFamilies(t *testing.T) {
 	for _, scenario := range []string{"tcp-ipv4", "tcp-ipv6"} {
 		t.Run(scenario, func(t *testing.T) {
-			got, want := ipcScenario(t, scenario, "", optionless(scenario))
+			got, want, run := ipcScenarioRun(t, scenario, "", optionless(scenario))
+			assertISNKeysMatch(t, run.Trace.Events)
 			assertCaught(t, got, want, map[string]func(*normalize.Expectation){
 				"the other family's loopback": func(x *normalize.Expectation) {
 					other := "::1"
@@ -144,6 +147,15 @@ func TestTCPFamilies(t *testing.T) {
 func ipcScenario(t *testing.T, scenario, families string, start starter) (
 	normalize.Trace, normalize.Expectation) {
 	t.Helper()
+	got, want, _ := ipcScenarioRun(t, scenario, families, start)
+	return got, want
+}
+
+// ipcScenarioRun is ipcScenario that also returns the raw run, for
+// checks on what normalization drops (the tcp_sock sequence fields).
+func ipcScenarioRun(t *testing.T, scenario, families string, start starter) (
+	normalize.Trace, normalize.Expectation, tracedRun) {
+	t.Helper()
 	enableParallelIfRequested(t)
 	h := newHarness(t)
 	h.Families = families
@@ -152,7 +164,7 @@ func ipcScenario(t *testing.T, scenario, families string, start starter) (
 	got := normalized(t, h, run, scenario)
 	want := expectation(t, scenario)
 	assertGolden(t, got, want)
-	return got, want
+	return got, want, run
 }
 
 // optionless starts a solo scenario that takes no options (pipe-ipc,

@@ -75,6 +75,20 @@ func newCollector() *collector {
 	return &collector{acc: map[LocalConn]*halfAcc{}, lossy: map[string]bool{}}
 }
 
+// Halves folds events — of any number of hosts, in any order — into the
+// TCP halves the merge would fuse, exactly as Merge collects them from
+// its sources. It lets a caller holding events rather than trace
+// directories (the tracer's end-to-end test, which splits a loopback
+// trace into two hosts to check both ends rebuild one key) run the same
+// role and key rules.
+func Halves(events []schema.Event) []Half {
+	c := newCollector()
+	for i := range events {
+		c.add(&events[i])
+	}
+	return c.halves()
+}
+
 // add folds one event into its half. Events without a conn_id name no
 // connection and are ignored, as are kinds that say nothing about role,
 // key, owner or the instants the clock bounds read (timing.add); a drop

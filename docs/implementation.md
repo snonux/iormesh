@@ -3356,8 +3356,21 @@ Built in task fb4 as `internal/federate` (cgo-free): `key.go`,
 (`clock.go`, `bound.go`, `order.go`) in task gb4. The tracer's
 `tcp_state` records carry the four `tcp_sock` fields as
 `args.snd_una`, `rcv_nxt`, `bytes_acked`, `bytes_received`
-(docs/schema.md, all four or none); the BPF capture that fills
-them is separate M4 work.
+(docs/schema.md, all four or none), captured in task ve4:
+`tcp_state_event` grew from 88 to 112 bytes (schema version 2),
+the four fields appended after the addresses. `sock.c` reads
+them with CO-RE probe reads from `struct tcp_sock` in both
+places a record is made — `inet_sock_set_state` and the accept
+exit's snapshot — four reads per record, a few records per
+connection, so the cost is negligible. BPF reads them in every
+record; the correlator (`carriesSeq`, `internal/correlate/
+sockets.go`) passes them on only from `ESTABLISHED` on (see
+docs/schema.md), and the normalizer drops them (random ISNs).
+`TestSockSeqFields` (root) pins the counters of a loopback
+exchange and the key on every record of both ends;
+`TestTCPFamilies` splits each real loopback trace into two
+pretend hosts and requires `federate.Halves` and `Fuse` to pair
+the ends by key alone.
 
 ```go
 // ISNPair is decision #26's key, oriented the same on both hosts:
@@ -3401,6 +3414,7 @@ type Source interface {
     Events(ctx context.Context, fn func(*schema.Event) error) error
 }
 
+func Halves(events []schema.Event) []Half             // as Merge collects them
 func Fuse(halves []Half, window time.Duration) Fusion // Conns, Unresolved
 func Merge(ctx context.Context, sources []Source, opt Options) (Result, error)
 ```

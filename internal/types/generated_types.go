@@ -205,7 +205,7 @@ const RESTART_PHASE_HANDLER = 1
 const RESTART_PHASE_RESUME = 2
 const TCP_STATE_SNAPSHOT = 0
 const TCP_ADDR_LEN = 16
-const TCP_STATE_EVENT_SCHEMA_VERSION = 1
+const TCP_STATE_EVENT_SCHEMA_VERSION = 2
 const MAX_ARGV_LENGTH = 1024
 const SOCK_ADDR_PATH_NONE = 0
 const SOCK_ADDR_PATH_NAMED = 1
@@ -3837,10 +3837,14 @@ type TcpStateEvent struct {
 	Reserved      uint32
 	Saddr         [TCP_ADDR_LEN]byte
 	Daddr         [TCP_ADDR_LEN]byte
+	SndUna        uint32
+	RcvNxt        uint32
+	BytesAcked    uint64
+	BytesReceived uint64
 }
 
 func (t TcpStateEvent) String() string {
-	return fmt.Sprintf("EventType:%v SchemaVersion:%v Time:%v Sk:%v Pid:%v Fd:%v Oldstate:%v Newstate:%v Family:%v Sport:%v Dport:%v Reserved:%v Saddr:%v Daddr:%v", t.EventType, t.SchemaVersion, t.Time, t.Sk, t.Pid, t.Fd, t.Oldstate, t.Newstate, t.Family, t.Sport, t.Dport, t.Reserved, hex.EncodeToString(t.Saddr[:]), hex.EncodeToString(t.Daddr[:]))
+	return fmt.Sprintf("EventType:%v SchemaVersion:%v Time:%v Sk:%v Pid:%v Fd:%v Oldstate:%v Newstate:%v Family:%v Sport:%v Dport:%v Reserved:%v Saddr:%v Daddr:%v SndUna:%v RcvNxt:%v BytesAcked:%v BytesReceived:%v", t.EventType, t.SchemaVersion, t.Time, t.Sk, t.Pid, t.Fd, t.Oldstate, t.Newstate, t.Family, t.Sport, t.Dport, t.Reserved, hex.EncodeToString(t.Saddr[:]), hex.EncodeToString(t.Daddr[:]), t.SndUna, t.RcvNxt, t.BytesAcked, t.BytesReceived)
 }
 
 func (t TcpStateEvent) Equals(other any) bool {
@@ -3848,7 +3852,7 @@ func (t TcpStateEvent) Equals(other any) bool {
 	if !ok {
 		return false
 	}
-	return t.EventType == otherConcrete.EventType && t.SchemaVersion == otherConcrete.SchemaVersion && t.Time == otherConcrete.Time && t.Sk == otherConcrete.Sk && t.Pid == otherConcrete.Pid && t.Fd == otherConcrete.Fd && t.Oldstate == otherConcrete.Oldstate && t.Newstate == otherConcrete.Newstate && t.Family == otherConcrete.Family && t.Sport == otherConcrete.Sport && t.Dport == otherConcrete.Dport && t.Reserved == otherConcrete.Reserved && t.Saddr == otherConcrete.Saddr && t.Daddr == otherConcrete.Daddr
+	return t.EventType == otherConcrete.EventType && t.SchemaVersion == otherConcrete.SchemaVersion && t.Time == otherConcrete.Time && t.Sk == otherConcrete.Sk && t.Pid == otherConcrete.Pid && t.Fd == otherConcrete.Fd && t.Oldstate == otherConcrete.Oldstate && t.Newstate == otherConcrete.Newstate && t.Family == otherConcrete.Family && t.Sport == otherConcrete.Sport && t.Dport == otherConcrete.Dport && t.Reserved == otherConcrete.Reserved && t.Saddr == otherConcrete.Saddr && t.Daddr == otherConcrete.Daddr && t.SndUna == otherConcrete.SndUna && t.RcvNxt == otherConcrete.RcvNxt && t.BytesAcked == otherConcrete.BytesAcked && t.BytesReceived == otherConcrete.BytesReceived
 }
 
 func (t *TcpStateEvent) GetEventType() EventType {

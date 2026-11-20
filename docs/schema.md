@@ -146,8 +146,15 @@ The four `tcp_sock` fields come together or not at all: the
 controller's merge rebuilds the connection's ISN pair — the
 cross-host join key (S2, decision #26) — from all four, so a
 partial set is rejected rather than read into a wrong key. The
-schema and the merge (`internal/federate`) carry them; the
-tracer's capture lands with the M4 BPF change.
+tracer fills them (task ve4) on every `tcp_state` record whose
+handshake is complete: `ESTABLISHED` and every later state, the
+accept snapshot (`CLOSE` included — a child reset in the accept
+queue), and a `CLOSE` that ends an established connection. The
+opening records (`SYN_SENT`, `SYN_RECV`) and a `CLOSE` straight
+from `SYN_SENT` (a refused connect) carry none of the four:
+there the fields hold no peer ISN yet. The values derive from
+the kernel's random initial sequence numbers, so the golden
+normalizer drops all four.
 
 `tcp_seq` gives a send or receive its TCP sequence range (start
 sequence plus `bytes`). A byte has the same sequence number on

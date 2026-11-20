@@ -183,11 +183,12 @@ func (n normalizer) conn(id string) string {
 	return "$" + kindConn + strconv.Itoa(n.syms.ord(kindConn, id))
 }
 
-// args rewrites paths, addresses and ports. The pointers (and an exec's
-// argv) are replaced, never written through, because the input event
-// shares them. An argv element that is a path under the scenario's temp
-// directory is one too — a child gets its work dir that way — so it is
-// rewritten like args.path; other elements pass unchanged.
+// args rewrites paths, addresses and ports and drops the tcp_sock
+// sequence fields. The pointers (and an exec's argv) are replaced, never
+// written through, because the input event shares them. An argv element
+// that is a path under the scenario's temp directory is one too — a child
+// gets its work dir that way — so it is rewritten like args.path; other
+// elements pass unchanged.
 func (n normalizer) args(a schema.Args) schema.Args {
 	a.Path = mapPtr(a.Path, n.path)
 	a.NewPath = mapPtr(a.NewPath, n.path)
@@ -202,6 +203,12 @@ func (n normalizer) args(a schema.Args) schema.Args {
 	a.RemoteAddr = mapPtr(a.RemoteAddr, canonicalAddr)
 	a.LocalPort = mapPtr(a.LocalPort, n.port)
 	a.RemotePort = mapPtr(a.RemotePort, n.port)
+	// A tcp_state record's tcp_sock fields (M4, decision #26) are drawn
+	// from the kernel's random initial sequence numbers: no two runs
+	// agree on them, and no expectation could name them. Dropped, all
+	// four together, so a normalized trace stays comparable across runs
+	// and still satisfies the schema's all-four-or-none.
+	a.SndUna, a.RcvNxt, a.BytesAcked, a.BytesReceived = nil, nil, nil, nil
 	return a
 }
 

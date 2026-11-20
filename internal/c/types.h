@@ -1013,11 +1013,22 @@ struct syscall_restart_event {
 // port, 0 in the CLOSE -> SYN_SENT transition, which precedes the port
 // choice); saddr/daddr are network byte order, an IPv4 address in the first
 // 4 bytes and zeroes after. All scalars are 32/64-bit because the Go type
-// generator maps no 16-bit integers. No implicit padding, 88 bytes.
+// generator maps no 16-bit integers.
+// snd_una, rcv_nxt, bytes_acked and bytes_received (M4, decision #26) are
+// struct tcp_sock's, read at the moment of the record, in every record:
+// the controller's merge rebuilds the connection's TCP initial-sequence-
+// number pair from them, the cross-host join key NAT never rewrites
+// (docs/spikes/s2-cross-host.md). They hold no peer ISN yet in the
+// opening transitions (CLOSE -> SYN_SENT, and a refused connect's
+// SYN_SENT -> CLOSE): BPF reports them anyway and the correlator decides
+// which states carry them into the trace (internal/correlate/sockets.go),
+// which keeps the record shape and the handler free of state logic.
+// Appended after the addresses so the M1 offsets stay; schema version 2.
+// No implicit padding, 112 bytes.
 #define TCP_STATE_SNAPSHOT 0
 // An address field holds an IPv6 address; IPv4 uses its first 4 bytes.
 #define TCP_ADDR_LEN 16
-#define TCP_STATE_EVENT_SCHEMA_VERSION 1
+#define TCP_STATE_EVENT_SCHEMA_VERSION 2
 struct tcp_state_event {
     __u32 event_type;
     __u32 schema_version;
@@ -1033,6 +1044,10 @@ struct tcp_state_event {
     __u32 reserved;
     __u8 saddr[TCP_ADDR_LEN];
     __u8 daddr[TCP_ADDR_LEN];
+    __u32 snd_una;
+    __u32 rcv_nxt;
+    __u64 bytes_acked;
+    __u64 bytes_received;
 };
 
 // exec_argv_event (iormesh, exec.c) reports an exec of a process that is not

@@ -82,11 +82,7 @@ func TestHalvesFromEvents(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tr := newTrace("h", "p")
 			c.build(tr)
-			col := newCollector()
-			for i := range tr.events {
-				col.add(&tr.events[i])
-			}
-			hs := col.halves()
+			hs := Halves(tr.events)
 			if len(hs) != 1 {
 				t.Fatalf("got %d halves, want 1: %+v", len(hs), hs)
 			}
@@ -102,11 +98,7 @@ func TestHalvesSkipNonTCP(t *testing.T) {
 	tr.event(1, schema.KindConnect, 3, 0, wall0, "unix", schema.Args{Path: ptr("/run/x.sock")})
 	tr.event(1, schema.KindWrite, 3, 1, wall0, "unix", schema.Args{})
 	tr.event(1, schema.KindWrite, 4, 1, wall0, "", schema.Args{})
-	col := newCollector()
-	for i := range tr.events {
-		col.add(&tr.events[i])
-	}
-	if hs := col.halves(); len(hs) != 0 {
+	if hs := Halves(tr.events); len(hs) != 0 {
 		t.Fatalf("got halves %+v, want none", hs)
 	}
 }

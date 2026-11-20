@@ -30,6 +30,11 @@
 // straight from the socket and emits it as a snapshot record (oldstate
 // TCP_STATE_SNAPSHOT; types.h, struct tcp_state_event).
 //
+// Both kinds of record also carry four struct tcp_sock fields (snd_una,
+// rcv_nxt, bytes_acked, bytes_received; M4, decision #26), from which the
+// controller's merge rebuilds the TCP initial-sequence-number pair - the
+// key that joins the two ends of one connection traced on two hosts.
+//
 // The fd -> struct sock walk uses BPF_CORE_READ probe reads, not the typed
 // walk of fileident.c: connect and accept are rare next to read/write, so the
 // helper calls cost nothing measurable, and the probe reads work on kernels
@@ -181,6 +186,24 @@ static __always_inline void iormesh_read_sk_tuple(struct tcp_state_event *ev, st
     bpf_core_read(ev->daddr, 4, &sk->__sk_common.skc_daddr);
 }
 
+// iormesh_read_tcp_seq fills ev's four tcp_sock fields (M4, decision #26):
+// the inputs the merge rebuilds the ISN pair from. sk is a TCP socket at
+// both call sites (the tracepoint checks the protocol, the accept exit
+// iormesh_sock_is_tcp), so the cast to struct tcp_sock is sound. Probe
+// reads, like the rest of this file: the tracepoint's skaddr is no
+// trusted BTF pointer. Four reads per tcp_state record, a few records per
+// connection - negligible next to the syscall handlers. bytes_acked and
+// bytes_received exist since Linux 4.1/4.2, older than any kernel the
+// tracer's other CO-RE reads accept.
+static __always_inline void iormesh_read_tcp_seq(struct tcp_state_event *ev, struct sock *sk) {
+    struct tcp_sock *tp = (struct tcp_sock *)sk;
+
+    ev->snd_una = BPF_CORE_READ(tp, snd_una);
+    ev->rcv_nxt = BPF_CORE_READ(tp, rcv_nxt);
+    ev->bytes_acked = BPF_CORE_READ(tp, bytes_acked);
+    ev->bytes_received = BPF_CORE_READ(tp, bytes_received);
+}
+
 // iormesh_sock_state returns sk's TCP state (TCP_ESTABLISHED ... ).
 static __always_inline int iormesh_sock_state(struct sock *sk) {
     return BPF_CORE_READ(sk, __sk_common.skc_state);
@@ -247,6 +270,7 @@ static __always_inline void iormesh_sock_on_accept(__u32 pid, __s64 ret) {
     ev->oldstate = TCP_STATE_SNAPSHOT;
     ev->newstate = state;
     iormesh_read_sk_tuple(ev, sk);
+    iormesh_read_tcp_seq(ev, sk);
     bpf_ringbuf_submit(ev, 0);
 }
 
@@ -286,6 +310,11 @@ int handle_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) 
         ev->oldstate = ctx->oldstate;
         ev->newstate = newstate;
         iormesh_read_ctx_tuple(ev, ctx);
+        // The tracepoint fires from tcp_set_state before the new state is
+        // stored, but after the segment that caused it was processed: at
+        // SYN_SENT -> ESTABLISHED the SYN-ACK already set rcv_nxt and
+        // advanced snd_una/bytes_acked (S2 read them at this very point).
+        iormesh_read_tcp_seq(ev, (struct sock *)ctx->skaddr);
         bpf_ringbuf_submit(ev, 0);
     }
     // TCP_CLOSE is final for this struct sock; its address may be reused by
