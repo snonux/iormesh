@@ -305,3 +305,13 @@ func TestNormalizeDropsTCPSeq(t *testing.T) {
 		t.Errorf("sock_state %v, want %q", got.SockState, state)
 	}
 }
+
+// TestNormalizeDropsStreamSeq: a data call's tcp_seq (task xe4) comes from
+// the same random ISNs and is dropped too.
+func TestNormalizeDropsStreamSeq(t *testing.T) {
+	n := normalizer{}
+	seq := uint32(0xdeadbeef)
+	if got := n.args(schema.Args{TCPSeq: &seq}); got.TCPSeq != nil {
+		t.Errorf("tcp_seq kept: %d", *got.TCPSeq)
+	}
+}

@@ -275,3 +275,16 @@ func assertHandshakeOnly(t *testing.T, r Result, theta int64) {
 		t.Fatalf("got %v, want the handshake's upper bound only", r.Clocks)
 	}
 }
+
+// TestClockBoundsOfEvents: ClockBounds, fed the events alone, draws the
+// very bounds Merge does from the same traces (task xe4).
+func TestClockBoundsOfEvents(t *testing.T) {
+	a, b := newTrace("hostA", "shop"), newTrace("hostB", "billing")
+	const theta = int64(42 * time.Millisecond)
+	newConv(a, b, 0, theta, "x", ISNPair{0xfffffff0, 0x1000}, t0).pingPong(t0 + 10*tus)
+	want := mergeTraces(t, Options{}, a, b).Clocks
+	got := ClockBounds(append(append([]schema.Event(nil), a.events...), b.events...), Options{})
+	if len(got) != 1 || len(want) != 1 || got[0] != want[0] {
+		t.Fatalf("ClockBounds %+v, Merge %+v", got, want)
+	}
+}

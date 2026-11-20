@@ -64,6 +64,11 @@ func (c *Correlator) emit(q *queued) error {
 		ev.ConnID = q.sock.connID
 		c.graph.connected(ev.PID, ev.PIDInc, q.sock.connID, q.sock.fused)
 	}
+	if ev.ConnID == "" {
+		// tcp_seq names bytes of a connection; without one the merge
+		// could match it to nothing (schema validateStreamSeq).
+		ev.Args.TCPSeq = nil
+	}
 	return c.cfg.Sink.Event(ev)
 }
 

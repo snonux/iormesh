@@ -1,0 +1,15 @@
+tag=untraced tcpload ops=100000 size=64 elapsed_ns=1215126545 cpu_ms=214 insn_k=530886299 load=7.84
+tag=base tcpload ops=100000 size=64 elapsed_ns=1393876818 cpu_ms=466 insn_k=886287637 tracer_run_cpu_ms=890 events=200014 tracer_insn_u= tracer_insn_k= tcp_seq_events=0 lost=0 load=7.93
+tag=new tcpload ops=100000 size=64 elapsed_ns=1518112775 cpu_ms=549 insn_k=1034474308 tracer_run_cpu_ms=1040 events=200014 tracer_insn_u=2741267590 tracer_insn_k=116824783 tcp_seq_events=200000 lost=0 load=7.63
+tag=untraced tcpload ops=100000 size=64 elapsed_ns=1275439154 cpu_ms=275 insn_k=546802644 load=7.63
+tag=base tcpload ops=100000 size=64 elapsed_ns=1326576179 cpu_ms=386 insn_k=881669066 tracer_run_cpu_ms=650 events=200014 tracer_insn_u= tracer_insn_k= tcp_seq_events=0 lost=0 load=7.34
+tag=new tcpload ops=100000 size=64 elapsed_ns=1514653147 cpu_ms=513 insn_k=1033349128 tracer_run_cpu_ms=1070 events=200014 tracer_insn_u=2776949155 tracer_insn_k=120774826 tcp_seq_events=200000 lost=0 load=7.20
+tag=untraced tcpload ops=100000 size=64 elapsed_ns=1225662338 cpu_ms=246 insn_k=533555909 load=7.20
+tag=base tcpload ops=100000 size=64 elapsed_ns=1477560544 cpu_ms=477 insn_k=898745853 tracer_run_cpu_ms=1000 events=200014 tracer_insn_u= tracer_insn_k= tcp_seq_events=0 lost=0 load=6.86
+tag=new tcpload ops=100000 size=64 elapsed_ns=1401317946 cpu_ms=496 insn_k=1016603446 tracer_run_cpu_ms=1020 events=200014 tracer_insn_u= tracer_insn_k= tcp_seq_events=200000 lost=0 load=6.95
+tag=untraced tcpload ops=100000 size=64 elapsed_ns=1246567246 cpu_ms=263 insn_k=539999707 load=6.95
+tag=base tcpload ops=100000 size=64 elapsed_ns=1488798433 cpu_ms=448 insn_k=899048860 tracer_run_cpu_ms=990 events=200014 tracer_insn_u=2234671353 tracer_insn_k=116261187 tcp_seq_events=0 lost=0 load=7.37
+tag=new tcpload ops=100000 size=64 elapsed_ns=1988226603 cpu_ms=404 insn_k=1232945893 tracer_run_cpu_ms=840 events=200014 tracer_insn_u=2746525129 tracer_insn_k=166515278 tcp_seq_events=200000 lost=0 load=8.41
+tag=untraced tcpload ops=100000 size=64 elapsed_ns=1161183610 cpu_ms=150 insn_k=548021100 load=8.41
+tag=base tcpload ops=100000 size=64 elapsed_ns=1297819952 cpu_ms=274 insn_k=891403988 tracer_run_cpu_ms=560 events=200014 tracer_insn_u= tracer_insn_k= tcp_seq_events=0 lost=0 load=8.22
+tag=new tcpload ops=100000 size=64 elapsed_ns=1272485304 cpu_ms=283 insn_k=1011820387 tracer_run_cpu_ms=639 events=200014 tracer_insn_u= tracer_insn_k= tcp_seq_events=200000 lost=0 load=8.04

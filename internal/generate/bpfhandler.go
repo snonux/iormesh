@@ -2,7 +2,8 @@
 // Changes: the prologue calls renderSockOwnerHook (sockowner.go); read and
 // write call the rwagg.c hooks (rwagg.go, M2 step 11); every enter handler
 // calls the stack.c hook (renderStackHook, M2 step 9) and the javamark.c hook
-// (renderJavaMarkHook, task td4).
+// (renderJavaMarkHook, task td4); the seven TCP data calls call the tcpseq.c
+// hooks (renderTCPSeqHook, task xe4).
 
 package generate
 
@@ -423,6 +424,7 @@ func renderHandler(h handlerSpec) string {
 		b.WriteString(h.sideMapTake)
 		b.WriteString("\n")
 	}
+	renderTCPSeqHook(&b, h)
 	renderStackHook(&b, h)
 	renderJavaMarkHook(&b, h)
 	renderFdNameEnter(&b, h)

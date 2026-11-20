@@ -7,9 +7,13 @@ package integrationtests
 // never sees it as two halves; the check splits the trace into two
 // pretend hosts — every record of the connecting socket on one, of the
 // accepted socket on the other — and requires the merge's own Halves and
-// Fuse to pair them by key alone.
+// Fuse to pair them by key alone. The same split checks the clock bounds
+// (task xe4): the data records' tcp_seq pair each receive with its send,
+// and the two pretend hosts, one clock in truth, must come out bounded
+// from both sides around offset 0.
 
 import (
+	"strings"
 	"testing"
 
 	"iormesh/internal/federate"
@@ -100,4 +104,40 @@ func endRole(kind string) string {
 		return federate.RoleServer
 	}
 	return ""
+}
+
+// assertClockBounds splits events like assertISNKeysMatch and requires the
+// merge's clock bounds between the two pretend hosts to be two-sided — a
+// lower bound needs a server→client message, which only the data records'
+// tcp_seq give (the handshake bounds one side) — and, the two being one
+// clock, to hold offset 0 in the raw interval, no drift allowance needed.
+func assertClockBounds(t *testing.T, events []schema.Event) {
+	t.Helper()
+	split, _ := splitByEnd(events)
+	seqs := 0
+	for _, e := range split {
+		if e.Args.TCPSeq != nil {
+			seqs++
+		}
+	}
+	bounds := federate.ClockBounds(split, federate.Options{})
+	if len(bounds) == 0 {
+		t.Fatalf("no clock bound between the pretend hosts (%d records with tcp_seq)", seqs)
+	}
+	for _, b := range bounds {
+		if !strings.HasSuffix(b.HostA, "/client") || !strings.HasSuffix(b.HostB, "/server") {
+			t.Errorf("bound between %s and %s, want client and server", b.HostA, b.HostB)
+		}
+		w, ok := b.Width()
+		if !b.HasLower || !b.HasUpper || !ok {
+			t.Errorf("bound %s→%s one-sided or empty (lower %v %d, upper %v %d; %d messages, %d tcp_seq records)",
+				b.HostA, b.HostB, b.HasLower, b.Lower, b.HasUpper, b.Upper, b.Messages, seqs)
+			continue
+		}
+		if b.Lower > 0 || b.Upper < 0 {
+			t.Errorf("one clock bounded to [%d, %d] ns, which misses 0", b.Lower, b.Upper)
+		}
+		t.Logf("clock bound [%d, %d] ns from %d messages, width %d ns with drift", b.Lower, b.Upper,
+			b.Messages, w)
+	}
 }

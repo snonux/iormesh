@@ -126,7 +126,8 @@ func New(cfg Config) *Correlator {
 // TCP state records, the process lifecycle records of M2 steps 1 and 6
 // (new processes, execs, exits), M2 step 7's records (handleIPC:
 // pipes, socketpairs, kill, epoll and poll, socket addresses, signals)
-// and M2 step 9's native stack records (stacks.go).
+// M2 step 9's native stack records (stacks.go) and M4's TCP sequence
+// records (streamseq.go).
 // Other record types are ignored; the exec_argv records of a pattern
 // session are the caller's to judge (Incarnation), and an exec's argv
 // reaches the trace through Exec, once the caller has completed a
@@ -161,6 +162,8 @@ func (c *Correlator) Handle(rec any) error {
 		c.aggregate(r)
 	case *types.TcpStateEvent:
 		c.tcpState(r)
+	case *types.TcpSeqEvent:
+		c.tcpSeqRecord(r)
 	case *types.TaskNewtaskEvent:
 		c.newTask(r)
 	case *types.ProcessExitEvent:

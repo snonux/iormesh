@@ -120,13 +120,16 @@ func TestUDPLoopback(t *testing.T) {
 // TestTCPFamilies: one AF_INET and one AF_INET6 connection, each with its
 // full 4-tuple, fused, and both ends' tcp_state records carrying the
 // tcp_sock fields from which internal/federate rebuilds one ISN pair (M4,
-// task ve4; assertISNKeysMatch). tcp-ipv6 skips on a host without an IPv6
-// loopback (the workload's exit 3).
+// task ve4; assertISNKeysMatch), and its sends and receives carrying
+// tcp_seq, from which the merge bounds the two pretend hosts' clock
+// offset from both sides (task xe4; assertClockBounds). tcp-ipv6 skips on
+// a host without an IPv6 loopback (the workload's exit 3).
 func TestTCPFamilies(t *testing.T) {
 	for _, scenario := range []string{"tcp-ipv4", "tcp-ipv6"} {
 		t.Run(scenario, func(t *testing.T) {
 			got, want, run := ipcScenarioRun(t, scenario, "", optionless(scenario))
 			assertISNKeysMatch(t, run.Trace.Events)
+			assertClockBounds(t, run.Trace.Events)
 			assertCaught(t, got, want, map[string]func(*normalize.Expectation){
 				"the other family's loopback": func(x *normalize.Expectation) {
 					other := "::1"

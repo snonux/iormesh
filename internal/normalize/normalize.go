@@ -209,6 +209,9 @@ func (n normalizer) args(a schema.Args) schema.Args {
 	// four together, so a normalized trace stays comparable across runs
 	// and still satisfies the schema's all-four-or-none.
 	a.SndUna, a.RcvNxt, a.BytesAcked, a.BytesReceived = nil, nil, nil, nil
+	// A data call's tcp_seq (task xe4) is a sequence number from the same
+	// random ISNs: dropped for the same reason.
+	a.TCPSeq = nil
 	return a
 }
 

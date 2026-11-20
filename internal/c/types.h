@@ -7,7 +7,8 @@
 // IORMESH_STACK_DEPTH (moved here from maps.h) added (stack.c, task kd4);
 // EXEC_ARGV_EVENT, PROCESS_ARGV_EVENT and struct exec_argv_event added
 // (exec.c, M2); JAVA_MARK_EVENT and struct java_mark_event added
-// (javamark.c, task td4).
+// (javamark.c, task td4); TCP_SEQ_EVENT and struct tcp_seq_event added
+// (tcpseq.c, task xe4).
 
 //+build ignore
 
@@ -132,6 +133,10 @@
 // syscall, sent right before the enter record when the Java mark is on
 // (struct java_mark_event, javamark.c, M3 "Join to kernel events", task td4).
 #define JAVA_MARK_EVENT 76
+// iormesh: the exit record of a single TCP send or receive with the TCP
+// sequence number of its first byte, sent by the call's exit hook in place
+// of its ret_event (struct tcp_seq_event, tcpseq.c, M4, task xe4).
+#define TCP_SEQ_EVENT 77
 
 #define UNCLASSIFIED 0
 #define READ_CLASSIFIED 1
@@ -1274,4 +1279,28 @@ struct java_mark_event {
     __u32 tid;
     __u64 cookie;
     __u64 entry;
+};
+
+// tcp_seq_event (iormesh, tcpseq.c, M4 "Clock reconciliation", task xe4)
+// is the exit record of one unfolded TCP send or receive that has a stream
+// position, sent in place of its ret_event (so the call still costs two
+// ring records): ret_event's fields plus seq, the TCP sequence number of
+// the call's first byte - write_seq for a send, copied_seq for a receive,
+// read at the call's enter - and sk, the struct sock address, the same
+// value tcp_state_event carries, so userspace can check the record names
+// the socket the call's fd is bound to. The call moved [seq, seq + ret)
+// mod 2^32. It is sent only when the same field read at the exit is
+// exactly ret further on, which proves that every byte the socket took (or
+// gave) in between was this call's own (tcpseq.c); every other exit of
+// these calls is a ret_event. 48 bytes, no implicit padding.
+struct tcp_seq_event {
+    __u32 event_type;
+    __u32 trace_id;
+    __u64 time;
+    __s64 ret;
+    __u32 pid;
+    __u32 tid;
+    __u64 sk;
+    __u32 seq;
+    __u32 reserved;
 };

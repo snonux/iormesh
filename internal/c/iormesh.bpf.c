@@ -3,7 +3,8 @@
 // Adapted from ior internal/c/ior.bpf.c @ b21afc50328c.
 // Changes: renamed to iormesh.bpf.c; rawsyscall.c not included; bpf_endian.h
 // and sock.c added; sockaddr.c and signal.c added (M2 step 7); rwagg.c added
-// (M2 step 11); stack.c added (M2 step 9); javamark.c added (task td4).
+// (M2 step 11); stack.c added (M2 step 9); javamark.c added (task td4);
+// tcpseq.c added (task xe4).
 
 #include "vmlinux.h"
 #include <bpf/bpf_core_read.h>
@@ -51,6 +52,11 @@
 // back to pid/fd through the socket registered at connect/accept (iormesh).
 // The generated connect and accept handlers call its hooks.
 #include "sock.c"
+
+// TCP sequence numbers of single sends and receives (M4, task xe4), parked
+// at the generated data calls' enters and sent at their exits; after sock.c
+// and fileident.c, whose constants and typed walk it uses.
+#include "tcpseq.c"
 
 // Address arguments and socket addresses of bind, connect, sendto, recvfrom
 // and AF_UNIX accepts (M2 step 7), sent by hooks of the generated handlers.

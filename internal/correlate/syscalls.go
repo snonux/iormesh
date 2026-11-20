@@ -56,6 +56,11 @@ type enter struct {
 	fd2       int32
 	addr      *sockAddr
 	sig       *sigInfo
+	// 120 bytes; keep it at most 128: a Go map stores larger values out
+	// of line, one allocation per insert, and c.enters takes one per
+	// call. Two tcp_seq fields here (task xe4) cost +17 % tracer
+	// instructions per event on the burst that way, so the exit's
+	// sequence number goes to exitSeq as arguments instead.
 }
 
 func (c *Correlator) enterOpen(r *types.OpenEvent) {
@@ -115,6 +120,12 @@ func (c *Correlator) exitRet(r *types.RetEvent) {
 // exit pairs an exit with its thread's pending enter and queues the event.
 // An exit without a matching enter is counted, not guessed at.
 func (c *Correlator) exit(tid uint32, name string, ret int64, at uint64) {
+	c.exitSeq(tid, name, ret, at, 0, 0)
+}
+
+// exitSeq is exit for an exit record that may carry a TCP sequence number
+// (a tcp_seq_event, streamseq.go): seqSk is its socket, 0 for none.
+func (c *Correlator) exitSeq(tid uint32, name string, ret int64, at uint64, seqSk uint64, seq uint32) {
 	en, ok := c.enters[tid]
 	delete(c.enters, tid)
 	if !ok || en.name != name {
@@ -125,6 +136,9 @@ func (c *Correlator) exit(tid uint32, name string, ret int64, at uint64) {
 	sock, ok := c.syscallDetail(&ev, en, ret)
 	if !ok {
 		return
+	}
+	if seqSk != 0 {
+		c.streamSeq(&ev, sock, seqSk, seq)
 	}
 	c.enqueue(ev, sock)
 }

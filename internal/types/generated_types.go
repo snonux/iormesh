@@ -158,6 +158,7 @@ const RW_AGGREGATE_EVENT = 73
 const STACK_EVENT = 74
 const STACK_INLINE_EVENT = 75
 const JAVA_MARK_EVENT = 76
+const TCP_SEQ_EVENT = 77
 const UNCLASSIFIED = 0
 const READ_CLASSIFIED = 1
 const WRITE_CLASSIFIED = 2
@@ -4404,4 +4405,80 @@ func (j *JavaMarkEvent) Bytes() ([]byte, error) {
 
 func (j *JavaMarkEvent) Recycle() {
 	poolOfJavaMarkEvents.Put(j)
+}
+
+type TcpSeqEvent struct {
+	EventType EventType
+	TraceId   TraceId
+	Time      uint64
+	Ret       int64
+	Pid       uint32
+	Tid       uint32
+	Sk        uint64
+	Seq       uint32
+	Reserved  uint32
+}
+
+func (t TcpSeqEvent) String() string {
+	return fmt.Sprintf("EventType:%v TraceId:%v Time:%v Ret:%v Pid:%v Tid:%v Sk:%v Seq:%v Reserved:%v", t.EventType, t.TraceId, t.Time, t.Ret, t.Pid, t.Tid, t.Sk, t.Seq, t.Reserved)
+}
+
+func (t TcpSeqEvent) Equals(other any) bool {
+	otherConcrete, ok := other.(*TcpSeqEvent)
+	if !ok {
+		return false
+	}
+	return t.EventType == otherConcrete.EventType && t.TraceId == otherConcrete.TraceId && t.Time == otherConcrete.Time && t.Ret == otherConcrete.Ret && t.Pid == otherConcrete.Pid && t.Tid == otherConcrete.Tid && t.Sk == otherConcrete.Sk && t.Seq == otherConcrete.Seq && t.Reserved == otherConcrete.Reserved
+}
+
+func (t *TcpSeqEvent) GetEventType() EventType {
+	return t.EventType
+}
+
+func (t *TcpSeqEvent) GetTraceId() TraceId {
+	return t.TraceId
+}
+
+func (t *TcpSeqEvent) GetPid() uint32 {
+	return t.Pid
+}
+
+func (t *TcpSeqEvent) GetTid() uint32 {
+	return t.Tid
+}
+
+func (t *TcpSeqEvent) GetTime() uint64 {
+	return t.Time
+}
+
+// GetRet returns the syscall return value carried by this event.
+func (t *TcpSeqEvent) GetRet() int64 {
+	return t.Ret
+}
+
+var poolOfTcpSeqEvents = sync.Pool{
+	New: func() any { return &TcpSeqEvent{} },
+}
+
+func NewTcpSeqEvent(raw []byte) *TcpSeqEvent {
+	t := poolOfTcpSeqEvents.Get().(*TcpSeqEvent)
+	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, t); err != nil {
+		*t = TcpSeqEvent{}
+		poolOfTcpSeqEvents.Put(t)
+		return nil
+	}
+	return t
+}
+
+func (t *TcpSeqEvent) Bytes() ([]byte, error) {
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.LittleEndian, t)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (t *TcpSeqEvent) Recycle() {
+	poolOfTcpSeqEvents.Put(t)
 }

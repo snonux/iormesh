@@ -168,9 +168,22 @@ queued its last byte and bounds the two hosts' clock offset by
 it (S2; PLAN.md M4 "Clock reconciliation"). A folded record
 cannot carry it — its `boot_ns` is the first call's and its
 `latency_ns` a sum, so no instant of it belongs to the call that
-moved a given byte. The schema and the merge carry it; the
-tracer's capture (new `tcp_sendmsg`/`tcp_recvmsg` hooks) is
-still open.
+moved a given byte. The tracer fills it (task xe4) from the
+socket itself: `write_seq` (the end of the send queue — not
+`snd_nxt`, which lags behind queued data) for a send,
+`copied_seq` (the next byte the reader gets — not `rcv_nxt`)
+for a receive, read at the call's enter and again at its exit.
+It is given only when the two reads differ by exactly the
+bytes the call moved, which proves no other call's bytes went
+through the socket in between. So a send racing another
+thread's send on the same socket, a `MSG_PEEK` or `MSG_OOB`
+read (`copied_seq` does not move, or skips the urgent byte), a
+kTLS socket (`write_seq` counts record framing) and a TCP Fast
+Open send (the ISN is chosen inside the call) carry none: no
+`tcp_seq` is ever a guess. Neither does a call on a kernel
+without the `bpf_rdonly_cast` kfunc (before 6.2), where the
+tracer cannot read the socket cheaply, nor one whose socket the
+trace never bound (opened before the session).
 
 ### Event kinds (M1)
 

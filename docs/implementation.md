@@ -3550,10 +3550,8 @@ connection into messages, `bound.go` intersects them,
 - **Messages.** Every receive pairs with the send that queued
   its last byte, matched by stream offset `seq − (iss + 1)`.
   The data records carry `args.tcp_seq`, the sequence number of
-  the call's first byte (schema only so far; the tracer's
-  `tcp_sendmsg`/`tcp_recvmsg` capture is still open: `write_seq`
-  after the send minus the bytes queued — TFO assigns the ISN
-  inside the call — and `copied_seq` before the receive). The
+  the call's first byte (captured since task xe4, see "tcp_seq
+  capture" below). The
   send's instant is its enter, the receive's its exit. The SYN
   is one more client→server message: the later of the client's
   first `connect` enter and its `SYN_SENT` record, against the
@@ -3636,6 +3634,63 @@ sends pairs with the later; three hosts A–B–C order A against
 C through B; an offset drifting within the allowance after
 its bound never yields a false order (and unpadded it would);
 a message's own send and receive stay unordered.
+
+**tcp_seq capture (task xe4).** The tracer fills `args.tcp_seq`
+in the syscall hooks it already runs (`internal/c/tcpseq.c`),
+not in `tcp_sendmsg`/`tcp_recvmsg` kprobes: a kprobe would add a
+program run to every TCP send and receive on the host, traced or
+not, and share `bpf_prog_active` with the dispatchers (8e4).
+
+- **Which field.** A send appends at `tcp_sock.write_seq` (not
+  `snd_nxt`, which lags behind queued data); a receive copies
+  from `copied_seq` (not `rcv_nxt`, which runs ahead by the
+  unread bytes).
+- **Enter.** Behind the sampling and fold hooks — a folded or
+  sampled-out call pays nothing — the enter of `write`,
+  `writev`, `sendto`, `sendfile64`, `read`, `readv` and
+  `recvfrom` walks its fd to the socket with fileident.c's
+  typed walk (`bpf_get_current_task_btf`, `bpf_rdonly_cast`; no
+  helper calls), and on a TCP socket parks the socket and the
+  field's value by tid (`seq_park_map`, LRU, entries kept and
+  emptied rather than deleted). A kernel without the kfunc
+  captures nothing.
+- **Exit and the race.** The hooks hold no socket lock, and
+  another thread may send on the same socket meanwhile. The
+  exit re-reads the field through the parked socket: the field
+  only grows as bytes are queued (consumed), so `end − start ==
+  ret` proves that every byte in between was the call's own
+  and the call moved exactly `[start, end)`. Anything else —
+  two senders interleaving, a send split around another, a
+  `MSG_PEEK`/`MSG_OOB` read, kTLS, a TFO send — gives no
+  `tcp_seq`. A stale park (an exit missed) is still exact when
+  the check holds; the residue is a field *assignment* inside
+  the window (connect, disconnect, `TCP_REPAIR`) whose jump
+  equals `ret`, 1 in 2³².
+- **Record.** When the check holds, the exit record itself is
+  a `tcp_seq_event` (a `ret_event` plus the socket and the
+  sequence number, 48 bytes) in place of the `ret_event`, so a
+  call still costs two ring records. The correlator
+  (`streamseq.go`) passes it on only for a stream data kind
+  that moved bytes on the socket the fd is bound to — the
+  record's `sk` must be that socket — and only once the event
+  has a conn id; the normalizer drops it (random ISNs).
+- **Tests.** `internal/streamseq_root_test.go` (root; a child
+  re-run of the test binary does the traffic, since the tracer
+  never traces itself): all seven kinds on one connection, each
+  pinned to the bytes before it from the handshake's
+  `snd_una`/`rcv_nxt`; two threads sending blocking 64 KiB
+  buffers on one socket, where every `tcp_seq` given must
+  locate exactly the caller's bytes in the received stream
+  (about 110–180 of 200 calls carry one; with the check
+  disabled the test fails); and a hot loop whose folded records
+  carry none. `TestTCPFamilies` splits a real Java loopback
+  trace into two pretend hosts and requires
+  `federate.ClockBounds` to bound them from both sides around
+  0 (≈ 64–145 µs raw width).
+- **Cost.** Unchanged per event on `syscall-burst`; on an
+  unfolded TCP loop +3 % tracer instructions per event and
+  ~500 kernel instructions per data call in the traced process
+  (s3-overhead.md, "Follow-up (xe4)").
 
 ### Service database
 

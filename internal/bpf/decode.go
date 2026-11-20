@@ -7,7 +7,8 @@
 // (M2 step 2), PROCESS_ARGV_EVENT (M2 step 8), SOCK_ADDR_EVENT and
 // SIGNAL_EVENT (M2 step 7), RW_AGGREGATE_EVENT (M2 step 11),
 // STACK_EVENT (M2 step 9), STACK_INLINE_EVENT (task kd4) and
-// JAVA_MARK_EVENT (task td4; its fast decoder, task ud4) added.
+// JAVA_MARK_EVENT (task td4; its fast decoder, task ud4) and TCP_SEQ_EVENT
+// (task xe4) added.
 
 package bpf
 
@@ -137,6 +138,10 @@ func addControlDecoders(d map[types.EventType]decoder) {
 	// (javamark.c), only sent with Config.JavaMarks — then once per hooked
 	// call, so decoded field by field, not by reflection (task ud4).
 	d[types.JAVA_MARK_EVENT] = typed(types.NewJavaMarkEventFast)
+	// M4 (task xe4): the exit record of a single TCP send or receive with
+	// its first sequence number (tcpseq.c), one per such call, hence the
+	// fast decoder.
+	d[types.TCP_SEQ_EVENT] = typed(types.NewTcpSeqEventFast)
 }
 
 // decodeFdSizeEvent widens an fd+size record to the FdEvent shape the

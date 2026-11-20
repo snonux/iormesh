@@ -787,3 +787,68 @@ Status (2026-11-19): M3 is accepted with the tracer-CPU item open and
 over (plain unfolded 2.28 µs at 4 threads, `-spool` 3.8 / 5.6 µs);
 it is split to task ee4 on the M2 pattern, gating M4's acceptance,
 limit unchanged (PLAN.md, M3 status).
+
+## Follow-up (xe4): the cost of `args.tcp_seq`
+
+Task xe4 makes every unfolded TCP `write`, `writev`, `sendto`,
+`sendfile64`, `read`, `readv` and `recvfrom` read its socket's
+sequence field at enter and exit (internal/c/tcpseq.c). It adds
+work in two places: in the target's syscalls (the BPF hooks — on
+every hooked call a typed fd walk to the inode's mode, on a TCP
+socket a per-tid park and the exit's re-read) and in the tracer
+(one more field per data event). Measured A/B against the build
+before it (`0733b36`), interleaved, pinned as `measure.sh` pins,
+load 9.7–18 throughout — a busy host, so CPU times spread and the
+instruction counts (`perf stat`) are the figures to trust.
+Samples, the TCP load and its driver: `spikes/s3/results-xe4/`.
+
+**`syscall-burst`, unfolded** (decision #25's item; file I/O, so
+the hooks only walk to the inode's mode and park nothing;
+`S3_TRACER_FLAGS=-aggregate=false S3_OPS=500000`, 5 rounds of one
+run each per build): tracer user instructions per event 6.56 k
+(base) and 6.57 k (new) at 1 thread, 6.40 k and 6.45 k at 4 —
+unchanged. Tracer CPU medians 3.24 / 3.15 µs (base) and 2.49 /
+2.65 µs (new) at 1 / 4 threads: noise of the load, both builds
+over the 2 µs budget at this load as before (the item stays with
+task ee4, limit unchanged). The burst's own CPU, where the BPF
+hooks run, moved within its spread.
+
+A first build carried the sequence number into the correlator's
+per-thread enter record, which pushed that struct from 120 to 136
+bytes — past Go's 128-byte limit for map values stored inline, so
+every syscall's enter then cost an allocation: +1.1 k tracer
+instructions per event (+17 %) on the burst, which has no TCP at
+all. The sequence number now goes straight from the exit record to
+the event (correlate/syscalls.go, `exitSeq`), and the struct stays
+at 120 bytes, with a comment saying why.
+
+**TCP loopback, unfolded** (`tcpload.c`: one writer thread sends
+100 000 × 64 B, one reader reads them, both traced; a 1 ms pause
+every 100 writes keeps the ring from overflowing, so no record is
+lost; 200 014 events per run, 200 000 of them with `tcp_seq`; 5
+rounds):
+
+| | base | new |
+|---|--:|--:|
+| tracer user instructions per event | 11.2 k | 11.5–11.7 k (+3 %) |
+| tracer CPU per event (median; includes the paced idle wake-ups) | 5.15 µs | 4.9 µs (noise) |
+| target kernel instructions per data call (untraced: ~2.8 k) | ~4.45 k | ~4.95 k (+~500, ~+11 %) |
+| target CPU (median) | 490 ms | 520 ms |
+
+A first design sent the sequence number in a record of its own,
+right before the exit record: three ring records per call instead
+of two. Each record costs the tracer one ring callback across cgo,
+and that design measured +2.5 k tracer instructions per event
+(`tcp-paced-own-record.txt`). The record now *is* the exit record
+(`tcp_seq_event`, a `ret_event` plus the socket and the number, 48
+bytes instead of 40), which leaves the +~400 instructions above:
+decoding 8 more bytes, the `tcp_sock` check in the correlator, and
+encoding one more field.
+
+**Verdict**: decision #25's tracer-CPU item is unchanged by the
+capture — the burst's per-event instructions are the same. On TCP
+traffic the tracer pays ~3 % more per data event and the traced
+process ~500 kernel instructions per unfolded data call. The
+default fold keeps hot loops out of both, and the calls that clock
+reconciliation needs — request/response calls that wait on the
+peer — are the ones that stay single.

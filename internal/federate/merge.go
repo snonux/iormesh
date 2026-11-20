@@ -67,12 +67,7 @@ type hostGraph struct {
 // argue in a circle. Fuse's window stays a coarse guard against ISN-clock
 // wrap; hosts skewed beyond it fuse nothing and so get no bound either.
 func Merge(ctx context.Context, sources []Source, opt Options) (Result, error) {
-	window := opt.Window
-	if window <= 0 { // a negative window would admit every candidate
-		window = DefaultWindow
-	}
-	clockWindow := cmp.Or(max(opt.ClockWindow, 0), DefaultClockWindow)
-	drift := driftAllowance(clockWindow, cmp.Or(max(opt.DriftPPM, 0), DefaultDriftPPM))
+	window, clockWindow, drift := opt.resolve()
 	sorted := slices.SortedFunc(slices.Values(sources), func(a, b Source) int {
 		return cmp.Compare(a.Name(), b.Name())
 	})
@@ -87,20 +82,53 @@ func Merge(ctx context.Context, sources []Source, opt Options) (Result, error) {
 	}
 	r := Result{Fusion: Fuse(col.halves(), window), Renames: map[LocalConn]string{}}
 	fused := map[string]bool{}
-	var msgs []message
 	for _, c := range r.Conns {
 		r.Renames[LocalConn{c.Client.Host, c.Client.ConnID}] = c.ID
 		r.Renames[LocalConn{c.Server.Host, c.Server.ConnID}] = c.ID
 		fused[c.ID] = true
-		msgs = append(msgs, col.messages(c)...)
 	}
-	r.Clocks = clockBounds(msgs, clockWindow, drift)
+	r.Clocks = col.clocks(r.Conns, clockWindow, drift)
 	requalify(traces, r.Renames)
 	r.Graph = union(traces, r.Renames, fused)
 	if err := r.Graph.Validate(); err != nil {
 		return Result{}, fmt.Errorf("federate: merged graph: %w", err)
 	}
 	return r, nil
+}
+
+// ClockBounds is the clock half of Merge for events alone, with no graph:
+// it fuses the events' halves and bounds every host pair's clock offset
+// from the fused connections, exactly as Merge's Result.Clocks. Like
+// Halves, it lets a test split one host's real trace into pretend hosts
+// and check the bounds the merge would draw (task xe4).
+func ClockBounds(events []schema.Event, opt Options) []ClockBound {
+	window, clockWindow, drift := opt.resolve()
+	col := newCollector()
+	for i := range events {
+		col.add(&events[i])
+	}
+	return col.clocks(Fuse(col.halves(), window).Conns, clockWindow, drift)
+}
+
+// resolve returns the options with their defaults filled in: Fuse's
+// window, the clock window and the drift allowance per bound side.
+func (o Options) resolve() (window, clockWindow time.Duration, drift int64) {
+	window = o.Window
+	if window <= 0 { // a negative window would admit every candidate
+		window = DefaultWindow
+	}
+	clockWindow = cmp.Or(max(o.ClockWindow, 0), DefaultClockWindow)
+	drift = driftAllowance(clockWindow, cmp.Or(max(o.DriftPPM, 0), DefaultDriftPPM))
+	return window, clockWindow, drift
+}
+
+// clocks bounds the clock offsets from the messages of the fused conns.
+func (c *collector) clocks(conns []Conn, clockWindow time.Duration, drift int64) []ClockBound {
+	var msgs []message
+	for _, conn := range conns {
+		msgs = append(msgs, c.messages(conn)...)
+	}
+	return clockBounds(msgs, clockWindow, drift)
 }
 
 // readSource reads one source's graph and feeds its events to col. A

@@ -1008,13 +1008,22 @@ Kubernetes (M7) build on it.
   over a long session shows up instead of emptying the
   interval; an empty intersection is reported, never hidden.
   This needs every send and receive record to carry its TCP
-  sequence range, not just its byte count — new
-  `tcp_sendmsg`/`tcp_recvmsg` hooks, added in M4. Cross-host order
+  sequence range, not just its byte count — captured in the
+  data calls' own syscall hooks (task xe4), not in new
+  `tcp_sendmsg`/`tcp_recvmsg` kprobes. Cross-host order
   is derived from happens-before (per-thread order plus
   send→receive edges), never from raw wall-clock comparison.
   Built (task gb4, `internal/federate`): send and receive
   records carry `args.tcp_seq` (the sequence number of the
-  call's first byte; schema only, the hooks are still open),
+  call's first byte; the tracer fills it since task xe4: the
+  socket's `write_seq`/`copied_seq` read at the call's enter
+  and again at its exit, given only when the two differ by
+  exactly the call's return — so concurrent senders or readers
+  on one socket, MSG_PEEK, kTLS and the like give none, never a
+  guess; one ring record per call as before, the exit record
+  carrying it; decision #25's burst figure unchanged, +3 %
+  tracer instructions per TCP data event — s3-overhead.md,
+  "Follow-up (xe4)"),
   the SYN adds one client→server edge (connect enter before
   the server's accept exit), and the merge keeps one bound per
   host pair per 1-minute window (`Result.Clocks`), one-sided
