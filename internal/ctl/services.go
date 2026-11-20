@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
-	"unicode"
 
 	"iormesh/internal/servicedb"
+	"iormesh/internal/termsafe"
 )
 
 // servicesCommand is `iormeshctl services [VERB] ...` (PLAN.md M4
@@ -241,10 +241,6 @@ func portText(p uint16) string {
 
 // safe quotes a string from the traces that holds a control character:
 // hostnames and paths come from the traced apps, and printed raw they
-// could rewrite the operator's terminal.
-func safe(s string) string {
-	if strings.IndexFunc(s, func(r rune) bool { return !unicode.IsPrint(r) }) >= 0 {
-		return strconv.Quote(s)
-	}
-	return s
-}
+// could rewrite the operator's terminal (internal/termsafe, shared with
+// the build summary and show).
+func safe(s string) string { return termsafe.String(s) }

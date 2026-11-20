@@ -1062,6 +1062,17 @@ Kubernetes (M7) build on it.
   named in the summary and the model, and the command exits 1
   after writing the outputs: one damaged file does not hide
   the rest of the mesh, and the loss is never silent.
+  A server may be compromised, so a collected segment is
+  hostile input (ib4's review): the reader bounds the file
+  (128 MiB) and its footer (8 MiB) before parsing, turns
+  decoder panics into errors, and each segment is decoded
+  first in a child process with a capped address space, so a
+  file built to exhaust memory fails itself, not the build.
+  Each host identity (host id, FQDN) belongs to one store
+  directory — the one thing a server cannot choose: the first
+  build pins it (`hosts.json`), and a session claiming another
+  directory's host, or a directory holding two hosts, is bad.
+  Text from the traces is printed terminal-safe.
   `refresh` is collect then build; a host whose collect fails
   is reported (exit 1) and what the store holds is built
   anyway.

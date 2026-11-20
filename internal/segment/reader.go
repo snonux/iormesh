@@ -2,6 +2,7 @@ package segment
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -20,10 +21,24 @@ import (
 const ContentEvents = "events"
 
 // readBatch is how many rows a reader decodes at once: big enough that
-// the per-call overhead vanishes, small enough that a reader holds a few
-// hundred KiB however large the segment (the controller's build streams
-// every collected segment, PLAN.md M4 "Build").
+// the per-call overhead vanishes, small enough that the decoded rows
+// stay small however many the segment holds. The decoder's own buffers
+// (a row group's pages) come on top.
 const readBatch = 512
+
+// Bounds on a file the reader opens: a segment on the controller came
+// from a server, which may be compromised, so the lengths in it are not
+// trusted (task ib4's review). The writer publishes at DefaultMaxBytes
+// plus at most one tick's events, so twice that is generous; its footer
+// is a few KiB. These bounds stop the footer allocations parquet-go
+// makes from declared lengths; page and decompression sizes inside a
+// file are not bounded here — the controller decodes each collected
+// segment once in a memory-capped child process first (internal/ctl,
+// checkSegment) and reads in-process only what passed.
+const (
+	MaxFileSize   = 2 * DefaultMaxBytes
+	MaxFooterSize = 8 << 20
+)
 
 // nameRE parses a segment file name from the right (Name, TableName):
 // <fqdn>-<session>-<start-ts>-<seq>[.<table>].parquet. The fqdn may hold
@@ -87,8 +102,12 @@ func (n FileName) Base() string { return base(n.FQDN, n.Session, n.Start, n.Seq)
 // then stays seen, so a caller that must not act on half a file reads it
 // once to check first. A non-nil error from fn stops the read and is
 // returned as is.
-func ReadEvents(ctx context.Context, path string, fn func(*schema.Event) error) (Meta, error) {
-	return readFile(ctx, path, ContentEvents, func(ev *schema.Event) error {
+//
+// want, if not nil, vets the footer before any row is decoded (the
+// caller's check that the file is the segment its name and place say).
+func ReadEvents(ctx context.Context, path string, want func(Meta) error,
+	fn func(*schema.Event) error) (Meta, error) {
+	return readFile(ctx, path, ContentEvents, want, func(ev *schema.Event) error {
 		nilEmptyLists(ev)
 		if err := ev.Validate(); err != nil {
 			return &rowError{fmt.Errorf("event seq %d: %w", ev.Seq, err)}
@@ -127,7 +146,38 @@ func nilEmptyLists(ev *schema.Event) {
 // the footer must declare. Rows are not validated here: each table type
 // has its own Validate, which the caller applies when it keeps a row.
 func ReadTable[T any](ctx context.Context, path, table string, fn func(*T) error) (Meta, error) {
-	return readFile(ctx, path, table, fn)
+	return readFile(ctx, path, table, nil, fn)
+}
+
+// Summary is what CheckEvents learned of an events file.
+type Summary struct {
+	Meta   Meta   `json:"meta"`
+	HostID string `json:"host_id"`
+	Events uint64 `json:"events"`
+}
+
+// CheckEvents reads a whole events file as ReadEvents does and
+// summarizes it: the footer, the one host id its events carry (a file
+// with events of two hosts, or with none, is an error — it cannot be
+// placed) and the event count. It is the check the controller runs on
+// every collected segment before reading it for real.
+func CheckEvents(ctx context.Context, path string, want func(Meta) error) (Summary, error) {
+	var s Summary
+	m, err := ReadEvents(ctx, path, want, func(ev *schema.Event) error {
+		switch {
+		case s.Events == 0:
+			s.HostID = ev.HostID
+		case ev.HostID != s.HostID:
+			return fmt.Errorf("segment: %s: events of two hosts (%s, %s)", path, s.HostID, ev.HostID)
+		}
+		s.Events++
+		return nil
+	})
+	if err == nil && s.Events == 0 {
+		err = fmt.Errorf("segment: %s: no events", path)
+	}
+	s.Meta = m
+	return s, err
 }
 
 // ReadMeta reads only a segment file's footer metadata.
@@ -155,9 +205,11 @@ type rowError struct{ err error }
 func (e *rowError) Error() string { return e.err.Error() }
 func (e *rowError) Unwrap() error { return e.err }
 
-// readFile opens path, checks its footer declares content, and streams
-// its rows into fn in batches of readBatch.
-func readFile[T any](ctx context.Context, path, content string, fn func(*T) error) (Meta, error) {
+// readFile opens path, checks its footer declares content and passes
+// want (nil: anything), and streams its rows into fn in batches of
+// readBatch. The footer is parsed once, here.
+func readFile[T any](ctx context.Context, path, content string, want func(Meta) error,
+	fn func(*T) error) (Meta, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return Meta{}, fmt.Errorf("segment: %w", err)
@@ -171,6 +223,9 @@ func readFile[T any](ctx context.Context, path, content string, fn func(*T) erro
 	if err == nil && m.Content != content {
 		err = fmt.Errorf("footer says %q, want %q", m.Content, content)
 	}
+	if err == nil && want != nil {
+		err = want(m)
+	}
 	if err != nil {
 		return Meta{}, fmt.Errorf("segment: %s: %w", path, err)
 	}
@@ -182,13 +237,52 @@ func readFile[T any](ctx context.Context, path, content string, fn func(*T) erro
 	return m, err
 }
 
-// openParquet opens f as a parquet file.
-func openParquet(f *os.File) (*parquetgo.File, error) {
+// openParquet opens f as a parquet file after the bounds checks a file
+// from a server needs before any of it is parsed (checkBounds), with
+// the page index and bloom filters skipped — the reader never uses
+// them, and each is one more length a hostile file could inflate.
+// parquet-go panics on some malformed footers (a negative make length
+// deep in its column loader); that is an input error like any other.
+func openParquet(f *os.File) (pf *parquetgo.File, err error) {
 	st, err := f.Stat()
 	if err != nil {
 		return nil, err
 	}
-	return parquetgo.OpenFile(f, st.Size())
+	if err := checkBounds(f, st.Size()); err != nil {
+		return nil, err
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			pf, err = nil, fmt.Errorf("unreadable footer: %v", p)
+		}
+	}()
+	return parquetgo.OpenFile(f, st.Size(), parquetgo.SkipPageIndex(true),
+		parquetgo.SkipBloomFilters(true))
+}
+
+// checkBounds refuses a file larger than MaxFileSize and a footer
+// longer than MaxFooterSize or than the file itself, before parquet-go
+// allocates the length the file's last bytes declare (up to 4 GiB).
+func checkBounds(f io.ReaderAt, size int64) error {
+	if size > MaxFileSize {
+		return fmt.Errorf("%d bytes, over the %d a segment may have", size, int64(MaxFileSize))
+	}
+	if size < 12 { // magic, footer length, magic
+		return fmt.Errorf("%d bytes: not a parquet file", size)
+	}
+	var tail [8]byte
+	if _, err := f.ReadAt(tail[:], size-8); err != nil {
+		return err
+	}
+	if string(tail[4:]) != parquetMagic {
+		return errors.New("no parquet magic at the end")
+	}
+	footer := int64(binary.LittleEndian.Uint32(tail[:4]))
+	if footer > MaxFooterSize || footer > size-12 {
+		return fmt.Errorf("footer of %d bytes in a %d-byte file (at most %d)", footer, size,
+			int64(MaxFooterSize))
+	}
+	return nil
 }
 
 // streamRows decodes pf's rows into a reused batch. parquet-go's reader

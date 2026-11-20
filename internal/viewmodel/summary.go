@@ -22,6 +22,7 @@ const timeLayout = "2006-01-02 15:04:05"
 // line per unresolved edge, session that recorded no end, bad segment
 // and stray store entry — what needs the operator's eye.
 func WriteSummary(w io.Writer, m Model) error {
+	m = safeModel(m)
 	var b strings.Builder
 	r := m.Run
 	fmt.Fprintf(&b, "built      %s: %d hosts, %d sessions, %d segments, %d events%s\n",
@@ -54,6 +55,7 @@ func WriteSummary(w io.Writer, m Model) error {
 
 // WriteServices prints one line per service.
 func WriteServices(w io.Writer, m Model) error {
+	m = safeModel(m)
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "SERVICE\tNAMED\tCONNS\tUNRESOLVED\tTLS\tREQUESTS\tENDPOINTS")
 	for _, s := range m.Services {
@@ -66,6 +68,7 @@ func WriteServices(w io.Writer, m Model) error {
 // WriteEdges prints one line per edge; unresolvedOnly keeps the edges
 // with an unresolved connection.
 func WriteEdges(w io.Writer, m Model, unresolvedOnly bool) error {
+	m = safeModel(m)
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "FROM\tTO\tSTATE\tCONNS\tUNRESOLVED\tFIRST\tLAST")
 	for _, e := range m.Edges {
@@ -81,6 +84,7 @@ func WriteEdges(w io.Writer, m Model, unresolvedOnly bool) error {
 // WriteHealth prints every session's end, every clock pair and what was
 // skipped.
 func WriteHealth(w io.Writer, m Model) error {
+	m = safeModel(m)
 	var b strings.Builder
 	h := m.Health
 	fmt.Fprintf(&b, "loss       %d lost, %d skipped runs, %d unattributed, %d attach gap\n",

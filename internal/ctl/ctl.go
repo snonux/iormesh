@@ -121,6 +121,8 @@ func run(args []string, e env) int {
 		err = refreshCommand(args[1:], e)
 	case "show":
 		err = showCommand(args[1:], e)
+	case checkCommand: // build's child, not for operators (check.go)
+		err = checkSegmentCommand(args[1:], e)
 	case "services":
 		err = servicesCommand(args[1:], e)
 	case "verify":

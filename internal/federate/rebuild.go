@@ -20,7 +20,8 @@ import (
 //   - opened: every successful open, openat, openat2 and creat with a
 //     path, and the new name of a rename that moved a file the process
 //     held open — the open fds are followed through the events (open,
-//     close, rename, unlink);
+//     close, dup, dup2, dup3, fcntl F_DUPFD, rename, unlink, and an
+//     exec closing the close-on-exec ones);
 //   - socket and connected for every event with a conn_id, fused when the
 //     host's correlator fused the connection itself: a pipe or socketpair
 //     (both ends are created together), or a connection whose connect and
@@ -30,10 +31,19 @@ import (
 //
 // Not rebuilt, because no event says it: app nodes and incarnation edges
 // (the session's pattern is not in the trace), forked edges (no event
-// records a clone), and the open fds a child inherited (so a rename
-// moves only the files a process opened itself). A graph.json written by
+// records a clone), the open fds a child inherited (so a rename moves
+// only the files a process opened or copied itself), and close-on-exec
+// changes by fcntl F_SETFD (the record has no argument). A graph.json written by
 // `iormesh run -out` has them; a build from segments does not, and says
 // so (docs/implementation.md M4 "Build").
+
+// Open-flag and fcntl constants the fd tracking reads (Linux, the same
+// on amd64 and arm64).
+const (
+	oCloexec      = 0o2000000
+	fDupFD        = 0
+	fDupFDCloexec = 1030
+)
 
 // fdKey names one process incarnation's fd number.
 type fdKey struct {
@@ -53,7 +63,9 @@ type graphRebuilder struct {
 	edges map[[3]string]schema.Edge
 	// paths are the open fds' file names, for renames.
 	paths map[fdKey]string
-	conns map[string]*connEnds
+	// cloexec says which fds an exec closes.
+	cloexec map[fdKey]bool
+	conns   map[string]*connEnds
 	// incs is each pid's newest incarnation: a signal names its sender by
 	// pid only.
 	incs map[uint32]uint64
@@ -61,7 +73,7 @@ type graphRebuilder struct {
 
 func newGraphRebuilder() *graphRebuilder {
 	return &graphRebuilder{nodes: map[string]schema.Node{}, edges: map[[3]string]schema.Edge{},
-		paths: map[fdKey]string{}, conns: map[string]*connEnds{}, incs: map[uint32]uint64{}}
+		paths: map[fdKey]string{}, cloexec: map[fdKey]bool{}, conns: map[string]*connEnds{}, incs: map[uint32]uint64{}}
 }
 
 // add folds one event in; it keeps no reference to ev.
@@ -144,9 +156,19 @@ func (g *graphRebuilder) file(proc string, ev *schema.Event) {
 		if ev.Ret >= 0 && ev.Args.Path != nil {
 			g.opened(proc, ev.HostID, *ev.Args.Path)
 			g.paths[k] = *ev.Args.Path
+			g.cloexec[k] = ev.Args.Flags != nil && *ev.Args.Flags&oCloexec != 0
 		}
+	case schema.KindDup, schema.KindDup2, schema.KindDup3:
+		g.dup(k, ev, ev.Event == schema.KindDup3 && ev.Args.Flags != nil && *ev.Args.Flags&oCloexec != 0)
+	case schema.KindFcntl:
+		if c := ev.Args.Cmd; c != nil && (*c == fDupFD || *c == fDupFDCloexec) {
+			g.dup(k, ev, *c == fDupFDCloexec)
+		}
+	case schema.KindExec:
+		g.exec(ev.PID, ev.PIDInc)
 	case schema.KindClose:
 		delete(g.paths, k)
+		delete(g.cloexec, k)
 	case schema.KindUnlink, schema.KindUnlinkat, schema.KindRmdir:
 		if ev.Ret == 0 && ev.Args.Path != nil {
 			g.unlinked(trimSlash(*ev.Args.Path))
@@ -154,6 +176,32 @@ func (g *graphRebuilder) file(proc string, ev *schema.Event) {
 	case schema.KindRename, schema.KindRenameat, schema.KindRenameat2:
 		if ev.Ret == 0 && ev.Args.Path != nil && ev.Args.NewPath != nil {
 			g.renamed(ev.HostID, trimSlash(*ev.Args.Path), trimSlash(*ev.Args.NewPath))
+		}
+	}
+}
+
+// dup makes the returned fd a copy of the event's fd (docs/schema.md
+// "fd lifecycle"): same file, its own close-on-exec state. Whatever the
+// new number held before is replaced.
+func (g *graphRebuilder) dup(old fdKey, ev *schema.Event, cloexec bool) {
+	if ev.Ret < 0 {
+		return
+	}
+	nk := fdKey{old.pid, old.inc, int32(ev.Ret)}
+	delete(g.paths, nk)
+	g.cloexec[nk] = cloexec
+	if p, ok := g.paths[old]; ok {
+		g.paths[nk] = p
+	}
+}
+
+// exec closes the process's close-on-exec fds: a rename after the exec
+// no longer moves them.
+func (g *graphRebuilder) exec(pid uint32, inc uint64) {
+	for k, ce := range g.cloexec {
+		if ce && k.pid == pid && k.inc == inc {
+			delete(g.paths, k)
+			delete(g.cloexec, k)
 		}
 	}
 }

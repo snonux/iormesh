@@ -35,7 +35,9 @@ type Segment struct {
 	// project label and the registry's host name.
 	Project, Host string
 	File          segment.FileName
-	sess          *session
+	// hostID is the host id the check found in the segment's events.
+	hostID string
+	sess   *session
 }
 
 var _ Source = (*Segment)(nil)
@@ -67,6 +69,9 @@ type Segments struct {
 	// Tables counts the table files seen (methods, threads, classes,
 	// stacks); the build does not read them yet (M5's conversations do).
 	Tables int
+	// Hosts is the identity each host directory's good sessions carry:
+	// what the caller pins (LoadOptions.Known) for the next build.
+	Hosts map[string]HostIdentity
 }
 
 // Name is the segment's path below the store, <project>/<host>/<file>:
@@ -98,20 +103,11 @@ func (s *Segment) Events(ctx context.Context, fn func(*schema.Event) error) erro
 }
 
 // read streams the events after checking the footer agrees with the
-// file's name and directory: a segment renamed or copied into another
-// project's or host's directory would otherwise merge as something it is
-// not.
+// file's name and directory (wantMeta): a segment renamed or copied into
+// another project's or host's directory would otherwise merge as
+// something it is not.
 func (s *Segment) read(ctx context.Context, fn func(*schema.Event) error) error {
-	meta, err := segment.ReadMeta(s.Path)
-	if err != nil {
-		return err
-	}
-	f := s.File
-	if meta.Project != s.Project || meta.FQDN != f.FQDN || meta.Session != f.Session || meta.Seq != f.Seq {
-		return fmt.Errorf("federate: %s: footer names %s/%s-%s-%06d", s.Name(),
-			meta.Project, meta.FQDN, meta.Session, meta.Seq)
-	}
-	_, err = segment.ReadEvents(ctx, s.Path, func(ev *schema.Event) error {
+	_, err := segment.ReadEvents(ctx, s.Path, s.wantMeta, func(ev *schema.Event) error {
 		if ev.Project != s.Project {
 			return fmt.Errorf("federate: %s: event seq %d of project %q", s.Name(), ev.Seq, ev.Project)
 		}
@@ -120,48 +116,112 @@ func (s *Segment) read(ctx context.Context, fn func(*schema.Event) error) error 
 	return err
 }
 
+// wantMeta checks a footer against the file's name and directory.
+func (s *Segment) wantMeta(m segment.Meta) error {
+	f := s.File
+	if m.Project != s.Project || m.FQDN != f.FQDN || m.Session != f.Session || m.Seq != f.Seq {
+		return fmt.Errorf("footer names %s/%s-%s-%06d", m.Project, m.FQDN, m.Session, m.Seq)
+	}
+	return nil
+}
+
+// Checker decodes one events segment whole and summarizes it
+// (segment.CheckEvents). The controller runs it in a memory-capped child
+// process, so a hostile file that would exhaust memory fails that
+// segment, not the build; nil checks in process.
+type Checker func(ctx context.Context, path string) (segment.Summary, error)
+
+// LoadOptions tune LoadSegments.
+type LoadOptions struct {
+	// Check decodes each segment before anything else reads it; nil is
+	// segment.CheckEvents in this process.
+	Check Checker
+	// Known pins host directories (registry host names) to the identity
+	// earlier builds saw there; a session claiming another is bad.
+	Known map[string]HostIdentity
+}
+
 // LoadSegments lists the events segments of projects (every project
-// directory when none is given) in store and reads each once: it checks
-// every event and rebuilds each session's graph from them. A segment
-// that fails is reported in Bad and left out — its session's graph is
-// rebuilt without it — so the merge that follows never reads half a
-// file. A requested project without a store directory is an error; a
-// cancelled ctx is returned as is.
-func LoadSegments(ctx context.Context, store string, projects []string) (Segments, error) {
+// directory when none is given) in store, checks each once (opt.Check:
+// every row decoded and validated, the footer matching the file's name
+// and place), vets the hosts the sessions claim to be (vetHosts), and
+// then rebuilds each session's graph from the segments that passed. A
+// segment that fails is reported in Bad and left out, so the merge that
+// follows never reads half a file. A requested project without a store
+// directory is an error; a cancelled ctx is returned as is.
+func LoadSegments(ctx context.Context, store string, projects []string, opt LoadOptions) (Segments, error) {
 	var out Segments
 	segs, err := listStore(store, projects, &out)
 	if err != nil {
 		return Segments{}, err
 	}
-	for _, group := range groupSessions(segs) {
-		good, bad, err := loadSession(ctx, group)
+	checked, err := checkAll(ctx, segs, opt.Check, &out)
+	if err != nil {
+		return Segments{}, err
+	}
+	sessions := vetHosts(groupSessions(checked), opt.Known, &out)
+	for _, group := range sessions {
+		good, err := loadSession(ctx, group, &out)
 		if err != nil {
 			return Segments{}, err
 		}
 		out.Sources = append(out.Sources, good...)
-		out.Bad = append(out.Bad, bad...)
 	}
 	slices.SortFunc(out.Sources, func(a, b *Segment) int { return cmp.Compare(a.Name(), b.Name()) })
 	slices.SortFunc(out.Bad, func(a, b BadSegment) int { return cmp.Compare(a.Name, b.Name) })
 	return out, nil
 }
 
-// loadSession reads a session's segments in seq order into one graph.
-// A segment that fails is dropped and the session read again without
-// it: the graph's open-fd state runs across segments, so a half-read
-// segment's effects cannot be taken back otherwise. Damage is rare, so
-// the re-read costs nothing in the common case.
-func loadSession(ctx context.Context, segs []*Segment) ([]*Segment, []BadSegment, error) {
-	var bad []BadSegment
+// checkAll runs check on every segment and keeps the ones that pass,
+// each with the host id its events carry; the rest go to out.Bad.
+func checkAll(ctx context.Context, segs []*Segment, check Checker, out *Segments) ([]*Segment, error) {
+	if check == nil {
+		check = func(ctx context.Context, path string) (segment.Summary, error) {
+			return segment.CheckEvents(ctx, path, nil)
+		}
+	}
+	var good []*Segment
+	for _, s := range segs {
+		sum, err := check(ctx, s.Path)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		if err == nil {
+			if err = s.wantMeta(sum.Meta); err != nil {
+				err = fmt.Errorf("segment: %s: %w", s.Path, err)
+			}
+		}
+		if err != nil {
+			out.bad(s, err)
+			continue
+		}
+		s.hostID = sum.HostID
+		good = append(good, s)
+	}
+	return good, nil
+}
+
+// bad records s as skipped. The error names the file by its store name,
+// not the absolute path the reader used: the model built from it is
+// meant to be the same wherever the store lives.
+func (o *Segments) bad(s *Segment, err error) {
+	msg := strings.ReplaceAll(err.Error(), s.Path, s.Name())
+	o.Bad = append(o.Bad, BadSegment{Name: s.Name(), Err: errors.New(msg)})
+}
+
+// loadSession reads a checked session's segments in seq order into one
+// graph. The check decoded every one already, so a failure here means a
+// file changed under the build: the segment is dropped and the session
+// read again without it (the graph's open-fd state runs across
+// segments, so half a segment cannot be taken back otherwise).
+func loadSession(ctx context.Context, segs []*Segment, out *Segments) ([]*Segment, error) {
 	for {
-		sess := &session{}
+		sess := &session{hostID: segs[0].hostID}
 		g := newGraphRebuilder()
 		failed := -1
 		for i, s := range segs {
 			err := s.read(ctx, func(ev *schema.Event) error {
-				if sess.hostID == "" {
-					sess.hostID = ev.HostID
-				} else if ev.HostID != sess.hostID {
+				if ev.HostID != sess.hostID {
 					return fmt.Errorf("federate: %s: host_id %q, the session's is %q",
 						s.Name(), ev.HostID, sess.hostID)
 				}
@@ -169,10 +229,11 @@ func loadSession(ctx context.Context, segs []*Segment) ([]*Segment, []BadSegment
 				return nil
 			})
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return nil, nil, ctxErr
+				return nil, ctxErr
 			}
 			if err != nil {
-				bad, failed = append(bad, BadSegment{Name: s.Name(), Err: err}), i
+				out.bad(s, err)
+				failed = i
 				break
 			}
 		}
@@ -181,9 +242,11 @@ func loadSession(ctx context.Context, segs []*Segment) ([]*Segment, []BadSegment
 			for _, s := range segs {
 				s.sess = sess
 			}
-			return segs, bad, nil
+			return segs, nil
 		}
-		segs = slices.Delete(slices.Clone(segs), failed, failed+1)
+		if segs = slices.Delete(slices.Clone(segs), failed, failed+1); len(segs) == 0 {
+			return nil, nil
+		}
 	}
 }
 

@@ -4020,14 +4020,18 @@ rejects the whole snapshot).
 
 ### Build, refresh and show
 
-Built by task ib4 (all cgo-free):
+Built by task ib4 (all cgo-free), hardened after its first review
+against segments a compromised server sends:
 
 ```
-internal/segment/reader.go      # ParseName, ReadMeta, ReadEvents, ReadTable
+internal/segment/reader.go      # ParseName, ReadEvents, CheckEvents, ReadTable
 internal/federate/segments.go   # Segment (a Source), LoadSegments
+internal/federate/hosts.go      # vetHosts: one host identity per host dir
 internal/federate/rebuild.go    # a session's graph from its events (#3)
+internal/termsafe/              # trace text made safe for a terminal
 internal/viewmodel/             # Model V1, Tally, New, the text views
 internal/ctl/build.go           # iormeshctl build
+internal/ctl/check.go           # the memory-capped check child, host pins
 internal/ctl/show.go            # iormeshctl refresh, iormeshctl show
 ```
 
@@ -4037,17 +4041,38 @@ iormeshctl refresh [-project P]... [-registry FILE] [...] [HOST...]
 iormeshctl show [summary|services|edges|health] [-project P]... [-json]
 ```
 
+- **Hostile input.** A server may be compromised, and every
+  collected byte is its choice. The reader refuses a file over
+  `segment.MaxFileSize` (twice the writer's 64 MiB cap) and a
+  footer over `MaxFooterSize` (8 MiB) or longer than the file
+  before parquet-go allocates what the file declares (a footer
+  length of 0xF0000000 would be 3.75 GiB), skips the page index
+  and bloom filters, and turns the decoder's panics — in the
+  footer's column loader as in the pages — into errors naming
+  the file. Page sizes and zstd output inside the file are not
+  bounded in process: parquet-go sizes them from the file and
+  running out of memory is fatal to Go. So every segment is
+  decoded first by `iormeshctl __check-segment SPACE PATH`, a
+  child of the same executable whose address space is capped
+  (`RLIMIT_AS`: what it mapped at start plus 1 GiB; the GC's soft
+  limit at half; 2 minutes at most). A hostile file kills the
+  child and fails that segment only. Decoding is deterministic,
+  so a file the child decoded needs the same memory in the
+  build's own process, where it is read again. On macOS
+  `RLIMIT_AS` may not hold; the child still keeps a crash out of
+  the build.
 - **Reading a segment.** `segment.ReadEvents` decodes the events
-  file with parquet-go's reader, 512 rows at a time into one
-  reused batch, so a reader holds a few hundred KiB whatever the
-  segment's size. Each row is checked like an NDJSON line
-  (`Event.Validate`; empty lists the decoder returns become
-  absent ones first, the contract's equality), the footer must
-  say `events` and this schema version, and a decoder panic on a
-  damaged page becomes an error naming the file — a segment came
-  over the network and must not crash the build. Table files
-  read through `ReadTable`; the build counts them but does not
-  read them yet (M5's conversations need the Java tables).
+  file 512 rows at a time into one reused batch; the decoder's
+  buffers for a row group come on top. Each row is checked like
+  an NDJSON line (`Event.Validate`; empty lists the decoder
+  returns become absent ones first, the contract's equality);
+  the footer, parsed once per read, must say `events`, this
+  schema version and — the caller's `want` — the project,
+  FQDN, session and seq of the file's name and directory.
+  `CheckEvents` is the child's read: it also requires one host
+  id in the file and at least one event. Table files read
+  through `ReadTable`; the build counts them but does not read
+  them yet (M5's conversations need the Java tables).
 - **One source per segment.** `LoadSegments` lists
   `<store>/<project>/<host>/*.parquet` (every project directory
   without `-project`; dot files skipped, other entries reported
@@ -4055,42 +4080,66 @@ iormeshctl show [summary|services|edges|health] [-project P]... [-json]
   `<project>/<host>/<file>` — stable wherever the store lives —
   because the service database counts requests per source and
   only a segment is immutable and may later be deleted (task
-  hb4). The footer must match the name and the directory
-  (project, FQDN, session, seq), every event the project, and a
-  session's events one host id.
+  hb4).
+- **Host identity** (`hosts.go`). A server names its own files
+  and writes its own events, so it could plant
+  `hostB.example.org-…` files with hostB's host id in its own
+  `ready/`; the merge and the service database (keyed by host
+  id, additive) would take them as hostB's. The store directory
+  is the one thing a server cannot choose, so each host identity
+  (host id, FQDN) is tied to one directory: a segment whose host
+  id is not its session's, a session whose directory is pinned
+  to another identity, every session of a directory holding two
+  identities, and every session of an identity — host id or
+  FQDN — found under two directories is bad. The first build
+  pins each directory to the identity it saw
+  (`~/.local/share/iormesh/hosts.json`, 0600, never
+  overwritten; a host reinstalled under the same registry name
+  needs its entry removed by hand). Pin mismatches are checked
+  first, so a forgery in a pinned directory does not taint the
+  genuine host's sessions. One machine registered under two
+  names collides with this rule.
 - **The graph is rebuilt** (decision #3, the server keeps none)
-  in a first pass per session, segments in seq order, by the
-  correlator's rules (`rebuild.go`): host, process (newest
-  comm), runs_on; opened for successful opens and creat, and the
-  new name of a rename that moved a file the process held open
-  (opens, closes, unlinks and renames followed through the
-  events); socket and connected for every conn_id, fused for a
-  pipe or socketpair or a conn_id with both a connect and an
-  accept on the host; signaled for a delivered signal from a
-  traced sender. Not rebuilt — no event says it: app nodes and
-  incarnation edges, forked edges, a child's inherited fds.
-  Every segment of a session returns the session's graph; the
-  merge's union keeps one copy. `TestSegmentMergeGolden` writes
+  once per session, segments in seq order, by the correlator's
+  rules (`rebuild.go`): host, process (newest comm), runs_on;
+  opened for successful opens and creat, and the new name of a
+  rename that moved a file the process held open (opens,
+  closes, dup, dup2, dup3, fcntl `F_DUPFD`/`F_DUPFD_CLOEXEC`,
+  unlinks, renames, and an exec closing the close-on-exec fds,
+  followed through the events); socket and connected for every
+  conn_id, fused for a pipe or socketpair or a conn_id with both
+  a connect and an accept on the host; signaled for a delivered
+  signal from a traced sender. Not rebuilt — no event says it:
+  app nodes and incarnation edges, forked edges, a child's
+  inherited fds, close-on-exec set by `F_SETFD`. Every segment of
+  a session returns the session's graph; the merge's union keeps
+  one copy. `TestSegmentMergeGolden` writes
   `testdata/mesh.golden`'s traces as rotated segments and merges
-  them to the same bytes as the NDJSON merge.
-- **Bad segments.** A segment that fails in the first pass is
-  dropped and its session read again without it (the graph's
-  fd state runs across segments, so half a segment cannot be
-  taken back otherwise). The build goes on with the rest, names
-  each in the summary and in `model.json`, and exits 1 after
-  writing the outputs; the file stays in the store.
-- **Passes.** Load (check + graph), merge (the run's tally rides
-  along: `talliedSegment`), `servicedb.Observe` — three reads of
-  every segment, none holding events. What grows with the input
-  is the merge's per-connection state (keys, the data records'
-  stream offsets for the clock bounds), the graph, the service
-  database rows and one tally per session.
+  them to the same bytes as the NDJSON merge;
+  `TestRebuildCorrelatorExport` rebuilds the correlator's own
+  export golden (`internal/correlate/testdata`) to its graph.
+- **Bad segments.** A segment the check fails, or whose host
+  identity is in doubt, is left out before anything else reads
+  it. The build goes on with the rest, names each — by its store
+  name, never the absolute path — in the summary and in
+  `model.json`, and exits 1 after writing the outputs; the file
+  stays in the store. A read failing later (a file changed under
+  the build) drops that segment and rebuilds its session's graph
+  without it.
+- **Passes.** Check (the child), graph, merge (the run's tally
+  rides along: `talliedSegment`), `servicedb.Observe` — four
+  reads of every segment, none holding events. What grows with
+  the input is the merge's per-connection state (keys, the data
+  records' stream offsets for the clock bounds), the graph, the
+  service database rows and one tally per session.
 - **Outputs.** `<builds>/<project>[+<project>…]/graph.json`
   (`schema.WriteGraphFile`) and `model.json` (indented JSON),
-  both written atomically into a 0700 directory; many projects
-  together get `projects-<hash>`. Build never contacts a server,
-  and the merge is sorted, the import idempotent, the model free
-  of clocks and paths — so a rerun writes the same bytes.
+  both written atomically; the builds directory is refused when
+  someone else owns it or others can write it, and the build's
+  own directory is forced to 0700. Many projects together get
+  `projects-<hash>`. Build never contacts a server, and the
+  merge is sorted, the import idempotent, the model free of
+  clocks and local paths — so a rerun writes the same bytes.
 - **The model** (`internal/viewmodel`, V1 of
   docs/visualization.md): `Run` (projects, hosts, sessions,
   segments, events, time range, fused and unresolved TCP
@@ -4101,24 +4150,37 @@ iormeshctl show [summary|services|edges|health] [-project P]... [-json]
   by `Filter.Projects`, so the whole history of the projects,
   not only the segments still in the store; an edge is `fused`,
   `unresolved` or `mixed`). `show` reads `model.json` alone.
+  Every text view passes every string through
+  `termsafe.String` first (a string with a control character is
+  printed Go-quoted), so an escape sequence in a comm, hostname
+  or file name never reaches the terminal raw; `iormeshctl
+  services` uses the same function.
 - **`refresh`** collects (the registry's hosts, or HOST...) and
   then builds every host directory of the projects; a host
   whose collect failed is reported, the store still built, and
   the command exits 1.
 - Tests: `internal/segment/reader_test.go` (round trip through
-  the writer at batch and row-group edges, tables, names,
-  damaged files: empty, garbage, truncated, footer cut, pages
-  zeroed); `internal/federate/segments_test.go` and
-  `rebuild_test.go` (the golden mesh from segments, the rebuild
-  against each trace's correlator graph and per rule, bad
-  segments, a session of two host ids);
-  `internal/viewmodel/new_test.go`; `internal/ctl/build_test.go`
-  — a two-host, two-project mesh written as rotated segments:
-  summary, graph and model goldens (`testdata/build_*.golden`),
-  byte-identical rebuilds, a naming rule shown by name, request
-  counts exact over repeated builds and after deleting segments,
-  a damaged segment, refusals, every `show` view, and `refresh`
-  over a fake transport.
+  the writer at batch and row-group edges, tables, names;
+  damaged files — empty, garbage, truncated, footer cut, pages
+  zeroed; 3000 single-byte flips weighted to the footer and
+  footer lengths past the file, none panicking; `FuzzReadEvents`
+  for `go test -fuzz`); `internal/federate/segments_test.go`
+  and `rebuild_test.go` (the golden mesh from segments, the
+  rebuild against the mesh traces' and the correlator's export
+  graphs and per rule, fd copies and exec, bad segments, a
+  session of two host ids, a checker failure, host spoofing:
+  an identity under two directories, two identities in one, a
+  pinned directory); `internal/viewmodel/new_test.go` (tally,
+  clocks, services and edges, determinism, escape sequences in
+  every text view); `internal/ctl/build_test.go` and
+  `check_test.go` — a two-host, two-project mesh written as
+  rotated segments: summary, graph and model goldens
+  (`testdata/build_*.golden`), byte-identical rebuilds, a naming
+  rule shown by name, request counts exact over repeated builds
+  and after deleting segments, a damaged segment, refusals,
+  every `show` view, `refresh` over a fake transport, the check
+  child (a good segment, garbage, and on Linux an address space
+  too small to decode in), host pins, an open builds directory.
 
 ### The microservices scenario
 

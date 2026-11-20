@@ -3,6 +3,7 @@ package federate
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -91,7 +92,7 @@ func meshStore(t *testing.T) string {
 // and merged from the store gives the NDJSON merge's result byte for byte
 // (testdata/mesh.golden) — the graph rebuilt from the events included.
 func TestSegmentMergeGolden(t *testing.T) {
-	segs, err := LoadSegments(context.Background(), meshStore(t), nil)
+	segs, err := LoadSegments(context.Background(), meshStore(t), nil, LoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +168,7 @@ func TestLoadSegmentsSkipsBadOnes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	segs, err := LoadSegments(context.Background(), store, nil)
+	segs, err := LoadSegments(context.Background(), store, nil, LoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +195,7 @@ func TestLoadSegmentsSkipsBadOnes(t *testing.T) {
 // TestLoadSegmentsUnknownProject: a project with nothing collected is an
 // error, not an empty build.
 func TestLoadSegmentsUnknownProject(t *testing.T) {
-	_, err := LoadSegments(context.Background(), t.TempDir(), []string{"shop"})
+	_, err := LoadSegments(context.Background(), t.TempDir(), []string{"shop"}, LoadOptions{})
 	if err == nil || !strings.Contains(err.Error(), "nothing collected for project shop") {
 		t.Fatalf("err = %v", err)
 	}
@@ -210,12 +211,91 @@ func TestSegmentSessionOfTwoHosts(t *testing.T) {
 		tr.events[i].HostID = "hostZ"
 	}
 	writeSegments(t, store, "app1", "a1b2c3d4", tr, 4)
-	segs, err := LoadSegments(context.Background(), store, []string{"shop"})
+	segs, err := LoadSegments(context.Background(), store, []string{"shop"}, LoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(segs.Bad) != 1 || !strings.Contains(segs.Bad[0].Err.Error(), `host_id "hostZ"`) {
 		t.Fatalf("bad = %v", segs.Bad)
+	}
+}
+
+// badNames lists the names of segs.Bad.
+func badNames(segs Segments) []string {
+	var out []string
+	for _, b := range segs.Bad {
+		out = append(out, b.Name)
+	}
+	return out
+}
+
+// TestHostSpoofing: a server (app1) that drops segments named after
+// another host (hostB's FQDN and host_id) into its own ready/ gets
+// neither its forgery nor hostB's genuine sessions merged — the identity
+// appears under two host directories — and a directory pinned to one
+// identity refuses sessions of another.
+func TestHostSpoofing(t *testing.T) {
+	store := t.TempDir()
+	mesh := meshTraces()
+	writeSegments(t, store, "app1", "a1b2c3d4", mesh["a"], 100)
+	writeSegments(t, store, "app2", "b1b2c3d4", mesh["b"], 100)
+	forged := newTrace("hostB", "shop")
+	forged.client(100, "f", "10.0.2.2:40000", "10.0.9.9:80", ISNPair{1, 2}, wall0)
+	writeSegments(t, store, "app1", "f0f0f0f0", forged, 100)
+	segs, err := LoadSegments(context.Background(), store, nil, LoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := strings.Join(badNames(segs), " ")
+	if !strings.Contains(bad, "shop/app1/hostB.example.org-f0f0f0f0") ||
+		!strings.Contains(bad, "billing/app2/hostB.example.org-b1b2c3d4") {
+		t.Errorf("bad = %s", bad)
+	}
+	for _, s := range segs.Sources {
+		if s.hostID == "hostB" {
+			t.Errorf("hostB's segment %s merged", s.Name())
+		}
+	}
+	// app1 alone with the forgery: two identities in one directory.
+	if err := os.RemoveAll(filepath.Join(store, "billing")); err != nil {
+		t.Fatal(err)
+	}
+	segs, err = LoadSegments(context.Background(), store, nil, LoadOptions{})
+	if err != nil || len(segs.Sources) != 0 || !strings.Contains(segs.Bad[0].Err.Error(), "2 different hosts") {
+		t.Fatalf("one dir, two hosts: %v, %v", segs, err)
+	}
+	// Pinned: app1 is hostA, so the hostB session alone is refused.
+	if err := os.Remove(filepath.Join(store, "shop", "app1",
+		filepath.Base(segment.Name("hostA.example.org", "a1b2c3d4", segT0, 0)))); err != nil {
+		t.Fatal(err)
+	}
+	known := map[string]HostIdentity{"app1": {HostID: "hostA", FQDN: "hostA.example.org"}}
+	segs, err = LoadSegments(context.Background(), store, nil, LoadOptions{Known: known})
+	if err != nil || len(segs.Sources) != 0 || len(segs.Bad) != 1 ||
+		!strings.Contains(segs.Bad[0].Err.Error(), "app1 is pinned to host_id hostA") {
+		t.Fatalf("pinned: %+v, %v", segs.Bad, err)
+	}
+}
+
+// TestCheckerFailureIsBad: a segment the checker (the controller's
+// memory-capped child) fails is bad, and nothing else reads it.
+func TestCheckerFailureIsBad(t *testing.T) {
+	store := t.TempDir()
+	paths := writeSegments(t, store, "app1", "a1b2c3d4", meshTraces()["a"], 4)
+	check := func(ctx context.Context, path string) (segment.Summary, error) {
+		if path == paths[0] {
+			return segment.Summary{}, fmt.Errorf("segment: %s: child killed: out of memory", path)
+		}
+		return segment.CheckEvents(ctx, path, nil)
+	}
+	segs, err := LoadSegments(context.Background(), store, nil, LoadOptions{Check: check})
+	if err != nil || len(segs.Bad) != 1 || len(segs.Sources) != len(paths)-1 {
+		t.Fatalf("%+v, %v", segs.Bad, err)
+	}
+	// The error names the store name, never the absolute path.
+	if msg := segs.Bad[0].Err.Error(); strings.Contains(msg, store) ||
+		!strings.Contains(msg, "shop/app1/") {
+		t.Errorf("bad segment error %q", msg)
 	}
 }
 

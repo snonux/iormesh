@@ -23,10 +23,13 @@ import (
 // `iormeshctl build [-project P]...` (PLAN.md M4 "Build", "Three
 // commands, two jobs"): merge what collect put in the store, offline.
 //
-//  1. federate.LoadSegments reads every events segment of the projects
-//     once: each event is checked, and each session's graph is rebuilt
-//     from its events (decision #3: the server keeps none). A segment
-//     that fails is skipped whole and reported (see "Bad segments").
+//  1. federate.LoadSegments decodes every events segment of the projects
+//     once in a memory-capped child process (check.go: a compromised
+//     server's file must not exhaust the build's memory), holds each
+//     store host directory to one host identity (pinned in hosts.json),
+//     and rebuilds each session's graph from its events (decision #3:
+//     the server keeps none). A segment that fails is skipped whole and
+//     reported (see "Bad segments").
 //  2. federate.Merge fuses the hosts' TCP ends into cross-host edges and
 //     bounds the clocks; the events it reads also feed the run's tally.
 //  3. servicedb.Observe and Import fold the mesh into the service
@@ -40,11 +43,11 @@ import (
 // Build never contacts a server, and everything it writes is a function
 // of the store and the database, so a rerun over the same segments
 // writes the same bytes (the import is idempotent, the merge sorted, the
-// model free of clocks and paths).
+// model free of clocks and local paths).
 //
 // Bad segments: a segment that cannot be read, whose footer disagrees
-// with its name or directory, or whose events do not validate is left
-// out of the build, named in the summary and the model, and makes the
+// with its name or directory, whose events do not validate or whose host
+// identity is in doubt is left out of the build, named in the summary and the model, and makes the
 // command exit 1 after the outputs are written. Skipping keeps the mesh
 // of every good segment available — one damaged file of a long run does
 // not hide the rest — while the exit status keeps the loss from being
@@ -52,7 +55,9 @@ import (
 // inspect or delete; nothing is ever deleted by a build.
 //
 // Memory: segments are streamed (internal/segment's reader decodes 512
-// rows at a time) and no pass holds events; what grows with the input is
+// rows at a time, plus a row group's pages) and no pass holds events;
+// a segment is read in this process only after the capped child decoded
+// it, and decoding is deterministic. What grows with the input is
 // the merge's per-connection state (keys, the TCP data records' stream
 // offsets the clock bounds need), the graph, the service database's
 // per-connection rows and the tally's per-session counts.
@@ -135,7 +140,7 @@ func build(ctx context.Context, e env, f buildFlags) (buildOutput, error) {
 	if err != nil {
 		return buildOutput{}, err
 	}
-	segs, err := federate.LoadSegments(ctx, paths.store, projects)
+	segs, err := loadSegments(ctx, paths, projects)
 	if err != nil {
 		return buildOutput{}, err
 	}
@@ -153,6 +158,28 @@ func build(ctx context.Context, e env, f buildFlags) (buildOutput, error) {
 		return buildOutput{}, err
 	}
 	return buildOutput{model: model, dir: dir}, nil
+}
+
+// loadSegments loads the projects' segments, each checked in a
+// memory-capped child (check.go) and each host directory held to the
+// identity pinned for it, then pins the directories seen for the first
+// time.
+func loadSegments(ctx context.Context, paths buildPaths, projects []string) (federate.Segments, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return federate.Segments{}, fmt.Errorf("build: %w", err)
+	}
+	pinsPath := filepath.Join(filepath.Dir(paths.db), hostPinsFileName)
+	pins, err := loadHostPins(pinsPath)
+	if err != nil {
+		return federate.Segments{}, err
+	}
+	segs, err := federate.LoadSegments(ctx, paths.store, projects, federate.LoadOptions{
+		Check: childChecker(exe, checkAddressSpace), Known: pins})
+	if err != nil {
+		return federate.Segments{}, err
+	}
+	return segs, pinNewHosts(pinsPath, pins, segs.Hosts)
 }
 
 // mergeAndImport merges the segments, folds the result into the service
@@ -284,6 +311,19 @@ func buildKey(projects []string) string {
 func writeOutputs(builds string, projects []string, g schema.Graph, m viewmodel.Model) (string, error) {
 	dir := filepath.Join(builds, buildKey(projects))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("build: %w", err)
+	}
+	// An existing builds directory is held to the store's rule (owned,
+	// not writable by others: whoever could write it could swap the
+	// build's directory for a symlink), and the build's own directory
+	// is made 0700 whatever an earlier run or umask left.
+	if err := checkStoreDir(builds); err != nil {
+		return "", fmt.Errorf("build outputs: %w", err)
+	}
+	if fi, err := os.Lstat(dir); err != nil || !fi.IsDir() {
+		return "", fmt.Errorf("build outputs: %s is not a directory (a symlink?)", dir)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
 		return "", fmt.Errorf("build: %w", err)
 	}
 	if err := schema.WriteGraphFile(filepath.Join(dir, graphFileName), g); err != nil {

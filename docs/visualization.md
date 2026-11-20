@@ -261,9 +261,9 @@ reads, for the M4 test mesh:
 
 ```
 built      billing+shop: 2 hosts, 2 sessions, 8 segments, 22 events, …
-merged     3 services, 2 edges (1 fused, 0 mixed, 1 unresolved); tcp 1 fused, 1 unresolved
-health     0 lost, 0 skipped runs, 0 unattributed, 0 attach gap; clock bounds <= 740µs
-clock      hostA.example.org ~ hostB.example.org: 1 windows, width 740µs-740µs
+merged     3 services, 2 edges (1 fused, 0 mixed, 1 unresolved); tcp …
+health     0 lost, 0 skipped runs, 0 unattributed, 0 attach gap; clock …
+clock      hostA.example.org ~ hostB.example.org: 1 windows, width …
 session    shop/app1 a1b2c3d4: no end recorded (running, or cut short)
 unresolved java -> 203.0.113.9:5432 (1 of 1 connections)
 ```
@@ -276,7 +276,11 @@ service (the database counts them per endpoint, not per client),
 and bytes and latency percentiles are not in the model yet.
 `show` has `summary`, `services`, `edges [-unresolved]` and
 `health`, each with `-json`, read from the build's
-`model.json`; the site path line comes with V3.
+`model.json`; the site path line comes with V3. (Lines cut
+with … here; `internal/ctl/testdata/build_summary.golden` has
+them whole.) Every string from the traces is printed
+terminal-safe: one holding a control character comes out
+Go-quoted, never as an escape sequence.
 
 Tests: golden files on the serialized model and on every `show`
 view; the site's `data/*.js` are goldens too, and one headless

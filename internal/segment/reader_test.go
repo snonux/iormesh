@@ -2,7 +2,9 @@ package segment
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +19,7 @@ import (
 func readAll(t *testing.T, path string) ([]schema.Event, Meta, error) {
 	t.Helper()
 	var evs []schema.Event
-	m, err := ReadEvents(context.Background(), path, func(ev *schema.Event) error {
+	m, err := ReadEvents(context.Background(), path, nil, func(ev *schema.Event) error {
 		evs = append(evs, *ev)
 		return nil
 	})
@@ -163,6 +165,85 @@ func TestReadDamagedFile(t *testing.T) {
 	}
 }
 
+// goodSegment is a published events file's bytes.
+func goodSegment(t testing.TB) []byte {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "shop")
+	w, err := New(Config{Dir: dir, FQDN: "app-1.example.org", Session: "a1b2c3d4", Project: "shop",
+		Now: func() time.Time { return t0 }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evs := richEvents()
+	for i := range evs {
+		if err := w.Event(&evs[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ReadyDir, Name("app-1.example.org", "a1b2c3d4", t0, 0)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+// readHostile writes data to a file and reads it every way the
+// controller does; it must return, never panic.
+func readHostile(t testing.TB, data []byte) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "x.parquet")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = ReadMeta(path)
+	_, _ = CheckEvents(context.Background(), path, nil)
+	_, _ = ReadTable(context.Background(), path, TableStacks, func(*schema.Stack) error { return nil })
+}
+
+// TestReadHostileFile: what a compromised server could send — every
+// single-byte flip of a real segment (the footer's included, where
+// parquet-go panics in its column loader) and footer lengths far past
+// the file — is an error, never a panic and never a multi-GiB
+// allocation.
+func TestReadHostileFile(t *testing.T) {
+	good := goodSegment(t)
+	r := rand.New(rand.NewPCG(1, 2))
+	flips := 3000
+	if testing.Short() {
+		flips = 300
+	}
+	for i := range flips {
+		bad := append([]byte(nil), good...)
+		// Half the flips land in the last KiB, the footer.
+		pos := r.IntN(len(bad))
+		if i%2 == 0 {
+			pos = len(bad) - 1 - r.IntN(min(1024, len(bad)))
+		}
+		bad[pos] ^= byte(1 + r.IntN(255))
+		readHostile(t, bad)
+	}
+	for _, footer := range []uint32{0xF0000000, MaxFooterSize + 1, uint32(len(good))} {
+		bad := append([]byte(nil), good...)
+		binary.LittleEndian.PutUint32(bad[len(bad)-8:], footer)
+		path := filepath.Join(t.TempDir(), "x.parquet")
+		if err := os.WriteFile(path, bad, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReadMeta(path); err == nil || !strings.Contains(err.Error(), "footer of") {
+			t.Errorf("footer length %#x: %v", footer, err)
+		}
+	}
+}
+
+// FuzzReadEvents: no input makes the reader panic (go test -fuzz).
+func FuzzReadEvents(f *testing.F) {
+	f.Add(goodSegment(f))
+	f.Fuzz(func(t *testing.T, data []byte) { readHostile(t, data) })
+}
+
 // zeroed returns a copy of data with [from, to) zeroed: pages destroyed,
 // the footer intact.
 func zeroed(data []byte, from, to int) []byte {
@@ -181,7 +262,7 @@ func TestReadEventsStopsOnCallerError(t *testing.T) {
 	stop := errors.New("stop")
 	n := 0
 	_, err := ReadEvents(context.Background(), filepath.Join(dir, ReadyDir,
-		Name("app-1.example.org", "a1b2c3d4", t0, 0)), func(*schema.Event) error {
+		Name("app-1.example.org", "a1b2c3d4", t0, 0)), nil, func(*schema.Event) error {
 		n++
 		return stop
 	})

@@ -1,6 +1,8 @@
 package federate
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -78,6 +80,73 @@ func TestRebuildRules(t *testing.T) {
 				t.Errorf("edges = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestRebuildFDCopies: a dup'd fd follows a rename like the original;
+// a close-on-exec fd an exec closed does not.
+func TestRebuildFDCopies(t *testing.T) {
+	p1 := schema.ProcessNodeID("h", 1, 1)
+	ren := rebuildEvent(1, schema.KindRename, schema.NoFD, 0)
+	ren.Args.Path, ren.Args.NewPath = ptr("/d/a.tmp"), ptr("/d/a")
+	open := withPath(rebuildEvent(1, schema.KindOpenat, 4, 4), "/d/a.tmp")
+	cloexecOpen := open
+	cloexecOpen.Args.Flags = ptr(uint32(oCloexec))
+	dup := rebuildEvent(1, schema.KindDup, 4, 9)
+	fcntl := rebuildEvent(1, schema.KindFcntl, 4, 10)
+	fcntl.Args.Cmd = ptr(uint32(fDupFDCloexec))
+	exec := rebuildEvent(1, schema.KindExec, schema.NoFD, 0)
+	moved := []string{"opened " + p1 + " file:h:/d/a ", "opened " + p1 + " file:h:/d/a.tmp "}
+	for _, tc := range []struct {
+		name string
+		evs  []schema.Event
+		want []string
+	}{
+		{"dup then close the original", []schema.Event{open, dup, rebuildEvent(1, schema.KindClose, 4, 0), ren}, moved},
+		{"exec keeps a plain fd", []schema.Event{open, exec, ren}, moved},
+		{"exec closes an O_CLOEXEC fd", []schema.Event{cloexecOpen, exec, ren}, moved[1:]},
+		{"exec closes an F_DUPFD_CLOEXEC copy", []schema.Event{open, fcntl,
+			rebuildEvent(1, schema.KindClose, 4, 0), exec, ren}, moved[1:]},
+	} {
+		g := newGraphRebuilder()
+		for i := range tc.evs {
+			g.add(&tc.evs[i])
+		}
+		got := slices.DeleteFunc(edgeList(g.graph()), func(s string) bool {
+			return strings.HasPrefix(s, schema.EdgeRunsOn+" ")
+		})
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%s: edges = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestRebuildCorrelatorExport: the correlator's own export golden
+// (internal/correlate/testdata) rebuilt from its events is its graph.
+func TestRebuildCorrelatorExport(t *testing.T) {
+	f, err := os.Open(filepath.Join("..", "correlate", "testdata", "export.ndjson"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	evs, err := schema.ReadNDJSON(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join("..", "correlate", "testdata", "export.graph.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := schema.DecodeGraph(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := newGraphRebuilder()
+	for i := range evs {
+		g.add(&evs[i])
+	}
+	if got := graphText(t, g.graph()); got != graphText(t, want) {
+		t.Errorf("rebuilt\n%s\nwant\n%s", got, graphText(t, want))
 	}
 }
 

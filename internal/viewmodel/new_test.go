@@ -134,3 +134,32 @@ func TestModelDeterministic(t *testing.T) {
 		}
 	}
 }
+
+// TestTextIsTerminalSafe: an escape sequence in any server-supplied
+// string (a comm, a hostname, a segment file name, an error) never
+// reaches the terminal raw from any text view.
+func TestTextIsTerminalSafe(t *testing.T) {
+	const esc = "\x1b]0;pwned\x07\x1b[2J"
+	tl := NewTally()
+	tl.Add(SessionKey{Project: "p", Host: "h", FQDN: "f" + esc, ID: "1"}, "s",
+		&schema.Event{HostID: "x", WallNS: 1, Event: schema.KindEnd, Args: schema.Args{EndReason: ptr(esc)}})
+	m := New(Input{Tally: tl, Ignored: []string{"p/h/" + esc},
+		BadSegments: []federate.BadSegment{{Name: "p/h/" + esc, Err: fmt.Errorf("bad %s", esc)}},
+		Endpoints:   []servicedb.Endpoint{{Hostname: "db" + esc, Port: 1, Conns: 1}},
+		Interactions: []servicedb.Interaction{{From: "java" + esc, To: "db" + esc + ":1", Conns: 1,
+			Unresolved: 1}}})
+	for name, write := range map[string]func(*bytes.Buffer) error{
+		"summary":  func(b *bytes.Buffer) error { return WriteSummary(b, m) },
+		"services": func(b *bytes.Buffer) error { return WriteServices(b, m) },
+		"edges":    func(b *bytes.Buffer) error { return WriteEdges(b, m, false) },
+		"health":   func(b *bytes.Buffer) error { return WriteHealth(b, m) },
+	} {
+		var b bytes.Buffer
+		if err := write(&b); err != nil {
+			t.Fatal(err)
+		}
+		if strings.ContainsAny(b.String(), "\x1b\x07") || !strings.Contains(b.String(), `\x1b`) {
+			t.Errorf("%s:\n%s", name, b.String())
+		}
+	}
+}
