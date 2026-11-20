@@ -3,7 +3,8 @@
 // counts a pattern session's attach gap) instead of
 // the single-TGID rodata PID_FILTER; the enter hooks flush the thread's
 // folded reads and writes first (iormesh_rw_flush, rwagg.c, M2 step 11);
-// filter() takes the pid and tid in the tracer's PID namespace (pidns.c, M7).
+// filter() takes the pid and tid in the tracer's PID namespace (pidns.c, M7);
+// the target-set tests ask the target hint first (targethint.c, task 9f4).
 
 //+build ignore
 
@@ -855,8 +856,14 @@ static __always_inline void ior_emit_second_name_fixup(__u32 tid, __u32 enter_tr
 // nothing, which is also what a pattern session does until its first match. A
 // PENDING entry (pattern sessions, waiting for userspace's verdict) is not
 // traced yet.
+//
+// The target hint (targethint.c) rules most tgids out before the lookup.
 static __always_inline int iormesh_pid_targeted(__u32 tgid) {
-    struct iormesh_target *t = bpf_map_lookup_elem(&target_map, &tgid);
+    struct iormesh_target *t;
+
+    if (!iormesh_target_hint(tgid))
+        return 0;
+    t = bpf_map_lookup_elem(&target_map, &tgid);
     return t && t->state == IORMESH_TARGET_TRACED;
 }
 
@@ -866,9 +873,14 @@ static __always_inline int iormesh_pid_targeted(__u32 tgid) {
 // attach_gap drop userspace reports once it adopts the process (maps.h), so
 // the gap is never silent. Only filter() counts, so each record is counted
 // once; it runs once per enter or exit handler, which emits one record each.
-// For processes absent from the map it costs what the plain lookup did.
+// A tgid the target hint (targethint.c) rules out costs one array access
+// instead of the hash lookup: that is nearly every call filter() sees.
 static __always_inline int iormesh_filter_tgid(__u32 tgid) {
-    struct iormesh_target *t = bpf_map_lookup_elem(&target_map, &tgid);
+    struct iormesh_target *t;
+
+    if (!iormesh_target_hint(tgid))
+        return 0;
+    t = bpf_map_lookup_elem(&target_map, &tgid);
     if (!t)
         return 0;
     if (t->state == IORMESH_TARGET_TRACED)

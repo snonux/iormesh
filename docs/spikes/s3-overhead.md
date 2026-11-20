@@ -1162,4 +1162,105 @@ on a quiet host its medians are 1.25× / 1.30× with wall clock
 1.28× / 1.27×, at and over the limit. Ways down, untried: skip
 the walk for tasks at a level below the tracer's before the
 helper call, or let the dispatcher answer the target-set test
-once per syscall instead of each handler.
+once per syscall instead of each handler. (Task 9f4 took the
+second, with a bitmap in front of the lookup; the item passes
+there — "Follow-up (9f4)" below.)
+
+## Follow-up (9f4): cutting the namespace bystander's cost
+
+Task 9f4 took on 4f4's open item. Same host, samples in
+`spikes/s3/results-9f4/` (`base` = `98747ba`, the build 4f4 left;
+`new` = this task's), every tracer `-aggregate=false`, the
+namespace runs under `unshare --pid --fork --mount-proc`.
+
+**Where the cost went.** `perf record -e instructions:k` on the
+`close(-1)` loop beside a host tracer put ~21 % of each call's
+kernel instructions in `target_map`'s hash lookup
+(`__htab_map_lookup_elem` and its bucket walk) — the handlers'
+`filter()`, at enter and exit, for a task that is no target. The
+rest of the ~1000 instructions the tracer adds is mostly the
+classic `raw_syscalls` tracepoints' own path (`trace_call_bpf`,
+`perf_trace_run_bpf_submit`, `trace_syscall_enter`/`_exit`),
+which 8e4 chose for losslessness and which no BPF change
+reaches. In a namespace, `iormesh_ns_cached_ids` (a global
+function call per handler) was the extra ~9 %.
+
+**Three cuts**, each checked by kernel instructions per call:
+
+1. A *target hint* (`internal/c/targethint.c`): one bit per pid
+   in front of `target_map`. A clear bit rules a pid out with an
+   inlined array access; only a set bit goes on to the lookup,
+   which still decides. The kernel's bitmap is written only by a
+   bit's owner (task_newtask for a child, the exec watch for its
+   process, the group-dead exit clears it) with `BPF_XADD`, so
+   5.8 stays the floor; AddTarget's bits live in a second,
+   userspace-only map. 1397 → 1288 per call in host mode (perf's
+   21 % share was sampling attribution; the lookups cost ~55 each),
+   1495 → 1386 in the namespace.
+2. The dispatcher answers the scope test before the tail call
+   (`iormesh_dispatch_in_scope`, dispatch.c): the tracer itself
+   and a hint-negative task never enter a handler. Alone, this
+   made every syscall of an *untraced* kind pay the test
+   (a `getppid` loop +115 instructions per call on the host,
+   +200 in a namespace), so the dispatcher first asks a mirror of
+   its program array (`syscall_{enter,exit}_traced`, filled with
+   the slots) whether the syscall is traced at all.
+3. The dispatcher's tgid comes inlined: in host mode a direct load
+   of the BTF task's `tgid` instead of the helper call, in a
+   namespace the per-CPU cache hit read in place (only the two
+   dispatchers inline it; the handlers keep the global function,
+   whose verification cost 4f4 measured).
+
+**Kernel instructions per call** (`kinsn.txt`, three interleaved
+rounds, identical to ±1):
+
+| | `close(-1)` | over no tracer | `getppid` |
+|---|--:|--:|--:|
+| no tracer | 400 | — | 429 |
+| base, host mode | 1397 | +997 | 1137 |
+| base, in the namespace | 1495 | +1095 | 1147 |
+| base, outside the namespace | 1292 | +892 | 1147 |
+| new, host mode | 1233 | +833 | 1128 |
+| new, in the namespace | 1306 | +906 | 1140 |
+| new, outside the namespace | 1205 | +805 | 1140 |
+
+The tracer's cost to an in-namespace bystander's traced-kind call
+fell by 17 %, now below what host mode cost before; host mode fell
+by 16 %; untraced kinds got slightly cheaper. The namespace still
+pays ~73 more per call than host mode (the cache's key compare
+against one load). The whole `syscall-burst` (200 k ops, the JVM
+run's kernel instructions, three rounds) says the same: no tracer
+~651 M; base +404 M (host) / +442 M (namespace); new +336 M /
++366 M at 1 and 4 threads alike.
+
+**`syscall-burst`, bystander CPU ratio** (`bench-*.txt`: base and
+new, host and namespace, interleaved in one set — 2 sets × 5
+rounds, 20 pairs per thread count; the first set's last rounds ran
+at load 8–9 under another session's builds, the second waited for
+load ≤ 4 before every run and saw 2.1–5.3):
+
+| | 1 thread (pairs > 1.25) | wall | 4 threads (pairs > 1.25) | wall |
+|---|--:|--:|--:|--:|
+| base, host mode | 1.24 (10 of 20) | 1.23 | 1.16 (4 of 20) | 1.18 |
+| base, namespace | 1.23 (7 of 20) | 1.24 | 1.23 (8 of 20) | 1.25 |
+| new, host mode | 1.19 (3 of 20) | 1.19 | 1.15 (4 of 20) | 1.15 |
+| new, namespace | 1.23 (8 of 20) | 1.22 | 1.23 (7 of 20) | 1.21 |
+
+The second set alone: new namespace 1.21 / 1.23 (wall 1.22 /
+1.23), base namespace 1.23 / 1.23 (wall 1.24 / 1.25), new host
+1.18 / 1.18. Tracer CPU per event and instructions per event are
+unchanged (7.0 k); loss in traced runs as before (none at
+1 thread, some 4-thread runs lossy in every build, not gated);
+load-and-attach CPU within the busy host's spread of the base.
+
+**Verdict**: the namespace bystander item of #25 **passes**:
+1.23× at 4 threads (and at 1), wall clock 1.21× / 1.22×, under
+the 1.25× guard. Honestly told, the margin is thin and the burst
+ratio does not separate the builds the way the instruction counts
+do: the base build measured 1.23× / 1.23× in the same set (wall
+1.24× / 1.25×, at the guard), where 4f4's set had 1.25× / 1.30×,
+and host mode on this machine sits at 1.15–1.24× by itself. The
+firm result is the kernel cost: the tracer now adds 17 % fewer
+kernel instructions to every bystander syscall in either mode,
+and an in-namespace bystander pays less than a host-mode one did
+before. What is left is mostly the tracepoint path itself.

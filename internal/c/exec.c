@@ -6,7 +6,9 @@
 // traced execs (iormesh_emit_argv, PROCESS_ARGV_EVENT) and the read/write
 // aggregation's flush points (iormesh_rw_flush/_forget, rwagg.c, M2 step 11);
 // the Java mark's reset on thread exit (iormesh_java_mark_forget, javamark.c,
-// task td4); pids and tids in the tracer's PID namespace (pidns.c, M7).
+// task td4); pids and tids in the tracer's PID namespace (pidns.c, M7);
+// target_map's kernel inserts and removals keep the target hint
+// (targethint.c, task 9f4).
 
 //+build ignore
 
@@ -230,6 +232,8 @@ iormesh_watch_exec(void *ctx, __u32 fname_off, __u32 pid, __u32 tid) {
     now = bpf_ktime_get_boot_ns();
     pending.state = IORMESH_TARGET_PENDING;
     pending.since = now;
+    // The hint first: an entry filter() could not see would lose the gap.
+    iormesh_hint_set(pid);
     if (bpf_map_update_elem(&target_map, &pid, &pending, BPF_ANY))
         ior_count_ringbuf_drop();
     if (iormesh_emit_argv(ctx, fname_off, pid, tid, EXEC_ARGV_EVENT, now))
@@ -564,13 +568,19 @@ ior_emit_process_exit(__u32 pid, __u32 tid, __u32 group_dead) {
 // tgid would outlive its process, and whatever process the kernel later gave
 // that PID would be traced (or counted as a gap) without ever matching
 // anything. Only a group-dead exit qualifies: a thread exiting leaves its
-// siblings traced. The lookup comes first, so the exits of the host's
-// untraced processes cost one hash lookup and no group_dead read.
+// siblings traced. The target hint (targethint.c) comes first, so the exits
+// of the host's untraced processes cost one array access and no group_dead
+// read. The process's kernel hint bit goes with its entry: this exit is the
+// bit's last owner, and the pid's next process starts clear. A hint without
+// an entry (a dismissed exec) is cleared too, and the delete then finds
+// nothing.
 static __always_inline void iormesh_forget_target(void *ctx, __u32 tgid) {
-    if (!tgid || !bpf_map_lookup_elem(&target_map, &tgid))
+    if (!tgid || !iormesh_target_hint(tgid))
         return;
-    if (ior_exit_group_dead(ctx))
-        bpf_map_delete_elem(&target_map, &tgid);
+    if (!ior_exit_group_dead(ctx))
+        return;
+    bpf_map_delete_elem(&target_map, &tgid);
+    iormesh_hint_clear(tgid);
 }
 
 SEC("tracepoint/sched/sched_process_exit")
@@ -707,6 +717,8 @@ iormesh_follow_child(__u64 clone_flags, __u32 creator_pid, __u32 child_pid) {
     if (!iormesh_pid_targeted(creator_pid))
         return;
     traced.state = IORMESH_TARGET_TRACED;
+    // The hint first, so the child's first syscall finds both.
+    iormesh_hint_set(child_pid);
     if (bpf_map_update_elem(&target_map, &child_pid, &traced, BPF_ANY))
         ior_count_ringbuf_drop();
 }

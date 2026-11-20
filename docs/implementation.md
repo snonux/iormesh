@@ -5018,9 +5018,14 @@ depends on:
      follow-up 4f4): host mode +1.0 k as before; in the namespace
      +1.4 k with the walk and helper alone, +1.1 k with the
      cache; a process outside the namespace +1.6 k without the
-     cache, +0.9 k with it. Decision #25's bystander item stays
-     open in namespace mode: 1.25× / 1.30× on a quiet host
-     (s3-overhead.md, "Follow-up (4f4)").
+     cache, +0.9 k with it. That left decision #25's bystander
+     item open in namespace mode (1.25× / 1.30×); task 9f4 closed
+     it: a target-hint bitmap rules most pids out before the
+     `target_map` lookup (`targethint.c`), and the dispatcher
+     answers the scope test before the tail call, behind a mirror
+     of its program array so untraced kinds skip the test. +0.83 k
+     per call in host mode, +0.91 k in the namespace; 1.23× /
+     1.23× (s3-overhead.md, "Follow-up (9f4)").
    - Both run in global BPF functions (`iormesh_ns_ids`,
      `iormesh_ns_current_ids`): the verifier checks each once
      per program and the callers see an unknown scalar. Inlined,

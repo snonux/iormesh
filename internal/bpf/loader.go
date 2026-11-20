@@ -92,6 +92,8 @@ type Tracer struct {
 	// pidNS is the inode of the tracer's PID namespace, 0 on the host
 	// (pidns.go): every pid of the session is numbered there.
 	pidNS uint32
+	// hintMu orders AddTarget's updates of the target hint (targets.go).
+	hintMu sync.Mutex
 }
 
 // Open loads the object, excludes the tracer itself, fills target_map,

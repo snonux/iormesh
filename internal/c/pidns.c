@@ -228,6 +228,20 @@ static __always_inline __u64 iormesh_current_start_time(void) {
     return BPF_CORE_READ((struct task_struct *)bpf_get_current_task(), start_time);
 }
 
+// iormesh_ns_cache_hit reports whether ns_ids_cache holds the current
+// task's pair, and returns it in *ids.
+static __always_inline int iormesh_ns_cache_hit(__u64 *ids) {
+    struct iormesh_ns_ids_slot *slot;
+    __u32 zero = 0;
+
+    slot = bpf_map_lookup_elem(&ns_ids_cache, &zero);
+    if (!slot || slot->task != bpf_get_current_task() ||
+        slot->start != iormesh_current_start_time())
+        return 0;
+    *ids = slot->ids;
+    return 1;
+}
+
 // iormesh_ns_cached_ids is iormesh_ns_current_ids through ns_ids_cache.
 __noinline __u64 iormesh_ns_cached_ids(void) {
     struct iormesh_ns_ids_slot *slot;
@@ -262,6 +276,30 @@ static __always_inline __u64 iormesh_filter_pid_tgid(void) {
     if (!IORMESH_PIDNS_INUM)
         return bpf_get_current_pid_tgid();
     return iormesh_ns_cached_ids();
+}
+
+// iormesh_dispatch_tgid is the current task's tgid in the tracer's
+// namespace for the raw_syscalls dispatchers' scope test (dispatch.c), which
+// every traced kind's syscall of every task on the host meets twice. So the
+// common answers are inlined: in host mode the tgid is a direct load from the
+// BTF-typed current task (bpf_get_current_task_btf, which the verifier
+// inlines, Linux 5.11; the helper call elsewhere), and in a namespace a
+// cache hit is read in place - inlined into the dispatchers only, two
+// programs, so the handlers' verification (iormesh_ns_cached_ids) is not
+// touched. Measured on a close(-1) loop (task 9f4): the global function's
+// call and the helper call cost a namespace bystander ~25 and a host one ~10
+// kernel instructions per dispatcher run.
+static __always_inline __u32 iormesh_dispatch_tgid(void) {
+    __u64 ids;
+
+    if (!IORMESH_PIDNS_INUM) {
+        if (bpf_core_enum_value_exists(enum bpf_func_id, BPF_FUNC_get_current_task_btf))
+            return (__u32)bpf_get_current_task_btf()->tgid;
+        return bpf_get_current_pid_tgid() >> 32;
+    }
+    if (iormesh_ns_cache_hit(&ids))
+        return ids >> 32;
+    return iormesh_ns_cached_ids() >> 32;
 }
 
 // iormesh_current_pid_tgid is bpf_get_current_pid_tgid() in the tracer's

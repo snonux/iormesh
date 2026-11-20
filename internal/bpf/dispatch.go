@@ -44,14 +44,26 @@ var dispatchers = []Probe{
 	{Program: "handle_raw_sys_enter", Category: rawSyscalls, Event: "sys_enter"},
 }
 
-// slotLink is one filled program-array slot; Destroy empties it again.
+// tracedMaps names each program array's mirror (dispatch.c,
+// syscall_*_traced): 1 in every filled slot, so the dispatcher can tell a
+// traced syscall before its scope test, which only a traced one pays.
+var tracedMaps = map[string]string{
+	enterProgsMap: "syscall_enter_traced",
+	exitProgsMap:  "syscall_exit_traced",
+}
+
+// slotLink is one filled program-array slot and its mirror entry; Destroy
+// empties both again.
 type slotLink struct {
-	m  *bpf.BPFMap
-	nr uint32
+	m, mirror *bpf.BPFMap
+	nr        uint32
 }
 
 func (s slotLink) Destroy() error {
-	nr := s.nr
+	nr, off := s.nr, uint32(0)
+	if err := s.mirror.Update(unsafe.Pointer(&nr), unsafe.Pointer(&off)); err != nil {
+		return fmt.Errorf("clear %s slot %d: %w", s.mirror.Name(), nr, err)
+	}
 	if err := s.m.DeleteKey(unsafe.Pointer(&nr)); err != nil {
 		return fmt.Errorf("clear %s slot %d: %w", s.m.Name(), nr, err)
 	}
@@ -62,7 +74,8 @@ func (s slotLink) Destroy() error {
 // probe in its dispatch slot. A syscall this kernel lacks - no tracepoint
 // of that name in tracefs, so the kernel has no such syscall - or one
 // without a number on this arch is skipped (ENOENT), as attaching to the
-// missing tracepoint used to be.
+// missing tracepoint used to be. The slot's mirror (tracedMaps) is set
+// with it.
 func (t *Tracer) attachSlot(p Probe) (link, error) {
 	mapName, nr, err := slotOf(p, syscallNumbers)
 	if err != nil {
@@ -80,12 +93,22 @@ func (t *Tracer) attachSlot(p Probe) (link, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get %s: %v", mapName, err)
 	}
+	mirror, err := t.module.GetMap(tracedMaps[mapName])
+	if err != nil {
+		return nil, fmt.Errorf("get %s: %v", tracedMaps[mapName], err)
+	}
 	fd := uint32(prog.FileDescriptor())
 	if err := m.Update(unsafe.Pointer(&nr), unsafe.Pointer(&fd)); err != nil {
 		return nil, fmt.Errorf("fill %s slot %d with %s: %v", mapName, nr, p.Program, err)
 	}
+	link := slotLink{m: m, mirror: mirror, nr: nr}
+	on := uint32(1)
+	if err := mirror.Update(unsafe.Pointer(&nr), unsafe.Pointer(&on)); err != nil {
+		return nil, errors.Join(fmt.Errorf("fill %s slot %d: %v", tracedMaps[mapName], nr, err),
+			link.Destroy())
+	}
 	t.slots++
-	return slotLink{m: m, nr: nr}, nil
+	return link, nil
 }
 
 // slotOf names the program array and the slot of a syscall probe, by its

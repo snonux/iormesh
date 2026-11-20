@@ -107,17 +107,64 @@ static __always_inline int iormesh_in_compat_syscall(void) {
 #endif
 }
 
+// syscall_enter_traced and syscall_exit_traced mirror the program arrays:
+// 1 in the slot of every syscall whose handler userspace stored there
+// (internal/bpf/dispatch.go writes both; a mirror and a slot that disagree
+// for a moment only skip a handler, as an empty slot does).
+// Why: a program array cannot be asked whether a slot is filled except by the
+// tail call itself, and the scope test below must come before that call. A
+// syscall of a kind no family traces - most of a host's - is told apart by
+// one inlined array load and pays no scope test (a getppid loop's dispatcher
+// cost rose by ~115 kernel instructions per call in host mode, ~200 in a
+// namespace, with the test ahead of the tail call and no mirror, task 9f4).
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, IORMESH_SYSCALL_SLOTS);
+    __type(key, __u32);
+    __type(value, __u32);
+} syscall_enter_traced SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, IORMESH_SYSCALL_SLOTS);
+    __type(key, __u32);
+    __type(value, __u32);
+} syscall_exit_traced SEC(".maps");
+
+// iormesh_dispatch_in_scope is filter()'s answer before the tail call, as
+// far as it can be given without the hash lookup: 0 for the tracer itself
+// and for a task the target hint (targethint.c) rules out. Why: nearly
+// every traced-kind call on the host is a bystander's, and a tail call into
+// a handler that only runs filter() to return cost ~30 kernel instructions
+// per dispatcher run more than this test (close(-1) loop, task 9f4). The
+// handler's filter() still decides - the hash lookup, the gap count of a
+// pending process, TID_FILTER - for whatever passes here.
+static __always_inline int iormesh_dispatch_in_scope(void) {
+    __u32 pid = iormesh_dispatch_tgid();
+
+    return pid && pid != IOR_PID_FILTER && iormesh_target_hint(pid);
+}
+
 // iormesh_dispatch tail-calls the handler in progs at the record's syscall
-// number. It returns only when there is none: a number out of range, a
-// compat syscall, or an untraced syscall (an empty slot).
-static __always_inline int iormesh_dispatch(void *ctx, void *progs) {
+// number. It returns only when there is none: a number out of range, an
+// untraced syscall (traced, progs' mirror, has no 1 there), a compat
+// syscall, or a task out of scope - whose handler would only have returned
+// at its filter().
+static __always_inline int iormesh_dispatch(void *ctx, void *progs, void *traced) {
     long id = ((struct iormesh_raw_syscall *)ctx)->id;
+    __u32 nr, *on;
 
     if (id < 0 || id >= IORMESH_SYSCALL_SLOTS)
         return 0;
+    nr = (__u32)id;
+    on = bpf_map_lookup_elem(traced, &nr);
+    if (!on || !*on)
+        return 0;
     if (iormesh_in_compat_syscall())
         return 0;
-    bpf_tail_call(ctx, progs, (__u32)id);
+    if (!iormesh_dispatch_in_scope())
+        return 0;
+    bpf_tail_call(ctx, progs, nr);
     return 0;
 }
 
@@ -128,10 +175,10 @@ int handle_raw_sys_enter(void *ctx) {
     // (pidns.c, M7); both pruned in host mode.
     iormesh_pidns_learn();
     iormesh_note_exec_tid(((struct iormesh_raw_syscall *)ctx)->id);
-    return iormesh_dispatch(ctx, &syscall_enter_progs);
+    return iormesh_dispatch(ctx, &syscall_enter_progs, &syscall_enter_traced);
 }
 
 SEC("tracepoint/raw_syscalls/sys_exit")
 int handle_raw_sys_exit(void *ctx) {
-    return iormesh_dispatch(ctx, &syscall_exit_progs);
+    return iormesh_dispatch(ctx, &syscall_exit_progs, &syscall_exit_traced);
 }

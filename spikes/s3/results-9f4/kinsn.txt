@@ -1,0 +1,85 @@
+# kernel instructions per call beside a tracer of an idle sleep
+# (perf stat -e instructions:k, 3 M calls on CPU 1; close = close(-1),
+# ppid = getppid, a kind no family traces). base = 98747ba (task 4f4),
+# new = task 9f4; host / in (loop in the tracer's PID namespace) / out
+# (loop on the host, tracer in a namespace).
+# round 1 load 1.80
+none close 400
+base host close 1398
+base in close 1495
+base out close 1292
+new host close 1233
+new in close 1305
+new out close 1205
+none ppid 429
+base host ppid 1137
+base in ppid 1147
+base out ppid 1147
+new host ppid 1128
+new in ppid 1140
+new out ppid 1140
+# round 2 load 2.17
+none close 400
+base host close 1397
+base in close 1496
+base out close 1292
+new host close 1233
+new in close 1306
+new out close 1205
+none ppid 429
+base host ppid 1137
+base in ppid 1147
+base out ppid 1147
+new host ppid 1128
+new in ppid 1140
+new out ppid 1140
+# round 3 load 2.37
+none close 400
+base host close 1397
+base in close 1495
+base out close 1292
+new host close 1233
+new in close 1306
+new out close 1206
+none ppid 429
+base host ppid 1137
+base in ppid 1147
+base out ppid 1147
+new host ppid 1128
+new in ppid 1140
+new out ppid 1140
+# syscall-burst --ops 200000, bystander beside the tracer, whole JVM
+# run's kernel (k) and user (u) instructions, millions
+# round 1 load 2.17
+none host t1 k=658M u=628M
+base host t1 k=1053M u=590M
+base in t1 k=1094M u=563M
+new host t1 k=991M u=557M
+new in t1 k=1023M u=591M
+none host t4 k=650M u=576M
+base host t4 k=1061M u=652M
+base in t4 k=1094M u=648M
+new host t4 k=986M u=575M
+new in t4 k=1013M u=574M
+# round 2 load 2.29
+none host t1 k=649M u=562M
+base host t1 k=1055M u=597M
+base in t1 k=1093M u=596M
+new host t1 k=988M u=625M
+new in t1 k=1017M u=625M
+none host t4 k=654M u=651M
+base host t4 k=1055M u=608M
+base in t4 k=1096M u=651M
+new host t4 k=991M u=648M
+new in t4 k=1020M u=604M
+# round 3 load 2.47
+none host t1 k=649M u=560M
+base host t1 k=1055M u=632M
+base in t1 k=1090M u=560M
+new host t1 k=984M u=559M
+new in t1 k=1014M u=562M
+none host t4 k=651M u=581M
+base host t4 k=1057M u=652M
+base in t4 k=1091M u=569M
+new host t4 k=990M u=655M
+new in t4 k=1017M u=606M

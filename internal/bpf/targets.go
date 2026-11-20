@@ -27,13 +27,51 @@ type targetValue struct {
 
 // AddTarget starts tracing pid. Its children follow it into the trace by
 // themselves (exec.c, iormesh_follow_child), and the kernel drops it from
-// the set once it exited (iormesh_forget_target).
+// the set once it exited (iormesh_forget_target). pid's target hint bit is
+// set first (setUserHint): filter() looks an entry up only behind a set bit.
 func (t *Tracer) AddTarget(pid uint32) error {
 	m, err := t.targetMap()
 	if err != nil {
 		return err
 	}
+	if err := t.setUserHint(pid); err != nil {
+		return err
+	}
 	return updateTarget(m, pid)
+}
+
+// hintUserMapName is userspace's target hint bitmap (targethint.c), and
+// hintUserWords its size in 64-bit words: IORMESH_HINT_USER_WORDS.
+const (
+	hintUserMapName = "target_hint_user"
+	hintUserWords   = 1 << 10
+)
+
+// setUserHint sets pid's bit in target_hint_user, folded to the bitmap's
+// 2^16 bits. Userspace is that map's only writer and hintMu orders its
+// read-modify-writes; the kernel's own bitmap is never touched from here,
+// since a word written by both could lose a bit (targethint.c). Bits are
+// never cleared: a stale one costs a hash lookup, a missing one a target.
+func (t *Tracer) setUserHint(pid uint32) error {
+	m, err := t.module.GetMap(hintUserMapName)
+	if err != nil {
+		return fmt.Errorf("get %s: %w", hintUserMapName, err)
+	}
+	t.hintMu.Lock()
+	defer t.hintMu.Unlock()
+	word := (pid >> 6) % hintUserWords
+	raw, err := m.GetValue(unsafe.Pointer(&word))
+	if err != nil {
+		return fmt.Errorf("read target hint of %d: %w", pid, err)
+	}
+	if len(raw) != 8 {
+		return fmt.Errorf("target hint word of %d bytes, want 8", len(raw))
+	}
+	bits := *(*uint64)(unsafe.Pointer(&raw[0])) | 1<<(pid&63)
+	if err := m.Update(unsafe.Pointer(&word), unsafe.Pointer(&bits)); err != nil {
+		return fmt.Errorf("set target hint of %d: %w", pid, err)
+	}
+	return nil
 }
 
 // RemoveTarget stops tracing pid. Records already in the ring buffer are

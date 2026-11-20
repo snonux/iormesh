@@ -114,7 +114,9 @@ func newSockTracer(t *testing.T) *sockTracer {
 	return tr
 }
 
-// setTarget inserts (on) or removes the tgid from target_map.
+// setTarget inserts (on) or removes the tgid from target_map. An insert
+// sets the tgid's target hint bit first, as internal/bpf's AddTarget does:
+// filter() looks target_map up only behind a set bit (targethint.c).
 func (tr *sockTracer) setTarget(t *testing.T, tgid uint32, on bool) {
 	t.Helper()
 	targets, err := tr.module.GetMap("target_map")
@@ -131,8 +133,28 @@ func (tr *sockTracer) setTarget(t *testing.T, tgid uint32, on bool) {
 	if size := int(unsafe.Sizeof(traced)); targets.ValueSize() != size {
 		t.Fatalf("target_map value is %d bytes, targetValue %d", targets.ValueSize(), size)
 	}
+	tr.setHint(t, tgid)
 	if err := targets.Update(unsafe.Pointer(&tgid), unsafe.Pointer(&traced)); err != nil {
 		t.Fatalf("add %d to target_map: %v", tgid, err)
+	}
+}
+
+// setHint sets tgid's bit in target_hint_user, the userspace half of the
+// target hint, folded to its 1024 words (IORMESH_HINT_USER_WORDS).
+func (tr *sockTracer) setHint(t *testing.T, tgid uint32) {
+	t.Helper()
+	hint, err := tr.module.GetMap("target_hint_user")
+	if err != nil {
+		t.Fatalf("target_hint_user: %v", err)
+	}
+	word := (tgid >> 6) % 1024
+	raw, err := hint.GetValue(unsafe.Pointer(&word))
+	if err != nil || len(raw) != 8 {
+		t.Fatalf("read target hint word %d: %d bytes, %v", word, len(raw), err)
+	}
+	bits := *(*uint64)(unsafe.Pointer(&raw[0])) | 1<<(tgid&63)
+	if err := hint.Update(unsafe.Pointer(&word), unsafe.Pointer(&bits)); err != nil {
+		t.Fatalf("set target hint of %d: %v", tgid, err)
 	}
 }
 

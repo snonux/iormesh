@@ -443,3 +443,49 @@ func TestReleaseRecyclesOnReader(t *testing.T) {
 		t.Error("released batch not reused")
 	}
 }
+
+// TestTargetHintMatchesC: userspace's half of the target hint
+// (setUserHint) folds pids to as many words as targethint.c's
+// IORMESH_HINT_USER_WORDS, into the map it names; a mismatch would set
+// bits the kernel never reads, and AddTarget's processes would go
+// untraced.
+func TestTargetHintMatchesC(t *testing.T) {
+	src, err := os.ReadFile("../c/targethint.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("#define IORMESH_HINT_USER_WORDS (1U << %d)", bitsOf(hintUserWords))
+	if 1<<bitsOf(hintUserWords) != hintUserWords || !strings.Contains(string(src), want) {
+		t.Errorf("targethint.c lacks %q (hintUserWords %d)", want, hintUserWords)
+	}
+	if !strings.Contains(string(src), "} "+hintUserMapName+" SEC(\".maps\");") {
+		t.Errorf("targethint.c defines no map %s", hintUserMapName)
+	}
+}
+
+// bitsOf is the exponent of the largest power of two in n.
+func bitsOf(n int) int {
+	b := 0
+	for n > 1 {
+		n >>= 1
+		b++
+	}
+	return b
+}
+
+// TestTracedMapsMatchC: every program array has its mirror in dispatch.c,
+// which the dispatcher asks before its scope test; a mirror missing there
+// would fail attachSlot, one never filled would trace nothing.
+func TestTracedMapsMatchC(t *testing.T) {
+	src, err := os.ReadFile("../c/dispatch.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for progs, mirror := range tracedMaps {
+		for _, name := range []string{progs, mirror} {
+			if !strings.Contains(string(src), "} "+name+" SEC(\".maps\");") {
+				t.Errorf("dispatch.c defines no map %s", name)
+			}
+		}
+	}
+}
