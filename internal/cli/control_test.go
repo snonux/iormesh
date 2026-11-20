@@ -302,13 +302,13 @@ func TestSudoCommandGate(t *testing.T) {
 		{"build with sudo", "/home/u/iormesh/iormesh", sudo, noInstall, false},
 		{"sibling dir", "/opt/iormesh2/iormesh", sudo, noInstall, false},
 	} {
-		for _, cmd := range []string{"normalize", "attach", "frobnicate"} {
+		for _, cmd := range []string{"normalize", "attach", "version", "frobnicate"} {
 			err := checkSudoCommand(cmd, tc.self, tc.env, tc.lstat)
 			if tc.gated != (err != nil) || (err != nil && !strings.Contains(err.Error(), "not allowed through the sudoers rule")) {
 				t.Errorf("%s: %s: %v, gated %v", tc.name, cmd, err, tc.gated)
 			}
 		}
-		for _, cmd := range []string{"run", "start", "stop", "status", "uninstall", "help"} {
+		for _, cmd := range []string{"run", "start", "stop", "status", "upgrade", "uninstall", "help"} {
 			if err := checkSudoCommand(cmd, tc.self, tc.env, tc.lstat); err != nil {
 				t.Errorf("%s: %s refused: %v", tc.name, cmd, err)
 			}

@@ -3,11 +3,13 @@ module iormesh
 go 1.26.0
 
 require (
+	aead.dev/minisign v0.3.0
 	github.com/aquasecurity/libbpfgo v0.9.2-libbpf-1.5.1
 	github.com/klauspost/compress v1.17.9
 	github.com/magefile/mage v1.17.2
 	github.com/parquet-go/parquet-go v0.29.0
 	golang.org/x/sys v0.50.0
+	golang.org/x/term v0.39.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.50.0
 )
@@ -23,6 +25,7 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/twpayne/go-geom v1.6.1 // indirect
+	golang.org/x/crypto v0.47.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 	modernc.org/libc v1.72.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

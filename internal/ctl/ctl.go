@@ -3,10 +3,14 @@
 //	iormeshctl add -project NAME (-pattern GLOB | -listen-port N) [-registry FILE] HOST [TRACER-FLAG...]
 //	iormeshctl rm [-project NAME] [-registry FILE] HOST
 //	iormeshctl services [list|edges|name|rules|unname] [-db FILE] ...
+//	iormeshctl verify [-key FILE] FILE...
+//	iormeshctl version
 //
 // add and rm manage the server registry (internal/federate, decisions #12
 // and #21); services reads the service-interaction database and edits
-// its naming rules (internal/servicedb, decision #24). deploy, collect,
+// its naming rules (internal/servicedb, decision #24); verify checks
+// release binaries' minisign signatures against the pinned key
+// (internal/release, decision #28). deploy, collect,
 // build and refresh follow in later M4 tasks.
 // It is cgo-free (internal/buildgate checks it), so it cross-compiles for
 // the darwin and linux laptops it runs on.
@@ -19,6 +23,7 @@ import (
 
 	"iormesh/internal/federate"
 	"iormesh/internal/servicedb"
+	"iormesh/internal/version"
 )
 
 // Exit codes, as the tracer's (internal/cli) uses them.
@@ -39,13 +44,16 @@ type env struct {
 	registry func() (string, error)
 	// servicedb is the default service database path; -db overrides it.
 	servicedb func() (string, error)
+	// releaseKey is the default pinned release key; -key overrides it.
+	releaseKey func() (string, error)
 }
 
 // defaultEnv is the real environment: the registry at
-// federate.DefaultRegistryPath, the database at servicedb.DefaultPath.
+// federate.DefaultRegistryPath, the database at servicedb.DefaultPath, the
+// release key next to the registry.
 func defaultEnv(stdout, stderr io.Writer) env {
 	return env{stdout: stdout, stderr: stderr, registry: federate.DefaultRegistryPath,
-		servicedb: servicedb.DefaultPath}
+		servicedb: servicedb.DefaultPath, releaseKey: defaultKeyPath}
 }
 
 // Main runs the subcommand args[0] and returns the process exit code.
@@ -66,6 +74,11 @@ func run(args []string, e env) int {
 		err = rmCommand(args[1:], e)
 	case "services":
 		err = servicesCommand(args[1:], e)
+	case "verify":
+		err = verifyCommand(args[1:], e)
+	case "version", "-version", "--version":
+		_, _ = fmt.Fprintln(e.stdout, "iormeshctl", version.Version)
+		return exitOK
 	case "help", "-h", "--help":
 		usage(e.stdout)
 		return exitOK
@@ -99,8 +112,11 @@ func usage(w io.Writer) {
   iormeshctl services name [-db FILE] [-port N] HOST-GLOB SERVICE
   iormeshctl services rules [-db FILE]
   iormeshctl services unname [-db FILE] RULE-ID
+  iormeshctl verify [-key FILE] FILE...      (FILE.minisig next to each)
+  iormeshctl version
 
-The registry defaults to ~/.config/iormesh/servers.yaml, the service
-database to ~/.local/share/iormesh/services.db.
+The registry defaults to ~/.config/iormesh/servers.yaml, the pinned
+release key to ~/.config/iormesh/minisign.pub, the service database to
+~/.local/share/iormesh/services.db.
 `)
 }

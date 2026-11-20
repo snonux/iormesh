@@ -876,9 +876,9 @@ Kubernetes (M7) build on it.
   `/opt/iormesh/traces` and `-spool` to
   `/run/iormesh/spool/<project>`, and give `ready/` only to the
   sudo caller; no existing directory is ever chmod'ed. Through
-  the rule only `run`, `start`, `stop`, `status` and
-  `uninstall` (and `upgrade` once built) run — every other
-  subcommand is refused, fail closed
+  the rule only `run`, `start`, `stop`, `status`, `upgrade`
+  (signature-checked, decision #1) and `uninstall` run — every
+  other subcommand is refused, fail closed
   ([docs/security.md](docs/security.md) has the rule's text
   and the install's ownership requirements).
 - **Trace files** land on the server as parquet under
@@ -1671,13 +1671,43 @@ answer), and deferred.
   in disguise. Upgrades therefore go through a tracer
   subcommand that verifies the staged binary's signature
   against a root-owned public key (#28) before replacing
-  itself.
+  itself. Built so (task bb4, the upgrade half; bootstrap stays
+  open): `iormesh upgrade FILE` runs through the rule and takes
+  only the staged file and `FILE.minisig`. It reads both once
+  into memory, verifies them against
+  `/opt/iormesh/etc/minisign.pub`, requires the signed name to
+  be this arch's tracer (`iormesh-linux-<arch>`) and the signed
+  version not older than the running binary's, then installs
+  exactly the verified bytes: a new root-owned 0755 file in
+  `bin/`, renamed over `/opt/iormesh/bin/iormesh`. It first
+  checks the layout — `/opt`, `/opt/iormesh`, `bin/`, `etc/`
+  root-owned directories nobody else may write, the installed
+  binary and the key regular root-owned files, never a
+  symlink — and refuses rather than repairs. A downgrade needs
+  `-allow-downgrade`, which root may pass but the rule may not:
+  an older signed build may carry a fixed hole. The first
+  install — binary, key and rule — is still the operator's own
+  sudo or configuration management.
 - **#28 Signature scheme** — which tool signs the tracer build
   (minisign, cosign, `ssh-keygen -Y`), where the public key is
   pinned (controller config; a root-owned copy on servers for
   upgrades), and who holds the private key (the release
   pipeline). *Default: minisign, key pinned in the controller
-  config.*
+  config.* Built with the default (task bb4; the owner has not
+  decided otherwise): minisign signatures made and checked with
+  `aead.dev/minisign` (pinned in go.mod/go.sum; the files are
+  plain minisign, so the `minisign` tool checks them too). The
+  signed trusted comment carries `file:` and `version:`, so a
+  renamed or older build cannot pass as the one wanted.
+  `mage sign` signs `dist/` with the release pipeline's
+  encrypted secret key from `$IORMESH_MINISIGN_KEY`, which must
+  lie outside the repository; no private key is ever committed,
+  tests generate throwaway keys. The controller pins the public
+  key at `~/.config/iormesh/minisign.pub` (`iormeshctl verify`,
+  which deploy will run); servers hold the root-owned copy at
+  `/opt/iormesh/etc/minisign.pub`. Key rotation is replacing
+  both files — the server's with the operator's own sudo, as
+  in bootstrap.
 - **#24 Service-interaction database** — controller-side:
   sqlite via a pure-Go driver (keeps iormeshctl cgo-free;
   additive merges and queries come natural) vs a plain YAML

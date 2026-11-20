@@ -49,9 +49,13 @@ func defaultConfinement(env func(string) string) confinement {
 // sudoAllowed are the only subcommands the sudoers rule may run (run
 // confined): the server lifecycle. Everything else — normalize, attach,
 // and any subcommand added later — is refused through the rule, so a new
-// one is closed until it is deliberately added here.
+// one is closed until it is deliberately added here. upgrade is here
+// because its only input is a staged file, which it installs only once the
+// signature verifies against the root-owned pinned key, names this arch's
+// tracer and is not older than the running binary (upgrade.go);
+// everything else it touches is fixed.
 var sudoAllowed = map[string]bool{"run": true, "start": true, "stop": true, "status": true,
-	"uninstall": true, "help": true, "-h": true, "--help": true}
+	"upgrade": true, "uninstall": true, "help": true, "-h": true, "--help": true}
 
 // sudoGated reports whether this process came through the sudoers rule:
 // SUDO_UID is set and the binary (self, os.Executable's resolved path)
@@ -79,8 +83,8 @@ func checkSudoCommand(cmd, self string, env func(string) string, lstat func(stri
 	if !sudoGated(self, env, lstat) || sudoAllowed[cmd] {
 		return nil
 	}
-	return fmt.Errorf("%s is not allowed through the sudoers rule (only run, start, stop, status and "+
-		"uninstall are); run it without sudo or as root directly", cmd)
+	return fmt.Errorf("%s is not allowed through the sudoers rule (only run, start, stop, status, "+
+		"upgrade and uninstall are); run it without sudo or as root directly", cmd)
 }
 
 // sudoCommandGate is checkSudoCommand for this process.

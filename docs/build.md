@@ -121,6 +121,7 @@ mage buildDocker   # the same with Docker
 mage containerBuild podman tracer-amd64,ctl  # a subset (ctl,
                    # tracer-amd64, tracer-arm64; all by default)
 mage containerClean podman  # drop builder images and cache volumes
+mage sign          # sign dist/ with the release key (see "Signing")
 ```
 
 A missing engine, or Docker's CLI without a running daemon,
@@ -192,7 +193,46 @@ fails up front with the fix named.
   the `iormesh-gomod` and `iormesh-gocache` volumes.
 - **Not here yet**: the published tracer *image* for `kubectl
   debug` and sidecars, and the capability set it runs with, are
-  M7 (decision #13); signing the tracer is decision #28.
+  M7 (decision #13).
+
+## Signing
+
+Release binaries are signed with minisign (PLAN.md decision
+#28, built with its default by task bb4) after the container
+builds:
+
+```bash
+export IORMESH_MINISIGN_KEY=~/.minisign/iormesh.key  # outside the tree
+mage sign          # dist/NAME -> dist/NAME.minisig, then verified
+iormeshctl verify dist/iormesh-linux-amd64   # the controller's check
+```
+
+- **Key**: a minisign key pair made once, e.g. `minisign -G -p
+  iormesh.pub -s iormesh.key`, with a password (the Go library
+  reads only scrypt-encrypted secret keys). The secret key
+  belongs to the release pipeline and never enters the
+  repository: `mage sign` refuses a key path inside the tree.
+  The password comes from `$IORMESH_MINISIGN_PASSWORD` for
+  unattended runs, else from the terminal.
+- **What is signed**: each file in `dist/` (not hidden, not a
+  `.minisig`), prehashed (BLAKE2b-512, minisign's default),
+  with the trusted comment
+  `timestamp:<unix> file:<name> version:<x.y.z>`; the version
+  is `internal/version.Version`, bumped per release. The tracer
+  and the controller both check the signed `file:` and
+  `version:`, so the comment is part of what is verified.
+- **Library**: `aead.dev/minisign`, pinned by go.mod/go.sum
+  (and `golang.org/x/crypto` for BLAKE2b and scrypt). The files
+  are ordinary minisign: `minisign -Vm FILE -p iormesh.pub`
+  checks them, and the `minisign` tool can sign instead of
+  `mage sign` with `-t "file:NAME version:X.Y.Z"`.
+- **Pinned public key**: `~/.config/iormesh/minisign.pub` on the
+  controller (`iormeshctl verify`, `-key` overrides; deploy
+  will check every push with it), `/opt/iormesh/etc/minisign.pub`
+  (root-owned) on each server, where `iormesh upgrade FILE`
+  verifies `FILE.minisig` before it replaces
+  `/opt/iormesh/bin/iormesh` ([security.md](security.md) has
+  the checks).
 
 ## Tech choices
 

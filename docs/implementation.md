@@ -3352,13 +3352,20 @@ SSH connection per host):
 ssh H 'uname -m; command -v rsync systemd-run'      # preflight
 # verify the local build's signature (decision #28), then:
 rsync -a iormesh-linux-$ARCH H:/tmp/iormesh.staged
+rsync -a iormesh-linux-$ARCH.minisig H:/tmp/iormesh.staged.minisig
 ssh H sudo /opt/iormesh/bin/iormesh upgrade /tmp/iormesh.staged
 ssh H sudo /opt/iormesh/bin/iormesh start -project shop \
     -pattern '*java*orders-service*' -duration 4h
 ```
 
 (First install on a host has no binary to `upgrade` with — that
-bootstrap is decision #1.)
+bootstrap is decision #1.) The two checks exist (task bb4):
+`release.VerifyFile` with the key `iormeshctl verify` pins
+(`~/.config/iormesh/minisign.pub`) on the controller, and
+`iormesh upgrade F`, which also wants `F.minisig` staged next to
+`F` and verifies against the server's
+`/opt/iormesh/etc/minisign.pub` (`internal/cli/upgrade.go`,
+`internal/release`; docs/build.md "Signing").
 
 `collect`, per host and project:
 

@@ -6,16 +6,20 @@
 //	iormesh start [run's flags] [-cpu-quota 100%] [-memory-max 1G] [-wait 2m]
 //	iormesh stop -project NAME [-trace-dir DIR]
 //	iormesh status [-project NAME] [-trace-dir DIR] [-json]
+//	iormesh upgrade [-allow-downgrade] FILE
 //	iormesh uninstall
+//	iormesh version
 //
 // run is the foreground tracer; its target spec (internal/target) is a
 // PID list, an argv/exe glob matched on exec, or a listening port (M2
 // steps 1–3, session.go). M4 wraps it (start.go, control.go): start runs
 // it as the transient systemd unit iormesh-<project>, stop and status
 // control and read that unit and the run's state.json, uninstall stops
-// every unit and removes /opt/iormesh (decision #19; upgrade is still
-// to come, decision #1). normalize applies the golden-check library
-// (internal/normalize) to a written trace. attach live-loads the Java
+// every unit and removes /opt/iormesh (decision #19), and upgrade
+// installs a staged build only once its minisign signature verifies
+// against the root-owned pinned key (upgrade.go, decisions #1 and #28).
+// normalize applies the golden-check library (internal/normalize) to a
+// written trace. attach live-loads the Java
 // agent into a running JVM a `run -spool` traces (decision #2, task ge4;
 // `run -agent` does the same for the JVMs a session starts with).
 package cli
@@ -24,6 +28,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"iormesh/internal/version"
 )
 
 // Exit codes. A failed golden check is its own code so a script can tell
@@ -82,6 +88,11 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		err = controlCommand(control.status, args[1:], stdout, stderr)
 	case "uninstall":
 		err = controlCommand(control.uninstall, args[1:], stdout, stderr)
+	case "upgrade":
+		err = upgradeCommand(args[1:], stdout, stderr)
+	case "version", "-version", "--version":
+		_, _ = fmt.Fprintln(stdout, "iormesh", version.Version)
+		return exitOK
 	case "help", "-h", "--help":
 		usage(stdout)
 		return exitOK
@@ -119,6 +130,8 @@ func usage(w io.Writer) {
   iormesh start [run's flags] [-cpu-quota 100%] [-memory-max 1G] [-wait 2m]
   iormesh stop -project NAME [-trace-dir DIR]
   iormesh status [-project NAME] [-trace-dir DIR] [-json]
+  iormesh upgrade [-allow-downgrade] FILE    (FILE.minisig next to it)
   iormesh uninstall
+  iormesh version
 `)
 }

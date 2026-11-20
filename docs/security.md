@@ -53,8 +53,51 @@ truth.
   That rule is only as strong as the binary's ownership: it must
   be root-owned and not writable by the deploying user, and
   upgrades verify the signature against a root-owned key.
-  Bootstrap and the signature scheme are open decisions in
-  PLAN.md (#1, #28).
+  Bootstrap is still open (PLAN.md #1); signing and upgrade
+  are built with #28's default (task bb4):
+  - **Who signs**: the release pipeline, with `mage sign` over
+    `dist/` (minisign via `aead.dev/minisign`). The secret key
+    is minisign's scrypt-encrypted file at
+    `$IORMESH_MINISIGN_KEY`, refused inside the repository;
+    no private key is ever committed — tests generate
+    throwaway keys per run.
+  - **What is signed**: each binary, with a trusted comment
+    `file:<name> version:<x.y.z>` that the signature covers. A
+    file renamed to another artifact's name, the arm64 tracer
+    staged on amd64, iormeshctl staged as the tracer, or an
+    older build fail on that comment, not just on the bytes.
+  - **Where the key is pinned**: the controller's
+    `~/.config/iormesh/minisign.pub` (the operator's own file,
+    writable by nobody else; `iormeshctl verify`), and on each
+    server the root-owned copy `/opt/iormesh/etc/minisign.pub`,
+    laid down with the binary at bootstrap. Neither path is a
+    flag of the tracer.
+  - **`iormesh upgrade FILE`**, through the rule: the staged
+    file and `FILE.minisig` must be regular files (not
+    symlinks; a FIFO cannot block the open) owned by the sudo
+    caller — not by root or anyone else, so the rule never
+    has root read others' files — at most 256 MiB and 4 KiB
+    (root directly may stage its own); both are read
+    once into memory, and exactly the verified bytes are
+    installed — changing the staged file after the check
+    changes nothing. Before any read, the layout is checked:
+    `/opt` (followed), `/opt/iormesh`, `bin/` and `etc/` are
+    root-owned directories nobody else may write, the
+    installed binary and the key root-owned regular files —
+    a symlinked install is refused, not replaced. The new
+    binary is a fresh root-owned 0755 file in `bin/`, fsynced
+    and renamed over the old one (then `bin/` fsynced), so a
+    crash leaves one or the other. A signed version older than
+    the running binary's is refused; `-allow-downgrade` is
+    root's alone and refused through the rule, since an older
+    signed build may carry a fixed hole. The same version with
+    the same bytes is a no-op (deploy re-pushes). Running
+    sessions keep the old binary; the next `start` runs the
+    new one.
+  - **What the rule then grants**: installing a build the
+    release key signed, for this arch, not older — nothing
+    else. Whoever holds the release key holds every server
+    that pins it.
 - **Through the sudoers rule, the tracer writes only to its own
   paths.** The rule names the installed binary and nothing else:
 
@@ -63,18 +106,21 @@ truth.
   ```
 
   (`deploy` being the deploying user). It is only as strong as
-  the install: `/opt/iormesh` and `/opt/iormesh/bin` must be
-  root-owned and not writable by group or others, and
-  `/opt/iormesh/bin/iormesh` a root-owned regular file, not a
-  symlink. Under the rule every argument is the caller's and
-  runs as root, so the binary gates itself
+  the install: `/opt/iormesh`, `/opt/iormesh/bin` and
+  `/opt/iormesh/etc` must be root-owned and not writable by
+  group or others, and `/opt/iormesh/bin/iormesh` and
+  `/opt/iormesh/etc/minisign.pub` root-owned regular files, not
+  symlinks (`upgrade` checks exactly this). Under the rule
+  every argument is the caller's and runs as root, so the
+  binary gates itself
   (`internal/cli/confine.go`, task 9b4): when `SUDO_UID` is set
   and its resolved path lies under `/opt/iormesh` — or
   `/opt/iormesh/bin/iormesh` is a symlink, or its own path is
-  unknown (fail closed) — only `run`, `start`, `stop`, `status`
-  and `uninstall` run. Every other subcommand (`normalize`,
-  `attach`, any added later) is refused: "not allowed through
-  the sudoers rule; run it without sudo or as root directly".
+  unknown (fail closed) — only `run`, `start`, `stop`, `status`,
+  `upgrade` and `uninstall` run. Every other subcommand
+  (`normalize`, `attach`, `version`, any added later) is
+  refused: "not allowed through the sudoers rule; run it
+  without sudo or as root directly".
   Sessions are confined: `start` always (its unit runs as
   root), and `run` under the same gate (a build run with the
   operator's own full sudo, `sudo ./iormesh run -out DIR`, and
