@@ -28,7 +28,9 @@ RUN dpkg --add-architecture arm64 && \
 # libeu.a, which libelf.so links in but the static libelf.a does not, so
 # a static link fails on undefined references. Compile eu-search.o from
 # the same elfutils release as the packaged libelf (checked) and add it to
-# libelf.a.
+# libelf.a. ELFUTILS_SHA256 was computed from the release tarball after
+# checking it against the release's published sha512.sum
+# (https://sourceware.org/elfutils/ftp/0.192/sha512.sum, 2026-11-20).
 ARG ELFUTILS_VERSION=0.192
 ARG ELFUTILS_SHA256=616099beae24aba11f9b63d86ca6cc8d566d968b802391334c91df54eab416b4
 RUN apt-get update && \

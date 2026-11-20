@@ -108,11 +108,36 @@ func TestRunArgvMounts(t *testing.T) {
 	}
 }
 
+// TestRunArgvMountsAreReadOnly keeps the builds from writing to the host
+// anywhere but dist/ and the named cache volumes: every other -v must be
+// read-only.
+func TestRunArgvMountsAreReadOnly(t *testing.T) {
+	o := RunOptions{RepoRoot: "/r", Dist: "/r/dist", VMLinux: "/v.h"}
+	volumes := map[string]bool{GoModVolume: true, GoCacheVolume: true}
+	for _, tgt := range Targets() {
+		argv := RunArgv(Docker, tgt, o)
+		for i, a := range argv[:len(argv)-1] {
+			if a != "-v" {
+				continue
+			}
+			spec := argv[i+1]
+			parts := strings.Split(spec, ":")
+			switch {
+			case strings.HasSuffix(spec, ":ro"):
+			case len(parts) == 2 && parts[1] == outMount && parts[0] == o.Dist:
+			case len(parts) == 2 && volumes[parts[0]]:
+			default:
+				t.Errorf("%s: writable mount %q", tgt.Name, spec)
+			}
+		}
+	}
+}
+
 func TestScript(t *testing.T) {
 	o := RunOptions{RepoRoot: "/r", Dist: "/r/dist", VMLinux: "/v.h", HostUID: 1000, HostGID: 100}
 	arm := mustTarget(t, "tracer-arm64")
 	docker, podman := Script(Docker, arm, o), Script(Podman, arm, o)
-	for _, must := range []string{"set -eu", "go run github.com/magefile/mage@v1.17.2 releaseTracer",
+	for _, must := range []string{"set -eu", "go run github.com/magefile/mage releaseTracer",
 		"cp /vmlinux.h internal/c/vmlinux.h", "cp dist/iormesh-linux-arm64 /out/"} {
 		if !strings.Contains(podman, must) {
 			t.Errorf("script lacks %q:\n%s", must, podman)

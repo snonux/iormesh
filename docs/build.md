@@ -42,7 +42,8 @@ The tracer build is ior's, lifted in M1 (provenance headers name
 the ior commit). Prerequisites, as for ior: a libbpfgo checkout at
 `../libbpfgo` (or `$LIBBPFGO`) pinned to `v0.9.2-libbpf-1.5.1`
 and built with `make -C ../libbpfgo libbpfgo-static`; clang;
-bpftool; and non-interactive `sudo` for the two root reads
+bpftool; mage ≥ v1.17 (older mage breaks on the backquotes in
+the magefiles' doc comments); and non-interactive `sudo` for the two root reads
 (`/sys/kernel/tracing` formats, `/sys/kernel/btf/vmlinux`).
 
 ```bash
@@ -134,16 +135,16 @@ fails up front with the fix named.
 - **Builders** (`scripts/container/*.Containerfile`) hold only
   the toolchain; the tree is mounted read-only and copied, so a
   build never writes into it. Inside, `go run
-  github.com/magefile/mage@v1.17.2 releaseTracer` (or
-  `releaseCtl`) runs on the copy and the binaries are copied to
-  `dist/`. Not go.mod's mage v1.15.0: its generated main breaks
-  on the backquotes in the magefiles' doc comments. The two Mage targets also run on a host that
-  has the static archives (and, for arm64, the cross compiler).
+  github.com/magefile/mage releaseTracer` (or `releaseCtl`) runs
+  on the copy — mage at go.mod's version, checked by go.sum —
+  and the binaries are copied to `dist/`. The two Mage targets
+  also run on a host that has the static archives (and, for
+  arm64, the cross compiler).
 - **Pins**: every base image by index digest (the constants in
   `internal/containerbuild`, which a test keeps in step with the
   Containerfiles); Go from the golang image, also in the Rocky
-  builder; libbpfgo by tag and commit; the zstd source by SHA-256;
-  mage by version.
+  builder; libbpfgo by tag and commit; the zstd and elfutils
+  sources by SHA-256; mage by go.mod.
   Distro packages (clang, gcc, bpftool, the static libs) follow
   their repos and are not pinned.
 - **libbpf**: the amd64 builder runs `make libbpfgo-static` like
@@ -168,13 +169,20 @@ fails up front with the fix named.
   when the tree has none. SELinux labeling is switched off for
   the run instead of relabeling the tree.
 - **arm64 kernel types**: without more input the arm64 object is
-  compiled against the build host's (amd64) `vmlinux.h`. That
-  works because CO-RE relocates every field by name against the
-  running kernel's BTF and the BPF C uses no arm64-only type — a
-  new one would fail the compile, not the load. To compile
-  against arm64 types, dump an arm64 host's BTF (`bpftool btf
-  dump file /sys/kernel/btf/vmlinux format c`) and point
-  `IORMESH_VMLINUX_ARM64` at the file.
+  compiled against the build host's (amd64) `vmlinux.h`. CO-RE
+  relocates every field by name against the running kernel's
+  BTF, but the risk runs the other way round from a compile
+  error: an x86-only field compiles fine and fails only when
+  the object *loads* on arm64, unless the code guards it with
+  `bpf_core_field_exists` (as dispatch.c does for
+  `thread_info.status`). `javamark.c`'s `ctx->sp` relies on
+  libbpf matching `sp` inside arm64 `pt_regs`' anonymous struct
+  (it should relocate; unverified), and its exit-probe comment
+  about the popped return address is x86-only reasoning. **The
+  arm64 object has never been loaded on a real arm64 kernel.**
+  To compile against arm64 types, dump an arm64 host's BTF
+  (`bpftool btf dump file /sys/kernel/btf/vmlinux format c`)
+  and point `IORMESH_VMLINUX_ARM64` at the file.
 - **Checks**: each binary's header is verified (ELF machine or
   Mach-O CPU; the tracers must have no ELF interpreter), then
   every Linux binary runs `--help` on Rocky 9 of its own arch.

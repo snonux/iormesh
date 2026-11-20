@@ -184,8 +184,8 @@ func buildBPFObject() error {
 		return err
 	}
 	// The BPF bytecode is the same for every host arch, but __TARGET_ARCH
-	// selects the arch-specific paths (dispatch.c's compat-task check, the
-	// bpf_tracing.h register macros), so it follows the tracer's GOARCH.
+	// selects the arch-specific paths (dispatch.c's compat-task check), so
+	// it follows the tracer's GOARCH.
 	arch, err := targetArch()
 	if err != nil {
 		return err

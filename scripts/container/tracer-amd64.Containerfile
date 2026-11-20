@@ -1,6 +1,7 @@
 # Adapted from ior Dockerfile @ b21afc50328c.
 # Changes: base and Go pinned by digest (Go copied from the golang image
-# instead of a go.dev download), zstd checksummed, libbpfgo pinned by commit,
+# instead of a go.dev download), zstd checksummed, the elfutils source RPM
+# signature-checked (rpm -K), libbpfgo pinned by commit,
 # no mage install (the build `go run`s a pinned mage), make -j4, no
 # CMD (mage drives the build with `<engine> run`, see
 # internal/containerbuild).
@@ -37,9 +38,11 @@ RUN dnf install -y \
     dnf clean all
 
 # Rocky 9 ships no libelf.a; build it from the distro's own source RPM so
-# it matches the headers installed above.
+# it matches the headers installed above. rpm -K checks the source RPM's
+# digests and Rocky's signature before it is unpacked.
 RUN mkdir -p /root/src && cd /root && \
     dnf download --source elfutils-libelf && \
+    rpm -K elfutils-*.src.rpm && \
     rpm -ivh elfutils-*.src.rpm && \
     tar -C /root/src -xjf rpmbuild/SOURCES/elfutils-*.tar.bz2 && \
     cd /root/src/elfutils-* && \

@@ -2206,8 +2206,10 @@ whether the engine is Docker or Podman:
   gate runs on the generation host, which also keeps the
   builds unprivileged (no tracefs). Base images are pinned by
   digest. The arm64 BPF object compiles against the build
-  host's `vmlinux.h` unless an arm64 host's is supplied — CO-RE
-  relocates by field name. Details:
+  host's `vmlinux.h` unless an arm64 host's is supplied; CO-RE
+  relocates by field name, but an unguarded x86-only field
+  would fail only at load on arm64, and the arm64 object has
+  never been loaded on a real arm64 kernel. Details:
   [docs/build.md](docs/build.md), "Container builds".
 
 ## Component map (planned)

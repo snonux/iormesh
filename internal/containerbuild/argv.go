@@ -18,13 +18,6 @@ const (
 	vmlinuxMount = "/vmlinux.h"
 )
 
-// MageVersion is the mage the builds run, via `go run …@MageVersion`, so
-// no builder image has to carry it. Not go.mod's v1.15.0 (that is the mg
-// and sh library the magefiles import): v1.15's generated main pastes the
-// magefiles' doc comments into a raw string literal and fails to compile on
-// the backquotes they contain; v1.17 escapes them.
-const MageVersion = "v1.17.2"
-
 // builderPlatform is the platform the tracer builders are built for and
 // run on. The arm64 tracer is cross-compiled, not emulated, so both tracer
 // builders are amd64 images whatever the target arch.
@@ -102,8 +95,11 @@ func RunArgv(engine string, t Target, o RunOptions) []string {
 // Script is the shell the build container runs.
 //
 // It copies the read-only tree (without .git, other worktrees and dist/)
-// and runs the target's mage target on the copy through `go run` at
-// MageVersion. It does not run `mage generate`: the
+// and runs the target's mage target on the copy through `go run`, so mage
+// is the version go.mod pins and go.sum checks, and no builder image has to
+// carry it (go.mod needs v1.17+: older mage pastes the magefiles' doc
+// comments into a raw string literal and breaks on their backquotes). It
+// does not run `mage generate`: the
 // generated handlers and tables are committed, pinned by the diff gate on
 // the generation host, and generation would need the host's tracefs (root)
 // - an arm64 cross build could not read its target's tracepoints anyway.
@@ -118,7 +114,7 @@ func Script(engine string, t Target, o RunOptions) string {
 	if usesVMLinux(t, o) {
 		lines = append(lines, "cp "+vmlinuxMount+" internal/c/vmlinux.h")
 	}
-	lines = append(lines, "go run github.com/magefile/mage@"+MageVersion+" "+t.MageTarget)
+	lines = append(lines, "go run github.com/magefile/mage "+t.MageTarget)
 	for _, b := range t.Binaries {
 		lines = append(lines, fmt.Sprintf("cp %s/%s %s/", DistDir, b.Name, outMount))
 		if engine == Docker {
