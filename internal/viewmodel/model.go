@@ -56,8 +56,8 @@ type Model struct {
 	// Threads are the stories of the conversations' threads, sorted by
 	// lifeline.
 	Threads []ThreadStory `json:"threads"`
-	// Processes are the traced process incarnations, sorted by host,
-	// pid and incarnation; MoreProcesses counts those the rollup cut.
+	// Processes are the traced process incarnations in the rollup's
+	// order (project, host, pid, incarnation); MoreProcesses counts those the rollup cut.
 	Processes     []Process `json:"processes"`
 	MoreProcesses int       `json:"more_processes"`
 }

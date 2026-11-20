@@ -22,9 +22,9 @@ import (
 var ErrNoThread = errors.New("no such thread")
 
 // FindThreads returns the stories of key ("SERVICE/THREAD"): every
-// lifeline of that service and thread name — one per host, process and
-// kernel thread that carries the name, and a carrier's virtual-thread
-// lifeline beside its own.
+// lifeline of that service and thread name — one per host, process
+// incarnation and kernel thread that carries the name, and a carrier's
+// virtual-thread lifeline beside its own.
 func FindThreads(m Model, key string) ([]ThreadStory, error) {
 	var out []ThreadStory
 	for _, t := range m.Threads {
@@ -42,20 +42,21 @@ func FindThreads(m Model, key string) ([]ThreadStory, error) {
 func WriteThreadList(w io.Writer, m Model) error {
 	m = safeModel(m)
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "THREAD\tHOST\tPID\tTID\tSTEPS\tNOTE")
+	_, _ = fmt.Fprintln(tw, "THREAD\tHOST\tPID\tINC\tTID\tSTEPS\tNOTE")
 	for _, t := range m.Threads {
 		note := ""
 		if t.Carrier {
 			note = "virtual threads on this carrier"
 		}
-		_, _ = fmt.Fprintf(tw, "%s/%s\t%s\t%d\t%d\t%d\t%s\n", t.Service, t.Thread, t.Host, t.PID, t.TID,
+		_, _ = fmt.Fprintf(tw, "%s/%s\t%s\t%d\t%d\t%d\t%d\t%s\n", t.Service, t.Thread, t.Host, t.PID, t.Incarnation, t.TID,
 			len(t.Entries)+t.MoreEntries, note)
 	}
 	return tw.Flush()
 }
 
 // WriteThreads prints each story: a header with the lifeline, the story
-// as one line, then one line per entry — its ordering against the entry
+// as one line (none for a carrier's virtual threads), then one line per
+// entry — its ordering against the entry
 // before, the conversation step it is, the act and label — and its ref.
 func WriteThreads(w io.Writer, ts []ThreadStory) error {
 	var b strings.Builder
@@ -68,7 +69,13 @@ func WriteThreads(w io.Writer, ts []ThreadStory) error {
 		if t.MoreEntries > 0 {
 			fmt.Fprintf(&b, "truncated: %d more steps (older, or past a conversation's cap)\n", t.MoreEntries)
 		}
-		fmt.Fprintf(&b, "story        %s\n", storyLine(t.Entries))
+		if t.Carrier {
+			// No " => " chain: its virtual threads migrate between
+			// carriers, so nothing orders their steps on this one.
+			b.WriteString("story        none: virtual threads' steps, in no provable order\n")
+		} else {
+			fmt.Fprintf(&b, "story        %s\n", storyLine(t.Entries))
+		}
 		for j, e := range t.Entries {
 			fmt.Fprintf(&b, "%3d  %-12s  %s#%d  %s\n", j+1, e.Ordering, e.Conversation, e.Step, actText(e))
 			fmt.Fprintf(&b, "     %-12s    ref %s\n", "", e.Ref)

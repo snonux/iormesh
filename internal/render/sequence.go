@@ -35,11 +35,15 @@ const sequenceStyle = `rect{fill:#fff;stroke:#333}rect.note{fill:#fdf6d8;stroke:
 	`line.time-ordered{stroke:#666;stroke-dasharray:6 4}` +
 	`line.unordered{stroke:#c33;stroke-dasharray:2 3}text.title{font-weight:bold}`
 
-// Sequence renders one conversation as an SVG sequence diagram.
+// Sequence renders one conversation as an SVG sequence diagram. A step
+// whose lane indices fall outside the lifelines (a hostile or damaged
+// model) is not drawn — never placed on a guessed column — and the
+// diagram counts such steps.
 func Sequence(c viewmodel.Conversation) []byte {
 	lanes, from, to := lanesOf(c)
 	x := func(lane int) int { return laneLeft + max(lane, 0)*laneWidth }
-	rows := len(c.Steps) + btoi(c.MoreSteps > 0)
+	invalid := countInvalid(len(c.Steps), from, to)
+	rows := len(c.Steps) + btoi(c.MoreSteps > 0) + btoi(invalid > 0)
 	height := firstRow + rows*stepHeight + 20
 	var s svg
 	s.open(laneLeft*2+max(len(lanes), 1)*laneWidth, height, sequenceStyle)
@@ -48,19 +52,39 @@ func Sequence(c viewmodel.Conversation) []byte {
 		drawHead(&s, l, x(i), height)
 	}
 	for i, st := range c.Steps {
-		drawStep(&s, st, firstRow+i*stepHeight, x(from(i)), x(to(i)), to(i) >= 0)
+		f, t := from(i), to(i)
+		if f == badLane || t == badLane {
+			continue
+		}
+		drawStep(&s, st, firstRow+i*stepHeight, x(f), x(t), t >= 0)
 	}
+	y := firstRow + len(c.Steps)*stepHeight
 	if c.MoreSteps > 0 {
-		s.text("label", 10, firstRow+len(c.Steps)*stepHeight, "start",
-			"truncated: "+strconv.Itoa(c.MoreSteps)+" more steps")
+		s.text("label", 10, y, "start", "truncated: "+strconv.Itoa(c.MoreSteps)+" more steps")
+		y += stepHeight
+	}
+	if invalid > 0 {
+		s.text("label", 10, y, "start", strconv.Itoa(invalid)+" steps with invalid lanes not drawn")
 	}
 	return s.close()
 }
 
+// countInvalid counts the steps whose lanes are out of range.
+func countInvalid(n int, from, to func(int) int) int {
+	bad := 0
+	for i := range n {
+		bad += btoi(from(i) == badLane || to(i) == badLane)
+	}
+	return bad
+}
+
+// badLane marks a step lane index outside the conversation's lifelines.
+const badLane = -2
+
 // lanesOf is the conversation's lifelines and, per step, the index of
-// its own and its peer's (-1 for none). A step whose index falls outside
-// the list (a hostile model) is drawn on the first lifeline rather than
-// trusted. Without lifelines, each service is one.
+// its own and its peer's (-1 for none, badLane when the model's index
+// is out of range). Without lifelines (a model built before task 0f4),
+// each service is one.
 func lanesOf(c viewmodel.Conversation) ([]viewmodel.Lifeline, func(int) int, func(int) int) {
 	if len(c.Lifelines) == 0 {
 		lanes := make([]viewmodel.Lifeline, 0, len(c.Services))
@@ -69,11 +93,11 @@ func lanesOf(c viewmodel.Conversation) ([]viewmodel.Lifeline, func(int) int, fun
 		}
 		idx := func(sv string) int { return slices.Index(c.Services, sv) }
 		return lanes, func(i int) int { return max(idx(c.Steps[i].Service), 0) },
-			func(i int) int { return peerIndex(c.Steps[i], idx(c.Steps[i].To)) }
+			func(i int) int { return peerIndex(c.Steps[i], max(idx(c.Steps[i].To), 0)) }
 	}
 	valid := func(n int) int {
 		if n < 0 || n >= len(c.Lifelines) {
-			return 0
+			return badLane
 		}
 		return n
 	}
@@ -87,7 +111,7 @@ func peerIndex(st viewmodel.Step, n int) int {
 	if st.Kind == viewmodel.StepFile || st.To == "" || st.ToLane < 0 {
 		return -1
 	}
-	return max(n, 0)
+	return n
 }
 
 // drawHead draws a lifeline's head — service, and thread below it — and

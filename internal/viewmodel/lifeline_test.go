@@ -19,7 +19,9 @@ func stories(r *Recorder) ([]Conversation, []ThreadStory) {
 // TestCarrierLifeline: a virtual thread's request, named by its carrier
 // (java.carrier), sits on a lifeline of its own — never the carrier's
 // platform lifeline, which its own request uses — and the carrier's
-// story of its virtual threads has no causal entry: no span of it is
+// story of its two interleaved virtual threads is all unordered, with
+// no one-line chain — virtual threads migrate between carriers, so
+// nothing proves their order on this one (task 0f4 review); no span of it is
 // the thread's alone.
 func TestCarrierLifeline(t *testing.T) {
 	virt := httpEv("a", 5, base, base+4*ms, "c1", true, 1)
@@ -59,14 +61,29 @@ func TestCarrierLifeline(t *testing.T) {
 		t.Fatalf("stories: carrier %+v, platform %+v", carrier, platform)
 	}
 	for _, e := range carrier.Entries {
-		if e.Ordering == OrderCausal {
-			t.Errorf("carrier entry %+v is causal", e)
+		if e.Ordering != OrderNone {
+			t.Errorf("carrier entry %+v is %s, want unordered", e, e.Ordering)
 		}
 	}
 	var out bytes.Buffer
 	if err := WriteThreads(&out, []ThreadStory{*carrier}); err != nil ||
-		!strings.Contains(out.String(), "not its own work") {
+		!strings.Contains(out.String(), "not its own work") ||
+		!strings.Contains(out.String(), "in no provable order") || strings.Contains(out.String(), " => ") {
 		t.Errorf("carrier story text (%v):\n%s", err, &out)
+	}
+}
+
+// TestIncarnationsApart: a restarted process reusing its pid and tid is
+// another lifeline — its steps are never one story with the earlier
+// incarnation's, ordered across both processes.
+func TestIncarnationsApart(t *testing.T) {
+	first := httpEv("a", 7, base, base+ms, "c1", true, 1)
+	second := httpEv("a", 7, base+5*ms, base+6*ms, "c2", true, 1)
+	second.PIDInc = 2
+	_, ts := stories(record(nil, []*schema.Event{first, second}, nil))
+	if len(ts) != 2 || ts[0].Incarnation == ts[1].Incarnation || len(ts[0].Entries) != 2 ||
+		len(ts[1].Entries) != 2 {
+		t.Fatalf("stories: %+v", ts)
 	}
 }
 
@@ -112,7 +129,10 @@ func TestProcessesProjection(t *testing.T) {
 	r := &report.Report{MoreProcesses: 3, Processes: []report.Process{
 		{ID: "process:h/7@1", Host: "h", PID: 7, Incarnation: 1, Comm: "java\x1b[2J"},
 		{ID: "process:h/7@2", Host: "h", PID: 7, Incarnation: 2, Comm: "java", Threads: []report.Thread{
-			{Name: "carrier-1", TID: 9, Events: 5, Carried: 4, Calls: []report.Call{{Carrier: true}, {}}}}},
+			{Name: "carrier-1", TID: 9, Events: 5, Carried: 4, Calls: []report.Call{{Carrier: true}, {}}}},
+			// Connected to itself: both ends in one process, one per fd.
+			Conns: []report.Conn{{ID: "m-c1", FD: 5, Role: report.RoleClient},
+				{ID: "m-c1", FD: 6, Role: report.RoleServer}}},
 	}}
 	ps, more := processes(r, newNamer(schema.Graph{}, nil, nil))
 	if len(ps) != 2 || more != 3 || ps[0].Incarnations != 2 || ps[1].Service != "pid 7" {
@@ -125,7 +145,7 @@ func TestProcessesProjection(t *testing.T) {
 	if err := WriteProcesses(&out, Model{Processes: ps, MoreProcesses: more}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"restarts 2 incarnations", "not its own", "truncated: 3 more processes"} {
+	for _, want := range []string{"m-c1 fd 5 client", "m-c1 fd 6 server", "2 incarnations of pid 7 on this host (restart or reused pid)", "not its own", "truncated: 3 more processes"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("text lacks %q:\n%s", want, &out)
 		}

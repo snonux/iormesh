@@ -19,6 +19,7 @@
       "service": "java",
       "host": "gw.example.org",
       "pid": 10,
+      "pid_incarnation": 1,
       "tid": 11,
       "thread": "http-1"
     },
@@ -26,6 +27,7 @@
       "service": "orders:8080",
       "host": "orders.example.org",
       "pid": 20,
+      "pid_incarnation": 1,
       "tid": 21,
       "thread": "worker-3"
     },
@@ -33,6 +35,7 @@
       "service": "inventory:8081",
       "host": "inv.example.org",
       "pid": 30,
+      "pid_incarnation": 1,
       "tid": 31,
       "thread": "inv-1"
     },
@@ -40,6 +43,7 @@
       "service": "billing:8082",
       "host": "bill.example.org",
       "pid": 40,
+      "pid_incarnation": 1,
       "tid": 41,
       "thread": "bill-1"
     }

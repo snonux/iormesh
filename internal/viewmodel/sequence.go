@@ -117,7 +117,7 @@ func LifelineName(l Lifeline) string {
 func lifelineDetail(l Lifeline) string {
 	d := LifelineName(l)
 	if l.Host != "" {
-		d += fmt.Sprintf("  %s pid %d tid %d", l.Host, l.PID, l.TID)
+		d += fmt.Sprintf("  %s pid %d@%d tid %d", l.Host, l.PID, l.Incarnation, l.TID)
 	}
 	if l.Carrier {
 		d += "  virtual threads' I/O on this carrier, not its own work"

@@ -4424,26 +4424,33 @@ internal/report/                   # + Thread.Carried, Call.Carrier
   The processes come from the rollup `build` already collects
   (`viewmodel.Input.Report`), which now counts a carrier thread's
   virtual-thread events (`carried`) and flags their calls.
-- **Lifeline identity** is service, host, pid, tid, thread name and
-  the carrier flag: a virtual thread's I/O on a carrier and the
-  carrier's own work are two lifelines, and two threads of one name
-  stay apart.
+- **Lifeline identity** is service, host, pid, pid incarnation,
+  tid, thread name and the carrier flag: a virtual thread's I/O on
+  a carrier and the carrier's own work are two lifelines, and two
+  threads of one name — or a restarted process's thread reusing
+  pid and tid — stay apart.
 - **Story order** is per lifeline, by its own host's clock and then
   emission order; `storyOrder` judges each entry against the one
   before (causal inside one owned span, else time-ordered when the
-  clock moved on, else unordered). A step past `MaxSteps` counts in
-  its lifelines' `more_entries`, as do entries past 200.
+  clock moved on, else unordered); every entry of a carrier's
+  lifeline is unordered (virtual threads migrate, review of task
+  0f4), and its text has no one-line story. A step past
+  `MaxSteps` counts in its lifelines' `more_entries`, as do
+  entries past 200.
 - **Renderer**: `render.Sequence` heads each column with service and
   thread (class `carrier`, dashed, for a carrier's lifeline); a lane
-  index outside the list is drawn on the first column, and a model
-  without lifelines (built before) one column per service.
+  index outside the list is not drawn but counted ("N steps with
+  invalid lanes not drawn"), and a model without lifelines (built
+  before) is drawn one column per service.
 - Tests: `internal/viewmodel/lifeline_test.go` (a virtual thread's
-  requests on their own lifelines beside the carrier's own, its
-  story never causal; story ordering ties and spans; the entry cap;
-  the processes projection — incarnations, carried counts, escapes,
-  no rollup; thread views terminal-safe, unknown thread);
+  requests on their own lifelines beside the carrier's own, two
+  interleaved ones' story all unordered with no one-line chain; two
+  incarnations of one pid and tid two stories; story ordering ties
+  and spans; the entry cap; the processes projection —
+  incarnations, carried counts, a self-connection's two ends by fd,
+  escapes, no rollup; thread views terminal-safe, unknown thread);
   `internal/render/render_test.go` (columns per lifeline, the
-  carrier lane, an out-of-range lane); `internal/report`
+  carrier lane, out-of-range lanes not drawn and counted); `internal/report`
   (`TestReportCarrier`); `internal/ctl/threads_test.go` — the
   four-host store's `show thread`, `show thread
   orders:8080/worker-3` (one owned span: every entry after the

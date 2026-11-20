@@ -1379,11 +1379,12 @@ Kubernetes (M7) build on it.
   timestamps never order a step. `show conversations`, `show
   sequence [ID]`, `query -ref`, and per build `graph.svg` and
   `sequence/<ID>.svg`. *Built (task 0f4):* per-thread
-  lifelines (service, host, pid, tid, thread; a virtual
+  lifelines (service, host, pid@incarnation, tid, thread; a virtual
   thread's I/O on its carrier a lifeline of its own, never the
   carrier's), each thread's story across the conversations in
   its own host's clock order (`show thread SERVICE/THREAD`:
-  causal only inside a span it held alone), and the processes
+  causal only inside a span it held alone; a carrier's
+  virtual-thread lifeline all unordered), and the processes
   per host — threads with carried virtual-thread I/O counted
   apart, files, sockets, restarts — projected from the rollup
   (`show processes`)

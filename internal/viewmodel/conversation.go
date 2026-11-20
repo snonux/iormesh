@@ -127,16 +127,18 @@ type Conversation struct {
 // lifeline with Service only. A virtual thread's I/O is named by its
 // carrier (java.carrier): such steps sit on a lifeline of their own,
 // Carrier set, never on the carrier's platform-thread lifeline — what
-// the carrier ran for its virtual threads is not its own work. PID and
-// TID tell two threads of one name apart (two processes of one service
-// on a host, a reused name).
+// the carrier ran for its virtual threads is not its own work. PID,
+// Incarnation and TID tell two threads of one name apart (two processes
+// of one service on a host, a restarted process reusing its pid and
+// tid, a reused name).
 type Lifeline struct {
-	Service string `json:"service"`
-	Host    string `json:"host,omitempty"`
-	PID     uint32 `json:"pid,omitempty"`
-	TID     uint32 `json:"tid,omitempty"`
-	Thread  string `json:"thread,omitempty"`
-	Carrier bool   `json:"carrier,omitempty"`
+	Service     string `json:"service"`
+	Host        string `json:"host,omitempty"`
+	PID         uint32 `json:"pid,omitempty"`
+	Incarnation uint64 `json:"pid_incarnation,omitempty"`
+	TID         uint32 `json:"tid,omitempty"`
+	Thread      string `json:"thread,omitempty"`
+	Carrier     bool   `json:"carrier,omitempty"`
 }
 
 // Step is one arrow or note of a conversation.

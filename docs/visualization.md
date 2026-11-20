@@ -373,7 +373,8 @@ in [implementation.md](implementation.md), M5 "Threads and
 processes"):
 
 - **Lifelines**: a conversation's `lifelines` are its threads in
-  first-appearance order — service, host, pid, tid, thread name —
+  first-appearance order — service, host, pid, pid incarnation,
+  tid, thread name —
   and each step names its own and its peer's (`lane`, `to_lane`,
   `-1` for a file step): gateway thread X → orders thread Y →
   inventory thread Z. The far end of a hop no trace saw (an
@@ -384,23 +385,29 @@ processes"):
   lifelines and names the peer's thread on each arrow;
   `sequence/<ID>.svg` draws one column per lifeline (service, and
   thread below; a carrier's lifeline dashed and marked
-  `(virtual)`).
+  `(virtual)`; a step whose lane index is out of range is not
+  drawn, and the diagram counts it).
 - **Thread stories** (`threads`): per lifeline with a thread,
   what it did across the kept conversations — `receive`, `send`,
   `response`, `reply`, `file` — each entry a conversation step
-  (ID and number) with its ref. All of a lifeline's entries
-  happened on one kernel thread of one host, so they are ordered
-  by that host's clock only: `causal` between two entries of one
-  request span the thread held alone (the `owned` rule above),
-  `time-ordered` when the clock moved on, `unordered` on a tie. A
-  carrier's lifeline has no owned span, so its entries are never
-  causal. The newest 200 entries are kept (`more_entries`).
-  `show thread` lists the stories; `show thread SERVICE/THREAD`
-  prints every lifeline of that name (one per host, process and
+  (ID and number) with its ref. A platform lifeline is one kernel
+  thread of one process incarnation on one host (a restarted
+  process reusing pid and tid is another lifeline), so its entries
+  are ordered by that host's clock only: `causal` between two
+  entries of one request span the thread held alone (the `owned`
+  rule above), `time-ordered` when the clock moved on, `unordered`
+  on a tie. A carrier's virtual-thread lifeline is all
+  `unordered`: an http event names the carrier the virtual thread
+  ran on when it was emitted, but virtual threads migrate between
+  carriers, so nothing proves the order of their steps on it. The
+  newest 200 entries are kept (`more_entries`). `show thread`
+  lists the stories; `show thread SERVICE/THREAD` prints every
+  lifeline of that name (one per host, process incarnation and
   kernel thread, a carrier's virtual-thread lifeline beside its
   own) — the story as one line (`received GET /orders/42 from
   gateway => read /etc/orders.conf => … => replied 200 to
-  gateway`), then entry by entry; `-json` prints the stories.
+  gateway`; a carrier's says it has none), then entry by entry;
+  `-json` prints the stories.
 - **Processes** (`processes`, `more_processes`): projected from the
   run's rollup (`report.json`, task qb4), not a reading of their
   own — per process incarnation its host, pid, comm, app, the name

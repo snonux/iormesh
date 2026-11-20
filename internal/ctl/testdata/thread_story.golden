@@ -1,4 +1,4 @@
-thread       orders:8080/worker-3  orders.example.org pid 20 tid 21
+thread       orders:8080/worker-3  orders.example.org pid 20@1 tid 21
 story        received GET /orders/42 from java => open /etc/orders.conf => read /etc/orders.conf => sent GET /stock/7 to inventory:8081 => got 200 from inventory:8081 => create /data/order-42.json.tmp => write /data/order-42.json.tmp => rename /data/order-42.json.tmp -> /data/order-42.json => sent POST /charge to billing:8082 => got 200 from billing:8082 => replied 200 to java
   1  time-ordered  0001#2  received GET /orders/42 from java
                      ref shop/gw/gw.example.org-g1/6

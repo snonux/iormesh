@@ -33,7 +33,7 @@ func writeProcess(b *strings.Builder, p Process) {
 	fmt.Fprintf(b, "process    %s/%s/%s[%d] incarnation %d  %s  (as a client: %s)\n", p.Project,
 		p.Host, p.Comm, p.PID, p.Incarnation, p.FQDN, p.Service)
 	if p.Incarnations > 1 {
-		fmt.Fprintf(b, "  restarts %d incarnations of pid %d on this host\n", p.Incarnations, p.PID)
+		fmt.Fprintf(b, "  pid      %d incarnations of pid %d on this host (restart or reused pid)\n", p.Incarnations, p.PID)
 	}
 	if len(p.Serves) > 0 {
 		fmt.Fprintf(b, "  serves   %s\n", strings.Join(p.Serves, ", "))
@@ -62,7 +62,7 @@ func procThreadLine(t ProcThread) string {
 	}
 	line := fmt.Sprintf("%s: %d events, %d B, %d calls", name, t.Events, t.Bytes, t.Calls)
 	if t.Carried > 0 || t.CarriedCalls > 0 {
-		line += fmt.Sprintf("; carrier: %d events and %d calls were virtual threads' I/O, not its own",
+		line += fmt.Sprintf("; carrier: %d events and %d of the listed calls were virtual threads' I/O, not its own",
 			t.Carried, t.CarriedCalls)
 	}
 	return line

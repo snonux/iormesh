@@ -13,15 +13,21 @@ import (
 // step of a conversation (ID and number), so a story adds no reading of
 // the trace, only another order of the same steps.
 //
-// The order is provable by construction: all of a lifeline's entries
-// happened on one kernel thread of one host, so its own clock orders
-// them — never another host's. Inside one request span the thread
+// The order is provable by construction: a platform lifeline is one
+// kernel thread of one process incarnation on one host (pid,
+// incarnation and tid are in its key), so its own clock orders its
+// entries — never another host's. Inside one request span the thread
 // worked on alone (request.owned) the order is the thread's program
 // order, causal; between spans it is time-ordered on that clock when
-// the instants differ, unordered when they tie. A virtual thread's I/O
-// on its carrier is a lifeline of its own (Lifeline.Carrier), so a
-// carrier's story of its virtual threads never reads as its own work,
-// and no span of it is owned: its entries are at most time-ordered.
+// the instants differ, unordered when they tie.
+//
+// A virtual thread's I/O on its carrier is a lifeline of its own
+// (Lifeline.Carrier), so it never reads as the carrier's own work. Its
+// entries are all unordered: an http event names the carrier the
+// virtual thread ran on when the event was emitted, but a virtual
+// thread migrates — its request may have started on another carrier —
+// so neither the instants nor the carrier prove which of its virtual
+// threads' steps came first on it (task 0f4 review).
 
 // Acts: what a thread did in a step.
 const (
@@ -143,6 +149,9 @@ func (b *storyBook) stories() []ThreadStory {
 		st := ThreadStory{Lifeline: a.lane, Entries: make([]ThreadEntry, 0, len(a.marks)), MoreEntries: a.cut}
 		for i, m := range a.marks {
 			m.entry.Ordering = storyOrder(a.marks, i)
+			if a.lane.Carrier { // virtual threads migrate: nothing proves their order here
+				m.entry.Ordering = OrderNone
+			}
 			st.Entries = append(st.Entries, m.entry)
 		}
 		if n := len(st.Entries); n > MaxThreadEntries {
@@ -170,10 +179,11 @@ func storyOrder(ms []storyMark, i int) string {
 	return OrderNone
 }
 
-// compareLifeline sorts lifelines by service, thread, host, process,
-// thread id, and a carrier's lifeline after the platform one.
+// compareLifeline sorts lifelines by service, thread, host, process
+// (pid, incarnation), thread id, and a carrier's lifeline after the
+// platform one.
 func compareLifeline(x, y Lifeline) int {
 	return cmp.Or(cmp.Compare(x.Service, y.Service), cmp.Compare(x.Thread, y.Thread),
-		cmp.Compare(x.Host, y.Host), cmp.Compare(x.PID, y.PID), cmp.Compare(x.TID, y.TID),
-		cmp.Compare(btoi(x.Carrier), btoi(y.Carrier)))
+		cmp.Compare(x.Host, y.Host), cmp.Compare(x.PID, y.PID), cmp.Compare(x.Incarnation, y.Incarnation),
+		cmp.Compare(x.TID, y.TID), cmp.Compare(btoi(x.Carrier), btoi(y.Carrier)))
 }

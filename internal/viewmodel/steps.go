@@ -139,8 +139,12 @@ func (e *emitter) body(s int, lifeline string) {
 				Thread: cmp.Or(op.thread, threadName(srv)), Carrier: op.carrier, Label: op.label,
 				Bytes: op.bytes, Latency: time.Duration(op.latency), Stack: e.frames(op.org, op.stack),
 				Ref: e.ref(op.org, op.seq)}
-			me := end{lane: Lifeline{Service: lifeline, Host: st.Host, PID: srv.th.pid, TID: srv.th.tid,
-				Thread: st.Thread, Carrier: op.carrier}, wall: op.at, span: s}
+			me := end{lane: Lifeline{Service: lifeline, Host: st.Host, PID: srv.th.pid,
+				Incarnation: srv.th.inc, TID: srv.th.tid, Thread: st.Thread, Carrier: op.carrier},
+				wall: op.at, span: s}
+			if op.carrier { // a virtual thread's I/O: no span of the carrier's own
+				me.span = -1
+			}
 			e.add(st, stampAt(srv.th.host, op.at), true, me, noEnd)
 			continue
 		}
@@ -155,7 +159,8 @@ func (e *emitter) body(s int, lifeline string) {
 func (e *emitter) thread(lifeline string, i, span int, wall uint64) end {
 	q := e.r.reqs[i]
 	return end{lane: Lifeline{Service: lifeline, Host: e.r.origins[q.org].FQDN, PID: q.th.pid,
-		TID: q.th.tid, Thread: threadName(q), Carrier: q.carrier}, wall: wall, span: span}
+		Incarnation: q.th.inc, TID: q.th.tid, Thread: threadName(q), Carrier: q.carrier},
+		wall: wall, span: span}
 }
 
 // side is the step fields request q's own end fills: its lifeline,

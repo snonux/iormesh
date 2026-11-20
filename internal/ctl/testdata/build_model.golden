@@ -151,6 +151,7 @@
           "service": "orders.example:8080",
           "host": "hostB.example.org",
           "pid": 200,
+          "pid_incarnation": 1,
           "tid": 200,
           "thread": "tid 200"
         }
@@ -205,6 +206,7 @@
           "service": "java",
           "host": "hostA.example.org",
           "pid": 100,
+          "pid_incarnation": 1,
           "tid": 100,
           "thread": "tid 100"
         },
@@ -265,6 +267,7 @@
           "service": "orders.example:8080",
           "host": "hostB.example.org",
           "pid": 200,
+          "pid_incarnation": 1,
           "tid": 200,
           "thread": "tid 200"
         }
@@ -319,6 +322,7 @@
           "service": "java",
           "host": "hostA.example.org",
           "pid": 100,
+          "pid_incarnation": 1,
           "tid": 100,
           "thread": "tid 100"
         },
@@ -379,6 +383,7 @@
           "service": "orders.example:8080",
           "host": "hostB.example.org",
           "pid": 200,
+          "pid_incarnation": 1,
           "tid": 200,
           "thread": "tid 200"
         }
@@ -433,6 +438,7 @@
           "service": "java",
           "host": "hostA.example.org",
           "pid": 100,
+          "pid_incarnation": 1,
           "tid": 100,
           "thread": "tid 100"
         },
@@ -482,6 +488,7 @@
       "service": "java",
       "host": "hostA.example.org",
       "pid": 100,
+      "pid_incarnation": 1,
       "tid": 100,
       "thread": "tid 100",
       "entries": [
@@ -546,6 +553,7 @@
       "service": "orders.example:8080",
       "host": "hostB.example.org",
       "pid": 200,
+      "pid_incarnation": 1,
       "tid": 200,
       "thread": "tid 200",
       "entries": [

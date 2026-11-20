@@ -30,8 +30,8 @@ type Process struct {
 	FQDN        string `json:"fqdn"`
 	PID         uint32 `json:"pid"`
 	Incarnation uint64 `json:"pid_incarnation"`
-	// Incarnations counts this host's incarnations of the pid in the
-	// list: more than one is a restart (or a reused pid).
+	// Incarnations counts the listed incarnations of the pid on this
+	// project's host: more than one is a restart or a reused pid.
 	Incarnations int    `json:"incarnations"`
 	Comm         string `json:"comm"`
 	App          string `json:"app"`
@@ -57,7 +57,8 @@ type ProcThread struct {
 	Events uint64 `json:"events"`
 	Bytes  uint64 `json:"bytes"`
 	// Carried counts the events among Events that were virtual threads'
-	// I/O it carried; CarriedCalls the requests among Calls.
+	// I/O it carried; CarriedCalls the virtual threads' requests among
+	// the rollup's listed calls (report.MaxCalls), not among those cut.
 	Carried      uint64 `json:"carried"`
 	Calls        int    `json:"calls"`
 	CarriedCalls int    `json:"carried_calls"`
@@ -97,13 +98,16 @@ func processes(r *report.Report, n namer) ([]Process, int) {
 	if r == nil {
 		return out, 0
 	}
-	incs := map[[2]string]int{}
+	// One pid's incarnations: the same project's host directory and pid
+	// (another project's host directory may be another machine).
+	incs := map[[3]string]int{}
 	for _, p := range r.Processes {
-		incs[[2]string{p.Host, itoa(p.PID)}]++
+		incs[[3]string{p.Project, p.Host, itoa(p.PID)}]++
 	}
 	for _, p := range r.Processes {
+		key := [3]string{p.Project, p.Host, itoa(p.PID)}
 		out = append(out, Process{ID: p.ID, Project: p.Project, Host: p.Host, FQDN: p.FQDN, PID: p.PID,
-			Incarnation: p.Incarnation, Incarnations: incs[[2]string{p.Host, itoa(p.PID)}], Comm: p.Comm,
+			Incarnation: p.Incarnation, Incarnations: incs[key], Comm: p.Comm,
 			App: p.App, Service: n.processID(p.ID, p.PID), Serves: nonNil(p.Serves), Events: p.Events,
 			JavaEvents: p.JavaEvents, Threads: procThreads(p.Threads), MoreThreads: p.MoreThreads,
 			Files: procFiles(p.Files), MoreFiles: p.MoreFiles, Sockets: procSockets(p.Conns),
