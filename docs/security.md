@@ -55,6 +55,19 @@ truth.
   upgrades verify the signature against a root-owned key.
   Bootstrap and the signature scheme are open decisions in
   PLAN.md (#1, #28).
+- **The lifecycle subcommands take no free-form input to
+  systemd or the filesystem's root.** `start`, `stop`, `status`
+  and `uninstall` (task 9b4) call `systemd-run` and `systemctl`
+  with an argv, never a shell string; the unit name is built
+  only from a project label `internal/project` accepts; start's
+  cgroup caps are checked against their documented forms, and
+  every forwarded run flag is one `-name=value` element.
+  `uninstall` removes exactly `/opt/iormesh` — no path flag,
+  since under the sudoers rule one would delete any tree as
+  root — and only after every `iormesh-<project>` unit stopped.
+  `state.json` is written by the run in its checked, locked
+  project directory, replaced by an atomic rename of a file
+  opened without following symlinks.
 - **The agent spool is untrusted input.** `iormesh run -spool`
   creates the directory mode 1733 (anyone may create, nobody may
   list or delete another's file) after checking, on a descriptor

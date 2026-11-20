@@ -32,9 +32,12 @@ type segmentFlags struct {
 
 // segOutput is a run's parquet segment writer (-trace-dir); nil writes
 // none, and its methods are no-ops then, as stackOutput's are.
+// dir, session and fqdn name the project directory and the session the
+// run's state.json (state.go) describes.
 type segOutput struct {
-	w      *segment.Writer
-	stderr io.Writer
+	w                  *segment.Writer
+	stderr             io.Writer
+	dir, session, fqdn string
 }
 
 // segmentSink feeds the correlator's events to the segment writer. Its
@@ -151,13 +154,14 @@ func openSegments(cfg runConfig, fqdn string, stderr io.Writer) (*segOutput, err
 	if err != nil {
 		return nil, err
 	}
-	w, err := segment.New(segment.Config{Dir: filepath.Join(cfg.traceDir, cfg.project),
+	dir := filepath.Join(cfg.traceDir, cfg.project)
+	w, err := segment.New(segment.Config{Dir: dir,
 		FQDN: fqdn, Session: id, Project: cfg.project, Owner: cfg.readyOwner,
 		Watchdog: cfg.watchdog()})
 	if err != nil {
 		return nil, err
 	}
-	return &segOutput{w: w, stderr: stderr}, nil
+	return &segOutput{w: w, stderr: stderr, dir: dir, session: id, fqdn: fqdn}, nil
 }
 
 // newSessionID is <session> in segment names: 8 random hex digits, so two

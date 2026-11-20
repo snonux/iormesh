@@ -1,0 +1,270 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"time"
+
+	"iormesh/internal/project"
+	"iormesh/internal/segment"
+)
+
+// installRoot is what uninstall removes: the binary and the default
+// trace dir under it (PLAN.md M4 "Cleanup"). It is deliberately not a
+// flag: uninstall runs under the one sudoers rule, and a path argument
+// would turn it into "delete any tree as root".
+const installRoot = "/opt/iormesh"
+
+// statusReport is one project's line in `iormesh status` (-json prints
+// the reports as they are).
+type statusReport struct {
+	Project string `json:"project"`
+	Unit    string `json:"unit"`
+	// UnitState is systemd's view, e.g. "active/running" or "not loaded".
+	UnitState string `json:"unit_state"`
+	// State is state.json's, with "dead" for a running state whose
+	// process is gone; empty without a state file.
+	State   string        `json:"state,omitempty"`
+	Session *sessionState `json:"session,omitempty"`
+	// ReadySegments counts the published events segments in ready/ that
+	// await collection.
+	ReadySegments int    `json:"ready_segments"`
+	Error         string `json:"error,omitempty"`
+}
+
+// projectFlags are the -project and -trace-dir flags stop and status
+// share: the unit's name and where its state.json is.
+type projectFlags struct {
+	project, traceDir *string
+}
+
+func addProjectFlags(fs *flag.FlagSet) projectFlags {
+	return projectFlags{
+		project:  fs.String("project", "", "project label"),
+		traceDir: fs.String("trace-dir", defaultTraceDir, "the trace dir the session writes to"),
+	}
+}
+
+// parseFlags parses args into fs, which takes no positional arguments.
+func parseFlags(fs *flag.FlagSet, args []string) error {
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("%w: %v", errUsage, err)
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("%w: unexpected argument %q", errUsage, fs.Arg(0))
+	}
+	return nil
+}
+
+// stop stops the project's unit: systemd sends SIGTERM, the run drains,
+// writes its end event and publishes the active segment as its last
+// (decision #19). It then prints the end state.json recorded.
+func (c control) stop(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
+	fs.SetOutput(c.stderr)
+	pf := addProjectFlags(fs)
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	unit, err := unitName(*pf.project)
+	if err != nil {
+		return err
+	}
+	u, err := showUnit(ctx, c.sys, unit)
+	if err != nil {
+		return err
+	}
+	if !u.live() {
+		return fmt.Errorf("project %s: %s is not running (%s)", *pf.project, unit, u)
+	}
+	if err := stopUnit(ctx, c.sys, unit); err != nil {
+		return err
+	}
+	st, err := readState(filepath.Join(*pf.traceDir, *pf.project))
+	if err != nil || st.State != stateEnded {
+		_, _ = fmt.Fprintf(c.stdout, "iormesh: stopped %s\n", unit)
+		return nil
+	}
+	_, _ = fmt.Fprintf(c.stdout, "iormesh: stopped %s: session %s ended (%s) at %s\n",
+		unit, st.Session, st.EndReason, st.EndedAt.Format(time.RFC3339))
+	return nil
+}
+
+// status reports the project's session, or with no -project every session
+// it knows of: the projects with a unit loaded and those with a state.json
+// in the trace dir. A named project with neither, or a corrupt state, is
+// an error (after every report is printed).
+func (c control) status(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	fs.SetOutput(c.stderr)
+	pf := addProjectFlags(fs)
+	asJSON := fs.Bool("json", false, "print the reports as JSON")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	projects, err := c.statusProjects(ctx, *pf.project, *pf.traceDir)
+	if err != nil {
+		return err
+	}
+	reports := make([]statusReport, 0, len(projects))
+	var errs []error
+	for _, p := range projects {
+		r := c.statusOf(ctx, *pf.traceDir, p)
+		if r.Error != "" {
+			errs = append(errs, fmt.Errorf("project %s: %s", p, r.Error))
+		}
+		reports = append(reports, r)
+	}
+	if err := c.printStatus(reports, *asJSON); err != nil {
+		return err
+	}
+	return errors.Join(errs...)
+}
+
+// statusProjects is the project list status reports on.
+func (c control) statusProjects(ctx context.Context, label, traceDir string) ([]string, error) {
+	if label != "" {
+		if _, err := unitName(label); err != nil {
+			return nil, err
+		}
+		return []string{label}, nil
+	}
+	projects, err := listUnits(ctx, c.sys)
+	if err != nil {
+		return nil, err
+	}
+	states, _ := filepath.Glob(filepath.Join(traceDir, "*", StateFile))
+	for _, s := range states {
+		// A directory that is no project label is not ours to report on,
+		// and its name must not reach a systemctl argv.
+		if p := filepath.Base(filepath.Dir(s)); project.Valid(p) {
+			projects = append(projects, p)
+		}
+	}
+	slices.Sort(projects)
+	return slices.Compact(projects), nil
+}
+
+// statusOf builds one project's report.
+func (c control) statusOf(ctx context.Context, traceDir, label string) statusReport {
+	r := statusReport{Project: label, Unit: unitPrefix + label + unitSuffix}
+	u, err := showUnit(ctx, c.sys, r.Unit)
+	if err != nil {
+		r.Error = err.Error()
+		return r
+	}
+	r.UnitState = u.String()
+	dir := filepath.Join(traceDir, label)
+	r.ReadySegments = countReady(filepath.Join(dir, segment.ReadyDir))
+	st, err := readState(dir)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		if u.LoadState == "not-found" {
+			r.Error = "no session (no unit, no " + StateFile + " in " + dir + ")"
+		}
+	case err != nil:
+		r.Error = err.Error()
+	case st.Project != label:
+		r.Error = fmt.Sprintf("%s names project %q", filepath.Join(dir, StateFile), st.Project)
+	default:
+		r.State, r.Session = st.effective(), &st
+	}
+	return r
+}
+
+// countReady counts the events segments in ready/ (not their tables):
+// what the controller's next collect will fetch.
+func countReady(ready string) int {
+	names, _ := filepath.Glob(filepath.Join(ready, "*"+segment.Ext))
+	n := 0
+	for _, name := range names {
+		base := strings.TrimSuffix(filepath.Base(name), segment.Ext)
+		if i := strings.LastIndexByte(base, '-'); i >= 0 && !strings.Contains(base[i:], ".") {
+			n++
+		}
+	}
+	return n
+}
+
+func (c control) printStatus(reports []statusReport, asJSON bool) error {
+	if asJSON {
+		enc := json.NewEncoder(c.stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(reports)
+	}
+	if len(reports) == 0 {
+		_, _ = fmt.Fprintln(c.stdout, "iormesh: no sessions")
+	}
+	for _, r := range reports {
+		_, _ = fmt.Fprint(c.stdout, r.text())
+	}
+	return nil
+}
+
+// text is the report as status prints it, one project per block.
+func (r statusReport) text() string {
+	var b strings.Builder
+	state := r.State
+	if state == "" {
+		state = "unknown"
+	}
+	fmt.Fprintf(&b, "%s: %s (unit %s %s)\n", r.Project, state, r.Unit, r.UnitState)
+	if st := r.Session; st != nil {
+		fmt.Fprintf(&b, "  session %s on %s, pid %d, tracing %s\n", st.Session, st.FQDN, st.PID, st.Targets)
+		fmt.Fprintf(&b, "  started %s, ends by %s\n", st.StartedAt.Format(time.RFC3339),
+			st.EndsBy.Format(time.RFC3339))
+		if st.State == stateEnded {
+			fmt.Fprintf(&b, "  ended %s (%s)\n", st.EndedAt.Format(time.RFC3339), st.EndReason)
+		}
+	}
+	if r.State == stateDead {
+		b.WriteString("  the tracer died without its end: the active minute was not published\n")
+	}
+	fmt.Fprintf(&b, "  ready/: %d segments to collect\n", r.ReadySegments)
+	if r.Error != "" {
+		fmt.Fprintf(&b, "  error: %s\n", r.Error)
+	}
+	return b.String()
+}
+
+// uninstall stops every iormesh unit, then removes installRoot.
+func (c control) uninstall(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	fs.SetOutput(c.stderr)
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	return c.uninstallFrom(ctx, installRoot)
+}
+
+// uninstallFrom is uninstall over root (a temporary directory in tests).
+// Every unit is stopped first, so each running tracer publishes its last
+// segment before the tree goes. A unit that will not stop stops the
+// uninstall: removing the binary under a live tracer would leave it
+// running with no way to reach it by name. Trace dirs outside root (a
+// start's -trace-dir) are left alone.
+func (c control) uninstallFrom(ctx context.Context, root string) error {
+	projects, err := listUnits(ctx, c.sys)
+	if err != nil {
+		return err
+	}
+	for _, p := range projects {
+		unit := unitPrefix + p + unitSuffix
+		if err := stopUnit(ctx, c.sys, unit); err != nil {
+			return fmt.Errorf("uninstall: %w", err)
+		}
+		_, _ = fmt.Fprintf(c.stdout, "iormesh: stopped %s\n", unit)
+	}
+	if err := os.RemoveAll(root); err != nil {
+		return fmt.Errorf("uninstall: %w", err)
+	}
+	_, _ = fmt.Fprintf(c.stdout, "iormesh: removed %s\n", root)
+	return nil
+}

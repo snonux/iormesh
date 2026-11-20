@@ -852,7 +852,15 @@ Kubernetes (M7) build on it.
   the final event). Runs default to a 4h auto-exit
   (`-duration`, ior-style), with the unit's `RuntimeMaxSec` as
   a second, independent bound — no unbounded daemons on
-  servers.
+  servers. Built (task 9b4): the caps default to one core
+  (`CPUQuota=100%`) and 1 GiB (`MemoryMax=1G`), overridable
+  with `start -cpu-quota`/`-memory-max`; `RuntimeMaxSec` is
+  `-duration` + 5 min and `TimeoutStopSec` 30 s before systemd
+  SIGKILLs. The run itself writes
+  `<trace-dir>/<project>/state.json` (running once attached,
+  then ended with its end reason); `start` waits for it, `status`
+  reads it, and `start` refuses a project whose unit is live —
+  flags change by stop and start (#19).
 - **One sudoers rule**: every privileged action is a tracer
   subcommand — `start`, `stop`, `status`, `upgrade`,
   `uninstall` (and `run`, the foreground tracer `start`
@@ -1453,7 +1461,10 @@ answer), and deferred.
   suite.
 - **#19 Runtime control** — the transient systemd unit (M4):
   graceful stop via SIGTERM, flag changes via stop-and-restart.
-  No control file, no socket.
+  No control file, no socket. Built by task 9b4 (`start`,
+  `stop`, `status`, `uninstall`); `state.json` is a status
+  record the run writes, read-only to the control commands —
+  not a control file.
 - **#11 Explorer form factor** — all three, on one view model:
   a generated static site (HTML/JS/SVG, no server, opens from
   `file://`), a Bubble Tea terminal UI, and plain text. A

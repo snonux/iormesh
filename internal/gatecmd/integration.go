@@ -62,6 +62,7 @@ func IntegrationTests() []string {
 		"TestNonJavaPeer",
 		"TestNativeStacks",
 		"TestParquetSegments",
+		"TestSystemdUnit",
 		"TestJavaAttachDynamicLoading",
 		"TestJavaLiveAttach",
 		"TestJavaLiveAttachAtStart",

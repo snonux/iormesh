@@ -3129,29 +3129,76 @@ sudoers rule names):
 | Subcommand  | Does |
 |-------------|------|
 | `run`       | the foreground tracer (also standalone mode) |
-| `start`     | launches `run` as a transient systemd unit |
-| `stop`      | `systemctl stop iormesh-<project>` |
-| `status`    | prints state from `<trace-dir>/<project>/state.json` |
+| `start`     | launches `run` as the transient unit `iormesh-<project>.service` |
+| `stop`      | `systemctl stop` of that unit: SIGTERM, last segment, end |
+| `status`    | the unit's state plus `<trace-dir>/<project>/state.json` |
 | `upgrade F` | verifies staged binary `F`, replaces itself (#1, #28) |
 | `uninstall` | stops every unit, removes `/opt/iormesh` |
 
+Built by task 9b4 (`internal/cli`: `start.go`, `control.go`,
+`systemd.go`, `state.go`):
+
 ```go
-// startUnit launches the tracer under systemd so it outlives the
-// SSH session and is capped by its cgroup. RuntimeMaxSec is the
-// second, independent bound next to the tracer's own -duration.
-func startUnit(cfg RunConfig) error {
-    args := []string{
-        "--unit=iormesh-" + cfg.Project, "--collect",
-        "--property=RuntimeMaxSec=" + cfg.maxRuntime(), // duration+5m
-        "--property=CPUQuota=" + cfg.CPUQuota,          // decision #25
-        "--property=MemoryMax=" + cfg.MemoryMax,
+// unitArgs is systemd-run's argv. --service-type=exec makes systemd-run
+// return only once the binary is exec'd; --collect lets a failed unit
+// vanish, its state.json and journal keeping what happened.
+func (cfg startConfig) unitArgs(self string) []string {
+    return append([]string{
+        "--unit=" + cfg.unit, // iormesh-<project>.service
+        "--description=iormesh tracer, project " + cfg.run.project,
+        "--collect", "--quiet", "--service-type=exec",
+        "--property=RuntimeMaxSec=" + seconds(cfg.run.duration+runtimeGrace),
+        "--property=CPUQuota=" + cfg.cpuQuota,   // 100%: one core (#25)
+        "--property=MemoryMax=" + cfg.memoryMax, // 1G
         "--property=KillSignal=SIGTERM",
-        "--property=TimeoutStopSec=30",
-        selfPath(), "run",
-    }
-    return runCommand("systemd-run", append(args, cfg.runFlags()...)...)
+        "--property=TimeoutStopSec=" + seconds(stopTimeout), // 30s
+        "--", self, "run",
+    }, cfg.runArgs...)
 }
 ```
+
+- `start` takes `run`'s flags plus `-cpu-quota`, `-memory-max`
+  and `-wait` (default 2m). It validates them as `run` would,
+  so a bad flag fails the start, not the journal, and forwards
+  the ones set as single `-name=value` argv elements, paths made
+  absolute (the unit runs in `/`). Without `-ready-owner` it
+  passes `SUDO_UID:SUDO_GID` (none under root's own sudo). It
+  needs segments: `-out` alone is refused, `state.json` lives
+  beside them. A live unit for the project is refused — flags
+  change by stop and start (#19) — and a failed one reset.
+- Every systemd call is an argv through the `commander`
+  interface; the unit tests replace it with a fake, so they
+  never start, stop or list a host unit. Unit names are built
+  only from labels `internal/project` accepts, with the
+  `.service` suffix spelled out (a label may contain dots).
+- `state.json` is written by the run (atomic rename, 0644), not
+  by `start`: `running` once the probes are attached, with pid
+  and incarnation, `$INVOCATION_ID`, targets, start and end-by
+  times; `ended` with the end reason before the segment writer
+  closes (after that its lock is free and the next run of the
+  project owns the file). `start` polls `systemctl show` and
+  the file until the state carries the unit's invocation id —
+  the run attached — or the unit is gone (error, see
+  `journalctl -u`) or `-wait` passed (error, the unit keeps
+  running). `status` reports a `running` state whose process
+  is gone as `dead`: its active minute was never published.
+- `stop -project P` refuses a unit that is not live, stops it
+  (systemctl waits for the drain, the end event and the last
+  publish) and prints the recorded end. `status [-project P]
+  [-json]` covers one project or every one with a loaded unit
+  or a `state.json` under `-trace-dir`, with the count of
+  events segments waiting in `ready/`; an unknown project or a
+  corrupt or foreign state is an error. `uninstall` takes no
+  path — it runs under the sudoers rule — stops every
+  `iormesh-<project>.service` first and keeps `/opt/iormesh`
+  if one will not stop.
+- Tests: argv construction, flag forwarding and the sudo owner,
+  rejected flags with no systemd call, the live-unit refusal,
+  the wait (attach, early exit, early end, timeout), stop,
+  status (running, dead, ended, corrupt, unknown, foreign) and
+  uninstall, all against the fake; `TestSystemdUnit` runs the
+  lifecycle on the real systemd as root under a unique project
+  name, stopping and resetting its unit in `t.Cleanup`.
 
 Segment writer (`internal/segment`, built by task 8b4):
 

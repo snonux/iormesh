@@ -128,6 +128,11 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 	if err := s.startJava(ctx, cfg, stderr); err != nil {
 		return errors.Join(err, finish(cfg, tr, c, out, schema.EndError, stderr))
 	}
+	// state.json says running before the ready file appears, so a harness
+	// released by the one finds the other.
+	if err := out.seg.markRunning(cfg, describe(cfg.spec, pids), time.Now()); err != nil {
+		return errors.Join(err, finish(cfg, tr, c, out, schema.EndError, stderr))
+	}
 	if err := announceReady(cfg); err != nil {
 		return errors.Join(err, finish(cfg, tr, c, out, schema.EndError, stderr))
 	}
@@ -221,9 +226,10 @@ func describe(spec target.Spec, pids []uint32) string {
 
 // finish ends a trace: a last loss poll (the counters die with the
 // tracer), the tracer's close, the end event, the sink's close (the Java
-// join's last ring read with it), the graph file and the optional tables'
-// close, then the one-line summary. A loss count it cannot read
-// turns the end reason into error: the trace might hide a gap.
+// join's last ring read with it), the graph file, state.json's end and
+// the optional tables' close, then the one-line summary. A loss count it
+// cannot read turns the end reason into error: the trace might hide a
+// gap.
 func finish(cfg runConfig, tr tracer, c *correlate.Correlator, out outputs, reason string,
 	stderr io.Writer) error {
 	aggErr := drainAggregates(tr, c)
@@ -240,6 +246,9 @@ func finish(cfg runConfig, tr tracer, c *correlate.Correlator, out outputs, reas
 	if cfg.out != "" {
 		graphErr = schema.WriteGraphFile(filepath.Join(cfg.out, GraphFile), c.Graph())
 	}
+	// state.json's end goes first: once the writer has closed, its lock
+	// is free and the project's next run may own the state.
+	stateErr := out.seg.markEnded(reason, time.Now())
 	tablesErr := out.close()
 	// Skipped runs are host-wide possible loss, reported beside the lost
 	// records and never in them (bpf.Losses.Missed, task vd4).
@@ -247,7 +256,7 @@ func finish(cfg runConfig, tr tracer, c *correlate.Correlator, out outputs, reas
 		"unpaired exits %d, unreadable paths %d, unattributed aggregates %d%s\n",
 		reason, losses.Total(), losses.Kernel, losses.Missed, c.Unpaired(), c.NoPath(), c.Unattributed(),
 		out.summary())
-	return errors.Join(aggErr, lossErr, closeErr, endErr, sinkErr, graphErr, tablesErr)
+	return errors.Join(aggErr, lossErr, closeErr, endErr, sinkErr, graphErr, stateErr, tablesErr)
 }
 
 // drainAggregates hands the correlator the folded read/write calls the

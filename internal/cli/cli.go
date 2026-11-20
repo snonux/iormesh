@@ -3,11 +3,18 @@
 //	iormesh run (-pid PID[,PID…] | -pattern GLOB | -listen-port N) -project NAME -out DIR [-duration 4h] [-ready FILE] [-cpuprofile FILE]
 //	iormesh normalize [-bracket S] [-tmp PREFIX] [-check expect.json] [-out DIR] TRACEDIR
 //	iormesh attach -pid PID -agent JAR -spool DIR [-timeout 10s]
+//	iormesh start [run's flags] [-cpu-quota 100%] [-memory-max 1G] [-wait 2m]
+//	iormesh stop -project NAME [-trace-dir DIR]
+//	iormesh status [-project NAME] [-trace-dir DIR] [-json]
+//	iormesh uninstall
 //
 // run is the foreground tracer; its target spec (internal/target) is a
 // PID list, an argv/exe glob matched on exec, or a listening port (M2
-// steps 1–3, session.go). M4 adds start/stop/status/upgrade/uninstall
-// around it. normalize applies the golden-check library
+// steps 1–3, session.go). M4 wraps it (start.go, control.go): start runs
+// it as the transient systemd unit iormesh-<project>, stop and status
+// control and read that unit and the run's state.json, uninstall stops
+// every unit and removes /opt/iormesh (decision #19; upgrade is still
+// to come, decision #1). normalize applies the golden-check library
 // (internal/normalize) to a written trace. attach live-loads the Java
 // agent into a running JVM a `run -spool` traces (decision #2, task ge4;
 // `run -agent` does the same for the JVMs a session starts with).
@@ -62,6 +69,14 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		code, err = normalizeCommand(args[1:], stdout, stderr)
 	case "attach":
 		err = attachCommand(args[1:], stderr)
+	case "start":
+		err = controlCommand(control.start, args[1:], stdout, stderr)
+	case "stop":
+		err = controlCommand(control.stop, args[1:], stdout, stderr)
+	case "status":
+		err = controlCommand(control.status, args[1:], stdout, stderr)
+	case "uninstall":
+		err = controlCommand(control.uninstall, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		usage(stdout)
 		return exitOK
@@ -96,5 +111,9 @@ func usage(w io.Writer) {
               [-cpuprofile FILE] [-aggregate=false] [-native-stacks] [-spool DIR [-agent JAR]]
   iormesh normalize [-bracket SCENARIO] [-tmp PREFIX] [-check expect.json] [-out DIR] TRACEDIR
   iormesh attach -pid PID -agent JAR -spool DIR [-timeout 10s]
+  iormesh start [run's flags] [-cpu-quota 100%] [-memory-max 1G] [-wait 2m]
+  iormesh stop -project NAME [-trace-dir DIR]
+  iormesh status [-project NAME] [-trace-dir DIR] [-json]
+  iormesh uninstall
 `)
 }

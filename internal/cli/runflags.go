@@ -92,48 +92,70 @@ func processStart(pid uint32) uint64 {
 	return processIdentity(pid).StartNS
 }
 
+// runFlags are run's flags, registered by addRunFlags on a flag set of
+// its own (run) or one shared with start's (startCommand), which forwards
+// what was set to the unit's run.
+type runFlags struct {
+	pids, pattern, project, out, ready, families, cpuProfile, spool, agent *string
+	port                                                                   *uint
+	duration                                                               *time.Duration
+	aggregate, nativeStacks                                                *bool
+	seg                                                                    segmentFlags
+}
+
 // parseRunFlags parses and validates `run`'s arguments. Every error wraps
 // errUsage.
 func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	pids := fs.String("pid", "", "comma-separated PIDs to trace, with their children")
-	pattern := fs.String("pattern", "", "glob over the command line or executable, matched on exec")
-	port := fs.Uint("listen-port", 0, "trace the owners of the TCP socket listening on this port")
-	project := fs.String("project", "", "project label (required)")
-	out := fs.String("out", "", "directory for the NDJSON trace files")
-	duration := fs.Duration("duration", defaultDuration, "stop after this long")
-	ready := fs.String("ready", "", "create this file once the probes are attached")
-	families := fs.String("trace-families", "",
-		"opt-in event families to add to file and socket: ipc, signal, poll, zerocopy, or all")
-	cpuProfile := fs.String("cpuprofile", "", "write a CPU profile of the tracer to this file")
-	aggregate := fs.Bool("aggregate", true,
-		"fold hot read/write loops into one event with args.count (false: one event per call, for debugging)")
-	nativeStacks := fs.Bool("native-stacks", false,
-		"record each syscall's native user stack (stack_id, stacks.ndjson); not useful for JIT-compiled Java")
-	spool := fs.String("spool", "",
-		"directory for the Java agent's rings (created, mode 1733); join their JVMs' I/O to Java stacks")
-	agent := fs.String("agent", "",
-		"live-load this iormesh-agent.jar into the JVMs traced at start (needs -spool; JEP 451 warns)")
-	seg := addSegmentFlags(fs)
+	f := addRunFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return runConfig{}, fmt.Errorf("%w: %v", errUsage, err)
 	}
 	if fs.NArg() != 0 {
 		return runConfig{}, fmt.Errorf("%w: unexpected argument %q", errUsage, fs.Arg(0))
 	}
-	cfg := runConfig{project: *project, out: *out, duration: *duration, ready: *ready,
-		spec: target.Spec{Pattern: *pattern}, cpuProfile: *cpuProfile, noAggregation: !*aggregate,
-		nativeStacks: *nativeStacks, spool: *spool}
-	if *port > math.MaxUint16 {
-		return runConfig{}, fmt.Errorf("%w: -listen-port %d: want 1-65535", errUsage, *port)
+	return f.config()
+}
+
+func addRunFlags(fs *flag.FlagSet) runFlags {
+	return runFlags{
+		pids:     fs.String("pid", "", "comma-separated PIDs to trace, with their children"),
+		pattern:  fs.String("pattern", "", "glob over the command line or executable, matched on exec"),
+		port:     fs.Uint("listen-port", 0, "trace the owners of the TCP socket listening on this port"),
+		project:  fs.String("project", "", "project label (required)"),
+		out:      fs.String("out", "", "directory for the NDJSON trace files"),
+		duration: fs.Duration("duration", defaultDuration, "stop after this long"),
+		ready:    fs.String("ready", "", "create this file once the probes are attached"),
+		families: fs.String("trace-families", "",
+			"opt-in event families to add to file and socket: ipc, signal, poll, zerocopy, or all"),
+		cpuProfile: fs.String("cpuprofile", "", "write a CPU profile of the tracer to this file"),
+		aggregate: fs.Bool("aggregate", true,
+			"fold hot read/write loops into one event with args.count (false: one event per call, for debugging)"),
+		nativeStacks: fs.Bool("native-stacks", false,
+			"record each syscall's native user stack (stack_id, stacks.ndjson); not useful for JIT-compiled Java"),
+		spool: fs.String("spool", "",
+			"directory for the Java agent's rings (created, mode 1733); join their JVMs' I/O to Java stacks"),
+		agent: fs.String("agent", "",
+			"live-load this iormesh-agent.jar into the JVMs traced at start (needs -spool; JEP 451 warns)"),
+		seg: addSegmentFlags(fs),
 	}
-	cfg.spec.ListenPort = uint16(*port)
-	cfg, err := seg.apply(cfg)
+}
+
+// config validates the parsed flags into a runConfig.
+func (f runFlags) config() (runConfig, error) {
+	cfg := runConfig{project: *f.project, out: *f.out, duration: *f.duration, ready: *f.ready,
+		spec: target.Spec{Pattern: *f.pattern}, cpuProfile: *f.cpuProfile, noAggregation: !*f.aggregate,
+		nativeStacks: *f.nativeStacks, spool: *f.spool}
+	if *f.port > math.MaxUint16 {
+		return runConfig{}, fmt.Errorf("%w: -listen-port %d: want 1-65535", errUsage, *f.port)
+	}
+	cfg.spec.ListenPort = uint16(*f.port)
+	cfg, err := f.seg.apply(cfg)
 	if err != nil {
 		return runConfig{}, err
 	}
-	return parseRunLists(cfg, *pids, *families, *agent)
+	return parseRunLists(cfg, *f.pids, *f.families, *f.agent)
 }
 
 // parseRunLists finishes parseRunFlags with the arguments that need more
