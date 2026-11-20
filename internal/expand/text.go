@@ -22,14 +22,14 @@ func WriteText(w io.Writer, p Proposal) error {
 		_, _ = fmt.Fprintln(b, "\ndeploy")
 	}
 	for _, c := range p.Deploy {
-		_, _ = fmt.Fprintf(b, "  %-21s hop %d  %s  %s\n", addrPort(c.Peer), c.Hop, conns(c.Conns), c.Rule)
+		_, _ = fmt.Fprintf(b, "  %-21s hop %d  %s  %s\n", addrPort(c.Peer), c.Hop, peerConns(c.Peer), c.Rule)
 		writeVia(b, c.Via)
 	}
 	if len(p.Skipped) > 0 {
 		_, _ = fmt.Fprintln(b, "\nskipped")
 	}
 	for _, s := range p.Skipped {
-		_, _ = fmt.Fprintf(b, "  %-21s %-16s %s  %s\n", addrPort(s.Peer), s.Reason, conns(s.Conns),
+		_, _ = fmt.Fprintf(b, "  %-21s %-16s %s  %s\n", addrPort(s.Peer), s.Reason, peerConns(s.Peer),
 			termsafe.String(s.Evidence))
 		writeVia(b, s.Via)
 	}
@@ -55,6 +55,15 @@ func addrPort(p Peer) string {
 		return "-"
 	}
 	return netip.AddrPortFrom(p.Addr, p.Port).String()
+}
+
+// peerConns is a peer's connection count, with those folded in from
+// per-connection skips (Peer.Other) named apart.
+func peerConns(p Peer) string {
+	if p.Other == 0 {
+		return conns(p.Conns)
+	}
+	return fmt.Sprintf("%s (+%d set aside)", conns(p.Conns), p.Other)
 }
 
 func conns(n int) string {

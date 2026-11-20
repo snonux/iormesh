@@ -1402,7 +1402,7 @@ operator's SSH key from the controller.
   port, which traced app talks to it, how often. Listing is the
   default; nothing is deployed without `--apply`.
 - **Apply**: `expand --apply --hops N` enrolls every unresolved
-  peer that matches the **expansion allowlist** (host patterns
+  peer that matches the **expansion allowlist** (address globs
   and CIDRs in the controller config), deploys the tracer
   there, and binds it to the process owning the listening
   socket on the observed port (target spec: listening port,
@@ -1419,11 +1419,14 @@ operator's SSH key from the controller.
   reached, never a DNS name; an address the registry or a
   traced host already owns is visited, one a fused connection
   proves NAT'ed to a traced server is left alone, and IPv6
-  peers wait for an ssh_config alias. The allowlist and
+  peers wait for an ssh_config alias. Only fused-proven NAT is
+  skipped: any other front (VIP, load balancer, SYN proxy) is
+  proposed by its own address, and excluding such ranges is
+  the operator's job through the allowlist. The allowlist and
   `max_nodes` live in the registry's `expand:` section (absent:
-  nothing is allowed); defaults are one hop and 16 nodes. Every
-  skipped peer is listed with its reason and evidence
-  (docs/implementation.md M6).
+  nothing is allowed); one hop and 16 nodes are the defaults
+  (owner may revisit). Every skipped peer is listed with its
+  reason and evidence (docs/implementation.md M6).
 - **Convergence honesty**: a peer's tracer starts after the
   connection that revealed it, so earlier conversations are
   one-sided. Those edges stay in the graph marked unresolved —

@@ -180,8 +180,8 @@ type hostPins struct {
 
 // checkedSegments loads the projects' segments as build does — each
 // decoded first in a memory-capped child, each host directory held to
-// its pinned identity — without pinning anything new: query, which
-// reads the store too, must not change what a later build trusts.
+// its pinned identity — without pinning anything new: query and expand, which
+// read the store too, must not change what a later build trusts.
 func checkedSegments(ctx context.Context, paths buildPaths, projects []string) (federate.Segments, hostPins, error) {
 	exe, err := os.Executable()
 	if err != nil {

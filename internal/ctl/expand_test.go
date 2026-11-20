@@ -2,6 +2,10 @@ package ctl
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -60,6 +64,56 @@ func TestExpandListing(t *testing.T) {
 	}
 	if code := f.run("expand", "-hops", "-1"); code != exitUsage {
 		t.Errorf("-hops -1: exit %d, want %d", code, exitUsage)
+	}
+}
+
+// TestExpandWritesNothing: expand reads the host pins but never records
+// them — a listing must not change what a later build trusts.
+func TestExpandWritesNothing(t *testing.T) {
+	f := newBuildFixture(t)
+	f.saveRegistry(t, nil)
+	f.mustRun(t, "expand")
+	pins := filepath.Join(filepath.Dir(f.db), hostPinsFileName)
+	if _, err := os.Stat(pins); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expand wrote %s: %v", pins, err)
+	}
+}
+
+// TestExpandBadSegment: a damaged segment is named on stderr and makes
+// expand exit 1 after the plan is printed, since its host's addresses are
+// missing from the visited set.
+func TestExpandBadSegment(t *testing.T) {
+	f := newBuildFixture(t)
+	f.saveRegistry(t, &federate.Expand{Allow: federate.Allow{CIDRs: []string{"203.0.113.0/24"}}})
+	bad := f.app2Files[len(f.app2Files)-1]
+	data, err := os.ReadFile(bad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bad, data[:len(data)/2], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code := f.run("expand")
+	if code != exitError || !strings.Contains(f.stderr.String(), "bad segment billing/app2/") ||
+		!strings.Contains(f.stdout.String(), "203.0.113.9:5432") {
+		t.Errorf("exit %d\nstdout %s\nstderr %s", code, f.stdout, f.stderr)
+	}
+}
+
+// TestExpandProjectNarrowsProposals: -project billing proposes nothing
+// (only shop's app1 dialed the database), while the merge, and so the
+// visited set, still spans every project.
+func TestExpandProjectNarrowsProposals(t *testing.T) {
+	f := newBuildFixture(t)
+	f.saveRegistry(t, &federate.Expand{Allow: federate.Allow{CIDRs: []string{"203.0.113.0/24"}}})
+	if out := f.mustRun(t, "expand", "-project", "billing"); !strings.Contains(out, "0 to deploy, 0 skipped") {
+		t.Errorf("-project billing:\n%s", out)
+	}
+	if out := f.mustRun(t, "expand", "-project", "shop"); !strings.Contains(out, "1 to deploy") {
+		t.Errorf("-project shop:\n%s", out)
+	}
+	if code := f.run("expand", "-project", "-bad"); code != exitUsage {
+		t.Errorf("-project -bad: exit %d, want %d", code, exitUsage)
 	}
 }
 

@@ -197,6 +197,44 @@ func TestPlanEvidence(t *testing.T) {
 	}
 }
 
+// TestPlanListsAPeerOnce: a peer is never both deployed and skipped. A
+// per-connection skip beside a candidate is folded into its Other count;
+// an ambiguous connection to the peer turns the candidate into a skip.
+func TestPlanListsAPeerOnce(t *testing.T) {
+	allow, lim := allowlist(t, nil, "10.0.0.0/8"), Limits{MaxHops: 1, MaxNodes: 16}
+	in := input(registry("hostA", "hostB"), nil,
+		out("id-A", "10.0.1.1:40001", "10.0.4.4:5432"),
+		out("id-C", "10.0.3.3:40001", "10.0.4.4:5432"),                         // via_unregistered
+		out("id-A", "10.0.1.1:40002", "10.0.4.4:5432", federate.ReasonNoKey),   // unjoined
+		out("id-A", "10.0.1.1:40003", "10.0.5.5:80"),                           // a candidate…
+		out("id-B", "10.0.2.2:40003", "10.0.5.5:80", federate.ReasonAmbiguous)) // …outranked
+	p := Plan(in, allow, lim)
+	got := summary(p)
+	want := []string{"deploy 10.0.4.4:5432 hop 1", "skip 10.0.5.5:80 unjoined", "skip 10.0.5.5:80 unjoined"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Plan:\n got %q\nwant %q", got, want)
+	}
+	if c := p.Deploy[0]; c.Conns != 1 || c.Other != 2 {
+		t.Errorf("candidate = %+v, want 1 conn and 2 set aside", c)
+	}
+	if !strings.Contains(p.Skipped[0].Evidence+p.Skipped[1].Evidence, "another connection to it was ambiguous") {
+		t.Errorf("skips = %+v", p.Skipped)
+	}
+}
+
+// TestPlanProjects: only the named projects' connections propose peers,
+// while every project's halves stay in the visited set.
+func TestPlanProjects(t *testing.T) {
+	billing := out("id-B", "10.0.2.2:40001", "10.0.1.1:9090")
+	billing.Half.Project = "billing"
+	in := input(registry("hostA", "hostB"), nil, out("id-A", "10.0.1.1:40001", "10.0.4.4:5432"), billing)
+	in.Projects = []string{"billing"}
+	got := summary(Plan(in, allowlist(t, []string{"*"}, nil...), Limits{MaxHops: 2, MaxNodes: 16}))
+	if want := []string{"skip 10.0.1.1:9090 enrolled"}; !slices.Equal(got, want) {
+		t.Errorf("Plan:\n got %q\nwant %q", got, want)
+	}
+}
+
 // TestPlanDeterministic: the order the merge lists halves in does not
 // change a byte of the plan.
 func TestPlanDeterministic(t *testing.T) {

@@ -3339,7 +3339,7 @@ servers:
 expand:                            # M6; absent = allow nothing
   allow:
     cidrs: [10.0.0.0/8]            # canonical, no host bits
-    hosts: ["192.168.7.*"]         # globs on the address text
+    hosts: ["192.168.7.*"]         # address-text globs; prefer cidrs
   max_nodes: 16                    # registered hosts included
 ```
 
@@ -4415,6 +4415,7 @@ type Input struct {
     Merge    federate.Result   // Unresolved halves, fused Conns, Graph
     HostDirs map[string]string // host_id -> store dir (registry host)
     Registry federate.Registry // hosts, their Hop, the expand: section
+    Projects []string          // which may propose; "" = all
 }
 
 type Peer struct {
@@ -4422,6 +4423,7 @@ type Peer struct {
     Port  uint16     // becomes the tracer's -listen-port
     Conns int        // how many connections reached it
     Via   []Via      // which traced apps, on which hosts, how often
+    Other int        // conns set aside per connection (listed once)
 }
 
 type Candidate struct {
@@ -4447,44 +4449,74 @@ type Proposal struct {
 The rules, in the order Plan applies them to each unresolved
 half (`internal/expand/doc.go` has the reasoning):
 
-| Reason             | When                                             |
-|--------------------|--------------------------------------------------|
-| `unjoined`         | the merge said ambiguous, no_key, no_role or key_conflict: the far end may be traced |
-| `inbound`          | a server half: the peer's port is ephemeral       |
-| `via_unregistered` | the revealing host is no longer in the registry   |
-| `local`            | loopback, link-local, multicast, no address       |
-| `enrolled`         | a registry host written as that address, or an address a traced host owns (the visited set: A→B→A ends here) |
-| `nat`              | a fused connection proves the address translates to a traced server |
-| `ipv6`             | the registry takes no IPv6 literal (alias by hand) |
-| `not_allowed`      | no allowlist CIDR or address glob matches         |
-| `hop_limit`        | hop > `-hops` (default 1: the first ring)         |
-| `node_cap`         | registered + new hosts would pass `max_nodes` (default 16); nearest, then busiest, peers first |
+- `unjoined`: the merge said ambiguous, no_key, no_role or
+  key_conflict — the far end may be traced.
+- `inbound`: a server half; the peer's port is ephemeral.
+- `via_unregistered`: the revealing host is no longer
+  registered.
+- `local`: loopback, link-local, multicast, no address.
+- `enrolled`: a registry host written as that address, or an
+  address a traced host owns — the visited set, where A→B→A
+  ends. It spans every project in the store.
+- `nat`: a fused connection proves the address translates to
+  a traced server.
+- `ipv6`: the registry takes no IPv6 literal (alias by hand).
+- `not_allowed`: no allowlist CIDR or address glob matches.
+- `hop_limit`: hop > `-hops` (default 1: the first ring).
+- `node_cap`: registered + new hosts would pass `max_nodes`
+  (default 16); nearest, then busiest, peers go first.
 
 Only a client half the merge left `no_match` can become a
-candidate. Peers are addresses: the allowlist's host globs
-match the address text, DNS names are never matched or
+candidate. Peers are addresses: DNS names are never matched or
 proposed (a name the client looked up is a guess about which
 machine answered). Halves with the same peer and verdict group
-into one entry; output is sorted, so a plan is deterministic.
+into one entry, and a peer is listed once: an ambiguous
+connection to it outranks a candidate, other per-connection
+skips fold into the candidate's `other_conns`. Output is
+sorted, so a plan is deterministic.
+
+The allowlist's host globs match the address text and may hold
+only digits, lowercase hex, `.`, `:` and glob syntax — prefer
+CIDRs, since `10.0.0.1*` matches .1, .10–.19 and .100–.199.
+CIDRs must be canonical and not IPv4-mapped. Only NAT a fused
+connection proves is skipped: a VIP, load balancer or NAT with
+an untraced backend, or a SYN proxy before a traced server
+(`no_match`), is proposed by its own address, so such ranges —
+and container bridges like Docker's 172.17.0.0/16, which name a
+different container on every host — belong outside the
+allowlist.
+
+Residual for `--apply`: the visited set cannot see a host
+registered by name whose traces were never collected, nor the
+addresses a multi-homed traced host never used as a local end;
+either can be proposed again by an address. tb4 can catch it
+after the deploy, when the new host's host_id equals a
+registered host's.
 
 `iormeshctl expand [-project P]... [-hops N] [-json]` merges
-the store (the same checked segment load as `build`), plans
-and prints `deploy` and `skipped` with evidence and stops; it
-contacts no server and edits nothing. `expand --apply` (task
-tb4) runs M4's `add` + `deploy` for each candidate, recording
-`Hop` in the registry entry so the next round can enforce the
-limit.
+every project in the store (the same checked segment load as
+`build`, against the pinned host identities, but recording no
+new pins), lets only `-project`'s connections propose, prints
+`deploy` and `skipped` with evidence and stops; it contacts no
+server and writes nothing. A segment left out of the merge is
+named on stderr and makes it exit 1 after printing: that host's
+addresses are missing from the visited set. `expand --apply`
+(task tb4) runs M4's `add` + `deploy` for each candidate,
+recording `Hop` in the registry entry so the next round can
+enforce the limit.
 
 Tests (table-driven, no network; `internal/expand`): allowlist
 CIDR and glob matching, v4-mapped addresses; hop counting
 across rounds (limit 1 stops at the first ring, the nearest
 revealer sets the hop); node cap and its tie-break; an
-already registered or traced address is enrolled (A→B→A);
-NAT'ed VIPs; ambiguous/no_key/no_role/key_conflict never a
-target; inbound, loopback, link-local, multicast, IPv6 and
-unregistered revealers skipped; the plan is identical for any
-order of the merge's halves; text output escapes trace-derived
-names. `internal/ctl` runs `expand` over a real store.
+already registered or traced address is enrolled (A→B→A), also
+from another project; NAT'ed VIPs; ambiguous/no_key/no_role/
+key_conflict never a target; inbound, loopback, link-local,
+multicast, IPv6 and unregistered revealers skipped; a peer
+listed once; the plan is identical for any order of the
+merge's halves; text output escapes trace-derived names.
+`internal/ctl` runs `expand` over a real store: no pins
+written, bad segments exit 1, `-project` narrows proposals.
 
 **Done when**: PLAN.md's M6 acceptance holds.
 

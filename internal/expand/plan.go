@@ -34,6 +34,11 @@ type Input struct {
 	// inverted).
 	HostDirs map[string]string
 	Registry federate.Registry
+	// Projects, when set, are the projects whose connections may propose
+	// peers (iormeshctl expand -project). Every project's halves still
+	// feed the visited set: a host traced under another project is in
+	// the mesh all the same.
+	Projects []string
 }
 
 // Via is one traced app that talked to a peer, and how often.
@@ -50,6 +55,10 @@ type Peer struct {
 	Port  uint16     `json:"port"`
 	Conns int        `json:"conns"`
 	Via   []Via      `json:"via"`
+	// Other counts connections to the same address and port set aside
+	// for a per-connection reason (unjoined, inbound, via_unregistered)
+	// while the peer itself is proposed: listed once, not twice.
+	Other int `json:"other_conns,omitempty"`
 }
 
 // Candidate is a peer to enroll: a tracer on Addr bound to whatever
@@ -105,9 +114,35 @@ type group struct {
 // of every other peer why not. It never touches the network.
 func Plan(in Input, allow Allowlist, lim Limits) Proposal {
 	ev := gather(in)
+	groups, ambiguous := ev.group(in, allow)
+	eligible, skipped := split(groups, ambiguous)
+	p := Proposal{Limits: lim, Nodes: len(in.Registry.Servers)}
+	var capped []Skip
+	p.Deploy, capped = admit(eligible, lim, p.Nodes)
+	p.Skipped = append(skipped, capped...)
+	slices.SortFunc(p.Deploy, func(a, b Candidate) int { return comparePeers(a.Peer, b.Peer) })
+	slices.SortFunc(p.Skipped, func(a, b Skip) int {
+		return cmp.Or(comparePeers(a.Peer, b.Peer), cmp.Compare(a.Reason, b.Reason),
+			cmp.Compare(a.Evidence, b.Evidence))
+	})
+	return p
+}
+
+// group judges every unresolved half of the proposing projects and
+// groups them by peer and verdict. It also returns the peers some
+// connection to which the merge found ambiguous: more than one traced
+// half shares that connection's key, so the far end is likely traced.
+func (ev *evidence) group(in Input, allow Allowlist) (map[groupKey]*group, map[netip.AddrPort]bool) {
 	groups := map[groupKey]*group{}
+	ambiguous := map[netip.AddrPort]bool{}
 	for _, u := range in.Merge.Unresolved {
+		if len(in.Projects) > 0 && !slices.Contains(in.Projects, u.Half.Project) {
+			continue // in the visited set (gather), but proposes nothing
+		}
 		v := ev.judge(allow, u)
+		if u.Reason == federate.ReasonAmbiguous {
+			ambiguous[netip.AddrPortFrom(v.addr, v.port)] = true
+		}
 		k := groupKey{v.addr, v.port, v.reason, v.evidence}
 		g := groups[k]
 		if g == nil {
@@ -118,26 +153,54 @@ func Plan(in Input, allow Allowlist, lim Limits) Proposal {
 		g.hop = min(g.hop, v.hop)
 		g.via[Via{Host: ev.host(u.Half.Host), App: ev.app(u.Half.Procs)}]++
 	}
-	var eligible []Candidate
-	p := Proposal{Limits: lim, Nodes: len(in.Registry.Servers)}
-	for _, k := range slices.SortedFunc(maps.Keys(groups), compareKeys) {
+	return groups, ambiguous
+}
+
+// split turns the groups into candidates and skips, so that a peer is
+// never both. Only per-connection verdicts (unjoined, inbound,
+// via_unregistered) can disagree with a candidate for the same peer —
+// the rest depend on the address alone. An ambiguous connection outranks
+// the candidate (its far end may be traced: the candidate becomes an
+// unjoined skip); any other per-connection skip is folded into the
+// candidate's Other count rather than listed beside it.
+func split(groups map[groupKey]*group, ambiguous map[netip.AddrPort]bool) ([]Candidate, []Skip) {
+	keys := slices.SortedFunc(maps.Keys(groups), compareKeys)
+	cands := map[netip.AddrPort]*Candidate{}
+	var skipped []Skip
+	for _, k := range keys {
 		g := groups[k]
 		peer := Peer{Addr: k.addr, Port: k.port, Conns: g.conns, Via: vias(g.via)}
+		switch ap := netip.AddrPortFrom(k.addr, k.port); {
+		case k.reason == "" && ambiguous[ap]:
+			skipped = append(skipped, Skip{Peer: peer, Reason: ReasonUnjoined,
+				Evidence: "another connection to it was ambiguous (the far end may be traced)"})
+		case k.reason == "":
+			cands[ap] = &Candidate{Peer: peer, Hop: g.hop, Rule: k.evidence}
+		}
+	}
+	for _, k := range keys {
+		g := groups[k]
 		if k.reason == "" {
-			eligible = append(eligible, Candidate{Peer: peer, Hop: g.hop, Rule: k.evidence})
 			continue
 		}
-		p.Skipped = append(p.Skipped, Skip{Peer: peer, Reason: k.reason, Evidence: k.evidence})
+		if c := cands[netip.AddrPortFrom(k.addr, k.port)]; c != nil && perConn(k.reason) {
+			c.Other += g.conns
+			continue
+		}
+		skipped = append(skipped, Skip{Peer: Peer{Addr: k.addr, Port: k.port, Conns: g.conns,
+			Via: vias(g.via)}, Reason: k.reason, Evidence: k.evidence})
 	}
-	var capped []Skip
-	p.Deploy, capped = admit(eligible, lim, p.Nodes)
-	p.Skipped = append(p.Skipped, capped...)
-	slices.SortFunc(p.Deploy, func(a, b Candidate) int { return comparePeers(a.Peer, b.Peer) })
-	slices.SortFunc(p.Skipped, func(a, b Skip) int {
-		return cmp.Or(comparePeers(a.Peer, b.Peer), cmp.Compare(a.Reason, b.Reason),
-			cmp.Compare(a.Evidence, b.Evidence))
-	})
-	return p
+	eligible := make([]Candidate, 0, len(cands))
+	for _, c := range cands {
+		eligible = append(eligible, *c)
+	}
+	return eligible, skipped
+}
+
+// perConn reports a reason that is about one connection, not about the
+// peer's address.
+func perConn(reason string) bool {
+	return reason == ReasonUnjoined || reason == ReasonInbound || reason == ReasonViaUnregistered
 }
 
 // judge decides one unresolved half: the facts first, then the

@@ -83,6 +83,10 @@ func TestLoadRegistryRejects(t *testing.T) {
 		{"bad cidr", "servers: []\nexpand: {allow: {cidrs: [10.0.0.0]}}\n", 0o600, ErrInvalid},
 		{"bad glob", "servers: []\nexpand: {allow: {hosts: [\"10.[\"]}}\n", 0o600, ErrInvalid},
 		{"space glob", "servers: []\nexpand: {allow: {hosts: [\"10.* \"]}}\n", 0o600, ErrInvalid},
+		{"name glob", "servers: []\nexpand: {allow: {hosts: [\"db-*.example.org\"]}}\n", 0o600, ErrInvalid},
+		{"uppercase hex glob", "servers: []\nexpand: {allow: {hosts: [\"FD00::*\"]}}\n", 0o600, ErrInvalid},
+		{"v4-mapped cidr", "servers: []\nexpand: {allow: {cidrs: [\"::ffff:10.0.0.0/104\"]}}\n", 0o600,
+			ErrInvalid},
 		{"negative hop", "servers:\n- {host: a, hop: -1, projects: [{name: p, target: {pattern: x}}]}\n",
 			0o600, ErrInvalid},
 		{"duplicate host", "servers:\n- {host: a, projects: [{name: p, target: {pattern: x}}]}\n" +

@@ -28,9 +28,15 @@ truth.
   there, a registry without one allows nothing, and
   `iormeshctl expand` without `--apply` contacts no server.
   Peers are proposed by the address a traced client reached,
-  never by a name it looked up, and a peer the traces cannot
-  place (an ambiguous or keyless connection, a NAT'ed address)
-  is listed, never enrolled.
+  never by a name it looked up; a connection the merge could
+  not place (ambiguous, keyless) proposes nothing, and an
+  address a fused connection proves to be NAT in front of a
+  traced server is listed, never enrolled. Any other front — a
+  VIP, load balancer or NAT with an untraced backend, a SYN
+  proxy — is proposed by its own address: keeping such ranges
+  (and container bridges like 172.17.0.0/16) out of the
+  allowlist is the operator's job. Expand writes nothing, not
+  even the host pins `build` records.
 - **A server controls trace contents, nothing else on the
   controller.** Collect copies with `rsync -rt`: remote modes
   and symlinks are not carried over, and the local trace

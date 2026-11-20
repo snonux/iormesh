@@ -22,11 +22,25 @@
 //   - A peer already in the mesh is enrolled, not a candidate: a
 //     registry host written as that address, or an address a traced host
 //     owns (the local end of one of its own connections). This visited
-//     set is what makes a cycle A→B→A terminate.
+//     set is what makes a cycle A→B→A terminate. It spans every project
+//     in the store, whichever projects may propose (Input.Projects).
+//     What it cannot see: a host registered by name whose traces were
+//     never collected, and the addresses a multi-homed traced host never
+//     used as a local end — such a host can be proposed again by an
+//     address. expand --apply (task tb4) can catch that after the deploy:
+//     the new host's host_id equals a registered host's.
 //   - A peer that a fused connection proves to be NAT in front of a
 //     traced server (the client's peer differs from the server's local
 //     address) is nat: what answers there is a translation, and which
 //     machine is behind it for any other connection would be a guess.
+//     Only such proven NAT is skipped. Any other front — a VIP, load
+//     balancer or NAT whose backend is untraced, or a SYN proxy or
+//     sequence-randomizing firewall before a traced server (the merge
+//     sees no_match there) — is proposed by its own address; keeping
+//     such ranges out is the allowlist's job, the operator's.
+//   - A peer is listed once. When its connections disagree, an
+//     ambiguous one outranks a candidate (unjoined), and other
+//     per-connection skips are folded into the candidate (Peer.Other).
 //   - Loopback, link-local, unspecified and multicast peers are local,
 //     IPv6 peers wait for an ssh_config alias (the registry takes no IPv6
 //     literal), and a half from a host no longer registered reveals
