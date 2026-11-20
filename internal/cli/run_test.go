@@ -266,18 +266,19 @@ func TestRunWritesSessionDropsEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	events := readEvents(t, dir)
-	if got := kinds(events); got != "session,read,drop,read,drop,drop,end" {
-		t.Fatalf("event kinds %s: want session,read,drop,read,drop,drop,end", got)
+	// The target's attach (task ze4) follows the header.
+	if got := kinds(events); got != "session,attach,read,drop,read,drop,drop,end" {
+		t.Fatalf("event kinds %s: want session,attach,read,drop,read,drop,drop,end", got)
 	}
 	// 3 from the in-loop poll, then 1 from finish's: one drop of 4, or a
 	// drop behind the second read, would mean the loop never polled.
-	if a, b := *events[2].Args.Lost, *events[4].Args.Lost; a != 3 || b != 1 {
+	if a, b := *events[3].Args.Lost, *events[5].Args.Lost; a != 3 || b != 1 {
 		t.Fatalf("drops lost %d then %d, want 3 then 1", a, b)
 	}
 	// The 40 skipped runs are their own drop, never in the lost records
 	// (task vd4).
-	if r := events[5].Args.DropReason; r == nil || *r != schema.DropSkippedRuns || *events[5].Args.Lost != 40 {
-		t.Fatalf("third drop %+v, want skipped_runs of 40", events[5].Args)
+	if r := events[6].Args.DropReason; r == nil || *r != schema.DropSkippedRuns || *events[6].Args.Lost != 40 {
+		t.Fatalf("third drop %+v, want skipped_runs of 40", events[6].Args)
 	}
 	end := events[len(events)-1]
 	if *end.Args.EndReason != schema.EndTargetsExited || !tr.closed {
@@ -291,18 +292,27 @@ func TestRunWritesSessionDropsEnd(t *testing.T) {
 	}
 }
 
-// failSink rejects every event, like an NDJSON sink whose disk is full.
-type failSink struct{}
+// failSink rejects every event after the first ok ones, like an NDJSON
+// sink whose disk filled up. The session's start writes the target's
+// attach event (task ze4), which a test of the loop lets through.
+type failSink struct{ ok int }
 
-func (failSink) Event(*schema.Event) error { return errors.New("disk full") }
-func (failSink) Close() error              { return nil }
+func (f *failSink) Event(*schema.Event) error {
+	if f.ok > 0 {
+		f.ok--
+		return nil
+	}
+	return errors.New("disk full")
+}
+
+func (*failSink) Close() error { return nil }
 
 // TestTraceLoopWriteError: a sink error stops the loop at once with end
 // reason error and returns the error.
 func TestTraceLoopWriteError(t *testing.T) {
 	fakeProcs(t, 10)
 	tr := newFakeTracer()
-	c := correlate.New(correlate.Config{Host: correlate.Host{ID: "h", Project: "p"}, Sink: failSink{},
+	c := correlate.New(correlate.Config{Host: correlate.Host{ID: "h", Project: "p"}, Sink: &failSink{ok: 1},
 		ProcInfo: func(uint32) (string, uint64) { return "x", 1 }})
 	tr.records <- []any{&types.FdEvent{EventType: types.ENTER_FD_EVENT, TraceId: types.SYS_ENTER_READ, Time: 1, Pid: 10, Tid: 10}}
 	tr.records <- []any{&types.RetEvent{EventType: types.EXIT_RET_EVENT, TraceId: types.SYS_EXIT_READ, Time: 2, Pid: 10, Tid: 10, Ret: 1}}

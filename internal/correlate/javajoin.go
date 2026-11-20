@@ -451,7 +451,7 @@ func (j *JavaJoin) pending(ev *schema.Event) (v *jvm, wait bool) {
 func joinable(ev *schema.Event) bool {
 	switch ev.Event {
 	case schema.KindSession, schema.KindEnd, schema.KindDrop, schema.KindTCPState,
-		schema.KindExec, schema.KindSignal:
+		schema.KindExec, schema.KindSignal, schema.KindFork, schema.KindAttach:
 		return false
 	}
 	return ev.TID != 0

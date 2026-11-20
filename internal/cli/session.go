@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"iormesh/internal/correlate"
-	"iormesh/internal/schema"
 	"iormesh/internal/target"
 	"iormesh/internal/types"
 )
@@ -23,9 +22,10 @@ type session struct {
 	tr   tracer
 	c    *correlate.Correlator
 	spec target.Spec
-	// app is the app node id of a pattern session, "" otherwise: only a
-	// pattern names an app that outlives its processes.
-	app string
+	// pattern is a pattern session's target pattern, "" otherwise: only
+	// a pattern names an app (schema.AppNodeID) that outlives its
+	// processes.
+	pattern string
 	// match is the pattern compiled once; every exec on the host asks it.
 	match target.Matcher
 	// selfExe is the tracer's executable: another iormesh session's
@@ -47,7 +47,7 @@ type session struct {
 func newSession(tr tracer, c *correlate.Correlator, cfg runConfig) *session {
 	s := &session{tr: tr, c: c, spec: cfg.spec, live: map[uint32]uint64{}}
 	if cfg.spec.Mode() == target.ModePattern {
-		s.app = schema.AppNodeID(cfg.project, cfg.spec.Pattern)
+		s.pattern = cfg.spec.Pattern
 		// The spec was validated, so the pattern compiles.
 		s.match, _ = cfg.spec.Matcher()
 		s.selfExe = target.HostProcFS().Exe(uint32(os.Getpid()))
@@ -69,11 +69,14 @@ func (s *session) start(pids []uint32) error {
 		s.live[pid] = id.StartNS
 		// A target already gone has nothing to seed: an empty identity
 		// would only add a pid@0 process node with no events.
-		if id.StartNS != 0 {
-			s.c.Seed(pid, id)
+		if id.StartNS == 0 {
+			continue
+		}
+		if err := s.c.Seed(pid, id); err != nil {
+			return err
 		}
 	}
-	if s.app == "" {
+	if s.pattern == "" {
 		return nil
 	}
 	found, err := s.spec.Resolve(target.HostProcFS(), uint32(os.Getpid()))
@@ -234,7 +237,7 @@ func (s *session) adopt(pid uint32, id correlate.Identity, gap uint64) error {
 		return nil
 	}
 	s.live[pid] = id.StartNS
-	return s.c.Incarnation(s.app, pid, id, gap)
+	return s.c.Incarnation(s.pattern, pid, id, gap)
 }
 
 // childStart is a followed child's start time, read when the session
@@ -260,7 +263,7 @@ func childStart(r *types.TaskNewtaskEvent) uint64 {
 // id or an unknown start time does not). A pattern session is never over: it waits for the
 // app to re-appear (decision #23) until its duration or a stop.
 func (s *session) over() bool {
-	if s.app != "" {
+	if s.pattern != "" {
 		return false
 	}
 	for pid, start := range s.live {

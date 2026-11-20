@@ -44,6 +44,22 @@ const (
 	// pattern session found its target counts too; a process already
 	// running when the trace attached has none.
 	KindExec = "exec"
+	// KindFork is a new process of a traced one (task_newtask without
+	// CLONE_THREAD, M2 step 1), written on the child: pid,
+	// pid_incarnation, tid and comm are the child's as it starts,
+	// args.parent_pid and args.parent_incarnation the process that forked
+	// it — absent when the record could not name it. It carries what the
+	// graph's forked edge and the child's inherited fd table rest on, so
+	// a graph rebuilt from the events (decision #3) has them too. Appended
+	// in M4 (task ze4).
+	KindFork = "fork"
+	// KindAttach is a process the session took on as its target: a -pid
+	// or port target at session start, or a process a -pattern session
+	// matched (then args.pattern is the session's pattern, and the
+	// process an incarnation of the app it names, AppNodeID). Its
+	// identity is the one read when the session took it on. Appended in
+	// M4 (task ze4).
+	KindAttach = "attach"
 )
 
 // End reasons, the values of args.end_reason. PLAN.md ("Explicit end")
@@ -235,6 +251,14 @@ type Args struct {
 	// a folded record has lost its calls' instants. Appended in M4 (task
 	// gb4); the tracer's capture (tcp_sendmsg/tcp_recvmsg hooks) is open.
 	TCPSeq *uint32 `json:"tcp_seq,omitempty" parquet:"tcp_seq,optional"`
+	// Pattern is the target pattern (decision #23) through which a
+	// pattern-bound session took a process on: attach events only. With
+	// the project it names the app (AppNodeID). Appended in M4 (task ze4).
+	Pattern *string `json:"pattern,omitempty" parquet:"pattern,optional"`
+	// ParentPID and ParentInc name the process that forked a fork
+	// event's child: fork only, both or none. Appended in M4 (task ze4).
+	ParentPID *uint32 `json:"parent_pid,omitempty" parquet:"parent_pid,optional"`
+	ParentInc *uint64 `json:"parent_incarnation,omitempty" parquet:"parent_incarnation,optional"`
 }
 
 // Session is the host description of the session header. Its fields are

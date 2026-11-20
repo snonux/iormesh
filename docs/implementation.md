@@ -4126,17 +4126,31 @@ iormeshctl show [summary|services|edges|health] [-project P]... [-json]
   (`TestErrorsAreTerminalSafe`).
 - **The graph is rebuilt** (decision #3, the server keeps none)
   once per session, segments in seq order, by the correlator's
-  rules (`rebuild.go`): host, process (newest comm), runs_on;
-  opened for successful opens and creat, and the new name of a
-  rename that moved a file the process held open (opens,
-  closes, dup, dup2, dup3, fcntl `F_DUPFD`/`F_DUPFD_CLOEXEC`,
-  unlinks, renames, and an exec closing the close-on-exec fds,
-  followed through the events); socket and connected for every
-  conn_id, fused for a pipe or socketpair or a conn_id with both
-  a connect and an accept on the host; signaled for a delivered
-  signal from a traced sender. Not rebuilt — no event says it:
-  app nodes and incarnation edges, forked edges, a child's
-  inherited fds, close-on-exec set by `F_SETFD`. Every segment of
+  rules (`rebuild.go`, `rebuild_fds.go`): host, process (newest
+  comm), runs_on; app and incarnation from an `attach` with
+  `args.pattern`; forked from a `fork`, where the child also
+  inherits a copy of the parent's fds; opened for successful
+  opens and creat, and the new name of a rename that moved a
+  file the process held open (opens, closes, dup, dup2, dup3,
+  fcntl `F_DUPFD`/`F_DUPFD_CLOEXEC`/`F_SETFD`/`F_GETFD`, forks,
+  the fd-creating accept, pipe, socketpair and epoll calls,
+  unlinks, renames, and an exec closing the close-on-exec fds
+  and the unknown ones above stdio, followed through the
+  events); socket and connected for every conn_id, fused for a
+  pipe or socketpair, a conn_id with both a connect and an
+  accept on the host, or mirrored address pairs (a loopback UDP
+  flow); signaled for a delivered signal from a traced sender.
+  The `fork` and `attach` events and `F_SETFD`'s `args.flags`
+  are task ze4's: before it a segment-built graph lacked app
+  nodes, incarnation and forked edges, a child's inherited fds
+  and `F_SETFD`'s close-on-exec. Now every judged integration
+  run rebuilds its graph from its segments
+  (`federate.RebuildGraph`) and must get its `graph.json`
+  exactly (`assertRebuiltGraph`, M4's acceptance for
+  single-host scenarios); `internal/correlate`
+  `TestRebuiltGraphIsTheCorrelators` drives the correlator
+  through forks, `F_SETFD`/`F_GETFD`, execs, pipes and attaches
+  and holds the rebuild to its graph. Every segment of
   a session returns the session's graph; the merge's union keeps
   one copy. `TestSegmentMergeGolden` writes
   `testdata/mesh.golden`'s traces as rotated segments and merges

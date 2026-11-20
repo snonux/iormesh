@@ -64,6 +64,10 @@ type meshRun struct {
 	client, server tracedRun
 }
 
+// sessions are the two hosts' tracer runs: each is a single-host session
+// whose rebuilt graph must be its own graph.json (task ze4).
+func (m meshRun) sessions() []Run { return []Run{m.client.Run, m.server.Run} }
+
 // newMeshRig builds the rig, skipping on a machine without the tools; the
 // namespaces are deleted when the test ends. Every interface is created
 // inside its namespace, so the machine's own network is never touched.

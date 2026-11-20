@@ -62,6 +62,9 @@ const (
 	colArgsBytesAcked
 	colArgsBytesReceived
 	colArgsTCPSeq
+	colArgsPattern
+	colArgsParentPID
+	colArgsParentInc
 	colConnID
 	colAttribution
 	colJavaThread
@@ -124,8 +127,10 @@ var eventColumnSpecs = [numEventColumns]columnSpec{
 	colArgsCount: {"args.count", kindInt64}, colArgsSndUna: {"args.snd_una", kindInt32},
 	colArgsRcvNxt: {"args.rcv_nxt", kindInt32}, colArgsBytesAcked: {"args.bytes_acked", kindInt64},
 	colArgsBytesReceived: {"args.bytes_received", kindInt64}, colArgsTCPSeq: {"args.tcp_seq", kindInt32},
-	colConnID: {"conn_id", kindBytes}, colAttribution: {"attribution", kindDict},
-	colJavaThread: {"java.thread", kindBytes}, colJavaStack: {"java.stack.list.element", kindInt64},
+	colArgsPattern: {"args.pattern", kindBytes}, colArgsParentPID: {"args.parent_pid", kindInt32},
+	colArgsParentInc: {"args.parent_incarnation", kindInt64}, colConnID: {"conn_id", kindBytes},
+	colAttribution: {"attribution", kindDict}, colJavaThread: {"java.thread", kindBytes},
+	colJavaStack:   {"java.stack.list.element", kindInt64},
 	colJavaCarrier: {"java.carrier", kindBool}, colHTTPMethod: {"http.method", kindBytes},
 	colHTTPScheme: {"http.scheme", kindBytes}, colHTTPHost: {"http.host", kindBytes},
 	colHTTPPath: {"http.path", kindBytes}, colHTTPStatus: {"http.status", kindInt32},
@@ -252,6 +257,9 @@ func (e *eventColumns) args(a *schema.Args) {
 	optI64(&c[colArgsBytesAcked], a.BytesAcked)
 	optI64(&c[colArgsBytesReceived], a.BytesReceived)
 	optI32(&c[colArgsTCPSeq], a.TCPSeq)
+	optStr(&c[colArgsPattern], a.Pattern)
+	optI32(&c[colArgsParentPID], a.ParentPID)
+	optI64(&c[colArgsParentInc], a.ParentInc)
 }
 
 // java, http, session, otel and dns write an optional nested object: a

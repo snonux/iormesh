@@ -78,14 +78,16 @@ func (e *Event) validatePayloads() error {
 }
 
 // KnownKind reports whether kind is part of schema v1: an M1
-// kind, exec (M2 step 8), one of the M2 file surface (kinds_file.go) or of
+// kind, exec (M2 step 8), fork and attach (M4, task ze4), one of the M2
+// file surface (kinds_file.go) or of
 // M2 step 7's socket addresses and opt-in families (kinds_ipc.go), or
 // M3's http (kinds_http.go) and dns (kinds_dns.go).
 func KnownKind(kind string) bool {
 	switch kind {
 	case KindOpen, KindOpenat, KindOpenat2, KindRead, KindWrite,
 		KindClose, KindConnect, KindAccept, KindAccept4,
-		KindTCPState, KindMarker, KindDrop, KindSession, KindEnd, KindExec:
+		KindTCPState, KindMarker, KindDrop, KindSession, KindEnd, KindExec,
+		KindFork, KindAttach:
 		return true
 	}
 	return fileKind(kind) || ipcKind(kind) || kind == KindHTTP || kind == KindDNS
@@ -164,6 +166,9 @@ func w3cID(s string, n int) bool {
 // would make the correlator's and normalizer's joins silently miss.
 func (e *Event) validateKindArgs() error {
 	if err := e.validateTCPSeq(); err != nil {
+		return err
+	}
+	if err := e.validateLifecycleArgs(); err != nil {
 		return err
 	}
 	if err := e.validateStreamSeq(); err != nil {

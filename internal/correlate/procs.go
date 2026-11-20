@@ -62,14 +62,22 @@ type Identity struct {
 
 // Seed tells the correlator who pid is, read by the caller when the
 // session took the process on: at session start for a -pid or port
-// target, at adoption for a pattern match. Call it before Handle sees the
-// process's first record. Without it the correlator reads /proc only
-// when that record is handled, and a correlator lagging past the target's
-// exit and a reuse of its PID would give the target's events the new
-// process's incarnation (and comm). Whatever state the correlator held
-// under pid belongs to an earlier process and is replaced.
-func (c *Correlator) Seed(pid uint32, id Identity) {
-	c.seed(pid, id)
+// target (a pattern match goes through Incarnation). Call it before
+// Handle sees the process's first record. Without it the correlator
+// reads /proc only when that record is handled, and a correlator lagging
+// past the target's exit and a reuse of its PID would give the target's
+// events the new process's incarnation (and comm). Whatever state the
+// correlator held under pid belongs to an earlier process and is
+// replaced. The target gets an attach event (task ze4): its process node
+// is in the graph even if it never makes a traced call, and a graph
+// rebuilt from the events must have it too. The error is the sink's, or
+// ErrEnded after End.
+func (c *Correlator) Seed(pid uint32, id Identity) error {
+	if c.ended {
+		return ErrEnded
+	}
+	c.attach(pid, id, nil)
+	return c.release(false)
 }
 
 // seed is Seed, returning the new state.

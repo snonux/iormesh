@@ -6,11 +6,14 @@ package integrationtests
 // the parallel switch is the -iormesh.parallel flag; the assertion helpers
 // are iormesh's: the golden check of internal/normalize and graph checks;
 // the judged-run retry is generic (judge), so a test with its own
-// choreography (TestPIDReuse) is retried and skipped the same way.
+// choreography (TestPIDReuse) is retried and skipped the same way, and
+// every judged run's graph rebuilt from its segments must be its
+// graph.json (task ze4).
 
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -19,8 +22,10 @@ import (
 	"strings"
 	"testing"
 
+	"iormesh/internal/federate"
 	"iormesh/internal/normalize"
 	"iormesh/internal/schema"
+	"iormesh/internal/segment"
 )
 
 const (
@@ -160,10 +165,19 @@ func traceJudged(t *testing.T, h *Harness, start starter) tracedRun {
 
 // judgeable is a judged run's result: a tracedRun, or a test's own run
 // type embedding one with what its choreography learned on the way.
-type judgeable interface{ traced() tracedRun }
+//
+// sessions are the single-host tracer runs it holds, each checked by
+// assertRebuiltGraph: the run itself, or each emulated host's (meshRun).
+type judgeable interface {
+	traced() tracedRun
+	sessions() []Run
+}
 
 // traced makes tracedRun (and every type embedding it) judgeable.
 func (r tracedRun) traced() tracedRun { return r }
+
+// sessions is the one tracer run of a single-host run.
+func (r tracedRun) sessions() []Run { return []Run{r.Run} }
 
 // judge is traceJudged's verdict for any attempt function, so a test
 // with its own choreography (TestPIDReuse) is judged the same way: retried
@@ -189,7 +203,57 @@ func judge[T judgeable](t *testing.T, attempt func() (T, error)) T {
 	if n := run.traced().Loss.Undecodable(); n > 0 {
 		t.Fatalf("%d records reached userspace but could not be decoded (%s)", n, run.traced().Loss)
 	}
+	for _, s := range run.sessions() {
+		assertRebuiltGraph(t, s)
+	}
 	return run
+}
+
+// assertRebuiltGraph is M4's acceptance for single-host runs (task ze4,
+// decision #3): the graph the controller rebuilds from a run's parquet
+// segments (federate.RebuildGraph, the build's rule set) is exactly the
+// graph.json the tracer wrote — every node and edge, comm and state.
+func assertRebuiltGraph(t *testing.T, run Run) {
+	t.Helper()
+	// One project directory: the harness's, or an emulated host's own.
+	readies, err := filepath.Glob(filepath.Join(run.Dir+segmentsSuffix, "*", segment.ReadyDir))
+	if err != nil || len(readies) != 1 {
+		t.Fatalf("segments of %s: %v, %v; want one ready/", run.Dir, readies, err)
+	}
+	ready := readies[0]
+	entries, err := os.ReadDir(ready)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []schema.Event
+	for _, e := range entries { // name order: seq order within the session
+		if isEventsSegment(e.Name()) {
+			events = append(events, readParquet[schema.Event](t, filepath.Join(ready, e.Name()))...)
+		}
+	}
+	got, want := graphLines(federate.RebuildGraph(events)), graphLines(run.Trace.Graph)
+	for _, l := range want {
+		if !slices.Contains(got, l) {
+			t.Errorf("graph.json has %s, the graph rebuilt from the segments lacks it", l)
+		}
+	}
+	for _, l := range got {
+		if !slices.Contains(want, l) {
+			t.Errorf("the graph rebuilt from the segments has %s, graph.json lacks it", l)
+		}
+	}
+}
+
+// graphLines renders a graph's nodes and edges one per line.
+func graphLines(g schema.Graph) []string {
+	var out []string
+	for _, n := range g.Nodes {
+		out = append(out, fmt.Sprintf("node %s %s %v", n.Type, n.ID, n.Attrs))
+	}
+	for _, e := range g.Edges {
+		out = append(out, fmt.Sprintf("edge %s %s -> %s %s", e.Type, e.From, e.To, e.State))
+	}
+	return out
 }
 
 // expectation loads a scenario's golden.

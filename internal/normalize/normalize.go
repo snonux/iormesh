@@ -139,6 +139,19 @@ func (n normalizer) processFields(e *schema.Event) {
 	host, _, _ := strings.Cut(strings.TrimPrefix(proc, "proc:"), "/")
 	e.Args.TargetPID = mapPtr(e.Args.TargetPID, func(pid uint32) uint32 { return n.pid(host, pid) })
 	e.Args.SenderPID = mapPtr(e.Args.SenderPID, func(pid uint32) uint32 { return n.pid(host, pid) })
+	n.parentFields(host, &e.Args)
+}
+
+// parentFields renumbers a fork's parent (task ze4) like the parent's own
+// events: its pid by the PID ordinal, its incarnation by the ordinal of
+// its process key — the parent's events come first, so they agree.
+func (n normalizer) parentFields(host string, a *schema.Args) {
+	if a.ParentPID == nil || a.ParentInc == nil {
+		return
+	}
+	key := schema.ProcessNodeID(host, *a.ParentPID, *a.ParentInc)
+	pid, inc := n.process(key, *a.ParentPID)
+	a.ParentPID, a.ParentInc = &pid, &inc
 }
 
 // pid renumbers a raw pid an argument names (a kill's target, a signal's

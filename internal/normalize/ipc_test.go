@@ -68,3 +68,27 @@ func TestExpectationFD2MustBeFDSymbol(t *testing.T) {
 		t.Fatal("fd2 bound to a process symbol was accepted")
 	}
 }
+
+// TestNormalizeForkParent (task ze4): a fork's parent_pid and
+// parent_incarnation take the ordinals the parent's own events have, and
+// the input's pointers stay untouched.
+func TestNormalizeForkParent(t *testing.T) {
+	parent := ipcEvent(1, schema.KindWrite, 1, 0)
+	fork := ipcEvent(2, schema.KindFork, schema.NoFD, 0)
+	fork.PID, fork.PIDInc, fork.TID = 5000, 9, 5000
+	ppid, pinc := uint32(4242), uint64(7)
+	fork.Args.ParentPID, fork.Args.ParentInc = &ppid, &pinc
+	got, err := Normalize(Trace{Events: []schema.Event{parent, fork},
+		Graph: schema.Graph{SchemaVersion: schema.Version}}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, f := got.Events[0], got.Events[1]
+	if *f.Args.ParentPID != p.PID || *f.Args.ParentInc != p.PIDInc || f.PID == p.PID {
+		t.Errorf("fork %d@%d parent %d@%d, want the parent's ordinals %d@%d",
+			f.PID, f.PIDInc, *f.Args.ParentPID, *f.Args.ParentInc, p.PID, p.PIDInc)
+	}
+	if ppid != 4242 || pinc != 7 {
+		t.Error("Normalize wrote through the input's pointers")
+	}
+}

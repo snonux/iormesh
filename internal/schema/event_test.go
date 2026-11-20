@@ -404,7 +404,7 @@ func checkRejected(t *testing.T, e Event) {
 func TestEventValidateAcceptsEveryKind(t *testing.T) {
 	kinds := []string{KindOpen, KindOpenat, KindOpenat2, KindRead, KindWrite,
 		KindClose, KindConnect, KindAccept, KindAccept4, KindTCPState,
-		KindMarker, KindDrop, KindSession, KindEnd, KindExec}
+		KindMarker, KindDrop, KindSession, KindEnd, KindExec, KindFork, KindAttach}
 	kinds = append(kinds, stepSevenKinds()...)
 	for _, k := range kinds {
 		e := validEvent()

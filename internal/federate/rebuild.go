@@ -3,6 +3,7 @@ package federate
 import (
 	"cmp"
 	"maps"
+	"net/netip"
 	"slices"
 	"strings"
 
@@ -12,37 +13,46 @@ import (
 // Decision #3: the server keeps no graph — a segment holds events and
 // tables only — so the controller rebuilds each host session's graph
 // from its events. The rebuild applies the correlator's own rules
-// (internal/correlate/graph.go) to what the events carry, which is most
-// of what the correlator knew, not all of it:
+// (internal/correlate/graph.go) to what the events carry, and since task
+// ze4 the events carry everything the correlator's graph rests on, so a
+// single-host run's rebuilt graph equals its graph.json (the integration
+// suite checks every run):
 //
 //   - host, process (comm: the newest the events show, an exec's new
-//     name), runs_on;
+//     name), runs_on — for every process an event names, including an
+//     attach (a target that never made a traced call) and a fork's
+//     parent;
+//   - app and incarnation: an attach with args.pattern;
+//   - forked: a fork with its parent, which is also where the child
+//     inherits a copy of the parent's open fds;
 //   - opened: every successful open, openat, openat2 and creat with a
 //     path, and the new name of a rename that moved a file the process
 //     held open — the open fds are followed through the events (open,
-//     close, dup, dup2, dup3, fcntl F_DUPFD, rename, unlink, and an
-//     exec closing the close-on-exec ones);
+//     close, dup, dup2, dup3, fcntl F_DUPFD, F_DUPFD_CLOEXEC, F_SETFD and
+//     F_GETFD, fork, the fd-creating socket, pipe and epoll calls,
+//     rename, unlink, and an exec closing the close-on-exec ones);
 //   - socket and connected for every event with a conn_id, fused when the
 //     host's correlator fused the connection itself: a pipe or socketpair
-//     (both ends are created together), or a connection whose connect and
-//     accept both happened on this host (a loopback pair);
+//     (both ends are created together), a connection whose connect and
+//     accept both happened on this host (a loopback pair), or one whose
+//     events show both ends' mirrored addresses (a loopback UDP flow);
 //   - signaled: a delivered signal event whose sender is a traced
 //     process.
 //
-// Not rebuilt, because no event says it: app nodes and incarnation edges
-// (the session's pattern is not in the trace), forked edges (no event
-// records a clone), the open fds a child inherited (so a rename moves
-// only the files a process opened or copied itself), and close-on-exec
-// changes by fcntl F_SETFD (the record has no argument). A graph.json written by
-// `iormesh run -out` has them; a build from segments does not, and says
-// so (docs/implementation.md M4 "Build").
+// What stays out of reach is what the correlator itself cannot see: the
+// fds of an untraced close_range, a cwd-relative rename (both alike in
+// either graph).
 
 // Open-flag and fcntl constants the fd tracking reads (Linux, the same
 // on amd64 and arm64).
 const (
 	oCloexec      = 0o2000000
+	fdCloexec     = 1 // FD_CLOEXEC, F_SETFD's and F_GETFD's flag
 	fDupFD        = 0
+	fGetFD        = 1
+	fSetFD        = 2
 	fDupFDCloexec = 1030
+	eBADF         = 9
 )
 
 // fdKey names one process incarnation's fd number.
@@ -53,8 +63,12 @@ type fdKey struct {
 }
 
 // connEnds is what a host saw of one conn_id: whether it was created as
-// a pipe or socketpair, and whether a connect and an accept named it.
-type connEnds struct{ pair, connect, accept bool }
+// a pipe or socketpair, whether a connect and an accept named it, and
+// the (local, remote) address pairs its events carried.
+type connEnds struct {
+	pair, connect, accept bool
+	tuples                map[[2]netip.AddrPort]bool
+}
 
 // graphRebuilder accumulates one host session's graph from its events,
 // fed in seq order.
@@ -63,7 +77,8 @@ type graphRebuilder struct {
 	edges map[[3]string]schema.Edge
 	// paths are the open fds' file names, for renames.
 	paths map[fdKey]string
-	// cloexec says which fds an exec closes.
+	// cloexec is each fd's known close-on-exec state, which decides what
+	// an exec closes (absent: unknown, as in the correlator).
 	cloexec map[fdKey]bool
 	conns   map[string]*connEnds
 	// incs is each pid's newest incarnation: a signal names its sender by
@@ -76,6 +91,18 @@ func newGraphRebuilder() *graphRebuilder {
 		paths: map[fdKey]string{}, cloexec: map[fdKey]bool{}, conns: map[string]*connEnds{}, incs: map[uint32]uint64{}}
 }
 
+// RebuildGraph rebuilds one host session's graph from its events, in seq
+// order, by the correlator's rules (decision #3): what the build does
+// for a session's segments, for a caller holding the events already —
+// the integration suite compares it with the run's graph.json.
+func RebuildGraph(events []schema.Event) schema.Graph {
+	g := newGraphRebuilder()
+	for i := range events {
+		g.add(&events[i])
+	}
+	return g.graph()
+}
+
 // add folds one event in; it keeps no reference to ev.
 func (g *graphRebuilder) add(ev *schema.Event) {
 	host := schema.HostNodeID(ev.HostID)
@@ -84,13 +111,18 @@ func (g *graphRebuilder) add(ev *schema.Event) {
 		return
 	}
 	proc := g.process(ev)
+	g.file(proc, ev)
 	switch {
 	case ev.ConnID != "":
 		g.connected(proc, ev)
 	case ev.Event == schema.KindSignal:
 		g.signaled(proc, ev)
-	default:
-		g.file(proc, ev)
+	case ev.Event == schema.KindFork:
+		g.forked(proc, ev)
+	case ev.Event == schema.KindAttach && ev.Args.Pattern != nil:
+		app := schema.AppNodeID(ev.Project, *ev.Args.Pattern)
+		g.nodes[app] = schema.Node{Type: schema.NodeApp, ID: app}
+		g.edge(schema.Edge{Type: schema.EdgeIncarnation, From: app, To: proc})
 	}
 }
 
@@ -98,17 +130,24 @@ func (g *graphRebuilder) add(ev *schema.Event) {
 // its id. The comm is overwritten by every later event: the node is
 // named after the newest name, as the correlator's is.
 func (g *graphRebuilder) process(ev *schema.Event) string {
-	id := schema.ProcessNodeID(ev.HostID, ev.PID, ev.PIDInc)
-	n, ok := g.nodes[id]
-	if !ok {
-		n = schema.Node{Type: schema.NodeProcess, ID: id}
-	}
+	id := g.processNode(ev.HostID, ev.PID, ev.PIDInc)
+	n := g.nodes[id]
 	if ev.Comm != "" && n.Attrs["comm"] != ev.Comm {
 		n.Attrs = map[string]string{"comm": ev.Comm}
 	}
 	g.nodes[id] = n
 	g.incs[ev.PID] = ev.PIDInc
-	g.edge(schema.Edge{Type: schema.EdgeRunsOn, From: id, To: schema.HostNodeID(ev.HostID)})
+	return id
+}
+
+// processNode adds a process node (without a comm if it is new) and its
+// runs_on edge, and returns its id.
+func (g *graphRebuilder) processNode(hostID string, pid uint32, inc uint64) string {
+	id := schema.ProcessNodeID(hostID, pid, inc)
+	if _, ok := g.nodes[id]; !ok {
+		g.nodes[id] = schema.Node{Type: schema.NodeProcess, ID: id}
+	}
+	g.edge(schema.Edge{Type: schema.EdgeRunsOn, From: id, To: schema.HostNodeID(hostID)})
 	return id
 }
 
@@ -120,17 +159,59 @@ func (g *graphRebuilder) connected(proc string, ev *schema.Event) {
 	g.edge(schema.Edge{Type: schema.EdgeConnected, From: proc, To: sock})
 	c := g.conns[ev.ConnID]
 	if c == nil {
-		c = &connEnds{}
+		c = &connEnds{tuples: map[[2]netip.AddrPort]bool{}}
 		g.conns[ev.ConnID] = c
 	}
 	switch ev.Event {
-	case schema.KindPipe, schema.KindSocketpair:
+	case schema.KindPipe, schema.KindPipe2, schema.KindSocketpair:
 		c.pair = true
 	case schema.KindConnect:
 		c.connect = true
 	case schema.KindAccept, schema.KindAccept4:
 		c.accept = true
 	}
+	if t, ok := eventTuple(&ev.Args); ok {
+		c.tuples[t] = true
+	}
+}
+
+// fused reports whether the host's correlator fused c: created as a pair,
+// both a connect and an accept, or both ends' mirrored address pairs.
+func (c *connEnds) fused() bool {
+	if c.pair || (c.connect && c.accept) {
+		return true
+	}
+	for t := range c.tuples {
+		if c.tuples[[2]netip.AddrPort{t[1], t[0]}] {
+			return true
+		}
+	}
+	return false
+}
+
+// eventTuple is an event's (local, remote) address pair, when it has
+// both ports and a remote address. A missing local address is the
+// wildcard; towards a loopback peer it is keyed as the peer's address,
+// the address the route sends from (the correlator's flowLocal), so the
+// two sides of a loopback flow mirror each other.
+func eventTuple(a *schema.Args) ([2]netip.AddrPort, bool) {
+	if a.LocalPort == nil || a.RemoteAddr == nil || a.RemotePort == nil {
+		return [2]netip.AddrPort{}, false
+	}
+	remote, err := netip.ParseAddr(*a.RemoteAddr)
+	if err != nil {
+		return [2]netip.AddrPort{}, false
+	}
+	local := remote
+	if a.LocalAddr != nil {
+		if local, err = netip.ParseAddr(*a.LocalAddr); err != nil {
+			return [2]netip.AddrPort{}, false
+		}
+	} else if !remote.IsLoopback() {
+		return [2]netip.AddrPort{}, false
+	}
+	return [2]netip.AddrPort{netip.AddrPortFrom(local, *a.LocalPort),
+		netip.AddrPortFrom(remote, *a.RemotePort)}, true
 }
 
 // signaled adds the edge from a traced sender to the process a signal
@@ -148,96 +229,40 @@ func (g *graphRebuilder) signaled(proc string, ev *schema.Event) {
 		From: schema.ProcessNodeID(ev.HostID, *s, inc), To: proc})
 }
 
-// file follows the open fds and adds the opened edges.
-func (g *graphRebuilder) file(proc string, ev *schema.Event) {
-	k := fdKey{ev.PID, ev.PIDInc, ev.FD}
-	switch ev.Event {
-	case schema.KindOpen, schema.KindOpenat, schema.KindOpenat2, schema.KindCreat:
-		if ev.Ret >= 0 && ev.Args.Path != nil {
-			g.opened(proc, ev.HostID, *ev.Args.Path)
-			g.paths[k] = *ev.Args.Path
-			g.cloexec[k] = ev.Args.Flags != nil && *ev.Args.Flags&oCloexec != 0
-		}
-	case schema.KindDup, schema.KindDup2, schema.KindDup3:
-		g.dup(k, ev, ev.Event == schema.KindDup3 && ev.Args.Flags != nil && *ev.Args.Flags&oCloexec != 0)
-	case schema.KindFcntl:
-		if c := ev.Args.Cmd; c != nil && (*c == fDupFD || *c == fDupFDCloexec) {
-			g.dup(k, ev, *c == fDupFDCloexec)
-		}
-	case schema.KindExec:
-		g.exec(ev.PID, ev.PIDInc)
-	case schema.KindClose:
-		delete(g.paths, k)
-		delete(g.cloexec, k)
-	case schema.KindUnlink, schema.KindUnlinkat, schema.KindRmdir:
-		if ev.Ret == 0 && ev.Args.Path != nil {
-			g.unlinked(trimSlash(*ev.Args.Path))
-		}
-	case schema.KindRename, schema.KindRenameat, schema.KindRenameat2:
-		if ev.Ret == 0 && ev.Args.Path != nil && ev.Args.NewPath != nil {
-			g.renamed(ev.HostID, trimSlash(*ev.Args.Path), trimSlash(*ev.Args.NewPath))
-		}
-	}
-}
-
-// dup makes the returned fd a copy of the event's fd (docs/schema.md
-// "fd lifecycle"): same file, its own close-on-exec state. Whatever the
-// new number held before is replaced.
-func (g *graphRebuilder) dup(old fdKey, ev *schema.Event, cloexec bool) {
-	if ev.Ret < 0 {
+// forked starts a fork's child with a copy of its parent's open fds and
+// adds the forked edge (correlate's forked and inherit). Whatever the
+// child's key held belongs to a predecessor, as in the correlator; a
+// fork whose parent the record could not name inherits nothing.
+func (g *graphRebuilder) forked(proc string, ev *schema.Event) {
+	g.dropFDs(ev.PID, ev.PIDInc, func(fdKey) bool { return true })
+	a := ev.Args
+	if a.ParentPID == nil || a.ParentInc == nil {
 		return
 	}
-	nk := fdKey{old.pid, old.inc, int32(ev.Ret)}
-	delete(g.paths, nk)
-	g.cloexec[nk] = cloexec
-	if p, ok := g.paths[old]; ok {
-		g.paths[nk] = p
+	parent := g.processNode(ev.HostID, *a.ParentPID, *a.ParentInc)
+	if _, seen := g.incs[*a.ParentPID]; !seen {
+		g.incs[*a.ParentPID] = *a.ParentInc
 	}
-}
-
-// exec closes the process's close-on-exec fds: a rename after the exec
-// no longer moves them.
-func (g *graphRebuilder) exec(pid uint32, inc uint64) {
+	g.edge(schema.Edge{Type: schema.EdgeForked, From: parent, To: proc})
+	// Keys added while ranging are the child's, which the filter skips
+	// (a fork names no parent of the child's own pid).
 	for k, ce := range g.cloexec {
-		if ce && k.pid == pid && k.inc == inc {
-			delete(g.paths, k)
-			delete(g.cloexec, k)
+		if k.pid == *a.ParentPID && k.inc == *a.ParentInc {
+			g.cloexec[fdKey{ev.PID, ev.PIDInc, k.fd}] = ce
+		}
+	}
+	for k, p := range g.paths {
+		if k.pid == *a.ParentPID && k.inc == *a.ParentInc {
+			g.paths[fdKey{ev.PID, ev.PIDInc, k.fd}] = p
 		}
 	}
 }
 
-func (g *graphRebuilder) opened(proc, hostID, path string) {
-	file := schema.FileNodeID(hostID, path)
-	g.nodes[file] = schema.Node{Type: schema.NodeFile, ID: file}
-	g.edge(schema.Edge{Type: schema.EdgeOpened, From: proc, To: file})
-}
-
-// unlinked forgets the fds of a removed name: a later rename onto the
-// same name must not move them.
-func (g *graphRebuilder) unlinked(name string) {
-	if !strings.HasPrefix(name, "/") {
-		return
-	}
-	maps.DeleteFunc(g.paths, func(_ fdKey, p string) bool { return p == name })
-}
-
-// renamed moves every open fd at or below old to new, and gives its
-// process an opened edge to the new name (correlate's renamed). Relative
-// names cannot be matched against the absolute paths fds keep.
-func (g *graphRebuilder) renamed(hostID, old, new string) {
-	if old == new || !strings.HasPrefix(old, "/") || !strings.HasPrefix(new, "/") {
-		return
-	}
-	g.unlinked(new)
-	for _, k := range slices.SortedFunc(maps.Keys(g.paths), compareFD) {
-		p := g.paths[k]
-		if !below(p, old) {
-			continue
-		}
-		moved := new + p[len(old):]
-		g.paths[k] = moved
-		g.opened(schema.ProcessNodeID(hostID, k.pid, k.inc), hostID, moved)
-	}
+// dropFDs forgets the fds of one process incarnation that drop selects.
+func (g *graphRebuilder) dropFDs(pid uint32, inc uint64, drop func(fdKey) bool) {
+	mine := func(k fdKey) bool { return k.pid == pid && k.inc == inc && drop(k) }
+	maps.DeleteFunc(g.paths, func(k fdKey, _ string) bool { return mine(k) })
+	maps.DeleteFunc(g.cloexec, func(k fdKey, _ bool) bool { return mine(k) })
 }
 
 func (g *graphRebuilder) edge(e schema.Edge) {
@@ -251,7 +276,7 @@ func (g *graphRebuilder) graph() schema.Graph {
 		if e.Type == schema.EdgeConnected {
 			e.State = schema.StateUnresolved
 			conn, _ := strings.CutPrefix(e.To, schema.SocketNodeID(""))
-			if c := g.conns[conn]; c != nil && (c.pair || (c.connect && c.accept)) {
+			if c := g.conns[conn]; c != nil && c.fused() {
 				e.State = schema.StateFused
 			}
 		}
@@ -267,18 +292,4 @@ func (g *graphRebuilder) graph() schema.Graph {
 // result does not depend on it; the order only keeps runs identical).
 func compareFD(a, b fdKey) int {
 	return cmp.Or(cmp.Compare(a.pid, b.pid), cmp.Compare(a.inc, b.inc), cmp.Compare(a.fd, b.fd))
-}
-
-// below: path is name or lies under it (correlate's below).
-func below(path, name string) bool {
-	return path == name ||
-		(len(path) > len(name) && strings.HasPrefix(path, name) && path[len(name)] == '/')
-}
-
-// trimSlash drops a trailing slash ("dir/" names dir) except of "/".
-func trimSlash(path string) string {
-	if len(path) > 1 {
-		return strings.TrimSuffix(path, "/")
-	}
-	return path
 }

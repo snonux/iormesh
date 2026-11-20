@@ -171,6 +171,9 @@ func appendArgs(dst []byte, a *Args) []byte {
 	optUint(&o, "bytes_acked", a.BytesAcked)
 	optUint(&o, "bytes_received", a.BytesReceived)
 	optUint(&o, "tcp_seq", a.TCPSeq)
+	o.str("pattern", a.Pattern)
+	optUint(&o, "parent_pid", a.ParentPID)
+	optUint(&o, "parent_incarnation", a.ParentInc)
 	return o.close()
 }
 

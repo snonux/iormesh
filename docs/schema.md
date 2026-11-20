@@ -10,7 +10,9 @@ Version 1 is frozen: spikes S1 (Java ↔ syscall join) and S2 (cross-host
 join) settled their fields, M2's acceptance (2026-11-19) the rest of the
 traced surface, and M3's acceptance (2026-11-20) the Java, OTEL, `http`
 and `dns` fields and the methods, threads, classes and stacks tables,
-which were provisional until then. Fields are only ever appended,
+which were provisional until then. M4 appended the `fork` and
+`attach` kinds and `args.pattern`, `args.parent_pid` and
+`args.parent_incarnation` (task ze4, below). Fields are only ever appended,
 and appended fields are optional, so an older reader never sees a
 changed meaning. Enum values (`drop_reason`,
 `end_reason`, …) are appended the same way as event kinds, so a reader
@@ -42,7 +44,9 @@ normalized trace.
 events and tables as parquet segments instead — or as well, with
 both flags — under `DIR/<project>/`; see
 [Parquet mapping](#parquet-mapping). The graph is `-out`'s only:
-on a server the controller rebuilds it (decision #3).
+on a server the controller rebuilds it from the events (decision
+#3), which carry everything it rests on — so a single-host run's
+rebuilt graph is its `graph.json` (see [Graph](#graph)).
 
 **NDJSON framing**: UTF-8, one JSON object per line, `\n`
 terminated, no blank lines, keys in the order of the table below
@@ -107,7 +111,11 @@ with its parent's fds as they were (same `fd_gen`) and gets a
 whose state the trace never learned, except stdio — so a number
 the new program reuses is a new instance. The state comes from
 the open and `accept4` flags, `dup3`, `F_DUPFD_CLOEXEC` and
-`fcntl(F_SETFD/F_GETFD)`. `close_range` is not traced.
+`fcntl(F_SETFD/F_GETFD)` — `F_SETFD`'s argument is the event's
+`args.flags`, `F_GETFD`'s answer its `ret`. A fork is an event of
+its own (`fork`, below), so a reader replaying the events knows
+where a child's copy of the table starts. `close_range` is not
+traced.
 
 ### Args
 
@@ -118,7 +126,7 @@ column each, never a blob.
 |-----|--------|
 | `path` | opens and `creat` (required); the M2 path kinds; the old name of the rename/link family (a symlink's text); the fd metadata kinds (the fd's current path); an AF_UNIX `bind`, `connect`, `sendto` or `recvfrom`: the socket path (`@name` for an abstract one) |
 | `new_path` | rename/link family (M2): the new name |
-| `flags` | opens: the raw open flags; the path kinds whose syscall has a flags argument (`statx`, `newfstatat`, `utimensat`, `fchownat`, `fchmodat2`, `linkat`); `dup3` |
+| `flags` | opens: the raw open flags; the path kinds whose syscall has a flags argument (`statx`, `newfstatat`, `utimensat`, `fchownat`, `fchmodat2`, `linkat`); `dup3`; a successful `fcntl(F_SETFD)`: the descriptor flags it set (`FD_CLOEXEC` 1; appended in M4, task ze4) — on no other `fcntl` |
 | `cmd` | `fcntl` (M2): the raw command (`F_DUPFD` 0, `F_GETFD` 1, `F_SETFD` 2, `F_DUPFD_CLOEXEC` 1030, …); `epoll_ctl`: the op (`EPOLL_CTL_ADD` 1, `DEL` 2, `MOD` 3) |
 | `offset` | positional I/O (planned, not set yet) |
 | `local_addr`, `local_port` | socket events, when known; a socket bound to the wildcard address (`0.0.0.0`, `::`) has its port but no `local_addr` |
@@ -141,6 +149,8 @@ IPv4 peers of dual-stack sockets are written unmapped
 | `snd_una`, `rcv_nxt` | `tcp_state` only, optional (appended in M4): the socket's `tcp_sock` fields of those names at the transition, u32 |
 | `bytes_acked`, `bytes_received` | `tcp_state` only, optional (appended in M4): the `tcp_sock` byte counters, u64 |
 | `tcp_seq` | optional (appended in M4): the TCP sequence number of the first stream byte the call moved, u32; the call moved `[tcp_seq, tcp_seq + bytes)` mod 2³². Only on an unfolded `write`, `writev`, `sendto`, `sendfile64`, `read`, `readv` or `recvfrom` with a `conn_id` that moved bytes |
+| `pattern` | `attach` only, optional (appended in M4, task ze4): the `-pattern` the session matched the process by; with the project it names the app (`app:<project>/<pattern>`). Absent for a `-pid` or port target. Never empty |
+| `parent_pid`, `parent_incarnation` | `fork` only, both or none (appended in M4, task ze4): the process that forked the child, as its own events name it (raw pid, u32; incarnation, u64); absent when the kernel record could not say |
 
 The four `tcp_sock` fields come together or not at all: the
 controller's merge rebuilds the connection's ISN pair — the
@@ -297,6 +307,16 @@ says nothing about the individual calls' sizes or gaps.
 | Kind | Source |
 |------|--------|
 | `exec` | a successful exec of a traced process (`sched_process_exec` plus the argv record): `args.path` is the executable as exec'd (empty when unreadable, then absent), `args.argv` the command line, redacted; `fd` is `-1`, `ret` `0` |
+
+| `fork` | a new process of a traced one (`task_newtask` without `CLONE_THREAD`), on the **child**: `pid`, `pid_incarnation`, `tid` (= pid) and `comm` are the child's as it starts, `args.parent_pid`/`parent_incarnation` the forker; `fd` `-1`, `ret` `0`, `boot_ns` the record's (appended in M4, task ze4) |
+| `attach` | a process the session took on as a target — a `-pid` or port target at session start, or a `-pattern` match (then with `args.pattern`) — with the identity read then; `fd` `-1`, `ret` `0`, `boot_ns` the tracer's clock at the attach (appended in M4, task ze4) |
+
+`fork` and `attach` carry what the graph's `forked` edge, a
+child's inherited fds, and the `app` node with its
+`incarnation` edges rest on, so the controller's rebuild from the
+events (decision #3) has them too. Each is one event per
+process. A child's `fork` is its first event; a pattern
+incarnation's `attach` comes before its `attach_gap` drop.
 
 A followed child's exec is one, and so is the exec through which a
 `-pattern` session found its app (after that process's
@@ -994,6 +1014,20 @@ name. An `app` id names nothing run-specific (project and
 pattern), so the normalizer passes it through unchanged and two
 runs — or two hosts — name the same app the same way; goldens bind
 it with `$a1`. A `-pid` or `-listen-port` session has no app node.
+
+**Rebuilt from the events** (decision #3; task ze4): every node
+and edge follows from the events in `seq` order — process nodes
+from any event naming the process (an `attach` covers a target
+that never made a traced call), `app`/`incarnation` from an
+`attach` with `args.pattern`, `forked` and the child's inherited
+fds from `fork`, `opened` from the opens and from renames moving
+the open fds the events track (the fd lifecycle above),
+`connected` from `conn_id` (fused for a pipe or socketpair, a
+connect and an accept on the host, or mirrored address pairs of
+a loopback UDP flow), `signaled` from a `signal` whose sender is
+traced. `iormeshctl build` does this
+(`internal/federate/rebuild.go`), and the integration suite holds
+every single-host run's rebuild to its `graph.json`.
 
 ## Redaction
 

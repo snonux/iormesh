@@ -3,6 +3,7 @@ package correlate
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -29,7 +30,7 @@ func TestIncarnationLinksRestarts(t *testing.T) {
 	c, _ := newTest(t)
 	app := schema.AppNodeID("p", "*RestartApp*")
 	for _, pid := range []uint32{40, 41} {
-		if err := c.Incarnation(app, pid, testIdentity(pid), 0); err != nil {
+		if err := c.Incarnation("*RestartApp*", pid, testIdentity(pid), 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -45,15 +46,14 @@ func TestIncarnationLinksRestarts(t *testing.T) {
 }
 
 // TestIncarnationGapDrop: a non-zero attach gap becomes one drop event
-// naming the process, ahead of its first traced event; a zero gap emits
-// nothing.
+// naming the process, right after its attach and ahead of its first
+// traced event; a zero gap emits nothing.
 func TestIncarnationGapDrop(t *testing.T) {
 	c, sink := newTest(t)
-	app := schema.AppNodeID("p", "*x*")
-	if err := c.Incarnation(app, 40, testIdentity(40), 0); err != nil {
+	if err := c.Incarnation("*x*", 40, testIdentity(40), 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Incarnation(app, 41, testIdentity(41), 6); err != nil {
+	if err := c.Incarnation("*x*", 41, testIdentity(41), 6); err != nil {
 		t.Fatal(err)
 	}
 	now := uint64(100)
@@ -69,8 +69,13 @@ func TestIncarnationGapDrop(t *testing.T) {
 	if d.PID != 41 || d.PIDInc != 1041 || *d.Args.Lost != 6 || *d.Args.DropReason != schema.DropAttachGap {
 		t.Fatalf("drop %+v (args %+v), want pid 41 lost 6 attach_gap", d, d.Args)
 	}
-	if sink.events[0].Event != schema.KindDrop || sink.events[1].Event != schema.KindOpenat {
-		t.Fatalf("events %v: the drop must precede the process's first event", sink.events)
+	kinds := []string{}
+	for _, e := range sink.events {
+		kinds = append(kinds, e.Event)
+	}
+	want := []string{schema.KindAttach, schema.KindAttach, schema.KindDrop, schema.KindOpenat}
+	if !slices.Equal(kinds, want) {
+		t.Fatalf("events %v, want %v: the drop follows the attach and precedes the first syscall", kinds, want)
 	}
 }
 
@@ -120,14 +125,13 @@ func TestNewTaskRegistersChild(t *testing.T) {
 // Unseeded, the target's event would carry the squatter's identity.
 func TestSeedOutlivesPIDReuse(t *testing.T) {
 	target := Identity{Comm: "target", StartNS: 500}
-	app := schema.AppNodeID("p", "*target*")
 	cases := []struct {
 		name string
 		seed func(c *Correlator) error
 	}{
-		{"pid target (Seed)", func(c *Correlator) error { c.Seed(60, target); return nil }},
+		{"pid target (Seed)", func(c *Correlator) error { return c.Seed(60, target) }},
 		{"pattern adoption (Incarnation)", func(c *Correlator) error {
-			return c.Incarnation(app, 60, target, 0)
+			return c.Incarnation("*target*", 60, target, 0)
 		}},
 	}
 	for _, tc := range cases {
@@ -219,7 +223,7 @@ func TestIncarnationAfterEnd(t *testing.T) {
 	if err := c.End(schema.EndStop); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Incarnation(schema.AppNodeID("p", "*x*"), 1, testIdentity(1), 0); !errors.Is(err, ErrEnded) {
+	if err := c.Incarnation("*x*", 1, testIdentity(1), 0); !errors.Is(err, ErrEnded) {
 		t.Fatalf("Incarnation after End: %v, want ErrEnded", err)
 	}
 }
@@ -398,5 +402,45 @@ func TestExeComm(t *testing.T) {
 		if got := exeComm(exe); got != want {
 			t.Errorf("exeComm(%q) = %q, want %q", exe, got, want)
 		}
+	}
+}
+
+// TestForkAndAttachEvents (task ze4): a new child is a fork event on the
+// child, naming its parent (none when the record names no creator, no
+// event for a thread); a -pid target is an attach without a pattern, a
+// pattern's incarnation one with it.
+func TestForkAndAttachEvents(t *testing.T) {
+	c, sink := newTest(t)
+	if err := c.Seed(1, testIdentity(1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Incarnation("*app*", 2, testIdentity(2), 0); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []*types.TaskNewtaskEvent{
+		{EventType: types.TASK_NEWTASK_EVENT, Time: 5000, Pid: 50, Tid: 50, CreatorPid: 1},
+		{EventType: types.TASK_NEWTASK_EVENT, Time: 5010, Pid: 50, Tid: 51, CreatorPid: 50, CloneFlags: cloneThread},
+		{EventType: types.TASK_NEWTASK_EVENT, Time: 5020, Pid: 60, Tid: 60},
+	} {
+		if err := c.Handle(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got := []string{}
+	for _, e := range sink.events {
+		a, _ := json.Marshal(e.Args)
+		got = append(got, fmt.Sprintf("%s %d@%d %s %s", e.Event, e.PID, e.PIDInc, e.Comm, a))
+	}
+	want := []string{
+		`attach 1@1001 proc1 {}`,
+		`attach 2@1002 proc2 {"pattern":"*app*"}`,
+		`fork 50@1050 proc50 {"parent_pid":1,"parent_incarnation":1001}`,
+		`fork 60@1060 proc60 {}`,
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("events\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }

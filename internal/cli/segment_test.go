@@ -63,8 +63,9 @@ func TestDiskLimitEndsTraceCleanly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := kinds(events); got != "session,end" || *events[1].Args.EndReason != schema.EndDiskLimit {
-		t.Fatalf("segment holds %s, want session,end with disk_limit", got)
+	// The target's attach (task ze4) is the session's only process event.
+	if got := kinds(events); got != "session,attach,end" || *events[2].Args.EndReason != schema.EndDiskLimit {
+		t.Fatalf("segment holds %s, want session,attach,end with disk_limit", got)
 	}
 	if !strings.Contains(stderr.String(), "disk limit reached") {
 		t.Fatalf("stderr %q: want the trip reported", stderr.String())

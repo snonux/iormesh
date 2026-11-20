@@ -218,9 +218,9 @@ func TestStartScanDropsVanished(t *testing.T) {
 
 // TestExecArgvRecordedRedacted: a traced process's exec (PROCESS_ARGV_EVENT)
 // and the exec a pattern session adopts both become exec events whose
-// argv is redacted — the adopted one after its attach_gap drop — while a
-// dismissed exec leaves no trace; the planted secret is nowhere in the
-// events file (decision #9).
+// argv is redacted — the adopted one after its attach and attach_gap
+// drop — while a dismissed exec leaves no trace; the planted secret is
+// nowhere in the events file (decision #9).
 func TestExecArgvRecordedRedacted(t *testing.T) {
 	fakeProcs(t)
 	dir := t.TempDir()
@@ -257,7 +257,8 @@ func TestExecArgvRecordedRedacted(t *testing.T) {
 			t.Errorf("event %d holds the secret: %s", e.Seq, b)
 		}
 	}
-	if want := []string{schema.KindExec, schema.KindDrop, schema.KindExec}; !slices.Equal(kinds, want) {
+	want := []string{schema.KindExec, schema.KindAttach, schema.KindDrop, schema.KindExec}
+	if !slices.Equal(kinds, want) {
 		t.Fatalf("process events %v, want %v", kinds, want)
 	}
 	if argvs[0][1] != "-Dpassword=***" || argvs[1][4] != "--api-key=***" {

@@ -22,7 +22,9 @@ package integrationtests
 // their exit, on a chosen JDK (Harness.Java) and user (Credential). The
 // java command line (workloadCmd) and a tracer's wait-and-read
 // (finishRun) are shared with the emulated hosts of multihost.go (M4,
-// task kb4), where each host runs its own tracer.
+// task kb4), where each host runs its own tracer. Every run also writes
+// parquet segments (-trace-dir, task ze4), from which the judged runs
+// rebuild the graph.
 
 import (
 	"errors"
@@ -97,10 +99,6 @@ type Harness struct {
 	// NativeStacks runs the tracer with -native-stacks (M2 step 9): events
 	// carry stack_id and the trace directory holds stacks.ndjson.
 	NativeStacks bool
-	// Segments runs the tracer with -trace-dir as well (M4, task 8b4):
-	// besides -out's NDJSON, the run's parquet segments land in
-	// SegmentsDir(run).
-	Segments bool
 	// JavaAgent, when set, is iormesh-agent.jar: every Java workload
 	// starts with -javaagent writing its ring into Spool, and the tracer
 	// runs with -spool Spool and joins their I/O to Java stacks (M3).
@@ -329,9 +327,11 @@ func (h *Harness) startTracer(ws []*Workload, out string) (*process, error) {
 	if h.NativeStacks {
 		args = append(args, "-native-stacks")
 	}
-	if h.Segments {
-		args = append(args, "-trace-dir", out+segmentsSuffix)
-	}
+	// Always -trace-dir beside -out (task ze4): the judged runs check that
+	// the graph the controller rebuilds from the segments is graph.json.
+	// The disk watchdog is off: it is not under test here, and a nearly
+	// full developer disk under TMPDIR would end runs as disk_limit.
+	args = append(args, "-trace-dir", out+segmentsSuffix, "-disk-limit", "0", "-disk-min-free", "0")
 	if h.JavaAgent != "" || h.AttachAgent != "" {
 		args = append(args, "-spool", h.Spool)
 	}
@@ -426,8 +426,8 @@ func release(ws []*Workload) error {
 	return nil
 }
 
-// SegmentsDir is the project directory a Segments run's tracer wrote its
-// parquet segments under (ready/ inside).
+// SegmentsDir is the project directory a run's tracer wrote its parquet
+// segments under (ready/ inside).
 func SegmentsDir(run Run) string {
 	return filepath.Join(run.Dir+segmentsSuffix, tracerProject)
 }

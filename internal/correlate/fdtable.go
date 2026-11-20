@@ -83,6 +83,11 @@ func fcntlDetail(ev *schema.Event, p *procState, en enter, ret int64) {
 	case unix.F_DUPFD_CLOEXEC:
 		dupDetail(p, en.fd, ret, true)
 	case unix.F_SETFD:
+		// The argument goes into the event too (task ze4): which fds an
+		// exec closes decides which ones a later rename moves, in the
+		// correlator's graph and in one rebuilt from the events.
+		fdFlags := uint32(en.arg)
+		ev.Args.Flags = &fdFlags
 		p.cloexec[en.fd] = en.arg&unix.FD_CLOEXEC != 0
 	case unix.F_GETFD:
 		p.cloexec[en.fd] = ret&unix.FD_CLOEXEC != 0
@@ -107,13 +112,16 @@ func (p *procState) openCloexec(fd int32, flags int32) {
 // A child sharing the table (CLONE_FILES without CLONE_THREAD, rare: the
 // JDK's posix_spawn uses CLONE_VM|CLONE_VFORK) gets a copy as well; its
 // later changes then do not reach the parent's view.
-func (c *Correlator) forked(creator uint32, child *procState, pid uint32) {
+//
+// It returns the parent, and false when there is none to name.
+func (c *Correlator) forked(creator uint32, child *procState, pid uint32) (*procState, bool) {
 	if creator == 0 || creator == pid {
-		return
+		return nil, false
 	}
 	parent := c.proc(creator)
 	child.inherit(parent)
 	c.graph.forked(creator, parent.inc, pid, child.inc)
+	return parent, true
 }
 
 // inherit replaces p's (fresh) fd table with a copy of parent's. Sockets

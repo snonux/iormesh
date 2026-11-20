@@ -120,6 +120,15 @@ ior source and what changed:
   counts (PLAN.md, "Syscall handlers run behind `raw_syscalls`
   dispatchers").
   Undecodable records fail at once: they are a decoder bug.
+- Every run also writes parquet segments (`-trace-dir` beside
+  `-out`, the disk watchdog off), and every judged run checks
+  M4's acceptance for single-host scenarios (task ze4): the graph
+  the controller rebuilds from the segments
+  (`federate.RebuildGraph`, the build's rules) is exactly the
+  run's `graph.json`, node for node and edge for edge
+  (`assertRebuiltGraph`; a multi-host run checks each emulated
+  host's tracer run on its own), so a fork, an inherited fd, a pattern's
+  app and an `F_SETFD` the rebuild could not see fail the suite.
 - `kernel_support_test.go` — the tests skip unless tracefs shows
   every tracepoint M1 attaches to; a probe that cannot find them
   as root fails, so a blind probe never turns the suite green.

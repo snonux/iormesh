@@ -107,9 +107,9 @@ func (h *Harness) TraceHosts(order []*Workload, hosts ...Host) ([]Run, error) {
 // attached.
 func (h *Harness) startHostTracer(host Host, out string) (*process, error) {
 	// A host tracer is the plain default tracer: the opt-in families,
-	// native stacks, segments and the Java agent of Harness are not passed
-	// on, so a test setting them would check what never ran.
-	if h.Families != "" || h.NativeStacks || h.Segments || h.JavaAgent != "" ||
+	// native stacks and the Java agent of Harness are not passed on, so a
+	// test setting them would check what never ran.
+	if h.Families != "" || h.NativeStacks || h.JavaAgent != "" ||
 		h.AttachAgent != "" || h.Pattern != "" {
 		return nil, fmt.Errorf("host %s: emulated hosts take no tracer options yet", host.Name)
 	}
@@ -121,7 +121,9 @@ func (h *Harness) startHostTracer(host Host, out string) (*process, error) {
 	args := []string{"--mount", "--uts", "--propagation", "private", "--",
 		"sh", "-c", hostShell, "sh", mid, host.Name, filepath.Join(netnsDir, host.Netns),
 		h.TracerBinary, "run", "-pid", workloadPIDs(host.Workloads), "-project", host.Project,
-		"-out", out, "-duration", tracerDuration, "-ready", ready}
+		"-out", out, "-duration", tracerDuration, "-ready", ready,
+		// Segments too, as startTracer writes them (task ze4).
+		"-trace-dir", out + segmentsSuffix, "-disk-limit", "0", "-disk-min-free", "0"}
 	cmd := exec.Command("unshare", args...)
 	cmd.Env = hostTracerEnv(h.BpfObject, host.ClockSkew)
 	tracer, err := startProcess("iormesh run on "+host.Name, cmd)

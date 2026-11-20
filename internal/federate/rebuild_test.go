@@ -166,3 +166,60 @@ func TestRebuildCommIsNewest(t *testing.T) {
 		}
 	}
 }
+
+// TestRebuildLifecycle pins the task ze4 records: a fork's forked edge and
+// inherited fds, an attach's app and incarnation edge, F_SETFD's flags,
+// and a loopback UDP flow fused by its mirrored address pairs.
+func TestRebuildLifecycle(t *testing.T) {
+	p1, p2 := schema.ProcessNodeID("h", 1, 1), schema.ProcessNodeID("h", 2, 1)
+	ren := rebuildEvent(1, schema.KindRename, schema.NoFD, 0)
+	ren.Args.Path, ren.Args.NewPath = ptr("/d/a.tmp"), ptr("/d/a")
+	open := withPath(rebuildEvent(1, schema.KindOpenat, 4, 4), "/d/a.tmp")
+	fork := rebuildEvent(2, schema.KindFork, schema.NoFD, 0)
+	fork.Args.ParentPID, fork.Args.ParentInc = ptr(uint32(1)), ptr(uint64(1))
+	orphan := rebuildEvent(2, schema.KindFork, schema.NoFD, 0)
+	attach := rebuildEvent(1, schema.KindAttach, schema.NoFD, 0)
+	attach.Args.Pattern = ptr("*app*")
+	setfd := rebuildEvent(1, schema.KindFcntl, 4, 0)
+	setfd.Args.Cmd, setfd.Args.Flags = ptr(uint32(fSetFD)), ptr(uint32(fdCloexec))
+	exec := rebuildEvent(2, schema.KindExec, schema.NoFD, 0)
+	app := schema.AppNodeID("shop", "*app*")
+	for _, tc := range []struct {
+		name string
+		evs  []schema.Event
+		want []string
+	}{
+		{"a fork's child moves an inherited fd", []schema.Event{open, fork, rebuildEvent(1, schema.KindClose, 4, 0), ren},
+			[]string{"forked " + p1 + " " + p2 + " ", "opened " + p1 + " file:h:/d/a.tmp ", "opened " + p2 + " file:h:/d/a "}},
+		{"a fork without a parent inherits nothing", []schema.Event{open, orphan, rebuildEvent(1, schema.KindClose, 4, 0), ren},
+			[]string{"opened " + p1 + " file:h:/d/a.tmp "}},
+		{"F_SETFD close-on-exec, then the child's exec", []schema.Event{open, setfd, fork,
+			rebuildEvent(1, schema.KindClose, 4, 0), exec, ren},
+			[]string{"forked " + p1 + " " + p2 + " ", "opened " + p1 + " file:h:/d/a.tmp "}},
+		{"an attach with a pattern", []schema.Event{attach}, []string{"incarnation " + app + " " + p1 + " "}},
+		{"an attach without one", []schema.Event{rebuildEvent(1, schema.KindAttach, schema.NoFD, 0)}, nil},
+		{"a loopback UDP flow", []schema.Event{udp(1, "p", 40000, 9000), udp(2, "p", 9000, 40000)},
+			[]string{"connected " + p1 + " conn:p fused", "connected " + p2 + " conn:p fused"}},
+		{"a UDP flow to another host", []schema.Event{udp(1, "q", 40000, 9000)},
+			[]string{"connected " + p1 + " conn:q unresolved"}},
+	} {
+		got := slices.DeleteFunc(edgeList(RebuildGraph(tc.evs)), func(s string) bool {
+			return strings.HasPrefix(s, schema.EdgeRunsOn+" ")
+		})
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%s: edges = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// udp is a sendto of pid on conn from a wildcard-bound local port to a
+// loopback peer, as the correlator writes a UDP flow's datagram.
+func udp(pid uint32, conn string, local, remote uint16) schema.Event {
+	ev := withConn(rebuildEvent(pid, schema.KindSendto, 5, 1), conn)
+	ev.Args.LocalPort, ev.Args.RemotePort = ptr(local), ptr(remote)
+	ev.Args.RemoteAddr = ptr("127.0.0.1")
+	if conn == "q" {
+		ev.Args.RemoteAddr = ptr("192.0.2.1")
+	}
+	return ev
+}
