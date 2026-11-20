@@ -1036,6 +1036,26 @@ Kubernetes (M7) build on it.
   sequence view. Views (M5)
   and the summary rollup render the named services; storage
   format is decision #24.
+  Built (task hb4, `internal/servicedb`, #24's default: one
+  sqlite database via `modernc.org/sqlite`, glob rules): one
+  row per observed TCP connection — fused, unresolved with the
+  merge's reason, or a same-host pair — keyed by its anchor end
+  (the client half's host-local conn id when the client was
+  traced, else the server half's), so a rebuild upserts; every
+  merged value is a MIN, MAX or keep-if-unknown, which makes
+  re-import idempotent and a build over fewer segments lose
+  nothing, and a fused verdict never reverts. Per-connection
+  HTTP requests (method, scheme, host, redacted path) give the
+  TLS and path hints; the hostname is the client's DNS lookup
+  of the endpoint's address, else its HTTP host. Rules match
+  hostname or IP, case-insensitively; port-specific beats
+  any-port, then the longer glob, then the older rule; a
+  duplicate is refused, never overwritten. The file is 0600 in
+  a 0700 directory, refused when open to others.
+  `iormeshctl services` lists (unnamed first), shows the edges
+  (`edges -from orders`: what orders talks to), and adds,
+  lists and removes rules (`name`, `rules`, `unname`). The
+  build calls `Observe` and `Import` (wiring: task ib4).
 - **Cleanup (`rm`)**: removes the host from the registry and
   tears down the deployment on it — `sudo iormesh uninstall`
   stops every session and removes `/opt/iormesh` (binary and
@@ -1624,7 +1644,10 @@ answer), and deferred.
   project vs one with project scoping; glob vs regex for the
   naming rules. Lives under `~/.local/share/iormesh/`, next to
   the collected traces. *Default: sqlite, one database, glob
-  rules.*
+  rules.* Task hb4 built the default (`modernc.org/sqlite`,
+  `~/.local/share/iormesh/services.db`, every row carrying its
+  projects, `-project` filtering the listings, rules global);
+  the owner has not decided otherwise.
 - **#21 Project semantics** — for now a project is a manual
   label (`-project`, kept with the registry entry); later
   candidates: defaulting to the k8s namespace, or

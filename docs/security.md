@@ -121,6 +121,14 @@ truth.
 - **Traces are sensitive data.** Collected segments stay on the
   controller until the operator deletes them — production
   metadata on a laptop deserves the care that implies.
+  The service database (`~/.local/share/iormesh/services.db`,
+  task hb4) distills them into hosts, addresses, hostnames and
+  redacted HTTP paths: it is created 0600 in a 0700 directory
+  and refused when it or its directory is foreign-owned or open
+  to others, like the registry. It holds no secrets beyond what
+  the traces already redacted (decision #9), and `iormeshctl
+  services` quotes control characters from the traces before
+  they reach the terminal.
 - **Kubernetes**: eBPF privileges are node-kernel-wide — a
   sidecar with CAP_BPF can in principle observe any process on
   the node. iormesh scopes itself by config to the pod it runs

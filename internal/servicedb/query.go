@@ -1,0 +1,210 @@
+package servicedb
+
+import (
+	"cmp"
+	"context"
+	"database/sql"
+	"fmt"
+	"net/netip"
+	"slices"
+	"strconv"
+)
+
+// Untraced labels the client of a connection only its server end saw.
+const Untraced = "(untraced)"
+
+// Filter narrows a query to one project: a connection belongs to it when
+// either end was traced in it. "" is every project.
+type Filter struct {
+	Project string
+}
+
+// Endpoint is one observed server endpoint (hostname, IP, port) and what
+// talked to it, named by the rules.
+type Endpoint struct {
+	Hostname, IP string
+	Port         uint16
+	Service      string // "" when no rule names it
+	Conns        int64  // connections seen
+	Unresolved   int64  // of which the far end stayed unresolved
+	TLS          string // "tls", "plain", "mixed" or "" (unknown)
+	First, Last  uint64 // wall ns
+	Clients      []string
+	// ServerApps are the traced apps that accepted these connections:
+	// what lets a client be named after the service it serves too.
+	ServerApps []string
+	Requests   []EndpointRequest
+}
+
+// EndpointRequest counts one method and path at an endpoint.
+type EndpointRequest struct {
+	Method, Path string
+	Count        int64
+}
+
+// Label is the endpoint's display name: its service, else
+// hostname:port, else ip:port.
+func (e Endpoint) Label() string {
+	if e.Service != "" {
+		return e.Service
+	}
+	if e.Hostname != "" {
+		return e.Hostname + ":" + strconv.Itoa(int(e.Port))
+	}
+	if a, err := netip.ParseAddr(e.IP); err == nil {
+		return netip.AddrPortFrom(a, e.Port).String()
+	}
+	return e.IP + ":" + strconv.Itoa(int(e.Port))
+}
+
+// Endpoints lists the observed endpoints — unnamed ones first, the ones
+// a human still has to name (PLAN.md M4), then by hostname, IP and port.
+// Connections whose anchor had no role name no endpoint and are left out.
+func (d *DB) Endpoints(ctx context.Context, f Filter) ([]Endpoint, error) {
+	rules, err := d.Rules(ctx)
+	if err != nil {
+		return nil, err
+	}
+	eps, err := d.endpointRows(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	byKey := map[epKey]*Endpoint{}
+	for i := range eps {
+		eps[i].Service = resolve(rules, eps[i].Hostname, eps[i].IP, eps[i].Port)
+		byKey[keyOf(eps[i])] = &eps[i]
+	}
+	if err := d.endpointLists(ctx, f, byKey); err != nil {
+		return nil, err
+	}
+	if err := d.endpointRequests(ctx, f, byKey); err != nil {
+		return nil, err
+	}
+	slices.SortStableFunc(eps, func(a, b Endpoint) int {
+		return cmp.Compare(btoi(a.Service != ""), btoi(b.Service != ""))
+	})
+	return eps, nil
+}
+
+// epKey identifies an endpoint row.
+type epKey struct {
+	hostname, ip string
+	port         uint16
+}
+
+func keyOf(e Endpoint) epKey { return epKey{e.Hostname, e.IP, e.Port} }
+
+// projectClause selects the rows of Filter.Project; it binds the project
+// twice (as ?1) so callers pass it once.
+const projectClause = `(?1 = '' OR project = ?1 OR client_project = ?1 OR server_project = ?1)`
+
+// endpointRows aggregates the connections per endpoint.
+func (d *DB) endpointRows(ctx context.Context, f Filter) ([]Endpoint, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT hostname, ip, port, COUNT(*),
+		SUM(state = 'unresolved'), MIN(first_seen), MAX(last_seen), MIN(tls), MAX(tls)
+		FROM conn WHERE role <> 'unknown' AND ip <> '' AND `+projectClause+`
+		GROUP BY hostname, ip, port ORDER BY hostname, ip, port`, f.Project)
+	if err != nil {
+		return nil, fmt.Errorf("servicedb: %w", err)
+	}
+	defer func() { _ = rows.Close() }() // read-only: rows.Err reports failures
+	var out []Endpoint
+	for rows.Next() {
+		var e Endpoint
+		var port, first, last int64
+		var lo, hi sql.NullInt64
+		if err := rows.Scan(&e.Hostname, &e.IP, &port, &e.Conns, &e.Unresolved,
+			&first, &last, &lo, &hi); err != nil {
+			return nil, fmt.Errorf("servicedb: %w", err)
+		}
+		e.Port, e.First, e.Last = uint16(port), uint64(first), uint64(last)
+		e.TLS = tlsLabel(lo, hi)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// tlsLabel summarizes the TLS hints of an endpoint's connections; MIN
+// and MAX skip the unknown ones (NULL).
+func tlsLabel(lo, hi sql.NullInt64) string {
+	switch {
+	case !lo.Valid:
+		return ""
+	case lo.Int64 == 1:
+		return "tls"
+	case hi.Int64 == 0:
+		return "plain"
+	}
+	return "mixed"
+}
+
+// endpointLists fills each endpoint's clients and server apps, sorted.
+func (d *DB) endpointLists(ctx context.Context, f Filter, byKey map[epKey]*Endpoint) error {
+	rows, err := d.db.QueryContext(ctx, `SELECT DISTINCT hostname, ip, port,
+		CASE WHEN client_host = '' THEN '`+Untraced+`'
+			ELSE COALESCE(NULLIF(client_app, ''), client_comm, '') END,
+		COALESCE(NULLIF(server_app, ''), '')
+		FROM conn WHERE role <> 'unknown' AND ip <> '' AND `+projectClause+`
+		ORDER BY 1, 2, 3, 4, 5`, f.Project)
+	if err != nil {
+		return fmt.Errorf("servicedb: %w", err)
+	}
+	defer func() { _ = rows.Close() }() // read-only: rows.Err reports failures
+	for rows.Next() {
+		var k epKey
+		var port int64
+		var client, server string
+		if err := rows.Scan(&k.hostname, &k.ip, &port, &client, &server); err != nil {
+			return fmt.Errorf("servicedb: %w", err)
+		}
+		k.port = uint16(port)
+		if e := byKey[k]; e != nil {
+			e.Clients = addSorted(e.Clients, client)
+			e.ServerApps = addSorted(e.ServerApps, server)
+		}
+	}
+	return rows.Err()
+}
+
+// endpointRequests fills each endpoint's requests by method and path.
+func (d *DB) endpointRequests(ctx context.Context, f Filter, byKey map[epKey]*Endpoint) error {
+	rows, err := d.db.QueryContext(ctx, `SELECT c.hostname, c.ip, c.port, r.method, r.path,
+		SUM(r.requests)
+		FROM http_request r JOIN conn c ON c.host = r.host AND c.conn_id = r.conn_id
+		WHERE c.role <> 'unknown' AND c.ip <> '' AND
+			(?1 = '' OR c.project = ?1 OR c.client_project = ?1 OR c.server_project = ?1)
+		GROUP BY 1, 2, 3, 4, 5 ORDER BY 1, 2, 3, 4, 5`, f.Project)
+	if err != nil {
+		return fmt.Errorf("servicedb: %w", err)
+	}
+	defer func() { _ = rows.Close() }() // read-only: rows.Err reports failures
+	for rows.Next() {
+		var k epKey
+		var port int64
+		var r EndpointRequest
+		if err := rows.Scan(&k.hostname, &k.ip, &port, &r.Method, &r.Path, &r.Count); err != nil {
+			return fmt.Errorf("servicedb: %w", err)
+		}
+		k.port = uint16(port)
+		if e := byKey[k]; e != nil {
+			e.Requests = append(e.Requests, r)
+		}
+	}
+	return rows.Err()
+}
+
+// addSorted inserts s into a sorted set, skipping "" and duplicates.
+func addSorted(set []string, s string) []string {
+	i, found := slices.BinarySearch(set, s)
+	if s == "" || found {
+		return set
+	}
+	return slices.Insert(set, i, s)
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
