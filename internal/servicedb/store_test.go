@@ -78,8 +78,8 @@ func TestImportIdempotent(t *testing.T) {
 	if twice := dump(t, d); twice != once {
 		t.Errorf("re-import changed the database:\n%s\nvs\n%s", once, twice)
 	}
-	if n := strings.Count(once, "\n"); n != len(s.Conns)+2 { // two request rows
-		t.Errorf("%d rows, want %d:\n%s", n, len(s.Conns)+2, once)
+	if n := strings.Count(once, "\n"); n != len(s.Conns)+4 { // both views of a1 and lo
+		t.Errorf("%d rows, want %d:\n%s", n, len(s.Conns)+4, once)
 	}
 }
 
@@ -100,7 +100,7 @@ func TestImportAdditive(t *testing.T) {
 	importSnap(t, d, later)
 	var last, reqs int64
 	if err := d.db.QueryRow(`SELECT c.last_seen, r.requests FROM conn c JOIN http_request r
-		USING (host, conn_id) WHERE c.conn_id = 'a1'`).Scan(&last, &reqs); err != nil {
+		USING (host, conn_id) WHERE c.conn_id = 'a1' AND r.source = 'hA'`).Scan(&last, &reqs); err != nil {
 		t.Fatal(err)
 	}
 	if uint64(last) != s.Conns[0].Last+1000 || reqs != 3 {
@@ -148,7 +148,7 @@ func TestImportFusedTakesOverServerRow(t *testing.T) {
 	serverOnly := Observation{Host: "hB", ConnID: "b1", Role: RoleServer,
 		State: schema.StateUnresolved, Reason: "no_match", Project: "inv", Server: fused.Server,
 		Endpoint: fused.Endpoint, TLS: -1, First: wall0 + 1, Last: wall0 + 2,
-		Requests: []Request{{Method: "GET", Scheme: "https", Path: "/items", Count: 2,
+		Requests: []Request{{Source: "hB", Method: "GET", Scheme: "https", Path: "/items", Count: 2,
 			First: wall0 + 1, Last: wall0 + 2}}}
 	importSnap(t, d, Snapshot{Conns: []Observation{serverOnly}})
 	importSnap(t, d, pick(s, "a1"))
@@ -186,7 +186,10 @@ func TestImportRejectsInvalid(t *testing.T) {
 		"window overflow": func(o *Observation) { o.Last = math.MaxUint64 },
 		"bad tls":         func(o *Observation) { o.TLS = 2 },
 		"zero requests": func(o *Observation) {
-			o.Requests = []Request{{Method: "GET", First: o.First, Last: o.Last}}
+			o.Requests = []Request{{Source: "s", Method: "GET", First: o.First, Last: o.Last}}
+		},
+		"request without source": func(o *Observation) {
+			o.Requests = []Request{{Method: "GET", Count: 1, First: o.First, Last: o.Last}}
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

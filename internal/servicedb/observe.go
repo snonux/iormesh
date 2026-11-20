@@ -44,16 +44,17 @@ type Observation struct {
 	// see different addresses; the client's view is what the client
 	// app talks to, so it wins when the client was traced.
 	Endpoint netip.AddrPort
-	// Hostname is the name the client asked for: its DNS lookup that
-	// resolved to the endpoint's address, else its HTTP requests' host
-	// when that is a name; "" when neither said.
+	// Hostname is the name the client asked for: its HTTP requests' host
+	// when that is a name, else — a best guess, as one address may serve
+	// many names — its latest DNS lookup that resolved to the endpoint's
+	// address before the connection; "" when neither said.
 	Hostname string
 	// TLS is 1 for https requests, 0 for plain http, -1 when no request
 	// said (non-HTTP traffic, or no agent).
 	TLS int
 	// First and Last bound the connection's records (wall ns).
 	First, Last uint64
-	Requests    []Request // sorted by (Method, Scheme, Host, Path)
+	Requests    []Request // both ends' views, sorted by (Source, Method, Scheme, Host, Path)
 }
 
 // End is one traced end of a connection.
@@ -65,10 +66,18 @@ type End struct {
 	App, Comm string
 }
 
-// Request counts the HTTP requests of one connection with one method,
-// scheme, host and (redacted) path. Scheme is "https" over TLS, as the
-// library saw it at its API (never read off the wire).
+// Request counts the HTTP requests of one connection that one source
+// recorded with one method, scheme, host and (redacted) path. Scheme is
+// "https" over TLS, as the library saw it at its API (never read off the
+// wire). Host is set only by the client's end, so a request with a host
+// is the client's view and one without the server's; both views are
+// kept, and the reads count one (the larger), never their sum.
 type Request struct {
+	// Source is the federate.Source the events came from (its Name): the
+	// unit counts are exact for. Sources are expected to be immutable
+	// once collected (a published segment, a finished trace directory);
+	// one that grows is fine too, its count only rises.
+	Source                     string
 	Method, Scheme, Host, Path string
 	Count                      uint64
 	First, Last                uint64 // wall ns
@@ -83,6 +92,7 @@ type Request struct {
 func Observe(ctx context.Context, sources []federate.Source, r federate.Result) (Snapshot, error) {
 	t := newTraffic()
 	for _, s := range sources {
+		t.source = s.Name()
 		if err := s.Events(ctx, t.add); err != nil {
 			return Snapshot{}, err
 		}

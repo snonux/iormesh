@@ -166,14 +166,26 @@ func (d *DB) endpointLists(ctx context.Context, f Filter, byKey map[epKey]*Endpo
 	return rows.Err()
 }
 
-// endpointRequests fills each endpoint's requests by method and path.
-func (d *DB) endpointRequests(ctx context.Context, f Filter, byKey map[epKey]*Endpoint) error {
-	rows, err := d.db.QueryContext(ctx, `SELECT c.hostname, c.ip, c.port, r.method, r.path,
-		SUM(r.requests)
-		FROM http_request r JOIN conn c ON c.host = r.host AND c.conn_id = r.conn_id
+// requestCounts counts each endpoint's requests by method and path. Per
+// connection, each view (the client's carries http_host, the server's
+// does not) sums over its sources; the two views count the same
+// requests, so the connection's count is the larger view — the one whose
+// segments a build kept more of — never the two added up. Connections
+// then add up per endpoint.
+const requestCounts = `WITH per_view AS (
+		SELECT host, conn_id, method, path, http_host <> '' AS client, SUM(requests) AS n
+		FROM http_request GROUP BY 1, 2, 3, 4, 5),
+	per_conn AS (
+		SELECT host, conn_id, method, path, MAX(n) AS n FROM per_view GROUP BY 1, 2, 3, 4)
+	SELECT c.hostname, c.ip, c.port, r.method, r.path, SUM(r.n)
+		FROM per_conn r JOIN conn c ON c.host = r.host AND c.conn_id = r.conn_id
 		WHERE c.role <> 'unknown' AND c.ip <> '' AND
 			(?1 = '' OR c.project = ?1 OR c.client_project = ?1 OR c.server_project = ?1)
-		GROUP BY 1, 2, 3, 4, 5 ORDER BY 1, 2, 3, 4, 5`, f.Project)
+		GROUP BY 1, 2, 3, 4, 5 ORDER BY 1, 2, 3, 4, 5`
+
+// endpointRequests fills each endpoint's requests by method and path.
+func (d *DB) endpointRequests(ctx context.Context, f Filter, byKey map[epKey]*Endpoint) error {
+	rows, err := d.db.QueryContext(ctx, requestCounts, f.Project)
 	if err != nil {
 		return fmt.Errorf("servicedb: %w", err)
 	}

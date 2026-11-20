@@ -27,6 +27,10 @@ var ErrUnsafeFile = errors.New("servicedb: unsafe file")
 // it could break the newer tool.
 var ErrNewerSchema = errors.New("servicedb: database schema is newer than this iormeshctl")
 
+// ErrNoDatabase marks a database OpenExisting did not find: no build
+// has created it yet.
+var ErrNoDatabase = errors.New("servicedb: no service database yet")
+
 // DB is an open service-interaction database.
 type DB struct {
 	db *sql.DB
@@ -48,17 +52,40 @@ func DefaultPath() (string, error) {
 // is not a sqlite database, or one migrated by a newer iormeshctl, is an
 // error; so is a file or directory other users could read or write.
 func Open(ctx context.Context, path string) (*DB, error) {
+	return open(ctx, path, true)
+}
+
+// OpenExisting is Open without the creating: a missing database is
+// ErrNoDatabase. Reading commands use it, so listing never leaves an
+// empty database (or its directory) behind as a side effect.
+func OpenExisting(ctx context.Context, path string) (*DB, error) {
+	return open(ctx, path, false)
+}
+
+// Close closes the database.
+func (d *DB) Close() error { return d.db.Close() }
+
+func open(ctx context.Context, path string, create bool) (*DB, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("servicedb: %w", err)
+	}
+	// The driver opens names as URIs (a "file:" prefix) and reads its
+	// options after '?': an absolute path cannot start with "file:" or be
+	// ":memory:", and one with '?' or '#' would open another file than
+	// the one checked here.
 	if strings.ContainsAny(path, "?#") {
-		// The driver reads its options after '?': such a path would open
-		// a different file than the one checked here.
 		return nil, fmt.Errorf("servicedb: path %q: '?' and '#' are not supported", path)
 	}
-	if err := prepareFile(path); err != nil {
+	if err := prepareFile(path, create); err != nil {
 		return nil, err
 	}
 	// One connection: sqlite serializes writers anyway, and the
-	// per-connection pragmas then hold for every statement.
-	sqldb, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
+	// per-connection pragmas then hold for every statement. Transactions
+	// take the write lock up front (immediate), so two iormeshctl runs
+	// migrating or importing at once queue instead of failing mid-way.
+	sqldb, err := sql.Open("sqlite", path+
+		"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("servicedb: open %s: %w", path, err)
 	}
@@ -71,36 +98,39 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	return d, nil
 }
 
-// Close closes the database.
-func (d *DB) Close() error { return d.db.Close() }
-
-// prepareFile makes sure path's directory exists and is private enough,
-// and that path is a regular file of this user's with no group or other
-// bits — creating it empty with mode 0600 when missing, before sqlite
-// would create it under the umask. sqlite gives its journal the
-// database's mode, so the journal is private too.
-func prepareFile(path string) error {
+// prepareFile makes sure path's directory is private enough and that
+// path is a regular file of this user's with no group or other bits.
+// With create, the directory (0700) and the file (empty, 0600) are made
+// when missing, before sqlite would create the file under the umask;
+// sqlite gives its journal the database's mode, so that is private too.
+//
+// The checks run before sqlite opens the path, which leaves a gap: the
+// file could be swapped between the Lstat and the open. Only someone who
+// can write the directory can do that, and such a directory is refused
+// first — so the gap is open to this user alone.
+func prepareFile(path string, create bool) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("servicedb: %w", err)
+	if create {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("servicedb: %w", err)
+		}
 	}
-	info, err := os.Stat(dir)
-	if err != nil {
-		return fmt.Errorf("servicedb: %w", err)
-	}
-	// Whoever can write the directory can rename their own file over the
-	// database; reading it is the file's business.
-	if err := checkOwned(info, dir, 0o022); err != nil {
+	if err := checkDir(dir, path, create); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
-	if err == nil {
-		return f.Close()
+	if create {
+		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+		if err == nil {
+			return f.Close()
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("servicedb: %w", err)
+		}
 	}
-	if !errors.Is(err, fs.ErrExist) {
-		return fmt.Errorf("servicedb: %w", err)
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("%w: %s", ErrNoDatabase, path)
 	}
-	info, err = os.Lstat(path)
 	if err != nil {
 		return fmt.Errorf("servicedb: %w", err)
 	}
@@ -108,6 +138,20 @@ func prepareFile(path string) error {
 		return fmt.Errorf("%w: %s is not a regular file", ErrUnsafeFile, path)
 	}
 	return checkOwned(info, path, 0o077)
+}
+
+// checkDir requires the database's directory to be this user's and
+// writable by nobody else: whoever can write it can rename their own
+// file over the database. Reading it is the file's business.
+func checkDir(dir, path string, create bool) error {
+	info, err := os.Stat(dir)
+	if !create && errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("%w: %s", ErrNoDatabase, path)
+	}
+	if err != nil {
+		return fmt.Errorf("servicedb: %w", err)
+	}
+	return checkOwned(info, dir, 0o022)
 }
 
 // checkOwned requires info (of path) to belong to this user and to have
@@ -124,29 +168,36 @@ func checkOwned(info fs.FileInfo, path string, mask fs.FileMode) error {
 
 // migrate brings the schema to len(migrations), one transaction per
 // step, so a failed step leaves the database at the previous version.
-// Reading user_version is also the check that the file is a sqlite
-// database at all: anything else fails here, before a write.
+// Each step reads user_version inside its (immediate, so write-locked)
+// transaction: a second iormeshctl migrating the same file meanwhile
+// can neither run a step twice nor skip one. Reading user_version is
+// also the check that the file is a sqlite database at all.
 func (d *DB) migrate(ctx context.Context) error {
-	var version int
-	if err := d.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
-		return fmt.Errorf("read schema version: %w", err)
-	}
-	if version > len(migrations) {
-		return fmt.Errorf("%w: version %d, this one knows %d", ErrNewerSchema, version, len(migrations))
-	}
-	for v := version; v < len(migrations); v++ {
-		if err := d.inTx(ctx, func(tx *sql.Tx) error {
+	for {
+		done := false
+		err := d.inTx(ctx, func(tx *sql.Tx) error {
+			var v int
+			if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&v); err != nil {
+				return fmt.Errorf("read schema version: %w", err)
+			}
+			switch {
+			case v > len(migrations):
+				return fmt.Errorf("%w: version %d, this one knows %d", ErrNewerSchema, v, len(migrations))
+			case v == len(migrations):
+				done = true
+				return nil
+			}
 			if _, err := tx.ExecContext(ctx, migrations[v]); err != nil {
-				return err
+				return fmt.Errorf("migrate to version %d: %w", v+1, err)
 			}
 			// PRAGMA takes no bound parameters; v+1 is our own integer.
 			_, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", v+1))
 			return err
-		}); err != nil {
-			return fmt.Errorf("migrate to version %d: %w", v+1, err)
+		})
+		if err != nil || done {
+			return err
 		}
 	}
-	return nil
 }
 
 // inTx runs fn in a transaction, committing when fn succeeds and rolling

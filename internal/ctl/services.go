@@ -3,6 +3,7 @@ package ctl
 import (
 	"cmp"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -54,8 +55,17 @@ func servicesFlags(verb string, e env) (*flag.FlagSet, *string) {
 	return fs, path
 }
 
-// withDB opens the database (flag path, else the default) for fn.
-func withDB(path string, e env, fn func(context.Context, *servicedb.DB) error) error {
+// How a verb opens the database.
+const (
+	dbRead   = iota // reads: a missing database is a note, not an error
+	dbEdit          // edits existing rows: a missing database is an error
+	dbCreate        // adds a rule: creates the database when missing
+)
+
+// withDB opens the database (flag path, else the default) for fn. Only
+// dbCreate may create it: listing must not leave an empty database and
+// its directory behind.
+func withDB(path string, e env, mode int, fn func(context.Context, *servicedb.DB) error) error {
 	if path == "" {
 		var err error
 		if path, err = e.servicedb(); err != nil {
@@ -63,7 +73,15 @@ func withDB(path string, e env, fn func(context.Context, *servicedb.DB) error) e
 		}
 	}
 	ctx := context.Background()
-	d, err := servicedb.Open(ctx, path)
+	open := servicedb.OpenExisting
+	if mode == dbCreate {
+		open = servicedb.Open
+	}
+	d, err := open(ctx, path)
+	if mode == dbRead && errors.Is(err, servicedb.ErrNoDatabase) {
+		_, err = fmt.Fprintf(e.stderr, "iormeshctl: no service database at %s yet (a build creates it)\n", path)
+		return err
+	}
 	if err != nil {
 		return err
 	}
@@ -92,7 +110,7 @@ func servicesList(args []string, e env) error {
 	if err := parse(fs, args, 0, "no arguments"); err != nil {
 		return err
 	}
-	return withDB(*path, e, func(ctx context.Context, d *servicedb.DB) error {
+	return withDB(*path, e, dbRead, func(ctx context.Context, d *servicedb.DB) error {
 		eps, err := d.Endpoints(ctx, servicedb.Filter{Project: *project})
 		if err != nil {
 			return err
@@ -139,7 +157,7 @@ func servicesEdges(args []string, e env) error {
 	if err := parse(fs, args, 0, "no arguments"); err != nil {
 		return err
 	}
-	return withDB(*path, e, func(ctx context.Context, d *servicedb.DB) error {
+	return withDB(*path, e, dbRead, func(ctx context.Context, d *servicedb.DB) error {
 		edges, err := d.Interactions(ctx, servicedb.Filter{Project: *project})
 		if err != nil {
 			return err
@@ -166,13 +184,13 @@ func servicesName(args []string, e env) error {
 		return fmt.Errorf("%w: -port %d: out of range", errUsage, *port)
 	}
 	r := servicedb.Rule{HostGlob: fs.Arg(0), Port: uint16(*port), Service: fs.Arg(1)}
-	return withDB(*path, e, func(ctx context.Context, d *servicedb.DB) error {
+	return withDB(*path, e, dbCreate, func(ctx context.Context, d *servicedb.DB) error {
 		id, err := d.AddRule(ctx, r)
 		if err != nil {
 			return err
 		}
 		_, err = fmt.Fprintf(e.stdout, "rule %d: %s port %s -> %s\n", id,
-			strings.ToLower(r.HostGlob), portText(r.Port), r.Service)
+			safe(strings.ToLower(r.HostGlob)), portText(r.Port), safe(r.Service))
 		return err
 	})
 }
@@ -182,7 +200,7 @@ func servicesRules(args []string, e env) error {
 	if err := parse(fs, args, 0, "no arguments"); err != nil {
 		return err
 	}
-	return withDB(*path, e, func(ctx context.Context, d *servicedb.DB) error {
+	return withDB(*path, e, dbRead, func(ctx context.Context, d *servicedb.DB) error {
 		rules, err := d.Rules(ctx)
 		if err != nil {
 			return err
@@ -205,7 +223,7 @@ func servicesUnname(args []string, e env) error {
 	if err != nil {
 		return fmt.Errorf("%w: rule id %q: %v", errUsage, fs.Arg(0), err)
 	}
-	return withDB(*path, e, func(ctx context.Context, d *servicedb.DB) error {
+	return withDB(*path, e, dbEdit, func(ctx context.Context, d *servicedb.DB) error {
 		if err := d.RemoveRule(ctx, id); err != nil {
 			return err
 		}

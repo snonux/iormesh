@@ -17,6 +17,10 @@ import (
 type traffic struct {
 	conns map[federate.LocalConn]*connAcc
 	dns   map[string][]lookup // by process node id
+	// source names the source whose events are being read: requests are
+	// counted per source, so a sum over sources stays exact whichever of
+	// them a later build still has.
+	source string
 }
 
 // connAcc accumulates one (host, conn_id) across every source.
@@ -28,11 +32,11 @@ type connAcc struct {
 	reqs            map[reqKey]*Request
 }
 
-// reqKey groups a connection's requests. Host is set only on a client's
-// event (docs/schema.md "HTTP events"), which is how the two ends of
-// one request — both on one conn id for a same-host pair — are told
-// apart and never counted twice.
-type reqKey struct{ method, scheme, host, path string }
+// reqKey groups a connection's requests per source. Host is set only on
+// a client's event (docs/schema.md "HTTP events"), which is how the two
+// ends' views of one request — both on one conn id for a same-host pair
+// — stay apart: the reads count one view, never both.
+type reqKey struct{ source, method, scheme, host, path string }
 
 // lookup is one DNS mapping a process recorded.
 type lookup struct {
@@ -72,7 +76,7 @@ func (t *traffic) add(ev *schema.Event) error {
 			a.local = l
 		}
 	case schema.KindHTTP:
-		a.request(ev)
+		a.request(t.source, ev)
 	}
 	return nil
 }
@@ -88,18 +92,18 @@ func (t *traffic) acc(k federate.LocalConn, ev *schema.Event) *connAcc {
 	return a
 }
 
-// request counts one http event.
-func (a *connAcc) request(ev *schema.Event) {
+// request counts one http event of source.
+func (a *connAcc) request(source string, ev *schema.Event) {
 	h := ev.HTTP
 	if h == nil {
 		return
 	}
-	k := reqKey{h.Method, h.Scheme, h.Host, h.Path}
+	k := reqKey{source, h.Method, h.Scheme, h.Host, h.Path}
 	end := ev.WallNS + ev.LatencyNS
 	r := a.reqs[k]
 	if r == nil {
-		r = &Request{Method: h.Method, Scheme: h.Scheme, Host: h.Host, Path: h.Path,
-			First: ev.WallNS, Last: end}
+		r = &Request{Source: source, Method: h.Method, Scheme: h.Scheme, Host: h.Host,
+			Path: h.Path, First: ev.WallNS, Last: end}
 		a.reqs[k] = r
 	}
 	r.Count++

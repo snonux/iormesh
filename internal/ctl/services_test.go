@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,7 +33,7 @@ func servicesEnv(t *testing.T) (env, *bytes.Buffer, *bytes.Buffer) {
 		Server:   servicedb.End{Project: "inv", Host: "hB", ConnID: "b1", Comm: "java"},
 		Endpoint: netip.MustParseAddrPort("10.0.0.2:8443"), Hostname: "inventory.svc",
 		TLS: 1, First: 1, Last: 2,
-		Requests: []servicedb.Request{{Method: "GET", Scheme: "https", Host: "inventory.svc",
+		Requests: []servicedb.Request{{Source: "seg", Method: "GET", Scheme: "https", Host: "inventory.svc",
 			Path: "/items\x1b[2J", Count: 3, First: 1, Last: 2}}}
 	if err := d.Import(ctx, servicedb.Snapshot{Conns: []servicedb.Observation{o}}); err != nil {
 		t.Fatal(err)
@@ -98,5 +99,28 @@ func TestServicesRejects(t *testing.T) {
 	}
 	if lines := strings.Count(stdout.String(), "\n"); lines != 1 {
 		t.Errorf("rules after rejected edits:\n%s", stdout)
+	}
+}
+
+// TestServicesMissingDatabase: reading verbs on a database no build has
+// created yet say so and exit 0 without creating it; unname fails.
+func TestServicesMissingDatabase(t *testing.T) {
+	e, _, stderr, _ := testEnv(t)
+	dir := filepath.Join(t.TempDir(), "iormesh")
+	e.servicedb = func() (string, error) { return filepath.Join(dir, servicedb.FileName), nil }
+	for _, verb := range []string{"list", "edges", "rules"} {
+		stderr.Reset()
+		if code := run([]string{"services", verb}, e); code != exitOK {
+			t.Errorf("%s: exit %d", verb, code)
+		}
+		if !strings.Contains(stderr.String(), "no service database") {
+			t.Errorf("%s: stderr %q lacks the note", verb, stderr)
+		}
+	}
+	if code := run([]string{"services", "unname", "1"}, e); code != exitError {
+		t.Errorf("unname: exit %d, want %d", code, exitError)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("a reading verb created %s: %v", dir, err)
 	}
 }

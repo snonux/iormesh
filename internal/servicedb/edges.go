@@ -19,9 +19,10 @@ type Interaction struct {
 
 // Interactions lists the edges between clients and endpoints, sorted by
 // (From, To). A client app is shown as the service it serves when the
-// rules name every endpoint it accepted fused connections on the same;
-// otherwise as its app id (or process name), so a guess never merges two
-// clients.
+// rules name every endpoint it accepted connections on the same — fused
+// ones and unresolved ones alike, since its own trace saw it accept
+// either way (the listing's server apps); otherwise as its app id (or
+// process name), so a guess never merges two clients.
 func (d *DB) Interactions(ctx context.Context, f Filter) ([]Interaction, error) {
 	eps, err := d.Endpoints(ctx, f)
 	if err != nil {

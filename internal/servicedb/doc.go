@@ -17,13 +17,18 @@
 //   - Idempotent: a row is keyed by its anchor end — the client half's
 //     host and host-local conn id when the client was traced, else the
 //     server half's — which is stable across rebuilds, and every merged
-//     value is a MIN, MAX or keep-if-unknown, so importing the same mesh
+//     value is a MIN, MAX or keep-if-unknown; request counts are kept
+//     per source (the trace unit read), so importing the same mesh
 //     twice changes nothing.
 //   - Additive: a later import never forgets what an earlier one saw. A
 //     build over fewer segments (the operator deleted old ones) leaves
-//     rows and windows as they were, and a fused verdict never reverts
-//     to unresolved. A connection that fuses once its far end is traced
-//     takes over the row its server end had alone.
+//     rows, windows and the deleted segments' request counts as they
+//     were, so a connection's requests spread over several segments
+//     still add up exactly. The client's and the server's view of the
+//     same requests are stored apart and the reads count the larger,
+//     never both. A fused verdict never reverts to unresolved, and a
+//     connection that fuses once its far end is traced takes over the
+//     row (window, TLS hint, requests) its server end had alone.
 //   - Retroactive names: services are resolved at read time by joining
 //     the rules against the endpoints, so a new rule names every past
 //     connection without rewriting a row.

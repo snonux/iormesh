@@ -3652,8 +3652,9 @@ CREATE TABLE conn (                -- one row per observed TCP connection
   server_{host,conn,project,app,comm},
   ip, port, hostname, tls,         -- the endpoint as the client saw it
   first_seen, last_seen);          -- wall ns
-CREATE TABLE http_request (        -- per conn: method, scheme, host, path
-  ..., requests, first_seen, last_seen,
+CREATE TABLE http_request (        -- per conn and source (v2): method,
+  ..., source, requests,           --   scheme, host, path; a count per
+  first_seen, last_seen,           --   source, summed at read time
   FOREIGN KEY (host, conn_id) REFERENCES conn ON DELETE CASCADE);
 CREATE TABLE naming_rule (         -- human input: never touched by build
   id INTEGER PRIMARY KEY, host_glob TEXT, port INTEGER, -- 0: any
@@ -3669,19 +3670,40 @@ result); `DB.Import(ctx, snapshot)` folds that in, in one
 transaction, after validating every observation (a corrupt one
 rejects the whole snapshot).
 
-- **Idempotent without bookkeeping.** Rows are keyed by the
-  anchor end's host-local conn id, which is the same on every
-  rebuild, and every merged column is a MIN, a MAX or
-  keep-if-unknown (`COALESCE(NULLIF(new, ''), old)`); request
-  counts are a MAX, never a sum. So no table of merged segment
-  names is needed: importing the same mesh twice changes no
-  byte, and a build over fewer segments (old ones deleted)
-  forgets nothing.
+- **Idempotent.** Rows are keyed by the anchor end's host-local
+  conn id, which is the same on every rebuild, and every merged
+  column is a MIN, a MAX or keep-if-unknown
+  (`COALESCE(NULLIF(new, ''), old)`): importing the same mesh
+  twice changes no byte.
+- **Exact request counts, per source.** One count per
+  connection could only keep the larger part when a pooled
+  connection's requests span segments and the older ones were
+  deleted. So the count is kept per source (`federate.Source`'s
+  name, the unit a build reads; a parquet source should be one
+  segment) and summed at read time: a deleted segment's count
+  stays, a re-read one rewrites the same number. The client's
+  view (its events carry the host) and the server's view count
+  the same requests and are kept apart; per connection the
+  reads take the larger view's sum, never both. The count is
+  exact while one view's segments were all imported at some
+  point, and a lower bound otherwise.
 - **Fused wins.** A fused verdict never reverts to unresolved; a
   connection first seen from its server end alone (only that
   project built) is taken over by the fused row once both
-  projects are built together, and a later server-only build
-  does not add it back.
+  projects are built together — its window, TLS hint and
+  requests move over — and a later server-only build does not
+  add it back.
+- **Hostname.** The client's HTTP host when that is a name;
+  else the latest DNS lookup by the client's processes that
+  returned the endpoint's address before the connection's first
+  record on the client's own clock — a best guess, since one
+  address can serve many names (a CDN, virtual hosting).
+- **Opening.** The path is made absolute first (the driver
+  would read `file:` as a URI and `:memory:` as no file);
+  transactions are `BEGIN IMMEDIATE` and each migration step
+  re-reads `user_version` inside its transaction, so two runs
+  queue instead of racing. Reading verbs use `OpenExisting`
+  and never create the database.
 - **Names are resolved at read time** in Go (`path.Match`, the
   rule's glob against the endpoint's hostname and its IP,
   case-insensitive): a port-specific rule beats an any-port one,
@@ -3690,7 +3712,7 @@ rejects the whole snapshot).
   port) is refused rather than overwriting a human's decision.
 - **Who talks to whom.** `Interactions` labels an endpoint by its
   service (else `hostname:port`, else `ip:port`) and a client by
-  the service its own fused endpoints are all named, else its
+  the service its own endpoints are all named, else its
   app id or process name — `iormeshctl services edges -from
   orders` answers "what does orders talk to".
 - A half without a role (the merge's `no_role`) is stored but

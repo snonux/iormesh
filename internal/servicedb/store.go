@@ -46,14 +46,29 @@ ON CONFLICT (host, conn_id) DO UPDATE SET
 	first_seen = MIN(conn.first_seen, excluded.first_seen),
 	last_seen = MAX(conn.last_seen, excluded.last_seen)`
 
-// upsertRequest folds one request count in. The count is a MAX, not a
-// sum: a rebuild re-reads every collected segment, so adding would count
-// the same requests again, and a build over fewer segments must not
-// shrink what an earlier one saw.
-const upsertRequest = `INSERT INTO http_request
-	(host, conn_id, method, scheme, http_host, path, requests, first_seen, last_seen)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT (host, conn_id, method, scheme, http_host, path) DO UPDATE SET
+// upsertRequest folds one source's count in. Counts are kept per source
+// (the unit a build reads), so a rebuild over the same sources rewrites
+// the same numbers and a build over fewer sources leaves the others'
+// counts standing: the reads sum over sources, which stays exact for a
+// pooled connection whose requests span several segments, old ones
+// deleted since. The MAX only matters for a source that grew between two
+// builds (a trace directory still being written): its count only rises.
+const upsertRequest = `INSERT INTO http_request (host, conn_id, source, method, scheme,
+	http_host, path, requests, first_seen, last_seen)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (host, conn_id, source, method, scheme, http_host, path) DO UPDATE SET
+	requests = MAX(http_request.requests, excluded.requests),
+	first_seen = MIN(http_request.first_seen, excluded.first_seen),
+	last_seen = MAX(http_request.last_seen, excluded.last_seen)`
+
+// moveRequests re-keys one connection row's requests onto another, by
+// upsertRequest's rule. The SELECT's WHERE is also what sqlite needs to
+// parse an upsert on INSERT … SELECT.
+const moveRequests = `INSERT INTO http_request (host, conn_id, source, method, scheme,
+	http_host, path, requests, first_seen, last_seen)
+SELECT ?, ?, source, method, scheme, http_host, path, requests, first_seen, last_seen
+	FROM http_request WHERE host = ? AND conn_id = ?
+ON CONFLICT (host, conn_id, source, method, scheme, http_host, path) DO UPDATE SET
 	requests = MAX(http_request.requests, excluded.requests),
 	first_seen = MIN(http_request.first_seen, excluded.first_seen),
 	last_seen = MAX(http_request.last_seen, excluded.last_seen)`
@@ -61,10 +76,10 @@ ON CONFLICT (host, conn_id, method, scheme, http_host, path) DO UPDATE SET
 // Import folds a snapshot into the database in one transaction: either
 // all of it lands or none. Naming rules are never touched. A fused
 // connection whose server end had a row of its own (imported while only
-// the server's project was built) takes that row over: the server row is
-// removed and its window folded into the fused one, so one connection
-// never shows as two. An unresolved server half that an earlier import
-// already fused is skipped for the same reason.
+// the server's project was built) takes that row over: its window, TLS
+// hint and requests move to the fused row and the server row goes, so
+// one connection never shows as two. An unresolved server half that an
+// earlier import already fused is skipped for the same reason.
 func (d *DB) Import(ctx context.Context, s Snapshot) error {
 	for i := range s.Conns {
 		if err := validate(&s.Conns[i]); err != nil {
@@ -83,51 +98,75 @@ func (d *DB) Import(ctx context.Context, s Snapshot) error {
 
 // importOne writes one observation and its requests.
 func importOne(ctx context.Context, tx *sql.Tx, o Observation) error {
-	if o.State == schema.StateFused {
-		if err := supersede(ctx, tx, &o); err != nil {
+	if o.State != schema.StateFused && o.Role == RoleServer {
+		if fused, err := fusedElsewhere(ctx, tx, o); err != nil || fused {
 			return err
 		}
-	} else if o.Role == RoleServer {
-		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM conn WHERE state = 'fused'
-			AND server_host = ? AND server_conn = ? AND NOT (host = ? AND conn_id = ?)`,
-			o.Host, o.ConnID, o.Host, o.ConnID).Scan(&n); err != nil {
-			return err
-		}
-		if n > 0 {
-			return nil
-		}
+	}
+	server, err := serverRow(ctx, tx, &o)
+	if err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, upsertConn, connArgs(o)...); err != nil {
 		return err
 	}
+	if server {
+		if err := supersede(ctx, tx, o); err != nil {
+			return err
+		}
+	}
 	for _, r := range o.Requests {
-		if _, err := tx.ExecContext(ctx, upsertRequest, o.Host, o.ConnID, r.Method, r.Scheme,
-			r.Host, r.Path, int64(r.Count), int64(r.First), int64(r.Last)); err != nil {
+		if _, err := tx.ExecContext(ctx, upsertRequest, o.Host, o.ConnID, r.Source, r.Method,
+			r.Scheme, r.Host, r.Path, int64(r.Count), int64(r.First), int64(r.Last)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// supersede removes the row the fused connection's server end had on its
-// own, widening o's window by it first so nothing seen is lost.
-func supersede(ctx context.Context, tx *sql.Tx, o *Observation) error {
+// fusedElsewhere reports whether an earlier import fused the connection
+// whose server half o is: that row already holds it.
+func fusedElsewhere(ctx context.Context, tx *sql.Tx, o Observation) (bool, error) {
+	var n int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM conn WHERE state = 'fused'
+		AND server_host = ? AND server_conn = ? AND NOT (host = ? AND conn_id = ?)`,
+		o.Host, o.ConnID, o.Host, o.ConnID).Scan(&n)
+	return n > 0, err
+}
+
+// serverRow looks for the row a fused o's server end had on its own and
+// folds its window and TLS hint into o, so the takeover loses neither.
+// It reports whether there is such a row to supersede.
+func serverRow(ctx context.Context, tx *sql.Tx, o *Observation) (bool, error) {
 	h, c := o.Server.Host, o.Server.ConnID
-	if h == o.Host && c == o.ConnID { // a same-host pair: one row already
-		return nil
+	if o.State != schema.StateFused || (h == o.Host && c == o.ConnID) { // same-host: one row
+		return false, nil
 	}
 	var first, last int64
-	err := tx.QueryRowContext(ctx, `SELECT first_seen, last_seen FROM conn
-		WHERE host = ? AND conn_id = ?`, h, c).Scan(&first, &last)
+	var tls sql.NullInt64
+	err := tx.QueryRowContext(ctx, `SELECT first_seen, last_seen, tls FROM conn
+		WHERE host = ? AND conn_id = ?`, h, c).Scan(&first, &last, &tls)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	o.First, o.Last = min(o.First, uint64(first)), max(o.Last, uint64(last))
-	_, err = tx.ExecContext(ctx, `DELETE FROM conn WHERE host = ? AND conn_id = ?`, h, c)
+	if o.TLS < 0 && tls.Valid {
+		o.TLS = int(tls.Int64)
+	}
+	return true, nil
+}
+
+// supersede moves the server row's requests onto o's row, then removes
+// the server row (its requests' old keys go with it, ON DELETE CASCADE).
+func supersede(ctx context.Context, tx *sql.Tx, o Observation) error {
+	h, c := o.Server.Host, o.Server.ConnID
+	if _, err := tx.ExecContext(ctx, moveRequests, o.Host, o.ConnID, h, c); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `DELETE FROM conn WHERE host = ? AND conn_id = ?`, h, c)
 	return err
 }
 
@@ -175,6 +214,9 @@ func validate(o *Observation) error {
 		return bad("%v", err)
 	}
 	for _, r := range o.Requests {
+		if r.Source == "" {
+			return bad("request %s %s: no source", r.Method, r.Path)
+		}
 		if r.Count == 0 || r.Count > math.MaxInt64 {
 			return bad("request %s %s: count %d", r.Method, r.Path, r.Count)
 		}

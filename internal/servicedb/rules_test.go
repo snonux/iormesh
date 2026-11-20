@@ -17,6 +17,8 @@ func TestAddRuleRejects(t *testing.T) {
 	}
 	for name, r := range map[string]Rule{
 		"bad glob":        {HostGlob: "orders[", Service: "orders"},
+		"glob control":    {HostGlob: "orders\x1b[2J*", Service: "orders"},
+		"glob space":      {HostGlob: "orders *", Service: "orders"},
 		"empty glob":      {HostGlob: "  ", Service: "orders"},
 		"empty service":   {HostGlob: "x*"},
 		"space":           {HostGlob: "x*", Service: "my orders"},

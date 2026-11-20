@@ -43,18 +43,16 @@ func (d *DB) AddRule(ctx context.Context, r Rule) (int64, error) {
 	if err := validRule(r); err != nil {
 		return 0, err
 	}
-	var n int
-	if err := d.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM naming_rule
-		WHERE host_glob = ? AND port = ?`, r.HostGlob, int64(r.Port)).Scan(&n); err != nil {
-		return 0, fmt.Errorf("servicedb: %w", err)
-	}
-	if n > 0 {
-		return 0, fmt.Errorf("%w: a rule for %s port %d exists already", ErrRule, r.HostGlob, r.Port)
-	}
+	// The UNIQUE (host_glob, port) constraint decides, not a check before
+	// the insert, so two concurrent names cannot both pass: DO NOTHING
+	// turns the conflict into zero rows affected.
 	res, err := d.db.ExecContext(ctx, `INSERT INTO naming_rule (host_glob, port, service)
-		VALUES (?, ?, ?)`, r.HostGlob, int64(r.Port), r.Service)
+		VALUES (?, ?, ?) ON CONFLICT (host_glob, port) DO NOTHING`, r.HostGlob, int64(r.Port), r.Service)
 	if err != nil {
 		return 0, fmt.Errorf("servicedb: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return 0, fmt.Errorf("%w: a rule for %s port %d exists already", ErrRule, r.HostGlob, r.Port)
 	}
 	return res.LastInsertId()
 }
@@ -97,15 +95,17 @@ func validRule(r Rule) error {
 	if r.HostGlob == "" {
 		return fmt.Errorf("%w: empty host glob", ErrRule)
 	}
+	if strings.ContainsFunc(r.HostGlob, notName) {
+		// Hostnames have neither; and the glob is echoed to the terminal.
+		return fmt.Errorf("%w: host glob %q: space or control character", ErrRule, r.HostGlob)
+	}
 	if _, err := path.Match(r.HostGlob, ""); err != nil {
 		return fmt.Errorf("%w: host glob %q: %v", ErrRule, r.HostGlob, err)
 	}
 	if r.Service == "" || len(r.Service) > maxService {
 		return fmt.Errorf("%w: service name must be 1 to %d bytes", ErrRule, maxService)
 	}
-	if i := strings.IndexFunc(r.Service, func(c rune) bool {
-		return !unicode.IsPrint(c) || unicode.IsSpace(c)
-	}); i >= 0 {
+	if strings.ContainsFunc(r.Service, notName) {
 		// A name lands in terminal listings and graph labels: control
 		// characters could rewrite the operator's screen.
 		return fmt.Errorf("%w: service name %q: space or control character", ErrRule, r.Service)
@@ -146,3 +146,7 @@ func globMatch(glob, name string) bool {
 	ok, _ := path.Match(glob, name) // validated on AddRule
 	return ok
 }
+
+// notName reports a rune no host glob or service name may hold: a space
+// or a control (unprintable) character.
+func notName(c rune) bool { return !unicode.IsPrint(c) || unicode.IsSpace(c) }

@@ -1049,17 +1049,27 @@ Kubernetes (M7) build on it.
   row per observed TCP connection — fused, unresolved with the
   merge's reason, or a same-host pair — keyed by its anchor end
   (the client half's host-local conn id when the client was
-  traced, else the server half's), so a rebuild upserts; every
-  merged value is a MIN, MAX or keep-if-unknown, which makes
-  re-import idempotent and a build over fewer segments lose
-  nothing, and a fused verdict never reverts. Per-connection
-  HTTP requests (method, scheme, host, redacted path) give the
-  TLS and path hints; the hostname is the client's DNS lookup
-  of the endpoint's address, else its HTTP host. Rules match
+  traced, else the server half's), so a rebuild upserts. The
+  window, endpoint and verdict merge as MIN, MAX or
+  keep-if-unknown, and a fused verdict never reverts. HTTP
+  request counts (method, scheme, host, redacted path) are
+  kept per source — the trace unit a build reads — and summed
+  at read time, so they stay exact when a pooled connection's
+  requests span segments and old segments were deleted; the
+  client's and the server's view of the same requests are
+  kept apart and the larger counts, never both (exact while
+  one view's segments were all imported at some point, a lower
+  bound otherwise). Re-import is
+  idempotent and a build over fewer segments loses nothing.
+  The requests give the TLS and path hints; the hostname is
+  the client's HTTP host when that is a name, else its DNS
+  lookup of the endpoint's address (a best guess: one address
+  may serve many names). Rules match
   hostname or IP, case-insensitively; port-specific beats
   any-port, then the longer glob, then the older rule; a
   duplicate is refused, never overwritten. The file is 0600 in
-  a 0700 directory, refused when open to others.
+  a 0700 directory, refused when open to others; reading
+  commands never create it.
   `iormeshctl services` lists (unnamed first), shows the edges
   (`edges -from orders`: what orders talks to), and adds,
   lists and removes rules (`name`, `rules`, `unname`). The

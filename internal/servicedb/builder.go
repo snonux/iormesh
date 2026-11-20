@@ -27,7 +27,7 @@ func (b builder) fused(c federate.Conn) Observation {
 	}
 	ca, sa := b.acc(c.Client), b.acc(c.Server)
 	o.fill(c.Client.Established, ca, sa)
-	o.Hostname = b.name(c.Client.Procs, o)
+	o.Hostname = b.name(c.Client.Procs, o, clientFirst(c.Client, ca))
 	return o
 }
 
@@ -50,7 +50,7 @@ func (b builder) unresolved(u federate.Unresolved) Observation {
 	}
 	o.fill(h.Established, a)
 	if o.Role == RoleClient {
-		o.Hostname = b.name(h.Procs, o)
+		o.Hostname = b.name(h.Procs, o, clientFirst(h, a))
 	}
 	return o
 }
@@ -74,7 +74,7 @@ func (b builder) localPairs() []Observation {
 			Server:   b.procEnd(k, a.project, sp),
 			Endpoint: a.peer}
 		o.fill(a.first, a)
-		o.Hostname = b.name(cp, o)
+		o.Hostname = b.name(cp, o, a.first)
 		out = append(out, o)
 	}
 	return out
@@ -103,19 +103,29 @@ func (b builder) procEnd(k federate.LocalConn, project string, procs []string) E
 	return e
 }
 
-// name is the hostname the client asked for: its DNS lookup of the
-// endpoint's address, else the host of its HTTP requests when that is a
-// name rather than an address literal.
-func (b builder) name(procs []string, o Observation) string {
-	if n := b.t.hostname(procs, o.Endpoint.Addr(), o.First); n != "" {
-		return n
+// clientFirst is the client end's own first record (its clock), the
+// cutoff for its DNS lookups: the window's start may come from the
+// server's host, whose wall clock is skewed against the client's.
+func clientFirst(h federate.Half, a *connAcc) uint64 {
+	if a != nil {
+		return a.first
 	}
+	return h.Established
+}
+
+// name is the hostname the client asked for. Its HTTP requests' host,
+// when that is a name rather than an address literal, says it outright;
+// otherwise its DNS lookup of the endpoint's address recorded no later
+// than cutoff (the lookup precedes the connect) is the best guess — one
+// address can serve many names (a CDN, virtual hosting), and the latest
+// lookup that returned it wins.
+func (b builder) name(procs []string, o Observation, cutoff uint64) string {
 	for _, r := range o.Requests {
 		if _, err := netip.ParseAddr(r.Host); r.Host != "" && err != nil {
 			return r.Host
 		}
 	}
-	return ""
+	return b.t.hostname(procs, o.Endpoint.Addr(), cutoff)
 }
 
 // fill sets the window, the requests and the TLS hint from the ends'
@@ -137,35 +147,26 @@ func (o *Observation) fill(established uint64, accs ...*connAcc) {
 	o.TLS = tlsOf(o.Requests)
 }
 
-// requestsOf picks one end's view of the requests: the client's events
-// (they carry the host) when any end has them, else the server's — never
-// both, which would count each request twice.
+// requestsOf collects both ends' views of the requests, per source. The
+// two views count the same requests, so they are stored side by side
+// (the client's carries the host) and the reads take the larger, never
+// the sum; which one a build sees depends on which hosts' segments it
+// still has.
 func requestsOf(accs []*connAcc) []Request {
-	for _, client := range []bool{true, false} {
-		var out []Request
-		for _, a := range accs {
-			if a == nil {
-				continue
-			}
-			for _, r := range a.reqs {
-				if (r.Host != "") == client {
-					out = append(out, *r)
-				}
-			}
-			if len(out) > 0 {
-				return sortRequests(out)
-			}
+	var out []Request
+	for _, a := range accs {
+		if a == nil {
+			continue
+		}
+		for _, r := range a.reqs {
+			out = append(out, *r)
 		}
 	}
-	return nil
-}
-
-func sortRequests(rs []Request) []Request {
-	slices.SortFunc(rs, func(a, b Request) int {
-		return cmp.Or(cmp.Compare(a.Method, b.Method), cmp.Compare(a.Scheme, b.Scheme),
-			cmp.Compare(a.Host, b.Host), cmp.Compare(a.Path, b.Path))
+	slices.SortFunc(out, func(a, b Request) int {
+		return cmp.Or(cmp.Compare(a.Source, b.Source), cmp.Compare(a.Method, b.Method),
+			cmp.Compare(a.Scheme, b.Scheme), cmp.Compare(a.Host, b.Host), cmp.Compare(a.Path, b.Path))
 	})
-	return rs
+	return out
 }
 
 // tlsOf is the TLS hint: 1 when a request went over https, 0 when they

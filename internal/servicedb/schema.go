@@ -54,4 +54,26 @@ var migrations = []string{
 		port      INTEGER NOT NULL DEFAULT 0 CHECK (port BETWEEN 0 AND 65535),
 		service   TEXT    NOT NULL CHECK (service <> ''),
 		UNIQUE (host_glob, port));`,
+	// Version 2 counts requests per source (the trace unit they were read
+	// from): a sum over sources stays exact when a connection's requests
+	// span segments and the older ones were deleted, where one number per
+	// connection could only keep the larger part. Version 1 rows carry no
+	// source; they keep '' and count as one source of their own.
+	`CREATE TABLE http_request_v2 (
+		host       TEXT    NOT NULL,
+		conn_id    TEXT    NOT NULL,
+		source     TEXT    NOT NULL,
+		method     TEXT    NOT NULL,
+		scheme     TEXT    NOT NULL,
+		http_host  TEXT    NOT NULL,
+		path       TEXT    NOT NULL,
+		requests   INTEGER NOT NULL CHECK (requests > 0),
+		first_seen INTEGER NOT NULL,
+		last_seen  INTEGER NOT NULL CHECK (last_seen >= first_seen),
+		PRIMARY KEY (host, conn_id, source, method, scheme, http_host, path),
+		FOREIGN KEY (host, conn_id) REFERENCES conn (host, conn_id) ON DELETE CASCADE);
+	INSERT INTO http_request_v2 SELECT host, conn_id, '', method, scheme, http_host, path,
+		requests, first_seen, last_seen FROM http_request;
+	DROP TABLE http_request;
+	ALTER TABLE http_request_v2 RENAME TO http_request;`,
 }
