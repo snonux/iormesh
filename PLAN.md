@@ -1285,6 +1285,22 @@ Kubernetes (M7) build on it.
   segment store. Naming two of the
   services via `iormeshctl services` shows them by name in
   the graph export — no manual file edits anywhere.
+  Status (2026-11-20, task lb4): **awaiting the owner's
+  two-host run** — no criterion above counts as accepted on
+  real hosts yet. `mage m4Acceptance HOST1 HOST2`
+  (`internal/acceptance`) runs the whole sequence against
+  exactly the two named, bootstrapped hosts and prints PASS,
+  FAIL, SKIP or NOT RUN per criterion; the runbook, its
+  prerequisites and the local results are in
+  [docs/testing.md](docs/testing.md#m4-acceptance-on-two-real-hosts-task-lb4).
+  On real hosts the clock criterion reports the real clocks'
+  bound; the injected skew stays the rig's
+  (`TestClockSkewRecovered`, task ye4). The microservices
+  spread over hosts cannot run yet: the scenario still binds
+  127.0.0.1 and pins certificates naming only it (scenario
+  notes above), so the run covers it on one host, one project
+  per service, and reports the cross-host spread NOT RUN until
+  the address options land.
 
 ### M5 — Views, query and the LLM eval
 

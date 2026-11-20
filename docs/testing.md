@@ -462,6 +462,205 @@ Emulated hosts take no tracer options and no `Credential`
 (`TraceHosts` and `StartWorkloadIn` refuse them): the host
 tracer is the default one.
 
+## M4 acceptance on two real hosts (task lb4)
+
+The rig above proves M4's criteria on network namespaces; the
+acceptance itself (PLAN.md M4, "Acceptance") also needs one run
+on two real hosts, which only the owner can make. **Status: not
+run on real hosts yet** — nothing below counts as accepted until
+the owner's run prints every criterion PASS.
+
+`mage m4Acceptance HOST1 HOST2` (`magefile_m4acceptance.go`,
+`internal/acceptance`) runs the whole sequence and checks each
+criterion itself. It contacts exactly the two hosts named
+(any other name is refused in code), and refuses to start
+without both, with the same host twice, or with two names for
+one machine (same `/etc/machine-id`). iormeshctl runs with
+`HOME` set to a private work directory, so its registry holds
+only the two hosts and the operator's own registry, store and
+service database are never touched. On the servers the tracer
+is driven only by iormeshctl; the runner itself runs the
+workloads, read-only probes and one fill file, never the
+operator's sudo. HOST1 gets the clients, the single-host
+scenarios and the microservices; HOST2 the servers and the
+watchdog project.
+
+### Prerequisites
+
+The controller (Linux or macOS):
+
+- The repo with Go, a JDK (`mage workloadBuild`) and mage; the
+  target builds the workload jar and a cgo-free iormeshctl
+  itself.
+- rsync 3.4.0 or newer first in `PATH` (the preflight refuses
+  older ones and openrsync; [security.md](security.md)).
+- Key-based SSH to both hosts through the agent (`BatchMode`),
+  each host key already in `~/.ssh/known_hosts`
+  (`StrictHostKeyChecking=yes`; compare the fingerprint out of
+  band, never accept it blind).
+- A release key the operator makes once with minisign, outside
+  the tree and never committed (`mage sign` refuses a key
+  inside it):
+
+  ```sh
+  minisign -G -p ~/.config/iormesh/minisign.pub \
+              -s ~/.minisign/iormesh.key
+  ```
+
+- A signed build for each host's arch in `dist/`:
+
+  ```sh
+  mage buildPodman      # or buildDocker; dist/iormesh-linux-*
+  IORMESH_MINISIGN_KEY=~/.minisign/iormesh.key mage sign
+  ```
+
+Each host (two machines, Linux, x86_64 or aarch64):
+
+- Kernel with BTF (`/sys/kernel/btf/vmlinux`) and the classic
+  `raw_syscalls` tracepoints. 6.2 or newer is needed for the
+  clock bound (M4-10: `tcp_seq` reads use `bpf_rdonly_cast`).
+  The Java mark uprobes need 6.10 (or 6.6–6.9 with commit
+  46ba0e49), though this run loads no agent. The suite has only
+  run on Linux 7.2, where the dispatcher findings (PLAN.md,
+  "Syscall handlers run behind `raw_syscalls` dispatchers") were
+  measured; Rocky 9's 5.14, the first target platform, has never
+  run the tracer, so a 7.x kernel is the safe choice.
+- systemd, rsync, Java 21 or newer on the SSH user's `PATH` (the
+  goldens were confirmed on JDK 25), `ss`, GNU `df` and `stat`,
+  `fallocate`, a POSIX login shell.
+- HOST2 reachable from HOST1 on TCP `PortBase+2` (18202) and,
+  with NAT, the DNAT'ed port (firewalld: `firewall-cmd
+  --add-port=18202/tcp --add-port=18880/tcp`).
+- At least 1 GiB free on the partition of `/opt/iormesh` (HOST2
+  fills 128 MiB of it for the watchdog trip).
+- Idle: no `iormesh-*` unit loaded and nothing under
+  `/opt/iormesh/traces` — the run ends with `rm`, which
+  uninstalls `/opt/iormesh`, so it refuses a host whose traces
+  are not its own.
+- Bootstrapped (decision #1: the first install is the
+  operator's own sudo), with `ops` standing for the SSH user:
+
+  ```sh
+  # from the controller
+  scp dist/iormesh-linux-amd64 ~/.config/iormesh/minisign.pub HOST:
+  # on HOST
+  sudo install -d -o root -g root -m 0755 /opt/iormesh \
+       /opt/iormesh/bin /opt/iormesh/etc
+  sudo install -o root -g root -m 0755 iormesh-linux-amd64 \
+       /opt/iormesh/bin/iormesh
+  sudo install -o root -g root -m 0644 minisign.pub \
+       /opt/iormesh/etc/minisign.pub
+  echo 'ops ALL=(root) NOPASSWD: /opt/iormesh/bin/iormesh' |
+       sudo tee /etc/sudoers.d/iormesh
+  sudo chmod 0440 /etc/sudoers.d/iormesh
+  sudo visudo -cf /etc/sudoers.d/iormesh
+  ```
+
+  `/opt` itself must be root-owned and not writable by others
+  (`upgrade` checks the layout; [security.md](security.md)).
+- For the NAT criterion, a DNAT on HOST2 from a port of the
+  operator's choice to the NAT server's `PortBase+3`, the way
+  `docker -p` would do it (removed again with `sudo nft delete
+  table ip iormesh_m4`):
+
+  ```sh
+  sudo nft add table ip iormesh_m4
+  sudo nft 'add chain ip iormesh_m4 pre { type nat hook prerouting priority dstnat; }'
+  sudo nft add rule ip iormesh_m4 pre tcp dport 18880 \
+       redirect to :18203
+  ```
+
+### Running it
+
+```sh
+export IORMESH_M4_NAT_PORT=18880
+LIBBPFGO=../libbpfgo mage m4Acceptance app1.example.org app2.example.org
+```
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `IORMESH_M4_ADDR1`, `_ADDR2` | `getent ahostsv4` on the other host | each host's IPv4 as the other reaches it (set them for an ssh_config alias or a NAT'ed cloud address; the server binds `_ADDR2`) |
+| `IORMESH_M4_NAT_PORT` | unset: M4-7 SKIP | HOST2's DNAT'ed port |
+| `IORMESH_M4_DIST` | `dist` | signed builds |
+| `IORMESH_M4_KEY` | `~/.config/iormesh/minisign.pub` | the pinned release key, copied into the work directory |
+| `IORMESH_M4_WORKDIR` | `~/.iormesh-m4` | iormeshctl's `HOME`; must be empty or absent; kept afterwards (store, builds, service database) |
+| `IORMESH_M4_PORT_BASE` | 18200 | workload ports are base+1 … base+13 |
+| `IORMESH_M4_ROUNDS` | 3 | streaming collect rounds (2–10), each after a 65 s rotation |
+| `IORMESH_M4_FILL_DIR` | the run's dir or `/var/tmp` | watchdog fill file's directory on HOST2; must be on `/opt/iormesh`'s filesystem |
+
+A run takes about ten minutes and prints every command it
+issues, then one result line per criterion and a verdict. Exit
+status 0 only when every criterion passed. The run's own files on
+the servers (`~/.iormesh-m4`: the jar and the scenarios' `--dir`
+trees) are removed at the end; deploy's staging directory
+(`~/.iormesh/staging`) stays, as after any deploy. **Because
+`rm` is a criterion, a finished run leaves the hosts without
+`/opt/iormesh`: bootstrap them again before a rerun**, and move
+the old work directory away. An interrupted run is cleaned up by
+`HOME=~/.iormesh-m4 iormeshctl rm HOST` per host (every session
+also ends by itself after its `-duration 1h`).
+
+Send back the results block and the work directory's path.
+
+### What the run checks
+
+| Id | Criterion (PLAN.md M4) | How | Expected |
+|---|---|---|---|
+| M4-0 | — preflight | ssh `pwd`; arch, kernel, machine ids; `test -f` of the binary and key; `sudo -n -l /opt/iormesh/bin/iormesh`; the tools; no unit or trace; signed build per arch; local rsync; jar pushed | PASS, arch and kernel per host printed |
+| M4-1 | `add` → `deploy`, zero manual steps on the servers | `add -project P -pattern 'java -jar */.iormesh-m4/workload.jar <scenario> --role <role> *' HOST -duration 1h` per role, `deploy HOST1 HOST2`, then `status -json` per project | every project `running` |
+| M4-2 | streaming collect | per round: `file-basic` on HOST1, 65 s, list every `ready/`, `collect`, list again | every listed file gone from the server and in the store; the project dir holds only `ready/`, `state.json`, `.lock` and `.active-*`; ≥ 1 file moved |
+| M4-3 | `collect` alone changes nothing but the local store | hash every file of the work dir outside the store before and after each `collect` | unchanged |
+| M4-4 | `refresh` produces the merged graph export | `refresh` (no host, no project) | exit 0; every project and both hosts in the model; no damaged segment |
+| M4-5 | merged mesh equals the single-host result | `build -project m4single`, `query -project m4single`, tcp-loopback's golden (`internal/normalize`) on the rebuilt graph and events | no violation (the rig checks graph equality on every run) |
+| M4-6 | M0 client and server as two projects fuse | `build` of m4shop+m4billing (`tcp-two-host`, client HOST1, server HOST2); `build` of m4shop alone | one fused cross-host connection, none unresolved; alone, the client's end unresolved |
+| M4-7 | NAT'ed pair fuses on different 4-tuples | `tcp-nat` through the DNAT; `build` m4natc+m4nats; `query -conn` | one fused connection; client dialed the NAT port, server accepted on base+3 |
+| M4-8 | microservices: every REST edge fused, plain and TLS | the four services on HOST1, one project each, read from the refresh's model | orders and billing `tls`, inventory `plain` (2 conns), all fused |
+| M4-9 | microservices one service per host | — | NOT RUN: the scenario is loopback-only (PLAN.md scenario notes) |
+| M4-10 | clock bound | the m4shop+m4billing model's clock windows | non-empty and two-sided, widths printed (real clocks; the injected skew is `TestClockSkewRecovered`'s) |
+| M4-11 | `build` with the network down is byte-identical | the same build rerun under `unshare -rn` (else with a `PATH` lacking ssh and rsync) | `graph.json` and `model.json` byte-equal |
+| M4-12 | naming two services shows them by name | `services name -port 18202 ADDR2 m4-billing-svc`, `services name -port 18213 127.0.0.1 m4-orders-svc`, `build`, `services` | both names in the model's services and edges and in the listing |
+| M4-13 | disk watchdog | `add` m4disk on HOST2 with `-disk-limit 0 -disk-min-free <free − 64 MiB>`, `deploy -project m4disk`, `fallocate` 128 MiB, wait | `ended`/`disk_limit`; collected segment intact; `show` names `disk_limit` |
+| M4-14 | `rm` leaves nothing under `/opt/iormesh` | `rm HOST1`, `rm HOST2`, `test -e /opt/iormesh`, units, registry, `build` of every project | no `/opt/iormesh`, no unit, empty registry; every session's end in the store |
+
+Not run by the target: decision #25's tracer-CPU item (met,
+task ee4, measured locally) and the injected clock skew (the
+rig's, task ye4).
+
+### Local verification (2026-11-20)
+
+This machine has no second host and no sshd, so the target has
+not run against real hosts. What ran here:
+
+- `internal/acceptance`'s unit tests (`mage test`):
+  `TestDryRun` drives every phase against fake hosts and a fake
+  iormeshctl — each criterion the fakes satisfy passes, the
+  single-host golden fails on the fakes' empty trace (the check
+  is not vacuous), M4-9 is NOT RUN and the verdict is "not
+  accepted"; `TestDryRunTouchesOnlyTheTwoHosts` finds every
+  remote command on the two hosts and no tracer lifecycle
+  command outside iormeshctl; `TestPreflightRefusesBusyHost`
+  stops at a host with someone else's traces before iormeshctl
+  runs; the host gate, the config's refusals and the rsync
+  version check have their own tests.
+- `mage m4Acceptance m4-host1.invalid m4-host2.invalid` (real
+  SSH transport, a throwaway key and dist): the preflight fails
+  on the first `ssh … pwd`, every other criterion is NOT RUN,
+  nothing is added or deployed, exit status 1.
+- `mage test`: every package passes (30). `mage build`, `vet`,
+  `lint` (0 issues) and `fmtCheck` pass.
+- `mage integrationTest` as root: all 47 tests pass, no skip,
+  the rig's `TestTwoHostsTwoProjects`, `TestNATPair`,
+  `TestClockSkewRecovered`, `TestClockSkewBeyondWindow`,
+  `TestMicroservices`, `TestParquetSegments` and
+  `TestSystemdUnit` included. A first run under load (≈ 5,
+  other workers' suites beside it) failed `TestJavaLiveAttach`
+  once on an attribution (`ambiguous 12`); the rerun passed,
+  and this task changes nothing that test runs.
+
+The owner's run is what remains: the prerequisites above, then
+`mage m4Acceptance HOST1 HOST2`, all criteria PASS — and M4-9
+needs the microservices address options first.
+
 ## Performance baselines
 
 S3 (PLAN.md, decision #25) measures overhead against a load the

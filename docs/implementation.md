@@ -4272,7 +4272,12 @@ Testing notes: [testing.md](testing.md#m4-two-host-and-nated-pairs-task-kb4).
 
 **Done when**: PLAN.md's M4 acceptance holds, driven by
 `integrationtests/multihost_test.go` on two network namespaces
-plus one run on two real hosts.
+plus one run on two real hosts. That run is `mage m4Acceptance
+HOST1 HOST2` (task lb4): `internal/acceptance` holds the
+sequence, one check per criterion and a preflight refusing an
+unbootstrapped, busy or third host; `fake_test.go` drives it
+against fake hosts and a fake iormeshctl. Runbook and status:
+[testing.md](testing.md#m4-acceptance-on-two-real-hosts-task-lb4).
 
 ## M5 — views, query, eval
 
