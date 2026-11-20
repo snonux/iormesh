@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/netip"
 	"slices"
@@ -13,10 +14,14 @@ import (
 // Untraced labels the client of a connection only its server end saw.
 const Untraced = "(untraced)"
 
-// Filter narrows a query to one project: a connection belongs to it when
-// either end was traced in it. "" is every project.
+// Filter narrows a query to projects: a connection belongs to a project
+// when either end was traced in it. Project and Projects together name
+// the projects; none is every project. Projects is what a build of
+// several projects together reads (PLAN.md M4 "Build": a cross-project
+// connection is one edge, counted once).
 type Filter struct {
-	Project string
+	Project  string
+	Projects []string
 }
 
 // Endpoint is one observed server endpoint (hostname, IP, port) and what
@@ -94,16 +99,33 @@ type epKey struct {
 
 func keyOf(e Endpoint) epKey { return epKey{e.Hostname, e.IP, e.Port} }
 
-// projectClause selects the rows of Filter.Project; it binds the project
-// twice (as ?1) so callers pass it once.
-const projectClause = `(?1 = '' OR project = ?1 OR client_project = ?1 OR server_project = ?1)`
+// projectClause selects the rows of a Filter's projects, bound once as ?1
+// to Filter.arg's JSON array (json_each: one bind for any number of
+// projects).
+const projectClause = `(?1 = '[]' OR project IN (SELECT value FROM json_each(?1))
+	OR client_project IN (SELECT value FROM json_each(?1))
+	OR server_project IN (SELECT value FROM json_each(?1)))`
+
+// arg is the filter's projects as the JSON array projectClause binds,
+// "[]" for every project.
+func (f Filter) arg() string {
+	ps := slices.Clone(f.Projects)
+	if f.Project != "" {
+		ps = append(ps, f.Project)
+	}
+	if ps == nil {
+		ps = []string{}
+	}
+	b, _ := json.Marshal(ps) // a []string always marshals
+	return string(b)
+}
 
 // endpointRows aggregates the connections per endpoint.
 func (d *DB) endpointRows(ctx context.Context, f Filter) ([]Endpoint, error) {
 	rows, err := d.db.QueryContext(ctx, `SELECT hostname, ip, port, COUNT(*),
 		SUM(state = 'unresolved'), MIN(first_seen), MAX(last_seen), MIN(tls), MAX(tls)
 		FROM conn WHERE role <> 'unknown' AND ip <> '' AND `+projectClause+`
-		GROUP BY hostname, ip, port ORDER BY hostname, ip, port`, f.Project)
+		GROUP BY hostname, ip, port ORDER BY hostname, ip, port`, f.arg())
 	if err != nil {
 		return nil, fmt.Errorf("servicedb: %w", err)
 	}
@@ -145,7 +167,7 @@ func (d *DB) endpointLists(ctx context.Context, f Filter, byKey map[epKey]*Endpo
 			ELSE COALESCE(NULLIF(client_app, ''), client_comm, '') END,
 		COALESCE(NULLIF(server_app, ''), '')
 		FROM conn WHERE role <> 'unknown' AND ip <> '' AND `+projectClause+`
-		ORDER BY 1, 2, 3, 4, 5`, f.Project)
+		ORDER BY 1, 2, 3, 4, 5`, f.arg())
 	if err != nil {
 		return fmt.Errorf("servicedb: %w", err)
 	}
@@ -180,12 +202,14 @@ const requestCounts = `WITH per_view AS (
 	SELECT c.hostname, c.ip, c.port, r.method, r.path, SUM(r.n)
 		FROM per_conn r JOIN conn c ON c.host = r.host AND c.conn_id = r.conn_id
 		WHERE c.role <> 'unknown' AND c.ip <> '' AND
-			(?1 = '' OR c.project = ?1 OR c.client_project = ?1 OR c.server_project = ?1)
+			(?1 = '[]' OR c.project IN (SELECT value FROM json_each(?1))
+				OR c.client_project IN (SELECT value FROM json_each(?1))
+				OR c.server_project IN (SELECT value FROM json_each(?1)))
 		GROUP BY 1, 2, 3, 4, 5 ORDER BY 1, 2, 3, 4, 5`
 
 // endpointRequests fills each endpoint's requests by method and path.
 func (d *DB) endpointRequests(ctx context.Context, f Filter, byKey map[epKey]*Endpoint) error {
-	rows, err := d.db.QueryContext(ctx, requestCounts, f.Project)
+	rows, err := d.db.QueryContext(ctx, requestCounts, f.arg())
 	if err != nil {
 		return fmt.Errorf("servicedb: %w", err)
 	}

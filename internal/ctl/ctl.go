@@ -4,6 +4,9 @@
 //	iormeshctl rm [-project NAME] [-registry FILE] [-store DIR] [-force] HOST
 //	iormeshctl collect [-project NAME]... [-registry FILE] [-store DIR] [HOST...]
 //	iormeshctl deploy [-project NAME] [-registry FILE] [-dist DIR] [-key FILE] [-restart] HOST...
+//	iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR]
+//	iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR] [HOST...]
+//	iormeshctl show [summary|services|edges|health] [-project NAME]... [-json] [-unresolved]
 //	iormeshctl services [list|edges|name|rules|unname] [-db FILE] ...
 //	iormeshctl verify [-key FILE] FILE...
 //	iormeshctl version
@@ -17,7 +20,10 @@
 // (internal/release, decision #28); deploy verifies the tracer build,
 // stages it on registered hosts over the Transport, upgrades the installed
 // tracer through the sudoers rule and starts the projects (deploy.go).
-// build and refresh follow in later M4 tasks.
+// build merges the collected segments offline into the merged graph
+// export, the service database and the view model, and refresh is
+// collect then build (build.go); show prints the last build's view
+// model as text (show.go, internal/viewmodel).
 // It is cgo-free (internal/buildgate checks it), so it cross-compiles for
 // the darwin and linux laptops it runs on.
 package ctl
@@ -26,6 +32,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 
 	"iormesh/internal/federate"
 	"iormesh/internal/servicedb"
@@ -56,6 +63,8 @@ type env struct {
 	deployed func() (string, error)
 	// traces is the default local trace store; -store overrides it.
 	traces func() (string, error)
+	// builds is the default build output directory; -builds overrides it.
+	builds func() (string, error)
 	// transport reaches a host: SSH in production, a fake in tests, so
 	// no test contacts a server.
 	transport func(host string) (federate.Transport, error)
@@ -63,12 +72,22 @@ type env struct {
 
 // defaultEnv is the real environment: the registry at
 // federate.DefaultRegistryPath, the database at servicedb.DefaultPath, the
-// release key next to the registry, the deploy record and the trace store
-// next to the database, and SSH to reach hosts.
+// release key next to the registry, the deploy record, the trace store and
+// the build outputs next to the database, and SSH to reach hosts.
 func defaultEnv(stdout, stderr io.Writer) env {
 	return env{stdout: stdout, stderr: stderr, registry: federate.DefaultRegistryPath,
 		servicedb: servicedb.DefaultPath, releaseKey: defaultKeyPath, deployed: defaultDeployedPath,
-		traces: defaultStorePath, transport: sshTransport}
+		traces: defaultStorePath, builds: defaultBuildsPath, transport: sshTransport}
+}
+
+// defaultBuildsPath is ~/.local/share/iormesh/builds, next to the trace
+// store and the service database it is built from.
+func defaultBuildsPath() (string, error) {
+	db, err := servicedb.DefaultPath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(db), buildsDirName), nil
 }
 
 // sshTransport is the production transport: federate.SSH (decision #12).
@@ -96,6 +115,12 @@ func run(args []string, e env) int {
 		err = collectCommand(args[1:], e)
 	case "deploy":
 		err = deployCommand(args[1:], e)
+	case "build":
+		err = buildCommand(args[1:], e)
+	case "refresh":
+		err = refreshCommand(args[1:], e)
+	case "show":
+		err = showCommand(args[1:], e)
 	case "services":
 		err = servicesCommand(args[1:], e)
 	case "verify":
@@ -133,6 +158,9 @@ func usage(w io.Writer) {
   iormeshctl rm [-project NAME] [-registry FILE] [-store DIR] [-force] HOST
   iormeshctl collect [-project NAME]... [-registry FILE] [-store DIR] [HOST...]
   iormeshctl deploy [-project NAME] [-registry FILE] [-dist DIR] [-key FILE] [-restart] HOST...
+  iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR]
+  iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR] [HOST...]
+  iormeshctl show [summary|services|edges|health] [-project NAME]... [-builds DIR] [-json] [-unresolved]
   iormeshctl services [list] [-db FILE] [-project NAME] [-paths]
   iormeshctl services edges [-db FILE] [-project NAME] [-from NAME]
   iormeshctl services name [-db FILE] [-port N] HOST-GLOB SERVICE
@@ -144,10 +172,15 @@ func usage(w io.Writer) {
 The registry defaults to ~/.config/iormesh/servers.yaml, the pinned
 release key to ~/.config/iormesh/minisign.pub, the service database to
 ~/.local/share/iormesh/services.db, the trace store to
-~/.local/share/iormesh/traces (<project>/<host>/), dist/ to ./dist.
+~/.local/share/iormesh/traces (<project>/<host>/), the build outputs to
+~/.local/share/iormesh/builds (<project>[+<project>...]/graph.json and
+model.json), dist/ to ./dist.
 deploy only upgrades a tracer already installed on the host (PLAN.md
 decision #1). collect without HOST collects every registered host; rm
 stops, syncs off and uninstalls before it unregisters, and refuses to
-uninstall over traces it could not sync unless -force.
+uninstall over traces it could not sync unless -force. build (and
+refresh, which is collect then build) merges every project in the store
+without -project, never contacts a server, and exits 1 when it had to
+leave a damaged segment out.
 `)
 }

@@ -20,13 +20,23 @@ var update = flag.Bool("update", false, "rewrite testdata/*.golden from the curr
 
 func mustAddrPort(s string) netip.AddrPort { return netip.MustParseAddrPort(s) }
 
-// meshSources writes the golden scenario's traces under dir: S2's rig as
-// hosts — client hostA dials the VIP 10.0.1.254:8080, the NAT host
+// meshSources writes the golden scenario's traces under dir as NDJSON
+// trace directories (meshTraces).
+func meshSources(t *testing.T, dir string) []Source {
+	t.Helper()
+	var out []Source
+	for name, tr := range meshTraces() {
+		out = append(out, tr.write(t, filepath.Join(dir, name)))
+	}
+	return out
+}
+
+// meshTraces is the golden scenario, by trace directory name: S2's rig
+// as hosts — client hostA dials the VIP 10.0.1.254:8080, the NAT host
 // (untraced: no conntrack needed) DNATs and SNATs it to hostB — plus
 // every reason a half stays unresolved (no_match, no_key, no_role,
 // key_conflict, ambiguous).
-func meshSources(t *testing.T, dir string) []Source {
-	t.Helper()
+func meshTraces() map[string]*trace {
 	const vip, srv = "10.0.1.254:8080", "10.0.2.2:8080"
 	a := newTrace("hostA", "shop")
 	b := newTrace("hostB", "billing") // another project: cross-project edges
@@ -68,8 +78,7 @@ func meshSources(t *testing.T, dir string) []Source {
 	c.client(300, "c-conflict", "10.0.3.3:40400", vip, ISNPair{0x11, 0x22}, wall0)
 	c.event(300, schema.KindTCPState, 7, 0, wall0+5000, "c-conflict", withSeq(
 		tuple("10.0.3.3:40400", vip), "FIN_WAIT1", seqFields{SndUna: 0x99, RcvNxt: 0x23}))
-	return []Source{a.write(t, filepath.Join(dir, "a")), b.write(t, filepath.Join(dir, "b")),
-		c.write(t, filepath.Join(dir, "c")), batch.write(t, filepath.Join(dir, "a-batch"))}
+	return map[string]*trace{"a": a, "b": b, "c": c, "a-batch": batch}
 }
 
 // report renders a Result as text for the golden file: the merged graph,

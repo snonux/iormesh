@@ -1,0 +1,170 @@
+// Package viewmodel is everything a human-facing surface may show of a
+// consolidation run (docs/visualization.md, "One view model, three
+// renderers"). `iormeshctl build` computes it once per run from the
+// merge, the per-session tallies and the service database; the plain
+// text of `build` and `show` (summary.go) renders it, and M5's site and
+// TUI will render the same model, so no two surfaces can disagree.
+//
+// This is step V1 (M4): run, health, services and edges. Conversations
+// and processes (V2, M5) are appended to Model when they land.
+//
+// Rules the model keeps:
+//
+//   - Sorted and deterministic: the same inputs give the same model,
+//     byte for byte as JSON — no maps, no build time, no local paths.
+//   - Bounded: a summary, never raw events; long per-edge lists are cut
+//     and say so (TopPaths, MorePaths).
+//   - Honest: unresolved edges, bad segments, sessions that never
+//     recorded their end and empty clock bounds are fields, so a
+//     renderer has to show them.
+//
+// It is cgo-free: iormeshctl builds it on a laptop (CGO_ENABLED=0).
+package viewmodel
+
+import "time"
+
+// Edge states. An edge between two services aggregates connections, and
+// each connection is fused (both ends traced and joined) or not; Mixed
+// says the edge has some of each, rather than letting one hide the
+// other.
+const (
+	StateFused      = "fused"
+	StateUnresolved = "unresolved"
+	StateMixed      = "mixed"
+)
+
+// MaxTopPaths caps a service's request paths (docs/visualization.md:
+// "top N paths per edge"); the rest is counted in MorePaths.
+const MaxTopPaths = 10
+
+// Model is one consolidation run's view (V1).
+type Model struct {
+	Run      Run       `json:"run"`
+	Health   Health    `json:"health"`
+	Services []Service `json:"services"`
+	Edges    []Edge    `json:"edges"`
+}
+
+// Run is what the build read and what the merge made of it.
+type Run struct {
+	// Projects are the projects built together, sorted.
+	Projects []string `json:"projects"`
+	// Hosts are the store's host directories (registry names), sorted.
+	Hosts    []string `json:"hosts"`
+	Sessions int      `json:"sessions"`
+	// Segments counts the events segments merged; bad ones are in
+	// Health.BadSegments, not here.
+	Segments int    `json:"segments"`
+	Events   uint64 `json:"events"`
+	// First and Last bound the events' wall clocks (UTC); zero without
+	// events.
+	First time.Time `json:"first"`
+	Last  time.Time `json:"last"`
+	// FusedConns and UnresolvedConns count this build's cross-trace TCP
+	// connections: joined by the merge, and halves it could not join.
+	FusedConns      int `json:"fused_conns"`
+	UnresolvedConns int `json:"unresolved_conns"`
+	// GraphNodes and GraphEdges size the merged graph export.
+	GraphNodes int `json:"graph_nodes"`
+	GraphEdges int `json:"graph_edges"`
+}
+
+// Health is what the run could not see, or could not see well.
+type Health struct {
+	// Lost counts records lost to the ring buffer or the decoder (drop
+	// events without a reason).
+	Lost uint64 `json:"lost"`
+	// SkippedRuns counts BPF program runs the kernel skipped: possible
+	// loss, never added to Lost (docs/output-contract.md).
+	SkippedRuns uint64 `json:"skipped_runs"`
+	// Unattributed counts folded calls no single fd explained.
+	Unattributed uint64 `json:"unattributed"`
+	// AttachGap counts records a pattern-matched process produced before
+	// the tracer attached to it.
+	AttachGap uint64 `json:"attach_gap"`
+	// Sessions says how each tracer run ended.
+	Sessions []Session `json:"sessions"`
+	// Clocks summarizes each traced host pair's clock bounds.
+	Clocks []Clock `json:"clocks"`
+	// BadSegments were skipped whole; Ignored are stray store entries.
+	BadSegments []BadSegment `json:"bad_segments"`
+	Ignored     []string     `json:"ignored"`
+}
+
+// Session is one tracer run on one host.
+type Session struct {
+	Project string `json:"project"`
+	Host    string `json:"host"` // the store's host directory
+	FQDN    string `json:"fqdn"`
+	ID      string `json:"id"`
+	// Segments and Events count what was merged of it.
+	Segments int       `json:"segments"`
+	Events   uint64    `json:"events"`
+	First    time.Time `json:"first"`
+	Last     time.Time `json:"last"`
+	// End is the end event's reason; "" when no end was collected (the
+	// run is still going, or was cut short).
+	End string `json:"end"`
+}
+
+// Clock summarizes the clock bounds of one host pair (federate
+// ClockBound, one per window): how far the two hosts' timestamps can be
+// compared.
+type Clock struct {
+	// HostA and HostB are FQDNs (the host ids when no session named
+	// them), HostA's id sorting first as in federate.
+	HostA string `json:"host_a"`
+	HostB string `json:"host_b"`
+	// Windows have a bound; of them Empty contradict themselves and
+	// OneSided have only one side.
+	Windows  int `json:"windows"`
+	Empty    int `json:"empty"`
+	OneSided int `json:"one_sided"`
+	// MinWidth and MaxWidth range over the two-sided, non-empty windows'
+	// widths (the drift allowance included); zero when there is none.
+	MinWidth time.Duration `json:"min_width_ns"`
+	MaxWidth time.Duration `json:"max_width_ns"`
+}
+
+// BadSegment is a segment the build skipped, and why.
+type BadSegment struct {
+	Name  string `json:"name"`
+	Error string `json:"error"`
+}
+
+// Service is a server endpoint label (a service name from the naming
+// rules, else hostname:port, else ip:port) or a client known only as an
+// app or process name.
+type Service struct {
+	Name string `json:"name"`
+	// Named is true when a naming rule gave the name.
+	Named bool `json:"named"`
+	// Endpoints are the endpoints behind the name (hostname or IP, and
+	// port), sorted; none for a client-only service.
+	Endpoints  []string `json:"endpoints"`
+	Conns      int64    `json:"conns"`
+	Unresolved int64    `json:"unresolved"`
+	// TLS is "tls", "plain", "mixed" or "" (unknown).
+	TLS       string     `json:"tls"`
+	Requests  int64      `json:"requests"`
+	TopPaths  []PathStat `json:"top_paths"`
+	MorePaths int        `json:"more_paths"`
+}
+
+// PathStat counts one HTTP method and (redacted) path.
+type PathStat struct {
+	Method string `json:"method"`
+	Path   string `json:"path"`
+	Count  int64  `json:"count"`
+}
+
+// Edge is who talks to whom: a client service to a server service.
+type Edge struct {
+	From       string    `json:"from"`
+	To         string    `json:"to"`
+	State      string    `json:"state"`
+	Conns      int64     `json:"conns"`
+	Unresolved int64     `json:"unresolved"`
+	First      time.Time `json:"first"`
+	Last       time.Time `json:"last"`
+}

@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "nodes": [
+    {
+      "type": "file",
+      "id": "file:hostA:/etc/shop.conf"
+    },
+    {
+      "type": "host",
+      "id": "host:hostA"
+    },
+    {
+      "type": "host",
+      "id": "host:hostB"
+    },
+    {
+      "type": "process",
+      "id": "proc:hostA/100@1",
+      "attrs": {
+        "comm": "java"
+      }
+    },
+    {
+      "type": "process",
+      "id": "proc:hostB/200@1",
+      "attrs": {
+        "comm": "java"
+      }
+    },
+    {
+      "type": "socket",
+      "id": "conn:34a93de6a0731466"
+    },
+    {
+      "type": "socket",
+      "id": "conn:c2"
+    }
+  ],
+  "edges": [
+    {
+      "type": "connected",
+      "from": "proc:hostA/100@1",
+      "to": "conn:34a93de6a0731466",
+      "state": "fused"
+    },
+    {
+      "type": "connected",
+      "from": "proc:hostA/100@1",
+      "to": "conn:c2",
+      "state": "unresolved"
+    },
+    {
+      "type": "connected",
+      "from": "proc:hostB/200@1",
+      "to": "conn:34a93de6a0731466",
+      "state": "fused"
+    },
+    {
+      "type": "opened",
+      "from": "proc:hostA/100@1",
+      "to": "file:hostA:/etc/shop.conf"
+    },
+    {
+      "type": "runs_on",
+      "from": "proc:hostA/100@1",
+      "to": "host:hostA"
+    },
+    {
+      "type": "runs_on",
+      "from": "proc:hostB/200@1",
+      "to": "host:hostB"
+    }
+  ]
+}

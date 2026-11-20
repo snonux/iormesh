@@ -1,0 +1,99 @@
+package federate
+
+import (
+	"slices"
+	"strings"
+	"testing"
+
+	"iormesh/internal/schema"
+)
+
+// rebuildEvent is a minimal event of pid on host h.
+func rebuildEvent(pid uint32, kind string, fd int32, ret int64) schema.Event {
+	return schema.Event{SchemaVersion: schema.Version, Project: "shop", HostID: "h", PID: pid,
+		PIDInc: 1, TID: pid, Comm: "app", Event: kind, FD: fd, Ret: ret, Attribution: schema.AttributionNone}
+}
+
+func withPath(ev schema.Event, path string) schema.Event {
+	ev.Args.Path = ptr(path)
+	return ev
+}
+
+func withConn(ev schema.Event, conn string) schema.Event {
+	ev.ConnID = conn
+	return ev
+}
+
+// edgeList renders a graph's edges as "type from to state" lines.
+func edgeList(g schema.Graph) []string {
+	var out []string
+	for _, e := range g.Edges {
+		out = append(out, e.Type+" "+e.From+" "+e.To+" "+e.State)
+	}
+	return out
+}
+
+// TestRebuildRules pins the correlator rules the rebuild applies (one
+// case per rule; rebuild.go lists what is out of reach).
+func TestRebuildRules(t *testing.T) {
+	p1, p2 := schema.ProcessNodeID("h", 1, 1), schema.ProcessNodeID("h", 2, 1)
+	ren := rebuildEvent(1, schema.KindRename, schema.NoFD, 0)
+	ren.Args.Path, ren.Args.NewPath = ptr("/d/a.tmp"), ptr("/d/a")
+	sig := rebuildEvent(2, schema.KindSignal, schema.NoFD, 0)
+	sig.Args.SenderPID = ptr(uint32(1))
+	for _, tc := range []struct {
+		name string
+		evs  []schema.Event
+		want []string // the edges besides runs_on
+	}{
+		{"open and failed open", []schema.Event{withPath(rebuildEvent(1, schema.KindOpenat, 3, 3), "/etc/x"),
+			withPath(rebuildEvent(1, schema.KindOpenat, -1, -2), "/etc/missing")},
+			[]string{"opened " + p1 + " file:h:/etc/x "}},
+		{"rename moves an open fd", []schema.Event{withPath(rebuildEvent(1, schema.KindCreat, 4, 4), "/d/a.tmp"), ren},
+			[]string{"opened " + p1 + " file:h:/d/a ", "opened " + p1 + " file:h:/d/a.tmp "}},
+		{"a closed fd does not move", []schema.Event{withPath(rebuildEvent(1, schema.KindCreat, 4, 4), "/d/a.tmp"),
+			rebuildEvent(1, schema.KindClose, 4, 0), ren},
+			[]string{"opened " + p1 + " file:h:/d/a.tmp "}},
+		{"pipe is fused", []schema.Event{withConn(rebuildEvent(1, schema.KindPipe, 5, 0), "p"),
+			withConn(rebuildEvent(2, schema.KindRead, 5, 1), "p")},
+			[]string{"connected " + p1 + " conn:p fused", "connected " + p2 + " conn:p fused"}},
+		{"loopback pair is fused", []schema.Event{withConn(rebuildEvent(1, schema.KindConnect, 5, 0), "lo"),
+			withConn(rebuildEvent(2, schema.KindAccept4, 6, 6), "lo")},
+			[]string{"connected " + p1 + " conn:lo fused", "connected " + p2 + " conn:lo fused"}},
+		{"one end is unresolved", []schema.Event{withConn(rebuildEvent(1, schema.KindConnect, 5, 0), "x")},
+			[]string{"connected " + p1 + " conn:x unresolved"}},
+		{"signal from a traced sender", []schema.Event{rebuildEvent(1, schema.KindRead, 0, 0), sig},
+			[]string{"signaled " + p1 + " " + p2 + " "}},
+		{"signal from an untraced sender", []schema.Event{sig}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newGraphRebuilder()
+			for i := range tc.evs {
+				g.add(&tc.evs[i])
+			}
+			got := slices.DeleteFunc(edgeList(g.graph()), func(s string) bool {
+				return strings.HasPrefix(s, schema.EdgeRunsOn+" ")
+			})
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("edges = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRebuildCommIsNewest: an exec renames the process node, as the
+// correlator's does; an event without comm leaves it.
+func TestRebuildCommIsNewest(t *testing.T) {
+	g := newGraphRebuilder()
+	evs := []schema.Event{rebuildEvent(1, schema.KindRead, 0, 0), rebuildEvent(1, schema.KindExec, -1, 0),
+		rebuildEvent(1, schema.KindRead, 0, 0)}
+	evs[1].Comm, evs[2].Comm = "java", ""
+	for i := range evs {
+		g.add(&evs[i])
+	}
+	for _, n := range g.graph().Nodes {
+		if n.Type == schema.NodeProcess && n.Attrs["comm"] != "java" {
+			t.Fatalf("process node %+v, want comm java", n)
+		}
+	}
+}

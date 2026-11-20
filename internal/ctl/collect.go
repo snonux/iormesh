@@ -15,6 +15,7 @@ import (
 
 	"iormesh/internal/federate"
 	"iormesh/internal/project"
+	"iormesh/internal/segment"
 	"iormesh/internal/servicedb"
 )
 
@@ -44,10 +45,10 @@ import (
 // (`build` does, offline; docs/implementation.md M4).
 
 const (
-	// readyDir is segment.ReadyDir, the sync contract. ctl does not
-	// import internal/segment: it would pull the parquet writer into the
-	// controller for one constant.
-	readyDir = "ready"
+	// readyDir is the sync contract. The controller reads segments
+	// through internal/segment since the build (task ib4), so the
+	// constant is that package's, not a copy that could drift.
+	readyDir = segment.ReadyDir
 	// tracesDirName is the store under ~/.local/share/iormesh.
 	tracesDirName = "traces"
 )

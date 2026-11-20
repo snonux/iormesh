@@ -253,6 +253,31 @@ V1 goes first on purpose: from the first working `build`, a run
 ends with readable output, and the model's shape is settled
 before two UIs are built on it.
 
+V1 as built (task ib4; details in
+[implementation.md](implementation.md), M4 "Build, refresh and
+show"): `Model` holds `Run`, `Health`, `Services` and `Edges`;
+`Conversations` and `Processes` are appended in V2. The summary
+reads, for the M4 test mesh:
+
+```
+built      billing+shop: 2 hosts, 2 sessions, 8 segments, 22 events, …
+merged     3 services, 2 edges (1 fused, 0 mixed, 1 unresolved); tcp 1 fused, 1 unresolved
+health     0 lost, 0 skipped runs, 0 unattributed, 0 attach gap; clock bounds <= 740µs
+clock      hostA.example.org ~ hostB.example.org: 1 windows, width 740µs-740µs
+session    shop/app1 a1b2c3d4: no end recorded (running, or cut short)
+unresolved java -> 203.0.113.9:5432 (1 of 1 connections)
+```
+
+Differences from the sketch above, until M5's renderers land:
+the text is plain (no colors, `->` for arrows); an edge between
+two services aggregates connections, so its state is `fused`,
+`unresolved` or `mixed`; request counts and top paths sit on the
+service (the database counts them per endpoint, not per client),
+and bytes and latency percentiles are not in the model yet.
+`show` has `summary`, `services`, `edges [-unresolved]` and
+`health`, each with `-json`, read from the build's
+`model.json`; the site path line comes with V3.
+
 Tests: golden files on the serialized model and on every `show`
 view; the site's `data/*.js` are goldens too, and one headless
 browser test loads `index.html` from `file://` and checks that

@@ -21,9 +21,9 @@ const (
 const maxLine = 1 << 20
 
 // Source is one host session's collected trace, whatever its format. The
-// merge reads every source through this interface only, so the NDJSON
-// trace directory of today and the parquet segments of the M4 segment
-// writer (task 8b4) are interchangeable inputs.
+// merge reads every source through this interface only, so an NDJSON
+// trace directory (NDJSONDir) and a collected parquet segment of the M4
+// segment writer (Segment, segments.go) are interchangeable inputs.
 type Source interface {
 	// Name identifies the source in errors and orders the sources, so a
 	// merge reads them in the same order every time.

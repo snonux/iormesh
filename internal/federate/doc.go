@@ -10,6 +10,11 @@
 // never rewrites; an end without exactly one partner stays unresolved,
 // never fused by a guess.
 //
+// Its inputs are Sources: NDJSON trace directories, or the collected
+// parquet segments of the controller's store (segments.go), whose
+// sessions' graphs are rebuilt from their events (rebuild.go; the
+// server keeps none, decision #3).
+//
 // The fused connections then bound each host pair's clock offset
 // (clock.go, bound.go: a send always precedes its receive, PLAN.md M4
 // "Clock reconciliation"), and order.go orders instants across hosts by

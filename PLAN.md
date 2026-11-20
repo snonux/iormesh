@@ -1027,7 +1027,7 @@ Kubernetes (M7) build on it.
   the site and the TUI follow in M5.
   The merge is built (task fb4, `internal/federate`): it reads
   each host session through a format-neutral source (NDJSON
-  trace directories now, parquet segments next), fuses only a
+  trace directories, and parquet segments since task ib4), fuses only a
   mutual single ISN-pair match inside a wall-clock window
   (default 2 minutes — boot clocks of two hosts share no epoch),
   and keeps every other TCP end unresolved with its reason
@@ -1038,6 +1038,33 @@ Kubernetes (M7) build on it.
   and record — negligible), so real traces now fuse: the
   integration test rebuilds one key from both ends of a real
   connection.
+  `build` and `refresh` are built (task ib4, `internal/ctl/
+  build.go`, `internal/federate/segments.go`): `iormeshctl
+  build [-project P]...` (default: every project in the store)
+  reads each events segment as its own merge source —
+  `internal/segment`'s reader, strict like the NDJSON one — so
+  the service database's per-source counts stay exact; the
+  server keeps no graph (#3), so each session's graph is
+  rebuilt from its events by the correlator's rules. Not
+  rebuilt, as no event records them: app nodes and incarnation
+  edges (the pattern is not in the trace), forked edges (no
+  clone event) and a child's inherited fds. The build merges,
+  calls `Observe` and `Import`, builds the view model (V1:
+  run, health, services, edges — docs/visualization.md) and
+  writes `~/.local/share/iormesh/builds/<project>[+<project>
+  …]/graph.json` (the merged graph export) and `model.json`,
+  then prints the summary; `iormeshctl show` prints it again,
+  or the services, edges or health view, from `model.json`
+  alone. A rerun over the same segments writes the same bytes.
+  A segment that cannot be read, whose footer disagrees with
+  its name or directory, or whose events do not validate is
+  skipped whole (its session's graph rebuilt without it),
+  named in the summary and the model, and the command exits 1
+  after writing the outputs: one damaged file does not hide
+  the rest of the mesh, and the loss is never silent.
+  `refresh` is collect then build; a host whose collect fails
+  is reported (exit 1) and what the store holds is built
+  anyway.
 - **Clock reconciliation from the traffic itself**: every
   fused connection gives send-before-receive constraints in
   both directions (send = send-syscall enter, receive =
@@ -1073,9 +1100,10 @@ Kubernetes (M7) build on it.
   they contradict. The offset drifts within a window, so each
   bound is widened by an assumed drift rate (default 1 ppm,
   NTP-disciplined hosts: 60 µs per side per minute); a clock
-  stepped or slewed harder breaks the assumption. "Records"
-  means in memory for now: the `build` summary and the M5 views
-  will print the bounds and widths. The bound never feeds back
+  stepped or slewed harder breaks the assumption. The `build`
+  summary and the view model print them per host pair
+  (windows, widths, one-sided and empty ones; task ib4); M5's
+  views will show them too. The bound never feeds back
   into fusion — it is proven by the fused connections, so it
   cannot choose them; the fusion window stays a wrap guard,
   and hosts skewed beyond it get neither edge nor bound.
@@ -1136,7 +1164,10 @@ Kubernetes (M7) build on it.
   `iormeshctl services` lists (unnamed first), shows the edges
   (`edges -from orders`: what orders talks to), and adds,
   lists and removes rules (`name`, `rules`, `unname`). The
-  build calls `Observe` and `Import` (wiring: task ib4).
+  build calls `Observe` and `Import` (task ib4: one source per
+  collected segment) and reads the projects it built back
+  through `Filter.Projects`, so a cross-project connection is
+  one edge, counted once.
 - **Cleanup (`rm`)**: removes the host from the registry and
   tears down the deployment on it — `sudo iormesh uninstall`
   stops every session and removes `/opt/iormesh` (binary and

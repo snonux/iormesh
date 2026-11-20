@@ -1,0 +1,9 @@
+built      billing+shop: 2 hosts, 2 sessions, 8 segments, 22 events, 2025-11-20 00:53:20 - 2025-11-20 00:53:20 UTC
+merged     3 services, 2 edges (1 fused, 0 mixed, 1 unresolved); tcp 1 fused, 1 unresolved
+health     0 lost, 0 skipped runs, 0 unattributed, 0 attach gap; clock bounds <= 740µs
+clock      hostA.example.org ~ hostB.example.org: 1 windows, width 740µs-740µs
+session    shop/app1 a1b2c3d4: no end recorded (running, or cut short)
+unresolved java -> 203.0.113.9:5432 (1 of 1 connections)
+
+graph      $BUILDS/billing+shop/graph.json
+model      $BUILDS/billing+shop/model.json

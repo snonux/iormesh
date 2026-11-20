@@ -42,8 +42,9 @@ type Result struct {
 	// reconciliation"), sorted by (HostA, HostB, Start). A pair without a
 	// fused connection has none: no traffic, no estimate. An empty bound
 	// is kept and reported (ClockBound.Empty). NewTimeline orders
-	// cross-host instants by them. In memory only for now: the build
-	// summary and the M5 views are where they will surface.
+	// cross-host instants by them. The build's view model summarizes them
+	// per host pair (internal/viewmodel Clock), and its summary prints
+	// them.
 	Clocks []ClockBound
 }
 

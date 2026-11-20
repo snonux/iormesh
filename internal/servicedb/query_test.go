@@ -41,6 +41,19 @@ func TestEndpoints(t *testing.T) {
 	if len(inv) != 2 || inv[0].Port != 8443 || inv[1].Hostname != "inventory.svc" {
 		t.Errorf("project inv: %+v, want its two 8443 endpoints", inv)
 	}
+	// Several projects (a build of them together): every connection
+	// either traced, each once.
+	both, err := d.Endpoints(ctx, Filter{Projects: []string{"inv", "shop"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(both, want) {
+		t.Errorf("projects inv+shop:\n got %+v\nwant %+v", both, want)
+	}
+	none, err := d.Endpoints(ctx, Filter{Projects: []string{"nosuch"}})
+	if err != nil || len(none) != 0 {
+		t.Errorf("project nosuch: %+v, %v", none, err)
+	}
 }
 
 // TestInteractions: who talks to whom, by service name once the rules

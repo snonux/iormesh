@@ -3691,7 +3691,8 @@ type Half struct {
 }
 
 // Source is one host session's trace, whatever its format: the
-// NDJSON trace directory (NDJSONDir) today, parquet segments next.
+// NDJSON trace directory (NDJSONDir) or one collected parquet segment
+// (Segment, task ib4).
 type Source interface {
     Name() string
     Graph(ctx context.Context) (schema.Graph, error)
@@ -3806,9 +3807,11 @@ connection into messages, `bound.go` intersects them,
   empty interval stays as it is (`Empty()`), witnesses named,
   never clamped. A pair without a fused connection has no
   bound; neither does a host with itself.
-- **Where it surfaces.** `Result.Clocks` is in memory only:
-  the `build` summary (M4) and the M5 views will print the
-  bounds and widths; neither exists yet.
+- **Where it surfaces.** The build's view model keeps one
+  `Clock` per host pair (task ib4: windows, the narrowest and
+  widest two-sided width, one-sided and empty windows counted),
+  and the `build` summary prints it; the M5 views will show
+  the same.
 - **Fusion stays clock-free.** The bound is computed after
   `Fuse`, from the fused connections only, and never picks
   partners: it is proven by those connections, so using it to
@@ -4015,6 +4018,108 @@ rejects the whole snapshot).
   names no endpoint: its far end may be a client's ephemeral
   port.
 
+### Build, refresh and show
+
+Built by task ib4 (all cgo-free):
+
+```
+internal/segment/reader.go      # ParseName, ReadMeta, ReadEvents, ReadTable
+internal/federate/segments.go   # Segment (a Source), LoadSegments
+internal/federate/rebuild.go    # a session's graph from its events (#3)
+internal/viewmodel/             # Model V1, Tally, New, the text views
+internal/ctl/build.go           # iormeshctl build
+internal/ctl/show.go            # iormeshctl refresh, iormeshctl show
+```
+
+```sh
+iormeshctl build [-project P]... [-store DIR] [-db FILE] [-builds DIR]
+iormeshctl refresh [-project P]... [-registry FILE] [...] [HOST...]
+iormeshctl show [summary|services|edges|health] [-project P]... [-json]
+```
+
+- **Reading a segment.** `segment.ReadEvents` decodes the events
+  file with parquet-go's reader, 512 rows at a time into one
+  reused batch, so a reader holds a few hundred KiB whatever the
+  segment's size. Each row is checked like an NDJSON line
+  (`Event.Validate`; empty lists the decoder returns become
+  absent ones first, the contract's equality), the footer must
+  say `events` and this schema version, and a decoder panic on a
+  damaged page becomes an error naming the file — a segment came
+  over the network and must not crash the build. Table files
+  read through `ReadTable`; the build counts them but does not
+  read them yet (M5's conversations need the Java tables).
+- **One source per segment.** `LoadSegments` lists
+  `<store>/<project>/<host>/*.parquet` (every project directory
+  without `-project`; dot files skipped, other entries reported
+  as ignored). Each events segment is a `federate.Segment`, named
+  `<project>/<host>/<file>` — stable wherever the store lives —
+  because the service database counts requests per source and
+  only a segment is immutable and may later be deleted (task
+  hb4). The footer must match the name and the directory
+  (project, FQDN, session, seq), every event the project, and a
+  session's events one host id.
+- **The graph is rebuilt** (decision #3, the server keeps none)
+  in a first pass per session, segments in seq order, by the
+  correlator's rules (`rebuild.go`): host, process (newest
+  comm), runs_on; opened for successful opens and creat, and the
+  new name of a rename that moved a file the process held open
+  (opens, closes, unlinks and renames followed through the
+  events); socket and connected for every conn_id, fused for a
+  pipe or socketpair or a conn_id with both a connect and an
+  accept on the host; signaled for a delivered signal from a
+  traced sender. Not rebuilt — no event says it: app nodes and
+  incarnation edges, forked edges, a child's inherited fds.
+  Every segment of a session returns the session's graph; the
+  merge's union keeps one copy. `TestSegmentMergeGolden` writes
+  `testdata/mesh.golden`'s traces as rotated segments and merges
+  them to the same bytes as the NDJSON merge.
+- **Bad segments.** A segment that fails in the first pass is
+  dropped and its session read again without it (the graph's
+  fd state runs across segments, so half a segment cannot be
+  taken back otherwise). The build goes on with the rest, names
+  each in the summary and in `model.json`, and exits 1 after
+  writing the outputs; the file stays in the store.
+- **Passes.** Load (check + graph), merge (the run's tally rides
+  along: `talliedSegment`), `servicedb.Observe` — three reads of
+  every segment, none holding events. What grows with the input
+  is the merge's per-connection state (keys, the data records'
+  stream offsets for the clock bounds), the graph, the service
+  database rows and one tally per session.
+- **Outputs.** `<builds>/<project>[+<project>…]/graph.json`
+  (`schema.WriteGraphFile`) and `model.json` (indented JSON),
+  both written atomically into a 0700 directory; many projects
+  together get `projects-<hash>`. Build never contacts a server,
+  and the merge is sorted, the import idempotent, the model free
+  of clocks and paths — so a rerun writes the same bytes.
+- **The model** (`internal/viewmodel`, V1 of
+  docs/visualization.md): `Run` (projects, hosts, sessions,
+  segments, events, time range, fused and unresolved TCP
+  halves, graph size), `Health` (lost, skipped runs,
+  unattributed, attach gap, each session's end, a `Clock` per
+  host pair, bad segments, ignored entries), `Services` and
+  `Edges` from the service database after the import (filtered
+  by `Filter.Projects`, so the whole history of the projects,
+  not only the segments still in the store; an edge is `fused`,
+  `unresolved` or `mixed`). `show` reads `model.json` alone.
+- **`refresh`** collects (the registry's hosts, or HOST...) and
+  then builds every host directory of the projects; a host
+  whose collect failed is reported, the store still built, and
+  the command exits 1.
+- Tests: `internal/segment/reader_test.go` (round trip through
+  the writer at batch and row-group edges, tables, names,
+  damaged files: empty, garbage, truncated, footer cut, pages
+  zeroed); `internal/federate/segments_test.go` and
+  `rebuild_test.go` (the golden mesh from segments, the rebuild
+  against each trace's correlator graph and per rule, bad
+  segments, a session of two host ids);
+  `internal/viewmodel/new_test.go`; `internal/ctl/build_test.go`
+  — a two-host, two-project mesh written as rotated segments:
+  summary, graph and model goldens (`testdata/build_*.golden`),
+  byte-identical rebuilds, a naming rule shown by name, request
+  counts exact over repeated builds and after deleting segments,
+  a damaged segment, refusals, every `show` view, and `refresh`
+  over a fake transport.
+
 ### The microservices scenario
 
 `microservices` (task jb4) landed ahead of the multi-host work,
@@ -4061,9 +4166,11 @@ plus one run on two real hosts.
 The three surfaces — local site, terminal UI, plain text — and
 the view model they share are designed in
 [visualization.md](visualization.md), including the build order
-(V1 lands with M4, V2–V4 here). Build `internal/viewmodel` and
-its goldens first; a renderer never reads the merged graph
-directly.
+(V1 lands with M4, V2–V4 here). V1 is built (task ib4, M4
+"Build, refresh and show"): `internal/viewmodel` with run,
+health, services and edges, and its text views. Extend the model
+and its goldens first (conversations and processes, V2); a
+renderer never reads the merged graph directly.
 
 ![The two joins behind one line of the sequence view](diagrams/join.svg)
 

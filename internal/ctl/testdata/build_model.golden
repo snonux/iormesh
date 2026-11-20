@@ -1,0 +1,134 @@
+{
+  "run": {
+    "projects": [
+      "billing",
+      "shop"
+    ],
+    "hosts": [
+      "app1",
+      "app2"
+    ],
+    "sessions": 2,
+    "segments": 8,
+    "events": 22,
+    "first": "2025-11-20T00:53:20Z",
+    "last": "2025-11-20T00:53:20.01Z",
+    "fused_conns": 1,
+    "unresolved_conns": 1,
+    "graph_nodes": 7,
+    "graph_edges": 6
+  },
+  "health": {
+    "lost": 0,
+    "skipped_runs": 0,
+    "unattributed": 0,
+    "attach_gap": 0,
+    "sessions": [
+      {
+        "project": "billing",
+        "host": "app2",
+        "fqdn": "hostB.example.org",
+        "id": "a1b2c3d4",
+        "segments": 3,
+        "events": 9,
+        "first": "2025-11-20T00:53:20Z",
+        "last": "2025-11-20T00:53:20.01Z",
+        "end": "stop"
+      },
+      {
+        "project": "shop",
+        "host": "app1",
+        "fqdn": "hostA.example.org",
+        "id": "a1b2c3d4",
+        "segments": 5,
+        "events": 13,
+        "first": "2025-11-20T00:53:20Z",
+        "last": "2025-11-20T00:53:20.0092Z",
+        "end": ""
+      }
+    ],
+    "clocks": [
+      {
+        "host_a": "hostA.example.org",
+        "host_b": "hostB.example.org",
+        "windows": 1,
+        "empty": 0,
+        "one_sided": 0,
+        "min_width_ns": 740000,
+        "max_width_ns": 740000
+      }
+    ],
+    "bad_segments": null,
+    "ignored": null
+  },
+  "services": [
+    {
+      "name": "203.0.113.9:5432",
+      "named": false,
+      "endpoints": [
+        "203.0.113.9:5432"
+      ],
+      "conns": 1,
+      "unresolved": 1,
+      "tls": "",
+      "requests": 0,
+      "top_paths": null,
+      "more_paths": 0
+    },
+    {
+      "name": "java",
+      "named": false,
+      "endpoints": null,
+      "conns": 0,
+      "unresolved": 0,
+      "tls": "",
+      "requests": 0,
+      "top_paths": null,
+      "more_paths": 0
+    },
+    {
+      "name": "orders.example:8080",
+      "named": false,
+      "endpoints": [
+        "orders.example:8080"
+      ],
+      "conns": 1,
+      "unresolved": 0,
+      "tls": "plain",
+      "requests": 3,
+      "top_paths": [
+        {
+          "method": "GET",
+          "path": "/orders/2",
+          "count": 2
+        },
+        {
+          "method": "GET",
+          "path": "/orders/1",
+          "count": 1
+        }
+      ],
+      "more_paths": 0
+    }
+  ],
+  "edges": [
+    {
+      "from": "java",
+      "to": "203.0.113.9:5432",
+      "state": "unresolved",
+      "conns": 1,
+      "unresolved": 1,
+      "first": "2025-11-20T00:53:20.0091Z",
+      "last": "2025-11-20T00:53:20.0092Z"
+    },
+    {
+      "from": "java",
+      "to": "orders.example:8080",
+      "state": "fused",
+      "conns": 1,
+      "unresolved": 0,
+      "first": "2025-11-20T00:53:20.0001Z",
+      "last": "2025-11-20T00:53:20.009Z"
+    }
+  ]
+}
