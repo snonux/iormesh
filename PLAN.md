@@ -86,6 +86,14 @@ and M7 kept their numbers.)
 | M6        | Mesh expansion, controller-driven           | —        |
 | M7        | Kubernetes                                  | —        |
 
+Sequencing relaxation (2026-11-20, owner-delegated advisor
+decision): M4's real-host run (task lb4) gates acceptance, not the
+start of M5–M7. Their work proceeds on the simulated rig and kind;
+a status may read "passes on the rig", never "accepted", until M4
+is accepted and the real-host re-check (task 3f4) has run. A
+real-host finding takes priority over any M5–M7 work. Decisions
+settled meanwhile are provisional.
+
 How to build each of these — files, order of work, code
 sketches, tests — is in the
 [implementation guide](docs/implementation.md). The plan decides;
