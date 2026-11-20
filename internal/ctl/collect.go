@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"slices"
@@ -24,8 +25,10 @@ import (
 //  1. true — reachability: a host that cannot be reached fails, it is
 //     never mistaken for one with nothing to collect;
 //  2. per project: test -d /opt/iormesh/traces/<project>/ready — a
-//     project never started has no ready/ yet and is skipped;
-//  3. Fetch (rsync -rt --remove-source-files) of that ready/ into
+//     project never started has no ready/ yet (exit status 1) and is
+//     skipped; any other failure is the project's failure (remoteTest);
+//  3. Fetch (federate.FetchFlags: rsync -rt --remove-source-files, the
+//     non-dot *.parquet files directly in ready/) into
 //     <store>/<project>/<host>/.
 //
 // Only ready/ is ever fetched. The tracer writes the active segment at
@@ -114,12 +117,20 @@ func collectCommand(args []string, e env) error {
 }
 
 // newCollector returns a collector over store, the default when empty.
+// The store is created and checked here, before any host is contacted:
+// an unusable store must not be found only after a host was stopped.
 func newCollector(e env, store string) (collector, error) {
 	if store == "" {
 		var err error
 		if store, err = e.traces(); err != nil {
 			return collector{}, err
 		}
+	}
+	if err := os.MkdirAll(filepath.Dir(store), 0o700); err != nil {
+		return collector{}, fmt.Errorf("trace store: %w", err)
+	}
+	if err := ensureStoreDir(store); err != nil {
+		return collector{}, err
 	}
 	return collector{e: e, store: store}, nil
 }
@@ -213,10 +224,18 @@ func probe(ctx context.Context, t federate.Transport) error {
 }
 
 // project moves one project's published segments into the store and
-// reports how many new files arrived.
+// reports how many new files arrived. The names are checked first, before
+// either reaches the remote command or a local path.
 func (c collector) project(ctx context.Context, t federate.Transport, host, name string) error {
+	if !project.Valid(name) || !federate.ValidHost(host) {
+		return fmt.Errorf("unsafe path component %q/%q", name, host)
+	}
 	remote := path.Join(confinedTraceDir, name, readyDir)
-	if _, err := t.Run(ctx, "test", "-d", remote); err != nil {
+	present, err := remoteTest(ctx, t, "test", "-d", remote)
+	if err != nil {
+		return err
+	}
+	if !present {
 		_, _ = fmt.Fprintf(c.e.stdout, "%s: project %s: no %s yet, nothing to collect\n", host, name, remote)
 		return nil
 	}
@@ -233,38 +252,63 @@ func (c collector) project(ctx context.Context, t federate.Transport, host, name
 	return err
 }
 
-// localDir creates and returns <store>/<project>/<host>. Every host gets
-// its own directory: segment names carry the server's FQDN, but the
-// server chooses its file names, so a shared directory would let one host
-// overwrite another's segments. Both components come from the registry
-// and are checked again here, since they become local path components:
-// neither rule admits "/", "." or "..".
+// remoteTest runs a `test` argv on the host: true when it holds, false
+// only when test says no (exit status 1). Anything else — ssh's 255 on a
+// dropped connection, a remote error — is an error, never "absent": rm
+// would otherwise skip a sync and uninstall over what it did not see.
+func remoteTest(ctx context.Context, t federate.Transport, argv ...string) (bool, error) {
+	_, err := t.Run(ctx, argv...)
+	if err == nil {
+		return true, nil
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
+}
+
+// localDir creates and returns <store>/<project>/<host> (names checked by
+// the caller). Every host gets its own directory: segment names carry
+// the server's FQDN, but the server chooses its file names, so a shared
+// directory would let one host overwrite another's segments.
 //
 // The store and the project directory must be this user's and writable
 // by nobody else — whoever could write them could swap a host directory
-// for a symlink and redirect rsync's writes. They are created 0700 and
-// refused, never repaired, when not. The host directory itself is
-// Fetch's: it forces it to 0700 after every transfer.
+// for a symlink and redirect rsync's writes. Each is checked before
+// anything is created inside it, created 0700 when missing, and refused,
+// never repaired, otherwise. The host directory itself is Fetch's: it
+// forces it to 0700 after every transfer.
 func (c collector) localDir(name, host string) (string, error) {
-	if !project.Valid(name) || !federate.ValidHost(host) {
-		return "", fmt.Errorf("unsafe path component %q/%q", name, host)
-	}
-	dir := filepath.Join(c.store, name, host)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", fmt.Errorf("trace store: %w", err)
-	}
-	for _, d := range []string{c.store, filepath.Dir(dir)} {
-		if err := checkStoreDir(d); err != nil {
+	projDir := filepath.Join(c.store, name)
+	for _, d := range []string{c.store, projDir} {
+		if err := ensureStoreDir(d); err != nil {
 			return "", err
 		}
 	}
+	dir := filepath.Join(projDir, host)
+	if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+		return "", fmt.Errorf("trace store: %w", err)
+	}
 	return dir, nil
+}
+
+// ensureStoreDir creates dir 0700 if it is missing, then checks it
+// (checkStoreDir).
+func ensureStoreDir(dir string) error {
+	if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf("trace store: %w", err)
+	}
+	return checkStoreDir(dir)
 }
 
 // checkStoreDir requires dir to be a directory owned by this user and not
 // group- or other-writable. The store root may be a symlink (another
 // disk, a dotfile manager), so Stat follows it; reading is left to the
-// operator, the segments themselves sit in 0700 host directories.
+// operator, the segments themselves sit in 0700 host directories. Only
+// the store and what is below it are checked: a -store under a directory
+// others can write (and that lacks the sticky bit) is unsafe however the
+// store itself looks (docs/security.md).
 func checkStoreDir(dir string) error {
 	info, err := os.Stat(dir)
 	if err != nil {

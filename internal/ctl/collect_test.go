@@ -3,6 +3,7 @@ package ctl
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -79,9 +80,23 @@ func TestCollectSelect(t *testing.T) {
 	}
 }
 
+// exitStatus is the error a Transport's Run returns for a remote command
+// that exited with code: a real *exec.ExitError, as SSH.Run wraps it.
+func exitStatus(t *testing.T, code int) error {
+	t.Helper()
+	err := exec.Command("sh", "-c", fmt.Sprintf("exit %d", code)).Run()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != code {
+		t.Fatalf("sh exit %d: %v", code, err)
+	}
+	return fmt.Errorf("ssh app test: %w", err)
+}
+
 // TestCollectFailures: an unreachable host or a failed transfer is
 // reported by host and fails the command, but every other host and
-// project is still collected; a project with no ready/ yet is skipped.
+// project is still collected; a project with no ready/ yet (test exit 1)
+// is skipped, while a test that fails any other way (ssh's 255 on a
+// dropped connection) is a failure, never "nothing to collect".
 func TestCollectFailures(t *testing.T) {
 	f := newDeployFixture(t)
 	f.answers["app1 true"] = reply{err: errors.New("ssh: connect to host app1: Connection refused")}
@@ -96,7 +111,7 @@ func TestCollectFailures(t *testing.T) {
 
 	delete(f.answers, "app1 true")
 	f.fetchErrs["app1 "+readyOf("shop")] = errors.New("rsync: connection unexpectedly closed")
-	f.answers["app2 test -d"] = reply{err: errors.New("exit status 1")}
+	f.answers["app2 test -d"] = reply{err: exitStatus(t, 1)}
 	if code := f.run("collect"); code != exitError {
 		t.Fatalf("exit %d", code)
 	}
@@ -110,28 +125,59 @@ func TestCollectFailures(t *testing.T) {
 	if !strings.Contains(f.stdout.String(), "app2: project shop: no "+readyOf("shop")+" yet") {
 		t.Errorf("stdout: %s", f.stdout)
 	}
+
+	f.answers["app2 test -d"] = reply{err: exitStatus(t, 255)}
+	if code := f.run("collect", "app2"); code != exitError ||
+		!strings.Contains(f.stderr.String(), "app2: project shop: ssh app test: exit status 255") {
+		t.Errorf("test -d exit 255: exit %d, stderr %s", code, f.stderr)
+	}
 }
 
-// TestCollectRefusesOpenStore: a store others can write is refused, not
-// repaired, and nothing is fetched into it.
-func TestCollectRefusesOpenStore(t *testing.T) {
-	f := newDeployFixture(t)
-	mustMkdir(t, f.store, 0o777)
-	if code := f.run("collect", "app2"); code != exitError || !strings.Contains(f.stderr.String(), "writable by others") {
-		t.Fatalf("exit %d, stderr %s", code, f.stderr)
+// TestCollectRefusesStore: a store or project directory others can
+// write, or a store that is a file, is refused, not repaired, and nothing
+// is fetched into it; the store is checked before any host is contacted.
+func TestCollectRefusesStore(t *testing.T) {
+	cases := map[string]struct {
+		setup     func(f *deployFixture)
+		msg       string
+		contacted bool
+	}{
+		"open store": {func(f *deployFixture) { mustMkdir(t, f.store, 0o777) }, "writable by others", false},
+		"store is a file": {func(f *deployFixture) {
+			mustMkdir(t, filepath.Dir(f.store), 0o700)
+			writeFile(t, f.store, nil, 0o600)
+		}, "is not a directory", false},
+		"open project dir": {func(f *deployFixture) {
+			mustMkdir(t, f.store, 0o700)
+			mustMkdir(t, filepath.Join(f.store, "shop"), 0o777)
+		}, "writable by others", true},
 	}
-	for _, c := range f.log {
-		if c[1] == "fetch" {
-			t.Errorf("fetched into an open store: %q", c)
-		}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newDeployFixture(t)
+			c.setup(f)
+			if code := f.run("collect", "app2"); code != exitError || !strings.Contains(f.stderr.String(), c.msg) {
+				t.Fatalf("exit %d, stderr %s", code, f.stderr)
+			}
+			if (len(f.log) > 0) != c.contacted {
+				t.Errorf("calls %q", f.log)
+			}
+			for _, call := range f.log {
+				if call[1] == "fetch" {
+					t.Errorf("fetched into a refused store: %q", call)
+				}
+			}
+		})
 	}
-	assertDirMode(t, f.store, 0o777)
 }
 
-// TestCollectLiveSession runs real rsync against a server tree laid out
-// as a live session leaves it: the active segment at the project
-// directory's top, published segments in ready/. Each collect moves what
-// ready/ holds and nothing else; the active file is never pulled or
+// TestCollectLiveSession runs real rsync, with SSH.Fetch's very flags,
+// against a server tree laid out as a live session leaves it: the active
+// segment at the project directory's top, published segments in ready/,
+// plus what a hostile or confused server might plant there — a symlink,
+// a subdirectory with a segment-named file, a dot file. Each collect
+// moves the published segments and nothing else; the active file is
+// never pulled or removed, the planted entries are neither pulled nor
 // removed, and after a "rotation" the next collect moves only the new
 // segment — between collections the server holds only what is unsynced.
 func TestCollectLiveSession(t *testing.T) {
@@ -144,10 +190,14 @@ func TestCollectLiveSession(t *testing.T) {
 	ready := filepath.Join(proj, "ready")
 	active := filepath.Join(proj, ".active-0a1b2c3d-events.parquet")
 	seg := func(seq string) string { return "h1.example.org-0a1b2c3d-20261120T120000Z-" + seq }
-	mustMkdir(t, ready, 0o755)
+	mustMkdir(t, filepath.Join(ready, "sub"), 0o755)
 	writeFile(t, active, []byte("partial"), 0o644)
 	writeFile(t, filepath.Join(ready, seg("000000")+".methods.parquet"), []byte("PAR1m"), 0o644)
 	writeFile(t, filepath.Join(ready, seg("000000")+".parquet"), []byte("PAR1e"), 0o644)
+	writeFile(t, filepath.Join(ready, "sub", seg("000009")+".parquet"), []byte("PAR1x"), 0o644)
+	writeFile(t, filepath.Join(ready, ".hidden.parquet"), []byte("PAR1h"), 0o644)
+	mustDo(t, os.Symlink("/etc/passwd", filepath.Join(ready, "lnk.parquet")))
+	planted := []string{".hidden.parquet", "lnk.parquet", "sub"}
 	f.e.transport = func(host string) (federate.Transport, error) {
 		return localServer{root: server, respond: f.respond}, nil
 	}
@@ -155,7 +205,8 @@ func TestCollectLiveSession(t *testing.T) {
 
 	f.mustRun(t, "collect", "app2")
 	assertFiles(t, local, seg("000000")+".methods.parquet", seg("000000")+".parquet")
-	assertFiles(t, ready)
+	assertFiles(t, ready, planted...)
+	assertFiles(t, filepath.Join(ready, "sub"), seg("000009")+".parquet")
 	assertFiles(t, proj, filepath.Base(active), "ready")
 
 	// Rotation: the active segment is published, the next one opened.
@@ -163,7 +214,7 @@ func TestCollectLiveSession(t *testing.T) {
 		os.WriteFile(active, []byte("partial2"), 0o644))
 	f.mustRun(t, "collect", "app2")
 	assertFiles(t, local, seg("000000")+".methods.parquet", seg("000000")+".parquet", seg("000001")+".parquet")
-	assertFiles(t, ready)
+	assertFiles(t, ready, planted...)
 	if got, err := os.ReadFile(active); err != nil || string(got) != "partial2" {
 		t.Errorf("active file touched: %q, %v", got, err)
 	}
@@ -175,8 +226,8 @@ func TestCollectLiveSession(t *testing.T) {
 
 // localServer is a Transport onto a directory standing in for the server's
 // root: Run answers through respond, except `test -d`, which looks at the
-// tree; Fetch runs real rsync with federate.SSH.Fetch's flags (-rt
-// --remove-source-files, no -l or -p), minus ssh.
+// tree; Fetch runs real rsync with federate.FetchFlags, SSH.Fetch's own,
+// minus ssh.
 type localServer struct {
 	root    string
 	respond func(host string, argv []string) ([]byte, error)
@@ -184,11 +235,7 @@ type localServer struct {
 
 func (s localServer) Run(_ context.Context, argv ...string) ([]byte, error) {
 	if argv[0] == "test" && argv[1] == "-d" {
-		info, err := os.Stat(filepath.Join(s.root, argv[2]))
-		if err != nil || !info.IsDir() {
-			return nil, errors.New("exit status 1")
-		}
-		return nil, nil
+		return nil, exec.Command("test", "-d", filepath.Join(s.root, argv[2])).Run()
 	}
 	return s.respond("local", argv)
 }
@@ -197,8 +244,8 @@ func (s localServer) Fetch(ctx context.Context, remote, local string) error {
 	if err := os.MkdirAll(local, 0o700); err != nil {
 		return err
 	}
-	out, err := exec.CommandContext(ctx, "rsync", "-rt", "--remove-source-files", "--",
-		filepath.Join(s.root, remote)+"/", local+"/").CombinedOutput()
+	args := slices.Concat(federate.FetchFlags(), []string{"--", filepath.Join(s.root, remote) + "/", local + "/"})
+	out, err := exec.CommandContext(ctx, "rsync", args...).CombinedOutput()
 	if err != nil {
 		return errors.New(string(out))
 	}

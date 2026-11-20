@@ -65,7 +65,8 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 // stop stops the project's unit: systemd sends SIGTERM, the run drains,
 // writes its end event and publishes the active segment as its last
-// (decision #19). It then prints the end state.json recorded.
+// (decision #19). It then prints the end state.json recorded, and fails
+// when there is none: the stop happened, the clean end did not.
 func (c control) stop(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
 	fs.SetOutput(c.stderr)
@@ -87,10 +88,18 @@ func (c control) stop(ctx context.Context, args []string) error {
 	if err := stopUnit(ctx, c.sys, unit); err != nil {
 		return err
 	}
+	// The unit is gone either way, but only an `ended` state says the run
+	// drained and published its last segment: a run SIGKILLed after
+	// TimeoutStopSec (or one that never attached) leaves its active minute
+	// unpublished. The caller — iormeshctl rm, before an uninstall that
+	// would delete that file — must learn of it, so this is an error.
 	st, err := readState(filepath.Join(*pf.traceDir, *pf.project))
-	if err != nil || st.State != stateEnded {
-		_, _ = fmt.Fprintf(c.stdout, "iormesh: stopped %s\n", unit)
-		return nil
+	if err != nil {
+		return fmt.Errorf("stopped %s, but its end is unknown, the last segment may be unpublished: %w", unit, err)
+	}
+	if st.State != stateEnded {
+		return fmt.Errorf("stopped %s, but state.json says %q, not ended: the run did not finish "+
+			"(killed after the stop timeout?), its last segment may be unpublished", unit, st.State)
 	}
 	_, _ = fmt.Fprintf(c.stdout, "iormesh: stopped %s: session %s ended (%s) at %s\n",
 		unit, st.Session, st.EndReason, st.EndedAt.Format(time.RFC3339))

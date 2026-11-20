@@ -486,6 +486,29 @@ func TestStop(t *testing.T) {
 	}
 }
 
+// TestStopUncleanEnd: a unit that stops without the run recording its end
+// (SIGKILLed after the stop timeout: state.json still running, or no
+// state at all) is stopped, but the stop fails so a caller about to
+// delete the trace dir learns the last segment may be unpublished.
+func TestStopUncleanEnd(t *testing.T) {
+	for name, write := range map[string]bool{"still running": true, "no state": false} {
+		traces := t.TempDir()
+		if write {
+			mustWriteState(t, filepath.Join(traces, "shop"), liveState("shop", "inv1"))
+		}
+		sys := newFakeSystemd()
+		sys.units["iormesh-shop.service"] = running
+		c, _ := testControl(sys, nil)
+		err := c.stop(context.Background(), []string{"-project", "shop", "-trace-dir", traces})
+		if err == nil || !strings.Contains(err.Error(), "last segment may be unpublished") {
+			t.Errorf("%s: err %v", name, err)
+		}
+		if !sys.called("systemctl", "stop", "--", "iormesh-shop.service") {
+			t.Errorf("%s: no stop call: %v", name, sys.calls)
+		}
+	}
+}
+
 func TestStopRejects(t *testing.T) {
 	for name, args := range map[string][]string{
 		"no project":  {},

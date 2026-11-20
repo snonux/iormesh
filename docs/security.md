@@ -27,13 +27,31 @@ truth.
 - **A server controls trace contents, nothing else on the
   controller.** Collect copies with `rsync -rt`: remote modes
   and symlinks are not carried over, and the local trace
-  directory is forced to 0700. Each host gets its own directory
+  directory is forced to 0700; only the non-dot `*.parquet`
+  files directly in `ready/` are taken, never a subdirectory or
+  a dot file. Each host gets its own directory
   (`~/.local/share/iormesh/traces/<project>/<host>/`), so one
   server cannot overwrite another's segments by naming files
   after it; project and host come from the registry, never from
   the server, and the directories above are refused when
-  foreign-owned or writable by others. Collect needs no sudo:
-  `ready/` belongs to the deploying user.
+  foreign-owned or writable by others. Only the store and what
+  is below it are checked: a `-store` under a directory others
+  can write without the sticky bit is unsafe whatever its own
+  mode. Collect needs no sudo: `ready/` belongs to the
+  deploying user.
+- **The controller's rsync must be 3.4.0 or newer.** The
+  receiving rsync parses what the server sends, and older ones
+  let a malicious sender write outside the destination or read
+  the receiver's memory (CVE-2024-12087, CVE-2024-12088,
+  CVE-2022-29154). macOS ships rsync 2.6.9 (or openrsync):
+  install a current one (Homebrew `rsync`) and put it first in
+  `PATH`.
+- **rm never deletes uncollected traces silently.** Before
+  `sudo iormesh uninstall` it stops and syncs off every project
+  under `/opt/iormesh/traces`, registered or not, and refuses
+  while a segment is left or a session did not end cleanly
+  (`iormesh stop` fails then); only `rm -force` uninstalls over
+  them.
 - **Host keys are verified, never trusted on first use.**
   iormeshctl runs the system `ssh`/`rsync` with
   `StrictHostKeyChecking=yes` and `BatchMode=yes`: an unknown or

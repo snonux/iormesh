@@ -272,7 +272,7 @@ func TestDeployRestartFailures(t *testing.T) {
 		fail, stderr string
 		calls        [][]string
 	}{
-		{stop, "stop for restart, session left running", [][]string{show, stopCall}},
+		{stop, "stop for restart failed, nothing started", [][]string{show, stopCall}},
 		{start, "session stopped, not restarted: start: exit status 1: boom", [][]string{show, stopCall,
 			sudoCall("app2", "start", "-project", "shop", "-pattern=*orders*")}},
 	} {

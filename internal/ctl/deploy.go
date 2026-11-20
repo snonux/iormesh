@@ -362,7 +362,7 @@ func (d deployer) start(ctx context.Context, t federate.Transport, host string, 
 	project := argv[2]
 	if live {
 		if err := d.sudo(ctx, t, host, "stop", "-project", project); err != nil {
-			return fmt.Errorf("stop for restart, session left running: %w", err)
+			return fmt.Errorf("stop for restart failed, nothing started: %w", err)
 		}
 	}
 	if err := d.sudo(ctx, t, host, argv...); err != nil {

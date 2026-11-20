@@ -10,10 +10,13 @@ type Transport interface {
 	// Run executes argv on the remote host and returns its stdout. Each
 	// element arrives as one argument, whatever it contains: an
 	// implementation never joins untrusted text into a command string
-	// unquoted.
+	// unquoted. A command that ran and exited non-zero returns an error
+	// wrapping *exec.ExitError with the remote status, so a caller can
+	// tell `test` saying "no" (status 1) from a host it never reached.
 	Run(ctx context.Context, argv ...string) ([]byte, error)
-	// Fetch moves the files under remoteDir into localDir: each file is
-	// deleted on the remote only after it transferred (the ready/
+	// Fetch moves the segment files directly in remoteDir (non-dot
+	// *.parquet; no subdirectory, symlink or other file) into localDir:
+	// each file is deleted on the remote only after it transferred (the ready/
 	// contract, PLAN.md M4 "Collect"), so a failed fetch loses nothing
 	// and a repeated one picks up only what is new.
 	Fetch(ctx context.Context, remoteDir, localDir string) error

@@ -91,7 +91,7 @@ func TestSSHFetchArgv(t *testing.T) {
 		t.Fatal(err)
 	}
 	argv := rec.calls[0]
-	want := []string{"rsync", "-rt", "--remove-source-files", "-e",
+	want := []string{"rsync", "-rt", "--remove-source-files", "--exclude=.*", "--include=*.parquet", "--exclude=*", "-e",
 		"ssh '-o' 'BatchMode=yes' '-o' 'StrictHostKeyChecking=yes' '-o' 'ControlMaster=auto'" +
 			" '-o' 'ControlPath=/ctl/%C' '-o' 'ControlPersist=60s' '-o' 'ConnectTimeout=15'",
 		"--", "app1:/opt/iormesh/traces/shop/ready/", local + "/"}

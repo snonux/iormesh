@@ -3196,7 +3196,10 @@ func (cfg startConfig) unitArgs(self string) []string {
   is gone as `dead`: its active minute was never published.
 - `stop -project P` refuses a unit that is not live, stops it
   (systemctl waits for the drain, the end event and the last
-  publish) and prints the recorded end. `status [-project P]
+  publish) and prints the recorded end — and fails when
+  `state.json` does not say `ended` (the run was killed after
+  the stop timeout, or never attached: its last minute is
+  unpublished; task eb4). `status [-project P]
   [-json]` covers one project or every one with a loaded unit
   or a `state.json` under `-trace-dir`, with the count of
   events segments waiting in `ready/`; an unknown project or a
@@ -3437,7 +3440,7 @@ ssh H sudo -n /opt/iormesh/bin/iormesh status -project shop
   A new build restarts the session: upgrade replaces the file,
   not the running process, and a deployed fix must not leave
   the old binary running. `-restart` restarts anyway. A failed
-  stop leaves the session running and starts nothing; a start
+  stop (or one whose run did not end cleanly) starts nothing; a start
   failing after the stop is reported as "session stopped, not
   restarted". `iormeshctl rm` drops the host or project from
   the record too.
@@ -3461,8 +3464,9 @@ iormeshctl collect [-project P]... [-store DIR] [HOST...]
 
 ssh H true                                   # reachable? else H fails
 # per project:
-ssh H test -d /opt/iormesh/traces/shop/ready # never started: skipped
-rsync -rt --remove-source-files -e 'ssh …' -- \
+ssh H test -d /opt/iormesh/traces/shop/ready # exit 1: never started, skip
+rsync -rt --remove-source-files --exclude='.*' --include='*.parquet' \
+    --exclude='*' -e 'ssh …' -- \
     H:/opt/iormesh/traces/shop/ready/ \
     ~/.local/share/iormesh/traces/shop/H/
 ```
@@ -3471,7 +3475,11 @@ rsync -rt --remove-source-files -e 'ssh …' -- \
   host or project the registry lacks — or a named host that
   carries none of the projects — fails before any host is
   contacted. A host named twice is collected once.
-- Only `ready/` is fetched. The tracer writes the active
+- Only `ready/` is fetched, and of it only the non-dot
+  `*.parquet` files directly in it (`federate.FetchFlags`,
+  shared by `SSH.Fetch` and the real-rsync test): a
+  subdirectory, symlink or dot file planted there is neither
+  pulled nor removed. The tracer writes the active
   segment as `.active-*` at the project directory's top and
   renames it into `ready/` whole and synced, tables before
   events, so rsync only ever sees final files; and
@@ -3492,9 +3500,13 @@ rsync -rt --remove-source-files -e 'ssh …' -- \
   path components. The store and project directories are
   created 0700 and refused, not repaired, when foreign-owned
   or writable by others (whoever can write them could swap a
-  host directory for a symlink); Fetch forces the host
+  host directory for a symlink), checked before anything is
+  created inside them and, for the store, before any host is
+  contacted; Fetch forces the host
   directory to 0700. The build reads `*.parquet` and skips
   dot files, rsync's in-flight temporaries.
+- `test -d` answers "no ready/" only with exit status 1;
+  anything else (ssh's 255) fails the project.
 - Failures: an unreachable host or a failed transfer is
   reported by host and project; the other projects and hosts
   are still collected, and the command exits 1 naming the
@@ -3503,43 +3515,72 @@ rsync -rt --remove-source-files -e 'ssh …' -- \
 - Tests (`internal/ctl/collect_test.go`): exact call sequence
   over the whole registry, identical on a second run;
   `-project`/HOST selection and refusals with no call at all;
-  unreachable host, failed fetch and missing `ready/`; an
-  open store refused; and `TestCollectLiveSession`, real
-  rsync over a temp "server" with an active file at the
-  project top and published segments in `ready/` — two
-  collects around a rotation move exactly the published files,
-  never the active one, and leave `ready/` empty.
+  unreachable host, failed fetch, missing `ready/` and a
+  `test -d` failing with 255; an open store, a store that is a
+  file and an open project directory refused; and
+  `TestCollectLiveSession`, real rsync with `FetchFlags` over
+  a temp "server" with an active file at the project top,
+  published segments in `ready/` and a planted symlink,
+  subdirectory and dot file — two collects around a rotation
+  move exactly the published segments, never the active file
+  or the planted entries.
 
 `rm`, as the commands it runs (`internal/ctl/rm.go`, task eb4):
 
 ```sh
-iormeshctl rm [-project P] [-store DIR] HOST
+iormeshctl rm [-project P] [-store DIR] [-force] HOST
 
 ssh H true                               # unreachable: warn, unregister
-ssh H test -x /opt/iormesh/bin/iormesh   # absent: just unregister
+ssh H test -x /opt/iormesh/bin/iormesh   # exit 1: just unregister
 # per removed project:
 ssh H systemctl show --property=ActiveState --value -- iormesh-shop.service
 ssh H sudo -n /opt/iormesh/bin/iormesh stop -project shop   # if live
 # ... collect's test -d and rsync for the project ...
-ssh H sudo -n /opt/iormesh/bin/iormesh uninstall  # host leaves registry
+# only when the host leaves the registry:
+ssh H test -d /opt/iormesh/traces
+ssh H find /opt/iormesh/traces -mindepth 1 -maxdepth 1 -type d -print
+# ... stop and collect every other project dir found ...
+ssh H find /opt/iormesh/traces -mindepth 2 -type f \
+    '(' -path '*/ready/*' -o -name '.active-*' ')' -print   # must be empty
+ssh H sudo -n /opt/iormesh/bin/iormesh uninstall
 ```
 
 - The stop comes before the sync so the last minute is
-  published and collected too. `uninstall` runs only when the
-  host leaves the registry (`rm HOST`, or its last project)
-  and removes the traces of projects the registry does not
-  list along with `/opt/iormesh` — rm only syncs what it can
-  name.
+  published and collected too. `iormesh stop` fails when the
+  unit is gone but `state.json` does not say `ended` (killed
+  after `TimeoutStopSec`, or never attached): its active
+  minute is unpublished, and rm stops there.
+- `uninstall` runs only when the host leaves the registry
+  (`rm HOST`, or its last project). It would stop and delete
+  every project under `/opt/iormesh/traces`, so rm first
+  stops and collects the ones the registry does not list
+  (started by hand, or dropped by an earlier rm while the host
+  was unreachable); a directory whose name is no project label
+  is not collected — it cannot be a local path component.
+  Then whatever is still in a `ready/` or active refuses the
+  uninstall, the files named (the first ten).
+- `test` answers "no" only with exit status 1; any other
+  failure — ssh's 255 on a dropped connection — is an error,
+  never "not installed" or "nothing published"
+  (`remoteTest`). `Transport.Run` wraps the remote status in
+  an `*exec.ExitError` for that.
 - The registry and deploy's record change only after every
-  step succeeded; a failed stop, sync or uninstall exits 1
-  with the registry as it was and, before the uninstall,
-  nothing uninstalled. Rerunning rm is safe: a stopped session
-  is not live any more, and what synced is local.
+  step succeeded; a failed or unclean stop, a failed sync or
+  check, leftovers or a failed uninstall exit 1 with the
+  registry as it was and, before the uninstall, nothing
+  uninstalled. `-force` turns an unclean stop and leftovers
+  into warnings and uninstalls: the operator accepts losing
+  those files. Rerunning rm is safe: a stopped session is not
+  live any more, and what synced is local.
 - Tests (`internal/ctl/rm_test.go`): exact sequences for
   `rm HOST` with a live session, `rm -project` keeping the
-  host and removing its last project; a failed stop, sync or
-  uninstall leaving the registry unchanged; the unreachable
-  and the uninstalled host.
+  host and removing its last project, the sweep of an
+  unlisted project (an odd name skipped); leftovers refusing
+  and `-force` uninstalling; a failed sync, an unclean stop,
+  `test -d`/`test -x` failing with 255, or a failed uninstall
+  leaving the registry unchanged; `-force` past an unclean
+  stop; the unreachable and the uninstalled host. In
+  `internal/cli`, `TestStopUncleanEnd`.
 
 Packages: `internal/federate/registry.go`, `transport.go` (the
 `Transport` interface of M7, coded against from M4 on), `ssh.go`
@@ -3558,8 +3599,10 @@ The SSH transport:
   must be a POSIX shell (csh/tcsh read `!` and newlines inside
   single quotes).
 - `Fetch(ctx, remoteDir, localDir)` — `rsync -rt
-  --remove-source-files -e 'ssh [opts]' -- HOST:DIR/ LOCAL/`:
-  a move, a file deleted remotely only once transferred. `-rt`,
+  --remove-source-files --exclude=.* --include=*.parquet
+  --exclude=* -e 'ssh [opts]' -- HOST:DIR/ LOCAL/`: a move of
+  the non-dot segment files directly in DIR, each deleted
+  remotely only once transferred. `-rt`,
   not `-a`: without `-p` the server's modes never reach the
   controller (a 0755 `ready/` would open the local dir), and
   without `-l` a symlink the server planted is skipped, not

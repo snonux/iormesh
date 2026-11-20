@@ -1,7 +1,7 @@
 // Package ctl implements iormeshctl, the controller (PLAN.md M4):
 //
 //	iormeshctl add -project NAME (-pattern GLOB | -listen-port N) [-registry FILE] HOST [TRACER-FLAG...]
-//	iormeshctl rm [-project NAME] [-registry FILE] [-store DIR] HOST
+//	iormeshctl rm [-project NAME] [-registry FILE] [-store DIR] [-force] HOST
 //	iormeshctl collect [-project NAME]... [-registry FILE] [-store DIR] [HOST...]
 //	iormeshctl deploy [-project NAME] [-registry FILE] [-dist DIR] [-key FILE] [-restart] HOST...
 //	iormeshctl services [list|edges|name|rules|unname] [-db FILE] ...
@@ -130,7 +130,7 @@ func report(err error, stderr io.Writer) int {
 func usage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `usage:
   iormeshctl add -project NAME (-pattern GLOB | -listen-port N) [-registry FILE] HOST [TRACER-FLAG...]
-  iormeshctl rm [-project NAME] [-registry FILE] [-store DIR] HOST
+  iormeshctl rm [-project NAME] [-registry FILE] [-store DIR] [-force] HOST
   iormeshctl collect [-project NAME]... [-registry FILE] [-store DIR] [HOST...]
   iormeshctl deploy [-project NAME] [-registry FILE] [-dist DIR] [-key FILE] [-restart] HOST...
   iormeshctl services [list] [-db FILE] [-project NAME] [-paths]
@@ -147,6 +147,7 @@ release key to ~/.config/iormesh/minisign.pub, the service database to
 ~/.local/share/iormesh/traces (<project>/<host>/), dist/ to ./dist.
 deploy only upgrades a tracer already installed on the host (PLAN.md
 decision #1). collect without HOST collects every registered host; rm
-stops, syncs off and uninstalls before it unregisters.
+stops, syncs off and uninstalls before it unregisters, and refuses to
+uninstall over traces it could not sync unless -force.
 `)
 }

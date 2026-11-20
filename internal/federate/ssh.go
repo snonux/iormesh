@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 )
@@ -133,7 +134,8 @@ func (s SSH) Run(ctx context.Context, argv ...string) ([]byte, error) {
 	return out, nil
 }
 
-// Fetch moves remoteDir's files into localDir with rsync over the same
+// Fetch moves remoteDir's segment files (FetchFlags: the non-dot
+// *.parquet files directly in it) into localDir with rsync over the same
 // multiplexed ssh connection. --remove-source-files deletes a remote file
 // only after it transferred, the delete-on-transfer of PLAN.md M4
 // "Collect".
@@ -160,8 +162,8 @@ func (s SSH) Fetch(ctx context.Context, remoteDir, localDir string) error {
 	if err := os.MkdirAll(local, 0o700); err != nil {
 		return fmt.Errorf("fetch: %w", err)
 	}
-	args := []string{"-rt", "--remove-source-files", "-e", s.rsyncShell(), "--",
-		s.host + ":" + strings.TrimSuffix(remoteDir, "/") + "/", local + "/"}
+	args := slices.Concat(FetchFlags(), []string{"-e", s.rsyncShell(), "--",
+		s.host + ":" + strings.TrimSuffix(remoteDir, "/") + "/", local + "/"})
 	_, err = s.exec(ctx, "rsync", args...)
 	// Chmod even after a failed rsync: a partial transfer is data too.
 	if cerr := os.Chmod(local, 0o700); cerr != nil && err == nil {
@@ -171,6 +173,21 @@ func (s SSH) Fetch(ctx context.Context, remoteDir, localDir string) error {
 		return fmt.Errorf("rsync %s:%s: %w", s.host, remoteDir, err)
 	}
 	return nil
+}
+
+// FetchFlags are the rsync flags of Fetch, before -e and the paths;
+// exported so a test standing in for the server runs exactly them:
+//   - -rt: recurse into remoteDir and keep mtimes; no -p (remote modes),
+//     no -l (a symlink is skipped, never recreated), no -o/-g;
+//   - --remove-source-files: delete a remote file once transferred;
+//   - --exclude=.*: never a dot file — the tracer publishes none, and in
+//     the local store dot files are rsync's own in-flight temporaries,
+//     which the build skips;
+//   - --include=*.parquet --exclude=*: segment files only, directly in
+//     remoteDir; the trailing exclude also matches every directory, so a
+//     subdirectory planted in ready/ is never descended into.
+func FetchFlags() []string {
+	return []string{"-rt", "--remove-source-files", "--exclude=.*", "--include=*.parquet", "--exclude=*"}
 }
 
 // Push copies localFiles into remoteDir with rsync over the multiplexed

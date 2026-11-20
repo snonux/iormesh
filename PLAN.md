@@ -994,8 +994,10 @@ Kubernetes (M7) build on it.
   registry before any host is contacted. Per host an `ssh
   true` probe (an unreachable host fails, it is never "nothing
   to collect"), then per project `test -d` of its `ready/` (a
-  project never started is skipped) and the Transport's Fetch
-  (`rsync -rt --remove-source-files`, no sudo). Each host
+  project never started — exit status 1, nothing else — is
+  skipped) and the Transport's Fetch (`rsync -rt
+  --remove-source-files`, only the non-dot `*.parquet` files
+  directly in `ready/`, no sudo). Each host
   lands in its own directory,
   `~/.local/share/iormesh/traces/<project>/<host>/` (the
   registry's host name): a server picks its own segment
@@ -1137,18 +1139,27 @@ Kubernetes (M7) build on it.
   tears down the deployment on it — `sudo iormesh uninstall`
   stops every session and removes `/opt/iormesh` (binary and
   traces). Trace files are synced off first (rsync, same as
-  collect), so `rm` never destroys uncollected traces; an
-  unreachable host warns and only drops from the registry.
+  collect), so `rm` never destroys uncollected traces unless
+  the operator says so with `-force`; an unreachable host
+  warns and only drops from the registry.
   Built (task eb4, `internal/ctl/rm.go`): per removed project
   a live session is stopped first (`sudo iormesh stop`, which
-  publishes its last segment), then collected; `uninstall`
-  runs only when the host leaves the registry (`rm HOST`, or
-  its last project), and the registry changes only after all
-  of that succeeded — a failed stop, sync or uninstall leaves
-  it as it was and uninstalls nothing. A host without the
-  installed tracer is just unregistered. Traces of a project
-  the registry does not list are not synced and go with the
-  uninstall.
+  publishes its last segment and now fails when `state.json`
+  does not say `ended` — a run SIGKILLed after the stop
+  timeout left its minute unpublished), then collected.
+  `uninstall` runs only when the host leaves the registry
+  (`rm HOST`, or its last project), and first every other
+  project directory under `/opt/iormesh/traces` (started by
+  hand, or dropped by an earlier rm of an unreachable host)
+  is stopped and collected too; then any segment file still
+  in a `ready/` or active refuses the uninstall, naming it.
+  The registry changes only after all of that succeeded — a
+  failed or unclean stop, a failed sync, a remote check that
+  fails other than with "no" (exit status 1; ssh's 255 is a
+  failure), leftovers, or a failed uninstall leave it as it
+  was. `-force` turns an unclean stop and leftovers into
+  warnings and uninstalls, losing them. A host without the
+  installed tracer is just unregistered.
 - **No management plane**: every tracer flag and feature is
   reachable through its own CLI, and `iormeshctl` composes
   those commands over plain SSH (later `kubectl exec` in the

@@ -2,7 +2,6 @@ package ctl
 
 import (
 	"bytes"
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -20,6 +19,7 @@ func testEnv(t *testing.T) (env, *bytes.Buffer, *bytes.Buffer, string) {
 	var stdout, stderr bytes.Buffer
 	path := filepath.Join(t.TempDir(), "iormesh", "servers.yaml")
 	deployed := filepath.Join(t.TempDir(), "share", deployedFileName)
+	notThere := exitStatus(t, 1)
 	store := filepath.Join(t.TempDir(), "traces")
 	e := env{stdout: &stdout, stderr: &stderr,
 		registry: func() (string, error) { return path, nil },
@@ -28,7 +28,7 @@ func testEnv(t *testing.T) (env, *bytes.Buffer, *bytes.Buffer, string) {
 		transport: func(host string) (federate.Transport, error) {
 			return fakeTransport{host: host, log: &[][]string{}, respond: func(_ string, argv []string) ([]byte, error) {
 				if argv[0] == "test" {
-					return nil, errors.New("exit status 1")
+					return nil, notThere
 				}
 				return nil, nil
 			}}, nil
