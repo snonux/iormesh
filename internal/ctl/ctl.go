@@ -10,6 +10,7 @@
 //	iormeshctl open [-project NAME]... [-builds DIR]
 //	iormeshctl tui [-project NAME]... [-builds DIR]
 //	iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
+//	                 [-apply [-dist DIR] [-key FILE]]
 //	iormeshctl query [-project NAME]... [-from T] [-to T] [-host GLOB] [-app GLOB] [-thread GLOB]
 //	                 [-conn ID [-follow]] [-file GLOB] [-method GLOB] [-max-bytes N]
 //	iormeshctl services [list|edges|name|rules|unname] [-db FILE] ...
@@ -33,7 +34,8 @@
 // model in a terminal (tui.go, internal/tui); query cuts the merged
 // trace into a size-capped NDJSON slice (query.go, internal/query). expand
 // lists which unresolved peers the next expansion round would enroll and
-// why the others stay (expand.go, internal/expand, PLAN.md M6).
+// why the others stay (expand.go, internal/expand, PLAN.md M6); with
+// -apply it enrolls them and runs deploy's steps on them (expandapply.go).
 // It is cgo-free (internal/buildgate checks it), so it cross-compiles for
 // the darwin and linux laptops it runs on.
 package ctl
@@ -203,6 +205,7 @@ func usage(w io.Writer) {
   iormeshctl open [-project NAME]... [-builds DIR]
   iormeshctl tui [-project NAME]... [-builds DIR]     (needs a terminal)
   iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
+                    [-apply [-dist DIR] [-key FILE]]
   iormeshctl query [-project NAME]... [-store DIR] [-db FILE] [-from T] [-to T]
                    [-host GLOB] [-app GLOB] [-thread GLOB] [-conn ID [-follow]]
                    [-file GLOB] [-method GLOB] [-max-bytes N]
@@ -231,7 +234,10 @@ without -project, never contacts a server, and exits 1 when it had to
 leave a damaged segment out. expand lists the unresolved peers of the
 store's merged mesh against the registry's expand: allowlist, hop limit
 (-hops, default 1) and max_nodes; it contacts no server and deploys
-nothing. query reads the store as build does and writes the matching
+nothing unless -apply, which registers each candidate (one per address,
+bound to its listening port) and deploys to it as deploy does; one
+-apply is one round: refresh and expand -apply again for the next.
+query reads the store as build does and writes the matching
 events as schema NDJSON, at most -max-bytes (default 1 MiB) of it; a cut
 slice ends in a truncation record. T is RFC 3339 or HH:MM:SS[.frac] UTC
 on the trace's first day; -to is exclusive.

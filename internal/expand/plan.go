@@ -23,6 +23,8 @@ const (
 	ReasonNotAllowed      = "not_allowed"      // no allowlist rule matches
 	ReasonHopLimit        = "hop_limit"        // further than --hops from the start
 	ReasonNodeCap         = "node_cap"         // the mesh is full
+	ReasonTransport       = "transport"        // the controller's own SSH/rsync traffic
+	ReasonAnotherPort     = "another_port"     // expand -apply enrolls one port per host
 )
 
 // Input is what a plan reads: the merged build, which registry host each
@@ -70,6 +72,9 @@ type Candidate struct {
 	Hop int `json:"hop"`
 	// Rule is the allowlist rule that allows it ("cidr 10.0.0.0/8").
 	Rule string `json:"rule"`
+	// Projects are the projects whose connections revealed it, sorted:
+	// expand -apply enrolls it under the first (Enroll).
+	Projects []string `json:"projects"`
 }
 
 // Skip is a peer left alone, the reason and the evidence for it.
@@ -105,9 +110,10 @@ type groupKey struct {
 
 // group accumulates one groupKey's halves.
 type group struct {
-	conns int
-	hop   int
-	via   map[Via]int // Conns zero in the key
+	conns    int
+	hop      int
+	via      map[Via]int // Conns zero in the key
+	projects map[string]bool
 }
 
 // Plan decides which unresolved peers to enroll in one round, and says
@@ -146,12 +152,13 @@ func (ev *evidence) group(in Input, allow Allowlist) (map[groupKey]*group, map[n
 		k := groupKey{v.addr, v.port, v.reason, v.evidence}
 		g := groups[k]
 		if g == nil {
-			g = &group{hop: v.hop, via: map[Via]int{}}
+			g = &group{hop: v.hop, via: map[Via]int{}, projects: map[string]bool{}}
 			groups[k] = g
 		}
 		g.conns++
 		g.hop = min(g.hop, v.hop)
 		g.via[Via{Host: ev.host(u.Half.Host), App: ev.app(u.Half.Procs)}]++
+		g.projects[u.Half.Project] = true
 	}
 	return groups, ambiguous
 }
@@ -175,7 +182,8 @@ func split(groups map[groupKey]*group, ambiguous map[netip.AddrPort]bool) ([]Can
 			skipped = append(skipped, Skip{Peer: peer, Reason: ReasonUnjoined,
 				Evidence: "another connection to it was ambiguous (the far end may be traced)"})
 		case k.reason == "":
-			cands[ap] = &Candidate{Peer: peer, Hop: g.hop, Rule: k.evidence}
+			cands[ap] = &Candidate{Peer: peer, Hop: g.hop, Rule: k.evidence,
+				Projects: slices.Sorted(maps.Keys(g.projects))}
 		}
 	}
 	for _, k := range keys {
@@ -200,7 +208,8 @@ func split(groups map[groupKey]*group, ambiguous map[netip.AddrPort]bool) ([]Can
 // perConn reports a reason that is about one connection, not about the
 // peer's address.
 func perConn(reason string) bool {
-	return reason == ReasonUnjoined || reason == ReasonInbound || reason == ReasonViaUnregistered
+	return reason == ReasonUnjoined || reason == ReasonInbound || reason == ReasonViaUnregistered ||
+		reason == ReasonTransport
 }
 
 // judge decides one unresolved half: the facts first, then the
@@ -231,6 +240,11 @@ func (ev *evidence) fact(u federate.Unresolved, via string, registered bool,
 		return ReasonUnjoined, "merge: " + u.Reason + " (the far end may be traced)"
 	case u.Half.Role != federate.RoleClient:
 		return ReasonInbound, "the peer connected in; its port is ephemeral"
+	case u.Half.Peer.Port() == sshPort:
+		return ReasonTransport, "port 22 is SSH, the controller's transport: never bound by a tracer"
+	case ev.transportProc(u.Half.Procs) != "":
+		return ReasonTransport, "revealed by " + ev.transportProc(u.Half.Procs) +
+			", the controller's own SSH/rsync traffic"
 	case !registered:
 		return ReasonViaUnregistered, via + " is not in the registry"
 	case !routable(addr):

@@ -211,6 +211,25 @@ func (r *Registry) Add(host string, p Project) error {
 	return nil
 }
 
+// AddHop registers a host mesh expansion enrolled (PLAN.md M6 "Apply"):
+// a new entry with project p and its hop recorded, so the next round
+// counts from it. A host already registered is ErrDuplicate whatever its
+// projects: expansion only ever adds hosts, it never edits an entry the
+// operator wrote.
+func (r *Registry) AddHop(host string, hop int, p Project) error {
+	if r.find(host) >= 0 {
+		return fmt.Errorf("%w: host %s", ErrDuplicate, host)
+	}
+	if hop < 0 {
+		return fmt.Errorf("%w: host %s: hop %d is negative", ErrInvalid, host, hop)
+	}
+	if err := r.Add(host, p); err != nil {
+		return err
+	}
+	r.Servers[len(r.Servers)-1].Hop = hop
+	return nil
+}
+
 // Remove unregisters host, or only its project name when name is set. A
 // host whose last project goes is dropped too, keeping Validate's rule
 // that every server has a project.

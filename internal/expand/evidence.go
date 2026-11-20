@@ -29,12 +29,43 @@ type evidence struct {
 	nat map[netip.Addr]string
 	// apps labels process node ids by their app, else their comm.
 	apps map[string]string
+	// comms maps process node ids to their comm.
+	comms map[string]string
+}
+
+// The controller's own traffic (PLAN.md M6: "the controller's SSH/rsync
+// traffic is excluded"). Collect, deploy and rm reach every host over
+// SSH, rsync riding on it. On a traced host that traffic is inbound to
+// sshd, never a candidate; it can only propose a peer when a traced
+// process is the SSH client itself — a project whose pattern matches
+// ssh or rsync, or the controller's own machine registered and traced —
+// and the peer is then an sshd. Binding a tracer to sshd would trace the
+// controller's own sessions, and the edge is the tool's, not the mesh's,
+// so neither the SSH port nor a transport tool's connection proposes a
+// peer. A service that really speaks SSH is added by hand.
+const sshPort = 22
+
+// transportComms are the controller's transport tools as the kernel
+// names their processes (sshd's per-session children included).
+var transportComms = map[string]bool{"ssh": true, "sshd": true, "sshd-session": true,
+	"rsync": true, "scp": true, "sftp-server": true}
+
+// transportProc is the comm of the first of procs that is one of the
+// controller's transport tools, or "".
+func (ev *evidence) transportProc(procs []string) string {
+	for _, p := range procs {
+		if c := ev.comms[p]; transportComms[c] {
+			return c
+		}
+	}
+	return ""
 }
 
 // gather reads in into an evidence.
 func gather(in Input) evidence {
 	ev := evidence{dirs: in.HostDirs, hops: map[string]int{}, literal: map[netip.Addr]string{},
-		owned: map[netip.Addr]string{}, nat: map[netip.Addr]string{}, apps: appLabels(in.Merge.Graph)}
+		owned: map[netip.Addr]string{}, nat: map[netip.Addr]string{}, apps: appLabels(in.Merge.Graph),
+		comms: processComms(in.Merge.Graph)}
 	for _, s := range in.Registry.Servers {
 		ev.hops[s.Host] = s.Hop
 		if a, ok := registryAddr(s.Host); ok {
@@ -113,15 +144,21 @@ func (ev *evidence) app(procs []string) string {
 // incarnation edges), or to its comm when no app owns it (a -pid or
 // -listen-port session).
 func appLabels(g schema.Graph) map[string]string {
+	out := processComms(g)
+	for _, e := range g.Edges {
+		if e.Type == schema.EdgeIncarnation {
+			out[e.To] = e.From
+		}
+	}
+	return out
+}
+
+// processComms maps every process node to its comm.
+func processComms(g schema.Graph) map[string]string {
 	out := map[string]string{}
 	for _, n := range g.Nodes {
 		if n.Type == schema.NodeProcess {
 			out[n.ID] = n.Attrs["comm"]
-		}
-	}
-	for _, e := range g.Edges {
-		if e.Type == schema.EdgeIncarnation {
-			out[e.To] = e.From
 		}
 	}
 	return out

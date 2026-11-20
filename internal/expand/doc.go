@@ -5,7 +5,10 @@
 // Plan is a pure function of a merge (internal/federate Result), the
 // registry and its expand: section. It never touches the network, never
 // resolves a name and never edits the registry; `iormeshctl expand`
-// prints its answer, and expand --apply (task tb4) acts on it.
+// prints its answer, and `expand -apply` acts on it through Enroll
+// (enroll.go), which adds the candidates to the registry in memory —
+// re-checking each against the allowlist and limits — before the
+// controller saves it and runs M4's deploy on the new hosts.
 //
 // The rules, each a fact read off the traces rather than a judgment:
 //
@@ -27,8 +30,12 @@
 //     What it cannot see: a host registered by name whose traces were
 //     never collected, and the addresses a multi-homed traced host never
 //     used as a local end — such a host can be proposed again by an
-//     address. expand --apply (task tb4) can catch that after the deploy:
-//     the new host's host_id equals a registered host's.
+//     address. expand -apply catches that before it deploys: it reads
+//     the new host's /etc/machine-id (the host_id its tracer would stamp)
+//     and unregisters a host whose id a traced host already has.
+//   - The controller's own traffic never proposes (transport): a peer on
+//     the SSH port, or a connection of a traced ssh, sshd or rsync
+//     process, is the controller's transport, not the mesh's.
 //   - A peer that a fused connection proves to be NAT in front of a
 //     traced server (the client's peer differs from the server's local
 //     address) is nat: what answers there is a translation, and which

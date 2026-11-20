@@ -102,28 +102,40 @@ func deployCommand(args []string, e env) error {
 	if err != nil {
 		return err
 	}
-	key, err := pinnedKey(*keyPath, e)
+	d, recPath, err := newDeployer(e, *dist, *keyPath, *restart)
 	if err != nil {
 		return err
+	}
+	return d.all(context.Background(), servers, recPath, d.host)
+}
+
+// newDeployer reads the pinned key and the deploy record, and returns a
+// deployer over them with the record's path. expand -apply builds its
+// deploy the same way, so an expanded host gets exactly deploy's steps.
+func newDeployer(e env, dist, keyPath string, restart bool) (deployer, string, error) {
+	key, err := pinnedKey(keyPath, e)
+	if err != nil {
+		return deployer{}, "", err
 	}
 	recPath, err := e.deployed()
 	if err != nil {
-		return err
+		return deployer{}, "", err
 	}
 	record, err := loadDeployed(recPath)
 	if err != nil {
-		return err
+		return deployer{}, "", err
 	}
-	d := deployer{e: e, key: key, dist: *dist, restart: *restart, record: record}
-	return d.all(context.Background(), servers, recPath)
+	return deployer{e: e, key: key, dist: dist, restart: restart, record: record}, recPath, nil
 }
 
-// all deploys each server in turn and saves the record of what started,
-// failed hosts or not.
-func (d deployer) all(ctx context.Context, servers []federate.Server, recPath string) error {
+// all runs each server through one (deploy's host, or expand -apply's
+// checked variant) in turn and saves the record of what started, failed
+// hosts or not.
+func (d deployer) all(ctx context.Context, servers []federate.Server, recPath string,
+	one func(context.Context, federate.Server) error) error {
 	var failed []string
 	for _, srv := range servers {
-		if err := d.host(ctx, srv); err != nil {
+		if err := one(ctx, srv); err != nil {
 			_, _ = fmt.Fprintf(d.e.stderr, "iormeshctl: %s: %s\n", srv.Host, errText(err))
 			failed = append(failed, srv.Host)
 		}

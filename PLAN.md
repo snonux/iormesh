@@ -1518,6 +1518,14 @@ operator's SSH key from the controller.
   there, and binds it to the process owning the listening
   socket on the observed port (target spec: listening port,
   M2). Peers outside the allowlist are listed, never touched.
+  Settled by task tb4: one `-apply` is one round; a candidate
+  becomes a registry host written as its address, under the
+  first project whose connections revealed it, with one
+  project per host (another port of it is listed for the
+  operator to add); the registry is saved before any host is
+  contacted, a host whose machine-id a traced host already has
+  is unregistered again, and the rest is M4's deploy unchanged
+  (no new sudo path). A damaged segment refuses `-apply`.
 - **Rounds**: expansion is iterative — deploy, let traffic
   flow, refresh, expand again. The hop limit counts rounds from
   the originally enrolled hosts; a max-node cap bounds the
@@ -1543,7 +1551,10 @@ operator's SSH key from the controller.
   one-sided. Those edges stay in the graph marked unresolved —
   never dropped, never invented.
 - The tracer's own footprint and the controller's SSH/rsync
-  traffic are excluded from the traced set.
+  traffic are excluded from the traced set. Expansion never
+  counts the latter as an edge (task tb4): a peer on port 22,
+  or a connection of a traced ssh, sshd or rsync process,
+  proposes nothing (`transport`).
 - Acceptance: the M0 microservices topology (3+ hops, mixed
   plain-HTTP/TLS links) with only the gateway host enrolled;
   expansion rounds discover and deploy to every service host,
@@ -1552,6 +1563,12 @@ operator's SSH key from the controller.
   demonstrably stops at the first ring; a peer outside the
   allowlist is listed but never contacted; a cyclic topology
   terminates.
+  Status (2026-11-20, task tb4): passes on the rig —
+  `TestMeshExpansion` (docs/testing.md "M6 on the rig"). Not
+  accepted: M4's real-host run (task lb4) and the re-check
+  (task 3f4) come first (Sequencing relaxation), and the rig
+  starts an enrolled host's tracer itself, where a real round
+  deploys it over SSH.
 
 ### M7 — Kubernetes: sidecar & debug-container deployment
 

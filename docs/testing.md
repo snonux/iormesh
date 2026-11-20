@@ -466,8 +466,10 @@ client host 10.231.0.1 --veth-- 10.231.0.2 server host
 
 Three network namespaces, every interface created inside its
 own. Each host's tracer runs under `unshare --mount --uts` with
-a fresh `/etc/machine-id` bind-mounted over the real one, so it
-stamps its own host id, as a second host would; the workloads
+an `/etc/machine-id` of its own bind-mounted over the real one
+(random per harness, kept across its runs, as a real host keeps
+it across sessions), so it stamps its own host id, as a second
+host would; the workloads
 and tracers enter the host's network namespace with `nsenter`
 (`ip netns exec` would remount `/sys` and lose tracefs). The NAT
 is what `docker run -p 880:80` installs: a DNAT rule in the
@@ -532,7 +534,41 @@ it, so every new rig first deletes the namespaces of binaries no
 longer alive, and their veths and nft table go with them.
 Emulated hosts take no tracer options and no `Credential`
 (`TraceHosts` and `StartWorkloadIn` refuse them): the host
-tracer is the default one.
+tracer is the default one, bound by its workloads' PIDs or, with
+`Host.ListenPort`, by listening port (M6 below).
+
+### M6 on the rig (task tb4)
+
+`TestMeshExpansion` (`integrationtests/expansion_test.go`) is
+PLAN.md's M6 acceptance on the rig: the spread of
+`TestMicroservicesAcrossHosts` with only hosta (the gateway's
+host, project `edge`) registered and the allowlist covering
+10.231.0.0/24 and 172.31.0.0/24. Each round re-runs the whole
+scenario — every service on its host, only registered hosts
+traced, the others' services running untraced — and adds the
+round's traces to a store that is merged whole, as the
+controller's is. `expand.Plan` and `expand.Enroll`, the code
+`iormeshctl expand -apply` runs, decide the rounds; what the rig
+does not do is the SSH deploy, so an enrolled host's tracer is
+started as `iormesh run -listen-port PORT` (`Host.ListenPort`),
+the target the registry entry names, once its server listens
+and before the gateway is released (`TraceHosts`). The deploy
+argv itself is `internal/ctl`'s `TestExpandApply`, over a fake
+transport.
+
+| Round | Traced | Asserted |
+|---|---|---|
+| 1 | hosta | the plan is exactly `deploy 10.231.0.2:443 hop 1`; enrolled as `10.231.0.2`, hop 1, `edge`, listen port 443 |
+| 2 | hosta, hostb by port 443 | round 1's gateway → orders connection is still `no_match` in the store's merge, fused with nothing; at `-hops 1` billing is `hop_limit` and orders `enrolled`; with an allowlist of 10.231.0.0/24 alone billing is `not_allowed` and `Enroll` enrolls nothing; at `-hops 2` billing is enrolled at hop 2. The cycle orders → inventory (back to hosta) fuses and proposes nothing |
+| 3 | all three | nothing to deploy, at `-hops 5`: both earlier peers are `enrolled`; the round's own merge fuses exactly the three cross-host hops with nothing unresolved (`assertSpreadFused`, within project `edge`), and the network part of `expect-spread.json` holds — accepts, connects and requests at their addresses and schemes, every process on its host, every connection fused. A TLS hop declared plain, a hop at loopback or billing on the gateway's host each fail it |
+
+Inbound skips are left out of the compared plans: inventory's
+side of orders' call in round 1 is a server half whose peer
+port is ephemeral, never a candidate. The golden's file and
+JVM-startup events are not compared: a tracer bound by
+listening port attaches to a server already running. Each round
+gives every host a fresh Java agent spool, so an untraced JVM's
+rings never wait for a later round's tracer.
 
 ## M4 acceptance on two real hosts (task lb4)
 

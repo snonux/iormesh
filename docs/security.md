@@ -105,7 +105,18 @@ truth.
   - only peers matching the expansion allowlist are enrolled —
     everything else is listed, never contacted;
   - a hop limit, a max-node cap and a visited set bound every
-    run.
+    run;
+  - `-apply` saves each enrolled peer to the registry before
+    contacting it, and then runs deploy's own steps — the same
+    Transport, the same one sudoers rule, no new sudo path; its
+    only extra remote call is an unprivileged read of
+    `/etc/machine-id`, and a machine the store already traces
+    is unregistered again with nothing deployed;
+  - a peer is bound by its listening port (the server side of
+    an edge), and the controller's own SSH/rsync traffic never
+    proposes one (`transport`);
+  - a damaged segment refuses `-apply`: the visited set would
+    miss that host's addresses.
 - **Signed tracer binary, one sudoers rule.** The controller
   verifies the build's signature before pushing it. On the
   server every privileged action is a subcommand of the one

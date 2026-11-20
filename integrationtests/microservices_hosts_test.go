@@ -137,9 +137,12 @@ var spreadServerEnds = map[netip.AddrPort]string{
 }
 
 // assertSpreadFused: the merge fused exactly the three cross-host hops,
-// each across two projects with one 4-tuple seen mirrored, and left no
-// end unresolved — the local gateway→inventory hop was its tracer's.
-func assertSpreadFused(t *testing.T, res federate.Result) {
+// each with one 4-tuple seen mirrored, and left no end unresolved — the
+// local gateway→inventory hop was its tracer's. With one project, every
+// hop is within it (mesh expansion enrolls a peer under the project that
+// revealed it, task tb4); without, each crosses two projects (one per
+// host, as the hosts were added by hand).
+func assertSpreadFused(t *testing.T, res federate.Result, project string) {
 	t.Helper()
 	for _, u := range res.Unresolved {
 		t.Errorf("unresolved %s end %s on %s: %s", u.Half.Role, u.Half.ConnID, u.Half.Host, u.Reason)
@@ -151,8 +154,11 @@ func assertSpreadFused(t *testing.T, res federate.Result) {
 		switch {
 		case !ok:
 			t.Errorf("fused connection %s to %v is no cross-host hop", c.ID, server)
-		case !c.CrossProject():
+		case project == "" && !c.CrossProject():
 			t.Errorf("%s fused within project %s", hop, c.Client.Project)
+		case project != "" && (c.Client.Project != project || c.Server.Project != project):
+			t.Errorf("%s fused across projects %s and %s, want %s", hop, c.Client.Project,
+				c.Server.Project, project)
 		case unmap(c.Client.Peer) != server || unmap(c.Client.Local) != unmap(c.Server.Peer):
 			t.Errorf("%s: the ends saw different 4-tuples: client %v->%v, server %v<-%v", hop,
 				c.Client.Local, c.Client.Peer, c.Server.Local, c.Server.Peer)
@@ -191,7 +197,7 @@ func TestMicroservicesAcrossHosts(t *testing.T) {
 	requireSeqFieldsIn(t, s.hosts...)
 	res, merged := mergeHosts(t, s.hosts...)
 	mergeMethods(t, &merged, s.hosts)
-	assertSpreadFused(t, res)
+	assertSpreadFused(t, res, "")
 	got, err := normalize.Normalize(merged, normalize.Options{Bracket: "microservices",
 		TmpPrefix: h.Tmp})
 	if err != nil {

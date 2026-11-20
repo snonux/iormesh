@@ -45,10 +45,18 @@ const testClockSkewEnv = "IORMESH_TEST_CLOCK_SKEW"
 // when Harness.JavaAgent is set (task 1f4): its JVMs write their rings
 // there and only its tracer drains them, as on a real host — two tracers
 // sharing one spool would each drain the other host's rings.
+//
+// ListenPort, if not 0, binds the host's tracer by listening port
+// instead of by its Workloads' PIDs (-listen-port, the target spec mesh
+// expansion deploys with, PLAN.md M6): such a tracer is started once the
+// servers listen — a port nobody listens on is no target — and before
+// the clients are released. Workloads then only name the PIDs its trace
+// may hold.
 type Host struct {
 	Name, Project, Netns, Spool string
 	Workloads                   []*Workload
 	ClockSkew                   time.Duration
+	ListenPort                  uint16
 }
 
 // StartWorkloadIn is StartWorkload for a process of an emulated host: the
@@ -83,20 +91,39 @@ func (h *Harness) StartWorkloadOn(host Host, scenario string, args ...string) (*
 // its own: every tracer attaches first, then the workloads are released
 // in the given order across hosts (a server before its client), and once
 // all exited each host's trace is read. The runs come back in hosts'
-// order.
+// order. A host with a ListenPort is the exception: its tracer attaches
+// after the servers (the workloads up to the last with ReleasedWhen)
+// printed their listening line, before the rest are released. A
+// workload of no host in hosts runs untraced.
 func (h *Harness) TraceHosts(order []*Workload, hosts ...Host) ([]Run, error) {
 	h.runs++
 	tracers := make([]*process, len(hosts))
 	runs := make([]Run, len(hosts))
-	for i, host := range hosts {
-		runs[i].Dir = filepath.Join(h.Dir, fmt.Sprintf("trace-%d-%s", h.runs, host.Name))
-		t, err := h.startHostTracer(host, runs[i].Dir)
-		if err != nil {
-			return nil, err
+	start := func(late bool) error {
+		for i, host := range hosts {
+			if (host.ListenPort != 0) != late {
+				continue
+			}
+			runs[i].Dir = filepath.Join(h.Dir, fmt.Sprintf("trace-%d-%s", h.runs, host.Name))
+			t, err := h.startHostTracer(host, runs[i].Dir)
+			if err != nil {
+				return err
+			}
+			tracers[i] = t
 		}
-		tracers[i] = t
+		return nil
 	}
-	if err := release(order); err != nil {
+	servers := serversEnd(order)
+	if err := start(false); err != nil {
+		return nil, err
+	}
+	if err := release(order[:servers]); err != nil {
+		return nil, err
+	}
+	if err := start(true); err != nil {
+		return nil, err
+	}
+	if err := release(order[servers:]); err != nil {
 		return nil, err
 	}
 	for _, w := range order {
@@ -110,6 +137,27 @@ func (h *Harness) TraceHosts(order []*Workload, hosts ...Host) ([]Run, error) {
 		}
 	}
 	return runs, nil
+}
+
+// serversEnd is the index after the last workload with ReleasedWhen: the
+// servers TraceHosts releases before attaching listening-port tracers.
+func serversEnd(order []*Workload) int {
+	end := 0
+	for i, w := range order {
+		if w.ReleasedWhen != "" {
+			end = i + 1
+		}
+	}
+	return end
+}
+
+// hostTarget is a host tracer's target spec: its listening port, else
+// its workloads' PIDs.
+func hostTarget(host Host) []string {
+	if host.ListenPort != 0 {
+		return []string{"-listen-port", fmt.Sprint(host.ListenPort)}
+	}
+	return []string{"-pid", workloadPIDs(host.Workloads)}
 }
 
 // startHostTracer starts host's `iormesh run` as that host — its own
@@ -132,12 +180,13 @@ func (h *Harness) startHostTracer(host Host, out string) (*process, error) {
 		return nil, err
 	}
 	ready := out + ".ready"
-	args := []string{"--mount", "--uts", "--propagation", "private", "--",
+	args := append([]string{"--mount", "--uts", "--propagation", "private", "--",
 		"sh", "-c", hostShell, "sh", mid, host.Name, filepath.Join(netnsDir, host.Netns),
-		h.TracerBinary, "run", "-pid", workloadPIDs(host.Workloads), "-project", host.Project,
+		h.TracerBinary, "run"}, hostTarget(host)...)
+	args = append(args, "-project", host.Project,
 		"-out", out, "-duration", tracerDuration, "-ready", ready,
 		// Segments too, as startTracer writes them (task ze4).
-		"-trace-dir", out + segmentsSuffix, "-disk-limit", "0", "-disk-min-free", "0"}
+		"-trace-dir", out+segmentsSuffix, "-disk-limit", "0", "-disk-min-free", "0")
 	if h.JavaAgent != "" {
 		args = append(args, "-spool", host.Spool)
 	}
@@ -181,8 +230,14 @@ func finishRun(tracer *process, run *Run) error {
 }
 
 // writeMachineID writes a fresh random machine id (32 hex digits and a
-// newline, machine-id(5)'s format) to path: a new host every run.
+// newline, machine-id(5)'s format) to path, unless the harness gave the
+// host one already: a host keeps its id across a harness's runs, as a
+// real host keeps it across tracer sessions — mesh expansion (task tb4)
+// traces the same hosts round after round and merges every round.
 func writeMachineID(path string) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return err

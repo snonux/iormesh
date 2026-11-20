@@ -4809,6 +4809,12 @@ half (`internal/expand/doc.go` has the reasoning):
 - `unjoined`: the merge said ambiguous, no_key, no_role or
   key_conflict — the far end may be traced.
 - `inbound`: a server half; the peer's port is ephemeral.
+- `transport`: the controller's own SSH/rsync traffic — a peer
+  on port 22, or a connection of a traced `ssh`, `sshd`,
+  `sshd-session`, `rsync`, `scp` or `sftp-server` process (task
+  tb4). On a traced host that traffic is inbound to sshd
+  anyway; this catches a traced SSH client, which would
+  otherwise bind a tracer to some sshd.
 - `via_unregistered`: the revealing host is no longer
   registered.
 - `local`: loopback, link-local, multicast, no address.
@@ -4846,9 +4852,10 @@ allowlist.
 Residual for `--apply`: the visited set cannot see a host
 registered by name whose traces were never collected, nor the
 addresses a multi-homed traced host never used as a local end;
-either can be proposed again by an address. tb4 can catch it
-after the deploy, when the new host's host_id equals a
-registered host's.
+either can be proposed again by an address. `-apply` catches
+it before the deploy: it reads the new host's
+`/etc/machine-id` (the host_id its tracer would stamp) and
+unregisters a host whose id the store already holds.
 
 `iormeshctl expand [-project P]... [-hops N] [-json]` merges
 every project in the store (the same checked segment load as
@@ -4857,10 +4864,39 @@ new pins), lets only `-project`'s connections propose, prints
 `deploy` and `skipped` with evidence and stops; it contacts no
 server and writes nothing. A segment left out of the merge is
 named on stderr and makes it exit 1 after printing: that host's
-addresses are missing from the visited set. `expand --apply`
-(task tb4) runs M4's `add` + `deploy` for each candidate,
-recording `Hop` in the registry entry so the next round can
-enforce the limit.
+addresses are missing from the visited set.
+
+`expand -apply [-dist DIR] [-key FILE]` (task tb4,
+`internal/ctl/expandapply.go`) is one round, after the plan is
+printed:
+
+1. `expand.Enroll` (pure, `internal/expand/enroll.go`) adds the
+   candidates to the registry in memory: one host per address,
+   written as the address (the next round's visited set knows
+   that literal), one project — the first that revealed it —
+   whose target is the peer's listening port, never a client's
+   ephemeral one, no pass-through flags, and the candidate's
+   `hop` (`Registry.AddHop`). Of several ports of one address
+   the busiest is enrolled and the others are printed as
+   `another_port` for the operator to `add`. Each candidate is
+   re-checked against the allowlist, the hop limit and IPv4
+   first; a violation (`ErrNotPlanned`) enrolls nothing.
+2. The pinned key and the deploy record are read — a
+   controller that cannot deploy fails before the registry
+   changes — then the registry is saved: deploy reaches only
+   registered hosts, expansion included.
+3. Per new host, through the same Transport: `cat
+   /etc/machine-id` (no sudo; the residual above), then
+   deploy's own steps (`newDeployer`, `deployer.host`):
+   preflight, verify, stage, upgrade, start. A failed host
+   stays registered (`deploy HOST` retries, `rm HOST` removes).
+
+`-apply` refuses a damaged segment (the visited set would be
+incomplete) and `-json` (the deploy's lines would follow the
+JSON). Rounds are repeated invocations — traffic flows,
+`refresh`, `expand -apply` again; the registry's hops keep the
+limit, and a round that finds nothing new enrolls nothing,
+which is how a cycle ends.
 
 Tests (table-driven, no network; `internal/expand`): allowlist
 CIDR and glob matching, v4-mapped addresses; hop counting
@@ -4874,6 +4910,21 @@ listed once; the plan is identical for any order of the
 merge's halves; text output escapes trace-derived names.
 `internal/ctl` runs `expand` over a real store: no pins
 written, bad segments exit 1, `-project` narrows proposals.
+`expand.Enroll`: one host per address, the hop recorded,
+unplanned candidates refused; rounds terminate on a cycle
+(`TestRoundsTerminate`); the `transport` rule. `-apply` over a
+fake transport: the exact argv (machine-id read, then deploy's
+steps with `-listen-port=PORT`), a second round contacts
+nobody, a peer outside the allowlist or past `-hops` is listed
+and never contacted, a known machine-id is unregistered with
+no sudo call, a bad segment or missing key changes nothing.
+
+Acceptance on the rig: `TestMeshExpansion`
+(`integrationtests/expansion_test.go`, docs/testing.md "M6 on
+the rig") grows 1f4's microservices spread from the gateway's
+host with `Plan` and `Enroll`, starting each enrolled host's
+tracer as `iormesh run -listen-port PORT` (`Host.ListenPort`)
+where a real round deploys over SSH.
 
 **Done when**: PLAN.md's M6 acceptance holds.
 

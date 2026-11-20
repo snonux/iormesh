@@ -12,10 +12,11 @@ import (
 
 // `iormeshctl expand` (PLAN.md M6 "Discover"): list the unresolved peers
 // of the store's merged mesh, which of them the next round would enroll
-// and why each other one stays put. Listing is all it does — it reads the
-// store, the host pins and the registry, never a server, and writes
-// nothing (not even the host pins build records: checkedSegments); enrolling
-// is expand --apply's job (task tb4).
+// and why each other one stays put. Without -apply, listing is all it
+// does — it reads the store, the host pins and the registry, never a
+// server, and writes nothing (not even the host pins build records:
+// checkedSegments). -apply enrolls and deploys (expandapply.go, PLAN.md
+// M6 "Apply").
 //
 // It merges the store itself rather than reading the last build's
 // outputs: the plan needs every unresolved half's 4-tuple, which the
@@ -34,13 +35,57 @@ type expandFlags struct {
 	registry string
 	hops     int
 	asJSON   bool
+	// apply enrolls and deploys the plan's candidates (expandapply.go);
+	// dist and key are deploy's, for the hosts it enrolls.
+	apply     bool
+	dist, key string
+}
+
+// expansion is one planned round and what -apply needs to act on it.
+type expansion struct {
+	reg      federate.Registry
+	regPath  string
+	allow    expand.Allowlist
+	proposal expand.Proposal
+	bad      []federate.BadSegment
+	// hostIDs maps every host_id the store holds to its directory: the
+	// machines already traced, which -apply must not enroll again under
+	// another address.
+	hostIDs map[string]string
 }
 
 // expandCommand parses expand's flags, plans one round and prints it. A
 // segment left out of the merge makes it exit 1 after printing, as build
 // does: a damaged host's addresses drop out of the visited set, so the
-// plan may propose a peer that is in fact traced.
+// plan may propose a peer that is in fact traced. With -apply it then
+// enrolls and deploys the candidates — never past a bad segment.
 func expandCommand(args []string, e env) error {
+	f, err := parseExpandFlags(args, e)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	x, err := planExpansion(ctx, e, f)
+	if err != nil {
+		return err
+	}
+	if err := writeProposal(e, x.proposal, f.asJSON); err != nil {
+		return err
+	}
+	if err := reportExpandBad(e, x.bad); err != nil {
+		if f.apply {
+			return fmt.Errorf("%w; nothing enrolled", err)
+		}
+		return err
+	}
+	if !f.apply {
+		return nil
+	}
+	return applyExpansion(ctx, e, f, x)
+}
+
+// parseExpandFlags parses and checks expand's command line.
+func parseExpandFlags(args []string, e env) (expandFlags, error) {
 	fs := newFlagSet("expand", e.stderr)
 	var f expandFlags
 	fs.Var(&f.build.projects, "project", "propose only from this project's connections (repeatable; default: all)")
@@ -50,48 +95,55 @@ func expandCommand(args []string, e env) error {
 	fs.StringVar(&f.registry, "registry", "", "registry file (default ~/.config/iormesh/servers.yaml)")
 	fs.IntVar(&f.hops, "hops", expand.DefaultMaxHops, "hop limit: rounds away from the hosts enrolled by hand")
 	fs.BoolVar(&f.asJSON, "json", false, "print the plan as JSON")
+	fs.BoolVar(&f.apply, "apply", false, "enroll the candidates in the registry and deploy to them")
+	fs.StringVar(&f.dist, "dist", defaultDist, "with -apply: directory holding the signed tracer builds")
+	fs.StringVar(&f.key, "key", "", "with -apply: pinned minisign public key (default ~/.config/iormesh/"+
+		keyFileName+")")
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return f, fmt.Errorf("%w: %v", errUsage, err)
 	}
-	if fs.NArg() != 0 {
-		return fmt.Errorf("%w: expand takes no arguments", errUsage)
+	switch {
+	case fs.NArg() != 0:
+		return f, fmt.Errorf("%w: expand takes no arguments", errUsage)
+	case f.hops < 0:
+		return f, fmt.Errorf("%w: -hops %d is negative", errUsage, f.hops)
+	case f.apply && f.asJSON:
+		// The deploy's progress lines would follow the JSON on stdout.
+		return f, fmt.Errorf("%w: -apply and -json do not mix", errUsage)
 	}
-	if f.hops < 0 {
-		return fmt.Errorf("%w: -hops %d is negative", errUsage, f.hops)
-	}
-	p, bad, err := planExpansion(context.Background(), e, f)
-	if err != nil {
-		return err
-	}
-	if err := writeProposal(e, p, f.asJSON); err != nil {
-		return err
-	}
-	return reportExpandBad(e, bad)
+	return f, nil
 }
 
 // planExpansion merges the whole store and plans one round against the
 // registry. Segments go through the same checks as a build (the
 // memory-capped child, the pinned host identities), since they are the
-// same untrusted files; the ones that fail are returned.
-func planExpansion(ctx context.Context, e env, f expandFlags) (expand.Proposal, []federate.BadSegment, error) {
-	reg, err := loadRegistry(f.registry, e)
-	if err != nil {
-		return expand.Proposal{}, nil, err
+// same untrusted files; the ones that fail are returned in bad.
+func planExpansion(ctx context.Context, e env, f expandFlags) (expansion, error) {
+	x := expansion{regPath: f.registry}
+	var err error
+	if x.regPath == "" {
+		if x.regPath, err = e.registry(); err != nil {
+			return x, err
+		}
 	}
-	allow, err := expand.NewAllowlist(reg.Expand)
-	if err != nil {
-		return expand.Proposal{}, nil, err
+	if x.reg, err = federate.LoadRegistry(x.regPath); err != nil {
+		return x, err
+	}
+	if x.allow, err = expand.NewAllowlist(x.reg.Expand); err != nil {
+		return x, err
 	}
 	paths, err := resolveBuildPaths(e, f.build)
 	if err != nil {
-		return expand.Proposal{}, nil, err
+		return x, err
 	}
 	res, segs, err := mergeStore(ctx, paths, f.build.projects)
 	if err != nil {
-		return expand.Proposal{}, nil, err
+		return x, err
 	}
-	in := expand.Input{Merge: res, HostDirs: hostDirs(segs.Hosts), Registry: reg, Projects: f.build.projects}
-	return expand.Plan(in, allow, expand.NewLimits(reg.Expand, f.hops)), segs.Bad, nil
+	x.hostIDs, x.bad = hostDirs(segs.Hosts), segs.Bad
+	in := expand.Input{Merge: res, HostDirs: x.hostIDs, Registry: x.reg, Projects: f.build.projects}
+	x.proposal = expand.Plan(in, x.allow, expand.NewLimits(x.reg.Expand, f.hops))
+	return x, nil
 }
 
 // mergeStore merges every project of the store, after checking that the
