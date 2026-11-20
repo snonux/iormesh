@@ -761,17 +761,19 @@ Gated by S1 — done; the design below is S1's result
   decision recorded here, never a quiet relaxation.
 
   Acceptance run (2026-11-20, task 5b4): `mage integrationTest`
-  40 / 40 on two consecutive runs with no skips and zero lost
+  40 / 40 on three of four runs with no skips and zero lost
   or skipped records at load 9–12 (Java method flow, HTTP —
   JDK client and server, sendAsync, TLS, redaction, Servlet,
   Apache, OkHttp, Netty — OTEL ids, DNS, live attach at start
   and mid-run, the class-load map); `mage agentTest` green on
   JDK 17, 21, 25 and 27-ea; workloadTest, unit tests and lint
-  green. One earlier run lost method-flow's first open to a
-  probe attach still in flight (I/O before a JVM's Java mark
-  probes attach stays none by design); the harness now releases
-  a `-javaagent` workload only after the tracer's "joined" line.
-  Schema v1 is frozen in full (docs/output-contract.md). Open
+  green. The fourth run failed method-flow: 17 events that
+  carried a Java mark were judged unbracketed although all 180
+  brackets arrived (attributed 21 instead of 37) — an
+  intermittent join defect under load, never a misattribution,
+  tracked by task se4, which gates M3's acceptance (task 5b4
+  stays open until it lands). Schema v1 is frozen in full
+  (docs/output-contract.md). Open
   beyond ee4: the third-party hook gaps listed above, the Netty
   client side unit-tested only, attaching JVMs a pattern session
   sees start, and cross-mount-namespace attach (M7).
@@ -1671,8 +1673,8 @@ can reconstruct behavior and check it against source code:
   redaction policy)`. S1 settled the Java fields: nested
   `java.thread` (thread name) and `java.stack` (method ids,
   innermost first), as `internal/schema` has them — the flat
-  names above are shorthand; `http` stays provisional until M3
-  closes. Task 3b4 appended `version`, `req_headers` and
+  names above are shorthand; `http` was provisional until M3's
+  acceptance froze it. Task 3b4 appended `version`, `req_headers` and
   `resp_headers` ("name: value", redacted) to it and made `http`
   an event kind of its own (fd -1, conn_id when found).
   Cross-host, `conn_id` comes from the merge's ISN-pair join

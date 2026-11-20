@@ -202,12 +202,13 @@ Field notes:
 - `Java` (`thread`, `stack` of method ids; set exactly when
   `attribution` is `java`) is settled by S1 (thread name from the
   agent's `THREAD` record, stack ids from its `STACK` records);
-  `HTTP` is provisional until M3. M1 assigns `conn_id` locally to fused loopback pairs;
+  `HTTP` was provisional until M3's acceptance froze it. M1
+  assigns `conn_id` locally to fused loopback pairs;
   across hosts the merge assigns it from the ISN-pair join (S2,
   decision #26). The Java fields are nested
   (`java.thread`, `java.stack`) — settled by S1; PLAN.md's flat
-  `java_thread`/`java_stack` were a sketch. `HTTP` stays
-  provisional until M3.
+  `java_thread`/`java_stack` were a sketch. `HTTP` was
+  provisional until M3's acceptance froze it.
 - `schema.Sink` (`Event(*Event) error`, `Close() error`) is what
   the correlator writes to; the NDJSON and parquet writers
   implement it. `Event` borrows the event for the call — a sink

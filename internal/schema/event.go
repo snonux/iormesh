@@ -254,8 +254,8 @@ type Java struct {
 
 // HTTP describes one request on an http event (KindHTTP): what the Java
 // agent's HTTP hooks saw at the library's API boundary (decision #22, M3
-// step 7), so HTTPS is included without touching the wire. Provisional
-// until M3 closes: fields may still change, and only append.
+// step 7), so HTTPS is included without touching the wire. Frozen with
+// M3's acceptance: fields are only appended.
 type HTTP struct {
 	Method string `json:"method,omitempty" parquet:"method,optional"`
 	Scheme string `json:"scheme,omitempty" parquet:"scheme,optional"`

@@ -11,10 +11,10 @@ the plan is the source of truth.
   settled the Java and cross-host fields. With M2's acceptance
   (2026-11-19) every field outside `http` was **frozen**: its
   name, type and meaning no longer change, only new optional
-  fields and kinds are appended. M3's acceptance (2026-11-20)
-  froze the rest: `java` (thread, stack, carrier), `otel`,
-  `http`, `dns`, `stack_id` and the methods, threads, classes
-  and stacks tables. All of v1 is frozen now.
+  fields and kinds are appended. M3's acceptance run
+  (2026-11-20) froze what M3 added or still owned: `http`,
+  `dns`, `otel`, `java.carrier` and the methods, threads,
+  classes and stacks tables. All of v1 is frozen now.
   Readers are strict: a record with an unknown or mis-cased
   key, a missing or null field, another schema version or an
   unknown event kind is rejected, never half-read.

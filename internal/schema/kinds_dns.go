@@ -10,8 +10,8 @@ package schema
 // "a lookup happened" — IP literals and failed lookups are not recorded.
 const KindDNS = "dns"
 
-// DNS is the mapping on a dns event. Provisional until M3 closes: fields
-// may still change, and only append.
+// DNS is the mapping on a dns event. Frozen with M3's acceptance: fields
+// are only appended.
 type DNS struct {
 	// Host is the name as the app passed it to the resolver.
 	Host string `json:"host" parquet:"host"`
