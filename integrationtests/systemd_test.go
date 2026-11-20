@@ -7,12 +7,17 @@ package integrationtests
 // last segment is published. Host safety: the project (and so the unit)
 // name is unique to the run, the unit is stopped and reset in t.Cleanup
 // whatever happens, and nothing is enabled, written to /etc or reloaded
-// — a transient unit lives in /run and is gone after its stop.
+// — a transient unit lives in /run and is gone after its stop. start is
+// confined to /opt/iormesh/traces, so the trace goes there; its project
+// directory, and the directories above it the test created, are removed
+// again.
 
 import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -39,15 +44,22 @@ func TestSystemdUnit(t *testing.T) {
 	enableParallelIfRequested(t)
 	requireTracepoints(t, m1Tracepoints...)
 	bin := absPath(t, tracerBinaryDefault)
-	project, unit := uniqueUnit(t)
+	project, unit, traces := uniqueUnit(t)
 	sleeper := exec.Command("sleep", "600")
 	if err := sleeper.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = sleeper.Process.Kill(); _ = sleeper.Wait() })
-	traces := t.TempDir()
+	// A -trace-dir elsewhere is refused before anything is launched.
+	if out, err := exec.Command(bin, "start", "-pid", strconv.Itoa(sleeper.Process.Pid), "-project", project,
+		"-trace-dir", t.TempDir()).CombinedOutput(); err == nil || !strings.Contains(string(out), "not allowed") {
+		t.Fatalf("start with another -trace-dir: %v: %s", err, out)
+	}
+	// The trace is a few KiB on the pinned dir's partition, which may be
+	// over the 90% default on a developer's host: the percentage limit is
+	// off, the free-bytes floor (256 MiB) still guards the partition.
 	out := iormesh(t, bin, "start", "-pid", strconv.Itoa(sleeper.Process.Pid), "-project", project,
-		"-trace-dir", traces, "-duration", "10m", "-wait", "90s")
+		"-duration", "10m", "-wait", "90s", "-disk-limit", "0")
 	if !strings.Contains(out, "started "+unit) {
 		t.Fatalf("start: %s", out)
 	}
@@ -71,10 +83,35 @@ func TestSystemdUnit(t *testing.T) {
 	}
 }
 
+// pinnedTraceDir is the trace dir start is confined to, /opt/iormesh/traces
+// (no other is accepted), and arranges for the test's trace in it to go
+// when the test ends — and /opt/iormesh/traces and /opt/iormesh too if
+// they did not exist before, each only if empty by then (os.Remove).
+func pinnedTraceDir(t *testing.T, project string) string {
+	t.Helper()
+	const root, traces = "/opt/iormesh", "/opt/iormesh/traces"
+	var created []string
+	for _, d := range []string{traces, root} {
+		if _, err := os.Stat(d); errors.Is(err, os.ErrNotExist) {
+			created = append(created, d)
+		}
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(filepath.Join(traces, project)); err != nil {
+			t.Errorf("remove the test's trace: %v", err)
+		}
+		for _, d := range created {
+			_ = os.Remove(d)
+		}
+	})
+	return traces
+}
+
 // uniqueUnit names a project, and its unit, no other run or host session
+// uses (with the pinned trace dir its trace goes to, pinnedTraceDir),
 // uses, and makes sure the unit is gone when the test ends: stopped (the
 // tracer publishes and exits) and its failed state, if any, reset.
-func uniqueUnit(t *testing.T) (project, unit string) {
+func uniqueUnit(t *testing.T) (project, unit, traces string) {
 	t.Helper()
 	var b [4]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -82,11 +119,14 @@ func uniqueUnit(t *testing.T) (project, unit string) {
 	}
 	project = "itest-" + hex.EncodeToString(b[:])
 	unit = "iormesh-" + project + ".service"
+	// Registered first, so it runs last: the unit is gone before its
+	// trace is removed.
+	traces = pinnedTraceDir(t, project)
 	t.Cleanup(func() {
 		_ = exec.Command("systemctl", "stop", "--", unit).Run()
 		_ = exec.Command("systemctl", "reset-failed", "--", unit).Run()
 	})
-	return project, unit
+	return project, unit, traces
 }
 
 // iormesh runs the tracer binary and fails the test on an error.

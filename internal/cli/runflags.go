@@ -70,6 +70,10 @@ type runConfig struct {
 // server (PLAN.md, M4's 4h auto-exit, here from M1 on).
 const defaultDuration = 4 * time.Hour
 
+// maxDuration caps -duration: still no unbounded tracer, and start's
+// RuntimeMaxSec (duration + 5 min) stays far from any overflow.
+const maxDuration = 7 * 24 * time.Hour
+
 // processAlive reports whether pid is a live process, and when startNS
 // is not 0 the incarnation that started then (target.ProcFS.Alive). It
 // is a variable so flag and loop tests need no real processes.
@@ -188,8 +192,8 @@ func validateRun(cfg runConfig) error {
 		// The registry (iormeshctl add) checks the same rule, so a
 		// label the controller stored is one the tracer accepts.
 		return fmt.Errorf("%w: -project %q: want %s", errUsage, cfg.project, project.Rule)
-	case cfg.duration <= 0:
-		return fmt.Errorf("%w: -duration %v: must be positive", errUsage, cfg.duration)
+	case cfg.duration <= 0 || cfg.duration > maxDuration:
+		return fmt.Errorf("%w: -duration %v: want more than 0, at most %v", errUsage, cfg.duration, maxDuration)
 	}
 	return nil
 }

@@ -36,6 +36,11 @@ func runCommand(args []string, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// The installed binary run through sudo is confined (confine.go): the
+	// sudoers rule must not be a way to write files as root.
+	if err := confineRun(cfg); err != nil {
+		return err
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	stopProfile, err := startCPUProfile(cfg.cpuProfile)

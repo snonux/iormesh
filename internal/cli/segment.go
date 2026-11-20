@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -132,13 +131,14 @@ func (cfg runConfig) watchdog() *segment.Watchdog {
 // checkTraceDisk is the startup check (PLAN.md: "fails fast if the
 // partition is already at the limit"): it runs before the BPF object is
 // loaded, so a full disk costs milliseconds, not the seconds of a load.
-// The trace dir is created here, since statfs needs a path that exists.
+// The trace dir is created here, since statfs needs a path that exists;
+// segment.MakeDirs never chmods a directory that already exists.
 func checkTraceDisk(cfg runConfig) error {
 	wd := cfg.watchdog()
 	if wd == nil {
 		return nil
 	}
-	if err := os.MkdirAll(cfg.traceDir, 0o755); err != nil {
+	if err := segment.MakeDirs(cfg.traceDir); err != nil {
 		return fmt.Errorf("trace dir: %w", err)
 	}
 	return wd.Check()

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -107,7 +108,7 @@ func writeState(dir string, st sessionState) error {
 // file that is not a state (corrupt, or for another project's name) is an
 // error of its own, never a silently empty state.
 func readState(dir string) (sessionState, error) {
-	b, err := os.ReadFile(filepath.Join(dir, StateFile))
+	b, err := readStateFile(filepath.Join(dir, StateFile))
 	if err != nil {
 		return sessionState{}, fmt.Errorf("state: %w", err)
 	}
@@ -120,6 +121,36 @@ func readState(dir string) (sessionState, error) {
 			filepath.Join(dir, StateFile), st.State, st.Session)
 	}
 	return st, nil
+}
+
+// maxStateSize bounds a state file read: a real one is under 1 KiB.
+const maxStateSize = 64 << 10
+
+// readStateFile reads path as root would safely read a file under a
+// -trace-dir the caller chose (status, stop): not through a symlink, only
+// a regular file, at most maxStateSize — so status can neither be pointed
+// at another file nor stalled on a FIFO or a huge one.
+func readStateFile(path string) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	b, err := io.ReadAll(io.LimitReader(f, maxStateSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > maxStateSize {
+		return nil, fmt.Errorf("%s is larger than %d bytes", path, maxStateSize)
+	}
+	return b, nil
 }
 
 // effective is the state status reports: a running state whose process

@@ -512,6 +512,35 @@ func TestUntrustedDirsStopTheStart(t *testing.T) {
 	}
 }
 
+// TestExistingDirsAreNotChmoded: a trace dir that already exists keeps
+// its mode — pointed at an existing root-owned tree (-trace-dir /), the
+// tracer must not loosen it — while the directories it creates are 0755.
+func TestExistingDirsAreNotChmoded(t *testing.T) {
+	trace := filepath.Join(t.TempDir(), "traces")
+	if err := os.Mkdir(trace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(trace, 0o711); err != nil {
+		t.Fatal(err)
+	}
+	w, err := New(Config{Dir: filepath.Join(trace, "shop"), FQDN: "h", Session: "s1", Project: "shop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for d, want := range map[string]os.FileMode{trace: 0o711, filepath.Join(trace, "shop"): 0o755,
+		filepath.Join(trace, "shop", ReadyDir): 0o755} {
+		if fi, err := os.Stat(d); err != nil || fi.Mode().Perm() != want {
+			t.Errorf("%s: %v, %v; want %v", d, fi.Mode().Perm(), err, want)
+		}
+	}
+	if err := MakeDirs(filepath.Join(trace, "shop", ReadyDir, "x")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestDirsAre0755UnderAnyUmask: under umask 077 the collector still gets
 // into the project directory and ready/.
 func TestDirsAre0755UnderAnyUmask(t *testing.T) {

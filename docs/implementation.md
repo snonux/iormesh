@@ -3162,10 +3162,16 @@ func (cfg startConfig) unitArgs(self string) []string {
   so a bad flag fails the start, not the journal, and forwards
   the ones set as single `-name=value` argv elements, paths made
   absolute (the unit runs in `/`). Without `-ready-owner` it
-  passes `SUDO_UID:SUDO_GID` (none under root's own sudo). It
-  needs segments: `-out` alone is refused, `state.json` lives
-  beside them. A live unit for the project is refused — flags
-  change by stop and start (#19) — and a failed one reset.
+  passes `SUDO_UID:SUDO_GID` (none under root's own sudo).
+  Its run is root, so start is confined (`confine.go`, also
+  applied to the installed binary's `run` under sudo): no
+  `-out`, `-cpuprofile` or `-ready`, `-trace-dir` only
+  `/opt/iormesh/traces` (where `state.json` lives too), `-spool`
+  only `/run/iormesh/spool/<project>`, `-ready-owner` only the
+  sudo caller, no `$` in a forwarded value
+  ([security.md](security.md)). A live unit for the project is
+  refused — flags change by stop and start (#19) — and a failed
+  one reset.
 - Every systemd call is an argv through the `commander`
   interface; the unit tests replace it with a fake, so they
   never start, stop or list a host unit. Unit names are built
@@ -3253,8 +3259,9 @@ func (w *Writer) rotate(now time.Time) error {
   UID:GID` (`start` passes `SUDO_UID`/`SUDO_GID` on to `run`);
   a `ready` that is not a real directory fails the start, as does
   a trace or project directory not owned by the euid or writable
-  by group or others (docs/security.md). The three directories
-  are chmod'ed 0755 whatever the umask. `New` takes an exclusive
+  by group or others (docs/security.md). The directories it
+  creates are set 0755 whatever the umask; an existing one is
+  never chmod'ed (`segment.MakeDirs`). `New` takes an exclusive
   `flock` on `<project>/.lock` (one run per project directory)
   before sweeping stale `.active-<session>-*` files, and holds it
   until `Close` has published.

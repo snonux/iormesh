@@ -869,6 +869,14 @@ Kubernetes (M7) build on it.
   whole lifecycle; nothing else on the server needs sudo. The
   binary is root-owned; how it gets installed and upgraded
   without turning that rule into full sudo is decision #1.
+  Since every argument under the rule is the caller's, a
+  session started through it is confined (task 9b4): `start`
+  always, and `run` of the installed binary under sudo, refuse
+  `-out`, `-cpuprofile` and `-ready`, pin `-trace-dir` to
+  `/opt/iormesh/traces` and `-spool` to
+  `/run/iormesh/spool/<project>`, and give `ready/` only to the
+  sudo caller; no existing directory is ever chmod'ed
+  ([docs/security.md](docs/security.md)).
 - **Trace files** land on the server as parquet under
   `/opt/iormesh/traces/<project>/` — every trace is always
   inside a project subfolder, so unrelated apps on one server

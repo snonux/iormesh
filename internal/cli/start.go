@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -47,10 +48,10 @@ var (
 // command line is run's and is forwarded to the unit's run.
 var startOnly = map[string]bool{"cpu-quota": true, "memory-max": true, "wait": true}
 
-// pathFlags are run's flags that name files: the unit runs in /, so start
-// makes them absolute against its own working directory first.
-var pathFlags = map[string]bool{"out": true, "ready": true, "cpuprofile": true,
-	"spool": true, "agent": true, "trace-dir": true}
+// pathFlags are run's flags that name files and that a confined start
+// accepts: the unit runs in /, so start makes them absolute against its
+// own working directory first.
+var pathFlags = map[string]bool{"spool": true, "agent": true, "trace-dir": true}
 
 // control runs the unit subcommands (start, stop, status, uninstall).
 // Every outside effect goes through it, so tests run them against a fake
@@ -65,6 +66,9 @@ type control struct {
 	sleep  func(ctx context.Context, d time.Duration) error
 	stdout io.Writer
 	stderr io.Writer
+	// confine is what a started session may use (confine.go): start is
+	// always confined, since its unit runs as root.
+	confine confinement
 }
 
 // startConfig is a validated `iormesh start` command line.
@@ -82,7 +86,7 @@ func newControl(stdout, stderr io.Writer) (control, error) {
 		return control{}, fmt.Errorf("own binary: %w", err)
 	}
 	return control{sys: execCommander{}, self: self, env: os.Getenv, now: time.Now,
-		sleep: sleepCtx, stdout: stdout, stderr: stderr}, nil
+		sleep: sleepCtx, stdout: stdout, stderr: stderr, confine: defaultConfinement(os.Getenv)}, nil
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {
@@ -129,6 +133,9 @@ func (c control) start(ctx context.Context, args []string) error {
 			return err
 		}
 	}
+	if err := c.confine.prepare(cfg.run); err != nil {
+		return err
+	}
 	if _, err := c.sys.Output(ctx, "systemd-run", cfg.unitArgs(c.self)...); err != nil {
 		return err
 	}
@@ -173,21 +180,23 @@ func (c control) parseStart(args []string) (startConfig, error) {
 			return cfg, err
 		}
 	}
-	return cfg.finish(rf)
+	return c.finishStart(cfg, rf)
 }
 
-// finish validates run's flags into cfg.run. start needs segments: they
-// are what a server session is for, and state.json lives beside them.
-func (cfg startConfig) finish(rf runFlags) (startConfig, error) {
+// finishStart validates run's flags into cfg.run and confines them: the
+// unit's run is root, so a start takes no -out, -cpuprofile or -ready,
+// segments go to the pinned trace dir (where state.json lives too) and a
+// spool to the project's pinned one (confinement.check).
+func (c control) finishStart(cfg startConfig, rf runFlags) (startConfig, error) {
 	var err error
 	if cfg.run, err = rf.config(); err != nil {
 		return cfg, err
 	}
-	if cfg.run.traceDir == "" {
-		return cfg, fmt.Errorf("%w: start writes segments: give -trace-dir with -out, or drop -out", errUsage)
-	}
 	if cfg.run.traceDir, err = filepath.Abs(cfg.run.traceDir); err != nil {
 		return cfg, fmt.Errorf("-trace-dir: %w", err)
+	}
+	if err := c.confine.check(cfg.run); err != nil {
+		return cfg, err
 	}
 	cfg.unit, err = unitName(cfg.run.project)
 	return cfg, err
@@ -208,7 +217,10 @@ func (cfg startConfig) validateCaps() error {
 
 // forwardedArgs rebuilds run's argv from the flags set on start's command
 // line, each as one -name=value element (so no value can be read as a
-// flag of its own), path values made absolute.
+// flag of its own), path values made absolute. A value with a $ is
+// refused: systemd 254 and later expand $VAR in a unit's command line,
+// and --expand-environment=no, which turns that off, is unknown to the
+// older systemd-run of servers still in use.
 func forwardedArgs(fs *flag.FlagSet) ([]string, error) {
 	var args []string
 	var err error
@@ -217,13 +229,17 @@ func forwardedArgs(fs *flag.FlagSet) ([]string, error) {
 			return
 		}
 		v := f.Value.String()
+		if strings.Contains(v, "$") {
+			err = fmt.Errorf("%w: -%s %q: no $ in a value systemd would expand", errUsage, f.Name, v)
+			return
+		}
 		if pathFlags[f.Name] && v != "" {
 			v, err = filepath.Abs(v)
 		}
 		args = append(args, "-"+f.Name+"="+v)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("start: %w", err)
+		return nil, err
 	}
 	return args, nil
 }
@@ -239,7 +255,7 @@ func (c control) sudoOwner(args []string) ([]string, error) {
 	}
 	owner := uid + ":" + gid
 	if _, err := parseOwner(owner); err != nil {
-		return nil, fmt.Errorf("SUDO_UID/SUDO_GID: %w", err)
+		return nil, fmt.Errorf("%w: SUDO_UID/SUDO_GID: %v", errUsage, err)
 	}
 	return append(args, "-ready-owner="+owner), nil
 }

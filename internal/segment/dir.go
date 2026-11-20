@@ -83,13 +83,15 @@ func validName(what, s string, dashOK bool) error {
 // check below and have root publish — and rename over — files wherever
 // it points. So both must be real directories owned by the tracer's
 // euid and not group- or other-writable; a planted directory stops the
-// start instead of being repaired. All three are set 0755 explicitly,
-// whatever the umask (077 would lock the collector out). ready/ itself
-// must be a real directory too, then goes to owner.
+// start instead of being repaired. A directory prepareDir creates is set
+// 0755 whatever the umask (077 would lock the collector out); one that
+// already exists is never chmod'ed (MakeDirs), so a trace dir pointed at
+// an existing root-owned tree cannot loosen it. ready/ itself must be a
+// real directory too, then goes to owner.
 func prepareDir(dir string, owner *Owner) error {
 	ready := filepath.Join(dir, ReadyDir)
-	if err := os.MkdirAll(ready, 0o755); err != nil {
-		return fmt.Errorf("segment: %w", err)
+	if err := MakeDirs(ready); err != nil {
+		return err
 	}
 	for _, d := range []string{filepath.Dir(dir), dir} {
 		if err := trustedDir(d); err != nil {
@@ -99,16 +101,42 @@ func prepareDir(dir string, owner *Owner) error {
 	if err := realDir(ready); err != nil {
 		return err
 	}
-	for _, d := range []string{filepath.Dir(dir), dir, ready} {
-		if err := os.Chmod(d, 0o755); err != nil {
-			return fmt.Errorf("segment: %w", err)
-		}
-	}
 	if owner == nil {
 		return nil
 	}
 	if err := os.Lchown(ready, owner.UID, owner.GID); err != nil {
 		return fmt.Errorf("segment: ready owner: %w", err)
+	}
+	return nil
+}
+
+// MakeDirs creates path and its missing parents, each it creates set
+// 0755 exactly (Mkdir's mode passes through the umask). An existing
+// directory is left as it is — never chmod'ed: run as root, a chmod of
+// whatever directory a flag names would be a way to loosen any tree. A
+// symlinked parent (/var/run) is followed; whether the trace and project
+// directories may be symlinks is prepareDir's check (they may not).
+func MakeDirs(path string) error {
+	path = filepath.Clean(path)
+	if fi, err := os.Stat(path); err == nil {
+		if !fi.IsDir() {
+			return fmt.Errorf("segment: %s is not a directory", path)
+		}
+		return nil
+	}
+	if parent := filepath.Dir(path); parent != path {
+		if err := MakeDirs(parent); err != nil {
+			return err
+		}
+	}
+	if err := os.Mkdir(path, 0o755); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return nil // created meanwhile: not ours, so not chmod'ed
+		}
+		return fmt.Errorf("segment: %w", err)
+	}
+	if err := os.Chmod(path, 0o755); err != nil {
+		return fmt.Errorf("segment: %w", err)
 	}
 	return nil
 }

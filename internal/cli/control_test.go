@@ -10,8 +10,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+
+	"iormesh/internal/segment"
 )
 
 // fakeSystemd stands in for systemd-run and systemctl: the unit tests
@@ -107,10 +110,21 @@ func testControl(sys commander, env map[string]string) (control, *bytes.Buffer) 
 	now := time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC)
 	out := &bytes.Buffer{}
 	return control{sys: sys, self: "/opt/iormesh/bin/iormesh", stdout: out, stderr: &bytes.Buffer{},
-		env:   func(k string) string { return env[k] },
-		now:   func() time.Time { return now },
-		sleep: func(_ context.Context, d time.Duration) error { now = now.Add(d); return nil },
+		env:     func(k string) string { return env[k] },
+		now:     func() time.Time { return now },
+		sleep:   func(_ context.Context, d time.Duration) error { now = now.Add(d); return nil },
+		confine: defaultConfinement(func(k string) string { return env[k] }),
 	}, out
+}
+
+// rootedControl is testControl confined to a temporary trace root (and a
+// spool root inside it) instead of /opt and /run, which it returns.
+func rootedControl(t *testing.T, sys commander, env map[string]string) (control, *bytes.Buffer, string) {
+	t.Helper()
+	c, out := testControl(sys, env)
+	traces := t.TempDir()
+	c.confine.traceRoot, c.confine.spoolRoot = traces, filepath.Join(traces, "spool-root")
+	return c, out, traces
 }
 
 // liveState is a running state of this test process, so processAlive
@@ -138,6 +152,9 @@ func TestStartUnitArgv(t *testing.T) {
 	c, _ := testControl(sys, map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1001"})
 	t.Chdir(t.TempDir())
 	cwd, _ := os.Getwd()
+	// A relative -trace-dir is made absolute before the confinement
+	// compares it with the pinned root.
+	c.confine.traceRoot = filepath.Join(cwd, "traces")
 	cfg, err := c.parseStart([]string{"-pattern", "*orders*", "-project", "shop", "-trace-dir", "traces",
 		"-duration", "1h", "-cpu-quota", "50%", "-native-stacks", "-wait", "0"})
 	if err != nil {
@@ -158,8 +175,9 @@ func TestStartUnitArgv(t *testing.T) {
 	}
 }
 
-// TestStartReadyOwner: an explicit -ready-owner wins over sudo's, and
-// root's own sudo (or none) leaves ready/ root's.
+// TestStartReadyOwner: ready/ goes to the sudo caller (an explicit
+// -ready-owner may only name them, TestStartRejects), and root's own sudo
+// (or none) leaves ready/ root's unless -ready-owner says otherwise.
 func TestStartReadyOwner(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -169,8 +187,9 @@ func TestStartReadyOwner(t *testing.T) {
 	}{
 		{"sudo", map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"}, nil, "-ready-owner=1000:1000"},
 		{"explicit", map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"},
-			[]string{"-ready-owner", "7:8"}, "-ready-owner=7:8"},
+			[]string{"-ready-owner", "1000:1000"}, "-ready-owner=1000:1000"},
 		{"root sudo", map[string]string{"SUDO_UID": "0", "SUDO_GID": "0"}, nil, ""},
+		{"root picks", nil, []string{"-ready-owner", "7:8"}, "-ready-owner=7:8"},
 		{"no sudo", nil, nil, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -194,17 +213,28 @@ func TestStartReadyOwner(t *testing.T) {
 
 func TestStartRejects(t *testing.T) {
 	for name, args := range map[string][]string{
-		"no project":       {"-pattern", "x"},
-		"bad project":      {"-pattern", "x", "-project", "-shop"},
-		"slash project":    {"-pattern", "x", "-project", "a/b"},
-		"no target":        {"-project", "p"},
-		"bad cpu quota":    {"-pattern", "x", "-project", "p", "-cpu-quota", "100"},
-		"shell cpu quota":  {"-pattern", "x", "-project", "p", "-cpu-quota", "1%; rm"},
-		"bad memory max":   {"-pattern", "x", "-project", "p", "-memory-max", "1 G"},
-		"negative wait":    {"-pattern", "x", "-project", "p", "-wait", "-1s"},
-		"out, no segments": {"-pattern", "x", "-project", "p", "-out", "/tmp/o"},
-		"positional":       {"-pattern", "x", "-project", "p", "extra"},
-		"bad sudo uid":     {"-pattern", "x", "-project", "p"},
+		"no project":      {"-pattern", "x"},
+		"bad project":     {"-pattern", "x", "-project", "-shop"},
+		"slash project":   {"-pattern", "x", "-project", "a/b"},
+		"no target":       {"-project", "p"},
+		"bad cpu quota":   {"-pattern", "x", "-project", "p", "-cpu-quota", "100"},
+		"shell cpu quota": {"-pattern", "x", "-project", "p", "-cpu-quota", "1%; rm"},
+		"bad memory max":  {"-pattern", "x", "-project", "p", "-memory-max", "1 G"},
+		"negative wait":   {"-pattern", "x", "-project", "p", "-wait", "-1s"},
+		"positional":      {"-pattern", "x", "-project", "p", "extra"},
+		"bad sudo uid":    {"-pattern", "x", "-project", "p"},
+		"duration > 7d":   {"-pattern", "x", "-project", "p", "-duration", "169h"},
+		"$ expanded":      {"-pattern", "$HOME", "-project", "p"},
+		// The root-write attacks of the one sudoers rule (confine.go).
+		"-out":             {"-pattern", "x", "-project", "p", "-out", "/etc"},
+		"-cpuprofile":      {"-pattern", "x", "-project", "p", "-cpuprofile", "/etc/passwd"},
+		"-ready":           {"-pattern", "x", "-project", "p", "-ready", "/etc/passwd"},
+		"-trace-dir /":     {"-pattern", "x", "-project", "root", "-trace-dir", "/"},
+		"-trace-dir below": {"-pattern", "x", "-project", "p", "-trace-dir", "/opt/iormesh/traces/x"},
+		"-trace-dir dots":  {"-pattern", "x", "-project", "p", "-trace-dir", "/opt/iormesh/traces/../../../etc"},
+		"-spool /etc":      {"-pattern", "x", "-project", "p", "-spool", "/etc/profile.d"},
+		"-spool other":     {"-pattern", "x", "-project", "p", "-spool", "/run/iormesh/spool/q"},
+		"-ready-owner":     {"-pattern", "x", "-project", "p", "-ready-owner", "0:0"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			sys := newFakeSystemd()
@@ -213,8 +243,8 @@ func TestStartRejects(t *testing.T) {
 				env["SUDO_GID"] = "staff"
 			}
 			c, _ := testControl(sys, env)
-			if err := c.start(context.Background(), args); err == nil {
-				t.Fatal("start accepted it")
+			if err := c.start(context.Background(), args); !errors.Is(err, errUsage) {
+				t.Fatalf("start: %v, want a usage error", err)
 			}
 			if len(sys.calls) != 0 {
 				t.Fatalf("systemd was called: %v", sys.calls)
@@ -223,13 +253,72 @@ func TestStartRejects(t *testing.T) {
 	}
 }
 
+// TestStartPinnedSpool: the project's pinned spool is accepted and its
+// root created 0755 before the unit starts.
+func TestStartPinnedSpool(t *testing.T) {
+	sys := newFakeSystemd()
+	c, _, _ := rootedControl(t, sys, nil)
+	spool := filepath.Join(c.confine.spoolRoot, "p")
+	if err := c.start(context.Background(), []string{"-pattern", "x", "-project", "p",
+		"-trace-dir", c.confine.traceRoot, "-spool", spool, "-wait", "0"}); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(c.confine.spoolRoot); err != nil || fi.Mode().Perm() != 0o755 {
+		t.Fatalf("spool root: %v, %v", fi, err)
+	}
+	if !slices.Contains(sys.calls[len(sys.calls)-1], "-spool="+spool) {
+		t.Fatalf("spool not forwarded: %v", sys.calls)
+	}
+}
+
+// TestRunConfinement: only the installed binary run through sudo is
+// confined — a build run with sudo, or the unit's run (no sudo
+// environment), is not — and a confined run gets start's checks.
+func TestRunConfinement(t *testing.T) {
+	sudo := func(k string) string { return map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"}[k] }
+	none := func(string) string { return "" }
+	for _, tc := range []struct {
+		self string
+		env  func(string) string
+		want bool
+	}{
+		{installedBinary, sudo, true},
+		{"/opt/iormesh/bin/../bin/iormesh", sudo, true},
+		{installedBinary, none, false},
+		{"/home/u/iormesh/iormesh", sudo, false},
+	} {
+		k, ok := runConfinement(tc.self, tc.env)
+		if ok != tc.want || (ok && (k.traceRoot != defaultTraceDir || k.sudoOwner != "1000:1000")) {
+			t.Errorf("runConfinement(%s) = %+v, %v", tc.self, k, ok)
+		}
+	}
+	k, _ := runConfinement(installedBinary, sudo)
+	ok := runConfig{project: "p", traceDir: defaultTraceDir}
+	for name, cfg := range map[string]runConfig{
+		"out":        {project: "p", traceDir: defaultTraceDir, out: "/etc"},
+		"cpuprofile": {project: "p", traceDir: defaultTraceDir, cpuProfile: "/etc/shadow"},
+		"ready":      {project: "p", traceDir: defaultTraceDir, ready: "/etc/passwd"},
+		"trace dir":  {project: "root", traceDir: "/"},
+		"spool":      {project: "p", traceDir: defaultTraceDir, spool: "/usr/local/bin"},
+		"owner":      {project: "p", traceDir: defaultTraceDir, readyOwner: &segment.Owner{UID: 0, GID: 0}},
+	} {
+		if err := k.check(cfg); !errors.Is(err, errUsage) {
+			t.Errorf("%s: %v, want refused", name, err)
+		}
+	}
+	ok.spool, ok.readyOwner = "/run/iormesh/spool/p", &segment.Owner{UID: 1000, GID: 1000}
+	if err := k.check(ok); err != nil {
+		t.Errorf("pinned paths refused: %v", err)
+	}
+}
+
 // TestStartRefusesLiveUnit: flags change by stop and start (decision #19),
 // so a live unit is never replaced or doubled.
 func TestStartRefusesLiveUnit(t *testing.T) {
 	sys := newFakeSystemd()
 	sys.units["iormesh-shop.service"] = running
-	c, _ := testControl(sys, nil)
-	err := c.start(context.Background(), []string{"-pattern", "x", "-project", "shop", "-trace-dir", t.TempDir()})
+	c, _, traces := rootedControl(t, sys, nil)
+	err := c.start(context.Background(), []string{"-pattern", "x", "-project", "shop", "-trace-dir", traces})
 	if err == nil || !strings.Contains(err.Error(), "already active") {
 		t.Fatalf("err %v", err)
 	}
@@ -242,16 +331,15 @@ func TestStartRefusesLiveUnit(t *testing.T) {
 // running state, recognized by the unit's invocation id; a state of an
 // earlier run is not mistaken for it.
 func TestStartWaitsForAttach(t *testing.T) {
-	traces := t.TempDir()
+	sys := newFakeSystemd()
+	c, out, traces := rootedControl(t, sys, nil)
 	dir := filepath.Join(traces, "shop")
 	old := liveState("shop", "inv0")
 	old.State = stateEnded
 	mustWriteState(t, dir, old)
-	sys := newFakeSystemd()
 	sys.units["iormesh-shop.service"] = unitState{LoadState: "loaded", ActiveState: "failed", SubState: "failed"}
 	shows := 0
 	sys.onRun = func([]string) { sys.units["iormesh-shop.service"] = running }
-	c, out := testControl(sys, nil)
 	c.sleep = func(context.Context, time.Duration) error {
 		if shows++; shows == 3 { // the run attaches after a few polls
 			mustWriteState(t, dir, liveState("shop", "inv1"))
@@ -283,8 +371,8 @@ func TestStartWaitFailures(t *testing.T) {
 		{"ends at once", running, stateEnded, "ended at once (targets_exited)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			traces := t.TempDir()
 			sys := newFakeSystemd()
+			c, _, traces := rootedControl(t, sys, nil)
 			sys.onRun = func([]string) {
 				sys.units["iormesh-p.service"] = tc.after
 				if tc.state != "" {
@@ -293,7 +381,6 @@ func TestStartWaitFailures(t *testing.T) {
 					mustWriteState(t, filepath.Join(traces, "p"), st)
 				}
 			}
-			c, _ := testControl(sys, nil)
 			err := c.start(context.Background(), []string{"-pattern", "x", "-project", "p", "-trace-dir", traces})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err %v, want %q", err, tc.want)
@@ -305,8 +392,8 @@ func TestStartWaitFailures(t *testing.T) {
 func TestStartSystemdRunFails(t *testing.T) {
 	sys := newFakeSystemd()
 	sys.fail["systemd-run"] = errors.New("Unit iormesh-p.service was already loaded")
-	c, _ := testControl(sys, nil)
-	err := c.start(context.Background(), []string{"-pattern", "x", "-project", "p", "-trace-dir", t.TempDir()})
+	c, _, traces := rootedControl(t, sys, nil)
+	err := c.start(context.Background(), []string{"-pattern", "x", "-project", "p", "-trace-dir", traces})
 	if err == nil || !strings.Contains(err.Error(), "already loaded") {
 		t.Fatalf("err %v", err)
 	}
@@ -483,6 +570,28 @@ func TestUninstall(t *testing.T) {
 	}
 	if err := c.uninstall(context.Background(), []string{"-root", "/"}); !errors.Is(err, errUsage) {
 		t.Fatalf("uninstall took a path: %v", err)
+	}
+}
+
+// TestReadStateRefusesPlants: status and stop read state.json as root
+// under a -trace-dir the caller names, so a symlink (to another file), a
+// FIFO (a stall) or a huge file is refused, not read.
+func TestReadStateRefusesPlants(t *testing.T) {
+	for name, plant := range map[string]func(path string) error{
+		"symlink": func(p string) error { return os.Symlink("/etc/passwd", p) },
+		"fifo":    func(p string) error { return syscall.Mkfifo(p, 0o644) },
+		"huge": func(p string) error {
+			return os.WriteFile(p, []byte(`{"state":"running","session":"s","x":"`+
+				strings.Repeat("a", maxStateSize)+`"}`), 0o644)
+		},
+	} {
+		dir := t.TempDir()
+		if err := plant(filepath.Join(dir, StateFile)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := readState(dir); err == nil || errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s: %v, want refused", name, err)
+		}
 	}
 }
 
