@@ -55,6 +55,7 @@ type halfAcc struct {
 	local, peer    netip.AddrPort
 	first          uint64 // earliest wall ns of any record
 	recs           []stateRec
+	timing         timing // what the clock bounds read (clock.go)
 }
 
 // LocalConn names a conn_id on one host: conn ids are host-local, so the
@@ -68,7 +69,7 @@ func newCollector() *collector { return &collector{acc: map[LocalConn]*halfAcc{}
 
 // add folds one event into its half. Events without a conn_id name no
 // connection and are ignored, as are kinds that say nothing about role,
-// key or owner beyond the process holding the socket.
+// key, owner or the instants the clock bounds read (timing.add).
 func (c *collector) add(ev *schema.Event) {
 	if ev.ConnID == "" {
 		return
@@ -83,6 +84,7 @@ func (c *collector) add(ev *schema.Event) {
 	if ev.PID != 0 {
 		a.procs[schema.ProcessNodeID(ev.HostID, ev.PID, ev.PIDInc)] = true
 	}
+	a.timing.add(ev)
 	switch ev.Event {
 	case schema.KindConnect:
 		a.client = true

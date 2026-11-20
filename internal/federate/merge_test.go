@@ -95,7 +95,24 @@ func report(t *testing.T, r Result) string {
 	}
 	slices.Sort(renames)
 	b.WriteString(strings.Join(renames, ""))
+	for _, c := range r.Clocks {
+		b.WriteString(clockLine(c))
+	}
 	return b.String()
+}
+
+// clockLine renders one clock bound; a missing side prints as "-".
+func clockLine(c ClockBound) string {
+	side := func(v int64, ok bool) string {
+		if !ok {
+			return "-"
+		}
+		return fmt.Sprint(v)
+	}
+	w, ok := c.Width()
+	return fmt.Sprintf("clock %s..%s window=%d offset=[%s,%s] width=%s empty=%v n=%d by=%s/%s\n",
+		c.HostA, c.HostB, c.Start, side(c.Lower, c.HasLower), side(c.Upper, c.HasUpper),
+		side(w, ok), c.Empty(), c.Messages, c.LowerConn, c.UpperConn)
 }
 
 // TestMergeGolden merges the synthetic mesh and compares the whole

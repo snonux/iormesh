@@ -3352,7 +3352,8 @@ The SSH transport:
 ### The merge
 
 Built in task fb4 as `internal/federate` (cgo-free): `key.go`,
-`half.go`, `fuse.go`, `source.go`, `merge.go`. The tracer's
+`half.go`, `fuse.go`, `source.go`, `merge.go`; the clock bounds
+(`clock.go`, `bound.go`, `order.go`) in task gb4. The tracer's
 `tcp_state` records carry the four `tcp_sock` fields as
 `args.snd_una`, `rcv_nxt`, `bytes_acked`, `bytes_received`
 (docs/schema.md, all four or none); the BPF capture that fills
@@ -3460,20 +3461,65 @@ mesh with every unresolved reason (`no_match`, `no_key`,
 takes its host from its graph's one host node; with sockets but
 no single host node it is rejected.
 
-Clock offsets (`internal/federate/clock.go`) implement S2's
-inequalities per host pair: every receive pairs with the send
-that queued its last byte, matched by sequence offset
-`seq − (iss + 1)` (so the data records need their sequence
-range: `write_seq` after the send minus the bytes queued — TFO
-assigns the ISN inside the call — and `copied_seq` before the
-receive). θ = clock_B − clock_A is below
-`recv_B − send_A` and above `send_B − recv_A`; the intersection,
-computed per time window so drift shows up, is attached to the
-merged graph as a `clock_bound` record `{min, max}` with its
-width. An empty intersection is reported, not clamped. Cross-host ordering is a
-topological sort over per-thread order plus send→receive edges
-(`internal/federate/order.go`); timestamps only break ties
-between causally unrelated events, and such ties are flagged.
+Clock offsets are built (task gb4): `clock.go` turns each fused
+connection into messages, `bound.go` intersects them,
+`order.go` orders instants by the result.
+
+- **Messages.** Every receive pairs with the send that queued
+  its last byte, matched by stream offset `seq − (iss + 1)`.
+  The data records carry `args.tcp_seq`, the sequence number of
+  the call's first byte (schema only so far; the tracer's
+  `tcp_sendmsg`/`tcp_recvmsg` capture is still open: `write_seq`
+  after the send minus the bytes queued — TFO assigns the ISN
+  inside the call — and `copied_seq` before the receive). The
+  send's instant is its enter, the receive's its exit. The SYN
+  is one more client→server message: the later of the client's
+  first `connect` enter and its `SYN_SENT` record, against the
+  earlier of the server's accept exit and its first `tcp_state`
+  record (the child socket exists only once the SYN arrived).
+  No server record precedes the SYN-ACK, so the handshake
+  bounds one side only.
+- **Never a guessed pair.** Sends whose offset ranges overlap
+  (exact duplicates from two sessions on one host count once),
+  a range that crosses 4 GiB, or a stream that may have passed
+  4 GiB (data bytes or a `tcp_sock` counter at 2³² or more)
+  give no data messages: an offset there could name two sends.
+  A receive whose byte no traced send holds gives nothing.
+- **Bounds.** θ = clock_B − clock_A (A < B by name) is below
+  `recv_B − send_A` and above `send_B − recv_A`. The merge
+  keeps one `ClockBound` per host pair and window
+  (`Options.ClockWindow`, default 1 minute, on A's clock) —
+  `Result.Clocks`, sorted — with `Lower`/`Upper` (each may be
+  absent), the conn ids that set them, the message count and
+  `Width()`. An empty intersection stays as it is
+  (`Empty()`), witnesses named, never clamped. A pair without
+  a fused connection has no bound; neither does a host with
+  itself.
+- **Fusion stays clock-free.** The bound is computed after
+  `Fuse`, from the fused connections only, and never picks
+  partners: it is proven by those connections, so using it to
+  choose them would argue in a circle. The 2-minute window
+  remains a guard against ISN-clock wrap; hosts skewed beyond
+  it stay `no_match` and get no bound.
+- **Order.** `NewTimeline(r.Clocks).Order(x, y)` says
+  `Before`, `After` or `Unordered` for two `Stamp`s. One host
+  compares its own stamps directly; across hosts x precedes y
+  only when y − x exceeds every offset the bound allows, so a
+  single message's happens-before is always reproduced. Two
+  hosts that never talked are related through a chain of hosts
+  that did (breadth-first, fewest hops), their bounds summed.
+  Only two-sided, non-empty bounds in the window holding the
+  instant count — no extrapolation across time, since drift
+  moves the offset — and raw timestamps never break a tie.
+  The sequence view (M5) builds its cross-host order on it.
+
+Tests (`clock_test.go`, `order_test.go`) inject skew into
+synthetic traces: +1.23 s, −0.99 s and 0 come back in exactly
+the tightest-gap interval; a 10 ms step a minute later gives
+two windows, and one window over both is empty and flagged;
+no fused connection gives no bound; 90 s skew fuses and is
+recovered, 3 minutes fuses nothing; the handshake alone is
+one-sided; three hosts A–B–C order A against C through B.
 
 ### Service database
 

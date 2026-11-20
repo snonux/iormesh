@@ -10,6 +10,11 @@
 // never rewrites; an end without exactly one partner stays unresolved,
 // never fused by a guess.
 //
+// The fused connections then bound each host pair's clock offset
+// (clock.go, bound.go: a send always precedes its receive, PLAN.md M4
+// "Clock reconciliation"), and order.go orders instants across hosts by
+// those bounds alone, never by comparing two clocks' raw timestamps.
+//
 // The package is cgo-free on purpose: iormeshctl runs on a laptop
 // (darwin or linux, CGO_ENABLED=0), so nothing here may import the
 // tracer's libbpfgo side.

@@ -973,6 +973,20 @@ Kubernetes (M7) build on it.
   `tcp_sendmsg`/`tcp_recvmsg` hooks, added in M4. Cross-host order
   is derived from happens-before (per-thread order plus
   send→receive edges), never from raw wall-clock comparison.
+  Built (task gb4, `internal/federate`): send and receive
+  records carry `args.tcp_seq` (the sequence number of the
+  call's first byte; schema only, the hooks are still open),
+  the SYN adds one client→server edge (connect enter before
+  the server's accept exit), and the merge keeps one bound per
+  host pair per 1-minute window (`Result.Clocks`), one-sided
+  when only one direction has edges, empty and flagged when
+  they contradict. The bound never feeds back into fusion —
+  it is proven by the fused connections, so it cannot choose
+  them; the fusion window stays a wrap guard, and hosts skewed
+  beyond it get neither edge nor bound. Cross-host order
+  (`Timeline`) is decided only when the bound — summed along a
+  chain of hosts when two never talked directly — leaves no
+  doubt; otherwise it stays unordered.
 - **Service-interaction database**: every `build` also
   analyzes the merged traces and updates a controller-side
   database of app-to-app network interaction — per observed

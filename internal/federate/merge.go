@@ -17,6 +17,9 @@ type Options struct {
 	// Window is Fuse's candidate window; zero or less means
 	// DefaultWindow.
 	Window time.Duration
+	// ClockWindow is how much traffic one clock bound covers; zero or
+	// less means DefaultClockWindow.
+	ClockWindow time.Duration
 }
 
 // Result is a merged mesh: one graph over every source, the fusion that
@@ -30,6 +33,13 @@ type Result struct {
 	// happened to share (requalified, so two connections never pose as
 	// one). Ids not listed are unchanged.
 	Renames map[LocalConn]string
+	// Clocks bounds each traced host pair's clock offset per window, from
+	// the fused connections' send→receive edges (PLAN.md M4 "Clock
+	// reconciliation"), sorted by (HostA, HostB, Start). A pair without a
+	// fused connection has none: no traffic, no estimate. An empty bound
+	// is kept and reported (ClockBound.Empty). NewTimeline orders
+	// cross-host instants by them.
+	Clocks []ClockBound
 }
 
 // hostGraph is one source's graph with the host it describes, which
@@ -45,11 +55,18 @@ type hostGraph struct {
 // several projects: the join is the same across projects, so building
 // project A with project B fuses A's calls into B into cross-project
 // edges (PLAN.md M4 "Build").
+//
+// The clock bounds are computed after fusing, from the fused connections
+// only, and never feed back into Fuse: a bound proves offsets only
+// because its connections are facts, so letting it pick partners would
+// argue in a circle. Fuse's window stays a coarse guard against ISN-clock
+// wrap; hosts skewed beyond it fuse nothing and so get no bound either.
 func Merge(ctx context.Context, sources []Source, opt Options) (Result, error) {
 	window := opt.Window
 	if window <= 0 { // a negative window would admit every candidate
 		window = DefaultWindow
 	}
+	clockWindow := cmp.Or(max(opt.ClockWindow, 0), DefaultClockWindow)
 	sorted := slices.SortedFunc(slices.Values(sources), func(a, b Source) int {
 		return cmp.Compare(a.Name(), b.Name())
 	})
@@ -64,11 +81,14 @@ func Merge(ctx context.Context, sources []Source, opt Options) (Result, error) {
 	}
 	r := Result{Fusion: Fuse(col.halves(), window), Renames: map[LocalConn]string{}}
 	fused := map[string]bool{}
+	var msgs []message
 	for _, c := range r.Conns {
 		r.Renames[LocalConn{c.Client.Host, c.Client.ConnID}] = c.ID
 		r.Renames[LocalConn{c.Server.Host, c.Server.ConnID}] = c.ID
 		fused[c.ID] = true
+		msgs = append(msgs, col.messages(c)...)
 	}
+	r.Clocks = clockBounds(msgs, clockWindow)
 	requalify(traces, r.Renames)
 	r.Graph = union(traces, r.Renames, fused)
 	if err := r.Graph.Validate(); err != nil {

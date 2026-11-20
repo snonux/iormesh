@@ -255,3 +255,4 @@ rename hostB/b-reuse-0 -> a370e84b0ff700d3
 rename hostB/b-reuse-1 -> a88d6fc170ae6385
 rename hostB/b-reuse-2 -> 3d46b6fa0381aa8d
 rename hostC/a-untraced -> 144ebe02d9280b21
+clock hostA..hostB window=1762999980000000000 offset=[-,2000] width=- empty=false n=3 by=/3d46b6fa0381aa8d

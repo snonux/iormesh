@@ -1,0 +1,168 @@
+package federate
+
+import (
+	"cmp"
+	"slices"
+)
+
+// Relations Timeline.Order finds between two instants.
+const (
+	// Unordered: neither instant provably came first — they are causally
+	// unrelated as far as the traces show, or no bound covers them. Raw
+	// timestamps never break this tie.
+	Unordered Relation = iota
+	Before             // the first instant came first
+	After              // the second instant came first
+)
+
+// Relation is how two instants on the hosts' clocks are ordered.
+type Relation int
+
+// Stamp is an instant on one host's wall clock, ns.
+type Stamp struct {
+	Host string
+	Wall uint64
+}
+
+// Timeline orders instants across hosts by the merge's clock bounds,
+// never by comparing raw timestamps of two clocks (PLAN.md M4 "Clock
+// reconciliation"): x on host X precedes y on host Y only when y − x
+// exceeds every offset the bound allows. The bounds come from
+// send→receive edges, so an order a single message proves directly is
+// one the bound proves too; hosts without traffic of their own are
+// related through a chain of hosts that have some, the offsets adding up
+// along it. The order is sound, not complete: what it cannot prove it
+// leaves Unordered.
+type Timeline struct {
+	// pairs holds the usable bounds — two-sided and not empty — per host
+	// pair in Start order. A one-sided bound proves no finite offset and
+	// an empty one proves nothing at all.
+	pairs map[[2]string][]ClockBound
+	peers map[string][]string // hosts sharing a usable bound, sorted
+}
+
+// NewTimeline indexes the merge's bounds (Result.Clocks).
+func NewTimeline(bounds []ClockBound) Timeline {
+	tl := Timeline{pairs: map[[2]string][]ClockBound{}, peers: map[string][]string{}}
+	for _, b := range bounds {
+		if _, ok := b.Width(); !ok {
+			continue
+		}
+		k := [2]string{b.HostA, b.HostB}
+		if len(tl.pairs[k]) == 0 {
+			tl.peers[b.HostA] = append(tl.peers[b.HostA], b.HostB)
+			tl.peers[b.HostB] = append(tl.peers[b.HostB], b.HostA)
+		}
+		tl.pairs[k] = append(tl.pairs[k], b)
+	}
+	for k, bs := range tl.pairs {
+		slices.SortFunc(bs, func(x, y ClockBound) int { return cmp.Compare(x.Start, y.Start) })
+		tl.pairs[k] = bs
+	}
+	for h := range tl.peers {
+		slices.Sort(tl.peers[h])
+	}
+	return tl
+}
+
+// String names the relation.
+func (r Relation) String() string {
+	switch r {
+	case Before:
+		return "before"
+	case After:
+		return "after"
+	}
+	return "unordered"
+}
+
+// Order relates x and y. On one host both stamps come from one clock and
+// compare directly; equal stamps stay Unordered.
+func (tl Timeline) Order(x, y Stamp) Relation {
+	diff := int64(y.Wall) - int64(x.Wall)
+	lo, hi := int64(0), int64(0)
+	if x.Host != y.Host {
+		var ok bool
+		if lo, hi, ok = tl.Offset(x.Host, y.Host, x.Wall); !ok {
+			return Unordered
+		}
+	}
+	// True time between them: (y − o_Y) − (x − o_X) = diff − offset.
+	switch {
+	case diff-hi > 0:
+		return Before
+	case diff-lo < 0:
+		return After
+	}
+	return Unordered
+}
+
+// Offset bounds clock(to) − clock(from) around instant at on from's clock:
+// along the shortest chain of hosts with usable bounds (fewest hops, the
+// first by name on a tie), adding each hop's bound in the window that
+// holds the instant. ok is false when no chain exists or a hop has no
+// usable window then: an offset is never extrapolated across time, since
+// drift moves it.
+func (tl Timeline) Offset(from, to string, at uint64) (lo, hi int64, ok bool) {
+	path := tl.path(from, to)
+	if path == nil {
+		return 0, 0, false
+	}
+	t := int64(at) // the instant on the current hop's clock
+	for i := 1; i < len(path); i++ {
+		l, h, found := tl.hop(path[i-1], path[i], t)
+		if !found {
+			return 0, 0, false
+		}
+		lo, hi = lo+l, hi+h
+		t += l + (h-l)/2 // carry the instant over to the next clock
+	}
+	return lo, hi, true
+}
+
+// path finds the hosts from from to to by breadth-first search over
+// sorted peers, so the same bounds always give the same chain.
+func (tl Timeline) path(from, to string) []string {
+	prev := map[string]string{from: ""}
+	queue := []string{from}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if cur == to {
+			var path []string
+			for h := to; h != ""; h = prev[h] {
+				path = append(path, h)
+			}
+			slices.Reverse(path)
+			return path
+		}
+		for _, p := range tl.peers[cur] {
+			if _, seen := prev[p]; !seen {
+				prev[p] = cur
+				queue = append(queue, p)
+			}
+		}
+	}
+	return nil
+}
+
+// hop bounds clock(next) − clock(cur) at instant t on cur's clock. A
+// window is on its HostA's clock, so seen from HostB the instant is
+// first carried over by the window's own midpoint offset.
+func (tl Timeline) hop(cur, next string, t int64) (lo, hi int64, ok bool) {
+	if cur < next {
+		for _, b := range tl.pairs[[2]string{cur, next}] {
+			if int64(b.Start) <= t && t < int64(b.End) {
+				return b.Lower, b.Upper, true
+			}
+		}
+		return 0, 0, false
+	}
+	for _, b := range tl.pairs[[2]string{next, cur}] {
+		ta := t - (b.Lower + (b.Upper-b.Lower)/2)
+		if int64(b.Start) <= ta && ta < int64(b.End) {
+			return -b.Upper, -b.Lower, true
+		}
+	}
+	return 0, 0, false
+}
