@@ -1622,6 +1622,14 @@ Later phase — plain Linux servers (M4) come first.
   defaulting to our published tracer image, pinned by digest.
   The config shape is provisional and the owner's examples are
   pending (decision #18).
+  Status (2026-11-21, task wb4): the kubectl transport is built
+  (`internal/k8s`, docs/implementation.md M7 step 9) and tested
+  against a fake kubectl, not yet on kind — `exec`, the
+  exec-streamed tar fetch through a new `iormesh ready`
+  subcommand, and `debug --target` into prepared pods only;
+  `Push` is refused (the image carries the tracer, and #12 rules
+  out `kubectl cp`). The registry sections and the iormeshctl
+  commands that pick it for a pod remain.
 - Pod identity enrichment: map host PIDs/cgroups → pod, namespace,
   container, so the graph speaks "pod checkout-7d9f (ns prod)"
   instead of bare host PIDs. In k8s mode the project defaults

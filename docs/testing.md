@@ -987,6 +987,47 @@ The tracer refuses a namespace whose `/proc` is the host's
 (`/proc/self` naming another pid than its own), since every
 `/proc/<pid>` read would then name another process.
 
+## K8s transport (task wb4)
+
+The controller's kubectl transport (`internal/k8s`, PLAN.md #12,
+#18; docs/implementation.md M7 step 9) is tested without a
+cluster: `fake_test.go` puts a fake `kubectl` first on `PATH`, a
+shell script that logs its argv (NUL-separated, one record per
+call) and serves canned output — pod JSON for `get`, a tar for
+`exec … iormesh ready`, a copy of the `--custom` file for `debug`.
+The real `execRunner` runs it, so the tests see exactly the argv
+kubectl would get. They run with the package's unit tests
+(`CGO_ENABLED=0 go test ./internal/k8s/`, and in `mage test`):
+
+- argv: `--context=` and `--namespace=` on every call, `exec POD
+  --container=iormesh -- argv…` with shell metacharacters arriving
+  as single, verbatim elements; `debug POD --container=iormesh
+  --target=APP --image=<digest> --attach=false --profile=general
+  --custom=FILE -- argv…` (`sysadmin` for the privileged profile),
+  and the `--custom` spec's security context and two mounts;
+- refusals before any kubectl runs: an unregistered or malformed
+  context, an image not pinned by `@sha256:<64 hex>` (or none —
+  the built-in default is empty until task vb4 publishes one),
+  namespace, pod or container names that are not Kubernetes names
+  (`$(id)`, `x;touch …`, `--all-namespaces`), a remote dir other
+  than `/opt/iormesh/traces/<project>/ready`, and `Push`;
+- refusals after the `get` alone: a pod without the `tracefs`
+  hostPath or a size-bounded `iormesh-traces` emptyDir, with
+  `hostUsers: false`, without the app container, or already
+  carrying an `iormesh` ephemeral container; a sidecar target
+  without its container or `shareProcessNamespace`;
+- the fetch stream: `WriteReady` sends only regular `*.parquet`
+  files of a `ready/` planted with a symlink, a FIFO, a
+  subdirectory, a dot file and a text file; `Unpack` refuses
+  traversal, directory parts, absolute and dot names, links,
+  devices, directories, oversize and duplicate entries, and leaves
+  no partial file from a truncated stream; `Fetch` removes on the
+  tracer exactly the files that arrived, also when the stream is
+  refused part-way.
+
+What only kind can show is task yb4's (docs/implementation.md M7
+step 9).
+
 ## Performance baselines
 
 S3 (PLAN.md, decision #25) measures overhead against a load the

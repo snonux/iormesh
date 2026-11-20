@@ -8,6 +8,7 @@
 //	iormesh status [-project NAME] [-trace-dir DIR] [-json]
 //	iormesh upgrade [-allow-downgrade] FILE
 //	iormesh uninstall
+//	iormesh ready -project NAME [-remove -- FILE...]
 //	iormesh version
 //
 // run is the foreground tracer; its target spec (internal/target) is a
@@ -19,8 +20,11 @@
 // installs a staged build only once its minisign signature verifies
 // against the root-owned pinned key (upgrade.go, decisions #1 and #28).
 // normalize applies the golden-check library (internal/normalize) to a
-// written trace. attach live-loads the Java
-// agent into a running JVM a `run -spool` traces (decision #2, task ge4;
+// written trace. ready streams a project's published segments as a tar
+// (or removes fetched ones), the k8s transport's fetch (ready.go,
+// internal/k8s; no tar or rsync in the tracer image). attach live-loads
+// the Java agent into a running JVM a `run -spool` traces (decision #2,
+// task ge4;
 // `run -agent` does the same for the JVMs a session starts with).
 package cli
 
@@ -90,6 +94,8 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		err = controlCommand(control.uninstall, args[1:], stdout, stderr)
 	case "upgrade":
 		err = upgradeCommand(args[1:], stdout, stderr)
+	case "ready":
+		err = readyCommand(args[1:], stdout, stderr)
 	case "version", "-version", "--version":
 		_, _ = fmt.Fprintln(stdout, "iormesh", version.Version)
 		return exitOK
@@ -132,6 +138,7 @@ func usage(w io.Writer) {
   iormesh status [-project NAME] [-trace-dir DIR] [-json]
   iormesh upgrade [-allow-downgrade] FILE    (FILE.minisig next to it)
   iormesh uninstall
+  iormesh ready -project NAME [-remove -- FILE...]   (k8s fetch: tar to stdout)
   iormesh version
 `)
 }

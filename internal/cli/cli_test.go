@@ -171,6 +171,10 @@ func TestMainDispatch(t *testing.T) {
 		{[]string{"run", "-pid", "abc"}, exitUsage},
 		{[]string{"normalize"}, exitUsage},
 		{[]string{"normalize", "/nonexistent/trace"}, exitError},
+		// ready takes a project, never a path (internal/k8s).
+		{[]string{"ready"}, exitUsage},
+		{[]string{"ready", "-project", "../etc"}, exitUsage},
+		{[]string{"ready", "-project", "shop", "/etc"}, exitUsage},
 	} {
 		if got := Main(c.args, &out, &errOut); got != c.want {
 			t.Errorf("Main(%q) = %d, want %d", c.args, got, c.want)

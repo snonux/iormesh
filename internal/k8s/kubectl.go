@@ -1,0 +1,161 @@
+package k8s
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"path"
+	"path/filepath"
+	"regexp"
+	"slices"
+
+	"iormesh/internal/federate"
+	"iormesh/internal/project"
+	"iormesh/internal/segment"
+)
+
+// TraceRoot is the tracer container's trace dir, the emptyDir #13 mounts
+// there (docs/implementation.md M7 step 8). It is the same path as a
+// server's, so collect's remote dir (<root>/<project>/ready) is too.
+const TraceRoot = "/opt/iormesh/traces"
+
+// TracerBinary is the tracer's name inside the image, found on the
+// image's PATH (task vb4 builds the image).
+const TracerBinary = "iormesh"
+
+// removeBatch bounds how many file names one remove exec carries, far
+// below any argv limit.
+const removeBatch = 256
+
+// readyDirPath is the one remote dir Fetch accepts: a project's ready/
+// under TraceRoot. The tracer's `ready` subcommand takes the project, not
+// a path, so the controller can never name another directory.
+var readyDirPath = regexp.MustCompile(`^` + regexp.QuoteMeta(TraceRoot) + `/([^/]+)/` +
+	regexp.QuoteMeta(segment.ReadyDir) + `/?$`)
+
+// Kubectl is the Transport for a tracer in a pod (decisions #12, #18).
+// Like federate.SSH it wraps the operator's own binary, so the
+// kubeconfig's credentials, exec plugins and proxies just work and
+// iormeshctl never holds a token itself — but it always passes the
+// Target's context and namespace explicitly, so the kubeconfig's current
+// context never picks the cluster.
+type Kubectl struct {
+	t   Target
+	run runner
+}
+
+// Kubectl satisfies federate.Transport; checked at compile time.
+var _ federate.Transport = (*Kubectl)(nil)
+
+// New returns the transport for t, validated again here so a Target
+// built by hand gets the same checks as a resolved one.
+func New(t Target) (*Kubectl, error) {
+	return newKubectl(t, execRunner{bin: "kubectl"})
+}
+
+// newKubectl is New with the command runner injected.
+func newKubectl(t Target, r runner) (*Kubectl, error) {
+	if err := t.Validate(); err != nil {
+		return nil, err
+	}
+	return &Kubectl{t: t, run: r}, nil
+}
+
+// base is every call's leading argv: the context and namespace, in
+// --flag=value form so neither can ever read as a separate option.
+func (k *Kubectl) base() []string {
+	return []string{"--context=" + k.t.Context, "--namespace=" + k.t.Namespace}
+}
+
+// execArgs is `kubectl exec` of argv in the tracer container. kubectl
+// hands argv to the container runtime as an argv — no shell on either
+// side — and without -i nothing reads the operator's terminal.
+func (k *Kubectl) execArgs(argv ...string) []string {
+	return slices.Concat(k.base(),
+		[]string{"exec", k.t.Pod, "--container=" + TracerContainer, "--"}, argv)
+}
+
+// Run executes argv in the tracer container. kubectl exec exits with the
+// remote command's status, so a non-zero exit wraps *exec.ExitError as
+// the Transport contract asks — but kubectl's own failures exit 1 too, so
+// a caller asking `test` must probe reachability first, as collect does.
+func (k *Kubectl) Run(ctx context.Context, argv ...string) ([]byte, error) {
+	if len(argv) == 0 {
+		return nil, fmt.Errorf("%w: empty remote command", ErrTransport)
+	}
+	out, err := k.run.output(ctx, k.execArgs(argv...))
+	if err != nil {
+		return out, fmt.Errorf("kubectl exec %s/%s %s: %w", k.t.Namespace, k.t.Pod, argv[0], err)
+	}
+	return out, nil
+}
+
+// Push is refused: in a pod the tracer comes with the image, pinned by
+// digest, and a deploy is a new debug container (Debug), never files
+// copied in — #12 rules out `kubectl cp`, which would need tar in the
+// image as well.
+func (k *Kubectl) Push(context.Context, string, ...string) error {
+	return fmt.Errorf("%w: push: the tracer image carries the binary; deploy a pod with a new image instead",
+		ErrTransport)
+}
+
+// Fetch moves the project's ready/ segments into localDir (decision #12
+// as settled by #18): one exec of `iormesh ready -project P` streams them
+// as a tar, which Unpack takes apart under collect's rules, and a second
+// exec removes, on the tracer, exactly the files that arrived — so a
+// failed fetch loses nothing and a repeated one moves only what is new.
+// Files already unpacked are removed even when the stream broke later.
+func (k *Kubectl) Fetch(ctx context.Context, remoteDir, localDir string) error {
+	proj, err := readyProject(remoteDir)
+	if err != nil {
+		return err
+	}
+	local, err := filepath.Abs(localDir)
+	if err != nil {
+		return fmt.Errorf("fetch: %w", err)
+	}
+	if err := os.MkdirAll(local, 0o700); err != nil {
+		return fmt.Errorf("fetch: %w", err)
+	}
+	var taken []string
+	err = k.run.stream(ctx, k.execArgs(TracerBinary, "ready", "-project", proj), func(r io.Reader) error {
+		var uerr error
+		taken, uerr = Unpack(r, local)
+		return uerr
+	})
+	// As SSH.Fetch: the host directory is the operator's alone, whatever
+	// happened to the stream.
+	if cerr := os.Chmod(local, 0o700); cerr != nil && err == nil {
+		err = cerr
+	}
+	if rerr := k.removeTaken(ctx, proj, taken); err == nil {
+		err = rerr
+	}
+	if err != nil {
+		return fmt.Errorf("kubectl fetch %s/%s %s: %w", k.t.Namespace, k.t.Pod, proj, err)
+	}
+	return nil
+}
+
+// removeTaken deletes the fetched files on the tracer, in batches.
+func (k *Kubectl) removeTaken(ctx context.Context, proj string, taken []string) error {
+	for batch := range slices.Chunk(taken, removeBatch) {
+		argv := slices.Concat([]string{TracerBinary, "ready", "-project", proj, "-remove", "--"}, batch)
+		if _, err := k.run.output(ctx, k.execArgs(argv...)); err != nil {
+			return fmt.Errorf("remove fetched segments: %w", err)
+		}
+	}
+	return nil
+}
+
+// readyProject maps collect's remote dir to its project, refusing any
+// other directory.
+func readyProject(remoteDir string) (string, error) {
+	m := readyDirPath.FindStringSubmatch(path.Clean(remoteDir) + "/")
+	if m == nil || !project.Valid(m[1]) {
+		return "", fmt.Errorf("%w: remote dir %q is not %s/<project>/%s", ErrTransport,
+			remoteDir, TraceRoot, segment.ReadyDir)
+	}
+	return m[1], nil
+}

@@ -5163,6 +5163,42 @@ depends on:
    directory part (no links, no modes, sizes bounded —
    collect's rules), then removes what it took with a second
    exec. No `tar`, `kubectl cp` or rsync in the image.
+
+   Built by task wb4 (`internal/k8s`, cgo-free): `Kubectl`
+   implements `federate.Transport` (whose third method, `Push`,
+   it refuses — the image carries the tracer, and a deploy is a
+   debug container), and adds `Check` and `Debug`. `Resolve` layers
+   flag, pod entry, cluster and `k8s:` defaults (#18), refuses a
+   context the registry does not list, an image not pinned by
+   digest (`DefaultImage` is empty until task vb4 publishes one)
+   and non-Kubernetes names. Every call passes `--context=` and
+   `--namespace=`; `Run` is `exec POD --container=iormesh --
+   argv…`; `Fetch` accepts only
+   `/opt/iormesh/traces/<project>/ready`, execs `iormesh ready
+   -project P` (internal/cli/ready.go, writer `k8s.WriteReady`),
+   unpacks with `k8s.Unpack` (regular `*.parquet` entries without
+   a directory part, ≤ 1 GiB each, 0600, through an `os.Root` and
+   a dot temporary) and removes what arrived with `iormesh ready
+   -project P -remove -- NAME…`, also after a stream refused
+   part-way. `Debug` reads the pod (`get pod -o json`), refuses it
+   without the `tracefs` hostPath and a `sizeLimit`ed
+   `iormesh-traces` emptyDir (naming the prepare patch), with
+   `hostUsers: false`, without the app container, or with an
+   `iormesh` ephemeral container already (ephemeral containers
+   cannot be removed), then runs `debug POD --container=iormesh
+   --target=APP --image=IMG --attach=false
+   --profile=general|sysadmin --custom=FILE -- argv…`, the custom
+   file step 8's spec. Tests: a fake kubectl on `PATH`
+   ([testing.md](testing.md#k8s-transport-task-wb4)).
+   Not yet: the registry's `k8s:`/`pods:` sections and the
+   iormeshctl commands that pick this transport for a pod (step
+   10), pod lookup by selector. For kind (task yb4): that
+   `--profile=general` plus `--custom` yields exactly the custom
+   capabilities (the lists' strategic merge); that the image's
+   `PATH` finds `iormesh`; and collect's probes — it runs `true`
+   and `test -d` through `Run`, which a shell-less image lacks,
+   and `kubectl exec` exits 1 for its own failures as well as for
+   the remote status 1 that `test` uses for "absent".
 10. Registry: the `k8s:` and `pods:` sections (#18). **Provisional
     — owner's examples pending**; every value below is a
     placeholder, not a fleet fact:
