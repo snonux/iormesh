@@ -24,7 +24,9 @@ var rootBPFTestFiles = []string{"internal/sock_root_test.go", "internal/sockseq_
 
 // testFunctionsIn returns the names of the top-level Test functions of the Go
 // file at the repository path rel. Adapted from ior
-// internal/buildgate/rootlink_test.go @ b21afc50328c.
+// internal/buildgate/rootlink_test.go @ b21afc50328c. Changes: TestMain is
+// left out — it runs the tests, it is none (integrationtests' stands in
+// for the eval's model, task rb4).
 func testFunctionsIn(t *testing.T, rel string) []string {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(repoRoot(t), rel), nil, parser.SkipObjectResolution)
@@ -34,7 +36,7 @@ func testFunctionsIn(t *testing.T, rel string) []string {
 	var names []string
 	for _, declaration := range file.Decls {
 		decl, ok := declaration.(*ast.FuncDecl)
-		if ok && decl.Recv == nil && strings.HasPrefix(decl.Name.Name, "Test") {
+		if ok && decl.Recv == nil && strings.HasPrefix(decl.Name.Name, "Test") && decl.Name.Name != "TestMain" {
 			names = append(names, decl.Name.Name)
 		}
 	}

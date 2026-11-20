@@ -67,7 +67,7 @@ func Files(g schema.Graph, m viewmodel.Model) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
-	files := []File{{IndexName, page}, {"graph.svg", render.Graph(g)}}
+	files := []File{{IndexName, page}, {"graph.svg", render.Graph(g, render.NamesOf(m))}}
 	for _, c := range m.Conversations {
 		if !digits(c.ID) {
 			return nil, fmt.Errorf("site: conversation ID %q is not a number", c.ID)

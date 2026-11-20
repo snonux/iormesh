@@ -435,7 +435,10 @@ terminal-safe; `-json` prints the conversation. The summary gains a
 unordered steps. `build` also writes the deterministic SVG exports
 (`internal/render`): `graph.svg` (apps, one column per host — host,
 processes, files — and the connections; unresolved connections
-dashed, 200 nodes a column, the rest counted) and
+dashed, 200 nodes a column, the rest counted; host columns titled
+and ordered by the store's host name, a server labeled with the
+service it serves, a client with its app — the model's names,
+task rb4) and
 `sequence/<ID>.svg` per conversation (lifelines in first-appearance
 order; causal arrows solid, time-ordered dashed, unordered dotted
 and marked `?`; file work as notes; every CSS class from a fixed

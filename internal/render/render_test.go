@@ -55,7 +55,7 @@ func TestDeterministicAndEscaped(t *testing.T) {
 			{Kind: viewmodel.StepResponse, Service: "orders&co", To: "gw", Label: "200", Ordering: viewmodel.OrderTime},
 		}}
 	for name, render := range map[string]func() []byte{
-		"graph":    func() []byte { return Graph(hostileGraph()) },
+		"graph":    func() []byte { return Graph(hostileGraph(), Names{}) },
 		"sequence": func() []byte { return Sequence(conv) },
 	} {
 		a, b := render(), render()
@@ -73,7 +73,7 @@ func TestDeterministicAndEscaped(t *testing.T) {
 			t.Errorf("sequence lacks %q", want)
 		}
 	}
-	if !strings.Contains(string(Graph(hostileGraph())), `class="unresolved"`) {
+	if !strings.Contains(string(Graph(hostileGraph(), Names{})), `class="unresolved"`) {
 		t.Error("graph: the unresolved connection is not marked")
 	}
 	conv.Steps[0].Ordering = `x" onload="alert(1)`
@@ -124,11 +124,47 @@ func TestGraphColumnCap(t *testing.T) {
 		g.Nodes = append(g.Nodes, schema.Node{Type: schema.NodeFile, ID: schema.FileNodeID("h", fmt.Sprintf("/f%04d", i))})
 	}
 	g.Sort()
-	out := string(Graph(g))
+	out := string(Graph(g, Names{}))
 	if !strings.Contains(out, "+6 more") || strings.Count(out, `<rect class="file"`) != maxColumnNodes-1 {
 		t.Errorf("cap: %d file boxes", strings.Count(out, `<rect class="file"`))
 	}
 	if got := short(strings.Repeat("x", 100)); len([]rune(got)) != maxLabel || !strings.HasSuffix(got, "…") {
 		t.Errorf("short: %q", got)
+	}
+}
+
+// TestGraphNames: with the model's names, host columns are titled and
+// ordered by host name — not by the random machine id — a server
+// carries the service it serves (its lifeline name, without an app, is
+// only its comm) and a client its app; a process with neither, and a
+// host the model never named, keep their ids
+// (task rb4: graph.svg said "java PID" on a machine id while every
+// other surface said "orders" on "hostb").
+func TestGraphNames(t *testing.T) {
+	g := schema.Graph{SchemaVersion: schema.Version}
+	for _, h := range []string{"ffff", "aaaa", "zzzz"} {
+		g.Nodes = append(g.Nodes, schema.Node{Type: schema.NodeHost, ID: schema.HostNodeID(h)},
+			schema.Node{Type: schema.NodeProcess, ID: schema.ProcessNodeID(h, 7, 1),
+				Attrs: map[string]string{"comm": "java"}})
+	}
+	g.Sort()
+	m := viewmodel.Model{Processes: []viewmodel.Process{
+		{ID: schema.ProcessNodeID("ffff", 7, 1), Host: "hosta", Comm: "java", Service: "java", Serves: []string{"orders"}},
+		{ID: schema.ProcessNodeID("aaaa", 7, 1), Host: "hostb", Comm: "java", Service: "java"},
+		{ID: schema.ProcessNodeID("zzzz", 7, 1), Comm: "java", Service: "edge/gw"},
+	}}
+	out := string(Graph(g, NamesOf(m)))
+	wellFormed(t, []byte(out))
+	a, b, c := strings.Index(out, ">host hosta<"), strings.Index(out, ">host hostb<"), strings.Index(out, ">host zzzz<")
+	if a < 0 || b < 0 || c < 0 || !(a < b && b < c) {
+		t.Errorf("host columns not titled and ordered by name (hosta %d, hostb %d, zzzz %d):\n%s", a, b, c, out)
+	}
+	for _, want := range []string{">orders: java 7@1<", ">hosta ffff<", ">java 7@1<", ">edge/gw: java 7@1<"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("graph lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "java: java") {
+		t.Errorf("a comm-only service is repeated as a name:\n%s", out)
 	}
 }

@@ -575,6 +575,35 @@ listening port attaches to a server already running. Each round
 gives every host a fresh Java agent spool, so an untraced JVM's
 rings never wait for a later round's tracer.
 
+### M5 on the rig (task rb4)
+
+`TestViewsAcceptance` (`integrationtests/m5*_test.go`) is PLAN.md's
+M5 acceptance on the rig. It runs the spread of
+`TestMicroservicesAcrossHosts`, copies each host's ready segments
+into `<store>/<project>/<host>/` as collect leaves them, names
+the three servers (`iormeshctl services name`) and builds with
+the real `../iormeshctl` (`mage build`), as root, HOME in a
+scratch directory. The SSH deploy and collect are what the rig
+does not do.
+
+| Surface | Asserted |
+|---|---|
+| model | orders, inventory and billing named with their scheme, every edge fused, nothing unresolved, no bad segment |
+| sequence | the checkout (`POST /orders`) is exactly the declared story: gateway `main` → orders' serving thread → inventory, then billing, each writing its record as create-tmp, write, rename before its `200`, then orders' own record and the `201` — lanes checked by host, role (PID) and thread; every step `causal`, every hop `paired`; the stack of each hop and record write holds the method that caused it (`ServiceNode#checkout`, `ServiceNode#handle`, `DataStore#save`) |
+| `show` | services, edges, conversations; `show sequence ID` in order with the rename's top frame and ref; `-json` its whole stack; `query -ref` its raw event; `show thread orders/HTTP-Dispatcher`; `show processes`: orders' config, record, and server socket with the gateway as peer |
+| TUI | ob4's key walk on the model: filter to orders, its conversation, down to the rename — the detail names `DataStore#save` and the `query -ref` command — then the thread's story |
+| site | `sites/latest`'s embedded model equals `model.json`; CSP `default-src 'none'`, no remote reference; with `IORMESH_SITE_BROWSER=1`, headless Chrome (`--no-sandbox` as root) passes `#/selftest` with an empty console and shows the rename step's stack at its route |
+| SVG | a rebuild writes the same bytes into the same site folder; `graph.svg` names hosts and servers; each `sequence/ID.svg` is its conversation; the mesh and the checkout, without the run's ids and the machine's own file work, match `workload/scenarios/microservices/graph-spread.svg` and `sequence-checkout-spread.svg` (`IORMESH_UPDATE_SVG=1` rewrites them) |
+| eval | `eval.Main` over the store with a scripted stand-in model — the test binary itself (`TestMain`, `-iormesh.eval-stand-in`) — scores 10/10, answering two questions only once its `QUERY` slice and `SOURCE` file showed the evidence; a wrong stand-in scores 0 and is refused |
+
+The stand-in knows the declared answers: it proves the pipeline,
+not a model. The eval criterion itself waits for the owner's
+model command (`mage eval`, below). The scenario's clients are
+synchronous, so it has no async hop: that every async or unpaired
+hop is drawn time-ordered or unordered is held by
+`internal/viewmodel`'s tests. Passed four times on 2026-11-20
+(Chrome 144).
+
 ## M4 acceptance on two real hosts (task lb4)
 
 The rig above proves M4's criteria on network namespaces; the

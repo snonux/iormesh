@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="560" viewBox="0 0 1120 560" font-family="monospace" font-size="11">
+<style>rect{fill:#fff;stroke:#333}rect.note{fill:#fdf6d8;stroke:#c9b458}rect.carrier{fill:#f4f4ff;stroke:#66c;stroke-dasharray:4 3}line.life{stroke:#bbb;stroke-dasharray:2 2}line.step{stroke:#222}line.time-ordered{stroke:#666;stroke-dasharray:6 4}line.unordered{stroke:#c33;stroke-dasharray:2 3}text.title{font-weight:bold}</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="title" x="10" y="16" text-anchor="start">conversation checkout: java POST /orders</text>
+<rect class="lane" x="35" y="30" width="170" height="32"/>
+<text class="label" x="120" y="43" text-anchor="middle">java</text>
+<text class="label" x="120" y="57" text-anchor="middle">main</text>
+<line class="life" x1="120" y1="62" x2="120" y2="550"/>
+<rect class="lane" x="255" y="30" width="170" height="32"/>
+<text class="label" x="340" y="43" text-anchor="middle">orders</text>
+<text class="label" x="340" y="57" text-anchor="middle">HTTP-Dispatcher</text>
+<line class="life" x1="340" y1="62" x2="340" y2="550"/>
+<rect class="lane" x="475" y="30" width="170" height="32"/>
+<text class="label" x="560" y="43" text-anchor="middle">inventory</text>
+<text class="label" x="560" y="57" text-anchor="middle">HTTP-Dispatcher</text>
+<line class="life" x1="560" y1="62" x2="560" y2="550"/>
+<rect class="lane" x="695" y="30" width="170" height="32"/>
+<text class="label" x="780" y="43" text-anchor="middle">billing</text>
+<text class="label" x="780" y="57" text-anchor="middle">HTTP-Dispatcher</text>
+<line class="life" x1="780" y1="62" x2="780" y2="550"/>
+<line class="step" x1="120" y1="90" x2="340" y2="90" marker-end="url(#arrow)"/>
+<text class="label" x="230" y="86" text-anchor="middle">POST /orders</text>
+<line class="step" x1="340" y1="120" x2="560" y2="120" marker-end="url(#arrow)"/>
+<text class="label" x="450" y="116" text-anchor="middle">POST /inventory/reserve</text>
+<rect class="note" x="566" y="138" width="260" height="16"/>
+<text class="label" x="570" y="150" text-anchor="start">create $tmp/inventory.d/reservation-42.…</text>
+<rect class="note" x="566" y="168" width="260" height="16"/>
+<text class="label" x="570" y="180" text-anchor="start">write $tmp/inventory.d/reservation-42.j…</text>
+<rect class="note" x="566" y="198" width="260" height="16"/>
+<text class="label" x="570" y="210" text-anchor="start">rename $tmp/inventory.d/reservation-42.…</text>
+<line class="step" x1="560" y1="240" x2="340" y2="240" marker-end="url(#arrow)"/>
+<text class="label" x="450" y="236" text-anchor="middle">200</text>
+<line class="step" x1="340" y1="270" x2="780" y2="270" marker-end="url(#arrow)"/>
+<text class="label" x="560" y="266" text-anchor="middle">POST /billing/charge</text>
+<rect class="note" x="786" y="288" width="260" height="16"/>
+<text class="label" x="790" y="300" text-anchor="start">create $tmp/billing.d/invoice-42.json.t…</text>
+<rect class="note" x="786" y="318" width="260" height="16"/>
+<text class="label" x="790" y="330" text-anchor="start">write $tmp/billing.d/invoice-42.json.tmp</text>
+<rect class="note" x="786" y="348" width="260" height="16"/>
+<text class="label" x="790" y="360" text-anchor="start">rename $tmp/billing.d/invoice-42.json.t…</text>
+<line class="step" x1="780" y1="390" x2="340" y2="390" marker-end="url(#arrow)"/>
+<text class="label" x="560" y="386" text-anchor="middle">200</text>
+<rect class="note" x="346" y="408" width="260" height="16"/>
+<text class="label" x="350" y="420" text-anchor="start">create $tmp/orders.d/order-42.json.tmp</text>
+<rect class="note" x="346" y="438" width="260" height="16"/>
+<text class="label" x="350" y="450" text-anchor="start">write $tmp/orders.d/order-42.json.tmp</text>
+<rect class="note" x="346" y="468" width="260" height="16"/>
+<text class="label" x="350" y="480" text-anchor="start">rename $tmp/orders.d/order-42.json.tmp …</text>
+<line class="step" x1="340" y1="510" x2="120" y2="510" marker-end="url(#arrow)"/>
+<text class="label" x="230" y="506" text-anchor="middle">201</text>
+</svg>

@@ -1499,6 +1499,30 @@ Kubernetes (M7) build on it.
   and async hops visibly time-ordered rather than
   thread-attributed; the LLM eval passes its threshold
   (pinned when the question set is written).
+  *Status (task rb4, 2026-11-20): passes on the rig — not
+  accepted* (Sequencing relaxation). `TestViewsAcceptance` runs
+  the microservices spread on three emulated hosts, fills a
+  store as collect lays one out (the rig has no SSH deploy or
+  collect), names the servers and builds with `iormeshctl`: the
+  mesh walks to the rename step's Java stack in `show`, the TUI
+  and the site (its embedded model is `model.json`; headless
+  Chrome renders every route from `file://` with an empty
+  console); the checkout's sequence is the declared story —
+  every hop on its causing thread, each serving thread's
+  create-tmp/write/rename in its place, all causal; a rebuild
+  writes the same bytes, and the mesh and the checkout match
+  their SVG goldens. Found and fixed: `graph.svg` drew machine
+  ids and "java PID" where every other surface said "orders" on
+  "hostb" — it now takes the model's names. The scenario reads
+  its config on the main thread at startup, so the config read
+  is in the process view, not the sequence; its clients are
+  synchronous, so async hops are held by unit tests only; and
+  without an app (the rig targets PIDs) a client is named by its
+  comm ("java"). Remaining: the eval with a real model —
+  *awaiting the owner's model command* (`mage eval`; only a
+  scripted stand-in has run the pipeline, 10/10, and a wrong one
+  is refused) — and the real-host re-check (task 3f4)
+  ([docs/testing.md](docs/testing.md) "M5 on the rig").
 
 ### M6 — Mesh expansion: follow the edges, from the controller
 

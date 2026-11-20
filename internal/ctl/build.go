@@ -397,7 +397,7 @@ func writeOutputs(builds string, projects []string, g schema.Graph, m viewmodel.
 // a conversation an earlier build had and this one has not never
 // lingers there next to the new ones.
 func writeExports(dir string, g schema.Graph, m viewmodel.Model) error {
-	if err := writeFileAtomic(filepath.Join(dir, graphSVGName), render.Graph(g)); err != nil {
+	if err := writeFileAtomic(filepath.Join(dir, graphSVGName), render.Graph(g, render.NamesOf(m))); err != nil {
 		return err
 	}
 	tmp, err := os.MkdirTemp(dir, "."+sequenceDirName+"-*")

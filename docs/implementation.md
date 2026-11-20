@@ -4300,7 +4300,9 @@ health, services and edges, and its text views. Extend the model
 and its goldens first (conversations and processes, V2); a
 renderer never reads the merged graph directly — `graph.svg`, a
 drawing of the graph export itself, is the one exception (PLAN.md
-M5 "Deterministic SVG export"). Conversations are built (task
+M5 "Deterministic SVG export"), and even it takes its names from
+the model (`render.NamesOf`: hosts by store name, servers by the
+service they serve, task rb4). Conversations are built (task
 mb4, "Conversations and exports" below), per-thread lifelines,
 thread stories and processes too (task 0f4, "Threads and
 processes"), and the local site (task nb4, "Local site").
@@ -4755,6 +4757,14 @@ magefile_eval.go            # mage evalTrace (root), mage eval
   session's result golden (a passing answer after a query and a
   source read, a reordered sequence, a model that never answers),
   a failing and a slow model command, and the opt-in refusal.
+
+Acceptance on the rig: `TestViewsAcceptance`
+(`integrationtests/m5*_test.go`, docs/testing.md "M5 on the
+rig") builds 1f4's spread with the `iormeshctl` binary from a
+store laid out as collect leaves one, walks it in `show`, the
+TUI and the site, holds the SVG exports to goldens and runs
+`eval.Main` with a scripted stand-in model (the test binary,
+re-executed) — the real model run stays the owner's.
 
 **Done when**: PLAN.md's M5 acceptance holds.
 

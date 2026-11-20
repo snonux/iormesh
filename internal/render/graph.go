@@ -1,6 +1,7 @@
 package render
 
 import (
+	"cmp"
 	"slices"
 	"strconv"
 	"strings"
@@ -42,9 +43,11 @@ type column struct {
 // pos is a drawn node's box.
 type pos struct{ x, y int }
 
-// Graph renders a normalized graph (schema.Graph.Sort order) as SVG.
-func Graph(g schema.Graph) []byte {
-	cols := graphColumns(g)
+// Graph renders a normalized graph (schema.Graph.Sort order) as SVG,
+// hosts and processes labeled by names (NamesOf the build's model; the
+// zero Names draws the graph's own ids).
+func Graph(g schema.Graph, names Names) []byte {
+	cols := graphColumns(g, names)
 	at := map[string]pos{}
 	height := topMargin
 	for i, c := range cols {
@@ -62,7 +65,7 @@ func Graph(g schema.Graph) []byte {
 		for _, n := range c.nodes {
 			p := at[n.ID]
 			s.rect(n.Type, p.x, p.y, boxWidth, boxHeight)
-			s.text("label", p.x+6, p.y+14, "start", short(nodeLabel(n)))
+			s.text("label", p.x+6, p.y+14, "start", short(nodeLabel(n, names)))
 		}
 		if c.more > 0 {
 			y := topMargin + len(c.nodes)*rowHeight
@@ -74,7 +77,9 @@ func Graph(g schema.Graph) []byte {
 }
 
 // graphColumns sorts the nodes into columns: apps, each host's, sockets.
-func graphColumns(g schema.Graph) []column {
+// Host columns are ordered by host name, then id: a host id is a random
+// machine id, so named hosts keep their order from run to run.
+func graphColumns(g schema.Graph, names Names) []column {
 	apps := column{title: "apps"}
 	socks := column{title: "connections"}
 	hosts := map[string]*column{}
@@ -88,13 +93,15 @@ func graphColumns(g schema.Graph) []column {
 		default:
 			h := nodeHost(n)
 			if hosts[h] == nil {
-				hosts[h] = &column{title: "host " + h}
+				hosts[h] = &column{title: "host " + names.host(h)}
 				order = append(order, h)
 			}
 			hosts[h].nodes = append(hosts[h].nodes, n)
 		}
 	}
-	slices.Sort(order)
+	slices.SortFunc(order, func(a, b string) int {
+		return cmp.Or(cmp.Compare(names.host(a), names.host(b)), cmp.Compare(a, b))
+	})
 	var cols []column
 	if len(apps.nodes) > 0 {
 		cols = append(cols, apps)
@@ -168,13 +175,16 @@ func typeRank(n schema.Node) int {
 	return 3
 }
 
-// nodeLabel is what a box says: a process's comm and pid, a file's
-// path, an app's project/pattern, a connection's id, a host's id.
-func nodeLabel(n schema.Node) string {
+// nodeLabel is what a box says: a process's service (when names has
+// one), comm and pid, a file's path, an app's project/pattern, a
+// connection's id, a host's name and id.
+func nodeLabel(n schema.Node, names Names) string {
 	switch n.Type {
 	case schema.NodeProcess:
 		_, pid, _ := strings.Cut(strings.TrimPrefix(n.ID, "proc:"), "/")
-		return strings.TrimSpace(n.Attrs["comm"] + " " + pid)
+		return names.process(n.ID, strings.TrimSpace(n.Attrs["comm"]+" "+pid))
+	case schema.NodeHost:
+		return names.hostLabel(strings.TrimPrefix(n.ID, schema.HostNodeID("")))
 	case schema.NodeFile:
 		_, path, _ := strings.Cut(strings.TrimPrefix(n.ID, "file:"), ":")
 		return path
