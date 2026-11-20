@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"path"
+	"slices"
 
 	"iormesh/internal/federate"
 	"iormesh/internal/k8s"
@@ -61,6 +62,19 @@ func addK8sFlags(fs *flag.FlagSet, image bool) *k8sFlags {
 	return f
 }
 
+// refuse fails when -context or -namespace is set where an override
+// would be ambiguous (review N1): rm, which edits the registry by the
+// entry's own reference and must collect what the entry names, and a
+// collect or refresh of every target, which would point every entry of
+// every cluster at one namespace.
+func (f *k8sFlags) refuse(where string) error {
+	if f.context != "" || f.namespace != "" {
+		return fmt.Errorf("%w: -context and -namespace are not taken by %s; name the pod entry instead",
+			errUsage, where)
+	}
+	return nil
+}
+
 // podEntry is a pods: entry resolved for this run.
 type podEntry struct {
 	ref      string
@@ -79,6 +93,13 @@ func resolvePodRef(r *federate.Registry, ref string, kf *k8sFlags) (podEntry, er
 		return podEntry{}, err
 	}
 	c, _ := r.Cluster(p.Cluster)
+	// An override may restate the entry's cluster's context, never move
+	// the entry to another cluster (review N1): a pod entry's name and
+	// its store directories stay tied to the cluster it names.
+	if kf.context != "" && kf.context != c.Context {
+		return podEntry{}, fmt.Errorf("pod entry %s: %w: -context %q is not cluster %s's (%q)", ref,
+			k8s.ErrContext, kf.context, c.Name, c.Context)
+	}
 	var defaults k8s.Layer
 	if r.K8s != nil {
 		defaults = k8s.Layer{Image: r.K8s.Image, Mode: k8s.Mode(r.K8s.Mode), Profile: k8s.Profile(r.K8s.Profile)}
@@ -156,9 +177,13 @@ func checkPodFlags(p federate.Project) error {
 
 // podRunArgs is the tracer argv a debug container runs for p: start's
 // argv (startArgs) as a foreground run — the container is the unit — of
-// the image's tracer.
+// the image's tracer, with -linger: when the session's -duration ends,
+// the run frees its BPF, publishes its last segment and waits instead of
+// exiting, since an exited ephemeral container can never be exec'd into
+// again and collect would lose that last segment (review B1).
 func podRunArgs(p federate.Project) []string {
 	argv := startArgs(p)
 	argv[0] = "run"
+	argv = slices.Insert(argv, 3, "-linger")
 	return append([]string{k8s.TracerBinary}, argv...)
 }

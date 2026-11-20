@@ -43,13 +43,20 @@ func (c collector) podEntryCollect(ctx context.Context, pe podEntry, projects []
 // pod collects projects from one pod into <store>/<project>/pod-<uid>,
 // after pinning that directory to the pod's host identity. A pod without
 // a tracer container — the API server says so — has nothing to collect;
-// one whose exec fails is an error.
+// one whose tracer container is stopped cannot be entered, which is said
+// plainly rather than as kubectl's exec failure (review B1: deploy runs
+// the session with -linger, so only a crash, an OOM kill or a session
+// from before -linger stops it); one whose exec fails is an error.
 func (c collector) pod(ctx context.Context, pe podEntry, st k8s.PodState, projects []string) error {
 	label := pe.label(st.Name)
 	if !st.Tracer {
 		_, err := fmt.Fprintf(c.e.stdout, "%s: no %q tracer container, nothing to collect\n", label,
 			k8s.TracerContainer)
 		return err
+	}
+	if st.Stopped != "" {
+		return fmt.Errorf("session ended: tracer container %s; kubectl exec cannot enter a stopped container, "+
+			"so the segments in its emptyDir (how many is unknown) are stranded until the pod goes", st.Stopped)
 	}
 	dir := k8s.PodHostID(st.UID)
 	if err := c.pin(dir, pe.podIdentity(st)); err != nil {
@@ -78,11 +85,7 @@ func (c collector) pin(dir string, id federate.HostIdentity) error {
 	if err != nil {
 		return err
 	}
-	pins, err := loadHostPins(path)
-	if err != nil {
-		return err
-	}
-	return pinNewHosts(path, pins, map[string]federate.HostIdentity{dir: id})
+	return pinNewHosts(path, map[string]federate.HostIdentity{dir: id})
 }
 
 // pinsPath is the pins file beside the service database db, the default

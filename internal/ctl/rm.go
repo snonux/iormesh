@@ -67,6 +67,9 @@ func rmCommand(args []string, e env) error {
 		return fmt.Errorf("%w: rm takes exactly one HOST or pod entry", errUsage)
 	}
 	host := fs.Arg(0)
+	if err := kf.refuse("rm"); err != nil {
+		return err
+	}
 	if federate.IsPodRef(host) {
 		return rmPod(host, rmPodOptions{regPath: *regPath, store: *store, project: *name, force: *force, kf: kf}, e)
 	}

@@ -5386,6 +5386,15 @@ depends on:
     registry digest (an image `kind load`ed reports a bare config
     digest, which deploy refuses — push to a registry), and the
     whole path against a real API server.
+    Review round 1 (task af4): the debug container's run is
+    `iormesh run -linger` (`internal/cli/linger.go`: after
+    `runTrace` returns — `finish` has closed the tracer and
+    published the last segment — it waits for SIGTERM; `start`
+    neither takes nor forwards the flag), `PodState.Stopped` from
+    the tracer's container status, the spec-image digest check
+    for an earlier debug container, `pinNewHosts` re-reading
+    `hosts.json` under `hosts.json.lock`, `collect -db`, and
+    `iormesh ready` failing for a project with no trace dir.
 11. ClusterIP join: S2's key if it survives kube-proxy's DNAT;
     otherwise conntrack on the node.
 12. `internal/routemap` (#15): the static map first —

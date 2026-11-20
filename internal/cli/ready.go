@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 
 	"iormesh/internal/k8s"
@@ -42,6 +43,14 @@ func readyIn(root string, args []string, stdout, stderr io.Writer) error {
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%w: unexpected argument %q", errUsage, fs.Arg(0))
+	}
+	// No project dir at all is not "nothing published yet" (WriteReady's
+	// empty stream for a missing ready/): no session of this project ever
+	// started here, which a project mismatch between the registry and
+	// the pod looks like. It fails, so collect says so instead of
+	// reporting an empty fetch (task af4 review N5).
+	if fi, err := os.Stat(filepath.Join(root, *name)); err != nil || !fi.IsDir() {
+		return fmt.Errorf("project %s has no trace dir under %s: no session of it ran in this container", *name, root)
 	}
 	return k8s.WriteReady(stdout, stderr, dir)
 }

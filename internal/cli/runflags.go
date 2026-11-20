@@ -20,6 +20,10 @@ import (
 
 // runConfig is a validated `iormesh run` command line.
 type runConfig struct {
+	// linger keeps the process alive after the session ended (-linger,
+	// linger.go): a k8s debug container's run, so the finished session's
+	// segments can still be fetched through `kubectl exec`.
+	linger bool
 	// spec names the targets: -pid, -pattern or -listen-port, exactly
 	// one (target.Spec.Validate).
 	spec     target.Spec
@@ -123,6 +127,11 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	f := addRunFlags(fs)
+	// -linger is run's alone, not addRunFlags': a systemd unit (start)
+	// must end with its session, so start can neither take nor forward it.
+	linger := fs.Bool("linger", false,
+		"after the session ends (BPF freed, last segment published), wait for SIGTERM instead of exiting, "+
+			"so a pod's tracer container stays enterable for `iormesh ready`")
 	if err := fs.Parse(args); err != nil {
 		return runConfig{}, fmt.Errorf("%w: %v", errUsage, err)
 	}
@@ -132,7 +141,9 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 	if err := f.podDefaults(podEnv); err != nil {
 		return runConfig{}, err
 	}
-	return f.config()
+	cfg, err := f.config()
+	cfg.linger = *linger
+	return cfg, err
 }
 
 // podEnv reads the downward-API variables podDefaults looks at. A

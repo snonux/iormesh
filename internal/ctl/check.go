@@ -173,8 +173,43 @@ func loadHostPins(path string) (map[string]federate.HostIdentity, error) {
 // pinNewHosts adds the identities of host directories not pinned yet and
 // writes the file (0600) when it changed. A pin is never overwritten: a
 // host reinstalled under the same registry name needs its entry removed
-// from the file by the operator, a deliberate step.
-func pinNewHosts(path string, pins, seen map[string]federate.HostIdentity) error {
+// from the file by the operator, a deliberate step. The file is read
+// again under an exclusive lock (hosts.json.lock beside it), so a build
+// and a collect pinning a pod at once (task af4 review N2) neither lose
+// the other's new pin nor race on the rename.
+func pinNewHosts(path string, seen map[string]federate.HostIdentity) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("host pins: %w", err)
+	}
+	unlock, err := lockPins(path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	pins, err := loadHostPins(path)
+	if err != nil {
+		return err
+	}
+	return addPins(path, pins, seen)
+}
+
+// lockPins takes the blocking exclusive flock on path's lock file: the
+// holders are short-lived (a read, a merge, a rename).
+func lockPins(path string) (func(), error) {
+	f, err := os.OpenFile(path+".lock", os.O_RDWR|os.O_CREATE|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("host pins: %w", err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("host pins: lock: %w", err)
+	}
+	return func() { _ = f.Close() }, nil
+}
+
+// addPins merges the unpinned directories of seen into pins and writes
+// them when anything was added.
+func addPins(path string, pins, seen map[string]federate.HostIdentity) error {
 	changed := false
 	for dir, id := range seen {
 		if _, ok := pins[dir]; !ok {
@@ -186,9 +221,6 @@ func pinNewHosts(path string, pins, seen map[string]federate.HostIdentity) error
 	}
 	data, err := json.MarshalIndent(pins, "", "  ")
 	if err != nil {
-		return fmt.Errorf("host pins: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("host pins: %w", err)
 	}
 	if err := writeFileAtomic(path, append(data, '\n')); err != nil {

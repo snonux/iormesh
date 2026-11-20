@@ -62,19 +62,51 @@ type podInfo struct {
 	} `json:"status"`
 }
 
-// named is a container entry; only its name matters here.
+// named is a container entry: its name, and its spec image (which
+// Deploy checks for an earlier debug container, N6).
 type named struct {
-	Name string `json:"name"`
+	Name  string `json:"name"`
+	Image string `json:"image"`
 }
 
 // containerStatus is a container's status: the image it really runs
-// (imageID, resolved by the kubelet) and whether it is running.
+// (imageID, resolved by the kubelet) and its state.
 type containerStatus struct {
 	Name    string `json:"name"`
 	ImageID string `json:"imageID"`
 	State   struct {
-		Running *struct{} `json:"running"`
+		Running    *struct{} `json:"running"`
+		Terminated *struct {
+			Reason   string `json:"reason"`
+			ExitCode int    `json:"exitCode"`
+		} `json:"terminated"`
+		Waiting *struct {
+			Reason string `json:"reason"`
+		} `json:"waiting"`
 	} `json:"state"`
+}
+
+// notRunning describes a status that is not running ("" when it is): a
+// terminated container with its reason and exit code, or a waiting one.
+func (st containerStatus) notRunning() string {
+	switch s := st.State; {
+	case s.Running != nil:
+		return ""
+	case s.Terminated != nil:
+		return fmt.Sprintf("terminated (%s, exit code %d)", s.Terminated.Reason, s.Terminated.ExitCode)
+	case s.Waiting != nil:
+		return fmt.Sprintf("waiting (%s)", s.Waiting.Reason)
+	}
+	return "in no known state"
+}
+
+// tracerStatus finds the tracer container's status in statuses.
+func tracerStatus(statuses []containerStatus) (containerStatus, bool) {
+	i := slices.IndexFunc(statuses, func(s containerStatus) bool { return s.Name == TracerContainer })
+	if i < 0 {
+		return containerStatus{}, false
+	}
+	return statuses[i], true
 }
 
 // hasContainer reports whether cs holds a container called name.
@@ -94,6 +126,12 @@ type PodState struct {
 	// has nothing to collect — said by the API server, not guessed from
 	// a failed exec.
 	Tracer bool
+	// Stopped says why the tracer container is not running ("" while it
+	// runs): a debug session deployed with -linger stays running after
+	// it ends, so a stopped one crashed, was OOM-killed or predates
+	// -linger, and `kubectl exec` cannot enter it — its segments in the
+	// emptyDir are out of reach until the pod goes (review B1).
+	Stopped string
 }
 
 // Lister looks pods up in one scope's context and namespace.
@@ -190,10 +228,19 @@ func (l *Lister) state(p podInfo) (PodState, error) {
 		return PodState{}, fmt.Errorf("%w: pod %q uid %q", ErrName, p.Metadata.Name, p.Metadata.UID)
 	}
 	tracer := hasContainer(p.Spec.EphemeralContainers, TracerContainer)
+	statuses := p.Status.EphemeralContainerStatuses
 	if l.s.Mode == ModeSidecar {
 		tracer = hasContainer(p.Spec.Containers, TracerContainer)
+		statuses = p.Status.ContainerStatuses
 	}
-	return PodState{Name: p.Metadata.Name, UID: p.Metadata.UID, Tracer: tracer}, nil
+	st := PodState{Name: p.Metadata.Name, UID: p.Metadata.UID, Tracer: tracer}
+	if tracer {
+		cs, ok := tracerStatus(statuses)
+		if st.Stopped = "without a status yet"; ok {
+			st.Stopped = cs.notRunning()
+		}
+	}
+	return st, nil
 }
 
 // PodHostID is the host_id a tracer in the pod with this UID reports

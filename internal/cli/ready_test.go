@@ -42,3 +42,23 @@ func TestReadyRoundTrip(t *testing.T) {
 		t.Errorf("ready/ still holds %v", entries)
 	}
 }
+
+// TestReadyMissingProject: a project that never ran here (no trace dir)
+// fails, unlike one whose ready/ is not there yet, which is an empty
+// stream — a project mismatch must not look like an empty collect.
+func TestReadyMissingProject(t *testing.T) {
+	root := t.TempDir()
+	var stream, errOut bytes.Buffer
+	if err := readyIn(root, []string{"-project", "shop"}, &stream, &errOut); err == nil || stream.Len() != 0 {
+		t.Fatalf("no trace dir: err = %v, %d bytes streamed", err, stream.Len())
+	}
+	if err := os.Mkdir(filepath.Join(root, "shop"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := readyIn(root, []string{"-project", "shop"}, &stream, &errOut); err != nil {
+		t.Fatalf("no ready/ yet: %v", err)
+	}
+	if taken, err := k8s.Unpack(&stream, t.TempDir()); err != nil || len(taken) != 0 {
+		t.Errorf("no ready/ yet: Unpack = %q, %v", taken, err)
+	}
+}

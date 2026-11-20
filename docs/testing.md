@@ -1052,11 +1052,14 @@ without a cluster, against fake kubectls on `PATH`:
   `ErrTooManyPods`; empty, negative-only, set-based and
   option-like selectors never reach kubectl; a pod name or UID
   not in the API server's form fails; kubectl failing is
-  `ErrUnreachable`. `Deploy` starts a debug container on a
+  `ErrUnreachable`; a tracer container terminated or without a
+  status is `Stopped`, with why. `Deploy` starts a debug container on a
   prepared pod, leaves an ephemeral tracer running the pinned
   digest alone (containerd's and cri-dockerd's `imageID` forms),
   verifies a sidecar, and — after the `get` alone — refuses
-  another digest, a bare `sha256:` `imageID`, a tag, a tracer not
+  another digest, an earlier debug container whose spec image is
+  another digest or a tag, a bare `sha256:` `imageID`, a tag, a
+  tracer not
   running, a missing sidecar and an unprepared pod. No image:
   `Resolve` passes, `Debug` and `Deploy` refuse before kubectl
   runs. A held fetch lock refuses a second `Fetch` (`ErrBusy`)
@@ -1070,6 +1073,16 @@ without a cluster, against fake kubectls on `PATH`:
   app container, two projects in a debug entry, a duplicate
   entry, an unknown key, and a server host shaped like
   `pod-<uid>`.
+- `internal/cli` (`linger_test.go`, review B1): a whole run —
+  pattern target, short `-duration`, a temp trace dir — on a fake
+  tracer (`openTracer`): with `-linger`, once the session ended the
+  tracer is closed (in `bpf.Tracer`, every program detached and
+  every map freed) and a segment is in `ready/`, yet the run has
+  not returned; cancelling (SIGTERM) ends it. Without `-linger` it
+  returns. Mutation-checked: skipping the linger fails the test
+  ("session returned before it ended"), and so does a `finish`
+  that no longer closes the tracer. `ready_test.go`: a project with
+  no trace dir fails, one without `ready/` yet is an empty stream.
 - `internal/ctl` (`pods_test.go`, its own fake answering per pod
   from files): collect of a pod entry runs `get pod`, then `exec
   … iormesh ready` and the remove — never `true`, `test` or
@@ -1080,10 +1093,14 @@ without a cluster, against fake kubectls on `PATH`:
   error fails the test); a pod without a tracer container is
   "nothing to collect" without an exec; a selector collects each
   match into its own directory, and one matching nothing fails;
-  `collect` alone includes pod entries; an unregistered or
-  malformed `-context`, an unknown entry and an unpinned
-  `-image` are refused before kubectl runs; deploy runs `debug
-  … -- iormesh run -project shop -pattern=… -duration 1h`,
+  `collect` alone includes pod entries; a tracer container that
+  terminated (OOM-killed) fails the collect as "session ended",
+  stranded, with no exec tried (mutation-checked); an `-context`
+  that is not the entry's cluster's, a malformed one, an unknown
+  entry and an unpinned `-image` are refused before kubectl runs,
+  and so are `-context`/`-namespace` on rm and on a collect or
+  refresh of every target; deploy runs `debug … -- iormesh run
+  -project shop -linger -pattern=… -duration 1h` (mutation-checked),
   refuses an unprepared pod naming the prepare patch and a
   registry without an image (collect still works there); rm
   keeps the registry when the last collect fails, drops the entry

@@ -107,6 +107,8 @@ func collectCommand(args []string, e env) error {
 	fs.Var(&projects, "project", "collect only this project (repeatable; default: every project)")
 	regPath := fs.String("registry", "", "registry file (default ~/.config/iormesh/servers.yaml)")
 	store := fs.String("store", "", "local trace store (default ~/.local/share/iormesh/traces)")
+	db := fs.String("db", "", "service database whose host pins a pod's store directory is pinned in "+
+		"(default ~/.local/share/iormesh/services.db; give build's -db)")
 	kf := addK8sFlags(fs, false)
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %v", errUsage, err)
@@ -123,6 +125,8 @@ func collectCommand(args []string, e env) error {
 	if err != nil {
 		return err
 	}
+	// A pod's pin goes where the build that reads it looks (review N3).
+	c.db = *db
 	return c.all(context.Background(), targets)
 }
 
@@ -171,6 +175,9 @@ func (c collector) all(ctx context.Context, targets []collectTarget) error {
 func collectTargets(r federate.Registry, args, projects []string, kf *k8sFlags) ([]collectTarget, error) {
 	explicit := len(args) > 0
 	if !explicit {
+		if err := kf.refuse("a collect of every target"); err != nil {
+			return nil, err
+		}
 		args = allTargets(r)
 	}
 	var targets []collectTarget

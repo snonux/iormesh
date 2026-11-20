@@ -25,7 +25,8 @@ func withTracer(sidecar, running bool, imageID string) string {
 			`"shareProcessNamespace":true,"containers":[{"name":"app"},{"name":"iormesh"}]`, 1)
 		return strings.TrimSuffix(pod, "}") + `,"status":{"containerStatuses":` + status + `}}`
 	}
-	pod := strings.Replace(preparedPod, `"containers"`, `"ephemeralContainers":[{"name":"iormesh"}],"containers"`, 1)
+	pod := strings.Replace(preparedPod, `"containers"`,
+		`"ephemeralContainers":[{"name":"iormesh","image":"`+testImage+`"}],"containers"`, 1)
 	return strings.TrimSuffix(pod, "}") + `,"status":{"ephemeralContainerStatuses":` + status + `}}`
 }
 
@@ -91,14 +92,19 @@ func TestDeployRefusesUnpinned(t *testing.T) {
 		want    error
 	}{
 		"ephemeral other digest": {withTracer(false, true, other), false, ErrImage},
-		"ephemeral local image":  {withTracer(false, true, "sha256:"+testDigest), false, ErrImage},
-		"ephemeral ended":        {withTracer(false, false, "registry.example/iormesh@sha256:"+testDigest), false, ErrTransport},
-		"sidecar other digest":   {withTracer(true, true, other), true, ErrImage},
-		"sidecar tag only":       {withTracer(true, true, "registry.example/iormesh:latest"), true, ErrImage},
-		"sidecar not running":    {withTracer(true, false, "registry.example/iormesh@sha256:"+testDigest), true, ErrTransport},
-		"sidecar missing":        {preparedPod, true, ErrUnprepared},
-		"sidecar unprepared":     {`{"spec":{"containers":[{"name":"app"},{"name":"iormesh"}]}}`, true, ErrUnprepared},
-		"debug unprepared":       {`{"spec":{"containers":[{"name":"app"}]}}`, false, ErrUnprepared},
+		"ephemeral spec image other": {strings.Replace(withTracer(false, true,
+			"registry.example/iormesh@sha256:"+testDigest), `"image":"`+testImage, `"image":"`+other, 1), false, ErrImage},
+		"ephemeral spec image tag": {strings.Replace(withTracer(false, true,
+			"registry.example/iormesh@sha256:"+testDigest), `"image":"`+testImage,
+			`"image":"registry.example/iormesh:latest`, 1), false, ErrImage},
+		"ephemeral local image": {withTracer(false, true, "sha256:"+testDigest), false, ErrImage},
+		"ephemeral ended":       {withTracer(false, false, "registry.example/iormesh@sha256:"+testDigest), false, ErrTransport},
+		"sidecar other digest":  {withTracer(true, true, other), true, ErrImage},
+		"sidecar tag only":      {withTracer(true, true, "registry.example/iormesh:latest"), true, ErrImage},
+		"sidecar not running":   {withTracer(true, false, "registry.example/iormesh@sha256:"+testDigest), true, ErrTransport},
+		"sidecar missing":       {preparedPod, true, ErrUnprepared},
+		"sidecar unprepared":    {`{"spec":{"containers":[{"name":"app"},{"name":"iormesh"}]}}`, true, ErrUnprepared},
+		"debug unprepared":      {`{"spec":{"containers":[{"name":"app"}]}}`, false, ErrUnprepared},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

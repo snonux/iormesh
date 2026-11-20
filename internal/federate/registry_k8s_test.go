@@ -157,6 +157,10 @@ func TestValidServer(t *testing.T) {
 	if !ValidServer("pod-1") {
 		t.Error("pod-1 refused")
 	}
+	// The same directory on a case-insensitive filesystem (N7).
+	if upper := strings.ToUpper(dir); ValidServer(upper) {
+		t.Errorf("%s accepted as a server", upper)
+	}
 	var r Registry
 	if err := r.Add(dir, shop()); !errors.Is(err, ErrInvalid) {
 		t.Errorf("Add(%s): %v", dir, err)

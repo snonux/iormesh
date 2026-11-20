@@ -2,7 +2,7 @@
 //
 //	iormeshctl add -project NAME (-pattern GLOB | -listen-port N) [-registry FILE] HOST [TRACER-FLAG...]
 //	iormeshctl rm [-project NAME] [-registry FILE] [-store DIR] [-force] [K8S] HOST|POD
-//	iormeshctl collect [-project NAME]... [-registry FILE] [-store DIR] [K8S] [HOST|POD...]
+//	iormeshctl collect [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [K8S] [HOST|POD...]
 //	iormeshctl deploy [-project NAME] [-registry FILE] [-dist DIR] [-key FILE] [-restart] [K8S]
 //	                  [-image IMG] HOST|POD...
 //	iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR]
@@ -204,7 +204,7 @@ func usage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `usage:
   iormeshctl add -project NAME (-pattern GLOB | -listen-port N) [-registry FILE] HOST [TRACER-FLAG...]
   iormeshctl rm [-project NAME] [-registry FILE] [-store DIR] [-force] [K8S] HOST|POD
-  iormeshctl collect [-project NAME]... [-registry FILE] [-store DIR] [K8S] [HOST|POD...]
+  iormeshctl collect [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [K8S] [HOST|POD...]
   iormeshctl deploy [-project NAME] [-registry FILE] [-dist DIR] [-key FILE] [-restart]
                     [K8S] [-image IMG] HOST|POD...
   iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR]
@@ -253,10 +253,12 @@ on the trace's first day; -to is exclusive.
 
 POD is a registry pods: entry, <cluster>/<namespace>/<pod> or
 <cluster>/<namespace>/<selector>; K8S is -context CTX -namespace NS,
-overriding the entry's (the context must be a registered cluster's).
-A selector reaches every running pod it matches; each pod is collected
-into <project>/pod-<uid>/. deploy starts a debug container in each
-prepared pod (or checks a sidecar) with the pinned image; rm collects
-a pod entry once more and unregisters it, leaving its tracer running.
+overriding the entry's (-context may only restate its cluster's; rm
+and a collect or refresh of every target take neither). A selector
+reaches every running pod it matches; each pod is collected into
+<project>/pod-<uid>/, pinned in the host pins beside -db. deploy
+starts a debug container (iormesh run -linger) in each prepared pod,
+or checks a sidecar, with the pinned image; rm collects a pod entry
+once more and unregisters it, leaving its tracer running.
 `)
 }

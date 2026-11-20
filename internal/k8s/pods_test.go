@@ -18,14 +18,41 @@ func testUID(n int) string {
 }
 
 // podItem is one pod object as `kubectl get` prints it (the fields the
-// lister reads), for a list or a single get.
+// lister reads), for a list or a single get; a tracer is an ephemeral
+// container that is running.
 func podItem(name, uid, phase string, tracer bool) map[string]any {
 	spec := map[string]any{"containers": []map[string]any{{"name": "app"}}}
+	status := map[string]any{"phase": phase}
 	if tracer {
-		spec["ephemeralContainers"] = []map[string]any{{"name": TracerContainer}}
+		spec["ephemeralContainers"] = []map[string]any{{"name": TracerContainer, "image": testImage}}
+		status["ephemeralContainerStatuses"] = []map[string]any{{"name": TracerContainer,
+			"state": map[string]any{"running": map[string]any{}}}}
 	}
 	return map[string]any{"metadata": map[string]any{"name": name, "uid": uid},
-		"spec": spec, "status": map[string]any{"phase": phase}}
+		"spec": spec, "status": status}
+}
+
+// TestPodStateStopped: a tracer container that terminated (OOM, crash)
+// or has no status yet is reported as stopped, with why; a running one
+// is not.
+func TestPodStateStopped(t *testing.T) {
+	f := newFake(t)
+	item := podItem("web-a", testUID(1), "Running", true)
+	item["status"].(map[string]any)["ephemeralContainerStatuses"] = []map[string]any{{"name": TracerContainer,
+		"state": map[string]any{"terminated": map[string]any{"reason": "OOMKilled", "exitCode": 137}}}}
+	noStatus := podItem("web-b", testUID(2), "Running", true)
+	delete(noStatus["status"].(map[string]any), "ephemeralContainerStatuses")
+	f.pod(t, podList(t, item, noStatus, podItem("web-c", testUID(3), "Running", true)))
+	pods, err := newTestLister(t).Select(context.Background(), "app=web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"terminated (OOMKilled, exit code 137)", "without a status yet", ""}
+	for i, p := range pods {
+		if p.Stopped != want[i] {
+			t.Errorf("%s: Stopped %q, want %q", p.Name, p.Stopped, want[i])
+		}
+	}
 }
 
 // podList is `kubectl get pods -o json` holding items.

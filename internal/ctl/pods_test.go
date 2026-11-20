@@ -156,18 +156,20 @@ func (f *podFixture) file(t *testing.T, name string, data []byte) {
 func uid(n int) string { return fmt.Sprintf("0123abcd-0000-4000-8000-%012d", n) }
 
 // podObject is a pod as `kubectl get` prints it: prepared (#13's
-// volumes), running, an app container, and an ephemeral tracer when
-// tracer is set.
+// volumes), running, an app container, and when tracer is set an
+// ephemeral tracer of the pinned image, running.
 func podObject(name, id string, tracer bool) map[string]any {
 	spec := map[string]any{"containers": []map[string]any{{"name": "app"}},
 		"volumes": []map[string]any{
 			{"name": k8s.TracefsVolume, "hostPath": map[string]any{"path": k8s.TracefsPath}},
 			{"name": k8s.TracesVolume, "emptyDir": map[string]any{"sizeLimit": "2Gi"}}}}
+	status := map[string]any{"phase": "Running"}
 	if tracer {
-		spec["ephemeralContainers"] = []map[string]any{{"name": k8s.TracerContainer}}
+		spec["ephemeralContainers"] = []map[string]any{{"name": k8s.TracerContainer, "image": podImage}}
+		status["ephemeralContainerStatuses"] = []map[string]any{{"name": k8s.TracerContainer,
+			"imageID": podImage, "state": map[string]any{"running": map[string]any{}}}}
 	}
-	return map[string]any{"metadata": map[string]any{"name": name, "uid": id}, "spec": spec,
-		"status": map[string]any{"phase": "Running"}}
+	return map[string]any{"metadata": map[string]any{"name": name, "uid": id}, "spec": spec, "status": status}
 }
 
 // pod serves obj for `get pod NAME`.
@@ -283,6 +285,29 @@ func TestPodCollectUnreachable(t *testing.T) {
 	}
 }
 
+// TestPodCollectStopped: a tracer container that terminated anyway (an
+// OOM kill, a crash — deploy's -linger keeps a finished session's
+// running) fails the collect saying the session ended and its segments
+// are stranded, without trying an exec kubectl would refuse.
+func TestPodCollectStopped(t *testing.T) {
+	f := newPodFixture(t, "")
+	obj := podObject("checkout-0", uid(1), true)
+	obj["status"].(map[string]any)["ephemeralContainerStatuses"] = []map[string]any{{"name": k8s.TracerContainer,
+		"state": map[string]any{"terminated": map[string]any{"reason": "OOMKilled", "exitCode": 137}}}}
+	f.pod(t, obj)
+	if code := f.run("collect", "kind/shop/checkout-0"); code != exitError {
+		t.Fatalf("exit %d, want %d", code, exitError)
+	}
+	for _, want := range []string{"session ended", "terminated (OOMKilled, exit code 137)", "stranded"} {
+		if !strings.Contains(f.stderr.String(), want) {
+			t.Errorf("stderr lacks %q: %s", want, f.stderr)
+		}
+	}
+	if got := verbs(f.calls(t)); !slices.Equal(got, []string{"get pod"}) {
+		t.Errorf("calls %q, want the get alone", got)
+	}
+}
+
 // TestPodCollectNoTracer: a running pod the API server shows without a
 // tracer container has nothing to collect — said, not an error, and no
 // exec is tried.
@@ -336,14 +361,17 @@ func TestPodRefusedBeforeContact(t *testing.T) {
 		args []string
 		msg  string
 	}{
-		{[]string{"collect", "-context", "prod", "kind/shop/checkout-0"}, `"prod" is not a registered context`},
+		{[]string{"collect", "-context", "prod", "kind/shop/checkout-0"}, `-context "prod" is not cluster kind's`},
 		{[]string{"collect", "-context", "-x", "kind/shop/checkout-0"}, "context refused"},
 		{[]string{"collect", "kind/shop/other"}, "pod entry not registered"},
-		{[]string{"deploy", "-context", "prod", "kind/shop/checkout-0"}, "not a registered context"},
+		{[]string{"deploy", "-context", "prod", "kind/shop/checkout-0"}, "context refused"},
 		{[]string{"deploy", "-image", "registry.example/iormesh:latest", "kind/shop/checkout-0"}, "not pinned by digest"},
-		{[]string{"rm", "-context", "prod", "kind/shop/checkout-0"}, "not a registered context"},
+		{[]string{"collect", "-namespace", "other", "-project", "x"}, "not taken by a collect of every target"},
+		{[]string{"refresh", "-context", "kind-test"}, "not taken by a collect of every target"},
+		{[]string{"rm", "-context", "kind-test", "kind/shop/checkout-0"}, "not taken by rm"},
+		{[]string{"rm", "-namespace", "other", "kind/shop/checkout-0"}, "not taken by rm"},
 	} {
-		if code := f.run(c.args...); code != exitError || !strings.Contains(f.stderr.String(), c.msg) {
+		if code := f.run(c.args...); code == exitOK || !strings.Contains(f.stderr.String(), c.msg) {
 			t.Errorf("%v: exit %d, stderr %s", c.args, code, f.stderr)
 		}
 		if calls := f.calls(t); len(calls) != 0 {
@@ -367,7 +395,7 @@ func TestPodDeploy(t *testing.T) {
 	}
 	dbg := calls[2]
 	i := slices.Index(dbg, "--")
-	wantArgv := []string{"iormesh", "run", "-project", "shop", "-pattern=*java*", "-duration", "1h"}
+	wantArgv := []string{"iormesh", "run", "-project", "shop", "-linger", "-pattern=*java*", "-duration", "1h"}
 	if i < 0 || !slices.Equal(dbg[i+1:], wantArgv) || !slices.Contains(dbg, "--image="+podImage) ||
 		!slices.Contains(dbg, "--target=app") {
 		t.Errorf("debug argv %q", dbg)
@@ -434,6 +462,27 @@ func TestPodRm(t *testing.T) {
 		t.Errorf("stdout: %s", f.stdout)
 	}
 	assertPodEntries(t, f.registry, 0)
+}
+
+// TestPinNewHostsRereads: pinNewHosts merges into the file as it is now,
+// under its lock, so a pin another process (a collect, a build) wrote
+// since the caller loaded the pins survives (review N2), and an existing
+// pin is never overwritten.
+func TestPinNewHostsRereads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "share", hostPinsFileName)
+	a := federate.HostIdentity{HostID: "pod-" + uid(1), FQDN: "a.shop.0123abcd"}
+	b := federate.HostIdentity{HostID: "pod-" + uid(2), FQDN: "b.shop.0123abcd"}
+	if err := pinNewHosts(path, map[string]federate.HostIdentity{"pod-" + uid(1): a}); err != nil {
+		t.Fatal(err)
+	}
+	if err := pinNewHosts(path, map[string]federate.HostIdentity{"pod-" + uid(2): b,
+		"pod-" + uid(1): {HostID: "forged"}}); err != nil {
+		t.Fatal(err)
+	}
+	pins, err := loadHostPins(path)
+	if err != nil || len(pins) != 2 || pins["pod-"+uid(1)] != a || pins["pod-"+uid(2)] != b {
+		t.Errorf("pins %v, %v", pins, err)
+	}
 }
 
 // assertPodEntries checks how many pods: entries the registry holds.

@@ -97,7 +97,10 @@ func (t Target) Spec() target.Spec {
 // podDir is the store directory name collect gives a pod: "pod-" and its
 // UID (internal/k8s PodHostID). No registry host may look like one, so a
 // server can never share a pod's directory.
-var podDir = regexp.MustCompile(`^pod-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+// Case-insensitive (review N7): a host "POD-<UID>" would be a different
+// store directory on Linux but the same one on a case-insensitive
+// filesystem (macOS, a laptop controller's default).
+var podDir = regexp.MustCompile(`(?i)^pod-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // ValidHost reports whether host is usable as a store directory name: a
 // registry host name, or a pod's "pod-<uid>".

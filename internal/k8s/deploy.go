@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"iormesh/internal/k8sname"
 )
@@ -61,6 +62,9 @@ func (k *Kubectl) Deploy(ctx context.Context, argv ...string) (Outcome, error) {
 		return SidecarVerified, nil
 	}
 	if hasContainer(p.Spec.EphemeralContainers, TracerContainer) {
+		if err := k.verifySpecImage(p.Spec.EphemeralContainers); err != nil {
+			return 0, err
+		}
 		if err := k.verifyImage(p.Status.EphemeralContainerStatuses); err != nil {
 			return 0, fmt.Errorf("%w; ephemeral containers cannot be replaced: restart the pod for a new session",
 				err)
@@ -82,23 +86,45 @@ func (k *Kubectl) Deploy(ctx context.Context, argv ...string) (Outcome, error) {
 // locally loaded image reports) cannot be checked and is refused too:
 // unverifiable is not verified.
 func (k *Kubectl) verifyImage(statuses []containerStatus) error {
-	where := fmt.Sprintf("%s/%s container %q", k.t.Namespace, k.t.Pod, TracerContainer)
-	for _, st := range statuses {
-		if st.Name != TracerContainer {
-			continue
-		}
-		if st.State.Running == nil {
-			return fmt.Errorf("%w: %s is not running", ErrTransport, where)
-		}
-		got, want := k8sname.StatusDigest(st.ImageID), k8sname.Digest(k.t.Image)
-		switch {
-		case got == "":
-			return fmt.Errorf("%w: %s runs imageID %q, which names no registry digest to check against %s",
-				ErrImage, where, st.ImageID, k.t.Image)
-		case got != want:
-			return fmt.Errorf("%w: %s runs sha256:%s, not the pinned %s", ErrImage, where, got, k.t.Image)
-		}
-		return nil
+	where := k.tracerName()
+	st, ok := tracerStatus(statuses)
+	if !ok {
+		return fmt.Errorf("%w: %s has no status yet (not started)", ErrTransport, where)
 	}
-	return fmt.Errorf("%w: %s has no status yet (not started)", ErrTransport, where)
+	if why := st.notRunning(); why != "" {
+		return fmt.Errorf("%w: %s is %s", ErrTransport, where, why)
+	}
+	got, want := k8sname.StatusDigest(st.ImageID), k8sname.Digest(k.t.Image)
+	switch {
+	case got == "":
+		return fmt.Errorf("%w: %s runs imageID %q, which names no registry digest to check against %s",
+			ErrImage, where, st.ImageID, k.t.Image)
+	case got != want:
+		return fmt.Errorf("%w: %s runs sha256:%s, not the pinned %s", ErrImage, where, got, k.t.Image)
+	}
+	return nil
+}
+
+// verifySpecImage requires an earlier debug container's spec image to be
+// pinned by the target's digest too (review N6): iormeshctl always
+// creates it with --image=<digest>, so anything else was made by someone
+// else, and the status alone is written by the node, not the API's
+// admission. A sidecar's spec may name a tag (the owner's patch); only
+// its status is checked.
+func (k *Kubectl) verifySpecImage(cs []named) error {
+	i := slices.IndexFunc(cs, func(c named) bool { return c.Name == TracerContainer })
+	if i < 0 || k8sname.Digest(cs[i].Image) != k8sname.Digest(k.t.Image) {
+		var img string
+		if i >= 0 {
+			img = cs[i].Image
+		}
+		return fmt.Errorf("%w: %s has spec image %q, not the pinned %s; restart the pod for a new session",
+			ErrImage, k.tracerName(), img, k.t.Image)
+	}
+	return nil
+}
+
+// tracerName names the target's tracer container in messages.
+func (k *Kubectl) tracerName() string {
+	return fmt.Sprintf("%s/%s container %q", k.t.Namespace, k.t.Pod, TracerContainer)
 }

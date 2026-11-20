@@ -51,11 +51,7 @@ func runCommand(args []string, stderr io.Writer) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	stopProfile, err := startCPUProfile(cfg.cpuProfile)
-	if err != nil {
-		return err
-	}
-	return errors.Join(runTrace(ctx, cfg, stderr), stopProfile())
+	return runSession(ctx, cfg, stderr)
 }
 
 // startCPUProfile starts a pprof CPU profile into path ("" profiles
@@ -94,6 +90,8 @@ type tracer interface {
 	StackTrace(id uint32) ([]uint64, error)
 	AttachJavaMarks(pid uint32, natives []bpf.JavaNative) ([]string, error)
 	DetachJavaMarks(pid uint32) error
+	Skipped() []bpf.Probe
+	PidNS() uint32
 	Close() error
 }
 
@@ -117,7 +115,7 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	tr, err := bpf.Open(bpf.Config{Pids: pids, ExecWatch: cfg.spec.Mode() == target.ModePattern,
+	tr, err := openTracer(bpf.Config{Pids: pids, ExecWatch: cfg.spec.Mode() == target.ModePattern,
 		Probes: bpf.ProbesFor(cfg.families), NoAggregation: cfg.noAggregation,
 		NativeStacks: cfg.nativeStacks, JavaMarks: cfg.spool != ""})
 	if err != nil {

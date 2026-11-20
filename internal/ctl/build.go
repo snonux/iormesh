@@ -206,7 +206,7 @@ func loadSegments(ctx context.Context, paths buildPaths, projects []string) (fed
 	if err != nil {
 		return federate.Segments{}, err
 	}
-	return segs, pinNewHosts(pins.path, pins.known, segs.Hosts)
+	return segs, pinNewHosts(pins.path, segs.Hosts)
 }
 
 // hostPins are the pinned host identities and the file they live in.

@@ -2388,17 +2388,38 @@ here only as placeholders.
   sidecar, or an earlier debug container, which is then left
   alone) must run the pinned digest by its status `imageID`;
   another digest, or an `imageID` without a registry digest, is
-  refused. An image is needed to deploy, not to collect. Collect
+  refused — and an earlier debug container's spec image must carry
+  the pinned digest too (iormeshctl always creates it so; the status
+  is the node's word, the spec the API's). An image is needed to
+  deploy, not to collect. A debug session runs `iormesh run
+  -linger`: when its `-duration` ends it detaches and frees its
+  BPF, publishes its last segment and then waits for SIGTERM
+  instead of exiting, because an exited ephemeral container can
+  never be exec'd into again and its last segments would be
+  stranded in the emptyDir. A tracer container stopped anyway (OOM
+  kill, crash) is reported by collect as "session ended", its
+  segments stranded or unknown, without an exec. Collect
   asks the API server which pods an entry is and whether each
   has a tracer container (none: nothing to collect, said), then
   fetches through `kubectl exec … iormesh ready`; a pod kubectl
   cannot reach fails, and a missing `ready/` is an empty stream —
-  no `true`, `test` or `find` in the image. One fetch per local
-  directory at a time (a flock, failing fast). Each pod's store
-  directory is `pod-<uid>`, not its name (a StatefulSet pod
-  recreated under its name is a new host), pinned in the build's
-  host pins to `host_id` `pod-<uid>` and the FQDN task 7f4
-  gives an in-pod tracer. rm collects one last time, then drops
+  no `true`, `test` or `find` in the image — but a project with no
+  trace dir at all in the container fails, so a project mismatch
+  never reads as an empty collect. One fetch per local directory
+  at a time (a flock, failing fast). Each pod's store directory is
+  `pod-<uid>`, not its name (a StatefulSet pod recreated under its
+  name is a new host), pinned in the build's host pins
+  (`hosts.json`, beside the service database: collect's and
+  refresh's `-db`, under a lock shared with build) to `host_id`
+  `pod-<uid>` and the FQDN task 7f4 gives an in-pod tracer. Those
+  pins grow with pod churn, one per pod incarnation ever
+  collected, and will need pruning later. A selector pod that was
+  replaced drops out of the selector's answer, and its emptyDir —
+  whatever it had not yet been collected from — goes with it:
+  collect often on churning workloads. `-context` may only restate
+  the entry's cluster's context, and neither `-context` nor
+  `-namespace` is taken by rm or by a collect of every target.
+  rm collects one last time, then drops
   the entry; nothing in the pod is stopped (an ephemeral
   container cannot be removed or signalled without a shell), so
   the session runs until its `-duration` or the pod ends.
