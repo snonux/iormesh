@@ -17,7 +17,8 @@ import javax.net.ssl.SSLContext;
  * in its own directory {@code <role>.d} inside the shared workdir.
  *
  * <pre>
- *   boot     mkdir D; provision and load D/role.conf; pin the cert of
+ *   boot     (in the fresh dir D Tree.inFreshDir made) provision and
+ *            load D/role.conf; pin the cert of
  *            every TLS service it calls (read D/../callee.crt)
  *   serve    (servers) publish role.crt if TLS, listen, answer the
  *            declared calls — the first one's handling makes this

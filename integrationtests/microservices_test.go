@@ -69,7 +69,7 @@ func TestMicroservices(t *testing.T) {
 			"a plain hop declared TLS": func(x *normalize.Expectation) {
 				httpOf(x, httpIndex(x, "/inventory/reserve")).Scheme = "https"
 			},
-			"the fan-in reversed": func(x *normalize.Expectation) {
+			"a wrong fan-in path": func(x *normalize.Expectation) {
 				i := httpIndex(x, "/inventory/stock/widget")
 				httpOf(x, i).Path = "/inventory/reserve"
 			},

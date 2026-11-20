@@ -350,11 +350,13 @@ pass, and orders must still remove its certificate.
 
 | Test | What it checks |
 |---|---|
-| `TestMicroservices` | microservices golden under the agent, the four services released leaves first on free ports in one `--dir`: every hop one fused connection with an `http` event on each end (`https` on the TLS hops) pairing by `(conn_id, req_seq)`; each server's request handled by `HttpServe#handle`, each call made by `HttpFetch#call`, orders' calls on its dispatcher thread inside the gateway's request; config, certificate and record I/O with their causing methods (`ServiceConfig#provision`/`#load`, `ServiceNode#publish`/`#readCert`/`#withdraw`/`#retire`, `DataStore#save`); four rings; mutated goldens fail |
+| `TestMicroservices` | microservices golden under the agent, the four services released leaves first on free ports in one `--dir`: every hop one fused connection with an `http` event on each end (`https` on the TLS hops) pairing by `(conn_id, req_seq)`; each server's request handled by `HttpServe#handle`, each call made by `HttpFetch#call`, orders' calls on its dispatcher thread inside the gateway's request; config, certificate and record I/O with their causing methods (`ServiceConfig#provision`/`#load`, `ServiceNode#publish`/`#readCert`/`#withdraw`, `DataStore#save`; the services' mkdir and rmdir stay unattributed, as no hook issues them); four rings; mutated goldens fail |
 
 The golden was written from strace runs of the four processes
-(JDK 25). The agent-side fields are reasoned from the M3 goldens
-and still need a traced run to confirm (see the task's notes).
+(JDK 25) and confirmed against a traced run (iormesh run +
+normalize -check as root, 5214 events): the one correction was the
+services' mkdir and rmdir, which stay attribution none because no
+agent hook issues them.
 
 ## Performance baselines
 

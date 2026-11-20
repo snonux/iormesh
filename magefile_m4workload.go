@@ -8,9 +8,12 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -178,19 +181,39 @@ func checkMicroservicesRunFailures() error {
 	}
 	defer func() { _ = os.RemoveAll(empty) }()
 	p := fmt.Sprint(port)
-	failing := [][]string{
-		{"microservices", "--role", "gateway", "--dir", empty, "--orders-port", p,
-			"--inventory-port", p},
-		{"microservices", "--role", "orders", "--dir", empty, "--inventory-port", p,
-			"--billing-port", p},
-		{"microservices", "--role", "billing", "--dir", "/nonexistent/iormesh-workload"},
+	// The callee port is closed too, so a refused connection would also
+	// exit 1: the stderr names the missing certificate, so the check pins
+	// that the cert, read at boot, is what failed (review of jb4).
+	noCert := map[string][]string{
+		"no orders certificate": {"microservices", "--role", "gateway", "--dir", empty,
+			"--orders-port", p, "--inventory-port", p},
+		"no billing certificate": {"microservices", "--role", "orders", "--dir", empty,
+			"--inventory-port", p, "--billing-port", p},
 	}
-	for _, args := range failing {
-		if err := expectExit(1, args...); err != nil {
+	for want, args := range noCert {
+		if err := expectExitSaying(1, want, args...); err != nil {
 			return err
 		}
 	}
+	if err := expectExit(1, "microservices", "--role", "billing",
+		"--dir", "/nonexistent/iormesh-workload"); err != nil {
+		return err
+	}
 	return expectEmptyDir(empty, "a failed microservices run")
+}
+
+// expectExitSaying is expectExit that also requires want in the jar's
+// stderr, so a run failing for another reason does not pass the check.
+func expectExitSaying(code int, want string, args ...string) error {
+	_, err := runBounded(nil, args...)
+	if werr := wantExitCode(err, code, fmt.Sprintf("workload %q", args)); werr != nil {
+		return werr
+	}
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || !strings.Contains(string(exit.Stderr), want) {
+		return fmt.Errorf("workload %q: stderr does not say %q", args, want)
+	}
+	return nil
 }
 
 // checkBrokenHop: a hop that fails in the middle of the chain fails the

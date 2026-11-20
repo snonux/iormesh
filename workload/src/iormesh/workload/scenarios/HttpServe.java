@@ -153,9 +153,10 @@ public final class HttpServe implements AutoCloseable {
      * Answers request n with call n, after its {@link Work}. A request the
      * declaration does not expect, or whose work throws, gets 500 and
      * fails the run; the latch is then released in full, so a standalone
-     * server never waits for requests that will not come. The latch counts down only after the exchange is closed, so an
-     * owner that stops the server next never cuts a reply short. The
-     * region is closed after ex.close(), so the close runs inside it too.
+     * server never waits for requests that will not come. The latch
+     * counts down only after the exchange is closed, so an owner that
+     * stops the server next never cuts a reply short. The region is
+     * closed after ex.close(), so the close runs inside it too.
      */
     private void handle(HttpExchange ex) throws IOException {
         int n = next.getAndIncrement();
@@ -197,7 +198,9 @@ public final class HttpServe implements AutoCloseable {
         try {
             work.before(n);
             return null;
-        } catch (Exception e) {
+        } catch (Throwable e) {
+            // Throwable, not Exception: an Error from the work must fail
+            // the server's run too, not just close the exchange unanswered.
             return "request " + (n + 1) + ": " + e;
         }
     }

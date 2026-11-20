@@ -64,8 +64,8 @@ public final class Microservices implements Scenario {
 
     @Override
     public void run(String role, Map<String, String> opts) throws Exception {
-        Service svc = Service.of(role);
         Options.requireRole(NAME, role, roles());
+        Service svc = Service.of(role);
         Options.requireKnown(opts, options(svc));
         // Every option is parsed before any I/O: a bad one is a usage
         // error with an empty bracket, never a half-booted service.
