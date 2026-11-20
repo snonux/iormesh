@@ -33,7 +33,8 @@ import (
 //
 // Release timing still converts the event's boot-clock end to
 // CLOCK_MONOTONIC with a midpoint offset sampled in user space (S1
-// experiment 2), to compare it with the ring's watermark.
+// experiment 2; the narrowest of offsetSamples triples per poll, task
+// se4), to compare it with the ring's watermark.
 //
 // I/O of a virtual thread is joined the same way (the agent records the
 // carrier it ran on) and flagged java.carrier, naming the carrier thread
@@ -156,7 +157,9 @@ type JavaStats struct {
 	// Events of JVMs with a ring that stayed none, by why.
 	Unmarked    uint64 // issued outside every hooked native: JVM work
 	OtherNative uint64 // issued from a native the bracket's hook does not reach
-	Unbracketed uint64 // no bracket contains the native's entry
+	// Unbracketed: no bracket contains the native's entry (or, Stale, the
+	// one that does closed before the syscall).
+	Unbracketed uint64
 	// Stale counts, of Unbracketed, the events whose containing bracket
 	// was found but closed before the syscall started on the converted
 	// clock: a stale mark — or a clock offset off by more than the ~100 ns

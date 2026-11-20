@@ -770,10 +770,17 @@ Gated by S1 — done; the design below is S1's result
   green. The fourth run failed method-flow: 17 events that
   carried a Java mark were judged unbracketed although all 180
   brackets arrived (attributed 21 instead of 37) — an
-  intermittent join defect under load, never a misattribution,
-  tracked by task se4, which gates M3's acceptance (task 5b4
-  stays open until it lands). Schema v1 is frozen in full
-  (docs/output-contract.md). Open
+  intermittent join defect under load, never a misattribution.
+  Task se4 traced it to the boot − monotonic offset: one
+  user-space clock triple preempted between its reads skewed it
+  by milliseconds, so the stale-mark check (a native's last
+  syscall starts ~100 ns before its bracket closes) judged whole
+  batches unbracketed. The offset is now the narrowest of eight
+  triples and the summary counts stale marks apart; three more
+  full runs were 40 / 40, the last at load 21 with stale 0 in
+  every scenario. With se4 closed, M3 is accepted; the
+  tracer-CPU item stays open in ee4. Schema v1 is frozen in
+  full (docs/output-contract.md). Open
   beyond ee4: the third-party hook gaps listed above, the Netty
   client side unit-tested only, attaching JVMs a pattern session
   sees start, and cross-mount-namespace attach (M7).
