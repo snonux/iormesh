@@ -814,7 +814,9 @@ Gated by S1 — done; the design below is S1's result
   triples and the summary counts stale marks apart; three more
   full runs were 40 / 40, the last at load 21 with stale 0 in
   every scenario. With se4 closed, M3 is accepted; the
-  tracer-CPU item stays open in ee4. Schema v1 is frozen in
+  tracer-CPU item stays open in ee4 (2026-11-20: plain unfolded
+  passes on the segment path, `-spool` is over — owner decision
+  needed, M4 acceptance). Schema v1 is frozen in
   full (docs/output-contract.md). Open
   beyond ee4: the third-party hook gaps listed above, the Netty
   client side unit-tested only, attaching JVMs a pattern session
@@ -929,7 +931,13 @@ Kubernetes (M7) build on it.
   one-encoder zstd codec; per event the writer costs ≈ 3× the
   NDJSON sink (≈ 10 k vs 3.4 k instructions on the burst
   event, ≈ 4.6 B/event on disk for that burst) — ee4 measures
-  what that does to decision #25's CPU item.
+  what that does to decision #25's CPU item. Task ee4 replaced
+  the events file's writer with the segment package's own
+  columnar encoder (the tables keep `parquet-go`): ≈ 2.5 k
+  instructions per burst event, below the NDJSON sink, the same
+  records read back, files smaller; one data page v2 per column
+  chunk, null-count statistics only, no column or offset index
+  (docs/schema.md, "Parquet mapping").
 - **Disk watchdog**: the trace directory is configurable
   (`-trace-dir`, default `/opt/iormesh/traces`), and the
   tracer continuously monitors the partition holding it
@@ -1126,7 +1134,24 @@ Kubernetes (M7) build on it.
   and arm64. Deployed binaries come out of the container build
   pipeline (see "Container builds (Docker/Podman)").
 - Acceptance: decision #25's tracer-CPU item passes on the
-  segment-writer path, plain and `-spool` (task ee4). Two test
+  segment-writer path, plain and `-spool` (task ee4).
+  Status (2026-11-20, task ee4): plain unfolded passes (0.85 µs
+  at 1 thread, 1.62 µs at 4); `-spool` with every event joined
+  is over (2.89 µs at 1 thread, 4.82 µs at 4; 5.8 k / 7.7 k
+  cycles per event, ~4 k needed at this host's loaded clock) —
+  the writer is no longer the cost, the agent ring's drain, the
+  join and the correlator are (s3-overhead.md, "Follow-up
+  (ee4)"). **Owner decision needed** — the limit is not moved
+  here and the item is not re-split past lb4. The options: (a)
+  another round of cuts on the join path — no record boxing in
+  the agent ring's drain, a chunked bracket list instead of one
+  growing slice, no per-event `schema.Java` allocation — worth
+  perhaps 10–20 %, short of the third still missing; (b) keep
+  2 µs for the plain path and give the every-event-joined
+  `-spool` burst, a worst case a real JVM's hot loops do not
+  reach under the default fold (`-aggregate`), its own measured
+  budget; (c) accept M4 with the `-spool` item open as the M2
+  and M3 milestones were, gated on a named later task. Two test
   hosts run M4's scenarios; from a
   controller, `add` → `deploy` → `refresh` → `rm` produces the
   merged graph export with zero manual steps on the servers,
@@ -1447,7 +1472,19 @@ answer), and deferred.
      vs ≈ 3.4 k instructions on the burst event), so the
      parquet path starts further over, not under;
      `DataPageStatistics(false)` (≈ −7 %) is the one known
-     cheap lever. Measured as the
+     cheap lever. Task ee4 (2026-11-20) replaced the events
+     file's `parquet-go` writer with a columnar encoder of its
+     own (writer 11.2 k → 2.5 k instructions per event) and
+     measured the segment path, interleaved against the build
+     before it, medians of 5: plain unfolded **passes** —
+     0.85 µs at 1 thread and 1.62 µs at 4 (from 2.68 / 3.14;
+     5.8 k / 6.0 k instructions, 2.6 k / 3.1 k cycles per event,
+     load 2.5–3.6); `-spool` with every event joined stays
+     **over** — 2.89 µs at 1 thread (load 3–41) and 4.82 µs at 4
+     (load 41–46), 11.5 k / 12.0 k instructions and 5.8 k /
+     7.7 k cycles per event (from 4.43 / 5.82 µs). The limit is
+     unchanged; the `-spool` case awaits an owner decision (M4
+     status; s3-overhead.md, "Follow-up (ee4)"). Measured as the
      tracer's own user+sys CPU time per event from its ready
      file to its exit (load and attach excluded), which host
      load moves less than wall time — not nothing: on a loaded SMT host one thread's CPU

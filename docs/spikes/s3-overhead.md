@@ -857,3 +857,116 @@ when it then blocks past 1 ms (the read waiting on the peer right
 after a burst) it is sent alone without `tcp_seq`. Parking held
 enters as well would cover it, at the price of the walk on every
 folded call — not taken.
+
+## Follow-up (ee4): tracer CPU on M4's segment writer
+
+Task ee4 re-measured decision #25's tracer-CPU item on M4's output
+path — parquet segments under `-trace-dir`, no `-out` — and cut the
+segment writer, which task 8b4 had measured at ≈ 3× the NDJSON sink
+per event. Same host (i7-1185G7, 8 CPUs, kernel 7.2.15, JDK 25),
+busy as ever. Samples, the A/B script and benchmark output:
+`spikes/s3/results-ee4/`.
+
+`measure.sh` gained `S3_SEGMENT=1`: the traced run writes segments to
+a `-trace-dir` in its work dir with `-disk-limit 0` (the developer
+laptop's root is 95 % used, over the watchdog's 90 % default; the
+256 MiB floor stays), and the emitted events are counted from the
+published segments' footers (`spikes/s3/rowcount.go`, run with `go
+run`). `S3_PERF=1` now records cycles (user and kernel) beside the
+instructions.
+
+**Where the time went** (`-cpuprofile` and `perf stat`, the build
+before ee4, `2d04f09`): on the plain unfolded burst the tracer spent
+12.3 k instructions per event on the segment path against 6.6 k on
+NDJSON, and lost 20–25 % of the records at 1 thread, which NDJSON
+never did. `segment.Writer.Event` was three quarters of the per-event
+work: `parquet-go`'s reflection over `schema.Event`'s 68 leaf columns
+(each nil pointer — the args, the java, http, session, otel and dns
+objects — walked row by row into ~50 null levels), then the page flush:
+level histograms, page bounds computed twice, and zstd. Neither the
+library's `WriteRows` (`parquet.Value` rows, 17.8 k instructions per
+event) nor `DataPageStatistics(false)` (−7 %) came near.
+
+**The cut**: the events file now has its own columnar encoder
+(`internal/segment/column.go`, `eventcols.go`, `eventfile.go`; the
+tables keep `parquet-go`, their rows are rare):
+
+- a hand-written mapping appends each field to a typed column buffer
+  — a definition level per slot of an optional leaf, a repetition
+  level per list element, values only for set slots — with no
+  reflection and no `parquet.Value`. It is parquet-go v0.29's mapping
+  for the struct tags (a nil pointer and an empty list are null; an
+  optional non-pointer field is always present, its zero value
+  included), checked against the schema the library derives (path,
+  physical type, levels) when a writer starts, and held to the
+  library's own `Deconstruct`, value by value, over 3 000 random
+  events by `TestEventColumnsMatchDeconstruct`;
+- slot and null counts are derived from the levels once per row group,
+  not counted per row: most of a syscall event's columns are nulls;
+- per row group (8192 rows, or 4 MiB buffered) and column: a
+  dictionary page for the six dict-tagged strings, one data page v2
+  (levels RLE, values PLAIN, `RLE_DICTIONARY`, or `DELTA_BINARY_PACKED`
+  for `seq`, `boot_ns`, `wall_ns` and `latency_ns`), zstd. Delta
+  encoding mattered: as PLAIN int64 those four high-entropy columns
+  cost zstd ~13 ns per byte, ~100 ns per event each, on a real
+  `-spool` segment. The footer's schema, column orders and created_by
+  are copied from an empty file `parquet-go` wrote, so the file
+  describes itself as the library's did. Not written: min/max page
+  statistics (null counts only), column and offset indexes;
+- 8192 rows per row group, not more: 16 k and 32 k saved instructions
+  but cost cycles once the open row group's buffers outgrew L2.
+
+The output is the same records: the round-trip tests read the files
+back with `parquet-go` and compare NDJSON lines, rich events and 16 k
+random ones over several row groups included; and the files are
+smaller (plain at 1 thread 8.1 → 5.2 B/event, `-spool` 10.2 → 7.0).
+
+**Benchmarks** (`results-ee4/bench.txt`, `perf stat` per op as ud4's
+`insn.sh`, pinned to CPU 3; `BenchmarkWriterJoinedEvent` is new, the
+read attributed java with a four-frame stack):
+
+| Benchmark (per op) | Instructions before → after | Cycles before → after |
+|---|--:|--:|
+| `WriterEvent` | 11 151 → 2 483 | 6 071 → 1 299 |
+| `WriterJoinedEvent` | 12 619 → 2 777 | 7 244 → 2 148 |
+
+For comparison, the NDJSON sink (`schema.BenchmarkNDJSONSink`) costs
+3 369 instructions per event (ud4).
+
+**End to end, by #25's method** (`results-ee4/ab.sh`: `measure.sh
+S3_SEGMENT=1 S3_MODES=traced S3_TRACER_FLAGS=-aggregate=false
+S3_OPS=500000 S3_PERF=1`, with and without `S3_AGENT=1`; five rounds,
+the build before ee4 and ee4's interleaved, base first; tracer CPU
+from its ready file to its exit per emitted event, medians of 5;
+instructions and cycles user + kernel):
+
+| Run | Threads | µs/event before → after | Instructions/event | Cycles/event | Lost before → after | Load |
+|---|--:|--:|--:|--:|--:|--:|
+| plain | 1 | 2.68 → **0.85** | 15 187 → 5 765 | 5 366 → 2 570 | 20–25 % → 0 | 2.8–3.4 |
+| plain | 4 | 3.14 → **1.62** | 15 380 → 5 963 | 6 092 → 3 098 | 67–71 % → 27–46 % | 2.5–3.6 |
+| `-spool`, agent | 1 | 4.43 → **2.89** | 22 836 → 11 503 | 9 583 → 5 834 | 0 → 0 | 3.1–41 |
+| `-spool`, agent | 4 | 5.82 → **4.82** | 23 320 → 12 027 | 12 540 → 7 652 | 0 → 0 | 41–46 |
+
+(The base's instruction counts look high against its cycles: the
+library's reflection loops run at an IPC near 3.) The last six
+`-spool` runs met another agent's test run at load 33–46; under that
+load the join attributed only 67–89 % of the events in three base and
+two ee4 rounds at 4 threads — the host, not a build.
+
+**Verdict**: plain unfolded **passes** at 1 and 4 threads (0.85 and
+1.62 µs; it now spends fewer instructions per event than the NDJSON
+path did, 5.8 k against 6.6 k, and at 1 thread loses no record).
+`-spool` with every event joined is **over**: 2.9 µs at 1 thread
+(load 3–41) and 4.8 µs at 4 (load 41–46). In cycles it is 5.8 k and
+7.7 k per event; this host's tracer core runs at an effective ~2 GHz
+under load (cycles over CPU time), so 2 µs needs about 4 k cycles,
+a further third off. The writer is no longer the problem — of the
+joined event's cost the writer is ~2.8 k instructions; the rest is the
+agent ring's drain, the join and the correlator, which ud4 already
+cut. What is left there, from a `-spool` profile after this cut: the
+agent ring's drain boxing every record into an interface (an
+allocation per bracket), the bracket list's growth (`slices.Insert`
+and `growslice` copying 10 s of 72-byte brackets, ~8 % of the loop),
+one `schema.Java` allocation per joined event, the bracket search and
+the per-tid map lookups — no single item above ~10 %. The limit is
+unchanged; the item goes to the owner (PLAN.md, M4 status).
