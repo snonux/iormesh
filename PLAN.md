@@ -1045,10 +1045,22 @@ Kubernetes (M7) build on it.
   `internal/segment`'s reader, strict like the NDJSON one — so
   the service database's per-source counts stay exact; the
   server keeps no graph (#3), so each session's graph is
-  rebuilt from its events by the correlator's rules. Not
-  rebuilt, as no event records them: app nodes and incarnation
-  edges (the pattern is not in the trace), forked edges (no
-  clone event) and a child's inherited fds. The build merges,
+  rebuilt from its events by the correlator's rules. What the
+  graph knew that no event said is in the trace since task
+  ze4, as appended optional kinds and fields (schema v1 stays
+  append-only): a `fork` event per new traced process (on the
+  child, with `args.parent_pid` and `args.parent_incarnation`
+  — the forked edge, and the point where the child inherits
+  its parent's fd table, which the rebuild copies from its own
+  view of the parent), an `attach` event per process the
+  session took on (a `-pid` or port target, with
+  `args.pattern` for a pattern's incarnation — the app node
+  and its incarnation edge), and `fcntl(F_SETFD)`'s argument in
+  `args.flags`; once per process, so decision #25's budget
+  does not notice them. A graph rebuilt from a single-host
+  run's segments equals that run's graph.json — the
+  integration suite checks it on every run (M4 acceptance:
+  the merged mesh equals the single-host result). The build merges,
   calls `Observe` and `Import`, builds the view model (V1:
   run, health, services, edges — docs/visualization.md) and
   writes `~/.local/share/iormesh/builds/<project>[+<project>
