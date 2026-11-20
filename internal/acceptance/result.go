@@ -48,7 +48,7 @@ var criteria = []struct{ id, text string }{
 	{cCross, "M0 client and server as two projects fuse into one cross-project edge"},
 	{cNAT, "the NAT'ed pair fuses although its ends saw different 4-tuples"},
 	{cMicro, "microservices, one project per service: every REST edge fused, plain and TLS"},
-	{cMicroHost, "microservices spread one service per host"},
+	{cMicroHost, "microservices spread over both hosts, one project per service: cross-host hops fused, plain and TLS"},
 	{cClock, "clock offset bound between the two real hosts (real clocks, reported)"},
 	{cOffline, "build rerun with the network down reproduces the outputs byte for byte"},
 	{cNaming, "two services named via iormeshctl services show by name in the build"},

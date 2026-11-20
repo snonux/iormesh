@@ -4247,12 +4247,20 @@ on the HttpServer's dispatcher thread, inside the request, as a
 synchronous REST service does it. `Scenario.roles()` lets the
 scenario name its four roles instead of client/server/solo.
 
-For `multihost_test.go`, the scenario still needs address
-options: a bind address per server, a host per callee, and the
-callee's address in its certificate's SAN (`SelfSignedCert`
-names 127.0.0.1 only). It also needs the certificates handed
-across hosts, since each caller pins its callee's from the
-shared `--dir`. The golden then gains one `$h` per host.
+The address options are built (task 1f4). A server binds
+`--bind`, and its certificate (`SelfSignedCert.generate(ip)`)
+names that address as its only SAN. A caller dials each callee
+at `--<callee>-host`. Both are IPv4 literals parsed by
+`TcpHosts.ipv4`, defaulting to 127.0.0.1. `ServiceNode` takes
+the callees as `InetSocketAddress`es. A caller still pins the
+certificate from its own `--dir`, and the deployment puts it
+there: the rig shares one `--dir`, and `internal/acceptance`
+copies the public file between the hosts. On the Go side,
+`Host.Spool` with `Harness.StartWorkloadOn` gives each emulated
+host its own agent spool, which only its tracer drains.
+`mergeHosts` merges any number of host traces and keeps each
+host's own event order. `microservices_hosts_test.go` spreads
+the services over three hosts against `expect-spread.json`.
 Testing notes: [testing.md](testing.md#m4-microservices-scenario-task-jb4).
 
 ### The two-host and NAT'ed pairs

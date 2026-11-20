@@ -362,12 +362,74 @@ pass, and orders must still remove its certificate.
 | Test | What it checks |
 |---|---|
 | `TestMicroservices` | microservices golden under the agent, the four services released leaves first on free ports in one `--dir`: every hop one fused connection with an `http` event on each end (`https` on the TLS hops) pairing by `(conn_id, req_seq)`; each server's request handled by `HttpServe#handle`, each call made by `HttpFetch#call`, orders' calls on its dispatcher thread inside the gateway's request; config, certificate and record I/O with their causing methods (`ServiceConfig#provision`/`#load`, `ServiceNode#publish`/`#readCert`/`#withdraw`, `DataStore#save`; the services' mkdir and rmdir stay unattributed, as no hook issues them); four rings; mutated goldens fail |
+| `TestMicroservicesAcrossHosts` | the services on three emulated hosts (task 1f4), each traced as its own project under the agent: each host's trace holds only its own processes, three distinct host ids; the merge fuses exactly the three cross-host hops, each across two projects with one 4-tuple mirrored, and leaves nothing unresolved; the merged trace satisfies `expect-spread.json` and its requests pair; a service on the wrong host, a hop declared at loopback and the cross-host TLS hop declared plain each fail it |
 
 The golden was written from strace runs of the four processes
 (JDK 25) and confirmed against a traced run (iormesh run +
 normalize -check as root, 5214 events): the one correction was the
 services' mkdir and rmdir, which stay attribution none because no
 agent hook issues them.
+
+**One service per host (task 1f4).** A server takes `--bind A`
+and a caller `--<callee>-host A` next to `--<callee>-port N`,
+both IPv4 literals defaulting to 127.0.0.1, so the loopback run
+and `expect.json` are unchanged. A TLS service's certificate
+names its `--bind` address as its only IP SAN, so a caller
+verifies it only at that address. The key stays in memory. A
+caller still pins `<callee>.crt` from its own `--dir`. Across
+hosts, putting the public certificate there is the deployment's
+job: the rig's namespaces share one `--dir`, and the acceptance
+run copies the file over ssh. `0.0.0.0` is a usage error
+because a wildcard names no address a certificate or a caller
+could use.
+
+`mage workloadTest` (`magefile_m4spread.go`) runs the topology
+a second time with each server on its own loopback address
+(billing 127.0.0.2, inventory .3, orders .4), every caller
+dialing it there. Address usage errors exit 2: a name, a
+wildcard, an out-of-range or IPv6 literal, `--bind` on the
+gateway, `--host`, or a host option for a service the role does
+not call. A `--bind` address the host lacks (192.0.2.1) exits
+1. The pin mismatch also exits 1: the gateway's `--dir` holds
+billing's real certificate as `orders.crt`, valid for the same
+address but not orders' own. The gateway must fail the
+handshake (`PKIX` on stderr) and must not fall back to trusting
+the server.
+
+`TestMicroservicesAcrossHosts` spreads the services over the
+rig's three namespaces, each an emulated host with its own
+project, tracer and agent spool:
+
+| Host | Address | Services | Project |
+|---|---|---|---|
+| hosta | 10.231.0.1 | gateway, inventory `:80` | edge |
+| hostb | 10.231.0.2 | orders `:443` (TLS) | orders |
+| hostc | 172.31.0.2 | billing `:443` (TLS) | billing |
+
+Three hops cross hosts: gateway → orders (TLS), orders →
+inventory (plain) and orders → billing (TLS, through hostb's
+bridge veth). Gateway → inventory stays on hosta. The merged
+golden `expect-spread.json` is `expect.json` with four changes:
+every process `runs_on` its host, each file edge on its host's
+`$h` (a certificate is one file node on its publisher's host and
+another on its reader's), the servers' accept and the callers'
+connect at the literal addresses and ports, and each client
+http event's `host` set to the address it dialed.
+`TestSpreadGoldenAgrees` (`internal/normalize`) keeps it in step
+with `expect.json`.
+
+Host traces are merged by wall clock, each host's events kept in
+the order its tracer wrote them (`mergeByWall`): an http event
+is stamped at its request's start but written at its end. The
+hosts' Java method ids are moved into ranges of their own, since
+ids are per trace. This test found a tracer bug. A cross-host
+connection holds the correlator's stream back for its whole
+5 s fuse window, because its far end never shows up locally.
+The Java join's 2 s http timeout ran on the clock, so it
+released http records ahead of their own connect or accept,
+and they lost their `conn_id` (about one run in eight). The
+timeout now counts from the end of the correlator's hold
+(`JavaJoinConfig.UpstreamHold`, `TestJavaJoinHTTPWaits`).
 
 ### M4 two-host and NAT'ed pairs (task kb4)
 
@@ -541,6 +603,10 @@ Each host (two machines, Linux, x86_64 or aarch64):
   --add-port=18202/tcp --add-port=18203/tcp` without
   `--permanent` is runtime-only, gone at the next reload, and
   `--remove-port` with the same arguments closes them at once.
+  The microservices spread (M4-9) also needs HOST2's orders on
+  `PortBase+16` (18216) open to HOST1 and HOST1's inventory on
+  `PortBase+15` (18215) open to HOST2; `base64` on both hosts
+  copies orders' certificate.
 - At least 1 GiB free on the partition of `/opt/iormesh` (HOST2
   fills 128 MiB of it for the watchdog trip).
 - Idle: no `iormesh-*` unit loaded and nothing under
@@ -606,20 +672,20 @@ LIBBPFGO=../libbpfgo mage m4Acceptance app1.example.org app2.example.org
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `IORMESH_M4_ADDR1`, `_ADDR2` | `getent ahostsv4` on the other host | each host's IPv4 as the other reaches it (set them for an ssh_config alias or a NAT'ed cloud address; the server binds `_ADDR2`) |
+| `IORMESH_M4_ADDR1`, `_ADDR2` | `getent ahostsv4` on the other host | each host's IPv4 as the other reaches it (the servers bind `_ADDR2`, and the spread's inventory `_ADDR1`, so both must be addresses of the hosts' own interfaces) |
 | `IORMESH_M4_NAT_PORT` | unset: M4-7 SKIP | HOST2's DNAT'ed port |
 | `IORMESH_M4_DIST` | `dist` | signed builds |
 | `IORMESH_M4_KEY` | `~/.config/iormesh/minisign.pub` | the pinned release key, copied into the work directory |
 | `IORMESH_M4_WORKDIR` | `~/.iormesh-m4` | iormeshctl's `HOME`; must be empty or absent; kept afterwards (store, builds, service database) |
-| `IORMESH_M4_PORT_BASE` | 18200 | workload ports are base+1 … base+13 |
+| `IORMESH_M4_PORT_BASE` | 18200 | workload ports are base+1 … base+16 |
 | `IORMESH_M4_ROUNDS` | 3 | streaming collect rounds (2–10), each after a 65 s rotation |
 | `IORMESH_M4_FILL_DIR` | the run's dir or `/var/tmp` | watchdog fill file's directory on HOST2; must be on `/opt/iormesh`'s filesystem |
 
 A run takes about ten minutes and prints every command it
 issues, then one result line per criterion and a verdict. Exit
-status 0 only when every criterion passed — **which cannot
-happen today**: M4-9 stays NOT RUN until the microservices
-scenario can spread over hosts (task 1f4). Every workload role
+status 0 only when every criterion passed; M4-9, the
+microservices spread over both hosts, runs since task 1f4. Every
+workload role
 runs under `timeout 300`, and a failed scenario's servers are
 killed, so a broken client cannot hang the run. The run's own
 files on the servers (`~/.iormesh-m4-run`: the jar and the
@@ -660,7 +726,7 @@ Send back the results block and the work directory's path.
 | M4-6 | M0 client and server as two projects fuse | `build` of m4shop+m4billing (`tcp-two-host`, client HOST1, server HOST2); `build` of m4shop alone | one fused cross-host connection, none unresolved; alone, the client's end unresolved |
 | M4-7 | NAT'ed pair fuses on different 4-tuples | `tcp-nat` through the DNAT; `build` m4natc+m4nats; `query -conn` | one fused connection; client dialed the NAT port, server accepted on base+3 |
 | M4-8 | microservices: every REST edge fused, plain and TLS | the four services on HOST1, one project each, read from the refresh's model | orders and billing `tls`, inventory `plain` (2 conns), all fused |
-| M4-9 | microservices one service per host | — | NOT RUN: the scenario is loopback-only (PLAN.md scenario notes) |
+| M4-9 | microservices spread over both hosts (task 1f4) | gateway and inventory (`--bind ADDR1`, base+15) on HOST1, orders (base+16) and billing (base+14) on HOST2 (`--bind ADDR2`), one project each (m4sgw, m4sinv, m4sord, m4sbill), every pattern ending in its `--dir` `microservices-spread`, so M4-8's sessions never trace them; orders' public certificate copied from HOST2 to HOST1 over ssh (`base64`); `build` of the four projects | two fused cross-host connections (gateway→orders TLS, orders→inventory plain), none unresolved; orders and billing `tls`, inventory `plain` (2 conns), all fused |
 | M4-10 | clock bound | the m4shop+m4billing model's clock windows | non-empty and two-sided, widths printed (real clocks; the injected skew is `TestClockSkewRecovered`'s) |
 | M4-11 | `build` with the network down is byte-identical | both outputs deleted, then the same build rerun under `unshare -rn` (else with a `PATH` lacking ssh and rsync) | `graph.json` and `model.json` byte-equal |
 | M4-12 | naming two services shows them by name | `services name -port 18202 ADDR2 m4-billing-svc`, `services name -port 18213 127.0.0.1 m4-orders-svc`, `build`, `services` | both names in the model's services and edges and in the listing |
@@ -680,8 +746,11 @@ not run against real hosts. What ran here:
   `TestDryRun` drives every phase against fake hosts and a fake
   iormeshctl — each criterion the fakes satisfy passes, the
   single-host golden fails on the fakes' empty trace (the check
-  is not vacuous), M4-9 is NOT RUN and the verdict is "not
-  accepted"; `TestDryRunTouchesOnlyTheTwoHosts` finds every
+  is not vacuous), the microservices spread (M4-9, task 1f4)
+  passes with orders' certificate copied to HOST1, and the
+  verdict is "not accepted"; `TestDryRunSpreadNoCertificate`
+  fails M4-9 when the certificate cannot be read and never runs
+  the gateway; `TestDryRunTouchesOnlyTheTwoHosts` finds every
   remote command on the two hosts and no tracer lifecycle
   command outside iormeshctl; `TestPreflightRefusesBusyHost`
   stops at a host with someone else's traces before iormeshctl
@@ -710,8 +779,7 @@ not run against real hosts. What ran here:
   and this task changes nothing that test runs.
 
 The owner's run is what remains: the prerequisites above, then
-`mage m4Acceptance HOST1 HOST2`, all criteria PASS — and M4-9
-needs the microservices address options first.
+`mage m4Acceptance HOST1 HOST2`, all criteria PASS.
 
 ## LLM introspection eval (task qb4)
 

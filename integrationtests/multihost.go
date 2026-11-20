@@ -41,28 +41,38 @@ const testClockSkewEnv = "IORMESH_TEST_CLOCK_SKEW"
 // namespace its processes live in, and the workloads its tracer targets
 // by PID. ClockSkew, if not 0, is how far this host's wall clock is off:
 // its tracer adds it to every wall_ns (boot_ns, the machine's one boot
-// clock, stays true).
+// clock, stays true). Spool is the host's own Java agent spool, required
+// when Harness.JavaAgent is set (task 1f4): its JVMs write their rings
+// there and only its tracer drains them, as on a real host — two tracers
+// sharing one spool would each drain the other host's rings.
 type Host struct {
-	Name, Project, Netns string
-	Workloads            []*Workload
-	ClockSkew            time.Duration
+	Name, Project, Netns, Spool string
+	Workloads                   []*Workload
+	ClockSkew                   time.Duration
 }
 
 // StartWorkloadIn is StartWorkload for a process of an emulated host: the
 // JVM runs in network namespace netns (nsenter execs it, so the PID it
-// prints is its own).
+// prints is its own). With Harness.JavaAgent its agent writes into the
+// harness's Spool; StartWorkloadOn gives it its host's.
 func (h *Harness) StartWorkloadIn(netns, scenario string, args ...string) (*Workload, error) {
+	return h.StartWorkloadOn(Host{Netns: netns, Spool: h.Spool}, scenario, args...)
+}
+
+// StartWorkloadOn is StartWorkloadIn on host: its network namespace and,
+// with Harness.JavaAgent, its own spool.
+func (h *Harness) StartWorkloadOn(host Host, scenario string, args ...string) (*Workload, error) {
 	if h.Credential != nil {
 		// nsenter would exec the JVM as root, not as the credential's
 		// user: a test needing both would silently test the wrong thing.
 		return nil, fmt.Errorf("workload %s: a Credential is not supported on an emulated host",
 			scenario)
 	}
-	cmd, err := h.workloadCmd(h.Tmp, scenario, args)
+	cmd, err := h.workloadCmd(h.Tmp, host.Spool, scenario, args)
 	if err != nil {
 		return nil, err
 	}
-	argv := append([]string{"--net=" + filepath.Join(netnsDir, netns), "--", cmd.Path},
+	argv := append([]string{"--net=" + filepath.Join(netnsDir, host.Netns), "--", cmd.Path},
 		cmd.Args[1:]...)
 	in := exec.Command("nsenter", argv...)
 	in.SysProcAttr, in.Dir = cmd.SysProcAttr, cmd.Dir
@@ -106,12 +116,16 @@ func (h *Harness) TraceHosts(order []*Workload, hosts ...Host) ([]Run, error) {
 // machine id, hostname and network namespace — and returns once it is
 // attached.
 func (h *Harness) startHostTracer(host Host, out string) (*process, error) {
-	// A host tracer is the plain default tracer: the opt-in families,
-	// native stacks and the Java agent of Harness are not passed on, so a
-	// test setting them would check what never ran.
-	if h.Families != "" || h.NativeStacks || h.JavaAgent != "" ||
-		h.AttachAgent != "" || h.Pattern != "" {
-		return nil, fmt.Errorf("host %s: emulated hosts take no tracer options yet", host.Name)
+	// A host tracer is the default tracer plus, with Harness.JavaAgent,
+	// the host's own spool: the opt-in families, native stacks, a live
+	// attach and a pattern are not passed on, so a test setting them
+	// would check what never ran.
+	if h.Families != "" || h.NativeStacks || h.AttachAgent != "" || h.Pattern != "" {
+		return nil, fmt.Errorf("host %s: emulated hosts take no tracer options but -spool yet",
+			host.Name)
+	}
+	if h.JavaAgent != "" && host.Spool == "" {
+		return nil, fmt.Errorf("host %s: the Java agent needs the host's own Spool", host.Name)
 	}
 	mid := filepath.Join(h.Dir, host.Name+".machine-id")
 	if err := writeMachineID(mid); err != nil {
@@ -124,6 +138,9 @@ func (h *Harness) startHostTracer(host Host, out string) (*process, error) {
 		"-out", out, "-duration", tracerDuration, "-ready", ready,
 		// Segments too, as startTracer writes them (task ze4).
 		"-trace-dir", out + segmentsSuffix, "-disk-limit", "0", "-disk-min-free", "0"}
+	if h.JavaAgent != "" {
+		args = append(args, "-spool", host.Spool)
+	}
 	cmd := exec.Command("unshare", args...)
 	cmd.Env = hostTracerEnv(h.BpfObject, host.ClockSkew)
 	tracer, err := startProcess("iormesh run on "+host.Name, cmd)

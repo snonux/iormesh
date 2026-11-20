@@ -116,6 +116,15 @@ enum Service {
         return role + "-port";
     }
 
+    /**
+     * The option naming the address callers dial this service at: its
+     * --bind, the one address its certificate names, so a TLS caller's
+     * endpoint identification passes for that address only.
+     */
+    String hostOption() {
+        return role + "-host";
+    }
+
     /** The published certificate's file name in the shared --dir. */
     String certFile() {
         return role + ".crt";

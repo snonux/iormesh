@@ -21,6 +21,7 @@ func (r *Runner) phaseWorkloads(ctx context.Context) {
 			r.cfg.port(portNATInner), r.cfg.NATPort)
 	}
 	r.workloadErr[cMicro] = r.runMicro(ctx)
+	r.workloadErr[cMicroHost] = r.runSpread(ctx)
 	for id, err := range r.workloadErr {
 		if err != nil {
 			r.logf("  workload for %s failed: %v", id, err)
@@ -124,7 +125,7 @@ func (r *Runner) runPair(ctx context.Context, scenario, addr string, listenPort,
 // harness releases it, each service traced by its own project.
 func (r *Runner) runMicro(ctx context.Context) error {
 	h := r.cfg.Host1
-	dir, err := r.scenarioDir(ctx, h, "microservices")
+	dir, err := r.scenarioDir(ctx, h, microDir)
 	if err != nil {
 		return err
 	}

@@ -39,7 +39,7 @@ type Config struct {
 	// operator's rule, see the runbook); 0 skips the NAT criterion.
 	NATPort int
 	// PortBase is the first workload port; the run uses PortBase+1 to
-	// PortBase+13 (Ports).
+	// PortBase+16 (ports).
 	PortBase int
 	// Dist holds iormesh-linux-<arch> and .minisig per host arch; Key is
 	// the release public key deploy pins.

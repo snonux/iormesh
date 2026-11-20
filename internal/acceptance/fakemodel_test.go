@@ -22,6 +22,9 @@ func (w *fakeWorld) model(projects []string) viewmodel.Model {
 	case slices.Equal(projects, []string{projDisk}):
 		m.Run.Segments = 1
 		m.Health.Sessions = []viewmodel.Session{{Project: projDisk, Host: w.cfg.Host2, End: "disk_limit"}}
+	case slices.Equal(projects, spreadNames()):
+		m.Run.FusedConns = 2
+		m.Services, m.Edges = w.spreadServices()
 	case len(projects) > 4:
 		m.Services, m.Edges = w.microServices()
 		m.Health.Sessions = []viewmodel.Session{{Project: projSingle, Host: w.cfg.Host1, End: "stop"}}
@@ -49,6 +52,46 @@ func (w *fakeWorld) microServices() ([]viewmodel.Service, []viewmodel.Edge) {
 		edges = append(edges, viewmodel.Edge{From: "app", To: s.Name, State: viewmodel.StateFused, Conns: s.Conns})
 	}
 	return svcs, edges
+}
+
+// spreadNames are the spread's projects as a build names them, sorted.
+func spreadNames() []string {
+	return []string{projSpreadBil, projSpreadGW, projSpreadInv, projSpreadOrd}
+}
+
+// spreadServices are the spread build's servers at their hosts'
+// addresses (the fake's getent answers), every edge fused.
+func (w *fakeWorld) spreadServices() ([]viewmodel.Service, []viewmodel.Edge) {
+	ep := func(addr string, off int) string { return fmt.Sprintf("%s:%d", addr, w.cfg.port(off)) }
+	svcs := []viewmodel.Service{
+		{Name: ep("10.9.0.2", portSpreadOrders), Endpoints: []string{ep("10.9.0.2", portSpreadOrders)},
+			Conns: 1, TLS: "tls"},
+		{Name: ep("10.9.0.2", portSpreadBilling), Endpoints: []string{ep("10.9.0.2", portSpreadBilling)},
+			Conns: 1, TLS: "tls"},
+		{Name: ep("10.9.0.1", portSpreadInventory),
+			Endpoints: []string{ep("10.9.0.1", portSpreadInventory)}, Conns: 2, TLS: "plain"},
+	}
+	var edges []viewmodel.Edge
+	for _, s := range svcs {
+		edges = append(edges, viewmodel.Edge{From: "app", To: s.Name, State: viewmodel.StateFused, Conns: s.Conns})
+	}
+	return svcs, edges
+}
+
+// fakeSpreadGraph fuses two connections, each between a process on hA
+// and one on hB.
+func fakeSpreadGraph() schema.Graph {
+	g := schema.Graph{SchemaVersion: schema.Version}
+	a, b := schema.ProcessNodeID("hA", 1, 1), schema.ProcessNodeID("hB", 2, 1)
+	for _, c := range []string{"c1", "c2"} {
+		conn := schema.SocketNodeID(c)
+		g.Nodes = append(g.Nodes, schema.Node{Type: "socket", ID: conn})
+		g.Edges = append(g.Edges, schema.Edge{Type: "connected", From: a, To: conn, State: schema.StateFused},
+			schema.Edge{Type: "connected", From: b, To: conn, State: schema.StateFused})
+	}
+	g.Nodes = append(g.Nodes, schema.Node{Type: "process", ID: a}, schema.Node{Type: "process", ID: b})
+	g.Sort()
+	return g
 }
 
 // query is the NAT pair's connection seen from both ends: the client

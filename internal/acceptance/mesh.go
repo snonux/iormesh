@@ -30,6 +30,7 @@ func (r *Runner) phaseMesh(ctx context.Context) {
 	} else {
 		r.res.set(cMicro, NotRun, "blocked: refresh failed")
 	}
+	r.check(cMicroHost, func() (string, error) { return r.checkSpread(ctx) })
 	r.check(cOffline, func() (string, error) { return r.checkOffline(ctx) })
 	r.check(cNaming, func() (string, error) { return r.checkNaming(ctx) })
 }
@@ -170,12 +171,21 @@ func (r *Runner) checkNAT(ctx context.Context) (string, error) {
 // its connections, all fused, with the TLS hint its hop has (orders and
 // billing serve TLS, inventory plain).
 func checkMicro(m viewmodel.Model, c Config) (string, error) {
+	return checkMicroAt(m, c, microPorts{portOrders, portBilling, portInventory})
+}
+
+// microPorts are one microservices run's server port offsets.
+type microPorts struct{ orders, billing, inventory int }
+
+// checkMicroAt is checkMicro for the run whose servers listen on ps.
+func checkMicroAt(m viewmodel.Model, c Config, ps microPorts) (string, error) {
 	want := []struct {
 		port      int
 		tls       string
 		minConns  int64
 		component string
-	}{{portOrders, "tls", 1, "orders"}, {portBilling, "tls", 1, "billing"}, {portInventory, "plain", 2, "inventory"}}
+	}{{ps.orders, "tls", 1, "orders"}, {ps.billing, "tls", 1, "billing"},
+		{ps.inventory, "plain", 2, "inventory"}}
 	var seen []string
 	for _, w := range want {
 		s, ok := serviceByPort(m, c.port(w.port))
@@ -189,7 +199,7 @@ func checkMicro(m viewmodel.Model, c Config) (string, error) {
 		seen = append(seen, fmt.Sprintf("%s %s x%d", s.Name, s.TLS, s.Conns))
 	}
 	for _, e := range m.Edges {
-		if microPort(e.To, c) && e.State != viewmodel.StateFused {
+		if microPort(e.To, c, ps) && e.State != viewmodel.StateFused {
 			return "", fmt.Errorf("edge %s -> %s is %s", e.From, e.To, e.State)
 		}
 	}
@@ -209,9 +219,9 @@ func serviceByPort(m viewmodel.Model, port int) (viewmodel.Service, bool) {
 	return viewmodel.Service{}, false
 }
 
-// microPort reports whether a service label names a microservices port.
-func microPort(label string, c Config) bool {
-	for _, off := range []int{portOrders, portBilling, portInventory} {
+// microPort reports whether a service label names one of ps's ports.
+func microPort(label string, c Config, ps microPorts) bool {
+	for _, off := range []int{ps.orders, ps.billing, ps.inventory} {
 		if strings.HasSuffix(label, fmt.Sprintf(":%d", c.port(off))) {
 			return true
 		}

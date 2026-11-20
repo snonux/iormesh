@@ -2,6 +2,7 @@ package iormesh.workload.scenarios;
 
 import java.io.ByteArrayInputStream;
 import java.math.BigInteger;
+import java.net.InetAddress;
 import java.security.GeneralSecurityException;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -20,20 +21,22 @@ import javax.net.ssl.TrustManagerFactory;
 /**
  * http-tls's server identity, and each TLS service's in the microservices
  * scenario (orders, billing): a fresh EC P-256 key pair and a self-signed
- * certificate for 127.0.0.1, made in memory at run time. The private key
+ * certificate for one IPv4 address — 127.0.0.1, or the address a service
+ * binds on a host of its own (M4) — made in memory at run time. The
+ * private key
  * exists only inside the server's JVM — never in the repository, never in
  * a file — and is new on every run; only the public certificate is handed
  * to the client, which trusts exactly that one certificate (pinned, PLAN.md
  * M0 "HTTP scenarios"). The subject alternative name carries the IP
  * address, so HttpClient's endpoint identification passes for
- * https://127.0.0.1:port without disabling any check.
+ * https://ADDRESS:port without disabling any check, and fails for any
+ * other address the server might also be reached at.
  */
 final class SelfSignedCert {
     private static final String SUBJECT = "iormesh-workload";
     private static final String ECDSA_SHA256 = "1.2.840.10045.4.3.2";
     private static final String COMMON_NAME = "2.5.4.3";
     private static final String SUBJECT_ALT_NAME = "2.5.29.17";
-    private static final byte[] LOOPBACK_IP = {127, 0, 0, 1};
     private static final Duration VALIDITY = Duration.ofDays(1);
 
     private final KeyPair keys;
@@ -44,14 +47,24 @@ final class SelfSignedCert {
         this.der = der;
     }
 
+    /** A certificate for 127.0.0.1: http-tls's, and every loopback service's. */
     static SelfSignedCert generate() throws GeneralSecurityException {
+        return generate(ServiceNode.LOOPBACK);
+    }
+
+    /**
+     * A certificate whose one subject alternative name is ip: the literal
+     * address the server binds and its callers dial, never a host name
+     * (there is no resolver behind it).
+     */
+    static SelfSignedCert generate(InetAddress ip) throws GeneralSecurityException {
         KeyPairGenerator gen = KeyPairGenerator.getInstance("EC");
         gen.initialize(new ECGenParameterSpec("secp256r1"));
         KeyPair keys = gen.generateKeyPair();
         // Bit 62 set: RFC 5280 wants a positive serial, and 63 random bits
         // alone could be 0.
         BigInteger serial = new BigInteger(63, new SecureRandom()).setBit(62);
-        byte[] tbs = tbs(keys, serial, Instant.now());
+        byte[] tbs = tbs(keys, serial, Instant.now(), ip.getAddress());
         Signature signer = Signature.getInstance("SHA256withECDSA");
         signer.initSign(keys.getPrivate());
         signer.update(tbs);
@@ -92,7 +105,7 @@ final class SelfSignedCert {
     }
 
     /** TBSCertificate (RFC 5280 4.1): v3, issuer = subject, one SAN extension. */
-    private static byte[] tbs(KeyPair keys, BigInteger serial, Instant now) {
+    private static byte[] tbs(KeyPair keys, BigInteger serial, Instant now, byte[] ip) {
         byte[] name = name();
         return Der.seq(
                 Der.explicit(0, Der.integer(BigInteger.TWO)),
@@ -103,7 +116,7 @@ final class SelfSignedCert {
                         Der.utcTime(now.plus(VALIDITY))),
                 name,
                 keys.getPublic().getEncoded(),
-                Der.explicit(3, Der.seq(subjectAltName())));
+                Der.explicit(3, Der.seq(subjectAltName(ip))));
     }
 
     private static byte[] algorithm() {
@@ -114,9 +127,9 @@ final class SelfSignedCert {
         return Der.seq(Der.tlv(Der.SET, Der.seq(Der.oid(COMMON_NAME), Der.utf8(SUBJECT))));
     }
 
-    /** SAN: iPAddress [7] 127.0.0.1 — the address the client dials. */
-    private static byte[] subjectAltName() {
-        byte[] names = Der.seq(Der.tlv(0x87, LOOPBACK_IP));
+    /** SAN: iPAddress [7] ip — the address the client dials. */
+    private static byte[] subjectAltName(byte[] ip) {
+        byte[] names = Der.seq(Der.tlv(0x87, ip));
         return Der.seq(Der.oid(SUBJECT_ALT_NAME), Der.octets(names));
     }
 

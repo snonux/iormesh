@@ -1,7 +1,6 @@
 package integrationtests
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"net/netip"
@@ -262,9 +261,17 @@ func hostID(t *testing.T, run tracedRun) string {
 // golden failures that followed would hide the cause.
 func requireSeqFields(t *testing.T, m meshRun) {
 	t.Helper()
-	for _, e := range slices.Concat(m.client.Trace.Events, m.server.Trace.Events) {
-		if e.Event == schema.KindTCPState && e.Args.SndUna != nil {
-			return
+	requireSeqFieldsIn(t, m.client, m.server)
+}
+
+// requireSeqFieldsIn is requireSeqFields for any hosts' runs.
+func requireSeqFieldsIn(t *testing.T, runs ...tracedRun) {
+	t.Helper()
+	for _, r := range runs {
+		for _, e := range r.Trace.Events {
+			if e.Event == schema.KindTCPState && e.Args.SndUna != nil {
+				return
+			}
 		}
 	}
 	t.Fatal("no tcp_state record carries snd_una: the tracer's tcp_sock capture " +
@@ -272,25 +279,60 @@ func requireSeqFields(t *testing.T, m meshRun) {
 }
 
 // mergeMesh merges the two host traces as `iormeshctl build` does and
-// returns the result with the merged trace: both hosts' events in
-// wall-clock order (the emulated hosts share one clock), their conn ids
-// renamed to the merged graph's, and the merged graph.
+// returns the result with the merged trace: both hosts' events
+// interleaved in wall-clock order (the emulated hosts share one clock),
+// each host's in its own order (mergeByWall), their conn ids renamed to
+// the merged graph's, and the merged graph.
 func mergeMesh(t *testing.T, m meshRun) (federate.Result, normalize.Trace) {
 	t.Helper()
-	res, err := federate.Merge(context.Background(), []federate.Source{
-		federate.NDJSONDir{Dir: m.client.Dir}, federate.NDJSONDir{Dir: m.server.Dir}},
-		federate.Options{})
+	return mergeHosts(t, m.client, m.server)
+}
+
+// mergeHosts is mergeMesh for any number of emulated hosts' runs (the
+// microservices spread has three, task 1f4).
+func mergeHosts(t *testing.T, runs ...tracedRun) (federate.Result, normalize.Trace) {
+	t.Helper()
+	var sources []federate.Source
+	streams := make([][]schema.Event, len(runs))
+	for i, r := range runs {
+		sources = append(sources, federate.NDJSONDir{Dir: r.Dir})
+		streams[i] = r.Trace.Events
+	}
+	res, err := federate.Merge(context.Background(), sources, federate.Options{})
 	if err != nil {
 		t.Fatalf("merge: %v", err)
 	}
-	events := slices.Concat(m.client.Trace.Events, m.server.Trace.Events)
+	events := mergeByWall(streams)
 	for i, e := range events {
 		if to, ok := res.Renames[federate.LocalConn{Host: e.HostID, ConnID: e.ConnID}]; ok {
 			events[i].ConnID = to
 		}
 	}
-	slices.SortStableFunc(events, func(a, b schema.Event) int { return cmp.Compare(a.WallNS, b.WallNS) })
 	return res, normalize.Trace{Events: events, Graph: res.Graph}
+}
+
+// mergeByWall interleaves the hosts' event streams into a new slice by
+// wall_ns, always taking the earliest head, so each host's events keep
+// the order its tracer wrote them in. A plain sort by wall_ns would not:
+// an http event is stamped when its request began but written when it
+// ended, after the reads and writes it spans (task 1f4), and the goldens
+// declare that written order.
+func mergeByWall(streams [][]schema.Event) []schema.Event {
+	var out []schema.Event
+	next := make([]int, len(streams))
+	for {
+		pick := -1
+		for i, s := range streams {
+			if next[i] < len(s) && (pick < 0 || s[next[i]].WallNS < streams[pick][next[pick]].WallNS) {
+				pick = i
+			}
+		}
+		if pick < 0 {
+			return out
+		}
+		out = append(out, streams[pick][next[pick]])
+		next[pick]++
+	}
 }
 
 // assertOneFusedConn: the merge fused exactly one connection, across the

@@ -345,10 +345,15 @@ Scenario notes:
   where its callers pin it. The golden declares every hop as
   one fused connection with an http event on each end (scheme
   `https` on the TLS ones) and each service's file work with
-  its causing Java method. Loopback only so far: the servers
-  bind 127.0.0.1; the cross-host run adds address options and
-  certificates naming them with M4's multi-host test, and
-  until then the same golden runs on one host.
+  its causing Java method. Across hosts (task 1f4) a server
+  binds `--bind` and its certificate names that address, and
+  a caller dials `--<callee>-host` (IPv4 literals, default
+  127.0.0.1, so the loopback golden is unchanged). The
+  deployment copies the public certificate into the caller's
+  `--dir`. `expect-spread.json` is the merged golden for the
+  rig's three emulated hosts: every service `runs_on` its
+  host, and the three cross-host hops (two TLS, one plain) are
+  fused at their addresses.
 - **Restart scenario** (M2): the app exits mid-session and
   comes back with a new PID; expectations assert both
   incarnations were traced under one app identity, with
@@ -1295,12 +1300,13 @@ Kubernetes (M7) build on it.
   [docs/testing.md](docs/testing.md#m4-acceptance-on-two-real-hosts-task-lb4).
   On real hosts the clock criterion reports the real clocks'
   bound; the injected skew stays the rig's
-  (`TestClockSkewRecovered`, task ye4). The microservices
-  spread over hosts cannot run yet: the scenario still binds
-  127.0.0.1 and pins certificates naming only it (scenario
-  notes above), so the run covers it on one host, one project
-  per service, and reports the cross-host spread NOT RUN until
-  the address options land.
+  (`TestClockSkewRecovered`, task ye4). The microservices run
+  covers both layouts: all four services on HOST1 (M4-8), and
+  the spread (M4-9, task 1f4). In the spread, gateway and
+  inventory run on HOST1 and orders and billing on HOST2, each
+  as its own project, so gateway→orders (TLS) and
+  orders→inventory (plain) cross hosts. The rig spreads them
+  over three emulated hosts (`TestMicroservicesAcrossHosts`).
 
 ### M5 — Views, query and the LLM eval
 

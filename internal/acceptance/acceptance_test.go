@@ -52,8 +52,9 @@ func dryRun(t *testing.T, cfg Config, w *fakeWorld) (string, error) {
 
 // TestDryRun drives every phase against the fake hosts and iormeshctl:
 // each criterion the fake can satisfy passes, the single-host golden
-// fails on the fake's empty trace (the check is not vacuous), M4-9 is
-// reported NOT RUN, and the verdict is "not accepted".
+// fails on the fake's empty trace (the check is not vacuous), the
+// microservices spread (M4-9) passes with orders' certificate copied to
+// HOST1, and the verdict is "not accepted".
 func TestDryRun(t *testing.T) {
 	cfg := testConfig(t)
 	w := newFakeWorld(t, cfg)
@@ -62,7 +63,7 @@ func TestDryRun(t *testing.T) {
 		t.Fatalf("Run = %v, want ErrNotAccepted\n%s", err, out)
 	}
 	want := map[string]Status{cPreflight: Pass, cDeploy: Pass, cStream: Pass, cCollect: Pass,
-		cRefresh: Pass, cSingle: Fail, cCross: Pass, cNAT: Pass, cMicro: Pass, cMicroHost: NotRun,
+		cRefresh: Pass, cSingle: Fail, cCross: Pass, cNAT: Pass, cMicro: Pass, cMicroHost: Pass,
 		cClock: Pass, cOffline: Pass, cNaming: Pass, cWatchdog: Pass, cRm: Pass}
 	for id, st := range want {
 		if !hasResult(out, id, st) {
@@ -71,6 +72,31 @@ func TestDryRun(t *testing.T) {
 	}
 	if !strings.Contains(out, "VERDICT: not accepted") {
 		t.Errorf("no verdict line\n%s", out)
+	}
+	wantCopy := "h1:/home/op/" + remoteDir + "/" + spreadDir + "/orders.crt"
+	if len(w.copied) != 1 || w.copied[0] != wantCopy {
+		t.Errorf("certificates copied %v, want only %s", w.copied, wantCopy)
+	}
+}
+
+// TestDryRunSpreadNoCertificate: when orders' certificate cannot be read
+// on HOST2, the spread fails M4-9 with the reason, and the gateway is
+// never run against a missing pin.
+func TestDryRunSpreadNoCertificate(t *testing.T) {
+	cfg := testConfig(t)
+	w := newFakeWorld(t, cfg)
+	w.cert = ""
+	out, err := dryRun(t, cfg, w)
+	if !errors.Is(err, ErrNotAccepted) {
+		t.Fatalf("Run = %v, want ErrNotAccepted\n%s", err, out)
+	}
+	if !hasResult(out, cMicroHost, Fail) || !strings.Contains(out, "orders.crt is empty") {
+		t.Errorf("M4-9 not failed for the missing certificate\n%s", out)
+	}
+	for _, c := range w.remote {
+		if strings.Contains(c, "--role gateway") && strings.Contains(c, spreadDir) {
+			t.Errorf("gateway ran without its pin: %s", c)
+		}
 	}
 }
 

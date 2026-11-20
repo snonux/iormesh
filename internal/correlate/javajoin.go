@@ -144,6 +144,13 @@ type JavaJoinConfig struct {
 	// event back for its fuse window (5 s) before it gets here. A mark
 	// is kept that long past its syscall's enter, plus Timeout.
 	Retain uint64
+	// UpstreamHold is how long the correlator may hold the whole stream
+	// back behind one socket event (ns, default its 5 s fuse window): a
+	// connection whose other end is on another host waits it out in
+	// full. An http record's Timeout counts from there (httpReady), or
+	// it would go out ahead of its own connection's connect or accept,
+	// still held upstream, and lose its conn_id (task 1f4).
+	UpstreamHold uint64
 	// AttachMarks attaches the Java mark's uprobes to one JVM's natives
 	// (bpf.Tracer.AttachJavaMarks), once its ring delivered the hook
 	// table; it returns the natives no library defines. nil: the tracer
@@ -222,6 +229,7 @@ func NewJavaJoin(cfg JavaJoinConfig) *JavaJoin {
 	cfg.Timeout = orDefault(cfg.Timeout, defaultTimeout)
 	cfg.Grace = orDefault(cfg.Grace, defaultGrace)
 	cfg.Retain = orDefault(cfg.Retain, defaultRetain)
+	cfg.UpstreamHold = orDefault(cfg.UpstreamHold, defaultFuseWindowNS)
 	return &JavaJoin{cfg: cfg, jvms: map[uint32]*jvm{}, methods: map[methodKey]uint64{},
 		classes: map[schema.Class]uint64{},
 		conns:   newConnIndex(), policy: redact.Default(),

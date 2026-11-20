@@ -4,6 +4,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -33,8 +34,12 @@ import javax.net.ssl.SSLContext;
  * declares is the innermost workload frame, and a lambda's frame would
  * be a synthetic {@code lambda$…} name that moves with every edit.
  * Each certificate is made in memory by its service ({@link
- * SelfSignedCert}); only the public half is written, and its callers
- * trust exactly that one.
+ * SelfSignedCert}) for the address the server binds; only the public half
+ * is written, and its callers trust exactly that one — at that address.
+ * On a host of its own (M4) a caller still pins D/../callee.crt: getting
+ * the published certificate there is the deployment's job (the shared
+ * --dir of the namespaces rig, a copy over ssh in the acceptance run),
+ * as it would be a real one's.
  */
 final class ServiceNode {
     /** Told the bound port once a server listens. */
@@ -43,34 +48,35 @@ final class ServiceNode {
         void at(int port) throws Exception;
     }
 
-    // A literal address, never a lookup: no resolver I/O in the bracket.
-    private static final InetAddress LOOPBACK = loopback();
+    /** 127.0.0.1, the default address; a literal, never a lookup. */
+    static final InetAddress LOOPBACK = loopback();
 
     private final Service svc;
     private final Workdir wd;
-    /** The listening port of every service this one calls. */
-    private final Map<Service, Integer> ports;
+    /** The address and port of every service this one calls. */
+    private final Map<Service, InetSocketAddress> callees;
     // Set by boot, before the server starts: HttpServer.start begins the
     // dispatcher thread after, so the handler sees both (happens-before).
     private Path dir;
     private Map<Service, SSLContext> trust = Map.of();
 
-    ServiceNode(Service svc, Workdir wd, Map<Service, Integer> ports) {
+    ServiceNode(Service svc, Workdir wd, Map<Service, InetSocketAddress> callees) {
         this.svc = svc;
         this.wd = wd;
-        this.ports = ports;
+        this.callees = callees;
     }
 
     /**
-     * Runs a server service: boot, serve its declared calls, retire.
-     * waitSeconds bounds the wait for the calls (self-test); 0 waits as
+     * Runs a server service on bind:port: boot, serve its declared calls,
+     * retire. waitSeconds bounds the wait for the calls (self-test); 0 waits as
      * long as it takes, like the other standalone servers — the harness
      * kills a stuck one.
      */
-    void serve(int port, Listening listening, long waitSeconds) throws Exception {
+    void serve(InetAddress bind, int port, Listening listening, long waitSeconds)
+            throws Exception {
         Tree.inFreshDir(wd.file(svc.dirName()), d -> {
             boot(d);
-            listen(port, listening, waitSeconds);
+            listen(new InetSocketAddress(bind, port), listening, waitSeconds);
             retire();
         });
     }
@@ -100,16 +106,17 @@ final class ServiceNode {
     }
 
     /**
-     * Publishes the certificate (TLS only), serves, and withdraws it
-     * again — also after a failure, so a reused --dir never hands a stale
-     * certificate to the next run's callers.
+     * Publishes the certificate (TLS only), naming the address it binds,
+     * serves, and withdraws it again — also after a failure, so a reused
+     * --dir never hands a stale certificate to the next run's callers.
      */
-    private void listen(int port, Listening listening, long waitSeconds) throws Exception {
-        SelfSignedCert cert = svc.tls ? SelfSignedCert.generate() : null;
+    private void listen(InetSocketAddress at, Listening listening, long waitSeconds)
+            throws Exception {
+        SelfSignedCert cert = svc.tls ? SelfSignedCert.generate(at.getAddress()) : null;
         try {
             SSLContext ctx = cert == null ? null : publish(cert);
-            try (HttpServe serve = HttpServe.startWorking(LOOPBACK, port, svc.serves, ctx,
-                    this::handle)) {
+            try (HttpServe serve = HttpServe.startWorking(at.getAddress(), at.getPort(),
+                    svc.serves, ctx, this::handle)) {
                 listening.at(serve.port());
                 if (waitSeconds == 0) {
                     serve.awaitAll();
@@ -140,13 +147,16 @@ final class ServiceNode {
     /**
      * Makes this service's hops in order, each on its own HttpClient and
      * so its own keep-alive connection, closed before the next hop: the
-     * http events' req_seq is 1 on every connection.
+     * http events' req_seq is 1 on every connection. The URI holds the
+     * callee's address as a literal, which is what a TLS callee's
+     * certificate names.
      */
     private void callDownstream() throws Exception {
         for (Service.Hop h : svc.hops()) {
             Service to = h.to();
-            URI base = URI.create((to.tls ? "https" : "http") + "://127.0.0.1:"
-                    + ports.get(to) + "/");
+            InetSocketAddress at = callees.get(to);
+            URI base = URI.create((to.tls ? "https" : "http") + "://"
+                    + at.getAddress().getHostAddress() + ":" + at.getPort() + "/");
             HttpFetch.run(base, List.of(h.call()), trust.get(to), false);
         }
     }

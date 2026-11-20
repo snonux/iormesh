@@ -250,10 +250,14 @@ func (j *JavaJoin) httpDue(ev *schema.Event) bool {
 
 // httpReady reports whether the next HTTP record may go out now: every
 // event that completed before it has arrived (one that completed Grace
-// after it did), or Timeout passed.
+// after it did), or Timeout passed beyond the correlator's longest hold
+// (UpstreamHold). scanned is the clock, not the stream: behind a socket
+// event waiting for an end on another host the stream arrives up to the
+// hold late, and a record released by the clock alone would beat its
+// connection's own connect or accept and find no connection (task 1f4).
 func (j *JavaJoin) httpReady() bool {
 	h := j.https[0]
-	if j.scanned >= h.boot+j.cfg.Timeout {
+	if j.scanned >= h.boot+j.cfg.UpstreamHold+j.cfg.Timeout {
 		return true
 	}
 	// A java.net.http client request also waits for its JVM's watermark

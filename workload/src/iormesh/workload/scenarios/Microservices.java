@@ -2,6 +2,9 @@ package iormesh.workload.scenarios;
 
 import iormesh.workload.Options;
 import iormesh.workload.Scenario;
+import iormesh.workload.UsageException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashSet;
@@ -20,10 +23,14 @@ import java.util.concurrent.TimeUnit;
  * host or pod in a real deployment:
  *
  * <pre>
- *   --role billing   [--port N] [--dir D]
- *   --role inventory [--port N] [--dir D]
- *   --role orders    [--port N] [--dir D] --inventory-port N --billing-port N
- *   --role gateway              [--dir D] --orders-port N --inventory-port N
+ *   --role billing   [--bind A] [--port N] [--dir D]
+ *   --role inventory [--bind A] [--port N] [--dir D]
+ *   --role orders    [--bind A] [--port N] [--dir D]
+ *                    --inventory-port N [--inventory-host A]
+ *                    --billing-port N   [--billing-host A]
+ *   --role gateway                         [--dir D]
+ *                    --orders-port N    [--orders-host A]
+ *                    --inventory-port N [--inventory-host A]
  * </pre>
  *
  * A server prints {@code listening <port>} after the PID once it listens
@@ -31,12 +38,18 @@ import java.util.concurrent.TimeUnit;
  * leaves first — billing, inventory, orders — each only after the one
  * before announced itself, then the gateway, whose checkout drives the
  * run. Every server answers its declared calls and exits; the gateway
- * exits after its checkout. The TLS hops need one shared D: a caller pins
- * the certificate its callee published there, never anything else.
+ * exits after its checkout. A caller pins the certificate its TLS callee
+ * published in D, never anything else: one shared D on one host; across
+ * hosts the deployment copies the public certificate into the caller's D
+ * (ServiceNode).
  *
- * Loopback only for now: the servers bind 127.0.0.1 and the certificates
- * name it; the cross-host run (one service per host) brings the address
- * options with M4's multi-host test.
+ * Addresses (M4, one service per host): a server binds --bind and its
+ * certificate names that address; a caller dials each callee at its
+ * --callee-host, which must be the callee's --bind for TLS to verify.
+ * Both default to 127.0.0.1 — the loopback run and its golden are what
+ * they were — and are IPv4 literals, never names ({@link TcpHosts#ipv4}:
+ * no resolver I/O in the bracket). 0.0.0.0 is refused: a wildcard bind
+ * names no one address a certificate or a caller could use.
  *
  * {@code --self-test} runs the whole topology in this one process on
  * loopback: each server on its own platform thread in the same order,
@@ -69,37 +82,62 @@ public final class Microservices implements Scenario {
         Options.requireKnown(opts, options(svc));
         // Every option is parsed before any I/O: a bad one is a usage
         // error with an empty bracket, never a half-booted service.
-        Map<Service, Integer> ports = downstreamPorts(svc, opts);
-        int port = svc.serves.isEmpty() ? 0 : Options.port(opts, 0);
+        Map<Service, InetSocketAddress> callees = callees(svc, opts);
+        boolean server = !svc.serves.isEmpty();
+        InetAddress bind = server ? address(opts, TcpHosts.BIND) : null;
+        int port = server ? Options.port(opts, 0) : 0;
         try (Workdir wd = Workdir.open(opts)) {
-            ServiceNode node = new ServiceNode(svc, wd, ports);
-            if (svc.serves.isEmpty()) {
-                node.checkout();
+            ServiceNode node = new ServiceNode(svc, wd, callees);
+            if (server) {
+                node.serve(bind, port, Microservices::announce, 0);
             } else {
-                node.serve(port, Microservices::announce, 0);
+                node.checkout();
             }
         }
     }
 
-    /** The options a role takes: --dir, --port if it serves, a port per callee. */
+    /**
+     * The options a role takes: --dir; --bind and --port if it serves; a
+     * port and a host per callee.
+     */
     private static Set<String> options(Service svc) {
         Set<String> known = new TreeSet<>(Set.of(Workdir.OPTION));
         if (!svc.serves.isEmpty()) {
+            known.add(TcpHosts.BIND);
             known.add("port");
         }
         for (Service to : svc.downstream()) {
             known.add(to.portOption());
+            known.add(to.hostOption());
         }
         return known;
     }
 
-    private static Map<Service, Integer> downstreamPorts(Service svc, Map<String, String> opts)
-            throws Exception {
-        Map<Service, Integer> ports = new EnumMap<>(Service.class);
+    /** Where each callee listens: its --callee-host (default 127.0.0.1) and port. */
+    private static Map<Service, InetSocketAddress> callees(Service svc, Map<String, String> opts)
+            throws UsageException {
+        Map<Service, InetSocketAddress> out = new EnumMap<>(Service.class);
         for (Service to : svc.downstream()) {
-            ports.put(to, Options.requiredPort(opts, to.portOption()));
+            InetAddress host = address(opts, to.hostOption());
+            out.put(to, new InetSocketAddress(host, Options.requiredPort(opts, to.portOption())));
         }
-        return ports;
+        return out;
+    }
+
+    /**
+     * Option key as an IPv4 literal, 127.0.0.1 when absent. A wildcard is
+     * a usage error: no certificate names it and no caller can dial it.
+     */
+    static InetAddress address(Map<String, String> opts, String key) throws UsageException {
+        if (!opts.containsKey(key)) {
+            return ServiceNode.LOOPBACK;
+        }
+        InetAddress a = TcpHosts.ipv4(opts, key);
+        if (a.isAnyLocalAddress()) {
+            throw new UsageException("--" + key + " " + opts.get(key)
+                    + " is a wildcard; name the one address the service is reached at");
+        }
+        return a;
     }
 
     private static void announce(int port) {
@@ -116,14 +154,14 @@ public final class Microservices implements Scenario {
     @Override
     public void selfTest() throws Exception {
         try (Workdir wd = Workdir.temp()) {
-            Map<Service, Integer> ports = new EnumMap<>(Service.class);
+            Map<Service, InetSocketAddress> listening = new EnumMap<>(Service.class);
             List<Peer> servers = new ArrayList<>();
             Exception failure = null;
             try {
                 for (Service s : SERVER_START_ORDER) {
-                    servers.add(startServer(s, wd, ports));
+                    servers.add(startServer(s, wd, listening));
                 }
-                new ServiceNode(Service.GATEWAY, wd, ports).checkout();
+                new ServiceNode(Service.GATEWAY, wd, listening).checkout();
             } catch (Exception e) {
                 failure = e;
             }
@@ -141,25 +179,26 @@ public final class Microservices implements Scenario {
     }
 
     /**
-     * Starts server s on a peer thread and waits for its port, which it
-     * adds to ports for the services started after it.
+     * Starts server s on loopback on a peer thread and waits for its
+     * port; adds its address to listening for the services started after.
      */
-    private static Peer startServer(Service s, Workdir wd, Map<Service, Integer> ports)
-            throws Exception {
-        CompletableFuture<Integer> listening = new CompletableFuture<>();
-        Map<Service, Integer> known = new EnumMap<>(ports);
+    private static Peer startServer(Service s, Workdir wd,
+            Map<Service, InetSocketAddress> listening) throws Exception {
+        CompletableFuture<Integer> bound = new CompletableFuture<>();
+        Map<Service, InetSocketAddress> known = new EnumMap<>(listening);
         Peer peer = Peer.start(NAME + "-" + s.role, () -> {
             try {
-                new ServiceNode(s, wd, known).serve(0, listening::complete,
+                new ServiceNode(s, wd, known).serve(ServiceNode.LOOPBACK, 0, bound::complete,
                         SELF_TEST_WAIT_SECONDS);
             } catch (Exception e) {
                 // A server that dies before listening must not leave the
                 // self-test waiting for a port that never comes.
-                listening.completeExceptionally(e);
+                bound.completeExceptionally(e);
                 throw e;
             }
         });
-        ports.put(s, listening.get(SELF_TEST_WAIT_SECONDS, TimeUnit.SECONDS));
+        int port = bound.get(SELF_TEST_WAIT_SECONDS, TimeUnit.SECONDS);
+        listening.put(s, new InetSocketAddress(ServiceNode.LOOPBACK, port));
         return peer;
     }
 }

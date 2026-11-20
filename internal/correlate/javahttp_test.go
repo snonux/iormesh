@@ -177,8 +177,10 @@ func TestJavaJoinHTTPStopsAfterRetries(t *testing.T) {
 }
 
 // TestJavaJoinHTTPWaits: an http event waits until an event that
-// completed Grace after it arrived — or Timeout — so a syscall of its
-// thread that completed before it is never emitted after it.
+// completed Grace after it arrived — or Timeout past the correlator's
+// hold — so a syscall of its thread that completed before it is never
+// emitted after it. Timeout alone is not enough (task 1f4): a cross-host
+// connection holds the stream back for the whole fuse window.
 func TestJavaJoinHTTPWaits(t *testing.T) {
 	jt := newJoinTest(t)
 	at := jt.now + 1000
@@ -192,6 +194,13 @@ func TestJavaJoinHTTPWaits(t *testing.T) {
 		t.Fatalf("before Grace: %v, want only the write", got)
 	}
 	jt.now = at + 1000 + defaultTimeout
+	if err := jt.j.Poll(); err != nil {
+		t.Fatal(err)
+	}
+	if got := kinds(jt.sink.events); !reflect.DeepEqual(got, []string{"write"}) {
+		t.Fatalf("after Timeout, inside the upstream hold: %v, want only the write", got)
+	}
+	jt.now = at + 1000 + defaultFuseWindowNS + defaultTimeout
 	if err := jt.j.Poll(); err != nil {
 		t.Fatal(err)
 	}

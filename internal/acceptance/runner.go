@@ -73,16 +73,10 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// microHostGap is why M4-9 cannot run yet; it is reported, never hidden.
-const microHostGap = "workload gap: microservices binds 127.0.0.1 and pins certificates " +
-	"naming 127.0.0.1 only (docs/implementation.md, \"The microservices scenario\"); " +
-	"spreading it over hosts needs --bind/--host options and SANs first"
-
 // Run executes every phase and prints the per-criterion results. It
 // returns ErrNotAccepted unless every criterion passed, or the error that
 // stopped the run.
 func (r *Runner) Run(ctx context.Context) error {
-	r.res.set(cMicroHost, NotRun, "%s", microHostGap)
 	if err := r.preflight(ctx); err != nil {
 		r.res.set(cPreflight, Fail, "%v", err)
 		r.res.fillNotRun("blocked: preflight failed, nothing was deployed")

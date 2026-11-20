@@ -20,8 +20,21 @@ const (
 	portBilling   = 11 // microservices on HOST1
 	portInventory = 12
 	portOrders    = 13
+	// The microservices spread (M4-9, task 1f4): orders and billing on
+	// HOST2, inventory on HOST1, each bound to its host's address.
+	portSpreadBilling   = 14
+	portSpreadInventory = 15
+	portSpreadOrders    = 16
 	// ports is the highest offset: the run uses PortBase+1..PortBase+ports.
-	ports = 13
+	ports = 16
+)
+
+// The microservices runs' --dir names: the loopback run (M4-8) and the
+// spread (M4-9). Their projects' patterns end in the --dir, so a session
+// of one run never traces the other's process of the same role.
+const (
+	microDir  = "microservices"
+	spreadDir = "microservices-spread"
 )
 
 // Project labels. One per scenario role, so cross-project fusion is what
@@ -38,7 +51,11 @@ const (
 	projOrders    = "m4orders"
 	projInventory = "m4inv"
 	projBill      = "m4bill"
-	projDisk      = "m4disk" // the watchdog project, HOST2, added last
+	projSpreadGW  = "m4sgw"   // the microservices spread, M4-9: gateway, HOST1
+	projSpreadInv = "m4sinv"  // inventory, HOST1
+	projSpreadOrd = "m4sord"  // orders, HOST2
+	projSpreadBil = "m4sbill" // billing, HOST2
+	projDisk      = "m4disk"  // the watchdog project, HOST2, added last
 )
 
 // project is one registry entry the run adds.
@@ -52,6 +69,23 @@ func rolePattern(scenario, role string) string {
 	return fmt.Sprintf("java -jar */%s/workload.jar %s --role %s *", remoteDir, scenario, role)
 }
 
+// microPattern is rolePattern for one microservices run, told apart by
+// its --dir, which the runner always passes last (Runner.java).
+func microPattern(role, dir string) string {
+	return fmt.Sprintf("java -jar */%s/workload.jar microservices --role %s * --dir */%s",
+		remoteDir, role, dir)
+}
+
+// spreadProjects are the spread's four projects, one per service.
+func (c Config) spreadProjects() []project {
+	return []project{
+		{c.Host1, projSpreadGW, microPattern("gateway", spreadDir)},
+		{c.Host1, projSpreadInv, microPattern("inventory", spreadDir)},
+		{c.Host2, projSpreadOrd, microPattern("orders", spreadDir)},
+		{c.Host2, projSpreadBil, microPattern("billing", spreadDir)},
+	}
+}
+
 // projects lists the entries added before the deploy, NAT ones only when
 // the operator configured the DNAT.
 func (c Config) projects() []project {
@@ -60,11 +94,12 @@ func (c Config) projects() []project {
 		{c.Host1, projStream, rolePattern("file-basic", "solo")},
 		{c.Host1, projShop, rolePattern("tcp-two-host", "client")},
 		{c.Host2, projBilling, rolePattern("tcp-two-host", "server")},
-		{c.Host1, projGateway, rolePattern("microservices", "gateway")},
-		{c.Host1, projOrders, rolePattern("microservices", "orders")},
-		{c.Host1, projInventory, rolePattern("microservices", "inventory")},
-		{c.Host1, projBill, rolePattern("microservices", "billing")},
+		{c.Host1, projGateway, microPattern("gateway", microDir)},
+		{c.Host1, projOrders, microPattern("orders", microDir)},
+		{c.Host1, projInventory, microPattern("inventory", microDir)},
+		{c.Host1, projBill, microPattern("billing", microDir)},
 	}
+	ps = append(ps, c.spreadProjects()...)
 	if c.NATPort != 0 {
 		ps = append(ps, project{c.Host1, projNATClient, rolePattern("tcp-nat", "client")},
 			project{c.Host2, projNATServer, rolePattern("tcp-nat", "server")})

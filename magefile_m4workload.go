@@ -54,7 +54,10 @@ var m4UsageErrors = [][]string{
 // checkM4Scenarios runs the topology, the usage errors and the run-time
 // failures.
 func checkM4Scenarios() error {
-	if err := checkMicroservices(); err != nil {
+	if err := checkMicroservices(nil); err != nil {
+		return err
+	}
+	if err := checkMicroservicesSpread(); err != nil {
 		return err
 	}
 	for _, args := range m4UsageErrors {
@@ -153,8 +156,10 @@ func checkTCPHostsRunFailures(scenario string) error {
 // checkMicroservices runs the whole topology in one shared --dir and
 // expects every service to finish its bracket and exit 0 — the gateway
 // first, then the servers in reverse start order — and the directory to
-// be empty afterwards: no service directory, no certificate left.
-func checkMicroservices() error {
+// be empty afterwards: no service directory, no certificate left. addrs
+// gives a service its own address (msArgs); nil runs the loopback
+// defaults.
+func checkMicroservices(addrs map[string]string) error {
 	dir, err := os.MkdirTemp("", "iormesh-microservices-")
 	if err != nil {
 		return err
@@ -168,14 +173,14 @@ func checkMicroservices() error {
 		}
 	}()
 	for _, svc := range msServerOrder {
-		r, port, err := startMsServer(svc, dir, ports)
+		r, port, err := startMsServer(svc, dir, ports, addrs)
 		if err != nil {
 			return err
 		}
 		runs = append(runs, r)
 		ports[svc] = port
 	}
-	gw, err := startMsGateway(dir, ports)
+	gw, err := startMsGateway(dir, ports, addrs)
 	if err != nil {
 		return err
 	}
@@ -189,19 +194,27 @@ func checkMicroservices() error {
 }
 
 // msArgs is the command line of service svc in dir, with the ports of
-// the services it calls.
-func msArgs(svc, dir string, ports map[string]string) []string {
+// the services it calls. A service with an address in addrs binds it
+// (--bind) and its callers dial it there (--<svc>-host), as on a host of
+// its own; without one both stay at their 127.0.0.1 default.
+func msArgs(svc, dir string, ports, addrs map[string]string) []string {
 	args := []string{"microservices", "--role", svc, "--dir", dir}
+	if a := addrs[svc]; a != "" && svc != "gateway" {
+		args = append(args, "--bind", a)
+	}
 	for _, callee := range msCallees[svc] {
 		args = append(args, "--"+callee+"-port", ports[callee])
+		if a := addrs[callee]; a != "" {
+			args = append(args, "--"+callee+"-host", a)
+		}
 	}
 	return args
 }
 
 // startMsServer starts server svc and returns it with the port its
 // `listening <port>` line announced.
-func startMsServer(svc, dir string, ports map[string]string) (*gatedRun, string, error) {
-	r, err := startRun(nil, msArgs(svc, dir, ports)...)
+func startMsServer(svc, dir string, ports, addrs map[string]string) (*gatedRun, string, error) {
+	r, err := startRun(nil, msArgs(svc, dir, ports, addrs)...)
 	if err != nil {
 		return nil, "", err
 	}
@@ -223,8 +236,8 @@ func startMsServer(svc, dir string, ports map[string]string) (*gatedRun, string,
 }
 
 // startMsGateway starts the gateway, whose checkout drives the run.
-func startMsGateway(dir string, ports map[string]string) (*gatedRun, error) {
-	r, err := startRun(nil, msArgs("gateway", dir, ports)...)
+func startMsGateway(dir string, ports, addrs map[string]string) (*gatedRun, error) {
+	r, err := startRun(nil, msArgs("gateway", dir, ports, addrs)...)
 	if err != nil {
 		return nil, err
 	}
@@ -313,19 +326,19 @@ func checkBrokenHop() error {
 	if err != nil {
 		return err
 	}
-	billing, port, err := startMsServer("billing", dir, nil)
+	billing, port, err := startMsServer("billing", dir, nil, nil)
 	if err != nil {
 		return err
 	}
 	defer billing.kill()
 	ports := map[string]string{"billing": port, "inventory": fmt.Sprint(closed)}
-	orders, port, err := startMsServer("orders", dir, ports)
+	orders, port, err := startMsServer("orders", dir, ports, nil)
 	if err != nil {
 		return err
 	}
 	defer orders.kill()
 	ports["orders"] = port
-	gw, err := startMsGateway(dir, ports)
+	gw, err := startMsGateway(dir, ports, nil)
 	if err != nil {
 		return err
 	}

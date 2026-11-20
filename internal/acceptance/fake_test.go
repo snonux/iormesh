@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"iormesh/internal/schema"
+	"iormesh/internal/target"
 )
 
 // fakeWorld plays both servers and iormeshctl for the dry run: enough
@@ -31,6 +32,9 @@ type fakeWorld struct {
 	removed  map[string]bool // host -> uninstalled by rm
 	named    bool
 	exit1    error // a genuine *exec.ExitError with status 1
+	// cert is what base64 prints for a certificate; "" fails the copy.
+	cert   string
+	copied []string
 	// failClient makes that scenario's client role fail, as a client
 	// that cannot reach its server does.
 	failClient string
@@ -57,7 +61,7 @@ func newFakeWorld(t *testing.T, cfg Config) *fakeWorld {
 		t.Fatalf("`false` gave %v, want exit status 1", err)
 	}
 	return &fakeWorld{t: t, cfg: cfg, ready: map[readyKey][]string{}, ended: map[string]bool{},
-		removed: map[string]bool{}, exit1: err}
+		removed: map[string]bool{}, exit1: err, cert: "Y2VydA=="}
 }
 
 // fakeTransport is one host's view of the world.
@@ -115,6 +119,12 @@ func (w *fakeWorld) answer(host string, argv []string) (string, error) {
 	case "fallocate":
 		w.ended[projDisk] = true
 		return "", nil
+	case "base64":
+		return w.cert, nil
+	case "sh":
+		if len(argv) == 6 && strings.Contains(argv[2], "base64 -d") {
+			w.copied = append(w.copied, host+":"+argv[5])
+		}
 	}
 	return "", nil // sh -c command -v, systemctl, mkdir, rm, find
 }
@@ -139,13 +149,15 @@ func (w *fakeWorld) answerSudo(host string, argv []string) (string, error) {
 	return "[" + fmt.Sprintf(st, proj) + "]", nil
 }
 
-// answerJava publishes a segment for the scenario's project, as the
-// tracer's next rotation would.
+// answerJava publishes a segment for each project whose pattern matches
+// the command line, as the tracer's next rotation would.
 func (w *fakeWorld) answerJava(host string, argv []string) {
-	scenario, role := argv[3], argv[5]
 	for _, p := range w.cfg.projects() {
-		if p.host == host && strings.Contains(p.pattern, " "+scenario+" ") &&
-			(strings.Contains(p.pattern, "--role "+role+" ") || strings.Contains(p.pattern, "--role * ")) {
+		g, err := target.CompileGlob(p.pattern)
+		if err != nil {
+			w.t.Fatal(err)
+		}
+		if p.host == host && g.Match(strings.Join(argv, " ")) {
 			w.seq++
 			k := readyKey{host, p.name}
 			w.ready[k] = append(w.ready[k], fmt.Sprintf("%s-abcd%04d-20261120T120000Z-%06d.parquet", host, w.seq, w.seq))
@@ -258,8 +270,12 @@ func (w *fakeWorld) writeBuild(projects []string) error {
 }
 
 // fakeGraph fuses one connection across two hosts for a pair's build, and
-// leaves it unresolved for the client's build alone.
+// leaves it unresolved for the client's build alone; the spread's build
+// fuses its two cross-host hops (fakeSpreadGraph).
 func fakeGraph(projects []string) schema.Graph {
+	if slices.Equal(projects, spreadNames()) {
+		return fakeSpreadGraph()
+	}
 	g := schema.Graph{SchemaVersion: schema.Version}
 	a, b := schema.ProcessNodeID("hA", 1, 1), schema.ProcessNodeID("hB", 2, 1)
 	conn := schema.SocketNodeID("c1")

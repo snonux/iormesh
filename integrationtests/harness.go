@@ -203,7 +203,7 @@ func (h *Harness) StartHeldHelper(binary, role string, args ...string) (*Workloa
 
 // startWorkload starts a workload; an empty dir passes no --dir.
 func (h *Harness) startWorkload(dir, scenario string, args []string) (*Workload, error) {
-	cmd, err := h.workloadCmd(dir, scenario, args)
+	cmd, err := h.workloadCmd(dir, h.Spool, scenario, args)
 	if err != nil {
 		return nil, err
 	}
@@ -212,15 +212,17 @@ func (h *Harness) startWorkload(dir, scenario string, args []string) (*Workload,
 
 // workloadCmd is the java command line of a workload, with the agent, the
 // JVM flags and the user the harness asks for; an empty dir passes no
-// --dir. It creates the agent's spool first: the agent never does.
-func (h *Harness) workloadCmd(dir, scenario string, args []string) (*exec.Cmd, error) {
+// --dir. spool is the agent's spool: the harness's, or an emulated
+// host's own (Host.Spool). It creates the spool first: the agent never
+// does.
+func (h *Harness) workloadCmd(dir, spool, scenario string, args []string) (*exec.Cmd, error) {
 	argv := append(slices.Clone(h.JVMFlags), "-jar", h.WorkloadJar, scenario)
 	argv = append(argv, args...)
 	if h.JavaAgent != "" {
-		if err := os.MkdirAll(h.Spool, 0o755); err != nil {
+		if err := os.MkdirAll(spool, 0o755); err != nil {
 			return nil, err
 		}
-		argv = append([]string{"-javaagent:" + h.JavaAgent + "=spool=" + h.Spool}, argv...)
+		argv = append([]string{"-javaagent:" + h.JavaAgent + "=spool=" + spool}, argv...)
 	}
 	if dir != "" {
 		argv = append(argv, "--dir", dir)
