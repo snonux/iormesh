@@ -163,6 +163,9 @@ func w3cID(s string, n int) bool {
 // an open (creat is one) without its path, or a marker without its name,
 // would make the correlator's and normalizer's joins silently miss.
 func (e *Event) validateKindArgs() error {
+	if err := e.validateTCPSeq(); err != nil {
+		return err
+	}
 	switch e.Event {
 	case KindOpen, KindOpenat, KindOpenat2, KindCreat:
 		if e.Args.Path == nil || *e.Args.Path == "" {
@@ -284,6 +287,30 @@ func (e *Event) validateCount() error {
 	}
 	if *c < 2 {
 		return invalidf("args.count %d, want ≥ 2 or none", *c)
+	}
+	return nil
+}
+
+// validateTCPSeq keeps the four tcp_sock fields (M4, decision #26) to
+// tcp_state records and together: the merge rebuilds the ISN-pair join
+// key from all four, so a partial set would rebuild a wrong key, and a
+// key on another kind would claim a connection the record does not name.
+func (e *Event) validateTCPSeq() error {
+	a := e.Args
+	set := 0
+	for _, present := range []bool{a.SndUna != nil, a.RcvNxt != nil,
+		a.BytesAcked != nil, a.BytesReceived != nil} {
+		if present {
+			set++
+		}
+	}
+	switch {
+	case set == 0:
+		return nil
+	case e.Event != KindTCPState:
+		return invalidf("args.snd_una/rcv_nxt/bytes_acked/bytes_received on a %s event (tcp_state only)", e.Event)
+	case set != 4:
+		return invalidf("tcp_state with %d of the four tcp_sock fields, want all or none", set)
 	}
 	return nil
 }

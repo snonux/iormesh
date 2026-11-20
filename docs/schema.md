@@ -131,13 +131,19 @@ column each, never a blob.
 IPv4 peers of dual-stack sockets are written unmapped
 (`127.0.0.1`, not `::ffff:127.0.0.1`).
 
-Planned for M4 (S2, decision #26): `tcp_state` gains the four
-`tcp_sock` fields the merge rebuilds the ISN-pair key from
-(`snd_una`, `rcv_nxt`, `bytes_acked`, `bytes_received`), and
-socket send/receive events gain their TCP sequence range (start
-sequence plus `bytes`, from new `tcp_sendmsg`/`tcp_recvmsg`
-hooks), which the merge's clock bounds match across hosts. Not
-in the M1 schema yet.
+| `snd_una`, `rcv_nxt` | `tcp_state` only, optional (appended in M4): the socket's `tcp_sock` fields of those names at the transition, u32 |
+| `bytes_acked`, `bytes_received` | `tcp_state` only, optional (appended in M4): the `tcp_sock` byte counters, u64 |
+
+The four `tcp_sock` fields come together or not at all: the
+controller's merge rebuilds the connection's ISN pair — the
+cross-host join key (S2, decision #26) — from all four, so a
+partial set is rejected rather than read into a wrong key. The
+schema and the merge (`internal/federate`) carry them; the
+tracer's capture lands with the M4 BPF change. Still planned
+for M4: socket send/receive events gain their TCP sequence
+range (start sequence plus `bytes`, from new
+`tcp_sendmsg`/`tcp_recvmsg` hooks), which the merge's clock
+bounds match across hosts.
 
 ### Event kinds (M1)
 
@@ -922,7 +928,7 @@ the agent gets the span that was current on its Java thread:
 | `host` | `host:<host_id>` |
 | `process` | `proc:<host_id>/<pid>@<pid_incarnation>` |
 | `file` | `file:<host_id>:<path>` — the path exactly as the open event reports it, or the new name of a rename that moved an open fd |
-| `socket` | `conn:<conn_id>` — one node per connection, both ends: a TCP or unix stream connection, a UDP flow, a pipe or socketpair (M2 step 7) |
+| `socket` | `conn:<conn_id>` — one node per connection, both ends: a TCP or unix stream connection, a UDP flow, a pipe or socketpair (M2 step 7); in a merged graph (M4) a TCP connection fused across traces has a merged conn_id both hosts' ids map to |
 | `app` | `app:<project>/<pattern>` — the identity of a pattern-bound session's app (M2): every process incarnation the pattern matched links to it, so a restarted app is a new process node under the same app node |
 
 | Edge | From → to | State |

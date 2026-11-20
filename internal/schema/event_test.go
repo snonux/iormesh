@@ -206,6 +206,12 @@ func TestEventValidateRejects(t *testing.T) {
 		"args.count 1 on a read": func(e *Event) {
 			e.Event, e.Err, e.Ret, e.Args.Count = KindRead, "", 1, ptr(uint64(1))
 		},
+		// M4 (decision #26): the ISN-pair inputs are tcp_state's, all four.
+		"args.snd_una on a connect": func(e *Event) { e.Args.SndUna = ptr(uint32(1)) },
+		"tcp_state with three of four seq fields": func(e *Event) {
+			*e = validTCPState()
+			e.Args.BytesReceived = nil
+		},
 		// M3 step 8: otel ids come from the agent and are W3C ids.
 		"otel with attribution none": func(e *Event) {
 			e.Attribution, e.Java, e.Otel = AttributionNone, nil, validOtel()
@@ -510,5 +516,39 @@ func TestFoldedReadWriteValid(t *testing.T) {
 		if err := e.Validate(); err != nil {
 			t.Errorf("folded %s: %v", kind, err)
 		}
+	}
+}
+
+// validTCPState is a tcp_state record carrying all four tcp_sock fields
+// (M4, decision #26), the u64 counters past 2^32 as a long connection's.
+func validTCPState() Event {
+	e := validEvent()
+	e.Event, e.Err, e.Ret, e.Attribution, e.Java = KindTCPState, "", 0, AttributionNone, nil
+	e.Args.SockState = ptr("ESTABLISHED")
+	e.Args.SndUna, e.Args.RcvNxt = ptr(uint32(4000000000)), ptr(uint32(7))
+	e.Args.BytesAcked, e.Args.BytesReceived = ptr(uint64(1)<<33), ptr(uint64(0))
+	return e
+}
+
+// TestTCPSeqFieldsValid: a tcp_state record with all four tcp_sock fields
+// is valid and round-trips through NDJSON, the fields appended after the
+// older args.
+func TestTCPSeqFieldsValid(t *testing.T) {
+	e := validTCPState()
+	if err := e.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	line := string(AppendEvent(nil, &e))
+	want := `"sock_state":"ESTABLISHED","snd_una":4000000000,"rcv_nxt":7,` +
+		`"bytes_acked":8589934592,"bytes_received":0}`
+	if !strings.Contains(line, want) {
+		t.Fatalf("encoded args lack %s:\n%s", want, line)
+	}
+	got, err := DecodeEvent([]byte(line))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *got.Args.BytesAcked != 1<<33 || *got.Args.SndUna != 4000000000 {
+		t.Fatalf("round trip lost the seq fields: %+v", got.Args)
 	}
 }

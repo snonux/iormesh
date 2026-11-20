@@ -166,6 +166,10 @@ func appendArgs(dst []byte, a *Args) []byte {
 	optUint(&o, "target_pid", a.TargetPID)
 	optUint(&o, "sender_pid", a.SenderPID)
 	optUint(&o, "count", a.Count)
+	optUint(&o, "snd_una", a.SndUna)
+	optUint(&o, "rcv_nxt", a.RcvNxt)
+	optUint(&o, "bytes_acked", a.BytesAcked)
+	optUint(&o, "bytes_received", a.BytesReceived)
 	return o.close()
 }
 

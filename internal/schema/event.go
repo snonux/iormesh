@@ -215,6 +215,16 @@ type Args struct {
 	// latencies, boot_ns the first call's enter. Absent for a single call;
 	// when set, always ≥ 2.
 	Count *uint64 `json:"count,omitempty" parquet:"count,optional"`
+	// SndUna, RcvNxt, BytesAcked and BytesReceived are the four tcp_sock
+	// fields a tcp_state record carries from M4 on (spike S2, decision
+	// #26): the controller's merge rebuilds the connection's TCP
+	// initial-sequence-number pair from them — the cross-host join key,
+	// which NAT never rewrites. tcp_state only, all four or none: a
+	// partial set would rebuild a wrong key. Appended in M4 (task fb4).
+	SndUna        *uint32 `json:"snd_una,omitempty" parquet:"snd_una,optional"`
+	RcvNxt        *uint32 `json:"rcv_nxt,omitempty" parquet:"rcv_nxt,optional"`
+	BytesAcked    *uint64 `json:"bytes_acked,omitempty" parquet:"bytes_acked,optional"`
+	BytesReceived *uint64 `json:"bytes_received,omitempty" parquet:"bytes_received,optional"`
 }
 
 // Session is the host description of the session header. Its fields are
