@@ -68,7 +68,10 @@ func checkMicroservicesSpread() error {
 // whose orders.crt is really billing's certificate (a valid one, for the
 // same address, just not the server's). The handshake must fail and the
 // gateway exit 1 — never fall back to trusting what the server offers.
-// Orders never sees a request and is killed with billing.
+// Orders never sees a request and is killed with billing. Both
+// certificates name 127.0.0.1, so this tests trust (the pin), not the
+// SAN: a SAN mismatch needs a server reachable at an address its
+// certificate does not name, which a specific --bind rules out.
 func checkPinMismatch() error {
 	served, err := os.MkdirTemp("", "iormesh-pin-served-")
 	if err != nil {

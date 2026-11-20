@@ -424,12 +424,22 @@ is stamped at its request's start but written at its end. The
 hosts' Java method ids are moved into ranges of their own, since
 ids are per trace. This test found a tracer bug. A cross-host
 connection holds the correlator's stream back for its whole
-5 s fuse window, because its far end never shows up locally.
+fuse window, because its far end never shows up locally. The
+correlator's clock moved only with records, so on an idle
+stream the hold lasted until the next record, however late.
 The Java join's 2 s http timeout ran on the clock, so it
 released http records ahead of their own connect or accept,
-and they lost their `conn_id` (about one run in eight). The
-timeout now counts from the end of the correlator's hold
-(`JavaJoinConfig.UpstreamHold`, `TestJavaJoinHTTPWaits`).
+and they lost their `conn_id` (about one run in eight). Two
+fixes (task 1f4 and its review). First, the run loop now ticks
+the correlator (`Correlator.Tick`) while no records are
+waiting, so the hold really ends 5 s after the socket was first
+seen. Second, the join's timeout counts from the end of that
+hold (`JavaJoinConfig.UpstreamHold`). An http event on an idle
+stream therefore goes out up to 7 s after its request ended.
+`TestJavaJoinHTTPWaits` and `TestIdleStreamHeldAcceptKeepsConn`
+pin this. The second test uses an idle stream behind a held
+accept: with the tick the http event keeps its `conn_id`, and
+without it the event loses it.
 
 ### M4 two-host and NAT'ed pairs (task kb4)
 

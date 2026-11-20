@@ -462,13 +462,21 @@ func drainStopped(s *session) error {
 	}
 }
 
-// poll is the loop's periodic work: the loss counters, the Java join's
-// rings, so an idle stream's held events still leave, and the segment
-// writer's clock — rotation and the disk watchdog, whose trip ends the
-// run as disk_limit (endReason).
+// poll is the loop's periodic work: the loss counters, the correlator's
+// clock (Correlator.Tick: a socket waiting for a cross-host end leaves
+// after its fuse window even on an idle stream), the Java join's rings,
+// so an idle stream's held events still leave, and the segment writer's
+// clock — rotation and the disk watchdog, whose trip ends the run as
+// disk_limit (endReason). The correlator ticks only while no batch is
+// waiting: with a backlog the records, not the clock, are behind.
 func (s *session) poll() error {
 	if _, err := pollLosses(s.tr, s.c); err != nil {
 		return err
+	}
+	if len(s.tr.Records()) == 0 {
+		if err := s.c.Tick(); err != nil {
+			return err
+		}
 	}
 	if err := s.java.poll(); err != nil {
 		return err

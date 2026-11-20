@@ -47,7 +47,9 @@ type Config struct {
 	WallOffsetNS int64
 	// FuseWindowNS is how long a socket event waits for its connection's
 	// other end before it is emitted as unresolved; 0 means 5s, the
-	// window the plan gives the loopback join.
+	// window the plan gives the loopback join. The Java join waits for
+	// it before it releases an http record by the clock
+	// (JavaJoinConfig.UpstreamHold, which must equal it): change both.
 	FuseWindowNS uint64
 	// Clock stamps session, drop and end events; it defaults to BootNow.
 	Clock Clock
@@ -214,6 +216,25 @@ func (c *Correlator) Close() error {
 // Graph returns the graph of everything emitted so far, sorted.
 func (c *Correlator) Graph() schema.Graph {
 	return c.graph.build()
+}
+
+// Tick advances the correlator's clock to Config.Clock and releases
+// what that decides: a socket event whose fuse window passed leaves as
+// unresolved, with every event held behind it. The clock otherwise only
+// moves with records, so without Tick a connection whose other end is on
+// another host would hold the whole stream until the next record — 30 s
+// on a server called every 30 s, not the 5 s window (task 1f4 review).
+// The run loop calls it on its ticker, and only while no record batch is
+// waiting: a backlog is the stream behind the clock, and the window must
+// not run out on records not yet read.
+func (c *Correlator) Tick() error {
+	if c.ended {
+		return nil
+	}
+	if now := c.cfg.Clock(); now > c.now {
+		c.now = now
+	}
+	return c.release(false)
 }
 
 // advance moves the correlator's clock; records are not strictly ordered

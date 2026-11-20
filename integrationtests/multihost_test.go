@@ -316,7 +316,9 @@ func mergeHosts(t *testing.T, runs ...tracedRun) (federate.Result, normalize.Tra
 // the order its tracer wrote them in. A plain sort by wall_ns would not:
 // an http event is stamped when its request began but written when it
 // ended, after the reads and writes it spans (task 1f4), and the goldens
-// declare that written order.
+// declare that written order. Equal wall_ns go to the stream listed
+// first (strict <), so ties are broken by host index, the same way on
+// every run.
 func mergeByWall(streams [][]schema.Event) []schema.Event {
 	var out []schema.Event
 	next := make([]int, len(streams))

@@ -23,11 +23,10 @@ import javax.net.ssl.TrustManagerFactory;
  * scenario (orders, billing): a fresh EC P-256 key pair and a self-signed
  * certificate for one IPv4 address — 127.0.0.1, or the address a service
  * binds on a host of its own (M4) — made in memory at run time. The
- * private key
- * exists only inside the server's JVM — never in the repository, never in
- * a file — and is new on every run; only the public certificate is handed
- * to the client, which trusts exactly that one certificate (pinned, PLAN.md
- * M0 "HTTP scenarios"). The subject alternative name carries the IP
+ * private key exists only inside the server's JVM — never in the
+ * repository, never in a file — and is new on every run; only the public
+ * certificate is handed to the client, which trusts exactly that one
+ * certificate (pinned, PLAN.md M0 "HTTP scenarios"). The subject alternative name carries the IP
  * address, so HttpClient's endpoint identification passes for
  * https://ADDRESS:port without disabling any check, and fails for any
  * other address the server might also be reached at.

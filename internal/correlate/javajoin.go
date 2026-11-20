@@ -145,11 +145,16 @@ type JavaJoinConfig struct {
 	// is kept that long past its syscall's enter, plus Timeout.
 	Retain uint64
 	// UpstreamHold is how long the correlator may hold the whole stream
-	// back behind one socket event (ns, default its 5 s fuse window): a
-	// connection whose other end is on another host waits it out in
-	// full. An http record's Timeout counts from there (httpReady), or
-	// it would go out ahead of its own connection's connect or accept,
-	// still held upstream, and lose its conn_id (task 1f4).
+	// back behind one socket event (ns): its fuse window, which a
+	// connection whose other end is on another host waits out in full.
+	// The default is the correlator's default window, and a caller that
+	// sets Config.FuseWindowNS must set this to the same value. The hold
+	// is clock-bounded because the run loop ticks the correlator
+	// (Correlator.Tick) on an idle stream; a record backlog delays it
+	// further, which Timeout's 2 s on top absorbs. An http record's
+	// Timeout counts from the end of the hold (httpReady), or it would go
+	// out ahead of its own connection's connect or accept, still held
+	// upstream, and lose its conn_id (task 1f4).
 	UpstreamHold uint64
 	// AttachMarks attaches the Java mark's uprobes to one JVM's natives
 	// (bpf.Tracer.AttachJavaMarks), once its ring delivered the hook

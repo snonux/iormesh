@@ -70,7 +70,10 @@ func rolePattern(scenario, role string) string {
 }
 
 // microPattern is rolePattern for one microservices run, told apart by
-// its --dir, which the runner always passes last (Runner.java).
+// its --dir, which the runner always passes last (Runner.java). The
+// " * " between --role and --dir needs at least one option there, which
+// every role has (a port, or a callee's port); a role started with no
+// option at all would not match.
 func microPattern(role, dir string) string {
 	return fmt.Sprintf("java -jar */%s/workload.jar microservices --role %s * --dir */%s",
 		remoteDir, role, dir)

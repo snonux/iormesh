@@ -2589,8 +2589,10 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
      from inside it while following, so only the outermost exit
      records (a stack walk counts the frames). The joiner inserts
      the http events by time (each waits until an event that
-     completed 5 ms after it arrived, or 2 s) and therefore numbers
-     its output `seq` itself.
+     completed 5 ms after it arrived, or, on an idle stream, the
+     correlator's 5 s fuse window plus 2 s: task 1f4,
+     `UpstreamHold`) and therefore numbers its output `seq`
+     itself.
    - **Redaction twice**: `Redaction` (agent) masks denied headers,
      URI-valued headers (Location, Content-Location, Referer,
      Origin) as URLs even when relative, every query value, and

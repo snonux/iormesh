@@ -829,7 +829,12 @@ a body by protocol (HEAD, 1xx, 204, 304) is 0; a response without
 
 The event goes into the stream after the events that completed
 before it: it waits until an event that completed 5 ms after it
-has reached the joiner, or 2 s; the trace's `end` stays last.
+has reached the joiner, or, on a stream with nothing later, 7 s
+after it completed: the correlator's 5 s fuse window, for which a
+socket event whose other end is on another host holds the stream,
+plus 2 s (task 1f4). So on an idle stream an http event reaches
+the live output and the segment being written up to about 7 s
+after its request ended. The trace's `end` stays last.
 `conn_id` is the connection whose socket ends match the ones the
 library still held (both, else the remote end — a server's local
 end is unreadable once the close shut the connection — else the

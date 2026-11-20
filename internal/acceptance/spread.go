@@ -103,8 +103,10 @@ func (r *Runner) copyCert(ctx context.Context, from, fromDir, to, toDir, name st
 	if b64 == "" {
 		return errors.New(from + ": " + name + " is empty")
 	}
-	_, err = r.remote(ctx, to, "sh", "-c", `printf %s "$1" | base64 -d > "$2"`, "sh", b64,
-		path.Join(toDir, name))
+	// test -s: a decode that wrote nothing (no base64 there, a full disk)
+	// fails here, not later as a gateway with no pin.
+	_, err = r.remote(ctx, to, "sh", "-c", `printf %s "$1" | base64 -d > "$2" && test -s "$2"`,
+		"sh", b64, path.Join(toDir, name))
 	if err != nil {
 		return fmt.Errorf("%s: writing %s: %w", to, name, err)
 	}
