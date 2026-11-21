@@ -256,7 +256,9 @@ static __always_inline void iormesh_put_tcp_seq(struct tcp_state_event *ev,
 
 // iormesh_read_tcp_seq fills ev's four fields with one read: for the
 // state-change records, whose tcp_set_state runs with the socket locked,
-// so no update of the four can interleave with the read.
+// so no update of the four can interleave with the read; and for the final
+// snapshot, which reads unlocked but needs no consistent four
+// (iormesh_sock_final).
 static __always_inline void iormesh_read_tcp_seq(struct tcp_state_event *ev, struct sock *sk) {
     struct iormesh_tcp_seq seq;
 
@@ -535,10 +537,14 @@ struct {
 // still finishing its FIN exchange) has no file and is believed, like a
 // state change of it would be. A socket in TCP_CLOSE is skipped: it
 // reported its last state already, or its run was lost and the address
-// now holds a socket nobody owns. The socket is not locked here, so the
-// four fields are read like the accept snapshot's
-// (iormesh_read_tcp_seq_stable). The timestamp is taken before them: the
-// counters only grow, so they hold at least what they held then.
+// now holds a socket nobody owns. The socket is not locked here, but the
+// four fields are read once (iormesh_read_tcp_seq), not re-read like the
+// accept snapshot's: each counter is one aligned load of a value that only
+// grows, so it proves what it proves torn or not, and a torn read would
+// only drop the record's say - the merge uses a final snapshot's counters
+// only when its fields rebuild the connection's key (internal/federate,
+// counterRec), which a torn read fails. The timestamp is taken before
+// the read: the counters hold at least what they held then.
 SEC("raw_tp")
 int iormesh_sock_final(struct bpf_raw_tracepoint_args *ctx) {
     __u64 key = ctx->args[0];
@@ -569,6 +575,6 @@ int iormesh_sock_final(struct bpf_raw_tracepoint_args *ctx) {
     ev->oldstate = TCP_STATE_FINAL;
     ev->newstate = state;
     iormesh_read_sk_tuple(ev, sk);
-    iormesh_read_tcp_seq_stable(ev, sk);
+    iormesh_read_tcp_seq(ev, sk);
     return 1;
 }

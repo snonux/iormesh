@@ -3904,10 +3904,15 @@ connection into messages, `bound.go` intersects them,
     that traced a holder but recorded none of its calls is the
     same blind spot. `sumsCover`, `ackedCovered`, the
     receiver's sums and any counter at 4 GiB or more catch
-    part of it; with the final snapshot below every end has a
-    `bytes_acked` read after all its calls, so what can still
-    pass unseen is untraced bytes no more than the data still
-    unacknowledged at that reading.
+    part of it; with the final snapshot below every end of a
+    session whose targets exited has a `bytes_acked` read
+    after all its calls, so what can still pass unseen is
+    untraced bytes no more than the data still unacknowledged
+    at that reading. A final snapshot of a session that ended
+    otherwise (duration, stop, disk limit, error; the end
+    events are kept per host and project) is no witness for
+    `ackedCovered`: the app may have sent after the last kept
+    record.
   - *Counter proof*, per message, immune to drops and untraced
     calls: a `tcp_state` record of the sender at or after the
     send's exit (its start is read in the enter hook, after the
@@ -3934,15 +3939,22 @@ connection into messages, `bound.go` intersects them,
     generation; an orphan is believed), skips `TCP_CLOSE`,
     and writes a `tcp_state_event` with `oldstate`
     `TCP_STATE_FINAL` (256) — the tuple and the four fields,
-    read like the unlocked accept snapshot — into the
+    read once, unlocked — into the
     one-slot `sock_final_map`, which userspace reads after the
     run. The correlator emits it as `tcp_state` with
     `args.sock_snapshot: "final"` on the socket's conn and fd
     instance, only for a socket it knows, with the same tuple
     and fields `carriesSeq` passes. The merge reads its
-    counters only (`timing.state`): it keys nothing
-    (`isFinal`; a torn read would turn the half into a key
-    conflict) and dates neither SYN nor handshake. Walking the
+    counters only (`timing.state`), and only when its four
+    fields rebuild the fused connection's key (`keyedCounts`:
+    since it keys nothing, a stale owner's record could not
+    become a `KeyConflict`, and a torn read fails the check
+    too); it keys nothing (`isFinal`) and dates neither SYN
+    nor handshake. The walk takes each key once and stops
+    after 4 × max entries steps (a key deleted mid-walk
+    restarts the kernel's iteration). No snapshot exists for
+    an owner entry the LRU map evicted or a socket still in
+    `SYN_SENT`/`SYN_RECV`. Walking the
     owners rather than the kernel's tables reaches every
     network namespace, a pod's included: a `bpf_iter` over
     tcp and `INET_DIAG` both list one namespace, and

@@ -1204,23 +1204,36 @@ Kubernetes (M7) build on it.
   4 GiB, whatever the trace missed, and the stream check
   decides only longer directions (or an end whose CLOSE run
   the kernel skipped, recorded as `skipped_runs`); there,
-  with a `bytes_acked` read after every call, what can pass
-  unseen is untraced bytes no more than the data still
-  unacknowledged at that reading. The snapshot is taken in
+  when the session ended because its targets exited, a
+  `bytes_acked` read after every call leaves unseen only
+  untraced bytes no more than the data still unacknowledged
+  at that reading. A session stopped while its app still ran
+  (duration, signal, disk limit, error) gives its final
+  snapshots no say in that sum check — the app may have sent
+  after the last record the trace kept — only in the counter
+  proof. The snapshot is taken in
   the tracer's `finish`, after the last records were handled
   and before the tracer closes: userspace walks
-  `sock_owner_map` and runs a raw tracepoint program per entry
+  `sock_owner_map` (each key once, the walk capped) and runs a
+  raw tracepoint program per entry
   through `BPF_PROG_TEST_RUN` (Linux 5.10; el9 5.14 has it),
   which checks the owner's inode generation as a state change
-  does and reads the socket unlocked, like the accept
-  snapshot. Walking the owners, not the kernel's socket tables,
-  reaches every network namespace — a `bpf_iter` over tcp and
-  `INET_DIAG` each list one, which misses a pod's sockets, and
-  `tcp_info` lacks `snd_una`/`rcv_nxt`, which the schema's
-  all-four rule needs. The merge reads only its counters: it
-  never keys a half (a torn read would make a key conflict)
-  and dates neither SYN nor handshake. A snapshot that cannot
-  be taken is a warning, not a failed trace. The
+  does, skips `TCP_CLOSE`, and reads the socket's four fields
+  once, unlocked. Walking the owners, not the kernel's socket
+  tables, reaches every network namespace — a `bpf_iter` over
+  tcp and `INET_DIAG` each list one, which misses a pod's
+  sockets, and `tcp_info` lacks `snd_una`/`rcv_nxt`, which the
+  schema's all-four rule needs. The merge reads only its
+  counters, and only when its four fields rebuild the fused
+  connection's key: a final snapshot never keys a half, so a
+  stale owner's record could not become a key conflict as a
+  state change does, and the key check drops it — and a torn
+  read with it. It dates neither SYN nor handshake. No final
+  snapshot exists for a socket whose owner entry the LRU map
+  evicted, nor for one still in `SYN_SENT` or `SYN_RECV` at
+  the end (a TFO child accepted mid-handshake, say); those
+  ends rely on their CLOSE or the stream check. A snapshot
+  that cannot be taken is a warning, not a failed trace. The
   merge keeps one bound per
   host pair per 1-minute window (`Result.Clocks`), one-sided
   when only one direction has edges, empty and flagged when

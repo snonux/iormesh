@@ -80,3 +80,44 @@ func TestDecodeFinalRejects(t *testing.T) {
 		t.Errorf("a final record: %v", err)
 	}
 }
+
+// fakeKeys yields keys in order, then repeats from the start forever when
+// loop is set: a walk restarted by a deleted key, at worst every time.
+type fakeKeys struct {
+	keys  []uint64
+	loop  bool
+	i     int
+	steps int
+	cur   []byte
+}
+
+func (f *fakeKeys) Next() bool {
+	if f.i == len(f.keys) {
+		if !f.loop {
+			return false
+		}
+		f.i = 0
+	}
+	f.cur = binary.NativeEndian.AppendUint64(nil, f.keys[f.i])
+	f.i++
+	f.steps++
+	return true
+}
+
+func (f *fakeKeys) Key() []byte { return f.cur }
+func (f *fakeKeys) Err() error  { return nil }
+
+// TestOwnerKeysDedupesAndStops: a restarted walk yields each socket once,
+// and one that restarts forever ends after 4 × max entries steps.
+func TestOwnerKeysDedupesAndStops(t *testing.T) {
+	restarted := &fakeKeys{keys: []uint64{1, 2, 1, 2, 3}}
+	got, err := ownerKeys(restarted, 8)
+	if err != nil || len(got) != 3 || got[0] != 1 || got[1] != 2 || got[2] != 3 {
+		t.Fatalf("ownerKeys = %v, %v; want [1 2 3]", got, err)
+	}
+	endless := &fakeKeys{keys: []uint64{5, 6}, loop: true}
+	got, err = ownerKeys(endless, 4)
+	if err != nil || len(got) != 2 || endless.steps != 16 {
+		t.Fatalf("ownerKeys of an endless walk = %v, %v after %d steps, want 16", got, err, endless.steps)
+	}
+}

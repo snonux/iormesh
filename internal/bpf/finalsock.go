@@ -69,15 +69,37 @@ func (t *Tracer) FinalSockets() ([]*types.TcpStateEvent, error) {
 		zero := uint32(0)
 		return out.GetValue(unsafe.Pointer(&zero))
 	}
-	var keys []uint64
-	it := owners.Iterator()
-	for it.Next() {
-		keys = append(keys, binary.NativeEndian.Uint64(it.Key()))
-	}
-	if err := it.Err(); err != nil {
+	keys, err := ownerKeys(owners.Iterator(), owners.MaxEntries())
+	if err != nil {
 		return nil, fmt.Errorf("iterate %s: %w", sockOwnerMapName, err)
 	}
 	return finalRecords(keys, snap)
+}
+
+// keyIterator is what ownerKeys needs of a libbpfgo map iterator.
+type keyIterator interface {
+	Next() bool
+	Key() []byte
+	Err() error
+}
+
+// ownerKeys collects the socket addresses of sock_owner_map, each once.
+// The targets still run while it walks: when the key the walk stands on
+// is deleted meanwhile (a socket closing), the kernel's next-key lookup
+// starts over from the first key, so keys come again — the set drops the
+// repeats — and a map churning fast enough could restart it forever, so
+// the walk stops after 4 × max entries steps, with what it has.
+func ownerKeys(it keyIterator, maxEntries uint32) ([]uint64, error) {
+	seen := map[uint64]bool{}
+	var keys []uint64
+	for steps := uint64(0); steps < 4*uint64(maxEntries) && it.Next(); steps++ {
+		k := binary.NativeEndian.Uint64(it.Key())
+		if !seen[k] {
+			seen[k] = true
+			keys = append(keys, k)
+		}
+	}
+	return keys, it.Err()
 }
 
 // finalRecords runs snap for each socket address and decodes the records

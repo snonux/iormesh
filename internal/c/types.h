@@ -1052,9 +1052,10 @@ struct syscall_restart_event {
 // may fall inside one update on a slow writer); the merge therefore
 // prefers the locked state-change records and uses a snapshot only when
 // a half has nothing else (internal/federate/half.go). The final snapshot
-// reads unlocked too, the same way; the merge never keys from it, and its
-// counters prove what they prove torn or not, each being one aligned load
-// of a counter that only grows.
+// reads unlocked too, but once, never TCP_SEQ_TORN: the merge never keys
+// from it, uses its counters only when its fields rebuild the half's key
+// (so a torn read costs only that record), and each counter, one aligned
+// load of a value that only grows, proves what it proves torn or not.
 // No implicit padding, 112 bytes.
 #define TCP_STATE_SNAPSHOT 0
 #define TCP_STATE_FINAL 256

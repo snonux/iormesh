@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"os"
+	"syscall"
 	"testing"
 	"time"
 	"unsafe"
@@ -25,9 +26,12 @@ import (
 // TestSockFinalSnapshot: an open connection's two ends each give one final
 // snapshot — TCP_STATE_FINAL, ESTABLISHED, owner pid and fd, the mirrored
 // tuple — whose counters count the exchange (the client's own SYN acked
-// too) and whose fields rebuild one ISN pair on both ends. Once both
-// sockets closed, neither gives one, nor does an address nobody
-// registered.
+// too) and whose fields rebuild one ISN pair on both ends. The program's
+// two guards each refuse a planted owner entry: one naming the live
+// client socket with another inode (a stale entry whose address a new
+// socket took), and one naming a socket a refused connect left in
+// TCP_CLOSE, still held by its fd. Once both sockets closed, neither gives
+// one, nor does an address nobody registered.
 func TestSockFinalSnapshot(t *testing.T) {
 	requireRoot(t)
 	tr := newSockTracer(t)
@@ -66,6 +70,8 @@ func TestSockFinalSnapshot(t *testing.T) {
 		t.Errorf("the final snapshots rebuild %+v (client) and %+v (server)", c, s)
 	}
 
+	tr.checkFinalGuards(t, p, client.Sk)
+
 	p.close()
 	tr.collectUntilClosed(t, p)
 	for _, sk := range []uint64{client.Sk, server.Sk, 1} {
@@ -73,6 +79,56 @@ func TestSockFinalSnapshot(t *testing.T) {
 			t.Errorf("socket %#x gave a final snapshot after it closed: %+v", sk, ev)
 		}
 	}
+}
+
+// checkFinalGuards plants the two owner entries iormesh_sock_final must
+// refuse and requires no record for either. clientSk is p's live client
+// socket; its real entry is put back afterwards.
+func (tr *sockTracer) checkFinalGuards(t *testing.T, p *loopbackPair, clientSk uint64) {
+	t.Helper()
+	pid := uint32(os.Getpid())
+	ino := socketIno(t, p.client)
+	tr.plantOwner(t, clientSk, sockOwnerValue{Pid: pid, Fd: p.clientFd, Ino: ino + 1})
+	if ev, ok := tr.finalSnapshot(t, clientSk); ok {
+		t.Errorf("an owner entry of another inode gave a final snapshot: %+v", ev)
+	}
+	tr.plantOwner(t, clientSk, sockOwnerValue{Pid: pid, Fd: p.clientFd, Ino: ino})
+
+	fd, sk := tr.refusedSocket(t)
+	defer func() { _ = syscall.Close(fd) }()
+	var st syscall.Stat_t
+	if err := syscall.Fstat(fd, &st); err != nil {
+		t.Fatalf("fstat: %v", err)
+	}
+	tr.plantOwner(t, sk, sockOwnerValue{Pid: pid, Fd: int32(fd), Ino: st.Ino})
+	if ev, ok := tr.finalSnapshot(t, sk); ok {
+		t.Errorf("a socket in TCP_CLOSE gave a final snapshot: %+v", ev)
+	}
+}
+
+// refusedSocket connects a new socket to a closed loopback port and
+// returns its fd, still open, and its struct sock address, read from its
+// SYN_SENT -> CLOSE record: a socket in TCP_CLOSE that its fd still holds.
+func (tr *sockTracer) refusedSocket(t *testing.T) (int, uint64) {
+	t.Helper()
+	port := closedPort(t)
+	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatalf("socket: %v", err)
+	}
+	err = syscall.Connect(fd, &syscall.SockaddrInet4{Port: int(port), Addr: [4]byte{127, 0, 0, 1}})
+	if err != syscall.ECONNREFUSED {
+		_ = syscall.Close(fd)
+		t.Fatalf("connect to closed port %d = %v, want ECONNREFUSED", port, err)
+	}
+	ev := tr.waitTCPState(5*time.Second, func(ev *types.TcpStateEvent) bool {
+		return ev.Dport == port && ev.Newstate == tcpClose
+	})
+	if ev == nil {
+		_ = syscall.Close(fd)
+		t.Fatalf("no SYN_SENT -> CLOSE record of the refused connect to port %d", port)
+	}
+	return fd, ev.Sk
 }
 
 // finalPair waits until the final snapshots of p's two ends show the

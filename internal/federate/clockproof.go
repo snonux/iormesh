@@ -35,8 +35,14 @@ import "iormesh/internal/schema"
 //     a later connection reusing the socket reports under the same conn_id
 //     with counters reset low — but its records rebuild another ISN pair,
 //     the half is a KeyConflict (half.go, keyRecords) and fuses with
-//     nothing. A final snapshot never keys a half (isFinal), and the
-//     tracer drops one whose socket file is not the registered one.
+//     nothing. A final snapshot never keys a half (isFinal), so that
+//     argument does not cover it: the tracer drops one whose socket file
+//     is not the registered one, and the proofs use one only when its
+//     fields rebuild the connection's key (keyedCounts) — which also
+//     drops a torn read. No final snapshot exists for a socket whose owner
+//     entry the LRU map evicted (65536 entries) or one still in SYN_SENT
+//     or SYN_RECV at the end (a TFO child accepted before its handshake
+//     completed, say); those ends rely on their CLOSE or the stream check.
 //   - the stream check (streamProof), for the directions the counter proof
 //     leaves (longer ones, or an end whose last records were lost): the
 //     whole direction stayed below 4 GiB by the byte sums of the half's
@@ -54,10 +60,14 @@ import "iormesh/internal/schema"
 //     only the drops of the sessions that reported the half. What limits
 //     the damage: an offset past the sender's sum (sumsCover) or a
 //     bytes_acked above it (ackedCovered) proves untraced bytes and fails
-//     the check — with the final snapshot every end has a bytes_acked
-//     taken after all of its calls, so what can still pass unseen is
-//     untraced bytes no more than the data still unacknowledged at that
-//     reading (none on a connection idle at the end); the receiver's sums
+//     the check — with the final snapshot of a session whose targets
+//     exited every end has a bytes_acked taken after all of its calls, so
+//     what can still pass unseen is untraced bytes no more than the data
+//     still unacknowledged at that reading (none on a connection idle at
+//     the end). A session stopped while its app still ran (duration,
+//     signal) gives its final snapshots no say here, since the app may
+//     have sent after the last kept record; there the residue is as
+//     before. The receiver's sums
 //     are a second witness (long); and any counter record at 4 GiB or more
 //     fails it.
 
@@ -81,8 +91,42 @@ import "iormesh/internal/schema"
 const ackedProofMax = uint64(1) << 29
 
 // counterRec is one tcp_state record's tcp_sock byte counters, at its
-// instant on the host's boot clock.
-type counterRec struct{ boot, acked, received uint64 }
+// instant on the host's boot clock; final is set for the tracer's final
+// snapshot (isFinal).
+type counterRec struct {
+	boot, acked, received uint64
+	final                 *finalRec
+}
+
+// finalRec is what the proofs need to know of a final snapshot beyond its
+// counters: the session that took it (ackedCovered) and its four tcp_sock
+// fields (keyedCounts).
+type finalRec struct {
+	session hostProject
+	f       seqFields
+}
+
+// keyedCounts returns counts without the final snapshots whose fields do
+// not rebuild key, the fused connection's ISN pair, from role's end. A
+// final snapshot never keys its half (isFinal), so unlike a state change it
+// cannot make a stale record a KeyConflict; checked here instead, a final
+// snapshot of another connection — a stale owner entry whose struct sock
+// another socket now uses, a socket without a file the tracer cannot check
+// (sock.c, iormesh_sock_final) with a tuple the correlator cannot
+// contradict — rebuilds another key and proves nothing. So does a torn
+// read: the tracer reads a final snapshot unlocked and once. What remains
+// is another connection that happens to rebuild the same ISN pair, a 2^-64
+// coincidence. The slice is filtered in place: a half fuses into one
+// connection at most.
+func keyedCounts(counts []counterRec, role string, key ISNPair) []counterRec {
+	out := counts[:0]
+	for _, r := range counts {
+		if r.final == nil || keyFrom(role, r.final.f) == key {
+			out = append(out, r)
+		}
+	}
+	return out
+}
 
 // dropRec is one drop event: its instant on the host's boot clock and its
 // reason ("" for ring-buffer or decoder loss). Every kind of drop is
@@ -137,7 +181,7 @@ func (c *collector) direction(conn string, from, to end, iss uint32) []message {
 // hidden a send unless dropTaints says otherwise.
 func (c *collector) streamProof(from, to end, iss uint32) bool {
 	if long(&from.acc.timing) || long(&to.acc.timing) ||
-		!sumsCover(&from.acc.timing, &to.acc.timing, iss) || !ackedCovered(&from.acc.timing) {
+		!sumsCover(&from.acc.timing, &to.acc.timing, iss) || !c.ackedCovered(&from.acc.timing) {
 		return false
 	}
 	for project := range from.acc.projects {
@@ -179,13 +223,36 @@ const ackedSlack = 2
 // counting more than the sum plus ackedSlack proves bytes the sum never
 // saw, however they were sent: an untraced sendmsg, splice or io_uring
 // call, or a holder the trace cannot tie to the connection.
-func ackedCovered(from *timing) bool {
+//
+// A final snapshot is that witness only when its session ended because
+// its targets exited (exitedOnly): a session stopped by its duration, a
+// signal, the disk limit or an error takes the snapshot while the app may
+// still send, after the last records the trace kept — the records still
+// in flight at the stop are discarded with the tracer — so its bytes_acked
+// may count bytes the trace never had a chance to see. Its counters still
+// feed the counter proof, which needs no sums.
+func (c *collector) ackedCovered(from *timing) bool {
 	for _, r := range from.counts {
+		if r.final != nil && !c.exitedOnly(r.final.session) {
+			continue
+		}
 		if r.acked > from.sent+ackedSlack {
 			return false
 		}
 	}
 	return true
+}
+
+// exitedOnly reports whether every session of k that wrote an end event
+// ended because its targets exited — at least one did.
+func (c *collector) exitedOnly(k hostProject) bool {
+	ends := c.ends[k]
+	for _, reason := range ends {
+		if reason != schema.EndTargetsExited {
+			return false
+		}
+	}
+	return len(ends) > 0
 }
 
 // dropTaints reports whether drop d, on the sending end's host, may have

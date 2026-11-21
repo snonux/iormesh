@@ -109,6 +109,13 @@ func (t *timing) state(ev *schema.Event) {
 	if ev.Args.BytesAcked != nil && ev.Args.BytesReceived != nil {
 		r := counterRec{boot: ev.BootNS, acked: *ev.Args.BytesAcked,
 			received: *ev.Args.BytesReceived}
+		if isFinal(ev) {
+			// SndUna and RcvNxt come with the counters (Validate's all
+			// four): the key check of keyedCounts needs them.
+			r.final = &finalRec{session: hostProject{ev.HostID, ev.Project},
+				f: seqFields{SndUna: *ev.Args.SndUna, RcvNxt: *ev.Args.RcvNxt,
+					BytesAcked: r.acked, BytesReceived: r.received}}
+		}
 		t.maxCount = max(t.maxCount, r.acked, r.received)
 		t.counts = append(t.counts, r)
 	}
@@ -158,6 +165,8 @@ func (c *collector) messages(conn Conn) []message {
 	if m, ok := handshake(conn, &cl.timing, &sv.timing); ok {
 		out = append(out, m)
 	}
+	cl.timing.counts = keyedCounts(cl.timing.counts, RoleClient, conn.Key)
+	sv.timing.counts = keyedCounts(sv.timing.counts, RoleServer, conn.Key)
 	client := end{host: conn.Client.Host, acc: cl, client: true}
 	server := end{host: conn.Server.Host, acc: sv}
 	out = append(out, c.direction(conn.ID, client, server, conn.Key.Client)...)

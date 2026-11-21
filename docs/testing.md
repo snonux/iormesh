@@ -1412,6 +1412,20 @@ static test binary as in nf4, staged under `/root/sf4` and
 removed). Mutations caught: no counter read (all zero) and the
 owner's inode check inverted (no record).
 
+The sf4 review added the two guards' own cases to the test: an
+owner entry planted for the live client socket with its inode plus
+one, and one for a socket a refused connect left in `TCP_CLOSE`
+with its fd still open, must give no record. Deleting the inode
+check, or the `TCP_CLOSE` skip, now fails the test on 7.2. The
+final snapshot now reads the four fields once instead of
+re-reading them until two reads agree. The merge uses its counters
+only when they rebuild the connection's key, which drops a torn
+read as well as another connection's record (`keyedCounts`).
+`ackedCovered` takes a final snapshot only from a session whose
+targets exited (`TestClockAckedPastSum`'s duration, stop and
+no-end cases). The walk over `sock_owner_map` takes each key once
+and is capped (`TestOwnerKeysDedupesAndStops`).
+
 End to end, `iormesh run -pid` traced a Python process that opens
 a loopback connection after the attach, exchanges 5 and 7 bytes
 and keeps it open. On both kernels the trace ends with two

@@ -34,6 +34,13 @@ func (t *trace) drop(pid uint32, reason string, wall uint64) {
 	}
 }
 
+// end appends the session's end event with reason at wall.
+func (t *trace) end(reason string, wall uint64) {
+	t.event(0, schema.KindEnd, schema.NoFD, 0, wall, "", schema.Args{EndReason: ptr(reason)})
+	ev := &t.events[len(t.events)-1]
+	ev.PIDInc, ev.Comm = 0, ""
+}
+
 // counters appends a tcp_state record of conv c's client (FIN_WAIT1) or
 // server (CLOSE_WAIT) end at true time at, carrying tcp_sock counters
 // that rebuild c's key.
@@ -286,8 +293,9 @@ func (c *conv) final(client bool, at, acked, received uint64, skew uint32) {
 // ended has no CLOSE after its data, only the tracer's final snapshots;
 // they prove every message by the counter proof although drops on both
 // hosts fail the stream check both ways (task sf4). A snapshot whose
-// fields rebuild another key — torn, as an unlocked read may be — keys
-// nothing and leaves the halves fusable, its counters still proving.
+// fields rebuild another key — torn, as an unlocked read may be, or
+// another connection's — keys nothing and leaves the halves fusable, but
+// proves nothing either (keyedCounts).
 func TestClockFinalSnapshot(t *testing.T) {
 	late := t0 + sec
 	for _, tc := range []struct {
@@ -299,7 +307,7 @@ func TestClockFinalSnapshot(t *testing.T) {
 	}{
 		{"no snapshot", 0, false, 1, false},
 		{"final snapshots of both ends", 0, true, pingMsgs, true},
-		{"torn final snapshots", 7, true, pingMsgs, true},
+		{"final snapshots rebuilding another key", 7, true, 1, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, b, c := pingConv()
@@ -331,7 +339,8 @@ func TestFinalSnapshotDatesNothing(t *testing.T) {
 	if tm.synSent.ok || tm.afterSYN.ok {
 		t.Fatalf("a final snapshot dated the handshake: %+v %+v", tm.synSent, tm.afterSYN)
 	}
-	if len(tm.counts) != 1 || tm.counts[0] != (counterRec{boot: 50, acked: 3, received: 4}) {
+	if len(tm.counts) != 1 || tm.counts[0].boot != 50 || tm.counts[0].acked != 3 ||
+		tm.counts[0].received != 4 || tm.counts[0].final == nil {
 		t.Fatalf("counts %+v, want the snapshot's", tm.counts)
 	}
 }
@@ -341,22 +350,40 @@ func TestFinalSnapshotDatesNothing(t *testing.T) {
 // sendmsg, say — so its direction fails the stream check. The server has
 // no counter record after the data, so the counter proof cannot take its
 // receives either: the client→server data goes, the handshake and the
-// responses stay.
+// responses stay. A final snapshot is that witness only when its session
+// ended with its targets: after a stop by duration or signal the app may
+// have sent past the last kept record, so it is left out.
 func TestClockAckedPastSum(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		acked uint64
-		msgs  int
+		name   string
+		acked  uint64
+		reason string
+		msgs   int
 	}{
-		{"acked within the sum and its SYN and FIN", 60 + ackedSlack, pingMsgs},
-		{"acked past the sum", 60 + ackedSlack + 1, 4},
+		{"acked within the sum and its SYN and FIN", 60 + ackedSlack, schema.EndTargetsExited, pingMsgs},
+		{"acked past the sum", 60 + ackedSlack + 1, schema.EndTargetsExited, 4},
+		{"acked past the sum, session stopped by duration", 60 + ackedSlack + 1, schema.EndDuration, pingMsgs},
+		{"acked past the sum, session stopped by a signal", 60 + ackedSlack + 1, schema.EndStop, pingMsgs},
+		{"acked past the sum, no end event", 60 + ackedSlack + 1, "", pingMsgs},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, b, c := pingConv()
 			c.final(true, t0+sec, tc.acked, 900, 0)
+			if tc.reason != "" {
+				a.end(tc.reason, t0+2*sec)
+			}
 			wantBound(t, mergeTraces(t, Options{}, a, b), tc.msgs, true)
 		})
 	}
+}
+
+// TestClockAckedPastSumByClose: a CLOSE record is the witness whatever
+// the session's end: the kernel wrote it while the session still traced.
+func TestClockAckedPastSumByClose(t *testing.T) {
+	a, b, c := pingConv()
+	c.counters(true, t0+sec, 60+ackedSlack+1, 900)
+	a.end(schema.EndDuration, t0+2*sec)
+	wantBound(t, mergeTraces(t, Options{}, a, b), 4, true)
 }
 
 // TestClockLB4Run2 replays the M4-10 failure of task lb4's second

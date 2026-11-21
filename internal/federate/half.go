@@ -73,6 +73,10 @@ type collector struct {
 	// laps (clockproof.go) may undercount — for the connections a drop
 	// could have touched (dropTaints).
 	drops map[hostProject][]dropRec
+	// ends holds every end event's reason, by the session that wrote
+	// it: whether a final snapshot of that session followed the targets'
+	// last calls (ackedCovered).
+	ends map[hostProject][]string
 }
 
 // hostProject names one host's sessions of one project: a drop is the
@@ -81,7 +85,8 @@ type collector struct {
 type hostProject struct{ Host, Project string }
 
 func newCollector() *collector {
-	return &collector{acc: map[LocalConn]*halfAcc{}, drops: map[hostProject][]dropRec{}}
+	return &collector{acc: map[LocalConn]*halfAcc{}, drops: map[hostProject][]dropRec{},
+		ends: map[hostProject][]string{}}
 }
 
 // Halves folds events — of any number of hosts, in any order — into the
@@ -106,6 +111,10 @@ func (c *collector) add(ev *schema.Event) {
 	if ev.Event == schema.KindDrop {
 		k := hostProject{ev.HostID, ev.Project}
 		c.drops[k] = append(c.drops[k], newDropRec(ev))
+	}
+	if ev.Event == schema.KindEnd && ev.Args.EndReason != nil {
+		k := hostProject{ev.HostID, ev.Project}
+		c.ends[k] = append(c.ends[k], *ev.Args.EndReason)
 	}
 	if ev.ConnID == "" {
 		return

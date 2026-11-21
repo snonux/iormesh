@@ -17,10 +17,14 @@ which were provisional until then. M4 appended the `fork` and
 appended, and appended fields are optional, so an older reader never
 sees a changed meaning. Enum values (`drop_reason`, `end_reason`, …)
 are appended the same way as event kinds, so a reader should pass an
-unknown value through. The strict readers here are the exception for
-kinds: `schema.DecodeEvent` and the segment reader reject an event
-kind they do not know (see "Readers are strict"), so a trace with
-the M4 kinds needs a reader of this version. One meaning did narrow:
+unknown value through. The strict readers here are the exception:
+`schema.DecodeEvent` and the segment reader reject an event kind
+they do not know, and the NDJSON readers (`DecodeEvent`,
+`ReadNDJSON`) reject an unknown key too — an appended field
+included (see "Readers are strict"). So a trace with the M4 kinds
+or fields (`args.sock_snapshot`, say) needs a reader of this
+version; a tolerant reader of its own passes them over. One meaning
+did narrow:
 task vd4 moved skipped program runs out of a plain `drop`'s `args.lost`
 into their own `skipped_runs` drops (see `drop` below). M3
 appended the optional `otel` object (task 4b4, "OpenTelemetry span
