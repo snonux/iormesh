@@ -2191,8 +2191,13 @@ Later phase — plain Linux servers (M4) come first.
   `emptyDir` is the pod's, so the new tracer's `iormesh ready`
   serves the segments its predecessors published, collected into
   the same `pod-<uid>` directory: one host (task 7f4), one
-  session per tracer. Fake-kubectl tested; a kind run of a real
-  restart is pending.
+  session per tracer. Fake-kubectl tested, and checked on kind
+  (2026-11-21, `mage k8sDebugRestart`). The tracer ended with
+  exit 137 when the app container's init was SIGKILLed. Deploy
+  started `iormesh-2`, and a rerun during its attach left it
+  alone with the same session. Collect brought both sessions'
+  segments into one `pod-<uid>`
+  ([testing.md](docs/testing.md#debug-tracer-replacement-on-kind-task-ah4-2026-11-21)).
 
 ## Decisions
 

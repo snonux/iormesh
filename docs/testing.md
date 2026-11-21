@@ -2559,8 +2559,8 @@ Task ah4 takes the debug-mode finding: PLAN.md M7 now recommends
 the sidecar for pods that restart, and `iormeshctl deploy` replaces
 an ended debug tracer with `iormesh-2` (up to `iormesh-8`), whose
 `iormesh ready` serves the stranded sealed segments. This is checked
-against the fake kubectl (see "Fake-kubectl tests" below, task ah4);
-a kind run of a real restart is still pending.
+against the fake kubectl (the "Debug tracers after an app container
+restart" item above) and on kind, in the next section.
 
 **Sidecar mode: no break.** With `shareProcessNamespace` the pause
 container is the PID namespace's init, so the tracer kept running
@@ -2653,6 +2653,60 @@ exactly these permissions; the permissive module was removed and
 the dontaudit rules restored (`semodule -B`) before runs 3 to 5.
 Not run: the type at `s0` (MCS refuses the Java attach there,
 PLAN.md #13), a multi-node cluster, a pod without a pinned level.
+
+#### Debug tracer replacement on kind (task ah4, 2026-11-21)
+
+`mage k8sDebugRestart` runs `TestKindDebugRestart`
+(`integrationtests/kind/restart_test.go`) on the laptop's kind
+cluster. The setup, images and teardown are `mage
+k8sAcceptance`'s, and the VMs were not used. The test uses the
+tcp scenario's prepared `server` Deployment, whose app container
+runs `sleep infinity`, in namespace `iormesh-ah4`. Its registry
+entry is a debug tracer with the Java agent (`-spool`, `-agent`).
+The steps:
+
+1. A gated `file-basic` JVM is started, then `iormeshctl deploy`.
+   The agent joins the JVM, which is released and ends; the test
+   then waits 75 s so the session publishes a segment.
+2. The app container's init is SIGKILLed from the kind node, its
+   pid taken from `crictl inspect`.
+3. The ephemeral `iormesh` must end. A collect must fail with
+   "session ended" and point to `iormeshctl deploy`.
+4. Another gated JVM is started, then `deploy` again. While that
+   deploy waits for the attach and `iormesh-2` already runs, a
+   second `deploy` reruns (N1).
+5. The agent joins the new JVM; after the run and another 75 s,
+   `collect` runs.
+
+Result: passed (181 s).
+
+- `iormesh` ended with `Error, exit code 137` as soon as the app
+  container's init died. The restart count read at that moment
+  was still 0; the test then waited for the pod to be `Ready`
+  again with the restarted container.
+- The collect at that point failed with the deploy advice.
+- The replacing deploy took 10.9 s and printed "earlier tracer
+  ended (its unsealed segment is lost, its published ones stay
+  for collect); started tracer iormesh-2, … attached, session
+  11870b83". The agent joined the JVM running then.
+- The N1 rerun started 1.7 s in, once `iormesh-2` ran and 9.2 s
+  before the replacing deploy returned. So its attach probes
+  read the killed tracer's `dead` `state.json`. It left
+  `iormesh-2` alone and reported "tracer iormesh-2 already
+  running the pinned image, attached, session 11870b83", the
+  same session. Before the N1 fix it would have failed at once
+  with "died without its end".
+- The final collect, which execs into `iormesh-2`, brought 4
+  segment files of the killed session `869f05bb` and 4 of
+  `11870b83` into the one `pod-<uid>` directory.
+
+Teardown: the cluster, the registry and its volume, the run's two
+images and the two base images it pulled (`kindest/node`,
+`registry`) were removed. The disk guard passed with 23 GiB free
+(minimum 20). Docker was started for the run and stopped after.
+`docker images -a`, `docker volume ls` and `docker ps -a` matched
+the state before. The `kind` network predates the run (created
+11:37 that day) and was left alone.
 
 ## Performance baselines
 
