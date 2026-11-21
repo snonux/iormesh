@@ -91,14 +91,23 @@ func newSockTable(window uint64) *sockTable {
 }
 
 // observe applies one tcp_state record to its socket and returns it, and
-// whether this was the socket's first record.
+// whether this was the first record at the socket's address — the one
+// that binds the owner's fd (procState.sockGen).
+//
+// A record whose 4-tuple contradicts the socket's starts a new socket at
+// the same address (otherLife): the old one's TCP_CLOSE record was lost,
+// and the address was reused. That record is not reported as a first one:
+// an accept snapshot binds its fd anyway, and any other record of the new
+// life that comes before it went out under the stale owner's pid and fd
+// (sock.c), which must not be bound to the new socket.
 func (t *sockTable) observe(r *types.TcpStateEvent) (*sockState, bool) {
+	local, remote := tuple(r)
 	s, ok := t.bySk[r.Sk]
-	if !ok {
+	first := !ok
+	if !ok || s.otherLife(local, remote) {
 		s = &sockState{firstSeen: r.Time}
 		t.bySk[r.Sk] = s
 	}
-	local, remote := tuple(r)
 	if local.IsValid() {
 		s.local, s.remote = local, remote
 	}
@@ -111,7 +120,28 @@ func (t *sockTable) observe(r *types.TcpStateEvent) (*sockState, bool) {
 		// freed; events already queued keep their pointer.
 		delete(t.bySk, r.Sk)
 	}
-	return s, !ok
+	return s, first
+}
+
+// otherLife reports whether a record with this 4-tuple belongs to another
+// socket than s, one at the same struct sock address: the tracer's
+// userspace backstop (sock.c, "Accepted residual risk") for a lost
+// TCP_CLOSE run. Losing that record keeps s in bySk, and the next socket
+// the kernel allocates at the address — an accepted child, typically —
+// would otherwise report under s and its conn id: one conn mixing two
+// connections, which the merge can only call a key conflict (task qf4,
+// M4-9 on Rocky 9.9). A socket's 4-tuple never changes once both ports
+// are known, so two complete tuples that differ are two lives. Records
+// before the port choice (CLOSE -> SYN_SENT carries no local port) and a
+// listener's (no remote port) prove nothing either way. The same tuple
+// reused right away stays undetected here; the ISN pair then differs, and
+// the merge still refuses to fuse the mixed conn.
+func (s *sockState) otherLife(local, remote netip.AddrPort) bool {
+	complete := func(l, r netip.AddrPort) bool {
+		return l.IsValid() && r.IsValid() && l.Port() != 0 && r.Port() != 0
+	}
+	return complete(s.local, s.remote) && complete(local, remote) &&
+		(local != s.local || remote != s.remote)
 }
 
 // establishes reports whether r shows the connection established: the

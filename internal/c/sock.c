@@ -420,9 +420,12 @@ static __always_inline void iormesh_read_ctx_tuple(struct tcp_state_event *ev,
 // stale entry in place for the child's SYN_RECV -> ESTABLISHED, which runs
 // before accept() gives the child a file, so neither proof catches it and
 // that one record goes out under the old owner (accept() then re-registers
-// the child, or its next transition with a file drops the entry). A
-// userspace backstop could start a new conn when a tcp_state record's
-// 4-tuple contradicts the conn's earlier records.
+// the child, or its next transition with a file drops the entry). The
+// correlator's userspace backstop (internal/correlate, sockState.otherLife)
+// starts a new socket when a record's 4-tuple contradicts the socket's, so
+// that record and the accepted child's later ones get a conn of their own;
+// it also catches the lone lost CLOSE whose next child at the address the
+// tracer registers by its accept (task qf4).
 //
 // The reads are probe reads: sk_socket may be cleared by close() on another
 // CPU meanwhile, which at worst makes one record unverifiable.

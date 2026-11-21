@@ -260,3 +260,99 @@ func TestRefusedConnectsStayApart(t *testing.T) {
 		t.Fatalf("two refused connects share conn_id %q", sink.events[0].ConnID)
 	}
 }
+
+// TestLostCloseThenAddressReuse: a server end's TCP_CLOSE record is lost
+// (a skipped run), and the next child the kernel allocates at the same
+// struct sock address is accepted on the same fd number. Its 4-tuple
+// contradicts the old socket's, so it is a new socket with a conn id of
+// its own, not a second connection under the old one (task qf4: M4-9's
+// inventory end on Rocky 9.9, whose mixed conn the merge could only call
+// a key conflict). A record of the old life with the old tuple stays on
+// the old conn.
+func TestLostCloseThenAddressReuse(t *testing.T) {
+	const peerA, peerB, local = "10.0.0.2:41000", "10.0.0.3:42000", "10.0.0.1:8080"
+	c, sink := newTest(t)
+	now := uint64(100)
+	server := feeder{t, c, 200, 201, &now}
+	server.handle(tcp(server.tick(), 0xB, 200, 7, types.TCP_STATE_SNAPSHOT, tcpEstablished, local, peerA))
+	server.accept4(0, 7)
+	server.read(7, 5)
+	server.handle(tcp(server.tick(), 0xB, 200, 7, tcpEstablished, 8, local, peerA)) // CLOSE_WAIT
+	server.close(7)
+	server.handle(tcp(server.tick(), 0xB, 200, 7, 8, 9, local, peerA)) // LAST_ACK; its CLOSE is lost
+	server.handle(tcp(server.tick(), 0xB, 200, 7, types.TCP_STATE_SNAPSHOT, tcpEstablished, local, peerB))
+	server.accept4(0, 7)
+	server.read(7, 6)
+	server.handle(tcp(server.tick(), 0xB, 200, 7, tcpEstablished, tcpClose, local, peerB))
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	states, reads := byKind(sink.events, schema.KindTCPState), byKind(sink.events, schema.KindRead)
+	if len(states) != 5 || len(reads) != 2 {
+		t.Fatalf("got %d tcp_state and %d read events, want 5 and 2", len(states), len(reads))
+	}
+	first, second := states[0].ConnID, states[3].ConnID
+	if first == "" || second == "" || first == second {
+		t.Fatalf("conn ids %q and %q, want two distinct ones", first, second)
+	}
+	for i, want := range []string{first, first, first, second, second} {
+		if states[i].ConnID != want {
+			t.Errorf("tcp_state %d (%s) on %q, want %q", i, *states[i].Args.SockState, states[i].ConnID, want)
+		}
+	}
+	if reads[0].ConnID != first || reads[1].ConnID != second {
+		t.Errorf("reads on %q and %q, want %q and %q", reads[0].ConnID, reads[1].ConnID, first, second)
+	}
+	if states[3].FDGen != 2 || states[4].FDGen != 2 {
+		t.Errorf("new life's records on fd gens %d and %d, want the second accept's 2",
+			states[3].FDGen, states[4].FDGen)
+	}
+}
+
+// TestStaleRecordOfNewLifeKeepsFdBinding: the new life's first record is a
+// state change that went out under the stale owner (sock.c's residual
+// risk: SYN_RECV -> ESTABLISHED before accept). It starts a new socket but
+// binds nothing: the old fd keeps its connection.
+func TestStaleRecordOfNewLifeKeepsFdBinding(t *testing.T) {
+	const peerA, peerB, local = "10.0.0.2:41000", "10.0.0.3:42000", "10.0.0.1:8080"
+	c, sink := newTest(t)
+	now := uint64(100)
+	server := feeder{t, c, 200, 201, &now}
+	server.handle(tcp(server.tick(), 0xB, 200, 7, types.TCP_STATE_SNAPSHOT, tcpEstablished, local, peerA))
+	server.accept4(0, 7)
+	server.handle(tcp(server.tick(), 0xB, 200, 7, tcpSynRecv, tcpEstablished, local, peerB))
+	server.read(7, 5)
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	states, reads := byKind(sink.events, schema.KindTCPState), byKind(sink.events, schema.KindRead)
+	if len(states) != 2 || len(reads) != 1 {
+		t.Fatalf("got %d tcp_state and %d read events, want 2 and 1", len(states), len(reads))
+	}
+	if states[1].ConnID == states[0].ConnID {
+		t.Errorf("stale record on the old conn %q, want a new one", states[0].ConnID)
+	}
+	if reads[0].ConnID != states[0].ConnID {
+		t.Errorf("read on %q, want the old conn %q", reads[0].ConnID, states[0].ConnID)
+	}
+}
+
+// TestIncompleteTupleSameLife: a record without a remote port (a
+// listener's, or one read before the peer was set) proves no other life,
+// so it stays on the socket's conn.
+func TestIncompleteTupleSameLife(t *testing.T) {
+	const peer, local, unset = "10.0.0.2:41000", "10.0.0.1:8080", "0.0.0.0:0"
+	c, sink := newTest(t)
+	now := uint64(100)
+	server := feeder{t, c, 200, 201, &now}
+	server.handle(tcp(server.tick(), 0xB, 200, 7, types.TCP_STATE_SNAPSHOT, tcpEstablished, local, peer))
+	server.accept4(0, 7)
+	server.handle(tcp(server.tick(), 0xB, 200, 7, tcpEstablished, tcpClose, local, unset))
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	states := byKind(sink.events, schema.KindTCPState)
+	if len(states) != 2 || states[0].ConnID == "" || states[1].ConnID != states[0].ConnID {
+		t.Fatalf("tcp_state events %+v, want two on one conn", states)
+	}
+}
