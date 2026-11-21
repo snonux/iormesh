@@ -1348,12 +1348,52 @@ point.
 | convergence honesty | PASS — the store's merge after round 2 keeps round 1's gateway → orders end unresolved, and round 1's server halves of orders' untraced calls |
 | a peer outside the allowlist is listed, never contacted | PASS — with 10.20.0.140/32 alone, the peer is `not_allowed`, `expand -apply` prints "nothing to enroll", the registry's hash is unchanged, and iom2's sshd logged no login meanwhile |
 | a cyclic topology terminates | PASS — rounds 2 and 3 (`-hops 1`, `-hops 5`) propose nothing: orders' calls back to iom1 reach a registered host |
-| a hop limit of 1 stops at the first ring | NOT RUN — needs a hop-2 peer, a third host reachable only through a service on iom2; every peer of iom2 is iom1 (task wg4) |
+| a hop limit of 1 stops at the first ring | NOT RUN — needs a hop-2 peer, a third host reachable only through a service on iom2; every peer of iom2 is iom1 (run by task wg4 below) |
 
-M6 stays "passes on the rig" until wg4's host shows the hop
-limit. Afterwards both hosts were removed with `rm` (every
-session collected), bootstrapped again with the same build, and
-the ports closed.
+Afterwards both hosts were removed with `rm` (every session
+collected), bootstrapped again with the same build, and the
+ports closed.
+
+### M6 on three Rocky 9.9 hosts (task wg4, 2026-11-21)
+
+The hop limit, and every criterion again, with a third VM, iom3
+(10.20.0.142, same kernel), as the hop-2 peer: the build of
+5eedf77 (3f4's, signed; HEAD's code when the run started), its
+`iormeshctl`, `HOME` a scratch directory (`~/.iormesh-m6-wg4`),
+the registry and the round procedure of 3f4's above, with
+billing moved to iom3:
+
+- iom1: the gateway and inventory (`--bind 10.20.0.140 --port
+  18215`), with the agent; the only registered host.
+- iom2: orders (`--bind 10.20.0.141 --port 18216`, calling
+  inventory on iom1 and billing on iom3), without it.
+- iom3: billing (`--bind 10.20.0.142 --port 18214`), without it;
+  its certificate copied to iom2.
+
+The gateway never calls billing, so billing is two hops from
+iom1 and shows only once iom2 is traced. iom3's firewall admits
+18214 from iom2 alone (`firewall-cmd --add-rich-rule='rule
+family=ipv4 source address=10.20.0.141/32 port port=18214
+protocol=tcp accept'`, runtime only): from iom1 a connect gets
+"No route to host", from iom2 it opens. 18215 on iom1 and 18216
+on iom2 are open as before. The allowlist holds all three /32s.
+Round 3 deploys iom2 again (`deploy -restart 10.20.0.141`, bound
+to the new orders) and then runs `expand -hops 2 -apply` once
+orders listens.
+
+| Criterion | Result |
+|---|---|
+| only the gateway host enrolled, rounds discover and deploy every service host | PASS — round 1 proposes exactly `10.20.0.141:18216 hop 1` (one inbound skip aside); round 2's `-apply` enrolls and deploys iom2 at hop 1, bound to orders' pid; round 3's `expand -hops 2 -apply` proposes exactly `10.20.0.142:18214 hop 2` via iom2's `java`, enrolls `10.20.0.142` (`hop: 2`, `listen_port: 18214`) and starts the session on iom3 over SSH, bound to billing's pid |
+| a hop limit of 1 stops at the first ring | PASS — after round 2, `expand -hops 1` lists `10.20.0.142:18214 hop_limit` ("hop 2, limit 1", via 10.20.0.141 java); `-apply` prints "nothing to enroll" and the registry's hash is unchanged |
+| a peer outside the allowlist is listed, never contacted | PASS — with 10.20.0.142/32 dropped from the allowlist, `expand -hops 2` lists billing `not_allowed`, `-apply` enrolls nothing, the hash is unchanged. iom3's sshd logged no login from the end of round 2's own steps (16:38:29) to the check (16:40:01), across `collect`, both `-hops 1` and both narrowed `-hops 2` runs |
+| after the scenario re-runs, the merge equals the one of all hosts added by hand | PASS — round 3's own sessions merge to 4 edges fused, tcp 3 fused, 0 unresolved, the three cross-host hops (iom1 → iom2, iom2 → iom1, iom2 → iom3) among them; a by-hand run (`~/.iormesh-m6-wg4h`: iom1 plus `add -project edge -listen-port 18216 10.20.0.141` and `-listen-port 18214 10.20.0.142`) builds the same, and both graphs' connection shapes are identical. Each side has one one-ended UDP socket on iom2 and on iom3, DNS to 10.20.0.1:53. Orders is `tls`, inventory `plain`; billing's TLS shows `-` in both, as neither end of that hop runs the agent |
+| convergence honesty | PASS — the store's merge over all three rounds keeps round 1's gateway → orders end and round 2's orders → billing end unresolved (`mixed`, 1 of 3 and 1 of 2 connections), and round 1's server half of orders' untraced call to inventory |
+| a cyclic topology terminates | PASS — orders → inventory goes back to iom1, a registered host; after round 3, `expand -hops 2`, `-hops 5` and `-hops 5 -apply` propose nothing (both peers `enrolled`) |
+
+M6 is accepted on this run (PLAN.md M6). All three VMs share one
+physical host. Afterwards every host was removed with `rm` from
+both scratch homes (every session collected), bootstrapped again
+with the same build, and the ports and the rich rule removed.
 
 ## Final socket snapshot (task sf4, 2026-11-21)
 

@@ -1789,6 +1789,26 @@ operator's SSH key from the controller.
   hops fused. A hop limit of 1 stopping at the first ring needs
   a third host, the hop-2 peer two hosts cannot provide (task
   wg4) ([docs/testing.md](docs/testing.md) "M6 on Rocky 9.9").
+  Status (2026-11-21, task wg4): **accepted** — every criterion
+  passes on three Rocky 9.9 hosts (VMs iom1, iom2, iom3, build
+  of 5eedf77), M4 being accepted and 3f4's re-check run
+  (Sequencing relaxation). iom1 (gateway, inventory) alone
+  enrolled, orders on iom2, billing on iom3, which a firewall
+  rule lets only iom2 reach: round 1 proposed iom2's orders port
+  at hop 1 and round 2's `-apply` deployed it; billing then
+  surfaced as hop 2 — `hop_limit` at `-hops 1` and `not_allowed`
+  with iom3 off the allowlist, `-apply` enrolling nothing and
+  iom3 seeing no login either way — and at `-hops 2` `-apply`
+  enrolled and deployed iom3 over SSH, bound to billing's port.
+  Later rounds propose nothing (orders → inventory returns to a
+  registered host); round 3's merge, all three cross-host hops
+  fused, has the same network shape as a by-hand build of all
+  three hosts; the store keeps earlier rounds' one-sided ends
+  unresolved. Limits of the evidence: the three VMs share one
+  physical host, and it is one run. Owner-delegated advisor
+  decision; the run was made by an agent on hosts the owner
+  provided for it ([docs/testing.md](docs/testing.md) "M6 on
+  three Rocky 9.9 hosts").
 
 ### M7 — Kubernetes: sidecar & debug-container deployment
 
