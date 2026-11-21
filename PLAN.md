@@ -2668,7 +2668,8 @@ here only as placeholders.
 
 - **#13 K8s privilege profile** — *Provisional (2026-11-20):*
   the minimal capability set, `privileged: true` the documented
-  fallback. The tracer container runs as uid 0 with
+  fallback; the tracer container — never the pod — runs as
+  SELinux type `spc_t` (task 5h4, below). The tracer container runs as uid 0 with
   `allowPrivilegeEscalation: false` in a pod with `hostUsers:
   true` (a user-namespaced pod's capabilities do not reach BPF
   or the host kernel's tracing), drops ALL and adds:
@@ -2747,8 +2748,8 @@ here only as placeholders.
   table). Fallback to `privileged` (which must not set
   `allowPrivilegeEscalation: false`; the API refuses the pair):
   a kernel before 5.8; a runtime that rejects the newer
-  capability names; an SELinux-enforcing node whose container
-  type is denied `bpf`; an AppArmor or seccomp default that
+  capability names; an SELinux-enforcing node whose policy has
+  no `spc_t` (or denies it what the tracer needs); an AppArmor or seccomp default that
   cannot be relaxed per container; a node-level debug pod.
   Privileged does not help under kernel lockdown
   (confidentiality): the tracer's kernel reads are refused
@@ -2786,7 +2787,25 @@ here only as placeholders.
   `spc_t` (unconfined in SELinux, yet keeping the capability
   set, seccomp and no privilege escalation), and an iormesh
   container type shipped as a policy module with just the
-  permissions above — owner to pick (task 5h4).
+  permissions above.
+  *Provisional (2026-11-21, task 5h4, owner-delegated advisor
+  decision):* `spc_t`. The minimal profile's tracer container
+  carries `securityContext.seLinuxOptions: {type: spc_t}` —
+  container level only, never the pod's securityContext, so the
+  app containers stay `container_t` — beside the seven
+  capabilities, `RuntimeDefault` and `allowPrivilegeEscalation:
+  false`, all unchanged. It is in `kubectl debug --custom`'s
+  spec and the sidecar patch (`deploy/`); the prepare patch and
+  the privileged profile (already `spc_t`) are unchanged. On a
+  node without SELinux the field is inert. `iormeshctl deploy
+  -selinux-type`, or `selinux_type` in the registry's `k8s:` or
+  a pod entry (#18's precedence), picks another type; an empty
+  one omits the field; a value must match `[a-z0-9_]+`. An
+  `iormesh_container_t` policy module with exactly the
+  permissions above follows (task 7h4, not gating); `privileged`
+  stays the last fallback. Owner to confirm: `spc_t` as the
+  fleet default, whether a policy RPM is viable, OpenShift (its
+  SCCs) out of scope.
 - **#14 K8s Java attach** — *Provisional (2026-11-20):* live
   attach through the shared process namespace is the k8s
   default; `-javaagent` via `JAVA_TOOL_OPTIONS` stays the
@@ -2894,7 +2913,8 @@ here only as placeholders.
   targets live in the registry beside `servers:`, as a `k8s:`
   section of defaults and clusters plus a `pods:` list whose
   entries carry the same `projects:` as a server; flags
-  override per run (`-context`, `-namespace`, `-image`). Order:
+  override per run (`-context`, `-namespace`, `-image`,
+  `-selinux-type`, task 5h4). Order:
   flag, then pod entry, then cluster, then the built-in default
   image (ours, pinned by digest). Every kubectl call passes
   `--context` explicitly — the registry, never the kubeconfig's

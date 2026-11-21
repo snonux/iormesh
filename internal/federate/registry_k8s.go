@@ -31,10 +31,14 @@ const (
 // K8s is the k8s: section: defaults for every pod entry, and the
 // clusters pod entries name.
 type K8s struct {
-	Image    string    `yaml:"image,omitempty"`
-	Mode     string    `yaml:"mode,omitempty"`
-	Profile  string    `yaml:"profile,omitempty"`
-	Clusters []Cluster `yaml:"clusters"`
+	Image   string `yaml:"image,omitempty"`
+	Mode    string `yaml:"mode,omitempty"`
+	Profile string `yaml:"profile,omitempty"`
+	// SELinuxType is the minimal profile's seLinuxOptions.type (decision
+	// #13, task 5h4; internal/k8s DefaultSELinuxType when unset). A
+	// pointer, since an explicit "" is a choice: omit seLinuxOptions.
+	SELinuxType *string   `yaml:"selinux_type,omitempty"`
+	Clusters    []Cluster `yaml:"clusters"`
 }
 
 // Cluster is a label for one kubeconfig context and its default
@@ -47,19 +51,22 @@ type Cluster struct {
 
 // Pod is one pods: entry: a pod by name, or the running pods a label
 // selector picks, in a cluster's namespace; the app container kubectl
-// debug targets; optional image, mode and profile over the k8s: ones;
+// debug targets; optional image, mode, profile and SELinux type over the
+// k8s: ones;
 // and its projects. A project's name may be left out: it is then the
 // namespace (decision #21, PodProjects).
 type Pod struct {
-	Cluster   string    `yaml:"cluster"`
-	Namespace string    `yaml:"namespace,omitempty"`
-	Selector  string    `yaml:"selector,omitempty"`
-	Pod       string    `yaml:"pod,omitempty"`
-	Container string    `yaml:"container"`
-	Image     string    `yaml:"image,omitempty"`
-	Mode      string    `yaml:"mode,omitempty"`
-	Profile   string    `yaml:"profile,omitempty"`
-	Projects  []Project `yaml:"projects"`
+	Cluster   string `yaml:"cluster"`
+	Namespace string `yaml:"namespace,omitempty"`
+	Selector  string `yaml:"selector,omitempty"`
+	Pod       string `yaml:"pod,omitempty"`
+	Container string `yaml:"container"`
+	Image     string `yaml:"image,omitempty"`
+	Mode      string `yaml:"mode,omitempty"`
+	Profile   string `yaml:"profile,omitempty"`
+	// SELinuxType overrides K8s.SELinuxType for this entry.
+	SELinuxType *string   `yaml:"selinux_type,omitempty"`
+	Projects    []Project `yaml:"projects"`
 }
 
 // IsPodRef reports whether a command-line target names a pod entry
@@ -188,7 +195,7 @@ func (r *Registry) validateK8s() error {
 }
 
 func (k *K8s) validate() error {
-	if err := checkPodOptions("k8s:", k.Image, k.Mode, k.Profile); err != nil {
+	if err := checkPodOptions("k8s:", k.Image, k.Mode, k.Profile, k.SELinuxType); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
@@ -209,8 +216,9 @@ func (k *K8s) validate() error {
 }
 
 // checkPodOptions checks an image (pinned by digest when set), a mode
-// and a profile (each empty or a known value).
-func checkPodOptions(where, image, mode, prof string) error {
+// and a profile (each empty or a known value), and an SELinux type (unset,
+// empty, or a type name).
+func checkPodOptions(where, image, mode, prof string, seType *string) error {
 	switch {
 	case image != "" && !k8sname.Pinned(image):
 		return fmt.Errorf("%w: %s image %q is not pinned by digest (<repo>@sha256:<64 hex>)", ErrInvalid, where, image)
@@ -218,6 +226,8 @@ func checkPodOptions(where, image, mode, prof string) error {
 		return fmt.Errorf("%w: %s mode %q (debug or sidecar)", ErrInvalid, where, mode)
 	case prof != "" && prof != profileMinimal && prof != profilePrivileged:
 		return fmt.Errorf("%w: %s profile %q (minimal or privileged)", ErrInvalid, where, prof)
+	case seType != nil && *seType != "" && !k8sname.SELinuxType(*seType):
+		return fmt.Errorf("%w: %s selinux_type %q ([a-z0-9_]+, or empty to omit it)", ErrInvalid, where, *seType)
 	}
 	return nil
 }
@@ -231,7 +241,7 @@ func (r *Registry) validatePod(p Pod) error {
 	if err := checkPodTarget(where, p, r.PodNamespace(p)); err != nil {
 		return err
 	}
-	if err := checkPodOptions(where+":", p.Image, p.Mode, p.Profile); err != nil {
+	if err := checkPodOptions(where+":", p.Image, p.Mode, p.Profile, p.SELinuxType); err != nil {
 		return err
 	}
 	projects := r.PodProjects(p)

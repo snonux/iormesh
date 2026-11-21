@@ -189,7 +189,7 @@ func (k *Kubectl) debug(ctx context.Context, p podInfo, argv []string) error {
 	if err != nil {
 		return err
 	}
-	custom, err := writeCustom(k.t.Profile)
+	custom, err := writeCustom(k.t.Profile, k.t.SELinuxType)
 	if err != nil {
 		return err
 	}
@@ -250,8 +250,14 @@ func (k *Kubectl) debugArgs(custom string, argv []string) []string {
 // volume mounts, and the pod's identity from the downward API
 // (PodFromEnv: how an in-pod tracer under a private cgroup namespace
 // knows its pod, and what its project defaults to). The sidecar patch
-// (manifest_spec.go) is this spec too, for the minimal profile.
-func customSpec(p Profile) map[string]any {
+// (manifest_spec.go) is this spec too, for the minimal profile and
+// DefaultSELinuxType.
+//
+// seType is the minimal profile's seLinuxOptions.type (task 5h4): set on
+// this container only, never the pod, so the app containers keep
+// container_t; "" omits it. The privileged profile ignores it: a
+// privileged container runs as spc_t already.
+func customSpec(p Profile, seType string) map[string]any {
 	sc := map[string]any{"runAsUser": 0}
 	if p == ProfileMinimal {
 		// privileged must not set allowPrivilegeEscalation: false (the
@@ -259,6 +265,9 @@ func customSpec(p Profile) map[string]any {
 		sc["allowPrivilegeEscalation"] = false
 		sc["seccompProfile"] = map[string]any{"type": "RuntimeDefault"}
 		sc["capabilities"] = map[string]any{"drop": []string{"ALL"}, "add": minimalCaps}
+		if seType != "" {
+			sc["seLinuxOptions"] = map[string]any{"type": seType}
+		}
 	}
 	return map[string]any{
 		"env":             downwardEnv(),
@@ -272,8 +281,8 @@ func customSpec(p Profile) map[string]any {
 
 // writeCustom writes customSpec to a private temporary file (0600, from
 // os.CreateTemp) and returns its path; the caller removes it.
-func writeCustom(p Profile) (string, error) {
-	b, err := json.Marshal(customSpec(p))
+func writeCustom(p Profile, seType string) (string, error) {
+	b, err := json.Marshal(customSpec(p, seType))
 	if err != nil {
 		return "", err
 	}

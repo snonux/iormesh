@@ -22,8 +22,9 @@ import (
 // --selector`, tar-NAME for `exec NAME … ready` (else an empty stream),
 // state-NAME for `exec NAME … ready -state` (else an attached session,
 // "running 1a2b3c4d"), and down-NAME makes every exec into NAME fail as
-// kubectl itself does (exit 1, no "command terminated" line). No cluster
-// is reached.
+// kubectl itself does (exit 1, no "command terminated" line). debug
+// keeps a copy of its --custom file as custom.json. No cluster is
+// reached.
 const fakeKubectl = `#!/bin/sh
 for a in "$@"; do printf '%s\0' "$a" >> "$FAKE_DIR/log"; done
 printf '\036\0' >> "$FAKE_DIR/log"
@@ -47,7 +48,9 @@ exec)
     exit 0 ;;
   esac
   if [ -f "$FAKE_DIR/tar-$pod" ]; then cat "$FAKE_DIR/tar-$pod"; else cat "$FAKE_DIR/empty.tar"; fi ;;
-debug) echo "ephemeral container iormesh created" ;;
+debug)
+  for a in "$@"; do case "$a" in --custom=*) cp "${a#--custom=}" "$FAKE_DIR/custom.json" ;; esac; done
+  echo "ephemeral container iormesh created" ;;
 esac
 `
 
@@ -413,6 +416,53 @@ func TestPodDeploy(t *testing.T) {
 	if !strings.Contains(f.stdout.String(), "started tracer, project shop") ||
 		!strings.Contains(f.stdout.String(), "attached, session 1a2b3c4d") {
 		t.Errorf("stdout: %s", f.stdout)
+	}
+}
+
+// TestPodDeploySELinuxType: a debug tracer runs as spc_t by default,
+// the registry's selinux_type overrides that, -selinux-type overrides
+// the registry, an empty -selinux-type= omits seLinuxOptions, and a malformed
+// type is refused before kubectl runs (decision #13, task 5h4).
+func TestPodDeploySELinuxType(t *testing.T) {
+	withType := strings.Replace(podRegistry, "  clusters:", "  selinux_type: container_t\n  clusters:", 1)
+	for _, c := range []struct {
+		registry string
+		flags    []string
+		want     string // "-" for no seLinuxOptions
+	}{
+		{"", nil, "spc_t"},
+		{withType, nil, "container_t"},
+		{withType, []string{"-selinux-type", "iormesh_container_t"}, "iormesh_container_t"},
+		{withType, []string{"-selinux-type="}, "-"},
+	} {
+		f := newPodFixture(t, c.registry)
+		f.pod(t, podObject("checkout-0", uid(1), false))
+		args := slices.Concat([]string{"deploy"}, c.flags, []string{"kind/shop/checkout-0"})
+		if code := f.run(args...); code != exitOK {
+			t.Fatalf("%q: exit %d: %s", args, code, f.stderr)
+		}
+		var spec struct {
+			SecurityContext struct {
+				SELinuxOptions *struct{ Type string } `json:"seLinuxOptions"`
+			} `json:"securityContext"`
+		}
+		b, err := os.ReadFile(filepath.Join(f.dir, "custom.json"))
+		if err != nil || json.Unmarshal(b, &spec) != nil {
+			t.Fatalf("%q: custom file %s: %v", args, b, err)
+		}
+		got := "-"
+		if se := spec.SecurityContext.SELinuxOptions; se != nil {
+			got = se.Type
+		}
+		if got != c.want {
+			t.Errorf("%q: SELinux type %q, want %q", args, got, c.want)
+		}
+	}
+	f := newPodFixture(t, "")
+	f.pod(t, podObject("checkout-0", uid(1), false))
+	if code := f.run("deploy", "-selinux-type", "spc_t:s0", "kind/shop/checkout-0"); code == exitOK ||
+		!strings.Contains(f.stderr.String(), "SELinux type") || len(f.calls(t)) != 0 {
+		t.Errorf("malformed type: exit %d, calls %q, stderr %s", code, f.calls(t), f.stderr)
 	}
 }
 

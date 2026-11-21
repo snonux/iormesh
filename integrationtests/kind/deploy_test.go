@@ -92,7 +92,8 @@ func (c *cluster) deploy(t *testing.T, reg string, apps ...string) map[string]po
 // assertTracerSpec checks a debug container as the API server stored it
 // and the kubelet ran it: exactly #13's capabilities after kubectl's
 // profile and the --custom spec merged, nothing privileged, RuntimeDefault
-// seccomp, uid 0, the downward-API env and both mounts, the tracer run by
+// seccomp, SELinux type spc_t on the tracer alone (task 5h4: the app
+// containers carry no seLinuxOptions and stay container_t), uid 0, the downward-API env and both mounts, the tracer run by
 // name (PATH) with the disk bounds deploy took from the pod (task df4:
 // 3/4 of the 2Gi emptyDir, no percent limit), and the pinned digest in
 // the status imageID (a registry digest, not a kind-loaded config
@@ -112,6 +113,15 @@ func (c *cluster) assertTracerSpec(t *testing.T, p podJSON) {
 	if sc.Privileged != nil && *sc.Privileged || sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation ||
 		sc.RunAsUser == nil || *sc.RunAsUser != 0 || sc.Seccomp.Type != "RuntimeDefault" {
 		t.Errorf("pod %s: security context %+v", p.Metadata.Name, sc)
+	}
+	if sc.SELinux == nil || sc.SELinux.Type != "spc_t" {
+		t.Errorf("pod %s: tracer seLinuxOptions %+v, want type spc_t", p.Metadata.Name, sc.SELinux)
+	}
+	for _, app := range p.Spec.Containers {
+		if app.SecurityContext.SELinux != nil {
+			t.Errorf("pod %s: app container %s has seLinuxOptions %+v", p.Metadata.Name, app.Name,
+				app.SecurityContext.SELinux)
+		}
 	}
 	var env, mounts []string
 	for _, e := range s.Env {

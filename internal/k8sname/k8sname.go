@@ -1,8 +1,8 @@
 // Package k8sname holds the Kubernetes name rules iormesh checks before a
 // value reaches a kubectl argv (PLAN.md M7, decision #18): namespaces,
 // containers and cluster labels, pod names, kubeconfig contexts, images
-// pinned by digest and the label selectors a registry pods: entry picks
-// pods by. It is its own package because two sides need the same rules:
+// pinned by digest, the label selectors a registry pods: entry picks
+// pods by, and the SELinux type a minimal-profile tracer runs as. It is its own package because two sides need the same rules:
 // internal/federate validates the registry's k8s: and pods: sections
 // when it loads them, and internal/k8s validates every Target again
 // before it runs kubectl — and internal/k8s imports internal/federate
@@ -38,7 +38,17 @@ var (
 	// "<repo>@sha256:<hex>" (containerd, CRI-O) or the same behind
 	// "docker-pullable://" (cri-dockerd).
 	repoDigest = regexp.MustCompile(`@sha256:([0-9a-f]{64})$`)
+	// selinuxType is an SELinux type name as the policy spells one
+	// (spc_t, container_t, iormesh_container_t): lowercase letters,
+	// digits and underscores, nothing that could carry a user, role or
+	// level into seLinuxOptions.
+	selinuxType = regexp.MustCompile(`^[a-z0-9_]{1,128}$`)
 )
+
+// SELinuxType reports whether s is an SELinux type name, the value of a
+// tracer container's seLinuxOptions.type (decision #13, task 5h4). The
+// empty string, which omits the field, is the caller's to allow.
+func SELinuxType(s string) bool { return selinuxType.MatchString(s) }
 
 // Label reports whether s is a DNS-1123 label.
 func Label(s string) bool { return label.MatchString(s) }

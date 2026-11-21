@@ -68,7 +68,8 @@ func podList(t *testing.T, items ...map[string]any) string {
 // testScope is the scope testTarget lives in.
 func testScope() Scope {
 	tg := testTarget()
-	return Scope{Context: tg.Context, Namespace: tg.Namespace, Image: tg.Image, Mode: tg.Mode, Profile: tg.Profile}
+	return Scope{Context: tg.Context, Namespace: tg.Namespace, Image: tg.Image, Mode: tg.Mode, Profile: tg.Profile,
+		SELinuxType: &tg.SELinuxType}
 }
 
 // newTestLister is NewLister on testScope, failing the test on refusal.

@@ -48,16 +48,38 @@ import (
 // > k8s: defaults.
 type k8sFlags struct {
 	context, namespace, image string
+	// seType is -selinux-type: nil unless given, so an unset flag defers
+	// to the registry while -selinux-type '' omits the field.
+	seType *string
 }
 
-// addK8sFlags registers -context and -namespace, and -image when the
-// command uses one (deploy).
-func addK8sFlags(fs *flag.FlagSet, image bool) *k8sFlags {
+// optString is a string flag that tells "not given" (nil) from "given
+// empty".
+type optString struct{ v **string }
+
+func (o optString) String() string {
+	if o.v == nil || *o.v == nil {
+		return ""
+	}
+	return **o.v
+}
+
+func (o optString) Set(s string) error {
+	*o.v = &s
+	return nil
+}
+
+// addK8sFlags registers -context and -namespace, and -image and
+// -selinux-type when the command starts tracers (deploy).
+func addK8sFlags(fs *flag.FlagSet, deploy bool) *k8sFlags {
 	f := &k8sFlags{}
 	fs.StringVar(&f.context, "context", "", "kubectl context for pod entries (must be a registered cluster's)")
 	fs.StringVar(&f.namespace, "namespace", "", "namespace for pod entries, over the entry's and the cluster's")
-	if image {
+	if deploy {
 		fs.StringVar(&f.image, "image", "", "tracer image for pod entries, pinned by digest")
+		fs.Var(optString{&f.seType}, "selinux-type",
+			"SELinux type of a minimal-profile debug tracer (default "+k8s.DefaultSELinuxType+
+				"; empty omits seLinuxOptions)")
 	}
 	return f
 }
@@ -102,11 +124,13 @@ func resolvePodRef(r *federate.Registry, ref string, kf *k8sFlags) (podEntry, er
 	}
 	var defaults k8s.Layer
 	if r.K8s != nil {
-		defaults = k8s.Layer{Image: r.K8s.Image, Mode: k8s.Mode(r.K8s.Mode), Profile: k8s.Profile(r.K8s.Profile)}
+		defaults = k8s.Layer{Image: r.K8s.Image, Mode: k8s.Mode(r.K8s.Mode), Profile: k8s.Profile(r.K8s.Profile),
+			SELinuxType: r.K8s.SELinuxType}
 	}
 	s, err := k8s.ResolveScope(r.Contexts(),
-		k8s.Layer{Context: kf.context, Namespace: kf.namespace, Image: kf.image},
-		k8s.Layer{Namespace: p.Namespace, Image: p.Image, Mode: k8s.Mode(p.Mode), Profile: k8s.Profile(p.Profile)},
+		k8s.Layer{Context: kf.context, Namespace: kf.namespace, Image: kf.image, SELinuxType: kf.seType},
+		k8s.Layer{Namespace: p.Namespace, Image: p.Image, Mode: k8s.Mode(p.Mode), Profile: k8s.Profile(p.Profile),
+			SELinuxType: p.SELinuxType},
 		k8s.Layer{Context: c.Context, Namespace: c.Namespace},
 		defaults)
 	if err != nil {

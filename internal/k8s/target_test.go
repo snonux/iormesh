@@ -20,9 +20,38 @@ func TestResolvePrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Target{Context: "kind-iormesh", Namespace: "flagns", Pod: "checkout-7d9f", Container: "app",
-		Image: other, Mode: ModeDebug, Profile: ProfilePrivileged}
+		Image: other, Mode: ModeDebug, Profile: ProfilePrivileged, SELinuxType: DefaultSELinuxType}
 	if got != want {
 		t.Errorf("Resolve\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// TestResolveSELinuxType: an unset type defers to the next layer and
+// falls back to spc_t; an empty one set at a higher layer wins and omits
+// the field; a malformed one is refused (task 5h4).
+func TestResolveSELinuxType(t *testing.T) {
+	str := func(s string) *string { return &s }
+	base := Layer{Context: "c", Namespace: "n"}
+	for _, c := range []struct {
+		layers []Layer
+		want   string
+	}{
+		{[]Layer{base}, DefaultSELinuxType},
+		{[]Layer{{}, base, {SELinuxType: str("iormesh_container_t")}}, "iormesh_container_t"},
+		{[]Layer{{SELinuxType: str("")}, base, {SELinuxType: str("iormesh_container_t")}}, ""},
+		{[]Layer{{SELinuxType: str("container_t")}, base, {SELinuxType: str("")}}, "container_t"},
+	} {
+		got, err := Resolve("p", "app", []string{"c"}, c.layers...)
+		if err != nil || got.SELinuxType != c.want {
+			t.Errorf("layers %+v: SELinux type %q, err %v; want %q", c.layers, got.SELinuxType, err, c.want)
+		}
+	}
+	for _, bad := range []string{"system_u:system_r:spc_t:s0", "spc-t", "SPC_T", "spc_t\n"} {
+		l := base
+		l.SELinuxType = str(bad)
+		if _, err := Resolve("p", "app", []string{"c"}, l); !errors.Is(err, ErrTransport) {
+			t.Errorf("type %q: err = %v, want ErrTransport", bad, err)
+		}
 	}
 }
 

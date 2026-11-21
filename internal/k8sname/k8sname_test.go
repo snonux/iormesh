@@ -8,6 +8,22 @@ import (
 // digest is a well-formed sha256 digest.
 var digest = strings.Repeat("0123456789abcdef", 4)
 
+// TestSELinuxType: a bare type name passes; empty, a full context, a
+// role, upper case, a dash or a level is refused (task 5h4).
+func TestSELinuxType(t *testing.T) {
+	for _, s := range []string{"spc_t", "container_t", "iormesh_container_t", "svirt_lxc_net_t", "t0"} {
+		if !SELinuxType(s) {
+			t.Errorf("%q refused", s)
+		}
+	}
+	for _, s := range []string{"", "system_u:system_r:spc_t:s0", "spc_t:s0", "Spc_t", "spc-t", "spc_t ",
+		"-spc_t", "s0:c1,c2", strings.Repeat("a", 129)} {
+		if SELinuxType(s) {
+			t.Errorf("%q accepted", s)
+		}
+	}
+}
+
 // TestSelector: equality-based selectors with one positive term pass;
 // empty, only-negative, set-based, existence and anything with a space,
 // a leading dash or a stray comma are refused.

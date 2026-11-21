@@ -90,7 +90,7 @@ func (m Manifests) Files() (map[string][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	debug, err := json.MarshalIndent(customSpec(ProfileMinimal), "", "  ")
+	debug, err := json.MarshalIndent(customSpec(ProfileMinimal, DefaultSELinuxType), "", "  ")
 	if err != nil {
 		return nil, err
 	}
@@ -130,4 +130,6 @@ const sidecarHeader = generated +
 # tracer sees the app's processes by the pod's own pids. Set the args to
 # the app's target first:
 #   kubectl patch deployment <name> --patch-file deploy/sidecar-patch.yaml
+# The tracer container alone runs as SELinux type spc_t (container_t is
+# denied BPF on an enforcing node); the app containers keep theirs.
 `

@@ -146,7 +146,7 @@ func TestDebugArgv(t *testing.T) {
 	if !slices.Equal(dbg, want) {
 		t.Errorf("debug argv\n got %q\nwant %q", dbg, want)
 	}
-	assertCustom(t, f.custom(t), true)
+	assertCustom(t, f.custom(t), true, DefaultSELinuxType)
 	// kubectl 1.30 knows --custom only behind this gate (task yb4).
 	if g := f.gate(t); g != "true" {
 		t.Errorf("debug ran with KUBECTL_DEBUG_CUSTOM_PROFILE=%q, want true", g)
@@ -167,12 +167,28 @@ func TestDebugPrivileged(t *testing.T) {
 	if !slices.Contains(f.calls(t)[1], "--profile=sysadmin") {
 		t.Errorf("argv %q lacks --profile=sysadmin", f.calls(t)[1])
 	}
-	assertCustom(t, f.custom(t), false)
+	assertCustom(t, f.custom(t), false, "")
+}
+
+// TestDebugSELinuxType: the minimal profile's custom file carries the
+// target's SELinux type, and none when the type is empty (task 5h4).
+func TestDebugSELinuxType(t *testing.T) {
+	for _, se := range []string{"iormesh_container_t", ""} {
+		f := newFake(t)
+		f.pod(t, preparedPod)
+		tg := testTarget()
+		tg.SELinuxType = se
+		if err := newTestKubectl(t, tg).Debug(context.Background(), "iormesh", "run"); err != nil {
+			t.Fatal(err)
+		}
+		assertCustom(t, f.custom(t), true, se)
+	}
 }
 
 // assertCustom checks the --custom spec: the two mounts always, #13's
-// capability set and no-escalation only for the minimal profile.
-func assertCustom(t *testing.T, js string, minimal bool) {
+// capability set, no-escalation and the SELinux type seType (absent when
+// "") only for the minimal profile.
+func assertCustom(t *testing.T, js string, minimal bool, seType string) {
 	t.Helper()
 	var spec struct {
 		SecurityContext struct {
@@ -182,6 +198,9 @@ func assertCustom(t *testing.T, js string, minimal bool) {
 				Drop []string `json:"drop"`
 				Add  []string `json:"add"`
 			} `json:"capabilities"`
+			SELinuxOptions *struct {
+				Type string `json:"type"`
+			} `json:"seLinuxOptions"`
 		} `json:"securityContext"`
 		VolumeMounts []struct {
 			Name, MountPath string
@@ -200,7 +219,7 @@ func assertCustom(t *testing.T, js string, minimal bool) {
 		t.Errorf("volume mounts in %s", js)
 	}
 	if !minimal {
-		if sc.AllowPrivilegeEscalation != nil || sc.Capabilities != nil {
+		if sc.AllowPrivilegeEscalation != nil || sc.Capabilities != nil || sc.SELinuxOptions != nil {
 			t.Errorf("privileged custom carries the minimal set: %s", js)
 		}
 		return
@@ -208,6 +227,12 @@ func assertCustom(t *testing.T, js string, minimal bool) {
 	if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation || sc.Capabilities == nil ||
 		!slices.Equal(sc.Capabilities.Drop, []string{"ALL"}) || !slices.Equal(sc.Capabilities.Add, minimalCaps) {
 		t.Errorf("minimal security context in %s", js)
+	}
+	switch {
+	case seType == "" && sc.SELinuxOptions != nil:
+		t.Errorf("seLinuxOptions set for an empty type: %s", js)
+	case seType != "" && (sc.SELinuxOptions == nil || sc.SELinuxOptions.Type != seType):
+		t.Errorf("seLinuxOptions in %s, want type %s", js, seType)
 	}
 }
 

@@ -94,23 +94,29 @@ func strs(t *testing.T, v any) []string {
 }
 
 // TestPreparePatch: the pod-level fields every mode needs (decision #13)
-// and no container.
+// and no container, nor a pod-level security context (task 5h4: an
+// SELinux type set there would move the app containers off container_t).
 func TestPreparePatch(t *testing.T) {
 	spec := at(t, decodeFile(t, "prepare-patch.yaml"), "spec", "template", "spec")
 	checkPodVolumes(t, spec)
 	if at(t, spec, "hostUsers") != true {
 		t.Errorf("hostUsers %v, want true", at(t, spec, "hostUsers"))
 	}
-	if m := spec.(map[string]any); m["containers"] != nil || m["shareProcessNamespace"] != nil {
+	if m := spec.(map[string]any); m["containers"] != nil || m["shareProcessNamespace"] != nil ||
+		m["securityContext"] != nil {
 		t.Errorf("prepare patch adds more than volumes and hostUsers: %v", m)
 	}
 }
 
 // TestSidecarPatch: the prepare patch's fields, one PID namespace for the
-// pod, and the tracer container pinned by digest.
+// pod, the tracer container pinned by digest, and no pod-level security
+// context (the SELinux type is the tracer container's alone, task 5h4).
 func TestSidecarPatch(t *testing.T) {
 	spec := at(t, decodeFile(t, "sidecar-patch.yaml"), "spec", "template", "spec")
 	checkPodVolumes(t, spec)
+	if sc := spec.(map[string]any)["securityContext"]; sc != nil {
+		t.Errorf("pod-level securityContext %v, want none", sc)
+	}
 	if at(t, spec, "hostUsers") != true || at(t, spec, "shareProcessNamespace") != true {
 		t.Errorf("hostUsers %v, shareProcessNamespace %v; want both true",
 			at(t, spec, "hostUsers"), at(t, spec, "shareProcessNamespace"))
@@ -179,6 +185,11 @@ func checkTracerContainer(t *testing.T, c any) {
 	}
 	if at(t, sc, "seccompProfile", "type") != "RuntimeDefault" {
 		t.Errorf("seccomp %v, want RuntimeDefault", at(t, sc, "seccompProfile"))
+	}
+	// spc_t, not container_t, which is denied BPF on an SELinux-enforcing
+	// node (decision #13, task 5h4).
+	if se := at(t, sc, "seLinuxOptions"); at(t, se, "type") != DefaultSELinuxType || len(se.(map[string]any)) != 1 {
+		t.Errorf("seLinuxOptions %v, want only type %s", se, DefaultSELinuxType)
 	}
 	if drop := strs(t, at(t, sc, "capabilities", "drop")); !slices.Equal(drop, []string{"ALL"}) {
 		t.Errorf("drop %q, want ALL", drop)

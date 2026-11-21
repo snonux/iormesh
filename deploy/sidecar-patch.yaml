@@ -4,6 +4,8 @@
 # tracer sees the app's processes by the pod's own pids. Set the args to
 # the app's target first:
 #   kubectl patch deployment <name> --patch-file deploy/sidecar-patch.yaml
+# The tracer container alone runs as SELinux type spc_t (container_t is
+# denied BPF on an enforcing node); the app containers keep theirs.
 spec:
   template:
     spec:
@@ -56,6 +58,8 @@ spec:
               drop:
                 - ALL
             runAsUser: 0
+            seLinuxOptions:
+              type: spc_t
             seccompProfile:
               type: RuntimeDefault
           volumeMounts:

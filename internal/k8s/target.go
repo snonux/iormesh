@@ -53,6 +53,15 @@ const (
 	ProfilePrivileged Profile = "privileged"
 )
 
+// DefaultSELinuxType is the SELinux type the minimal profile's tracer
+// container runs as (decision #13, task 5h4): container_t is denied
+// bpf { prog_load } on an SELinux-enforcing node (task zg4), spc_t is
+// not, and it keeps #13's capability set, RuntimeDefault seccomp and no
+// privilege escalation. Only the tracer container carries it, never the
+// pod: the app containers stay container_t. An empty type omits
+// seLinuxOptions, leaving the runtime's default.
+const DefaultSELinuxType = "spc_t"
+
 // TracerContainer is the tracer container's name in the pod, the
 // ephemeral one and the sidecar alike: every exec names it.
 const TracerContainer = "iormesh"
@@ -75,17 +84,22 @@ type Target struct {
 	Image     string // the tracer image, pinned by digest
 	Mode      Mode
 	Profile   Profile
+	// SELinuxType is the minimal profile's seLinuxOptions.type ("" omits
+	// the field); the privileged profile ignores it.
+	SELinuxType string
 }
 
 // Layer is one level of #18's precedence: run flags, the pod entry, the
 // cluster entry, the k8s: defaults. Empty fields defer to the next
-// layer.
+// layer. SELinuxType is a pointer because its empty value is a choice
+// (omit seLinuxOptions), not a deferral: nil defers.
 type Layer struct {
-	Context   string
-	Namespace string
-	Image     string
-	Mode      Mode
-	Profile   Profile
+	Context     string
+	Namespace   string
+	Image       string
+	Mode        Mode
+	Profile     Profile
+	SELinuxType *string
 }
 
 // Scope is the layers resolved: where pods are looked up and how a
@@ -95,8 +109,8 @@ type Layer struct {
 type Scope Layer
 
 // ResolveScope layers ls (highest precedence first: flag, pod entry,
-// cluster, k8s: defaults), falls back to DefaultImage, debug mode and the
-// minimal profile, and validates the result. registered is the
+// cluster, k8s: defaults), falls back to DefaultImage, debug mode, the
+// minimal profile and DefaultSELinuxType, and validates the result. registered is the
 // registry's list of contexts: one it does not list is refused, as an
 // unregistered host is for SSH.
 func ResolveScope(registered []string, ls ...Layer) (Scope, error) {
@@ -107,10 +121,17 @@ func ResolveScope(registered []string, ls ...Layer) (Scope, error) {
 		s.Image = pick(l.Image, s.Image)
 		s.Mode = pick(l.Mode, s.Mode)
 		s.Profile = pick(l.Profile, s.Profile)
+		if l.SELinuxType != nil {
+			s.SELinuxType = l.SELinuxType
+		}
 	}
 	s.Image = pick(s.Image, DefaultImage)
 	s.Mode = pick(s.Mode, ModeDebug)
 	s.Profile = pick(s.Profile, ProfileMinimal)
+	if s.SELinuxType == nil {
+		def := DefaultSELinuxType
+		s.SELinuxType = &def
+	}
 	if err := s.validate(); err != nil {
 		return Scope{}, err
 	}
@@ -124,6 +145,9 @@ func ResolveScope(registered []string, ls ...Layer) (Scope, error) {
 func (s Scope) Target(pod, container string) (Target, error) {
 	t := Target{Context: s.Context, Namespace: s.Namespace, Pod: pod, Container: container,
 		Image: s.Image, Mode: s.Mode, Profile: s.Profile}
+	if s.SELinuxType != nil {
+		t.SELinuxType = *s.SELinuxType
+	}
 	if err := t.Validate(); err != nil {
 		return Target{}, err
 	}
@@ -169,12 +193,16 @@ func (s Scope) validate() error {
 	if s.Profile != ProfileMinimal && s.Profile != ProfilePrivileged {
 		return fmt.Errorf("%w: profile %q (minimal or privileged)", ErrTransport, s.Profile)
 	}
+	if s.SELinuxType != nil && *s.SELinuxType != "" && !k8sname.SELinuxType(*s.SELinuxType) {
+		return fmt.Errorf("%w: SELinux type %q ([a-z0-9_]+, or empty to omit it)", ErrTransport, *s.SELinuxType)
+	}
 	return nil
 }
 
 // Validate checks every field before any reaches a kubectl argv.
 func (t Target) Validate() error {
-	s := Scope{Context: t.Context, Namespace: t.Namespace, Image: t.Image, Mode: t.Mode, Profile: t.Profile}
+	s := Scope{Context: t.Context, Namespace: t.Namespace, Image: t.Image, Mode: t.Mode, Profile: t.Profile,
+		SELinuxType: &t.SELinuxType}
 	if err := s.validate(); err != nil {
 		return err
 	}

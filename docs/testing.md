@@ -1789,13 +1789,30 @@ Unit tests in `mage test`, no cluster and no container engine
   `Directory` and the trace dir as an `emptyDir` with a
   `sizeLimit`; uid 0, `allowPrivilegeEscalation: false`, no
   `privileged`, `RuntimeDefault` seccomp, `drop: [ALL]` and
-  exactly #13's seven capabilities, in order; the downward-API
+  exactly #13's seven capabilities, in order;
+  `seLinuxOptions` with only `type: spc_t` on the tracer
+  container, and no pod-level `securityContext` in either patch
+  (task 5h4); the downward-API
   env (`POD_NAME`, `POD_NAMESPACE`, `POD_UID`); the sidecar's
   image pinned by digest, its args ending in the ¾ byte cap and
   its small requests; and no field in the `--custom` profile
   that kubectl debug's own flags set. `Validate` refuses a tag,
   a malformed digest, an odd size and a command line that is
   not `run`.
+- SELinux type (task 5h4): `k8sname.TestSELinuxType` takes a
+  bare type name and refuses a full context, a level, upper
+  case, a dash and over 128 bytes; `TestResolveSELinuxType`
+  pins the precedence — an unset type defers, an empty one set
+  higher up wins and omits the field, `spc_t` is the fallback, a
+  malformed one is `ErrTransport`; `TestDebugSELinuxType` and
+  `assertCustom` check the `--custom` file (the type for the
+  minimal profile, none for an empty type or the privileged
+  profile); `TestPodDeploySELinuxType` runs `iormeshctl deploy`
+  against the fake kubectl with the default, a registry
+  `selinux_type`, `-selinux-type` over it and `-selinux-type=`,
+  and refuses `spc_t:s0` before any kubectl call; the registry
+  tests round-trip an explicit `selinux_type: ""` and refuse a
+  malformed one at load.
 - Pod byte cap and attach wait (task 5g4):
   `internal/k8s/quantity_test.go` reads every byte-size form
   (`2Gi`, `2G`, `2000M`, a byte count, `2e9`, `1.5Gi`, `.5Ki`)

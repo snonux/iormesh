@@ -76,7 +76,7 @@ func (m Manifests) sidecarPatch() workloadPatch {
 	p := m.preparePatch()
 	share := true
 	p.Spec.Template.Spec.ShareProcessNamespace = &share
-	c := customSpec(ProfileMinimal)
+	c := customSpec(ProfileMinimal, DefaultSELinuxType)
 	c["name"], c["image"], c["args"] = TracerContainer, m.Image, m.sidecarArgs()
 	// The container is the unit (PLAN.md M7): its limits are the caps
 	// `iormesh start` puts on a server's unit by default (one CPU, 1 GiB).

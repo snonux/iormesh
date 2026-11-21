@@ -5466,7 +5466,11 @@ depends on:
    hand-run `kubectl debug` (JSON, which every kubectl with
    `--custom` reads), and the sidecar's container: the security
    context, the mounts and the downward-API env — name, image and
-   command stay kubectl's flags. The sidecar adds resource limits
+   command stay kubectl's flags. Since task 5h4 the minimal
+   profile's security context also sets `seLinuxOptions: {type:
+   spc_t}` on this container (never the pod; `iormeshctl deploy
+   -selinux-type` or the registry's `selinux_type` picks another,
+   empty omits it; PLAN.md #13). The sidecar adds resource limits
    of one CPU and 1 GiB (start's unit defaults: the container is
    the unit) beside small requests (50m, 128 MiB), and runs
    `iormesh run` as its process, with example args

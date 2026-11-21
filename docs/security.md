@@ -428,6 +428,17 @@ truth.
     to the code that needs it in PLAN.md #13 and checked by
     leaving it out
     ([testing.md](testing.md#k8s-capability-set-task-ub4));
+  - runs as SELinux type `spc_t` — the tracer container alone,
+    never the pod, so the app containers keep `container_t`. On
+    an SELinux-enforcing node (el9) `container_t` is denied
+    `bpf { prog_load }` outright (task zg4); `spc_t` is
+    unconfined by SELinux, so on such a node the capability set,
+    `RuntimeDefault` seccomp and no privilege escalation are what
+    bound the tracer. `iormeshctl deploy -selinux-type` (or
+    `selinux_type` in the registry) names another type, empty
+    omits it; a dedicated `iormesh_container_t` policy module
+    granting only the tracer's `bpf`, `perf_event` and tracefs
+    permissions is planned (PLAN.md #13, task 7h4);
   - mounts the host's tracefs read-only and nothing else of the
     host; traces live in a size-bounded `emptyDir` of the pod.
     The pod must carry both volumes before the tracer comes
@@ -500,8 +511,8 @@ truth.
     answer implies before any segment arrives — never by what
     the pod's own segments claim (task af4);
   `privileged: true` is the fallback where the minimal profile
-  cannot run (old kernels, SELinux-enforcing nodes, runtimes
-  without the newer capability names; it cannot be combined
+  cannot run (old kernels, an SELinux policy without `spc_t`,
+  runtimes without the newer capability names; it cannot be combined
   with `allowPrivilegeEscalation: false`); it widens what a
   compromised tracer could do to the whole node, so use it only
   where the minimal set was tried. On an SELinux-enforcing node
