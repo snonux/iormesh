@@ -21,8 +21,9 @@ import "strings"
 // a thread's and a process's exit told apart, the el9 signal->live
 // fallback included, task nf4; a call on fd -1 before and after a fork
 // and exec, task mf4; the key a CLOSE record rebuilds after an RST abort,
-// task qf4; the raw_syscalls record relocated against el9 BTF on any
-// kernel, and a traced loop seen as several syscall kinds, task of4). They
+// and a dual-stack bound connect kept on one connection, task qf4; the
+// raw_syscalls record relocated against el9 BTF on any kernel, and a
+// traced loop seen as several syscall kinds, task of4). They
 // skip for anybody but root, so `mage test` passes them by, and `mage
 // bpfRootTest` is the one place that runs them. The names are listed
 // rather than matched by a pattern so that a renamed test fails a gate
@@ -38,6 +39,7 @@ func RootBPFTests() []string {
 		"TestSockSeqStress",
 		"TestSockRefusedConnectNoSeq",
 		"TestSockSeqAbortClose",
+		"TestSockDualStackBoundConnect",
 		"TestSockReuseAfterLostClose",
 		"TestSockStaleOwnerOfLiveSocket",
 		"TestLoaderDeliversRecords",

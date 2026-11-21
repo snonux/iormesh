@@ -649,9 +649,15 @@ scope) call `iormesh_pid_targeted` too.
   same gap: a lost `CLOSE` keeps the old socket under its
   address, and the next child accepted there would report under
   the old conn_id — two connections in one, a `key_conflict` in
-  the merge (task qf4, M4-9 on Rocky 9.9). A record whose
-  complete 4-tuple contradicts the socket's therefore starts a
-  new socket (`sockState.otherLife`).
+  the merge (task qf4, M4-9 on Rocky 9.9). So the correlator
+  mirrors the two proofs: a transition out of `CLOSE` or `LISTEN`
+  starts a new socket and binds its fd, and so does a record whose
+  tuple contradicts the socket's, both tuples complete (addresses
+  specified, ports set: a dual-stack socket bound to `[::]:P` may
+  report the unspecified address before its connect completes).
+  Such a record that is no accept snapshot went out under the
+  stale owner: it binds nothing and is not emitted
+  (`sockTable.observe`).
 - The fd → sock walk uses `BPF_CORE_READ` probe reads, not
   `fileident.c`'s typed walk: connect and accept are rare, and
   the probe reads work without the `bpf_rdonly_cast` kfunc
@@ -3780,7 +3786,7 @@ skipped run lost (task qf4): `snd_una − bytes_acked` and
 through the `CLOSE`, by FIN or by RST (`TestSockSeqAbortClose`),
 and such a half counts as established at its `SYN_SENT` record,
 so a late `CLOSE` stays inside the window. Records are read in
-wall-clock order. A
+the order of the host's boot clock, which all its sessions share. A
 conn_id with both a connecting and an accepting end on one host
 is a loopback pair the correlator fused already, and a conn_id
 without any `tcp_state` (unix, pipe, UDP) is no TCP half; the

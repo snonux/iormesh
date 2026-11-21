@@ -421,11 +421,14 @@ static __always_inline void iormesh_read_ctx_tuple(struct tcp_state_event *ev,
 // before accept() gives the child a file, so neither proof catches it and
 // that one record goes out under the old owner (accept() then re-registers
 // the child, or its next transition with a file drops the entry). The
-// correlator's userspace backstop (internal/correlate, sockState.otherLife)
-// starts a new socket when a record's 4-tuple contradicts the socket's, so
-// that record and the accepted child's later ones get a conn of their own;
-// it also catches the lone lost CLOSE whose next child at the address the
-// tracer registers by its accept (task qf4).
+// correlator's userspace backstop (internal/correlate, sockTable.observe)
+// starts a new socket when a record's tuple contradicts the socket's —
+// both complete: addresses specified and ports set — so that record and
+// the accepted child's later ones get a conn of their own, the stale
+// record naming no process; it also catches the lone lost CLOSE whose
+// next child at the address the tracer registers by its accept, and, like
+// the first proof above, treats a transition out of CLOSE or LISTEN as a
+// new life (task qf4).
 //
 // The reads are probe reads: sk_socket may be cleared by close() on another
 // CPU meanwhile, which at worst makes one record unverifiable.

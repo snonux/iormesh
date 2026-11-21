@@ -1053,8 +1053,10 @@ waits for the VMs):
   accepted at the same `struct sock` address, which the
   correlator kept under the old socket — a `key_conflict`, and
   both clients `no_match`. The correlator now starts a new socket
-  when a record's complete 4-tuple contradicts the socket's
-  (`sockState.otherLife`, `TestLostCloseThenAddressReuse`). The
+  when a record's tuple contradicts the socket's, both complete
+  (`sockTable.observe`, `TestLostCloseThenAddressReuse`;
+  `TestSockDualStackBoundConnect` keeps a dual-stack bound
+  connect on one conn). The
   stored trace is already correlated, so only a rerun shows it.
 
 The other stored runs replay unchanged.

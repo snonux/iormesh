@@ -2,10 +2,14 @@ package internal
 
 import (
 	"io"
+	"net"
+	"net/netip"
 	"os"
+	"syscall"
 	"testing"
 	"time"
 
+	"iormesh/internal/schema"
 	"iormesh/internal/types"
 )
 
@@ -132,4 +136,97 @@ func fillWindow(t *testing.T, p *loopbackPair) {
 	if total == 0 {
 		t.Fatal("client wrote nothing before the window closed")
 	}
+}
+
+// TestSockDualStackBoundConnect: a dual-stack AF_INET6 socket bound to
+// [::]:0 (the JVM's bind(null)) that connects to an IPv4 listener reports
+// its tuple from the real kernel as it is before and after the address is
+// mapped, and the correlator keeps every record of it on one connection,
+// fused with the accepted end (task qf4, review B1: a record whose tuple
+// merely completes the socket's is no other life).
+func TestSockDualStackBoundConnect(t *testing.T) {
+	requireRoot(t)
+	tr := newSockTracer(t)
+	tr.setTarget(t, uint32(os.Getpid()), true)
+	ln, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	accepted := make(chan *net.TCPConn, 1)
+	go func() {
+		c, _ := ln.AcceptTCP()
+		accepted <- c
+	}()
+	sport := uint32(ln.Addr().(*net.TCPAddr).Port)
+	cport := dualStackConnect(t, sport)
+	if s := <-accepted; s != nil {
+		_ = s.Close()
+	}
+	recs := tr.collectPair(t, cport, sport)
+	sawUnspecified := false
+	for _, r := range recs {
+		t.Logf("%d -> %d family %d saddr %v:%d daddr %v:%d", r.Oldstate, r.Newstate,
+			r.Family, r.Saddr, r.Sport, r.Daddr, r.Dport)
+		sawUnspecified = sawUnspecified || (r.Sport == cport && netip.AddrFrom16(r.Saddr).Unmap().IsUnspecified())
+	}
+	t.Logf("unspecified local address reported: %v", sawUnspecified)
+	conns := map[string]bool{}
+	for _, e := range correlateRecords(t, recs) {
+		if e.Event == schema.KindTCPState {
+			conns[e.ConnID] = true
+		}
+	}
+	if len(conns) != 1 || conns[""] {
+		t.Errorf("tcp_state events on conns %v, want one fused conn", conns)
+	}
+}
+
+// collectPair gathers the records of both ends of the connection between
+// ports a and b until both reported TCP_CLOSE.
+func (tr *sockTracer) collectPair(t *testing.T, a, b uint32) []*types.TcpStateEvent {
+	t.Helper()
+	var recs []*types.TcpStateEvent
+	closed := 0
+	tr.waitTCPState(5*time.Second, func(ev *types.TcpStateEvent) bool {
+		if (ev.Sport != a || ev.Dport != b) && (ev.Sport != b || ev.Dport != a) {
+			return false
+		}
+		recs = append(recs, ev)
+		if ev.Newstate == tcpClose {
+			closed++
+		}
+		return closed == 2
+	})
+	if closed != 2 {
+		t.Fatalf("saw %d of the two CLOSE records; records %+v", closed, recs)
+	}
+	return recs
+}
+
+// dualStackConnect opens an AF_INET6 socket, binds it to [::]:0, connects
+// it to ::ffff:127.0.0.1:port, closes it, and returns its local port.
+func dualStackConnect(t *testing.T, port uint32) uint32 {
+	t.Helper()
+	fd, err := syscall.Socket(syscall.AF_INET6, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatalf("socket: %v", err)
+	}
+	defer func() { _ = syscall.Close(fd) }()
+	if err := syscall.SetsockoptInt(fd, syscall.IPPROTO_IPV6, syscall.IPV6_V6ONLY, 0); err != nil {
+		t.Fatalf("clear IPV6_V6ONLY: %v", err)
+	}
+	if err := syscall.Bind(fd, &syscall.SockaddrInet6{}); err != nil {
+		t.Fatalf("bind [::]:0: %v", err)
+	}
+	sa, err := syscall.Getsockname(fd)
+	if err != nil {
+		t.Fatalf("getsockname: %v", err)
+	}
+	local := uint32(sa.(*syscall.SockaddrInet6).Port)
+	peer := &syscall.SockaddrInet6{Port: int(port), Addr: [16]byte{10: 0xff, 11: 0xff, 12: 127, 15: 1}}
+	if err := syscall.Connect(fd, peer); err != nil {
+		t.Fatalf("connect to ::ffff:127.0.0.1:%d: %v", port, err)
+	}
+	return local
 }

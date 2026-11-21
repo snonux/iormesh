@@ -90,21 +90,34 @@ func newSockTable(window uint64) *sockTable {
 		waiting: map[[2]netip.AddrPort]*sockState{}}
 }
 
-// observe applies one tcp_state record to its socket and returns it, and
-// whether this was the first record at the socket's address — the one
-// that binds the owner's fd (procState.sockGen).
+// observe applies one tcp_state record to its socket and returns it,
+// whether this was the first record of the socket — the one that binds
+// the owner's fd (procState.sockGen) — and whether the record went out
+// under a stale owner, so that it must name no process or fd.
 //
-// A record whose 4-tuple contradicts the socket's starts a new socket at
-// the same address (otherLife): the old one's TCP_CLOSE record was lost,
-// and the address was reused. That record is not reported as a first one:
-// an accept snapshot binds its fd anyway, and any other record of the new
-// life that comes before it went out under the stale owner's pid and fd
-// (sock.c), which must not be bound to the new socket.
-func (t *sockTable) observe(r *types.TcpStateEvent) (*sockState, bool) {
+// A known address can start a new socket: the old one's TCP_CLOSE record
+// was lost (a skipped run, sock.c) and the kernel reused the address. Two
+// proofs, mirroring the tracer's owner check (iormesh_sock_owner_stale):
+//   - a transition out of CLOSE or LISTEN (newLife) begins every life —
+//     a connect's CLOSE -> SYN_SENT is its socket's first record — so it
+//     starts a new socket and binds the fd, as on an unknown address;
+//   - a record whose tuple contradicts the socket's (otherLife) is a new
+//     life too. An accept snapshot binds its own fd anyway; any other such
+//     record came before the accept and went out under the stale owner's
+//     pid and fd, which belong to the old life: it binds nothing and is
+//     reported stale.
+func (t *sockTable) observe(r *types.TcpStateEvent) (s *sockState, first, stale bool) {
 	local, remote := tuple(r)
 	s, ok := t.bySk[r.Sk]
-	first := !ok
-	if !ok || s.otherLife(local, remote) {
+	reborn := false
+	switch {
+	case !ok || newLife(r):
+		first = true
+	case s.otherLife(local, remote):
+		reborn = true
+		stale = r.Oldstate != types.TCP_STATE_SNAPSHOT
+	}
+	if first || reborn {
 		s = &sockState{firstSeen: r.Time}
 		t.bySk[r.Sk] = s
 	}
@@ -120,28 +133,45 @@ func (t *sockTable) observe(r *types.TcpStateEvent) (*sockState, bool) {
 		// freed; events already queued keep their pointer.
 		delete(t.bySk, r.Sk)
 	}
-	return s, first
+	return s, first, stale
 }
 
-// otherLife reports whether a record with this 4-tuple belongs to another
+// newLife reports whether r is a transition that begins a socket's life:
+// out of CLOSE (connect's CLOSE -> SYN_SENT, listen's CLOSE -> LISTEN) or
+// out of LISTEN (an accepted child is born LISTEN -> SYN_RECV). An accept
+// snapshot is no transition; its old state is a marker.
+func newLife(r *types.TcpStateEvent) bool {
+	return r.Oldstate == tcpClose || r.Oldstate == tcpListen
+}
+
+// otherLife reports whether a record with this tuple belongs to another
 // socket than s, one at the same struct sock address: the tracer's
 // userspace backstop (sock.c, "Accepted residual risk") for a lost
 // TCP_CLOSE run. Losing that record keeps s in bySk, and the next socket
 // the kernel allocates at the address — an accepted child, typically —
 // would otherwise report under s and its conn id: one conn mixing two
 // connections, which the merge can only call a key conflict (task qf4,
-// M4-9 on Rocky 9.9). A socket's 4-tuple never changes once both ports
-// are known, so two complete tuples that differ are two lives. Records
-// before the port choice (CLOSE -> SYN_SENT carries no local port) and a
-// listener's (no remote port) prove nothing either way. The same tuple
+// M4-9 on Rocky 9.9).
+//
+// A socket's tuple never changes once it is complete: both addresses
+// specified and both ports set. Before that it may still change within
+// one life: CLOSE -> SYN_SENT carries no local port unless the socket was
+// bound, a dual-stack AF_INET6 socket bound to [::]:P that connects to an
+// IPv4 peer reports [::]:P at SYN_SENT (tcp_v6_connect runs
+// tcp_v4_connect before it maps sk_v6_rcv_saddr) and the real address
+// from ESTABLISHED on, and a listener's records have no remote port. So
+// only two complete tuples that differ are two lives. The same tuple
 // reused right away stays undetected here; the ISN pair then differs, and
 // the merge still refuses to fuse the mixed conn.
 func (s *sockState) otherLife(local, remote netip.AddrPort) bool {
-	complete := func(l, r netip.AddrPort) bool {
-		return l.IsValid() && r.IsValid() && l.Port() != 0 && r.Port() != 0
-	}
-	return complete(s.local, s.remote) && complete(local, remote) &&
+	return complete(s.local) && complete(s.remote) && complete(local) && complete(remote) &&
 		(local != s.local || remote != s.remote)
+}
+
+// complete reports whether an endpoint is fully known: a specified address
+// and a port.
+func complete(a netip.AddrPort) bool {
+	return a.IsValid() && !a.Addr().IsUnspecified() && a.Port() != 0
 }
 
 // establishes reports whether r shows the connection established: the
@@ -234,8 +264,12 @@ func tuple(r *types.TcpStateEvent) (local, remote netip.AddrPort) {
 // owner's fd to the socket.
 func (c *Correlator) tcpState(r *types.TcpStateEvent) {
 	c.advance(r.Time)
-	s, first := c.socks.observe(r)
-	if r.Pid == 0 {
+	s, first, stale := c.socks.observe(r)
+	if r.Pid == 0 || stale {
+		// A stale record's pid and fd are the old life's owner: it
+		// updates the socket but, like a record without an owner, is
+		// not emitted, so the old process never holds the new
+		// connection. The accept snapshot that follows carries the key.
 		return
 	}
 	p := c.proc(r.Pid)
