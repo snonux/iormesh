@@ -130,8 +130,8 @@ const (
 	// 4+4+8+4+4+16(comm) = 40 bytes with no padding, so kernel and
 	// binary.Write payloads share one size. It has no legacy layout: it is new.
 	taskRenameEventSize = 40
-	// syscall_restart_event is the control record of the restart-fold probes
-	// (internal/c/restart.c). 4+4+8+4+4+4(phase)+4(sa_restart) = 32 bytes
+	// syscall_restart_event is the control record of ior's restart-fold
+	// probes (ior internal/c/restart.c); iormesh never emits it (task pf4). 4+4+8+4+4+4(phase)+4(sa_restart) = 32 bytes
 	// with no padding, so kernel and binary.Write payloads share one size.
 	// It has no legacy layout: it is new.
 	syscallRestartEventSize = 32

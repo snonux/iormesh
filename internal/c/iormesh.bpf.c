@@ -5,7 +5,7 @@
 // and sock.c added; sockaddr.c and signal.c added (M2 step 7); rwagg.c added
 // (M2 step 11); stack.c added (M2 step 9); javamark.c added (task td4);
 // tcpseq.c added (task xe4); pidns.c added (M7, task 4f4); targethint.c
-// added (task 9f4).
+// added (task 9f4); restart.c not included (task pf4).
 
 #include "vmlinux.h"
 #include <bpf/bpf_core_read.h>

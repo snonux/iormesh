@@ -567,8 +567,8 @@ func fastMatchesTaskAndRestartRecords(t *testing.T) {
 		}
 	})
 
-	// SyscallRestartEvent is the control record of the restart-fold probes
-	// (internal/c/restart.c); same table membership rationale as above.
+	// SyscallRestartEvent is the control record of ior's restart-fold
+	// probes (ior internal/c/restart.c; iormesh never emits it, task pf4); same table membership rationale as above.
 	t.Run("SyscallRestartEvent", func(t *testing.T) {
 		ev := &SyscallRestartEvent{EventType: SYSCALL_RESTART_EVENT, Time: 1, Pid: 2, Tid: 3,
 			Phase: RESTART_PHASE_HANDLER, SaRestart: 1}

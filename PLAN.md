@@ -2251,9 +2251,10 @@ would overturn it), and deferred.
   ior's restart fold (one row for a call a signal interrupted
   and the kernel re-executed) is not part of the signal family
   and not lifted: a restarted call stays two rows, the first
-  with its restart code (-512…-516). Its kernel half, compiled but never attached, was removed
-  (task pf4); lifting it needs both of its signal probes and a
-  userspace consumer.
+  with its restart code (-512…-516). Its kernel half — two
+  probes never attached, and enter/exit hooks emitting records
+  nothing read — was removed (task pf4); lifting it needs both
+  of its signal probes and a userspace consumer.
 - **#23 Target-pattern mechanics** — match on exec (argv/exe)
   vs comm; glob vs regex; concurrent matches (newest wins vs
   trace all vs error); restart semantics (wait for
