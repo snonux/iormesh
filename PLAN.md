@@ -1375,13 +1375,14 @@ Kubernetes (M7) build on it.
   5.14.0-741.22.1.el9_9, build of 35c7de7) printed every
   criterion M4-0 to M4-14 PASS. Limits of the evidence: both
   VMs share one physical host (one hardware clock, one
-  physical network), and one run passed all 15; the five before
-  it each failed on defects since fixed (gf4–nf4, qf4, tf4).
+  physical network), and two runs passed all 15 (the sixth, and
+  3f4's below); the five before the sixth each failed on defects
+  since fixed (gf4–nf4, qf4, tf4).
   Owner-delegated advisor decision; the run was made by agents
-  on hosts the owner provided for it. Task 3f4 first re-runs
-  the acceptance on a HEAD build (pf4 changed the BPF object
-  after 35c7de7); any FAIL there sets M4 back to not accepted
-  until fixed. History: the first run passed 11 of 15;
+  on hosts the owner provided for it. Task 3f4 re-ran the
+  acceptance on a HEAD build (5eedf77, after pf4 changed the
+  BPF object) on the same VMs: every criterion PASS again, so M4
+  stays accepted. History: the first run passed 11 of 15;
   the microservices TLS label (kf4), one cross-host hop of the
   spread (if4), the clock bound (jf4) and the watchdog reason in
   the summary (lf4) fail on defects filed as tasks, none of them
@@ -1619,6 +1620,20 @@ Kubernetes (M7) build on it.
   scripted stand-in has run the pipeline, 10/10, and a wrong one
   is refused) — and the real-host re-check (task 3f4)
   ([docs/testing.md](docs/testing.md) "M5 on the rig").
+  *Real-host re-check (task 3f4, 2026-11-21): still not
+  accepted.* On the store of 3f4's M4 run (Rocky 9.9, the
+  spread with the agent, collected over SSH) every surface
+  works — `show`, `query -ref`, threads, processes, the TUI walk
+  to a step's Java stack, the site (headless Chrome, every route,
+  empty console), byte-identical rebuilds, the stand-in eval —
+  but the sequence criterion fails: the checkout has 1696 steps,
+  orders' serving thread loading classes from the JDK's
+  `lib/modules` (744 `pread64`) on its first request, and the
+  200-step cap cuts it before the inventory hop, so neither the
+  later hops nor any service's create-tmp/rename are shown; the
+  process view's file cap hides orders' config and record the
+  same way (task vg4). The eval still awaits the owner's model.
+  ([docs/testing.md](docs/testing.md) "M5 on Rocky 9.9").
 
 ### M6 — Mesh expansion: follow the edges, from the controller
 
@@ -1689,6 +1704,19 @@ operator's SSH key from the controller.
   (task 3f4) come first (Sequencing relaxation), and the rig
   starts an enrolled host's tracer itself, where a real round
   deploys it over SSH.
+  Real-host re-check (task 3f4, 2026-11-21): passes on the rig
+  and on two Rocky 9.9 hosts except one criterion — still not
+  accepted. With only iom1 (gateway, inventory, billing)
+  enrolled, round 1 proposed exactly iom2's orders port at hop
+  1; with the allowlist narrowed, it was listed `not_allowed`,
+  `-apply` enrolled nothing and iom2 saw no login; `-apply`
+  then enrolled and deployed iom2 over SSH, bound to orders'
+  listening port; later rounds proposed nothing (the cycle back
+  to iom1 is visited), and a re-run's merge has the same network
+  shape as a by-hand build of both hosts, all three cross-host
+  hops fused. A hop limit of 1 stopping at the first ring needs
+  a third host, the hop-2 peer two hosts cannot provide (task
+  wg4) ([docs/testing.md](docs/testing.md) "M6 on Rocky 9.9").
 
 ### M7 — Kubernetes: sidecar & debug-container deployment
 

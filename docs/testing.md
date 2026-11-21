@@ -620,12 +620,13 @@ acceptance itself (PLAN.md M4, "Acceptance") also needs one run
 on two real hosts. **Status (2026-11-21): accepted** (PLAN.md
 M4, an owner-delegated advisor decision): run six times on two
 Rocky 9.9 VMs the owner provided; the sixth (qf4, the build of
-35c7de7) printed every criterion PASS. Both VMs share one
-physical host; task 3f4 re-runs the acceptance on a HEAD build
-first — the two kf4 runs before it passed 14 of
-15 each, the fourth failing the clock bound (before jf4), the
-fifth the spread M4-9 (skipped runs, qf4) (see "Run on Rocky
-9.9" below).
+35c7de7) printed every criterion PASS, and so did a seventh on
+a HEAD build (task 3f4, the build of 5eedf77). Both VMs share
+one physical host; the two kf4 runs before the sixth passed 14
+of 15 each, the fourth failing the clock bound (before jf4),
+the fifth the spread M4-9 (skipped runs, qf4) (see "Run on
+Rocky 9.9" below). The M5 and M6 re-checks on the same VMs are
+"M5 on Rocky 9.9" and "M6 on Rocky 9.9" below.
 
 `mage m4Acceptance HOST1 HOST2` (`magefile_m4acceptance.go`,
 `internal/acceptance`) runs the whole sequence and checks each
@@ -1086,6 +1087,19 @@ Also found on el9, outside M4's sequence: a session dies with
 "schema: invalid: fd_gen 1 without an fd" when the pattern also
 matches a `su` that runs the JVM (task mf4).
 
+A seventh run (task 3f4, the build of 5eedf77: pf4's BPF object
+changes and uf4's stamped, signed artifacts; both VMs
+bootstrapped again with it as root, work directory
+`~/.iormesh-m4-3f4-1`) **passed all 15 criteria** on el9: M4-2
+3 rounds and 44 files; M4-5 the golden on 1358 events; M4-8
+`127.0.0.1:18213 tls x1, 127.0.0.1:18211 tls x1,
+127.0.0.1:18212 plain x2`; M4-9 two conns fused across iom1
+and iom2, `10.20.0.141:18216 tls x1, 10.20.0.141:18214 tls x1,
+10.20.0.140:18215 plain x2`; M4-10 one window, two-sided, width
+749µs; M4-14 15 sessions collected and nothing under
+`/opt/iormesh`. Ports and DNAT as before, removed after the M6
+rounds below.
+
 Both VMs were bootstrapped again after the kf4 run with the build
 of 1080cfd (the run's `rm` removes `/opt/iormesh`; the agent jar
 needs no bootstrap, deploy installs it), so a rerun with that
@@ -1254,6 +1268,72 @@ the pipe-ipc pattern session (three runs) and lb4's
 `su paul -c java … tcp-loopback` session (`-out` and
 `-trace-dir`) now end `stop`. The old binary still dies on the
 su run. A writer's error now names the event it rejects.
+
+### M5 on Rocky 9.9 (task 3f4, 2026-11-21)
+
+PLAN.md M5's re-check on the real hosts. The input is the store
+of the seventh M4 run above — the spread's four projects
+(m4sgw, m4sinv, m4sord, m4sbill), traced with the agent,
+deployed and collected over SSH — copied under a scratch `HOME`
+(`~/.iom5`), the three servers named by address and port
+(`services name -port 18216 10.20.0.141 orders`, 18214 billing,
+18215 on 10.20.0.140 inventory) and built with `iormeshctl`.
+**Not accepted: the sequence criterion fails (task vg4).**
+
+| Surface | Result |
+|---|---|
+| model | PASS — orders, inventory and billing named, orders and billing `tls`, inventory `plain` (2 conns), 4 edges fused, nothing unresolved |
+| sequence | FAIL — the checkout (0002, `POST /orders`, 3 hops) has 1696 steps; orders' serving thread (iom2 tid 9041) loads classes from `/usr/lib/jvm/java-25-openjdk/lib/modules` on its first request (744 `pread64`) and resolves names (`/etc/host.conf`, `resolv.conf`, `hosts`, `libnss_myhostname`), and the 200-step cap (`viewmodel.MaxSteps`) cuts the conversation before the inventory hop: its services and lifelines name only the gateway and orders, and no create-tmp, write or rename is shown. The kept steps are all `causal`, the first hop `paired` with its stack (`HttpClientImpl#send` … `ServiceNode#checkout`) |
+| `show` | PASS for the walk to a stack: `show sequence 0002 -json` has step 1's whole stack, `query -ref` its raw `http` event, `show thread orders/HTTP-Dispatcher` the thread's story (cut like the sequence). `show processes` lists orders' server socket with the gateway as peer, but cuts its files at 32 (90 more, the JVM's library probes first, as the pattern session traces from exec), so its config and record are not listed (vg4) |
+| TUI | PASS — in tmux, `/orders`, ⏎ ⏎ ⏎ reaches the checkout with step 1's detail (its Java stack and `iormeshctl query -ref`), ⏎ its thread's story |
+| site | PASS — the embedded model equals `model.json`, CSP `default-src 'none'`, no remote reference; headless Chrome 144 prints `selftest: ok 228 routes` from `file://` with an empty console |
+| SVG | rebuild PASS (same bytes in the same site folder); `graph.svg` names the hosts and the services. The goldens are the rig's three-host layout: the checkout's export holds the cut sequence above, not the golden's story (vg4) |
+| eval | pipeline PASS — `iormesheval` with the scripted stand-in scores 10/10 on this store, the wrong one 0/10 and is refused; the criterion still awaits the owner's model command |
+
+The rig's run did not meet the cap; why (it attaches by PID after
+the JVMs started, the agent's bootstrap append limits class
+sharing to boot classes — the JVM warns so — or the JDK build) is
+part of vg4.
+
+### M6 on Rocky 9.9 (task 3f4, 2026-11-21)
+
+PLAN.md M6's re-check on the real hosts, by hand with the
+`iormeshctl` of the build above, `HOME` a scratch directory
+(`~/.iormesh-m6-3f4`). Two hosts cannot give every service a
+host of its own, so the layout differs from M4-9's: iom1 runs
+the gateway, inventory (`--bind 10.20.0.140 --port 18215`) and
+billing (`--bind 10.20.0.140 --port 18214`), each with the agent;
+iom2 runs orders (`--bind 10.20.0.141 --port 18216`, calling
+both on iom1), without it. Only iom1 is registered, as project
+`edge` with one pattern for every role
+(`java -jar */.iormesh-m6-run/workload.jar microservices --role *
+--dir */.iormesh-m6-run/m6`, `-duration 1h -spool
+/run/iormesh/spool/edge -agent /opt/iormesh/lib/iormesh-agent.jar`),
+and the registry's `expand:` allows 10.20.0.140/32 and
+10.20.0.141/32. Firewall: 18214 and 18215 on iom1, 18216 on iom2,
+runtime only.
+
+Each round: `deploy -restart iom1`; start billing and inventory,
+copy billing's certificate to iom2 (`base64`), start orders; once
+it listens, deploy any enrolled host (bound to orders' port,
+resolved at start); copy orders' certificate to iom1, run the
+gateway; the servers retire after their calls; after 70 s,
+`collect`. Round 2 deploys through `expand -apply` at that
+point.
+
+| Criterion | Result |
+|---|---|
+| only the gateway host enrolled, rounds discover and deploy every service host | PASS — round 1's `expand` proposes exactly `10.20.0.141:18216 hop 1` (the two inbound skips aside); round 2's `expand -apply` enrolls `10.20.0.141`, hop 1, project `edge`, `listen_port: 18216`, verifies the signed build and starts the session on iom2 over SSH, bound to orders' pid |
+| after the scenario re-runs, the merge equals the one of all hosts added by hand | PASS — round 3's own sessions merge to 4 edges fused, tcp 3 fused and 0 unresolved, orders and billing `tls`, inventory `plain` x2; a by-hand run (`~/.iom6h`: iom1 as above plus `add -project edge -listen-port 18216 10.20.0.141`) builds the same, and both graphs' connection shapes (each socket's ends by host, process and state) are identical. Each side has two one-ended UDP sockets, DNS to the gateway's resolver |
+| convergence honesty | PASS — the store's merge after round 2 keeps round 1's gateway → orders end unresolved, and round 1's server halves of orders' untraced calls |
+| a peer outside the allowlist is listed, never contacted | PASS — with 10.20.0.140/32 alone, the peer is `not_allowed`, `expand -apply` prints "nothing to enroll", the registry's hash is unchanged, and iom2's sshd logged no login meanwhile |
+| a cyclic topology terminates | PASS — rounds 2 and 3 (`-hops 1`, `-hops 5`) propose nothing: orders' calls back to iom1 reach a registered host |
+| a hop limit of 1 stops at the first ring | NOT RUN — needs a hop-2 peer, a third host reachable only through a service on iom2; every peer of iom2 is iom1 (task wg4) |
+
+M6 stays "passes on the rig" until wg4's host shows the hop
+limit. Afterwards both hosts were removed with `rm` (every
+session collected), bootstrapped again with the same build, and
+the ports closed.
 
 ## el9 record layout (task of4)
 
