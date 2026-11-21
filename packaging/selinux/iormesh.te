@@ -13,13 +13,25 @@ policy_module(iormesh, 0.1.0)
 # to the app containers' JVMs (container_t), found by task 7h4's
 # audit2allow review of a permissive run.
 #
-# MCS: like container_t it can read only files its level dominates. Run
-# it at the pod's own MCS pair (iormeshctl deploy -selinux-level
-# s0:cN,cM): at the default s0 the app container's files, which the
-# Java attach reaches through /proc/<pid>/root, are out of its reach,
-# and so are the app's processes: the container_t rules below then
-# apply to no process at all. At the pod's pair they reach the pod's
-# app containers only - other pods run at other pairs.
+# Capabilities: this module grants none. Six of the tracer's seven (bpf,
+# perfmon, checkpoint_restore, sys_ptrace, sys_resource, dac_override;
+# all but kill) reach the type only through container-selinux's
+# virt_sandbox_use_all_caps boolean (on by default), as they reach
+# container_t; with it off the BPF load fails on capability2 { bpf
+# perfmon }. Leave the boolean on (getsebool virt_sandbox_use_all_caps).
+#
+# MCS: like container_t it is MCS-constrained, but MCS does not gate
+# every rule below. It gates the signal, file and lnk_file reads, dir
+# search and read, and writes to filesystem sockets: run the tracer at
+# the pod's own MCS pair (iormeshctl deploy -selinux-level s0:cN,cM),
+# where those reach the pod's app containers and any container_t at
+# plain s0; at the default s0 the app's files (/proc/<pid>/root) and
+# processes are out of reach, so the Java attach is denied. Not gated:
+# unix_stream_socket connectto (an abstract socket is bounded by the
+# pod's network namespace), file open/getattr and dir getattr (bounded
+# by what the tracer's PID namespace shows). Pods sharing one pinned
+# pair (replicas of a Deployment, a namespace) are not separated by MCS
+# at all; there containment rests on the namespaces.
 #
 # Build: mage selinuxRPM (packaging/selinux/build.sh); unit tests in
 # packaging/selinux/policy_test.go pin the permission sets below.

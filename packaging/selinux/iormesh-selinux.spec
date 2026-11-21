@@ -45,14 +45,18 @@ bzip2 -9 %{modulename}.pp
 install -D -m 0644 %{modulename}.pp.bz2 \
     %{buildroot}%{_datadir}/selinux/packages/%{selinuxtype}/%{modulename}.pp.bz2
 
+# Priority 200, the distribution packages' (container, k3s), so 400
+# stays free for the node owner's local overrides.
 %post
-/usr/sbin/semodule -s %{selinuxtype} -i \
+/usr/sbin/semodule -s %{selinuxtype} -X 200 -i \
     %{_datadir}/selinux/packages/%{selinuxtype}/%{modulename}.pp.bz2
 
 %postun
 # $1 is 0 on erase, 1 on upgrade (the new package's %post reinstalled it).
+# Stop every iormesh_container_t tracer first: once the type is gone its
+# processes become unlabeled_t.
 if [ "$1" -eq 0 ]; then
-    /usr/sbin/semodule -s %{selinuxtype} -r %{modulename}
+    /usr/sbin/semodule -s %{selinuxtype} -X 200 -r %{modulename}
 fi
 
 %files

@@ -107,8 +107,9 @@ func TestPolicyNothingBroad(t *testing.T) {
 }
 
 // TestSpec: the RPM builds the module with selinux-policy-devel against
-// container-selinux, installs it in %post with semodule -i, removes it in
-// %postun on erase only (not on upgrade), and requires container-selinux.
+// container-selinux, installs it in %post with semodule -i at priority 200
+// (400 stays the node owner's), removes it in %postun on erase only (not
+// on upgrade), and requires container-selinux.
 func TestSpec(t *testing.T) {
 	b, err := os.ReadFile("iormesh-selinux.spec")
 	if err != nil {
@@ -121,9 +122,9 @@ func TestSpec(t *testing.T) {
 		"Requires:       container-selinux",
 		"Source0:        %{modulename}.te",
 		"make -f %{_datadir}/selinux/devel/Makefile %{modulename}.pp",
-		"%post\n/usr/sbin/semodule -s %{selinuxtype} -i \\\n" +
+		"%post\n/usr/sbin/semodule -s %{selinuxtype} -X 200 -i \\\n" +
 			"    %{_datadir}/selinux/packages/%{selinuxtype}/%{modulename}.pp.bz2\n",
-		"if [ \"$1\" -eq 0 ]; then\n    /usr/sbin/semodule -s %{selinuxtype} -r %{modulename}\nfi",
+		"if [ \"$1\" -eq 0 ]; then\n    /usr/sbin/semodule -s %{selinuxtype} -X 200 -r %{modulename}\nfi",
 		"%global modulename iormesh\n",
 	} {
 		if !strings.Contains(spec, want) {
