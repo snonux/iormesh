@@ -5634,7 +5634,16 @@ depends on:
     address — for an in-pod end only among endpoints without a
     UID, as pod IPs are reused) — or, not listed, the host id plus a
     `stale_service` flag; an unfused one is a `service` edge to
-    the workload, with a pod only for a sole endpoint. Tests:
+    the workload, with a pod only for a sole endpoint. A `route`
+    edge (FQDN → ingress → Service → workload) names its
+    Service's sole endpoint too, but only when that pod was traced
+    (task ff4): `Join` takes the build's traced host ids
+    (`viewmodel.tracedHosts`: the tally's sessions and every
+    traced end of an observation) and `addRoute` names the
+    endpoint whose `pod-<uid>` is among them — its pod name, else
+    the host id. Two endpoints, one without a UID or an untraced
+    pod name none. On kind the inventory backend under its
+    sidecar is that pod. Tests:
     `internal/routemap/join_test.go` merges two synthetic pods'
     traces with the unchanged merge and checks the joined result
     against `testdata/clusterip.golden`.

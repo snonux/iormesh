@@ -1615,7 +1615,12 @@ docs/implementation.md M7 steps 11 and 12):
   the fused edge names the Service and the pod (matched by UID);
   an untraced Service with two endpoints stops at its
   StatefulSet with no pod, one with a sole endpoint names it; the
-  FQDN is routed through Traefik; an address in the Service CIDR
+  FQDN is routed through Traefik (`ingress_test.go`
+  `TestRouteNamesSoleTracedPod`: the route's edge names the
+  Service's one endpoint when that pod is traced, not for two
+  endpoints, an untraced pod or an endpoint without a UID;
+  `viewmodel` `TestRoutesNameTracedPod` the same from
+  observations); an address in the Service CIDR
   no Service holds is `unknown_service`, a fused pod missing from
   a Service's endpoints `stale_service`, an HTTP host whose route
   names another Service than the one reached
@@ -1813,7 +1818,7 @@ discover`, `build -registry`.
 | `clusterip` | tcp-nat's client dials the server Service's ClusterIP (880, DNAT to the pod's 80): the build prints the routed edge `→ Service → deployment → pod (fused, 1 connections)`; each pod's trace matches `expect-client.json` / `expect-server.json` and the merge `expect.json`, the rig's addresses replaced by the client pod's, the ClusterIP and the server pod's (no SNAT between pods); a golden with the client dialing the pod fails |
 | `hairpin` | tcp-nat's two roles in one pod, the client dialing the pod's own Service: one fused connection, the server end seeing the node's masquerade address (10.244.0.1), the Service and pod named |
 | `identity` | every pod is its own store directory and host, `pod-<uid>`, with the FQDN `<name>.<ns>.<uid[:8]>`; all share one `boot_id` |
-| `ingress` | the gateway (debug container with the agent) asks for `shop.iormesh.test` through Traefik (hostAliases to Traefik's ClusterIP); the backend runs under a sidecar. The build prints one routed edge `→ shop.iormesh.test → ingress/<ns>/shop → <ns>/inventory → <ns>/deployment/inventory (route, 1 connections)`, no route flag; `model.json` and `graph.svg` carry it; the discovered route's FQDN, ingress, Service and ingress Service equal the scenario's declared `routes.yaml` (discovery leaves the workload to the Service, so it is checked in the build's line), and the snapshot holds the IngressRoute's host too (`traefik.io`); the merged trace matches `workload/scenarios/ingress/expect.json` (both ends unresolved: Traefik splits the call; the gateway's `dns` and `http` events carry the FQDN) |
+| `ingress` | the gateway (debug container with the agent) asks for `shop.iormesh.test` through Traefik (hostAliases to Traefik's ClusterIP); the backend runs under a sidecar. The build prints one routed edge `→ shop.iormesh.test → ingress/<ns>/shop → <ns>/inventory → <ns>/deployment/inventory → <ns>/<inventory pod> (route, 1 connections)` — the pod named as the Service's sole endpoint, traced by the sidecar (task ff4) — no route flag; `model.json` and `graph.svg` carry it; the discovered route's FQDN, ingress, Service and ingress Service equal the scenario's declared `routes.yaml` (discovery leaves the workload to the Service, so it is checked in the build's line), and the snapshot holds the IngressRoute's host too (`traefik.io`); the merged trace matches `workload/scenarios/ingress/expect.json` (both ends unresolved: Traefik splits the call; the gateway's `dns` and `http` events carry the FQDN) |
 | `rbac` | `routes discover` as a ServiceAccount allowed only `list` on services, pods, endpointslices, replicasets, ingresses and ingressroutes (both Traefik groups), not secrets: same two routes |
 | `sigterm` | deleting a pod ends its debug tracer on the kubelet's SIGTERM: exit 0, about 0.6 s after the delete, inside the 5 s grace |
 
@@ -1891,8 +1896,10 @@ gateway's agent flags), ef4 (deploy returned before the tracer was attached; the
 waited for its `attached` log line; built since: deploy waits for
 the tracer's attach state and the test only checks deploy's
 `attached, session` line — the sidecar's own start, which no
-deploy makes, is still awaited by its log line), ff4 (a route edge never names a
-sole endpoint's pod).
+deploy makes, is still awaited by its log line), ff4 (a route edge never named a
+sole endpoint's pod; built since: a traced sole endpoint is named,
+and the `ingress` check expects the inventory pod at the end of
+the routed edge, in the summary and `model.json`).
 
 ## Performance baselines
 

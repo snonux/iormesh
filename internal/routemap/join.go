@@ -20,7 +20,8 @@ const (
 	BasisService = "service"
 	// BasisRoute: the client asked for an FQDN the map routes through an
 	// ingress; the ingress ended the connection, so the edge is the
-	// route's, never the traces'.
+	// route's, never the traces'. It names a pod only when the Service
+	// has exactly one endpoint and that pod was traced (Join's traced).
 	BasisRoute = "route"
 )
 
@@ -107,9 +108,12 @@ type Result struct {
 // Join routes the flows. A flow to a ClusterIP is matched by the
 // address it dialed (a fact of the trace) before any route by name (the
 // client's word); a flow the map names nothing about is left out, to
-// stay the plain unresolved edge it was.
-func (t *Table) Join(flows []Flow) Result {
-	j := joiner{t: t, edges: map[edgeKey]*Edge{}, flags: map[Flag]int{}}
+// stay the plain unresolved edge it was. traced holds the host ids of
+// the build's traced sessions ("pod-<uid>" for an in-pod tracer): a
+// route edge names its Service's sole endpoint only when that pod is
+// among them (addRoute). nil means none.
+func (t *Table) Join(flows []Flow, traced map[string]bool) Result {
+	j := joiner{t: t, traced: traced, edges: map[edgeKey]*Edge{}, flags: map[Flag]int{}}
 	if t != nil {
 		for _, f := range t.flags {
 			j.flag(f.Kind, f.Subject, f.Detail, 0)
@@ -128,9 +132,10 @@ type edgeKey struct {
 }
 
 type joiner struct {
-	t     *Table
-	edges map[edgeKey]*Edge
-	flags map[Flag]int // Conns zeroed in the key; the value counts them
+	t      *Table
+	traced map[string]bool // host ids with a traced session
+	edges  map[edgeKey]*Edge
+	flags  map[Flag]int // Conns zeroed in the key; the value counts them
 }
 
 // flow routes one flow and checks its HTTP hosts. A flow that reached
@@ -204,12 +209,25 @@ func (j *joiner) route(f *Flow) {
 	}
 }
 
-// addRoute adds f as r's edge: FQDN → ingress → Service → workload.
+// addRoute adds f as r's edge: FQDN → ingress → Service → workload, and
+// → pod by the ClusterIP join's single-endpoint rule (service): a
+// Service that lists exactly one endpoint names it (task ff4). A route
+// edge adds one condition, that the pod was traced (its "pod-<uid>"
+// host id in traced): the ingress ended the client's connection, so no
+// trace of the flow ever reached the backend — its own trace is the
+// evidence that the map's one endpoint was the pod serving then, not a
+// stale entry. Two endpoints, an endpoint without a UID or an untraced
+// pod name none.
 func (j *joiner) addRoute(f *Flow, r Route, origin string) {
 	k := edgeKey{from: f.From, fqdn: r.FQDN, ingress: r.Ingress, service: r.Service,
 		workload: r.Workload, basis: BasisRoute, origin: origin}
 	if s, ok := j.t.Service(r.Service); ok {
 		k.workload, k.endpoints = cmp.Or(r.Workload, s.Workload), len(s.Endpoints)
+		if len(s.Endpoints) == 1 {
+			if ep := s.Endpoints[0]; ep.UID != "" && j.traced["pod-"+ep.UID] {
+				k.pod = cmp.Or(ep.Pod, "pod-"+ep.UID)
+			}
+		}
 	}
 	j.add(k, f)
 }

@@ -173,7 +173,7 @@ func TestClusterIPGoldenMerge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := json.MarshalIndent(Compile(m, nil, nil).Join(flows(fusion, events, hostnames)), "", "  ")
+	got, err := json.MarshalIndent(Compile(m, nil, nil).Join(flows(fusion, events, hostnames), nil), "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}

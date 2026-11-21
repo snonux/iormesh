@@ -53,9 +53,11 @@ type RouteFlag struct {
 // Only connections whose client was traced take part: only the client
 // knows what it dialed and asked for. Labels follow the edges' rule
 // (servicedb Interactions): the service a client app serves, else its
-// app, else its process name.
+// app, else its process name. traced are the build's traced host ids,
+// which let a route edge name its Service's sole endpoint (routemap
+// Join).
 func routes(t *routemap.Table, obs []servicedb.Observation, conns []federate.Conn,
-	eps []servicedb.Endpoint) ([]Route, []RouteFlag) {
+	eps []servicedb.Endpoint, traced map[string]bool) ([]Route, []RouteFlag) {
 	outR, outF := []Route{}, []RouteFlag{}
 	if t.Empty() {
 		return outR, outF
@@ -78,7 +80,7 @@ func routes(t *routemap.Table, obs []servicedb.Observation, conns []federate.Con
 		}
 		flows = append(flows, f)
 	}
-	res := t.Join(flows)
+	res := t.Join(flows, traced)
 	for _, e := range res.Edges {
 		outR = append(outR, Route{From: e.From, FQDN: e.FQDN, Ingress: e.Ingress, Service: e.Service,
 			Workload: e.Workload, Pod: e.Pod, Basis: e.Basis, Endpoints: e.Endpoints, Origin: e.Origin,
@@ -88,6 +90,25 @@ func routes(t *routemap.Table, obs []servicedb.Observation, conns []federate.Con
 		outF = append(outF, RouteFlag(f))
 	}
 	return outR, outF
+}
+
+// tracedHosts are the host ids this build has a traced session of: the
+// tally's sessions and every traced end of an observed connection (a
+// server end's host is "pod-<uid>" in a pod). A pod that served the
+// ingress's side of a routed call is traced by the second.
+func tracedHosts(t *Tally, obs []servicedb.Observation) map[string]bool {
+	out := map[string]bool{}
+	for h := range fqdns(t) {
+		out[h] = true
+	}
+	for _, o := range obs {
+		for _, h := range []string{o.Host, o.Client.Host, o.Server.Host} {
+			if h != "" {
+				out[h] = true
+			}
+		}
+	}
+	return out
 }
 
 // clientHosts are the distinct hosts of a connection's requests as its

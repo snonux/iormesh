@@ -2,6 +2,7 @@ package routemap
 
 import (
 	"net/netip"
+	"strings"
 	"testing"
 )
 
@@ -27,7 +28,7 @@ func TestReusedPodIP(t *testing.T) {
 		return Flow{From: "a", Endpoint: netip.MustParseAddrPort("10.96.0.20:80"), Fused: true,
 			ServerHost: host, ServerAddr: netip.MustParseAddrPort(addr)}
 	}
-	r := tbl.Join([]Flow{flow("pod-"+uid2, "10.244.1.5:80")})
+	r := tbl.Join([]Flow{flow("pod-"+uid2, "10.244.1.5:80")}, nil)
 	if len(r.Edges) != 1 || r.Edges[0].Pod != "pod-"+uid2 {
 		t.Errorf("reused IP named %+v", r.Edges)
 	}
@@ -35,7 +36,7 @@ func TestReusedPodIP(t *testing.T) {
 		t.Errorf("reused IP flags %+v, want stale_service", r.Flags)
 	}
 	r = tbl.Join([]Flow{flow("pod-"+uid1, "10.244.1.5:80"), flow("pod-"+uid2, "10.244.1.6:80"),
-		flow("hostB", "10.244.1.5:80")})
+		flow("hostB", "10.244.1.5:80")}, nil)
 	if len(r.Flags) != 0 {
 		t.Errorf("listed ends flagged: %+v", r.Flags)
 	}
@@ -81,7 +82,7 @@ func TestInClusterIngress(t *testing.T) {
 		"C: fused via clusterip":  {withTraefik, ask("10.96.0.100:80", true, "pod-"+uidT, "10.244.9.1:8000"), 0},
 		"C: fused straight to it": {withTraefik, ask("10.244.9.1:8000", true, "pod-"+uidT, "10.244.9.1:8000"), 0},
 	} {
-		r := c.tbl.Join([]Flow{c.flow})
+		r := c.tbl.Join([]Flow{c.flow}, nil)
 		if len(r.Edges) != 1 || r.Edges[0].Basis != BasisRoute || r.Edges[0].Ingress != "traefik" ||
 			r.Edges[0].Service != "prod/backend" {
 			t.Errorf("%s: edges %+v, want the route's", name, r.Edges)
@@ -91,12 +92,47 @@ func TestInClusterIngress(t *testing.T) {
 		}
 	}
 	// Another pod than Traefik's, reached by the FQDN, still contradicts.
-	r := withTraefik.Join([]Flow{ask("10.244.7.7:80", true, "pod-"+uid2, "10.244.7.7:80")})
+	r := withTraefik.Join([]Flow{ask("10.244.7.7:80", true, "pod-"+uid2, "10.244.7.7:80")}, nil)
 	if len(r.Flags) != 1 || r.Flags[0].Kind != FlagContradicted {
 		t.Errorf("non-ingress pod: %+v", r.Flags)
 	}
 	if _, err := Parse("bad", []byte("routes:\n  - {fqdn: a.example.org, ingress: t, service: p/b, "+
 		"ingress_service: traefik}\n")); err == nil {
 		t.Error("ingress_service without a namespace accepted")
+	}
+}
+
+// TestRouteNamesSoleTracedPod: a routed edge names the pod by the
+// ClusterIP join's single-endpoint rule when that pod was traced (task
+// ff4) — its name, else its host id; two endpoints, an untraced pod or
+// an endpoint without a UID name none.
+func TestRouteNamesSoleTracedPod(t *testing.T) {
+	ask := Flow{From: "gateway", Endpoint: netip.MustParseAddrPort("10.96.0.100:80"), Hostname: "shop.example.org"}
+	one := ingressMap + traefikService
+	named := strings.Replace(one, "endpoints: [{addr: 10.244.1.5, uid: "+uid1+"}]",
+		"endpoints: [{addr: 10.244.1.5, pod: prod/backend-abc, uid: "+uid1+"}]", 1)
+	two := strings.Replace(one, "endpoints: [{addr: 10.244.1.5, uid: "+uid1+"}]",
+		"endpoints: [{addr: 10.244.1.5, uid: "+uid1+"}, {addr: 10.244.1.6, uid: "+uid2+"}]", 1)
+	noUID := strings.Replace(one, "endpoints: [{addr: 10.244.1.5, uid: "+uid1+"}]",
+		"endpoints: [{addr: 10.244.1.5}]", 1)
+	both := map[string]bool{"pod-" + uid1: true, "pod-" + uid2: true}
+	for name, c := range map[string]struct {
+		m      string
+		traced map[string]bool
+		pod    string
+		eps    int
+	}{
+		"one endpoint, traced":       {one, map[string]bool{"pod-" + uid1: true}, "pod-" + uid1, 1},
+		"one named endpoint, traced": {named, map[string]bool{"pod-" + uid1: true}, "prod/backend-abc", 1},
+		"two endpoints, traced":      {two, both, "", 2},
+		"one endpoint, untraced":     {one, map[string]bool{"pod-" + uid2: true}, "", 1},
+		"nothing traced":             {one, nil, "", 1},
+		"one endpoint without uid":   {noUID, both, "", 1},
+	} {
+		r := Compile(mustParse(t, c.m), nil, nil).Join([]Flow{ask}, c.traced)
+		if len(r.Edges) != 1 || r.Edges[0].Basis != BasisRoute || r.Edges[0].Pod != c.pod ||
+			r.Edges[0].Endpoints != c.eps {
+			t.Errorf("%s: edges %+v, want pod %q of %d endpoints", name, r.Edges, c.pod, c.eps)
+		}
 	}
 }

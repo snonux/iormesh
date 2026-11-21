@@ -64,7 +64,8 @@ func New(in Input) Model {
 		m.MoreConversations, m.Health.RequestsCut = r.more, r.cut
 	}
 	m.Processes, m.MoreProcesses = processes(in.Report, n)
-	m.Routes, m.Health.RouteFlags = routes(in.Routes, in.Observations, in.Merge.Conns, in.Endpoints)
+	m.Routes, m.Health.RouteFlags = routes(in.Routes, in.Observations, in.Merge.Conns, in.Endpoints,
+		tracedHosts(in.Tally, in.Observations))
 	return m
 }
 

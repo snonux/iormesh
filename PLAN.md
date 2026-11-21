@@ -1820,7 +1820,11 @@ Later phase — plain Linux servers (M4) come first.
   listed flags the map `stale_service`, the fused fact stands);
   a ClusterIP edge whose pod is untraced completed to the
   Service and its workload, to a pod only when the Service
-  lists exactly one endpoint; an
+  lists exactly one endpoint; a routed (ingress) edge ends at
+  the pod by the same rule, provided the build also traced that
+  pod (task ff4: no trace of the client's flow reaches past the
+  ingress, so the pod's own trace vouches for the map's one
+  endpoint); an
   address inside a declared Service CIDR no Service holds
   flagged `unknown_service`. Confirmed on kind (task yb4): a
   ClusterIP connection between two traced pods fuses in the

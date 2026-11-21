@@ -40,7 +40,7 @@ services:
 	if _, ok := tbl.ServiceAt(netip.MustParseAddrPort("10.96.0.21:80")); ok {
 		t.Error("the shadowed discovered prod/backend's ClusterIP still resolves")
 	}
-	flags := tbl.Join(nil).Flags
+	flags := tbl.Join(nil, nil).Flags
 	want := map[string]bool{"route shop.example.org": true, "service prod/backend": true,
 		"service prod/other": true, "x.example.org": true}
 	if len(flags) != len(want) {
@@ -78,17 +78,17 @@ func TestJoinNegative(t *testing.T) {
 		{From: "a", Endpoint: netip.MustParseAddrPort("10.0.2.2:8080"), Fused: true, ServerHost: "hostB",
 			Hostname: "shop.example.org"},
 	}
-	if r := (*Table)(nil).Join(flows); len(r.Edges) != 0 || len(r.Flags) != 0 {
+	if r := (*Table)(nil).Join(flows, nil); len(r.Edges) != 0 || len(r.Flags) != 0 {
 		t.Errorf("nil table joined %+v", r)
 	}
 	tbl := Compile(mustParse(t, goodRoutes), nil, nil)
-	if r := tbl.Join(flows); len(r.Edges) != 0 || len(r.Flags) != 0 {
+	if r := tbl.Join(flows, nil); len(r.Edges) != 0 || len(r.Flags) != 0 {
 		t.Errorf("unnamed flows joined %+v", r)
 	}
 	bare := Compile(mustParse(t, "services:\n  - {service: prod/x, cluster_ips: [10.96.0.7], ports: [{port: 80}]}\n"),
 		nil, nil)
 	r := bare.Join([]Flow{{From: "a", Endpoint: netip.MustParseAddrPort("10.96.0.7:80"), Fused: true,
-		ServerHost: "pod-x", ServerAddr: netip.MustParseAddrPort("10.244.0.9:80")}})
+		ServerHost: "pod-x", ServerAddr: netip.MustParseAddrPort("10.244.0.9:80")}}, nil)
 	if len(r.Flags) != 0 || len(r.Edges) != 1 || r.Edges[0].Pod != "pod-x" {
 		t.Errorf("endpoint-less service: %+v", r)
 	}
@@ -102,14 +102,14 @@ func TestJoinDirectContradiction(t *testing.T) {
 	tbl := Compile(mustParse(t, goodMap), nil, nil)
 	r := tbl.Join([]Flow{{From: "a", Endpoint: netip.MustParseAddrPort("10.244.7.7:8080"), Fused: true,
 		ServerHost: "pod-other", ServerAddr: netip.MustParseAddrPort("10.244.7.7:8080"),
-		HTTPHosts: []string{"shop.example.org:8080"}}})
+		HTTPHosts: []string{"shop.example.org:8080"}}}, nil)
 	if len(r.Edges) != 0 || len(r.Flags) != 1 || r.Flags[0].Kind != FlagContradicted {
 		t.Errorf("got %+v", r)
 	}
 	// Reaching a listed endpoint by address agrees with the route.
 	r = tbl.Join([]Flow{{From: "a", Endpoint: netip.MustParseAddrPort("10.244.2.6:8080"), Fused: true,
 		ServerHost: "hostB", ServerAddr: netip.MustParseAddrPort("10.244.2.6:8080"),
-		HTTPHosts: []string{"shop.example.org"}}})
+		HTTPHosts: []string{"shop.example.org"}}}, nil)
 	if len(r.Flags) != 0 {
 		t.Errorf("listed endpoint flagged: %+v", r.Flags)
 	}

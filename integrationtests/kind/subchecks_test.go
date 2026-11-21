@@ -79,13 +79,15 @@ func (c *cluster) checkHairpin(t *testing.T, summary string, p podJSON) {
 
 // checkIngress: the gateway's call through Traefik is one routed edge —
 // gateway → FQDN → the Ingress → the inventory Service → its Deployment
-// — in the summary, model.json and graph.svg, with no route flag, though
-// no tracer sits on Traefik; the discovered snapshot also holds the
-// IngressRoute's host (traefik.io group).
+// → its one pod, traced by the sidecar (task ff4) — in the summary,
+// model.json and graph.svg, with no route flag, though no tracer sits on
+// Traefik; the discovered snapshot also holds the IngressRoute's host
+// (traefik.io group).
 func (c *cluster) checkIngress(t *testing.T, summary string) {
 	ns := c.ns
+	invPod := ns + "/" + c.pod(t, "inventory").Metadata.Name
 	assertLines(t, summary, "-> "+fqdn+" -> ingress/"+ns+"/shop -> "+ns+"/inventory -> "+ns+
-		"/deployment/inventory (route, 1 connections)")
+		"/deployment/inventory -> "+invPod+" (route, 1 connections)")
 	if strings.Contains(summary, "route flag") {
 		t.Errorf("the build flagged a route")
 	}
@@ -93,7 +95,8 @@ func (c *cluster) checkIngress(t *testing.T, summary string) {
 	found := false
 	for _, r := range routes {
 		found = found || r["fqdn"] == fqdn && r["ingress"] == "ingress/"+ns+"/shop" &&
-			r["service"] == ns+"/inventory" && r["workload"] == ns+"/deployment/inventory" && r["basis"] == "route"
+			r["service"] == ns+"/inventory" && r["workload"] == ns+"/deployment/inventory" && r["basis"] == "route" &&
+			r["pod"] == invPod
 	}
 	if !found || len(flags) != 0 {
 		t.Errorf("model.json routes %v, flags %v", routes, flags)
