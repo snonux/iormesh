@@ -16,7 +16,8 @@ import (
 	"iormesh/internal/schema"
 )
 
-// TestPipeIPC: pipe2 names both ends of each pipe, the child JVM's dup2s
+// TestPipeIPC: pipe2 (pipe with an older libc, pipeKindOfThisLibc) names
+// both ends of each pipe, the child JVM's dup2s
 // put the stdin and stdout pipes on its fd 0 and 1, and every pipe is one
 // fused connection — the in-process one of the parent alone, the stdio
 // ones of parent and child.
@@ -165,9 +166,34 @@ func ipcScenarioRun(t *testing.T, scenario, families string, start starter) (
 	run := traceJudged(t, h, start)
 	assertTracedOrForked(t, run.Trace, run.pids)
 	got := normalized(t, h, run, scenario)
-	want := expectation(t, scenario)
+	want := pipeKindOfThisLibc(t, got, expectation(t, scenario))
 	assertGolden(t, got, want)
 	return got, want, run
+}
+
+// pipeKindOfThisLibc returns want with its declared pipe2 events declared
+// as pipe when the trace holds pipe and no pipe2 (task nf4). Java's
+// pipe() call is the libc's choice of syscall: glibc 2.34 (Rocky 9) issues
+// pipe(2) on x86_64, a newer one (Fedora's 2.43) pipe2(fds, 0). The tracer
+// reports the syscall the process made, and both carry the same fds, so
+// the golden holds either way; only the kind's name follows the libc.
+func pipeKindOfThisLibc(t *testing.T, got normalize.Trace, want normalize.Expectation) normalize.Expectation {
+	t.Helper()
+	kinds := map[string]bool{}
+	for _, e := range got.Events {
+		kinds[e.Event] = true
+	}
+	if kinds[schema.KindPipe2] || !kinds[schema.KindPipe] {
+		return want
+	}
+	want.Events = slices.Clone(want.Events)
+	for i, e := range want.Events {
+		if e.Event == schema.KindPipe2 {
+			want.Events[i].Event = schema.KindPipe
+		}
+	}
+	t.Logf("golden %s: the libc issues pipe, not pipe2; pipe2 declared as pipe", want.Scenario)
+	return want
 }
 
 // optionless starts a solo scenario that takes no options (pipe-ipc,
