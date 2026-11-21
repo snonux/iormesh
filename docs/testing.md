@@ -1033,6 +1033,32 @@ unresolved on both ends (4 `skipped_runs` in the spread's
 sessions) — the lost-transition class of if4/qf4, not the agent.
 Ports, DNAT and bootstrap as after the fourth run.
 
+Task qf4 fixed both spread losses on the controller and replayed
+every stored run through the merge (no VM needed; the el9 rerun
+waits for the VMs):
+
+- **Third run** (`~/.iormesh-m4-if4-20261121123004`): the gateway
+  half `3c19fcadb1b49857` had only `SYN_SENT` and `CLOSE`. The
+  merge now keys a client from a `CLOSE` whose `bytes_acked`
+  counts its SYN (implementation.md M4, "The merge"); replayed,
+  that el9 `CLOSE` rebuilds orders' key, and the spread fuses
+  4 of 4 with none unresolved (before: 3 fused, 2 unresolved).
+  `TestSockSeqAbortClose` checks the `CLOSE` rebuild on 7.2 after
+  RST aborts (client, client with data queued, server);
+  `TestSockSeqFields` covers the FIN close.
+- **Fifth run** (`~/.iormesh-m4-kf4-2`): all three unresolved
+  halves had their keyed records. Inventory's server conn
+  `b727ffb216e83ea3` held two connections: orders→inventory,
+  whose final `CLOSE` a skipped run lost, then gateway→inventory,
+  accepted at the same `struct sock` address, which the
+  correlator kept under the old socket — a `key_conflict`, and
+  both clients `no_match`. The correlator now starts a new socket
+  when a record's complete 4-tuple contradicts the socket's
+  (`sockState.otherLife`, `TestLostCloseThenAddressReuse`). The
+  stored trace is already correlated, so only a rerun shows it.
+
+The other stored runs replay unchanged.
+
 Also found on el9, outside M4's sequence: a session dies with
 "schema: invalid: fd_gen 1 without an fd" when the pattern also
 matches a `su` that runs the JVM (task mf4).

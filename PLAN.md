@@ -1380,7 +1380,9 @@ Kubernetes (M7) build on it.
   15, M4-8 and M4-9 with their TLS labels; only the clock bound
   (jf4, fixed after that build) failed; a fifth, with jf4 and
   kf4's review fixes, passed M4-10 but lost two plain hops of the
-  spread M4-9 to skipped runs (qf4). No criterion counts as
+  spread M4-9 to skipped runs (qf4: the merge keys a client from
+  its `CLOSE`, the correlator splits a socket address reused after
+  a lost `CLOSE`; the rerun is pending). No criterion counts as
   accepted until one run passes all. `mage m4Acceptance HOST1 HOST2`
   (`internal/acceptance`) runs the whole sequence against
   exactly the two named, bootstrapped hosts and prints PASS,
