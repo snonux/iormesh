@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 
 	"iormesh/internal/k8s"
 	"iormesh/internal/project"
@@ -73,7 +75,13 @@ func readyIn(root string, args []string, stdout, stderr io.Writer) error {
 // "running <session>", "ended <reason>" or "dead" (a running state
 // whose process is gone, status's rule). A corrupt state.json fails.
 // The project dir is the one-per-pod emptyDir's, so a state.json there
-// is this pod's session, never an earlier pod's.
+// is this pod's session, never an earlier pod's — but a debug tracer's
+// predecessor in the same pod (iormesh-N, task ah4) leaves its own
+// there, so these three states end with "started=<RFC3339Nano>", the
+// session's StartedAt (k8s.AttachStartedKey, task eh4): the wait
+// compares it with the new tracer container's start to tell the
+// predecessor's state from the new run's. An ended session without a
+// reason prints none rather than an empty word.
 func readyState(stdout io.Writer, dir string) error {
 	st, err := readState(dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -83,13 +91,17 @@ func readyState(stdout io.Writer, dir string) error {
 	if err != nil {
 		return err
 	}
-	line := st.effective()
-	switch line {
+	words := []string{st.effective()}
+	switch words[0] {
 	case stateRunning:
-		line += " " + st.Session
+		words = append(words, st.Session)
 	case stateEnded:
-		line += " " + st.EndReason
+		words = append(words, st.EndReason)
 	}
-	_, err = fmt.Fprintln(stdout, line)
+	if !st.StartedAt.IsZero() {
+		words = append(words, k8s.AttachStartedKey+st.StartedAt.UTC().Format(time.RFC3339Nano))
+	}
+	words = slices.DeleteFunc(words, func(w string) bool { return w == "" })
+	_, err = fmt.Fprintln(stdout, strings.Join(words, " "))
 	return err
 }

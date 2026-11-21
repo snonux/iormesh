@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"iormesh/internal/k8s"
 )
@@ -91,6 +92,10 @@ func TestReadyState(t *testing.T) {
 	pid := os.Getpid()
 	st := sessionState{Project: "shop", Session: "s1", PID: pid, PIDStartNS: processStart(uint32(pid)),
 		State: stateRunning}
+	// A state with a StartedAt ends with it (task eh4), in UTC whatever
+	// zone wrote it; one without (an older writer) prints none.
+	started := time.Date(2026, 11, 21, 23, 4, 5, 123456789, time.FixedZone("x", 3600))
+	const at = " started=2026-11-21T22:04:05.123456789Z\n"
 	for _, c := range []struct {
 		edit func(*sessionState)
 		want string
@@ -98,6 +103,10 @@ func TestReadyState(t *testing.T) {
 		{func(*sessionState) {}, "running s1\n"},
 		{func(s *sessionState) { s.State, s.EndReason = stateEnded, "disk_limit" }, "ended disk_limit\n"},
 		{func(s *sessionState) { s.PIDStartNS++ }, "dead\n"},
+		{func(s *sessionState) { s.StartedAt = started }, "running s1" + at},
+		{func(s *sessionState) { s.StartedAt, s.State, s.EndReason = started, stateEnded, "stop" }, "ended stop" + at},
+		{func(s *sessionState) { s.StartedAt, s.State = started, stateEnded }, "ended" + at},
+		{func(s *sessionState) { s.StartedAt, s.PIDStartNS = started, s.PIDStartNS+1 }, "dead" + at},
 	} {
 		s := st
 		c.edit(&s)

@@ -80,7 +80,12 @@ type containerStatus struct {
 	Name    string `json:"name"`
 	ImageID string `json:"imageID"`
 	State   struct {
-		Running    *struct{} `json:"running"`
+		// Running.StartedAt is when the kubelet started the container
+		// (RFC3339, whole seconds): WaitAttached's line between a
+		// predecessor's state.json and the new run's (task eh4).
+		Running *struct {
+			StartedAt string `json:"startedAt"`
+		} `json:"running"`
 		Terminated *struct {
 			Reason   string `json:"reason"`
 			ExitCode int    `json:"exitCode"`
