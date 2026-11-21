@@ -2033,10 +2033,19 @@ Later phase — plain Linux servers (M4) come first.
   pod identity added; a ClusterIP connection joins both sides;
   the M0 ingress scenario renders as one routed edge — app →
   FQDN → Traefik → deployment — with no tracer on the ingress.
-  Status (2026-11-21, task yb4): **passed on kind — first with
-  one test-only workaround (cf4) and two test-side compensations
-  (df4, ef4), all since removed; re-run green without any (tasks
-  df4–ff4)** — `mage k8sAcceptance` from
+  Status (2026-11-21, tasks yb4, cf4–ff4): **accepted** — every
+  criterion passes on kind (`mage k8sAcceptance` from scratch,
+  no workaround or test-side compensation left), M4 being
+  accepted and 3f4's re-check run (Sequencing relaxation).
+  Limits of the evidence: one single-node kind cluster on the
+  Fedora host's 7.2 kernel with no LSM active, containerd 2.2.0
+  only — no el9 node, no SELinux-enforcing node, no older
+  runtime, no Pod Security level below `privileged`. Decisions
+  #13, #14, #15 and #18 stay provisional; a finding on an el9 or
+  fleet node reopens this status. Owner-delegated advisor
+  decision. History: first passed with one test-only workaround
+  (cf4) and two test-side compensations (df4, ef4), all since
+  removed, then re-run green without any — `mage k8sAcceptance` from
   scratch, green (`integrationtests/kind`; kind 0.31, Kubernetes
   1.35.0, containerd 2.2.0, one node; docs/testing.md "M7
   acceptance on kind"). tcp-nat's client and server as pods
