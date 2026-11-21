@@ -6,7 +6,10 @@
 #   el9-k3s.sh up        install k3s (its SELinux policy, k3s-selinux,
 #                        comes with it) with containerd's SELinux support
 #                        on, no bundled Traefik (the harness installs its
-#                        own), and a mirror for localhost:5001, the
+#                        own) and no metrics-server (on iom1 it never
+#                        became Ready, and its stale API stalled every
+#                        namespace deletion, task zg4), and a mirror
+#                        for localhost:5001, the
 #                        laptop's registry reached through `ssh -R`
 #   el9-k3s.sh proxy M   restart k3s with kube-proxy in mode M
 #                        (iptables or nftables)
@@ -36,6 +39,7 @@ _write_config() {
 selinux: true
 disable:
   - traefik
+  - metrics-server
 write-kubeconfig-mode: "0600"
 kube-proxy-arg:
   - proxy-mode=$mode
@@ -75,7 +79,22 @@ up() {
     curl -sfL https://get.k3s.io \
         | INSTALL_K3S_CHANNEL="$K3S_CHANNEL" sh -s - server
     rpm -q k3s-selinux container-selinux
+    _trust_cidrs --add-source
     _wait_ready
+}
+
+# _trust_cidrs passes $1 (--add-source or --remove-source) for k3s's pod
+# and Service CIDRs to firewalld's trusted zone, at runtime only (a
+# reboot forgets it). el9's firewalld rejects forwarded pod traffic
+# otherwise (`reject with icmpx admin-prohibited`): on iom1 Traefik's
+# pod could not reach the backend pod (task zg4); k3s documents the
+# same two sources.
+_trust_cidrs() {
+    local -r op="$1"
+    if systemctl is-active -q firewalld; then
+        firewall-cmd --zone=trusted "$op=10.42.0.0/16" \
+            "$op=10.43.0.0/16" || true
+    fi
 }
 
 proxy() {
@@ -96,7 +115,10 @@ down() {
     if [[ -x /usr/local/bin/k3s-uninstall.sh ]]; then
         /usr/local/bin/k3s-uninstall.sh
     fi
-    rm -rf /etc/rancher/k3s
+    # k3s-uninstall.sh leaves the node password and the empty parents;
+    # on this throwaway node both trees are k3s's alone (no RKE2).
+    rm -rf /etc/rancher /var/lib/rancher
+    _trust_cidrs --remove-source
     # Without a state file nothing counts as ours: both are kept.
     local container_selinux_before=yes repo_before=yes key value
     if [[ -r "$STATE" ]]; then

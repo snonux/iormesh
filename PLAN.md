@@ -2116,6 +2116,25 @@ Later phase — plain Linux servers (M4) come first.
   pods, kubectl 1.30's `--custom` gate. The target tears down
   only what it made (`mage k8sTeardown` alone, also after an
   interrupted run; never a `docker system prune`).
+  **Reopened on el9** (2026-11-21, task zg4): accepted on kind
+  only. On a Rocky 9.9 k3s node (el9 5.14.0-741.22.1, SELinux
+  enforcing, k3s v1.35.10, containerd 2.2.10, container-selinux
+  2.250, k3s-selinux 1.6), run by `mage k8sAcceptance` against
+  an existing cluster (docs/testing.md "M7 on an existing
+  cluster"), #13's pod spec fails: every tracer, sidecar and
+  debug container alike, dies on libbpf's first program load
+  with EPERM — `avc: denied { prog_load }` for `container_t`,
+  class `bpf`, #13's named trigger. With a node-local SELinux
+  module granting `container_t` the tracer's `bpf`, `perf_event`
+  and tracefs permissions (a diagnostic, not a fix: it widens
+  every container on the node), the unchanged #13 spec passed
+  every subtest of both tests — ClusterIP fused under iptables
+  and nftables, the hairpin, pod identity, the ingress routed
+  edge ending at the inventory pod, the agent live-attached by a
+  debug container, list-only discovery, SIGTERM exit 0 in
+  0.62 s. M7 stays reopened until #13 has an el9 profile
+  (task 5h4) and the run passes with it and no node-local
+  policy.
 
 ## Decisions
 
@@ -2747,6 +2766,27 @@ here only as placeholders.
   from `/sys`, live-attached the agent across containers, and
   ran with exactly these seven capabilities (CapEff
   0x1c001080022). Older runtimes were not run.
+  On el9 (task zg4, Rocky 9.9 k3s node, SELinux enforcing,
+  container-selinux 2.250, k3s-selinux 1.6, containerd 2.2.10,
+  `RuntimeDefault` seccomp): the SELinux trigger above fires.
+  The set is not short — the container type is: `container_t` is
+  denied `bpf { prog_load }` (no boolean allows it), and
+  Unconfined seccomp or an added `SYS_ADMIN` changes nothing.
+  Measured on probe pods: `seLinuxOptions.type: spc_t` with
+  these seven capabilities and `RuntimeDefault` attaches, and so
+  does `privileged`. In permissive and then enforcing runs the
+  tracer needed, beyond what `container_t` has: `bpf {
+  map_create map_read map_write prog_load prog_run }`,
+  `perf_event { open cpu kernel read write tracepoint }`, and
+  `tracefs_t` `dir { search read open getattr }`, `file { open
+  read getattr }`; with exactly that granted to `container_t`
+  the whole acceptance passed and no AVC was logged. BTF from
+  the container's sysfs needed nothing. So on an
+  SELinux-enforcing node the choice is between `privileged`,
+  `spc_t` (unconfined in SELinux, yet keeping the capability
+  set, seccomp and no privilege escalation), and an iormesh
+  container type shipped as a policy module with just the
+  permissions above — owner to pick (task 5h4).
 - **#14 K8s Java attach** — *Provisional (2026-11-20):* live
   attach through the shared process namespace is the k8s
   default; `-javaagent` via `JAVA_TOOL_OPTIONS` stays the

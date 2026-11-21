@@ -2269,10 +2269,76 @@ forward serves; the `-R` forward gives the node the laptop's
 registry. Trace data stays on the laptop and the node. Delete the
 copied kubeconfig after the run.
 
-Status (2026-11-21): the harness option and the script are built
-and unit-tested (`TestTeardownExisting`, `TestExistingConfig`,
-`TestCrictlPrefix`); the run on a Rocky 9.9 node is pending — the
-VM's host was needed elsewhere.
+The harness option and the script are unit-tested
+(`TestTeardownExisting`, `TestExistingConfig`, `TestCrictlPrefix`;
+the script with shellcheck).
+
+#### Run on Rocky 9.9 (task zg4, 2026-11-21)
+
+One VM (2 vCPU, 4 GB for the run, 20 GB disk): Rocky 9.9, el9
+5.14.0-741.22.1, SELinux enforcing, k3s v1.35.10+k3s1 with
+containerd 2.2.10, container-selinux 2.250 and k3s-selinux 1.6,
+firewalld active; the laptop built and pushed the images.
+**M7 does not pass as shipped** (PLAN.md M7, reopened):
+
+| Criterion | #13 spec as shipped | With the diagnostic module |
+|---|---|---|
+| tracer spec (#13's capabilities, `RuntimeDefault`, mounts, image digest) | spec stored as asked, tracer dies on load | PASS |
+| BPF load under SELinux | FAIL: `avc: denied { prog_load }` `container_t` `tclass=bpf` | PASS, no AVC |
+| tracefs hostPath | not reached (denied in permissive: `tracefs_t` `file { open read }`) | PASS |
+| BTF from the container's sysfs | not reached | PASS, nothing needed |
+| `clusterip` (fused, goldens), iptables | FAIL (no trace) | PASS |
+| `clusterip`, nftables (`el9-k3s.sh proxy nftables`) | not run | PASS |
+| `hairpin` | FAIL (no trace) | PASS (server saw 10.42.0.1) |
+| `identity` (5 pods, one `boot_id`) | FAIL | PASS |
+| debug container with `-agent` (Java live-attach) | FAIL | PASS |
+| `ingress` routed edge to the inventory pod | FAIL (sidecar never Ready) | PASS |
+| `rbac` (list-only discovery) | not reached | PASS |
+| `sigterm` (crictl over ssh) | not reached | PASS: exit 0, 624 ms |
+
+The first column is the run as shipped: the sidecar's rollout timed
+out (the tracer crash-looped on `load BPF object: permission
+denied`), the debug tracers ended `session failed` and lingered,
+and libbpf's message blames `RLIMIT_MEMLOCK` (task 6h4). `ausearch
+-m avc` printed no match; the raw `/var/log/audit/audit.log` held
+the denial. Six probe pods, one tracer each with `-duration 15s`,
+isolated the cause:
+
+| Probe pod | Result |
+|---|---|
+| #13 as shipped | EPERM |
+| `seccompProfile: Unconfined` | EPERM |
+| `+SYS_ADMIN` | EPERM |
+| `seLinuxOptions.type: spc_t` (#13's capabilities, `RuntimeDefault`) | attached |
+| `spc_t` and Unconfined | attached |
+| `privileged: true` | attached |
+
+`container_t` permissive (a one-line CIL module, removed again)
+logged the rest of what the tracer does: `perf_event { open cpu
+kernel read write }` and `tracefs_t` `file { open read }`. The
+diagnostic module that made the second column pass, loaded with
+`semodule -i` and removed after:
+
+```
+(allow container_t self (bpf (map_create map_read map_write prog_load prog_run)))
+(allow container_t self (perf_event (open cpu kernel read write tracepoint)))
+(allow container_t tracefs_t (dir (search read open getattr)))
+(allow container_t tracefs_t (file (open read getattr)))
+```
+
+It grants every container on the node BPF and is no deployment
+answer; decision #13 records the choices (task 5h4). Two node
+findings, fixed in the script: el9's firewalld rejected
+forwarded pod traffic (`reject with icmpx admin-prohibited`, so
+Traefik's pod got "Host is unreachable" to the backend and the
+gateway a 502), so `up` trusts the pod and Service CIDRs at
+runtime; k3s's metrics-server never became Ready and its stale
+API stalled every namespace deletion, so `up` disables it. The
+ingress pass came after both fixes; ClusterIP passed before them.
+After the run the cluster, the module, the packages, the
+registry and the images were removed: the laptop's `docker
+images -a` and volumes matched the state before, and the VM had
+the 371 packages and the `/opt/iormesh` it started with.
 
 ## Performance baselines
 
