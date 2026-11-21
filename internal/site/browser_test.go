@@ -5,12 +5,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"iormesh/internal/schema"
+	"iormesh/internal/viewmodel"
 )
 
 // browserEnv opts in to TestBrowserSelftest: it starts a real browser,
@@ -41,14 +42,27 @@ func TestBrowserSelftest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%s: %v\n%s", bin, err, stderr.String())
 	}
-	if !regexp.MustCompile(`selftest: ok \d+ routes`).Match(out) {
-		t.Errorf("selftest did not pass; DOM:\n%s", out)
+	if want := "selftest: ok " + strconv.Itoa(selftestRoutes(sampleModel(hostile))) + " routes"; !strings.Contains(string(out), want) {
+		t.Errorf("selftest did not pass with %q; DOM:\n%s", want, out)
 	}
 	for _, line := range strings.Split(stderr.String(), "\n") {
 		if strings.Contains(line, "CONSOLE") || strings.Contains(line, "Refused to") {
 			t.Errorf("console: %s", line)
 		}
 	}
+}
+
+// selftestRoutes is how many routes app.js's selftest renders for m:
+// the five screens, then every service, edge, routed edge, route flag,
+// thread, process, conversation and step — so a screen the selftest
+// skipped (the routed edges, task bf4) fails the count.
+func selftestRoutes(m viewmodel.Model) int {
+	n := 5 + len(m.Services) + len(m.Edges) + len(m.Routes) + len(m.Health.RouteFlags) + len(m.Threads) +
+		len(m.Processes)
+	for _, c := range m.Conversations {
+		n += 1 + len(c.Steps)
+	}
+	return n
 }
 
 // browser is the browser to run, or skips the test.

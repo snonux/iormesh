@@ -45,9 +45,31 @@ type pos struct{ x, y int }
 
 // Graph renders a normalized graph (schema.Graph.Sort order) as SVG,
 // hosts and processes labeled by names (NamesOf the build's model; the
-// zero Names draws the graph's own ids).
+// zero Names draws the graph's own ids). The model's routed edges and
+// route flags, when names carries any, are drawn in a band below the
+// columns (routes.go); without them the drawing is byte for byte what it
+// was before the band existed.
 func Graph(g schema.Graph, names Names) []byte {
 	cols := graphColumns(g, names)
+	at, height := placeColumns(cols)
+	band := newRouteBand(names.Routes, names.RouteFlags, height+rowHeight)
+	style := graphStyle
+	if !band.empty() {
+		style += routeStyle
+	}
+	var s svg
+	s.open(max(leftMargin*2+max(len(cols), 1)*colWidth, band.width()), band.bottom(), style)
+	drawEdges(&s, g.Edges, at)
+	for i, c := range cols {
+		drawColumn(&s, c, leftMargin+i*colWidth, at, names)
+	}
+	band.draw(&s)
+	return s.close()
+}
+
+// placeColumns gives every drawn node its box and returns the height the
+// columns take.
+func placeColumns(cols []column) (map[string]pos, int) {
 	at := map[string]pos{}
 	height := topMargin
 	for i, c := range cols {
@@ -56,24 +78,23 @@ func Graph(g schema.Graph, names Names) []byte {
 		}
 		height = max(height, topMargin+(len(c.nodes)+1)*rowHeight)
 	}
-	var s svg
-	s.open(leftMargin*2+max(len(cols), 1)*colWidth, height+rowHeight, graphStyle)
-	drawEdges(&s, g.Edges, at)
-	for i, c := range cols {
-		x := leftMargin + i*colWidth
-		s.text("title", x, topMargin-14, "start", short(c.title))
-		for _, n := range c.nodes {
-			p := at[n.ID]
-			s.rect(n.Type, p.x, p.y, boxWidth, boxHeight)
-			s.text("label", p.x+6, p.y+14, "start", short(nodeLabel(n, names)))
-		}
-		if c.more > 0 {
-			y := topMargin + len(c.nodes)*rowHeight
-			s.rect("more", x, y, boxWidth, boxHeight)
-			s.text("label", x+6, y+14, "start", "+"+strconv.Itoa(c.more)+" more")
-		}
+	return at, height
+}
+
+// drawColumn draws one column at x: its title, its boxes, and the box
+// counting what the cap left out.
+func drawColumn(s *svg, c column, x int, at map[string]pos, names Names) {
+	s.text("title", x, topMargin-14, "start", short(c.title))
+	for _, n := range c.nodes {
+		p := at[n.ID]
+		s.rect(n.Type, p.x, p.y, boxWidth, boxHeight)
+		s.text("label", p.x+6, p.y+14, "start", short(nodeLabel(n, names)))
 	}
-	return s.close()
+	if c.more > 0 {
+		y := topMargin + len(c.nodes)*rowHeight
+		s.rect("more", x, y, boxWidth, boxHeight)
+		s.text("label", x+6, y+14, "start", "+"+strconv.Itoa(c.more)+" more")
+	}
 }
 
 // graphColumns sorts the nodes into columns: apps, each host's, sockets.

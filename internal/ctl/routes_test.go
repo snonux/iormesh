@@ -102,6 +102,13 @@ func TestBuildRoutes(t *testing.T) {
 	if !strings.Contains(string(data), `"basis": "route"`) || !strings.Contains(string(data), `"ingress": "traefik"`) {
 		t.Errorf("model lacks the routed edge:\n%s", data)
 	}
+	// graph.svg draws them (task bf4): the ingress route one row, java →
+	// FQDN → traefik → Service → Deployment, dashed as not traced.
+	svg, err := os.ReadFile(filepath.Join(f.builds, "prod", graphSVGName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "routes_graph_svg.golden", string(svg))
 }
 
 // TestBuildRoutesStale: an endpoint list that no longer names the pod

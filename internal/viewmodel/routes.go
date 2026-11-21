@@ -120,3 +120,16 @@ func safeRoutes(rs []Route, fs []RouteFlag) ([]Route, []RouteFlag) {
 	}
 	return rs, fs
 }
+
+// FlagsOf are the flags of fs about r: those whose subject is one of r's
+// hops past its client (its FQDN, ingress, Service, workload or pod) —
+// what a renderer shows beside the routed edge it qualifies.
+func FlagsOf(r Route, fs []RouteFlag) []RouteFlag {
+	var out []RouteFlag
+	for _, f := range fs {
+		if f.Subject != "" && slices.Contains(r.Hops()[1:], f.Subject) {
+			out = append(out, f)
+		}
+	}
+	return out
+}

@@ -68,8 +68,11 @@ func (m *Model) title() string {
 	if !r.First.IsZero() {
 		t += fmt.Sprintf(" · %s – %s UTC", r.First.Format(timeLayout), r.Last.Format("15:04:05"))
 	}
-	return t + fmt.Sprintf(" · %d services · %d edges · %d conversations", len(m.vm.Services),
-		len(m.vm.Edges), len(m.vm.Conversations))
+	t += fmt.Sprintf(" · %d services · %d edges", len(m.vm.Services), len(m.vm.Edges))
+	if n := len(m.vm.Routes); n > 0 { // only with routes: a routeless title is as before
+		t += fmt.Sprintf(" · %d routed", n)
+	}
+	return t + fmt.Sprintf(" · %d conversations", len(m.vm.Conversations))
 }
 
 // tabs is the screen bar, the current screen highlighted; short names

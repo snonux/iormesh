@@ -4,13 +4,13 @@
 :root {
   --bg: #fbfbfa; --fg: #1d1f21; --muted: #6a6f75; --line: #d6d8db;
   --panel: #ffffff; --accent: #2f6db5; --warn: #b5562f; --sel: #f2c14e;
-  --node: #eef3fa; --file: #f3efe4;
+  --node: #eef3fa; --file: #f3efe4; --route: #8a3fa8;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #17191c; --fg: #e3e5e8; --muted: #9aa0a6; --line: #3a3e44;
     --panel: #1f2226; --accent: #7fb0ef; --warn: #ef9f7f; --sel: #c99a2e;
-    --node: #243041; --file: #3a3426;
+    --node: #243041; --file: #3a3426; --route: #c48ae0;
   }
 }
 * { box-sizing: border-box; }
@@ -82,3 +82,15 @@ svg .arrow.unordered { stroke-dasharray: 2 3; stroke: var(--warn); }
 svg .note rect { fill: var(--file); stroke: var(--line); }
 svg .label { fill: var(--muted); }
 #selftest { white-space: pre-wrap; }
+/* Routed edges (route map, PLAN.md M7): hops no tracer saw, as boxes of
+   their own kind; a completed edge dashed in its own colour, a fused one
+   solid. */
+svg .routed { cursor: pointer; }
+svg .routed.dim { opacity: 0.2; }
+svg .routed .hopline { stroke: var(--route); stroke-width: 1.5; stroke-dasharray: 6 3; }
+svg .routed.fused .hopline { stroke: var(--muted); stroke-dasharray: none; }
+svg .routed.sel .hopline { stroke: var(--sel); }
+svg .hop rect { fill: var(--node); stroke: var(--route); }
+svg .hop.client rect { stroke: var(--accent); }
+svg .hop.fqdn rect, svg .hop.ingress rect { fill: var(--file); stroke-dasharray: 3 2; }
+svg .routed.sel .hop rect { stroke: var(--sel); stroke-width: 3; }

@@ -163,6 +163,10 @@ func (m *Model) open() {
 		m.push(scrConversations)
 		m.scope = scope{service: m.vm.Services[i].Name}
 	case scrEdges:
+		if kind, _ := m.edgeItem(i); kind != itemEdge {
+			m.note = "nothing to open: the route map's hops carry no conversations of their own"
+			return
+		}
 		m.push(scrConversations)
 		m.scope = scope{from: m.vm.Edges[i].From, to: m.vm.Edges[i].To}
 	case scrConversations:

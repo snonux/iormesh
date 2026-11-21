@@ -104,6 +104,8 @@ func (m *Model) serviceRows() ([]string, [][]string, []int) {
 	return []string{"SERVICE", "CONNS", "REQS", "TLS", ""}, cells, idx
 }
 
+// edgeRows lists the traced edges, then the routed edges and the route
+// flags (routes.go).
 func (m *Model) edgeRows() ([]string, [][]string, []int) {
 	cells := make([][]string, 0, len(m.vm.Edges))
 	idx := make([]int, 0, len(m.vm.Edges))
@@ -111,6 +113,7 @@ func (m *Model) edgeRows() ([]string, [][]string, []int) {
 		cells = append(cells, []string{e.From, "->", e.To, e.State, fmt.Sprint(e.Conns)})
 		idx = append(idx, i)
 	}
+	cells, idx = m.routeRows(cells, idx)
 	return []string{"FROM", "", "TO", "STATE", "CONNS"}, cells, idx
 }
 

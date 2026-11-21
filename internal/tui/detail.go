@@ -31,7 +31,7 @@ func (m *Model) detail(s screen) string {
 	case scrServices:
 		m.serviceDetail(&b, m.vm.Services[i])
 	case scrEdges:
-		m.edgeDetail(&b, m.vm.Edges[i])
+		m.edgesDetail(&b, i)
 	case scrConversations:
 		_ = viewmodel.WriteSequence(&b, m.vm.Conversations[i])
 		b.WriteString("\n⏎ opens the sequence\n")
@@ -94,6 +94,7 @@ func (m *Model) serviceDetail(b *strings.Builder, s viewmodel.Service) {
 			fmt.Fprintf(b, "called by  %s (%s, %d conns)\n", e.From, e.State, e.Conns)
 		}
 	}
+	m.servicesRoutes(b, s.Name)
 	m.listConversations(b, scope{service: s.Name})
 }
 

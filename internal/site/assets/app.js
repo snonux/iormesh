@@ -284,15 +284,141 @@
     return { names: names, pos: pos };
   }
 
+  // renderMesh draws the services and edges, and below them the routed
+  // edges (routedBand). Without routes or flags the screen is what it
+  // was before routed edges existed: no band, no extra legend.
   function renderMesh(view, sel) {
-    const lay = meshLayout();
+    const lay = meshLayout(), rs = arr(M.routes);
     let w = 0, h = 0;
     for (const n of lay.names) { w = Math.max(w, lay.pos[n].x + 200); h = Math.max(h, lay.pos[n].y + 40); }
-    add(view, el('h2', '', 'Mesh — ' + lay.names.length + ' services, ' + arr(M.edges).length + ' edges'));
-    add(view, el('p', 'muted', 'solid: fused · dashed: unresolved · click a service or an edge'));
+    const top = h + (h > 0 ? 40 : 0);
+    if (rs.length > 0) {
+      for (const r of rs) { w = Math.max(w, routedHops(r).length * HOPSTEP + 400); }
+      h = top + 30 + rs.length * 44;
+    }
+    add(view, el('h2', '', 'Mesh — ' + lay.names.length + ' services, ' + arr(M.edges).length + ' edges' +
+      (rs.length ? ', ' + rs.length + ' routed' : '')));
+    add(view, el('p', 'muted', 'solid: fused · dashed: unresolved · click a service or an edge' +
+      (rs.length ? ' · purple dashed: routed, completed from the route map (not traced)' : '')));
+    flagNote(view);
     const g = canvas(view, w, h);
     arr(M.edges).forEach(function (e, i) { g.appendChild(meshEdge(e, i, lay.pos, sel)); });
     lay.names.forEach(function (n) { g.appendChild(meshNode(n, lay.pos[n], sel)); });
+    if (rs.length > 0) { routedBand(g, top, sel); }
+  }
+
+  // ---- routed edges (route map, PLAN.md M7) ------------------------
+
+  // A routed edge is one row: client → FQDN → ingress → Service →
+  // workload (→ pod), the hops no tracer saw drawn as boxes of their
+  // own kind. Only a fused edge (both ends traced) is drawn solid; one
+  // the route map completed is dashed, so it never reads as traced.
+  const HOPSTEP = 230;
+  const HOPKINDS = ['client', 'fqdn', 'ingress', 'service', 'workload', 'pod'];
+
+  // routedHops are r's hops with their kinds, the empty ones left out.
+  function routedHops(r) {
+    const vals = [r.from, r.fqdn, r.ingress, r.service, r.workload, r.pod], out = [];
+    vals.forEach(function (v, i) { if (i === 0 || v) { out.push({ kind: HOPKINDS[i], name: v || '' }); } });
+    return out;
+  }
+
+  function routeNote(r) {
+    let s = r.basis + ', ' + (r.conns || 0) + ' connections';
+    if (r.basis === 'service' && !r.pod && r.endpoints > 1) { s += '; ' + r.endpoints + ' endpoints, pod unknown'; }
+    return s;
+  }
+
+  function flagText(f) {
+    return f.kind + ' ' + f.subject + ': ' + f.detail + (f.conns > 0 ? ' (' + f.conns + ' connections)' : '');
+  }
+
+  // flagsOf are the route flags about r: subject one of its hops past
+  // the client (viewmodel.FlagsOf).
+  function flagsOf(r) {
+    const hops = routedHops(r).slice(1).map(function (h) { return h.name; });
+    return arr((M.health || {}).route_flags).filter(function (f) { return f.subject && hops.indexOf(f.subject) >= 0; });
+  }
+
+  function routeShown(r) { return hit(routedHops(r).map(function (h) { return h.name; })); }
+
+  // flagNote puts a warning above the mesh when the route map and the
+  // traces disagree somewhere: a flag is never left to the health
+  // screen alone.
+  function flagNote(view) {
+    const fs = arr((M.health || {}).route_flags);
+    if (fs.length === 0) { return; }
+    add(view, el('p', 'warn', [fs.length + ' route flag' + (fs.length > 1 ? 's' : '') +
+      ' — where the route map and the traces disagree: ', link(['mesh', 'flag', 0], 'see them')]));
+  }
+
+  function routedBand(g, top, sel) {
+    g.appendChild(stext(0, top + 14, 'routed edges (route map)', 'start', 'label'));
+    arr(M.routes).forEach(function (r, i) { g.appendChild(routedRow(r, i, top + 30 + i * 44, sel)); });
+  }
+
+  function routedRow(r, i, y, sel) {
+    const basis = ['fused', 'service', 'route'].indexOf(r.basis) >= 0 ? r.basis : 'other';
+    let cls = 'routed ' + basis;
+    if (!routeShown(r)) { cls += ' dim'; }
+    if (sel && sel.kind === 'route' && sel.i === i) { cls += ' sel'; }
+    const g = svg('g', {}, cls), hops = routedHops(r);
+    hops.forEach(function (h, k) {
+      const x = k * HOPSTEP;
+      if (k > 0) {
+        g.appendChild(svg('line', { x1: x - (HOPSTEP - 200), y1: y + 18, x2: x, y2: y + 18, 'marker-end': 'url(#arrow)' }, 'hopline'));
+      }
+      const b = svg('g', {}, 'hop ' + h.kind);
+      b.appendChild(svg('rect', { x: x, y: y, width: 200, height: 36, rx: 4 }));
+      b.appendChild(stext(x + 8, y + 15, short(h.name, 28)));
+      b.appendChild(stext(x + 8, y + 29, h.kind, 'start', 'label'));
+      g.appendChild(b);
+    });
+    g.appendChild(stext(hops.length * HOPSTEP - 22, y + 22, short(routeNote(r), 60), 'start', 'label'));
+    const t = svg('title', {}); t.textContent = clean(hops.map(function (h) { return h.name; }).join(' → ')); g.appendChild(t);
+    g.addEventListener('click', function () { location.hash = route(['mesh', 'route', i]); });
+    return g;
+  }
+
+  function routeDetail(d, i) {
+    const r = arr(M.routes)[i];
+    if (!r) { return add(d, el('p', 'empty', 'no such routed edge')); }
+    const hops = routedHops(r);
+    add(d, [el('h2', '', hops.map(function (h) { return h.name; }).join(' → ')),
+      kv(hops.map(function (h) { return [h.kind, h.name]; }).concat([['basis', r.basis],
+        ['connections', String(r.conns || 0)], ['endpoints', r.endpoints ? String(r.endpoints) : ''],
+        ['map', r.origin], ['first', r.first], ['last', r.last]]))]);
+    if (r.basis !== 'fused') {
+      add(d, el('p', 'warn', 'completed from the route map: no tracer saw the hops past ' + r.from));
+    }
+    if (r.basis === 'service' && !r.pod && r.endpoints > 1) {
+      add(d, el('p', 'muted', r.endpoints + ' endpoints: the traces cannot say which pod answered'));
+    }
+    const si = serviceIndex(r.from);
+    add(d, el('p', '', ['client: ', si >= 0 ? link(['mesh', 'svc', si], r.from) : r.from]));
+    add(d, [el('h3', '', 'route flags'), flagList(flagsOf(r))]);
+  }
+
+  // flagList links each flag to its detail.
+  function flagList(fs) {
+    const all = arr((M.health || {}).route_flags);
+    return list(fs.map(function (f) { return link(['mesh', 'flag', all.indexOf(f)], flagText(f)); }));
+  }
+
+  function flagDetail(d, i) {
+    const f = arr((M.health || {}).route_flags)[i];
+    if (!f) { return add(d, el('p', 'empty', 'no such route flag')); }
+    add(d, [el('h2', '', 'route flag ' + f.kind), kv([['subject', f.subject], ['detail', f.detail],
+      ['connections', f.conns ? String(f.conns) : '']]),
+    el('p', 'warn', 'the route map and the traces disagree here, or the map left it open')]);
+    add(d, [el('h3', '', 'all route flags'), flagList(arr((M.health || {}).route_flags))]);
+  }
+
+  // routedList links each routed edge.
+  function routedList() {
+    return list(arr(M.routes).map(function (r, i) {
+      return [link(['mesh', 'route', i], routedHops(r).map(function (h) { return h.name; }).join(' → ')), ' ' + routeNote(r)];
+    }));
   }
 
   function serviceIndex(name) { return arr(M.services).findIndex(function (s) { return s.name === name; }); }
@@ -627,6 +753,15 @@
     add(view, [el('h3', '', 'bad segments (left out)'), table(['segment', 'error'], arr(h.bad_segments).map(function (b) {
       return { cells: [b.name, b.error] };
     })), el('h3', '', 'ignored store entries'), list(arr(h.ignored))]);
+    // Only a build with a route map has flags; a routeless run's health
+    // screen stays as it was.
+    const fs = arr(h.route_flags);
+    if (fs.length) {
+      add(view, [el('h3', '', 'route flags (route map vs traces)'), table(['kind', 'subject', 'detail', 'conns'],
+        fs.map(function (f, i) {
+          return { cells: [link(['mesh', 'flag', i], f.kind), f.subject, f.detail, f.conns ? String(f.conns) : '-'] };
+        }))]);
+    }
   }
 
   // ---- routing -----------------------------------------------------
@@ -669,7 +804,12 @@
   function meshDetail(d, kind, i) {
     if (kind === 'svc') { serviceDetail(d, i); return; }
     if (kind === 'edge') { edgeDetail(d, i); return; }
+    if (kind === 'route') { routeDetail(d, i); return; }
+    if (kind === 'flag') { flagDetail(d, i); return; }
     add(d, [el('h2', '', 'Edges'), edgeList(function () { return true; })]);
+    if (arr(M.routes).length) { add(d, [el('h2', '', 'Routed edges'), routedList()]); }
+    const fs = arr((M.health || {}).route_flags);
+    if (fs.length) { add(d, [el('h2', '', 'Route flags'), flagList(fs)]); }
   }
 
   function markTab(top) {
@@ -695,6 +835,8 @@
     const routes = [['mesh'], ['convs'], ['threads'], ['procs'], ['health']];
     arr(M.services).forEach(function (s, i) { routes.push(['mesh', 'svc', i]); });
     arr(M.edges).forEach(function (e, i) { routes.push(['mesh', 'edge', i]); });
+    arr(M.routes).forEach(function (r, i) { routes.push(['mesh', 'route', i]); });
+    arr((M.health || {}).route_flags).forEach(function (f, i) { routes.push(['mesh', 'flag', i]); });
     arr(M.threads).forEach(function (t, i) { routes.push(['thread', i]); });
     arr(M.processes).forEach(function (p, i) { routes.push(['proc', i]); });
     for (const c of arr(M.conversations)) {

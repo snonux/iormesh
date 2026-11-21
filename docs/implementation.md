@@ -5490,5 +5490,14 @@ depends on:
     filling only FQDNs the file lacks; a static entry always
     wins. Observed http events never change a route; a route
     they contradict is flagged in the build.
+13. Rendering the routed edges (task bf4): `render/routes.go`
+    (the band below `graph.svg`'s columns; `render.Names` carries
+    the model's routes and flags), `tui/routes.go` (rows after the
+    edges, their details) and `site/assets/app.js` ("routed
+    edges": the band under the mesh, `#/mesh/route/N`,
+    `#/mesh/flag/N`); the shared text — `Route.Hops`,
+    `RouteNote`, `FlagText`, `FlagsOf` — is in `viewmodel`.
+    Design and tests: [visualization.md](visualization.md),
+    "Routed edges".
 
 **Done when**: PLAN.md's M7 acceptance holds.

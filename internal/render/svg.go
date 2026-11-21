@@ -38,6 +38,8 @@ var classes = map[string]bool{
 	"runs_on": true, "opened": true, "connected": true, "incarnation": true, "forked": true,
 	"signaled": true, "fused": true, "unresolved": true, "more": true, "title": true, "label": true,
 	"lane": true, "carrier": true, "life": true, "note": true, "step": true, "time-ordered": true, "unordered": true,
+	// The routed-edge band (routes.go): hop boxes, the arrow and flags.
+	"fqdn": true, "ingress": true, "service": true, "workload": true, "pod": true, "routed": true, "flag": true,
 }
 
 // cls is c when it is a known class, else "other".
@@ -117,10 +119,13 @@ func esc(s string) string {
 }
 
 // short cuts s to maxLabel runes, marking the cut with "…".
-func short(s string) string {
-	if utf8.RuneCountInString(s) <= maxLabel {
+func short(s string) string { return cut(s, maxLabel) }
+
+// cut cuts s to n runes, marking the cut with "…".
+func cut(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
 		return s
 	}
 	r := []rune(s)
-	return string(r[:maxLabel-1]) + "…"
+	return string(r[:n-1]) + "…"
 }

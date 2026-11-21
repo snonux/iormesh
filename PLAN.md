@@ -1757,8 +1757,15 @@ Later phase — plain Linux servers (M4) come first.
   ClusterIP, or fused to one of its pods — while asking for the
   FQDN gets the route's edge, not a contradiction, and an address
   in the Service CIDR that no Service holds is flagged and the
-  route still tried. The graph and site renderers do not draw
-  routed edges yet (a separate task).
+  route still tried. The three surfaces draw them (task bf4):
+  each routed edge is one row — client → FQDN → ingress →
+  Service → workload (→ pod) — in a band below `graph.svg`'s
+  columns and the site's mesh, and as rows after the traced
+  edges in the TUI; an edge the map completed is drawn dashed,
+  only a fused one solid, and every route flag is shown beside
+  them (graph.svg, the mesh, the TUI's edges and health). The
+  graph has no FQDN, ingress or workload nodes: those hops
+  exist only in the routed edge.
   Discovery is built too (task xb4), tested against a fake
   kubectl, not yet on kind: `iormeshctl routes discover` reads a
   registered cluster's namespaces with read-only `kubectl get`

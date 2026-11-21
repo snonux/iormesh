@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1960" height="300" viewBox="0 0 1960 300" font-family="monospace" font-size="11">
+<style>rect{fill:#fff;stroke:#333}rect.host{fill:#e8eef8}rect.app{fill:#eef8e8}rect.socket{fill:#f8f0e8}rect.more{fill:#f4f4f4;stroke-dasharray:3 3}line{stroke:#888}line.unresolved{stroke:#c33;stroke-dasharray:6 4}line.fused{stroke:#36c;stroke-width:1.5}text.title{font-weight:bold}rect.fqdn{fill:#f0e8f8}rect.ingress{fill:#f8e8f0}rect.service{fill:#e8f8f4}rect.workload{fill:#e8f4f8}rect.pod{fill:#f4f8e8}rect.flag{fill:#c33;stroke:#c33}line.routed{stroke:#939;stroke-width:1.5;stroke-dasharray:6 3}text.flag{fill:#c33}</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<line class="fused" x1="280" y1="76" x2="620" y2="50" marker-end="url(#arrow)"/>
+<line class="unresolved" x1="280" y1="76" x2="620" y2="76" marker-end="url(#arrow)"/>
+<line class="unresolved" x1="280" y1="76" x2="620" y2="102" marker-end="url(#arrow)"/>
+<line class="fused" x1="580" y1="76" x2="620" y2="50" marker-end="url(#arrow)"/>
+<line class="runs_on" x1="20" y1="76" x2="20" y2="50" marker-end="url(#arrow)"/>
+<line class="runs_on" x1="320" y1="76" x2="320" y2="50" marker-end="url(#arrow)"/>
+<text class="title" x="20" y="26" text-anchor="start">host hostA</text>
+<rect class="host" x="20" y="40" width="260" height="20"/>
+<text class="label" x="26" y="54" text-anchor="start">hostA</text>
+<rect class="process" x="20" y="66" width="260" height="20"/>
+<text class="label" x="26" y="80" text-anchor="start">java 100@1</text>
+<text class="title" x="320" y="26" text-anchor="start">host hostB</text>
+<rect class="host" x="320" y="40" width="260" height="20"/>
+<text class="label" x="326" y="54" text-anchor="start">hostB</text>
+<rect class="process" x="320" y="66" width="260" height="20"/>
+<text class="label" x="326" y="80" text-anchor="start">10.96.0.20:80: java 200@1</text>
+<text class="title" x="620" y="26" text-anchor="start">connections</text>
+<rect class="socket" x="620" y="40" width="260" height="20"/>
+<text class="label" x="626" y="54" text-anchor="start">34a93de6a0731466</text>
+<rect class="socket" x="620" y="66" width="260" height="20"/>
+<text class="label" x="626" y="80" text-anchor="start">c2</text>
+<rect class="socket" x="620" y="92" width="260" height="20"/>
+<text class="label" x="626" y="106" text-anchor="start">c3</text>
+<text class="title" x="20" y="184" text-anchor="start">routed edges (route map; dashed: not traced)</text>
+<rect class="app" x="20" y="196" width="260" height="20"/>
+<text class="label" x="26" y="210" text-anchor="start">java</text>
+<line class="fused" x1="280" y1="206" x2="320" y2="206" marker-end="url(#arrow)"/>
+<rect class="service" x="320" y="196" width="260" height="20"/>
+<text class="label" x="326" y="210" text-anchor="start">prod/backend</text>
+<line class="fused" x1="580" y1="206" x2="620" y2="206" marker-end="url(#arrow)"/>
+<rect class="workload" x="620" y="196" width="260" height="20"/>
+<text class="label" x="626" y="210" text-anchor="start">prod/deployment/backend</text>
+<line class="fused" x1="880" y1="206" x2="920" y2="206" marker-end="url(#arrow)"/>
+<rect class="pod" x="920" y="196" width="260" height="20"/>
+<text class="label" x="926" y="210" text-anchor="start">prod/backend-7d9f-a</text>
+<text class="label" x="1196" y="210" text-anchor="start">fused, 1 connections</text>
+<rect class="app" x="20" y="222" width="260" height="20"/>
+<text class="label" x="26" y="236" text-anchor="start">java</text>
+<line class="routed" x1="280" y1="232" x2="320" y2="232" marker-end="url(#arrow)"/>
+<rect class="service" x="320" y="222" width="260" height="20"/>
+<text class="label" x="326" y="236" text-anchor="start">prod/db</text>
+<line class="routed" x1="580" y1="232" x2="620" y2="232" marker-end="url(#arrow)"/>
+<rect class="workload" x="620" y="222" width="260" height="20"/>
+<text class="label" x="626" y="236" text-anchor="start">prod/statefulset/db</text>
+<text class="label" x="896" y="236" text-anchor="start">service, 1 connections; 2 endpoints, pod unknown</text>
+<rect class="app" x="20" y="248" width="260" height="20"/>
+<text class="label" x="26" y="262" text-anchor="start">java</text>
+<line class="routed" x1="280" y1="258" x2="320" y2="258" marker-end="url(#arrow)"/>
+<rect class="fqdn" x="320" y="248" width="260" height="20"/>
+<text class="label" x="326" y="262" text-anchor="start">shop.example.org</text>
+<line class="routed" x1="580" y1="258" x2="620" y2="258" marker-end="url(#arrow)"/>
+<rect class="ingress" x="620" y="248" width="260" height="20"/>
+<text class="label" x="626" y="262" text-anchor="start">traefik</text>
+<line class="routed" x1="880" y1="258" x2="920" y2="258" marker-end="url(#arrow)"/>
+<rect class="service" x="920" y="248" width="260" height="20"/>
+<text class="label" x="926" y="262" text-anchor="start">prod/backend</text>
+<line class="routed" x1="1180" y1="258" x2="1220" y2="258" marker-end="url(#arrow)"/>
+<rect class="workload" x="1220" y="248" width="260" height="20"/>
+<text class="label" x="1226" y="262" text-anchor="start">prod/deployment/backend</text>
+<text class="label" x="1496" y="262" text-anchor="start">route, 1 connections</text>
+</svg>

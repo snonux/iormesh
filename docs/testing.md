@@ -1290,7 +1290,11 @@ docs/implementation.md M7 steps 11 and 12):
   Deployment) and models them; a stale endpoint list flags the
   Service and keeps the fused edge on the server's host; a
   writable or forged map fails the build; `-routes` reads
-  another file.
+  another file. The same build's `graph.svg` draws the routed
+  edges (`testdata/routes_graph_svg.golden`, task bf4); the
+  renderers' own route tests are in `internal/render`,
+  `internal/tui` and `internal/site`
+  ([visualization.md](visualization.md), "Routed edges").
 
 Not checked here (task yb4, on kind): a ClusterIP connection
 between two traced pods fusing in a real cluster (iptables and,

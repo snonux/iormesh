@@ -19,6 +19,12 @@ type Names struct {
 	// Services maps a process node id to the services it serves, else
 	// to its lifeline name when that says more than its comm (its app).
 	Services map[string]string
+	// Routes and RouteFlags are the model's routed edges and route flags
+	// (task bf4, PLAN.md M7): the hops no tracer saw — FQDN, ingress,
+	// Service, workload — which the graph has no nodes for, so Graph
+	// draws them in a band of their own (routes.go).
+	Routes     []viewmodel.Route
+	RouteFlags []viewmodel.RouteFlag
 }
 
 // NamesOf collects the names from the model's processes: each carries
@@ -26,9 +32,11 @@ type Names struct {
 // lifeline name. A server is named by what it serves, as the
 // conversations' server lifelines are: its lifeline name is its client
 // name, which without an app is only its comm. Processes the model cut
-// (MoreProcesses) keep their bare labels, as before.
+// (MoreProcesses) keep their bare labels, as before. The routed edges
+// and flags are carried over as the model holds them.
 func NamesOf(m viewmodel.Model) Names {
-	n := Names{Hosts: map[string]string{}, Services: map[string]string{}}
+	n := Names{Hosts: map[string]string{}, Services: map[string]string{},
+		Routes: m.Routes, RouteFlags: m.Health.RouteFlags}
 	for _, p := range m.Processes {
 		if host, _, ok := strings.Cut(strings.TrimPrefix(p.ID, "proc:"), "/"); ok && p.Host != "" {
 			n.Hosts[host] = p.Host

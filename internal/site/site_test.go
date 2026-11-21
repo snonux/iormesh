@@ -38,7 +38,14 @@ func sampleModel(s string) viewmodel.Model {
 		Run: viewmodel.Run{Projects: []string{"shop"}, Hosts: []string{"h1" + s, "h2"}, Sessions: 2,
 			First: t0, Last: t0.Add(time.Second)},
 		Health: viewmodel.Health{Sessions: []viewmodel.Session{{Project: "shop", Host: "h1", ID: "s" + s, End: s}},
-			BadSegments: []viewmodel.BadSegment{{Name: s, Error: s}}, Ignored: []string{s}},
+			BadSegments: []viewmodel.BadSegment{{Name: s, Error: s}}, Ignored: []string{s},
+			RouteFlags: []viewmodel.RouteFlag{{Kind: "route_contradicted", Subject: "shop.example.org" + s,
+				Detail: s, Conns: 1}, {Kind: s, Subject: "__proto__", Detail: strings.Repeat("d", 3000)}}},
+		// The routed edges: the ingress route (its FQDN the flag's
+		// subject), and one whose every name is s, long and hostile.
+		Routes: []viewmodel.Route{{From: "gw" + s, FQDN: "shop.example.org" + s, Ingress: "traefik",
+			Service: "prod/backend", Workload: "prod/deployment/backend", Basis: "route", Conns: 3, First: t0, Last: t0},
+			{From: s, Service: s + strings.Repeat("s", 3000), Pod: s, Basis: s, Endpoints: 2}},
 		Services: []viewmodel.Service{{Name: "gw" + s}, {Name: "orders" + s, Endpoints: []string{"h2:8080" + s},
 			TopPaths: []viewmodel.PathStat{{Method: "GET", Path: "/x" + s, Count: 2}}},
 			{Name: "__proto__"}, {Name: "constructor"}},
@@ -262,5 +269,57 @@ func TestLatestRefusesEscapes(t *testing.T) {
 		if _, err := Latest(root); err == nil {
 			t.Errorf("latest -> %s accepted", target)
 		}
+	}
+}
+
+// TestRoutedEdges: the routed edges and route flags reach the page's
+// data block whole (the script draws them from there) and graph.svg's
+// band; hostile names among them stay data — escaped in the block,
+// escaped and cut in the SVG — and the script routes and classes them
+// only by fixed values.
+func TestRoutedEdges(t *testing.T) {
+	files, err := Files(schema.Graph{}, sampleModel(hostile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := inline(t, files[0].Data, `<script type="application/json" id="model">`, "</script>")
+	var back viewmodel.Model
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatalf("data block does not parse: %v", err)
+	}
+	if len(back.Routes) != 2 || len(back.Health.RouteFlags) != 2 || back.Routes[0].Ingress != "traefik" {
+		t.Errorf("routes in the data block: %+v, flags %+v", back.Routes, back.Health.RouteFlags)
+	}
+	svg := string(files[1].Data)
+	for _, want := range []string{`<rect class="fqdn"`, `<rect class="ingress"`, ">traefik<", `<line class="routed"`,
+		"route_contradicted shop.example.org"} {
+		if !strings.Contains(svg, want) {
+			t.Errorf("graph.svg lacks %q", want)
+		}
+	}
+	for _, bad := range []string{"<script", "\x1b", "<img", strings.Repeat("s", 100)} {
+		if strings.Contains(svg, bad) {
+			t.Errorf("graph.svg holds %q", bad)
+		}
+	}
+	for _, want := range []string{"function routedBand", "function routeDetail", "function flagDetail",
+		"['mesh', 'route', i]", "['mesh', 'flag', i]", "['fused', 'service', 'route'].indexOf(r.basis)"} {
+		if !strings.Contains(appJS, want) {
+			t.Errorf("app.js lacks %q", want)
+		}
+	}
+}
+
+// TestRoutelessGraphUnchanged: a model without routes gets the graph.svg
+// a routeless renderer drew — no band.
+func TestRoutelessGraphUnchanged(t *testing.T) {
+	m := sampleModel("")
+	m.Routes, m.Health.RouteFlags = nil, nil
+	files, err := Files(schema.Graph{}, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if svg := string(files[1].Data); strings.Contains(svg, "routed") || strings.Contains(svg, "flag") {
+		t.Errorf("routeless graph.svg draws a band:\n%s", svg)
 	}
 }

@@ -61,22 +61,41 @@ func WriteSummary(w io.Writer, m Model) error {
 // arrows, then its basis — and one per route flag.
 func writeRoutes(b *strings.Builder, rs []Route, fs []RouteFlag) {
 	for _, r := range rs {
-		hops := []string{r.From}
-		for _, h := range []string{r.FQDN, r.Ingress, r.Service, r.Workload, r.Pod} {
-			if h != "" {
-				hops = append(hops, h)
-			}
-		}
-		fmt.Fprintf(b, "routed     %s (%s, %d connections%s)\n", strings.Join(hops, " -> "), r.Basis,
-			r.Conns, endpointsNote(r))
+		fmt.Fprintf(b, "routed     %s (%s)\n", strings.Join(r.Hops(), " -> "), RouteNote(r))
 	}
 	for _, f := range fs {
-		fmt.Fprintf(b, "route flag %s %s: %s", f.Kind, f.Subject, f.Detail)
-		if f.Conns > 0 {
-			fmt.Fprintf(b, " (%d connections)", f.Conns)
-		}
-		b.WriteString("\n")
+		fmt.Fprintf(b, "route flag %s\n", FlagText(f))
 	}
+}
+
+// Hops are r's hops in order — From, FQDN, ingress, Service, workload,
+// pod — the empty ones left out: the chain every surface draws.
+func (r Route) Hops() []string {
+	hops := []string{r.From}
+	for _, h := range []string{r.FQDN, r.Ingress, r.Service, r.Workload, r.Pod} {
+		if h != "" {
+			hops = append(hops, h)
+		}
+	}
+	return hops
+}
+
+// RouteNote is what a routed edge stands on and carries: its basis, its
+// connections and, for an untraced Service of several endpoints, that
+// the pod is unknown. The summary prints it in parentheses; the
+// renderers beside the drawn chain.
+func RouteNote(r Route) string {
+	return fmt.Sprintf("%s, %d connections%s", r.Basis, r.Conns, endpointsNote(r))
+}
+
+// FlagText is one route flag as the summary prints it after "route
+// flag": kind, subject, detail and the connections it covers.
+func FlagText(f RouteFlag) string {
+	s := fmt.Sprintf("%s %s: %s", f.Kind, f.Subject, f.Detail)
+	if f.Conns > 0 {
+		s += fmt.Sprintf(" (%d connections)", f.Conns)
+	}
+	return s
 }
 
 // endpointsNote says why an untraced Service's edge names no pod: the
