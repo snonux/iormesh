@@ -62,8 +62,28 @@ containerdConfigPatches:
 // of its own session, which outlives mage's 5-second cancel; should even
 // that fail, `mage k8sTeardown` is the recovery.
 func K8sAcceptance() error {
+	return kindRun("k8sAcceptance", kindTests)
+}
+
+// K8sDebugRestart runs task ah4's real-cluster check alone on kind
+// (TestKindDebugRestart, docs/testing.md "App container restart"): a
+// debug tracer with the agent dies with its app container's init, deploy
+// starts iormesh-2, and collect gets both sessions' segments. Same
+// setup, environment and teardown as K8sAcceptance, which it shares;
+// kube-proxy's mode does not matter here and is left as it is.
+func K8sDebugRestart() error {
+	return kindRun("k8sDebugRestart", func(env map[string]string, _ bool) error {
+		return sh.RunWithV(env, "go", "test", "./integrationtests/kind/", "-count=1", "-v",
+			"-timeout=20m", "-run=^TestKindDebugRestart$")
+	})
+}
+
+// kindRun is the body K8sAcceptance and K8sDebugRestart share: skip
+// without the prerequisites, build, disk guard, the teardown deferred
+// (unless IORMESH_KIND_KEEP) and on signals, the cluster up, then tests.
+func kindRun(name string, tests func(env map[string]string, existing bool) error) error {
 	if why := kindMissing(); why != "" {
-		fmt.Println("SKIP k8sAcceptance:", why)
+		fmt.Println("SKIP "+name+":", why)
 		return nil
 	}
 	c, err := kindConfigFor()
@@ -85,7 +105,7 @@ func K8sAcceptance() error {
 	if err != nil {
 		return err
 	}
-	return kindTests(env, c.Existing)
+	return tests(env, c.Existing)
 }
 
 // K8sTeardown removes what K8sAcceptance made — the cluster, the
