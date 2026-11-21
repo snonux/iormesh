@@ -1,6 +1,6 @@
 // Adapted from ior internal/generate/codegen_test.go @ b21afc50328c.
 // Changes: the openat2 test no longer checks ior's docs/output.md; a comment
-// names iormesh.bpf.c.
+// names iormesh.bpf.c; handlers take the raw_syscalls ctx flavor (task lb4).
 
 package generate
 
@@ -23,7 +23,7 @@ func TestGenerateFdHandler(t *testing.T) {
 	output := generateFromPair(t, FormatRead, FormatExitRead)
 
 	requireContains(t, output, `SEC("tracepoint/syscalls/sys_enter_read")`)
-	requireContains(t, output, "struct syscall_trace_enter *ctx")
+	requireContains(t, output, "struct trace_event_raw_sys_enter___iormesh *ctx")
 	requireContains(t, output, "struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);")
 	requireContains(t, output, "ev->event_type = ENTER_FD_EVENT;")
 	requireContains(t, output, "ev->trace_id = SYS_ENTER_READ;")
@@ -1144,7 +1144,7 @@ func TestGenerateRetHandlerRead(t *testing.T) {
 	output := generateFromPair(t, FormatRead, FormatExitRead)
 
 	requireContains(t, output, `SEC("tracepoint/syscalls/sys_exit_read")`)
-	requireContains(t, output, "struct syscall_trace_exit *ctx")
+	requireContains(t, output, "struct trace_event_raw_sys_exit___iormesh *ctx")
 	requireContains(t, output, "struct ret_event *ev")
 	requireContains(t, output, "ev->event_type = EXIT_RET_EVENT;")
 	requireContains(t, output, "ev->trace_id = SYS_EXIT_READ;")
@@ -2385,7 +2385,7 @@ func TestClockNanosleepExitHandlerIsUnclassifiedRet(t *testing.T) {
 	requireContains(t, output, "ev->ret = ctx->ret;")
 	requireContains(t, output, "ev->ret_type = UNCLASSIFIED;")
 	// The exit handler must not try to read a timespec or treat ret as an fd.
-	requireNotContains(t, output, "handle_sys_exit_clock_nanosleep(struct syscall_trace_exit *ctx) {\n    __u32 pid, tid;\n    if (filter(&pid, &tid))\n        return 0;\n\n    __u64 now = bpf_ktime_get_boot_ns();\n    if (!ior_on_syscall_exit(tid, SYS_ENTER_CLOCK_NANOSLEEP, ctx->ret, now))\n        return 0;\n\n    struct sleep_event")
+	requireNotContains(t, output, "handle_sys_exit_clock_nanosleep(struct trace_event_raw_sys_exit___iormesh *ctx) {\n    __u32 pid, tid;\n    if (filter(&pid, &tid))\n        return 0;\n\n    __u64 now = bpf_ktime_get_boot_ns();\n    if (!ior_on_syscall_exit(tid, SYS_ENTER_CLOCK_NANOSLEEP, ctx->ret, now))\n        return 0;\n\n    struct sleep_event")
 }
 
 func TestGenerateKeyctlHandler(t *testing.T) {
@@ -2703,7 +2703,7 @@ func TestGenerateDefinesSortedByIDDesc(t *testing.T) {
 func TestGenerateHandlerStructure(t *testing.T) {
 	output := generateFromPair(t, FormatClose, FormatExitClose)
 
-	requireContains(t, output, "int handle_sys_enter_close(struct syscall_trace_enter *ctx) {")
+	requireContains(t, output, "int handle_sys_enter_close(struct trace_event_raw_sys_enter___iormesh *ctx) {")
 	requireContains(t, output, "__u32 pid, tid;")
 	requireContains(t, output, "if (filter(&pid, &tid))")
 	requireContains(t, output, "ev->pid = pid;")

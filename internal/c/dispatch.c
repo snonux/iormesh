@@ -32,12 +32,12 @@
 // tail-call the generated handler of the syscall's number from a program
 // array userspace fills (internal/bpf/attach.go): an empty slot is a syscall
 // that is not traced and falls through. The handlers stay the per-syscall
-// programs they were - tracepoint programs, verified one by one - because
-// the raw_syscalls record has their context's layout: the arguments
-// (sys_enter) and the return value (sys_exit) sit at offset 16 in both, and
-// the first 8 bytes carry the pt_regs pointer the stack helpers read. Only
-// the number differs (long id where the per-syscall record has int nr, the
-// same low half on a little-endian host), and no handler reads it.
+// programs they were - tracepoint programs, verified one by one - but read
+// their context as the raw_syscalls record they are handed
+// (trace_event_raw_sys_enter___iormesh below, CO-RE relocated): upstream it
+// matches the per-syscall record (args and ret at offset 16), RHEL 9's
+// differs (task lb4). The first 8 bytes carry the pt_regs pointer the stack
+// helpers read in both.
 //
 // The design follows ior's raw dispatch prototype (ior internal/c/rawsyscall.c
 // @ b21afc50328c, docs/raw-tracepoint-design.md), with the classic
@@ -68,14 +68,31 @@ struct {
     __type(value, __u32);
 } syscall_exit_progs SEC(".maps");
 
-// iormesh_raw_syscall is the head both raw_syscalls records share: the
-// common trace_entry (whose first 8 bytes perf overwrites with the pt_regs
-// pointer) and the syscall number. Declared here instead of taken from
-// vmlinux.h, whose trace_event_raw_sys_enter the build must not depend on.
-struct iormesh_raw_syscall {
-    __u64 regs;
+// trace_event_raw_sys_enter___iormesh and trace_event_raw_sys_exit___iormesh
+// are the raw_syscalls records as the dispatchers and every tail-called
+// handler read them (internal/generate handlerCtxStruct): CO-RE flavors, so
+// libbpf relocates each field to the running kernel's offset. Declared here
+// instead of taken from vmlinux.h, whose trace_event_raw_sys_enter the
+// build must not depend on. The first 8 bytes of the common trace_entry are
+// the pt_regs pointer perf writes there (the stack helpers read it) and are
+// never read as fields.
+//
+// Why relocated and not fixed: upstream puts id at 8 and args/ret at 16, but
+// RHEL 9 (5.14 with the rt-merge backport) grew trace_entry by
+// preempt_lazy_count to 12 bytes, which moves id to 16 and args and ret to
+// 24 (/sys/kernel/tracing/events/raw_syscalls/sys_enter/format on Rocky
+// 9.9). With fixed offsets the dispatcher read id as 0 - nearly every
+// syscall went to the read handler - and the handlers read id as args[0]
+// and ret (task lb4).
+struct trace_event_raw_sys_enter___iormesh {
     long id;
-};
+    unsigned long args[6];
+} __attribute__((preserve_access_index));
+
+struct trace_event_raw_sys_exit___iormesh {
+    long id;
+    long ret;
+} __attribute__((preserve_access_index));
 
 // IORMESH_ARM64_TIF_32BIT is arm64's thread_info.flags bit of an AArch32
 // (compat) task (arch/arm64/include/asm/thread_info.h).
@@ -150,8 +167,7 @@ static __always_inline int iormesh_dispatch_in_scope(void) {
 // untraced syscall (traced, progs' mirror, has no 1 there), a compat
 // syscall, or a task out of scope - whose handler would only have returned
 // at its filter().
-static __always_inline int iormesh_dispatch(void *ctx, void *progs, void *traced) {
-    long id = ((struct iormesh_raw_syscall *)ctx)->id;
+static __always_inline int iormesh_dispatch(void *ctx, long id, void *progs, void *traced) {
     __u32 nr, *on;
 
     if (id < 0 || id >= IORMESH_SYSCALL_SLOTS)
@@ -174,11 +190,15 @@ int handle_raw_sys_enter(void *ctx) {
     // exec's namespace tid, before any handler, for sched_process_exec
     // (pidns.c, M7); both pruned in host mode.
     iormesh_pidns_learn();
-    iormesh_note_exec_tid(((struct iormesh_raw_syscall *)ctx)->id);
-    return iormesh_dispatch(ctx, &syscall_enter_progs, &syscall_enter_traced);
+    long id = ((struct trace_event_raw_sys_enter___iormesh *)ctx)->id;
+
+    iormesh_note_exec_tid(id);
+    return iormesh_dispatch(ctx, id, &syscall_enter_progs, &syscall_enter_traced);
 }
 
 SEC("tracepoint/raw_syscalls/sys_exit")
 int handle_raw_sys_exit(void *ctx) {
-    return iormesh_dispatch(ctx, &syscall_exit_progs, &syscall_exit_traced);
+    long id = ((struct trace_event_raw_sys_exit___iormesh *)ctx)->id;
+
+    return iormesh_dispatch(ctx, id, &syscall_exit_progs, &syscall_exit_traced);
 }

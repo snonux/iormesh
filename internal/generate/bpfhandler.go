@@ -3,7 +3,8 @@
 // write call the rwagg.c hooks (rwagg.go, M2 step 11); every enter handler
 // calls the stack.c hook (renderStackHook, M2 step 9) and the javamark.c hook
 // (renderJavaMarkHook, task td4); the seven TCP data calls call the tcpseq.c
-// hooks (renderTCPSeqHook, task xe4).
+// hooks (renderTCPSeqHook, task xe4); handlers read their context as the
+// raw_syscalls record they are tail-called with (handlerCtxStruct, task lb4).
 
 package generate
 
@@ -105,20 +106,23 @@ func outputHandleArgForHandler(name string) int {
 
 // handlerCtxStruct returns the context struct of an enter or exit handler.
 //
-// These are the kernel's actual tracepoint context structs
-// (syscall_trace_enter/exit), not the BTF-emitted
-// trace_event_raw_sys_enter/exit aliases. On RHEL 9 kernels (5.14 with the
-// rt-merge backport that added preempt_lazy_count to trace_entry) the two
-// diverge: trace_event_raw_sys_* grows by 8 bytes and the args/ret offsets
-// shift, but the real context handed to the BPF program is still
-// syscall_trace_*. Reading via the wider alias trips the verifier's
-// max_ctx_offset check and the attach fails with EACCES. The two structs are
-// identical on non-RHEL kernels, so this is a no-op everywhere else.
+// The handlers are not attached to their syscalls:sys_{enter,exit}_<name>
+// tracepoints: dispatch.c tail-calls them from the classic raw_syscalls
+// events (task 8e4), so the record they are handed is raw_syscalls', and
+// their context must be read with its layout - the CO-RE flavors of
+// trace_event_raw_sys_enter/exit that dispatch.c declares, never
+// syscall_trace_enter/exit (the per-syscall record). The two layouts agree
+// on upstream kernels (args and ret at offset 16), but not on RHEL 9 (5.14
+// with the rt-merge backport that added preempt_lazy_count to trace_entry):
+// there the per-syscall record keeps args at 16 while raw_syscalls moves id
+// to 16 and args and ret to 24. Read through the per-syscall struct, a
+// Rocky 9.9 handler took the syscall number for args[0] and for ret (task
+// lb4). ior attaches the handlers per syscall and keeps syscall_trace_*.
 func handlerCtxStruct(isEnter bool) string {
 	if isEnter {
-		return "syscall_trace_enter"
+		return "trace_event_raw_sys_enter___iormesh"
 	}
-	return "syscall_trace_exit"
+	return "trace_event_raw_sys_exit___iormesh"
 }
 
 // handlerComment renders the /// reason line of a handler. It is also the line
