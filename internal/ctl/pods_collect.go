@@ -45,8 +45,12 @@ func (c collector) podEntryCollect(ctx context.Context, pe podEntry, projects []
 // a tracer container — the API server says so — has nothing to collect;
 // one whose tracer container is stopped cannot be entered, which is said
 // plainly rather than as kubectl's exec failure (review B1: deploy runs
-// the session with -linger, so only a crash, an OOM kill or a session
-// from before -linger stops it); one whose exec fails is an error.
+// the session with -linger, so only a crash, an OOM kill, the app
+// container's restart taking a debug tracer with it, or a session from
+// before -linger stops it); one whose exec fails is an error. The exec
+// names st.Container, the newest debug tracer (task ah4): the trace
+// emptyDir is the pod's, so its `iormesh ready` also serves what ended
+// predecessors published, under the same pod-<uid> host.
 func (c collector) pod(ctx context.Context, pe podEntry, st k8s.PodState, projects []string) error {
 	label := pe.label(st.Name)
 	if !st.Tracer {
@@ -55,14 +59,13 @@ func (c collector) pod(ctx context.Context, pe podEntry, st k8s.PodState, projec
 		return err
 	}
 	if st.Stopped != "" {
-		return fmt.Errorf("session ended: tracer container %s; kubectl exec cannot enter a stopped container, "+
-			"so the segments in its emptyDir (how many is unknown) are stranded until the pod goes", st.Stopped)
+		return stranded(pe, st)
 	}
 	dir := k8s.PodHostID(st.UID)
 	if err := c.pin(dir, pe.podIdentity(st)); err != nil {
 		return err
 	}
-	t, err := pe.transport(st.Name)
+	t, err := pe.transport(st.Name, st.Container)
 	if err != nil {
 		return err
 	}
@@ -74,6 +77,24 @@ func (c collector) pod(ctx context.Context, pe podEntry, st k8s.PodState, projec
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// stranded is collect's error for a pod whose tracer container stopped:
+// kubectl exec cannot enter it. A sidecar's segments wait for the pod
+// to go; in debug mode a deploy starts the next tracer (task ah4),
+// whose `iormesh ready` serves the published segments from the shared
+// emptyDir, so the message says that — only the unsealed segment is
+// lost.
+func stranded(pe podEntry, st k8s.PodState) error {
+	if pe.scope.Mode == k8s.ModeDebug {
+		return fmt.Errorf("session ended: tracer container %q %s; kubectl exec cannot enter a stopped "+
+			"container: iormeshctl deploy %s starts a fresh tracer in the pod, and the next collect fetches the "+
+			"published segments it left in the emptyDir (its unsealed one is lost)", st.Container, st.Stopped,
+			pe.ref)
+	}
+	return fmt.Errorf("session ended: tracer container %q %s; kubectl exec cannot enter a stopped container, "+
+		"so the segments in its emptyDir (how many is unknown) are stranded until the pod goes",
+		st.Container, st.Stopped)
 }
 
 // pin records dir's host identity in the pins file build holds host

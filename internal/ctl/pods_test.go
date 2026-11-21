@@ -295,9 +295,10 @@ func TestPodCollectUnreachable(t *testing.T) {
 }
 
 // TestPodCollectStopped: a tracer container that terminated anyway (an
-// OOM kill, a crash — deploy's -linger keeps a finished session's
-// running) fails the collect saying the session ended and its segments
-// are stranded, without trying an exec kubectl would refuse.
+// OOM kill, a crash, its app container's restart — deploy's -linger
+// keeps a finished session's running) fails the collect saying the
+// session ended and that a deploy starts a fresh tracer to serve its
+// segments (task ah4), without trying an exec kubectl would refuse.
 func TestPodCollectStopped(t *testing.T) {
 	f := newPodFixture(t, "")
 	obj := podObject("checkout-0", uid(1), true)
@@ -307,13 +308,139 @@ func TestPodCollectStopped(t *testing.T) {
 	if code := f.run("collect", "kind/shop/checkout-0"); code != exitError {
 		t.Fatalf("exit %d, want %d", code, exitError)
 	}
-	for _, want := range []string{"session ended", "terminated (OOMKilled, exit code 137)", "stranded"} {
+	for _, want := range []string{"session ended", `"iormesh" terminated (OOMKilled, exit code 137)`,
+		"iormeshctl deploy kind/shop/checkout-0 starts a fresh tracer", "unsealed one is lost"} {
 		if !strings.Contains(f.stderr.String(), want) {
 			t.Errorf("stderr lacks %q: %s", want, f.stderr)
 		}
 	}
 	if got := verbs(f.calls(t)); !slices.Equal(got, []string{"get pod"}) {
 		t.Errorf("calls %q, want the get alone", got)
+	}
+}
+
+// tracerObject is podObject with the debug tracers named, each of the
+// pinned image, running when its flag is set and else killed (exit 137,
+// as the app container's restart leaves it).
+func tracerObject(name, id string, tracers map[string]bool) map[string]any {
+	obj := podObject(name, id, false)
+	var spec, status []map[string]any
+	for n, running := range tracers {
+		state := map[string]any{"terminated": map[string]any{"reason": "Error", "exitCode": 137}}
+		if running {
+			state = map[string]any{"running": map[string]any{}}
+		}
+		spec = append(spec, map[string]any{"name": n, "image": podImage,
+			"command": []string{"iormesh", "run", "-project", "shop"}})
+		status = append(status, map[string]any{"name": n, "imageID": podImage, "state": state})
+	}
+	obj["spec"].(map[string]any)["ephemeralContainers"] = spec
+	obj["status"].(map[string]any)["ephemeralContainerStatuses"] = status
+	return obj
+}
+
+// TestPodCollectReplacedTracer: in a pod whose first debug tracer was
+// killed and a second one runs (task ah4), collect execs into the
+// second — fetch and remove alike — and gets the segments both
+// sessions published in the shared emptyDir into the one pod-<uid>
+// directory, pinned to the one pod identity.
+func TestPodCollectReplacedTracer(t *testing.T) {
+	f := newPodFixture(t, "")
+	f.pod(t, tracerObject("checkout-0", uid(1), map[string]bool{"iormesh": false, "iormesh-2": true}))
+	old, cur := "checkout-0.shop.0123abcd-aaaaaaaa-1-0.parquet", "checkout-0.shop.0123abcd-bbbbbbbb-2-0.parquet"
+	f.file(t, "tar-checkout-0", segmentTar(t, []string{old, cur}))
+	if code := f.run("collect", "kind/shop/checkout-0"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr)
+	}
+	calls := f.calls(t)
+	if got := verbs(calls); !slices.Equal(got, []string{"get pod", "exec checkout-0", "exec checkout-0 -remove"}) {
+		t.Fatalf("calls %q", calls)
+	}
+	for _, c := range calls[1:] {
+		if !slices.Contains(c, "--container=iormesh-2") {
+			t.Errorf("exec %q does not name the running tracer iormesh-2", c)
+		}
+	}
+	dir := filepath.Join(f.store, "shop", k8s.PodHostID(uid(1)))
+	for _, seg := range []string{old, cur} {
+		if b, err := os.ReadFile(filepath.Join(dir, seg)); err != nil || string(b) != "seg "+seg {
+			t.Errorf("segment %s: %q, %v", seg, b, err)
+		}
+	}
+	pins, err := loadHostPins(filepath.Join(f.share, hostPinsFileName))
+	if err != nil || len(pins) != 1 || pins["pod-"+uid(1)].HostID != "pod-"+uid(1) {
+		t.Errorf("pins %v, %v; want the one pod identity", pins, err)
+	}
+}
+
+// TestPodDeployReplacesEnded: deploy in a pod whose debug tracer was
+// killed with its app container starts iormesh-2 with the same argv,
+// image and disk bounds as a first tracer, waits for it — the probe
+// naming iormesh-2 — and says it replaced an ended one.
+func TestPodDeployReplacesEnded(t *testing.T) {
+	f := newPodFixture(t, "")
+	f.pod(t, tracerObject("checkout-0", uid(1), map[string]bool{"iormesh": false}))
+	if code := f.run("deploy", "kind/shop/checkout-0"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr)
+	}
+	calls := f.calls(t)
+	if got := verbs(calls); !slices.Equal(got, []string{"get pod", "get pod", "debug checkout-0", "exec checkout-0"}) {
+		t.Fatalf("calls %q", calls)
+	}
+	dbg := calls[2]
+	i := slices.Index(dbg, "--")
+	wantArgv := []string{"iormesh", "run", "-project", "shop", "-linger", "-pattern=*java*", "-duration", "1h",
+		"-disk-limit", "0", "-disk-max-bytes", "1536MiB"}
+	if i < 0 || !slices.Equal(dbg[i+1:], wantArgv) || !slices.Contains(dbg, "--image="+podImage) ||
+		!slices.Contains(dbg, "--container=iormesh-2") {
+		t.Errorf("debug argv %q", dbg)
+	}
+	if !slices.Contains(calls[3], "--container=iormesh-2") {
+		t.Errorf("attach probe %q does not name iormesh-2", calls[3])
+	}
+	if out := f.stdout.String(); !strings.Contains(out, "earlier tracer ended") ||
+		!strings.Contains(out, "started tracer iormesh-2, project shop") ||
+		!strings.Contains(out, "attached, session 1a2b3c4d") {
+		t.Errorf("stdout: %s", out)
+	}
+}
+
+// TestPodDeployNewestRunning: a running second tracer is left alone, its
+// attach state read from it, whatever ended before it.
+func TestPodDeployNewestRunning(t *testing.T) {
+	f := newPodFixture(t, "")
+	f.pod(t, tracerObject("checkout-0", uid(1), map[string]bool{"iormesh": false, "iormesh-2": true}))
+	if code := f.run("deploy", "kind/shop/checkout-0"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr)
+	}
+	calls := f.calls(t)
+	if got := verbs(calls); !slices.Equal(got, []string{"get pod", "get pod", "exec checkout-0"}) ||
+		!slices.Contains(calls[2], "--container=iormesh-2") {
+		t.Fatalf("calls %q", calls)
+	}
+	if !strings.Contains(f.stdout.String(), "tracer iormesh-2 already running the pinned image") {
+		t.Errorf("stdout: %s", f.stdout)
+	}
+}
+
+// TestPodDeployCap: a pod that has had k8s.MaxDebugTracers, all ended,
+// gets no ninth: deploy fails naming the cap, and no debug runs.
+func TestPodDeployCap(t *testing.T) {
+	f := newPodFixture(t, "")
+	all := map[string]bool{}
+	for n := 1; n <= k8s.MaxDebugTracers; n++ {
+		all[k8s.TracerName(n)] = false
+	}
+	f.pod(t, tracerObject("checkout-0", uid(1), all))
+	if code := f.run("deploy", "kind/shop/checkout-0"); code != exitError {
+		t.Fatalf("exit %d, want %d", code, exitError)
+	}
+	if !strings.Contains(f.stderr.String(), "the pod has had 8, the most deploy starts in one pod") ||
+		!strings.Contains(f.stderr.String(), "sidecar mode") {
+		t.Errorf("stderr: %s", f.stderr)
+	}
+	if got := verbs(f.calls(t)); !slices.Equal(got, []string{"get pod", "get pod"}) {
+		t.Errorf("calls %q, want the two gets alone", got)
 	}
 }
 

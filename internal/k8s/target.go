@@ -76,8 +76,10 @@ const DefaultSELinuxType = "spc_t"
 // level omits the field and gets the type-alone behaviour above.
 const DefaultSELinuxLevel = "s0"
 
-// TracerContainer is the tracer container's name in the pod, the
-// ephemeral one and the sidecar alike: every exec names it.
+// TracerContainer is the tracer container's name in the pod: the
+// sidecar's, and the first debug tracer's. A debug tracer started in
+// place of an ended one takes the next TracerName (tracers.go, task
+// ah4), and Target.Tracer then names it for every exec.
 const TracerContainer = "iormesh"
 
 // DefaultImage is the built-in tracer image, the last layer of #18's
@@ -104,6 +106,12 @@ type Target struct {
 	// SELinuxLevel is the seLinuxOptions.level beside a non-empty
 	// SELinuxType ("" omits the level; ignored when the type is empty).
 	SELinuxLevel string
+	// Tracer is the tracer container exec and fetch name, ""
+	// for TracerContainer: in debug mode the pod's newest debug tracer
+	// (PodState.Container, a TracerName), which Deploy also sets on its
+	// Kubectl once it has picked or started one (task ah4). A sidecar
+	// is always TracerContainer.
+	Tracer string
 }
 
 // Layer is one level of #18's precedence: run flags, the pod entry, the
@@ -243,10 +251,20 @@ func (t Target) Validate() error {
 		return fmt.Errorf("%w: pod %q", ErrName, t.Pod)
 	case !k8sname.Label(t.Container):
 		return fmt.Errorf("%w: container %q", ErrName, t.Container)
-	case t.Container == TracerContainer:
-		return fmt.Errorf("%w: container %q is the tracer's own name", ErrName, t.Container)
+	case isTracerName(t.Container):
+		return fmt.Errorf("%w: container %q is a tracer's own name", ErrName, t.Container)
+	case t.Tracer == "" || t.Tracer == TracerContainer:
+	case t.Mode == ModeSidecar || !isTracerName(t.Tracer):
+		return fmt.Errorf("%w: tracer container %q (%s, or in debug mode %s up to %s)", ErrName, t.Tracer,
+			TracerContainer, TracerName(2), TracerName(MaxDebugTracers))
 	}
 	return nil
+}
+
+// isTracerName reports whether name is one TracerName makes.
+func isTracerName(name string) bool {
+	_, ok := tracerIndex(name)
+	return ok
 }
 
 // requireImage refuses a target without a tracer image: what Debug runs

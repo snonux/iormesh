@@ -419,6 +419,45 @@ func TestStaleActiveFilesAreSwept(t *testing.T) {
 	}
 }
 
+// TestNextRunKeepsKilledRunsSegments: a run killed mid-segment (a debug
+// tracer taken down with its app container, task ah4) leaves its
+// published segments in ready/, its unsealed one as .active-* and its
+// .lock unheld — the kernel drops a dead process's flock. The next
+// run's writer, another session in the same project dir (the pod's
+// shared emptyDir), opens there, sweeps the unsealed files and
+// publishes beside the published ones, which stay for collect: only the
+// killed run's active segment is lost.
+func TestNextRunKeepsKilledRunsSegments(t *testing.T) {
+	w1, dir := newTestWriter(t, nil)
+	evs := richEvents()
+	writeAll(t, w1, evs[:2])
+	if err := w1.Tick(t0.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	writeAll(t, w1, evs[2:])                // the unsealed segment the kill loses
+	if err := w1.lock.Close(); err != nil { // the kill: no Close, the flock dropped
+		t.Fatal(err)
+	}
+	w2, err := New(Config{Dir: dir, FQDN: "app-1.example.org", Session: "e5f6a7b8", Project: "shop",
+		Now: func() time.Time { return t0.Add(2 * time.Minute) }})
+	if err != nil {
+		t.Fatalf("next run: %v", err)
+	}
+	writeAll(t, w2, evs[:1])
+	if err := w2.Close(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"app-1.example.org-a1b2c3d4-20261120T063000Z-000000.parquet",
+		"app-1.example.org-e5f6a7b8-20261120T063200Z-000000.parquet"}
+	if got := readyFiles(t, dir); !slices.Equal(got, want) {
+		t.Fatalf("ready/ = %v, want %v", got, want)
+	}
+	sameNDJSON(t, readEvents(t, filepath.Join(dir, ReadyDir, want[0])), evs[:2])
+	if active, _ := filepath.Glob(filepath.Join(dir, activePrefix+"*")); len(active) != 0 {
+		t.Errorf("unsealed files left: %v", active)
+	}
+}
+
 func TestReadyOwnerAndSymlink(t *testing.T) {
 	// Chown to oneself needs no privilege, so the owner path runs here.
 	w, dir := newTestWriter(t, func(c *Config) { c.Owner = &Owner{UID: os.Getuid(), GID: os.Getgid()} })

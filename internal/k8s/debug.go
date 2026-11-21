@@ -119,7 +119,9 @@ func checkPrepared(p podInfo, mode Mode) error {
 // checkContainers checks the tracer container against the mode (the app
 // container is checkPod's): a sidecar must be there, with the shared
 // process namespace it traces through; a debug target must have no
-// tracer yet, neither a debug container nor a sidecar.
+// tracer yet, neither a debug container nor a sidecar. (Deploy is more
+// lenient: it leaves a running debug tracer alone and replaces an ended
+// one, task ah4. Check and Debug are the plain first-tracer path.)
 func checkContainers(p podInfo, t Target) error {
 	if t.Mode == ModeSidecar {
 		return checkSidecar(p, t)
@@ -128,11 +130,11 @@ func checkContainers(p podInfo, t Target) error {
 	// (pod.go HostID) and its pids are the pod's PID namespace's, so a
 	// second tracer in the same pod would write a second session under
 	// the same identity. Both refusals below keep it at one.
-	if hasContainer(p.Spec.EphemeralContainers, TracerContainer) {
+	if ts := debugTracers(p.Spec.EphemeralContainers); len(ts) > 0 {
 		// Ephemeral containers can be neither removed nor restarted:
 		// a second debug of the same name would fail in the API server.
-		return fmt.Errorf("%w: %s/%s already has a %q debug container; restart the pod for a new session",
-			ErrTransport, t.Namespace, t.Pod, TracerContainer)
+		return fmt.Errorf("%w: %s/%s already has a %q debug container; iormeshctl deploy leaves a running "+
+			"one alone and replaces an ended one", ErrTransport, t.Namespace, t.Pod, ts[len(ts)-1].Name)
 	}
 	if hasContainer(p.Spec.Containers, TracerContainer) {
 		// A sidecar-patched pod has its tracer already: use sidecar mode.
@@ -226,8 +228,10 @@ func (p podInfo) traceLimit() string {
 	return ""
 }
 
-// debugArgs is the `kubectl debug` argv. --attach=false: the tracer runs
-// on in the pod, iormeshctl does not hold a terminal to it. The profile
+// debugArgs is the `kubectl debug` argv, the container named k.tracer()
+// (TracerContainer, or the TracerName Deploy picked in place of an ended
+// tracer). --attach=false: the tracer runs on in the pod, iormeshctl
+// does not hold a terminal to it. The profile
 // is general for the minimal set (the --custom file then sets the whole
 // security context) and sysadmin (privileged) for the fallback.
 func (k *Kubectl) debugArgs(custom string, argv []string) []string {
@@ -236,7 +240,7 @@ func (k *Kubectl) debugArgs(custom string, argv []string) []string {
 		profile = "sysadmin"
 	}
 	return slices.Concat(k.base(), []string{"debug", k.t.Pod,
-		"--container=" + TracerContainer,
+		"--container=" + k.tracer(),
 		"--target=" + k.t.Container,
 		"--image=" + k.t.Image,
 		"--attach=false",

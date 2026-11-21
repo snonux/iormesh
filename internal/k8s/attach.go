@@ -80,6 +80,16 @@ var (
 // probe itself failed in it, and with ErrNotAttached naming the last
 // answer once timeout passed or ctx ended — the message tells the two
 // apart, and an ended ctx's error is wrapped as well.
+//
+// After a Deploy that replaced an ended tracer (Replaced, task ah4),
+// "dead" and "ended" are the predecessor's: its state.json stays in the
+// shared trace dir until the new run's markRunning replaces it, and the
+// new tracer reads it as dead (its process is gone with the old PID
+// namespace). They are waited past, not failed on. The new run's own
+// death cannot hide behind that: the run is its container's process, so
+// its container terminates, which the probe sees and fails on; only a
+// new session that ended inside the wait (a -duration shorter than the
+// timeout) reads as a timeout instead.
 func (k *Kubectl) WaitAttached(ctx context.Context, proj string, timeout time.Duration) (string, error) {
 	if !project.Valid(proj) {
 		return "", fmt.Errorf("%w: project %q: %s", ErrName, proj, project.Rule)
@@ -99,7 +109,7 @@ func (k *Kubectl) WaitAttached(ctx context.Context, proj string, timeout time.Du
 		if left <= 0 {
 			return "", fmt.Errorf("%w: %s, project %s, not attached after %s (last: %s); "+
 				"see kubectl logs %s --container=%s", ErrNotAttached, k.tracerName(), proj, timeout, last,
-				k.t.Pod, TracerContainer)
+				k.t.Pod, k.tracer())
 		}
 		timer := time.NewTimer(min(attachPoll, left))
 		select {
@@ -139,7 +149,7 @@ func (k *Kubectl) probeOnce(ctx context.Context, proj string) (session, last str
 func (k *Kubectl) attachProbe(ctx context.Context, proj string) (session, last string, err error) {
 	out, rerr := k.Run(ctx, TracerBinary, "ready", "-project", proj, ReadyStateFlag)
 	if rerr == nil {
-		return parseAttach(strings.TrimSpace(string(out)), k.tracerName())
+		return parseAttach(strings.TrimSpace(string(out)), k.tracerName(), k.superseded)
 	}
 	if ctx.Err() != nil {
 		return "", "", nil // cut off: the answer before it says more
@@ -160,29 +170,35 @@ func (k *Kubectl) attachProbe(ctx context.Context, proj string) (session, last s
 		}
 		return "", firstLine(gerr.Error()), nil
 	}
-	if st, ok := tracerStatus(p.Status.EphemeralContainerStatuses); ok && st.State.Terminated != nil {
+	if st, ok := statusOf(p.Status.EphemeralContainerStatuses, k.tracer()); ok && st.State.Terminated != nil {
 		return "", "", fmt.Errorf("%w: %s %s before attaching; see kubectl logs %s --container=%s",
-			ErrNotAttached, k.tracerName(), st.notRunning(), k.t.Pod, TracerContainer)
+			ErrNotAttached, k.tracerName(), st.notRunning(), k.t.Pod, k.tracer())
 	}
 	return "", firstLine(rerr.Error()), nil
 }
 
 // parseAttach reads one `iormesh ready -state` answer, refusing words
 // iormesh never writes (attachSession, attachReason): pending and dead
-// take none, running a session id, ended an end reason or none.
-func parseAttach(answer, where string) (session, last string, err error) {
+// take none, running a session id, ended an end reason or none. With
+// superseded (the tracer replaced an ended one, WaitAttached) a dead or
+// ended state is the predecessor's and reads as pending.
+func parseAttach(answer, where string, superseded bool) (session, last string, err error) {
 	word, rest, _ := strings.Cut(answer, " ")
+	dead := word == AttachDead && rest == ""
+	over := word == AttachEnded && (rest == "" || attachReason.MatchString(rest))
 	switch {
+	case superseded && (dead || over):
+		return "", "the ended tracer's state (" + word + "), the new run not attached yet", nil
 	case word == AttachRunning && attachSession.MatchString(rest):
 		return rest, "", nil
 	case word == AttachRunning:
 		return "", "", fmt.Errorf("%w: %s answered %q: no session id", ErrNotAttached, where, firstLine(answer))
 	case word == AttachPending && rest == "":
 		return "", "probes not attached yet", nil
-	case word == AttachEnded && (rest == "" || attachReason.MatchString(rest)):
+	case over:
 		return "", "", fmt.Errorf("%w: %s: the session already ended (%s); restart the pod for a new one",
 			ErrNotAttached, where, cmp.Or(rest, "no reason given"))
-	case word == AttachDead && rest == "":
+	case dead:
 		return "", "", fmt.Errorf("%w: %s: the tracer died without its end; restart the pod for a new session",
 			ErrNotAttached, where)
 	}

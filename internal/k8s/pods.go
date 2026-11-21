@@ -105,15 +105,6 @@ func (st containerStatus) notRunning() string {
 	return "in no known state"
 }
 
-// tracerStatus finds the tracer container's status in statuses.
-func tracerStatus(statuses []containerStatus) (containerStatus, bool) {
-	i := slices.IndexFunc(statuses, func(s containerStatus) bool { return s.Name == TracerContainer })
-	if i < 0 {
-		return containerStatus{}, false
-	}
-	return statuses[i], true
-}
-
 // hasContainer reports whether cs holds a container called name.
 func hasContainer(cs []named, name string) bool {
 	return slices.ContainsFunc(cs, func(c named) bool { return c.Name == name })
@@ -131,11 +122,20 @@ type PodState struct {
 	// has nothing to collect — said by the API server, not guessed from
 	// a failed exec.
 	Tracer bool
-	// Stopped says why the tracer container is not running ("" while it
-	// runs): a debug session deployed with -linger stays running after
-	// it ends, so a stopped one crashed, was OOM-killed or predates
-	// -linger, and `kubectl exec` cannot enter it — its segments in the
-	// emptyDir are out of reach until the pod goes (review B1).
+	// Container is the tracer container every exec names ("" without
+	// one): the sidecar's TracerContainer, or the newest debug tracer
+	// (TracerName, task ah4) — the one deploy left running or started
+	// last. Its predecessors ended; whatever they published is in the
+	// shared emptyDir, which the newest one's `iormesh ready` serves.
+	Container string
+	// Stopped says why that tracer container is not running ("" while
+	// it runs): a debug session deployed with -linger stays running
+	// after it ends, so a stopped one crashed, was OOM-killed, was
+	// killed with its app container (debug mode joins that container's
+	// PID namespace, task ah4) or predates -linger, and `kubectl exec`
+	// cannot enter it — its segments in the emptyDir are out of reach
+	// until a deploy starts the next debug tracer or the pod goes
+	// (review B1).
 	Stopped string
 }
 
@@ -234,20 +234,25 @@ func (l *Lister) Select(ctx context.Context, selector string) ([]PodState, error
 }
 
 // state checks a pod's name and UID — both reach a kubectl argv or a
-// local path — and notes whether the mode's tracer container is in it.
+// local path — and notes the mode's tracer container in it, if any: the
+// sidecar, or the newest debug tracer (debugTracers).
 func (l *Lister) state(p podInfo) (PodState, error) {
 	if !k8sname.Pod(p.Metadata.Name) || !k8sname.UID(p.Metadata.UID) {
 		return PodState{}, fmt.Errorf("%w: pod %q uid %q", ErrName, p.Metadata.Name, p.Metadata.UID)
 	}
-	tracer := hasContainer(p.Spec.EphemeralContainers, TracerContainer)
+	var name string
 	statuses := p.Status.EphemeralContainerStatuses
 	if l.s.Mode == ModeSidecar {
-		tracer = hasContainer(p.Spec.Containers, TracerContainer)
+		if hasContainer(p.Spec.Containers, TracerContainer) {
+			name = TracerContainer
+		}
 		statuses = p.Status.ContainerStatuses
+	} else if ts := debugTracers(p.Spec.EphemeralContainers); len(ts) > 0 {
+		name = ts[len(ts)-1].Name
 	}
-	st := PodState{Name: p.Metadata.Name, UID: p.Metadata.UID, Tracer: tracer}
-	if tracer {
-		cs, ok := tracerStatus(statuses)
+	st := PodState{Name: p.Metadata.Name, UID: p.Metadata.UID, Tracer: name != "", Container: name}
+	if st.Tracer {
+		cs, ok := statusOf(statuses, name)
 		if st.Stopped = "without a status yet"; ok {
 			st.Stopped = cs.notRunning()
 		}

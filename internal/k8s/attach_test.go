@@ -122,11 +122,11 @@ func TestWaitAttachedEnded(t *testing.T) {
 // prints is 8 lowercase hex, an end reason snake_case, pending and dead
 // take no words — and an odd answer is quoted, never echoed raw.
 func TestParseAttach(t *testing.T) {
-	session, last, err := parseAttach("running 0f1e2d3c", "pod")
+	session, last, err := parseAttach("running 0f1e2d3c", "pod", false)
 	if session != "0f1e2d3c" || last != "" || err != nil {
 		t.Errorf("running: %q, %q, %v", session, last, err)
 	}
-	if session, last, err = parseAttach("pending", "pod"); session != "" || last == "" || err != nil {
+	if session, last, err = parseAttach("pending", "pod", false); session != "" || last == "" || err != nil {
 		t.Errorf("pending: %q, %q, %v", session, last, err)
 	}
 	for _, answer := range []string{
@@ -135,7 +135,7 @@ func TestParseAttach(t *testing.T) {
 		"ended Disk_limit", "ended disk limit", "ended disk-limit", "ended \x1b[2J", "ended " + strings.Repeat("a", 33),
 		"pending x", "dead x", "", "RUNNING 0f1e2d3c",
 	} {
-		session, _, err := parseAttach(answer, "pod")
+		session, _, err := parseAttach(answer, "pod", false)
 		if session != "" || !errors.Is(err, ErrNotAttached) {
 			t.Errorf("%q: session %q, err %v; want a refusal", answer, session, err)
 			continue
@@ -150,7 +150,7 @@ func TestParseAttach(t *testing.T) {
 		}
 	}
 	for _, reason := range []string{"disk_limit", "signal", "duration", strings.Repeat("a", 32)} {
-		if _, _, err := parseAttach("ended "+reason, "pod"); !strings.Contains(err.Error(), "already ended ("+reason+")") {
+		if _, _, err := parseAttach("ended "+reason, "pod", false); !strings.Contains(err.Error(), "already ended ("+reason+")") {
 			t.Errorf("ended %s: %v", reason, err)
 		}
 	}

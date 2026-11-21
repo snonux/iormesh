@@ -58,6 +58,11 @@ var readyDirPath = regexp.MustCompile(`^` + regexp.QuoteMeta(TraceRoot) + `/([^/
 type Kubectl struct {
 	t   Target
 	run runner
+	// superseded is set by a Deploy that started a debug tracer in
+	// place of an ended one (Replaced, task ah4): the predecessor's
+	// state.json is still in the shared trace dir until the new run
+	// attaches, and WaitAttached must not take it for the new one's.
+	superseded bool
 }
 
 // Kubectl satisfies federate.Transport; checked at compile time.
@@ -83,12 +88,25 @@ func (k *Kubectl) base() []string {
 	return []string{"--context=" + k.t.Context, "--namespace=" + k.t.Namespace}
 }
 
+// tracer is the tracer container this transport execs into: the
+// target's Tracer, else TracerContainer.
+func (k *Kubectl) tracer() string {
+	if k.t.Tracer != "" {
+		return k.t.Tracer
+	}
+	return TracerContainer
+}
+
+// Tracer names the tracer container this transport execs into — after
+// Deploy, the one it left running or started (task ah4).
+func (k *Kubectl) Tracer() string { return k.tracer() }
+
 // execArgs is `kubectl exec` of argv in the tracer container. kubectl
 // hands argv to the container runtime as an argv — no shell on either
 // side — and without -i nothing reads the operator's terminal.
 func (k *Kubectl) execArgs(argv ...string) []string {
 	return slices.Concat(k.base(),
-		[]string{"exec", k.t.Pod, "--container=" + TracerContainer, "--"}, argv)
+		[]string{"exec", k.t.Pod, "--container=" + k.tracer(), "--"}, argv)
 }
 
 // Run executes argv in the tracer container. A command that ran and

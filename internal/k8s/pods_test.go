@@ -99,7 +99,8 @@ func TestSelectArgvAndFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []PodState{{Name: "web-a", UID: testUID(1), Tracer: true}, {Name: "web-b", UID: testUID(2)}}
+	want := []PodState{{Name: "web-a", UID: testUID(1), Tracer: true, Container: TracerContainer},
+		{Name: "web-b", UID: testUID(2)}}
 	if !slices.Equal(pods, want) {
 		t.Errorf("pods = %+v, want %+v", pods, want)
 	}
@@ -170,7 +171,7 @@ func TestGet(t *testing.T) {
 	b, _ := json.Marshal(podItem("checkout-0", testUID(7), "Running", true))
 	f.pod(t, string(b))
 	st, err := newTestLister(t).Get(context.Background(), "checkout-0")
-	if err != nil || st != (PodState{Name: "checkout-0", UID: testUID(7), Tracer: true}) {
+	if err != nil || st != (PodState{Name: "checkout-0", UID: testUID(7), Tracer: true, Container: TracerContainer}) {
 		t.Fatalf("Get = %+v, %v", st, err)
 	}
 	want := []string{"--context=kind-iormesh", "--namespace=shop", "get", "pod", "checkout-0", "--output=json"}

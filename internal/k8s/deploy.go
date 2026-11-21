@@ -23,6 +23,11 @@ const (
 	// there and running the pinned image. iormeshctl starts nothing in
 	// a sidecar pod: the patch fixed its command line.
 	SidecarVerified
+	// Replaced: every earlier debug tracer in the pod had ended — most
+	// often killed with its app container, whose PID namespace it
+	// joined (task ah4) — and a new one, under the next TracerName,
+	// runs argv. It serves what its predecessors published.
+	Replaced
 )
 
 // Deploy is iormeshctl deploy's step for one pod (decision #18, task
@@ -31,12 +36,8 @@ const (
 //
 //   - sidecar: the "iormesh" container and shareProcessNamespace must be
 //     there, and the container must be running the pinned image;
-//   - debug, with an "iormesh" ephemeral container already (an earlier
-//     deploy): it must be running the pinned image, and is left alone —
-//     one that ended, or runs another image, is refused (restart the pod);
-//   - debug otherwise: `kubectl debug` starts the tracer running argv
-//     plus the pod's disk bounds (PodDiskArgs of its trace emptyDir's
-//     sizeLimit: the byte cap, no percent limit).
+//   - debug: deployDebug — a new tracer, an earlier one left alone, or a
+//     fresh one in place of an ended one.
 //
 // "Running the pinned image" is checked against the container status's
 // imageID, the digest the kubelet actually pulled, never the spec's
@@ -64,6 +65,27 @@ func (k *Kubectl) Deploy(ctx context.Context, argv ...string) (Outcome, error) {
 		}
 		return SidecarVerified, nil
 	}
+	return k.deployDebug(ctx, p, argv)
+}
+
+// deployDebug is Deploy in debug mode, on the checked pod p, by the
+// pod's debug tracers (debugTracers, newest last):
+//
+//   - none: `kubectl debug` starts TracerContainer running argv plus the
+//     pod's disk bounds (PodDiskArgs of its trace emptyDir's sizeLimit:
+//     the byte cap, no percent limit) — Started;
+//   - the newest one has not terminated: it must be running the pinned
+//     image and the project argv asks for, and is left alone — Running;
+//     one still waiting (image pull), or running another image or
+//     project, is refused;
+//   - the newest one terminated (task ah4): with every earlier one
+//     terminated too and fewer than MaxDebugTracers in the pod, the
+//     next TracerName starts as above — Replaced. Its spec image
+//     is --image=<pinned digest>, as for a first tracer.
+//
+// On success the transport names that tracer (Tracer) for the attach
+// wait and every exec after it.
+func (k *Kubectl) deployDebug(ctx context.Context, p podInfo, argv []string) (Outcome, error) {
 	if hasContainer(p.Spec.Containers, TracerContainer) {
 		// One tracer per pod (PLAN.md M7, task 7f4): a sidecar pod has
 		// its tracer already, and a debug one beside it would be a
@@ -71,18 +93,19 @@ func (k *Kubectl) Deploy(ctx context.Context, argv ...string) (Outcome, error) {
 		return 0, fmt.Errorf("%w: %s/%s already has a %q sidecar; trace it in sidecar mode",
 			ErrTransport, k.t.Namespace, k.t.Pod, TracerContainer)
 	}
-	if hasContainer(p.Spec.EphemeralContainers, TracerContainer) {
-		if err := k.verifySpecImage(p.Spec.EphemeralContainers); err != nil {
+	statuses := p.Status.EphemeralContainerStatuses
+	out := Started
+	if ts := debugTracers(p.Spec.EphemeralContainers); len(ts) > 0 {
+		newest := ts[len(ts)-1].Name
+		if !ended(statuses, newest) {
+			k.t.Tracer = newest
+			return k.keepRunning(p, argv)
+		}
+		next, err := k.nextTracer(ts, statuses)
+		if err != nil {
 			return 0, err
 		}
-		if err := k.verifyImage(p.Status.EphemeralContainerStatuses); err != nil {
-			return 0, fmt.Errorf("%w; ephemeral containers cannot be replaced: restart the pod for a new session",
-				err)
-		}
-		if err := k.verifyProject(p.Spec.EphemeralContainers, argv); err != nil {
-			return 0, err
-		}
-		return Running, nil
+		k.t.Tracer, out = next, Replaced
 	}
 	if len(argv) == 0 {
 		return 0, fmt.Errorf("%w: empty tracer command", ErrTransport)
@@ -90,7 +113,25 @@ func (k *Kubectl) Deploy(ctx context.Context, argv ...string) (Outcome, error) {
 	if err := k.debug(ctx, p, argv); err != nil {
 		return 0, err
 	}
-	return Started, nil
+	k.superseded = out == Replaced
+	return out, nil
+}
+
+// keepRunning checks the pod's newest debug tracer (k.tracer()), which
+// has not terminated, before Deploy leaves it alone: spec image and
+// status imageID the pinned digest, the project argv asks for.
+func (k *Kubectl) keepRunning(p podInfo, argv []string) (Outcome, error) {
+	if err := k.verifySpecImage(p.Spec.EphemeralContainers); err != nil {
+		return 0, err
+	}
+	if err := k.verifyImage(p.Status.EphemeralContainerStatuses); err != nil {
+		return 0, fmt.Errorf("%w; a debug tracer that has not ended cannot be replaced: wait until it runs, "+
+			"or restart the pod for a new session", err)
+	}
+	if err := k.verifyProject(p.Spec.EphemeralContainers, argv); err != nil {
+		return 0, err
+	}
+	return Running, nil
 }
 
 // verifyImage finds the tracer container's status in statuses and
@@ -100,7 +141,7 @@ func (k *Kubectl) Deploy(ctx context.Context, argv ...string) (Outcome, error) {
 // unverifiable is not verified.
 func (k *Kubectl) verifyImage(statuses []containerStatus) error {
 	where := k.tracerName()
-	st, ok := tracerStatus(statuses)
+	st, ok := statusOf(statuses, k.tracer())
 	if !ok {
 		return fmt.Errorf("%w: %s has no status yet (not started)", ErrTransport, where)
 	}
@@ -125,7 +166,7 @@ func (k *Kubectl) verifyImage(statuses []containerStatus) error {
 // admission. A sidecar's spec may name a tag (the owner's patch); only
 // its status is checked.
 func (k *Kubectl) verifySpecImage(cs []named) error {
-	i := slices.IndexFunc(cs, func(c named) bool { return c.Name == TracerContainer })
+	i := slices.IndexFunc(cs, func(c named) bool { return c.Name == k.tracer() })
 	if i < 0 || k8sname.Digest(cs[i].Image) != k8sname.Digest(k.t.Image) {
 		var img string
 		if i >= 0 {
@@ -149,7 +190,7 @@ func (k *Kubectl) verifyProject(cs []named, argv []string) error {
 	if !ok {
 		return nil
 	}
-	i := slices.IndexFunc(cs, func(c named) bool { return c.Name == TracerContainer })
+	i := slices.IndexFunc(cs, func(c named) bool { return c.Name == k.tracer() })
 	if i < 0 {
 		return nil // verifySpecImage has refused this already
 	}
@@ -158,8 +199,8 @@ func (k *Kubectl) verifyProject(cs []named, argv []string) error {
 		got = k.t.Namespace
 	}
 	if got != want {
-		return fmt.Errorf("%w: %s traces project %q, not %q; ephemeral containers cannot be replaced: "+
-			"restart the pod for a new session", ErrTransport, k.tracerName(), got, want)
+		return fmt.Errorf("%w: %s traces project %q, not %q; ephemeral containers cannot be replaced while "+
+			"they run: restart the pod for a new session", ErrTransport, k.tracerName(), got, want)
 	}
 	return nil
 }
@@ -193,5 +234,5 @@ func flagValue(argv []string, name string) (string, bool) {
 
 // tracerName names the target's tracer container in messages.
 func (k *Kubectl) tracerName() string {
-	return fmt.Sprintf("%s/%s container %q", k.t.Namespace, k.t.Pod, TracerContainer)
+	return fmt.Sprintf("%s/%s container %q", k.t.Namespace, k.t.Pod, k.tracer())
 }

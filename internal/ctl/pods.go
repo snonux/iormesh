@@ -29,7 +29,9 @@ import (
 //     does not exist yet is an empty stream from the tracer itself.
 //   - deploy: per pod, k8s.Kubectl.Deploy — a prepared pod gets an
 //     ephemeral tracer running the entry's project, a pod whose tracer
-//     already runs the pinned image is left alone, a sidecar is checked
+//     already runs the pinned image is left alone, a pod whose debug
+//     tracers all ended (killed with a restarting app container) gets
+//     the next one, "iormesh-2" and on (task ah4), a sidecar is checked
 //     for the pinned image. No uname, command -v, mkdir or Push: the
 //     image carries the tracer, pinned by digest.
 //   - rm: the entry's projects are collected one last time, then the
@@ -162,12 +164,16 @@ func (pe podEntry) pods(ctx context.Context) ([]k8s.PodState, error) {
 	return l.Select(ctx, pe.entry.Selector)
 }
 
-// transport is the kubectl transport into one of the entry's pods.
-func (pe podEntry) transport(pod string) (*k8s.Kubectl, error) {
+// transport is the kubectl transport into one of the entry's pods, its
+// execs naming the tracer container tracer (PodState.Container: the
+// newest debug tracer, task ah4), or k8s.TracerContainer when "" —
+// deploy's case, where Deploy picks the container itself.
+func (pe podEntry) transport(pod, tracer string) (*k8s.Kubectl, error) {
 	t, err := pe.scope.Target(pod, pe.entry.Container)
 	if err != nil {
 		return nil, err
 	}
+	t.Tracer = tracer
 	return k8s.New(t)
 }
 

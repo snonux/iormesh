@@ -89,7 +89,7 @@ func deployPods(ctx context.Context, e env, entries []podEntry, attach time.Dura
 // deploy's word would otherwise go untraced. One that never attaches,
 // or whose session already ended, fails the pod.
 func deployPod(ctx context.Context, e env, pe podEntry, pod string, attach time.Duration) error {
-	k, err := pe.transport(pod)
+	k, err := pe.transport(pod, "")
 	if err != nil {
 		return err
 	}
@@ -103,7 +103,7 @@ func deployPod(ctx context.Context, e env, pe podEntry, pod string, attach time.
 	}
 	label := pe.label(pod)
 	var session string
-	if out == k8s.Started || out == k8s.Running {
+	if out == k8s.Started || out == k8s.Running || out == k8s.Replaced {
 		if session, err = k.WaitAttached(ctx, pe.projects[0].Name, attach); err != nil {
 			return err
 		}
@@ -112,10 +112,14 @@ func deployPod(ctx context.Context, e env, pe podEntry, pod string, attach time.
 	case k8s.Started:
 		_, err = fmt.Fprintf(e.stdout, "%s: started tracer, project %s, image %s; attached, session %s\n", label,
 			pe.projects[0].Name, pe.scope.Image, session)
+	case k8s.Replaced:
+		_, err = fmt.Fprintf(e.stdout, "%s: earlier tracer ended (its unsealed segment is lost, its published "+
+			"ones stay for collect); started tracer %s, project %s, image %s; attached, session %s\n", label,
+			k.Tracer(), pe.projects[0].Name, pe.scope.Image, session)
 	case k8s.Running:
-		_, err = fmt.Fprintf(e.stdout, "%s: tracer already running the pinned image, attached, session %s; "+
-			"left alone (an ephemeral container cannot be restarted: restart the pod for a new session)\n",
-			label, session)
+		_, err = fmt.Fprintf(e.stdout, "%s: tracer %s already running the pinned image, attached, session %s; "+
+			"left alone (a running ephemeral container cannot be restarted: restart the pod for a new session)\n",
+			label, k.Tracer(), session)
 	case k8s.SidecarVerified:
 		_, err = fmt.Fprintf(e.stdout, "%s: sidecar running the pinned image; its sessions are the "+
 			"sidecar patch's command line\n", label)

@@ -160,8 +160,9 @@ func TestDeploySidecar(t *testing.T) {
 
 // TestDeployRefusesUnpinned: a tracer container — sidecar or an earlier
 // ephemeral one — running another digest, an imageID naming no registry
-// digest (a locally loaded image), one not running, or a sidecar pod
-// without the sidecar is refused; nothing is started.
+// digest (a locally loaded image), one not running (an ephemeral one
+// still waiting: one that terminated is replaced instead, task ah4),
+// or a sidecar pod without the sidecar is refused; nothing is started.
 func TestDeployRefusesUnpinned(t *testing.T) {
 	other := "registry.example/iormesh@sha256:" + strings.Repeat("f", 64)
 	cases := map[string]struct {
@@ -176,13 +177,14 @@ func TestDeployRefusesUnpinned(t *testing.T) {
 			"registry.example/iormesh@sha256:"+testDigest), `"image":"`+testImage,
 			`"image":"registry.example/iormesh:latest`, 1), false, ErrImage},
 		"ephemeral local image": {withTracer(false, true, "sha256:"+testDigest), false, ErrImage},
-		"ephemeral ended":       {withTracer(false, false, "registry.example/iormesh@sha256:"+testDigest), false, ErrTransport},
-		"sidecar other digest":  {withTracer(true, true, other), true, ErrImage},
-		"sidecar tag only":      {withTracer(true, true, "registry.example/iormesh:latest"), true, ErrImage},
-		"sidecar not running":   {withTracer(true, false, "registry.example/iormesh@sha256:"+testDigest), true, ErrTransport},
-		"sidecar missing":       {preparedPod, true, ErrUnprepared},
-		"sidecar unprepared":    {`{"spec":{"containers":[{"name":"app"},{"name":"iormesh"}]}}`, true, ErrUnprepared},
-		"debug unprepared":      {`{"spec":{"containers":[{"name":"app"}]}}`, false, ErrUnprepared},
+		"ephemeral waiting": {strings.Replace(withTracer(false, false, "registry.example/iormesh@sha256:"+testDigest),
+			`{"terminated":{"exitCode":0}}`, `{"waiting":{"reason":"ErrImagePull"}}`, 1), false, ErrTransport},
+		"sidecar other digest": {withTracer(true, true, other), true, ErrImage},
+		"sidecar tag only":     {withTracer(true, true, "registry.example/iormesh:latest"), true, ErrImage},
+		"sidecar not running":  {withTracer(true, false, "registry.example/iormesh@sha256:"+testDigest), true, ErrTransport},
+		"sidecar missing":      {preparedPod, true, ErrUnprepared},
+		"sidecar unprepared":   {`{"spec":{"containers":[{"name":"app"},{"name":"iormesh"}]}}`, true, ErrUnprepared},
+		"debug unprepared":     {`{"spec":{"containers":[{"name":"app"}]}}`, false, ErrUnprepared},
 		// One tracer per pod, and an identity the tracer would refuse
 		// (task 7f4).
 		"debug beside a sidecar": {withTracer(true, true, "registry.example/iormesh@sha256:"+testDigest), false,

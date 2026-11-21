@@ -19,7 +19,12 @@
 //   - deploy.go: iormeshctl deploy's step for one pod — start the debug
 //     container, or accept a tracer container already there (sidecar or
 //     earlier debug container) only if its status imageID is the pinned
-//     digest (task af4).
+//     digest (task af4), or start the next debug tracer in place of
+//     ended ones (task ah4).
+//   - tracers.go: a debug pod's successive tracers — "iormesh",
+//     "iormesh-2" … up to MaxDebugTracers — since a debug tracer dies
+//     with its app container and an ephemeral container is never
+//     restarted, removed or renamed (task ah4).
 //   - pods.go: which running pods a registry pods: entry is (a named pod
 //     or a label selector), with each pod's UID — its store directory and
 //     host identity — and whether a tracer container is in it.
