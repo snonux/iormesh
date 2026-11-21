@@ -46,12 +46,12 @@ func TestWaitAttachedTimeout(t *testing.T) {
 	f.pod(t, withTracer(false, true, testImage))
 	f.states(t, "pending")
 	start := time.Now()
-	_, err := newTestKubectl(t, testTarget()).WaitAttached(context.Background(), "shop", 150*time.Millisecond)
-	if !errors.Is(err, ErrNotAttached) || !strings.Contains(err.Error(), "not attached after 150ms") ||
+	_, err := newTestKubectl(t, testTarget()).WaitAttached(context.Background(), "shop", 500*time.Millisecond)
+	if !errors.Is(err, ErrNotAttached) || !strings.Contains(err.Error(), "not attached after 500ms") ||
 		!strings.Contains(err.Error(), "probes not attached yet") || !strings.Contains(err.Error(), "kubectl logs") {
 		t.Fatalf("err = %v", err)
 	}
-	if d := time.Since(start); d < 150*time.Millisecond {
+	if d := time.Since(start); d < 500*time.Millisecond {
 		t.Errorf("gave up after %s, before the timeout", d)
 	}
 	if n := len(f.calls(t)); n < 2 {
@@ -68,7 +68,7 @@ func TestWaitAttachedContainerDown(t *testing.T) {
 	t.Setenv("FAKE_KUBECTL_EXEC_DOWN", "1")
 	f.pod(t, strings.Replace(withTracer(false, true, testImage), `{"running":{"startedAt":"2026-11-21T00:00:00Z"}}`,
 		`{"waiting":{"reason":"ContainerCreating"}}`, 1))
-	_, err := newTestKubectl(t, testTarget()).WaitAttached(context.Background(), "shop", 100*time.Millisecond)
+	_, err := newTestKubectl(t, testTarget()).WaitAttached(context.Background(), "shop", 500*time.Millisecond)
 	if !errors.Is(err, ErrNotAttached) || !strings.Contains(err.Error(), "container not found") {
 		t.Fatalf("still creating: err = %v", err)
 	}

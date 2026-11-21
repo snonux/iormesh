@@ -97,6 +97,10 @@ func (k *Kubectl) attachProbe(ctx context.Context, proj string) (session, last s
 	// creating), or no longer. Only the pod's status tells which.
 	p, gerr := k.getPod(ctx)
 	if gerr != nil {
+		if ctx.Err() != nil {
+			// The timeout cut the get off: the exec's failure says more.
+			return "", firstLine(rerr.Error()), nil
+		}
 		return "", firstLine(gerr.Error()), nil
 	}
 	if st, ok := tracerStatus(p.Status.EphemeralContainerStatuses); ok && st.State.Terminated != nil {
