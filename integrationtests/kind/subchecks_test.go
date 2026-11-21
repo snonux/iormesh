@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -223,12 +224,12 @@ func (c *cluster) clusterName(t *testing.T) string {
 		"--output=jsonpath={.contexts[0].context.cluster}"))
 }
 
-// checkSigterm deletes app's pod and reads, from containerd on the kind
-// node, how its debug tracer ended: on the kubelet's SIGTERM, exit 0,
+// checkSigterm deletes app's pod and reads, from containerd on the node
+// (crictlPrefix), how its debug tracer ended: on the kubelet's SIGTERM, exit 0,
 // within the pod's grace period (5 s), not killed after it.
 func (c *cluster) checkSigterm(t *testing.T, app string) {
-	if c.cfg.node == "" {
-		t.Skipf("%s unset: no node to read the container's exit from", envNode)
+	if len(c.cfg.crictl) == 0 {
+		t.Skipf("%s and %s unset: no node to read the container's exit from", envNode, envCrictl)
 	}
 	p := c.pod(t, app)
 	var id string
@@ -260,13 +261,13 @@ type crictlStatus struct {
 	Finished time.Time `json:"finishedAt"`
 }
 
-// crictlState inspects a container on the kind node (docker exec through
-// sudo -n, as every docker call of the acceptance run).
+// crictlState inspects a container on the node through the crictl
+// prefix (crictlPrefix).
 func (c *cluster) crictlState(t *testing.T, id string) crictlStatus {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "sudo", "-n", "docker", "exec", c.cfg.node,
-		"crictl", "inspect", "-o", "json", id).Output()
+	argv := append(slices.Clone(c.cfg.crictl), "inspect", "-o", "json", id)
+	out, err := exec.CommandContext(ctx, argv[0], argv[1:]...).Output()
 	var v struct {
 		Status crictlStatus `json:"status"`
 	}

@@ -101,11 +101,16 @@ func (c *cluster) serviceIP(t *testing.T, name string) string {
 	return strings.TrimSpace(c.kubectl(t, "get", "service", name, "--output=jsonpath={.spec.clusterIP}"))
 }
 
-// proxyMode is kube-proxy's configured mode.
+// proxyMode is kube-proxy's configured mode, as kind's configmap says;
+// a cluster without one (k3s embeds kube-proxy, task zg4) is "unknown",
+// only logged.
 func (c *cluster) proxyMode(t *testing.T) string {
 	t.Helper()
-	cm := c.kubectl(t, "--namespace=kube-system", "get", "configmap", "kube-proxy",
+	cm, err := c.try("--namespace=kube-system", "get", "configmap", "kube-proxy",
 		"--output=jsonpath={.data.config\\.conf}")
+	if err != nil {
+		return "unknown (no kube-proxy configmap)"
+	}
 	for _, l := range strings.Split(cm, "\n") {
 		if v, ok := strings.CutPrefix(strings.TrimSpace(l), "mode:"); ok {
 			return strings.TrimSpace(v)

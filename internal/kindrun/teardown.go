@@ -8,17 +8,16 @@ import (
 	"strings"
 )
 
-// TeardownPlan is every removal, in order: the cluster, the registry
+// TeardownPlan is every removal, in order: the cluster (or, in an
+// existing cluster, the run's Traefik and namespaces), the registry
 // container with its anonymous volumes and its named data volume, the
 // run's own image tags, any image left carrying the run's label, and
 // the base images the run pulled (by ID). Nothing else is named, and no
 // prune runs without the run's label filter.
 func TeardownPlan(c Config, pulled []string) [][]string {
-	plan := [][]string{
-		kind("delete", "cluster", "--name="+c.Cluster),
+	plan := append(clusterTeardown(c),
 		docker("rm", "--force", "--volumes", c.Registry),
-		docker("volume", "rm", "--force", c.RegistryVolume),
-	}
+		docker("volume", "rm", "--force", c.RegistryVolume))
 	for _, img := range c.Images {
 		plan = append(plan, docker("image", "rm", "--force", img))
 	}
@@ -29,8 +28,8 @@ func TeardownPlan(c Config, pulled []string) [][]string {
 	return plan
 }
 
-// Teardown runs TeardownPlan and removes the kubeconfig and the state
-// file. A failing step is reported on w and the rest still run (a
+// Teardown runs TeardownPlan and removes the state file and, unless the
+// cluster is an existing one, the kubeconfig the run wrote. A failing step is reported on w and the rest still run (a
 // missing cluster or volume is the normal case of a repeat); the error
 // joins the failures of the steps that matter — the listing and the file
 // removals — not those of removals with nothing to remove.
@@ -53,7 +52,7 @@ func Teardown(r Runner, c Config, w io.Writer) error {
 		}
 	}
 	var errs []error
-	for _, f := range []string{c.Kubeconfig, c.StateFile} {
+	for _, f := range ownedFiles(c) {
 		if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, err)
 		}

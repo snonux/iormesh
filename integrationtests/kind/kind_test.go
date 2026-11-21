@@ -18,7 +18,12 @@ type config struct {
 	kubeconfig, context string
 	tracer, workload    string // images, the tracer pinned by digest
 	ctl                 string // the iormeshctl binary
-	node                string // kind's node container, for crictl ("" skips)
+	node                string // kind's node container, for crictl
+	// crictl is the argv prefix that runs crictl on the node: on kind
+	// `sudo -n docker exec <node> crictl`, on an existing cluster the
+	// operator's (IORMESH_KIND_CRICTL, say `ssh root@node k3s crictl`,
+	// task zg4). Empty skips the SIGTERM check.
+	crictl []string
 }
 
 // Environment variables of the acceptance run.
@@ -29,6 +34,7 @@ const (
 	envWorkload   = "IORMESH_KIND_WORKLOAD_IMAGE"
 	envCtl        = "IORMESH_KIND_CTL"
 	envNode       = "IORMESH_KIND_NODE"
+	envCrictl     = "IORMESH_KIND_CRICTL"
 	envKeep       = "IORMESH_KIND_KEEP"
 )
 
@@ -46,6 +52,7 @@ func loadConfig(t *testing.T) config {
 		t.Skipf("no kind cluster: set %s, %s, %s and %s (mage k8sAcceptance does)",
 			envKubeconfig, envContext, envTracer, envWorkload)
 	}
+	c.crictl = crictlPrefix(os.Getenv(envCrictl), c.node)
 	if c.ctl == "" {
 		c.ctl = "../../iormeshctl"
 	}
@@ -55,6 +62,20 @@ func loadConfig(t *testing.T) config {
 	}
 	c.ctl = abs
 	return c
+}
+
+// crictlPrefix is the argv prefix running crictl on the node: the
+// operator's, split on blanks, else docker exec into kind's node
+// container (through sudo -n, as every docker call of the run), else
+// none.
+func crictlPrefix(operator, node string) []string {
+	if f := strings.Fields(operator); len(f) > 0 {
+		return f
+	}
+	if node != "" {
+		return []string{"sudo", "-n", "docker", "exec", node, "crictl"}
+	}
+	return nil
 }
 
 // newCluster gives the test a fresh namespace (deleted again unless
@@ -108,5 +129,22 @@ func (c *cluster) prepare(t *testing.T, full bool) {
 	if full {
 		c.patch(t, "inventory", files["sidecar-patch.yaml"])
 		c.rollout(t, "inventory")
+	}
+}
+
+// TestCrictlPrefix: the operator's prefix wins (an existing cluster's
+// node, task zg4), kind's node container is the default, and with
+// neither the SIGTERM check has none.
+func TestCrictlPrefix(t *testing.T) {
+	for _, tc := range []struct {
+		operator, node, want string
+	}{
+		{"ssh root@iom1  k3s crictl", "n", "ssh root@iom1 k3s crictl"},
+		{"", "iormesh-m7-control-plane", "sudo -n docker exec iormesh-m7-control-plane crictl"},
+		{" ", "", ""},
+	} {
+		if got := strings.Join(crictlPrefix(tc.operator, tc.node), " "); got != tc.want {
+			t.Errorf("crictlPrefix(%q, %q) = %q, want %q", tc.operator, tc.node, got, tc.want)
+		}
 	}
 }

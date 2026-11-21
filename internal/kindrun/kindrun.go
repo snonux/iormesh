@@ -43,6 +43,11 @@ type Config struct {
 	// Kubeconfig is the operator's kubeconfig file for the cluster;
 	// StateFile records the base images present before the run.
 	Kubeconfig, StateFile string
+	// Existing marks a cluster the run did not create (Existing, task
+	// zg4): no kind cluster is made or deleted, the kubeconfig stays,
+	// and the teardown deletes Namespaces instead.
+	Existing   bool
+	Namespaces []string
 }
 
 // RegistryAt is where the node and the host reach the local registry.

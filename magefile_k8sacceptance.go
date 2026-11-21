@@ -10,6 +10,11 @@
 // the Docker daemon is the operator's: without a usable `sudo -n docker`,
 // kind, kubectl or helm the target says SKIP and succeeds.
 //
+// With IORMESH_K8S_KUBECONFIG set the run targets that existing cluster
+// instead (task zg4, docs/testing.md "M7 on an existing cluster"): no
+// kind cluster is made, kube-proxy's mode is the cluster's own, and the
+// teardown takes out only what the run put in (kindrun.Existing).
+//
 // Never `docker system prune` here or in any teardown: the daemon holds
 // the operator's own images and volumes (review N7).
 
@@ -47,7 +52,9 @@ containerdConfigPatches:
 // under kube-proxy's iptables mode, then TestKindClusterIP again under
 // nftables, then K8sTeardown's steps. IORMESH_KIND_KEEP=1 keeps the
 // cluster and the registry; IORMESH_KIND_KUBECONFIG puts the kubeconfig
-// elsewhere. Ctrl-C (SIGINT) or SIGTERM starts the teardown in a process
+// elsewhere. IORMESH_K8S_KUBECONFIG (with IORMESH_K8S_CONTEXT, else its
+// current context, and IORMESH_K8S_CRICTL, the argv prefix that runs
+// crictl on the node) targets an existing cluster instead. Ctrl-C (SIGINT) or SIGTERM starts the teardown in a process
 // of its own session, which outlives mage's 5-second cancel; should even
 // that fail, `mage k8sTeardown` is the recovery.
 func K8sAcceptance() error {
@@ -55,8 +62,11 @@ func K8sAcceptance() error {
 		fmt.Println("SKIP k8sAcceptance:", why)
 		return nil
 	}
+	c, err := kindConfigFor()
+	if err != nil {
+		return err
+	}
 	mg.Deps(Build, ReleaseTracer, AgentBuild, WorkloadBuild)
-	c := kindConfigFor()
 	r := shRunner{}
 	if err := diskGuard(r); err != nil {
 		return err
@@ -71,7 +81,7 @@ func K8sAcceptance() error {
 	if err != nil {
 		return err
 	}
-	return kindTests(env)
+	return kindTests(env, c.Existing)
 }
 
 // K8sTeardown removes what K8sAcceptance made — the cluster, the
@@ -82,13 +92,20 @@ func K8sTeardown() error {
 	if err := exec.Command("sudo", "-n", "docker", "info").Run(); err != nil {
 		return fmt.Errorf("k8sTeardown needs the Docker daemon running (`sudo -n docker info` failed): %w", err)
 	}
-	return kindrun.Teardown(shRunner{}, kindConfigFor(), os.Stdout)
+	c, err := kindConfigFor()
+	if err != nil {
+		return err
+	}
+	return kindrun.Teardown(shRunner{}, c, os.Stdout)
 }
 
 // kindConfigFor is the run's configuration: kubeconfig at the repository
 // root unless $IORMESH_KIND_KUBECONFIG says otherwise, the base-image
-// state beside it.
-func kindConfigFor() kindrun.Config {
+// state beside it — or, with $IORMESH_K8S_KUBECONFIG, existingConfig.
+func kindConfigFor() (kindrun.Config, error) {
+	if os.Getenv("IORMESH_K8S_KUBECONFIG") != "" {
+		return existingConfig()
+	}
 	kc := os.Getenv("IORMESH_KIND_KUBECONFIG")
 	if kc == "" {
 		kc = ".kind-kubeconfig"
@@ -97,7 +114,28 @@ func kindConfigFor() kindrun.Config {
 	if err == nil {
 		kc = abs
 	}
-	return kindrun.Default(kc, kc+".state.json")
+	return kindrun.Default(kc, kc+".state.json"), nil
+}
+
+// existingConfig is the configuration against the existing cluster of
+// $IORMESH_K8S_KUBECONFIG, in $IORMESH_K8S_CONTEXT or else the
+// kubeconfig's current context; the base-image state goes to the
+// repository root (the kubeconfig's directory is the operator's).
+func existingConfig() (kindrun.Config, error) {
+	kc, err := filepath.Abs(os.Getenv("IORMESH_K8S_KUBECONFIG"))
+	if err != nil {
+		return kindrun.Config{}, err
+	}
+	ctx := os.Getenv("IORMESH_K8S_CONTEXT")
+	if ctx == "" {
+		out, err := sh.Output("kubectl", "--kubeconfig="+kc, "config", "current-context")
+		if err != nil {
+			return kindrun.Config{}, fmt.Errorf("IORMESH_K8S_KUBECONFIG %s: no current context: %w", kc, err)
+		}
+		ctx = strings.TrimSpace(out)
+	}
+	state, err := filepath.Abs(".k8s-existing.state.json")
+	return kindrun.Existing(kc, ctx, state), err
 }
 
 // teardownOnSignal starts the teardown, once, in a new session when
@@ -144,9 +182,14 @@ func reportTeardown(err error) {
 	}
 }
 
-// kindMissing names the first missing prerequisite, "" when all are there.
+// kindMissing names the first missing prerequisite, "" when all are
+// there; an existing cluster needs no kind.
 func kindMissing() string {
-	for _, bin := range []string{"kind", "kubectl", "helm", "docker"} {
+	bins := []string{"kind", "kubectl", "helm", "docker"}
+	if os.Getenv("IORMESH_K8S_KUBECONFIG") != "" {
+		bins = bins[1:]
+	}
+	for _, bin := range bins {
 		if _, err := exec.LookPath(bin); err != nil {
 			return bin + " is not on PATH"
 		}
@@ -157,8 +200,9 @@ func kindMissing() string {
 	return ""
 }
 
-// kindUp records the base images, brings up the registry, the cluster,
-// the images and Traefik, and returns the tests' environment.
+// kindUp records the base images, brings up the registry, the cluster
+// (unless it is an existing one), the images and Traefik, and returns
+// the tests' environment.
 func kindUp(r shRunner, c kindrun.Config) (map[string]string, error) {
 	state, err := kindrun.Snapshot(r, c)
 	if err == nil {
@@ -167,7 +211,7 @@ func kindUp(r shRunner, c kindrun.Config) (map[string]string, error) {
 	if err == nil {
 		err = kindrun.RegistryUp(r, c)
 	}
-	if err == nil {
+	if err == nil && !c.Existing {
 		err = kindClusterUp(r, c)
 	}
 	if err != nil {
@@ -187,15 +231,22 @@ func kindUp(r shRunner, c kindrun.Config) (map[string]string, error) {
 	ctl, err := filepath.Abs(ctlBinaryName)
 	return map[string]string{"IORMESH_KIND_KUBECONFIG": c.Kubeconfig, "IORMESH_KIND_CONTEXT": c.Context,
 		"IORMESH_KIND_TRACER_IMAGE": tracer, "IORMESH_KIND_WORKLOAD_IMAGE": workload,
-		"IORMESH_KIND_CTL": ctl, "IORMESH_KIND_NODE": c.Node, "CGO_ENABLED": "0"}, err
+		"IORMESH_KIND_CTL": ctl, "IORMESH_KIND_NODE": c.Node,
+		"IORMESH_KIND_CRICTL": os.Getenv("IORMESH_K8S_CRICTL"), "CGO_ENABLED": "0"}, err
 }
 
 // kindTests runs the suite under iptables, then the ClusterIP join under
-// nftables.
-func kindTests(env map[string]string) error {
+// nftables. An existing cluster's kube-proxy is not kind's daemonset
+// (k3s embeds it), so there both run in the cluster's own mode, and the
+// operator reruns after switching it.
+func kindTests(env map[string]string, existing bool) error {
 	run := func(test string) error {
 		return sh.RunWithV(env, "go", "test", "./integrationtests/kind/", "-count=1", "-v",
 			"-timeout=40m", "-run=^"+test+"$")
+	}
+	if existing {
+		fmt.Println("NOTICE existing cluster: kube-proxy's mode is the cluster's own, not switched")
+		return errors.Join(run("TestKindAcceptance"), run("TestKindClusterIP"))
 	}
 	if err := kindProxyMode(env, "iptables"); err != nil {
 		return err

@@ -43,4 +43,5 @@ internal/c/generated_tracepoints.c.tmp-*
 
 # mage k8sAcceptance state and interrupted-teardown log (task yb4).
 /.kind-kubeconfig.state.json
+/.k8s-existing.state.json
 /k8s-teardown.log

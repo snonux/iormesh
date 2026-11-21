@@ -2219,6 +2219,61 @@ sole endpoint is named, and the `ingress` check expects the
 inventory pod at the end of the routed edge, in the summary and
 `model.json`).
 
+### M7 on an existing cluster (task zg4)
+
+kind's node runs in a privileged container, so a kind run says
+nothing about a real node's SELinux. For a node of the main target
+platform — el9, SELinux enforcing — `mage k8sAcceptance` also
+targets an existing cluster: set `IORMESH_K8S_KUBECONFIG` to its
+kubeconfig (and `IORMESH_K8S_CONTEXT`, else the kubeconfig's
+current context). The run then needs no kind, creates no cluster,
+leaves kube-proxy's mode alone (k3s embeds kube-proxy; there is no
+daemonset to switch) and runs `TestKindAcceptance` and
+`TestKindClusterIP` in the cluster's own mode. It still starts the
+laptop's registry on `localhost:5001`, builds and pushes both
+images, and installs Traefik with helm. Its teardown
+(`kindrun.Existing`) uninstalls that Traefik release, deletes the
+namespaces `traefik`, `iormesh-m7` and `iormesh-m7-clusterip`
+(Traefik's CRDs, which helm never removes, stay), removes the
+registry and images as the kind path does, and keeps the
+operator's kubeconfig; the base-image state goes to
+`.k8s-existing.state.json` at the repository root. The SIGTERM
+check reads the tracer's exit through `IORMESH_K8S_CRICTL`, the
+argv prefix that runs crictl on the node (`ssh root@<node> k3s
+crictl`), and skips without it. Without `IORMESH_K8S_KUBECONFIG`
+nothing changes.
+
+The cluster must pull `localhost:5001/…` under that name: the
+images are pinned by the registry's digest, and that reference is
+what the pods run. `scripts/k8s/el9-k3s.sh` sets up such a node:
+run on it as root, `up` installs a single-node k3s (channel
+`$K3S_CHANNEL`, default v1.35) with containerd's SELinux support
+on, `k3s-selinux` from the k3s installer, no bundled Traefik, and
+a containerd mirror of `localhost:5001` to `http://localhost:5001`;
+`proxy nftables` (or `iptables`) restarts k3s in that kube-proxy
+mode for the second pass; `down` uninstalls k3s with its images
+and data and removes the `k3s-selinux` package and repository
+(and `container-selinux` only if `up` installed it); `status`
+shows SELinux, k3s and the disk. From the laptop, one tunnel
+carries both directions:
+
+```
+scp root@node:/etc/rancher/k3s/k3s.yaml "$scratch/k3s.yaml"
+ssh -N -L 6443:127.0.0.1:6443 -R 5001:127.0.0.1:5001 root@node &
+IORMESH_K8S_KUBECONFIG="$scratch/k3s.yaml" \
+  IORMESH_K8S_CRICTL='ssh root@node k3s crictl' mage k8sAcceptance
+```
+
+k3s's kubeconfig names `https://127.0.0.1:6443`, which the `-L`
+forward serves; the `-R` forward gives the node the laptop's
+registry. Trace data stays on the laptop and the node. Delete the
+copied kubeconfig after the run.
+
+Status (2026-11-21): the harness option and the script are built
+and unit-tested (`TestTeardownExisting`, `TestExistingConfig`,
+`TestCrictlPrefix`); the run on a Rocky 9.9 node is pending — the
+VM's host was needed elsewhere.
+
 ## Performance baselines
 
 S3 (PLAN.md, decision #25) measures overhead against a load the
