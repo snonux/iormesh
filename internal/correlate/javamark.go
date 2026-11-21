@@ -151,13 +151,16 @@ func (j *JavaJoin) cookie(symbol string) uint64 {
 	return c
 }
 
-// attachMarks probes v's natives once its hook table has been read: the
-// agent writes the table into the empty ring at install, so the first
-// drain that saw a hook saw them all. A JVM whose natives cannot be
-// probed keeps every syscall unmarked — none, never guessed — and the
-// reason goes to Warn.
+// attachMarks probes v's natives once its whole hook table has been read
+// (jvm.tableRead: a record that follows the table). Not at the first hook:
+// the agent writes the table one record at a time while the tracer drains
+// concurrently, and a drain that caught only its first rows probed only
+// their natives — the I/O of every later hook (unlink0, say) stayed none
+// for the JVM's life, though the tracer had reported it joined (task tf4).
+// A JVM whose natives cannot be probed keeps every syscall unmarked —
+// none, never guessed — and the reason goes to Warn.
 func (j *JavaJoin) attachMarks(v *jvm) {
-	if v.probed || len(v.hooks) == 0 {
+	if v.probed || len(v.hooks) == 0 || !v.tableRead {
 		return
 	}
 	v.probed = true

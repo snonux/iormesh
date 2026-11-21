@@ -45,8 +45,15 @@ type jvm struct {
 	// begins before it.
 	createdMono uint64
 	failed      bool // the ring is corrupt: decide with what was read
+	// tableRead: a record other than HOOK was read. The agent writes its
+	// whole hook table into the empty ring first and only then anything
+	// else (Agent.prepare: warmUp's THREAD and WATERMARK follow the
+	// table, every bracket follows the retransformation), and the ring
+	// hands records out in reservation order, so from then on v.hooks is
+	// complete. A drain can land in the middle of the table (task tf4).
+	tableRead bool
 	// probed: the mark's uprobes were attached to this JVM's natives (or
-	// the attempt failed); done once, after the hook table was read.
+	// the attempt failed); done once, after the whole hook table was read.
 	probed bool
 	// The mark's liveness (markCheck, javamark.go): when the probe was
 	// attached, the threads that sent a mark since, and per thread the
@@ -145,18 +152,23 @@ type drainer struct {
 }
 
 func (d *drainer) Bracket(b *agentspool.Bracket) {
+	d.v.tableRead = true
 	if d.err == nil {
 		d.j.bracket(d.v, b)
 	}
 }
 
 func (d *drainer) Watermark(w agentspool.Watermark) {
+	d.v.tableRead = true
 	if d.err == nil {
 		d.v.watermark = max(d.v.watermark, w.Mono)
 	}
 }
 
 func (d *drainer) Record(rec agentspool.Record) {
+	if _, hook := rec.(agentspool.Hook); !hook {
+		d.v.tableRead = true
+	}
 	if d.err == nil {
 		d.err = d.j.record(d.v, rec)
 	}

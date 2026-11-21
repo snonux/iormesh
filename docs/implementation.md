@@ -3027,7 +3027,11 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
     tracer's mount namespace) is reported as such. The tracer
     now prints `java agent of pid N joined, K natives probed`
     when it marks a JVM — what `iormesh attach`'s user and
-    `TestJavaLiveAttach` wait for. Scenario `live-attach` and
+    `TestJavaLiveAttach` wait for. It marks the JVM only once a
+    record after the hook table (warmUp's watermark) shows the
+    table read whole: probing at the first HOOK of a drain that
+    raced the agent's writes left later hooks' natives unprobed
+    (task tf4). Scenario `live-attach` and
     the three tests: [testing.md](testing.md#live-attach-task-ge4);
     user-facing caveats: [java-attach.md](java-attach.md).
     Checked on 17.0.19 (by hand), 21.0.12, 25.0.4 and 27-ea+35

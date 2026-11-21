@@ -605,6 +605,46 @@ func TestJavaJoinAttachesMarks(t *testing.T) {
 	jt.close()
 }
 
+// TestJavaJoinWaitsForWholeTable: a drain that lands in the middle of the
+// agent's hook table probes nothing; the natives are probed once, all of
+// them, when a record that follows the table (warmUp's WATERMARK) shows
+// the table complete (task tf4: a live attach probed 16 of 37 natives and
+// left a later hook's unlink none).
+func TestJavaJoinWaitsForWholeTable(t *testing.T) {
+	jt := newJoinTest(t)
+	var calls [][]MarkedNative
+	jt.j.cfg.AttachMarks = func(_ uint32, natives []MarkedNative) ([]string, error) {
+		calls = append(calls, natives)
+		return nil, nil
+	}
+	r := jt.ring()
+	rest := r.queue[2:]
+	r.queue = r.queue[:2] // the first two HOOK rows only
+	if err := jt.j.Poll(); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("probed %+v on a partial hook table", calls)
+	}
+	r.queue = rest[:2] // the last two HOOK rows, still nothing after them
+	if err := jt.j.Poll(); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("probed %+v before a record after the table", calls)
+	}
+	r.queue = []agentspool.Record{jt.watermark(jt.now)}
+	for range 2 {
+		if err := jt.j.Poll(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(calls) != 1 || len(calls[0]) != 4 {
+		t.Fatalf("attach calls %+v, want one with the four natives", calls)
+	}
+	jt.close()
+}
+
 // TestJavaJoinMarkQueue: a thread's marks pair with its events in enter
 // order while several wait at once — a lost exit's mark (no event) is
 // skipped, an event without a mark of its own takes no other's, and an

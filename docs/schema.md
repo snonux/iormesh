@@ -600,10 +600,11 @@ How an event gets `attribution: java` — never by guessing:
   allowlist (`stat`, `lstat` and `fstat` match the kinds
   `newstat`, `newlstat`, `newfstat`).
 - The kernel marks the syscall (task td4): once a JVM's ring has
-  delivered its hook table, the tracer attaches uprobes to the
-  hooks' natives in that JVM's `libjava`/`libnio`/`libnet`
-  (scoped to its pid, each native's BPF cookie its id), which
-  push and pop a per-thread mark. A syscall a thread enters from
+  delivered its whole hook table (a record after the last HOOK,
+  the agent's first watermark, says so; task tf4), the tracer
+  attaches uprobes to the hooks' natives in that JVM's
+  `libjava`/`libnio`/`libnet` (scoped to its pid, each native's
+  BPF cookie its id), which push and pop a per-thread mark. A syscall a thread enters from
   inside a hooked native carries that native and the native's
   entry time, stamped in CLOCK_MONOTONIC — `System.nanoTime()`'s
   clock — by BPF.

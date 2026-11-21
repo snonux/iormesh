@@ -342,7 +342,9 @@ public final class Hooks {
      * ring's record paths) at install time, so none of that class
      * loading — and its jar reads — lands inside the target's own I/O
      * later. With a ring this writes real records: the installing
-     * thread's THREAD, the warm-up stack's STACK and a first WATERMARK.
+     * thread's THREAD, the warm-up stack's STACK and a first WATERMARK —
+     * the first records after the hook table, which tell the tracer the
+     * table is complete (Agent.describeHooks, task tf4).
      */
     public static void warmUp() {
         Brackets t = STATE.get();

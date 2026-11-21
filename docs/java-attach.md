@@ -74,7 +74,14 @@ later are not attached: their JVM is still starting (see
 confirmed the agent started; the running tracer then prints
 `java agent of pid N joined, K natives probed` at its next spool
 scan (within ≈200 ms) — from there on the JVM's I/O is
-attributed.
+attributed. What the line guarantees once `iormesh attach` has
+returned too: every hook is installed (the load returns after
+the agent's retransformation) and every native of the agent's
+whole hook table is probed, so a call the JVM makes from then on
+is bracketed and marked. The tracer waits for the table to be
+complete (a record after its last row) before it probes;
+probing a partly written table left later hooks' I/O
+unattributed (task tf4).
 
 The tracer needs no JDK: it speaks HotSpot's attach protocol
 itself (`internal/javaattach`, the same handshake `jcmd` and

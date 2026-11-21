@@ -176,6 +176,13 @@ public final class Agent {
      * row cannot be dropped for lack of room; one that is anyway (a
      * pathological ring size) only leaves that hook's brackets
      * unjoinable — attribution none, never a guess.
+     *
+     * The table is complete once any other record follows it: prepare
+     * calls warmUp right after this, whose THREAD and WATERMARK records
+     * the tracer takes as that signal before it probes the natives the
+     * table names (internal/correlate jvm.tableRead). It drains while
+     * these rows are written, so a hook row must never come after
+     * another record (task tf4).
      */
     private static void describeHooks(HookTable table, Bridge bridge)
             throws ReflectiveOperationException {

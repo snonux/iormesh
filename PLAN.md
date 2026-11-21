@@ -631,7 +631,8 @@ Gated by S1 — done; the design below is S1's result
   thread only; the joiner warns when a JVM's threads close
   brackets without a mark) attach per JVM, scoped to its pid, to the
   natives its ring's hook table names, once the tracer read that
-  table; a syscall without a mark, or with another native's,
+  whole table (a record after it shows it complete; task tf4); a
+  syscall without a mark, or with another native's,
   is JVM work and stays `none` whatever its kind, the allowlist
   staying as a second guard; a JVM whose natives cannot be
   probed keeps all its syscalls `none`. Cost: see
