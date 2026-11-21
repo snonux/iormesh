@@ -1164,6 +1164,25 @@ it failed 1 of 8 serial runs on the idle host. 7.2 showed the
 same symptom once under load; task tf4. The root suite on that
 tree: 27 of 27.
 
+Task tf4 found the cause in the tracer, not the test. The test
+already waited for the tracer's `java agent of pid N joined`
+line, but that line could lie. The joiner probed a JVM's natives
+at the first drain that saw any HOOK record. The agent writes
+its hook table into the ring one row at a time, and a drain that
+landed mid-table probed only the first rows' natives. Every
+failing run printed `joined, 8|15|16|21 natives probed`, every
+passing run 37, and the later hooks' I/O (`unlink0`, `open0`)
+stayed `none`. The joiner now probes only after a record that
+follows the table (the agent's warm-up THREAD and WATERMARK)
+shows the table read whole
+(`TestJavaJoinWaitsForWholeTable`). `TestJavaLiveAttach`
+serially, before → after:
+
+| Host | Before | After |
+|---|---|---|
+| 7.2 laptop, load ≈ 12 (other workers' suites) | 3 of 110 failed | 0 of 100 failed |
+| Rocky 9.9 `iom1`, idle | 1 of 40 failed | 0 of 40 failed |
+
 Outside the suites: a hand-run pattern session over pipe-ipc
 (`-pattern '*workload.jar*pipe-ipc*' -trace-families ipc`) died
 with "fd_gen 1 without an fd". That is task mf4 again, this time
