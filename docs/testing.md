@@ -1377,6 +1377,17 @@ goes through `sudo -n`. It:
    0.6 GB with the JRE base's layers, measured after a run — stays;
    it is the operator's to prune.
 
+Re-run on 2026-11-21 on cf4's tracer, without the workaround and
+with the scoped teardown: `TestKindAcceptance` (all six subtests,
+104 s) and `TestKindClusterIP` (83 s, nftables) passed, the
+ingress subtest's routed edge `→ shop.iormesh.test →
+ingress/iormesh-m7/shop → iormesh-m7/inventory →
+iormesh-m7/deployment/inventory (route, 1 connections)` among
+them. An interrupted run (SIGINT to mage after the first image
+push) printed `interrupt: teardown running as pid …`, and the
+detached `k8sTeardown` removed the cluster, the registry and its
+volume with the images back to the state before.
+
 Checked on 2026-11-21 with a real run over a daemon holding
 unrelated images: `docker images -a` was identical before and
 after (the three pulled base images removed by ID, the operator's
@@ -1430,7 +1441,9 @@ step 3, decision #14, task cf4). Until cf4 the run below used a
 test-only workaround — the app container mounted the trace
 emptyDir and the workload image carried the jar at the tracer's
 paths — which is now gone from `testdata/workloads.yaml` and
-`kind-workload.Containerfile`; the re-run without it is pending.
+`kind-workload.Containerfile`. The re-run without it (below)
+passed, the ingress routed edge included: the agent the tracer
+staged reported the gateway's FQDN as its HTTP host.
 The gateway starts behind the workload's startup gate, so the
 debug tracer finds the JVM at start and live-loads the agent
 before the bracket.

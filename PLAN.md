@@ -1798,9 +1798,10 @@ Later phase — plain Linux servers (M4) come first.
   pod identity added; a ClusterIP connection joins both sides;
   the M0 ingress scenario renders as one routed edge — app →
   FQDN → Traefik → deployment — with no tracer on the ingress.
-  Status (2026-11-21, task yb4): **passed on kind, with one
-  test-only workaround (cf4) and two test-side compensations
-  for open gaps (df4: `-disk-limit=0 -disk-max-bytes` through
+  Status (2026-11-21, task yb4): **passed on kind — first with
+  one test-only workaround (cf4, since removed; re-run green
+  without it) — and with two test-side compensations for open
+  gaps (df4: `-disk-limit=0 -disk-max-bytes` through
   registry flags; ef4: waiting for the tracer's `attached` log
   line before starting workloads)** — `mage k8sAcceptance` from
   scratch, green (`integrationtests/kind`; kind 0.31, Kubernetes
@@ -1824,9 +1825,12 @@ Later phase — plain Linux servers (M4) come first.
   context; a list-only ServiceAccount finds the same two routes.
   The workaround (cf4): the gateway's HTTP host comes from the
   Java agent, and step 3 of docs/implementation.md M7 (#14's
-  staging inside the JVM's root) is not built, so the test
-  mounts the trace emptyDir into the app container and ships the
-  agent jar in the workload image. The compensations stand in
+  staging inside the JVM's root) was not built, so the test
+  mounted the trace emptyDir into the app container and shipped
+  the agent jar in the workload image. cf4 built the staging and
+  dropped the workaround; the re-run on its tracer passed every
+  subtest, the ingress routed edge included (the staged agent
+  reported the FQDN), so only the two compensations remain. The compensations stand in
   for product gaps the run found: debug deploys carry no byte
   cap and trip the percent disk limit on a full node (df4), and
   deploy returns before the tracer is attached (ef4). Fixed on
