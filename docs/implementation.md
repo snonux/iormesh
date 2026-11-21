@@ -5069,8 +5069,15 @@ depends on:
    `internal/cli/stage.go`). For a JVM in another mount
    namespace (`sameMountNS` false), `run -agent` stages before
    the load (`javaattach.Attacher.Stage`):
+   - `/proc/<pid>` is held as an fd and its `maps`, `status`,
+     `ns/pid` and `root` opened relative to it, so a reused pid
+     fails (`ESRCH`) instead of being read as the JVM;
    - a process that maps no `libjvm.so` gets `ErrNotJVM` and
      nothing is created;
+   - a JVM in another PID namespace than the tracer's gets
+     `ErrOtherPidNS`: its agent names the ring by its own pid,
+     which the tracer would resolve as another process (a host
+     tracer reading a container JVM's `1.ring` as host pid 1);
    - the JVM's root is opened through `/proc/<pid>/root`, its
      `/tmp` with `openat2`'s `RESOLVE_IN_ROOT` and no symlinks
      (the fd discipline of the handshake, `openTmp`);
@@ -5078,7 +5085,13 @@ depends on:
      `/tmp` must be root's or the JVM user's and not writable
      by group or others unless sticky, or another user could
      rename the stage away and put their own jar at the path
-     the JVM loads (`ErrUntrustedTmp`);
+     the JVM loads (`ErrUntrustedTmp`). An `emptyDir` mounted at
+     `/tmp` (0777, not sticky) is refused for that reason; a
+     non-root JVM in a root-owned 1777 `/tmp` is staged for like
+     any other (its ring is its user's); in a user-namespaced pod
+     (`hostUsers: false`, which #13 excludes) the container's root
+     is a high host uid, so its `/tmp` reads as a third user's
+     and is refused;
    - `mkdirat` of `iormesh-<16 hex>` (crypto/rand), 0700 first;
      a name already taken (the JVM's user may have planted it)
      is never adopted — the next fresh name is tried, eight in
@@ -5093,8 +5106,12 @@ depends on:
    `spool=/tmp/<name>/spool`; the Java join scans the spool as
    `/proc/self/fd/<n>` beside `-spool` (an `agentspool.Dir` per
    stage, with Dir's ring checks unchanged), so nothing in the
-   JVM's tree is resolved by name again. JVMs of one mount
-   namespace and user share a stage. The session removes every
+   JVM's tree is resolved by name again. Every check runs for
+   every JVM; a JVM shares an earlier JVM's stage only with the
+   same euid and the same `/tmp` directory object (device and
+   inode as opened in its root), not merely the same mount
+   namespace, whose processes may run as other users or chroot
+   apart (review of cf4, B1). The session removes every
    stage when it ends, through the held fds — rings, stray
    entries (unlinked, never followed), spool, jar, directory; a
    JVM still running keeps writing into its unlinked ring. A JVM
@@ -5107,12 +5124,17 @@ depends on:
    planted names as a directory, a symlink to the host's tree and
    a file; `/tmp` a symlink, missing, read-only, not sticky,
    group-writable or a third user's; `/` world-writable; a
-   planted jar file or symlink; removal past a planted symlink),
-   `agentspool` `TestMakeSpoolAt`, `internal/cli/stage_test.go`
-   (who stages, sharing by key, notes, removal at close), and
-   `TestJavaAttachMountNS` in `mage integrationTest` (each
-   http-plain JVM in its own mount namespace with a private
-   tmpfs `/tmp`).
+   planted jar file or symlink; removal past a planted symlink;
+   another PID namespace; a pid gone; stage reuse by the same
+   user and `/tmp` only, a chrooted JVM getting its own and
+   another user in the first user's `/tmp` refused; a stage
+   directory swapped for another user's), `agentspool`
+   `TestMakeSpoolAt`, `internal/cli/stage_test.go` (who stages,
+   sharing as the stager decides, notes, removal at close, the
+   ring check), and `TestJavaAttachMountNS` in `mage
+   integrationTest` (each http-plain JVM in its own mount
+   namespace with a private tmpfs `/tmp`, the server as nobody,
+   the client as root).
 4. **Java mark without `CAP_CHECKPOINT_RESTORE`** (optional,
    #13). `openJavaLibs` opens mapped libraries through
    `/proc/<pid>/map_files`, which needs the capability. Open

@@ -104,10 +104,14 @@ the JVM's own socket: the tracer still listens on nothing.
   root's or the JVM user's, or writable by others without the
   sticky bit), read through its held descriptor and removed
   when the session ends. A JVM without a writable, trusted
-  `/tmp` gets no Java attribution and a note naming
-  `-javaagent`. `iormesh attach` stages nothing — its spool
-  belongs to a separate `run` — so for it the jar and spool must
-  exist in the JVM's namespace under the same names. In a pod
+  `/tmp` (an `emptyDir` at `/tmp`, 0777 and not sticky, is not
+  trusted), or in another PID namespace than the tracer's, gets
+  no Java attribution and a note naming `-javaagent`; a non-root
+  JVM in a root-owned 1777 `/tmp` is staged for like any other.
+  `iormesh attach` stages nothing — its spool belongs to a
+  separate `run` — so for it the jar and spool must exist in the
+  JVM's namespace under the same names, and for a JVM in another
+  mount namespace it says it could not verify the ring. In a pod
   the tracer needs `SYS_PTRACE`, `DAC_OVERRIDE`, `KILL` and
   `CHECKPOINT_RESTORE` ([security.md](security.md)
   "Kubernetes").

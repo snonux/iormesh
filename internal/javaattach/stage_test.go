@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -42,13 +43,58 @@ func newStageFixture(t *testing.T) stageFixture {
 	if err := os.Chmod(f.tmp(""), 0o777|os.ModeSticky); err != nil {
 		t.Fatal(err)
 	}
+	// The tracer's and the JVM's PID namespace: the same.
+	nsLink(t, filepath.Join(p.root, "self"), tracerPidNS)
+	nsLink(t, p.dir, tracerPidNS)
 	return f
+}
+
+const tracerPidNS = "pid:[4026531836]"
+
+// nsLink makes dir/ns/pid name the PID namespace ns, as /proc's does.
+func nsLink(t *testing.T, dir, ns string) {
+	t.Helper()
+	link := filepath.Join(dir, "ns", "pid")
+	_ = os.Remove(link)
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(ns, link); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// addProc adds another fake JVM, pid, of uid euid, to the fixture's
+// /proc: its root is the first JVM's (sharedRoot) or a fresh one with a
+// /tmp of its own.
+func (f stageFixture) addProc(t *testing.T, pid, euid int, sharedRoot bool) {
+	t.Helper()
+	dir := filepath.Join(f.p.root, strconv.Itoa(pid))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"status": statusOf(pid, euid), "maps": jvmMaps} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nsLink(t, dir, tracerPidNS)
+	if sharedRoot {
+		if err := os.Symlink(filepath.Join(f.p.dir, "root"), filepath.Join(dir, "root")); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "root/tmp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chmod(t, filepath.Join(dir, "root/tmp"), 0o777|os.ModeSticky)
 }
 
 func (f stageFixture) tmp(name string) string { return filepath.Join(f.p.dir, "root/tmp", name) }
 
 func (f stageFixture) stage() (*Stage, error) {
-	return f.p.attacher(nil).Stage(uint32(fakePID), f.jar)
+	return f.p.attacher(nil).Stage(uint32(fakePID), f.jar, nil)
 }
 
 // names makes stageName return these names in turn.
@@ -218,6 +264,16 @@ func TestStageRefuses(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, ErrNotJVM},
+		// A host tracer and a container JVM: the agent's 1.ring would
+		// be read as the tracer's pid 1.
+		"other PID namespace": {func(t *testing.T, f stageFixture) {
+			nsLink(t, f.p.dir, "pid:[4026532999]")
+		}, ErrOtherPidNS},
+		"pid gone": {func(t *testing.T, f stageFixture) {
+			if err := os.RemoveAll(f.p.dir); err != nil {
+				t.Fatal(err)
+			}
+		}, syscall.ENOENT},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -300,5 +356,92 @@ func TestCopyJarRefusesPlanted(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(filepath.Join(dir, "file.jar")); string(data) != "planted" {
 		t.Errorf("planted file overwritten: %q", data)
+	}
+}
+
+// TestStageReuse (review B1, N1): a JVM shares a stage only with the same
+// euid and the same /tmp directory object. One of the same user in the
+// same root gets the first JVM's stage; one with a root of its own (a
+// chroot in the same mount namespace) a stage of its own; and one of
+// another user is checked afresh — in a /tmp the first JVM's user owns,
+// that user could swap the jar under it, so it is refused, never handed
+// the stage.
+func TestStageReuse(t *testing.T) {
+	f := newStageFixture(t)
+	a := f.p.attacher(nil)
+	names(t, "iormesh-a", "iormesh-b", "iormesh-c")
+	first, err := a.Stage(uint32(fakePID), f.jar, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = first.Remove() }()
+	f.addProc(t, fakePID+1, os.Geteuid(), true)
+	f.addProc(t, fakePID+2, os.Geteuid(), false)
+	same, err := a.Stage(uint32(fakePID+1), f.jar, []*Stage{first})
+	if err != nil || same != first {
+		t.Errorf("same user and /tmp: stage %p, %v; want the first, %p", same, err, first)
+	}
+	own, err := a.Stage(uint32(fakePID+2), f.jar, []*Stage{first})
+	if err != nil || own == first {
+		t.Fatalf("own root: stage %p, %v; want a new one", own, err)
+	}
+	defer func() { _ = own.Remove() }()
+	if own.Jar() != "/tmp/iormesh-b/iormesh-agent.jar" {
+		t.Errorf("own root staged at %s", own.Jar())
+	}
+	if _, err := os.Stat(filepath.Join(f.p.root, strconv.Itoa(fakePID+2), "root/tmp/iormesh-b/spool")); err != nil {
+		t.Errorf("own root's stage not in its /tmp: %v", err)
+	}
+	if os.Geteuid() == 0 {
+		return // as root the fixture's /tmp is root's, trusted for every user
+	}
+	f.addProc(t, fakePID+3, os.Geteuid()+1, true)
+	if s, err := a.Stage(uint32(fakePID+3), f.jar, []*Stage{first, own}); !errors.Is(err, ErrUntrustedTmp) {
+		t.Errorf("another user in the first user's /tmp: stage %p, %v; want ErrUntrustedTmp", s, err)
+	}
+}
+
+// TestStageReuseOtherUser (review B1): in a /tmp every user trusts
+// (root's, played here by the test's own uid), a JVM of another user
+// passes the checks but still gets a stage of its own, never the first
+// user's.
+func TestStageReuseOtherUser(t *testing.T) {
+	f := newStageFixture(t)
+	orig := rootUID
+	rootUID = uint32(os.Geteuid())
+	t.Cleanup(func() { rootUID = orig })
+	a := f.p.attacher(nil)
+	names(t, "iormesh-a", "iormesh-b")
+	first, err := a.Stage(uint32(fakePID), f.jar, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = first.Remove() }()
+	f.addProc(t, fakePID+1, os.Geteuid()+1, true)
+	other, err := a.Stage(uint32(fakePID+1), f.jar, []*Stage{first})
+	if err != nil || other == first {
+		t.Fatalf("another user, same /tmp: stage %p, %v; want a new one", other, err)
+	}
+	defer func() { _ = other.Remove() }()
+	if other.Jar() != "/tmp/iormesh-b/iormesh-agent.jar" {
+		t.Errorf("staged at %s", other.Jar())
+	}
+}
+
+// TestStageRefusesSwappedDir (review N3): a stage directory found not
+// to be the tracer's right after mkdirat — swapped for another user's —
+// is refused and never touched again, Remove included.
+func TestStageRefusesSwappedDir(t *testing.T) {
+	f := newStageFixture(t)
+	orig := tracerEUID
+	tracerEUID = func() int { return os.Geteuid() + 1 }
+	t.Cleanup(func() { tracerEUID = orig })
+	names(t, "iormesh-a")
+	if _, err := f.stage(); !errors.Is(err, ErrUntrustedTmp) {
+		t.Fatalf("Stage: %v, want ErrUntrustedTmp", err)
+	}
+	m, _ := mode(t, f.tmp("iormesh-a"))
+	if entries, _ := os.ReadDir(f.tmp("iormesh-a")); len(entries) != 0 || m.Perm() != 0o700 {
+		t.Errorf("the swapped directory was written to or chmodded: %v, %v", entries, m)
 	}
 }

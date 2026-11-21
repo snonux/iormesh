@@ -20,29 +20,41 @@ import (
 var privateTmpWrap = []string{"unshare", "--mount", "--propagation", "private", "--",
 	"sh", "-c", `mount -t tmpfs -o mode=1777 iormesh-jvm-tmp /tmp && exec "$@"`, "sh"}
 
+// nobodyPrivateTmpWrap is privateTmpWrap with the JVM run as nobody
+// (setpriv, after the mount only root may make), from / (the test's own
+// working directory may be closed to that user).
+var nobodyPrivateTmpWrap = []string{"unshare", "--mount", "--propagation", "private", "--",
+	"sh", "-c", `mount -t tmpfs -o mode=1777 iormesh-jvm-tmp /tmp && cd / && ` +
+		`exec setpriv --reuid=` + strconv.Itoa(nobody) + ` --regid=` + strconv.Itoa(nobody) +
+		` --clear-groups "$@"`, "sh"}
+
 // TestJavaAttachMountNS is decision #14's staging (M7 step 3, task cf4):
-// http-plain's server and client each run in their own mount namespace
-// with a private /tmp, so neither sees the tracer's agent jar or spool,
-// and `run -agent` stages both inside each JVM's root. The Java join
-// must still work end to end — both rings read, the client's requests
-// carry their host, the golden holds as under -javaagent — with no ring
-// in the tracer's own spool, and every stage removed from the JVMs' /tmp
-// once the run ended.
+// http-plain's server (as nobody) and client (as root) each run in their
+// own mount namespace with a private /tmp, so neither sees the tracer's
+// agent jar or spool, and `run -agent` stages both inside each JVM's
+// root. The Java join must still work end to end — both rings read, the
+// client's requests carry their host, the golden holds as under
+// -javaagent — with no ring in the tracer's own spool, and every stage
+// removed from the JVMs' /tmp once the run ended.
 func TestJavaAttachMountNS(t *testing.T) {
 	enableParallelIfRequested(t)
 	requireRootForProbe(t) // mount namespaces and a tmpfs
 	h := newHarness(t)
-	// The JVMs' /tmp is their own: the gate files and the spool must lie
-	// elsewhere for the test to reach them.
+	// The JVMs' /tmp is their own: the gate files, the workload jar and
+	// the spool must lie elsewhere, and nobody must reach the first two.
 	h.Dir, h.Tmp = dirOutsideTmp(t), dirOutsideTmp(t)
+	for _, d := range []string{h.Dir, h.Tmp} {
+		if err := os.Chmod(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.WorkloadJar = copyReadable(t, h.WorkloadJar, h.Tmp)
 	h.AttachAgent = trustedAgentJar(t)
 	h.AgentAtStart = true
 	h.Spool = filepath.Join(h.Dir, "spool")
-	h.JVMWrap = privateTmpWrap
 	var tmps []int
-	pair := startHTTPPair(t, "http-plain", false)
 	run := traceJudged(t, h, func(h *Harness) ([]*Workload, error) {
-		ws, err := pair(h)
+		ws, err := startMixedUserPair(t, h)
 		for _, w := range ws {
 			tmps = append(tmps, holdJVMTmp(t, w.PID))
 		}
@@ -66,6 +78,29 @@ func TestJavaAttachMountNS(t *testing.T) {
 	for _, fd := range tmps {
 		assertNoStage(t, fd)
 	}
+}
+
+// startMixedUserPair starts http-plain's server as nobody and its client
+// as root, each under its private-/tmp wrapper, and checks the server
+// really runs as nobody (a non-root JVM's stage and ring).
+func startMixedUserPair(t *testing.T, h *Harness) ([]*Workload, error) {
+	port := freePort(t)
+	h.JVMWrap = nobodyPrivateTmpWrap
+	server, err := h.StartNoDir("http-plain", "--role", "server", "--port", port)
+	if err != nil {
+		return nil, err
+	}
+	server.ReleasedWhen = "listening "
+	var st unix.Stat_t
+	if err := unix.Stat(filepath.Join("/proc", strconv.Itoa(server.PID)), &st); err != nil || st.Uid != nobody {
+		return nil, fmt.Errorf("server pid %d: uid %d, %v; want nobody", server.PID, st.Uid, err)
+	}
+	h.JVMWrap = privateTmpWrap
+	client, err := h.StartNoDir("http-plain", "--role", "client", "--port", port)
+	if err != nil {
+		return nil, err
+	}
+	return []*Workload{server, client}, nil
 }
 
 // dirOutsideTmp is a fresh directory under /var/tmp, out of the private

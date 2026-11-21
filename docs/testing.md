@@ -304,7 +304,7 @@ the tests need root like the rest of the suite.
 |---|---|
 | `TestJavaLiveAttach` | live-attach under `run -spool`: between the halves `iormesh attach` loads the agent, the test waits for the tracer's `java agent of pid N joined` line and opens the gate; the golden holds (first half none, second half and sweep java); no event of the JVM that ended before the attach began is attributed, and there are such events; JEP 451's warning on the JVM's stderr; mutated goldens fail |
 | `TestJavaLiveAttachAtStart` | `run -agent` on a gated method-flow JVM: the tracer reports the load and the method-flow golden holds as under `-javaagent`; the JVM printed the warning |
-| `TestJavaAttachMountNS` | `run -agent` on http-plain's pair, each JVM in its own mount namespace with a private tmpfs `/tmp` (`unshare --mount`, `Harness.JVMWrap`; task cf4, decision #14): the tracer stages the jar and spool inside each JVM's root; both loads reported, two rings read, every request on its connection, the client's `http` events carry their host, the http-plain golden holds; no ring in the tracer's own spool, and no `iormesh-*` stage left in either JVM's `/tmp` (held open past the JVM's exit) |
+| `TestJavaAttachMountNS` | `run -agent` on http-plain's pair (the server as nobody through `setpriv`, the client as root), each JVM in its own mount namespace with a private tmpfs `/tmp` (`unshare --mount`, `Harness.JVMWrap`; task cf4, decision #14): the tracer stages the jar and spool inside each JVM's root; both loads reported, two rings read, every request on its connection, the client's `http` events carry their host, the http-plain golden holds; no ring in the tracer's own spool, and no `iormesh-*` stage left in either JVM's `/tmp` (held open past the JVM's exit) |
 | `TestJavaAttachDynamicLoading` | no tracer, per JDK (the `java` on PATH plus each JAVA_HOME in `IORMESH_ATTACH_JDKS`): a default JVM loads and warns, `-XX:+EnableDynamicAgentLoading` loads silently, `-XX:-EnableDynamicAgentLoading` refuses with `dynamic agent loading is disabled` and no ring, the JVM finishing cleanly every time; and a root attacher loads into a JVM running as nobody, whose ring is then nobody's |
 
 `internal/javaattach` unit-tests the handshake against a fake
@@ -323,7 +323,9 @@ root-owned directory for it. The staging inside a JVM's root
 (`internal/javaattach/stage_test.go`: planted stage names, a
 symlinked, missing, read-only, non-sticky, group-writable or
 foreign `/tmp`, a world-writable `/`, a planted jar, removal
-past a planted symlink), with `TestMakeSpoolAt` in
+past a planted symlink, another PID namespace, a pid gone, stage
+reuse only for the same euid and `/tmp` object, a swapped stage
+directory), with `TestMakeSpoolAt` in
 `internal/agentspool` and `internal/cli/stage_test.go`.
 
 ### M4 microservices scenario (task jb4)

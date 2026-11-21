@@ -168,15 +168,24 @@ func trustedAgent(agent string) (string, error) {
 // spool) on the JVM's stderr and installs nothing, so the ring's
 // appearance is checked too, in t.ringDir — the tracer's spool, or a
 // stage's held descriptor; with no ringDir (attach into another mount
-// namespace) it cannot be. The ring is named by the pid as the JVM sees
-// it, the tracer's own number in the shared PID namespace.
+// namespace) it cannot be, which the line says, naming the ways that can.
+// The ring is named by the pid as the JVM sees it, the tracer's own
+// number in the shared PID namespace (staging refuses any other).
 func loadAgent(ctx context.Context, l agentLoader, pid uint32, t agentTarget) (string, error) {
 	err := l.Load(ctx, javaattach.Request{PID: pid, Jar: t.jar, Options: "spool=" + t.spool})
 	if err != nil {
 		return "", err
 	}
 	name := strconv.FormatUint(uint64(pid), 10) + ".ring"
-	if _, err := os.Stat(filepath.Join(t.ringDir, name)); err != nil && t.ringDir != "" {
+	if t.ringDir == "" {
+		return fmt.Sprintf("agent loaded into pid %d, but its ring could not be verified: the JVM is in "+
+			"another mount namespace and resolves %s there (`run -agent` stages the jar and spool "+
+			"inside its root; or start it with -javaagent)", pid, t.spool), nil
+	}
+	// Lstat and a regular file only: the spool is writable by every
+	// target user, and a symlink planted as the ring must not count (nor
+	// be followed) — Dir rejects it at its scan anyway.
+	if st, err := os.Lstat(filepath.Join(t.ringDir, name)); err != nil || !st.Mode().IsRegular() {
 		return fmt.Sprintf("agent loaded into pid %d, but it wrote no ring %s: no Java attribution "+
 			"(its reason, iormesh-agent: …, is on the JVM's stderr)", pid, filepath.Join(t.spool, name)), nil
 	}

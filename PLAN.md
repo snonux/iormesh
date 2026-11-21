@@ -2466,12 +2466,17 @@ here only as placeholders.
   Owner to confirm: JDK versions and flags in the fleet, and
   whether app containers keep a writable `/tmp`.
   Built (task cf4): `run -agent` stages for every JVM whose mount
-  namespace is not the tracer's, one stage per namespace and
-  JVM user. The JVM's `/` and `/tmp` must also be root's or the
-  JVM user's and not writable by group or others unless sticky
-  (the jar's trust rule, inside the JVM's root); a stage name
-  already taken is skipped for a fresh random one, never
-  adopted. `iormesh attach` stages nothing: its spool belongs to
+  namespace is not the tracer's and whose PID namespace is (the
+  agent names its ring by its own pid; a JVM in another PID
+  namespace gets a note naming `-javaagent`). The JVM's `/` and
+  `/tmp` must also be root's or the JVM user's and not writable
+  by group or others unless sticky (the jar's trust rule, inside
+  the JVM's root) — so an `emptyDir` mounted at `/tmp` (0777, not
+  sticky) is refused too; a stage name already taken is skipped
+  for a fresh random one, never adopted. Every check runs for
+  every JVM; two JVMs share a stage only with the same euid and
+  the same `/tmp` directory object (device and inode), not
+  merely the same mount namespace (review of cf4). `iormesh attach` stages nothing: its spool belongs to
   a separate `run`, which would not read a stage it made. Proven
   in `mage integrationTest` with JVMs in private mount
   namespaces (`TestJavaAttachMountNS`). On kind (task yb4),

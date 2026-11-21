@@ -35,7 +35,13 @@ import (
 // (cli.trustedAgent) is kept inside the JVM's root: / and /tmp must be
 // root's or the JVM's user's, and not writable by group or others unless
 // sticky — otherwise another user could rename the directory away and
-// put a jar of their own at the path the JVM loads.
+// put a jar of their own at the path the JVM loads. These checks run for
+// each JVM, and a JVM shares a stage made for another only with the same
+// euid and the same /tmp directory object (stageID). Only a JVM in the
+// tracer's PID namespace is staged for: the agent names its ring by its
+// own pid, which must mean the same process to the tracer. /proc/<pid>
+// is held as an fd while staging (procdir.go), so a reused pid fails
+// instead of being read as the JVM.
 
 const (
 	// stageJar and stageSpool are the stage's two entries.
@@ -65,66 +71,114 @@ var stageName = func() (string, error) {
 	return "iormesh-" + hex.EncodeToString(b[:]), nil
 }
 
+// rootUID is root's uid, whose / and /tmp every JVM may trust; a variable
+// so a test, not root, can have a /tmp that several users trust (the
+// only case where stageID's euid decides).
+var rootUID uint32
+
+// tracerEUID is the tracer's euid, which the stage directory must
+// carry; a variable so a test can play a directory swapped for another
+// user's.
+var tracerEUID = os.Geteuid
+
+// stageID is what decides whether a JVM may use a stage made for
+// another: the same /tmp directory object (device and inode, as opened
+// in its own root — not merely the same mount namespace, whose processes
+// may have chrooted apart) and the same effective uid (whose ownership of
+// / or /tmp the trust check may have accepted).
+type stageID struct {
+	euid     uint32
+	dev, ino uint64
+}
+
 // Stage is the agent jar and a spool staged inside one JVM's root. It
 // holds the JVM's /tmp, the stage directory and the spool open until
-// Remove; a JVM of the same mount namespace and user can share it.
+// Remove; another JVM with the same stageID can share it.
 type Stage struct {
 	tmp, dir, spool int // -1 when not open
 	name            string
+	id              stageID
 }
 
 // Stage stages jar (the tracer's own trusted copy, by its resolved path)
-// inside pid's root. A process that is no JVM gets ErrNotJVM before
-// anything is created; an untrusted / or /tmp gets ErrUntrustedTmp; a
-// /tmp nothing can be created in gets ErrNoStage.
-func (a Attacher) Stage(pid uint32, jar string) (*Stage, error) {
-	info, err := a.checkJVM(pid)
+// inside pid's root, or returns the stage of reuse whose stageID pid's
+// JVM matches. Every check runs for every pid, a reused stage included:
+// a process that is no JVM gets ErrNotJVM and one in another PID
+// namespace ErrOtherPidNS before anything is opened in its root; an
+// untrusted / or /tmp gets ErrUntrustedTmp; a /tmp nothing can be created
+// in gets ErrNoStage.
+func (a Attacher) Stage(pid uint32, jar string, reuse []*Stage) (*Stage, error) {
+	s, err := a.stage(pid, jar, reuse)
 	if err != nil {
 		return nil, fmt.Errorf("stage pid %d: %w", pid, err)
-	}
-	root, err := a.openRoot(pid)
-	if err != nil {
-		return nil, fmt.Errorf("stage pid %d: %w", pid, err)
-	}
-	defer func() { _ = unix.Close(root) }()
-	s := &Stage{tmp: -1, dir: -1, spool: -1}
-	if err := s.build(root, info.euid, jar); err != nil {
-		return nil, errors.Join(fmt.Errorf("stage pid %d: %w", pid, err), s.Remove())
 	}
 	return s, nil
 }
 
-// checkJVM is what staging needs of the target: a JVM, and its euid.
-func (a Attacher) checkJVM(pid uint32) (procInfo, error) {
-	jvm, err := mapsJVM(a.ProcRoot, pid)
-	switch {
-	case err != nil:
-		return procInfo{}, err
-	case !jvm:
-		return procInfo{}, ErrNotJVM
+func (a Attacher) stage(pid uint32, jar string, reuse []*Stage) (*Stage, error) {
+	pd, err := a.openProc(pid)
+	if err != nil {
+		return nil, err
 	}
-	return readProcInfo(a.ProcRoot, pid)
+	defer pd.close()
+	info, err := pd.checkStageable()
+	if err != nil {
+		return nil, err
+	}
+	root, err := pd.openRoot()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = unix.Close(root) }()
+	tmp, id, err := openTrustedTmp(root, info.euid)
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range reuse {
+		if s.id == id {
+			_ = unix.Close(tmp)
+			return s, nil
+		}
+	}
+	s := &Stage{tmp: tmp, dir: -1, spool: -1, id: id}
+	if err := s.build(jar); err != nil {
+		return nil, errors.Join(err, s.Remove())
+	}
+	return s, nil
 }
 
-// build checks / and /tmp, then makes the directory, the jar and the
-// spool; Remove undoes whatever part of it was done.
-func (s *Stage) build(root int, euid uint32, jar string) error {
+// openTrustedTmp checks the JVM's / (root), opens its /tmp and checks it
+// too, and returns it with its stageID.
+func openTrustedTmp(root int, euid uint32) (int, stageID, error) {
 	if err := trustedDir(root, "/", euid); err != nil {
-		return err
+		return -1, stageID{}, err
 	}
-	var err error
-	if s.tmp, err = openTmp(root); err != nil {
-		return err
+	tmp, err := openTmp(root)
+	if err != nil {
+		return -1, stageID{}, err
 	}
-	if err := trustedDir(s.tmp, "/tmp", euid); err != nil {
-		return err
+	var st unix.Stat_t
+	if err := unix.Fstat(tmp, &st); err != nil {
+		_ = unix.Close(tmp)
+		return -1, stageID{}, err
 	}
+	if err := trustedDir(tmp, "/tmp", euid); err != nil {
+		_ = unix.Close(tmp)
+		return -1, stageID{}, err
+	}
+	return tmp, stageID{euid: euid, dev: st.Dev, ino: st.Ino}, nil
+}
+
+// build makes the directory, the jar and the spool in the checked /tmp;
+// Remove undoes whatever part of it was done.
+func (s *Stage) build(jar string) error {
 	if err := s.makeDir(); err != nil {
 		return err
 	}
 	if err := copyJar(s.dir, stageJar, jar); err != nil {
 		return err
 	}
+	var err error
 	s.spool, err = agentspool.MakeSpoolAt(s.dir, stageSpool)
 	return err
 }
@@ -138,7 +192,7 @@ func trustedDir(fd int, name string, euid uint32) error {
 	if err := unix.Fstat(fd, &st); err != nil {
 		return fmt.Errorf("%s: %w", name, err)
 	}
-	if st.Uid != 0 && st.Uid != euid {
+	if st.Uid != rootUID && st.Uid != euid {
 		return fmt.Errorf("%w: %s belongs to uid %d, neither root nor the JVM's %d",
 			ErrUntrustedTmp, name, st.Uid, euid)
 	}
@@ -185,7 +239,7 @@ func (s *Stage) openDir() error {
 		_ = unix.Close(fd)
 		return err
 	}
-	if st.Uid != uint32(os.Geteuid()) {
+	if st.Uid != uint32(tracerEUID()) {
 		// Not the directory mkdirat made: neither it nor anything in it
 		// is touched again, Remove included.
 		_ = unix.Close(fd)

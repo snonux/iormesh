@@ -2,10 +2,7 @@ package cli
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
-	"strconv"
-	"syscall"
+	"slices"
 
 	"iormesh/internal/javaattach"
 )
@@ -24,35 +21,24 @@ type agentStage interface {
 
 var _ agentStage = (*javaattach.Stage)(nil)
 
-// stageAgent stages jar inside pid's root. A variable like newAgentLoader,
-// so the session's tests stage into no real JVM.
-var stageAgent = func(pid uint32, jar string) (agentStage, error) {
-	s, err := javaattach.New().Stage(pid, jar)
+// stageAgent stages jar inside pid's root, or returns the stage of have
+// that pid's JVM may share: javaattach decides, from the JVM's euid and
+// its /tmp's identity (never from the mount namespace alone, whose
+// processes may run as other users or in other roots), after running
+// every check for pid. A variable like newAgentLoader, so the session's
+// tests stage into no real JVM.
+var stageAgent = func(pid uint32, jar string, have []agentStage) (agentStage, error) {
+	reuse := make([]*javaattach.Stage, 0, len(have))
+	for _, h := range have {
+		if s, ok := h.(*javaattach.Stage); ok {
+			reuse = append(reuse, s)
+		}
+	}
+	s, err := javaattach.New().Stage(pid, jar, reuse)
 	if err != nil {
 		return nil, err
 	}
 	return s, nil
-}
-
-// stageKey names what JVMs may share one stage: the same mount namespace
-// (so the same /tmp) and the same user (whose ownership of / or /tmp the
-// stage's trust check accepted). "" when unreadable: that JVM gets a
-// stage of its own. A variable so tests need no real processes.
-var stageKey = func(pid uint32) string {
-	dir := filepath.Join("/proc", strconv.FormatUint(uint64(pid), 10))
-	ns, err := os.Readlink(filepath.Join(dir, "ns", "mnt"))
-	if err != nil {
-		return ""
-	}
-	st, err := os.Stat(dir)
-	if err != nil {
-		return ""
-	}
-	sys, ok := st.Sys().(*syscall.Stat_t)
-	if !ok {
-		return ""
-	}
-	return ns + "/" + strconv.FormatUint(uint64(sys.Uid), 10)
 }
 
 // agentTarget is what one load needs: the jar and the spool as the JVM
@@ -63,42 +49,40 @@ type agentTarget struct {
 	jar, spool, ringDir string
 }
 
-// agentStages are the stages one `run -agent` made, at most one per
-// stageKey, all removed when the session ends (javaOutput.close).
+// agentStages are the stages one `run -agent` made, each listed once
+// however many JVMs share it, all removed when the session ends
+// (javaOutput.close).
 type agentStages struct {
-	jar   string
-	byKey map[string]agentStage
-	all   []agentStage
+	jar string
+	all []agentStage
 }
 
 func newAgentStages(jar string) *agentStages {
-	return &agentStages{jar: jar, byKey: map[string]agentStage{}}
+	return &agentStages{jar: jar}
 }
 
 // target returns pid's agentTarget: the tracer's own jar and spool for a
 // JVM in the tracer's mount namespace, as before; for any other JVM a
-// stage inside its root, made on first use for its stageKey.
+// stage inside its root, shared with an earlier JVM only when stageAgent
+// says so.
 func (st *agentStages) target(pid uint32, spool string) (agentTarget, error) {
 	if sameMountNS(pid) {
 		return agentTarget{jar: st.jar, spool: spool, ringDir: spool}, nil
 	}
-	key := stageKey(pid)
-	s, ok := st.byKey[key]
-	if !ok || key == "" {
-		var err error
-		if s, err = stageAgent(pid, st.jar); err != nil {
-			return agentTarget{}, err
-		}
+	s, err := stageAgent(pid, st.jar, st.all)
+	if err != nil {
+		return agentTarget{}, err
+	}
+	if !slices.Contains(st.all, s) {
 		st.all = append(st.all, s)
-		if key != "" {
-			st.byKey[key] = s
-		}
 	}
 	return agentTarget{jar: s.Jar(), spool: s.Spool(), ringDir: s.ReadPath()}, nil
 }
 
-// stagingFailed reports whether err is a stage that could not be made in
-// the JVM's root, where -javaagent is the way out (decision #14).
+// stagingFailed reports whether err is a JVM no stage could be made for
+// — its /tmp unusable or untrusted, or its PID namespace not the
+// tracer's — where -javaagent is the way out (decision #14).
 func stagingFailed(err error) bool {
-	return errors.Is(err, javaattach.ErrNoStage) || errors.Is(err, javaattach.ErrUntrustedTmp)
+	return errors.Is(err, javaattach.ErrNoStage) || errors.Is(err, javaattach.ErrUntrustedTmp) ||
+		errors.Is(err, javaattach.ErrOtherPidNS)
 }

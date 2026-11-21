@@ -404,7 +404,13 @@ truth.
     the JVM's `/` and `/tmp` are root's or the JVM user's and
     not writable by group or others without the sticky bit:
     otherwise another user could rename the directory away and
-    have the JVM load their own jar. It costs the app
+    have the JVM load their own jar (an `emptyDir` at `/tmp`,
+    0777 without the sticky bit, is refused for that). The
+    checks run for every JVM, and a JVM shares another's stage
+    only with the same euid and the same `/tmp` directory object.
+    A JVM in another PID namespace than the tracer's is not
+    staged for: its ring's name would be read as another
+    process's pid. It costs the app
     container's ephemeral storage, or its memory where `/tmp` is
     a tmpfs (the jar and one fixed-size ring per JVM). The
     tracer removes the directory through its fds when its

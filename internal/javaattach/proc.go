@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -102,7 +103,12 @@ func mapsJVM(root string, pid uint32) (bool, error) {
 		return false, err
 	}
 	defer func() { _ = f.Close() }()
-	sc := bufio.NewScanner(f)
+	return parseMaps(f)
+}
+
+// parseMaps reports whether a maps file names libjvm.so.
+func parseMaps(r io.Reader) (bool, error) {
+	sc := bufio.NewScanner(r)
 	for sc.Scan() {
 		fields := strings.Fields(sc.Text())
 		// address perms offset dev inode path
