@@ -59,7 +59,8 @@ containerdConfigPatches:
 
 // K8sAcceptance runs PLAN.md M7's acceptance on kind: TestKindAcceptance
 // under kube-proxy's iptables mode, then TestKindClusterIP again under
-// nftables. IORMESH_KIND_KEEP=1 keeps the cluster and the registry.
+// nftables. IORMESH_KIND_KEEP=1 keeps the cluster and the registry;
+// IORMESH_KIND_KUBECONFIG puts the kubeconfig elsewhere.
 func K8sAcceptance() error {
 	if why := kindMissing(); why != "" {
 		fmt.Println("SKIP k8sAcceptance:", why)
@@ -112,7 +113,7 @@ func kindUp() (map[string]string, error) {
 	if err := kindTraefik(); err != nil {
 		return nil, err
 	}
-	kc, err := filepath.Abs(kindKubeconfig)
+	kc, err := filepath.Abs(kubeconfigPath())
 	if err != nil {
 		return nil, err
 	}
@@ -220,17 +221,17 @@ func createKindCluster() error {
 	}
 	defer func() { _ = os.Remove(cfg) }()
 	if err := sh.RunV("sudo", "-n", "kind", "create", "cluster", "--name="+kindCluster,
-		"--kubeconfig="+kindKubeconfig, "--config="+cfg); err != nil {
+		"--kubeconfig="+kubeconfigPath(), "--config="+cfg); err != nil {
 		return err
 	}
 	owner := strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid())
-	return sh.RunV("sudo", "-n", "chown", owner, kindKubeconfig)
+	return sh.RunV("sudo", "-n", "chown", owner, kubeconfigPath())
 }
 
 // kindTraefik installs Traefik (its CRDs under traefik.io included) with a
 // ClusterIP Service: kind has no load balancer.
 func kindTraefik() error {
-	env := map[string]string{"KUBECONFIG": kindKubeconfig}
+	env := map[string]string{"KUBECONFIG": kubeconfigPath()}
 	if err := sh.RunV("helm", "repo", "add", "--force-update", "traefik", "https://traefik.github.io/charts"); err != nil {
 		return err
 	}
@@ -248,4 +249,14 @@ func kindTeardown() {
 			fmt.Printf("teardown: %s: %v\n", strings.Join(argv, " "), err)
 		}
 	}
+}
+
+// kubeconfigPath is where the cluster's kubeconfig goes:
+// $IORMESH_KIND_KUBECONFIG (a worktree pointing at its main checkout's
+// file), else kindKubeconfig at the repository root.
+func kubeconfigPath() string {
+	if p := os.Getenv("IORMESH_KIND_KUBECONFIG"); p != "" {
+		return p
+	}
+	return kindKubeconfig
 }

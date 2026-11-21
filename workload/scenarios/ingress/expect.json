@@ -9,7 +9,6 @@
     "fd": "$fd2", "conn_id": "$c2"},
    {"process": "$p1", "thread": "$t2", "event": "read", "fd": "$fd2"},
    {"process": "$p1", "thread": "$t2", "event": "write", "fd": "$fd2"},
-   {"process": "$p1", "thread": "$t1", "event": "close", "fd": "$fd2"},
    {"process": "$p2", "thread": "$t3", "event": "dns", "attribution": "java",
     "dns": {"host": "shop.iormesh.test", "addrs": ["192.0.2.80"]}},
    {"process": "$p2", "thread": "$t3", "event": "connect",

@@ -1796,8 +1796,8 @@ Later phase — plain Linux servers (M4) come first.
   the M0 ingress scenario renders as one routed edge — app →
   FQDN → Traefik → deployment — with no tracer on the ingress.
   Status (2026-11-21, task yb4): **passed on kind, with one
-  test-only workaround** — `mage k8sAcceptance`
-  (`integrationtests/kind`; kind 0.31, Kubernetes 1.35.0,
+  test-only workaround** — `mage k8sAcceptance` from scratch,
+  green (`integrationtests/kind`; kind 0.31, Kubernetes 1.35.0,
   containerd 2.2.0, one node; docs/testing.md "M7 acceptance on
   kind"). tcp-nat's client and server as pods under debug
   containers, deployed by iormeshctl from a local registry

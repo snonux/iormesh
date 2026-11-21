@@ -1327,9 +1327,9 @@ goes through `sudo -n`. It:
    (before every create, build and push; it never balances);
 3. starts a local registry (`registry:2`, pinned) on
    `localhost:5001`, creates the cluster `iormesh-m7` with its
-   kubeconfig at the repository root (`.kind-kubeconfig`, owned by
-   the operator, ignored by git) and wires the node's containerd
-   to the registry;
+   kubeconfig at the repository root (`.kind-kubeconfig`, or
+   `$IORMESH_KIND_KUBECONFIG`; owned by the operator, ignored by
+   git) and wires the node's containerd to the registry;
 4. builds and pushes the tracer image
    (`scripts/container/tracer-image.Containerfile`) and a workload
    image (`scripts/container/kind-workload.Containerfile`: a JRE,
@@ -1382,9 +1382,14 @@ bracket.
 
 Run on 2026-11-21 (kind 0.31.0, Kubernetes 1.35.0, containerd
 2.2.0, Docker 29.9.2, Fedora kernel 7.2.15, one node):
-`TestKindAcceptance` passed every subtest on the cluster built by
-hand (kube-proxy then in nftables mode); the `mage
-k8sAcceptance` run from scratch is recorded in PLAN.md M7.
+`mage k8sAcceptance` from scratch passed: `TestKindAcceptance`
+(every subtest, 107 s; iptables) and `TestKindClusterIP` (84 s;
+nftables), then tore the cluster and registry down. Two pods
+happened to share pod-local pid 47 and still gave two process
+ids. The first from-scratch run had failed only the ingress
+golden, which had pinned the backend's `close` to its main
+thread — the JDK HttpServer closes on whichever thread finishes
+the exchange, so the golden no longer declares it.
 
 Checked by hand on the same cluster and recorded here, not
 automated:
