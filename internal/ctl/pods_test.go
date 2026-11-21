@@ -423,6 +423,34 @@ func TestPodDeployNewestRunning(t *testing.T) {
 	}
 }
 
+// TestPodCollectStoppedAtCap: a stopped debug tracer that is the pod's
+// last allowed one (k8s.MaxDebugTracers) cannot be followed by deploy,
+// so collect says to restart the pod or use sidecar mode instead.
+func TestPodCollectStoppedAtCap(t *testing.T) {
+	f := newPodFixture(t, "")
+	all := map[string]bool{}
+	for n := 1; n <= k8s.MaxDebugTracers; n++ {
+		all[k8s.TracerName(n)] = false
+	}
+	f.pod(t, tracerObject("checkout-0", uid(1), all))
+	if code := f.run("collect", "kind/shop/checkout-0"); code != exitError {
+		t.Fatalf("exit %d, want %d", code, exitError)
+	}
+	stderr := f.stderr.String()
+	for _, want := range []string{`"iormesh-8" terminated`, "stranded until the pod goes", "restart the pod",
+		"sidecar mode"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr lacks %q: %s", want, stderr)
+		}
+	}
+	if strings.Contains(stderr, "iormeshctl deploy") {
+		t.Errorf("advises a deploy that would refuse: %s", stderr)
+	}
+	if got := verbs(f.calls(t)); !slices.Equal(got, []string{"get pod"}) {
+		t.Errorf("calls %q, want the get alone", got)
+	}
+}
+
 // TestPodDeployCap: a pod that has had k8s.MaxDebugTracers, all ended,
 // gets no ninth: deploy fails naming the cap, and no debug runs.
 func TestPodDeployCap(t *testing.T) {

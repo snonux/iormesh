@@ -119,7 +119,8 @@ func (k *Kubectl) deployDebug(ctx context.Context, p podInfo, argv []string) (Ou
 
 // keepRunning checks the pod's newest debug tracer (k.tracer()), which
 // has not terminated, before Deploy leaves it alone: spec image and
-// status imageID the pinned digest, the project argv asks for.
+// status imageID the pinned digest, the project argv asks for. A tracer
+// past the first marks the transport superseded, as a replacement does.
 func (k *Kubectl) keepRunning(p podInfo, argv []string) (Outcome, error) {
 	if err := k.verifySpecImage(p.Spec.EphemeralContainers); err != nil {
 		return 0, err
@@ -131,6 +132,11 @@ func (k *Kubectl) keepRunning(p podInfo, argv []string) (Outcome, error) {
 	if err := k.verifyProject(p.Spec.EphemeralContainers, argv); err != nil {
 		return 0, err
 	}
+	// A rerun of deploy while iormesh-N (N > 1) still attaches finds
+	// the predecessor's state.json as the replacing deploy did: the
+	// wait must read it the same way.
+	n, _ := tracerIndex(k.tracer())
+	k.superseded = n > 1
 	return Running, nil
 }
 

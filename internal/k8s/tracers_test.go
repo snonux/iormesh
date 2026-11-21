@@ -220,7 +220,9 @@ func TestWaitAttachedAfterReplace(t *testing.T) {
 			t.Errorf("%s: probes = %q, want three into iormesh-2", first, calls)
 		}
 	}
-	// A predecessor's state that never gives way times out naming it.
+	// A predecessor's state that never gives way times out naming it,
+	// that the new run may have failed before attaching (under -linger
+	// its container keeps running), and the new container's logs.
 	f := newFake(t)
 	f.pod(t, podWith(t, tracerSpec{"iormesh", testImage, stKilled}))
 	k := newTestKubectl(t, testTarget())
@@ -229,9 +231,84 @@ func TestWaitAttachedAfterReplace(t *testing.T) {
 	}
 	f.states(t, "dead")
 	_, err := k.WaitAttached(context.Background(), "shop", 100*time.Millisecond)
-	if !errors.Is(err, ErrNotAttached) || !strings.Contains(err.Error(), "the ended tracer's state (dead)") ||
-		!strings.Contains(err.Error(), "--container=iormesh-2") {
-		t.Errorf("timeout: err = %v", err)
+	for _, want := range []string{"still the ended tracer's state (dead)", "failed before attaching",
+		"kubectl logs checkout-7d9f --container=iormesh-2"} {
+		if !errors.Is(err, ErrNotAttached) || !strings.Contains(err.Error(), want) {
+			t.Errorf("timeout: err = %v, want %q", err, want)
+		}
+	}
+}
+
+// TestWaitAttachedStateChanges: after a replacement, an answer that
+// differs from the first dead or ended one seen is the new run's own
+// state.json — its session attached and is already over — and fails at
+// once instead of being waited past.
+func TestWaitAttachedStateChanges(t *testing.T) {
+	fastPoll(t)
+	for _, seq := range [][]string{{"dead", "ended duration"}, {"ended duration", "ended disk_limit"},
+		{"ended duration", "dead"}} {
+		f := newFake(t)
+		f.pod(t, podWith(t, tracerSpec{"iormesh", testImage, stKilled}))
+		k := newTestKubectl(t, testTarget())
+		if _, err := k.Deploy(context.Background(), "iormesh", "run"); err != nil {
+			t.Fatal(err)
+		}
+		f.states(t, seq[0], seq[0], seq[1])
+		_, err := k.WaitAttached(context.Background(), "shop", time.Minute)
+		if !errors.Is(err, ErrNotAttached) || !strings.Contains(err.Error(), "state changed from") ||
+			!strings.Contains(err.Error(), "--container=iormesh-2") {
+			t.Errorf("%q: err = %v", seq, err)
+		}
+		if n := len(f.calls(t)) - 2; n != 3 {
+			t.Errorf("%q: %d probes, want 3 (failed at the change)", seq, n)
+		}
+	}
+	// The first answer is remembered across waits on one transport: a
+	// second wait that finds the state changed fails too.
+	f := newFake(t)
+	f.pod(t, podWith(t, tracerSpec{"iormesh", testImage, stKilled}))
+	k := newTestKubectl(t, testTarget())
+	if _, err := k.Deploy(context.Background(), "iormesh", "run"); err != nil {
+		t.Fatal(err)
+	}
+	f.states(t, "dead")
+	if _, err := k.WaitAttached(context.Background(), "shop", 50*time.Millisecond); !errors.Is(err, ErrNotAttached) {
+		t.Fatalf("first wait: %v", err)
+	}
+	f.states(t, "ended duration")
+	if _, err := k.WaitAttached(context.Background(), "shop", time.Minute); err == nil ||
+		!strings.Contains(err.Error(), "state changed from") {
+		t.Errorf("second wait: err = %v", err)
+	}
+}
+
+// TestDeployRerunWhileAttaching: a deploy rerun while iormesh-2 still
+// attaches leaves it alone (Running) and reads the predecessor's dead
+// state as the replacing deploy did, waiting until iormesh-2 says
+// running; a first tracer left running has no predecessor, and its dead
+// fails at once.
+func TestDeployRerunWhileAttaching(t *testing.T) {
+	fastPoll(t)
+	f := newFake(t)
+	f.pod(t, podWith(t, tracerSpec{"iormesh", testImage, stKilled}, tracerSpec{"iormesh-2", testImage, stRunning}))
+	k := newTestKubectl(t, testTarget())
+	if out, err := k.Deploy(context.Background(), "iormesh", "run", "-project", "shop"); err != nil || out != Running {
+		t.Fatalf("Deploy = %v, %v", out, err)
+	}
+	f.states(t, "dead", "pending", "running 1a2b3c4d")
+	if session, err := k.WaitAttached(context.Background(), "shop", time.Minute); err != nil || session != "1a2b3c4d" {
+		t.Fatalf("WaitAttached = %q, %v", session, err)
+	}
+	f = newFake(t)
+	f.pod(t, podWith(t, tracerSpec{"iormesh", testImage, stRunning}))
+	k = newTestKubectl(t, testTarget())
+	if out, err := k.Deploy(context.Background(), "iormesh", "run", "-project", "shop"); err != nil || out != Running {
+		t.Fatalf("first tracer: Deploy = %v, %v", out, err)
+	}
+	f.states(t, "dead")
+	if _, err := k.WaitAttached(context.Background(), "shop", time.Minute); !errors.Is(err, ErrNotAttached) ||
+		!strings.Contains(err.Error(), "died without its end") {
+		t.Errorf("first tracer: err = %v, want a dead session at once", err)
 	}
 }
 

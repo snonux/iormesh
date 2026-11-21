@@ -84,8 +84,16 @@ func (c collector) pod(ctx context.Context, pe podEntry, st k8s.PodState, projec
 // to go; in debug mode a deploy starts the next tracer (task ah4),
 // whose `iormesh ready` serves the published segments from the shared
 // emptyDir, so the message says that — only the unsealed segment is
-// lost.
+// lost. At the cap (the stopped one is the pod's last allowed debug
+// tracer, k8s.MaxDebugTracers) deploy would refuse, so the message says
+// to restart the pod or move it to sidecar mode instead.
 func stranded(pe podEntry, st k8s.PodState) error {
+	if pe.scope.Mode == k8s.ModeDebug && st.Container == k8s.TracerName(k8s.MaxDebugTracers) {
+		return fmt.Errorf("session ended: tracer container %q %s; kubectl exec cannot enter a stopped "+
+			"container, and the pod has had %d debug tracers, the most deploy starts: its segments in the "+
+			"emptyDir are stranded until the pod goes; restart the pod, or use sidecar mode for a pod whose app "+
+			"container restarts", st.Container, st.Stopped, k8s.MaxDebugTracers)
+	}
 	if pe.scope.Mode == k8s.ModeDebug {
 		return fmt.Errorf("session ended: tracer container %q %s; kubectl exec cannot enter a stopped "+
 			"container: iormeshctl deploy %s starts a fresh tracer in the pod, and the next collect fetches the "+

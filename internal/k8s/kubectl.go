@@ -59,10 +59,14 @@ type Kubectl struct {
 	t   Target
 	run runner
 	// superseded is set by a Deploy that started a debug tracer in
-	// place of an ended one (Replaced, task ah4): the predecessor's
-	// state.json is still in the shared trace dir until the new run
-	// attaches, and WaitAttached must not take it for the new one's.
+	// place of an ended one (Replaced, task ah4), or left one running
+	// that has an ended predecessor (its name past TracerContainer: it
+	// may still be attaching): the predecessor's state.json is still in
+	// the shared trace dir until the new run attaches, and WaitAttached
+	// must not take it for the new one's.
 	superseded bool
+	// pred is WaitAttached's memory of that state, kept across waits.
+	pred *predecessor
 }
 
 // Kubectl satisfies federate.Transport; checked at compile time.

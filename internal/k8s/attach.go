@@ -81,18 +81,29 @@ var (
 // answer once timeout passed or ctx ended — the message tells the two
 // apart, and an ended ctx's error is wrapped as well.
 //
-// After a Deploy that replaced an ended tracer (Replaced, task ah4),
-// "dead" and "ended" are the predecessor's: its state.json stays in the
-// shared trace dir until the new run's markRunning replaces it, and the
-// new tracer reads it as dead (its process is gone with the old PID
-// namespace). They are waited past, not failed on. The new run's own
-// death cannot hide behind that: the run is its container's process, so
-// its container terminates, which the probe sees and fails on; only a
-// new session that ended inside the wait (a -duration shorter than the
-// timeout) reads as a timeout instead.
+// After a Deploy that left or started a tracer with an ended
+// predecessor (superseded, task ah4), "dead" and "ended" may be the
+// predecessor's: its state.json stays in the shared trace dir until the
+// new run's markRunning replaces it, and the new tracer reads it as dead
+// (its process is gone with the old PID namespace). They are waited
+// past, not failed on — which means a new run that fails before it
+// attaches is not seen at once: under -linger a failed run lingers
+// rather than exiting, its container keeps running, and the
+// predecessor's state stays. The wait then times out saying so and
+// naming the container's logs. What is caught at once (predecessor): the
+// answer changing from the first one seen, dead to ended say, which
+// only the new run's own state.json can do — its session attached and
+// is already over. A run that exits (a crash) takes its container down,
+// which the probe sees and fails on too.
 func (k *Kubectl) WaitAttached(ctx context.Context, proj string, timeout time.Duration) (string, error) {
 	if !project.Valid(proj) {
 		return "", fmt.Errorf("%w: project %q: %s", ErrName, proj, project.Rule)
+	}
+	// Made once and kept across waits on this transport: the
+	// predecessor's state does not change, so a later wait still knows
+	// the first answer.
+	if k.superseded && k.pred == nil {
+		k.pred = &predecessor{logs: fmt.Sprintf("kubectl logs %s --container=%s", k.t.Pod, k.tracer())}
 	}
 	deadline := time.Now().Add(timeout)
 	last := "no answer yet"
@@ -149,7 +160,7 @@ func (k *Kubectl) probeOnce(ctx context.Context, proj string) (session, last str
 func (k *Kubectl) attachProbe(ctx context.Context, proj string) (session, last string, err error) {
 	out, rerr := k.Run(ctx, TracerBinary, "ready", "-project", proj, ReadyStateFlag)
 	if rerr == nil {
-		return parseAttach(strings.TrimSpace(string(out)), k.tracerName(), k.superseded)
+		return parseAttach(strings.TrimSpace(string(out)), k.tracerName(), k.pred)
 	}
 	if ctx.Err() != nil {
 		return "", "", nil // cut off: the answer before it says more
@@ -177,18 +188,42 @@ func (k *Kubectl) attachProbe(ctx context.Context, proj string) (session, last s
 	return "", firstLine(rerr.Error()), nil
 }
 
+// predecessor is WaitAttached's memory of a superseded tracer's state
+// (task ah4): the first dead or ended answer, taken as the
+// predecessor's, and the logs command its messages name.
+type predecessor struct {
+	first, logs string
+}
+
+// seen takes one dead or ended answer: the predecessor's while it is
+// the first one's (pending, with a last that says what it may mean),
+// the new run's own once it differs — its session attached and is
+// over, which no wait changes.
+func (p *predecessor) seen(answer, where string) (last string, err error) {
+	if p.first == "" {
+		p.first = answer
+	}
+	if answer != p.first {
+		return "", fmt.Errorf("%w: %s: the state changed from %q to %q: the new session attached and is "+
+			"already over; see %s", ErrNotAttached, where, p.first, firstLine(answer), p.logs)
+	}
+	return fmt.Sprintf("still the ended tracer's state (%s): the new run has not attached, or failed before "+
+		"attaching; check %s", answer, p.logs), nil
+}
+
 // parseAttach reads one `iormesh ready -state` answer, refusing words
 // iormesh never writes (attachSession, attachReason): pending and dead
 // take none, running a session id, ended an end reason or none. With
-// superseded (the tracer replaced an ended one, WaitAttached) a dead or
-// ended state is the predecessor's and reads as pending.
-func parseAttach(answer, where string, superseded bool) (session, last string, err error) {
+// pred (the tracer has an ended predecessor, WaitAttached) a dead or
+// ended state goes to pred.seen, as the predecessor's while unchanged.
+func parseAttach(answer, where string, pred *predecessor) (session, last string, err error) {
 	word, rest, _ := strings.Cut(answer, " ")
 	dead := word == AttachDead && rest == ""
 	over := word == AttachEnded && (rest == "" || attachReason.MatchString(rest))
 	switch {
-	case superseded && (dead || over):
-		return "", "the ended tracer's state (" + word + "), the new run not attached yet", nil
+	case pred != nil && (dead || over):
+		last, err := pred.seen(answer, where)
+		return "", last, err
 	case word == AttachRunning && attachSession.MatchString(rest):
 		return rest, "", nil
 	case word == AttachRunning:
