@@ -449,9 +449,21 @@ truth.
     `RuntimeDefault` seccomp and no privilege escalation are what
     bound the tracer. `iormeshctl deploy -selinux-type` (or
     `selinux_type` in the registry) names another type, empty
-    omits it; a dedicated `iormesh_container_t` policy module
-    granting only the tracer's `bpf`, `perf_event` and tracefs
-    permissions is planned (PLAN.md #13, task 7h4);
+    omits it. Opt-in where nodes accept the RPM: the
+    `iormesh-selinux` policy module (`packaging/selinux/`,
+    `mage selinuxRPM`) confines the tracer to its own type,
+    `iormesh_container_t` — container-selinux's container
+    template as for `container_t` (MCS-constrained), plus only
+    `bpf`, `perf_event`, read-only tracefs, and the Java attach
+    to `container_t` processes (their `/proc` entries, one
+    signal, the attach socket). Run it at the pod's own MCS pair
+    (`-selinux-type iormesh_container_t -selinux-level
+    s0:cN,cM`): MCS then limits those `container_t` rules to the
+    pod's own app containers, and the pod's shared files keep
+    the pair; at `s0` the Java attach is denied. The rules and
+    the el9 run are in PLAN.md #13 and
+    [testing.md](testing.md#dedicated-type-iormesh_container_t-task-7h4-2026-11-21)
+    (task 7h4);
   - mounts the host's tracefs read-only and nothing else of the
     host; traces live in a size-bounded `emptyDir` of the pod.
     The pod must carry both volumes before the tracer comes

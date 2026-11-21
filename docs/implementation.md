@@ -5471,7 +5471,9 @@ depends on:
    spc_t, level: s0}` on this container (never the pod; `iormeshctl deploy
    -selinux-type` or the registry's `selinux_type` picks another,
    `-selinux-level` or `selinux_level` the level (task 8h4),
-   empty omits it; PLAN.md #13). The sidecar adds resource limits
+   empty omits it; PLAN.md #13; the opt-in `iormesh_container_t`
+   type ships as a policy RPM, `packaging/selinux/`, task 7h4). The
+   sidecar adds resource limits
    of one CPU and 1 GiB (start's unit defaults: the container is
    the unit) beside small requests (50m, 128 MiB), and runs
    `iormesh run` as its process, with example args

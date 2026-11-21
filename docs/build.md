@@ -245,6 +245,17 @@ fails up front with the fix named.
   `--custom` at all. With `--profile=general` the stored
   container has exactly the `--custom` file's capabilities on
   every version that takes the flag.
+- **The `iormesh-selinux` RPM** (opt-in, task 7h4): `mage
+  selinuxRPM podman` (or `docker`) builds the
+  `iormesh_container_t` policy module and its RPM from
+  `packaging/selinux/` in a throwaway Rocky 9 container
+  (`build.sh` installs selinux-policy-devel, container-selinux
+  and rpm-build there) and writes the binary and source RPMs to
+  `dist/selinux/`. The build host needs no SELinux tools, and
+  neither does `mage test`: `packaging/selinux/policy_test.go`
+  reads the `.te` and the spec as text. Install the RPM on an
+  SELinux-enforcing el9 node that has container-selinux;
+  PLAN.md #13 and [security.md](security.md) say when to.
 
 ## Signing
 

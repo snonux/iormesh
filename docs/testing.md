@@ -2574,6 +2574,81 @@ was stopped and set back to 2 GB; the laptop's images, volumes and
 containers matched the state before, Docker was stopped and the
 copied kubeconfig deleted.
 
+#### Dedicated type `iormesh_container_t` (task 7h4, 2026-11-21)
+
+The opt-in policy module (PLAN.md #13, `packaging/selinux/`) on the
+same VM and versions (4 GB): Rocky 9.9, container-selinux 2.250,
+selinux-policy 38.1.86, k3s v1.35.10+k3s1. The RPM came from `mage
+selinuxRPM podman` on the laptop and was installed with `dnf`; its
+`%post` loaded the module at priority 400 beside the packaged
+`container` and `k3s` ones, and a `dnf remove` (its `%postun`)
+unloaded it again. Two harness variables run the acceptance with
+another type and level: `IORMESH_K8S_SELINUX_TYPE` and
+`IORMESH_K8S_SELINUX_LEVEL` (default `spc_t` and `s0`). They go
+into the registry's `k8s:` and the sidecar patch, the spec check
+expects them, and a level other than `s0` is also pinned on every
+workload pod (`securityContext.seLinuxOptions.level`), so the
+tracer runs at its pod's pair as #13 requires
+(`TestSELinuxOptions`). Every run used `iormesh_container_t` at
+`s0:c100,c200`.
+
+| Run | Module | Result |
+|---|---|---|
+| 1, iptables, enforcing | zg4's four rules only | `TestKindClusterIP` PASS; `TestKindAcceptance` FAIL: the gateway's tracer attached, but the agent never joined, and no AVC was logged |
+| 2, iptables, the type permissive, dontaudit off (`semodule -DB`) | the same | PASS; the review below |
+| 3, iptables, enforcing | zg4's rules plus the Java attach's five | PASS, no AVC |
+| 4, nftables, enforcing | the same | PASS, no AVC |
+| 5, nftables, module removed, default `spc_t` at `s0` | none (only the packaged `container` and `k3s` modules) | PASS, no AVC: tracers `spc_t:s0`, apps `container_t` at their pods' random pairs, SIGTERM exit 0 in 587 ms |
+
+Runs 3 and 4 in detail:
+
+| Criterion | iptables | nftables |
+|---|---|---|
+| tracer spec as stored (`iormesh_container_t` at `s0:c100,c200` on the tracer only, apps without `seLinuxOptions`) | PASS | PASS |
+| BPF load, tracefs hostPath, BTF | PASS, no AVC | PASS, no AVC |
+| `clusterip` (fused, goldens), both tests | PASS | PASS |
+| `hairpin` | PASS | PASS |
+| `identity` (5 pods, one `boot_id`) | PASS | PASS |
+| debug container with `-agent` (Java live-attach) | PASS | PASS |
+| `ingress` routed edge (the sidecar tracer) | PASS | PASS |
+| `rbac` (list-only discovery) | PASS | PASS |
+| `sigterm` (crictl over ssh) | PASS: exit 0, 719 ms | PASS: exit 0, 616 ms |
+
+On the node (`ps -eZ`, sampled every 10 s) the tracers ran as
+`system_u:system_r:iormesh_container_t:s0:c100,c200`, the app
+containers as `container_t` at the same pair, and the cluster's own
+pods (CoreDNS, Traefik, local-path) at their own pairs. The raw
+`/var/log/audit/audit.log` and its rotation, read by timestamp, held
+no `AVC`, `USER_AVC` or `SELINUX_ERR` during runs 3 and 4.
+
+Run 1's silence is container-selinux's: it dontaudits a container
+domain's `search` of another domain's `/proc/<pid>` directory, so
+the tracer's first step towards the JVM failed without a record.
+Run 2 made the type permissive with a one-line CIL module
+(`(typepermissive iormesh_container_t)`) and rebuilt the policy
+without dontaudit rules; the audit2allow review of its AVCs (read
+by hand — the VM has no `audit2allow`, and installing it would have
+changed its packages) found, for `scontext=iormesh_container_t`,
+only targets of type `container_t` at the pod's pair, the JVMs of
+the app containers:
+
+| Denied | Object |
+|---|---|
+| `dir { search getattr }` | `/proc/1`, `/proc/7` |
+| `file { open read getattr }` | `/proc/1/cmdline`; `read` also without a path, the ptrace read check `/proc/<pid>/root` takes |
+| `lnk_file { read }` | `/proc/<pid>/exe` |
+| `process { signal }` | the SIGQUIT to the JVM |
+| `unix_stream_socket { connectto }` | `/tmp/.java_pid7`, the attach socket |
+
+Nothing else appeared for the type — no further file, network or
+capability need. zg4's diagnostic module granted `container_t`
+itself, which owns these objects, so it never met them. The five
+rules were added as `allow iormesh_container_t container_t:…` with
+exactly these permissions; the permissive module was removed and
+the dontaudit rules restored (`semodule -B`) before runs 3 to 5.
+Not run: the type at `s0` (MCS refuses the Java attach there,
+PLAN.md #13), a multi-node cluster, a pod without a pinned level.
+
 ## Performance baselines
 
 S3 (PLAN.md, decision #25) measures overhead against a load the

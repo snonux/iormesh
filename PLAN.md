@@ -2157,8 +2157,10 @@ Later phase — plain Linux servers (M4) come first.
   1.6, firewalld trusting the pod and Service CIDRs, run by
   `el9-k3s.sh`), kubectl 1.35, no multi-node cluster, no CRI-O,
   no OpenShift, no Pod Security level below `privileged`; the
-  tracer is unconfined by SELinux there (task 7h4's module would
-  confine it). #13, #14, #15 and #18 stay provisional.
+  tracer is unconfined by SELinux there. Task 7h4's opt-in
+  `iormesh_container_t` module confines it and passed the same
+  acceptance on the same node, at the pods' pinned MCS pair
+  (#13). #13, #14, #15 and #18 stay provisional.
   **A debug tracer ends with its app container** (2026-11-21,
   task ah4, after 8h4's el9 restart check). `kubectl debug
   --target` puts the tracer in the target container's PID
@@ -2856,10 +2858,10 @@ here only as placeholders.
   node without SELinux the field is inert. `iormeshctl deploy
   -selinux-type`, or `selinux_type` in the registry's `k8s:` or
   a pod entry (#18's precedence), picks another type; an empty
-  one omits the field; a value must match `[a-z0-9_]+`. An
-  `iormesh_container_t` policy module with exactly the
-  permissions above follows (task 7h4, not gating); `privileged`
-  stays the last fallback. The level is not optional: given a
+  one omits the field; a value must match `[a-z0-9_]+`. The
+  `iormesh_container_t` policy module (task 7h4, below) is the
+  opt-in confined alternative; `privileged` stays the last
+  fallback. The level is not optional: given a
   type alone, containerd gives the container a fresh MCS pair
   and relabels the pod's shared files (`/etc/hosts`,
   `resolv.conf`, the trace `emptyDir`) to it, and on el9 the
@@ -2880,10 +2882,62 @@ here only as placeholders.
   level (the type-alone behaviour above); an empty type omits
   the whole field, level included. The sidecar patch is static
   at `s0`: its header tells such an owner to edit the level to
-  the pod's pair. Owner to confirm: `spc_t` and `s0`
+  the pod's pair.
+  *Opt-in (owner, 2026-11-21, task 7h4):* the dedicated type
+  `iormesh_container_t`, shipped as the `iormesh-selinux` RPM
+  (`packaging/selinux/`: `iormesh.te`, the spec, `mage
+  selinuxRPM docker|podman` building on Rocky 9 in a container;
+  `%post` `semodule -i`, `%postun` `semodule -r` on erase;
+  requires container-selinux). `spc_t` stays the default; an
+  owner whose nodes accept the RPM deploys with
+  `-selinux-type iormesh_container_t -selinux-level s0:cN,cM`
+  (or the registry's `selinux_type`/`selinux_level`). The type
+  comes from container-selinux's `container_domain_template`,
+  as `container_t` does (entrypoint and management of
+  `container_file_t`, MCS-constrained, `system_r`), with
+  `container_t`'s attributes `container_net_domain`,
+  `container_user_domain`, `sandbox_net_domain`,
+  `sandbox_caps_domain` and `svirt_sandbox_domain`, and exactly
+  these allow rules: zg4's
+  `self:bpf { map_create map_read map_write prog_load prog_run }`,
+  `self:perf_event { open cpu kernel read write tracepoint }`,
+  `tracefs_t:dir { search read open getattr }` and
+  `tracefs_t:file { open read getattr }`; and, for the Java
+  attach (#14), `container_t:dir { search getattr }`,
+  `container_t:file { open read getattr }`,
+  `container_t:lnk_file read`, `container_t:process signal` and
+  `container_t:unix_stream_socket connectto`. The second group
+  came from an audit2allow review of a permissive run (the type
+  permissive, dontaudit rules off) — zg4's diagnostic module had
+  granted `container_t` itself, which owns the JVM's `/proc`
+  entries and socket, so it needed none; without them BPF
+  tracing passes and the agent never joins, with no AVC logged
+  (container-selinux dontaudits a container domain searching
+  another domain's `/proc/<pid>`). No wildcard, no permissive,
+  no MCS exemption: unit tests pin the rule text. MCS is why the
+  level must be the pod's pair: there the `container_t` rules
+  reach only the pod's own app containers (other pods run at
+  other pairs) and the pod's shared files keep the pair; at
+  `s0` the tracer can neither read the app's files through
+  `/proc/<pid>/root` nor its processes, so the Java attach is
+  denied (BPF tracing still works; this follows from the MCS
+  constraint and was not run). An MCS exemption
+  (`mcs_constrained` left out, or `mcsreadall`) would make `s0`
+  work but let the tracer read any pod's `container_file_t`
+  files and reach any container's processes its namespaces
+  show — rejected. A pod that does not pin its level gets a
+  random pair, so the type suits owners who pin MCS levels; a
+  debug tracer does not discover the pair itself. On el9 (one
+  Rocky 9.9 k3s node, the versions of 5h4) the M7 acceptance
+  passed with it under iptables and nftables, no AVC, app
+  containers `container_t` at the pod's pair
+  ([testing.md](docs/testing.md#dedicated-type-iormesh_container_t-task-7h4-2026-11-21)),
+  and `spc_t` still passed with the module absent.
+  Owner to confirm: `spc_t` and `s0`
   as the fleet default, no tenant hostPath to the kubelet
-  directories, whether fleet pods pin MCS levels, whether a
-  policy RPM is viable, OpenShift (its SCCs) out of scope.
+  directories, whether fleet pods pin MCS levels, where nodes
+  accept the `iormesh-selinux` RPM (and so the opt-in type),
+  OpenShift (its SCCs) out of scope.
 - **#14 K8s Java attach** — *Provisional (2026-11-20):* live
   attach through the shared process namespace is the k8s
   default; `-javaagent` via `JAVA_TOOL_OPTIONS` stays the
