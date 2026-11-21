@@ -338,18 +338,26 @@ static __always_inline void iormesh_sock_on_accept(__u32 pid, __s64 ret) {
 
 // iormesh_read_ctx_tuple fills ev's tuple from the tracepoint record, whose
 // ports the kernel already converted to host order.
+//
+// The address arrays are copied with bpf_probe_read_kernel, not
+// __builtin_memcpy: clang lowers the 16-byte copy to loads off a ctx
+// pointer it advanced first (r3 = ctx + 48; *(u64 *)(r3 + 8)), and the
+// el9 verifier (Rocky 9.9, 5.14.0-741.22.1.el9_9) refuses that with
+// "dereference of modified ctx ptr R3 off=48 disallowed" - the whole
+// object then fails to load (task lb4). Linux 7.2 accepts either; the
+// helper call costs nothing measurable on a state change.
 static __always_inline void iormesh_read_ctx_tuple(struct tcp_state_event *ev,
                                                    struct trace_event_raw_inet_sock_set_state *ctx) {
     ev->family = ctx->family;
     ev->sport = ctx->sport;
     ev->dport = ctx->dport;
     if (ev->family == IORMESH_AF_INET6) {
-        __builtin_memcpy(ev->saddr, ctx->saddr_v6, TCP_ADDR_LEN);
-        __builtin_memcpy(ev->daddr, ctx->daddr_v6, TCP_ADDR_LEN);
+        bpf_probe_read_kernel(ev->saddr, TCP_ADDR_LEN, ctx->saddr_v6);
+        bpf_probe_read_kernel(ev->daddr, TCP_ADDR_LEN, ctx->daddr_v6);
         return;
     }
-    __builtin_memcpy(ev->saddr, ctx->saddr, 4);
-    __builtin_memcpy(ev->daddr, ctx->daddr, 4);
+    bpf_probe_read_kernel(ev->saddr, 4, ctx->saddr);
+    bpf_probe_read_kernel(ev->daddr, 4, ctx->daddr);
 }
 
 // handle_inet_sock_set_state reports a state change of a registered socket.
