@@ -456,11 +456,24 @@ truth.
     template as for `container_t` (MCS-constrained), plus only
     `bpf`, `perf_event`, read-only tracefs, and the Java attach
     to `container_t` processes (their `/proc` entries, one
-    signal, the attach socket). Run it at the pod's own MCS pair
-    (`-selinux-type iormesh_container_t -selinux-level
-    s0:cN,cM`): MCS then limits those `container_t` rules to the
-    pod's own app containers, and the pod's shared files keep
-    the pair; at `s0` the Java attach is denied. The rules and
+    signal, the attach socket). It grants no capability: six of
+    the tracer's seven (all but `KILL`) reach the type only
+    through container-selinux's `virt_sandbox_use_all_caps`
+    boolean, on by default — keep it on, or the BPF load fails on
+    `capability2 { bpf perfmon }`. Run it at the pod's own MCS
+    pair (`-selinux-type iormesh_container_t -selinux-level
+    s0:cN,cM`), and the pod's shared files keep the pair. MCS
+    then confines the signal, the `/proc` file and link reads and
+    directory search, and filesystem-socket writes to the pod's
+    own app containers (and any `container_t` at plain `s0`); at
+    `s0` the Java attach is denied. It does not confine the
+    attach socket's `connectto` (an abstract socket, bounded by
+    the pod's network namespace) or `/proc` `open`/`getattr`
+    (bounded by the tracer's PID namespace). Where owners pin one
+    pair per Deployment or namespace, shared by replicas, MCS
+    separates none of those pods and containment rests on the
+    namespaces. Stop its tracers before removing the RPM, or they
+    become `unlabeled_t`. The rules and
     the el9 run are in PLAN.md #13 and
     [testing.md](testing.md#dedicated-type-iormesh_container_t-task-7h4-2026-11-21)
     (task 7h4);

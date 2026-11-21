@@ -2582,7 +2582,12 @@ selinux-policy 38.1.86, k3s v1.35.10+k3s1. The RPM came from `mage
 selinuxRPM podman` on the laptop and was installed with `dnf`; its
 `%post` loaded the module at priority 400 beside the packaged
 `container` and `k3s` ones, and a `dnf remove` (its `%postun`)
-unloaded it again. Two harness variables run the acceptance with
+unloaded it again. (Since the policy review the spec installs and
+removes at priority 200, `semodule -X 200`, leaving 400 to local
+overrides; that RPM has not been installed on el9 yet.) The run
+relied on container-selinux's `virt_sandbox_use_all_caps` boolean,
+on by default, for the tracer's capabilities (PLAN.md #13); it was
+not turned off. Two harness variables run the acceptance with
 another type and level: `IORMESH_K8S_SELINUX_TYPE` and
 `IORMESH_K8S_SELINUX_LEVEL` (default `spc_t` and `s0`). They go
 into the registry's `k8s:` and the sidecar patch, the spec check

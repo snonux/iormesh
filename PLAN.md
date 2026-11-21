@@ -2887,8 +2887,11 @@ here only as placeholders.
   `iormesh_container_t`, shipped as the `iormesh-selinux` RPM
   (`packaging/selinux/`: `iormesh.te`, the spec, `mage
   selinuxRPM docker|podman` building on Rocky 9 in a container;
-  `%post` `semodule -i`, `%postun` `semodule -r` on erase;
-  requires container-selinux). `spc_t` stays the default; an
+  `%post` `semodule -X 200 -i`, `%postun` `semodule -X 200 -r`
+  on erase — priority 200, the distribution modules', so 400
+  stays free for local overrides; requires container-selinux;
+  stop every `iormesh_container_t` tracer before `dnf remove`,
+  or its processes become `unlabeled_t`). `spc_t` stays the default; an
   owner whose nodes accept the RPM deploys with
   `-selinux-type iormesh_container_t -selinux-level s0:cN,cM`
   (or the registry's `selinux_type`/`selinux_level`). The type
@@ -2914,12 +2917,28 @@ here only as placeholders.
   tracing passes and the agent never joins, with no AVC logged
   (container-selinux dontaudits a container domain searching
   another domain's `/proc/<pid>`). No wildcard, no permissive,
-  no MCS exemption: unit tests pin the rule text. MCS is why the
-  level must be the pod's pair: there the `container_t` rules
-  reach only the pod's own app containers (other pods run at
-  other pairs) and the pod's shared files keep the pair; at
-  `s0` the tracer can neither read the app's files through
-  `/proc/<pid>/root` nor its processes, so the Java attach is
+  no MCS exemption: unit tests pin the rule text. The module
+  grants no capability: six of the tracer's seven (all but
+  `KILL`) reach the type, as they reach `container_t`, only
+  through container-selinux's `virt_sandbox_use_all_caps`
+  boolean, on by default; with it off the BPF load fails on
+  `capability2 { bpf perfmon }`, so the boolean must stay on
+  (explicit capability rules are a follow-up for the next el9
+  window). MCS is why the level must be the pod's pair, but it
+  does not gate every rule: it gates the signal, the `file` and
+  `lnk_file` reads, `dir` search and read, and writes to
+  filesystem sockets, which at the pod's pair reach the pod's
+  own app containers and any `container_t` at plain `s0`, and
+  no pod at another pair; the pod's shared files keep the
+  pair. `unix_stream_socket connectto` is not MCS-constrained
+  (an abstract socket is bounded by the pod's network
+  namespace), nor are `file { open getattr }` and `dir
+  getattr` (bounded by what the tracer's PID namespace shows).
+  Where owners pin one pair per Deployment or namespace, shared
+  by its replicas, MCS separates none of those pods and
+  containment rests on the namespaces alone. At `s0` the tracer
+  can neither read the app's files through `/proc/<pid>/root`
+  nor signal or search its processes, so the Java attach is
   denied (BPF tracing still works; this follows from the MCS
   constraint and was not run). An MCS exemption
   (`mcs_constrained` left out, or `mcsreadall`) would make `s0`
