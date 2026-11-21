@@ -4,7 +4,8 @@
 // the single-TGID rodata PID_FILTER; the enter hooks flush the thread's
 // folded reads and writes first (iormesh_rw_flush, rwagg.c, M2 step 11);
 // filter() takes the pid and tid in the tracer's PID namespace (pidns.c, M7);
-// the target-set tests ask the target hint first (targethint.c, task 9f4).
+// the target-set tests ask the target hint first (targethint.c, task 9f4);
+// the restart fold's hooks are gone with restart.c (task pf4).
 
 //+build ignore
 
@@ -279,14 +280,8 @@ static __always_inline int ior_should_emit_trace(__u32 enter_trace_id) {
 // The rate is read again at sys_exit. Userspace writes the sampling map once
 // before the tracepoints are attached, so it cannot change between the two.
 
-// The restart fold's two entry points, defined in restart.c (which ior.bpf.c
-// includes after this file, because it uses ior_count_ringbuf_drop and the
-// restart codes above). The enter and exit hooks below call them.
-static __always_inline void ior_restart_on_enter(__u32 tid, __u64 now);
-static __always_inline int ior_restart_on_exit(__u32 tid, __s64 ret, int emits);
-
-// The read/write aggregation's flush (rwagg.c, included after this file for
-// the same reason). Every enter hook below calls it before anything else,
+// The read/write aggregation's flush (rwagg.c, included after this file
+// because it uses ior_count_ringbuf_drop). Every enter hook below calls it before anything else,
 // except ior_on_rw_syscall_enter, the hook of the folded kinds themselves:
 // a syscall that is not a folded read or write is a flush point, so the
 // thread's folded calls reach the stream ahead of its record.
@@ -309,14 +304,6 @@ static __always_inline int ior_stateless_exit_emits(__u32 enter_trace_id) {
 // syscall costs two clock helper calls (one per side) instead of four, and the
 // kernel-side duration (syscall_aggregate_map) and the userspace duration
 // (exit ev->time - enter ev->time) are derived from the same two instants.
-// A third user depends on it: the restart fold's RESUME record is stamped with
-// the enter handler's `now` (ior_restart_on_enter below) and userspace matches
-// it to the enter record by that time alone, so an enter handler that stamped
-// ev->time from a second clock read would silently end every restart fold,
-// that of a re-executed call (-512/-513/-514) and that of a -516 call resumed
-// through restart_syscall alike (restart.c, "RESUME names its enter by
-// time").
-//
 // Enter state is elided for most syscalls at rate 1 (task 2s2). The hash
 // update here and the lookup + delete in ior_on_syscall_exit were the bulk of
 // the ~280 ns a traced syscall cost (a bs=1 dd ran 2.6x slower): taking the
@@ -370,19 +357,12 @@ static __always_inline int ior_on_syscall_enter_impl(__u32 tid, __u32 enter_trac
 // ior_on_syscall_enter is the enter hook of every syscall whose handler never
 // stashes a pending filename; at rate 1 it writes no enter state.
 //
-// Both enter hooks first let the restart fold look at the enter
-// (ior_restart_on_enter, restart.c): the first enter of a task whose
-// interrupted call the kernel continues - the call's re-execution, or after
-// -516 its restart_syscall - is announced by a control record that has to
-// precede the enter's own record. It goes out before the sampling decision,
-// so the enter it announces may be sampled out; the record carries `now` so
-// that userspace can tell (restart.c). The noreturn hook below does not
-// consult the restart fold: exit and exit_group are never the continuation
-// of an interrupted call, and rt_sigreturn is the restart fold's own
-// business (handle_restart_sigreturn).
+// ior's enter hooks also fed its restart fold here (ior_restart_on_enter,
+// ior internal/c/restart.c); iormesh does not lift the fold (task pf4,
+// docs/implementation.md, M1 step 6): a call a signal interrupted and the
+// kernel re-executed stays two rows, the first with its restart code.
 static __always_inline int ior_on_syscall_enter(__u32 tid, __u32 enter_trace_id, __u64 now) {
     iormesh_rw_flush(tid);
-    ior_restart_on_enter(tid, now);
     return ior_on_syscall_enter_impl(tid, enter_trace_id, now, 0);
 }
 
@@ -390,7 +370,6 @@ static __always_inline int ior_on_syscall_enter(__u32 tid, __u32 enter_trace_id,
 // write; rwagg.c): no flush, since the call may continue the thread's hot
 // loop; iormesh_rw_on_enter, which the generated handler calls next, decides.
 static __always_inline int ior_on_rw_syscall_enter(__u32 tid, __u32 enter_trace_id, __u64 now) {
-    ior_restart_on_enter(tid, now);
     return ior_on_syscall_enter_impl(tid, enter_trace_id, now, 0);
 }
 
@@ -402,7 +381,6 @@ static __always_inline int ior_on_rw_syscall_enter(__u32 tid, __u32 enter_trace_
 // rate, since a stash needs the entry.
 static __always_inline int ior_on_syscall_enter_stateful(__u32 tid, __u32 enter_trace_id, __u64 now) {
     iormesh_rw_flush(tid);
-    ior_restart_on_enter(tid, now);
     return ior_on_syscall_enter_impl(tid, enter_trace_id, now, 1);
 }
 
@@ -534,14 +512,8 @@ static __always_inline int ior_on_syscall_exit_impl(__u32 tid, __u32 enter_trace
 
 // ior_on_syscall_exit is the exit hook of every handler that recovers no
 // pending filename.
-//
-// All four exit hooks pass the verdict through ior_restart_on_exit
-// (restart.c), which notes an emitted exit that carries a restart code the
-// kernel may answer by continuing the call - re-executing it, or after -516
-// resuming it through restart_syscall; for any other return value it costs
-// one range check.
 static __always_inline int ior_on_syscall_exit(__u32 tid, __u32 enter_trace_id, __s64 ret, __u64 now) {
-    return ior_restart_on_exit(tid, ret, ior_on_syscall_exit_impl(tid, enter_trace_id, ret, now, 0, 0, 0));
+    return ior_on_syscall_exit_impl(tid, enter_trace_id, ret, now, 0, 0, 0);
 }
 
 // ior_on_syscall_exit_take_filename is the exit hook of the path-capturing
@@ -550,8 +522,7 @@ static __always_inline int ior_on_syscall_exit(__u32 tid, __u32 enter_trace_id, 
 // ior_stash_pending_filename), or 0 when there is none to use.
 static __always_inline int ior_on_syscall_exit_take_filename(__u32 tid, __u32 enter_trace_id, __s64 ret, __u64 now,
                                                              __u64 *pending_filename) {
-    return ior_restart_on_exit(tid, ret,
-                               ior_on_syscall_exit_impl(tid, enter_trace_id, ret, now, pending_filename, 0, 0));
+    return ior_on_syscall_exit_impl(tid, enter_trace_id, ret, now, pending_filename, 0, 0);
 }
 
 // ior_on_syscall_exit_take_filenames is the same for the two-path kinds
@@ -561,9 +532,7 @@ static __always_inline int ior_on_syscall_exit_take_filename(__u32 tid, __u32 en
 // looks at the verdict.
 static __always_inline int ior_on_syscall_exit_take_filenames(__u32 tid, __u32 enter_trace_id, __s64 ret, __u64 now,
                                                               __u64 *pending_filename, __u64 *pending_filename2) {
-    return ior_restart_on_exit(tid, ret,
-                               ior_on_syscall_exit_impl(tid, enter_trace_id, ret, now, pending_filename,
-                                                        pending_filename2, 0));
+    return ior_on_syscall_exit_impl(tid, enter_trace_id, ret, now, pending_filename, pending_filename2, 0);
 }
 
 // ior_on_syscall_exit_take_handle is the exit hook of name_to_handle_at
@@ -576,9 +545,7 @@ static __always_inline int ior_on_syscall_exit_take_filenames(__u32 tid, __u32 e
 static __always_inline int ior_on_syscall_exit_take_handle(__u32 tid, __u32 enter_trace_id, __s64 ret, __u64 now,
                                                            __u64 *pending_filename, __u64 *pending_handle,
                                                            __u64 *enter_ns) {
-    return ior_restart_on_exit(tid, ret,
-                               ior_on_syscall_exit_impl(tid, enter_trace_id, ret, now, pending_filename,
-                                                        pending_handle, enter_ns));
+    return ior_on_syscall_exit_impl(tid, enter_trace_id, ret, now, pending_filename, pending_handle, enter_ns);
 }
 
 // ior_on_exec_tid_change carries an in-flight execve's enter state across the

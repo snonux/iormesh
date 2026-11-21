@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -216,6 +217,68 @@ func TestDefaultProbeProgramsExist(t *testing.T) {
 		if !def.Match(src) {
 			t.Errorf("program %s not defined in internal/c", p.Program)
 		}
+	}
+}
+
+// handWrittenProgramRE finds a program definition in a hand-written BPF
+// source: its SEC line, any comment lines, then "int <name>(".
+var handWrittenProgramRE = regexp.MustCompile(`SEC\("[^"]+"\)\n(?:\s*//[^\n]*\n)*int\s+(\w+)\(`)
+
+// TestEveryHandWrittenProgramIsAttached: every program the hand-written BPF
+// sources define is one the Go side attaches somewhere - a probe of some
+// family, a dispatcher, the PID-namespace pick of the task_newtask program
+// or the Java mark's uprobes. restart.c defined two programs no Go code
+// attached, so the state they were to keep was never kept (task pf4). The
+// generated handlers are left out: they cover the whole syscall table, and
+// only the families pick which run.
+//
+// notYetDecided lists the programs known to share the defect, each with the
+// task that decides it; an entry is no licence to add one.
+func TestEveryHandWrittenProgramIsAttached(t *testing.T) {
+	notYetDecided := map[string]string{
+		// exec.c's task_rename record has no consumer either (task 0g4).
+		"handle_task_rename": "0g4",
+	}
+	attached := map[string]bool{newtaskProg: true, newtaskNSProg: true,
+		javaMarkEnterProg: true, javaMarkExitProg: true}
+	for _, p := range append(ProbesFor(tracepoints.AllFamilies()), dispatchers...) {
+		attached[p.Program] = true
+	}
+	files, err := filepath.Glob("../c/*.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := 0
+	for _, f := range files {
+		if filepath.Base(f) == "generated_tracepoints.c" {
+			continue
+		}
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range handWrittenProgramRE.FindAllSubmatch(src, -1) {
+			found++
+			name := string(m[1])
+			switch task, known := notYetDecided[name]; {
+			case attached[name] && known:
+				t.Errorf("%s is attached now: drop it from notYetDecided (task %s)", name, task)
+			case !attached[name] && !known:
+				t.Errorf("%s defines program %s, which no Go code attaches", filepath.Base(f), name)
+			}
+		}
+	}
+	// The pattern's own check: it must find at least every hand-written
+	// program the Go side names (all but the generated handle_sys_* ones).
+	handWritten := 0
+	for name := range attached {
+		if !strings.HasPrefix(name, "handle_sys_") {
+			handWritten++
+		}
+	}
+	if found < handWritten {
+		t.Errorf("found %d program definitions in internal/c, fewer than the %d hand-written ones attached: "+
+			"the pattern misses some", found, handWritten)
 	}
 }
 

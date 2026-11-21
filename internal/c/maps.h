@@ -3,7 +3,8 @@
 // struct iormesh_target values for tree following and pattern sessions (M2);
 // rw_agg_map, rw_agg_stop and struct iormesh_rw_state added (rwagg.c, M2
 // step 11); stack_map added (stack.c, M2 step 9); java_mark_map and struct
-// iormesh_java_mark added (javamark.c, task td4).
+// iormesh_java_mark added (javamark.c, task td4); restart_pending_map
+// removed with restart.c (task pf4).
 
 //+build ignore
 
@@ -181,32 +182,6 @@ struct {
     __type(key, __u32);
     __type(value, __u64);
 } ringbuf_drop_map SEC(".maps");
-
-// restart_pending_map remembers, per task, that its last traced syscall exit
-// carried a restart code the kernel may answer by carrying the call on - by
-// re-executing it (-512/-513/-514) or through restart_syscall (-516) - until
-// the signal path has decided (restart.c, tasks 103 and t13).
-//
-// It is a direct-mapped ARRAY indexed by the low bits of the tid, each slot
-// one __u64 word holding the owning tid and its state (ior_restart_entry in
-// restart.c), not a HASH keyed by tid: every traced syscall enter has to ask
-// "does this task have a pending restart?", and an array lookup is inlined by
-// the verifier where a hash lookup is a helper call (the cost task 2s2 took
-// out of this path). The price is that two tasks whose tids collide share a
-// slot: the later interrupted exit evicts the earlier one, whose call is then
-// simply not folded. One word per slot makes every update a single store, so
-// a slot never mixes one task's tid with another task's state.
-//
-// Userspace writes it too: it stores 0 in every slot whenever a syscall's
-// probes are attached or detached at runtime, because an entry cannot tell
-// that its continuation ran while the tracepoints were off (task o03,
-// "Runtime probe changes" in restart.c; internal/restart_pending_map.go).
-struct {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, 4096);
-    __type(key, __u32);
-    __type(value, __u64);
-} restart_pending_map SEC(".maps");
 
 // struct iormesh_rw_slot is one aggregation key of a thread: the read or
 // write calls (trace_id, the enter id; 0 marks a free slot) on one fd

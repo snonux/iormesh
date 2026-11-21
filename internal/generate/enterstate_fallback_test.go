@@ -1,6 +1,7 @@
 // Adapted from ior internal/generate/enterstate_fallback_test.go @ b21afc50328c.
 // Changes: the harness stubs iormesh_rw_flush (rwagg.c, M2 step 11), which
-// the enter hooks call; rwagg_harness_test.go drives the real one.
+// the enter hooks call; rwagg_harness_test.go drives the real one. The
+// restart fold's stand-ins are gone with restart.c (task pf4).
 
 package generate
 
@@ -144,20 +145,6 @@ static long bpf_map_delete_elem(void *map, const void *key) {
 
 static __u32 bpf_get_prandom_u32(void) {
     return sim_rand;
-}
-
-/* The restart fold's two hook entry points (restart.c) are not part of the
- * accounting: they are identity stand-ins here, and restart_harness_test.go
- * drives the real ones. */
-static inline void ior_restart_on_enter(__u32 tid, __u64 now) {
-    (void)tid;
-    (void)now;
-}
-
-static inline int ior_restart_on_exit(__u32 tid, __s64 ret, int emits) {
-    (void)tid;
-    (void)ret;
-    return emits;
 }
 
 /* The read/write aggregation's flush (rwagg.c), which every enter hook calls

@@ -9,7 +9,8 @@
 // task td4); pids and tids in the tracer's PID namespace (pidns.c, M7);
 // target_map's kernel inserts and removals keep the target hint
 // (targethint.c, task 9f4); ior_exit_group_dead's verification note names
-// the root test that runs both of its paths (task nf4).
+// the root test that runs both of its paths (task nf4); the restart fold's
+// ior_restart_forget is gone with restart.c (task pf4).
 
 //+build ignore
 
@@ -603,10 +604,6 @@ int handle_sched_process_exit(void *ctx) {
     // per-tid map (pidns.c, M7); 0 for a task outside it, which has no state.
     __u64 ids = iormesh_current_pid_tgid();
 
-    // Before the scope check: a task that dies with an interrupted call
-    // pending (killed while stopped, say) never reaches the enter that would
-    // clear it, and its tid may be recycled (restart.c).
-    ior_restart_forget((__u32)ids);
     // The thread's folded reads and writes, ahead of its exit record; the
     // entry dies with the thread. One lookup for an untraced thread.
     iormesh_rw_forget((__u32)ids);

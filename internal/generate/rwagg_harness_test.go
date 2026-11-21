@@ -14,10 +14,10 @@ import (
 // #25) decides which calls of a hot loop are folded and when the folded
 // sums reach the ring buffer. A wrong decision either loses calls, sends
 // them twice, or puts them out of their thread's order, and none of that
-// shows on a short integration scenario. As with the restart fold
-// (restart_harness_test.go), the real rwagg.c is compiled with the host C
-// compiler against a simulated map and ring buffer and driven through the
-// call sequences that matter; each scenario is also run against mutated
+// shows on a short integration scenario. As in ior's restart-fold
+// harness, the real rwagg.c is compiled with the host C compiler against a
+// simulated map and ring buffer and driven through the call sequences that
+// matter; each scenario is also run against mutated
 // sources, so the suite is shown to catch the regressions it exists for.
 
 // rwaggHarnessTemplate simulates what rwagg.c uses of BPF: rw_agg_map as a

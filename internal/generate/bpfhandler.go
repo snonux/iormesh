@@ -4,7 +4,8 @@
 // calls the stack.c hook (renderStackHook, M2 step 9) and the javamark.c hook
 // (renderJavaMarkHook, task td4); the seven TCP data calls call the tcpseq.c
 // hooks (renderTCPSeqHook, task xe4); handlers read their context as the
-// raw_syscalls record they are tail-called with (handlerCtxStruct, task lb4).
+// raw_syscalls record they are tail-called with (handlerCtxStruct, task lb4);
+// renderSyscallHook's comment no longer cites restart.c (task pf4).
 
 package generate
 
@@ -252,9 +253,8 @@ func renderHandlerPrologue(b *strings.Builder, h handlerSpec) {
 // The handler reads the clock exactly once (clockReadLine) and hands that
 // value to the hook and to ev->time, instead of the hook and the body each
 // calling bpf_ktime_get_boot_ns(). The hook's duration and the pair's ev->time
-// delta are then the same two instants, and the RESUME record the enter hook
-// may emit for a kernel-re-executed call (internal/c/restart.c) carries
-// exactly the enter record's time, which is how userspace matches the two.
+// delta are then the same two instants. (In ior the restart fold's RESUME
+// record also carries that time; iormesh does not lift the fold, task pf4.)
 func renderSyscallHook(b *strings.Builder, h handlerSpec) {
 	switch {
 	case h.ringFds != nil:

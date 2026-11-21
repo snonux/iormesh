@@ -9,8 +9,8 @@
 // the call that queued it - kill(2), tgkill(2), a child's exit (SIGCHLD), a
 // fault - so the current task is the sender of every task-sent signal, and
 // one record names both ends. A kernel-raised one (its siginfo says so) has
-// no sender: the current task merely ran when it fired. signal_deliver (restart.c) fires in the
-// receiver only and says nothing about who sent it.
+// no sender: the current task merely ran when it fired. signal_deliver fires
+// in the receiver only and says nothing about who sent it.
 //
 // Why a raw tracepoint: the classic tracepoint names the target by its
 // thread id only, and a tgkill's target thread is not in target_map (which

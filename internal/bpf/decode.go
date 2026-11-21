@@ -114,6 +114,8 @@ func addControlDecoders(d map[types.EventType]decoder) {
 	d[types.PROCESS_EXIT_EVENT] = typed(types.NewProcessExitEventFast)
 	d[types.TASK_NEWTASK_EVENT] = typed(types.NewTaskNewtaskEventFast)
 	d[types.TASK_RENAME_EVENT] = typed(types.NewTaskRenameEventFast)
+	// No iormesh program emits it: ior's restart fold was not lifted
+	// (task pf4). The entry stays so the table matches ior's.
 	d[types.SYSCALL_RESTART_EVENT] = typed(types.NewSyscallRestartEventFast)
 	d[types.OPEN_NAME_FIXUP_EVENT] = typed(types.NewOpenNameFixupEventFast)
 	d[types.FILE_HANDLE_EVENT] = typed(types.NewFileHandleEventFast)

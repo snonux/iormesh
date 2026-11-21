@@ -531,8 +531,9 @@ changes in a provenance header):
 - `internal/c/`: every hand-written file but ior's raw-tracepoint
   prototype `rawsyscall.c` — not just
   `maps.h`/`types.h`/`filter.c`/`fdname.c`/`fileident.c`, because
-  the generated handlers call helpers from all of them (restart,
-  exec, recv, poll, handle, iouring). `ior.bpf.c` became
+  the generated handlers call helpers from all of them (exec,
+  recv, poll, handle, iouring; ior's `restart.c` came along too
+  and was removed by task pf4, see step 6). `ior.bpf.c` became
   `iormesh.bpf.c`. The C macros keep ior's `IOR_` prefix so ior
   fixes port without renaming.
 - `internal/bpfembed.go` (override `IORMESH_BPF_OBJECT`,
@@ -771,9 +772,15 @@ unit-tested with synthetic record streams:
 - **Pairing**: an enter waits per tid for its exit (a thread runs
   one syscall at a time); an exit without the matching enter
   (lost to a drop) emits nothing and is counted (`Unpaired`).
-  ior's restart handling is not lifted: M1 attaches no restart
-  probes (`SYSCALL_RESTART_EVENT`), so it lands with M2's signal
-  work.
+  ior's restart fold is not lifted (PLAN.md decision #7): a call
+  a signal interrupted and the kernel re-executed stays two
+  rows. M2's signal work did not take it either. The copied
+  kernel half (`restart.c`, `restart_pending_map`, the enter and
+  exit hooks) ran without its two signal probes, which were
+  never attached, so it miscounted handler depth and emitted
+  `SYSCALL_RESTART_EVENT` records that nothing read. Task pf4
+  removed it. The record type stays in `types.h`, so the
+  generated types and decoder table still match ior's.
 - **fd generations**: an open or accept exit with `ret >= 0`
   creates a new instance (`gen = last + 1`); `close` removes it
   (except on `EBADF`). M1 does not trace `socket`, `dup` or

@@ -8,7 +8,8 @@
 // EXEC_ARGV_EVENT, PROCESS_ARGV_EVENT and struct exec_argv_event added
 // (exec.c, M2); JAVA_MARK_EVENT and struct java_mark_event added
 // (javamark.c, task td4); TCP_SEQ_EVENT and struct tcp_seq_event added
-// (tcpseq.c, task xe4).
+// (tcpseq.c, task xe4); SYSCALL_RESTART_EVENT's comments say no program
+// emits it (task pf4).
 
 //+build ignore
 
@@ -84,8 +85,9 @@
 #define TASK_NEWTASK_EVENT 62
 // Control record of the hand-written task:task_rename handler (exec.c).
 #define TASK_RENAME_EVENT 63
-// Control record of the restart-fold probes (restart.c): what the kernel does
-// with a call a signal interrupted.
+// Control record of ior's restart-fold probes (ior internal/c/restart.c):
+// what the kernel does with a call a signal interrupted. iormesh does not
+// lift the fold; no program emits it (task pf4).
 #define SYSCALL_RESTART_EVENT 64
 // Control record carrying the file handle a successful name_to_handle_at
 // returned (ior_emit_file_handle, handle.c).
@@ -954,9 +956,11 @@ struct task_rename_event {
 #define RESTART_PHASE_HANDLER 1
 #define RESTART_PHASE_RESUME 2
 
-// syscall_restart_event is a control record, not a syscall event: restart.c
-// emits it for a task whose last traced syscall exit carried -ERESTARTSYS,
-// -ERESTARTNOINTR, -ERESTARTNOHAND or -ERESTART_RESTARTBLOCK
+// syscall_restart_event is kept from ior so the generated types and the
+// decoder tables stay ior's, but no iormesh program emits it: the restart
+// fold was not lifted (task pf4, docs/implementation.md, M1 step 6). In ior
+// it is a control record, not a syscall event: restart.c emits it for a
+// task whose last traced syscall exit carried -ERESTARTSYS, -ERESTARTNOINTR, -ERESTARTNOHAND or -ERESTART_RESTARTBLOCK
 // (-512/-513/-514/-516), so userspace can fold the interrupted row and the
 // kernel's continuation of the call - its re-execution, or for -516 its
 // restart_syscall - into one row (tasks 103 and t13,
