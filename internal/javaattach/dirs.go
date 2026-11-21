@@ -33,20 +33,39 @@ func (a Attacher) openDirs(pid uint32) (jvmDirs, error) {
 	if fd, err := unix.Open(procPath(a.ProcRoot, pid, "cwd"), dirFlags, 0); err == nil {
 		d.cwd = fd
 	}
-	root, err := unix.Open(procPath(a.ProcRoot, pid, "root"), dirFlags, 0)
+	root, err := a.openRoot(pid)
 	if err != nil {
 		d.close()
-		return d, fmt.Errorf("JVM root: %w", err)
+		return d, err
 	}
 	defer func() { _ = unix.Close(root) }()
-	d.tmp, err = unix.Openat2(root, "tmp", &unix.OpenHow{Flags: dirFlags,
-		Resolve: unix.RESOLVE_IN_ROOT | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_SYMLINKS})
-	if err != nil {
-		d.tmp = -1
+	if d.tmp, err = openTmp(root); err != nil {
 		d.close()
-		return d, fmt.Errorf("the JVM's /tmp (a symlink is refused): %w", err)
+		return d, err
 	}
 	return d, nil
+}
+
+// openRoot opens pid's root directory (the magic link followed on
+// purpose: it names the JVM's root, in its own mount namespace).
+func (a Attacher) openRoot(pid uint32) (int, error) {
+	root, err := unix.Open(procPath(a.ProcRoot, pid, "root"), dirFlags, 0)
+	if err != nil {
+		return -1, fmt.Errorf("JVM root: %w", err)
+	}
+	return root, nil
+}
+
+// openTmp opens the /tmp of the root fd with RESOLVE_IN_ROOT and no
+// symlinks at all, as an O_PATH fd. It is also the stage's parent
+// (stage.go).
+func openTmp(root int) (int, error) {
+	tmp, err := unix.Openat2(root, "tmp", &unix.OpenHow{Flags: dirFlags,
+		Resolve: unix.RESOLVE_IN_ROOT | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_SYMLINKS})
+	if err != nil {
+		return -1, fmt.Errorf("the JVM's /tmp (a symlink is refused): %w", err)
+	}
+	return tmp, nil
 }
 
 func (d jvmDirs) close() {

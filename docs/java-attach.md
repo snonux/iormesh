@@ -94,11 +94,22 @@ the JVM's own socket: the tracer still listens on nothing.
   changeable by nobody but root (see "Safety"); the spool (mode
   1733) is writable by all.
 - **Containers.** Paths are resolved inside the JVM's mount
-  namespace: the jar and the spool must exist there under the
-  same names. Attaching into containers is M7's (decision #14,
-  provisional): the tracer will stage both inside the JVM's root
-  and needs `SYS_PTRACE`, `DAC_OVERRIDE`, `KILL` and
-  `CHECKPOINT_RESTORE` there ([security.md](security.md)
+  namespace. For a JVM in another one (an app container beside
+  an in-pod tracer, decision #14, provisional), `run -agent`
+  stages a copy of the jar and a spool inside the JVM's root:
+  `/tmp/iormesh-<random>/` (root's, 0755) holding
+  `iormesh-agent.jar` and `spool/` (1733), created through
+  descriptors opened from `/proc/<pid>/root`, refused when the
+  JVM's `/` or `/tmp` could be swapped by another user (not
+  root's or the JVM user's, or writable by others without the
+  sticky bit), read through its held descriptor and removed
+  when the session ends. A JVM without a writable, trusted
+  `/tmp` gets no Java attribution and a note naming
+  `-javaagent`. `iormesh attach` stages nothing — its spool
+  belongs to a separate `run` — so for it the jar and spool must
+  exist in the JVM's namespace under the same names. In a pod
+  the tracer needs `SYS_PTRACE`, `DAC_OVERRIDE`, `KILL` and
+  `CHECKPOINT_RESTORE` ([security.md](security.md)
   "Kubernetes").
 
 ## Safety

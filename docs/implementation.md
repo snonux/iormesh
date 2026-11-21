@@ -5065,18 +5065,54 @@ depends on:
 3. **Java staging inside the JVM's root** (#14). The jar and
    spool paths are resolved in the JVM's mount namespace, and an
    ephemeral container cannot give the app container a volume.
-   For a JVM in another mount namespace (`sameMountNS` false),
-   `attach` and `run -agent` create a root-owned 0755 directory
-   under the JVM's `/tmp` through the `RESOLVE_IN_ROOT` fd
-   `internal/javaattach` already holds — `mkdirat`, refusing an
-   existing entry (the JVM's user may have planted it) — copy
-   the jar in with `O_EXCL|O_NOFOLLOW` (the trust rule still
-   holds: `/tmp` is sticky), make the spool beside it 1733, pass
-   those paths, and let `internal/agentspool` open the ring
-   through `/proc/<pid>/root` with its existing checks. The
-   session removes the directory when it ends. A JVM without a
-   writable `/tmp` gets no Java attribution and a note naming
-   `-javaagent`.
+   Built by task cf4 (`internal/javaattach/stage.go`,
+   `internal/cli/stage.go`). For a JVM in another mount
+   namespace (`sameMountNS` false), `run -agent` stages before
+   the load (`javaattach.Attacher.Stage`):
+   - a process that maps no `libjvm.so` gets `ErrNotJVM` and
+     nothing is created;
+   - the JVM's root is opened through `/proc/<pid>/root`, its
+     `/tmp` with `openat2`'s `RESOLVE_IN_ROOT` and no symlinks
+     (the fd discipline of the handshake, `openTmp`);
+   - the jar's trust rule is applied inside that root: `/` and
+     `/tmp` must be root's or the JVM user's and not writable
+     by group or others unless sticky, or another user could
+     rename the stage away and put their own jar at the path
+     the JVM loads (`ErrUntrustedTmp`);
+   - `mkdirat` of `iormesh-<16 hex>` (crypto/rand), 0700 first;
+     a name already taken (the JVM's user may have planted it)
+     is never adopted — the next fresh name is tried, eight in
+     all; then the directory is opened `O_NOFOLLOW`, checked to
+     be the tracer's, and `fchmod`ed to 0755;
+   - the jar (the tracer's trusted copy) is copied in with
+     `O_CREAT|O_EXCL|O_NOFOLLOW`, then 0644;
+   - `agentspool.MakeSpoolAt` makes `spool` beside it, again
+     exclusively, with MakeSpool's owner check and an exact
+     1733 by `fchmod`, and returns it open.
+   The load gets `/tmp/<name>/iormesh-agent.jar` and
+   `spool=/tmp/<name>/spool`; the Java join scans the spool as
+   `/proc/self/fd/<n>` beside `-spool` (an `agentspool.Dir` per
+   stage, with Dir's ring checks unchanged), so nothing in the
+   JVM's tree is resolved by name again. JVMs of one mount
+   namespace and user share a stage. The session removes every
+   stage when it ends, through the held fds — rings, stray
+   entries (unlinked, never followed), spool, jar, directory; a
+   JVM still running keeps writing into its unlinked ring. A JVM
+   whose `/tmp` is missing, read-only or untrusted gets no Java
+   attribution and a note naming `-javaagent`. `iormesh attach`
+   stages nothing: its spool belongs to a separate `run`, which
+   would never read a stage it made, so a JVM in another mount
+   namespace must see attach's paths as they are. Tests:
+   `internal/javaattach/stage_test.go` (a hostile fake root:
+   planted names as a directory, a symlink to the host's tree and
+   a file; `/tmp` a symlink, missing, read-only, not sticky,
+   group-writable or a third user's; `/` world-writable; a
+   planted jar file or symlink; removal past a planted symlink),
+   `agentspool` `TestMakeSpoolAt`, `internal/cli/stage_test.go`
+   (who stages, sharing by key, notes, removal at close), and
+   `TestJavaAttachMountNS` in `mage integrationTest` (each
+   http-plain JVM in its own mount namespace with a private
+   tmpfs `/tmp`).
 4. **Java mark without `CAP_CHECKPOINT_RESTORE`** (optional,
    #13). `openJavaLibs` opens mapped libraries through
    `/proc/<pid>/map_files`, which needs the capability. Open

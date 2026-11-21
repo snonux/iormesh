@@ -4,7 +4,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -171,5 +173,51 @@ func TestMakeSpool(t *testing.T) {
 	}
 	if _, _, err := NewDir(filepath.Join(t.TempDir(), "missing")).Scan(); err == nil {
 		t.Error("missing directory scanned")
+	}
+}
+
+// TestMakeSpoolAt: the staged spool (decision #14) is created with the
+// spool mode, past the umask, and returned open — a Dir reads it through
+// /proc/self/fd; anything already in its place (a directory, a symlink to
+// another directory, a file) is refused untouched, never adopted.
+func TestMakeSpoolAt(t *testing.T) {
+	parent := t.TempDir()
+	pfd, err := syscall.Open(parent, syscall.O_RDONLY|syscall.O_DIRECTORY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = syscall.Close(pfd) }()
+	old := syscall.Umask(0o077)
+	fd, err := MakeSpoolAt(pfd, "spool")
+	syscall.Umask(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = syscall.Close(fd) }()
+	st, err := os.Stat(filepath.Join(parent, "spool"))
+	if err != nil || st.Mode()&(os.ModePerm|os.ModeSticky) != SpoolMode {
+		t.Fatalf("mode %v, %v", st.Mode(), err)
+	}
+	if _, _, err := NewDir("/proc/self/fd/" + strconv.Itoa(fd)).Scan(); err != nil {
+		t.Errorf("scan through the descriptor: %v", err)
+	}
+	other := t.TempDir()
+	if err := os.Symlink(other, filepath.Join(parent, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "file"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(parent, "dir"), 0o777); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"spool", "link", "file", "dir"} {
+		if fd, err := MakeSpoolAt(pfd, name); !errors.Is(err, syscall.EEXIST) {
+			_ = syscall.Close(fd)
+			t.Errorf("%s: %v, want EEXIST", name, err)
+		}
+	}
+	if st, err := os.Stat(other); err != nil || st.Mode()&os.ModeSticky != 0 {
+		t.Errorf("the symlink's target was chmodded: %v, %v", st.Mode(), err)
 	}
 }

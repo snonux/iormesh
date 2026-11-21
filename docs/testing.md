@@ -304,6 +304,7 @@ the tests need root like the rest of the suite.
 |---|---|
 | `TestJavaLiveAttach` | live-attach under `run -spool`: between the halves `iormesh attach` loads the agent, the test waits for the tracer's `java agent of pid N joined` line and opens the gate; the golden holds (first half none, second half and sweep java); no event of the JVM that ended before the attach began is attributed, and there are such events; JEP 451's warning on the JVM's stderr; mutated goldens fail |
 | `TestJavaLiveAttachAtStart` | `run -agent` on a gated method-flow JVM: the tracer reports the load and the method-flow golden holds as under `-javaagent`; the JVM printed the warning |
+| `TestJavaAttachMountNS` | `run -agent` on http-plain's pair, each JVM in its own mount namespace with a private tmpfs `/tmp` (`unshare --mount`, `Harness.JVMWrap`; task cf4, decision #14): the tracer stages the jar and spool inside each JVM's root; both loads reported, two rings read, every request on its connection, the client's `http` events carry their host, the http-plain golden holds; no ring in the tracer's own spool, and no `iormesh-*` stage left in either JVM's `/tmp` (held open past the JVM's exit) |
 | `TestJavaAttachDynamicLoading` | no tracer, per JDK (the `java` on PATH plus each JAVA_HOME in `IORMESH_ATTACH_JDKS`): a default JVM loads and warns, `-XX:+EnableDynamicAgentLoading` loads silently, `-XX:-EnableDynamicAgentLoading` refuses with `dynamic agent loading is disabled` and no ring, the JVM finishing cleanly every time; and a root attacher loads into a JVM running as nobody, whose ring is then nobody's |
 
 `internal/javaattach` unit-tests the handshake against a fake
@@ -317,7 +318,13 @@ non-socket, and both timeouts; and the confused-deputy cases
 user's: used and left alone; a planted symlink: refused
 unsignalled). `internal/cli` checks the agent-jar trust rule
 (`TestTrustedAgent`). The integration tests copy the jar into a
-root-owned directory for it.
+root-owned directory for it. The staging inside a JVM's root
+(task cf4) is unit-tested against a hostile fake root
+(`internal/javaattach/stage_test.go`: planted stage names, a
+symlinked, missing, read-only, non-sticky, group-writable or
+foreign `/tmp`, a world-writable `/`, a planted jar, removal
+past a planted symlink), with `TestMakeSpoolAt` in
+`internal/agentspool` and `internal/cli/stage_test.go`.
 
 ### M4 microservices scenario (task jb4)
 
@@ -1368,17 +1375,17 @@ discover`, `build -registry`.
 `TestKindClusterIP` is the `clusterip` row alone, in a namespace
 of its own, under nftables.
 
-Test-only workaround: the Java agent cannot reach a JVM in
-another container yet — M7 step 3 (#14's staging inside the
-JVM's root) is not built, and `-spool` in the scratch image fails
-(`mkdir /tmp/iormesh-spool: no such file or directory`). The
-gateway's app container mounts the trace emptyDir at the
-tracer's path and the workload image carries the agent jar at
-the tracer's path, so the spool and jar paths mean the same file
-on both sides (task cf4 builds the real staging). The gateway
-starts behind the workload's startup gate, so the debug tracer
-finds the JVM at start and live-loads the agent before the
-bracket.
+The gateway's tracer runs `-agent` with the tracer image's jar
+and its spool on the tracer's emptyDir; the app container sees
+neither, so the tracer stages both inside the JVM's root (M7
+step 3, decision #14, task cf4). Until cf4 the run below used a
+test-only workaround — the app container mounted the trace
+emptyDir and the workload image carried the jar at the tracer's
+paths — which is now gone from `testdata/workloads.yaml` and
+`kind-workload.Containerfile`; the re-run without it is pending.
+The gateway starts behind the workload's startup gate, so the
+debug tracer finds the JVM at start and live-loads the agent
+before the bracket.
 
 Run on 2026-11-21 (kind 0.31.0, Kubernetes 1.35.0, containerd
 2.2.0, Docker 29.9.2, Fedora kernel 7.2.15, one node):
@@ -1425,7 +1432,7 @@ context was checked against the default registry and refused
 right after a rollout and deploy failed on it (`Select` skips
 `deletionTimestamp`; `TestSelectArgvAndFilter`); kubectl 1.30's
 gate (`TestDebugArgv`). Follow-ups: cf4 (agent staging in the
-JVM's root), df4 (debug deploy without a byte cap: the 90 %
+JVM's root; built, kind re-run pending), df4 (debug deploy without a byte cap: the 90 %
 `-disk-limit` stops every debug tracer on a node fuller than
 that, so the test passes `-disk-limit=0 -disk-max-bytes=1536MiB`),
 ef4 (deploy returns before the tracer is attached; the test waits

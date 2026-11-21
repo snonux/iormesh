@@ -109,18 +109,18 @@ func TestLoadAgentChecksRing(t *testing.T) {
 	useLoader(t, nil)
 	agent, spool := agentFiles(t)
 	l := &fakeLoader{errs: map[uint32]error{30: javaattach.ErrDynamicLoadingDisabled}}
-	note, err := loadAgent(context.Background(), l, 10, agent, spool)
+	note, err := loadAgent(context.Background(), l, 10, agentTarget{agent, spool, spool})
 	if err != nil || !strings.Contains(note, "wrote no ring") {
 		t.Errorf("no ring: %q, %v", note, err)
 	}
 	if err := os.WriteFile(filepath.Join(spool, "10.ring"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	note, err = loadAgent(context.Background(), l, 10, agent, spool)
+	note, err = loadAgent(context.Background(), l, 10, agentTarget{agent, spool, spool})
 	if err != nil || !strings.Contains(note, "agent loaded into pid 10;") {
 		t.Errorf("ring: %q, %v", note, err)
 	}
-	if _, err := loadAgent(context.Background(), l, 30, agent, spool); !errors.Is(err, javaattach.ErrDynamicLoadingDisabled) {
+	if _, err := loadAgent(context.Background(), l, 30, agentTarget{agent, spool, spool}); !errors.Is(err, javaattach.ErrDynamicLoadingDisabled) {
 		t.Errorf("refused load: err = %v", err)
 	}
 	if want := (javaattach.Request{PID: 10, Jar: agent, Options: "spool=" + spool}); l.got[0] != want {

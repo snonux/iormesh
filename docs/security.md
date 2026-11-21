@@ -393,19 +393,25 @@ truth.
     open. `hostPID` is not used: it would give the app
     containers the node's process table too;
   - stages the agent jar and spool inside the JVM's root for a
-    live attach (PLAN.md #14): a root-owned 0755 directory
-    under the JVM's `/tmp`, created exclusively (`O_EXCL`
-    semantics through `mkdirat` on the `RESOLVE_IN_ROOT` fd)
-    and refused if it already exists or is not root's — the
-    JVM's user could otherwise have planted it; the jar copied
-    in with `O_EXCL|O_NOFOLLOW`; the spool beside it 1733, its
-    rings checked as on a host. It costs the app container's
-    ephemeral storage, or its memory where `/tmp` is a tmpfs
-    (the jar and one fixed-size ring per JVM). The tracer
-    removes the directory when its session ends; a session
-    killed before that leaves it to the container's lifetime,
-    and the next session removes a leftover it can prove its
-    own (root-owned, its name);
+    live attach (PLAN.md #14; built by task cf4): a root-owned
+    0755 directory under the JVM's `/tmp`, created exclusively
+    (`mkdirat` on the `RESOLVE_IN_ROOT` fd) under a random name
+    — a name that already exists is never adopted, the JVM's
+    user could have planted it; the next fresh name is tried —
+    and checked to be root's on its fd; the jar copied in with
+    `O_EXCL|O_NOFOLLOW`; the spool beside it 1733, read through
+    its held fd, its rings checked as on a host. Refused unless
+    the JVM's `/` and `/tmp` are root's or the JVM user's and
+    not writable by group or others without the sticky bit:
+    otherwise another user could rename the directory away and
+    have the JVM load their own jar. It costs the app
+    container's ephemeral storage, or its memory where `/tmp` is
+    a tmpfs (the jar and one fixed-size ring per JVM). The
+    tracer removes the directory through its fds when its
+    session ends; a session killed before that leaves it to the
+    container's lifetime — a later session does not remove it,
+    since it cannot tell a dead session's stage from a live
+    one's;
   - is reached only through the operator's kubectl, with the
     cluster named by the registry (`--context` always explicit,
     never the kubeconfig's current context) — the registry stays

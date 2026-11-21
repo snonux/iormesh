@@ -23,7 +23,11 @@ import (
 type javaOutput struct {
 	join   *correlate.JavaJoin
 	marker javaMarker
-	dir    *agentspool.Dir
+	// dirs are the spools scanned for rings: -spool first, then one per
+	// stage `run -agent` made inside a JVM's root (stages, removed at
+	// close; decision #14).
+	dirs   []*agentspool.Dir
+	stages []agentStage
 	// methods, threads and classes are -out's NDJSON tables, nil without
 	// -out; seg is the segment writer, nil without -trace-dir.
 	methods *schema.TableWriter[schema.Method]
@@ -56,7 +60,8 @@ func openJava(cfg runConfig, marker javaMarker, seg *segOutput, stderr io.Writer
 	if err := agentspool.MakeSpool(cfg.spool); err != nil {
 		return nil, err
 	}
-	o := &javaOutput{dir: agentspool.NewDir(cfg.spool), marker: marker, seg: seg, stderr: stderr}
+	o := &javaOutput{dirs: []*agentspool.Dir{agentspool.NewDir(cfg.spool)}, marker: marker, seg: seg,
+		stderr: stderr}
 	if cfg.out == "" {
 		return o, nil
 	}
@@ -161,16 +166,49 @@ func (o *javaOutput) mark(r *types.JavaMarkEvent) {
 // scan hands the joiner the rings that appeared, and reports each file
 // the spool refused (a planted or foreign file) once on stderr.
 func (o *javaOutput) scan() ([]correlate.AgentRing, error) {
-	rings, skipped, err := o.dir.Scan()
-	for _, s := range skipped {
-		o.skipped++
-		_, _ = fmt.Fprintf(o.stderr, "iormesh: skipped agent ring: %v\n", s)
+	var out []correlate.AgentRing
+	var errs []error
+	for _, d := range o.dirs {
+		rings, skipped, err := d.Scan()
+		for _, s := range skipped {
+			o.skipped++
+			_, _ = fmt.Fprintf(o.stderr, "iormesh: skipped agent ring: %v\n", s)
+		}
+		for _, r := range rings {
+			out = append(out, r)
+		}
+		errs = append(errs, err)
 	}
-	out := make([]correlate.AgentRing, len(rings))
-	for i, r := range rings {
-		out[i] = r
+	return out, errors.Join(errs...)
+}
+
+// addStages makes the stages `run -agent` made inside JVMs' roots part
+// of the join: each one's spool is scanned from now on, through its held
+// descriptor, and the stage removed at close. Without a join (no -spool,
+// which -agent requires; tests) they are removed at once.
+func (o *javaOutput) addStages(stages []agentStage) {
+	if o == nil {
+		for _, s := range stages {
+			_ = s.Remove()
+		}
+		return
 	}
-	return out, err
+	for _, s := range stages {
+		o.dirs = append(o.dirs, agentspool.NewDir(s.ReadPath()))
+		o.stages = append(o.stages, s)
+	}
+}
+
+// removeStages removes the session's stages from the JVMs' roots. The
+// rings were read for the last time when the joiner closed, before; a
+// stage that cannot be removed is reported, not a failed run.
+func (o *javaOutput) removeStages() {
+	for _, s := range o.stages {
+		if err := s.Remove(); err != nil {
+			o.warn(err)
+		}
+	}
+	o.stages = nil
 }
 
 // Method and Thread make javaOutput the joiner's correlate.JavaTables;
@@ -204,11 +242,15 @@ func (o *javaOutput) poll() error {
 	return o.join.Poll()
 }
 
-// close closes the NDJSON tables (the segment writer closes on its own,
-// last); the joiner itself is closed by the correlator, as its sink,
-// before.
+// close removes the stages and closes the NDJSON tables (the segment
+// writer closes on its own, last); the joiner itself is closed by the
+// correlator, as its sink, before.
 func (o *javaOutput) close() error {
-	if o == nil || o.methods == nil {
+	if o == nil {
+		return nil
+	}
+	o.removeStages()
+	if o.methods == nil {
 		return nil
 	}
 	return errors.Join(o.methods.Close(), o.threads.Close(), o.classes.Close())

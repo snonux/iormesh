@@ -52,7 +52,14 @@ func attachCommand(args []string, stderr io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.timeout)
 	defer cancel()
-	note, err := loadAgent(ctx, newAgentLoader(), cfg.pid, cfg.agent, cfg.spool)
+	// attach stages nothing: its spool belongs to a separate `run`, which
+	// would never read a stage made here. A JVM in another mount namespace
+	// must see both paths as they are; `run -agent` stages them instead.
+	t := agentTarget{jar: cfg.agent, spool: cfg.spool}
+	if sameMountNS(cfg.pid) {
+		t.ringDir = cfg.spool
+	}
+	note, err := loadAgent(ctx, newAgentLoader(), cfg.pid, t)
 	if err != nil {
 		return err
 	}
@@ -155,22 +162,23 @@ func trustedAgent(agent string) (string, error) {
 	}
 }
 
-// loadAgent loads the agent into pid with its ring in spool and returns
+// loadAgent loads the agent into pid with t's jar and spool and returns
 // the line to report. The JVM confirms only that agentmain returned; the
 // agent reports its own failures (an unsupported JDK, an unwritable
 // spool) on the JVM's stderr and installs nothing, so the ring's
-// appearance is checked too — only for a JVM in the tracer's mount
-// namespace, where the spool path and the pid in the ring's name mean
-// the same as here (containers are M7's).
-func loadAgent(ctx context.Context, l agentLoader, pid uint32, agent, spool string) (string, error) {
-	err := l.Load(ctx, javaattach.Request{PID: pid, Jar: agent, Options: "spool=" + spool})
+// appearance is checked too, in t.ringDir — the tracer's spool, or a
+// stage's held descriptor; with no ringDir (attach into another mount
+// namespace) it cannot be. The ring is named by the pid as the JVM sees
+// it, the tracer's own number in the shared PID namespace.
+func loadAgent(ctx context.Context, l agentLoader, pid uint32, t agentTarget) (string, error) {
+	err := l.Load(ctx, javaattach.Request{PID: pid, Jar: t.jar, Options: "spool=" + t.spool})
 	if err != nil {
 		return "", err
 	}
-	ring := filepath.Join(spool, strconv.FormatUint(uint64(pid), 10)+".ring")
-	if _, err := os.Stat(ring); err != nil && sameMountNS(pid) {
+	name := strconv.FormatUint(uint64(pid), 10) + ".ring"
+	if _, err := os.Stat(filepath.Join(t.ringDir, name)); err != nil && t.ringDir != "" {
 		return fmt.Sprintf("agent loaded into pid %d, but it wrote no ring %s: no Java attribution "+
-			"(its reason, iormesh-agent: …, is on the JVM's stderr)", pid, ring), nil
+			"(its reason, iormesh-agent: …, is on the JVM's stderr)", pid, filepath.Join(t.spool, name)), nil
 	}
 	// JEP 451: the JVM itself prints the warning, on its own stderr.
 	return fmt.Sprintf("agent loaded into pid %d; its I/O before now stays unattributed, and unless "+
@@ -178,9 +186,10 @@ func loadAgent(ctx context.Context, l agentLoader, pid uint32, agent, spool stri
 		pid), nil
 }
 
-// sameMountNS reports whether pid shares the tracer's mount namespace. A
-// variable so tests need no real process; an unreadable namespace link
-// counts as not shared.
+// sameMountNS reports whether pid shares the tracer's mount namespace —
+// whether the tracer's paths mean the same to it — or needs a stage
+// inside its root (stage.go). A variable so tests need no real process;
+// an unreadable namespace link counts as not shared.
 var sameMountNS = func(pid uint32) bool {
 	self, err := os.Readlink("/proc/self/ns/mnt")
 	if err != nil {
@@ -207,17 +216,20 @@ func (s *session) startJava(ctx context.Context, cfg runConfig, stderr io.Writer
 // a load takes S1's ≈150 ms or more, the JVM's own class loading is
 // traced meanwhile, and a stalled reader would lose records — then reads
 // the new rings, so their natives are probed before the ready file says
-// the tracer is live. A process that is no JVM, or refuses the load, is
-// reported and traced on without Java attribution: decision #2 reports a
-// refusal instead of retrying.
+// the tracer is live. A JVM in another mount namespace gets the jar and
+// a spool staged inside its root (decision #14), which the Java join
+// reads beside -spool and removes when the session ends. A process that
+// is no JVM, refuses the load or has no root to stage in is reported and
+// traced on without Java attribution: decision #2 reports a refusal
+// instead of retrying.
 func (s *session) attachAgents(ctx context.Context, agent, spool string, stderr io.Writer) error {
 	pids := make([]uint32, 0, len(s.live))
 	for pid := range s.live {
 		pids = append(pids, pid)
 	}
 	slices.Sort(pids)
-	notes := make(chan []string, 1)
-	go func() { notes <- loadAgents(ctx, newAgentLoader(), pids, agent, spool) }()
+	done := make(chan agentLoads, 1)
+	go func() { done <- loadAgents(ctx, newAgentLoader(), pids, agent, spool) }()
 	for {
 		select {
 		case batch, ok := <-s.tr.Records():
@@ -227,38 +239,67 @@ func (s *session) attachAgents(ctx context.Context, agent, spool string, stderr 
 			if err := s.handleAll(batch); err != nil {
 				return err
 			}
-		case lines := <-notes:
-			for _, l := range lines {
+		case r := <-done:
+			for _, l := range r.lines {
 				_, _ = fmt.Fprintf(stderr, "iormesh: %s\n", l)
 			}
+			s.java.addStages(r.stages)
 			return s.java.poll()
 		case <-ctx.Done():
-			// A signal during the loads: stop waiting for them (they end
-			// on the same ctx; notes is buffered, so the goroutine never
-			// blocks). nil, not ctx.Err(): traceLoop sees the done ctx
-			// and ends the trace as stop, which an error would turn into
-			// error.
+			// A signal during the loads: they end on the same ctx, and
+			// loadAgents stages nothing more once it is done, so the wait
+			// is short; it is needed for the stages already made, which
+			// the session must remove from the JVMs' roots. nil, not
+			// ctx.Err(): traceLoop sees the done ctx and ends the trace as
+			// stop, which an error would turn into error.
+			s.java.addStages((<-done).stages)
 			return nil
 		}
 	}
 }
 
+// agentLoads is what loadAgents did: one line per pid, and the stages it
+// made inside JVMs' roots (decision #14), for the session to read and
+// remove.
+type agentLoads struct {
+	lines  []string
+	stages []agentStage
+}
+
 // loadAgents loads the agent into each pid in turn, each attach bounded
-// by javaattach.DefaultTimeout, and returns one line per pid. It runs
-// beside the record loop, so it reports instead of writing stderr.
-func loadAgents(ctx context.Context, l agentLoader, pids []uint32, agent, spool string) []string {
+// by javaattach.DefaultTimeout, with the tracer's jar and spool or, for a
+// JVM in another mount namespace, a stage inside its root. It runs beside
+// the record loop, so it reports instead of writing stderr, and stops
+// once ctx is done.
+func loadAgents(ctx context.Context, l agentLoader, pids []uint32, agent, spool string) agentLoads {
 	var lines []string
+	st := newAgentStages(agent)
 	for _, pid := range pids {
-		actx, cancel := context.WithTimeout(ctx, javaattach.DefaultTimeout)
-		note, err := loadAgent(actx, l, pid, agent, spool)
-		cancel()
+		if ctx.Err() != nil {
+			break
+		}
+		note, err := loadOne(ctx, l, st, pid, spool)
 		switch {
 		case errors.Is(err, javaattach.ErrNotJVM):
 			note = fmt.Sprintf("pid %d is not a JVM, no agent loaded", pid)
+		case stagingFailed(err):
+			note = fmt.Sprintf("no Java attribution for pid %d: %v (start it with -javaagent instead)",
+				pid, err)
 		case err != nil:
 			note = fmt.Sprintf("no Java attribution for pid %d: %v", pid, err)
 		}
 		lines = append(lines, note)
 	}
-	return lines
+	return agentLoads{lines: lines, stages: st.all}
+}
+
+// loadOne stages (if pid needs it) and loads the agent into one JVM.
+func loadOne(ctx context.Context, l agentLoader, st *agentStages, pid uint32, spool string) (string, error) {
+	t, err := st.target(pid, spool)
+	if err != nil {
+		return "", err
+	}
+	actx, cancel := context.WithTimeout(ctx, javaattach.DefaultTimeout)
+	defer cancel()
+	return loadAgent(actx, l, pid, t)
 }

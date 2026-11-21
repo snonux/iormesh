@@ -1796,7 +1796,8 @@ Later phase — plain Linux servers (M4) come first.
   the M0 ingress scenario renders as one routed edge — app →
   FQDN → Traefik → deployment — with no tracer on the ingress.
   Status (2026-11-21, task yb4): **passed on kind, with one
-  test-only workaround** — `mage k8sAcceptance` from scratch,
+  test-only workaround** (since removed, task cf4; re-run
+  pending) — `mage k8sAcceptance` from scratch,
   green (`integrationtests/kind`; kind 0.31, Kubernetes 1.35.0,
   containerd 2.2.0, one node; docs/testing.md "M7 acceptance on
   kind"). tcp-nat's client and server as pods under debug
@@ -1816,9 +1817,11 @@ Later phase — plain Linux servers (M4) come first.
   by `routes discover` as a list-only ServiceAccount. The
   workaround: the gateway's HTTP host comes from the Java agent,
   and step 3 of docs/implementation.md M7 (#14's staging inside
-  the JVM's root) is not built, so the test mounts the trace
-  emptyDir into the app container and ships the agent jar in the
-  workload image (task cf4 builds the staging). Fixed on the way:
+  the JVM's root) was not built, so the test mounted the trace
+  emptyDir into the app container and shipped the agent jar in
+  the workload image. Task cf4 built the staging and removed the
+  workaround from the test; the kind re-run without it is
+  pending (task cf4). Fixed on the way:
   `build -registry`, selectors skipping terminating pods, kubectl
   1.30's `--custom` gate. Open: debug deploys carry no byte cap
   and trip the percent disk limit on a full node (df4), deploy
@@ -2444,10 +2447,20 @@ here only as placeholders.
   AppArmor profile blocks the cross-container `/proc` reads.
   Owner to confirm: JDK versions and flags in the fleet, and
   whether app containers keep a writable `/tmp`.
-  On kind (task yb4): the staging is not built yet (task cf4) —
-  `run -spool` in the scratch image fails (no `/tmp`), and the
-  jar path is the tracer's — so no in-pod tracer attributes Java
-  today. With the paths made to agree by hand (the app mounting
+  Built (task cf4): `run -agent` stages for every JVM whose mount
+  namespace is not the tracer's, one stage per namespace and
+  JVM user. The JVM's `/` and `/tmp` must also be root's or the
+  JVM user's and not writable by group or others unless sticky
+  (the jar's trust rule, inside the JVM's root); a stage name
+  already taken is skipped for a fresh random one, never
+  adopted. `iormesh attach` stages nothing: its spool belongs to
+  a separate `run`, which would not read a stage it made. Proven
+  in `mage integrationTest` with JVMs in private mount
+  namespaces (`TestJavaAttachMountNS`). On kind (task yb4),
+  before cf4: `run -spool` in the scratch image failed with a
+  spool under `/tmp` (the image has none), and the jar path was
+  the tracer's — so no in-pod tracer attributed Java. With the
+  paths made to agree by hand (the app mounting
   the trace emptyDir, its image carrying the jar), live attach
   through the shared PID namespace worked: the agent joined and
   its http and dns events carried the gateway's FQDN. Neither

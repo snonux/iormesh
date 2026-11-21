@@ -22,7 +22,9 @@ package integrationtests
 // their exit, on a chosen JDK (Harness.Java) and user (Credential). The
 // java command line (workloadCmd) and a tracer's wait-and-read
 // (finishRun) are shared with the emulated hosts of multihost.go (M4,
-// task kb4), where each host runs its own tracer. Every run also writes
+// task kb4), where each host runs its own tracer. A JVM may run under a
+// wrapper command (Harness.JVMWrap: its own mount namespace and /tmp,
+// task cf4). Every run also writes
 // parquet segments (-trace-dir, task ze4), from which the judged runs
 // rebuild the graph.
 
@@ -121,6 +123,10 @@ type Harness struct {
 	// PATH. JVMFlags go before -jar.
 	Java     string
 	JVMFlags []string
+	// JVMWrap, when set, is a command the java command line is appended
+	// to and which must exec it in the same process: privateTmpWrap runs
+	// each JVM in a mount namespace of its own (decision #14, task cf4).
+	JVMWrap []string
 	// Credential, when set, runs the workloads as another user (a root
 	// attacher reaching a JVM of another uid).
 	Credential *syscall.Credential
@@ -232,6 +238,9 @@ func (h *Harness) workloadCmd(dir, spool, scenario string, args []string) (*exec
 		java = "java"
 	}
 	cmd := exec.Command(java, argv...)
+	if len(h.JVMWrap) > 0 {
+		cmd = exec.Command(h.JVMWrap[0], slices.Concat(h.JVMWrap[1:], []string{java}, argv)...)
+	}
 	if h.Credential != nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: h.Credential}
 		cmd.Dir = h.Tmp // the test's own working directory may be closed to that user

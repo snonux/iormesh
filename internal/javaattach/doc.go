@@ -38,6 +38,12 @@
 // sent only after SO_PEERCRED showed the connected peer is the target's
 // pid with its euid (checkPeer), whatever the socket's path led to.
 //
+// The jar and spool paths of the request are resolved by the JVM in its
+// own mount namespace. For a JVM in another one (an app container beside
+// an in-pod tracer, M7), Attacher.Stage stages a copy of the jar and a
+// spool inside the JVM's root, under its /tmp, by the same fd discipline
+// (stage.go, decision #14).
+//
 // The JVM checks the attacher's credentials itself: the peer's effective
 // uid (and gid) must be its own, or root. A root tracer therefore
 // reaches every JVM on the host (S1, Experiment 4); a non-root caller

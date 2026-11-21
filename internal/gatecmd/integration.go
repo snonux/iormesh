@@ -66,6 +66,7 @@ func IntegrationTests() []string {
 		"TestJavaAttachDynamicLoading",
 		"TestJavaLiveAttach",
 		"TestJavaLiveAttachAtStart",
+		"TestJavaAttachMountNS",
 		"TestJavaMethodFlow",
 		"TestHTTPPlain",
 		"TestHTTPAsync",

@@ -10,9 +10,13 @@ import (
 	"syscall"
 )
 
-// Dir finds the agents' rings in the tracer's spool directory: one file
-// per JVM, <pid>.ring (pid as the JVM sees it, so the JVM must share the
-// tracer's pid namespace; containers are M7's). Each file is opened once.
+// Dir finds the agents' rings in a spool directory: one file per JVM,
+// <pid>.ring (pid as the JVM sees it, so the JVM must share the tracer's
+// pid namespace). The directory is the tracer's -spool, or one staged
+// inside the root of a JVM in another mount namespace (decision #14),
+// which the tracer names /proc/self/fd/<n>: a descriptor it opened
+// through /proc/<pid>/root, so nothing in the JVM's tree is resolved by
+// name again. Each file is opened once.
 type Dir struct {
 	path string
 	// owner returns the uid of process pid, false if it is gone; a
@@ -22,7 +26,7 @@ type Dir struct {
 }
 
 // NewDir scans path; it does not create it (the tracer does, see
-// MakeSpool).
+// MakeSpool and MakeSpoolAt).
 func NewDir(path string) *Dir {
 	return &Dir{path: path, owner: procOwner, done: map[string]bool{}}
 }
@@ -48,6 +52,35 @@ func MakeSpool(path string) error {
 		return fmt.Errorf("spool: %s: not a directory (or a symlink): %w", path, err)
 	}
 	defer func() { _ = syscall.Close(fd) }()
+	return setSpoolMode(fd, path)
+}
+
+// MakeSpoolAt creates the spool directory name in the directory dirfd
+// and returns it open (O_RDONLY, close-on-exec), for reading through
+// /proc/self/fd (decision #14: a spool staged inside another mount
+// namespace's root is reached only through descriptors). Unlike MakeSpool
+// it never adopts an existing entry: the caller made dirfd itself, so
+// anything already there was planted. The same owner check and fchmod as
+// MakeSpool follow, on the descriptor.
+func MakeSpoolAt(dirfd int, name string) (int, error) {
+	if err := syscall.Mkdirat(dirfd, name, 0o700); err != nil {
+		return -1, fmt.Errorf("spool: %s: %w", name, err)
+	}
+	fd, err := syscall.Openat(dirfd, name, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|
+		syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return -1, fmt.Errorf("spool: %s: not a directory (or a symlink): %w", name, err)
+	}
+	if err := setSpoolMode(fd, name); err != nil {
+		_ = syscall.Close(fd)
+		return -1, err
+	}
+	return fd, nil
+}
+
+// setSpoolMode checks that the open spool directory fd belongs to the
+// tracer's own uid and gives it SpoolMode exactly.
+func setSpoolMode(fd int, path string) error {
 	var st syscall.Stat_t
 	if err := syscall.Fstat(fd, &st); err != nil {
 		return fmt.Errorf("spool: %w", err)
