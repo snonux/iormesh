@@ -49,6 +49,7 @@ type stateRec struct {
 // halfAcc accumulates one (host, conn_id) across all events and sources.
 type halfAcc struct {
 	project        string
+	projects       map[string]bool // every session's project that reported the half
 	procs          map[string]bool
 	client, server bool // role evidence: connect / accept, SYN_SENT
 	tcp            bool // a tcp_state record: only TCP ends are halves
@@ -65,14 +66,21 @@ type LocalConn struct{ Host, ConnID string }
 // collector turns event streams into halves.
 type collector struct {
 	acc map[LocalConn]*halfAcc
-	// lossy marks hosts whose trace reports a drop: records are missing,
-	// so the byte sums that guard the clock bounds' offset matching
-	// against 4 GiB laps (long, clock.go) may undercount.
-	lossy map[string]bool
+	// drops holds every drop event, by the session (host and project)
+	// whose trace reported it: records that session lost, so the byte
+	// sums that guard the clock bounds' offset matching against 4 GiB
+	// laps (clockproof.go) may undercount — for the connections a drop
+	// could have touched (dropTaints).
+	drops map[hostProject][]dropRec
 }
 
+// hostProject names one host's sessions of one project: a drop is the
+// loss of the session that reported it, not of another project's
+// session tracing the same host with its own BPF programs and ring.
+type hostProject struct{ Host, Project string }
+
 func newCollector() *collector {
-	return &collector{acc: map[LocalConn]*halfAcc{}, lossy: map[string]bool{}}
+	return &collector{acc: map[LocalConn]*halfAcc{}, drops: map[hostProject][]dropRec{}}
 }
 
 // Halves folds events — of any number of hosts, in any order — into the
@@ -92,10 +100,11 @@ func Halves(events []schema.Event) []Half {
 // add folds one event into its half. Events without a conn_id name no
 // connection and are ignored, as are kinds that say nothing about role,
 // key, owner or the instants the clock bounds read (timing.add); a drop
-// marks its host lossy.
+// is kept for the session that reported it (dropRec).
 func (c *collector) add(ev *schema.Event) {
 	if ev.Event == schema.KindDrop {
-		c.lossy[ev.HostID] = true
+		k := hostProject{ev.HostID, ev.Project}
+		c.drops[k] = append(c.drops[k], newDropRec(ev))
 	}
 	if ev.ConnID == "" {
 		return
@@ -103,9 +112,11 @@ func (c *collector) add(ev *schema.Event) {
 	k := LocalConn{ev.HostID, ev.ConnID}
 	a := c.acc[k]
 	if a == nil {
-		a = &halfAcc{project: ev.Project, procs: map[string]bool{}, first: ev.WallNS}
+		a = &halfAcc{project: ev.Project, projects: map[string]bool{}, procs: map[string]bool{},
+			first: ev.WallNS}
 		c.acc[k] = a
 	}
+	a.projects[ev.Project] = true
 	a.first = min(a.first, ev.WallNS)
 	if ev.PID != 0 {
 		a.procs[schema.ProcessNodeID(ev.HostID, ev.PID, ev.PIDInc)] = true

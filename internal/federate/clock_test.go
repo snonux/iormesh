@@ -211,12 +211,12 @@ func TestStreamMessages(t *testing.T) {
 		{"send across 4 GiB", []streamRec{rec(wrap4G-5, 10, 1)}, rec(0, 3, 9), 0},
 	}
 	for _, tc := range cases {
-		got := streamMessages("hostA", "hostB", "c", tc.sends, []streamRec{tc.recv}, iss)
+		got := streamMessages("hostA", "hostB", "c", tc.sends, []streamRec{tc.recv}, iss, nil)
 		if len(got) != tc.want {
 			t.Errorf("%s: %d messages, want %d", tc.name, len(got), tc.want)
 		}
 	}
-	m := streamMessages("hostA", "hostB", "c", cases[0].sends, []streamRec{cases[0].recv}, iss)
+	m := streamMessages("hostA", "hostB", "c", cases[0].sends, []streamRec{cases[0].recv}, iss, nil)
 	if m[0].send != 2 || m[0].recv != 19 { // last byte 24 sits in the second send
 		t.Fatalf("paired with %+v, want the send holding the last byte", m[0])
 	}
@@ -225,9 +225,10 @@ func TestStreamMessages(t *testing.T) {
 	}
 }
 
-// TestClockBoundStreamGuards runs whole merges: a stream past 4 GiB or a
-// host that dropped records leaves the handshake as the only message,
-// and a receive spanning two sends pairs with the later one.
+// TestClockBoundStreamGuards runs whole merges: a stream past 4 GiB leaves
+// the handshake as the only message, and a receive spanning two sends
+// pairs with the later one. Drops are TestClockDropScope's
+// (clockproof_test.go).
 func TestClockBoundStreamGuards(t *testing.T) {
 	const theta = int64(sec)
 	k := ISNPair{0x10, 0x20}
@@ -240,15 +241,6 @@ func TestClockBoundStreamGuards(t *testing.T) {
 			tuple("10.0.1.1:45678", "10.0.1.254:8080"), "FIN_WAIT1",
 			seqFields{SndUna: k.Client + 23, RcvNxt: k.Server + 302, BytesAcked: big,
 				BytesReceived: 301}))
-		assertHandshakeOnly(t, mergeTraces(t, Options{}, a, b), theta)
-	})
-	t.Run("host dropped records", func(t *testing.T) {
-		a, b := newTrace("hostA", "shop"), newTrace("hostB", "billing")
-		newConv(a, b, 0, theta, "x", k, t0).pingPong(t0 + 10*tus)
-		b.event(0, schema.KindDrop, schema.NoFD, 0, on(t0+sec, theta), "",
-			schema.Args{Lost: ptr(uint64(3))})
-		drop := &b.events[len(b.events)-1]
-		drop.PIDInc, drop.Comm = 0, ""
 		assertHandshakeOnly(t, mergeTraces(t, Options{}, a, b), theta)
 	})
 	t.Run("receive spanning two sends", func(t *testing.T) {

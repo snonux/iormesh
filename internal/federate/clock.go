@@ -35,25 +35,38 @@ type streamRec struct {
 	seq         uint32
 	n           uint64
 	enter, exit uint64 // wall ns
+	// bootEnter and bootExit are the same instants on the host's boot
+	// clock, which all of the host's sessions share (two sessions derive
+	// wall ns from slightly different offsets): the counter proofs order
+	// them against tcp_state records (clockproof.go).
+	bootEnter, bootExit uint64
 }
 
 // sendRange is a streamRec's send as a stream offset range, where offset
-// = seq − (iss + 1) is the same number on both hosts.
-type sendRange struct{ start, n, enter uint64 }
+// = seq − (iss + 1) is the same number on both hosts; boot is its enter
+// on the boot clock.
+type sendRange struct{ start, n, enter, boot uint64 }
 
 // timing is what one half's records say about when things happened on
-// its host's clock: the instants around the SYN, and every data record
-// with a sequence range.
+// its host's clock: the instants around the SYN, every data record with
+// a sequence range, and the tcp_sock byte counters of its tcp_state
+// records.
 type timing struct {
 	connect  earliest // client: the earliest connect enter
 	synSent  earliest // client: the SYN_SENT transition
 	afterSYN earliest // server: the earliest accept exit or tcp_state
-	sends    []streamRec
-	recvs    []streamRec
-	// sent and received sum the data records' bytes; maxCount is the
+	// opened is the earliest enter, on the boot clock, of a connect
+	// (client) or a successful accept (server): no data call of this host
+	// moves the connection's bytes before it (dropTaints).
+	opened earliest
+	sends  []streamRec
+	recvs  []streamRec
+	// sent and received sum the bytes of every data record of the half,
+	// folded ones and those without a tcp_seq included; maxCount is the
 	// largest tcp_sock byte counter any tcp_state record carried. Any of
-	// them at 4 GiB or more means offsets may repeat (streamMessages).
+	// them at 4 GiB or more means offsets may repeat (streamProof).
 	sent, received, maxCount uint64
+	counts                   []counterRec // the counter proofs read them
 }
 
 func (e *earliest) see(ns uint64) {
@@ -68,11 +81,13 @@ func (t *timing) add(ev *schema.Event) {
 	switch {
 	case ev.Event == schema.KindConnect:
 		t.connect.see(ev.WallNS)
+		t.opened.see(ev.BootNS)
 	case (ev.Event == schema.KindAccept || ev.Event == schema.KindAccept4) && ev.Ret >= 0:
 		t.afterSYN.see(ev.WallNS + ev.LatencyNS)
+		t.opened.see(ev.BootNS)
 	case ev.Event == schema.KindTCPState:
 		t.state(ev)
-	case ev.Args.TCPSeq != nil:
+	case schema.IsStreamSend(ev.Event) || schema.IsStreamReceive(ev.Event):
 		t.data(ev)
 	}
 }
@@ -86,31 +101,45 @@ func (t *timing) state(ev *schema.Event) {
 		t.synSent.see(ev.WallNS)
 	}
 	if ev.Args.BytesAcked != nil && ev.Args.BytesReceived != nil {
-		t.maxCount = max(t.maxCount, *ev.Args.BytesAcked, *ev.Args.BytesReceived)
+		r := counterRec{boot: ev.BootNS, acked: *ev.Args.BytesAcked,
+			received: *ev.Args.BytesReceived}
+		t.maxCount = max(t.maxCount, r.acked, r.received)
+		t.counts = append(t.counts, r)
 	}
 }
 
-// data keeps one data record with its sequence range: the send's enter
-// (the bytes cannot leave before the call started) and the receive's
-// exit (they had arrived when it returned).
+// data sums one data record's bytes and, when it carries args.tcp_seq,
+// keeps it with its sequence range: the send's enter (the bytes cannot
+// leave before the call started) and the receive's exit (they had
+// arrived when it returned). Every record counts toward the sums — a
+// folded record (args.count) stands for many calls and carries no
+// tcp_seq, nor does a call another thread interleaved with — since the
+// sums must not undercount the stream (streamProof).
 func (t *timing) data(ev *schema.Event) {
+	send := schema.IsStreamSend(ev.Event)
+	if send {
+		t.sent += ev.Bytes
+	} else {
+		t.received += ev.Bytes
+	}
+	if ev.Args.TCPSeq == nil {
+		return
+	}
 	r := streamRec{seq: *ev.Args.TCPSeq, n: ev.Bytes,
-		enter: ev.WallNS, exit: ev.WallNS + ev.LatencyNS}
-	switch {
-	case schema.IsStreamSend(ev.Event):
+		enter: ev.WallNS, exit: ev.WallNS + ev.LatencyNS,
+		bootEnter: ev.BootNS, bootExit: ev.BootNS + ev.LatencyNS}
+	if send {
 		t.sends = append(t.sends, r)
-		t.sent += r.n
-	case schema.IsStreamReceive(ev.Event):
+	} else {
 		t.recvs = append(t.recvs, r)
-		t.received += r.n
 	}
 }
 
 // messages returns every causal edge one fused connection gives: the
 // handshake (client to server only) and each matched data message in
-// both directions — data messages only when neither stream may have
-// passed 4 GiB and neither host's trace dropped records (a drop makes the
-// byte sums that rule out a lap undercount). A connection both of whose ends one host traced (two
+// both directions — each only when it is proven not to pair bytes of two
+// different laps of the 4 GiB sequence space (direction,
+// clockproof.go). A connection both of whose ends one host traced (two
 // sessions over loopback) gives edges too; the bounds skip them, since a
 // host's clock needs no offset to itself.
 func (c *collector) messages(conn Conn) []message {
@@ -123,14 +152,10 @@ func (c *collector) messages(conn Conn) []message {
 	if m, ok := handshake(conn, &cl.timing, &sv.timing); ok {
 		out = append(out, m)
 	}
-	if long(&cl.timing) || long(&sv.timing) ||
-		c.lossy[conn.Client.Host] || c.lossy[conn.Server.Host] {
-		return out // offsets may repeat: matching bytes would be a guess
-	}
-	out = append(out, streamMessages(conn.Client.Host, conn.Server.Host, conn.ID,
-		cl.timing.sends, sv.timing.recvs, conn.Key.Client)...)
-	out = append(out, streamMessages(conn.Server.Host, conn.Client.Host, conn.ID,
-		sv.timing.sends, cl.timing.recvs, conn.Key.Server)...)
+	client := end{host: conn.Client.Host, acc: cl, client: true}
+	server := end{host: conn.Server.Host, acc: sv}
+	out = append(out, c.direction(conn.ID, client, server, conn.Key.Client)...)
+	out = append(out, c.direction(conn.ID, server, client, conn.Key.Server)...)
 	return out
 }
 
@@ -151,7 +176,7 @@ func handshake(conn Conn, cl, sv *timing) (message, bool) {
 
 // long reports a stream that may have passed 4 GiB in either direction:
 // its offsets repeat, so one offset could name bytes of two different
-// sends. Such a connection gives no data messages rather than a guess.
+// sends. The byte sums then prove nothing (streamProof).
 func long(t *timing) bool {
 	return t.sent >= wrap4G || t.received >= wrap4G || t.maxCount >= wrap4G
 }
@@ -159,8 +184,10 @@ func long(t *timing) bool {
 // streamMessages pairs each receive with the send that queued the
 // receive's last byte (S2: matched by stream offset, which NAT leaves
 // alone). A receive whose byte no traced send holds — the send was
-// lost, or predates the session — gives nothing.
-func streamMessages(from, to, conn string, sends, recvs []streamRec, iss uint32) []message {
+// lost, or predates the session — gives nothing; so does a pair keep
+// rejects (nil keeps all): one not proven to share a lap (direction).
+func streamMessages(from, to, conn string, sends, recvs []streamRec, iss uint32,
+	keep func(sendRange, streamRec) bool) []message {
 	idx, ok := sendIndex(sends, iss)
 	if !ok {
 		return nil
@@ -169,7 +196,7 @@ func streamMessages(from, to, conn string, sends, recvs []streamRec, iss uint32)
 	for _, r := range recvs {
 		last := uint64(r.seq-iss-1) + r.n - 1
 		i := sort.Search(len(idx), func(i int) bool { return idx[i].start > last }) - 1
-		if i < 0 || idx[i].start+idx[i].n <= last {
+		if i < 0 || idx[i].start+idx[i].n <= last || (keep != nil && !keep(idx[i], r)) {
 			continue
 		}
 		out = append(out, message{from: from, to: to, send: idx[i].enter,
@@ -186,11 +213,12 @@ func streamMessages(from, to, conn string, sends, recvs []streamRec, iss uint32)
 func sendIndex(sends []streamRec, iss uint32) ([]sendRange, bool) {
 	idx := make([]sendRange, 0, len(sends))
 	for _, s := range sends {
-		idx = append(idx, sendRange{start: uint64(s.seq - iss - 1), n: s.n, enter: s.enter})
+		idx = append(idx, sendRange{start: uint64(s.seq - iss - 1), n: s.n, enter: s.enter,
+			boot: s.bootEnter})
 	}
 	slices.SortFunc(idx, func(a, b sendRange) int {
 		return cmp.Or(cmp.Compare(a.start, b.start), cmp.Compare(a.n, b.n),
-			cmp.Compare(a.enter, b.enter))
+			cmp.Compare(a.enter, b.enter), cmp.Compare(a.boot, b.boot))
 	})
 	idx = slices.Compact(idx)
 	for i, s := range idx {

@@ -3825,16 +3825,38 @@ connection into messages, `bound.go` intersects them,
   bounds one side only.
 - **Never a guessed pair.** Sends whose offset ranges overlap
   (exact duplicates from two sessions on one host count once),
-  a range that crosses 4 GiB, or a stream that may have passed
-  4 GiB (data bytes or a `tcp_sock` counter at 2³² or more)
-  give no data messages: an offset there could name two sends.
-  So does a host whose trace reports any `drop`: lost records
-  make the byte sums that rule out a 4 GiB lap undercount. A
-  receive whose byte no traced send holds gives nothing.
-  Still open: a stream past 4 GiB whose traced bytes stay
-  below it and whose counter-bearing `tcp_state` records all
-  came early (a long-lived connection traced in part) is not
-  caught.
+  or a range that crosses 4 GiB give no data messages: an
+  offset there could name two sends. A receive whose byte no
+  traced send holds gives nothing. Beyond that a message must
+  be proven to pair bytes of one 4 GiB lap (`clockproof.go`,
+  task jf4; the rule is PLAN.md's):
+  - *Stream proof*, per direction: the sums of every data
+    record (folded and `tcp_seq`-less ones included) and every
+    `tcp_sock` counter stay below 4 GiB, and no drop of the
+    sending half's sessions (keyed by host and project) may
+    have hidden a send. Each drop is written after the records
+    it stands for were lost, so a drop before the socket opened
+    on the sending host (its connect or accept enter, compared
+    on the boot clock) does not taint. Always tainting: an
+    `unattributed` drop (its folded calls run past its
+    instant), `skipped_runs` on the client end (a skipped
+    `task_newtask` leaves an untraced child holding a socket
+    that may predate connect), and an end with no opening call.
+    Drops on the receiving host only lose receives.
+  - *Counter proof*, per message, drop-immune: a `tcp_state`
+    record of the sender at or after the send's enter with
+    `bytes_acked` < 512 MiB (unsent plus unacknowledged data
+    stays under 3 GiB, `sk_sndbuf` being an int and the
+    overshoot two size goals of at most 2²⁹), and one of the
+    receiver at or after the receive's exit with
+    `bytes_received` < 4 GiB, put both offsets below 2³².
+  Lb4's run 2 (M4-10) had an `attach_gap` before each socket
+  and skipped runs after it on both hosts: the stream proof
+  fails, the counter proof keeps both data messages.
+  Still open: a stream whose bytes went through untraced
+  calls (`sendmsg`, `splice`, io_uring) is not in the sums, and
+  a long-lived connection traced in part with no
+  counter-bearing record after its data relies on them.
 - **Bounds.** θ = clock_B − clock_A (A < B by name) is below
   `recv_B − send_A` and above `send_B − recv_A`, each at the
   message's own instant. The merge keeps one `ClockBound` per
@@ -3894,8 +3916,12 @@ the tightest-gap interval; a 10 ms step a minute later gives
 two windows with exact intervals, and one window over both is
 empty and flagged; no fused connection gives no bound; 90 s
 skew fuses and is recovered, 3 minutes fuses nothing; the
-handshake alone is one-sided; a stream past 4 GiB or a host
-with drops leaves the handshake only; a receive spanning two
+handshake alone is one-sided; a stream past 4 GiB leaves the
+handshake only; drops before, inside and after the connection,
+of every reason and on either host, take exactly the
+directions they may have touched, and counters after a message
+prove it despite them (`clockproof_test.go`, with lb4's run 2
+trimmed into `testdata/lb4-run2`); a receive spanning two
 sends pairs with the later; three hosts A–B–C order A against
 C through B; an offset drifting within the allowance after
 its bound never yields a false order (and unpadded it would);

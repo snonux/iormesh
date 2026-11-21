@@ -1156,7 +1156,26 @@ Kubernetes (M7) build on it.
   tracer instructions per TCP data event — s3-overhead.md,
   "Follow-up (xe4)"),
   the SYN adds one client→server edge (connect enter before
-  the server's accept exit), and the merge keeps one bound per
+  the server's accept exit). Offsets repeat every 4 GiB, so a
+  data message counts only when it provably pairs bytes of one
+  lap (task jf4, `internal/federate/clockproof.go`), by either
+  of two proofs. The stream proof covers a direction: the byte
+  sums of all its data records (folded ones too) and the
+  `tcp_sock` counters stay below 4 GiB, and no drop of the
+  *sending* host may have hidden a send — a drop's records
+  were lost at or before its own instant, so one before the
+  socket opened there (connect or accept enter) hid none;
+  unattributed drops, skipped runs on the connecting end (a
+  skipped `task_newtask` leaves a child untraced holding a
+  socket that may predate connect) and ends without an opening
+  call always taint. Receiver-side drops only remove receives.
+  The counter proof covers one message and ignores drops: a
+  `tcp_state` record of the sender after the send with
+  `bytes_acked` below 512 MiB (the kernel keeps less than
+  3 GiB queued: `sk_sndbuf` is an int) and one of the receiver
+  after the receive with `bytes_received` below 4 GiB put both
+  offsets below 2³², where equal mod 2³² means equal. The
+  merge keeps one bound per
   host pair per 1-minute window (`Result.Clocks`), one-sided
   when only one direction has edges, empty and flagged when
   they contradict. The offset drifts within a window, so each
