@@ -597,11 +597,13 @@ scope) call `iormesh_pid_targeted` too.
 `internal/c/sock.c`, included ahead of the generated handlers:
 
 - `sock_owner_map` (LRU hash, 65536): `struct sock *` →
-  `{pid, fd}`. An entry must not outlive its socket: slab reuse
-  hands a freed sock's address to the next socket, possibly a
-  non-target's, which would then be attributed to the old
-  owner. LRU only bounds what is left (sockets open when the
-  trace ends, a lost tracepoint run).
+  `{pid, fd, ino}`, `ino` the socket file's inode number found
+  behind the fd at registration. An entry must not outlive its
+  socket: slab reuse hands a freed sock's address to the next
+  socket, possibly a non-target's, which would then be
+  attributed to the old owner. LRU only bounds what is left
+  (sockets open when the trace ends, stale entries whose
+  address is never reused).
 - **connect (active side)**: the generated `sys_enter_connect`
   handler calls `iormesh_sock_on_connect(pid, fd)`, which walks
   fd → `struct file` → `struct socket` → `struct sock`, keeps
@@ -633,7 +635,17 @@ scope) call `iormesh_pid_targeted` too.
   filters or attributes by the current task — in softirq that is
   whichever task was interrupted — only by the socket. On
   `TCP_CLOSE` the entry is deleted, since the next socket may
-  reuse the address.
+  reuse the address. That delete can be lost: the kernel skips
+  a tracepoint program while another tracing BPF program runs
+  on the CPU (`bpf_prog_active`, a `skipped_runs` drop), and the
+  final `CLOSE` fires in softirq. So every record first checks
+  the entry against the socket's current life (task if4, M4-9
+  on Rocky 9.9): a transition out of `LISTEN` or `CLOSE` other
+  than the registering connect's own `CLOSE → SYN_SENT` (sk
+  parked under the current tid in `connect_sock_map`) starts a
+  new life, and while the socket has a file its inode must be
+  the registered `ino`. A stale entry is deleted and its record
+  dropped.
 - The fd → sock walk uses `BPF_CORE_READ` probe reads, not
   `fileident.c`'s typed walk: connect and accept are rare, and
   the probe reads work without the `bpf_rdonly_cast` kfunc
@@ -666,7 +678,15 @@ tuple, `TCP_CLOSE` for both sockets with `sock_owner_map`
 emptied; that a connect to 255.255.255.255 (`ENETUNREACH`)
 and a reset child taken by plain `accept(2)` leave
 `sock_owner_map` empty; and that an empty `target_map`, or one
-naming another PID, yields nothing (with a positive control). The target only counts tests
+naming another PID, yields nothing (with a positive control).
+`internal/sockreuse_root_test.go` (task if4) plants the entries
+a lost `TCP_CLOSE` run leaves and churns non-target loopback
+connections until the slab reuses the freed socks: nothing is
+recorded under a stale owner and each reused sock's entry is
+dropped; a planted entry with another inode on a live socket is
+dropped at its next transition. The syscall handlers run in
+their dispatch slots behind the `raw_syscalls` dispatchers, as
+under the loader, so the tests run on el9 too. The target only counts tests
 reported as passed (`gatecmd.RootBPFTests`, pinned by
 `internal/buildgate`). Not covered yet: IPv6, Java processes.
 

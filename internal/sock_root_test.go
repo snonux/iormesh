@@ -15,13 +15,14 @@ import (
 )
 
 // These tests need root: they load the real BPF object (the embedded one, or
-// IORMESH_BPF_OBJECT), attach the connect/accept handlers and
+// IORMESH_BPF_OBJECT), put the connect/accept handlers in their dispatch
+// slots behind the raw_syscalls dispatchers, attach
 // sock:inet_sock_set_state, and read the ring buffer. They skip for any other
 // user, so `mage test` passes them by; `mage bpfRootTest` runs them as root
 // and fails unless each is reported as passed (a skip is not a pass).
 //
-// They stand in for the M1 loader (step 5), which does not exist yet, so
-// they drive libbpfgo directly and attach only what TCP tracing needs. What
+// They were written before the M1 loader (step 5) and still drive libbpfgo
+// directly, attaching only what TCP tracing needs. What
 // they prove: the whole object passes the verifier on this kernel; a Go
 // net.Dial (a non-blocking connect returning EINPROGRESS, like Java NIO)
 // from a PID in target_map yields the connection's 4-tuple from the
@@ -41,13 +42,33 @@ const (
 	tcpClose       = 7
 )
 
-// sockTestPrograms are the programs a TCP tuple needs, by tracepoint.
-var sockTestPrograms = map[string][2]string{
-	"handle_sys_enter_connect":   {"syscalls", "sys_enter_connect"},
-	"handle_sys_exit_connect":    {"syscalls", "sys_exit_connect"},
-	"handle_sys_exit_accept":     {"syscalls", "sys_exit_accept"},
-	"handle_sys_exit_accept4":    {"syscalls", "sys_exit_accept4"},
-	"handle_inet_sock_set_state": {"sock", "inet_sock_set_state"},
+// sockSlot is a syscall handler a TCP tuple needs and the dispatch slot it
+// takes: its syscall's number in the side's program array and the array's
+// traced mirror (dispatch.c).
+type sockSlot struct {
+	prog, progs, traced string
+	nr                  uint32
+}
+
+// sockSlots are the syscall handlers a TCP tuple needs. They run as tail
+// calls of the raw_syscalls dispatchers, as under the loader
+// (internal/bpf/dispatch.go), not attached to their own syscalls:sys_*
+// tracepoints: they read the raw_syscalls record, and el9 (Rocky 9.9)
+// refuses that attachment with EACCES, so these tests could not run there
+// (task if4).
+var sockSlots = []sockSlot{
+	{"handle_sys_enter_connect", "syscall_enter_progs", "syscall_enter_traced", syscall.SYS_CONNECT},
+	{"handle_sys_exit_connect", "syscall_exit_progs", "syscall_exit_traced", syscall.SYS_CONNECT},
+	{"handle_sys_exit_accept", "syscall_exit_progs", "syscall_exit_traced", syscall.SYS_ACCEPT},
+	{"handle_sys_exit_accept4", "syscall_exit_progs", "syscall_exit_traced", syscall.SYS_ACCEPT4},
+}
+
+// sockTracepoints are the programs attached as tracepoints, in order: the
+// state tracepoint, then the dispatchers, exit before enter (dispatch.go).
+var sockTracepoints = [][3]string{
+	{"handle_inet_sock_set_state", "sock", "inet_sock_set_state"},
+	{"handle_raw_sys_exit", "raw_syscalls", "sys_exit"},
+	{"handle_raw_sys_enter", "raw_syscalls", "sys_enter"},
 }
 
 // targetTraced is IORMESH_TARGET_TRACED, the state filter() traces (maps.h).
@@ -78,8 +99,9 @@ func requireRoot(t *testing.T) {
 	}
 }
 
-// newSockTracer loads the full object, attaches sockTestPrograms and starts
-// polling event_map. Everything is released at test cleanup.
+// newSockTracer loads the full object, fills sockSlots, attaches
+// sockTracepoints and starts polling event_map. Everything is released at
+// test cleanup.
 func newSockTracer(t *testing.T) *sockTracer {
 	t.Helper()
 	// libbpf logs every CO-RE relocation of ~1500 programs at debug level;
@@ -95,13 +117,16 @@ func newSockTracer(t *testing.T) *sockTracer {
 	if err := module.BPFLoadObject(); err != nil {
 		t.Fatalf("load BPF object: %v", err)
 	}
-	for prog, tp := range sockTestPrograms {
-		p, err := module.GetProgram(prog)
+	for _, slot := range sockSlots {
+		fillSlot(t, module, slot)
+	}
+	for _, tp := range sockTracepoints {
+		p, err := module.GetProgram(tp[0])
 		if err != nil {
-			t.Fatalf("program %s: %v", prog, err)
+			t.Fatalf("program %s: %v", tp[0], err)
 		}
-		if _, err := p.AttachTracepoint(tp[0], tp[1]); err != nil {
-			t.Fatalf("attach %s to %s:%s: %v", prog, tp[0], tp[1], err)
+		if _, err := p.AttachTracepoint(tp[1], tp[2]); err != nil {
+			t.Fatalf("attach %s to %s:%s: %v", tp[0], tp[1], tp[2], err)
 		}
 	}
 	tr := &sockTracer{module: module, events: make(chan []byte, 4096)}
@@ -112,6 +137,26 @@ func newSockTracer(t *testing.T) *sockTracer {
 	rb.Poll(50)
 	t.Cleanup(rb.Close)
 	return tr
+}
+
+// fillSlot stores slot's program in its program array and marks the slot
+// traced, as the loader's attachSlot does.
+func fillSlot(t *testing.T, module *bpf.Module, slot sockSlot) {
+	t.Helper()
+	prog, err := module.GetProgram(slot.prog)
+	if err != nil {
+		t.Fatalf("program %s: %v", slot.prog, err)
+	}
+	fd, on := uint32(prog.FileDescriptor()), uint32(1)
+	for name, value := range map[string]*uint32{slot.progs: &fd, slot.traced: &on} {
+		m, err := module.GetMap(name)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if err := m.Update(unsafe.Pointer(&slot.nr), unsafe.Pointer(value)); err != nil {
+			t.Fatalf("fill %s slot %d with %s: %v", name, slot.nr, slot.prog, err)
+		}
+	}
 }
 
 // setTarget inserts (on) or removes the tgid from target_map. An insert

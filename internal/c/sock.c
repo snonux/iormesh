@@ -19,7 +19,10 @@
 //     the registered owner, and forgets a socket at TCP_CLOSE; a socket that
 //     is TCP_CLOSE without a transition (a connect failing early, an accept
 //     of a reset connection) is forgotten by the connect exit, or never
-//     registered by the accept exit (see sock_owner_map).
+//     registered by the accept exit (see sock_owner_map);
+//   - because a forgetting run can be lost, every record first checks that
+//     the entry still belongs to the socket's current life
+//     (iormesh_sock_owner_stale) and drops a stale entry instead.
 // The struct sock address is the join key userspace uses to tie the state
 // records to the fd's syscalls: an fd number is reused after close, a socket
 // is the connection itself.
@@ -49,10 +52,17 @@
 #define IORMESH_S_IFMT 00170000
 #define IORMESH_S_IFSOCK 0140000
 
-// sock_owner is the traced process and descriptor a socket belongs to.
+// sock_owner is the traced process and descriptor a socket belongs to, and
+// the inode number of the socket file the registration found behind that
+// descriptor - the generation that tells this life of the struct sock from
+// a later one at the same address (iormesh_sock_owner_stale). Socket inode
+// numbers come from get_next_ino(), one per socket file, so a new socket
+// reusing the struct sock has a new one even when the slab also hands it
+// the old struct socket.
 struct sock_owner {
     __u32 pid;
     __s32 fd;
+    __u64 ino;
 };
 
 // sock_owner_map: struct sock address -> owner. An entry must not outlive
@@ -61,11 +71,22 @@ struct sock_owner {
 // attributed to the old owner. Two removals keep it exact: the TCP_CLOSE
 // transition (handle_inet_sock_set_state), and, for a socket that is
 // already TCP_CLOSE and so never transitions again, its registering call's
-// own exit (iormesh_sock_on_connect_exit, iormesh_sock_on_accept). What is
-// left is a socket still open when the trace ends, or one whose TCP_CLOSE
-// record ran while event_map was full - its delete still runs, so only
-// a lost tracepoint run leaks. LRU bounds those: the least recently used
-// entries, the long-idle ones, go first.
+// own exit (iormesh_sock_on_connect_exit, iormesh_sock_on_accept).
+//
+// Removal alone is not enough: a lost tracepoint run leaks the entry. The
+// kernel skips a tracepoint program whenever another tracing BPF program
+// already runs on that CPU (trace_call_bpf's bpf_prog_active guard, counted
+// as a recursion miss - our skipped_runs drop), and the final LAST_ACK ->
+// CLOSE or FIN_WAIT2 -> CLOSE fires in softirq, which readily interrupts a
+// syscall handler of this or another tracer. On a busy host (Rocky 9.9, two
+// vCPUs, eight tracers; task if4, M4-9 in lb4) inventory's CLOSE was lost,
+// the freed struct sock came back as another process's socket, and its
+// whole life was recorded under inventory's pid, fd and conn id. So every
+// record also checks the entry against the socket's current life
+// (iormesh_sock_owner_stale) and drops it when it belongs to an earlier
+// one. What is left is a socket still open when the trace ends, or a stale
+// entry whose address is never reused; LRU bounds those: the least
+// recently used entries, the long-idle ones, go first.
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 65536);
@@ -117,10 +138,12 @@ static __always_inline int iormesh_sock_is_tcp(struct sock *sk) {
 }
 
 // iormesh_tcp_sock_of_fd returns the struct sock behind descriptor fd when it
-// is a TCP socket, else NULL. A socket inode alone is not proof: an O_PATH
-// descriptor of a bound AF_UNIX path has one too, with no struct socket
-// behind private_data - hence the NULL and type checks before the sock.
-static __always_inline struct sock *iormesh_tcp_sock_of_fd(__s32 fd) {
+// is a TCP socket, else NULL, and stores the socket file's inode number in
+// *ino (the owner's generation, struct sock_owner). A socket inode alone is
+// not proof: an O_PATH descriptor of a bound AF_UNIX path has one too, with
+// no struct socket behind private_data - hence the NULL and type checks
+// before the sock.
+static __always_inline struct sock *iormesh_tcp_sock_of_fd(__s32 fd, __u64 *ino) {
     struct file *file = iormesh_file_of_fd(fd);
     struct socket *sock;
     struct sock *sk;
@@ -129,6 +152,7 @@ static __always_inline struct sock *iormesh_tcp_sock_of_fd(__s32 fd) {
         return 0;
     if ((BPF_CORE_READ(file, f_inode, i_mode) & IORMESH_S_IFMT) != IORMESH_S_IFSOCK)
         return 0;
+    *ino = BPF_CORE_READ(file, f_inode, i_ino);
     sock = BPF_CORE_READ(file, private_data);
     if (!sock || BPF_CORE_READ(sock, type) != IORMESH_SOCK_STREAM)
         return 0;
@@ -138,12 +162,12 @@ static __always_inline struct sock *iormesh_tcp_sock_of_fd(__s32 fd) {
     return sk;
 }
 
-// iormesh_sock_register records pid/fd as the owner of sk. A failed update
-// (an LRU map evicts rather than fills, so practically never) loses only
-// this socket's state records.
-static __always_inline void iormesh_sock_register(struct sock *sk, __u32 pid, __s32 fd) {
+// iormesh_sock_register records pid/fd, with the socket file's inode
+// number ino, as the owner of sk. A failed update (an LRU map evicts rather
+// than fills, so practically never) loses only this socket's state records.
+static __always_inline void iormesh_sock_register(struct sock *sk, __u32 pid, __s32 fd, __u64 ino) {
     __u64 key = (__u64)sk;
-    struct sock_owner owner = {.pid = pid, .fd = fd};
+    struct sock_owner owner = {.pid = pid, .fd = fd, .ino = ino};
 
     bpf_map_update_elem(&sock_owner_map, &key, &owner, BPF_ANY);
 }
@@ -274,12 +298,13 @@ static __always_inline int iormesh_sock_state(struct sock *sk) {
 // later SYN_SENT -> ESTABLISHED in softirq visible at all. The socket is
 // also parked for the exit hook, by tid.
 static __always_inline void iormesh_sock_on_connect(__u32 pid, __u32 tid, __s32 fd) {
-    struct sock *sk = iormesh_tcp_sock_of_fd(fd);
+    __u64 ino = 0;
+    struct sock *sk = iormesh_tcp_sock_of_fd(fd, &ino);
     __u64 key = (__u64)sk;
 
     if (!sk)
         return;
-    iormesh_sock_register(sk, pid, fd);
+    iormesh_sock_register(sk, pid, fd, ino);
     bpf_map_update_elem(&connect_sock_map, &tid, &key, BPF_ANY);
 }
 
@@ -313,11 +338,12 @@ static __always_inline void iormesh_sock_on_connect_exit(__u32 tid) {
 static __always_inline void iormesh_sock_on_accept(__u32 pid, __s64 ret) {
     struct tcp_state_event *ev;
     struct sock *sk;
+    __u64 ino = 0;
     int state;
 
     if (ret < 0 || ret > 0x7fffffff)
         return;
-    sk = iormesh_tcp_sock_of_fd((__s32)ret);
+    sk = iormesh_tcp_sock_of_fd((__s32)ret, &ino);
     if (!sk)
         return;
     state = iormesh_sock_state(sk);
@@ -326,7 +352,7 @@ static __always_inline void iormesh_sock_on_accept(__u32 pid, __s64 ret) {
     // which is how the merge tells the snapshot apart (half.go).
     ev = iormesh_reserve_tcp_state((__u64)sk, pid, (__s32)ret);
     if (state != TCP_CLOSE)
-        iormesh_sock_register(sk, pid, (__s32)ret);
+        iormesh_sock_register(sk, pid, (__s32)ret, ino);
     if (!ev)
         return;
     ev->oldstate = TCP_STATE_SNAPSHOT;
@@ -360,9 +386,57 @@ static __always_inline void iormesh_read_ctx_tuple(struct tcp_state_event *ev,
     bpf_probe_read_kernel(ev->daddr, 4, ctx->daddr);
 }
 
+// iormesh_sock_owner_stale reports whether owner, sk's sock_owner_map
+// entry, belongs to an earlier life of the struct sock at that address: one
+// whose forgetting TCP_CLOSE run the kernel skipped (sock_owner_map), after
+// which the slab handed the address to a new socket. Two proofs, each
+// enough on its own:
+//
+//   - A transition out of TCP_LISTEN or TCP_CLOSE starts a new life. A
+//     socket leaves TCP_CLOSE by connect (CLOSE -> SYN_SENT) or listen
+//     (CLOSE -> LISTEN), and an accepted child is born LISTEN -> SYN_RECV
+//     (inet_csk_clone_lock copies the listener's state). The only such
+//     transition a live entry can see is the CLOSE -> SYN_SENT inside the
+//     very connect that registered it, and that connect parked sk under
+//     its tid in connect_sock_map - the transition runs in the connecting
+//     task's context. Listeners are never registered, children only after
+//     accept() returns, so every other one means the entry is stale.
+//   - The socket file's inode number is the generation (struct sock_owner).
+//     While the socket has a file (sk_socket is set from socket() or
+//     accept() until close() orphans it) its inode must be the registered
+//     one; a kernel socket without a file never is. An orphaned socket
+//     (sk_socket NULL: the FIN_WAIT2/LAST_ACK -> CLOSE tail after close(),
+//     or a child not yet accepted) cannot be checked this way and is
+//     believed - the first proof covers the next life's start.
+//
+// The reads are probe reads: sk_socket may be cleared by close() on another
+// CPU meanwhile, which at worst makes one record unverifiable.
+static __always_inline int iormesh_sock_owner_stale(struct trace_event_raw_inet_sock_set_state *ctx,
+                                                    const struct sock_owner *owner, __u64 sk) {
+    int oldstate = ctx->oldstate;
+    struct socket *sock;
+
+    if (oldstate == TCP_LISTEN)
+        return 1;
+    if (oldstate == TCP_CLOSE) {
+        __u32 tid = (__u32)bpf_get_current_pid_tgid();
+        __u64 *parked = bpf_map_lookup_elem(&connect_sock_map, &tid);
+
+        if (!parked || *parked != sk)
+            return 1;
+    }
+    sock = BPF_CORE_READ((struct sock *)sk, sk_socket);
+    if (!sock)
+        return 0;
+    return BPF_CORE_READ(sock, file, f_inode, i_ino) != owner->ino;
+}
+
 // handle_inet_sock_set_state reports a state change of a registered socket.
 // No filter() and no current task here (see the top of this file): scope and
-// attribution come from sock_owner_map alone.
+// attribution come from sock_owner_map alone, after the entry has been
+// checked to belong to this life of the socket (iormesh_sock_owner_stale) -
+// a stale one is dropped, and with it the record, which is another
+// process's socket or one the tracer never registered.
 SEC("tracepoint/sock/inet_sock_set_state")
 int handle_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
     __u64 sk = (__u64)ctx->skaddr;
@@ -375,6 +449,10 @@ int handle_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) 
     owner = bpf_map_lookup_elem(&sock_owner_map, &sk);
     if (!owner)
         return 0;
+    if (iormesh_sock_owner_stale(ctx, owner, sk)) {
+        bpf_map_delete_elem(&sock_owner_map, &sk);
+        return 0;
+    }
     ev = iormesh_reserve_tcp_state(sk, owner->pid, owner->fd);
     if (ev) {
         ev->oldstate = ctx->oldstate;
