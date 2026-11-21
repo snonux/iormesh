@@ -1,12 +1,12 @@
 iormesh · shop · 2025-11-20 12:00:00 – 12:01:00 UTC · 3 services · 2 edges · 2 routed · 2 conversations                                                         
  1 services  2 edges  3 conversations  4 sequence  5 threads  6 processes  7 health                                                                             
- FROM            TO                       STATE               C…│routed     gateway -> shop.example.org -> traefik -> prod/backend -> prod/deployment/backend   
- gateway     ->  orders                   fused               3 │  client   gateway                                                                             
- orders      ->  "db\x1b[2J"              unresolved          1 │  fqdn     shop.example.org                                                                    
- orders      =>  prod/statefulset/db      routed service      1 │  ingress  traefik                                                                             
- gateway     =>  prod/deployment/backend  routed route        3 │  service  prod/backend                                                                        
- route flag  !   shop.example.org         route_contradicted  1 │  workload prod/deployment/backend                                                             
- route flag  !   ingress/prod/bad         skipped             - │basis      route (the FQDN's route through an ingress; completed from the map, not traced)     
+ FROM         TO                       STATE               CONNS│routed     gateway -> shop.example.org -> traefik -> prod/backend -> prod/deployment/backend   
+ gateway  ->  orders                   fused               3    │  client   gateway                                                                             
+ orders   ->  "db\x1b[2J"              unresolved          1    │  fqdn     shop.example.org                                                                    
+ orders   =>  prod/statefulset/db      routed service      1    │  ingress  traefik                                                                             
+ gateway  =>  prod/deployment/backend  routed route        3    │  service  prod/backend                                                                        
+ flag     !   shop.example.org         route_contradicted  1    │  workload prod/deployment/backend                                                             
+ flag     !   ingress/prod/bad         skipped             -    │basis      route (the FQDN's route through an ingress; completed from the map, not traced)     
                                                                 │carries    route, 3 connections                                                                
                                                                 │map        discovered                                                                          
                                                                 │seen       2025-11-20 12:00:00 - 2025-11-20 12:00:00 UTC                                       
@@ -31,13 +31,13 @@ iormesh · shop · 2025-11-20 12:00:00 – 12:01:00 UTC · 3 services · 2 edges
 ----
 iormesh · shop · 2025-11-20 12:00:00 – 12:01:00 UTC · 3 services · 2 edges · 2 routed · 2 conversations                                                         
  1 services  2 edges  3 conversations  4 sequence  5 threads  6 processes  7 health                                                                             
- FROM            TO                       STATE               C…│route flag route_contradicted                                                                  
- gateway     ->  orders                   fused               3 │subject    shop.example.org                                                                    
- orders      ->  "db\x1b[2J"              unresolved          1 │detail     asked for it, reached prod/other                                                    
- orders      =>  prod/statefulset/db      routed service      1 │conns      1                                                                                   
- gateway     =>  prod/deployment/backend  routed route        3 │                                                                                               
- route flag  !   shop.example.org         route_contradicted  1 │the route map and the traces disagree here, or the map left it open                            
- route flag  !   ingress/prod/bad         skipped             - │                                                                                               
+ FROM         TO                       STATE               CONNS│route flag route_contradicted                                                                  
+ gateway  ->  orders                   fused               3    │subject    shop.example.org                                                                    
+ orders   ->  "db\x1b[2J"              unresolved          1    │detail     asked for it, reached prod/other                                                    
+ orders   =>  prod/statefulset/db      routed service      1    │conns      1                                                                                   
+ gateway  =>  prod/deployment/backend  routed route        3    │                                                                                               
+ flag     !   shop.example.org         route_contradicted  1    │the route map and the traces disagree here, or the map left it open                            
+ flag     !   ingress/prod/bad         skipped             -    │                                                                                               
                                                                 │                                                                                               
                                                                 │                                                                                               
                                                                 │                                                                                               

@@ -53,11 +53,15 @@ func TestBrowserSelftest(t *testing.T) {
 }
 
 // selftestRoutes is how many routes app.js's selftest renders for m:
-// the five screens, then every service, edge, routed edge, route flag,
-// thread, process, conversation and step — so a screen the selftest
-// skipped (the routed edges, task bf4) fails the count.
+// the five screens, three guarded deep links, then every service, edge,
+// routed edge, route flag, thread, process, conversation and step — so
+// a screen the selftest skipped (the routed edges, task bf4) fails the
+// count.
 func selftestRoutes(m viewmodel.Model) int {
-	n := 5 + len(m.Services) + len(m.Edges) + len(m.Routes) + len(m.Health.RouteFlags) + len(m.Threads) +
+	// The 3: the out-of-range and hostile deep links the selftest checks
+	// land on their "no such …" guard (mesh/route/999, mesh/flag/-1,
+	// mesh/route/__proto__).
+	n := 5 + 3 + len(m.Services) + len(m.Edges) + len(m.Routes) + len(m.Health.RouteFlags) + len(m.Threads) +
 		len(m.Processes)
 	for _, c := range m.Conversations {
 		n += 1 + len(c.Steps)

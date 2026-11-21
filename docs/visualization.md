@@ -593,7 +593,7 @@ hops live only in the routed edge.
   `textContent`.
 - **TUI**: the edges screen lists the routed edges after the
   traced ones (client, `=>`, last hop, `routed BASIS`) and each
-  flag as a row (subject, kind); the detail spells out the chain,
+  flag as a row (`flag`, subject, kind); the detail spells out the chain,
   what the basis means, and the flags about it. A service's
   detail lists the routed edges leaving it; the title counts them;
   the health screen's summary has the `routed` and `route flag`
@@ -606,7 +606,9 @@ existing goldens hold. Tests: `internal/render`
 routes unchanged), `internal/tui` (`testdata/routes_edges.golden`,
 hostile names at every size, empty lists unchanged),
 `internal/site` (the routes through the data block and graph.svg,
-the browser selftest rendering every routed edge and flag) and
+the browser selftest rendering every routed edge and flag, and
+checking that `#/mesh/route/999`, `#/mesh/flag/-1` and
+`#/mesh/route/__proto__` land on their "no such …" guard) and
 `internal/ctl` (`testdata/routes_graph_svg.golden` from the
 ClusterIP build).
 

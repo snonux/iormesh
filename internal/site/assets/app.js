@@ -323,6 +323,8 @@
     return out;
   }
 
+  // routeNote and flagText are the Go twins viewmodel.RouteNote and
+  // viewmodel.FlagText (what `build` prints): keep their wording in step.
   function routeNote(r) {
     let s = r.basis + ', ' + (r.conns || 0) + ' connections';
     if (r.basis === 'service' && !r.pod && r.endpoints > 1) { s += '; ' + r.endpoints + ' endpoints, pod unknown'; }
@@ -843,10 +845,19 @@
       routes.push(['conv', c.id]);
       arr(c.steps).forEach(function (s, n) { routes.push(['conv', c.id, 'step', n + 1]); });
     }
+    // Deep links past the lists, or not numbers at all (a pasted or
+    // forged hash), must land on their "no such …" guard, not throw or
+    // index a prototype.
+    const guarded = [['mesh', 'route', 999], ['mesh', 'flag', -1], ['mesh', 'route', '__proto__']];
     const failed = [];
-    for (const r of routes) {
+    for (const r of routes.concat(guarded)) {
       try { show(r.map(String)); } catch (e) { failed.push(r.join('/') + ': ' + e); }
     }
+    for (const r of guarded) {
+      show(r.map(String));
+      if (document.getElementById('detail').textContent.indexOf('no such') < 0) { failed.push(r.join('/') + ': no guard shown'); }
+    }
+    routes.push.apply(routes, guarded);
     const out = el('pre', '', failed.length ? 'selftest: FAILED\n' + failed.join('\n') : 'selftest: ok ' + routes.length + ' routes');
     out.id = 'selftest';
     document.getElementById('view').replaceChildren(out);
