@@ -2369,9 +2369,15 @@ would overturn it), and deferred.
   version with other bytes is refused, as for the tracer. A
   confined session's `-agent` may name only that file, so root
   never loads a jar the release key did not sign: the tracer's
-  "never run unverified code" rule covers the jar. JVMs matched
-  at exec get it through `-javaagent` (e.g. `JAVA_TOOL_OPTIONS`),
-  pointing at the same installed file. Overturned if the owner
+  "never run unverified code" rule covers the jar; `start`
+  forwards the checked, resolved jar path to its unit, whose run
+  re-checks it. The installed jar has no version of its own, so
+  a tracer upgrade to another version removes it under the
+  upgrade lock and the next deploy installs the matching one
+  (until then `-agent` fails, closed). JVMs matched at exec get
+  it through `-javaagent` pointing at the same installed file
+  (the M4 runner sets `JAVA_TOOL_OPTIONS`; the product sets
+  nothing in a JVM's environment). Overturned if the owner
   wants the jar inside the tracer binary (one artifact, extracted
   at start) or a separate key for it.
 - **#24 Service-interaction database** — controller-side:

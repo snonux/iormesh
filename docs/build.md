@@ -282,6 +282,13 @@ iormeshctl verify dist/iormesh-linux-amd64   # the controller's check
   is `internal/version.Version`, bumped per release. The tracer
   and the controller both check the signed `file:` and
   `version:`, so the comment is part of what is verified.
+- **Rebuilding without a version bump**: through the sudoers
+  rule `upgrade` refuses a jar (as a tracer) with other bytes
+  under an installed version, so a rebuilt and re-signed jar at
+  the same version makes `iormeshctl deploy` fail on every host
+  that already has the jar — closed, nothing is started there.
+  Bump `internal/version.Version` for a release, or reinstall
+  as root for a test host (docs/testing.md, the M4 runbook).
 - **Library**: `aead.dev/minisign`, pinned by go.mod/go.sum
   (and `golang.org/x/crypto` for BLAKE2b and scrypt). The files
   are ordinary minisign: `minisign -Vm FILE -p iormesh.pub`

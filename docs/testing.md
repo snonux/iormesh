@@ -876,7 +876,13 @@ not run against real hosts. What ran here:
   `internal/cli` (`TestUpgradeInstallsAgentJar`,
   `TestUpgradeRefusesAgentJar`, `TestUpgradeRefusesAgentLayout`,
   the confined `-agent` in `TestRunConfinement`); 21 mutants of
-  the new checks were each killed by a test.
+  the new checks were each killed by a test. The review round
+  added `TestStartForwardsResolvedAgent` (a symlink to the jar
+  passes, the unit argv carries the resolved path, never the
+  symlink), `TestStartForwardsCleanSpool`,
+  `TestStartRefusesOtherAgent`, `TestConfinementSymlinkedAgent`,
+  `TestUnitRunIsConfined`, `TestUpgradeTracerDropsAgent` and the
+  0644 check; 7 more mutants, each killed.
 - `mage m4Acceptance m4-host1.invalid m4-host2.invalid` (real
   SSH transport, a throwaway key and dist): the preflight fails
   on the first `ssh … pwd`, every other criterion is NOT RUN,

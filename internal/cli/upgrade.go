@@ -193,6 +193,9 @@ func (u upgrader) lockedInstall(m release.Meta, data []byte, allowDowngrade bool
 		return fmt.Errorf("upgrade: %w", err)
 	}
 	_, _ = fmt.Fprintf(u.stdout, "iormesh: upgraded %s from %s to %s\n", u.bin(), u.running, m.Version)
+	if m.Version != u.running {
+		return u.dropAgent(m.Version)
+	}
 	return nil
 }
 

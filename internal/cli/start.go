@@ -50,7 +50,11 @@ var startOnly = map[string]bool{"cpu-quota": true, "memory-max": true, "wait": t
 
 // pathFlags are run's flags that name files and that a confined start
 // accepts: the unit runs in /, so start makes them absolute against its
-// own working directory first.
+// own working directory first, and finally forwards the very value the
+// confinement checked (checkedPath) — never the caller's spelling, which
+// for -agent may be a symlink the caller re-points after the check. A
+// flag added here without a case in checkedPath fails every start that
+// sets it (fail closed).
 var pathFlags = map[string]bool{"spool": true, "agent": true, "trace-dir": true}
 
 // control runs the unit subcommands (start, stop, status, uninstall).
@@ -202,8 +206,50 @@ func (c control) finishStart(cfg startConfig, rf runFlags) (startConfig, error) 
 	if err := c.confine.check(cfg.run); err != nil {
 		return cfg, err
 	}
+	if cfg.runArgs, err = forwardChecked(cfg.runArgs, cfg.run); err != nil {
+		return cfg, err
+	}
 	cfg.unit, err = unitName(cfg.run.project)
 	return cfg, err
+}
+
+// forwardChecked replaces each path flag in args with the value the
+// confinement checked (task kf4's review): -agent with the jar's
+// resolved real path, whose every directory is root's (trustedAgent), so
+// nothing the caller owns lies between the check and the unit's run;
+// -spool and -trace-dir with their cleaned absolute paths, equal to the
+// pinned ones. The unit's run checks them once more (unitConfinedEnv).
+func forwardChecked(args []string, run runConfig) ([]string, error) {
+	out := make([]string, 0, len(args))
+	for _, a := range args {
+		name, val, _ := strings.Cut(strings.TrimPrefix(a, "-"), "=")
+		if pathFlags[name] && val != "" { // an empty value names no file
+			v, err := checkedPath(run, name)
+			if err != nil {
+				return nil, err
+			}
+			a = "-" + name + "=" + v
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+// checkedPath is run's checked value of path flag name.
+func checkedPath(run runConfig, name string) (string, error) {
+	var v string
+	switch name {
+	case "agent":
+		v = run.agent
+	case "spool":
+		v = filepath.Clean(run.spool)
+	case "trace-dir":
+		v = filepath.Clean(run.traceDir)
+	}
+	if v == "" || v == "." || !filepath.IsAbs(v) {
+		return "", fmt.Errorf("%w: -%s: no checked absolute value to forward", errUsage, name)
+	}
+	return v, nil
 }
 
 func (cfg startConfig) validateCaps() error {
@@ -278,6 +324,8 @@ func (cfg startConfig) unitArgs(self string) []string {
 		"--property=MemoryMax=" + cfg.memoryMax,
 		"--property=KillSignal=SIGTERM",
 		"--property=TimeoutStopSec=" + seconds(stopTimeout),
+		// The unit's run re-applies start's confinement (confine.go).
+		"--setenv=" + unitConfinedEnv + "=1",
 		"--", self, "run",
 	}, cfg.runArgs...)
 }

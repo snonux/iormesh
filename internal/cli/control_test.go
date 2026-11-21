@@ -163,7 +163,7 @@ func TestStartUnitArgv(t *testing.T) {
 	want := []string{"--unit=iormesh-shop.service", "--description=iormesh tracer, project shop",
 		"--collect", "--quiet", "--service-type=exec",
 		"--property=RuntimeMaxSec=3900s", "--property=CPUQuota=50%", "--property=MemoryMax=1G",
-		"--property=KillSignal=SIGTERM", "--property=TimeoutStopSec=30s",
+		"--property=KillSignal=SIGTERM", "--property=TimeoutStopSec=30s", "--setenv=IORMESH_CONFINED_UNIT=1",
 		"--", "/opt/iormesh/bin/iormesh", "run",
 		"-duration=1h0m0s", "-native-stacks=true", "-pattern=*orders*", "-project=shop",
 		"-trace-dir=" + filepath.Join(cwd, "traces"), "-ready-owner=1000:1001"}

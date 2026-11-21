@@ -3474,7 +3474,10 @@ ssh H sudo -n /opt/iormesh/bin/iormesh status -project shop
   installs a file signed as `iormesh-agent.jar` at
   `/opt/iormesh/lib/iormesh-agent.jar` only at its own version
   (PLAN.md #28, provisional). A host whose projects do not use
-  the agent gets no jar.
+  the agent gets no jar. A tracer upgrade to another version
+  removes the installed jar (it matched the old tracer); `start`
+  forwards `-agent` as the checked real path and its unit re-checks
+  it (`IORMESH_CONFINED_UNIT`).
 - Under sudo runs only `/opt/iormesh/bin/iormesh` with `upgrade`,
   `start`, `stop` and `status`; `sudo -n` fails instead of
   prompting when the rule is missing. Every argv element is

@@ -161,6 +161,12 @@ func TestUpgradeRefusesAgentLayout(t *testing.T) {
 			}
 			return r.stage(t, []byte("new jar"), agentMeta), false
 		}, "group or other may write"},
+		{"private jar", true, func(t *testing.T, r *upgradeRig) (string, bool) {
+			if err := os.Chmod(r.u.agentPath(), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return r.stage(t, []byte("new jar"), agentMeta), false
+		}, "want 0644"},
 		{"symlinked jar", false, func(t *testing.T, r *upgradeRig) (string, bool) {
 			mustMkdir(t, filepath.Dir(r.u.agentPath()))
 			if err := os.Symlink(filepath.Join(r.staging, "x"), r.u.agentPath()); err != nil {
@@ -182,5 +188,32 @@ func TestUpgradeAgentRootReinstall(t *testing.T) {
 	}
 	if got := r.installedAgentBytes(t); string(got) != "rebuilt jar" {
 		t.Fatalf("installed jar %q", got)
+	}
+}
+
+// TestUpgradeTracerDropsAgent (task kf4's review, N1): a tracer upgrade
+// to another version removes the jar checked against the old one, so the
+// new tracer never loads a jar of another release; a same-version
+// reinstall (root) and a no-op keep it.
+func TestUpgradeTracerDropsAgent(t *testing.T) {
+	r := newUpgradeRig(t)
+	if err := r.u.upgrade(r.stage(t, []byte("agent jar"), agentMeta), false); err != nil {
+		t.Fatal(err)
+	}
+	same := release.Meta{File: "iormesh-linux-amd64", Version: "1.2.0"}
+	if err := r.u.upgrade(r.stage(t, []byte("rebuilt tracer"), same), false); err != nil {
+		t.Fatal(err)
+	}
+	if r.installedAgentBytes(t) == nil {
+		t.Fatal("a same-version tracer reinstall removed the jar")
+	}
+	if err := r.u.upgrade(r.stage(t, []byte("new tracer"), goodMeta), false); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.installedAgentBytes(t); got != nil {
+		t.Fatalf("jar %q kept after the tracer moved to 1.3.0", got)
+	}
+	if !strings.Contains(r.out.String(), "removed "+r.u.agentPath()) {
+		t.Errorf("output %q", r.out.String())
 	}
 }

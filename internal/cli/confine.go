@@ -17,8 +17,9 @@ import (
 // world-writable. So through the rule only the lifecycle subcommands run
 // at all (sudoAllowed; normalize -out, say, would overwrite any file),
 // and every session started that way is confined: start always (whoever
-// calls it, its unit runs as root), and run when it came through the
-// rule (sudoGated). A confined session's -agent is pinned too: root
+// calls it, its unit runs as root), run when it came through the rule
+// (sudoGated), and the unit's run of a start again (unitConfinedEnv),
+// which gets exactly the values start checked. A confined session's -agent is pinned too: root
 // live-loads it into JVMs of every user, so through the rule it may name
 // only the jar `iormesh upgrade` verified and installed (task kf4).
 const (
@@ -100,12 +101,20 @@ func sudoCommandGate(cmd string) error {
 	return checkSudoCommand(cmd, self, os.Getenv, os.Lstat)
 }
 
+// unitConfinedEnv marks the run of a unit `start` launched (start sets it
+// with systemd-run --setenv): start checked the session's flags already,
+// and the unit's run checks them again — defence in depth, so a path
+// start checked but something changed before the unit ran (task kf4's
+// review: a re-pointed -agent symlink) is refused there too. The variable
+// only ever adds confinement, so setting it by hand gains nothing.
+const unitConfinedEnv = "IORMESH_CONFINED_UNIT"
+
 // runConfinement decides whether a run is confined: it came through the
-// sudoers rule (sudoGated). A build run with `sudo ./iormesh run -out DIR`
-// — standalone use, the operator's own full sudo — is not; nor is the
-// unit's run, which start confined.
+// sudoers rule (sudoGated), or it is the unit's run of a start
+// (unitConfinedEnv). A build run with `sudo ./iormesh run -out DIR` —
+// standalone use, the operator's own full sudo — is not.
 func runConfinement(self string, env func(string) string) (confinement, bool) {
-	if !sudoGated(self, env, os.Lstat) {
+	if !sudoGated(self, env, os.Lstat) && env(unitConfinedEnv) != "1" {
 		return confinement{}, false
 	}
 	return defaultConfinement(env), true

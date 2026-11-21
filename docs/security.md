@@ -215,6 +215,15 @@ truth.
     root alone. Root loads it into every user's JVM (and the
     JVM user loads it with `-javaagent`), so it gets the
     tracer's rule: never run unverified code.
+    The installed jar carries no version of its own, so its
+    match with the tracer is kept by the upgrades: an upgrade of
+    the tracer to another version removes the jar under the
+    same lock (it was checked against the old tracer), and the
+    next deploy with an agent project installs the matching one.
+    Until then a session's `-agent` and a JVM's `-javaagent`
+    fail — closed, never an old jar under a new tracer (task
+    kf4's review). An installed jar must be exactly 0644 and
+    root's; anything else is refused, not repaired.
   - **`iormeshctl deploy`** (task db4) verifies the build and
     its signature on the controller before each host's push,
     stages both in the deploying user's `~/.iormesh/staging`
@@ -269,9 +278,17 @@ truth.
   refused: "not allowed through the sudoers rule; run it
   without sudo or as root directly".
   Sessions are confined: `start` always (its unit runs as
-  root), and `run` under the same gate (a build run with the
-  operator's own full sudo, `sudo ./iormesh run -out DIR`, and
-  the unit's own run are not). Confined:
+  root), `run` under the same gate (a build run with the
+  operator's own full sudo, `sudo ./iormesh run -out DIR`, is
+  not), and the unit's own run again: `start` launches it with
+  `IORMESH_CONFINED_UNIT=1` (`systemd-run --setenv`), which only
+  ever adds confinement, so the unit re-checks what `start`
+  checked. `start` forwards to the unit the values it checked,
+  not the caller's spelling of them: `-agent` as the jar's
+  resolved real path, whose every directory is root's, `-spool`
+  and `-trace-dir` cleaned and absolute — a symlink the caller
+  re-points between the check and the unit's start changes
+  nothing (task kf4's review). Confined:
   - `-out`, `-cpuprofile` and `-ready` are refused — each
     creates, truncates or removes whatever file it names;
   - `-trace-dir` must be `/opt/iormesh/traces` (after cleaning;
@@ -291,7 +308,9 @@ truth.
     euid, root under sudo) and not be group- or other-writable,
     sticky directories excepted — so a sudoer cannot have root
     load a jar they could rewrite, nor one the release key
-    never signed.
+    never signed. Since `start` is always confined, root's own
+    `start` too takes only the installed jar; a jar of root's
+    choice goes through `run` directly.
   - the test-only clock skew `IORMESH_TEST_CLOCK_SKEW`
     ([testing.md](testing.md)) is refused, by `start` always —
     so a sudoer cannot have a root session record falsified

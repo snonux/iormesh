@@ -80,12 +80,25 @@ func (u upgrader) agentDir() error {
 	return u.checkDir(dir, os.Lstat)
 }
 
+// agentCheck admits an installed jar only as installFile leaves it: the
+// owner's, mode exactly 0644 — writable by nobody else, readable by
+// every JVM user it is loaded into (a 0600 jar would fail their JVMs).
+func (u upgrader) agentCheck(path string, info fs.FileInfo) error {
+	if err := release.OwnedBy(u.owner)(path, info); err != nil {
+		return err
+	}
+	if perm := info.Mode().Perm(); perm != 0o644 {
+		return fmt.Errorf("%w: %s has mode %v, want 0644", release.ErrUnsafeFile, path, perm)
+	}
+	return nil
+}
+
 // sameAgent reports whether data is the installed jar's content. No jar
-// yet is false; an installed jar that is not a regular file the owner
-// owns, writable by nobody else, is refused; other bytes under the same
-// version are refused through the rule (lockedInstallAgent's reasoning).
+// yet is false; an installed jar that is not a regular file agentCheck
+// admits is refused, never repaired; other bytes under the same version
+// are refused through the rule (lockedInstallAgent's reasoning).
 func (u upgrader) sameAgent(data []byte) (bool, error) {
-	installed, err := release.ReadFile(u.agentPath(), release.MaxBinarySize, release.OwnedBy(u.owner))
+	installed, err := release.ReadFile(u.agentPath(), release.MaxBinarySize, u.agentCheck)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
@@ -100,4 +113,24 @@ func (u upgrader) sameAgent(data []byte) (bool, error) {
 			"new build must carry a new version", release.AgentFile, u.running)
 	}
 	return false, nil
+}
+
+// dropAgent removes the installed jar after the tracer moved to another
+// version, under the upgrade lock (task kf4's review, N1): the jar was
+// checked against the old tracer only, and the installed jar carries no
+// version of its own, so keeping it would let the new tracer load a jar
+// of another release. Without a jar, a session's -agent and a JVM's
+// -javaagent fail until the next deploy installs the matching one —
+// closed, not open. A same-version reinstall (root only) keeps it.
+func (u upgrader) dropAgent(newVersion string) error {
+	err := os.Remove(u.agentPath())
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("upgrade: the tracer is now %s, but its old agent jar stays: %w", newVersion, err)
+	}
+	_, _ = fmt.Fprintf(u.stdout, "iormesh: removed %s, signed for %s; deploy installs the %s jar\n",
+		u.agentPath(), u.running, newVersion)
+	return nil
 }

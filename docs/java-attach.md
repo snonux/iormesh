@@ -40,8 +40,16 @@ JAVA_TOOL_OPTIONS=-javaagent:/opt/iormesh/lib/iormesh-agent.jar=spool=/run/iorme
     java -jar shop.jar
 ```
 
-The M4 acceptance starts its microservices that way
+That line is an example for operators, not something iormesh
+sets: the product never touches a JVM's environment. The M4
+acceptance runner uses it to start its microservices
 ([testing.md](testing.md#m4-acceptance-on-two-real-hosts-task-lb4)).
+Mind what `JAVA_TOOL_OPTIONS` does: every JVM started with it
+in its environment prints `Picked up JAVA_TOOL_OPTIONS: …` on
+stderr, and child processes inherit it, so a JVM that spawns
+other JVMs loads the agent into all of them (each writing its
+ring into the same spool) — prefer `-javaagent` on the command
+line where the pattern allows it.
 
 ## Live attach
 
