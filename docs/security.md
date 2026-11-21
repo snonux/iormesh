@@ -454,19 +454,23 @@ truth.
     `mage selinuxRPM`) confines the tracer to its own type,
     `iormesh_container_t` — container-selinux's container
     template as for `container_t` (MCS-constrained), plus only
-    `bpf`, `perf_event`, read-only tracefs, and the Java attach
-    to `container_t` processes (their `/proc` entries, one
-    signal, the attach socket). It grants no capability: six of
-    the tracer's seven (all but `KILL`) reach the type only
-    through container-selinux's `virt_sandbox_use_all_caps`
-    boolean, on by default — keep it on, or the BPF load fails on
-    `capability2 { bpf perfmon }`. Run it at the pod's own MCS
+    the tracer's seven capabilities, `bpf`, `perf_event`,
+    read-only tracefs, and the Java attach to `container_t`
+    processes (their `/proc` entries, one signal, the attach
+    socket). Granting the capabilities itself, the type does not
+    depend on container-selinux's `virt_sandbox_use_all_caps`
+    boolean (task gh4: M7 passed on el9 with it off and on); the
+    app containers, `container_t`, still get six of those
+    capabilities only through it. Run it at the pod's own MCS
     pair (`-selinux-type iormesh_container_t -selinux-level
     s0:cN,cM`), and the pod's shared files keep the pair. MCS
     then confines the signal, the `/proc` file and link reads and
     directory search, and filesystem-socket writes to the pod's
-    own app containers (and any `container_t` at plain `s0`); at
-    `s0` the Java attach is denied. It does not confine the
+    own app containers (and any `container_t` at plain `s0`); a
+    tracer at another pair than the app's was denied the search
+    of the JVM's `/proc/<pid>` on el9 and never attached (task
+    gh4), and at `s0` the Java attach is denied the same way. It
+    does not confine the
     attach socket's `connectto` (an abstract socket, bounded by
     the pod's network namespace) or `/proc` `open`/`getattr`
     (bounded by the tracer's PID namespace). Where owners pin one
@@ -476,7 +480,7 @@ truth.
     become `unlabeled_t`. The rules and
     the el9 run are in PLAN.md #13 and
     [testing.md](testing.md#dedicated-type-iormesh_container_t-task-7h4-2026-11-21)
-    (task 7h4);
+    (tasks 7h4, gh4);
   - mounts the host's tracefs read-only and nothing else of the
     host; traces live in a size-bounded `emptyDir` of the pod.
     The pod must carry both volumes before the tracer comes

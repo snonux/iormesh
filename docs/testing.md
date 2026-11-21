@@ -2609,10 +2609,11 @@ selinuxRPM podman` on the laptop and was installed with `dnf`; its
 `container` and `k3s` ones, and a `dnf remove` (its `%postun`)
 unloaded it again. (Since the policy review the spec installs and
 removes at priority 200, `semodule -X 200`, leaving 400 to local
-overrides; that RPM has not been installed on el9 yet.) The run
-relied on container-selinux's `virt_sandbox_use_all_caps` boolean,
-on by default, for the tracer's capabilities (PLAN.md #13); it was
-not turned off. Two harness variables run the acceptance with
+overrides; task gh4 installed that RPM, below.) These runs relied
+on container-selinux's `virt_sandbox_use_all_caps` boolean, on by
+default, for the tracer's capabilities; it was not turned off.
+Task gh4's module grants them itself and passed with it off.
+Two harness variables run the acceptance with
 another type and level: `IORMESH_K8S_SELINUX_TYPE` and
 `IORMESH_K8S_SELINUX_LEVEL` (default `spc_t` and `s0`). They go
 into the registry's `k8s:` and the sidecar patch, the spec check
@@ -2678,6 +2679,71 @@ exactly these permissions; the permissive module was removed and
 the dontaudit rules restored (`semodule -B`) before runs 3 to 5.
 Not run: the type at `s0` (MCS refuses the Java attach there,
 PLAN.md #13), a multi-node cluster, a pod without a pinned level.
+
+**Without the boolean (task gh4, 2026-11-21).** The module now
+grants the tracer's seven capabilities itself
+(`self:capability { dac_override kill sys_ptrace sys_resource }`,
+`self:capability2 { bpf perfmon checkpoint_restore }`). Same VM
+(4 GB), same versions; the RPM from `mage selinuxRPM podman`.
+
+- *Install at priority 200:* `dnf install` put the module beside
+  the packaged ones, `semodule -lfull`: `200 container`,
+  `200 iormesh`, `200 k3s`.
+- *MCS:* `seinfo -a mcs_constrained_type -x | grep
+  iormesh_container_t` printed `iormesh_container_t` (setools
+  installed for this and removed again). `sesearch` showed
+  `capability2 { bpf checkpoint_restore perfmon }` for the type
+  without a condition, where `container_t` has them only under
+  `[ virt_sandbox_use_all_caps ]:True`.
+- *The acceptance,* iptables, `iormesh_container_t` at
+  `s0:c100,c200` as above:
+
+| Run | Boolean (`setsebool`, not `-P`) | Result |
+|---|---|---|
+| 1 | off | FAIL, not the tracer: the app containers' JVMs (`container_t`, root) were denied `capability { dac_override }` opening `workload.jar` (2 AVCs), so no scenario started; the tracers attached |
+| 2 | off, plus a temporary local CIL module at priority 400, `(allow container_t self (capability (dac_override)))` | PASS: `TestKindAcceptance` (all six subtests, SIGTERM exit 0 in 658 ms) and `TestKindClusterIP`, no AVC |
+| 3 | on, the CIL module removed | PASS, both tests (SIGTERM exit 0 in 721 ms), no AVC |
+
+`ps -eZ` showed the tracers as `iormesh_container_t:s0:c100,c200`
+and the JVMs as `container_t` at the same pair. The raw
+`/var/log/audit/audit.log` and its rotations, read by timestamp,
+held no `AVC`, `USER_AVC` or `SELINUX_ERR` during runs 2 and 3.
+Run 1 shows that the boolean is still the app containers' matter:
+a node owner who turns it off must give their own containers what
+they need.
+
+- *Cross-pair containment:* one pod (`shareProcessNamespace`)
+  with its level pinned at `s0:c300,c400`: the app container ran a
+  gated `file-basic` JVM as `container_t:s0:c300,c400`, the tracer
+  container `run -pattern '*workload.jar*' -spool … -agent …` as
+  `iormesh_container_t:s0:c100,c200`, dontaudit rules off
+  (`semodule -DB`) so the denials are logged. The tracer loaded
+  its programs ("attached, tracing pattern"), but the pattern never
+  matched the JVM, and `kubectl exec … iormesh attach -pid 8`
+  (the JVM's pid in the pod) failed "no such process". The audit
+  log:
+
+  ```
+  avc:  denied  { search } for  pid=27986 comm="iormesh" name="8"
+  dev="proc" ino=154534
+  scontext=system_u:system_r:iormesh_container_t:s0:c100,c200
+  tcontext=system_u:system_r:container_t:s0:c300,c400 tclass=dir
+  permissive=0
+  ```
+
+  and the same `search` denial for the pause process (`/proc/1`)
+  and for the processes `kubectl exec` started in the pod. MCS
+  stops the attach at its first step; the signal and socket are
+  never reached. The pod was deleted and `semodule -B` restored
+  the dontaudit rules.
+- *Removal:* `dnf remove iormesh-selinux` unloaded it at priority
+  200 ("Removing last iormesh module"); `semodule -lfull` listed
+  no `iormesh` and `seinfo -t iormesh_container_t` no type.
+
+After the run the boolean was on, `el9-k3s.sh down` left the same
+372 packages and the same `/opt/iormesh`, iom1 was stopped and set
+back to 2 GB, the laptop's Docker images matched the state before,
+Docker was stopped, the tunnel closed and the kubeconfig deleted.
 
 #### Debug tracer replacement on kind (task ah4, 2026-11-21)
 

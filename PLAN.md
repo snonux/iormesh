@@ -2918,7 +2918,9 @@ here only as placeholders.
   `container_t`'s attributes `container_net_domain`,
   `container_user_domain`, `sandbox_net_domain`,
   `sandbox_caps_domain` and `svirt_sandbox_domain`, and exactly
-  these allow rules: zg4's
+  these allow rules: the tracer's seven capabilities (task gh4),
+  `self:capability { dac_override kill sys_ptrace sys_resource }`
+  and `self:capability2 { bpf perfmon checkpoint_restore }`; zg4's
   `self:bpf { map_create map_read map_write prog_load prog_run }`,
   `self:perf_event { open cpu kernel read write tracepoint }`,
   `tracefs_t:dir { search read open getattr }` and
@@ -2935,13 +2937,18 @@ here only as placeholders.
   (container-selinux dontaudits a container domain searching
   another domain's `/proc/<pid>`). No wildcard, no permissive,
   no MCS exemption: unit tests pin the rule text. The module
-  grants no capability: six of the tracer's seven (all but
-  `KILL`) reach the type, as they reach `container_t`, only
-  through container-selinux's `virt_sandbox_use_all_caps`
-  boolean, on by default; with it off the BPF load fails on
-  `capability2 { bpf perfmon }`, so the boolean must stay on
-  (explicit capability rules are a follow-up for the next el9
-  window). MCS is why the level must be the pod's pair, but it
+  grants the seven capabilities itself, so the type no longer
+  depends on container-selinux's `virt_sandbox_use_all_caps`
+  boolean, through which six of them (all but `KILL`) reach
+  `container_t` and, before task gh4, reached this type too (with
+  the boolean off its BPF load failed on `capability2 { bpf
+  perfmon }`). On el9 the M7 acceptance passed with the boolean
+  off and on (task gh4); the boolean still matters to the app
+  containers, `container_t`: with it off the workload's JVM,
+  running as root, was denied `capability dac_override` opening
+  its jar, so that run gave `container_t` back `dac_override`
+  alone through a temporary local module. MCS is why the level
+  must be the pod's pair, but it
   does not gate every rule: it gates the signal, the `file` and
   `lnk_file` reads, `dir` search and read, and writes to
   filesystem sockets, which at the pod's pair reach the pod's
@@ -2953,11 +2960,17 @@ here only as placeholders.
   getattr` (bounded by what the tracer's PID namespace shows).
   Where owners pin one pair per Deployment or namespace, shared
   by its replicas, MCS separates none of those pods and
-  containment rests on the namespaces alone. At `s0` the tracer
+  containment rests on the namespaces alone. A tracer at another
+  pair than the app's is kept out: on el9 a tracer at
+  `s0:c100,c200` beside an app container at `s0:c300,c400` loaded
+  its BPF programs, but its pattern never matched the JVM and
+  `iormesh attach` found no such process, with `avc: denied {
+  search }` on `/proc/<pid>` (`tcontext=container_t:s0:c300,c400`,
+  logged with dontaudit rules off; task gh4). At `s0` the tracer
   can neither read the app's files through `/proc/<pid>/root`
   nor signal or search its processes, so the Java attach is
-  denied (BPF tracing still works; this follows from the MCS
-  constraint and was not run). An MCS exemption
+  denied (BPF tracing still works; this follows from the same MCS
+  constraint and was not run at `s0`). An MCS exemption
   (`mcs_constrained` left out, or `mcsreadall`) would make `s0`
   work but let the tracer read any pod's `container_file_t`
   files and reach any container's processes its namespaces
@@ -2968,7 +2981,9 @@ here only as placeholders.
   passed with it under iptables and nftables, no AVC, app
   containers `container_t` at the pod's pair
   ([testing.md](docs/testing.md#dedicated-type-iormesh_container_t-task-7h4-2026-11-21)),
-  and `spc_t` still passed with the module absent.
+  and `spc_t` still passed with the module absent; task gh4's
+  RPM with the capability rules loaded and unloaded at priority
+  200 and passed under iptables with the boolean off and on.
   Owner to confirm: `spc_t` and `s0`
   as the fleet default, no tenant hostPath to the kubelet
   directories, whether fleet pods pin MCS levels, where nodes
