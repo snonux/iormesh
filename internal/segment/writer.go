@@ -139,13 +139,14 @@ func New(cfg Config) (*Writer, error) {
 }
 
 // Event implements schema.Sink. The event is validated (readers are
-// strict; a writer must not produce what they reject) and encoded into
+// strict; a writer must not produce what they reject; the error names the
+// rejected event, schema.Event.Brief) and encoded into
 // the open row group's columns at once (eventStream), which copies what
 // it keeps: the Sink contract lets the caller reuse the Event and
 // everything it points to after the call.
 func (w *Writer) Event(ev *schema.Event) error {
 	if err := ev.Validate(); err != nil {
-		return fmt.Errorf("segment: event seq %d: %w", ev.Seq, err)
+		return fmt.Errorf("segment: event seq %d (%s): %w", ev.Seq, ev.Brief(), err)
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()

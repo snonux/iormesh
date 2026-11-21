@@ -50,7 +50,7 @@ func (s *NDJSONSink) Event(ev *Event) error {
 		return s.err
 	}
 	if err := ev.Validate(); err != nil {
-		return fmt.Errorf("ndjson: event seq %d: %w", ev.Seq, err)
+		return fmt.Errorf("ndjson: event seq %d (%s): %w", ev.Seq, ev.Brief(), err)
 	}
 	// A nearly full buffer is flushed first, so the line is encoded in
 	// place: AvailableBuffer is empty with the buffer's free capacity, and

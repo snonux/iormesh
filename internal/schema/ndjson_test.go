@@ -42,8 +42,14 @@ func TestNDJSONRejectsInvalidEvent(t *testing.T) {
 	s := NewNDJSONSink(&buf)
 	bad := sampleEvent(1)
 	bad.Seq = 0
-	if err := s.Event(&bad); !errors.Is(err, ErrInvalid) {
+	err := s.Event(&bad)
+	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("invalid event: err %v, want ErrInvalid", err)
+	}
+	// The rejected record is not written, so the error names it (task
+	// mf4): its kind, process and fd are what debugging the producer needs.
+	if want := bad.Brief(); !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q does not name the event (%s)", err, want)
 	}
 	// A rejected event is the producer's bug, not a broken sink: the
 	// next valid event is still written.

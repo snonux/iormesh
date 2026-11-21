@@ -257,6 +257,14 @@ func KnownEndReason(reason string) bool {
 }
 
 // invalidf formats a validation failure wrapped in ErrInvalid.
+// Brief names an event for an error about it: its kind, process, thread
+// and fd. A writer that rejects an event drops it, so its error is the
+// only trace of the record left to debug the producer with (task mf4).
+func (e *Event) Brief() string {
+	return fmt.Sprintf("%q pid %d tid %d fd %d fd_gen %d ret %d",
+		e.Event, e.PID, e.TID, e.FD, e.FDGen, e.Ret)
+}
+
 func invalidf(format string, args ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{ErrInvalid}, args...)...)
 }
