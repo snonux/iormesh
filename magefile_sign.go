@@ -34,7 +34,10 @@ const (
 
 // Sign signs every binary in dist/ as its file name at internal/version's
 // Version, writing NAME.minisig, then verifies each signature with the
-// key's public half. The key comes from $IORMESH_MINISIGN_KEY (outside
+// key's public half. A file not stamped with that Version — the jar's
+// manifest Implementation-Version, a binary's version.Stamp — fails the
+// run before anything is signed (release.CheckStamp, task uf4): a stale
+// build is rebuilt, never signed as the release. The key comes from $IORMESH_MINISIGN_KEY (outside
 // the repository), its password from $IORMESH_MINISIGN_PASSWORD or the
 // terminal.
 func Sign() error {

@@ -103,7 +103,7 @@ func TestSignDirVerifyFile(t *testing.T) {
 	pub, priv := newKey(t)
 	dir := t.TempDir()
 	for _, name := range []string{"iormesh-linux-amd64", "iormesh-linux-arm64", ".hidden"} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name+stampOf("0.3.0")), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -2393,7 +2393,11 @@ would overturn it), and deferred.
   reaches a server, and M4's TLS label needs it there. `mage
   agentBuild` copies it to `dist/iormesh-agent.jar`, `mage
   sign` signs it at the release version (`file:
-  iormesh-agent.jar`), `iormeshctl deploy` verifies it with the
+  iormesh-agent.jar`) — and refuses to, as it refuses a tracer
+  or controller, when the artifact's own stamp (the jar's
+  manifest `Implementation-Version`, a binary's embedded
+  version) differs, so a stale build is never signed as the
+  release (task uf4) — `iormeshctl deploy` verifies it with the
   pinned key and ships it only to hosts with a project using
   `-spool` or `-agent`, and `iormesh upgrade` — no new
   subcommand, no wider sudoers rule — installs a file whose

@@ -97,7 +97,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	case "ready":
 		err = readyCommand(args[1:], stdout, stderr)
 	case "version", "-version", "--version":
-		_, _ = fmt.Fprintln(stdout, "iormesh", version.Version)
+		_, _ = fmt.Fprintln(stdout, "iormesh", version.Stamped()) // keeps version.Stamp linked in
 		return exitOK
 	case "help", "-h", "--help":
 		usage(stdout)

@@ -130,20 +130,30 @@ func VerifyFile(key minisign.PublicKey, path string) (Meta, error) {
 // SignDir signs every release binary in dir — each regular file not
 // itself a signature or hidden — as its own name at version, writing
 // NAME.minisig next to it. It is `mage sign`'s work; the private key never
-// leaves the caller.
+// leaves the caller. Every file must be stamped with ver (CheckStamp),
+// and all are checked before the first is signed, so one stale build
+// leaves dir unsigned rather than half signed at ver.
 func SignDir(key minisign.PrivateKey, dir, ver string, now time.Time) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("sign: %w", err)
 	}
-	var signed []string
+	var paths []string
 	for _, e := range entries {
 		name := e.Name()
 		if !e.Type().IsRegular() || strings.HasSuffix(name, SigSuffix) || strings.HasPrefix(name, ".") {
 			continue
 		}
-		path := filepath.Join(dir, name)
-		if err := signFile(key, path, Meta{File: name, Version: ver}, now); err != nil {
+		paths = append(paths, filepath.Join(dir, name))
+	}
+	for _, path := range paths {
+		if _, err := readStamped(path, ver); err != nil {
+			return nil, err
+		}
+	}
+	var signed []string
+	for _, path := range paths {
+		if err := signFile(key, path, Meta{File: filepath.Base(path), Version: ver}, now); err != nil {
 			return signed, err
 		}
 		signed = append(signed, path)
@@ -151,11 +161,24 @@ func SignDir(key minisign.PrivateKey, dir, ver string, now time.Time) ([]string,
 	return signed, nil
 }
 
-// signFile writes path's signature as m.
-func signFile(key minisign.PrivateKey, path string, m Meta, now time.Time) error {
+// readStamped reads path and requires its stamp to be ver.
+func readStamped(path, ver string) ([]byte, error) {
 	data, err := ReadFile(path, MaxBinarySize, nil)
 	if err != nil {
-		return fmt.Errorf("sign: %w", err)
+		return nil, fmt.Errorf("sign: %w", err)
+	}
+	if err := CheckStamp(filepath.Base(path), data, ver); err != nil {
+		return nil, fmt.Errorf("sign: %w", err)
+	}
+	return data, nil
+}
+
+// signFile writes path's signature as m, checking the stamp again on the
+// very bytes it signs.
+func signFile(key minisign.PrivateKey, path string, m Meta, now time.Time) error {
+	data, err := readStamped(path, m.Version)
+	if err != nil {
+		return err
 	}
 	sig, err := Sign(key, data, m, now)
 	if err != nil {

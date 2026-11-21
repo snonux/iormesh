@@ -171,7 +171,7 @@ func run(args []string, e env) int {
 	case "verify":
 		err = verifyCommand(args[1:], e)
 	case "version", "-version", "--version":
-		_, _ = fmt.Fprintln(e.stdout, "iormeshctl", version.Version)
+		_, _ = fmt.Fprintln(e.stdout, "iormeshctl", version.Stamped()) // keeps version.Stamp linked in
 		return exitOK
 	case "help", "-h", "--help":
 		usage(e.stdout)

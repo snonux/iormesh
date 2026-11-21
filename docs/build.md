@@ -282,6 +282,20 @@ iormeshctl verify dist/iormesh-linux-amd64   # the controller's check
   is `internal/version.Version`, bumped per release. The tracer
   and the controller both check the signed `file:` and
   `version:`, so the comment is part of what is verified.
+- **Stale builds are refused** (task uf4): every artifact
+  carries its own version, and `mage sign` checks all of them
+  against `internal/version.Version` before it signs any. The
+  jar's manifest has `Implementation-Version` (written by `mage
+  agentBuild`); the tracers and controllers carry
+  `version.Stamp`, `"\0iormesh-version:<x.y.z>\0"`, in their
+  rodata (kept linked by the `version` subcommands), read
+  statically, since the signing host cannot run an arm64 or
+  darwin build to ask its `--version`. A missing or different
+  stamp fails the run with `rebuild it` and leaves `dist/`
+  unsigned, so a jar or tracer left from an older build is never
+  signed as the new release. `TestControllerCrossCompiles` and
+  `TestTracerCarriesVersionStamp` (`internal/buildgate`) keep
+  the stamp in real builds.
 - **Rebuilding without a version bump**: through the sudoers
   rule `upgrade` refuses a jar (as a tracer) with other bytes
   under an installed version, so a rebuilt and re-signed jar at

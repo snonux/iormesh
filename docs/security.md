@@ -197,7 +197,9 @@ truth.
   - **The Java agent jar takes the same path** (task kf4,
     PLAN.md #28): `mage agentBuild` copies it to
     `dist/iormesh-agent.jar`, `mage sign` signs it at the
-    release version, and `iormesh upgrade FILE` installs a
+    release version (only if its manifest's
+    `Implementation-Version` is that version, task uf4;
+    [build.md](build.md) "Signing"), and `iormesh upgrade FILE` installs a
     file whose *signed* name is `iormesh-agent.jar` as
     `/opt/iormesh/lib/iormesh-agent.jar` — the same staged-file,
     pinned-key and read-once checks as for the tracer. Its

@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 
 	"github.com/magefile/mage/sh"
+
+	"iormesh/internal/version"
 )
 
 const (
@@ -137,12 +139,18 @@ func buildAgentCore() error {
 }
 
 // packAgent writes the agent jar: manifest, core classes and resources,
-// and the relocated ASM classes.
+// and the relocated ASM classes. The manifest's Implementation-Version
+// is the release version (internal/version), which `mage sign` requires
+// to equal the version it signs the jar as (release.CheckStamp, task
+// uf4): a jar left over from an older build is refused, not signed as
+// the new release.
 func packAgent() error {
 	manifest := filepath.Join(agentBuildDir, "MANIFEST.MF")
 	err := os.WriteFile(manifest, []byte("Premain-Class: "+agentMain+"\n"+
 		"Agent-Class: "+agentMain+"\n"+
-		"Can-Retransform-Classes: true\n"), 0o644)
+		"Can-Retransform-Classes: true\n"+
+		"Implementation-Title: iormesh-agent\n"+
+		"Implementation-Version: "+version.Version+"\n"), 0o644)
 	if err != nil {
 		return err
 	}
