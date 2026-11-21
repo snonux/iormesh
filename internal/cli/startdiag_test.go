@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 )
 
 // fakeSystemdPath puts shell stand-ins for systemd-run, systemctl and
@@ -15,7 +18,9 @@ import (
 // prints runStderr to stderr and exits 1, as el9's does when systemd
 // cannot exec the binary; journalctl prints journal; systemctl answers
 // show with an unknown unit (a --collect'ed one) and status with status,
-// exiting 3 as systemctl does for a failed or missing unit.
+// exiting 3 as systemctl does for a failed or missing unit. Unless
+// status gets --lines=0 it adds a journal line, standing for the log of a
+// racing start's unit of the same name (task 8g4).
 func fakeSystemdPath(t *testing.T, runStderr, journal, status string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -33,7 +38,9 @@ func fakeSystemdPath(t *testing.T, runStderr, journal, status string) {
 		"journalctl":  "#!/bin/sh\ncat '" + dir + "/journal.txt'\n",
 		"systemctl": "#!/bin/sh\ncase \"$1\" in\n" +
 			"show) printf 'LoadState=not-found\\nActiveState=inactive\\nSubState=dead\\nMainPID=0\\nInvocationID=\\n' ;;\n" +
-			"status) cat '" + dir + "/status.txt'; exit 3 ;;\n" +
+			"status) cat '" + dir + "/status.txt'\n" +
+			"  case \" $* \" in *' --lines=0 '*) ;; *) echo 'racing session: its own journal line' ;; esac\n" +
+			"  exit 3 ;;\n" +
 			"esac\n",
 	}
 	for name, body := range scripts {
@@ -80,8 +87,9 @@ func TestStartDiagnosesExecFailure(t *testing.T) {
 	}
 }
 
-// With nothing in the journal start falls back to `systemctl status`;
-// with SELinux permissive there is no hint.
+// With nothing in the journal start falls back to `systemctl status`,
+// its state only: the journal lines status would add may be a racing
+// session's (task 8g4). With SELinux permissive there is no hint.
 func TestStartDiagnosisFallsBackToStatus(t *testing.T) {
 	fakeSystemdPath(t, "Job for iormesh-p.service failed.\n", "",
 		"x iormesh-p.service - iormesh tracer\n     Active: failed (Result: exit-code)\n")
@@ -98,6 +106,69 @@ func TestStartDiagnosisFallsBackToStatus(t *testing.T) {
 	}
 	if strings.Contains(msg, "SELinux is enforcing") {
 		t.Errorf("hint with SELinux permissive:\n%v", err)
+	}
+	if strings.Contains(msg, "racing session") {
+		t.Errorf("status fallback carried journal lines:\n%v", err)
+	}
+}
+
+// deadlineSys is a commander that records each call's argv and the time
+// left on its context, and prints nothing (an empty journal).
+type deadlineSys struct {
+	calls [][]string
+	left  []time.Duration
+}
+
+func (d *deadlineSys) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	d.calls = append(d.calls, append([]string{name}, args...))
+	left := time.Duration(-1)
+	if dl, ok := ctx.Deadline(); ok {
+		left = time.Until(dl)
+	}
+	d.left = append(d.left, left)
+	return nil, nil
+}
+
+// Each diagnostic command runs under its own diagTimeout (task 8g4), so a
+// hung journald cannot hold up start's error.
+func TestUnitLogTimeouts(t *testing.T) {
+	sys := &deadlineSys{}
+	c, _ := testControl(sys, nil)
+	if got := c.unitLog(context.Background(), "iormesh-p.service", time.Now()); got != "" {
+		t.Errorf("unitLog = %q", got)
+	}
+	if len(sys.calls) != 2 || sys.calls[0][0] != "journalctl" || sys.calls[1][0] != "systemctl" ||
+		!slices.Contains(sys.calls[1], "--lines=0") {
+		t.Fatalf("calls = %q, want journalctl then systemctl status --lines=0", sys.calls)
+	}
+	for i, left := range sys.left {
+		if left <= diagTimeout-time.Second || left > diagTimeout {
+			t.Errorf("%s ran with %v left, want about %v", sys.calls[i][0], left, diagTimeout)
+		}
+	}
+}
+
+// Lines are cut after termsafe quoting (task 8g4): a line of control
+// bytes, four times longer quoted, still prints at most diagLineBytes,
+// and a cut never splits a multi-byte rune.
+func TestBoundedLinesCutsAfterQuoting(t *testing.T) {
+	// The "x" puts byte diagLineBytes inside a two-byte rune.
+	in := strings.Repeat("\x01", 200) + "\n" + "x" + strings.Repeat("é", 400) + "\n"
+	got := boundedLines([]byte(in))
+	lines := strings.Split(got, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %q", lines)
+	}
+	for _, l := range lines {
+		if len(l) > len("  ")+diagLineBytes+len("...") || !strings.HasSuffix(l, "...") {
+			t.Errorf("line of %d bytes, want cut to %d: %q", len(l), diagLineBytes, l)
+		}
+		if !utf8.ValidString(l) || strings.ContainsRune(l, '\x01') {
+			t.Errorf("line not valid terminal-safe UTF-8: %q", l)
+		}
+	}
+	if !strings.HasPrefix(lines[0], `  "\x01\x01`) {
+		t.Errorf("control line not quoted: %q", lines[0])
 	}
 }
 

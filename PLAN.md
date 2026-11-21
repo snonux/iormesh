@@ -2576,7 +2576,11 @@ would overturn it), and deferred.
   or controller, when the artifact's own stamp (the jar's
   manifest `Implementation-Version`, a binary's embedded
   version) differs, so a stale build is never signed as the
-  release (task uf4) — `iormeshctl deploy` verifies it with the
+  release (task uf4; the stamp proves the version, not the
+  commit — task 8g4 left a vcs revision out, as the container
+  builds see no `.git`, and docs/build.md has dist/ rebuilt
+  from the release commit before signing) — `iormeshctl
+  deploy` verifies it with the
   pinned key and ships it only to hosts with a project using
   `-spool` or `-agent`, and `iormesh upgrade` — no new
   subcommand, no wider sudoers rule — installs a file whose

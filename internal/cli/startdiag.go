@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
 
@@ -25,11 +26,15 @@ import (
 // not wait for an AVC record: el9's policy does not audit this denial
 // (`ausearch -m avc` shows nothing), so the label is the evidence.
 const (
-	// diagLines bounds the journal tail, diagLineBytes each line and
+	// diagLines bounds the journal tail, diagLineBytes each line as
+	// printed (after termsafe quoting, which can quadruple a line) and
 	// diagBytes the whole diagnosis: an error message, not a log dump.
 	diagLines     = 20
 	diagLineBytes = 300
 	diagBytes     = 4096
+	// diagTimeout bounds each diagnostic command (task 8g4): a hung
+	// journald must not hold up start's error, which is the point.
+	diagTimeout = 5 * time.Second
 )
 
 // execTypes are the SELinux file types systemd execs from without a
@@ -80,21 +85,34 @@ func (c control) diagnoseStart(ctx context.Context, unit string, since time.Time
 // `systemctl status` (which exits non-zero for a failed unit but still
 // prints it). Neither is an error of its own: the diagnosis is best
 // effort, and systemd-run's error stays the one returned.
+//
+// The fallback passes --lines=0, the unit's state without its journal
+// (task 8g4). Our unit is --collect'ed once it fails, so a unit status
+// still finds is most likely a racing start's of the same project —
+// systemd-run's "already loaded" — and its log lines are that other
+// session's, not ours. Its state header still says who holds the name.
 func (c control) unitLog(ctx context.Context, unit string, since time.Time) string {
-	out, _ := c.sys.Output(ctx, "journalctl", "--no-pager", "--quiet", "-o", "short-iso",
+	out := c.diagOutput(ctx, "journalctl", "--no-pager", "--quiet", "-o", "short-iso",
 		"-n", strconv.Itoa(diagLines), "--since=@"+strconv.FormatInt(since.Unix(), 10),
 		"--unit="+unit)
 	if tail := boundedLines(out); tail != "" {
 		return tail
 	}
-	out, _ = c.sys.Output(ctx, "systemctl", "status", "--no-pager", "--full",
-		"--lines="+strconv.Itoa(diagLines), "--", unit)
-	return boundedLines(out)
+	return boundedLines(c.diagOutput(ctx, "systemctl", "status", "--no-pager", "--full", "--lines=0", "--", unit))
 }
 
-// boundedLines keeps the last diagLines non-blank lines of out, each cut
-// to diagLineBytes, made terminal-safe and indented, and of those only as
-// many of the last as fit diagBytes.
+// diagOutput runs one diagnostic command under diagTimeout and returns
+// its stdout, whatever it exited with.
+func (c control) diagOutput(ctx context.Context, name string, args ...string) []byte {
+	ctx, cancel := context.WithTimeout(ctx, diagTimeout)
+	defer cancel()
+	out, _ := c.sys.Output(ctx, name, args...)
+	return out
+}
+
+// boundedLines keeps the last diagLines non-blank lines of out, each
+// made terminal-safe, then cut to diagLineBytes (cutLine) and indented,
+// and of those only as many of the last as fit diagBytes.
 func boundedLines(out []byte) string {
 	var lines []string
 	for line := range strings.Lines(string(out)) {
@@ -102,10 +120,7 @@ func boundedLines(out []byte) string {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		if len(line) > diagLineBytes {
-			line = line[:diagLineBytes] + "..."
-		}
-		lines = append(lines, "  "+termsafe.String(line))
+		lines = append(lines, "  "+cutLine(termsafe.String(line)))
 	}
 	if len(lines) > diagLines {
 		lines = lines[len(lines)-diagLines:]
@@ -115,6 +130,22 @@ func boundedLines(out []byte) string {
 		lines = lines[1:]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// cutLine cuts an already terminal-safe line to diagLineBytes plus
+// "...". Cutting after the quoting (task 8g4) bounds what is printed: a
+// line of control bytes quotes to four bytes each. The cut backs off to
+// a rune boundary, so a printable multi-byte rune is never split into
+// invalid UTF-8; a cut inside a quoted escape leaves printable ASCII.
+func cutLine(s string) string {
+	if len(s) <= diagLineBytes {
+		return s
+	}
+	n := diagLineBytes
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "..."
 }
 
 // selinuxHint names SELinux as the likely cause when it enforces and

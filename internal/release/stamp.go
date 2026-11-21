@@ -30,7 +30,11 @@ const (
 // version ver: a jar in its manifest's Implementation-Version, any other
 // file (the tracers, the controllers) as version.Stamp in its rodata.
 // Both are read statically, so an arm64 or darwin build is checked on
-// any signing host.
+// any signing host. The check proves the version, not the commit (task
+// 8g4): a build of another commit at the same version passes. A vcs
+// revision is not stamped because the container builds see no .git
+// (.containerignore keeps it out, so -buildvcs has nothing to embed),
+// and the jar would need its own; docs/build.md has the rule instead.
 func CheckStamp(name string, data []byte, ver string) error {
 	var got string
 	var err error

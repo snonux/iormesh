@@ -295,7 +295,13 @@ iormeshctl verify dist/iormesh-linux-amd64   # the controller's check
   unsigned, so a jar or tracer left from an older build is never
   signed as the new release. `TestControllerCrossCompiles` and
   `TestTracerCarriesVersionStamp` (`internal/buildgate`) keep
-  the stamp in real builds.
+  the stamp in real builds. The stamp proves the version only,
+  not the commit (task 8g4): a build of another commit at the
+  same version would pass. No vcs revision is stamped — the
+  container builds get no `.git` (`.containerignore`), so Go's
+  `-buildvcs` has nothing to embed, and the jar would need its
+  own — so the release rule is to bump the version, commit, and
+  rebuild `dist/` from that commit right before `mage sign`.
 - **Rebuilding without a version bump**: through the sudoers
   rule `upgrade` refuses a jar (as a tracer) with other bytes
   under an installed version, so a rebuilt and re-signed jar at

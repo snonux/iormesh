@@ -37,9 +37,11 @@ const (
 // key's public half. A file not stamped with that Version — the jar's
 // manifest Implementation-Version, a binary's version.Stamp — fails the
 // run before anything is signed (release.CheckStamp, task uf4): a stale
-// build is rebuilt, never signed as the release. The key comes from $IORMESH_MINISIGN_KEY (outside
-// the repository), its password from $IORMESH_MINISIGN_PASSWORD or the
-// terminal.
+// build is rebuilt, never signed as the release. The stamp proves the
+// version only, not the commit (task 8g4, docs/build.md): rebuild dist/
+// from the release commit before signing. The key comes from
+// $IORMESH_MINISIGN_KEY (outside the repository), its password from
+// $IORMESH_MINISIGN_PASSWORD or the terminal.
 func Sign() error {
 	key, err := loadSigningKey()
 	if err != nil {

@@ -1192,10 +1192,19 @@ Task rf4 made a failed start name its cause. systemd-run
 (`--quiet --service-type=exec`) exits 1 with nothing on stderr,
 and `--collect` has already dropped the unit, so start now
 appends the unit's journal since the launch (`journalctl
---since=@<launch> --unit=…`, falling back to `systemctl status`),
-at most 20 lines of 300 bytes and 4 KiB, oldest lines dropped
-first, each line through `termsafe`; systemd-run's own stderr is
-bounded the same way. When SELinux enforces and the binary's
+--since=@<launch> --unit=…`, falling back to `systemctl status
+--lines=0`), at most 20 lines of 300 bytes and 4 KiB, oldest
+lines dropped first, each line through `termsafe`; systemd-run's
+own stderr is bounded the same way. Task 8g4 tightened it: the
+300 bytes are counted after the quoting (a line of control bytes
+quotes to four bytes each) and the cut keeps whole runes; each
+diagnostic command has a 5 s timeout (`TestUnitLogTimeouts`);
+and the status fallback shows the unit's state without journal
+lines, which for a unit that survived `--collect` are most
+likely a racing start's (the fake systemctl adds such a line
+unless given `--lines=0`). Mutation-checked: `--lines=20`, no
+timeout, cutting before quoting and cutting inside a rune each
+fail a test. When SELinux enforces and the binary's
 type is not `bin_t` or `usr_t`, or the log shows a permission or
 AVC denial, a hint names the label and points to `/usr/local/bin`
 or `/opt`. The hint does not wait for an AVC record: el9 does not
