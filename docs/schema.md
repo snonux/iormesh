@@ -1263,7 +1263,8 @@ The Go types are `internal/report`'s `Report`.
   `exec`'s (redacted by the tracer), `serves` the endpoint labels
   it accepted connections on.
 - **Files** are listed in the order the process first opened or
-  changed them. Opens count by access mode (`O_RDONLY` vs.
+  changed them (past the cap, which ones stay is ranked: see
+  Caps). Opens count by access mode (`O_RDONLY` vs.
   `O_WRONLY`/`O_RDWR`; `creat` writes); the bytes are the reads and
   writes on the fd instance an open returned, until its close.
   `ops` are the file-system changes by kind (`creat`, `mkdir`,
@@ -1298,7 +1299,12 @@ The Go types are `internal/report`'s `Report`.
 - **Caps**: 256 processes, and per process 32 files, connections
   and threads, 32 calls per thread and requests per connection,
   10 methods (by events, then bytes), 8 ops per file; each cut is
-  counted in its `more_*` field. A file lists its first 4 causing
+  counted in its `more_*` field. Past 32 files the kept ones are
+  ranked, not first-seen: files written or changed (a write open,
+  written bytes, a file-system change that succeeded), then files
+  read from, then files only opened, then files only failed on —
+  first-seen first within a rank, listed in first-seen order (task
+  vg4). A file lists its first 4 causing
   methods and does not count the rest. While reading, the collector
   tracks at most 2²⁰ entries; an event that found no room for some
   part of it is counted once in `untracked`, and the text starts

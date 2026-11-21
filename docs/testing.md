@@ -1290,10 +1290,30 @@ deployed and collected over SSH — copied under a scratch `HOME`
 | SVG | rebuild PASS (same bytes in the same site folder); `graph.svg` names the hosts and the services. The goldens are the rig's three-host layout: the checkout's export holds the cut sequence above, not the golden's story (vg4) |
 | eval | pipeline PASS — `iormesheval` with the scripted stand-in scores 10/10 on this store, the wrong one 0/10 and is refused; the criterion still awaits the owner's model command |
 
-The rig's run did not meet the cap; why (it attaches by PID after
-the JVMs started, the agent's bootstrap append limits class
-sharing to boot classes — the JVM warns so — or the JDK build) is
-part of vg4.
+The rig's run did not meet the cap because it attaches by PID
+after the JVMs started (task vg4): the open of `lib/modules` (and
+of the jars) at JVM start is not in its trace, so the class
+loading's later `pread64` calls are on an fd whose open the trace
+never showed, which the sequence view cannot name and leaves out.
+The real hosts' pattern sessions trace from exec, see that open
+and name every read. The agent's bootstrap append (class sharing
+for boot classes only, as the JVM warns) adds to the reads but
+is the same on both.
+
+**Rebuilt with folded runs (task vg4).** The same store, built by
+an iormeshctl with PLAN.md M5's folded runs (`iormeshctl build
+-store … -db … -builds …` on a copy, nothing sent anywhere):
+
+| Surface | Result |
+|---|---|
+| sequence | PASS — the checkout is 100 steps, none cut, holding all 1696 calls (`read …/lib/modules (420 calls)`, `(134 calls)`, …); all `causal`, three hops `paired`: `POST /orders` gateway main → orders HTTP-Dispatcher, `POST /inventory/reserve` → inventory HTTP-Dispatcher with `create`/`write`/`rename` of `reservation-42.json(.tmp)`, `200`, `POST /billing/charge` → billing with `invoice-42.json`, `200`, orders' own `order-42.json`, `201`; services gateway, orders, inventory, billing |
+| `show processes` | PASS — orders keeps 32 files (90 more): its `orders.conf` (39 B read and written), `orders.crt`, `order-42.json.tmp` (36 B, rename) and `order-42.json`, the library probes cut |
+
+The rig's acceptance (`TestViewsAcceptance`) checks only the
+story's hops and the scenario's own files, which fold never
+joins, so its story and SVG goldens stand;
+`internal/viewmodel` `TestNoisyCheckoutFolds` holds the real
+noise pattern, trimmed, as a unit test.
 
 ### M6 on Rocky 9.9 (task 3f4, 2026-11-21)
 

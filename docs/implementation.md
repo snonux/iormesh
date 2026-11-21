@@ -4543,7 +4543,15 @@ internal/query/                    # + Filter.Ref, ParseRef (-ref)
   caps; escapes), `guard_test.go` (a Netty loop's overlapping
   requests, two virtual threads on one carrier and an unknown
   thread nest nothing and own no file work; no join near the
-  cut); `internal/correlate/javahttp_thread_test.go` (a virtual
+  cut), `fold_test.go` (task vg4: the Rocky 9.9 checkout's noise
+  pattern, trimmed — runs of `lib/modules` reads, the
+  name-service lookup, `/dev/urandom` breaking a run — keeps
+  every hop and each create-tmp/write/rename inside the cap, the
+  folded steps' calls and bytes adding up to every event; no run
+  across a call; a failed and a successful open, or two Java
+  thread names, kept apart; the step after a run judged by its
+  last call; services named past the cap);
+  `internal/correlate/javahttp_thread_test.go` (a virtual
   thread's http event `carrier` under its carrier's name, held
   only with a start, a lost thread record unnamed);
   `internal/render/render_test.go` (two renders byte-identical,

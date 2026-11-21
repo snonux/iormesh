@@ -248,10 +248,10 @@ func TestConversationCaps(t *testing.T) {
 	for i := range uint64(MaxConversations + 1) {
 		evs = append(evs, httpEv("a", uint32(i+1), base+i*ms, base+i*ms+ms/2, "", false, 0))
 	}
-	for i := range uint64(MaxSteps + 5) {
+	for i := range uint64(MaxSteps + 5) { // distinct paths: a repeated call would fold
 		files = append(files, &schema.Event{HostID: "a", PID: 1, PIDInc: 1, TID: uint32(MaxConversations + 1),
 			WallNS: base + MaxConversations*ms + i, Event: schema.KindUnlink, FD: schema.NoFD,
-			Args: schema.Args{Path: ptr("/f")}})
+			Args: schema.Args{Path: ptr(fmt.Sprint("/f", i))}})
 	}
 	r = record(nil, evs, files)
 	cs = convs(r)

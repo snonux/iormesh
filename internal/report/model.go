@@ -80,7 +80,8 @@ type Process struct {
 }
 
 // File is one path a process opened or changed, in the order it first
-// did.
+// did; past MaxFiles the files kept are ranked by the work done on them
+// (topFiles).
 type File struct {
 	Path string `json:"path"`
 	// ReadOpens and WriteOpens count successful opens for reading only

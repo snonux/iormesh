@@ -3,6 +3,8 @@ package render
 import (
 	"slices"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"iormesh/internal/viewmodel"
 )
@@ -133,7 +135,7 @@ func drawHead(s *svg, l viewmodel.Lifeline, x, height int) {
 // arrow (a loop when both are one), or a note on the step's own
 // lifeline when it has no peer.
 func drawStep(s *svg, st viewmodel.Step, y, from, to int, arrow bool) {
-	label := short(st.Label)
+	label := stepLabel(st)
 	if st.Ordering == viewmodel.OrderNone {
 		label = "? " + label
 	}
@@ -155,6 +157,19 @@ func drawStep(s *svg, st viewmodel.Step, y, from, to int, arrow bool) {
 	}
 	s.line(class, from, y, to, y, true)
 	s.text("label", (from+to)/2, y-4, "middle", label)
+}
+
+// stepLabel is a step's label cut to maxLabel runes. A folded run's
+// "(N calls)" ending (viewmodel.Step.Count, task vg4) survives the cut:
+// the path is shortened instead, so the diagram never shows a run of
+// hundreds of calls as one.
+func stepLabel(st viewmodel.Step) string {
+	suffix := " (" + strconv.Itoa(st.Count) + " calls)"
+	head, ok := strings.CutSuffix(st.Label, suffix)
+	if st.Count < 2 || !ok {
+		return short(st.Label)
+	}
+	return cut(head, max(maxLabel-utf8.RuneCountInString(suffix), 1)) + suffix
 }
 
 func btoi(b bool) int {

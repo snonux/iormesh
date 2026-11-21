@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"iormesh/internal/federate"
@@ -184,6 +185,48 @@ func TestReportCaps(t *testing.T) {
 	}
 	if _, text := render(t, r); !bytes.Contains(text, []byte("...      3 more files")) {
 		t.Errorf("the cut is not shown:\n%s", text)
+	}
+}
+
+// TestReportFilesPastTheCap: a process traced from its exec (task vg4)
+// probes and opens many library paths before its own work. Past
+// MaxFiles the files kept are the written or changed ones, then the
+// read ones, then those only opened, and the failed probes go first —
+// listed in first-seen order, the cut counted.
+func TestReportFilesPastTheCap(t *testing.T) {
+	tr := &trace{host: "h1"}
+	for i := range MaxFiles { // the loader's probes: failed opens only
+		tr.add(30, 30, schema.KindOpenat, schema.NoFD, -2, "", schema.Args{Path: ptr("/lib/probe" + itoa(uint32(i)))}, nil)
+	}
+	open := func(path string, fd int32, flags uint32) {
+		tr.add(30, 30, schema.KindOpenat, fd, int64(fd), "", schema.Args{Path: ptr(path), Flags: ptr(flags)}, nil)
+	}
+	open("/etc/ld.so.cache", 3, 0) // opened, nothing read (mapped): the last slot, above the probes
+	want := []string{"/etc/ld.so.cache"}
+	for i := range MaxFiles - 4 { // libraries read: with the config and the record, one slot short of the cap
+		want = append(want, "/lib/lib"+itoa(uint32(i))+".so")
+		open("/lib/lib"+itoa(uint32(i))+".so", 4, 0)
+		tr.add(30, 30, schema.KindRead, 4, 832, "", schema.Args{}, nil)
+		tr.add(30, 30, schema.KindClose, 4, 0, "", schema.Args{}, nil)
+	}
+	open("/proc/self/task", 3, 0) // opened only too, seen later: cut
+	open("/srv/orders.conf", 5, 0)
+	tr.add(30, 30, schema.KindRead, 5, 39, "", schema.Args{}, nil)
+	open("/srv/order-42.json.tmp", 6, 577)
+	tr.add(30, 30, schema.KindRename, schema.NoFD, 0, "", schema.Args{Path: ptr("/srv/order-42.json.tmp"),
+		NewPath: ptr("/srv/order-42.json")}, nil)
+	tr.add(30, 30, schema.KindUnlink, schema.NoFD, -2, "", schema.Args{Path: ptr("/srv/gone")}, nil)
+	p := Build(collect(tr, 0), Input{}).Processes[0]
+	var paths []string
+	for _, f := range p.Files {
+		paths = append(paths, f.Path)
+	}
+	if p.MoreFiles != MaxFiles+2 {
+		t.Errorf("%d more files; want %d", p.MoreFiles, MaxFiles+2)
+	}
+	want = append(want, "/srv/orders.conf", "/srv/order-42.json.tmp", "/srv/order-42.json")
+	if !slices.Equal(paths, want) {
+		t.Errorf("files kept\n%q\nwant\n%q", paths, want)
 	}
 }
 

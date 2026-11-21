@@ -73,9 +73,12 @@ type procAcc struct {
 	methods map[string]*MethodStat
 }
 
+// fileAcc is one file of a process while the collector reads; changed
+// records that a file-system change on it succeeded (fileRank).
 type fileAcc struct {
 	File
 	ops, methods map[string]bool
+	changed      bool
 }
 
 // connAcc is one end of a connection: the conn id and the fd instance

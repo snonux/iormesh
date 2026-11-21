@@ -33,7 +33,10 @@ import "time"
 //
 // Within a server request, the thread's file work (opens, reads,
 // writes, renames, unlinks, …) is interleaved in its own clock's order
-// with the calls it made.
+// with the calls it made; a run of one repeated call (a JVM reading its
+// runtime image hundreds of times while it loads classes) is one step
+// that counts its calls (Step.Count, Recorder.File), so the noise of a
+// real host cannot push the declared story past MaxSteps (task vg4).
 
 // Step kinds.
 const (
@@ -111,7 +114,8 @@ type Conversation struct {
 	Entry string `json:"entry"`
 	Label string `json:"label"`
 	// Hops counts the request steps; Services are the services the
-	// steps touch, in the order they first appear.
+	// steps touch, in the order they first appear — both over the whole
+	// conversation, steps past MaxSteps included (task vg4).
 	Hops     int      `json:"hops"`
 	Services []string `json:"services"`
 	// Lifelines are the per-thread lifelines, in the order they first
@@ -156,7 +160,12 @@ type Step struct {
 	To string `json:"to,omitempty"`
 	// Label says what happened: "GET /orders/42", "200",
 	// "rename /d/order-42.json.tmp -> /d/order-42.json".
+	// A file step may be a folded run: Count repeated calls of one
+	// thread (same verb, path and outcome, back to back, offsets aside),
+	// its Label ending "(N calls)", Bytes and Latency the run's sums,
+	// Stack and Ref its first call's; 0 (omitted) for a single call.
 	Label   string        `json:"label"`
+	Count   int           `json:"count,omitempty"`
 	Bytes   uint64        `json:"bytes"`
 	Latency time.Duration `json:"latency_ns"`
 	// Ordering is causal, time-ordered or unordered (Order*).

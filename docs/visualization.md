@@ -415,6 +415,19 @@ trace, never re-inferred:
   interleaved in that thread's clock order with the calls it
   made. Another thread's I/O, socket I/O and an fd whose open the
   trace never showed are not in it.
+- **Folded runs** (task vg4): back-to-back repeats of one call by
+  one thread — same verb, path and outcome, only the offset
+  differing, and no call of the thread's started in between — are
+  one step: `count` holds the calls, the label ends `(N calls)`
+  and drops the offset, `bytes` and `latency_ns` are the run's
+  sums, `stack` and `ref` its first call's, and the step after it
+  is judged against its last call. On Rocky 9.9 a JVM's serving
+  thread read its runtime image (`lib/modules`) 744 times while
+  loading classes on its first request, which pushed the checkout
+  to 1696 steps and its story past the cap; folded it is 100
+  steps that still count all 1696 calls. A single call has no
+  `count`. The SVG, which cuts labels at 40 characters, shortens
+  a run's path and keeps its `(N calls)`.
 
 Each step carries `ordering`, judged against the step before it in
 the list: `causal` (thread order or a paired send→receive),
@@ -431,8 +444,11 @@ the sketch above: `host`, `carrier` and `hop` are added, there is no
 `note` kind, a stack is at most 12 frames, and `ref` is
 `<project>/<host>/<fqdn>-<session>/<seq>` — `iormeshctl query -ref
 REF` prints that one raw event. Caps: 200 steps per conversation
-(`more_steps`), 2¹⁸ http events read (the newest by completion),
-2²⁰ followed fds.
+(`more_steps`; folded runs count as one step each, and a server
+request keeps at most 200 file steps of its own), 2¹⁸ http events
+read (the newest by completion), 2²⁰ followed fds. `hops` and
+`services` describe the whole conversation, steps past the cap
+included, so a service reached only there is still named.
 
 `show conversations` lists them; `show sequence [ID]` (the newest
 without an ID) prints one as numbered steps — ordering, actor
@@ -500,8 +516,13 @@ processes"):
   threads (events, bytes, calls, and `carried` / `carried_calls`:
   the virtual threads' I/O a carrier ran, counted apart), files
   (bytes, ops) and sockets (merged conn id, fd, role, addresses,
-  service, peers), with the rollup's caps. `show processes` prints
-  them, `-json` the list.
+  service, peers), with the rollup's caps. Past 32 files the kept
+  ones are chosen by the work done on them — written or changed,
+  then read, then only opened, then only failed on — and listed in
+  first-seen order (task vg4: a JVM traced from its exec probes and
+  opens ~90 library paths first, and a first-seen cut hid the
+  service's own config and records). `show processes` prints them,
+  `-json` the list.
 
 V3 as built (task nb4; files in [implementation.md](implementation.md),
 M5 "Local site"): every `build` writes the run's site folder

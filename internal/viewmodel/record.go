@@ -80,12 +80,19 @@ type request struct {
 	stack               []uint64
 }
 
-// fileOp is one file event of a kept server request's thread.
+// fileOp is one file event of a kept server request's thread, or a run
+// of count repeated ones folded into it (Recorder.File): org, seq, at
+// and stack are the first call's, last is the last call's instant,
+// bytes and latency are the run's sums. base is the label without an
+// offset, what a run folds on; label is what its step shows.
 type fileOp struct {
 	org     int
 	seq     uint64
 	at      uint64
+	last    uint64
+	base    string
 	label   string
+	count   int
 	bytes   uint64
 	latency uint64
 	thread  string

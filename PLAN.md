@@ -1539,7 +1539,35 @@ Kubernetes (M7) build on it.
   apart, files, sockets, restarts — projected from the rollup
   (`show processes`)
   ([docs/visualization.md](docs/visualization.md) "V2 as
-  built"). *Built (task ob4):* the terminal UI, `iormeshctl
+  built"). *Decided (task vg4, 2026-11-21): realistic noise
+  folds, it is never filtered.* On Rocky 9.9 the checkout had
+  1696 steps — the serving threads reading the JDK's
+  `lib/modules` hundreds of times while loading classes on their
+  first request, plus name-service lookups — and the 200-step cap
+  cut it before the inventory hop. The rig never saw this: it
+  attaches by PID after the JVMs started, so the open of
+  `lib/modules` (and of the jars) at JVM start is not in its trace
+  and the later reads, on an fd whose open the trace never showed,
+  are no file work it can name; the real hosts' pattern sessions
+  trace from exec and name every one. The views now fold a run of
+  back-to-back repeats of one call by one thread (same verb, path
+  and outcome, offsets aside, never across a call the thread
+  made) into one step that counts its calls (`count`, label
+  `(N calls)`, bytes and latency summed, the first call's stack
+  and ref); the caps count steps after folding; a conversation's
+  `hops` and `services` cover its whole length, past the cap
+  included; and past 32 files a process keeps its written or
+  changed files first, then read, then only opened, then only
+  failed ones (first-seen order kept in the list). Weighed and
+  not taken: a noise class for JDK runtime-image and jar reads
+  (a path list to maintain, and a guess about what is noise that
+  the operator cannot audit — folding needs no list and hides
+  nothing), and per-segment caps (folding brought the real
+  checkout to 100 steps; a tail cut stays the one rule while it
+  holds). Same model, so the site, the TUI and the SVG show the
+  folded steps alike ([docs/visualization.md](docs/visualization.md)
+  "V2 as built" "Folded runs"). *Built (task ob4):* the
+  terminal UI, `iormeshctl
   tui`, on the same `model.json` through `show`'s loader —
   services, edges, conversations, a conversation's steps, thread
   stories, processes and health, each a list and a detail;
@@ -1662,6 +1690,16 @@ Kubernetes (M7) build on it.
   process view's file cap hides orders' config and record the
   same way (task vg4). The eval still awaits the owner's model.
   ([docs/testing.md](docs/testing.md) "M5 on Rocky 9.9").
+  *Views fixed (task vg4, 2026-11-21):* rebuilt from the same
+  store with folded runs, the checkout is 100 steps holding all
+  1696 calls, none cut — every hop causal and paired on its
+  thread (gateway main → orders HTTP-Dispatcher → inventory, →
+  billing), inventory's, billing's and orders' create-tmp, write
+  and rename each in its place, all four services named — and
+  `show processes` lists orders' `orders.conf` and its
+  `order-42.json` record. The sequence criterion now holds on
+  the real store; M5 stays not accepted until the eval has run
+  with the owner's model.
 
 ### M6 — Mesh expansion: follow the edges, from the controller
 

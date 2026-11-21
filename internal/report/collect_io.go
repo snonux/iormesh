@@ -236,6 +236,8 @@ func (c *Collector) fileFor(p *procAcc, path string) *fileAcc {
 func (f *fileAcc) op(op, errno string) {
 	if errno != "" {
 		op += " (" + errno + ")"
+	} else {
+		f.changed = true
 	}
 	if f.ops[op] {
 		return

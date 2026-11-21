@@ -22,7 +22,8 @@
 //     clocks, no local paths. Lists keep the order the events came in
 //     (the store's: projects, hosts, sessions, segments in seq order),
 //     which is also the order a reader wants: the first file a process
-//     opened first.
+//     opened first. Only which files survive a process's file cap is
+//     ranked by the work done on them (topFiles, task vg4).
 //   - Bounded: every list is capped and says how much it cut (More*);
 //     what the collector tracks while reading is capped too
 //     (maxTracked), so a hostile trace cannot grow it without bound —

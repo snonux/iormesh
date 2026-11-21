@@ -93,14 +93,7 @@ func (b *builder) process(k procKey) Process {
 	p := b.c.procs[k]
 	out := p.p
 	out.Argv = nonNil(out.Argv)
-	for i, f := range p.files {
-		if i == MaxFiles {
-			out.MoreFiles = len(p.files) - i
-			break
-		}
-		f.Ops, f.Methods = nonNil(f.Ops), nonNil(f.Methods)
-		out.Files = append(out.Files, f.File)
-	}
+	out.Files, out.MoreFiles = topFiles(p.files)
 	serves := map[string]bool{}
 	for i, a := range p.conns {
 		c := b.conn(p, a)
@@ -118,6 +111,51 @@ func (b *builder) process(k procKey) Process {
 	out.Methods, out.MoreMethods = topMethods(p.methods)
 	out.Files, out.Conns, out.Serves = nonNil(out.Files), nonNil(out.Conns), nonNil(out.Serves)
 	return out
+}
+
+// topFiles lists a process's files, cut at MaxFiles. Within the cap the
+// list is every file in first-seen order. Past it, which files stay is
+// decided by the work done on them — first the files written or changed
+// (a write open, written bytes, a file-system change that succeeded),
+// then those read from, then those opened without a byte read, last
+// those only failed on (the dynamic loader's ENOENT probes) — earlier
+// first-seen first within a class, and the kept ones are listed in
+// first-seen order. A process traced from its exec opens a hundred
+// library and JDK paths before its own work (task vg4); a first-seen
+// cut would list just those and hide its config and its records. What
+// is cut is counted (MoreFiles) either way.
+func topFiles(files []*fileAcc) ([]File, int) {
+	keep := make([]int, len(files))
+	for i := range keep {
+		keep[i] = i
+	}
+	more := 0
+	if len(files) > MaxFiles {
+		slices.SortStableFunc(keep, func(a, b int) int { return cmp.Compare(fileRank(files[a]), fileRank(files[b])) })
+		more, keep = len(files)-MaxFiles, keep[:MaxFiles]
+		slices.Sort(keep)
+	}
+	out := make([]File, 0, len(keep))
+	for _, i := range keep {
+		f := files[i].File
+		f.Ops, f.Methods = nonNil(f.Ops), nonNil(f.Methods)
+		out = append(out, f)
+	}
+	return out, more
+}
+
+// fileRank is a file's class for topFiles: 0 written or changed, 1 read
+// from, 2 opened only, 3 only failed on.
+func fileRank(f *fileAcc) int {
+	switch {
+	case f.WriteOpens > 0 || f.WriteBytes > 0 || f.changed:
+		return 0
+	case f.ReadBytes > 0:
+		return 1
+	case f.ReadOpens > 0:
+		return 2
+	}
+	return 3
 }
 
 // conn renders one connection end.

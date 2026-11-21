@@ -115,6 +115,19 @@ func TestSequenceLifelines(t *testing.T) {
 	}
 }
 
+// TestSequenceFoldedRun: a folded run's "(N calls)" survives the label
+// cut (task vg4) — the path is shortened, never the count.
+func TestSequenceFoldedRun(t *testing.T) {
+	label := "read /usr/lib/jvm/java-25-openjdk/lib/modules (420 calls)"
+	conv := viewmodel.Conversation{ID: "0001", Lifelines: []viewmodel.Lifeline{{Service: "orders", Thread: "t"}},
+		Steps: []viewmodel.Step{{Kind: viewmodel.StepFile, Label: label, Count: 420, Lane: 0, ToLane: -1,
+			Ordering: viewmodel.OrderCausal}}}
+	out := string(Sequence(conv))
+	if !strings.Contains(out, "… (420 calls)</text>") || strings.Contains(out, label) {
+		t.Errorf("the folded run's label lost its count or was not cut:\n%s", out)
+	}
+}
+
 // TestGraphColumnCap: a host with more nodes than a column holds shows
 // the first ones and counts the rest.
 func TestGraphColumnCap(t *testing.T) {

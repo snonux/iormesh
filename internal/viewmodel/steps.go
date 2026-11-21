@@ -130,28 +130,46 @@ func (e *emitter) serverRoot(i int) {
 // own clock order — one thread, so the order is causal.
 func (e *emitter) body(s int, lifeline string) {
 	ops, kids := e.r.ops[s], e.r.links.children[s]
-	srv := e.r.reqs[s]
 	for len(ops) > 0 || len(kids) > 0 {
 		if len(ops) > 0 && (len(kids) == 0 || ops[0].at <= e.r.reqs[kids[0]].start) {
-			op := ops[0]
+			e.file(s, lifeline, ops[0])
 			ops = ops[1:]
-			st := Step{Kind: StepFile, Service: lifeline, Host: e.r.origins[op.org].FQDN,
-				Thread: cmp.Or(op.thread, threadName(srv)), Carrier: op.carrier, Label: op.label,
-				Bytes: op.bytes, Latency: time.Duration(op.latency), Stack: e.frames(op.org, op.stack),
-				Ref: e.ref(op.org, op.seq)}
-			me := end{lane: Lifeline{Service: lifeline, Host: st.Host, PID: srv.th.pid,
-				Incarnation: srv.th.inc, TID: srv.th.tid, Thread: st.Thread, Carrier: op.carrier},
-				wall: op.at, span: s}
-			if op.carrier { // a virtual thread's I/O: no span of the carrier's own
-				me.span = -1
-			}
-			e.add(st, stampAt(srv.th.host, op.at), true, me, noEnd)
 			continue
 		}
 		e.client(kids[0], lifeline)
 		kids = kids[1:]
 	}
 	e.c.MoreSteps += e.r.moreOps[s]
+}
+
+// file emits one file op of server request s on lifeline. A folded run
+// (fileOp.count > 1) is one step whose Count and label say how many
+// calls it holds; it is judged at its first call, and the step after it
+// against its last.
+func (e *emitter) file(s int, lifeline string, op fileOp) {
+	srv := e.r.reqs[s]
+	st := Step{Kind: StepFile, Service: lifeline, Host: e.r.origins[op.org].FQDN,
+		Thread: cmp.Or(op.thread, threadName(srv)), Carrier: op.carrier, Label: op.label,
+		Bytes: op.bytes, Latency: time.Duration(op.latency), Stack: e.frames(op.org, op.stack),
+		Ref: e.ref(op.org, op.seq)}
+	if op.count > 1 {
+		st.Count, st.Label = op.count, runLabel(op.label, op.count)
+	}
+	me := end{lane: Lifeline{Service: lifeline, Host: st.Host, PID: srv.th.pid,
+		Incarnation: srv.th.inc, TID: srv.th.tid, Thread: st.Thread, Carrier: op.carrier},
+		wall: op.at, span: s}
+	if op.carrier { // a virtual thread's I/O: no span of the carrier's own
+		me.span = -1
+	}
+	e.add(st, stampAt(srv.th.host, op.at), true, me, noEnd)
+	e.prev = stampAt(srv.th.host, op.last)
+}
+
+// runLabel is a folded run's label: "read /usr/lib/jvm/…/modules (420
+// calls)" — every surface prints the label, so none can show the run as
+// one call.
+func runLabel(label string, count int) string {
+	return label + " (" + strconv.Itoa(count) + " calls)"
 }
 
 // thread is request i's end on lifeline (a service): its kernel thread,
@@ -175,20 +193,22 @@ func (e *emitter) side(q request, lifeline string) Step {
 // its two ends (to.lane.Service "" for none). A step past MaxSteps is
 // counted, not kept — but still moves the instant on, so the next kept
 // step is judged against what really came before it, and its ends are
-// counted in their threads' stories.
+// counted in their threads' stories. Its services are listed either
+// way: Services and Hops describe the whole conversation, so a service
+// reached only past the cap is still named (task vg4).
 func (e *emitter) add(s Step, at federate.Stamp, causal bool, from, to end) {
 	s.Ordering = e.ordering(at, causal)
 	e.prev, e.started = at, true
-	if len(e.c.Steps) >= MaxSteps {
-		e.c.MoreSteps++
-		e.book.cut(from.lane, to.lane)
-		return
-	}
 	for _, l := range []string{s.Service, s.To} {
 		if l != "" && !e.seen[l] {
 			e.seen[l] = true
 			e.c.Services = append(e.c.Services, l)
 		}
+	}
+	if len(e.c.Steps) >= MaxSteps {
+		e.c.MoreSteps++
+		e.book.cut(from.lane, to.lane)
+		return
 	}
 	s.Lane, s.ToLane = e.lane(from.lane), -1
 	if to.lane.Service != "" {
