@@ -2446,6 +2446,64 @@ has no active LSM, so there the field is inert. Docker was
 started for the runs and stopped after; images and volumes
 matched the state before.
 
+#### App container restart (task 8h4, 2026-11-21)
+
+Does an app container restarting mid-session, which relabels the
+pod's shared files back to the pod's MCS pair, break the tracer or
+the spool? The same VM and versions (4 GB), the tracer as shipped
+(`spc_t` at `s0`), no node-local policy, and a minimal
+reproduction instead of the suite: the tcp scenario's `server`
+Deployment (app container `sleep infinity`, prepare patch) with a
+debug tracer carrying the Java agent (the acceptance test's
+`-spool`/`-agent` flags), and the ingress scenario's `inventory`
+shape with the sidecar patch (`run -pattern '*workload.jar*'`).
+In each pod a gated `file-basic` JVM ran and then held; the app
+container's init (`sleep`) was then killed with SIGKILL from the
+node, and the kubelet restarted the container (restart count 1).
+
+**SELinux: no break.** The raw `/var/log/audit/audit.log`, which
+covered the whole session, held no `AVC`, `USER_AVC` or
+`SELINUX_ERR`. `ls -Z` on the node:
+
+| File | Before the tracer | Tracer running | After the app restart |
+|---|---|---|---|
+| `etc-hosts`, sandbox `resolv.conf` and `hostname` | `s0:c557,c864` (the pod's) | `s0` | `s0:c557,c864` |
+| trace `emptyDir`, `spool/`, `traces/` | — | `s0` | `s0` |
+
+The restarted container relabels the files it mounts back to the
+pod's pair, as expected; the `emptyDir`, which only the tracer
+mounts, stays at `s0`. The `spc_t` tracer reads either label.
+In the sidecar pod the app container starts after the tracer, so
+there those files are at the pod's pair from the start.
+
+**Debug mode: the tracer dies with the app container — not
+SELinux.** `kubectl debug --target` joins the app container's PID
+namespace; when its init died the kernel killed every process in
+it, the tracer included: the ephemeral container ended `exitCode
+137` at the same instant, and an ephemeral container is never
+restarted. The unsealed segment (`.active-*`, 0 bytes) was lost;
+`iormeshctl collect` said "session ended: tracer container
+terminated (Error, exit code 137) … stranded until the pod goes",
+and `iormeshctl deploy` refused a second tracer ("ephemeral
+containers cannot be replaced: restart the pod"). Before the kill
+the agent was live-loaded into the JVM (`java agent of pid 41
+joined, 37 natives probed`). A JVM started after the tracer, as a
+restarted app's always is, gets no agent from `run -agent` — as
+[java-attach.md](java-attach.md) documents; it needs `-javaagent`.
+Task ah4 takes the debug-mode finding.
+
+**Sidecar mode: no break.** With `shareProcessNamespace` the pause
+container is the PID namespace's init, so the tracer kept running
+(restart count 0) through the app restart; the pattern re-attached
+to the new JVM, and the collected segment held both incarnations
+— pid 27 before the restart and pid 64 after, 644 and 647 events,
+8 `file-basic` file events each — plus one `drop` record
+(`skipped_runs`, 1 lost) at the restart. After the run `el9-k3s.sh
+down` left the same 372 packages and the same `/opt/iormesh`; iom1
+was stopped and set back to 2 GB; the laptop's images, volumes and
+containers matched the state before, Docker was stopped and the
+copied kubeconfig deleted.
+
 ## Performance baselines
 
 S3 (PLAN.md, decision #25) measures overhead against a load the
