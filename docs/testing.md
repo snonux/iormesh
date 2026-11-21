@@ -617,13 +617,12 @@ hop is drawn time-ordered or unordered is held by
 
 The rig above proves M4's criteria on network namespaces; the
 acceptance itself (PLAN.md M4, "Acceptance") also needs one run
-on two real hosts. **Status (2026-11-21): run five times on two
-Rocky 9.9 VMs, not accepted** — the two kf4 runs pass 14 of 15
-criteria each, but not the same 14: the fourth fails the clock
-bound (before jf4), the fifth the spread M4-9 (skipped runs,
-qf4) (see "Run on Rocky 9.9" below);
-nothing counts as accepted until a run prints every criterion
-PASS.
+on two real hosts. **Status (2026-11-21): run six times on two
+Rocky 9.9 VMs; the sixth (qf4, the build of 35c7de7) printed
+every criterion PASS** — the two kf4 runs before it passed 14 of
+15 each, the fourth failing the clock bound (before jf4), the
+fifth the spread M4-9 (skipped runs, qf4) (see "Run on Rocky
+9.9" below).
 
 `mage m4Acceptance HOST1 HOST2` (`magefile_m4acceptance.go`,
 `internal/acceptance`) runs the whole sequence and checks each
@@ -1060,6 +1059,25 @@ waits for the VMs):
   stored trace is already correlated, so only a rerun shows it.
 
 The other stored runs replay unchanged.
+
+A sixth run (qf4, the build of 35c7de7: both fixes plus the
+review's — an unspecified address never contradicts a tuple, a
+transition out of `CLOSE` or `LISTEN` starts a socket, a stale
+record names no process; both VMs bootstrapped again with it,
+work directory `~/.iormesh-m4-qf4-1`) **passed all 15
+criteria**: M4-8 `127.0.0.1:18213 tls x1, 127.0.0.1:18211 tls
+x1, 127.0.0.1:18212 plain x2`; M4-9 two conns fused across iom1
+and iom2, `10.20.0.141:18216 tls x1, 10.20.0.141:18214 tls x1,
+10.20.0.140:18215 plain x2`; M4-10 one window, two-sided, width
+667µs; M4-2 3 rounds and 40 files; M4-14 15 sessions collected
+and nothing under `/opt/iormesh`. Before it, on `iom1`,
+`TestSockSeqAbortClose` (the three RST aborts), the new
+`TestSockDualStackBoundConnect`, `TestSockSeqFields` and
+`TestSockRefusedConnectNoSeq` passed as root on el9. Neither
+kernel reported the unspecified address at `SYN_SENT` for that
+loopback connect; the unit test covers the sequence. Ports and
+DNAT were removed after the run, and both VMs bootstrapped again
+with the same build.
 
 Also found on el9, outside M4's sequence: a session dies with
 "schema: invalid: fd_gen 1 without an fd" when the pattern also
