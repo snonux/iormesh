@@ -161,13 +161,18 @@ type Step struct {
 	// Label says what happened: "GET /orders/42", "200",
 	// "rename /d/order-42.json.tmp -> /d/order-42.json".
 	// A file step may be a folded run: Count repeated calls of one
-	// thread (same verb, path and outcome, back to back, offsets aside),
-	// its Label ending "(N calls)", Bytes and Latency the run's sums,
-	// Stack and Ref its first call's; 0 (omitted) for a single call.
-	Label   string        `json:"label"`
-	Count   int           `json:"count,omitempty"`
-	Bytes   uint64        `json:"bytes"`
-	Latency time.Duration `json:"latency_ns"`
+	// thread (same verb, path and outcome — success or one errno —
+	// back to back, offsets aside), its Label ending "(N calls)", Bytes
+	// and Latency the run's sums, Stack and Ref its first call's,
+	// LastRef its last call's, RunQuery the `iormeshctl query` that
+	// prints every call of it (runquery.go); all omitted for a single
+	// call.
+	Label    string        `json:"label"`
+	Count    int           `json:"count,omitempty"`
+	LastRef  string        `json:"last_ref,omitempty"`
+	RunQuery string        `json:"run_query,omitempty"`
+	Bytes    uint64        `json:"bytes"`
+	Latency  time.Duration `json:"latency_ns"`
 	// Ordering is causal, time-ordered or unordered (Order*).
 	Ordering string `json:"ordering"`
 	// Hop says how a request's ends were joined (Hop*); "" otherwise.

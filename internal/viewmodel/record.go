@@ -80,24 +80,39 @@ type request struct {
 	stack               []uint64
 }
 
+// runKey is what a run of repeated calls folds on (Recorder.File): the
+// label without an offset (verb, path, errno) and the Java thread.
+type runKey struct {
+	base    string
+	thread  string
+	carrier bool
+}
+
 // fileOp is one file event of a kept server request's thread, or a run
 // of count repeated ones folded into it (Recorder.File): org, seq, at
-// and stack are the first call's, last is the last call's instant,
-// bytes and latency are the run's sums. base is the label without an
-// offset, what a run folds on; label is what its step shows.
+// and stack are the first call's, lastSeq and last the last call's,
+// bytes and latency the run's sums. path is the file it names; label
+// is what its step shows.
 type fileOp struct {
+	runKey
 	org     int
 	seq     uint64
+	lastSeq uint64
 	at      uint64
 	last    uint64
-	base    string
+	path    string
 	label   string
 	count   int
 	bytes   uint64
 	latency uint64
-	thread  string
-	carrier bool
 	stack   []uint64
+}
+
+// droppedRun is the run the last call cut past a request's cap belongs
+// to (Recorder.drop): the calls cut fold too, so MoreSteps counts steps.
+type droppedRun struct {
+	runKey
+	last uint64
 }
 
 // Recorder collects a build's conversations. Use: HTTP for every event
@@ -121,6 +136,7 @@ type Recorder struct {
 	fds     map[fdKey]string
 	ops     map[int][]fileOp
 	moreOps map[int]int
+	dropped map[int]droppedRun
 	// Set by Frame: session → method id → frame text.
 	frames map[string]map[uint64]string
 }
@@ -130,7 +146,7 @@ type Recorder struct {
 func NewRecorder(renames map[federate.LocalConn]string) *Recorder {
 	return &Recorder{renames: renames, maxRequests: MaxRequests, originIdx: map[Origin]int{},
 		fds: map[fdKey]string{}, ops: map[int][]fileOp{}, moreOps: map[int]int{},
-		frames: map[string]map[uint64]string{}}
+		dropped: map[int]droppedRun{}, frames: map[string]map[uint64]string{}}
 }
 
 // HTTP records ev when it is an http event. It borrows ev (a Source

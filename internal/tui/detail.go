@@ -152,24 +152,39 @@ func stepDetail(b *strings.Builder, c viewmodel.Conversation, i int) {
 	if s.Hop != "" {
 		fmt.Fprintf(b, "hop        %s\n", s.Hop)
 	}
+	run := s.Count > 1 // a folded run: sums, and its first call's stack and ref
 	if s.Bytes > 0 {
-		fmt.Fprintf(b, "bytes      %d\n", s.Bytes)
+		fmt.Fprintf(b, "bytes      %d%s\n", s.Bytes, ifRun(run, fmt.Sprintf(" (%d calls)", s.Count)))
 	}
 	if s.Latency > 0 {
-		fmt.Fprintf(b, "latency    %s\n", s.Latency)
+		fmt.Fprintf(b, "latency    %s%s\n", s.Latency, ifRun(run, fmt.Sprintf(" (sum of %d calls)", s.Count)))
 	}
-	b.WriteString("java stack (top first)\n")
+	fmt.Fprintf(b, "java stack (top first%s)\n", ifRun(run, ", first call"))
 	for _, f := range s.Stack {
 		fmt.Fprintf(b, "  at %s\n", f)
 	}
 	if len(s.Stack) == 0 {
 		b.WriteString("  none recorded\n")
 	}
-	fmt.Fprintf(b, "ref        %s\n", s.Ref)
+	fmt.Fprintf(b, "ref        %s%s\n", s.Ref, ifRun(run, fmt.Sprintf(" (first of %d)", s.Count)))
 	fmt.Fprintf(b, "raw event  iormeshctl query -ref %s\n", s.Ref)
+	if run {
+		fmt.Fprintf(b, "last ref   %s\n", s.LastRef)
+		fmt.Fprintf(b, "whole run  %s\n", s.RunQuery)
+	}
 	if s.Lane >= 0 && s.Lane < len(c.Lifelines) && c.Lifelines[s.Lane].Thread != "" {
 		b.WriteString("\n⏎ opens this thread's story\n")
 	}
+}
+
+// ifRun is note when the step is a folded run (viewmodel.Step.Count >
+// 1, task vg4), else "": its bytes and latency are sums, its stack and
+// ref its first call's, and each field says so.
+func ifRun(run bool, note string) string {
+	if run {
+		return note
+	}
+	return ""
 }
 
 // orderingText says what an ordering means, so a time-ordered or

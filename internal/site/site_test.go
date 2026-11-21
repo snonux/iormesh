@@ -33,6 +33,12 @@ func sampleModel(s string) viewmodel.Model {
 			Stack: []string{"a.B#c(B.java:1)" + s}, Ref: "p/h1/h1-s/5" + s, Lane: 0, ToLane: 1},
 		{Kind: viewmodel.StepFile, Service: lanes[1].Service, Host: "h2", Thread: "w-3", Label: "open /etc/" + s,
 			Ordering: viewmodel.OrderNone, Stack: []string{}, Ref: "p/h2/h2-s/9", Lane: 1, ToLane: -1},
+		// A folded run (task vg4): the selftest checks its detail.
+		{Kind: viewmodel.StepFile, Service: lanes[1].Service, Host: "h2", Thread: "w-3",
+			Label: "read /usr/lib/modules" + s + " (3 calls)", Count: 3, Bytes: 12, Latency: 3000,
+			Ordering: viewmodel.OrderCausal, Stack: []string{"a.B#c(B.java:2)"}, Ref: "p/h2/h2-s/10",
+			LastRef: "p/h2/h2-s/12" + s, RunQuery: "iormeshctl query -thread 21 -file '" + s + "'",
+			Lane: 1, ToLane: -1},
 	}
 	return viewmodel.Model{
 		Run: viewmodel.Run{Projects: []string{"shop"}, Hosts: []string{"h1" + s, "h2"}, Sessions: 2,

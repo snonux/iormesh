@@ -73,7 +73,8 @@ func FindConversation(m Model, id string) (Conversation, error) {
 // per-thread lifelines, then one line per step — its number, ordering,
 // actor (service/thread), arrow to the peer's lifeline, label and
 // extras — with the step's top Java frame and its raw event's ref
-// indented below it.
+// indented below it; a folded run's says they are its first call's and
+// adds its last call's ref and the query that prints the whole run.
 func WriteSequence(w io.Writer, c Conversation) error {
 	c = safeConversation(c)
 	var b strings.Builder
@@ -86,15 +87,28 @@ func WriteSequence(w io.Writer, c Conversation) error {
 	for i, s := range c.Steps {
 		fmt.Fprintf(&b, "%3d  %-12s  %s\n", i+1, s.Ordering, stepLine(s, peerLane(c, s)))
 		if len(s.Stack) > 0 {
-			fmt.Fprintf(&b, "     %-12s    at %s\n", "", s.Stack[0])
+			fmt.Fprintf(&b, "     %-12s    at %s%s\n", "", s.Stack[0], firstOf(s, " (first call)"))
 		}
-		fmt.Fprintf(&b, "     %-12s    ref %s\n", "", s.Ref)
+		fmt.Fprintf(&b, "     %-12s    ref %s%s\n", "", s.Ref, firstOf(s, fmt.Sprintf(" (first of %d)", s.Count)))
+		if s.Count > 1 {
+			fmt.Fprintf(&b, "     %-12s    last %s\n", "", s.LastRef)
+			fmt.Fprintf(&b, "     %-12s    run %s\n", "", s.RunQuery)
+		}
 	}
 	if c.MoreSteps > 0 {
 		fmt.Fprintf(&b, "truncated: %d more steps\n", c.MoreSteps)
 	}
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// firstOf is note for a folded run's step (Count > 1), whose stack and
+// ref are its first call's, else "".
+func firstOf(s Step, note string) string {
+	if s.Count > 1 {
+		return note
+	}
+	return ""
 }
 
 // LifelineName is a lifeline as a sequence view heads its column:
@@ -189,6 +203,7 @@ func safeConversation(c Conversation) Conversation {
 		x := &c.Steps[i]
 		x.Kind, x.Service, x.Host, x.Thread, x.To = s(x.Kind), s(x.Service), s(x.Host), s(x.Thread), s(x.To)
 		x.Label, x.Ordering, x.Hop, x.Ref = s(x.Label), s(x.Ordering), s(x.Hop), s(x.Ref)
+		x.LastRef, x.RunQuery = s(x.LastRef), s(x.RunQuery)
 		x.Stack = safeAll(x.Stack)
 	}
 	return c

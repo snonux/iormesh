@@ -144,8 +144,9 @@ func (e *emitter) body(s int, lifeline string) {
 
 // file emits one file op of server request s on lifeline. A folded run
 // (fileOp.count > 1) is one step whose Count and label say how many
-// calls it holds; it is judged at its first call, and the step after it
-// against its last.
+// calls it holds, LastRef its last call and RunQuery the query that
+// prints every call of it; it is judged at its first call, and the step
+// after it against its last.
 func (e *emitter) file(s int, lifeline string, op fileOp) {
 	srv := e.r.reqs[s]
 	st := Step{Kind: StepFile, Service: lifeline, Host: e.r.origins[op.org].FQDN,
@@ -154,6 +155,8 @@ func (e *emitter) file(s int, lifeline string, op fileOp) {
 		Ref: e.ref(op.org, op.seq)}
 	if op.count > 1 {
 		st.Count, st.Label = op.count, runLabel(op.label, op.count)
+		st.LastRef = e.ref(op.org, op.lastSeq)
+		st.RunQuery = runQuery(st.Host, srv.th.tid, op.path, op.at, op.last)
 	}
 	me := end{lane: Lifeline{Service: lifeline, Host: st.Host, PID: srv.th.pid,
 		Incarnation: srv.th.inc, TID: srv.th.tid, Thread: st.Thread, Carrier: op.carrier},

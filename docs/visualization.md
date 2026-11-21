@@ -416,18 +416,43 @@ trace, never re-inferred:
   made. Another thread's I/O, socket I/O and an fd whose open the
   trace never showed are not in it.
 - **Folded runs** (task vg4): back-to-back repeats of one call by
-  one thread — same verb, path and outcome, only the offset
-  differing, and no call of the thread's started in between — are
-  one step: `count` holds the calls, the label ends `(N calls)`
-  and drops the offset, `bytes` and `latency_ns` are the run's
-  sums, `stack` and `ref` its first call's, and the step after it
-  is judged against its last call. On Rocky 9.9 a JVM's serving
-  thread read its runtime image (`lib/modules`) 744 times while
-  loading classes on its first request, which pushed the checkout
-  to 1696 steps and its story past the cap; folded it is 100
-  steps that still count all 1696 calls. A single call has no
-  `count`. The SVG, which cuts labels at 40 characters, shortens
-  a run's path and keeps its `(N calls)`.
+  one thread — same verb and path, the same outcome (success, or
+  failure with the same errno: return values and byte counts may
+  differ, so a short read or the read that hits EOF folds with the
+  reads before it), only the offset differing, and no client
+  request of the thread's started in between — are one step:
+  `count` holds the calls, the label ends `(N calls)` and drops
+  the offset, `bytes` and `latency_ns` are the run's sums, `stack`
+  and `ref` its first call's, `last_ref` its last call's, and the
+  step after it is judged against its last call. On Rocky 9.9 a
+  JVM's serving thread read its runtime image (`lib/modules`) 744
+  times while loading classes on its first request, which pushed
+  the checkout to 1696 steps and its story past the cap; folded it
+  is 100 steps that still count all 1696 calls. A single call has
+  none of these fields. Every surface says which fields are a
+  run's: the site's and the TUI's step detail label them `bytes
+  (N calls)`, `latency (sum of N calls)`, the Java stack `first
+  call`, the ref `first of N`, and `show sequence` marks the frame
+  and ref the same way; the SVG, which cuts labels at 40
+  characters, shortens a run's path and keeps its `(N calls)`.
+  `run_query` is the query that prints every call of the run —
+  each surface shows it ready to copy:
+
+  ```
+  iormeshctl query -host FQDN -thread TID -file PATH \
+    -from FIRST -to LAST+1ns
+  ```
+
+  the run's host, its kernel thread, its file (globs escaped to
+  match only themselves, every word shell-quoted) and its window,
+  from the first call's instant to just past the last's (`-to` is
+  exclusive). `-file` follows an fd opened from the path even
+  before the window, so reads on an fd the process opened at its
+  start are printed; anything else the thread did to that file
+  between the calls (a close, a stat) is printed with them.
+  Past a server request's 200 file steps, the calls cut fold the
+  same way, so `more_steps` counts steps, not calls, and nothing
+  folds into a kept step across a cut call.
 
 Each step carries `ordering`, judged against the step before it in
 the list: `causal` (thread order or a paired send→receive),
@@ -521,8 +546,9 @@ processes"):
   then read, then only opened, then only failed on — and listed in
   first-seen order (task vg4: a JVM traced from its exec probes and
   opens ~90 library paths first, and a first-seen cut hid the
-  service's own config and records). `show processes` prints them,
-  `-json` the list.
+  service's own config and records) — a ranked selection, not a
+  prefix of the files in the order they were opened. `show
+  processes` prints them, `-json` the list.
 
 V3 as built (task nb4; files in [implementation.md](implementation.md),
 M5 "Local site"): every `build` writes the run's site folder

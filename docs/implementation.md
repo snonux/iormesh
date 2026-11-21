@@ -4554,7 +4554,12 @@ internal/query/                    # + Filter.Ref, ParseRef (-ref)
   folded steps' calls and bytes adding up to every event; no run
   across a call; a failed and a successful open, or two Java
   thread names, kept apart; the step after a run judged by its
-  last call; services named past the cap);
+  last call; services named past the cap; calls cut past a
+  request's cap counted as runs, never folded into a kept step;
+  the run query escaped and quoted, and `show sequence` marking a
+  run's first-call fields), `internal/tui/fold_test.go` (the step
+  detail's run labels), the site selftest (the same labels in the
+  browser);
   `internal/correlate/javahttp_thread_test.go` (a virtual
   thread's http event `carrier` under its carrier's name, held
   only with a start, a lost thread record unnamed);

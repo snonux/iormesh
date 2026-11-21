@@ -51,7 +51,7 @@ func (f *fixture) ev(kind string, fd int32, ret int64, args schema.Args) *schema
 	f.at += 1000
 	e := &schema.Event{Seq: uint64(len(f.evs) + 1), HostID: f.host, PID: f.pid, PIDInc: 1, TID: f.pid * 10,
 		WallNS: f.at, Event: kind, FD: fd, FDGen: 1, Ret: ret, Args: args,
-		Attribution: schema.AttributionJava, Java: &schema.Java{Thread: "HTTP-Dispatcher"}}
+		Attribution: schema.AttributionJava, Java: &schema.Java{Thread: "HTTP-Dispatcher", Stack: []uint64{7}}}
 	f.evs = append(f.evs, e)
 	return e
 }
@@ -302,5 +302,81 @@ func TestFoldKeepsApart(t *testing.T) {
 		"unordered GET /x"}
 	if !slices.Equal(got, want) {
 		t.Errorf("steps\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestCapCountsRuns: past a request's cap the calls cut fold as the kept
+// ones do, so MoreSteps counts steps — runs of 50 and 51 cut are one
+// more each, not 101 — and no call folds into the last kept op across
+// the calls cut after it.
+func TestCapCountsRuns(t *testing.T) {
+	o := newFixture(pidOrders, base)
+	for i := range MaxSteps - 1 { // distinct paths: nothing folds
+		o.ev(schema.KindUnlink, schema.NoFD, 0, schema.Args{Path: ptr(fmt.Sprint("/srv/f", i))})
+	}
+	o.reads("/srv/x", 1) // the open is the last kept op, the read the first cut
+	o.reads("/srv/a", 50)
+	o.reads("/srv/b", 51)
+	o.call("inventory", o.at+300, o.at+600, true) // the run of b reads goes on after a call
+	o.at += 600
+	o.reads("/srv/b", 2)
+	o.ev(schema.KindUnlink, schema.NoFD, 0, schema.Args{Path: ptr("/srv/y")})
+	o.ev(schema.KindOpenat, 99, 99, schema.Args{Path: ptr("/srv/x")}) // the last kept op again
+	o.call("orders", base-1000, o.at+1000, false)
+	var https, files []*schema.Event
+	for _, e := range o.evs {
+		if e.Event == schema.KindHTTP {
+			https = append(https, e)
+		} else {
+			files = append(files, e)
+		}
+	}
+	// The request's own cap, below the conversation's (which also holds
+	// the request and response steps): read from the recorder.
+	r := record(nil, https, files)
+	if len(r.ops) != 1 {
+		t.Fatalf("%d server requests with file work, want 1", len(r.ops))
+	}
+	for srv, ops := range r.ops {
+		// Cut: read x; open a, read a ×50; open b, read b ×51; after the
+		// call read b ×2; unlink y;
+		// open x — each a run of its own: 1 + 2 + 2 + 1 + 1 + 1.
+		if len(ops) != MaxSteps || r.moreOps[srv] != 8 {
+			t.Errorf("%d ops kept, %d more; want %d and 8", len(ops), r.moreOps[srv], MaxSteps)
+		}
+		if last := ops[len(ops)-1]; last.label != "open /srv/x" || last.count != 1 {
+			t.Errorf("last kept op %q (count %d): a cut call folded into it", last.label, last.count)
+		}
+	}
+}
+
+// TestRunQuery: a folded run's query names its host, kernel thread, file
+// and window — from its first call to just past its last — every glob
+// escaped to match itself and every word inert in a shell; show
+// sequence prints it with the run's last ref and marks its stack and
+// ref as the first call's.
+func TestRunQuery(t *testing.T) {
+	got := runQuery("h1.example", 21, "/srv/a b*[x]'c", base, base+5*ms)
+	want := `iormeshctl query -host h1.example -thread 21 -file '/srv/a b\*\[x\]'\''c'` +
+		` -from 1970-01-01T00:16:40Z -to 1970-01-01T00:16:40.005000001Z`
+	if got != want {
+		t.Errorf("run query\n%s\nwant\n%s", got, want)
+	}
+	https, files := noisyCheckout()
+	c := convs(record(nil, https, files))[0]
+	i := slices.IndexFunc(c.Steps, func(s Step) bool { return s.Count == 420 })
+	if s := c.Steps[i]; s.LastRef == "" || s.LastRef == s.Ref ||
+		!strings.Contains(s.RunQuery, "-host h2.example -thread 20 -file "+jdkModules+" -from ") {
+		t.Errorf("the 420-call run: last ref %q, ref %q, query %q", s.LastRef, s.Ref, s.RunQuery)
+	}
+	var b strings.Builder
+	if err := WriteSequence(&b, c); err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{"(first of 420)", "last " + c.Steps[i].LastRef, "run " + c.Steps[i].RunQuery,
+		" (first call)"} {
+		if !strings.Contains(b.String(), w) {
+			t.Errorf("show sequence lacks %q", w)
+		}
 	}
 }

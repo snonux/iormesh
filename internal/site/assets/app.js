@@ -619,25 +619,39 @@
       el('p', 'muted', 'click a step for its Java stack')]);
       return;
     }
+    // A folded run (count > 1, task vg4): its bytes and latency are sums,
+    // its stack and ref its first call's, and each label says so.
+    const n = s.count > 1 ? s.count : 0;
     add(d, [el('h2', '', 'Step ' + stepNo + ': ' + s.kind), kv([['label', s.label], ['service', s.service],
       ['host', s.host], ['thread', s.thread ? s.thread + (s.carrier ? ' (virtual, on its carrier)' : '') : 'untraced'],
-      ['to', s.to], ['bytes', s.bytes ? String(s.bytes) : ''], ['latency', s.latency_ns ? dur(s.latency_ns) : ''],
+      ['to', s.to], [n ? 'bytes (' + n + ' calls)' : 'bytes', s.bytes ? String(s.bytes) : ''],
+      [n ? 'latency (sum of ' + n + ' calls)' : 'latency', s.latency_ns ? dur(s.latency_ns) : ''],
       ['ordering', s.ordering], ['hop', s.hop]])]);
-    add(d, [el('h3', '', 'Java stack (top first)'), arr(s.stack).length ? el('ol', '', arr(s.stack).map(function (f) { return el('li', '', f); })) : el('p', 'empty', 'no Java frames')]);
+    add(d, [el('h3', '', n ? 'Java stack (first call)' : 'Java stack (top first)'), arr(s.stack).length ? el('ol', '', arr(s.stack).map(function (f) { return el('li', '', f); })) : el('p', 'empty', 'no Java frames')]);
     const peer = arr(c.lifelines)[s.to_lane];
     const si = storyIndex(arr(c.lifelines)[s.lane] || {}), pi = peer ? storyIndex(peer) : -1;
     add(d, el('p', '', [si >= 0 ? link(['thread', si], 'this thread’s story') : null,
       pi >= 0 ? ' · ' : null, pi >= 0 ? link(['thread', pi], 'peer thread’s story') : null]));
-    if (s.ref) { refBox(d, s.ref); }
+    if (s.ref) { refBox(d, s.ref, n ? 'raw event (first of ' + n + ')' : 'raw event'); }
+    if (n && s.run_query) {
+      add(d, kv([['last ref', s.last_ref]]));
+      cmdBox(d, 'every call of the run', clean(s.run_query));
+    }
   }
 
   // refBox shows the query command for the raw event: the static site
   // cannot run a query (docs/visualization.md "Detail on demand").
-  function refBox(d, ref) {
-    const cmd = 'iormeshctl query -ref ' + shellQuote(clean(ref));
+  function refBox(d, ref, title) {
+    cmdBox(d, title, 'iormeshctl query -ref ' + shellQuote(clean(ref)));
+  }
+
+  // cmdBox shows a ready-made command under title with a copy button. A
+  // folded run's query comes quoted from the model (viewmodel
+  // runQuery: escaped globs, inert shell words).
+  function cmdBox(d, title, cmd) {
     const pre = el('pre', 'cmd', cmd);
     const msg = el('span', 'muted');
-    add(d, [el('h3', '', 'raw event'), pre, button('copy', function () { copy(cmd, pre, msg); }), ' ', msg]);
+    add(d, [el('h3', '', title), pre, button('copy', function () { copy(cmd, pre, msg); }), ' ', msg]);
   }
 
   // shellQuote makes a ref one inert shell word: the command is meant to
@@ -856,6 +870,19 @@
     for (const r of guarded) {
       show(r.map(String));
       if (document.getElementById('detail').textContent.indexOf('no such') < 0) { failed.push(r.join('/') + ': no guard shown'); }
+    }
+    // A folded run's detail must say its fields are sums or its first
+    // call's (task vg4), and give the query for the whole run.
+    for (const c of arr(M.conversations)) {
+      arr(c.steps).forEach(function (s, n) {
+        if (!(s.count > 1)) { return; }
+        show(['conv', c.id, 'step', String(n + 1)]);
+        const text = document.getElementById('detail').textContent;
+        ['bytes (' + s.count + ' calls)', 'latency (sum of ' + s.count + ' calls)', 'Java stack (first call)',
+          'raw event (first of ' + s.count + ')', 'every call of the run'].forEach(function (w) {
+          if (text.indexOf(w) < 0) { failed.push(['conv', c.id, 'step', n + 1].join('/') + ': lacks ' + w); }
+        });
+      });
     }
     routes.push.apply(routes, guarded);
     const out = el('pre', '', failed.length ? 'selftest: FAILED\n' + failed.join('\n') : 'selftest: ok ' + routes.length + ' routes');

@@ -1550,15 +1550,21 @@ Kubernetes (M7) build on it.
   and the later reads, on an fd whose open the trace never showed,
   are no file work it can name; the real hosts' pattern sessions
   trace from exec and name every one. The views now fold a run of
-  back-to-back repeats of one call by one thread (same verb, path
-  and outcome, offsets aside, never across a call the thread
-  made) into one step that counts its calls (`count`, label
-  `(N calls)`, bytes and latency summed, the first call's stack
-  and ref); the caps count steps after folding; a conversation's
-  `hops` and `services` cover its whole length, past the cap
-  included; and past 32 files a process keeps its written or
-  changed files first, then read, then only opened, then only
-  failed ones (first-seen order kept in the list). Weighed and
+  back-to-back repeats of one call by one thread (same verb and
+  path, the same outcome — success, or the same errno; return
+  values and byte counts may differ, so EOF and short reads fold
+  — offsets aside, never across a client request the thread made)
+  into one step that counts its calls (`count`, label `(N
+  calls)`, bytes and latency summed, the first call's stack and
+  ref, the last call's ref, and the `query` that prints the whole
+  run); every surface labels a run's fields as sums or its first
+  call's; the caps count steps after folding, the calls cut past
+  a request's cap folding too; a conversation's `hops` and
+  `services` cover its whole length, past the cap included; and
+  past 32 files a process keeps its written or changed files
+  first, then read, then only opened, then only failed ones — a
+  ranked selection, not a prefix, listed in first-seen order
+  (task vg4 review). Weighed and
   not taken: a noise class for JDK runtime-image and jar reads
   (a path list to maintain, and a guess about what is noise that
   the operator cannot audit — folding needs no list and hides

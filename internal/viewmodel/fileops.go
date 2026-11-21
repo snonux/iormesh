@@ -63,6 +63,10 @@ var (
 // declared story past MaxSteps (task vg4; PLAN.md M5 "Sequence view").
 // The fold keeps the order exact and counts every call, so nothing is
 // hidden; the per-request cap counts ops after folding.
+//
+// "The same outcome" is success, or failure with the same errno: return
+// values and byte counts may differ, so a short read or the read that
+// hits EOF folds with the reads before it.
 func (r *Recorder) File(o Origin, ev *schema.Event) {
 	if ev.PID == 0 || !r.procs[procKey{ev.HostID, ev.PID, ev.PIDInc}] {
 		return
@@ -72,36 +76,55 @@ func (r *Recorder) File(o Origin, ev *schema.Event) {
 	if !ok {
 		return
 	}
-	base, label, ok := r.describe(ev)
+	path, base, label, ok := r.describe(ev)
 	if !ok {
 		return
 	}
 	thread, carrier, stack := javaOf(ev)
+	key := runKey{base: base, thread: thread, carrier: carrier}
+	if r.moreOps[srv] > 0 {
+		r.drop(srv, key, ev.WallNS)
+		return
+	}
 	if ops := r.ops[srv]; len(ops) > 0 {
-		last := &ops[len(ops)-1]
-		if last.base == base && last.thread == thread && last.carrier == carrier &&
-			!r.callBetween(srv, last.last, ev.WallNS) {
+		if last := &ops[len(ops)-1]; last.runKey == key && !r.callBetween(srv, last.last, ev.WallNS) {
 			last.fold(ev)
 			return
 		}
 	}
 	if len(r.ops[srv]) >= MaxSteps {
-		r.moreOps[srv]++
+		r.drop(srv, key, ev.WallNS)
 		return
 	}
-	r.ops[srv] = append(r.ops[srv], fileOp{org: r.origin(o), seq: ev.Seq, at: ev.WallNS, last: ev.WallNS,
-		base: base, label: label, count: 1, bytes: ev.Bytes, latency: ev.LatencyNS, thread: thread,
-		carrier: carrier, stack: stack})
+	r.ops[srv] = append(r.ops[srv], fileOp{runKey: key, org: r.origin(o), seq: ev.Seq, lastSeq: ev.Seq,
+		at: ev.WallNS, last: ev.WallNS, path: path, label: label, count: 1, bytes: ev.Bytes,
+		latency: ev.LatencyNS, stack: stack})
+}
+
+// drop counts a call past server request srv's cap. MoreSteps counts
+// steps, so the calls cut fold as the kept ones do: only a call that
+// starts a new run is one more step. Once anything is cut no call folds
+// into a kept op either — it would join that op across the calls cut
+// between them.
+func (r *Recorder) drop(srv int, key runKey, at uint64) {
+	d, ok := r.dropped[srv]
+	if !ok || d.runKey != key || r.callBetween(srv, d.last, at) {
+		r.moreOps[srv]++
+		d.runKey = key
+	}
+	d.last = at
+	r.dropped[srv] = d
 }
 
 // fold adds ev to op as one more call of its run: bytes and latency
 // summed, the label without the first call's offset. The first call
-// stays the op's instant, stack and raw event (its Ref).
+// stays the op's instant, stack and raw event (its Ref); the last call
+// is kept as lastSeq and last, which bound the run for a query.
 func (op *fileOp) fold(ev *schema.Event) {
 	op.count++
 	op.bytes += ev.Bytes
 	op.latency += ev.LatencyNS
-	op.last = ev.WallNS
+	op.last, op.lastSeq = ev.WallNS, ev.Seq
 	op.label = op.base
 }
 
@@ -145,38 +168,39 @@ func (r *Recorder) within(ev *schema.Event) (int, bool) {
 }
 
 // describe labels a file event: "read /etc/orders.conf @0", "rename a
-// -> b", with the error when the call failed. base is the label without
-// the offset: what a run of repeated calls folds on (File). Socket and
-// pipe I/O, and an fd whose open the trace never showed, are no file
-// work it can name.
-func (r *Recorder) describe(ev *schema.Event) (base, label string, ok bool) {
+// -> b", with the error when the call failed. path is the file it names
+// (the first of two); base is the label without the offset: what a run
+// of repeated calls folds on (File). Socket and pipe I/O, and an fd
+// whose open the trace never showed, are no file work it can name.
+func (r *Recorder) describe(ev *schema.Event) (path, base, label string, ok bool) {
 	offset := ""
 	if verb, ok := fileVerb[ev.Event]; ok && ev.Args.Path != nil {
 		if opens[ev.Event] && ev.Args.Flags != nil && *ev.Args.Flags&oCreat != 0 {
 			verb = "create"
 		}
-		base = verb + " " + *ev.Args.Path
+		path = *ev.Args.Path
+		base = verb + " " + path
 		if ev.Args.NewPath != nil {
 			base += " -> " + *ev.Args.NewPath
 		}
 	} else if verb, ok := fdVerb[ev.Event]; ok && ev.ConnID == "" {
-		path, known := r.fds[fdKey{procKey{ev.HostID, ev.PID, ev.PIDInc}, ev.FD, ev.FDGen}]
+		p, known := r.fds[fdKey{procKey{ev.HostID, ev.PID, ev.PIDInc}, ev.FD, ev.FDGen}]
 		if !known {
-			return "", "", false
+			return "", "", "", false
 		}
-		base = verb + " " + path
+		path, base = p, verb+" "+p
 		if ev.Args.Offset != nil {
 			offset = " @" + strconv.FormatInt(*ev.Args.Offset, 10)
 		}
 	} else {
-		return "", "", false
+		return "", "", "", false
 	}
 	label = base + offset
 	if ev.Ret < 0 {
 		errno := " (" + cmp.Or(ev.Err, "error") + ")"
 		base, label = base+errno, label+errno
 	}
-	return base, label, true
+	return path, base, label, true
 }
 
 // Methods lists, per session, the method ids the kept conversations'
