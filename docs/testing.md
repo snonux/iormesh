@@ -617,9 +617,10 @@ hop is drawn time-ordered or unordered is held by
 
 The rig above proves M4's criteria on network namespaces; the
 acceptance itself (PLAN.md M4, "Acceptance") also needs one run
-on two real hosts. **Status (2026-11-21): run twice on two
-Rocky 9.9 VMs, not accepted** — 11 of 15 criteria pass, four
-fail on defects filed as tasks (see "Run on Rocky 9.9" below);
+on two real hosts. **Status (2026-11-21): run four times on two
+Rocky 9.9 VMs, not accepted** — the latest run (kf4) passes 14
+of 15 criteria, only the clock bound (jf4) failing (see "Run on
+Rocky 9.9" below);
 nothing counts as accepted until a run prints every criterion
 PASS.
 
@@ -861,6 +862,20 @@ not run against real hosts. What ran here:
   its server killed and M4-6 reports the workload's failure;
   the fakes also fail any role started without `timeout 300`),
   `TestPreflightRefusesController` and `TestNewExecCtlEnv`.
+  Task kf4 added `TestDryRunMicroservicesWithAgent` (exactly the
+  eight microservices projects are added with their spool and
+  the installed jar, every microservices JVM starts with that
+  jar as `-javaagent` into its own project's spool, no other one
+  does, M4-8 and M4-9 pass) and
+  `TestPreflightRefusesMissingAgentJar`; the deploy and upgrade
+  halves are unit-tested in `internal/ctl`
+  (`TestDeployShipsAgent`, `TestDeployRefusesBadAgent` — a
+  tampered, unsigned, foreign-signed, renamed or other-version
+  jar pushes nothing — `TestDeployAgentUpgradeRefused`) and
+  `internal/cli` (`TestUpgradeInstallsAgentJar`,
+  `TestUpgradeRefusesAgentJar`, `TestUpgradeRefusesAgentLayout`,
+  the confined `-agent` in `TestRunConfinement`); 21 mutants of
+  the new checks were each killed by a test.
 - `mage m4Acceptance m4-host1.invalid m4-host2.invalid` (real
   SSH transport, a throwaway key and dist): the preflight fails
   on the first `ssh … pwd`, every other criterion is NOT RUN,
@@ -941,7 +956,11 @@ run-2 failures are not the kernel's:
 - **M4-8 (kf4)**: the TLS label comes only from the Java
   agent's http records, and the runner deploys the services
   without `-spool`/`-agent` (deploy has no way to ship the agent
-  jar). The rig's `TestMicroservices` loads the agent.
+  jar). The rig's `TestMicroservices` loads the agent. Fixed in
+  kf4: deploy ships the signed jar to `/opt/iormesh/lib`
+  (PLAN.md #28, provisional), the microservices projects carry
+  `-spool`/`-agent`, and their JVMs start with the installed jar
+  as `-javaagent` (see "Run with the agent (kf4)" below).
 - **M4-9 (if4)**: a skipped `inet_sock_set_state` run (a
   `skipped_runs` drop, many tracers on a 2-vCPU host) missed
   inventory's final CLOSE, its `sock_owner_map` entry stayed,
@@ -969,15 +988,44 @@ run-2 failures are not the kernel's:
   (`ended disk_limit`, `ended error`), and the runner checks
   for `: ended disk_limit`.
 
+### Run with the agent (kf4, 2026-11-21)
+
+A fourth run, the build of 1080cfd (if4 and lf4 in, jf4 not
+yet), both VMs re-bootstrapped with it, work directory
+`~/.iormesh-m4-kf4-1`: deploy verified and installed
+`dist/iormesh-agent.jar` on both hosts (the installed
+`/opt/iormesh/lib/iormesh-agent.jar` byte-identical to the
+signed one, root's 0644 in a root 0755 `lib/`), the
+microservices' JVMs joined ("java agent of pid N joined, 37
+natives probed"), and **14 of 15 criteria passed**:
+
+- M4-8 PASS — `127.0.0.1:18213 tls x1, 127.0.0.1:18211 tls x1,
+  127.0.0.1:18212 plain x2`, all fused;
+- M4-9 PASS — the two cross-host hops fused across iom1 and
+  iom2; `10.20.0.141:18216 tls x1, 10.20.0.141:18214 tls x1,
+  10.20.0.140:18215 plain x2` (the qf4 loss did not recur in
+  this run; qf4 stays open);
+- M4-10 FAIL — `iom1~iom2: 1 windows (1 one-sided, 0 empty)`,
+  jf4's defect, whose fix landed after this build;
+- every other criterion PASS, M4-14 with 15 sessions collected
+  and nothing left under `/opt/iormesh`.
+
+The ports and the DNAT were removed after the run and both VMs
+bootstrapped again with the same build.
+
 Also found on el9, outside M4's sequence: a session dies with
 "schema: invalid: fd_gen 1 without an fd" when the pattern also
 matches a `su` that runs the JVM (task mf4).
 
-Both VMs were bootstrapped again after run 2 with the build of
-6daa651 (the run's `rm` removes `/opt/iormesh`), so a rerun needs
-only the firewall ports, the DNAT and an empty work directory
-(run 2's is `~/.iormesh-m4`, run 1's `~/.iormesh-m4-run1-20261121`
-on the controller).
+Both VMs were bootstrapped again after the kf4 run with the build
+of 1080cfd (the run's `rm` removes `/opt/iormesh`; the agent jar
+needs no bootstrap, deploy installs it), so a rerun with that
+build needs only the firewall ports, the DNAT and an empty work
+directory; a rerun with a newer build of the same version needs
+the tracer bootstrapped again, since `upgrade` through the rule
+refuses other bytes under one version (run 2's work directory is
+`~/.iormesh-m4`, run 1's `~/.iormesh-m4-run1-20261121`, kf4's
+`~/.iormesh-m4-kf4-1` on the controller).
 
 ## Local site (task nb4)
 

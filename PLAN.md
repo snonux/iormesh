@@ -1352,7 +1352,10 @@ Kubernetes (M7) build on it.
   spread (if4), the clock bound (jf4) and the watchdog reason in
   the summary (lf4) fail on defects filed as tasks, none of them
   the kernel's. Two el9 kernel defects that stopped the tracer
-  were fixed in the run (gf4, hf4). No criterion counts as
+  were fixed in the run (gf4, hf4). After if4, lf4 and kf4 (the
+  agent jar shipped by deploy, #28), a fourth run passed 14 of
+  15, M4-8 and M4-9 with their TLS labels; only the clock bound
+  (jf4, fixed after that build) failed. No criterion counts as
   accepted until one run passes all. `mage m4Acceptance HOST1 HOST2`
   (`internal/acceptance`) runs the whole sequence against
   exactly the two named, bootstrapped hosts and prints PASS,
