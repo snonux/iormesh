@@ -523,7 +523,16 @@ truth.
     one under the next name, `iormesh-2` up to `iormesh-8`. The
     new one is created with the pinned `--image` too, never
     while an earlier one still runs, and never past eight per
-    pod (task ah4);
+    pod (task ah4). Collect does not check the image. It execs
+    into the newest container with a tracer name, whatever image
+    it runs. A principal allowed to add ephemeral containers to
+    the pod could name one `iormesh-N` and have collect read its
+    stream. That stream is already treated as untrusted:
+    unpacked under collect's rules into the pod's own
+    `pod-<uid>`, pinned from the API server. Such a principal
+    can also exec into the pod's tracer directly, so collect
+    adds no new reach. A later `deploy` checks that container's
+    digest and refuses it;
   - is collected into a store directory named by the pod's UID
     (`pod-<uid>`), pinned to the host identity the API server's
     answer implies before any segment arrives — never by what

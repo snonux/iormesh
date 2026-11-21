@@ -2179,7 +2179,12 @@ Later phase — plain Linux servers (M4) come first.
   no status yet, so the pod keeps one tracer. The new tracer gets
   the same pinned `--image`, disk bounds and attach wait as the
   first. Until the new run writes its own `state.json`, the wait
-  reads the predecessor's `dead` or `ended` state as pending.
+  reads the predecessor's `dead` or `ended` state as pending, and
+  so does a deploy rerun that leaves an `iormesh-N` (N > 1)
+  running. An answer that changes from the first one seen fails
+  at once. A new run that fails before attaching lingers
+  (`-linger`), so the wait times out naming its logs; catching
+  that at once is task eh4.
   Collect and every exec name the pod's newest tracer. The trace
   `emptyDir` is the pod's, so the new tracer's `iormesh ready`
   serves the segments its predecessors published, collected into

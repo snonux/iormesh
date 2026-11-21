@@ -5767,14 +5767,27 @@ depends on:
     reports. After a replacement, `WaitAttached` treats `dead`
     and `ended` as pending: they are the predecessor's
     `state.json`, still in the shared project dir until the new
-    run's `markRunning` replaces it. The new run's own death
+    run's `markRunning` replaces it. A deploy rerun that leaves
+    `iormesh-N` (N > 1) running does the same, since that
+    tracer may still be attaching. Only the first such answer
+    is taken as the predecessor's. An answer that differs from
+    it (`dead` turning into `ended`, say) comes from the new
+    run's own `state.json`: its session attached and is already
+    over, so the wait fails at once. A new run that fails before
+    attaching lingers under `-linger`, so its container keeps
+    running and the predecessor's state stays. The wait then
+    times out, saying the run may have failed and naming
+    `kubectl logs --container=iormesh-N`. Telling the two apart
+    at once (comparing `state.json`'s start with the
+    container's) is follow-up task eh4. A run that crashes
     terminates its container, which the probe catches. The new
     run's `segment.New` takes the `.lock` the dead run's flock
     no longer holds, sweeps its `.active-*` files and publishes
     beside its sealed segments, which `iormesh ready` then
     serves. Collect's "session ended" error for a stopped debug
-    tracer says to run deploy. Sidecar mode is unchanged and is
-    the recommendation for pods that restart.
+    tracer says to run deploy, or, when it is `iormesh-8` (the
+    cap), to restart the pod or use sidecar mode. Sidecar mode is
+    unchanged and is the recommendation for pods that restart.
 11. ClusterIP join: S2's key survives kube-proxy's DNAT (PLAN.md
     M7 "Service-NAT correlation", settled by task xb4), so M4's
     `federate.Fuse` joins both ends unchanged and no conntrack is

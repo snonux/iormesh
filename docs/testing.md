@@ -1794,9 +1794,15 @@ without a cluster, against fake kubectls on `PATH`:
     tracers (the cap).
   - After a replacement, the attach probes go to `iormesh-2`.
     The predecessor's `dead` or `ended duration` is waited past
-    until `running`; a `dead` that never gives way times out
-    naming it. A replacement whose container exits fails at
-    once.
+    until `running`. A `dead` that never gives way times out,
+    naming it, the chance that the run failed before attaching,
+    and `kubectl logs … --container=iormesh-2`. An answer that
+    changes from the first one seen (`dead` to `ended`, `ended`
+    with a new reason, `ended` to `dead`) fails at the change. A
+    replacement whose container exits fails at once. A deploy
+    rerun that leaves `iormesh-2` running waits past the
+    predecessor's `dead` the same way, while a first tracer's
+    `dead` still fails at once.
   - The `Lister` reports the newest tracer and its own status.
   - `Run` and `Fetch` exec into `Target.Tracer`. `New` refuses a
     malformed tracer name, a sidecar tracer other than
@@ -1810,7 +1816,10 @@ without a cluster, against fake kubectls on `PATH`:
   - Deploy starts `iormesh-2` and waits on it, or leaves a
     running `iormesh-2` alone, or fails at the cap without a
     `debug`.
-  - The stopped-tracer error tells the operator to run deploy.
+  - The stopped-tracer error tells the operator to run deploy,
+    except at the cap (`iormesh-8` stopped), where it says to
+    restart the pod or use sidecar mode and never mentions
+    deploy.
 
   `internal/segment` (`TestNextRunKeepsKilledRunsSegments`): a
   writer whose flock is gone without `Close` (a kill) is followed
@@ -1825,7 +1834,11 @@ without a cluster, against fake kubectls on `PATH`:
   tracer, `exec` or `debug` naming `iormesh`, tracer-name
   validation dropped, a leading zero accepted, collect ignoring
   `PodState.Container`, and deploy skipping the attach wait after
-  a replacement.
+  a replacement. The review fixes added six more, each failing a
+  test too: a rerun not marked superseded, a first tracer marked
+  superseded, no state-change check, the first answer not
+  remembered, that memory reset per wait, and the cap message
+  dropped.
 
 ## K8s manifests and pod identity (task vb4)
 
