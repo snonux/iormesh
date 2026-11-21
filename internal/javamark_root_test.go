@@ -173,7 +173,8 @@ func (c *markCollector) file(rec any) {
 // checkMarks: the open of probePath carries open0's mark and its read and
 // stdin's carry readBytes'; the opens and reads of /proc files (info0's,
 // a native the mark does not probe) carry none, and no read of another
-// file carries readBytes'; every mark names a native entered before now.
+// file carries readBytes'; every mark names a native entered before now;
+// and a mark comes from a thread other than the launcher's (tid != pid).
 func checkMarks(t *testing.T, enters []markedEnter) {
 	t.Helper()
 	seen := map[string]bool{}
@@ -188,6 +189,7 @@ func checkMarks(t *testing.T, enters []markedEnter) {
 			t.Errorf("%s: no mark", e.kind)
 		case hooked:
 			seen[e.kind] = e.mark.Cookie == map[bool]uint64{true: cookieOpen0, false: cookieReadBytes}[strings.HasPrefix(e.kind, "openat:")]
+			seen["thread"] = seen["thread"] || e.mark.Tid != e.mark.Pid
 		case proc && e.mark != nil:
 			t.Errorf("%s: JVM work marked with cookie %d", e.kind, e.mark.Cookie)
 		case proc:
@@ -196,7 +198,12 @@ func checkMarks(t *testing.T, enters []markedEnter) {
 			t.Errorf("%s: marked as readBytes'", e.kind)
 		}
 	}
-	for _, k := range []string{"openat:" + probePath, "read:" + probePath, "read:stdin", "openat:/proc", "read:/proc"} {
+	// "thread": a hooked native marked on a thread whose tid is not the
+	// pid. Java's main method never runs on the launcher thread, so on a
+	// kernel whose uprobe_multi filters by thread (6.6-6.9 without commit
+	// 46ba0e49) no mark is sent at all; this names the cause. Rocky 9.9's
+	// el9 kernel passes (task nf4).
+	for _, k := range []string{"openat:" + probePath, "read:" + probePath, "read:stdin", "openat:/proc", "read:/proc", "thread"} {
 		if !seen[k] {
 			t.Errorf("no correctly marked %s; enters %+v", k, enters)
 		}

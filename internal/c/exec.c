@@ -8,7 +8,8 @@
 // the Java mark's reset on thread exit (iormesh_java_mark_forget, javamark.c,
 // task td4); pids and tids in the tracer's PID namespace (pidns.c, M7);
 // target_map's kernel inserts and removals keep the target hint
-// (targethint.c, task 9f4).
+// (targethint.c, task 9f4); ior_exit_group_dead's verification note names
+// the root test that runs both of its paths (task nf4).
 
 //+build ignore
 
@@ -389,12 +390,12 @@ struct trace_event_raw_sched_process_exit___ior {
 // signal) reports 0 rather than guessing: the fd entries then linger until LRU
 // trimming, the same outcome as a record lost to ring-buffer backpressure.
 //
-// Verification status: the field path is exercised end to end by the
-// integration scenario thread-exit-keeps-fd (integrationtests) on the 7.2
-// development host, whose tracepoint has group_dead. The signal->live
-// fallback compiles to valid CO-RE relocations but has not been run on a
-// kernel lacking the field; its correctness rests on the do_exit() ordering
-// argued above.
+// Verification status: TestProcessExitGroupDead (internal/exit_root_test.go,
+// `mage bpfRootTest`) runs both paths: the field on the 7.2 development
+// host, and the signal->live fallback on Rocky 9.9's 5.14.0-741.22.1.el9_9,
+// whose sched_process_exit has no group_dead (task nf4). A thread exiting
+// alone reports 0 and leaves the process traced; the process's exit_group
+// reports 1 on its last thread (one record in each of ten runs there).
 static __always_inline __u32
 ior_exit_group_dead(void *raw_ctx) {
     struct trace_event_raw_sched_process_exit___ior *ctx = raw_ctx;
