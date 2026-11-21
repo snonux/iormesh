@@ -1315,9 +1315,10 @@ Kubernetes (M7) build on it.
   load-time probe or CO-RE, never a skip — as gf4 (verifier:
   ctx memcpy) and hf4 (12-byte `trace_entry`) were.
   Status (2026-11-21, task nf4): the root BPF suite (27 tests)
-  and the integration suite (51) pass on 9.9, the uprobe_multi
-  pid filter (46ba0e49) and the `group_dead` fallback included;
-  `TestJavaLiveAttach` flakes there (about 1 run in 8, task tf4)
+  passes on 9.9, the uprobe_multi pid filter (46ba0e49) and the
+  `group_dead` fallback included; the integration suite passed
+  50 of 51 on the final tree — `TestJavaLiveAttach` flakes
+  there (about 1 run in 8, task tf4)
   ([testing.md](docs/testing.md#root-suites-on-rocky-99-task-nf4-2026-11-21)).
 - Acceptance: decision #25's tracer-CPU item passes on the
   segment-writer path, plain and `-spool` (task ee4).
