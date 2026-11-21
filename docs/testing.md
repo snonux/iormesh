@@ -1204,6 +1204,54 @@ the pipe-ipc pattern session (three runs) and lb4's
 `-trace-dir`) now end `stop`. The old binary still dies on the
 su run. A writer's error now names the event it rejects.
 
+## el9 record layout (task of4)
+
+lb4's dispatch bug, the raw_syscalls record read at upstream's
+offsets on el9, showed only on el9. Two root tests in `mage
+bpfRootTest` now hold the fix on a 7.x host:
+
+- **`TestEl9RecordLayout`** (`internal/btf_root_test.go`)
+  relocates the dispatchers and close's two handlers against a
+  committed el9 BTF, set as libbpf's `btf_custom_path`. Their
+  record loads must sit at id 16 and args/ret 24. Relocated
+  against the host BTF, they must match the host's tracefs
+  format file (8 and 16 on 7.2). The host kernel refuses the
+  el9-relocated programs: their BTF-typed `task_struct` loads
+  carry el9 offsets. So the test reads libbpf's relocated
+  instructions (`bpf_program__insns`, `internal/corereloc`), not
+  the loaded ones. With `preserve_access_index` dropped from the
+  enter struct it fails: id is then read at 0, the pt_regs slot,
+  and args at 8.
+- **`TestDispatchSeesSeveralKinds`** traces an open/read/close
+  loop and requires more than one syscall kind, and all three
+  enters. The el9 bug sent nearly every call to the read
+  handler.
+
+The BTF is
+`internal/testdata/btf/rocky9.9-5.14.0-741.22.1.el9_9.x86_64.min.btf`
+(11 KB), trimmed to what the object's CO-RE relocations name. It
+was extracted from the Rocky kernel-core RPM; a trim of iom1's
+live BTF is byte-identical. To regenerate it after `mage
+bpfBuild` (needed when the four programs gain relocations
+against types the file lacks):
+
+```sh
+rpm2cpio kernel-core-5.14.0-741.22.1.el9_9.x86_64.rpm | cpio -idm
+scripts/extract-vmlinux lib/modules/*/vmlinuz > vmlinux  # kernel tree
+bpftool gen min_core_btf vmlinux el9.min.btf internal/c/iormesh.bpf.o
+# or: ssh root@iom1 cat /sys/kernel/btf/vmlinux > el9.btf
+```
+
+The nf4 review changed `TestProcessExitGroupDead` in the same
+change-set. It waits for the record it needs, then for a 200 ms
+quiet period, instead of a fixed second. Where
+`sched_process_exit` has `group_dead`, read from the format file,
+it requires exactly one `group_dead` record; the el9 fallback
+keeps "at least one". The child locks its main thread in
+`init()`. `TestJavaMarkNamesTheNative` reports a missing
+off-launcher-thread mark in an error of its own, which names
+commit 46ba0e49.
+
 ## Local site (task nb4)
 
 `mage test` covers the generated site without a browser
