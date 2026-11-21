@@ -1378,7 +1378,9 @@ Kubernetes (M7) build on it.
   were fixed in the run (gf4, hf4). After if4, lf4 and kf4 (the
   agent jar shipped by deploy, #28), a fourth run passed 14 of
   15, M4-8 and M4-9 with their TLS labels; only the clock bound
-  (jf4, fixed after that build) failed. No criterion counts as
+  (jf4, fixed after that build) failed; a fifth, with jf4 and
+  kf4's review fixes, passed M4-10 but lost two plain hops of the
+  spread M4-9 to skipped runs (qf4). No criterion counts as
   accepted until one run passes all. `mage m4Acceptance HOST1 HOST2`
   (`internal/acceptance`) runs the whole sequence against
   exactly the two named, bootstrapped hosts and prints PASS,

@@ -617,10 +617,11 @@ hop is drawn time-ordered or unordered is held by
 
 The rig above proves M4's criteria on network namespaces; the
 acceptance itself (PLAN.md M4, "Acceptance") also needs one run
-on two real hosts. **Status (2026-11-21): run four times on two
-Rocky 9.9 VMs, not accepted** — the latest run (kf4) passes 14
-of 15 criteria, only the clock bound (jf4) failing (see "Run on
-Rocky 9.9" below);
+on two real hosts. **Status (2026-11-21): run five times on two
+Rocky 9.9 VMs, not accepted** — the two kf4 runs pass 14 of 15
+criteria each, but not the same 14: the fourth fails the clock
+bound (before jf4), the fifth the spread M4-9 (skipped runs,
+qf4) (see "Run on Rocky 9.9" below);
 nothing counts as accepted until a run prints every criterion
 PASS.
 
@@ -1019,6 +1020,18 @@ natives probed"), and **14 of 15 criteria passed**:
 
 The ports and the DNAT were removed after the run and both VMs
 bootstrapped again with the same build.
+
+A fifth run after kf4's review round (the build of 22c3ad9, jf4
+in; `~/.iormesh-m4-kf4-2`) checked the hardened start on el9: the
+units ran with `IORMESH_CONFINED_UNIT=1` and `-agent` forwarded as
+`/opt/iormesh/lib/iormesh-agent.jar`, every confined unit run
+started, and the agents joined. 14 of 15 passed — M4-8 (TLS
+labels as above) and now M4-10 (`width 646µs`, two-sided) among
+them. M4-9 failed: gateway→orders (TLS) and orders→billing (TLS)
+fused, but orders→inventory and gateway→inventory stayed
+unresolved on both ends (4 `skipped_runs` in the spread's
+sessions) — the lost-transition class of if4/qf4, not the agent.
+Ports, DNAT and bootstrap as after the fourth run.
 
 Also found on el9, outside M4's sequence: a session dies with
 "schema: invalid: fd_gen 1 without an fd" when the pattern also
