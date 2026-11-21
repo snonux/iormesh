@@ -1803,6 +1803,30 @@ without a cluster, against fake kubectls on `PATH`:
     rerun that leaves `iormesh-2` running waits past the
     predecessor's `dead` the same way, while a first tracer's
     `dead` still fails at once.
+  - `started=` times (task eh4, `attach_started_test.go`), with
+    `iormesh-2` running since 00:00:00 in the pod read.
+    `TestWaitAttachedOlderState`: a `dead`, `ended` or
+    (reused-pid) `running` state started an hour earlier, or
+    1 µs past the 2 s skew window, is waited past until the new
+    run's `running`, with one pod read for the whole wait. Its
+    timeout names both instants and the container's logs.
+    `TestWaitAttachedNewState`: a new run's `ended` (with or
+    without a reason) or `dead`, started after the container
+    or exactly 2 s before it, fails at the first probe and names
+    the logs. So does a new `dead` after the predecessor's
+    `dead`, which the state-change check alone would miss. A new
+    `running` attaches. `TestWaitAttachedNoContainerStart`: no
+    status, or a waiting one, falls back to the state-change
+    check and reads the pod again each probe.
+    `TestWaitAttachedTimelessAfterOlder`: an answer without a
+    time after a timed predecessor's fails as a change.
+    `TestWaitAttachedMalformedStarted` fails at once on a time
+    that is not one. `TestParseStarted` takes RFC3339 in any
+    zone and unix ns, and refuses dates, missing zones, years
+    before 2020 or from 2200, signs, overflow, over-long
+    fractions, escape bytes and a time after `pending`.
+    `TestReadyState` (`internal/cli`) pins the `started=` word
+    in UTC with nanoseconds.
   - The `Lister` reports the newest tracer and its own status.
   - `Run` and `Fetch` exec into `Target.Tracer`. `New` refuses a
     malformed tracer name, a sidecar tracer other than
@@ -1907,7 +1931,8 @@ Unit tests in `mage test`, no cluster and no container engine
   mode. `TestParseAttach` refuses every `ready -state` answer
   iormesh never writes (an upper-case, short, long or trailing
   session id, escape bytes, an end reason outside `[a-z_]{1,32}`,
-  a word after `pending` or `dead`), with no raw control byte in
+  a word after `pending` or `dead` other than `dead`'s
+  `started=` time), with no raw control byte in
   the error; `TestWaitAttachedProbeFails` (a remote exit status
   fails after one exec), `TestWaitAttachedInterrupted` (a
   cancel says "interrupted" and wraps `context.Canceled`),

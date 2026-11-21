@@ -5766,22 +5766,43 @@ depends on:
     the container that `exec`, `Fetch` and the attach probe
     use. `Deploy` sets it on its `Kubectl`, and collect takes it
     from `PodState.Container`, the newest tracer the `Lister`
-    reports. After a replacement, `WaitAttached` treats `dead`
-    and `ended` as pending: they are the predecessor's
-    `state.json`, still in the shared project dir until the new
+    reports. After a replacement the predecessor's
+    `state.json` stays in the shared project dir until the new
     run's `markRunning` replaces it. A deploy rerun that leaves
-    `iormesh-N` (N > 1) running does the same, since that
-    tracer may still be attaching. Only the first such answer
-    is taken as the predecessor's. An answer that differs from
-    it (`dead` turning into `ended`, say) comes from the new
-    run's own `state.json`: its session attached and is already
-    over, so the wait fails at once. A new run that fails before
-    attaching lingers under `-linger`, so its container keeps
-    running and the predecessor's state stays. The wait then
-    times out, saying the run may have failed and naming
-    `kubectl logs --container=iormesh-N`. Telling the two apart
-    at once (comparing `state.json`'s start with the
-    container's) is follow-up task eh4. A run that crashes
+    `iormesh-N` (N > 1) running is in the same spot, since that
+    tracer may still be attaching (`Kubectl.superseded`).
+    Task eh4 tells the two states apart by time. `readyState`
+    ends `running`, `ended` and `dead` with
+    `started=<RFC3339Nano>`, the state's `StartedAt`
+    (`k8s.AttachStartedKey`). `parseAttach`'s `splitStarted`
+    cuts that word off and `parseStarted` reads it strictly:
+    at most 35 bytes, RFC3339 or 1 to 19 digits of unix ns, in
+    [2020, 2200), else the wait fails quoting the answer. On
+    the first answer that carries a time, `attachProbe` reads
+    the pod once (`containerStart`) for the new container's
+    `running.startedAt` and keeps it in `predecessor.start`,
+    since an ephemeral container never restarts.
+    `predecessor.whose` then decides. A `StartedAt` more than
+    `attachSkew` (2 s) before the container's start is the
+    predecessor's, waited past, and the timeout names both
+    instants. Anything later is the new run's own: `running`
+    returns its session, `ended` or `dead` fails at once and
+    names the container's logs. Both stamps are the same
+    node's clock (kubelet or runtime, and the tracer's own
+    `time.Now`); the window covers the status's whole seconds
+    and a small step. Without a time to compare (no `started=`
+    from an older image, a failed pod read, no running status
+    yet), ah4's rule is the fallback. Only the first `dead` or
+    `ended` answer is taken as the predecessor's. An answer
+    that differs from it (`dead` turning into `ended`, or
+    another `started=` time) comes from the new run's own
+    `state.json`, so the wait fails at once. A predecessor's
+    answer judged by time is remembered as that first answer
+    too. A new run that fails before attaching writes no
+    `state.json` and lingers under `-linger`, so its container
+    keeps running and the predecessor's state stays. The wait
+    then times out, saying the run may have failed and naming
+    `kubectl logs --container=iormesh-N`. A run that crashes
     terminates its container, which the probe catches. The new
     run's `segment.New` takes the `.lock` the dead run's flock
     no longer holds, sweeps its `.active-*` files and publishes

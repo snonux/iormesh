@@ -2180,13 +2180,25 @@ Later phase — plain Linux servers (M4) come first.
   It never starts one while an earlier tracer runs, waits or has
   no status yet, so the pod keeps one tracer. The new tracer gets
   the same pinned `--image`, disk bounds and attach wait as the
-  first. Until the new run writes its own `state.json`, the wait
-  reads the predecessor's `dead` or `ended` state as pending, and
-  so does a deploy rerun that leaves an `iormesh-N` (N > 1)
-  running. An answer that changes from the first one seen fails
-  at once. A new run that fails before attaching lingers
-  (`-linger`), so the wait times out naming its logs; catching
-  that at once is task eh4.
+  first. Until the new run writes its own `state.json`, the
+  predecessor's stays in the shared project dir, and so it does
+  for a deploy rerun that leaves an `iormesh-N` (N > 1) running.
+  `iormesh ready -state` ends its `running`, `ended` and `dead`
+  answers with the session's `started=` time (task eh4). The
+  wait compares it with the new container's
+  `running.startedAt` from one pod read. A state that started
+  more than a 2 s skew window before the container is the
+  predecessor's, and the wait waits past it. Any later state is
+  the new run's own: `running` is attached, and `ended` or
+  `dead` fails at once. Both instants come from the same node's
+  clock; the window covers the status's whole seconds. The time
+  is parsed strictly (RFC3339 or unix ns, 2020 to 2200), since
+  the pod writes it. Without a time to compare (an older image,
+  a failed pod read), the fallback is the first rule: the
+  predecessor's `dead` or `ended` is pending, and an answer that
+  changes from the first one seen fails at once. A new run that
+  fails before attaching writes no `state.json` and lingers
+  (`-linger`), so the wait still times out naming its logs.
   Collect and every exec name the pod's newest tracer. The trace
   `emptyDir` is the pod's, so the new tracer's `iormesh ready`
   serves the segments its predecessors published, collected into
