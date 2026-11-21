@@ -617,9 +617,12 @@ hop is drawn time-ordered or unordered is held by
 
 The rig above proves M4's criteria on network namespaces; the
 acceptance itself (PLAN.md M4, "Acceptance") also needs one run
-on two real hosts. **Status (2026-11-21): run six times on two
-Rocky 9.9 VMs; the sixth (qf4, the build of 35c7de7) printed
-every criterion PASS** — the two kf4 runs before it passed 14 of
+on two real hosts. **Status (2026-11-21): accepted** (PLAN.md
+M4, an owner-delegated advisor decision): run six times on two
+Rocky 9.9 VMs the owner provided; the sixth (qf4, the build of
+35c7de7) printed every criterion PASS. Both VMs share one
+physical host; task 3f4 re-runs the acceptance on a HEAD build
+first — the two kf4 runs before it passed 14 of
 15 each, the fourth failing the clock bound (before jf4), the
 fifth the spread M4-9 (skipped runs, qf4) (see "Run on Rocky
 9.9" below).

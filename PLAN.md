@@ -1370,8 +1370,18 @@ Kubernetes (M7) build on it.
   segment store. Naming two of the
   services via `iormeshctl services` shows them by name in
   the graph export — no manual file edits anywhere.
-  Status (2026-11-21, task lb4): **run on two Rocky 9.9
-  hosts, not accepted** — 11 of the run's 15 criteria pass;
+  Status (2026-11-21, task lb4): **accepted** — the sixth run
+  on two Rocky 9.9 hosts (VMs iom1 and iom2, kernel
+  5.14.0-741.22.1.el9_9, build of 35c7de7) printed every
+  criterion M4-0 to M4-14 PASS. Limits of the evidence: both
+  VMs share one physical host (one hardware clock, one
+  physical network), and one run passed all 15; the five before
+  it each failed on defects since fixed (gf4–nf4, qf4, tf4).
+  Owner-delegated advisor decision; the run was made by agents
+  on hosts the owner provided for it. Task 3f4 first re-runs
+  the acceptance on a HEAD build (pf4 changed the BPF object
+  after 35c7de7); any FAIL there sets M4 back to not accepted
+  until fixed. History: the first run passed 11 of 15;
   the microservices TLS label (kf4), one cross-host hop of the
   spread (if4), the clock bound (jf4) and the watchdog reason in
   the summary (lf4) fail on defects filed as tasks, none of them
@@ -1385,7 +1395,7 @@ Kubernetes (M7) build on it.
   its `CLOSE`, the correlator splits a socket address reused after
   a lost `CLOSE`); a sixth, with qf4, printed every criterion
   PASS (build of 35c7de7). No criterion counts as
-  accepted until one run passes all. `mage m4Acceptance HOST1 HOST2`
+  accepted until one run passes all — the sixth did. `mage m4Acceptance HOST1 HOST2`
   (`internal/acceptance`) runs the whole sequence against
   exactly the two named, bootstrapped hosts and prints PASS,
   FAIL, SKIP or NOT RUN per criterion; the runbook, its
