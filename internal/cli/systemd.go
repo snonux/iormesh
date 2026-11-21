@@ -28,7 +28,9 @@ type commander interface {
 }
 
 // execCommander runs the real tools. Their stderr is folded into the
-// error, since systemctl says there why a unit could not start or stop.
+// error, since systemctl says there why a unit could not start or stop —
+// bounded and terminal-safe (boundedLines), as a tool on a compromised
+// host may print anything.
 type execCommander struct{}
 
 // unitState is the part of `systemctl show` that start, stop and status
@@ -45,7 +47,10 @@ func (execCommander) Output(ctx context.Context, name string, args ...string) ([
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		msg := strings.TrimSpace(stderr.String())
+		msg := strings.TrimSpace(boundedLines(stderr.Bytes()))
+		if msg == "" {
+			msg = "(no stderr)"
+		}
 		return out, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, msg)
 	}
 	return out, nil

@@ -73,6 +73,9 @@ type control struct {
 	// confine is what a started session may use (confine.go): start is
 	// always confined, since its unit runs as root.
 	confine confinement
+	// selinux reports SELinux's mode and a file's label, for the hint on
+	// a failed start (startdiag.go); nil gives no hint.
+	selinux func(path string) selinuxState
 }
 
 // startConfig is a validated `iormesh start` command line.
@@ -90,7 +93,8 @@ func newControl(stdout, stderr io.Writer) (control, error) {
 		return control{}, fmt.Errorf("own binary: %w", err)
 	}
 	return control{sys: execCommander{}, self: self, env: os.Getenv, now: time.Now,
-		sleep: sleepCtx, stdout: stdout, stderr: stderr, confine: defaultConfinement(os.Getenv)}, nil
+		sleep: sleepCtx, stdout: stdout, stderr: stderr, confine: defaultConfinement(os.Getenv),
+		selinux: hostSELinux}, nil
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {
@@ -140,8 +144,11 @@ func (c control) start(ctx context.Context, args []string) error {
 	if err := c.confine.prepare(cfg.run); err != nil {
 		return err
 	}
+	launched := c.now()
 	if _, err := c.sys.Output(ctx, "systemd-run", cfg.unitArgs(c.self)...); err != nil {
-		return err
+		// systemd-run says little (with --quiet often nothing): the
+		// cause is in the unit's journal (startdiag.go).
+		return c.diagnoseStart(ctx, cfg.unit, launched, err)
 	}
 	if cfg.wait == 0 {
 		_, _ = fmt.Fprintf(c.stdout, "iormesh: launched %s\n", cfg.unit)

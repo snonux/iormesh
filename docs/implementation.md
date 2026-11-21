@@ -3232,6 +3232,11 @@ func (cfg startConfig) unitArgs(self string) []string {
   never start, stop or list a host unit. Unit names are built
   only from labels `internal/project` accepts, with the
   `.service` suffix spelled out (a label may contain dots).
+- A failed systemd-run is diagnosed (`startdiag.go`, task rf4):
+  the unit's journal since the launch, or `systemctl status`,
+  bounded and through `termsafe`, plus an SELinux hint when
+  the binary's label is not `bin_t`/`usr_t` or the log shows a
+  denial ([testing.md](testing.md), "Root suites on Rocky 9.9").
 - `state.json` is written by the run (atomic rename, 0644), not
   by `start`: `running` once the probes are attached, with pid
   and incarnation, `$INVOCATION_ID`, targets, start and end-by

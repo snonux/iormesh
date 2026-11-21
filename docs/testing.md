@@ -1170,6 +1170,34 @@ serial run (about 10 minutes; 2 GiB was enough) failed seven:
   systemd may not exec a binary in `/root` (`admin_home_t`,
   status 203/EXEC), and `iormesh start` said only "exit status
   1". Passes from `/opt`. The bare error is task rf4.
+
+Task rf4 made a failed start name its cause. systemd-run
+(`--quiet --service-type=exec`) exits 1 with nothing on stderr,
+and `--collect` has already dropped the unit, so start now
+appends the unit's journal since the launch (`journalctl
+--since=@<launch> --unit=…`, falling back to `systemctl status`),
+at most 20 lines of 300 bytes and 4 KiB, oldest lines dropped
+first, each line through `termsafe`; systemd-run's own stderr is
+bounded the same way. When SELinux enforces and the binary's
+type is not `bin_t` or `usr_t`, or the log shows a permission or
+AVC denial, a hint names the label and points to `/usr/local/bin`
+or `/opt`. The hint does not wait for an AVC record: el9 does not
+audit this denial (`ausearch -m avc` shows none). The unit tests
+(`internal/cli/startdiag_test.go`) put shell stand-ins for
+systemd-run, systemctl and journalctl first on `PATH`, so the
+real exec path (argv, stderr capture) runs: the el9 journal and
+label, the status fallback, the hint's cases, and a 200-line log
+with escape sequences in it and in systemd-run's stderr. On iom1
+(enforcing), a start from `/root/rf4` now reports:
+
+```
+iormesh: systemd-run --unit=iormesh-rf4probe.service … -- /root/rf4/iormesh run …: exit status 1: (no stderr)
+iormesh-rf4probe.service logged:
+  … iormesh-rf4probe.service: Failed to locate executable /root/rf4/iormesh: Permission denied
+  … iormesh-rf4probe.service: Main process exited, code=exited, status=203/EXEC
+  …
+SELinux is enforcing and /root/rf4/iormesh is labelled admin_home_t: systemd may not exec a binary outside a bin_t or usr_t path (e.g. under /root, admin_home_t); install it under /usr/local/bin or /opt (restorecon relabels it)
+```
 - `TestPipeIPC` (fixed): el9's glibc 2.34 implements `pipe()` as
   `pipe(2)` on x86_64, Fedora's 2.43 as `pipe2(fds, 0)`; the
   tracer recorded `pipe` with both ends, the golden declared

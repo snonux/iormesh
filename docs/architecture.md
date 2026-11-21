@@ -90,7 +90,9 @@ views — happens on the controller.
   - The tracer runs as a transient systemd unit: independent of
     the SSH session, capped in CPU and memory by its cgroup,
     bounded to 4h by default and by a disk-space watchdog, and
-    stopped cleanly with a flush.
+    stopped cleanly with a flush. A unit systemd refuses to run
+    fails the start with the unit's journal tail and, under
+    enforcing SELinux, a hint naming the binary's label.
   - Every privileged action is a tracer subcommand (`start`,
     `stop`, `status`, `uninstall`), so one pinned sudoers rule
     covers the whole lifecycle.
