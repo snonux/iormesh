@@ -250,3 +250,21 @@ func mustTarget(t *testing.T, name string) Target {
 	}
 	return targets[0]
 }
+
+// TestSelinuxRPMArgv: the RPM build runs build.sh on the pinned Rocky 9
+// image with the packaging directory read-only, and hands the RPMs to the
+// owner only under Docker (rootless Podman's root is the user already).
+func TestSelinuxRPMArgv(t *testing.T) {
+	base := "run --rm --security-opt label=disable --platform linux/amd64 " +
+		"-v /r/packaging/selinux:/src:ro -v /r/dist/selinux:/out "
+	tail := RockyImage + " bash /src/build.sh /src /out"
+	for _, tc := range []struct{ engine, want string }{
+		{Podman, "podman " + base + tail},
+		{Docker, "docker " + base + "-e IORMESH_OUT_OWNER=1000:1000 " + tail},
+	} {
+		got := strings.Join(SelinuxRPMArgv(tc.engine, "/r/packaging/selinux", "/r/dist/selinux", "1000:1000"), " ")
+		if got != tc.want {
+			t.Errorf("SelinuxRPMArgv(%s) = %q, want %q", tc.engine, got, tc.want)
+		}
+	}
+}

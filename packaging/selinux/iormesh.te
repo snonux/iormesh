@@ -1,0 +1,85 @@
+policy_module(iormesh, 0.1.0)
+
+########################################
+#
+# iormesh_container_t: the in-pod tracer's SELinux type (PLAN.md #13,
+# task 7h4), an opt-in alternative to the default spc_t. It is a
+# container domain built like container_t - container-selinux's own
+# template, so containerd may transition to it, it manages
+# container_file_t, and it stays MCS-constrained - plus only what the
+# tracer needs that container_t lacks, measured on el9 (tasks zg4, 7h4):
+# BPF programs and maps, the perf events that attach tracepoints, a
+# read-only view of tracefs for the tracepoint ids, and the Java attach
+# to the app containers' JVMs (container_t), found by task 7h4's
+# audit2allow review of a permissive run.
+#
+# MCS: like container_t it can read only files its level dominates. Run
+# it at the pod's own MCS pair (iormeshctl deploy -selinux-level
+# s0:cN,cM): at the default s0 the app container's files, which the
+# Java attach reaches through /proc/<pid>/root, are out of its reach,
+# and so are the app's processes: the container_t rules below then
+# apply to no process at all. At the pod's pair they reach the pod's
+# app containers only - other pods run at other pairs.
+#
+# Build: mage selinuxRPM (packaging/selinux/build.sh); unit tests in
+# packaging/selinux/policy_test.go pin the permission sets below.
+#
+
+gen_require(`
+	attribute container_net_domain;
+	attribute container_user_domain;
+	attribute sandbox_net_domain;
+	attribute sandbox_caps_domain;
+	attribute svirt_sandbox_domain;
+	type container_t;
+	type container_file_t;
+	type tracefs_t;
+	class bpf { map_create map_read map_write prog_load prog_run };
+	class perf_event { open cpu kernel read write tracepoint };
+	class dir { search read open getattr };
+	class file { open read getattr };
+	class lnk_file { read };
+	class process { signal };
+	class unix_stream_socket { connectto };
+')
+
+# The type, entrypoint container_file_t, container_file_t managed, MCS
+# constrained, system_r: container-selinux's template, as for
+# container_t.
+container_domain_template(iormesh_container, container)
+
+# container_t's attributes beside the template's, so the tracer has the
+# same network, user-namespace, capability and sandbox rules an app
+# container has; the tracer's capabilities themselves stay bounded by
+# the pod spec (#13's seven).
+typeattribute iormesh_container_t container_net_domain, container_user_domain;
+typeattribute iormesh_container_t sandbox_net_domain, sandbox_caps_domain;
+typeattribute iormesh_container_t svirt_sandbox_domain;
+
+# Load and run the tracing programs, create and use their maps and the
+# ring buffer (container_t is denied bpf { prog_load } outright).
+allow iormesh_container_t self:bpf { map_create map_read map_write prog_load prog_run };
+
+# perf_event_open for each classic tracepoint the programs attach to.
+allow iormesh_container_t self:perf_event { open cpu kernel read write tracepoint };
+
+# The host's tracefs, mounted read-only (hostPath /sys/kernel/tracing):
+# libbpf reads each tracepoint's id under events/.
+allow iormesh_container_t tracefs_t:dir { search read open getattr };
+allow iormesh_container_t tracefs_t:file { open read getattr };
+
+# The Java attach (decision #14, -agent/-spool, attach), to the app
+# containers' JVMs, which run as container_t at the pod's pair (MCS
+# keeps other pods out): /proc/<pid> search and getattr, and its
+# cmdline, maps and environ read (file read is also SELinux's check of
+# the ptrace read access /proc/<pid>/root and cwd take); its exe, root
+# and cwd links; the one SIGQUIT that starts HotSpot's attach listener;
+# and the connect to the JVM's attach socket. Without these the BPF
+# tracing works and the agent never joins: container-selinux's
+# dontaudit of container_domain on other domains' /proc dirs leaves no
+# AVC in the audit log (task 7h4).
+allow iormesh_container_t container_t:dir { search getattr };
+allow iormesh_container_t container_t:file { open read getattr };
+allow iormesh_container_t container_t:lnk_file read;
+allow iormesh_container_t container_t:process signal;
+allow iormesh_container_t container_t:unix_stream_socket connectto;

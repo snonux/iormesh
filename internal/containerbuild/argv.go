@@ -150,3 +150,28 @@ func CleanImageArgv(engine, image string) []string {
 func CleanVolumeArgv(engine, volume string) []string {
 	return []string{engine, "volume", "rm", volume}
 }
+
+// SelinuxDir is the iormesh-selinux packaging directory (task 7h4) and
+// SelinuxDist where SelinuxRPMArgv's build puts the RPMs, both relative
+// to the repository root.
+const (
+	SelinuxDir  = "packaging/selinux"
+	SelinuxDist = DistDir + "/selinux"
+)
+
+// SelinuxRPMArgv builds the iormesh-selinux RPM in a throwaway Rocky
+// Linux 9 container: src (the absolute packaging/selinux) read-only at
+// /src, out (absolute) at /out, packaging/selinux/build.sh as the
+// command. The build installs its requirements with microdnf, so it runs
+// as the container's root; under Docker, which is real root, owner
+// (uid:gid) gets the RPMs back, while rootless Podman's root already is
+// the invoking user (owner is ignored, as in RunOptions).
+func SelinuxRPMArgv(engine, src, out, owner string) []string {
+	argv := []string{engine, "run", "--rm", "--security-opt", "label=disable",
+		"--platform", builderPlatform,
+		"-v", src + ":" + srcMount + ":ro", "-v", out + ":" + outMount}
+	if engine == Docker && owner != "" {
+		argv = append(argv, "-e", "IORMESH_OUT_OWNER="+owner)
+	}
+	return append(argv, RockyImage, "bash", srcMount+"/build.sh", srcMount, outMount)
+}
