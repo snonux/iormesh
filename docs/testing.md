@@ -1779,6 +1779,22 @@ push) printed `interrupt: teardown running as pid …`, and the
 detached `k8sTeardown` removed the cluster, the registry and its
 volume with the images back to the state before.
 
+Re-run on 2026-11-21 on the df4–ff4 tracer and controller,
+without either compensation (no disk flags in the registry, no
+wait for the `attached` log line; the sidecar's own start, which
+no deploy makes, is still awaited by its log line), on a host disk
+97 % full (33 GiB free): `TestKindAcceptance` (all six subtests,
+185 s) and `TestKindClusterIP` (103 s, nftables) passed. Deploy
+reported every debug tracer `attached, session …` before the test
+started a workload, each debug container's command ended with
+`-disk-limit 0 -disk-max-bytes 1536MiB`, and the routed edge read
+`→ shop.iormesh.test → ingress/iormesh-m7/shop →
+iormesh-m7/inventory → iormesh-m7/deployment/inventory →
+iormesh-m7/inventory-c78778bcd-wqscn (route, 1 connections)`.
+Docker was started for the run and stopped after it; `docker
+images -a` and `docker volume ls` were identical before and after,
+with no container or kind cluster left.
+
 Checked on 2026-11-21 with a real run over a daemon holding
 unrelated images: `docker images -a` was identical before and
 after (the three pulled base images removed by ID, the operator's
@@ -1892,12 +1908,12 @@ deploy without a byte cap: the 90 %
 that, so the test passed `-disk-limit=0 -disk-max-bytes=1536MiB`;
 built since: deploy passes the pod's bounds itself, the tracer
 spec check asserts them, and the registry carries only the
-gateway's agent flags), ef4 (deploy returned before the tracer was attached; the test
-waited for its `attached` log line; built since: deploy waits for
+gateway's agent flags), ef4 (deploy returned before the tracer
+was attached; the test waited for its `attached` log line; built since: deploy waits for
 the tracer's attach state and the test only checks deploy's
 `attached, session` line — the sidecar's own start, which no
-deploy makes, is still awaited by its log line), ff4 (a route edge never named a
-sole endpoint's pod; built since: a traced sole endpoint is named,
+deploy makes, is still awaited by its log line), ff4 (a route
+edge never named a sole endpoint's pod; built since: a traced sole endpoint is named,
 and the `ingress` check expects the inventory pod at the end of
 the routed edge, in the summary and `model.json`).
 

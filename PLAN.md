@@ -1890,11 +1890,9 @@ Later phase — plain Linux servers (M4) come first.
   the M0 ingress scenario renders as one routed edge — app →
   FQDN → Traefik → deployment — with no tracer on the ingress.
   Status (2026-11-21, task yb4): **passed on kind — first with
-  one test-only workaround (cf4, since removed; re-run green
-  without it) — and with two test-side compensations for open
-  gaps (df4: `-disk-limit=0 -disk-max-bytes` through
-  registry flags; ef4: waiting for the tracer's `attached` log
-  line before starting workloads)** — `mage k8sAcceptance` from
+  one test-only workaround (cf4) and two test-side compensations
+  (df4, ef4), all since removed; re-run green without any (tasks
+  df4–ff4)** — `mage k8sAcceptance` from
   scratch, green (`integrationtests/kind`; kind 0.31, Kubernetes
   1.35.0, containerd 2.2.0, one node; docs/testing.md "M7
   acceptance on kind"). tcp-nat's client and server as pods
@@ -1911,7 +1909,8 @@ Later phase — plain Linux servers (M4) come first.
   `workload/scenarios/ingress`), its backend under a sidecar and
   its gateway under a debug container, renders as one routed
   edge gateway → `shop.iormesh.test` → the Ingress → Service →
-  Deployment in the summary, `model.json` and `graph.svg`, from
+  Deployment → the backend's pod (since ff4) in the summary,
+  `model.json` and `graph.svg`, from
   the routes `routes discover` found with the operator's admin
   context; a list-only ServiceAccount finds the same two routes.
   The workaround (cf4): the gateway's HTTP host comes from the
@@ -1921,13 +1920,21 @@ Later phase — plain Linux servers (M4) come first.
   the agent jar in the workload image. cf4 built the staging and
   dropped the workaround; the re-run on its tracer passed every
   subtest, the ingress routed edge included (the staged agent
-  reported the FQDN), so only the two compensations remain. The compensations stand in
-  for product gaps the run found: debug deploys carry no byte
-  cap and trip the percent disk limit on a full node (df4), and
-  deploy returns before the tracer is attached (ef4). Fixed on
+  reported the FQDN). The two compensations stood in for product
+  gaps the run found — debug deploys carried no byte cap and
+  tripped the percent disk limit on a full node (df4:
+  `-disk-limit=0 -disk-max-bytes` through registry flags), and
+  deploy returned before the tracer was attached (ef4: the test
+  waited for the tracer's `attached` log line) — and a route edge
+  never named a sole endpoint's pod (ff4). All three are built:
+  deploy passes the pod's disk bounds and waits for the tracer's
+  attach state, and a routed edge names a sole traced endpoint;
+  the re-run (2026-11-21, tasks df4–ff4) with neither
+  compensation passed every subtest of both tests, deploy
+  reporting each tracer attached and the ingress edge ending at
+  the inventory pod. Fixed on
   the way: `build -registry`, selectors skipping terminating
-  pods, kubectl 1.30's `--custom` gate. Also open: a route edge
-  never names a sole endpoint's pod (ff4). The target tears down
+  pods, kubectl 1.30's `--custom` gate. The target tears down
   only what it made (`mage k8sTeardown` alone, also after an
   interrupted run; never a `docker system prune`).
 
