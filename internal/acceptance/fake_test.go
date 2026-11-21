@@ -205,7 +205,9 @@ func (w *fakeWorld) ctl(args []string) (string, error) {
 		w.named = w.named || len(args) > 1 && args[1] == "name"
 		return "SERVICE " + nameBilling + "\nSERVICE " + nameOrders, nil
 	case "show":
-		return "session m4disk end disk_limit", nil
+		// The summary line viewmodel.WriteSummary prints for a session
+		// the watchdog ended.
+		return "session    m4disk/" + w.cfg.Host2 + " 1: ended disk_limit (the disk watchdog stopped the tracer)", nil
 	case "rm":
 		w.removed[args[1]] = true
 	case "query":

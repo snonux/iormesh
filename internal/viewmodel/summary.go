@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"iormesh/internal/routemap"
+	"iormesh/internal/schema"
 )
 
 // The plain-text renderer (docs/visualization.md "Plain text"): what
@@ -21,8 +22,9 @@ import (
 const timeLayout = "2006-01-02 15:04:05"
 
 // WriteSummary prints the run summary: one line per aspect, then one
-// line per unresolved edge, session that recorded no end, bad segment
-// and stray store entry — what needs the operator's eye.
+// line per session that recorded no end or ended abnormally, unresolved
+// edge, bad segment and stray store entry — what needs the operator's
+// eye.
 func WriteSummary(w io.Writer, m Model) error {
 	m = safeModel(m)
 	var b strings.Builder
@@ -40,12 +42,7 @@ func WriteSummary(w io.Writer, m Model) error {
 		fmt.Fprintf(&b, "clock      %s ~ %s: %s\n", c.HostA, c.HostB, clockLine(c))
 	}
 	fmt.Fprintf(&b, "sequence   %s\n", conversationsLine(m))
-	for _, s := range h.Sessions {
-		if s.End == "" {
-			fmt.Fprintf(&b, "session    %s/%s %s: no end recorded (running, or cut short)\n",
-				s.Project, s.Host, s.ID)
-		}
-	}
+	writeSessions(&b, h.Sessions)
 	for _, e := range m.Edges {
 		if e.State != StateFused {
 			fmt.Fprintf(&b, "unresolved %s -> %s (%d of %d connections)\n", e.From, e.To, e.Unresolved, e.Conns)
@@ -55,6 +52,48 @@ func WriteSummary(w io.Writer, m Model) error {
 	writeBad(&b, h)
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// writeSessions prints one line per session the operator must look at:
+// one that recorded no end, and one whose end reason is not a normal
+// one (normalEnd) — the disk watchdog's disk_limit, a tracer error, or
+// a reason this build does not know. PLAN.md M4 wants the exit reason
+// in the summary, not only in `show health`: a run the watchdog cut
+// short must not read like a complete one. A normal end stays out, so
+// the summary still lists only what needs the operator's eye.
+func writeSessions(b *strings.Builder, ss []Session) {
+	for _, s := range ss {
+		switch {
+		case s.End == "":
+			fmt.Fprintf(b, "session    %s/%s %s: no end recorded (running, or cut short)\n",
+				s.Project, s.Host, s.ID)
+		case !normalEnd(s.End):
+			fmt.Fprintf(b, "session    %s/%s %s: ended %s%s\n", s.Project, s.Host, s.ID, s.End, endNote(s.End))
+		}
+	}
+}
+
+// normalEnd reports whether a session that ended with reason r ran its
+// course: the -duration bound, a user or controller stop, or every
+// target exited (docs/schema.md, "end").
+func normalEnd(r string) bool {
+	switch r {
+	case schema.EndDuration, schema.EndStop, schema.EndTargetsExited:
+		return true
+	}
+	return false
+}
+
+// endNote says, in parentheses, what an abnormal end means for the
+// trace; nothing for a reason it does not know.
+func endNote(r string) string {
+	switch r {
+	case schema.EndDiskLimit:
+		return " (the disk watchdog stopped the tracer)"
+	case schema.EndError:
+		return " (the tracer failed; the trace is incomplete)"
+	}
+	return ""
 }
 
 // writeRoutes prints one line per routed edge — its hops joined by

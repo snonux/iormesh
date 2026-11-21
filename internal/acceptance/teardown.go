@@ -125,7 +125,8 @@ func (r *Runner) waitEnded(ctx context.Context, h, proj string) error {
 }
 
 // checkWatchdogBuild builds the watchdog project and finds its end
-// reason in the model and in `show`'s summary, with no damaged segment.
+// reason in the model and in `show`'s default view, the summary, with
+// no damaged segment.
 func (r *Runner) checkWatchdogBuild(ctx context.Context) (string, error) {
 	m, _, err := r.build(ctx, projDisk)
 	if err != nil {
@@ -141,8 +142,11 @@ func (r *Runner) checkWatchdogBuild(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !strings.Contains(show, "disk_limit") {
-		return "", errors.New("`iormeshctl show` summary does not name disk_limit")
+	// The summary's session line (viewmodel.WriteSummary): "session
+	// m4disk/HOST ID: ended disk_limit (...)". Matched on "ended", so a
+	// stray disk_limit elsewhere in the text cannot pass for it.
+	if !strings.Contains(show, ": ended disk_limit") {
+		return "", errors.New("`iormeshctl show` summary does not name the session ended disk_limit")
 	}
 	return fmt.Sprintf("ended disk_limit; %d segment(s) merged intact; summary names the reason", m.Run.Segments), nil
 }

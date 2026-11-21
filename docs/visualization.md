@@ -343,6 +343,14 @@ session    shop/app1 a1b2c3d4: no end recorded (running, or cut short)
 unresolved java -> 203.0.113.9:5432 (1 of 1 connections)
 ```
 
+A `session` line names each session the operator must look at:
+one that recorded no end, and one whose end reason is not a
+normal one (`duration`, `stop`, `targets_exited`), so a run the
+disk watchdog cut short reads `session    m4disk/iom2 …: ended
+disk_limit (the disk watchdog stopped the tracer)` — PLAN.md M4
+puts the exit reason in the summary (task lf4). `show health`
+lists every session's end.
+
 Differences from the sketch above, until M5's renderers land:
 the text is plain (no colors, `->` for arrows); an edge between
 two services aggregates connections, so its state is `fused`,

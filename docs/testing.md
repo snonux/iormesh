@@ -824,7 +824,7 @@ Send back the results block and the work directory's path.
 | M4-10 | clock bound | the m4shop+m4billing model's clock windows | non-empty and two-sided, widths printed (real clocks; the injected skew is `TestClockSkewRecovered`'s) |
 | M4-11 | `build` with the network down is byte-identical | both outputs deleted, then the same build rerun under `unshare -rn` (else with a `PATH` lacking ssh and rsync) | `graph.json` and `model.json` byte-equal |
 | M4-12 | naming two services shows them by name | `services name -port 18202 ADDR2 m4-billing-svc`, `services name -port 18213 127.0.0.1 m4-orders-svc`, `build`, `services` | both names in the model's services and edges and in the listing |
-| M4-13 | disk watchdog | `add` m4disk on HOST2 with `-disk-limit 0 -disk-min-free <free − 64 MiB>`, `deploy -project m4disk`, `fallocate` 128 MiB, wait | `ended`/`disk_limit`; collected segment intact; `show` names `disk_limit` |
+| M4-13 | disk watchdog | `add` m4disk on HOST2 with `-disk-limit 0 -disk-min-free <free − 64 MiB>`, `deploy -project m4disk`, `fallocate` 128 MiB, wait | `ended`/`disk_limit`; collected segment intact; `show`'s summary prints `ended disk_limit` |
 | M4-14 | `rm` leaves nothing under `/opt/iormesh` | `rm HOST1`, `rm HOST2`, `test -e /opt/iormesh`, units, registry, `build` of every project | no `/opt/iormesh`, no unit, empty registry; every session's end in the store |
 
 Not run by the target: decision #25's tracer-CPU item (met,
@@ -951,8 +951,11 @@ run-2 failures are not the kernel's:
   of all its connections, leaving only the handshake.
 - **M4-13 (lf4)**: the watchdog worked (`end_reason`
   `disk_limit`, `show health` prints it), but the plain
-  `iormeshctl show` summary no longer names a session's end
-  reason.
+  `iormeshctl show` summary never named a recorded end reason:
+  it listed only sessions with no end. Fixed in lf4 — the
+  summary now names every session that ended abnormally
+  (`ended disk_limit`, `ended error`), and the runner checks
+  for `: ended disk_limit`.
 
 Also found on el9, outside M4's sequence: a session dies with
 "schema: invalid: fd_gen 1 without an fd" when the pattern also

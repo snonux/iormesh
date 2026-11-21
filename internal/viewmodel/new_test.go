@@ -135,6 +135,42 @@ func TestModelDeterministic(t *testing.T) {
 	}
 }
 
+// TestSummaryNamesEndReason: the summary names a session the disk
+// watchdog (or an error) ended, with its reason — PLAN.md M4 and the
+// acceptance check M4-13 read the reason from the plain summary — and
+// leaves sessions that ran their course out.
+func TestSummaryNamesEndReason(t *testing.T) {
+	tl := NewTally()
+	end := func(id, reason string) {
+		k := SessionKey{Project: "m4disk", Host: "iom2", FQDN: "iom2.example", ID: id}
+		tl.Add(k, "s/"+id, &schema.Event{HostID: "x", WallNS: 1, Event: schema.KindEnd,
+			Args: schema.Args{EndReason: ptr(reason)}})
+	}
+	end("1", schema.EndDiskLimit)
+	end("2", schema.EndError)
+	end("3", schema.EndDuration)
+	end("4", schema.EndStop)
+	end("5", schema.EndTargetsExited)
+	var b bytes.Buffer
+	if err := WriteSummary(&b, New(Input{Tally: tl})); err != nil {
+		t.Fatal(err)
+	}
+	got := b.String()
+	for _, want := range []string{
+		"session    m4disk/iom2 1: ended disk_limit (the disk watchdog stopped the tracer)\n",
+		"session    m4disk/iom2 2: ended error (the tracer failed; the trace is incomplete)\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary lacks %q:\n%s", want, got)
+		}
+	}
+	for _, normal := range []string{schema.EndDuration, schema.EndStop, schema.EndTargetsExited} {
+		if strings.Contains(got, "ended "+normal) {
+			t.Errorf("summary names the normal end %q:\n%s", normal, got)
+		}
+	}
+}
+
 // TestTextIsTerminalSafe: an escape sequence in any server-supplied
 // string (a comm, a hostname, a segment file name, an error) never
 // reaches the terminal raw from any text view.
