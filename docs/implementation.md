@@ -5591,8 +5591,27 @@ depends on:
     the old pod still reported `Running` and deploy failed on
     it), and `build` takes `-registry` (refresh shares its own),
     since the snapshot's context check and `routes.yaml` follow
-    the registry. Deploy still returns before the tracer is
-    attached (task ef4).
+    the registry. Deploy returned before the tracer was attached,
+    so a workload started on its word went untraced (two tcp-nat
+    runs within ~8 s of deploy fused nothing). Since task ef4 a
+    debug tracer, new or left running, is reported only once it
+    says it is attached: `Kubectl.WaitAttached` (`attach.go`)
+    execs `iormesh ready -project P -state` once a second, which
+    prints `pending` until the run's `state.json` exists (written
+    once every probe is attached, `markRunning`), then `running
+    <session>`, `ended <reason>` or `dead`. A running session
+    ends the wait (deploy prints `attached, session S`); an ended
+    or dead one, or an exec failure with the tracer container
+    `terminated` in the pod's status, fails at once; a failed exec
+    while the container is still waiting (image pull) is retried;
+    `-attach-timeout` (default 2 min) bounds it with
+    `ErrNotAttached` naming the last answer and `kubectl logs`.
+    The state, not the log's `attached` line, is the signal: it is
+    a file the run writes for exactly this, readable without a
+    shell, and the one-per-pod emptyDir holds no earlier pod's.
+    Also from yb4: a route discovery get refused by RBAC read
+    `k8s: pod not reached` (`ErrUnreachable`'s text); it is
+    `ErrAPI` ("API request failed") with kubectl's reason now.
     Review round 1 (task af4): the debug container's run is
     `iormesh run -linger` (`internal/cli/linger.go`: after
     `runTrace` returns — `finish` has closed the tracer and

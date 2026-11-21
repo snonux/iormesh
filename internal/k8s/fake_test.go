@@ -12,7 +12,11 @@ import (
 // (each element NUL-terminated, each call closed by an RS element) and
 // serves canned output — the pod JSON for `get`, the tar for `exec … ready`
 // without -remove, a copy of the --custom file for `debug` — and exits with
-// $FAKE_KUBECTL_EXIT. $FAKE_KUBECTL_REMOTE=N ends stderr with kubectl
+// $FAKE_KUBECTL_EXIT. `exec … ready -state` answers the first line of
+// $FAKE_KUBECTL_STATE and drops it while more follow (so a test scripts
+// pending, then running); $FAKE_KUBECTL_EXEC_DOWN=1 fails every exec as
+// kubectl itself does (exit 1, no remote status), the get still served.
+// $FAKE_KUBECTL_REMOTE=N ends stderr with kubectl
 // exec's "command terminated with exit code N" (the remote command ran
 // and failed), $FAKE_KUBECTL_CHATTY=1 writes 10 KB of stderr before it.
 // No cluster is reached; the tests assert the exact argv the real kubectl
@@ -20,19 +24,26 @@ import (
 const fakeKubectl = `#!/bin/sh
 for a in "$@"; do printf '%s\0' "$a" >> "$FAKE_KUBECTL_LOG"; done
 printf '\036\0' >> "$FAKE_KUBECTL_LOG"
-verb=""; remove=""; ready=""
+verb=""; remove=""; ready=""; state=""
 for a in "$@"; do
   case "$a" in
     get|exec|debug) [ -z "$verb" ] && verb="$a" ;;
     ready) ready=1 ;;
     -remove) remove=1 ;;
+    -state) state=1 ;;
     --custom=*) cp "${a#--custom=}" "$FAKE_KUBECTL_LOG.custom"
                 printf '%s' "$KUBECTL_DEBUG_CUSTOM_PROFILE" > "$FAKE_KUBECTL_LOG.gate" ;;
   esac
 done
+if [ "$verb" = exec ] && [ -n "$FAKE_KUBECTL_EXEC_DOWN" ]; then
+  echo 'error: unable to upgrade connection: container not found ("iormesh")' >&2; exit 1
+fi
 case "$verb" in
   get) cat "$FAKE_KUBECTL_POD" ;;
-  exec) if [ -n "$ready" ] && [ -z "$remove" ]; then cat "$FAKE_KUBECTL_TAR"; else echo ran; fi ;;
+  exec) if [ -n "$state" ]; then
+          head -n 1 "$FAKE_KUBECTL_STATE"
+          if [ "$(wc -l < "$FAKE_KUBECTL_STATE")" -gt 1 ]; then sed -i 1d "$FAKE_KUBECTL_STATE"; fi
+        elif [ -n "$ready" ] && [ -z "$remove" ]; then cat "$FAKE_KUBECTL_TAR"; else echo ran; fi ;;
 esac
 echo "fake kubectl stderr" >&2
 [ -n "$FAKE_KUBECTL_CHATTY" ] && head -c 10000 /dev/zero | tr '\0' x >&2
@@ -65,7 +76,18 @@ func newFake(t *testing.T) *fake {
 	t.Setenv("FAKE_KUBECTL_EXIT", "0")
 	t.Setenv("FAKE_KUBECTL_REMOTE", "")
 	t.Setenv("FAKE_KUBECTL_CHATTY", "")
+	t.Setenv("FAKE_KUBECTL_STATE", filepath.Join(dir, "state"))
+	t.Setenv("FAKE_KUBECTL_EXEC_DOWN", "")
 	return f
+}
+
+// states scripts the answers of `iormesh ready -state`, one per probe,
+// the last repeated.
+func (f *fake) states(t *testing.T, lines ...string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(f.dir, "state"), []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // pod sets the JSON `kubectl get pod` serves.

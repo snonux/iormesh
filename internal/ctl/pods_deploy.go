@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"iormesh/internal/federate"
 	"iormesh/internal/k8s"
@@ -54,9 +55,10 @@ func podDeployTargets(r *federate.Registry, refs []string, project string, kf *k
 	return out, nil
 }
 
-// deployPods deploys every entry's pods in turn; a failed pod is
-// reported and the next one still deployed, and the result names them.
-func deployPods(ctx context.Context, e env, entries []podEntry) error {
+// deployPods deploys every entry's pods in turn, a debug tracer waited
+// for up to attach until attached; a failed pod is reported and the next
+// one still deployed, and the result names them.
+func deployPods(ctx context.Context, e env, entries []podEntry, attach time.Duration) error {
 	var failed []string
 	for _, pe := range entries {
 		pods, err := pe.pods(ctx)
@@ -66,7 +68,7 @@ func deployPods(ctx context.Context, e env, entries []podEntry) error {
 			continue
 		}
 		for _, st := range pods {
-			if err := deployPod(ctx, e, pe, st.Name); err != nil {
+			if err := deployPod(ctx, e, pe, st.Name, attach); err != nil {
 				_, _ = fmt.Fprintf(e.stderr, "iormeshctl: %s: %s\n", pe.label(st.Name), errText(err))
 				failed = append(failed, pe.label(st.Name))
 			}
@@ -80,8 +82,13 @@ func deployPods(ctx context.Context, e env, entries []podEntry) error {
 
 // deployPod is k8s.Kubectl.Deploy on one pod, with the entry's project
 // as the debug container's tracer argv (a debug entry has exactly one;
-// a sidecar's command line is its patch's, so none is passed).
-func deployPod(ctx context.Context, e env, pe podEntry, pod string) error {
+// a sidecar's command line is its patch's, so none is passed). A debug
+// tracer, new or left running, is then waited for until it reports its
+// probes attached (k8s.Kubectl.WaitAttached, task ef4): kubectl debug
+// returns before the image is even pulled, and a workload started on
+// deploy's word would otherwise go untraced. One that never attaches,
+// or whose session already ended, fails the pod.
+func deployPod(ctx context.Context, e env, pe podEntry, pod string, attach time.Duration) error {
 	k, err := pe.transport(pod)
 	if err != nil {
 		return err
@@ -95,13 +102,20 @@ func deployPod(ctx context.Context, e env, pe podEntry, pod string) error {
 		return err
 	}
 	label := pe.label(pod)
+	var session string
+	if out == k8s.Started || out == k8s.Running {
+		if session, err = k.WaitAttached(ctx, pe.projects[0].Name, attach); err != nil {
+			return err
+		}
+	}
 	switch out {
 	case k8s.Started:
-		_, err = fmt.Fprintf(e.stdout, "%s: started tracer, project %s, image %s\n", label,
-			pe.projects[0].Name, pe.scope.Image)
+		_, err = fmt.Fprintf(e.stdout, "%s: started tracer, project %s, image %s; attached, session %s\n", label,
+			pe.projects[0].Name, pe.scope.Image, session)
 	case k8s.Running:
-		_, err = fmt.Fprintf(e.stdout, "%s: tracer already running the pinned image, left alone "+
-			"(an ephemeral container cannot be restarted: restart the pod for a new session)\n", label)
+		_, err = fmt.Fprintf(e.stdout, "%s: tracer already running the pinned image, attached, session %s; "+
+			"left alone (an ephemeral container cannot be restarted: restart the pod for a new session)\n",
+			label, session)
 	case k8s.SidecarVerified:
 		_, err = fmt.Fprintf(e.stdout, "%s: sidecar running the pinned image; its sessions are the "+
 			"sidecar patch's command line\n", label)

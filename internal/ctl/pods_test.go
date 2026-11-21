@@ -20,8 +20,10 @@ import (
 // answers from files in $FAKE_DIR — pod-NAME.json for `get pod NAME`
 // (absent: kubectl's NotFound, exit 1), list.json for `get pods
 // --selector`, tar-NAME for `exec NAME … ready` (else an empty stream),
-// and down-NAME makes every exec into NAME fail as kubectl itself does
-// (exit 1, no "command terminated" line). No cluster is reached.
+// state-NAME for `exec NAME … ready -state` (else an attached session,
+// "running 1a2b3c4d"), and down-NAME makes every exec into NAME fail as
+// kubectl itself does (exit 1, no "command terminated" line). No cluster
+// is reached.
 const fakeKubectl = `#!/bin/sh
 for a in "$@"; do printf '%s\0' "$a" >> "$FAKE_DIR/log"; done
 printf '\036\0' >> "$FAKE_DIR/log"
@@ -40,6 +42,10 @@ exec)
     echo "error: unable to upgrade connection: container not found" >&2; exit 1
   fi
   case " $* " in *" -remove "*) exit 0 ;; esac
+  case " $* " in *" -state "*)
+    if [ -f "$FAKE_DIR/state-$pod" ]; then cat "$FAKE_DIR/state-$pod"; else echo "running 1a2b3c4d"; fi
+    exit 0 ;;
+  esac
   if [ -f "$FAKE_DIR/tar-$pod" ]; then cat "$FAKE_DIR/tar-$pod"; else cat "$FAKE_DIR/empty.tar"; fi ;;
 debug) echo "ephemeral container iormesh created" ;;
 esac
@@ -390,7 +396,7 @@ func TestPodDeploy(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, f.stderr)
 	}
 	calls := f.calls(t)
-	if got := verbs(calls); !slices.Equal(got, []string{"get pod", "get pod", "debug checkout-0"}) {
+	if got := verbs(calls); !slices.Equal(got, []string{"get pod", "get pod", "debug checkout-0", "exec checkout-0"}) {
 		t.Fatalf("calls %q", calls)
 	}
 	dbg := calls[2]
@@ -401,8 +407,44 @@ func TestPodDeploy(t *testing.T) {
 		!slices.Contains(dbg, "--target=app") {
 		t.Errorf("debug argv %q", dbg)
 	}
-	if !strings.Contains(f.stdout.String(), "started tracer, project shop") {
+	if probe := calls[3]; !slices.Equal(probe[len(probe)-5:], []string{"iormesh", "ready", "-project", "shop", "-state"}) {
+		t.Errorf("attach probe argv %q", probe)
+	}
+	if !strings.Contains(f.stdout.String(), "started tracer, project shop") ||
+		!strings.Contains(f.stdout.String(), "attached, session 1a2b3c4d") {
 		t.Errorf("stdout: %s", f.stdout)
+	}
+}
+
+// TestPodDeployAttach: deploy reports a debug tracer only once it says
+// it is attached (task ef4). One still pending when -attach-timeout
+// passes fails the pod, saying so; one whose session already ended
+// fails at once, also when it was left running from an earlier deploy;
+// a non-positive timeout is a usage error before anything runs.
+func TestPodDeployAttach(t *testing.T) {
+	f := newPodFixture(t, "")
+	f.pod(t, podObject("checkout-0", uid(1), false))
+	f.file(t, "state-checkout-0", []byte("pending\n"))
+	if code := f.run("deploy", "-attach-timeout", "50ms", "kind/shop/checkout-0"); code != exitError ||
+		!strings.Contains(f.stderr.String(), "tracer not attached") ||
+		!strings.Contains(f.stderr.String(), "not attached after 50ms (last: probes not attached yet)") ||
+		strings.Contains(f.stdout.String(), "started tracer") {
+		t.Errorf("pending: exit %d, stdout %s, stderr %s", code, f.stdout, f.stderr)
+	}
+	f.pod(t, podObject("checkout-0", uid(1), true))
+	f.file(t, "state-checkout-0", []byte("ended duration\n"))
+	if code := f.run("deploy", "kind/shop/checkout-0"); code != exitError ||
+		!strings.Contains(f.stderr.String(), "already ended (duration)") {
+		t.Errorf("ended: exit %d, stderr %s", code, f.stderr)
+	}
+	if got := verbs(f.calls(t)); !slices.Equal(got, []string{"get pod", "get pod", "exec checkout-0"}) {
+		t.Errorf("ended: calls %q", got)
+	}
+	for _, d := range []string{"0s", "-1s"} {
+		if code := f.run("deploy", "-attach-timeout", d, "kind/shop/checkout-0"); code != exitUsage ||
+			len(f.calls(t)) != 0 {
+			t.Errorf("-attach-timeout %s: exit %d, calls %q", d, code, f.calls(t))
+		}
 	}
 }
 

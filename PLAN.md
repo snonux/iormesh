@@ -1714,7 +1714,8 @@ Later phase — plain Linux servers (M4) come first.
   (`internal/k8s`, docs/implementation.md M7 step 9) and tested
   against a fake kubectl, since run on kind (task yb4) — `exec`, the
   exec-streamed tar fetch through a new `iormesh ready`
-  subcommand, and `debug --target` into prepared pods only;
+  subcommand (with `-state`, the session's attach state, which
+  deploy waits for: task ef4), and `debug --target` into prepared pods only;
   `Push` is refused (the image carries the tracer, and #12 rules
   out `kubectl cp`).
   Status (2026-11-21, task af4): wired into iormeshctl and tested
@@ -1726,7 +1727,12 @@ Later phase — plain Linux servers (M4) come first.
   is its own store directory, `pod-<uid>`, pinned to the host
   identity task 7f4 gives an in-pod tracer (`host_id`
   `pod-<uid>`); the tracer derives it with the same helpers
-  (`k8s.PodHostID`, `PodFQDN`) and name rules (below).
+  (`k8s.PodHostID`, `PodFQDN`) and name rules (below). Deploy
+  reports a debug tracer only once it is attached (task ef4):
+  it waits, bounded by `-attach-timeout` (default 2 min), for the
+  session's `state.json` to say running, and fails the pod when
+  the session ended or the container exited first — a workload
+  started on deploy's word is traced from its first syscall.
 - Pod identity enrichment: map host PIDs/cgroups → pod, namespace,
   container, so the graph speaks "pod checkout-7d9f (ns prod)"
   instead of bare host PIDs. In k8s mode the project defaults

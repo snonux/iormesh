@@ -23,6 +23,12 @@ import (
 // reads it as no objects, not as a failure.
 var ErrNoResource = errors.New("k8s: resource type not served")
 
+// ErrAPI: a route discovery get failed in kubectl or the API server
+// (forbidden, unknown context, server unreachable). It replaces the
+// runner's ErrUnreachable, whose "pod not reached" misled for a list of
+// ingresses no pod is part of (task ef4).
+var ErrAPI = errors.New("k8s: API request failed")
+
 // RouteResources are the resources route discovery reads, by the fully
 // qualified names kubectl takes: no short name another CRD could shadow.
 // Traefik serves IngressRoute under traefik.io since v3 and under
@@ -67,7 +73,8 @@ func newRouteReader(kubeContext, namespace string, r runner) (*RouteReader, erro
 
 // Get runs `kubectl get <resource> --output=json` in the reader's
 // context and namespace and returns the list. Only RouteResources are
-// read. A resource the server does not serve is ErrNoResource.
+// read. A resource the server does not serve is ErrNoResource, any
+// other failure of kubectl's ErrAPI.
 func (r *RouteReader) Get(ctx context.Context, resource string) ([]byte, error) {
 	if !slices.Contains(RouteResources, resource) {
 		return nil, fmt.Errorf("%w: resource %q is not one route discovery reads", ErrName, resource)
@@ -79,6 +86,10 @@ func (r *RouteReader) Get(ctx context.Context, resource string) ([]byte, error) 
 	if err != nil {
 		if strings.Contains(err.Error(), "the server doesn't have a resource type") {
 			return nil, fmt.Errorf("%w: %s", ErrNoResource, resource)
+		}
+		if errors.Is(err, ErrUnreachable) {
+			msg := strings.TrimPrefix(err.Error(), ErrUnreachable.Error()+": ")
+			return nil, fmt.Errorf("%w: kubectl get %s in %s: %s", ErrAPI, resource, r.namespace, msg)
 		}
 		return nil, fmt.Errorf("kubectl get %s in %s: %w", resource, r.namespace, err)
 	}

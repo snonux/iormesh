@@ -11,11 +11,15 @@ import (
 
 // routeKubectl answers `get` with $FAKE_OUT, or fails as kubectl does
 // for a resource the server does not serve when $FAKE_NOTYPE is set; it
-// logs its argv one element per line.
+// logs its argv one element per line; $FAKE_FORBIDDEN fails as RBAC
+// refusing the list does.
 const routeKubectl = `#!/bin/sh
 for a in "$@"; do printf '%s\n' "$a" >> "$FAKE_LOG"; done
 if [ -n "$FAKE_NOTYPE" ]; then
   echo 'error: the server doesn'"'"'t have a resource type "ingressroutes"' >&2; exit 1
+fi
+if [ -n "$FAKE_FORBIDDEN" ]; then
+  echo 'Error from server (Forbidden): ingressroutes.traefik.io is forbidden: User "x" cannot list resource' >&2; exit 1
 fi
 cat "$FAKE_OUT"
 `
@@ -39,7 +43,7 @@ func routeFake(t *testing.T) (log string) {
 
 // TestRouteReader: a get carries the context and namespace and reads
 // the list as JSON, nothing else; a resource the server lacks is
-// ErrNoResource; a resource outside the list, a bad context or a bad
+// ErrNoResource, a refused one ErrAPI (task ef4); a resource outside the list, a bad context or a bad
 // namespace never reaches kubectl.
 func TestRouteReader(t *testing.T) {
 	log := routeFake(t)
@@ -62,6 +66,13 @@ func TestRouteReader(t *testing.T) {
 	t.Setenv("FAKE_NOTYPE", "1")
 	if _, err := r.Get(context.Background(), "ingressroutes.traefik.io"); !errors.Is(err, ErrNoResource) {
 		t.Errorf("missing CRD: %v", err)
+	}
+	t.Setenv("FAKE_NOTYPE", "")
+	t.Setenv("FAKE_FORBIDDEN", "1")
+	_, err = r.Get(context.Background(), "ingressroutes.traefik.io")
+	if !errors.Is(err, ErrAPI) || errors.Is(err, ErrUnreachable) || strings.Contains(err.Error(), "pod not reached") ||
+		!strings.Contains(err.Error(), "Forbidden") {
+		t.Errorf("forbidden: %v, want ErrAPI with kubectl's reason and no pod wording", err)
 	}
 	for _, bad := range [][2]string{{"-oProxy", "prod"}, {"kind-test", "Prod"}, {"kind-test", "a/b"}} {
 		if _, err := NewRouteReader(bad[0], bad[1]); err == nil {

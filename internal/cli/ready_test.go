@@ -62,3 +62,64 @@ func TestReadyMissingProject(t *testing.T) {
 		t.Errorf("no ready/ yet: Unpack = %q, %v", taken, err)
 	}
 }
+
+// TestReadyState: `iormesh ready -project P -state` is what deploy's
+// wait reads (task ef4): pending before state.json (with or without the
+// project dir), then running with the session id, ended with the
+// reason, dead for a running state whose process is gone; a corrupt
+// state.json fails, and -state takes no -remove.
+func TestReadyState(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "shop")
+	answer := func() string {
+		t.Helper()
+		var out, errOut bytes.Buffer
+		if err := readyIn(root, []string{"-project", "shop", "-state"}, &out, &errOut); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	if got := answer(); got != "pending\n" {
+		t.Errorf("no project dir: %q", got)
+	}
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := answer(); got != "pending\n" {
+		t.Errorf("no state.json: %q", got)
+	}
+	pid := os.Getpid()
+	st := sessionState{Project: "shop", Session: "s1", PID: pid, PIDStartNS: processStart(uint32(pid)),
+		State: stateRunning}
+	for _, c := range []struct {
+		edit func(*sessionState)
+		want string
+	}{
+		{func(*sessionState) {}, "running s1\n"},
+		{func(s *sessionState) { s.State, s.EndReason = stateEnded, "disk_limit" }, "ended disk_limit\n"},
+		{func(s *sessionState) { s.PIDStartNS++ }, "dead\n"},
+	} {
+		s := st
+		c.edit(&s)
+		if err := writeState(dir, s); err != nil {
+			t.Fatal(err)
+		}
+		if got := answer(); got != c.want {
+			t.Errorf("state %+v: %q, want %q", s, got, c.want)
+		}
+	}
+	// With a valid state.json, so only the flag check can refuse these.
+	var out, errOut bytes.Buffer
+	for _, extra := range [][]string{{"-remove"}, {"-remove", "--", "x.parquet"}, {"x"}} {
+		args := append([]string{"-project", "shop", "-state"}, extra...)
+		if err := readyIn(root, args, &out, &errOut); err == nil {
+			t.Errorf("%q accepted", args)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, StateFile), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := readyIn(root, []string{"-project", "shop", "-state"}, &out, &errOut); err == nil {
+		t.Errorf("corrupt state.json: %q", out.String())
+	}
+}

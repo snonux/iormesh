@@ -1887,8 +1887,11 @@ deploy without a byte cap: the 90 %
 that, so the test passed `-disk-limit=0 -disk-max-bytes=1536MiB`;
 built since: deploy passes the pod's bounds itself, the tracer
 spec check asserts them, and the registry carries only the
-gateway's agent flags), ef4 (deploy returns before the tracer is attached; the test waits
-for its `attached` log line), ff4 (a route edge never names a
+gateway's agent flags), ef4 (deploy returned before the tracer was attached; the test
+waited for its `attached` log line; built since: deploy waits for
+the tracer's attach state and the test only checks deploy's
+`attached, session` line — the sidecar's own start, which no
+deploy makes, is still awaited by its log line), ff4 (a route edge never names a
 sole endpoint's pod).
 
 ## Performance baselines

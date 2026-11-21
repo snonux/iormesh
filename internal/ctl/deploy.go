@@ -15,6 +15,7 @@ import (
 	"aead.dev/minisign"
 
 	"iormesh/internal/federate"
+	"iormesh/internal/k8s"
 	"iormesh/internal/release"
 )
 
@@ -105,12 +106,17 @@ func deployCommand(args []string, e env) error {
 	dist := fs.String("dist", defaultDist, "directory holding iormesh-linux-<arch> and its "+release.SigSuffix)
 	keyPath := fs.String("key", "", "pinned minisign public key (default ~/.config/iormesh/"+keyFileName+")")
 	restart := fs.Bool("restart", false, "restart a running session even if its flags and build are unchanged")
+	attach := fs.Duration("attach-timeout", k8s.DefaultAttachTimeout,
+		"how long to wait for each pod's debug tracer to attach its probes")
 	kf := addK8sFlags(fs, true)
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
 	if fs.NArg() == 0 {
 		return fmt.Errorf("%w: deploy needs one or more HOSTs or pod entries", errUsage)
+	}
+	if *attach <= 0 {
+		return fmt.Errorf("%w: -attach-timeout %s: want a positive duration", errUsage, *attach)
 	}
 	r, err := loadRegistry(*path, e)
 	if err != nil {
@@ -134,7 +140,7 @@ func deployCommand(args []string, e env) error {
 		}
 		hostErr = d.all(ctx, servers, recPath, d.host)
 	}
-	return errors.Join(hostErr, deployPods(ctx, e, pods))
+	return errors.Join(hostErr, deployPods(ctx, e, pods, *attach))
 }
 
 // newDeployer reads the pinned key and the deploy record, and returns a

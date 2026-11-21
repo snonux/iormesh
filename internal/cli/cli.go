@@ -8,7 +8,7 @@
 //	iormesh status [-project NAME] [-trace-dir DIR] [-json]
 //	iormesh upgrade [-allow-downgrade] FILE
 //	iormesh uninstall
-//	iormesh ready -project NAME [-remove -- FILE...]
+//	iormesh ready -project NAME [-state | -remove -- FILE...]
 //	iormesh version
 //
 // run is the foreground tracer; its target spec (internal/target) is a
@@ -138,7 +138,7 @@ func usage(w io.Writer) {
   iormesh status [-project NAME] [-trace-dir DIR] [-json]
   iormesh upgrade [-allow-downgrade] FILE    (FILE.minisig next to it)
   iormesh uninstall
-  iormesh ready -project NAME [-remove -- FILE...]   (k8s fetch: tar to stdout)
+  iormesh ready -project NAME [-state | -remove -- FILE...]   (k8s: segments as a tar, or the attach state)
   iormesh version
 `)
 }

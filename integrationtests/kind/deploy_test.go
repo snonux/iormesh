@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 )
 
 // pattern is every pod's tracer target: the workload's JVMs, exec'd by
@@ -65,23 +64,27 @@ func quoteAll(flags []string) string {
 // ref is a pod entry's reference on iormeshctl's command line.
 func (c *cluster) ref(app string) string { return "kind/" + c.ns + "/app=" + app }
 
-// deploy runs `iormeshctl deploy` for the apps' debug containers and
-// waits until each tracer says it is attached: deploy returns once
-// kubectl created the ephemeral container, before the tracer loaded its
-// probes (task yb4's follow-up), and a workload started earlier would go
-// untraced.
+// deploy runs `iormeshctl deploy` for the apps' debug containers. Deploy
+// itself returns only once each tracer reported its probes attached
+// (task ef4), so the test starts workloads right after it, with no wait
+// of its own; deploy's output must say so for every app.
 func (c *cluster) deploy(t *testing.T, reg string, apps ...string) map[string]podJSON {
 	t.Helper()
 	refs := make([]string, len(apps))
 	for i, a := range apps {
 		refs[i] = c.ref(a)
 	}
-	c.ctl(t, nil, append([]string{"deploy", "-registry", reg}, refs...)...)
+	out := c.ctl(t, nil, append([]string{"deploy", "-registry", reg}, refs...)...)
 	pods := map[string]podJSON{}
 	for _, a := range apps {
 		p := c.pod(t, a)
-		c.waitLog(t, p.Metadata.Name, "iormesh: attached", time.Minute)
-		pods[a] = c.pod(t, a)
+		prefix := c.ref(a) + " pod " + p.Metadata.Name + ": started tracer"
+		if !slices.ContainsFunc(strings.Split(out, "\n"), func(l string) bool {
+			return strings.HasPrefix(l, prefix) && strings.Contains(l, "; attached, session ")
+		}) {
+			t.Fatalf("deploy did not report %s's tracer attached:\n%s", a, out)
+		}
+		pods[a] = p
 	}
 	return pods
 }
