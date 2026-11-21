@@ -504,7 +504,12 @@ truth.
   without the newer capability names; it cannot be combined
   with `allowPrivilegeEscalation: false`); it widens what a
   compromised tracer could do to the whole node, so use it only
-  where the minimal set was tried. Pod Security `baseline` and
+  where the minimal set was tried. On an SELinux-enforcing node
+  a `container_t` tracer is refused `bpf { prog_load }`; the
+  tracer's load error then names SELinux and its context instead
+  of libbpf's memlock hint (task 6h4; the denial shows in the
+  raw audit.log, not always in `ausearch -m avc`), and the el9
+  choices are PLAN.md #13's (task 5h4). Pod Security `baseline` and
   `restricted` refuse both profiles: the tracer needs a
   namespace at the `privileged` level or an exemption — the
   owner's call per namespace.

@@ -167,7 +167,9 @@ func (t *Tracer) load(cfg Config) error {
 		return err
 	}
 	if err := t.module.BPFLoadObject(); err != nil {
-		return fmt.Errorf("load BPF object: %w", err)
+		// A permission refusal gets a hint naming SELinux or another LSM
+		// rather than libbpf's usually wrong RLIMIT_MEMLOCK (lsmhint.go).
+		return fmt.Errorf("load BPF object: %w", withLoadHint(err, hostHintEnv()))
 	}
 	for _, pid := range cfg.Pids {
 		if err := t.AddTarget(pid); err != nil {

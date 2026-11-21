@@ -2340,6 +2340,24 @@ registry and the images were removed: the laptop's `docker
 images -a` and volumes matched the state before, and the VM had
 the 371 packages and the `/opt/iormesh` it started with.
 
+#### Load refusal hint (task 6h4)
+
+Since that run a BPF load refused with EPERM or EACCES no longer
+leaves libbpf's `RLIMIT_MEMLOCK` line as the only clue: the
+tracer's `load BPF object` error names the likelier cause
+(`internal/bpf/lsmhint.go`). SELinux enforcing with the process
+in a confined domain (not `spc_t`, `unconfined_t`, `kernel_t`)
+names the context from `/proc/self/attr/current`, decision #13's
+el9 profile and the raw audit.log; otherwise an active AppArmor,
+BPF LSM or lockdown (`/sys/kernel/security/lsm`); the memlock
+hint stays only for a low limit on a kernel before 5.11, else
+the message says libbpf's hint does not apply. The error, and
+whether the tracer fails, is otherwise unchanged. Unit-tested
+with injected file reads and limit (`TestLoadHint`: enforcing
+`container_t`, enforcing `spc_t`, permissive, no LSM, low and
+high memlock on old and new kernels; `TestLoadHintContextIsSafe`,
+`TestWithLoadHint`), each branch mutation-checked.
+
 ## Performance baselines
 
 S3 (PLAN.md, decision #25) measures overhead against a load the
