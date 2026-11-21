@@ -165,6 +165,8 @@ func run(args []string, e env) int {
 		err = checkSegmentCommand(args[1:], e)
 	case "services":
 		err = servicesCommand(args[1:], e)
+	case "routes":
+		err = routesCommand(args[1:], e)
 	case "verify":
 		err = verifyCommand(args[1:], e)
 	case "version", "-version", "--version":
@@ -207,9 +209,9 @@ func usage(w io.Writer) {
   iormeshctl collect [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [K8S] [HOST|POD...]
   iormeshctl deploy [-project NAME] [-registry FILE] [-dist DIR] [-key FILE] [-restart]
                     [K8S] [-image IMG] HOST|POD...
-  iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR]
+  iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-routes FILE]
   iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR]
-                     [K8S] [HOST|POD...]
+                     [-routes FILE] [K8S] [HOST|POD...]
   iormeshctl show [summary|services|edges|health] [-project NAME]... [-builds DIR] [-json] [-unresolved]
   iormeshctl open [-project NAME]... [-builds DIR]
   iormeshctl tui [-project NAME]... [-builds DIR]     (needs a terminal)
@@ -223,6 +225,7 @@ func usage(w io.Writer) {
   iormeshctl services name [-db FILE] [-port N] HOST-GLOB SERVICE
   iormeshctl services rules [-db FILE]
   iormeshctl services unname [-db FILE] RULE-ID
+  iormeshctl routes discover [-registry FILE] [-cluster NAME] [-namespace NS]... [-db FILE]
   iormeshctl verify [-key FILE] FILE...      (FILE.minisig next to each)
   iormeshctl version
 
@@ -260,5 +263,13 @@ reaches every running pod it matches; each pod is collected into
 starts a debug container (iormesh run -linger) in each prepared pod,
 or checks a sidecar, with the pinned image; rm collects a pod entry
 once more and unregisters it, leaving its tracer running.
+
+The route map (decision #15) is ~/.config/iormesh/routes.yaml (fqdn ->
+ingress -> service -> workload, and services with their ClusterIPs and
+endpoints), private like the registry; routes discover reads a
+registered cluster's Ingresses, Traefik IngressRoutes, Services,
+EndpointSlices, pods and ReplicaSets with kubectl get (read-only) into
+routes-discovered.json beside the database. build reads both, the file
+winning, and prints the routed edges; it never runs kubectl.
 `)
 }

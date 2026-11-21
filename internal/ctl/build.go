@@ -100,7 +100,8 @@ var errBadSegments = errors.New("segments skipped")
 
 // buildFlags are the paths build reads and writes. routes is the static
 // route map (-routes, registered by build and refresh only: routes.go);
-// "" is routes.yaml beside the registry.
+// "" is routes.yaml beside the registry. The discovery snapshot is read
+// beside db.
 type buildFlags struct {
 	projects          projectList
 	store, db, builds string
@@ -168,7 +169,7 @@ func build(ctx context.Context, e env, f buildFlags) (buildOutput, error) {
 	}
 	// The route map is read first: a map others could write fails the
 	// build before any segment is read, as a bad registry fails deploy.
-	routes, err := loadRoutes(e, f)
+	routes, err := loadRoutes(e, f, paths.db)
 	if err != nil {
 		return buildOutput{}, err
 	}

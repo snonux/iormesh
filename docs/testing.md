@@ -1238,6 +1238,32 @@ docs/implementation.md M7 steps 11 and 12):
   endpoint pod of another namespace, a forged UID, two Services
   claiming one ClusterIP and port, a non-canonical CIDR, and past
   1024 endpoints.
+- `internal/routemap/discover_test.go`: a namespace as kubectl
+  lists it becomes `testdata/discovered.golden` — a Deployment's
+  Service with its named target port resolved and its not-ready
+  endpoint left out, a StatefulSet's, routes from an Ingress and
+  a Traefik IngressRoute naming two hosts — while headless,
+  ExternalName and UDP-only Services are left out and a host
+  split across two Services (`ambiguous_route`), a Service over
+  two workloads (`ambiguous_workload`), a forged endpoint
+  address, a host with an escape sequence and a TraefikService
+  backend (`skipped`) are flags; JSON that is not kubectl's fails
+  whole. `MatchHosts` takes `Host` only (not `HostSNI`,
+  `HostRegexp` or a longer name), in v2's list form too. A
+  snapshot round-trips 0600; an unknown field, a forged context
+  and a writable file are refused.
+- `internal/k8s/routes_test.go`: a route get's exact argv
+  (context, namespace, `get`, the resource, `--output=json`); an
+  unserved resource is `ErrNoResource`; `secrets`, an option-like
+  context and a bad namespace never reach kubectl.
+- `internal/ctl/routes_discover_test.go`, a fake kubectl on
+  `PATH`: `routes discover` makes only read-only gets in the
+  registered context and namespace, survives the missing Traefik
+  CRDs and writes the snapshot; the next build names the Service,
+  pod and route from it without running kubectl; a static route
+  for the same FQDN wins and is flagged `shadowed`; no
+  subcommand, an unregistered cluster, a bad namespace and a
+  failing kubectl write no snapshot.
 - `internal/ctl/routes_test.go`: a build over a ClusterIP mesh
   with the map beside the registry prints the routed edges
   (`testdata/routes_summary.golden`: the fused edge with its
@@ -1250,8 +1276,10 @@ docs/implementation.md M7 steps 11 and 12):
 
 Not checked here (task yb4, on kind): a ClusterIP connection
 between two traced pods fusing in a real cluster (iptables and,
-where offered, nftables mode), the hairpin case, and the M0
-ingress scenario through a real Traefik.
+where offered, nftables mode), the hairpin case, the M0 ingress
+scenario through a real Traefik, and `routes discover` against a
+real API server (RBAC for the read-only gets, Traefik's CRDs
+under either group).
 
 ## Performance baselines
 

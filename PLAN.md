@@ -1740,6 +1740,18 @@ Later phase — plain Linux servers (M4) come first.
   → workload; an HTTP host whose route names another Service
   than the one reached is flagged `route_contradicted`. The
   graph and site renderers do not draw routed edges yet.
+  Discovery is built too (task xb4), tested against a fake
+  kubectl, not yet on kind: `iormeshctl routes discover` reads a
+  registered cluster's namespaces with read-only `kubectl get`
+  (Ingress, IngressRoute under both Traefik API groups, Service,
+  EndpointSlice, pods, ReplicaSets) into a snapshot beside the
+  service database; `build` reads the snapshot, never kubectl, so
+  it stays offline and deterministic. One answer or none: a host
+  routed to several Services (by path or by two objects) gets no
+  route (`ambiguous_route`), a Service whose endpoints span
+  workloads names none (`ambiguous_workload`), an object whose
+  names fail the map's checks is `skipped`, and a static entry
+  shadowing a discovered one is `shadowed`.
 - Collection works with the controller tooling too —
   per-pod/per-node trace fetch (decision #12), events carrying
   pod identity.
@@ -2382,8 +2394,10 @@ here only as placeholders.
   (discovery moves first), or the ingress is not Traefik.
   Owner to confirm: the ingress controller and CRDs in use, and
   a sample of real routes.
-  Built (task xb4): the static map (docs/implementation.md M7
-  step 12). Its `services:` section — ClusterIPs, ports,
+  Built (task xb4): the static map and discovery
+  (docs/implementation.md M7 step 12); discovery writes a
+  snapshot the build reads, so `build` itself never runs
+  kubectl. Its `services:` section — ClusterIPs, ports,
   endpoints, the Service CIDR — is an addition the ClusterIP join
   needs (a route names a Service, not its address); a route's
   workload may be left out and is then the Service's.

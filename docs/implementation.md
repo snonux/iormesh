@@ -5449,6 +5449,24 @@ depends on:
     `build -routes <file>` reads another file; `refresh` takes it
     too.
 
+    Discovery (`discover.go`, `discover_services.go`,
+    `discover_ingress.go`, `snapshot.go`; built by task xb4):
+    `iormeshctl routes discover [-cluster C] [-namespace NS]...`
+    resolves a registered cluster (the only one by default) and
+    its namespace, runs `k8s.RouteReader.Get` — `kubectl
+    --context=… --namespace=… get <resource> --output=json` for
+    each of `k8s.RouteResources`, an unserved IngressRoute CRD
+    read as none — and `routemap.Discover` turns the lists into a
+    `Map` plus flags: Services with a ClusterIP and a TCP port,
+    named target ports resolved through the slices' ports,
+    serving endpoints by pod UID and name, the workload through
+    pod → ReplicaSet → Deployment or pod → StatefulSet; Ingress
+    rule hosts and Traefik `Host(…)` matchers (`MatchHosts`, the
+    rule text only) to their Services, one Service per host or no
+    route. The snapshot (`routes-discovered.json` beside
+    `services.db`, 0600, validated on load like the static map)
+    feeds `routemap.Compile` under the static map.
+
     Then discovery through the controller's kubectl (Ingress,
     IngressRoute, Service, EndpointSlice, owner references),
     filling only FQDNs the file lacks; a static entry always
