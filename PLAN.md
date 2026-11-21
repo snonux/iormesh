@@ -2834,9 +2834,16 @@ here only as placeholders.
   gateway's JVM (`container_t` at the pod's pair) was then denied
   reading `/etc/hosts` (task 5h4's first run); at `s0`, which
   every pair dominates, the app keeps access, and those files
-  lose the pod's MCS pair. Owner to confirm: `spc_t` as the
-  fleet default, the `s0` level, whether a policy RPM is viable, OpenShift (its
-  SCCs) out of scope.
+  lose the pod's MCS pair: every `container_t` process on the
+  node dominates `s0`, so MCS no longer separates them from
+  other pods — only mount namespaces do, and a hostPath over
+  `/var/lib/kubelet/pods` or an escape reaches them; the label
+  stays after a debug tracer exits. Advisor confirmed `s0`
+  (2026-11-21); a `-selinux-level` option for owners who pin
+  pod levels is task 8h4. Owner to confirm: `spc_t` and `s0`
+  as the fleet default, no tenant hostPath to the kubelet
+  directories, whether fleet pods pin MCS levels, whether a
+  policy RPM is viable, OpenShift (its SCCs) out of scope.
 - **#14 K8s Java attach** — *Provisional (2026-11-20):* live
   attach through the shared process namespace is the k8s
   default; `-javaagent` via `JAVA_TOOL_OPTIONS` stays the

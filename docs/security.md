@@ -433,9 +433,12 @@ truth.
     `container_t` and the pod's MCS pair. The `s0` level keeps
     the pod's `/etc/hosts`, `resolv.conf` and trace `emptyDir`,
     which the runtime relabels to the tracer's level, open to the
-    app; they no longer carry the pod's own MCS pair, a
-    defense-in-depth layer against a container escape that the
-    mount namespaces still back. On
+    app; they no longer carry the pod's own MCS pair. Every
+    `container_t` process on the node dominates `s0`, so MCS no
+    longer separates these files from other pods — only mount
+    namespaces do, and a hostPath over `/var/lib/kubelet/pods`
+    or an escape reaches them; the label stays after a debug
+    tracer exits. On
     an SELinux-enforcing node (el9) `container_t` is denied
     `bpf { prog_load }` outright (task zg4); `spc_t` is
     unconfined by SELinux, so on such a node the capability set,
