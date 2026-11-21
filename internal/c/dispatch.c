@@ -84,6 +84,14 @@ struct {
 // 9.9). With fixed offsets the dispatcher read id as 0 - nearly every
 // syscall went to the read handler - and the handlers read id as args[0]
 // and ret (task lb4).
+//
+// Keep preserve_access_index on both. The structs leave out the 8-byte
+// trace_entry header, so without the attribute nothing relocates them and
+// every field is read at its declared offset: id at 0 - the pt_regs
+// pointer slot - and args/ret at 8. That compiles, loads and attaches
+// without a word on every kernel, and silently dispatches by a pointer's
+// low bits. TestEl9RecordLayout (internal/btf_root_test.go, task of4)
+// relocates the object against both layouts and catches it on any host.
 struct trace_event_raw_sys_enter___iormesh {
     long id;
     unsigned long args[6];

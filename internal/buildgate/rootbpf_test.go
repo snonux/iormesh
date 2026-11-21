@@ -19,15 +19,16 @@ import (
 // tests (task xe4), the tracer in a PID namespace (task 4f4), the stale
 // socket owner and pod-mode connect tests (task if4), the process
 // exit's group_dead (task nf4), a call on fd -1 across an exec (task
-// mf4) and the key an RST abort's CLOSE rebuilds (task qf4), all in the
-// one test binary of ./internal.
+// mf4), the key an RST abort's CLOSE rebuilds (task qf4) and the el9
+// record layout relocated on any kernel (task of4), all in the one test
+// binary of ./internal.
 var rootBPFTestFiles = []string{"internal/sock_root_test.go", "internal/sockseq_root_test.go",
 	"internal/loader_root_test.go", "internal/follow_root_test.go",
 	"internal/javamark_root_test.go", "internal/dispatch_root_test.go",
 	"internal/streamseq_root_test.go", "internal/pidns_root_test.go",
 	"internal/sockreuse_root_test.go", "internal/exit_root_test.go",
 	"internal/pidnsconnect_root_test.go", "internal/badfd_root_test.go",
-	"internal/sockclose_root_test.go"}
+	"internal/sockclose_root_test.go", "internal/btf_root_test.go"}
 
 // testFunctionsIn returns the names of the top-level Test functions of the Go
 // file at the repository path rel. Adapted from ior

@@ -174,7 +174,8 @@ func (c *markCollector) file(rec any) {
 // stdin's carry readBytes'; the opens and reads of /proc files (info0's,
 // a native the mark does not probe) carry none, and no read of another
 // file carries readBytes'; every mark names a native entered before now;
-// and a mark comes from a thread other than the launcher's (tid != pid).
+// and a mark comes from a thread other than the launcher's (tid != pid),
+// checked on its own because its failure has one known cause.
 func checkMarks(t *testing.T, enters []markedEnter) {
 	t.Helper()
 	seen := map[string]bool{}
@@ -198,15 +199,21 @@ func checkMarks(t *testing.T, enters []markedEnter) {
 			t.Errorf("%s: marked as readBytes'", e.kind)
 		}
 	}
-	// "thread": a hooked native marked on a thread whose tid is not the
-	// pid. Java's main method never runs on the launcher thread, so on a
-	// kernel whose uprobe_multi filters by thread (6.6-6.9 without commit
-	// 46ba0e49) no mark is sent at all; this names the cause. Rocky 9.9's
-	// el9 kernel passes (task nf4).
-	for _, k := range []string{"openat:" + probePath, "read:" + probePath, "read:stdin", "openat:/proc", "read:/proc", "thread"} {
+	for _, k := range []string{"openat:" + probePath, "read:" + probePath, "read:stdin", "openat:/proc", "read:/proc"} {
 		if !seen[k] {
 			t.Errorf("no correctly marked %s; enters %+v", k, enters)
 		}
+	}
+	// "thread": a hooked native marked on a thread whose tid is not the
+	// pid. Java's main method never runs on the launcher thread, so on a
+	// kernel whose uprobe_multi filters by thread (6.6-6.9 without commit
+	// 46ba0e49) no mark is sent at all. Its own error names that cause, so
+	// a reader of the failure does not have to infer it from the misses
+	// above (nf4 review). Rocky 9.9's el9 kernel passes (task nf4).
+	if !seen["thread"] {
+		t.Errorf("no mark from a thread other than the launcher's (tid != pid): a kernel whose "+
+			"uprobe_multi filters by thread instead of by process (6.6-6.9 without commit 46ba0e49) "+
+			"drops every mark of a Java thread; enters %+v", enters)
 	}
 }
 

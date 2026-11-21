@@ -7,6 +7,9 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	ibpf "iormesh/internal/bpf"
+	"iormesh/internal/types"
 )
 
 // TestSharedCPUNotSkipped is the regression test of task 8e4: a traced and
@@ -52,6 +55,61 @@ func TestSharedCPUNotSkipped(t *testing.T) {
 	}
 	if l.Missed != 0 {
 		t.Fatalf("%d program runs skipped with two read loops sharing CPU %s (want 0): %+v", l.Missed, cpu, l)
+	}
+}
+
+// TestDispatchSeesSeveralKinds is the root half of the el9 regression test
+// (task of4; TestEl9RecordLayout is the half that runs on any kernel). With
+// the dispatchers reading the syscall number at the wrong offset, Rocky
+// 9.9 sent nearly every call to the read handler (task lb4), so a trace of
+// an open/read/close loop held one syscall kind. Here the same loop must
+// yield more than one, and specifically all three enters.
+func TestDispatchSeesSeveralKinds(t *testing.T) {
+	tg := startTarget(t)
+	tr := openTracerWith(t, ibpf.Config{Pids: []uint32{tg.pid()}, NoAggregation: true})
+	for range 3 {
+		tg.poke(t)
+	}
+	enters := []types.TraceId{types.SYS_ENTER_OPENAT, types.SYS_ENTER_READ, types.SYS_ENTER_CLOSE}
+	kinds := traceKindsOf(tr.Records(), tg.pid(), func(k map[types.TraceId]int) bool {
+		return k[enters[0]] > 0 && k[enters[1]] > 0 && k[enters[2]] > 0
+	})
+	if len(kinds) < 2 {
+		t.Fatalf("pid %d's open/read/close loop traced as %d syscall kind(s): %v", tg.pid(), len(kinds), kinds)
+	}
+	for _, id := range enters {
+		if kinds[id] == 0 {
+			t.Errorf("no %v enter from pid %d; trace ids seen: %v", id, tg.pid(), kinds)
+		}
+	}
+}
+
+// traceKindsOf counts the records of pid by trace id until done accepts the
+// counts, or for 5 s.
+func traceKindsOf(records <-chan []any, pid uint32, done func(map[types.TraceId]int) bool) map[types.TraceId]int {
+	type traced interface {
+		GetPid() uint32
+		GetTraceId() types.TraceId
+	}
+	kinds := map[types.TraceId]int{}
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case batch, ok := <-records:
+			if !ok {
+				return kinds
+			}
+			for _, rec := range batch {
+				if ev, isTraced := rec.(traced); isTraced && ev.GetPid() == pid {
+					kinds[ev.GetTraceId()]++
+				}
+			}
+			if done(kinds) {
+				return kinds
+			}
+		case <-deadline:
+			return kinds
+		}
 	}
 }
 
