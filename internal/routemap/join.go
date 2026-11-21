@@ -6,6 +6,8 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+
+	"iormesh/internal/k8sname"
 )
 
 // Bases: what an Edge stands on.
@@ -224,8 +226,8 @@ func (j *joiner) addRoute(f *Flow, r Route, origin string) {
 	if s, ok := j.t.Service(r.Service); ok {
 		k.workload, k.endpoints = cmp.Or(r.Workload, s.Workload), len(s.Endpoints)
 		if len(s.Endpoints) == 1 {
-			if ep := s.Endpoints[0]; ep.UID != "" && j.traced["pod-"+ep.UID] {
-				k.pod = cmp.Or(ep.Pod, "pod-"+ep.UID)
+			if ep := s.Endpoints[0]; ep.UID != "" && j.traced[k8sname.PodHostID(ep.UID)] {
+				k.pod = cmp.Or(ep.Pod, k8sname.PodHostID(ep.UID))
 			}
 		}
 	}
@@ -261,7 +263,7 @@ func (j *joiner) checkHosts(f *Flow, reached Service, viaService bool) {
 // another pod that held the address, and the end is not listed (the
 // caller flags the map stale) rather than named after it.
 func endpointOf(s Service, host string, addr netip.AddrPort) (Endpoint, bool) {
-	uid, inPod := strings.CutPrefix(host, "pod-")
+	uid, inPod := strings.CutPrefix(host, k8sname.PodHostPrefix)
 	for _, e := range s.Endpoints {
 		if inPod && e.UID != "" && e.UID == uid {
 			return e, true

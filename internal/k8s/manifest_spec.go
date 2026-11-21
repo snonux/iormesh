@@ -3,7 +3,6 @@ package k8s
 import (
 	"fmt"
 	"slices"
-	"strconv"
 )
 
 // The pod-level subset of the Kubernetes API types the patches use, with
@@ -120,25 +119,37 @@ func PodDiskArgs(limit string) []string {
 	return []string{"-disk-limit", "0", "-disk-max-bytes", TraceCap(limit)}
 }
 
+// The headroom a trace emptyDir keeps above the tracer's byte cap
+// (task 5g4). The cap is checked every few seconds and before each
+// rotation, and a segment is written out only when it rotates: when
+// the cap trips, the dir may still grow by the segment being built (at
+// most segmentBytes, decision #16, plus one tick's events) and by the
+// session's end files. A quarter of the volume covers that for a large
+// sizeLimit; for a small one it does not (a quarter of 200Mi is 50Mi,
+// less than one segment), so the cap is the smaller of three quarters
+// and the volume less traceReserve, and a sizeLimit whose cap would
+// fall under minTraceCap is refused — it holds too little trace to be
+// worth starting a tracer, and less headroom risks the pod's eviction.
+const (
+	segmentBytes = 64 << 20              // internal/segment.DefaultMaxBytes
+	traceReserve = segmentBytes + 32<<20 // a segment, a tick's events, the end files
+	minTraceCap  = 32 << 20              // so the smallest sizeLimit is 128Mi
+	mib          = 1 << 20
+)
+
 // TraceCap is the tracer's -disk-max-bytes for an emptyDir of sizeLimit
-// limit (a binaryQuantity): three quarters of it, in MiB. The quarter
-// left covers the segment being written when the cap trips (the cap is
-// checked every few seconds and at each rotation, segments are at most
-// 64 MB) and the session's end files. "" for a limit that is not a
-// binaryQuantity. A debug deploy passes the same, from the pod's own
-// sizeLimit (Kubectl.podDiskArgs).
+// limit, in MiB: min(¾ limit, limit − traceReserve), rounded down to a
+// MiB (see traceReserve for why). limit is any byte-size Quantity
+// (parseQuantity: 2Gi, 2G, 2000M, 2147483648, 2e9). "" for a limit
+// that is no size, or too small to leave minTraceCap — the caller
+// refuses it rather than start a tracer whose cap could let the
+// kubelet evict the pod. A debug deploy passes the same, from the pod's
+// own sizeLimit (Kubectl.podDiskArgs).
 func TraceCap(limit string) string {
-	if !binaryQuantity.MatchString(limit) {
+	n, err := parseQuantity(limit)
+	if err != nil || n < minTraceCap+traceReserve {
 		return ""
 	}
-	num, unit := limit[:len(limit)-2], limit[len(limit)-2:]
-	n, err := strconv.ParseUint(num, 10, 64)
-	if err != nil {
-		return ""
-	}
-	capMiB := n * map[string]uint64{"Mi": 1, "Gi": 1 << 10, "Ti": 1 << 20}[unit] * 3 / 4
-	if capMiB == 0 {
-		return "" // 0 would turn the cap off
-	}
-	return fmt.Sprintf("%dMiB", capMiB)
+	capBytes := min(n/4*3, n-traceReserve)
+	return fmt.Sprintf("%dMiB", capBytes/mib)
 }

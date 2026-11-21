@@ -143,8 +143,10 @@ func (e execRunner) command(ctx context.Context, args []string) (*exec.Cmd, *hea
 // with exit code N" line, N being kubectl's status, did the command run:
 // that error wraps *exec.ExitError, as federate.Transport promises. Any
 // other failure wraps ErrUnreachable and not the ExitError, so no caller
-// reads an unreached pod as a "no" from it. Either way the start of
-// stderr says what went wrong.
+// reads an unreached pod as a "no" from it; the kubectlFailure beside it
+// keeps kubectl's own words for a caller that is not about a pod
+// (RouteReader.Get). Either way the start of stderr says what went
+// wrong.
 func explain(err error, stderr *headTail) error {
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) {
@@ -154,7 +156,18 @@ func explain(err error, stderr *headTail) error {
 	if n, ok := stderr.remoteStatus(); ok && n == exitErr.ExitCode() {
 		return fmt.Errorf("%w: %s", err, msg)
 	}
-	return fmt.Errorf("%w: kubectl %v: %s", ErrUnreachable, err, msg)
+	return fmt.Errorf("%w: %w", ErrUnreachable, &kubectlFailure{status: err.Error(), stderr: msg})
+}
+
+// kubectlFailure is kubectl's own failure: its exit status and the start
+// of its stderr, as text — it must not wrap the *exec.ExitError (see
+// explain).
+type kubectlFailure struct {
+	status, stderr string
+}
+
+func (e *kubectlFailure) Error() string {
+	return fmt.Sprintf("kubectl %s: %s", e.status, e.stderr)
 }
 
 // headTail is an io.Writer keeping the first stderrLimit and the last

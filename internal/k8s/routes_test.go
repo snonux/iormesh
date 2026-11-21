@@ -71,7 +71,8 @@ func TestRouteReader(t *testing.T) {
 	t.Setenv("FAKE_FORBIDDEN", "1")
 	_, err = r.Get(context.Background(), "ingressroutes.traefik.io")
 	if !errors.Is(err, ErrAPI) || errors.Is(err, ErrUnreachable) || strings.Contains(err.Error(), "pod not reached") ||
-		!strings.Contains(err.Error(), "Forbidden") {
+		!strings.Contains(err.Error(), "Forbidden") ||
+		!strings.Contains(err.Error(), "get ingressroutes.traefik.io in prod: kubectl exit status 1: ") {
 		t.Errorf("forbidden: %v, want ErrAPI with kubectl's reason and no pod wording", err)
 	}
 	for _, bad := range [][2]string{{"-oProxy", "prod"}, {"kind-test", "Prod"}, {"kind-test", "a/b"}} {

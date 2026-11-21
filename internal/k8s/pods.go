@@ -64,11 +64,14 @@ type podInfo struct {
 	} `json:"status"`
 }
 
-// named is a container entry: its name, and its spec image (which
-// Deploy checks for an earlier debug container, N6).
+// named is a container entry: its name, its spec image (which Deploy
+// checks for an earlier debug container, N6) and its command line (whose
+// -project Deploy checks for one, task 5g4).
 type named struct {
-	Name  string `json:"name"`
-	Image string `json:"image"`
+	Name    string   `json:"name"`
+	Image   string   `json:"image"`
+	Command []string `json:"command"`
+	Args    []string `json:"args"`
 }
 
 // containerStatus is a container's status: the image it really runs
@@ -256,7 +259,7 @@ func (l *Lister) state(p podInfo) (PodState, error) {
 // (task 7f4's advisor decision: "pod-" + POD_UID, never the node's or the
 // image's machine-id), and the controller's store directory name for the
 // pod: one directory per pod incarnation.
-func PodHostID(uid string) string { return "pod-" + uid }
+func PodHostID(uid string) string { return k8sname.PodHostID(uid) }
 
 // PodFQDN is the FQDN a tracer in the pod reports (the same decision):
 // <name>.<namespace>.<first 8 hex of the UID>, no resolver lookup.

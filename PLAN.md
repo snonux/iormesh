@@ -1877,6 +1877,12 @@ Later phase — plain Linux servers (M4) come first.
   session's `state.json` to say running, and fails the pod when
   the session ended or the container exited first — a workload
   started on deploy's word is traced from its first syscall.
+  Since task 5g4 it also fails at once when the probe itself
+  fails in the running container or a tracer left running
+  traces another project, refuses an answer `state.json` could
+  carry but iormesh never writes (the session id it prints is
+  8 lowercase hex), bounds each probe on its own rather than
+  by the wait's deadline, and says "interrupted" for a Ctrl-C.
 - Pod identity enrichment: map host PIDs/cgroups → pod, namespace,
   container, so the graph speaks "pod checkout-7d9f (ns prod)"
   instead of bare host PIDs. In k8s mode the project defaults
@@ -1915,7 +1921,16 @@ Later phase — plain Linux servers (M4) come first.
   of an emptyDir reads the node's partition and a 90 % limit
   stopped every tracer on a full node at once; `-disk-min-free`
   stays as the node's floor, and a registry may not set either
-  flag for a pod entry. The
+  flag for a pod entry. Since task 5g4 the cap is the smaller
+  of ¾ and the `sizeLimit` less 96 MiB (a segment in flight
+  and the end files), a `sizeLimit` under 128 MiB is refused,
+  and any byte-size quantity is read (`2G`, a byte count,
+  `2e9`, `1.5Gi`). Accepted trade-off: without a percent limit
+  a busy trace on a full node counts toward the traced pod's
+  ephemeral storage when the kubelet's node-pressure eviction
+  picks pods; a 98 % limit would not change that, the kubelet
+  acting at 90 % used by default (docs/implementation.md M7
+  step 5). The
   image has no `/etc/machine-id`, which made every run in it
   fail; since task 7f4 a run in a pod needs none (above,
   docs/implementation.md M7 step 6). Pod identity status
@@ -1968,7 +1983,18 @@ Later phase — plain Linux servers (M4) come first.
   the pod by the same rule, provided the build also traced that
   pod (task ff4: no trace of the client's flow reaches past the
   ingress, so the pod's own trace vouches for the map's one
-  endpoint); an
+  endpoint). The route rule is stricter on purpose (task 5g4,
+  kept rather than unified): an untraced ClusterIP edge rests
+  on one map lookup from what the client's trace saw — it
+  dialed the Service's address, which kube-proxy forwards only
+  to the Service's endpoints — while a route's flow ends at the
+  ingress, whose controller picks the backend from its own
+  cache and rules (canary weights, a default backend), so
+  FQDN → Service → endpoint is two lookups no trace confirms.
+  A traced pod behind a ClusterIP fuses instead, so the two
+  rules never meet on one edge. The `pod-` prefix is one
+  constant (`k8sname.PodHostPrefix`) for `k8s.PodHostID`, the
+  route join and the registry's pod directories. An
   address inside a declared Service CIDR no Service holds
   flagged `unknown_service`. Confirmed on kind (task yb4): a
   ClusterIP connection between two traced pods fuses in the

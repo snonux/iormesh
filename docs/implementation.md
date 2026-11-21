@@ -5492,15 +5492,39 @@ depends on:
      the node's reasons, not the trace's. So an in-pod tracer
      runs with `k8s.PodDiskArgs` (task df4): `-disk-limit 0
      -disk-max-bytes` `k8s.TraceCap` of the emptyDir's
-     `sizeLimit` (¾: 1536 MiB for 2 GiB). The sidecar patch
-     appends them to its args (last, so they win); a debug
-     deploy appends them to the tracer argv from the pod's own
-     `sizeLimit`, read with the pod (`Kubectl.debug`), and
-     refuses a `sizeLimit` `TraceCap` cannot read (`2G`, a byte
-     count) rather than start a tracer without a cap.
-     `-disk-min-free` keeps its default, so a tracer still never
-     takes a node's last 256 MiB; the node's fullness otherwise
-     is the kubelet's eviction thresholds' business. A pod entry
+     `sizeLimit`: the smaller of ¾ and the limit less 96 MiB
+     (1536 MiB for 2 GiB, 104 MiB for 200 MiB), in whole MiB.
+     The 96 MiB (task 5g4) is the segment being built when the
+     cap trips (≤ 64 MB plus a tick's events: the cap is checked
+     every few seconds and at rotation) and the end files, which
+     a quarter of a small volume could not hold; a `sizeLimit`
+     under 128 MiB leaves less than a 32 MiB cap and is refused.
+     `TraceCap` reads any byte-size quantity
+     (`k8s.parseQuantity`): binary or decimal SI (`2Gi`, `2G`,
+     `2000M`), a byte count, a decimal exponent (`2e9`), a
+     fraction (`1.5Gi`); a sign, a milli suffix or an exponent
+     over two digits is no size. The sidecar patch appends them
+     to its args (last, so they win); a debug deploy appends them
+     to the tracer argv from the pod's own `sizeLimit`, read with
+     the pod (`Kubectl.debug`). In debug mode `checkPrepared`
+     refuses a `sizeLimit` `TraceCap` cannot use, so `Check` and
+     `Deploy` both say so before any `kubectl debug`, rather than
+     start a tracer without a cap. `-disk-min-free` keeps its
+     default, so a tracer still never takes a node's last
+     256 MiB; the node's fullness otherwise is the kubelet's
+     eviction thresholds' business. The trade-off of no percent
+     limit (task 5g4): on a node short of disk the tracer keeps
+     writing until its byte cap, and the kubelet's node-pressure
+     eviction (by default at `nodefs.available` < 10 %) ranks
+     pods by ephemeral storage over their request, the trace
+     emptyDir included — so a busy trace makes the traced pod an
+     earlier eviction candidate on a full node. A 98 % limit
+     would not help: the kubelet acts at 90 % used by default,
+     before 98 % is reached, and the byte cap already bounds the
+     trace's share at ¾ of the volume. An owner who wants the
+     trace never to add to node pressure sets a smaller
+     `sizeLimit` (or an ephemeral-storage request that covers
+     it). A pod entry
      setting `-disk-limit` or `-disk-max-bytes` is refused before
      any pod is contacted (`checkPodFlags`): the pod's would win
      silently.
@@ -5684,9 +5708,25 @@ depends on:
     The state, not the log's `attached` line, is the signal: it is
     a file the run writes for exactly this, readable without a
     shell, and the one-per-pod emptyDir holds no earlier pod's.
+    Hardened by task 5g4: `state.json` is the pod's to write, so
+    `parseAttach` takes only what iormesh writes — a session id of
+    8 lowercase hex (the one deploy prints), an end reason of
+    `[a-z_]`, no word after `pending` or `dead` — and refuses
+    anything else, quoted. Each probe runs under its own 30 s
+    bound (`attachProbeTimeout`), not the wait's deadline, so a
+    probe in flight at the deadline still answers and the message
+    names it; the wait can so end up to 30 s late. `iormesh ready
+    -state` exiting non-zero in the running container (a remote
+    exit status) fails at once, as does an earlier debug tracer
+    left running whose command line's `-project` (else the
+    namespace, #21) is not the entry's (`verifyProject`): no wait
+    changes either. A cancelled context (Ctrl-C) ends the wait as
+    "interrupted", wrapping `context.Canceled`, not as a timeout.
     Also from yb4: a route discovery get refused by RBAC read
     `k8s: pod not reached` (`ErrUnreachable`'s text); it is
-    `ErrAPI` ("API request failed") with kubectl's reason now.
+    `ErrAPI` ("API request failed") with kubectl's reason now,
+    taken from the runner's `kubectlFailure` beside the
+    `ErrUnreachable` (task 5g4), not trimmed from its text.
     Review round 1 (task af4): the debug container's run is
     `iormesh run -linger` (`internal/cli/linger.go`: after
     `runTrace` returns — `finish` has closed the tracer and
@@ -5717,8 +5757,21 @@ depends on:
     traced end of an observation) and `addRoute` names the
     endpoint whose `pod-<uid>` is among them — its pod name, else
     the host id. Two endpoints, one without a UID or an untraced
-    pod name none. On kind the inventory backend under its
-    sidecar is that pod. Tests:
+    pod name none. Why a route asks more than a ClusterIP edge
+    (PLAN.md M7, task 5g4): an unfused ClusterIP flow's own trace
+    shows the client dialing the Service's address, which
+    kube-proxy forwards only to the Service's endpoints, so a sole
+    endpoint is one map lookup from what was observed. A route's
+    flow ends at the ingress; the ingress controller picks the
+    backend from its own endpoint cache and rules (canary weights,
+    a default backend), and the map's FQDN → Service → endpoint is
+    two lookups no trace confirms — the pod's own trace in the
+    same build is the evidence the endpoint was not stale. A
+    traced pod behind a ClusterIP fuses instead, so the two rules
+    never apply to the same edge. `pod-` is
+    `k8sname.PodHostPrefix`, which `k8s.PodHostID`, `routemap`
+    and the registry's `podDir` share. On kind the inventory
+    backend under its sidecar is that pod. Tests:
     `internal/routemap/join_test.go` merges two synthetic pods'
     traces with the unchanged merge and checks the joined result
     against `testdata/clusterip.golden`.

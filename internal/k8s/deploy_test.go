@@ -35,7 +35,8 @@ func withTracer(sidecar, running bool, imageID string) string {
 // ended by the pod's disk bounds: TraceCap of its own emptyDir's
 // sizeLimit and no percent limit (task df4).
 func TestDeployStarts(t *testing.T) {
-	for limit, maxBytes := range map[string]string{"2Gi": "1536MiB", "512Mi": "384MiB"} {
+	for limit, maxBytes := range map[string]string{"2Gi": "1536MiB", "512Mi": "384MiB", "2G": "1430MiB",
+		"2147483648": "1536MiB", "2e9": "1430MiB", "200Mi": "104MiB"} {
 		f := newFake(t)
 		f.pod(t, strings.Replace(preparedPod, `"sizeLimit":"2Gi"`, `"sizeLimit":"`+limit+`"`, 1))
 		out, err := newTestKubectl(t, testTarget()).Deploy(context.Background(), "iormesh", "run", "-project", "shop")
@@ -52,10 +53,11 @@ func TestDeployStarts(t *testing.T) {
 }
 
 // TestDeployRefusesUnreadableLimit: a trace emptyDir whose sizeLimit
-// TraceCap cannot read (decimal units, a byte count) is refused before
-// any debug: a tracer without a byte cap would get the pod evicted.
+// TraceCap cannot use (no byte size, or too small for a segment's
+// headroom: task 5g4) is refused before any debug: a tracer without a
+// byte cap would get the pod evicted.
 func TestDeployRefusesUnreadableLimit(t *testing.T) {
-	for _, limit := range []string{"2G", "2147483648", "1Mi"} {
+	for _, limit := range []string{"1Mi", "127Mi", "100M", "2m", "1e100"} {
 		f := newFake(t)
 		f.pod(t, strings.Replace(preparedPod, `"sizeLimit":"2Gi"`, `"sizeLimit":"`+limit+`"`, 1))
 		_, err := newTestKubectl(t, testTarget()).Deploy(context.Background(), "iormesh", "run")
@@ -82,6 +84,60 @@ func TestDeployLeavesRunningTracer(t *testing.T) {
 		}
 		if calls := f.calls(t); len(calls) != 1 {
 			t.Errorf("calls = %q, want the get alone", calls)
+		}
+	}
+}
+
+// TestDeployRunningTracerProject: an earlier debug tracer is left alone
+// only when it traces the project asked for — its command line's
+// -project, else the namespace — so deploy does not wait the attach
+// timeout for a session that cannot come (task 5g4).
+func TestDeployRunningTracerProject(t *testing.T) {
+	id := "registry.example/iormesh@sha256:" + testDigest
+	for _, tc := range []struct {
+		spec, want string
+		ok         bool
+	}{
+		{`"command":["iormesh","run","-project","shop","-linger"]`, "shop", true},
+		{`"command":["iormesh"],"args":["run","--project=shop"]`, "shop", true},
+		{`"command":["iormesh","run","-pattern","x"]`, "shop", true}, // the namespace's default
+		{`"command":["iormesh","run","-project","cart"]`, "shop", false},
+		{`"command":["iormesh","run","-project","shop","-project","cart"]`, "shop", false},
+		{`"command":["iormesh","run","-pattern","x"]`, "cart", false},
+	} {
+		f := newFake(t)
+		f.pod(t, strings.Replace(withTracer(false, true, id), `"image":"`+testImage+`"`,
+			`"image":"`+testImage+`",`+tc.spec, 1))
+		out, err := newTestKubectl(t, testTarget()).Deploy(context.Background(), "iormesh", "run", "-project", tc.want)
+		switch {
+		case tc.ok && (err != nil || out != Running):
+			t.Errorf("%s, want %s: Deploy = %v, %v", tc.spec, tc.want, out, err)
+		case !tc.ok && (!errors.Is(err, ErrTransport) || !strings.Contains(err.Error(), `not "`+tc.want+`"`)):
+			t.Errorf("%s, want %s: err = %v, want a project refusal", tc.spec, tc.want, err)
+		}
+		if calls := f.calls(t); len(calls) != 1 {
+			t.Errorf("%s: calls = %q, want the get alone", tc.spec, calls)
+		}
+	}
+}
+
+func TestFlagValue(t *testing.T) {
+	for _, tc := range []struct {
+		argv []string
+		want string
+		ok   bool
+	}{
+		{[]string{"run", "-project", "a"}, "a", true},
+		{[]string{"run", "--project", "a"}, "a", true},
+		{[]string{"run", "-project=a"}, "a", true},
+		{[]string{"run", "-project=a", "-project", "b"}, "b", true},
+		{[]string{"run", "-projects", "a"}, "", false},
+		{[]string{"run", "project", "a"}, "", false},
+		{[]string{"run", "--", "-project", "a"}, "", false},
+		{[]string{"run", "-project"}, "", false},
+	} {
+		if got, ok := flagValue(tc.argv, "project"); got != tc.want || ok != tc.ok {
+			t.Errorf("flagValue(%q) = %q, %v; want %q, %v", tc.argv, got, ok, tc.want, tc.ok)
 		}
 	}
 }

@@ -124,3 +124,13 @@ var uid = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[
 // A pod's UID names its store directory on the controller, so nothing
 // else passes.
 func UID(s string) bool { return uid.MatchString(s) }
+
+// PodHostPrefix starts the host_id of an in-pod tracer, "pod-<uid>"
+// (PLAN.md M7, task 7f4). It lives here, beside UID, so internal/k8s
+// (which writes it: k8s.PodHostID) and internal/routemap (which reads
+// it back to find a pod by UID, and cannot import internal/k8s) spell it
+// once (task 5g4).
+const PodHostPrefix = "pod-"
+
+// PodHostID is the host_id of the tracer in the pod with this UID.
+func PodHostID(uid string) string { return PodHostPrefix + uid }

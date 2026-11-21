@@ -1787,6 +1787,32 @@ Unit tests in `mage test`, no cluster and no container engine
   that kubectl debug's own flags set. `Validate` refuses a tag,
   a malformed digest, an odd size and a command line that is
   not `run`.
+- Pod byte cap and attach wait (task 5g4):
+  `internal/k8s/quantity_test.go` reads every byte-size form
+  (`2Gi`, `2G`, `2000M`, a byte count, `2e9`, `1.5Gi`, `.5Ki`)
+  to its bytes and refuses a sign, a milli suffix, wrong case,
+  spaces, a three-digit exponent, a value over 4 EiB and text
+  over 40 bytes; `TestTraceCap` pins min(¾, limit − 96 MiB) and
+  no cap under 128Mi; `TestCheckTraceLimit` and
+  `TestDeployRefusesUnreadableLimit` refuse such a pod in debug
+  mode before any `kubectl debug` and accept it in sidecar
+  mode. `TestParseAttach` refuses every `ready -state` answer
+  iormesh never writes (an upper-case, short, long or trailing
+  session id, escape bytes, an end reason outside `[a-z_]{1,32}`,
+  a word after `pending` or `dead`), with no raw control byte in
+  the error; `TestWaitAttachedProbeFails` (a remote exit status
+  fails after one exec), `TestWaitAttachedInterrupted` (a
+  cancel says "interrupted" and wraps `context.Canceled`),
+  `TestWaitAttachedSlowProbe` (a 300 ms answer still counts
+  after a 50 ms wait; a probe over its own bound is named) and
+  `TestDeployRunningTracerProject` (an earlier tracer of
+  another project, by `-project` or the namespace default, is
+  refused) cover the wait; the timeout tests are back to 150
+  and 100 ms. Mutation-checked: loosening the session or reason
+  pattern, letting `pending`/`dead` take a word, dropping the
+  length cap, the milli refusal, the exponent bound, the
+  4 EiB bound, the 96 MiB reserve, the 128Mi floor, or the
+  debug-mode check in `checkPrepared` each fails a test.
 - `internal/k8s/cgroup_test.go`: `/proc/<pid>/cgroup` paths in
   the formats the kubelet and runtimes write — the systemd driver
   (`kubepods-<qos>-pod<uid_escaped>.slice/cri-containerd-<id>.scope`,
@@ -2169,19 +2195,20 @@ collect and rm (its final collect) of a selector entry now skip
 pods in their grace period, whose tracer is ending on SIGTERM
 anyway); kubectl 1.30's gate (`TestDebugArgv`). Follow-ups: cf4
 (agent staging in the JVM's root; built since), df4 (debug
-deploy without a byte cap: the 90 %
-`-disk-limit` stopped every debug tracer on a node fuller than
-that, so the test passed `-disk-limit=0 -disk-max-bytes=1536MiB`;
-built since: deploy passes the pod's bounds itself, the tracer
-spec check asserts them, and the registry carries only the
-gateway's agent flags), ef4 (deploy returned before the tracer
-was attached; the test waited for its `attached` log line; built since: deploy waits for
-the tracer's attach state and the test only checks deploy's
+deploy without a byte cap: the 90 % `-disk-limit` stopped every
+debug tracer on a node fuller than that, so the test passed
+`-disk-limit=0 -disk-max-bytes=1536MiB`; built since: deploy
+passes the pod's bounds itself, the tracer spec check asserts
+them, and the registry carries only the gateway's agent flags),
+ef4 (deploy returned before the tracer was attached; the test
+waited for its `attached` log line; built since: deploy waits
+for the tracer's attach state and the test only checks deploy's
 `attached, session` line — the sidecar's own start, which no
 deploy makes, is still awaited by its log line), ff4 (a route
-edge never named a sole endpoint's pod; built since: a traced sole endpoint is named,
-and the `ingress` check expects the inventory pod at the end of
-the routed edge, in the summary and `model.json`).
+edge never named a sole endpoint's pod; built since: a traced
+sole endpoint is named, and the `ingress` check expects the
+inventory pod at the end of the routed edge, in the summary and
+`model.json`).
 
 ## Performance baselines
 

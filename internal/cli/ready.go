@@ -19,10 +19,11 @@ import (
 // #18, internal/k8s): it writes the project's ready/ segments as a tar
 // to stdout, or with -remove deletes the named ones once the controller
 // has them, or with -state prints whether the project's session has
-// attached (readyState: what deploy waits for, task ef4). It takes a project, never a path — the trace dir is the fixed
-// k8s.TraceRoot, inside the pod's emptyDir — so an exec into the tracer can
-// read or delete nothing but published segments. No tar, rsync or shell
-// is needed in the image.
+// attached (readyState: what deploy waits for, task ef4). It takes a
+// project, never a path — the trace dir is the fixed k8s.TraceRoot,
+// inside the pod's emptyDir — so an exec into the tracer can read or
+// delete nothing but published segments. No tar, rsync or shell is
+// needed in the image.
 func readyCommand(args []string, stdout, stderr io.Writer) error {
 	return readyIn(k8s.TraceRoot, args, stdout, stderr)
 }

@@ -15,7 +15,9 @@ import (
 // $FAKE_KUBECTL_EXIT. `exec … ready -state` answers the first line of
 // $FAKE_KUBECTL_STATE and drops it while more follow (so a test scripts
 // pending, then running); $FAKE_KUBECTL_EXEC_DOWN=1 fails every exec as
-// kubectl itself does (exit 1, no remote status), the get still served.
+// kubectl itself does (exit 1, no remote status), the get still served;
+// $FAKE_KUBECTL_EXEC_SLEEP=S makes every exec take S seconds first (its
+// sleep holds no pipe, so a killed fake ends at once).
 // $FAKE_KUBECTL_REMOTE=N ends stderr with kubectl
 // exec's "command terminated with exit code N" (the remote command ran
 // and failed), $FAKE_KUBECTL_CHATTY=1 writes 10 KB of stderr before it.
@@ -35,6 +37,9 @@ for a in "$@"; do
                 printf '%s' "$KUBECTL_DEBUG_CUSTOM_PROFILE" > "$FAKE_KUBECTL_LOG.gate" ;;
   esac
 done
+if [ "$verb" = exec ] && [ -n "$FAKE_KUBECTL_EXEC_SLEEP" ]; then
+  sleep "$FAKE_KUBECTL_EXEC_SLEEP" </dev/null >/dev/null 2>&1
+fi
 if [ "$verb" = exec ] && [ -n "$FAKE_KUBECTL_EXEC_DOWN" ]; then
   echo 'error: unable to upgrade connection: container not found ("iormesh")' >&2; exit 1
 fi
@@ -78,6 +83,7 @@ func newFake(t *testing.T) *fake {
 	t.Setenv("FAKE_KUBECTL_CHATTY", "")
 	t.Setenv("FAKE_KUBECTL_STATE", filepath.Join(dir, "state"))
 	t.Setenv("FAKE_KUBECTL_EXEC_DOWN", "")
+	t.Setenv("FAKE_KUBECTL_EXEC_SLEEP", "")
 	return f
 }
 

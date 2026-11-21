@@ -15,6 +15,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"iormesh/internal/k8sname"
 	"iormesh/internal/project"
 	"iormesh/internal/target"
 )
@@ -95,12 +96,13 @@ func (t Target) Spec() target.Spec {
 }
 
 // podDir is the store directory name collect gives a pod: "pod-" and its
-// UID (internal/k8s PodHostID). No registry host may look like one, so a
+// UID (k8sname.PodHostID). No registry host may look like one, so a
 // server can never share a pod's directory.
 // Case-insensitive (review N7): a host "POD-<UID>" would be a different
 // store directory on Linux but the same one on a case-insensitive
 // filesystem (macOS, a laptop controller's default).
-var podDir = regexp.MustCompile(`(?i)^pod-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+var podDir = regexp.MustCompile(`(?i)^` + regexp.QuoteMeta(k8sname.PodHostPrefix) +
+	`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // ValidHost reports whether host is usable as a store directory name: a
 // registry host name, or a pod's "pod-<uid>".

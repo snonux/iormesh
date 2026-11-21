@@ -26,7 +26,9 @@ var ErrNoResource = errors.New("k8s: resource type not served")
 // ErrAPI: a route discovery get failed in kubectl or the API server
 // (forbidden, unknown context, server unreachable). It replaces the
 // runner's ErrUnreachable, whose "pod not reached" misled for a list of
-// ingresses no pod is part of (task ef4).
+// ingresses no pod is part of (task ef4), and carries kubectl's own
+// words from the runner's kubectlFailure (task 5g4) rather than a trim
+// of the other error's text.
 var ErrAPI = errors.New("k8s: API request failed")
 
 // RouteResources are the resources route discovery reads, by the fully
@@ -87,9 +89,8 @@ func (r *RouteReader) Get(ctx context.Context, resource string) ([]byte, error) 
 		if strings.Contains(err.Error(), "the server doesn't have a resource type") {
 			return nil, fmt.Errorf("%w: %s", ErrNoResource, resource)
 		}
-		if errors.Is(err, ErrUnreachable) {
-			msg := strings.TrimPrefix(err.Error(), ErrUnreachable.Error()+": ")
-			return nil, fmt.Errorf("%w: kubectl get %s in %s: %s", ErrAPI, resource, r.namespace, msg)
+		if kf := (*kubectlFailure)(nil); errors.As(err, &kf) {
+			return nil, fmt.Errorf("%w: get %s in %s: %s", ErrAPI, resource, r.namespace, kf)
 		}
 		return nil, fmt.Errorf("kubectl get %s in %s: %w", resource, r.namespace, err)
 	}

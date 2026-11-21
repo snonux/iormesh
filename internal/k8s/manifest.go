@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"regexp"
 
 	"gopkg.in/yaml.v3"
 
@@ -62,16 +61,13 @@ func Defaults() Manifests {
 	return Manifests{Image: image, TraceLimit: DefaultTraceLimit, SidecarArgs: DefaultSidecarArgs}
 }
 
-// binaryQuantity is a sizeLimit like 512Mi or 2Gi.
-var binaryQuantity = regexp.MustCompile(`^[1-9][0-9]{0,5}(Mi|Gi|Ti)$`)
-
 // Validate refuses inputs the manifests must not carry.
 func (m Manifests) Validate() error {
 	switch {
 	case !k8sname.Pinned(m.Image):
 		return fmt.Errorf("image %q: want <repository>@sha256:<64 hex>, pinned by digest", m.Image)
 	case TraceCap(m.TraceLimit) == "":
-		return fmt.Errorf("trace limit %q: want a size like 512Mi or 2Gi", m.TraceLimit)
+		return fmt.Errorf("trace limit %q: want a size of at least 128Mi, like 512Mi or 2Gi", m.TraceLimit)
 	case len(m.SidecarArgs) == 0 || m.SidecarArgs[0] != "run":
 		return fmt.Errorf("sidecar args %q: want an `iormesh run` command line", m.SidecarArgs)
 	}

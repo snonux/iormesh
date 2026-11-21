@@ -68,7 +68,7 @@ func (k *Kubectl) getPod(ctx context.Context) (podInfo, error) {
 // MaxFQDN), so iormeshctl says so up front instead of starting a tracer
 // that exits with ErrPodEnv.
 func (k *Kubectl) checkPod(p podInfo) error {
-	if err := checkPrepared(p); err != nil {
+	if err := checkPrepared(p, k.t.Mode); err != nil {
 		return fmt.Errorf("%w: %s/%s: %s; apply %s to its workload first", ErrUnprepared,
 			k.t.Namespace, k.t.Pod, err, PreparePatch)
 	}
@@ -84,8 +84,13 @@ func (k *Kubectl) checkPod(p podInfo) error {
 }
 
 // checkPrepared checks the pod-level requirements, the ones the prepare
-// patch provides.
-func checkPrepared(p podInfo) error {
+// patch provides. In debug mode the trace emptyDir's sizeLimit must
+// also be one TraceCap reads and finds large enough (task 5g4): a debug
+// tracer gets its byte cap from it (podDiskArgs), so Check refuses such
+// a pod up front, as Deploy does, rather than only once `kubectl debug`
+// is due. A sidecar's cap is its patch's command line, so in sidecar
+// mode any sizeLimit will do.
+func checkPrepared(p podInfo, mode Mode) error {
 	if p.Spec.HostUsers != nil && !*p.Spec.HostUsers {
 		return fmt.Errorf("hostUsers is false (a user-namespaced pod's capabilities do not reach BPF)")
 	}
@@ -103,6 +108,10 @@ func checkPrepared(p podInfo) error {
 	}
 	if !traces {
 		return fmt.Errorf("no volume %q (emptyDir with a sizeLimit)", TracesVolume)
+	}
+	if limit := p.traceLimit(); mode == ModeDebug && TraceCap(limit) == "" {
+		return fmt.Errorf("volume %q has sizeLimit %q; want a size of at least 128Mi (e.g. 512Mi, 2Gi "+
+			"or 2G) to leave the tracer a byte cap below it", TracesVolume, limit)
 	}
 	return nil
 }
@@ -193,13 +202,14 @@ func (k *Kubectl) debug(ctx context.Context, p podInfo, argv []string) error {
 
 // podDiskArgs are a debug tracer's disk bounds, from the pod's own trace
 // emptyDir (PodDiskArgs of its sizeLimit, as the sidecar patch carries
-// them). A sizeLimit TraceCap cannot read (a decimal "2G", say) is
-// refused rather than starting a tracer without a byte cap, which the
-// kubelet would evict the whole pod for once it outgrew the volume.
+// them). checkPrepared has already refused a sizeLimit TraceCap cannot
+// use (no size, or under 128Mi); this refusal is the backstop, so no
+// path starts a tracer without a byte cap, which the kubelet would
+// evict the whole pod for once it outgrew the volume.
 func (k *Kubectl) podDiskArgs(p podInfo) ([]string, error) {
 	limit := p.traceLimit()
 	if TraceCap(limit) == "" {
-		return nil, fmt.Errorf("%w: %s/%s: volume %q has sizeLimit %q; want a binary size like 512Mi or 2Gi",
+		return nil, fmt.Errorf("%w: %s/%s: volume %q has sizeLimit %q; want a size of at least 128Mi",
 			ErrUnprepared, k.t.Namespace, k.t.Pod, TracesVolume, limit)
 	}
 	return PodDiskArgs(limit), nil

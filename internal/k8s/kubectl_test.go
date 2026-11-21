@@ -279,3 +279,30 @@ func TestSidecarMode(t *testing.T) {
 		t.Errorf("prepared sidecar pod: %v", err)
 	}
 }
+
+// TestCheckTraceLimit: in debug mode Check refuses a sizeLimit TraceCap
+// cannot use — the debug tracer's byte cap comes from it — and accepts
+// any byte-size form; a sidecar's cap is its patch's, so sidecar mode
+// takes any sizeLimit (task 5g4).
+func TestCheckTraceLimit(t *testing.T) {
+	f := newFake(t)
+	sidecar := testTarget()
+	sidecar.Mode = ModeSidecar
+	for limit, debugOK := range map[string]bool{"2G": true, "2147483648": true, "128Mi": true,
+		"127Mi": false, "2m": false} {
+		pod := strings.Replace(preparedPod, `"sizeLimit":"2Gi"`, `"sizeLimit":"`+limit+`"`, 1)
+		f.pod(t, pod)
+		err := newTestKubectl(t, testTarget()).Check(context.Background())
+		if debugOK && err != nil {
+			t.Errorf("debug, %s: %v", limit, err)
+		}
+		if !debugOK && (!errors.Is(err, ErrUnprepared) || !strings.Contains(err.Error(), limit)) {
+			t.Errorf("debug, %s: err = %v, want ErrUnprepared naming it", limit, err)
+		}
+		f.pod(t, strings.Replace(pod, `"containers":[{"name":"app"}]`,
+			`"shareProcessNamespace":true,"containers":[{"name":"app"},{"name":"iormesh"}]`, 1))
+		if err := newTestKubectl(t, sidecar).Check(context.Background()); err != nil {
+			t.Errorf("sidecar, %s: %v", limit, err)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	"iormesh/internal/k8sname"
 )
@@ -78,6 +79,9 @@ func (k *Kubectl) Deploy(ctx context.Context, argv ...string) (Outcome, error) {
 			return 0, fmt.Errorf("%w; ephemeral containers cannot be replaced: restart the pod for a new session",
 				err)
 		}
+		if err := k.verifyProject(p.Spec.EphemeralContainers, argv); err != nil {
+			return 0, err
+		}
 		return Running, nil
 	}
 	if len(argv) == 0 {
@@ -131,6 +135,60 @@ func (k *Kubectl) verifySpecImage(cs []named) error {
 			ErrImage, k.tracerName(), img, k.t.Image)
 	}
 	return nil
+}
+
+// verifyProject requires an earlier debug container to trace the
+// project argv asks for (task 5g4). Without the check, deploy would
+// leave a tracer of another project running and then wait the whole
+// attach timeout for a session that never comes. The container's
+// project is the -project of its command line, else the namespace (an
+// in-pod tracer's default, #21); argv without a -project asks for none
+// in particular, and any is accepted.
+func (k *Kubectl) verifyProject(cs []named, argv []string) error {
+	want, ok := flagValue(argv, "project")
+	if !ok {
+		return nil
+	}
+	i := slices.IndexFunc(cs, func(c named) bool { return c.Name == TracerContainer })
+	if i < 0 {
+		return nil // verifySpecImage has refused this already
+	}
+	got, ok := flagValue(slices.Concat(cs[i].Command, cs[i].Args), "project")
+	if !ok {
+		got = k.t.Namespace
+	}
+	if got != want {
+		return fmt.Errorf("%w: %s traces project %q, not %q; ephemeral containers cannot be replaced: "+
+			"restart the pod for a new session", ErrTransport, k.tracerName(), got, want)
+	}
+	return nil
+}
+
+// flagValue is the value of the Go flag name in argv — -name V, -name=V
+// or the same with two dashes — and whether argv has it; Go's flag
+// package keeps a repeated flag's last value, so this does too. It
+// stops at "--", past which nothing is a flag.
+func flagValue(argv []string, name string) (string, bool) {
+	var val string
+	var found bool
+	for i := 0; i < len(argv); i++ {
+		a := argv[i]
+		if a == "--" {
+			break
+		}
+		flag, eq, hasEq := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(a, "-"), "-"), "=")
+		if !strings.HasPrefix(a, "-") || flag != name {
+			continue
+		}
+		switch {
+		case hasEq:
+			val, found = eq, true
+		case i+1 < len(argv):
+			val, found = argv[i+1], true
+			i++
+		}
+	}
+	return val, found
 }
 
 // tracerName names the target's tracer container in messages.

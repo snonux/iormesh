@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -47,58 +49,113 @@ const DefaultAttachTimeout = 2 * time.Minute
 // most a second to a deploy.
 var attachPoll = time.Second
 
+// attachProbeTimeout bounds one probe (its exec and the get after a
+// failed one), a variable so a test can shorten it. Each probe has its
+// own bound rather than the wait's deadline (task 5g4): a probe in
+// flight when the deadline passes still gets its answer, so the timeout
+// message names what the tracer last said and not "signal: killed",
+// and a short wait is not lost to a slow first exec. The wait may so
+// end up to this much after its timeout.
+var attachProbeTimeout = 30 * time.Second
+
 // ErrNotAttached: the tracer did not report itself attached — its
-// session ended or died first, its container exited, or the wait timed
-// out.
+// session ended or died first, its container exited, `iormesh ready
+// -state` failed in it, the wait timed out or was interrupted.
 var ErrNotAttached = errors.New("k8s: tracer not attached")
+
+// The words of an answer after its state, checked because state.json
+// is written in the pod (task 5g4): whatever the pod's tracer
+// container holds, an answer either is one iormesh writes or fails the
+// wait, and the session id deploy prints to the operator's terminal is
+// 8 lowercase hex (cli newSessionID), the end reason a snake_case word
+// (cli endReason).
+var (
+	attachSession = regexp.MustCompile(`^[0-9a-f]{8}$`)
+	attachReason  = regexp.MustCompile(`^[a-z_]{1,32}$`)
+)
 
 // WaitAttached waits until the pod's debug tracer reports project's
 // session attached and returns the session id. It fails at once when
-// the session already ended or died or the tracer container exited, and
-// with ErrNotAttached naming the last answer once timeout passed.
+// the session already ended or died, the tracer container exited or the
+// probe itself failed in it, and with ErrNotAttached naming the last
+// answer once timeout passed or ctx ended — the message tells the two
+// apart, and an ended ctx's error is wrapped as well.
 func (k *Kubectl) WaitAttached(ctx context.Context, proj string, timeout time.Duration) (string, error) {
 	if !project.Valid(proj) {
 		return "", fmt.Errorf("%w: project %q: %s", ErrName, proj, project.Rule)
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	deadline := time.Now().Add(timeout)
 	last := "no answer yet"
 	for {
-		session, seen, err := k.attachProbe(ctx, proj)
+		session, seen, err := k.probeOnce(ctx, proj)
 		if err != nil || session != "" {
 			return session, err
 		}
+		if ctx.Err() != nil {
+			return "", k.interrupted(ctx, proj, last)
+		}
 		last = cmp.Or(seen, last)
-		timer := time.NewTimer(attachPoll)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
+		left := time.Until(deadline)
+		if left <= 0 {
 			return "", fmt.Errorf("%w: %s, project %s, not attached after %s (last: %s); "+
 				"see kubectl logs %s --container=%s", ErrNotAttached, k.tracerName(), proj, timeout, last,
 				k.t.Pod, TracerContainer)
+		}
+		timer := time.NewTimer(min(attachPoll, left))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return "", k.interrupted(ctx, proj, last)
 		case <-timer.C:
 		}
 	}
 }
 
+// interrupted is WaitAttached's error for a ctx that ended first (an
+// operator's Ctrl-C, mostly): not a timeout, so it says so.
+func (k *Kubectl) interrupted(ctx context.Context, proj, last string) error {
+	return fmt.Errorf("%w: %s, project %s: wait interrupted before the tracer attached (last: %s): %w",
+		ErrNotAttached, k.tracerName(), proj, last, context.Cause(ctx))
+}
+
+// probeOnce is attachProbe under its own attachProbeTimeout. A probe the
+// bound cut off says so as its answer.
+func (k *Kubectl) probeOnce(ctx context.Context, proj string) (session, last string, err error) {
+	pctx, cancel := context.WithTimeout(ctx, attachProbeTimeout)
+	defer cancel()
+	session, last, err = k.attachProbe(pctx, proj)
+	if last == "" && ctx.Err() == nil && pctx.Err() != nil {
+		last = fmt.Sprintf("no answer within %s", attachProbeTimeout)
+	}
+	return session, last, err
+}
+
 // attachProbe asks the tracer once. It returns the session id once
-// attached, else what it saw for the timeout's message ("" when the
-// timeout cut the probe off); an error only
-// for an answer no wait can change.
+// attached, else what it saw for the timeout's message ("" when ctx cut
+// the probe off); an error only for an answer no wait can change: an
+// ended or dead session, an exited container, or `iormesh ready -state`
+// failing in the running container (a remote exit status: an old image,
+// a corrupt state.json — task 5g4).
 func (k *Kubectl) attachProbe(ctx context.Context, proj string) (session, last string, err error) {
 	out, rerr := k.Run(ctx, TracerBinary, "ready", "-project", proj, ReadyStateFlag)
 	if rerr == nil {
 		return parseAttach(strings.TrimSpace(string(out)), k.tracerName())
 	}
 	if ctx.Err() != nil {
-		return "", "", nil // cut off by the timeout: the answer before it says more
+		return "", "", nil // cut off: the answer before it says more
 	}
-	// The exec failed: the container is not running yet (pulling,
+	if exitErr := (*exec.ExitError)(nil); errors.As(rerr, &exitErr) {
+		// Only a command that ran wraps the ExitError (explain): the
+		// container runs, and the probe's own failure will not change.
+		return "", "", fmt.Errorf("%w: %s: `%s ready %s` failed in the tracer container: %s",
+			ErrNotAttached, k.tracerName(), TracerBinary, ReadyStateFlag, firstLine(rerr.Error()))
+	}
+	// kubectl itself failed: the container is not running yet (pulling,
 	// creating), or no longer. Only the pod's status tells which.
 	p, gerr := k.getPod(ctx)
 	if gerr != nil {
 		if ctx.Err() != nil {
-			// The timeout cut the get off: the exec's failure says more.
+			// The bound cut the get off: the exec's failure says more.
 			return "", firstLine(rerr.Error()), nil
 		}
 		return "", firstLine(gerr.Error()), nil
@@ -110,21 +167,22 @@ func (k *Kubectl) attachProbe(ctx context.Context, proj string) (session, last s
 	return "", firstLine(rerr.Error()), nil
 }
 
-// parseAttach reads one `iormesh ready -state` answer.
+// parseAttach reads one `iormesh ready -state` answer, refusing words
+// iormesh never writes (attachSession, attachReason): pending and dead
+// take none, running a session id, ended an end reason or none.
 func parseAttach(answer, where string) (session, last string, err error) {
 	word, rest, _ := strings.Cut(answer, " ")
-	switch word {
-	case AttachRunning:
-		if rest == "" {
-			return "", "", fmt.Errorf("%w: %s answered %q: no session id", ErrNotAttached, where, answer)
-		}
+	switch {
+	case word == AttachRunning && attachSession.MatchString(rest):
 		return rest, "", nil
-	case AttachPending:
+	case word == AttachRunning:
+		return "", "", fmt.Errorf("%w: %s answered %q: no session id", ErrNotAttached, where, firstLine(answer))
+	case word == AttachPending && rest == "":
 		return "", "probes not attached yet", nil
-	case AttachEnded:
+	case word == AttachEnded && (rest == "" || attachReason.MatchString(rest)):
 		return "", "", fmt.Errorf("%w: %s: the session already ended (%s); restart the pod for a new one",
-			ErrNotAttached, where, rest)
-	case AttachDead:
+			ErrNotAttached, where, cmp.Or(rest, "no reason given"))
+	case word == AttachDead && rest == "":
 		return "", "", fmt.Errorf("%w: %s: the tracer died without its end; restart the pod for a new session",
 			ErrNotAttached, where)
 	}
@@ -132,7 +190,8 @@ func parseAttach(answer, where string) (session, last string, err error) {
 }
 
 // firstLine is s up to its first newline, at most 200 bytes: enough of
-// a kubectl error or an odd answer for a message.
+// a kubectl error or an odd answer for a message. iormeshctl prints
+// errors terminal-safe (ctl errText), whatever the pod wrote.
 func firstLine(s string) string {
 	s, _, _ = strings.Cut(s, "\n")
 	if len(s) > 200 {

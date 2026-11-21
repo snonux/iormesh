@@ -135,15 +135,6 @@ func TestSidecarPatch(t *testing.T) {
 	checkTracerContainer(t, c)
 }
 
-func TestTraceCap(t *testing.T) {
-	for limit, want := range map[string]string{"2Gi": "1536MiB", "512Mi": "384MiB", "1Ti": "786432MiB",
-		"1Mi": "", "2G": "", "": ""} {
-		if got := TraceCap(limit); got != want {
-			t.Errorf("TraceCap(%q) = %q, want %q", limit, got, want)
-		}
-	}
-}
-
 // TestDebugProfile: kubectl debug --custom gets the same security
 // context, mounts and env, and nothing kubectl's own flags set.
 func TestDebugProfile(t *testing.T) {
@@ -244,11 +235,19 @@ func TestManifestsValidate(t *testing.T) {
 			t.Errorf("image %q accepted", img)
 		}
 	}
-	for _, limit := range []string{"", "0Gi", "2G", "2gi", "-1Gi", "1.5Gi", "2Ki", "9999999Gi", "1Mi"} {
+	for _, limit := range []string{"", "0Gi", "2gi", "-1Gi", "2Ki", "1Mi", "127Mi", "1e100", "99999Ei", "2m",
+		"1 Gi", "2Gi\n"} {
 		m := good
 		m.TraceLimit = limit
 		if m.Validate() == nil {
 			t.Errorf("trace limit %q accepted", limit)
+		}
+	}
+	for _, limit := range []string{"128Mi", "2G", "1.5Gi", "2147483648", "2e9"} {
+		m := good
+		m.TraceLimit = limit
+		if err := m.Validate(); err != nil {
+			t.Errorf("trace limit %q refused: %v", limit, err)
 		}
 	}
 	for _, args := range [][]string{nil, {}, {"attach"}, {"-pid", "1"}} {

@@ -46,12 +46,12 @@ func TestWaitAttachedTimeout(t *testing.T) {
 	f.pod(t, withTracer(false, true, testImage))
 	f.states(t, "pending")
 	start := time.Now()
-	_, err := newTestKubectl(t, testTarget()).WaitAttached(context.Background(), "shop", 500*time.Millisecond)
-	if !errors.Is(err, ErrNotAttached) || !strings.Contains(err.Error(), "not attached after 500ms") ||
+	_, err := newTestKubectl(t, testTarget()).WaitAttached(context.Background(), "shop", 150*time.Millisecond)
+	if !errors.Is(err, ErrNotAttached) || !strings.Contains(err.Error(), "not attached after 150ms") ||
 		!strings.Contains(err.Error(), "probes not attached yet") || !strings.Contains(err.Error(), "kubectl logs") {
 		t.Fatalf("err = %v", err)
 	}
-	if d := time.Since(start); d < 500*time.Millisecond {
+	if d := time.Since(start); d < 150*time.Millisecond {
 		t.Errorf("gave up after %s, before the timeout", d)
 	}
 	if n := len(f.calls(t)); n < 2 {
@@ -68,7 +68,7 @@ func TestWaitAttachedContainerDown(t *testing.T) {
 	t.Setenv("FAKE_KUBECTL_EXEC_DOWN", "1")
 	f.pod(t, strings.Replace(withTracer(false, true, testImage), `{"running":{"startedAt":"2026-11-21T00:00:00Z"}}`,
 		`{"waiting":{"reason":"ContainerCreating"}}`, 1))
-	_, err := newTestKubectl(t, testTarget()).WaitAttached(context.Background(), "shop", 500*time.Millisecond)
+	_, err := newTestKubectl(t, testTarget()).WaitAttached(context.Background(), "shop", 100*time.Millisecond)
 	if !errors.Is(err, ErrNotAttached) || !strings.Contains(err.Error(), "container not found") {
 		t.Fatalf("still creating: err = %v", err)
 	}
@@ -90,10 +90,13 @@ func TestWaitAttachedContainerDown(t *testing.T) {
 func TestWaitAttachedEnded(t *testing.T) {
 	fastPoll(t)
 	for answer, want := range map[string]string{
-		"ended disk_limit": "already ended (disk_limit)",
-		"dead":             "died without its end",
-		"running":          "no session id",
-		"hello":            `answered "hello"`,
+		"ended disk_limit":  "already ended (disk_limit)",
+		"ended":             "already ended (no reason given)",
+		"dead":              "died without its end",
+		"running":           "no session id",
+		"running 1a2b3c4d!": `answered "running 1a2b3c4d!": no session id`,
+		"ended ../x":        `answered "ended ../x", not an attach state`,
+		"hello":             `answered "hello"`,
 	} {
 		f := newFake(t)
 		f.states(t, answer)
@@ -111,5 +114,111 @@ func TestWaitAttachedEnded(t *testing.T) {
 	}
 	if calls := f.calls(t); len(calls) != 0 {
 		t.Errorf("bad project ran kubectl: %q", calls)
+	}
+}
+
+// TestParseAttach: state.json is written in the pod, so an answer is
+// one iormesh writes or an error (task 5g4) — the session id deploy
+// prints is 8 lowercase hex, an end reason snake_case, pending and dead
+// take no words — and an odd answer is quoted, never echoed raw.
+func TestParseAttach(t *testing.T) {
+	session, last, err := parseAttach("running 0f1e2d3c", "pod")
+	if session != "0f1e2d3c" || last != "" || err != nil {
+		t.Errorf("running: %q, %q, %v", session, last, err)
+	}
+	if session, last, err = parseAttach("pending", "pod"); session != "" || last == "" || err != nil {
+		t.Errorf("pending: %q, %q, %v", session, last, err)
+	}
+	for _, answer := range []string{
+		"running 0F1E2D3C", "running 0f1e2d3", "running 0f1e2d3c4", "running 0f1e2d3c x", "running  0f1e2d3c",
+		"running 0f1e2d3c\x1b[2J", "running \x1b]0;pwned\x07", "running g0000000", "running ",
+		"ended Disk_limit", "ended disk limit", "ended disk-limit", "ended \x1b[2J", "ended " + strings.Repeat("a", 33),
+		"pending x", "dead x", "", "RUNNING 0f1e2d3c",
+	} {
+		session, _, err := parseAttach(answer, "pod")
+		if session != "" || !errors.Is(err, ErrNotAttached) {
+			t.Errorf("%q: session %q, err %v; want a refusal", answer, session, err)
+			continue
+		}
+		// The refusal is the odd-answer one, not a reading of the
+		// answer as an ended or dead session.
+		if !strings.Contains(err.Error(), "not an attach state") && !strings.Contains(err.Error(), "no session id") {
+			t.Errorf("%q: err %v, want it refused as no attach state", answer, err)
+		}
+		if strings.ContainsAny(err.Error(), "\x1b\x07") {
+			t.Errorf("%q: raw control bytes in %q", answer, err)
+		}
+	}
+	for _, reason := range []string{"disk_limit", "signal", "duration", strings.Repeat("a", 32)} {
+		if _, _, err := parseAttach("ended "+reason, "pod"); !strings.Contains(err.Error(), "already ended ("+reason+")") {
+			t.Errorf("ended %s: %v", reason, err)
+		}
+	}
+}
+
+// TestWaitAttachedProbeFails: `iormesh ready -state` failing in the
+// running tracer container (a remote exit status) fails the wait at
+// once — no wait changes it — with no pod get (task 5g4).
+func TestWaitAttachedProbeFails(t *testing.T) {
+	fastPoll(t)
+	f := newFake(t)
+	f.states(t, "pending")
+	t.Setenv("FAKE_KUBECTL_EXIT", "2")
+	t.Setenv("FAKE_KUBECTL_REMOTE", "2")
+	_, err := newTestKubectl(t, testTarget()).WaitAttached(context.Background(), "shop", time.Minute)
+	if !errors.Is(err, ErrNotAttached) || !strings.Contains(err.Error(), "failed in the tracer container") {
+		t.Fatalf("err = %v", err)
+	}
+	if calls := f.calls(t); len(calls) != 1 {
+		t.Errorf("calls = %q, want the one exec", calls)
+	}
+}
+
+// TestWaitAttachedInterrupted: a ctx cancelled during the wait (Ctrl-C)
+// ends it with an error saying so and wrapping context.Canceled, not
+// the timeout's message (task 5g4).
+func TestWaitAttachedInterrupted(t *testing.T) {
+	fastPoll(t)
+	f := newFake(t)
+	f.states(t, "pending")
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	_, err := newTestKubectl(t, testTarget()).WaitAttached(ctx, "shop", time.Minute)
+	if !errors.Is(err, ErrNotAttached) || !errors.Is(err, context.Canceled) ||
+		!strings.Contains(err.Error(), "interrupted") || !strings.Contains(err.Error(), "probes not attached yet") ||
+		strings.Contains(err.Error(), "not attached after") {
+		t.Fatalf("err = %v", err)
+	}
+	if n := len(f.calls(t)); n < 1 {
+		t.Errorf("%d probes", n)
+	}
+}
+
+// TestWaitAttachedSlowProbe: a probe in flight when the wait's timeout
+// passes still gets its answer — it runs under its own bound — so a
+// slow exec that answers running attaches (task 5g4); a probe over its
+// own bound is cut off and named in the timeout message.
+func TestWaitAttachedSlowProbe(t *testing.T) {
+	fastPoll(t)
+	f := newFake(t)
+	f.pod(t, withTracer(false, true, testImage))
+	f.states(t, "running 1a2b3c4d")
+	t.Setenv("FAKE_KUBECTL_EXEC_SLEEP", "0.3")
+	session, err := newTestKubectl(t, testTarget()).WaitAttached(context.Background(), "shop", 50*time.Millisecond)
+	if err != nil || session != "1a2b3c4d" {
+		t.Fatalf("slow probe: %q, %v", session, err)
+	}
+	orig := attachProbeTimeout
+	attachProbeTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { attachProbeTimeout = orig })
+	t.Setenv("FAKE_KUBECTL_EXEC_SLEEP", "5")
+	start := time.Now()
+	_, err = newTestKubectl(t, testTarget()).WaitAttached(context.Background(), "shop", 10*time.Millisecond)
+	if !errors.Is(err, ErrNotAttached) || !strings.Contains(err.Error(), "no answer within 50ms") ||
+		!strings.Contains(err.Error(), "not attached after 10ms") {
+		t.Fatalf("probe over its bound: err = %v", err)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Errorf("probe over its bound took %s", d)
 	}
 }
