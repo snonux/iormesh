@@ -399,8 +399,14 @@ static __always_inline void iormesh_read_ctx_tuple(struct tcp_state_event *ev,
 //     transition a live entry can see is the CLOSE -> SYN_SENT inside the
 //     very connect that registered it, and that connect parked sk under
 //     its tid in connect_sock_map - the transition runs in the connecting
-//     task's context. Listeners are never registered, children only after
-//     accept() returns, so every other one means the entry is stale.
+//     task's context, so the tid is looked up as filter() stored it: in
+//     the tracer's PID namespace (iormesh_current_pid_tgid; pod mode, M7),
+//     not the host tid. Children are registered only after accept()
+//     returns. A listener is registered only by a connect() on it, which
+//     fails with EISCONN and leaves it LISTEN; its one later transition,
+//     LISTEN -> CLOSE, ends it, so dropping that record and the entry
+//     loses nothing. Every other such transition means the entry is
+//     stale.
 //   - The socket file's inode number is the generation (struct sock_owner).
 //     While the socket has a file (sk_socket is set from socket() or
 //     accept() until close() orphans it) its inode must be the registered
@@ -408,6 +414,15 @@ static __always_inline void iormesh_read_ctx_tuple(struct tcp_state_event *ev,
 //     (sk_socket NULL: the FIN_WAIT2/LAST_ACK -> CLOSE tail after close(),
 //     or a child not yet accepted) cannot be checked this way and is
 //     believed - the first proof covers the next life's start.
+//
+// Accepted residual risk: two skipped runs in a row on one address - the
+// old life's CLOSE, then the new child's LISTEN -> SYN_RECV - leave the
+// stale entry in place for the child's SYN_RECV -> ESTABLISHED, which runs
+// before accept() gives the child a file, so neither proof catches it and
+// that one record goes out under the old owner (accept() then re-registers
+// the child, or its next transition with a file drops the entry). A
+// userspace backstop could start a new conn when a tcp_state record's
+// 4-tuple contradicts the conn's earlier records.
 //
 // The reads are probe reads: sk_socket may be cleared by close() on another
 // CPU meanwhile, which at worst makes one record unverifiable.
@@ -419,7 +434,7 @@ static __always_inline int iormesh_sock_owner_stale(struct trace_event_raw_inet_
     if (oldstate == TCP_LISTEN)
         return 1;
     if (oldstate == TCP_CLOSE) {
-        __u32 tid = (__u32)bpf_get_current_pid_tgid();
+        __u32 tid = (__u32)iormesh_current_pid_tgid();
         __u64 *parked = bpf_map_lookup_elem(&connect_sock_map, &tid);
 
         if (!parked || *parked != sk)

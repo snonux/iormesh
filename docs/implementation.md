@@ -605,8 +605,8 @@ scope) call `iormesh_pid_targeted` too.
   (sockets open when the trace ends, stale entries whose
   address is never reused).
 - **connect (active side)**: the generated `sys_enter_connect`
-  handler calls `iormesh_sock_on_connect(pid, fd)`, which walks
-  fd → `struct file` → `struct socket` → `struct sock`, keeps
+  handler calls `iormesh_sock_on_connect(pid, tid, fd)`, which
+  walks fd → `struct file` → `struct socket` → `struct sock`, keeps
   only IPv4/IPv6 TCP sockets and registers the owner. Then the
   in-syscall `CLOSE → SYN_SENT` (local port still 0) and the
   softirq `SYN_SENT → ESTABLISHED` transition (full 4-tuple —
@@ -664,13 +664,14 @@ connection), owner `pid`/`fd`, `oldstate`/`newstate`, `family`,
 `sport`/`dport` (host order, `sport` local), `seq_status` (M1's
 reserved word), `saddr`/`daddr` (16 bytes, network order, IPv4
 in the first 4), and since ve4 the four `tcp_sock` fields of the
-M4 merge (see "The merge"). Every scalar is 32/64-bit because the Go type generator maps no
-16-bit integers.
+M4 merge (see "The merge"). Every scalar is 32/64-bit because
+the Go type generator maps no 16-bit integers.
 
 Tested by `mage bpfRootTest` (root, via `sudo -n`): the test
 binary of `./internal` (`internal/sock_root_test.go`) loads the
 whole object, attaches only the connect/accept handlers and the
-state tracepoint with libbpfgo directly (the loader is step 5),
+state tracepoint with libbpfgo directly (written before the
+loader, step 5),
 and over loopback checks the client's `SYN_SENT → ESTABLISHED`
 tuple and owner fd (Go's `net.Dial` connects non-blocking and
 gets `EINPROGRESS`, like NIO), the accept snapshot's mirrored
@@ -684,10 +685,12 @@ a lost `TCP_CLOSE` run leaves and churns non-target loopback
 connections until the slab reuses the freed socks: nothing is
 recorded under a stale owner and each reused sock's entry is
 dropped; a planted entry with another inode on a live socket is
-dropped at its next transition. The syscall handlers run in
-their dispatch slots behind the `raw_syscalls` dispatchers, as
-under the loader, so the tests run on el9 too. The target only counts tests
-reported as passed (`gatecmd.RootBPFTests`, pinned by
+dropped at its next transition; in the tracer's own PID
+namespace (pod mode) a connect still yields its
+`SYN_SENT → ESTABLISHED`. The syscall handlers run in their
+dispatch slots behind the `raw_syscalls` dispatchers, as under
+the loader, so the tests run on el9 too. The target only counts
+tests reported as passed (`gatecmd.RootBPFTests`, pinned by
 `internal/buildgate`). Not covered yet: IPv6, Java processes.
 
 **Step 5 — loader and ring buffer** (`internal/bpf`, cgo; built).

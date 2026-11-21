@@ -76,13 +76,18 @@ type seqCall struct{ Buf, Off, N int }
 
 // TestMain also dispatches the namespace side of TestPidNSTracerConfined
 // (pidns_root_test.go), whose variable carries the host bystander's pid,
-// and the multithreaded child of TestProcessExitGroupDead (exit_root_test.go).
+// the multithreaded child of TestProcessExitGroupDead (exit_root_test.go)
+// and the namespace side of TestPidNSConnectEstablished
+// (pidnsconnect_root_test.go).
 func TestMain(m *testing.M) {
 	if host := os.Getenv(pidnsChildEnv); host != "" {
 		os.Exit(pidnsChildMain(host))
 	}
 	if os.Getenv(exitChildEnv) != "" {
 		os.Exit(exitChildMain())
+	}
+	if os.Getenv(pidnsConnectEnv) != "" {
+		os.Exit(pidnsConnectMain())
 	}
 	if scenario := os.Getenv(seqChildEnv); scenario != "" {
 		if err := runSeqChild(scenario); err != nil {
