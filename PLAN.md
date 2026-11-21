@@ -2135,6 +2135,30 @@ Later phase — plain Linux servers (M4) come first.
   0.62 s. M7 stays reopened until #13 has an el9 profile
   (task 5h4) and the run passes with it and no node-local
   policy.
+  **Accepted on el9** (2026-11-21, task 5h4): with #13's el9
+  profile — the tracer container alone at `seLinuxOptions:
+  {type: spc_t, level: s0}`, the seven capabilities,
+  `RuntimeDefault` and no privilege escalation unchanged — and
+  no node-local SELinux module (only the packaged `container`
+  and `k3s` ones), the same node passed every subtest of both
+  tests under iptables and again under nftables: ClusterIP
+  fused, the hairpin, pod identity, the agent live-attached by a
+  debug container (a `container_t` JVM sharing the `emptyDir`
+  spool, ring and attach socket with the `spc_t` tracer), the
+  ingress routed edge to the inventory pod, list-only discovery,
+  SIGTERM exit 0 (0.81 s, 0.72 s). The raw audit log held no
+  AVC; the app containers ran `container_t` at their pods' own
+  MCS pairs; `kubectl debug --custom` took the field; the kind
+  run passed with it too. A first pass with the type alone
+  failed the ingress subtest (containerd gave the tracer its own
+  MCS pair and relabelled the pod's `/etc/hosts` to it, #13),
+  hence the level. Limits: one single-node k3s on one Rocky 9.9
+  VM (containerd 2.2.10, container-selinux 2.250, k3s-selinux
+  1.6, firewalld trusting the pod and Service CIDRs, run by
+  `el9-k3s.sh`), kubectl 1.35, no multi-node cluster, no CRI-O,
+  no OpenShift, no Pod Security level below `privileged`; the
+  tracer is unconfined by SELinux there (task 7h4's module would
+  confine it). #13, #14, #15 and #18 stay provisional.
 
 ## Decisions
 
@@ -2790,8 +2814,8 @@ here only as placeholders.
   permissions above.
   *Provisional (2026-11-21, task 5h4, owner-delegated advisor
   decision):* `spc_t`. The minimal profile's tracer container
-  carries `securityContext.seLinuxOptions: {type: spc_t}` —
-  container level only, never the pod's securityContext, so the
+  carries `securityContext.seLinuxOptions: {type: spc_t, level:
+  s0}` — container level only, never the pod's securityContext, so the
   app containers stay `container_t` — beside the seven
   capabilities, `RuntimeDefault` and `allowPrivilegeEscalation:
   false`, all unchanged. It is in `kubectl debug --custom`'s
@@ -2803,8 +2827,15 @@ here only as placeholders.
   one omits the field; a value must match `[a-z0-9_]+`. An
   `iormesh_container_t` policy module with exactly the
   permissions above follows (task 7h4, not gating); `privileged`
-  stays the last fallback. Owner to confirm: `spc_t` as the
-  fleet default, whether a policy RPM is viable, OpenShift (its
+  stays the last fallback. The level is not optional: given a
+  type alone, containerd gives the container a fresh MCS pair
+  and relabels the pod's shared files (`/etc/hosts`,
+  `resolv.conf`, the trace `emptyDir`) to it, and on el9 the
+  gateway's JVM (`container_t` at the pod's pair) was then denied
+  reading `/etc/hosts` (task 5h4's first run); at `s0`, which
+  every pair dominates, the app keeps access, and those files
+  lose the pod's MCS pair. Owner to confirm: `spc_t` as the
+  fleet default, the `s0` level, whether a policy RPM is viable, OpenShift (its
   SCCs) out of scope.
 - **#14 K8s Java attach** — *Provisional (2026-11-20):* live
   attach through the shared process namespace is the k8s

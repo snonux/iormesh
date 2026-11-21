@@ -131,5 +131,6 @@ const sidecarHeader = generated +
 # the app's target first:
 #   kubectl patch deployment <name> --patch-file deploy/sidecar-patch.yaml
 # The tracer container alone runs as SELinux type spc_t (container_t is
-# denied BPF on an enforcing node); the app containers keep theirs.
+# denied BPF on an enforcing node) at level s0, so the pod's files it
+# relabels stay open to the app containers, which keep their own label.
 `

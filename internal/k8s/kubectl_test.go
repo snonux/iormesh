@@ -186,8 +186,8 @@ func TestDebugSELinuxType(t *testing.T) {
 }
 
 // assertCustom checks the --custom spec: the two mounts always, #13's
-// capability set, no-escalation and the SELinux type seType (absent when
-// "") only for the minimal profile.
+// capability set, no-escalation and the SELinux type seType at level s0
+// (absent when "") only for the minimal profile.
 func assertCustom(t *testing.T, js string, minimal bool, seType string) {
 	t.Helper()
 	var spec struct {
@@ -199,7 +199,8 @@ func assertCustom(t *testing.T, js string, minimal bool, seType string) {
 				Add  []string `json:"add"`
 			} `json:"capabilities"`
 			SELinuxOptions *struct {
-				Type string `json:"type"`
+				Type  string `json:"type"`
+				Level string `json:"level"`
 			} `json:"seLinuxOptions"`
 		} `json:"securityContext"`
 		VolumeMounts []struct {
@@ -231,8 +232,9 @@ func assertCustom(t *testing.T, js string, minimal bool, seType string) {
 	switch {
 	case seType == "" && sc.SELinuxOptions != nil:
 		t.Errorf("seLinuxOptions set for an empty type: %s", js)
-	case seType != "" && (sc.SELinuxOptions == nil || sc.SELinuxOptions.Type != seType):
-		t.Errorf("seLinuxOptions in %s, want type %s", js, seType)
+	case seType != "" && (sc.SELinuxOptions == nil || sc.SELinuxOptions.Type != seType ||
+		sc.SELinuxOptions.Level != SELinuxLevel):
+		t.Errorf("seLinuxOptions in %s, want type %s, level %s", js, seType, SELinuxLevel)
 	}
 }
 

@@ -147,7 +147,8 @@ type containerSpec struct {
 			Type string `json:"type"`
 		} `json:"seccompProfile"`
 		SELinux *struct {
-			Type string `json:"type"`
+			Type  string `json:"type"`
+			Level string `json:"level"`
 		} `json:"seLinuxOptions"`
 	} `json:"securityContext"`
 	Env []struct {

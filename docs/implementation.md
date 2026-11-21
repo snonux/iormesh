@@ -5468,7 +5468,7 @@ depends on:
    context, the mounts and the downward-API env — name, image and
    command stay kubectl's flags. Since task 5h4 the minimal
    profile's security context also sets `seLinuxOptions: {type:
-   spc_t}` on this container (never the pod; `iormeshctl deploy
+   spc_t, level: s0}` on this container (never the pod; `iormeshctl deploy
    -selinux-type` or the registry's `selinux_type` picks another,
    empty omits it; PLAN.md #13). The sidecar adds resource limits
    of one CPU and 1 GiB (start's unit defaults: the container is

@@ -1790,8 +1790,8 @@ Unit tests in `mage test`, no cluster and no container engine
   `sizeLimit`; uid 0, `allowPrivilegeEscalation: false`, no
   `privileged`, `RuntimeDefault` seccomp, `drop: [ALL]` and
   exactly #13's seven capabilities, in order;
-  `seLinuxOptions` with only `type: spc_t` on the tracer
-  container, and no pod-level `securityContext` in either patch
+  `seLinuxOptions` with only `type: spc_t` and `level: s0` on
+  the tracer container, and no pod-level `securityContext` in either patch
   (task 5h4); the downward-API
   env (`POD_NAME`, `POD_NAMESPACE`, `POD_UID`); the sidecar's
   image pinned by digest, its args ending in the ¾ byte cap and
@@ -2374,6 +2374,60 @@ with injected file reads and limit (`TestLoadHint`: enforcing
 `container_t`, enforcing `spc_t`, permissive, no LSM, low and
 high memlock on old and new kernels; `TestLoadHintContextIsSafe`,
 `TestWithLoadHint`), each branch mutation-checked.
+
+#### Re-run with `spc_t` (task 5h4, 2026-11-21)
+
+The same VM and versions (4 GB for the run), the tracer container
+as shipped by task 5h4 — #13's seven capabilities,
+`RuntimeDefault`, `allowPrivilegeEscalation: false` and
+`seLinuxOptions: {type: spc_t, level: s0}` — and **no node-local
+policy**: `semodule --list-modules=full` listed only the packaged
+`container` and `k3s` modules (priority 200), nothing at the
+local priority 400. **M7 passes on el9** (PLAN.md M7):
+
+| Criterion | iptables | nftables |
+|---|---|---|
+| tracer spec as stored (`spc_t`/`s0` on the tracer only, pod `securityContext` empty, apps without `seLinuxOptions`) | PASS | PASS |
+| BPF load under SELinux, tracefs hostPath, BTF | PASS, no AVC | PASS, no AVC |
+| `clusterip` (fused, goldens), both tests | PASS | PASS |
+| `hairpin` | PASS (server saw 10.42.0.1) | PASS (server saw 10.42.0.1) |
+| `identity` (5 pods, one `boot_id`) | PASS | PASS |
+| debug container with `-agent` (Java live-attach, container_t JVM to spc_t tracer through the emptyDir spool, ring and attach socket) | PASS | PASS |
+| `ingress` routed edge to the inventory pod (the sidecar tracer) | PASS | PASS |
+| `rbac` (list-only discovery) | PASS | PASS |
+| `sigterm` (crictl over ssh) | PASS: exit 0, 810 ms | PASS: exit 0, 715 ms |
+
+`kubectl debug --custom` (kubectl 1.35) took the field: every
+debug container was stored with it. On the node (`ps -eZ`) the
+tracers ran as `system_u:system_r:spc_t:s0`, the app containers
+as `container_t` with their pods' own MCS pairs. The raw
+`/var/log/audit/audit.log` and its rotations, read by
+timestamp (they cover the whole session), held no AVC during
+either pass — `ausearch` is not trusted here (task zg4).
+
+The level is part of the fix. The first pass ran with
+`{type: spc_t}` alone: `TestKindClusterIP` passed, but
+`TestKindAcceptance` failed in the ingress subtest, the gateway's
+JVM getting `java.net.ConnectException`; the audit log held
+`avc: denied { read }` for `java` (`container_t:s0:c19,c249`)
+on `resolv.conf` and `etc-hosts`, labelled
+`container_file_t:s0:c292,c345` — the debug tracer's own pair.
+Given a type without a level, containerd gives the container a
+fresh MCS pair and relabels the pod's shared files (and the trace
+`emptyDir`) to it, locking the app out. With `level: s0` those
+files (and the `emptyDir`) were `container_file_t:s0`, readable
+and writable from every pair, and both passes went green.
+After the run `el9-k3s.sh down` left the VM with the same 372
+packages (`rpm -qa` identical), the same `/opt/iormesh` (paths,
+sizes, mtimes, modes) and no trusted firewalld source; the
+laptop's `docker images -a` and volumes matched the state before.
+The kind path (`mage k8sAcceptance` without
+`IORMESH_K8S_KUBECONFIG`) passed with the field present too:
+`TestKindAcceptance` all six subtests (119 s, SIGTERM exit 0 in
+702 ms) and `TestKindClusterIP` (104 s, nftables); the kind node
+has no active LSM, so there the field is inert. Docker was
+started for the runs and stopped after; images and volumes
+matched the state before.
 
 ## Performance baselines
 

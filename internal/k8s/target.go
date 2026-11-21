@@ -62,6 +62,16 @@ const (
 // seLinuxOptions, leaving the runtime's default.
 const DefaultSELinuxType = "spc_t"
 
+// SELinuxLevel is the MCS level set beside any SELinux type (task 5h4).
+// Given a type alone, containerd gives the container a fresh MCS pair
+// of its own and relabels the pod's shared files — /etc/hosts,
+// resolv.conf, the trace emptyDir — to it, which locks the app
+// containers (container_t at the pod's pair) out of them: on el9 the
+// gateway's JVM was denied reading /etc/hosts. At s0, which every pair
+// dominates, the relabelled files stay readable and writable by the
+// app; the price is that they lose the pod's own MCS pair.
+const SELinuxLevel = "s0"
+
 // TracerContainer is the tracer container's name in the pod, the
 // ephemeral one and the sidecar alike: every exec names it.
 const TracerContainer = "iormesh"

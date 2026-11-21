@@ -187,9 +187,11 @@ func checkTracerContainer(t *testing.T, c any) {
 		t.Errorf("seccomp %v, want RuntimeDefault", at(t, sc, "seccompProfile"))
 	}
 	// spc_t, not container_t, which is denied BPF on an SELinux-enforcing
-	// node (decision #13, task 5h4).
-	if se := at(t, sc, "seLinuxOptions"); at(t, se, "type") != DefaultSELinuxType || len(se.(map[string]any)) != 1 {
-		t.Errorf("seLinuxOptions %v, want only type %s", se, DefaultSELinuxType)
+	// node, at level s0, so its relabels never lock the app out (decision
+	// #13, task 5h4).
+	if se := at(t, sc, "seLinuxOptions"); at(t, se, "type") != DefaultSELinuxType ||
+		at(t, se, "level") != SELinuxLevel || len(se.(map[string]any)) != 2 {
+		t.Errorf("seLinuxOptions %v, want only type %s and level %s", se, DefaultSELinuxType, SELinuxLevel)
 	}
 	if drop := strs(t, at(t, sc, "capabilities", "drop")); !slices.Equal(drop, []string{"ALL"}) {
 		t.Errorf("drop %q, want ALL", drop)

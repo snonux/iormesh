@@ -428,8 +428,14 @@ truth.
     to the code that needs it in PLAN.md #13 and checked by
     leaving it out
     ([testing.md](testing.md#k8s-capability-set-task-ub4));
-  - runs as SELinux type `spc_t` — the tracer container alone,
-    never the pod, so the app containers keep `container_t`. On
+  - runs as SELinux type `spc_t` at level `s0` — the tracer
+    container alone, never the pod, so the app containers keep
+    `container_t` and the pod's MCS pair. The `s0` level keeps
+    the pod's `/etc/hosts`, `resolv.conf` and trace `emptyDir`,
+    which the runtime relabels to the tracer's level, open to the
+    app; they no longer carry the pod's own MCS pair, a
+    defense-in-depth layer against a container escape that the
+    mount namespaces still back. On
     an SELinux-enforcing node (el9) `container_t` is denied
     `bpf { prog_load }` outright (task zg4); `spc_t` is
     unconfined by SELinux, so on such a node the capability set,

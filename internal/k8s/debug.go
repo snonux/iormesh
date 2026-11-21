@@ -255,8 +255,9 @@ func (k *Kubectl) debugArgs(custom string, argv []string) []string {
 //
 // seType is the minimal profile's seLinuxOptions.type (task 5h4): set on
 // this container only, never the pod, so the app containers keep
-// container_t; "" omits it. The privileged profile ignores it: a
-// privileged container runs as spc_t already.
+// container_t; "" omits it. The level is always SELinuxLevel beside it
+// (see there). The privileged profile ignores both: a privileged
+// container runs as spc_t already.
 func customSpec(p Profile, seType string) map[string]any {
 	sc := map[string]any{"runAsUser": 0}
 	if p == ProfileMinimal {
@@ -266,7 +267,7 @@ func customSpec(p Profile, seType string) map[string]any {
 		sc["seccompProfile"] = map[string]any{"type": "RuntimeDefault"}
 		sc["capabilities"] = map[string]any{"drop": []string{"ALL"}, "add": minimalCaps}
 		if seType != "" {
-			sc["seLinuxOptions"] = map[string]any{"type": seType}
+			sc["seLinuxOptions"] = map[string]any{"type": seType, "level": SELinuxLevel}
 		}
 	}
 	return map[string]any{

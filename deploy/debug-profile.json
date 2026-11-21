@@ -43,6 +43,7 @@
     },
     "runAsUser": 0,
     "seLinuxOptions": {
+      "level": "s0",
       "type": "spc_t"
     },
     "seccompProfile": {
