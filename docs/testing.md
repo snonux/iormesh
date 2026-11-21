@@ -683,14 +683,15 @@ Each host (two machines, Linux, x86_64 or aarch64):
   clock bound (M4-10: `tcp_seq` reads use `bpf_rdonly_cast`).
   The Java mark uprobes need 6.10 (or 6.6–6.9 with commit
   46ba0e49); the microservices projects load the agent (task
-  kf4). The suite has only
-  run on Linux 7.2, where the dispatcher findings (PLAN.md,
-  "Syscall handlers run behind `raw_syscalls` dispatchers") were
-  measured. Rocky 9.9's 5.14.0-741.22.1.el9_9 has backported
-  the BPF features these floors name (`bpf_rdonly_cast`,
-  uprobe_multi links) and runs the tracer since tasks gf4 and
-  hf4 (see "Run on Rocky 9.9" below); the version floors above
-  do not describe el9.
+  kf4). The dispatcher findings (PLAN.md, "Syscall handlers run
+  behind `raw_syscalls` dispatchers") were measured on Linux 7.2.
+  Rocky 9.9's 5.14.0-741.22.1.el9_9 has backported the BPF
+  features these floors name (`bpf_rdonly_cast`, uprobe_multi
+  links with 46ba0e49's process-wide pid filter) and runs the
+  tracer since tasks gf4 and hf4, and the root BPF and
+  integration suites since task nf4 (see "Run on Rocky 9.9" and
+  "Root suites on Rocky 9.9" below); the version floors above do
+  not describe el9.
 - systemd, rsync, Java 21 or newer on the SSH user's `PATH` (the
   goldens were confirmed on JDK 25), `ss`, GNU `df` and `stat`,
   `fallocate`, `timeout`, `pkill`, a POSIX login shell.
@@ -1026,6 +1027,95 @@ the tracer bootstrapped again, since `upgrade` through the rule
 refuses other bytes under one version (run 2's work directory is
 `~/.iormesh-m4`, run 1's `~/.iormesh-m4-run1-20261121`, kf4's
 `~/.iormesh-m4-kf4-1` on the controller).
+
+### Root suites on Rocky 9.9 (task nf4, 2026-11-21)
+
+`mage bpfRootTest`'s test binary and the integration test binary
+ran as root on `iom1` (the host above). Both were built on the
+7.2 laptop with `mage`'s cgo flags plus `-tags netgo,osusergo
+-ldflags '-w -extldflags "-static"'` (as `ReleaseTracer` links
+the tracer: Fedora's glibc is newer than el9's 2.34), and the
+integration inputs (static tracer, `iormeshctl`, the four jars,
+`workload/{scenarios,src,libs,otel}`, `edgepeer`, `echopeer`)
+were staged under `/opt/nf4`, run serially, and removed again.
+
+**bpfRootTest: 27 of 27 pass** (first run: 17 of 24;
+`TestProcessExitGroupDead` is new, the two `sockreuse` tests came
+with if4). They cover the paths no earlier el9 run had taken:
+
+- **Sock tests**: all seven `TestSock*` failed to attach
+  — `failed to create BPF link for perf_event: -13 (Permission
+  denied)` on `syscalls:sys_enter_connect` and friends. The tests
+  attached the generated handlers to their own per-syscall
+  tracepoints, but since hf4 the handlers read the raw_syscalls
+  record, which on el9 is longer (`args` at 24, while
+  `sys_enter_connect` ends at 40), and the kernel refuses a
+  program reading past its tracepoint's record. Only the tests
+  did that; the loader tail-calls the handlers from the
+  `raw_syscalls` dispatchers. The tests now fill the dispatch
+  slots and attach the dispatchers as the loader does (the same
+  fix landed with if4 while this ran).
+- **Java mark (`TestJavaMarkNamesTheNative`)**: passes. It now
+  also requires a mark from a thread whose tid is not the pid (a
+  JVM's `main` never runs on the launcher thread): el9's
+  uprobe_multi filters by process, so commit 46ba0e49 is
+  backported.
+- **PID namespace (`TestPidNSTracerConfined`)**: passes
+  (`handle_task_newtask_ns` and the namespace dispatch).
+- **Follow and fork, process exit**: `TestFollowForkExec` and the
+  exec-watch tests pass. el9's `sched_process_exit` has no
+  `group_dead` (comm at 12, pid at 28, prio at 32), so
+  `ior_exit_group_dead` takes the `signal->live` fallback. The
+  new `TestProcessExitGroupDead` runs it: a Go child ends one
+  locked thread (record `group_dead` 0, the process still in
+  `target_map`), then exits (a `group_dead` 1 record, the entry
+  gone). In ten runs every exit had exactly one `group_dead` 1
+  record, on the last thread. On 7.2 the same test runs the
+  field path.
+- **Target hint**: the harness assumes `pid_max` ≤
+  `PID_MAX_LIMIT` (el9: 4194304, the limit), BPF_XADD (present)
+  and that the fallback may report a dead group twice, which
+  `iormesh_forget_target`'s single successful delete absorbs; no
+  duplicate was seen on el9.
+
+**Syscall formats**: el9's `events/syscalls/*/format` against
+the 7.2 formats `mage generate` reads. The handlers read every
+argument by index from the raw_syscalls record (CO-RE, hf4), so
+per-syscall offsets do not matter; the argument order does, and
+it matches for every syscall both kernels have. Differences: 7.2
+appends `__data_loc` copies of string arguments (never read);
+`bpf` gained a fourth argument `size_common` (the handler reads
+only `cmd`, args[0]); `getcpu`, `name_to_handle_at` and `semop`
+differ in a pointer or integer type name only. 16 syscalls (32
+tracepoints) are generated but absent on el9 (`file_getattr`,
+`file_setattr`, `getxattrat`, `setxattrat`, `listxattrat`,
+`removexattrat`, `listmount`, `statmount`, `listns`, the three
+`lsm_*`, `mseal`, `open_tree_attr`, `uprobe`, `uretprobe`); the
+loader skips their slots (`tracepointExists`) and reports "0
+tracepoints missing" for the default families.
+
+**Integration suite: 51 of 51 pass**, 44 in the first full run and
+the other seven after the staging and golden fixes below. That
+serial run (about 10 minutes; 2 GiB was enough) failed seven:
+
+- `TestHTTPServlet`, `TestHTTPApache`, `TestHTTPOkHttp`,
+  `TestHTTPNetty`, `TestOtelHTTP`: staging — the third-party jars
+  under `workload/libs` and `workload/otel` were not copied.
+- `TestSystemdUnit`: staging — under SELinux (enforcing on el9)
+  systemd may not exec a binary in `/root` (`admin_home_t`,
+  status 203/EXEC), and `iormesh start` said only "exit status
+  1". Passes from `/opt`. The bare error is task rf4.
+- `TestPipeIPC` (fixed): el9's glibc 2.34 implements `pipe()` as
+  `pipe(2)` on x86_64, Fedora's 2.43 as `pipe2(fds, 0)`; the
+  tracer recorded `pipe` with both ends, the golden declared
+  `pipe2`. The test now declares the kind the trace's libc issued
+  (`pipeKindOfThisLibc`); both ends and every edge are still
+  checked.
+
+Outside the suites: a hand-run pattern session over pipe-ipc
+(`-pattern '*workload.jar*pipe-ipc*' -trace-families ipc`) died
+with "fd_gen 1 without an fd". That is task mf4 again, this time
+without `su`; the `-pid` run of the same scenario passes.
 
 ## Local site (task nb4)
 
