@@ -13,12 +13,16 @@ policy_module(iormesh, 0.1.0)
 # to the app containers' JVMs (container_t), found by task 7h4's
 # audit2allow review of a permissive run.
 #
-# Capabilities: this module grants none. Six of the tracer's seven (bpf,
-# perfmon, checkpoint_restore, sys_ptrace, sys_resource, dac_override;
-# all but kill) reach the type only through container-selinux's
-# virt_sandbox_use_all_caps boolean (on by default), as they reach
-# container_t; with it off the BPF load fails on capability2 { bpf
-# perfmon }. Leave the boolean on (getsebool virt_sandbox_use_all_caps).
+# Capabilities: the module grants the tracer's seven (#13's set) itself,
+# self:capability { dac_override kill sys_ptrace sys_resource } and
+# self:capability2 { bpf perfmon checkpoint_restore } (task gh4). Before,
+# six of them (all but kill) reached the type only through
+# container-selinux's virt_sandbox_use_all_caps boolean, as they reach
+# container_t, and with it off the BPF load failed on capability2 { bpf
+# perfmon }; now the M7 acceptance passes on el9 with the boolean off
+# and on (task gh4). The app containers (container_t) still take six of
+# their capabilities from that boolean. The pod spec's capability set
+# still bounds what the tracer's process holds.
 #
 # MCS: like container_t it is MCS-constrained, but MCS does not gate
 # every rule below. It gates the signal, file and lnk_file reads, dir
@@ -46,6 +50,8 @@ gen_require(`
 	type container_t;
 	type container_file_t;
 	type tracefs_t;
+	class capability { dac_override kill sys_ptrace sys_resource };
+	class capability2 { bpf perfmon checkpoint_restore };
 	class bpf { map_create map_read map_write prog_load prog_run };
 	class perf_event { open cpu kernel read write tracepoint };
 	class dir { search read open getattr };
@@ -67,6 +73,18 @@ container_domain_template(iormesh_container, container)
 typeattribute iormesh_container_t container_net_domain, container_user_domain;
 typeattribute iormesh_container_t sandbox_net_domain, sandbox_caps_domain;
 typeattribute iormesh_container_t svirt_sandbox_domain;
+
+# The tracer's seven capabilities, granted here so the type does not
+# depend on virt_sandbox_use_all_caps (task gh4), each for #13's
+# reason: bpf and perfmon for the programs and perf events,
+# sys_resource for libbpfgo's RLIMIT_MEMLOCK raise, and for the Java
+# attach sys_ptrace (/proc/<pid>/root, cwd, maps, environ),
+# dac_override (the 0600 attach socket and ring), kill (the SIGQUIT)
+# and checkpoint_restore (/proc/<pid>/map_files). These are self rules:
+# whom sys_ptrace and kill reach stays bounded by the container_t rules
+# below and MCS.
+allow iormesh_container_t self:capability { dac_override kill sys_ptrace sys_resource };
+allow iormesh_container_t self:capability2 { bpf perfmon checkpoint_restore };
 
 # Load and run the tracing programs, create and use their maps and the
 # ring buffer (container_t is denied bpf { prog_load } outright).

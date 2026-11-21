@@ -12,11 +12,15 @@ import (
 	"testing"
 )
 
-// wantAllows are the module's only allow rules: task zg4's measured
-// permissions, which el9 showed container_t lacks, and the Java attach to
-// the app containers' JVMs (container_t), which task 7h4's audit2allow
-// review of a permissive el9 run found - nothing else.
+// wantAllows are the module's only allow rules: the tracer's seven
+// capabilities (#13's set, granted here so the type does not depend on
+// virt_sandbox_use_all_caps, task gh4), task zg4's measured permissions,
+// which el9 showed container_t lacks, and the Java attach to the app
+// containers' JVMs (container_t), which task 7h4's audit2allow review of
+// a permissive el9 run found - nothing else.
 var wantAllows = []string{
+	"allow iormesh_container_t self:capability { dac_override kill sys_ptrace sys_resource };",
+	"allow iormesh_container_t self:capability2 { bpf perfmon checkpoint_restore };",
 	"allow iormesh_container_t self:bpf { map_create map_read map_write prog_load prog_run };",
 	"allow iormesh_container_t self:perf_event { open cpu kernel read write tracepoint };",
 	"allow iormesh_container_t tracefs_t:dir { search read open getattr };",
@@ -56,7 +60,7 @@ func policy(t *testing.T) []string {
 	return lines
 }
 
-// TestPolicyRules: exactly the nine allow rules and the three attribute
+// TestPolicyRules: exactly the eleven allow rules and the three attribute
 // lines, the module named iormesh, the type from container-selinux's
 // template with container_file_t.
 func TestPolicyRules(t *testing.T) {
