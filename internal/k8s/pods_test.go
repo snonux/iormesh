@@ -83,12 +83,17 @@ func newTestLister(t *testing.T) *Lister {
 
 // TestSelectArgvAndFilter: Select passes the selector as one
 // --selector= element with the scope's context and namespace, keeps only
-// running pods, sorts them, and says which carry the tracer container.
+// running pods that are not terminating, sorts them, and says which carry
+// the tracer container.
 func TestSelectArgvAndFilter(t *testing.T) {
 	f := newFake(t)
+	// web-e is terminating, yet Running until its containers stop: the
+	// old pod of a rollout, which deploy must not pick (task yb4).
+	terminating := podItem("web-e", testUID(5), "Running", false)
+	terminating["metadata"].(map[string]any)["deletionTimestamp"] = "2026-11-21T08:40:00Z"
 	f.pod(t, podList(t, podItem("web-b", testUID(2), "Running", false),
 		podItem("web-a", testUID(1), "Running", true), podItem("web-c", testUID(3), "Pending", true),
-		podItem("web-d", testUID(4), "Succeeded", true)))
+		podItem("web-d", testUID(4), "Succeeded", true), terminating))
 	pods, err := newTestLister(t).Select(context.Background(), "app=web,tier!=db")
 	if err != nil {
 		t.Fatal(err)

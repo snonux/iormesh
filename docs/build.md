@@ -205,7 +205,7 @@ fails up front with the fix named.
   (binfmt_misc `qemu-aarch64`); without it the run is skipped
   with a notice. Module downloads and the Go build cache live in
   the `iormesh-gomod` and `iormesh-gocache` volumes.
-- **The tracer image** (M7, task vb4; not built or run yet —
+- **The tracer image** (M7, task vb4; built and run on kind by
   task yb4): `scripts/container/tracer-image.Containerfile`
   packs a release tracer from `dist/` and `iormesh-agent.jar`
   into `FROM scratch` — no shell, no libc — with the binary at
@@ -223,15 +223,27 @@ fails up front with the fix named.
   `/etc/machine-id` and needs none: in a pod `iormesh run` takes
   its host id and FQDN from the downward-API env both container
   specs set (task 7f4, docs/implementation.md M7 step 6); a run
-  without that env in this image fails. Running it on kind is
-  task yb4's. The
+  without that env in this image fails. On kind (task yb4) it
+  ran as debug container and sidecar with #13's set and
+  `RuntimeDefault` seccomp (containerd 2.2.0); the static
+  tracer for it can also come from `mage releaseTracer` on a
+  host with the static archives (Fedora 44 had them). No image
+  is published yet, so `k8s.DefaultImage` stays empty and
+  `deploy/` keeps the placeholder: a deployment passes its
+  pushed digest with `-image` or the registry's `k8s.image`, as
+  `mage k8sAcceptance` does for its local registry
+  ([testing.md](testing.md#m7-acceptance-on-kind-task-yb4)). The
   capability set it runs with is provisional (PLAN.md decision
   #13, [security.md](security.md) "Kubernetes").
 - **kubectl on the controller** (k8s mode only, task wb4): 1.30
   or later. The debug container's security context and volume
-  mounts go in through `kubectl debug --custom`, which kubectl
-  1.27–1.29 only accepted with `KUBECTL_DEBUG_CUSTOM_PROFILE=true`
-  set (to confirm on kind, task yb4).
+  mounts go in through `kubectl debug --custom`. Checked on kind
+  (task yb4): 1.31.12 and 1.35.9 take it by default; 1.30.14
+  only with `KUBECTL_DEBUG_CUSTOM_PROFILE=true`, which the
+  controller sets on every kubectl it runs; 1.29.15 has no
+  `--custom` at all. With `--profile=general` the stored
+  container has exactly the `--custom` file's capabilities on
+  every version that takes the flag.
 
 ## Signing
 

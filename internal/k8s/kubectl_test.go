@@ -145,6 +145,10 @@ func TestDebugArgv(t *testing.T) {
 		t.Errorf("debug argv\n got %q\nwant %q", dbg, want)
 	}
 	assertCustom(t, f.custom(t), true)
+	// kubectl 1.30 knows --custom only behind this gate (task yb4).
+	if g := f.gate(t); g != "true" {
+		t.Errorf("debug ran with KUBECTL_DEBUG_CUSTOM_PROFILE=%q, want true", g)
+	}
 }
 
 // TestDebugPrivileged: the fallback profile is sysadmin, and its custom

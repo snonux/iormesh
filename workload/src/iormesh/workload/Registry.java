@@ -7,6 +7,7 @@ import iormesh.workload.scenarios.FileBasic;
 import iormesh.workload.scenarios.FileLifecycle;
 import iormesh.workload.scenarios.FileLinks;
 import iormesh.workload.scenarios.HttpScenario;
+import iormesh.workload.scenarios.Ingress;
 import iormesh.workload.scenarios.LiveAttach;
 import iormesh.workload.scenarios.MethodFlow;
 import iormesh.workload.scenarios.Microservices;
@@ -52,6 +53,7 @@ final class Registry {
         r.add(HttpScenario.plain());
         r.add(HttpScenario.redaction());
         r.add(HttpScenario.tls());
+        r.add(new Ingress());
         r.add(new LiveAttach());
         r.add(new MethodFlow());
         r.add(new Microservices());

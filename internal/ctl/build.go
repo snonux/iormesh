@@ -99,13 +99,14 @@ const (
 var errBadSegments = errors.New("segments skipped")
 
 // buildFlags are the paths build reads and writes. routes is the static
-// route map (-routes, registered by build and refresh only: routes.go);
-// "" is routes.yaml beside the registry. The discovery snapshot is read
-// beside db.
+// route map and registry the registry file (-routes and -registry,
+// registered by build and refresh only: routes.go); routes "" is
+// routes.yaml beside the registry, registry "" the default one. The
+// discovery snapshot is read beside db.
 type buildFlags struct {
 	projects          projectList
 	store, db, builds string
-	routes            string
+	routes, registry  string
 }
 
 // addBuildFlags registers build's flags on fs into f (refresh shares

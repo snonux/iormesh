@@ -1,0 +1,147 @@
+package kind
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+)
+
+// pattern is every pod's tracer target: the workload's JVMs, exec'd by
+// the test once the tracer is attached.
+const pattern = "*workload.jar*"
+
+// debugFlags are the debug tracers' extra flags. -disk-limit=0: the
+// tracer's percent limit reads statfs of the emptyDir, which is the
+// node's partition — a dev host's disk may be fuller than 90 %, and the
+// pod's own bound is the emptyDir's byte cap, which the sidecar passes
+// as -disk-max-bytes (and a debug deploy does not yet: task yb4's
+// follow-up).
+var debugFlags = []string{"-disk-limit=0", "-disk-max-bytes=1536MiB"}
+
+// agentFlags add the Java agent to the gateway's tracer: live attach at
+// start into the gated JVM, its spool in the emptyDir the app container
+// mounts too (the workaround for the unbuilt #14 staging, testdata).
+var agentFlags = []string{"-spool=/opt/iormesh/data/spool", "-agent=/opt/iormesh/lib/iormesh-agent.jar"}
+
+// writeRegistry writes the iormeshctl registry for the test's pods (0600
+// in a 0700 directory, the registry's rules) and returns its path.
+func (c *cluster) writeRegistry(t *testing.T, full bool) string {
+	t.Helper()
+	var b strings.Builder
+	fmt.Fprintf(&b, "k8s:\n  image: %s\n  clusters:\n    - name: kind\n      context: %s\n      namespace: %s\npods:\n",
+		c.cfg.tracer, c.cfg.context, c.ns)
+	entry := func(app, mode string, flags []string) {
+		fmt.Fprintf(&b, "  - cluster: kind\n    selector: app=%s\n    container: app\n", app)
+		if mode != "" {
+			fmt.Fprintf(&b, "    mode: %s\n", mode)
+		}
+		fmt.Fprintf(&b, "    projects:\n      - target: {pattern: %q}\n", pattern)
+		if len(flags) > 0 {
+			fmt.Fprintf(&b, "        flags: [%s]\n", quoteAll(flags))
+		}
+	}
+	entry("server", "", debugFlags)
+	entry("client", "", debugFlags)
+	if full {
+		entry("hairpin", "", debugFlags)
+		entry("gateway", "", slices.Concat(debugFlags, agentFlags))
+		entry("inventory", "sidecar", nil)
+	}
+	path := filepath.Join(c.dir, "servers.yaml")
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// quoteAll renders flags as a YAML flow list's items.
+func quoteAll(flags []string) string {
+	q := make([]string, len(flags))
+	for i, f := range flags {
+		q[i] = fmt.Sprintf("%q", f)
+	}
+	return strings.Join(q, ", ")
+}
+
+// ref is a pod entry's reference on iormeshctl's command line.
+func (c *cluster) ref(app string) string { return "kind/" + c.ns + "/app=" + app }
+
+// deploy runs `iormeshctl deploy` for the apps' debug containers and
+// waits until each tracer says it is attached: deploy returns once
+// kubectl created the ephemeral container, before the tracer loaded its
+// probes (task yb4's follow-up), and a workload started earlier would go
+// untraced.
+func (c *cluster) deploy(t *testing.T, reg string, apps ...string) map[string]podJSON {
+	t.Helper()
+	refs := make([]string, len(apps))
+	for i, a := range apps {
+		refs[i] = c.ref(a)
+	}
+	c.ctl(t, nil, append([]string{"deploy", "-registry", reg}, refs...)...)
+	pods := map[string]podJSON{}
+	for _, a := range apps {
+		p := c.pod(t, a)
+		c.waitLog(t, p.Metadata.Name, "iormesh: attached", time.Minute)
+		pods[a] = c.pod(t, a)
+	}
+	return pods
+}
+
+// assertTracerSpec checks a debug container as the API server stored it
+// and the kubelet ran it: exactly #13's capabilities after kubectl's
+// profile and the --custom spec merged, nothing privileged, RuntimeDefault
+// seccomp, uid 0, the downward-API env and both mounts, the tracer run by
+// name (PATH), and the pinned digest in the status imageID (a registry
+// digest, not a kind-loaded config digest).
+func (c *cluster) assertTracerSpec(t *testing.T, p podJSON) {
+	t.Helper()
+	i := slices.IndexFunc(p.Spec.Ephemeral, func(s containerSpec) bool { return s.Name == "iormesh" })
+	if i < 0 {
+		t.Fatalf("pod %s: no iormesh ephemeral container", p.Metadata.Name)
+	}
+	s := p.Spec.Ephemeral[i]
+	sc := s.SecurityContext
+	want := []string{"BPF", "PERFMON", "SYS_RESOURCE", "SYS_PTRACE", "DAC_OVERRIDE", "KILL", "CHECKPOINT_RESTORE"}
+	if !slices.Equal(sc.Capabilities.Add, want) || !slices.Equal(sc.Capabilities.Drop, []string{"ALL"}) {
+		t.Errorf("pod %s: capabilities %+v", p.Metadata.Name, sc.Capabilities)
+	}
+	if sc.Privileged != nil && *sc.Privileged || sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation ||
+		sc.RunAsUser == nil || *sc.RunAsUser != 0 || sc.Seccomp.Type != "RuntimeDefault" {
+		t.Errorf("pod %s: security context %+v", p.Metadata.Name, sc)
+	}
+	var env, mounts []string
+	for _, e := range s.Env {
+		if e.ValueFrom != nil {
+			env = append(env, e.Name+"="+e.ValueFrom.FieldRef.FieldPath)
+		}
+	}
+	for _, m := range s.Mounts {
+		mounts = append(mounts, m.Name+"@"+m.MountPath)
+	}
+	if !slices.Equal(env, []string{"POD_NAME=metadata.name", "POD_NAMESPACE=metadata.namespace", "POD_UID=metadata.uid"}) ||
+		!slices.Equal(mounts, []string{"tracefs@/sys/kernel/tracing", "iormesh-traces@/opt/iormesh/data"}) ||
+		len(s.Command) == 0 || s.Command[0] != "iormesh" {
+		t.Errorf("pod %s: env %v, mounts %v, command %v", p.Metadata.Name, env, mounts, s.Command)
+	}
+	c.assertImageID(t, p, p.Status.Ephemeral)
+}
+
+// assertImageID: the tracer container's status imageID names the
+// registry digest the image was pinned by.
+func (c *cluster) assertImageID(t *testing.T, p podJSON, statuses []containerStatus) {
+	t.Helper()
+	digest := c.cfg.tracer[strings.LastIndex(c.cfg.tracer, "@")+1:]
+	for _, s := range statuses {
+		if s.Name == "iormesh" {
+			if !strings.HasSuffix(s.ImageID, "@"+digest) {
+				t.Errorf("pod %s: tracer imageID %s, want …@%s", p.Metadata.Name, s.ImageID, digest)
+			}
+			return
+		}
+	}
+	t.Errorf("pod %s: no tracer container status", p.Metadata.Name)
+}

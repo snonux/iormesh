@@ -147,6 +147,36 @@ func TestRoutesSnapshotContext(t *testing.T) {
 	}
 }
 
+// TestRoutesRegistryFlag: discover and build both given -registry (task
+// yb4: on kind, build checked the snapshot against the default registry
+// and refused it). The default registry names another context, so only a
+// build reading -registry passes; the static map is read beside that
+// file too. Without the flag the build still refuses.
+func TestRoutesRegistryFlag(t *testing.T) {
+	f, _ := discoverFixture(t)
+	reg, _ := f.e.registry()
+	other := filepath.Join(t.TempDir(), "servers.yaml")
+	if err := os.WriteFile(other, []byte(discoverRegistry), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(reg, []byte(strings.Replace(discoverRegistry, "kind-test", "kind-other", 1)),
+		0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.mustRun(t, "routes", "discover", "-registry", other)
+	static := "routes:\n  - {fqdn: shop.example.org, ingress: traefik, service: prod/backend}\n"
+	if err := os.WriteFile(filepath.Join(filepath.Dir(other), "routes.yaml"), []byte(static), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := f.mustRun(t, "build", "-registry", other)
+	if !strings.Contains(got, "-> shop.example.org -> traefik -> prod/backend") {
+		t.Errorf("build -registry did not read the map beside it:\n%s", got)
+	}
+	if code := f.run("build"); code != exitError || !strings.Contains(f.stderr.String(), "no registered cluster") {
+		t.Errorf("build without -registry: exit %d: %s", code, f.stderr)
+	}
+}
+
 // TestRoutesDiscoverRefusals: no subcommand, an unregistered cluster, a
 // bad namespace and a failing kubectl all fail without a snapshot.
 func TestRoutesDiscoverRefusals(t *testing.T) {

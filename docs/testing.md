@@ -1037,8 +1037,8 @@ kubectl would get. They run with the package's unit tests
   (internal/cli) runs `iormesh ready` and `-remove` around
   `Unpack`.
 
-What only kind can show is task yb4's (docs/implementation.md M7
-step 9).
+What only kind can show is checked by task yb4's run
+([below](#m7-acceptance-on-kind-task-yb4)).
 
 ## K8s controller wiring (task af4)
 
@@ -1147,8 +1147,11 @@ Unit tests in `mage test`, no cluster and no container engine
   missing its systemd parents, under the wrong parent or a
   foreign root is an error (each case fails with the parent
   check disabled); the in-pod `/../<container>` form yields the
-  container id. The strings are built to the formats, not
-  captured from kind: the kind capture is task yb4's.
+  container id. The strings are built to the formats;
+  `TestParseProcCgroupKindCaptures` adds the files captured on
+  kind (task yb4): from the host, from the node, the tracer's
+  own, and the tracer seen from the app container's private
+  cgroup namespace.
 - `internal/segment/emptydir_test.go`: the trace dir one level
   inside a 0777 setgid directory (an emptyDir root) is accepted
   and created 0755, while the volume root as the trace dir is
@@ -1196,12 +1199,13 @@ Unit tests in `mage test`, no cluster and no container engine
   skipped, and either one-tracer-per-pod refusal in
   `checkContainers` removed.
 
-Not checked here (task yb4, on kind): that the image builds and
-runs, two pods on one node traced side by side, that
-`kubectl patch` and `kubectl debug --custom` accept the files
-and carry the capabilities, mounts and env, that the trace dir
-stays 0755 under `fsGroup`, and the oldest runtime whose
-`RuntimeDefault` lets `bpf` through.
+Checked on kind by task yb4
+([below](#m7-acceptance-on-kind-task-yb4)): the image builds and
+runs, pods on one node traced side by side, `kubectl patch` and
+`kubectl debug --custom` carry the capabilities, mounts and env,
+and the trace dir stays 0755 under `fsGroup`. Not checked: the
+oldest runtime whose `RuntimeDefault` lets `bpf` through (only
+containerd 2.2.0 was run).
 
 ## Route map and ClusterIP join (task xb4)
 
@@ -1296,12 +1300,132 @@ docs/implementation.md M7 steps 11 and 12):
   `internal/tui` and `internal/site`
   ([visualization.md](visualization.md), "Routed edges").
 
-Not checked here (task yb4, on kind): a ClusterIP connection
-between two traced pods fusing in a real cluster (iptables and,
-where offered, nftables mode), the hairpin case, the M0 ingress
-scenario through a real Traefik, and `routes discover` against a
-real API server (RBAC for the read-only gets, Traefik's CRDs
-under either group).
+Checked on kind by task yb4
+([below](#m7-acceptance-on-kind-task-yb4)): a ClusterIP connection
+between two traced pods fusing (iptables and nftables), the
+hairpin, the M0 ingress scenario through a real Traefik, and
+`routes discover` against a real API server as a list-only
+identity (Traefik's CRDs under `traefik.io`; the
+`traefik.containo.us` group was not installed, so only its
+absence was exercised).
+
+## M7 acceptance on kind (task yb4)
+
+PLAN.md M7's acceptance runs on one local kind cluster:
+`mage k8sAcceptance` (`magefile_k8sacceptance.go`,
+`magefile_k8simages.go`) and the tests in `integrationtests/kind`.
+The target says SKIP and succeeds when `kind`, `kubectl`, `helm`
+or a usable `sudo -n docker` is missing; starting and stopping
+the Docker daemon is the operator's. Every docker and kind call
+goes through `sudo -n`. It:
+
+1. builds the controller, the static release tracer (`mage
+   releaseTracer`, which ran on the Fedora host directly), the
+   agent jar and the workload jar;
+2. refuses to go on below 20 GiB free, or on btrfs with metadata
+   within 0.5 GiB of its allocation and under 2 GiB unallocated
+   (before every create, build and push; it never balances);
+3. starts a local registry (`registry:2`, pinned) on
+   `localhost:5001`, creates the cluster `iormesh-m7` with its
+   kubeconfig at the repository root (`.kind-kubeconfig`, owned by
+   the operator, ignored by git) and wires the node's containerd
+   to the registry;
+4. builds and pushes the tracer image
+   (`scripts/container/tracer-image.Containerfile`) and a workload
+   image (`scripts/container/kind-workload.Containerfile`: a JRE,
+   `workload.jar`, and, test-only, the agent jar), so each pod's
+   `imageID` carries the registry digest — a `kind load`ed image
+   reports a bare config digest, which deploy refuses;
+5. installs Traefik (chart 42.4.1, Traefik 3.7, a ClusterIP
+   Service: kind has no load balancer);
+6. runs `TestKindAcceptance` with kube-proxy in iptables mode,
+   switches kube-proxy to nftables and runs `TestKindClusterIP`;
+7. deletes the cluster and the registry (`IORMESH_KIND_KEEP=1`
+   keeps them).
+
+The tests read the cluster from `IORMESH_KIND_*` (kubeconfig,
+context, the two images, the iormeshctl binary, the node
+container for `crictl`) and skip without them. Each makes a
+fresh namespace, applies `testdata/workloads.yaml`, and applies
+deploy/'s patches as an operator would — rendered from
+`k8s.Manifests` for the test's image, the sidecar's target set
+to the workload's pattern. Every app container sleeps; the test
+runs the scenarios with `kubectl exec` once the tracers are
+attached, through iormeshctl's real k8s path: a registry with
+`k8s:` and `pods:` entries, `deploy`, `collect`, `routes
+discover`, `build -registry`.
+
+| Check | What it asserts |
+|---|---|
+| tracer spec | each debug container as stored: exactly #13's seven capabilities with `drop: [ALL]` after `--profile=general` and `--custom` merged, nothing privileged, `RuntimeDefault` seccomp, uid 0, the three downward-API env vars, both mounts, `command` starting with `iormesh` (the image's `PATH`); the tracer's status `imageID` names the pushed digest (the sidecar's too) |
+| `clusterip` | tcp-nat's client dials the server Service's ClusterIP (880, DNAT to the pod's 80): the build prints the routed edge `→ Service → deployment → pod (fused, 1 connections)`; each pod's trace matches `expect-client.json` / `expect-server.json` and the merge `expect.json`, the rig's addresses replaced by the client pod's, the ClusterIP and the server pod's (no SNAT between pods); a golden with the client dialing the pod fails |
+| `hairpin` | tcp-nat's two roles in one pod, the client dialing the pod's own Service: one fused connection, the server end seeing the node's masquerade address (10.244.0.1), the Service and pod named |
+| `identity` | every pod is its own store directory and host, `pod-<uid>`, with the FQDN `<name>.<ns>.<uid[:8]>`; all share one `boot_id` |
+| `ingress` | the gateway (debug container with the agent) asks for `shop.iormesh.test` through Traefik (hostAliases to Traefik's ClusterIP); the backend runs under a sidecar. The build prints one routed edge `→ shop.iormesh.test → ingress/<ns>/shop → <ns>/inventory → <ns>/deployment/inventory (route, 1 connections)`, no route flag; `model.json` and `graph.svg` carry it; the discovered route equals the scenario's declared `routes.yaml`, and the snapshot holds the IngressRoute's host too (`traefik.io`); the merged trace matches `workload/scenarios/ingress/expect.json` (both ends unresolved: Traefik splits the call; the gateway's `dns` and `http` events carry the FQDN) |
+| `rbac` | `routes discover` as a ServiceAccount allowed only `list` on services, pods, endpointslices, replicasets, ingresses and ingressroutes (both Traefik groups), not secrets: same two routes |
+| `sigterm` | deleting a pod ends its debug tracer on the kubelet's SIGTERM: exit 0, about 0.6 s after the delete, inside the 5 s grace |
+
+`TestKindClusterIP` is the `clusterip` row alone, in a namespace
+of its own, under nftables.
+
+Test-only workaround: the Java agent cannot reach a JVM in
+another container yet — M7 step 3 (#14's staging inside the
+JVM's root) is not built, and `-spool` in the scratch image fails
+(`mkdir /tmp/iormesh-spool: no such file or directory`). The
+gateway's app container mounts the trace emptyDir at the
+tracer's path and the workload image carries the agent jar at
+the tracer's path, so the spool and jar paths mean the same file
+on both sides (task cf4 builds the real staging). The gateway
+starts behind the workload's startup gate, so the debug tracer
+finds the JVM at start and live-loads the agent before the
+bracket.
+
+Run on 2026-11-21 (kind 0.31.0, Kubernetes 1.35.0, containerd
+2.2.0, Docker 29.9.2, Fedora kernel 7.2.15, one node):
+`TestKindAcceptance` passed every subtest on the cluster built by
+hand (kube-proxy then in nftables mode); the `mage
+k8sAcceptance` run from scratch is recorded in PLAN.md M7.
+
+Checked by hand on the same cluster and recorded here, not
+automated:
+
+- **kubectl floor**: `kubectl debug --custom` is unknown to
+  1.29.15, and to 1.30.14 unless `KUBECTL_DEBUG_CUSTOM_PROFILE=true`
+  (the controller now sets it on every kubectl); 1.31.12 and
+  1.35.9 take it by default. Every version that took it stored
+  exactly the custom capabilities with `--profile=general`.
+- **Readiness**: a tracer failing at once, as a regular container
+  and as a native sidecar (`initContainers`, `restartPolicy:
+  Always`), made the pod NotReady and its endpoint not ready
+  either way; a healthy sidecar kept both ready
+  (docs/implementation.md M7 step 8).
+- **`-linger`**: a session ended by `-duration` left the debug
+  container running and collectable (its last segment fetched),
+  and the pod's deletion ended it with exit 0.
+- **`fsGroup`**: under `fsGroup: 2000` the emptyDir root was
+  `drwxrwsrwx root:2000` and `traces/` stayed `drwxr-xr-x` 20
+  minutes on.
+- **Ingress Service**: discovering Traefik's namespace too
+  without `-ingress-service` (kind's ClusterIP Service gives the
+  Ingress no status address) named the gateway's edge as the
+  Traefik Service with `route_contradicted`; with
+  `-ingress-service traefik/traefik` it is the route's edge.
+- **RBAC**: a forbidden `ingressroutes` list fails discover whole
+  and writes no snapshot.
+
+Found and fixed: `build` had no `-registry`, so the snapshot's
+context was checked against the default registry and refused
+(`build` takes it now, `refresh` shares its own;
+`TestRoutesRegistryFlag`); a selector matched a terminating pod
+right after a rollout and deploy failed on it (`Select` skips
+`deletionTimestamp`; `TestSelectArgvAndFilter`); kubectl 1.30's
+gate (`TestDebugArgv`). Follow-ups: cf4 (agent staging in the
+JVM's root), df4 (debug deploy without a byte cap: the 90 %
+`-disk-limit` stops every debug tracer on a node fuller than
+that, so the test passes `-disk-limit=0 -disk-max-bytes=1536MiB`),
+ef4 (deploy returns before the tracer is attached; the test waits
+for its `attached` log line), ff4 (a route edge never names a
+sole endpoint's pod).
 
 ## Performance baselines
 

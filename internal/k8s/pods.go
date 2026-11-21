@@ -39,6 +39,8 @@ type podInfo struct {
 	Metadata struct {
 		Name string `json:"name"`
 		UID  string `json:"uid"`
+		// DeletionTimestamp is set once the pod is being deleted.
+		DeletionTimestamp string `json:"deletionTimestamp"`
 	} `json:"metadata"`
 	Spec struct {
 		HostUsers             *bool `json:"hostUsers"`
@@ -186,8 +188,9 @@ func (l *Lister) Get(ctx context.Context, name string) (PodState, error) {
 	return l.state(p)
 }
 
-// Select is every running pod selector matches, sorted by name. None is
-// ErrNoPod, more than MaxSelected ErrTooManyPods (PLAN.md #18).
+// Select is every running, not terminating pod selector matches, sorted
+// by name. None is ErrNoPod, more than MaxSelected ErrTooManyPods
+// (PLAN.md #18).
 func (l *Lister) Select(ctx context.Context, selector string) ([]PodState, error) {
 	if !k8sname.Selector(selector) {
 		return nil, fmt.Errorf("%w: selector %q (k=v[,k!=v...], one = at least)", ErrName, selector)
@@ -200,7 +203,13 @@ func (l *Lister) Select(ctx context.Context, selector string) ([]PodState, error
 	}
 	var pods []PodState
 	for _, p := range list.Items {
-		if p.Status.Phase != "Running" {
+		// A terminating pod (deletionTimestamp set) still reports phase
+		// Running until its containers stop: right after a rollout — the
+		// prepare patch's own — a selector matched the old, unprepared
+		// pod too, and deploy failed on it (kind, task yb4). Its tracer,
+		// if any, ends on the kubelet's SIGTERM within the grace period,
+		// so neither deploy nor collect has anything to do there.
+		if p.Status.Phase != "Running" || p.Metadata.DeletionTimestamp != "" {
 			continue
 		}
 		st, err := l.state(p)

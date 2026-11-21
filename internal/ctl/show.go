@@ -27,12 +27,13 @@ func refreshCommand(args []string, e env) error {
 	var f buildFlags
 	addBuildFlags(fs, &f)
 	addRoutesFlag(fs, &f)
-	regPath := fs.String("registry", "", "registry file (default ~/.config/iormesh/servers.yaml)")
 	kf := addK8sFlags(fs, false)
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
-	r, err := loadRegistry(*regPath, e)
+	// -registry (addRoutesFlag) serves both halves: the collect's targets
+	// and the build's route map and snapshot check.
+	r, err := loadRegistry(f.registry, e)
 	if err != nil {
 		return err
 	}

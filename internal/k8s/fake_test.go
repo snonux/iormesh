@@ -26,7 +26,8 @@ for a in "$@"; do
     get|exec|debug) [ -z "$verb" ] && verb="$a" ;;
     ready) ready=1 ;;
     -remove) remove=1 ;;
-    --custom=*) cp "${a#--custom=}" "$FAKE_KUBECTL_LOG.custom" ;;
+    --custom=*) cp "${a#--custom=}" "$FAKE_KUBECTL_LOG.custom"
+                printf '%s' "$KUBECTL_DEBUG_CUSTOM_PROFILE" > "$FAKE_KUBECTL_LOG.gate" ;;
   esac
 done
 case "$verb" in
@@ -114,6 +115,16 @@ func (f *fake) custom(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return strings.TrimSpace(string(b))
+}
+
+// gate returns $KUBECTL_DEBUG_CUSTOM_PROFILE as the last debug call saw it.
+func (f *fake) gate(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile(f.log + ".gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
 
 // testImage is a digest-pinned image (a placeholder repository).

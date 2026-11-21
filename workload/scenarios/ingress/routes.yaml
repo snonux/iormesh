@@ -1,0 +1,12 @@
+# The ingress scenario's route map (PLAN.md M0 "Ingress scenario", M7
+# "Ingress route mapping"), as a static routes.yaml beside the registry
+# would declare it for the kind acceptance's namespace (task yb4,
+# integrationtests/kind). Discovery (`iormeshctl routes discover
+# -ingress-service traefik/traefik`) finds the same route from the
+# Ingress object; the acceptance checks the two agree.
+routes:
+  - fqdn: shop.iormesh.test
+    ingress: ingress/iormesh-m7/shop
+    service: iormesh-m7/inventory
+    workload: iormesh-m7/deployment/inventory
+    ingress_service: traefik/traefik

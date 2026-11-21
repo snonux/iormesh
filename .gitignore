@@ -36,3 +36,7 @@ internal/c/generated_tracepoints.c.tmp-*
 # The LLM introspection's recorded store (mage evalTrace); its results
 # under eval/results/ are kept.
 /eval/store/
+
+# The kind acceptance cluster's kubeconfig (mage k8sAcceptance, task yb4):
+# credentials, never committed.
+/.kind-kubeconfig

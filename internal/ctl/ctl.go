@@ -5,7 +5,8 @@
 //	iormeshctl collect [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [K8S] [HOST|POD...]
 //	iormeshctl deploy [-project NAME] [-registry FILE] [-dist DIR] [-key FILE] [-restart] [K8S]
 //	                  [-image IMG] HOST|POD...
-//	iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR]
+//	iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-routes FILE]
+//	                 [-registry FILE]
 //	iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR] [K8S]
 //	                   [HOST|POD...]
 //	iormeshctl show [summary|services|edges|health] [-project NAME]... [-json] [-unresolved]
@@ -210,6 +211,7 @@ func usage(w io.Writer) {
   iormeshctl deploy [-project NAME] [-registry FILE] [-dist DIR] [-key FILE] [-restart]
                     [K8S] [-image IMG] HOST|POD...
   iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-routes FILE]
+                   [-registry FILE]
   iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR]
                      [-routes FILE] [K8S] [HOST|POD...]
   iormeshctl show [summary|services|edges|health] [-project NAME]... [-builds DIR] [-json] [-unresolved]

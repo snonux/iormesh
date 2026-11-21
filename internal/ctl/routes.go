@@ -32,16 +32,24 @@ import (
 // and no snapshot is no routed edges, never an error; a file that fails
 // its checks fails the build.
 
-// addRoutesFlag registers -routes on build's and refresh's flag sets.
+// addRoutesFlag registers -routes and -registry on build's and refresh's
+// flag sets. The registry decides where routes.yaml is by default and
+// which contexts a discovery snapshot may name, so a build reads the
+// registry that discover and collect were given (task yb4: on kind, a
+// build after `routes discover -registry FILE` refused the snapshot,
+// having checked it against the default registry).
 func addRoutesFlag(fs *flag.FlagSet, f *buildFlags) {
-	fs.StringVar(&f.routes, "routes", "", "static route map (default ~/.config/iormesh/routes.yaml)")
+	fs.StringVar(&f.routes, "routes", "", "static route map (default routes.yaml beside the registry)")
+	fs.StringVar(&f.registry, "registry", "", "registry file (default ~/.config/iormesh/servers.yaml)")
 }
 
 // loadRoutes reads the static route map and the discovery snapshot
 // beside db and compiles them; nil when there is neither.
 func loadRoutes(e env, f buildFlags, db string) (*routemap.Table, error) {
 	path := f.routes
-	if path == "" && e.registry != nil {
+	if path == "" && f.registry != "" {
+		path = routemap.DefaultPath(f.registry)
+	} else if path == "" && e.registry != nil {
 		reg, err := e.registry()
 		if err != nil {
 			return nil, err
@@ -64,7 +72,7 @@ func loadRoutes(e env, f buildFlags, db string) (*routemap.Table, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := checkSnapshotContext(e, snap); err != nil {
+	if err := checkSnapshotContext(e, f.registry, snap); err != nil {
 		return nil, err
 	}
 	if static == nil && snap == nil {
@@ -81,12 +89,12 @@ func loadRoutes(e env, f buildFlags, db string) (*routemap.Table, error) {
 // traces would name its ClusterIPs on another cluster's connections. A
 // registry that lists several clusters still shares one snapshot (the
 // last discovered); the map applies to every flow of the build (PLAN.md
-// #15).
-func checkSnapshotContext(e env, snap *routemap.Snapshot) error {
+// #15). registry is the build's -registry, "" for the default.
+func checkSnapshotContext(e env, registry string, snap *routemap.Snapshot) error {
 	if snap == nil {
 		return nil
 	}
-	r, err := loadRegistry("", e)
+	r, err := loadRegistry(registry, e)
 	if err != nil {
 		return err
 	}

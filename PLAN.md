@@ -427,6 +427,14 @@ Scenario notes:
 - **Ingress scenario** (M7): gateway → Traefik → backend
   service in kind (the microservices scenario's front door),
   with the route map declared alongside the expected graph.
+  Built by task yb4 as `ingress` (`Ingress.java`): `--role
+  backend --bind A [--port N]` serves the gateway's stock query
+  (`GET /inventory/stock/widget`) once; `--role gateway --fqdn
+  NAME` asks for it by name — the one scenario that resolves a
+  name in its bracket, since the route map matches the request's
+  host. `workload/scenarios/ingress` holds the merged golden
+  (both ends unresolved, TEST-NET addresses the kind test
+  replaces) and the declared `routes.yaml`.
 - **Load scenarios** (S3): `syscall-burst` exists to be
   measured, not golden-checked — its event count scales with
   `--ops` and its threads interleave as the scheduler decides,
@@ -1609,7 +1617,7 @@ Later phase — plain Linux servers (M4) come first.
   limits are the caps.)
   Status (2026-11-20, task 4f4): the namespace-aware targeting is
   built (docs/implementation.md M7 step 1) and checked in a PID
-  namespace on the host, not yet on kind. Every pid the tracer
+  namespace on the host, and on kind since (task yb4). Every pid the tracer
   keys by or reports — `pid`, `tid`, `target_pid`, the agent's
   ring names — is the one its own namespace shows, so on the
   host nothing changes; records carry no host tgid (an in-pod
@@ -1627,13 +1635,13 @@ Later phase — plain Linux servers (M4) come first.
   pending (decision #18).
   Status (2026-11-21, task wb4): the kubectl transport is built
   (`internal/k8s`, docs/implementation.md M7 step 9) and tested
-  against a fake kubectl, not yet on kind — `exec`, the
+  against a fake kubectl, since run on kind (task yb4) — `exec`, the
   exec-streamed tar fetch through a new `iormesh ready`
   subcommand, and `debug --target` into prepared pods only;
   `Push` is refused (the image carries the tracer, and #12 rules
   out `kubectl cp`).
   Status (2026-11-21, task af4): wired into iormeshctl and tested
-  against a fake kubectl, not yet on kind — the registry's `k8s:`
+  against a fake kubectl, since run on kind (task yb4) — the registry's `k8s:`
   and `pods:` sections, `-context`/`-namespace`/`-image`, and
   deploy, collect, refresh and rm taking pod entries (named
   `<cluster>/<namespace>/<pod or selector>`) beside hosts, with
@@ -1663,8 +1671,8 @@ Later phase — plain Linux servers (M4) come first.
   To confirm with the owner: the pod as the host node in k8s
   mode, the 8-hex FQDN suffix, the node's machine-id should a
   hostPID mode ever come, and service rows of dead pods.
-  Status (2026-11-21, task vb4): built and unit-tested, not yet
-  run on kind (task yb4) — the tracer image
+  Status (2026-11-21, task vb4): built and unit-tested, and run
+  on kind by task yb4 (Acceptance, below) — the tracer image
   (`scripts/container/tracer-image.Containerfile`: the static
   tracer and agent jar on `scratch`), the prepare and sidecar
   patches and the `kubectl debug --custom` profile, generated
@@ -1679,7 +1687,8 @@ Later phase — plain Linux servers (M4) come first.
   docs/implementation.md M7 step 6). Pod identity status
   (2026-11-21, task 7f4): built and unit-tested, including two
   pods with one pod-local pid merging into two process nodes;
-  two pods on one kind node remain (task yb4).
+  on kind (task yb4) five pods on one node, five hosts, one
+  `boot_id`.
 - Java agent live-attach through the shared process namespace
   (`kubectl debug --target`, or `shareProcessNamespace: true`
   for a sidecar; attach socket reached via `/proc/<pid>/root`),
@@ -1723,12 +1732,12 @@ Later phase — plain Linux servers (M4) come first.
   Service and its workload, to a pod only when the Service
   lists exactly one endpoint; an
   address inside a declared Service CIDR no Service holds
-  flagged `unknown_service`. To confirm on kind (task yb4): that
-  a ClusterIP connection between two traced pods fuses in the
-  build (iptables mode, kind's default, and nftables if the kind
-  version offers it), and the hairpin case — a pod calling its
-  own Service, both ends in one pod, the server end seeing the
-  node's masquerade source.
+  flagged `unknown_service`. Confirmed on kind (task yb4): a
+  ClusterIP connection between two traced pods fuses in the
+  build under kube-proxy's iptables and nftables modes, and so
+  does the hairpin — a pod calling its own Service, both ends in
+  one pod, the server end seeing the node's masquerade source
+  (10.244.0.1).
 - **Ingress route mapping**: an FQDN often terminates on an
   ingress (Traefik) behind a managed LB — no tracer can attach
   there, and the L7 hop breaks the connection join anyway
@@ -1742,7 +1751,7 @@ Later phase — plain Linux servers (M4) come first.
   Observed http events (host + path from the agent) can
   validate the mapping against what actually flowed.
   Status (2026-11-21, task xb4): the static map is built and
-  unit-tested, not yet on kind — `routes.yaml` beside the
+  unit-tested, and run on kind (task yb4) — `routes.yaml` beside the
   registry (its `routes:`, plus the `services:` with ClusterIPs
   and endpoints the ClusterIP join reads), read under the
   registry's rules and refused whole on any bad entry; `build`
@@ -1767,7 +1776,7 @@ Later phase — plain Linux servers (M4) come first.
   graph has no FQDN, ingress or workload nodes: those hops
   exist only in the routed edge.
   Discovery is built too (task xb4), tested against a fake
-  kubectl, not yet on kind: `iormeshctl routes discover` reads a
+  kubectl and on kind (task yb4): `iormeshctl routes discover` reads a
   registered cluster's namespaces with read-only `kubectl get`
   (Ingress, IngressRoute under both Traefik API groups, Service,
   EndpointSlice, pods, ReplicaSets) into a snapshot beside the
@@ -1786,6 +1795,35 @@ Later phase — plain Linux servers (M4) come first.
   pod identity added; a ClusterIP connection joins both sides;
   the M0 ingress scenario renders as one routed edge — app →
   FQDN → Traefik → deployment — with no tracer on the ingress.
+  Status (2026-11-21, task yb4): **passed on kind, with one
+  test-only workaround** — `mage k8sAcceptance`
+  (`integrationtests/kind`; kind 0.31, Kubernetes 1.35.0,
+  containerd 2.2.0, one node; docs/testing.md "M7 acceptance on
+  kind"). tcp-nat's client and server as pods under debug
+  containers, deployed by iormeshctl from a local registry
+  (imageID carries the registry digest), match their per-pod and
+  merged goldens with the ClusterIP and pod addresses; the
+  connection fuses (iptables and nftables) and the build names
+  Service, Deployment and pod; each pod is its own `pod-<uid>`
+  host, all on one `boot_id`; the debug containers carry exactly
+  #13's capabilities under `RuntimeDefault` seccomp; the pod's
+  deletion ends the tracer on SIGTERM. The new `ingress` scenario
+  (gateway → Traefik → inventory, golden and `routes.yaml` in
+  `workload/scenarios/ingress`), its backend under a sidecar and
+  its gateway under a debug container, renders as one routed
+  edge gateway → `shop.iormesh.test` → the Ingress → Service →
+  Deployment in the summary, `model.json` and `graph.svg`, found
+  by `routes discover` as a list-only ServiceAccount. The
+  workaround: the gateway's HTTP host comes from the Java agent,
+  and step 3 of docs/implementation.md M7 (#14's staging inside
+  the JVM's root) is not built, so the test mounts the trace
+  emptyDir into the app container and ships the agent jar in the
+  workload image (task cf4 builds the staging). Fixed on the way:
+  `build -registry`, selectors skipping terminating pods, kubectl
+  1.30's `--custom` gate. Open: debug deploys carry no byte cap
+  and trip the percent disk limit on a full node (df4), deploy
+  returns before the tracer is attached (ef4), a route edge never
+  names a sole endpoint's pod (ff4).
 
 ## Decisions
 
@@ -2365,6 +2403,12 @@ here only as placeholders.
   level of target namespaces — `baseline` and `restricted`
   refuse this set and `privileged` alike, so the tracer needs a
   `privileged`-level namespace or an exemption.
+  On kind (task yb4, containerd 2.2.0, `RuntimeDefault`
+  seccomp, no LSM active): the set sufficed — the tracer loaded
+  its programs, attached through the tracefs hostPath, read BTF
+  from `/sys`, live-attached the agent across containers, and
+  ran with exactly these seven capabilities (CapEff
+  0x1c001080022). Older runtimes were not run.
 - **#14 K8s Java attach** — *Provisional (2026-11-20):* live
   attach through the shared process namespace is the k8s
   default; `-javaagent` via `JAVA_TOOL_OPTIONS` stays the
@@ -2400,6 +2444,15 @@ here only as placeholders.
   AppArmor profile blocks the cross-container `/proc` reads.
   Owner to confirm: JDK versions and flags in the fleet, and
   whether app containers keep a writable `/tmp`.
+  On kind (task yb4): the staging is not built yet (task cf4) —
+  `run -spool` in the scratch image fails (no `/tmp`), and the
+  jar path is the tracer's — so no in-pod tracer attributes Java
+  today. With the paths made to agree by hand (the app mounting
+  the trace emptyDir, its image carrying the jar), live attach
+  through the shared PID namespace worked: the agent joined and
+  its http and dns events carried the gateway's FQDN. Neither
+  AppArmor nor SELinux was active on that Fedora host, so the
+  AppArmor question stays open.
 - **#15 Route-map source of truth** — *Provisional
   (2026-11-20):* a static YAML map first, k8s API discovery
   second, Traefik's API and access logs not in v1. The map lives
@@ -2432,8 +2485,12 @@ here only as placeholders.
   `ingress_service` names the ingress controller's Service;
   discovery fills it from an Ingress's status addresses matching
   a discovered Service, else from `routes discover
-  -ingress-service`. A path-restricted ingress rule becomes a
-  whole-host route: the map routes FQDNs, not paths. Scoping: the
+  -ingress-service`. On kind (task yb4) Traefik's ClusterIP
+  Service gave the Ingress no status address, so once Traefik's
+  namespace was discovered too, only `-ingress-service` kept the
+  gateway's edge the route's instead of a `route_contradicted`
+  edge to Traefik's Service. A path-restricted ingress rule
+  becomes a whole-host route: the map routes FQDNs, not paths. Scoping: the
   table applies to every flow of a build, whichever cluster or
   host it came from — a ClusterIP another traced cluster reuses
   would be named after this map's Service; the build refuses a

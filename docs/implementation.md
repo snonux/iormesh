@@ -5130,8 +5130,11 @@ depends on:
    refuses the pod up front), so the join through the mirror
    pod's `kubernetes.io/config.mirror` annotation is needed only
    if a node-level tracer seeing other pods ever comes. The
-   test strings follow the formats; the kind capture is task
-   yb4's.
+   test strings follow the formats; kind's real files (task yb4:
+   kind 0.31, containerd 2.2.0, systemd driver, cgroup v2) are in
+   `TestParseProcCgroupKindCaptures` — from the host, from the
+   node, the tracer's own, and the tracer seen from the app's
+   private namespace (`0::/../cri-containerd-<id>.scope`).
    **The pod is the host** (task 7f4, an advisor's provisional
    choice; review B2): in a pod `iormesh run` takes its host id
    from the downward API, never from `/etc/machine-id` — the
@@ -5168,8 +5171,9 @@ depends on:
    with the same pid and start tick written as segments, checked
    against the controller's segment-name pattern, loaded under
    the controller's pins and merged into two process nodes) and
-   `internal/cli/hostinfo_test.go`. Left to yb4: two pods on one
-   kind node.
+   `internal/cli/hostinfo_test.go`. On kind (task yb4,
+   `integrationtests/kind`): six pods on one node, each its own
+   `pod-<uid>` with its FQDN, one `boot_id`.
    The project (decision #21): `iormesh run` without `-project`
    in a pod (all three downward-API variables set) takes the
    namespace (`k8s.ProjectForNamespace`); `start`, a systemd
@@ -5235,10 +5239,11 @@ depends on:
      directory it creates root-owned 0755; `iormesh run` in a pod
      defaults `-trace-dir` to it, `iormesh ready` and `Fetch`
      read it. The unchecked 0777 root is only the tracer
-     container's: no other container mounts the volume. Check on
-     kind under `fsGroup` that the kubelet's ownership pass does
-     not later make `traces/` group-writable (it would refuse the
-     next start, never trust it).
+     container's: no other container mounts the volume. On kind
+     under `fsGroup: 2000` (`fsGroupChangePolicy: Always`, task
+     yb4) the volume root was `drwxrwsrwx root:2000` and
+     `traces/` stayed `drwxr-xr-x` after 20 minutes: the
+     ownership pass runs at mount, before the tracer makes it.
    - **Byte cap**: statfs on a disk-backed emptyDir sees the
      node's partition, not the `sizeLimit` past which the kubelet
      evicts the whole pod. `-disk-max-bytes` caps the trace dir
@@ -5246,7 +5251,10 @@ depends on:
      `k8s.TraceCap` of the limit (¾: 1536 MiB for 2 GiB). For a
      debug container the controller should pass the same,
      computed from the pod's own `sizeLimit` (`Kubectl.Check`
-     reads it) — not yet wired.
+     reads it) — not yet wired (task df4). On kind (task yb4) the
+     percent limit (`-disk-limit 90`) stopped every debug tracer
+     at once on a node whose partition was 96 % used; the
+     acceptance passes `-disk-limit=0 -disk-max-bytes=1536MiB`.
    - **Native sidecar or regular container** (for task yb4): the
      patch adds a regular container. A native sidecar (an
      `initContainers` entry with `restartPolicy: Always`, beta
@@ -5257,19 +5265,26 @@ depends on:
      an exec probe — a tracer subcommand would be needed), and it
      needs 1.29+ nodes. Readiness: a pod is Ready only when every
      container is, so a crash-looping regular tracer takes the
-     pod out of its Services' endpoints; check on kind whether a
-     native sidecar without a readiness probe does the same
-     (believed: its readiness also counts, so neither shields
-     the app). Settle on kind; the default stays a regular
-     container until then.
+     pod out of its Services' endpoints. Settled on kind (task
+     yb4, Kubernetes 1.35): a tracer failing at once (a bad
+     flag), as a regular container and as a native sidecar
+     without probes, made the pod NotReady and its endpoint
+     `ready: false` either way — the native sidecar let the app
+     start, but neither shields the app's endpoints. A healthy
+     sidecar kept the pod Ready and its endpoint ready. The
+     default stays a regular container: the native one buys only
+     the start order, at the price of 1.29+ nodes.
 
    The image:
    `scripts/container/tracer-image.Containerfile` (docs/build.md,
    "Container builds"), with the tracer on its `PATH` for
    `kubectl exec … -- iormesh`. While `k8s.DefaultImage` is empty
    `deploy/` names an unpullable digest-pinned placeholder on
-   `registry.invalid`; task yb4 builds and publishes the image,
-   sets the constant and reruns `mage k8sManifests`.
+   `registry.invalid`. Task yb4 built the image and ran it on
+   kind from a local registry (`mage k8sAcceptance`); none is
+   published, so the constant stays empty and `deploy/`
+   unchanged until one is — then set it and rerun `mage
+   k8sManifests`.
 9. `iormeshctl` gains a k8s transport implementing the same
    interface as SSH:
 
@@ -5325,13 +5340,15 @@ depends on:
    --profile=general|sysadmin --custom=FILE -- argv…`, the custom
    file step 8's spec. Tests: a fake kubectl on `PATH`
    ([testing.md](testing.md#k8s-transport-task-wb4)).
-   `--custom` needs kubectl 1.30 or later (from 1.27 it sat behind
-   `KUBECTL_DEBUG_CUSTOM_PROFILE=true`; docs/build.md).
-   Wired by task af4 (step 10). For kind (task yb4): that
-   `--profile=general` plus
-   `--custom` yields exactly the custom capabilities (the lists'
-   strategic merge), and that the image's `PATH` finds
-   `iormesh`.
+   `--custom` needs kubectl 1.30 or later: on kind (task yb4)
+   1.31 and later take it by default, 1.30 only behind
+   `KUBECTL_DEBUG_CUSTOM_PROFILE=true` — which `execRunner` now
+   sets on every kubectl it runs — and 1.29 not at all
+   (docs/build.md). Wired by task af4 (step 10). On kind,
+   `--profile=general` plus `--custom` stored exactly the
+   custom capabilities, and `kubectl debug … -- iormesh run`
+   sets the container's `command` (the image's `PATH` finds
+   `iormesh`; its `ENTRYPOINT` is replaced).
 10. Registry: the `k8s:` and `pods:` sections (#18). **Provisional
     — owner's examples pending**; every value below is a
     placeholder, not a fleet fact:
@@ -5391,10 +5408,17 @@ depends on:
     host shaped like `pod-<uid>`, so no server shares a pod's
     directory. Tests: a fake kubectl on `PATH` in both packages
     ([testing.md](testing.md#k8s-controller-wiring-task-af4)).
-    Left for yb4 on kind: that a pod's `imageID` names the
-    registry digest (an image `kind load`ed reports a bare config
-    digest, which deploy refuses — push to a registry), and the
-    whole path against a real API server.
+    On kind (task yb4): pushed to a local registry, a pod's
+    `imageID` names the registry digest (the manifest list's for
+    a BuildKit build), and deploy, collect, `routes discover` and
+    build ran against a real API server. Two fixes came of it: a
+    selector no longer matches a terminating pod (`Select` skips a
+    `deletionTimestamp`: right after the prepare patch's rollout
+    the old pod still reported `Running` and deploy failed on
+    it), and `build` takes `-registry` (refresh shares its own),
+    since the snapshot's context check and `routes.yaml` follow
+    the registry. Deploy still returns before the tracer is
+    attached (task ef4).
     Review round 1 (task af4): the debug container's run is
     `iormesh run -linger` (`internal/cli/linger.go`: after
     `runTrace` returns — `finish` has closed the tracer and

@@ -1,0 +1,31 @@
+{"scenario": "ingress",
+ "schema_version": 1,
+ "events": [
+   {"process": "$p1", "thread": "$t1", "event": "bind",
+    "args": {"local_addr": "192.0.2.20", "local_port": "$port1"}, "fd": "$fd1"},
+   {"process": "$p1", "thread": "$t2", "event": "accept",
+    "args": {"local_addr": "192.0.2.20", "local_port": "$port1",
+             "remote_addr": "192.0.2.30", "remote_port": "$port3"},
+    "fd": "$fd2", "conn_id": "$c2"},
+   {"process": "$p1", "thread": "$t2", "event": "read", "fd": "$fd2"},
+   {"process": "$p1", "thread": "$t2", "event": "write", "fd": "$fd2"},
+   {"process": "$p1", "thread": "$t1", "event": "close", "fd": "$fd2"},
+   {"process": "$p2", "thread": "$t3", "event": "dns", "attribution": "java",
+    "dns": {"host": "shop.iormesh.test", "addrs": ["192.0.2.80"]}},
+   {"process": "$p2", "thread": "$t3", "event": "connect",
+    "args": {"local_addr": "192.0.2.10", "local_port": "$port2",
+             "remote_addr": "192.0.2.80", "remote_port": 80},
+    "fd": "$fd3", "conn_id": "$c1", "attribution": "java"},
+   {"process": "$p2", "thread": "$t3", "event": "http", "conn_id": "$c1", "attribution": "java",
+    "http": {"method": "GET", "scheme": "http", "host": "shop.iormesh.test",
+             "path": "/inventory/stock/widget", "status": 200, "req_seq": 1,
+             "req_bytes": 0, "resp_bytes": 9}},
+   {"process": "$p2", "thread": "$t4", "event": "read", "fd": "$fd3", "attribution": "java"}
+ ],
+ "edges": [
+   {"type": "runs_on", "from": "$p1", "to": "host:$h1"},
+   {"type": "connected", "from": "$p1", "to": "conn:$c2", "state": "unresolved"},
+   {"type": "runs_on", "from": "$p2", "to": "host:$h2"},
+   {"type": "connected", "from": "$p2", "to": "conn:$c1", "state": "unresolved"}
+ ],
+ "must_not_appear": []}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -116,10 +117,20 @@ func (e execRunner) stream(ctx context.Context, args []string, consume func(io.R
 	return werr
 }
 
-// command builds the exec.Cmd with stderr captured, bounded.
+// customProfileGate opens `kubectl debug --custom` on kubectl 1.30, where
+// the flag exists only behind this variable (checked on kind, task yb4:
+// 1.30.14 says "unknown flag: --custom" without it; 1.31 and later have
+// it on by default and ignore the variable; 1.29 lacks the flag either
+// way). Set on every call: it changes nothing but debug's flag set.
+const customProfileGate = "KUBECTL_DEBUG_CUSTOM_PROFILE=true"
+
+// command builds the exec.Cmd with stderr captured, bounded, and the
+// operator's environment (KUBECONFIG, credential plugins) plus
+// customProfileGate.
 func (e execRunner) command(ctx context.Context, args []string) (*exec.Cmd, *headTail) {
 	stderr := &headTail{}
 	cmd := exec.CommandContext(ctx, e.bin, args...)
+	cmd.Env = append(os.Environ(), customProfileGate)
 	cmd.Stderr = stderr
 	cmd.WaitDelay = waitDelay
 	return cmd, stderr

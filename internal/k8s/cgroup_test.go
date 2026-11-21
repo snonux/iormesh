@@ -75,6 +75,52 @@ func TestParseCgroupPathRuntimes(t *testing.T) {
 	}
 }
 
+// Captured on kind (task yb4, 2026-11-21: kind v0.31.0, Kubernetes
+// 1.35.0, containerd 2.2.0, cgroup v2, systemd driver, Fedora host
+// running Docker 29): /proc/<pid>/cgroup of one best-effort pod's app
+// process ("sleep infinity") and of the iormesh debug container in the
+// same pod, read from the host, from inside the kind node, and from the
+// app container itself (its own private cgroup namespace) — the tracer
+// as the app container sees it.
+const (
+	kindPodUID  = "b078784d-e7ac-459c-8170-cf429e884744"
+	kindAppCtr  = "6612e45364e3b3a16fc67c538fb68fd179c01d3ff421f3b129715baaf2306a93"
+	kindDbgCtr  = "f193ef8957b18f5d49c0d1942676045ebc164ec2aba75c3c99f5bea872ca1194"
+	kindPodPath = "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-besteffort.slice/" +
+		"kubelet-kubepods-besteffort-podb078784d_e7ac_459c_8170_cf429e884744.slice/"
+	kindFromHost = "0::/system.slice/docker-598afbae8beec7b309f7384b0ddd20d6b2554c5fe75935392c761a5a8a6878db.scope" +
+		kindPodPath + "cri-containerd-" + kindAppCtr + ".scope\n"
+	kindInNode     = "0::" + kindPodPath + "cri-containerd-" + kindAppCtr + ".scope\n"
+	kindDbgInNode  = "0::" + kindPodPath + "cri-containerd-" + kindDbgCtr + ".scope\n"
+	kindAppOwnView = "0::/\n"
+	kindDbgFromApp = "0::/../cri-containerd-" + kindDbgCtr + ".scope\n"
+)
+
+// TestParseProcCgroupKindCaptures: the files captured on kind parse to
+// the pod's UID and each container's id (the debug container is a
+// container of the same pod), the app's own view is ErrNotInPod, and a
+// sibling seen from inside a pod's cgroup namespace yields its container
+// id alone.
+func TestParseProcCgroupKindCaptures(t *testing.T) {
+	for name, c := range map[string]struct {
+		data string
+		want CgroupIdentity
+	}{
+		"app from host":   {kindFromHost, CgroupIdentity{kindPodUID, kindAppCtr, RuntimeContainerd, QoSBestEffort}},
+		"app in node":     {kindInNode, CgroupIdentity{kindPodUID, kindAppCtr, RuntimeContainerd, QoSBestEffort}},
+		"tracer in node":  {kindDbgInNode, CgroupIdentity{kindPodUID, kindDbgCtr, RuntimeContainerd, QoSBestEffort}},
+		"tracer from app": {kindDbgFromApp, CgroupIdentity{ContainerID: kindDbgCtr, Runtime: RuntimeContainerd}},
+	} {
+		got, err := ParseProcCgroup([]byte(c.data))
+		if err != nil || got != c.want {
+			t.Errorf("%s: %+v, %v; want %+v", name, got, err, c.want)
+		}
+	}
+	if id, err := ParseProcCgroup([]byte(kindAppOwnView)); !errors.Is(err, ErrNotInPod) {
+		t.Errorf("app's own view: %+v, %v; want ErrNotInPod", id, err)
+	}
+}
+
 // TestParseCgroupPathNotInPod: paths that name no pod say so with
 // ErrNotInPod — including the "/" every process shows inside a private
 // cgroup namespace — rather than guessing.
