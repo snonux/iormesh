@@ -23,8 +23,10 @@ const pattern = "*workload.jar*"
 var debugFlags = []string{"-disk-limit=0", "-disk-max-bytes=1536MiB"}
 
 // agentFlags add the Java agent to the gateway's tracer: live attach at
-// start into the gated JVM, its spool in the emptyDir the app container
-// mounts too (the workaround for the unbuilt #14 staging, testdata).
+// start into the gated JVM. The jar is the tracer image's, the spool is
+// on the tracer's emptyDir (the scratch image has no /tmp); the app
+// container sees neither, so the tracer stages both inside the JVM's
+// root (decision #14, task cf4).
 var agentFlags = []string{"-spool=/opt/iormesh/data/spool", "-agent=/opt/iormesh/lib/iormesh-agent.jar"}
 
 // writeRegistry writes the iormeshctl registry for the test's pods (0600

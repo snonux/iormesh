@@ -32,8 +32,9 @@ func kindTracerImage() (string, error) {
 }
 
 // kindWorkloadImage builds the workload's pod image from a context of
-// just its two jars (scripts/container/kind-workload.Containerfile),
-// pushes it and returns it pinned.
+// just workload.jar (scripts/container/kind-workload.Containerfile; the
+// agent jar is the tracer image's, staged into the JVM's root by the
+// tracer, task cf4), pushes it and returns it pinned.
 func kindWorkloadImage() (string, error) {
 	if err := diskGuard(); err != nil {
 		return "", err
@@ -43,10 +44,8 @@ func kindWorkloadImage() (string, error) {
 		return "", err
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	for _, jar := range []string{"workload.jar", "iormesh-agent.jar"} {
-		if err := sh.Copy(filepath.Join(dir, jar), jar); err != nil {
-			return "", err
-		}
+	if err := sh.Copy(filepath.Join(dir, "workload.jar"), "workload.jar"); err != nil {
+		return "", err
 	}
 	tag := kindRegistryAt + "/iormesh/workload:m7"
 	if err := sh.RunV("sudo", "-n", "docker", "build",

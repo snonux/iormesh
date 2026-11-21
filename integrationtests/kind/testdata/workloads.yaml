@@ -1,6 +1,6 @@
 # M7 acceptance workloads (task yb4), a text/template: {{"{{"}}.NS{{"}}"}} the
-# test's namespace, {{"{{"}}.Workload{{"}}"}} the workload image (JRE, workload.jar,
-# the agent jar), {{"{{"}}.TraefikIP{{"}}"}} Traefik's ClusterIP. Every app
+# test's namespace, {{"{{"}}.Workload{{"}}"}} the workload image (JRE and
+# workload.jar), {{"{{"}}.TraefikIP{{"}}"}} Traefik's ClusterIP. Every app
 # container sleeps; the test runs the scenarios with kubectl exec once a
 # tracer is attached. The prepare and sidecar patches are applied on top
 # by the test, from internal/k8s, as an operator would.
@@ -70,11 +70,9 @@ spec:
 # The ingress scenario's backend (traced by a sidecar) and gateway (a
 # debug container). The gateway resolves the FQDN to Traefik's ClusterIP
 # through hostAliases, as a real FQDN resolves to the ingress's load
-# balancer. Test-only workaround for the unbuilt M7 step 3 (#14: the
-# agent jar and spool staged inside the JVM's root): the gateway's app
-# container mounts the trace emptyDir at the tracer's own path, so the
-# spool the tracer makes there is the JVM's too, and the workload image
-# carries the agent jar at the tracer's path.
+# balancer. The gateway's app container sees neither the tracer's agent
+# jar nor its spool: the tracer stages both inside the JVM's root
+# (decision #14, task cf4).
 apiVersion: apps/v1
 kind: Deployment
 metadata: {name: inventory, namespace: {{.NS}}}
@@ -108,15 +106,7 @@ spec:
       hostAliases:
         - {ip: "{{.TraefikIP}}", hostnames: [shop.iormesh.test]}
       containers:
-        - name: app
-          image: {{.Workload}}
-          command: [sleep, infinity]
-          volumeMounts:
-            - {name: iormesh-traces, mountPath: /opt/iormesh/data}
-      # The prepare patch's emptyDir, declared here already because the
-      # app mounts it; the patch merges into it by name.
-      volumes:
-        - {name: iormesh-traces, emptyDir: {sizeLimit: 2Gi}}
+        - {name: app, image: {{.Workload}}, command: [sleep, infinity]}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
