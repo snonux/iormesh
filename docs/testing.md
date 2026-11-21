@@ -1763,7 +1763,8 @@ without a cluster, against fake kubectls on `PATH`:
   match into its own directory, and one matching nothing fails;
   `collect` alone includes pod entries; a tracer container that
   terminated (OOM-killed) fails the collect as "session ended",
-  stranded, with no exec tried (mutation-checked); an `-context`
+  pointing at deploy for a fresh debug tracer (task ah4), with no
+  exec tried (mutation-checked); an `-context`
   that is not the entry's cluster's, a malformed one, an unknown
   entry and an unpinned `-image` are refused before kubectl runs,
   and so are `-context`/`-namespace` on rm and on a collect or
@@ -1774,6 +1775,57 @@ without a cluster, against fake kubectls on `PATH`:
   keeps the registry when the last collect fails, drops the entry
   with `-force` or after a good collect, and says the tracer is
   not stopped.
+- Debug tracers after an app container restart (task ah4).
+  These tests use the fake kubectl and never run kind or Docker.
+  `internal/k8s/tracers_test.go`:
+  - `TracerName` and `tracerIndex` round-trip `iormesh` through
+    `iormesh-8` and refuse look-alikes such as `iormesh-1`,
+    `iormesh-02` and `iormesh-9`.
+  - A pod whose tracers all terminated (exit 137) gets one
+    `debug` call for the next name, with the pinned `--image`,
+    `--target` and the disk bounds. This holds with containers
+    listed out of order and with look-alike names beside them.
+  - A newest tracer that runs is left alone, with no `debug`
+    call, and the transport names it. It must carry the pinned
+    spec image and `imageID` and the project.
+  - Refused, with only the `get` run: a newest tracer still
+    waiting or without a status, an earlier one running or
+    without a status while the newest ended, and eight ended
+    tracers (the cap).
+  - After a replacement, the attach probes go to `iormesh-2`.
+    The predecessor's `dead` or `ended duration` is waited past
+    until `running`; a `dead` that never gives way times out
+    naming it. A replacement whose container exits fails at
+    once.
+  - The `Lister` reports the newest tracer and its own status.
+  - `Run` and `Fetch` exec into `Target.Tracer`. `New` refuses a
+    malformed tracer name, a sidecar tracer other than
+    `iormesh`, and an app container named like a tracer.
+
+  `internal/ctl/pods_test.go`:
+  - Collect of a pod with a killed `iormesh` and a running
+    `iormesh-2` execs both the fetch and the remove into
+    `iormesh-2`. It gets both sessions' segments into the one
+    `pod-<uid>` and pins one identity.
+  - Deploy starts `iormesh-2` and waits on it, or leaves a
+    running `iormesh-2` alone, or fails at the cap without a
+    `debug`.
+  - The stopped-tracer error tells the operator to run deploy.
+
+  `internal/segment` (`TestNextRunKeepsKilledRunsSegments`): a
+  writer whose flock is gone without `Close` (a kill) is followed
+  by another session's writer in the same dir. The new writer
+  sweeps the unsealed files and publishes beside the killed run's
+  sealed segment.
+
+  Mutation checks: each of 13 single-line mutations fails at least
+  one of these tests. The mutations: the next name repeated, the cap
+  off by one, no all-ended check, an ended tracer kept as running,
+  `superseded` unset or ignored, the `Lister` picking the oldest
+  tracer, `exec` or `debug` naming `iormesh`, tracer-name
+  validation dropped, a leading zero accepted, collect ignoring
+  `PodState.Container`, and deploy skipping the attach wait after
+  a replacement.
 
 ## K8s manifests and pod identity (task vb4)
 
@@ -2490,7 +2542,12 @@ the agent was live-loaded into the JVM (`java agent of pid 41
 joined, 37 natives probed`). A JVM started after the tracer, as a
 restarted app's always is, gets no agent from `run -agent` — as
 [java-attach.md](java-attach.md) documents; it needs `-javaagent`.
-Task ah4 takes the debug-mode finding.
+Task ah4 takes the debug-mode finding: PLAN.md M7 now recommends
+the sidecar for pods that restart, and `iormeshctl deploy` replaces
+an ended debug tracer with `iormesh-2` (up to `iormesh-8`), whose
+`iormesh ready` serves the stranded sealed segments. This is checked
+against the fake kubectl (see "Fake-kubectl tests" below, task ah4);
+a kind run of a real restart is still pending.
 
 **Sidecar mode: no break.** With `shareProcessNamespace` the pause
 container is the PID namespace's init, so the tracer kept running

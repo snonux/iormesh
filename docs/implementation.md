@@ -5744,6 +5744,37 @@ depends on:
     for an earlier debug container, `pinNewHosts` re-reading
     `hosts.json` under `hosts.json.lock`, `collect -db`, and
     `iormesh ready` failing for a project with no trace dir.
+    App container restarts (task ah4, PLAN.md M7): a debug
+    tracer shares the app container's PID namespace, so it dies
+    with that container's init (exit 137). An ephemeral container
+    is never restarted, removed or renamed. So
+    `internal/k8s/tracers.go` names a pod's successive debug
+    tracers `TracerName(n)`: `iormesh`, then `iormesh-2` up to
+    `MaxDebugTracers` (8). `tracerIndex` accepts exactly those
+    names and nothing like `iormesh-02` or `iormesh-9`.
+    `Deploy`'s `deployDebug` looks at the newest one. If it has
+    not terminated, it is the pod's tracer: `keepRunning`
+    applies the spec-image, `imageID` and project checks and
+    leaves it alone, and one still waiting is refused, not
+    replaced. If it terminated, `nextTracer` requires every
+    earlier one to have terminated too (one tracer per pod) and
+    the count to be under the cap, and `debug` starts the next
+    name with the same pinned `--image`, `--custom` spec and
+    `PodDiskArgs` (outcome `Replaced`). `Target.Tracer` names
+    the container that `exec`, `Fetch` and the attach probe
+    use. `Deploy` sets it on its `Kubectl`, and collect takes it
+    from `PodState.Container`, the newest tracer the `Lister`
+    reports. After a replacement, `WaitAttached` treats `dead`
+    and `ended` as pending: they are the predecessor's
+    `state.json`, still in the shared project dir until the new
+    run's `markRunning` replaces it. The new run's own death
+    terminates its container, which the probe catches. The new
+    run's `segment.New` takes the `.lock` the dead run's flock
+    no longer holds, sweeps its `.active-*` files and publishes
+    beside its sealed segments, which `iormesh ready` then
+    serves. Collect's "session ended" error for a stopped debug
+    tracer says to run deploy. Sidecar mode is unchanged and is
+    the recommendation for pods that restart.
 11. ClusterIP join: S2's key survives kube-proxy's DNAT (PLAN.md
     M7 "Service-NAT correlation", settled by task xb4), so M4's
     `federate.Fuse` joins both ends unchanged and no conntrack is

@@ -2159,6 +2159,33 @@ Later phase — plain Linux servers (M4) come first.
   no OpenShift, no Pod Security level below `privileged`; the
   tracer is unconfined by SELinux there (task 7h4's module would
   confine it). #13, #14, #15 and #18 stay provisional.
+  **A debug tracer ends with its app container** (2026-11-21,
+  task ah4, after 8h4's el9 restart check). `kubectl debug
+  --target` puts the tracer in the target container's PID
+  namespace. When that container's init dies (a crash, an OOM
+  kill, a liveness kill), the kernel kills the tracer with it,
+  exit 137, and the kubelet never restarts an ephemeral
+  container. What is lost is the unsealed segment, up to a
+  rotation interval of events. A sidecar survives the same
+  restart, because the pause container is init of a shared
+  process namespace. **For pods that restart, use sidecar mode**
+  (with `-javaagent` for their JVMs, #14). Debug mode is for
+  tracing a pod that stays up. Recovery: when every debug tracer
+  in the pod has terminated, deploy adds a fresh one under the
+  next unique name, `iormesh-2` up to `iormesh-8`, since
+  ephemeral container names can never be reused or removed. Past
+  eight it refuses and points to sidecar mode or a pod restart.
+  It never starts one while an earlier tracer runs, waits or has
+  no status yet, so the pod keeps one tracer. The new tracer gets
+  the same pinned `--image`, disk bounds and attach wait as the
+  first. Until the new run writes its own `state.json`, the wait
+  reads the predecessor's `dead` or `ended` state as pending.
+  Collect and every exec name the pod's newest tracer. The trace
+  `emptyDir` is the pod's, so the new tracer's `iormesh ready`
+  serves the segments its predecessors published, collected into
+  the same `pod-<uid>` directory: one host (task 7f4), one
+  session per tracer. Fake-kubectl tested; a kind run of a real
+  restart is pending.
 
 ## Decisions
 
@@ -2855,7 +2882,9 @@ here only as placeholders.
 - **#14 K8s Java attach** — *Provisional (2026-11-20):* live
   attach through the shared process namespace is the k8s
   default; `-javaagent` via `JAVA_TOOL_OPTIONS` stays the
-  documented alternative for pods that restart anyway, for JVMs
+  documented alternative for pods that restart anyway (with the
+  sidecar: a debug tracer ends with its target container's
+  restart, task ah4, see M7), for JVMs
   run with `-XX:-EnableDynamicAgentLoading`, and for a future
   JDK that disables dynamic loading by default (#2's caveats
   apply unchanged). The ephemeral container joins the target
@@ -3008,9 +3037,12 @@ here only as placeholders.
   BPF, publishes its last segment and then waits for SIGTERM
   instead of exiting, because an exited ephemeral container can
   never be exec'd into again and its last segments would be
-  stranded in the emptyDir. A tracer container stopped anyway (OOM
-  kill, crash) is reported by collect as "session ended", its
-  segments stranded or unknown, without an exec. Collect
+  stranded in the emptyDir. A tracer container stopped anyway (an
+  OOM kill, a crash, or an app container restart, which takes a
+  debug tracer with it: task ah4) is reported by collect as
+  "session ended", without an exec. A sidecar's segments are then
+  stranded until the pod goes. In debug mode, deploy starts the
+  next tracer (`iormesh-2` … `iormesh-8`), which serves them. Collect
   asks the API server which pods an entry is and whether each
   has a tracer container (none: nothing to collect, said), then
   fetches through `kubectl exec … iormesh ready`; a pod kubectl

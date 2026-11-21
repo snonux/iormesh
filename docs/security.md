@@ -518,7 +518,12 @@ truth.
     its status `imageID`, the digest the kubelet pulled, and
     refuses another digest or an `imageID` naming none (a
     locally loaded image), so a sidecar patch that names a tag
-    still runs only the pinned bytes (task af4);
+    still runs only the pinned bytes (task af4). A debug tracer
+    that ended (killed with its app container) is replaced by
+    one under the next name, `iormesh-2` up to `iormesh-8`. The
+    new one is created with the pinned `--image` too, never
+    while an earlier one still runs, and never past eight per
+    pod (task ah4);
   - is collected into a store directory named by the pod's UID
     (`pod-<uid>`), pinned to the host identity the API server's
     answer implies before any segment arrives — never by what

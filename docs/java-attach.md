@@ -161,7 +161,15 @@ the JVM's own socket: the tracer still listens on nothing.
   mount namespace it says it could not verify the ring. In a pod
   the tracer needs `SYS_PTRACE`, `DAC_OVERRIDE`, `KILL` and
   `CHECKPOINT_RESTORE` ([security.md](security.md)
-  "Kubernetes").
+  "Kubernetes"). When the app container restarts, the JVM that
+  comes back starts after the tracer and gets no agent from `run
+  -agent`. A debug-mode tracer does not even outlive the restart:
+  `kubectl debug --target` puts it in the app container's PID
+  namespace, and the kernel kills it along with that namespace's
+  init (task ah4). `iormeshctl deploy` then starts a fresh debug
+  tracer, which live-attaches to the JVM running at that point. For
+  a pod that restarts, use the sidecar and `-javaagent` (PLAN.md
+  #14).
 
 ## Safety
 
