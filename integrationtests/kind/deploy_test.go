@@ -26,8 +26,8 @@ var agentFlags = []string{"-spool=/opt/iormesh/data/spool", "-agent=/opt/iormesh
 func (c *cluster) writeRegistry(t *testing.T, full bool) string {
 	t.Helper()
 	var b strings.Builder
-	fmt.Fprintf(&b, "k8s:\n  image: %s\n  clusters:\n    - name: kind\n      context: %s\n      namespace: %s\npods:\n",
-		c.cfg.tracer, c.cfg.context, c.ns)
+	fmt.Fprintf(&b, "k8s:\n  image: %s\n  selinux_type: %s\n  selinux_level: %q\n", c.cfg.tracer, c.cfg.seType, c.cfg.seLevel)
+	fmt.Fprintf(&b, "  clusters:\n    - name: kind\n      context: %s\n      namespace: %s\npods:\n", c.cfg.context, c.ns)
 	entry := func(app, mode string, flags []string) {
 		fmt.Fprintf(&b, "  - cluster: kind\n    selector: app=%s\n    container: app\n", app)
 		if mode != "" {
@@ -92,8 +92,10 @@ func (c *cluster) deploy(t *testing.T, reg string, apps ...string) map[string]po
 // assertTracerSpec checks a debug container as the API server stored it
 // and the kubelet ran it: exactly #13's capabilities after kubectl's
 // profile and the --custom spec merged, nothing privileged, RuntimeDefault
-// seccomp, SELinux spc_t at level s0 on the tracer alone (task 5h4: the app
-// containers carry no seLinuxOptions and stay container_t), uid 0, the downward-API env and both mounts, the tracer run by
+// seccomp, SELinux spc_t at level s0 (or the operator's type and level,
+// task 7h4) on the tracer alone (task 5h4: the app containers carry no
+// seLinuxOptions and stay container_t; a pinned pod level is the pod's,
+// not theirs), uid 0, the downward-API env and both mounts, the tracer run by
 // name (PATH) with the disk bounds deploy took from the pod (task df4:
 // 3/4 of the 2Gi emptyDir, no percent limit), and the pinned digest in
 // the status imageID (a registry digest, not a kind-loaded config
@@ -114,8 +116,9 @@ func (c *cluster) assertTracerSpec(t *testing.T, p podJSON) {
 		sc.RunAsUser == nil || *sc.RunAsUser != 0 || sc.Seccomp.Type != "RuntimeDefault" {
 		t.Errorf("pod %s: security context %+v", p.Metadata.Name, sc)
 	}
-	if sc.SELinux == nil || sc.SELinux.Type != "spc_t" || sc.SELinux.Level != "s0" {
-		t.Errorf("pod %s: tracer seLinuxOptions %+v, want spc_t at s0", p.Metadata.Name, sc.SELinux)
+	if sc.SELinux == nil || sc.SELinux.Type != c.cfg.seType || sc.SELinux.Level != c.cfg.seLevel {
+		t.Errorf("pod %s: tracer seLinuxOptions %+v, want %s at %s", p.Metadata.Name, sc.SELinux,
+			c.cfg.seType, c.cfg.seLevel)
 	}
 	for _, app := range p.Spec.Containers {
 		if app.SecurityContext.SELinux != nil {

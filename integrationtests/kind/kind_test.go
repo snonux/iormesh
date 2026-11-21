@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"iormesh/internal/k8s"
+	"iormesh/internal/k8sname"
 )
 
 // config is the cluster the tests run against, from the environment
@@ -24,6 +25,23 @@ type config struct {
 	// operator's (IORMESH_KIND_CRICTL, say `ssh root@node k3s crictl`,
 	// task zg4). Empty skips the SIGTERM check.
 	crictl []string
+	// seType and seLevel are the tracer's SELinux type and level:
+	// k8s.DefaultSELinuxType and DefaultSELinuxLevel (spc_t at s0) unless
+	// IORMESH_KIND_SELINUX_TYPE or _LEVEL names others (task 7h4, the
+	// opt-in iormesh_container_t). The registry, the sidecar patch and
+	// the spec check take them; a level other than s0 is also pinned on
+	// every workload pod (podLevel), as an owner pinning MCS pairs would.
+	seType, seLevel string
+}
+
+// podLevel is the MCS level the workload pods pin: none at the default
+// s0, which every pod's pair dominates, else the tracer's own pair, so the
+// tracer and the app containers share it (decision #13, task 8h4).
+func (c config) podLevel() string {
+	if c.seLevel == k8s.DefaultSELinuxLevel {
+		return ""
+	}
+	return c.seLevel
 }
 
 // Environment variables of the acceptance run.
@@ -36,6 +54,8 @@ const (
 	envNode       = "IORMESH_KIND_NODE"
 	envCrictl     = "IORMESH_KIND_CRICTL"
 	envKeep       = "IORMESH_KIND_KEEP"
+	envSEType     = "IORMESH_KIND_SELINUX_TYPE"
+	envSELevel    = "IORMESH_KIND_SELINUX_LEVEL"
 )
 
 // rotation outlasts the segment writer's interval (segment.DefaultInterval,
@@ -53,6 +73,11 @@ func loadConfig(t *testing.T) config {
 			envKubeconfig, envContext, envTracer, envWorkload)
 	}
 	c.crictl = crictlPrefix(os.Getenv(envCrictl), c.node)
+	c.seType, c.seLevel = selinuxOptions(os.Getenv(envSEType), os.Getenv(envSELevel))
+	if !k8sname.SELinuxType(c.seType) || !k8sname.SELinuxLevel(c.seLevel) {
+		t.Fatalf("%s %q or %s %q: want a type [a-z0-9_]+ and a level s0 or s0:cN,cM",
+			envSEType, c.seType, envSELevel, c.seLevel)
+	}
 	if c.ctl == "" {
 		c.ctl = "../../iormeshctl"
 	}
@@ -76,6 +101,18 @@ func crictlPrefix(operator, node string) []string {
 		return []string{"sudo", "-n", "docker", "exec", node, "crictl"}
 	}
 	return nil
+}
+
+// selinuxOptions is the tracer's SELinux type and level: the operator's,
+// each defaulting to the shipped one (spc_t, s0).
+func selinuxOptions(seType, seLevel string) (string, string) {
+	if seType == "" {
+		seType = k8s.DefaultSELinuxType
+	}
+	if seLevel == "" {
+		seLevel = k8s.DefaultSELinuxLevel
+	}
+	return seType, seLevel
 }
 
 // newCluster gives the test a fresh namespace (deleted again unless
@@ -106,7 +143,7 @@ func newCluster(t *testing.T, ns string) *cluster {
 // workload's pattern) on inventory.
 func (c *cluster) prepare(t *testing.T, full bool) {
 	t.Helper()
-	data := map[string]any{"NS": c.ns, "Workload": c.cfg.workload, "Full": full}
+	data := map[string]any{"NS": c.ns, "Workload": c.cfg.workload, "Full": full, "PodLevel": c.cfg.podLevel()}
 	if full {
 		data["TraefikIP"] = strings.TrimSpace(c.kubectl(t, "--namespace=traefik", "get", "service",
 			"traefik", "--output=jsonpath={.spec.clusterIP}"))
@@ -127,8 +164,40 @@ func (c *cluster) prepare(t *testing.T, full bool) {
 	}
 	c.rollout(t, debug...)
 	if full {
-		c.patch(t, "inventory", files["sidecar-patch.yaml"])
+		c.patch(t, "inventory", sidecarSELinux(files["sidecar-patch.yaml"], c.cfg.seType, c.cfg.seLevel))
 		c.rollout(t, "inventory")
+	}
+}
+
+// sidecarSELinux sets the static sidecar patch's tracer type and level
+// (spc_t at s0) to seType and seLevel, as its header tells an owner to.
+func sidecarSELinux(patch []byte, seType, seLevel string) []byte {
+	s := strings.Replace(string(patch), "level: "+k8s.DefaultSELinuxLevel+"\n", "level: "+seLevel+"\n", 1)
+	return []byte(strings.Replace(s, "type: "+k8s.DefaultSELinuxType+"\n", "type: "+seType+"\n", 1))
+}
+
+// TestSELinuxOptions: the shipped spc_t at s0 by default, the operator's
+// type and level otherwise (task 7h4), the pod level pinned only off s0,
+// and the sidecar patch's tracer options rewritten.
+func TestSELinuxOptions(t *testing.T) {
+	if ty, lv := selinuxOptions("", ""); ty != "spc_t" || lv != "s0" {
+		t.Errorf("default = %s %s, want spc_t s0", ty, lv)
+	}
+	ty, lv := selinuxOptions("iormesh_container_t", "s0:c100,c200")
+	if ty != "iormesh_container_t" || lv != "s0:c100,c200" {
+		t.Errorf("operator's = %s %s", ty, lv)
+	}
+	if (config{seLevel: "s0"}).podLevel() != "" || (config{seLevel: lv}).podLevel() != lv {
+		t.Error("podLevel: want none at s0, the tracer's pair otherwise")
+	}
+	files, err := k8s.Defaults().Files()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(sidecarSELinux(files["sidecar-patch.yaml"], ty, lv))
+	if !strings.Contains(got, "level: s0:c100,c200\n") || !strings.Contains(got, "type: iormesh_container_t\n") ||
+		strings.Contains(got, "type: spc_t\n") || strings.Contains(got, "level: s0\n") {
+		t.Errorf("sidecar patch not rewritten:\n%s", got)
 	}
 }
 

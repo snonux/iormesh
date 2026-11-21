@@ -54,7 +54,11 @@ containerdConfigPatches:
 // cluster and the registry; IORMESH_KIND_KUBECONFIG puts the kubeconfig
 // elsewhere. IORMESH_K8S_KUBECONFIG (with IORMESH_K8S_CONTEXT, else its
 // current context, and IORMESH_K8S_CRICTL, the argv prefix that runs
-// crictl on the node) targets an existing cluster instead. Ctrl-C (SIGINT) or SIGTERM starts the teardown in a process
+// crictl on the node) targets an existing cluster instead.
+// IORMESH_K8S_SELINUX_TYPE and IORMESH_K8S_SELINUX_LEVEL run the tracer at
+// another SELinux type and level than spc_t at s0 (task 7h4, the opt-in
+// iormesh_container_t; a level off s0 is pinned on every workload pod
+// too). Ctrl-C (SIGINT) or SIGTERM starts the teardown in a process
 // of its own session, which outlives mage's 5-second cancel; should even
 // that fail, `mage k8sTeardown` is the recovery.
 func K8sAcceptance() error {
@@ -232,7 +236,9 @@ func kindUp(r shRunner, c kindrun.Config) (map[string]string, error) {
 	return map[string]string{"IORMESH_KIND_KUBECONFIG": c.Kubeconfig, "IORMESH_KIND_CONTEXT": c.Context,
 		"IORMESH_KIND_TRACER_IMAGE": tracer, "IORMESH_KIND_WORKLOAD_IMAGE": workload,
 		"IORMESH_KIND_CTL": ctl, "IORMESH_KIND_NODE": c.Node,
-		"IORMESH_KIND_CRICTL": os.Getenv("IORMESH_K8S_CRICTL"), "CGO_ENABLED": "0"}, err
+		"IORMESH_KIND_CRICTL":        os.Getenv("IORMESH_K8S_CRICTL"),
+		"IORMESH_KIND_SELINUX_TYPE":  os.Getenv("IORMESH_K8S_SELINUX_TYPE"),
+		"IORMESH_KIND_SELINUX_LEVEL": os.Getenv("IORMESH_K8S_SELINUX_LEVEL"), "CGO_ENABLED": "0"}, err
 }
 
 // kindTests runs the suite under iptables, then the ClusterIP join under
