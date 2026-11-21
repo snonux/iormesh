@@ -193,8 +193,18 @@ func (c *Correlator) syscallDetail(ev *schema.Event, en enter, ret int64) (*sock
 	case schema.KindAccept, schema.KindAccept4:
 		return c.acceptDetail(ev, p, en, ret), true
 	}
-	ev.FD, ev.FDGen = en.fd, p.use(en.fd)
-	sock := p.sockOf[en.fd]
+	// A negative fd (fstat(-1), close(-1): EBADF) names no instance, so
+	// the event keeps NoFD and gen 0, as the path and ipc shapes do. Never
+	// use() it: the number would enter the table, an exec would close it
+	// (survivesExec) and the next call on it would get gen 1 - the
+	// schema-invalid "fd_gen 1 without an fd" that ended el9 sessions,
+	// where NSS fstat(-1)s in a JVM and again in its spawned child (task
+	// mf4). An fd below -1 has no schema form either.
+	var sock *sockState
+	if en.fd >= 0 {
+		ev.FD, ev.FDGen = en.fd, p.use(en.fd)
+		sock = p.sockOf[en.fd]
+	}
 	switch en.name {
 	case schema.KindRead, schema.KindWrite:
 		if ret > 0 {

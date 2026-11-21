@@ -208,3 +208,39 @@ func TestExecAfterCloseReuse(t *testing.T) {
 		t.Fatalf("ftruncate after exec %+v (path %v): want gen 2 and no path", ft, ft.Args.Path)
 	}
 }
+
+// TestNegativeFdNamesNoInstance: a call on a negative fd (EBADF) is an
+// event without an fd (NoFD, gen 0) and never enters the fd table. The
+// record shape is el9's (task mf4): NSS fstat(-1)s in a JVM, whose spawned
+// child execs and fstat(-1)s again. Registering -1 let the exec close it
+// and gave the child's call gen 1, which the schema rejects ("fd_gen 1
+// without an fd") and which ended the session. A number below -1 has no
+// schema form, so it is reported as NoFD too.
+func TestNegativeFdNamesNoInstance(t *testing.T) {
+	c, sink := newTest(t)
+	parent := feeder{t, c, 10, 11, new(uint64)}
+	ebadf := -int64(unix.EBADF)
+	parent.fdCall(types.SYS_ENTER_NEWFSTAT, types.SYS_EXIT_NEWFSTAT, -1, ebadf)
+	parent.fdCall(types.SYS_ENTER_CLOSE, types.SYS_EXIT_CLOSE, -1, ebadf)
+	parent.fork(20)
+	child := feeder{t, c, 20, 20, parent.now}
+	child.exec()
+	child.fdCall(types.SYS_ENTER_NEWFSTAT, types.SYS_EXIT_NEWFSTAT, -1, ebadf)
+	child.fdCall(types.SYS_ENTER_NEWFSTAT, types.SYS_EXIT_NEWFSTAT, -100, ebadf)
+	if isOpen(c, 10, -1) || isOpen(c, 20, -1) {
+		t.Error("fd -1 entered the fd table")
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	evs := append(byKind(sink.events, schema.KindNewfstat), byKind(sink.events, schema.KindClose)...)
+	if len(evs) != 4 {
+		t.Fatalf("%d newfstat and close events, want 4: %+v", len(evs), evs)
+	}
+	for _, ev := range evs {
+		if ev.FD != schema.NoFD || ev.FDGen != 0 || ev.Err != "EBADF" {
+			t.Errorf("%s pid %d: fd %d gen %d err %q, want no fd, gen 0, EBADF",
+				ev.Event, ev.PID, ev.FD, ev.FDGen, ev.Err)
+		}
+	}
+}

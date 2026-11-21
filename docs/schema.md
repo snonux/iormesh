@@ -68,7 +68,9 @@ the same graph is the same bytes.
 `DecodeGraph`): an unknown or mis-cased key, a missing or `null`
 required field, another `schema_version`, an unknown event kind or
 trailing data rejects the record — never half-read. Writers
-validate before writing, so a producer bug fails loudly.
+validate before writing, so a producer bug fails loudly; the error
+names the rejected event (kind, pid, tid, fd, fd_gen, ret), which is
+not written.
 
 ## Event envelope
 
@@ -87,7 +89,7 @@ Required fields are always present; a zero is a real zero.
 | `tid` | int | thread id; `0` for records with no task context (`tcp_state`) |
 | `comm` | string | process name at the event: the kernel's comm (≤ 15 bytes); an exec renames it, so events before the exec carry the old name and the `exec` event and later ones the new |
 | `event` | string | the event kind, below |
-| `fd` | int | descriptor acted on — the argument, or the returned one for opens and accepts; `-1` when none |
+| `fd` | int | descriptor acted on — the argument, or the returned one for opens and accepts; `-1` when none, also for a negative argument (`fstat(-1)`, EBADF), which names no instance |
 | `fd_gen` | int | how often this fd number was (re)created in this incarnation; `0` = predates the trace or no fd. A forked child continues its parent's count (it inherits the parent's instances) |
 | `ret` | int | the syscall's return value |
 | `err` | string, optional | errno name (`ENOENT`), only when `ret < 0` |
