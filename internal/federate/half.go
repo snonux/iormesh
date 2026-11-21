@@ -42,6 +42,7 @@ type Half struct {
 type stateRec struct {
 	state string
 	wall  uint64
+	boot  uint64 // the host's boot clock: one clock for every session on the host
 	f     seqFields
 	has   bool // the record carried the four tcp_sock fields
 }
@@ -156,7 +157,7 @@ func (a *halfAcc) tuple(args *schema.Args) {
 func (a *halfAcc) addState(ev *schema.Event) {
 	a.tcp = true
 	args := &ev.Args
-	r := stateRec{state: *args.SockState, wall: ev.WallNS}
+	r := stateRec{state: *args.SockState, wall: ev.WallNS, boot: ev.BootNS}
 	if args.SndUna != nil {
 		// Validate guarantees all four together on a tcp_state record.
 		r.f = seqFields{SndUna: *args.SndUna, RcvNxt: *args.RcvNxt,
@@ -208,8 +209,10 @@ func (a *halfAcc) half(k LocalConn) Half {
 }
 
 // key rebuilds h's key from every eligible record (keyRecords); all must
-// agree. The records are taken in wall-clock order, so the earliest
-// eligible one sets the key whatever order the sessions reported them in.
+// agree. The records are taken in the order of the host's boot clock, so
+// the earliest eligible one sets the key whatever order the sessions
+// reported them in: one host's sessions share that clock, while each
+// derives its wall clock from it with an offset of its own.
 //
 // A server half's accept snapshot is read from a socket nobody locks
 // (the tracer's sock.c): softirq may be updating the four fields as it
@@ -224,7 +227,7 @@ func (a *halfAcc) half(k LocalConn) Half {
 // costs that record's say in the conflict check.
 func (a *halfAcc) key(h *Half) {
 	recs := slices.Clone(a.recs)
-	slices.SortStableFunc(recs, func(x, y stateRec) int { return cmp.Compare(x.wall, y.wall) })
+	slices.SortStableFunc(recs, func(x, y stateRec) int { return cmp.Compare(x.boot, y.boot) })
 	locked, snap := recs, []stateRec(nil)
 	if h.Role == RoleServer && len(recs) > 0 {
 		snap, locked = recs[:1], recs[1:]

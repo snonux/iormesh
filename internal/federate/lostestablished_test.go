@@ -153,3 +153,22 @@ func TestClientEstablishedKeepsEstablished(t *testing.T) {
 		t.Fatalf("halves %+v, want established at the ESTABLISHED record", hs)
 	}
 }
+
+// TestRecordsInBootOrder: two sessions on one host derive their wall
+// clocks with offsets of their own, so the records are ordered by the
+// shared boot clock. Here the ESTABLISHED record comes first on it but
+// carries the later wall time; read in boot order, the zero-acked CLOSE
+// after it is no record of this connection and the half is a conflict.
+func TestRecordsInBootOrder(t *testing.T) {
+	k := ISNPair{100, 200}
+	tr := newTrace("gw", "shop")
+	tr.lostEstClient(1, "c1", wall0,
+		lateRec{"ESTABLISHED", 2 * sec, seqFields{SndUna: k.Client + 1, RcvNxt: k.Server + 1, BytesAcked: 1}},
+		lateRec{"CLOSE", sec, seqFields{SndUna: k.Client, RcvNxt: 0}})
+	n := len(tr.events)
+	tr.events[n-2].BootNS, tr.events[n-1].BootNS = 10*sec, 11*sec
+	hs := Halves(tr.events)
+	if len(hs) != 1 || !hs[0].KeyConflict {
+		t.Fatalf("halves %+v, want a key conflict", hs)
+	}
+}
