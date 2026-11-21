@@ -948,7 +948,11 @@ run-2 failures are not the kernel's:
   against the socket's current life (a new-life transition, or
   the socket file's inode) and drops a stale one
   (`internal/sockreuse_root_test.go` reproduces the reuse, on
-  7.2 and on el9).
+  7.2 and on el9). A third run with if4 fused orders→inventory
+  (and M4-13 passed with lf4), but M4-9 still failed: a skipped
+  run lost the gateway's `SYN_SENT → ESTABLISHED`, and the merge
+  could not pair gateway→orders from its `CLOSE` alone — task
+  qf4.
 - **M4-10 (jf4)**: `tcp_seq` pairs exist in both directions,
   but any drop on a host — every pattern session has an
   `attach_gap` at the JVM's exec — disables the data messages
