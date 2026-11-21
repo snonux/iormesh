@@ -1180,8 +1180,8 @@ Kubernetes (M7) build on it.
   an offset past the sender's sum proves untraced bytes and
   fails the check, the receiver's sums are a second witness,
   and any counter record at 4 GiB or more fails it. The
-  planned closure is a follow-up task: a final counter
-  snapshot of every traced socket at session end.
+  planned closure is task sf4: a final counter snapshot of
+  every traced socket at session end.
   The counter proof covers one message and ignores drops and
   untraced calls: a `tcp_state` record of the sender after the
   send's exit with `bytes_acked` below 512 MiB (the kernel
