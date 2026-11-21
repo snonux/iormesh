@@ -1094,7 +1094,7 @@ tracepoints) are generated but absent on el9 (`file_getattr`,
 loader skips their slots (`tracepointExists`) and reports "0
 tracepoints missing" for the default families.
 
-**Integration suite: 51 of 51 pass**, 44 in the first full run and
+**Integration suite: 51 of 51 passed**, 44 in the first full run and
 the other seven after the staging and golden fixes below. That
 serial run (about 10 minutes; 2 GiB was enough) failed seven:
 
@@ -1111,6 +1111,13 @@ serial run (about 10 minutes; 2 GiB was enough) failed seven:
   `pipe2`. The test now declares the kind the trace's libc issued
   (`pipeKindOfThisLibc`); both ends and every edge are still
   checked.
+
+A second full run, on the tree rebased onto if4, kf4 and jf4,
+passed 50 of 51: `TestJavaLiveAttach` failed its golden, a call
+after the live attach left unattributed (`ambiguous 14`). Alone
+it failed 1 of 8 serial runs on the idle host. 7.2 showed the
+same symptom once under load; task tf4. The root suite on that
+tree: 27 of 27.
 
 Outside the suites: a hand-run pattern session over pipe-ipc
 (`-pattern '*workload.jar*pipe-ipc*' -trace-families ipc`) died
