@@ -124,8 +124,9 @@ func TestSidecarPatch(t *testing.T) {
 		t.Errorf("image %q is not pinned by digest", image)
 	}
 	args := strs(t, at(t, c, "args"))
-	if len(args) < 3 || args[0] != "run" || !slices.Equal(args[len(args)-2:], []string{"-disk-max-bytes", "1536MiB"}) {
-		t.Errorf("args %q, want an iormesh run capped at 3/4 of the 2Gi emptyDir", args)
+	if len(args) < 5 || args[0] != "run" ||
+		!slices.Equal(args[len(args)-4:], []string{"-disk-limit", "0", "-disk-max-bytes", "1536MiB"}) {
+		t.Errorf("args %q, want an iormesh run capped at 3/4 of the 2Gi emptyDir, no percent limit", args)
 	}
 	if at(t, c, "resources", "requests", "cpu") != "50m" || at(t, c, "resources", "requests", "memory") != "128Mi" ||
 		at(t, c, "resources", "limits", "cpu") != "1" || at(t, c, "resources", "limits", "memory") != "1Gi" {

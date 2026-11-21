@@ -153,15 +153,26 @@ func (pe podEntry) podIdentity(st k8s.PodState) federate.HostIdentity {
 		FQDN: k8s.PodFQDN(st.Name, pe.scope.Namespace, st.UID)}
 }
 
+// podDiskFlags are the disk bounds a debug deploy derives from the pod
+// itself (k8s.PodDiskArgs, task df4): the byte cap from the trace
+// emptyDir's sizeLimit, and no percent limit, since statfs in a pod sees
+// the node's partition. The registry may not set them: one passed
+// through would be overridden by the pod's anyway, silently.
+var podDiskFlags = map[string]bool{"disk-limit": true, "disk-max-bytes": true}
+
 // checkPodFlags refuses, before any pod is contacted, pass-through flags
-// the entry sets itself (ownedFlags) and a -trace-dir other than the
-// pod's emptyDir, where collect fetches from.
+// the entry sets itself (ownedFlags), the disk bounds deploy takes from
+// the pod (podDiskFlags) and a -trace-dir other than the pod's emptyDir,
+// where collect fetches from.
 func checkPodFlags(p federate.Project) error {
 	if f := firstOwnedFlag(p.Flags); f != "" {
 		return fmt.Errorf("flag %s: the entry sets it itself", f)
 	}
 	for i, f := range p.Flags {
 		key, val, hasVal := cutFlag(f)
+		if podDiskFlags[key] {
+			return fmt.Errorf("flag %s: deploy sets it from the pod's %s sizeLimit", f, k8s.TracesVolume)
+		}
 		if key != "trace-dir" {
 			continue
 		}

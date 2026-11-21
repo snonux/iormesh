@@ -5411,14 +5411,24 @@ depends on:
    - **Byte cap**: statfs on a disk-backed emptyDir sees the
      node's partition, not the `sizeLimit` past which the kubelet
      evicts the whole pod. `-disk-max-bytes` caps the trace dir
-     itself (`segment.Watchdog.MaxDirBytes`); the sidecar passes
-     `k8s.TraceCap` of the limit (¾: 1536 MiB for 2 GiB). For a
-     debug container the controller should pass the same,
-     computed from the pod's own `sizeLimit` (`Kubectl.Check`
-     reads it) — not yet wired (task df4). On kind (task yb4) the
-     percent limit (`-disk-limit 90`) stopped every debug tracer
-     at once on a node whose partition was 96 % used; the
-     acceptance passes `-disk-limit=0 -disk-max-bytes=1536MiB`.
+     itself (`segment.Watchdog.MaxDirBytes`). On kind (task yb4)
+     the percent limit (`-disk-limit 90`) stopped every debug
+     tracer at once on a node whose partition was 96 % used, for
+     the node's reasons, not the trace's. So an in-pod tracer
+     runs with `k8s.PodDiskArgs` (task df4): `-disk-limit 0
+     -disk-max-bytes` `k8s.TraceCap` of the emptyDir's
+     `sizeLimit` (¾: 1536 MiB for 2 GiB). The sidecar patch
+     appends them to its args (last, so they win); a debug
+     deploy appends them to the tracer argv from the pod's own
+     `sizeLimit`, read with the pod (`Kubectl.debug`), and
+     refuses a `sizeLimit` `TraceCap` cannot read (`2G`, a byte
+     count) rather than start a tracer without a cap.
+     `-disk-min-free` keeps its default, so a tracer still never
+     takes a node's last 256 MiB; the node's fullness otherwise
+     is the kubelet's eviction thresholds' business. A pod entry
+     setting `-disk-limit` or `-disk-max-bytes` is refused before
+     any pod is contacted (`checkPodFlags`): the pod's would win
+     silently.
    - **Native sidecar or regular container** (for task yb4): the
      patch adds a regular container. A native sidecar (an
      `initContainers` entry with `restartPolicy: Always`, beta

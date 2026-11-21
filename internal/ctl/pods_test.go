@@ -395,13 +395,39 @@ func TestPodDeploy(t *testing.T) {
 	}
 	dbg := calls[2]
 	i := slices.Index(dbg, "--")
-	wantArgv := []string{"iormesh", "run", "-project", "shop", "-linger", "-pattern=*java*", "-duration", "1h"}
+	wantArgv := []string{"iormesh", "run", "-project", "shop", "-linger", "-pattern=*java*", "-duration", "1h",
+		"-disk-limit", "0", "-disk-max-bytes", "1536MiB"}
 	if i < 0 || !slices.Equal(dbg[i+1:], wantArgv) || !slices.Contains(dbg, "--image="+podImage) ||
 		!slices.Contains(dbg, "--target=app") {
 		t.Errorf("debug argv %q", dbg)
 	}
 	if !strings.Contains(f.stdout.String(), "started tracer, project shop") {
 		t.Errorf("stdout: %s", f.stdout)
+	}
+}
+
+// TestPodDeployDiskFlags: a pod entry may not set the disk bounds
+// deploy takes from the pod (task df4), in any spelling; nothing is
+// contacted. -disk-min-free still passes.
+func TestPodDeployDiskFlags(t *testing.T) {
+	for flags, want := range map[string]string{
+		`"-disk-limit=0"`:                     "flag -disk-limit=0: deploy sets it",
+		`"--disk-max-bytes", "1GiB"`:          "flag --disk-max-bytes: deploy sets it",
+		`"-duration", "1h", "-disk-limit=50"`: "flag -disk-limit=50: deploy sets it",
+		`"-disk-min-free", "1GiB"`:            "",
+	} {
+		f := newPodFixture(t, strings.Replace(podRegistry, `flags: ["-duration", "1h"]`, "flags: ["+flags+"]", 1))
+		f.pod(t, podObject("checkout-0", uid(1), false))
+		code := f.run("deploy", "kind/shop/checkout-0")
+		if want == "" {
+			if code != exitOK {
+				t.Errorf("%s: exit %d: %s", flags, code, f.stderr)
+			}
+			continue
+		}
+		if code != exitError || !strings.Contains(f.stderr.String(), want) || len(f.calls(t)) != 0 {
+			t.Errorf("%s: exit %d, calls %q, stderr %s; want %q", flags, code, f.calls(t), f.stderr, want)
+		}
 	}
 }
 

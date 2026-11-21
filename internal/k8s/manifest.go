@@ -23,8 +23,8 @@ const placeholderImage = "registry.invalid/iormesh/tracer@sha256:" +
 
 // DefaultTraceLimit bounds the trace emptyDir: segments past it get the
 // pod evicted, never the node's disk filled (decision #13). The tracer's
-// own disk watchdog (decision #17) stops it earlier on the node's
-// partition.
+// own disk watchdog (decision #17) stops it earlier, at TraceCap of the
+// limit (PodDiskArgs).
 const DefaultTraceLimit = "2Gi"
 
 // DefaultSidecarArgs are the sidecar's tracer command line (the image's

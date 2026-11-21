@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 )
 
@@ -91,12 +92,32 @@ func (m Manifests) sidecarPatch() workloadPatch {
 	return p
 }
 
-// sidecarArgs are SidecarArgs plus the trace dir's byte cap
-// (-disk-max-bytes, TraceCap), so the tracer ends its trace before the
-// kubelet evicts the pod — the app with it — for outgrowing the
-// emptyDir's sizeLimit.
+// sidecarArgs are SidecarArgs plus the pod's disk bounds (PodDiskArgs).
+// They come last, so they win over the same flags in SidecarArgs (Go's
+// flag package keeps a repeated flag's last value).
 func (m Manifests) sidecarArgs() []string {
-	return append(append([]string(nil), m.SidecarArgs...), "-disk-max-bytes", TraceCap(m.TraceLimit))
+	return slices.Concat(m.SidecarArgs, PodDiskArgs(m.TraceLimit))
+}
+
+// PodDiskArgs are an in-pod tracer's disk bounds for a trace emptyDir of
+// sizeLimit limit (task df4), which the sidecar patch and a debug deploy
+// both pass:
+//
+//   - -disk-max-bytes TraceCap(limit): the trace dir's own byte cap, so
+//     the tracer ends its trace before the kubelet evicts the pod — the
+//     app with it — for outgrowing the emptyDir's sizeLimit;
+//   - -disk-limit 0: no percent-used limit. statfs on a disk-backed
+//     emptyDir sees the node's partition, not the volume, so the
+//     default 90 % stopped every tracer on a node at once whenever the
+//     node's disk was that full for reasons of its own (seen on kind,
+//     task yb4: a 96 %-full dev disk). The node's fullness is the
+//     kubelet's to manage (its eviction thresholds), the volume's is the
+//     byte cap's.
+//
+// -disk-min-free keeps its default (256 MiB free on the partition): a
+// tracer still never writes a node's last bytes.
+func PodDiskArgs(limit string) []string {
+	return []string{"-disk-limit", "0", "-disk-max-bytes", TraceCap(limit)}
 }
 
 // TraceCap is the tracer's -disk-max-bytes for an emptyDir of sizeLimit
@@ -104,8 +125,8 @@ func (m Manifests) sidecarArgs() []string {
 // left covers the segment being written when the cap trips (the cap is
 // checked every few seconds and at each rotation, segments are at most
 // 64 MB) and the session's end files. "" for a limit that is not a
-// binaryQuantity. The controller passes the same for a debug container,
-// from the pod's own sizeLimit.
+// binaryQuantity. A debug deploy passes the same, from the pod's own
+// sizeLimit (Kubectl.podDiskArgs).
 func TraceCap(limit string) string {
 	if !binaryQuantity.MatchString(limit) {
 		return ""

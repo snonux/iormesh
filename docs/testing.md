@@ -1809,7 +1809,7 @@ discover`, `build -registry`.
 
 | Check | What it asserts |
 |---|---|
-| tracer spec | each debug container as stored: exactly #13's seven capabilities with `drop: [ALL]` after `--profile=general` and `--custom` merged, nothing privileged, `RuntimeDefault` seccomp, uid 0, the three downward-API env vars, both mounts, `command` starting with `iormesh` (the image's `PATH`); the tracer's status `imageID` names the pushed digest (the sidecar's too) |
+| tracer spec | each debug container as stored: exactly #13's seven capabilities with `drop: [ALL]` after `--profile=general` and `--custom` merged, nothing privileged, `RuntimeDefault` seccomp, uid 0, the three downward-API env vars, both mounts, `command` starting with `iormesh` (the image's `PATH`) and ending with the disk bounds deploy took from the pod (`-disk-limit 0 -disk-max-bytes 1536MiB`, task df4); the tracer's status `imageID` names the pushed digest (the sidecar's too) |
 | `clusterip` | tcp-nat's client dials the server Service's ClusterIP (880, DNAT to the pod's 80): the build prints the routed edge `→ Service → deployment → pod (fused, 1 connections)`; each pod's trace matches `expect-client.json` / `expect-server.json` and the merge `expect.json`, the rig's addresses replaced by the client pod's, the ClusterIP and the server pod's (no SNAT between pods); a golden with the client dialing the pod fails |
 | `hairpin` | tcp-nat's two roles in one pod, the client dialing the pod's own Service: one fused connection, the server end seeing the node's masquerade address (10.244.0.1), the Service and pod named |
 | `identity` | every pod is its own store directory and host, `pod-<uid>`, with the FQDN `<name>.<ns>.<uid[:8]>`; all share one `boot_id` |
@@ -1883,9 +1883,11 @@ pods in their grace period, whose tracer is ending on SIGTERM
 anyway); kubectl 1.30's gate (`TestDebugArgv`). Follow-ups: cf4
 (agent staging in the JVM's root; built since), df4 (debug
 deploy without a byte cap: the 90 %
-`-disk-limit` stops every debug tracer on a node fuller than
-that, so the test passes `-disk-limit=0 -disk-max-bytes=1536MiB`),
-ef4 (deploy returns before the tracer is attached; the test waits
+`-disk-limit` stopped every debug tracer on a node fuller than
+that, so the test passed `-disk-limit=0 -disk-max-bytes=1536MiB`;
+built since: deploy passes the pod's bounds itself, the tracer
+spec check asserts them, and the registry carries only the
+gateway's agent flags), ef4 (deploy returns before the tracer is attached; the test waits
 for its `attached` log line), ff4 (a route edge never names a
 sole endpoint's pod).
 

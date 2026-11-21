@@ -31,18 +31,40 @@ func withTracer(sidecar, running bool, imageID string) string {
 }
 
 // TestDeployStarts: a prepared pod without a tracer gets the debug
-// container — the same get and debug argv as Debug.
+// container — the same get and debug argv as Debug, the tracer argv
+// ended by the pod's disk bounds: TraceCap of its own emptyDir's
+// sizeLimit and no percent limit (task df4).
 func TestDeployStarts(t *testing.T) {
-	f := newFake(t)
-	f.pod(t, preparedPod)
-	out, err := newTestKubectl(t, testTarget()).Deploy(context.Background(), "iormesh", "run", "-project", "shop")
-	if err != nil || out != Started {
-		t.Fatalf("Deploy = %v, %v", out, err)
+	for limit, maxBytes := range map[string]string{"2Gi": "1536MiB", "512Mi": "384MiB"} {
+		f := newFake(t)
+		f.pod(t, strings.Replace(preparedPod, `"sizeLimit":"2Gi"`, `"sizeLimit":"`+limit+`"`, 1))
+		out, err := newTestKubectl(t, testTarget()).Deploy(context.Background(), "iormesh", "run", "-project", "shop")
+		if err != nil || out != Started {
+			t.Fatalf("%s: Deploy = %v, %v", limit, out, err)
+		}
+		calls := f.calls(t)
+		want := []string{"--", "iormesh", "run", "-project", "shop", "-disk-limit", "0", "-disk-max-bytes", maxBytes}
+		if len(calls) != 2 || calls[0][2] != "get" || calls[1][2] != "debug" ||
+			!slices.Equal(calls[1][len(calls[1])-len(want):], want) {
+			t.Errorf("%s: calls = %q", limit, calls)
+		}
 	}
-	calls := f.calls(t)
-	if len(calls) != 2 || calls[0][2] != "get" || calls[1][2] != "debug" ||
-		!slices.Equal(calls[1][len(calls[1])-4:], []string{"iormesh", "run", "-project", "shop"}) {
-		t.Errorf("calls = %q", calls)
+}
+
+// TestDeployRefusesUnreadableLimit: a trace emptyDir whose sizeLimit
+// TraceCap cannot read (decimal units, a byte count) is refused before
+// any debug: a tracer without a byte cap would get the pod evicted.
+func TestDeployRefusesUnreadableLimit(t *testing.T) {
+	for _, limit := range []string{"2G", "2147483648", "1Mi"} {
+		f := newFake(t)
+		f.pod(t, strings.Replace(preparedPod, `"sizeLimit":"2Gi"`, `"sizeLimit":"`+limit+`"`, 1))
+		_, err := newTestKubectl(t, testTarget()).Deploy(context.Background(), "iormesh", "run")
+		if !errors.Is(err, ErrUnprepared) || !strings.Contains(err.Error(), limit) {
+			t.Errorf("%s: err = %v, want ErrUnprepared naming it", limit, err)
+		}
+		if calls := f.calls(t); len(calls) != 1 {
+			t.Errorf("%s: calls = %q, want the get alone", limit, calls)
+		}
 	}
 }
 

@@ -33,7 +33,9 @@ const (
 //   - debug, with an "iormesh" ephemeral container already (an earlier
 //     deploy): it must be running the pinned image, and is left alone —
 //     one that ended, or runs another image, is refused (restart the pod);
-//   - debug otherwise: `kubectl debug` starts the tracer running argv.
+//   - debug otherwise: `kubectl debug` starts the tracer running argv
+//     plus the pod's disk bounds (PodDiskArgs of its trace emptyDir's
+//     sizeLimit: the byte cap, no percent limit).
 //
 // "Running the pinned image" is checked against the container status's
 // imageID, the digest the kubelet actually pulled, never the spec's
@@ -81,7 +83,7 @@ func (k *Kubectl) Deploy(ctx context.Context, argv ...string) (Outcome, error) {
 	if len(argv) == 0 {
 		return 0, fmt.Errorf("%w: empty tracer command", ErrTransport)
 	}
-	if err := k.debug(ctx, argv); err != nil {
+	if err := k.debug(ctx, p, argv); err != nil {
 		return 0, err
 	}
 	return Started, nil

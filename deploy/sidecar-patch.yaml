@@ -16,6 +16,8 @@ spec:
             - "8080"
             - -duration
             - 168h
+            - -disk-limit
+            - "0"
             - -disk-max-bytes
             - 1536MiB
           env:

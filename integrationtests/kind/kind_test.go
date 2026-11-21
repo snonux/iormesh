@@ -92,7 +92,7 @@ func (c *cluster) prepare(t *testing.T, full bool) {
 	}
 	c.apply(t, "workloads.yaml", data)
 	m := k8s.Manifests{Image: c.cfg.tracer, TraceLimit: k8s.DefaultTraceLimit,
-		SidecarArgs: []string{"run", "-pattern", "*workload.jar*", "-disk-limit=0", "-duration", "1h"}}
+		SidecarArgs: []string{"run", "-pattern", "*workload.jar*", "-duration", "1h"}}
 	files, err := m.Files()
 	if err != nil {
 		t.Fatal(err)

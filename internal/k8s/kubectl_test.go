@@ -116,7 +116,9 @@ const preparedPod = `{"metadata":{"name":"checkout-7d9f","uid":"3b1c9a52-7e0d-4c
 
 // TestDebugArgv: on a prepared pod, Check reads the spec, then one
 // `kubectl debug` with the target container, the pinned image, the
-// profile and the --custom file — and the tracer argv after "--".
+// profile and the --custom file — and the tracer argv after "--", ended
+// by the pod's disk bounds: no percent limit, 3/4 of its 2Gi emptyDir
+// (task df4).
 func TestDebugArgv(t *testing.T) {
 	f := newFake(t)
 	f.pod(t, preparedPod)
@@ -140,7 +142,7 @@ func TestDebugArgv(t *testing.T) {
 	}
 	want := slices.Concat([]string{"--context=kind-iormesh", "--namespace=shop", "debug", "checkout-7d9f",
 		"--container=iormesh", "--target=app", "--image=" + testImage, "--attach=false",
-		"--profile=general", dbg[i], "--"}, argv)
+		"--profile=general", dbg[i], "--"}, argv, []string{"-disk-limit", "0", "-disk-max-bytes", "1536MiB"})
 	if !slices.Equal(dbg, want) {
 		t.Errorf("debug argv\n got %q\nwant %q", dbg, want)
 	}

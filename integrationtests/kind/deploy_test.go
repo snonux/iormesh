@@ -14,15 +14,8 @@ import (
 // the test once the tracer is attached.
 const pattern = "*workload.jar*"
 
-// debugFlags are the debug tracers' extra flags. -disk-limit=0: the
-// tracer's percent limit reads statfs of the emptyDir, which is the
-// node's partition — a dev host's disk may be fuller than 90 %, and the
-// pod's own bound is the emptyDir's byte cap, which the sidecar passes
-// as -disk-max-bytes (and a debug deploy does not yet: task yb4's
-// follow-up).
-var debugFlags = []string{"-disk-limit=0", "-disk-max-bytes=1536MiB"}
-
-// agentFlags add the Java agent to the gateway's tracer: live attach at
+// agentFlags add the Java agent to the gateway's tracer (the only
+// registry flags: deploy passes the pod's disk bounds itself, task df4): live attach at
 // start into the gated JVM. The jar is the tracer image's, the spool is
 // on the tracer's emptyDir (the scratch image has no /tmp); the app
 // container sees neither, so the tracer stages both inside the JVM's
@@ -46,11 +39,11 @@ func (c *cluster) writeRegistry(t *testing.T, full bool) string {
 			fmt.Fprintf(&b, "        flags: [%s]\n", quoteAll(flags))
 		}
 	}
-	entry("server", "", debugFlags)
-	entry("client", "", debugFlags)
+	entry("server", "", nil)
+	entry("client", "", nil)
 	if full {
-		entry("hairpin", "", debugFlags)
-		entry("gateway", "", slices.Concat(debugFlags, agentFlags))
+		entry("hairpin", "", nil)
+		entry("gateway", "", agentFlags)
 		entry("inventory", "sidecar", nil)
 	}
 	path := filepath.Join(c.dir, "servers.yaml")
@@ -97,8 +90,10 @@ func (c *cluster) deploy(t *testing.T, reg string, apps ...string) map[string]po
 // and the kubelet ran it: exactly #13's capabilities after kubectl's
 // profile and the --custom spec merged, nothing privileged, RuntimeDefault
 // seccomp, uid 0, the downward-API env and both mounts, the tracer run by
-// name (PATH), and the pinned digest in the status imageID (a registry
-// digest, not a kind-loaded config digest).
+// name (PATH) with the disk bounds deploy took from the pod (task df4:
+// 3/4 of the 2Gi emptyDir, no percent limit), and the pinned digest in
+// the status imageID (a registry digest, not a kind-loaded config
+// digest).
 func (c *cluster) assertTracerSpec(t *testing.T, p podJSON) {
 	t.Helper()
 	i := slices.IndexFunc(p.Spec.Ephemeral, func(s containerSpec) bool { return s.Name == "iormesh" })
@@ -126,7 +121,8 @@ func (c *cluster) assertTracerSpec(t *testing.T, p podJSON) {
 	}
 	if !slices.Equal(env, []string{"POD_NAME=metadata.name", "POD_NAMESPACE=metadata.namespace", "POD_UID=metadata.uid"}) ||
 		!slices.Equal(mounts, []string{"tracefs@/sys/kernel/tracing", "iormesh-traces@/opt/iormesh/data"}) ||
-		len(s.Command) == 0 || s.Command[0] != "iormesh" {
+		len(s.Command) < 5 || s.Command[0] != "iormesh" ||
+		!slices.Equal(s.Command[len(s.Command)-4:], []string{"-disk-limit", "0", "-disk-max-bytes", "1536MiB"}) {
 		t.Errorf("pod %s: env %v, mounts %v, command %v", p.Metadata.Name, env, mounts, s.Command)
 	}
 	c.assertImageID(t, p, p.Status.Ephemeral)

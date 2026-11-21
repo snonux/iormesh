@@ -160,23 +160,60 @@ func (k *Kubectl) Debug(ctx context.Context, argv ...string) error {
 	if err := k.t.requireImage(); err != nil {
 		return err
 	}
-	if err := k.Check(ctx); err != nil {
+	p, err := k.getPod(ctx)
+	if err != nil {
 		return err
 	}
-	return k.debug(ctx, argv)
+	if err := k.checkPod(p); err != nil {
+		return err
+	}
+	if err := checkContainers(p, k.t); err != nil {
+		return err
+	}
+	return k.debug(ctx, p, argv)
 }
 
-// debug runs `kubectl debug` once the pod has been checked.
-func (k *Kubectl) debug(ctx context.Context, argv []string) error {
+// debug runs `kubectl debug` once the pod p has been checked, with the
+// pod's disk bounds (podDiskArgs) after argv.
+func (k *Kubectl) debug(ctx context.Context, p podInfo, argv []string) error {
+	disk, err := k.podDiskArgs(p)
+	if err != nil {
+		return err
+	}
 	custom, err := writeCustom(k.t.Profile)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = os.Remove(custom) }()
-	if _, err := k.run.output(ctx, k.debugArgs(custom, argv)); err != nil {
+	if _, err := k.run.output(ctx, k.debugArgs(custom, slices.Concat(argv, disk))); err != nil {
 		return fmt.Errorf("kubectl debug %s/%s: %w", k.t.Namespace, k.t.Pod, err)
 	}
 	return nil
+}
+
+// podDiskArgs are a debug tracer's disk bounds, from the pod's own trace
+// emptyDir (PodDiskArgs of its sizeLimit, as the sidecar patch carries
+// them). A sizeLimit TraceCap cannot read (a decimal "2G", say) is
+// refused rather than starting a tracer without a byte cap, which the
+// kubelet would evict the whole pod for once it outgrew the volume.
+func (k *Kubectl) podDiskArgs(p podInfo) ([]string, error) {
+	limit := p.traceLimit()
+	if TraceCap(limit) == "" {
+		return nil, fmt.Errorf("%w: %s/%s: volume %q has sizeLimit %q; want a binary size like 512Mi or 2Gi",
+			ErrUnprepared, k.t.Namespace, k.t.Pod, TracesVolume, limit)
+	}
+	return PodDiskArgs(limit), nil
+}
+
+// traceLimit is the sizeLimit of the pod's trace emptyDir, "" without
+// one.
+func (p podInfo) traceLimit() string {
+	for _, v := range p.Spec.Volumes {
+		if v.Name == TracesVolume && v.EmptyDir != nil {
+			return v.EmptyDir.SizeLimit
+		}
+	}
+	return ""
 }
 
 // debugArgs is the `kubectl debug` argv. --attach=false: the tracer runs

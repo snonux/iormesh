@@ -1758,7 +1758,14 @@ Later phase — plain Linux servers (M4) come first.
   container parser, and the project defaulting to the namespace
   (#21). The trace dir sits one level inside the emptyDir, whose
   root the kubelet makes 0777, and a byte cap below its
-  `sizeLimit` ends the trace before an eviction would. The
+  `sizeLimit` ends the trace before an eviction would. In a
+  pod the byte cap replaces the percent limit (task df4): the
+  sidecar patch and a debug deploy both pass `-disk-limit 0
+  -disk-max-bytes` ¾ of the pod's own `sizeLimit`, since statfs
+  of an emptyDir reads the node's partition and a 90 % limit
+  stopped every tracer on a full node at once; `-disk-min-free`
+  stays as the node's floor, and a registry may not set either
+  flag for a pod entry. The
   image has no `/etc/machine-id`, which made every run in it
   fail; since task 7f4 a run in a pod needs none (above,
   docs/implementation.md M7 step 6). Pod identity status
