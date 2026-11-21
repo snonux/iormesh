@@ -205,6 +205,33 @@ func (c *Correlator) execComm(pid uint32, p *procState, comm string) {
 	c.setComm(pid, p, comm)
 }
 
+// renameTask applies a task_rename record (exec.c, task 0g4): the kernel
+// changed a task's comm — prctl(PR_SET_NAME), pthread_setname_np, a
+// /proc/<tid>/comm write, or an exec's own rename, which arrives just
+// before the exec record and names the process the same. Only the thread
+// group leader's (tid == pid) rename renames the process: an event's comm
+// is the process's name (docs/schema.md), the one /proc/<pid>/comm and ps
+// show, and that is the leader's comm. A worker thread naming itself (a
+// JVM, tokio or Go runtime pool) leaves the process's name alone; Java
+// thread names reach the trace through the agent (java.thread). A process
+// the correlator has not met yet needs nothing: its first record reads
+// its name from /proc (proc), which already holds the new one. An empty
+// comm (the handler drops records it cannot read, so never in practice)
+// renames nothing.
+func (c *Correlator) renameTask(r *types.TaskRenameEvent) {
+	c.advance(r.Time)
+	if r.Tid != r.Pid {
+		return
+	}
+	p, ok := c.procs[r.Pid]
+	if !ok {
+		return
+	}
+	if comm := types.StringValue(r.Comm[:]); comm != "" {
+		c.setComm(r.Pid, p, comm)
+	}
+}
+
 // exeFallbackComm names the process after its executable (exeComm) when
 // its exec record carried no comm (execComm). exe is the redacted path:
 // what the trace may show of it.

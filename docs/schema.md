@@ -88,7 +88,7 @@ Required fields are always present; a zero is a real zero.
 | `pid` | int | process id (tgid), as the tracer's PID namespace numbers it — the host's on a host, the pod's for an in-pod tracer (M7, below) |
 | `pid_incarnation` | int | process start on the boot clock: a reused pid is another process |
 | `tid` | int | thread id; `0` for records with no task context (`tcp_state`) |
-| `comm` | string | process name at the event: the kernel's comm (≤ 15 bytes); an exec renames it, so events before the exec carry the old name and the `exec` event and later ones the new |
+| `comm` | string | process name at the event: the kernel's comm of the main thread (≤ 15 bytes), what `ps` shows; an exec renames it, so events before the exec carry the old name and the `exec` event and later ones the new, and so does the main thread's `prctl(PR_SET_NAME)` (the `task_rename` record); a worker thread naming itself does not rename the process |
 | `event` | string | the event kind, below |
 | `fd` | int | descriptor acted on — the argument, or the returned one for opens and accepts; `-1` when none, also for a negative argument (`fstat(-1)`, EBADF), which names no instance |
 | `fd_gen` | int | how often this fd number was (re)created in this incarnation; `0` = predates the trace or no fd. A forked child continues its parent's count (it inherits the parent's instances) |

@@ -846,7 +846,11 @@ unit-tested with synthetic record streams:
   exec record (`sched_process_exec`, successful execs only)
   replaces `comm` with the kernel's post-exec name for later
   events and the process node (task hd4; an empty record
-  comm falls back to the exe's basename cut to 15 bytes);
+  comm falls back to the exe's basename cut to 15 bytes), and so
+  does the main thread's `task_rename` record
+  (`prctl(PR_SET_NAME)`, a `/proc/<pid>/comm` write; task 0g4).
+  A worker thread's rename is ignored: `comm` is the process's
+  name, and Java thread names come from the agent;
   `wall_ns = boot_ns + WallOffsetNS` (`BootToWallOffset`,
   measured once); `err` is the errno name.
 - **Host-level events** go through the same queue, so `seq`

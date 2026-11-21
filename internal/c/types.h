@@ -9,7 +9,8 @@
 // (exec.c, M2); JAVA_MARK_EVENT and struct java_mark_event added
 // (javamark.c, task td4); TCP_SEQ_EVENT and struct tcp_seq_event added
 // (tcpseq.c, task xe4); SYSCALL_RESTART_EVENT's comments say no program
-// emits it (task pf4); TCP_STATE_FINAL added (sock.c, task sf4).
+// emits it (task pf4); TCP_STATE_FINAL added (sock.c, task sf4);
+// task_rename_event's comment names its consumer (task 0g4).
 
 //+build ignore
 
@@ -933,8 +934,8 @@ struct task_newtask_event {
 // task_rename_event is a control record, not a syscall event: the hand-written
 // task:task_rename handler in exec.c emits it whenever the kernel changes a
 // task's comm (prctl(PR_SET_NAME), pthread_setname_np, a /proc/<tid>/comm
-// write, and the exec's own rename). Userspace applies it to the tid->comm
-// cache (handleTaskRenameEvent); it is never rendered as a row.
+// write, and the exec's own rename). The correlator renames the process when
+// tid is the pid (renameTask, task 0g4); it is never an event of its own.
 //
 // pid is the renamed task's thread-group id and tid its task id - the
 // *renamed* task, which a /proc/<tid>/comm write makes different from the

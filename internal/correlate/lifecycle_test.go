@@ -388,6 +388,50 @@ func TestExecRefreshesComm(t *testing.T) {
 	}
 }
 
+// renameRecord is the task_rename record of f's thread with comm.
+func (f feeder) renameRecord(comm string) {
+	rec := &types.TaskRenameEvent{EventType: types.TASK_RENAME_EVENT, Time: f.tick(),
+		Pid: f.pid, Tid: f.tid}
+	copy(rec.Comm[:], comm)
+	f.handle(rec)
+}
+
+// TestRenameRefreshesComm (task 0g4): the leader's prctl(PR_SET_NAME)
+// renames the process for later events and its graph node, events before
+// it keep the old name; a worker thread naming itself, and an empty name,
+// rename nothing.
+func TestRenameRefreshesComm(t *testing.T) {
+	cases := []struct {
+		name string
+		tid  uint32
+		comm string
+		want string
+	}{
+		{"leader", 10, "renamed", "renamed"},
+		{"worker thread", 11, "worker-1", "proc10"},
+		{"empty name", 10, "", "proc10"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, sink := newTest(t)
+			f := feeder{t, c, 10, 10, new(uint64)}
+			f.open("/before", 0, 3)
+			feeder{t, c, 10, tc.tid, f.now}.renameRecord(tc.comm)
+			f.open("/after", 0, 4)
+			if err := c.Close(); err != nil {
+				t.Fatal(err)
+			}
+			opens := byKind(sink.events, schema.KindOpenat)
+			if opens[0].Comm != "proc10" || opens[1].Comm != tc.want {
+				t.Errorf("open comms %q, %q; want proc10, %q", opens[0].Comm, opens[1].Comm, tc.want)
+			}
+			if got := processComm(t, c.Graph(), 10, 1010); got != tc.want {
+				t.Errorf("node comm %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestExeComm: the kernel's naming of an exec'd process — the basename,
 // cut to 15 bytes, here without a split UTF-8 character.
 func TestExeComm(t *testing.T) {

@@ -10,7 +10,8 @@
 // target_map's kernel inserts and removals keep the target hint
 // (targethint.c, task 9f4); ior_exit_group_dead's verification note names
 // the root test that runs both of its paths (task nf4); the restart fold's
-// ior_restart_forget is gone with restart.c (task pf4).
+// ior_restart_forget is gone with restart.c (task pf4); task_rename's comments
+// say how iormesh attaches and consumes it (task 0g4).
 
 //+build ignore
 
@@ -642,15 +643,11 @@ int handle_sched_process_exit(void *ctx) {
 // execve()s is renamed by the sched_process_exec record, and a thread that
 // renames itself (prctl(PR_SET_NAME)/pthread_setname_np: tokio, Java, Chrome
 // and Bun worker pools do so as their first act) is reported by the task_rename
-// record below. That record can still be missing, so userspace treats the seed
-// as provisional (setCachedProvisional): it re-reads /proc once when rename
-// records cannot be trusted (the probe failed to attach, ring-buffer drops are
-// not monitored or their counter cannot be read) or when the seed's record may
-// predate a drop the monitor has seen (provisionalSeedNeedsRecheck, task xr2).
-// A rename record lost to backpressure otherwise shows up as a drop, whose
-// sweep flags the seed for the same read. A rename record handle_task_rename
-// discards because it cannot read the new name is counted as a drop as well
-// (task mz2), so that sweep sees it.
+// record below. A rename record lost to backpressure, or one handle_task_rename
+// discards because it cannot read the new name, is counted as a ring-buffer
+// drop, so the loss is visible in the trace. (ior's provisional-seed /proc
+// re-read is not part of iormesh: its correlator names a process from one /proc
+// read when it takes the process on and from the exec and rename records after.)
 //
 // The record also carries the raw clone_flags and the creator's tgid, the inputs
 // userspace needs to tell a thread from a process and to model the fd table the
@@ -876,22 +873,24 @@ int handle_task_newtask_ns(void *ctx) {
 // Why task_rename exists: nothing else reports a task renaming itself. A thread
 // calls prctl(PR_SET_NAME) or pthread_setname_np() (which writes
 // /proc/self/task/<tid>/comm), and the kernel changes task->comm without any
-// syscall record, exec record or open payload telling userspace; the tid->comm
-// cache then kept serving the old name for the rest of the thread's life (until
-// an open event's payload comm happened to heal it). The visible damage was a
-// wrong label on every later row and, under -comm, an inverted filter:
-// -comm <new name> dropped the renamed thread's rows while -comm <old name> kept
-// admitting them, and an openat dropped at the enter-side gate (no cached name
-// match) could not heal the cache either.
+// syscall record or exec record telling userspace. In ior the tid->comm cache
+// then served the old name for the rest of the thread's life. In iormesh the
+// program was compiled but not attached until task 0g4, so a process that
+// renamed its main thread kept its old comm on every later event and on its
+// graph node (the Processes view).
 //
 // task:task_rename fires from __set_task_comm() for every change of task->comm:
 // prctl, a /proc/<tid>/comm write (also by a sibling thread) and the exec's own
 // rename in begin_new_exec (which merely repeats the sched_process_exec record's
 // name). Emitting it as a control record into the syscall ring buffer gives
 // userspace an ordered "this tid is now called X" notice, like the exec record:
-// the buffer hands records out in reservation order to the single event-loop
-// goroutine, so the rename is applied after the renaming task's earlier rows and
-// before its later ones (handleTaskRenameEvent).
+// the buffer hands records out in reservation order to the single consumer, so
+// the rename is applied after the renaming task's earlier events and before its
+// later ones. The correlator (renameTask, internal/correlate/lifecycle.go)
+// renames the process for the main thread's record only: an event's comm is
+// the process's name, the leader's comm that ps shows; a worker thread's own
+// name does not rename its process. bpf.ControlProbes attaches it with every
+// family.
 //
 // It is attached as a RAW tracepoint (SEC raw_tracepoint, args = the
 // TP_PROTO of the tracepoint: the task and the new name). The classic
@@ -915,10 +914,9 @@ int handle_task_newtask_ns(void *ctx) {
 // the old name (bpf_get_current_comm read it before the copy). In ring order
 // the stale payload then follows the rename. The window is nanoseconds wide,
 // and a self-rename (prctl) cannot hit it, since T is busy renaming itself.
-// Userspace mitigates it: an open payload that contradicts the cached name
-// leaves the entry stale, and T's next use re-reads /proc/<T>/comm, which by
-// then holds the new name (setCachedFromEnterPayload in
-// internal/eventloop_comm.go); only the row in between keeps the old name.
+// The race does not reach iormesh's events: the correlator names a process
+// from /proc and from exec and rename records, and takes an open payload's
+// comm only for a process it has no name for yet.
 //
 // Cost: one 40-byte record per rename. Renames are rare (worker pools rename each
 // thread once at start; exec renames once per exec), so this is far below the

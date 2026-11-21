@@ -9,7 +9,8 @@ import "strings"
 // internal/pidns_root_test.go, internal/sockreuse_root_test.go,
 // internal/exit_root_test.go, internal/pidnsconnect_root_test.go,
 // internal/badfd_root_test.go, internal/sockclose_root_test.go,
-// internal/sockfinal_root_test.go and internal/btf_root_test.go: they
+// internal/sockfinal_root_test.go, internal/btf_root_test.go and
+// internal/rename_root_test.go: they
 // load the real BPF object, attach the TCP programs or the loader's default
 // probe set, and read the ring buffer (M1 steps 4 and 5; process-tree
 // following and the exec watch, M2 steps 1–2; every event family, M2 step
@@ -24,7 +25,8 @@ import "strings"
 // and a dual-stack bound connect kept on one connection, task qf4; the
 // raw_syscalls record relocated against el9 BTF on any kernel, and a
 // traced loop seen as several syscall kinds, task of4; the final counter
-// snapshot of a socket still open at the session's end, task sf4). They
+// snapshot of a socket still open at the session's end, task sf4; a
+// prctl(PR_SET_NAME) rename reflected in the process's comm, task 0g4). They
 // skip for anybody but root, so `mage test` passes them by, and `mage
 // bpfRootTest` is the one place that runs them. The names are listed
 // rather than matched by a pattern so that a renamed test fails a gate
@@ -66,6 +68,7 @@ func RootBPFTests() []string {
 		"TestNegativeFdAcrossExec",
 		"TestEl9RecordLayout",
 		"TestDispatchSeesSeveralKinds",
+		"TestRenameReflected",
 	}
 }
 

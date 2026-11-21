@@ -78,7 +78,8 @@ type seqCall struct{ Buf, Off, N int }
 // (pidns_root_test.go), whose variable carries the host bystander's pid,
 // the multithreaded child of TestProcessExitGroupDead (exit_root_test.go),
 // the namespace side of TestPidNSConnectEstablished
-// (pidnsconnect_root_test.go) and the fstat(-1) pair of
+// (pidnsconnect_root_test.go), the self-renaming child of
+// TestRenameReflected (rename_root_test.go) and the fstat(-1) pair of
 // TestNegativeFdAcrossExec (badfd_root_test.go).
 func TestMain(m *testing.M) {
 	if host := os.Getenv(pidnsChildEnv); host != "" {
@@ -89,6 +90,9 @@ func TestMain(m *testing.M) {
 	}
 	if os.Getenv(pidnsConnectEnv) != "" {
 		os.Exit(pidnsConnectMain())
+	}
+	if os.Getenv(renameChildEnv) != "" {
+		os.Exit(renameChildMain())
 	}
 	if role := os.Getenv(badFDChildEnv); role != "" {
 		os.Exit(badFDChildMain(role))

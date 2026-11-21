@@ -91,13 +91,16 @@ func ProbesFor(families []tracepoints.TraceFamily) []Probe {
 // their first syscall, sched_process_exit removes a dead process from it
 // (so a reused PID is not traced), and sched_process_exec reports execs —
 // of traced processes, and in a pattern session (Config.ExecWatch) of every
-// untraced one, with its argv. Each stands alone: a kernel lacking one
-// skips just that one, which Skipped reports.
+// untraced one, with its argv. task_rename (a raw tracepoint) reports a
+// traced task's comm change, prctl(PR_SET_NAME) above all, so the
+// correlator renames the process (task 0g4). Each stands alone: a kernel
+// lacking one skips just that one, which Skipped reports.
 func ControlProbes() []Probe {
 	return []Probe{
 		{Program: "handle_task_newtask", Category: "task", Event: "task_newtask"},
 		{Program: "handle_sched_process_exec", Category: "sched", Event: "sched_process_exec"},
 		{Program: "handle_sched_process_exit", Category: "sched", Event: "sched_process_exit"},
+		{Program: "handle_task_rename", Category: rawCategory, Event: "task_rename"},
 	}
 }
 

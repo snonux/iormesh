@@ -1405,7 +1405,14 @@ bpfRootTest` now hold the fix on a 7.x host:
   instructions (`bpf_program__insns`, `internal/corereloc`), not
   the loaded ones. With `preserve_access_index` dropped from the
   enter struct it fails: id is then read at 0, the pt_regs slot,
-  and args at 8.
+  and args at 8. Each program must read its field at the wanted
+  offset and nothing of the record below it; a later load is no
+  regression (task bg4). A relocation the trimmed BTF cannot
+  satisfy makes libbpf poison the instruction (a call with imm
+  `0xbad2310`); the test then fails with a hint to regenerate
+  the BTF instead of reporting wrong offsets. A `mage test`
+  gate (`internal/buildgate/testonly_test.go`) keeps
+  `internal/corereloc` out of every non-test file.
 - **`TestDispatchSeesSeveralKinds`** traces an open/read/close
   loop and requires more than one syscall kind, and all three
   enters. The el9 bug sent nearly every call to the read
@@ -1414,12 +1421,17 @@ bpfRootTest` now hold the fix on a 7.x host:
 The BTF is
 `internal/testdata/btf/rocky9.9-5.14.0-741.22.1.el9_9.x86_64.min.btf`
 (11 KB), trimmed to what the object's CO-RE relocations name. It
-was extracted from the Rocky kernel-core RPM; a trim of iom1's
+was extracted from the Rocky kernel-core RPM
+(`BaseOS/x86_64/os/Packages/k/kernel-core-5.14.0-741.22.1.el9_9.x86_64.rpm`
+on the Rocky 9.9 mirror, sha256
+`8a339817a1d896907da0a776a00f5a022bf73aa84f1e8983f1da2c314fe81294`,
+as the repository's `primary.xml` lists it); a trim of iom1's
 live BTF is byte-identical. To regenerate it after `mage
 bpfBuild` (needed when the four programs gain relocations
 against types the file lacks):
 
 ```sh
+sha256sum kernel-core-5.14.0-741.22.1.el9_9.x86_64.rpm  # 8a339817…
 rpm2cpio kernel-core-5.14.0-741.22.1.el9_9.x86_64.rpm | cpio -idm
 scripts/extract-vmlinux lib/modules/*/vmlinuz > vmlinux  # kernel tree
 bpftool gen min_core_btf vmlinux el9.min.btf internal/c/iormesh.bpf.o
@@ -1435,6 +1447,24 @@ keeps "at least one". The child locks its main thread in
 `init()`. `TestJavaMarkNamesTheNative` reports a missing
 off-launcher-thread mark in an error of its own, which names
 commit 46ba0e49.
+
+## Comm renames (task 0g4)
+
+exec.c's `task_rename` program was compiled and loaded but never
+attached, so a process renaming itself kept its old `comm` in the
+trace and the graph. It is now a control probe (raw tracepoint,
+every family), and the correlator applies the main thread's
+rename; a worker thread's is ignored (docs/schema.md, `comm`).
+`TestRenameReflected` (root, `internal/rename_root_test.go`) runs
+a Go child that names a worker thread and then its main thread
+with `prctl(PR_SET_NAME)` between two `fstat(-1)` calls. Both
+renames must arrive as records, the first call must keep the old
+comm and the second carry the new one. correlate's
+`TestRenameRefreshesComm` holds the leader/worker rule.
+`TestEveryHandWrittenProgramIsAttached` now lists the programs
+from the compiled object's ELF symbols rather than a regex over
+the C, and requires every attached program to be in the object
+(task bg4).
 
 ## Local site (task nb4)
 

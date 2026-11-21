@@ -1,11 +1,11 @@
 package bpf
 
 import (
+	"debug/elf"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -165,7 +165,7 @@ func TestDefaultProbes(t *testing.T) {
 	}
 	for _, need := range []string{"syscalls:sys_enter_openat", "syscalls:sys_exit_accept4",
 		"sock:inet_sock_set_state", "task:task_newtask", "sched:sched_process_exec",
-		"sched:sched_process_exit"} {
+		"sched:sched_process_exit", "raw_tracepoint:task_rename"} {
 		if !seen[need] {
 			t.Errorf("default probes lack %s", need)
 		}
@@ -192,7 +192,10 @@ func TestProbesForFamilies(t *testing.T) {
 			t.Errorf("probes for every family lack %s", need)
 		}
 	}
-	for _, p := range ProbesFor([]tracepoints.TraceFamily{tracepoints.FamilyFile}) {
+	// The control probes attach with every family; task_rename is one of
+	// them and a raw tracepoint too, so only the family's own count.
+	fileOnly := ProbesFor([]tracepoints.TraceFamily{tracepoints.FamilyFile})
+	for _, p := range fileOnly[:len(fileOnly)-len(ControlProbes())] {
 		if p.Category == "sock" || p.Category == rawCategory {
 			t.Errorf("file family alone attaches %s", p)
 		}
@@ -220,67 +223,76 @@ func TestDefaultProbeProgramsExist(t *testing.T) {
 	}
 }
 
-// handWrittenProgramRE finds a program definition in a hand-written BPF
-// source: its SEC line, any comment lines, then "int <name>(".
-var handWrittenProgramRE = regexp.MustCompile(`SEC\("[^"]+"\)\n(?:\s*//[^\n]*\n)*int\s+(\w+)\(`)
+// bpfObject is the object `mage bpfBuild` compiles and internal embeds;
+// `mage test` builds it first.
+const bpfObject = "../c/iormesh.bpf.o"
 
-// TestEveryHandWrittenProgramIsAttached: every program the hand-written BPF
-// sources define is one the Go side attaches somewhere - a probe of some
-// family, a dispatcher, the PID-namespace pick of the task_newtask program
-// or the Java mark's uprobes - or one it runs instead: the final socket
-// snapshot, which FinalSockets runs through BPF_PROG_TEST_RUN (task sf4).
-// restart.c defined two programs no Go code
-// attached, so the state they were to keep was never kept (task pf4). The
-// generated handlers are left out: they cover the whole syscall table, and
-// only the families pick which run.
-//
-// notYetDecided lists the programs known to share the defect, each with the
-// task that decides it; an entry is no licence to add one.
-func TestEveryHandWrittenProgramIsAttached(t *testing.T) {
-	notYetDecided := map[string]string{
-		// exec.c's task_rename record has no consumer either (task 0g4).
-		"handle_task_rename": "0g4",
+// objectPrograms lists the BPF programs of the compiled object: its global
+// functions in an executable section other than .text (each program's
+// section is its SEC name; .text holds the shared subprograms). Asking
+// the object rather than matching the C sources cannot miss a spelling of
+// a definition (task bg4).
+func objectPrograms(t *testing.T) map[string]string {
+	t.Helper()
+	f, err := elf.Open(bpfObject)
+	if err != nil {
+		t.Fatalf("%v (run mage bpfBuild, or mage test, which builds it)", err)
 	}
+	defer func() { _ = f.Close() }()
+	syms, err := f.Symbols()
+	if err != nil {
+		t.Fatal(err)
+	}
+	progs := map[string]string{}
+	for _, s := range syms {
+		if elf.ST_TYPE(s.Info) != elf.STT_FUNC || elf.ST_BIND(s.Info) != elf.STB_GLOBAL ||
+			int(s.Section) >= len(f.Sections) {
+			continue
+		}
+		sec := f.Sections[s.Section]
+		if sec.Flags&elf.SHF_EXECINSTR == 0 || sec.Name == ".text" {
+			continue
+		}
+		progs[s.Name] = sec.Name
+	}
+	return progs
+}
+
+// TestEveryHandWrittenProgramIsAttached: every hand-written program of
+// the compiled object is one the Go side attaches somewhere - a probe of
+// some family, a dispatcher, the PID-namespace pick of the task_newtask
+// program or the Java mark's uprobes - or one it runs instead: the final
+// socket snapshot, which FinalSockets runs through BPF_PROG_TEST_RUN (task
+// sf4). restart.c defined two programs no Go code attached, so the state
+// they were to keep was never kept (task pf4), and exec.c's task_rename was compiled and loaded for nothing until
+// task 0g4 attached it. The generated handle_sys_* handlers are left out:
+// they cover the whole syscall table, and only the families pick which
+// run. The reverse holds too: every program the Go side attaches is in
+// the object, so a renamed handler fails here, not on a host.
+func TestEveryHandWrittenProgramIsAttached(t *testing.T) {
 	attached := map[string]bool{newtaskProg: true, newtaskNSProg: true,
 		javaMarkEnterProg: true, javaMarkExitProg: true, sockFinalProg: true}
 	for _, p := range append(ProbesFor(tracepoints.AllFamilies()), dispatchers...) {
 		attached[p.Program] = true
 	}
-	files, err := filepath.Glob("../c/*.c")
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := 0
-	for _, f := range files {
-		if filepath.Base(f) == "generated_tracepoints.c" {
+	progs := objectPrograms(t)
+	handWritten := 0
+	for name, sec := range progs {
+		if strings.HasPrefix(name, "handle_sys_") {
 			continue
 		}
-		src, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, m := range handWrittenProgramRE.FindAllSubmatch(src, -1) {
-			found++
-			name := string(m[1])
-			switch task, known := notYetDecided[name]; {
-			case attached[name] && known:
-				t.Errorf("%s is attached now: drop it from notYetDecided (task %s)", name, task)
-			case !attached[name] && !known:
-				t.Errorf("%s defines program %s, which no Go code attaches", filepath.Base(f), name)
-			}
+		handWritten++
+		if !attached[name] {
+			t.Errorf("the object's program %s (SEC %q) is one no Go code attaches", name, sec)
 		}
 	}
-	// The pattern's own check: it must find at least every hand-written
-	// program the Go side names (all but the generated handle_sys_* ones).
-	handWritten := 0
+	if handWritten == 0 {
+		t.Fatalf("no hand-written program in %s", bpfObject)
+	}
 	for name := range attached {
-		if !strings.HasPrefix(name, "handle_sys_") {
-			handWritten++
+		if _, ok := progs[name]; !ok {
+			t.Errorf("Go attaches program %s, which %s does not have", name, bpfObject)
 		}
-	}
-	if found < handWritten {
-		t.Errorf("found %d program definitions in internal/c, fewer than the %d hand-written ones attached: "+
-			"the pattern misses some", found, handWritten)
 	}
 }
 

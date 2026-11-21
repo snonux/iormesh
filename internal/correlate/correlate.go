@@ -126,8 +126,9 @@ func New(cfg Config) *Correlator {
 // Handle consumes one record from bpf.Tracer.Records: syscall records
 // (M1's, and the path, name, dup3 and fcntl enters of M2's file surface),
 // TCP state records, the process lifecycle records of M2 steps 1 and 6
-// (new processes, execs, exits), M2 step 7's records (handleIPC:
-// pipes, socketpairs, kill, epoll and poll, socket addresses, signals)
+// (new processes, execs, exits) and comm renames (task 0g4), M2 step 7's
+// records (handleIPC: pipes, socketpairs, kill, epoll and poll, socket
+// addresses, signals),
 // M2 step 9's native stack records (stacks.go) and M4's TCP sequence
 // records (streamseq.go).
 // Other record types are ignored; the exec_argv records of a pattern
@@ -172,6 +173,8 @@ func (c *Correlator) Handle(rec any) error {
 		c.exitTask(r)
 	case *types.ProcessExecEvent:
 		c.execTask(r)
+	case *types.TaskRenameEvent:
+		c.renameTask(r)
 	case *types.StackEvent:
 		if err := c.stackRecord(r); err != nil {
 			return err
