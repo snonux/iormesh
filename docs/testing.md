@@ -1329,26 +1329,74 @@ goes through `sudo -n`. It:
 1. builds the controller, the static release tracer (`mage
    releaseTracer`, which ran on the Fedora host directly), the
    agent jar and the workload jar;
-2. refuses to go on below 20 GiB free, or on btrfs with metadata
-   within 0.5 GiB of its allocation and under 2 GiB unallocated
-   (before every create, build and push; it never balances);
-3. starts a local registry (`registry:2`, pinned) on
-   `localhost:5001`, creates the cluster `iormesh-m7` with its
-   kubeconfig at the repository root (`.kind-kubeconfig`, or
-   `$IORMESH_KIND_KUBECONFIG`; owned by the operator, ignored by
-   git) and wires the node's containerd to the registry;
-4. builds and pushes the tracer image
+2. refuses to go on when Docker's data root (`docker info`'s
+   `DockerRootDir`, where the node, images and registry volume
+   land) has under 20 GiB free, or on btrfs with metadata within
+   0.5 GiB of its allocation and under 2 GiB unallocated — before
+   the run and before each image build; it never balances, and
+   says so (a NOTICE) when the `sudo -n btrfs` check cannot run;
+3. records which base images (`kindest/node`, `registry`,
+   `eclipse-temurin`) are present, in a state file beside the
+   kubeconfig;
+4. starts a local registry (`registry:2`, pinned) on
+   `localhost:5001` with a named volume `iormesh-registry-data`
+   (a stopped container of that name is removed first), creates
+   the cluster `iormesh-m7` without `--kubeconfig` — root never
+   writes a path the operator chose — and writes `kind get
+   kubeconfig`'s output as the operator to `.kind-kubeconfig` at
+   the repository root (or `$IORMESH_KIND_KUBECONFIG`; 0600,
+   ignored by git), then wires the node's containerd to the
+   registry; its kind and kube-proxy configs are `os.CreateTemp`
+   files;
+5. builds and pushes the tracer image
    (`scripts/container/tracer-image.Containerfile`) and a workload
    image (`scripts/container/kind-workload.Containerfile`: a JRE,
-   `workload.jar`, and, test-only, the agent jar), so each pod's
-   `imageID` carries the registry digest — a `kind load`ed image
-   reports a bare config digest, which deploy refuses;
-5. installs Traefik (chart 42.4.1, Traefik 3.7, a ClusterIP
-   Service: kind has no load balancer);
-6. runs `TestKindAcceptance` with kube-proxy in iptables mode,
+   `workload.jar`, and, test-only, the agent jar), both labelled
+   `org.iormesh.acceptance=m7`, so each pod's `imageID` carries the
+   registry digest — a `kind load`ed image reports a bare config
+   digest, which deploy refuses;
+6. installs Traefik (chart 42.4.1, Traefik 3.7, a ClusterIP
+   Service: kind has no load balancer) from a helm repository
+   config and cache in a temporary directory, so the operator's
+   helm repositories stay as they were;
+7. runs `TestKindAcceptance` with kube-proxy in iptables mode,
    switches kube-proxy to nftables and runs `TestKindClusterIP`;
-7. deletes the cluster and the registry (`IORMESH_KIND_KEEP=1`
-   keeps them).
+8. tears down exactly what it made (`internal/kindrun`
+   `TeardownPlan`): the cluster, the registry container with its
+   volumes and the named volume, the run's two tags, any image
+   left with the run's label (`docker image prune --all
+   --filter=label=org.iormesh.acceptance=m7`), the base images
+   the run pulled (by ID, against the recorded state; with no
+   state none), the kubeconfig and the state file.
+   `IORMESH_KIND_KEEP=1` keeps everything; `mage k8sTeardown`
+   runs the same steps on its own and is safe to repeat. Never
+   `docker system prune` or an unfiltered prune: the daemon holds
+   the operator's own images, volumes and build cache (the first
+   manual run's system prune removed unrelated images). BuildKit's
+   build cache cannot be labelled, so the two builds' cache — about
+   0.6 GB with the JRE base's layers, measured after a run — stays;
+   it is the operator's to prune.
+
+Checked on 2026-11-21 with a real run over a daemon holding
+unrelated images: `docker images -a` was identical before and
+after (the three pulled base images removed by ID, the operator's
+eight tags untouched), no volume or container left, no kind
+cluster, no kubeconfig or state file.
+
+Ctrl-C or SIGTERM during the run starts the teardown as `mage
+k8sTeardown` in a session of its own (log in `k8s-teardown.log`),
+which outlives mage's 5-second grace for cancelled targets and the
+terminal's process-group SIGINT; if the daemon or the binary is
+gone by then, run `mage k8sTeardown` by hand — the recovery step
+for any interrupted run. `internal/kindrun`'s tests drive the
+plans with a fake runner recording every argv: teardown names only
+the run's objects (no `system prune`, no prune without the label
+filter), removes base images only against recorded state, keeps
+the first run's state across a kept cluster's rerun, replaces a
+stopped registry, never passes `--kubeconfig` to `kind create`,
+writes the kubeconfig without following a planted symlink, and
+the disk guard reads the data root and refuses a full disk or
+tight btrfs metadata.
 
 The tests read the cluster from `IORMESH_KIND_*` (kubeconfig,
 context, the two images, the iormeshctl binary, the node
@@ -1368,7 +1416,7 @@ discover`, `build -registry`.
 | `clusterip` | tcp-nat's client dials the server Service's ClusterIP (880, DNAT to the pod's 80): the build prints the routed edge `→ Service → deployment → pod (fused, 1 connections)`; each pod's trace matches `expect-client.json` / `expect-server.json` and the merge `expect.json`, the rig's addresses replaced by the client pod's, the ClusterIP and the server pod's (no SNAT between pods); a golden with the client dialing the pod fails |
 | `hairpin` | tcp-nat's two roles in one pod, the client dialing the pod's own Service: one fused connection, the server end seeing the node's masquerade address (10.244.0.1), the Service and pod named |
 | `identity` | every pod is its own store directory and host, `pod-<uid>`, with the FQDN `<name>.<ns>.<uid[:8]>`; all share one `boot_id` |
-| `ingress` | the gateway (debug container with the agent) asks for `shop.iormesh.test` through Traefik (hostAliases to Traefik's ClusterIP); the backend runs under a sidecar. The build prints one routed edge `→ shop.iormesh.test → ingress/<ns>/shop → <ns>/inventory → <ns>/deployment/inventory (route, 1 connections)`, no route flag; `model.json` and `graph.svg` carry it; the discovered route equals the scenario's declared `routes.yaml`, and the snapshot holds the IngressRoute's host too (`traefik.io`); the merged trace matches `workload/scenarios/ingress/expect.json` (both ends unresolved: Traefik splits the call; the gateway's `dns` and `http` events carry the FQDN) |
+| `ingress` | the gateway (debug container with the agent) asks for `shop.iormesh.test` through Traefik (hostAliases to Traefik's ClusterIP); the backend runs under a sidecar. The build prints one routed edge `→ shop.iormesh.test → ingress/<ns>/shop → <ns>/inventory → <ns>/deployment/inventory (route, 1 connections)`, no route flag; `model.json` and `graph.svg` carry it; the discovered route's FQDN, ingress, Service and ingress Service equal the scenario's declared `routes.yaml` (discovery leaves the workload to the Service, so it is checked in the build's line), and the snapshot holds the IngressRoute's host too (`traefik.io`); the merged trace matches `workload/scenarios/ingress/expect.json` (both ends unresolved: Traefik splits the call; the gateway's `dns` and `http` events carry the FQDN) |
 | `rbac` | `routes discover` as a ServiceAccount allowed only `list` on services, pods, endpointslices, replicasets, ingresses and ingressroutes (both Traefik groups), not secrets: same two routes |
 | `sigterm` | deleting a pod ends its debug tracer on the kubelet's SIGTERM: exit 0, about 0.6 s after the delete, inside the 5 s grace |
 
@@ -1430,9 +1478,12 @@ context was checked against the default registry and refused
 (`build` takes it now, `refresh` shares its own;
 `TestRoutesRegistryFlag`); a selector matched a terminating pod
 right after a rollout and deploy failed on it (`Select` skips
-`deletionTimestamp`; `TestSelectArgvAndFilter`); kubectl 1.30's
-gate (`TestDebugArgv`). Follow-ups: cf4 (agent staging in the
-JVM's root; built, kind re-run pending), df4 (debug deploy without a byte cap: the 90 %
+`deletionTimestamp`; `TestSelectArgvAndFilter` — so deploy,
+collect and rm (its final collect) of a selector entry now skip
+pods in their grace period, whose tracer is ending on SIGTERM
+anyway); kubectl 1.30's gate (`TestDebugArgv`). Follow-ups: cf4
+(agent staging in the JVM's root; built since), df4 (debug
+deploy without a byte cap: the 90 %
 `-disk-limit` stops every debug tracer on a node fuller than
 that, so the test passes `-disk-limit=0 -disk-max-bytes=1536MiB`),
 ef4 (deploy returns before the tracer is attached; the test waits

@@ -40,3 +40,7 @@ internal/c/generated_tracepoints.c.tmp-*
 # The kind acceptance cluster's kubeconfig (mage k8sAcceptance, task yb4):
 # credentials, never committed.
 /.kind-kubeconfig
+
+# mage k8sAcceptance state and interrupted-teardown log (task yb4).
+/.kind-kubeconfig.state.json
+/k8s-teardown.log

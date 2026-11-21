@@ -434,7 +434,10 @@ Scenario notes:
   name in its bracket, since the route map matches the request's
   host. `workload/scenarios/ingress` holds the merged golden
   (both ends unresolved, TEST-NET addresses the kind test
-  replaces) and the declared `routes.yaml`.
+  replaces) and the declared `routes.yaml`. The golden does not
+  check the backend's `close`: the JDK HttpServer closes the
+  exchange on whichever thread finishes it, so declaring the
+  thread failed a from-scratch run.
 - **Load scenarios** (S3): `syscall-burst` exists to be
   measured, not golden-checked — its event count scales with
   `--ops` and its threads interleave as the scheduler decides,
@@ -1796,37 +1799,42 @@ Later phase — plain Linux servers (M4) come first.
   the M0 ingress scenario renders as one routed edge — app →
   FQDN → Traefik → deployment — with no tracer on the ingress.
   Status (2026-11-21, task yb4): **passed on kind, with one
-  test-only workaround** (since removed, task cf4; re-run
-  pending) — `mage k8sAcceptance` from scratch,
-  green (`integrationtests/kind`; kind 0.31, Kubernetes 1.35.0,
-  containerd 2.2.0, one node; docs/testing.md "M7 acceptance on
-  kind"). tcp-nat's client and server as pods under debug
-  containers, deployed by iormeshctl from a local registry
-  (imageID carries the registry digest), match their per-pod and
-  merged goldens with the ClusterIP and pod addresses; the
-  connection fuses (iptables and nftables) and the build names
-  Service, Deployment and pod; each pod is its own `pod-<uid>`
-  host, all on one `boot_id`; the debug containers carry exactly
-  #13's capabilities under `RuntimeDefault` seccomp; the pod's
-  deletion ends the tracer on SIGTERM. The new `ingress` scenario
-  (gateway → Traefik → inventory, golden and `routes.yaml` in
+  test-only workaround (cf4) and two test-side compensations
+  for open gaps (df4: `-disk-limit=0 -disk-max-bytes` through
+  registry flags; ef4: waiting for the tracer's `attached` log
+  line before starting workloads)** — `mage k8sAcceptance` from
+  scratch, green (`integrationtests/kind`; kind 0.31, Kubernetes
+  1.35.0, containerd 2.2.0, one node; docs/testing.md "M7
+  acceptance on kind"). tcp-nat's client and server as pods
+  under debug containers, deployed by iormeshctl from a local
+  registry (imageID carries the registry digest), match their
+  per-pod and merged goldens with the ClusterIP and pod
+  addresses; the connection fuses (iptables and nftables) and
+  the build names Service, Deployment and pod; each pod is its
+  own `pod-<uid>` host, all on one `boot_id`; the debug
+  containers carry exactly #13's capabilities under
+  `RuntimeDefault` seccomp; the pod's deletion ends the tracer on
+  SIGTERM. The new `ingress` scenario (gateway → Traefik →
+  inventory, golden and `routes.yaml` in
   `workload/scenarios/ingress`), its backend under a sidecar and
   its gateway under a debug container, renders as one routed
   edge gateway → `shop.iormesh.test` → the Ingress → Service →
-  Deployment in the summary, `model.json` and `graph.svg`, found
-  by `routes discover` as a list-only ServiceAccount. The
-  workaround: the gateway's HTTP host comes from the Java agent,
-  and step 3 of docs/implementation.md M7 (#14's staging inside
-  the JVM's root) was not built, so the test mounted the trace
-  emptyDir into the app container and shipped the agent jar in
-  the workload image. Task cf4 built the staging and removed the
-  workaround from the test; the kind re-run without it is
-  pending (task cf4). Fixed on the way:
-  `build -registry`, selectors skipping terminating pods, kubectl
-  1.30's `--custom` gate. Open: debug deploys carry no byte cap
-  and trip the percent disk limit on a full node (df4), deploy
-  returns before the tracer is attached (ef4), a route edge never
-  names a sole endpoint's pod (ff4).
+  Deployment in the summary, `model.json` and `graph.svg`, from
+  the routes `routes discover` found with the operator's admin
+  context; a list-only ServiceAccount finds the same two routes.
+  The workaround (cf4): the gateway's HTTP host comes from the
+  Java agent, and step 3 of docs/implementation.md M7 (#14's
+  staging inside the JVM's root) is not built, so the test
+  mounts the trace emptyDir into the app container and ships the
+  agent jar in the workload image. The compensations stand in
+  for product gaps the run found: debug deploys carry no byte
+  cap and trip the percent disk limit on a full node (df4), and
+  deploy returns before the tracer is attached (ef4). Fixed on
+  the way: `build -registry`, selectors skipping terminating
+  pods, kubectl 1.30's `--custom` gate. Also open: a route edge
+  never names a sole endpoint's pod (ff4). The target tears down
+  only what it made (`mage k8sTeardown` alone, also after an
+  interrupted run; never a `docker system prune`).
 
 ## Decisions
 

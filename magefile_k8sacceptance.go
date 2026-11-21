@@ -4,12 +4,14 @@
 // acceptance on kind"): K8sAcceptance stands up what the tests in
 // integrationtests/kind need — a local registry, one kind cluster wired to
 // it, the tracer and workload images pushed there (so a pod's imageID
-// carries a registry digest), Traefik — runs them, and tears the cluster
-// and the registry down again. Every docker and kind call goes through
-// `sudo -n`; nobody joins the docker group. Starting and stopping the
-// Docker daemon is the operator's: without a usable `sudo -n docker`,
-// kind, kubectl or helm the target says SKIP and succeeds, so it is safe
-// to run anywhere.
+// carries a registry digest), Traefik — runs them, and tears down exactly
+// what it made (internal/kindrun). Every docker and kind call goes
+// through `sudo -n`; nobody joins the docker group. Starting and stopping
+// the Docker daemon is the operator's: without a usable `sudo -n docker`,
+// kind, kubectl or helm the target says SKIP and succeeds.
+//
+// Never `docker system prune` here or in any teardown: the daemon holds
+// the operator's own images and volumes (review N7).
 
 package main
 
@@ -18,37 +20,21 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 
 	"github.com/magefile/mage/mg"
 	"github.com/magefile/mage/sh"
-)
 
-// The acceptance run's fixed names. The kubeconfig sits at the repository
-// root, owned by the operator, and is never committed (.gitignore).
-const (
-	kindCluster    = "iormesh-m7"
-	kindContext    = "kind-" + kindCluster
-	kindNode       = kindCluster + "-control-plane"
-	kindKubeconfig = ".kind-kubeconfig"
-	kindRegistry   = "iormesh-registry"
-	kindRegistryAt = "localhost:5001"
-	// registryImage is the distribution registry, pinned by digest.
-	registryImage = "docker.io/library/registry:2@sha256:" +
-		"a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373"
-	traefikChart   = "traefik/traefik"
-	traefikVersion = "42.4.1"
-	// minFreeGiB is the disk guard: below it nothing is created, built or
-	// pushed (images and the node take a few GiB).
-	minFreeGiB = 20
+	"iormesh/internal/kindrun"
 )
 
 // kindConfig points the node's containerd at /etc/containerd/certs.d,
-// where kindRegistryHosts maps the local registry (kind's documented
-// local-registry setup).
+// where the local registry is mapped (kind's local-registry setup).
 const kindConfig = `kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 containerdConfigPatches:
@@ -59,25 +45,103 @@ containerdConfigPatches:
 
 // K8sAcceptance runs PLAN.md M7's acceptance on kind: TestKindAcceptance
 // under kube-proxy's iptables mode, then TestKindClusterIP again under
-// nftables. IORMESH_KIND_KEEP=1 keeps the cluster and the registry;
-// IORMESH_KIND_KUBECONFIG puts the kubeconfig elsewhere.
+// nftables, then K8sTeardown's steps. IORMESH_KIND_KEEP=1 keeps the
+// cluster and the registry; IORMESH_KIND_KUBECONFIG puts the kubeconfig
+// elsewhere. Ctrl-C (SIGINT) or SIGTERM starts the teardown in a process
+// of its own session, which outlives mage's 5-second cancel; should even
+// that fail, `mage k8sTeardown` is the recovery.
 func K8sAcceptance() error {
 	if why := kindMissing(); why != "" {
 		fmt.Println("SKIP k8sAcceptance:", why)
 		return nil
 	}
 	mg.Deps(Build, ReleaseTracer, AgentBuild, WorkloadBuild)
-	if err := diskGuard(); err != nil {
+	c := kindConfigFor()
+	r := shRunner{}
+	if err := diskGuard(r); err != nil {
 		return err
 	}
 	if os.Getenv("IORMESH_KIND_KEEP") == "" {
-		defer kindTeardown()
+		var once sync.Once
+		stop := teardownOnSignal(&once)
+		defer stop()
+		defer once.Do(func() { reportTeardown(kindrun.Teardown(r, c, os.Stdout)) })
 	}
-	env, err := kindUp()
+	env, err := kindUp(r, c)
 	if err != nil {
 		return err
 	}
 	return kindTests(env)
+}
+
+// K8sTeardown removes what K8sAcceptance made — the cluster, the
+// registry and its volume, the run's labelled images, the base images
+// the run pulled (by the state recorded before it), the kubeconfig — and
+// nothing else. Safe to repeat; the recovery after an interrupted run.
+func K8sTeardown() error {
+	if err := exec.Command("sudo", "-n", "docker", "info").Run(); err != nil {
+		return fmt.Errorf("k8sTeardown needs the Docker daemon running (`sudo -n docker info` failed): %w", err)
+	}
+	return kindrun.Teardown(shRunner{}, kindConfigFor(), os.Stdout)
+}
+
+// kindConfigFor is the run's configuration: kubeconfig at the repository
+// root unless $IORMESH_KIND_KUBECONFIG says otherwise, the base-image
+// state beside it.
+func kindConfigFor() kindrun.Config {
+	kc := os.Getenv("IORMESH_KIND_KUBECONFIG")
+	if kc == "" {
+		kc = ".kind-kubeconfig"
+	}
+	abs, err := filepath.Abs(kc)
+	if err == nil {
+		kc = abs
+	}
+	return kindrun.Default(kc, kc+".state.json")
+}
+
+// teardownOnSignal starts the teardown, once, in a new session when
+// SIGINT or SIGTERM arrives: mage gives cancelled targets 5 seconds and
+// a terminal's Ctrl-C reaches the whole process group, but not a
+// setsid'd child. The returned func stops listening.
+func teardownOnSignal(once *sync.Once) func() {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig, ok := <-ch
+		if !ok {
+			return
+		}
+		once.Do(func() { detachedTeardown(sig) })
+		os.Exit(1)
+	}()
+	return func() { signal.Stop(ch); close(ch) }
+}
+
+// detachedTeardown runs this mage binary's k8sTeardown in its own
+// session, its output in k8s-teardown.log, and does not wait for it.
+func detachedTeardown(sig os.Signal) {
+	self, err := os.Executable()
+	log, lerr := os.Create("k8s-teardown.log")
+	if err != nil || lerr != nil {
+		fmt.Printf("%v: cannot start the teardown (%v %v): run `mage k8sTeardown`\n", sig, err, lerr)
+		return
+	}
+	cmd := exec.Command(self, "k8sTeardown")
+	cmd.Stdout, cmd.Stderr = log, log
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		fmt.Printf("%v: cannot start the teardown (%v): run `mage k8sTeardown`\n", sig, err)
+		return
+	}
+	fmt.Printf("%v: teardown running as pid %d, log in k8s-teardown.log\n", sig, cmd.Process.Pid)
+}
+
+// reportTeardown prints a teardown's failure: the run's result stands.
+func reportTeardown(err error) {
+	if err != nil {
+		fmt.Printf("teardown: %v (run `mage k8sTeardown` again once fixed)\n", err)
+	}
 }
 
 // kindMissing names the first missing prerequisite, "" when all are there.
@@ -93,38 +157,41 @@ func kindMissing() string {
 	return ""
 }
 
-// kindUp brings up the registry, the cluster, the images and Traefik and
-// returns the tests' environment.
-func kindUp() (map[string]string, error) {
-	if err := kindRegistryUp(); err != nil {
-		return nil, err
+// kindUp records the base images, brings up the registry, the cluster,
+// the images and Traefik, and returns the tests' environment.
+func kindUp(r shRunner, c kindrun.Config) (map[string]string, error) {
+	state, err := kindrun.Snapshot(r, c)
+	if err == nil {
+		err = c.Save(state)
 	}
-	if err := kindClusterUp(); err != nil {
-		return nil, err
+	if err == nil {
+		err = kindrun.RegistryUp(r, c)
 	}
-	tracer, err := kindTracerImage()
+	if err == nil {
+		err = kindClusterUp(r, c)
+	}
 	if err != nil {
 		return nil, err
 	}
-	workload, err := kindWorkloadImage()
+	tracer, err := kindTracerImage(r, c)
 	if err != nil {
 		return nil, err
 	}
-	if err := kindTraefik(); err != nil {
+	workload, err := kindWorkloadImage(r, c)
+	if err != nil {
 		return nil, err
 	}
-	kc, err := filepath.Abs(kubeconfigPath())
-	if err != nil {
+	if err := kindTraefik(c); err != nil {
 		return nil, err
 	}
 	ctl, err := filepath.Abs(ctlBinaryName)
-	return map[string]string{"IORMESH_KIND_KUBECONFIG": kc, "IORMESH_KIND_CONTEXT": kindContext,
+	return map[string]string{"IORMESH_KIND_KUBECONFIG": c.Kubeconfig, "IORMESH_KIND_CONTEXT": c.Context,
 		"IORMESH_KIND_TRACER_IMAGE": tracer, "IORMESH_KIND_WORKLOAD_IMAGE": workload,
-		"IORMESH_KIND_CTL": ctl, "IORMESH_KIND_NODE": kindNode, "CGO_ENABLED": "0"}, err
+		"IORMESH_KIND_CTL": ctl, "IORMESH_KIND_NODE": c.Node, "CGO_ENABLED": "0"}, err
 }
 
-// kindTests runs the suite, then switches kube-proxy to nftables and runs
-// the ClusterIP join again.
+// kindTests runs the suite under iptables, then the ClusterIP join under
+// nftables.
 func kindTests(env map[string]string) error {
 	run := func(test string) error {
 		return sh.RunWithV(env, "go", "test", "./integrationtests/kind/", "-count=1", "-v",
@@ -145,16 +212,15 @@ func kindTests(env map[string]string) error {
 // kubectlKind runs kubectl in the acceptance context.
 func kubectlKind(env map[string]string, args ...string) (string, error) {
 	return sh.OutputWith(map[string]string{"KUBECONFIG": env["IORMESH_KIND_KUBECONFIG"]}, "kubectl",
-		append([]string{"--context=" + kindContext}, args...)...)
+		append([]string{"--context=" + env["IORMESH_KIND_CONTEXT"]}, args...)...)
 }
 
 // proxyModeLine is the mode line of kube-proxy's config.conf as the
-// configmap's YAML indents it (kind writes iptables; empty is iptables
-// too, but kind never leaves it empty).
+// configmap's YAML indents it.
 var proxyModeLine = regexp.MustCompile(`(?m)^    mode: [a-z]*$`)
 
 // kindProxyMode sets kube-proxy's mode and restarts it; a cluster already
-// in that mode (a kept cluster's second run) is left alone.
+// in that mode is left alone.
 func kindProxyMode(env map[string]string, mode string) error {
 	cm, err := kubectlKind(env, "--namespace=kube-system", "get", "configmap", "kube-proxy", "--output=yaml")
 	if err != nil {
@@ -167,9 +233,8 @@ func kindProxyMode(env map[string]string, mode string) error {
 	if line == "    mode: "+mode {
 		return nil
 	}
-	edited := strings.Replace(cm, line, "    mode: "+mode, 1)
-	path := filepath.Join(os.TempDir(), "iormesh-kube-proxy.yaml")
-	if err := os.WriteFile(path, []byte(edited), 0o600); err != nil {
+	path, err := writeTemp("iormesh-kube-proxy-*.yaml", strings.Replace(cm, line, "    mode: "+mode, 1))
+	if err != nil {
 		return err
 	}
 	defer func() { _ = os.Remove(path) }()
@@ -183,80 +248,69 @@ func kindProxyMode(env map[string]string, mode string) error {
 	return nil
 }
 
-// kindRegistryUp starts the local registry unless it runs already.
-func kindRegistryUp() error {
-	if out, _ := sh.Output("sudo", "-n", "docker", "inspect", "--format={{.State.Running}}", kindRegistry); out == "true" {
-		return nil
+// writeTemp writes text to a new private temporary file (os.CreateTemp:
+// a fixed name in /tmp could be planted) and returns its path.
+func writeTemp(pattern, text string) (string, error) {
+	f, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return "", err
 	}
-	return sh.RunV("sudo", "-n", "docker", "run", "--detach", "--restart=no",
-		"--publish=127.0.0.1:5001:5000", "--name="+kindRegistry, registryImage)
+	_, werr := f.WriteString(text)
+	cerr := f.Close()
+	if err := errors.Join(werr, cerr); err != nil {
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }
 
-// kindClusterUp creates the cluster unless it exists, hands the
-// kubeconfig to the operator and wires the registry into the node.
-func kindClusterUp() error {
-	out, err := sh.Output("sudo", "-n", "kind", "get", "clusters")
+// kindClusterUp creates the cluster unless it exists, writes the
+// kubeconfig as the operator, and wires the registry into the node.
+func kindClusterUp(r shRunner, c kindrun.Config) error {
+	out, err := r.Output("sudo", "-n", "kind", "get", "clusters")
 	if err != nil {
 		return err
 	}
-	if !strings.Contains("\n"+out+"\n", "\n"+kindCluster+"\n") {
-		if err := createKindCluster(); err != nil {
+	if !strings.Contains("\n"+out+"\n", "\n"+c.Cluster+"\n") {
+		cfg, err := writeTemp("iormesh-kind-*.yaml", kindConfig)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = os.Remove(cfg) }()
+		if err := kindrun.CreateCluster(r, c, cfg); err != nil {
 			return err
 		}
 	}
+	if err := kindrun.WriteKubeconfig(r, c); err != nil {
+		return err
+	}
 	// Already connected is no error worth stopping for.
-	_ = exec.Command("sudo", "-n", "docker", "network", "connect", "kind", kindRegistry).Run()
-	dir := "/etc/containerd/certs.d/" + kindRegistryAt
-	hosts := fmt.Sprintf("[host.\"http://%s:5000\"]\n", kindRegistry)
-	return sh.RunV("sudo", "-n", "docker", "exec", kindNode, "sh", "-c",
+	_ = exec.Command("sudo", "-n", "docker", "network", "connect", "kind", c.Registry).Run()
+	dir := "/etc/containerd/certs.d/" + kindrun.RegistryAt
+	hosts := fmt.Sprintf("[host.\"http://%s:5000\"]\n", c.Registry)
+	return r.Run("sudo", "-n", "docker", "exec", c.Node, "sh", "-c",
 		"mkdir -p "+dir+" && printf '%s' '"+hosts+"' > "+dir+"/hosts.toml")
 }
 
-// createKindCluster runs kind create with kindConfig and chowns the
-// kubeconfig kind (run as root) wrote.
-func createKindCluster() error {
-	cfg := filepath.Join(os.TempDir(), "iormesh-kind.yaml")
-	if err := os.WriteFile(cfg, []byte(kindConfig), 0o600); err != nil {
+// kindTraefik installs Traefik (CRDs under traefik.io included) with a
+// ClusterIP Service, from a helm repository config of its own.
+func kindTraefik(c kindrun.Config) error {
+	dir, err := os.MkdirTemp("", "iormesh-helm-")
+	if err != nil {
 		return err
 	}
-	defer func() { _ = os.Remove(cfg) }()
-	if err := sh.RunV("sudo", "-n", "kind", "create", "cluster", "--name="+kindCluster,
-		"--kubeconfig="+kubeconfigPath(), "--config="+cfg); err != nil {
-		return err
-	}
-	owner := strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid())
-	return sh.RunV("sudo", "-n", "chown", owner, kubeconfigPath())
-}
-
-// kindTraefik installs Traefik (its CRDs under traefik.io included) with a
-// ClusterIP Service: kind has no load balancer.
-func kindTraefik() error {
-	env := map[string]string{"KUBECONFIG": kubeconfigPath()}
-	if err := sh.RunV("helm", "repo", "add", "--force-update", "traefik", "https://traefik.github.io/charts"); err != nil {
-		return err
-	}
-	return sh.RunWithV(env, "helm", "upgrade", "--install", "traefik", traefikChart, "--version="+traefikVersion,
-		"--kube-context="+kindContext, "--namespace=traefik", "--create-namespace",
-		"--set=service.spec.type=ClusterIP", "--set=ingressClass.isDefaultClass=true", "--wait", "--timeout=5m")
-}
-
-// kindTeardown deletes the cluster and the registry container; failures
-// are reported, not fatal, so a failed run still cleans up what it can.
-func kindTeardown() {
-	for _, argv := range [][]string{{"sudo", "-n", "kind", "delete", "cluster", "--name=" + kindCluster},
-		{"sudo", "-n", "docker", "rm", "--force", kindRegistry}} {
+	defer func() { _ = os.RemoveAll(dir) }()
+	for _, argv := range kindrun.HelmArgv(c, dir, c.Kubeconfig) {
 		if err := sh.RunV(argv[0], argv[1:]...); err != nil {
-			fmt.Printf("teardown: %s: %v\n", strings.Join(argv, " "), err)
+			return err
 		}
 	}
+	return nil
 }
 
-// kubeconfigPath is where the cluster's kubeconfig goes:
-// $IORMESH_KIND_KUBECONFIG (a worktree pointing at its main checkout's
-// file), else kindKubeconfig at the repository root.
-func kubeconfigPath() string {
-	if p := os.Getenv("IORMESH_KIND_KUBECONFIG"); p != "" {
-		return p
-	}
-	return kindKubeconfig
-}
+// shRunner runs argv through mage's sh helpers.
+type shRunner struct{}
+
+func (shRunner) Run(argv ...string) error { return sh.RunV(argv[0], argv[1:]...) }
+
+func (shRunner) Output(argv ...string) (string, error) { return sh.Output(argv[0], argv[1:]...) }
