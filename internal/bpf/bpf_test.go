@@ -227,7 +227,9 @@ var handWrittenProgramRE = regexp.MustCompile(`SEC\("[^"]+"\)\n(?:\s*//[^\n]*\n)
 // TestEveryHandWrittenProgramIsAttached: every program the hand-written BPF
 // sources define is one the Go side attaches somewhere - a probe of some
 // family, a dispatcher, the PID-namespace pick of the task_newtask program
-// or the Java mark's uprobes. restart.c defined two programs no Go code
+// or the Java mark's uprobes - or one it runs instead: the final socket
+// snapshot, which FinalSockets runs through BPF_PROG_TEST_RUN (task sf4).
+// restart.c defined two programs no Go code
 // attached, so the state they were to keep was never kept (task pf4). The
 // generated handlers are left out: they cover the whole syscall table, and
 // only the families pick which run.
@@ -240,7 +242,7 @@ func TestEveryHandWrittenProgramIsAttached(t *testing.T) {
 		"handle_task_rename": "0g4",
 	}
 	attached := map[string]bool{newtaskProg: true, newtaskNSProg: true,
-		javaMarkEnterProg: true, javaMarkExitProg: true}
+		javaMarkEnterProg: true, javaMarkExitProg: true, sockFinalProg: true}
 	for _, p := range append(ProbesFor(tracepoints.AllFamilies()), dispatchers...) {
 		attached[p.Program] = true
 	}

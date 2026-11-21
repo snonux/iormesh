@@ -65,6 +65,7 @@ const (
 	colArgsPattern
 	colArgsParentPID
 	colArgsParentInc
+	colArgsSockSnapshot
 	colConnID
 	colAttribution
 	colJavaThread
@@ -129,7 +130,8 @@ var eventColumnSpecs = [numEventColumns]columnSpec{
 	colArgsRcvNxt: {"args.rcv_nxt", kindInt32}, colArgsBytesAcked: {"args.bytes_acked", kindInt64},
 	colArgsBytesReceived: {"args.bytes_received", kindInt64}, colArgsTCPSeq: {"args.tcp_seq", kindInt32},
 	colArgsPattern: {"args.pattern", kindBytes}, colArgsParentPID: {"args.parent_pid", kindInt32},
-	colArgsParentInc: {"args.parent_incarnation", kindInt64}, colConnID: {"conn_id", kindBytes},
+	colArgsParentInc:    {"args.parent_incarnation", kindInt64},
+	colArgsSockSnapshot: {"args.sock_snapshot", kindBytes}, colConnID: {"conn_id", kindBytes},
 	colAttribution: {"attribution", kindDict}, colJavaThread: {"java.thread", kindBytes},
 	colJavaStack:   {"java.stack.list.element", kindInt64},
 	colJavaCarrier: {"java.carrier", kindBool}, colHTTPMethod: {"http.method", kindBytes},
@@ -262,6 +264,7 @@ func (e *eventColumns) args(a *schema.Args) {
 	optStr(&c[colArgsPattern], a.Pattern)
 	optI32(&c[colArgsParentPID], a.ParentPID)
 	optI64(&c[colArgsParentInc], a.ParentInc)
+	optStr(&c[colArgsSockSnapshot], a.SockSnapshot)
 }
 
 // java, http, session, otel and dns write an optional nested object: a

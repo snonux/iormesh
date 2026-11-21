@@ -132,8 +132,21 @@ func (c *collector) add(ev *schema.Event) {
 		a.tuple(&ev.Args)
 	case schema.KindTCPState:
 		a.tuple(&ev.Args)
-		a.addState(ev)
+		if !isFinal(ev) {
+			a.addState(ev)
+		}
 	}
+}
+
+// isFinal reports whether ev is the tracer's final snapshot of a socket
+// still open at the end of its session (args.sock_snapshot; task sf4). It
+// is there for the counter proof alone (timing.state): no transition, so
+// no role evidence, and read from an unlocked socket like the accept
+// snapshot, so a torn read could rebuild a wrong key and turn a fusable
+// half into a key conflict. It never keys a half: the half's earlier
+// records do, as before.
+func isFinal(ev *schema.Event) bool {
+	return ev.Args.SockSnapshot != nil && *ev.Args.SockSnapshot == schema.SockSnapshotFinal
 }
 
 // tuple keeps the newest 4-tuple the records name. Each side is taken

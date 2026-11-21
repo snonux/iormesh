@@ -94,6 +94,10 @@ const (
 	DropSkippedRuns = "skipped_runs"
 )
 
+// SockSnapshotFinal is args.sock_snapshot's one value: the snapshot the
+// tracer takes of each socket still open at the end of the session.
+const SockSnapshotFinal = "final"
+
 // Attribution values. Missing attribution is data, not a hole: every
 // event says which one applies, and the empty string is invalid.
 const (
@@ -261,6 +265,15 @@ type Args struct {
 	// event's child: fork only, both or none. Appended in M4 (task ze4).
 	ParentPID *uint32 `json:"parent_pid,omitempty" parquet:"parent_pid,optional"`
 	ParentInc *uint64 `json:"parent_incarnation,omitempty" parquet:"parent_incarnation,optional"`
+	// SockSnapshot marks a tcp_state record that reports no transition
+	// but the socket as it stood: SockSnapshotFinal for the tracer's
+	// snapshot of every socket still open when the session ended, whose
+	// four tcp_sock fields (always present) are the session's last reading
+	// of the byte counters — the merge's counter proof reads them
+	// (internal/federate/clockproof.go); args.sock_state is the socket's
+	// state then. Absent on every other record, the accept snapshot's
+	// included. Appended in M4 (task sf4).
+	SockSnapshot *string `json:"sock_snapshot,omitempty" parquet:"sock_snapshot,optional"`
 }
 
 // Session is the host description of the session header. Its fields are

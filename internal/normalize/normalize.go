@@ -74,7 +74,7 @@ type normalizer struct {
 // bracket, and the bracket is exactly where runs must agree. The graph is
 // pruned to what the bracketed events touched for the same reason.
 func Normalize(in Trace, opt Options) (Trace, error) {
-	events := in.Events
+	events := withoutFinal(in.Events)
 	if opt.Bracket != "" {
 		var err error
 		if events, err = cut(events, in.Graph.Edges, opt.Bracket); err != nil {
@@ -92,6 +92,32 @@ func Normalize(in Trace, opt Options) (Trace, error) {
 	}
 	out.Graph = n.graph(g)
 	return out, nil
+}
+
+// withoutFinal leaves out the tracer's final socket snapshots
+// (args.sock_snapshot "final", task sf4). They hold nothing a normalized
+// trace keeps — no transition, and the tcp_sock counters args drops — and
+// whether a socket was still open when the session ended is the run's
+// timing, so a golden could name them no more than the counters. Keeping
+// one without its counters would also break the schema's rule that a
+// final snapshot carries them. A trace without any is returned as is.
+func withoutFinal(events []schema.Event) []schema.Event {
+	keep := func(e *schema.Event) bool {
+		return e.Args.SockSnapshot == nil || *e.Args.SockSnapshot != schema.SockSnapshotFinal
+	}
+	for i := range events {
+		if keep(&events[i]) {
+			continue
+		}
+		out := append([]schema.Event(nil), events[:i]...)
+		for j := i + 1; j < len(events); j++ {
+			if keep(&events[j]) {
+				out = append(out, events[j])
+			}
+		}
+		return out
+	}
+	return events
 }
 
 // event rewrites one event. rank is its 1-based position in the output:

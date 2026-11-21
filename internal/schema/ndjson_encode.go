@@ -174,6 +174,7 @@ func appendArgs(dst []byte, a *Args) []byte {
 	o.str("pattern", a.Pattern)
 	optUint(&o, "parent_pid", a.ParentPID)
 	optUint(&o, "parent_incarnation", a.ParentInc)
+	o.str("sock_snapshot", a.SockSnapshot)
 	return o.close()
 }
 

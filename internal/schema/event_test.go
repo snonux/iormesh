@@ -567,6 +567,44 @@ func TestTCPSeqFieldsValid(t *testing.T) {
 	}
 }
 
+// TestSockSnapshotFinal: a final snapshot is a tcp_state record with the
+// four tcp_sock fields and args.sock_snapshot "final", which round-trips
+// through NDJSON as the last arg (task sf4). On another kind, with another
+// value or without the fields it is invalid.
+func TestSockSnapshotFinal(t *testing.T) {
+	e := validTCPState()
+	e.Args.SockSnapshot = ptr(SockSnapshotFinal)
+	if err := e.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	line := string(AppendEvent(nil, &e))
+	if !strings.Contains(line, `"bytes_received":0,"sock_snapshot":"final"}`) {
+		t.Fatalf("encoded args lack sock_snapshot:\n%s", line)
+	}
+	got, err := DecodeEvent([]byte(line))
+	if err != nil || got.Args.SockSnapshot == nil || *got.Args.SockSnapshot != SockSnapshotFinal {
+		t.Fatalf("round trip: %+v, %v", got.Args, err)
+	}
+	bad := map[string]func(*Event){
+		"on connect": func(e *Event) {
+			*e = validEvent()
+			e.Args.SockSnapshot = ptr(SockSnapshotFinal)
+		},
+		"unknown value": func(e *Event) { e.Args.SockSnapshot = ptr("accept") },
+		"no counters": func(e *Event) {
+			e.Args.SndUna, e.Args.RcvNxt, e.Args.BytesAcked, e.Args.BytesReceived = nil, nil, nil, nil
+		},
+	}
+	for name, mutate := range bad {
+		e := validTCPState()
+		e.Args.SockSnapshot = ptr(SockSnapshotFinal)
+		mutate(&e)
+		if err := e.Validate(); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: err %v, want ErrInvalid", name, err)
+		}
+	}
+}
+
 // validStreamWrite is one write of 5 bytes on a TCP socket carrying the
 // sequence number of its first byte (M4, task gb4).
 func validStreamWrite() Event {

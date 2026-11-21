@@ -1179,10 +1179,10 @@ Kubernetes (M7) build on it.
   by `SCM_RIGHTS` or `pidfd_getfd`; and it reads only the drops
   of sessions that reported the half. What limits the damage:
   an offset past the sender's sum proves untraced bytes and
-  fails the check, the receiver's sums are a second witness,
-  and any counter record at 4 GiB or more fails it. The
-  planned closure is task sf4: a final counter snapshot of
-  every traced socket at session end.
+  fails the check, and so does a sender's `bytes_acked` above
+  its sum plus SYN and FIN (task sf4) — the kernel's own count
+  of the stream; the receiver's sums are a second witness, and
+  any counter record at 4 GiB or more fails it.
   The counter proof covers one message and ignores drops and
   untraced calls: a `tcp_state` record of the sender after the
   send's exit with `bytes_acked` below 512 MiB (the kernel
@@ -1192,7 +1192,35 @@ Kubernetes (M7) build on it.
   where equal mod 2³² means equal. A stale socket binding after
   a lost CLOSE cannot feed it another connection's low
   counters: those records rebuild another key, and the
-  conflicting half fuses with nothing. The
+  conflicting half fuses with nothing. Every end gets a
+  counter record after its last call (task sf4): a socket
+  closed in the session has its CLOSE, and for every socket
+  still registered when the session ends the tracer takes a
+  final snapshot — `tcp_state` with `args.sock_snapshot:
+  "final"` (an appended optional arg, schema v1), the socket's
+  state, tuple and the four `tcp_sock` fields. So the counter
+  proof covers every message of a direction whose sender
+  acknowledged under 512 MiB and whose receiver received under
+  4 GiB, whatever the trace missed, and the stream check
+  decides only longer directions (or an end whose CLOSE run
+  the kernel skipped, recorded as `skipped_runs`); there,
+  with a `bytes_acked` read after every call, what can pass
+  unseen is untraced bytes no more than the data still
+  unacknowledged at that reading. The snapshot is taken in
+  the tracer's `finish`, after the last records were handled
+  and before the tracer closes: userspace walks
+  `sock_owner_map` and runs a raw tracepoint program per entry
+  through `BPF_PROG_TEST_RUN` (Linux 5.10; el9 5.14 has it),
+  which checks the owner's inode generation as a state change
+  does and reads the socket unlocked, like the accept
+  snapshot. Walking the owners, not the kernel's socket tables,
+  reaches every network namespace — a `bpf_iter` over tcp and
+  `INET_DIAG` each list one, which misses a pod's sockets, and
+  `tcp_info` lacks `snd_una`/`rcv_nxt`, which the schema's
+  all-four rule needs. The merge reads only its counters: it
+  never keys a half (a torn read would make a key conflict)
+  and dates neither SYN nor handshake. A snapshot that cannot
+  be taken is a warning, not a failed trace. The
   merge keeps one bound per
   host pair per 1-minute window (`Result.Clocks`), one-sided
   when only one direction has edges, empty and flagged when

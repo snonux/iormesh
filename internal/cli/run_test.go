@@ -34,6 +34,9 @@ type fakeTracer struct {
 	pending    []*types.RwAggregateEvent
 	pendingErr error
 	aggStopped bool
+	// finals is what FinalSockets hands finish, finalErr its error.
+	finals   []*types.TcpStateEvent
+	finalErr error
 }
 
 func newFakeTracer() *fakeTracer { return &fakeTracer{records: make(chan []any, 16)} }
@@ -94,6 +97,15 @@ func (f *fakeTracer) PendingAggregates() ([]*types.RwAggregateEvent, error) {
 		return nil, errors.New("pending aggregates read before the aggregation was stopped")
 	}
 	return f.pending, f.pendingErr
+}
+
+func (f *fakeTracer) FinalSockets() ([]*types.TcpStateEvent, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return nil, errors.New("final sockets read after Close")
+	}
+	return f.finals, f.finalErr
 }
 
 // StackTrace has no stacks to give: the fake sends no stack records.
@@ -431,6 +443,53 @@ func TestFinishDrainsPendingAggregates(t *testing.T) {
 			}
 			if got := *events[3].Args.EndReason; got != tc.reason {
 				t.Fatalf("end reason %q, want %q", got, tc.reason)
+			}
+		})
+	}
+}
+
+// TestFinishWritesFinalSnapshots: the tracer's final snapshot of a socket
+// still open reaches the trace as a tcp_state event marked final, ahead
+// of the end event (task sf4); a snapshot walk that failed part-way keeps
+// what it took, says so on stderr and fails neither the trace nor its end
+// reason.
+func TestFinishWritesFinalSnapshots(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{{"taken", nil}, {"walk failed", errors.New("test run refused")}} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			c := testCorrelator(t, dir)
+			rec := func(old int32, at uint64) *types.TcpStateEvent {
+				return &types.TcpStateEvent{EventType: types.TCP_STATE_EVENT, Time: at, Sk: 0xA, Pid: 10,
+					Fd: 4, Oldstate: old, Newstate: 1, Family: 2, Sport: 8080, Dport: 40000,
+					Saddr: [16]uint8{127, 0, 0, 1}, Daddr: [16]uint8{127, 0, 0, 1},
+					BytesAcked: at, BytesReceived: at}
+			}
+			if err := c.Handle(rec(types.TCP_STATE_SNAPSHOT, 5)); err != nil {
+				t.Fatal(err)
+			}
+			tr := newFakeTracer()
+			tr.finals, tr.finalErr = []*types.TcpStateEvent{rec(types.TCP_STATE_FINAL, 9)}, tc.err
+			var stderr bytes.Buffer
+			if err := finish(runConfig{out: dir}, tr, c, outputs{}, schema.EndStop, &stderr); err != nil {
+				t.Fatal(err)
+			}
+			events := readEvents(t, dir)
+			if got := kinds(events); got != "session,tcp_state,tcp_state,end" {
+				t.Fatalf("kinds %s, want session,tcp_state,tcp_state,end", got)
+			}
+			f := events[2].Args
+			if f.SockSnapshot == nil || *f.SockSnapshot != schema.SockSnapshotFinal || *f.BytesAcked != 9 {
+				t.Fatalf("final event args %+v", f)
+			}
+			if got := *events[3].Args.EndReason; got != schema.EndStop {
+				t.Fatalf("end reason %q, want stop", got)
+			}
+			warned := strings.Contains(stderr.String(), "warning: final socket snapshot")
+			if warned != (tc.err != nil) {
+				t.Fatalf("stderr %q: warning %v, want %v", stderr.String(), warned, tc.err != nil)
 			}
 		})
 	}

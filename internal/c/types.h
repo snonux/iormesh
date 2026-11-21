@@ -9,7 +9,7 @@
 // (exec.c, M2); JAVA_MARK_EVENT and struct java_mark_event added
 // (javamark.c, task td4); TCP_SEQ_EVENT and struct tcp_seq_event added
 // (tcpseq.c, task xe4); SYSCALL_RESTART_EVENT's comments say no program
-// emits it (task pf4).
+// emits it (task pf4); TCP_STATE_FINAL added (sock.c, task sf4).
 
 //+build ignore
 
@@ -1015,7 +1015,14 @@ struct syscall_restart_event {
 //   - the accept exit, as a snapshot: the accepted socket reached
 //     ESTABLISHED in softirq before anyone could own it, so its transition
 //     was not reported. oldstate is TCP_STATE_SNAPSHOT (0, no TCP state has
-//     it) and newstate the socket's state at accept time.
+//     it) and newstate the socket's state at accept time;
+//   - the end of the session, as a final snapshot of every socket still
+//     registered (iormesh_sock_final, run by userspace through
+//     BPF_PROG_TEST_RUN, never attached; task sf4): oldstate is
+//     TCP_STATE_FINAL (256, beyond every TCP state) and newstate the
+//     socket's state then. Its byte counters, taken after every call the
+//     session recorded, complete the merge's counter proof
+//     (internal/federate/clockproof.go).
 // sk is the struct sock address, the join key back to the owner: an fd
 // number can be reused, the socket is the connection. family is AF_INET (2)
 // or AF_INET6 (10); sport/dport are host byte order (sport is the local
@@ -1043,9 +1050,13 @@ struct syscall_restart_event {
 // none of them on. Two agreeing reads still leave a residual race (both
 // may fall inside one update on a slow writer); the merge therefore
 // prefers the locked state-change records and uses a snapshot only when
-// a half has nothing else (internal/federate/half.go).
+// a half has nothing else (internal/federate/half.go). The final snapshot
+// reads unlocked too, the same way; the merge never keys from it, and its
+// counters prove what they prove torn or not, each being one aligned load
+// of a counter that only grows.
 // No implicit padding, 112 bytes.
 #define TCP_STATE_SNAPSHOT 0
+#define TCP_STATE_FINAL 256
 // seq_status values.
 #define TCP_SEQ_OK 0
 #define TCP_SEQ_TORN 1

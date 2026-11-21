@@ -315,3 +315,28 @@ func TestNormalizeDropsStreamSeq(t *testing.T) {
 		t.Errorf("tcp_seq kept: %d", *got.TCPSeq)
 	}
 }
+
+// TestNormalizeDropsFinalSnapshots: the tracer's final socket snapshots
+// (task sf4) leave the normalized trace — whether a socket outlived the
+// session is timing — and the events after them are numbered on; the
+// input is not touched.
+func TestNormalizeDropsFinalSnapshots(t *testing.T) {
+	final, state := schema.SockSnapshotFinal, "ESTABLISHED"
+	host := func(kind string) schema.Event {
+		return schema.Event{SchemaVersion: schema.Version, Project: "p", HostID: "h", Event: kind,
+			FD: schema.NoFD, Attribution: schema.AttributionNone}
+	}
+	snap := host(schema.KindTCPState)
+	snap.Args = schema.Args{SockState: &state, SockSnapshot: &final}
+	in := []schema.Event{host(schema.KindSession), snap, snap, host(schema.KindEnd)}
+	out, err := Normalize(Trace{Events: in}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Events) != 2 || out.Events[1].Event != schema.KindEnd || out.Events[1].Seq != 2 {
+		t.Fatalf("normalized events %+v, want session and end", out.Events)
+	}
+	if in[1].Args.SockSnapshot == nil {
+		t.Fatal("the input lost its snapshot")
+	}
+}

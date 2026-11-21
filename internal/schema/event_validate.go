@@ -168,6 +168,9 @@ func (e *Event) validateKindArgs() error {
 	if err := e.validateTCPSeq(); err != nil {
 		return err
 	}
+	if err := e.validateSockSnapshot(); err != nil {
+		return err
+	}
 	if err := e.validateLifecycleArgs(); err != nil {
 		return err
 	}
@@ -327,6 +330,24 @@ func (e *Event) validateTCPSeq() error {
 		return invalidf("args.snd_una/rcv_nxt/bytes_acked/bytes_received on a %s event (tcp_state only)", e.Event)
 	case set != 4:
 		return invalidf("tcp_state with %d of the four tcp_sock fields, want all or none", set)
+	}
+	return nil
+}
+
+// validateSockSnapshot keeps args.sock_snapshot (task sf4) to records
+// with the four tcp_sock fields, which validateTCPSeq keeps to tcp_state:
+// a final snapshot exists for its counters alone, and a reader that skips
+// it as no transition must find it marked on that kind only.
+func (e *Event) validateSockSnapshot() error {
+	s := e.Args.SockSnapshot
+	switch {
+	case s == nil:
+		return nil
+	case *s != SockSnapshotFinal:
+		return invalidf("args.sock_snapshot %q, want %q", *s, SockSnapshotFinal)
+	case e.Args.BytesAcked == nil:
+		return invalidf("args.sock_snapshot on a %s event without the four tcp_sock fields (tcp_state only)",
+			e.Event)
 	}
 	return nil
 }

@@ -95,10 +95,16 @@ func (t *timing) add(ev *schema.Event) {
 // state reads a tcp_state record. On an accepting end every record of the
 // child socket follows the client's SYN — the child exists only once the
 // SYN arrived — so its earliest is a receive-side instant of the SYN.
+//
+// A final snapshot (isFinal) gives only its counters: it marks no
+// transition, so it dates neither the SYN nor the handshake — a connect
+// still pending at the end reads SYN_SENT long after its SYN left.
 func (t *timing) state(ev *schema.Event) {
-	t.afterSYN.see(ev.WallNS)
-	if ev.Args.SockState != nil && *ev.Args.SockState == "SYN_SENT" {
-		t.synSent.see(ev.WallNS)
+	if !isFinal(ev) {
+		t.afterSYN.see(ev.WallNS)
+		if ev.Args.SockState != nil && *ev.Args.SockState == "SYN_SENT" {
+			t.synSent.see(ev.WallNS)
+		}
 	}
 	if ev.Args.BytesAcked != nil && ev.Args.BytesReceived != nil {
 		r := counterRec{boot: ev.BootNS, acked: *ev.Args.BytesAcked,

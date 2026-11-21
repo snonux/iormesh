@@ -33,6 +33,11 @@
 // straight from the socket and emits it as a snapshot record (oldstate
 // TCP_STATE_SNAPSHOT; types.h, struct tcp_state_event).
 //
+// The end of the session needs a third: a final snapshot of every socket
+// still registered (oldstate TCP_STATE_FINAL), whose byte counters complete
+// the merge's counter proof. Userspace runs iormesh_sock_final once per
+// sock_owner_map entry; nothing attaches it (task sf4).
+//
 // Both kinds of record also carry four struct tcp_sock fields (snd_una,
 // rcv_nxt, bytes_acked, bytes_received; M4, decision #26), from which the
 // controller's merge rebuilds the TCP initial-sequence-number pair - the
@@ -492,4 +497,78 @@ int handle_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) 
     if (newstate == TCP_CLOSE)
         bpf_map_delete_elem(&sock_owner_map, &sk);
     return 0;
+}
+
+// sock_final_map is iormesh_sock_final's output slot: one record, read by
+// userspace after each run (internal/bpf/finalsock.go). A map, not the
+// ring buffer: the session is ending, nobody drains the ring any more,
+// and a run whose record does not fit there would be lost.
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct tcp_state_event);
+} sock_final_map SEC(".maps");
+
+// iormesh_sock_final writes the final snapshot of one registered socket
+// into sock_final_map and returns 1, or returns 0 when there is none to
+// take (task sf4). It is never attached: at the end of a session userspace
+// walks sock_owner_map and runs it once per entry through
+// BPF_PROG_TEST_RUN, with the struct sock address as the raw tracepoint's
+// first argument (internal/bpf/finalsock.go). Linux 5.10 added test runs
+// of raw tracepoint programs; el9's 5.14 has them. Walking the owners
+// instead of the kernel's socket tables (a bpf_iter over tcp, or
+// INET_DIAG) is what reaches sockets in every network namespace - a
+// pod's included - and only the traced ones.
+//
+// Why at all: the merge pairs a send and a receive by sequence offset mod
+// 2^32, and its counter proof needs a counter record of each end taken
+// after the message (internal/federate/clockproof.go). A socket closed
+// during the session has its CLOSE record, taken after every call on it;
+// one still open at the end had none after its last state change, and
+// its messages fell back on the stream check, which trusts the trace to
+// hold every byte. This record is that last counter reading.
+//
+// The entry may be stale - its TCP_CLOSE run lost and the address reused
+// (sock_owner_map) - so the socket's file must still carry the registered
+// inode, as iormesh_sock_owner_stale checks; an orphaned socket (closed,
+// still finishing its FIN exchange) has no file and is believed, like a
+// state change of it would be. A socket in TCP_CLOSE is skipped: it
+// reported its last state already, or its run was lost and the address
+// now holds a socket nobody owns. The socket is not locked here, so the
+// four fields are read like the accept snapshot's
+// (iormesh_read_tcp_seq_stable). The timestamp is taken before them: the
+// counters only grow, so they hold at least what they held then.
+SEC("raw_tp")
+int iormesh_sock_final(struct bpf_raw_tracepoint_args *ctx) {
+    __u64 key = ctx->args[0];
+    struct sock *sk = (struct sock *)key;
+    struct sock_owner *owner;
+    struct tcp_state_event *ev;
+    struct socket *sock;
+    __u32 zero = 0;
+    int state;
+
+    ev = bpf_map_lookup_elem(&sock_final_map, &zero);
+    owner = bpf_map_lookup_elem(&sock_owner_map, &key);
+    if (!ev || !owner || !iormesh_sock_is_tcp(sk))
+        return 0;
+    state = iormesh_sock_state(sk);
+    if (state == TCP_CLOSE)
+        return 0;
+    sock = BPF_CORE_READ(sk, sk_socket);
+    if (sock && BPF_CORE_READ(sock, file, f_inode, i_ino) != owner->ino)
+        return 0;
+    __builtin_memset(ev, 0, sizeof(*ev));
+    ev->event_type = TCP_STATE_EVENT;
+    ev->schema_version = TCP_STATE_EVENT_SCHEMA_VERSION;
+    ev->time = bpf_ktime_get_boot_ns();
+    ev->sk = key;
+    ev->pid = owner->pid;
+    ev->fd = owner->fd;
+    ev->oldstate = TCP_STATE_FINAL;
+    ev->newstate = state;
+    iormesh_read_sk_tuple(ev, sk);
+    iormesh_read_tcp_seq_stable(ev, sk);
+    return 1;
 }

@@ -3876,7 +3876,10 @@ connection into messages, `bound.go` intersects them,
     record (folded and `tcp_seq`-less ones included) and every
     `tcp_sock` counter stay below 4 GiB, no recorded send or
     receive ends past the sender's sum (`sumsCover`: such an
-    offset proves bytes the sums missed), and no drop of the
+    offset proves bytes the sums missed), no `tcp_state`
+    record of the sender counts more `bytes_acked` than its sum
+    plus its SYN and FIN (`ackedCovered`: the kernel saw bytes
+    the sums missed), and no drop of the
     sending half's sessions (keyed by host and project) may
     have hidden a send. Each drop is written after the records
     it stands for were lost, so a drop before the socket opened
@@ -3895,10 +3898,12 @@ connection into messages, `bound.go` intersects them,
     `SCM_RIGHTS` or `pidfd_getfd`; and only the drops of the
     sessions that reported the half are read, so a session
     that traced a holder but recorded none of its calls is the
-    same blind spot. `sumsCover`, the receiver's sums and any
-    counter at 4 GiB or more catch part of it; the planned
-    closure (a follow-up task) is a final counter snapshot of
-    every traced socket at session end.
+    same blind spot. `sumsCover`, `ackedCovered`, the
+    receiver's sums and any counter at 4 GiB or more catch
+    part of it; with the final snapshot below every end has a
+    `bytes_acked` read after all its calls, so what can still
+    pass unseen is untraced bytes no more than the data still
+    unacknowledged at that reading.
   - *Counter proof*, per message, immune to drops and untraced
     calls: a `tcp_state` record of the sender at or after the
     send's exit (its start is read in the enter hook, after the
@@ -3911,12 +3916,41 @@ connection into messages, `bound.go` intersects them,
     a later connection's low counters under the same conn id,
     but those records rebuild another key: the half is a
     `KeyConflict` and fuses with nothing.
+  - *Final snapshot* (task sf4): every end needs a counter
+    record after its last call for the counter proof. A socket
+    closed during the session has its `CLOSE`; for one still
+    open, `finish` (`internal/cli/run.go`) has the tracer walk
+    `sock_owner_map` before it closes and run the raw
+    tracepoint program `iormesh_sock_final` once per entry
+    through `BPF_PROG_TEST_RUN` with the `struct sock` address
+    as its argument (`bpf.Tracer.FinalSockets`; never
+    attached, so `TestEveryHandWrittenProgramIsAttached` lists
+    it as run). The program checks the owner like a state
+    change does (the socket file's inode is the registered
+    generation; an orphan is believed), skips `TCP_CLOSE`,
+    and writes a `tcp_state_event` with `oldstate`
+    `TCP_STATE_FINAL` (256) — the tuple and the four fields,
+    read like the unlocked accept snapshot — into the
+    one-slot `sock_final_map`, which userspace reads after the
+    run. The correlator emits it as `tcp_state` with
+    `args.sock_snapshot: "final"` on the socket's conn and fd
+    instance, only for a socket it knows, with the same tuple
+    and fields `carriesSeq` passes. The merge reads its
+    counters only (`timing.state`): it keys nothing
+    (`isFinal`; a torn read would turn the half into a key
+    conflict) and dates neither SYN nor handshake. Walking the
+    owners rather than the kernel's tables reaches every
+    network namespace, a pod's included: a `bpf_iter` over
+    tcp and `INET_DIAG` both list one namespace, and
+    `tcp_info` has no `snd_una`/`rcv_nxt`. A walk that fails
+    is a stderr warning, not a failed trace.
   Lb4's run 2 (M4-10) had an `attach_gap` before each socket
   and skipped runs after it on both hosts: the stream check
   fails, the counter proof keeps both data messages.
-  Still open, besides the stream check's residue: a long-lived
-  connection traced in part with no counter-bearing record
-  after its data relies on the stream check alone.
+  Still open, besides the stream check's residue: an end whose
+  last counter record was lost (a skipped `CLOSE` run, which
+  a `skipped_runs` drop records) relies on the stream check
+  for the messages after its last surviving record.
 - **Bounds.** θ = clock_B − clock_A (A < B by name) is below
   `recv_B − send_A` and above `send_B − recv_A`, each at the
   message's own instant. The merge keeps one `ClockBound` per

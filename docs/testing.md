@@ -1335,6 +1335,39 @@ limit. Afterwards both hosts were removed with `rm` (every
 session collected), bootstrapped again with the same build, and
 the ports closed.
 
+## Final socket snapshot (task sf4, 2026-11-21)
+
+`TestSockFinalSnapshot` (`internal/sockfinal_root_test.go`, in
+`mage bpfRootTest`) opens a loopback connection in the test
+process, exchanges 5 and 7 bytes and leaves it open. It walks
+`sock_owner_map` and test-runs `iormesh_sock_final` for each
+entry, as `bpf.Tracer.FinalSockets` does. Each end must give one
+`TCP_STATE_FINAL` record with its owner, its tuple and the
+counters the exchange implies: client 6 acked (its SYN too) and
+7 received, server 7 and 5. Both ends' fields must rebuild one
+ISN pair. Once both sockets closed, neither gives a record, nor
+does an address nobody registered. It passes on the 7.2 laptop
+and, with the sock root tests, on `iom1` (5.14.0-741.22.1.el9_9;
+static test binary as in nf4, staged under `/root/sf4` and
+removed). Mutations caught: no counter read (all zero) and the
+owner's inode check inverted (no record).
+
+End to end, `iormesh run -pid` traced a Python process that opens
+a loopback connection after the attach, exchanges 5 and 7 bytes
+and keeps it open. On both kernels the trace ends with two
+`tcp_state` records marked `"sock_snapshot":"final"`, on the
+connection's conn id and fd instances: `bytes_acked` 6 and
+`bytes_received` 7 on the client, 7 and 5 on the server.
+
+The unit tests: `internal/federate` (`TestClockFinalSnapshot`,
+`TestFinalSnapshotDatesNothing`, `TestClockAckedPastSum`),
+`internal/correlate` (`TestFinalSnapshotEvent`), `internal/cli`
+(`TestFinishWritesFinalSnapshots`), `internal/bpf`
+(`TestFinalRecords*`, `TestDecodeFinalRejects`), `internal/schema`
+(`TestSockSnapshotFinal`) and `internal/normalize`
+(`TestNormalizeDropsFinalSnapshots`). Each guard was mutated out
+once and a test failed every time.
+
 ## el9 record layout (task of4)
 
 lb4's dispatch bug, the raw_syscalls record read at upstream's

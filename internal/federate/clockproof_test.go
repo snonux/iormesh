@@ -266,6 +266,99 @@ func TestClockCounterInsideCall(t *testing.T) {
 	}
 }
 
+// final appends the tracer's final snapshot (args.sock_snapshot "final",
+// task sf4) of conv c's client or server end at true time at: an
+// ESTABLISHED socket with these counters. skew is added to snd_una, so a
+// non-zero skew rebuilds another key — a torn unlocked read.
+func (c *conv) final(client bool, at, acked, received uint64, skew uint32) {
+	c.counters(client, at, acked, received)
+	tr := c.b
+	if client {
+		tr = c.a
+	}
+	a := &tr.events[len(tr.events)-1].Args
+	*a.SockState = "ESTABLISHED"
+	*a.SndUna += skew
+	a.SockSnapshot = ptr(schema.SockSnapshotFinal)
+}
+
+// TestClockFinalSnapshot: a connection still open when both sessions
+// ended has no CLOSE after its data, only the tracer's final snapshots;
+// they prove every message by the counter proof although drops on both
+// hosts fail the stream check both ways (task sf4). A snapshot whose
+// fields rebuild another key — torn, as an unlocked read may be — keys
+// nothing and leaves the halves fusable, its counters still proving.
+func TestClockFinalSnapshot(t *testing.T) {
+	late := t0 + sec
+	for _, tc := range []struct {
+		name  string
+		skew  uint32
+		add   bool
+		msgs  int
+		lower bool
+	}{
+		{"no snapshot", 0, false, 1, false},
+		{"final snapshots of both ends", 0, true, pingMsgs, true},
+		{"torn final snapshots", 7, true, pingMsgs, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, b, c := pingConv()
+			a.drop(0, "", t0+100*tus)
+			b.drop(0, "", on(t0+100*tus, theta))
+			if tc.add {
+				c.final(true, late, 61, 900, tc.skew)
+				c.final(false, late, 900, 61, tc.skew)
+			}
+			r := mergeTraces(t, Options{}, a, b)
+			if len(r.Conns) != 1 {
+				t.Fatalf("%d fused conns, want 1 (unresolved %v)", len(r.Conns), r.Unresolved)
+			}
+			wantBound(t, r, tc.msgs, tc.lower)
+		})
+	}
+}
+
+// TestFinalSnapshotDatesNothing: a final snapshot gives the timing its
+// counters only — a connect still pending at the end reads SYN_SENT long
+// after its SYN left, and the snapshot marks no instant after the SYN
+// either.
+func TestFinalSnapshotDatesNothing(t *testing.T) {
+	var tm timing
+	ev := schema.Event{Event: schema.KindTCPState, BootNS: 50, WallNS: 70, Args: withSeq(schema.Args{},
+		"SYN_SENT", seqFields{BytesAcked: 3, BytesReceived: 4})}
+	ev.Args.SockSnapshot = ptr(schema.SockSnapshotFinal)
+	tm.add(&ev)
+	if tm.synSent.ok || tm.afterSYN.ok {
+		t.Fatalf("a final snapshot dated the handshake: %+v %+v", tm.synSent, tm.afterSYN)
+	}
+	if len(tm.counts) != 1 || tm.counts[0] != (counterRec{boot: 50, acked: 3, received: 4}) {
+		t.Fatalf("counts %+v, want the snapshot's", tm.counts)
+	}
+}
+
+// TestClockAckedPastSum: a sender whose bytes_acked exceeds its byte sum
+// (beyond its SYN and FIN) sent bytes no record counted — an untraced
+// sendmsg, say — so its direction fails the stream check. The server has
+// no counter record after the data, so the counter proof cannot take its
+// receives either: the client→server data goes, the handshake and the
+// responses stay.
+func TestClockAckedPastSum(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		acked uint64
+		msgs  int
+	}{
+		{"acked within the sum and its SYN and FIN", 60 + ackedSlack, pingMsgs},
+		{"acked past the sum", 60 + ackedSlack + 1, 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, b, c := pingConv()
+			c.final(true, t0+sec, tc.acked, 900, 0)
+			wantBound(t, mergeTraces(t, Options{}, a, b), tc.msgs, true)
+		})
+	}
+}
+
 // TestClockLB4Run2 replays the M4-10 failure of task lb4's second
 // two-host run (Rocky 9.9, 2026-11-21): the tcp-two-host connection
 // between m4shop on iom1 and m4billing on iom2, trimmed from the

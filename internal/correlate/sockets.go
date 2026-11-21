@@ -264,6 +264,10 @@ func tuple(r *types.TcpStateEvent) (local, remote netip.AddrPort) {
 // owner's fd to the socket.
 func (c *Correlator) tcpState(r *types.TcpStateEvent) {
 	c.advance(r.Time)
+	if r.Oldstate == types.TCP_STATE_FINAL {
+		c.finalState(r)
+		return
+	}
 	s, first, stale := c.socks.observe(r)
 	if r.Pid == 0 || stale {
 		// A stale record's pid and fd are the old life's owner: it
@@ -274,6 +278,33 @@ func (c *Correlator) tcpState(r *types.TcpStateEvent) {
 	}
 	p := c.proc(r.Pid)
 	gen := p.sockGen(r.Fd, s, first, r.Oldstate == types.TCP_STATE_SNAPSHOT)
+	c.emitState(r, s, p, gen)
+}
+
+// finalState records the tracer's final snapshot of a socket still open
+// at the end of the session (bpf.Tracer.FinalSockets; task sf4), marked
+// args.sock_snapshot "final". It is there for its byte counters — the
+// merge's counter proof reads them, internal/federate/clockproof.go — and
+// changes nothing else: the socket keeps its tuple, its established time
+// and its fd binding. So a snapshot that cannot add a reading is dropped:
+// one of a socket this correlator never saw a record of (nothing of it
+// reached the trace, so there is no connection to vouch for), one whose
+// tuple contradicts the socket's (another life at the address, as
+// otherLife finds for a state change), one without an owner, and one
+// whose fields carriesSeq refuses — a connect still in SYN_SENT, or reads
+// that never agreed.
+func (c *Correlator) finalState(r *types.TcpStateEvent) {
+	s, ok := c.socks.bySk[r.Sk]
+	local, remote := tuple(r)
+	if !ok || r.Pid == 0 || s.otherLife(local, remote) || !carriesSeq(r) {
+		return
+	}
+	c.emitState(r, s, c.proc(r.Pid), s.fdGen)
+}
+
+// emitState queues r as a tcp_state event of socket s, owned by process p
+// with fd generation gen.
+func (c *Correlator) emitState(r *types.TcpStateEvent, s *sockState, p *procState, gen uint32) {
 	state := tcpStateNames[r.Newstate]
 	if state == "" {
 		state = fmt.Sprintf("STATE_%d", r.Newstate)
@@ -286,6 +317,10 @@ func (c *Correlator) tcpState(r *types.TcpStateEvent) {
 	s.fillArgs(&ev.Args)
 	if carriesSeq(r) {
 		fillSeq(&ev.Args, r)
+	}
+	if r.Oldstate == types.TCP_STATE_FINAL {
+		final := schema.SockSnapshotFinal
+		ev.Args.SockSnapshot = &final
 	}
 	c.enqueue(ev, s)
 }

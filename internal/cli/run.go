@@ -87,6 +87,7 @@ type tracer interface {
 	IgnoreExec(pid uint32, since uint64) error
 	StopAggregation() error
 	PendingAggregates() ([]*types.RwAggregateEvent, error)
+	FinalSockets() ([]*types.TcpStateEvent, error)
 	StackTrace(id uint32) ([]uint64, error)
 	AttachJavaMarks(pid uint32, natives []bpf.JavaNative) ([]string, error)
 	DetachJavaMarks(pid uint32) error
@@ -242,8 +243,9 @@ func describe(spec target.Spec, pids []uint32) string {
 	return fmt.Sprintf("pid %v", pids)
 }
 
-// finish ends a trace: a last loss poll (the counters die with the
-// tracer), the tracer's close, the end event, the sink's close (the Java
+// finish ends a trace: the folded calls the kernel still holds, the
+// final snapshot of every open socket (finalSockets), a last loss poll
+// (the counters die with the tracer), the tracer's close, the end event, the sink's close (the Java
 // join's last ring read with it), the graph file, state.json's end and
 // the optional tables' close, then the one-line summary. A loss count it
 // cannot read turns the end reason into error: the trace might hide a
@@ -251,6 +253,9 @@ func describe(spec target.Spec, pids []uint32) string {
 func finish(cfg runConfig, tr tracer, c *correlate.Correlator, out outputs, reason string,
 	stderr io.Writer) error {
 	aggErr := drainAggregates(tr, c)
+	if aggErr == nil {
+		aggErr = finalSockets(tr, c, stderr)
+	}
 	losses, lossErr := pollLosses(tr, c)
 	if lossErr != nil || aggErr != nil {
 		reason = schema.EndError
@@ -296,6 +301,30 @@ func drainAggregates(tr tracer, c *correlate.Correlator) error {
 	}
 	if err != nil {
 		return fmt.Errorf("pending aggregates: %w", err)
+	}
+	return nil
+}
+
+// finalSockets hands the correlator the tracer's final snapshot of every
+// TCP socket still open (bpf.Tracer.FinalSockets, task sf4): the byte
+// counters after the session's last recorded call, which the merge's
+// counter proof needs for a connection no CLOSE record ended
+// (internal/federate/clockproof.go). Taken after the last records were
+// handled and the folded calls drained, so each snapshot follows every
+// call of its socket the trace holds. A snapshot that cannot be taken is
+// said on stderr and does not fail the trace: the app's records are all
+// there, and the merge only proves fewer messages without it — the
+// stream check still covers them where it holds. A correlator error is
+// the trace's, as for any record.
+func finalSockets(tr tracer, c *correlate.Correlator, stderr io.Writer) error {
+	recs, err := tr.FinalSockets()
+	for _, rec := range recs {
+		if herr := c.Handle(rec); herr != nil {
+			return herr
+		}
+	}
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "iormesh: warning: final socket snapshot: %v\n", err)
 	}
 	return nil
 }

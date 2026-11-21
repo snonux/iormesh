@@ -12,7 +12,8 @@ traced surface, and M3's acceptance (2026-11-20) the Java, OTEL, `http`
 and `dns` fields and the methods, threads, classes and stacks tables,
 which were provisional until then. M4 appended the `fork` and
 `attach` kinds and `args.pattern`, `args.parent_pid` and
-`args.parent_incarnation` (task ze4, below). Fields are only ever
+`args.parent_incarnation` (task ze4, below), and
+`args.sock_snapshot` (task sf4). Fields are only ever
 appended, and appended fields are optional, so an older reader never
 sees a changed meaning. Enum values (`drop_reason`, `end_reason`, …)
 are appended the same way as event kinds, so a reader should pass an
@@ -156,6 +157,7 @@ IPv4 peers of dual-stack sockets are written unmapped
 | `tcp_seq` | optional (appended in M4): the TCP sequence number of the first stream byte the call moved, u32; the call moved `[tcp_seq, tcp_seq + bytes)` mod 2³². Only on an unfolded `write`, `writev`, `sendto`, `sendfile64`, `read`, `readv` or `recvfrom` with a `conn_id` that moved bytes |
 | `pattern` | `attach` only, optional (appended in M4, task ze4): the `-pattern` the session matched the process by; with the project it names the app (`app:<project>/<pattern>`). Absent for a `-pid` or port target. Never empty |
 | `parent_pid`, `parent_incarnation` | `fork` only, both or none (appended in M4, task ze4): the process that forked the child, as its own events name it (raw pid, u32; incarnation, u64); absent when the kernel record could not say |
+| `sock_snapshot` | `tcp_state` only, optional (appended in M4, task sf4): `final` on the tracer's snapshot of a socket still open when the session ended — no transition, `sock_state` is the socket's state then, and the four `tcp_sock` fields are always present; absent on every other record, the accept snapshot's included |
 
 The four `tcp_sock` fields come together or not at all: the
 controller's merge rebuilds the connection's ISN pair — the
@@ -175,6 +177,20 @@ server end from its state changes and uses the snapshot only
 when it has nothing else. The values derive from
 the kernel's random initial sequence numbers, so the golden
 normalizer drops all four.
+
+When a session ends, the tracer adds one more `tcp_state`
+record for every traced socket still open: the final snapshot
+(`args.sock_snapshot: "final"`, task sf4), stamped after the
+session's last recorded call on it, with the socket's state,
+tuple and the four fields. A socket closed during the session
+gets none — its `CLOSE` was its last record. It reports no
+transition; a reader counting state changes skips it. Its
+counters are the session's last reading of the socket's byte
+counts, which the merge's clock bounds use to prove that a
+send and a receive of one sequence offset are the same bytes
+(PLAN.md M4, "Clock reconciliation"); it never keys the
+connection, since it reads an unlocked socket like the accept
+snapshot.
 
 `tcp_seq` gives a send or receive its TCP sequence range (start
 sequence plus `bytes`). A byte has the same sequence number on
