@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -46,28 +45,40 @@ var rawSyscallPrograms = map[string]string{
 // relocating it against the host BTF the offsets of the host's own tracefs
 // format file - which on a 7.x host are the other layout, so a
 // fixed-offset struct cannot pass both.
+//
+// Each program must read its field at the wanted offset and nothing of the
+// record below it (readsFieldAt): a load at upstream's lower offset is the
+// fixed-layout bug, while a later load (a compiler reading args[1] too, say)
+// is no regression, so an exact list match is not required (task bg4).
 func TestEl9RecordLayout(t *testing.T) {
 	requireRoot(t)
 	el9 := ctxLoadOffsets(t, el9BTF)
-	want := map[string][]int16{"id": {16}, "args": {24}, "ret": {24}}
+	want := map[string]int16{"id": 16, "args": 24, "ret": 24}
 	for prog, field := range rawSyscallPrograms {
-		if !reflect.DeepEqual(el9[prog], want[field]) {
-			t.Errorf("el9 BTF: %s reads the record at %v, want %s at %v", prog, el9[prog], field, want[field])
+		if !readsFieldAt(el9[prog], want[field]) {
+			t.Errorf("el9 BTF: %s reads the record at %v, want %s at %d and nothing below",
+				prog, el9[prog], field, want[field])
 		}
 	}
 	host := ctxLoadOffsets(t, "")
-	hostWant := map[string][]int16{
-		"id":   {rawSyscallsOffset(t, "sys_enter", "id")},
-		"args": {rawSyscallsOffset(t, "sys_enter", "args")},
-		"ret":  {rawSyscallsOffset(t, "sys_exit", "ret")},
+	hostWant := map[string]int16{
+		"id":   rawSyscallsOffset(t, "sys_enter", "id"),
+		"args": rawSyscallsOffset(t, "sys_enter", "args"),
+		"ret":  rawSyscallsOffset(t, "sys_exit", "ret"),
 	}
 	for prog, field := range rawSyscallPrograms {
-		if !reflect.DeepEqual(host[prog], hostWant[field]) {
-			t.Errorf("host BTF: %s reads the record at %v, want %s at %v (tracefs format)",
+		if !readsFieldAt(host[prog], hostWant[field]) {
+			t.Errorf("host BTF: %s reads the record at %v, want %s at %d and nothing below (tracefs format)",
 				prog, host[prog], field, hostWant[field])
 		}
 	}
 	t.Logf("record loads with el9 BTF %v, with host BTF %v", el9, host)
+}
+
+// readsFieldAt reports whether the sorted record load offsets offs
+// (recordLoads) contain want and none below it.
+func readsFieldAt(offs []int16, want int16) bool {
+	return len(offs) > 0 && offs[0] == want
 }
 
 // ctxLoadOffsets relocates rawSyscallPrograms in the embedded object
@@ -89,9 +100,34 @@ func ctxLoadOffsets(t *testing.T, btfPath string) map[string][]int16 {
 	}
 	got := map[string][]int16{}
 	for name, insns := range res.Insns {
+		if at, ok := poisonedInsn(insns); ok {
+			t.Fatalf("BTF %q: %s instruction %d is libbpf's poison call: a CO-RE relocation found no "+
+				"matching type or field in that BTF. Regenerate the trimmed el9 BTF for the "+
+				"object's current relocations (docs/testing.md, \"el9 record layout\")", btfPath, name, at)
+		}
 		got[name] = recordLoads(insns)
 	}
 	return got
+}
+
+// poisonedInsn reports the index of the first instruction libbpf poisoned
+// because a CO-RE relocation failed (bpf_core_poison_insn: a helper call
+// with imm 0xbad2310, which the verifier would reject as an unknown
+// helper), and whether there is one. A trimmed BTF that lacks a type a
+// newer relocation names fails this way; without the check its offsets
+// would just come out wrong, the poisoned load missing from recordLoads
+// (task bg4).
+func poisonedInsn(insns []byte) (int, bool) {
+	const (
+		call   = 0x85
+		poison = 0xbad2310
+	)
+	for i := 0; i+8 <= len(insns); i += 8 {
+		if insns[i] == call && binary.LittleEndian.Uint32(insns[i+4:]) == poison {
+			return i / 8, true
+		}
+	}
+	return 0, false
 }
 
 // recordLoads returns the sorted, distinct offsets of the memory loads

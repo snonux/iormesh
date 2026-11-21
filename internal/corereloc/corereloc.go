@@ -13,7 +13,8 @@
 // relocated instructions until the object is closed, so they can be read
 // with bpf_program__insns whether the kernel then accepts them or not.
 // libbpfgo does not expose that call; this package is the few lines of cgo
-// that do, and nothing but tests imports it.
+// that do, and nothing but tests imports it (internal/buildgate
+// enforces that, task bg4).
 package corereloc
 
 /*
