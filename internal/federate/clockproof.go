@@ -15,29 +15,48 @@ import "iormesh/internal/schema"
 // receive's bytes was never recorded (lost, or folded without a tcp_seq),
 // the receive pairs with a send of another lap — a message whose "send"
 // may well come after its receive. A message is used only when one of two
-// proofs rules that out:
+// checks rules that out:
 //
-//   - the stream proof (streamProof): the whole direction stayed below
-//     4 GiB, by the byte sums of the half's records and the tcp_sock
-//     counters, and no drop of the sending host could have hidden a send of
-//     this connection (dropTaints). It covers every message of the
-//     direction.
+//   - the stream check (streamProof): the whole direction stayed below
+//     4 GiB by the byte sums of the half's records and the tcp_sock
+//     counters, no recorded offset lies past the sender's sum, and no drop
+//     of the sending host could have hidden a send of this connection
+//     (dropTaints). It covers every message of the direction. It is not a
+//     proof: it trusts the sums to hold every byte queued, and bytes can
+//     escape them with no drop recorded — untraced sendmsg, sendmmsg,
+//     splice and io_uring; a fork between the untraced socket() and
+//     connect(), an exec that keeps the socket (the correlator drops the
+//     fd's binding), or an fd passed by SCM_RIGHTS or pidfd_getfd, any of
+//     which leaves a holder whose calls name no connection. It also reads
+//     only the drops of the sessions that reported the half: a session that
+//     traced a holder but recorded none of its calls is the same blind
+//     spot. What limits the damage: an offset past the sender's sum proves
+//     untraced bytes and fails the check (sumsCover); the receiver's sums
+//     are a second witness (long); and any counter record at 4 GiB or more
+//     fails it. The complete closure — a final counter snapshot of every
+//     traced socket at session end — is planned as a follow-up task.
 //   - the counter proof (sendProven, receiveProven): the tcp_sock counters
 //     of tcp_state records taken after the message's send (on its host) and
 //     after its receive (on its host) place both ends' true offsets below
 //     2^32. Equal mod 2^32 and both below 2^32, they are the same offset.
-//     The counters are the kernel's, so no drop touches this proof; it
-//     covers one message at a time.
+//     The counters are the kernel's, so no drop and no untraced call
+//     touches this proof; it covers one message at a time. It relies on the
+//     records being this connection's: a lost CLOSE can leave the tracer's
+//     socket-to-connection binding stale, so a later connection reusing the
+//     socket reports under the same conn_id with counters reset low — but
+//     its records rebuild another ISN pair, the half is a KeyConflict
+//     (half.go, keyRecords) and fuses with nothing.
 //
-// Drops never enter the counter proof, and they enter the stream proof only
+// Drops never enter the counter proof, and they enter the stream check only
 // on the sending host: lost records on the receiving host remove receives,
 // which only removes messages. Every drop's records were lost at or before
 // its own instant (dropRec), so a drop before the connection's socket
 // existed on the sending host hid none of its sends.
 
 // ackedProofMax caps a sender's bytes_acked for the counter proof. The
-// send's start S (its write_seq when it entered) is at most write_seq at
-// any later instant T, and write_seq − snd_una is the data still queued
+// send's start S (write_seq read in its enter hook, a little after the
+// enter's timestamp) is at most write_seq at any instant T after the
+// call's exit, and write_seq − snd_una is the data still queued
 // (unsent or unacknowledged), which the kernel charges to sk_wmem_queued:
 // tcp_sendmsg waits once sk_wmem_queued reaches sk_sndbuf, an int below
 // 2^31, and can overshoot by no more than the skb it is filling and one
@@ -81,32 +100,52 @@ type end struct {
 }
 
 // direction returns the data messages from one end to the other, iss
-// being the sender's ISN: all of them when the stream proof holds, those
+// being the sender's ISN: all of them when the stream check holds, those
 // the counter proof covers otherwise.
 func (c *collector) direction(conn string, from, to end, iss uint32) []message {
 	sends, recvs := from.acc.timing.sends, to.acc.timing.recvs
-	if c.streamProof(from, to) {
+	if c.streamProof(from, to, iss) {
 		return streamMessages(from.host, to.host, conn, sends, recvs, iss, nil)
 	}
 	return streamMessages(from.host, to.host, conn, sends, recvs, iss,
 		func(s sendRange, r streamRec) bool {
-			return sendProven(&from.acc.timing, s.boot) && receiveProven(&to.acc.timing, r.bootExit)
+			return sendProven(&from.acc.timing, s.bootExit) &&
+				receiveProven(&to.acc.timing, r.bootExit)
 		})
 }
 
-// streamProof reports whether every byte the sender queued on the
-// connection is in its records' sums, and those stay below 4 GiB: then
-// all offsets of the direction are below 2^32 and each names one send.
-// The receiver's sums and counters are checked too (long), a cheap second
-// witness of the same total. A drop of any session that reported the
-// sending half may have hidden a send unless dropTaints says otherwise.
-func (c *collector) streamProof(from, to end) bool {
-	if long(&from.acc.timing) || long(&to.acc.timing) {
+// streamProof reports whether the sender's records' sums stay below
+// 4 GiB and nothing shows bytes they miss: then, as far as the trace can
+// tell, all offsets of the direction are below 2^32 and each names one
+// send (the residue the header names remains). The receiver's sums and
+// counters are checked too (long), a cheap second witness of the same
+// total. A drop of any session that reported the sending half may have
+// hidden a send unless dropTaints says otherwise.
+func (c *collector) streamProof(from, to end, iss uint32) bool {
+	if long(&from.acc.timing) || long(&to.acc.timing) ||
+		!sumsCover(&from.acc.timing, &to.acc.timing, iss) {
 		return false
 	}
 	for project := range from.acc.projects {
 		for _, d := range c.drops[hostProject{from.host, project}] {
 			if dropTaints(d, from) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// sumsCover reports whether every recorded offset of the direction ends
+// within the sender's byte sum. The stream starts at offset 0, so a
+// recorded send or receive ending past the sum proves bytes the sums never
+// saw — an untraced call or holder — and the sums prove nothing. It is a
+// partial guard: untraced bytes after the last recorded offset leave no
+// such trace.
+func sumsCover(from, to *timing, iss uint32) bool {
+	for _, recs := range [][]streamRec{from.sends, to.recvs} {
+		for _, r := range recs {
+			if uint64(r.seq-iss-1)+r.n > from.sent {
 				return false
 			}
 		}
@@ -143,12 +182,13 @@ func dropTaints(d dropRec, sender end) bool {
 }
 
 // sendProven reports whether a tcp_state record of the sending half taken
-// at or after the send's enter (boot ns) proves the send's start offset
+// at or after the send's exit (boot ns) proves the send's start offset
 // below 2^32 (ackedProofMax). write_seq only grows, so a record after the
-// enter bounds the start.
-func sendProven(t *timing, enter uint64) bool {
+// exit bounds the start; one merely after the enter's timestamp need not,
+// since the start is read in the enter hook a little later.
+func sendProven(t *timing, exit uint64) bool {
 	for _, r := range t.counts {
-		if r.boot >= enter && r.acked < ackedProofMax {
+		if r.boot >= exit && r.acked < ackedProofMax {
 			return true
 		}
 	}

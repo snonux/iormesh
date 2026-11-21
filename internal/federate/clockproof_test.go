@@ -103,6 +103,9 @@ func TestClockDropScope(t *testing.T) {
 		{"attach_gap on the client after its connect", func(a, b *trace) {
 			a.drop(100, schema.DropAttachGap, inside)
 		}, 4, true}, // client→server only
+		{"ring loss on the server at its accept's very instant", func(a, b *trace) {
+			b.drop(0, "", on(t0, theta)+2000) // trace.server's accept4 enter
+		}, 4, false}, // the lost record may be the connection's
 		{"skipped runs on the server before its accept", func(a, b *trace) {
 			b.drop(0, schema.DropSkippedRuns, on(before, theta))
 		}, pingMsgs, true},
@@ -178,7 +181,7 @@ func TestClockCounterProof(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			a, b, c := pingConv()
-			// Drops inside the connection on both hosts: the stream proof
+			// Drops inside the connection on both hosts: the stream check
 			// fails both ways, so only the counter proof can keep data.
 			a.drop(0, "", t0+100*tus)
 			b.drop(0, "", on(t0+100*tus, theta))
@@ -189,13 +192,78 @@ func TestClockCounterProof(t *testing.T) {
 }
 
 // TestClockFoldedBytesCount: a folded write (no tcp_seq) still counts
-// toward the sums that guard the stream proof, so 4 GiB of it leaves the
+// toward the sums that guard the stream check, so 4 GiB of it leaves the
 // direction to the counter proof.
 func TestClockFoldedBytesCount(t *testing.T) {
 	a, b, _ := pingConv()
 	a.event(100, schema.KindWrite, 7, 1<<20, t0+500*tus, "x-c", schema.Args{Count: ptr(uint64(4096))})
 	a.events[len(a.events)-1].Bytes = wrap4G
 	wantBound(t, mergeTraces(t, Options{}, a, b), 1, false)
+}
+
+// TestClockUnfoldedBytesCount: so does a single write without tcp_seq
+// (another thread interleaved with it) and without args.count.
+func TestClockUnfoldedBytesCount(t *testing.T) {
+	a, b, _ := pingConv()
+	a.event(100, schema.KindWrite, 7, 1<<20, t0+500*tus, "x-c", schema.Args{})
+	a.events[len(a.events)-1].Bytes = wrap4G
+	wantBound(t, mergeTraces(t, Options{}, a, b), 1, false)
+}
+
+// TestClockSumsCover: a recorded offset past the sender's byte sum proves
+// bytes no record counted — an untraced sendmsg, or a holder the trace
+// cannot tie to the connection — so the sums prove nothing for that
+// direction; the other direction keeps its messages.
+func TestClockSumsCover(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		add  func(a, b *trace, c *conv)
+	}{
+		{"a receive past the sender's sum", func(a, b *trace, c *conv) {
+			b.data(200, schema.KindRead, 9, on(t0+400*tus, theta), tus, "x-s", c.k.Client+1+1000, 10)
+		}},
+		{"a send past its own sum", func(a, b *trace, c *conv) {
+			a.data(100, schema.KindWrite, 7, t0+400*tus, tus, "x-c", c.k.Client+1+1000, 10)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, b, c := pingConv()
+			tc.add(a, b, c)
+			wantBound(t, mergeTraces(t, Options{}, a, b), 4, true)
+		})
+	}
+	if !sumsCover(&timing{sent: 10, sends: []streamRec{{seq: 1, n: 10}}}, &timing{}, 0) {
+		t.Fatal("a send ending exactly at the sum is covered")
+	}
+}
+
+// TestClockCounterInsideCall: a counter record taken while the call ran
+// proves nothing — after a send's enter but before its exit (its start
+// is read in the enter hook, after the enter's timestamp), or before a
+// receive's exit (its bytes may not all be counted yet).
+func TestClockCounterInsideCall(t *testing.T) {
+	at, late := t0+10*tus, t0+sec
+	for _, tc := range []struct {
+		name             string
+		sendRec, recvRec uint64 // true times of the two counter records
+		msgs             int
+	}{
+		{"both after the calls", late, late, 2},
+		{"inside the send", at + tus/2, late, 1},
+		{"inside the receive", late, at + 5*tus, 1},
+	} {
+		a, b := newTrace("hostA", "shop"), newTrace("hostB", "billing")
+		c := newConv(a, b, 0, theta, "x", ISNPair{0x10, 0x20}, t0)
+		c.request(at, 10*tus, 20) // the client's write takes 1 µs, the read 10 µs
+		a.drop(0, "", at)
+		b.drop(0, "", on(at, theta))
+		c.counters(true, tc.sendRec, 21, 0)
+		c.counters(false, tc.recvRec, 0, 21)
+		cl := mergeTraces(t, Options{}, a, b).Clocks
+		if len(cl) != 1 || cl[0].Messages != tc.msgs {
+			t.Fatalf("%s: got %v, want %d messages", tc.name, cl, tc.msgs)
+		}
+	}
 }
 
 // TestClockLB4Run2 replays the M4-10 failure of task lb4's second
@@ -206,7 +274,7 @@ func TestClockFoldedBytesCount(t *testing.T) {
 // before the connection on each, skipped runs after it on each. Every
 // drop counted against the whole host left the handshake alone
 // ("1 windows (1 one-sided, 0 empty)"). The skipped runs still block the
-// stream proof — they may have hidden sends — but the connection's own
+// stream check — they may have hidden sends — but the connection's own
 // tcp_state counters prove both data messages: two-sided.
 func TestClockLB4Run2(t *testing.T) {
 	events := readNDJSON(t, "m4shop.ndjson", "m4billing.ndjson")
@@ -221,7 +289,7 @@ func TestClockLB4Run2(t *testing.T) {
 		!c.HasLower || c.Lower != -567_047 || !c.HasUpper || c.Upper != -94_740 {
 		t.Fatalf("got %s, want [-567047, -94740] from 3 messages", clockLine(c))
 	}
-	// The stream proof alone, as run 2 had it, fails both ways: the
+	// The stream check alone, as run 2 had it, fails both ways: the
 	// skipped runs came after each socket opened, so they may have hidden
 	// sends. The drops still count wherever they could have.
 	col := newCollector()
@@ -234,14 +302,15 @@ func TestClockLB4Run2(t *testing.T) {
 	}
 	cl := end{host: "iom1", acc: col.acc[LocalConn{"iom1", conns[0].Client.ConnID}], client: true}
 	sv := end{host: "iom2", acc: col.acc[LocalConn{"iom2", conns[0].Server.ConnID}]}
-	if col.streamProof(cl, sv) || col.streamProof(sv, cl) {
-		t.Fatal("the stream proof must not survive skipped runs after the socket opened")
+	k := conns[0].Key
+	if col.streamProof(cl, sv, k.Client) || col.streamProof(sv, cl, k.Server) {
+		t.Fatal("the stream check must not survive skipped runs after the socket opened")
 	}
 	// Without its skipped runs, billing's sends are complete: its
 	// attach_gap came before the accept.
 	col.drops[hostProject{"iom2", "m4billing"}] = col.drops[hostProject{"iom2", "m4billing"}][:1]
-	if !col.streamProof(sv, cl) {
-		t.Fatal("an attach_gap before the accept must not block the stream proof")
+	if !col.streamProof(sv, cl, k.Server) {
+		t.Fatal("an attach_gap before the accept must not block the stream check")
 	}
 }
 

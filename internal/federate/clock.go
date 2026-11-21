@@ -43,9 +43,9 @@ type streamRec struct {
 }
 
 // sendRange is a streamRec's send as a stream offset range, where offset
-// = seq − (iss + 1) is the same number on both hosts; boot is its enter
-// on the boot clock.
-type sendRange struct{ start, n, enter, boot uint64 }
+// = seq − (iss + 1) is the same number on both hosts; boot and bootExit
+// are its enter and exit on the boot clock.
+type sendRange struct{ start, n, enter, boot, bootExit uint64 }
 
 // timing is what one half's records say about when things happened on
 // its host's clock: the instants around the SYN, every data record with
@@ -214,7 +214,7 @@ func sendIndex(sends []streamRec, iss uint32) ([]sendRange, bool) {
 	idx := make([]sendRange, 0, len(sends))
 	for _, s := range sends {
 		idx = append(idx, sendRange{start: uint64(s.seq - iss - 1), n: s.n, enter: s.enter,
-			boot: s.bootEnter})
+			boot: s.bootEnter, bootExit: s.bootExit})
 	}
 	slices.SortFunc(idx, func(a, b sendRange) int {
 		return cmp.Or(cmp.Compare(a.start, b.start), cmp.Compare(a.n, b.n),

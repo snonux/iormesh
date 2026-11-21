@@ -1157,24 +1157,41 @@ Kubernetes (M7) build on it.
   "Follow-up (xe4)"),
   the SYN adds one client→server edge (connect enter before
   the server's accept exit). Offsets repeat every 4 GiB, so a
-  data message counts only when it provably pairs bytes of one
-  lap (task jf4, `internal/federate/clockproof.go`), by either
-  of two proofs. The stream proof covers a direction: the byte
-  sums of all its data records (folded ones too) and the
-  `tcp_sock` counters stay below 4 GiB, and no drop of the
-  *sending* host may have hidden a send — a drop's records
+  data message counts only when it is shown to pair bytes of
+  one lap (task jf4, `internal/federate/clockproof.go`), by a
+  stream check or a counter proof. The stream check covers a
+  direction: the byte sums of all its data records (folded
+  ones too) and the `tcp_sock` counters stay below 4 GiB, no
+  recorded offset ends past the sender's sum, and no drop of
+  the *sending* host may have hidden a send — a drop's records
   were lost at or before its own instant, so one before the
   socket opened there (connect or accept enter) hid none;
   unattributed drops, skipped runs on the connecting end (a
   skipped `task_newtask` leaves a child untraced holding a
   socket that may predate connect) and ends without an opening
   call always taint. Receiver-side drops only remove receives.
-  The counter proof covers one message and ignores drops: a
-  `tcp_state` record of the sender after the send with
-  `bytes_acked` below 512 MiB (the kernel keeps less than
-  3 GiB queued: `sk_sndbuf` is an int) and one of the receiver
-  after the receive with `bytes_received` below 4 GiB put both
-  offsets below 2³², where equal mod 2³² means equal. The
+  The stream check is not a proof: it trusts the sums to hold
+  every byte, and bytes escape them with no drop recorded —
+  untraced `sendmsg`, `sendmmsg`, `splice`, io_uring; a fork
+  between the untraced `socket()` and `connect()`; an exec
+  keeping the socket (its fd binding is dropped); an fd passed
+  by `SCM_RIGHTS` or `pidfd_getfd`; and it reads only the drops
+  of sessions that reported the half. What limits the damage:
+  an offset past the sender's sum proves untraced bytes and
+  fails the check, the receiver's sums are a second witness,
+  and any counter record at 4 GiB or more fails it. The
+  planned closure is a follow-up task: a final counter
+  snapshot of every traced socket at session end.
+  The counter proof covers one message and ignores drops and
+  untraced calls: a `tcp_state` record of the sender after the
+  send's exit with `bytes_acked` below 512 MiB (the kernel
+  keeps less than 3 GiB queued: `sk_sndbuf` is an int) and one
+  of the receiver after the receive's exit with
+  `bytes_received` below 4 GiB put both offsets below 2³²,
+  where equal mod 2³² means equal. A stale socket binding after
+  a lost CLOSE cannot feed it another connection's low
+  counters: those records rebuild another key, and the
+  conflicting half fuses with nothing. The
   merge keeps one bound per
   host pair per 1-minute window (`Result.Clocks`), one-sided
   when only one direction has edges, empty and flagged when

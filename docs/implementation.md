@@ -3831,11 +3831,13 @@ connection into messages, `bound.go` intersects them,
   or a range that crosses 4 GiB give no data messages: an
   offset there could name two sends. A receive whose byte no
   traced send holds gives nothing. Beyond that a message must
-  be proven to pair bytes of one 4 GiB lap (`clockproof.go`,
+  be shown to pair bytes of one 4 GiB lap (`clockproof.go`,
   task jf4; the rule is PLAN.md's):
-  - *Stream proof*, per direction: the sums of every data
+  - *Stream check*, per direction: the sums of every data
     record (folded and `tcp_seq`-less ones included) and every
-    `tcp_sock` counter stay below 4 GiB, and no drop of the
+    `tcp_sock` counter stay below 4 GiB, no recorded send or
+    receive ends past the sender's sum (`sumsCover`: such an
+    offset proves bytes the sums missed), and no drop of the
     sending half's sessions (keyed by host and project) may
     have hidden a send. Each drop is written after the records
     it stands for were lost, so a drop before the socket opened
@@ -3845,21 +3847,37 @@ connection into messages, `bound.go` intersects them,
     instant), `skipped_runs` on the client end (a skipped
     `task_newtask` leaves an untraced child holding a socket
     that may predate connect), and an end with no opening call.
-    Drops on the receiving host only lose receives.
-  - *Counter proof*, per message, drop-immune: a `tcp_state`
-    record of the sender at or after the send's enter with
-    `bytes_acked` < 512 MiB (unsent plus unacknowledged data
-    stays under 3 GiB, `sk_sndbuf` being an int and the
-    overshoot two size goals of at most 2²⁹), and one of the
-    receiver at or after the receive's exit with
-    `bytes_received` < 4 GiB, put both offsets below 2³².
+    Drops on the receiving host only lose receives. Not a
+    proof: bytes reach the socket with no record and no drop
+    through untraced `sendmsg`, `sendmmsg`, `splice` and
+    io_uring, through a child forked between the untraced
+    `socket()` and `connect()`, an exec that keeps the socket
+    (its fd binding is dropped), or an fd passed by
+    `SCM_RIGHTS` or `pidfd_getfd`; and only the drops of the
+    sessions that reported the half are read, so a session
+    that traced a holder but recorded none of its calls is the
+    same blind spot. `sumsCover`, the receiver's sums and any
+    counter at 4 GiB or more catch part of it; the planned
+    closure (a follow-up task) is a final counter snapshot of
+    every traced socket at session end.
+  - *Counter proof*, per message, immune to drops and untraced
+    calls: a `tcp_state` record of the sender at or after the
+    send's exit (its start is read in the enter hook, after the
+    enter's timestamp) with `bytes_acked` < 512 MiB (unsent
+    plus unacknowledged data stays under 3 GiB, `sk_sndbuf`
+    being an int and the overshoot two size goals of at most
+    2²⁹), and one of the receiver at or after the receive's
+    exit with `bytes_received` < 4 GiB, put both offsets below
+    2³². A stale socket binding after a lost CLOSE would report
+    a later connection's low counters under the same conn id,
+    but those records rebuild another key: the half is a
+    `KeyConflict` and fuses with nothing.
   Lb4's run 2 (M4-10) had an `attach_gap` before each socket
-  and skipped runs after it on both hosts: the stream proof
+  and skipped runs after it on both hosts: the stream check
   fails, the counter proof keeps both data messages.
-  Still open: a stream whose bytes went through untraced
-  calls (`sendmsg`, `splice`, io_uring) is not in the sums, and
-  a long-lived connection traced in part with no
-  counter-bearing record after its data relies on them.
+  Still open, besides the stream check's residue: a long-lived
+  connection traced in part with no counter-bearing record
+  after its data relies on the stream check alone.
 - **Bounds.** θ = clock_B − clock_A (A < B by name) is below
   `recv_B − send_A` and above `send_B − recv_A`, each at the
   message's own instant. The merge keeps one `ClockBound` per
