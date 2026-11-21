@@ -73,3 +73,14 @@ func TestRouteReader(t *testing.T) {
 		t.Error("an unlisted resource reached kubectl")
 	}
 }
+
+// TestCapBuffer: kubectl output past the limit is refused, not held.
+func TestCapBuffer(t *testing.T) {
+	c := &capBuffer{limit: 4}
+	if _, err := c.Write([]byte("abcd")); err != nil || c.over {
+		t.Fatalf("at the limit: %v", err)
+	}
+	if _, err := c.Write([]byte("e")); err == nil || !c.over || c.Len() != 4 {
+		t.Errorf("past the limit: %v, over %v, len %d", err, c.over, c.Len())
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // The ingress objects: which host each routes to which Service. Paths
@@ -27,6 +28,13 @@ type ingressObj struct {
 			} `json:"http"`
 		} `json:"rules"`
 	} `json:"spec"`
+	Status struct {
+		LoadBalancer struct {
+			Ingress []struct {
+				IP string `json:"ip"`
+			} `json:"ingress"`
+		} `json:"loadBalancer"`
+	} `json:"status"`
 }
 
 // addIngresses adds each rule's host with its paths' Services. A rule
@@ -36,6 +44,7 @@ func (d *discovery) addIngresses(data []byte) error {
 	items, err := list[ingressObj](data)
 	for _, ing := range items {
 		label := "ingress/" + ing.Metadata.Namespace + "/" + ing.Metadata.Name
+		d.ingressStatus(label, ing)
 		for _, r := range ing.Spec.Rules {
 			if r.Host == "" || r.HTTP == nil {
 				continue
@@ -48,6 +57,23 @@ func (d *discovery) addIngresses(data []byte) error {
 		}
 	}
 	return err
+}
+
+// ingressStatus names the ingress controller's Service from the
+// addresses the Ingress's status lists, when they all name one
+// discovered Service (its ClusterIP or load-balancer address).
+func (d *discovery) ingressStatus(label string, ing ingressObj) {
+	found := map[string]bool{}
+	for _, lb := range ing.Status.LoadBalancer.Ingress {
+		found[d.svcIPs[lb.IP]] = true
+	}
+	if len(found) == 1 {
+		for ref := range found {
+			if ref != "" {
+				d.ingressSvc[label] = ref
+			}
+		}
+	}
 }
 
 type ingressRouteObj struct {
@@ -73,6 +99,12 @@ func (d *discovery) addIngressRoutes(data []byte) error {
 		md := ir.Metadata
 		label := "ingressroute/" + md.Namespace + "/" + md.Name
 		for _, r := range ir.Spec.Routes {
+			if strings.Contains(r.Match, "!") {
+				// A negated matcher routes every host but some: no host
+				// list to map, and its Host names are exclusions.
+				d.skip(label, "match rule with a negation names no routable host")
+				continue
+			}
 			for _, host := range MatchHosts(r.Match) {
 				for _, s := range r.Services {
 					if s.Kind != "" && s.Kind != "Service" {
@@ -119,9 +151,8 @@ var (
 
 // MatchHosts returns the host names a Traefik match rule's Host matchers
 // name, in order. It reads the routing rule, the configuration — never a
-// request. A host under a negation is still returned: the rule is
-// configuration the operator wrote, and an odd one shows up as an
-// ambiguous or contradicted route rather than vanishing.
+// request. It does not read negations: addIngressRoutes skips a rule
+// holding one before asking.
 func MatchHosts(match string) []string {
 	var out []string
 	for _, call := range hostCall.FindAllStringSubmatch(match, -1) {

@@ -52,12 +52,36 @@ type execRunner struct {
 }
 
 func (e execRunner) output(ctx context.Context, args []string) ([]byte, error) {
-	var stdout bytes.Buffer
+	stdout := &capBuffer{limit: outputLimit}
 	cmd, stderr := e.command(ctx, args)
-	cmd.Stdout = &stdout
+	cmd.Stdout = stdout
 	// Run first: the operands of a return are evaluated left to right.
 	err := explain(cmd.Run(), stderr)
+	if stdout.over {
+		return nil, fmt.Errorf("kubectl %s: output over %d bytes", strings.Join(args, " "), outputLimit)
+	}
 	return stdout.Bytes(), err
+}
+
+// outputLimit bounds what output holds of one kubectl's stdout: a pod's
+// JSON is kilobytes, a namespace's route-discovery list (internal/k8s
+// RouteReader) a few MiB; past this the answer is not one to hold in
+// memory, and the copy fails, which ends kubectl.
+const outputLimit = 128 << 20
+
+// capBuffer is a bytes.Buffer refusing writes past limit.
+type capBuffer struct {
+	bytes.Buffer
+	limit int
+	over  bool
+}
+
+func (c *capBuffer) Write(p []byte) (int, error) {
+	if c.Len()+len(p) > c.limit {
+		c.over = true
+		return 0, errors.New("output limit reached")
+	}
+	return c.Buffer.Write(p)
 }
 
 // stream starts kubectl with its stdout on a pipe for consume. A consumer

@@ -5,19 +5,19 @@
         "fqdn": "api.example.org",
         "ingress": "ingressroute/prod/api",
         "service": "prod/backend",
-        "workload": "prod/deployment/backend"
+        "ingress_service": "kube-system/traefik"
       },
       {
         "fqdn": "api2.example.org",
         "ingress": "ingressroute/prod/api",
         "service": "prod/backend",
-        "workload": "prod/deployment/backend"
+        "ingress_service": "kube-system/traefik"
       },
       {
         "fqdn": "shop.example.org",
         "ingress": "ingress/prod/web",
         "service": "prod/backend",
-        "workload": "prod/deployment/backend"
+        "ingress_service": "prod/traefik"
       }
     ],
     "services": [
@@ -45,6 +45,43 @@
           }
         ],
         "workload": "prod/deployment/backend"
+      },
+      {
+        "service": "prod/bare",
+        "cluster_ips": [
+          "10.96.0.33"
+        ],
+        "ports": [
+          {
+            "port": 80
+          }
+        ],
+        "endpoints": [
+          {
+            "addr": "10.244.1.5",
+            "pod": "prod/backend-7d9f-a",
+            "uid": "0b6e7a52-0000-4c3e-9a63-000000000001"
+          },
+          {
+            "addr": "10.244.6.6"
+          }
+        ]
+      },
+      {
+        "service": "prod/borrowed",
+        "cluster_ips": [
+          "10.96.0.34"
+        ],
+        "ports": [
+          {
+            "port": 80
+          }
+        ],
+        "endpoints": [
+          {
+            "addr": "10.244.8.8"
+          }
+        ]
       },
       {
         "service": "prod/db",
@@ -88,6 +125,17 @@
             "uid": "0b6e7a52-0000-4c3e-9a63-000000000004"
           }
         ]
+      },
+      {
+        "service": "prod/traefik",
+        "cluster_ips": [
+          "10.96.0.100"
+        ],
+        "ports": [
+          {
+            "port": 80
+          }
+        ]
       }
     ]
   },
@@ -96,6 +144,18 @@
       "kind": "ambiguous_route",
       "subject": "split.example.org",
       "detail": "routed to several services: ingress/prod/web -\u003e prod/backend, ingress/prod/web -\u003e prod/db",
+      "conns": 0
+    },
+    {
+      "kind": "ambiguous_workload",
+      "subject": "prod/bare",
+      "detail": "an endpoint names no pod of its namespace (no targetRef, or another namespace's): workload unknown",
+      "conns": 0
+    },
+    {
+      "kind": "ambiguous_workload",
+      "subject": "prod/borrowed",
+      "detail": "an endpoint names no pod of its namespace (no targetRef, or another namespace's): workload unknown",
       "conns": 0
     },
     {
@@ -112,6 +172,12 @@
     },
     {
       "kind": "skipped",
+      "subject": "endpoint \"other/intruder\"",
+      "detail": "pod name fails the map's checks or is outside prod",
+      "conns": 0
+    },
+    {
+      "kind": "skipped",
       "subject": "ingress/prod/web",
       "detail": "host \"bad\\x1b[31m.example.org\" fails the map's checks",
       "conns": 0
@@ -120,6 +186,18 @@
       "kind": "skipped",
       "subject": "ingressroute/prod/canary",
       "detail": "backend kind \"TraefikService\" names no single service",
+      "conns": 0
+    },
+    {
+      "kind": "skipped",
+      "subject": "ingressroute/prod/catchall",
+      "detail": "match rule with a negation names no routable host",
+      "conns": 0
+    },
+    {
+      "kind": "skipped",
+      "subject": "service prod/wide",
+      "detail": "over 64 ports",
       "conns": 0
     }
   ]

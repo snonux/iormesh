@@ -5414,7 +5414,8 @@ depends on:
     and returns routed edges and flags. A fused flow to a
     ClusterIP is a `fused` edge whose pod is the server end's
     endpoint (by UID from its `pod-<uid>` host id, else by
-    address) — or, not listed, the host id plus a
+    address — for an in-pod end only among endpoints without a
+    UID, as pod IPs are reused) — or, not listed, the host id plus a
     `stale_service` flag; an unfused one is a `service` edge to
     the workload, with a pod only for a sole endpoint. Tests:
     `internal/routemap/join_test.go` merges two synthetic pods'
@@ -5432,6 +5433,8 @@ depends on:
         service: <namespace>/<service>
         workload: <namespace>/deployment/<name>  # or statefulset/;
                                                  # optional
+        ingress_service: <namespace>/<service>   # optional: the
+                                                 # ingress's own
     services:                           # what the ClusterIP join reads
       - service: <namespace>/<service>
         cluster_ips: [<ip>]             # one, or two (dual stack)
@@ -5446,8 +5449,14 @@ depends on:
     document, duplicates (an FQDN, a Service, a ClusterIP and
     port) and the caps (4096 routes and Services, 64 ports and
     1024 endpoints a Service, 4 MiB) refuse the whole file.
-    `build -routes <file>` reads another file; `refresh` takes it
-    too.
+    `build -routes <file>` reads another file, which must exist;
+    `refresh` takes it too. `ingress_service` names the ingress
+    controller's Service: a flow that dialed its ClusterIP, or
+    fused to one of its listed pods, while asking for the route's
+    FQDN is the route's edge (`Table.Join` tries it first, and the
+    HTTP-host check skips it), so an in-cluster client calling
+    the FQDN through Traefik is no contradiction. A path-restricted
+    rule becomes a whole-host route.
 
     Discovery (`discover.go`, `discover_services.go`,
     `discover_ingress.go`, `snapshot.go`; built by task xb4):
@@ -5463,9 +5472,18 @@ depends on:
     pod → ReplicaSet → Deployment or pod → StatefulSet; Ingress
     rule hosts and Traefik `Host(…)` matchers (`MatchHosts`, the
     rule text only) to their Services, one Service per host or no
-    route. The snapshot (`routes-discovered.json` beside
-    `services.db`, 0600, validated on load like the static map)
-    feeds `routemap.Compile` under the static map.
+    route, its workload left to the Service and its
+    `ingress_service` from the Ingress's status addresses (a
+    discovered Service's ClusterIP or load-balancer address), else
+    `-ingress-service`. A rule with a negation, a Service over 64
+    ports, an endpoint pod of another namespace (its UID dropped
+    too) are skipped and flagged, not fatal. Each get has a
+    two-minute timeout, and the runner caps kubectl's stdout at
+    128 MiB. The snapshot (`routes-discovered.json` beside
+    `services.db`, 0600, validated on load like the static map,
+    nothing after its JSON value) feeds `routemap.Compile` under
+    the static map; the build refuses one whose context no
+    registered cluster names.
 
     Then discovery through the controller's kubectl (Ingress,
     IngressRoute, Service, EndpointSlice, owner references),

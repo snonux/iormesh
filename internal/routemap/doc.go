@@ -15,7 +15,9 @@
 //     exactly one endpoint, never by picking among several.
 //   - A connection to an FQDN that terminates on an ingress (an L7 hop no
 //     tracer sits on, which ends the TCP connection and so the ISN join) is
-//     completed FQDN → ingress → Service → workload from the route.
+//     completed FQDN → ingress → Service → workload from the route — also
+//     when an in-cluster client reaches the ingress controller's own
+//     Service (the route's ingress_service) while asking for the FQDN.
 //
 // Sources, in precedence order: the static map
 // (~/.config/iormesh/routes.yaml, read under the registry's ownership and

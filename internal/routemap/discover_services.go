@@ -40,6 +40,13 @@ type serviceObj struct {
 			TargetPort json.RawMessage `json:"targetPort"`
 		} `json:"ports"`
 	} `json:"spec"`
+	Status struct {
+		LoadBalancer struct {
+			Ingress []struct {
+				IP string `json:"ip"`
+			} `json:"ingress"`
+		} `json:"loadBalancer"`
+	} `json:"status"`
 }
 
 // addServices keeps every Service with a ClusterIP: headless ones
@@ -69,11 +76,29 @@ func (d *discovery) addServices(data []byte) error {
 				acc.ports = append(acc.ports, newSvcPort(p.Port, p.TargetPort))
 			}
 		}
-		if len(acc.ports) > 0 { // a UDP-only Service carries no TCP connection
+		switch {
+		case len(acc.ports) > maxPorts: // one odd Service, not a failed discovery
+			d.skip("service "+ref, "over "+strconv.Itoa(maxPorts)+" ports")
+		case len(acc.ports) > 0: // a UDP-only Service carries no TCP connection
 			d.services[ref] = acc
+			d.addressed(ref, ips, s)
 		}
 	}
 	return err
+}
+
+// addressed records the addresses that name a kept Service: its
+// ClusterIPs and its load balancer's, which an Ingress's status may
+// list when the Service is the ingress controller's.
+func (d *discovery) addressed(ref string, ips []string, s serviceObj) {
+	for _, ip := range ips {
+		d.svcIPs[ip] = ref
+	}
+	for _, lb := range s.Status.LoadBalancer.Ingress {
+		if lb.IP != "" {
+			d.svcIPs[lb.IP] = ref
+		}
+	}
 }
 
 // newSvcPort reads a port and its targetPort, a number or a port name.
@@ -196,8 +221,10 @@ func (a *svcAcc) service(d *discovery) Service {
 func (d *discovery) checked(ref string, e Endpoint) Endpoint {
 	ns, _, _ := strings.Cut(ref, "/")
 	if e.Pod != "" && (!validPodRef(e.Pod) || !strings.HasPrefix(e.Pod, ns+"/")) {
-		d.skip("endpoint "+strconv.Quote(e.Pod), "pod name fails the map's checks")
-		e.Pod = ""
+		// A pod of another namespace (or an odd name): its UID would let
+		// a server end match an endpoint the Service cannot have.
+		d.skip("endpoint "+strconv.Quote(e.Pod), "pod name fails the map's checks or is outside "+ns)
+		e.Pod, e.UID = "", ""
 	}
 	return e
 }
@@ -206,9 +233,10 @@ func (d *discovery) checked(ref string, e Endpoint) Endpoint {
 // — flagged when the endpoints disagree or one has none of the two
 // kinds.
 func (d *discovery) workloadOf(ref string, eps []Endpoint) string {
-	found := map[string]bool{}
+	found, unnamed := map[string]bool{}, false
 	for _, e := range eps {
 		found[d.workloads[e.UID]] = true
+		unnamed = unnamed || e.UID == ""
 	}
 	if len(found) == 1 {
 		for w := range found {
@@ -217,9 +245,12 @@ func (d *discovery) workloadOf(ref string, eps []Endpoint) string {
 			}
 		}
 	}
+	detail := "endpoints are not all pods of one deployment or statefulset"
+	if unnamed {
+		detail = "an endpoint names no pod of its namespace (no targetRef, or another namespace's): workload unknown"
+	}
 	if len(found) > 0 {
-		d.flags = append(d.flags, Flag{Kind: FlagAmbiguousWorkload, Subject: ref,
-			Detail: "endpoints are not all pods of one deployment or statefulset"})
+		d.flags = append(d.flags, Flag{Kind: FlagAmbiguousWorkload, Subject: ref, Detail: detail})
 	}
 	return ""
 }

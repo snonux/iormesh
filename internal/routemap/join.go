@@ -133,18 +133,48 @@ type joiner struct {
 	flags map[Flag]int // Conns zeroed in the key; the value counts them
 }
 
-// flow routes one flow and checks its HTTP hosts.
+// flow routes one flow and checks its HTTP hosts. A flow that reached
+// its hostname's ingress — the route's ingress Service by ClusterIP, or
+// fused to one of that Service's pods — is the route's edge: an
+// in-cluster client calling the FQDN through Traefik's Service is the
+// ingress hop, not a contradiction. An address in a Service CIDR that no
+// Service holds is flagged and the route still tried: the ingress's own
+// Service may simply be missing from the map.
 func (j *joiner) flow(f *Flow) {
 	s, viaService := j.t.ServiceAt(f.Endpoint)
+	if r, origin, ok := j.t.Route(stripPort(f.Hostname)); ok && j.reachedIngress(f, r, s, viaService) {
+		j.addRoute(f, r, origin)
+		return
+	}
 	switch {
 	case viaService:
 		j.service(f, s)
 	case f.Endpoint.IsValid() && j.t.inServiceRange(f.Endpoint.Addr()):
 		j.flag(FlagUnknownService, f.Endpoint.String(), "inside a service CIDR, no service of the map holds it", 1)
+		if !f.Fused {
+			j.route(f)
+		}
 	case !f.Fused:
 		j.route(f)
 	}
 	j.checkHosts(f, s, viaService)
+}
+
+// reachedIngress reports whether the flow ended on r's ingress: its
+// ClusterIP dialed, or — fused — one of its listed pods answered.
+func (j *joiner) reachedIngress(f *Flow, r Route, reached Service, viaService bool) bool {
+	if r.IngressService == "" {
+		return false
+	}
+	if viaService {
+		return reached.Service == r.IngressService
+	}
+	ing, ok := j.t.Service(r.IngressService)
+	if !ok || !f.Fused {
+		return false
+	}
+	_, listed := endpointOf(ing, f.ServerHost, f.ServerAddr)
+	return listed
 }
 
 // service adds a flow that dialed s's ClusterIP: the Service named, the
@@ -169,10 +199,13 @@ func (j *joiner) service(f *Flow, s Service) {
 
 // route adds an unfused flow whose hostname the map routes.
 func (j *joiner) route(f *Flow) {
-	r, origin, ok := j.t.Route(stripPort(f.Hostname))
-	if !ok {
-		return
+	if r, origin, ok := j.t.Route(stripPort(f.Hostname)); ok {
+		j.addRoute(f, r, origin)
 	}
+}
+
+// addRoute adds f as r's edge: FQDN → ingress → Service → workload.
+func (j *joiner) addRoute(f *Flow, r Route, origin string) {
 	k := edgeKey{from: f.From, fqdn: r.FQDN, ingress: r.Ingress, service: r.Service,
 		workload: r.Workload, basis: BasisRoute, origin: origin}
 	if s, ok := j.t.Service(r.Service); ok {
@@ -187,8 +220,8 @@ func (j *joiner) route(f *Flow) {
 func (j *joiner) checkHosts(f *Flow, reached Service, viaService bool) {
 	for _, h := range f.HTTPHosts {
 		r, _, ok := j.t.Route(stripPort(h))
-		if !ok {
-			continue
+		if !ok || j.reachedIngress(f, r, reached, viaService) {
+			continue // reaching the route's ingress is what the route says
 		}
 		switch {
 		case viaService && reached.Service != r.Service:
@@ -205,7 +238,10 @@ func (j *joiner) checkHosts(f *Flow, reached Service, viaService bool) {
 
 // endpointOf finds the traced server end among s's endpoints: by pod UID
 // first (an in-pod tracer's host id is "pod-<uid>"), else by the address
-// it accepted on.
+// it accepted on. For an in-pod end the address names only endpoints
+// without a UID: pod IPs are reused, so an endpoint whose UID differs is
+// another pod that held the address, and the end is not listed (the
+// caller flags the map stale) rather than named after it.
 func endpointOf(s Service, host string, addr netip.AddrPort) (Endpoint, bool) {
 	uid, inPod := strings.CutPrefix(host, "pod-")
 	for _, e := range s.Endpoints {
@@ -214,6 +250,9 @@ func endpointOf(s Service, host string, addr netip.AddrPort) (Endpoint, bool) {
 		}
 	}
 	for _, e := range s.Endpoints {
+		if inPod && e.UID != "" {
+			continue
+		}
 		if a, err := netip.ParseAddr(e.Addr); err == nil && addr.IsValid() && a.Unmap() == addr.Addr().Unmap() {
 			return e, true
 		}

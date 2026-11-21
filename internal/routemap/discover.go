@@ -26,6 +26,13 @@ import (
 // (one per namespace read).
 type Objects struct {
 	Ingresses, IngressRoutes, Services, EndpointSlices, Pods, ReplicaSets [][]byte
+	// IngressService is the operator's word for the ingress controller's
+	// own Service ("kube-system/traefik", `routes discover
+	// -ingress-service`): every discovered route gets it unless an
+	// Ingress's status names a discovered Service by address. An
+	// IngressRoute carries no status, so for Traefik's CRD this is the
+	// only source.
+	IngressService string
 }
 
 // FlagSkipped: a discovered object whose names or addresses fail the
@@ -35,7 +42,8 @@ const FlagSkipped = "skipped"
 // Discover builds the discovered map from objs. The result passed
 // Validate; an error means a list that is not kubectl's JSON.
 func Discover(objs Objects) (*Map, []Flag, error) {
-	d := discovery{owners: map[string]string{}, workloads: map[string]string{}}
+	d := discovery{owners: map[string]string{}, workloads: map[string]string{},
+		svcIPs: map[string]string{}, ingressSvc: map[string]string{}, defaultIngress: objs.IngressService}
 	steps := []struct {
 		lists [][]byte
 		add   func([]byte) error
@@ -68,7 +76,14 @@ type discovery struct {
 	pods      map[string]podRef // by UID
 	services  map[string]*svcAcc
 	hosts     map[string]map[backend]bool // FQDN → the backends routing it
-	flags     []Flag
+	// svcIPs maps a discovered Service's ClusterIPs and load-balancer
+	// addresses to it; ingressSvc an Ingress object (by label) to the
+	// Service its status addresses name; defaultIngress is
+	// Objects.IngressService.
+	svcIPs         map[string]string
+	ingressSvc     map[string]string
+	defaultIngress string
+	flags          []Flag
 }
 
 // podRef is a pod's name, as an endpoint names it.
@@ -166,7 +181,7 @@ func (d *discovery) finish() *Map {
 		m.Services = append(m.Services, d.services[ref].service(d))
 	}
 	for _, host := range slices.Sorted(maps.Keys(d.hosts)) {
-		r, ok := d.route(host, m)
+		r, ok := d.route(host)
 		if ok {
 			m.Routes = append(m.Routes, r)
 		}
@@ -175,7 +190,9 @@ func (d *discovery) finish() *Map {
 }
 
 // route is host's route, when every object routing it names one Service.
-func (d *discovery) route(host string, m *Map) (Route, bool) {
+// A path-restricted rule becomes a whole-host route: the map routes FQDNs,
+// not paths.
+func (d *discovery) route(host string) (Route, bool) {
 	bs := slices.SortedFunc(maps.Keys(d.hosts[host]), func(a, b backend) int {
 		return cmp.Or(cmp.Compare(a.service, b.service), cmp.Compare(a.ingress, b.ingress))
 	})
@@ -188,11 +205,8 @@ func (d *discovery) route(host string, m *Map) (Route, bool) {
 			Detail: "routed to several services: " + strings.Join(slices.Compact(names), ", ")})
 		return Route{}, false
 	}
-	r := Route{FQDN: host, Ingress: bs[0].ingress, Service: bs[0].service}
-	for _, s := range m.Services {
-		if s.Service == r.Service {
-			r.Workload = s.Workload
-		}
-	}
-	return r, true
+	// The workload is left to the Service (Table lookups fill it), so a
+	// static Service shadowing the discovered one keeps its own.
+	return Route{FQDN: host, Ingress: bs[0].ingress, Service: bs[0].service,
+		IngressService: cmp.Or(d.ingressSvc[bs[0].ingress], d.defaultIngress)}, true
 }

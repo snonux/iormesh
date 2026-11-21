@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"iormesh/internal/k8sname"
 )
@@ -36,9 +37,10 @@ var RouteResources = []string{
 	"replicasets.apps",
 }
 
-// maxRouteOutput bounds one get's JSON: a namespace's pods are a few
-// MiB; past this the list is not one discovery should hold in memory.
-const maxRouteOutput = 128 << 20
+// routeTimeout bounds one get: a list that takes longer is an API server
+// or credential plugin hanging, and discovery would otherwise wait
+// forever. The output itself is bounded by the runner (outputLimit).
+const routeTimeout = 2 * time.Minute
 
 // RouteReader reads route discovery's objects in one context and
 // namespace.
@@ -71,15 +73,14 @@ func (r *RouteReader) Get(ctx context.Context, resource string) ([]byte, error) 
 		return nil, fmt.Errorf("%w: resource %q is not one route discovery reads", ErrName, resource)
 	}
 	argv := []string{"--context=" + r.context, "--namespace=" + r.namespace, "get", resource, "--output=json"}
+	ctx, cancel := context.WithTimeout(ctx, routeTimeout)
+	defer cancel()
 	out, err := r.run.output(ctx, argv)
 	if err != nil {
 		if strings.Contains(err.Error(), "the server doesn't have a resource type") {
 			return nil, fmt.Errorf("%w: %s", ErrNoResource, resource)
 		}
 		return nil, fmt.Errorf("kubectl get %s in %s: %w", resource, r.namespace, err)
-	}
-	if len(out) > maxRouteOutput {
-		return nil, fmt.Errorf("kubectl get %s in %s: over %d bytes", resource, r.namespace, maxRouteOutput)
 	}
 	return out, nil
 }

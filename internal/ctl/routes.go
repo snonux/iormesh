@@ -5,12 +5,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"time"
 
 	"iormesh/internal/federate"
 	"iormesh/internal/k8s"
+	"iormesh/internal/k8sname"
 	"iormesh/internal/routemap"
 	"iormesh/internal/termsafe"
 )
@@ -46,6 +48,11 @@ func loadRoutes(e env, f buildFlags, db string) (*routemap.Table, error) {
 		}
 		path = routemap.DefaultPath(reg)
 	}
+	if f.routes != "" { // named on the command line: it must be there
+		if _, err := os.Stat(f.routes); err != nil {
+			return nil, fmt.Errorf("route map: %w", err)
+		}
+	}
 	var static *routemap.Map
 	if path != "" {
 		var err error
@@ -57,6 +64,9 @@ func loadRoutes(e env, f buildFlags, db string) (*routemap.Table, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := checkSnapshotContext(e, snap); err != nil {
+		return nil, err
+	}
 	if static == nil && snap == nil {
 		return nil, nil
 	}
@@ -66,10 +76,32 @@ func loadRoutes(e env, f buildFlags, db string) (*routemap.Table, error) {
 	return routemap.Compile(static, &snap.Map, snap.Flags), nil
 }
 
+// checkSnapshotContext requires the snapshot's context to be one of the
+// registry's clusters: a snapshot of a cluster the operator no longer
+// traces would name its ClusterIPs on another cluster's connections. A
+// registry that lists several clusters still shares one snapshot (the
+// last discovered); the map applies to every flow of the build (PLAN.md
+// #15).
+func checkSnapshotContext(e env, snap *routemap.Snapshot) error {
+	if snap == nil {
+		return nil
+	}
+	r, err := loadRegistry("", e)
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(r.Contexts(), snap.Context) {
+		return fmt.Errorf("route snapshot: context %s is no registered cluster's; rediscover or remove %s",
+			termsafe.String(snap.Context), routemap.SnapshotName)
+	}
+	return nil
+}
+
 // routesFlags are `routes discover`'s flags.
 type routesFlags struct {
 	registry, cluster, db string
 	namespaces            projectList // repeatable, like -project
+	ingressService        string      // the ingress controller's Service
 }
 
 // routesCommand runs `iormeshctl routes discover`.
@@ -83,11 +115,17 @@ func routesCommand(args []string, e env) error {
 	fs.StringVar(&f.cluster, "cluster", "", "registered cluster to read (default: the only one)")
 	fs.Var(&f.namespaces, "namespace", "namespace to read (repeatable; default: the cluster's)")
 	fs.StringVar(&f.db, "db", "", "service database the snapshot sits beside (default ~/.local/share/iormesh/services.db)")
+	fs.StringVar(&f.ingressService, "ingress-service", "",
+		"the ingress controller's own Service, NAMESPACE/NAME, put on discovered routes")
 	if err := fs.Parse(args[1:]); err != nil {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%w: routes discover takes no arguments", errUsage)
+	}
+	if ns, name, ok := strings.Cut(f.ingressService, "/"); f.ingressService != "" &&
+		(!ok || !k8sname.Label(ns) || !k8sname.Label(name)) {
+		return fmt.Errorf("%w: -ingress-service %q is not NAMESPACE/NAME", errUsage, f.ingressService)
 	}
 	return discoverRoutes(context.Background(), e, f)
 }
@@ -107,6 +145,7 @@ func discoverRoutes(ctx context.Context, e env, f routesFlags) error {
 	if err != nil {
 		return err
 	}
+	objs.IngressService = f.ingressService
 	m, flags, err := routemap.Discover(objs)
 	if err != nil {
 		return err

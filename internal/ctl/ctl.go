@@ -226,6 +226,7 @@ func usage(w io.Writer) {
   iormeshctl services rules [-db FILE]
   iormeshctl services unname [-db FILE] RULE-ID
   iormeshctl routes discover [-registry FILE] [-cluster NAME] [-namespace NS]... [-db FILE]
+                            [-ingress-service NS/NAME]
   iormeshctl verify [-key FILE] FILE...      (FILE.minisig next to each)
   iormeshctl version
 

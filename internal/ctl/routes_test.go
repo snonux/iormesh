@@ -124,7 +124,7 @@ func TestBuildRoutesStale(t *testing.T) {
 
 // TestBuildRoutesHostile: a route map others could write, or one that
 // fails its checks, fails the build before any segment is read, and
-// -routes points the build at another file.
+// -routes points the build at another file — one that must exist.
 func TestBuildRoutesHostile(t *testing.T) {
 	f := newClusterFixture(t, clusterRoutes, 0o666)
 	reg, _ := f.e.registry()
@@ -151,5 +151,9 @@ func TestBuildRoutesHostile(t *testing.T) {
 	}
 	if out := f.mustRun(t, "build", "-routes", other); !strings.Contains(out, "routed") {
 		t.Errorf("-routes ignored:\n%s", out)
+	}
+	if code := f.run("build", "-routes", filepath.Join(t.TempDir(), "typo.yaml")); code != exitError ||
+		!strings.Contains(f.stderr.String(), "no such file") {
+		t.Errorf("missing -routes file: exit %d: %s", code, f.stderr)
 	}
 }

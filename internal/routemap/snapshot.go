@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -87,6 +88,9 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&s); err != nil {
 		return nil, fmt.Errorf("route snapshot %s: %w", path, err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("%w: route snapshot %s: data after the JSON value", ErrInvalid, path)
 	}
 	if err := s.validate(); err != nil {
 		return nil, fmt.Errorf("route snapshot %s: %w", path, err)

@@ -58,6 +58,11 @@ type Route struct {
 	// Workload is "<namespace>/deployment/<name>" or
 	// "<namespace>/statefulset/<name>"; empty takes the Service's.
 	Workload string `yaml:"workload,omitempty" json:"workload,omitempty"`
+	// IngressService is the ingress controller's own Service
+	// ("kube-system/traefik"), optional: an in-cluster client reaching
+	// it — by ClusterIP, or fused to one of its pods — while asking for
+	// FQDN is this route's ingress hop, not a contradiction.
+	IngressService string `yaml:"ingress_service,omitempty" json:"ingress_service,omitempty"`
 }
 
 // Service is one Kubernetes Service: what its ClusterIP is and what is
@@ -164,6 +169,9 @@ func (r *Route) validate() error {
 		return fmt.Errorf("%w: route %s: ingress %q", ErrInvalid, r.FQDN, r.Ingress)
 	case !validRef(r.Service):
 		return fmt.Errorf("%w: route %s: service %q is not <namespace>/<service>", ErrInvalid, r.FQDN, r.Service)
+	case r.IngressService != "" && !validRef(r.IngressService):
+		return fmt.Errorf("%w: route %s: ingress_service %q is not <namespace>/<service>", ErrInvalid,
+			r.FQDN, r.IngressService)
 	}
 	if r.Workload != "" {
 		if err := validWorkload(r.Workload, r.Service); err != nil {

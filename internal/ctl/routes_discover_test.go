@@ -81,7 +81,7 @@ func discoverFixture(t *testing.T) (*buildFixture, string) {
 // Service and pod from it alone.
 func TestRoutesDiscover(t *testing.T) {
 	f, dir := discoverFixture(t)
-	out := f.mustRun(t, "routes", "discover")
+	out := f.mustRun(t, "routes", "discover", "-ingress-service", "kube-system/traefik")
 	if !strings.Contains(out, "discovered 1 routes, 1 services in kind-test (prod)") {
 		t.Errorf("discover printed\n%s", out)
 	}
@@ -91,8 +91,9 @@ func TestRoutesDiscover(t *testing.T) {
 			t.Errorf("kubectl call %q is not a read-only get in the registered scope", l)
 		}
 	}
-	if _, err := os.Stat(routemap.SnapshotPath(f.db)); err != nil {
-		t.Fatal(err)
+	snap, err := routemap.LoadSnapshot(routemap.SnapshotPath(f.db))
+	if err != nil || snap == nil || snap.Map.Routes[0].IngressService != "kube-system/traefik" {
+		t.Fatalf("snapshot %+v, %v", snap, err)
 	}
 	if err := os.Remove(filepath.Join(dir, "log")); err != nil {
 		t.Fatal(err)
@@ -130,12 +131,28 @@ func TestRoutesDiscoverPrecedence(t *testing.T) {
 	}
 }
 
+// TestRoutesSnapshotContext: a snapshot of a context the registry no
+// longer lists fails the build rather than naming another cluster's
+// addresses.
+func TestRoutesSnapshotContext(t *testing.T) {
+	f, _ := discoverFixture(t)
+	f.mustRun(t, "routes", "discover")
+	reg, _ := f.e.registry()
+	if err := os.WriteFile(reg, []byte(strings.Replace(discoverRegistry, "kind-test", "kind-other", 1)),
+		0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := f.run("build"); code != exitError || !strings.Contains(f.stderr.String(), "no registered cluster") {
+		t.Errorf("stale context: exit %d: %s", code, f.stderr)
+	}
+}
+
 // TestRoutesDiscoverRefusals: no subcommand, an unregistered cluster, a
 // bad namespace and a failing kubectl all fail without a snapshot.
 func TestRoutesDiscoverRefusals(t *testing.T) {
 	f, dir := discoverFixture(t)
 	for _, args := range [][]string{{"routes"}, {"routes", "discover", "-cluster", "other"},
-		{"routes", "discover", "-namespace", "Bad_NS"}} {
+		{"routes", "discover", "-namespace", "Bad_NS"}, {"routes", "discover", "-ingress-service", "traefik"}} {
 		if code := f.run(args...); code == exitOK {
 			t.Errorf("%v: exit 0", args)
 		}

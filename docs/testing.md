@@ -1227,7 +1227,17 @@ docs/implementation.md M7 steps 11 and 12):
   name or ClusterIP (each shadowing flagged), wildcards of one
   label only, a nil table, an endpoint-less Service never stale,
   a fused direct-to-pod flow contradicting its HTTP host's
-  route, a Host with a port.
+  route, a Host with a port. `ingress_test.go`: a reused pod IP
+  (the map's endpoint has another UID than the server end's
+  `pod-<uid>`) names no pod and flags `stale_service`; in-cluster
+  clients asking for the FQDN through Traefik get the route's
+  edge and no contradiction — by Traefik's ClusterIP, by an
+  address in the Service CIDR with Traefik's Service unmapped
+  (`unknown_service` plus the route), fused to a Traefik pod
+  through its ClusterIP or directly — while another pod still
+  contradicts. Mutation-checked (each fails a test): the UID
+  guard on the address fallback, the ingress short-circuit, the
+  route after `unknown_service`, the fused-pod ingress check.
 - `internal/routemap/load_test.go`: a hostile `routes.yaml` is
   refused whole — group- or world-writable file or directory,
   over 4 MiB, an unknown key, a second document, an escape
@@ -1246,24 +1256,32 @@ docs/implementation.md M7 steps 11 and 12):
   ExternalName and UDP-only Services are left out and a host
   split across two Services (`ambiguous_route`), a Service over
   two workloads (`ambiguous_workload`), a forged endpoint
-  address, a host with an escape sequence and a TraefikService
-  backend (`skipped`) are flags; JSON that is not kubectl's fails
+  address, a host with an escape sequence, a TraefikService
+  backend, a negated matcher, a 65-port Service and an endpoint
+  pod of another namespace, UID dropped (`skipped`), and endpoints
+  naming no pod (`ambiguous_workload`, its own text) are flags;
+  an Ingress's status address names Traefik's Service as the
+  route's `ingress_service`, `-ingress-service` the
+  IngressRoutes'; JSON that is not kubectl's fails
   whole. `MatchHosts` takes `Host` only (not `HostSNI`,
   `HostRegexp` or a longer name), in v2's list form too. A
-  snapshot round-trips 0600; an unknown field, a forged context
-  and a writable file are refused.
+  snapshot round-trips 0600; an unknown field, data after the
+  JSON value, a forged context and a writable file are refused.
 - `internal/k8s/routes_test.go`: a route get's exact argv
   (context, namespace, `get`, the resource, `--output=json`); an
   unserved resource is `ErrNoResource`; `secrets`, an option-like
-  context and a bad namespace never reach kubectl.
+  context and a bad namespace never reach kubectl; output past
+  the cap is refused.
 - `internal/ctl/routes_discover_test.go`, a fake kubectl on
   `PATH`: `routes discover` makes only read-only gets in the
   registered context and namespace, survives the missing Traefik
   CRDs and writes the snapshot; the next build names the Service,
   pod and route from it without running kubectl; a static route
-  for the same FQDN wins and is flagged `shadowed`; no
-  subcommand, an unregistered cluster, a bad namespace and a
-  failing kubectl write no snapshot.
+  for the same FQDN wins and is flagged `shadowed`; a snapshot
+  whose context the registry no longer lists fails the build; no
+  subcommand, an unregistered cluster, a bad namespace, a bad
+  `-ingress-service` and a failing kubectl write no snapshot; a
+  missing `-routes` file fails the build.
 - `internal/ctl/routes_test.go`: a build over a ClusterIP mesh
   with the map beside the registry prints the routed edges
   (`testdata/routes_summary.golden`: the fused edge with its

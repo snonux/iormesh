@@ -81,37 +81,56 @@ func ingressRoute(name, match string, services ...obj) obj {
 
 // clusterObjects is a namespace as kubectl lists it: a Deployment's
 // backend (named targetPort) and a StatefulSet's db, a Service whose
-// endpoints span two workloads, headless, ExternalName and UDP-only
-// Services, a not-ready and a forged endpoint; an Ingress routing the
-// shop FQDN, one host split by path across two Services, a Traefik
-// IngressRoute naming two hosts and one behind a TraefikService, and a
-// host carrying an escape sequence.
+// endpoints span two workloads, one with an endpoint naming no pod, one
+// whose endpoint's pod is another namespace's, headless, ExternalName,
+// UDP-only and 65-port Services, a not-ready and a forged endpoint,
+// Traefik's own Service with a load-balancer address; an Ingress routing
+// the shop FQDN whose status names that address, one host split by path
+// across two Services, a Traefik IngressRoute naming two hosts, one
+// behind a TraefikService and one negated, and a host carrying an escape
+// sequence. The operator names Traefik's Service for the IngressRoutes.
 func clusterObjects(t *testing.T) Objects {
 	tcp := []obj{{"name": "http", "protocol": "TCP", "port": 80, "targetPort": "web"}}
+	var many []obj
+	for p := range 65 {
+		many = append(many, obj{"port": 1000 + p})
+	}
+	traefik := svc("traefik", "10.96.0.100", []obj{{"port": 80}}, "LoadBalancer")
+	traefik["status"] = obj{"loadBalancer": obj{"ingress": []obj{{"ip": "203.0.113.10"}}}}
+	web := ingress("web", rule("Shop.Example.org", "backend"), rule(""),
+		rule("split.example.org", "backend", "db"), rule("bad\x1b[31m.example.org", "backend"))
+	web["status"] = obj{"loadBalancer": obj{"ingress": []obj{{"ip": "203.0.113.10"}}}}
+	foreign := ep("10.244.8.8", "5", true)
 	return Objects{
+		IngressService: "kube-system/traefik",
 		ReplicaSets: [][]byte{items(t, md("backend-7d9f", owner("Deployment", "backend")),
 			md("worker-55", owner("Deployment", "worker")))},
 		Pods: [][]byte{items(t, pod("backend-7d9f-a", "1", owner("ReplicaSet", "backend-7d9f")),
 			pod("backend-7d9f-b", "2", owner("ReplicaSet", "backend-7d9f")),
-			pod("db-0", "3", owner("StatefulSet", "db")), pod("worker-55-x", "4", owner("ReplicaSet", "worker-55")))},
+			pod("db-0", "3", owner("StatefulSet", "db")), pod("worker-55-x", "4", owner("ReplicaSet", "worker-55")),
+			obj{"metadata": obj{"name": "intruder", "namespace": "other", "uid": uidN("5")}})},
 		Services: [][]byte{items(t, svc("backend", "10.96.0.20", tcp, "ClusterIP"),
 			svc("db", "10.96.0.30", []obj{{"port": 5432, "targetPort": 5432}}, "ClusterIP"),
 			svc("mixed", "10.96.0.31", []obj{{"port": 80}}, "ClusterIP"),
 			svc("headless", "None", []obj{{"port": 80}}, "ClusterIP"),
 			svc("dns", "10.96.0.10", []obj{{"port": 53, "protocol": "UDP"}}, "ClusterIP"),
-			svc("ext", "", []obj{{"port": 80}}, "ExternalName"))},
+			svc("ext", "", []obj{{"port": 80}}, "ExternalName"), svc("wide", "10.96.0.32", many, "ClusterIP"),
+			svc("bare", "10.96.0.33", []obj{{"port": 80}}, "ClusterIP"),
+			svc("borrowed", "10.96.0.34", []obj{{"port": 80}}, "ClusterIP"), traefik)},
 		EndpointSlices: [][]byte{items(t,
 			slice("backend", []obj{{"name": "web", "port": 8080}}, ep("10.244.1.5", "1", true),
 				ep("10.244.2.6", "2", true), ep("10.244.2.9", "9", false)),
 			slice("db", nil, ep("10.244.4.1", "3", true), obj{"addresses": []string{"10.244.4.1\x1b[2J"}}),
-			slice("mixed", nil, ep("10.244.1.5", "1", true), ep("10.244.5.5", "4", true)))},
-		Ingresses: [][]byte{items(t, ingress("web", rule("Shop.Example.org", "backend"), rule(""),
-			rule("split.example.org", "backend", "db"), rule("bad\x1b[31m.example.org", "backend")))},
+			slice("mixed", nil, ep("10.244.1.5", "1", true), ep("10.244.5.5", "4", true)),
+			slice("bare", nil, ep("10.244.1.5", "1", true), obj{"addresses": []string{"10.244.6.6"}}),
+			slice("borrowed", nil, foreign))},
+		Ingresses: [][]byte{items(t, web)},
 		IngressRoutes: [][]byte{items(t,
 			ingressRoute("api", "Host(`api.example.org`) || Host(`api2.example.org`) && PathPrefix(`/v1`)",
 				obj{"name": "backend", "port": 80}),
 			ingressRoute("canary", "HostSNI(`x.example.org`) || Host(`canary.example.org`)",
-				obj{"name": "weighted", "kind": "TraefikService"}))},
+				obj{"name": "weighted", "kind": "TraefikService"}),
+			ingressRoute("catchall", "!Host(`internal.example.org`)", obj{"name": "backend"}))},
 	}
 }
 
@@ -158,8 +177,8 @@ func TestMatchHosts(t *testing.T) {
 }
 
 // TestSnapshotRoundTrip: a snapshot saved is the one loaded, 0600; a
-// missing one is none; an unknown field, a writable file or a forged
-// context is refused.
+// missing one is none; an unknown field, data after the JSON value, a
+// writable file or a forged context is refused.
 func TestSnapshotRoundTrip(t *testing.T) {
 	m, flags, err := Discover(clusterObjects(t))
 	if err != nil {
@@ -189,6 +208,12 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 	if _, err := LoadSnapshot(path); err == nil {
 		t.Error("unknown field accepted")
+	}
+	if err := os.WriteFile(path, append(append([]byte{}, data...), []byte(`{"taken":"x"}`)...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadSnapshot(path); !errors.Is(err, ErrInvalid) {
+		t.Errorf("trailing data: %v", err)
 	}
 	s.Context = "-oProxy"
 	if err := SaveSnapshot(path, s); !errors.Is(err, ErrInvalid) {
