@@ -615,9 +615,11 @@ hop is drawn time-ordered or unordered is held by
 
 The rig above proves M4's criteria on network namespaces; the
 acceptance itself (PLAN.md M4, "Acceptance") also needs one run
-on two real hosts, which only the owner can make. **Status: not
-run on real hosts yet** — nothing below counts as accepted until
-the owner's run prints every criterion PASS.
+on two real hosts. **Status (2026-11-21): run twice on two
+Rocky 9.9 VMs, not accepted** — 11 of 15 criteria pass, four
+fail on defects filed as tasks (see "Run on Rocky 9.9" below);
+nothing counts as accepted until a run prints every criterion
+PASS.
 
 `mage m4Acceptance HOST1 HOST2` (`magefile_m4acceptance.go`,
 `internal/acceptance`) runs the whole sequence and checks each
@@ -677,8 +679,11 @@ Each host (two machines, Linux, x86_64 or aarch64):
   46ba0e49), though this run loads no agent. The suite has only
   run on Linux 7.2, where the dispatcher findings (PLAN.md,
   "Syscall handlers run behind `raw_syscalls` dispatchers") were
-  measured; Rocky 9's 5.14, the first target platform, has never
-  run the tracer, so a 7.x kernel is the safe choice.
+  measured. Rocky 9.9's 5.14.0-741.22.1.el9_9 has backported
+  the BPF features these floors name (`bpf_rdonly_cast`,
+  uprobe_multi links) and runs the tracer since tasks gf4 and
+  hf4 (see "Run on Rocky 9.9" below); the version floors above
+  do not describe el9.
 - systemd, rsync, Java 21 or newer on the SSH user's `PATH` (the
   goldens were confirmed on JDK 25), `ss`, GNU `df` and `stat`,
   `fallocate`, `timeout`, `pkill`, a POSIX login shell.
@@ -865,8 +870,97 @@ not run against real hosts. What ran here:
   once on an attribution (`ambiguous 12`); the rerun passed,
   and this task changes nothing that test runs.
 
-The owner's run is what remains: the prerequisites above, then
-`mage m4Acceptance HOST1 HOST2`, all criteria PASS.
+### Run on Rocky 9.9 (2026-11-21)
+
+Two test VMs on the owner's homelab, `iom1` (10.20.0.140, HOST1)
+and `iom2` (10.20.0.141, HOST2): Rocky Linux 9.9 minimal, 2 vCPUs,
+2 GiB, kernel 5.14.0-741.22.1.el9_9.x86_64 with BTF, JDK 25.0.5,
+rsync 3.2.7 (the controller's is 3.5.1). Bootstrapped as above
+with `ops` = the SSH user and a test release key; ports 18202,
+18203 and 18216 opened runtime-only on HOST2 and 18215 on
+HOST1; the DNAT 18880 → 18203 on HOST2;
+`IORMESH_M4_ADDR1/2` and `IORMESH_M4_NAT_PORT=18880` set.
+
+The el9 kernel has every BPF feature the floors above ask of
+6.2–6.10: `bpftool feature probe` and the BTF list
+`bpf_rdonly_cast`, `bpf_cast_to_kern_ctx`, uprobe_multi and
+kprobe_multi links, ringbuf, `bpf_get_current_task_btf`,
+`bpf_ktime_get_boot_ns`; the 704 `syscalls` tracepoints and
+`raw_syscalls` are there. Two el9 defects stopped the tracer and
+were fixed in this task (each loaded per program on el9 — all 744
+— and checked on 7.2 with `mage test`, `mage bpfRootTest` and
+`mage integrationTest`, 51 passed, none skipped):
+
+- **gf4** — the verifier refused `handle_inet_sock_set_state`
+  ("dereference of modified ctx ptr R3 off=48"): clang lowered a
+  16-byte memcpy from the tracepoint context to loads off an
+  advanced ctx pointer. The addresses are now read with
+  `bpf_probe_read_kernel`. It was the only program el9 refused.
+- **hf4** — el9's `trace_entry` is 12 bytes (the rt-merge
+  `preempt_lazy_count`), so `raw_syscalls` carries `id` at 16
+  and `args`/`ret` at 24 while the per-syscall records keep
+  `args` at 16. The dispatchers read `id` at a fixed 8 (nearly
+  every syscall went to the read handler) and the handlers read
+  `args`/`ret` through the per-syscall struct. Both now read the
+  raw record through CO-RE flavors (dispatch.c, generator's
+  `handlerCtxStruct`).
+
+Beyond M4's run, on el9: the Java agent live-loaded into a traced
+JVM and the uprobe_multi Java marks attached ("37 natives
+probed", brackets and attributed calls), and `tcp_seq` is read
+on both ends of a connection.
+
+| Id | Run 1 (before gf4/hf4 were in) | Run 2 (after) |
+|---|---|---|
+| M4-0 | PASS | PASS |
+| M4-1 | PASS | PASS |
+| M4-2 | PASS | PASS (3 rounds, 20 files) |
+| M4-3 | PASS | PASS |
+| M4-4 | PASS | PASS |
+| M4-5 | FAIL (no begin marker: syscalls lost, hf4) | PASS (1428 events) |
+| M4-6 | FAIL (0 fused, hf4) | PASS |
+| M4-7 | FAIL (hf4) | PASS (client :18880, server :18203) |
+| M4-8 | FAIL (hf4) | FAIL: no TLS label — task kf4 |
+| M4-9 | FAIL (hf4) | FAIL: 1 of 2 hops unresolved — task if4 |
+| M4-10 | FAIL (hf4) | FAIL: one-sided bound — task jf4 |
+| M4-11 | FAIL (no earlier build) | PASS (`unshare -rn`) |
+| M4-12 | FAIL (hf4) | PASS |
+| M4-13 | FAIL | FAIL: summary lacks the reason — task lf4 |
+| M4-14 | PASS | PASS (15 sessions collected) |
+
+Run 1 had the tracer fix gf4 but not hf4, so the traced
+processes recorded little more than exec and exit. The four
+run-2 failures are not the kernel's:
+
+- **M4-8 (kf4)**: the TLS label comes only from the Java
+  agent's http records, and the runner deploys the services
+  without `-spool`/`-agent` (deploy has no way to ship the agent
+  jar). The rig's `TestMicroservices` loads the agent.
+- **M4-9 (if4)**: a skipped `inet_sock_set_state` run (a
+  `skipped_runs` drop, many tracers on a 2-vCPU host) missed
+  inventory's final CLOSE, its `sock_owner_map` entry stayed,
+  and the reused `struct sock` of another process's socket was
+  recorded under inventory's fd and conn id — whose half then
+  had a connect and an accept and was dropped as a loopback
+  pair.
+- **M4-10 (jf4)**: `tcp_seq` pairs exist in both directions,
+  but any drop on a host — every pattern session has an
+  `attach_gap` at the JVM's exec — disables the data messages
+  of all its connections, leaving only the handshake.
+- **M4-13 (lf4)**: the watchdog worked (`end_reason`
+  `disk_limit`, `show health` prints it), but the plain
+  `iormeshctl show` summary no longer names a session's end
+  reason.
+
+Also found on el9, outside M4's sequence: a session dies with
+"schema: invalid: fd_gen 1 without an fd" when the pattern also
+matches a `su` that runs the JVM (task mf4).
+
+Both VMs were bootstrapped again after run 2 with the build of
+6daa651 (the run's `rm` removes `/opt/iormesh`), so a rerun needs
+only the firewall ports, the DNAT and an empty work directory
+(run 2's is `~/.iormesh-m4`, run 1's `~/.iormesh-m4-run1-20261121`
+on the controller).
 
 ## Local site (task nb4)
 

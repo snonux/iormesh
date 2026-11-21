@@ -1309,13 +1309,19 @@ Kubernetes (M7) build on it.
   segment store. Naming two of the
   services via `iormeshctl services` shows them by name in
   the graph export — no manual file edits anywhere.
-  Status (2026-11-20, task lb4): **awaiting the owner's
-  two-host run** — no criterion above counts as accepted on
-  real hosts yet. `mage m4Acceptance HOST1 HOST2`
+  Status (2026-11-21, task lb4): **run on two Rocky 9.9
+  hosts, not accepted** — 11 of the run's 15 criteria pass;
+  the microservices TLS label (kf4), one cross-host hop of the
+  spread (if4), the clock bound (jf4) and the watchdog reason in
+  the summary (lf4) fail on defects filed as tasks, none of them
+  the kernel's. Two el9 kernel defects that stopped the tracer
+  were fixed in the run (gf4, hf4). No criterion counts as
+  accepted until one run passes all. `mage m4Acceptance HOST1 HOST2`
   (`internal/acceptance`) runs the whole sequence against
   exactly the two named, bootstrapped hosts and prints PASS,
   FAIL, SKIP or NOT RUN per criterion; the runbook, its
-  prerequisites and the local results are in
+  prerequisites, the local results and the Rocky 9.9 runs are
+  in
   [docs/testing.md](docs/testing.md#m4-acceptance-on-two-real-hosts-task-lb4).
   On real hosts the clock criterion reports the real clocks'
   bound; the injected skew stays the rig's
