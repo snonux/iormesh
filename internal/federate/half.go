@@ -207,10 +207,9 @@ func (a *halfAcc) half(k LocalConn) Half {
 	return h
 }
 
-// key rebuilds h's key from every eligible record; all must agree. CLOSE
-// counts on an accepted socket (a child reset in the accept queue gets
-// its only record there, and S2 showed the rebuild holds) or after the
-// half was keyed already, never on a connect that CLOSE ended unanswered.
+// key rebuilds h's key from every eligible record (keyRecords); all must
+// agree. The records are taken in wall-clock order, so the earliest
+// eligible one sets the key whatever order the sessions reported them in.
 //
 // A server half's accept snapshot is read from a socket nobody locks
 // (the tracer's sock.c): softirq may be updating the four fields as it
@@ -224,10 +223,10 @@ func (a *halfAcc) half(k LocalConn) Half {
 // snapshot makes the first state change the fallback instead, which only
 // costs that record's say in the conflict check.
 func (a *halfAcc) key(h *Half) {
-	locked, snap := a.recs, []stateRec(nil)
-	if h.Role == RoleServer && len(a.recs) > 0 {
-		recs := slices.Clone(a.recs)
-		slices.SortStableFunc(recs, func(x, y stateRec) int { return cmp.Compare(x.wall, y.wall) })
+	recs := slices.Clone(a.recs)
+	slices.SortStableFunc(recs, func(x, y stateRec) int { return cmp.Compare(x.wall, y.wall) })
+	locked, snap := recs, []stateRec(nil)
+	if h.Role == RoleServer && len(recs) > 0 {
 		snap, locked = recs[:1], recs[1:]
 	}
 	keyRecords(h, locked)
@@ -239,14 +238,54 @@ func (a *halfAcc) key(h *Half) {
 		// established at the latest.
 		h.Established = min(h.Established, snap[0].wall)
 	}
+	if h.HasKey && h.Role == RoleClient {
+		h.Established = clientEstablished(recs, h.Established)
+	}
+}
+
+// clientEstablished returns when a keyed client half was established,
+// keyed being the wall time of its earliest keyed record. That is the
+// ESTABLISHED record when the trace has it. When a skipped run lost it
+// (task qf4) and a later record keyed the half — a CLOSE perhaps minutes
+// on — the SYN_SENT record before that is the better time: the handshake
+// completes one round trip after it, while the keyed record may lie
+// outside the fusion window around the server's accept.
+func clientEstablished(recs []stateRec, keyed uint64) uint64 {
+	syn := keyed
+	for _, r := range recs {
+		switch {
+		case r.state == "ESTABLISHED" && r.has:
+			return keyed
+		case r.state == "SYN_SENT" && r.wall <= keyed:
+			syn = r.wall
+		}
+	}
+	return syn
 }
 
 // keyRecords keys h from recs: the first eligible record sets the key,
-// any later one rebuilding another marks a conflict.
+// any later one rebuilding another marks a conflict. A record rebuilds
+// the key from ESTABLISHED on: snd_una − bytes_acked and rcv_nxt −
+// bytes_received stay constant from there (tcp_snd_una_update and
+// tcp_rcv_nxt_update move each pair together, a FIN included) up to and
+// including the CLOSE that ends the connection, by FIN or by RST (S2;
+// the root tests TestSockSeqFields and TestSockSeqAbortClose).
+//
+// CLOSE also ends a connect nobody answered, whose fields hold no peer
+// ISN. The correlator, which sees the old state, leaves the fields out
+// there; the merge sees only the new state and checks for itself. A
+// CLOSE counts on an accepted socket (a child reset in the accept queue
+// gets its only record there, and S2 showed the rebuild holds), after
+// the half was keyed already (one disagreeing is a conflict), and on a
+// client whose CLOSE counts its own SYN as acknowledged: the SYN-ACK's
+// tcp_ack makes bytes_acked ≥ 1, and the same locked softirq sets
+// rcv_nxt to the peer's ISN + 1 before ESTABLISHED, while an unanswered
+// connect's CLOSE has bytes_acked 0. The last case is a client whose
+// ESTABLISHED record a skipped inet_sock_set_state run lost (task qf4).
 func keyRecords(h *Half, recs []stateRec) {
 	for _, r := range recs {
-		ok := keyState(r.state) ||
-			(r.state == "CLOSE" && (h.Role == RoleServer || h.HasKey))
+		ok := keyState(r.state) || (r.state == "CLOSE" &&
+			(h.Role == RoleServer || h.HasKey || r.f.BytesAcked >= 1))
 		if !r.has || !ok {
 			continue
 		}

@@ -7,8 +7,8 @@ import "strings"
 // internal/follow_root_test.go, internal/javamark_root_test.go,
 // internal/dispatch_root_test.go, internal/streamseq_root_test.go,
 // internal/pidns_root_test.go, internal/sockreuse_root_test.go,
-// internal/exit_root_test.go, internal/pidnsconnect_root_test.go and
-// internal/badfd_root_test.go: they
+// internal/exit_root_test.go, internal/pidnsconnect_root_test.go,
+// internal/badfd_root_test.go and internal/sockclose_root_test.go: they
 // load the real BPF object, attach the TCP programs or the loader's default
 // probe set, and read the ring buffer (M1 steps 4 and 5; process-tree
 // following and the exec watch, M2 steps 1–2; every event family, M2 step
@@ -19,7 +19,8 @@ import "strings"
 // a lost TCP_CLOSE run, and a pod-mode connect's state records, task if4;
 // a thread's and a process's exit told apart, the el9 signal->live
 // fallback included, task nf4; a call on fd -1 before and after a fork
-// and exec, task mf4). They
+// and exec, task mf4; the key a CLOSE record rebuilds after an RST abort,
+// task qf4). They
 // skip for anybody but root, so `mage test` passes them by, and `mage
 // bpfRootTest` is the one place that runs them. The names are listed
 // rather than matched by a pattern so that a renamed test fails a gate
@@ -34,6 +35,7 @@ func RootBPFTests() []string {
 		"TestSockSeqFields",
 		"TestSockSeqStress",
 		"TestSockRefusedConnectNoSeq",
+		"TestSockSeqAbortClose",
 		"TestSockReuseAfterLostClose",
 		"TestSockStaleOwnerOfLiveSocket",
 		"TestLoaderDeliversRecords",
