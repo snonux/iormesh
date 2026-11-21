@@ -1260,6 +1260,16 @@ Kubernetes (M7) build on it.
   present; ior's Rocky 9 build/Docker patterns apply), amd64
   and arm64. Deployed binaries come out of the container build
   pipeline (see "Container builds (Docker/Podman)").
+  Owner decision (2026-11-21): **Rocky Linux 9.9 is the main
+  target**, and everything must work on its el9 kernel
+  (5.14.0-741.22.1.el9_9 on the M4 test hosts), not only on
+  the 7.x the suite was developed on. Kernel-version floors
+  below are upstream numbers: RHEL backports BPF, and on 9.9
+  `bpf_rdonly_cast`, uprobe_multi (the Java marks) and BTF are
+  present (task lb4). An el9 load failure, verifier rejection
+  or record-layout difference is a defect to fix behind a
+  load-time probe or CO-RE, never a skip — as gf4 (verifier:
+  ctx memcpy) and hf4 (12-byte `trace_entry`) were.
 - Acceptance: decision #25's tracer-CPU item passes on the
   segment-writer path, plain and `-spool` (task ee4).
   Status (2026-11-20, task ee4): plain unfolded passes (0.85 µs
@@ -2365,7 +2375,9 @@ here only as placeholders.
   capabilities and the ring buffer, 5.9 for
   `CAP_CHECKPOINT_RESTORE`, and 6.10 (or a 6.6–6.9 kernel with
   commit 46ba0e49, internal/bpf/javamark.go) for Java
-  attribution's uprobe_multi marks. Measured on the host, not
+  attribution's uprobe_multi marks — upstream versions; Rocky
+  9.9's el9 5.14 carries all of these as backports (task lb4,
+  see "Target platform"). Measured on the host, not
   assumed: this set traces and attaches as root does, and each
   capability left out alone breaks a step it is listed for
   ([testing.md](docs/testing.md#k8s-capability-set-task-ub4)).
