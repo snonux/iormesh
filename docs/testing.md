@@ -1143,6 +1143,22 @@ Outside the suites: a hand-run pattern session over pipe-ipc
 with "fd_gen 1 without an fd". That is task mf4 again, this time
 without `su`; the `-pid` run of the same scenario passes.
 
+**mf4, fixed**: the rejected event was the spawned child's
+`newfstat` on fd -1. el9's NSS lookups `fstat(-1)` (EBADF) in the
+JVM and again in the child it spawns through jspawnhelper (su and
+bash do NSS lookups too). The correlator registered fd -1 as an
+fd instance. The exec closed it but kept its generation, so the
+child's call got gen 1. A negative fd now names no instance: the
+event keeps fd -1 and gen 0. The tracer is wrong on any kernel
+for this sequence. Only el9's libc makes it, so 7.2 never
+showed it. `TestNegativeFdAcrossExec` (root) replays it with a Go
+child on 7.2 and fails without the fix; correlate's
+`TestNegativeFdNamesNoInstance` holds the record shape. On iom1
+the pipe-ipc pattern session (three runs) and lb4's
+`su paul -c java … tcp-loopback` session (`-out` and
+`-trace-dir`) now end `stop`. The old binary still dies on the
+su run. A writer's error now names the event it rejects.
+
 ## Local site (task nb4)
 
 `mage test` covers the generated site without a browser
