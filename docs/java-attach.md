@@ -5,21 +5,53 @@ names the Java method, stack and thread behind each syscall of a
 JVM. It gets into a JVM in one of two ways (decision #2):
 
 - **`-javaagent` at launch — the primary path.** The JVM starts
-  with `-javaagent:/opt/iormesh/iormesh-agent.jar=spool=DIR` and
+  with `-javaagent:/opt/iormesh/lib/iormesh-agent.jar=spool=DIR` and
   `iormesh run -spool DIR` joins its I/O from the first syscall
   on. Silent, nothing missed.
 - **Live attach to a running JVM** — for "trace this PID now"
   without a restart, at the cost of the caveats below.
+
+## On hosts iormeshctl deploys to
+
+The jar ships like the tracer (task kf4, PLAN.md decision #28):
+`mage agentBuild` copies it to `dist/iormesh-agent.jar`, `mage
+sign` signs it at the release version, and `iormeshctl deploy`
+pushes it to every host with a project that uses the agent — a
+registry entry carrying `-spool` or `-agent` — after checking it
+against the pinned key. On the host `sudo iormesh upgrade`
+checks it again against the root-owned key, requires the
+tracer's version, and installs it as
+`/opt/iormesh/lib/iormesh-agent.jar` (root's, 0644). A deployed
+session may use only that jar and its project's spool:
+
+```
+iormeshctl add -project shop -pattern 'java -jar */shop.jar*' app1 \
+    -spool /run/iormesh/spool/shop -agent /opt/iormesh/lib/iormesh-agent.jar
+iormeshctl deploy app1
+```
+
+`-agent` reaches the JVMs running when the session starts. A
+JVM started later, matched at exec, needs the agent at launch —
+the same installed jar, e.g. through the environment so the
+command line the pattern matches stays as it is:
+
+```
+JAVA_TOOL_OPTIONS=-javaagent:/opt/iormesh/lib/iormesh-agent.jar=spool=/run/iormesh/spool/shop \
+    java -jar shop.jar
+```
+
+The M4 acceptance starts its microservices that way
+([testing.md](testing.md#m4-acceptance-on-two-real-hosts-task-lb4)).
 
 ## Live attach
 
 ```
 # load the agent into the JVMs the session starts with
 iormesh run -pid 4242 -project shop -out /var/tmp/trace \
-    -spool /var/lib/iormesh/spool -agent /opt/iormesh/iormesh-agent.jar
+    -spool /var/lib/iormesh/spool -agent /opt/iormesh/lib/iormesh-agent.jar
 
 # or load it later, into a JVM a `run -spool` is already tracing
-iormesh attach -pid 4242 -agent /opt/iormesh/iormesh-agent.jar \
+iormesh attach -pid 4242 -agent /opt/iormesh/lib/iormesh-agent.jar \
     -spool /var/lib/iormesh/spool [-timeout 10s]
 ```
 
@@ -59,7 +91,7 @@ the JVM's own socket: the tracer still listens on nothing.
   dynamically prints four lines on its own stderr:
 
   ```
-  WARNING: A Java agent has been loaded dynamically (/opt/iormesh/iormesh-agent.jar)
+  WARNING: A Java agent has been loaded dynamically (/opt/iormesh/lib/iormesh-agent.jar)
   WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
   WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
   WARNING: Dynamic loading of agents will be disallowed by default in a future release

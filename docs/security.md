@@ -194,6 +194,27 @@ truth.
     bumps the version. Running
     sessions keep the old binary; the next `start` runs the
     new one.
+  - **The Java agent jar takes the same path** (task kf4,
+    PLAN.md #28): `mage agentBuild` copies it to
+    `dist/iormesh-agent.jar`, `mage sign` signs it at the
+    release version, and `iormesh upgrade FILE` installs a
+    file whose *signed* name is `iormesh-agent.jar` as
+    `/opt/iormesh/lib/iormesh-agent.jar` — the same staged-file,
+    pinned-key and read-once checks as for the tracer. Its
+    signed version must equal the installed tracer's (the two
+    speak one ring format, and an older signed jar may carry a
+    fixed hole); through the rule the same version with other
+    bytes is refused, as for the tracer, and `-allow-downgrade`
+    does not apply. `lib/` is created by the first install,
+    root:root 0755 (set explicitly, whatever root's umask), so
+    a bootstrap made before the jar shipped needs nothing new;
+    an existing `lib/` or jar that is a symlink, not root's, or
+    group- or other-writable is refused, never repaired. The
+    jar is a fresh root:root 0644 file renamed into place:
+    readable by every JVM user it is loaded into, changeable by
+    root alone. Root loads it into every user's JVM (and the
+    JVM user loads it with `-javaagent`), so it gets the
+    tracer's rule: never run unverified code.
   - **`iormeshctl deploy`** (task db4) verifies the build and
     its signature on the controller before each host's push,
     stages both in the deploying user's `~/.iormesh/staging`
@@ -212,9 +233,16 @@ truth.
     deploy before any host is contacted. A new build restarts
     the live sessions, so a fixed hole does not keep running in
     the old binary. A host without the installed tracer is
-    reported, not bootstrapped (PLAN.md #1).
+    reported, not bootstrapped (PLAN.md #1). A host with a
+    project that uses the Java agent (`-spool` or `-agent`)
+    also gets `dist/iormesh-agent.jar`, verified on the
+    controller (signed by the pinned key, as itself, at the
+    tracer's version) before anything is pushed, staged with
+    the tracer and installed by a second `upgrade` after the
+    tracer's; any refusal starts nothing (task kf4).
   - **What the rule then grants**: installing a build the
-    release key signed, for this arch, not older — nothing
+    release key signed, for this arch, not older, and the
+    agent jar signed at that build's version — nothing
     else. Whoever holds the release key holds every server
     that pins it.
 - **Through the sudoers rule, the tracer writes only to its own
@@ -255,11 +283,15 @@ truth.
     (`SUDO_UID:SUDO_GID`), which `start` passes by default;
   - `-duration` is at most 7 days (everywhere), so the unit's
     `RuntimeMaxSec` stays bounded;
-  - `-agent` needs a jar that root owns: the jar and each
+  - `-agent` must be `/opt/iormesh/lib/iormesh-agent.jar` (its
+    path, or its real path where `/opt` is a symlink): the jar
+    `upgrade` verified and installed (task kf4). Everywhere,
+    `-agent` needs a jar that root owns: the jar and each
     directory above it must belong to root or the caller (the
     euid, root under sudo) and not be group- or other-writable,
     sticky directories excepted — so a sudoer cannot have root
-    load a jar they could rewrite.
+    load a jar they could rewrite, nor one the release key
+    never signed.
   - the test-only clock skew `IORMESH_TEST_CLOCK_SKEW`
     ([testing.md](testing.md)) is refused, by `start` always —
     so a sudoer cannot have a root session record falsified

@@ -54,8 +54,9 @@ func (r *Runner) preflight(ctx context.Context) error {
 }
 
 // preflightLocal checks the controller side: rsync's version (security.md:
-// older receivers can be attacked by the server), the inputs, and a fresh
-// HOME for iormeshctl holding a copy of the pinned key.
+// older receivers can be attacked by the server), the inputs (the signed
+// agent jar among them, task kf4), and a fresh HOME for iormeshctl
+// holding a copy of the pinned key.
 func (r *Runner) preflightLocal() error {
 	out, err := exec.Command("rsync", "--version").Output()
 	if err != nil {
@@ -68,6 +69,9 @@ func (r *Runner) preflightLocal() error {
 		if _, err := os.Stat(f); err != nil {
 			return err
 		}
+	}
+	if err := r.checkAgentBuild(); err != nil {
+		return err
 	}
 	return r.prepareWorkDir()
 }

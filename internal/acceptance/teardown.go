@@ -76,7 +76,7 @@ func (r *Runner) startWatchdog(ctx context.Context, h string) error {
 		return fmt.Errorf("%s: %q free on %s's partition, want >= 1 GiB (%v)", h, out, traceRoot, err)
 	}
 	floor := fmt.Sprintf("%dKiB", (avail-watchdogMargin)>>10)
-	p := project{h, projDisk, "m4-watchdog-matches-no-process"}
+	p := project{h, projDisk, "m4-watchdog-matches-no-process", false}
 	if err := r.add(ctx, p, "-disk-limit", "0", "-disk-min-free", floor); err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"slices"
 	"strconv"
 )
 
@@ -37,12 +38,19 @@ const roleTimeout = "300"
 // java runs one workload role on host in the foreground, under
 // `timeout`; dir is the scenario's --dir under the run's directory. The
 // JVM's own command line still starts with "java -jar", so the sessions'
-// patterns match it and not the timeout process above it.
+// patterns match it and not the timeout process above it. A role an
+// agent project traces runs through `env` with its -javaagent in
+// JAVA_TOOL_OPTIONS (agentEnv); env execs java, so the command line is
+// the same.
 func (r *Runner) java(ctx context.Context, host, scenario, role, dir string, opts ...string) error {
-	argv := []string{"timeout", roleTimeout, "java", "-jar", r.remoteJar(host), scenario, "--role", role}
-	argv = append(argv, opts...)
-	_, err := r.remote(ctx, host, append(argv, "--dir", dir)...)
+	java := []string{"java", "-jar", r.remoteJar(host), scenario, "--role", role}
+	java = append(append(java, opts...), "--dir", dir)
+	env, err := r.agentEnv(host, java)
 	if err != nil {
+		return err
+	}
+	argv := slices.Concat([]string{"timeout", roleTimeout}, env, java)
+	if _, err := r.remote(ctx, host, argv...); err != nil {
 		return fmt.Errorf("%s %s --role %s: %w", host, scenario, role, err)
 	}
 	return nil

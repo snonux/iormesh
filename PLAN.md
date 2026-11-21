@@ -881,7 +881,13 @@ Kubernetes (M7) build on it.
   (`~/.local/share/iormesh/deployed.json`) or with `-restart`,
   else left alone, so a re-deploy is a no-op. Deploy only
   upgrades: a host without the installed tracer is reported as
-  needing the bootstrap of #1, never installed.
+  needing the bootstrap of #1, never installed. The Java agent
+  jar ships on the same trust path (task kf4, #28): a host with
+  a project that uses the agent (`-spool` or `-agent`) also gets
+  the signed `dist/iormesh-agent.jar`, verified on the
+  controller, staged with the tracer and installed by `sudo
+  iormesh upgrade` as `/opt/iormesh/lib/iormesh-agent.jar`;
+  every refusal starts nothing.
 - **The tracer runs as a transient systemd unit**: `start`
   launches the session through `systemd-run` as
   `iormesh-<project>`. That gives it a life independent of the
@@ -912,8 +918,10 @@ Kubernetes (M7) build on it.
   session started through it is confined (task 9b4): `start`
   always, and `run` of the installed binary under sudo, refuse
   `-out`, `-cpuprofile` and `-ready`, pin `-trace-dir` to
-  `/opt/iormesh/traces` and `-spool` to
-  `/run/iormesh/spool/<project>`, and give `ready/` only to the
+  `/opt/iormesh/traces`, `-spool` to
+  `/run/iormesh/spool/<project>` and `-agent` to the installed,
+  signature-checked `/opt/iormesh/lib/iormesh-agent.jar` (task
+  kf4), and give `ready/` only to the
   sudo caller; no existing directory is ever chmod'ed. Through
   the rule only `run`, `start`, `stop`, `status`, `upgrade`
   (signature-checked, decision #1) and `uninstall` run — every
@@ -2298,6 +2306,29 @@ would overturn it), and deferred.
   `/opt/iormesh/etc/minisign.pub`. Key rotation is replacing
   both files — the server's with the operator's own sudo, as
   in bootstrap.
+  *Provisional (2026-11-21, owner-delegated default, task kf4):
+  the Java agent jar is a release artifact signed and checked
+  exactly like the tracer* — the plan had not said how the jar
+  reaches a server, and M4's TLS label needs it there. `mage
+  agentBuild` copies it to `dist/iormesh-agent.jar`, `mage
+  sign` signs it at the release version (`file:
+  iormesh-agent.jar`), `iormeshctl deploy` verifies it with the
+  pinned key and ships it only to hosts with a project using
+  `-spool` or `-agent`, and `iormesh upgrade` — no new
+  subcommand, no wider sudoers rule — installs a file whose
+  signed name is the jar's as `/opt/iormesh/lib/iormesh-agent.jar`
+  (root's, 0644; `lib/` created root's 0755 by the first install,
+  so the bootstrap is unchanged). The jar's signed version must
+  equal the installed tracer's (one ring format, and an older
+  signed jar may carry a fixed hole); through the rule the same
+  version with other bytes is refused, as for the tracer. A
+  confined session's `-agent` may name only that file, so root
+  never loads a jar the release key did not sign: the tracer's
+  "never run unverified code" rule covers the jar. JVMs matched
+  at exec get it through `-javaagent` (e.g. `JAVA_TOOL_OPTIONS`),
+  pointing at the same installed file. Overturned if the owner
+  wants the jar inside the tracer binary (one artifact, extracted
+  at start) or a separate key for it.
 - **#24 Service-interaction database** — controller-side:
   sqlite via a pure-Go driver (keeps iormeshctl cgo-free;
   additive merges and queries come natural) vs a plain YAML

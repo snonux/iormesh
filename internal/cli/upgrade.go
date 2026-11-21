@@ -29,7 +29,12 @@ import (
 //     the key, the install path and the layout are fixed, not flags;
 //   - the signature must verify against the root-owned pinned key
 //     (pinnedKeyRel), with the trusted comment naming this host's tracer
-//     (release.TracerFile) — not iormeshctl, not the other arch;
+//     (release.TracerFile) — not iormeshctl, not the other arch — or the
+//     Java agent jar (release.AgentFile, task kf4): the signed name, not
+//     the staged file's, decides what is installed where;
+//   - an agent jar's signed version must equal the running tracer's
+//     (upgrade_agent.go): the jar and the tracer speak one ring format,
+//     and an older signed jar may carry a fixed hole like an older tracer;
 //   - the signed version may not be older than the installed binary's,
 //     unless root itself, not the rule, passes -allow-downgrade: an old
 //     signed build may carry a fixed hole. Through the rule a same
@@ -47,13 +52,20 @@ import (
 //     symlink, and only into the layout docs/security.md requires.
 //
 // Running sessions keep the old binary (their inode); the next start runs
-// the new one.
+// the new one. The agent jar lands at agentRel, in its own root-only
+// directory, readable by every JVM user; a confined session's -agent may
+// name only that file (confine.go), so a deployed session loads exactly
+// the jar that verified here.
 const (
 	// pinnedKeyRel is the pinned release key under installRoot: the
 	// root-owned server copy of the controller's key (decision #28).
 	pinnedKeyRel = "etc/minisign.pub"
 	// binRel is the installed binary under installRoot.
 	binRel = "bin/iormesh"
+	// agentRel is the installed Java agent jar under installRoot (task
+	// kf4): lib/ is created by its first upgrade, root's and 0755, so a
+	// bootstrap made before the jar shipped needs nothing new.
+	agentRel = "lib/" + release.AgentFile
 )
 
 // upgrader is one upgrade, its environment injected so tests run on a
@@ -109,8 +121,9 @@ func upgradeCommand(args []string, stdout, stderr io.Writer) error {
 	return newUpgrader(stdout).upgrade(flags.Arg(0), *allowDowngrade)
 }
 
-// upgrade verifies staged and installs it. Nothing under root is written
-// before the signature, the artifact name and the version all passed.
+// upgrade verifies staged and installs it as the tracer or the agent jar,
+// whichever its signed name says. Nothing under root is written before the
+// signature, the artifact name and the version all passed.
 func (u upgrader) upgrade(staged string, allowDowngrade bool) error {
 	if allowDowngrade && u.gated {
 		return fmt.Errorf("%w: -allow-downgrade is not allowed through the sudoers rule; run it as root directly",
@@ -127,11 +140,21 @@ func (u upgrader) upgrade(staged string, allowDowngrade bool) error {
 	if err != nil {
 		return fmt.Errorf("upgrade: %w", err)
 	}
+	agent := m.File == release.AgentFile
+	if agent && allowDowngrade {
+		return fmt.Errorf("%w: -allow-downgrade applies to the tracer only; an agent jar must match it", errUsage)
+	}
+	// One lock on bin/ serializes every upgrade, tracer or jar: a jar's
+	// version is checked against the installed tracer, which must not
+	// change under the check.
 	unlock, err := u.lock()
 	if err != nil {
 		return fmt.Errorf("upgrade: %w", err)
 	}
 	defer unlock()
+	if agent {
+		return u.lockedInstallAgent(m, data)
+	}
 	return u.lockedInstall(m, data, allowDowngrade)
 }
 
@@ -166,7 +189,7 @@ func (u upgrader) lockedInstall(m release.Meta, data []byte, allowDowngrade bool
 		}
 		return err
 	}
-	if err := u.install(data); err != nil {
+	if err := installFile(u.bin(), data, u.owner, u.group, 0o755); err != nil {
 		return fmt.Errorf("upgrade: %w", err)
 	}
 	_, _ = fmt.Fprintf(u.stdout, "iormesh: upgraded %s from %s to %s\n", u.bin(), u.running, m.Version)
@@ -250,8 +273,9 @@ func (u upgrader) verifyStaged(key minisign.PublicKey, staged string) ([]byte, r
 	if err != nil {
 		return nil, release.Meta{}, fmt.Errorf("%s: %w", staged, err)
 	}
-	if want := release.TracerFile(u.goarch); m.File != want {
-		return nil, release.Meta{}, fmt.Errorf("%s is signed as %s; this host runs %s", staged, m.File, want)
+	if want := release.TracerFile(u.goarch); m.File != want && m.File != release.AgentFile {
+		return nil, release.Meta{}, fmt.Errorf("%s is signed as %s; this host takes %s or %s", staged, m.File,
+			want, release.AgentFile)
 	}
 	return data, m, nil
 }
@@ -302,16 +326,17 @@ func (u upgrader) checkVersion(m release.Meta, data []byte, allowDowngrade bool)
 	return false, nil
 }
 
-// install writes data as a new file in bin/ and renames it over the
-// installed binary, so a crash leaves the old binary or the new one,
-// never half of each, and a running tracer keeps its own inode. bin/ is
-// writable by its owner only (checkLayout), so the temp name cannot be
-// planted; CreateTemp's O_EXCL refuses one anyway. The file is chowned to
-// owner:group (root:root) on its descriptor before it is made 0755, so
-// it never carries the mode with another owner; 0755 matches what the
+// installFile writes data as a new file next to dst and renames it over
+// dst, so a crash leaves the old file or the new one, never half of each,
+// and a running tracer (or a JVM that opened the old jar) keeps its own
+// inode. dst's directory is writable by its owner only (checkLayout,
+// agentDir), so the temp name cannot be planted; CreateTemp's O_EXCL
+// refuses one anyway. The file is chowned to uid:gid (root:root) on its
+// descriptor before it gets mode, so it never carries the mode with
+// another owner: 0755 for the tracer, 0644 for the jar, each what the
 // layout check requires of it next time.
-func (u upgrader) install(data []byte) (err error) {
-	dir := filepath.Dir(u.bin())
+func installFile(dst string, data []byte, uid, gid int, mode os.FileMode) (err error) {
+	dir := filepath.Dir(dst)
 	tmp, err := os.CreateTemp(dir, ".iormesh-upgrade-*")
 	if err != nil {
 		return err
@@ -321,24 +346,24 @@ func (u upgrader) install(data []byte) (err error) {
 			_ = os.Remove(tmp.Name())
 		}
 	}()
-	if err := writeSynced(tmp, data, u.owner, u.group); err != nil {
+	if err := writeSynced(tmp, data, uid, gid, mode); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp.Name(), u.bin()); err != nil {
+	if err := os.Rename(tmp.Name(), dst); err != nil {
 		return err
 	}
 	return syncPath(dir)
 }
 
-// writeSynced writes data to f, chowns it to uid:gid, makes it 0755,
+// writeSynced writes data to f, chowns it to uid:gid, gives it mode,
 // fsyncs and closes it.
-func writeSynced(f *os.File, data []byte, uid, gid int) error {
+func writeSynced(f *os.File, data []byte, uid, gid int, mode os.FileMode) error {
 	_, err := f.Write(data)
 	if err == nil {
 		err = f.Chown(uid, gid)
 	}
 	if err == nil {
-		err = f.Chmod(0o755)
+		err = f.Chmod(mode)
 	}
 	if err == nil {
 		err = f.Sync()

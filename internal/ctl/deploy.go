@@ -29,12 +29,19 @@ import (
 //     operator's own sudo or configuration management (decision #1), and
 //     deploy says so instead of pretending otherwise;
 //  2. verify dist/iormesh-linux-<arch> and its .minisig against the pinned
-//     key (decision #28) — before anything is pushed;
-//  3. stage both in the login user's ~/.iormesh/staging, never in /opt:
-//     the user can only hand files to the tracer, which re-verifies them;
+//     key (decision #28) — before anything is pushed; when a project of
+//     the host uses the Java agent (-spool or -agent), verify
+//     dist/iormesh-agent.jar the same way, signed at the tracer's version
+//     (deploy_agent.go, task kf4);
+//  3. stage them with their signatures in the login user's
+//     ~/.iormesh/staging, never in /opt: the user can only hand files to
+//     the tracer, which re-verifies them;
 //  4. sudo -n /opt/iormesh/bin/iormesh upgrade STAGED — the same build
 //     again is a no-op there, and a refusal (bad signature, older build)
-//     is reported verbatim and nothing is started;
+//     is reported verbatim and nothing is started; then, with the new
+//     tracer, the same upgrade of the staged jar, which lands at
+//     /opt/iormesh/lib/iormesh-agent.jar — a refusal there starts nothing
+//     either;
 //  5. per project: start it, or stop and start a live session whose flags
 //     or build changed (decision #19; see deployedRecord), then print its
 //     status.
@@ -56,6 +63,9 @@ const (
 	// confine.go); a registry flag naming another is refused there.
 	confinedTraceDir  = "/opt/iormesh/traces"
 	confinedSpoolRoot = "/run/iormesh/spool"
+	// installedAgent is the agent jar `iormesh upgrade` installs and the
+	// only -agent a confined session may load (task kf4).
+	installedAgent = "/opt/iormesh/lib/" + release.AgentFile
 )
 
 // unameArch maps `uname -m` to the Go arch of the builds iormesh ships.
@@ -212,13 +222,14 @@ func selectProjects(r federate.Registry, host, project string) (federate.Server,
 // checkDeployFlags refuses, up front, pass-through flags the start would
 // refuse on the server: the ones the entry itself owns (ownedFlags; a
 // hand-edited registry may carry them), the ones a confined session may
-// not use at all, and -trace-dir/-spool naming any but the pinned path.
-// Failing here names the registry entry and contacts no host.
+// not use at all, and -trace-dir/-spool/-agent naming any but the pinned
+// path. Failing here names the registry entry and contacts no host.
 func checkDeployFlags(p federate.Project) error {
 	if f := firstOwnedFlag(p.Flags); f != "" {
 		return fmt.Errorf("flag %s: the entry sets it itself (iormeshctl add)", f)
 	}
-	pinned := map[string]string{"trace-dir": confinedTraceDir, "spool": confinedSpoolRoot + "/" + p.Name}
+	pinned := map[string]string{"trace-dir": confinedTraceDir, "spool": confinedSpoolRoot + "/" + p.Name,
+		"agent": installedAgent}
 	for i := 0; i < len(p.Flags); i++ {
 		f := p.Flags[i]
 		if !strings.HasPrefix(f, "-") {
@@ -255,18 +266,22 @@ func (d deployer) host(ctx context.Context, srv federate.Server) error {
 	if err != nil {
 		return err
 	}
-	bin, version, err := d.verify(arch)
+	files, version, err := d.verifyAll(arch, srv.Projects)
 	if err != nil {
 		return err
 	}
-	staged, err := stage(ctx, t, bin)
+	staged, err := stage(ctx, t, files...)
 	if err != nil {
 		return err
 	}
-	out, err := t.Run(ctx, sudoTracer("upgrade", staged)...)
-	d.relay(srv.Host, out)
-	if err != nil {
-		return fmt.Errorf("upgrade refused, nothing started: %w", err)
+	// The tracer first: the jar's upgrade then runs the new binary, whose
+	// version the jar's must equal.
+	for _, s := range staged {
+		out, err := t.Run(ctx, sudoTracer("upgrade", s)...)
+		d.relay(srv.Host, out)
+		if err != nil {
+			return fmt.Errorf("upgrade of %s refused, nothing started: %w", path.Base(s), err)
+		}
 	}
 	var errs []error
 	for _, p := range srv.Projects {
@@ -321,30 +336,36 @@ func (d deployer) verify(arch string) (string, string, error) {
 	return path, m.Version, nil
 }
 
-// stage pushes the build and its signature into the staging directory and
-// returns the staged binary's absolute path. Absolute, because the path
-// is handed to sudo: a relative one would depend on sudo keeping the
-// working directory, which a `Defaults runcwd` in sudoers changes.
-func stage(ctx context.Context, t federate.Transport, bin string) (string, error) {
+// stage pushes the release files and their signatures into the staging
+// directory in one push and returns each staged file's absolute path, in
+// order. Absolute, because the paths are handed to sudo: a relative one
+// would depend on sudo keeping the working directory, which a `Defaults
+// runcwd` in sudoers changes.
+func stage(ctx context.Context, t federate.Transport, files ...string) ([]string, error) {
 	// Every ssh command starts in the login user's home; pwd names it.
 	out, err := t.Run(ctx, "pwd")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	home := strings.TrimSpace(string(out))
 	if !homePath.MatchString(home) || strings.Contains(home, "..") {
-		return "", fmt.Errorf("home directory %q: want an absolute path of [A-Za-z0-9._/-]", home)
+		return nil, fmt.Errorf("home directory %q: want an absolute path of [A-Za-z0-9._/-]", home)
 	}
 	dir := path.Join(home, stagingRel)
 	// -m applies to the last component only; staging/ is the directory
 	// the files land in, so that one is kept private.
 	if _, err := t.Run(ctx, "mkdir", "-p", "-m", "0700", dir); err != nil {
-		return "", err
+		return nil, err
 	}
-	if err := t.Push(ctx, dir, bin, bin+release.SigSuffix); err != nil {
-		return "", err
+	var push, staged []string
+	for _, f := range files {
+		push = append(push, f, f+release.SigSuffix)
+		staged = append(staged, dir+"/"+filepath.Base(f))
 	}
-	return dir + "/" + filepath.Base(bin), nil
+	if err := t.Push(ctx, dir, push...); err != nil {
+		return nil, err
+	}
+	return staged, nil
 }
 
 // project starts one project's session. A live session deploy started

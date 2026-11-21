@@ -58,9 +58,11 @@ const (
 	projDisk      = "m4disk"  // the watchdog project, HOST2, added last
 )
 
-// project is one registry entry the run adds.
+// project is one registry entry the run adds; agent marks the ones traced
+// with the Java agent (agent.go).
 type project struct {
 	host, name, pattern string
+	agent               bool
 }
 
 // rolePattern is the -pattern of a session tracing one workload role:
@@ -82,30 +84,32 @@ func microPattern(role, dir string) string {
 // spreadProjects are the spread's four projects, one per service.
 func (c Config) spreadProjects() []project {
 	return []project{
-		{c.Host1, projSpreadGW, microPattern("gateway", spreadDir)},
-		{c.Host1, projSpreadInv, microPattern("inventory", spreadDir)},
-		{c.Host2, projSpreadOrd, microPattern("orders", spreadDir)},
-		{c.Host2, projSpreadBil, microPattern("billing", spreadDir)},
+		{c.Host1, projSpreadGW, microPattern("gateway", spreadDir), true},
+		{c.Host1, projSpreadInv, microPattern("inventory", spreadDir), true},
+		{c.Host2, projSpreadOrd, microPattern("orders", spreadDir), true},
+		{c.Host2, projSpreadBil, microPattern("billing", spreadDir), true},
 	}
 }
 
 // projects lists the entries added before the deploy, NAT ones only when
-// the operator configured the DNAT.
+// the operator configured the DNAT. The microservices projects (M4-8,
+// M4-9) trace with the Java agent: their TLS label comes from its http
+// records (task kf4).
 func (c Config) projects() []project {
 	ps := []project{
-		{c.Host1, projSingle, rolePattern("tcp-loopback", "*")},
-		{c.Host1, projStream, rolePattern("file-basic", "solo")},
-		{c.Host1, projShop, rolePattern("tcp-two-host", "client")},
-		{c.Host2, projBilling, rolePattern("tcp-two-host", "server")},
-		{c.Host1, projGateway, microPattern("gateway", microDir)},
-		{c.Host1, projOrders, microPattern("orders", microDir)},
-		{c.Host1, projInventory, microPattern("inventory", microDir)},
-		{c.Host1, projBill, microPattern("billing", microDir)},
+		{c.Host1, projSingle, rolePattern("tcp-loopback", "*"), false},
+		{c.Host1, projStream, rolePattern("file-basic", "solo"), false},
+		{c.Host1, projShop, rolePattern("tcp-two-host", "client"), false},
+		{c.Host2, projBilling, rolePattern("tcp-two-host", "server"), false},
+		{c.Host1, projGateway, microPattern("gateway", microDir), true},
+		{c.Host1, projOrders, microPattern("orders", microDir), true},
+		{c.Host1, projInventory, microPattern("inventory", microDir), true},
+		{c.Host1, projBill, microPattern("billing", microDir), true},
 	}
 	ps = append(ps, c.spreadProjects()...)
 	if c.NATPort != 0 {
-		ps = append(ps, project{c.Host1, projNATClient, rolePattern("tcp-nat", "client")},
-			project{c.Host2, projNATServer, rolePattern("tcp-nat", "server")})
+		ps = append(ps, project{c.Host1, projNATClient, rolePattern("tcp-nat", "client"), false},
+			project{c.Host2, projNATServer, rolePattern("tcp-nat", "server"), false})
 	}
 	return ps
 }

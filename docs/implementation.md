@@ -3415,6 +3415,10 @@ rsync -ct dist/iormesh-linux-$ARCH dist/iormesh-linux-$ARCH.minisig \
     H:/home/ops/.iormesh/staging/
 ssh H sudo -n /opt/iormesh/bin/iormesh upgrade \
     /home/ops/.iormesh/staging/iormesh-linux-$ARCH
+# only when a project of H has -spool or -agent (task kf4): the
+# verified dist/iormesh-agent.jar(.minisig) went in the same rsync, and
+ssh H sudo -n /opt/iormesh/bin/iormesh upgrade \
+    /home/ops/.iormesh/staging/iormesh-agent.jar
 # per project:
 ssh H systemctl show --property=ActiveState --value -- iormesh-shop.service
 ssh H sudo -n /opt/iormesh/bin/iormesh stop -project shop  # live, changed
@@ -3428,8 +3432,8 @@ ssh H sudo -n /opt/iormesh/bin/iormesh status -project shop
   selected entry's flags must be ones the server's `start`
   accepts: no entry-owned flag (`-project`, `-pattern`, `-pid`,
   …, possible in a hand-edited registry), no `-out`,
-  `-cpuprofile` or `-ready`, `-trace-dir` and `-spool` only at
-  their pinned paths (`internal/cli/confine.go`). Hosts
+  `-cpuprofile` or `-ready`, `-trace-dir`, `-spool` and `-agent`
+  only at their pinned paths (`internal/cli/confine.go`). Hosts
   deploy one after the other; a failed host is reported and the
   next one still deployed, and the command then exits 1.
 - First install on a host has no binary to `upgrade` with — that
@@ -3460,6 +3464,14 @@ ssh H sudo -n /opt/iormesh/bin/iormesh status -project shop
   and its refusals (older build, bad signature, layout) come
   back verbatim in deploy's error — and no project is started.
   `-allow-downgrade` is never passed.
+- The agent jar (task kf4, `internal/ctl/deploy_agent.go`,
+  `internal/cli/upgrade_agent.go`): verified locally like the
+  tracer, and signed at the tracer's version, else nothing is
+  pushed; upgraded after the tracer, by the new binary, which
+  installs a file signed as `iormesh-agent.jar` at
+  `/opt/iormesh/lib/iormesh-agent.jar` only at its own version
+  (PLAN.md #28, provisional). A host whose projects do not use
+  the agent gets no jar.
 - Under sudo runs only `/opt/iormesh/bin/iormesh` with `upgrade`,
   `start`, `stop` and `status`; `sudo -n` fails instead of
   prompting when the rule is missing. Every argv element is

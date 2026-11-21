@@ -665,10 +665,13 @@ The controller (Linux or macOS):
               -s ~/.minisign/iormesh.key
   ```
 
-- A signed build for each host's arch in `dist/`:
+- A signed build for each host's arch and the signed agent jar
+  in `dist/` (deploy ships the jar to both hosts: the
+  microservices projects trace with the agent, task kf4):
 
   ```sh
   mage buildPodman      # or buildDocker; dist/iormesh-linux-*
+  mage agentBuild       # dist/iormesh-agent.jar
   IORMESH_MINISIGN_KEY=~/.minisign/iormesh.key mage sign
   ```
 
@@ -678,7 +681,8 @@ Each host (two machines, Linux, x86_64 or aarch64):
   `raw_syscalls` tracepoints. 6.2 or newer is needed for the
   clock bound (M4-10: `tcp_seq` reads use `bpf_rdonly_cast`).
   The Java mark uprobes need 6.10 (or 6.6–6.9 with commit
-  46ba0e49), though this run loads no agent. The suite has only
+  46ba0e49); the microservices projects load the agent (task
+  kf4). The suite has only
   run on Linux 7.2, where the dispatcher findings (PLAN.md,
   "Syscall handlers run behind `raw_syscalls` dispatchers") were
   measured. Rocky 9.9's 5.14.0-741.22.1.el9_9 has backported
@@ -811,7 +815,7 @@ Send back the results block and the work directory's path.
 
 | Id | Criterion (PLAN.md M4) | How | Expected |
 |---|---|---|---|
-| M4-0 | — preflight | ssh `pwd`; arch, kernel, machine ids (distinct, neither the controller's); `test -f` of the binary and key; `sudo -n -l /opt/iormesh/bin/iormesh`; the tools; no unit or trace; signed build per arch; local rsync; jar pushed | PASS, arch and kernel per host printed |
+| M4-0 | — preflight | ssh `pwd`; arch, kernel, machine ids (distinct, neither the controller's); `test -f` of the binary and key; `sudo -n -l /opt/iormesh/bin/iormesh`; the tools; no unit or trace; signed build per arch and signed `dist/iormesh-agent.jar`; local rsync; jar pushed | PASS, arch and kernel per host printed |
 | M4-1 | `add` → `deploy`, zero manual steps on the servers | `add -project P -pattern 'java -jar */.iormesh-m4-run/workload.jar <scenario> --role <role> *' HOST -duration 1h` per role, `deploy HOST1 HOST2`, then `status -json` per project | every project `running` |
 | M4-2 | streaming collect | per round: `file-basic` on HOST1, 65 s, list every `ready/`, `collect`, list again | every listed file gone from the server and in the store; the project dir holds only `ready/`, `state.json`, `.lock` and `.active-*`; ≥ 1 file moved |
 | M4-3 | `collect` alone changes nothing but the local store | hash every file of the work dir outside the store before and after each `collect` | unchanged |
@@ -819,8 +823,8 @@ Send back the results block and the work directory's path.
 | M4-5 | merged mesh equals the single-host result | `build -project m4single`, `query -project m4single`, tcp-loopback's golden (`internal/normalize`) on the rebuilt graph and events | no violation (the rig checks graph equality on every run) |
 | M4-6 | M0 client and server as two projects fuse | `build` of m4shop+m4billing (`tcp-two-host`, client HOST1, server HOST2); `build` of m4shop alone | one fused cross-host connection, none unresolved; alone, the client's end unresolved |
 | M4-7 | NAT'ed pair fuses on different 4-tuples | `tcp-nat` through the DNAT; `build` m4natc+m4nats; `query -conn` | one fused connection; client dialed the NAT port, server accepted on base+3 |
-| M4-8 | microservices: every REST edge fused, plain and TLS | the four services on HOST1, one project each, read from the refresh's model | orders and billing `tls`, inventory `plain` (2 conns), all fused |
-| M4-9 | microservices spread over both hosts (task 1f4) | gateway and inventory (`--bind ADDR1`, base+15) on HOST1, orders (base+16) and billing (base+14) on HOST2 (`--bind ADDR2`), one project each (m4sgw, m4sinv, m4sord, m4sbill), every pattern ending in its `--dir` `microservices-spread`, so M4-8's sessions never trace them; orders' public certificate copied from HOST2 to HOST1 over ssh (`base64`); `build` of the four projects | two fused cross-host connections (gateway→orders TLS, orders→inventory plain), none unresolved; orders and billing `tls`, inventory `plain` (2 conns), all fused |
+| M4-8 | microservices: every REST edge fused, plain and TLS | the four services on HOST1, one project each, read from the refresh's model; each project added with `-spool /run/iormesh/spool/P -agent /opt/iormesh/lib/iormesh-agent.jar` (so deploy installs the signed jar), each JVM started with `JAVA_TOOL_OPTIONS=-javaagent:/opt/iormesh/lib/iormesh-agent.jar=spool=/run/iormesh/spool/P` — the TLS label comes from the agent's http records (task kf4) | orders and billing `tls`, inventory `plain` (2 conns), all fused |
+| M4-9 | microservices spread over both hosts (task 1f4) | with the agent as in M4-8 (task kf4); gateway and inventory (`--bind ADDR1`, base+15) on HOST1, orders (base+16) and billing (base+14) on HOST2 (`--bind ADDR2`), one project each (m4sgw, m4sinv, m4sord, m4sbill), every pattern ending in its `--dir` `microservices-spread`, so M4-8's sessions never trace them; orders' public certificate copied from HOST2 to HOST1 over ssh (`base64`); `build` of the four projects | two fused cross-host connections (gateway→orders TLS, orders→inventory plain), none unresolved; orders and billing `tls`, inventory `plain` (2 conns), all fused |
 | M4-10 | clock bound | the m4shop+m4billing model's clock windows | non-empty and two-sided, widths printed (real clocks; the injected skew is `TestClockSkewRecovered`'s) |
 | M4-11 | `build` with the network down is byte-identical | both outputs deleted, then the same build rerun under `unshare -rn` (else with a `PATH` lacking ssh and rsync) | `graph.json` and `model.json` byte-equal |
 | M4-12 | naming two services shows them by name | `services name -port 18202 ADDR2 m4-billing-svc`, `services name -port 18213 127.0.0.1 m4-orders-svc`, `build`, `services` | both names in the model's services and edges and in the listing |

@@ -18,7 +18,9 @@ import (
 )
 
 const (
-	agentJar      = "iormesh-agent.jar"
+	agentJar = "iormesh-agent.jar"
+	// distDir holds the release artifacts mage sign signs.
+	distDir       = "dist"
 	agentBuildDir = "agent/build"
 	// The agent runs on 17+ (PLAN.md decision #29), so it is compiled
 	// for 17 whatever newer JDK builds it.
@@ -50,7 +52,12 @@ var (
 // AgentBuild builds iormesh-agent.jar: the agent core with ASM shaded
 // under iormesh.agent.shaded.asm, the hook tables, and the bridge jar
 // (the bootstrap-visible Hooks and StackIds) nested as a resource that
-// the agent appends to the bootstrap search path at install.
+// the agent appends to the bootstrap search path at install. A copy goes
+// to dist/ as a release artifact (task kf4): `mage sign` signs it with
+// the tracers, and `iormeshctl deploy` ships it to hosts whose projects
+// use the agent. A copy over an older one leaves that one's signature
+// behind, which no longer verifies, so a jar is never shipped unsigned
+// by `mage sign`.
 func AgentBuild() error {
 	if err := verifyASM(); err != nil {
 		return err
@@ -64,7 +71,13 @@ func AgentBuild() error {
 			return err
 		}
 	}
-	return packAgent()
+	if err := packAgent(); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(distDir, 0o755); err != nil {
+		return err
+	}
+	return sh.Copy(filepath.Join(distDir, agentJar), agentJar)
 }
 
 // verifyASM checks the vendored ASM jar against its pinned SHA-256.

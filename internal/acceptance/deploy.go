@@ -33,9 +33,14 @@ func (r *Runner) phaseDeploy(ctx context.Context) bool {
 	return true
 }
 
-// add registers one project; extra are tracer flags after the host.
+// add registers one project; extra are tracer flags after the host. An
+// agent project also gets its spool and the installed agent jar, which
+// makes deploy ship the jar to its host (agent.go).
 func (r *Runner) add(ctx context.Context, p project, extra ...string) error {
 	args := append([]string{"add", "-project", p.name, "-pattern", p.pattern, p.host}, tracerFlags...)
+	if p.agent {
+		args = append(args, agentFlags(p.name)...)
+	}
 	if _, err := r.ctlRun(ctx, append(args, extra...)...); err != nil {
 		return err
 	}

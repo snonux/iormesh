@@ -19,7 +19,8 @@ func testConfig(t *testing.T) Config {
 	t.Helper()
 	dir := t.TempDir()
 	for _, f := range []string{"workload.jar", "iormeshctl", "minisign.pub",
-		"dist/iormesh-linux-amd64", "dist/iormesh-linux-amd64.minisig"} {
+		"dist/iormesh-linux-amd64", "dist/iormesh-linux-amd64.minisig",
+		"dist/iormesh-agent.jar", "dist/iormesh-agent.jar.minisig"} {
 		p := filepath.Join(dir, f)
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			t.Fatal(err)

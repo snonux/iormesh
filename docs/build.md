@@ -60,7 +60,8 @@ mage workloadTest  # the Java workload, standalone (M0)
 mage bpfRootTest   # BPF root tests: loader, TCP, fork, exec watch (sudo -n)
 mage integrationTest        # tracer + workload end to end, as root
 mage integrationTestSerial  # the same, one test at a time
-mage agentBuild    # the Java agent -> ./iormesh-agent.jar (M3)
+mage agentBuild    # the Java agent -> ./iormesh-agent.jar (M3),
+                   # copied to dist/ for mage sign and deploy
 mage agentTest     # its unit tests, -javaagent smoke runs and
                    # the ring's Java-driven Go tests
 ```
@@ -253,6 +254,7 @@ builds:
 
 ```bash
 export IORMESH_MINISIGN_KEY=~/.minisign/iormesh.key  # outside the tree
+mage agentBuild    # also dist/iormesh-agent.jar (task kf4)
 mage sign          # dist/NAME -> dist/NAME.minisig, then verified
 iormeshctl verify dist/iormesh-linux-amd64   # the controller's check
 ```
@@ -269,7 +271,12 @@ iormeshctl verify dist/iormesh-linux-amd64   # the controller's check
   (`/proc/<pid>/environ`) and leaks into logs that dump the
   environment.
 - **What is signed**: each file in `dist/` (not hidden, not a
-  `.minisig`), prehashed (BLAKE2b-512, minisign's default),
+  `.minisig`) — the tracers, the controllers and, after `mage
+  agentBuild`, the agent jar `iormesh-agent.jar`, which
+  `iormeshctl deploy` ships to hosts whose projects use the
+  agent and `iormesh upgrade` installs only at the tracer's
+  version (task kf4; [security.md](security.md)) — prehashed
+  (BLAKE2b-512, minisign's default),
   with the trusted comment
   `timestamp:<unix> file:<name> version:<x.y.z>`; the version
   is `internal/version.Version`, bumped per release. The tracer

@@ -360,12 +360,18 @@ func TestRunConfinement(t *testing.T) {
 		"trace dir":  {project: "root", traceDir: "/"},
 		"spool":      {project: "p", traceDir: defaultTraceDir, spool: "/usr/local/bin"},
 		"owner":      {project: "p", traceDir: defaultTraceDir, readyOwner: &segment.Owner{UID: 0, GID: 0}},
+		// Task kf4: a confined -agent is the installed jar or nothing.
+		"agent": {project: "p", traceDir: defaultTraceDir, spool: "/run/iormesh/spool/p",
+			agent: "/tmp/evil.jar"},
+		"agent dir": {project: "p", traceDir: defaultTraceDir, spool: "/run/iormesh/spool/p",
+			agent: "/opt/iormesh/lib/x.jar"},
 	} {
 		if err := k.check(cfg); !errors.Is(err, errUsage) {
 			t.Errorf("%s: %v, want refused", name, err)
 		}
 	}
 	ok.spool, ok.readyOwner = "/run/iormesh/spool/p", &segment.Owner{UID: 1000, GID: 1000}
+	ok.agent = "/opt/iormesh/lib/iormesh-agent.jar"
 	if err := k.check(ok); err != nil {
 		t.Errorf("pinned paths refused: %v", err)
 	}

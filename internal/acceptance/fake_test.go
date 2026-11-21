@@ -38,16 +38,34 @@ type fakeWorld struct {
 	// failClient makes that scenario's client role fail, as a client
 	// that cannot reach its server does.
 	failClient string
+	// launched is every workload JVM the run started, with the
+	// environment `env` gave it (task kf4).
+	launched []launch
+}
+
+// launch is one workload JVM: its host, the env assignment it ran under
+// ("" without env) and its command line.
+type launch struct {
+	host, env, cmdline string
 }
 
 // answerTimeout runs a workload role: every role must come under
-// `timeout 300`, and a failing client fails with exit status 1.
+// `timeout 300`, optionally through `env VAR=value` (an agent project's
+// JAVA_TOOL_OPTIONS), and a failing client fails with exit status 1.
 func (w *fakeWorld) answerTimeout(host string, argv []string) (string, error) {
-	if len(argv) < 8 || argv[1] != roleTimeout || argv[2] != "java" {
+	if len(argv) < 3 || argv[1] != roleTimeout {
 		w.t.Errorf("%s: unexpected timeout command %v", host, argv)
 		return "", nil
 	}
-	java := argv[2:]
+	java, env := argv[2:], ""
+	if java[0] == "env" && len(java) > 1 {
+		env, java = java[1], java[2:]
+	}
+	if len(java) < 6 || java[0] != "java" {
+		w.t.Errorf("%s: unexpected timeout command %v", host, argv)
+		return "", nil
+	}
+	w.launched = append(w.launched, launch{host, env, strings.Join(java, " ")})
 	if java[3] == w.failClient && java[5] == "client" {
 		return "", w.exit1
 	}

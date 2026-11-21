@@ -2,7 +2,8 @@
 
 // Release signing (PLAN.md decision #28, docs/build.md "Signing"): Sign
 // writes a minisign signature next to every binary the container builds
-// left in dist/. The private key is the release pipeline's and never
+// left in dist/, and next to the agent jar `mage agentBuild` copies there
+// (task kf4). The private key is the release pipeline's and never
 // enters the repo: it is read from the path IORMESH_MINISIGN_KEY names,
 // which must lie outside the tree, and stays encrypted at rest (minisign's
 // scrypt-encrypted key file).
@@ -41,7 +42,7 @@ func Sign() error {
 	if err != nil {
 		return err
 	}
-	signed, err := release.SignDir(key, "dist", version.Version, time.Now())
+	signed, err := release.SignDir(key, distDir, version.Version, time.Now())
 	if err != nil {
 		return err
 	}

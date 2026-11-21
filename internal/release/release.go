@@ -65,6 +65,12 @@ func TracerFile(goarch string) string {
 	return "iormesh-linux-" + goarch
 }
 
+// AgentFile is the release name of the Java agent jar (`mage agentBuild`
+// copies it into dist/, `mage sign` signs it): architecture-neutral, so one
+// name serves every host. `iormesh upgrade` installs a file signed with
+// this name as the host's agent jar, never as the tracer.
+const AgentFile = "iormesh-agent.jar"
+
 // ParsePublicKey reads a minisign public key file (an untrusted comment
 // line, then the base64 key) or the bare base64 key.
 func ParsePublicKey(data []byte) (minisign.PublicKey, error) {

@@ -96,6 +96,7 @@ func newDeployFixture(t *testing.T) *deployFixture {
 	writeFile(t, keyPath, text, 0o600)
 	signed(t, priv, filepath.Join(f.dist, "iormesh-linux-amd64"))
 	signed(t, priv, filepath.Join(f.dist, "iormesh-linux-arm64"))
+	signed(t, priv, filepath.Join(f.dist, release.AgentFile))
 	f.e = env{stdout: f.stdout, stderr: f.stderr,
 		registry:   func() (string, error) { return f.registry, nil },
 		releaseKey: func() (string, error) { return keyPath, nil },
@@ -324,7 +325,8 @@ func refusalCases() []refusal {
 		{name: "odd home", answers: map[string]reply{"app1 pwd": {out: "/home/a b\n"}},
 			app1: preflightLog("app1", "amd64")[:5], stderr: `home directory "/home/a b"`},
 		{name: "upgrade refused", answers: map[string]reply{sudo + "upgrade": {err: boom}},
-			app1: preflightLog("app1", "amd64"), stderr: "upgrade refused, nothing started: exit status 1: boom"},
+			app1:   preflightLog("app1", "amd64"),
+			stderr: "upgrade of iormesh-linux-amd64 refused, nothing started: exit status 1: boom"},
 		{name: "start fails", answers: map[string]reply{sudo + "start -project shop": {err: boom}},
 			app1: slices.Concat(preflightLog("app1", "amd64"), startLog("app1", "shop",
 				"start", "-project", "shop", "-pattern=*orders*", "-duration", "1h")[:2],
@@ -364,7 +366,11 @@ func TestDeployRefusedFlags(t *testing.T) {
 		"-cpuprofile /tmp/p":          "not allowed through the sudoers rule",
 		"--ready=/tmp/r":              "not allowed through the sudoers rule",
 		"-pid 1":                      "the entry sets it itself",
-		"-trace-dir /opt/iormesh/traces -spool=/run/iormesh/spool/shop/": "",
+		// Task kf4: -agent is the jar deploy installs, nothing else.
+		"-spool /run/iormesh/spool/shop -agent /tmp/a.jar":                         "may only use /opt/iormesh/lib/iormesh-agent.jar",
+		"-agent=/opt/iormesh/lib/../bin/iormesh":                                   "may only use /opt/iormesh/lib/iormesh-agent.jar",
+		"-spool /run/iormesh/spool/shop -agent /opt/iormesh/lib/iormesh-agent.jar": "",
+		"-trace-dir /opt/iormesh/traces -spool=/run/iormesh/spool/shop/":           "",
 	} {
 		f := newDeployFixture(t)
 		// Written by hand: add refuses the entry-owned flags itself.

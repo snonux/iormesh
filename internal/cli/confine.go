@@ -18,20 +18,24 @@ import (
 // at all (sudoAllowed; normalize -out, say, would overwrite any file),
 // and every session started that way is confined: start always (whoever
 // calls it, its unit runs as root), and run when it came through the
-// rule (sudoGated).
+// rule (sudoGated). A confined session's -agent is pinned too: root
+// live-loads it into JVMs of every user, so through the rule it may name
+// only the jar `iormesh upgrade` verified and installed (task kf4).
 const (
 	// installedBinary is the path the sudoers rule names.
 	installedBinary = "/opt/iormesh/bin/iormesh"
 	// defaultSpoolRoot holds the confined sessions' agent spools, one per
 	// project: /run is root's, so nothing in the path can be planted.
 	defaultSpoolRoot = "/run/iormesh/spool"
+	// installedAgent is the agent jar upgrade installs (agentRel).
+	installedAgent = installRoot + "/" + agentRel
 )
 
 // confinement is what a confined session may use: segments only under
-// traceRoot, a spool only at spoolRoot/<project>, and ready/ only for
-// the sudo caller.
+// traceRoot, a spool only at spoolRoot/<project>, the agent jar only at
+// agent, and ready/ only for the sudo caller.
 type confinement struct {
-	traceRoot, spoolRoot string
+	traceRoot, spoolRoot, agent string
 	// sudoOwner is the sudo caller as UID:GID, "" without sudo (or under
 	// root's own sudo).
 	sudoOwner string
@@ -39,7 +43,7 @@ type confinement struct {
 
 // defaultConfinement is the production one, for env's sudo caller.
 func defaultConfinement(env func(string) string) confinement {
-	k := confinement{traceRoot: defaultTraceDir, spoolRoot: defaultSpoolRoot}
+	k := confinement{traceRoot: defaultTraceDir, spoolRoot: defaultSpoolRoot, agent: installedAgent}
 	if uid := env("SUDO_UID"); uid != "" && uid != "0" {
 		k.sudoOwner = uid + ":" + env("SUDO_GID")
 	}
@@ -124,10 +128,24 @@ func (k confinement) check(cfg runConfig) error {
 		return refuse("-trace-dir "+cfg.traceDir, "segments go to "+k.traceRoot+" only")
 	case cfg.spool != "" && filepath.Clean(cfg.spool) != k.spool(cfg.project):
 		return refuse("-spool "+cfg.spool, "the project's spool is "+k.spool(cfg.project))
+	case cfg.agent != "" && !k.isAgent(cfg.agent):
+		return refuse("-agent "+cfg.agent, "only the installed, signature-checked "+k.agent+" (iormesh upgrade)")
 	case k.sudoOwner != "" && cfg.readyOwner != nil && owner(cfg.readyOwner) != k.sudoOwner:
 		return refuse("-ready-owner "+owner(cfg.readyOwner), "ready/ goes to the sudo caller, "+k.sudoOwner)
 	}
 	return nil
+}
+
+// isAgent reports whether path, the run's -agent as trustedAgent resolved
+// it, is the installed jar: its path, or its real path where /opt is a
+// symlink (image-based systems), which is what trustedAgent hands on.
+func (k confinement) isAgent(path string) bool {
+	path = filepath.Clean(path)
+	if path == k.agent {
+		return true
+	}
+	real, err := filepath.EvalSymlinks(k.agent)
+	return err == nil && path == real
 }
 
 // spool is a confined project's spool directory.
