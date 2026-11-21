@@ -146,7 +146,7 @@ func TestDebugArgv(t *testing.T) {
 	if !slices.Equal(dbg, want) {
 		t.Errorf("debug argv\n got %q\nwant %q", dbg, want)
 	}
-	assertCustom(t, f.custom(t), true, DefaultSELinuxType)
+	assertCustom(t, f.custom(t), true, DefaultSELinuxType, DefaultSELinuxLevel)
 	// kubectl 1.30 knows --custom only behind this gate (task yb4).
 	if g := f.gate(t); g != "true" {
 		t.Errorf("debug ran with KUBECTL_DEBUG_CUSTOM_PROFILE=%q, want true", g)
@@ -167,28 +167,36 @@ func TestDebugPrivileged(t *testing.T) {
 	if !slices.Contains(f.calls(t)[1], "--profile=sysadmin") {
 		t.Errorf("argv %q lacks --profile=sysadmin", f.calls(t)[1])
 	}
-	assertCustom(t, f.custom(t), false, "")
+	assertCustom(t, f.custom(t), false, "", "")
 }
 
 // TestDebugSELinuxType: the minimal profile's custom file carries the
-// target's SELinux type, and none when the type is empty (task 5h4).
+// target's SELinux type and level (task 5h4), the pod's pinned pair as
+// the level when given one, no level when the level is empty, and no
+// seLinuxOptions at all when the type is empty (task 8h4).
 func TestDebugSELinuxType(t *testing.T) {
-	for _, se := range []string{"iormesh_container_t", ""} {
+	for _, se := range [][2]string{
+		{"iormesh_container_t", DefaultSELinuxLevel},
+		{DefaultSELinuxType, "s0:c19,c249"},
+		{DefaultSELinuxType, ""},
+		{"", "s0:c19,c249"},
+	} {
 		f := newFake(t)
 		f.pod(t, preparedPod)
 		tg := testTarget()
-		tg.SELinuxType = se
+		tg.SELinuxType, tg.SELinuxLevel = se[0], se[1]
 		if err := newTestKubectl(t, tg).Debug(context.Background(), "iormesh", "run"); err != nil {
 			t.Fatal(err)
 		}
-		assertCustom(t, f.custom(t), true, se)
+		assertCustom(t, f.custom(t), true, se[0], se[1])
 	}
 }
 
 // assertCustom checks the --custom spec: the two mounts always, #13's
-// capability set, no-escalation and the SELinux type seType at level s0
-// (absent when "") only for the minimal profile.
-func assertCustom(t *testing.T, js string, minimal bool, seType string) {
+// capability set, no-escalation and the SELinux type seType (no
+// seLinuxOptions when "") at level seLevel (no level key when "") only
+// for the minimal profile.
+func assertCustom(t *testing.T, js string, minimal bool, seType, seLevel string) {
 	t.Helper()
 	var spec struct {
 		SecurityContext struct {
@@ -199,8 +207,8 @@ func assertCustom(t *testing.T, js string, minimal bool, seType string) {
 				Add  []string `json:"add"`
 			} `json:"capabilities"`
 			SELinuxOptions *struct {
-				Type  string `json:"type"`
-				Level string `json:"level"`
+				Type  string  `json:"type"`
+				Level *string `json:"level"`
 			} `json:"seLinuxOptions"`
 		} `json:"securityContext"`
 		VolumeMounts []struct {
@@ -232,9 +240,13 @@ func assertCustom(t *testing.T, js string, minimal bool, seType string) {
 	switch {
 	case seType == "" && sc.SELinuxOptions != nil:
 		t.Errorf("seLinuxOptions set for an empty type: %s", js)
-	case seType != "" && (sc.SELinuxOptions == nil || sc.SELinuxOptions.Type != seType ||
-		sc.SELinuxOptions.Level != SELinuxLevel):
-		t.Errorf("seLinuxOptions in %s, want type %s, level %s", js, seType, SELinuxLevel)
+	case seType == "":
+	case sc.SELinuxOptions == nil || sc.SELinuxOptions.Type != seType:
+		t.Errorf("seLinuxOptions in %s, want type %s", js, seType)
+	case seLevel == "" && sc.SELinuxOptions.Level != nil:
+		t.Errorf("seLinuxOptions in %s carries a level, want none", js)
+	case seLevel != "" && (sc.SELinuxOptions.Level == nil || *sc.SELinuxOptions.Level != seLevel):
+		t.Errorf("seLinuxOptions in %s, want level %s", js, seLevel)
 	}
 }
 

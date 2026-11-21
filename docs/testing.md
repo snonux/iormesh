@@ -1813,6 +1813,23 @@ Unit tests in `mage test`, no cluster and no container engine
   and refuses `spc_t:s0` before any kubectl call; the registry
   tests round-trip an explicit `selinux_type: ""` and refuse a
   malformed one at load.
+- SELinux level (task 8h4): `k8sname.TestSELinuxLevel` takes
+  `s0` and `s0:cN,cM` (distinct N, M ≤ 1023) and refuses empty,
+  a range, `s1`, a lone, a third or a repeated category,
+  `c1024`, a leading zero, a full context and stray whitespace;
+  `TestResolveSELinuxLevel` pins the same precedence as the
+  type (unset defers, empty wins and omits the level, `s0` the
+  fallback) and `ErrTransport` for a bad level from a layer or
+  a `Target`; `TestDebugSELinuxType` checks the `--custom` file
+  for a pinned pair, no `level` key for an empty level and no
+  `seLinuxOptions` for an empty type; `TestPodDeploySELinuxLevel`
+  runs `iormeshctl deploy` with the default, a `k8s:`
+  `selinux_level`, a pod entry's over it, `-selinux-level` over
+  both and `-selinux-level=`, and refuses three malformed levels
+  before any kubectl call; the registry tests round-trip a
+  pinned pair and an explicit `selinux_level: ""` and refuse a
+  range, `c1024`, `s1` and a full context at load. Each check
+  was mutation-checked.
 - Pod byte cap and attach wait (task 5g4):
   `internal/k8s/quantity_test.go` reads every byte-size form
   (`2Gi`, `2G`, `2000M`, a byte count, `2e9`, `1.5Gi`, `.5Ki`)

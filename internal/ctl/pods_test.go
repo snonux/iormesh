@@ -466,6 +466,63 @@ func TestPodDeploySELinuxType(t *testing.T) {
 	}
 }
 
+// TestPodDeploySELinuxLevel: a debug tracer runs at level s0 by default,
+// the registry's selinux_level overrides that (a pod entry's over the
+// k8s: one), -selinux-level overrides the registry, an empty
+// -selinux-level= omits the level and keeps the type, and a malformed
+// level is refused before kubectl runs (decision #13, task 8h4).
+func TestPodDeploySELinuxLevel(t *testing.T) {
+	withLevel := strings.Replace(podRegistry, "  clusters:", "  selinux_level: s0:c1,c2\n  clusters:", 1)
+	withEntry := strings.Replace(withLevel, "    container: app\n",
+		"    container: app\n    selinux_level: s0:c19,c249\n", 1)
+	for _, c := range []struct {
+		registry string
+		flags    []string
+		want     string // "-" for no level key
+	}{
+		{"", nil, "s0"},
+		{withLevel, nil, "s0:c1,c2"},
+		{withEntry, nil, "s0:c19,c249"},
+		{withEntry, []string{"-selinux-level", "s0:c7,c1023"}, "s0:c7,c1023"},
+		{withEntry, []string{"-selinux-level="}, "-"},
+	} {
+		f := newPodFixture(t, c.registry)
+		f.pod(t, podObject("checkout-0", uid(1), false))
+		args := slices.Concat([]string{"deploy"}, c.flags, []string{"kind/shop/checkout-0"})
+		if code := f.run(args...); code != exitOK {
+			t.Fatalf("%q: exit %d: %s", args, code, f.stderr)
+		}
+		var spec struct {
+			SecurityContext struct {
+				SELinuxOptions *struct{ Type, Level *string } `json:"seLinuxOptions"`
+			} `json:"securityContext"`
+		}
+		b, err := os.ReadFile(filepath.Join(f.dir, "custom.json"))
+		if err != nil || json.Unmarshal(b, &spec) != nil {
+			t.Fatalf("%q: custom file %s: %v", args, b, err)
+		}
+		se := spec.SecurityContext.SELinuxOptions
+		if se == nil || se.Type == nil || *se.Type != k8s.DefaultSELinuxType {
+			t.Fatalf("%q: seLinuxOptions %s, want type spc_t", args, b)
+		}
+		got := "-"
+		if se.Level != nil {
+			got = *se.Level
+		}
+		if got != c.want {
+			t.Errorf("%q: SELinux level %q, want %q", args, got, c.want)
+		}
+	}
+	for _, bad := range []string{"s0:c1024,c1", "s0-s0:c0.c1023", "s0:c5"} {
+		f := newPodFixture(t, "")
+		f.pod(t, podObject("checkout-0", uid(1), false))
+		if code := f.run("deploy", "-selinux-level", bad, "kind/shop/checkout-0"); code == exitOK ||
+			!strings.Contains(f.stderr.String(), "SELinux level") || len(f.calls(t)) != 0 {
+			t.Errorf("level %q: exit %d, calls %q, stderr %s", bad, code, f.calls(t), f.stderr)
+		}
+	}
+}
+
 // TestPodDeployAttach: deploy reports a debug tracer only once it says
 // it is attached (task ef4). One still pending when -attach-timeout
 // passes fails the pod, saying so; one whose session already ended

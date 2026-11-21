@@ -62,15 +62,19 @@ const (
 // seLinuxOptions, leaving the runtime's default.
 const DefaultSELinuxType = "spc_t"
 
-// SELinuxLevel is the MCS level set beside any SELinux type (task 5h4).
-// Given a type alone, containerd gives the container a fresh MCS pair
+// DefaultSELinuxLevel is the MCS level set beside the SELinux type
+// unless the owner picks another (task 5h4; -selinux-level and the
+// registry's selinux_level since task 8h4). Given a type alone, containerd gives the container a fresh MCS pair
 // of its own and relabels the pod's shared files — /etc/hosts,
 // resolv.conf, the trace emptyDir — to it, which locks the app
 // containers (container_t at the pod's pair) out of them: on el9 the
 // gateway's JVM was denied reading /etc/hosts. At s0, which every pair
 // dominates, the relabelled files stay readable and writable by the
-// app; the price is that they lose the pod's own MCS pair.
-const SELinuxLevel = "s0"
+// app; the price is that they lose the pod's own MCS pair. An owner who
+// pins the pod's level (pod securityContext.seLinuxOptions.level) passes
+// that same pair instead and keeps MCS isolation of those files; an empty
+// level omits the field and gets the type-alone behaviour above.
+const DefaultSELinuxLevel = "s0"
 
 // TracerContainer is the tracer container's name in the pod, the
 // ephemeral one and the sidecar alike: every exec names it.
@@ -97,19 +101,24 @@ type Target struct {
 	// SELinuxType is the minimal profile's seLinuxOptions.type ("" omits
 	// the field); the privileged profile ignores it.
 	SELinuxType string
+	// SELinuxLevel is the seLinuxOptions.level beside a non-empty
+	// SELinuxType ("" omits the level; ignored when the type is empty).
+	SELinuxLevel string
 }
 
 // Layer is one level of #18's precedence: run flags, the pod entry, the
 // cluster entry, the k8s: defaults. Empty fields defer to the next
-// layer. SELinuxType is a pointer because its empty value is a choice
-// (omit seLinuxOptions), not a deferral: nil defers.
+// layer. SELinuxType and SELinuxLevel are pointers because their empty
+// value is a choice (omit seLinuxOptions, omit the level), not a
+// deferral: nil defers.
 type Layer struct {
-	Context     string
-	Namespace   string
-	Image       string
-	Mode        Mode
-	Profile     Profile
-	SELinuxType *string
+	Context      string
+	Namespace    string
+	Image        string
+	Mode         Mode
+	Profile      Profile
+	SELinuxType  *string
+	SELinuxLevel *string
 }
 
 // Scope is the layers resolved: where pods are looked up and how a
@@ -120,8 +129,8 @@ type Scope Layer
 
 // ResolveScope layers ls (highest precedence first: flag, pod entry,
 // cluster, k8s: defaults), falls back to DefaultImage, debug mode, the
-// minimal profile and DefaultSELinuxType, and validates the result. registered is the
-// registry's list of contexts: one it does not list is refused, as an
+// minimal profile, DefaultSELinuxType and DefaultSELinuxLevel, and
+// validates the result. registered is the registry's list of contexts: one it does not list is refused, as an
 // unregistered host is for SSH.
 func ResolveScope(registered []string, ls ...Layer) (Scope, error) {
 	var s Scope
@@ -131,17 +140,14 @@ func ResolveScope(registered []string, ls ...Layer) (Scope, error) {
 		s.Image = pick(l.Image, s.Image)
 		s.Mode = pick(l.Mode, s.Mode)
 		s.Profile = pick(l.Profile, s.Profile)
-		if l.SELinuxType != nil {
-			s.SELinuxType = l.SELinuxType
-		}
+		s.SELinuxType = pickPtr(l.SELinuxType, s.SELinuxType)
+		s.SELinuxLevel = pickPtr(l.SELinuxLevel, s.SELinuxLevel)
 	}
 	s.Image = pick(s.Image, DefaultImage)
 	s.Mode = pick(s.Mode, ModeDebug)
 	s.Profile = pick(s.Profile, ProfileMinimal)
-	if s.SELinuxType == nil {
-		def := DefaultSELinuxType
-		s.SELinuxType = &def
-	}
+	s.SELinuxType = pickPtr(s.SELinuxType, new(DefaultSELinuxType))
+	s.SELinuxLevel = pickPtr(s.SELinuxLevel, new(DefaultSELinuxLevel))
 	if err := s.validate(); err != nil {
 		return Scope{}, err
 	}
@@ -157,6 +163,9 @@ func (s Scope) Target(pod, container string) (Target, error) {
 		Image: s.Image, Mode: s.Mode, Profile: s.Profile}
 	if s.SELinuxType != nil {
 		t.SELinuxType = *s.SELinuxType
+	}
+	if s.SELinuxLevel != nil {
+		t.SELinuxLevel = *s.SELinuxLevel
 	}
 	if err := t.Validate(); err != nil {
 		return Target{}, err
@@ -177,6 +186,15 @@ func Resolve(pod, container string, registered []string, ls ...Layer) (Target, e
 // pick returns v unless it is empty, then fallback.
 func pick[T ~string](v, fallback T) T {
 	if v != "" {
+		return v
+	}
+	return fallback
+}
+
+// pickPtr returns v unless it is nil (unset), then fallback: for the
+// fields whose empty value is a choice rather than a deferral.
+func pickPtr(v, fallback *string) *string {
+	if v != nil {
 		return v
 	}
 	return fallback
@@ -206,13 +224,17 @@ func (s Scope) validate() error {
 	if s.SELinuxType != nil && *s.SELinuxType != "" && !k8sname.SELinuxType(*s.SELinuxType) {
 		return fmt.Errorf("%w: SELinux type %q ([a-z0-9_]+, or empty to omit it)", ErrTransport, *s.SELinuxType)
 	}
+	if s.SELinuxLevel != nil && *s.SELinuxLevel != "" && !k8sname.SELinuxLevel(*s.SELinuxLevel) {
+		return fmt.Errorf("%w: SELinux level %q (s0 or s0:cN,cM with N, M <= 1023, or empty to omit it)",
+			ErrTransport, *s.SELinuxLevel)
+	}
 	return nil
 }
 
 // Validate checks every field before any reaches a kubectl argv.
 func (t Target) Validate() error {
 	s := Scope{Context: t.Context, Namespace: t.Namespace, Image: t.Image, Mode: t.Mode, Profile: t.Profile,
-		SELinuxType: &t.SELinuxType}
+		SELinuxType: &t.SELinuxType, SELinuxLevel: &t.SELinuxLevel}
 	if err := s.validate(); err != nil {
 		return err
 	}

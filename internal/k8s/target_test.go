@@ -20,7 +20,8 @@ func TestResolvePrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Target{Context: "kind-iormesh", Namespace: "flagns", Pod: "checkout-7d9f", Container: "app",
-		Image: other, Mode: ModeDebug, Profile: ProfilePrivileged, SELinuxType: DefaultSELinuxType}
+		Image: other, Mode: ModeDebug, Profile: ProfilePrivileged, SELinuxType: DefaultSELinuxType,
+		SELinuxLevel: DefaultSELinuxLevel}
 	if got != want {
 		t.Errorf("Resolve\n got %+v\nwant %+v", got, want)
 	}
@@ -51,6 +52,40 @@ func TestResolveSELinuxType(t *testing.T) {
 		l.SELinuxType = str(bad)
 		if _, err := Resolve("p", "app", []string{"c"}, l); !errors.Is(err, ErrTransport) {
 			t.Errorf("type %q: err = %v, want ErrTransport", bad, err)
+		}
+	}
+}
+
+// TestResolveSELinuxLevel: the level resolves as the type does — unset
+// defers and falls back to s0, an empty one set higher up wins and
+// omits the level, a pod's pinned pair passes — and anything but s0 or
+// s0:cN,cM with N, M <= 1023 is refused (task 8h4).
+func TestResolveSELinuxLevel(t *testing.T) {
+	base := Layer{Context: "c", Namespace: "n"}
+	for _, c := range []struct {
+		layers []Layer
+		want   string
+	}{
+		{[]Layer{base}, DefaultSELinuxLevel},
+		{[]Layer{{}, base, {SELinuxLevel: new("s0:c19,c249")}}, "s0:c19,c249"},
+		{[]Layer{{SELinuxLevel: new("")}, base, {SELinuxLevel: new("s0:c19,c249")}}, ""},
+		{[]Layer{{SELinuxLevel: new("s0:c1,c2")}, base, {SELinuxLevel: new("")}}, "s0:c1,c2"},
+	} {
+		got, err := Resolve("p", "app", []string{"c"}, c.layers...)
+		if err != nil || got.SELinuxLevel != c.want {
+			t.Errorf("layers %+v: SELinux level %q, err %v; want %q", c.layers, got.SELinuxLevel, err, c.want)
+		}
+	}
+	for _, bad := range []string{"s1", "s0-s0:c0.c1023", "s0:c1024,c1", "s0:c5", "s0:c5,c5", "spc_t:s0", "s0\n"} {
+		l := base
+		l.SELinuxLevel = new(bad)
+		if _, err := Resolve("p", "app", []string{"c"}, l); !errors.Is(err, ErrTransport) {
+			t.Errorf("level %q: err = %v, want ErrTransport", bad, err)
+		}
+		tg := testTarget()
+		tg.SELinuxLevel = bad
+		if err := tg.Validate(); !errors.Is(err, ErrTransport) {
+			t.Errorf("target level %q: err = %v, want ErrTransport", bad, err)
 		}
 	}
 }

@@ -163,7 +163,7 @@ const testImage = "registry.example/iormesh@sha256:" +
 func testTarget() Target {
 	return Target{Context: "kind-iormesh", Namespace: "shop", Pod: "checkout-7d9f",
 		Container: "app", Image: testImage, Mode: ModeDebug, Profile: ProfileMinimal,
-		SELinuxType: DefaultSELinuxType}
+		SELinuxType: DefaultSELinuxType, SELinuxLevel: DefaultSELinuxLevel}
 }
 
 // newTestKubectl is New on target t, failing the test on refusal.

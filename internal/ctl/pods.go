@@ -51,6 +51,8 @@ type k8sFlags struct {
 	// seType is -selinux-type: nil unless given, so an unset flag defers
 	// to the registry while -selinux-type '' omits the field.
 	seType *string
+	// seLevel is -selinux-level, nil unless given likewise (task 8h4).
+	seLevel *string
 }
 
 // optString is a string flag that tells "not given" (nil) from "given
@@ -69,8 +71,9 @@ func (o optString) Set(s string) error {
 	return nil
 }
 
-// addK8sFlags registers -context and -namespace, and -image and
-// -selinux-type when the command starts tracers (deploy).
+// addK8sFlags registers -context and -namespace, and -image,
+// -selinux-type and -selinux-level when the command starts tracers
+// (deploy).
 func addK8sFlags(fs *flag.FlagSet, deploy bool) *k8sFlags {
 	f := &k8sFlags{}
 	fs.StringVar(&f.context, "context", "", "kubectl context for pod entries (must be a registered cluster's)")
@@ -80,6 +83,9 @@ func addK8sFlags(fs *flag.FlagSet, deploy bool) *k8sFlags {
 		fs.Var(optString{&f.seType}, "selinux-type",
 			"SELinux type of a minimal-profile debug tracer (default "+k8s.DefaultSELinuxType+
 				"; empty omits seLinuxOptions)")
+		fs.Var(optString{&f.seLevel}, "selinux-level",
+			"MCS level beside -selinux-type: s0 or the pod's pinned s0:cN,cM (default "+
+				k8s.DefaultSELinuxLevel+"; empty omits the level)")
 	}
 	return f
 }
@@ -125,12 +131,13 @@ func resolvePodRef(r *federate.Registry, ref string, kf *k8sFlags) (podEntry, er
 	var defaults k8s.Layer
 	if r.K8s != nil {
 		defaults = k8s.Layer{Image: r.K8s.Image, Mode: k8s.Mode(r.K8s.Mode), Profile: k8s.Profile(r.K8s.Profile),
-			SELinuxType: r.K8s.SELinuxType}
+			SELinuxType: r.K8s.SELinuxType, SELinuxLevel: r.K8s.SELinuxLevel}
 	}
 	s, err := k8s.ResolveScope(r.Contexts(),
-		k8s.Layer{Context: kf.context, Namespace: kf.namespace, Image: kf.image, SELinuxType: kf.seType},
+		k8s.Layer{Context: kf.context, Namespace: kf.namespace, Image: kf.image, SELinuxType: kf.seType,
+			SELinuxLevel: kf.seLevel},
 		k8s.Layer{Namespace: p.Namespace, Image: p.Image, Mode: k8s.Mode(p.Mode), Profile: k8s.Profile(p.Profile),
-			SELinuxType: p.SELinuxType},
+			SELinuxType: p.SELinuxType, SELinuxLevel: p.SELinuxLevel},
 		k8s.Layer{Context: c.Context, Namespace: c.Namespace},
 		defaults)
 	if err != nil {

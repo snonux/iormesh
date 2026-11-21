@@ -438,7 +438,11 @@ truth.
     longer separates these files from other pods — only mount
     namespaces do, and a hostPath over `/var/lib/kubelet/pods`
     or an escape reaches them; the label stays after a debug
-    tracer exits. On
+    tracer exits. An owner who pins the pod's MCS level gives
+    the tracer that same pair (`iormeshctl deploy
+    -selinux-level s0:cN,cM`, or `selinux_level` in the
+    registry; in the sidecar patch, its `level:` line), which
+    keeps the files at the pod's pair and their MCS isolation. On
     an SELinux-enforcing node (el9) `container_t` is denied
     `bpf { prog_load }` outright (task zg4); `spc_t` is
     unconfined by SELinux, so on such a node the capability set,

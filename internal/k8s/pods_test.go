@@ -69,7 +69,7 @@ func podList(t *testing.T, items ...map[string]any) string {
 func testScope() Scope {
 	tg := testTarget()
 	return Scope{Context: tg.Context, Namespace: tg.Namespace, Image: tg.Image, Mode: tg.Mode, Profile: tg.Profile,
-		SELinuxType: &tg.SELinuxType}
+		SELinuxType: &tg.SELinuxType, SELinuxLevel: &tg.SELinuxLevel}
 }
 
 // newTestLister is NewLister on testScope, failing the test on refusal.

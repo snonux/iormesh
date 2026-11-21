@@ -24,6 +24,25 @@ func TestSELinuxType(t *testing.T) {
 	}
 }
 
+// TestSELinuxLevel: s0 and s0 with a pair of distinct categories up to
+// c1023 pass; empty, a range, another sensitivity, a lone or a third
+// category, a duplicate, c1024, a leading zero, a full context and stray
+// spaces are refused (task 8h4).
+func TestSELinuxLevel(t *testing.T) {
+	for _, s := range []string{"s0", "s0:c0,c1", "s0:c19,c249", "s0:c1023,c0", "s0:c1022,c1023"} {
+		if !SELinuxLevel(s) {
+			t.Errorf("%q refused", s)
+		}
+	}
+	for _, s := range []string{"", "s1", "s0-s0", "s0-s0:c0.c1023", "s0:c5", "s0:c1,c2,c3", "s0:c5,c5",
+		"s0:c1024,c1", "s0:c1,c1024", "s0:c01,c2", "s0:c1,c02", "s0:c0.c3", "s0:", "S0", " s0", "s0 ",
+		"s0\n", "system_u:system_r:spc_t:s0", "spc_t", "s0:c1,c99999", "s0:c,c1"} {
+		if SELinuxLevel(s) {
+			t.Errorf("%q accepted", s)
+		}
+	}
+}
+
 // TestSelector: equality-based selectors with one positive term pass;
 // empty, only-negative, set-based, existence and anything with a space,
 // a leading dash or a stray comma are refused.

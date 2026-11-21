@@ -22,6 +22,7 @@ const k8sYAML = `servers:
 k8s:
   image: ` + k8sImage + `
   selinux_type: iormesh_container_t
+  selinux_level: s0:c19,c249
   clusters:
     - name: kind
       context: kind-iormesh
@@ -40,6 +41,7 @@ pods:
     container: app
     mode: sidecar
     selinux_type: ""
+    selinux_level: ""
     projects:
       - name: web
         target: {listen_port: 8080}
@@ -59,8 +61,9 @@ func writeRegistry(t *testing.T, text string) string {
 
 // TestK8sRegistry: both sections load, references name the entries, the
 // namespace and the project default to the cluster's namespace (#21),
-// an explicitly empty selinux_type stays set (it omits the field rather
-// than deferring, task 5h4), and Save writes back what was read.
+// an explicitly empty selinux_type or selinux_level stays set (it omits
+// the field rather than deferring, tasks 5h4 and 8h4), and Save writes
+// back what was read.
 func TestK8sRegistry(t *testing.T) {
 	path := writeRegistry(t, k8sYAML)
 	r, err := LoadRegistry(path)
@@ -87,6 +90,10 @@ func TestK8sRegistry(t *testing.T) {
 	if r.K8s.SELinuxType == nil || *r.K8s.SELinuxType != "iormesh_container_t" || p.SELinuxType != nil ||
 		r.Pods[1].SELinuxType == nil || *r.Pods[1].SELinuxType != "" {
 		t.Errorf("selinux_type: k8s %v, entries %v %v", r.K8s.SELinuxType, p.SELinuxType, r.Pods[1].SELinuxType)
+	}
+	if r.K8s.SELinuxLevel == nil || *r.K8s.SELinuxLevel != "s0:c19,c249" || p.SELinuxLevel != nil ||
+		r.Pods[1].SELinuxLevel == nil || *r.Pods[1].SELinuxLevel != "" {
+		t.Errorf("selinux_level: k8s %v, entries %v %v", r.K8s.SELinuxLevel, p.SELinuxLevel, r.Pods[1].SELinuxLevel)
 	}
 	if _, err := r.LookupPod("kind/shop/other"); !errors.Is(err, ErrUnknownPod) {
 		t.Errorf("unknown ref: %v", err)
@@ -129,6 +136,10 @@ func TestK8sRegistryRefusals(t *testing.T) {
 		"bad mode":               {"    mode: sidecar", "    mode: daemonset"},
 		"selinux context":        {"selinux_type: iormesh_container_t", "selinux_type: system_u:system_r:spc_t:s0"},
 		"selinux upper case":     {"selinux_type: \"\"", "selinux_type: Spc_t"},
+		"selinux level range":    {"selinux_level: s0:c19,c249", "selinux_level: s0-s0:c0.c1023"},
+		"selinux level c1024":    {"selinux_level: s0:c19,c249", "selinux_level: s0:c19,c1024"},
+		"selinux level s1":       {"selinux_level: \"\"", "selinux_level: s1"},
+		"selinux level context":  {"selinux_level: \"\"", "selinux_level: system_u:system_r:spc_t:s0"},
 		"bad context":            {"context: ops@prod", "context: -kubeconfig=/x"},
 		"bad cluster name":       {"- name: prod", "- name: Prod_1"},
 		"unknown cluster":        {"  - cluster: prod", "  - cluster: staging"},

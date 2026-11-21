@@ -2,7 +2,8 @@
 // value reaches a kubectl argv (PLAN.md M7, decision #18): namespaces,
 // containers and cluster labels, pod names, kubeconfig contexts, images
 // pinned by digest, the label selectors a registry pods: entry picks
-// pods by, and the SELinux type a minimal-profile tracer runs as. It is its own package because two sides need the same rules:
+// pods by, and the SELinux type and MCS level a minimal-profile tracer
+// runs as. It is its own package because two sides need the same rules:
 // internal/federate validates the registry's k8s: and pods: sections
 // when it loads them, and internal/k8s validates every Target again
 // before it runs kubectl — and internal/k8s imports internal/federate
@@ -11,6 +12,7 @@ package k8sname
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -43,7 +45,35 @@ var (
 	// digits and underscores, nothing that could carry a user, role or
 	// level into seLinuxOptions.
 	selinuxType = regexp.MustCompile(`^[a-z0-9_]{1,128}$`)
+	// selinuxLevel is an MCS level as a pod's label carries one: the
+	// sensitivity s0 alone or with a category pair, each category
+	// c0..c1023 spelled without leading zeros (the policy's names). The
+	// range check and the distinct pair are SELinuxLevel's.
+	selinuxLevel = regexp.MustCompile(`^s0(?::c(0|[1-9][0-9]{0,3}),c(0|[1-9][0-9]{0,3}))?$`)
 )
+
+// maxCategory is the highest MCS category the targeted policy defines
+// (c1023).
+const maxCategory = 1023
+
+// SELinuxLevel reports whether s is an MCS level for a tracer container's
+// seLinuxOptions.level (decision #13, task 8h4): "s0", or "s0:cN,cM" with
+// two distinct categories N, M <= 1023 — the form containerd gives a pod
+// and an owner pins one to. Anything else (a range, a sensitivity above
+// s0, a user or type, a lone category) is refused. The empty string,
+// which omits the level, is the caller's to allow.
+func SELinuxLevel(s string) bool {
+	m := selinuxLevel.FindStringSubmatch(s)
+	if m == nil {
+		return false
+	}
+	if m[1] == "" {
+		return true
+	}
+	n, errN := strconv.Atoi(m[1])
+	k, errK := strconv.Atoi(m[2])
+	return errN == nil && errK == nil && n <= maxCategory && k <= maxCategory && n != k
+}
 
 // SELinuxType reports whether s is an SELinux type name, the value of a
 // tracer container's seLinuxOptions.type (decision #13, task 5h4). The

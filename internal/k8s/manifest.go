@@ -90,7 +90,7 @@ func (m Manifests) Files() (map[string][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	debug, err := json.MarshalIndent(customSpec(ProfileMinimal, DefaultSELinuxType), "", "  ")
+	debug, err := json.MarshalIndent(customSpec(ProfileMinimal, DefaultSELinuxType, DefaultSELinuxLevel), "", "  ")
 	if err != nil {
 		return nil, err
 	}
@@ -133,4 +133,8 @@ const sidecarHeader = generated +
 # The tracer container alone runs as SELinux type spc_t (container_t is
 # denied BPF on an enforcing node) at level s0, so the pod's files it
 # relabels stay open to the app containers, which keep their own label.
+# If the pod pins its MCS level (pod securityContext.seLinuxOptions.level,
+# e.g. s0:c123,c456), set the tracer's level below to that same pair to
+# keep those files at the pod's own pair (iormeshctl deploy -selinux-level
+# does this for a debug tracer; PLAN.md #13).
 `

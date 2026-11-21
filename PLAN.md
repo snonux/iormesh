@@ -2839,8 +2839,16 @@ here only as placeholders.
   other pods — only mount namespaces do, and a hostPath over
   `/var/lib/kubelet/pods` or an escape reaches them; the label
   stays after a debug tracer exits. Advisor confirmed `s0`
-  (2026-11-21); a `-selinux-level` option for owners who pin
-  pod levels is task 8h4. Owner to confirm: `spc_t` and `s0`
+  (2026-11-21). For owners who pin pod levels (task 8h4):
+  `iormeshctl deploy -selinux-level`, or `selinux_level` in the
+  registry's `k8s:` or a pod entry (#18's precedence), sets the
+  level — the pod's own pair, which keeps the shared files at
+  it and so their MCS isolation; default `s0`; a value must be
+  `s0` or `s0:cN,cM` with distinct N, M ≤ 1023; empty omits the
+  level (the type-alone behaviour above); an empty type omits
+  the whole field, level included. The sidecar patch is static
+  at `s0`: its header tells such an owner to edit the level to
+  the pod's pair. Owner to confirm: `spc_t` and `s0`
   as the fleet default, no tenant hostPath to the kubelet
   directories, whether fleet pods pin MCS levels, whether a
   policy RPM is viable, OpenShift (its SCCs) out of scope.
@@ -2952,7 +2960,7 @@ here only as placeholders.
   section of defaults and clusters plus a `pods:` list whose
   entries carry the same `projects:` as a server; flags
   override per run (`-context`, `-namespace`, `-image`,
-  `-selinux-type`, task 5h4). Order:
+  `-selinux-type`, task 5h4; `-selinux-level`, task 8h4). Order:
   flag, then pod entry, then cluster, then the built-in default
   image (ours, pinned by digest). Every kubectl call passes
   `--context` explicitly — the registry, never the kubeconfig's

@@ -37,8 +37,12 @@ type K8s struct {
 	// SELinuxType is the minimal profile's seLinuxOptions.type (decision
 	// #13, task 5h4; internal/k8s DefaultSELinuxType when unset). A
 	// pointer, since an explicit "" is a choice: omit seLinuxOptions.
-	SELinuxType *string   `yaml:"selinux_type,omitempty"`
-	Clusters    []Cluster `yaml:"clusters"`
+	SELinuxType *string `yaml:"selinux_type,omitempty"`
+	// SELinuxLevel is the MCS level beside it (task 8h4; internal/k8s
+	// DefaultSELinuxLevel, s0, when unset): an owner who pins pod levels
+	// passes the pod's pair. A pointer too: "" omits the level.
+	SELinuxLevel *string   `yaml:"selinux_level,omitempty"`
+	Clusters     []Cluster `yaml:"clusters"`
 }
 
 // Cluster is a label for one kubeconfig context and its default
@@ -51,9 +55,8 @@ type Cluster struct {
 
 // Pod is one pods: entry: a pod by name, or the running pods a label
 // selector picks, in a cluster's namespace; the app container kubectl
-// debug targets; optional image, mode, profile and SELinux type over the
-// k8s: ones;
-// and its projects. A project's name may be left out: it is then the
+// debug targets; optional image, mode, profile, SELinux type and level
+// over the k8s: ones; and its projects. A project's name may be left out: it is then the
 // namespace (decision #21, PodProjects).
 type Pod struct {
 	Cluster   string `yaml:"cluster"`
@@ -65,8 +68,11 @@ type Pod struct {
 	Mode      string `yaml:"mode,omitempty"`
 	Profile   string `yaml:"profile,omitempty"`
 	// SELinuxType overrides K8s.SELinuxType for this entry.
-	SELinuxType *string   `yaml:"selinux_type,omitempty"`
-	Projects    []Project `yaml:"projects"`
+	SELinuxType *string `yaml:"selinux_type,omitempty"`
+	// SELinuxLevel overrides K8s.SELinuxLevel for this entry: the pod's
+	// own pinned pair, typically.
+	SELinuxLevel *string   `yaml:"selinux_level,omitempty"`
+	Projects     []Project `yaml:"projects"`
 }
 
 // IsPodRef reports whether a command-line target names a pod entry
@@ -195,7 +201,7 @@ func (r *Registry) validateK8s() error {
 }
 
 func (k *K8s) validate() error {
-	if err := checkPodOptions("k8s:", k.Image, k.Mode, k.Profile, k.SELinuxType); err != nil {
+	if err := checkPodOptions("k8s:", k.Image, k.Mode, k.Profile, k.SELinuxType, k.SELinuxLevel); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
@@ -216,9 +222,10 @@ func (k *K8s) validate() error {
 }
 
 // checkPodOptions checks an image (pinned by digest when set), a mode
-// and a profile (each empty or a known value), and an SELinux type (unset,
-// empty, or a type name).
-func checkPodOptions(where, image, mode, prof string, seType *string) error {
+// and a profile (each empty or a known value), an SELinux type (unset,
+// empty, or a type name) and an MCS level (unset, empty, s0 or
+// s0:cN,cM).
+func checkPodOptions(where, image, mode, prof string, seType, seLevel *string) error {
 	switch {
 	case image != "" && !k8sname.Pinned(image):
 		return fmt.Errorf("%w: %s image %q is not pinned by digest (<repo>@sha256:<64 hex>)", ErrInvalid, where, image)
@@ -228,6 +235,9 @@ func checkPodOptions(where, image, mode, prof string, seType *string) error {
 		return fmt.Errorf("%w: %s profile %q (minimal or privileged)", ErrInvalid, where, prof)
 	case seType != nil && *seType != "" && !k8sname.SELinuxType(*seType):
 		return fmt.Errorf("%w: %s selinux_type %q ([a-z0-9_]+, or empty to omit it)", ErrInvalid, where, *seType)
+	case seLevel != nil && *seLevel != "" && !k8sname.SELinuxLevel(*seLevel):
+		return fmt.Errorf("%w: %s selinux_level %q (s0 or s0:cN,cM with N, M <= 1023, or empty to omit it)",
+			ErrInvalid, where, *seLevel)
 	}
 	return nil
 }
@@ -241,7 +251,7 @@ func (r *Registry) validatePod(p Pod) error {
 	if err := checkPodTarget(where, p, r.PodNamespace(p)); err != nil {
 		return err
 	}
-	if err := checkPodOptions(where+":", p.Image, p.Mode, p.Profile, p.SELinuxType); err != nil {
+	if err := checkPodOptions(where+":", p.Image, p.Mode, p.Profile, p.SELinuxType, p.SELinuxLevel); err != nil {
 		return err
 	}
 	projects := r.PodProjects(p)
