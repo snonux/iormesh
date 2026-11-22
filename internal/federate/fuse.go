@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
+	"math"
 	"slices"
 	"time"
 )
@@ -110,24 +111,73 @@ func unkeyed(h Half) string {
 // fuseGroup fuses within one key's halves. Usually a group is one client
 // and one server; more appear only after an ISN-clock wrap (kept apart
 // by the window) or when something is wrong (reported as ambiguous).
+// A hostile segment can put tens of thousands of halves on one key, so
+// the group is never walked pairwise: candidates only need counting
+// (0, 1 or more), and naming only when there is exactly one.
 func (f *Fusion) fuseGroup(g []Half, window uint64) {
-	candidates := make([][]int, len(g))
-	for i := range g {
-		for j := range g {
-			if g[i].Role != g[j].Role && within(g[i].Established, g[j].Established, window) {
-				candidates[i] = append(candidates[i], j)
-			}
-		}
-	}
+	m := countCandidates(g, window)
 	for i, h := range g {
-		c := candidates[i]
-		switch {
-		case len(c) == 0:
+		switch c := m[i]; {
+		case c.n == 0:
 			f.Unresolved = append(f.Unresolved, Unresolved{h, ReasonNoMatch})
-		case len(c) > 1 || len(candidates[c[0]]) > 1:
+		case c.n > 1 || m[c.only].n > 1:
 			f.Unresolved = append(f.Unresolved, Unresolved{h, ReasonAmbiguous})
 		case h.Role == RoleClient: // a mutual single match, added once
-			f.Conns = append(f.Conns, newConn(h, g[c[0]]))
+			f.Conns = append(f.Conns, newConn(h, g[c.only]))
+		}
+	}
+}
+
+// candidates is how many opposite-role halves of the group lie within
+// the window of one half, and, when n == 1, that one's index in g.
+type candidates struct{ n, only int }
+
+// countCandidates counts every half's candidates in O(n log n) time and
+// O(n) memory: each role's halves sorted by Established, a half's
+// candidates are one contiguous run of the other role's, found by two
+// binary searches. Unkeyed halves are already gone, so a role is client
+// or server.
+func countCandidates(g []Half, window uint64) []candidates {
+	var clients, servers []int
+	for i, h := range g {
+		if h.Role == RoleClient {
+			clients = append(clients, i)
+		} else {
+			servers = append(servers, i)
+		}
+	}
+	byTime := func(a, b int) int { return cmp.Compare(g[a].Established, g[b].Established) }
+	slices.SortFunc(clients, byTime)
+	slices.SortFunc(servers, byTime)
+	m := make([]candidates, len(g))
+	countRun(g, clients, servers, window, m)
+	countRun(g, servers, clients, window, m)
+	return m
+}
+
+// countRun fills m for each half in own from opp, sorted by Established:
+// the run of opp within [t-window, t+window], saturating at both ends of
+// uint64: two halves are candidates when their Established times differ
+// by at most window.
+func countRun(g []Half, own, opp []int, window uint64, m []candidates) {
+	for _, i := range own {
+		t := g[i].Established
+		from := t - min(t, window)
+		to := t + min(window, math.MaxUint64-t)
+		lo, _ := slices.BinarySearchFunc(opp, from, func(j int, v uint64) int {
+			return cmp.Compare(g[j].Established, v)
+		})
+		// n is the run's length: searching opp[lo:], with equal times
+		// counted as smaller, lands just past the last half at exactly to.
+		n, _ := slices.BinarySearchFunc(opp[lo:], to, func(j int, v uint64) int {
+			if g[j].Established <= v {
+				return -1
+			}
+			return 1
+		})
+		m[i] = candidates{n: n}
+		if n > 0 {
+			m[i].only = opp[lo]
 		}
 	}
 }
@@ -147,11 +197,4 @@ func newConn(client, server Half) Conn {
 func hashID(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])[:16]
-}
-
-func within(a, b, window uint64) bool {
-	if a > b {
-		a, b = b, a
-	}
-	return b-a <= window
 }
