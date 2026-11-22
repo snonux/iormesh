@@ -561,18 +561,15 @@ holds `List` only since task hj4.
 
 **Step 2 — narrow the attach set, not the generator** (done).
 The generated handlers stay for all syscalls; only attachment
-narrows. `tracepoints.DefaultSyscalls()` is M1's set —
+narrows. `tracepoints.DefaultSyscalls()` was first M1's set —
 `open`/`openat`/`openat2`, `read`, `write`, `close`, `connect`,
-`accept`/`accept4` — and replaces ior's FS-family fallback in
-`ParseSelectorWithDimensions`, the selector ior already uses for
-`-trace-syscalls`: with no `-trace-*` selector and no `-tps`
-regex (which, as in ior, alone decides then), exactly these
-attach; an explicit selector replaces the set, a `-no-trace-*`
-one narrows it. Nothing attaches yet — the loader is step 5.
-That selector was never wired: the loader attaches
-`bpf.ProbesFor(families)` over `tracepoints.SyscallsFor`
-(`trace_family.go`, decision #7), and task hj4 removed ior's
-selector code.
+`accept`/`accept4` — plugged in as the default of ior's
+`-trace-*`/`-tps` selector. That selector was never wired: the
+loader (step 5) attaches `bpf.ProbesFor(families)` over
+`tracepoints.SyscallsFor` (`trace_family.go`, decision #7), the
+families chosen with `-trace-families`, and task hj4 removed
+ior's selector code. `DefaultSyscalls()` is now the syscalls of
+the default families.
 
 **Step 3 — the target filter becomes a map** (done). ior
 filters on one TGID baked into rodata (`PID_FILTER`). iormesh

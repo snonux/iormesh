@@ -1,7 +1,7 @@
 package tracepoints
 
-// DefaultSyscalls returns the syscalls attached when no -trace-* selector
-// is given: those of DefaultFamilies (decision #7: file and socket on) —
+// DefaultSyscalls returns the syscalls attached when -trace-families is
+// not given: those of DefaultFamilies (decision #7: file and socket on) —
 // M1's walking-skeleton set (PLAN.md, "M1 — Walking skeleton", Probes),
 // M2's file surface (fileSurfaceSyscalls) and the socket calls that carry
 // addresses (socketSyscalls).
