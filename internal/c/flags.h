@@ -2,7 +2,8 @@
 // Changes: PID_FILTER removed; the target set is target_map (maps.h);
 // IORMESH_EXEC_WATCH added (M2 pattern sessions); IORMESH_RW_AGGREGATE added
 // (M2 step 11); IORMESH_NATIVE_STACKS added (M2 step 9); IORMESH_JAVA_MARK
-// added (javamark.c, task td4).
+// added (javamark.c, task td4); the TID_FILTER* and IOR_FILE_IDENT comments
+// say iormesh's loader writes none of them (task gj4).
 
 //+build ignore
 
@@ -11,16 +12,21 @@ const volatile u32 TID_FILTER = -1;
 // The traced processes are not a constant here but target_map (maps.h),
 // which userspace fills.
 //
-// TID_FILTER_TGID is the thread group owning the TID_FILTER thread (resolved
-// by userspace at setup, -1 when no tid filter or unresolvable). It scopes the
-// group-dead sched_process_exit bypass of the tid filter to that one process;
-// see ior_process_exit_in_scope in exec.c.
+// TID_FILTER and TID_FILTER_TGID are ior's -tid filter: the traced thread and
+// the thread group owning it (resolved by ior's userspace at setup, -1 when
+// no tid filter or unresolvable). TID_FILTER_TGID scopes the group-dead
+// sched_process_exit bypass of the tid filter to that one process; see
+// ior_process_exit_in_scope in exec.c. iormesh has no -tid and its loader
+// (internal/bpf/loader.go) writes neither, so both stay -1 and admit every
+// thread.
 const volatile u32 TID_FILTER_TGID = -1;
 // IOR_FILE_IDENT switches the file-identity capture on (1) or off (0); see
-// fileident.c. It is off in the object and switched on by userspace before
-// the load, which is also how userspace knows that the file_ident words of
-// fd_event and ret_event are written at all: an object built before the
-// capture has no such symbol (and leaves those bytes as stale padding).
+// fileident.c. It is off in the object. ior's userspace switches it on before
+// the load, which is also how ior knows that the file_ident words of fd_event
+// and ret_event are written at all: an object built before the capture has
+// no such symbol (and leaves those bytes as stale padding). iormesh's loader
+// never writes it, so the capture stays off; tcpseq.c's use of the same walk
+// does not depend on it (fileident.c).
 const volatile u32 IOR_FILE_IDENT = 0;
 // IORMESH_EXEC_WATCH (1) makes the sched_process_exec handler report every
 // exec of an untraced process with its argv and mark it PENDING in

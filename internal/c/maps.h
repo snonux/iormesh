@@ -4,7 +4,8 @@
 // rw_agg_map, rw_agg_stop and struct iormesh_rw_state added (rwagg.c, M2
 // step 11); stack_map added (stack.c, M2 step 9); java_mark_map and struct
 // iormesh_java_mark added (javamark.c, task td4); restart_pending_map
-// removed with restart.c (task pf4).
+// removed with restart.c (task pf4); event_map's and the sampling map's
+// comments say what iormesh's userspace does with them (task gj4).
 
 //+build ignore
 
@@ -46,11 +47,13 @@ struct {
 } target_map SEC(".maps");
 
 // event_map is the ring buffer carrying every event to userspace. max_entries
-// is its size in BYTES and must stay equal to config.DefaultEventMapSize
-// (internal/config/buffers.go, pinned by TestDefaultEventMapSizeMatchesMapsH):
-// userspace overrides it at load time from -mapSize (resizeBPFMaps), and the
-// default is 16 MiB because a smaller buffer drops events whenever the consumer
-// pauses for more than a fraction of a millisecond under load.
+// is its size in BYTES, and iormesh loads it as written here: its loader
+// (internal/bpf/loader.go) does not resize the map and has no flag for it,
+// so this line is the one place the size is set. (ior overrides it at load
+// time from -mapSize and pins its default to this line with a test; neither
+// was lifted.) It is 16 MiB because a smaller buffer drops events whenever
+// the consumer pauses for more than a fraction of a millisecond under load;
+// such drops are counted (ringbuf_drop_map below).
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
     __uint(max_entries, 1 << 24);
@@ -159,8 +162,10 @@ struct {
 // An array has no "absent" state - an untouched slot reads 0, which as a
 // rate would mean aggregate-only - so a slot stores rate + 1 and 0 means
 // "not configured, use the default rate 1" (ior_sampling_rate decodes it;
-// applySyscallSamplingRates in internal/syscall_aggregate_consumer.go
-// encodes it).
+// ior encodes it in applySyscallSamplingRates,
+// ior internal/syscall_aggregate_consumer.go). iormesh's userspace never
+// writes this map, so every slot reads 0 and every traced syscall runs at
+// the default rate 1.
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, 4096);

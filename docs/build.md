@@ -123,6 +123,19 @@ because only Mage sets `CGO_CFLAGS`/`CGO_LDFLAGS`.
   regeneration.
 - **External object**: `IORMESH_BPF_OBJECT=path.bpf.o` loads that
   object instead of the embedded one.
+- **No load fallback for the typed walk**: `tcpseq.c` walks a
+  descriptor to its socket with `fileident.c`'s typed walk
+  (`bpf_get_current_task_btf`, `bpf_rdonly_cast`) on every kernel
+  that has the kfunc; on one without it the walk is pruned at load
+  and captures nothing. The tracer loads the object once
+  (`internal/bpf/loader.go`) and has no switch that turns the walk
+  off, so a kernel with the kfunc whose verifier rejects the walk
+  fails the whole load. ior's second load without its identity
+  capture (`loadWithIdentFallback`) was not lifted, and iormesh
+  leaves `IOR_FILE_IDENT` at 0, so that capture is off anyway. The
+  walk is verified to load on Linux 7.2 and on Rocky 9.9's el9
+  5.14 kernel (PLAN.md, task nf4); a rejection elsewhere is a
+  defect to fix in the walk, as PLAN.md says of el9 load failures.
 - **`//nolint` is banned** (`internal/buildgate`): a deliberate
   discard is an explicit `_ =`; an exemption goes into
   `.golangci.yml` with its reasoning.

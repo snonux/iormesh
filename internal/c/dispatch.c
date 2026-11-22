@@ -53,7 +53,11 @@
 
 // syscall_enter_progs and syscall_exit_progs are the tail-call tables,
 // indexed by syscall number; userspace stores the generated handlers' fds in
-// the slots of the traced syscalls, the exit slot first.
+// the slots of the traced syscalls, each syscall's enter slot before its exit
+// slot (ProbesFor's order, internal/bpf/attach.go). The order does not matter:
+// the dispatchers attach only after every slot is filled, exit dispatcher
+// first (internal/bpf/dispatch.go), so no enter is recorded whose exit could
+// not be.
 struct {
     __uint(type, BPF_MAP_TYPE_PROG_ARRAY);
     __uint(max_entries, IORMESH_SYSCALL_SLOTS);

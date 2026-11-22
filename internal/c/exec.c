@@ -11,7 +11,8 @@
 // (targethint.c, task 9f4); ior_exit_group_dead's verification note names
 // the root test that runs both of its paths (task nf4); the restart fold's
 // ior_restart_forget is gone with restart.c (task pf4); task_rename's comments
-// say how iormesh attaches and consumes it (task 0g4).
+// say how iormesh attaches and consumes it (task 0g4); comments that cited
+// ior's Go files and tests name them as ior's or iormesh's own (task gj4).
 
 //+build ignore
 
@@ -20,8 +21,9 @@
  * tracepoints: sched_process_exec, sched_process_exit, task_newtask and
  * task_rename.
  *
- * Why sched_process_exec exists: the comm shown for a syscall used to come from an
- * asynchronous /proc/<tid>/comm read (internal/eventloop_comm.go). A task that
+ * Why sched_process_exec exists (ior's reasoning, kept with the handler): the
+ * comm ior showed for a syscall used to come from an asynchronous
+ * /proc/<tid>/comm read (ior internal/eventloop_comm.go). A task that
  * forks and then execve()s keeps its tid across the exec, so a lookup that
  * landed in the post-fork/pre-exec window cached the *old* program name for
  * that tid and nothing ever invalidated it. The earliest post-exec syscalls -
@@ -332,9 +334,11 @@ int handle_sched_process_exec(struct trace_event_raw_sched_process_exec *ctx) {
 //
 // sched:sched_process_exit fires per exiting *task* (thread) and carries the
 // task in context, so this handler emits a small control record with the tgid,
-// the tid and a group_dead flag (internal/eventloop_processexit.go consumes
-// it). Per-task firing is exactly right for the tid-keyed userspace state (comm
-// cache, parked enters, pending handles), but the fd table belongs to the
+// the tid and a group_dead flag (iormesh's correlator consumes it in exitTask,
+// internal/correlate/lifecycle.go; ior's event loop in
+// ior internal/eventloop_processexit.go). Per-task firing is exactly right
+// for the tid-keyed userspace state (comm cache, parked enters, pending
+// handles), but the fd table belongs to the
 // whole thread group: a thread dying while its siblings live must not evict
 // the process's descriptors. Doing so used to push every later syscall on
 // them through the /proc/<pid>/fd fallback, which renames the same descriptor
@@ -387,10 +391,13 @@ struct trace_event_raw_sched_process_exit___ior {
 // reads its own decrement, so at least one exit record of a group carries
 // group_dead = 1. Two threads exiting concurrently can both observe 0 and
 // both report it (the earlier thread fires its tracepoint after the later
-// one's decrement). Userspace eviction is idempotent and the group-dead
-// counter drops the duplicate (see isDuplicateGroupDead). A failed read (NULL
-// signal) reports 0 rather than guessing: the fd entries then linger until LRU
-// trimming, the same outcome as a record lost to ring-buffer backpressure.
+// one's decrement). Both userspaces take the duplicate: in iormesh the second
+// record finds the process already marked dead and changes nothing (markDead,
+// internal/correlate/reap.go); ior's group-dead counter drops it
+// (isDuplicateGroupDead). A failed read (NULL signal) reports 0 rather than
+// guessing: the process then stays live until its pid's next owner or the
+// session's end, the same outcome as a record lost to ring-buffer
+// backpressure.
 //
 // Verification status: TestProcessExitGroupDead (internal/exit_root_test.go,
 // `mage bpfRootTest`) runs both paths: the field on the 7.2 development
@@ -427,8 +434,10 @@ ior_exit_group_dead(void *raw_ctx) {
 // thread.
 //
 // The bypass is scoped to TID_FILTER_TGID, the traced thread's process, which
-// userspace resolves at setup (the target when -pid is also given, else
-// /proc/<tid>/status; see tidFilterTgid in internal/bpfsetup.go). An unscoped
+// ior's userspace resolves at setup (the target when -pid is also given, else
+// /proc/<tid>/status; tidFilterTgid in ior internal/bpfsetup.go). iormesh has
+// no -tid and never writes TID_FILTER or TID_FILTER_TGID
+// (internal/bpf/loader.go), so both stay -1 and the bypass never applies. An unscoped
 // bypass would emit a record for every process death on the system under
 // -tid without -pid. When the tgid is unresolved (-1) no pid matches, so
 // there is no bypass at all. group_dead is only read once the pid matched,
@@ -512,10 +521,11 @@ struct signal_struct___ior_exit {
 // the dumping thread's group-dead record, or on the liveness watcher about a
 // second later (two polls). Follow-up task gz2 tracks it.
 //
-// Verification status: the group_exec_task path is exercised by the
-// integration test TestHeadlessTidLeaderRunSurvivesANonLeaderExec on the 7.2
-// development host; the group_exit_task path compiles to a valid CO-RE
-// relocation but has not been run on an old kernel.
+// Verification status: in ior, the group_exec_task path is exercised by
+// ior's TestHeadlessTidLeaderRunSurvivesANonLeaderExec integration test on
+// the 7.2 development host; iormesh has no -tid run, so nothing here runs
+// it. The group_exit_task path compiles to a valid CO-RE relocation but has
+// not been run on an old kernel.
 static __always_inline __u32
 ior_exit_tid_inherited(__u32 pid, __u32 tid) {
     struct task_struct *task;

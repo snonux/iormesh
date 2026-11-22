@@ -5,7 +5,8 @@
 // folded reads and writes first (iormesh_rw_flush, rwagg.c, M2 step 11);
 // filter() takes the pid and tid in the tracer's PID namespace (pidns.c, M7);
 // the target-set tests ask the target hint first (targethint.c, task 9f4);
-// the restart fold's hooks are gone with restart.c (task pf4).
+// the restart fold's hooks are gone with restart.c (task pf4); comments that
+// cited ior's userspace name it as ior's (task gj4).
 
 //+build ignore
 
@@ -38,8 +39,10 @@ static __always_inline int ior_is_restart_ret(__s64 ret) {
 
 // True for a failure the program can observe: an errno in the kernel window,
 // minus the restart codes above (an interruption, not an error). The
-// aggregate's errors field must agree with the userspace is_error/error-count
-// rule (event.IsErrorRet in internal/event/return.go).
+// aggregate's errors field must agree with ior's userspace
+// is_error/error-count rule (event.IsErrorRet in
+// ior internal/event/return.go). iormesh does not read syscall_aggregate_map; the rule is kept so the map
+// means what it means in ior.
 static __always_inline int ior_is_errno_ret(__s64 ret) {
     return ret >= -IOR_MAX_ERRNO && ret < 0 && !ior_is_restart_ret(ret);
 }
@@ -144,9 +147,11 @@ static __always_inline void ior_update_syscall_aggregate(__u32 enter_trace_id, _
         bucket_idx = IOR_HISTOGRAM_BUCKETS - 1;
 
     if (existing) {
-        // Store order matters. Userspace reads this CPU's slot while it may
-        // be half-updated, and derives the untimed part of count as count
-        // minus the histogram total (internal/syscall_aggregate_consumer.go).
+        // Store order matters. ior's userspace reads this CPU's slot while it
+        // may be half-updated, and derives the untimed part of count as count
+        // minus the histogram total
+        // (ior internal/syscall_aggregate_consumer.go; iormesh has no
+        // reader of this map).
         // The kernel copies a slot to userspace in ascending address order,
         // and count is the first field of struct syscall_aggregate (maps.h),
         // so count is read first; storing it last means a torn read can only
@@ -190,11 +195,11 @@ static __always_inline void ior_update_syscall_aggregate(__u32 enter_trace_id, _
 // sampling decision survives until sys_exit, and it counts the sampled-out
 // enters of noreturn syscalls, which have no duration at all
 // (ior_on_noreturn_syscall_enter). The row's latency fields and
-// histogram keep describing the timed invocations only, so userspace sees
+// histogram keep describing the timed invocations only, so a reader sees
 // count > sum(histogram) and must not take min/max from a row without
 // histogram samples (rawSyscallAggregate.add in
-// internal/syscall_aggregate_consumer.go). Errors of untimed invocations are
-// unknown and not counted.
+// ior internal/syscall_aggregate_consumer.go). Errors of untimed invocations
+// are unknown and not counted.
 static __always_inline void ior_count_untimed_syscall(__u32 enter_trace_id) {
     struct syscall_aggregate *existing;
     struct syscall_aggregate fresh = {};
@@ -475,8 +480,8 @@ static __always_inline int ior_on_syscall_exit_impl(__u32 tid, __u32 enter_trace
     // A completed invocation always has a duration of at least 1ns in the
     // aggregate. A coarse clocksource can return the same reading at enter
     // and exit, but a 0 duration would leave min_duration_ns/max_duration_ns
-    // at 0, which userspace reserves for "first timed sample still being
-    // written" (normalizeTornSlot in internal/syscall_aggregate_consumer.go)
+    // at 0, which ior's reader reserves for "first timed sample still being
+    // written" (normalizeTornSlot, ior internal/syscall_aggregate_consumer.go)
     // and would then drop the slot's latency for the rest of the session.
     // The clamp also covers a start timestamp ahead of now.
     duration = now > state->start_ns ? now - state->start_ns : 1;
@@ -689,9 +694,10 @@ static __always_inline void ior_on_exec_exit_unseen(__u32 tid) {
 // decided to emit the event; its exit handler takes the pointer the same way
 // (ior_on_syscall_exit_take_filename) but emits the fixup only when
 // ctx->ret > 0, because a failed getcwd wrote nothing into the buffer.
-// Userspace attaches that string to the pending pair instead of splicing it
-// into the (header-only) enter event (applyCapturedOutputPath /
-// finishGetcwdPath, internal/eventloop_getcwd.go).
+// ior's userspace attaches that string to the pending pair instead of
+// splicing it into the (header-only) enter event (applyCapturedOutputPath /
+// finishGetcwdPath, ior internal/eventloop_getcwd.go); iormesh's getcwd is
+// outside its traced families (internal/tracepoints).
 
 // ior_stash_pending_filename records filename_ptr on this tid's in-flight
 // syscall state so the matching exit handler can read the string there. The
@@ -755,8 +761,10 @@ static __always_inline void ior_stash_pending_filename2(__u32 tid, __u64 filenam
 // (writeStringMethod in internal/generate/typesgo.go). Only the test-only
 // Equals() still compares whole arrays. The generator tests pin the BPF shape
 // (internal/generate/stringterminator_test.go) and userspace tests pin that
-// garbage after the NUL cannot change a row or a warning
-// (internal/eventloop_stringtail_test.go, internal/types/stringtail_test.go).
+// garbage after the NUL cannot change a decoded string
+// (internal/types/stringtail_test.go; ior also pins its rows in
+// ior internal/eventloop_stringtail_test.go). In iormesh the reader is the
+// tracer (internal/bpf), which maps the ring the same way.
 
 // ior_emit_name_fixup reads the identifying string at sys_exit - a second
 // read of a faulted path, or the first read of getcwd's output buffer, which

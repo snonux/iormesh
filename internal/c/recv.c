@@ -1,5 +1,5 @@
 // Adapted from ior internal/c/recv.c @ b21afc50328c.
-// Changes: none.
+// Changes: the bytesFromRet reference names ior's file (task gj4).
 
 //+build ignore
 
@@ -15,8 +15,9 @@
 // The iovec array of a recvmsg is summed for at most this many entries. Eight
 // is the kernel's own on-stack fast path (UIO_FASTIOV) and covers every
 // receive loop libnl, systemd and libpcap issue; a caller with more entries
-// makes the capacity unknown rather than partially counted, which userspace
-// resolves conservatively (see bytesFromRet in internal/eventloop_exit.go).
+// makes the capacity unknown rather than partially counted, which ior's
+// userspace resolves conservatively (bytesFromRet in
+// ior internal/eventloop_exit.go).
 #define IOR_RECVMSG_MAX_IOV 8
 
 // The kernel's MAX_RW_COUNT (INT_MAX & PAGE_MASK for 4 KiB pages): the most a

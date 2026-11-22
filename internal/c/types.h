@@ -10,7 +10,8 @@
 // (javamark.c, task td4); TCP_SEQ_EVENT and struct tcp_seq_event added
 // (tcpseq.c, task xe4); SYSCALL_RESTART_EVENT's comments say no program
 // emits it (task pf4); TCP_STATE_FINAL added (sock.c, task sf4);
-// task_rename_event's comment names its consumer (task 0g4).
+// task_rename_event's comment names its consumer (task 0g4); comments that
+// cited ior's Go files name them as ior's (task gj4).
 
 //+build ignore
 
@@ -468,11 +469,11 @@ struct open_by_handle_at_event {
 // file_handle_event is a control record, not a syscall event: the exit handler
 // of name_to_handle_at emits it after a successful return, with the handle the
 // kernel wrote into the caller's buffer, and reserves it before the exit
-// record of the same call (ior_emit_file_handle, handle.c). Userspace files
-// the pathname of the still-pending enter under that handle, so that an
+// record of the same call (ior_emit_file_handle, handle.c). ior's userspace
+// files the pathname of the still-pending enter under that handle, so that an
 // open_by_handle_at carrying the same handle - on any thread or process - can
-// be named (handleFileHandleEvent, internal/eventloop_handle.go). It is never
-// rendered as a row.
+// be named (handleFileHandleEvent, ior internal/eventloop_handle.go); iormesh
+// decodes the record but does not use it yet. It is never rendered as a row.
 //
 // trace_id is the ENTER trace ID of the call (SYS_ENTER_NAME_TO_HANDLE_AT).
 // The record names both ends of its call by their clock reads, because
@@ -537,9 +538,10 @@ struct file_handle_event {
 // of io_uring_register emits it for the two opcodes above after a return
 // that processed at least one entry, ahead of the call's exit record and
 // whether or not the sampling rate emits that one (ior_emit_ring_fds,
-// iouring.c). It is never rendered as a row; userspace applies it to the
-// registered-ring table of the thread tid (handleRingFdsEvent,
-// internal/eventloop_ringfds.go).
+// iouring.c). It is never rendered as a row; ior's userspace applies it to
+// the registered-ring table of the thread tid (handleRingFdsEvent,
+// ior internal/eventloop_ringfds.go); iormesh decodes the record but does
+// not use it yet.
 //
 // trace_id is the ENTER trace ID of the call (SYS_ENTER_IO_URING_REGISTER),
 // opcode the io_uring_register opcode without the
@@ -572,7 +574,8 @@ struct ring_fds_event {
 // (ior_emit_fd_name_enter in fdname.c, task xz2): userspace cannot ask procfs
 // about a descriptor that is closed by the time its row is processed, so the
 // close of a descriptor ior never saw opened had no name at all
-// (internal/eventloop_procfs_close.go). Every other close - a pipe, a
+// (ior internal/eventloop_procfs_close.go). iormesh leaves IOR_FILE_IDENT
+// off (flags.h), so its runs send none. Every other close - a pipe, a
 // socket, an anonymous-inode file, the root of a mount (the root directory
 // of a filesystem, a mounted subvolume, a bind-mounted directory or single
 // file: its dentry is named after its source, not after what was opened),
@@ -965,7 +968,7 @@ struct task_rename_event {
 // (-512/-513/-514/-516), so userspace can fold the interrupted row and the
 // kernel's continuation of the call - its re-execution, or for -516 its
 // restart_syscall - into one row (tasks 103 and t13,
-// internal/eventloop_restart.go). It is never rendered as a row.
+// ior internal/eventloop_restart.go). It is never rendered as a row.
 //
 // phase says which of two things happened:
 //   - RESTART_PHASE_HANDLER: the signal:signal_deliver probe saw the first

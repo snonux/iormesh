@@ -1,5 +1,6 @@
 // Adapted from ior internal/c/fdname.c @ b21afc50328c.
-// Changes: none.
+// Changes: comments say where ior's userspace is meant and that iormesh
+// leaves IOR_FILE_IDENT off (task gj4).
 
 //+build ignore
 
@@ -9,11 +10,11 @@
 // Userspace names a descriptor from the calls it traced (the fd table) or
 // from /proc/<pid>/fd. A descriptor that was opened before the trace began,
 // or by a call outside the trace set, has no table entry, and for its close
-// procfs is of no use: the event loop gets to the row after the kernel
-// released the descriptor (internal/eventloop_procfs_close.go, task jr2). The
-// only place that still sees the file is the sys_enter_close program, which
-// runs before the close takes effect. So that handler says what the file is
-// called.
+// procfs is of no use: ior's event loop gets to the row after the kernel
+// released the descriptor (ior internal/eventloop_procfs_close.go, task
+// jr2). The only place that still sees the file is the sys_enter_close
+// program, which runs before the close takes effect. So that handler says
+// what the file is called.
 //
 // What is captured is the dentry's own name - the last path component,
 // "foo.log" of /var/log/foo.log - and nothing above it:
@@ -64,9 +65,10 @@
 // and therefore the same kfunc, and IOR_FILE_IDENT switches both. A kernel
 // without the kfunc, an object built before this file, and a run with
 // IOR_FILE_IDENT=0 send no such record, and userspace then leaves those rows
-// unnamed as before. The record has an event type of its own, so unlike the
-// identity word it needs no capability flag: a record that is not sent is
-// not read.
+// unnamed as before. iormesh never switches IOR_FILE_IDENT on (flags.h), so
+// its runs send none; the handler is kept as lifted from ior. The record
+// has an event type of its own, so unlike the identity word it needs no
+// capability flag: a record that is not sent is not read.
 //
 // The name is copied with bpf_probe_read_kernel, d_name.len bytes of it (at
 // most what the record holds), and terminated by the handler. Not
