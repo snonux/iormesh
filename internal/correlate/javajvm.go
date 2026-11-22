@@ -112,8 +112,10 @@ func newJVM(r AgentRing, pid uint32, start, createdMono, created uint64) *jvm {
 
 // owns says whether ev is of this ring's process, not of an earlier or
 // later one with the same pid. The start times come from the same /proc
-// field; when the JVM was gone before its ring was opened (start 0) the
-// ring's creation time decides.
+// field. A ring whose start was unknown when it was opened (start 0) is
+// never trusted (isTraced, task yi4), so an accepted ring always takes
+// the first branch; the creation-time fallback below is kept only as
+// the conservative answer for a jvm built outside that path.
 func (v *jvm) owns(ev *schema.Event) bool {
 	if v.start != 0 {
 		return v.start == ev.PIDInc
