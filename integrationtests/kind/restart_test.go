@@ -192,14 +192,18 @@ type stateJSON struct {
 	} `json:"terminated"`
 }
 
-// killAppInit SIGKILLs the app container's init (sleep) from the kind
-// node, as a crash or an OOM kill would end it: a process inside the
-// container's PID namespace cannot kill its init. The kubelet restarts
-// the container.
+// killAppInit SIGKILLs the app container's init (sleep), as a crash or
+// an OOM kill would end it: a process inside the container's PID
+// namespace cannot kill its init. On kind it kills the pid `crictl
+// inspect` names from the node container; on an existing cluster, where
+// there is no node container but the operator's crictl prefix
+// (IORMESH_K8S_CRICTL, task si4), through that prefix alone
+// (crictlKill). The kubelet restarts the container. Without either the
+// test skips, which fails mage k8sDebugRestart (gatecmd.KindTestsVerdict).
 func (c *cluster) killAppInit(t *testing.T, pod string) {
 	t.Helper()
-	if c.cfg.node == "" || len(c.cfg.crictl) == 0 {
-		t.Skipf("%s unset: no kind node to kill the app container's init from", envNode)
+	if len(c.cfg.crictl) == 0 {
+		t.Skipf("%s and %s unset: no node to kill the app container's init from", envNode, envCrictl)
 	}
 	p := c.pod(t, "server")
 	i := slices.IndexFunc(p.Status.Ctrs, func(s containerStatus) bool { return s.Name == "app" })
@@ -207,6 +211,10 @@ func (c *cluster) killAppInit(t *testing.T, pod string) {
 		t.Fatalf("pod %s: no app container status", pod)
 	}
 	id := strings.TrimPrefix(p.Status.Ctrs[i].ContainerID, "containerd://")
+	if c.cfg.node == "" {
+		c.crictlKill(t, id)
+		return
+	}
 	argv := append(slices.Clone(c.cfg.crictl), "inspect", "-o", "json", id)
 	out, err := exec.Command(argv[0], argv[1:]...).Output()
 	var v struct {
@@ -225,6 +233,22 @@ func (c *cluster) killAppInit(t *testing.T, pod string) {
 		t.Fatalf("kill %d on the node: %v\n%s", v.Info.Pid, err, out)
 	}
 	t.Logf("SIGKILLed the app container's init (node pid %d)", v.Info.Pid)
+}
+
+// crictlKill SIGKILLs container id's init through the crictl prefix
+// alone: `crictl stop --timeout 0` skips the stop signal and the grace
+// period, so containerd sends SIGKILL at once, as killAppInit's kill on
+// kind's node does. The prefix (`ssh root@node k3s crictl`) runs crictl
+// only, so a pid from `crictl inspect` could not be killed through it.
+func (c *cluster) crictlKill(t *testing.T, id string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	argv := append(slices.Clone(c.cfg.crictl), "stop", "--timeout", "0", id)
+	if out, err := exec.CommandContext(ctx, argv[0], argv[1:]...).CombinedOutput(); err != nil {
+		t.Fatalf("crictl stop --timeout 0 %s: %v\n%s", id, err, out)
+	}
+	t.Logf("SIGKILLed the app container's init (crictl stop --timeout 0 %s)", id)
 }
 
 // waitTracerEnded waits until pod's ephemeral tracer name terminated

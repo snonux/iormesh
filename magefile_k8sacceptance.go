@@ -23,8 +23,10 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -37,6 +39,7 @@ import (
 	"github.com/magefile/mage/mg"
 	"github.com/magefile/mage/sh"
 
+	"iormesh/internal/gatecmd"
 	"iormesh/internal/kindrun"
 )
 
@@ -72,12 +75,28 @@ func K8sAcceptance() error {
 // debug tracer with the agent dies with its app container's init, deploy
 // starts iormesh-2, and collect gets both sessions' segments. Same
 // setup, environment and teardown as K8sAcceptance, which it shares;
-// kube-proxy's mode does not matter here and is left as it is.
+// kube-proxy's mode does not matter here and is left as it is. On an
+// existing cluster the test kills the init through IORMESH_K8S_CRICTL;
+// without it the test skips and the target fails (kindGoTest).
 func K8sDebugRestart() error {
 	return kindRun("k8sDebugRestart", func(env map[string]string, _ bool) error {
-		return sh.RunWithV(env, "go", "test", "./integrationtests/kind/", "-count=1", "-v",
-			"-timeout=20m", "-run=^TestKindDebugRestart$")
+		return kindGoTest(env, "20m", "TestKindDebugRestart")
 	})
+}
+
+// kindGoTest runs one test of ./integrationtests/kind with -v and judges
+// it by what it reported, not by go test's exit status alone: a skipped
+// test or subtest, or a test that never reported PASS, exits 0 too, and
+// fails the target here (gatecmd.KindTestsVerdict, task si4), as `mage
+// integrationTest` does.
+func kindGoTest(env map[string]string, timeout, test string) error {
+	var output bytes.Buffer
+	w := io.MultiWriter(os.Stdout, &output)
+	if _, err := sh.Exec(env, w, w, "go", "test", "./integrationtests/kind/", "-count=1", "-v",
+		"-timeout="+timeout, "-run=^"+test+"$"); err != nil {
+		return err
+	}
+	return gatecmd.KindTestsVerdict(output.String(), test)
 }
 
 // kindRun is the body K8sAcceptance and K8sDebugRestart share: skip
@@ -286,12 +305,11 @@ func kindUp(r shRunner, c kindrun.Config) (map[string]string, error) {
 // kindTests runs the suite under iptables, then the ClusterIP join under
 // nftables. An existing cluster's kube-proxy is not kind's daemonset
 // (k3s embeds it), so there both run in the cluster's own mode, and the
-// operator reruns after switching it.
+// operator reruns after switching it. Each run fails on a skip or a test
+// not reported as passed (kindGoTest): on an existing cluster without
+// IORMESH_K8S_CRICTL the SIGTERM check skips, and the target fails.
 func kindTests(env map[string]string, existing bool) error {
-	run := func(test string) error {
-		return sh.RunWithV(env, "go", "test", "./integrationtests/kind/", "-count=1", "-v",
-			"-timeout=40m", "-run=^"+test+"$")
-	}
+	run := func(test string) error { return kindGoTest(env, "40m", test) }
 	if existing {
 		fmt.Println("NOTICE existing cluster: kube-proxy's mode is the cluster's own, not switched")
 		return errors.Join(run("TestKindAcceptance"), run("TestKindClusterIP"))

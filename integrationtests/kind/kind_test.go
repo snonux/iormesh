@@ -23,7 +23,8 @@ type config struct {
 	// crictl is the argv prefix that runs crictl on the node: on kind
 	// `sudo -n docker exec <node> crictl`, on an existing cluster the
 	// operator's (IORMESH_KIND_CRICTL, say `ssh root@node k3s crictl`,
-	// task zg4). Empty skips the SIGTERM check.
+	// task zg4). Empty skips the SIGTERM check and the restart test's
+	// kill, and a skip fails the mage targets (task si4).
 	crictl []string
 	// seType and seLevel are the tracer's SELinux type and level:
 	// k8s.DefaultSELinuxType and DefaultSELinuxLevel (spc_t at s0) unless
