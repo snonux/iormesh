@@ -53,8 +53,11 @@ truth.
   files directly in `ready/` are taken, never a subdirectory or
   a dot file. A file over 1 GiB is skipped (`--max-size`, the
   cap the pod path's fetch stream applies per file), so one
-  segment cannot fill the controller's disk; it stays on the
-  server and `iormeshctl rm` lists it as a leftover (task gi4).
+  oversized segment cannot fill the controller's disk; it stays
+  on the server and `iormeshctl rm` lists it as a leftover (task
+  gi4). rsync checks the size the server's own rsync declares,
+  so this bounds a server's files, not a server whose rsync
+  binary lies; there is no cap on total bytes per collect yet.
   Each host gets its own directory
   (`~/.local/share/iormesh/traces/<project>/<host>/`), so one
   server cannot overwrite another's segments by naming files

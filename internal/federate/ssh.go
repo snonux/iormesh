@@ -190,10 +190,13 @@ func (s SSH) Fetch(ctx context.Context, remoteDir, localDir string) error {
 //   - --timeout (rsyncTimeout): give up once no data has moved for that
 //     long, however long the transfer itself takes;
 //   - --remove-source-files: delete a remote file once transferred;
-//   - --max-size (maxFetchSize): skip a file over the cap, so a hostile
-//     server cannot fill the controller's disk with one segment; a
+//   - --max-size (maxFetchSize): skip a file over the cap, so one
+//     oversized segment in ready/ cannot fill the controller's disk; a
 //     skipped file is not transferred, so --remove-source-files leaves
-//     it on the server, where `iormeshctl rm` reports it as a leftover;
+//     it on the server, where `iormeshctl rm` reports it as a leftover.
+//     The cap is checked against the size the server's rsync declares,
+//     so it bounds the server's files, not a server whose rsync binary
+//     itself lies (the pod path counts the bytes it receives instead);
 //   - --exclude=.*: never a dot file — the tracer publishes none, and in
 //     the local store dot files are rsync's own in-flight temporaries,
 //     which the build skips;
