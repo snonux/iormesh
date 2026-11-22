@@ -102,7 +102,8 @@ func (p *procState) openCloexec(fd int32, flags int32) {
 }
 
 // forked gives a traced process's new child (newTask) a copy of the
-// parent's fd table and records the fork as a forked edge, which the
+// parent's fd table — and in a pod its container (inheritPod, task
+// sh4) — and records the fork as a forked edge, which the
 // normalizer's bracket cut follows. creator is the clone caller's tgid, 0
 // when the record could not say. The copy keeps the parent's generations
 // and lastGen: an inherited fd is the parent's instance, seen from a new
@@ -120,6 +121,7 @@ func (c *Correlator) forked(creator uint32, child *procState, pid uint32) (*proc
 	}
 	parent := c.proc(creator)
 	child.inherit(parent)
+	c.inheritPod(child, parent)
 	c.graph.forked(creator, parent.inc, pid, child.inc)
 	return parent, true
 }

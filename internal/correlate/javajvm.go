@@ -105,10 +105,13 @@ type jvm struct {
 	// MONOTONIC, 0: none; task wd4 review round 2): java.net.http client
 	// requests completing from then on get no req_seq.
 	asyncFrom uint64
-	// comm and inc are the JVM's as its last joined event carried them,
-	// for its http events' envelope.
+	// comm, inc and pod are the JVM's as its last joined event carried
+	// them, for its http and dns events' envelope (pod: task sh4; the
+	// correlator's shared, never-changed object, so keeping the pointer
+	// is safe).
 	comm string
 	inc  uint64
+	pod  *schema.Pod
 	// exited is when the process's thread group died (boot clock, 0:
 	// alive), as JavaJoin.Exited reported it; retire then closes and
 	// removes the ring once nothing can ask for it any more.

@@ -331,6 +331,23 @@ Collect often. Segments still in a pod are lost when the pod
 goes, and a full trace volume stops tracing until collect drains
 it.
 
+Every event of a pod's tracer names its namespace, pod and the
+container its process runs in (the `pod` object,
+[schema.md](schema.md#pod-fields-on-events-m7)), so in sidecar
+mode the app's, a sidecar's and the tracer's own processes are
+told apart. To look at one namespace:
+
+```
+iormeshctl build -namespace prod   # only pods in prod
+iormeshctl show services -namespace prod
+```
+
+The build keeps the sessions of pods in `prod` (hosts outside a
+pod are left out) and the services and edges their connections
+make, and writes `<projects>@prod/` next to the unfiltered build.
+`refresh` does not take it: its `-namespace` is the kubectl
+namespace of the collect.
+
 ## Limits you will hit
 
 - **A debug tracer dies with its app container.** A crash, OOM

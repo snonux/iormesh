@@ -353,7 +353,7 @@ func (j *JavaJoin) httpEvent(h pendingHTTP) (schema.Event, error) {
 	ev := schema.Event{SchemaVersion: schema.Version, Project: j.project, HostID: j.hostID,
 		BootNS: h.boot, WallNS: uint64(int64(h.boot) + j.wallOff), PID: v.pid,
 		PIDInc: v.incarnation(), TID: uint32(r.KTID), Comm: v.comm, Event: schema.KindHTTP,
-		FD: schema.NoFD, Attribution: schema.AttributionNone}
+		FD: schema.NoFD, Attribution: schema.AttributionNone, Pod: j.podOf(v)}
 	ev.HTTP = &schema.HTTP{Method: r.Method, Scheme: r.Scheme, Host: r.Host,
 		Path: j.policy.URL(r.Path), Status: uint16(min(r.Status, 999)), Version: r.Version,
 		ReqHeaders: j.headers(r.ReqHeaders), RespHeaders: j.headers(r.RespHeaders),
@@ -505,12 +505,26 @@ func (j *JavaJoin) headers(hs []string) []string {
 	return out
 }
 
+// podOf is the pod object of a JVM's http or dns event (task sh4): its
+// last joined event's, which names its container, or before it had one
+// the pod alone, as a host-level event of the stream carried it. nil
+// outside a pod.
+func (j *JavaJoin) podOf(v *jvm) *schema.Pod {
+	if v.pod != nil {
+		return v.pod
+	}
+	return j.hostPod
+}
+
 // seen takes what the http events borrow from the stream as ev passes:
-// the envelope's project, host and clock offset, the latest completion
+// the envelope's project, host, pod and clock offset, the latest completion
 // time, the socket ends of a socket event and its thread's call on its
 // connection.
 func (j *JavaJoin) seen(ev *schema.Event) {
 	j.project, j.hostID = ev.Project, ev.HostID
+	if ev.PID == 0 {
+		j.hostPod = ev.Pod // the pod alone (task sh4): the session header's
+	}
 	if ev.WallNS != 0 {
 		j.wallOff = int64(ev.WallNS) - int64(ev.BootNS)
 	}

@@ -92,8 +92,9 @@ the plan is the source of truth.
 - **Pod-aware identity** — under Kubernetes, an in-pod tracer
   describes its pod as the host (`host_id` `pod-<uid>`, pids in
   the pod's PID namespace; [schema.md](schema.md#pods-as-hosts-m7)).
-  Pod, namespace and container fields on events are planned
-  (task sh4).
+  Every event carries the optional `pod` object: namespace, pod
+  name and the container id (task sh4;
+  [schema.md](schema.md#pod-fields-on-events-m7)).
 - **Project-scoped** — every session belongs to a named project;
   traces live under `/opt/iormesh/traces/<project>/`, and
   cross-project connections render as explicit edges in the

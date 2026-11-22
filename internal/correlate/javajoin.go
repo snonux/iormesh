@@ -104,6 +104,7 @@ type JavaJoin struct {
 	policy  redact.Policy
 	project string
 	hostID  string
+	hostPod *schema.Pod // the pod alone, from the stream's pid-0 events (task sh4)
 	wallOff int64
 	maxEnd  uint64
 	seq     uint64 // the last seq emitted
@@ -463,7 +464,7 @@ func (j *JavaJoin) releaseHeld(force bool) error {
 // joinable) and emits it.
 func (j *JavaJoin) decide(ev *schema.Event, v *jvm) error {
 	if v != nil {
-		v.comm, v.inc = ev.Comm, ev.PIDInc
+		v.comm, v.inc, v.pod = ev.Comm, ev.PIDInc, ev.Pod
 		if err := j.attribute(ev, v); err != nil {
 			return err
 		}

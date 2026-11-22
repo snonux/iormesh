@@ -5596,7 +5596,7 @@ depends on:
    step makes process ids pod-unique: since step 1 pids are the
    pod's, so `proc:<host_id>/<pid>@<inc>` with the node's
    `host_id` could collide across two pods of one node.
-   Built (task vb4), not yet wired into records:
+   Built (task vb4), wired into records by task sh4 (below):
    `k8s.ParseProcCgroup` and `ParseCgroupPath` return pod UID,
    container id, runtime and QoS class for the systemd and
    cgroupfs drivers (containerd, CRI-O, cri-dockerd; kind's
@@ -5619,6 +5619,22 @@ depends on:
    `TestParseProcCgroupKindCaptures` — from the host, from the
    node, the tracer's own, and the tracer seen from the app's
    private namespace (`0::/../cri-containerd-<id>.scope`).
+   **Pod fields on events** (task sh4; PLAN.md M7): the
+   correlator stamps each event's `pod` object at enqueue —
+   namespace and name from `Config.Pod`, the container id from
+   the event's process, read once per process through
+   `Config.ContainerOf` (the run's reader of
+   `/proc/<pid>/cgroup`, `k8s.ContainerOf`: a container of
+   another pod, the pod cgroup and the tracer's own `0::/` give
+   none) and inherited by a forked child. The Java join copies a
+   JVM's `pod` from its joined events onto its http and dns
+   events. `TestContainerOfShapes` holds the reader to kind's
+   captures and k3s-on-el9 systemd and cgroupfs shapes.
+   `iormeshctl build -namespace NS` keeps the sessions whose
+   pinned pod FQDN names NS (`federate.Segments.InNamespace`),
+   narrows the service database's views to those pods' host
+   ids (`servicedb.Filter.Hosts`), and writes to
+   `<projects>@<NS>/`; `show -namespace NS` reads it.
    **The pod is the host** (task 7f4, an advisor's provisional
    choice; review B2): in a pod `iormesh run` takes its host id
    from the downward API, never from `/etc/machine-id` — the

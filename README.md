@@ -64,8 +64,8 @@ app is ever the first test subject.
 - **Kubernetes (M7)** — sidecar or `iormeshctl`-driven
   `kubectl debug` container (context and image configurable)
   next to the app; each pod is traced as its own host
-  (`pod-<uid>`). Pod, namespace and container fields on events
-  are planned (task sh4).
+  (`pod-<uid>`), and every event names its namespace, pod and
+  container.
 - **Mesh expansion** — `iormeshctl expand` follows observed
   connections to untraced peers and deploys tracers there, under
   the allowlist and hop limits (M6). Driven by the controller;

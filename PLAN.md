@@ -2031,6 +2031,46 @@ Built after plain Linux servers (M4); accepted on kind and el9
   pods with one pod-local pid merging into two process nodes;
   on kind (task yb4) five pods on one node, five hosts, one
   `boot_id`.
+  **Pod fields on events** (task sh4, owner-approved
+  2026-11-22): an in-pod tracer stamps every event with an
+  optional nested envelope object `pod` — `namespace` and
+  `name` from the downward API (`POD_NAMESPACE`, `POD_NAME`,
+  the values the host id and FQDN already come from), and
+  `container_id`, the 64-hex runtime id of the container the
+  process runs in. An envelope object, not args: it describes
+  who did the I/O, like `host_id`, on every kind, and an LLM
+  reading a slice of events sees the pod without a join.
+  Host-level events (`session`, `drop`, `end`, pid 0) carry
+  `namespace` and `name` only. The container comes per process
+  from `/proc/<pid>/cgroup` (`k8s.ParseProcCgroup`: the
+  relative `/../<container>` form a private cgroup namespace
+  shows, and the full kubelet paths of both drivers — kind's
+  `kubelet-kubepods-…` slices, k3s on el9's systemd
+  `kubepods-…` slices, cgroupfs), read once when the
+  correlator meets the process (attach or first record), and
+  inherited at fork, where the kernel puts the child in its
+  parent's cgroup; never per event. A process in the tracer's
+  own container (its cgroup reads `/`), in the pod cgroup
+  itself or in another pod's cgroup gets no `container_id`.
+  The container's *name* is not in the cgroup and the tracer
+  has no API access, so the id is what a trace carries; the
+  name join (pod status' `containerStatuses`) is left to the
+  controller, not built yet. Outside a pod there is no `pod`
+  object. Backward compatible: an older segment has no pod
+  column and reads as before (no `pod`). The controller
+  checks a segment's `pod` against its pinned FQDN
+  (`<name>.<namespace>.<uid[:8]>`), so a session cannot claim
+  another namespace. **Namespace filter**: `iormeshctl build
+  -namespace NS` builds only the sessions of pods in NS (by
+  their pinned FQDN, so segments from before the pod fields
+  count too; a host outside a pod is left out), and the
+  service database's views of the build only the connections
+  one of those pods traced; the build goes to
+  `<projects>@<NS>/`, which `show -namespace NS` reads. Bad
+  segments stay listed whatever their namespace (a damaged file
+  cannot say whose it was). Status (2026-11-22, task sh4):
+  built and unit-tested against kind's captured cgroup files and
+  constructed k3s-on-el9 shapes; not yet run on a cluster.
 - Java agent live-attach through the shared process namespace
   (`kubectl debug --target`, or `shareProcessNamespace: true`
   for a sidecar; attach socket reached via `/proc/<pid>/root`),
@@ -3665,8 +3705,9 @@ can reconstruct behavior and check it against source code:
 - **Pod-aware identity**: under Kubernetes an in-pod tracer
   describes the pod as its host (`host_id` `pod-<uid>`, M7;
   docs/schema.md "Pods as hosts"), so the pod is the graph's
-  host node. Pod, namespace and container fields on the
-  envelope (cgroup-mapped) are planned (task sh4).
+  host node, and every event carries the optional `pod`
+  object — namespace, pod name and the cgroup-mapped
+  container id (task sh4, M7 "Pod fields on events").
 - **Project-scoped**: every session belongs to a named project
   (`-project`); traces always live under
   `/opt/iormesh/traces/<project>/`, graph nodes carry their
@@ -3906,7 +3947,7 @@ whether the engine is Docker or Podman:
 | Normalizer       | Go, cgo-free | symbolic ids, marker brackets, golden check |
 | Controller (iormeshctl) | Go, cgo-free | registry, deploy, collect, offline merge, service-interaction db, expand, query, rm cleanup, projects |
 | Views            | Go + SVG/HTML/JS | one view model; local site, Bubble Tea TUI, plain text; deterministic SVG + sequence exports |
-| K8s mode         | Go + manifests | sidecar/debug-container deploy, pod as host (pod fields on events planned, task sh4) |
+| K8s mode         | Go + manifests | sidecar/debug-container deploy, pod as host, pod fields on events (task sh4) |
 | Route map        | YAML + k8s API | FQDN→ingress→service/workload edges |
 
 There is no long-lived collector and no mesh agent: the tracer
@@ -3980,7 +4021,7 @@ internal/site/        # local site: one self-contained page
 internal/tui/         # Bubble Tea terminal explorer
 internal/ctl/         # iormeshctl's subcommands
 internal/k8s/         # kubectl transport, pod targets, manifests
-                      #   (pod fields on events planned, sh4)
+                      #   cgroup → container (pod fields, sh4)
 internal/routemap/    # FQDN→ingress→workload map (config + k8s discovery)
 internal/javaattach/  # live attach of the Java agent (HotSpot
                       #   attach protocol)

@@ -184,6 +184,26 @@ type Event struct {
 	// resolved and its addresses (decision #8). Appended after Otel (task
 	// wd4); frozen with M3's acceptance.
 	DNS *DNS `json:"dns,omitempty" parquet:"dns,optional"`
+	// Pod names the Kubernetes pod and container the event happened in
+	// (PLAN.md M7 "Pod fields on events", task sh4): set on every event
+	// of an in-pod tracer, absent outside a pod and in segments written
+	// before it. Appended after DNS.
+	Pod *Pod `json:"pod,omitempty" parquet:"pod,optional"`
+}
+
+// Pod is an in-pod tracer's pod, from the downward API, and the
+// container of the event's process, from its cgroup. The tracer's
+// host_id is the pod's ("pod-<uid>"), so the UID is not repeated here.
+type Pod struct {
+	// Namespace and Name are the pod's metadata.namespace (an RFC 1123
+	// label) and metadata.name (an RFC 1123 subdomain).
+	Namespace string `json:"namespace" parquet:"namespace,dict"`
+	Name      string `json:"name" parquet:"name,dict"`
+	// ContainerID is the 64-hex-digit runtime id of the process's
+	// container, as `kubectl get pod -o json` shows it after
+	// "containerd://"; empty on host-level events (pid 0) and when the
+	// process's cgroup names no container of the pod.
+	ContainerID string `json:"container_id,omitempty" parquet:"container_id,dict"`
 }
 
 // Otel is an OpenTelemetry span context in W3C form, so an event joins
