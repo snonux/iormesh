@@ -45,7 +45,8 @@ type forwardedIO struct {
 // for a virtual thread (its carrier serves others inside the span), not
 // when the thread touched two such connections, and never by I/O outside
 // the span or on a connection whose ends are not the request's (the
-// thread's own call to a database).
+// thread's own call to a database) or that this process opened toward
+// the request's local end (a call to its own listener).
 func TestJavaJoinHTTPForwarded(t *testing.T) {
 	body := forwardedIO{"read", "c1", 2000}
 	cases := map[string]forwardedCase{
@@ -59,6 +60,13 @@ func TestJavaJoinHTTPForwarded(t *testing.T) {
 		"before the span": {held: true, io: []forwardedIO{{"read", "c1", 500}}},
 		"after the span":  {held: true, io: []forwardedIO{{"write", "c1", 6000}}},
 		"database only":   {held: true, io: []forwardedIO{{"write", "db", 3000}}},
+		// The servlet calls its own listener (review of 7j4): the loopback
+		// connection's server end is on the request's local end, but this
+		// thread is its client.
+		"self call only": {held: true,
+			io: []forwardedIO{{"write", "self", 2000}, {"read", "self", 3000}}},
+		"own read and a self call": {held: true, want: "c1",
+			io: []forwardedIO{body, {"write", "self", 2500}, {"read", "self", 3000}}},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -87,11 +95,14 @@ func forwardedEvent(t *testing.T, c forwardedCase) schema.Event {
 		recs = append(recs, agentspool.Thread{ID: 3, KTID: carrier, Virtual: true})
 	}
 	jt.ring(append(recs, r, jt.watermark(at+20_000_000))...)
-	// Two clients' connections through the proxy on the listener, and
-	// the thread's own connection to a database.
+	// Two clients' connections through the proxy on the listener, the
+	// thread's own connection to a database, and its call to its own
+	// listener: one conn_id for both ends of the loopback connection.
 	jt.sock(at, "c1", "127.0.0.1", 8080, "10.0.0.5", 50001, "ESTABLISHED")
 	jt.sock(at, "c2", "127.0.0.1", 8080, "10.0.0.5", 50002, "ESTABLISHED")
 	jt.sock(at, "db", "127.0.0.1", 40001, "10.0.0.9", 5432, "ESTABLISHED")
+	jt.sock(at, "self", "127.0.0.1", 40002, "127.0.0.1", 8080, "ESTABLISHED")
+	jt.sock(at, "self", "127.0.0.1", 8080, "127.0.0.1", 40002, "ESTABLISHED")
 	for _, io := range c.io {
 		jt.sockIO(tid, io.kind, io.conn, at+io.at)
 	}
@@ -106,11 +117,18 @@ func forwardedEvent(t *testing.T, c forwardedCase) schema.Event {
 	return schema.Event{}
 }
 
-// TestConnIndexThreadIOBounded: the index keeps a thread's newest socket
+// TestConnIndexThreadIOBounded: the index keeps a thread's newest TCP socket
 // calls only, never a kernel transition (tcp_state), and forgets a thread
 // idle for Retain.
 func TestConnIndexThreadIOBounded(t *testing.T) {
 	x := newConnIndex()
+	x.observe(sockEvent(schema.KindTCPState, "c1", "ESTABLISHED", 0, "10.0.0.1", 8080,
+		"10.0.0.2", 5000))
+	x.observe(sockEvent(schema.KindSendto, "u1", "", 0, "10.0.0.1", 45678, "10.0.0.53", 53))
+	x.noteIO(&schema.Event{PID: 1, TID: 4, Event: schema.KindSendto, ConnID: "u1", BootNS: 1})
+	if _, ok := x.io[threadKey{1, 4}]; ok {
+		t.Error("a UDP flow's call noted")
+	}
 	for i := range uint64(10 * threadIOKeep) {
 		x.noteIO(&schema.Event{PID: 1, TID: 2, Event: schema.KindRead, ConnID: "c1", BootNS: i})
 	}

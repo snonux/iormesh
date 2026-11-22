@@ -516,5 +516,7 @@ func (j *JavaJoin) seen(ev *schema.Event) {
 	}
 	j.maxEnd = max(j.maxEnd, ev.BootNS+ev.LatencyNS)
 	j.conns.observe(ev)
-	j.conns.noteIO(ev)
+	if j.jvms[ev.PID] != nil {
+		j.conns.noteIO(ev) // only a JVM's records are joined by it
+	}
 }

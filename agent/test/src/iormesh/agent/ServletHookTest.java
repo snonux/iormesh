@@ -55,6 +55,7 @@ final class ServletHookTest {
         String query = "token=s3cret";
         DispatcherType type = DispatcherType.REQUEST;
         boolean async;
+        boolean headerThrows;
         String remoteAddr = "0:0:0:0:0:0:0:1";
         int remotePort = 40000;
         Map<String, String> headers = new TreeMap<>(Map.of("Authorization", "Bearer x",
@@ -68,6 +69,9 @@ final class ServletHookTest {
             return Collections.enumeration(List.of(headers.get(n)));
         }
         public String getHeader(String n) {   // by name, ignoring case, as containers do
+            if (headerThrows) {
+                throw new IllegalStateException("broken wrapper");
+            }
             for (Map.Entry<String, String> e : headers.entrySet()) {
                 if (e.getKey().equalsIgnoreCase(n)) {
                     return e.getValue();
@@ -260,7 +264,8 @@ final class ServletHookTest {
      * X-Forwarded-For or Forwarded header — the client's claim, not the
      * socket's peer — so a request carrying either records no remote end
      * (the tracer must not join by an attacker-influenced address); one
-     * without keeps it (recorded).
+     * without keeps it (recorded), and one whose getHeader throws is
+     * still recorded, without a remote end (review of 7j4).
      */
     static void forwarded() throws Exception {
         List<Got> got = new ArrayList<>();
@@ -277,6 +282,10 @@ final class ServletHookTest {
                 equal("127.0.0.1:8080", g.s().get(5), h + ": local end kept");
                 equal("", g.s().get(6), h + ": no remote end");
             }
+            Req broken = new Req();
+            broken.headerThrows = true;
+            check(!serve(c, (q, s) -> { }, broken, new Resp()), "served");
+            equal("", got.remove(0).s().get(6), "a throwing getHeader: recorded, no remote end");
             check(got.isEmpty(), "nothing else");
         } finally {
             Hooks.release();

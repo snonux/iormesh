@@ -47,9 +47,14 @@ type threadIO struct {
 
 // noteIO remembers a socket event's call on its thread. Only calls a
 // thread makes itself count: a tcp_state is the kernel's transition,
-// whichever task the softirq ran in.
+// whichever task the softirq ran in. And only on a connection the index
+// knows (a TCP one, observed before its I/O): a UDP flow is no HTTP
+// request's. The caller notes JVMs' events only.
 func (x *connIndex) noteIO(ev *schema.Event) {
 	if ev.ConnID == "" || ev.TID == 0 || ev.Event == schema.KindTCPState {
+		return
+	}
+	if _, ok := x.keys[connKey{ev.PID, ev.ConnID}]; !ok {
 		return
 	}
 	k := threadKey{ev.PID, ev.TID}
@@ -74,6 +79,8 @@ func (x *connIndex) pruneIO(now, retain uint64) {
 // byThread returns the one connection of pid on the request's ends
 // (local, remote: either may be empty, not both) that thread tid made a
 // socket call on completing inside [from, to]; "" for none or several.
+// A connection the process opened toward the request's own end is
+// skipped (selfCall).
 func (x *connIndex) byThread(pid, tid uint32, from, to uint64, local, remote string) string {
 	l, r := parseEnd(local), parseEnd(remote)
 	if !l.IsValid() && !r.IsValid() {
@@ -83,7 +90,8 @@ func (x *connIndex) byThread(pid, tid uint32, from, to uint64, local, remote str
 	calls := x.io[threadKey{pid, tid}]
 	for i := len(calls) - 1; i >= 0 && calls[i].end >= from; i-- {
 		c := calls[i]
-		if c.end > to || c.conn == found || !x.hasEnds(connKey{pid, c.conn}, l, r) {
+		k := connKey{pid, c.conn}
+		if c.end > to || c.conn == found || !x.hasEnds(k, l, r) || x.selfCall(k, l, r) {
 			continue
 		}
 		if found != "" {
@@ -99,6 +107,22 @@ func (x *connIndex) byThread(pid, tid uint32, from, to uint64, local, remote str
 func (x *connIndex) hasEnds(k connKey, l, r netip.AddrPort) bool {
 	for _, p := range x.keys[k] {
 		if (!l.IsValid() || p.local == l) && (!r.IsValid() || p.remote == r) {
+			return true
+		}
+	}
+	return false
+}
+
+// selfCall reports whether connection k runs between the process and
+// itself with the request's end on the far side (review of 7j4): the
+// servlet calling its own listener. A same-process loopback connection
+// has one conn_id for both ends, so its server-side pair has the
+// listener's local end and hasEnds alone would take the thread's client
+// I/O on it for the request's own; a pair whose remote is the request's
+// local end (or whose local is its remote end) gives it away.
+func (x *connIndex) selfCall(k connKey, l, r netip.AddrPort) bool {
+	for _, p := range x.keys[k] {
+		if (l.IsValid() && p.remote == l) || (r.IsValid() && p.local == r) {
 			return true
 		}
 	}

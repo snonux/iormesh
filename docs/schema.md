@@ -882,8 +882,10 @@ connection it accepted, so a held request with a start (`held`)
 is joined by its own thread's socket I/O instead: the one
 connection on the request's ends that the thread read or wrote
 inside the span (the thread's outbound calls, to a database say,
-have other ends; two such connections answer nothing; never for a
-virtual thread, whose carrier serves others in the span). A
+have other ends, and a call to the process's own listener, whose
+loopback connection shares its `conn_id` with the server end, is
+skipped; two such connections answer nothing; never for a virtual
+thread, whose carrier serves others in the span). A
 request whose body and reply moved outside the span — a GET whose
 reply the container still buffered when `service` returned —
 leaves no I/O inside it and keeps no `conn_id`, nor `req_seq`. A

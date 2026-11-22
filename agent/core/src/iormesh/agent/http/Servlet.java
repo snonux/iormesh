@@ -210,11 +210,18 @@ public final class Servlet implements Library {
          * request with many headers could push it out of. Its scheme may
          * be X-Forwarded-Proto's too (kept: as the app had it). A proxy
          * set up with another header (RemoteIpValve's remoteIpHeader) is
-         * not recognised.
+         * not recognised. A getHeader that throws (a wrapper's bug)
+         * counts as forwarded: the remote end is dropped, not the record.
          */
-        private boolean forwarded(Object req) throws Throwable {
-            return Handles.call(header, req, "Forwarded") != null
-                    || Handles.call(header, req, "X-Forwarded-For") != null;
+        private boolean forwarded(Object req) {
+            try {
+                return Handles.call(header, req, "Forwarded") != null
+                        || Handles.call(header, req, "X-Forwarded-For") != null;
+            } catch (VirtualMachineError e) {
+                throw e;   // the JVM's own trouble, not the wrapper's
+            } catch (Throwable t) {
+                return true;
+            }
         }
 
         private static String nz(String s) {
