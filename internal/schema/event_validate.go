@@ -59,7 +59,8 @@ func (e *Event) Validate() error {
 
 // validatePayloads keeps the nested objects with their kind: the Java
 // attribution with its flag, the http object on http events, the dns
-// object on dns events, the session object on the session header.
+// object on dns events, the session object on the session header — and
+// the pod object (any kind) to an in-pod tracer's events (pod.go).
 func (e *Event) validatePayloads() error {
 	if err := e.validateAttribution(); err != nil {
 		return err
@@ -76,7 +77,7 @@ func (e *Event) validatePayloads() error {
 	if (e.Event == KindSession) != (e.Session != nil) {
 		return invalidf("session object on a %s event (set exactly on session events)", e.Event)
 	}
-	return nil
+	return e.validatePod()
 }
 
 // KnownKind reports whether kind is part of schema v1: an M1

@@ -92,8 +92,9 @@ the plan is the source of truth.
 - **Pod-aware identity** — under Kubernetes, an in-pod tracer
   describes its pod as the host (`host_id` `pod-<uid>`, pids in
   the pod's PID namespace; [schema.md](schema.md#pods-as-hosts-m7)).
-  Pod, namespace and container fields on events are planned
-  (task sh4).
+  Every event carries the optional `pod` object: namespace, pod
+  name and the container id (task sh4;
+  [schema.md](schema.md#pod-fields-on-events-m7)).
 - **Project-scoped** — every session belongs to a named project;
   traces live under `/opt/iormesh/traces/<project>/`, and
   cross-project connections render as explicit edges in the
@@ -113,8 +114,11 @@ the plan is the source of truth.
   the connection, the method stack and the OTEL span; sensitive
   headers and query params are redacted before recording — the
   same policy covers argv. Path segments are recorded verbatim
-  (decision #22); templating id-like segments is planned (task
-  xh4).
+  (decision #22): the events keep the raw path. Only the
+  controller's per-path counts (the service database, the
+  services view's top paths) fold id-like segments into
+  templates such as `/orders/{id}` (task xh4; see
+  [security.md](security.md) for the rules).
 - **Goldens in the same schema** — M0's declared expectations
   are schema documents with symbolic ids. Validation is subset,
   not equality: cut to the marker bracket, normalize, assert

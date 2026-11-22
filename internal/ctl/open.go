@@ -63,7 +63,7 @@ func latestSite(e env, f buildFlags) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	root := filepath.Join(p.builds, buildKey(projects), sitesDirName)
+	root := filepath.Join(p.builds, buildKey(projects, f.namespace), sitesDirName)
 	index, err := site.Latest(root)
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", fmt.Errorf("open: no site of %s yet (iormeshctl build)", strings.Join(projects, "+"))

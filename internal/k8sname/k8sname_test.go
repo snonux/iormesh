@@ -119,3 +119,26 @@ func TestNames(t *testing.T) {
 		}
 	}
 }
+
+// TestPodNamespace: the namespace comes out of a pod's host identity,
+// dotted pod names included, and nothing comes out of a machine host or
+// an FQDN that does not end in the host's own UID prefix (task sh4).
+func TestPodNamespace(t *testing.T) {
+	const uid = "3b1c9a52-7e0d-4c1f-9a8e-2f6d5b4c3a21"
+	for _, c := range []struct {
+		host, fqdn, want string
+		ok               bool
+	}{
+		{PodHostID(uid), "web-7d9f.prod.3b1c9a52", "prod", true},
+		{PodHostID(uid), "web.v2.prod.3b1c9a52", "prod", true},
+		{PodHostID(uid), "web.prod.9f9f9f9f", "", false},
+		{PodHostID(uid), "prod.3b1c9a52", "", false},
+		{PodHostID(uid), "web.Prod.3b1c9a52", "", false},
+		{PodHostID("not-a-uid"), "web.prod.not-a-ui", "", false},
+		{"0123456789abcdef0123456789abcdef", "web.prod.3b1c9a52", "", false},
+	} {
+		if got, ok := PodNamespace(c.host, c.fqdn); got != c.want || ok != c.ok {
+			t.Errorf("PodNamespace(%q, %q) = %q, %v; want %q, %v", c.host, c.fqdn, got, ok, c.want, c.ok)
+		}
+	}
+}

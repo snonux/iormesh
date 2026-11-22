@@ -95,12 +95,16 @@ func (s *Segment) Graph(_ context.Context) (schema.Graph, error) {
 }
 
 // Events streams the segment's events (segment.ReadEvents, strict),
-// checking each against its directory and session.
+// checking each against its directory and session — its pod object
+// against the session's pod FQDN too (checkPod, task sh4).
 func (s *Segment) Events(ctx context.Context, fn func(*schema.Event) error) error {
 	return s.read(ctx, func(ev *schema.Event) error {
 		if s.sess != nil && ev.HostID != s.sess.hostID {
 			return fmt.Errorf("federate: %s: host_id %q, the session's is %q",
 				s.Name(), ev.HostID, s.sess.hostID)
+		}
+		if err := checkPod(ev, s.File.FQDN); err != nil {
+			return fmt.Errorf("federate: %s: %w", s.Name(), err)
 		}
 		return fn(ev)
 	})
@@ -249,7 +253,8 @@ func (o *Segments) bad(s *Segment, err error) {
 
 // loadSession reads a checked session's segments in seq order into one
 // graph. The check decoded every one already, so a failure here means a
-// file changed under the build: the segment is dropped and the session
+// file changed under the build, or events whose host id or pod object
+// (checkPod) is not the session's: the segment is dropped and the session
 // read again without it (the graph's open-fd state runs across
 // segments, so half a segment cannot be taken back otherwise).
 func loadSession(ctx context.Context, segs []*Segment, out *Segments) ([]*Segment, error) {
@@ -262,6 +267,9 @@ func loadSession(ctx context.Context, segs []*Segment, out *Segments) ([]*Segmen
 				if ev.HostID != sess.hostID {
 					return fmt.Errorf("federate: %s: host_id %q, the session's is %q",
 						s.Name(), ev.HostID, sess.hostID)
+				}
+				if err := checkPod(ev, s.File.FQDN); err != nil {
+					return fmt.Errorf("federate: %s: %w", s.Name(), err)
 				}
 				g.add(ev)
 				return nil

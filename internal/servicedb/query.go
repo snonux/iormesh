@@ -19,9 +19,15 @@ const Untraced = "(untraced)"
 // the projects; none is every project. Projects is what a build of
 // several projects together reads (PLAN.md M4 "Build": a cross-project
 // connection is one edge, counted once).
+//
+// Hosts, when set, narrows further to the connections one of those
+// traced hosts (host ids) saw, either end: a namespace-filtered build
+// reads its pods' connections only (task sh4). nil is every host; the
+// two narrowings AND.
 type Filter struct {
 	Project  string
 	Projects []string
+	Hosts    []string
 }
 
 // Endpoint is one observed server endpoint (hostname, IP, port) and what
@@ -113,12 +119,17 @@ type epKey struct {
 
 func keyOf(e Endpoint) epKey { return epKey{e.Hostname, e.IP, e.Port, e.Host} }
 
-// projectClause selects the rows of a Filter's projects, bound once as ?1
-// to Filter.arg's JSON array (json_each: one bind for any number of
-// projects).
+// projectClause selects the rows of a Filter's projects and hosts, bound
+// as ?1 to Filter.arg's JSON array of projects and as ?2 to hostArg's of
+// host ids (json_each: one bind for any number of either); "null" for
+// ?2 is every host, so an empty Hosts list that is set still selects
+// nothing.
 const projectClause = `(?1 = '[]' OR project IN (SELECT value FROM json_each(?1))
 	OR client_project IN (SELECT value FROM json_each(?1))
-	OR server_project IN (SELECT value FROM json_each(?1)))`
+	OR server_project IN (SELECT value FROM json_each(?1)))
+	AND (?2 = 'null' OR host IN (SELECT value FROM json_each(?2))
+	OR client_host IN (SELECT value FROM json_each(?2))
+	OR server_host IN (SELECT value FROM json_each(?2)))`
 
 // arg is the filter's projects as the JSON array projectClause binds,
 // "[]" for every project.
@@ -134,6 +145,13 @@ func (f Filter) arg() string {
 	return string(b)
 }
 
+// hostArg is the filter's host ids as the JSON array projectClause binds
+// as ?2, "null" for every host.
+func (f Filter) hostArg() string {
+	b, _ := json.Marshal(f.Hosts) // a []string always marshals; nil is null
+	return string(b)
+}
+
 // endpointRows aggregates the connections per endpoint: hostname, IP,
 // port and, for a loopback or link-local IP, the anchor host it was seen
 // on (endpointHostSQL), so two hosts' local services never fold into one.
@@ -141,7 +159,7 @@ func (d *DB) endpointRows(ctx context.Context, f Filter) ([]Endpoint, error) {
 	rows, err := d.db.QueryContext(ctx, `SELECT hostname, ip, port, `+endpointHostSQL+`,
 		COUNT(*), SUM(state = 'unresolved'), MIN(first_seen), MAX(last_seen), MIN(tls), MAX(tls)
 		FROM conn WHERE role <> 'unknown' AND ip <> '' AND `+projectClause+`
-		GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3, 4`, f.arg())
+		GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3, 4`, f.arg(), f.hostArg())
 	if err != nil {
 		return nil, fmt.Errorf("servicedb: %w", err)
 	}
@@ -183,7 +201,7 @@ func (d *DB) endpointLists(ctx context.Context, f Filter, byKey map[epKey]*Endpo
 			ELSE COALESCE(NULLIF(client_app, ''), client_comm, '') END,
 		COALESCE(NULLIF(server_app, ''), '')
 		FROM conn WHERE role <> 'unknown' AND ip <> '' AND `+projectClause+`
-		ORDER BY 1, 2, 3, 4, 5, 6`, f.arg())
+		ORDER BY 1, 2, 3, 4, 5, 6`, f.arg(), f.hostArg())
 	if err != nil {
 		return fmt.Errorf("servicedb: %w", err)
 	}
@@ -210,9 +228,13 @@ func (d *DB) endpointLists(ctx context.Context, f Filter, byKey map[epKey]*Endpo
 // requests, so the connection's count is the larger view — the one whose
 // segments a build kept more of — never the two added up. Connections
 // then add up per endpoint (keyed as endpointRows keys it, the scoping
-// host of a local IP included).
+// host of a local IP included). A row stored with a raw path, before the
+// templating, is folded by the built-in rules first (pathTemplateSQL,
+// paths.go), so it counts under its route's template; a stored template
+// is taken as it is. The filter is projectClause's, spelled out on c.
 const requestCounts = `WITH per_view AS (
-		SELECT host, conn_id, method, path, http_host <> '' AS client, SUM(requests) AS n
+		SELECT host, conn_id, method, ` + pathTemplateSQL + ` AS path, http_host <> '' AS client,
+			SUM(requests) AS n
 		FROM http_request GROUP BY 1, 2, 3, 4, 5),
 	per_conn AS (
 		SELECT host, conn_id, method, path, MAX(n) AS n FROM per_view GROUP BY 1, 2, 3, 4)
@@ -223,11 +245,14 @@ const requestCounts = `WITH per_view AS (
 			(?1 = '[]' OR c.project IN (SELECT value FROM json_each(?1))
 				OR c.client_project IN (SELECT value FROM json_each(?1))
 				OR c.server_project IN (SELECT value FROM json_each(?1)))
+			AND (?2 = 'null' OR c.host IN (SELECT value FROM json_each(?2))
+				OR c.client_host IN (SELECT value FROM json_each(?2))
+				OR c.server_host IN (SELECT value FROM json_each(?2)))
 		GROUP BY 1, 2, 3, 4, 5, 6 ORDER BY 1, 2, 3, 4, 5, 6`
 
 // endpointRequests fills each endpoint's requests by method and path.
 func (d *DB) endpointRequests(ctx context.Context, f Filter, byKey map[epKey]*Endpoint) error {
-	rows, err := d.db.QueryContext(ctx, requestCounts, f.arg())
+	rows, err := d.db.QueryContext(ctx, requestCounts, f.arg(), f.hostArg())
 	if err != nil {
 		return fmt.Errorf("servicedb: %w", err)
 	}

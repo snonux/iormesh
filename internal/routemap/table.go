@@ -3,6 +3,8 @@ package routemap
 import (
 	"net/netip"
 	"strings"
+
+	"iormesh/internal/pathtmpl"
 )
 
 // Origins: where an entry of the compiled table came from.
@@ -22,6 +24,8 @@ type Table struct {
 	// over from the discovery snapshot (its ambiguous routes and
 	// workloads), and discovered entries a static one shadowed.
 	flags []Flag
+	// paths are the static map's path templates, nil without any.
+	paths *pathtmpl.Rules
 }
 
 // entry is one compiled route or Service and its origin.
@@ -36,11 +40,18 @@ type entry[T any] struct {
 // discovered one of the same name — and over one claiming the same
 // ClusterIP and port, which can only mean one of the two maps is out of
 // date. Discovery fills only what the file lacks. Both maps were
-// validated on load, so each is free of duplicates of its own.
+// validated on load, so each is free of duplicates of its own. Path
+// templates come from the static map alone: they are the operator's
+// rules, not something a cluster's objects say.
 func Compile(static, discovered *Map, discoveryFlags []Flag) *Table {
 	t := &Table{routes: map[string]entry[Route]{}, services: map[string]entry[Service]{},
 		byAddr: map[netip.AddrPort]string{}}
 	t.flags = append(t.flags, discoveryFlags...)
+	if static != nil {
+		// Validate refused a bad template on load; a map built in code
+		// without it gets no rules rather than half of them.
+		t.paths, _ = pathtmpl.Compile(static.PathTemplates)
+	}
 	for _, src := range []struct {
 		m      *Map
 		origin string
@@ -102,7 +113,17 @@ func (t *Table) shadowed(origin, what string) {
 	}
 }
 
-// Empty reports whether the table names nothing.
+// Paths are the operator's path templates; nil (the built-in folding
+// alone) for a nil table or a static map without any.
+func (t *Table) Paths() *pathtmpl.Rules {
+	if t == nil {
+		return nil
+	}
+	return t.paths
+}
+
+// Empty reports whether the table names nothing: no route, Service or
+// Service range (path templates name no edge).
 func (t *Table) Empty() bool {
 	return t == nil || (len(t.routes) == 0 && len(t.services) == 0 && len(t.cidrs) == 0)
 }

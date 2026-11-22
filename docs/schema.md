@@ -109,6 +109,7 @@ Required fields are always present; a zero is a real zero.
 | `stack_id` | int, optional | the native user stack the thread entered the syscall with: an id of `stacks.ndjson` (≥ 1); only with `-native-stacks` (below) |
 | `otel` | object, optional | `{trace_id, span_id}`, the OpenTelemetry span the Java code ran in; only with attribution `java`, absent outside a span (appended in M3) — see "OpenTelemetry span context" |
 | `dns` | object, optional | `{host, addrs}`, set exactly on `dns` events (appended in M3, task wd4) — see "DNS events" |
+| `pod` | object, optional | `{namespace, name, container_id}`, on every event of an in-pod tracer, absent outside a pod (appended in M7, task sh4) — see [Pod fields on events](#pod-fields-on-events-m7) |
 
 `(pid, pid_incarnation, fd, fd_gen)` names one fd instance, even
 when a library's open and a later socket land on the same number.
@@ -1142,6 +1143,54 @@ the pod's API metadata and pins the pod's store directory
 dropped; iormeshctl checks the same before it deploys a tracer
 into a pod. Outside a pod
 nothing changes.
+
+### Pod fields on events (M7)
+
+An in-pod tracer also stamps every event with the `pod` object
+(PLAN.md M7 "Pod fields on events", task sh4), last in the
+envelope:
+
+```json
+"pod": {"namespace": "prod", "name": "checkout-7d9f",
+        "container_id": "4f6c0f1e…7b6c5d"}
+```
+
+| Key | Meaning |
+|-----|---------|
+| `namespace` | the pod's namespace (`POD_NAMESPACE`), an RFC 1123 label |
+| `name` | the pod's name (`POD_NAME`), an RFC 1123 subdomain |
+| `container_id` | optional: the 64-hex runtime id of the container the event's process runs in, as `kubectl get pod -o json` shows it after `containerd://` |
+
+- The pod is the host already (`host_id` `pod-<uid>`), so the UID
+  is not repeated; a `pod` object on any other host id is
+  invalid.
+- `container_id` comes from the process's `/proc/<pid>/cgroup`,
+  read once when the tracer meets the process (its attach or
+  first record) and inherited at fork — never per event. Inside
+  the tracer's private cgroup namespace a sibling container reads
+  `0::/../cri-containerd-<id>.scope` (systemd driver: kind, k3s
+  on el9) or `0::/../<id>` (cgroupfs); the full kubelet paths of
+  both drivers are read too. It is absent on host-level events
+  (`session`, `drop`, `end`), for the tracer's own processes
+  (their cgroup reads `0::/`), for a process in the pod cgroup
+  itself and for one whose cgroup names another pod. In sidecar
+  mode with a shared PID namespace it tells the app's, the
+  sidecars' and the tracer's processes apart.
+- The container's *name* is not in the cgroup and the tracer has
+  no API access; map the id with `kubectl get pod -o json`
+  (`status.containerStatuses[].containerID`).
+- The Java join's `http` and `dns` events carry their JVM's.
+- In parquet the three keys are `pod.namespace`, `pod.name` and
+  `pod.container_id`, dictionary-encoded. A segment written
+  before task sh4 has no pod columns and reads as before, with
+  no `pod`.
+- The controller holds each event's `pod` to its session's
+  pinned FQDN (`<name>.<namespace>.<uid[:8]>`); a segment that
+  claims another pod is left out of the build as bad.
+  `iormeshctl build -namespace NS` keeps only the sessions whose
+  pinned identity is a pod in NS — segments from before task sh4
+  included — and writes `<projects>@NS/`, read by `show
+  -namespace NS` ([kubernetes.md](kubernetes.md#collect-and-build)).
 
 ## Redaction
 

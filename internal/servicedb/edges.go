@@ -97,7 +97,7 @@ func (d *DB) clientRows(ctx context.Context, f Filter, fn func(string, epKey, In
 		hostname, ip, port, `+endpointHostSQL+`,
 		COUNT(*), SUM(state = 'unresolved'), MIN(first_seen), MAX(last_seen)
 		FROM conn WHERE role <> 'unknown' AND ip <> '' AND `+projectClause+`
-		GROUP BY 1, 2, 3, 4, 5 ORDER BY 1, 2, 3, 4, 5`, f.arg())
+		GROUP BY 1, 2, 3, 4, 5 ORDER BY 1, 2, 3, 4, 5`, f.arg(), f.hostArg())
 	if err != nil {
 		return fmt.Errorf("servicedb: %w", err)
 	}

@@ -14,9 +14,11 @@ import (
 	"strings"
 
 	"iormesh/internal/federate"
+	"iormesh/internal/k8sname"
 	"iormesh/internal/project"
 	"iormesh/internal/render"
 	"iormesh/internal/report"
+	"iormesh/internal/routemap"
 	"iormesh/internal/schema"
 	"iormesh/internal/servicedb"
 	"iormesh/internal/site"
@@ -32,12 +34,16 @@ import (
 //     store host directory to one host identity (pinned in hosts.json),
 //     and rebuilds each session's graph from its events (decision #3:
 //     the server keeps none). A segment that fails is skipped whole and
-//     reported (see "Bad segments").
+//     reported (see "Bad segments"). With -namespace NS (task sh4) only
+//     the sessions of pods in NS go on (inNamespace), and the service
+//     database's views of step 3 keep only those pods' connections.
 //  2. federate.Merge fuses the hosts' TCP ends into cross-host edges and
 //     bounds the clocks; the events it reads also feed the run's tally.
 //  3. servicedb.Observe and Import fold the mesh into the service
 //     database (task hb4), one source per segment so request counts stay
-//     exact after old segments are deleted.
+//     exact after old segments are deleted; requests count per path
+//     template (ids folded, the route map's path_templates first —
+//     task xh4), never per raw id.
 //  4. The view model (V1: run, health, services, edges; V2: the
 //     conversations; M7: the routed edges, from the route map read
 //     before step 1, routes.go) is built from the tally, the merge, the
@@ -48,7 +54,7 @@ import (
 //     read, the sessions' methods tables (each checked in the child
 //     first, as query reads them), the merge's conn-id renames and the
 //     database's endpoints.
-//  5. <builds>/<projects>/graph.json (the merged graph export),
+//  5. <builds>/<projects>[@<namespace>]/graph.json (the merged graph export),
 //     model.json, report.json and the SVG exports (graph.svg,
 //     sequence/<ID>.svg per conversation; internal/render) are written,
 //     then the run's local site (internal/site: a new folder under
@@ -103,10 +109,32 @@ var errBadSegments = errors.New("segments skipped")
 // registered by build and refresh only: routes.go); routes "" is
 // routes.yaml beside the registry, registry "" the default one. The
 // discovery snapshot is read beside db.
+//
+// namespace is -namespace (build and show only, addNamespaceFlag): the
+// Kubernetes namespace whose pods' sessions a build keeps, "" for all
+// (task sh4).
 type buildFlags struct {
 	projects          projectList
 	store, db, builds string
 	routes, registry  string
+	namespace         string
+}
+
+// addNamespaceFlag registers -namespace, build's and show's narrowing
+// to one Kubernetes namespace (PLAN.md M7 "Pod fields on events", task
+// sh4). refresh does not take it: its -namespace is the K8S flag, the
+// kubectl namespace its collect reaches.
+func addNamespaceFlag(fs *flag.FlagSet, f *buildFlags, usage string) {
+	fs.StringVar(&f.namespace, "namespace", "", usage)
+}
+
+// checkNamespace refuses a -namespace no API server issues (an RFC 1123
+// label): it names a build directory, so it must not be a path either.
+func checkNamespace(ns string) error {
+	if ns != "" && !k8sname.Label(ns) {
+		return fmt.Errorf("%w: -namespace %q is not a Kubernetes namespace (an RFC 1123 label)", errUsage, ns)
+	}
+	return nil
 }
 
 // addBuildFlags registers build's flags on fs into f (refresh shares
@@ -137,11 +165,16 @@ func buildCommand(args []string, e env) error {
 	var f buildFlags
 	addBuildFlags(fs, &f)
 	addRoutesFlag(fs, &f)
+	addNamespaceFlag(fs, &f, "build only the sessions of pods in this Kubernetes namespace, into "+
+		"<projects>@<namespace> (default: every session)")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%w: build takes no arguments", errUsage)
+	}
+	if err := checkNamespace(f.namespace); err != nil {
+		return err
 	}
 	return buildAndReport(e.root(), e, f)
 }
@@ -195,22 +228,23 @@ func build(ctx context.Context, e env, f buildFlags) (buildOutput, error) {
 	if err != nil {
 		return buildOutput{}, err
 	}
+	segs, hosts := inNamespace(segs, f.namespace)
 	if len(segs.Sources) == 0 {
-		return buildOutput{}, fmt.Errorf("build: no readable segment for %s in %s (%d bad)",
-			strings.Join(projects, ", "), paths.store, len(segs.Bad))
+		return buildOutput{}, fmt.Errorf("build: no readable segment for %s%s in %s (%d bad)",
+			strings.Join(projects, ", "), namespaceNote(f.namespace), paths.store, len(segs.Bad))
 	}
 	methods, err := loadMethodTables(ctx, &segs)
 	if err != nil {
 		return buildOutput{}, err
 	}
-	in, rep, err := mergeAndImport(ctx, paths.db, projects, &segs, methods)
+	in, rep, err := mergeAndImport(ctx, paths.db, servicedb.Filter{Projects: projects, Hosts: hosts},
+		&segs, methods, routes)
 	if err != nil {
 		return buildOutput{}, err
 	}
 	in.Report = &rep // the processes view is projected from the rollup
-	in.Routes = routes
 	model := viewmodel.New(in)
-	dir, err := writeOutputs(paths.builds, projects, in.Merge.Graph, model)
+	dir, err := writeOutputs(paths.builds, buildKey(projects, f.namespace), in.Merge.Graph, model)
 	if err == nil {
 		err = writeReport(dir, rep)
 	}
@@ -234,6 +268,53 @@ func loadSegments(ctx context.Context, paths buildPaths, projects []string) (fed
 		return federate.Segments{}, err
 	}
 	return segs, pinNewHosts(pins.path, segs.Hosts)
+}
+
+// inNamespace narrows a build to the sessions of pods in namespace ns
+// (-namespace, task sh4; federate.Segments.InNamespace: by the pinned pod
+// identity, so a machine host is left out) and returns their host ids,
+// which narrow the service database's views to the connections those
+// pods traced. ns "" keeps everything, and the host ids are nil: every
+// host. Pinning (loadSegments) has seen every segment by then, so a
+// filtered build trusts what an unfiltered one would.
+func inNamespace(segs federate.Segments, ns string) (federate.Segments, []string) {
+	if ns == "" {
+		return segs, nil
+	}
+	segs = segs.InNamespace(ns)
+	hosts := []string{} // set, so no pod in ns selects no connection
+	for _, s := range segs.Sources {
+		if !slices.Contains(hosts, s.HostID()) {
+			hosts = append(hosts, s.HostID())
+		}
+	}
+	return segs, hosts
+}
+
+// buildName names a build in messages: its projects joined by '+', and
+// "@<namespace>" for a -namespace build — buildKey before any hashing.
+func buildName(projects []string, namespace string) string {
+	if namespace == "" {
+		return strings.Join(projects, "+")
+	}
+	return strings.Join(projects, "+") + "@" + namespace
+}
+
+// namespaceArg is " -namespace NS", the flag that rebuilds a -namespace
+// build, for a message's hint; "" without one.
+func namespaceArg(ns string) string {
+	if ns == "" {
+		return ""
+	}
+	return " -namespace " + ns
+}
+
+// namespaceNote is " in namespace NS" for a -namespace build's messages.
+func namespaceNote(ns string) string {
+	if ns == "" {
+		return ""
+	}
+	return " in namespace " + ns
 }
 
 // hostPins are the pinned host identities and the file they live in.
@@ -263,9 +344,13 @@ func checkedSegments(ctx context.Context, paths buildPaths, projects []string) (
 // mergeAndImport merges the segments, folds the result into the service
 // database, reads the database's view of the projects back and records
 // the conversations (conversations.go); the rollup is built from the
-// events the merge read and the database's endpoints.
-func mergeAndImport(ctx context.Context, dbPath string, projects []string,
-	segs *federate.Segments, methods map[string]map[uint64]schema.Method) (viewmodel.Input, report.Report, error) {
+// events the merge read and the database's endpoints. routes (nil
+// without a route map) joins the routed edges and carries the operator's
+// path templates the import counts requests under. scope names the
+// projects built and, for a -namespace build, the hosts whose
+// connections the database's views keep.
+func mergeAndImport(ctx context.Context, dbPath string, scope servicedb.Filter, segs *federate.Segments,
+	methods map[string]map[uint64]schema.Method, routes *routemap.Table) (viewmodel.Input, report.Report, error) {
 	tally := viewmodel.NewTally()
 	col := report.NewCollector(methods)
 	tallied := make([]federate.Source, len(segs.Sources))
@@ -276,13 +361,13 @@ func mergeAndImport(ctx context.Context, dbPath string, projects []string,
 	if err != nil {
 		return viewmodel.Input{}, report.Report{}, err
 	}
-	in := viewmodel.Input{Projects: projects, Tally: tally, Merge: res,
-		Conversations: viewmodel.NewRecorder(res.Renames)}
+	in := viewmodel.Input{Projects: scope.Projects, Tally: tally, Merge: res,
+		Conversations: viewmodel.NewRecorder(res.Renames), Routes: routes}
 	recorded := make([]federate.Source, len(segs.Sources))
 	for i, s := range segs.Sources {
 		recorded[i] = recordedSegment{s, in.Conversations}
 	}
-	if err := importMesh(ctx, dbPath, recorded, &in); err != nil {
+	if err := importMesh(ctx, dbPath, recorded, &in, scope); err != nil {
 		return viewmodel.Input{}, report.Report{}, err
 	}
 	if err := recordConversations(ctx, segs, in.Conversations, res.Clocks); err != nil {
@@ -294,9 +379,14 @@ func mergeAndImport(ctx context.Context, dbPath string, projects []string,
 }
 
 // importMesh runs Observe and Import and fills in's database view and
-// observations.
-func importMesh(ctx context.Context, dbPath string, sources []federate.Source, in *viewmodel.Input) error {
-	snap, err := servicedb.Observe(ctx, sources, in.Merge)
+// observations. Requests are stored under their path templates — the
+// route map's path_templates, then the built-in folding of ids (task
+// xh4) — so the services view counts routes; the events keep the raw
+// paths (decision #22) for query. The database's views are read back
+// through filter: the build's projects, and a -namespace build's hosts.
+func importMesh(ctx context.Context, dbPath string, sources []federate.Source, in *viewmodel.Input,
+	filter servicedb.Filter) error {
+	snap, err := servicedb.Observe(ctx, sources, in.Merge, in.Routes.Paths())
 	if err != nil {
 		return err
 	}
@@ -309,7 +399,6 @@ func importMesh(ctx context.Context, dbPath string, sources []federate.Source, i
 	if err := d.Import(ctx, snap); err != nil {
 		return err
 	}
-	filter := servicedb.Filter{Projects: in.Projects}
 	if in.Endpoints, err = d.Endpoints(ctx, filter); err != nil {
 		return err
 	}
@@ -370,9 +459,14 @@ func buildProjects(store string, flagged []string) ([]string, error) {
 
 // buildKey names a build's output directory after its projects:
 // "shop", or "client+server" for several built together ('+' is no
-// project character). Too many to name get a hash of the list.
-func buildKey(projects []string) string {
+// project character), and "shop@prod" for a -namespace build of
+// namespace prod ('@' is in neither alphabet, so no two builds share a
+// name). Too many to name get a hash of the name.
+func buildKey(projects []string, namespace string) string {
 	key := strings.Join(projects, "+")
+	if namespace != "" {
+		key += "@" + namespace
+	}
 	if len(key) <= maxBuildKey {
 		return key
 	}
@@ -381,11 +475,11 @@ func buildKey(projects []string) string {
 }
 
 // writeOutputs writes graph.json and model.json into the build's
-// directory, each atomically (temp file, rename), and returns the
-// directory. The directories are 0700: the graph names hosts, processes
-// and files of production servers.
-func writeOutputs(builds string, projects []string, g schema.Graph, m viewmodel.Model) (string, error) {
-	dir := filepath.Join(builds, buildKey(projects))
+// directory, builds/<key> (buildKey), each atomically (temp file,
+// rename), and returns the directory. The directories are 0700: the
+// graph names hosts, processes and files of production servers.
+func writeOutputs(builds, key string, g schema.Graph, m viewmodel.Model) (string, error) {
+	dir := filepath.Join(builds, key)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("build: %w", err)
 	}

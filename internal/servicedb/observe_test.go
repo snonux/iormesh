@@ -64,7 +64,7 @@ func TestObserveDeterministic(t *testing.T) {
 	sources, r := mesh()
 	first := observeMesh(t)
 	rev := []federate.Source{sources[1], sources[0]}
-	again, err := Observe(context.Background(), rev, r)
+	again, err := Observe(context.Background(), rev, r, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestObserveDNSAfterConnect(t *testing.T) {
 	a := sources[0].(memSource)
 	a.events[0].WallNS = wall0 + 1000
 	sources[0] = a
-	s, err := Observe(context.Background(), sources, r)
+	s, err := Observe(context.Background(), sources, r, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestObserveDNSAfterConnect(t *testing.T) {
 			a.events[i].HTTP.Host = "10.0.0.2"
 		}
 	}
-	if s, err = Observe(context.Background(), sources, r); err != nil {
+	if s, err = Observe(context.Background(), sources, r, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := s.Conns[0].Hostname; got != "" {
@@ -109,11 +109,11 @@ func TestObserveRejectsCorruptSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, r := mesh()
-	if _, err := Observe(context.Background(), []federate.Source{federate.NDJSONDir{Dir: dir}}, r); err == nil {
+	if _, err := Observe(context.Background(), []federate.Source{federate.NDJSONDir{Dir: dir}}, r, nil); err == nil {
 		t.Fatal("corrupt events.ndjson observed without error")
 	}
 	boom := errors.New("boom")
-	if _, err := Observe(context.Background(), []federate.Source{failing{boom}}, r); !errors.Is(err, boom) {
+	if _, err := Observe(context.Background(), []federate.Source{failing{boom}}, r, nil); !errors.Is(err, boom) {
 		t.Fatalf("source error %v, want %v", err, boom)
 	}
 }

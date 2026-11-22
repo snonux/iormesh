@@ -3,6 +3,7 @@ package segment
 import (
 	"math/rand/v2"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	parquetgo "github.com/parquet-go/parquet-go"
@@ -46,6 +47,11 @@ func randomEvent(r *rand.Rand, seq uint64) schema.Event {
 		// Addrs never empty: a reader returns [] for an absent list, which
 		// NDJSON tells from null only here (a valid dns event has addresses).
 		ev.DNS = &schema.DNS{Host: pick(r, "", "example.org"), Addrs: []string{"::1", "::2"}[:1+r.IntN(2)]}
+	}
+	if r.IntN(2) == 0 {
+		// Task sh4: an in-pod tracer's pod, with or without a container.
+		ev.Pod = &schema.Pod{Namespace: pick(r, "prod", "dev"), Name: pick(r, "web", "web-7d9f"),
+			ContainerID: pick(r, "", strings.Repeat("ab", 32))}
 	}
 	return ev
 }

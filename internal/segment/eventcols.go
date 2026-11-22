@@ -92,6 +92,9 @@ const (
 	colOtelSpanID
 	colDNSHost
 	colDNSAddrs
+	colPodNamespace
+	colPodName
+	colPodContainerID
 	numEventColumns
 )
 
@@ -146,7 +149,9 @@ var eventColumnSpecs = [numEventColumns]columnSpec{
 	colSessionKernel: {"session.kernel", kindBytes}, colSessionArch: {"session.arch", kindBytes},
 	colStackID: {"stack_id", kindInt32}, colOtelTraceID: {"otel.trace_id", kindBytes},
 	colOtelSpanID: {"otel.span_id", kindBytes}, colDNSHost: {"dns.host", kindBytes},
-	colDNSAddrs: {"dns.addrs.list.element", kindBytes},
+	colDNSAddrs:     {"dns.addrs.list.element", kindBytes},
+	colPodNamespace: {"pod.namespace", kindDict}, colPodName: {"pod.name", kindDict},
+	colPodContainerID: {"pod.container_id", kindDict},
 }
 
 // eventColumns is the open row group of an events file.
@@ -209,6 +214,7 @@ func (e *eventColumns) add(ev *schema.Event) {
 	c[colStackID].optInt32(int32(deref(ev.StackID)), ev.StackID != nil, 0)
 	e.otel(ev.Otel)
 	e.dns(ev.DNS)
+	e.pod(ev.Pod)
 	e.rows++
 }
 
@@ -267,7 +273,7 @@ func (e *eventColumns) args(a *schema.Args) {
 	optStr(&c[colArgsSockSnapshot], a.SockSnapshot)
 }
 
-// java, http, session, otel and dns write an optional nested object: a
+// java, http, session, otel, dns and pod write an optional nested object: a
 // nil object is a null at level 0 in each of its leaves, a set one puts
 // its leaves one level deeper (1 is "the object is there").
 func (e *eventColumns) java(j *schema.Java) {
@@ -340,6 +346,24 @@ func (e *eventColumns) dns(d *schema.DNS) {
 	}
 	c[colDNSHost].optString(d.Host, true, 0)
 	c[colDNSAddrs].listStrings(d.Addrs, 1)
+}
+
+// pod's leaves are required inside the object, as session's: a set pod
+// puts each at level 1, its maxDef. They are dictionary-encoded: one
+// pod's namespace and name repeat on every event of the trace and its
+// containers' ids on every event of their processes (task sh4), so a
+// row costs a dictionary index, not 64 bytes of id.
+func (e *eventColumns) pod(p *schema.Pod) {
+	c := &e.cols
+	if p == nil {
+		c[colPodNamespace].null(0)
+		c[colPodName].null(0)
+		c[colPodContainerID].null(0)
+		return
+	}
+	c[colPodNamespace].optDict(p.Namespace)
+	c[colPodName].optDict(p.Name)
+	c[colPodContainerID].optDict(p.ContainerID)
 }
 
 // reset empties every column for the next row group.

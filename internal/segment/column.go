@@ -120,6 +120,14 @@ func (c *column) optString(s string, set bool, nullDef byte) {
 	c.plain = plain.AppendByteArrayString(c.plain, s)
 }
 
+// optDict records a set value of an optional dictionary column (the pod
+// object's leaves); a null goes through null, as for any optional leaf.
+// Only the set slots take a dictionary index, as parquet stores them.
+func (c *column) optDict(s string) {
+	c.present()
+	c.putDict(s)
+}
+
 func (c *column) optBool(v bool, set bool, nullDef byte) {
 	if !set {
 		c.null(nullDef)
