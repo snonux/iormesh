@@ -109,6 +109,9 @@ Details: [docs/security.md](./docs/security.md).
 - [docs/java-attach.md](./docs/java-attach.md) — getting the
   Java agent into a JVM: `-javaagent`, or live attach and its
   caveats (JEP 451).
+- [docs/kubernetes.md](./docs/kubernetes.md) — the operator
+  runbook for tracing pods: prerequisites, debug vs sidecar,
+  SELinux, collecting, limits, cleanup, troubleshooting.
 - [docs/security.md](./docs/security.md) — security & scope.
 - [docs/build.md](./docs/build.md) — build, code generation and
   tech choices.
