@@ -9,6 +9,7 @@ import (
 
 	"iormesh/internal/federate"
 	"iormesh/internal/release"
+	"iormesh/internal/termsafe"
 )
 
 // keyFileName is the pinned release key in the controller's config
@@ -65,7 +66,9 @@ func verifyCommand(args []string, e env) error {
 			failed++
 			continue
 		}
-		_, _ = fmt.Fprintf(e.stdout, "%s: OK, signed %s %s\n", path, m.File, m.Version)
+		// Quoted like deploy's printVerified: a path may hold any byte.
+		_, _ = fmt.Fprintf(e.stdout, "%s: OK, signed %s %s\n", termsafe.String(path),
+			termsafe.String(m.File), termsafe.String(m.Version))
 	}
 	if failed > 0 {
 		return fmt.Errorf("%d of %d files failed verification", failed, fs.NArg())

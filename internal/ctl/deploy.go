@@ -341,8 +341,18 @@ func (d deployer) verify(arch string) (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("local build, nothing pushed: %w", err)
 	}
-	_, _ = fmt.Fprintf(d.e.stdout, "verified %s: %s %s\n", path, m.File, m.Version)
+	printVerified(d.e.stdout, path, m)
 	return path, m.Version, nil
+}
+
+// printVerified reports a local build that passed verification. The path
+// and the signed name and version go through termsafe.String: the -dist
+// path is the operator's, but a directory name is whatever bytes the
+// file system holds, and none may reach the terminal as a control
+// sequence.
+func printVerified(w io.Writer, path string, m release.Meta) {
+	_, _ = fmt.Fprintf(w, "verified %s: %s %s\n", termsafe.String(path), termsafe.String(m.File),
+		termsafe.String(m.Version))
 }
 
 // stage pushes the release files and their signatures into the staging
@@ -392,7 +402,7 @@ func (d deployer) project(ctx context.Context, t federate.Transport, host string
 	}
 	if live && !d.restart && d.record.same(host, p.Name, argv, version) {
 		_, _ = fmt.Fprintf(d.e.stdout, "%s: project %s already running this build with these flags, "+
-			"left alone (-restart restarts it)\n", host, p.Name)
+			"left alone (-restart restarts it)\n", termsafe.String(host), termsafe.String(p.Name))
 	} else {
 		if err := d.start(ctx, t, host, argv, live); err != nil {
 			return err
@@ -442,10 +452,14 @@ func (d deployer) relay(host string, out []byte) {
 // ended by a newline. The host may be compromised (or just enrolled by
 // expand -apply), so each line goes through termsafe.String like errors
 // do (errText): an escape sequence prints Go-quoted instead of clearing
-// the screen, setting the title or overwriting another host's lines.
+// the screen, setting the title or overwriting another host's lines. The
+// host prefix is quoted the same way: registry hosts are validated
+// (federate.ValidServer) and expand enrolls only addresses, so this is
+// defence in depth should either ever let a control byte through.
 func relay(w io.Writer, host string, out []byte) {
+	prefix := termsafe.String(host)
 	for line := range strings.Lines(string(out)) {
-		_, _ = fmt.Fprintf(w, "%s: %s\n", host, termsafe.String(strings.TrimSuffix(line, "\n")))
+		_, _ = fmt.Fprintf(w, "%s: %s\n", prefix, termsafe.String(strings.TrimSuffix(line, "\n")))
 	}
 }
 

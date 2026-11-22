@@ -10,6 +10,7 @@ import (
 
 	"iormesh/internal/federate"
 	"iormesh/internal/k8s"
+	"iormesh/internal/termsafe"
 )
 
 // splitTargets separates pod entry references from host names.
@@ -78,7 +79,8 @@ func deployPods(ctx context.Context, e env, entries []podEntry, attach time.Dura
 		for _, st := range pods {
 			err := e.onHost(ctx, func(ctx context.Context) error { return deployPod(ctx, e, pe, st.Name, attach) })
 			if err != nil {
-				_, _ = fmt.Fprintf(e.stderr, "iormeshctl: %s: %s\n", pe.label(st.Name), errText(err))
+				_, _ = fmt.Fprintf(e.stderr, "iormeshctl: %s: %s\n", termsafe.String(pe.label(st.Name)),
+					errText(err))
 				failed = append(failed, pe.label(st.Name))
 			}
 		}
@@ -97,6 +99,13 @@ func deployPods(ctx context.Context, e env, entries []podEntry, attach time.Dura
 // returns before the image is even pulled, and a workload started on
 // deploy's word would otherwise go untraced. One that never attaches,
 // or whose session already ended, fails the pod.
+//
+// The pod name comes from the API server and the session id from the
+// tracer in the pod. internal/k8s already refuses a pod name that is no
+// DNS label and a session id that is not 8 hex digits; the label and the
+// session are quoted through termsafe.String all the same, so a
+// compromised cluster can never put a control sequence on the
+// operator's terminal should either check ever loosen.
 func deployPod(ctx context.Context, e env, pe podEntry, pod string, attach time.Duration) error {
 	k, err := pe.transport(pod, "")
 	if err != nil {
@@ -110,12 +119,13 @@ func deployPod(ctx context.Context, e env, pe podEntry, pod string, attach time.
 	if err != nil {
 		return err
 	}
-	label := pe.label(pod)
+	label := termsafe.String(pe.label(pod))
 	var session string
 	if out == k8s.Started || out == k8s.Running || out == k8s.Replaced {
 		if session, err = k.WaitAttached(ctx, pe.projects[0].Name, attach); err != nil {
 			return err
 		}
+		session = termsafe.String(session)
 	}
 	switch out {
 	case k8s.Started:
