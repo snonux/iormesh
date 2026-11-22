@@ -29,7 +29,9 @@ func podOf(getenv func(string) string) *k8s.PodRef {
 // podConfig gives an in-pod run's correlator the pod fields of its events
 // (PLAN.md M7 "Pod fields on events", task sh4): the pod's namespace and
 // name, and a reader of each process's container from its cgroup under
-// the host's /proc, asked once per process. Outside a pod it leaves
+// the tracer's own /proc (its PID namespace, which the pod shares, so
+// event pids name the right entries), asked once per process. Outside a
+// pod it leaves
 // cfg alone: no pod object, no cgroup read.
 func podConfig(cfg *correlate.Config, pod *k8s.PodRef) {
 	if pod == nil {
