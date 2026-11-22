@@ -105,6 +105,11 @@ func (t *Tracer) AdoptExec(pid uint32) (gap uint64, adopted bool, err error) {
 	if err != nil {
 		return 0, false, err
 	}
+	return adoptExec(m, pid)
+}
+
+// adoptExec is AdoptExec on m.
+func adoptExec(m targetStore, pid uint32) (gap uint64, adopted bool, err error) {
 	v, ok, err := lookupTarget(m, pid)
 	if err != nil || !ok {
 		return 0, false, err
@@ -123,21 +128,65 @@ func (t *Tracer) AdoptExec(pid uint32) (gap uint64, adopted bool, err error) {
 	return gap, true, nil
 }
 
-// IgnoreExec dismisses the exec reported by an ExecArgvEvent: its pending
-// entry is removed so the process costs nothing more. An entry that is
-// traced, or pending for a later exec of pid, is left alone — the process
-// was adopted already, or a newer exec still awaits its own verdict.
-func (t *Tracer) IgnoreExec(pid uint32, since uint64) error {
+// IgnoreExec dismisses the exec reported by an ExecArgvEvent, made at
+// since: its pending entry is removed so the process costs nothing more.
+// An entry that is traced, or pending for a later exec of pid, must stay
+// — the process was adopted already, or a newer exec (jspawnhelper's
+// JVM, sh -c 'exec java …') still awaits its own verdict. A read, a
+// compare and a delete would race that newer exec: the kernel can replace
+// the entry between the read and the delete, which then removes the new
+// one, and the matching app would go untraced without a word. So the
+// entry is taken out atomically (BPF_MAP_LOOKUP_AND_DELETE_ELEM, hash
+// maps since 5.14) and put back when it was not the dismissed exec's
+// (putBackTarget). alive reports whether the process still runs; it is
+// asked only on that rare path.
+func (t *Tracer) IgnoreExec(pid uint32, since uint64, alive func() bool) error {
 	m, err := t.targetMap()
 	if err != nil {
 		return err
 	}
-	v, ok, err := lookupTarget(m, pid)
-	if err != nil || !ok || v.State != targetPending || v.Since != since {
+	return ignoreExec(m, pid, since, alive)
+}
+
+// ignoreExec is IgnoreExec on m.
+func ignoreExec(m targetStore, pid uint32, since uint64, alive func() bool) error {
+	raw, err := m.GetValueAndDeleteKey(unsafe.Pointer(&pid))
+	if errors.Is(err, syscall.ENOENT) {
+		return nil // exited, or never inserted (map full)
+	}
+	if err != nil {
+		return fmt.Errorf("dismiss exec of %d: %w", pid, err)
+	}
+	v, _, err := decodeTargetValue(raw)
+	if err != nil || (v.State == targetPending && v.Since == since) {
 		return err
 	}
+	return putBackTarget(m, pid, v, alive)
+}
+
+// putBackTarget re-inserts v, pid's entry that ignoreExec took out but
+// was not the dismissed exec's. Records pid made while the entry was out
+// are not counted in its gap, so the gap stays a lower bound (AdoptExec).
+// The insert is BPF_NOEXIST: an entry there now is a still newer exec's,
+// made by the kernel meanwhile, and it wins. If pid exited while the
+// entry was out, its exit found nothing to remove (iormesh_forget_target)
+// and nothing ever would, so a process reusing the PID could be adopted
+// on the newer exec's verdict: alive is asked after the insert, as
+// adoptRunning does in the CLI, and a dead process's entry is removed
+// again. An exit after the insert removes the entry by itself.
+func putBackTarget(m targetStore, pid uint32, v targetValue, alive func() bool) error {
+	err := m.UpdateValueFlags(unsafe.Pointer(&pid), unsafe.Pointer(&v), bpf.MapFlagUpdateNoExist)
+	if errors.Is(err, syscall.EEXIST) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("put back target %d: %w", pid, err)
+	}
+	if alive() {
+		return nil
+	}
 	if err := m.DeleteKey(unsafe.Pointer(&pid)); err != nil && !errors.Is(err, syscall.ENOENT) {
-		return fmt.Errorf("dismiss exec of %d: %w", pid, err)
+		return fmt.Errorf("remove exited target %d: %w", pid, err)
 	}
 	return nil
 }
@@ -155,8 +204,21 @@ func (t *Tracer) Targeted(pid uint32) (bool, error) {
 	return ok && v.State == targetTraced, err
 }
 
+// targetStore is what this file needs of target_map: *bpf.BPFMap in the
+// tracer, a fake in unit tests, which can land a kernel update between
+// two of userspace's calls.
+type targetStore interface {
+	GetValue(key unsafe.Pointer) ([]byte, error)
+	GetValueAndDeleteKey(key unsafe.Pointer) ([]byte, error)
+	Update(key, value unsafe.Pointer) error
+	UpdateValueFlags(key, value unsafe.Pointer, flags bpf.MapFlag) error
+	DeleteKey(key unsafe.Pointer) error
+}
+
+var _ targetStore = (*bpf.BPFMap)(nil)
+
 // targetMap returns target_map, or errClosed once Close has started.
-func (t *Tracer) targetMap() (*bpf.BPFMap, error) {
+func (t *Tracer) targetMap() (targetStore, error) {
 	if t.closed() {
 		return nil, errClosed
 	}
@@ -168,7 +230,7 @@ func (t *Tracer) targetMap() (*bpf.BPFMap, error) {
 }
 
 // updateTarget makes pid a traced entry, replacing a pending one.
-func updateTarget(m *bpf.BPFMap, pid uint32) error {
+func updateTarget(m targetStore, pid uint32) error {
 	v := targetValue{State: targetTraced}
 	if err := m.Update(unsafe.Pointer(&pid), unsafe.Pointer(&v)); err != nil {
 		return fmt.Errorf("add target %d: %w", pid, err)
@@ -177,7 +239,7 @@ func updateTarget(m *bpf.BPFMap, pid uint32) error {
 }
 
 // lookupTarget reads pid's entry; ok is false when there is none.
-func lookupTarget(m *bpf.BPFMap, pid uint32) (targetValue, bool, error) {
+func lookupTarget(m targetStore, pid uint32) (targetValue, bool, error) {
 	raw, err := m.GetValue(unsafe.Pointer(&pid))
 	if errors.Is(err, syscall.ENOENT) {
 		return targetValue{}, false, nil
