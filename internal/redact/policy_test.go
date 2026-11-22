@@ -273,3 +273,66 @@ func TestArgvMultiWordHeaderValue(t *testing.T) {
 		t.Errorf("trailing header name: %q, want the next element masked", got)
 	}
 }
+
+// TestArgvParamRunsAndSchemelessURLs is task zi4's leak: a secret in a
+// parameter run whose first pair is harmless (a form body, a JDBC
+// property list without "://"), Oracle's thin user/password@, and a URL
+// whose query holds a space or a quote inside one argv element.
+func TestArgvParamRunsAndSchemelessURLs(t *testing.T) {
+	const s = "S3CRET"
+	cases := []struct{ in, want []string }{
+		{[]string{"curl", "-d", "grant_type=client_credentials&client_secret=" + s},
+			[]string{"curl", "-d", "grant_type=client_credentials&client_secret=***"}},
+		{[]string{"curl", "--data", "user=bob&password=" + s},
+			[]string{"curl", "--data", "user=bob&password=***"}},
+		{[]string{"curl", "--data", "a&password=" + s},
+			[]string{"curl", "--data", "a&password=***"}},
+		{[]string{"sh", "-c", "curl -d 'a=b&secret=" + s + "' http://h"},
+			[]string{"sh", "-c", "curl -d 'a=b&secret=***' http://h"}},
+		{[]string{"curl", "-d", "grant_type=authorization_code&redirect_uri=https://app/cb&client_secret=" + s},
+			[]string{"curl", "-d", "grant_type=authorization_code&redirect_uri=https://app/cb&client_secret=***"}},
+		{[]string{"curl", "-d", "redirect_uri=https://app/cb&client_secret=" + s},
+			[]string{"curl", "-d", "redirect_uri=https://app/cb&client_secret=***"}},
+		// A run inside a URL query still gets every query value masked.
+		{[]string{"java", "-Durl=https://u:" + s + "@h/?a=b&page=" + s},
+			[]string{"java", "-Durl=https://u:***@h/?a=***&page=***"}},
+		{[]string{"java", "-Dspring.datasource.url=jdbc:h2:file:/data/db;USER=sa;PASSWORD=" + s, "M"},
+			[]string{"java", "-Dspring.datasource.url=jdbc:h2:file:/data/db;USER=sa;PASSWORD=***", "M"}},
+		{[]string{"app", "jdbc:h2:file:/data/db;PASSWORD=" + s},
+			[]string{"app", "jdbc:h2:file:/data/db;PASSWORD=***"}},
+		{[]string{"java", "-Ddb.url=jdbc:oracle:thin:scott/" + s + "@//db:1521/svc"},
+			[]string{"java", "-Ddb.url=jdbc:oracle:thin:scott/***@//db:1521/svc"}},
+		{[]string{"java", "-Ddb.url=JDBC:Oracle:oci:scott/" + s + "@db"},
+			[]string{"java", "-Ddb.url=JDBC:Oracle:oci:scott/***@db"}},
+		{[]string{"curl", "https://h/?q=hello world&token=" + s},
+			[]string{"curl", "https://h/?q=***&token=***"}},
+		{[]string{"curl", "https://h/x?token=abc'" + s},
+			[]string{"curl", "https://h/x?token=***"}},
+		{[]string{"curl", "http://x --password " + s},
+			[]string{"curl", "http://x --password ***"}},
+	}
+	for _, c := range cases {
+		got := Default().Argv(c.in)
+		if !slices.Equal(got, c.want) || strings.Contains(strings.Join(got, " "), s) {
+			t.Errorf("Argv(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestArgvParamRunsKeepBenignArgs is zi4's negative half: runs and URLs
+// that name no secret come back byte for byte.
+func TestArgvParamRunsKeepBenignArgs(t *testing.T) {
+	cases := [][]string{
+		{"cp", "/data/a&b.txt", "/data/x;y=1.txt", "/data/r&d=1.txt"},
+		{"java", "-Dfoo=bar", "-Dlist=a&b", "-Dcp=a.jar;b.jar", "M"},
+		{"curl", "-d", "a=b&c=d", "https://example.com/a/b", "http://h/x'y"},
+		{"java", "-Ddb.url=jdbc:h2:file:/data/db;USER=sa;MODE=PostgreSQL"},
+		{"java", "-Ddb.url=jdbc:oracle:thin:@//db:1521/svc", "jdbc:oracle:thin:scott@db"},
+		{"sh", "-c", "curl 'https://example.com/a' && echo a=b&c=d"},
+	}
+	for _, in := range cases {
+		if got := Default().Argv(in); !slices.Equal(got, in) {
+			t.Errorf("Argv(%q) = %q, want unchanged", in, got)
+		}
+	}
+}

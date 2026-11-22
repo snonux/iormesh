@@ -3,15 +3,39 @@ package redact
 import (
 	"net/url"
 	"strings"
+	"unicode"
 )
 
 // Text masks every URL embedded in free text — an argument, a header
 // value, a "-Ddb.url=jdbc:postgresql://…" property: userinfo (always) and
-// the values of denied query parameters. Text without "://" is returned
-// unchanged; a bare "?" in an argument is a glob or a question, not a
-// query string.
+// the values of denied query parameters. A URL ends at white space or a
+// quote, as in a sentence or a shell string. Besides Oracle's
+// "jdbc:oracle:thin:user/password@…" (see maskOracle), text without
+// "://" is returned unchanged; a bare "?" in an argument is a glob or a
+// question, not a query string.
 func (p Policy) Text(s string) string {
-	spans := urlSpans(s)
+	return p.maskURLs(maskOracle(s), false)
+}
+
+// wordText is Text for one argv word: the program got it as one
+// argument, so a URL in it runs to the word's end, past white space and
+// quotes ("https://h/x?token=a'b" masks all of "a'b"). A URL right after
+// a quote still ends at the matching quote, which keeps a quoted shell
+// word ("'https://h/?a=b'") intact.
+func (p Policy) wordText(s string) string {
+	return p.maskURLs(maskOracle(s), true)
+}
+
+// startsWithURL reports an element that begins with a URL, after at most
+// a leading quote.
+func startsWithURL(s string) bool {
+	spans := urlSpans(s, false)
+	return len(spans) > 0 && strings.Trim(s[:spans[0][0]], `'"`) == ""
+}
+
+// maskURLs masks every URL urlSpans finds in s; toWordEnd is urlSpans'.
+func (p Policy) maskURLs(s string, toWordEnd bool) string {
+	spans := urlSpans(s, toWordEnd)
 	if len(spans) == 0 {
 		return s
 	}
@@ -134,11 +158,13 @@ func (p Policy) maskParam(param string) string {
 
 // urlSpans returns the [start, end) byte ranges of the URLs in s. A URL
 // starts at its scheme (the run of scheme characters before "://", with
-// "jdbc:postgresql" counted whole) and ends at white space or a quote, or
-// where the next URL's scheme begins — so "a://x?k=1,b://u:p@y" yields two
-// spans and the second userinfo is masked even though it sits inside the
-// first URL's query string.
-func urlSpans(s string) [][2]int {
+// "jdbc:postgresql" counted whole) and ends where the next URL's scheme
+// begins — so "a://x?k=1,b://u:p@y" yields two spans and the second
+// userinfo is masked even though it sits inside the first URL's query
+// string. Before that it ends at white space or a quote, unless toWordEnd
+// is set (s is one argv word, see wordText): then only a quote matching
+// one right before the scheme ends it.
+func urlSpans(s string, toWordEnd bool) [][2]int {
 	var spans [][2]int
 	for off := 0; ; {
 		i := strings.Index(s[off:], "://")
@@ -153,13 +179,91 @@ func urlSpans(s string) [][2]int {
 		if n := len(spans); n > 0 && spans[n-1][1] > start {
 			spans[n-1][1] = start
 		}
-		end := i + len("://")
-		for end < len(s) && !strings.ContainsRune(" \t\r\n\"'", rune(s[end])) {
-			end++
-		}
-		spans = append(spans, [2]int{start, end})
+		spans = append(spans, [2]int{start, urlEnd(s, start, i+len("://"), toWordEnd)})
 		off = i + len("://")
 	}
+}
+
+// urlEnd returns where the URL whose scheme starts at start ends, scanning
+// from from (just after "://"); see urlSpans for the rules.
+func urlEnd(s string, start, from int, toWordEnd bool) int {
+	stop := " \t\r\n\"'"
+	if toWordEnd {
+		stop = ""
+		if start > 0 && (s[start-1] == '\'' || s[start-1] == '"') {
+			stop = s[start-1 : start]
+		}
+	}
+	if n := strings.IndexAny(s[from:], stop); n >= 0 { // -1 for stop ""
+		return from + n
+	}
+	return len(s)
+}
+
+// maskOracle masks the password of Oracle's scheme-less JDBC URLs,
+// "jdbc:oracle:<driver>:user/password@<host or descriptor>" (thin, oci):
+// without "://" urlSpans does not see them. The credentials run from the
+// driver's ':' to the last '@' before white space — a password with '@'
+// in it is written quoted (scott/"p@ss"@h), and none of EZConnect
+// ("@//h:1521/svc"), "@h:1521:sid" or a descriptor holds one. Text without
+// a '/' there ("jdbc:oracle:thin:@//h/svc", "…:scott@h") has no password.
+func maskOracle(s string) string {
+	lower := asciiLower(s)
+	var b strings.Builder
+	last := 0
+	for off := 0; ; {
+		i := strings.Index(lower[off:], "jdbc:oracle:")
+		if i < 0 {
+			break
+		}
+		off += i + len("jdbc:oracle:")
+		from, to, ok := oraclePassword(s, off)
+		if !ok {
+			continue
+		}
+		b.WriteString(s[last:from])
+		b.WriteString(Mask)
+		last, off = to, to
+	}
+	if last == 0 {
+		return s
+	}
+	b.WriteString(s[last:])
+	return b.String()
+}
+
+// oraclePassword returns the [from, to) range of the password in the
+// Oracle URL whose driver name starts at drv ("thin:scott/tiger@h"), and
+// false when there is none (see maskOracle).
+func oraclePassword(s string, drv int) (from, to int, ok bool) {
+	c := strings.IndexByte(s[drv:], ':')
+	if c <= 0 || !isName(s[drv:drv+c]) {
+		return 0, 0, false
+	}
+	creds := drv + c + 1
+	word := s[creds:]
+	if sp := strings.IndexFunc(word, unicode.IsSpace); sp >= 0 {
+		word = word[:sp]
+	}
+	at := strings.LastIndexByte(word, '@')
+	slash := strings.IndexByte(word, '/')
+	if at < 0 || slash < 0 || slash > at {
+		return 0, 0, false
+	}
+	return creds + slash + 1, creds + at, true
+}
+
+// asciiLower folds A-Z byte by byte. Unlike strings.ToLower it keeps
+// every byte offset valid in s (some runes and invalid UTF-8 change
+// length there), so an index found in the result can cut s.
+func asciiLower(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c + 'a' - 'A'
+		}
+	}
+	return string(b)
 }
 
 // isSchemeByte reports a byte that may appear in a URL scheme (RFC 3986:

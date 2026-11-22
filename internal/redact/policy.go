@@ -157,8 +157,12 @@ func (p Policy) see(st *argvState, arg string) {
 // value of a denied option and must be masked too. The forms are tried
 // from the most specific: a program's own flag, a "Name: value" header or
 // colon pair, KEY=VALUE (whose value is redacted like an element of its
-// own: it may hold a header, a command or another pair), several words,
-// a bare denied option, and finally URLs anywhere in the text.
+// own: it may hold a header, a command or another pair), an element that
+// begins with a URL, several words, a bare denied option, and finally
+// URLs anywhere in the text. Before KEY=VALUE, the denied pairs of a
+// parameter run ("a=b&secret=x", "jdbc:h2:file:/d;USER=u;PASSWORD=x")
+// are masked; the element then goes on through the other forms, so a URL
+// in it is still masked as a URL.
 func (p Policy) argvElem(st *argvState, arg string) (string, bool) {
 	if out, next, ok := p.flagRule(st.progs, arg); ok {
 		return out, next
@@ -166,14 +170,21 @@ func (p Policy) argvElem(st *argvState, arg string) (string, bool) {
 	if out, next, ok := p.colonPair(arg); ok {
 		return out, next
 	}
+	if isParamRun(arg) {
+		arg = p.paramRun(arg)
+	}
 	// A key with URL, path or space characters is not an option name: in
-	// "https://h/?api_key=x" the '=' belongs to the query string.
+	// "https://h/?api_key=x" the '=' belongs to the query string. A denied
+	// first key masks the whole rest, '&' and ';' included.
 	if key, value, ok := strings.Cut(arg, "="); ok && !strings.ContainsAny(key, "/?&#@") && !hasSpace(key) {
 		if denied(p.ArgvDeny, optionKey(key)) {
 			return key + "=" + Mask, false
 		}
 		out, next := p.argvElem(st, value)
 		return key + "=" + out, next
+	}
+	if startsWithURL(arg) {
+		return p.urlElem(st, arg)
 	}
 	if hasSpace(arg) {
 		return p.words(st, arg)
@@ -186,7 +197,74 @@ func (p Policy) argvElem(st *argvState, arg string) (string, bool) {
 		denied(p.ArgvDeny, optionKey(opt)) {
 		return arg, true
 	}
-	return p.Text(arg), false
+	// One word: a URL in it runs to the word's end (see wordText).
+	return p.wordText(arg), false
+}
+
+// isParamRun reports what may be a run of "name=value" pairs joined by
+// '&' or ';' — a form body ("user=bob&password=x"), a JDBC property list
+// without "://" ("jdbc:h2:file:/data/db;USER=sa;PASSWORD=x"), or a form
+// body holding a raw URL ("redirect_uri=https://app/cb&client_secret=x",
+// where the URL path would otherwise swallow the secret). A several-word
+// element is not one: words splits it first and its words come back to
+// argvElem one by one.
+func isParamRun(s string) bool {
+	return strings.ContainsAny(s, "&;") && strings.Contains(s, "=") && !hasSpace(s)
+}
+
+// paramRun masks the value of every pair of a parameter run whose name
+// ArgvDeny denies; separators, names and the other pairs stay, so a path
+// with '&' or ';' in a file name comes back unchanged. The first pair's
+// name is the whole option ("-Ddb.url=jdbc:h2:…;PASSWORD=x" yields
+// "-Ddb.url", "USER", "PASSWORD"). Splitting at every '&' and ';' is what
+// a form decoder and a JDBC driver do too, so a value cannot hold one.
+// It only adds masks: a URL query in the run is still masked under
+// QueryDeny afterwards (argvElem goes on), which may mask more than
+// ArgvDeny does. A masked value keeps a trailing quote, which closes a
+// quoted shell word ("'a=b&secret=x'" → "'a=b&secret=***'"); a quote
+// says nothing about the secret, and keeping it makes paramRun
+// idempotent, which the KEY=VALUE recursion relies on.
+func (p Policy) paramRun(run string) string {
+	var b strings.Builder
+	start := 0
+	for i := 0; i <= len(run); i++ {
+		if i < len(run) && run[i] != '&' && run[i] != ';' {
+			continue
+		}
+		pair := run[start:i]
+		if name, value, ok := strings.Cut(pair, "="); ok && denied(p.ArgvDeny, optionKey(name)) {
+			pair = name + "=" + Mask + trailingQuote(value)
+		}
+		b.WriteString(pair)
+		if i < len(run) {
+			b.WriteByte(run[i])
+		}
+		start = i + 1
+	}
+	return b.String()
+}
+
+// trailingQuote returns the ' or " that ends s, or "".
+func trailingQuote(s string) string {
+	if n := len(s); n > 0 && (s[n-1] == '\'' || s[n-1] == '"') {
+		return s[n-1:]
+	}
+	return ""
+}
+
+// urlElem redacts an element that begins with a URL (after an optional
+// quote). The program received it as one argument, so the URL runs to
+// the element's end, white space and quotes included: in
+// "https://h/?q=hello world&token=x" the token is still a query value.
+// What then still holds white space is redacted word by word as well, so
+// "http://x --password s" cannot pass as a URL path; the masked parts
+// ("***") are inert for that second pass.
+func (p Policy) urlElem(st *argvState, arg string) (string, bool) {
+	out := p.wordText(arg)
+	if hasSpace(out) {
+		return p.words(st, out)
+	}
+	return out, false
 }
 
 // flagRule applies the FlagRules whose program is among progs to arg. ok

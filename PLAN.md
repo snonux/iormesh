@@ -2540,10 +2540,12 @@ would overturn it), and deferred.
   env off.* M2 step 8 (task ta4) implements the default:
   `internal/redact` masks option and KEY=VALUE values by a
   denylist, program-scoped flags (mysql's `-p`), URL userinfo
-  and query values; every exec of a traced process becomes an
-  `exec` event carrying its redacted argv, and the environment
-  is never read. A process already running when the trace
-  attaches has no exec, so its argv is not recorded (yet).
+  and query values, denied pairs of `&`/`;` runs (form bodies,
+  scheme-less JDBC such as h2 files) and Oracle's thin
+  `user/password@` (task zi4); every exec of a traced process
+  becomes an `exec` event carrying its redacted argv, and the
+  environment is never read. A process already running when the
+  trace attaches has no exec, so its argv is not recorded (yet).
 
 ### Open — blocks M3
 
