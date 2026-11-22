@@ -74,11 +74,6 @@ func (s *stream[T]) write(rows []T) error {
 	return nil
 }
 
-// size is the library's estimate of the file size so far: flushed pages
-// plus the open row group's buffers. Rotation compares it with the size
-// cap (decision #16).
-func (s *stream[T]) size() int64 { return s.pw.Size() }
-
 // publish writes the footer with meta, syncs and closes the file, and
 // renames it to readyPath. The sync comes first so a crash after the
 // rename cannot leave a published name over unwritten blocks: ready/ is

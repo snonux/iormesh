@@ -1,5 +1,5 @@
 // Adapted from ior internal/types/fastdecode_test.go @ b21afc50328c.
-// Changes: none.
+// Changes: the layout tests declare their zero value with var (SA4006).
 
 package types
 
@@ -1054,7 +1054,9 @@ func TestNewSocketpairEventFastKernelLayout(t *testing.T) {
 }
 
 func TestNewAcceptEventFastLegacyAndCurrentLayouts(t *testing.T) {
-	acceptLayout := AcceptEvent{}
+	// var, not := AcceptEvent{}: Sizeof and Offsetof read only the type,
+	// so an assigned value would be dead (SA4006).
+	var acceptLayout AcceptEvent
 	if got := unsafe.Sizeof(acceptLayout); got != acceptEventSize {
 		t.Fatalf("sizeof(AcceptEvent) = %d, want %d", got, acceptEventSize)
 	}
@@ -1491,8 +1493,8 @@ func fillCommonHeader(raw []byte, et EventType, tid TraceId) {
 
 func TestNewOpenEventFastLegacyAndCurrentLayouts(t *testing.T) {
 	flags := int32(-7)
-	openLayout := OpenEvent{}
-	if got := unsafe.Sizeof(OpenEvent{}); got != openEventSize {
+	var openLayout OpenEvent
+	if got := unsafe.Sizeof(openLayout); got != openEventSize {
 		t.Fatalf("sizeof(OpenEvent) = %d, want %d", got, openEventSize)
 	}
 	for field, offset := range map[string]struct {
@@ -1570,8 +1572,8 @@ func TestNewOpenEventFastLegacyAndCurrentLayouts(t *testing.T) {
 }
 
 func TestNewNameEventFastLegacyAndCurrentLayouts(t *testing.T) {
-	nameLayout := NameEvent{}
-	if got := unsafe.Sizeof(NameEvent{}); got != nameEventSize {
+	var nameLayout NameEvent
+	if got := unsafe.Sizeof(nameLayout); got != nameEventSize {
 		t.Fatalf("sizeof(NameEvent) = %d, want %d", got, nameEventSize)
 	}
 	for field, offset := range map[string]struct {
@@ -1649,8 +1651,8 @@ func TestNewNameEventFastLegacyAndCurrentLayouts(t *testing.T) {
 }
 
 func TestNewPathEventFastLegacyAndCurrentLayouts(t *testing.T) {
-	pathLayout := PathEvent{}
-	if got := unsafe.Sizeof(PathEvent{}); got != pathEventSize {
+	var pathLayout PathEvent
+	if got := unsafe.Sizeof(pathLayout); got != pathEventSize {
 		t.Fatalf("sizeof(PathEvent) = %d, want %d", got, pathEventSize)
 	}
 	for field, offset := range map[string]struct {

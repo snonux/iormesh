@@ -1,11 +1,11 @@
 // Adapted from ior internal/buildgate/buildgate_test.go @ b21afc50328c.
 // Changes: kept the module, lint-config, argv and no-nolint gates; dropped
-// the Magefile AST, World, ioworkload-exclusion and planted-defect tests.
+// the Magefile AST, World, ioworkload-exclusion and planted-defect tests;
+// the fixture also pins the unused linter (task hj4).
 
 package buildgate
 
 import (
-	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -149,22 +149,6 @@ func (c golangciConfig) section(t *testing.T, key string) golangciConfig {
 	return m
 }
 
-// mapStrings returns m[key] as a []string, tolerating a scalar.
-func mapStrings(m golangciConfig, key string) []string {
-	switch v := m[key].(type) {
-	case []any:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			out = append(out, fmt.Sprint(item))
-		}
-		return out
-	case nil:
-		return nil
-	default:
-		return []string{fmt.Sprint(v)}
-	}
-}
-
 // assertOnlyKnownKeys fails for any key in m that is not in known. This is the
 // deny-by-default rule the config assertions rest on.
 func assertOnlyKnownKeys(t *testing.T, where string, m golangciConfig, known ...string) {
@@ -303,10 +287,11 @@ func TestNoNolintDirectives(t *testing.T) {
 	}
 }
 
-// lintFixture is a package that violates exactly the two linters this gate
-// exists to run: an unchecked error (errcheck) and a dead store (staticcheck
-// SA4006). It is written to a temp directory rather than committed, so it
-// cannot itself be caught by the gate it is used to test.
+// lintFixture is a package that violates each linter this gate runs: an
+// unchecked error (errcheck), a dead store (staticcheck SA4006) and an
+// unexported function nothing calls (unused, U1000). It is written to a temp
+// directory rather than committed, so it cannot itself be caught by the gate
+// it is used to test.
 const lintFixture = `package fixture
 
 import (
@@ -323,6 +308,10 @@ func Fixture() string {
 
 func Printf(format string) {
 	fmt.Printf(format)
+}
+
+func neverCalled() int {
+	return 42
 }
 `
 
@@ -423,8 +412,8 @@ func assertArgvAllowed(t *testing.T, name string, got, want []string) {
 
 // TestLintArgvRejectsAKnownDefect runs the lint gate's real command line - the
 // argv `mage lint` runs, with the repository's own .golangci.yml - against a
-// package containing an unchecked error and two dead stores, and requires all
-// of them to be reported.
+// package containing an unchecked error, two dead stores and an unused
+// function, and requires all of them to be reported.
 //
 // This is the assertion the config- and argv-level ones exist to support: it
 // asks what the gate *does*. A configuration that is plausible key by key and
@@ -447,7 +436,7 @@ func TestLintArgvRejectsAKnownDefect(t *testing.T) {
 	report := string(out)
 
 	if runErr == nil {
-		t.Errorf("the lint gate accepted a package with an unchecked error and two dead stores; it reports nothing and would pass any tree.\n%s", report)
+		t.Errorf("the lint gate accepted a package with an unchecked error, two dead stores and an unused function; it reports nothing and would pass any tree.\n%s", report)
 	}
 	// Two different SA checks, because pinning one lets `checks: [SA4006]`
 	// disable the rest of the family while this test still passes.
@@ -456,6 +445,7 @@ func TestLintArgvRejectsAKnownDefect(t *testing.T) {
 		{"errcheck in a _test.go file", "fixture_test.go"},
 		{"staticcheck SA4006", "SA4006"},
 		{"staticcheck SA1006", "SA1006"},
+		{"unused", "func neverCalled is unused"},
 	} {
 		if !strings.Contains(report, want.marker) {
 			t.Errorf("%s reported nothing for the fixture (looked for %q); it is enabled in name only.\n%s", want.what, want.marker, report)

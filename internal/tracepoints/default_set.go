@@ -1,7 +1,7 @@
 package tracepoints
 
-// DefaultSyscalls returns the syscalls attached when no -trace-* selector
-// is given: those of DefaultFamilies (decision #7: file and socket on) —
+// DefaultSyscalls returns the syscalls attached when -trace-families is
+// not given: those of DefaultFamilies (decision #7: file and socket on) —
 // M1's walking-skeleton set (PLAN.md, "M1 — Walking skeleton", Probes),
 // M2's file surface (fileSurfaceSyscalls) and the socket calls that carry
 // addresses (socketSyscalls).
@@ -73,15 +73,4 @@ func fileSurfaceSyscalls() []string {
 		"preadv", "pwritev", "preadv2", "pwritev2",
 		"dup", "dup2", "dup3", "fcntl",
 	}
-}
-
-// defaultSyscallSet is DefaultSyscalls as a set, the shape the selector's
-// allowlist uses.
-func defaultSyscallSet() map[string]struct{} {
-	names := DefaultSyscalls()
-	set := make(map[string]struct{}, len(names))
-	for _, name := range names {
-		set[name] = struct{}{}
-	}
-	return set
 }

@@ -527,7 +527,11 @@ changes in a provenance header):
 - `internal/generate/`, `internal/tracepoints/`,
   `internal/types/`, `internal/csvlist/` (a tracepoints
   dependency), whole, with their tests; only the tests that check
-  ior's own docs were dropped.
+  ior's own docs were dropped. Task hj4 later removed ior's
+  attach selector (`selector.go`, `dimension_selector.go`,
+  `family.go`) and the `syscallFamilies`/`syscallKinds` maps the
+  generator emitted for it: iormesh attaches by its own families
+  (step 2).
 - `internal/c/`: every hand-written file but ior's raw-tracepoint
   prototype `rawsyscall.c` — not just
   `maps.h`/`types.h`/`filter.c`/`fdname.c`/`fileident.c`, because
@@ -552,18 +556,20 @@ changes in a provenance header):
 Regenerating on the generation host reproduced ior's committed
 artifacts byte for byte (since step 4 they differ only by the
 socket hooks and `tcp_state_event`), so `mage generate` passes
-its diff gate with ior's full syscall set.
+its diff gate with ior's full syscall set. The Go tracepoint list
+holds `List` only since task hj4.
 
 **Step 2 — narrow the attach set, not the generator** (done).
 The generated handlers stay for all syscalls; only attachment
-narrows. `tracepoints.DefaultSyscalls()` is M1's set —
+narrows. `tracepoints.DefaultSyscalls()` was first M1's set —
 `open`/`openat`/`openat2`, `read`, `write`, `close`, `connect`,
-`accept`/`accept4` — and replaces ior's FS-family fallback in
-`ParseSelectorWithDimensions`, the selector ior already uses for
-`-trace-syscalls`: with no `-trace-*` selector and no `-tps`
-regex (which, as in ior, alone decides then), exactly these
-attach; an explicit selector replaces the set, a `-no-trace-*`
-one narrows it. Nothing attaches yet — the loader is step 5.
+`accept`/`accept4` — plugged in as the default of ior's
+`-trace-*`/`-tps` selector. That selector was never wired: the
+loader (step 5) attaches `bpf.ProbesFor(families)` over
+`tracepoints.SyscallsFor` (`trace_family.go`, decision #7), the
+families chosen with `-trace-families`, and task hj4 removed
+ior's selector code. `DefaultSyscalls()` is now the syscalls of
+the default families.
 
 **Step 3 — the target filter becomes a map** (done). ior
 filters on one TGID baked into rodata (`PID_FILTER`). iormesh
