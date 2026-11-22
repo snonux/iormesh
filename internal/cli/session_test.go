@@ -181,6 +181,28 @@ func TestChildStartAfterForkIsGone(t *testing.T) {
 	}
 }
 
+// TestExecAlive: IgnoreExec's liveness check holds only for the process
+// that made the exec — alive, started no later than the exec, readable.
+func TestExecAlive(t *testing.T) {
+	fakeProcs(t, 10)
+	for _, c := range []struct {
+		name      string
+		pid       uint32
+		start, at uint64
+		wantAlive bool
+	}{
+		{"same process", 10, 500, 600, true},
+		{"reused PID", 10, 700, 600, false},
+		{"unreadable", 10, 0, 600, false},
+		{"exited", 11, 500, 600, false},
+	} {
+		processIdentity = func(uint32) correlate.Identity { return correlate.Identity{StartNS: c.start} }
+		if got := execAlive(execRecord(c.pid, c.at, "/bin/sh"))(); got != c.wantAlive {
+			t.Errorf("%s: execAlive = %v, want %v", c.name, got, c.wantAlive)
+		}
+	}
+}
+
 // TestUnknownStartTimeIsGone: a target whose start time could not be
 // read is not kept alive by whatever process holds its PID now, and is
 // not seeded: no empty pid@0 process node without events.

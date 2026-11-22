@@ -84,7 +84,7 @@ type tracer interface {
 	AddTarget(pid uint32) error
 	RemoveTarget(pid uint32) error
 	AdoptExec(pid uint32) (gap uint64, adopted bool, err error)
-	IgnoreExec(pid uint32, since uint64) error
+	IgnoreExec(pid uint32, since uint64, alive func() bool) error
 	StopAggregation() error
 	PendingAggregates() ([]*types.RwAggregateEvent, error)
 	FinalSockets() ([]*types.TcpStateEvent, error)

@@ -76,7 +76,7 @@ func (f *fakeTracer) AdoptExec(pid uint32) (uint64, bool, error) {
 	return f.gap, true, nil
 }
 
-func (f *fakeTracer) IgnoreExec(pid uint32, since uint64) error {
+func (f *fakeTracer) IgnoreExec(pid uint32, since uint64, _ func() bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ignored = append(f.ignored, pid)

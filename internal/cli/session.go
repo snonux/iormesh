@@ -164,7 +164,7 @@ func (s *session) judgeExec(ev *types.ExecArgvEvent) error {
 	argv, cut := execArgv(ev)
 	exe := types.StringValue(ev.Exe[:])
 	if !s.match.Match(exe, argv) || s.isTracer(ev.Pid, exe) {
-		return s.tr.IgnoreExec(ev.Pid, ev.Time)
+		return s.tr.IgnoreExec(ev.Pid, ev.Time, execAlive(ev))
 	}
 	gap, adopted, err := s.tr.AdoptExec(ev.Pid)
 	if err != nil || !adopted {
@@ -176,6 +176,19 @@ func (s *session) judgeExec(ev *types.ExecArgvEvent) error {
 		return err
 	}
 	return s.c.Exec(execInfo(ev, argv, cut))
+}
+
+// execAlive returns IgnoreExec's liveness check: whether the process that
+// made the exec ev reports still runs. It started no later than the exec
+// (a later start is a reused PID's) and is alive with that start time,
+// not a zombie (processAlive). IgnoreExec asks only when it had to put
+// back the entry of a later exec it took out, so the /proc reads cost
+// nothing on the common path.
+func execAlive(ev *types.ExecArgvEvent) func() bool {
+	return func() bool {
+		start := processStart(ev.Pid)
+		return start != 0 && start <= ev.Time && processAlive(ev.Pid, start)
+	}
 }
 
 // procCmdline reads a process's command line; a variable so tests need

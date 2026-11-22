@@ -159,7 +159,7 @@ func TestExecWatchAdoptAndIgnore(t *testing.T) {
 	}
 	ignored := startScript(t, "sh", watchScript(marker+"-other")...)
 	other := execOf(t, tr, ignored.pid())
-	if err := tr.IgnoreExec(other.Pid, other.Time); err != nil {
+	if err := tr.IgnoreExec(other.Pid, other.Time, func() bool { return true }); err != nil {
 		t.Fatal(err)
 	}
 	ignored.poke(t)

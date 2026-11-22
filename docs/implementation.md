@@ -1274,7 +1274,14 @@ scenarios landing first (principle #1).
    tree belongs to the session. A PENDING entry carries its
    exec time, so the dismissal of a posix_spawn child's first exec
    (`jspawnhelper`) cannot remove the entry of its second (the
-   app). A pattern session never ends by itself — it waits for
+   app): `IgnoreExec` removes only an entry a plain read shows as
+   its exec's, takes it out atomically (lookup and delete in one
+   syscall, hash maps since 5.14) and puts it back if a later exec
+   replaced it after the read, removing it again if the process
+   exited meanwhile; records in that window miss the gap, which
+   stays a lower bound. A kernel before 5.14 lacks the atomic
+   take-out; there the dismissal falls back to a plain delete and
+   the race remains. A pattern session never ends by itself — it waits for
    re-appearance (decision #23) until `-duration` or a signal, and
    a stop drains the records in flight (at most 2 s). PID and port
    sessions end once every target and followed child is gone,
