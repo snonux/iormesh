@@ -80,6 +80,52 @@ func TestJavaJoinIgnoresUntracedRing(t *testing.T) {
 	}
 }
 
+// TestJavaJoinUnknownStartUntrusted (task yi4 review): a ring whose
+// process's start time cannot be read (gone between the scan's owner
+// check and the join, /proc unreadable) is never read, even under a
+// traced pid: the fallback would compare against the ring's own
+// creation stamp, which its writer chooses.
+func TestJavaJoinUnknownStartUntrusted(t *testing.T) {
+	jt := newJoinTest(t)
+	jt.j.cfg.ProcInfo = func(uint32) (string, uint64) { return "", 0 }
+	probed := jt.probes()
+	at := jt.now + 1000
+	jt.attach(jvmPID, jvmStart)
+	r := jt.loudRing(jvmPID, at)
+	r.hdr.CreatedMono = 1 << 62
+	if err := jt.j.Poll(); err != nil {
+		t.Fatal(err)
+	}
+	jt.close()
+	if s := jt.j.Stats(); s.Rings != 0 || s.HTTP != 0 || s.DNS != 0 || len(*probed) != 0 {
+		t.Errorf("stats %+v, probed %v", s, *probed)
+	}
+	if !r.closed {
+		t.Error("held ring not closed")
+	}
+}
+
+// TestJavaJoinReplacesWaitingRing (task yi4 review): a newer ring of a
+// pid replaces an older one still waiting, which is closed at once, so
+// re-planting <pid>.ring under new inodes keeps one mapping, not one per
+// scan.
+func TestJavaJoinReplacesWaitingRing(t *testing.T) {
+	jt := newJoinTest(t)
+	first := jt.loudRing(strangerPID, jt.now)
+	if err := jt.j.Poll(); err != nil {
+		t.Fatal(err)
+	}
+	second := jt.loudRing(strangerPID, jt.now)
+	if err := jt.j.Poll(); err != nil {
+		t.Fatal(err)
+	}
+	if !first.closed || second.closed || len(jt.j.waiting) != 1 {
+		t.Errorf("first closed %v, second closed %v, %d waiting", first.closed, second.closed,
+			len(jt.j.waiting))
+	}
+	jt.close()
+}
+
 // TestJavaJoinHoldsRingUntilTraced (task yi4): a ring that appears before
 // its process is traced (the agent loaded at exec by JAVA_TOOL_OPTIONS,
 // mapped before the session's attach event passes) is held unread — no

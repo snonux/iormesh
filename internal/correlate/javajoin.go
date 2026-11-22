@@ -363,7 +363,7 @@ func (j *JavaJoin) addRing(r AgentRing) {
 		j.accept(v)
 		return
 	}
-	j.waiting = append(j.waiting, v)
+	j.hold(v)
 }
 
 // accept registers a traced process's ring under its JVM's pid, to be

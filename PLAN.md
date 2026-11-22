@@ -2498,12 +2498,15 @@ would overturn it), and deferred.
   — an event of that pid and incarnation (its attach or fork
   event, at the latest) has reached the Java join; a ring found
   earlier is held unread, never drained, emitted or probed for,
-  and a ring of a process never traced stays unread. A ring's
+  and a ring of a process never traced stays unread, as does
+  one whose process's start time is unknown when it is found
+  (only the ring's writer-chosen stamp would be left to match);
+  only the newest waiting ring per pid stays mapped. A ring's
   capacity is at most 64 MiB (the agent refuses a larger
   `ringsize=`, the tracer a larger header) and a record other
   than PAD at most 64 KiB, four times the agent's own 16 KiB
-  cap: a longer one is skipped as malformed, undecoded, so no
-  ring can push the tracer past its memory limit.
+  cap: a longer one is skipped as malformed, undecoded, so one
+  ring puts at most about its capacity on the tracer's heap.
 
 ### Open — blocks M2
 

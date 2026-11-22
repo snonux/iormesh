@@ -146,7 +146,8 @@ the JVM's own socket: the tracer still listens on nothing.
   `JAVA_TOOL_OPTIONS`, before the session adopted the JVM — waits
   unread and is read from then on; one of a JVM the session never
   traces (it inherited `JAVA_TOOL_OPTIONS` but is no target) is
-  never read: no events, no table rows, no probes. A ring is at
+  never read: no events, no table rows, no probes. Nor is a ring
+  whose JVM's start time cannot be read when it is found. A ring is at
   most 64 MiB (`ringsize=`) and a record at most 64 KiB
   ([security.md](security.md), "The agent spool is untrusted
   input").
