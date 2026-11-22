@@ -91,9 +91,7 @@ func fakeProc(t *testing.T, pid uint32, inc, tag uint64, maps string,
 	if err := os.MkdirAll(filepath.Join(dir, "map_files"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	stat := fmt.Sprintf("%d (x) S 1%s %d%s %d%s\n", pid, strings.Repeat(" 0", 17), inc/10_000_000,
-		strings.Repeat(" 0", 25), tag, strings.Repeat(" 0", 4))
-	writeFile(t, filepath.Join(dir, "stat"), stat)
+	writeFile(t, filepath.Join(dir, "stat"), fakeStat(pid, inc, tag))
 	writeFile(t, filepath.Join(dir, "maps"), maps)
 	for name, setup := range files {
 		if err := setup(filepath.Join(dir, "map_files", name)); err != nil {
@@ -101,6 +99,13 @@ func fakeProc(t *testing.T, pid uint32, inc, tag uint64, maps string,
 		}
 	}
 	return root
+}
+
+// fakeStat is a /proc/<pid>/stat line with start time inc (ns) and image
+// tag (field 48, arg_start).
+func fakeStat(pid uint32, inc, tag uint64) string {
+	return fmt.Sprintf("%d (x) S 1%s %d%s %d%s\n", pid, strings.Repeat(" 0", 17), inc/10_000_000,
+		strings.Repeat(" 0", 25), tag, strings.Repeat(" 0", 4))
 }
 
 func writeFile(t *testing.T, path, data string) {
@@ -193,6 +198,67 @@ func TestSnapshotOnlyOfTheRecordsImage(t *testing.T) {
 			t.Errorf("%s: maps %+v, frames %+v; want a bare address", name, maps, frames)
 		}
 	}
+}
+
+// TestRefusedReadKeepsModulesForLater: a read refused because the process
+// exec'd while its maps were read hands nothing out — and must not count
+// the files it opened as handed to the resolver, or the binary would never
+// be symbolized again. The maps are a FIFO so the test can exec the
+// process (rewrite stat) between the maps read and the second stat check.
+func TestRefusedReadKeepsModulesForLater(t *testing.T) {
+	line, exe := selfMaps(t)
+	root := fakeProc(t, fakePid, fakeInc, fakeTag, line, map[string]func(string) error{
+		"400000-500000": func(p string) error { return os.Symlink(exe, p) }})
+	dir := filepath.Join(root, fmt.Sprint(fakePid))
+	mapsPath, statPath := filepath.Join(dir, "maps"), filepath.Join(dir, "stat")
+	execd := execDuringMapsRead(t, mapsPath, statPath, line, fakeStat(fakePid, fakeInc, fakeTag+0x1000))
+	c := newMapsCache(root)
+	if maps, files := c.snapshot(image{fakePid, fakeInc, fakeTag}, []uint64{0x401000}); maps != nil || files != nil {
+		t.Fatalf("a read racing an exec was believed: %+v %v", maps, files)
+	}
+	if err := <-execd; err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(mapsPath); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, mapsPath, line)
+	maps, files := c.snapshot(image{fakePid, fakeInc, fakeTag + 0x1000}, []uint64{0x401000})
+	if len(files) != 1 {
+		t.Fatalf("new image: files %v, maps %+v; want the binary handed to the resolver", files, maps)
+	}
+	if f := newResolver().frames(maps, files, []uint64{0x401000})[0]; f.BuildID == "" {
+		t.Fatalf("frame %+v, want a build id", f)
+	}
+	writeFile(t, statPath, fakeStat(fakePid, fakeInc, fakeTag+0x2000))
+	if _, files := c.snapshot(image{fakePid, fakeInc, fakeTag + 0x2000}, []uint64{0x401000}); len(files) != 0 {
+		t.Fatalf("a handed-out module was handed out again: %v", files)
+	}
+}
+
+// execDuringMapsRead turns mapsPath into a FIFO whose writer, once a
+// reader opened it, writes maps, rewrites statPath to stat (the exec) and
+// only then ends the read; the channel reports the writer's error.
+func execDuringMapsRead(t *testing.T, mapsPath, statPath, maps, stat string) <-chan error {
+	t.Helper()
+	if err := os.Remove(mapsPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Mkfifo(mapsPath, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	execd := make(chan error, 1)
+	go func() {
+		w, err := os.OpenFile(mapsPath, os.O_WRONLY, 0)
+		if err != nil {
+			execd <- err
+			return
+		}
+		_, err = w.WriteString(maps)
+		err = errors.Join(err, os.WriteFile(statPath, []byte(stat), 0o644))
+		execd <- errors.Join(err, w.Close())
+	}()
+	return execd
 }
 
 // TestUncoveredAddressesReadOnce: an address no mapping covers re-reads

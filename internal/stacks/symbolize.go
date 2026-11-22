@@ -98,7 +98,10 @@ func (c *mapsCache) snapshot(img image, ips []uint64) ([]mapping, map[string]*os
 
 // read reads img's maps and opens their files, if img is the process's
 // current image before and after; ok is false otherwise (exited, exec'd,
-// pid reused, hidden), with nothing opened.
+// pid reused, hidden), with nothing opened. The files' module keys count
+// as handed to the resolver only on an accepted read: a refused one closes
+// them unused, so a later image mapping the same file opens it again
+// rather than leaving it unsymbolized for the session.
 func (c *mapsCache) read(img image) ([]mapping, map[string]*os.File, bool) {
 	if img.tag == 0 || !c.current(img) {
 		return nil, nil, false
@@ -112,6 +115,9 @@ func (c *mapsCache) read(img image) ([]mapping, map[string]*os.File, bool) {
 	if !c.current(img) {
 		closeAll(files)
 		return nil, nil, false
+	}
+	for key := range files {
+		c.opened[key] = true
 	}
 	return maps, files, true
 }
@@ -136,8 +142,10 @@ func (c *mapsCache) forget(pid uint32) {
 	}
 }
 
-// openFiles sets each file mapping's module key, opening the files not
-// opened before. Mappings of one file share the open.
+// openFiles sets each file mapping's module key and returns the files not
+// handed to the resolver before, one per module key: mappings of one file
+// share the open. It does not mark them handed out — read does, once the
+// read is accepted.
 func (c *mapsCache) openFiles(pid uint32, maps []mapping) map[string]*os.File {
 	var files map[string]*os.File
 	byMapping := map[string]string{} // maps-line identity → module key
@@ -155,14 +163,14 @@ func (c *mapsCache) openFiles(pid uint32, maps []mapping) map[string]*os.File {
 			continue
 		}
 		byMapping[m.ident()], m.mod = key, key
-		if c.opened[key] {
+		if c.opened[key] || files[key] != nil { // handed out, or opened by another maps line
 			_ = f.Close()
 			continue
 		}
 		if files == nil {
 			files = map[string]*os.File{}
 		}
-		files[key], c.opened[key] = f, true
+		files[key] = f
 	}
 	return files
 }
