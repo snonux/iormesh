@@ -126,7 +126,7 @@ func routesCommand(args []string, e env) error {
 	fs.StringVar(&f.ingressService, "ingress-service", "",
 		"the ingress controller's own Service, NAMESPACE/NAME, put on discovered routes")
 	if err := fs.Parse(args[1:]); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%w: routes discover takes no arguments", errUsage)

@@ -133,7 +133,7 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 		"after the session ends (BPF freed, last segment published), wait for SIGTERM instead of exiting, "+
 			"so a pod's tracer container stays enterable for `iormesh ready`")
 	if err := fs.Parse(args); err != nil {
-		return runConfig{}, fmt.Errorf("%w: %v", errUsage, err)
+		return runConfig{}, fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() != 0 {
 		return runConfig{}, fmt.Errorf("%w: unexpected argument %q", errUsage, fs.Arg(0))

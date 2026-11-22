@@ -49,7 +49,7 @@ func verifyCommand(args []string, e env) error {
 	fs := newFlagSet("verify", e.stderr)
 	keyPath := fs.String("key", "", "pinned minisign public key (default ~/.config/iormesh/"+keyFileName+")")
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() == 0 {
 		return fmt.Errorf("%w: verify takes one or more FILEs", errUsage)

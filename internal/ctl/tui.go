@@ -23,9 +23,9 @@ var errNoTerminal = errors.New("tui needs a terminal on stdin and stdout; " +
 func tuiCommand(args []string, e env) error {
 	fs := newFlagSet("tui", e.stderr)
 	var f buildFlags
-	addBuildFlags(fs, &f)
+	addReadBuildFlags(fs, &f)
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%w: tui takes no arguments", errUsage)

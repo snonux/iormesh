@@ -112,7 +112,7 @@ func collectCommand(args []string, e env) error {
 		"(default ~/.local/share/iormesh/services.db; give build's -db)")
 	kf := addK8sFlags(fs, false)
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	r, err := loadRegistry(*regPath, e)
 	if err != nil {

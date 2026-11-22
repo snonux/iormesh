@@ -1582,6 +1582,21 @@ from the compiled object's ELF symbols rather than a regex over
 the C, and requires every attached program to be in the object
 (task bg4).
 
+## Command-line help (task vh4)
+
+PLAN.md M4 ("Command-line conventions") makes `SUBCMD -h` a
+request: exit 0, only that subcommand's flags. Both binaries pin
+it with `TestSubcommandHelpExitsZero` (`internal/ctl/usage_test.go`
+over every subcommand, services verb and show view;
+`internal/cli/cli_test.go` over every tracer subcommand), each with
+the negative case that an unknown flag still exits 2 with the full
+usage. `TestUsageNamesEverySubcommandAndFlag` runs `-h` on every
+entry of `iormeshctl`'s dispatch tables (`commands`,
+`servicesVerbs`, `showViews`) and fails when the usage text lacks an
+entry, a view or a flag the flag set registers (`[K8S]` stands for
+`-context` and `-namespace`). Add a subcommand or a flag and the
+test asks for its usage line.
+
 ## Local site (task nb4)
 
 `mage test` covers the generated site without a browser

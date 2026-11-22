@@ -32,19 +32,20 @@ func servicesCommand(args []string, e env) error {
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		verb, args = args[0], args[1:]
 	}
-	switch verb {
-	case "list":
-		return servicesList(args, e)
-	case "edges":
-		return servicesEdges(args, e)
-	case "name":
-		return servicesName(args, e)
-	case "rules":
-		return servicesRules(args, e)
-	case "unname":
-		return servicesUnname(args, e)
+	if cmd, ok := servicesVerbs[verb]; ok {
+		return cmd(args, e)
 	}
 	return fmt.Errorf("%w: services: unknown verb %q", errUsage, verb)
+}
+
+// servicesVerbs are services' verbs by name: a table like commands, so
+// the usage test sees every verb there is (task vh4).
+var servicesVerbs = map[string]func([]string, env) error{
+	"list":   servicesList,
+	"edges":  servicesEdges,
+	"name":   servicesName,
+	"rules":  servicesRules,
+	"unname": servicesUnname,
 }
 
 // servicesFlags is the flag set every verb shares: the database path.
@@ -94,7 +95,7 @@ func withDB(path string, e env, mode int, fn func(context.Context, *servicedb.DB
 // parse parses a verb's flags and requires exactly n positional args.
 func parse(fs *flag.FlagSet, args []string, n int, what string) error {
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() != n {
 		return fmt.Errorf("%w: %s needs %s", errUsage, fs.Name(), what)

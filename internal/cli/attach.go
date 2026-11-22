@@ -79,7 +79,7 @@ func parseAttachFlags(args []string, stderr io.Writer) (attachConfig, error) {
 	spool := fs.String("spool", "", "the -spool directory of the run tracing the JVM")
 	timeout := fs.Duration("timeout", javaattach.DefaultTimeout, "give up on the attach after this long")
 	if err := fs.Parse(args); err != nil {
-		return attachConfig{}, fmt.Errorf("%w: %v", errUsage, err)
+		return attachConfig{}, fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() != 0 {
 		return attachConfig{}, fmt.Errorf("%w: unexpected argument %q", errUsage, fs.Arg(0))

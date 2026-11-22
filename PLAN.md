@@ -869,6 +869,18 @@ Kubernetes (M7) build on it.
   Linux or macOS — with no eBPF and no cgo at all
   (cross-compiled darwin/linux, amd64/arm64; the merge and
   render packages stay cgo-free).
+- **Command-line conventions** (both binaries, `iormesh` and
+  `iormeshctl`; task vh4): exit 0 on success, 1 when the command
+  failed, 2 on a usage error (an unknown subcommand or flag, a
+  missing argument — printed with the full usage); the tracer's
+  `normalize -check` adds 3 for golden violations. `help`, `-h`
+  and `--help` print the full usage to stdout and exit 0;
+  `SUBCMD -h` (or `--help`) is a request too: it prints only that
+  subcommand's flags (stderr, Go's flag format) and exits 0 —
+  never 2, never followed by "flag: help requested" or the full
+  usage. The full usage names every subcommand, verb, view and
+  flag; a test holds `iormeshctl`'s text to its registered
+  subcommands and flag sets, so it cannot drift.
 - **Server registry**: `iormeshctl add HOSTNAME` / `rm HOSTNAME`
   manage the list automatically (kept in the controller's
   config, e.g. `~/.config/iormesh/servers.yaml`). Only
