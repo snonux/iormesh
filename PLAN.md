@@ -529,6 +529,8 @@ criterion here.
   the Java agent re-attaches to the new JVM, and both PID
   incarnations link under one app node in the graph. This is
   also what keeps a project's target stable across restarts.
+  A listening-port session follows its port across restarts of
+  the same program (decision #23, task mh4).
 - Probes reuse ior's fd/path resolution helpers where the
   problems are the same; peer addresses, process-tree following
   and exec matching are new work (see "What ior does not give
@@ -2796,9 +2798,28 @@ deferred.
   glob on argv, trace all matches, wait for re-appearance.*
   M2 steps 1–3 (task pa4) implement the default: the glob runs
   over argv and the exe path, never the comm, and the
-  exec-to-attach window is written as an `attach_gap` drop. The
-  listening-port target resolves once at start for now; whether
-  it follows the port across restarts stays open for M6.
+  exec-to-attach window is written as an `attach_gap` drop.
+  Task mh4 settles the listening-port target: *follow the port
+  across restarts, conservatively.* Every host `expand -apply`
+  enrolls is bound by port, so ending at the first restart lost
+  the host. When the last traced process of a `-listen-port`
+  session is gone, the session re-resolves the port's owners
+  about once a second for a grace period (`-listen-grace`,
+  default 2m; 0 ends at once, the old behaviour). A holder is
+  adopted only if it runs the same executable (" (deleted)"
+  ignored, so a package update still matches) under the same
+  effective uid as a process the session started with: the same
+  port alone is not the same app. It gets an `attach` event of
+  its own incarnation and the session goes on; stderr names it.
+  No match within the grace ends the session `targets_exited`,
+  stderr saying no new owner appeared. A service manager — a
+  process whose executable is named `systemd`, pid 1 or a user
+  manager, holding a socket-activated listener — is never a
+  target, at start or later: tracing it would follow every
+  service it spawns. A port only the manager holds fails the
+  start (the service is not running). A new owner that listens
+  while the old one still runs (an overlapping restart) is
+  adopted once the old one exits, within the grace.
 - **#9 Capture policy for argv and env** — argv is in, but it
   is not harmless: command lines carry passwords and tokens
   (`-Dpassword=…`, `--token …`). Argv is recorded through the

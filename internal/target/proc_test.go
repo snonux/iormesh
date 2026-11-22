@@ -229,3 +229,58 @@ func TestListenOwners(t *testing.T) {
 		t.Fatal("a port nothing listens on resolved")
 	}
 }
+
+// listenTable is a /proc/net/tcp with one LISTEN socket on 8080, inode
+// 111.
+func (f fakeProc) listenTable() {
+	f.t.Helper()
+	header := "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
+	f.write(filepath.Join(f.root, "net"), "tcp", header+
+		"   0: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 111 1\n")
+}
+
+// TestListenOwnersSkipsServiceManager (task mh4): a socket-activated
+// listener is held by systemd (pid 1, or a user manager) and by the
+// service it started; only the service is an owner. A port only the
+// manager holds is an error that says so: tracing the manager would
+// follow every service it spawns.
+func TestListenOwnersSkipsServiceManager(t *testing.T) {
+	f := newFakeProc(t)
+	f.listenTable()
+	f.proc(1, 1, 0, 'S', 1, "/usr/lib/systemd/systemd")
+	f.socket(1, 40, "111")
+	f.proc(900, 900, 800, 'S', 1, "/usr/lib/systemd/systemd")
+	f.socket(900, 41, "111")
+	if _, err := f.fs().ListenOwners(8080); err == nil || !strings.Contains(err.Error(), "service manager") {
+		t.Fatalf("only the manager holds the port: err %v, want a service manager error", err)
+	}
+	f.proc(50, 50, 1, 'S', 1, "/usr/bin/app")
+	f.socket(50, 3, "111")
+	if got, err := f.fs().ListenOwners(8080); err != nil || !slices.Equal(got, []uint32{50}) {
+		t.Fatalf("ListenOwners(8080) = %v, %v; want [50], never the manager", got, err)
+	}
+}
+
+// TestOwner (task mh4): a process's owner key is its executable — a
+// replaced binary's " (deleted)" suffix dropped — and its effective uid;
+// a process without an exe link or status has none.
+func TestOwner(t *testing.T) {
+	f := newFakeProc(t)
+	f.proc(50, 50, 1, 'S', 1, "/usr/bin/app (deleted)")
+	f.write(filepath.Join(f.root, "50"), "status", "Name:\tapp\nTgid:\t50\nPid:\t50\nUid:\t0\t1000\t1000\t1000\n")
+	got, err := f.fs().Owner(50)
+	if err != nil || got != (Owner{Exe: "/usr/bin/app", UID: 1000}) {
+		t.Fatalf("Owner(50) = %+v, %v; want /usr/bin/app uid 1000", got, err)
+	}
+	f.proc(51, 51, 1, 'S', 1, "")
+	if _, err := f.fs().Owner(51); err == nil {
+		t.Fatal("a process without an exe link has an owner key")
+	}
+	f.proc(52, 52, 1, 'S', 1, "/usr/bin/app")
+	if _, err := f.fs().Owner(52); err == nil {
+		t.Fatal("a process without a Uid line has an owner key")
+	}
+	if _, err := f.fs().Owner(53); err == nil {
+		t.Fatal("a missing process has an owner key")
+	}
+}

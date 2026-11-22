@@ -297,8 +297,10 @@ options; see [SELinux](#selinux).
    the pin. It prints `sidecar running the pinned image; its
    sessions are the sidecar patch's command line`.
 
-The patch's `-listen-port` finds the listener's owner once, at
-start, and fails if the app is not listening yet. `-pattern`
+The patch's `-listen-port` finds the listener's owner at start,
+and fails if the app is not listening yet; after that it follows
+the port to a restarted app of the same executable and uid for
+`-listen-grace` (default 2m). `-pattern`
 only matches execs after the tracer attached. In either case the
 container restart (restart policy) retries.
 

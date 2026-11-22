@@ -442,7 +442,11 @@ truth.
   `-pattern`, `-listen-port` and `-agent` reach other users'
   processes — that is what a tracer is for — so the sudoer gets
   their I/O metadata in segments they own; grant the rule only
-  to whoever may see that.
+  to whoever may see that. A `-listen-port` session that follows
+  its port across a restart (task mh4) adopts only a process of
+  the same executable and uid as its start owner, and never
+  systemd holding a socket-activated listener: another user's
+  program binding the released port is not traced.
 - **The agent spool is untrusted input.** `iormesh run -spool`
   creates the directory mode 1733 (anyone may create, nobody may
   list or delete another's file) after checking, on a descriptor

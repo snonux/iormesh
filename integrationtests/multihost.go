@@ -152,10 +152,12 @@ func serversEnd(order []*Workload) int {
 }
 
 // hostTarget is a host tracer's target spec: its listening port, else
-// its workloads' PIDs.
+// its workloads' PIDs. A port session ends as soon as its owner exited
+// (-listen-grace 0): no host app restarts here, and the default grace
+// (task mh4) would keep the tracer past finishRun's timeout.
 func hostTarget(host Host) []string {
 	if host.ListenPort != 0 {
-		return []string{"-listen-port", fmt.Sprint(host.ListenPort)}
+		return []string{"-listen-port", fmt.Sprint(host.ListenPort), "-listen-grace", "0"}
 	}
 	return []string{"-pid", workloadPIDs(host.Workloads)}
 }

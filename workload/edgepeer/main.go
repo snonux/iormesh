@@ -19,8 +19,13 @@
 //     mid-stream, a shutdown racing a blocked accept), bracketed as
 //     sock-races. Each race prints one line of facts (fds and ports) the
 //     test checks the trace against.
+//   - port-owner -port P -dir D: listens on 127.0.0.1:P, then brackets
+//     itself as port-follow around a write of D/port-owner-<pid>.dat,
+//     prints "worked" and holds the port until stdin reaches EOF: one
+//     incarnation of an app a -listen-port session follows across a
+//     restart (task mh4).
 //
-// The gated roles (pid-target, pid-keeper, sock-races) follow the Java
+// The gated roles (pid-target, pid-keeper, sock-races, port-owner) follow the Java
 // workload's harness protocol (workload Main.java): the PID is the first
 // stdout line, and nothing runs until $IORMESH_WORKLOAD_STARTUP_FILE
 // exists, so the tracer is attached before the first bracketed syscall.
@@ -71,11 +76,13 @@ func main() {
 	fs := flag.NewFlagSet(role, flag.ExitOnError)
 	dir := fs.String("dir", "", "directory for the role's files")
 	pid := fs.Int("pid", 0, "the freed PID to land on (pid-reuse)")
+	port := fs.Int("port", 0, "the TCP port to listen on (port-owner)")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		usage()
 	}
-	run, ok := roles(*dir, *pid)[role]
-	if !ok || (needsDir(role) && *dir == "") || (role == "pid-reuse" && *pid <= 0) {
+	run, ok := roles(*dir, *pid, *port)[role]
+	if !ok || (needsDir(role) && *dir == "") || (role == "pid-reuse" && *pid <= 0) ||
+		(role == "port-owner" && (*port <= 0 || *port > 65535)) {
 		usage()
 	}
 	if err := run(); err != nil {
@@ -85,8 +92,10 @@ func main() {
 }
 
 // roles maps each role to its body; the gated ones go through gated.
-func roles(dir string, pid int) map[string]func() error {
+// port-owner binds before its gate (portOwner), so it calls gated itself.
+func roles(dir string, pid, port int) map[string]func() error {
 	return map[string]func() error{
+		"port-owner": func() error { return portOwner(port, dir) },
 		"pid-target": func() error { return gated(func() error { return pidTarget(dir) }) },
 		"pid-keeper": func() error { return gated(pidKeeper) },
 		"pid-reuse":  func() error { return pidReuse(pid, dir) },
@@ -96,12 +105,12 @@ func roles(dir string, pid int) map[string]func() error {
 }
 
 func needsDir(role string) bool {
-	return role == "pid-target" || role == "pid-reuse" || role == "pid-squat"
+	return role == "pid-target" || role == "pid-reuse" || role == "pid-squat" || role == "port-owner"
 }
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: edgepeer pid-target -dir D | pid-keeper | "+
-		"pid-reuse -pid N -dir D | pid-squat -dir D | sock-races")
+		"pid-reuse -pid N -dir D | pid-squat -dir D | sock-races | port-owner -port P -dir D")
 	os.Exit(2)
 }
 

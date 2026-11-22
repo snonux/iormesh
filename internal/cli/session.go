@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -16,8 +17,9 @@ const cloneThread = 0x00010000
 
 // session ties one run's tracer and correlator to its target spec
 // (docs/implementation.md M2 steps 1–3). It judges a pattern session's
-// execs, links every match to the session's app node, and keeps the set
-// of live targets that decides when a PID or port session is over.
+// execs, links every match to the session's app node, keeps the set of
+// live targets that decides when a PID or port session is over, and
+// follows a port session's port to a restarted owner (portfollow.go).
 type session struct {
 	tr   tracer
 	c    *correlate.Correlator
@@ -42,10 +44,19 @@ type session struct {
 	// seg is the -trace-dir run's segment writer, ticked on the loop's
 	// ticker (nil without -trace-dir).
 	seg *segOutput
+	// follow is a -listen-port session's wait for a restarted owner
+	// (decision #23, task mh4); nil for a PID or pattern session.
+	follow *portFollow
+	// log is where the session reports what it decides on its own (a
+	// followed or refused port owner): run's stderr, io.Discard in tests.
+	log io.Writer
 }
 
 func newSession(tr tracer, c *correlate.Correlator, cfg runConfig) *session {
-	s := &session{tr: tr, c: c, spec: cfg.spec, live: map[uint32]uint64{}}
+	s := &session{tr: tr, c: c, spec: cfg.spec, live: map[uint32]uint64{}, log: io.Discard}
+	if cfg.spec.Mode() == target.ModeListenPort {
+		s.follow = newPortFollow(cfg)
+	}
 	if cfg.spec.Mode() == target.ModePattern {
 		s.pattern = cfg.spec.Pattern
 		// The spec was validated, so the pattern compiles.
@@ -64,8 +75,12 @@ func newSession(tr tracer, c *correlate.Correlator, cfg runConfig) *session {
 // (attachIdentity): a target already running has no exec event to carry
 // them. A pattern scan runs after the probes attached, so a process
 // exec'ing meanwhile is seen by the scan, by its exec record, or by both
-// — adopt takes it once.
+// — adopt takes it once. A port session also remembers its owners'
+// keys, by which it recognises them after a restart (portFollow).
 func (s *session) start(pids []uint32) error {
+	if s.follow != nil {
+		s.follow.remember(pids)
+	}
 	for _, pid := range pids {
 		id := attachIdentity(pid)
 		s.live[pid] = id.StartNS
@@ -93,25 +108,36 @@ func (s *session) start(pids []uint32) error {
 	return nil
 }
 
-// adoptRunning traces a process the start scan found. Its start time is
-// read before the insert and its liveness checked after: a process that
-// exited in between had its exit handled before the entry existed, so
-// nothing would ever remove the entry, and a later process under the PID
-// would be traced. Such an entry is removed again. Its earlier syscalls
-// precede the session, so they are no attach gap. Its exec precedes the
-// session too, so its attach carries its command line (attachIdentity).
+// adoptRunning traces a process the start scan found (addRunning). Its
+// earlier syscalls precede the session, so they are no attach gap. Its
+// exec precedes the session too, so its attach carries its command line
+// (attachIdentity).
 func (s *session) adoptRunning(pid uint32) error {
 	id := attachIdentity(pid)
 	if id.StartNS == 0 {
 		return nil // gone already
 	}
-	if err := s.tr.AddTarget(pid); err != nil {
+	added, err := s.addRunning(pid, id.StartNS)
+	if err != nil || !added {
 		return err
 	}
-	if !processAlive(pid, id.StartNS) {
-		return s.tr.RemoveTarget(pid)
-	}
 	return s.adopt(pid, id, 0)
+}
+
+// addRunning puts a running process, started at start, into target_map
+// and reports whether it is still there. The start time is read before
+// the insert and the liveness checked after: a process that exited in
+// between had its exit handled before the entry existed, so nothing
+// would ever remove the entry, and a later process under the PID would
+// be traced. Such an entry is removed again.
+func (s *session) addRunning(pid uint32, start uint64) (bool, error) {
+	if err := s.tr.AddTarget(pid); err != nil {
+		return false, err
+	}
+	if !processAlive(pid, start) {
+		return false, s.tr.RemoveTarget(pid)
+	}
+	return true, nil
 }
 
 // handleAll handles one batch of records in order; the first error stops
@@ -279,8 +305,10 @@ func childStart(r *types.TaskNewtaskEvent) uint64 {
 // every target and followed child exited. Exit records remove most of
 // them; this also drops those whose exit record was lost, by asking /proc
 // whether that incarnation still lives (a reused PID, a zombie, a thread
-// id or an unknown start time does not). A pattern session is never over: it waits for the
-// app to re-appear (decision #23) until its duration or a stop.
+// id or an unknown start time does not). A pattern session is never
+// over: it waits for the app to re-appear (decision #23) until its
+// duration or a stop. A port session that is over may still go on: it
+// waits for a restarted owner (ended, followPort).
 func (s *session) over() bool {
 	if s.pattern != "" {
 		return false

@@ -1245,9 +1245,22 @@ scenarios landing first (principle #1).
    byte, `\` escapes; a pattern without a literal character is
    refused (it would trace every process). `Matches` tries the
    argv joined by spaces, then the exe path — never the comm.
-   `-listen-port` resolves the owners once, at start
-   (`/proc/net/tcp{,6}` LISTEN inode → `/proc/*/fd`); following
-   the port across restarts stays open for M6 (decision #23).
+   `-listen-port` resolves the owners at start
+   (`/proc/net/tcp{,6}` LISTEN inode → `/proc/*/fd`), never a
+   service manager (an exe named `systemd` holding a
+   socket-activated listener). Task mh4 follows the port across
+   restarts (decision #23, `internal/cli/portfollow.go`): the
+   session keeps each start owner's `target.Owner` (exe without
+   " (deleted)", effective uid); once its live set is empty,
+   `session.ended` re-resolves the port every
+   `portFollowEvery` (1s) for `-listen-grace` (default 2m),
+   adopts a holder with a remembered key (`AddTarget`, the
+   liveness re-check of `addRunning`, `Correlator.Seed` → an
+   `attach` of the new incarnation) and names refused holders
+   once on stderr. No match within the grace ends the session
+   `targets_exited` with a stderr line saying so; 0 ends at
+   once. `TestListenPortFollowsRestart` (integration, root)
+   kills and restarts an `edgepeer port-owner` on one port.
 
    Pattern sessions load the object with `IORMESH_EXEC_WATCH`
    set: every exec of an untraced process is reported as an
@@ -5885,7 +5898,8 @@ depends on:
    `iormesh run` as its process, with example args
    (`k8s.DefaultSidecarArgs`) the owner replaces by the app's
    target; either target races the app (`-listen-port` resolves
-   once at start, `-pattern` sees only later execs).
+   at start and only then follows the port, `-pattern` sees only
+   later execs).
    - **Trace dir** (review B1): the kubelet makes an emptyDir's
      root 0777 (setgid too under `fsGroup`), which the segment
      writer's trust check refuses, and must. So the volume mounts

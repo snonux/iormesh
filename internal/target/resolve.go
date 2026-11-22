@@ -20,7 +20,7 @@ const tcpListen = "0A"
 //     possibly none — later ones are matched on exec. self and its
 //     ancestors are skipped (ProcFS.Ancestors);
 //   - ListenPort: the owners of the sockets listening on the port, at
-//     least one.
+//     least one, never a service manager (ListenOwners).
 func (s Spec) Resolve(p ProcFS, self uint32) ([]uint32, error) {
 	switch s.Mode() {
 	case ModePattern:
@@ -79,6 +79,12 @@ func IsTracer(exe, selfExe string) bool {
 // ListenOwners returns the processes holding a TCP socket (IPv4 or IPv6)
 // that listens on port, sorted. None is an error: the session would trace
 // nothing. Sockets in other network namespaces are not seen.
+//
+// A service manager holding the listener (systemd socket activation:
+// pid 1 or a user manager keeps the socket and hands it to the service)
+// is never an owner (decision #23, task mh4): tracing it would follow
+// every service it spawns. A port only a manager holds is an error of
+// its own — the service is not running.
 func (p ProcFS) ListenOwners(port uint16) ([]uint32, error) {
 	inodes := map[string]bool{}
 	for _, f := range []string{"tcp", "tcp6"} {
@@ -96,7 +102,22 @@ func (p ProcFS) ListenOwners(port uint16) ([]uint32, error) {
 	if len(owners) == 0 {
 		return nil, fmt.Errorf("%w: no visible process owns the listener on TCP port %d", ErrSpec, port)
 	}
-	return owners, nil
+	apps := slices.DeleteFunc(slices.Clone(owners), func(pid uint32) bool {
+		return IsServiceManager(p.Exe(pid))
+	})
+	if len(apps) == 0 {
+		return nil, fmt.Errorf("%w: only the service manager (pid %v) holds the listener on TCP port %d "+
+			"(socket activation; the service is not running)", ErrSpec, owners, port)
+	}
+	return apps, nil
+}
+
+// IsServiceManager reports whether exe, a process's executable, is a
+// service manager that holds socket-activated listeners for its services:
+// systemd, as pid 1 or as a user manager. Matched by name, since its path
+// differs between distributions (/usr/lib/systemd/systemd on el9).
+func IsServiceManager(exe string) bool {
+	return exe != "" && filepath.Base(strings.TrimSuffix(exe, deletedSuffix)) == "systemd"
 }
 
 // listenInodes adds the inode of every LISTEN socket on port in one
