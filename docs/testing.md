@@ -2355,13 +2355,30 @@ leaves kube-proxy's mode alone (k3s embeds kube-proxy; there is no
 daemonset to switch) and runs `TestKindAcceptance` and
 `TestKindClusterIP` in the cluster's own mode. It still starts the
 laptop's registry on `localhost:5001`, builds and pushes both
-images, and installs Traefik with helm. Its teardown
-(`kindrun.Existing`) uninstalls that Traefik release, deletes the
-namespaces `traefik`, `iormesh-m7` and `iormesh-m7-clusterip`
-(Traefik's CRDs, which helm never removes, stay), removes the
-registry and images as the kind path does, and keeps the
-operator's kubeconfig; the base-image state goes to
-`.k8s-existing.state.json` at the repository root. The SIGTERM
+images, and installs Traefik with helm. The cluster is the
+operator's, and a release `traefik` in namespace `traefik` is the
+chart's documented install of a cluster's own ingress controller
+(task li4). So before touching the cluster the run claims its
+namespaces (`kindrun.ClaimExisting`): it refuses when `traefik`,
+`iormesh-m7` or `iormesh-m7-clusterip` is already there and not
+recorded as its own, or when it cannot list them, and otherwise
+records the kubeconfig, the context, the Traefik release and the
+namespaces in `.k8s-existing.state.json` at the repository root,
+beside the base-image state. The teardown removes only what that
+record names, in the recorded kubeconfig and context (not the
+kubeconfig's current one, which may point elsewhere by then):
+it uninstalls the release and deletes the namespaces (Traefik's
+CRDs, which helm never removes, stay). Without a record — a run
+refused or failed before its claim, a bare `mage k8sTeardown` —
+it leaves the cluster alone; when the namespace deletion fails,
+the state file stays for the next `mage k8sTeardown`. It removes
+the registry and images as the kind path does and keeps the
+operator's kubeconfig. A record of another context makes the next
+run refuse until that one is torn down; the refused run's own
+teardown leaves that record and its objects alone for an explicit
+`mage k8sTeardown`. A record naming no kubeconfig or context (a
+hand-edited state file) is not acted on in the cluster: the
+teardown says so, keeps the state file and fails. The SIGTERM
 check reads the tracer's exit through `IORMESH_K8S_CRICTL`, the
 argv prefix that runs crictl on the node (`ssh root@<node> k3s
 crictl`), and skips without it. Without `IORMESH_K8S_KUBECONFIG`
@@ -2394,8 +2411,12 @@ registry. Trace data stays on the laptop and the node. Delete the
 copied kubeconfig after the run.
 
 The harness option and the script are unit-tested
-(`TestTeardownExisting`, `TestExistingConfig`, `TestCrictlPrefix`;
-the script with shellcheck).
+(`TestTeardownExisting`, `TestExistingConfig`, `TestCrictlPrefix`,
+the claim and record in `TestClaimExistingRefusesTaken`,
+`TestClaimExistingUnreachable`, `TestClaimExistingRecords`,
+`TestTeardownExistingWithoutRecord`,
+`TestTeardownExistingKeepsRecord`, `TestRefusedRunLeavesForeignRecord`
+and `TestTeardownRecordWithoutContext`; the script with shellcheck).
 
 #### Run on Rocky 9.9 (task zg4, 2026-11-21)
 
