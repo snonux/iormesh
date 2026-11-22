@@ -384,6 +384,29 @@ func TestTestArgvRunsEverything(t *testing.T) {
 		[]string{"go", "clean", "-testcache"})
 }
 
+// TestRaceArgvRunsTheChosenSet pins `mage testRace` (task ij4): the -race
+// command line, the package listing it filters, and the exclusions, which
+// docs/testing.md justifies by measured cost. Growing RaceExcluded quietly
+// takes packages out of the race gate, so a change has to be reviewed here.
+func TestRaceArgvRunsTheChosenSet(t *testing.T) {
+	assertArgvAllowed(t, "ListPackages", gatecmd.ListPackages(),
+		[]string{"go", "list", "./..."})
+	assertArgvAllowed(t, "TestRace", gatecmd.TestRace([]string{"p/a", "p/b"}),
+		[]string{"go", "test", "-race", "-count=1", "-failfast", "-timeout=15m", "p/a", "p/b"})
+	assertArgvAllowed(t, "RaceExcluded", gatecmd.RaceExcluded(),
+		[]string{"iormesh/internal/ctl", "iormesh/internal/generate"})
+
+	listed := []string{"iormesh/cmd/iormesh", "iormesh/internal/ctl",
+		"iormesh/internal/ctlx", "iormesh/internal/generate", "iormesh/internal/segment"}
+	want := []string{"iormesh/cmd/iormesh", "iormesh/internal/ctlx", "iormesh/internal/segment"}
+	if got := gatecmd.RacePackages(listed); !slices.Equal(got, want) {
+		t.Errorf("RacePackages(%v) = %v, want %v: only the exact excluded paths may go", listed, got, want)
+	}
+	if got := gatecmd.RacePackages(nil); len(got) != 0 {
+		t.Errorf("RacePackages(nil) = %v, want none", got)
+	}
+}
+
 // assertArgvAllowed compares an argv against the reviewed one exactly.
 //
 // An allow-list rather than a list of flags known to be bad, because

@@ -52,6 +52,8 @@ mage generate      # tracepoint formats -> C handlers, Go tables, Go types,
 mage bpfBuild      # vmlinux.h (first run) + clang CO-RE -> iormesh.bpf.o
 mage build         # bpfBuild + go build ./... + ./iormesh, ./iormeshctl
 mage test          # go test ./... (the generator's C harness tests too)
+mage testRace      # go test -race, all but generate and ctl
+                   # (docs/testing.md, "Race detector gate")
 mage vet           # go vet ./... with the cgo environment
 mage lint          # golangci-lint: errcheck + staticcheck SA
 mage fmt / fmtCheck

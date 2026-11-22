@@ -68,6 +68,46 @@ introspection.
   traces, with answers known from the scenario declarations,
   rerun on every schema change.
 
+## Race detector gate (task ij4)
+
+`mage testRace` runs the Go suite once more under `-race`
+(`go test -race -count=1 -failfast -timeout=15m`). It belongs
+to the gate beside `mage test`; `mage test` itself stays
+without `-race`, since the detector multiplies the cost of the
+two slowest packages many times over. The package set is
+every package `go list ./...` names minus a deny-list,
+`gatecmd.RaceExcluded`, so a new package is race-checked from
+its first commit; `internal/buildgate` pins the argv and the
+list.
+
+Measured on 2026-11-22 (`go test -race -p 2 ./internal/...`,
+GOMAXPROCS=4, nice 15, a loaded host):
+
+| package | under `-race` | in the race gate |
+|---|---|---|
+| `internal/generate` | 2099 s | no: its tests compile and run C harness programs, and its Go code starts no goroutine |
+| `internal/ctl` | 947 s | no: neither its code nor its tests start a goroutine or call `t.Parallel`; what it drives (segment, federate, k8s) is race-checked in those packages |
+| every other package | under 60 s each | yes, among them all that start goroutines: acceptance, bpf, cli, stacks |
+
+So the gate costs a few minutes, not the 50 the whole module
+would. The 15-minute timeout is per test binary and stops a
+hung test long before `mage test`'s 90. A package that turns
+out slow under `-race` goes into `RaceExcluded` with its
+measured cost and a row here. `IORMESH_RACE_PKGS="./internal/a
+./internal/b"` replaces the set for a run on one or two
+packages while working on them.
+
+The two failures the first run found are fixed: the acceptance
+runner's log writer is locked (background workload roles log
+while the run does), and `internal/segment`'s
+`TestReadHostileFile` skips under `-race` only (a `race`
+build-tagged constant): there parquet-go's `unsafe.Slice(nil,
+n)` on a flipped footer is a fatal runtime throw, not the
+panic the reader recovers, so it would kill the test binary.
+It still runs in `mage test`. The root suites
+(`mage bpfRootTest`, `mage integrationTest`) are not run under
+`-race`.
+
 ## Integration tests follow ior
 
 The end-to-end suite lifts ior's `integrationtests/` pattern

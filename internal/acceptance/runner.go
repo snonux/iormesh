@@ -6,6 +6,7 @@ import (
 	"io"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"iormesh/internal/federate"
@@ -33,6 +34,9 @@ type Runner struct {
 	cfg   Config
 	ctl   Ctl
 	hosts *hostGate
+	// out is written by logf from the run's goroutine and from the
+	// background roles javaBG starts; outMu serialises those writes.
+	outMu sync.Mutex
 	out   io.Writer
 	sleep func(ctx context.Context, d time.Duration) error
 	res   results
@@ -119,7 +123,14 @@ func (r *Runner) ctlRun(ctx context.Context, args ...string) (string, error) {
 	return r.ctl.Run(ctx, args...)
 }
 
+// logf prints one log line. It holds outMu: a background role (javaBG)
+// logs its remote commands while the run's goroutine logs its own, and an
+// io.Writer such as the tests' bytes.Buffer is not safe for concurrent
+// writes (go test -race reported it). res.print writes r.out unlocked
+// because it runs only after every background role has been settled.
 func (r *Runner) logf(format string, args ...any) {
+	r.outMu.Lock()
+	defer r.outMu.Unlock()
 	_, _ = fmt.Fprintf(r.out, format+"\n", args...)
 }
 

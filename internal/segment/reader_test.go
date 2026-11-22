@@ -219,8 +219,12 @@ func readHostile(t testing.TB, data []byte) {
 // single-byte flip of a real segment (the footer's included, where
 // parquet-go panics in its column loader) and footer lengths far past
 // the file — is an error, never a panic and never a multi-GiB
-// allocation.
+// allocation. It skips under -race only (raceEnabled, race_on_test.go):
+// there parquet-go's unsafe.Slice(nil, n) is a fatal throw, not a panic.
 func TestReadHostileFile(t *testing.T) {
+	if raceEnabled {
+		t.Skip("parquet-go's unsafe.Slice(nil, n) on a hostile footer is a fatal throw under -race, not a recoverable panic; the test runs without -race")
+	}
 	good := goodSegment(t)
 	r := rand.New(rand.NewPCG(1, 2))
 	flips := 3000
