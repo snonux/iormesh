@@ -3451,7 +3451,11 @@ iormeshctl rm app1.example.org                    # the whole host
   outlives the processes. Tracer flags the entry or deploy own
   (`-project`, `-pattern`, `-listen-port`, `-pid`, `-out`) are
   refused after HOST — usually an iormeshctl flag in the wrong
-  place.
+  place. So is any flag every later deploy would refuse (task
+  ji4): one the sudoers rule bars (`-out`, `-cpuprofile`,
+  `-ready`), or `-trace-dir`/`-spool`/`-agent` off the path
+  deploy pins. An older registry holding one still loads; deploy
+  names the entry and contacts no host.
 - Hosts are `[user@]name` from `[A-Za-z0-9._-]`, never starting
   with `-` (an ssh option); IPv6 literals need an ssh_config
   alias. Project labels follow the tracer's rule

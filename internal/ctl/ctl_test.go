@@ -73,6 +73,26 @@ func TestAddRm(t *testing.T) {
 	}
 }
 
+// TestAddPinnedPaths: add stores -trace-dir/-spool/-agent when they name
+// the paths deploy pins them to; other values are refused
+// (TestCommandErrors).
+func TestAddPinnedPaths(t *testing.T) {
+	e, _, stderr, path := testEnv(t)
+	flags := []string{"-trace-dir", "/opt/iormesh/traces", "--spool=/run/iormesh/spool/shop/",
+		"-agent", "/opt/iormesh/lib/iormesh-agent.jar"}
+	args := append([]string{"add", "-project", "shop", "-pattern", "java", "app1"}, flags...)
+	if code := run(args, e); code != exitOK {
+		t.Fatalf("exit %d, stderr %s", code, stderr)
+	}
+	r, err := federate.LoadRegistry(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Servers[0].Projects[0].Flags; !reflect.DeepEqual(got, flags) {
+		t.Errorf("flags %q, want %q", got, flags)
+	}
+}
+
 // TestCommandErrors: each failure exits non-zero, says why, and leaves
 // the registry as it was.
 func TestCommandErrors(t *testing.T) {
@@ -91,6 +111,9 @@ func TestCommandErrors(t *testing.T) {
 		{"option host after --", []string{"add", "-project", "x", "-pattern", "java", "--", "-oProxyCommand=id"}, exitError, "invalid entry"},
 		{"flag after host", []string{"add", "-pattern", "java", "app2", "-project", "x"}, exitUsage, "go before HOST"},
 		{"owned tracer flag", []string{"add", "-project", "x", "-pattern", "java", "app2", "--out=/tmp"}, exitUsage, "go before HOST"},
+		{"pinned tracer flag", []string{"add", "-project", "x", "-pattern", "j", "host", "-trace-dir", "/data"}, exitUsage, "a deployed session may only use"},
+		{"pinned tracer flag joined", []string{"add", "-project", "x", "-pattern", "j", "host", "--", "--spool=/tmp/s"}, exitUsage, "a deployed session may only use"},
+		{"refused tracer flag", []string{"add", "-project", "x", "-pattern", "j", "host", "-cpuprofile", "/tmp/p"}, exitUsage, "not allowed through the sudoers rule"},
 		{"port range", []string{"add", "-project", "x", "-listen-port", "70000", "app2"}, exitUsage, "out of range"},
 		{"rm two hosts", []string{"rm", "a", "b"}, exitUsage, "exactly one HOST"},
 		{"unknown subcommand", []string{"frobnicate"}, exitUsage, "unknown subcommand"},

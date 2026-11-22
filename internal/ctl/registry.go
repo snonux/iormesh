@@ -9,11 +9,14 @@ import (
 	"iormesh/internal/federate"
 )
 
-// ownedFlags are tracer flags the registry entry or deploy sets itself:
-// the project label, the target and the trace directory. Passed through as
-// well they would contradict the entry — or, since Go's flag parsing stops
-// at HOST, be an iormeshctl flag the operator put after the host by
-// mistake — so add refuses them instead of storing them.
+// ownedFlags are flags the registry entry or deploy sets itself — the
+// project label, the target (-pattern, -listen-port, -pid) and the trace
+// output (-out) — plus iormeshctl's own -registry. Passed through as well
+// they would contradict the entry — or, since Go's flag parsing stops at
+// HOST, be an iormeshctl flag the operator put after the host by mistake —
+// so add refuses them instead of storing them. The trace directory, spool
+// and agent are not here: deploy pins them to fixed paths rather than
+// owning them, and add refuses other values through checkDeployFlags.
 var ownedFlags = map[string]bool{
 	"project": true, "pattern": true, "listen-port": true, "pid": true,
 	"out": true, "registry": true,
@@ -21,7 +24,11 @@ var ownedFlags = map[string]bool{
 
 // addCommand registers a project on a host: iormeshctl add -project NAME
 // (-pattern GLOB | -listen-port N) HOST [TRACER-FLAG...]. Only the
-// registry file changes; nothing contacts the host until deploy.
+// registry file changes; nothing contacts the host until deploy. Tracer
+// flags every later deploy would refuse (checkDeployFlags: a refused flag,
+// or -trace-dir/-spool/-agent off its pinned path) are refused here too:
+// stored, they would fail each deploy naming the host, and no command
+// edits flags, so the only cure would be rm and add.
 func addCommand(args []string, e env) error {
 	fs := newFlagSet("add", e.stderr)
 	name := fs.String("project", "", "project label (required, decision #21)")
@@ -43,6 +50,9 @@ func addCommand(args []string, e env) error {
 	}
 	p := federate.Project{Name: *name, Flags: flags,
 		Target: federate.Target{Pattern: *pattern, ListenPort: uint16(*port)}}
+	if err := checkDeployFlags(p); err != nil {
+		return fmt.Errorf("%w: %v", errUsage, err)
+	}
 	return editRegistry(*path, e, func(r *federate.Registry) error {
 		return r.Add(host, p)
 	}, fmt.Sprintf("added %s project %s", host, *name))
@@ -94,7 +104,7 @@ func checkTracerFlags(flags []string) error {
 
 // firstOwnedFlag returns the first of flags naming an ownedFlags entry,
 // or "". add refuses it when storing an entry, deploy when starting one
-// (a hand-edited registry may carry it).
+// (a hand-edited or older registry may carry it; it still loads).
 func firstOwnedFlag(flags []string) string {
 	for _, f := range flags {
 		if !strings.HasPrefix(f, "-") {
