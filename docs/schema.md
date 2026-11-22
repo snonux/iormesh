@@ -1111,6 +1111,9 @@ and the structure stays:
 | `https://bob:s@h/p?k=s` (anywhere in an argument) | `https://bob:***@h/p?k=***` |
 | `jdbc:sqlserver://h;user=u;password=s` | `jdbc:sqlserver://h;user=***;password=***` |
 | `https://h/cb#access_token=s` | `https://h/cb#access_token=***` — fragment parameters too |
+| `-d grant_type=x&client_secret=s`, `jdbc:h2:file:/d;USER=u;PASSWORD=s` | `client_secret=***`, `PASSWORD=***` — a `&`/`;` run is judged pair by pair, the other pairs stay |
+| `jdbc:oracle:thin:scott/s@//db:1521/svc` | `jdbc:oracle:thin:scott/***@//db:1521/svc` |
+| `https://h/?q=a b&token=s`, `https://h/?token=a's` (one argument) | `https://h/?q=***&token=***`, `https://h/?token=***` — a URL starting an argument runs to its end |
 | `--token s` in one element; `sh -c "mysql -ps"` | `--token ***`; `mysql -p***` — several words are redacted word by word, separators and quoting kept |
 | `curl -H "Authorization: Bearer s"`, `--header=Cookie: s`, `--api_key:s`, `pass:s` | `Authorization: ***`, `--header=Cookie: ***`, `--api_key:***`, `pass:***` |
 | `sudo -u root mysql -ps`, `env X=1 mysql -p s`, `docker login -p s` | `-p***`, `-p ***`, `-p ***` — a flag rule applies after any word naming its program |
