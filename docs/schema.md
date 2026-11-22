@@ -833,7 +833,7 @@ before the reply was committed has no `status`.
 
 | `http` field | Type | Meaning |
 |---|---|---|
-| `method`, `scheme` | string | as the library had them; `scheme` `https` over TLS (seen at the API boundary, never on the wire) |
+| `method`, `scheme` | string | as the library had them; `scheme` `https` over TLS (seen at the API boundary, never on the wire), empty when the library did not say (Netty: an unreadable pipeline) |
 | `host` | string, optional | the request URI's host — client side only |
 | `path` | string, optional | path and query, every query (and `;`/`#` parameter) value masked; path segments verbatim (#22's default) |
 | `status` | int, optional | the response's status; absent when none came |
