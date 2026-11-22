@@ -159,7 +159,8 @@ IPv4 peers of dual-stack sockets are written unmapped
 
 | `snd_una`, `rcv_nxt` | `tcp_state` only, optional (appended in M4): the socket's `tcp_sock` fields of those names at the transition, u32 |
 | `bytes_acked`, `bytes_received` | `tcp_state` only, optional (appended in M4): the `tcp_sock` byte counters, u64 |
-| `tcp_seq` | optional (appended in M4): the TCP sequence number of the first stream byte the call moved, u32; the call moved `[tcp_seq, tcp_seq + bytes)` mod 2³². Only on an unfolded `write`, `writev`, `sendto`, `sendfile64`, `read`, `readv` or `recvfrom` with a `conn_id` that moved bytes |
+| `tcp_seq` | optional (appended in M4): the TCP sequence number of the first stream byte the call moved, u32; the call moved `[tcp_seq, tcp_seq + bytes)` mod 2³². Only on an unfolded `write`, `writev`, `sendto`, `sendfile64`, `sendmsg`, `sendmmsg`, `read`, `readv`, `recvfrom`, `recvmsg` or `recvmmsg` with a `conn_id` that moved bytes |
+| `bytes_partial` | `sendmmsg` and `recvmmsg` only, optional (appended in M4, task oh4): `true` when `bytes` is a lower bound — the tracer could not read every message's length (a faulting read, more messages than its cap, a lost enter). Never `false`; such a record carries no `tcp_seq` |
 | `pattern` | `attach` only, optional (appended in M4, task ze4): the `-pattern` the session matched the process by; with the project it names the app (`app:<project>/<pattern>`). Absent for a `-pid` or port target. Never empty |
 | `parent_pid`, `parent_incarnation` | `fork` only, both or none (appended in M4, task ze4): the process that forked the child, as its own events name it (raw pid, u32; incarnation, u64); absent when the kernel record could not say |
 | `sock_snapshot` | `tcp_state` only, optional (appended in M4, task sf4): `final` on the tracer's snapshot of a socket still open when the session ended — no transition, `sock_state` is the socket's state then, and the four `tcp_sock` fields are always present; absent on every other record, the accept snapshot's included |
@@ -217,7 +218,9 @@ number) when nothing was received after it (task wi4). So a
 send racing another thread's send on the same socket, a
 `MSG_PEEK` or `MSG_OOB` read (`copied_seq` does not move, or
 skips the urgent byte), a kTLS socket (`write_seq` counts
-record framing) and a TCP Fast Open send (the ISN is chosen inside the call) carry none: no
+record framing), a TCP Fast Open send (the ISN is chosen inside
+the call) and a `sendmmsg`/`recvmmsg` whose message lengths
+the tracer could not all read (`bytes_partial`) carry none: no
 `tcp_seq` is ever a guess. Neither does a call on a kernel
 without the `bpf_rdonly_cast` kfunc (before 6.2), where the
 tracer cannot read the socket cheaply, nor one whose socket the
@@ -376,7 +379,9 @@ The environment is never captured (decision #9).
 
 Each family is decision #7's (`internal/schema/kinds_ipc.go`;
 families in `internal/tracepoints/trace_family.go`): `bind`,
-`sendto` and `recvfrom` belong to the default-on socket family,
+`sendto`, `recvfrom` and the msghdr data calls `sendmsg`,
+`recvmsg`, `sendmmsg` and `recvmmsg` (task oh4) belong to the
+default-on socket family,
 the rest to opt-in ones — `iormesh run -trace-families
 ipc,signal,poll,zerocopy` (or `all`) adds them.
 
@@ -385,6 +390,8 @@ ipc,signal,poll,zerocopy` (or `all`) adds them.
 | socket | `bind` | the socket | AF_UNIX: `path`; inet: `local_addr`/`local_port` (the bound address; the kernel's port for port 0) |
 | socket | `connect` (M1) | the socket | TCP: the 4-tuple; AF_UNIX: `path` |
 | socket | `sendto`, `recvfrom` | the socket | `bytes`; per datagram `local_*` and `remote_*` (the peer it went to or came from); AF_UNIX: `path`. On a stream socket (`send`/`recv` on a TCP or unix connection) only the connection's 4-tuple, as `read`/`write` |
+| socket | `sendmsg`, `recvmsg` | the socket | `bytes` (the return); on a connected socket the connection's 4-tuple, as `read`/`write`; `tcp_seq` on TCP. The peer address inside the msghdr is not read yet |
+| socket | `sendmmsg`, `recvmmsg` | the socket | `ret`: the messages moved; `bytes`: the sum of their lengths (`msg_len`), `bytes_partial` when incomplete; otherwise as `sendmsg` |
 | ipc | `pipe`, `pipe2`, `socketpair` | the first end (a pipe's read end) | `fd2`, `fd2_gen`: the second end |
 | signal | `kill`, `tgkill`, `tkill` | `-1` | `target_pid`, `signal` |
 | signal | `signal` | `-1` | `signal`, `sender_pid`; `pid`/`tid` are the receiver |

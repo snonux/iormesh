@@ -79,15 +79,20 @@ func TestEl9RecordLayout(t *testing.T) {
 // seqDataPrograms are tail-call targets that read tcp_sock fields through
 // CO-RE relocations (internal/c/tcpseq.c, tasks xe4 and wi4), so
 // rawSyscallPrograms does not cover them: the data calls' enter and exit
-// handlers.
+// handlers, the msghdr calls' included (task oh4; the mmsg exits reach
+// tcpseq.c's check through mmsg.c).
 var seqDataPrograms = []string{
 	"handle_sys_enter_read", "handle_sys_exit_read",
 	"handle_sys_enter_readv", "handle_sys_exit_readv",
 	"handle_sys_enter_recvfrom", "handle_sys_exit_recvfrom",
+	"handle_sys_enter_recvmsg", "handle_sys_exit_recvmsg",
+	"handle_sys_enter_recvmmsg", "handle_sys_exit_recvmmsg",
 	"handle_sys_enter_write", "handle_sys_exit_write",
 	"handle_sys_enter_writev", "handle_sys_exit_writev",
 	"handle_sys_enter_sendto", "handle_sys_exit_sendto",
 	"handle_sys_enter_sendfile64", "handle_sys_exit_sendfile64",
+	"handle_sys_enter_sendmsg", "handle_sys_exit_sendmsg",
+	"handle_sys_enter_sendmmsg", "handle_sys_exit_sendmmsg",
 }
 
 // checkRelocatesClean relocates progs against btfPath and requires that no

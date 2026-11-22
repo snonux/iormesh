@@ -2,8 +2,9 @@
 // Changes: the prologue calls renderSockOwnerHook (sockowner.go); read and
 // write call the rwagg.c hooks (rwagg.go, M2 step 11); every enter handler
 // calls the stack.c hook (renderStackHook, M2 step 9) and the javamark.c hook
-// (renderJavaMarkHook, task td4); the seven TCP data calls call the tcpseq.c
-// hooks (renderTCPSeqHook, task xe4); handlers read their context as the
+// (renderJavaMarkHook, task td4); the TCP data calls call the tcpseq.c
+// hooks (renderTCPSeqHook, task xe4; the msghdr calls too, sendmmsg and
+// recvmmsg through mmsg.c, task oh4); handlers read their context as the
 // raw_syscalls record they are tail-called with (handlerCtxStruct, task lb4);
 // renderSyscallHook's comment no longer cites restart.c (task pf4).
 

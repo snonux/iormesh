@@ -26,13 +26,18 @@ func m1FileSyscalls() []string {
 // a TCP socket to its fd, plus M2 step 7's bind (a unix socket's name, a
 // server's port) and the datagram calls, whose address argument is a UDP
 // peer (internal/c/sockaddr.c). read, write and close come along so the
-// family alone still sees a connection's data. sendmsg/recvmsg (and their
-// mmsg forms) are not attached: their addresses sit inside a msghdr the
-// hooks do not walk yet, and the JDK's DatagramChannel uses sendto and
-// recvfrom.
+// family alone still sees a connection's data. sendmsg, recvmsg and their
+// mmsg forms are socket data calls too (task oh4): a stream's bytes that
+// went through them would escape the byte sums the merge's clock proof
+// trusts (PLAN.md M4), so they are on by default with the rest of the
+// family. Their bytes and tcp_seq are captured (the mmsg calls' bytes are
+// their messages' msg_len sum, internal/c/mmsg.c); a datagram's peer
+// inside the msghdr is not walked yet - the JDK's DatagramChannel sends
+// through sendto and recvfrom anyway.
 func socketSyscalls() []string {
 	return []string{"read", "write", "close",
-		"connect", "accept", "accept4", "bind", "sendto", "recvfrom"}
+		"connect", "accept", "accept4", "bind", "sendto", "recvfrom",
+		"sendmsg", "recvmsg", "sendmmsg", "recvmmsg"}
 }
 
 // fileSurfaceSyscalls is M2 step 4's file surface, on by default

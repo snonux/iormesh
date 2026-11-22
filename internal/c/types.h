@@ -11,7 +11,8 @@
 // (tcpseq.c, task xe4); SYSCALL_RESTART_EVENT's comments say no program
 // emits it (task pf4); TCP_STATE_FINAL added (sock.c, task sf4);
 // task_rename_event's comment names its consumer (task 0g4); comments that
-// cited ior's Go files name them as ior's (task gj4).
+// cited ior's Go files name them as ior's (task gj4); MMSG_EVENT,
+// MMSG_BYTES_PARTIAL and struct mmsg_event added (mmsg.c, task oh4).
 
 //+build ignore
 
@@ -141,6 +142,11 @@
 // sequence number of its first byte, sent by the call's exit hook in place
 // of its ret_event (struct tcp_seq_event, tcpseq.c, M4, task xe4).
 #define TCP_SEQ_EVENT 77
+// iormesh: the exit record of a sendmmsg or recvmmsg that moved messages,
+// with the byte sum of its messages and, on a TCP socket, the sequence
+// number of its first byte; sent by the call's exit hook in place of its
+// ret_event (struct mmsg_event, mmsg.c, task oh4).
+#define MMSG_EVENT 78
 
 #define UNCLASSIFIED 0
 #define READ_CLASSIFIED 1
@@ -1323,4 +1329,36 @@ struct tcp_seq_event {
     __u64 sk;
     __u32 seq;
     __u32 reserved;
+};
+
+// Flags of mmsg_event.
+// MMSG_BYTES_PARTIAL: total_bytes is a lower bound - the exit could not
+// read every message's msg_len (a faulting read, more messages than
+// mmsg.c's cap, or no parked enter to find the array by).
+#define MMSG_BYTES_PARTIAL 1
+
+// mmsg_event (iormesh, mmsg.c, task oh4) is the exit record of a sendmmsg
+// or recvmmsg that returned at least one message, sent in place of its
+// ret_event: ret_event's fields - ret is the message count, as the syscall
+// returns it - plus total_bytes, the sum of the msg_len the kernel wrote
+// into the first ret entries of the caller's mmsghdr array, read at the
+// exit (rw_aggregate_event's name for a sum; a field named bytes would
+// clash with the generated Go type's Bytes method). sk and seq are
+// tcp_seq_event's: on a TCP socket whose write_seq (copied_seq) moved by
+// exactly total_bytes between the call's enter and exit,
+// the struct sock and the sequence number of the call's first byte (the
+// messages' bytes are contiguous in the stream); sk is 0 otherwise, and
+// always with MMSG_BYTES_PARTIAL in flags. A call that moved nothing
+// (ret <= 0) sends its plain ret_event. 56 bytes, no implicit padding.
+struct mmsg_event {
+    __u32 event_type;
+    __u32 trace_id;
+    __u64 time;
+    __s64 ret;
+    __u32 pid;
+    __u32 tid;
+    __u64 total_bytes;
+    __u64 sk;
+    __u32 seq;
+    __u32 flags;
 };

@@ -33,9 +33,10 @@ import (
 // peer's FIN carries one, and its negative that a read skipping an urgent
 // byte does not. Root only.
 
-// seqSyscalls are the syscalls these tests attach, enter and exit.
+// seqSyscalls are the syscalls these tests and msgcalls_root_test.go
+// attach, enter and exit; the msghdr calls since task oh4.
 var seqSyscalls = []string{"connect", "write", "read", "writev", "readv", "sendto", "recvfrom",
-	"sendfile64", "close"}
+	"sendfile64", "sendmsg", "recvmsg", "sendmmsg", "recvmmsg", "close"}
 
 // seqChild is a running child scenario and the server end of its
 // connection.
@@ -179,11 +180,29 @@ func (s *seqSink) Event(ev *schema.Event) error {
 
 func (s *seqSink) Close() error { return nil }
 
-// events lets the last records arrive, stops collecting and returns the
-// correlator's events of descriptor fd of pid, every event validated. The
+// events is all (below), narrowed to the events of descriptor fd of pid. The
 // connection is unfused (its server end is not traced) and gets its conn
 // id from the correlator's Close.
 func (l *recordLog) events(t *testing.T, pid uint32, fd int32) []schema.Event {
+	t.Helper()
+	return eventsOf(l.all(t), pid, fd)
+}
+
+// eventsOf returns the events of descriptor fd of pid among evs.
+func eventsOf(evs []schema.Event, pid uint32, fd int32) []schema.Event {
+	var out []schema.Event
+	for _, e := range evs {
+		if e.PID == pid && e.FD == fd {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// all is events for every process and descriptor: it lets the last
+// records arrive, stops collecting and returns every event the
+// correlator emitted, each validated.
+func (l *recordLog) all(t *testing.T) []schema.Event {
 	t.Helper()
 	time.Sleep(300 * time.Millisecond)
 	close(l.stop)
@@ -198,16 +217,12 @@ func (l *recordLog) events(t *testing.T, pid uint32, fd int32) []schema.Event {
 	if err := c.Close(); err != nil {
 		t.Fatalf("close correlator: %v", err)
 	}
-	var out []schema.Event
 	for _, e := range sink.events {
 		if err := e.Validate(); err != nil {
 			t.Errorf("%s event invalid: %v", e.Event, err)
 		}
-		if e.PID == pid && e.FD == fd {
-			out = append(out, e)
-		}
 	}
-	return out
+	return sink.events
 }
 
 // established returns the ESTABLISHED tcp_state event among evs: its

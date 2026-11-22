@@ -183,6 +183,14 @@ func appendArgs(dst []byte, a *Args) []byte {
 	optUint(&o, "parent_pid", a.ParentPID)
 	optUint(&o, "parent_incarnation", a.ParentInc)
 	o.str("sock_snapshot", a.SockSnapshot)
+	if a.BytesPartial != nil {
+		o.key("bytes_partial")
+		if *a.BytesPartial {
+			o.dst = append(o.dst, "true"...)
+		} else {
+			o.dst = append(o.dst, "false"...)
+		}
+	}
 	return o.close()
 }
 

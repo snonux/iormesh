@@ -9,7 +9,9 @@ import (
 // args.tcp_seq, the TCP sequence number of the first byte a single send or
 // receive moved. The kernel side (internal/c/tcpseq.c) sends a
 // tcp_seq_event as the exit record of a write, writev, sendto,
-// sendfile64, read, readv or recvfrom on a TCP socket - a ret_event plus
+// sendfile64, sendmsg, read, readv, recvfrom or recvmsg on a TCP socket
+// (sendmmsg and recvmmsg carry theirs in an mmsg_event, mmsg.go) - a
+// ret_event plus
 // the sequence number and the socket - only when the socket's write_seq
 // (copied_seq) moved by exactly the call's return between its enter and
 // its exit, so the range is the call's own. A folded read or write never

@@ -1221,9 +1221,20 @@ Kubernetes (M7) build on it.
   skipped `task_newtask` leaves a child untraced holding a
   socket that may predate connect) and ends without an opening
   call always taint. Receiver-side drops only remove receives.
+  The msghdr data calls count since task oh4: `sendmsg` and
+  `recvmsg` carry their return as bytes and `tcp_seq` by the
+  same exact-move rule; `sendmmsg` and `recvmmsg` return a
+  message count, so their exit sums the messages' `msg_len`
+  from the caller's mmsghdr array (a bounded loop capped at
+  the kernel's own 1024-message clamp, el9's 5.14 verifier
+  takes it) and checks `tcp_seq` against that sum. A sum the
+  tracer could not complete (a faulting read, the cap, a lost
+  park) is marked `args.bytes_partial`, carries no `tcp_seq`
+  and fails its direction's stream check — never a short sum
+  passed off as the whole.
   The stream check is not a proof: it trusts the sums to hold
   every byte, and bytes escape them with no drop recorded —
-  untraced `sendmsg`, `sendmmsg`, `splice`, io_uring; a fork
+  untraced `splice`, io_uring; a fork
   between the untraced `socket()` and `connect()`; an exec
   keeping the socket (its fd binding is dropped); an fd passed
   by `SCM_RIGHTS` or `pidfd_getfd`; and it reads only the drops
@@ -2713,7 +2724,14 @@ deferred.
   (sendfile, splice, tee, copy_file_range) opt-in through
   `iormesh run -trace-families ipc,signal,…|all`. The flag only
   adds: file and socket cannot be turned off (the scenario
-  markers are opens). Renames and mmaps are not families: the
+  markers are opens). Task oh4 grows socket by the msghdr data
+  calls sendmsg, recvmsg, sendmmsg and recvmmsg — in socket,
+  not a family of their own: an opt-in family would leave the
+  clock proof's byte sums open to them by default (M4), and
+  they are socket data calls like sendto/recvfrom. Their
+  events reuse the schema's rule that a syscall kind is its
+  syscall's name (`sendmsg`, …, appended to schema v1).
+  Renames and mmaps are not families: the
   renames are the file surface's, mmaps are not traced yet.
   ior's restart fold (one row for a call a signal interrupted
   and the kernel re-executed) is not part of the signal family
@@ -3528,8 +3546,9 @@ Metadata only — nothing below is payload (see non-goals):
 
 The inventory is the target. Not traced as built (2026-11-22;
 `internal/tracepoints`, default_set.go and trace_family.go):
-file mmaps, eventfd and shared memory (no probes);
-sendmsg/recvmsg/sendmmsg/recvmmsg (planned, task oh4); TLS
+file mmaps, eventfd and shared memory (no probes); the peer
+address inside a sendmsg/recvmsg msghdr (their bytes and
+`tcp_seq` are traced since task oh4, the address is not); TLS
 peer identity (later, decision #8).
 
 ## Trace output contract — built for LLM introspection

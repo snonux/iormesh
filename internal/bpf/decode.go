@@ -7,8 +7,8 @@
 // (M2 step 2), PROCESS_ARGV_EVENT (M2 step 8), SOCK_ADDR_EVENT and
 // SIGNAL_EVENT (M2 step 7), RW_AGGREGATE_EVENT (M2 step 11),
 // STACK_EVENT (M2 step 9), STACK_INLINE_EVENT (task kd4) and
-// JAVA_MARK_EVENT (task td4; its fast decoder, task ud4) and TCP_SEQ_EVENT
-// (task xe4) added.
+// JAVA_MARK_EVENT (task td4; its fast decoder, task ud4), TCP_SEQ_EVENT
+// (task xe4) and MMSG_EVENT (task oh4) added.
 
 package bpf
 
@@ -144,6 +144,10 @@ func addControlDecoders(d map[types.EventType]decoder) {
 	// its first sequence number (tcpseq.c), one per such call, hence the
 	// fast decoder.
 	d[types.TCP_SEQ_EVENT] = typed(types.NewTcpSeqEventFast)
+	// M4 (task oh4): the exit record of a sendmmsg or recvmmsg with its
+	// messages' byte sum (mmsg.c). Rare next to read and write, so the
+	// reflective decoder does.
+	d[types.MMSG_EVENT] = typed(types.NewMmsgEvent)
 }
 
 // decodeFdSizeEvent widens an fd+size record to the FdEvent shape the

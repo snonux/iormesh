@@ -35,8 +35,11 @@ event families `iormesh run -trace-families` adds (see
   socket's state transitions rather than syscall arguments (so
   Java's non-blocking connects are covered), plus a
   NAT-tolerant join key; UDP per-packet
-  peers (sendto/recvfrom; sendmsg and its kin are planned, task
-  oh4), poll/epoll wait registrations, DNS hostname↔IP maps,
+  peers (sendto/recvfrom), the msghdr data calls
+  sendmsg/recvmsg/sendmmsg/recvmmsg with their bytes (the mmsg
+  calls' summed over their messages) and TCP sequence ranges —
+  their datagram peer inside the msghdr is not read yet (task
+  oh4) — poll/epoll wait registrations, DNS hostname↔IP maps,
   and ingress route maps for proxy hops that hide the peer. TLS
   peer identity is later (decision #8). *Who talks to whom,
   under what name — and which threads wait on what.*

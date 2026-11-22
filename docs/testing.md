@@ -1457,6 +1457,29 @@ physical host. Afterwards every host was removed with `rm` from
 both scratch homes (every session collected), bootstrapped again
 with the same build, and the ports and the rich rule removed.
 
+## msghdr data calls (task oh4, 2026-11-22)
+
+`TestMsgCallsTCP` and `TestMsgCallsUDP`
+(`internal/msgcalls_root_test.go`, in `mage bpfRootTest`) run
+through the seq child of the tcp_seq tests. On TCP: a `sendmsg`
+of two buffers and a `sendmmsg` of two messages, then a
+`recvmsg` and a `recvmmsg` of two messages, each pinned to its
+bytes and to `tcp_seq` from the handshake's `snd_una`/`rcv_nxt`;
+the mmsg calls' `ret` stays their message count. Between two
+connected UDP sockets: a `sendmmsg` of three datagrams and the
+`recvmmsg` taking them carry the datagrams' byte sum, the
+single `sendmsg`/`recvmsg` their size, and no record carries
+`tcp_seq`. Red first on the 7.2 laptop: before the change both
+failed (`sends: calls moved [] bytes, want [7 11]`, `udp
+sendmmsg moved 0 bytes, want 60`). The incomplete sums no
+kernel produces — the 1024-message cap, a faulting read, a lost
+park — are pinned by `TestMmsgHarness`, the real
+`internal/c/mmsg.c` compiled against simulated maps, ring and
+user memory with the cap lowered to 4, plus its mutations
+(`TestMmsgHarnessCatchesMutations`). Not yet run on el9 (VMs
+stopped); `TestEl9RecordLayout` relocates the eight new
+handlers against the trimmed el9 BTF.
+
 ## Final socket snapshot (task sf4, 2026-11-21)
 
 `TestSockFinalSnapshot` (`internal/sockfinal_root_test.go`, in
@@ -1526,11 +1549,12 @@ bpfRootTest` now hold the fix on a 7.x host:
   regression (task bg4). A relocation the trimmed BTF cannot
   satisfy makes libbpf poison the instruction (a call with imm
   `0xbad2310`); the test then fails with a hint to regenerate
-  the BTF instead of reporting wrong offsets. The seven data
-  calls' enter and exit handlers (tail-call targets the
-  dispatchers do not cover, reading `tcp_sock` fields for
-  `tcp_seq`) are relocated against the same BTF and checked
-  for poison only (task wi4). A `mage test`
+  the BTF instead of reporting wrong offsets. The data calls'
+  enter and exit handlers (tail-call targets the dispatchers
+  do not cover, reading `tcp_sock` fields for `tcp_seq`) are
+  relocated against the same BTF and checked for poison only
+  (task wi4; the four msghdr calls' handlers too since task
+  oh4). A `mage test`
   gate (`internal/buildgate/testonly_test.go`) keeps
   `internal/corereloc` out of every non-test file.
 - **`TestDispatchSeesSeveralKinds`** traces an open/read/close

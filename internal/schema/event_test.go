@@ -629,11 +629,45 @@ func validStreamWrite() Event {
 	return e
 }
 
+// TestBytesPartial: args.bytes_partial (task oh4) is valid as true on a
+// sendmmsg or recvmmsg without tcp_seq, and round-trips through NDJSON
+// as the last arg; false, another kind or a tcp_seq beside it are
+// invalid.
+func TestBytesPartial(t *testing.T) {
+	e := validStreamWrite()
+	e.Event, e.Ret, e.Args = KindRecvmmsg, 3, Args{BytesPartial: ptr(true)}
+	if err := e.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	line := string(AppendEvent(nil, &e))
+	if !strings.Contains(line, `"args":{"bytes_partial":true}`) {
+		t.Fatalf("encoded args lack bytes_partial:\n%s", line)
+	}
+	got, err := DecodeEvent([]byte(line))
+	if err != nil || got.Args.BytesPartial == nil || !*got.Args.BytesPartial {
+		t.Fatalf("round trip: %+v, %v", got.Args, err)
+	}
+	bad := map[string]func(*Event){
+		"false":        func(e *Event) { e.Args.BytesPartial = ptr(false) },
+		"on sendmsg":   func(e *Event) { e.Event = KindSendmsg },
+		"on write":     func(e *Event) { e.Event = KindWrite },
+		"with tcp_seq": func(e *Event) { e.Args.TCPSeq = ptr(uint32(7)) },
+	}
+	for name, mutate := range bad {
+		e := validStreamWrite()
+		e.Event, e.Ret, e.Args = KindSendmmsg, 2, Args{BytesPartial: ptr(true)}
+		mutate(&e)
+		if err := e.Validate(); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: err %v, want ErrInvalid", name, err)
+		}
+	}
+}
+
 // TestStreamSeqValid: tcp_seq is valid on every unfolded socket data
 // kind, send or receive, and round-trips through NDJSON.
 func TestStreamSeqValid(t *testing.T) {
 	for _, kind := range []string{KindWrite, KindWritev, KindSendto, KindSendfile64,
-		KindRead, KindReadv, KindRecvfrom} {
+		KindSendmsg, KindSendmmsg, KindRead, KindReadv, KindRecvfrom, KindRecvmsg, KindRecvmmsg} {
 		e := validStreamWrite()
 		e.Event = kind
 		if err := e.Validate(); err != nil {

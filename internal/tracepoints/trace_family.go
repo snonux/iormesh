@@ -30,7 +30,8 @@ const (
 	FamilyFile TraceFamily = "file"
 	// FamilySocket is the TCP connect/accept of M1 plus bind and the
 	// datagram calls sendto/recvfrom (M2 step 7): unix sockets and UDP
-	// are sockets, and their addresses ride on these calls.
+	// are sockets, and their addresses ride on these calls. The msghdr
+	// data calls sendmsg/recvmsg/sendmmsg/recvmmsg joined in task oh4.
 	FamilySocket TraceFamily = "socket"
 	// FamilyIPC is pipes and socketpairs: both ends at once, one
 	// connection node.
