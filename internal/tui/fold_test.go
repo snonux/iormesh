@@ -35,6 +35,27 @@ func TestFoldedStepDetail(t *testing.T) {
 	}
 }
 
+// TestRawEventCommandIsInert (task 3i4): a ref is built from segment
+// file names a traced host chooses, so the offered `iormeshctl query
+// -ref` command quotes it as one inert shell word; a plain ref stays
+// unquoted.
+func TestRawEventCommandIsInert(t *testing.T) {
+	for ref, want := range map[string]string{
+		"p/h/x;touch PWNED;y-s/1": `raw event  iormeshctl query -ref 'p/h/x;touch PWNED;y-s/1'` + "\n",
+		"p/h/x'$(id)-s/1":         `raw event  iormeshctl query -ref 'p/h/x'\''$(id)-s/1'` + "\n",
+		"p/h/app-1.example.org-a1b2c3d4/7": "raw event  iormeshctl query -ref " +
+			"p/h/app-1.example.org-a1b2c3d4/7\n",
+	} {
+		c := viewmodel.Conversation{ID: "0001", Steps: []viewmodel.Step{{Kind: viewmodel.StepFile,
+			Label: "read /m", Ref: ref, Lane: -1, ToLane: -1}}}
+		var b strings.Builder
+		stepDetail(&b, c, 0)
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("ref %q: detail lacks %q:\n%s", ref, want, b.String())
+		}
+	}
+}
+
 // TestWholeRunKeepsShellQuoting (task 1i4): the TUI's model goes through
 // viewmodel.Safe, which must not Go-quote a run's query — that broke its
 // single quotes, so pasting it ran the path's text. A rune that is not

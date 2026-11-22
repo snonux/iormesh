@@ -955,7 +955,11 @@ Kubernetes (M7) build on it.
   `ready/`; the union of a session's segments is its tables.
   `<session>` is 8 random hex digits per run (names never
   collide, even in the same second); every file's footer
-  repeats project, FQDN, session, seq and start. A segment
+  repeats project, FQDN, session, seq and start. FQDN and
+  session hold only `[A-Za-z0-9_.:-]`: the writer refuses
+  others and the controller ignores a file named with them,
+  since refs built from the name reach shell commands (task
+  3i4). A segment
   without a single row is not published (an idle session
   leaves no empty files), and a crashed run's footer-less
   active file is removed by the next start.

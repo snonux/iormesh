@@ -28,7 +28,7 @@ func runQuery(host string, tid uint32, path string, first, last uint64) string {
 		"-thread", strconv.FormatUint(uint64(tid), 10), "-file", globLiteral(path),
 		"-from", instant(first), "-to", instant(last + 1)}
 	for i, w := range words {
-		words[i] = shellWord(w)
+		words[i] = ShellWord(w)
 	}
 	return strings.Join(words, " ")
 }
@@ -66,9 +66,11 @@ func wild(r rune) bool {
 	return !unicode.IsPrint(r) || r == utf8.RuneError
 }
 
-// shellWord is s as one inert POSIX shell word: as is when it holds only
-// safe characters, else single-quoted.
-func shellWord(s string) string {
+// ShellWord is s as one inert POSIX shell word: as is when it holds only
+// safe characters, else single-quoted. Every command a surface offers
+// for pasting quotes its server-chosen words with it: a run's query
+// here, a step's `iormeshctl query -ref` in the TUI (task 3i4).
+func ShellWord(s string) string {
 	safe := s != "" && strings.IndexFunc(s, func(r rune) bool {
 		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' ||
 			strings.ContainsRune("._/:@+=-", r))

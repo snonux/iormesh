@@ -1192,7 +1192,12 @@ type and segment, through the `parquet:` tags in
   `.stacks` for the tables that got rows while it was active.
   `<start-ts>` is `YYYYMMDDTHHMMSSZ` (UTC), `<seq>` six or more
   digits from `000000`, `<session>` 8 hex digits; the FQDN may
-  contain dashes, so a name parses from the right.
+  contain dashes, so a name parses from the right. FQDN and
+  session hold only letters, digits, `-`, `.`, `_` and `:`: the
+  writer refuses to start with any other, and a reader refuses a
+  file whose name holds one (it is ignored as a stray), because
+  the server names its files and those parts reach the
+  controller's shell commands and terminals (task 3i4).
 - **Footer metadata**: `iormesh.schema_version`,
   `iormesh.project`, `iormesh.fqdn`, `iormesh.session`,
   `iormesh.seq`, `iormesh.start` (RFC 3339, nanoseconds) and

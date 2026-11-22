@@ -485,11 +485,51 @@ func TestConfigNames(t *testing.T) {
 		"no dir":          {FQDN: "h", Session: "s", Project: "p"},
 		"dash in session": {Dir: "d", FQDN: "h", Session: "s-1", Project: "p"},
 		"slash in fqdn":   {Dir: "d", FQDN: "h/x", Session: "s", Project: "p"},
+		"shell in fqdn":   {Dir: "d", FQDN: "h;touch PWNED", Session: "s", Project: "p"},
+		"space in fqdn":   {Dir: "d", FQDN: "h x", Session: "s", Project: "p"},
+		"quote in sess":   {Dir: "d", FQDN: "h", Session: "s'x", Project: "p"},
+		"$ in session":    {Dir: "d", FQDN: "h", Session: "$(id)", Project: "p"},
 		"dot project":     {Dir: "d", FQDN: "h", Session: "s", Project: ".."},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := New(cfg); err == nil {
+			// A usable directory, so only the name can refuse the config
+			// (and an accepted one writes nothing into the source tree).
+			if cfg.Dir != "" {
+				cfg.Dir = filepath.Join(t.TempDir(), "p")
+			}
+			w, err := New(cfg)
+			if err == nil {
+				_ = w.Close()
 				t.Fatal("accepted")
+			}
+		})
+	}
+}
+
+// TestWrittenNamesParse (task 3i4): every name an honest tracer writes
+// parses back. ParseName refuses names outside a safe character set,
+// and that set must hold whatever the tracer produces as an FQDN (a
+// hostname of letters, digits, '-', '_' and '.'; a pod's
+// <name>.<namespace>.<uid[:8]>, k8s.PodFQDN) and as a session id (8 hex
+// digits, cli newSessionID).
+func TestWrittenNamesParse(t *testing.T) {
+	for _, fqdn := range []string{"app-1.example.org", "h", "my_host.lan", "WEB01.Example.COM",
+		"orders-7d9f8c-x2k4p.shop.1a2b3c4d", "host."} {
+		t.Run(fqdn, func(t *testing.T) {
+			w, dir := newTestWriter(t, func(c *Config) { c.FQDN, c.Session = fqdn, "0f1e2d3c" })
+			writeAll(t, w, richEvents())
+			if err := w.Close(); err != nil {
+				t.Fatal(err)
+			}
+			names := readyFiles(t, dir)
+			if len(names) == 0 {
+				t.Fatal("nothing published")
+			}
+			for _, n := range names {
+				f, err := ParseName(n)
+				if err != nil || f.FQDN != fqdn || f.Session != "0f1e2d3c" {
+					t.Errorf("ParseName(%q) = %+v, %v", n, f, err)
+				}
 			}
 		})
 	}

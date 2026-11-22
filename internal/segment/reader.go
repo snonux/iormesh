@@ -70,7 +70,11 @@ type Meta struct {
 
 // ParseName parses a segment file name. A name that is not one — a dot
 // file (rsync's in-flight temporary), anything else in the store — is an
-// error, so a reader never guesses what a stray file holds.
+// error, so a reader never guesses what a stray file holds. So is a name
+// whose fqdn or session holds a character outside validName's set: the
+// server names its files, and those parts reach shell commands and
+// terminals on the controller (task 3i4); the honest writer checks the
+// same set before it writes, so it never produces such a name.
 func ParseName(name string) (FileName, error) {
 	m := nameRE.FindStringSubmatch(name)
 	if m == nil {
@@ -84,7 +88,7 @@ func ParseName(name string) (FileName, error) {
 	if err != nil {
 		return FileName{}, fmt.Errorf("segment: %q: %w", name, err)
 	}
-	if err := validName("session", m[2], false); err != nil {
+	if err := errors.Join(validName("fqdn", m[1], true), validName("session", m[2], false)); err != nil {
 		return FileName{}, err
 	}
 	return FileName{FQDN: m[1], Session: m[2], Start: start, Seq: seq, Table: m[5]}, nil

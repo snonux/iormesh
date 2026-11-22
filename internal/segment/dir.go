@@ -62,14 +62,30 @@ func base(fqdn, session string, start time.Time, seq int) string {
 	return fmt.Sprintf("%s-%s-%s-%06d", fqdn, session, start.UTC().Format(TimeLayout), seq)
 }
 
-// validName rejects a name part that would leave the directory or break
-// the right-to-left parse of Name.
+// nameChars are the only characters a name part may hold: letters,
+// digits, '-', '.', '_' and ':'. A traced host chooses its FQDN and
+// session, the controller builds refs from them that it offers inside a
+// shell command (`iormeshctl query -ref`) and prints them to terminals,
+// so a part must be inert there (task 3i4); no '/' or NUL either, so it
+// never leaves its directory. '_' is as inert and Linux accepts it in a
+// hostname. Everything an honest tracer writes fits: a hostname, a pod's
+// <name>.<namespace>.<uid[:8]> (k8s.PodFQDN), an 8-hex session id.
+const nameChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._:"
+
+// notNameChar reports whether r is outside nameChars.
+func notNameChar(r rune) bool { return !strings.ContainsRune(nameChars, r) }
+
+// validName rejects a name part that holds anything but nameChars, would
+// leave the directory or would break the right-to-left parse of Name.
+// The writer checks its config with it and ParseName every name it
+// reads, so a name the controller would refuse is never published, and
+// one a hostile server planted is never trusted.
 func validName(what, s string, dashOK bool) error {
 	switch {
 	case s == "" || s == "." || s == "..":
 		return fmt.Errorf("segment: %s %q: empty or a dot name", what, s)
-	case strings.ContainsAny(s, "/\x00"):
-		return fmt.Errorf("segment: %s %q: contains / or NUL", what, s)
+	case strings.IndexFunc(s, notNameChar) >= 0:
+		return fmt.Errorf("segment: %s %q: holds a character outside [A-Za-z0-9_.:-]", what, s)
 	case !dashOK && strings.Contains(s, "-"):
 		return fmt.Errorf("segment: %s %q: contains -", what, s)
 	}
