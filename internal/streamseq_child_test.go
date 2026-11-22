@@ -33,6 +33,8 @@ const (
 	seqScenarioValues     = "values"
 	seqScenarioConcurrent = "concurrent"
 	seqScenarioFolded     = "folded"
+	seqScenarioFin        = "fin"
+	seqScenarioUrgent     = "urgent"
 )
 
 // The values scenario's byte counts, call by call: sends write, writev
@@ -57,6 +59,21 @@ const (
 	seqFoldWrites = 200
 	seqFoldSize   = 10
 )
+
+// The fin scenario: the parent writes seqFinBytes and closes; the child
+// waits seqFinWait, so data and FIN are both queued, and reads them with
+// a buffer of seqFinBuf bytes.
+const (
+	seqFinBytes = 11
+	seqFinBuf   = 64
+	seqFinWait  = 50 * time.Millisecond
+)
+
+// The urgent scenario: the parent writes seqUrgentChunk bytes, one urgent
+// byte (MSG_OOB) and seqUrgentChunk bytes more, without closing; the child
+// waits seqFinWait and reads twice with a buffer of seqFinBuf bytes. The
+// first read stops at the urgent mark, the second skips the urgent byte.
+const seqUrgentChunk = 3
 
 // seqResult is what a child reports: its socket's descriptor and, for the
 // concurrent scenario, each sender's thread and write calls.
@@ -131,6 +148,10 @@ func runSeqChild(scenario string) error {
 		r.Senders, err = childConcurrent(fd)
 	case seqScenarioFolded:
 		err = childFolded(fd)
+	case seqScenarioFin:
+		err = childFin(fd)
+	case seqScenarioUrgent:
+		err = childUrgent(fd)
 	default:
 		err = fmt.Errorf("unknown scenario %q", scenario)
 	}
@@ -278,6 +299,36 @@ func childFolded(fd int) error {
 	for i := range seqFoldWrites {
 		if n, err := unix.Write(fd, buf); err != nil || n != seqFoldSize {
 			return fmt.Errorf("write %d: %d bytes, %v", i, n, err)
+		}
+	}
+	return nil
+}
+
+// childFin waits until the parent's bytes and FIN are queued, then drains
+// both with one read larger than the data - the read that also consumes
+// the FIN - and requires the end of stream after it.
+func childFin(fd int) error {
+	time.Sleep(seqFinWait)
+	buf := make([]byte, seqFinBuf)
+	if n, err := unix.Read(fd, buf); err != nil || n != seqFinBytes {
+		return fmt.Errorf("read: %d bytes, want %d: %v", n, seqFinBytes, err)
+	}
+	if n, err := unix.Read(fd, buf); err != nil || n != 0 {
+		return fmt.Errorf("read after the data: %d bytes, want end of stream: %v", n, err)
+	}
+	return nil
+}
+
+// childUrgent waits until the parent's bytes are queued and reads them in
+// two calls: up to the urgent mark, then past the urgent byte, which the
+// kernel skips (SO_OOBINLINE off) - copied_seq moves one more than the
+// read returns, on an open connection.
+func childUrgent(fd int) error {
+	time.Sleep(seqFinWait)
+	buf := make([]byte, seqFinBuf)
+	for i := range 2 {
+		if n, err := unix.Read(fd, buf); err != nil || n != seqUrgentChunk {
+			return fmt.Errorf("read %d: %d bytes, want %d: %v", i, n, seqUrgentChunk, err)
 		}
 	}
 	return nil

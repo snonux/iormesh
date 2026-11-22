@@ -210,11 +210,13 @@ socket itself: `write_seq` (the end of the send queue — not
 for a receive, read at the call's enter and again at its exit.
 It is given only when the two reads differ by exactly the
 bytes the call moved, which proves no other call's bytes went
-through the socket in between. So a send racing another
-thread's send on the same socket, a `MSG_PEEK` or `MSG_OOB`
-read (`copied_seq` does not move, or skips the urgent byte), a
-kTLS socket (`write_seq` counts record framing) and a TCP Fast
-Open send (the ISN is chosen inside the call) carry none: no
+through the socket in between — or, for a receive that also
+consumes the peer's FIN, by one more (the FIN's own sequence
+number) when nothing was received after it (task wi4). So a
+send racing another thread's send on the same socket, a
+`MSG_PEEK` or `MSG_OOB` read (`copied_seq` does not move, or
+skips the urgent byte), a kTLS socket (`write_seq` counts
+record framing) and a TCP Fast Open send (the ISN is chosen inside the call) carry none: no
 `tcp_seq` is ever a guess. Neither does a call on a kernel
 without the `bpf_rdonly_cast` kfunc (before 6.2), where the
 tracer cannot read the socket cheaply, nor one whose socket the

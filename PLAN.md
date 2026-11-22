@@ -1181,10 +1181,11 @@ Kubernetes (M7) build on it.
   call's first byte; the tracer fills it since task xe4: the
   socket's `write_seq`/`copied_seq` read at the call's enter
   and again at its exit, given only when the two differ by
-  exactly the call's return — so concurrent senders or readers
-  on one socket, MSG_PEEK, kTLS and the like give none, never a
-  guess; one ring record per call as before, the exit record
-  carrying it; decision #25's burst figure unchanged, +3 %
+  exactly the call's return, or by one more for a receive that
+  also consumes the peer's FIN, task wi4 — so concurrent
+  senders or readers on one socket, MSG_PEEK, kTLS and the like
+  give none, never a guess; one ring record per call as
+  before, the exit record carrying it; decision #25's burst figure unchanged, +3 %
   tracer instructions per TCP data event — s3-overhead.md,
   "Follow-up (xe4)"),
   the SYN adds one client→server edge (connect enter before

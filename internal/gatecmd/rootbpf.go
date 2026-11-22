@@ -16,7 +16,9 @@ import "strings"
 // following and the exec watch, M2 steps 1–2; every event family, M2 step
 // 7; native stacks, M2 step 9; the Java mark's uprobes on a running JVM, M3
 // task td4; no skipped runs on a shared CPU, task 8e4; the tcp_sock
-// sequence fields, M4 task ve4; the data calls' tcp_seq, M4 task xe4; a
+// sequence fields, M4 task ve4; the data calls' tcp_seq, M4 task xe4, the read that
+// consumes the peer's FIN included and one skipping an urgent byte
+// excluded, task wi4; a
 // tracer in its own PID namespace, M7 task 4f4; a stale socket owner after
 // a lost TCP_CLOSE run, and a pod-mode connect's state records, task if4;
 // a thread's and a process's exit told apart, the el9 signal->live
@@ -62,6 +64,8 @@ func RootBPFTests() []string {
 		"TestStreamSeqValues",
 		"TestStreamSeqConcurrentSenders",
 		"TestStreamSeqFolded",
+		"TestStreamSeqFinRead",
+		"TestStreamSeqUrgentSkipNoSeq",
 		"TestPidNSTracerConfined",
 		"TestProcessExitGroupDead",
 		"TestPidNSConnectEstablished",

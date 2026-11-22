@@ -4189,10 +4189,23 @@ not, and share `bpf_prog_active` with the dispatchers (8e4).
   exit re-reads the field through the parked socket: the field
   only grows as bytes are queued (consumed), so `end − start ==
   ret` proves that every byte in between was the call's own
-  and the call moved exactly `[start, end)`. Anything else —
-  two senders interleaving, a send split around another, a
-  `MSG_PEEK`/`MSG_OOB` read, kTLS, a TFO send — gives no
-  `tcp_seq`. Not covered either: a `read`/`write` the fold held
+  and the call moved exactly `[start, end)`. One exception
+  (task wi4): the read that drains the last data and consumes
+  the peer's FIN behind it — the final read of a "write, then
+  close" exchange — moves `copied_seq` by `ret + 1`, since the
+  FIN takes a sequence number (`tcp_recvmsg`'s `found_fin_ok`).
+  A receive passes with `ret + 1` when `end` is `rcv_nxt` and
+  the socket's state says the FIN arrived (`CLOSE_WAIT`,
+  `LAST_ACK`, `CLOSING`, or `CLOSE` after `FIN_WAIT2`): the
+  extra number is then the last one received, so the data
+  bytes are still `[start, start + ret)`. The state, not
+  `sk_shutdown`, because a local `shutdown(SHUT_RD)` sets
+  `RCV_SHUTDOWN` too, and `skc_state` is already in the trimmed
+  el9 BTF. Anything else — two senders interleaving, a send
+  split around another, a `MSG_PEEK`/`MSG_OOB` read (a skipped
+  urgent byte also moves `copied_seq` one further, but with no
+  FIN), kTLS, a TFO send — gives no `tcp_seq`. Not covered
+  either: a `read`/`write` the fold held
   at its enter on a hot streak parks nothing, so if it then
   turns out slow (> 1 ms, the read waiting on the peer after a
   burst) it is sent alone without `tcp_seq`; parking held
@@ -4219,9 +4232,14 @@ not, and share `bpf_prog_active` with the dispatchers (8e4).
   buffers on one socket, where every `tcp_seq` given must
   locate exactly the caller's bytes in the received stream
   (about 110–180 of 200 calls carry one; with the check
-  disabled the test fails); and a hot loop whose folded records
-  carry none. `TestTCPFamilies` splits a real Java loopback
-  trace into two pretend hosts and requires
+  disabled the test fails); a hot loop whose folded records
+  carry none; a read that drains the data and the peer's FIN
+  together, which carries one (`TestStreamSeqFinRead`, no
+  `tcp_seq` before task wi4), and its negative, a read past an
+  urgent byte, which carries none (`TestStreamSeqUrgentSkipNoSeq`,
+  failing with the FIN-state check removed). `TestTCPFamilies`
+  splits a real Java loopback trace into two pretend hosts and
+  requires
   `federate.ClockBounds` to bound them from both sides around
   0 (≈ 64–145 µs raw width).
 - **Cost.** Unchanged per event on `syscall-burst`; on an
