@@ -24,8 +24,8 @@ import (
 // Connection: the record names the request's socket ends, as far as the
 // library still held them. The joiner keeps the ends of every TCP socket
 // event that passed with a conn_id (tcp_state, connect, accept; a local
-// port 0 is no end), forgets all of a connection's Retain after its
-// close, and looks the request's up: both ends, else the remote, else the
+// port 0 is no end), forgets all of a connection's ends Retain after
+// its close, and looks the request's up: both ends, else the remote, else the
 // local one (a server's local end reads as unknown once the exchange
 // closed the connection; a client's remote is known only for a literal
 // IP host). A request whose ends match nothing keeps no conn_id.
@@ -128,8 +128,8 @@ func newConnIndex() *connIndex {
 // observe indexes a TCP socket event's ends under its conn_id; a closed
 // socket's entries stay until purge.
 //
-// Only the kinds a TCP connection alone names its ends with are indexed:
-// tcp_state, connect, accept (task 1j4). A UDP flow's sendto/recvfrom
+// Only the event kinds that name a TCP connection's own ends are
+// indexed: tcp_state, connect, accept (task 1j4). A UDP flow's sendto/recvfrom
 // also carries a conn_id and both ends, but no CLOSE ever forgets it, so
 // its local port would stay a second candidate for the TCP connection
 // that later reuses the port, and the lookup by that local end would
