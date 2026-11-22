@@ -2,6 +2,7 @@ package ctl
 
 import (
 	"bytes"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -21,7 +22,8 @@ func helpInvocations() [][]string {
 	for _, v := range []string{"list", "edges", "name", "rules", "unname"} {
 		out = append(out, []string{"services", v})
 	}
-	return append(out, []string{"routes", "discover"}, []string{"show"}, []string{"services"})
+	return append(out, []string{"routes", "discover"}, []string{"routes"}, []string{"show"},
+		[]string{"services"})
 }
 
 // TestSubcommandHelpExitsZero pins task vh4: `SUBCMD -h` (and --help)
@@ -126,26 +128,47 @@ func TestUsageNamesEverySubcommandAndFlag(t *testing.T) {
 			verbs = showViews
 		}
 		for _, verb := range verbs {
-			entry := usageEntry(text, name, verb)
-			if entry == "" {
-				t.Errorf("usage has no entry for %s %s", name, verb)
-				continue
-			}
-			if name == "show" && !strings.Contains(entry, verb) {
-				t.Errorf("show's usage does not name the view %s:\n%s", verb, entry)
-			}
-			inv := []string{name}
-			if verb != "" {
-				inv = append(inv, verb)
-			}
-			for _, f := range flagsOf(t, inv) {
-				if (f == "context" || f == "namespace") && strings.Contains(entry, "[K8S]") {
-					continue
-				}
-				if !strings.Contains(entry, "-"+f+" ") && !strings.Contains(entry, "-"+f+"]") {
-					t.Errorf("usage of %s %s does not name -%s:\n%s", name, verb, f, entry)
-				}
-			}
+			checkUsageEntry(t, usageEntry(text, name, verb), name, verb)
+		}
+	}
+}
+
+// namesWord reports whether text holds word whole: not inside a longer
+// name, so -type is not satisfied by -selinux-type, nor a view thread
+// by threads.
+func namesWord(text, word string) bool {
+	return regexp.MustCompile(`(^|[^A-Za-z0-9-])` + regexp.QuoteMeta(word) + `($|[^A-Za-z0-9-])`).
+		MatchString(text)
+}
+
+// checkUsageEntry holds one usage entry to `name verb -h`: the entry
+// exists, names show's view, and names every flag the help lists —
+// at least one, so a help the parser stopped producing cannot pass
+// for a subcommand without flags (every iormeshctl subcommand has
+// some).
+func checkUsageEntry(t *testing.T, entry, name, verb string) {
+	t.Helper()
+	if entry == "" {
+		t.Errorf("usage has no entry for %s %s", name, verb)
+		return
+	}
+	if name == "show" && !namesWord(entry, verb) {
+		t.Errorf("show's usage does not name the view %s:\n%s", verb, entry)
+	}
+	inv := []string{name}
+	if verb != "" {
+		inv = append(inv, verb)
+	}
+	flags := flagsOf(t, inv)
+	if len(flags) == 0 {
+		t.Errorf("%s %s -h listed no flags", name, verb)
+	}
+	for _, f := range flags {
+		if (f == "context" || f == "namespace") && strings.Contains(entry, "[K8S]") {
+			continue
+		}
+		if !namesWord(entry, "-"+f) {
+			t.Errorf("usage of %s %s does not name -%s:\n%s", name, verb, f, entry)
 		}
 	}
 }
