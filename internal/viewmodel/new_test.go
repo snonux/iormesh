@@ -135,6 +135,42 @@ func TestModelDeterministic(t *testing.T) {
 	}
 }
 
+// TestSummaryClockHeadline: the health headline claims a bound only
+// from two-sided windows. One-sided-only pairs have no bound (MaxWidth
+// stays zero), so they must not read as "<= 0s", the tightest possible
+// agreement; when some pairs have a bound, the others are counted.
+func TestSummaryClockHeadline(t *testing.T) {
+	two := Clock{HostA: "a", HostB: "b", Windows: 2, MinWidth: time.Millisecond, MaxWidth: 2 * time.Millisecond}
+	one := Clock{HostA: "a", HostB: "c", Windows: 3, OneSided: 3}
+	bad := Clock{HostA: "b", HostB: "c", Windows: 1, Empty: 1}
+	for _, tc := range []struct {
+		name   string
+		clocks []Clock
+		want   string
+	}{
+		{"none", nil, "; no clock bounds\n"},
+		{"one-sided only", []Clock{one}, "; no two-sided clock bound\n"},
+		{"empty only", []Clock{bad}, "; no two-sided clock bound, 1 EMPTY\n"},
+		{"all bounded", []Clock{two}, "; clock bounds <= 2ms\n"},
+		{"mixed", []Clock{two, one}, "; clock bounds <= 2ms, 1 pair without a bound\n"},
+		{"mixed plural", []Clock{two, one, bad}, "; clock bounds <= 2ms, 2 pairs without a bound, 1 EMPTY\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var b bytes.Buffer
+			if err := WriteSummary(&b, Model{Health: Health{Clocks: tc.clocks}}); err != nil {
+				t.Fatal(err)
+			}
+			got := b.String()
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("headline lacks %q:\n%s", tc.want, got)
+			}
+			if strings.Contains(got, "<= 0s") {
+				t.Errorf("headline claims a zero bound:\n%s", got)
+			}
+		})
+	}
+}
+
 // TestSummaryNamesEndReason: the summary names a session the disk
 // watchdog (or an error) ended, with its reason — PLAN.md M4 and the
 // acceptance check M4-13 read the reason from the plain summary — and

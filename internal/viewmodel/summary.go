@@ -245,17 +245,37 @@ func edgeStates(edges []Edge) (fused, mixed, unresolved int) {
 }
 
 // clockHeadline is the widest two-sided bound over every pair, the
-// figure that says how far cross-host timestamps compare.
+// figure that says how far cross-host timestamps compare. Only a pair
+// with a two-sided, non-empty window has a bound: one-sided and empty
+// windows leave MaxWidth at zero, and printing that as "<= 0s" would
+// claim the tightest agreement exactly when cross-host order cannot be
+// proven. So with no bounded pair the headline says so, and with some
+// it counts the pairs left without a bound.
 func clockHeadline(cs []Clock) string {
 	if len(cs) == 0 {
 		return "no clock bounds"
 	}
 	var widest time.Duration
-	empty := 0
+	empty, unbounded := 0, 0
 	for _, c := range cs {
-		widest, empty = max(widest, c.MaxWidth), empty+c.Empty
+		empty += c.Empty
+		if c.Windows-c.OneSided-c.Empty <= 0 {
+			unbounded++
+			continue
+		}
+		widest = max(widest, c.MaxWidth)
 	}
-	s := fmt.Sprintf("clock bounds <= %v", widest)
+	var s string
+	switch {
+	case unbounded == len(cs):
+		s = "no two-sided clock bound"
+	case unbounded == 1:
+		s = fmt.Sprintf("clock bounds <= %v, 1 pair without a bound", widest)
+	case unbounded > 1:
+		s = fmt.Sprintf("clock bounds <= %v, %d pairs without a bound", widest, unbounded)
+	default:
+		s = fmt.Sprintf("clock bounds <= %v", widest)
+	}
 	if empty > 0 {
 		s += fmt.Sprintf(", %d EMPTY", empty)
 	}
