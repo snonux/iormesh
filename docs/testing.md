@@ -846,9 +846,13 @@ rerun**, and move the old work directory away.
 The first ^C cancels the current step and still runs the
 teardown (`rm` of both hosts, leftover roles killed, the run's
 directory and fill file removed; at most 5 minutes); a second
-^C kills the run outright. If the teardown did not finish, clean
-up by hand — with an iormeshctl built as above, and the
-operator's XDG variables cleared so it reads the run's registry:
+^C ends the run at once (exit 130). mage's own handler would
+exit 5 seconds after the first ^C, so the target takes SIGINT
+away from it (`acceptance.InterruptContext`, task mi4) and the
+teardown runs to the end in the same process, results table
+included. If the teardown did not finish, clean up by hand —
+with an iormeshctl built as above, and the operator's XDG
+variables cleared so it reads the run's registry:
 
 ```sh
 env -u XDG_CONFIG_HOME -u XDG_DATA_HOME HOME=$HOME/.iormesh-m4 \
@@ -907,6 +911,11 @@ not run against real hosts. What ran here:
   round: `TestInterruptStillTearsDown` (a ^C during the
   streaming rounds still runs `rm` on both hosts, `pkill`s the
   roles and removes the run directories),
+  `TestInterruptOutlivesMageGrace` and
+  `TestSecondInterruptKills` (a child process playing mage's
+  generated main, its 5-second grace shortened: a teardown
+  longer than the grace still finishes after one SIGINT, and a
+  second SIGINT exits at once with 130),
   `TestFailedClientStopsServer` (a failed two-host client gets
   its server killed and M4-6 reports the workload's failure;
   the fakes also fail any role started without `timeout 300`),

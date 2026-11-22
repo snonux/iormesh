@@ -111,8 +111,9 @@ func (r *Runner) Run(ctx context.Context) error {
 const cleanupTimeout = 5 * time.Minute
 
 // cleanupCtx is a context for cleanup work that outlives ctx's
-// cancellation (^C) but not cleanupTimeout. A second ^C kills the
-// process (the mage target restores the default signal handling).
+// cancellation (^C) but not cleanupTimeout. A second ^C ends the
+// process (InterruptContext); mage's own 5-second limit after ^C does
+// not apply, since InterruptContext takes SIGINT away from mage.
 func cleanupCtx(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 }

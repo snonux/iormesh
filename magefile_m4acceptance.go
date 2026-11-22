@@ -11,9 +11,7 @@ package main
 import (
 	"context"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 
 	"github.com/magefile/mage/mg"
 	"github.com/magefile/mage/sh"
@@ -78,15 +76,12 @@ func runM4Acceptance(cfg acceptance.Config) error {
 	if err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// The first ^C or SIGTERM cancels the run, whose teardown (rm, the
+	// servers' cleanup) still runs, here, for up to its 5 minutes:
+	// InterruptContext takes SIGINT away from mage's own handler, which
+	// would exit 5 seconds in (task mi4). A second ^C exits at once.
+	ctx, stop := acceptance.InterruptContext(context.Background())
 	defer stop()
-	// The first ^C cancels the run, whose teardown (rm, the servers'
-	// cleanup) still runs; stop() then restores the default handling, so
-	// a second ^C kills the process outright.
-	go func() {
-		<-ctx.Done()
-		stop()
-	}()
 	r := acceptance.New(cfg, acceptance.Deps{Ctl: ctl, Out: os.Stdout,
 		Dial: func(h string) (federate.Transport, error) { return federate.NewSSH(h) }})
 	return r.Run(ctx)
