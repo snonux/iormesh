@@ -3704,7 +3704,7 @@ rsync -rt --timeout=60 --remove-source-files --max-size=1073741824 \
 ```sh
 iormeshctl rm [-project P] [-store DIR] [-force] HOST
 
-ssh H true                               # unreachable: warn, unregister
+ssh H true                               # unreachable: warn, unregister, tombstone
 ssh H test -x /opt/iormesh/bin/iormesh   # exit 1: just unregister
 # per removed project:
 ssh H systemctl show --property=ActiveState --value -- iormesh-shop.service
@@ -3727,12 +3727,25 @@ ssh H sudo -n /opt/iormesh/bin/iormesh uninstall
 - `uninstall` runs only when the host leaves the registry
   (`rm HOST`, or its last project). It would stop and delete
   every project under `/opt/iormesh/traces`, so rm first
-  stops and collects the ones the registry does not list
-  (started by hand, or dropped by an earlier rm while the host
-  was unreachable); a directory whose name is no project label
-  is not collected — it cannot be a local path component.
-  Then whatever is still in a `ready/` or active refuses the
-  uninstall, the files named (the first ten).
+  stops and collects the other ones the registry or deploy's
+  record (`deployed.json`) lists for the host. The directory
+  names come from the server, so one neither lists (started by
+  hand, or planted by a compromised server) is not collected —
+  the server must not choose which project's store it writes
+  into — and neither is a name that is no project label (it
+  cannot be a local path component). Then whatever is still in
+  a `ready/` or active, theirs included, refuses the uninstall,
+  the files named (the first ten) and, apart, the unlisted
+  project dirs that hold any of them.
+- An unreachable host is only unregistered (the host, or the
+  `-project`): its tracer and traces stay on it. The removed
+  projects are then not forgotten from `deployed.json` but
+  kept as tombstones (`"dropped": true`, no start or version),
+  so a later `rm HOST` — the host still registered, or added
+  again — collects them as its own instead of refusing over
+  them. A tombstone never matches a deploy's last start (the
+  project restarts if re-added); a successful `rm HOST`
+  forgets the host, tombstones included.
 - `test` answers "no" only with exit status 1; any other
   failure — ssh's 255 on a dropped connection — is an error,
   never "not installed" or "nothing published"
@@ -3748,8 +3761,12 @@ ssh H sudo -n /opt/iormesh/bin/iormesh uninstall
   live any more, and what synced is local.
 - Tests (`internal/ctl/rm_test.go`): exact sequences for
   `rm HOST` with a live session, `rm -project` keeping the
-  host and removing its last project, the sweep of an
-  unlisted project (an odd name skipped); leftovers refusing
+  host and removing its last project, the sweep of a project
+  only deploy's record lists (an odd name skipped), a project
+  dir nothing lists left uncollected and refusing without
+  `-force` (`TestRmSweepSkipsForeign`), `rm -project` on an
+  unreachable host then `rm HOST` collecting that project
+  (`TestRmProjectUnreachableStaysKnown`); leftovers refusing
   and `-force` uninstalling; a failed sync, an unclean stop,
   `test -d`/`test -x` failing with 255, or a failed uninstall
   leaving the registry unchanged; `-force` past an unclean

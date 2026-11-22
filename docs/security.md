@@ -62,7 +62,11 @@ truth.
   (`~/.local/share/iormesh/traces/<project>/<host>/`), so one
   server cannot overwrite another's segments by naming files
   after it; project and host come from the registry, never from
-  the server, and the directories above are refused when
+  the server — rm's sweep before an uninstall collects only
+  projects the registry or deploy's record lists for the host,
+  and treats any other project directory the server reports as
+  leftovers (rm refuses over them without `-force`, task
+  hi4) — and the directories above are refused when
   foreign-owned or writable by others. The file names are the
   server's: a segment whose FQDN or session holds anything but
   letters, digits, `-`, `.`, `_` and `:` is ignored as a stray,

@@ -1341,7 +1341,10 @@ Kubernetes (M7) build on it.
   traces). Trace files are synced off first (rsync, same as
   collect), so `rm` never destroys uncollected traces unless
   the operator says so with `-force`; an unreachable host
-  warns and only drops from the registry.
+  warns and only drops the host (or the `-project`) from the
+  registry — its tracer and traces stay on it, and deploy's
+  record keeps the dropped projects as tombstones so a later
+  `rm` of the host still collects them.
   Built (task eb4, `internal/ctl/rm.go`): per removed project
   a live session is stopped first (`sudo iormesh stop`, which
   publishes its last segment and now fails when `state.json`
@@ -1349,10 +1352,15 @@ Kubernetes (M7) build on it.
   timeout left its minute unpublished), then collected.
   `uninstall` runs only when the host leaves the registry
   (`rm HOST`, or its last project), and first every other
-  project directory under `/opt/iormesh/traces` (started by
-  hand, or dropped by an earlier rm of an unreachable host)
-  is stopped and collected too; then any segment file still
-  in a `ready/` or active refuses the uninstall, naming it.
+  project directory under `/opt/iormesh/traces` that the
+  registry or deploy's record (tombstones included) lists for
+  the host is stopped and collected too. A directory neither
+  lists (started by hand, or named by a compromised server)
+  is not collected (task hi4): the server never picks the
+  store's project.
+  Then any segment file still in a `ready/` or active —
+  an unlisted project's included — refuses the uninstall,
+  naming it.
   The registry changes only after all of that succeeded — a
   failed or unclean stop, a failed sync, a remote check that
   fails other than with "no" (exit status 1; ssh's 255 is a
