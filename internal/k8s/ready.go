@@ -169,12 +169,84 @@ func RemoveReady(dir string, names []string) error {
 // under a dot-prefixed temporary name (which the build skips) and renamed
 // into place only once complete, all through an os.Root, so nothing is
 // ever written outside dir.
+//
+// The names Unpack returns are on disk, not just in the page cache (task
+// ii4): Fetch deletes them on the tracer next, and a controller crash or
+// power loss inside the writeback window would otherwise lose segments
+// that then exist nowhere. Each file is fsynced before its rename, and dir
+// once after the last rename, which makes the renames themselves durable.
+// When that directory sync fails Unpack returns no names, whatever it
+// took, so the tracer keeps every copy and the next collect fetches them
+// again.
 func Unpack(r io.Reader, dir string) ([]string, error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = root.Close() }()
+	return unpack(r, newUnpackFS(root))
+}
+
+// unpackFS is the part of an os.Root that Unpack writes through, an
+// interface so a test can record the order of syncs and renames and
+// fail a sync.
+type unpackFS interface {
+	Remove(name string) error
+	// Create makes name new (O_EXCL), 0600, for writing.
+	Create(name string) (unpackFile, error)
+	Rename(oldname, newname string) error
+	// SyncDir fsyncs the directory itself, so the renames in it persist.
+	SyncDir() error
+}
+
+// unpackFile is the temporary one segment is written to.
+type unpackFile interface {
+	io.Writer
+	Sync() error
+	Close() error
+}
+
+// newUnpackFS wraps Unpack's root; a variable so a test can inject a
+// failing sync under Kubectl.Fetch.
+var newUnpackFS = func(root *os.Root) unpackFS { return rootFS{root} }
+
+// rootFS is unpackFS on an os.Root.
+type rootFS struct{ root *os.Root }
+
+func (r rootFS) Remove(name string) error { return r.root.Remove(name) }
+
+func (r rootFS) Create(name string) (unpackFile, error) {
+	return r.root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+}
+
+func (r rootFS) Rename(oldname, newname string) error { return r.root.Rename(oldname, newname) }
+
+func (r rootFS) SyncDir() error {
+	d, err := r.root.Open(".")
+	if err != nil {
+		return err
+	}
+	return errors.Join(d.Sync(), d.Close())
+}
+
+// unpack is Unpack on fsys: unpackAll, then the one directory sync that
+// makes what it took durable. It runs after a refused or broken stream
+// too, since the entries before the failure are kept and removed on the
+// tracer (Fetch). Nothing taken, nothing to sync.
+func unpack(r io.Reader, fsys unpackFS) ([]string, error) {
+	taken, err := unpackAll(r, fsys)
+	if len(taken) == 0 {
+		return taken, err
+	}
+	if serr := fsys.SyncDir(); serr != nil {
+		return nil, errors.Join(err, fmt.Errorf("sync fetched segments: %w", serr))
+	}
+	return taken, err
+}
+
+// unpackAll unpacks entry after entry until the stream ends or one is
+// refused, returning the names renamed into place so far.
+func unpackAll(r io.Reader, fsys unpackFS) ([]string, error) {
 	tr := tar.NewReader(r)
 	var taken []string
 	var total int64
@@ -193,7 +265,7 @@ func Unpack(r io.Reader, dir string) ([]string, error) {
 		if total += hdr.Size; total > fetchLimit {
 			return taken, fmt.Errorf("%w: more than %d bytes in one fetch", ErrStream, fetchLimit)
 		}
-		if err := unpackOne(root, hdr.Name, tr, hdr.Size); err != nil {
+		if err := unpackOne(fsys, hdr.Name, tr, hdr.Size); err != nil {
 			return taken, err
 		}
 		taken = append(taken, hdr.Name)
@@ -218,25 +290,30 @@ func checkEntry(hdr *tar.Header, seen map[string]bool, n int) error {
 	return nil
 }
 
-// unpackOne writes size bytes of r to name in root, through a temporary.
-// A stale temporary from an interrupted fetch is the controller's own
-// and is replaced.
-func unpackOne(root *os.Root, name string, r io.Reader, size int64) error {
+// unpackOne writes size bytes of r to name in fsys, through a temporary
+// that is fsynced before the rename, so a name never points at contents
+// still only in the page cache. A failed write or sync removes the
+// temporary and leaves name untaken. A stale temporary from an
+// interrupted fetch is the controller's own and is replaced.
+func unpackOne(fsys unpackFS, name string, r io.Reader, size int64) error {
 	tmp := "." + name + ".part"
-	if err := root.Remove(tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := fsys.Remove(tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := fsys.Create(tmp)
 	if err != nil {
 		return err
 	}
 	_, err = io.CopyN(f, r, size)
+	if err == nil {
+		err = f.Sync()
+	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
 	if err != nil {
-		_ = root.Remove(tmp)
+		_ = fsys.Remove(tmp)
 		return fmt.Errorf("%s: %w", name, err)
 	}
-	return root.Rename(tmp, name)
+	return fsys.Rename(tmp, name)
 }

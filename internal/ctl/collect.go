@@ -28,9 +28,10 @@ import (
 //  2. per project: test -d /opt/iormesh/traces/<project>/ready — a
 //     project never started has no ready/ yet (exit status 1) and is
 //     skipped; any other failure is the project's failure (remoteTest);
-//  3. Fetch (federate.FetchFlags: rsync -rt --remove-source-files, the
-//     non-dot *.parquet files directly in ready/, none over 1 GiB) into
-//     <store>/<project>/<host>/.
+//  3. Fetch (federate.FetchFlags: rsync -rt --fsync
+//     --remove-source-files, the non-dot *.parquet files directly in
+//     ready/, none over 1 GiB) into <store>/<project>/<host>/; a server
+//     file is deleted only once fsynced here.
 //
 // Only ready/ is ever fetched. The tracer writes the active segment at
 // the project directory's top (.active-*, internal/segment) and renames

@@ -1745,7 +1745,11 @@ kubectl would get. They run with the package's unit tests
   per-fetch total; `WriteReady` notes an oversize file on stderr;
   `Fetch` refuses more than 64 KiB after the tar's end and removes
   on the tracer exactly the files that arrived, also when the
-  stream is refused part-way; `TestReadyRoundTrip`
+  stream is refused part-way; through an injected file interface
+  (`ready_sync_test.go`, task ii4), `Unpack` fsyncs each temporary
+  before its rename and the directory after the last, and a failed
+  sync keeps `Fetch` from removing what is not durable (nothing at
+  all for the directory sync); `TestReadyRoundTrip`
   (internal/cli) runs `iormesh ready` and `-remove` around
   `Unpack`.
 

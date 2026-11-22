@@ -1022,7 +1022,10 @@ Kubernetes (M7) build on it.
   `ready/`, so rsync can never grab or delete a file mid-write.
   Server-side cleanup is delete-on-transfer, not by age: an
   uncollected segment older than a minute is still data the
-  operator wants, so only a confirmed transfer frees it; if
+  operator wants, so only a confirmed transfer frees it —
+  confirmed meaning fsynced on the controller (rsync
+  `--fsync`; the pod path syncs file and directory before its
+  remove, task ii4); if
   `collect` never runs, the disk watchdog and the 4h bound cap
   what piles up.
   Synced segments land on the controller under

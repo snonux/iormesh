@@ -145,8 +145,8 @@ func (s SSH) Run(ctx context.Context, argv ...string) ([]byte, error) {
 // Fetch moves remoteDir's segment files (FetchFlags: the non-dot
 // *.parquet files directly in it) into localDir with rsync over the same
 // multiplexed ssh connection. --remove-source-files deletes a remote file
-// only after it transferred, the delete-on-transfer of PLAN.md M4
-// "Collect".
+// only after it transferred, and --fsync makes that mean "on the
+// controller's disk", the delete-on-transfer of PLAN.md M4 "Collect".
 //
 // The server is not trusted with anything on the controller beyond file
 // contents, so rsync runs -rt, not -a: without -p the remote modes do not
@@ -189,6 +189,15 @@ func (s SSH) Fetch(ctx context.Context, remoteDir, localDir string) error {
 //     no -l (a symlink is skipped, never recreated), no -o/-g;
 //   - --timeout (rsyncTimeout): give up once no data has moved for that
 //     long, however long the transfer itself takes;
+//   - --fsync (rsync 3.2.4+; the controller's must be 3.4.0+ anyway):
+//     fsync each received file before rsync counts it transferred, so
+//     --remove-source-files never deletes the server's copy of a segment
+//     the controller holds only in its page cache (task ii4) — a crash
+//     or power loss there would lose it for good. rsync syncs the file,
+//     not localDir's entry for it, and offers no directory sync before
+//     its delete, so the rename itself can still be lost to a crash
+//     right after a transfer — a gap the pod path (k8s.Unpack, which
+//     syncs the directory) does not have;
 //   - --remove-source-files: delete a remote file once transferred;
 //   - --max-size (maxFetchSize): skip a file over the cap, so one
 //     oversized segment in ready/ cannot fill the controller's disk; a
@@ -204,7 +213,7 @@ func (s SSH) Fetch(ctx context.Context, remoteDir, localDir string) error {
 //     remoteDir; the trailing exclude also matches every directory, so a
 //     subdirectory planted in ready/ is never descended into.
 func FetchFlags() []string {
-	return []string{"-rt", rsyncTimeout, "--remove-source-files",
+	return []string{"-rt", rsyncTimeout, "--fsync", "--remove-source-files",
 		fmt.Sprintf("--max-size=%d", maxFetchSize),
 		"--exclude=.*", "--include=*.parquet", "--exclude=*"}
 }
