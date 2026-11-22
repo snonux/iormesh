@@ -66,8 +66,22 @@ public final class Agent {
         if (!bridge.claim()) {
             // A second -javaagent or attach: the first install's hooks
             // stand; installing again would bracket every call twice.
-            System.err.println("iormesh-agent: already installed, ignoring this load");
+            // What a re-attach wants is a tracer session's view of them,
+            // and an earlier session consumed the dictionary records, so
+            // the load asks for a resync (task 5j4) — a flag the watermark
+            // thread acts on at its next tick; this thread never waits.
+            // The first load's ring and options stay: a different spool=
+            // in this load is not followed. The extracted jar goes first:
+            // an installed bridge older than 5j4 has no requestResync, and
+            // that load must still leave nothing behind.
             bridge.deleteExtracted();
+            try {
+                bridge.requestResync();
+                System.err.println("iormesh-agent: already installed, resyncing its ring");
+            } catch (ReflectiveOperationException e) {
+                System.err.println("iormesh-agent: already installed (an older agent, no"
+                        + " resync), ignoring this load");
+            }
             return;
         }
         BoundaryTransformer transformer = prepare(args, table, bridge);
@@ -182,7 +196,9 @@ public final class Agent {
      * the tracer takes as that signal before it probes the natives the
      * table names (internal/correlate jvm.tableRead). It drains while
      * these rows are written, so a hook row must never come after
-     * another record (task tf4).
+     * another record (task tf4). The bridge keeps the rows: a later
+     * reader gets them again from the watermark thread (task 5j4,
+     * Watermarks.resync), closed by a WATERMARK instead.
      */
     private static void describeHooks(HookTable table, Bridge bridge)
             throws ReflectiveOperationException {

@@ -2229,8 +2229,9 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
 
    ```
    0    magic "IORMRING" (stored last, release: header complete)
-   8    version u32 = 7     12  header size u32 = 4096
+   8    version u32 = 8     12  header size u32 = 4096
    16   capacity u64        24  pid u64     32  created mono ns
+   40   reader epoch u64 (each reader adds 1 at open; task 5j4)
    64   head (writers' CAS, own cache line)
    128  tail (reader's release store, own cache line)
    192  dropped records per type u64[16]
@@ -2306,7 +2307,12 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
    as dropped STACKs. The method table is the tracer's (step 6).
    A thread renamed after its first bracket writes another THREAD
    at its next bracket (an identity compare of `getName()` with
-   the name last written, task fe4).
+   the name last written, task fe4). A later reader gets all of
+   these again (task 5j4, PLAN.md #27): its open bumps the
+   reader epoch, and the watermark thread resends the hook table
+   (closed by a WATERMARK) and bumps a generation, so each
+   THREAD, STACK and CLASS is written once more at its next
+   sighting; [java-attach.md](java-attach.md) "Second sessions".
 
    Brackets are written at exit, so a syscall inside a still-open
    bracket has no record yet; the agent's watermark thread writes

@@ -647,6 +647,47 @@ func TestJavaJoinWaitsForWholeTable(t *testing.T) {
 	jt.close()
 }
 
+// TestJavaJoinWaitsForResentTable (task 5j4): a session that opens a
+// running JVM's ring reads brackets first and gets the hook table only
+// when the agent resends it, amid other threads' records. A record after
+// the first resent row says nothing; the natives are probed once, all of
+// them, at the WATERMARK the agent writes after the last row.
+func TestJavaJoinWaitsForResentTable(t *testing.T) {
+	jt := newJoinTest(t)
+	var calls [][]MarkedNative
+	jt.j.cfg.AttachMarks = func(_ uint32, natives []MarkedNative) ([]string, error) {
+		calls = append(calls, natives)
+		return nil, nil
+	}
+	jt.attach(jvmPID, jvmStart)
+	r := jt.ring()
+	hooks, rest := r.queue[:4], r.queue[4:]
+	at := jt.now + 1000
+	early := jt.bracket(1, mainTID, at, at+500, 10, 1)
+	r.queue = append([]agentspool.Record{early, rest[0]}, hooks[:2]...)
+	if err := jt.j.Poll(); err != nil {
+		t.Fatal(err)
+	}
+	r.queue = append(append([]agentspool.Record{}, hooks[2:]...), rest[1:]...)
+	r.queue = append(r.queue, jt.bracket(1, mainTID, at+1000, at+1500, 10, 1))
+	if err := jt.j.Poll(); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("probed %+v before the resent table was closed", calls)
+	}
+	r.queue = []agentspool.Record{jt.watermark(jt.now)}
+	for range 2 {
+		if err := jt.j.Poll(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(calls) != 1 || len(calls[0]) != 4 {
+		t.Fatalf("attach calls %+v, want one with the four natives", calls)
+	}
+	jt.close()
+}
+
 // TestJavaJoinMarkQueue: a thread's marks pair with its events in enter
 // order while several wait at once — a lost exit's mark (no event) is
 // skipped, an event without a mark of its own takes no other's, and an

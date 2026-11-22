@@ -32,6 +32,7 @@ import java.util.Set;
  *   8    version u32           12  header size u32 (4096)
  *   16   capacity u64 (data bytes, a power of two)
  *   24   writer pid u64        32  CLOCK_MONOTONIC ns at create
+ *   40   reader epoch u64 — each reader adds one when it opens the ring
  *   64   head — bytes reserved by writers (CAS), its own cache line
  *   128  tail — bytes consumed by the reader, written by the reader only
  *   192  dropped records per type, u64[16] (index = record type)
@@ -57,6 +58,17 @@ import java.util.Set;
  * Back-pressure: never block the target. When the reader is a full
  * capacity behind, the record is dropped and counted in the header by
  * type; the tracer turns the counters into the trace's loss accounting.
+ *
+ * Readers come and go (task 5j4): a tracer session ends and the JVM
+ * runs on, and the records a reader consumed are gone for the next one —
+ * the dictionary records (HOOK, THREAD, STACK, CLASS) among them, which
+ * the agent writes once each. So every reader bumps the reader epoch on
+ * open, and the watermark thread (Watermarks.resync) resends the
+ * dictionary once the epoch passed 1 (or moved after the tail had: a
+ * reader too old to bump it drained the ring). The word sits in what was zero
+ * padding: an agent older than 5j4 never reads it, a tracer older than
+ * 5j4 never bumps it, and either pairing behaves as before, so VERSION
+ * stays (an older peer misreads nothing).
  */
 public final class Ring {
     static final int PAD = 0;
@@ -84,13 +96,16 @@ public final class Ring {
      * HTTP flags HTTP_ASYNC_MARK and HTTP_NET_HTTP. 7 (task fe4): CLASS
      * records, a class id per frame in STACK, and sixteen drop counters
      * (CLASS is the ninth type), which moves dropped bytes and abandoned.
-     * 8 (task mb4 review): the HTTP flag HTTP_HELD.
+     * 8 (task mb4 review): the HTTP flag HTTP_HELD. The reader epoch
+     * (EPOCH, task 5j4) kept 8: a word both older peers leave alone.
      */
     static final int VERSION = 8;
     /** THREAD flag: the Java thread is a virtual thread (JDK 21+). */
     static final int VIRTUAL = 1;
     static final long MAGIC = 0x474e49524d524f49L; // "IORMRING", little endian
     static final int DATA = 4096;
+    /** The reader epoch: written by readers only, polled by the watermark thread. */
+    static final int EPOCH = 40;
     static final int HEAD = 64;
     static final int TAIL = 128;
     static final int DROPPED = 192;
@@ -233,6 +248,22 @@ public final class Ring {
         }
     }
 
+    /**
+     * How many readers have opened the ring so far (task 5j4): one plain
+     * load of a header word, no syscall, polled once per watermark tick.
+     */
+    long readerEpoch() {
+        return (long) LONGS.getAcquire(buf, EPOCH);
+    }
+
+    /**
+     * Bytes the readers have consumed so far (the tail): non-zero means
+     * some reader drained the ring, even one too old to bump the epoch.
+     */
+    long consumed() {
+        return (long) LONGS.getAcquire(buf, TAIL);
+    }
+
     /** The ring file, for the debug dump and for discard. */
     Path path() {
         return path;
@@ -361,7 +392,9 @@ public final class Ring {
      * comma-separated syscall allowlist as strings. The agent writes the
      * whole table at install, into the still empty ring, so the joiner
      * learns which syscalls each bracket may stand for from the ring
-     * itself, whatever table variant (or table= override) the JVM chose.
+     * itself, whatever table variant (or table= override) the JVM chose;
+     * and again, followed by a WATERMARK, whenever a later reader asks
+     * for a resync (task 5j4) — then amid other threads' records.
      */
     boolean hook(int id, String kind, String cls, String method, String nativeName,
                  String syscalls) {

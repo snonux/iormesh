@@ -44,7 +44,13 @@ public final class RingTest {
                 new AgentTests.Case("ring/renamed thread described again", RingTest::renamed),
                 new AgentTests.Case("ring/virtual thread flagged", RingTest::virtualThread),
                 new AgentTests.Case("ring/watermark waits for closing", RingTest::watermark),
-                new AgentTests.Case("ring/release discards", RingTest::release));
+                new AgentTests.Case("ring/release discards", RingTest::release),
+                // Last: it moves the dictionary generation for the JVM.
+                new AgentTests.Case("ring/later reader resyncs", RingTest::resync),
+                new AgentTests.Case("ring/partial resend holds watermarks",
+                        RingTest::partialResend),
+                new AgentTests.Case("ring/old reader then new resyncs",
+                        RingTest::oldReaderThenNew));
     }
 
     static void header() throws Exception {
@@ -342,6 +348,90 @@ public final class RingTest {
     }
 
     /**
+     * A later reader gets the dictionary again (task 5j4): the first
+     * reader's epoch (1) changes nothing; the second's (2) makes the
+     * watermark thread's resync write the hook table and a WATERMARK
+     * closing it, and the same thread's next bracket on the same stack
+     * writes its THREAD, the stack's CLASS records and its STACK again.
+     * A repeated agent load (requestResync) resyncs without a new reader.
+     */
+    static void resync() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        Hooks.configure(5, true, false);
+        Hooks.openRing(dir.toString(), Ring.MIN_CAPACITY);   // a fresh table too
+        Ring r = Hooks.ring;
+        Hooks.describeHook(3, "write", "java/io/FileOutputStream", "write", "writeBytes", "write");
+        ByteBuffer b = map(r.path());
+        java.util.concurrent.CountDownLatch resynced = new java.util.concurrent.CountDownLatch(1);
+        Watermarks.Resync s = new Watermarks.Resync();
+        s.gapNs = 0;   // two resyncs back to back below
+        int before;
+        try {
+            Thread t = new Thread(() -> {
+                ClassProbe.run(RingTest::bracket);
+                awaitQuietly(resynced);
+                ClassProbe.run(RingTest::bracket);
+            }, "ring-resync-thread");
+            t.start();
+            while (count(records(b), Ring.BRACKET) == 0) {
+                Thread.sleep(1);
+            }
+            setEpoch(r.path(), 1);
+            Watermarks.resync(r, s);
+            before = records(b).size();
+            setEpoch(r.path(), 2);
+            Watermarks.resync(r, s);
+            resynced.countDown();
+            t.join();
+        } finally {
+            Hooks.ring = null;
+        }
+        List<Rec> recs = records(b);
+        checkResent(recs.subList(before, recs.size()));
+        Hooks.requestResync();
+        Hooks.ring = r;
+        try {
+            Watermarks.resync(r, s);
+        } finally {
+            Hooks.ring = null;
+        }
+        equal(Ring.HOOK, records(b).get(recs.size()).type(), "a repeated load resends too");
+        delete(dir);
+    }
+
+    /**
+     * The records after the second reader's epoch: the hook table, the
+     * resyncing thread's THREAD and the closing WATERMARK, then the app
+     * thread's next bracket with its THREAD, CLASS records and STACK.
+     */
+    private static void checkResent(List<Rec> after) {
+        equal(List.of(Ring.HOOK, Ring.THREAD, Ring.WATERMARK),
+                after.subList(0, 3).stream().map(Rec::type).toList(), "resent table, closed");
+        List<Integer> rest = after.subList(3, after.size()).stream().map(Rec::type).toList();
+        equal(Ring.THREAD, rest.get(0), "the thread described again: " + rest);
+        check(rest.contains(Ring.CLASS) && rest.indexOf(Ring.CLASS) < rest.indexOf(Ring.STACK),
+                "CLASS records again, ahead of the STACK: " + rest);
+        equal(Ring.BRACKET, rest.get(rest.size() - 1), "then the bracket: " + rest);
+    }
+
+    private static void bracket() {
+        Hooks.enter(3);
+        Hooks.exit(3);
+    }
+
+    private static void awaitQuietly(java.util.concurrent.CountDownLatch l) {
+        try {
+            l.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static long count(List<Rec> recs, int type) {
+        return recs.stream().filter(x -> x.type() == type).count();
+    }
+
+    /**
      * A thread renamed after its first bracket writes another THREAD at
      * its next one (task fe4), and only then: an unchanged name is not
      * described again.
@@ -478,6 +568,100 @@ public final class RingTest {
         check(Hooks.ring == null, "no ring");
         check(Hooks.claim(), "claim is free again");
         delete(dir);
+    }
+
+    /**
+     * A resend whose rows the full ring drops writes no watermark at all
+     * (review of 5j4): the tracer takes the first WATERMARK after resent
+     * rows as the table's end, so the tick's own watermark would close a
+     * partial table and the tracer would probe only its natives. Once the
+     * reader frees room, the next tick resends it whole and closes it.
+     */
+    static void partialResend() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        Hooks.openRing(dir.toString(), Ring.MIN_CAPACITY);
+        Ring r = Hooks.ring;
+        try {
+            Hooks.describeHook(3, "write", "java/io/FileOutputStream", "write", "writeBytes",
+                    "write");
+            ByteBuffer b = map(r.path());
+            fillLeaving(r, b);   // room for a WATERMARK, not for a HOOK
+            long head = b.getLong(Ring.HEAD);
+            setEpoch(r.path(), 2);
+            Watermarks.Resync s = new Watermarks.Resync();
+            s.gapNs = 0;
+            Watermarks.tick(r, s);
+            check(s.due, "the dropped resend is still due");
+            equal(head, b.getLong(Ring.HEAD), "nothing written, no watermark either");
+            setHeader(r.path(), Ring.TAIL, head);   // the reader consumed it all
+            Watermarks.tick(r, s);
+            check(!s.due, "resent once there is room");
+            check(b.getLong(Ring.HEAD) > head, "the table and its watermark written");
+        } finally {
+            Hooks.ring = null;
+        }
+        delete(dir);
+    }
+
+    /**
+     * A reader too old to bump the epoch (a tracer before 5j4) still
+     * consumed the dictionary: the first epoch bump after its drain moved
+     * the tail resyncs, though the epoch only reached 1. Resyncs closer
+     * than the gap wait for it instead of piling up.
+     */
+    static void oldReaderThenNew() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        Hooks.openRing(dir.toString(), Ring.MIN_CAPACITY);
+        Ring r = Hooks.ring;
+        try {
+            Watermarks.Resync s = new Watermarks.Resync();
+            int g = Hooks.generation;
+            r.watermark(0);
+            setHeader(r.path(), Ring.TAIL, Ring.WATERMARK_LEN);   // the old reader's drain
+            Watermarks.resync(r, s);
+            equal(g, Hooks.generation, "no new reader yet");
+            setEpoch(r.path(), 1);
+            Watermarks.resync(r, s);
+            equal(g + 1, Hooks.generation, "the new reader resynced");
+            setEpoch(r.path(), 2);
+            Watermarks.resync(r, s);
+            equal(g + 1, Hooks.generation, "the next one waits for the gap");
+            check(s.pending, "and stays pending");
+            s.gapNs = 0;
+            Watermarks.resync(r, s);
+            equal(g + 2, Hooks.generation, "then resyncs");
+        } finally {
+            Hooks.ring = null;
+        }
+        delete(dir);
+    }
+
+    /**
+     * Fills r with BRACKETs, then WATERMARKs, until 16 or 24 bytes are
+     * left: a WATERMARK (16) fits, a HOOK or THREAD (over 24) does not.
+     */
+    private static void fillLeaving(Ring r, ByteBuffer b) {
+        long cap = Ring.MIN_CAPACITY;
+        while (cap - b.getLong(Ring.HEAD) > Ring.BRACKET_LEN + 24) {
+            r.bracket(1, 1, 0, 0, 0, 0);
+        }
+        while (cap - b.getLong(Ring.HEAD) > 24) {
+            r.watermark(0);
+        }
+    }
+
+    /** Sets the ring's reader epoch, as internal/agentspool's Open bumps it. */
+    private static void setEpoch(Path p, long epoch) throws IOException {
+        setHeader(p, Ring.EPOCH, epoch);
+    }
+
+    /** Sets one u64 header word, as the reader would. */
+    private static void setHeader(Path p, int off, long v) throws IOException {
+        try (FileChannel ch = FileChannel.open(p, StandardOpenOption.READ,
+                StandardOpenOption.WRITE)) {
+            ch.map(FileChannel.MapMode.READ_WRITE, 0, Ring.DATA).order(ByteOrder.LITTLE_ENDIAN)
+                    .putLong(off, v);
+        }
     }
 
     private static ByteBuffer map(Path p) throws IOException {
