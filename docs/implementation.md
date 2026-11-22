@@ -3257,7 +3257,7 @@ sudoers rule names):
 | `stop`      | `systemctl stop` of that unit: SIGTERM, last segment, end |
 | `status`    | the unit's state plus `<trace-dir>/<project>/state.json` |
 | `upgrade F` | verifies staged binary `F`, replaces itself (#1, #28) |
-| `uninstall` | stops every unit, removes `/opt/iormesh` |
+| `uninstall` | stops every unit, removes `/opt/iormesh`, then bootstrap's sudoers rule (marker line only) |
 
 Built by task 9b4 (`internal/cli`: `start.go`, `control.go`,
 `systemd.go`, `state.go`):
@@ -3570,7 +3570,20 @@ ssh H sudo -n /opt/iormesh/bin/iormesh status -project shop
 - First install on a host has no binary to `upgrade` with — that
   bootstrap is decision #1, the operator's own sudo or
   configuration management; deploy stops at the `test -x` with
-  that message and never tries to install.
+  that message and never tries to install. `iormeshctl
+  bootstrap HOST` (`internal/ctl/bootstrap.go`, task qh4) prints
+  the steps, or runs them with `-apply` as `sudo -n` over the
+  same Transport: preflight (`uname -m`, the tools, `sudo -n
+  true`, `id -un`, no `/etc/sudoers.d/iormesh` yet), the build
+  read once and verified (`release.ReadVerified`), one push of
+  build, signature, key and rule into the staging directory,
+  then per file `install` to a dot-named temporary, a
+  `sh -c 'test "$(sha256sum < "$1")" = "$2  -"'` check, `visudo
+  -cf` for the rule, and `mv -f -T` into place; the installed
+  tracer's `upgrade` of the staged build before the rule, `sudo
+  -n iormesh status` after it. One step list
+  (`bootstrapSteps`) serves both modes; the paths and the rule
+  come from `internal/hostlayout`.
 - The build is verified on the controller before each host's
   push (per host, not once per arch, so a build replaced
   mid-run is caught at the next host):

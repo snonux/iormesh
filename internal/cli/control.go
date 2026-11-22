@@ -12,15 +12,18 @@ import (
 	"strings"
 	"time"
 
+	"iormesh/internal/hostlayout"
 	"iormesh/internal/project"
+	"iormesh/internal/release"
 	"iormesh/internal/segment"
 )
 
 // installRoot is what uninstall removes: the binary and the default
 // trace dir under it (PLAN.md M4 "Cleanup"). It is deliberately not a
 // flag: uninstall runs under the one sudoers rule, and a path argument
-// would turn it into "delete any tree as root".
-const installRoot = "/opt/iormesh"
+// would turn it into "delete any tree as root". The path comes from
+// internal/hostlayout, which the controller's bootstrap reads too.
+const installRoot = hostlayout.Root
 
 // statusReport is one project's line in `iormesh status` (-json prints
 // the reports as they are).
@@ -277,14 +280,15 @@ func (r statusReport) text() string {
 	return b.String()
 }
 
-// uninstall stops every iormesh unit, then removes installRoot.
+// uninstall stops every iormesh unit, then removes installRoot and the
+// sudoers rule iormeshctl bootstrap installed (task qh4).
 func (c control) uninstall(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
 	fs.SetOutput(c.stderr)
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	return c.uninstallFrom(ctx, installRoot)
+	return c.uninstallFrom(ctx, installRoot, hostlayout.SudoersFile)
 }
 
 // uninstallFrom is uninstall over root (a temporary directory in tests).
@@ -295,8 +299,12 @@ func (c control) uninstall(ctx context.Context, args []string) error {
 // trace dir /opt/iormesh/traces (confine.go), which lies under
 // installRoot, so its segments go with the tree; the agent spools under
 // /run/iormesh/spool are outside root and left alone (/run is emptied at
-// boot).
-func (c control) uninstallFrom(ctx context.Context, root string) error {
+// boot). Once the tree is gone the bootstrap's sudoers rule goes too
+// (removeBootstrapRule; sudoers is a temporary path in tests): it names
+// a binary that no longer exists, and a host bootstrapped again gets a
+// new one. A failed removal of the tree keeps the rule, so the operator
+// can rerun uninstall through it.
+func (c control) uninstallFrom(ctx context.Context, root, sudoers string) error {
 	projects, err := listUnits(ctx, c.sys)
 	if err != nil {
 		return err
@@ -312,5 +320,38 @@ func (c control) uninstallFrom(ctx context.Context, root string) error {
 		return fmt.Errorf("uninstall: %w", err)
 	}
 	_, _ = fmt.Fprintf(c.stdout, "iormesh: removed %s\n", root)
+	return c.removeBootstrapRule(sudoers)
+}
+
+// maxSudoersSize bounds what uninstall reads of the rule file: the
+// bootstrap's is two short lines.
+const maxSudoersSize = 4 << 10
+
+// removeBootstrapRule removes the sudoers file at path when it is the one
+// iormeshctl bootstrap installed: a regular file, not a symlink (read
+// with O_NOFOLLOW by release.ReadFile), whose first line is
+// hostlayout.SudoersMarker. The path is fixed, never the caller's:
+// uninstall runs through the rule. Anything else there — a rule
+// configuration management laid down, a planted symlink — is left alone
+// and reported, so uninstall only ever removes the privilege bootstrap
+// granted. No file is nothing to do.
+func (c control) removeBootstrapRule(path string) error {
+	data, err := release.ReadFile(path, maxSudoersSize, nil)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return nil
+	case err != nil:
+		_, _ = fmt.Fprintf(c.stdout, "iormesh: left %s: not the bootstrap's rule: %v\n", path, err)
+		return nil
+	}
+	first, _, _ := strings.Cut(string(data), "\n")
+	if first != hostlayout.SudoersMarker {
+		_, _ = fmt.Fprintf(c.stdout, "iormesh: left %s: not installed by iormeshctl bootstrap\n", path)
+		return nil
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("uninstall: sudoers rule: %w", err)
+	}
+	_, _ = fmt.Fprintf(c.stdout, "iormesh: removed %s\n", path)
 	return nil
 }

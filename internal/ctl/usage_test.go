@@ -12,7 +12,7 @@ import (
 // discover.
 func helpInvocations() [][]string {
 	var out [][]string
-	for _, name := range []string{"add", "rm", "collect", "deploy", "build", "refresh", "open", "tui",
+	for _, name := range []string{"add", "rm", "collect", "deploy", "bootstrap", "build", "refresh", "open", "tui",
 		"expand", "query", "verify", "status", "list", "ensure"} {
 		out = append(out, []string{name})
 	}
