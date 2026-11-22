@@ -41,8 +41,9 @@ static __always_inline int ior_is_restart_ret(__s64 ret) {
 // minus the restart codes above (an interruption, not an error). The
 // aggregate's errors field must agree with ior's userspace
 // is_error/error-count rule (event.IsErrorRet in
-// ior internal/event/return.go). iormesh does not read syscall_aggregate_map; the rule is kept so the map
-// means what it means in ior.
+// ior internal/event/return.go). iormesh does not read
+// syscall_aggregate_map; the rule is kept so the map means what it means
+// in ior.
 static __always_inline int ior_is_errno_ret(__s64 ret) {
     return ret >= -IOR_MAX_ERRNO && ret < 0 && !ior_is_restart_ret(ret);
 }

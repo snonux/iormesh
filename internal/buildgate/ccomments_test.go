@@ -25,7 +25,7 @@ var (
 	// internal/... path or a Go test function. The optional "ior " or
 	// "ior's " prefix is captured so a reference into ior's repository (a
 	// provenance header, "ior internal/c/restart.c") can be told apart.
-	cRefRE = regexp.MustCompile(`(ior(?:'s)? +)?\b(internal/[A-Za-z0-9_./-]*[A-Za-z0-9_]|Test[A-Z][A-Za-z0-9_]*)`)
+	cRefRE = regexp.MustCompile(`(\bior(?:'s)? +)?\b(internal/[A-Za-z0-9_./-]*[A-Za-z0-9_]|Test[A-Z][A-Za-z0-9_]*)`)
 	// goTestFuncRE matches a top-level test function declaration.
 	goTestFuncRE = regexp.MustCompile(`(?m)^func (Test[A-Z][A-Za-z0-9_]*)\(`)
 )

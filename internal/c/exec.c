@@ -437,8 +437,9 @@ ior_exit_group_dead(void *raw_ctx) {
 // ior's userspace resolves at setup (the target when -pid is also given, else
 // /proc/<tid>/status; tidFilterTgid in ior internal/bpfsetup.go). iormesh has
 // no -tid and never writes TID_FILTER or TID_FILTER_TGID
-// (internal/bpf/loader.go), so both stay -1 and the bypass never applies. An unscoped
-// bypass would emit a record for every process death on the system under
+// (internal/bpf/loader.go), so both stay -1 and the bypass never
+// applies. An unscoped bypass would emit a record for every process
+// death on the system under
 // -tid without -pid. When the tgid is unresolved (-1) no pid matches, so
 // there is no bypass at all. group_dead is only read once the pid matched,
 // so exits of unrelated processes cost no extra reads.
