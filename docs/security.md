@@ -581,9 +581,8 @@ truth.
     `image:`) and is refused without one. The digest pins the
     bytes; no signature vouches for them (signed release
     tarballs are planned, task rh4). A sidecar is added only by
-    the
-    deployment owner's explicit patch, a debug container only
-    by the operator's `iormeshctl`. The patches and the debug
+    the deployment owner's explicit patch, a debug container
+    only by the operator's `iormeshctl`. The patches and the debug
     profile are generated into `deploy/` from internal/k8s and
     test-checked field by field
     ([testing.md](testing.md#k8s-manifests-and-pod-identity-task-vb4)).
