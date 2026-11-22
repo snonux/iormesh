@@ -28,7 +28,9 @@ import java.util.Set;
  * the tracer can load the same rows for its uprobe set and per-native
  * syscall allowlist (M3 step 3). Exact descriptors, not names: a JDK
  * that changes a signature leaves the row unmatched, which the agent
- * reports, instead of silently bracketing a different method.
+ * reports — one stderr line per such row, at install or, for a class
+ * first loaded later, at exit (Agent.reportUnapplied), and "missing" in
+ * the debug= dump — instead of silently bracketing a different method.
  */
 final class HookTable {
     /** One hooked method; owner is an internal name (java/io/…). */
