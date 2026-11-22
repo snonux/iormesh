@@ -3603,7 +3603,7 @@ iormeshctl collect [-project P]... [-store DIR] [HOST...]
 ssh H true                                   # reachable? else H fails
 # per project:
 ssh H test -d /opt/iormesh/traces/shop/ready # exit 1: never started, skip
-rsync -rt --timeout=60 --remove-source-files --max-size=1073741824 \
+rsync -rt --timeout=60 --fsync --remove-source-files --max-size=1073741824 \
     --exclude='.*' --include='*.parquet' --exclude='*' -e 'ssh …' -- \
     H:/opt/iormesh/traces/shop/ready/ \
     ~/.local/share/iormesh/traces/shop/H/
@@ -3622,7 +3622,11 @@ rsync -rt --timeout=60 --remove-source-files --max-size=1073741824 \
   renames it into `ready/` whole and synced, tables before
   events, so rsync only ever sees final files; and
   `--remove-source-files` deletes a server file only after it
-  transferred. A file over 1 GiB (`--max-size`, the pod path's
+  transferred, and `--fsync` (rsync 3.2.4+) makes that mean
+  fsynced on the controller, so a crash or power loss right
+  after a collect cannot lose a segment the server already
+  deleted (task ii4); rsync does not sync the local directory,
+  so the new name itself is not yet covered. A file over 1 GiB (`--max-size`, the pod path's
   `k8s.MaxSegmentSize`) is skipped and stays on the server, so
   `rm` lists it as a leftover (task gi4). Collect keeps no
   state: run repeatedly during a live session, each run moves
@@ -3790,10 +3794,10 @@ The SSH transport:
   must be a POSIX shell (csh/tcsh read `!` and newlines inside
   single quotes).
 - `Fetch(ctx, remoteDir, localDir)` — `rsync -rt --timeout=60
-  --remove-source-files --exclude=.* --include=*.parquet
+  --fsync --remove-source-files --exclude=.* --include=*.parquet
   --exclude=* -e 'ssh [opts]' -- HOST:DIR/ LOCAL/`: a move of
   the non-dot segment files directly in DIR, each deleted
-  remotely only once transferred. `-rt`,
+  remotely only once transferred and fsynced locally. `-rt`,
   not `-a`: without `-p` the server's modes never reach the
   controller (a 0755 `ready/` would open the local dir), and
   without `-l` a symlink the server planted is skipped, not
@@ -5752,10 +5756,13 @@ depends on:
    -project P` (internal/cli/ready.go, writer `k8s.WriteReady`),
    unpacks with `k8s.Unpack` (regular `*.parquet` entries without
    a directory part, ≤ 1 GiB each and 8 GiB in all, 0600, through
-   an `os.Root` and a dot temporary; at most 64 KiB after the
-   tar's end) and removes what arrived with `iormesh ready
-   -project P -remove -- NAME…`, also after a stream refused
-   part-way. `Debug` reads the pod (`get pod -o json`), refuses it
+   an `os.Root` and a dot temporary fsynced before its rename,
+   the directory fsynced once after the last; at most 64 KiB
+   after the tar's end) and removes what arrived with `iormesh
+   ready -project P -remove -- NAME…`, also after a stream
+   refused part-way — but only what is durable: a failed file
+   sync drops that segment, a failed directory sync all of them,
+   and they stay on the tracer for the next collect (task ii4). `Debug` reads the pod (`get pod -o json`), refuses it
    without the `tracefs` hostPath and a `sizeLimit`ed
    `iormesh-traces` emptyDir (naming the prepare patch), with
    `hostUsers: false`, without the app container, or with an

@@ -110,7 +110,7 @@ func TestSSHFetchArgv(t *testing.T) {
 		t.Fatal(err)
 	}
 	argv := rec.calls[0]
-	want := []string{"rsync", "-rt", "--timeout=60", "--remove-source-files", "--max-size=1073741824", "--exclude=.*", "--include=*.parquet",
+	want := []string{"rsync", "-rt", "--timeout=60", "--fsync", "--remove-source-files", "--max-size=1073741824", "--exclude=.*", "--include=*.parquet",
 		"--exclude=*", "-e",
 		"ssh '-o' 'BatchMode=yes' '-o' 'StrictHostKeyChecking=yes' '-o' 'ControlMaster=auto'" +
 			" '-o' 'ControlPath=/ctl/%C' '-o' 'ControlPersist=60s' '-o' 'ConnectTimeout=15'" +

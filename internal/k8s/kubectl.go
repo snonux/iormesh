@@ -167,6 +167,10 @@ func (k *Kubectl) Push(context.Context, string, ...string) error {
 // exec removes, on the tracer, exactly the files that arrived — so a
 // failed fetch loses nothing and a repeated one moves only what is new.
 // Files already unpacked are removed even when the stream broke later.
+// Unpack returns only names it fsynced, file and directory (task ii4),
+// so removeTaken never deletes the tracer's copy of a segment the
+// controller holds only in its page cache; when a sync fails it gets
+// fewer names, or none, and the rest stays on the tracer.
 // One fetch at a time per local dir (lockDir): Unpack's temporaries are
 // per segment name, and two collects of one pod would otherwise write
 // the same temporary at once. Neither exec can hold that lock for good
