@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -264,5 +265,75 @@ func TestLateAttachStopRemovesStages(t *testing.T) {
 	s.late.exec(21) // after the stop: nothing is tried any more
 	if s.late.busy() {
 		t.Error("a process was scheduled after the stop")
+	}
+}
+
+// gateLoader blocks every load until the current gate opens, then
+// refuses it, so the test decides when the pending attaches end.
+type gateLoader struct {
+	mu   sync.Mutex
+	gate chan struct{}
+}
+
+func (g *gateLoader) Load(ctx context.Context, _ javaattach.Request) error {
+	g.mu.Lock()
+	gate := g.gate
+	g.mu.Unlock()
+	select {
+	case <-gate:
+	case <-ctx.Done():
+	}
+	return javaattach.ErrAttachDisabled
+}
+
+// arm makes the loads from now on wait for open.
+func (g *gateLoader) arm() {
+	g.mu.Lock()
+	g.gate = make(chan struct{})
+	g.mu.Unlock()
+}
+
+// open ends the loads waiting, and lets later ones through until arm.
+func (g *gateLoader) open() {
+	g.mu.Lock()
+	close(g.gate)
+	g.mu.Unlock()
+}
+
+// TestLateAttachOverflowNamedEachTime (task lh4 review): with the
+// pending queue full, an exec gets no agent and is named; once the
+// queue drained and fills again, the next dropped exec is named too —
+// not dropped silently because an earlier overflow was reported.
+func TestLateAttachOverflowNamedEachTime(t *testing.T) {
+	var pids []uint32
+	for i := range uint32(lateAttachPending + 1) {
+		pids = append(pids, 1000+i, 2000+i)
+	}
+	fakeProcs(t, pids...)
+	agent, spool := agentFiles(t)
+	g := &gateLoader{}
+	useLoader(t, g)
+	tr := newFakeTracer()
+	c := testCorrelator(t, t.TempDir())
+	defer func() { _ = c.Close() }()
+	s := patternSession(t, tr, c)
+	log := startAgentSession(t, s, agent, spool)
+	for _, base := range []uint32{1000, 2000} {
+		g.arm()
+		for i := range uint32(lateAttachPending + 1) {
+			s.late.exec(base + i)
+		}
+		pollUntil(t, s, log, fmt.Sprintf("pid %d gets no agent", base+lateAttachPending))
+		g.open()
+		for deadline := time.Now().Add(5 * time.Second); s.late.busy() && time.Now().Before(deadline); {
+			time.Sleep(time.Millisecond)
+		}
+		if s.late.busy() {
+			t.Fatal("the pending attaches did not end")
+		}
+	}
+	s.stopLate()
+	if n := strings.Count(log.String(), "gets no agent"); n != 2 {
+		t.Errorf("%d overflow lines, want one per overflow:\n%s", n, log.String())
 	}
 }

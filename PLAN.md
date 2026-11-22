@@ -690,7 +690,9 @@ Gated by S1 — done; the design below is S1's result
   confined session) and stages inside a foreign root, removed
   at the session's end. The attaches run off the trace loop: a
   goroutine per JVM, at most 2 handshakes at a time and 64 JVMs
-  waiting (more are named and skipped); the loop only collects
+  waiting (an exec beyond them is skipped, the first of each
+  overflow named, the next overflow named again once a slot
+  freed); the loop only collects
   their lines and stages at its tick. A JVM forked without an
   exec is no new JVM and gets nothing.
 - **Stack capture cost**: the per-I/O `StackWalker` walk is the

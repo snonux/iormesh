@@ -3150,7 +3150,8 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
     which tries it on a goroutine of its own every 250 ms for
     30 s (5 s while it maps no `libjvm.so`), through the
     start-time `loadAgent` and stages, at most 2 handshakes at a
-    time and 64 pids pending; the trace loop's `poll` collects
+    time and 64 pids pending (each overflow named once, `full`
+    cleared when a slot frees); the trace loop's `poll` collects
     its lines and new stages, and `run` stops it (cancel, wait,
     collect) before `finish` closes the Java join. Unit tests in
     `lateattach_test.go`, end to end `TestJavaLateAttach`.

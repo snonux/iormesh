@@ -55,7 +55,10 @@ type lateAttacher struct {
 	// lateNotJVMFor; fields so tests need not wait that long.
 	every, deadline, notJVM time.Duration
 
-	// stMu guards st: the stages are made by the attach goroutines.
+	// stMu guards st: the stages are made by the attach goroutines, and
+	// held while one is made (file I/O inside the JVM's root). The trace
+	// loop never takes it once the session runs (share is start-time
+	// only): it collects the new stages from made, under mu.
 	stMu sync.Mutex
 	st   *agentStages
 
@@ -63,11 +66,13 @@ type lateAttacher struct {
 	mu sync.Mutex
 	// pending maps each process being tried to its job.
 	pending map[uint32]*lateJob
-	// lines are the attaches' reports, not yet printed; handed are the
-	// stages already given to the Java join.
-	lines  []string
-	handed map[agentStage]bool
-	// full says the pending limit was reported already (named once).
+	// lines are the attaches' reports and made the stages they made, both
+	// not yet collected by the loop.
+	lines []string
+	made  []agentStage
+	// full says the current overflow of the pending limit was named; it
+	// is cleared when an attach ends and frees a slot, so the next
+	// overflow is named again.
 	full bool
 }
 
@@ -89,12 +94,13 @@ func newLateAttacher(ctx context.Context, agent, spool string) *lateAttacher {
 	return &lateAttacher{ctx: ctx, cancel: cancel, l: newAgentLoader(), spool: spool,
 		sem: make(chan struct{}, lateAttachParallel), every: lateAttachEvery,
 		deadline: lateAttachFor, notJVM: lateNotJVMFor, st: newAgentStages(agent),
-		pending: map[uint32]*lateJob{}, handed: map[agentStage]bool{}}
+		pending: map[uint32]*lateJob{}}
 }
 
 // share makes the stages the start-time attach made available to the
 // late ones, which reuse a stage when javaattach says a JVM may share it.
-// They reached the Java join already.
+// They reached the Java join already, so they are not in made. It runs
+// once, before the ready file, and may wait for a late stage being made.
 func (a *lateAttacher) share(stages []agentStage) {
 	if a == nil {
 		return
@@ -102,15 +108,13 @@ func (a *lateAttacher) share(stages []agentStage) {
 	a.stMu.Lock()
 	a.st.all = append(a.st.all, stages...)
 	a.stMu.Unlock()
-	a.mu.Lock()
-	for _, s := range stages {
-		a.handed[s] = true
-	}
-	a.mu.Unlock()
 }
 
 // exec schedules pid's attach: it just exec'd (or was adopted) and may
-// be a JVM. A pid tried already only has its windows restarted.
+// be a JVM. A pid tried already only has its windows restarted. With
+// lateAttachPending processes pending, pid gets nothing; the first pid
+// dropped in each overflow is named (full), the rest until a slot frees
+// are covered by that line.
 func (a *lateAttacher) exec(pid uint32) {
 	if a == nil || a.ctx.Err() != nil {
 		return
@@ -125,7 +129,8 @@ func (a *lateAttacher) exec(pid uint32) {
 		if !a.full {
 			a.full = true
 			a.lines = append(a.lines, fmt.Sprintf("%d processes wait for the agent already; pid %d "+
-				"and later ones get none (start them with -javaagent)", lateAttachPending, pid))
+				"gets no agent, nor does any other process exec'd before one of them is done "+
+				"(start them with -javaagent)", lateAttachPending, pid))
 		}
 		return
 	}
@@ -142,19 +147,9 @@ func (a *lateAttacher) collect(java *javaOutput, w io.Writer) {
 	if a == nil {
 		return
 	}
-	a.stMu.Lock()
-	all := append([]agentStage(nil), a.st.all...)
-	a.stMu.Unlock()
 	a.mu.Lock()
-	lines := a.lines
-	a.lines = nil
-	var fresh []agentStage
-	for _, s := range all {
-		if !a.handed[s] {
-			a.handed[s] = true
-			fresh = append(fresh, s)
-		}
-	}
+	lines, fresh := a.lines, a.made
+	a.lines, a.made = nil, nil
 	a.mu.Unlock()
 	for _, l := range lines {
 		_, _ = fmt.Fprintf(w, "iormesh: %s\n", l)
@@ -162,9 +157,12 @@ func (a *lateAttacher) collect(java *javaOutput, w io.Writer) {
 	java.addStages(fresh)
 }
 
-// stop cancels the attaches still running, waits for them (a cancelled
-// handshake returns at once) and collects what they did, so every stage
-// reaches the Java join, which removes it with the session.
+// stop cancels the attaches still running, waits for them and collects
+// what they did, so every stage reaches the Java join, which removes it
+// with the session. A cancelled attach ends at once while it waits for
+// its next try, a token or the attach socket; one already waiting for
+// the JVM's reply ends at that read's deadline, javaattach.DefaultTimeout
+// at most (the load request is out, and the JVM still completes it).
 func (a *lateAttacher) stop(java *javaOutput, w io.Writer) {
 	if a == nil {
 		return
@@ -208,6 +206,7 @@ func (a *lateAttacher) run(j *lateJob) {
 	defer func() {
 		a.mu.Lock()
 		delete(a.pending, j.pid)
+		a.full = false // a slot is free: the next overflow is named again
 		a.mu.Unlock()
 	}()
 	start := processStart(j.pid)
@@ -274,13 +273,28 @@ func (a *lateAttacher) attempt(pid uint32) (string, error) {
 		return "", a.ctx.Err()
 	}
 	defer func() { <-a.sem }()
-	a.stMu.Lock()
-	t, err := a.st.target(pid, a.spool)
-	a.stMu.Unlock()
+	t, err := a.target(pid)
 	if err != nil {
 		return "", err
 	}
 	actx, cancel := context.WithTimeout(a.ctx, javaattach.DefaultTimeout)
 	defer cancel()
 	return loadAgent(actx, a.l, pid, t)
+}
+
+// target returns pid's agentTarget (agentStages.target) under stMu, and
+// queues a stage it made in made for the loop to collect — under mu, so
+// the loop never waits for a stage being made.
+func (a *lateAttacher) target(pid uint32) (agentTarget, error) {
+	a.stMu.Lock()
+	n := len(a.st.all)
+	t, err := a.st.target(pid, a.spool)
+	fresh := append([]agentStage(nil), a.st.all[n:]...)
+	a.stMu.Unlock()
+	if len(fresh) > 0 {
+		a.mu.Lock()
+		a.made = append(a.made, fresh...)
+		a.mu.Unlock()
+	}
+	return t, err
 }

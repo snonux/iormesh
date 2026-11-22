@@ -86,13 +86,18 @@ JVM's uid and namespaces, the same trusted (in a confined
 session pinned) jar, a stage inside a foreign root removed when
 the session ends. The attaches run beside the trace, never in
 its loop: at most 2 handshakes at a time and 64 processes
-waiting, more are named and get nothing. The I/O such a JVM does
-before its load stays unattributed — its start-up, mostly —
+waiting. A process exec'd while 64 wait gets nothing; the first
+one of each such overflow is named on stderr (`… pid N gets no
+agent, nor does any other process exec'd before one of them is
+done`), and once a waiting attach ends, processes exec'd after
+are tried again and the next overflow is named anew. The I/O
+such a JVM does before its load stays unattributed — its start-up, mostly —
 so give a JVM whose start matters `-javaagent`, e.g. through
 `JAVA_TOOL_OPTIONS`. A process forked without an exec (a JVM's
 fork) is no new JVM and gets nothing; one that turns up in the
 start-time scan and execs while it is loaded may be loaded
-twice, which the agent answers with nothing new. `iormesh
+twice: the agent, already installed, installs nothing twice but
+resyncs its ring, as for any second load (above). `iormesh
 attach` returns once the JVM
 confirmed the agent started; the running tracer then prints
 `java agent of pid N joined, K natives probed` at its next spool
