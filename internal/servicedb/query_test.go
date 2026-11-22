@@ -22,7 +22,7 @@ func TestEndpoints(t *testing.T) {
 	want := []Endpoint{
 		{IP: "10.0.0.2", Port: 8443, Conns: 1, Unresolved: 1, First: wall0 + 70, Last: wall0 + 70,
 			Clients: []string{Untraced}, ServerApps: []string{inventory}},
-		{IP: "127.0.0.1", Port: 9000, Conns: 1, TLS: "plain", First: wall0 + 50, Last: wall0 + 560,
+		{IP: "127.0.0.1", Port: 9000, Host: "hA", Conns: 1, TLS: "plain", First: wall0 + 50, Last: wall0 + 560,
 			Clients: []string{"curl"}, ServerApps: []string{orders},
 			Requests: []EndpointRequest{{"GET", "/orders", 1}}},
 		{IP: "203.0.113.9", Port: 5432, Conns: 1, Unresolved: 1, First: wall0 + 40, Last: wall0 + 40,

@@ -4229,6 +4229,14 @@ rejects the whole snapshot).
 - A half without a role (the merge's `no_role`) is stored but
   names no endpoint: its far end may be a client's ephemeral
   port.
+- **Local addresses are per host** (task ai4). An endpoint is
+  (hostname, ip, port), plus the anchor host when the IP is
+  loopback, link-local or unspecified: such an address names a
+  different machine on every host, so two hosts' 127.0.0.1:5432
+  are two endpoints, and their unnamed labels end in `@host`.
+  The scope is computed at read time (`EndpointHost`, a SQL
+  function registered with the driver), so no column or
+  migration was needed and older rows scope the same way.
 
 ### Build, refresh and show
 

@@ -138,11 +138,16 @@ func writeEndpoints(w io.Writer, eps []servicedb.Endpoint, paths bool) error {
 	return tw.Flush()
 }
 
-// endpointText is "hostname (ip:port)" or "ip:port".
+// endpointText is "hostname (ip:port)" or "ip:port"; a loopback or
+// link-local endpoint's address ends in "@host", the traced host it is
+// local to, so two hosts' 127.0.0.1:5432 rows tell apart.
 func endpointText(ep servicedb.Endpoint) string {
 	addr := ep.IP + ":" + strconv.Itoa(int(ep.Port))
 	if a, err := netip.ParseAddr(ep.IP); err == nil {
 		addr = netip.AddrPortFrom(a, ep.Port).String()
+	}
+	if ep.Host != "" {
+		addr += "@" + safe(ep.Host)
 	}
 	if ep.Hostname == "" {
 		return addr

@@ -29,12 +29,17 @@ type Filter struct {
 type Endpoint struct {
 	Hostname, IP string
 	Port         uint16
-	Service      string // "" when no rule names it
-	Conns        int64  // connections seen
-	Unresolved   int64  // of which the far end stayed unresolved
-	TLS          string // "tls", "plain", "mixed" or "" (unknown)
-	First, Last  uint64 // wall ns
-	Clients      []string
+	// Host is the traced host a loopback or link-local IP belongs to,
+	// "" for any other address. Such an address names a different
+	// machine on every host, so it scopes the endpoint: two hosts each
+	// running a local service on 127.0.0.1:5432 are two endpoints.
+	Host        string
+	Service     string // "" when no rule names it
+	Conns       int64  // connections seen
+	Unresolved  int64  // of which the far end stayed unresolved
+	TLS         string // "tls", "plain", "mixed" or "" (unknown)
+	First, Last uint64 // wall ns
+	Clients     []string
 	// ServerApps are the traced apps that accepted these connections:
 	// what lets a client be named after the service it serves too.
 	ServerApps []string
@@ -48,18 +53,25 @@ type EndpointRequest struct {
 }
 
 // Label is the endpoint's display name: its service, else
-// hostname:port, else ip:port.
+// hostname:port, else ip:port; the unnamed forms of a host-scoped
+// endpoint (a loopback or link-local IP) end in "@host", so two hosts'
+// 127.0.0.1:5432 stay two nodes of the interaction graph, which keys by
+// label. A service name is the rules' choice and stands alone.
 func (e Endpoint) Label() string {
 	if e.Service != "" {
 		return e.Service
 	}
+	at := ""
+	if e.Host != "" {
+		at = "@" + e.Host
+	}
 	if e.Hostname != "" {
-		return e.Hostname + ":" + strconv.Itoa(int(e.Port))
+		return e.Hostname + ":" + strconv.Itoa(int(e.Port)) + at
 	}
 	if a, err := netip.ParseAddr(e.IP); err == nil {
-		return netip.AddrPortFrom(a, e.Port).String()
+		return netip.AddrPortFrom(a, e.Port).String() + at
 	}
-	return e.IP + ":" + strconv.Itoa(int(e.Port))
+	return e.IP + ":" + strconv.Itoa(int(e.Port)) + at
 }
 
 // Endpoints lists the observed endpoints — unnamed ones first, the ones
@@ -91,13 +103,15 @@ func (d *DB) Endpoints(ctx context.Context, f Filter) ([]Endpoint, error) {
 	return eps, nil
 }
 
-// epKey identifies an endpoint row.
+// epKey identifies an endpoint row: hostname, IP and port, plus the
+// scoping host of a loopback or link-local IP (EndpointHost).
 type epKey struct {
 	hostname, ip string
 	port         uint16
+	host         string
 }
 
-func keyOf(e Endpoint) epKey { return epKey{e.Hostname, e.IP, e.Port} }
+func keyOf(e Endpoint) epKey { return epKey{e.Hostname, e.IP, e.Port, e.Host} }
 
 // projectClause selects the rows of a Filter's projects, bound once as ?1
 // to Filter.arg's JSON array (json_each: one bind for any number of
@@ -120,12 +134,14 @@ func (f Filter) arg() string {
 	return string(b)
 }
 
-// endpointRows aggregates the connections per endpoint.
+// endpointRows aggregates the connections per endpoint: hostname, IP,
+// port and, for a loopback or link-local IP, the anchor host it was seen
+// on (endpointHostSQL), so two hosts' local services never fold into one.
 func (d *DB) endpointRows(ctx context.Context, f Filter) ([]Endpoint, error) {
-	rows, err := d.db.QueryContext(ctx, `SELECT hostname, ip, port, COUNT(*),
-		SUM(state = 'unresolved'), MIN(first_seen), MAX(last_seen), MIN(tls), MAX(tls)
+	rows, err := d.db.QueryContext(ctx, `SELECT hostname, ip, port, `+endpointHostSQL+`,
+		COUNT(*), SUM(state = 'unresolved'), MIN(first_seen), MAX(last_seen), MIN(tls), MAX(tls)
 		FROM conn WHERE role <> 'unknown' AND ip <> '' AND `+projectClause+`
-		GROUP BY hostname, ip, port ORDER BY hostname, ip, port`, f.arg())
+		GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3, 4`, f.arg())
 	if err != nil {
 		return nil, fmt.Errorf("servicedb: %w", err)
 	}
@@ -135,7 +151,7 @@ func (d *DB) endpointRows(ctx context.Context, f Filter) ([]Endpoint, error) {
 		var e Endpoint
 		var port, first, last int64
 		var lo, hi sql.NullInt64
-		if err := rows.Scan(&e.Hostname, &e.IP, &port, &e.Conns, &e.Unresolved,
+		if err := rows.Scan(&e.Hostname, &e.IP, &port, &e.Host, &e.Conns, &e.Unresolved,
 			&first, &last, &lo, &hi); err != nil {
 			return nil, fmt.Errorf("servicedb: %w", err)
 		}
@@ -162,12 +178,12 @@ func tlsLabel(lo, hi sql.NullInt64) string {
 
 // endpointLists fills each endpoint's clients and server apps, sorted.
 func (d *DB) endpointLists(ctx context.Context, f Filter, byKey map[epKey]*Endpoint) error {
-	rows, err := d.db.QueryContext(ctx, `SELECT DISTINCT hostname, ip, port,
+	rows, err := d.db.QueryContext(ctx, `SELECT DISTINCT hostname, ip, port, `+endpointHostSQL+`,
 		CASE WHEN client_host = '' THEN '`+Untraced+`'
 			ELSE COALESCE(NULLIF(client_app, ''), client_comm, '') END,
 		COALESCE(NULLIF(server_app, ''), '')
 		FROM conn WHERE role <> 'unknown' AND ip <> '' AND `+projectClause+`
-		ORDER BY 1, 2, 3, 4, 5`, f.arg())
+		ORDER BY 1, 2, 3, 4, 5, 6`, f.arg())
 	if err != nil {
 		return fmt.Errorf("servicedb: %w", err)
 	}
@@ -176,7 +192,7 @@ func (d *DB) endpointLists(ctx context.Context, f Filter, byKey map[epKey]*Endpo
 		var k epKey
 		var port int64
 		var client, server string
-		if err := rows.Scan(&k.hostname, &k.ip, &port, &client, &server); err != nil {
+		if err := rows.Scan(&k.hostname, &k.ip, &port, &k.host, &client, &server); err != nil {
 			return fmt.Errorf("servicedb: %w", err)
 		}
 		k.port = uint16(port)
@@ -193,19 +209,21 @@ func (d *DB) endpointLists(ctx context.Context, f Filter, byKey map[epKey]*Endpo
 // does not) sums over its sources; the two views count the same
 // requests, so the connection's count is the larger view — the one whose
 // segments a build kept more of — never the two added up. Connections
-// then add up per endpoint.
+// then add up per endpoint (keyed as endpointRows keys it, the scoping
+// host of a local IP included).
 const requestCounts = `WITH per_view AS (
 		SELECT host, conn_id, method, path, http_host <> '' AS client, SUM(requests) AS n
 		FROM http_request GROUP BY 1, 2, 3, 4, 5),
 	per_conn AS (
 		SELECT host, conn_id, method, path, MAX(n) AS n FROM per_view GROUP BY 1, 2, 3, 4)
-	SELECT c.hostname, c.ip, c.port, r.method, r.path, SUM(r.n)
+	SELECT c.hostname, c.ip, c.port, iormesh_endpoint_host(c.ip, c.host), r.method, r.path,
+		SUM(r.n)
 		FROM per_conn r JOIN conn c ON c.host = r.host AND c.conn_id = r.conn_id
 		WHERE c.role <> 'unknown' AND c.ip <> '' AND
 			(?1 = '[]' OR c.project IN (SELECT value FROM json_each(?1))
 				OR c.client_project IN (SELECT value FROM json_each(?1))
 				OR c.server_project IN (SELECT value FROM json_each(?1)))
-		GROUP BY 1, 2, 3, 4, 5 ORDER BY 1, 2, 3, 4, 5`
+		GROUP BY 1, 2, 3, 4, 5, 6 ORDER BY 1, 2, 3, 4, 5, 6`
 
 // endpointRequests fills each endpoint's requests by method and path.
 func (d *DB) endpointRequests(ctx context.Context, f Filter, byKey map[epKey]*Endpoint) error {
@@ -218,7 +236,8 @@ func (d *DB) endpointRequests(ctx context.Context, f Filter, byKey map[epKey]*En
 		var k epKey
 		var port int64
 		var r EndpointRequest
-		if err := rows.Scan(&k.hostname, &k.ip, &port, &r.Method, &r.Path, &r.Count); err != nil {
+		if err := rows.Scan(&k.hostname, &k.ip, &port, &k.host, &r.Method, &r.Path,
+			&r.Count); err != nil {
 			return fmt.Errorf("servicedb: %w", err)
 		}
 		k.port = uint16(port)

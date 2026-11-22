@@ -29,10 +29,14 @@ type namer struct {
 // proc is what the merged graph says about a process.
 type proc struct{ app, comm string }
 
-// epKey is an endpoint as the database keys it.
+// epKey is an endpoint as the database keys it: a loopback or
+// link-local IP is scoped to the host that saw it
+// (servicedb.EndpointHost), so two hosts' 127.0.0.1:5432 keep their own
+// labels.
 type epKey struct {
 	hostname, ip string
 	port         uint16
+	host         string
 }
 
 // newNamer indexes the graph, the build's observations and the
@@ -60,7 +64,7 @@ func newNamer(g schema.Graph, obs []servicedb.Observation, eps []servicedb.Endpo
 		n.byLocal[federate.LocalConn{Host: o.Host, ConnID: o.ConnID}] = o
 	}
 	for _, e := range eps {
-		n.labels[epKey{e.Hostname, e.IP, e.Port}] = e.Label()
+		n.labels[epKey{e.Hostname, e.IP, e.Port, e.Host}] = e.Label()
 	}
 	return n
 }
@@ -100,11 +104,12 @@ func (n namer) endpoint(q request) string {
 	if !ok || !o.Endpoint.IsValid() {
 		return ""
 	}
-	k := epKey{o.Hostname, o.Endpoint.Addr().String(), o.Endpoint.Port()}
+	ip := o.Endpoint.Addr().String()
+	k := epKey{o.Hostname, ip, o.Endpoint.Port(), servicedb.EndpointHost(ip, o.Host)}
 	if l, ok := n.labels[k]; ok {
 		return l
 	}
-	return servicedb.Endpoint{Hostname: o.Hostname, IP: k.ip, Port: k.port}.Label()
+	return servicedb.Endpoint{Hostname: o.Hostname, IP: k.ip, Port: k.port, Host: k.host}.Label()
 }
 
 // server is a server request's lifeline: its endpoint, else its
