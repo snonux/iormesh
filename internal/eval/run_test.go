@@ -124,6 +124,20 @@ func TestCommandModel(t *testing.T) {
 	}
 }
 
+// TestCommandModelWrapperTimeout: a wrapper script whose child outlives
+// the kill and keeps the stdout pipe open (the shell does not exec
+// `sleep` here, as `echo` follows it) is still cut near the timeout,
+// not when the child finally exits. The bound is loose for a loaded
+// machine: the child sleeps 5 s, so anything under 3 s proves the cut.
+func TestCommandModelWrapperTimeout(t *testing.T) {
+	c := Command{Argv: []string{"/bin/sh", "-c", "sleep 5; echo late"}, Timeout: 100 * time.Millisecond}
+	start := time.Now()
+	_, err := c.Reply(context.Background(), "")
+	if elapsed := time.Since(start); err == nil || elapsed > 3*time.Second {
+		t.Errorf("wrapper not cut by the timeout: err %v after %v", err, elapsed)
+	}
+}
+
 // TestOptIn: without a model command the eval refuses to run, before
 // reading anything; the other options are checked too.
 func TestOptIn(t *testing.T) {
