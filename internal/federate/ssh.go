@@ -235,10 +235,12 @@ func (s SSH) Push(ctx context.Context, remoteDir string, localFiles ...string) e
 //   - ControlMaster/ControlPath/ControlPersist: one connection per host,
 //     reused by the next command for a minute; %C hashes user, host and
 //     port, so the socket path stays short (macOS caps it at 104 bytes).
-//   - ForwardAgent=no, ClearAllForwardings=yes: no agent or port
-//     forwarding, whatever ~/.ssh/config says. Mesh expansion points the
-//     operator's key at hosts found from traffic; such a host must get
-//     a login, never a way back into the operator's agent or network.
+//   - ForwardAgent=no, ClearAllForwardings=yes, ForwardX11=no,
+//     ForwardX11Trusted=no: no agent, port or X11 forwarding, whatever
+//     ~/.ssh/config says. ClearAllForwardings does not cover X11, so it
+//     gets its own options. Mesh expansion points the operator's key at
+//     hosts found from traffic; such a host must get a login, never a way
+//     back into the operator's agent, network or X display.
 func (s SSH) sshOptions() []string {
 	return []string{
 		"-o", "BatchMode=yes",
@@ -249,6 +251,8 @@ func (s SSH) sshOptions() []string {
 		"-o", "ConnectTimeout=15",
 		"-o", "ForwardAgent=no",
 		"-o", "ClearAllForwardings=yes",
+		"-o", "ForwardX11=no",
+		"-o", "ForwardX11Trusted=no",
 	}
 }
 
