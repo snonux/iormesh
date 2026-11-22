@@ -113,8 +113,11 @@ the plan is the source of truth.
   the connection, the method stack and the OTEL span; sensitive
   headers and query params are redacted before recording — the
   same policy covers argv. Path segments are recorded verbatim
-  (decision #22); templating id-like segments is planned (task
-  xh4).
+  (decision #22): the events keep the raw path. Only the
+  controller's per-path counts (the service database, the
+  services view's top paths) fold id-like segments into
+  templates such as `/orders/{id}` (task xh4; see
+  [security.md](security.md) for the rules).
 - **Goldens in the same schema** — M0's declared expectations
   are schema documents with symbolic ids. Validation is subset,
   not equality: cut to the marker bracket, normalize, assert

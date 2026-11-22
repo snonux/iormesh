@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"iormesh/internal/k8sname"
+	"iormesh/internal/pathtmpl"
 )
 
 // ErrInvalid marks a map entry that fails validation, for errors.Is.
@@ -42,6 +43,12 @@ type Map struct {
 	// address inside one that no Service of the map holds is flagged
 	// (unknown_service) rather than left a bare address.
 	ServiceCIDRs []string `yaml:"service_cidrs,omitempty" json:"service_cidrs,omitempty"`
+	// PathTemplates are the operator's HTTP path templates
+	// ("/shops/{shop}/orders/{order}", internal/pathtmpl): the build
+	// counts a request on a matching path under the template, ahead of
+	// the built-in folding of numeric, UUID and long-hex segments. Only
+	// the static map's count; discovery never writes any.
+	PathTemplates []string `yaml:"path_templates,omitempty" json:"path_templates,omitempty"`
 }
 
 // Route maps one FQDN to the ingress it terminates on and the Service and
@@ -132,6 +139,9 @@ func (m *Map) Validate() error {
 		if p, err := netip.ParsePrefix(c); err != nil || p != p.Masked() {
 			return fmt.Errorf("%w: service_cidrs: %q is not a canonical prefix", ErrInvalid, c)
 		}
+	}
+	if _, err := pathtmpl.Compile(m.PathTemplates); err != nil {
+		return fmt.Errorf("%w: path_templates: %v", ErrInvalid, err)
 	}
 	return nil
 }

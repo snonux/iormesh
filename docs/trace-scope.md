@@ -45,7 +45,8 @@ event families `iormesh run -trace-families` adds (see
   client/server API boundary by the agent (so HTTPS included,
   nothing sniffed off the wire), sensitive headers and query
   params redacted by policy, path segments verbatim (decision
-  #22; templating is planned, task xh4). *What is actually
+  #22; the controller's per-path counts fold ids into
+  templates, task xh4). *What is actually
   said, at the level the mesh routes on.*
 - **Local IPC** — pipes and socketpairs (both ends), unix stream
   connections (paired by the kernel), loopback TCP pairs and

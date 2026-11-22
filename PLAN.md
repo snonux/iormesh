@@ -737,8 +737,9 @@ Gated by S1 — done; the design below is S1's result
   Captured at the API boundary, so HTTPS is included without
   ever touching the wire; sensitive headers and query params
   are redacted by policy before anything is recorded, path
-  segments are verbatim (#22; templating is planned, task
-  xh4). Task 3b4 built the JDK's three — HttpServer (at
+  segments are verbatim in the events (#22); the controller's
+  per-path views fold id-like segments into templates (task
+  xh4, see #22). Task 3b4 built the JDK's three — HttpServer (at
   the exchange's close, or the handler's return), HttpClient
   (synchronous `send`) and HttpURLConnection (its response
   read): one `http` event per request with method, scheme,
@@ -2727,6 +2728,23 @@ deferred.
   X-Forwarded-URI, X-Rewrite-URL, X-Envoy-Original-Path) as
   URLs like Location; a test fails when the agent's copy and
   internal/redact's lists differ.
+  *Decided (task xh4): templated at the controller's
+  aggregations, raw in the events.* The trace keeps the path
+  verbatim (no schema change, no data lost, `iormeshctl query`
+  and report.json show what was requested); the build folds
+  id-like segments where it counts per path — the service
+  database's request keys, hence the services view's top
+  paths. Built-in folding is conservative: a segment of only
+  digits, a canonical UUID, or 16+ hex digits with a digit
+  becomes `{id}`; words and versions (`v2`, `cafe`,
+  `report-2024`) never fold. The operator's `path_templates`
+  in routes.yaml (`/shops/{shop}/orders/{order}`: a `{name}`
+  segment matches any one segment) win over it, first match,
+  a literal template pinning a path verbatim. A source
+  imported again replaces its rows on a connection, so a
+  changed rule or the upgrade never counts requests twice;
+  rows stored raw before it fold by the built-in rules when
+  read (internal/pathtmpl).
 - **#8 Hostname & TLS visibility** — DNS hostname↔IP via Java
   agent hooks (InetAddress) is the clean path; TLS peer
   identity (trust-manager/SSLSocket hooks) is extra value at
@@ -3391,7 +3409,8 @@ Metadata only — nothing below is payload (see non-goals):
   client/server API boundary by the agent (HTTPS included,
   nothing sniffed off the wire), sensitive headers and query
   params redacted by policy, path segments verbatim (#22;
-  templating planned, task xh4). *Why: URIs are
+  the controller's views fold ids into templates, task xh4).
+  *Why: URIs are
   what the mesh actually routes on — and what an LLM matches
   against source code.*
 - **Local IPC**: pipes (both ends), unix sockets (peer PID where
@@ -3628,9 +3647,9 @@ can reconstruct behavior and check it against source code:
   status and sizes as first-class events, correlated with
   connection, stack and span; sensitive headers and query
   params are redacted before recording, path segments are
-  verbatim (#22's default; templating id-like segments is
-  planned, task xh4). The same policy covers argv (policy
-  documented in docs/schema.md).
+  verbatim (#22's default; the controller's per-path views
+  fold id-like segments into templates, task xh4). The same
+  policy covers argv (policy documented in docs/schema.md).
 - **Summary rollup**: per-process entry point — config files read,
   connections with hostnames, thread table, top methods by I/O —
   cheap context before diving into the event stream.
@@ -3899,6 +3918,8 @@ internal/federate/    # server registry, trace sync (rsync,
 internal/servicedb/   # service-interaction database: observed
                       #   connections, naming rules, CLI-facing
                       #   queries (cgo-free)
+internal/pathtmpl/    # HTTP path templates: ids fold to {id},
+                      #   operator rules first (#22, cgo-free)
 internal/report/      # per-run summary rollup (M5, cgo-free)
 internal/eval/        # LLM eval harness: question sets, model
                       #   command protocol, scoring (M5)

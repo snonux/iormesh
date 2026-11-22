@@ -103,13 +103,8 @@
       "top_paths": [
         {
           "method": "GET",
-          "path": "/orders/2",
-          "count": 2
-        },
-        {
-          "method": "GET",
-          "path": "/orders/1",
-          "count": 1
+          "path": "/orders/{id}",
+          "count": 3
         }
       ],
       "more_paths": 0

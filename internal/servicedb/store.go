@@ -51,8 +51,11 @@ ON CONFLICT (host, conn_id) DO UPDATE SET
 // the same numbers and a build over fewer sources leaves the others'
 // counts standing: the reads sum over sources, which stays exact for a
 // pooled connection whose requests span several segments, old ones
-// deleted since. The MAX only matters for a source that grew between two
-// builds (a trace directory still being written): its count only rises.
+// deleted since. importOne clears the source's rows on the connection
+// first (clearSources, paths.go), so a source read again — grown, or
+// under other path templates — replaces its counts; the MAX only decides
+// between two rows of one key within a snapshot, and when moveRequests
+// merges a server row into a fused one.
 const upsertRequest = `INSERT INTO http_request (host, conn_id, source, method, scheme,
 	http_host, path, requests, first_seen, last_seen)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -96,7 +99,8 @@ func (d *DB) Import(ctx context.Context, s Snapshot) error {
 	})
 }
 
-// importOne writes one observation and its requests.
+// importOne writes one observation and its requests, which replace the
+// rows their sources had on the connection.
 func importOne(ctx context.Context, tx *sql.Tx, o Observation) error {
 	if o.State != schema.StateFused && o.Role == RoleServer {
 		if fused, err := fusedElsewhere(ctx, tx, o); err != nil || fused {
@@ -114,6 +118,9 @@ func importOne(ctx context.Context, tx *sql.Tx, o Observation) error {
 		if err := supersede(ctx, tx, o); err != nil {
 			return err
 		}
+	}
+	if err := clearSources(ctx, tx, o); err != nil {
+		return err
 	}
 	for _, r := range o.Requests {
 		if _, err := tx.ExecContext(ctx, upsertRequest, o.Host, o.ConnID, r.Source, r.Method,

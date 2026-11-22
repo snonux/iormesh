@@ -2131,7 +2131,21 @@ docs/implementation.md M7 steps 11 and 12):
   unspecified ClusterIP, no ports, a port past 65535, an
   endpoint pod of another namespace, a forged UID, two Services
   claiming one ClusterIP and port, a non-canonical CIDR, and past
-  1024 endpoints.
+  1024 endpoints. `paths_test.go`: a bad `path_templates` entry
+  refuses the file too, and only the static map's templates
+  reach the table.
+- HTTP path templates (task xh4): `internal/pathtmpl` folds
+  numeric, canonical-UUID and 16+-hex segments to `{id}` and
+  keeps words and versions (`/api/v2/users`, `cafe`, 15 hex
+  digits, near-UUIDs, `report-2024`, the query) verbatim;
+  operator templates win, a literal one pins a path.
+  `internal/servicedb/paths_test.go`: Observe counts one row per
+  template; a source imported again under other keys replaces
+  its rows (never counted twice); raw rows stored before the
+  templating fold when read. `TestBuildPathTemplates`
+  (internal/ctl): the model's top paths show `/orders/{id}`,
+  then the route map's `/orders/{order}` over the same
+  database, while report.json keeps `/orders/1`.
 - `internal/routemap/discover_test.go`: a namespace as kubectl
   lists it becomes `testdata/discovered.golden` — a Deployment's
   Service with its named target port resolved and its not-ready
