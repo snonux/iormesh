@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"iormesh/internal/federate"
 	"iormesh/internal/k8sname"
@@ -261,8 +262,7 @@ func build(ctx context.Context, e env, f buildFlags) (buildOutput, error) {
 	if err != nil {
 		return buildOutput{}, err
 	}
-	in, rep, err := mergeAndImport(ctx, paths.db, servicedb.Filter{Projects: sel.projects, Hosts: sel.hosts},
-		&sel.segs, methods, routes)
+	in, rep, err := mergeAndImport(ctx, paths.db, sel.scope(), &sel.segs, methods, routes)
 	if err != nil {
 		return buildOutput{}, err
 	}
@@ -290,6 +290,28 @@ type selection struct {
 	window   *federate.Window
 	segs     federate.Segments
 	hosts    []string
+}
+
+// scope is what the build reads back of the service database: its
+// projects, a -namespace build's hosts, and a windowed build's window
+// (task yh4's review) — the database holds every import ever made, so
+// without the window a windowed build's services and edges would be
+// the whole history while its tally is the window's.
+func (sel selection) scope() servicedb.Filter {
+	f := servicedb.Filter{Projects: sel.projects, Hosts: sel.hosts}
+	if sel.window != nil {
+		f.From, f.To = wallNS(sel.window.From), wallNS(sel.window.To)
+	}
+	return f
+}
+
+// wallNS is t in wall ns, 0 for the zero time (an open side). The window
+// lies in 1970–2262 (query.ParseTime, the segment names), so it fits.
+func wallNS(t time.Time) uint64 {
+	if t.IsZero() {
+		return 0
+	}
+	return uint64(t.UnixNano())
 }
 
 // selectSegments picks the build's projects, resolves its window, loads
@@ -417,7 +439,8 @@ func checkedSegmentsIn(ctx context.Context, paths buildPaths, projects []string,
 // without a route map) joins the routed edges and carries the operator's
 // path templates the import counts requests under. scope names the
 // projects built and, for a -namespace build, the hosts whose
-// connections the database's views keep.
+// connections the database's views keep; for a windowed build, the
+// window those connections must have been seen in (selection.scope).
 func mergeAndImport(ctx context.Context, dbPath string, scope servicedb.Filter, segs *federate.Segments,
 	methods map[string]map[uint64]schema.Method, routes *routemap.Table) (viewmodel.Input, report.Report, error) {
 	tally := viewmodel.NewTally()
@@ -452,7 +475,9 @@ func mergeAndImport(ctx context.Context, dbPath string, scope servicedb.Filter, 
 // route map's path_templates, then the built-in folding of ids (task
 // xh4) — so the services view counts routes; the events keep the raw
 // paths (decision #22) for query. The database's views are read back
-// through filter: the build's projects, and a -namespace build's hosts.
+// through filter: the build's projects, a -namespace build's hosts and a
+// windowed build's window. The import itself is never narrowed: it folds
+// every segment read into the database.
 func importMesh(ctx context.Context, dbPath string, sources []federate.Source, in *viewmodel.Input,
 	filter servicedb.Filter) error {
 	snap, err := servicedb.Observe(ctx, sources, in.Merge, in.Routes.Paths())

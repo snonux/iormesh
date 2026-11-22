@@ -19,14 +19,22 @@ import (
 // name's start is cut to the second, and an event stamped in the kernel
 // just before a rotation is written into the next segment. A minute is
 // far more than any of these; erring wide only lets a window take one
-// more segment at an edge, never miss one.
+// more segment at an edge.
 const spanSlack = time.Minute
 
-// Span is the time range [from, to) a segment file's events can fall in,
-// from its name: the named start, plus the writer's rotation interval
+// Span is the time range [from, to) a segment file was written in, from
+// its name: the named start, plus the writer's rotation interval
 // (segment.DefaultInterval — the tracer never sets another; a segment
 // rotated early at its size bound only ends sooner), each side widened by
 // spanSlack.
+//
+// It bounds when events were written, not their wall_ns: an event is
+// stamped when its call began and written when it completed, so a call
+// that blocked longer than the slack (a read waiting minutes for data)
+// lands in a segment written after its wall_ns. A -to window can miss
+// such an event, and prune counts it with the later segment — the
+// window selects segments, it does not promise every event whose
+// wall_ns lies inside it.
 func Span(f segment.FileName) (from, to time.Time) {
 	return f.Start.Add(-spanSlack), f.Start.Add(segment.DefaultInterval + spanSlack)
 }

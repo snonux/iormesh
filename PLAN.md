@@ -1194,7 +1194,15 @@ Kubernetes (M7) build on it.
   segments and never decodes one outside it once its host
   directory is pinned; an unpinned directory is checked whole,
   so the host vetting, and what the build pins, are a full
-  build's. A windowed build is a different build: it writes
+  build's. The range bounds when a segment was written, not its
+  events' wall clocks: a call blocked past the slack is written
+  later than it was stamped, and a `-to` can miss it. The
+  service database holds every import ever made, so a windowed
+  build reads its services and edges back narrowed to the
+  connections (and per-segment request rows) whose seen range
+  overlaps the window (`servicedb.Filter` From/To, wall ns);
+  the import itself is never narrowed. A windowed build is a
+  different build: it writes
   `<projects>[@NS]~window/` (one per project set and namespace,
   overwritten by the next windowed build, read by `show
   -windowed`) and never replaces the full build. `prune

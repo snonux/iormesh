@@ -146,16 +146,46 @@ func TestPrune(t *testing.T) {
 }
 
 // TestPruneProject: -project limits prune to that project's host
-// directories.
+// directories; given twice, each file is listed and deleted once.
 func TestPruneProject(t *testing.T) {
 	f := newPruneFixture(t)
 	want := f.relNames(t, f.app1Files[0], f.app1Files[1])
+	if got := listed(f.mustRun(t, "prune", "-older-than", "5m", "-project", "shop", "-project", "shop"),
+		"would delete  "); !slices.Equal(got, want) {
+		t.Errorf("-project shop twice listed %v, want %v", got, want)
+	}
 	out := f.mustRun(t, "prune", "-older-than", "5m", "-project", "shop", "-apply")
 	if got := listed(out, "deleted       "); !slices.Equal(got, want) {
 		t.Errorf("deleted %v, want %v\n%s", got, want, out)
 	}
 	if _, err := os.Lstat(f.app2Files[0]); err != nil {
 		t.Errorf("prune -project shop deleted billing's %s", f.app2Files[0])
+	}
+}
+
+// TestPruneSymlinkedProject: a project directory that is a symlink is
+// not the store's: -project naming it is refused before anything is
+// listed, and without -project it is skipped, its target untouched.
+func TestPruneSymlinkedProject(t *testing.T) {
+	f := newPruneFixture(t)
+	elsewhere := filepath.Join(t.TempDir(), "elsewhere")
+	if err := os.Rename(filepath.Join(f.store, "shop"), elsewhere); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, filepath.Join(f.store, "shop")); err != nil {
+		t.Fatal(err)
+	}
+	moved := filepath.Join(elsewhere, "app1", filepath.Base(f.app1Files[0]))
+	if code := f.run("prune", "-older-than", "5m", "-project", "shop", "-apply"); code != exitError ||
+		!strings.Contains(f.stderr.String(), "nothing collected for project shop") {
+		t.Errorf("prune -project of a symlinked project: exit %d, %s", code, f.stderr)
+	}
+	out := f.mustRun(t, "prune", "-older-than", "5m", "-apply")
+	if strings.Contains(out, "shop/") {
+		t.Errorf("prune followed the symlinked project:\n%s", out)
+	}
+	if _, err := os.Lstat(moved); err != nil {
+		t.Errorf("the symlinked project's segment is gone: %v", err)
 	}
 }
 

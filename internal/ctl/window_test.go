@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"iormesh/internal/schema"
 	"iormesh/internal/viewmodel"
 )
 
@@ -71,6 +73,48 @@ func TestBuildWindow(t *testing.T) {
 	}
 	if out := f.mustRun(t, "show", "-windowed"); !strings.Contains(out, "segments") {
 		t.Errorf("show -windowed:\n%s", out)
+	}
+}
+
+// lateDialer is a session of host app3 (project shop) whose events'
+// clocks agree with its segment names: it dials peerEarly at t0, in
+// seq 0 (named t0), and peerLate at t0+3m10s, in seq 1 (named t0+3m).
+func lateDialer(t *testing.T, f *buildFixture, peerEarly, peerLate string) {
+	t.Helper()
+	const late = uint64(190 * time.Second / time.Microsecond)
+	h := &hostTrace{host: "app3", project: "shop", fqdn: "app3.example.org"}
+	h.header()
+	h.add(400, schema.KindConnect, 5, -115, 100, "e1", tupleArgs("10.3.0.5:41000", peerEarly))
+	h.tcp(400, 5, 200, "e1", "10.3.0.5:41000", peerEarly, "ESTABLISHED", 0x11, 0x21, 1, 0)
+	h.add(400, schema.KindConnect, 6, -115, late, "l1", tupleArgs("10.3.0.5:42000", peerLate))
+	h.tcp(400, 6, late+100, "l1", "10.3.0.5:42000", peerLate, "ESTABLISHED", 0x31, 0x41, 1, 0)
+	h.end(late+200, schema.EndStop)
+	writeStoreSegments(t, f.store, h.host, h, 3)
+}
+
+// TestBuildWindowScopesServices (review of task yh4): the services and
+// edges of a windowed build are the window's — the service database
+// holds every import ever made, so its views are read back narrowed to
+// the connections seen in the window — not the database's whole history.
+func TestBuildWindowScopesServices(t *testing.T) {
+	f := newBuildFixture(t)
+	const early, late = "198.51.100.1:5432", "198.51.100.2:6379"
+	lateDialer(t, f, early, late)
+	f.mustRun(t, "build")
+	all := endpointsOf(t, f.mustRun(t, "show", "services", "-json"))
+	if !slices.Contains(all, early) || !slices.Contains(all, late) {
+		t.Fatalf("full build's services %v: want both peers", all)
+	}
+	f.mustRun(t, "build", "-from", windowT0.Add(3*time.Minute).Format(time.RFC3339))
+	got := endpointsOf(t, f.mustRun(t, "show", "services", "-json", "-windowed"))
+	if slices.Contains(got, early) || !slices.Contains(got, late) {
+		t.Errorf("windowed services %v: want %s and not %s", got, late, early)
+	}
+	if edges := f.mustRun(t, "show", "edges", "-json", "-windowed"); strings.Contains(edges, "198.51.100.1") {
+		t.Errorf("windowed edges name the peer seen only before the window:\n%s", edges)
+	}
+	if again := endpointsOf(t, f.mustRun(t, "show", "services", "-json")); !slices.Equal(again, all) {
+		t.Errorf("the full build's services changed: %v, was %v", again, all)
 	}
 }
 

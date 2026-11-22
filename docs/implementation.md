@@ -4718,7 +4718,20 @@ iormeshctl prune -older-than DUR [-project P]... [-store DIR] [-apply]
   just before a rotation all fit inside. Reading the events to
   place a segment would cost the decode a window is there to
   save, so the range errs wide: a window takes whole segments,
-  about a minute or two past each edge.
+  about a minute or two past each edge. The range bounds when
+  the segment was *written*, not its events' `wall_ns`: an
+  event is stamped when its call began and written when it
+  completed, so a read that blocked for minutes sits in a later
+  segment, and a `-to` window can miss it.
+- **Services and edges.** The build imports every segment it
+  read into the service database, which holds every import ever
+  made — pruned segments' too. So the windowed build reads the
+  services and edges back through `servicedb.Filter{From, To}`
+  (wall ns, the clock of `first_seen`/`last_seen`): a connection
+  counts when its seen range overlaps the window, and its
+  requests only from the per-segment rows whose range does.
+  Without that, its summary would mix the window's tally with
+  the database's whole history.
 - **The window.** `T` is query's (`query.ParseTime`: RFC 3339,
   or a UTC time of day on the day of the earliest segment of the
   projects, `federate.FirstStart`); `-last DUR` is `-from
@@ -4756,7 +4769,8 @@ iormeshctl prune -older-than DUR [-project P]... [-store DIR] [-apply]
 - **Tests.** `internal/federate/window_test.go` (range edges);
   `internal/ctl/window_test.go` (`-from`, a time of day, `-last`,
   `-to` select the expected segments of the rotated fixture, the
-  full build unchanged, an unpinned directory checked whole and
+  full build unchanged, services and edges seen only before the
+  window left out of the windowed views, an unpinned directory checked whole and
   a pinned one only in its window, refusals);
   `internal/ctl/prune_test.go` (the listing deletes nothing,
   `-apply` exactly the listed files, a live session's table kept

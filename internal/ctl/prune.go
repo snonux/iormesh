@@ -99,7 +99,8 @@ func pruneStore(e env, flagged string) (string, error) {
 
 // planPrune lists the old segment files of projects (every valid,
 // non-symlink project directory when none is given), as paths below
-// store, sorted.
+// store, sorted. A -project given twice is listed once; one that is not
+// a real directory of the store (missing, a file, a symlink) is an error.
 func planPrune(store string, projects []string, cutoff time.Time) ([]string, error) {
 	if len(projects) == 0 {
 		var err error
@@ -107,6 +108,7 @@ func planPrune(store string, projects []string, cutoff time.Time) ([]string, err
 			return nil, fmt.Errorf("trace store: %w", err)
 		}
 	} else {
+		projects = slices.Compact(slices.Sorted(slices.Values(projects)))
 		for _, p := range projects {
 			if fi, err := os.Lstat(filepath.Join(store, p)); err != nil || !fi.IsDir() {
 				return nil, fmt.Errorf("prune: nothing collected for project %s in %s", p, store)

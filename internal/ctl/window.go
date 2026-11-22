@@ -17,7 +17,10 @@ import (
 // widened to its segments' edges, about a minute or two each side. T is
 // query's (query.ParseTime): RFC 3339, or a UTC time of day placed on
 // the day of the earliest segment of the projects; -last counts back
-// from now. build echoes the resolved window.
+// from now. build echoes the resolved window. The service database's
+// views (services, edges, request counts) are read back narrowed to the
+// window too (selection.scope): the database keeps every import ever
+// made.
 //
 // A windowed build is another build than the full one, so it never
 // replaces it: it writes <projects>[@<namespace>]~window/ ('~' is in

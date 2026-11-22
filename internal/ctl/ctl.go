@@ -408,7 +408,8 @@ services and edges their connections make) and writes
 <project>[+<project>...]@NS/, which show -namespace NS reads. build -from,
 -to (T as query's) or -last DUR builds only the segments whose time range
 overlaps that window, into <project>[+<project>...][@NS]~window/, which
-show -windowed reads; the full build stays. prune lists the store's
+show -windowed reads; the full build stays. Its services and edges are
+the connections seen in the window, not the database's whole history. prune lists the store's
 segment files whose range ended more than DUR ago and deletes them only
 with -apply; it never touches a file it cannot parse as a segment, a dot
 file or a symlink, and nothing is ever pruned on its own. -ref on query is a

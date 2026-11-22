@@ -24,10 +24,19 @@ const Untraced = "(untraced)"
 // traced hosts (host ids) saw, either end: a namespace-filtered build
 // reads its pods' connections only (task sh4). nil is every host; the
 // two narrowings AND.
+//
+// From and To, when not 0, narrow to a time window [From, To) in wall
+// ns, the clock first_seen and last_seen are recorded in: a connection
+// is in it when its seen range overlaps the window, and a request count
+// only from the rows (one per source segment) whose seen range does. A
+// windowed build reads them (task yh4): the database holds every import
+// ever made, pruned segments' included, and the window's views must not
+// show its whole history. 0 leaves that side open.
 type Filter struct {
 	Project  string
 	Projects []string
 	Hosts    []string
+	From, To uint64
 }
 
 // Endpoint is one observed server endpoint (hostname, IP, port) and what
@@ -123,13 +132,28 @@ func keyOf(e Endpoint) epKey { return epKey{e.Hostname, e.IP, e.Port, e.Host} }
 // as ?1 to Filter.arg's JSON array of projects and as ?2 to hostArg's of
 // host ids (json_each: one bind for any number of either); "null" for
 // ?2 is every host, so an empty Hosts list that is set still selects
-// nothing.
+// nothing. ?3 and ?4 are the window's From and To (0: open side): the
+// row's seen range must overlap it (timeClause). Bind them all with
+// Filter.args.
 const projectClause = `(?1 = '[]' OR project IN (SELECT value FROM json_each(?1))
 	OR client_project IN (SELECT value FROM json_each(?1))
 	OR server_project IN (SELECT value FROM json_each(?1)))
 	AND (?2 = 'null' OR host IN (SELECT value FROM json_each(?2))
 	OR client_host IN (SELECT value FROM json_each(?2))
-	OR server_host IN (SELECT value FROM json_each(?2)))`
+	OR server_host IN (SELECT value FROM json_each(?2)))
+	AND ` + timeClause
+
+// timeClause keeps a row whose [first_seen, last_seen] overlaps the
+// window [?3, ?4), each side open when 0. It names the columns bare, so
+// it works on conn and on http_request alike.
+const timeClause = `(?3 = 0 OR last_seen >= ?3) AND (?4 = 0 OR first_seen < ?4)`
+
+// args are the binds of projectClause (and requestCounts): the
+// projects, the hosts and the window's two sides. Wall ns never pass
+// int64 (the reader bounds them), so the conversion is exact.
+func (f Filter) args() []any {
+	return []any{f.arg(), f.hostArg(), int64(f.From), int64(f.To)}
+}
 
 // arg is the filter's projects as the JSON array projectClause binds,
 // "[]" for every project.
@@ -159,7 +183,7 @@ func (d *DB) endpointRows(ctx context.Context, f Filter) ([]Endpoint, error) {
 	rows, err := d.db.QueryContext(ctx, `SELECT hostname, ip, port, `+endpointHostSQL+`,
 		COUNT(*), SUM(state = 'unresolved'), MIN(first_seen), MAX(last_seen), MIN(tls), MAX(tls)
 		FROM conn WHERE role <> 'unknown' AND ip <> '' AND `+projectClause+`
-		GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3, 4`, f.arg(), f.hostArg())
+		GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3, 4`, f.args()...)
 	if err != nil {
 		return nil, fmt.Errorf("servicedb: %w", err)
 	}
@@ -201,7 +225,7 @@ func (d *DB) endpointLists(ctx context.Context, f Filter, byKey map[epKey]*Endpo
 			ELSE COALESCE(NULLIF(client_app, ''), client_comm, '') END,
 		COALESCE(NULLIF(server_app, ''), '')
 		FROM conn WHERE role <> 'unknown' AND ip <> '' AND `+projectClause+`
-		ORDER BY 1, 2, 3, 4, 5, 6`, f.arg(), f.hostArg())
+		ORDER BY 1, 2, 3, 4, 5, 6`, f.args()...)
 	if err != nil {
 		return fmt.Errorf("servicedb: %w", err)
 	}
@@ -231,11 +255,15 @@ func (d *DB) endpointLists(ctx context.Context, f Filter, byKey map[epKey]*Endpo
 // host of a local IP included). A row stored with a raw path, before the
 // templating, is folded by the built-in rules first (pathTemplateSQL,
 // paths.go), so it counts under its route's template; a stored template
-// is taken as it is. The filter is projectClause's, spelled out on c.
+// is taken as it is. The filter is projectClause's, spelled out on c,
+// but for the window: that one (timeClause) applies to the request rows
+// themselves, one per connection and source segment, so a windowed
+// build counts the requests of the segments seen in its window — an
+// endpoint with none there is left out by endpointRows already.
 const requestCounts = `WITH per_view AS (
 		SELECT host, conn_id, method, ` + pathTemplateSQL + ` AS path, http_host <> '' AS client,
 			SUM(requests) AS n
-		FROM http_request GROUP BY 1, 2, 3, 4, 5),
+		FROM http_request WHERE ` + timeClause + ` GROUP BY 1, 2, 3, 4, 5),
 	per_conn AS (
 		SELECT host, conn_id, method, path, MAX(n) AS n FROM per_view GROUP BY 1, 2, 3, 4)
 	SELECT c.hostname, c.ip, c.port, iormesh_endpoint_host(c.ip, c.host), r.method, r.path,
@@ -252,7 +280,7 @@ const requestCounts = `WITH per_view AS (
 
 // endpointRequests fills each endpoint's requests by method and path.
 func (d *DB) endpointRequests(ctx context.Context, f Filter, byKey map[epKey]*Endpoint) error {
-	rows, err := d.db.QueryContext(ctx, requestCounts, f.arg(), f.hostArg())
+	rows, err := d.db.QueryContext(ctx, requestCounts, f.args()...)
 	if err != nil {
 		return fmt.Errorf("servicedb: %w", err)
 	}
