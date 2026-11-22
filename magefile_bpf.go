@@ -2,8 +2,8 @@
 
 // Adapted from ior Magefile.go @ b21afc50328c.
 // Changes: only the build, BPF, generate, test, vet, lint, fmt and clean
-// targets (no TUI, demo, bench, parquet or docker targets; the integration
-// targets are in magefile_integration.go);
+// targets, plus TestRace (task ij4) (no TUI, demo, bench, parquet or docker
+// targets; the integration targets are in magefile_integration.go);
 // IOR_FORCE_GENERATE renamed to IORMESH_FORCE_GENERATE; Build compiles every
 // package instead of a binary, since cmd/iormesh lands in M1 step 10, and
 // links the cgo-free controller ./iormeshctl beside the tracer;
@@ -89,6 +89,25 @@ func Test() error {
 		return err
 	}
 	return run(gatecmd.TestAll())
+}
+
+// TestRace runs the suite under the race detector (task ij4): every package
+// `go list ./...` names except gatecmd.RaceExcluded, the two whose -race
+// cost dwarfs what they could find (docs/testing.md, "Race detector gate").
+// $IORMESH_RACE_PKGS (space-separated) replaces the package set, to race-check
+// one package while working on it.
+func TestRace() error {
+	mg.Deps(BpfBuild)
+	pkgs := strings.Fields(os.Getenv(gatecmd.RacePackagesEnv))
+	if len(pkgs) == 0 {
+		argv := gatecmd.ListPackages()
+		listed, err := sh.OutputWith(goEnv(), argv[0], argv[1:]...)
+		if err != nil {
+			return err
+		}
+		pkgs = gatecmd.RacePackages(strings.Fields(listed))
+	}
+	return run(gatecmd.TestRace(pkgs))
 }
 
 // BpfRootTest runs the BPF root tests of ./internal (gatecmd.RootBPFTests)
