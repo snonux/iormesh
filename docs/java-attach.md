@@ -125,7 +125,10 @@ blocks or throws into an application thread. With `watermark=0`
 there is no watermark thread and no resync. Loading the agent
 into a JVM that has it already (`iormesh attach` again, a second
 `-javaagent`) installs nothing twice but asks for the same
-resync; the first load's ring and options stay.
+resync; the first load's ring and options stay. It finds the
+bridge in the bootstrap loader before extracting anything (task
+8j4), so it costs the JVM no temporary jar, descriptor, mapping
+or bootstrap search-path entry.
 
 A ring therefore lives as long as its JVM (task 2j4, PLAN.md #27).
 The JVM's agent unlinks its own ring in its shutdown hook, right
@@ -205,7 +208,8 @@ dictionary.
 - **The install's own I/O is in the trace.** Reading the agent
   jar, extracting its bridge jar into the JVM's temporary
   directory and creating the ring show up as the JVM's events on
-  its `Attach Listener` thread, attribution none.
+  its `Attach Listener` thread, attribution none. A repeated load
+  reads the agent jar only: the bridge and ring are there.
 - **Users.** The JVM accepts an attacher whose effective uid (and
   gid) are its own, or root. `iormesh` runs as root, so it reaches
   a JVM of any user — but the agent then runs as that user: the

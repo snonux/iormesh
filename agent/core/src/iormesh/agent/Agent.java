@@ -71,9 +71,12 @@ public final class Agent {
             // the load asks for a resync (task 5j4) — a flag the watermark
             // thread acts on at its next tick; this thread never waits.
             // The first load's ring and options stay: a different spool=
-            // in this load is not followed. The extracted jar goes first:
-            // an installed bridge older than 5j4 has no requestResync, and
-            // that load must still leave nothing behind.
+            // in this load is not followed. Bridge.install found the
+            // installed bridge and extracted nothing (task 8j4); only two
+            // loads racing past that check can each have extracted a jar,
+            // and the loser's goes first: an installed bridge older than
+            // 5j4 has no requestResync, and that load must still leave
+            // no file behind.
             bridge.deleteExtracted();
             try {
                 bridge.requestResync();
