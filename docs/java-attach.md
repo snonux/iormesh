@@ -224,7 +224,10 @@ dictionary.
   unread and is read from then on; one of a JVM the session never
   traces (it inherited `JAVA_TOOL_OPTIONS` but is no target) is
   never read: no events, no table rows, no probes. Nor is a ring
-  whose JVM's start time cannot be read when it is found. A ring is at
+  whose JVM's start time cannot be read when it is found. Another
+  user's `<pid>.ring` in the spool, which the agent cannot delete,
+  does not stop it: it creates `<pid>.<hex>.ring` instead (task
+  9j4), checked the same way. A ring is at
   most 64 MiB (`ringsize=`) and a record at most 64 KiB
   ([security.md](security.md), "The agent spool is untrusted
   input").

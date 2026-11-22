@@ -373,7 +373,16 @@ truth.
   following symlinks and maps it only if the descriptor shows a
   regular file with one link owned by the uid of the process its
   name names — a planted file is reported and never mapped —
-  and the mapped header must name that pid. A ring its owner
+  and the mapped header must name that pid. The name is
+  `<pid>.ring`, or `<pid>.<hex>.ring` (task 9j4): in the sticky
+  spool the agent cannot delete another user's file, so a
+  `<pid>.ring` planted for a JVM's pid (known in advance for a
+  live attach) would otherwise keep that JVM's agent from
+  installing; the agent leaves such a file alone and takes a name
+  with a random 64-bit tag nobody can plant ahead of it. The
+  suffixed name carries the pid too and passes the same owner and
+  header checks; the planted file itself, owned by a uid other
+  than the process's, is reported and never mapped. A ring its owner
   truncates under the mapping faults on access, which the reader
   turns into a corrupt ring, not a crash (docs/schema.md, "Java
   attribution"). The owner check keeps a user from speaking for

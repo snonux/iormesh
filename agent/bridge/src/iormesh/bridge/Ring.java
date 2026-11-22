@@ -7,6 +7,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
@@ -15,13 +16,16 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.security.SecureRandom;
 import java.util.Set;
 
 /**
  * The agent → tracer transport (decision #27): one memory-mapped ring
- * per JVM, a file {@code <spool dir>/<pid>.ring} in the tracer-owned
- * spool directory, mapped shared by the agent (writers: every target
- * thread that closes a bracket, plus the watermark thread) and the
+ * per JVM, a file {@code <spool dir>/<pid>.ring} (or {@code
+ * <pid>.<hex>.ring} when another user holds that name, see
+ * {@link #create}) in the tracer-owned spool directory, mapped shared
+ * by the agent (writers: every target thread that closes a bracket,
+ * plus the watermark thread) and the
  * tracer (one reader, internal/agentspool). After {@link #create} a
  * record is plain memory stores and one CAS — no syscall, no allocation
  * for BRACKET and WATERMARK — so the transport adds nothing to the
@@ -226,10 +230,16 @@ public final class Ring {
      * Creates and maps {@code dir/<pid>.ring}; install time only. A
      * stale file of a reused pid is deleted and a new one created, never
      * truncated in place: a tracer may still map the old inode, and
-     * shrinking it would SIGBUS that reader. The directory is the
-     * tracer's: the agent never creates it, so a missing directory means
-     * no tracer is listening and fails the install. These are the agent's
-     * own syscalls, which the tracer recognises by the spool path.
+     * shrinking it would SIGBUS that reader. A {@code <pid>.ring} the
+     * agent cannot delete or take — another user's, stale or planted in
+     * the sticky spool to keep this JVM's agent from installing (task
+     * 9j4) — is left alone, and the ring is created as {@code
+     * <pid>.<hex>.ring} instead, the tag random; the tracer accepts both
+     * names under the same owner and header checks (agentspool ringPID).
+     * The directory is the tracer's: the agent never creates it, so a
+     * missing directory means no tracer is listening and fails the
+     * install. These are the agent's own syscalls, which the tracer
+     * recognises by the spool path.
      */
     static Ring create(Path dir, long capacity) throws IOException {
         if (Long.bitCount(capacity) != 1 || capacity < MIN_CAPACITY || capacity > MAX_CAPACITY) {
@@ -238,15 +248,12 @@ public final class Ring {
         }
         long pid = ProcessHandle.current().pid();
         Path path = dir.resolve(pid + ".ring");
-        Files.deleteIfExists(path);
-        // CREATE_NEW and NOFOLLOW_LINKS: the spool is writable by every
-        // user, so a file or symlink someone placed under our name after
-        // the delete fails the install instead of being written through;
-        // 0600, so no other user can read or truncate the ring. Mapping
-        // past the end grows the file to its full size.
-        try (FileChannel f = FileChannel.open(path, Set.<OpenOption>of(StandardOpenOption.CREATE_NEW,
-                StandardOpenOption.READ, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS),
-                PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))) {
+        FileChannel opened = openFresh(path);
+        if (opened == null) {
+            path = dir.resolve(pid + "." + tag() + ".ring");
+            opened = openNew(path);
+        }
+        try (FileChannel f = opened) {
             ByteBuffer b = f.map(FileChannel.MapMode.READ_WRITE, 0, DATA + capacity);
             b.order(ByteOrder.LITTLE_ENDIAN);
             b.putInt(8, VERSION);
@@ -262,6 +269,46 @@ public final class Ring {
                     LinkOption.NOFOLLOW_LINKS).fileKey();
             return new Ring(b, capacity, path, key);
         }
+    }
+
+    /**
+     * Deletes a stale file under path and creates a new one there, or
+     * returns null when path is not to be had: the delete or the create
+     * failed for a reason other than a missing directory — in the sticky
+     * spool, EPERM on another user's file, or a file or symlink someone
+     * placed there after the delete. A missing directory still fails.
+     */
+    private static FileChannel openFresh(Path path) throws IOException {
+        try {
+            Files.deleteIfExists(path);
+            return openNew(path);
+        } catch (NoSuchFileException e) {
+            throw e;
+        } catch (FileSystemException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Creates path and opens it. CREATE_NEW and NOFOLLOW_LINKS: the spool
+     * is writable by every user, so a file or symlink someone placed
+     * under the name fails instead of being written through; 0600, so no
+     * other user can read or truncate the ring. Mapping past the end
+     * grows the file to its full size.
+     */
+    private static FileChannel openNew(Path path) throws IOException {
+        return FileChannel.open(path, Set.<OpenOption>of(StandardOpenOption.CREATE_NEW,
+                StandardOpenOption.READ, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS),
+                PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+    }
+
+    /**
+     * The fallback name's tag: 16 random hex digits (agentspool's ringPID
+     * takes 1 to 32), from SecureRandom so no other user can predict the
+     * name and plant it too. Only the fallback pays for it.
+     */
+    private static String tag() {
+        return String.format("%016x", new SecureRandom().nextLong());
     }
 
     /**
@@ -303,9 +350,9 @@ public final class Ring {
      * running write on into the unlinked file. Only the file this ring
      * created goes: the path is checked without following a symlink and
      * must name the same device and inode. While this JVM lives, its pid
-     * — the name — is no other JVM's, and while it maps the file the
-     * inode cannot be reused, so a match is this ring. False when the
-     * file was gone or replaced.
+     * — which the name carries, tagged or not — is no other JVM's, and
+     * while it maps the file the inode cannot be reused, so a match is
+     * this ring. False when the file was gone or replaced.
      */
     boolean removeOwn() throws IOException {
         BasicFileAttributes a;

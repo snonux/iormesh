@@ -63,7 +63,7 @@ type JavaJoin struct {
 	lastInc uint64
 	// exiting counts the rings (accepted or waiting) whose process
 	// exited and that retire has not closed yet (javaretire.go); it may
-	// count one a newer ring replaced, which retire's next pass drops.
+	// count one a later ring replaced, which retire's next pass drops.
 	exiting int
 	offset  int64 // boot − mono, ns, from the last poll
 	// scanned is the boot time just before the last poll, failed spool
@@ -402,8 +402,9 @@ func (j *JavaJoin) addRing(r AgentRing) {
 }
 
 // accept registers a traced process's ring under its JVM's pid, to be
-// drained from the next poll on. A newer ring for the same pid (a reused
-// pid, a restarted JVM) replaces the older, which is closed and counted
+// drained from the next poll on. A ring of the same pid accepted later (a
+// reused pid, a restarted JVM; for two found in one scan, the later in
+// name order, see hold) replaces the earlier, which is closed and counted
 // at once (task 2j4): no event looks at it any more — pending asks the
 // pid's current ring, which no longer owns the old process's events —
 // and its process, another incarnation, is dead, so its file goes too.

@@ -36,6 +36,8 @@ public final class RingTest {
                 new AgentTests.Case("ring/full drops and counts", RingTest::fullDrops),
                 new AgentTests.Case("ring/abandoned fill becomes PAD", RingTest::abandoned),
                 new AgentTests.Case("ring/stale file replaced", RingTest::staleFile),
+                new AgentTests.Case("ring/held name falls back to a tagged one",
+                        RingTest::heldName),
                 new AgentTests.Case("ring/hooks write records", RingTest::hooksWrite),
                 new AgentTests.Case("ring/hook table record", RingTest::hookRecord),
                 new AgentTests.Case("ring/class records ahead of stack", RingTest::classRecords),
@@ -154,6 +156,33 @@ public final class RingTest {
         Ring r = Ring.create(dir, Ring.MIN_CAPACITY * 2);
         check(!inode.equals(Files.getAttribute(r.path(), "unix:ino")), "new inode");
         equal(Ring.MAGIC, oldMap.getLong(0), "the old mapping stays readable");
+        delete(dir);
+    }
+
+    /**
+     * A {@code <pid>.ring} the agent cannot delete (task 9j4) — in the
+     * sticky spool another user's file fails with EPERM; a non-empty
+     * directory stands in for it here, one user being all a test has —
+     * stays untouched, and the ring is created as {@code
+     * <pid>.<16 hex>.ring}, its header naming the pid as always. The
+     * planted-by-another-user case itself is a manual check (see
+     * internal/agentspool TestDirSuffixedRing).
+     */
+    static void heldName() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        long pid = ProcessHandle.current().pid();
+        Path held = dir.resolve(pid + ".ring");
+        Files.createDirectory(held);
+        Files.createFile(held.resolve("x"));
+        Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
+        String name = r.path().getFileName().toString();
+        check(name.matches(pid + "\\.[0-9a-f]{16}\\.ring"), "tagged name " + name);
+        equal(dir, r.path().getParent(), "in the spool");
+        equal(pid, map(r.path()).getLong(24), "header pid");
+        check(Files.isDirectory(held), "the held name untouched");
+        check(r.removeOwn(), "the tagged ring removes its own");
+        Files.delete(held.resolve("x"));
+        Files.delete(held);
         delete(dir);
     }
 

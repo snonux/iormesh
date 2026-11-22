@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"iormesh/internal/agentspool"
 	"iormesh/internal/javaattach"
 )
 
@@ -182,10 +183,12 @@ func loadAgent(ctx context.Context, l agentLoader, pid uint32, t agentTarget) (s
 			"another mount namespace and resolves %s there (`run -agent` stages the jar and spool "+
 			"inside its root; or start it with -javaagent)", pid, t.spool), nil
 	}
-	// Lstat and a regular file only: the spool is writable by every
-	// target user, and a symlink planted as the ring must not count (nor
-	// be followed) — Dir rejects it at its scan anyway.
-	if st, err := os.Lstat(filepath.Join(t.ringDir, name)); err != nil || !st.Mode().IsRegular() {
+	// A regular file only: the spool is writable by every target user,
+	// and a symlink planted as the ring must not count (nor be followed)
+	// — Dir rejects it at its scan anyway. The agent names its ring
+	// <pid>.<hex>.ring when another user holds <pid>.ring (task 9j4), so
+	// either name counts.
+	if !agentspool.HasRing(t.ringDir, uint64(pid)) {
 		return fmt.Sprintf("agent loaded into pid %d, but it wrote no ring %s: no Java attribution "+
 			"(its reason, iormesh-agent: …, is on the JVM's stderr)", pid, filepath.Join(t.spool, name)), nil
 	}
