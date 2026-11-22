@@ -110,7 +110,7 @@ func TestSSHFetchArgv(t *testing.T) {
 		t.Fatal(err)
 	}
 	argv := rec.calls[0]
-	want := []string{"rsync", "-rt", "--timeout=60", "--remove-source-files", "--exclude=.*", "--include=*.parquet",
+	want := []string{"rsync", "-rt", "--timeout=60", "--remove-source-files", "--max-size=1073741824", "--exclude=.*", "--include=*.parquet",
 		"--exclude=*", "-e",
 		"ssh '-o' 'BatchMode=yes' '-o' 'StrictHostKeyChecking=yes' '-o' 'ControlMaster=auto'" +
 			" '-o' 'ControlPath=/ctl/%C' '-o' 'ControlPersist=60s' '-o' 'ConnectTimeout=15'" +
@@ -277,14 +277,21 @@ func localRsync(t *testing.T) execFunc {
 }
 
 // TestFetchDistrustsServerModes runs real rsync against a "server" dir
-// that is 0755 and holds a 0666 segment and a symlink to /etc/passwd: the
-// local dir stays 0700, the symlink is not recreated, the segment moves.
+// that is 0755 and holds a 0666 segment, a symlink to /etc/passwd and a
+// segment over the size cap: the local dir stays 0700, the symlink is not
+// recreated, the segment moves, and the oversized one stays on the server
+// (task gi4). maxFetchSize is lowered to 1 KiB so the oversized file is
+// a small sparse file, not a GiB written to disk.
 func TestFetchDistrustsServerModes(t *testing.T) {
+	defer func(old int64) { maxFetchSize = old }(maxFetchSize)
+	maxFetchSize = 1 << 10
 	remote := filepath.Join(t.TempDir(), "ready")
 	seg := filepath.Join(remote, "h-s-20261120T000000Z-000000.parquet")
+	big := filepath.Join(remote, "h-s-20261120T000000Z-000001.parquet")
 	mustDo(t, os.Mkdir(remote, 0o700), os.Chmod(remote, 0o755),
 		os.WriteFile(seg, []byte("PAR1"), 0o600), os.Chmod(seg, 0o666),
-		os.Symlink("/etc/passwd", filepath.Join(remote, "lnk")))
+		os.Symlink("/etc/passwd", filepath.Join(remote, "lnk")),
+		os.WriteFile(big, nil, 0o600), os.Truncate(big, maxFetchSize+1))
 	s, err := newSSH("app1", "/ctl", localRsync(t))
 	if err != nil {
 		t.Fatal(err)
@@ -302,6 +309,12 @@ func TestFetchDistrustsServerModes(t *testing.T) {
 	}
 	if _, err := os.Stat(seg); !os.IsNotExist(err) {
 		t.Errorf("remote segment not removed after transfer: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(local, filepath.Base(big))); !os.IsNotExist(err) {
+		t.Errorf("oversized segment fetched: %v", err)
+	}
+	if _, err := os.Stat(big); err != nil {
+		t.Errorf("oversized segment not left on the server: %v", err)
 	}
 }
 

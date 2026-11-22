@@ -29,7 +29,7 @@ import (
 //     project never started has no ready/ yet (exit status 1) and is
 //     skipped; any other failure is the project's failure (remoteTest);
 //  3. Fetch (federate.FetchFlags: rsync -rt --remove-source-files, the
-//     non-dot *.parquet files directly in ready/) into
+//     non-dot *.parquet files directly in ready/, none over 1 GiB) into
 //     <store>/<project>/<host>/.
 //
 // Only ready/ is ever fetched. The tracer writes the active segment at
