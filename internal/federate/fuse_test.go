@@ -1,9 +1,14 @@
 package federate
 
 import (
+	"cmp"
 	"fmt"
+	"math"
+	"math/rand/v2"
 	"net/netip"
+	"runtime"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -144,5 +149,146 @@ func TestCrossProject(t *testing.T) {
 	f := Fuse([]Half{c, s}, DefaultWindow)
 	if len(f.Conns) != 1 || !f.Conns[0].CrossProject() {
 		t.Fatalf("got %v, want one cross-project conn", outcome(f))
+	}
+}
+
+// sameKeyHalves builds n halves on one ISN pair, alternating client and
+// server, all established within a millisecond: the hostile segment of
+// task ci4, every half a candidate of every opposite one.
+func sameKeyHalves(n int) []Half {
+	hs := make([]Half, n)
+	role := [2]string{RoleClient, RoleServer}
+	for i := range hs {
+		hs[i] = Half{Host: "H", ConnID: fmt.Sprintf("x%06d", i), Role: role[i%2],
+			Key: ISNPair{7, 7}, HasKey: true, Established: wall0 + uint64(i)}
+	}
+	return hs
+}
+
+// fuseAllocBytes is how many bytes one Fuse over hs allocates.
+func fuseAllocBytes(hs []Half) uint64 {
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	Fuse(hs, DefaultWindow)
+	runtime.ReadMemStats(&after)
+	return after.TotalAlloc - before.TotalAlloc
+}
+
+// TestFuseSameKeyScales: a segment of tens of thousands of halves on one
+// key (one compromised server can publish it) must fail itself, not the
+// controller. Allocation grows near-linearly in n — measured on small n
+// first, so a quadratic Fuse fails here after a few dozen MiB instead of
+// allocating gigabytes — and 50,000 such halves fuse in well under a
+// second, all ambiguous.
+func TestFuseSameKeyScales(t *testing.T) {
+	small, big := fuseAllocBytes(sameKeyHalves(250)), fuseAllocBytes(sameKeyHalves(2000))
+	if big > 16*small {
+		t.Fatalf("8x the halves allocated %.1fx the bytes (%d -> %d): not linear",
+			float64(big)/float64(small), small, big)
+	}
+	hs := sameKeyHalves(50_000)
+	start := time.Now()
+	f := Fuse(hs, DefaultWindow)
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("50,000 same-key halves took %v", d)
+	}
+	if len(f.Conns) != 0 || len(f.Unresolved) != len(hs) {
+		t.Fatalf("got %d conns, %d unresolved", len(f.Conns), len(f.Unresolved))
+	}
+	for _, u := range f.Unresolved {
+		if u.Reason != ReasonAmbiguous {
+			t.Fatalf("%s: %s, want ambiguous", u.Half.ConnID, u.Reason)
+		}
+	}
+}
+
+// refFuse is Fuse as it was before task ci4: every half's full candidate
+// list, quadratic in a group. It is the reference the property test
+// holds the linear grouping to.
+func refFuse(halves []Half, window time.Duration) Fusion {
+	var f Fusion
+	groups := map[ISNPair][]Half{}
+	for _, h := range halves {
+		if reason := unkeyed(h); reason != "" {
+			f.Unresolved = append(f.Unresolved, Unresolved{h, reason})
+			continue
+		}
+		groups[h.Key] = append(groups[h.Key], h)
+	}
+	ns := uint64(max(window, 0))
+	for _, g := range groups {
+		refFuseGroup(&f, g, ns)
+	}
+	slices.SortFunc(f.Conns, func(a, b Conn) int { return cmp.Compare(a.ID, b.ID) })
+	slices.SortFunc(f.Unresolved, func(a, b Unresolved) int {
+		return cmp.Or(cmp.Compare(a.Half.Host, b.Half.Host),
+			cmp.Compare(a.Half.ConnID, b.Half.ConnID))
+	})
+	return f
+}
+
+// refFuseGroup is the old fuseGroup: a full double loop of candidates.
+func refFuseGroup(f *Fusion, g []Half, window uint64) {
+	candidates := make([][]int, len(g))
+	for i := range g {
+		for j := range g {
+			if g[i].Role != g[j].Role && within(g[i].Established, g[j].Established, window) {
+				candidates[i] = append(candidates[i], j)
+			}
+		}
+	}
+	for i, h := range g {
+		c := candidates[i]
+		switch {
+		case len(c) == 0:
+			f.Unresolved = append(f.Unresolved, Unresolved{h, ReasonNoMatch})
+		case len(c) > 1 || len(candidates[c[0]]) > 1:
+			f.Unresolved = append(f.Unresolved, Unresolved{h, ReasonAmbiguous})
+		case h.Role == RoleClient:
+			f.Conns = append(f.Conns, newConn(h, g[c[0]]))
+		}
+	}
+}
+
+// within is the reference's window test: a and b at most window apart.
+func within(a, b, window uint64) bool {
+	if a > b {
+		a, b = b, a
+	}
+	return b-a <= window
+}
+
+// randomHalves draws up to 12 halves over two keys, both roles, a few
+// unkeyed, with times clustered on the window's edges (ties, exactly w
+// apart, one past it, near zero and near the top of uint64) so every
+// boundary gets hit. w >= 1.
+func randomHalves(r *rand.Rand, w uint64) []Half {
+	offsets := []uint64{0, 1, w - 1, w, w + 1, 2 * w, 2*w + 1, 3 * w}
+	bases := []uint64{0, w / 2, wall0, math.MaxUint64 - 3*w}
+	hs := make([]Half, r.IntN(13))
+	for i := range hs {
+		role := []string{RoleClient, RoleServer, RoleClient, RoleServer, ""}[r.IntN(5)]
+		hs[i] = Half{Host: "H" + strconv.Itoa(r.IntN(3)), ConnID: fmt.Sprintf("c%02d", i),
+			Role: role, Key: ISNPair{1, uint32(r.IntN(2))}, HasKey: r.IntN(8) != 0,
+			Established: bases[r.IntN(len(bases))] + offsets[r.IntN(len(offsets))]}
+	}
+	return hs
+}
+
+// TestFuseMatchesReference: on many small random inputs the linear
+// grouping gives exactly the reference's fusion — same conns, same ids,
+// same unresolved halves and reasons — for zero, negative, tiny and the
+// default window.
+func TestFuseMatchesReference(t *testing.T) {
+	r := rand.New(rand.NewPCG(4, 2))
+	windows := []time.Duration{0, -1, 1, 10, DefaultWindow}
+	for range 5000 {
+		w := windows[r.IntN(len(windows))]
+		hs := randomHalves(r, uint64(max(w, 1)))
+		got, want := fmt.Sprint(Fuse(hs, w)), fmt.Sprint(refFuse(hs, w))
+		if got != want {
+			t.Fatalf("window %v, halves %+v:\ngot  %s\nwant %s", w, hs, got, want)
+		}
 	}
 }
