@@ -51,8 +51,8 @@ func testConfig(t *testing.T) Config {
 // images and the base images its setup used that were absent before —
 // never a system prune or an unfiltered prune, nor an image that
 // appeared in a base repository since without the run using it (task
-// oi4: sha256:other, the operator's own eclipse-temurin pull); the
-// kubeconfig and state go.
+// oi4: sha256:other, the operator's own eclipse-temurin pull); with
+// every step succeeding the kubeconfig and state go.
 func TestTeardownScoped(t *testing.T) {
 	c := testConfig(t)
 	before := &fake{replies: map[string]string{"reference=kindest/node": "sha256:old\n", "reference=registry": ""}}
@@ -72,8 +72,7 @@ func TestTeardownScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := &fake{replies: map[string]string{"reference=kindest/node": "sha256:old\nsha256:new\n",
-		"reference=registry": "sha256:reg\n", "reference=eclipse-temurin": "sha256:jre\nsha256:other\n"},
-		fail: map[string]bool{"volume rm": true}}
+		"reference=registry": "sha256:reg\n", "reference=eclipse-temurin": "sha256:jre\nsha256:other\n"}}
 	var log strings.Builder
 	if err := Teardown(f, c, &log); err != nil {
 		t.Fatal(err)
@@ -106,9 +105,6 @@ func TestTeardownScoped(t *testing.T) {
 	if !slices.Equal(runs, want) {
 		t.Errorf("teardown ran\n%s\nwant\n%s", strings.Join(runs, "\n"), strings.Join(want, "\n"))
 	}
-	if !strings.Contains(log.String(), "volume rm") {
-		t.Errorf("a failed step was not reported: %q", log.String())
-	}
 	for _, p := range []string{c.Kubeconfig, c.StateFile} {
 		if _, err := os.Stat(p); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("%s left behind", p)
@@ -132,6 +128,42 @@ func TestTeardownWithoutState(t *testing.T) {
 	}
 	if !strings.Contains(log.String(), "none removed") {
 		t.Errorf("no notice: %q", log.String())
+	}
+}
+
+// TestTeardownFailedStepKeepsState (task qi4): a removal step that
+// fails — every step but helm's uninstall exits 0 when its object is
+// already gone, so a failure is a real one, such as sudo or the daemon
+// refusing — makes Teardown fail and keep the state file, whose record
+// of the pulled base images a rerun needs; the other steps still run.
+// The rerun, with every step succeeding, removes the state file.
+func TestTeardownFailedStepKeepsState(t *testing.T) {
+	c := testConfig(t)
+	if err := c.write(State{BaseImages: map[string][]string{"kindest/node": {}},
+		Used: []string{"sha256:new"}}); err != nil {
+		t.Fatal(err)
+	}
+	now := map[string]string{"reference=kindest/node": "sha256:new\n"}
+	f := &fake{replies: now, fail: map[string]bool{"image rm": true}}
+	var log strings.Builder
+	err := Teardown(f, c, &log)
+	if err == nil || !strings.Contains(err.Error(), "image rm sha256:new") {
+		t.Errorf("failed image rm: error %v", err)
+	}
+	if _, serr := os.Stat(c.StateFile); serr != nil {
+		t.Errorf("state file gone after a failed step: %v", serr)
+	}
+	if !strings.Contains(log.String(), "image rm") {
+		t.Errorf("a failed step was not reported: %q", log.String())
+	}
+	if !slices.ContainsFunc(f.calls, func(a []string) bool { return slices.Contains(a, "prune") }) {
+		t.Error("the steps after the failed one did not run")
+	}
+	if !teardownRemoved(t, c, now, "sha256:new") {
+		t.Error("rerun did not remove the pulled image")
+	}
+	if _, serr := os.Stat(c.StateFile); !errors.Is(serr, os.ErrNotExist) {
+		t.Errorf("state file left after a clean rerun: %v", serr)
 	}
 }
 
