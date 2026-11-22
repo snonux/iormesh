@@ -2468,10 +2468,9 @@ Built after plain Linux servers (M4); accepted on kind and el9
   2026-11-22): M0's microservices scenario "runs on plain hosts
   (M4/M6) and as pods (M7)", but the M7 acceptance ran tcp-nat
   and ingress only. `TestKindMicroservices` (`mage
-  k8sMicroservices` alone; it joins `mage k8sAcceptance` only
-  after its first green run, so the accepted suite never waits
-  on a never-run test) runs gateway, orders, inventory and billing each in a pod of
-  its own, one host per service, every pod under a debug tracer
+  k8sMicroservices` alone, and part of `mage k8sAcceptance`
+  since its first green run) runs gateway, orders, inventory
+  and billing each in a pod of its own, one host per service, every pod under a debug tracer
   with the Java agent, one registry project for all. Each JVM
   starts behind the workload's startup gate, its tracer is
   deployed and joined, the certificate it pins is shipped into
@@ -2492,10 +2491,10 @@ Built after plain Linux servers (M4); accepted on kind and el9
   pods' addresses. The run also checks sh4's pod fields: every
   event carries its pod's namespace and name, and a process's
   events the id of the app container, as the pod status lists
-  it. It also checks pod identity. Status (2026-11-22): built
-  and unit-tested, not yet run. The one kind run stopped at the
-  disk guard (`/var/lib/docker has 16 GiB free, need 20`)
-  before it created anything.
+  it. It also checks pod identity. Status: accepted on kind
+  2026-11-22 (`mage k8sMicroservices`: mesh, pod_fields and
+  identity PASS in 152 s, scoped teardown clean); not run on
+  el9 k3s.
 
 ## Decisions
 
