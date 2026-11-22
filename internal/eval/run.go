@@ -57,7 +57,8 @@ type Command struct {
 
 var _ Model = Command{}
 
-// Reply runs the command once, bounded by Timeout, and returns at most
+// Reply runs the command once, bounded by Timeout (plus at most the
+// one-second WaitDelay for a lingering grandchild), and returns at most
 // maxReplyBytes of its stdout.
 func (c Command) Reply(ctx context.Context, prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.Timeout)
@@ -69,6 +70,11 @@ func (c Command) Reply(ctx context.Context, prompt string) (string, error) {
 	if c.Stderr != nil {
 		cmd.Stderr = c.Stderr
 	}
+	// The context kill reaches only the direct child: a wrapper script's
+	// own child can outlive it and keep stdout (a pipe, not a file) open,
+	// and Run would wait for that pipe until the grandchild exits.
+	// WaitDelay closes the pipes a second after the kill, as Ctl.run does.
+	cmd.WaitDelay = time.Second
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("model command: %w (its stderr went to the terminal)", err)
 	}
