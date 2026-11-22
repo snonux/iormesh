@@ -50,9 +50,15 @@ func applyExpansion(ctx context.Context, e env, f expandFlags, x expansion) erro
 	if err != nil {
 		return err
 	}
+	// Every field printed below goes through termsafe.String. Evidence is
+	// trace-derived text; the address (a netip.Addr), the reason (a
+	// constant), the enrolled host (that address) and the project (a
+	// validated registry name) cannot carry a control byte today, and are
+	// quoted all the same so no later change lets one reach the terminal.
+	q := termsafe.String
 	for _, s := range skipped {
-		_, _ = fmt.Fprintf(e.stdout, "not enrolled %s:%d: %s: %s\n", s.Addr, s.Port, s.Reason,
-			termsafe.String(s.Evidence))
+		_, _ = fmt.Fprintf(e.stdout, "not enrolled %s:%d: %s: %s\n", q(s.Addr.String()), s.Port, q(s.Reason),
+			q(s.Evidence))
 	}
 	if len(enrolled) == 0 {
 		_, err := fmt.Fprintln(e.stdout, "expand: nothing to enroll; the mesh is complete within the limits")
@@ -69,8 +75,8 @@ func applyExpansion(ctx context.Context, e env, f expandFlags, x expansion) erro
 	for i, n := range enrolled {
 		servers[i] = n.Server
 		p := n.Server.Projects[0]
-		_, _ = fmt.Fprintf(e.stdout, "enrolled %s hop %d project %s listen-port %d (%s)\n", n.Server.Host,
-			n.Server.Hop, p.Name, p.Target.ListenPort, x.regPath)
+		_, _ = fmt.Fprintf(e.stdout, "enrolled %s hop %d project %s listen-port %d (%s)\n", q(n.Server.Host),
+			n.Server.Hop, q(p.Name), p.Target.ListenPort, q(x.regPath))
 	}
 	a := &applier{d: d, known: maps.Clone(x.hostIDs)}
 	deployErr := d.all(ctx, servers, recPath, a.host)

@@ -68,6 +68,6 @@ func (d deployer) verifyAgent(version string) (string, error) {
 		return "", fmt.Errorf("local build, nothing pushed: %s is signed as %s, the tracer as %s "+
 			"(mage agentBuild, then mage sign, signs both)", jar, m.Version, version)
 	}
-	_, _ = fmt.Fprintf(d.e.stdout, "verified %s: %s %s\n", jar, m.File, m.Version)
+	printVerified(d.e.stdout, jar, m)
 	return jar, nil
 }
