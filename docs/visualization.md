@@ -593,13 +593,18 @@ embedded whole:
   requests cut, sessions and how they ended, clock bounds, bad
   segments, ignored entries).
 - **Filter bar** on every list and the mesh: host (the run's
-  hosts), text (service, thread, pid, path, method, a stack
-  frame, a ref) and a time window on the conversations' start
-  (`HH:MM[:SS]` against the time of day, or RFC 3339). The model
-  has no pod yet (M7); the text filter matches host and service
-  names meanwhile.
+  hosts, i.e. the store's host directories; conversations and
+  threads carry FQDNs, matched through the sessions that link a
+  directory to its FQDN), text (service, thread, pid, path,
+  method, a stack frame, a ref) and a time window on the
+  conversations' start (`HH:MM[:SS]` against the time of day, or
+  RFC 3339). The model has no pod yet (M7); the text filter
+  matches host and service names meanwhile.
 - `#/selftest` renders every route of the model in turn and
-  prints `selftest: ok N routes`, or the routes that threw.
+  prints `selftest: ok N routes`, or the routes that threw; it
+  also selects each host of the filter and requires a
+  conversation and a thread wherever its sessions' FQDNs have
+  some.
 
 Tests: golden files on the serialized model and on every `show`
 view; `internal/site` tests the page itself — byte-identical

@@ -156,9 +156,21 @@
     return hit([s.name].concat(arr(s.endpoints), arr(s.top_paths).map(function (p) { return p.method + ' ' + p.path; })));
   }
 
+  // hostMatch says whether h — a step's, lifeline's or thread's host,
+  // which is a session's FQDN — is the filter's host. The dropdown
+  // lists the store's host directories (run.hosts), which are not the
+  // FQDNs, so the sessions link the two (task 4i4); h equal to the
+  // directory itself still matches, for a session that named no FQDN.
+  function hostMatch(h) {
+    if (h === filter.host) { return true; }
+    return arr((M.health || {}).sessions).some(function (s) {
+      return s.host === filter.host && !!s.fqdn && s.fqdn === h;
+    });
+  }
+
   function convShown(c) {
     const steps = arr(c.steps);
-    if (filter.host && !steps.some(function (s) { return s.host === filter.host || hostOfLane(c, s.lane) === filter.host; })) {
+    if (filter.host && !steps.some(function (s) { return hostMatch(s.host) || hostMatch(hostOfLane(c, s.lane)); })) {
       return false;
     }
     if (!inTime(c.start)) { return false; }
@@ -172,7 +184,7 @@
   }
 
   function storyShown(t) {
-    if (filter.host && t.host !== filter.host) { return false; }
+    if (filter.host && !hostMatch(t.host)) { return false; }
     return hit([t.service, t.thread, t.host, String(t.pid), String(t.tid)].concat(
       arr(t.entries).map(function (e) { return e.label + ' ' + e.peer; })));
   }
@@ -183,6 +195,9 @@
       arr(p.threads).map(function (t) { return t.name; }), arr(p.files).map(function (f) { return f.path; })));
   }
 
+  // buildFilters makes the filter bar. The host dropdown lists the
+  // store's host directories (run.hosts); hostMatch maps one to its
+  // sessions' FQDNs for the conversation and thread lists.
   function buildFilters() {
     const box = document.getElementById('filters');
     const host = el('select');
@@ -892,10 +907,41 @@
         });
       });
     }
+    hostFilterCheck(failed);
     routes.push.apply(routes, guarded);
     const out = el('pre', '', failed.length ? 'selftest: FAILED\n' + failed.join('\n') : 'selftest: ok ' + routes.length + ' routes');
     out.id = 'selftest';
     document.getElementById('view').replaceChildren(out);
+  }
+
+  // hostFilterCheck selects each host of the dropdown (a store host
+  // directory) in turn and requires a conversation and a thread for it
+  // whenever one of its sessions' FQDNs is a step or thread host — the
+  // directory and the FQDN differ in a real run (task 4i4) — and none
+  // for a host the run does not have. It restores the filter after.
+  function hostFilterCheck(failed) {
+    const saved = filter.host;
+    const sess = arr((M.health || {}).sessions);
+    const convHosts = arr(M.conversations).flatMap(function (c) {
+      return arr(c.steps).map(function (s) { return s.host; }).concat(arr(c.lifelines).map(function (l) { return l.host; }));
+    });
+    const threadHosts = arr(M.threads).map(function (t) { return t.host; });
+    const count = function (list, shown) { return arr(list).filter(shown).length; };
+    for (const h of arr(M.run && M.run.hosts)) {
+      const fqdns = sess.filter(function (s) { return s.host === h && s.fqdn; }).map(function (s) { return s.fqdn; });
+      filter.host = h;
+      if (fqdns.some(function (f) { return convHosts.indexOf(f) >= 0; }) && !count(M.conversations, convShown)) {
+        failed.push('filter host ' + clean(h) + ': no conversation');
+      }
+      if (fqdns.some(function (f) { return threadHosts.indexOf(f) >= 0; }) && !count(M.threads, storyShown)) {
+        failed.push('filter host ' + clean(h) + ': no thread');
+      }
+    }
+    filter.host = '\u0000no such host';
+    if (count(M.conversations, convShown) || count(M.threads, storyShown)) {
+      failed.push('filter host not in the run: conversations or threads shown');
+    }
+    filter.host = saved;
   }
 
   buildHeader();
