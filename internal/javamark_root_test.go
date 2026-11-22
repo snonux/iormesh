@@ -223,3 +223,163 @@ func monoNow() uint64 {
 	_ = unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts)
 	return uint64(ts.Nano())
 }
+
+// loopChunks is how many 16-byte chunks the loop file holds: well past the
+// four individual calls of a key (rwagg.c, IORMESH_RW_INDIVIDUAL), so the
+// later reads fold and the EOF read after them is held.
+const loopChunks = 64
+
+// loopJava is a JVM target in startScript's protocol: per line on stdin it
+// reads the file args[0] names through FileInputStream in 16-byte chunks
+// until EOF - a hot read loop whose every read(2), the EOF one included,
+// comes from the readBytes native.
+const loopJava = `import java.io.*;
+public class Loop {
+    public static void main(String[] args) throws Exception {
+        BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
+        byte[] buf = new byte[16];
+        while (in.readLine() != null) {
+            try (FileInputStream f = new FileInputStream(args[0])) {
+                while (f.read(buf) > 0) {
+                }
+            }
+            System.out.println("ok");
+            System.out.flush();
+        }
+    }
+}
+`
+
+// heldEOF is one EOF read of the loop file the fold held: the enter it
+// owed, sent at its exit, and the mark sent right before it (nil: none).
+type heldEOF struct {
+	enter *types.FdEvent
+	mark  *types.JavaMarkEvent
+}
+
+// loopCollector follows the loop file's reads on the target: the fd its
+// open returned, the latest record on that fd per tid (an enter, or a
+// folded record), and the EOF reads whose enter came right after folded
+// calls within the hot window - the held calls rwagg.c sends alone.
+type loopCollector struct {
+	markCollector
+	path    string
+	fd      int32
+	pending map[uint32]*heldEOF // per tid: a read enter awaiting its exit
+	lastAgg map[uint32]uint64   // per tid: end time of the record just before
+	folded  int
+	held    []heldEOF
+}
+
+// fileLoop files one record.
+func (c *loopCollector) fileLoop(rec any) {
+	switch ev := rec.(type) {
+	case *types.RwAggregateEvent:
+		if ev.Pid == c.pid && ev.Fd == c.fd && c.fd >= 0 {
+			c.folded += int(ev.Count)
+			c.lastAgg[ev.Tid] = ev.EndTime
+		}
+		return
+	case *types.FdEvent:
+		if ev.Pid == c.pid && ev.TraceId == types.SYS_ENTER_READ && ev.Fd == c.fd && c.fd >= 0 {
+			cp := *ev
+			mark := c.take(ev.Tid, ev.Time)
+			if end, ok := c.lastAgg[ev.Tid]; ok && ev.Time <= end+uint64(time.Millisecond) {
+				c.pending[ev.Tid] = &heldEOF{enter: &cp, mark: mark}
+			}
+			delete(c.lastAgg, ev.Tid)
+			return
+		}
+	case *types.RetEvent:
+		if h, ok := c.pending[ev.Tid]; ok && ev.Pid == c.pid && ev.TraceId == types.SYS_EXIT_READ {
+			delete(c.pending, ev.Tid)
+			if ev.Ret == 0 {
+				c.held = append(c.held, *h)
+			}
+		}
+	}
+	c.file(rec)
+	if fd, ok := c.fdOf(); ok {
+		c.fd = fd
+	}
+}
+
+// fdOf returns the fd the loop file's latest open returned.
+func (c *loopCollector) fdOf() (int32, bool) {
+	for fd, p := range c.fds {
+		if p == c.path {
+			delete(c.fds, fd)
+			return fd, true
+		}
+	}
+	return 0, false
+}
+
+// TestJavaMarkOnHeldRead (task ti4): with the fold on, a JVM thread inside
+// FileInputStream.readBytes reads a file in many fast chunks; the reads
+// after the fourth fold, so the EOF read is held at its enter and, not
+// being hot (ret 0), sent alone at its exit. Its enter must still come
+// with readBytes' mark stamped with its own enter time - else the last
+// read of every hot Java loop counts as JVM work.
+func TestJavaMarkOnHeldRead(t *testing.T) {
+	requireRoot(t)
+	dir := t.TempDir()
+	src := filepath.Join(dir, "Loop.java")
+	data := filepath.Join(dir, "loop.dat")
+	if err := os.WriteFile(src, []byte(loopJava), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(data, []byte(strings.Repeat("0123456789abcdef", loopChunks)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	java, err := exec.LookPath("java")
+	if err != nil {
+		t.Fatalf("no java on PATH: %v", err)
+	}
+	tg := startScript(t, java, src, data)
+	tg.poke(t) // the JVM is up, libjava mapped, Loop's methods warm
+	tr := openTracerWith(t, ibpf.Config{Pids: []uint32{tg.pid()}, JavaMarks: true})
+	if _, err := tr.AttachJavaMarks(tg.pid(), []ibpf.JavaNative{
+		{Symbol: "Java_java_io_FileInputStream_readBytes", Cookie: cookieReadBytes},
+	}); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	for range 5 {
+		tg.poke(t)
+	}
+	c := collectLoop(tr, tg.pid(), data, time.Second)
+	if c.folded == 0 || len(c.held) == 0 {
+		t.Fatalf("no held EOF read after folded calls (folded %d): the loop never folded", c.folded)
+	}
+	for _, h := range c.held {
+		switch {
+		case h.mark == nil:
+			t.Errorf("held EOF read at %d sent without its Java mark", h.enter.Time)
+		case h.mark.Cookie != cookieReadBytes || h.mark.Tid != h.enter.Tid:
+			t.Errorf("held EOF read at %d: mark %+v is not readBytes' on its thread", h.enter.Time, h.mark)
+		}
+	}
+}
+
+// collectLoop collects the loop file's held EOF reads of pid for wait.
+func collectLoop(tr *ibpf.Tracer, pid uint32, path string, wait time.Duration) *loopCollector {
+	c := &loopCollector{
+		markCollector: markCollector{pid: pid, last: map[uint32]*types.JavaMarkEvent{},
+			opening: map[uint32]string{}, fds: map[int32]string{}},
+		path: path, fd: -1, pending: map[uint32]*heldEOF{}, lastAgg: map[uint32]uint64{},
+	}
+	deadline := time.After(wait)
+	for {
+		select {
+		case batch, ok := <-tr.Records():
+			if !ok {
+				return c
+			}
+			for _, rec := range batch {
+				c.fileLoop(rec)
+			}
+		case <-deadline:
+			return c
+		}
+	}
+}

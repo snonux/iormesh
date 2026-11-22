@@ -12453,7 +12453,7 @@ int handle_sys_exit_read(struct trace_event_raw_sys_exit___iormesh *ctx) {
 
     __u64 now = bpf_ktime_get_boot_ns();
     int emits = ior_on_syscall_exit(tid, SYS_ENTER_READ, ctx->ret, now);
-    if (!iormesh_rw_on_exit(pid, tid, SYS_ENTER_READ, ctx->ret, now, emits))
+    if (!iormesh_rw_on_exit(ctx, pid, tid, SYS_ENTER_READ, ctx->ret, now, emits))
         return 0;
 
     if (iormesh_seq_on_exit(pid, tid, SYS_EXIT_READ, now, ctx->ret, IORMESH_SEQ_RECV))
@@ -12522,7 +12522,7 @@ int handle_sys_exit_write(struct trace_event_raw_sys_exit___iormesh *ctx) {
 
     __u64 now = bpf_ktime_get_boot_ns();
     int emits = ior_on_syscall_exit(tid, SYS_ENTER_WRITE, ctx->ret, now);
-    if (!iormesh_rw_on_exit(pid, tid, SYS_ENTER_WRITE, ctx->ret, now, emits))
+    if (!iormesh_rw_on_exit(ctx, pid, tid, SYS_ENTER_WRITE, ctx->ret, now, emits))
         return 0;
 
     if (iormesh_seq_on_exit(pid, tid, SYS_EXIT_WRITE, now, ctx->ret, IORMESH_SEQ_SEND))

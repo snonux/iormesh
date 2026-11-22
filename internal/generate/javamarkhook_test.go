@@ -38,6 +38,44 @@ func TestJavaMarkHookOnEveryEmittedEnter(t *testing.T) {
 	}
 }
 
+// TestHeldEnterCarriesMarkAndStack covers the one enter record the
+// generated handlers do not send: the enter a call the read/write fold
+// held owes once its exit shows it cannot fold (EOF, an error, a call
+// slower than 1 ms; internal/c/rwagg.c, iormesh_rw_send_held_enter). The
+// handler returned before its hooks when it held the call, so the owed
+// enter must send the stack and the Java mark itself, stamped with the
+// call's enter time and ahead of its record (task ti4) - else the last
+// call of every hot Java read loop counts as JVM work. TestRwaggHarness
+// checks the order at run time; this pins the arguments.
+func TestHeldEnterCarriesMarkAndStack(t *testing.T) {
+	src, err := readCSource("rwagg.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const head = "static __always_inline void iormesh_rw_send_held_enter("
+	start := strings.Index(src, head)
+	if start < 0 {
+		t.Fatal("iormesh_rw_send_held_enter not found in rwagg.c")
+	}
+	body := src[start:]
+	body = body[:strings.Index(body, "\n}\n")]
+	send := strings.Index(body, "bpf_ringbuf_reserve(")
+	for _, hook := range []string{
+		"    iormesh_stack_on_enter(ctx, pid, tid, enter_ns);\n",
+		"    iormesh_java_mark_on_enter(pid, tid, enter_ns);\n",
+	} {
+		at := strings.Index(body, hook)
+		switch {
+		case strings.Count(body, hook) != 1:
+			t.Errorf("held enter: want exactly one %q", strings.TrimSpace(hook))
+		case send >= 0 && at > send:
+			t.Errorf("held enter: %q after its record", strings.TrimSpace(hook))
+		case strings.Contains(body[:at], "return"):
+			t.Errorf("held enter: may return before %q", strings.TrimSpace(hook))
+		}
+	}
+}
+
 // checkJavaMarkHook returns what is wrong with one handler's mark hook.
 func checkJavaMarkHook(name, body string) string {
 	n := strings.Count(body, javaMarkHookCall)
