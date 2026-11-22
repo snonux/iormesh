@@ -154,8 +154,18 @@ final class Bridge {
             return (String) hooks.getMethod("openRing", String.class, long.class)
                     .invoke(null, dir, capacity);
         } catch (java.lang.reflect.InvocationTargetException e) {
-            // "disabled: <the IOException>" says what to fix; the wrapper does not.
-            throw e.getCause() instanceof Exception c ? c : e;
+            // "disabled: <the cause>" says what to fix; the wrapper does
+            // not. Any cause, an Error too (task cj4): prepare releases
+            // the claim on either, and Agent.start catches Throwable, so
+            // passing an Error on cannot take the application down.
+            Throwable c = e.getCause();
+            if (c instanceof Exception x) {
+                throw x;
+            }
+            if (c instanceof Error x) {
+                throw x;
+            }
+            throw e;
         }
     }
 
