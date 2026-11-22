@@ -17,6 +17,7 @@ import (
 	"iormesh/internal/federate"
 	"iormesh/internal/k8s"
 	"iormesh/internal/release"
+	"iormesh/internal/termsafe"
 )
 
 // `iormeshctl deploy [-project P] HOST...` (PLAN.md M4 "Deploy"): put the
@@ -435,13 +436,14 @@ func (d deployer) relay(host string, out []byte) {
 }
 
 // relay prints a remote command's stdout to w, each line prefixed by the
-// host so output from several hosts stays attributable.
+// host so output from several hosts stays attributable, and every line
+// ended by a newline. The host may be compromised (or just enrolled by
+// expand -apply), so each line goes through termsafe.String like errors
+// do (errText): an escape sequence prints Go-quoted instead of clearing
+// the screen, setting the title or overwriting another host's lines.
 func relay(w io.Writer, host string, out []byte) {
 	for line := range strings.Lines(string(out)) {
-		_, _ = fmt.Fprintf(w, "%s: %s", host, line)
-		if !strings.HasSuffix(line, "\n") {
-			_, _ = fmt.Fprintln(w)
-		}
+		_, _ = fmt.Fprintf(w, "%s: %s\n", host, termsafe.String(strings.TrimSuffix(line, "\n")))
 	}
 }
 
