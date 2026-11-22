@@ -1052,8 +1052,14 @@ Kubernetes (M7) build on it.
   and each server host gets an hour in all (collect, deploy
   and rm alike) before the controller moves on — generous,
   since an interrupted collect loses nothing and a backlog may
-  be large. Pod entries (kubectl) are not bound yet (task
-  pi4). The build reads every
+  be large. Pod entries get the same hour (each entry in
+  collect and rm, each pod in deploy); below it every kubectl
+  call that answers and exits (get, debug, a short exec) has
+  2 min, and the fetch stream an idle timeout of 2 min without
+  a byte — silence, not length, so a long backlog still
+  moves (task pi4). A Ctrl-C or SIGTERM cancels the command's
+  calls, lets it clean up, and it reports "interrupted". The
+  build reads every
   `*.parquet` under `<project>/*/` and skips dot files
   (rsync's in-flight temporaries).
 - **Build**: merge the collected segments offline by stable

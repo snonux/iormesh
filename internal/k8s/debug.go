@@ -48,9 +48,10 @@ func (k *Kubectl) Check(ctx context.Context) error {
 	return checkContainers(p, k.t)
 }
 
-// getPod reads the target pod (`kubectl get pod -o json`).
+// getPod reads the target pod (`kubectl get pod -o json`), under
+// callTimeout (Kubectl.output).
 func (k *Kubectl) getPod(ctx context.Context) (podInfo, error) {
-	out, err := k.run.output(ctx, slices.Concat(k.base(), []string{"get", "pod", k.t.Pod, "--output=json"}))
+	out, err := k.output(ctx, slices.Concat(k.base(), []string{"get", "pod", k.t.Pod, "--output=json"}))
 	if err != nil {
 		return podInfo{}, fmt.Errorf("kubectl get pod %s/%s: %w", k.t.Namespace, k.t.Pod, err)
 	}
@@ -186,6 +187,9 @@ func (k *Kubectl) Debug(ctx context.Context, argv ...string) error {
 
 // debug runs `kubectl debug` once the pod p has been checked, with the
 // pod's disk bounds (podDiskArgs) after argv.
+// It runs under callTimeout (Kubectl.output): with --attach=false
+// kubectl returns once the API server has the ephemeral container, and
+// the --custom temporary is removed however it ends.
 func (k *Kubectl) debug(ctx context.Context, p podInfo, argv []string) error {
 	disk, err := k.podDiskArgs(p)
 	if err != nil {
@@ -196,7 +200,7 @@ func (k *Kubectl) debug(ctx context.Context, p podInfo, argv []string) error {
 		return err
 	}
 	defer func() { _ = os.Remove(custom) }()
-	if _, err := k.run.output(ctx, k.debugArgs(custom, slices.Concat(argv, disk))); err != nil {
+	if _, err := k.output(ctx, k.debugArgs(custom, slices.Concat(argv, disk))); err != nil {
 		return fmt.Errorf("kubectl debug %s/%s: %w", k.t.Namespace, k.t.Pod, err)
 	}
 	return nil

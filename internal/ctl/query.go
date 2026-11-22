@@ -71,7 +71,7 @@ func queryCommand(args []string, e env) error {
 	if err != nil {
 		return err
 	}
-	return runQuery(context.Background(), e, f, filter, from, to)
+	return runQuery(e.root(), e, f, filter, from, to)
 }
 
 // addQueryFlags registers query's flags on fs into f.

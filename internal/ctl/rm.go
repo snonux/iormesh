@@ -84,7 +84,7 @@ func rmCommand(args []string, e env) error {
 	r := remover{collector: c, force: *force}
 	// Bounded like collect's hosts (env.onHost): a host stalled after
 	// the probe fails the teardown and the registry stays as it was.
-	err = r.e.onHost(context.Background(), func(ctx context.Context) error {
+	err = r.e.onHost(r.e.root(), func(ctx context.Context) error {
 		return r.teardown(ctx, host, projects, hostGoes)
 	})
 	if errors.Is(err, errUnreachable) {

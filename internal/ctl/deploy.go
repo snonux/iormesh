@@ -132,7 +132,7 @@ func deployCommand(args []string, e env) error {
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
+	ctx := e.root()
 	var hostErr error
 	if len(servers) > 0 {
 		d, recPath, err := newDeployer(e, *dist, *keyPath, *restart)

@@ -107,8 +107,11 @@ truth.
   session after three missed keepalives
   (`ServerAliveInterval=15`, `ServerAliveCountMax=3`), rsync a
   transfer idle for 60 s (`--timeout=60`), and each server host
-  gets an hour before iormeshctl reports it failed and moves on
-  (kubectl calls for pods are not bound yet, task pi4).
+  gets an hour before iormeshctl reports it failed and moves on.
+  A pod entry gets the same hour; inside it each kubectl get,
+  debug or short exec gets 2 min and the fetch stream 2 min of
+  silence, so a stalled exec cannot hold the fetch lock (task
+  pi4).
   Its control sockets — live, authenticated sessions — sit in a private
   0700 directory that is refused if a symlink, foreign-owned or
   open to others.

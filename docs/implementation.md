@@ -3636,6 +3636,28 @@ rsync -rt --timeout=60 --remove-source-files --exclude='.*' \
   ServerAlive options' (about 45 s) and a stalled transfer
   rsync's `--timeout=60`, an I/O idle timeout that never cuts
   off a long transfer that is still moving.
+- Pod entries likewise (task pi4): collect's and rm's entry,
+  and in deploy the entry's pod lookup and each pod, run under
+  `env.onHost`. Below the hour, internal/k8s bounds each
+  kubectl call that answers and exits (`callTimeout`, 2 min:
+  get, debug, the remove exec, `Run`) and gives the fetch
+  stream an idle timeout (`streamIdle`, 2 min without a byte;
+  `idleReader` in `exec.go`), both `ErrStalled`. An idle
+  timeout rather than a whole-fetch one, for rsync's reason:
+  a large backlog may stream for long, and only silence means
+  a stalled exec — one that would otherwise hold the
+  directory's fetch lock.
+- Ctrl-C: `ctl.Main` runs every command under a root context
+  from `signal.NotifyContext` (SIGINT, SIGTERM; `env.ctx`,
+  `env.root`). The first signal cancels it — the ssh and
+  kubectl calls end, deferred cleanups run (fetch lock,
+  `kubectl debug`'s `--custom` temporary) — and the command's
+  error reads "interrupted (interrupt signal received): …";
+  the handler is then dropped, so a second Ctrl-C kills
+  outright. Tests: `internal/k8s/bound_test.go` (a stalled
+  stream, a slow one not cut, hung remove/get/debug) and
+  `internal/ctl/interrupt_test.go` (hung pod deploy and rm, an
+  interrupted collect, the signal context).
 - Tests (`internal/ctl/collect_test.go`): exact call sequence
   over the whole registry, identical on a second run;
   `-project`/HOST selection and refusals with no call at all;
@@ -5808,7 +5830,8 @@ depends on:
     left running whose command line's `-project` (else the
     namespace, #21) is not the entry's (`verifyProject`): no wait
     changes either. A cancelled context (Ctrl-C) ends the wait as
-    "interrupted", wrapping `context.Canceled`, not as a timeout.
+    "interrupted", wrapping `context.Canceled`, not as a timeout
+    (and naming the signal, the root context's cause, task pi4).
     Also from yb4: a route discovery get refused by RBAC read
     `k8s: pod not reached` (`ErrUnreachable`'s text); it is
     `ErrAPI` ("API request failed") with kubectl's reason now,

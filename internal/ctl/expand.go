@@ -63,7 +63,7 @@ func expandCommand(args []string, e env) error {
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
+	ctx := e.root()
 	x, err := planExpansion(ctx, e, f)
 	if err != nil {
 		return err

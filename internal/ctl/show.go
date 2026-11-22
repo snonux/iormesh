@@ -1,7 +1,6 @@
 package ctl
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -49,7 +48,7 @@ func refreshCommand(args []string, e env) error {
 	}
 	// The build reads its pins beside -db: a pod's pin goes there too.
 	c.db = f.db
-	ctx := context.Background()
+	ctx := e.root()
 	collectErr := c.all(ctx, targets)
 	if collectErr != nil {
 		_, _ = fmt.Fprintf(e.stderr, "iormeshctl: %s; building what the store has\n", errText(collectErr))

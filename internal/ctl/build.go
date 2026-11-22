@@ -130,7 +130,7 @@ func buildCommand(args []string, e env) error {
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%w: build takes no arguments", errUsage)
 	}
-	return buildAndReport(context.Background(), e, f)
+	return buildAndReport(e.root(), e, f)
 }
 
 // buildAndReport builds and prints the summary and the output paths.

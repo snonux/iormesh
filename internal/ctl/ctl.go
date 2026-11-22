@@ -53,7 +53,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"iormesh/internal/federate"
@@ -104,6 +107,20 @@ type env struct {
 	// hostTimeout bounds everything one command does on one host
 	// (onHost); zero is defaultHostTimeout. Tests shorten it.
 	hostTimeout time.Duration
+	// ctx is the root context every command runs under (root): Main's
+	// is cancelled by SIGINT or SIGTERM (interruptContext), so a Ctrl-C
+	// ends the command's ssh and kubectl calls and it cleans up and
+	// reports "interrupted" (task pi4). Nil is context.Background(), as
+	// in most tests.
+	ctx context.Context
+}
+
+// root is the command's root context, e.ctx or context.Background().
+func (e env) root() context.Context {
+	if e.ctx == nil {
+		return context.Background()
+	}
+	return e.ctx
 }
 
 // defaultEnv is the real environment: the registry at
@@ -165,9 +182,27 @@ func sshTransport(host string) (federate.Transport, error) {
 	return federate.NewSSH(host)
 }
 
-// Main runs the subcommand args[0] and returns the process exit code.
+// Main runs the subcommand args[0] under a root context that SIGINT and
+// SIGTERM cancel (interruptContext) and returns the process exit code.
 func Main(args []string, stdout, stderr io.Writer) int {
-	return run(args, defaultEnv(stdout, stderr))
+	ctx, stop := interruptContext()
+	defer stop()
+	e := defaultEnv(stdout, stderr)
+	e.ctx = ctx
+	return run(args, e)
+}
+
+// interruptContext is the root context a Ctrl-C (SIGINT) or a kill
+// (SIGTERM) cancels, with the signal as its cause, instead of killing
+// iormeshctl outright (task pi4): the running command's ssh and kubectl
+// calls end, its deferred cleanups run (the fetch lock, kubectl debug's
+// --custom temporary) and it reports "interrupted". Only the first
+// signal is caught: once the context is cancelled the handler is
+// dropped, so a second Ctrl-C kills a command whose cleanup hangs.
+func interruptContext() (context.Context, context.CancelFunc) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	context.AfterFunc(ctx, stop)
+	return ctx, stop
 }
 
 func run(args []string, e env) int {
@@ -216,7 +251,17 @@ func run(args []string, e env) int {
 	default:
 		err = fmt.Errorf("%w: unknown subcommand %q", errUsage, args[0])
 	}
-	return exitCodeOf(err, e.stderr)
+	return exitCodeOf(interrupted(e.root(), err), e.stderr)
+}
+
+// interrupted marks a command's failure as the interrupt's once the
+// root context has ended (Ctrl-C, SIGTERM): the error then is mostly
+// the calls it cut off, and the operator should read why first.
+func interrupted(ctx context.Context, err error) error {
+	if err == nil || ctx.Err() == nil {
+		return err
+	}
+	return fmt.Errorf("interrupted (%v): %w", context.Cause(ctx), err)
 }
 
 // exitCodeOf maps an error to its exit code.

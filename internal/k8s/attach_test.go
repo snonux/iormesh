@@ -194,6 +194,22 @@ func TestWaitAttachedInterrupted(t *testing.T) {
 	}
 }
 
+// TestWaitAttachedSignal: iormeshctl's root context ends with the
+// signal as its cause (signal.NotifyContext, task pi4); the wait still
+// wraps context.Canceled and names the signal.
+func TestWaitAttachedSignal(t *testing.T) {
+	fastPoll(t)
+	f := newFake(t)
+	f.states(t, "pending")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	time.AfterFunc(100*time.Millisecond, func() { cancel(errors.New("interrupt signal received")) })
+	_, err := newTestKubectl(t, testTarget()).WaitAttached(ctx, "shop", time.Minute)
+	if !errors.Is(err, ErrNotAttached) || !errors.Is(err, context.Canceled) ||
+		!strings.Contains(err.Error(), "interrupted") || !strings.Contains(err.Error(), "interrupt signal received") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 // TestWaitAttachedSlowProbe: a probe in flight when the wait's timeout
 // passes still gets its answer — it runs under its own bound — so a
 // slow exec that answers running attaches (task 5g4); a probe over its

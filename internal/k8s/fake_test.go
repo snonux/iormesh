@@ -18,6 +18,14 @@ import (
 // kubectl itself does (exit 1, no remote status), the get still served;
 // $FAKE_KUBECTL_EXEC_SLEEP=S makes every exec take S seconds first (its
 // sleep holds no pipe, so a killed fake ends at once).
+// $FAKE_KUBECTL_HANG stalls one call for 30 s without exiting, as a
+// kubectl whose API server or exec stream hangs does (task pi4): "get"
+// and "debug" those verbs, "remove" the remove exec, "stall" the ready
+// stream after its first 300 bytes (inside the first header), and
+// "trickle" sends the ready stream 512 bytes at a time, 0.3 s apart
+// (slow but moving).
+// The hang is the fake's own process (exec sleep), so a killed fake
+// closes its stdout at once.
 // $FAKE_KUBECTL_REMOTE=N ends stderr with kubectl
 // exec's "command terminated with exit code N" (the remote command ran
 // and failed), $FAKE_KUBECTL_CHATTY=1 writes 10 KB of stderr before it.
@@ -37,6 +45,19 @@ for a in "$@"; do
                 printf '%s' "$KUBECTL_DEBUG_CUSTOM_PROFILE" > "$FAKE_KUBECTL_LOG.gate" ;;
   esac
 done
+stream=""; [ "$verb" = exec ] && [ -n "$ready" ] && [ -z "$remove" ] && [ -z "$state" ] && stream=1
+case "$FAKE_KUBECTL_HANG" in
+  get|debug) [ "$verb" = "$FAKE_KUBECTL_HANG" ] && exec sleep 30 ;;
+  remove) [ -n "$remove" ] && exec sleep 30 ;;
+  stall) if [ -n "$stream" ]; then head -c 300 "$FAKE_KUBECTL_TAR"; exec sleep 30; fi ;;
+  trickle) if [ -n "$stream" ]; then
+             size=$(wc -c < "$FAKE_KUBECTL_TAR"); i=0
+             while [ $((i * 512)) -lt "$size" ]; do
+               dd if="$FAKE_KUBECTL_TAR" bs=512 skip=$i count=1 2>/dev/null; i=$((i + 1)); sleep 0.3
+             done
+             exit 0
+           fi ;;
+esac
 if [ "$verb" = exec ] && [ -n "$FAKE_KUBECTL_EXEC_SLEEP" ]; then
   sleep "$FAKE_KUBECTL_EXEC_SLEEP" </dev/null >/dev/null 2>&1
 fi
@@ -84,6 +105,7 @@ func newFake(t *testing.T) *fake {
 	t.Setenv("FAKE_KUBECTL_STATE", filepath.Join(dir, "state"))
 	t.Setenv("FAKE_KUBECTL_EXEC_DOWN", "")
 	t.Setenv("FAKE_KUBECTL_EXEC_SLEEP", "")
+	t.Setenv("FAKE_KUBECTL_HANG", "")
 	return f
 }
 

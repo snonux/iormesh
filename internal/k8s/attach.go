@@ -177,10 +177,17 @@ func (k *Kubectl) WaitAttached(ctx context.Context, proj string, timeout time.Du
 }
 
 // interrupted is WaitAttached's error for a ctx that ended first (an
-// operator's Ctrl-C, mostly): not a timeout, so it says so.
+// operator's Ctrl-C, mostly): not a timeout, so it says so. It wraps
+// ctx.Err() (context.Canceled for a Ctrl-C) and names the cause when
+// the ctx carries another — iormeshctl's root context, from
+// signal.NotifyContext, carries the signal (task pi4).
 func (k *Kubectl) interrupted(ctx context.Context, proj, last string) error {
-	return fmt.Errorf("%w: %s, project %s: wait interrupted before the tracer attached (last: %s): %w",
-		ErrNotAttached, k.tracerName(), proj, last, context.Cause(ctx))
+	err := fmt.Errorf("%w: %s, project %s: wait interrupted before the tracer attached (last: %s): %w",
+		ErrNotAttached, k.tracerName(), proj, last, ctx.Err())
+	if cause := context.Cause(ctx); cause != nil && !errors.Is(cause, ctx.Err()) {
+		err = fmt.Errorf("%w (%v)", err, cause)
+	}
+	return err
 }
 
 // probeOnce is attachProbe under its own attachProbeTimeout. A probe the
