@@ -37,7 +37,11 @@ const DefaultTraceLimit = "2Gi"
 // -pattern matches only execs after the tracer attached, missing an app
 // that started first. A restart of the tracer (restartPolicy) retries
 // either; the native-sidecar trade-off in docs/implementation.md M7
-// step 8 is how yb4 settles it.
+// step 8 is how yb4 settles it. No -linger: a session ended by its
+// -duration should exit, so the restart begins the next one. A session
+// at its byte cap (PodDiskArgs) does not exit, though: in a pod the run
+// waits, BPF released, until collect drains the trace dir (task ki4,
+// internal/cli awaitDrain), so a full dir never crash-loops the pod.
 var DefaultSidecarArgs = []string{"run", "-listen-port", "8080", "-duration", "168h"}
 
 // Manifests are the inputs the generated manifests vary by.

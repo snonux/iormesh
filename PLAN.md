@@ -1930,7 +1930,17 @@ Later phase — plain Linux servers (M4) come first.
   ephemeral storage when the kubelet's node-pressure eviction
   picks pods; a 98 % limit would not change that, the kubelet
   acting at 90 % used by default (docs/implementation.md M7
-  step 5). The
+  step 5). At the cap a run in a pod does not exit (task ki4):
+  whether the cap ended its session (`disk_limit`) or refused
+  its start (the trace dir still over it), it frees its BPF and
+  waits, as `-linger` does, until collect has drained the dir
+  under the cap or SIGTERM arrives. An exit crash-looped the
+  sidecar — every restart refused for the same full dir — which
+  took the pod NotReady and left collect no running container
+  to exec into, so the segments died with the pod. Once
+  drained the run exits and the restart starts a fresh
+  session; outside a pod a full disk still fails the run at
+  once. The
   image has no `/etc/machine-id`, which made every run in it
   fail; since task 7f4 a run in a pod needs none (above,
   docs/implementation.md M7 step 6). Pod identity status

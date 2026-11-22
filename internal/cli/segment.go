@@ -257,8 +257,8 @@ func (t teeSink) Event(ev *schema.Event) error {
 func (t teeSink) Close() error { return errors.Join(t.a.Close(), t.b.Close()) }
 
 // endReason maps a poll error to the run's end: a disk-limit trip is a
-// clean end (PLAN.md: flush, record the reason, exit 0), anything else an
-// error.
+// clean end (PLAN.md: flush, record the reason, exit 0 — in a pod only
+// once collect drained the dir, awaitDrain), anything else an error.
 func endReason(err error) (string, error) {
 	if errors.Is(err, segment.ErrDiskLimit) {
 		return schema.EndDiskLimit, nil
