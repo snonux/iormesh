@@ -67,10 +67,33 @@ iormesh attach -pid 4242 -agent /opt/iormesh/lib/iormesh-agent.jar \
 the `-pid` list, the `-listen-port` owners, the JVMs a `-pattern`
 finds running at start — before its `-ready` file appears; a
 process that is no JVM is noted and traced without Java
-attribution. Children forked later and pattern matches exec'd
-later are not attached: their JVM is still starting (see
-"Safety"); give those `-javaagent`, e.g. through
-`JAVA_TOOL_OPTIONS`. `iormesh attach` returns once the JVM
+attribution. A JVM that appears later in the session gets the
+agent too (late attach, task lh4): a pattern match exec'd later,
+a traced process — a child forked later included — that execs a
+JVM, a restarted `-listen-port` owner the session adopts. Such a
+JVM is still starting at its exec, so the tracer tries it every
+250 ms from its exec until the load succeeds, for at most 30 s:
+a process that still maps no `libjvm.so` 5 s after its exec is
+no JVM and dropped without a word, a JVM without its SIGQUIT
+handler yet (see "Safety") is tried again. One that refuses
+(`-XX:+DisableAttachMechanism`, dynamic loading disabled, no
+stage possible), is still not ready after 30 s or exits first is
+named once on stderr, `no Java attribution for pid N: …`, and
+never tried again; a load prints the same `agent loaded into
+pid N` line as at start. Every check of the start-time attach
+applies unchanged — the same handshake and its checks of the
+JVM's uid and namespaces, the same trusted (in a confined
+session pinned) jar, a stage inside a foreign root removed when
+the session ends. The attaches run beside the trace, never in
+its loop: at most 2 handshakes at a time and 64 processes
+waiting, more are named and get nothing. The I/O such a JVM does
+before its load stays unattributed — its start-up, mostly —
+so give a JVM whose start matters `-javaagent`, e.g. through
+`JAVA_TOOL_OPTIONS`. A process forked without an exec (a JVM's
+fork) is no new JVM and gets nothing; one that turns up in the
+start-time scan and execs while it is loaded may be loaded
+twice, which the agent answers with nothing new. `iormesh
+attach` returns once the JVM
 confirmed the agent started; the running tracer then prints
 `java agent of pid N joined, K natives probed` at its next spool
 scan (within ≈200 ms) — from there on the JVM's I/O is
@@ -269,8 +292,10 @@ dictionary.
   the tracer needs `SYS_PTRACE`, `DAC_OVERRIDE`, `KILL` and
   `CHECKPOINT_RESTORE` ([security.md](security.md)
   "Kubernetes"). When the app container restarts, the JVM that
-  comes back starts after the tracer and gets no agent from `run
-  -agent`. A debug-mode tracer does not even outlive the restart:
+  comes back starts after the tracer and gets the agent from `run
+  -agent` only when the session follows it — a `-pattern` match,
+  a restarted `-listen-port` owner — through the late attach
+  ("Live attach" above), staged like any other. A debug-mode tracer does not even outlive the restart:
   `kubectl debug --target` puts it in the app container's PID
   namespace, and the kernel kills it along with that namespace's
   init (task ah4). `iormeshctl deploy` then starts a fresh debug
@@ -308,7 +333,8 @@ runs answers it with a thread dump on its stdout, so the tracer:
   is refused, whatever the path's owner;
 - bounds the whole attach by `-timeout` (default 10 s; `run
   -agent` uses 10 s per JVM, while it keeps reading the BPF
-  stream). Giving up never touches the JVM again, but a load the
+  stream — per try for a late attach, whose tries a JVM still
+  starting ends quickly). Giving up never touches the JVM again, but a load the
   JVM already started still completes inside it — a running
   `run -spool` then picks up its ring at the next scan.
 

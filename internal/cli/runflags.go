@@ -58,8 +58,9 @@ type runConfig struct {
 	// their I/O joined to Java stacks. "" joins nothing.
 	spool string
 	// agent is iormesh-agent.jar to live-load into the JVMs the session
-	// starts with (-agent, decision #2, task ge4), absolute; "" loads
-	// nothing. It needs spool.
+	// starts with (-agent, decision #2, task ge4) and those that appear
+	// later (lateattach.go, task lh4), absolute; "" loads nothing. It
+	// needs spool.
 	agent string
 	// traceDir is where parquet segments go (-trace-dir, M4), under a
 	// directory per project; "" writes none. Without -out it defaults to
@@ -232,7 +233,8 @@ func addRunFlags(fs *flag.FlagSet) runFlags {
 		spool: fs.String("spool", "",
 			"directory for the Java agent's rings (created, mode 1733); join their JVMs' I/O to Java stacks"),
 		agent: fs.String("agent", "",
-			"live-load this iormesh-agent.jar into the JVMs traced at start (needs -spool; JEP 451 warns)"),
+			"live-load this iormesh-agent.jar into the traced JVMs, at start and as they appear "+
+				"(needs -spool; JEP 451 warns)"),
 		seg: addSegmentFlags(fs),
 	}
 }

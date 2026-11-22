@@ -26,7 +26,8 @@
 // internal/k8s; no tar or rsync in the tracer image). attach live-loads
 // the Java agent into a running JVM a `run -spool` traces (decision #2,
 // task ge4;
-// `run -agent` does the same for the JVMs a session starts with).
+// `run -agent` does the same for the JVMs a session starts with and,
+// as they appear, later ones, task lh4).
 package cli
 
 import (

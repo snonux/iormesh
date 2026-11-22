@@ -134,25 +134,30 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 	}
 	s := newSession(tr, c, cfg)
 	s.java, s.seg, s.log = out.java, out.seg, stderr
+	// end stops the late attaches (task lh4) before finish closes the
+	// Java join, so their stages are removed with the session's.
+	end := func(reason string, err error) error {
+		s.stopLate()
+		return errors.Join(err, finish(cfg, tr, c, out, reason, stderr))
+	}
 	if err := s.start(pids); err != nil {
-		return errors.Join(err, finish(cfg, tr, c, out, schema.EndError, stderr))
+		return end(schema.EndError, err)
 	}
 	_, _ = fmt.Fprintf(stderr, "iormesh: attached, tracing %s (%d tracepoints missing on this kernel)\n",
 		describe(cfg.spec, pids), len(tr.Skipped()))
 	announcePidNS(tr.PidNS(), stderr)
 	if err := s.startJava(ctx, cfg, stderr); err != nil {
-		return errors.Join(err, finish(cfg, tr, c, out, schema.EndError, stderr))
+		return end(schema.EndError, err)
 	}
 	// state.json says running before the ready file appears, so a harness
 	// released by the one finds the other.
 	if err := out.seg.markRunning(cfg, describe(cfg.spec, pids), time.Now()); err != nil {
-		return errors.Join(err, finish(cfg, tr, c, out, schema.EndError, stderr))
+		return end(schema.EndError, err)
 	}
 	if err := announceReady(cfg); err != nil {
-		return errors.Join(err, finish(cfg, tr, c, out, schema.EndError, stderr))
+		return end(schema.EndError, err)
 	}
-	reason, loopErr := traceLoop(ctx, s, cfg)
-	return errors.Join(loopErr, finish(cfg, tr, c, out, reason, stderr))
+	return end(traceLoop(ctx, s, cfg))
 }
 
 // preflight runs before anything is loaded: a stale ready file is
@@ -523,10 +528,11 @@ func drainStopped(s *session) error {
 
 // poll is the loop's periodic work: the loss counters, the correlator's
 // clock (Correlator.Tick: a socket waiting for a cross-host end leaves
-// after its fuse window even on an idle stream), the Java join's rings,
-// so an idle stream's held events still leave, and the segment writer's
-// clock — rotation and the disk watchdog, whose trip ends the run as
-// disk_limit (endReason). The correlator ticks only while no batch is
+// after its fuse window even on an idle stream), the late attaches'
+// lines and stages (task lh4), the Java join's rings — so an idle
+// stream's held events still leave, and a late-attached JVM's new ring
+// is read — and the segment writer's clock — rotation and the disk
+// watchdog, whose trip ends the run as disk_limit (endReason). The correlator ticks only while no batch is
 // waiting: with a backlog the records, not the clock, are behind.
 func (s *session) poll() error {
 	if _, err := pollLosses(s.tr, s.c); err != nil {
@@ -537,6 +543,7 @@ func (s *session) poll() error {
 			return err
 		}
 	}
+	s.late.collect(s.java, s.log)
 	if err := s.java.poll(); err != nil {
 		return err
 	}

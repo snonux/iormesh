@@ -214,13 +214,23 @@ var sameMountNS = func(pid uint32) bool {
 // startJava readies the Java join before the ready file promises the
 // tracer is live: the rings of JVMs already running get their natives
 // probed (the Java mark, task td4), and with -agent the JVMs the session
-// starts with get the agent loaded first (task ge4). Without -spool it
-// does nothing.
+// starts with get the agent loaded first (task ge4). With -agent the
+// late attacher starts first too: a JVM that execs while the start-time
+// loads run is tried by it (task lh4), and it reuses their stages.
+// Without -spool it does nothing.
 func (s *session) startJava(ctx context.Context, cfg runConfig, stderr io.Writer) error {
-	if cfg.agent != "" {
-		return s.attachAgents(ctx, cfg.agent, cfg.spool, stderr)
+	if cfg.agent == "" {
+		return s.java.poll()
 	}
-	return s.java.poll()
+	s.late = newLateAttacher(ctx, cfg.agent, cfg.spool)
+	return s.attachAgents(ctx, cfg.agent, cfg.spool, stderr)
+}
+
+// stopLate ends the late attaches (lateAttacher.stop): their lines go to
+// the session's log, their stages to the Java join, which removes them.
+// run calls it before finish closes the join.
+func (s *session) stopLate() {
+	s.late.stop(s.java, s.log)
 }
 
 // attachAgents is `run -agent`: it loads the agent into each JVM the
@@ -264,6 +274,7 @@ func (s *session) attachAgents(ctx context.Context, agent, spool string, stderr 
 				_, _ = fmt.Fprintf(stderr, "iormesh: %s\n", l)
 			}
 			s.java.addStages(r.stages)
+			s.late.share(r.stages)
 			return s.java.poll()
 		case <-ctx.Done():
 			// A signal during the loads. nil, not ctx.Err(): traceLoop

@@ -673,6 +673,26 @@ Gated by S1 — done; the design below is S1's result
   -agent JAR` for the JVMs a session starts with, `iormesh
   attach` for one at any time — and never signals a process
   that could die of SIGQUIT; caveats in docs/java-attach.md.
+  Late attach (task lh4): `run -agent` also loads the agent
+  into a JVM that appears during the session — a pattern match
+  exec'd later, a traced process (a child included) that execs
+  a JVM, a restarted port owner the session adopts (#23). Each
+  is tried from its exec (or adoption) every 250 ms until the
+  load succeeds, for at most 30 s; a process that maps no
+  `libjvm.so` within 5 s of its exec is no JVM and dropped
+  silently, a JVM still starting (no SIGQUIT handler yet) is
+  tried again. A JVM that refuses (`-XX:+DisableAttachMechanism`,
+  dynamic loading disabled, a failed stage or handshake), runs
+  out of the 30 s or exits first is named once on stderr and
+  never tried again. Every check of the start-time attach
+  applies unchanged — the same loader, the same JVM, uid and
+  namespace checks, the same trusted jar path (pinned in a
+  confined session) and stages inside a foreign root, removed
+  at the session's end. The attaches run off the trace loop: a
+  goroutine per JVM, at most 2 handshakes at a time and 64 JVMs
+  waiting (more are named and skipped); the loop only collects
+  their lines and stages at its tick. A JVM forked without an
+  exec is no new JVM and gets nothing.
 - **Stack capture cost**: the per-I/O `StackWalker` walk is the
   agent's dominant cost (S1: ≈8 µs per call on a loaded host vs
   ≈0.3 µs for the rest of the bracket); M3 engineers it down
@@ -3061,9 +3081,10 @@ deferred.
   a tracer upgrade to another version removes it under the
   upgrade lock and the next deploy installs the matching one
   (until then `-agent` fails, closed). JVMs matched at exec get
-  it through `-javaagent` pointing at the same installed file
-  (the M4 runner sets `JAVA_TOOL_OPTIONS`; the product sets
-  nothing in a JVM's environment). Overturned if the owner
+  the same file by `run -agent`'s late attach (M3, task lh4),
+  or through `-javaagent` pointing at it, which misses nothing
+  before the attach (the M4 runner sets `JAVA_TOOL_OPTIONS`;
+  the product sets nothing in a JVM's environment). Overturned if the owner
   wants the jar inside the tracer binary (one artifact, extracted
   at start) or a separate key for it.
 - **#24 Service-interaction database** — controller-side:

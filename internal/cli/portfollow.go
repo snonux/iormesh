@@ -125,8 +125,9 @@ func (s *session) followPort() (bool, error) {
 // the session started with. Like the start scan's adoptRunning it reads
 // the identity first and re-checks liveness after the insert (addRunning),
 // then seeds the correlator, which writes the process's attach event —
-// a new incarnation of the port's app. A holder of another program or
-// user is named once on stderr and left alone.
+// a new incarnation of the port's app — and with -agent tries to load
+// the agent into it (task lh4). A holder of another program or user is
+// named once on stderr and left alone.
 func (s *session) adoptOwner(pid uint32) error {
 	f := s.follow
 	id := attachIdentity(pid)
@@ -147,5 +148,6 @@ func (s *session) adoptOwner(pid uint32) error {
 	}
 	s.live[pid] = id.StartNS
 	_, _ = fmt.Fprintf(s.log, "iormesh: port %d: following new owner pid %d\n", f.port, pid)
+	s.late.exec(pid)
 	return s.c.Seed(pid, id)
 }

@@ -3134,9 +3134,18 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
     the three tests: [testing.md](testing.md#live-attach-task-ge4);
     user-facing caveats: [java-attach.md](java-attach.md).
     Checked on 17.0.19 (by hand), 21.0.12, 25.0.4 and 27-ea+35
-    (`IORMESH_ATTACH_JDKS`). Not built: attaching to JVMs a
-    pattern session finds on exec (they are still starting) and
-    across mount namespaces (M7, #14).
+    (`IORMESH_ATTACH_JDKS`). Across mount namespaces: M7, #14
+    (task cf4). Late attach (task lh4, `internal/cli/
+    lateattach.go`): `session.handle` (a traced process's exec),
+    `judgeExec` (an adopted pattern match) and `adoptOwner` (a
+    restarted port owner) hand the pid to a `lateAttacher`,
+    which tries it on a goroutine of its own every 250 ms for
+    30 s (5 s while it maps no `libjvm.so`), through the
+    start-time `loadAgent` and stages, at most 2 handshakes at a
+    time and 64 pids pending; the trace loop's `poll` collects
+    its lines and new stages, and `run` stops it (cancel, wait,
+    collect) before `finish` closes the Java join. Unit tests in
+    `lateattach_test.go`, end to end `TestJavaLateAttach`.
 
 **Done when**: PLAN.md's M3 acceptance holds.
 

@@ -47,8 +47,12 @@ type session struct {
 	// follow is a -listen-port session's wait for a restarted owner
 	// (decision #23, task mh4); nil for a PID or pattern session.
 	follow *portFollow
+	// late loads the agent into JVMs that appear while a -agent session
+	// runs (lateattach.go, task lh4); nil without -agent.
+	late *lateAttacher
 	// log is where the session reports what it decides on its own (a
-	// followed or refused port owner): run's stderr, io.Discard in tests.
+	// followed or refused port owner, a late attach): run's stderr,
+	// io.Discard in tests.
 	log io.Writer
 }
 
@@ -158,11 +162,13 @@ func (s *session) handleAll(batch []any) error {
 
 // handle routes one record: exec reports to the pattern judge, process
 // lifecycle records to the live set and then, like everything else, to
-// the correlator.
+// the correlator. A traced process's exec (a target's, a child's) may
+// start a JVM, which -agent's late attach then tries (task lh4).
 func (s *session) handle(rec any) error {
 	switch r := rec.(type) {
 	case *types.ExecArgvEvent:
 		if r.EventType == types.PROCESS_ARGV_EVENT {
+			s.late.exec(r.Pid)
 			argv, cut := execArgv(r)
 			return s.c.Exec(execInfo(r, argv, cut))
 		}
@@ -188,7 +194,8 @@ func (s *session) handle(rec any) error {
 // judgeExec matches an untraced process's exec against the pattern
 // (decision #23: argv and exe, never the comm) and adopts or dismisses
 // it. An adopted exec is also recorded (redacted, by the correlator):
-// it is how the app came to be traced, and its argv is the app's.
+// it is how the app came to be traced, and its argv is the app's; and
+// with -agent its JVM gets the agent once it is ready (task lh4).
 func (s *session) judgeExec(ev *types.ExecArgvEvent) error {
 	argv, cut := execArgv(ev)
 	exe := types.StringValue(ev.Exe[:])
@@ -204,6 +211,7 @@ func (s *session) judgeExec(ev *types.ExecArgvEvent) error {
 	if err := s.adopt(ev.Pid, processIdentity(ev.Pid), gap); err != nil {
 		return err
 	}
+	s.late.exec(ev.Pid)
 	return s.c.Exec(execInfo(ev, argv, cut))
 }
 
