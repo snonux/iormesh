@@ -2612,8 +2612,8 @@ deferred.
   through the same resync as a new reader. A ring lives as long
   as its JVM, not as long as a session (task 2j4): the agent
   unlinks its own ring in its shutdown hook after the last
-  watermark (a tracer reading it has it mapped); the Java join retires a JVM once its
-  group-dead exit was handled and nothing can ask for its ring
+  watermark (a tracer reading it has it mapped); the Java join
+  retires a JVM once its group-dead exit was handled and nothing can ask for its ring
   (the fuse window plus the join timeout past the exit, none of
   its events held): a last drain, then close and unlink; and the
   spool scan unlinks a ring whose process is gone (SIGKILL, or
