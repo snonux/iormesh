@@ -146,7 +146,7 @@ column each, never a blob.
 | `lost` | `drop` (required, > 0): records lost since the previous `drop` event of its kind; for `skipped_runs`, program runs skipped host-wide (an upper bound, not lost records) |
 | `drop_reason` | `drop`, optional: why the records were lost — `attach_gap` (M2), `unattributed` (a folded read/write no fd instance explains, M2 step 11), `skipped_runs` (program runs the kernel skipped, possible loss); absent for ring-buffer and decoder loss |
 | `end_reason` | `end` (required): why the trace ended, below |
-| `argv` | `exec` only: the new program's argv, a list of strings, redacted (see Redaction); absent when unreadable |
+| `argv` | `exec` and `attach` only: the new program's argv (`exec`), or the command line of a process already running at attach (`attach`, task nh4), a list of strings, redacted (see Redaction); absent when unreadable |
 | `fd2`, `fd2_gen` | a second fd instance (M2 step 7): the other end of `pipe`, `pipe2`, `socketpair`; the fd `epoll_ctl` registers |
 | `signal` | the signal number: `kill`, `tgkill`, `tkill` (when the kernel generated a signal) and `signal` (required) |
 | `target_pid` | `kill`, `tgkill`, `tkill`: the tgid signalled — raw, the target need not be traced |
@@ -210,11 +210,13 @@ socket itself: `write_seq` (the end of the send queue — not
 for a receive, read at the call's enter and again at its exit.
 It is given only when the two reads differ by exactly the
 bytes the call moved, which proves no other call's bytes went
-through the socket in between. So a send racing another
-thread's send on the same socket, a `MSG_PEEK` or `MSG_OOB`
-read (`copied_seq` does not move, or skips the urgent byte), a
-kTLS socket (`write_seq` counts record framing) and a TCP Fast
-Open send (the ISN is chosen inside the call) carry none: no
+through the socket in between — or, for a receive that also
+consumes the peer's FIN, by one more (the FIN's own sequence
+number) when nothing was received after it (task wi4). So a
+send racing another thread's send on the same socket, a
+`MSG_PEEK` or `MSG_OOB` read (`copied_seq` does not move, or
+skips the urgent byte), a kTLS socket (`write_seq` counts
+record framing) and a TCP Fast Open send (the ISN is chosen inside the call) carry none: no
 `tcp_seq` is ever a guess. Neither does a call on a kernel
 without the `bpf_rdonly_cast` kfunc (before 6.2), where the
 tracer cannot read the socket cheaply, nor one whose socket the
@@ -334,7 +336,7 @@ says nothing about the individual calls' sizes or gaps.
 | `exec` | a successful exec of a traced process (`sched_process_exec` plus the argv record): `args.path` is the executable as exec'd (empty when unreadable, then absent), `args.argv` the command line, redacted; `fd` is `-1`, `ret` `0` |
 
 | `fork` | a new process of a traced one (`task_newtask` without `CLONE_THREAD`), on the **child**: `pid`, `pid_incarnation`, `tid` (= pid) and `comm` are the child's as it starts, `args.parent_pid`/`parent_incarnation` the forker; `fd` `-1`, `ret` `0`, `boot_ns` the record's (appended in M4, task ze4) |
-| `attach` | a process the session took on as a target — a `-pid` or port target at session start, or a `-pattern` match (then with `args.pattern`) — with the identity read then; `fd` `-1`, `ret` `0`, `boot_ns` the tracer's clock at the attach — read when the event is numbered, so it can be later than the `boot_ns` of events with a higher `seq` (records the tracer handles later but stamped earlier); `seq` orders it (appended in M4, task ze4) |
+| `attach` | a process the session took on as a target — a `-pid` or port target at session start, or a `-pattern` match (then with `args.pattern`) — with the identity read then; a process already running then (no exec of its own: a `-pid` or port target, a pattern's start-scan match) also carries `args.path`, its executable (`/proc/<pid>/exe`), and `args.argv`, its command line (`/proc/<pid>/cmdline`), redacted like an `exec`'s, each absent when `/proc` could not be read (task nh4); `fd` `-1`, `ret` `0`, `boot_ns` the tracer's clock at the attach — read when the event is numbered, so it can be later than the `boot_ns` of events with a higher `seq` (records the tracer handles later but stamped earlier); `seq` orders it (appended in M4, task ze4) |
 
 `fork` and `attach` carry what the graph's `forked` edge, a
 child's inherited fds, and the `app` node with its
@@ -346,7 +348,14 @@ incarnation's `attach` comes before its `attach_gap` drop.
 A followed child's exec is one, and so is the exec through which a
 `-pattern` session found its app (after that process's
 `attach_gap` drop). A process already running when the trace
-attached has none, so its argv is not in the trace. `jspawnhelper`
+attached has none; its `attach` carries the argv and executable
+`/proc` showed then instead, redacted by the same policy, read only
+while the process is still the incarnation seeded (a reused PID
+yields neither) and absent when unreadable (the process gone,
+`hidepid`, another pid namespace). Its `args.path` is the resolved
+`/proc/<pid>/exe` link — a symlink-free path, with the kernel's
+` (deleted)` suffix when the binary was replaced or removed since —
+while an `exec`'s is the path as exec'd. `jspawnhelper`
 and the program it execs are two `exec` events of one process.
 BPF copies the first 1 KiB of the argument block; a longer one is
 completed from `/proc/<pid>/cmdline` only when that still starts
@@ -354,6 +363,12 @@ with the copied bytes — the process may have exec'd again, or its
 PID been reused, by the time userspace reads it. Otherwise the cut
 argv is kept, its partial last element masked as `***` (a cut
 `https://u:secr` is no longer recognizable as a URL password).
+Every read of `/proc/<pid>/cmdline` for an event (an `attach`'s
+argv, an `exec`'s completion) takes at most 64 KiB
+(`target.MaxCmdline`); a longer command line (a JVM's class path
+can be megabytes) is cut there and its partial last element masked
+the same way, so an event line stays far below the 1 MiB the NDJSON
+readers take.
 The environment is never captured (decision #9).
 
 ### Event kinds (M2 step 7: IPC, signals, UDP, poll, zero-copy)
@@ -1312,7 +1327,8 @@ The Go types are `internal/report`'s `Report`.
 - **Processes** are sorted by project, store host, pid and
   incarnation; host-level records (pid 0) are no process's. `app`
   is the target pattern of the session's `attach`, `argv` the last
-  `exec`'s (redacted by the tracer), `serves` the endpoint labels
+  `exec`'s (redacted by the tracer) — the `attach`'s for a process
+  running before the trace with no exec since — `serves` the endpoint labels
   it accepted connections on.
 - **Files** are listed in the order the process first opened or
   changed them (past the cap, which ones stay is ranked: see

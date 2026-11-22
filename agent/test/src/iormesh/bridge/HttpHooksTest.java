@@ -31,7 +31,54 @@ public final class HttpHooksTest {
                 new AgentTests.Case("http hooks/entry stamps", HttpHooksTest::stamps),
                 new AgentTests.Case("http hooks/dns record", HttpHooksTest::dns),
                 new AgentTests.Case("http hooks/late record", HttpHooksTest::late),
-                new AgentTests.Case("http hooks/async marker", HttpHooksTest::marker));
+                new AgentTests.Case("http hooks/async marker", HttpHooksTest::marker),
+                new AgentTests.Case("http hooks/dormant agent runs no probe",
+                        HttpHooksTest::dormant));
+    }
+
+    /**
+     * Task ej4: while nobody reads the ring the HTTP hooks run no probe
+     * and walk no stack; each request they skip counts as a dropped HTTP
+     * record (so the tracer stops numbering, as for a full ring), a DNS
+     * lookup counts nothing, and the entry stamps stay balanced.
+     */
+    static void dormant() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-http-hooks");
+        Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
+        int[] probed = {0};
+        Hooks.httpProbe(1, (a, meta) -> {
+            probed[0]++;
+            return REQUEST;
+        });
+        Hooks.httpProbe(3, (a, meta) -> {
+            probed[0]++;
+            return new String[] {"h", "10.0.0.1"};
+        });
+        Hooks.ring = r;
+        Hooks.dormant = true;
+        try {
+            Hooks.httpEnter("outer", 1);
+            Hooks.http(null, "inner", null, 1);
+            Hooks.httpExit(null, "outer", null, 1);
+            Hooks.httpMark("client", 2);
+            Hooks.dns(null, null, "h", 3);
+            Hooks.httpLate().accept(new long[Hooks.CALLER + 1], m -> {
+                probed[0]++;
+                return REQUEST;
+            });
+            equal(0, Hooks.state().httpDepth, "balanced");
+        } finally {
+            Hooks.dormant = false;
+            Hooks.ring = null;
+            Hooks.httpProbe(1, null);
+            Hooks.httpProbe(3, null);
+        }
+        ByteBuffer b = map(r.path());
+        equal(0, probed[0], "no probe ran");
+        equal(0, records(b).size(), "nothing written");
+        equal(4L, b.getLong(Ring.DROPPED + 8 * Ring.HTTP), "four HTTP records lost");
+        equal(0L, b.getLong(Ring.DROPPED + 8 * Ring.DNS), "no DNS loss");
+        delete(dir, r);
     }
 
     private static final String[] REQUEST = {"GET", "http", "h", "/p?q=***", "HTTP/1.1",

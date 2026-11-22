@@ -41,10 +41,12 @@ func (e *Event) Validate() error {
 	if e.Args.EndReason != nil && e.Event != KindEnd {
 		return invalidf("args.end_reason on a %s event (end only)", e.Event)
 	}
-	// argv is recorded through the redaction policy on exec events only;
-	// one anywhere else came from a producer that may have skipped it.
-	if e.Args.Argv != nil && e.Event != KindExec {
-		return invalidf("args.argv on a %s event (exec only)", e.Event)
+	// argv is recorded through the redaction policy on exec events and on
+	// the attach of a process already running when the trace took it on
+	// (task nh4: it has no exec to carry it); one anywhere else came from
+	// a producer that may have skipped the policy.
+	if e.Args.Argv != nil && e.Event != KindExec && e.Event != KindAttach {
+		return invalidf("args.argv on a %s event (exec or attach only)", e.Event)
 	}
 	if e.StackID != nil && *e.StackID == 0 {
 		return invalidf("stack_id 0: stack table ids start at 1")

@@ -71,7 +71,7 @@ func rmCommand(args []string, e env) error {
 	force := fs.Bool("force", false, "uninstall even if traces could not be synced off (they are lost)")
 	kf := addK8sFlags(fs, false)
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() != 1 {
 		return fmt.Errorf("%w: rm takes exactly one HOST or pod entry", errUsage)

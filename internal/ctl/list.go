@@ -22,7 +22,7 @@ func listCommand(args []string, e env) error {
 	fs := newFlagSet("list", e.stderr)
 	regPath := fs.String("registry", "", "registry file (default ~/.config/iormesh/servers.yaml)")
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%w: list takes no arguments", errUsage)

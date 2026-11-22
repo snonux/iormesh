@@ -29,7 +29,7 @@ func parseNormalizeFlags(args []string, stderr io.Writer) (normalizeConfig, erro
 	fs.StringVar(&cfg.check, "check", "", "golden-check against this expect.json")
 	fs.StringVar(&cfg.out, "out", "", "write the normalized trace into this directory")
 	if err := fs.Parse(args); err != nil {
-		return cfg, fmt.Errorf("%w: %v", errUsage, err)
+		return cfg, fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() != 1 {
 		return cfg, fmt.Errorf("%w: want exactly one trace directory, got %d arguments", errUsage, fs.NArg())

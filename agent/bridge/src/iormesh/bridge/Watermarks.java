@@ -36,6 +36,13 @@ import java.util.concurrent.ConcurrentHashMap;
  * the ring's reader epoch and, when a reader came after the first one,
  * resends the dictionary records that reader missed ({@link #resync}).
  * With watermark=0 there is no thread and so no resync either.
+ *
+ * It also notices when nobody reads the ring any more (task ej4): the
+ * tail stands still while the ring stays full for DORMANT_AFTER_MS. It
+ * then sets Hooks.dormant, and the hooks stop walking stacks for records
+ * the ring would drop; it clears the flag through a resync once the tail
+ * moves or a reader comes ({@link #doze}). With watermark=0 the agent
+ * never goes dormant.
  */
 final class Watermarks {
     /** The thread's name: the tracer recognises its syscalls as the agent's. */
@@ -118,12 +125,23 @@ final class Watermarks {
     static final long RESYNC_GAP_NS = 1_000_000_000L;
 
     /**
+     * How long the ring must stay full and unread before the agent goes
+     * dormant (task ej4), turned into ticks by {@link #dormantTicks}:
+     * long enough that a live tracer stalled by a loaded host is never
+     * taken for a gone one, short enough that a JVM outliving its session
+     * stops paying its walks soon.
+     */
+    static final long DORMANT_AFTER_MS = 10_000;
+
+    /**
      * The watermark thread's resync state (task 5j4), touched by that
      * thread only: the reader epoch it last acted on and the ring's tail
      * read just before (what earlier readers consumed), whether a resync
      * was asked for but waits out gapNs since the last one (pending), and
      * whether the hook table still has to be resent (due: a row or the
-     * THREAD was dropped last time).
+     * THREAD was dropped last time). Also the dormancy state (task ej4,
+     * {@link #doze}): the tail, epoch and drop count of the last tick and
+     * how many ticks in a row found the tail still and the ring full.
      */
     static final class Resync {
         long seen;
@@ -132,6 +150,59 @@ final class Watermarks {
         boolean due;
         long gapNs = RESYNC_GAP_NS;
         long lastNs = System.nanoTime() - RESYNC_GAP_NS;
+        long dozeTail;
+        long dozeEpoch;
+        long dozeDropped;
+        int stuck;
+        int dormantTicks = dormantTicks(10);
+    }
+
+    /** DORMANT_AFTER_MS in ticks of intervalMs, at least two. */
+    static int dormantTicks(long intervalMs) {
+        return (int) Math.max(2, Math.min(Integer.MAX_VALUE, DORMANT_AFTER_MS / intervalMs));
+    }
+
+    /**
+     * Puts the agent to sleep when nobody reads the ring, and wakes it
+     * (task ej4). Asleep after dormantTicks ticks in a row in which the
+     * tail did not move, no reader came (the epoch stood) and the ring
+     * dropped a record (it is full — the tick's own watermark drops when
+     * the app is quiet): the session ended or the tracer died, and every
+     * record would be dropped anyway. Awake as soon as the tail moves or
+     * the epoch does (a new reader, task 5j4), and a wake asks for a
+     * resync, as a new reader does: the reader then gets the dictionary
+     * again before brackets that need it, and the drops a dormant agent
+     * counted in the header (Hooks.lostDormant) keep the watermarks
+     * honest about the time it slept. A repeated agent load wakes it too
+     * (resync reads that request, see tick). Reads three header words per
+     * tick; app threads read only Hooks.dormant.
+     */
+    static void doze(Ring ring, Resync s) {
+        long tail = ring.consumed();
+        long epoch = ring.readerEpoch();
+        long dropped = ring.dropped();
+        boolean moved = tail != s.dozeTail || epoch != s.dozeEpoch;
+        boolean full = dropped != s.dozeDropped;
+        s.dozeTail = tail;
+        s.dozeEpoch = epoch;
+        s.dozeDropped = dropped;
+        if (Hooks.dormant) {
+            if (moved) {
+                wake(s);
+            }
+            return;
+        }
+        s.stuck = !moved && full ? s.stuck + 1 : 0;
+        if (s.stuck >= s.dormantTicks) {
+            Hooks.dormant = true;
+        }
+    }
+
+    /** Wakes the agent through a resync (see doze). */
+    private static void wake(Resync s) {
+        Hooks.dormant = false;
+        s.stuck = 0;
+        s.pending = true;
     }
 
     /**
@@ -155,7 +226,12 @@ final class Watermarks {
     static void resync(Ring ring, Resync s) {
         long tail = ring.consumed();
         long epoch = ring.readerEpoch();
-        s.pending |= Hooks.resyncRequested();
+        if (Hooks.resyncRequested()) {
+            s.pending = true;
+            if (Hooks.dormant) {
+                wake(s);   // a new session's load (task ej4)
+            }
+        }
         if (epoch != s.seen) {
             s.pending |= epoch > 1 || s.seenTail > 0;
             s.seen = epoch;
@@ -220,14 +296,16 @@ final class Watermarks {
             }
         }
         Resync s = new Resync();
+        s.dormantTicks = dormantTicks(intervalMs);
         while (pause(intervalMs)) {
             tick(ring, s);
         }
     }
 
     /**
-     * One tick: a resync if a new reader asked for one, then the
-     * watermark — but none while a resend is still due (review of 5j4).
+     * One tick: dormancy first (doze: a wake asks for a resync, which then
+     * runs in the same tick), a resync if a new reader asked for one, then
+     * the watermark — but none while a resend is still due (review of 5j4).
      * The tracer takes the first WATERMARK after resent HOOK rows as the
      * table's end and probes the natives of the rows it has: a watermark
      * after a resend whose rows the full ring partly dropped would close
@@ -239,6 +317,11 @@ final class Watermarks {
      * the watermarks.
      */
     static void tick(Ring ring, Resync s) {
+        try {
+            doze(ring, s);
+        } catch (Throwable e) {
+            Hooks.dormant = false;   // in doubt, awake: costs walks, loses nothing
+        }
         try {
             resync(ring, s);
         } catch (Throwable e) {

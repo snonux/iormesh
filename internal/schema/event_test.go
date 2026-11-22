@@ -73,6 +73,16 @@ func TestEventRoundTrip(t *testing.T) {
 			e.Attribution, e.Java, e.HTTP, e.ConnID = AttributionNone, nil, nil, ""
 			return e
 		}(),
+		// Task nh4: a process already running at attach has no exec; its
+		// attach carries the redacted argv and exe /proc showed then.
+		"attach with argv": func() Event {
+			e := validEvent()
+			e.Event, e.FD, e.FDGen, e.Ret, e.Err = KindAttach, NoFD, 0, 0, ""
+			e.Args = Args{Path: ptr("/usr/bin/java"),
+				Argv: []string{"java", "-Dpassword=***", "Main"}}
+			e.Attribution, e.Java, e.HTTP, e.ConnID = AttributionNone, nil, nil, ""
+			return e
+		}(),
 		"marker": func() Event {
 			e := validEvent()
 			e.Event, e.FD, e.FDGen, e.Ret, e.Err = KindMarker, NoFD, 0, 0, ""
@@ -186,6 +196,10 @@ func TestEventValidateRejects(t *testing.T) {
 		"marker empty name":         func(e *Event) { e.Event, e.Args.Marker = KindMarker, ptr("") },
 		"tcp_state without state":   func(e *Event) { e.Event = KindTCPState },
 		"argv on a non-exec event":  func(e *Event) { e.Args.Argv = []string{"java"} },
+		"argv on a fork": func(e *Event) {
+			e.Event, e.FD, e.FDGen, e.Ret, e.Err = KindFork, NoFD, 0, 0, ""
+			e.Args, e.Attribution, e.Java, e.HTTP, e.ConnID = Args{Argv: []string{"java"}}, AttributionNone, nil, nil, ""
+		},
 		// M2 step 7's args stay with their kinds.
 		"signal without args.signal": func(e *Event) { e.Event = KindSignal },
 		"signal without a receiver": func(e *Event) {

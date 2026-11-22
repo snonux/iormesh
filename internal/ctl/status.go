@@ -78,7 +78,7 @@ func statusCommand(args []string, e env) error {
 	regPath := fs.String("registry", "", "registry file (default ~/.config/iormesh/servers.yaml)")
 	kf := addK8sFlags(fs, false)
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	r, err := loadRegistry(*regPath, e)
 	if err != nil {

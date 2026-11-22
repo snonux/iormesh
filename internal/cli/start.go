@@ -178,7 +178,7 @@ func (c control) parseStart(args []string) (startConfig, error) {
 	fs.StringVar(&cfg.memoryMax, "memory-max", defaultMemoryMax, "the unit's MemoryMax (bytes, K/M/G/T suffix)")
 	fs.DurationVar(&cfg.wait, "wait", defaultStartWait, "wait this long for the run to attach (0: do not wait)")
 	if err := fs.Parse(args); err != nil {
-		return cfg, fmt.Errorf("%w: %v", errUsage, err)
+		return cfg, fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() != 0 {
 		return cfg, fmt.Errorf("%w: unexpected argument %q", errUsage, fs.Arg(0))

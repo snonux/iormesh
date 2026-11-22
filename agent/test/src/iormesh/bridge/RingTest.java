@@ -62,7 +62,11 @@ public final class RingTest {
                 new AgentTests.Case("ring/partial resend holds watermarks",
                         RingTest::partialResend),
                 new AgentTests.Case("ring/old reader then new resyncs",
-                        RingTest::oldReaderThenNew));
+                        RingTest::oldReaderThenNew),
+                new AgentTests.Case("ring/unread full ring goes dormant", RingTest::dormant),
+                new AgentTests.Case("ring/new reader wakes the agent", RingTest::wakeByReader),
+                new AgentTests.Case("ring/dormant only when unread and full",
+                        RingTest::dormantNeedsBoth));
     }
 
     static void header() throws Exception {
@@ -889,6 +893,141 @@ public final class RingTest {
             Hooks.ring = null;
         }
         delete(dir);
+    }
+
+    /**
+     * Task ej4: a ring nobody reads that stayed full for dormantTicks
+     * ticks puts the agent to sleep — an enter then walks no stack and
+     * counts its bracket as dropped, depth still balanced — and the
+     * reader's next drain (the tail moved) wakes it through the resync
+     * path, after which enters walk again.
+     */
+    static void dormant() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger walks = dormancyRing();
+        Ring r = Hooks.ring;
+        try {
+            ByteBuffer b = map(r.path());
+            Watermarks.Resync s = new Watermarks.Resync();
+            s.dormantTicks = 2;
+            bracket();
+            equal(1, walks.get(), "awake: the enter walks");
+            fillUp(r);
+            Watermarks.tick(r, s);
+            check(!Hooks.dormant, "one full tick is not enough");
+            Watermarks.tick(r, s);
+            check(Hooks.dormant, "unread and full for two ticks: dormant");
+            long lost = b.getLong(Ring.DROPPED + 8 * Ring.BRACKET);
+            bracket();
+            equal(1, walks.get(), "a dormant enter walks no stack");
+            equal(lost + 1, b.getLong(Ring.DROPPED + 8 * Ring.BRACKET),
+                    "its bracket counted as dropped");
+            equal(0, Hooks.depth(), "balanced");
+            int g = Hooks.generation;
+            setHeader(r.path(), Ring.TAIL, b.getLong(Ring.HEAD));   // the reader drained
+            Watermarks.tick(r, s);
+            check(!Hooks.dormant, "awake once the tail moved");
+            equal(g + 1, Hooks.generation, "woken through a resync");
+            bracket();
+            equal(2, walks.get(), "the enter walks again");
+        } finally {
+            endDormancy();
+        }
+        delete(dir(r));
+    }
+
+    /** A dormant agent wakes when a new reader bumps the epoch (task 5j4). */
+    static void wakeByReader() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger walks = dormancyRing();
+        Ring r = Hooks.ring;
+        try {
+            Watermarks.Resync s = new Watermarks.Resync();
+            s.dormantTicks = 1;
+            fillUp(r);
+            Watermarks.tick(r, s);
+            check(Hooks.dormant, "dormant");
+            setEpoch(r.path(), 2);
+            Watermarks.tick(r, s);
+            check(!Hooks.dormant, "a new reader woke it");
+            bracket();
+            equal(1, walks.get(), "the enter walks");
+        } finally {
+            endDormancy();
+        }
+        delete(dir(r));
+    }
+
+    /**
+     * Neither an unread ring with room (an idle reader-less JVM whose
+     * records still land) nor a full ring whose reader keeps draining
+     * puts the agent to sleep.
+     */
+    static void dormantNeedsBoth() throws Exception {
+        dormancyRing();
+        Ring r = Hooks.ring;
+        try {
+            Watermarks.Resync s = new Watermarks.Resync();
+            s.dormantTicks = 2;
+            for (int i = 0; i < 5; i++) {
+                Watermarks.tick(r, s);
+            }
+            check(!Hooks.dormant, "room left: awake");
+            ByteBuffer b = map(r.path());
+            for (int i = 0; i < 5; i++) {
+                fillUp(r);
+                setHeader(r.path(), Ring.TAIL, b.getLong(Ring.TAIL) + Ring.WATERMARK_LEN);
+                Watermarks.tick(r, s);
+            }
+            check(!Hooks.dormant, "a draining reader: awake");
+        } finally {
+            endDormancy();
+        }
+        delete(dir(r));
+    }
+
+    /**
+     * Opens a fresh ring in Hooks and counts the stack walks of its
+     * enters through the stacks seam.
+     */
+    private static java.util.concurrent.atomic.AtomicInteger dormancyRing() throws IOException {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        Hooks.configure(5, true, false);
+        Hooks.openRing(dir.toString(), Ring.MIN_CAPACITY);
+        java.util.concurrent.atomic.AtomicInteger walks =
+                new java.util.concurrent.atomic.AtomicInteger();
+        Hooks.stacks = () -> {
+            walks.incrementAndGet();
+            return StackIds.NONE;
+        };
+        return walks;
+    }
+
+    /**
+     * Undoes dormancyRing: no ring, awake, walking again; and this thread
+     * undescribed, so a later test's ring gets its THREAD first, as it
+     * would after the resync tests (HttpHooksTest relies on that).
+     */
+    private static void endDormancy() {
+        Hooks.ring = null;
+        Hooks.dormant = false;
+        Hooks.configure(5, true, false);
+        Hooks.state().described = null;
+    }
+
+    private static Path dir(Ring r) {
+        return r.path().getParent();
+    }
+
+    /**
+     * Writes BRACKETs, then WATERMARKs, until the ring drops one of each:
+     * full even for the watermark thread's own records.
+     */
+    private static void fillUp(Ring r) {
+        while (r.bracket(1, 1, 0, 0, 0, 0)) {
+            // until full
+        }
+        while (r.watermark(0)) {
+            // until full for the smallest record too
+        }
     }
 
     /**

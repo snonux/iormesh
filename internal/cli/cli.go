@@ -30,6 +30,7 @@ package cli
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 
@@ -109,11 +110,16 @@ func Main(args []string, stdout, stderr io.Writer) int {
 }
 
 // report maps an error to its exit code; code is the command's own result
-// when it ran to completion.
+// when it ran to completion. `SUBCMD -h` is a request, not a mistake
+// (task vh4): the flag set has printed that subcommand's help, so
+// flag.ErrHelp exits 0 with nothing added — no "flag: help requested"
+// line, no full usage. Every flag parse wraps its error with %w for this.
 func report(err error, code int, stderr io.Writer) int {
 	switch {
 	case err == nil:
 		return code
+	case errors.Is(err, flag.ErrHelp):
+		return exitOK
 	case errors.Is(err, errUsage):
 		_, _ = fmt.Fprintf(stderr, "iormesh: %v\n", err)
 		usage(stderr)

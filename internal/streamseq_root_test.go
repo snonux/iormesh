@@ -15,6 +15,8 @@ import (
 	ibpf "iormesh/internal/bpf"
 	"iormesh/internal/correlate"
 	"iormesh/internal/schema"
+
+	"golang.org/x/sys/unix"
 )
 
 // args.tcp_seq (M4 "Clock reconciliation", task xe4) from the real kernel:
@@ -27,7 +29,9 @@ import (
 // the seven data calls against the bytes moved and the ISNs; the
 // concurrent senders test checks that a sequence number, when given, names
 // exactly the calling thread's bytes; the folded test that a folded record
-// never carries one. Root only.
+// never carries one; the fin test that the read which also consumes the
+// peer's FIN carries one, and its negative that a read skipping an urgent
+// byte does not. Root only.
 
 // seqSyscalls are the syscalls these tests attach, enter and exit.
 var seqSyscalls = []string{"connect", "write", "read", "writev", "readv", "sendto", "recvfrom",
@@ -249,6 +253,83 @@ func TestStreamSeqValues(t *testing.T) {
 		if !hasKind(evs, kind) {
 			t.Errorf("no %s event on the socket", kind)
 		}
+	}
+}
+
+// TestStreamSeqFinRead: the peer writes its bytes and closes; the child's
+// one read drains the data and consumes the FIN, which moves copied_seq one
+// past the data (tcp_recvmsg's found_fin_ok). The read still carries the
+// sequence number of its first byte: the server's ISS + 1 (task wi4).
+func TestStreamSeqFinRead(t *testing.T) {
+	requireRoot(t)
+	child := startSeqChild(t, seqScenarioFin)
+	log := collectRecords(openSeqTracer(t, child.pid(), false))
+	child.start(t)
+	if _, err := child.conn.Write(make([]byte, seqFinBytes)); err != nil {
+		t.Fatalf("send to the child: %v", err)
+	}
+	if err := child.conn.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	r := child.result(t)
+	evs := log.events(t, child.pid(), r.Fd)
+	_, rcvNxt := established(t, evs)
+	checkRanges(t, "receives", evs, schema.IsStreamReceive, rcvNxt, []int{seqFinBytes})
+}
+
+// TestStreamSeqUrgentSkipNoSeq is the negative of TestStreamSeqFinRead: a
+// read that skips an urgent byte also moves copied_seq one past what it
+// returns, and even ends at rcv_nxt, but no FIN arrived, so its bytes are
+// not contiguous and it must carry no tcp_seq. The read before it, which
+// stops at the urgent mark, carries the server's ISS + 1 (task wi4).
+func TestStreamSeqUrgentSkipNoSeq(t *testing.T) {
+	requireRoot(t)
+	child := startSeqChild(t, seqScenarioUrgent)
+	log := collectRecords(openSeqTracer(t, child.pid(), false))
+	child.start(t)
+	sendUrgentStream(t, child.conn)
+	r := child.result(t)
+	evs := log.events(t, child.pid(), r.Fd)
+	_, rcvNxt := established(t, evs)
+	var reads []schema.Event
+	for _, e := range evs {
+		if schema.IsStreamReceive(e.Event) && e.Bytes > 0 {
+			reads = append(reads, e)
+		}
+	}
+	if len(reads) != 2 {
+		t.Fatalf("%d receives with bytes, want 2", len(reads))
+	}
+	if s := reads[0].Args.TCPSeq; s == nil || *s != rcvNxt {
+		t.Errorf("read up to the urgent mark: tcp_seq %v, want %#x", s, rcvNxt)
+	}
+	if s := reads[1].Args.TCPSeq; s != nil {
+		t.Errorf("read past the urgent byte carries tcp_seq %#x, want none", *s)
+	}
+}
+
+// sendUrgentStream writes seqUrgentChunk bytes, one urgent byte and
+// seqUrgentChunk bytes more to conn, pausing so each goes out on its own.
+func sendUrgentStream(t *testing.T, conn *net.TCPConn) {
+	t.Helper()
+	raw, err := conn.SyscallConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write(make([]byte, seqUrgentChunk)); err != nil {
+		t.Fatalf("send to the child: %v", err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	var sendErr error
+	if err := raw.Write(func(fd uintptr) bool {
+		sendErr = unix.Send(int(fd), []byte{'!'}, unix.MSG_OOB)
+		return true
+	}); err != nil || sendErr != nil {
+		t.Fatalf("send the urgent byte: %v %v", err, sendErr)
+	}
+	time.Sleep(5 * time.Millisecond)
+	if _, err := conn.Write(make([]byte, seqUrgentChunk)); err != nil {
+		t.Fatalf("send to the child: %v", err)
 	}
 }
 

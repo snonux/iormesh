@@ -45,7 +45,7 @@ func readyIn(root string, args []string, stdout, stderr io.Writer) error {
 	status := fs.Bool(strings.TrimPrefix(k8s.ReadyStatusFlag, "-"), false,
 		"print the session's status report as JSON instead of streaming")
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if !project.Valid(*name) {
 		return fmt.Errorf("%w: -project %q: %s", errUsage, *name, project.Rule)

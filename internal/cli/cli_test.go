@@ -25,12 +25,16 @@ func fakeProcs(t *testing.T, pids ...uint32) {
 	for _, p := range pids {
 		live[p] = true
 	}
-	origAlive, origIdentity, origEnv := processAlive, processIdentity, podEnv
+	origAlive, origIdentity, origCommand, origEnv := processAlive, processIdentity, procCommand, podEnv
 	processAlive = func(pid uint32, _ uint64) bool { return live[pid] }
 	processIdentity = func(uint32) correlate.Identity { return correlate.Identity{Comm: "x", StartNS: 1} }
+	// No command lines: the real /proc must not lend a fake pid one.
+	procCommand = func(uint32, uint64) ([]string, string, bool) { return nil, "", false }
 	// No pod: the test's own environment must not supply a -project.
 	podEnv = func(string) string { return "" }
-	t.Cleanup(func() { processAlive, processIdentity, podEnv = origAlive, origIdentity, origEnv })
+	t.Cleanup(func() {
+		processAlive, processIdentity, procCommand, podEnv = origAlive, origIdentity, origCommand, origEnv
+	})
 }
 
 func TestParseRunFlags(t *testing.T) {
@@ -181,6 +185,37 @@ func TestMainDispatch(t *testing.T) {
 		if got := Main(c.args, &out, &errOut); got != c.want {
 			t.Errorf("Main(%q) = %d, want %d", c.args, got, c.want)
 		}
+	}
+}
+
+// TestSubcommandHelpExitsZero pins task vh4: `SUBCMD -h` (and --help)
+// is a request, not an error. It exits 0 and prints only that
+// subcommand's flags — no "flag: help requested" line and no full
+// usage after them. Parsing comes first in every subcommand, so none
+// of these touches systemd, a JVM or the trace root.
+func TestSubcommandHelpExitsZero(t *testing.T) {
+	for _, name := range []string{"run", "normalize", "attach", "start", "stop", "status", "uninstall",
+		"upgrade", "ready"} {
+		for _, h := range []string{"-h", "--help"} {
+			var out, errOut bytes.Buffer
+			code := Main([]string{name, h}, &out, &errOut)
+			all := out.String() + errOut.String()
+			if code != exitOK {
+				t.Errorf("%s %s: exit %d, want 0; output %q", name, h, code, all)
+			}
+			if strings.Contains(all, "help requested") || strings.Contains(all, "usage:\n") {
+				t.Errorf("%s %s: printed more than the subcommand's help: %q", name, h, all)
+			}
+			if !strings.Contains(errOut.String(), "Usage of "+name) {
+				t.Errorf("%s %s: no subcommand help on stderr: %q", name, h, errOut.String())
+			}
+		}
+	}
+	// An unknown flag stays a usage error, with the full usage.
+	var out, errOut bytes.Buffer
+	if code := Main([]string{"status", "-nope"}, &out, &errOut); code != exitUsage ||
+		!strings.Contains(errOut.String(), "usage:\n") {
+		t.Errorf("status -nope: exit %d, stderr %q", code, errOut.String())
 	}
 }
 

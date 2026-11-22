@@ -64,7 +64,7 @@ func queryCommand(args []string, e env) error {
 	var f queryFlags
 	addQueryFlags(fs, &f)
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%w: query takes no arguments", errUsage)
@@ -115,12 +115,12 @@ func parseQueryFilter(f queryFlags) (query.Filter, *query.TimeSpec, *query.TimeS
 		}
 		t, err := query.ParseTime(s)
 		if err != nil {
-			return query.Filter{}, nil, nil, fmt.Errorf("%w: %v", errUsage, err)
+			return query.Filter{}, nil, nil, fmt.Errorf("%w: %w", errUsage, err)
 		}
 		specs[i] = &t
 	}
 	if err := filter.Validate(); err != nil {
-		return query.Filter{}, nil, nil, fmt.Errorf("%w: %v", errUsage, err)
+		return query.Filter{}, nil, nil, fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if f.maxBytes < query.MinMaxBytes() {
 		return query.Filter{}, nil, nil, fmt.Errorf("%w: -max-bytes %d is below %d, the truncation record's size",
@@ -145,7 +145,7 @@ func parseValueFlags(f queryFlags, filter *query.Filter) error {
 	if f.errno != "" {
 		name, err := query.ParseErrno(f.errno)
 		if err != nil {
-			return fmt.Errorf("%w: %v", errUsage, err)
+			return fmt.Errorf("%w: %w", errUsage, err)
 		}
 		filter.Errno = name
 	}
@@ -204,13 +204,13 @@ func resolveWindow(filter *query.Filter, sources []*federate.Segment, from, to *
 		}
 		v, err := t.spec.Resolve(day)
 		if err != nil {
-			return fmt.Errorf("%w: %v", errUsage, err)
+			return fmt.Errorf("%w: %w", errUsage, err)
 		}
 		*t.dst = v
 	}
 	filter.HasTo = to != nil
 	if err := filter.Validate(); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	return nil
 }

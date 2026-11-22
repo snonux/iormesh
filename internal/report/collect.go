@@ -153,6 +153,12 @@ func (c *Collector) add(src Source, ev *schema.Event) bool {
 		if ev.Args.Pattern != nil {
 			p.p.App = *ev.Args.Pattern
 		}
+		// A process already running at attach has no exec: its attach
+		// carries the argv /proc showed then (task nh4). It comes before
+		// any exec of the process, which replaces it.
+		if len(ev.Args.Argv) > 0 {
+			p.p.Argv = append([]string(nil), ev.Args.Argv...)
+		}
 	}
 	if ev.ConnID != "" {
 		ok = c.conn(p, ev) && ok

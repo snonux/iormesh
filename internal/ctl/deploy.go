@@ -111,7 +111,7 @@ func deployCommand(args []string, e env) error {
 		"how long to wait for each pod's debug tracer to attach its probes")
 	kf := addK8sFlags(fs, true)
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() == 0 {
 		return fmt.Errorf("%w: deploy needs one or more HOSTs or pod entries", errUsage)

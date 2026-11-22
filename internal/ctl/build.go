@@ -118,6 +118,19 @@ func addBuildFlags(fs *flag.FlagSet, f *buildFlags) {
 	fs.StringVar(&f.builds, "builds", "", "build outputs (default ~/.local/share/iormesh/builds)")
 }
 
+// addReadBuildFlags registers the same flags for show, open and tui,
+// which read a build and never write one: their -project picks which
+// build, and -db is accepted but unused (task vh4 fixed the help, which
+// said "build only this project").
+func addReadBuildFlags(fs *flag.FlagSet, f *buildFlags) {
+	addBuildFlags(fs, f)
+	fs.Lookup("project").Usage = "read the build of this project (repeatable, the set build -project made; " +
+		"default: every project in the store)"
+	fs.Lookup("store").Usage = "local trace store, listed for the default project set " +
+		"(default ~/.local/share/iormesh/traces)"
+	fs.Lookup("db").Usage = "accepted and unused: the build already holds what the database gave it"
+}
+
 // buildCommand parses build's flags and builds.
 func buildCommand(args []string, e env) error {
 	fs := newFlagSet("build", e.stderr)
@@ -125,7 +138,7 @@ func buildCommand(args []string, e env) error {
 	addBuildFlags(fs, &f)
 	addRoutesFlag(fs, &f)
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%w: build takes no arguments", errUsage)

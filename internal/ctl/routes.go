@@ -112,8 +112,14 @@ type routesFlags struct {
 	ingressService        string      // the ingress controller's Service
 }
 
-// routesCommand runs `iormeshctl routes discover`.
+// routesCommand runs `iormeshctl routes discover`. discover is routes'
+// only verb, so `routes -h` (or --help) is help on it: the discover flag
+// set prints its flags and the parse's flag.ErrHelp exits 0 (task vh4),
+// where any other word is still a usage error.
 func routesCommand(args []string, e env) error {
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "-help" || args[0] == "--help") {
+		args = append([]string{"discover"}, args...)
+	}
 	if len(args) == 0 || args[0] != "discover" {
 		return fmt.Errorf("%w: routes takes the subcommand discover", errUsage)
 	}
@@ -126,7 +132,7 @@ func routesCommand(args []string, e env) error {
 	fs.StringVar(&f.ingressService, "ingress-service", "",
 		"the ingress controller's own Service, NAMESPACE/NAME, put on discovered routes")
 	if err := fs.Parse(args[1:]); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%w: routes discover takes no arguments", errUsage)

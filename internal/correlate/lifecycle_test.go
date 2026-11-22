@@ -488,3 +488,58 @@ func TestForkAndAttachEvents(t *testing.T) {
 		t.Fatalf("events\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+// TestAttachRecordsRedactedArgv (task nh4): a process already running at
+// attach has no exec, so its attach carries the argv and executable the
+// caller read from /proc, redacted by the correlator's policy before the
+// event exists (as Exec does) — for a -pid target and a pattern's
+// start-scan match alike. An identity without them (/proc unreadable, a
+// pattern's exec adoption, whose Exec follows) leaves both absent; a cut
+// argv (a bounded read) has its partial last element masked whole. No
+// event or graph node holds the secret, and the caller's argv is not
+// modified.
+func TestAttachRecordsRedactedArgv(t *testing.T) {
+	c, sink := newTest(t)
+	argv := []string{"java", "-Dpassword=hunter2", "-jar", "/srv/app.jar", "--token", "hunter2"}
+	id := testIdentity(1)
+	id.Argv, id.Exe = argv, "/x/https://u:hunter2@h/java"
+	if err := c.Seed(1, id); err != nil {
+		t.Fatal(err)
+	}
+	id2 := testIdentity(2)
+	id2.Argv = []string{"app", "--password", "hunter2"}
+	if err := c.Incarnation("*app*", 2, id2, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Seed(3, testIdentity(3)); err != nil {
+		t.Fatal(err)
+	}
+	id4 := testIdentity(4) // a bounded read cut inside a URL's password
+	id4.Argv, id4.ArgvCut = []string{"app", "--url", "https://u:secr"}, true
+	if err := c.Seed(4, id4); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got := []string{}
+	for _, e := range byKind(sink.events, schema.KindAttach) {
+		a, _ := json.Marshal(e.Args)
+		got = append(got, fmt.Sprintf("%d %s %s", e.PID, e.Comm, a))
+	}
+	want := []string{
+		`1 proc1 {"path":"/x/https://u:***@h/java","argv":["java","-Dpassword=***","-jar","/srv/app.jar","--token","***"]}`,
+		`2 proc2 {"argv":["app","--password","***"],"pattern":"*app*"}`,
+		`3 proc3 {}`,
+		`4 proc4 {"argv":["app","--url","***"]}`,
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("attach events\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if argv[1] != "-Dpassword=hunter2" {
+		t.Fatal("attach modified the caller's argv")
+	}
+	if b, _ := json.Marshal(c.Graph()); strings.Contains(string(b), "hunter2") {
+		t.Fatalf("graph holds the secret: %s", b)
+	}
+}

@@ -42,7 +42,8 @@ const (
 	// args.argv the new program's argv, redacted by internal/redact
 	// (decision #9; env is never captured). The exec through which a
 	// pattern session found its target counts too; a process already
-	// running when the trace attached has none.
+	// running when the trace attached has none (its attach carries the
+	// argv /proc showed then, task nh4).
 	KindExec = "exec"
 	// KindFork is a new process of a traced one (task_newtask without
 	// CLONE_THREAD, M2 step 1), written on the child: pid,
@@ -57,8 +58,11 @@ const (
 	// or port target at session start, or a process a -pattern session
 	// matched (then args.pattern is the session's pattern, and the
 	// process an incarnation of the app it names, AppNodeID). Its
-	// identity is the one read when the session took it on. Appended in
-	// M4 (task ze4).
+	// identity is the one read when the session took it on. A process
+	// already running then (a -pid or port target, a pattern's start-scan
+	// match) also carries the executable (args.path) and command line
+	// (args.argv) /proc showed, redacted like an exec's (task nh4); each
+	// is absent when /proc could not be read. Appended in M4 (task ze4).
 	KindAttach = "attach"
 )
 

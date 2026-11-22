@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"iormesh/internal/federate"
@@ -271,6 +273,26 @@ func TestReportNoMethodWithoutTable(t *testing.T) {
 				t.Errorf("%s: %+v", f.Path, f.Methods)
 			}
 		}
+	}
+}
+
+// TestReportAttachArgv (task nh4): a process already running at attach
+// has no exec; its argv is the one its attach carries, and an exec after
+// that replaces it (the command line it runs now). One with neither has
+// none.
+func TestReportAttachArgv(t *testing.T) {
+	tr := &trace{host: "h1"}
+	tr.add(10, 10, schema.KindAttach, schema.NoFD, 0, "", schema.Args{Argv: []string{"java", "-jar", "a.jar"}}, nil)
+	tr.add(20, 20, schema.KindAttach, schema.NoFD, 0, "", schema.Args{Argv: []string{"sh", "run.sh"}}, nil)
+	tr.add(20, 20, schema.KindExec, schema.NoFD, 0, "", schema.Args{Argv: []string{"java", "Main"}}, nil)
+	tr.add(30, 30, schema.KindAttach, schema.NoFD, 0, "", schema.Args{}, nil)
+	got := map[uint32]string{}
+	for _, p := range Build(collect(tr, 0), Input{}).Processes {
+		got[p.PID] = strings.Join(p.Argv, " ")
+	}
+	want := map[uint32]string{10: "java -jar a.jar", 20: "java Main", 30: ""}
+	if !maps.Equal(got, want) {
+		t.Fatalf("argv %v, want %v", got, want)
 	}
 }
 

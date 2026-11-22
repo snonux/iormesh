@@ -17,15 +17,17 @@ import "strings"
 // 7; native stacks, M2 step 9; the Java mark's uprobes on a running JVM, M3
 // task td4, kept on a read the fold held, task ti4; no skipped runs on a
 // shared CPU, task 8e4; the tcp_sock
-// sequence fields, M4 task ve4; the data calls' tcp_seq, M4 task xe4; a
-// tracer in its own PID namespace, M7 task 4f4; a stale socket owner after
-// a lost TCP_CLOSE run, and a pod-mode connect's state records, task if4;
-// a thread's and a process's exit told apart, the el9 signal->live
-// fallback included, task nf4; a call on fd -1 before and after a fork
-// and exec, task mf4; the key a CLOSE record rebuilds after an RST abort,
-// and a dual-stack bound connect kept on one connection, task qf4; the
-// raw_syscalls record relocated against el9 BTF on any kernel, and a
-// traced loop seen as several syscall kinds, task of4; the final counter
+// sequence fields, M4 task ve4; the data calls' tcp_seq, M4 task xe4, the
+// read that consumes the peer's FIN included and one skipping an urgent
+// byte excluded, task wi4; a tracer in its own PID namespace, M7 task 4f4;
+// a stale socket owner after a lost TCP_CLOSE run, and a pod-mode
+// connect's state records, task if4; a thread's and a process's exit told
+// apart, the el9 signal->live fallback included, task nf4; a call on fd -1
+// before and after a fork and exec, task mf4; the key a CLOSE record
+// rebuilds after an RST abort, and a dual-stack bound connect kept on one
+// connection, task qf4; the raw_syscalls record relocated against el9 BTF
+// on any kernel, the data handlers too since task wi4, and a traced loop
+// seen as several syscall kinds, task of4; the final counter
 // snapshot of a socket still open at the session's end, task sf4; a
 // prctl(PR_SET_NAME) rename reflected in the process's comm, task 0g4). They
 // skip for anybody but root, so `mage test` passes them by, and `mage
@@ -64,6 +66,8 @@ func RootBPFTests() []string {
 		"TestStreamSeqValues",
 		"TestStreamSeqConcurrentSenders",
 		"TestStreamSeqFolded",
+		"TestStreamSeqFinRead",
+		"TestStreamSeqUrgentSkipNoSeq",
 		"TestPidNSTracerConfined",
 		"TestProcessExitGroupDead",
 		"TestPidNSConnectEstablished",

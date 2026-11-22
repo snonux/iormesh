@@ -60,7 +60,9 @@ type Process struct {
 	Comm        string `json:"comm"`
 	// App is the target pattern its session took it on by ("" for -pid
 	// and port sessions); Argv its last exec's command line, redacted
-	// by the tracer (none when it was running before the trace).
+	// by the tracer — for a process running before the trace with no
+	// exec since, the one its attach carries (task nh4); none when /proc
+	// could not be read then.
 	App  string   `json:"app"`
 	Argv []string `json:"argv"`
 	// Serves lists the endpoint labels it accepted connections on (a

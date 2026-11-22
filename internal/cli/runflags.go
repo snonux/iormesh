@@ -104,6 +104,28 @@ var processIdentity = func(pid uint32) correlate.Identity {
 	return correlate.Identity{Comm: comm, StartNS: start}
 }
 
+// procCommand reads the argv (bounded, cut says its last element is a
+// fragment) and executable of pid while it is still the incarnation that
+// started at startNS (target.ProcFS.Command), both empty when they
+// cannot be read. A variable like processAlive.
+var procCommand = func(pid uint32, startNS uint64) ([]string, string, bool) {
+	return target.HostProcFS().Command(pid, startNS)
+}
+
+// attachIdentity is processIdentity plus the command line and executable
+// of a process already running when the session takes it on (task nh4):
+// a -pid or port target at start, a pattern's start-scan match. It has
+// no exec event to carry them, so the correlator puts them, redacted, on
+// its attach (correlate.Identity). A process adopted by its exec does
+// not need it: the exec event follows.
+func attachIdentity(pid uint32) correlate.Identity {
+	id := processIdentity(pid)
+	if id.StartNS != 0 {
+		id.Argv, id.Exe, id.ArgvCut = procCommand(pid, id.StartNS)
+	}
+	return id
+}
+
 // processStart returns pid's start time (processIdentity), 0 when it
 // cannot be read.
 func processStart(pid uint32) uint64 {
@@ -133,7 +155,7 @@ func parseRunFlags(args []string, stderr io.Writer) (runConfig, error) {
 		"after the session ends (BPF freed, last segment published), wait for SIGTERM instead of exiting, "+
 			"so a pod's tracer container stays enterable for `iormesh ready`")
 	if err := fs.Parse(args); err != nil {
-		return runConfig{}, fmt.Errorf("%w: %v", errUsage, err)
+		return runConfig{}, fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() != 0 {
 		return runConfig{}, fmt.Errorf("%w: unexpected argument %q", errUsage, fs.Arg(0))

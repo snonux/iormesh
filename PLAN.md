@@ -869,6 +869,18 @@ Kubernetes (M7) build on it.
   Linux or macOS — with no eBPF and no cgo at all
   (cross-compiled darwin/linux, amd64/arm64; the merge and
   render packages stay cgo-free).
+- **Command-line conventions** (both binaries, `iormesh` and
+  `iormeshctl`; task vh4): exit 0 on success, 1 when the command
+  failed, 2 on a usage error (an unknown subcommand or flag, a
+  missing argument — printed with the full usage); the tracer's
+  `normalize -check` adds 3 for golden violations. `help`, `-h`
+  and `--help` print the full usage to stdout and exit 0;
+  `SUBCMD -h` (or `--help`) is a request too: it prints only that
+  subcommand's flags (stderr, Go's flag format) and exits 0 —
+  never 2, never followed by "flag: help requested" or the full
+  usage. The full usage names every subcommand, verb, view and
+  flag; a test holds `iormeshctl`'s text to its registered
+  subcommands and flag sets, so it cannot drift.
 - **Server registry**: `iormeshctl add HOSTNAME` / `rm HOSTNAME`
   manage the list automatically (kept in the controller's
   config, e.g. `~/.config/iormesh/servers.yaml`). Only
@@ -1186,10 +1198,11 @@ Kubernetes (M7) build on it.
   call's first byte; the tracer fills it since task xe4: the
   socket's `write_seq`/`copied_seq` read at the call's enter
   and again at its exit, given only when the two differ by
-  exactly the call's return — so concurrent senders or readers
-  on one socket, MSG_PEEK, kTLS and the like give none, never a
-  guess; one ring record per call as before, the exit record
-  carrying it; decision #25's burst figure unchanged, +3 %
+  exactly the call's return, or by one more for a receive that
+  also consumes the peer's FIN, task wi4 — so concurrent
+  senders or readers on one socket, MSG_PEEK, kTLS and the like
+  give none, never a guess; one ring record per call as
+  before, the exit record carrying it; decision #25's burst figure unchanged, +3 %
   tracer instructions per TCP data event — s3-overhead.md,
   "Follow-up (xe4)"),
   the SYN adds one client→server edge (connect enter before
@@ -2614,11 +2627,18 @@ deferred.
   an older agent never reads it and an older tracer never bumps
   it, so the format version stays and either mix behaves as
   before (a later session on an older agent stays attribution
-  none). A ring lives as long as its JVM, not as long as a
-  session (task 2j4): the agent unlinks its own ring in its
-  shutdown hook after the last watermark (a tracer reading it
-  has it mapped); the Java join retires a JVM once its
-  group-dead exit was handled and nothing can ask for its ring
+  none). Between sessions the agent goes dormant (task ej4): when
+  the tail stood still for 10 s while the ring kept dropping and
+  the epoch did not move, the watermark thread sets a flag the
+  hooks read first among their work (one volatile read when
+  awake); a dormant hook walks no stack and runs no probe, and
+  counts its record as dropped in the header, as the full ring
+  would. A moving tail or epoch, or a repeated load, wakes it
+  through the same resync as a new reader. A ring lives as long
+  as its JVM, not as long as a session (task 2j4): the agent
+  unlinks its own ring in its shutdown hook after the last
+  watermark (a tracer reading it has it mapped); the Java join
+  retires a JVM once its group-dead exit was handled and nothing can ask for its ring
   (the fuse window plus the join timeout past the exit, none of
   its events held): a last drain, then close and unlink; and the
   spool scan unlinks a ring whose process is gone (SIGKILL, or
@@ -2689,7 +2709,16 @@ deferred.
   `user/password@` (task zi4); every exec of a traced process
   becomes an `exec` event carrying its redacted argv, and the
   environment is never read. A process already running when the
-  trace attaches has no exec, so its argv is not recorded (yet).
+  trace attaches (a `-pid` or port target, a pattern's start-scan
+  match) has no exec; task nh4 records its argv and executable on
+  its `attach` event instead, read from `/proc/<pid>/cmdline` and
+  `/proc/<pid>/exe` at attach, checked against the start time
+  seeded, and redacted by the same policy before the event
+  exists. An unreadable `/proc` (process gone, hidepid, another
+  pid namespace) leaves both absent and never fails the attach.
+  Every `/proc` command line read for an event (this one, an
+  exec's completion) is bounded at 64 KiB, its cut last element
+  masked, so no event line nears the readers' 1 MiB cap.
 
 ### Open — raised for M3 (built on the default)
 

@@ -4,16 +4,18 @@
 //	iormeshctl rm [-project NAME] [-registry FILE] [-store DIR] [-force] [K8S] HOST|POD
 //	iormeshctl collect [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [K8S] [HOST|POD...]
 //	iormeshctl deploy [-project NAME] [-registry FILE] [-dist DIR] [-key FILE] [-restart] [K8S]
-//	                  [-image IMG] [-attach-timeout D] HOST|POD...
+//	                  [-image IMG] [-selinux-type TYPE] [-selinux-level LEVEL] [-attach-timeout D]
+//	                  HOST|POD...
 //	iormeshctl status [-project NAME]... [-registry FILE] [K8S] [HOST|POD...]
 //	iormeshctl list [-registry FILE]
 //	iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-routes FILE]
 //	                 [-registry FILE]
 //	iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR] [K8S]
 //	                   [HOST|POD...]
-//	iormeshctl show [summary|services|edges|health] [-project NAME]... [-json] [-unresolved]
-//	iormeshctl open [-project NAME]... [-builds DIR]
-//	iormeshctl tui [-project NAME]... [-builds DIR]
+//	iormeshctl show [summary|services|edges|health|conversations|sequence [ID]|thread [SERVICE/THREAD]|
+//	                processes|report] [-project NAME]... [-store DIR] [-builds DIR] [-json] [-unresolved]
+//	iormeshctl open [-project NAME]... [-store DIR] [-builds DIR]
+//	iormeshctl tui [-project NAME]... [-store DIR] [-builds DIR]
 //	iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
 //	                 [-apply [-dist DIR] [-key FILE]]
 //	iormeshctl query [-project NAME]... [-from T] [-to T] [-host GLOB] [-app GLOB] [-thread GLOB]
@@ -22,6 +24,10 @@
 //	iormeshctl services [list|edges|name|rules|unname] [-db FILE] ...
 //	iormeshctl verify [-key FILE] FILE...
 //	iormeshctl version
+//
+// usage() below is the full text, held to every subcommand and flag by
+// TestUsageNamesEverySubcommandAndFlag; `SUBCMD -h` prints only that
+// subcommand's flags and exits 0 (task vh4).
 //
 // K8S is -context CTX and -namespace NS, and POD a registry pods: entry's
 // reference, <cluster>/<namespace>/<pod or selector>: deploy, collect,
@@ -56,6 +62,7 @@ package ctl
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -210,57 +217,48 @@ func interruptContext() (context.Context, context.CancelFunc) {
 	return ctx, stop
 }
 
+// commands are the subcommands run dispatches to, by name: a table, not
+// a switch, so TestUsageNamesEverySubcommandAndFlag holds the usage text
+// to every subcommand there is (task vh4). version and help only print,
+// so run answers them itself.
+var commands = map[string]func([]string, env) error{
+	"add":        addCommand,
+	"rm":         rmCommand,
+	"collect":    collectCommand,
+	"deploy":     deployCommand,
+	"status":     statusCommand,
+	"list":       listCommand,
+	"build":      buildCommand,
+	"refresh":    refreshCommand,
+	"show":       showCommand,
+	"open":       openCommand,
+	"expand":     expandCommand,
+	"query":      queryCommand,
+	"tui":        tuiCommand,
+	checkCommand: checkSegmentCommand, // build's child, not for operators (check.go)
+	"services":   servicesCommand,
+	"routes":     routesCommand,
+	"verify":     verifyCommand,
+}
+
 func run(args []string, e env) int {
 	if len(args) == 0 {
 		usage(e.stderr)
 		return exitUsage
 	}
-	var err error
 	switch args[0] {
-	case "add":
-		err = addCommand(args[1:], e)
-	case "rm":
-		err = rmCommand(args[1:], e)
-	case "collect":
-		err = collectCommand(args[1:], e)
-	case "deploy":
-		err = deployCommand(args[1:], e)
-	case "status":
-		err = statusCommand(args[1:], e)
-	case "list":
-		err = listCommand(args[1:], e)
-	case "build":
-		err = buildCommand(args[1:], e)
-	case "refresh":
-		err = refreshCommand(args[1:], e)
-	case "show":
-		err = showCommand(args[1:], e)
-	case "open":
-		err = openCommand(args[1:], e)
-	case "expand":
-		err = expandCommand(args[1:], e)
-	case "query":
-		err = queryCommand(args[1:], e)
-	case "tui":
-		err = tuiCommand(args[1:], e)
-	case checkCommand: // build's child, not for operators (check.go)
-		err = checkSegmentCommand(args[1:], e)
-	case "services":
-		err = servicesCommand(args[1:], e)
-	case "routes":
-		err = routesCommand(args[1:], e)
-	case "verify":
-		err = verifyCommand(args[1:], e)
 	case "version", "-version", "--version":
 		_, _ = fmt.Fprintln(e.stdout, "iormeshctl", safe(version.Stamped())) // keeps version.Stamp linked in
 		return exitOK
 	case "help", "-h", "--help":
 		usage(e.stdout)
 		return exitOK
-	default:
-		err = fmt.Errorf("%w: unknown subcommand %q", errUsage, args[0])
 	}
-	return exitCodeOf(interrupted(e.root(), err), e.stderr)
+	cmd, ok := commands[args[0]]
+	if !ok {
+		return exitCodeOf(fmt.Errorf("%w: unknown subcommand %q", errUsage, args[0]), e.stderr)
+	}
+	return exitCodeOf(interrupted(e.root(), cmd(args[1:], e)), e.stderr)
 }
 
 // interrupted marks a command's failure as the interrupt's once the
@@ -273,10 +271,14 @@ func interrupted(ctx context.Context, err error) error {
 	return fmt.Errorf("interrupted (%v): %w", context.Cause(ctx), err)
 }
 
-// exitCodeOf maps an error to its exit code.
+// exitCodeOf maps an error to its exit code. `SUBCMD -h` is a request,
+// not a mistake (task vh4): the flag set has printed that subcommand's
+// help, so flag.ErrHelp exits 0 with nothing added — no "flag: help
+// requested" line, no full usage. Every flag parse wraps its error with
+// %w for this.
 func exitCodeOf(err error, stderr io.Writer) int {
 	switch {
-	case err == nil:
+	case err == nil, errors.Is(err, flag.ErrHelp):
 		return exitOK
 	case errors.Is(err, errUsage):
 		_, _ = fmt.Fprintf(stderr, "iormeshctl: %s\n", errText(err))
@@ -313,16 +315,19 @@ func usage(w io.Writer) {
   iormeshctl rm [-project NAME] [-registry FILE] [-store DIR] [-force] [K8S] HOST|POD
   iormeshctl collect [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [K8S] [HOST|POD...]
   iormeshctl deploy [-project NAME] [-registry FILE] [-dist DIR] [-key FILE] [-restart]
-                    [K8S] [-image IMG] [-attach-timeout D] HOST|POD...
+                    [K8S] [-image IMG] [-selinux-type TYPE] [-selinux-level LEVEL]
+                    [-attach-timeout D] HOST|POD...
   iormeshctl status [-project NAME]... [-registry FILE] [K8S] [HOST|POD...]
   iormeshctl list [-registry FILE]
   iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-routes FILE]
                    [-registry FILE]
   iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR]
                      [-routes FILE] [K8S] [HOST|POD...]
-  iormeshctl show [summary|services|edges|health] [-project NAME]... [-builds DIR] [-json] [-unresolved]
-  iormeshctl open [-project NAME]... [-builds DIR]
-  iormeshctl tui [-project NAME]... [-builds DIR]     (needs a terminal)
+  iormeshctl show [VIEW] [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-json] [-unresolved]
+      VIEW: summary (default) | services | edges | health | conversations
+            | sequence [ID] | thread [SERVICE/THREAD] | processes | report
+  iormeshctl open [-project NAME]... [-store DIR] [-db FILE] [-builds DIR]
+  iormeshctl tui [-project NAME]... [-store DIR] [-db FILE] [-builds DIR]     (needs a terminal)
   iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
                     [-apply [-dist DIR] [-key FILE]]
   iormeshctl query [-project NAME]... [-store DIR] [-db FILE] [-from T] [-to T]
@@ -355,7 +360,11 @@ stops, syncs off and uninstalls before it unregisters, and refuses to
 uninstall over traces it could not sync unless -force. build (and
 refresh, which is collect then build) merges every project in the store
 without -project, never contacts a server, and exits 1 when it had to
-leave a damaged segment out. expand lists the unresolved peers of the
+leave a damaged segment out. show, open and tui read a build and
+never the segments: -project picks the build of exactly those projects
+(default: of every project in the store, which -store names), as build
+-project wrote it; -db is accepted and unused. -ref on query is a
+conversation step's ref from show sequence. expand lists the unresolved peers of the
 store's merged mesh against the registry's expand: allowlist, hop limit
 (-hops, default 1) and max_nodes; it contacts no server and deploys
 nothing unless -apply, which registers each candidate (one per address,
@@ -377,6 +386,8 @@ reaches every running pod it matches; each pod is collected into
 starts a debug container (iormesh run -linger) in each prepared pod,
 or checks a sidecar, with the pinned image; rm collects a pod entry
 once more and unregisters it, leaving its tracer running.
+-selinux-type and -selinux-level set a minimal-profile debug tracer's
+SELinux type and MCS level over the registry's (empty omits the field).
 
 The route map (decision #15) is ~/.config/iormesh/routes.yaml (fqdn ->
 ingress -> service -> workload, and services with their ClusterIPs and

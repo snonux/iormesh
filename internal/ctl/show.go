@@ -30,7 +30,7 @@ func refreshCommand(args []string, e env) error {
 	addRoutesFlag(fs, &f)
 	kf := addK8sFlags(fs, false)
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	// -registry (addRoutesFlag) serves both halves: the collect's targets
 	// and the build's route map and snapshot check.
@@ -78,11 +78,11 @@ func showCommand(args []string, e env) error {
 	}
 	fs := newFlagSet("show "+view, e.stderr)
 	var f buildFlags
-	addBuildFlags(fs, &f)
+	addReadBuildFlags(fs, &f)
 	asJSON := fs.Bool("json", false, "print the view model's JSON for the view")
 	unresolved := fs.Bool("unresolved", false, "edges: only edges with an unresolved connection")
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%w: show takes one view: %s", errUsage, strings.Join(showViews, ", "))
