@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Why the promise holds: a closing bracket enters its thread in the
  * set of closing threads and sets its {@code closing} to its enter
  * stamp before stamping its exit, and clears both after publishing
- * ({@link #closing}, {@link #idle}). A watermark reads the clock first,
+ * ({@link #closing}, {@link #leave}). A watermark reads the clock first,
  * then scans that set: a thread not in it (or seen idle) either
  * published already (so its record precedes the watermark's
  * reservation) or will stamp its exit after the scan, hence after the
@@ -44,7 +44,7 @@ final class Watermarks {
      * The threads writing a record under the watermark promise right now
      * (closing not IDLE, or about to be or just been): the only ones a
      * watermark scans. A thread is in it from {@link #closing} to
-     * {@link #idle} only, so it holds no thread longer than a record's
+     * {@link #leave} only, so it holds no thread longer than a record's
      * write, and needs no pruning.
      */
     private static final Set<Brackets> CLOSING = ConcurrentHashMap.newKeySet();
@@ -53,8 +53,12 @@ final class Watermarks {
     private Watermarks() {}
 
     /**
-     * Marks t closing from stamp — no watermark passes stamp until
-     * {@link #idle} — and returns what idle must restore. The caller
+     * Marks t closing from stamp; no watermark passes stamp until the
+     * caller ends the mark. was is t.closing as the caller read it
+     * before its try, which its finally restores with a plain store and
+     * then calls {@link #leave}: assigned before anything that can throw
+     * (a StackOverflowError on entering this method), so a throw never
+     * clears an outer mark nor leaves t closing for good. The caller
      * fences before its clock read (see the class comment). Nested in an
      * open mark (an HTTP marker written inside a probe's record), the
      * older stamp stays in force and t stays in the set: the inner write
@@ -62,22 +66,21 @@ final class Watermarks {
      * set before its mark is stored, so a failed insertion (it allocates)
      * leaves t idle, never closing but unseen.
      */
-    static long closing(Brackets t, long stamp) {
-        long was = t.closing;
+    static void closing(Brackets t, long was, long stamp) {
         if (was == Brackets.IDLE) {
             CLOSING.add(t);
         }
         t.closing = Math.min(was, stamp);
-        return was;
     }
 
     /**
-     * Ends the mark {@link #closing} returned was for, after the record
-     * is published: restores the outer mark, or clears t and leaves the
-     * set when there is none.
+     * Takes t out of the set once its caller restored t.closing to was,
+     * after the record is published — unless was is an outer mark still
+     * open. A remove that never happened (a throw on entering here)
+     * leaves an IDLE entry, which lowers no watermark and goes at the
+     * thread's next leave.
      */
-    static void idle(Brackets t, long was) {
-        t.closing = was;
+    static void leave(Brackets t, long was) {
         if (was == Brackets.IDLE) {
             CLOSING.remove(t);
         }

@@ -352,9 +352,9 @@ public final class Hooks {
     /** late's record, marked closing from before its stamp (see request). */
     private static boolean lateRecord(Brackets t, Ring r, long[] c,
                                       java.util.function.Function<long[], String[]> describer) {
-        long was = Brackets.IDLE;
+        long was = t.closing;   // read before the try: see close
         try {
-            was = Watermarks.closing(t, System.nanoTime());
+            Watermarks.closing(t, was, System.nanoTime());
             VarHandle.fullFence();   // as in close: the stamp after the mark
             long mono = System.nanoTime();
             long[] meta = new long[Ring.META];
@@ -370,7 +370,8 @@ public final class Hooks {
             r.http(mono, c[0], c[1], (int) c[2], s, meta, c[3], c[4], c[5]);
             return true;
         } finally {
-            Watermarks.idle(t, was);
+            t.closing = was;
+            Watermarks.leave(t, was);
         }
     }
 
@@ -563,17 +564,19 @@ public final class Hooks {
                 return;
             }
             Brackets t = STATE.get();
-            long wasClosing = Brackets.IDLE;
+            // Read before the try (see close): nested in another record's
+            // closing window (a probe), the outer, older mark stays in
+            // force (Watermarks.closing) and is restored whatever throws.
+            long wasClosing = t.closing;
             try {
-                // Nested in another record's closing window (a probe), the
-                // outer, older mark stays in force (Watermarks.closing).
-                wasClosing = Watermarks.closing(t, System.nanoTime());
+                Watermarks.closing(t, wasClosing, System.nanoTime());
                 VarHandle.fullFence();   // as in close: the stamp after the mark
                 long[] meta = {0, 0, Ring.HTTP_ASYNC_MARK, 1, 0, -1, -1};
                 r.http(System.nanoTime(), StackIds.NONE, t.owner.getId(), 0, NO_STRINGS, meta,
                         0, 0, 0);
             } finally {
-                Watermarks.idle(t, wasClosing);
+                t.closing = wasClosing;
+                Watermarks.leave(t, wasClosing);
             }
         } catch (Throwable e) {
             countSkip(FAILS);
@@ -730,9 +733,9 @@ public final class Hooks {
     /** dns's record, marked closing from before its stamp (see request). */
     private static boolean lookup(Brackets t, Ring r, BiFunction<Object[], long[], String[]> probe,
                                   Object[] args) {
-        long was = Brackets.IDLE;
+        long was = t.closing;   // read before the try: see close
         try {
-            was = Watermarks.closing(t, System.nanoTime());
+            Watermarks.closing(t, was, System.nanoTime());
             VarHandle.fullFence();   // as in close: the stamp after the mark
             long mono = System.nanoTime();
             String[] s = probe.apply(args, new long[Ring.META]);
@@ -748,7 +751,8 @@ public final class Hooks {
             r.dns(mono, stack, t.owner.getId(), ktid, s, t.otelHi, t.otelLo, t.otelSpan);
             return true;
         } finally {
-            Watermarks.idle(t, was);
+            t.closing = was;
+            Watermarks.leave(t, was);
         }
     }
 
@@ -780,9 +784,9 @@ public final class Hooks {
     private static boolean request(Brackets t, Ring r,
                                    BiFunction<Object[], long[], String[]> probe, Object[] args,
                                    long start) {
-        long was = Brackets.IDLE;
+        long was = t.closing;   // read before the try: see close
         try {
-            was = Watermarks.closing(t, System.nanoTime());
+            Watermarks.closing(t, was, System.nanoTime());
             VarHandle.fullFence();   // as in close: the stamp after the mark
             long mono = System.nanoTime();
             long[] meta = new long[Ring.META];
@@ -805,7 +809,8 @@ public final class Hooks {
             r.http(mono, stack, t.owner.getId(), ktid, s, meta, t.otelHi, t.otelLo, t.otelSpan);
             return true;
         } finally {
-            Watermarks.idle(t, was);
+            t.closing = was;
+            Watermarks.leave(t, was);
         }
     }
 
@@ -822,9 +827,16 @@ public final class Hooks {
      */
     private static void close(Brackets t, int d, Ring r) {
         boolean wasBusy = t.busy;
-        long was = Brackets.IDLE;
+        // The mark to restore is read before the try, never assigned in
+        // it: a throw (a StackOverflowError) before closing returned
+        // must still restore an outer mark, not clear it. The finally
+        // restores it with a plain store before any call, so a throw on
+        // entering leave cannot leave t closing for good — at worst an
+        // IDLE entry stays in the set, which lowers nothing and goes at
+        // the thread's next leave.
+        long was = t.closing;
         try {
-            was = Watermarks.closing(t, t.enter(d));
+            Watermarks.closing(t, was, t.enter(d));
             // The JMM does not order System.nanoTime() against volatiles:
             // without a full fence the clock read below may take effect
             // before the closing mark is visible (AArch64's stlr has no
@@ -838,8 +850,9 @@ public final class Hooks {
             r.bracket(t.hook(d), ktid, t.enter(d), exit, t.stack(d), t.owner.getId(),
                     t.traceHi(d), t.traceLo(d), t.span(d));
         } finally {
+            t.closing = was;
             t.busy = wasBusy;
-            Watermarks.idle(t, was);
+            Watermarks.leave(t, was);
         }
     }
 

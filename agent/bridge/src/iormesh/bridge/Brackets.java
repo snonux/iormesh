@@ -113,9 +113,9 @@ final class Brackets {
      * The enter stamp of the bracket being written to the ring, or IDLE:
      * set before the exit is stamped and cleared after the record is
      * published, so a watermark never claims a time this bracket's
-     * exit may precede. Set and cleared through Watermarks.closing and
-     * Watermarks.idle only, which also enter the thread in the set the
-     * watermark scans.
+     * exit may precede. Set through Watermarks.closing, which also
+     * enters the thread in the set the watermark scans; restored by the
+     * caller's finally, which then calls Watermarks.leave.
      */
     volatile long closing = IDLE;
 

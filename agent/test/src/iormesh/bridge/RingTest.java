@@ -623,16 +623,15 @@ public final class RingTest {
         Path dir = Files.createTempDirectory("iormesh-ring-test");
         Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
         Brackets b = new Brackets();
-        long was = Brackets.IDLE;
         try {
             Watermarks.emit(r);
             long enter = System.nanoTime();
-            was = Watermarks.closing(b, enter);
+            Watermarks.closing(b, Brackets.IDLE, enter);
             Watermarks.emit(r);   // held back to enter, still newer than the first
-            Watermarks.idle(b, was);
+            end(b, Brackets.IDLE);
             Watermarks.emit(r);
         } finally {
-            Watermarks.idle(b, was);
+            end(b, Brackets.IDLE);
         }
         ByteBuffer m = map(r.path());
         List<Long> marks = new ArrayList<>();
@@ -654,23 +653,22 @@ public final class RingTest {
         Path dir = Files.createTempDirectory("iormesh-ring-test");
         Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
         Brackets b = new Brackets();
-        long outer = Brackets.IDLE;
         long enter;
         try {
             Watermarks.emit(r);
             enter = System.nanoTime();
-            outer = Watermarks.closing(b, enter);
-            long inner = Watermarks.closing(b, System.nanoTime());
+            Watermarks.closing(b, Brackets.IDLE, enter);
+            long inner = b.closing;
+            Watermarks.closing(b, inner, System.nanoTime());
             equal(enter, b.closing, "the older stamp stays in force");
-            Watermarks.idle(b, inner);
+            end(b, inner);
             equal(enter, b.closing, "still closing after the inner mark");
             Watermarks.emit(r);   // held back to the outer enter
-            Watermarks.idle(b, outer);
-            outer = Brackets.IDLE;
+            end(b, Brackets.IDLE);
             equal(Brackets.IDLE, b.closing, "idle after the outer mark");
             Watermarks.emit(r);
         } finally {
-            Watermarks.idle(b, outer);
+            end(b, Brackets.IDLE);
         }
         ByteBuffer m = map(r.path());
         List<Long> marks = new ArrayList<>();
@@ -681,6 +679,12 @@ public final class RingTest {
         equal(enter, marks.get(1), "the second stops at the outer enter");
         check(marks.get(2) > enter, "the third passes it");
         delete(dir);
+    }
+
+    /** Ends a mark as Hooks' finally blocks do: restore, then leave. */
+    private static void end(Brackets b, long was) {
+        b.closing = was;
+        Watermarks.leave(b, was);
     }
 
     /**
