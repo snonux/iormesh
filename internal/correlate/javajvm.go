@@ -58,7 +58,10 @@ type jvm struct {
 	// resends its table for it (task 5j4, Watermarks.resync) while the
 	// JVM's threads keep writing, so their records say nothing about the
 	// table. The agent closes a resent table with a WATERMARK from the
-	// thread that wrote the rows; only that sets tableRead again.
+	// thread that wrote the rows, and writes no watermark while rows it
+	// resent were dropped (it retries the whole table first), so the
+	// first WATERMARK after them follows a whole table; only that sets
+	// tableRead again.
 	resending bool
 	// probed: the mark's uprobes were attached to this JVM's natives (or
 	// the attempt failed); done once, after the whole hook table was read.

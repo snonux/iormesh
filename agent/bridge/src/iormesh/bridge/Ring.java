@@ -64,7 +64,8 @@ import java.util.Set;
  * the dictionary records (HOOK, THREAD, STACK, CLASS) among them, which
  * the agent writes once each. So every reader bumps the reader epoch on
  * open, and the watermark thread (Watermarks.resync) resends the
- * dictionary once the epoch passed 1. The word sits in what was zero
+ * dictionary once the epoch passed 1 (or moved after the tail had: a
+ * reader too old to bump it drained the ring). The word sits in what was zero
  * padding: an agent older than 5j4 never reads it, a tracer older than
  * 5j4 never bumps it, and either pairing behaves as before, so VERSION
  * stays (an older peer misreads nothing).
@@ -253,6 +254,14 @@ public final class Ring {
      */
     long readerEpoch() {
         return (long) LONGS.getAcquire(buf, EPOCH);
+    }
+
+    /**
+     * Bytes the readers have consumed so far (the tail): non-zero means
+     * some reader drained the ring, even one too old to bump the epoch.
+     */
+    long consumed() {
+        return (long) LONGS.getAcquire(buf, TAIL);
     }
 
     /** The ring file, for the debug dump and for discard. */

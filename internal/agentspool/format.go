@@ -51,7 +51,8 @@ const (
 	// THREAD, STACK, CLASS) once and a reader consumes what it reads, so
 	// a second session on a running JVM would never see them; the agent's
 	// watermark thread polls this word and resends the dictionary when it
-	// moved past 1 (the first reader finds everything still in the ring).
+	// moved past 1, or moved after an older tracer had drained the ring
+	// (the first reader finds everything still in the ring).
 	// Agents before 5j4 never read it and stay silent: a second session
 	// on such a JVM gets no hook table, as before.
 	offEpoch        = 40

@@ -109,25 +109,36 @@ table again, closes it with a WATERMARK, and bumps a generation
 that makes each thread, stack and class be written once more at
 its next bracket. The tracer probes the JVM's natives once that
 WATERMARK has arrived, as it waits for the install's table (task
-tf4). Brackets read before the resent table stay unattributed
-until their thread and stack show up again.
+tf4). While the ring is too full for the whole table — a new
+reader still freeing what the last session left — the agent
+writes no watermark at all and retries the table every tick, so
+the tracer never probes a partly resent table; it holds the JVM's
+syscalls meanwhile, up to its join timeout. Brackets read before
+the resent table stay unattributed until their thread and stack
+show up again.
 
 The resync costs the application what its first brackets cost (a
 THREAD per thread, a stack walk's description and a CLASS per
-distinct call site), happens at most once per tick however often
-readers open the ring, and never blocks or throws into an
-application thread. With `watermark=0` there is no watermark
-thread and no resync. Loading the agent into a JVM that has it
-already (`iormesh attach` again, a second `-javaagent`) installs
-nothing twice but asks for the same resync; the first load's ring
-and options stay.
+distinct call site), happens at most once a second however often
+readers open the ring (one asked for sooner waits), and never
+blocks or throws into an application thread. With `watermark=0`
+there is no watermark thread and no resync. Loading the agent
+into a JVM that has it already (`iormesh attach` again, a second
+`-javaagent`) installs nothing twice but asks for the same
+resync; the first load's ring and options stay.
 
 Mixed versions: the epoch sits in what was zero padding, so the
 ring format version did not change. An agent older than 5j4 never
 reads the word: under a newer tracer its first session works and
-later ones get no hook table (attribution none), as before. A
-tracer older than 5j4 never bumps it: a newer agent then never
-resyncs, and nothing else changes.
+later ones get no hook table (attribution none), as before; a
+newer jar loaded into such a JVM says it found an older agent and
+changes nothing. A tracer older than 5j4 never bumps it: a newer
+agent under it resyncs only when loaded again (an old
+`iormesh attach` still triggers that), which the old tracer reads
+as duplicate HOOK rows. The first newer session after old ones
+still gets a resync: the agent sees the epoch move after the
+ring's tail already had, so some earlier reader consumed the
+dictionary.
 
 ## Caveats
 

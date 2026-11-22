@@ -88,38 +88,57 @@ final class Watermarks {
         }
     }
 
+    /** The least time between two resyncs (Resync.gapNs's default). */
+    static final long RESYNC_GAP_NS = 1_000_000_000L;
+
     /**
      * The watermark thread's resync state (task 5j4), touched by that
-     * thread only: the reader epoch it last acted on, and whether the hook
-     * table still has to be resent (a row was dropped last time).
+     * thread only: the reader epoch it last acted on and the ring's tail
+     * read just before (what earlier readers consumed), whether a resync
+     * was asked for but waits out gapNs since the last one (pending), and
+     * whether the hook table still has to be resent (due: a row or the
+     * THREAD was dropped last time).
      */
     static final class Resync {
         long seen;
+        long seenTail;
+        boolean pending;
         boolean due;
+        long gapNs = RESYNC_GAP_NS;
+        long lastNs = System.nanoTime() - RESYNC_GAP_NS;
     }
 
     /**
-     * Resends the dictionary when a reader came after the first one (the
-     * reader epoch passed 1 since the last tick) or a repeated agent load
-     * asked for it (Hooks.requestResync): an earlier reader consumed the
-     * HOOK, THREAD, STACK and CLASS records written so far. The first
-     * reader needs none — everything it did not consume is still in the
-     * ring. A resync bumps the generation, which makes each thread's
-     * THREAD and each class's CLASS due again at their next bracket or
-     * stack, forgets the known stacks so each is written again at its
-     * next sighting, and writes the hook table again (resend). App
-     * threads pay only what they paid at their first bracket; nothing
-     * here waits on them. Bounded: at most one resync per tick, however
-     * fast readers come.
+     * Resends the dictionary when a reader came after an earlier one or
+     * a repeated agent load asked for it (Hooks.requestResync): an earlier
+     * reader consumed the HOOK, THREAD, STACK and CLASS records written so
+     * far. The first reader needs none — everything it did not consume is
+     * still in the ring. An earlier reader is one whose open moved the
+     * epoch past 1, or one that consumed records without moving it (a
+     * tracer older than 5j4: the tail had moved before the epoch did).
+     * The tail is read before the epoch, so a new reader's own drains are
+     * never taken for an earlier one's. A resync bumps the generation,
+     * which makes each thread's THREAD and each class's CLASS due again
+     * at their next bracket or stack, forgets the known stacks so each is
+     * written again at its next sighting, and writes the hook table again
+     * (resend). App threads pay only what they paid at their first
+     * bracket; nothing here waits on them. Bounded: at most one resync per
+     * gapNs (a second), however fast readers come; one asked for sooner
+     * waits for the gap, never dropped.
      */
     static void resync(Ring ring, Resync s) {
+        long tail = ring.consumed();
         long epoch = ring.readerEpoch();
-        boolean asked = Hooks.resyncRequested();
+        s.pending |= Hooks.resyncRequested();
         if (epoch != s.seen) {
-            asked |= epoch > 1;
+            s.pending |= epoch > 1 || s.seenTail > 0;
             s.seen = epoch;
         }
-        if (asked) {
+        s.seenTail = tail;
+        long now = System.nanoTime();
+        if (s.pending && now - s.lastNs >= s.gapNs) {
+            s.pending = false;
+            s.lastNs = now;
             Hooks.generation = (Hooks.generation + 1) & Integer.MAX_VALUE;
             StackIds.forget();
             s.due = true;
@@ -182,8 +201,16 @@ final class Watermarks {
 
     /**
      * One tick: a resync if a new reader asked for one, then the
-     * watermark. A resync that throws (it must not) costs that resync,
-     * never the watermarks.
+     * watermark — but none while a resend is still due (review of 5j4).
+     * The tracer takes the first WATERMARK after resent HOOK rows as the
+     * table's end and probes the natives of the rows it has: a watermark
+     * after a resend whose rows the full ring partly dropped would close
+     * a partial table, and the full one resent later would come too late.
+     * So watermarks wait until the resend lands whole (resend closes it
+     * itself); meanwhile the tracer holds the JVM's syscalls up to its
+     * join timeout, as it would with watermarks dropped by the same full
+     * ring. A resync that throws (it must not) costs that resync, never
+     * the watermarks.
      */
     static void tick(Ring ring, Resync s) {
         try {
@@ -191,7 +218,9 @@ final class Watermarks {
         } catch (Throwable e) {
             s.due = false;
         }
-        emit(ring);
+        if (!s.due) {
+            emit(ring);
+        }
     }
 
     /** Sleeps; false once interrupted, which ends the thread. */

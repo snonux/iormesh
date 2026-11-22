@@ -2512,11 +2512,14 @@ would overturn it), and deferred.
   records (HOOK, THREAD, STACK, CLASS) once, so a later session
   would read brackets it can never attribute. Each reader
   therefore adds one to a reader-epoch word in the header (offset
-  40) when it opens the ring; once the epoch passes 1, the
-  agent's watermark thread resends the hook table, closed by a
-  WATERMARK, and bumps a generation that makes each thread,
-  stack and class be written again at its next sighting. At most
-  one resync per watermark tick; app threads pay only what their
+  40) when it opens the ring; once the epoch passes 1 (or moves
+  after an older tracer drained the ring: the tail had moved),
+  the agent's watermark thread resends the hook table, closed by
+  a WATERMARK, and bumps a generation that makes each thread,
+  stack and class be written again at its next sighting. No
+  watermark is written until the whole table landed, so the
+  tracer never takes a partly dropped resend for the table. At
+  most one resync per second; app threads pay only what their
   first bracket cost. A repeated agent load asks for the same
   resync instead of doing nothing. The word was zero padding:
   an older agent never reads it and an older tracer never bumps
