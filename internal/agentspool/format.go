@@ -31,17 +31,30 @@ const (
 	// review round 2) HTTP's async-marker and java.net.http flags; 7
 	// (task fe4) CLASS records, a class id per frame in STACK, and
 	// sixteen drop counters, which moves dropped bytes and abandoned; 8
-	// (task mb4 review) HTTP's held flag.
+	// (task mb4 review) HTTP's held flag. The reader epoch (offEpoch,
+	// task 5j4) did not bump it: it lives in a header word every older
+	// agent left zero and never read, so either side may meet an older
+	// peer and both go on as before (docs/java-attach.md, "Second
+	// sessions").
 	Version = 8
 	// magic is "IORMRING" as a little-endian word; the agent stores it
 	// last, so a reader that sees it sees a complete header.
 	magic = 0x474e49524d524f49
 
-	offVersion      = 8
-	offHeaderSize   = 12
-	offCapacity     = 16
-	offPID          = 24
-	offCreated      = 32
+	offVersion    = 8
+	offHeaderSize = 12
+	offCapacity   = 16
+	offPID        = 24
+	offCreated    = 32
+	// offEpoch is the reader epoch (task 5j4): every reader adds one when
+	// it opens the ring. The agent writes its dictionary records (HOOK,
+	// THREAD, STACK, CLASS) once and a reader consumes what it reads, so
+	// a second session on a running JVM would never see them; the agent's
+	// watermark thread polls this word and resends the dictionary when it
+	// moved past 1 (the first reader finds everything still in the ring).
+	// Agents before 5j4 never read it and stay silent: a second session
+	// on such a JVM gets no hook table, as before.
+	offEpoch        = 40
 	offHead         = 64
 	offTail         = 128
 	offDropped      = 192 // u64 per record type, droppedSlots of them

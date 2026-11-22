@@ -4,7 +4,7 @@ import java.net.URL;
 import java.nio.file.Path;
 import java.security.CodeSource;
 import java.security.ProtectionDomain;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -34,7 +34,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * it lies behind it in the ring. Two threads racing on a new class may
  * each compute an entry and write a CLASS (ClassValue keeps one id); the
  * loser's row names an id no frame uses, which the tracer never lists.
- * One entry's CLASS is written at most once: a writer claims it first.
+ * One entry's CLASS is written at most once per reader generation (once,
+ * and again after each resync for a later reader, task 5j4): a writer
+ * claims it first.
  * A dropped CLASS is retried when a later new stack names the class
  * (after the back-off), and then follows the STACKs already naming it.
  * The tracer resolves a stack once, when its first event joins: a stack
@@ -59,35 +61,53 @@ final class ClassIds {
 
     private ClassIds() {}
 
+    /** Entry.written before any CLASS reached the ring, or after a drop. */
+    private static final int UNWRITTEN = -1;
+    /** Entry.written while one thread writes the CLASS. */
+    private static final int WRITING = Integer.MIN_VALUE;
+
     /**
-     * One class's id and whether its CLASS reached the ring or is being
-     * written: claimed by compare-and-set, so two threads retrying a
-     * dropped one never both write it (the ring would hold one id twice).
+     * One class's id and the dictionary generation (Hooks.generation)
+     * its CLASS reached the ring under — UNWRITTEN, or WRITING while one
+     * is being written: claimed by compare-and-set, so two threads
+     * retrying a dropped one never both write it (the ring would hold one
+     * id twice for one reader). A resync (task 5j4) bumps the generation,
+     * which makes every class due again for the later reader: lazily,
+     * when a new stack names it, since a ClassValue cannot be listed.
      */
     private static final class Entry {
         final long id;
-        final AtomicBoolean written = new AtomicBoolean();
+        final AtomicInteger written = new AtomicInteger(UNWRITTEN);
 
         Entry(long id) {
             this.id = id;
         }
 
+        /** Whether the current reader still lacks this CLASS. */
+        boolean due() {
+            int w = written.get();
+            return w != WRITING && w != Hooks.generation;
+        }
+
         /**
          * Writes the CLASS record. Without a ring (released after a
          * failed install, between a test's rings) it stays unwritten,
-         * so the next ring still gets it.
+         * so the next ring still gets it. The generation is read before
+         * the write: a resync racing it leaves the class due again.
          */
         void write(Class<?> c) {
             Ring r = Hooks.ring;
-            if (r == null || !written.compareAndSet(false, true)) {
+            int g = Hooks.generation;
+            int w = written.get();
+            if (r == null || w == WRITING || w == g || !written.compareAndSet(w, WRITING)) {
                 return;
             }
             boolean ok = false;
             try {
                 ok = r.classRecord(id, c.getName(), loader(c.getClassLoader()), codeSource(c));
             } finally {
+                written.set(ok ? g : UNWRITTEN);
                 if (!ok) {
-                    written.set(false);
                     retryAt = System.nanoTime() + Hooks.RETRY_NS;
                 }
             }
@@ -95,15 +115,16 @@ final class ClassIds {
     }
 
     /**
-     * Returns c's id, describing c the first time, or retrying a dropped
-     * description after the back-off. The id is returned whether or not
-     * its CLASS reached the ring (the tracer then has no class for it);
-     * NONE only when getting the id itself threw.
+     * Returns c's id, describing c the first time (or the first time
+     * since a resync), or retrying a dropped description after the
+     * back-off. The id is returned whether or not its CLASS reached the
+     * ring (the tracer then has no class for it); NONE only when getting
+     * the id itself threw.
      */
     static long of(Class<?> c) {
         try {
             Entry e = IDS.get(c);
-            if (!e.written.get() && System.nanoTime() >= retryAt) {
+            if (e.due() && System.nanoTime() >= retryAt) {
                 e.write(c);
             }
             return e.id;

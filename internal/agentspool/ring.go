@@ -35,7 +35,10 @@ type Ring struct {
 }
 
 // Open maps the ring file read-write (the reader zeroes what it consumed
-// and moves the tail) and checks its header. ErrNotReady means the agent
+// and moves the tail), checks its header and bumps its reader epoch, so
+// the agent resends what an earlier reader consumed (announce). Open a
+// ring once per session: every open costs the JVM such a resend.
+// ErrNotReady means the agent
 // has not finished the header yet; retry. The mapping outlives the file
 // descriptor, which is closed before Open returns. A file shorter than
 // the header is also ErrNotReady: the agent has created but not yet
@@ -79,7 +82,23 @@ func OpenOwned(path string, owner func(uid uint32) error) (*Ring, error) {
 		_ = syscall.Munmap(mem)
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := guarded(r.announce); err != nil {
+		_ = syscall.Munmap(mem)
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	return r, nil
+}
+
+// announce tells the agent a new reader is here (task 5j4): it adds one
+// to the header's reader epoch, which the agent's watermark thread polls.
+// From the second reader on, the agent then resends its dictionary — the
+// hook table, and each thread, stack and class again as it next shows up
+// — because the earlier reader consumed the first copy. The add is atomic
+// although one reader at a time is the rule: a reader that opens while
+// another still drains must not undo its bump.
+func (r *Ring) announce() error {
+	atomic.AddUint64((*uint64)(unsafe.Pointer(&r.mem[offEpoch])), 1)
+	return nil
 }
 
 // openRingFile opens path without following a symlink (and without

@@ -95,6 +95,14 @@ final class Bridge {
         return (boolean) hooks.getMethod("claim").invoke(null);
     }
 
+    /**
+     * See Hooks.requestResync: a repeated load asks the installed agent's
+     * watermark thread to resend its dictionary (task 5j4).
+     */
+    void requestResync() throws ReflectiveOperationException {
+        hooks.getMethod("requestResync").invoke(null);
+    }
+
     /** See Hooks.release: undoes claim after an install that rewrote nothing. */
     void release() throws ReflectiveOperationException {
         hooks.getMethod("release").invoke(null);

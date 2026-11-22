@@ -2507,6 +2507,22 @@ would overturn it), and deferred.
   than PAD at most 64 KiB, four times the agent's own 16 KiB
   cap: a longer one is skipped as malformed, undecoded, so one
   ring puts at most about its capacity on the tracer's heap.
+  Readers come and go while the JVM runs on (task 5j4): the
+  ring is consume-once, and the agent writes its dictionary
+  records (HOOK, THREAD, STACK, CLASS) once, so a later session
+  would read brackets it can never attribute. Each reader
+  therefore adds one to a reader-epoch word in the header (offset
+  40) when it opens the ring; once the epoch passes 1, the
+  agent's watermark thread resends the hook table, closed by a
+  WATERMARK, and bumps a generation that makes each thread,
+  stack and class be written again at its next sighting. At most
+  one resync per watermark tick; app threads pay only what their
+  first bracket cost. A repeated agent load asks for the same
+  resync instead of doing nothing. The word was zero padding:
+  an older agent never reads it and an older tracer never bumps
+  it, so the format version stays and either mix behaves as
+  before (a later session on an older agent stays attribution
+  none).
 
 ### Open — blocks M2
 

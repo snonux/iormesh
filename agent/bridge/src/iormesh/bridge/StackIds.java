@@ -17,7 +17,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * back-off (Hooks.RETRY_NS) retries it;
  * past MAX_KNOWN distinct stacks no more are kept or written, and each
  * unkept sighting counts as a dropped STACK — the bracket keeps its id,
- * the trace's loss accounting says why the frames are missing.
+ * the trace's loss accounting says why the frames are missing. A resync
+ * for a later reader (task 5j4) forgets them all ({@link #forget}), so
+ * that reader gets each STACK at its next sighting.
  *
  * Lives in the bridge (bootstrap path) because {@link Hooks#enter} calls
  * it from rewritten java.base code, which cannot see the agent's own
@@ -125,9 +127,21 @@ public final class StackIds {
         return f == null ? null : f.clone();
     }
 
-    /** The number of distinct stacks seen so far. */
+    /** The number of distinct stacks seen so far (since the last resync). */
     public static int size() {
         return KNOWN.size();
+    }
+
+    /**
+     * Forgets every stack (a resync, task 5j4): a later reader never saw
+     * their STACK records, so each is walked into a new one at its next
+     * sighting — one describe per distinct stack, as at the start. Brackets
+     * already holding an id are unaffected; their stack's next sighting
+     * writes the STACK they name. Watermark thread only; app threads may
+     * race it, which at worst writes a STACK twice.
+     */
+    static void forget() {
+        KNOWN.clear();
     }
 
     /**

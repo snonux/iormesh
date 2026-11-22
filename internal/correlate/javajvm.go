@@ -51,7 +51,15 @@ type jvm struct {
 	// table, every bracket follows the retransformation), and the ring
 	// hands records out in reservation order, so from then on v.hooks is
 	// complete. A drain can land in the middle of the table (task tf4).
+	// A resent table (resending) is complete only at a WATERMARK.
 	tableRead bool
+	// resending: a HOOK row came after other records before the probe —
+	// this session opened a ring an earlier one drained, and the agent
+	// resends its table for it (task 5j4, Watermarks.resync) while the
+	// JVM's threads keep writing, so their records say nothing about the
+	// table. The agent closes a resent table with a WATERMARK from the
+	// thread that wrote the rows; only that sets tableRead again.
+	resending bool
 	// probed: the mark's uprobes were attached to this JVM's natives (or
 	// the attempt failed); done once, after the whole hook table was read.
 	probed bool
@@ -154,25 +162,48 @@ type drainer struct {
 }
 
 func (d *drainer) Bracket(b *agentspool.Bracket) {
-	d.v.tableRead = true
+	d.v.otherRecord()
 	if d.err == nil {
 		d.j.bracket(d.v, b)
 	}
 }
 
 func (d *drainer) Watermark(w agentspool.Watermark) {
-	d.v.tableRead = true
+	// Closes the table, a resent one too (jvm.resending).
+	d.v.tableRead, d.v.resending = true, false
 	if d.err == nil {
 		d.v.watermark = max(d.v.watermark, w.Mono)
 	}
 }
 
 func (d *drainer) Record(rec agentspool.Record) {
-	if _, hook := rec.(agentspool.Hook); !hook {
-		d.v.tableRead = true
+	switch rec.(type) {
+	case agentspool.Hook:
+		d.v.hookRow()
+	case agentspool.Watermark: // a boxed one, as Watermark above
+		d.v.tableRead, d.v.resending = true, false
+	default:
+		d.v.otherRecord()
 	}
 	if d.err == nil {
 		d.err = d.j.record(d.v, rec)
+	}
+}
+
+// hookRow notes a HOOK record: one after other records, before the
+// natives were probed, starts a resent table (jvm.resending). After the
+// probe a resent row (another session asked for it) changes nothing.
+func (v *jvm) hookRow() {
+	if v.tableRead && !v.probed {
+		v.tableRead, v.resending = false, true
+	}
+}
+
+// otherRecord notes a record other than HOOK and WATERMARK: it follows
+// the install's table, but not necessarily a resent one.
+func (v *jvm) otherRecord() {
+	if !v.resending {
+		v.tableRead = true
 	}
 }
 

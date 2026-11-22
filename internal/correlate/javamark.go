@@ -157,6 +157,10 @@ func (j *JavaJoin) cookie(symbol string) uint64 {
 // concurrently, and a drain that caught only its first rows probed only
 // their natives — the I/O of every later hook (unlink0, say) stayed none
 // for the JVM's life, though the tracer had reported it joined (task tf4).
+// A session on a ring an earlier one drained gets the table only when the
+// agent resends it (task 5j4): until then len(v.hooks) == 0 and nothing
+// is probed, and a resent table is complete at the WATERMARK closing it
+// (jvm.resending), not at the JVM's next bracket.
 // A JVM whose natives cannot be probed keeps every syscall unmarked —
 // none, never guessed — and the reason goes to Warn.
 func (j *JavaJoin) attachMarks(v *jvm) {

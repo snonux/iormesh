@@ -76,6 +76,11 @@ final class Brackets {
      * different String means the thread was renamed (Hooks.describeDue).
      */
     String described;
+    /**
+     * Hooks.generation when that THREAD record was written: an older one
+     * means a resync (task 5j4) asked for it again.
+     */
+    int generation;
     /** After a dropped THREAD, no retry before this nanoTime. */
     long retryAt;
     /**

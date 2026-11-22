@@ -40,7 +40,10 @@ import java.util.function.LongSupplier;
  * guaranteed to precede the brackets naming it — a dropped one is
  * retried later, and another thread may publish a bracket on a stack
  * whose STACK is still being written — so the joiner resolves ids
- * against everything it has read. Without a
+ * against everything it has read. A later reader of the ring gets
+ * these records again (task 5j4): the watermark thread resends the hook
+ * table and bumps {@link #generation}, after which each THREAD, STACK
+ * and CLASS is written once more at its next sighting. Without a
  * ring (no spool= option) brackets are only counted, and only when the
  * agent's debug dump asked for counts ({@link #counts}).
  *
@@ -77,6 +80,21 @@ public final class Hooks {
     static volatile AtomicLongArray counts = new AtomicLongArray(0);
     /** The transport, or null (no spool=): brackets then go nowhere. */
     static volatile Ring ring;
+    /**
+     * The dictionary generation (task 5j4): THREAD, STACK and CLASS
+     * records written under an older one are stale — a reader that came
+     * later never saw them — and are written again at their next
+     * sighting. Bumped by the watermark thread only (Watermarks.resync),
+     * never negative (ClassIds keeps negative marks of its own).
+     */
+    static volatile int generation;
+    /**
+     * The hook table's rows as describeHook wrote them into the current
+     * ring, kept so a resync can write them again; replaced by openRing.
+     */
+    private static volatile java.util.List<HookRow> hookRows = java.util.List.of();
+    /** A repeated agent load asked for a resync (requestResync). */
+    private static final AtomicBoolean RESYNC = new AtomicBoolean();
     private static final AtomicLong SKIPS = new AtomicLong();
     private static final AtomicLong FAILS = new AtomicLong();
     private static final AtomicBoolean CLAIMED = new AtomicBoolean();
@@ -158,20 +176,61 @@ public final class Hooks {
      */
     public static String openRing(String dir, long capacity) throws java.io.IOException {
         Ring r = Ring.create(java.nio.file.Path.of(dir), capacity);
+        hookRows = java.util.List.of();   // a new ring gets its own table
         ring = r;
         return r.path().toString();
     }
 
+    /** One HOOK record's fields, kept for a resync (Ring.hook). */
+    private record HookRow(int id, String kind, String cls, String method, String nativeName,
+                           String syscalls) {}
+
     /**
      * Writes one HOOK record (a row of the agent's hook table) into the
      * ring; the agent calls it for every row at install, before any
-     * bracket, so the joiner knows each hook's syscall allowlist. False
-     * without a ring or when the record was dropped.
+     * bracket, so the joiner knows each hook's syscall allowlist. The row
+     * is kept for later readers (writeHooks). False without a ring or
+     * when the record was dropped.
      */
-    public static boolean describeHook(int id, String kind, String cls, String method,
-                                       String nativeName, String syscalls) {
+    public static synchronized boolean describeHook(int id, String kind, String cls,
+                                                    String method, String nativeName,
+                                                    String syscalls) {
         Ring r = ring;
-        return r != null && r.hook(id, kind, cls, method, nativeName, syscalls);
+        if (r == null) {
+            return false;
+        }
+        java.util.List<HookRow> rows = new java.util.ArrayList<>(hookRows);
+        rows.add(new HookRow(id, kind, cls, method, nativeName, syscalls));
+        hookRows = java.util.List.copyOf(rows);
+        return r.hook(id, kind, cls, method, nativeName, syscalls);
+    }
+
+    /**
+     * Writes the kept hook table into r again (a resync, task 5j4); true
+     * only if every row reached the ring. Watermark thread only.
+     */
+    static boolean writeHooks(Ring r) {
+        boolean all = true;
+        for (HookRow h : hookRows) {
+            all &= r.hook(h.id(), h.kind(), h.cls(), h.method(), h.nativeName(), h.syscalls());
+        }
+        return all;
+    }
+
+    /**
+     * Asks the watermark thread to resend the dictionary at its next tick
+     * (task 5j4): what a repeated agent load does instead of nothing, so
+     * re-attaching a JVM whose ring an earlier session drained gives the
+     * new session its hook table even before its reader opens the ring.
+     * Only sets a flag: the caller (the JVM's attach thread) never waits.
+     */
+    public static void requestResync() {
+        RESYNC.set(true);
+    }
+
+    /** Takes a pending requestResync: true once per request. */
+    static boolean resyncRequested() {
+        return RESYNC.getAndSet(false);
     }
 
     /**
@@ -772,24 +831,31 @@ public final class Hooks {
      * events after the new name). Thread.getName() returns the field
      * setName stored, so a rename is a new String and an identity
      * compare finds it — one volatile read per bracket, no allocation.
-     * Either way a retry after a drop waits for retryAt.
+     * Also due when a resync (task 5j4) bumped the generation since: a
+     * later reader never saw the record. Either way a retry after a drop
+     * waits for retryAt.
      */
     private static boolean describeDue(Brackets t) {
-        return t.owner.getName() != t.described && System.nanoTime() >= t.retryAt;
+        return (t.owner.getName() != t.described || t.generation != generation)
+                && System.nanoTime() >= t.retryAt;
     }
 
     /**
      * Writes the thread's THREAD record (its first bracket, the warm-up,
-     * or the first bracket after a rename); a dropped one is retried at
-     * a later bracket, and the kernel tid lookup — a syscall — happens
-     * only once regardless. After a drop the retry waits RETRY_NS: under
-     * back-pressure every bracket would otherwise encode the name again
-     * (an allocation) only to be dropped again.
+     * the first bracket after a rename or after a resync); a dropped one
+     * is retried at a later bracket, and the kernel tid lookup — a
+     * syscall — happens only once regardless. After a drop the retry
+     * waits RETRY_NS: under back-pressure every bracket would otherwise
+     * encode the name again (an allocation) only to be dropped again.
+     * The generation is read before the write, so a resync racing it
+     * leaves the record due again.
      */
     private static void describe(Brackets t, Ring r) {
         String name = t.owner.getName();
+        int g = generation;
         if (r.thread(t.owner.getId(), t.kernelTid(), t.virtual ? Ring.VIRTUAL : 0, name)) {
             t.described = name;
+            t.generation = g;
         } else {
             t.retryAt = System.nanoTime() + RETRY_NS;
         }
