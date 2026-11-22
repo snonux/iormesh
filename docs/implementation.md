@@ -4194,28 +4194,39 @@ not, and share `bpf_prog_active` with the dispatchers (8e4).
   the peer's FIN behind it — the final read of a "write, then
   close" exchange — moves `copied_seq` by `ret + 1`, since the
   FIN takes a sequence number (`tcp_recvmsg`'s `found_fin_ok`).
-  A receive passes with `ret + 1` when `end` is `rcv_nxt` and
-  the socket's state says the FIN arrived (`CLOSE_WAIT`,
-  `LAST_ACK`, `CLOSING`, or `CLOSE` after `FIN_WAIT2`): the
-  extra number is then the last one received, so the data
-  bytes are still `[start, start + ret)`. The state, not
-  `sk_shutdown`, because a local `shutdown(SHUT_RD)` sets
-  `RCV_SHUTDOWN` too, and `skc_state` is already in the trimmed
-  el9 BTF. Anything else — two senders interleaving, a send
-  split around another, a `MSG_PEEK`/`MSG_OOB` read (a skipped
-  urgent byte also moves `copied_seq` one further, but with no
-  FIN), kTLS, a TFO send — gives no `tcp_seq`. Not covered
-  either: a `read`/`write` the fold held
-  at its enter on a hot streak parks nothing, so if it then
-  turns out slow (> 1 ms, the read waiting on the peer after a
-  burst) it is sent alone without `tcp_seq`; parking held
-  enters too would put the walk back on every folded call. A
-  stale park (an exit missed) is still exact when
-  the check holds; the residue is a field *assignment* inside
-  the window (connect, disconnect, `TCP_REPAIR`) whose jump
-  equals `ret`, 1 in 2³², and an untraced `dup2` of another
-  socket onto the fd mid-call while exactly `ret` bytes moved on
-  the parked one.
+  A receive passes with `ret + 1` when the socket's state says
+  the FIN arrived and the socket is still open (`CLOSE_WAIT`,
+  `LAST_ACK`, `CLOSING`) and `end` is `rcv_nxt`: the extra
+  number is then the last one received, so the data bytes are
+  still `[start, start + ret)`. The state is read first:
+  `tcp_data_queue` stores the FIN's `rcv_nxt` before `tcp_fin`
+  sets the state, so a FIN state implies an `rcv_nxt` read
+  after it counts the FIN. The state, not `sk_shutdown`,
+  because a local `shutdown(SHUT_RD)` sets `RCV_SHUTDOWN` too,
+  and `skc_state` is already in the trimmed el9 BTF. Not
+  `CLOSE`: a reset ends there without a FIN, and a skipped
+  urgent byte could then pass as one; userspace drops
+  `tcp_seq` after a `TCP_CLOSE` record anyway. So the final
+  read on a socket that shut its own side first (`FIN_WAIT2`,
+  which the FIN closes) still gets no `tcp_seq`. Anything
+  else — two senders interleaving, a send split around
+  another, a `MSG_PEEK`/`MSG_OOB` read (a skipped urgent byte
+  also moves `copied_seq` one further, but with no FIN), kTLS,
+  a TFO send — gives no `tcp_seq`. Not covered either: a
+  `read`/`write` the fold held at its enter on a hot streak
+  parks nothing, so if it then turns out slow (> 1 ms, the
+  read waiting on the peer after a burst) it is sent alone
+  without `tcp_seq`; parking held enters too would put the
+  walk back on every folded call. A stale park (an exit
+  missed) is still exact when the check holds; the residue is
+  a field *assignment* inside the window (connect, disconnect,
+  `TCP_REPAIR`) whose jump equals `ret`, 1 in 2³², an untraced
+  `dup2` of another socket onto the fd mid-call while exactly
+  `ret` bytes moved on the parked one, and, for the FIN case,
+  a CPU that reorders loads: the state and `rcv_nxt` loads
+  are kept in order by the compiler only, with no read
+  barrier, which suffices on x86 (the main target) but not
+  strictly on arm64.
 - **Record.** When the check holds, the exit record itself is
   a `tcp_seq_event` (a `ret_event` plus the socket and the
   sequence number, 48 bytes) in place of the `ret_event`, so a

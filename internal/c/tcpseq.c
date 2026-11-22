@@ -29,7 +29,10 @@
 // no other bytes went through in between and the call's bytes are exactly
 // [start, end). One exception, a receive that also consumes the peer's
 // FIN, moves copied_seq by ret + 1 and is accepted when the FIN is the
-// last number received (iormesh_seq_moved_exactly). Anything else -
+// last number received and the socket is still open (CLOSE_WAIT,
+// LAST_ACK, CLOSING; iormesh_seq_moved_exactly). Such a read on a socket
+// that had shut its own side first (FIN_WAIT2, so the FIN closes it) gets
+// no tcp_seq. Anything else -
 // another sender or reader interleaving, a call split around one, a
 // MSG_PEEK or MSG_OOB read (copied_seq does not move, or skips the urgent
 // byte), a kTLS socket (write_seq counts record framing), a TCP Fast Open
@@ -178,22 +181,17 @@ static __always_inline void iormesh_emit_tcp_seq(__u32 pid, __u32 tid, __u32 tra
     bpf_ringbuf_submit(ev, 0);
 }
 
-// iormesh_tcp_fin_received tells whether the peer's FIN has arrived on tp:
-// the states tcp_fin moves a socket to - CLOSE_WAIT from ESTABLISHED,
-// CLOSING from FIN_WAIT1, and CLOSE from FIN_WAIT2 (the time-wait handoff
-// ends the full socket; a reset ends there too) - and LAST_ACK, which
-// follows CLOSE_WAIT once the reader shuts its own side down. The state
-// rather than sk_shutdown's RCV_SHUTDOWN, which a local shutdown(SHUT_RD)
-// sets too, without any FIN.
-// The state is read through struct sock, which a tcp_sock starts with (the
-// verifier walks the typed pointer to the same field), so the CO-RE
-// relocation names sock.__sk_common.skc_state like sock.c's reads and the
-// trimmed el9 BTF (internal/testdata/btf) needs no new types.
-static __always_inline int iormesh_tcp_fin_received(struct tcp_sock *tp) {
-    __u8 state = ((struct sock *)tp)->__sk_common.skc_state;
-
-    return state == TCP_CLOSE_WAIT || state == TCP_LAST_ACK || state == TCP_CLOSING ||
-           state == TCP_CLOSE;
+// iormesh_tcp_fin_received tells whether state (skc_state) says the peer's
+// FIN has arrived: the states tcp_fin moves a socket to that keep it alive
+// - CLOSE_WAIT from ESTABLISHED, CLOSING from FIN_WAIT1 - and LAST_ACK,
+// which follows CLOSE_WAIT once the reader shuts its own side down. Not
+// CLOSE: a FIN in FIN_WAIT2 ends there (the time-wait handoff), but so
+// does a reset that never carried a FIN, which would let a skipped urgent
+// byte pass as the FIN; userspace drops tcp_seq after a TCP_CLOSE record
+// anyway. The state rather than sk_shutdown's RCV_SHUTDOWN, which a local
+// shutdown(SHUT_RD) sets too, without any FIN.
+static __always_inline int iormesh_tcp_fin_received(__u8 state) {
+    return state == TCP_CLOSE_WAIT || state == TCP_LAST_ACK || state == TCP_CLOSING;
 }
 
 // iormesh_seq_moved_exactly is the check of the top of this file: the
@@ -210,14 +208,30 @@ static __always_inline int iormesh_tcp_fin_received(struct tcp_sock *tp) {
 // reader consumed the FIN. Without those two, the extra one could be
 // another reader's byte or a skipped urgent byte, and the call gets no
 // tcp_seq as before.
+// Order: the state is read before rcv_nxt. tcp_data_queue stores the
+// FIN's rcv_nxt before tcp_fin sets the state, so a FIN state seen first
+// implies the rcv_nxt read after it already counts the FIN; the other
+// order could pair a FIN state with an rcv_nxt from before the FIN. The
+// empty asm keeps the compiler from hoisting the rcv_nxt load above the
+// state load (skc_state is volatile, rcv_nxt is not). There is no read
+// barrier for the CPU: x86 keeps loads in order, a weakly ordered CPU
+// (arm64) strictly may not - a residue there. The state is read
+// through struct sock, which a tcp_sock starts with (the verifier walks
+// the typed pointer to the same field), so the CO-RE relocation names
+// sock.__sk_common.skc_state like sock.c's reads and the trimmed el9 BTF
+// (internal/testdata/btf) needs no new types.
 static __always_inline int iormesh_seq_moved_exactly(struct tcp_sock *tp, __u32 dir, __u32 start,
                                                      __u32 end, __s64 ret) {
     __u64 moved = (__u32)(end - start);
+    __u8 state;
 
     if (moved == (__u64)ret)
         return 1;
-    return dir == IORMESH_SEQ_RECV && moved == (__u64)ret + 1 && end == tp->rcv_nxt &&
-           iormesh_tcp_fin_received(tp);
+    if (dir != IORMESH_SEQ_RECV || moved != (__u64)ret + 1)
+        return 0;
+    state = ((struct sock *)tp)->__sk_common.skc_state;
+    asm volatile("" ::: "memory");
+    return iormesh_tcp_fin_received(state) && end == tp->rcv_nxt;
 }
 
 // iormesh_seq_on_exit is the exit hook of the seven data calls, behind

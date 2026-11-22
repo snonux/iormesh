@@ -73,6 +73,45 @@ func TestEl9RecordLayout(t *testing.T) {
 		}
 	}
 	t.Logf("record loads with el9 BTF %v, with host BTF %v", el9, host)
+	checkRelocatesClean(t, el9BTF, seqDataPrograms)
+}
+
+// seqDataPrograms are tail-call targets that read tcp_sock fields through
+// CO-RE relocations (internal/c/tcpseq.c, tasks xe4 and wi4), so
+// rawSyscallPrograms does not cover them: the data calls' enter and exit
+// handlers.
+var seqDataPrograms = []string{
+	"handle_sys_enter_read", "handle_sys_exit_read",
+	"handle_sys_enter_readv", "handle_sys_exit_readv",
+	"handle_sys_enter_recvfrom", "handle_sys_exit_recvfrom",
+	"handle_sys_enter_write", "handle_sys_exit_write",
+	"handle_sys_enter_writev", "handle_sys_exit_writev",
+	"handle_sys_enter_sendto", "handle_sys_exit_sendto",
+	"handle_sys_enter_sendfile64", "handle_sys_exit_sendfile64",
+}
+
+// checkRelocatesClean relocates progs against btfPath and requires that no
+// instruction is libbpf's poison call: every CO-RE relocation they carry
+// found its type and field in that BTF. Only the relocation is checked;
+// the host kernel may refuse the el9-relocated programs.
+func checkRelocatesClean(t *testing.T, btfPath string, progs []string) {
+	t.Helper()
+	res, err := corereloc.Relocate(internal.EmbeddedBPFObject(), "iormesh.bpf.o", btfPath, progs)
+	if err != nil {
+		t.Fatalf("relocate against BTF %q: %v", btfPath, err)
+	}
+	for _, name := range progs {
+		insns, ok := res.Insns[name]
+		if !ok {
+			t.Errorf("BTF %q: no relocated instructions for %s", btfPath, name)
+			continue
+		}
+		if at, ok := poisonedInsn(insns); ok {
+			t.Errorf("BTF %q: %s instruction %d is libbpf's poison call: a CO-RE relocation found "+
+				"no matching type or field in that BTF. Regenerate the trimmed el9 BTF "+
+				"(docs/testing.md, \"el9 record layout\")", btfPath, name, at)
+		}
+	}
 }
 
 // readsFieldAt reports whether the sorted record load offsets offs
