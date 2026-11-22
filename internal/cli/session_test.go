@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -235,6 +236,61 @@ func TestStartScanDropsVanished(t *testing.T) {
 	if !slices.Equal(tr.added, []uint32{4242}) || !slices.Equal(tr.removed, []uint32{4242}) || len(s.live) != 0 {
 		t.Fatalf("added %v removed %v live %v: want the vanished match inserted and removed",
 			tr.added, tr.removed, s.live)
+	}
+}
+
+// TestRunningTargetAttachArgv (task nh4): a process already running when
+// the session takes it on — a -pid target at start, a pattern's start-scan
+// match — has no exec, so its attach carries the argv and exe /proc shows,
+// read against the start time seeded and redacted; the planted secret is
+// nowhere in the events file. A pattern's exec adoption reads no
+// command line (its exec event follows), and a target whose command
+// cannot be read attaches without one.
+func TestRunningTargetAttachArgv(t *testing.T) {
+	fakeProcs(t, 10, 11, 20, 30)
+	processIdentity = func(pid uint32) correlate.Identity { return correlate.Identity{Comm: "java", StartNS: 500} }
+	var asked []uint32
+	procCommand = func(pid uint32, start uint64) ([]string, string) {
+		asked = append(asked, pid)
+		if pid == 11 || start != 500 {
+			return nil, "" // unreadable (hidepid, gone, reused)
+		}
+		return []string{"java", "-Dpassword=hunter2", "-jar", "app.jar"}, "/usr/bin/java"
+	}
+	dir := t.TempDir()
+	c := testCorrelator(t, dir)
+	pidSession(t, newFakeTracer(), c, 10, 11)
+	ps := newSession(newFakeTracer(), c,
+		runConfig{spec: target.Spec{Pattern: "*iormesh.test.NoSuchRestartApp*"}, project: "p"})
+	if err := ps.adoptRunning(20); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.handle(execRecord(30, 40, "/jdk/bin/java", "/jdk/bin/java",
+		"iormesh.test.NoSuchRestartApp")); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got := []string{}
+	for _, e := range readEvents(t, dir) {
+		if b, _ := json.Marshal(e); strings.Contains(string(b), "hunter2") {
+			t.Errorf("event %d holds the secret: %s", e.Seq, b)
+		}
+		if e.Event == schema.KindAttach {
+			a, _ := json.Marshal(e.Args)
+			got = append(got, fmt.Sprintf("%d %s", e.PID, a))
+		}
+	}
+	argv := `"path":"/usr/bin/java","argv":["java","-Dpassword=***","-jar","app.jar"]`
+	want := []string{`10 {` + argv + `}`, `11 {}`,
+		`20 {` + argv + `,"pattern":"*iormesh.test.NoSuchRestartApp*"}`,
+		`30 {"pattern":"*iormesh.test.NoSuchRestartApp*"}`}
+	if !slices.Equal(got, want) {
+		t.Fatalf("attach events\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if !slices.Equal(asked, []uint32{10, 11, 20}) {
+		t.Fatalf("command read for %v, want the running targets 10 11 20 only", asked)
 	}
 }
 

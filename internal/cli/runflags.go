@@ -104,6 +104,27 @@ var processIdentity = func(pid uint32) correlate.Identity {
 	return correlate.Identity{Comm: comm, StartNS: start}
 }
 
+// procCommand reads the argv and executable of pid while it is still the
+// incarnation that started at startNS (target.ProcFS.Command), both empty
+// when they cannot be read. A variable like processAlive.
+var procCommand = func(pid uint32, startNS uint64) ([]string, string) {
+	return target.HostProcFS().Command(pid, startNS)
+}
+
+// attachIdentity is processIdentity plus the command line and executable
+// of a process already running when the session takes it on (task nh4):
+// a -pid or port target at start, a pattern's start-scan match. It has
+// no exec event to carry them, so the correlator puts them, redacted, on
+// its attach (correlate.Identity). A process adopted by its exec does
+// not need it: the exec event follows.
+func attachIdentity(pid uint32) correlate.Identity {
+	id := processIdentity(pid)
+	if id.StartNS != 0 {
+		id.Argv, id.Exe = procCommand(pid, id.StartNS)
+	}
+	return id
+}
+
 // processStart returns pid's start time (processIdentity), 0 when it
 // cannot be read.
 func processStart(pid uint32) uint64 {

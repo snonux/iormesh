@@ -66,9 +66,19 @@ type procState struct {
 
 // Identity is a process incarnation as one /proc/<pid>/stat read saw it:
 // its comm and its start time on the boot clock (pid_incarnation).
+//
+// Argv and Exe are the command line and executable of a process already
+// running when the session took it on (task nh4): it has no exec event to
+// carry them, so its attach event does (attach). They are raw — the
+// caller read them from /proc/<pid>/cmdline and /proc/<pid>/exe, checked
+// against StartNS — and the correlator redacts them before the event
+// exists and keeps neither. Empty when unread: /proc could not be read,
+// or an exec event follows (a pattern's exec adoption).
 type Identity struct {
 	Comm    string
 	StartNS uint64
+	Argv    []string
+	Exe     string
 }
 
 // Seed tells the correlator who pid is, read by the caller when the

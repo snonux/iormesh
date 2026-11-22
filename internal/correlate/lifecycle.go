@@ -137,11 +137,22 @@ func (c *Correlator) Incarnation(pattern string, pid uint32, id Identity, gap ui
 
 // attach seeds pid as id and queues its attach event, stamped now (the
 // session took the process on now; its records come later). pattern is
-// the pattern session's, nil for a -pid or port target.
+// the pattern session's, nil for a -pid or port target. The executable
+// and argv the caller read for a process already running (task nh4) are
+// redacted here, before the event exists, by the policy Exec uses
+// (decision #9); either one absent stays absent.
 func (c *Correlator) attach(pid uint32, id Identity, pattern *string) *procState {
 	p := c.seed(pid, id)
 	ev := c.processEvent(schema.KindAttach, pid, p, c.cfg.Clock())
 	ev.Args.Pattern = pattern
+	if id.Exe != "" {
+		// A path, but one that may embed a URL like any argument.
+		exe := c.redact.Text(id.Exe)
+		ev.Args.Path = &exe
+	}
+	if len(id.Argv) > 0 {
+		ev.Args.Argv = c.redact.Argv(id.Argv)
+	}
 	c.enqueue(ev, nil)
 	return p
 }

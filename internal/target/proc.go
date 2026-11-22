@@ -105,6 +105,34 @@ func (p ProcFS) Exe(pid uint32) string {
 	return exe
 }
 
+// Command returns the argv and executable of pid for the attach event of
+// a process already running when the session took it on (task nh4),
+// only while pid is still the incarnation that started at startNS: the
+// two reads come after the caller's stat read, and a process that exited
+// meanwhile and had its PID reused would otherwise lend the target a
+// stranger's command line. The stat is re-read after both, so a reuse
+// before or between them is caught; one after them is harmless. Any
+// failure — the process gone, hidepid, another pid namespace, a kernel
+// thread or zombie (empty cmdline, no exe link) — leaves that part
+// empty, never an error: the attach goes on without it. Both reads only
+// read (cmdline a file, exe a link that is read, not followed). The
+// result is raw — a secret's carrier, redacted by the correlator and
+// never logged.
+func (p ProcFS) Command(pid uint32, startNS uint64) (argv []string, exe string) {
+	if startNS == 0 {
+		return nil, ""
+	}
+	argv, err := p.Cmdline(pid)
+	if err != nil || len(argv) == 0 {
+		argv = nil
+	}
+	exe = p.Exe(pid)
+	if st, err := p.Stat(pid); err != nil || st.StartNS != startNS {
+		return nil, ""
+	}
+	return argv, exe
+}
+
 // Tgid returns the thread group pid belongs to. /proc/<tid> resolves for
 // a thread id too, although no listing shows it, so a PID that is really
 // some process's thread is told apart by its Tgid.
