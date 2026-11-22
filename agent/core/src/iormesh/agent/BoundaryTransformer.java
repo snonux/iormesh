@@ -75,14 +75,20 @@ final class BoundaryTransformer implements ClassFileTransformer {
         if (className == null || !table.hasClass(className)) {
             return null;
         }
-        seen.add(className);
-        ClassReader reader = new ClassReader(bytes);
-        // Passing the reader lets ASM copy unchanged methods verbatim;
-        // COMPUTE_MAXS only adds the bracket's stack slots.
-        ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
-        Rewriter rewriter = new Rewriter(writer, className);
-        reader.accept(rewriter, 0);
-        return rewriter.rewritten == 0 ? null : writer.toByteArray();
+        try {
+            ClassReader reader = new ClassReader(bytes);
+            // Passing the reader lets ASM copy unchanged methods verbatim;
+            // COMPUTE_MAXS only adds the bracket's stack slots.
+            ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
+            Rewriter rewriter = new Rewriter(writer, className);
+            reader.accept(rewriter, 0);
+            return rewriter.rewritten == 0 ? null : writer.toByteArray();
+        } finally {
+            // Seen only once every applied id of the class is recorded:
+            // a reader that takes seen before applied (Agent's
+            // reportUnapplied) never sees a half-rewritten class.
+            seen.add(className);
+        }
     }
 
     /**

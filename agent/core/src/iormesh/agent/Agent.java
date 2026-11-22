@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.lang.instrument.Instrumentation;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The iormesh Java agent (M3): brackets the JDK's I/O boundary methods
@@ -89,9 +90,19 @@ public final class Agent {
         }
         BoundaryTransformer transformer = prepare(args, table, bridge);
         HttpTransformer http = prepareHttp(inst, bridge);
+        // Ids of the rows reported as matching no method, so the exit
+        // hook names only those whose class loaded after install.
+        Set<Integer> reported = ConcurrentHashMap.newKeySet();
         Runtime.getRuntime().addShutdownHook(new Thread(
-                () -> atExit(args, table, transformer, http, bridge), "iormesh-agent-exit"));
+                () -> atExit(args, table, transformer, http, bridge, reported),
+                "iormesh-agent-exit"));
         retransform(inst, table, transformer);
+        // Most listed classes are loaded by now, so a table/JDK mismatch
+        // shows at install. A class first loaded later (sun.nio.ch.Net
+        // before the app's first socket) is reported at exit instead:
+        // the transformer runs inside the target's class loading and
+        // stays quiet there.
+        reportUnapplied(table, transformer, reported, System.err);
         retransformHttp(inst, http);
         if (args.spool() != null) {
             installOtel(inst, bridge);
@@ -215,12 +226,14 @@ public final class Agent {
      * At JVM exit: a last watermark — every bracket closed so far is in
      * the ring, so the joiner need not time out — then the ring file is
      * unlinked (task 2j4: a tracer that reads it has it mapped; a dead
-     * JVM's file would otherwise stay in the spool), then the debug dump.
+     * JVM's file would otherwise stay in the spool), then the rows that
+     * matched no method in a class first loaded after install (task
+     * bj4; install reported the others), then the debug dump.
      * A JVM killed without its shutdown hooks leaves the file to the
      * tracer, which removes rings whose process is gone.
      */
     private static void atExit(AgentArgs args, HookTable table, BoundaryTransformer t,
-                               HttpTransformer http, Bridge bridge) {
+                               HttpTransformer http, Bridge bridge, Set<Integer> reported) {
         try {
             bridge.agentThread();  // the dump's own I/O is not the target's
             bridge.watermark();
@@ -232,6 +245,7 @@ public final class Agent {
         } catch (ReflectiveOperationException e) {
             System.err.println("iormesh-agent: removing the ring failed: " + e.getCause());
         }
+        reportUnapplied(table, t, reported, System.err);
         if (args.debug() != null) {
             writeDebug(args.debug(), table, t, http, bridge);
         }
@@ -254,6 +268,35 @@ public final class Agent {
         } catch (Exception | Error e) {
             inst.removeTransformer(transformer);
             throw e;
+        }
+    }
+
+    /**
+     * One stderr line per table row whose class the transformer has
+     * been handed but whose method it did not rewrite (task bj4): the
+     * table's exact descriptor matches no method of this JDK, so that
+     * kind of I/O stays attribution none. Before this the drift showed
+     * only in the debug= dump. Rows of a class never loaded print
+     * nothing (it may load later, or not exist in this JDK at all), and
+     * a table that matches prints nothing — the success path is silent.
+     * A row already in reported is skipped and a printed one is added,
+     * so install and exit name each row once.
+     *
+     * seen is read before applied: the transformer marks a class seen
+     * only after its rewrite, so a class being rewritten concurrently
+     * (a live attach while the app loads it) is not mistaken for one
+     * whose methods are missing.
+     */
+    static void reportUnapplied(HookTable table, BoundaryTransformer t, Set<Integer> reported,
+                                PrintStream err) {
+        Set<String> seen = t.seen();
+        Set<Integer> applied = t.applied();
+        for (HookTable.Hook h : table.hooks()) {
+            if (seen.contains(h.owner()) && !applied.contains(h.id()) && reported.add(h.id())) {
+                err.println("iormesh-agent: hook " + h.id() + " (" + h.kind() + ") " + h.key()
+                        + " matches no method in this JDK (java " + Runtime.version().feature()
+                        + ", table " + table.variant() + "), no attribution for it");
+            }
         }
     }
 
@@ -288,7 +331,8 @@ public final class Agent {
      * Writes the debug dump (agent option debug=<path>): one line per
      * table row with its status and closed-bracket count. Status is
      * "applied" (method rewritten), "missing" (its class was seen but has
-     * no such method — the table does not match this JDK) or "unloaded"
+     * no such method — the table does not match this JDK; such a row was
+     * also reported on stderr) or "unloaded"
      * (its class never loaded, so nothing to rewrite yet).
      */
     private static void writeDebug(String path, HookTable table, BoundaryTransformer t,
