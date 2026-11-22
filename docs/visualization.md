@@ -444,9 +444,11 @@ trace, never re-inferred:
   ```
 
   the run's host, its kernel thread, its file (globs escaped to
-  match only themselves, every word shell-quoted) and its window,
-  from the first call's instant to just past the last's (`-to` is
-  exclusive). `-file` follows an fd opened from the path even
+  match only themselves, every word shell-quoted; a rune that is
+  not printable, or an invalid byte, becomes the wildcard `?`, so
+  the command is printable as built and no surface re-quotes it)
+  and its window, from the first call's instant to just past the
+  last's (`-to` is exclusive). `-file` follows an fd opened from the path even
   before the window, so reads on an fd the process opened at its
   start are printed; anything else the thread did to that file
   between the calls (a close, a stat) is printed with them.

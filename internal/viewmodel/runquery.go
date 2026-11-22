@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // runQuery is the `iormeshctl query` that prints every call of a folded
@@ -16,7 +18,11 @@ import (
 // between the run's calls (a close, a stat) is printed with them. The
 // host, thread and path come from the servers: each is a glob escaped
 // to match only itself, and the command is quoted into inert shell
-// words, so pasting it runs nothing else.
+// words, so pasting it runs nothing else. Every rune of the result is
+// printable (globLiteral turns the others into '?'), so no surface
+// passes it through termsafe.String: Go-quoting the finished command
+// would break its single quotes and make the path's text shell code
+// (task 1i4).
 func runQuery(host string, tid uint32, path string, first, last uint64) string {
 	words := []string{"iormeshctl", "query", "-host", globLiteral(host),
 		"-thread", strconv.FormatUint(uint64(tid), 10), "-file", globLiteral(path),
@@ -33,16 +39,31 @@ func instant(ns uint64) string {
 }
 
 // globLiteral escapes path.Match's metacharacters, so the glob matches
-// s alone.
+// s alone, except that each rune wild reports becomes the wildcard '?':
+// the glob then also matches names differing from s only there, but it
+// is printable, so it can be shown and pasted as is (task 1i4).
+// path.Match's '?' matches one rune or one invalid byte, as range
+// yields them.
 func globLiteral(s string) string {
 	var b strings.Builder
 	for _, r := range s {
+		if wild(r) {
+			b.WriteByte('?')
+			continue
+		}
 		if strings.ContainsRune(`*?[]\`, r) {
 			b.WriteByte('\\')
 		}
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// wild reports whether r, as range over a string yields it, cannot be
+// printed: a control or format (bidi) rune, or utf8.RuneError, which
+// stands for an invalid byte (a real U+FFFD is caught with it).
+func wild(r rune) bool {
+	return !unicode.IsPrint(r) || r == utf8.RuneError
 }
 
 // shellWord is s as one inert POSIX shell word: as is when it holds only

@@ -190,7 +190,10 @@ func stepLine(s Step, to string) string {
 
 // safeConversation is c with every string terminal-safe (safeModel's
 // rule): service names, threads, paths, frames and refs all come from
-// the servers.
+// the servers. A step's RunQuery is never Go-quoted: it is a finished
+// shell command, and quoting it would break its single quotes, making a
+// path's text shell code once pasted (task 1i4). runQuery builds it
+// from printable runes only; safeCommand only guards that.
 func safeConversation(c Conversation) Conversation {
 	s := termsafe.String
 	c.ID, c.Entry, c.Label, c.Services = s(c.ID), s(c.Entry), s(c.Label), safeAll(c.Services)
@@ -203,8 +206,21 @@ func safeConversation(c Conversation) Conversation {
 		x := &c.Steps[i]
 		x.Kind, x.Service, x.Host, x.Thread, x.To = s(x.Kind), s(x.Service), s(x.Host), s(x.Thread), s(x.To)
 		x.Label, x.Ordering, x.Hop, x.Ref = s(x.Label), s(x.Ordering), s(x.Hop), s(x.Ref)
-		x.LastRef, x.RunQuery = s(x.LastRef), s(x.RunQuery)
+		x.LastRef, x.RunQuery = s(x.LastRef), safeCommand(x.RunQuery)
 		x.Stack = safeAll(x.Stack)
 	}
 	return c
+}
+
+// safeCommand is cmd, a shell command meant to be pasted, with each
+// rune wild reports replaced by '?'. Unlike termsafe.String it
+// adds no quote or backslash, so the command's shell quoting stays as
+// built; runQuery's output passes through unchanged.
+func safeCommand(cmd string) string {
+	return strings.Map(func(r rune) rune {
+		if wild(r) {
+			return '?'
+		}
+		return r
+	}, cmd)
 }

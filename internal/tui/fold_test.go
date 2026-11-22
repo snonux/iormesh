@@ -34,3 +34,21 @@ func TestFoldedStepDetail(t *testing.T) {
 		t.Errorf("a single call's detail is qualified:\n%s", s)
 	}
 }
+
+// TestWholeRunKeepsShellQuoting (task 1i4): the TUI's model goes through
+// viewmodel.Safe, which must not Go-quote a run's query — that broke its
+// single quotes, so pasting it ran the path's text. A rune that is not
+// printable becomes '?' and the quoting stays as built.
+func TestWholeRunKeepsShellQuoting(t *testing.T) {
+	q := `iormeshctl query -file '/up/x'\'';echo>PWNED;'\''x` + "\x01'"
+	run := viewmodel.Step{Kind: viewmodel.StepFile, Label: "read /m (2 calls)", Count: 2,
+		Ref: "p/h/s/10", LastRef: "p/h/s/11", RunQuery: q, Lane: -1, ToLane: -1}
+	m := New(viewmodel.Model{Conversations: []viewmodel.Conversation{{ID: "0001",
+		Steps: []viewmodel.Step{run}}}})
+	var b strings.Builder
+	stepDetail(&b, m.vm.Conversations[0], 0)
+	want := "whole run  " + strings.Replace(q, "\x01", "?", 1) + "\n"
+	if !strings.Contains(b.String(), want) {
+		t.Errorf("whole run line is not %q:\n%s", want, b.String())
+	}
+}

@@ -647,7 +647,8 @@
 
   // cmdBox shows a ready-made command under title with a copy button. A
   // folded run's query comes quoted from the model (viewmodel
-  // runQuery: escaped globs, inert shell words).
+  // runQuery: escaped globs, inert shell words, printable runes only,
+  // so clean leaves it unchanged).
   function cmdBox(d, title, cmd) {
     const pre = el('pre', 'cmd', cmd);
     const msg = el('span', 'muted');

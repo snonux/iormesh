@@ -137,7 +137,9 @@ func (m *Model) listConversations(b *strings.Builder, sc scope) {
 
 // stepDetail is one step of c in full: its lifelines, how it is ordered
 // and joined, sizes, the whole Java stack and the query that prints its
-// raw event — the bottom of the walk from the mesh.
+// raw event — the bottom of the walk from the mesh. A folded run's
+// whole-run query is printed as built (viewmodel.Safe leaves its shell
+// quoting intact, task 1i4), ready to paste.
 func stepDetail(b *strings.Builder, c viewmodel.Conversation, i int) {
 	s := c.Steps[i]
 	fmt.Fprintf(b, "step       %d of conversation %s (%s)\n", i+1, c.ID, s.Kind)
