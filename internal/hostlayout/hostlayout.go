@@ -26,19 +26,25 @@ const (
 	// SudoersFile only when it starts with this line: a rule laid down
 	// by configuration management (without it) is left alone.
 	SudoersMarker = "# iormesh: installed by iormeshctl bootstrap; iormesh uninstall removes it"
-	// RuleSuffix is the rule after the user name. It holds no shell
-	// metacharacter that double quotes would interpret (bootstrap's
-	// printed steps quote it so).
+	// RuleSuffix is the rule after the user name.
 	RuleSuffix = " ALL=(root) NOPASSWD: " + Binary
 )
 
-// sudoUser is a user name a sudoers rule may carry unquoted: no sudoers
-// special character (`,` `:` `=` `!` `#` `%` `+` spaces, quotes or a
-// backslash), not starting with `-`.
-var sudoUser = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,31}$`)
+var (
+	// sudoUser is a user name a sudoers rule may carry unquoted: no
+	// sudoers special character (`,` `:` `=` `!` `#` `%` `+` spaces,
+	// quotes or a backslash), not starting with `-`.
+	sudoUser = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,31}$`)
+	// sudoAlias is what sudoers reads as an alias name, not a user: an
+	// upper-case letter, then upper-case letters, digits and `_` — "ALL"
+	// (every user) among them. A rule naming one would grant whoever the
+	// alias (or ALL) covers, not one user.
+	sudoAlias = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+)
 
-// ValidUser reports whether user may be named in the rule.
-func ValidUser(user string) bool { return sudoUser.MatchString(user) }
+// ValidUser reports whether user may be named in the rule: exactly one
+// user, never ALL or an alias.
+func ValidUser(user string) bool { return sudoUser.MatchString(user) && !sudoAlias.MatchString(user) }
 
 // Rule is the one sudoers rule for user: run the installed binary, and
 // nothing else, as root without a password.

@@ -177,6 +177,22 @@ func TestBootstrapPrintsSteps(t *testing.T) {
 	}
 }
 
+// TestBootstrapPrintDefaultUserFromHost: without -user, a registry host
+// written user@host names its SSH user, so the printed rule grants that
+// user — not the controller's own name (review of qh4). -user still wins.
+func TestBootstrapPrintDefaultUserFromHost(t *testing.T) {
+	f := newBootstrapFixture(t)
+	f.mustRun(t, "add", "-project", "shop", "-pattern", "*orders*", "ops@app3")
+	f.mustRun(t, "bootstrap", "-dist", f.dist, "ops@app3")
+	if out := f.stdout.String(); !strings.Contains(out, "'"+hostlayout.Rule("ops")+"'") {
+		t.Errorf("printed rule does not name ops from ops@app3:\n%s", out)
+	}
+	f.mustRun(t, "bootstrap", "-dist", f.dist, "-user", "deploy", "ops@app3")
+	if out := f.stdout.String(); !strings.Contains(out, "'"+hostlayout.Rule("deploy")+"'") {
+		t.Errorf("-user deploy not used:\n%s", out)
+	}
+}
+
 // TestBootstrapRefusals: each refusal names its cause and installs
 // nothing — no push, no privileged install.
 func TestBootstrapRefusals(t *testing.T) {
@@ -201,6 +217,8 @@ func TestBootstrapRefusals(t *testing.T) {
 		{name: "bad user", args: []string{"-apply", "app1"},
 			answers: map[string]reply{"app1 id -un": {out: "ops,root\n"}}, want: "user name"},
 		{name: "bad -user", args: []string{"-user", "a b", "app1"}, want: "-user", code: exitUsage},
+		{name: "-user ALL", args: []string{"-user", "ALL", "app1"}, want: "-user", code: exitUsage},
+		{name: "-user alias", args: []string{"-user", "OPS", "app1"}, want: "-user", code: exitUsage},
 		{name: "bad -arch", args: []string{"-arch", "mips", "app1"}, want: "-arch", code: exitUsage},
 		{name: "two hosts", args: []string{"app1", "app2"}, want: "exactly one HOST", code: exitUsage},
 		{name: "unsigned build", args: []string{"-apply", "app1"},

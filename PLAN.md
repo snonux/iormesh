@@ -2890,7 +2890,10 @@ deferred.
   `-apply` it contacts nothing and prints the exact steps,
   with the hashes of the build it verified, for the arch and
   SSH user `-arch` and `-user` name (default amd64 and the
-  controller's own user name, ssh's default login); with
+  registry host's `user@` part, else the controller's own user
+  name, ssh's default login — a `User` in `~/.ssh/config` is
+  not seen); the rule's user must be one user, never `ALL` or
+  an all-caps alias name (sudoers would widen it); with
   `-apply` it reads both from the host (`uname -m`, `id -un`;
   a flag that disagrees is refused) and runs the same steps
   over the Transport. Interactive sudo over ssh needs

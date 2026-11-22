@@ -104,8 +104,8 @@ func parseBootstrapFlags(args []string, e env) (bootstrapFlags, error) {
 	fs.StringVar(&f.dist, "dist", defaultDist, "directory holding iormesh-linux-<arch> and its "+release.SigSuffix)
 	fs.StringVar(&f.keyPath, "key", "", "pinned minisign public key (default ~/.config/iormesh/"+keyFileName+")")
 	fs.StringVar(&f.arch, "arch", "", "the host's arch, amd64 or arm64 (default: amd64; -apply reads it from the host)")
-	fs.StringVar(&f.user, "user", "", "the SSH user the sudoers rule names (default: your user name; "+
-		"-apply reads it from the host)")
+	fs.StringVar(&f.user, "user", "", "the SSH user the sudoers rule names (default: HOST's user@ part, "+
+		"else your user name — a User in ~/.ssh/config is not seen; -apply reads it from the host)")
 	fs.BoolVar(&f.apply, "apply", false, "run the steps over SSH with your own sudo -n instead of printing them")
 	if err := fs.Parse(args); err != nil {
 		return f, fmt.Errorf("%w: %w", errUsage, err)
@@ -311,9 +311,9 @@ func printBootstrap(e env, f bootstrapFlags, key minisign.PublicKey) error {
 		arch = defaultBootstrapArch
 	}
 	if login == "" {
-		login = localUser()
+		login = defaultLogin(f.host)
 		if !hostlayout.ValidUser(login) {
-			return fmt.Errorf("%w: your user name %q cannot be named in a sudoers rule: pass -user", errUsage, login)
+			return fmt.Errorf("%w: SSH user name %q cannot be named in a sudoers rule: pass -user", errUsage, login)
 		}
 	}
 	b, err := loadBundle(f.dist, arch, login, key)
@@ -326,7 +326,18 @@ func printBootstrap(e env, f bootstrapFlags, key minisign.PublicKey) error {
 	return nil
 }
 
-// localUser is the controller's user name, ssh's default login.
+// defaultLogin is the SSH user the printed rule names without -user: the
+// user@ part of a registry host written so (federate's hostName allows
+// it), else the controller's own user name, ssh's default login. A User
+// set in ~/.ssh/config is not seen: -user names it then.
+func defaultLogin(host string) string {
+	if u, _, ok := strings.Cut(host, "@"); ok {
+		return u
+	}
+	return localUser()
+}
+
+// localUser is the controller's user name.
 func localUser() string {
 	u, err := user.Current()
 	if err != nil {

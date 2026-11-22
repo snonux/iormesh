@@ -364,7 +364,8 @@ path and opens it with xdg-open (open on macOS) when there is one.
 deploy only upgrades a tracer already installed on the host (PLAN.md
 decision #1); bootstrap is the first install of a registered host with
 your own sudo: it prints the exact steps (for -arch, default amd64, and
-the SSH user -user, default yours) and contacts nothing, or with -apply
+the SSH user -user, default HOST's user@ part or yours; a User in
+~/.ssh/config is not seen) and contacts nothing, or with -apply
 runs them over ssh with sudo -n, which needs sudo without a password.
 rm's uninstall removes the sudoers rule bootstrap installed. status asks every target's tracer (sudo iormesh status, or
 iormesh ready -status in a pod) and prints one row per project; list

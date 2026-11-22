@@ -27,23 +27,24 @@ func TestSudoersContent(t *testing.T) {
 	if got := SudoersContent("ops"); got != want {
 		t.Errorf("SudoersContent = %q, want %q", got, want)
 	}
-	// The printed steps put RuleSuffix in double quotes.
-	if strings.ContainsAny(RuleSuffix, "\"$`\\!") {
-		t.Errorf("RuleSuffix %q holds a character double quotes interpret", RuleSuffix)
-	}
-	if strings.ContainsAny(SudoersMarker, "'\n") {
-		t.Errorf("SudoersMarker %q holds a quote or newline", SudoersMarker)
+	// The rule file is two lines: the marker, then the rule. A newline in
+	// either would split a line the printed printf step writes.
+	if strings.Contains(RuleSuffix, "\n") || strings.Contains(SudoersMarker, "\n") {
+		t.Errorf("RuleSuffix %q or SudoersMarker %q holds a newline", RuleSuffix, SudoersMarker)
 	}
 }
 
 func TestValidUser(t *testing.T) {
-	for _, u := range []string{"ops", "deploy", "a.b-c_d", "_svc"} {
+	for _, u := range []string{"ops", "deploy", "a.b-c_d", "_svc", "Ops", "oPS", "OPS-1", "A.B"} {
 		if !ValidUser(u) {
 			t.Errorf("ValidUser(%q) = false", u)
 		}
 	}
 	for _, u := range []string{"", "-ops", "ops,root", "ops ALL", "%wheel", "a:b", "a=b", "#0", "a\nb",
-		"ops\\", "\"ops\"", strings.Repeat("a", 33)} {
+		"ops\\", "\"ops\"", strings.Repeat("a", 33),
+		// sudoers reads ALL as everyone and an all-caps word as a
+		// User_Alias: either would widen the rule beyond one user.
+		"ALL", "OPS", "A", "DEPLOY_2", "X9"} {
 		if ValidUser(u) {
 			t.Errorf("ValidUser(%q) = true", u)
 		}
