@@ -15,6 +15,7 @@ import (
 	"aead.dev/minisign"
 
 	"iormesh/internal/federate"
+	"iormesh/internal/hostlayout"
 	"iormesh/internal/k8s"
 	"iormesh/internal/release"
 	"iormesh/internal/termsafe"
@@ -28,8 +29,9 @@ import (
 //  1. preflight: uname -m picks the build (amd64/arm64); rsync and
 //     systemd-run must be there (decision #12: fail fast), and so must the
 //     installed tracer — deploy only upgrades: the first install needs the
-//     operator's own sudo or configuration management (decision #1), and
-//     deploy says so instead of pretending otherwise;
+//     operator's own sudo (iormeshctl bootstrap, bootstrap.go) or
+//     configuration management (decision #1), and deploy says so instead
+//     of pretending otherwise;
 //  2. verify dist/iormesh-linux-<arch> and its .minisig against the pinned
 //     key (decision #28) — before anything is pushed; when a project of
 //     the host uses the Java agent (-spool or -agent), verify
@@ -53,8 +55,9 @@ import (
 // stop, status); never -allow-downgrade, which is root's alone.
 
 const (
-	// installedTracer is the binary the sudoers rule names.
-	installedTracer = "/opt/iormesh/bin/iormesh"
+	// installedTracer is the binary the sudoers rule names, from
+	// internal/hostlayout like the rule bootstrap installs.
+	installedTracer = hostlayout.Binary
 	// stagingRel is the staging directory under the login user's home on
 	// the server: private to the user and not shared like /tmp, where
 	// another user could pre-create the name.
@@ -304,6 +307,23 @@ func (d deployer) host(ctx context.Context, srv federate.Server) error {
 // preflight returns the server's Go arch and checks the tools deploy and
 // collect need and the installed tracer are there.
 func preflight(ctx context.Context, t federate.Transport) (string, error) {
+	arch, err := hostArch(ctx, t)
+	if err != nil {
+		return "", err
+	}
+	if err := checkTools(ctx, t); err != nil {
+		return "", err
+	}
+	if _, err := t.Run(ctx, "test", "-x", installedTracer); err != nil {
+		return "", fmt.Errorf("%s is not installed: deploy only upgrades an installed tracer; "+
+			"the first install takes the operator's own sudo (iormeshctl bootstrap) or configuration "+
+			"management (PLAN.md decision #1, docs/security.md): %w", installedTracer, err)
+	}
+	return arch, nil
+}
+
+// hostArch maps the server's `uname -m` to the Go arch of its build.
+func hostArch(ctx context.Context, t federate.Transport) (string, error) {
 	out, err := t.Run(ctx, "uname", "-m")
 	if err != nil {
 		return "", err
@@ -313,18 +333,20 @@ func preflight(ctx context.Context, t federate.Transport) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("unsupported architecture %q: iormesh ships linux amd64 and arm64", machine)
 	}
+	return arch, nil
+}
+
+// checkTools fails fast when a tool deploy and collect need is missing
+// (decision #12); bootstrap runs it too, so a host it installs can be
+// deployed to.
+func checkTools(ctx context.Context, t federate.Transport) error {
 	// command is a shell builtin; Run's quoting leaves it one.
 	for _, tool := range []string{"rsync", "systemd-run"} {
 		if _, err := t.Run(ctx, "command", "-v", tool); err != nil {
-			return "", fmt.Errorf("%s not found on the server, deploy and collect need it: %w", tool, err)
+			return fmt.Errorf("%s not found on the server, deploy and collect need it: %w", tool, err)
 		}
 	}
-	if _, err := t.Run(ctx, "test", "-x", installedTracer); err != nil {
-		return "", fmt.Errorf("%s is not installed: deploy only upgrades an installed tracer; "+
-			"the first install takes the operator's own sudo or configuration management "+
-			"(PLAN.md decision #1, docs/security.md): %w", installedTracer, err)
-	}
-	return arch, nil
+	return nil
 }
 
 // verify checks the local build for arch against the pinned key and
@@ -361,19 +383,8 @@ func printVerified(w io.Writer, path string, m release.Meta) {
 // would depend on sudo keeping the working directory, which a `Defaults
 // runcwd` in sudoers changes.
 func stage(ctx context.Context, t federate.Transport, files ...string) ([]string, error) {
-	// Every ssh command starts in the login user's home; pwd names it.
-	out, err := t.Run(ctx, "pwd")
+	dir, err := stagingDir(ctx, t)
 	if err != nil {
-		return nil, err
-	}
-	home := strings.TrimSpace(string(out))
-	if !homePath.MatchString(home) || strings.Contains(home, "..") {
-		return nil, fmt.Errorf("home directory %q: want an absolute path of [A-Za-z0-9._/-]", home)
-	}
-	dir := path.Join(home, stagingRel)
-	// -m applies to the last component only; staging/ is the directory
-	// the files land in, so that one is kept private.
-	if _, err := t.Run(ctx, "mkdir", "-p", "-m", "0700", dir); err != nil {
 		return nil, err
 	}
 	var push, staged []string
@@ -385,6 +396,27 @@ func stage(ctx context.Context, t federate.Transport, files ...string) ([]string
 		return nil, err
 	}
 	return staged, nil
+}
+
+// stagingDir creates the login user's private staging directory on the
+// server and returns its absolute path (deploy's stage, bootstrap).
+func stagingDir(ctx context.Context, t federate.Transport) (string, error) {
+	// Every ssh command starts in the login user's home; pwd names it.
+	out, err := t.Run(ctx, "pwd")
+	if err != nil {
+		return "", err
+	}
+	home := strings.TrimSpace(string(out))
+	if !homePath.MatchString(home) || strings.Contains(home, "..") {
+		return "", fmt.Errorf("home directory %q: want an absolute path of [A-Za-z0-9._/-]", home)
+	}
+	dir := path.Join(home, stagingRel)
+	// -m applies to the last component only; staging/ is the directory
+	// the files land in, so that one is kept private.
+	if _, err := t.Run(ctx, "mkdir", "-p", "-m", "0700", dir); err != nil {
+		return "", err
+	}
+	return dir, nil
 }
 
 // project starts one project's session. A live session deploy started

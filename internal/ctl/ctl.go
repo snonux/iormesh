@@ -6,15 +6,18 @@
 //	iormeshctl deploy [-project NAME] [-registry FILE] [-dist DIR] [-key FILE] [-restart] [K8S]
 //	                  [-image IMG] [-selinux-type TYPE] [-selinux-level LEVEL] [-attach-timeout D]
 //	                  HOST|POD...
+//	iormeshctl bootstrap [-apply] [-registry FILE] [-dist DIR] [-key FILE] [-arch ARCH] [-user NAME] HOST
 //	iormeshctl status [-project NAME]... [-registry FILE] [K8S] [HOST|POD...]
+//	iormeshctl ensure [-project NAME]... [-registry FILE] [-store DIR] [HOST...]
 //	iormeshctl list [-registry FILE]
 //	iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-routes FILE]
-//	                 [-registry FILE] [-namespace NS]
+//	                 [-registry FILE] [-namespace NS] [-from T] [-to T] [-last DUR]
+//	iormeshctl prune -older-than DUR [-project NAME]... [-store DIR] [-apply]
 //	iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR] [K8S]
 //	                   [HOST|POD...]
 //	iormeshctl show [summary|services|edges|health|conversations|sequence [ID]|thread [SERVICE/THREAD]|
 //	                processes|report] [-project NAME]... [-store DIR] [-builds DIR] [-json] [-unresolved]
-//	                [-namespace NS]
+//	                [-namespace NS] [-windowed]
 //	iormeshctl open [-project NAME]... [-store DIR] [-builds DIR]
 //	iormeshctl tui [-project NAME]... [-store DIR] [-builds DIR]
 //	iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
@@ -44,12 +47,18 @@
 // (internal/release, decision #28); deploy verifies the tracer build,
 // stages it on registered hosts over the Transport, upgrades the installed
 // tracer through the sudoers rule and starts the projects (deploy.go).
-// status prints a table of each target's tracer state from the tracers'
+// bootstrap is the first install deploy cannot do: it prints the steps
+// that lay down the tracer, the pinned key and the sudoers rule with the
+// operator's own sudo, or runs them with -apply (bootstrap.go, decision
+// #1). status prints a table of each target's tracer state from the tracers'
 // own status reports (status.go), and list prints the registry (list.go).
+// ensure restarts the sessions that ended on their own and collects, for
+// tracing over days from a timer (ensure.go).
 // build merges the collected segments offline into the merged graph
 // export, the service database and the view model, and refresh is
-// collect then build (build.go); show prints the last build's view
-// model as text (show.go, internal/viewmodel); open opens the newest
+// collect then build (build.go; a time window, window.go); prune deletes
+// old segments from the store on the operator's word (prune.go); show
+// prints the last build's view model as text (show.go, internal/viewmodel); open opens the newest
 // local site a build wrote (open.go, internal/site); tui explores the same
 // model in a terminal (tui.go, internal/tui); query cuts the merged
 // trace into a size-capped NDJSON slice (query.go, internal/query). expand
@@ -117,6 +126,9 @@ type env struct {
 	// A nil terminal is no terminal.
 	terminal func() bool
 	tui      func(viewmodel.Model) error
+	// now is the clock build -last and prune -older-than count back
+	// from (window.go); nil is time.Now. Tests fix it.
+	now func() time.Time
 	// hostTimeout bounds everything one command does on one host
 	// (onHost); zero is defaultHostTimeout. Tests shorten it.
 	hostTimeout time.Duration
@@ -134,6 +146,14 @@ func (e env) root() context.Context {
 		return context.Background()
 	}
 	return e.ctx
+}
+
+// clock is the current time, by e.now or time.Now.
+func (e env) clock() time.Time {
+	if e.now == nil {
+		return time.Now()
+	}
+	return e.now()
 }
 
 // defaultEnv is the real environment: the registry at
@@ -227,7 +247,9 @@ var commands = map[string]func([]string, env) error{
 	"rm":         rmCommand,
 	"collect":    collectCommand,
 	"deploy":     deployCommand,
+	"bootstrap":  bootstrapCommand,
 	"status":     statusCommand,
+	"ensure":     ensureCommand,
 	"list":       listCommand,
 	"build":      buildCommand,
 	"refresh":    refreshCommand,
@@ -235,6 +257,7 @@ var commands = map[string]func([]string, env) error{
 	"open":       openCommand,
 	"expand":     expandCommand,
 	"query":      queryCommand,
+	"prune":      pruneCommand,
 	"tui":        tuiCommand,
 	checkCommand: checkSegmentCommand, // build's child, not for operators (check.go)
 	"services":   servicesCommand,
@@ -318,14 +341,18 @@ func usage(w io.Writer) {
   iormeshctl deploy [-project NAME] [-registry FILE] [-dist DIR] [-key FILE] [-restart]
                     [K8S] [-image IMG] [-selinux-type TYPE] [-selinux-level LEVEL]
                     [-attach-timeout D] HOST|POD...
+  iormeshctl bootstrap [-apply] [-registry FILE] [-dist DIR] [-key FILE] [-arch ARCH]
+                       [-user NAME] HOST
   iormeshctl status [-project NAME]... [-registry FILE] [K8S] [HOST|POD...]
+  iormeshctl ensure [-project NAME]... [-registry FILE] [-store DIR] [HOST...]
   iormeshctl list [-registry FILE]
   iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-routes FILE]
-                   [-registry FILE] [-namespace NS]
+                   [-registry FILE] [-namespace NS] [-from T] [-to T] [-last DUR]
+  iormeshctl prune -older-than DUR [-project NAME]... [-store DIR] [-apply]
   iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR]
                      [-routes FILE] [K8S] [HOST|POD...]
   iormeshctl show [VIEW] [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-json] [-unresolved]
-                  [-namespace NS]
+                  [-namespace NS] [-windowed]
       VIEW: summary (default) | services | edges | health | conversations
             | sequence [ID] | thread [SERVICE/THREAD] | processes | report
   iormeshctl open [-project NAME]... [-store DIR] [-db FILE] [-builds DIR]
@@ -355,9 +382,19 @@ model.json, report.json and sites/<run>/index.html, one site folder per
 run, kept until deleted), dist/ to ./dist. open prints the newest site's
 path and opens it with xdg-open (open on macOS) when there is one.
 deploy only upgrades a tracer already installed on the host (PLAN.md
-decision #1). status asks every target's tracer (sudo iormesh status, or
+decision #1); bootstrap is the first install of a registered host with
+your own sudo: it prints the exact steps (for -arch, default amd64, and
+the SSH user -user, default HOST's user@ part or yours; a User in
+~/.ssh/config is not seen) and contacts nothing, or with -apply
+runs them over ssh with sudo -n, which needs sudo without a password.
+rm's uninstall removes the sudoers rule bootstrap installed. status asks every target's tracer (sudo iormesh status, or
 iormesh ready -status in a pod) and prints one row per project; list
-prints the registry. collect without HOST collects every registered host; rm
+prints the registry. ensure, per host (every registered one without
+HOST), starts again every session that ended on its own (duration,
+targets gone, error, reboot, crash), never one stopped with iormesh
+stop, then collects; a disk_limit end restarts only once the collect
+emptied its ready/. It never upgrades and starts no project the host
+never ran, so it is safe from a timer (docs/architecture.md). collect without HOST collects every registered host; rm
 stops, syncs off and uninstalls before it unregisters, and refuses to
 uninstall over traces it could not sync unless -force. build (and
 refresh, which is collect then build) merges every project in the store
@@ -368,7 +405,15 @@ never the segments: -project picks the build of exactly those projects
 -project wrote it; -db is accepted and unused. build -namespace NS
 keeps only the sessions of pods in Kubernetes namespace NS (and the
 services and edges their connections make) and writes
-<project>[+<project>...]@NS/, which show -namespace NS reads. -ref on query is a
+<project>[+<project>...]@NS/, which show -namespace NS reads. build -from,
+-to (T as query's) or -last DUR builds only the segments whose time range
+overlaps that window, into <project>[+<project>...][@NS]~window/, which
+show -windowed reads; the full build stays. Its services and edges are
+the connections seen in the window (a connection open across it shows
+its whole lifetime), not the database's whole history. prune lists the
+store's segment files whose range ended more than DUR ago and deletes them only
+with -apply; it never touches a file it cannot parse as a segment, a dot
+file or a symlink, and nothing is ever pruned on its own. -ref on query is a
 conversation step's ref from show sequence. expand lists the unresolved peers of the
 store's merged mesh against the registry's expand: allowlist, hop limit
 (-hops, default 1) and max_nodes; it contacts no server and deploys

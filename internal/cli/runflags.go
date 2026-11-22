@@ -26,10 +26,14 @@ type runConfig struct {
 	linger bool
 	// spec names the targets: -pid, -pattern or -listen-port, exactly
 	// one (target.Spec.Validate).
-	spec     target.Spec
-	project  string
-	out      string
-	duration time.Duration
+	spec target.Spec
+	// listenGrace is how long a -listen-port session whose owners are
+	// all gone waits for a restarted owner (-listen-grace, portfollow.go;
+	// 0 ends at once). Unused by the other target modes.
+	listenGrace time.Duration
+	project     string
+	out         string
+	duration    time.Duration
 	// ready, if set, is created once every probe is attached: a harness
 	// waits for it before releasing the target, since loading the object
 	// takes seconds and a fixed sleep races.
@@ -138,7 +142,7 @@ func processStart(pid uint32) uint64 {
 type runFlags struct {
 	pids, pattern, project, out, ready, families, cpuProfile, spool, agent *string
 	port                                                                   *uint
-	duration                                                               *time.Duration
+	duration, listenGrace                                                  *time.Duration
 	aggregate, nativeStacks                                                *bool
 	seg                                                                    segmentFlags
 }
@@ -210,6 +214,9 @@ func addRunFlags(fs *flag.FlagSet) runFlags {
 		pids:    fs.String("pid", "", "comma-separated PIDs to trace, with their children"),
 		pattern: fs.String("pattern", "", "glob over the command line or executable, matched on exec"),
 		port:    fs.Uint("listen-port", 0, "trace the owners of the TCP socket listening on this port"),
+		listenGrace: fs.Duration("listen-grace", defaultListenGrace,
+			"with -listen-port: how long to wait for the same program (executable and uid) "+
+				"to own the port again after its owners exited; 0 ends at once"),
 		project: fs.String("project", "",
 			"project label (required; in a pod run defaults to the pod's namespace, from the downward API)"),
 		out:      fs.String("out", "", "directory for the NDJSON trace files"),
@@ -234,7 +241,7 @@ func addRunFlags(fs *flag.FlagSet) runFlags {
 func (f runFlags) config() (runConfig, error) {
 	cfg := runConfig{project: *f.project, out: *f.out, duration: *f.duration, ready: *f.ready,
 		spec: target.Spec{Pattern: *f.pattern}, cpuProfile: *f.cpuProfile, noAggregation: !*f.aggregate,
-		nativeStacks: *f.nativeStacks, spool: *f.spool}
+		nativeStacks: *f.nativeStacks, spool: *f.spool, listenGrace: *f.listenGrace}
 	if *f.port > math.MaxUint16 {
 		return runConfig{}, fmt.Errorf("%w: -listen-port %d: want 1-65535", errUsage, *f.port)
 	}
@@ -278,6 +285,8 @@ func validateRun(cfg runConfig) error {
 		return fmt.Errorf("%w: -project %q: want %s", errUsage, cfg.project, project.Rule)
 	case cfg.duration <= 0 || cfg.duration > maxDuration:
 		return fmt.Errorf("%w: -duration %v: want more than 0, at most %v", errUsage, cfg.duration, maxDuration)
+	case cfg.listenGrace < 0 || cfg.listenGrace > maxDuration:
+		return fmt.Errorf("%w: -listen-grace %v: want 0 to %v", errUsage, cfg.listenGrace, maxDuration)
 	}
 	return nil
 }

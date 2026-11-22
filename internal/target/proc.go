@@ -170,20 +170,60 @@ func (p ProcFS) Command(pid uint32, startNS uint64) (argv []string, exe string, 
 // a thread id too, although no listing shows it, so a PID that is really
 // some process's thread is told apart by its Tgid.
 func (p ProcFS) Tgid(pid uint32) (uint32, error) {
+	return p.statusField(pid, "Tgid:", 0)
+}
+
+// statusField returns the n-th whitespace-separated number of the line of
+// /proc/<pid>/status that starts with key ("Tgid:", "Uid:").
+func (p ProcFS) statusField(pid uint32, key string, n int) (uint32, error) {
 	b, err := os.ReadFile(p.path(pid, "status"))
 	if err != nil {
 		return 0, err
 	}
 	for line := range strings.SplitSeq(string(b), "\n") {
-		if rest, ok := strings.CutPrefix(line, "Tgid:"); ok {
-			n, err := strconv.ParseUint(strings.TrimSpace(rest), 10, 32)
-			if err != nil {
-				return 0, fmt.Errorf("target: /proc/%d/status Tgid %q: %w", pid, rest, err)
-			}
-			return uint32(n), nil
+		rest, ok := strings.CutPrefix(line, key)
+		if !ok {
+			continue
 		}
+		f := strings.Fields(rest)
+		if len(f) <= n {
+			return 0, fmt.Errorf("target: /proc/%d/status %s %q: no field %d", pid, key, rest, n)
+		}
+		v, err := strconv.ParseUint(f[n], 10, 32)
+		if err != nil {
+			return 0, fmt.Errorf("target: /proc/%d/status %s %q: %w", pid, key, rest, err)
+		}
+		return uint32(v), nil
 	}
-	return 0, fmt.Errorf("target: /proc/%d/status has no Tgid line", pid)
+	return 0, fmt.Errorf("target: /proc/%d/status has no %s line", pid, key)
+}
+
+// Owner is how a listening-port session recognises its app after a
+// restart (decision #23, task mh4): the executable and effective uid of
+// a process that owned the port. The same port alone is not the same
+// app: anything may bind a port the app released.
+type Owner struct {
+	Exe string // the resolved exe link, " (deleted)" dropped
+	UID uint32 // the effective uid
+}
+
+// deletedSuffix is what the kernel appends to an exe link whose binary
+// was replaced or removed since the exec — a package update under a
+// running app, which the restarted app, exec'ing the new binary, lacks.
+const deletedSuffix = " (deleted)"
+
+// Owner returns pid's owner key. A process with no readable exe link (a
+// kernel thread, a zombie, hidepid) or status has none: an error.
+func (p ProcFS) Owner(pid uint32) (Owner, error) {
+	exe := strings.TrimSuffix(p.Exe(pid), deletedSuffix)
+	if exe == "" {
+		return Owner{}, fmt.Errorf("target: pid %d: no readable executable", pid)
+	}
+	uid, err := p.statusField(pid, "Uid:", 1)
+	if err != nil {
+		return Owner{}, err
+	}
+	return Owner{Exe: exe, UID: uid}, nil
 }
 
 // pfExiting is the kernel's PF_EXITING task flag (include/linux/sched.h).

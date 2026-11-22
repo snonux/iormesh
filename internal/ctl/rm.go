@@ -38,8 +38,9 @@ import (
 //     published segment or an .active-* file still there (an unclean
 //     stop, an unlisted project, a name that is no project label) refuses
 //     the uninstall, naming the files;
-//  5. sudo iormesh uninstall, which stops every unit and removes
-//     /opt/iormesh;
+//  5. sudo iormesh uninstall, which stops every unit, removes
+//     /opt/iormesh and then the sudoers rule iormeshctl bootstrap
+//     installed (its marker line; any other rule stays, task qh4);
 //  6. only then the registry and deploy's record are edited.
 //
 // Any failure in 2–5 stops rm with the registry untouched, so the

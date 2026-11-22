@@ -145,11 +145,11 @@ func loadReport(e env, f buildFlags) (report.Report, error) {
 	if err != nil {
 		return report.Report{}, err
 	}
-	path := filepath.Join(p.builds, buildKey(projects, f.namespace), reportFileName)
+	path := filepath.Join(p.builds, f.key(projects), reportFileName)
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return report.Report{}, fmt.Errorf("show: no report for the build of %s (iormeshctl build)",
-			buildName(projects, f.namespace))
+			f.name(projects))
 	}
 	if err != nil {
 		return report.Report{}, fmt.Errorf("show: %w", err)

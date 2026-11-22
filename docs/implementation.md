@@ -1245,9 +1245,27 @@ scenarios landing first (principle #1).
    byte, `\` escapes; a pattern without a literal character is
    refused (it would trace every process). `Matches` tries the
    argv joined by spaces, then the exe path — never the comm.
-   `-listen-port` resolves the owners once, at start
-   (`/proc/net/tcp{,6}` LISTEN inode → `/proc/*/fd`); following
-   the port across restarts stays open for M6 (decision #23).
+   `-listen-port` resolves the owners at start
+   (`/proc/net/tcp{,6}` LISTEN inode → `/proc/*/fd`), never a
+   service manager (an exe named `systemd` holding a
+   socket-activated listener). Task mh4 follows the port across
+   restarts (decision #23, `internal/cli/portfollow.go`): the
+   session keeps each start owner's `target.Owner` (exe without
+   " (deleted)", effective uid) whose exe is the earliest-started
+   owner's (task qj4: a privilege-separated server's root master
+   and its workers under another uid are all kept, a different
+   program with an inherited fd is not); once its live set is
+   empty, `session.ended` re-resolves the port every
+   `portFollowEvery` (1s) for `-listen-grace` (default 2m) via
+   `ListenHolders` (each holding pid with the start time read
+   before a second read of its fd table), adopts a holder with a remembered key whose pid
+   still has the listed start time (`AddTarget`, the liveness
+   re-check of `addRunning`, `Correlator.Seed` → an `attach` of
+   the new incarnation) and names refused holders once on
+   stderr. No match within the grace ends the session
+   `targets_exited` with a stderr line saying so; 0 ends at
+   once. `TestListenPortFollowsRestart` (integration, root)
+   kills and restarts an `edgepeer port-owner` on one port.
 
    Pattern sessions load the object with `IORMESH_EXEC_WATCH`
    set: every exec of an untraced process is reported as an
@@ -3260,7 +3278,7 @@ sudoers rule names):
 | `stop`      | `systemctl stop` of that unit: SIGTERM, last segment, end |
 | `status`    | the unit's state plus `<trace-dir>/<project>/state.json` |
 | `upgrade F` | verifies staged binary `F`, replaces itself (#1, #28) |
-| `uninstall` | stops every unit, removes `/opt/iormesh` |
+| `uninstall` | stops every unit, removes `/opt/iormesh`, then bootstrap's sudoers rule (marker line only) |
 
 Built by task 9b4 (`internal/cli`: `start.go`, `control.go`,
 `systemd.go`, `state.go`):
@@ -3322,7 +3340,8 @@ func (cfg startConfig) unitArgs(self string) []string {
   times, and the run's own tracer `version` and `argv` (task
   ph4: upgrade replaces the binary, not a running session, so
   only the run can say which build it is; a state from an older
-  tracer lacks both and reads as version unknown); `ended` with
+  tracer lacks both and reads as version unknown) and
+  `operator_stop: false` (task zh4); `ended` with
   the end reason before the segment writer
   closes (after that its lock is free and the next run of the
   project owns the file). `start` polls `systemctl show` and
@@ -3336,7 +3355,21 @@ func (cfg startConfig) unitArgs(self string) []string {
   publish) and prints the recorded end — and fails when
   `state.json` does not say `ended` (the run was killed after
   the stop timeout, or never attached: its last minute is
-  unpublished; task eb4). `status [-project P]
+  unpublished; task eb4). Once the unit is stopped it sets
+  `operator_stop: true` in `state.json` (task zh4: a reboot's
+  SIGTERM ends a run as `stop` too, and `iormeshctl ensure`
+  must leave only the operator's stops alone) — only then,
+  since the mark is an unlocked read-modify-write and a live
+  run's start or end record landing in between would be rolled
+  back; a run SIGKILLed after the timeout is marked too. A
+  stop that fails marks nothing. Each writer of `state.json`
+  uses its own temporary name (pid), removed again when the
+  write fails. A deploy restart whose start fails after its
+  stop leaves the project marked stopped, so ensure will not
+  bring it back; deploy reports it. Through the
+  sudoers rule the mark is written only under the confined
+  trace root, never into a `-trace-dir` the caller chose.
+  `status [-project P]
   [-json]` covers one project or every one with a loaded unit
   or a `state.json` under `-trace-dir`, with the count of
   events segments waiting in `ready/`; an unknown project or a
@@ -3558,7 +3591,20 @@ ssh H sudo -n /opt/iormesh/bin/iormesh status -project shop
 - First install on a host has no binary to `upgrade` with — that
   bootstrap is decision #1, the operator's own sudo or
   configuration management; deploy stops at the `test -x` with
-  that message and never tries to install.
+  that message and never tries to install. `iormeshctl
+  bootstrap HOST` (`internal/ctl/bootstrap.go`, task qh4) prints
+  the steps, or runs them with `-apply` as `sudo -n` over the
+  same Transport: preflight (`uname -m`, the tools, `sudo -n
+  true`, `id -un`, no `/etc/sudoers.d/iormesh` yet), the build
+  read once and verified (`release.ReadVerified`), one push of
+  build, signature, key and rule into the staging directory,
+  then per file `install` to a dot-named temporary, a
+  `sh -c 'test "$(sha256sum < "$1")" = "$2  -"'` check, `visudo
+  -cf` for the rule, and `mv -f -T` into place; the installed
+  tracer's `upgrade` of the staged build before the rule, `sudo
+  -n iormesh status` after it. One step list
+  (`bootstrapSteps`) serves both modes; the paths and the rule
+  come from `internal/hostlayout`.
 - The build is verified on the controller before each host's
   push (per host, not once per arch, so a build replaced
   mid-run is caught at the next host):
@@ -3664,6 +3710,43 @@ iormeshctl list [-registry FILE]                       # contacts nothing
   report / unreachable host, escaped control bytes, a pod with
   `-status`, an old image's `-state` fallback, a pod without a
   tracer, a pod gone; `list` for hosts and pods.
+
+`ensure` (task zh4, `internal/ctl/ensure.go`) keeps sessions
+going over days, from a timer
+([architecture.md](architecture.md#tracing-for-days)):
+
+```sh
+iormeshctl ensure [-project P]... [-registry FILE] [-store DIR] [HOST...]
+ssh H sudo -n /opt/iormesh/bin/iormesh status -json    # hostReports
+# per project that ended on its own (deployer.start, deploy's argv):
+ssh H sudo -n /opt/iormesh/bin/iormesh start -project P ...
+# then collect's calls for every selected project (collector.host)
+# a disk_limit end: status -json again, start only if ready/ is empty
+```
+
+- The decision (`ensureDecide`) reads the report: a live unit
+  or a running state is left; `dead`, a unit without a state,
+  and an `ended` session restart — unless `operator_stop` is
+  true, or the end is `stop` with no `operator_stop` (a tracer
+  that predates it cannot tell a reboot from the operator), or
+  it is `disk_limit`, which waits for the collect. A project
+  with no report (never ran there) is deploy's. A report error
+  is that project's failure; the host is still collected.
+- A status that cannot be read fails the host before anything
+  is started; a failed start or collect fails it after the
+  rest ran; every host runs under `env.onHost`, and the command
+  exits 1 naming the failed hosts. Hosts only: a pod entry is a
+  usage error. The deploy record is not touched (ensure does
+  not know the installed build).
+- Tests (`internal/ctl/ensure_test.go`): the exact calls for a
+  restart, an operator stop and a running session; each
+  decision; `disk_limit` collected-then-restarted, still full,
+  collect failed; an unreachable host, a failed start, a report
+  error; pod, unregistered host and stray project refused with
+  no call. Tracer side (`internal/cli/operatorstop_test.go`):
+  the mark before and after a stop, on an unclean stop, not
+  outside the trace root through sudo, `false` from the start,
+  absent in an old state.
 
 `collect`, as the commands it runs (built by task eb4,
 `internal/ctl/collect.go`; no sudo anywhere):
@@ -4658,6 +4741,88 @@ iormeshctl show [summary|services|edges|health] [-project P]... [-json]
   every `show` view, `refresh` over a fake transport, the check
   child (a good segment, garbage, and on Linux an address space
   too small to decode in), host pins, an open builds directory.
+
+### Build window and prune (task yh4)
+
+```
+internal/federate/window.go     # Span, Window, FirstStart
+internal/ctl/window.go          # build -from/-to/-last, show -windowed
+internal/ctl/prune.go           # iormeshctl prune
+```
+
+```sh
+iormeshctl build [...] [-from T] [-to T] [-last DUR]
+iormeshctl show [VIEW] [...] -windowed
+iormeshctl prune -older-than DUR [-project P]... [-store DIR] [-apply]
+```
+
+- **A segment's range, from its name.** `federate.Span` is the
+  named start minus a minute to the start plus the rotation
+  interval (one minute) plus a minute: the late tick that
+  rotates, the name's cut to the second and an event stamped
+  just before a rotation all fit inside. Reading the events to
+  place a segment would cost the decode a window is there to
+  save, so the range errs wide: a window takes whole segments,
+  about a minute or two past each edge. The range bounds when
+  the segment was *written*, not its events' `wall_ns`: an
+  event is stamped when its call began and written when it
+  completed, so a read that blocked for minutes sits in a later
+  segment, and a `-to` window can miss it.
+- **Services and edges.** The build imports every segment it
+  read into the service database, which holds every import ever
+  made — pruned segments' too. So the windowed build reads the
+  services and edges back through `servicedb.Filter{From, To}`
+  (wall ns, the clock of `first_seen`/`last_seen`): a connection
+  counts when its seen range overlaps the window, and its
+  requests only from the per-segment rows whose range does.
+  Without that, its summary would mix the window's tally with
+  the database's whole history.
+- **The window.** `T` is query's (`query.ParseTime`: RFC 3339,
+  or a UTC time of day on the day of the earliest segment of the
+  projects, `federate.FirstStart`); `-last DUR` is `-from
+  now−DUR`, and not combined with `-from`/`-to`. An empty window
+  is a usage error. The build echoes the resolved window
+  (`window     FROM .. TO`, `(open)` for a side not given).
+- **What it checks.** `LoadOptions.Window`: a pinned host
+  directory's segments outside the window are not decoded; an
+  unpinned directory's are, all of them, because the host
+  vetting judges a directory on every session (two identities
+  in one directory put all of it in doubt) — so the windowed
+  build trusts, and pins, exactly what a full build would, and
+  a damaged segment of an unpinned directory is reported though
+  it lies outside the window. Each session's graph is rebuilt
+  from its window alone, as from a store whose older segments
+  were deleted.
+- **Where it writes.** `<projects>[@NS]~window/` — `~` is in
+  neither the project nor the namespace alphabet — one
+  directory per project set and namespace, overwritten by each
+  windowed build and read by `show -windowed`; the full build's
+  directory is never touched. `open` and `tui` read full builds
+  only (as with `-namespace`). The window is not in the model.
+- **prune.** Lists the store's own files whose range ended
+  before now−DUR — exactly what `build -last DUR` would never
+  take — and deletes them only with `-apply`, printing each.
+  Its own means: directly in `<store>/<project>/<host>/` (both
+  real directories with valid names, never a symlink), a
+  regular non-dot file whose name `segment.ParseName` accepts.
+  A table file goes only once no events segment of its session
+  stays in the directory (a newer segment's events may name
+  rows it holds). Deletes go through an `os.Root` on the store.
+  Directories, host pins and the service database's counts
+  stay. Auto-cleaning stays out: prune runs only when the
+  operator runs it.
+- **Tests.** `internal/federate/window_test.go` (range edges);
+  `internal/ctl/window_test.go` (`-from`, a time of day, `-last`,
+  `-to` select the expected segments of the rotated fixture, the
+  full build unchanged, services and edges seen only before the
+  window left out of the windowed views, an unpinned directory
+  checked whole and a pinned one only in its window, refusals);
+  `internal/ctl/prune_test.go` (the listing deletes nothing,
+  `-apply` exactly the listed files, a live session's table kept
+  and an orphan's deleted, planted foreign entries — a stray
+  name, a dot file, a symlink named like a segment, a directory
+  named like one, a file above the host directories, a symlinked
+  host directory — untouched, `-project`, refusals).
 
 ### The microservices scenario
 
@@ -5765,7 +5930,8 @@ depends on:
    `iormesh run` as its process, with example args
    (`k8s.DefaultSidecarArgs`) the owner replaces by the app's
    target; either target races the app (`-listen-port` resolves
-   once at start, `-pattern` sees only later execs).
+   at start and only then follows the port, `-pattern` sees only
+   later execs).
    - **Trace dir** (review B1): the kubelet makes an emptyDir's
      root 0777 (setgid too under `fsGroup`), which the segment
      writer's trust check refuses, and must. So the volume mounts

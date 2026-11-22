@@ -1,6 +1,6 @@
 // Package cli implements the iormesh tracer's subcommands (M1 step 10):
 //
-//	iormesh run (-pid PID[,PID…] | -pattern GLOB | -listen-port N) -project NAME -out DIR [-duration 4h] [-ready FILE] [-cpuprofile FILE]
+//	iormesh run (-pid PID[,PID…] | -pattern GLOB | -listen-port N [-listen-grace 2m]) -project NAME -out DIR [-duration 4h] [-ready FILE] [-cpuprofile FILE]
 //	iormesh normalize [-bracket S] [-tmp PREFIX] [-check expect.json] [-out DIR] TRACEDIR
 //	iormesh attach -pid PID -agent JAR -spool DIR [-timeout 10s]
 //	iormesh start [run's flags] [-cpu-quota 100%] [-memory-max 1G] [-wait 2m]
@@ -16,7 +16,8 @@
 // steps 1–3, session.go). M4 wraps it (start.go, control.go): start runs
 // it as the transient systemd unit iormesh-<project>, stop and status
 // control and read that unit and the run's state.json, uninstall stops
-// every unit and removes /opt/iormesh (decision #19), and upgrade
+// every unit and removes /opt/iormesh (decision #19) and then the sudoers
+// rule iormeshctl bootstrap installed (decision #1), and upgrade
 // installs a staged build only once its minisign signature verifies
 // against the root-owned pinned key (upgrade.go, decisions #1 and #28).
 // normalize applies the golden-check library (internal/normalize) to a
@@ -132,7 +133,8 @@ func report(err error, code int, stderr io.Writer) int {
 
 func usage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `usage:
-  iormesh run (-pid PID[,PID...] | -pattern GLOB | -listen-port N) -project NAME (in a pod default: its namespace)
+  iormesh run (-pid PID[,PID...] | -pattern GLOB | -listen-port N [-listen-grace 2m])
+              -project NAME (in a pod default: its namespace)
               [-out DIR] [-trace-dir DIR (default /opt/iormesh/traces without -out)]
               [-disk-limit 90] [-disk-min-free 256MiB] [-disk-max-bytes 0] [-ready-owner UID:GID]
               [-duration 4h] [-ready FILE] [-trace-families ipc,signal,poll,zerocopy|all]

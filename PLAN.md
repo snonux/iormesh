@@ -529,6 +529,8 @@ criterion here.
   the Java agent re-attaches to the new JVM, and both PID
   incarnations link under one app node in the graph. This is
   also what keeps a project's target stable across restarts.
+  A listening-port session follows its port across restarts of
+  the same program (decision #23, task mh4).
 - Probes reuse ior's fd/path resolution helpers where the
   problems are the same; peer addresses, process-tree following
   and exec matching are new work (see "What ior does not give
@@ -905,7 +907,8 @@ Kubernetes (M7) build on it.
   (`~/.local/share/iormesh/deployed.json`) or with `-restart`,
   else left alone, so a re-deploy is a no-op. Deploy only
   upgrades: a host without the installed tracer is reported as
-  needing the bootstrap of #1, never installed. The Java agent
+  needing the bootstrap of #1 (`iormeshctl bootstrap`), never
+  installed. The Java agent
   jar ships on the same trust path (task kf4, #28): a host with
   a project that uses the agent (`-spool` or `-agent`) also gets
   the signed `dist/iormesh-agent.jar`, verified on the
@@ -1050,7 +1053,13 @@ Kubernetes (M7) build on it.
   Synced segments land on the controller under
   `~/.local/share/iormesh/traces/<project>/` — that path on
   every platform, always — and stay there until the operator
-  deletes them; nothing is auto-cleaned.
+  deletes them; nothing is auto-cleaned. Deleting is an
+  explicit operator command (task yh4, owner-approved
+  2026-11-22): `iormeshctl prune -older-than DUR` lists the
+  store's own segment files whose time range ended more than
+  DUR ago and deletes them only with `-apply` — never a file it
+  cannot parse as a segment, a dot file or a symlink (see
+  **Build** below); no command prunes on its own.
   Collect is project-aware: one project at a time, or
   several together.
   Built (task eb4, `internal/ctl/collect.go`): `iormeshctl
@@ -1177,6 +1186,35 @@ Kubernetes (M7) build on it.
   `refresh` is collect then build; a host whose collect fails
   is reported (exit 1) and what the store holds is built
   anyway.
+  **Build window and prune** (task yh4, owner-approved
+  2026-11-22): `build -from T -to T` or `-last DUR` builds only
+  the segments whose time range overlaps the window, T as
+  query's (RFC 3339, or a UTC time of day on the trace's first
+  day), and echoes the resolved window. A segment's range comes
+  from its name — its start, a minute before, to its one-minute
+  interval and a minute after — so a window takes whole
+  segments and never decodes one outside it once its host
+  directory is pinned; an unpinned directory is checked whole,
+  so the host vetting, and what the build pins, are a full
+  build's. The range bounds when a segment was written, not its
+  events' wall clocks: a call blocked past the slack is written
+  later than it was stamped, and a `-to` can miss it. The
+  service database holds every import ever made, so a windowed
+  build reads its services and edges back narrowed to the
+  connections (and per-segment request rows) whose seen range
+  overlaps the window (`servicedb.Filter` From/To, wall ns);
+  the import itself is never narrowed. A windowed build is a
+  different build: it writes
+  `<projects>[@NS]~window/` (one per project set and namespace,
+  overwritten by the next windowed build, read by `show
+  -windowed`) and never replaces the full build. `prune
+  -older-than DUR [-apply]` is the store's only delete: it
+  takes what `-last DUR` would never select, regular files
+  directly in a valid `<project>/<host>/` whose names parse as
+  segments, a table file only once its session keeps no newer
+  segment; without `-apply` it lists, with it it deletes and
+  prints each file. Auto-cleaning the store stays out of scope:
+  prune is the operator's explicit command.
 - **Clock reconciliation from the traffic itself**: every
   fused connection gives send-before-receive constraints in
   both directions (send = send-syscall enter, receive =
@@ -1377,7 +1415,8 @@ Kubernetes (M7) build on it.
 - **Cleanup (`rm`)**: removes the host from the registry and
   tears down the deployment on it — `sudo iormesh uninstall`
   stops every session and removes `/opt/iormesh` (binary and
-  traces). Trace files are synced off first (rsync, same as
+  traces), then the sudoers rule `iormeshctl bootstrap`
+  installed (decision #1). Trace files are synced off first (rsync, same as
   collect), so `rm` never destroys uncollected traces unless
   the operator says so with `-force`; an unreachable host
   warns and only drops the host (or the `-project`) from the
@@ -1429,6 +1468,33 @@ Kubernetes (M7) build on it.
   `state.json` so a skew between the deployed build and a
   running session is visible; a state from an older tracer
   lacks them and shows the version as unknown.
+  Built (task zh4, owner-approved 2026-11-22): **tracing over
+  days**. A session ends after its `-duration` and its
+  transient unit has no `Restart=`, so a reboot, an OOM kill
+  or a disk-limit trip ends it for good. `iormeshctl ensure
+  [-project P]... [HOST...]` reads each host's `status -json`
+  and starts again (deploy's start argv and start path) every
+  registered project whose session ended on its own —
+  `duration`, `targets_exited`, `error`, a `stop` that was not
+  the operator's, a run that died — then collects the host.
+  An explicit stop stays distinguishable from an end: `iormesh
+  stop` sets `operator_stop: true` in `state.json` once the
+  unit is dead (never while the run may write the file; the run
+  writes `false` from its start), since a reboot's SIGTERM ends
+  a run with the same `stop` reason; ensure leaves those
+  stopped. A deploy restart whose start fails after its stop
+  leaves the project marked stopped, so ensure does not recover
+  it. A tracer from before the field (`operator_stop`
+  absent) cannot tell, so its `stop` ends are left too. A
+  `disk_limit` end is collected first and restarted only when
+  the collect emptied its `ready/` (a second status read);
+  should the partition still be over the limit, the new run's
+  watchdog refuses at its start, so no restart loop fills the
+  disk. ensure starts no project the host never ran and never
+  upgrades — both are deploy's — takes hosts only (a pod's
+  tracer is its debug container), and run again only collects,
+  so a systemd user timer or a cron line drives it
+  ([architecture.md](docs/architecture.md#tracing-for-days)).
 - Target platform for the tracer: Rocky Linux 9 first (BTF
   present; ior's Rocky 9 build/Docker patterns apply), amd64
   and arm64. Deployed binaries come out of the container build
@@ -2750,9 +2816,44 @@ deferred.
   glob on argv, trace all matches, wait for re-appearance.*
   M2 steps 1–3 (task pa4) implement the default: the glob runs
   over argv and the exe path, never the comm, and the
-  exec-to-attach window is written as an `attach_gap` drop. The
-  listening-port target resolves once at start for now; whether
-  it follows the port across restarts stays open for M6.
+  exec-to-attach window is written as an `attach_gap` drop.
+  Task mh4 settles the listening-port target: *follow the port
+  across restarts, conservatively.* Every host `expand -apply`
+  enrolls is bound by port, so ending at the first restart lost
+  the host. When the last traced process of a `-listen-port`
+  session is gone, the session re-resolves the port's owners
+  about once a second for a grace period (`-listen-grace`,
+  default 2m; 0 ends at once, the old behaviour). A holder is
+  adopted only if it runs the same executable (" (deleted)"
+  ignored, so a package update still matches) under the same
+  effective uid as a process the session started with: the same
+  port alone is not the same app. Task qj4 tightens both halves:
+  only start holders running the executable of the
+  earliest-started holder (the one that most likely bound the
+  port) are remembered, so another program that merely inherited
+  the listener fd (a root helper) does not widen what is
+  accepted. Their uids are kept as they are: a
+  privilege-separated server (nginx, httpd: a root master and
+  workers of the same binary under their own uid, all holding the
+  listener) is followed whole, since the restarted workers fork
+  before the next re-resolve and fork-following never picks up a
+  process that already exists. And a holder is adopted only
+  while its pid still has the start time the port listing read
+  with its fd table, so a pid reused in between is never
+  mistaken for the holder. An adopted holder
+  gets an `attach` event of its own incarnation and the session
+  goes on; stderr names it. No match within the grace ends the
+  session `targets_exited`, stderr saying no new owner appeared.
+  A service manager — a process whose executable is named
+  `systemd`, pid 1 or a user manager, holding a socket-activated
+  listener — is never a target, at start or later: tracing it
+  would follow every service it spawns. A port only the manager
+  holds fails the start (the service is not running) — also for
+  `expand -apply` on an idle socket-activated service: wake the
+  service (one request) and deploy again, or enroll it by
+  `-pattern`. A new owner that listens while the old one still
+  runs (an overlapping restart) is adopted once the old one
+  exits, within the grace.
 - **#9 Capture policy for argv and env** — argv is in, but it
   is not harmless: command lines carry passwords and tokens
   (`-Dpassword=…`, `--token …`). Argv is recorded through the
@@ -2872,7 +2973,7 @@ deferred.
   settled: SSH, key-based, from the controller only. The sudo
   scope is one pinned sudoers rule for exactly
   `/opt/iormesh/bin/iormesh` (ior precedent: scoped sudoers
-  rules). Open: bootstrap and upgrade. The first install needs
+  rules). Raised: bootstrap and upgrade. The first install needs
   broader privilege once (the operator's own sudo, or
   configuration management laying down the binary and the
   rule), and the binary must be root-owned and not writable by
@@ -2880,8 +2981,8 @@ deferred.
   in disguise. Upgrades therefore go through a tracer
   subcommand that verifies the staged binary's signature
   against a root-owned public key (#28) before replacing
-  itself. Built so (task bb4, the upgrade half; bootstrap stays
-  open): `iormesh upgrade FILE` runs through the rule and takes
+  itself. Built so (task bb4, the upgrade half):
+  `iormesh upgrade FILE` runs through the rule and takes
   only the staged file and `FILE.minisig`. It reads both once
   into memory, verifies them against
   `/opt/iormesh/etc/minisign.pub`, requires the signed name to
@@ -2898,9 +2999,50 @@ deferred.
   binary and the key regular root-owned files, never a
   symlink — and refuses rather than repairs. A downgrade needs
   `-allow-downgrade`, which root may pass but the rule may not:
-  an older signed build may carry a fixed hole. The first
-  install — binary, key and rule — is still the operator's own
-  sudo or configuration management.
+  an older signed build may carry a fixed hole.
+  Built so (task qh4, the bootstrap half; owner-approved
+  2026-11-22): the first install — binary, key and rule — is
+  the operator's own sudo, driven by `iormeshctl bootstrap
+  HOST` (or configuration management doing the same). Without
+  `-apply` it contacts nothing and prints the exact steps,
+  with the hashes of the build it verified, for the arch and
+  SSH user `-arch` and `-user` name (default amd64 and the
+  registry host's `user@` part, else the controller's own user
+  name, ssh's default login — a `User` in `~/.ssh/config` is
+  not seen); the rule's user must be one user, never `ALL` or
+  an all-caps alias name (sudoers would widen it); with
+  `-apply` it reads both from the host (`uname -m`, `id -un`;
+  a flag that disagrees is refused) and runs the same steps
+  over the Transport. Interactive sudo over ssh needs
+  a TTY and the Transport has none (`BatchMode`, decision #12),
+  so `-apply` runs every privileged step as `sudo -n`: it needs
+  the SSH user's own sudo to work without a password
+  (NOPASSWD, as on cloud images), and a host whose sudo asks for
+  one is refused with a pointer to the printed steps, which the
+  operator runs by hand on a terminal. Only registered hosts,
+  and only hosts without the tracer (deploy upgrades the
+  rest); an existing `/etc/sudoers.d/iormesh` is refused, never
+  overwritten. The steps: the controller verifies
+  `dist/iormesh-linux-<arch>` against its pinned key exactly as
+  deploy does and stages those verified bytes, its signature,
+  the pinned key and the rule in `~/.iormesh/staging`; root
+  creates `/opt/iormesh`, `bin/` and `etc/` (root:root 0755),
+  installs each file under a temporary name next to its place
+  (sudo ignores a `.`-name in `sudoers.d`), checks the root-owned
+  copy's SHA-256 against the controller's (the rule also with
+  `visudo -cf`) and only then renames it into place — the
+  binary never runs before that check; then, still under the
+  operator's sudo and before the rule goes live, the installed
+  tracer's own `upgrade` of the staged build re-verifies it
+  against the root-owned key and checks the whole layout
+  (same bytes: a no-op); last the rule is installed and a
+  `sudo -n iormesh status` proves it. The rule is
+  `USER ALL=(root) NOPASSWD: /opt/iormesh/bin/iormesh` for the
+  SSH user, under a marker comment line, generated from
+  `internal/hostlayout` — the one source the tracer's gate,
+  deploy and the docs' tests use. `iormesh uninstall` (rm's
+  last step) removes `/etc/sudoers.d/iormesh` when its first
+  line is that marker, and leaves any other rule alone.
 - **#28 Signature scheme** — which tool signs the tracer build
   (minisign, cosign, `ssh-keygen -Y`), where the public key is
   pinned (controller config; a root-owned copy on servers for
@@ -3954,6 +4096,53 @@ whether the engine is Docker or Podman:
   never been loaded on a real arm64 kernel. Details:
   [docs/build.md](docs/build.md), "Container builds".
 
+### Release archives (task rh4, owner-approved 2026-11-22)
+
+An operator should not need a clone, libbpfgo and a key of their
+own to deploy: `mage release ENGINE` (docker or podman) turns a
+tagged commit into downloadable, signed archives. Nothing is
+published by it; uploading is a separate, human step.
+
+- **Version and tree**: `git describe --tags --dirty --match
+  'v[0-9]*'` must be exactly `v<internal/version.Version>` — a
+  dirty tree, a commit past the tag, or a tag that disagrees
+  with the version the signatures carry is refused before
+  anything is built.
+- **Pipeline**: the container builds (all targets), `mage
+  agentBuild`, then `mage sign`'s signing with the release key
+  (decision #28; stale builds refused as there), then the
+  archives in `dist/release/<version>/`.
+- **Archives**: one per arch, `iormesh-<version>-<arch>.tar.gz`
+  (amd64, arm64), each under a top directory of the same name
+  holding the static tracer `iormesh-linux-<arch>`, the agent
+  jar `iormesh-agent.jar`, the controllers
+  `iormeshctl-{linux,darwin}-<arch>`, each with its
+  `.minisig`, plus `minisign.pub` (the release public key),
+  `CHANGELOG.md`, and `LICENSE` once the repository has one
+  (each extra is packed when present). Every artifact is
+  verified against its signature at the release version before
+  it is packed, and the verified bytes are the packed ones.
+- **Checksums**: `SHA256SUMS` (sha256sum format) over the
+  archives, itself signed as `SHA256SUMS.minisig` with
+  `file:SHA256SUMS`.
+- **Reproducible**: entries in name order, owner root (0/0),
+  modes 0755/0644, every mtime `$SOURCE_DATE_EPOCH` or else the
+  release commit's time, gzip header without name or time; the
+  same signed `dist/` gives the same bytes with the same Go
+  toolchain (its gzip encoder; a unit test packs twice). The signatures themselves carry a signing timestamp,
+  so a re-signed `dist/` gives new archives.
+- **Operator check**: the key to trust is the one published
+  apart from the archives (the copy inside is a convenience,
+  not an anchor). With that key: `minisign -Vm SHA256SUMS -p
+  KEY`, `sha256sum -c SHA256SUMS`, then, after unpacking,
+  `iormeshctl verify -key KEY iormesh-linux-<arch>` (or
+  `minisign -Vm`) for each build; pinning that key at
+  `~/.config/iormesh/minisign.pub` lets `iormeshctl deploy`
+  check every build again before it pushes. Details:
+  [docs/build.md](docs/build.md), "Releases".
+- **Open**: the licence (LICENSE) is the owner's choice; the
+  BPF object declares `Dual BSD/GPL`.
+
 ## Component map
 
 | Component        | Language | Role                                            |
@@ -4046,6 +4235,8 @@ internal/javaattach/  # live attach of the Java agent (HotSpot
                       #   attach protocol)
 internal/stacks/      # native stack table (opt-in)
 internal/release/     # minisign signing and verification
+internal/dist/        # mage release's reproducible archives
+internal/hostlayout/  # the server install's paths and sudoers rule
 internal/version/     # release version and its ordering
 internal/termsafe/    # terminal-safe printing of trace text
 internal/acceptance/  # M4's real-host acceptance driver

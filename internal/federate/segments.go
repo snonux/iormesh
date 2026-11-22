@@ -180,6 +180,11 @@ type LoadOptions struct {
 	// Known pins host directories (registry host names) to the identity
 	// earlier builds saw there; a session claiming another is bad.
 	Known map[string]HostIdentity
+	// Window, if set, keeps only the segments that may hold events
+	// inside it (window.go, task yh4). Segments outside it are not
+	// decoded, except those of a host directory Known does not pin yet,
+	// which the host vetting needs whole (Window.toCheck).
+	Window *Window
 }
 
 // LoadSegments lists the events segments of projects (every project
@@ -190,17 +195,22 @@ type LoadOptions struct {
 // segment that fails is reported in Bad and left out, so the merge that
 // follows never reads half a file. A requested project without a store
 // directory is an error; a cancelled ctx is returned as is.
+//
+// With opt.Window only the window's segments are returned, each
+// session's graph rebuilt from those alone; a segment of an unpinned
+// directory is still checked, and reported in Bad when it fails, though
+// it lies outside the window (Window.toCheck).
 func LoadSegments(ctx context.Context, store string, projects []string, opt LoadOptions) (Segments, error) {
 	var out Segments
 	segs, err := listStore(store, projects, &out)
 	if err != nil {
 		return Segments{}, err
 	}
-	checked, err := checkAll(ctx, segs, opt.Check, &out)
+	checked, err := checkAll(ctx, opt.Window.toCheck(segs, opt.Known), opt.Check, &out)
 	if err != nil {
 		return Segments{}, err
 	}
-	sessions := vetHosts(groupSessions(checked), opt.Known, &out)
+	sessions := opt.Window.narrow(vetHosts(groupSessions(checked), opt.Known, &out))
 	for _, group := range sessions {
 		good, err := loadSession(ctx, group, &out)
 		if err != nil {
