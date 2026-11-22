@@ -2457,16 +2457,28 @@ an existing cluster needs the prefix. Without
 The cluster must pull `localhost:5001/…` under that name: the
 images are pinned by the registry's digest, and that reference is
 what the pods run. `scripts/k8s/el9-k3s.sh` sets up such a node:
-run on it as root, `up` installs a single-node k3s (channel
-`$K3S_CHANNEL`, default v1.35) with containerd's SELinux support
-on, `k3s-selinux` from the k3s installer, no bundled Traefik, and
-a containerd mirror of `localhost:5001` to `http://localhost:5001`;
+run on it as root, `up` installs a single-node k3s (pinned, see
+below) with containerd's SELinux support on, `k3s-selinux` from
+the k3s installer, no bundled Traefik, and a containerd mirror of
+`localhost:5001` to `http://localhost:5001`, and adds to
+firewalld's trusted zone the pod and Service CIDRs it lacks;
 `proxy nftables` (or `iptables`) restarts k3s in that kube-proxy
 mode for the second pass; `down` uninstalls k3s with its images
 and data and removes the `k3s-selinux` package and repository
-(and `container-selinux` only if `up` installed it); `status`
-shows SELinux, k3s and the disk. From the laptop, one tunnel
-carries both directions:
+(and `container-selinux` and the firewalld sources only if `up`
+added them); `status` shows SELinux, k3s and the disk. `down`
+refuses to run without the state file `up` writes
+(`/root/.iormesh-k3s-state`), so it cannot wipe a k3s node it did
+not set up (task ni4).
+
+The script pins k3s v1.35.10+k3s1 and the sha256 of that tag's
+`install.sh` (`8598e002…6d91`) instead of piping get.k3s.io into a
+root shell; the installer checks the k3s binary against the
+release's `sha256sum` file. To bump, set `K3S_VERSION` in the
+script to the new tag and `K3S_INSTALLER_SHA256` to the output of
+`curl -sfL https://raw.githubusercontent.com/k3s-io/k3s/<tag>/install.sh
+| sha256sum`, the tag's `+` written as `%2B`. From the laptop, one
+tunnel carries both directions:
 
 ```
 scp root@node:/etc/rancher/k3s/k3s.yaml "$scratch/k3s.yaml"
@@ -2486,7 +2498,9 @@ the claim and record in `TestClaimExistingRefusesTaken`,
 `TestClaimExistingUnreachable`, `TestClaimExistingRecords`,
 `TestTeardownExistingWithoutRecord`,
 `TestTeardownExistingKeepsRecord`, `TestRefusedRunLeavesForeignRecord`
-and `TestTeardownRecordWithoutContext`; the script with shellcheck).
+and `TestTeardownRecordWithoutContext`; the script with shellcheck,
+and its `down` against recording fakes in `TestDownRefusesWithoutState`
+and `TestDownFirewalld`).
 
 #### Run on Rocky 9.9 (task zg4, 2026-11-21)
 
