@@ -18,7 +18,11 @@ from the same data:
 
 `build` itself prints the plain-text summary and the path of the
 site, so there is always something on screen when it finishes.
-With `refresh`, the first line comes from the collect half:
+The sketch below is the design, not the output: as built,
+`refresh` prints collect's per-host `N new files` lines, then
+build's summary (`built`, `merged`, `health`, … — see V1 under
+[Build order](#build-order)) and the graph, model, report and
+site paths; the TUI is not in that last line.
 
 ```
 $ iormeshctl refresh --project shop
@@ -208,8 +212,9 @@ the export match.
 ## The terminal UI
 
 `iormeshctl tui` — Bubble Tea, with the same libraries and
-versions ior uses (`charm.land/bubbletea/v2`, `lipgloss/v2`,
-`bubbles/v2`), all pure Go, so the controller stays cgo-free.
+versions ior uses (`charm.land/bubbletea/v2` and `lipgloss/v2`;
+`bubbles/v2` turned out unneeded, see below), all pure Go, so
+the controller stays cgo-free.
 ior's TUI rules apply as written in its AGENTS.md: all-pointer
 model methods, side-effect-free `Init`, never render wider or
 taller than the terminal, tests through `teatest`.
@@ -310,8 +315,9 @@ iormeshctl show health
 iormeshctl show report                # the summary, then the rollup
 ```
 
-- Colors and box characters only when stdout is a terminal;
-  plain ASCII with `--ascii` or when piped.
+- As built the text is always plain ASCII (`->` for arrows),
+  terminal or pipe. Colors and box characters on a terminal,
+  and an `--ascii` switch, were sketched but are not built.
 - `--json` prints the view model's JSON for the same view.
 - The output is deterministic, so text goldens work.
 
@@ -351,8 +357,9 @@ disk_limit (the disk watchdog stopped the tracer)` — PLAN.md M4
 puts the exit reason in the summary (task lf4). `show health`
 lists every session's end.
 
-Differences from the sketch above, until M5's renderers land:
-the text is plain (no colors, `->` for arrows); an edge between
+Differences from the sketch above (V1; still so after M5's
+renderers landed): the text is plain (no colors, `->` for
+arrows); an edge between
 two services aggregates connections, so its state is `fused`,
 `unresolved` or `mixed`; request counts and top paths sit on the
 service (the database counts them per endpoint, not per client),

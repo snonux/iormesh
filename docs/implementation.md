@@ -5225,10 +5225,10 @@ where a real round deploys over SSH.
 
 ## M7 — Kubernetes
 
-Later phase. Decisions #13, #14, #15 and #18 are provisional
-(PLAN.md "Provisional — M7", task ub4): build to them, prove
-them on kind, and expect #18 to move once the owner's fleet
-examples arrive.
+Accepted on kind and el9 (PLAN.md M7). Decisions #13, #14, #15
+and #18 are still provisional (PLAN.md "Provisional — M7", task
+ub4): built to them and proven on kind, with #18 expected to
+move once the owner's fleet examples arrive.
 
 Order of work — the first five are tracer and pod changes the rest
 depends on:
@@ -5548,7 +5548,8 @@ depends on:
    oldest containerd and CRI-O whose `RuntimeDefault` lets
    `bpf` and `perf_event_open` through on `CAP_BPF` and
    `CAP_PERFMON` (believed containerd 1.6, CRI-O 1.23).
-   Generated (task vb4), not yet run: one container spec,
+   Generated (task vb4), run by M7's kind and el9 acceptance
+   (tasks yb4, 5h4): one container spec,
    `customSpec` (internal/k8s/debug.go), is what `Kubectl.Debug`
    hands `--custom`, what `deploy/debug-profile.json` holds for a
    hand-run `kubectl debug` (JSON, which every kubectl with

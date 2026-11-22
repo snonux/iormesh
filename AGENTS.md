@@ -1,9 +1,12 @@
 # AGENTS.md — conventions for agents working in this repo
 
-iormesh is early in implementation: M0 (the Java test workload
-under `workload/`) and M1's build and generator lifted from ior
-(`internal/`, the `magefile_*.go` targets) are the first code;
-everything else is still plan. [PLAN.md](PLAN.md) is the
+iormesh is a proof of concept: M0, M1, M2, M3, M4, M6 and M7 are
+accepted; M5 (views, query and the LLM eval) is built but not
+accepted until its eval has run with a real model. Rocky Linux
+9.9 (el9, kernel 5.14) is the main target. The code lives in
+`cmd/` (`iormesh`, `iormeshctl`, `iormesheval`), `internal/`,
+`agent/` (the Java agent), `workload/` (the Java test workload)
+and the `magefile_*.go` targets. [PLAN.md](PLAN.md) is the
 working plan and the source of truth for scope, spikes (S1–S3),
 milestones (M0–M7), and decisions. `ior` (`../ior`) is the
 reference project for BPF/C code generation and integration
@@ -40,9 +43,10 @@ Never write `//nolint` — a test fails on it.
   modes, a short security summary, and the docs index. It must
   not accumulate detail sections again.
 - **Detailed documentation lives in `docs/`**, one topic per
-  file (architecture, trace-scope, output-contract, testing,
-  security, build, implementation, visualization), each linked from the
-  README's Documentation section.
+  file (architecture, trace-scope, output-contract, schema,
+  testing, java-attach, security, build, implementation,
+  visualization; spike results under `docs/spikes/`), each
+  linked from the README's Documentation section.
 - **Diagrams are generated**: `docs/diagrams/*.svg` come from
   `docs/diagrams/gen.py` (`python3 docs/diagrams/gen.py
   docs/diagrams`). Change the generator, not the SVGs.

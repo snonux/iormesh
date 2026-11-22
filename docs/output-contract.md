@@ -81,29 +81,39 @@ the plan is the source of truth.
   full trace never fits an LLM's context; the slice is what
   gets read.
 - **Tested, not asserted** — an eval asks an LLM a fixed
-  question set over workload traces with known answers; it is
-  rerun on every schema change.
+  question set over workload traces with known answers. The
+  eval is built (M5) but has not yet run with a real model, so
+  M5 is not accepted; once it has, it is meant to rerun on
+  every schema change.
 - **Deterministic SVG too** — the diagram export is stable for a
   given normalized graph, so it diffs and goldens like the data
   exports; same for the sequence-diagram export.
-- **Pod-aware identity** — under Kubernetes, events carry
-  pod/namespace/container alongside host PID identity.
+- **Pod-aware identity** — under Kubernetes, an in-pod tracer
+  describes its pod as the host (`host_id` `pod-<uid>`, pids in
+  the pod's PID namespace; [schema.md](schema.md#pods-as-hosts-m7)).
+  Pod, namespace and container fields on events are planned
+  (task sh4).
 - **Project-scoped** — every session belongs to a named project;
   traces live under `/opt/iormesh/traces/<project>/`, and
   cross-project connections render as explicit edges in the
   merged mesh.
-- **Proxy-hop edges** — routes through an ingress render as
-  synthetic edges (FQDN → ingress → service → workload), so the
-  graph completes even where no tracer can run.
+- **Proxy-hop edges** — a route through an ingress renders as
+  one routed edge (client → FQDN → ingress → Service →
+  workload) in the build's model and its views, so the mesh
+  completes even where no tracer can run. The graph itself has
+  no FQDN, ingress or workload nodes (PLAN.md M7).
 - **OTEL-correlated** — events carry the active OpenTelemetry
   trace/span ids when the app is instrumented, so the mesh joins
-  with any tracing backend; spans can be ingested (opt-in) to
-  overlay the distributed service graph.
+  with any tracing backend. Ingesting the app's spans to
+  overlay the distributed service graph is deferred (PLAN.md
+  decision #20).
 - **HTTP request events** — method, scheme, host, path/URI,
   status and sizes as first-class events, correlated with
   the connection, the method stack and the OTEL span; sensitive
-  headers, query params and path segments are redacted before
-  recording — the same policy covers argv.
+  headers and query params are redacted before recording — the
+  same policy covers argv. Path segments are recorded verbatim
+  (decision #22); templating id-like segments is planned (task
+  xh4).
 - **Goldens in the same schema** — M0's declared expectations
   are schema documents with symbolic ids. Validation is subset,
   not equality: cut to the marker bracket, normalize, assert
