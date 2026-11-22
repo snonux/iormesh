@@ -136,8 +136,8 @@ public final class Servlet implements Library {
     record In(MethodHandle method, MethodHandle scheme, MethodHandle uri, MethodHandle query,
               MethodHandle protocol, MethodHandle localAddr, MethodHandle localPort,
               MethodHandle remoteAddr, MethodHandle remotePort, MethodHandle names,
-              MethodHandle values, MethodHandle length, MethodHandle dispatch,
-              MethodHandle async) {
+              MethodHandle values, MethodHandle header, MethodHandle length,
+              MethodHandle dispatch, MethodHandle async) {
         /** The getters, or null when c is no HttpServletRequest of pkg. */
         static In of(Class<?> c, String pkg) {
             Class<?> api = Handles.find(c, pkg + ".http.HttpServletRequest");
@@ -152,6 +152,7 @@ public final class Servlet implements Library {
                     get(api, "getRemotePort", int.class),
                     get(api, "getHeaderNames", Enumeration.class),
                     Handles.virtual(api, "getHeaders", Enumeration.class, String.class),
+                    Handles.virtual(api, "getHeader", String.class, String.class),
                     get(api, "getContentLengthLong", long.class),
                     get(api, "getDispatcherType", dt), get(api, "isAsyncStarted", boolean.class));
         }
@@ -186,11 +187,34 @@ public final class Servlet implements Library {
             r.version = nz(Handles.string(protocol, req));
             r.local = Request.literal(Handles.string(localAddr, req),
                     (int) Handles.number(localPort, req, 0));
-            r.remote = Request.literal(Handles.string(remoteAddr, req),
-                    (int) Handles.number(remotePort, req, 0));
+            if (!forwarded(req)) {
+                r.remote = Request.literal(Handles.string(remoteAddr, req),
+                        (int) Handles.number(remotePort, req, 0));
+            }
             r.requestHeaders(Handles.headers(names, values, req));
             r.reqBytes = Handles.number(length, req, Request.UNKNOWN);
             return r;
+        }
+
+        /**
+         * Whether the request came through a proxy that names the client
+         * (task 7j4): Tomcat's RemoteIpValve and Spring's
+         * ForwardedHeaderFilter then answer getRemoteAddr (and the
+         * filter getRemotePort) from X-Forwarded-For or Forwarded while
+         * the servlet runs: the header's claim, which the sender
+         * chooses, not the socket's peer. Such a remote end matches no
+         * socket, or worse another connection's, so the request records
+         * none, and the tracer joins by the local end or the thread's
+         * own socket I/O instead. Asked by name (getHeader ignores case)
+         * rather than looked for in the bounded header list, which a
+         * request with many headers could push it out of. Its scheme may
+         * be X-Forwarded-Proto's too (kept: as the app had it). A proxy
+         * set up with another header (RemoteIpValve's remoteIpHeader) is
+         * not recognised.
+         */
+        private boolean forwarded(Object req) throws Throwable {
+            return Handles.call(header, req, "Forwarded") != null
+                    || Handles.call(header, req, "X-Forwarded-For") != null;
         }
 
         private static String nz(String s) {

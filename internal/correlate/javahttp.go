@@ -28,7 +28,10 @@ import (
 // its close, and looks the request's up: both ends, else the remote, else the
 // local one (a server's local end reads as unknown once the exchange
 // closed the connection; a client's remote is known only for a literal
-// IP host). A request whose ends match nothing keeps no conn_id.
+// IP host). A held request those ends do not tell (a servlet's behind a
+// proxy names only the listener's end: task 7j4) is joined by its
+// thread's own socket I/O inside its span (javahttpio.go). A request
+// still unmatched keeps no conn_id.
 //
 // Numbering: req_seq counts a connection's requests per process and end
 // (client or server: a same-JVM loopback call has both) in completion
@@ -117,12 +120,15 @@ type connIndex struct {
 	// change within one life (a wildcard local address at SYN_SENT, the
 	// real one from ESTABLISHED on) — so purge forgets them all.
 	keys map[connKey][]connPair
+	// io is each thread's latest socket calls, for the join by a held
+	// request's own I/O (javahttpio.go, task 7j4).
+	io map[threadKey][]threadIO
 }
 
 func newConnIndex() *connIndex {
 	return &connIndex{byPair: map[connPair]connSet{}, byLocal: map[connEnd]connSet{},
 		byRemote: map[connEnd]connSet{}, seq: map[connSeq]uint32{},
-		keys: map[connKey][]connPair{}}
+		keys: map[connKey][]connPair{}, io: map[threadKey][]threadIO{}}
 }
 
 // observe indexes a TCP socket event's ends under its conn_id; a closed
@@ -222,7 +228,8 @@ func only(set connSet) string {
 }
 
 // purge forgets the sockets closed more than retain before now under
-// every pair they were indexed by, and their request counters. Like the
+// every pair they were indexed by, and their request counters, and the
+// threads idle for retain (pruneIO). Like the
 // counters, the unit is the conn_id in one process: a same-JVM loopback
 // connection's two ends are forgotten with the first close (a later
 // event of the other end indexes it again until its own close).
@@ -240,6 +247,7 @@ func (x *connIndex) purge(now, retain uint64) {
 		delete(x.seq, connSeq{k.pid, k.conn, true})
 	}
 	x.closed = slices.Delete(x.closed, 0, n)
+	x.pruneIO(now, retain)
 }
 
 func removeFrom[K comparable](m map[K]connSet, k K, conn string) {
@@ -358,6 +366,13 @@ func (j *JavaJoin) httpEvent(h pendingHTTP) (schema.Event, error) {
 		ev.HTTP.Method = "?" // a library that lost its method still made a request
 	}
 	ev.ConnID = j.conns.lookup(v.pid, r.Local, r.Remote)
+	if ev.ConnID == "" && ev.HTTP.Held && platform(v, r) {
+		// Behind a proxy the record names the listener's end only
+		// (task 7j4): the thread's own socket I/O inside the span
+		// tells which of its connections was this request's.
+		ev.ConnID = j.conns.byThread(v.pid, ev.TID, ev.BootNS, ev.BootNS+ev.LatencyNS,
+			r.Local, r.Remote)
+	}
 	ev.HTTP.ReqSeq = j.reqSeq(v, ev.ConnID, r)
 	j.stats.HTTP++
 	if ev.ConnID == "" {
@@ -387,6 +402,13 @@ func (j *JavaJoin) httpJava(v *jvm, r agentspool.HTTP, tid uint32, stack []uint6
 		java.Thread = v.nameAt(th, r.ExitMono)
 	}
 	return java
+}
+
+// platform reports whether a record's thread is a known platform thread:
+// a virtual one's tid is its carrier, which runs others inside the span.
+func platform(v *jvm, r agentspool.HTTP) bool {
+	th, ok := v.threads[r.ThreadID]
+	return ok && !th.Virtual
 }
 
 // span gives an http event the envelope's syscall shape when the record
@@ -485,7 +507,8 @@ func (j *JavaJoin) headers(hs []string) []string {
 
 // seen takes what the http events borrow from the stream as ev passes:
 // the envelope's project, host and clock offset, the latest completion
-// time, and the socket ends of a socket event.
+// time, the socket ends of a socket event and its thread's call on its
+// connection.
 func (j *JavaJoin) seen(ev *schema.Event) {
 	j.project, j.hostID = ev.Project, ev.HostID
 	if ev.WallNS != 0 {
@@ -493,4 +516,5 @@ func (j *JavaJoin) seen(ev *schema.Event) {
 	}
 	j.maxEnd = max(j.maxEnd, ev.BootNS+ev.LatencyNS)
 	j.conns.observe(ev)
+	j.conns.noteIO(ev)
 }

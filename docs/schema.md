@@ -870,6 +870,26 @@ host), and only when exactly one connection of the process is
 known on those ends: a client's two connections to one server
 share the remote end, so such a request keeps no `conn_id`.
 
+Behind a proxy that names the client (task 7j4) — Tomcat's
+`RemoteIpValve` (on by default in Spring Boot on Kubernetes),
+Spring's `ForwardedHeaderFilter` — a servlet's remote address is
+the `X-Forwarded-For` or `Forwarded` header's claim, which the
+sender chooses, not the socket's peer. So a servlet request
+carrying either header records no remote end, and `scheme` is as
+the app had it (`X-Forwarded-Proto`'s, which may say `https` on
+a plain-HTTP hop). Its local end is the listener's, shared by every
+connection it accepted, so a held request with a start (`held`)
+is joined by its own thread's socket I/O instead: the one
+connection on the request's ends that the thread read or wrote
+inside the span (the thread's outbound calls, to a database say,
+have other ends; two such connections answer nothing; never for a
+virtual thread, whose carrier serves others in the span). A
+request whose body and reply moved outside the span — a GET whose
+reply the container still buffered when `service` returned —
+leaves no I/O inside it and keeps no `conn_id`, nor `req_seq`. A
+proxy set up with another header (`RemoteIpValve`'s
+`remoteIpHeader`) is not recognised.
+
 The tracer numbers a connection's requests per process and end
 (client or server — a same-process loopback call has both on one
 `conn_id`) in completion order (`req_seq`), so the client's and the
