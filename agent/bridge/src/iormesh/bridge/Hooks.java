@@ -96,6 +96,18 @@ public final class Hooks {
      */
     static volatile int generation;
     /**
+     * Nobody reads the ring (task ej4): its tail stood still while it
+     * stayed full for Watermarks.Resync.dormantTicks ticks — the session
+     * ended or the tracer died, and the JVM runs on. Every record would
+     * be dropped anyway, so enter and the HTTP and DNS hooks skip their
+     * work (the stack walk, the probe) and only count the loss, as the
+     * full ring would have. One volatile read per call when awake. Set
+     * and cleared by the watermark thread only (Watermarks.doze), which
+     * wakes the agent when the tail moves or a reader comes, through the
+     * same resync as a new reader; a new ring starts awake.
+     */
+    static volatile boolean dormant;
+    /**
      * The hook table's rows as describeHook wrote them into the current
      * ring, kept so a resync can write them again; replaced by openRing.
      */
@@ -154,6 +166,7 @@ public final class Hooks {
     public static void release() {
         Ring r = ring;
         ring = null;
+        dormant = false;
         if (r != null) {
             try {
                 r.discard();
@@ -197,6 +210,7 @@ public final class Hooks {
     public static String openRing(String dir, long capacity) throws java.io.IOException {
         Ring r = Ring.create(java.nio.file.Path.of(dir), capacity);
         hookRows = java.util.List.of();   // a new ring gets its own table
+        dormant = false;                  // and starts awake (task ej4)
         ring = r;
         return r.path().toString();
     }
@@ -324,6 +338,10 @@ public final class Hooks {
         Ring r = ring;
         try {
             if (r == null || c == null || describer == null || c.length != CALLER + 1) {
+                return;
+            }
+            if (dormant) {
+                httpLost(r);   // the describer does not run (task ej4)
                 return;
             }
             Brackets t = STATE.get();
@@ -499,6 +517,29 @@ public final class Hooks {
             countSkip(SKIPS);
             return;
         }
+        // Dormant (task ej4): nobody reads the ring, which would drop the
+        // record, so skip the walk and count the drop now. Checked after
+        // the slot is reserved, not before the depth is counted: the flag
+        // can flip between a nested enter and its exit, and an enter that
+        // left no slot would make that exit close its caller's bracket.
+        if (dormant) {
+            lostDormant(Ring.BRACKET);
+            return;
+        }
+        try {
+            openSlot(t, d, hook);
+        } catch (Throwable e) {
+            countSkip(FAILS);  // a StackOverflowError entering openSlot
+        }
+    }
+
+    /**
+     * enter's work once slot d is reserved and the agent awake: the
+     * thread's THREAD if due, the stack walk, the OTEL span and the
+     * carrier, then the slot opened with its hook. The thread is busy
+     * throughout, so I/O the walk does (class loading) is not bracketed.
+     */
+    private static void openSlot(Brackets t, int d, int hook) {
         t.busy = true;
         try {
             Ring r = ring;
@@ -561,6 +602,10 @@ public final class Hooks {
         Ring r = ring;
         try {
             if (r == null) {
+                return;
+            }
+            if (dormant) {
+                httpLost(r);   // as the full ring would drop it (task ej4)
                 return;
             }
             Brackets t = STATE.get();
@@ -675,6 +720,10 @@ public final class Hooks {
             if (r == null || id <= 0 || id >= p.length || p[id] == null) {
                 return;
             }
+            if (dormant) {
+                httpLost(r);   // no probe, no walk: nobody reads (task ej4)
+                return;
+            }
             Brackets t = STATE.get();
             if (t.busy) {
                 countSkip(SKIPS);
@@ -709,7 +758,9 @@ public final class Hooks {
         try {
             Ring r = ring;
             BiFunction<Object[], long[], String[]>[] p = httpProbes;
-            if (r == null || id <= 0 || id >= p.length || p[id] == null) {
+            // Dormant (task ej4): the probe does not run, so it does not
+            // take the mapping as known, and the next lookup records it.
+            if (r == null || id <= 0 || id >= p.length || p[id] == null || dormant) {
                 return;
             }
             Brackets t = STATE.get();
@@ -767,6 +818,23 @@ public final class Hooks {
         try {
             if (r != null) {
                 r.lost(Ring.HTTP);
+            }
+        } catch (Throwable ignored) {
+            // Counting is best effort, like countSkip.
+        }
+    }
+
+    /**
+     * Counts a record a dormant agent skipped (task ej4) as dropped, in
+     * the ring header like the full ring's drops, so the watermark
+     * promise ("in the ring or counted as dropped") still holds for the
+     * brackets that exited while it slept. Never throws.
+     */
+    private static void lostDormant(int type) {
+        try {
+            Ring r = ring;
+            if (r != null) {
+                r.lost(type);
             }
         } catch (Throwable ignored) {
             // Counting is best effort, like countSkip.
