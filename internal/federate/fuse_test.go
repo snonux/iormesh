@@ -187,10 +187,14 @@ func TestFuseSameKeyScales(t *testing.T) {
 		t.Fatalf("8x the halves allocated %.1fx the bytes (%d -> %d): not linear",
 			float64(big)/float64(small), small, big)
 	}
+	// The allocation ratio above proves the scaling; the wall-clock
+	// bound only catches a gross regression. It is generous (the old
+	// quadratic code took minutes here, the new one well under a
+	// second) so a -race run on a loaded machine cannot fail it.
 	hs := sameKeyHalves(50_000)
 	start := time.Now()
 	f := Fuse(hs, DefaultWindow)
-	if d := time.Since(start); d > time.Second {
+	if d := time.Since(start); d > 10*time.Second {
 		t.Fatalf("50,000 same-key halves took %v", d)
 	}
 	if len(f.Conns) != 0 || len(f.Unresolved) != len(hs) {
