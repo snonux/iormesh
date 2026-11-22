@@ -124,3 +124,22 @@ func TestServicesMissingDatabase(t *testing.T) {
 		t.Errorf("a reading verb created %s: %v", dir, err)
 	}
 }
+
+// TestEndpointTextScoped: a loopback or link-local endpoint's row names
+// the host it is local to, so two hosts' 127.0.0.1:5432 tell apart; a
+// routable one does not.
+func TestEndpointTextScoped(t *testing.T) {
+	for _, c := range []struct {
+		ep   servicedb.Endpoint
+		want string
+	}{
+		{servicedb.Endpoint{IP: "127.0.0.1", Port: 5432, Host: "hA"}, "127.0.0.1:5432@hA"},
+		{servicedb.Endpoint{Hostname: "localhost", IP: "::1", Port: 5432, Host: "hB"},
+			"localhost ([::1]:5432@hB)"},
+		{servicedb.Endpoint{IP: "10.0.0.2", Port: 8443}, "10.0.0.2:8443"},
+	} {
+		if got := endpointText(c.ep); got != c.want {
+			t.Errorf("endpointText(%+v) = %q, want %q", c.ep, got, c.want)
+		}
+	}
+}

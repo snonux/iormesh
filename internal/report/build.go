@@ -32,16 +32,26 @@ type builder struct {
 	c       *Collector
 	in      Input
 	ends    map[string][]end // merged conn id → its ends in the rollup
-	labels  map[string]string
-	servers map[string]string // merged conn id → server address
+	labels  map[labelKey]string
+	servers map[string]server // merged conn id → server address
 }
+
+// server is the address a connection's server was seen at and the host
+// id of the end that saw it: the host a loopback or link-local address
+// belongs to, which picks that host's endpoint among the database's.
+type server struct{ addr, host string }
+
+// labelKey is an endpoint's ip:port plus its scoping host
+// (servicedb.EndpointHost: set for a loopback or link-local IP only),
+// so two hosts' 127.0.0.1:5432 keep their own labels.
+type labelKey struct{ addr, host string }
 
 // Build turns the collected state into the Report: processes sorted by
 // (project, host, pid, incarnation), each list in first-seen order and
 // cut at its cap.
 func Build(c *Collector, in Input) Report {
 	b := builder{c: c, in: in, ends: map[string][]end{}, labels: endpointLabels(in.Endpoints),
-		servers: map[string]string{}}
+		servers: map[string]server{}}
 	keys := slices.SortedFunc(maps.Keys(c.procs), func(x, y procKey) int {
 		px, py := c.procs[x].p, c.procs[y].p
 		return cmp.Or(cmp.Compare(px.Project, py.Project), cmp.Compare(px.Host, py.Host),
@@ -73,9 +83,9 @@ func (b *builder) index(k procKey) {
 		b.ends[id] = append(b.ends[id], end{acc: a, label: procLabel(p), role: a.role})
 		switch {
 		case a.role == RoleClient && a.addrR != "":
-			b.servers[id] = a.addrR
-		case a.role == RoleServer && a.addrL != "" && b.servers[id] == "":
-			b.servers[id] = a.addrL
+			b.servers[id] = server{a.addrR, p.hostID}
+		case a.role == RoleServer && a.addrL != "" && b.servers[id].addr == "":
+			b.servers[id] = server{a.addrL, p.hostID}
 		}
 	}
 }
@@ -189,13 +199,25 @@ func (b *builder) peers(id string, self *connAcc) []string {
 }
 
 // service labels a connection's server address through the service
-// database: its service name, else hostname:port, else the address.
+// database: its service name, else hostname:port, else the address. A
+// loopback or link-local address is looked up with the host that saw
+// it, so a call is never labelled with another machine's endpoint.
 func (b *builder) service(id string) string {
-	addr := b.servers[id]
-	if l, ok := b.labels[addr]; ok {
+	s := b.servers[id]
+	if l, ok := b.labels[labelKey{s.addr, scopeOf(s.addr, s.host)}]; ok {
 		return l
 	}
-	return addr
+	return s.addr
+}
+
+// scopeOf is servicedb.EndpointHost for an "ip:port" address; "" when
+// addr is not one.
+func scopeOf(addr, host string) string {
+	ap, err := netip.ParseAddrPort(addr)
+	if err != nil {
+		return ""
+	}
+	return servicedb.EndpointHost(ap.Addr().String(), host)
 }
 
 // threads renders a process's threads with their calls resolved: the
@@ -250,15 +272,16 @@ func topMethods(ms map[string]*MethodStat) ([]MethodStat, int) {
 	return out, 0
 }
 
-// endpointLabels maps each endpoint's ip:port to its label.
-func endpointLabels(eps []servicedb.Endpoint) map[string]string {
-	out := map[string]string{}
+// endpointLabels maps each endpoint's ip:port and scoping host (Host:
+// set for a loopback or link-local IP) to its label.
+func endpointLabels(eps []servicedb.Endpoint) map[labelKey]string {
+	out := map[labelKey]string{}
 	for _, e := range eps {
 		key := e.IP + ":" + strconv.Itoa(int(e.Port))
 		if a, err := netip.ParseAddr(e.IP); err == nil {
 			key = netip.AddrPortFrom(a, e.Port).String()
 		}
-		out[key] = e.Label()
+		out[labelKey{key, e.Host}] = e.Label()
 	}
 	return out
 }

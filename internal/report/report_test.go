@@ -115,10 +115,11 @@ func collect(tr *trace, limit int) *Collector {
 	return c
 }
 
-// meshInput renames the loopback pair and names the orders endpoint.
+// meshInput renames the loopback pair and names the orders endpoint
+// (loopback, so scoped to h1 as the service database lists it).
 func meshInput() Input {
 	return Input{Renames: map[federate.LocalConn]string{{Host: "h1", ConnID: "c1"}: "m-c1"},
-		Endpoints: []servicedb.Endpoint{{IP: "127.0.0.1", Port: 8001, Service: "orders"}}}
+		Endpoints: []servicedb.Endpoint{{IP: "127.0.0.1", Port: 8001, Host: "h1", Service: "orders"}}}
 }
 
 func golden(t *testing.T, name string, got []byte) {

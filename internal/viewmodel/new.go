@@ -3,9 +3,7 @@ package viewmodel
 import (
 	"cmp"
 	"maps"
-	"net/netip"
 	"slices"
-	"strconv"
 	"time"
 
 	"iormesh/internal/federate"
@@ -177,15 +175,11 @@ func edges(ins []servicedb.Interaction) []Edge {
 }
 
 // endpointString is hostname:port when the endpoint has a name, else
-// ip:port (IPv6 bracketed).
+// ip:port (IPv6 bracketed), ending in "@host" for a loopback or
+// link-local endpoint: the endpoint's Label without its service.
 func endpointString(e servicedb.Endpoint) string {
-	if e.Hostname != "" {
-		return e.Hostname + ":" + strconv.Itoa(int(e.Port))
-	}
-	if a, err := netip.ParseAddr(e.IP); err == nil {
-		return netip.AddrPortFrom(a, e.Port).String()
-	}
-	return e.IP + ":" + strconv.Itoa(int(e.Port))
+	e.Service = ""
+	return e.Label()
 }
 
 // mergeTLS combines two TLS labels: unknown yields to known, and two

@@ -199,3 +199,22 @@ func TestTextIsTerminalSafe(t *testing.T) {
 		}
 	}
 }
+
+// TestEndpointStringScoped: a loopback or link-local endpoint's address
+// ends in "@host", as `iormeshctl services` shows it; a routable one
+// does not, and a service name never replaces the address.
+func TestEndpointStringScoped(t *testing.T) {
+	for _, c := range []struct {
+		ep   servicedb.Endpoint
+		want string
+	}{
+		{servicedb.Endpoint{IP: "127.0.0.1", Port: 5432, Host: "hA", Service: "db"}, "127.0.0.1:5432@hA"},
+		{servicedb.Endpoint{IP: "::1", Port: 5432, Host: "hB"}, "[::1]:5432@hB"},
+		{servicedb.Endpoint{Hostname: "orders-1", IP: "10.0.0.2", Port: 8443, Service: "orders"},
+			"orders-1:8443"},
+	} {
+		if got := endpointString(c.ep); got != c.want {
+			t.Errorf("endpointString(%+v) = %q, want %q", c.ep, got, c.want)
+		}
+	}
+}
