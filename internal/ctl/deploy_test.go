@@ -228,6 +228,27 @@ func TestDeployArgv(t *testing.T) {
 	}
 }
 
+// TestDeployRelayTerminalSafe: a compromised host's status output carrying
+// escape sequences (set title, clear screen) reaches deploy's stdout
+// Go-quoted, never raw; a clean line is relayed unchanged.
+func TestDeployRelayTerminalSafe(t *testing.T) {
+	f := newDeployFixture(t)
+	f.answers["app2 sudo -n /opt/iormesh/bin/iormesh status"] = reply{
+		out: "state \x1b]0;pwned\x07\x1b[2Jrunning\nclean line\n"}
+	if code := f.run("deploy", "-dist", f.dist, "app2"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr)
+	}
+	out := f.stdout.String()
+	if strings.ContainsAny(out, "\x1b\a") {
+		t.Errorf("stdout carries a raw escape sequence: %q", out)
+	}
+	for _, want := range []string{`app2: "state \x1b]0;pwned\a\x1b[2Jrunning"` + "\n", "app2: clean line\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout lacks %q:\n%q", want, out)
+		}
+	}
+}
+
 // TestDeployIdempotent: a re-deploy of the same build and entry to a live
 // session upgrades (a no-op on the server) and leaves the session alone;
 // -restart, a changed entry or a new build stops and starts it.
