@@ -25,7 +25,10 @@ type socketKey struct {
 //
 // Halves fold when they share host, role, ISN pair and a known
 // 4-tuple, and their Established times lie within window of the
-// cluster's earliest: on one host that is one socket. The window keeps
+// cluster's earliest: on one host that is one socket (one host is
+// taken as one network namespace: two namespaces holding the same
+// tuple and the same ISN pair at once would fold, a contrived case the
+// halves cannot tell apart since they carry no netns). The window keeps
 // a reuse of tuple and pair after an ISN-clock wrap apart, as Fuse
 // does. Halves without a key or a known tuple never fold. The folded
 // half keeps the smallest conn id (deterministic) and the earliest
