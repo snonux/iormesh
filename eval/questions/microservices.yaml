@@ -38,10 +38,10 @@ questions:
     # The sequence alone would pass a chain told from the wrong start
     # ("orders, then gateway, orders, …"). answer_regex anchors the head
     # of the answer: the gateway comes first, after at most list
-    # punctuation or numbering ("1. ", "- ") and a short label ending in
-    # a colon ("The chain: "). Later mentions of the gateway, in an
-    # explanation, are free.
-    answer_regex: '^[\W\d]*([a-z ]{0,30}:[\W\d]*)?gateway'
+    # punctuation or numbering ("1. ", "- "), a short label ending in a
+    # colon ("The chain: ") and an article ("The gateway calls ...").
+    # Later mentions of the gateway, in an explanation, are free.
+    answer_regex: '^[\W\d]*(the\s+)?([a-z ]{0,30}:[\W\d]*)?(the\s+)?gateway'
     answer_not_regex: 'billing[\s\S]*inventory[\s\S]*billing|inventory[\s\S]*orders[\s\S]*inventory'
 
   - id: orders-next-call
