@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -368,5 +369,49 @@ func TestClassDropsCounted(t *testing.T) {
 	want := Losses{DroppedClasses: 2, DroppedOther: 1, DroppedBytes: 96, Abandoned: 4}
 	if l != want || l.Dropped() != 3 || offAbandoned != 328 {
 		t.Errorf("losses %+v, want %+v; abandoned at %d", l, want, offAbandoned)
+	}
+}
+
+// TestOversizedRecordSkipped (task yi4): a record whose framing is sound
+// but whose length is past maxRecord is skipped and counted malformed,
+// never decoded: its strings would be copied to the heap, so one record
+// of a few hundred MiB could get the tracer OOM-killed. The largest
+// record the agent itself writes (Ring.MAX_RECORD, 16 KiB) still decodes.
+func TestOversizedRecordSkipped(t *testing.T) {
+	path, w := newTestRing(t, 1<<20)
+	agentMax := strings.Repeat("a", 16<<10-stringsHead-4)
+	if !w.thread(Thread{ID: 1, KTID: 7, Name: agentMax}) {
+		t.Fatal("agent-sized THREAD dropped")
+	}
+	if !w.thread(Thread{ID: 2, KTID: 8, Name: strings.Repeat("b", 100<<10)}) {
+		t.Fatal("oversized THREAD dropped")
+	}
+	w.bracket(Bracket{Hook: 5, ExitMono: 1})
+	r := openRing(t, path)
+	got := drainAll(t, r)
+	if len(got) != 2 || got[0].(Thread).Name != agentMax || got[1].(Bracket).Hook != 5 {
+		t.Errorf("records %d, want the agent-sized THREAD and the bracket", len(got))
+	}
+	if l := r.Losses(); l != (Losses{Malformed: 1}) {
+		t.Errorf("losses %+v, want one malformed", l)
+	}
+}
+
+// TestCapacityCapped (task yi4): a header whose capacity is a power of two
+// past maxCapacity is refused as corrupt, whatever the file's size: a
+// drain decodes up to a whole ring's records at once, so the capacity
+// bounds what one ring can put on the tracer's heap.
+func TestCapacityCapped(t *testing.T) {
+	path, w := newTestRing(t, testCap)
+	le.PutUint64(w.mem[offCapacity:], 1<<27)
+	if err := os.Truncate(path, headerSize+1<<27); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open(path)
+	if !errors.Is(err, ErrCorrupt) {
+		if r != nil {
+			_ = r.Close()
+		}
+		t.Fatalf("Open: %v, want ErrCorrupt", err)
 	}
 }

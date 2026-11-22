@@ -139,7 +139,17 @@ the JVM's own socket: the tracer still listens on nothing.
   jar must be readable by it (`/opt/iormesh`, not a mode-0700
   home directory) and, since root loads it into every user's JVM,
   changeable by nobody but root (see "Safety"); the spool (mode
-  1733) is writable by all.
+  1733) is writable by all, so the tracer reads a ring only once
+  its process is traced (an event of that pid and incarnation,
+  its attach or fork event at the latest, has passed the Java
+  join). A ring found earlier — the agent loaded at exec through
+  `JAVA_TOOL_OPTIONS`, before the session adopted the JVM — waits
+  unread and is read from then on; one of a JVM the session never
+  traces (it inherited `JAVA_TOOL_OPTIONS` but is no target) is
+  never read: no events, no table rows, no probes. A ring is at
+  most 64 MiB (`ringsize=`) and a record at most 64 KiB
+  ([security.md](security.md), "The agent spool is untrusted
+  input").
 - **Containers.** Paths are resolved inside the JVM's mount
   namespace. For a JVM in another one (an app container beside
   an in-pod tracer, decision #14, provisional), `run -agent`

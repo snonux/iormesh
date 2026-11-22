@@ -250,6 +250,7 @@ func TestJavaJoinHTTPBeforeEnd(t *testing.T) {
 	jt := newJoinTest(t)
 	at := jt.now + 1000
 	jt.ring(jt.request(at+5000, "/", "", ""), jt.watermark(at+20_000_000))
+	jt.attach(jvmPID, jvmStart) // its poll reads the ring
 	jt.seq++
 	reason := schema.EndTargetsExited
 	end := schema.Event{SchemaVersion: schema.Version, Project: "p", Seq: jt.seq, BootNS: at,
@@ -259,7 +260,7 @@ func TestJavaJoinHTTPBeforeEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	jt.close()
-	if got := kinds(jt.sink.events); !reflect.DeepEqual(got, []string{"http", "end"}) {
+	if got := kinds(jt.sink.events); !reflect.DeepEqual(got, []string{"attach", "http", "end"}) {
 		t.Fatalf("order %v, want the end last", got)
 	}
 }

@@ -115,10 +115,17 @@ func newJVM(r AgentRing, pid uint32, start, createdMono, created uint64) *jvm {
 // field; when the JVM was gone before its ring was opened (start 0) the
 // ring's creation time decides.
 func (v *jvm) owns(ev *schema.Event) bool {
+	return v.ownsInc(ev.PIDInc)
+}
+
+// ownsInc is owns for an event's pid_incarnation alone: the same test
+// decides whether a ring's process is traced (javatrust.go), so a ring is
+// read exactly when its events could be joined to it.
+func (v *jvm) ownsInc(inc uint64) bool {
 	if v.start != 0 {
-		return v.start == ev.PIDInc
+		return v.start == inc
 	}
-	return v.created+startTolerance >= ev.PIDInc
+	return v.created+startTolerance >= inc
 }
 
 // drain reads every record the ring has published since the last drain,

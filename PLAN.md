@@ -2493,7 +2493,17 @@ would overturn it), and deferred.
   `head`, not a ring per thread — the thread count is unknown at
   setup, and the stack walk, not the CAS, bounds a bracket's
   cost; format versioned in the header, reader strict
-  (`internal/agentspool`).
+  (`internal/agentspool`). The spool is untrusted input (task
+  yi4): the tracer reads a ring only once its process is traced
+  — an event of that pid and incarnation (its attach or fork
+  event, at the latest) has reached the Java join; a ring found
+  earlier is held unread, never drained, emitted or probed for,
+  and a ring of a process never traced stays unread. A ring's
+  capacity is at most 64 MiB (the agent refuses a larger
+  `ringsize=`, the tracer a larger header) and a record other
+  than PAD at most 64 KiB, four times the agent's own 16 KiB
+  cap: a longer one is skipped as malformed, undecoded, so no
+  ring can push the tracer past its memory limit.
 
 ### Open — blocks M2
 
@@ -3035,7 +3045,7 @@ here only as placeholders.
   `/proc/<pid>/root` (#27 foresaw this). That staging is
   bounded: the jar (≈280 KiB) and one
   ring per JVM of a fixed size (8 MiB by default, `ringsize=`
-  at most 1 GiB; AgentArgs.java, Ring.java), charged to the app
+  at most 64 MiB; AgentArgs.java, Ring.java), charged to the app
   container's ephemeral storage — or its memory where `/tmp` is
   a tmpfs. Capabilities: #13's Java four. Overturned if: the
   owner's JVMs run with dynamic loading disabled or a

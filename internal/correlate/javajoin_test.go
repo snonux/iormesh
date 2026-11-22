@@ -573,6 +573,7 @@ func TestJavaJoinAttachesMarks(t *testing.T) {
 		calls = append(calls, natives)
 		return []string{symAccept}, nil
 	}
+	jt.attach(jvmPID, jvmStart)
 	r := jt.ring()
 	if err := jt.j.Poll(); err != nil {
 		t.Fatal(err)
@@ -617,6 +618,7 @@ func TestJavaJoinWaitsForWholeTable(t *testing.T) {
 		calls = append(calls, natives)
 		return nil, nil
 	}
+	jt.attach(jvmPID, jvmStart)
 	r := jt.ring()
 	rest := r.queue[2:]
 	r.queue = r.queue[:2] // the first two HOOK rows only
@@ -707,6 +709,7 @@ func TestJavaJoinNoNativeFound(t *testing.T) {
 		}
 		return all, nil
 	}
+	jt.attach(jvmPID, jvmStart)
 	jt.ring()
 	if err := jt.j.Poll(); err != nil {
 		t.Fatal(err)
@@ -727,6 +730,7 @@ func TestJavaJoinMarksDead(t *testing.T) {
 	var warned []error
 	jt.j.cfg.Warn = func(err error) { warned = append(warned, err) }
 	jt.j.cfg.AttachMarks = func(uint32, []MarkedNative) ([]string, error) { return nil, nil }
+	jt.attach(jvmPID, jvmStart)
 	r := jt.ring()
 	if err := jt.j.Poll(); err != nil {
 		t.Fatal(err)

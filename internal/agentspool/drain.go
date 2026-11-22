@@ -121,13 +121,20 @@ func (r *Ring) next() (ok bool, err error) {
 // decodeAt decodes one record in place, before consume zeroes it, and
 // appends it to the batch; the entry holds copies (strings), never the
 // ring's memory. Brackets and watermarks are decoded into the entry
-// itself, unboxed.
+// itself, unboxed. A record longer than maxRecord is skipped as
+// malformed before any of it is decoded (task yi4): its framing is sound,
+// so the ring goes on, but its strings could be as long as the ring and
+// would be copied to the heap.
 func (r *Ring) decodeAt(typ uint32, b []byte) {
 	if typ == typePad {
 		return
 	}
 	if typ > typeClass {
 		r.losses.Unknown++
+		return
+	}
+	if len(b) > maxRecord {
+		r.losses.Malformed++
 		return
 	}
 	e := entry{typ: typ}

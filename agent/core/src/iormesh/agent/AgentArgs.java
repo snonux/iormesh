@@ -18,7 +18,7 @@ package iormesh.agent;
  *     writes its records to the ring {@code <dir>/<pid>.ring} (decision
  *     #27). Without it brackets go nowhere (counted for debug only);</li>
  * <li>{@code ringsize=<bytes>} — the ring's data size, a power of two
- *     from 64 KiB to 1 GiB (default 8 MiB);</li>
+ *     from 64 KiB to 64 MiB (default 8 MiB; the tracer refuses more);</li>
  * <li>{@code watermark=<ms>} — how often the watermark thread writes a
  *     WATERMARK (default 10; 0 disables it, leaving only the install's
  *     and the shutdown's).</li>
