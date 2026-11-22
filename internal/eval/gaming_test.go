@@ -48,6 +48,42 @@ func TestListingEverythingFails(t *testing.T) {
 	}
 }
 
+// TestNonAnswersFail: an empty answer and a refusal pass no question —
+// every question needs something positive in the answer — and the
+// gateway chain told from the wrong start fails although it holds the
+// right sequence after it.
+func TestNonAnswersFail(t *testing.T) {
+	s, err := LoadSet(repoFile("eval/questions/microservices.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, reply := range []string{"ANSWER:", "ANSWER: I do not know"} {
+		act, ok := ParseReply(reply)
+		if !ok || act.Kind != ActAnswer {
+			t.Fatalf("%q: parsed as %+v, %v", reply, act, ok)
+		}
+		for _, q := range s.Questions {
+			if len(q.Score(act.Arg)) == 0 {
+				t.Errorf("%s: %q passes", q.ID, reply)
+			}
+		}
+	}
+	for _, q := range s.Questions {
+		if q.ID != "gateway-chain" {
+			continue
+		}
+		for _, wrong := range []string{"orders, then gateway, orders, inventory, billing",
+			"billing; gateway -> orders -> inventory -> billing"} {
+			if len(q.Score(wrong)) == 0 {
+				t.Errorf("gateway-chain: the wrong start %q passes", wrong)
+			}
+		}
+		if fails := q.Score("The chain: gateway, orders, inventory, billing."); len(fails) != 0 {
+			t.Errorf("gateway-chain: the right chain after a preamble fails: %v", fails)
+		}
+	}
+}
+
 // TestAnswersPass: the declared right answer, written concisely, passes
 // each question — the exclusions do not reject the truth.
 func TestAnswersPass(t *testing.T) {

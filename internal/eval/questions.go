@@ -21,7 +21,9 @@ type Set struct {
 }
 
 // Question is one question and the matchers its answer is scored by.
-// Every matcher set must hold; all compare case-insensitively.
+// Every matcher set must hold; all compare case-insensitively. At least
+// one positive matcher (Contains, Sequence or Regex) is required: the
+// exclusions only reject wrong answers, not empty ones.
 type Question struct {
 	ID       string `yaml:"id"`
 	Question string `yaml:"question"`
@@ -61,7 +63,9 @@ func LoadSet(path string) (Set, error) {
 
 // Validate rejects a set that cannot score: no scenario, a threshold
 // outside (0, 1], no questions, a question without an id, text or
-// matcher, a duplicate id, an empty matcher string or a bad regex.
+// positive matcher (answer_contains, answer_sequence or answer_regex —
+// exclusions alone pass an empty answer), a duplicate id, an empty
+// matcher string or a bad regex.
 func (s Set) Validate() error {
 	switch {
 	case s.Scenario == "":
@@ -92,6 +96,11 @@ func (q Question) validate() error {
 		return errors.New("no question")
 	case len(q.Contains)+len(q.Sequence)+len(q.Excludes) == 0 && q.Regex == "" && q.NotRegex == "":
 		return errors.New("no matcher: the answer could not be scored")
+	case len(q.Contains)+len(q.Sequence) == 0 && q.Regex == "":
+		// Exclusions alone only say what a wrong answer holds: an empty
+		// answer or "I do not know" holds none of it and would pass.
+		return errors.New("no positive matcher (answer_contains, answer_sequence or " +
+			"answer_regex): an empty answer would pass")
 	}
 	for _, list := range [][]string{q.Contains, q.Sequence, q.Excludes} {
 		for _, s := range list {

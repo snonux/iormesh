@@ -35,7 +35,10 @@ questions:
       List the services the gateway's checkout touches, in the order they
       are first reached, starting with the gateway itself.
     answer_sequence: ["gateway", "orders", "inventory", "billing"]
-    answer_not_regex: 'billing[\s\S]*inventory[\s\S]*billing|inventory[\s\S]*orders[\s\S]*inventory'
+    # The sequence alone would pass a chain told from the wrong start
+    # ("orders, then gateway, orders, …"); the first alternative anchors
+    # it — no other service may be named before the gateway.
+    answer_not_regex: '(orders|inventory|billing)[\s\S]*gateway|billing[\s\S]*inventory[\s\S]*billing|inventory[\s\S]*orders[\s\S]*inventory'
 
   - id: orders-next-call
     question: >-
