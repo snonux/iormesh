@@ -1051,7 +1051,13 @@ Kubernetes (M7) build on it.
   Synced segments land on the controller under
   `~/.local/share/iormesh/traces/<project>/` — that path on
   every platform, always — and stay there until the operator
-  deletes them; nothing is auto-cleaned.
+  deletes them; nothing is auto-cleaned. Deleting is an
+  explicit operator command (task yh4, owner-approved
+  2026-11-22): `iormeshctl prune -older-than DUR` lists the
+  store's own segment files whose time range ended more than
+  DUR ago and deletes them only with `-apply` — never a file it
+  cannot parse as a segment, a dot file or a symlink (see
+  **Build** below); no command prunes on its own.
   Collect is project-aware: one project at a time, or
   several together.
   Built (task eb4, `internal/ctl/collect.go`): `iormeshctl
@@ -1178,6 +1184,35 @@ Kubernetes (M7) build on it.
   `refresh` is collect then build; a host whose collect fails
   is reported (exit 1) and what the store holds is built
   anyway.
+  **Build window and prune** (task yh4, owner-approved
+  2026-11-22): `build -from T -to T` or `-last DUR` builds only
+  the segments whose time range overlaps the window, T as
+  query's (RFC 3339, or a UTC time of day on the trace's first
+  day), and echoes the resolved window. A segment's range comes
+  from its name — its start, a minute before, to its one-minute
+  interval and a minute after — so a window takes whole
+  segments and never decodes one outside it once its host
+  directory is pinned; an unpinned directory is checked whole,
+  so the host vetting, and what the build pins, are a full
+  build's. The range bounds when a segment was written, not its
+  events' wall clocks: a call blocked past the slack is written
+  later than it was stamped, and a `-to` can miss it. The
+  service database holds every import ever made, so a windowed
+  build reads its services and edges back narrowed to the
+  connections (and per-segment request rows) whose seen range
+  overlaps the window (`servicedb.Filter` From/To, wall ns);
+  the import itself is never narrowed. A windowed build is a
+  different build: it writes
+  `<projects>[@NS]~window/` (one per project set and namespace,
+  overwritten by the next windowed build, read by `show
+  -windowed`) and never replaces the full build. `prune
+  -older-than DUR [-apply]` is the store's only delete: it
+  takes what `-last DUR` would never select, regular files
+  directly in a valid `<project>/<host>/` whose names parse as
+  segments, a table file only once its session keeps no newer
+  segment; without `-apply` it lists, with it it deletes and
+  prints each file. Auto-cleaning the store stays out of scope:
+  prune is the operator's explicit command.
 - **Clock reconciliation from the traffic itself**: every
   fused connection gives send-before-receive constraints in
   both directions (send = send-syscall enter, receive =
