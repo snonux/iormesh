@@ -291,6 +291,15 @@ truth.
     is the registry entry's flags as deploy passed them, which
     the deploying user chose and which any local user already
     sees in the tracer's `/proc/<pid>/cmdline`.
+  - **`iormeshctl ensure`** (task zh4) runs only `status
+    -json` and `start` with deploy's argv for the registry
+    entry through the rule, plus collect's unprivileged calls:
+    nothing is widened, and it never pushes or upgrades.
+    `iormesh stop` now also rewrites the project's
+    `state.json` to record `operator_stop` — through the rule
+    only under the confined trace root (root's), never into a
+    `-trace-dir` the caller chose, which stop otherwise only
+    reads.
   - **What the rule then grants**: installing a build the
     release key signed, for this arch, not older, and the
     agent jar signed at that build's version — nothing
