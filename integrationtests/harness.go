@@ -10,7 +10,8 @@ package integrationtests
 // the trace directory (events.ndjson + graph.json) read strictly, not an
 // .ior.zst recording; no flamegraph, parquet, wrapper or per-PID-args
 // variants yet. A run may bind the tracer to a pattern instead of PIDs
-// (Harness.Pattern, M2), which ior has no counterpart of, and may add
+// (Harness.Pattern, M2) or a listening port (Harness.ListenPort, task
+// mh4), which ior has no counterpart of, and may add
 // opt-in event families (Harness.Families, M2 step 7) and native stacks
 // (Harness.NativeStacks, M2 step 9). A workload exiting
 // with the skip code 3 ends the run with ErrWorkloadSkipped. A gated
@@ -94,6 +95,12 @@ type Harness struct {
 	// ends by itself (it waits for the app to re-appear, decision #23),
 	// so Trace stops it with SIGINT once the workloads exited.
 	Pattern string
+	// ListenPort, when set, binds the tracer to the owner of this
+	// listening port (-listen-port) instead of the workloads' PIDs, and
+	// ListenGrace, when set, is its -listen-grace: how long the session
+	// waits for a restarted owner once the owner exited (task mh4).
+	ListenPort  int
+	ListenGrace string
 	// Families, when set, is the tracer's -trace-families: the opt-in
 	// event families (ipc, signal, poll, zerocopy) a scenario needs on
 	// top of the default file and socket families (decision #7).
@@ -375,11 +382,18 @@ func (h *Harness) Attach(w *Workload) (string, error) {
 	return stderr.String(), nil
 }
 
-// targetArgs is the tracer's target spec: the pattern, or the PIDs of
-// the traced workloads.
+// targetArgs is the tracer's target spec: the pattern, the listening
+// port (with its grace), or the PIDs of the traced workloads.
 func (h *Harness) targetArgs(ws []*Workload) []string {
 	if h.Pattern != "" {
 		return []string{"-pattern", h.Pattern}
+	}
+	if h.ListenPort != 0 {
+		args := []string{"-listen-port", strconv.Itoa(h.ListenPort)}
+		if h.ListenGrace != "" {
+			args = append(args, "-listen-grace", h.ListenGrace)
+		}
+		return args
 	}
 	var pids []string
 	for _, w := range ws {

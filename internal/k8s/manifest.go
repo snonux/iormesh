@@ -32,7 +32,8 @@ const DefaultTraceLimit = "2Gi"
 // trace dir default from the pod (decision #21, k8s.TraceRoot), and the
 // longest -duration a run accepts keeps restarts — a new session each —
 // rare. The target races the app: -listen-port resolves the listener's
-// owner once, at start, and fails if the app is not listening yet
+// owner at start, and fails if the app is not listening yet (later it
+// follows the port to a restarted owner, task mh4)
 // (containers start in order but nobody waits for the app), while
 // -pattern matches only execs after the tracer attached, missing an app
 // that started first. A restart of the tracer (restartPolicy) retries

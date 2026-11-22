@@ -86,6 +86,7 @@ func IntegrationTests() []string {
 		"TestClockSkewRecovered",
 		"TestClockSkewBeyondWindow",
 		"TestPIDReuse",
+		"TestListenPortFollowsRestart",
 		"TestSocketRaces",
 		"TestSyscallBurstFoldsEveryCall",
 		"TestSkipCodeIsSkip",

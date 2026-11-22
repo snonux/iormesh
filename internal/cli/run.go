@@ -100,8 +100,9 @@ type tracer interface {
 var _ tracer = (*bpf.Tracer)(nil)
 
 // runTrace traces cfg.spec's targets until the duration ends, a signal
-// arrives or (for PIDs and a port) every target has exited, then writes
-// the event stream and the graph into cfg.out. The stream opens with a
+// arrives or (for PIDs and a port) every target has exited — a port
+// session only once no restarted owner appeared within -listen-grace —
+// then writes the event stream and the graph into cfg.out. The stream opens with a
 // session header, records loss as drop events while it runs and closes
 // with an end event naming why it stopped (PLAN.md, "Trace output
 // contract").
@@ -132,7 +133,7 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 		return errors.Join(err, out.close(), tr.Close())
 	}
 	s := newSession(tr, c, cfg)
-	s.java, s.seg = out.java, out.seg
+	s.java, s.seg, s.log = out.java, out.seg, stderr
 	if err := s.start(pids); err != nil {
 		return errors.Join(err, finish(cfg, tr, c, out, schema.EndError, stderr))
 	}
@@ -228,10 +229,11 @@ func (o outputs) summary() string {
 }
 
 // initialTargets resolves the processes target_map starts with: the
-// PIDs, or the owners of the listening port (resolved once, at start —
-// decision #23 leaves following the port across restarts to M6). A
-// pattern starts empty; its matches are added after the probes attached
-// (session.start), so none can exec unseen in between.
+// PIDs, or the owners of the listening port (never a service manager;
+// once the last of them is gone the session re-resolves the port for a
+// restarted owner, portfollow.go, decision #23). A pattern starts empty;
+// its matches are added after the probes attached (session.start), so
+// none can exec unseen in between.
 func initialTargets(spec target.Spec) ([]uint32, error) {
 	if spec.Mode() == target.ModePattern {
 		return nil, nil
@@ -445,7 +447,11 @@ func traceLoop(ctx context.Context, s *session, cfg runConfig) (string, error) {
 			if err := s.poll(); err != nil {
 				return endReason(err)
 			}
-			if s.over() {
+			done, err := s.ended()
+			if err != nil {
+				return schema.EndError, err
+			}
+			if done {
 				if err := s.tr.StopAggregation(); err != nil {
 					return schema.EndError, err
 				}
