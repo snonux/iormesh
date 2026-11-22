@@ -11,6 +11,7 @@ import (
 
 // procState is one traced process incarnation.
 type procState struct {
+	pid uint32
 	inc uint64
 	// comm is the process's current name: read with inc (Identity) when
 	// the session took the process on (Seed) or else when the correlator
@@ -51,6 +52,13 @@ type procState struct {
 	born  map[int32]uint64
 	past  map[int32]pastInstance
 	clock *uint64
+	// dead: the process's last thread exited (exitTask). Its fd table is
+	// gone then; inc and comm stay for the late records of its sockets.
+	dead bool
+	// socks counts the TCP sockets whose records name this process and
+	// that are still in the socket table (not yet TCP_CLOSE): the ones
+	// the kernel may still report after the process died (reap.go).
+	socks int
 }
 
 // Identity is a process incarnation as one /proc/<pid>/stat read saw it:
@@ -95,7 +103,8 @@ func (c *Correlator) seed(pid uint32, id Identity) *procState {
 // The last process looked up is kept aside: an event's handling asks for
 // its process two or three times, and a burst's events are mostly of one
 // process (decision #25's budget, task ud4). newProc, the only place a
-// pid's state is replaced, refreshes it.
+// pid's state is replaced, refreshes it; reap, which deletes a dead
+// process's state, clears it.
 func (c *Correlator) proc(pid uint32) *procState {
 	if c.lastProc != nil && c.lastPID == pid {
 		return c.lastProc
@@ -110,15 +119,22 @@ func (c *Correlator) proc(pid uint32) *procState {
 
 // newProc registers pid as the incarnation id, in the state and the graph.
 func (c *Correlator) newProc(pid uint32, id Identity) *procState {
-	p := &procState{inc: id.StartNS, comm: id.Comm, fds: map[int32]uint32{},
-		lastGen: map[int32]uint32{}, sockOf: map[int32]*sockState{},
-		paths: map[int32]fdPath{}, cloexec: map[int32]bool{},
-		flowsOf: map[int32][][2]netip.AddrPort{}, born: map[int32]uint64{},
-		past: map[int32]pastInstance{}, clock: &c.recTime}
+	p := &procState{pid: pid, inc: id.StartNS, comm: id.Comm, clock: &c.recTime}
+	p.resetFds()
 	c.procs[pid] = p
 	c.lastPID, c.lastProc = pid, p
 	c.graph.process(pid, id.StartNS, id.Comm)
 	return p
+}
+
+// resetFds gives p an empty fd table: fresh maps, so a dropped table
+// (exitTask) also returns the buckets the old maps grew — Go maps never
+// shrink, and clearing them would keep a busy parent's table per child.
+func (p *procState) resetFds() {
+	p.fds, p.lastGen = map[int32]uint32{}, map[int32]uint32{}
+	p.sockOf, p.paths = map[int32]*sockState{}, map[int32]fdPath{}
+	p.cloexec, p.flowsOf = map[int32]bool{}, map[int32][][2]netip.AddrPort{}
+	p.born, p.past = map[int32]uint64{}, map[int32]pastInstance{}
 }
 
 // create registers a new fd instance returned by a traced syscall and

@@ -45,6 +45,11 @@ type sockState struct {
 	// the TCP table. UDP flows and unix connections pair in tables of
 	// their own (ipc.go), which must also forget the waiting entry.
 	table resolver
+	// owner is the process a TCP socket's records name while the socket
+	// is in the table, kept so a dead owner's state outlives the exit
+	// until the socket closes (reap.go); nil for none, and for UDP flows
+	// and unix connections, which get no records after an exit.
+	owner *procState
 }
 
 // resolver gives a socket whose fuse window passed unfused its own conn
@@ -261,24 +266,31 @@ func tuple(r *types.TcpStateEvent) (local, remote netip.AddrPort) {
 }
 
 // tcpState records the socket transition as an event and binds the
-// owner's fd to the socket.
+// owner's fd to the socket. It also keeps the socket's owner (own,
+// disownGone): a process dead by now keeps its identity for the records
+// still to come while the socket is open (reap.go).
 func (c *Correlator) tcpState(r *types.TcpStateEvent) {
 	c.advance(r.Time)
 	if r.Oldstate == types.TCP_STATE_FINAL {
 		c.finalState(r)
 		return
 	}
+	old := c.socks.bySk[r.Sk]
 	s, first, stale := c.socks.observe(r)
-	if r.Pid == 0 || stale {
-		// A stale record's pid and fd are the old life's owner: it
-		// updates the socket but, like a record without an owner, is
-		// not emitted, so the old process never holds the new
-		// connection. The accept snapshot that follows carries the key.
-		return
+	// A stale record's pid and fd are the old life's owner: it updates
+	// the socket but, like a record without an owner, is not emitted, so
+	// the old process never holds the new connection. The accept
+	// snapshot that follows carries the key.
+	if r.Pid != 0 && !stale {
+		p := c.proc(r.Pid)
+		snapshot := r.Oldstate == types.TCP_STATE_SNAPSHOT
+		gen := p.sockGen(r.Fd, s, first, snapshot)
+		if first || snapshot {
+			c.own(s, p) // its records name p, even after p died (reap.go)
+		}
+		c.emitState(r, s, p, gen)
 	}
-	p := c.proc(r.Pid)
-	gen := p.sockGen(r.Fd, s, first, r.Oldstate == types.TCP_STATE_SNAPSHOT)
-	c.emitState(r, s, p, gen)
+	c.disownGone(r.Sk, old, s)
 }
 
 // finalState records the tracer's final snapshot of a socket still open

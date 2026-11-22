@@ -107,7 +107,10 @@ func (c *Correlator) unlinked(name string) {
 // new, and its process gets an opened edge to the new name — the process
 // holds that file open under it, which the write after the rename in
 // file-lifecycle proves. Relative names cannot be matched against the
-// absolute paths fds keep, so they change nothing.
+// absolute paths fds keep, so they change nothing. A dead process holds
+// no paths (its table goes at its exit, reap.go), so it gets no edge to
+// a name renamed after it died, and neither this walk nor unlinked's
+// spends time on it.
 func (c *Correlator) renamed(old, new string) {
 	old, new = trimSlash(old), trimSlash(new)
 	if old == new || !strings.HasPrefix(old, "/") || !strings.HasPrefix(new, "/") {

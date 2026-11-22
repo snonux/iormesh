@@ -76,6 +76,8 @@ type Correlator struct {
 	// lastPID and lastProc cache proc's last answer.
 	lastPID  uint32
 	lastProc *procState
+	// dying lists dead processes waiting out their fuse window (reap.go).
+	dying    []dying
 	socks    *sockTable
 	datagram *sockTable                       // UDP flows, apart from TCP: one tuple may be both
 	unix     *unixTable                       // AF_UNIX stream connections by their socket pair
@@ -188,6 +190,7 @@ func (c *Correlator) Handle(rec any) error {
 			return nil
 		}
 	}
+	c.reap()
 	return c.release(false)
 }
 
@@ -223,7 +226,8 @@ func (c *Correlator) Graph() schema.Graph {
 
 // Tick advances the correlator's clock to Config.Clock and releases
 // what that decides: a socket event whose fuse window passed leaves as
-// unresolved, with every event held behind it. The clock otherwise only
+// unresolved, with every event held behind it, and a dead process whose
+// window passed is forgotten (reap). The clock otherwise only
 // moves with records, so without Tick a connection whose other end is on
 // another host would hold the whole stream until the next record — 30 s
 // on a server called every 30 s, not the 5 s window (task 1f4 review).
@@ -237,6 +241,7 @@ func (c *Correlator) Tick() error {
 	if now := c.cfg.Clock(); now > c.now {
 		c.now = now
 	}
+	c.reap()
 	return c.release(false)
 }
 
