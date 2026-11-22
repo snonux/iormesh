@@ -144,9 +144,11 @@ func TestHTTPTLS(t *testing.T) {
 
 // TestHTTPRedaction: the planted Authorization, X-Api-Token, Cookie and
 // Set-Cookie values and the query secret never reach the trace (decision
-// #9 / #22) — not the trace files and not the agent's rings in the
-// spool — while their headers are recorded, masked, and the query keeps
-// its names with every value masked.
+// #9 / #22) — not events.ndjson, graph.json or the Java tables — while
+// their headers are recorded, masked, and the query keeps its names with
+// every value masked. The agent's rings are no longer scanned: since task
+// 2j4 a ring is unlinked once its JVM exits, so it is gone when the run
+// ends; ring-level redaction is pinned by the agent's own unit tests.
 func TestHTTPRedaction(t *testing.T) {
 	enableParallelIfRequested(t)
 	h := newHarness(t)
