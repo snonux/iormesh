@@ -52,9 +52,12 @@ type procState struct {
 	born  map[int32]uint64
 	past  map[int32]pastInstance
 	clock *uint64
-	// dead: the process's last thread exited (exitTask). Its fd table is
-	// gone then; inc and comm stay for the late records of its sockets.
-	dead bool
+	// dead: the process's last thread exited (exitTask); renames and
+	// unlinks skip it. Its fd table goes a fuse window later (fdsDropped,
+	// reap.go); inc and comm stay for the late records of its sockets.
+	// dyingAt is when its latest fuse window began.
+	dead, fdsDropped bool
+	dyingAt          uint64
 	// socks counts the TCP sockets whose records name this process and
 	// that are still in the socket table (not yet TCP_CLOSE): the ones
 	// the kernel may still report after the process died (reap.go).
@@ -128,7 +131,7 @@ func (c *Correlator) newProc(pid uint32, id Identity) *procState {
 }
 
 // resetFds gives p an empty fd table: fresh maps, so a dropped table
-// (exitTask) also returns the buckets the old maps grew — Go maps never
+// (reapOne) also returns the buckets the old maps grew — Go maps never
 // shrink, and clearing them would keep a busy parent's table per child.
 func (p *procState) resetFds() {
 	p.fds, p.lastGen = map[int32]uint32{}, map[int32]uint32{}

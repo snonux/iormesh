@@ -93,6 +93,9 @@ func (c *Correlator) unlinked(name string) {
 		return
 	}
 	for _, p := range c.procs {
+		if p.dead {
+			continue // see renamed
+		}
 		for fd, fp := range p.paths {
 			if !fp.gone && fp.path == name {
 				p.paths[fd] = fdPath{path: fp.path, gone: true}
@@ -107,10 +110,11 @@ func (c *Correlator) unlinked(name string) {
 // new, and its process gets an opened edge to the new name — the process
 // holds that file open under it, which the write after the rename in
 // file-lifecycle proves. Relative names cannot be matched against the
-// absolute paths fds keep, so they change nothing. A dead process holds
-// no paths (its table goes at its exit, reap.go), so it gets no edge to
-// a name renamed after it died, and neither this walk nor unlinked's
-// spends time on it.
+// absolute paths fds keep, so they change nothing. A dead process is
+// skipped, here and in unlinked: it holds no file under any name any
+// more, so it gets no edge to a name renamed after it died; its table
+// stays only a fuse window for late folded records (reap.go), which
+// need the fd instance, not the path.
 func (c *Correlator) renamed(old, new string) {
 	old, new = trimSlash(old), trimSlash(new)
 	if old == new || !strings.HasPrefix(old, "/") || !strings.HasPrefix(new, "/") {
@@ -118,6 +122,9 @@ func (c *Correlator) renamed(old, new string) {
 	}
 	c.unlinked(new)
 	for pid, p := range c.procs {
+		if p.dead {
+			continue
+		}
 		for fd, fp := range p.paths {
 			if fp.gone || !below(fp.path, old) {
 				continue

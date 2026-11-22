@@ -77,15 +77,18 @@ func (c *Correlator) childIdentity(r *types.TaskNewtaskEvent) Identity {
 // exitTask forgets a dead thread's pending enter and parked stack: its
 // syscall never returns, and the tid may be reused. A dead process is
 // also dropped from the native stack table (M2 step 9), which would
-// otherwise grow with every process a long session sees. Its fd table
-// goes too (dropFds, reap.go): the kernel closed every fd, and a table
-// kept per dead child cost memory, unlink and rename time, and false
-// opened edges with every fork (task xi4). Its identity (inc, comm)
-// stays while the kernel may still report its sockets' last transitions
-// (tcp_state, owned by the dead pid, which belong to that incarnation),
-// then the fuse window, and is reaped after that. A later process under
-// the same PID is announced by its own task_newtask record or attach
-// (newTask, Incarnation), which replaces the old state at once.
+// otherwise grow with every process a long session sees. The process is
+// marked dead (markDead, reap.go): a table kept per dead child cost
+// memory, unlink and rename time, and false opened edges with every fork
+// (task xi4). Renames and unlinks skip it at once; its fd table stays
+// one fuse window for a sibling thread's folded records, which can
+// trail this record (two threads may both report group_dead, exec.c),
+// then goes. Its identity (inc, comm) stays while the kernel may still
+// report its sockets' last transitions (tcp_state, owned by the dead
+// pid, which belong to that incarnation), then the fuse window, and is
+// reaped after that. A later process under the same PID is announced by
+// its own task_newtask record or attach (newTask, Incarnation), which
+// replaces the old state at once.
 func (c *Correlator) exitTask(r *types.ProcessExitEvent) {
 	c.advance(r.Time)
 	delete(c.enters, r.Tid)
@@ -97,7 +100,7 @@ func (c *Correlator) exitTask(r *types.ProcessExitEvent) {
 		c.cfg.Stacks.Forget(r.Pid) // its stacks are written; its maps are gone
 	}
 	if p, ok := c.procs[r.Pid]; ok {
-		c.dropFds(p)
+		c.markDead(p)
 	}
 }
 

@@ -102,6 +102,57 @@ func TestLateTCPStateOfDeadProcess(t *testing.T) {
 	}
 }
 
+// TestSiblingFlushAfterGroupDead (task xi4 review): two exiting threads
+// can both report group_dead (el9's signal->live fallback, exec.c), and
+// a sibling's folded write, flushed from its own exit, can trail the
+// first such record. It still names the fd instance it wrote to.
+func TestSiblingFlushAfterGroupDead(t *testing.T) {
+	c, sink := newTest(t)
+	now := uint64(0)
+	f := feeder{t, c, 10, 10, &now}
+	f.fork(60)
+	sib := feeder{t, c, 60, 61, &now}
+	sib.open("/tmp/a", 0, 5)
+	sib.close(5)
+	sib.open("/tmp/a", 0, 5) // generation 2
+	first := sib.tick()
+	f.groupDead(60)
+	sib.folded(types.SYS_ENTER_WRITE, 5, 3, 30, first, sib.tick())
+	sib.handle(&types.ProcessExitEvent{EventType: types.PROCESS_EXIT_EVENT, Time: sib.tick(),
+		Pid: 60, Tid: 61, GroupDead: 1})
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	writes := byKind(sink.events, schema.KindWrite)
+	if len(writes) != 1 || writes[0].FDGen != 2 {
+		t.Fatalf("writes %+v, want the sibling's folded write on fd 5 generation 2", writes)
+	}
+}
+
+// TestRequeuedDeadProcessWaitsLatestWindow (task xi4 review): a dead
+// process queued at its exit, which then owns a socket from a late first
+// record, waits out the window after that socket's close, not the one
+// after its exit.
+func TestRequeuedDeadProcessWaitsLatestWindow(t *testing.T) {
+	c, _ := newTest(t)
+	now := uint64(0)
+	f := feeder{t, c, 10, 10, &now}
+	f.fork(60)
+	f.groupDead(60)
+	*f.now += defaultFuseWindowNS / 2
+	f.handle(tcp(f.tick(), 0xA, 60, 6, tcpClose, synSent, "10.0.0.1:0", "10.0.0.2:80"))
+	f.handle(tcp(f.tick(), 0xA, 60, 6, synSent, tcpClose, "10.0.0.1:4000", "10.0.0.2:80"))
+	*f.now += defaultFuseWindowNS/2 + 100
+	f.read(0, 1)
+	if _, ok := c.procs[60]; !ok {
+		t.Fatal("the dead process was reaped inside the window after its socket's close")
+	}
+	pastFuseWindow(f)
+	if _, ok := c.procs[60]; ok {
+		t.Fatal("the dead process outlived the window after its socket's close")
+	}
+}
+
 // TestPIDReusedBeforeReap (task xi4): a pid reused by a new traced child
 // before its predecessor's fuse window passed keeps the new state when
 // the window does.
