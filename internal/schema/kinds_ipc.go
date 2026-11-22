@@ -12,6 +12,11 @@ package schema
 //     "@name"); inet args carry the local or remote address.
 //   - sendto, recvfrom: bytes, and per datagram the local and remote
 //     address and port (UDP's peer is in each call, not in the socket).
+//   - sendmsg, recvmsg, sendmmsg, recvmmsg (task oh4): bytes; on a
+//     connected socket the connection's 4-tuple, as read and write. The
+//     mmsg calls' ret is the message count and bytes the sum of the
+//     messages' msg_len; args.bytes_partial marks a sum the tracer could
+//     not complete. A datagram's peer inside the msghdr is not read yet.
 //   - pipe, pipe2, socketpair: fd is the first descriptor, args.fd2 and
 //     args.fd2_gen the second; both name one connection (conn_id).
 //   - kill, tgkill, tkill: args.target_pid and args.signal, when the
@@ -27,6 +32,11 @@ const (
 	KindBind     = "bind"
 	KindSendto   = "sendto"
 	KindRecvfrom = "recvfrom"
+	// Socket family msghdr data calls (default-on, task oh4).
+	KindSendmsg  = "sendmsg"
+	KindRecvmsg  = "recvmsg"
+	KindSendmmsg = "sendmmsg"
+	KindRecvmmsg = "recvmmsg"
 
 	// ipc family: both ends of a pipe or socketpair.
 	KindPipe       = "pipe"
@@ -63,6 +73,7 @@ const (
 func ipcKind(kind string) bool {
 	switch kind {
 	case KindBind, KindSendto, KindRecvfrom,
+		KindSendmsg, KindRecvmsg, KindSendmmsg, KindRecvmmsg,
 		KindPipe, KindPipe2, KindSocketpair,
 		KindKill, KindTgkill, KindTkill, KindSignal,
 		KindEpollCreate, KindEpollCreate1, KindEpollCtl, KindEpollWait,
@@ -81,6 +92,13 @@ func signalKind(kind string) bool {
 		return true
 	}
 	return false
+}
+
+// IsMmsg reports whether kind is one of the multi-message calls, whose
+// ret counts messages, not bytes (task oh4): bytes is the sum of their
+// msg_len, which the tracer reads at the exit.
+func IsMmsg(kind string) bool {
+	return kind == KindSendmmsg || kind == KindRecvmmsg
 }
 
 // fd2Kind reports whether kind may carry args.fd2: the pair creators and

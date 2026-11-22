@@ -25,8 +25,8 @@ const (
 	shapeName              // name_event: two dirfd/path pairs (files.go)
 	// shapeIPC: the M2 step 7 records with their own layout — pipe and
 	// socketpair, kill's null_event, epoll_ctl, the poll waits, epoll
-	// create (ipc.go). bind, sendto, recvfrom and the zero-copy calls are
-	// plain fd records and stay shapeFd.
+	// create (ipc.go). bind, sendto, recvfrom, the msghdr calls (task
+	// oh4) and the zero-copy calls are plain fd records and stay shapeFd.
 	shapeIPC
 )
 
@@ -126,14 +126,8 @@ func (c *Correlator) exit(tid uint32, name string, ret int64, at uint64) {
 // exitSeq is exit for an exit record that may carry a TCP sequence number
 // (a tcp_seq_event, streamseq.go): seqSk is its socket, 0 for none.
 func (c *Correlator) exitSeq(tid uint32, name string, ret int64, at uint64, seqSk uint64, seq uint32) {
-	en, ok := c.enters[tid]
-	delete(c.enters, tid)
-	if !ok || en.name != name {
-		c.unpaired++
-		return
-	}
-	ev := c.base(en, tid, ret, at)
-	sock, ok := c.syscallDetail(&ev, en, ret)
+	var ev schema.Event
+	sock, ok := c.pair(&ev, tid, name, ret, at)
 	if !ok {
 		return
 	}
@@ -141,6 +135,23 @@ func (c *Correlator) exitSeq(tid uint32, name string, ret int64, at uint64, seqS
 		c.streamSeq(&ev, sock, seqSk, seq)
 	}
 	c.enqueue(ev, sock)
+}
+
+// pair pairs an exit with its thread's pending enter and fills ev from
+// both (base, syscallDetail). It returns the socket the event acts on and
+// false when there is no event to emit: the exit came without its enter
+// (counted, not guessed at) or the detail dropped it. The exit records
+// that carry more than a ret (tcp_seq_event, mmsg_event) add theirs to ev
+// before it is queued.
+func (c *Correlator) pair(ev *schema.Event, tid uint32, name string, ret int64, at uint64) (*sockState, bool) {
+	en, ok := c.enters[tid]
+	delete(c.enters, tid)
+	if !ok || en.name != name {
+		c.unpaired++
+		return nil, false
+	}
+	*ev = c.base(en, tid, ret, at)
+	return c.syscallDetail(ev, en, ret)
 }
 
 // base fills the envelope fields every syscall event shares.
@@ -220,6 +231,7 @@ func (c *Correlator) syscallDetail(ev *schema.Event, en enter, ret int64) (*sock
 	case schema.KindConnect:
 		sock = c.connectDetail(ev, p, en, sock)
 	case schema.KindBind, schema.KindSendto, schema.KindRecvfrom,
+		schema.KindSendmsg, schema.KindRecvmsg, schema.KindSendmmsg, schema.KindRecvmmsg,
 		schema.KindSendfile64, schema.KindSplice, schema.KindTee, schema.KindCopyFileRange:
 		sock = c.socketFdDetail(ev, p, en, ret, sock)
 	default:

@@ -230,6 +230,24 @@ func TestListenOwners(t *testing.T) {
 	}
 }
 
+// TestListenHoldersStartTime (task qj4): each holder comes with the start
+// time read with its fd table, so a later adoption can tell the listed
+// incarnation from a process that reused its pid.
+func TestListenHoldersStartTime(t *testing.T) {
+	f := newFakeProc(t)
+	f.listenTable()
+	f.proc(30, 30, 1, 'S', 7, "/usr/bin/app")
+	f.socket(30, 5, "111")
+	st, err := f.fs().Stat(30)
+	if err != nil || st.StartNS == 0 {
+		t.Fatalf("Stat(30) = %+v, %v", st, err)
+	}
+	got, err := f.fs().ListenHolders(8080)
+	if err != nil || !slices.Equal(got, []Holder{{PID: 30, StartNS: st.StartNS}}) {
+		t.Fatalf("ListenHolders(8080) = %v, %v; want pid 30 at %d", got, err, st.StartNS)
+	}
+}
+
 // listenTable is a /proc/net/tcp with one LISTEN socket on 8080, inode
 // 111.
 func (f fakeProc) listenTable() {

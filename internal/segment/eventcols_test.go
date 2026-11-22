@@ -68,7 +68,7 @@ func randomArgs(r *rand.Rand) schema.Args {
 		RcvNxt: maybe(r, r.Uint32()), BytesAcked: maybe(r, r.Uint64()),
 		BytesReceived: maybe(r, uint64(0)), TCPSeq: maybe(r, r.Uint32()),
 		Pattern: maybe(r, "app"), ParentPID: maybe(r, r.Uint32()), ParentInc: maybe(r, r.Uint64()),
-		SockSnapshot: maybe(r, "final")}
+		SockSnapshot: maybe(r, "final"), BytesPartial: maybe(r, true)}
 }
 
 func pick[T any](r *rand.Rand, vs ...T) T { return vs[r.IntN(len(vs))] }

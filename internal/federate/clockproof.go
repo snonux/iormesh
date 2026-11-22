@@ -52,11 +52,13 @@ import "iormesh/internal/schema"
 //     sending host could have hidden a send of this connection
 //     (dropTaints). It covers every message of the direction. It is not a
 //     proof: it trusts the sums to hold every byte queued, and bytes can
-//     escape them with no drop recorded — untraced sendmsg, sendmmsg,
-//     splice and io_uring; a fork between the untraced socket() and
-//     connect(), an exec that keeps the socket (the correlator drops the
-//     fd's binding), or an fd passed by SCM_RIGHTS or pidfd_getfd, any of
-//     which leaves a holder whose calls name no connection. It also reads
+//     escape them with no drop recorded — untraced splice and io_uring
+//     (sendmsg and sendmmsg are traced since task oh4, and a sendmmsg
+//     whose sum the tracer could not complete fails the check); a fork
+//     between the untraced socket() and connect(), an exec that keeps
+//     the socket (the correlator drops the fd's binding), or an fd
+//     passed by SCM_RIGHTS or pidfd_getfd, any of which leaves a
+//     holder whose calls name no connection. It also reads
 //     only the drops of the sessions that reported the half. What limits
 //     the damage: an offset past the sender's sum (sumsCover) or a
 //     bytes_acked above it (ackedCovered) proves untraced bytes and fails
@@ -178,8 +180,13 @@ func (c *collector) direction(conn string, from, to end, iss uint32) []message {
 // send (the residue the header names remains). The receiver's sums and
 // counters are checked too (long), a cheap second witness of the same
 // total. A drop of any session that reported the sending half may have
-// hidden a send unless dropTaints says otherwise.
+// hidden a send unless dropTaints says otherwise. A half with a partial
+// byte sum (a sendmmsg or recvmmsg the tracer could not sum, task oh4)
+// fails it: its sums undercount by the tracer's own account.
 func (c *collector) streamProof(from, to end, iss uint32) bool {
+	if from.acc.timing.partial || to.acc.timing.partial {
+		return false
+	}
 	if long(&from.acc.timing) || long(&to.acc.timing) ||
 		!sumsCover(&from.acc.timing, &to.acc.timing, iss) || !c.ackedCovered(&from.acc.timing) {
 		return false
@@ -221,8 +228,8 @@ const ackedSlack = 2
 // kernel's own count of the stream and only grows, so a record — the
 // final snapshot (task sf4) or a CLOSE above all, taken after every call —
 // counting more than the sum plus ackedSlack proves bytes the sum never
-// saw, however they were sent: an untraced sendmsg, splice or io_uring
-// call, or a holder the trace cannot tie to the connection.
+// saw, however they were sent: an untraced splice or io_uring call, or a
+// holder the trace cannot tie to the connection.
 //
 // A final snapshot is that witness only when its session ended because
 // its targets exited (exitedOnly): a session stopped by its duration, a

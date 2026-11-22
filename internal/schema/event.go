@@ -277,9 +277,11 @@ type Args struct {
 	// number on both hosts, so the merge pairs each receive with the send
 	// that queued its last byte and bounds the two hosts' clock offset by
 	// the pair. Only on an unfolded data record of a TCP socket (write,
-	// writev, sendto, sendfile64, read, readv, recvfrom) with a conn_id that moved bytes:
-	// a folded record has lost its calls' instants. Appended in M4 (task
-	// gb4); the tracer's capture (tcp_sendmsg/tcp_recvmsg hooks) is open.
+	// writev, sendto, sendfile64, sendmsg, sendmmsg, read, readv,
+	// recvfrom, recvmsg, recvmmsg) with a conn_id that moved bytes: a
+	// folded record has lost its calls' instants. Appended in M4 (task
+	// gb4); the tracer fills it from the data calls' own syscall hooks
+	// (task xe4; the msghdr calls since task oh4).
 	TCPSeq *uint32 `json:"tcp_seq,omitempty" parquet:"tcp_seq,optional"`
 	// Pattern is the target pattern (decision #23) through which a
 	// pattern-bound session took a process on: attach events only. With
@@ -298,6 +300,13 @@ type Args struct {
 	// state then. Absent on every other record, the accept snapshot's
 	// included. Appended in M4 (task sf4).
 	SockSnapshot *string `json:"sock_snapshot,omitempty" parquet:"sock_snapshot,optional"`
+	// BytesPartial marks a sendmmsg or recvmmsg whose bytes is a lower
+	// bound: the tracer sums the messages' msg_len at the exit and could
+	// not read them all (a faulting read, more messages than its cap, a
+	// lost enter). Always true when set; such a record carries no
+	// tcp_seq, and the merge's stream check does not trust its
+	// direction's sums (internal/federate). Appended in M4 (task oh4).
+	BytesPartial *bool `json:"bytes_partial,omitempty" parquet:"bytes_partial,optional"`
 }
 
 // Session is the host description of the session header. Its fields are

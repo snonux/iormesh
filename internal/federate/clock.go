@@ -67,6 +67,11 @@ type timing struct {
 	// them at 4 GiB or more means offsets may repeat (streamProof).
 	sent, received, maxCount uint64
 	counts                   []counterRec // the counter proofs read them
+	// partial is set once a data record's bytes were only a lower bound
+	// (args.bytes_partial: a sendmmsg or recvmmsg whose messages the
+	// tracer could not all sum, task oh4): the sums then undercount, and
+	// the stream check, which trusts them, does not hold (streamProof).
+	partial bool
 }
 
 func (e *earliest) see(ns uint64) {
@@ -127,13 +132,17 @@ func (t *timing) state(ev *schema.Event) {
 // arrived when it returned). Every record counts toward the sums — a
 // folded record (args.count) stands for many calls and carries no
 // tcp_seq, nor does a call another thread interleaved with — since the
-// sums must not undercount the stream (streamProof).
+// sums must not undercount the stream (streamProof). A record whose
+// bytes are a lower bound (args.bytes_partial) marks the half partial.
 func (t *timing) data(ev *schema.Event) {
 	send := schema.IsStreamSend(ev.Event)
 	if send {
 		t.sent += ev.Bytes
 	} else {
 		t.received += ev.Bytes
+	}
+	if ev.Args.BytesPartial != nil {
+		t.partial = true
 	}
 	if ev.Args.TCPSeq == nil {
 		return

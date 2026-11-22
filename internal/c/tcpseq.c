@@ -8,9 +8,11 @@
 //
 // The controller's merge pairs every receive with the send that queued its
 // last byte, by stream offset (internal/federate, clock.go), so each unfolded
-// write, writev, sendto, sendfile64, read, readv and recvfrom on a TCP socket
-// needs the sequence number of its first byte: args.tcp_seq. Which field
-// holds it:
+// write, writev, sendto, sendfile64, sendmsg, sendmmsg, read, readv,
+// recvfrom, recvmsg and recvmmsg on a TCP socket needs the sequence number
+// of its first byte: args.tcp_seq. (The mmsg calls check their messages'
+// byte sum, not their return, which counts messages: mmsg.c, task oh4.)
+// Which field holds it:
 //   - a send appends at tcp_sock.write_seq (the end of the send queue), not
 //     at snd_nxt, which lags behind whatever is still queued;
 //   - a receive copies from tcp_sock.copied_seq (the next byte the reader
@@ -134,7 +136,7 @@ static __always_inline __u32 iormesh_tcp_seq_field(struct tcp_sock *tp, __u32 di
     return tp->copied_seq;
 }
 
-// iormesh_seq_on_enter is the enter hook of the seven data calls: it parks
+// iormesh_seq_on_enter is the enter hook of the data calls: it parks
 // the start of a call on a TCP socket. It runs only for an enter whose
 // record is sent (behind the sampling and fold hooks). A call on anything
 // else parks nothing and leaves the thread's entry as it was: its exit then
@@ -234,13 +236,14 @@ static __always_inline int iormesh_seq_moved_exactly(struct tcp_sock *tp, __u32 
     return iormesh_tcp_fin_received(state) && end == tp->rcv_nxt;
 }
 
-// iormesh_seq_on_exit is the exit hook of the seven data calls, behind
-// the hooks that decide the exit record is sent: it empties the thread's
-// park and, when the call moved bytes and the field moved by exactly that
-// many since the park (iormesh_seq_moved_exactly), sends the exit record
-// itself, with the call's first sequence number, and returns 1 - the
-// handler then sends no ret_event. Otherwise it returns 0 and the handler
-// sends its plain ret_event. A park of the other direction is another
+// iormesh_seq_take is the exit half of the check, for every data call:
+// it empties the thread's park and returns 1, with the parked socket in
+// *sk and the call's first sequence number in *seq, when the call moved
+// n > 0 bytes and the field moved by exactly that many since the park
+// (iormesh_seq_moved_exactly); otherwise 0. n is the call's return for
+// the single-buffer calls and sendmsg/recvmsg, the messages' byte sum
+// for sendmmsg/recvmmsg (mmsg.c), and 0 - which only empties the park -
+// when that sum is incomplete. A park of the other direction is another
 // call's (a missed exit) and is only emptied. The socket is re-read
 // through the parked address: the call's fd reference, or a
 // single-threaded file table, kept the socket alive until the syscall
@@ -248,13 +251,12 @@ static __always_inline int iormesh_seq_moved_exactly(struct tcp_sock *tp, __u32 
 // fault-safe, and a freed or reused socket fails the check (or
 // userspace's socket check). Residue besides the 1 in 2^32 above: another
 // thread dup2s a second socket onto the fd between this enter's walk and
-// the kernel's fd lookup while a third party moves exactly ret bytes on
+// the kernel's fd lookup while a third party moves exactly n bytes on
 // the parked one - userspace catches it only if it traced the dup2.
-static __always_inline int iormesh_seq_on_exit(__u32 pid, __u32 tid, __u32 trace_id, __u64 now,
-                                               __s64 ret, __u32 dir) {
+static __always_inline int iormesh_seq_take(__u32 tid, __s64 n, __u32 dir, __u64 *sk, __u32 *seq) {
     struct seq_park *slot = bpf_map_lookup_elem(&seq_park_map, &tid);
     struct tcp_sock *tp;
-    __u64 sk;
+    __u64 parked;
     __u32 start, end;
 
     if (!slot)
@@ -263,15 +265,35 @@ static __always_inline int iormesh_seq_on_exit(__u32 pid, __u32 tid, __u32 trace
         slot->dir = 0;
         return 0;
     }
-    sk = slot->sk;
+    parked = slot->sk;
     start = slot->seq;
     slot->dir = 0;
-    if (ret <= 0 || !ior_file_ident_supported())
+    if (n <= 0 || !ior_file_ident_supported())
         return 0;
-    tp = bpf_rdonly_cast((void *)sk, bpf_core_type_id_kernel(struct tcp_sock));
+    tp = bpf_rdonly_cast((void *)parked, bpf_core_type_id_kernel(struct tcp_sock));
     end = iormesh_tcp_seq_field(tp, dir);
-    if (!iormesh_seq_moved_exactly(tp, dir, start, end, ret))
+    if (!iormesh_seq_moved_exactly(tp, dir, start, end, n))
         return 0;
-    iormesh_emit_tcp_seq(pid, tid, trace_id, now, ret, sk, start);
+    *sk = parked;
+    *seq = start;
+    return 1;
+}
+
+// iormesh_seq_on_exit is the exit hook of the single-buffer data calls
+// and sendmsg/recvmsg, behind the hooks that decide the exit record is
+// sent: when iormesh_seq_take proves the call's ret bytes are its own, it
+// sends the exit record itself, with the call's first sequence number,
+// and returns 1 - the handler then sends no ret_event. Otherwise it
+// returns 0 and the handler sends its plain ret_event. sendmmsg and
+// recvmmsg take the park through mmsg.c's exit hook instead: their ret
+// counts messages, not bytes.
+static __always_inline int iormesh_seq_on_exit(__u32 pid, __u32 tid, __u32 trace_id, __u64 now,
+                                               __s64 ret, __u32 dir) {
+    __u64 sk = 0;
+    __u32 seq = 0;
+
+    if (!iormesh_seq_take(tid, ret, dir, &sk, &seq))
+        return 0;
+    iormesh_emit_tcp_seq(pid, tid, trace_id, now, ret, sk, seq);
     return 1;
 }

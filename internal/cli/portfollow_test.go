@@ -14,12 +14,25 @@ import (
 )
 
 // fakePort is the /proc a listening-port session sees in a test: which
-// processes live, who holds the port and each process's owner key.
+// processes live, who holds the port and each process's owner key and
+// start time.
 type fakePort struct {
 	live    map[uint32]bool
 	holders []uint32 // nil: nothing listens
 	owners  map[uint32]target.Owner
-	now     time.Time
+	// starts are the processes' start times now, 1 when not set; listed
+	// overrides the start time the port's listing saw for a holder — a
+	// pid reused between the listing and the adoption.
+	starts, listed map[uint32]uint64
+	now            time.Time
+}
+
+// start is pid's start time now (processIdentity).
+func (f *fakePort) start(pid uint32) uint64 {
+	if s, ok := f.starts[pid]; ok {
+		return s
+	}
+	return 1
 }
 
 // newFakePort installs a fakePort for the test's processAlive,
@@ -27,14 +40,28 @@ type fakePort struct {
 func newFakePort(t *testing.T) *fakePort {
 	t.Helper()
 	fakeProcs(t)
-	f := &fakePort{live: map[uint32]bool{}, owners: map[uint32]target.Owner{}, now: time.Unix(1000, 0)}
+	f := &fakePort{live: map[uint32]bool{}, owners: map[uint32]target.Owner{},
+		starts: map[uint32]uint64{}, listed: map[uint32]uint64{}, now: time.Unix(1000, 0)}
 	origOwners, origOwner := listenOwners, procOwner
-	processAlive = func(pid uint32, _ uint64) bool { return f.live[pid] }
-	listenOwners = func(uint16) ([]uint32, error) {
+	processAlive = func(pid uint32, start uint64) bool {
+		return f.live[pid] && (start == 0 || start == f.start(pid))
+	}
+	processIdentity = func(pid uint32) correlate.Identity {
+		return correlate.Identity{Comm: "x", StartNS: f.start(pid)}
+	}
+	listenOwners = func(uint16) ([]target.Holder, error) {
 		if f.holders == nil {
 			return nil, errors.New("nothing listens")
 		}
-		return f.holders, nil
+		var hs []target.Holder
+		for _, pid := range f.holders {
+			start, ok := f.listed[pid]
+			if !ok {
+				start = f.start(pid)
+			}
+			hs = append(hs, target.Holder{PID: pid, StartNS: start})
+		}
+		return hs, nil
 	}
 	procOwner = func(pid uint32) (target.Owner, error) {
 		o, ok := f.owners[pid]
@@ -177,6 +204,104 @@ func TestPortSessionOwnerUnknown(t *testing.T) {
 	mustEnded(t, s, true, "unknown owner")
 	if len(tr.added) != 0 || !strings.Contains(log.String(), "not following") {
 		t.Fatalf("added %v, stderr %q; want nothing adopted and a reason", tr.added, log.String())
+	}
+	_ = c.Close()
+}
+
+// TestPortFollowPIDReuse (task qj4): the listing names pid 22 as the
+// port's holder, but by the time the session adopts it pid 22 is another
+// process — same executable and uid, a different start time — which does
+// not hold the port. Adoption is tied to the incarnation the listing saw,
+// so it is refused; the real holder is adopted at the next resolve.
+func TestPortFollowPIDReuse(t *testing.T) {
+	f := newFakePort(t)
+	app := target.Owner{Exe: "/usr/bin/app", UID: 1000}
+	f.live[10], f.owners[10], f.holders = true, app, []uint32{10}
+	tr := newFakeTracer()
+	c := testCorrelator(t, t.TempDir())
+	s, _ := portSession(t, f, c, tr, time.Minute, 10)
+	f.live[10], f.holders = false, nil
+	mustEnded(t, s, false, "owner gone, within the grace")
+
+	f.now = f.now.Add(2 * time.Second)
+	f.live[22], f.owners[22], f.starts[22], f.listed[22] = true, app, 9, 5
+	f.holders = []uint32{22}
+	mustEnded(t, s, false, "listed holder reused")
+	if len(tr.added) != 0 || len(s.live) != 0 {
+		t.Fatalf("added %v, live %v; want the reused pid left alone", tr.added, s.live)
+	}
+
+	f.now = f.now.Add(2 * time.Second)
+	delete(f.listed, 22) // the listing now sees the process at pid 22
+	mustEnded(t, s, false, "real holder")
+	if !slices.Equal(tr.added, []uint32{22}) {
+		t.Fatalf("added %v; want 22 once the listing sees its incarnation", tr.added)
+	}
+	_ = c.Close()
+}
+
+// TestPortFollowPrivilegeSeparated (task qj4): a privilege-separated
+// server — a root master and workers of the same binary under another
+// uid, all holding the listener — is followed whole across a restart:
+// the new master and its workers are adopted, since workers forked
+// before the re-resolve are never picked up by fork-following.
+func TestPortFollowPrivilegeSeparated(t *testing.T) {
+	f := newFakePort(t)
+	master := target.Owner{Exe: "/usr/sbin/nginx", UID: 0}
+	worker := target.Owner{Exe: "/usr/sbin/nginx", UID: 995}
+	f.live[10], f.owners[10], f.starts[10] = true, master, 100
+	f.live[11], f.owners[11], f.starts[11] = true, worker, 200
+	f.holders = []uint32{10, 11}
+	tr := newFakeTracer()
+	c := testCorrelator(t, t.TempDir())
+	s, _ := portSession(t, f, c, tr, time.Minute, 10, 11)
+	f.live[10], f.live[11], f.holders = false, false, nil
+	mustEnded(t, s, false, "server gone, within the grace")
+
+	f.now = f.now.Add(2 * time.Second)
+	f.live[24], f.owners[24] = true, master
+	f.live[25], f.owners[25] = true, worker
+	f.holders = []uint32{24, 25}
+	mustEnded(t, s, false, "restarted server")
+	if !slices.Equal(tr.added, []uint32{24, 25}) {
+		t.Fatalf("added %v; want the restarted master and worker [24 25]", tr.added)
+	}
+	_ = c.Close()
+}
+
+// TestPortFollowRemembersOriginalExe (task qj4): at start the port is
+// held by the app (the earliest-started holder, uid 1000) and by a helper
+// of another program, running as root, that inherited the listener fd.
+// Only keys of the original holder's executable are remembered, so after
+// the app exits the root helper binding the port is not adopted; the
+// restarted app is.
+func TestPortFollowRemembersOriginalExe(t *testing.T) {
+	f := newFakePort(t)
+	app := target.Owner{Exe: "/usr/bin/app", UID: 1000}
+	helper := target.Owner{Exe: "/usr/bin/helper", UID: 0}
+	f.live[10], f.owners[10], f.starts[10] = true, app, 100
+	f.live[11], f.owners[11], f.starts[11] = true, helper, 200
+	f.holders = []uint32{10, 11}
+	tr := newFakeTracer()
+	c := testCorrelator(t, t.TempDir())
+	s, _ := portSession(t, f, c, tr, time.Minute, 10, 11)
+	f.live[10], f.live[11], f.holders = false, false, nil
+	mustEnded(t, s, false, "owners gone, within the grace")
+
+	f.now = f.now.Add(2 * time.Second)
+	f.live[23], f.owners[23] = true, helper
+	f.holders = []uint32{23}
+	mustEnded(t, s, false, "root helper on the port")
+	if len(tr.added) != 0 {
+		t.Fatalf("added %v; a holder of another program than the original widened the follow", tr.added)
+	}
+
+	f.now = f.now.Add(2 * time.Second)
+	f.live[24], f.owners[24] = true, app
+	f.holders = []uint32{23, 24}
+	mustEnded(t, s, false, "restarted app")
+	if !slices.Equal(tr.added, []uint32{24}) {
+		t.Fatalf("added %v; want only the restarted app 24", tr.added)
 	}
 	_ = c.Close()
 }

@@ -159,6 +159,7 @@ const STACK_EVENT = 74
 const STACK_INLINE_EVENT = 75
 const JAVA_MARK_EVENT = 76
 const TCP_SEQ_EVENT = 77
+const MMSG_EVENT = 78
 const UNCLASSIFIED = 0
 const READ_CLASSIFIED = 1
 const WRITE_CLASSIFIED = 2
@@ -219,6 +220,7 @@ const SIGNAL_SCOPE_SENDER = 1
 const SIGNAL_SCOPE_TARGET = 2
 const SIGNAL_SCOPE_USER = 4
 const IORMESH_STACK_DEPTH = 64
+const MMSG_BYTES_PARTIAL = 1
 const SYS_ENTER_SOCKET TraceId = 1899
 const SYS_EXIT_SOCKET TraceId = 1898
 const SYS_ENTER_SOCKETPAIR TraceId = 1897
@@ -4482,4 +4484,81 @@ func (t *TcpSeqEvent) Bytes() ([]byte, error) {
 
 func (t *TcpSeqEvent) Recycle() {
 	poolOfTcpSeqEvents.Put(t)
+}
+
+type MmsgEvent struct {
+	EventType  EventType
+	TraceId    TraceId
+	Time       uint64
+	Ret        int64
+	Pid        uint32
+	Tid        uint32
+	TotalBytes uint64
+	Sk         uint64
+	Seq        uint32
+	Flags      uint32
+}
+
+func (m MmsgEvent) String() string {
+	return fmt.Sprintf("EventType:%v TraceId:%v Time:%v Ret:%v Pid:%v Tid:%v TotalBytes:%v Sk:%v Seq:%v Flags:%v", m.EventType, m.TraceId, m.Time, m.Ret, m.Pid, m.Tid, m.TotalBytes, m.Sk, m.Seq, m.Flags)
+}
+
+func (m MmsgEvent) Equals(other any) bool {
+	otherConcrete, ok := other.(*MmsgEvent)
+	if !ok {
+		return false
+	}
+	return m.EventType == otherConcrete.EventType && m.TraceId == otherConcrete.TraceId && m.Time == otherConcrete.Time && m.Ret == otherConcrete.Ret && m.Pid == otherConcrete.Pid && m.Tid == otherConcrete.Tid && m.TotalBytes == otherConcrete.TotalBytes && m.Sk == otherConcrete.Sk && m.Seq == otherConcrete.Seq && m.Flags == otherConcrete.Flags
+}
+
+func (m *MmsgEvent) GetEventType() EventType {
+	return m.EventType
+}
+
+func (m *MmsgEvent) GetTraceId() TraceId {
+	return m.TraceId
+}
+
+func (m *MmsgEvent) GetPid() uint32 {
+	return m.Pid
+}
+
+func (m *MmsgEvent) GetTid() uint32 {
+	return m.Tid
+}
+
+func (m *MmsgEvent) GetTime() uint64 {
+	return m.Time
+}
+
+// GetRet returns the syscall return value carried by this event.
+func (m *MmsgEvent) GetRet() int64 {
+	return m.Ret
+}
+
+var poolOfMmsgEvents = sync.Pool{
+	New: func() any { return &MmsgEvent{} },
+}
+
+func NewMmsgEvent(raw []byte) *MmsgEvent {
+	m := poolOfMmsgEvents.Get().(*MmsgEvent)
+	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, m); err != nil {
+		*m = MmsgEvent{}
+		poolOfMmsgEvents.Put(m)
+		return nil
+	}
+	return m
+}
+
+func (m *MmsgEvent) Bytes() ([]byte, error) {
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.LittleEndian, m)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (m *MmsgEvent) Recycle() {
+	poolOfMmsgEvents.Put(m)
 }

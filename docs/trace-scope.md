@@ -15,8 +15,20 @@ event families `iormesh run -trace-families` adds (see
   create/exit, thread renames; PID incarnation ids so a reused
   PID is never confused with the old one. Sessions bound to a
   process-name pattern auto-detect restarts and follow the app
-  to its new PID. *Who exists, spawned by
-  whom, for how long.*
+  to its new PID. Sessions bound to a listening port
+  (`-listen-port`) follow the port to a restarted owner, within
+  `-listen-grace`, if it runs the original owner's executable
+  under a uid one of the original holders had, and still is the
+  process the port listing saw (decision #23). A
+  privilege-separated server — a root master and workers of the
+  same binary under their own uid — is followed whole; another
+  program that only inherited the listener fd is not. A socket-activated port that only
+  systemd holds — the service is idle, not running — is refused
+  at start, also by `expand -apply`: systemd itself is never a
+  target, since tracing it would follow every service it
+  spawns. Wake the service (one request) and deploy again, or
+  enroll it by `-pattern`. *Who exists, spawned by whom, for
+  how long.*
 - **Filesystem** — the full syscall surface, not just data
   movement: open/close, read/write/pread, stat family, create
   (open O_CREAT, creat, mkdir), delete (unlink/rmdir), rename &
@@ -35,8 +47,14 @@ event families `iormesh run -trace-families` adds (see
   socket's state transitions rather than syscall arguments (so
   Java's non-blocking connects are covered), plus a
   NAT-tolerant join key; UDP per-packet
-  peers (sendto/recvfrom; sendmsg and its kin are planned, task
-  oh4), poll/epoll wait registrations, DNS hostname↔IP maps,
+  peers (sendto/recvfrom), the msghdr data calls
+  sendmsg/recvmsg/sendmmsg/recvmmsg with their bytes (the mmsg
+  calls' summed over their messages) and TCP sequence ranges —
+  their datagram peer inside the msghdr is not read yet (task
+  oh4); their 8 handlers are on by default, and a
+  sendmmsg/recvmmsg exit pays up to 1024 user-memory reads per
+  call, one per message — heavy for UDP workloads that batch
+  with them — poll/epoll wait registrations, DNS hostname↔IP maps,
   and ingress route maps for proxy hops that hide the peer. TLS
   peer identity is later (decision #8). *Who talks to whom,
   under what name — and which threads wait on what.*

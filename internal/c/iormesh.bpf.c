@@ -5,7 +5,8 @@
 // and sock.c added; sockaddr.c and signal.c added (M2 step 7); rwagg.c added
 // (M2 step 11); stack.c added (M2 step 9); javamark.c added (task td4);
 // tcpseq.c added (task xe4); pidns.c added (M7, task 4f4); targethint.c
-// added (task 9f4); restart.c not included (task pf4).
+// added (task 9f4); restart.c not included (task pf4); mmsg.c added (task
+// oh4).
 
 #include "vmlinux.h"
 #include <bpf/bpf_core_read.h>
@@ -66,6 +67,11 @@
 // at the generated data calls' enters and sent at their exits; after sock.c
 // and fileident.c, whose constants and typed walk it uses.
 #include "tcpseq.c"
+
+// Byte sums of sendmmsg and recvmmsg, whose return counts messages (M4,
+// task oh4): the enter parks the mmsghdr array, the exit sums its msg_len
+// and checks the sum with tcpseq.c's park, hence after it.
+#include "mmsg.c"
 
 // Address arguments and socket addresses of bind, connect, sendto, recvfrom
 // and AF_UNIX accepts (M2 step 7), sent by hooks of the generated handlers.

@@ -226,11 +226,20 @@ func (c *Correlator) connectDetail(ev *schema.Event, p *procState, en enter, soc
 	return sock
 }
 
-// socketFdDetail fills bind, the datagram calls and the zero-copy calls:
-// bytes for what moved, and the addresses of their sock_addr record.
+// socketFdDetail fills bind, the datagram calls, the msghdr calls and the
+// zero-copy calls: bytes for what moved, and the addresses of their
+// sock_addr record (none for the msghdr calls yet: their peer sits in the
+// msghdr, task oh4). A sendmmsg's or recvmmsg's ret counts messages: its
+// bytes come from its mmsg_event (mmsgRecord), so an exit of one that
+// moved messages but came as a plain ret_event has an unknown sum and is
+// marked partial.
 func (c *Correlator) socketFdDetail(ev *schema.Event, p *procState, en enter, ret int64,
 	sock *sockState) *sockState {
-	if ret > 0 && en.name != schema.KindBind {
+	switch {
+	case ret <= 0 || en.name == schema.KindBind:
+	case schema.IsMmsg(en.name):
+		markPartial(ev)
+	default:
 		ev.Bytes = uint64(ret)
 	}
 	a := en.addr

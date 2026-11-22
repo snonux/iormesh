@@ -217,6 +217,22 @@ func TestClockUnfoldedBytesCount(t *testing.T) {
 	wantBound(t, mergeTraces(t, Options{}, a, b), 1, false)
 }
 
+// TestClockPartialSumTaints: a sendmmsg whose byte sum the tracer could
+// not complete (args.bytes_partial, task oh4) leaves the sums short by
+// the tracer's own account, so its direction falls to the counter proof
+// as a 4 GiB sum does; the same record with a complete sum keeps both.
+func TestClockPartialSumTaints(t *testing.T) {
+	a, b, _ := pingConv()
+	a.event(100, schema.KindSendmmsg, 7, 1<<20, t0+500*tus, "x-c", schema.Args{BytesPartial: ptr(true)})
+	wantBound(t, mergeTraces(t, Options{}, a, b), 1, false)
+	a, b, _ = pingConv()
+	a.event(100, schema.KindSendmmsg, 7, 1<<20, t0+500*tus, "x-c", schema.Args{})
+	a.events[len(a.events)-1].Bytes = 0
+	if r := mergeTraces(t, Options{}, a, b); len(r.Clocks) != 1 || !r.Clocks[0].HasLower {
+		t.Fatalf("a complete sendmmsg sum lost the lower side: %v", r.Clocks)
+	}
+}
+
 // TestClockSumsCover: a recorded offset past the sender's byte sum proves
 // bytes no record counted — an untraced sendmsg, or a holder the trace
 // cannot tie to the connection — so the sums prove nothing for that

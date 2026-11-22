@@ -1673,6 +1673,7 @@ int handle_sys_enter_sendmsg(struct trace_event_raw_sys_enter___iormesh *ctx) {
     if (!ior_on_syscall_enter(tid, SYS_ENTER_SENDMSG, now))
         return 0;
 
+    iormesh_seq_on_enter(tid, (__s32)ctx->args[0], IORMESH_SEQ_SEND);
     iormesh_stack_on_enter(ctx, pid, tid, now);
     iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
@@ -1704,6 +1705,8 @@ int handle_sys_exit_sendmsg(struct trace_event_raw_sys_exit___iormesh *ctx) {
     if (!ior_on_syscall_exit(tid, SYS_ENTER_SENDMSG, ctx->ret, now))
         return 0;
 
+    if (iormesh_seq_on_exit(pid, tid, SYS_EXIT_SENDMSG, now, ctx->ret, IORMESH_SEQ_SEND))
+        return 0;
     struct ret_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct ret_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1734,6 +1737,8 @@ int handle_sys_enter_sendmmsg(struct trace_event_raw_sys_enter___iormesh *ctx) {
     if (!ior_on_syscall_enter(tid, SYS_ENTER_SENDMMSG, now))
         return 0;
 
+    iormesh_seq_on_enter(tid, (__s32)ctx->args[0], IORMESH_SEQ_SEND);
+    iormesh_mmsg_on_enter(tid, ctx->args[1], IORMESH_SEQ_SEND);
     iormesh_stack_on_enter(ctx, pid, tid, now);
     iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
@@ -1765,6 +1770,8 @@ int handle_sys_exit_sendmmsg(struct trace_event_raw_sys_exit___iormesh *ctx) {
     if (!ior_on_syscall_exit(tid, SYS_ENTER_SENDMMSG, ctx->ret, now))
         return 0;
 
+    if (iormesh_mmsg_on_exit(pid, tid, SYS_EXIT_SENDMMSG, now, ctx->ret, IORMESH_SEQ_SEND))
+        return 0;
     struct ret_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct ret_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1795,6 +1802,7 @@ int handle_sys_enter_recvmsg(struct trace_event_raw_sys_enter___iormesh *ctx) {
     if (!ior_on_syscall_enter(tid, SYS_ENTER_RECVMSG, now))
         return 0;
 
+    iormesh_seq_on_enter(tid, (__s32)ctx->args[0], IORMESH_SEQ_RECV);
     iormesh_stack_on_enter(ctx, pid, tid, now);
     iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_size_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_size_event), 0);
@@ -1831,6 +1839,8 @@ int handle_sys_exit_recvmsg(struct trace_event_raw_sys_exit___iormesh *ctx) {
     if (!ior_on_syscall_exit(tid, SYS_ENTER_RECVMSG, ctx->ret, now))
         return 0;
 
+    if (iormesh_seq_on_exit(pid, tid, SYS_EXIT_RECVMSG, now, ctx->ret, IORMESH_SEQ_RECV))
+        return 0;
     struct ret_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct ret_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -1861,6 +1871,8 @@ int handle_sys_enter_recvmmsg(struct trace_event_raw_sys_enter___iormesh *ctx) {
     if (!ior_on_syscall_enter(tid, SYS_ENTER_RECVMMSG, now))
         return 0;
 
+    iormesh_seq_on_enter(tid, (__s32)ctx->args[0], IORMESH_SEQ_RECV);
+    iormesh_mmsg_on_enter(tid, ctx->args[1], IORMESH_SEQ_RECV);
     iormesh_stack_on_enter(ctx, pid, tid, now);
     iormesh_java_mark_on_enter(pid, tid, now);
     struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
@@ -1892,6 +1904,8 @@ int handle_sys_exit_recvmmsg(struct trace_event_raw_sys_exit___iormesh *ctx) {
     if (!ior_on_syscall_exit(tid, SYS_ENTER_RECVMMSG, ctx->ret, now))
         return 0;
 
+    if (iormesh_mmsg_on_exit(pid, tid, SYS_EXIT_RECVMMSG, now, ctx->ret, IORMESH_SEQ_RECV))
+        return 0;
     struct ret_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct ret_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();

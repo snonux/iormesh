@@ -203,6 +203,8 @@ func (c *Correlator) Handle(rec any) error {
 		c.tcpState(r)
 	case *types.TcpSeqEvent:
 		c.tcpSeqRecord(r)
+	case *types.MmsgEvent:
+		c.mmsgRecord(r)
 	case *types.TaskNewtaskEvent:
 		c.newTask(r)
 	case *types.ProcessExitEvent:

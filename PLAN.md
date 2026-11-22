@@ -1279,9 +1279,26 @@ Kubernetes (M7) build on it.
   skipped `task_newtask` leaves a child untraced holding a
   socket that may predate connect) and ends without an opening
   call always taint. Receiver-side drops only remove receives.
+  The msghdr data calls count since task oh4: `sendmsg` and
+  `recvmsg` carry their return as bytes and `tcp_seq` by the
+  same exact-move rule; `sendmmsg` and `recvmmsg` return a
+  message count, so their exit sums the messages' `msg_len`
+  from the caller's mmsghdr array (a bounded loop capped at
+  the kernel's own 1024-message clamp) and checks `tcp_seq`
+  against that sum. On el9 only the relocation is checked
+  (against its BTF); that 5.14's verifier accepts the loop is
+  estimated, not run: unrolling is off and the bound constant,
+  and 7.2's verifier processes about 42k instructions for the
+  exit handler (`TestMmsgVerifierHeadroom`) against the 1M
+  limit 5.14 has too — docs/testing.md, "el9 runbook and
+  pending runs". A sum the
+  tracer could not complete (a faulting read, the cap, a lost
+  park) is marked `args.bytes_partial`, carries no `tcp_seq`
+  and fails its direction's stream check — never a short sum
+  passed off as the whole.
   The stream check is not a proof: it trusts the sums to hold
   every byte, and bytes escape them with no drop recorded —
-  untraced `sendmsg`, `sendmmsg`, `splice`, io_uring; a fork
+  untraced `splice`, io_uring; a fork
   between the untraced `socket()` and `connect()`; an exec
   keeping the socket (its fd binding is dropped); an fd passed
   by `SCM_RIGHTS` or `pidfd_getfd`; and it reads only the drops
@@ -2799,7 +2816,14 @@ deferred.
   (sendfile, splice, tee, copy_file_range) opt-in through
   `iormesh run -trace-families ipc,signal,…|all`. The flag only
   adds: file and socket cannot be turned off (the scenario
-  markers are opens). Renames and mmaps are not families: the
+  markers are opens). Task oh4 grows socket by the msghdr data
+  calls sendmsg, recvmsg, sendmmsg and recvmmsg — in socket,
+  not a family of their own: an opt-in family would leave the
+  clock proof's byte sums open to them by default (M4), and
+  they are socket data calls like sendto/recvfrom. Their
+  events reuse the schema's rule that a syscall kind is its
+  syscall's name (`sendmsg`, …, appended to schema v1).
+  Renames and mmaps are not families: the
   renames are the file surface's, mmaps are not traced yet.
   ior's restart fold (one row for a call a signal interrupted
   and the kernel re-executed) is not part of the signal family
@@ -2829,17 +2853,33 @@ deferred.
   adopted only if it runs the same executable (" (deleted)"
   ignored, so a package update still matches) under the same
   effective uid as a process the session started with: the same
-  port alone is not the same app. It gets an `attach` event of
-  its own incarnation and the session goes on; stderr names it.
-  No match within the grace ends the session `targets_exited`,
-  stderr saying no new owner appeared. A service manager — a
-  process whose executable is named `systemd`, pid 1 or a user
-  manager, holding a socket-activated listener — is never a
-  target, at start or later: tracing it would follow every
-  service it spawns. A port only the manager holds fails the
-  start (the service is not running). A new owner that listens
-  while the old one still runs (an overlapping restart) is
-  adopted once the old one exits, within the grace.
+  port alone is not the same app. Task qj4 tightens both halves:
+  only start holders running the executable of the
+  earliest-started holder (the one that most likely bound the
+  port) are remembered, so another program that merely inherited
+  the listener fd (a root helper) does not widen what is
+  accepted. Their uids are kept as they are: a
+  privilege-separated server (nginx, httpd: a root master and
+  workers of the same binary under their own uid, all holding the
+  listener) is followed whole, since the restarted workers fork
+  before the next re-resolve and fork-following never picks up a
+  process that already exists. And a holder is adopted only
+  while its pid still has the start time the port listing read
+  with its fd table, so a pid reused in between is never
+  mistaken for the holder. An adopted holder
+  gets an `attach` event of its own incarnation and the session
+  goes on; stderr names it. No match within the grace ends the
+  session `targets_exited`, stderr saying no new owner appeared.
+  A service manager — a process whose executable is named
+  `systemd`, pid 1 or a user manager, holding a socket-activated
+  listener — is never a target, at start or later: tracing it
+  would follow every service it spawns. A port only the manager
+  holds fails the start (the service is not running) — also for
+  `expand -apply` on an idle socket-activated service: wake the
+  service (one request) and deploy again, or enroll it by
+  `-pattern`. A new owner that listens while the old one still
+  runs (an overlapping restart) is adopted once the old one
+  exits, within the grace.
 - **#9 Capture policy for argv and env** — argv is in, but it
   is not harmless: command lines carry passwords and tokens
   (`-Dpassword=…`, `--token …`). Argv is recorded through the
@@ -3675,8 +3715,9 @@ Metadata only — nothing below is payload (see non-goals):
 
 The inventory is the target. Not traced as built (2026-11-22;
 `internal/tracepoints`, default_set.go and trace_family.go):
-file mmaps, eventfd and shared memory (no probes);
-sendmsg/recvmsg/sendmmsg/recvmmsg (planned, task oh4); TLS
+file mmaps, eventfd and shared memory (no probes); the peer
+address inside a sendmsg/recvmsg msghdr (their bytes and
+`tcp_seq` are traced since task oh4, the address is not); TLS
 peer identity (later, decision #8).
 
 ## Trace output contract — built for LLM introspection
@@ -4082,6 +4123,53 @@ whether the engine is Docker or Podman:
   never been loaded on a real arm64 kernel. Details:
   [docs/build.md](docs/build.md), "Container builds".
 
+### Release archives (task rh4, owner-approved 2026-11-22)
+
+An operator should not need a clone, libbpfgo and a key of their
+own to deploy: `mage release ENGINE` (docker or podman) turns a
+tagged commit into downloadable, signed archives. Nothing is
+published by it; uploading is a separate, human step.
+
+- **Version and tree**: `git describe --tags --dirty --match
+  'v[0-9]*'` must be exactly `v<internal/version.Version>` — a
+  dirty tree, a commit past the tag, or a tag that disagrees
+  with the version the signatures carry is refused before
+  anything is built.
+- **Pipeline**: the container builds (all targets), `mage
+  agentBuild`, then `mage sign`'s signing with the release key
+  (decision #28; stale builds refused as there), then the
+  archives in `dist/release/<version>/`.
+- **Archives**: one per arch, `iormesh-<version>-<arch>.tar.gz`
+  (amd64, arm64), each under a top directory of the same name
+  holding the static tracer `iormesh-linux-<arch>`, the agent
+  jar `iormesh-agent.jar`, the controllers
+  `iormeshctl-{linux,darwin}-<arch>`, each with its
+  `.minisig`, plus `minisign.pub` (the release public key),
+  `CHANGELOG.md`, and `LICENSE` once the repository has one
+  (each extra is packed when present). Every artifact is
+  verified against its signature at the release version before
+  it is packed, and the verified bytes are the packed ones.
+- **Checksums**: `SHA256SUMS` (sha256sum format) over the
+  archives, itself signed as `SHA256SUMS.minisig` with
+  `file:SHA256SUMS`.
+- **Reproducible**: entries in name order, owner root (0/0),
+  modes 0755/0644, every mtime `$SOURCE_DATE_EPOCH` or else the
+  release commit's time, gzip header without name or time; the
+  same signed `dist/` gives the same bytes with the same Go
+  toolchain (its gzip encoder; a unit test packs twice). The signatures themselves carry a signing timestamp,
+  so a re-signed `dist/` gives new archives.
+- **Operator check**: the key to trust is the one published
+  apart from the archives (the copy inside is a convenience,
+  not an anchor). With that key: `minisign -Vm SHA256SUMS -p
+  KEY`, `sha256sum -c SHA256SUMS`, then, after unpacking,
+  `iormeshctl verify -key KEY iormesh-linux-<arch>` (or
+  `minisign -Vm`) for each build; pinning that key at
+  `~/.config/iormesh/minisign.pub` lets `iormeshctl deploy`
+  check every build again before it pushes. Details:
+  [docs/build.md](docs/build.md), "Releases".
+- **Open**: the licence (LICENSE) is the owner's choice; the
+  BPF object declares `Dual BSD/GPL`.
+
 ## Component map
 
 | Component        | Language | Role                                            |
@@ -4174,6 +4262,7 @@ internal/javaattach/  # live attach of the Java agent (HotSpot
                       #   attach protocol)
 internal/stacks/      # native stack table (opt-in)
 internal/release/     # minisign signing and verification
+internal/dist/        # mage release's reproducible archives
 internal/hostlayout/  # the server install's paths and sudoers rule
 internal/version/     # release version and its ordering
 internal/termsafe/    # terminal-safe printing of trace text

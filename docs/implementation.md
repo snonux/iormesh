@@ -1251,13 +1251,18 @@ scenarios landing first (principle #1).
    socket-activated listener). Task mh4 follows the port across
    restarts (decision #23, `internal/cli/portfollow.go`): the
    session keeps each start owner's `target.Owner` (exe without
-   " (deleted)", effective uid); once its live set is empty,
-   `session.ended` re-resolves the port every
-   `portFollowEvery` (1s) for `-listen-grace` (default 2m),
-   adopts a holder with a remembered key (`AddTarget`, the
-   liveness re-check of `addRunning`, `Correlator.Seed` → an
-   `attach` of the new incarnation) and names refused holders
-   once on stderr. No match within the grace ends the session
+   " (deleted)", effective uid) whose exe is the earliest-started
+   owner's (task qj4: a privilege-separated server's root master
+   and its workers under another uid are all kept, a different
+   program with an inherited fd is not); once its live set is
+   empty, `session.ended` re-resolves the port every
+   `portFollowEvery` (1s) for `-listen-grace` (default 2m) via
+   `ListenHolders` (each holding pid with the start time read
+   before a second read of its fd table), adopts a holder with a remembered key whose pid
+   still has the listed start time (`AddTarget`, the liveness
+   re-check of `addRunning`, `Correlator.Seed` → an `attach` of
+   the new incarnation) and names refused holders once on
+   stderr. No match within the grace ends the session
    `targets_exited` with a stderr line saying so; 0 ends at
    once. `TestListenPortFollowsRestart` (integration, root)
    kills and restarts an `edgepeer port-owner` on one port.
@@ -1480,9 +1485,12 @@ scenarios landing first (principle #1).
      file or socket. ior's own family names (FS, Network, …) are
      not accepted: every syscall of a family here has a schema kind
      and a correlator shape, which ior's broader groups lack.
-     Not attached yet: sendmsg/recvmsg (their addresses sit in a
-     msghdr), select/pselect6, vmsplice. The default set grows by
-     bind, sendto and recvfrom. glibc's send(3)/recv(3) are these
+     Not attached yet: select/pselect6, vmsplice. The default set
+     grows by bind, sendto and recvfrom — and, since task oh4, by
+     sendmsg, recvmsg, sendmmsg and recvmmsg, whose bytes and
+     `tcp_seq` are captured (the mmsg calls' bytes summed from
+     their mmsghdr arrays, `internal/c/mmsg.c`) but whose peer
+     address inside the msghdr is not. glibc's send(3)/recv(3) are these
      syscalls, so a stream socket's sendto/recvfrom sends no
      address record (`IORMESH_ADDR_NOT_STREAM`; its connection
      already has the addresses) and pays only the enter-time park
@@ -4172,8 +4180,10 @@ connection into messages, `bound.go` intersects them,
     that may predate connect), and an end with no opening call.
     Drops on the receiving host only lose receives. Not a
     proof: bytes reach the socket with no record and no drop
-    through untraced `sendmsg`, `sendmmsg`, `splice` and
-    io_uring, through a child forked between the untraced
+    through untraced `splice` and io_uring (`sendmsg` and
+    `sendmmsg` are traced since task oh4; a `sendmmsg` or
+    `recvmmsg` whose sum is `bytes_partial` fails the check),
+    through a child forked between the untraced
     `socket()` and `connect()`, an exec that keeps the socket
     (its fd binding is dropped), or an fd passed by
     `SCM_RIGHTS` or `pidfd_getfd`; and only the drops of the
@@ -4331,9 +4341,10 @@ not, and share `bpf_prog_active` with the dispatchers (8e4).
   unread bytes).
 - **Enter.** Behind the sampling and fold hooks — a folded or
   sampled-out call pays nothing — the enter of `write`,
-  `writev`, `sendto`, `sendfile64`, `read`, `readv` and
-  `recvfrom` walks its fd to the socket with fileident.c's
-  typed walk (`bpf_get_current_task_btf`, `bpf_rdonly_cast`; no
+  `writev`, `sendto`, `sendfile64`, `sendmsg`, `sendmmsg`,
+  `read`, `readv`, `recvfrom`, `recvmsg` and `recvmmsg` (the
+  msghdr calls since task oh4) walks its fd to the socket with
+  fileident.c's typed walk (`bpf_get_current_task_btf`, `bpf_rdonly_cast`; no
   helper calls), and on a TCP socket parks the socket and the
   field's value by tid (`seq_park_map`, LRU, entries kept and
   emptied rather than deleted). A kernel without the kfunc
@@ -4373,7 +4384,8 @@ not, and share `bpf_prog_active` with the dispatchers (8e4).
   without `tcp_seq`; parking held enters too would put the
   walk back on every folded call. (Its native stack and Java
   mark are kept: the owed enter sends them, rwagg.c, task
-  ti4.) A stale park (an exit missed) is still exact when the check holds; the residue is
+  ti4.) A stale park (an exit missed) is still exact when the
+  check holds; the residue is
   a field *assignment* inside the window (connect, disconnect,
   `TCP_REPAIR`) whose jump equals `ret`, 1 in 2³², an untraced
   `dup2` of another socket onto the fd mid-call while exactly
@@ -4390,6 +4402,30 @@ not, and share `bpf_prog_active` with the dispatchers (8e4).
   that moved bytes on the socket the fd is bound to — the
   record's `sk` must be that socket — and only once the event
   has a conn id; the normalizer drops it (random ISNs).
+- **The mmsg calls (task oh4).** `sendmmsg` and `recvmmsg`
+  return a message count, so their enter also parks the
+  mmsghdr array by tid (`internal/c/mmsg.c`, `mmsg_park_map`)
+  and their exit reads `msg_len` of the first `ret` entries —
+  one 4-byte probe read each in a bounded loop capped at 1024,
+  the kernel's own `UIO_MAXIOV` clamp (bounded loops exist
+  since 5.3, `bpf_loop` only since 5.17; that el9's 5.14
+  verifier accepts this one is estimated, not run — 7.2's
+  processes about 42k instructions for the exit handler,
+  `TestMmsgVerifierHeadroom`, against the 1M limit; see
+  testing.md, "el9 runbook and pending runs") — and checks the
+  sum, not `ret`, against the parked sequence field. The exit record is
+  an `mmsg_event` (56 bytes: a `ret_event` plus the sum, the
+  socket and sequence number, and flags) for every such call
+  that moved messages. A sum it could not complete — a
+  faulting read, the cap, no park — is flagged; the correlator
+  marks the event `args.bytes_partial`, it carries no
+  `tcp_seq`, and the merge's stream check fails its direction
+  (`streamProof`). The cases no kernel reaches (the cap, a
+  fault) are pinned by a C harness of the real mmsg.c with the
+  cap lowered (`internal/generate/mmsg_harness_test.go`, with
+  mutations); `internal/msgcalls_root_test.go` runs the four
+  calls on TCP (bytes and `tcp_seq` from the handshake) and
+  the mmsg sums between two UDP sockets.
 - **Tests.** `internal/streamseq_root_test.go` (root; a child
   re-run of the test binary does the traffic, since the tracer
   never traces itself): all seven kinds on one connection, each

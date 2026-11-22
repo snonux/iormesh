@@ -186,6 +186,9 @@ func (e *Event) validateKindArgs() error {
 	if err := e.validateStreamSeq(); err != nil {
 		return err
 	}
+	if err := e.validateBytesPartial(); err != nil {
+		return err
+	}
 	switch e.Event {
 	case KindOpen, KindOpenat, KindOpenat2, KindCreat:
 		if e.Args.Path == nil || *e.Args.Path == "" {
@@ -386,21 +389,43 @@ func (e *Event) validateStreamSeq() error {
 }
 
 // IsStreamSend reports whether kind queues bytes on a socket stream: the
-// send side of a message the merge matches by args.tcp_seq.
+// send side of a message the merge matches by args.tcp_seq. sendmsg and
+// sendmmsg joined in task oh4; a sendmmsg's bytes are its messages' sum.
 func IsStreamSend(kind string) bool {
 	switch kind {
-	case KindWrite, KindWritev, KindSendto, KindSendfile64:
+	case KindWrite, KindWritev, KindSendto, KindSendfile64, KindSendmsg, KindSendmmsg:
 		return true
 	}
 	return false
 }
 
 // IsStreamReceive reports whether kind returns bytes from a socket
-// stream: the receive side of a message the merge matches.
+// stream: the receive side of a message the merge matches. recvmsg and
+// recvmmsg joined in task oh4.
 func IsStreamReceive(kind string) bool {
 	switch kind {
-	case KindRead, KindReadv, KindRecvfrom:
+	case KindRead, KindReadv, KindRecvfrom, KindRecvmsg, KindRecvmmsg:
 		return true
 	}
 	return false
+}
+
+// validateBytesPartial keeps args.bytes_partial (task oh4) to what it
+// means: the tracer could not sum every message of a sendmmsg or
+// recvmmsg, so bytes is a lower bound. Only those two kinds sum, and
+// only true is ever written: "false" and "absent" must not both describe
+// a complete sum. A partial sum names no exact range, so no tcp_seq.
+func (e *Event) validateBytesPartial() error {
+	p := e.Args.BytesPartial
+	switch {
+	case p == nil:
+		return nil
+	case !IsMmsg(e.Event):
+		return invalidf("args.bytes_partial on a %s event (sendmmsg and recvmmsg only)", e.Event)
+	case !*p:
+		return invalidf("args.bytes_partial false, want true or none")
+	case e.Args.TCPSeq != nil:
+		return invalidf("args.tcp_seq on a %s whose bytes are partial", e.Event)
+	}
+	return nil
 }
