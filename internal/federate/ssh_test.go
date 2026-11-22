@@ -3,6 +3,7 @@ package federate
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // recorder is an execFunc that records each command instead of running
@@ -192,6 +194,24 @@ func TestRunLocalCarriesStderr(t *testing.T) {
 	out, err := runLocal(context.Background(), "sh", "-c", "echo hi")
 	if err != nil || string(out) != "hi\n" {
 		t.Errorf("runLocal = %q, %v", out, err)
+	}
+}
+
+// TestRunLocalCutsStderrOnARune: the stderrLimit cut never splits a
+// multi-byte rune, which would leave an invalid tail in the error and
+// get the whole message quoted when it is printed (termsafe.String).
+func TestRunLocalCutsStderrOnARune(t *testing.T) {
+	// stderrLimit-1 a's, then é (2 bytes) straddling the limit.
+	script := fmt.Sprintf("head -c %d /dev/zero | tr '\\0' a >&2; printf 'é' >&2; exit 1", stderrLimit-1)
+	_, err := runLocal(context.Background(), "sh", "-c", script)
+	if err == nil {
+		t.Fatal("no error")
+	}
+	if !utf8.ValidString(err.Error()) {
+		t.Errorf("error is not valid UTF-8: %q", err.Error()[len(err.Error())-8:])
+	}
+	if !strings.HasSuffix(err.Error(), strings.Repeat("a", 8)+"…") {
+		t.Errorf("error tail = %q, want the a's then …", err.Error()[len(err.Error())-12:])
 	}
 }
 

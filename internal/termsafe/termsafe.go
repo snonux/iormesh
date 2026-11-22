@@ -18,12 +18,16 @@ import (
 
 const hexDigits = "0123456789abcdef"
 
-// String returns s unchanged when every rune is printable, else s Go-
-// quoted ("orders\x1b[2J" prints as "\"orders\\x1b[2J\""): visibly odd,
-// never interpreted. Quoting the whole string rather than dropping the
-// bad runes keeps two different names from printing the same.
+// String returns s unchanged when it is valid UTF-8 and every rune is
+// printable, else s Go-quoted ("orders\x1b[2J" prints as
+// "\"orders\\x1b[2J\""): visibly odd, never interpreted. Quoting the
+// whole string rather than dropping the bad runes keeps two different
+// names from printing the same. Validity is checked on its own because
+// IndexFunc decodes an invalid byte as U+FFFD, which is printable: a raw
+// 0x9B (the 8-bit CSI on terminals that honor C1) would pass otherwise.
 func String(s string) string {
-	if strings.IndexFunc(s, func(r rune) bool { return !unicode.IsPrint(r) }) >= 0 {
+	if !utf8.ValidString(s) ||
+		strings.IndexFunc(s, func(r rune) bool { return !unicode.IsPrint(r) }) >= 0 {
 		return strconv.Quote(s)
 	}
 	return s

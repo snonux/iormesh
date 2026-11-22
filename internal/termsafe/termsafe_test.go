@@ -3,7 +3,9 @@ package termsafe
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // TestJSON: the runes a JSON encoder passes through but a terminal may
@@ -49,10 +51,27 @@ func TestJSON(t *testing.T) {
 
 // TestString: printable text is unchanged, the rest quoted.
 func TestString(t *testing.T) {
-	if got := String("orders"); got != "orders" {
-		t.Errorf("String(orders) = %q", got)
+	for _, s := range []string{"orders", "grüße 日本", "ok \ufffd"} {
+		if got := String(s); got != s {
+			t.Errorf("String(%q) = %q", s, got)
+		}
 	}
 	if got := String("a\x1b[2J"); got != `"a\x1b[2J"` {
 		t.Errorf("String(esc) = %q", got)
+	}
+}
+
+// TestStringInvalidUTF8: a byte that is not UTF-8 — a raw 0x9B is the
+// 8-bit CSI on terminals that honor C1 — is quoted, though a decoder
+// reads it as U+FFFD, which is printable.
+func TestStringInvalidUTF8(t *testing.T) {
+	for _, s := range []string{"a\x9b2Jb", "a\x90b", "a\xffb"} {
+		got := String(s)
+		if got == s || !utf8.ValidString(got) {
+			t.Errorf("String(%q) = %q, want it quoted", s, got)
+		}
+		if strings.Contains(got, "\x9b") {
+			t.Errorf("String(%q) kept byte 0x9b", s)
+		}
 	}
 }
