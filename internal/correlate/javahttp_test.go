@@ -38,7 +38,8 @@ func (jt *joinTest) request(at uint64, path, local, remote string) agentspool.HT
 	return agentspool.HTTP{ExitMono: jt.mono(at), StackID: 10, ThreadID: 1, KTID: mainTID,
 		Status: 200, Method: "GET", Scheme: "http", Host: "127.0.0.1", Path: path,
 		Version: "HTTP/1.1", Local: local, Remote: remote,
-		ReqHeaders:  []string{"authorization: Bearer leaked"},
+		ReqHeaders: []string{"authorization: Bearer leaked", "x-auth-key: leaked",
+			"x-original-uri: /login?token=leaked"},
 		RespHeaders: []string{"location: /next?token=leaked", "x-a: b"},
 		ReqBytes:    -1, RespBytes: -1}
 }
@@ -74,7 +75,8 @@ func TestJavaJoinHTTPEvents(t *testing.T) {
 	h1, h2 := jt.sink.events[2], jt.sink.events[4]
 	wantHTTP := &schema.HTTP{Method: "GET", Scheme: "http", Host: "127.0.0.1",
 		Path: "/a?token=***", Status: 200, ReqSeq: 1, Version: "HTTP/1.1",
-		ReqHeaders:  []string{"authorization: ***"},
+		ReqHeaders: []string{"authorization: ***", "x-auth-key: ***",
+			"x-original-uri: /login?token=***"},
 		RespHeaders: []string{"location: /next?token=***", "x-a: b"}}
 	if !reflect.DeepEqual(h1.HTTP, wantHTTP) || h1.ConnID != "c1" || h2.HTTP.ReqSeq != 2 {
 		t.Errorf("http events %+v %+v, want %+v on c1, then req_seq 2", h1.HTTP, h2, wantHTTP)

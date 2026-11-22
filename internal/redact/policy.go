@@ -37,6 +37,10 @@ type Policy struct {
 	FlagRules []FlagRule
 	// HeaderDeny names HTTP headers whose whole value is masked.
 	HeaderDeny []string
+	// URLHeaders names HTTP headers whose value is a URI reference, often
+	// relative ("/login?token=x"), so it is masked as a URL whole: Text
+	// finds only URLs with "://".
+	URLHeaders []string
 	// QueryDeny names URL query parameters whose value is masked; "*"
 	// masks every value.
 	QueryDeny []string
@@ -66,12 +70,40 @@ func Default() Policy {
 			// docker/podman login: "run -p" is a port mapping.
 			{Program: "login", Flag: "-p"},
 		},
-		HeaderDeny: []string{
-			"authorization", "proxy-authorization", "cookie",
-			"set-cookie", "*token*", "*apikey*", "*secret*",
-			"*password*", "*session*", "*signature*",
-		},
-		QueryDeny: []string{"*"},
+		HeaderDeny: defaultHeaderDeny(),
+		URLHeaders: defaultURLHeaders(),
+		QueryDeny:  []string{"*"},
+	}
+}
+
+// defaultHeaderDeny is Default's header denylist. The globs follow the
+// argv ones (decision #22), written normalized (no '-') so the Java
+// agent's copy, Redaction.HEADER_DENY, reads the same entry for entry —
+// TestAgentPolicyMatchesDefault fails when the two drift. They match
+// anywhere in a name because proxies and clouds prefix credential
+// headers: X-Forwarded-Authorization, X-Amz-Credential, Cookie2. The key
+// globs keep a word before "key" (api, auth, access, private,
+// subscription, functions) rather than "*key*", which would mask
+// Sec-WebSocket-Key and similar non-secrets.
+func defaultHeaderDeny() []string {
+	return []string{
+		"*authorization*", "*cookie*", "*bearer*", "*credential*",
+		"*token*", "*secret*", "*password*", "*passwd*",
+		"*passphrase*", "*pwd", "*pass", "*session*", "*signature*",
+		"*api*key*", "*auth*key*", "*access*key*", "*private*key*",
+		"*subscription*key*", "*functions*key*",
+	}
+}
+
+// defaultURLHeaders is Default's list of URL headers (normalized, the
+// Java agent's Redaction.URL_HEADERS): Location and friends, plus the
+// headers forward-auth proxies (nginx auth_request, Traefik, Envoy, IIS
+// rewrite) copy the original request target into, query secrets and all.
+func defaultURLHeaders() []string {
+	return []string{
+		"location", "contentlocation", "referer", "origin",
+		"xoriginaluri", "xoriginalurl", "xforwardeduri",
+		"xrewriteurl", "xenvoyoriginalpath",
 	}
 }
 
@@ -109,11 +141,15 @@ func (p Policy) Argv(argv []string) []string {
 }
 
 // Header returns the value to record for an HTTP header: Mask when its name
-// is denied, else the value with embedded URLs masked (a Referer or
-// Location carries a query string and maybe userinfo).
+// is denied; the value masked as one URL when the name is a URL header (a
+// relative "/next?token=x" has no "://" for Text to find); else the value
+// with embedded URLs masked.
 func (p Policy) Header(name, value string) string {
-	if denied(p.HeaderDeny, name) {
+	switch {
+	case denied(p.HeaderDeny, name):
 		return Mask
+	case denied(p.URLHeaders, name):
+		return p.URL(value)
 	}
 	return p.Text(value)
 }

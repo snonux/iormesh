@@ -388,7 +388,14 @@ truth.
   default); environment capture is off by default. HTTP
   metadata is redacted twice: by the Java agent before it
   reaches the spool, and again by the tracer before it is
-  written. The workload plants secrets in four headers, a
+  written; a test keeps the agent's header lists equal to the
+  tracer's. Header names use the argv globs anywhere in the
+  name, so prefixed credential headers
+  (`X-Forwarded-Authorization`, `X-Amz-Credential`,
+  `X-Auth-Key`) are masked too, and forward-auth URI headers (`X-Original-URI`,
+  `X-Forwarded-URI`) have their query values masked like a
+  `Location`; the full list is in
+  [schema.md](schema.md#redaction). The workload plants secrets in four headers, a
   query parameter and argv, and the tests assert none of them
   ever reaches a trace.
 - **The trace directory is root's.** The tracer writes and

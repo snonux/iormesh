@@ -1131,12 +1131,20 @@ value with spaces inside a shell string is masked only up to the
 quote's end as a shell would split it, and the
 defaults over-mask rather than leak (`--password-stdin` masks the
 argument after it). HTTP headers (M3) use the same package:
-`authorization`, `proxy-authorization`, `cookie`, `set-cookie`
-and names containing `token`, `apikey`, `secret`, `password`,
-`session` or `signature` are recorded as `***`, URLs in the other
-headers' values and every query value of the path are masked;
-`location`, `content-location`, `referer` and `origin` are masked
-as a URL even when relative (`/next?token=***`).
+names containing `authorization`, `cookie`, `bearer`,
+`credential`, `token`, `secret`, `password`, `passwd`,
+`passphrase`, `session` or `signature`, names ending in `pwd` or
+`pass`, and api, auth, access, private, subscription and
+functions keys (`*api*key*`, `*auth*key*`, …) are recorded as
+`***` — so `X-Forwarded-Authorization`, `Cookie2`,
+`X-Amz-Credential`, `X-Api-Key` and `Ocp-Apim-Subscription-Key`
+are too, while `Sec-WebSocket-Key`, `Keep-Alive` or
+`X-Forwarded-For` stay. URLs in the other headers' values and
+every query value of the path are masked; `location`,
+`content-location`, `referer`, `origin` and the forward-auth
+headers `x-original-uri`, `x-original-url`, `x-forwarded-uri`,
+`x-rewrite-url` and `x-envoy-original-path` are masked as a URL
+even when relative (`/next?token=***`).
 The Java agent applies a copy of these header and query rules
 (`iormesh.agent.http.Redaction`) before a request reaches the
 spool, so a secret never lands on disk, and the tracer applies

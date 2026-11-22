@@ -53,6 +53,50 @@ public final class HttpProbeTest {
         equal("referer: http://h/p?a=***", Redaction.header("Referer", "http://h/p?a=1"),
                 "URL in an allowed value");
         check(Redaction.glob("a*b?c", "axxbyc") && !Redaction.glob("a*b", "ac"), "glob");
+        credentialHeaders();
+        urlHeaders();
+    }
+
+    /**
+     * Task 0j4: prefixed and API-key style credential headers are masked,
+     * ordinary headers are not (the same tables as internal/redact's
+     * TestHeaderDeniesCredentialHeaders and TestHeaderKeepsOrdinaryHeaders).
+     */
+    static void credentialHeaders() {
+        for (String n : List.of("X-Authorization", "X-Forwarded-Authorization",
+                "X-Original-Authorization", "X-Amzn-Remapped-Authorization", "Cookie2",
+                "X-Auth-Key", "X-Access-Key", "X-Amz-Credential", "Ocp-Apim-Subscription-Key",
+                "X-Functions-Key", "Private-Key", "X-Passwd", "X-Api-Key", "Api-Key",
+                "X-Goog-Api-Key", "X-Bearer", "X-Passphrase")) {
+            String lower = n.toLowerCase(java.util.Locale.ROOT);
+            equal(lower + ": ***", Redaction.header(n, "S3CRET"), "credential header " + n);
+        }
+        for (String n : List.of("Content-Type", "Accept", "User-Agent", "Host", "X-Request-Id",
+                "Keep-Alive", "Cache-Control", "X-Forwarded-For", "X-Forwarded-Proto",
+                "Sec-WebSocket-Key", "Content-Length")) {
+            String lower = n.toLowerCase(java.util.Locale.ROOT);
+            equal(lower + ": plain", Redaction.header(n, "plain"), "ordinary header " + n);
+        }
+    }
+
+    /**
+     * Headers holding a URI reference are masked as a URL even when
+     * relative: forward-auth proxies copy the original request target,
+     * query secrets and all, into X-Original-URI and the like.
+     */
+    static void urlHeaders() {
+        equal("x-original-uri: /login?token=***",
+                Redaction.header("X-Original-URI", "/login?token=s"), "x-original-uri");
+        equal("x-original-url: /a?b=***", Redaction.header("X-Original-URL", "/a?b=s"),
+                "x-original-url");
+        equal("x-forwarded-uri: /reset?code=***&user=***",
+                Redaction.header("X-Forwarded-URI", "/reset?code=s&user=bob"), "x-forwarded-uri");
+        equal("x-rewrite-url: /a?b=***", Redaction.header("X-Rewrite-URL", "/a?b=s"),
+                "x-rewrite-url");
+        equal("x-envoy-original-path: /a?b=***",
+                Redaction.header("X-Envoy-Original-Path", "/a?b=s"), "x-envoy-original-path");
+        equal("x-forwarded-prefix: /api", Redaction.header("X-Forwarded-Prefix", "/api"),
+                "x-forwarded-prefix stays");
     }
 
     static void addresses() throws Exception {

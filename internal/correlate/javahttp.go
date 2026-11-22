@@ -416,7 +416,9 @@ func httpLost(l agentspool.Losses) bool {
 	return l.DroppedHTTP+l.Abandoned+l.Malformed > 0
 }
 
-// headers re-applies the tracer's header policy to "name: value" lines.
+// headers re-applies the tracer's header policy to "name: value" lines;
+// the policy also masks a URL header's relative reference
+// ("location: /next?token=x", redact.Policy.URLHeaders).
 func (j *JavaJoin) headers(hs []string) []string {
 	if len(hs) == 0 {
 		return nil
@@ -429,19 +431,9 @@ func (j *JavaJoin) headers(hs []string) []string {
 			continue
 		}
 		out[i] = name + ": " + j.policy.Header(name, value)
-		if urlHeaders[strings.ToLower(name)] {
-			// A relative reference ("/next?token=x") has no "://" for
-			// the policy's text scan to find.
-			out[i] = name + ": " + j.policy.URL(j.policy.Header(name, value))
-		}
 	}
 	return out
 }
-
-// urlHeaders hold a URI reference, often relative: masked as a URL whole
-// (the agent's Redaction.URL_HEADERS).
-var urlHeaders = map[string]bool{"location": true, "content-location": true,
-	"referer": true, "origin": true}
 
 // seen takes what the http events borrow from the stream as ev passes:
 // the envelope's project, host and clock offset, the latest completion

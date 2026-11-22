@@ -148,6 +148,62 @@ func TestHeader(t *testing.T) {
 	}
 }
 
+// TestHeaderDeniesCredentialHeaders is task 0j4's leak: the header
+// denylist named "authorization" and "cookie" exactly, so prefixed and
+// API-key style credential headers were recorded verbatim.
+func TestHeaderDeniesCredentialHeaders(t *testing.T) {
+	for _, name := range []string{
+		"X-Authorization", "X-Forwarded-Authorization",
+		"X-Original-Authorization", "X-Amzn-Remapped-Authorization",
+		"Cookie2", "X-Auth-Key", "X-Access-Key", "X-Amz-Credential",
+		"Ocp-Apim-Subscription-Key", "X-Functions-Key", "Private-Key",
+		"X-Passwd", "X-Api-Key", "Api-Key", "X-Goog-Api-Key",
+		"X-Bearer", "X-Passphrase",
+	} {
+		if got := Default().Header(name, "S3CRET"); got != Mask {
+			t.Errorf("Header(%q) = %q, want %q", name, got, Mask)
+		}
+	}
+}
+
+// TestHeaderKeepsOrdinaryHeaders guards against the widened globs
+// over-masking: headers that carry no credential stay readable.
+func TestHeaderKeepsOrdinaryHeaders(t *testing.T) {
+	for _, name := range []string{
+		"Content-Type", "Accept", "User-Agent", "Host", "X-Request-Id",
+		"Keep-Alive", "Cache-Control", "X-Forwarded-For",
+		"X-Forwarded-Proto", "Sec-WebSocket-Key", "Content-Length",
+	} {
+		if got := Default().Header(name, "plain"); got != "plain" {
+			t.Errorf("Header(%q, \"plain\") = %q, want it unmasked", name, got)
+		}
+	}
+}
+
+// TestHeaderMasksURLHeaders: a header holding a URI reference is masked
+// as a URL even when relative. Forward-auth proxies (nginx auth_request,
+// Traefik, Envoy) copy the original request target, query secrets and
+// all, into X-Original-URI and the like; "/login?token=x" has no "://"
+// for Text to find.
+func TestHeaderMasksURLHeaders(t *testing.T) {
+	cases := []struct{ name, value, want string }{
+		{"Location", "/next?token=s", "/next?token=***"},
+		{"Content-Location", "/a?b=s", "/a?b=***"},
+		{"Referer", "/r?code=s", "/r?code=***"},
+		{"X-Original-URI", "/login?token=s", "/login?token=***"},
+		{"X-Original-URL", "/a?b=s", "/a?b=***"},
+		{"X-Forwarded-URI", "/reset?code=s&user=bob", "/reset?code=***&user=***"},
+		{"X-Rewrite-URL", "/a?b=s", "/a?b=***"},
+		{"X-Envoy-Original-Path", "/a?b=s", "/a?b=***"},
+		{"X-Forwarded-Prefix", "/api", "/api"},
+	}
+	for _, c := range cases {
+		if got := Default().Header(c.name, c.value); got != c.want {
+			t.Errorf("Header(%q, %q) = %q, want %q", c.name, c.value, got, c.want)
+		}
+	}
+}
+
 // FuzzArgv checks the invariants on arbitrary input: no panic, the same
 // number of elements, and a planted --password value never survives.
 func FuzzArgv(f *testing.F) {

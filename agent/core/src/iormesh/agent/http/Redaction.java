@@ -13,16 +13,21 @@ import java.util.Locale;
  *
  * <ul>
  *   <li>a header whose name matches a deny glob is recorded as
- *       "name: ***" (Authorization, Cookie, Set-Cookie, anything with
- *       token, apikey, secret, password, session or signature in it);
+ *       "name: ***": anything with authorization, cookie, bearer,
+ *       credential, token, secret, password, passwd, passphrase,
+ *       session or signature in it, ending in pwd or pass, or an
+ *       api/auth/access/private/subscription/functions key
+ *       (X-Forwarded-Authorization, Cookie2, X-Api-Key, X-Auth-Key);
  *   <li>every query parameter's value is masked ("?user=***&token=***"),
  *       decision #22's default, since a query string's names say
  *       nothing reliable about what is secret; ';' and '#' parameters
  *       too, as JDBC and OAuth put credentials there;
  *   <li>URL userinfo is masked wherever a URL appears (a Referer or a
  *       Location header value): "https://user:***@host/"; Location,
- *       Content-Location, Referer and Origin are masked as a URL even
- *       when relative ("/next?token=***").
+ *       Content-Location, Referer, Origin and the forward-auth headers
+ *       X-Original-URI/-URL, X-Forwarded-URI, X-Rewrite-URL and
+ *       X-Envoy-Original-Path are masked as a URL even when relative
+ *       ("/next?token=***").
  * </ul>
  *
  * Path segments are recorded verbatim (#22's default; templating
@@ -32,18 +37,31 @@ import java.util.Locale;
 public final class Redaction {
     /** Replaces every masked value; the same as internal/redact.Mask. */
     public static final String MASK = "***";
-    /** internal/redact.Default().HeaderDeny, already normalized. */
-    static final List<String> HEADER_DENY = List.of("authorization", "proxyauthorization",
-            "cookie", "setcookie", "*token*", "*apikey*", "*secret*", "*password*",
-            "*session*", "*signature*");
+    /**
+     * internal/redact.Default().HeaderDeny, already normalized, entry for
+     * entry (internal/redact's TestAgentPolicyMatchesDefault reads this
+     * list and fails when it drifts). Globs match anywhere in a name, as
+     * proxies prefix credential headers (X-Forwarded-Authorization,
+     * X-Amz-Credential, Cookie2); the key globs name the word before
+     * "key" so Sec-WebSocket-Key and the like stay readable.
+     */
+    static final List<String> HEADER_DENY = List.of("*authorization*", "*cookie*",
+            "*bearer*", "*credential*", "*token*", "*secret*", "*password*", "*passwd*",
+            "*passphrase*", "*pwd", "*pass", "*session*", "*signature*", "*api*key*",
+            "*auth*key*", "*access*key*", "*private*key*", "*subscription*key*",
+            "*functions*key*");
 
     /**
      * Headers whose value is a URI reference, often relative
-     * ("/login?token=x"): masked as a URL whole, like internal/redact's
-     * URLHeader.
+     * ("/login?token=x"): masked as a URL whole, like
+     * internal/redact.Default().URLHeaders (normalized, checked by the
+     * same test). Besides Location and friends, these are the headers
+     * forward-auth proxies (nginx auth_request, Traefik, Envoy, IIS
+     * rewrite) copy the original request target into, query and all.
      */
-    static final java.util.Set<String> URL_HEADERS = java.util.Set.of("location",
-            "content-location", "referer", "origin");
+    static final List<String> URL_HEADERS = List.of("location", "contentlocation",
+            "referer", "origin", "xoriginaluri", "xoriginalurl", "xforwardeduri",
+            "xrewriteurl", "xenvoyoriginalpath");
 
     private Redaction() {}
 
@@ -58,7 +76,7 @@ public final class Redaction {
         String v = value == null ? "" : value;
         if (denied(n)) {
             v = MASK;
-        } else if (URL_HEADERS.contains(n)) {
+        } else if (matches(URL_HEADERS, n)) {
             v = url(v);   // a relative reference has no "://" for text to find
         } else {
             v = text(v);
@@ -68,8 +86,13 @@ public final class Redaction {
 
     /** Whether a header name matches a deny glob. */
     static boolean denied(String name) {
+        return matches(HEADER_DENY, name);
+    }
+
+    /** Whether a name, normalized, matches one of globs (also normalized). */
+    private static boolean matches(List<String> globs, String name) {
         String k = normalize(name);
-        for (String g : HEADER_DENY) {
+        for (String g : globs) {
             if (glob(g, k)) {
                 return true;
             }

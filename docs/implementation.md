@@ -1529,7 +1529,8 @@ scenarios landing first (principle #1).
    type Policy struct {
        ArgvDeny   []string   // "*password*", "*token*", "*secret*", …
        FlagRules  []FlagRule // {Program: "mysql*", Flag: "-p"}, …
-       HeaderDeny []string   // "authorization", "cookie", …
+       HeaderDeny []string   // "*authorization*", "*cookie*", …
+       URLHeaders []string   // "location", "xoriginaluri", …
        QueryDeny  []string   // "*": every query value (#22)
    }
 
@@ -2642,9 +2643,12 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
      itself.
    - **Redaction twice**: `Redaction` (agent) masks denied headers,
      URI-valued headers (Location, Content-Location, Referer,
-     Origin) as URLs even when relative, every query value, and
-     URL userinfo with `internal/redact`'s authority heuristic;
-     the joiner applies `internal/redact` again.
+     Origin, X-Original-URI and the other forward-auth ones) as
+     URLs even when relative, every query value, and URL
+     userinfo with `internal/redact`'s authority heuristic; the
+     joiner applies `internal/redact` again.
+     `TestAgentPolicyMatchesDefault` reads the agent's lists
+     from `Redaction.java` and fails when they drift.
 
    Tests: `mage agentTest` — `HttpTransformerTest` (a fixture's
    ctor, return, last-argument-after-a-long and throw paths hand

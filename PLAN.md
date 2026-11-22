@@ -2587,6 +2587,15 @@ would overturn it), and deferred.
   over HTTP/1 only. Task de4 adds the third-party libraries in
   #22's order, rewritten in the app's class loaders: Servlet,
   Apache HttpClient 5, OkHttp and Netty's HTTP/1.x codec.
+  Task 0j4 widens the header denylist to the argv globs
+  (anywhere in a name: X-Forwarded-Authorization, Cookie2,
+  X-Amz-Credential) plus named key globs (`*api*key*`,
+  `*auth*key*`, `*access*key*`, `*private*key*`,
+  `*subscription*key*`, `*functions*key*`, not `*key*`), and
+  masks the forward-auth URI headers (X-Original-URI/-URL,
+  X-Forwarded-URI, X-Rewrite-URL, X-Envoy-Original-Path) as
+  URLs like Location; a test fails when the agent's copy and
+  internal/redact's lists differ.
 - **#8 Hostname & TLS visibility** — DNS hostname↔IP via Java
   agent hooks (InetAddress) is the clean path; TLS peer
   identity (trust-manager/SSLSocket hooks) is extra value at
