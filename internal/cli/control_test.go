@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"iormesh/internal/hostlayout"
 	"iormesh/internal/segment"
 	"iormesh/internal/version"
 )
@@ -22,12 +23,14 @@ import (
 // never start, stop or list a real unit. It records every argv; show
 // answers from units (absent: not-found), list-units from the loaded
 // units, and onRun runs when systemd-run is called (a test's stand-in for
-// the unit's run writing its state).
+// the unit's run writing its state), onStop when systemctl stop is (the
+// run recording its end).
 type fakeSystemd struct {
-	calls [][]string
-	units map[string]unitState
-	onRun func(args []string)
-	fail  map[string]error // by subcommand: "systemd-run", "stop", ...
+	calls  [][]string
+	units  map[string]unitState
+	onRun  func(args []string)
+	onStop func()
+	fail   map[string]error // by subcommand: "systemd-run", "stop", ...
 }
 
 func newFakeSystemd() *fakeSystemd {
@@ -54,6 +57,9 @@ func (f *fakeSystemd) Output(_ context.Context, name string, args ...string) ([]
 		return f.list(), nil
 	case "stop":
 		delete(f.units, args[len(args)-1])
+		if f.onStop != nil {
+			f.onStop()
+		}
 	}
 	return nil, nil
 }
@@ -632,7 +638,7 @@ func TestUninstall(t *testing.T) {
 	sys.units["iormesh-shop.service"] = running
 	sys.units["iormesh-x.y.service"] = failedUnit
 	c, out := testControl(sys, nil)
-	if err := c.uninstallFrom(context.Background(), root); err != nil {
+	if err := c.uninstallFrom(context.Background(), root, filepath.Join(t.TempDir(), "sudoers-iormesh")); err != nil {
 		t.Fatal(err)
 	}
 	for _, unit := range []string{"iormesh-shop.service", "iormesh-x.y.service"} {
@@ -652,7 +658,7 @@ func TestUninstall(t *testing.T) {
 	}
 	sys.units["iormesh-shop.service"] = running
 	sys.fail["stop"] = errors.New("job failed")
-	if err := c.uninstallFrom(context.Background(), root); err == nil {
+	if err := c.uninstallFrom(context.Background(), root, filepath.Join(t.TempDir(), "sudoers-iormesh")); err == nil {
 		t.Fatal("uninstall ignored a failed stop")
 	}
 	if _, err := os.Stat(root); err != nil {
@@ -660,6 +666,62 @@ func TestUninstall(t *testing.T) {
 	}
 	if err := c.uninstall(context.Background(), []string{"-root", "/"}); !errors.Is(err, errUsage) {
 		t.Fatalf("uninstall took a path: %v", err)
+	}
+}
+
+// TestUninstallRemovesBootstrapRule pins task qh4: uninstall (rm's last
+// step) removes the sudoers rule iormeshctl bootstrap installed — the file
+// starting with hostlayout.SudoersMarker — once the tree is gone, and
+// leaves alone a rule without the marker (configuration management's) or
+// a symlink planted in its place.
+func TestUninstallRemovesBootstrapRule(t *testing.T) {
+	newRoot := func() string {
+		root := filepath.Join(t.TempDir(), "opt-iormesh")
+		if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return root
+	}
+	rule := filepath.Join(t.TempDir(), "iormesh")
+	if err := os.WriteFile(rule, []byte(hostlayout.SudoersContent("ops")), 0o440); err != nil {
+		t.Fatal(err)
+	}
+	c, out := testControl(newFakeSystemd(), nil)
+	if err := c.uninstallFrom(context.Background(), newRoot(), rule); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(rule); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("bootstrap's rule left: %v", err)
+	}
+	if !strings.Contains(out.String(), "removed "+rule) {
+		t.Errorf("output %q does not report the rule", out)
+	}
+	// Someone else's rule, and a symlink, stay; uninstall still succeeds.
+	foreign := filepath.Join(t.TempDir(), "iormesh")
+	if err := os.WriteFile(foreign, []byte(hostlayout.Rule("ops")+"\n"), 0o440); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "iormesh")
+	if err := os.Symlink(rule+"-target", link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rule+"-target", []byte(hostlayout.SudoersContent("ops")), 0o440); err != nil {
+		t.Fatal(err)
+	}
+	for _, keep := range []string{foreign, link} {
+		c, out := testControl(newFakeSystemd(), nil)
+		if err := c.uninstallFrom(context.Background(), newRoot(), keep); err != nil {
+			t.Fatalf("%s: %v", keep, err)
+		}
+		if _, err := os.Lstat(keep); err != nil {
+			t.Errorf("%s removed: %v", keep, err)
+		}
+		if !strings.Contains(out.String(), "left "+keep) {
+			t.Errorf("%s: output %q does not say it was left", keep, out)
+		}
+	}
+	if _, err := os.Stat(rule + "-target"); err != nil {
+		t.Errorf("symlink target removed: %v", err)
 	}
 }
 

@@ -59,6 +59,13 @@ type sessionState struct {
 	// values as unknown, never as an error.
 	Version string   `json:"version,omitempty"`
 	Argv    []string `json:"argv,omitempty"`
+	// OperatorStop is true once `iormesh stop` ended (or is ending) the
+	// session (task zh4): the end reason alone cannot say so, since a
+	// reboot's or anyone's SIGTERM ends a run as "stop" too, and
+	// iormeshctl ensure restarts every end but the operator's. The run
+	// writes false from its start, so a reader tells "not the operator"
+	// (false) from a tracer that predates the field (absent: nil).
+	OperatorStop *bool `json:"operator_stop,omitempty"`
 }
 
 // markRunning writes state.json once the probes are attached (beside
@@ -66,7 +73,8 @@ type sessionState struct {
 // -trace-dir. The project directory was checked and locked by
 // segment.New, so only this run writes there. It records this binary's
 // version and os.Args, the run's own argv (for a unit, the `run` argv
-// start handed systemd-run).
+// start handed systemd-run). OperatorStop starts out false: only a later
+// `iormesh stop` sets it (markOperatorStop).
 func (o *segOutput) markRunning(cfg runConfig, targets string, now time.Time) error {
 	if o == nil {
 		return nil
@@ -75,7 +83,28 @@ func (o *segOutput) markRunning(cfg runConfig, targets string, now time.Time) er
 	return writeState(o.dir, sessionState{Project: cfg.project, Session: o.session, FQDN: o.fqdn,
 		PID: pid, PIDStartNS: processStart(uint32(pid)), InvocationID: os.Getenv("INVOCATION_ID"),
 		State: stateRunning, Targets: targets, StartedAt: now.UTC(), EndsBy: now.Add(cfg.duration).UTC(),
-		Version: version.Stamped(), Argv: slices.Clone(os.Args)})
+		Version: version.Stamped(), Argv: slices.Clone(os.Args), OperatorStop: new(false)})
+}
+
+// markOperatorStop sets OperatorStop in dir's state.json, if there is
+// one (task zh4). It is an unlocked read-modify-write, so stop calls it
+// only once the unit is dead and the run can no longer write the file:
+// earlier, a run's start or end record landing between the read and the
+// rename would be rolled back. Nothing to mark is not an error: a run
+// that never attached has no state to carry it.
+func markOperatorStop(dir string) error {
+	st, err := readState(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if st.OperatorStop != nil && *st.OperatorStop {
+		return nil
+	}
+	st.OperatorStop = new(true)
+	return writeState(dir, st)
 }
 
 // markEnded records the end in state.json, if markRunning wrote it. It is
@@ -98,26 +127,40 @@ func (o *segOutput) markEnded(reason string, now time.Time) error {
 
 // writeState replaces dir/state.json atomically (a temporary file, fsync,
 // rename), so status never reads half a file. 0644: status runs under
-// sudo, but the deploying user may read it too, like the segments.
+// sudo, but the deploying user may read it too, like the segments. The
+// temporary name carries the writer's pid: the run and `iormesh stop`
+// (markOperatorStop) never share one, even should a dying run's write
+// overlap the stop's. A failed write or rename removes the
+// temporary again.
 func writeState(dir string, st sessionState) error {
 	b, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return fmt.Errorf("state: %w", err)
 	}
-	tmp := filepath.Join(dir, "."+StateFile+".tmp")
+	tmp := filepath.Join(dir, fmt.Sprintf(".%s.%d.tmp", StateFile, os.Getpid()))
 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o644)
 	if err != nil {
 		return fmt.Errorf("state: %w", err)
 	}
 	_, werr := f.Write(append(b, '\n'))
 	if err := errors.Join(werr, f.Sync(), f.Close()); err != nil {
+		_ = os.Remove(tmp)
 		return fmt.Errorf("state: %w", err)
 	}
+	if beforeStateRename != nil {
+		beforeStateRename(dir)
+	}
 	if err := os.Rename(tmp, filepath.Join(dir, StateFile)); err != nil {
+		_ = os.Remove(tmp)
 		return fmt.Errorf("state: %w", err)
 	}
 	return nil
 }
+
+// beforeStateRename, when set, runs in writeState between the temporary's
+// sync and its rename over state.json: a test's stand-in for another
+// writer (the run) landing its own write right then. Nil in production.
+var beforeStateRename func(dir string)
 
 // readState reads dir/state.json. A missing file wraps os.ErrNotExist; a
 // file that is not a state (corrupt, or for another project's name) is an

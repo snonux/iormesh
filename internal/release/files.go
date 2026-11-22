@@ -109,22 +109,32 @@ func ReadKeyFile(path string, uid int) (minisign.PublicKey, error) {
 // name: a renamed artifact (the arm64 tracer as amd64's) is refused. This
 // is the controller's check before it pushes a binary (decision #28).
 func VerifyFile(key minisign.PublicKey, path string) (Meta, error) {
-	data, err := ReadFile(path, MaxBinarySize, nil)
+	_, _, m, err := ReadVerified(key, path)
+	return m, err
+}
+
+// ReadVerified is VerifyFile that also returns the artifact's and the
+// signature's bytes, exactly the ones it verified: iormeshctl bootstrap
+// stages those bytes and checks the host's installed copy against their
+// hash, so a file replaced in dist/ after the check cannot slip through
+// (task qh4).
+func ReadVerified(key minisign.PublicKey, path string) (data, sig []byte, m Meta, err error) {
+	data, err = ReadFile(path, MaxBinarySize, nil)
 	if err != nil {
-		return Meta{}, err
+		return nil, nil, Meta{}, err
 	}
-	sig, err := ReadFile(path+SigSuffix, MaxSigSize, nil)
+	sig, err = ReadFile(path+SigSuffix, MaxSigSize, nil)
 	if err != nil {
-		return Meta{}, err
+		return nil, nil, Meta{}, err
 	}
-	m, err := Verify(key, data, sig)
+	m, err = Verify(key, data, sig)
 	if err != nil {
-		return Meta{}, fmt.Errorf("%s: %w", path, err)
+		return nil, nil, Meta{}, fmt.Errorf("%s: %w", path, err)
 	}
 	if m.File != filepath.Base(path) {
-		return Meta{}, fmt.Errorf("%w: %s was signed as %s", ErrBadSignature, path, m.File)
+		return nil, nil, Meta{}, fmt.Errorf("%w: %s was signed as %s", ErrBadSignature, path, m.File)
 	}
-	return m, nil
+	return data, sig, m, nil
 }
 
 // SignDir signs every release binary in dir — each regular file not

@@ -52,11 +52,15 @@ type remoteStatus struct {
 	Error         string         `json:"error"`
 }
 
-// remoteSession is the part of state.json the table shows.
+// remoteSession is the part of state.json the table shows, and
+// OperatorStop, which ensure reads (task zh4): true when `iormesh stop`
+// ended the session, false when anything else did, nil from a tracer
+// that predates the field.
 type remoteSession struct {
-	EndsBy    time.Time `json:"ends_by"`
-	EndReason string    `json:"end_reason"`
-	Version   string    `json:"version"`
+	EndsBy       time.Time `json:"ends_by"`
+	EndReason    string    `json:"end_reason"`
+	Version      string    `json:"version"`
+	OperatorStop *bool     `json:"operator_stop"`
 }
 
 // statusRow is one line of the table. failed marks a row whose target or
@@ -144,13 +148,9 @@ func hostStatus(ctx context.Context, e env, tg collectTarget, unlisted bool) ([]
 	if err != nil {
 		return nil, err
 	}
-	out, runErr := t.Run(ctx, sudoTracer("status", "-json")...)
-	var reports []remoteStatus
-	if err := json.Unmarshal(out, &reports); err != nil {
-		if runErr != nil {
-			return nil, runErr
-		}
-		return nil, fmt.Errorf("status -json: unreadable answer: %w", err)
+	reports, err := hostReports(ctx, t)
+	if err != nil {
+		return nil, err
 	}
 	byProject := map[string]remoteStatus{}
 	for _, r := range reports {
@@ -173,6 +173,21 @@ func hostStatus(ctx context.Context, e env, tg collectTarget, unlisted bool) ([]
 		}
 	}
 	return rows, nil
+}
+
+// hostReports runs the installed tracer's `status -json` on the host
+// and decodes its reports, whatever its exit (see hostStatus). ensure
+// reads the same reports to decide what to restart (ensure.go).
+func hostReports(ctx context.Context, t federate.Transport) ([]remoteStatus, error) {
+	out, runErr := t.Run(ctx, sudoTracer("status", "-json")...)
+	var reports []remoteStatus
+	if err := json.Unmarshal(out, &reports); err != nil {
+		if runErr != nil {
+			return nil, runErr
+		}
+		return nil, fmt.Errorf("status -json: unreadable answer: %w", err)
+	}
+	return reports, nil
 }
 
 // reportRow is the row of one tracer report; a report carrying an error

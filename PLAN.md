@@ -905,7 +905,8 @@ Kubernetes (M7) build on it.
   (`~/.local/share/iormesh/deployed.json`) or with `-restart`,
   else left alone, so a re-deploy is a no-op. Deploy only
   upgrades: a host without the installed tracer is reported as
-  needing the bootstrap of #1, never installed. The Java agent
+  needing the bootstrap of #1 (`iormeshctl bootstrap`), never
+  installed. The Java agent
   jar ships on the same trust path (task kf4, #28): a host with
   a project that uses the agent (`-spool` or `-agent`) also gets
   the signed `dist/iormesh-agent.jar`, verified on the
@@ -1393,7 +1394,8 @@ Kubernetes (M7) build on it.
 - **Cleanup (`rm`)**: removes the host from the registry and
   tears down the deployment on it — `sudo iormesh uninstall`
   stops every session and removes `/opt/iormesh` (binary and
-  traces). Trace files are synced off first (rsync, same as
+  traces), then the sudoers rule `iormeshctl bootstrap`
+  installed (decision #1). Trace files are synced off first (rsync, same as
   collect), so `rm` never destroys uncollected traces unless
   the operator says so with `-force`; an unreachable host
   warns and only drops the host (or the `-project`) from the
@@ -1445,6 +1447,33 @@ Kubernetes (M7) build on it.
   `state.json` so a skew between the deployed build and a
   running session is visible; a state from an older tracer
   lacks them and shows the version as unknown.
+  Built (task zh4, owner-approved 2026-11-22): **tracing over
+  days**. A session ends after its `-duration` and its
+  transient unit has no `Restart=`, so a reboot, an OOM kill
+  or a disk-limit trip ends it for good. `iormeshctl ensure
+  [-project P]... [HOST...]` reads each host's `status -json`
+  and starts again (deploy's start argv and start path) every
+  registered project whose session ended on its own —
+  `duration`, `targets_exited`, `error`, a `stop` that was not
+  the operator's, a run that died — then collects the host.
+  An explicit stop stays distinguishable from an end: `iormesh
+  stop` sets `operator_stop: true` in `state.json` once the
+  unit is dead (never while the run may write the file; the run
+  writes `false` from its start), since a reboot's SIGTERM ends
+  a run with the same `stop` reason; ensure leaves those
+  stopped. A deploy restart whose start fails after its stop
+  leaves the project marked stopped, so ensure does not recover
+  it. A tracer from before the field (`operator_stop`
+  absent) cannot tell, so its `stop` ends are left too. A
+  `disk_limit` end is collected first and restarted only when
+  the collect emptied its `ready/` (a second status read);
+  should the partition still be over the limit, the new run's
+  watchdog refuses at its start, so no restart loop fills the
+  disk. ensure starts no project the host never ran and never
+  upgrades — both are deploy's — takes hosts only (a pod's
+  tracer is its debug container), and run again only collects,
+  so a systemd user timer or a cron line drives it
+  ([architecture.md](docs/architecture.md#tracing-for-days)).
 - Target platform for the tracer: Rocky Linux 9 first (BTF
   present; ior's Rocky 9 build/Docker patterns apply), amd64
   and arm64. Deployed binaries come out of the container build
@@ -2881,7 +2910,7 @@ deferred.
   settled: SSH, key-based, from the controller only. The sudo
   scope is one pinned sudoers rule for exactly
   `/opt/iormesh/bin/iormesh` (ior precedent: scoped sudoers
-  rules). Open: bootstrap and upgrade. The first install needs
+  rules). Raised: bootstrap and upgrade. The first install needs
   broader privilege once (the operator's own sudo, or
   configuration management laying down the binary and the
   rule), and the binary must be root-owned and not writable by
@@ -2889,8 +2918,8 @@ deferred.
   in disguise. Upgrades therefore go through a tracer
   subcommand that verifies the staged binary's signature
   against a root-owned public key (#28) before replacing
-  itself. Built so (task bb4, the upgrade half; bootstrap stays
-  open): `iormesh upgrade FILE` runs through the rule and takes
+  itself. Built so (task bb4, the upgrade half):
+  `iormesh upgrade FILE` runs through the rule and takes
   only the staged file and `FILE.minisig`. It reads both once
   into memory, verifies them against
   `/opt/iormesh/etc/minisign.pub`, requires the signed name to
@@ -2907,9 +2936,50 @@ deferred.
   binary and the key regular root-owned files, never a
   symlink — and refuses rather than repairs. A downgrade needs
   `-allow-downgrade`, which root may pass but the rule may not:
-  an older signed build may carry a fixed hole. The first
-  install — binary, key and rule — is still the operator's own
-  sudo or configuration management.
+  an older signed build may carry a fixed hole.
+  Built so (task qh4, the bootstrap half; owner-approved
+  2026-11-22): the first install — binary, key and rule — is
+  the operator's own sudo, driven by `iormeshctl bootstrap
+  HOST` (or configuration management doing the same). Without
+  `-apply` it contacts nothing and prints the exact steps,
+  with the hashes of the build it verified, for the arch and
+  SSH user `-arch` and `-user` name (default amd64 and the
+  registry host's `user@` part, else the controller's own user
+  name, ssh's default login — a `User` in `~/.ssh/config` is
+  not seen); the rule's user must be one user, never `ALL` or
+  an all-caps alias name (sudoers would widen it); with
+  `-apply` it reads both from the host (`uname -m`, `id -un`;
+  a flag that disagrees is refused) and runs the same steps
+  over the Transport. Interactive sudo over ssh needs
+  a TTY and the Transport has none (`BatchMode`, decision #12),
+  so `-apply` runs every privileged step as `sudo -n`: it needs
+  the SSH user's own sudo to work without a password
+  (NOPASSWD, as on cloud images), and a host whose sudo asks for
+  one is refused with a pointer to the printed steps, which the
+  operator runs by hand on a terminal. Only registered hosts,
+  and only hosts without the tracer (deploy upgrades the
+  rest); an existing `/etc/sudoers.d/iormesh` is refused, never
+  overwritten. The steps: the controller verifies
+  `dist/iormesh-linux-<arch>` against its pinned key exactly as
+  deploy does and stages those verified bytes, its signature,
+  the pinned key and the rule in `~/.iormesh/staging`; root
+  creates `/opt/iormesh`, `bin/` and `etc/` (root:root 0755),
+  installs each file under a temporary name next to its place
+  (sudo ignores a `.`-name in `sudoers.d`), checks the root-owned
+  copy's SHA-256 against the controller's (the rule also with
+  `visudo -cf`) and only then renames it into place — the
+  binary never runs before that check; then, still under the
+  operator's sudo and before the rule goes live, the installed
+  tracer's own `upgrade` of the staged build re-verifies it
+  against the root-owned key and checks the whole layout
+  (same bytes: a no-op); last the rule is installed and a
+  `sudo -n iormesh status` proves it. The rule is
+  `USER ALL=(root) NOPASSWD: /opt/iormesh/bin/iormesh` for the
+  SSH user, under a marker comment line, generated from
+  `internal/hostlayout` — the one source the tracer's gate,
+  deploy and the docs' tests use. `iormesh uninstall` (rm's
+  last step) removes `/etc/sudoers.d/iormesh` when its first
+  line is that marker, and leaves any other rule alone.
 - **#28 Signature scheme** — which tool signs the tracer build
   (minisign, cosign, `ssh-keygen -Y`), where the public key is
   pinned (controller config; a root-owned copy on servers for
@@ -4054,6 +4124,7 @@ internal/javaattach/  # live attach of the Java agent (HotSpot
                       #   attach protocol)
 internal/stacks/      # native stack table (opt-in)
 internal/release/     # minisign signing and verification
+internal/hostlayout/  # the server install's paths and sudoers rule
 internal/version/     # release version and its ordering
 internal/termsafe/    # terminal-safe printing of trace text
 internal/acceptance/  # M4's real-host acceptance driver

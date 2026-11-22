@@ -176,6 +176,87 @@ while a session runs; `expand` turns the unresolved edges of one round
 into the newly enrolled hosts of the next; `rm` stops, syncs and
 removes. See PLAN.md, M4 and M6.
 
+## Tracing for days
+
+A session ends after its `-duration` (4h by default, 7 days at
+most), and its transient unit has no `Restart=`: a reboot, an
+OOM kill at `MemoryMax` or a disk-limit trip ends it for good.
+`iormeshctl ensure [-project P]... [HOST...]` keeps it going
+(PLAN.md M4, "No management plane"; task zh4). Per host — every
+registered one without HOST — it reads the tracer's `status
+-json`, then:
+
+| The session | ensure |
+|---|---|
+| running, or its unit is live | nothing |
+| ended `duration`, `targets_exited`, `error` | starts it again |
+| ended `stop` with `operator_stop: false` (a reboot's SIGTERM) | starts it again |
+| `dead` (crash, OOM kill, power loss), unless `operator_stop` | starts it again |
+| stopped with `iormesh stop` (`operator_stop: true`) | leaves it stopped |
+| ended `stop` on a tracer from before `operator_stop` | leaves it stopped: it cannot tell |
+| ended `disk_limit` | collects first; starts it only once `ready/` is empty |
+| never ran on the host | nothing: `deploy` starts new projects |
+
+then collects every selected project of the host. A start uses
+deploy's argv for the registry entry and goes through the same
+sudoers rule (`status`, `start`); ensure never pushes or
+upgrades. A `disk_limit` end whose disk is still over the
+limit is refused by the new run's own watchdog at its start,
+so a timer never loops a full disk. To keep a session ended,
+stop it while it runs (`sudo iormesh stop -project P` on the
+host) or remove it (`iormeshctl rm`); a session that already
+ended cannot be stopped, so narrow ensure with `-project` or
+HOST instead. A `deploy` starts a stopped session again; but a
+deploy restart whose start fails after its stop leaves the
+project marked stopped, so ensure will not recover it — deploy
+reports "session stopped, not restarted", and the next deploy
+starts it.
+
+Run again, ensure finds what it started running and only
+collects, so a timer may drive it. A systemd user timer on the
+laptop (it needs the SSH key without a prompt: an agent socket
+in the user manager's environment, `systemctl --user
+import-environment SSH_AUTH_SOCK`, or a key for this alone):
+
+```ini
+# ~/.config/systemd/user/iormesh-ensure.service
+[Unit]
+Description=iormeshctl ensure: restart ended iormesh sessions, collect
+
+[Service]
+Type=oneshot
+ExecStart=%h/bin/iormeshctl ensure
+
+# ~/.config/systemd/user/iormesh-ensure.timer
+[Unit]
+Description=Run iormeshctl ensure every 15 minutes
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now iormesh-ensure.timer
+journalctl --user -u iormesh-ensure.service   # what each run did
+```
+
+A timer never starts a run while the last one is still going
+(a slow collect). With cron, `flock` gives the same:
+
+```cron
+*/15 * * * * flock -n ~/.cache/iormesh-ensure.lock ~/bin/iormeshctl ensure >>~/.cache/iormesh-ensure.log 2>&1
+```
+
+ensure exits 1 when a host could not be reached or a start or
+collect failed, after trying every host; the next run retries.
+Run `iormeshctl build` (or `refresh`) when you want the picture;
+ensure only keeps the segments coming.
+
 ## The two joins
 
 ![Two joins make one story](diagrams/join.svg)

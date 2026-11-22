@@ -12,15 +12,18 @@ import (
 	"strings"
 	"time"
 
+	"iormesh/internal/hostlayout"
 	"iormesh/internal/project"
+	"iormesh/internal/release"
 	"iormesh/internal/segment"
 )
 
 // installRoot is what uninstall removes: the binary and the default
 // trace dir under it (PLAN.md M4 "Cleanup"). It is deliberately not a
 // flag: uninstall runs under the one sudoers rule, and a path argument
-// would turn it into "delete any tree as root".
-const installRoot = "/opt/iormesh"
+// would turn it into "delete any tree as root". The path comes from
+// internal/hostlayout, which the controller's bootstrap reads too.
+const installRoot = hostlayout.Root
 
 // statusReport is one project's line in `iormesh status` (-json prints
 // the reports as they are).
@@ -66,7 +69,9 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 // stop stops the project's unit: systemd sends SIGTERM, the run drains,
 // writes its end event and publishes the active segment as its last
 // (decision #19). It then prints the end state.json recorded, and fails
-// when there is none: the stop happened, the clean end did not.
+// when there is none: the stop happened, the clean end did not. Once the
+// unit is stopped it marks state.json as the operator's stop
+// (markOperatorStop, task zh4), which iormeshctl ensure leaves ended.
 func (c control) stop(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
 	fs.SetOutput(c.stderr)
@@ -86,14 +91,22 @@ func (c control) stop(ctx context.Context, args []string) error {
 		return fmt.Errorf("project %s: %s is not running (%s)", *pf.project, unit, u)
 	}
 	if err := stopUnit(ctx, c.sys, unit); err != nil {
-		return err
+		return err // the unit may still be live: nothing is marked
 	}
+	// Marked only now that systemctl stop returned with the unit dead:
+	// the run (which holds the project's lock, not state.json's) writes
+	// state.json only while it lives, so this read-modify-write cannot
+	// roll back its start or end record (review of task zh4). A run
+	// SIGKILLed after the stop timeout left a running state; it is
+	// marked too, since the operator meant the stop either way.
+	dir := filepath.Join(*pf.traceDir, *pf.project)
+	mark := c.markStop(dir)
 	// The unit is gone either way, but only an `ended` state says the run
 	// drained and published its last segment: a run SIGKILLed after
 	// TimeoutStopSec (or one that never attached) leaves its active minute
 	// unpublished. The caller — iormeshctl rm, before an uninstall that
 	// would delete that file — must learn of it, so this is an error.
-	st, err := readState(filepath.Join(*pf.traceDir, *pf.project))
+	st, err := readState(dir)
 	if err != nil {
 		return fmt.Errorf("stopped %s, but its end is unknown, the last segment may be unpublished: %w", unit, err)
 	}
@@ -103,7 +116,24 @@ func (c control) stop(ctx context.Context, args []string) error {
 	}
 	_, _ = fmt.Fprintf(c.stdout, "iormesh: stopped %s: session %s ended (%s) at %s\n",
 		unit, st.Session, st.EndReason, st.EndedAt.Format(time.RFC3339))
+	if mark != nil {
+		return fmt.Errorf("stopped %s, but could not record it as the operator's stop "+
+			"(iormeshctl ensure may restart it): %w", unit, mark)
+	}
 	return nil
+}
+
+// markStop records the operator's stop in dir's state.json
+// (markOperatorStop). Through the sudoers rule stop takes any
+// -trace-dir, and only reads there; it writes only under the confined
+// trace root, which is root's, never as root into a directory the
+// caller chose. Elsewhere it is a no-op, as for a session that was never
+// started confined.
+func (c control) markStop(dir string) error {
+	if sudoGated(c.self, c.env, os.Lstat) && filepath.Dir(filepath.Clean(dir)) != c.confine.traceRoot {
+		return nil
+	}
+	return markOperatorStop(dir)
 }
 
 // status reports the project's session, or with no -project every session
@@ -250,14 +280,15 @@ func (r statusReport) text() string {
 	return b.String()
 }
 
-// uninstall stops every iormesh unit, then removes installRoot.
+// uninstall stops every iormesh unit, then removes installRoot and the
+// sudoers rule iormeshctl bootstrap installed (task qh4).
 func (c control) uninstall(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
 	fs.SetOutput(c.stderr)
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	return c.uninstallFrom(ctx, installRoot)
+	return c.uninstallFrom(ctx, installRoot, hostlayout.SudoersFile)
 }
 
 // uninstallFrom is uninstall over root (a temporary directory in tests).
@@ -268,8 +299,12 @@ func (c control) uninstall(ctx context.Context, args []string) error {
 // trace dir /opt/iormesh/traces (confine.go), which lies under
 // installRoot, so its segments go with the tree; the agent spools under
 // /run/iormesh/spool are outside root and left alone (/run is emptied at
-// boot).
-func (c control) uninstallFrom(ctx context.Context, root string) error {
+// boot). Once the tree is gone the bootstrap's sudoers rule goes too
+// (removeBootstrapRule; sudoers is a temporary path in tests): it names
+// a binary that no longer exists, and a host bootstrapped again gets a
+// new one. A failed removal of the tree keeps the rule, so the operator
+// can rerun uninstall through it.
+func (c control) uninstallFrom(ctx context.Context, root, sudoers string) error {
 	projects, err := listUnits(ctx, c.sys)
 	if err != nil {
 		return err
@@ -285,5 +320,38 @@ func (c control) uninstallFrom(ctx context.Context, root string) error {
 		return fmt.Errorf("uninstall: %w", err)
 	}
 	_, _ = fmt.Fprintf(c.stdout, "iormesh: removed %s\n", root)
+	return c.removeBootstrapRule(sudoers)
+}
+
+// maxSudoersSize bounds what uninstall reads of the rule file: the
+// bootstrap's is two short lines.
+const maxSudoersSize = 4 << 10
+
+// removeBootstrapRule removes the sudoers file at path when it is the one
+// iormeshctl bootstrap installed: a regular file, not a symlink (read
+// with O_NOFOLLOW by release.ReadFile), whose first line is
+// hostlayout.SudoersMarker. The path is fixed, never the caller's:
+// uninstall runs through the rule. Anything else there — a rule
+// configuration management laid down, a planted symlink — is left alone
+// and reported, so uninstall only ever removes the privilege bootstrap
+// granted. No file is nothing to do.
+func (c control) removeBootstrapRule(path string) error {
+	data, err := release.ReadFile(path, maxSudoersSize, nil)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return nil
+	case err != nil:
+		_, _ = fmt.Fprintf(c.stdout, "iormesh: left %s: not the bootstrap's rule: %v\n", path, err)
+		return nil
+	}
+	first, _, _ := strings.Cut(string(data), "\n")
+	if first != hostlayout.SudoersMarker {
+		_, _ = fmt.Fprintf(c.stdout, "iormesh: left %s: not installed by iormeshctl bootstrap\n", path)
+		return nil
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("uninstall: sudoers rule: %w", err)
+	}
+	_, _ = fmt.Fprintf(c.stdout, "iormesh: removed %s\n", path)
 	return nil
 }
