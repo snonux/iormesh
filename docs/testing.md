@@ -2244,7 +2244,11 @@ goes through `sudo -n`. It:
    other work between a kept run and `mage k8sTeardown` stays,
    task oi4; a state file written before that change carries no
    `used_images`, so its base images are left for the operator to
-   prune by hand), the kubeconfig and the state file.
+   prune by hand), the kubeconfig and the state file. Every step
+   but helm's uninstall exits 0 when its object is already gone,
+   so a failing step is a real failure (sudo or the daemon
+   refusing): the rest still run, the teardown fails and the
+   state file stays for the next attempt (task qi4).
    `IORMESH_KIND_KEEP=1` keeps everything; `mage k8sTeardown`
    runs the same steps on its own and is safe to repeat. Never
    `docker system prune` or an unfiltered prune: the daemon holds

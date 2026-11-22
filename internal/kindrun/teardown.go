@@ -33,13 +33,13 @@ func TeardownPlan(c Config, o *Owned, pulled []string) [][]string {
 
 // Teardown runs TeardownPlan and removes the state file and, unless the
 // cluster is an existing one, the kubeconfig the run wrote. A failing
-// step is reported on w and the rest still run (a missing cluster or
-// volume is the normal case of a repeat); the error joins the failures
-// of the steps that matter — the listing, an existing cluster's
-// namespace deletion and the file removals — not those of removals with
-// nothing to remove. When that namespace deletion fails the state file
-// stays, so the record of what is the run's survives for the next
-// `mage k8sTeardown` (task li4); it also stays, with nothing removed in
+// step is reported on w and the rest still run; the error joins the
+// listing's failure, the failed steps that matter (stepsError: all but
+// helm's uninstall, since the steps exit 0 when their object is already
+// gone) and the file removals'. When such a step fails the state file
+// stays, so the record of what is the run's — the pulled base images,
+// an existing cluster's namespaces — survives for the next `mage
+// k8sTeardown` (tasks li4, qi4); it also stays, with nothing removed in
 // the cluster, for a refused run (LeaveCluster) and for a record naming
 // no kubeconfig or context (clusterRecord).
 func Teardown(r Runner, c Config, w io.Writer) error {
@@ -60,13 +60,40 @@ func Teardown(r Runner, c Config, w io.Writer) error {
 		_, _ = fmt.Fprintln(w, "teardown: "+notice)
 	}
 	failed := runPlan(r, TeardownPlan(c, owned, Pulled(before, known, now)), w)
-	var kerr error
-	if del := namespaceDelete(owned); del != nil && slices.ContainsFunc(failed,
-		func(a []string) bool { return slices.Equal(a, del) }) {
-		kerr = fmt.Errorf("namespaces %s not deleted: record kept in %s",
-			strings.Join(owned.Namespaces, " "), c.StateFile)
+	ferr := stepsError(c, owned, failed)
+	return errors.Join(serr, oerr, ferr, removeFiles(c, keep || ferr != nil))
+}
+
+// stepsError is the error of the failed steps that matter, nil when
+// none: every step but helm's uninstall, which is excused — the
+// release's storage is in namespace traefik and goes with the namespace
+// deletion, whose own failure is reported (task li4). Every other step
+// exits 0 when its object is already gone (`kind delete cluster` on a
+// missing cluster, `docker rm --force`, `docker volume rm --force`,
+// `docker image rm --force`, a label-filtered prune, `kubectl delete
+// --ignore-not-found`; the unforced `docker image rm <id>` names only
+// IDs Snapshot listed just before), so its failure is a real one — sudo,
+// the daemon or the cluster refusing — and not the repeat of a
+// teardown; the state file is then kept for the next `mage k8sTeardown`
+// (task qi4). Runner.Run streams the output and returns only the exit,
+// so no message is classified.
+func stepsError(c Config, owned *Owned, failed [][]string) error {
+	var errs []error
+	del := namespaceDelete(owned)
+	for _, argv := range failed {
+		switch {
+		case argv[0] == "helm":
+		case del != nil && slices.Equal(argv, del):
+			errs = append(errs, fmt.Errorf("namespaces %s not deleted",
+				strings.Join(owned.Namespaces, " ")))
+		default:
+			errs = append(errs, fmt.Errorf("%s failed", strings.Join(argv, " ")))
+		}
 	}
-	return errors.Join(serr, oerr, kerr, removeFiles(c, keep || kerr != nil))
+	if len(errs) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: record kept in %s", errors.Join(errs...), c.StateFile)
 }
 
 // runPlan runs every step of plan, reports each failure on w, and
