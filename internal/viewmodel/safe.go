@@ -17,8 +17,12 @@ func Safe(m Model) Model { return safeModel(m) }
 // names and errors, stray file names — and a compromised server could
 // put escape sequences in any. Done once over the whole model before a
 // text writer formats it, so a field added later cannot be missed by one
-// writer; the model itself (model.json, -json) stays unchanged, as JSON
-// escapes control characters anyway.
+// writer. The model itself (model.json) stays unchanged: JSON is data,
+// not terminal text. encoding/json escapes only bytes below 0x20, not
+// DEL, the C1 controls or bidi overrides, so whatever prints JSON to a
+// terminal (iormeshctl show -json, query) passes it through
+// termsafe.JSON, which escapes those as \u escapes the decoder reads
+// back as the same value.
 func safeModel(m Model) Model {
 	s := termsafe.String
 	m.Run.Projects, m.Run.Hosts = safeAll(m.Run.Projects), safeAll(m.Run.Hosts)

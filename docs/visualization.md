@@ -369,7 +369,10 @@ surfaces: it is the export an LLM reads first (PLAN.md M5). (Lines cut
 with … here; `internal/ctl/testdata/build_summary.golden` has
 them whole.) Every string from the traces is printed
 terminal-safe: one holding a control character comes out
-Go-quoted, never as an escape sequence.
+Go-quoted, never as an escape sequence. The `-json` views (and
+`show report -json`, `expand -json`) escape DEL, the C1
+controls and bidi overrides as JSON `\u` escapes, so the JSON
+still decodes to the same value.
 
 V2 as built (task mb4; files and passes in
 [implementation.md](implementation.md), M5 "Conversations and
