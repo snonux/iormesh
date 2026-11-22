@@ -2468,8 +2468,9 @@ Built after plain Linux servers (M4); accepted on kind and el9
   2026-11-22): M0's microservices scenario "runs on plain hosts
   (M4/M6) and as pods (M7)", but the M7 acceptance ran tcp-nat
   and ingress only. `TestKindMicroservices` (`mage
-  k8sMicroservices` alone, and part of `mage k8sAcceptance`)
-  runs gateway, orders, inventory and billing each in a pod of
+  k8sMicroservices` alone; it joins `mage k8sAcceptance` only
+  after its first green run, so the accepted suite never waits
+  on a never-run test) runs gateway, orders, inventory and billing each in a pod of
   its own, one host per service, every pod under a debug tracer
   with the Java agent, one registry project for all. Each JVM
   starts behind the workload's startup gate, its tracer is

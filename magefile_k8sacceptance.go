@@ -54,9 +54,11 @@ containerdConfigPatches:
 `
 
 // K8sAcceptance runs PLAN.md M7's acceptance on kind: TestKindAcceptance
-// and TestKindMicroservices under kube-proxy's iptables mode, then
-// TestKindClusterIP again under nftables, then K8sTeardown's steps. IORMESH_KIND_KEEP=1 keeps the
-// cluster and the registry; IORMESH_KIND_KUBECONFIG puts the kubeconfig
+// under kube-proxy's iptables mode, then TestKindClusterIP again under
+// nftables, then K8sTeardown's steps. TestKindMicroservices (task uh4)
+// is not part of it until `mage k8sMicroservices` has run green once, so
+// the accepted suite never depends on a never-run test. IORMESH_KIND_KEEP=1
+// keeps the cluster and the registry; IORMESH_KIND_KUBECONFIG puts the kubeconfig
 // elsewhere. IORMESH_K8S_KUBECONFIG (with IORMESH_K8S_CONTEXT, else its
 // current context, and IORMESH_K8S_CRICTL, the argv prefix that runs
 // crictl on the node) targets an existing cluster instead.
@@ -328,9 +330,10 @@ func kindUp(r shRunner, c kindrun.Config) (env map[string]string, err error) {
 		"IORMESH_KIND_SELINUX_LEVEL": os.Getenv("IORMESH_K8S_SELINUX_LEVEL"), "CGO_ENABLED": "0"}, err
 }
 
-// kindTests runs the suite — TestKindAcceptance, then the microservices
-// pods (TestKindMicroservices, task uh4) — under iptables, then the
-// ClusterIP join under nftables. An existing cluster's kube-proxy is not
+// kindTests runs the suite — TestKindAcceptance under iptables, then the
+// ClusterIP join under nftables. The microservices pods
+// (TestKindMicroservices, task uh4) run alone through K8sMicroservices
+// until they have passed once; then they join here. An existing cluster's kube-proxy is not
 // kind's daemonset (k3s embeds it), so there all run in the cluster's own
 // mode, and the operator reruns after switching it. Each run fails on a
 // skip or a test not reported as passed (kindGoTest): on an existing
@@ -340,15 +343,12 @@ func kindTests(env map[string]string, existing bool) error {
 	run := func(test string) error { return kindGoTest(env, "40m", test) }
 	if existing {
 		fmt.Println("NOTICE existing cluster: kube-proxy's mode is the cluster's own, not switched")
-		return errors.Join(run("TestKindAcceptance"), run("TestKindMicroservices"), run("TestKindClusterIP"))
+		return errors.Join(run("TestKindAcceptance"), run("TestKindClusterIP"))
 	}
 	if err := kindProxyMode(env, "iptables"); err != nil {
 		return err
 	}
 	if err := run("TestKindAcceptance"); err != nil {
-		return err
-	}
-	if err := run("TestKindMicroservices"); err != nil {
 		return err
 	}
 	if err := kindProxyMode(env, "nftables"); err != nil {

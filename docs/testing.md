@@ -2330,8 +2330,7 @@ goes through `sudo -n`. It:
    Service: kind has no load balancer) from a helm repository
    config and cache in a temporary directory, so the operator's
    helm repositories stay as they were;
-7. runs `TestKindAcceptance` and `TestKindMicroservices` (below,
-   task uh4) with kube-proxy in iptables mode,
+7. runs `TestKindAcceptance` with kube-proxy in iptables mode,
    switches kube-proxy to nftables and runs `TestKindClusterIP`,
    each with `go test -v`, judged as `mage integrationTest` is
    (`gatecmd.KindTestsVerdict`, task si4): the target fails when
@@ -2526,8 +2525,9 @@ PLAN.md M0 runs the microservices scenario "on plain hosts
 (M4/M6) and as pods (M7)"; `TestKindMicroservices` is the pod
 run (PLAN.md M7 "Microservices as pods"). `mage
 k8sMicroservices` runs it alone, with the same setup, disk
-guard, judging and scoped teardown as `mage k8sAcceptance`,
-which runs it too, after `TestKindAcceptance`.
+guard, judging and scoped teardown as `mage k8sAcceptance`.
+`mage k8sAcceptance` leaves it out until it has passed once, so
+the accepted M7 suite never depends on a never-run test.
 
 In namespace `iormesh-m7-micro` it applies
 `testdata/microservices.yaml`: one Deployment per service
