@@ -3475,7 +3475,8 @@ ssh H test -x /opt/iormesh/bin/iormesh   # installed? else bootstrap, #1
 # verify dist/iormesh-linux-$ARCH + .minisig locally (#28), then:
 ssh H pwd                                # the home, e.g. /home/ops
 ssh H mkdir -p -m 0700 /home/ops/.iormesh/staging
-rsync -ct dist/iormesh-linux-$ARCH dist/iormesh-linux-$ARCH.minisig \
+rsync -ct --timeout=60 \
+    dist/iormesh-linux-$ARCH dist/iormesh-linux-$ARCH.minisig \
     H:/home/ops/.iormesh/staging/
 ssh H sudo -n /opt/iormesh/bin/iormesh upgrade \
     /home/ops/.iormesh/staging/iormesh-linux-$ARCH
@@ -3579,8 +3580,8 @@ iormeshctl collect [-project P]... [-store DIR] [HOST...]
 ssh H true                                   # reachable? else H fails
 # per project:
 ssh H test -d /opt/iormesh/traces/shop/ready # exit 1: never started, skip
-rsync -rt --remove-source-files --exclude='.*' --include='*.parquet' \
-    --exclude='*' -e 'ssh …' -- \
+rsync -rt --timeout=60 --remove-source-files --exclude='.*' \
+    --include='*.parquet' --exclude='*' -e 'ssh …' -- \
     H:/opt/iormesh/traces/shop/ready/ \
     ~/.local/share/iormesh/traces/shop/H/
 ```
@@ -3626,11 +3627,23 @@ rsync -rt --remove-source-files --exclude='.*' --include='*.parquet' \
   are still collected, and the command exits 1 naming the
   failed hosts. A partial transfer loses nothing: what moved
   is local, the rest stays in `ready/` for the next run.
+- A hung host is a failed host. Each host runs under its own
+  deadline derived from the caller's context
+  (`env.onHost`, `defaultHostTimeout` = 1 h; deploy, rm and
+  expand -apply use the same), and the error then says "gave
+  up on the host after …". The hour only catches a remote
+  command hanging on a live connection; a dead link is ssh's
+  ServerAlive options' (about 45 s) and a stalled transfer
+  rsync's `--timeout=60`, an I/O idle timeout that never cuts
+  off a long transfer that is still moving.
 - Tests (`internal/ctl/collect_test.go`): exact call sequence
   over the whole registry, identical on a second run;
   `-project`/HOST selection and refusals with no call at all;
   unreachable host, failed fetch, missing `ready/` and a
-  `test -d` failing with 255; an open store, a store that is a
+  `test -d` failing with 255; a host that stalls given up on
+  at the (shortened) per-host bound while the next is still
+  collected, deployed or, for rm, the registry kept
+  (`Test{Collect,Deploy,Rm}HungHost`); an open store, a store that is a
   file and an open project directory refused; and
   `TestCollectLiveSession`, real rsync with `FetchFlags` over
   a temp "server" with an active file at the project top,
@@ -3712,7 +3725,7 @@ The SSH transport:
   POSIX quoting: the deploying user's login shell on a server
   must be a POSIX shell (csh/tcsh read `!` and newlines inside
   single quotes).
-- `Fetch(ctx, remoteDir, localDir)` — `rsync -rt
+- `Fetch(ctx, remoteDir, localDir)` — `rsync -rt --timeout=60
   --remove-source-files --exclude=.* --include=*.parquet
   --exclude=* -e 'ssh [opts]' -- HOST:DIR/ LOCAL/`: a move of
   the non-dot segment files directly in DIR, each deleted
@@ -3727,7 +3740,11 @@ The SSH transport:
   prompt to hang on), `StrictHostKeyChecking=yes` (the host key
   must already be in known_hosts — no trust on first use, never
   `no`), `ControlMaster=auto`, `ControlPersist=60s` and
-  `ControlPath=<dir>/%C` — one multiplexed connection per host.
+  `ControlPath=<dir>/%C` — one multiplexed connection per host;
+  `ConnectTimeout=15`, `ServerAliveInterval=15` and
+  `ServerAliveCountMax=3` — a silent connect fails after 15 s,
+  a session that stops answering after about 45 s. Both rsync
+  calls carry `--timeout=60` (no data for a minute ends them).
   The dir is `<user cache dir>/iormesh/ssh`, or `~/.iormesh/ssh`
   on macOS, whose `~/Library/Caches` leaves too little of a unix
   socket's 104-byte path; a dir too long for one is refused up

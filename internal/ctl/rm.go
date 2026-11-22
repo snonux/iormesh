@@ -82,7 +82,11 @@ func rmCommand(args []string, e env) error {
 		return err
 	}
 	r := remover{collector: c, force: *force}
-	err = r.teardown(context.Background(), host, projects, hostGoes)
+	// Bounded like collect's hosts (env.onHost): a host stalled after
+	// the probe fails the teardown and the registry stays as it was.
+	err = r.e.onHost(context.Background(), func(ctx context.Context) error {
+		return r.teardown(ctx, host, projects, hostGoes)
+	})
 	if errors.Is(err, errUnreachable) {
 		_, _ = fmt.Fprintf(e.stderr, "iormeshctl: warning: %s: %s; its traces and tracer stay on it, "+
 			"dropping it from the registry only\n", host, errText(err))

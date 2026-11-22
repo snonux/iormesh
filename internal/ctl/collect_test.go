@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"iormesh/internal/federate"
 )
@@ -131,6 +132,110 @@ func TestCollectFailures(t *testing.T) {
 		!strings.Contains(f.stderr.String(), "app2: project shop: ssh app test: exit status 255") {
 		t.Errorf("test -d exit 255: exit %d, stderr %s", code, f.stderr)
 	}
+}
+
+// hangingTransport is a server that accepted the session and then
+// stalled: every call blocks until its context is done, except the
+// reachability probe when answerProbe is set.
+type hangingTransport struct {
+	fakeTransport
+	answerProbe bool
+}
+
+func (h hangingTransport) Run(ctx context.Context, argv ...string) ([]byte, error) {
+	if h.answerProbe && slices.Equal(argv, []string{"true"}) {
+		return h.fakeTransport.Run(ctx, argv...)
+	}
+	*h.log = append(*h.log, slices.Concat([]string{h.host, "run"}, argv))
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (h hangingTransport) Fetch(ctx context.Context, remote, local string) error {
+	*h.log = append(*h.log, []string{h.host, "fetch", remote, local})
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// hangOn makes host hang (hangingTransport, answering the probe when
+// answerProbe is set) and bounds each host at timeout.
+func (f *deployFixture) hangOn(host string, timeout time.Duration, answerProbe bool) {
+	f.e.hostTimeout = timeout
+	f.e.transport = func(h string) (federate.Transport, error) {
+		if h == host {
+			return hangingTransport{f.transport(h), answerProbe}, nil
+		}
+		return f.transport(h), nil
+	}
+}
+
+// runBounded is run with a watchdog: a command still running after
+// limit fails the test instead of hanging it.
+func (f *deployFixture) runBounded(t *testing.T, limit time.Duration, args ...string) int {
+	t.Helper()
+	done := make(chan int, 1)
+	go func() { done <- f.run(args...) }()
+	select {
+	case code := <-done:
+		return code
+	case <-time.After(limit):
+		t.Fatalf("%v did not return within %s: a hung host blocks the others", args, limit)
+		return 0
+	}
+}
+
+// TestCollectHungHost: a host that accepts the session and then stalls
+// is given up on after the per-host bound and reported as failed; the
+// hosts after it are still collected (task bi4).
+func TestCollectHungHost(t *testing.T) {
+	f := newDeployFixture(t)
+	f.hangOn("app1", 50*time.Millisecond, false)
+	if code := f.runBounded(t, 10*time.Second, "collect"); code != exitError {
+		t.Fatalf("exit %d: %s", code, f.stderr)
+	}
+	checkLog(t, f.log, [][]string{probeCall("app1"), probeCall("app2")}, f.collectLog("app2", "shop"))
+	if !strings.Contains(f.stderr.String(), "app1: host unreachable") ||
+		!strings.Contains(f.stderr.String(), "gave up on the host after 50ms") ||
+		!strings.Contains(f.stderr.String(), "collect failed on 1 of 2 hosts: app1") {
+		t.Errorf("stderr: %s", f.stderr)
+	}
+}
+
+// TestDeployHungHost: deploy gives up on a stalled host the same way
+// and still deploys the next one.
+func TestDeployHungHost(t *testing.T) {
+	f := newDeployFixture(t)
+	f.hangOn("app1", 50*time.Millisecond, false)
+	if code := f.runBounded(t, 10*time.Second, "deploy", "-dist", f.dist, "app1", "app2"); code != exitError {
+		t.Fatalf("exit %d: %s", code, f.stderr)
+	}
+	if !slices.ContainsFunc(f.log, func(c []string) bool { return c[0] == "app2" && c[1] == "push" }) {
+		t.Errorf("app2 not deployed: %q", f.log)
+	}
+	if !strings.Contains(f.stderr.String(), "gave up on the host after 50ms") ||
+		!strings.Contains(f.stderr.String(), "deploy failed on 1 of 2 hosts: app1") {
+		t.Errorf("stderr: %s", f.stderr)
+	}
+}
+
+// TestRmHungHost: rm of a host that answers the probe and then stalls
+// mid-teardown returns within the bound and leaves the registry alone,
+// as any failed teardown does (a hung probe reads as unreachable, which
+// TestRmUnreachable covers).
+func TestRmHungHost(t *testing.T) {
+	f := newDeployFixture(t)
+	f.hangOn("app1", 50*time.Millisecond, true)
+	if code := f.runBounded(t, 10*time.Second, "rm", "app1"); code != exitError {
+		t.Fatalf("exit %d: %s", code, f.stderr)
+	}
+	if !strings.Contains(f.stderr.String(), "gave up on the host after 50ms") ||
+		!strings.Contains(f.stderr.String(), "registry unchanged") {
+		t.Errorf("stderr: %s", f.stderr)
+	}
+	if got := f.hosts(t); len(got) != 3 {
+		t.Errorf("registry changed: %v", got)
+	}
+	assertNoUninstall(t, f.log)
 }
 
 // TestCollectRefusesStore: a store or project directory others can

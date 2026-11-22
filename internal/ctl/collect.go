@@ -149,11 +149,14 @@ func newCollector(e env, store string) (collector, error) {
 	return collector{e: e, store: store}, nil
 }
 
-// all collects every target in turn.
+// all collects every target in turn, each under its own deadline
+// (env.onHost) derived from ctx, so a host that stalls is reported and
+// the ones after it are still collected.
 func (c collector) all(ctx context.Context, targets []collectTarget) error {
 	var failed []string
 	for _, tg := range targets {
-		if err := c.host(ctx, tg); err != nil {
+		err := c.e.onHost(ctx, func(ctx context.Context) error { return c.host(ctx, tg) })
+		if err != nil {
 			_, _ = fmt.Fprintf(c.e.stderr, "iormeshctl: %s: %s\n", tg.host, errText(err))
 			failed = append(failed, tg.host)
 		}

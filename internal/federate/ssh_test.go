@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -51,6 +52,8 @@ func TestSSHRunArgv(t *testing.T) {
 		"-o", "ControlPath=/ctl/%C",
 		"-o", "ControlPersist=60s",
 		"-o", "ConnectTimeout=15",
+		"-o", "ServerAliveInterval=15",
+		"-o", "ServerAliveCountMax=3",
 		"-o", "ForwardAgent=no",
 		"-o", "ClearAllForwardings=yes",
 		"-o", "ForwardX11=no",
@@ -107,9 +110,11 @@ func TestSSHFetchArgv(t *testing.T) {
 		t.Fatal(err)
 	}
 	argv := rec.calls[0]
-	want := []string{"rsync", "-rt", "--remove-source-files", "--exclude=.*", "--include=*.parquet", "--exclude=*", "-e",
+	want := []string{"rsync", "-rt", "--timeout=60", "--remove-source-files", "--exclude=.*", "--include=*.parquet",
+		"--exclude=*", "-e",
 		"ssh '-o' 'BatchMode=yes' '-o' 'StrictHostKeyChecking=yes' '-o' 'ControlMaster=auto'" +
 			" '-o' 'ControlPath=/ctl/%C' '-o' 'ControlPersist=60s' '-o' 'ConnectTimeout=15'" +
+			" '-o' 'ServerAliveInterval=15' '-o' 'ServerAliveCountMax=3'" +
 			" '-o' 'ForwardAgent=no' '-o' 'ClearAllForwardings=yes'" +
 			" '-o' 'ForwardX11=no' '-o' 'ForwardX11Trusted=no'",
 		"--", "app1:/opt/iormesh/traces/shop/ready/", local + "/"}
@@ -127,9 +132,10 @@ func TestSSHPushArgv(t *testing.T) {
 		t.Fatal(err)
 	}
 	argv := rec.calls[0]
-	want := []string{"rsync", "-ct", "-e",
+	want := []string{"rsync", "-ct", "--timeout=60", "-e",
 		"ssh '-o' 'BatchMode=yes' '-o' 'StrictHostKeyChecking=yes' '-o' 'ControlMaster=auto'" +
 			" '-o' 'ControlPath=/ctl/%C' '-o' 'ControlPersist=60s' '-o' 'ConnectTimeout=15'" +
+			" '-o' 'ServerAliveInterval=15' '-o' 'ServerAliveCountMax=3'" +
 			" '-o' 'ForwardAgent=no' '-o' 'ClearAllForwardings=yes'" +
 			" '-o' 'ForwardX11=no' '-o' 'ForwardX11Trusted=no'",
 		"--", "/dist/iormesh-linux-amd64", "/dist/iormesh-linux-amd64.minisig", "ops@app1:/home/ops/.iormesh/staging/"}
@@ -208,6 +214,22 @@ func TestRunLocalCarriesStderr(t *testing.T) {
 	out, err := runLocal(context.Background(), "sh", "-c", "echo hi")
 	if err != nil || string(out) != "hi\n" {
 		t.Errorf("runLocal = %q, %v", out, err)
+	}
+}
+
+// TestRunLocalDeadline: a command still running at the context's
+// deadline is killed, runLocal returns soon after, and the error is the
+// deadline's, with what the command had said on stderr.
+func TestRunLocalDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := runLocal(ctx, "sh", "-c", "echo 'Timeout, server not responding.' >&2; exec sleep 30")
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Errorf("runLocal returned after %s", elapsed)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "server not responding") {
+		t.Errorf("err = %v, want the deadline with stderr", err)
 	}
 }
 

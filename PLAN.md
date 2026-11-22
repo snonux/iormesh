@@ -1045,7 +1045,14 @@ Kubernetes (M7) build on it.
   0700 and refused when foreign-owned or writable by others;
   the host directory is forced to 0700 by every fetch. A
   failed host is reported, the others still collected, and
-  the command exits 1 naming it. The build reads every
+  the command exits 1 naming it. A hung host counts as
+  failed: ssh gives up on a dead connection after about 45 s
+  (`ServerAliveInterval=15`, `ServerAliveCountMax=3`), rsync
+  on a transfer that moves no data for 60 s (`--timeout=60`),
+  and each host gets an hour in all (collect, deploy and rm
+  alike) before the controller moves on — generous, since an
+  interrupted collect loses nothing and a backlog may be
+  large. The build reads every
   `*.parquet` under `<project>/*/` and skips dot files
   (rsync's in-flight temporaries).
 - **Build**: merge the collected segments offline by stable
@@ -2268,7 +2275,9 @@ would overturn it), and deferred.
   trusts a host key on first use: ssh runs with
   `StrictHostKeyChecking=yes` and `BatchMode=yes`, so a server's
   key must already be in the operator's known_hosts, and no
-  password prompt can hang a run. The k8s fetch path is
+  password prompt can hang a run; keepalives, rsync's I/O
+  timeout and a per-host deadline keep a stalled host from
+  hanging one either (M4 "Collect"). The k8s fetch path is
   provisionally settled in #18: an exec-streamed tar, no
   `kubectl cp`.
 - **#16 Trace-file segmentation** — rotate once per minute,

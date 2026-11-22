@@ -49,10 +49,12 @@
 package ctl
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
+	"time"
 
 	"iormesh/internal/federate"
 	"iormesh/internal/servicedb"
@@ -99,6 +101,9 @@ type env struct {
 	// A nil terminal is no terminal.
 	terminal func() bool
 	tui      func(viewmodel.Model) error
+	// hostTimeout bounds everything one command does on one host
+	// (onHost); zero is defaultHostTimeout. Tests shorten it.
+	hostTimeout time.Duration
 }
 
 // defaultEnv is the real environment: the registry at
@@ -111,6 +116,38 @@ func defaultEnv(stdout, stderr io.Writer) env {
 		servicedb: servicedb.DefaultPath, releaseKey: defaultKeyPath, deployed: defaultDeployedPath,
 		traces: defaultStorePath, builds: defaultBuildsPath, transport: sshTransport,
 		opener: systemOpener, terminal: stdioIsTerminal, tui: tui.Run}
+}
+
+// defaultHostTimeout is the ceiling on the time one command (collect,
+// deploy, rm, and refresh's and expand's collect and deploy) spends on
+// one host before it gives up on it and moves to the next. The cheaper
+// bounds come first and catch the usual hangs: ssh's ConnectTimeout
+// and ServerAlive options a dead link within about a minute, rsync's
+// --timeout a transfer that stops moving data (federate.SSH). What is
+// left for this ceiling is a remote command that hangs on a live
+// connection — a sudo or find stuck on a dead NFS mount. It is an hour,
+// not minutes, because a collect after a long outage may move a large
+// ready/ backlog over a slow link, and cutting that off would only
+// delay it: --remove-source-files deletes just what arrived, so the
+// rest waits for the next run either way.
+const defaultHostTimeout = time.Hour
+
+// onHost runs one host's work under a deadline derived from ctx, the
+// caller's (a cancelled ctx stops it too). A failure that is the
+// deadline's says so, with the bound, so the operator can tell a
+// stalled host from a refused one.
+func (e env) onHost(ctx context.Context, work func(context.Context) error) error {
+	timeout := e.hostTimeout
+	if timeout <= 0 {
+		timeout = defaultHostTimeout
+	}
+	hctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	err := work(hctx)
+	if err != nil && ctx.Err() == nil && errors.Is(hctx.Err(), context.DeadlineExceeded) {
+		err = fmt.Errorf("%w (gave up on the host after %s)", err, timeout)
+	}
+	return err
 }
 
 // defaultBuildsPath is ~/.local/share/iormesh/builds, next to the trace

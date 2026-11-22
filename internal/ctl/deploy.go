@@ -164,12 +164,14 @@ func newDeployer(e env, dist, keyPath string, restart bool) (deployer, string, e
 
 // all runs each server through one (deploy's host, or expand -apply's
 // checked variant) in turn and saves the record of what started, failed
-// hosts or not.
+// hosts or not. Each server runs under its own deadline (env.onHost)
+// derived from ctx, so a stalled one is reported and the next deployed.
 func (d deployer) all(ctx context.Context, servers []federate.Server, recPath string,
 	one func(context.Context, federate.Server) error) error {
 	var failed []string
 	for _, srv := range servers {
-		if err := one(ctx, srv); err != nil {
+		err := d.e.onHost(ctx, func(ctx context.Context) error { return one(ctx, srv) })
+		if err != nil {
 			_, _ = fmt.Fprintf(d.e.stderr, "iormeshctl: %s: %s\n", srv.Host, errText(err))
 			failed = append(failed, srv.Host)
 		}
