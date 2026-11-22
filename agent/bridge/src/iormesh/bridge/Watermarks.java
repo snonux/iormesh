@@ -3,7 +3,6 @@ package iormesh.bridge;
 import java.lang.invoke.VarHandle;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * WATERMARK records: the promise "every bracket that exited before this
@@ -12,16 +11,26 @@ import java.util.concurrent.atomic.AtomicInteger;
  * watermark has passed it (docs/implementation.md M3 step 4); without
  * watermarks it would have to guess how long to wait.
  *
- * Why the promise holds: a closing bracket sets its thread's
- * {@code closing} to its enter stamp before stamping its exit, and
- * clears it after publishing. A watermark reads the clock first, then
- * scans every thread: a thread seen idle either published already (so
- * its record precedes the watermark's reservation) or will stamp its
- * exit after the scan, hence after the clock read; a thread seen
- * closing lowers the watermark to its enter stamp, which no exit
- * precedes. Watermarks never go backwards. Both sides fence between
- * their volatile access and their clock read (Dekker): the JMM does not
- * order System.nanoTime() against volatiles by itself.
+ * Why the promise holds: a closing bracket enters its thread in the
+ * set of closing threads and sets its {@code closing} to its enter
+ * stamp before stamping its exit, and clears both after publishing
+ * ({@link #closing}, {@link #leave}). A watermark reads the clock first,
+ * then scans that set: a thread not in it (or seen idle) either
+ * published already (so its record precedes the watermark's
+ * reservation) or will stamp its exit after the scan, hence after the
+ * clock read; a thread seen closing lowers the watermark to its enter
+ * stamp, which no exit precedes. Watermarks never go backwards. Both
+ * sides fence between their volatile access and their clock read
+ * (Dekker): the JMM does not order System.nanoTime() against volatiles
+ * by itself. The set's insertion is a volatile write the scan's
+ * iterator reads (ConcurrentHashMap: an element added before the
+ * iterator is created, and not removed, is seen), so the fences order
+ * it like the closing store itself.
+ *
+ * Only closing threads are scanned (task dj4): a tick costs the brackets
+ * being written at that instant, not the threads alive. A JVM with tens
+ * of thousands of parked (virtual) threads once burned most of a core
+ * here, scanning them all every tick.
  *
  * The same thread serves later readers (task 5j4): each tick it polls
  * the ring's reader epoch and, when a reader came after the first one,
@@ -31,27 +40,49 @@ import java.util.concurrent.atomic.AtomicInteger;
 final class Watermarks {
     /** The thread's name: the tracer recognises its syscalls as the agent's. */
     static final String THREAD_NAME = "iormesh-agent-watermark";
-    /** Every so many registrations, dead threads are pruned (see register). */
-    private static final int PRUNE_EVERY = 256;
-    private static final Set<Brackets> LIVE = ConcurrentHashMap.newKeySet();
-    private static final AtomicInteger REGISTERED = new AtomicInteger();
+    /**
+     * The threads writing a record under the watermark promise right now
+     * (closing not IDLE, or about to be or just been): the only ones a
+     * watermark scans. A thread is in it from {@link #closing} to
+     * {@link #leave} only, so it holds no thread longer than a record's
+     * write, and needs no pruning.
+     */
+    private static final Set<Brackets> CLOSING = ConcurrentHashMap.newKeySet();
     private static long last = Long.MIN_VALUE;
 
     private Watermarks() {}
 
     /**
-     * Tracks a thread's state for the scan; without a ring there are no
-     * watermarks and nothing to track. Dead threads are pruned by every
-     * scan, and here too, so an app that churns threads cannot grow the
-     * set when the timer is off (watermark=0).
+     * Marks t closing from stamp; no watermark passes stamp until the
+     * caller ends the mark. was is t.closing as the caller read it
+     * before its try, which its finally restores with a plain store and
+     * then calls {@link #leave}: assigned before anything that can throw
+     * (a StackOverflowError on entering this method), so a throw never
+     * clears an outer mark nor leaves t closing for good. The caller
+     * fences before its clock read (see the class comment). Nested in an
+     * open mark (an HTTP marker written inside a probe's record), the
+     * older stamp stays in force and t stays in the set: the inner write
+     * must not lift the floor the outer record still needs. t enters the
+     * set before its mark is stored, so a failed insertion (it allocates)
+     * leaves t idle, never closing but unseen.
      */
-    static void register(Brackets b) {
-        if (Hooks.ring == null) {
-            return;
+    static void closing(Brackets t, long was, long stamp) {
+        if (was == Brackets.IDLE) {
+            CLOSING.add(t);
         }
-        LIVE.add(b);
-        if (REGISTERED.incrementAndGet() % PRUNE_EVERY == 0) {
-            LIVE.removeIf(x -> x.closing == Brackets.IDLE && !x.owner.isAlive());
+        t.closing = Math.min(was, stamp);
+    }
+
+    /**
+     * Takes t out of the set once its caller restored t.closing to was,
+     * after the record is published — unless was is an outer mark still
+     * open. A remove that never happened (a throw on entering here)
+     * leaves an IDLE entry, which lowers no watermark and goes at the
+     * thread's next leave.
+     */
+    static void leave(Brackets t, long was) {
+        if (was == Brackets.IDLE) {
+            CLOSING.remove(t);
         }
     }
 
@@ -74,13 +105,8 @@ final class Watermarks {
         // the JMM alone does not; pairs with the fence in Hooks.close.
         VarHandle.fullFence();
         long w = now;
-        for (Brackets b : LIVE) {
-            long c = b.closing;
-            if (c < w) {
-                w = c;
-            } else if (c == Brackets.IDLE && !b.owner.isAlive()) {
-                LIVE.remove(b);  // dead thread: it can write nothing more
-            }
+        for (Brackets b : CLOSING) {
+            w = Math.min(w, b.closing);   // IDLE (entering or leaving) lowers nothing
         }
         long v = force ? Math.max(w, last) : w;
         if ((force || w > last) && ring.watermark(v)) {

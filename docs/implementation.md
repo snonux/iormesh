@@ -2340,9 +2340,11 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
    when to stop waiting. The S1 prototype had no watermark — it
    drained after exit. The promise holds without locks: a closing
    bracket marks its thread with its enter stamp before stamping
-   the exit and clears the mark after publishing; a watermark
-   reads the clock, then scans the threads and lowers itself to
-   any marked thread's enter stamp. Both sides put a full fence
+   the exit and clears the mark after publishing, entering a
+   small set of closing threads for that time; a watermark reads
+   the clock, then scans that set — never every live thread, so
+   parked threads cost it nothing (task dj4) — and lowers itself
+   to any marked thread's enter stamp. Both sides put a full fence
    between their volatile access and their clock read: the JMM
    does not order `System.nanoTime()` against volatiles, and on
    AArch64 the closing mark could otherwise become visible only
