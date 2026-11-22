@@ -14,7 +14,11 @@ import (
 var openTracer = func(cfg bpf.Config) (tracer, error) { return bpf.Open(cfg) }
 
 // runSession is run once its flags are parsed: the CPU profile around
-// the trace, then, with -linger, the wait (linger).
+// the trace, then, with -linger, the wait (linger); without it, a run
+// in a pod whose trace dir is over its disk limits waits for collect to
+// drain it (awaitDrain, drain.go) instead of exiting into a crash loop.
+// Either wait returns the session's own result, so a preflight refusal
+// still exits non-zero once drained.
 func runSession(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 	stopProfile, err := startCPUProfile(cfg.cpuProfile)
 	if err != nil {
@@ -23,6 +27,8 @@ func runSession(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 	err = errors.Join(runTrace(ctx, cfg, stderr), stopProfile())
 	if cfg.linger {
 		linger(ctx, err, stderr)
+	} else {
+		awaitDrain(ctx, cfg, stderr)
 	}
 	return err
 }

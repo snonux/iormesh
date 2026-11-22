@@ -5542,6 +5542,27 @@ depends on:
      setting `-disk-limit` or `-disk-max-bytes` is refused before
      any pod is contacted (`checkPodFlags`): the pod's would win
      silently.
+   - **At the cap** (task ki4): a sidecar's run carries no
+     `-linger`, so a session ended by the cap used to exit 0,
+     the kubelet restarted the container, and the new run's
+     preflight (`checkTraceDisk`) refused the still-full dir —
+     a crash loop. The restarting container took the pod
+     NotReady (step 8, Readiness), and collect, finding the
+     container stopped, reported it stranded without an exec,
+     so nothing could drain the dir; at the 18 MB/min reference
+     rate a 2 GiB volume reaches its 1536 MiB cap in about 85
+     minutes. Now `runSession` calls `awaitDrain`
+     (`internal/cli/drain.go`) after the trace: in a pod
+     (`k8s.PodFromEnv`), with the trace dir over the
+     watchdog's limits — after a `disk_limit` end or a refused
+     preflight alike — the run, its tracer already closed,
+     polls the watchdog every 2 s and returns only once collect
+     (`ready -remove`) has brought the dir back under them, or
+     on SIGTERM. It keeps the session's result, so a refused
+     preflight still exits non-zero once drained; the restart
+     then starts a fresh session. Outside a pod nothing
+     restarts the run or collects through an exec, so it still
+     fails at once.
    - **Native sidecar or regular container** (for task yb4): the
      patch adds a regular container. A native sidecar (an
      `initContainers` entry with `restartPolicy: Always`, beta

@@ -115,6 +115,13 @@ func (m Manifests) sidecarArgs() []string {
 //
 // -disk-min-free keeps its default (256 MiB free on the partition): a
 // tracer still never writes a node's last bytes.
+//
+// At either bound a run in a pod ends its trace, frees its BPF and then
+// waits — it does not exit — until collect has drained the trace dir
+// back under them or SIGTERM arrives (task ki4, internal/cli
+// awaitDrain): an exit would have the kubelet restart the sidecar into
+// a run refused for the same full dir, a crash loop that takes the pod
+// NotReady and leaves collect no running container to exec into.
 func PodDiskArgs(limit string) []string {
 	return []string{"-disk-limit", "0", "-disk-max-bytes", TraceCap(limit)}
 }

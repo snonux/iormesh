@@ -156,7 +156,9 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 // preflight runs before anything is loaded: a stale ready file is
 // removed, so a harness reusing the path never mistakes a previous run's
 // for this one's, and a trace disk already over its limit fails the run
-// at once (checkTraceDisk).
+// at once (checkTraceDisk) — before any BPF load. In a pod the process
+// then still waits for collect to drain the dir (runSession,
+// awaitDrain) rather than exit into a kubelet restart loop.
 func preflight(cfg runConfig) error {
 	if cfg.ready != "" {
 		if err := os.Remove(cfg.ready); err != nil && !errors.Is(err, os.ErrNotExist) {
