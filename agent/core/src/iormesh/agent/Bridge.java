@@ -191,6 +191,11 @@ final class Bridge {
         hooks.getMethod("watermark").invoke(null);
     }
 
+    /** See Hooks.removeRing: unlinks the ring file at JVM exit (task 2j4). */
+    boolean removeRing() throws ReflectiveOperationException {
+        return (boolean) hooks.getMethod("removeRing").invoke(null);
+    }
+
     long ringDropped() throws ReflectiveOperationException {
         return (long) hooks.getMethod("ringDropped").invoke(null);
     }

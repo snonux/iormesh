@@ -10,6 +10,7 @@ package agentspool
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func javaEnv(t *testing.T, names ...string) []string {
@@ -100,6 +102,30 @@ func runRingStress(t *testing.T, cp, mode string, fn func(Record)) (*Ring, uint6
 		t.Fatal(err)
 	}
 	return r, written
+}
+
+// openWhileRunning opens the ring at path as soon as the agent created
+// and set it up, polling every millisecond; it fails the test if the
+// JVM exits (exited delivers) first.
+func openWhileRunning(t *testing.T, path string, exited <-chan error) *Ring {
+	t.Helper()
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for {
+		r, err := Open(path)
+		if err == nil {
+			t.Cleanup(func() { _ = r.Close() })
+			return r
+		}
+		if !errors.Is(err, ErrNotReady) && !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-exited:
+			t.Fatalf("the JVM exited (%v) before its ring %s could be opened", err, path)
+		case <-tick.C:
+		}
+	}
 }
 
 // startJava starts cmd and returns its stdin and a channel of its stdout
@@ -189,7 +215,9 @@ func (s *stressCheck) record(rec Record) {
 }
 
 // TestJavaAgentWorkload runs the workload's file-basic scenario under
-// the agent with a spool directory and reads the ring it leaves behind.
+// the agent with a spool directory and reads its ring: mapped while the
+// JVM runs, as a tracer does, since the agent's shutdown hook unlinks
+// the file after its last watermark (task 2j4) — which the test checks.
 func TestJavaAgentWorkload(t *testing.T) {
 	env := javaEnv(t, "IORMESH_AGENT_JAR", "IORMESH_WORKLOAD_JAR")
 	dir := t.TempDir()
@@ -197,11 +225,22 @@ func TestJavaAgentWorkload(t *testing.T) {
 	cmd := exec.Command("java", "-javaagent:"+env[0]+"=spool="+dir+",debug="+debug,
 		"-jar", env[1], "file-basic")
 	cmd.Stderr = io.Discard
-	if out, err := cmd.Output(); err != nil {
-		t.Fatalf("file-basic under the agent: %v: %s", err, out)
+	var out strings.Builder
+	cmd.Stdout = &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
 	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
 	pid := cmd.Process.Pid
-	r := openRing(t, filepath.Join(dir, strconv.Itoa(pid)+".ring"))
+	path := filepath.Join(dir, strconv.Itoa(pid)+".ring")
+	r := openWhileRunning(t, path, exited)
+	if err := <-exited; err != nil {
+		t.Fatalf("file-basic under the agent: %v: %s", err, out.String())
+	}
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Errorf("the JVM left its ring behind: %v", err)
+	}
 	if r.Header().PID != uint64(pid) {
 		t.Errorf("header pid %d, want %d", r.Header().PID, pid)
 	}

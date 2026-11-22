@@ -79,6 +79,14 @@ type jvm struct {
 	// tid to its name, for the carrier of a virtual thread's I/O.
 	threads map[uint64]agentspool.Thread
 	names   map[int32]string
+	// virtual holds, per virtual thread in threads, the latest exit of
+	// its records (or the watermark when its THREAD came), CLOCK_
+	// MONOTONIC: prune drops the thread once that is Retain behind the
+	// watermark, with its brackets (task 2j4) — a virtual thread per
+	// request would otherwise cost an entry per request for the session.
+	// nextSweep is the watermark from which prune looks at them again.
+	virtual   map[uint64]uint64
+	nextSweep uint64
 	// renames lists each renamed thread's later names (task fe4),
 	// in the order the agent wrote them (javaclass.go).
 	renames map[uint64][]rename
@@ -101,6 +109,10 @@ type jvm struct {
 	// for its http events' envelope.
 	comm string
 	inc  uint64
+	// exited is when the process's thread group died (boot clock, 0:
+	// alive), as JavaJoin.Exited reported it; retire then closes and
+	// removes the ring once nothing can ask for it any more.
+	exited uint64
 }
 
 // incarnation is the JVM's pid_incarnation: its start from /proc, or,
@@ -115,7 +127,7 @@ func (v *jvm) incarnation() uint64 {
 func newJVM(r AgentRing, pid uint32, start, createdMono, created uint64) *jvm {
 	return &jvm{ring: r, pid: pid, start: start, created: created, createdMono: createdMono,
 		hooks: map[int32]hookInfo{}, threads: map[uint64]agentspool.Thread{},
-		names: map[int32]string{}, renames: map[uint64][]rename{},
+		names: map[int32]string{}, renames: map[uint64][]rename{}, virtual: map[uint64]uint64{},
 		frames: map[uint64]agentspool.Stack{}, stacks: map[uint64][]uint64{},
 		classes: map[uint64]agentspool.Class{}, classIDs: map[uint64]uint64{},
 		brackets: map[int32]*bracketList{}}
@@ -214,9 +226,22 @@ func (v *jvm) otherRecord() {
 // that thread's list.
 func (j *JavaJoin) bracket(v *jvm, b *agentspool.Bracket) {
 	j.stats.Brackets++
+	v.touch(b.ThreadID, b.ExitMono)
 	if b.KTID > 0 {
 		v.addBracket(b)
 		v.countAfterProbe(*b)
+	}
+}
+
+// touch notes a record of thread id that exited at mono: a virtual
+// thread's entry is kept Retain past it (jvm.virtual). A JVM without
+// virtual threads pays one length check per record.
+func (v *jvm) touch(id, mono uint64) {
+	if len(v.virtual) == 0 {
+		return
+	}
+	if last, ok := v.virtual[id]; ok && mono > last {
+		v.virtual[id] = mono
 	}
 }
 
@@ -238,6 +263,7 @@ func (j *JavaJoin) record(v *jvm, rec agentspool.Record) error {
 	case agentspool.Bracket:
 		j.bracket(v, &r)
 	case agentspool.HTTP:
+		v.touch(r.ThreadID, r.ExitMono) // its event names the thread later
 		if r.AsyncMark {
 			if v.asyncFrom == 0 || r.ExitMono < v.asyncFrom {
 				v.asyncFrom = r.ExitMono
@@ -246,6 +272,7 @@ func (j *JavaJoin) record(v *jvm, rec agentspool.Record) error {
 		}
 		j.addHTTP(v, r)
 	case agentspool.DNS:
+		v.touch(r.ThreadID, r.ExitMono)
 		j.addDNS(v, r)
 	}
 	return nil
@@ -256,8 +283,15 @@ func (j *JavaJoin) record(v *jvm, rec agentspool.Record) error {
 // thread's later brackets — one row per name change, none for a record
 // repeating the name in force. Only a platform thread's tid names a
 // carrier: a virtual thread's is just where it happened to start. A
-// carrier is named after its latest name.
+// carrier is named after its latest name. A virtual thread's record
+// keeps its entry Retain longer (touch); one whose entry prune dropped
+// is a first record again, so a virtual thread idle past Retain gets a
+// second, identical table row when its agent describes it again
+// (Hooks.describeDue).
 func (j *JavaJoin) thread(v *jvm, r agentspool.Thread) error {
+	if r.Virtual {
+		v.virtual[r.ID] = max(v.virtual[r.ID], v.watermark)
+	}
 	if first, ok := v.threads[r.ID]; ok {
 		if !v.rename(first, r.Name) {
 			return nil
@@ -288,7 +322,8 @@ func (v *jvm) addBracket(b *agentspool.Bracket) {
 // the list's front instead of moving the kept ones down: a busy thread
 // keeps Retain's worth of brackets (10 s, up to millions), and a drain
 // every 50 ms copying all of them would cost more than the join itself
-// (task ud4).
+// (task ud4). The virtual threads go with their last brackets
+// (pruneVirtual).
 func (v *jvm) prune(retain uint64) {
 	if v.watermark <= retain {
 		return
@@ -301,6 +336,30 @@ func (v *jvm) prune(retain uint64) {
 			delete(v.brackets, tid)
 		case i > 0:
 			bl.dropFront(i)
+		}
+	}
+	if v.watermark >= v.nextSweep {
+		v.pruneVirtual(cut)
+		v.nextSweep = v.watermark + retain/8
+	}
+}
+
+// pruneVirtual forgets the virtual threads whose latest record exited
+// before cut: their brackets are gone, and no record still to come
+// names them unless the thread runs again — and then its agent describes
+// it again first (Hooks.describeDue: a virtual thread's THREAD is
+// rewritten after REDESCRIBE_NS without one, less than the default
+// Retain), so its I/O keeps its carrier flag. An agent older than that
+// leaves such a thread unknown: no name, no carrier flag, and its
+// parking hooks' brackets join nothing (mayHaveParked). Platform threads
+// stay: few, and their tid names a carrier. The sweep walks every
+// virtual thread, so prune runs it only every Retain/8 of watermark.
+func (v *jvm) pruneVirtual(cut uint64) {
+	for id, last := range v.virtual {
+		if last < cut {
+			delete(v.virtual, id)
+			delete(v.threads, id)
+			delete(v.renames, id)
 		}
 	}
 }

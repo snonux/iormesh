@@ -87,7 +87,8 @@ func TestDirRejects(t *testing.T) {
 			edit: func(t *testing.T, dir string) {
 				corruptMagic(t, filepath.Join(dir, "4242.ring"))
 			}},
-		"process gone": {uid: uint32(os.Getuid()), alive: false},
+		// A ring whose process is gone is removed, not reported
+		// (TestDirRemovesDeadRings).
 		"pid mismatch": {uid: uint32(os.Getuid()), alive: true, edit: func(t *testing.T, dir string) {
 			mustRename(t, filepath.Join(dir, "4242.ring"), filepath.Join(dir, "4241.ring"))
 		}},

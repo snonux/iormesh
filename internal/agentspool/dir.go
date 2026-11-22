@@ -103,17 +103,29 @@ func setSpoolMode(fd int, path string) error {
 // owner other than its JVM's, a pid that does not match its name — is
 // reported once in skipped and never opened again. Files are remembered
 // by name and inode, so a reused pid's new ring (the agent replaces a
-// stale file, never reuses it) is opened too. err is a failure to read
-// the directory itself.
+// stale file, never reuses it) is opened too. A ring whose process is
+// gone is removed instead (task 2j4, remove.go): its JVM died without
+// its shutdown hook, or while no session ran, and nothing can verify,
+// read or delete it otherwise — a failed removal is reported in skipped.
+// err is a failure to read the directory itself.
 func (d *Dir) Scan() (rings []*Ring, skipped []error, err error) {
 	entries, err := os.ReadDir(d.path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("spool: %w", err)
 	}
 	for _, e := range entries {
-		key, ok := ringKey(e)
+		key, ino, ok := ringKey(e)
 		if !ok || d.done[key] {
 			continue
+		}
+		if pid, ok := ringPID(e.Name()); ok {
+			if _, alive := d.owner(pid); !alive {
+				d.done[key] = true
+				if err := d.removeDead(e.Name(), pid, ino); err != nil {
+					skipped = append(skipped, err)
+				}
+				continue
+			}
 		}
 		r, err := d.open(e.Name())
 		if errors.Is(err, ErrNotReady) {
@@ -129,21 +141,28 @@ func (d *Dir) Scan() (rings []*Ring, skipped []error, err error) {
 	return rings, skipped, nil
 }
 
-// ringKey names a directory entry by name and inode; ok is false for a
-// name that is not *.ring or an entry gone since the listing.
-func ringKey(e os.DirEntry) (string, bool) {
+// ringKey names a directory entry by name and inode (lstat: a symlink's
+// own) and returns the inode; ok is false for a name that is not *.ring
+// or an entry gone since the listing.
+func ringKey(e os.DirEntry) (key string, ino uint64, ok bool) {
 	if !strings.HasSuffix(e.Name(), ".ring") {
-		return "", false
+		return "", 0, false
 	}
 	info, err := e.Info()
 	if err != nil {
-		return "", false
+		return "", 0, false
 	}
-	var ino uint64
 	if st, ok := info.Sys().(*syscall.Stat_t); ok {
 		ino = st.Ino
 	}
-	return e.Name() + "\x00" + strconv.FormatUint(ino, 10), true
+	return e.Name() + "\x00" + strconv.FormatUint(ino, 10), ino, true
+}
+
+// ringPID is the pid a <pid>.ring name names; ok is false for any other
+// name.
+func ringPID(name string) (uint64, bool) {
+	pid, err := strconv.ParseUint(strings.TrimSuffix(name, ".ring"), 10, 32)
+	return pid, err == nil && pid != 0
 }
 
 // open opens one ring and checks that its JVM wrote it: the file belongs
@@ -151,12 +170,13 @@ func ringKey(e os.DirEntry) (string, bool) {
 // before anything is mapped — and the header names the same pid. A file
 // another user planted for someone else's pid would otherwise put
 // made-up Java frames on that process's events. A JVM gone before the
-// scan cannot be checked, so its ring is never read: a JVM that lives
-// less than one scan interval (50 ms) after creating its ring stays
-// attribution none.
+// scan cannot be checked, so its ring is never read (Scan removes it): a
+// JVM that lives less than one scan interval (50 ms) after creating its
+// ring stays attribution none. One gone between Scan's check and the
+// open is refused here, and its ring is left to a later session's scan.
 func (d *Dir) open(name string) (*Ring, error) {
-	pid, err := strconv.ParseUint(strings.TrimSuffix(name, ".ring"), 10, 32)
-	if err != nil || pid == 0 {
+	pid, ok := ringPID(name)
+	if !ok {
 		return nil, fmt.Errorf("spool: %s: not <pid>.ring: %w", name, ErrNotRing)
 	}
 	r, err := OpenOwned(filepath.Join(d.path, name), func(fileUID uint32) error {

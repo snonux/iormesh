@@ -145,7 +145,7 @@ func (s *session) handle(rec any) error {
 	case *types.ProcessExitEvent:
 		if r.GroupDead != 0 {
 			delete(s.live, r.Pid)
-			s.java.exited(r.Pid)
+			s.java.exited(r.Pid, r.Time)
 		}
 	case *types.JavaMarkEvent:
 		// The Java join's, not the correlator's: it pairs the mark with

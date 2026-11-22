@@ -45,6 +45,9 @@ public final class RingTest {
                 new AgentTests.Case("ring/virtual thread flagged", RingTest::virtualThread),
                 new AgentTests.Case("ring/watermark waits for closing", RingTest::watermark),
                 new AgentTests.Case("ring/release discards", RingTest::release),
+                new AgentTests.Case("ring/exit removes only its own file", RingTest::removeOwn),
+                new AgentTests.Case("ring/idle virtual thread described again",
+                        RingTest::redescribe),
                 // Last: it moves the dictionary generation for the JVM.
                 new AgentTests.Case("ring/later reader resyncs", RingTest::resync),
                 new AgentTests.Case("ring/partial resend holds watermarks",
@@ -568,6 +571,94 @@ public final class RingTest {
         check(Hooks.ring == null, "no ring");
         check(Hooks.claim(), "claim is free again");
         delete(dir);
+    }
+
+    /**
+     * At JVM exit the agent unlinks its ring (task 2j4): the file it
+     * created goes, the mapping stays writable; a new ring under the
+     * name (another inode) or a symlink planted there is left alone.
+     */
+    static void removeOwn() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
+        ByteBuffer b = map(r.path());
+        check(r.removeOwn(), "own file removed");
+        check(!Files.exists(r.path(), java.nio.file.LinkOption.NOFOLLOW_LINKS), "file gone");
+        check(r.bracket(1, 1, 1, 2, 0, 1), "writes go on into the unlinked ring");
+        equal(Ring.BRACKET, (int) (b.getLong(Ring.DATA) >>> 32), "the mapping sees them");
+        Ring other = Ring.create(dir, Ring.MIN_CAPACITY);   // same name, new inode
+        check(!r.removeOwn(), "another inode's file reported kept");
+        check(Files.exists(other.path()), "another inode's file kept");
+        check(other.removeOwn(), "the new ring removes its own");
+        Files.createSymbolicLink(r.path(), dir.resolve("elsewhere"));
+        check(!r.removeOwn(), "symlink reported kept");
+        check(Files.isSymbolicLink(r.path()), "symlink kept");
+        delete(dir);
+    }
+
+    /**
+     * A virtual thread describes itself again at its first bracket
+     * redescribeNs after its last THREAD (task 2j4): the tracer forgets
+     * an idle virtual thread and must learn again that it is virtual. A
+     * platform thread never does. Skipped on 17–20.
+     */
+    static void redescribe() throws Exception {
+        java.lang.reflect.Method ofVirtual;
+        try {
+            ofVirtual = Thread.class.getMethod("ofVirtual");
+        } catch (NoSuchMethodException e) {
+            return;
+        }
+        Runnable body = () -> {
+            Hooks.enter(3);
+            Hooks.exit(3);
+            Hooks.enter(3);
+            Hooks.exit(3);
+            try {
+                Thread.sleep(60);
+            } catch (InterruptedException e) {
+                throw new IllegalStateException(e);
+            }
+            Hooks.enter(3);
+            Hooks.exit(3);
+        };
+        Object builder = ofVirtual.invoke(null);
+        java.lang.reflect.Method start = Class.forName("java.lang.Thread$Builder")
+                .getMethod("start", Runnable.class);
+        equal(List.of(Ring.THREAD, Ring.BRACKET, Ring.BRACKET, Ring.THREAD, Ring.BRACKET),
+                redescribeRecords(() -> ((Thread) start.invoke(builder, body)).join()),
+                "virtual thread's records");
+        equal(List.of(Ring.THREAD, Ring.BRACKET, Ring.BRACKET, Ring.BRACKET),
+                redescribeRecords(() -> {
+                    Thread t = new Thread(body, "ring-platform");
+                    t.start();
+                    t.join();
+                }), "platform thread's records");
+    }
+
+    /** A step that may throw (redescribeRecords). */
+    private interface Step {
+        void run() throws Exception;
+    }
+
+    /** The record types run writes into a fresh ring, redescribeNs 50 ms. */
+    private static List<Integer> redescribeRecords(Step run) throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
+        long old = Hooks.redescribeNs;
+        Hooks.configure(5, false, false);
+        Hooks.redescribeNs = 50_000_000L;
+        Hooks.ring = r;
+        try {
+            run.run();
+        } finally {
+            Hooks.ring = null;
+            Hooks.redescribeNs = old;
+            Hooks.configure(5, true, false);
+        }
+        List<Integer> types = records(map(r.path())).stream().map(Rec::type).toList();
+        delete(dir);
+        return types;
     }
 
     /**
