@@ -3626,8 +3626,8 @@ rsync -rt --timeout=60 --fsync --remove-source-files --max-size=1073741824 \
   fsynced on the controller, so a crash or power loss right
   after a collect cannot lose a segment the server already
   deleted (task ii4); rsync does not sync the local directory,
-  so the new name itself is not yet covered. A file over 1 GiB (`--max-size`, the pod path's
-  `k8s.MaxSegmentSize`) is skipped and stays on the server, so
+  so the new name itself is not yet covered. A file over 1 GiB
+  (`--max-size`, the pod path's `k8s.MaxSegmentSize`) is skipped and stays on the server, so
   `rm` lists it as a leftover (task gi4). Collect keeps no
   state: run repeatedly during a live session, each run moves
   what was published since the last, and between runs the
@@ -5762,7 +5762,8 @@ depends on:
    ready -project P -remove -- NAME…`, also after a stream
    refused part-way — but only what is durable: a failed file
    sync drops that segment, a failed directory sync all of them,
-   and they stay on the tracer for the next collect (task ii4). `Debug` reads the pod (`get pod -o json`), refuses it
+   and they stay on the tracer for the next collect (task ii4).
+   `Debug` reads the pod (`get pod -o json`), refuses it
    without the `tracefs` hostPath and a `sizeLimit`ed
    `iormesh-traces` emptyDir (naming the prepare patch), with
    `hostUsers: false`, without the app container, or with an

@@ -197,7 +197,9 @@ func (s SSH) Fetch(ctx context.Context, remoteDir, localDir string) error {
 //     not localDir's entry for it, and offers no directory sync before
 //     its delete, so the rename itself can still be lost to a crash
 //     right after a transfer — a gap the pod path (k8s.Unpack, which
-//     syncs the directory) does not have;
+//     syncs the directory) does not have. --fsync is a receiver
+//     option and is never passed to the server's rsync, so servers
+//     older than 3.2.4 (Rocky 9 ships 3.2.3) are unaffected;
 //   - --remove-source-files: delete a remote file once transferred;
 //   - --max-size (maxFetchSize): skip a file over the cap, so one
 //     oversized segment in ready/ cannot fill the controller's disk; a
