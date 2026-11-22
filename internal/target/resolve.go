@@ -86,6 +86,30 @@ func IsTracer(exe, selfExe string) bool {
 // every service it spawns. A port only a manager holds is an error of
 // its own — the service is not running.
 func (p ProcFS) ListenOwners(port uint16) ([]uint32, error) {
+	hs, err := p.ListenHolders(port)
+	if err != nil {
+		return nil, err
+	}
+	pids := make([]uint32, len(hs))
+	for i, h := range hs {
+		pids[i] = h.PID
+	}
+	return pids, nil
+}
+
+// Holder is a process holding a listening socket, as one listing saw it:
+// its pid and the start time read just before its fd table. A port
+// session adopts the holder only while the pid still has that start time
+// (decision #23, task qj4): a pid reused after the listing by a process
+// that does not hold the port is not the holder.
+type Holder struct {
+	PID     uint32
+	StartNS uint64
+}
+
+// ListenHolders is ListenOwners with each owner's start time (Holder),
+// the same rules and errors.
+func (p ProcFS) ListenHolders(port uint16) ([]Holder, error) {
 	inodes := map[string]bool{}
 	for _, f := range []string{"tcp", "tcp6"} {
 		if err := listenInodes(filepath.Join(p.Root, "net", f), port, inodes); err != nil {
@@ -102,12 +126,18 @@ func (p ProcFS) ListenOwners(port uint16) ([]uint32, error) {
 	if len(owners) == 0 {
 		return nil, fmt.Errorf("%w: no visible process owns the listener on TCP port %d", ErrSpec, port)
 	}
-	apps := slices.DeleteFunc(slices.Clone(owners), func(pid uint32) bool {
-		return IsServiceManager(p.Exe(pid))
-	})
+	var apps []Holder
+	var managers []uint32
+	for _, h := range owners {
+		if IsServiceManager(p.Exe(h.PID)) {
+			managers = append(managers, h.PID)
+		} else {
+			apps = append(apps, h)
+		}
+	}
 	if len(apps) == 0 {
 		return nil, fmt.Errorf("%w: only the service manager (pid %v) holds the listener on TCP port %d "+
-			"(socket activation; the service is not running)", ErrSpec, owners, port)
+			"(socket activation; the service is not running)", ErrSpec, managers, port)
 	}
 	return apps, nil
 }
@@ -144,27 +174,42 @@ func listenInodes(table string, port uint16, inodes map[string]bool) error {
 }
 
 // socketOwners returns the processes with an fd on one of the socket
-// inodes. Processes that vanish or hide their fds are skipped.
-func (p ProcFS) socketOwners(inodes map[string]bool) ([]uint32, error) {
+// inodes. Processes that vanish, hide their fds or have no readable start
+// time are skipped. The start time is read before the fd table: if the
+// pid is reused in between, the fds are the new process's and the start
+// time the old one's, a mismatch adoption refuses (Holder) rather than a
+// stranger passed off as the holder.
+func (p ProcFS) socketOwners(inodes map[string]bool) ([]Holder, error) {
 	pids, err := p.PIDs()
 	if err != nil {
 		return nil, err
 	}
-	var owners []uint32
+	var owners []Holder
 	for _, pid := range pids {
-		dir := filepath.Join(p.Root, strconv.FormatUint(uint64(pid), 10), "fd")
-		fds, err := os.ReadDir(dir)
-		if err != nil {
+		st, err := p.Stat(pid)
+		if err != nil || st.StartNS == 0 {
 			continue
 		}
-		for _, fd := range fds {
-			link, err := os.Readlink(filepath.Join(dir, fd.Name()))
-			ino, ok := strings.CutPrefix(link, "socket:[")
-			if err == nil && ok && inodes[strings.TrimSuffix(ino, "]")] {
-				owners = append(owners, pid)
-				break
-			}
+		if p.holdsSocket(pid, inodes) {
+			owners = append(owners, Holder{PID: pid, StartNS: st.StartNS})
 		}
 	}
 	return owners, nil
+}
+
+// holdsSocket reports whether pid has an fd on one of the socket inodes.
+func (p ProcFS) holdsSocket(pid uint32, inodes map[string]bool) bool {
+	dir := filepath.Join(p.Root, strconv.FormatUint(uint64(pid), 10), "fd")
+	fds, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, fd := range fds {
+		link, err := os.Readlink(filepath.Join(dir, fd.Name()))
+		ino, ok := strings.CutPrefix(link, "socket:[")
+		if err == nil && ok && inodes[strings.TrimSuffix(ino, "]")] {
+			return true
+		}
+	}
+	return false
 }

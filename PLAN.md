@@ -2809,17 +2809,27 @@ deferred.
   adopted only if it runs the same executable (" (deleted)"
   ignored, so a package update still matches) under the same
   effective uid as a process the session started with: the same
-  port alone is not the same app. It gets an `attach` event of
-  its own incarnation and the session goes on; stderr names it.
-  No match within the grace ends the session `targets_exited`,
-  stderr saying no new owner appeared. A service manager — a
-  process whose executable is named `systemd`, pid 1 or a user
-  manager, holding a socket-activated listener — is never a
-  target, at start or later: tracing it would follow every
-  service it spawns. A port only the manager holds fails the
-  start (the service is not running). A new owner that listens
-  while the old one still runs (an overlapping restart) is
-  adopted once the old one exits, within the grace.
+  port alone is not the same app. Task qj4 tightens both halves:
+  only start holders under the uid of the earliest-started
+  holder (the one that most likely bound the port) are
+  remembered, so a process that merely inherited the listener fd
+  under another uid does not widen what is accepted; and a
+  holder is adopted only while its pid still has the start time
+  the port listing read with its fd table, so a pid reused in
+  between is never mistaken for the holder. An adopted holder
+  gets an `attach` event of its own incarnation and the session
+  goes on; stderr names it. No match within the grace ends the
+  session `targets_exited`, stderr saying no new owner appeared.
+  A service manager — a process whose executable is named
+  `systemd`, pid 1 or a user manager, holding a socket-activated
+  listener — is never a target, at start or later: tracing it
+  would follow every service it spawns. A port only the manager
+  holds fails the start (the service is not running) — also for
+  `expand -apply` on an idle socket-activated service: wake the
+  service (one request) and deploy again, or enroll it by
+  `-pattern`. A new owner that listens while the old one still
+  runs (an overlapping restart) is adopted once the old one
+  exits, within the grace.
 - **#9 Capture policy for argv and env** — argv is in, but it
   is not harmless: command lines carry passwords and tokens
   (`-Dpassword=…`, `--token …`). Argv is recorded through the

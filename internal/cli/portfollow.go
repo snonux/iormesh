@@ -22,12 +22,13 @@ const (
 	portFollowEvery = time.Second
 )
 
-// listenOwners resolves the port's owners (target.ProcFS.ListenOwners,
-// never a service manager); procOwner reads a process's owner key
+// listenOwners resolves the port's owners, each with the start time the
+// listing saw (target.ProcFS.ListenHolders, never a service manager);
+// procOwner reads a process's owner key
 // (target.ProcFS.Owner). Variables like processAlive, so tests need no
 // /proc.
 var (
-	listenOwners = func(port uint16) ([]uint32, error) { return target.HostProcFS().ListenOwners(port) }
+	listenOwners = func(port uint16) ([]target.Holder, error) { return target.HostProcFS().ListenHolders(port) }
 	procOwner    = func(pid uint32) (target.Owner, error) { return target.HostProcFS().Owner(pid) }
 )
 
@@ -36,9 +37,10 @@ type portFollow struct {
 	port  uint16
 	grace time.Duration
 	// owners are the keys (executable, effective uid) of the processes
-	// the session started with: a later holder of the port is adopted
-	// only if it is one of them again. Empty when none could be read —
-	// then nothing is recognised and the session ends as before.
+	// the session started with, under the original holder's uid
+	// (remember): a later holder of the port is adopted only if it is
+	// one of them again. Empty when none could be read — then nothing
+	// is recognised and the session ends as before.
 	owners map[target.Owner]bool
 	// since is when the last target went, zero while one is traced; last
 	// is the last resolve. now is the clock, a field so tests set it.
@@ -56,9 +58,28 @@ func newPortFollow(cfg runConfig) *portFollow {
 
 // remember records the owner keys of the processes the session starts
 // with. One that cannot be read is no key: its restart is not followed.
+// Only keys under the original holder's uid count (task qj4): the
+// original is the earliest-started holder, the one that most likely
+// bound the port; a process under another uid that merely inherited the
+// listener fd (a root helper, a worker that dropped privileges) would
+// otherwise widen which programs a later adoption accepts.
 func (f *portFollow) remember(pids []uint32) {
+	keys := map[uint32]target.Owner{}
+	var first uint64
+	var uid uint32
 	for _, pid := range pids {
-		if o, err := procOwner(pid); err == nil {
+		o, err := procOwner(pid)
+		start := processStart(pid)
+		if err != nil || start == 0 {
+			continue
+		}
+		keys[pid] = o
+		if first == 0 || start < first {
+			first, uid = start, o.UID
+		}
+	}
+	for _, o := range keys {
+		if o.UID == uid {
 			f.owners[o] = true
 		}
 	}
@@ -106,12 +127,12 @@ func (s *session) followPort() (bool, error) {
 		return false, nil
 	}
 	f.last = now
-	pids, err := listenOwners(f.port)
+	holders, err := listenOwners(f.port)
 	if err != nil {
 		return false, nil // nothing (visible) listens yet: keep waiting
 	}
-	for _, pid := range pids {
-		if err := s.adoptOwner(pid); err != nil {
+	for _, h := range holders {
+		if err := s.adoptOwner(h); err != nil {
 			return false, err
 		}
 	}
@@ -121,17 +142,21 @@ func (s *session) followPort() (bool, error) {
 	return false, nil
 }
 
-// adoptOwner traces pid, a holder of the port, if its owner key is one
+// adoptOwner traces h, a holder of the port, if its owner key is one
 // the session started with. Like the start scan's adoptRunning it reads
 // the identity first and re-checks liveness after the insert (addRunning),
 // then seeds the correlator, which writes the process's attach event —
-// a new incarnation of the port's app. A holder of another program or
+// a new incarnation of the port's app. The identity must have the start
+// time the listing saw (task qj4): a pid reused since by a process that
+// does not hold the port is skipped — the next resolve lists whoever
+// holds it — and addRunning's re-check ties the owner key read in
+// between to that same incarnation. A holder of another program or
 // user is named once on stderr and left alone.
-func (s *session) adoptOwner(pid uint32) error {
-	f := s.follow
+func (s *session) adoptOwner(h target.Holder) error {
+	f, pid := s.follow, h.PID
 	id := attachIdentity(pid)
-	if id.StartNS == 0 {
-		return nil // gone already
+	if id.StartNS == 0 || id.StartNS != h.StartNS {
+		return nil // gone already, or no longer the listed holder
 	}
 	if o, err := procOwner(pid); err != nil || !f.owners[o] {
 		if !f.refused[pid] {

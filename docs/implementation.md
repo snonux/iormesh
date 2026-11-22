@@ -1251,13 +1251,16 @@ scenarios landing first (principle #1).
    socket-activated listener). Task mh4 follows the port across
    restarts (decision #23, `internal/cli/portfollow.go`): the
    session keeps each start owner's `target.Owner` (exe without
-   " (deleted)", effective uid); once its live set is empty,
+   " (deleted)", effective uid) whose uid is the earliest-started
+   owner's (task qj4); once its live set is empty,
    `session.ended` re-resolves the port every
-   `portFollowEvery` (1s) for `-listen-grace` (default 2m),
-   adopts a holder with a remembered key (`AddTarget`, the
-   liveness re-check of `addRunning`, `Correlator.Seed` → an
-   `attach` of the new incarnation) and names refused holders
-   once on stderr. No match within the grace ends the session
+   `portFollowEvery` (1s) for `-listen-grace` (default 2m) via
+   `ListenHolders` (each pid with the start time read before its
+   fd table), adopts a holder with a remembered key whose pid
+   still has the listed start time (`AddTarget`, the liveness
+   re-check of `addRunning`, `Correlator.Seed` → an `attach` of
+   the new incarnation) and names refused holders once on
+   stderr. No match within the grace ends the session
    `targets_exited` with a stderr line saying so; 0 ends at
    once. `TestListenPortFollowsRestart` (integration, root)
    kills and restarts an `edgepeer port-owner` on one port.

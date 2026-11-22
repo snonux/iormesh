@@ -15,8 +15,17 @@ event families `iormesh run -trace-families` adds (see
   create/exit, thread renames; PID incarnation ids so a reused
   PID is never confused with the old one. Sessions bound to a
   process-name pattern auto-detect restarts and follow the app
-  to its new PID. *Who exists, spawned by
-  whom, for how long.*
+  to its new PID. Sessions bound to a listening port
+  (`-listen-port`) follow the port to a restarted owner, within
+  `-listen-grace`, if it runs the same executable under the same
+  uid as the original owner and still is the process the port
+  listing saw (decision #23). A socket-activated port that only
+  systemd holds — the service is idle, not running — is refused
+  at start, also by `expand -apply`: systemd itself is never a
+  target, since tracing it would follow every service it
+  spawns. Wake the service (one request) and deploy again, or
+  enroll it by `-pattern`. *Who exists, spawned by whom, for
+  how long.*
 - **Filesystem** — the full syscall surface, not just data
   movement: open/close, read/write/pread, stat family, create
   (open O_CREAT, creat, mkdir), delete (unlink/rmdir), rename &
