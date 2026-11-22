@@ -26,8 +26,9 @@ import (
 // counter. Commands name the tid first; each prints one line: the records
 // the step sent, in order - "agg(trace fd count bytes first-last lat)" for
 // a folded record, "enter(trace fd time)" for a held call's owed enter,
-// "lost" for a failed reserve - then the hook's verdict for enter ("send" or
-// "hold") and exit ("send" or "fold"), or "-" when nothing happened.
+// preceded by "stack(time)" and "mark(time)" from the stubbed stack and
+// Java mark hooks (task ti4), "lost" for a failed reserve - then the
+// hook's verdict for enter ("send" or "hold") and exit ("send" or "fold"), or "-" when nothing happened.
 //
 // "enter T trace fd now" and "exit T trace ret now" call the generated
 // handlers' hooks ("enteri T trace fd ident now" with a file identity,
@@ -63,6 +64,7 @@ static int sim_drop, sim_full;
 static __u32 IORMESH_RW_AGGREGATE = 1;
 static union { struct fd_event fd; struct rw_aggregate_event agg; } sim_record;
 static char sim_out[512];
+static int sim_ctx;
 
 static void sim_print(const char *s) {
     if (sim_out[0])
@@ -131,6 +133,22 @@ static void ior_count_ringbuf_drop(void) {
     sim_print("lost");
 }
 
+// The enter-side hooks of stack.c and javamark.c, which a held call's owed
+// enter calls first: each prints its record's time.
+static __always_inline void iormesh_stack_on_enter(void *ctx, __u32 pid, __u32 tid, __u64 now) {
+    char line[48];
+    (void)pid;
+    (void)tid;
+    snprintf(line, sizeof(line), ctx == &sim_ctx ? "stack(%%llu)" : "stack-noctx(%%llu)", now);
+    sim_print(line);
+}
+
+static __always_inline void iormesh_java_mark_on_enter(__u32 pid, __u32 tid, __u64 now) {
+    char line[48];
+    snprintf(line, sizeof(line), pid == 77 && tid ? "mark(%%llu)" : "mark-bad(%%llu)", now);
+    sim_print(line);
+}
+
 %s
 
 int main(void) {
@@ -146,13 +164,13 @@ int main(void) {
         } else if (!strcmp(cmd, "enteri") && scanf("%%llu %%llu %%llu %%llu", &a, &b, &ident, &now) == 4) {
             sim_print(iormesh_rw_on_enter(77, tid, a, (__s32)b, ident, now) ? "send" : "hold");
         } else if (!strcmp(cmd, "exitn") && scanf("%%llu %%lld %%llu", &a, &ret, &now) == 3) {
-            sim_print(iormesh_rw_on_exit(77, tid, a, ret, now, 0) ? "send" : "shed");
+            sim_print(iormesh_rw_on_exit(&sim_ctx, 77, tid, a, ret, now, 0) ? "send" : "shed");
         } else if (!strcmp(cmd, "full")) {
             sim_full = tid;
         } else if (!strcmp(cmd, "enter") && scanf("%%llu %%llu %%llu", &a, &b, &now) == 3) {
             sim_print(iormesh_rw_on_enter(77, tid, a, (__s32)b, 0, now) ? "send" : "hold");
         } else if (!strcmp(cmd, "exit") && scanf("%%llu %%lld %%llu", &a, &ret, &now) == 3) {
-            sim_print(iormesh_rw_on_exit(77, tid, a, ret, now, 1) ? "send" : "fold");
+            sim_print(iormesh_rw_on_exit(&sim_ctx, 77, tid, a, ret, now, 1) ? "send" : "fold");
         } else if (!strcmp(cmd, "flush")) {
             iormesh_rw_flush(tid);
         } else if (!strcmp(cmd, "forget")) {
@@ -221,7 +239,7 @@ var rwaggScenarios = []rwaggScenario{
 	// and its key starts over.
 	{name: "an unfoldable held call is sent after the folded ones", steps: rwaggSteps(rwaggWarmup(4, 0), []rwaggStep{
 		{"enter 9 2 3 8000", "hold"}, {"exit 9 2 10 9000", "fold"},
-		{"enter 9 2 3 10000", "hold"}, {"exit 9 2 0 11000", "agg(2 3 1 10 8000-9000 1000) enter(2 3 10000) send"},
+		{"enter 9 2 3 10000", "hold"}, {"exit 9 2 0 11000", "agg(2 3 1 10 8000-9000 1000) stack(10000) mark(10000) enter(2 3 10000) send"},
 		{"enter 9 2 3 12000", "send"},
 		{"exit 9 2 10 13000", "send"},
 	}, []rwaggStep{
@@ -229,7 +247,7 @@ var rwaggScenarios = []rwaggScenario{
 		{"enter 9 2 3 16000", "send"},
 	})},
 	{name: "a slow held call is sent, not folded", steps: rwaggSteps(rwaggWarmup(4, 0), []rwaggStep{
-		{"enter 9 2 3 8000", "hold"}, {"exit 9 2 10 2000000", "enter(2 3 8000) send"},
+		{"enter 9 2 3 8000", "hold"}, {"exit 9 2 10 2000000", "stack(8000) mark(8000) enter(2 3 8000) send"},
 	})},
 	// A gap longer than the hot window ends the loop: the key's folded
 	// calls are sent and the late call is sent itself, as a new streak.
@@ -276,7 +294,7 @@ var rwaggScenarios = []rwaggScenario{
 	// keeps the entry.
 	{name: "stop freezes the sums", steps: rwaggSteps(rwaggWarmup(4, 0), []rwaggStep{
 		{"enter 9 2 3 8000", "hold"}, {"exit 9 2 10 9000", "fold"},
-		{"enter 9 2 3 10000", "hold"}, {"stop 1", "-"}, {"exit 9 2 10 11000", "enter(2 3 10000) send"},
+		{"enter 9 2 3 10000", "hold"}, {"stop 1", "-"}, {"exit 9 2 10 11000", "stack(10000) mark(10000) enter(2 3 10000) send"},
 		{"enter 9 2 3 12000", "send"}, {"exit 9 2 10 13000", "send"},
 		{"flush 9", "-"}, {"forget 9", "kept"},
 		{"stop 0", "-"}, {"flush 9", "agg(2 3 1 10 8000-9000 1000)"},
@@ -301,7 +319,7 @@ var rwaggScenarios = []rwaggScenario{
 	{name: "a flush inside a held call", steps: rwaggSteps(rwaggWarmup(4, 0), []rwaggStep{
 		{"enter 9 2 3 8000", "hold"}, {"exit 9 2 10 9000", "fold"},
 		{"enter 9 2 3 10000", "hold"}, {"flush 9", "agg(2 3 1 10 8000-9000 1000)"},
-		{"exit 9 2 10 11000", "enter(2 3 10000) send"},
+		{"exit 9 2 10 11000", "stack(10000) mark(10000) enter(2 3 10000) send"},
 	})},
 	// forget sends the thread's sums and removes its entry.
 	{name: "forget sends and removes", steps: rwaggSteps(rwaggWarmup(4, 0), []rwaggStep{
@@ -399,8 +417,20 @@ var rwaggMutations = map[string][2]string{
 		"    if (!hot) {",
 	},
 	"owed enter not sent": {
-		"        s->streak = 0;\n        iormesh_rw_send_held_enter(pid, tid, s->trace_id, s->fd, s->file_ident, enter_ns);",
+		"        s->streak = 0;\n        iormesh_rw_send_held_enter(ctx, pid, tid, s->trace_id, s->fd, s->file_ident, enter_ns);",
 		"        s->streak = 0;",
+	},
+	"owed enter without its Java mark": {
+		"    iormesh_java_mark_on_enter(pid, tid, enter_ns);\n",
+		"",
+	},
+	"owed enter without its stack": {
+		"    iormesh_stack_on_enter(ctx, pid, tid, enter_ns);\n",
+		"",
+	},
+	"owed enter's mark at the exit time": {
+		"    iormesh_java_mark_on_enter(pid, tid, enter_ns);\n",
+		"    iormesh_java_mark_on_enter(pid, tid, enter_ns + 1);\n",
 	},
 	"end time past the folded calls": {
 		"        iormesh_rw_send_all(st, tid);\n        s->last_ns = now;",

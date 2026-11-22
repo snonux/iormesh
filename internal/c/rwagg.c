@@ -138,16 +138,35 @@ static __always_inline void iormesh_rw_send_all(struct iormesh_rw_state *st, __u
     }
 }
 
+// The enter-side hooks of stack.c and javamark.c, included after this file
+// (they need nothing of it); the owed enter below calls them.
+static __always_inline void iormesh_stack_on_enter(void *ctx, __u32 pid, __u32 tid, __u64 now);
+static __always_inline void iormesh_java_mark_on_enter(__u32 pid, __u32 tid, __u64 now);
+
 // iormesh_rw_send_held_enter sends the enter record a held call owes once
 // its exit shows it cannot be folded, stamped with the call's own enter
 // time, so userspace pairs it with the exit that follows as usual (and the
 // restart fold, which matches by time, still finds it). fd and identity
 // come from the in-flight markers, not the slot, which a flush inside the
 // call may have freed.
-static __always_inline void iormesh_rw_send_held_enter(__u32 pid, __u32 tid, __u32 trace_id, __s32 fd,
-                                                       __u32 ident, __u64 enter_ns) {
-    struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(*ev), 0);
+//
+// The generated enter handler returned before its stack and Java mark
+// hooks when it held the call, so the owed enter sends both here, ahead of
+// its record and stamped with enter_ns, as the handler would have (task
+// ti4): else the last call of every hot Java read loop - its EOF read -
+// counted as JVM work and lost its native stack. Taking them at sys_exit
+// is exact: the user stack and the thread's innermost hooked native are
+// what they were at sys_enter, since the thread has not left the syscall.
+// ctx is the exit tracepoint's, which bpf_get_stackid takes alike. The
+// tcp_seq park is not made up for: the enter parked nothing to measure
+// from (docs/implementation.md, M4).
+static __always_inline void iormesh_rw_send_held_enter(void *ctx, __u32 pid, __u32 tid, __u32 trace_id,
+                                                       __s32 fd, __u32 ident, __u64 enter_ns) {
+    struct fd_event *ev;
 
+    iormesh_stack_on_enter(ctx, pid, tid, enter_ns);
+    iormesh_java_mark_on_enter(pid, tid, enter_ns);
+    ev = bpf_ringbuf_reserve(&event_map, sizeof(*ev), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
         return;
@@ -296,9 +315,11 @@ static __always_inline void iormesh_rw_fold(struct iormesh_rw_state *st, struct 
 
 // iormesh_rw_settle decides a call on its live key at exit (see
 // iormesh_rw_on_exit). The pending sums end at the last folded exit (their
-// end_time), so last_ns moves on only after they were sent.
-static __always_inline int iormesh_rw_settle(struct iormesh_rw_state *st, struct iormesh_rw_slot *s, __u32 pid,
-                                             __u32 tid, __s64 ret, __u64 enter_ns, __u64 now, __u32 held) {
+// end_time), so last_ns moves on only after they were sent. ctx is the exit
+// tracepoint's, for the owed enter's stack.
+static __always_inline int iormesh_rw_settle(void *ctx, struct iormesh_rw_state *st, struct iormesh_rw_slot *s,
+                                             __u32 pid, __u32 tid, __s64 ret, __u64 enter_ns, __u64 now,
+                                             __u32 held) {
     int hot = ret > 0 && now <= enter_ns + IORMESH_RW_HOT_NS;
 
     if (!held) {
@@ -310,7 +331,7 @@ static __always_inline int iormesh_rw_settle(struct iormesh_rw_state *st, struct
         iormesh_rw_send_all(st, tid);
         s->last_ns = now;
         s->streak = 0;
-        iormesh_rw_send_held_enter(pid, tid, s->trace_id, s->fd, s->file_ident, enter_ns);
+        iormesh_rw_send_held_enter(ctx, pid, tid, s->trace_id, s->fd, s->file_ident, enter_ns);
         return 1;
     }
     s->last_ns = now;
@@ -325,9 +346,10 @@ static __always_inline int iormesh_rw_settle(struct iormesh_rw_state *st, struct
 // so a shed exit never leaves them to the thread's next call. A sent call
 // that was hot extends its key's streak, any other resets it. A held call
 // that is not hot sends every pending sum of the thread, then the enter it
-// owes, then its exit. Once stopped, a held call is only sent.
-static __always_inline int iormesh_rw_on_exit(__u32 pid, __u32 tid, __u32 trace_id, __s64 ret, __u64 now,
-                                              int emits) {
+// owes (with its stack and Java mark), then its exit. Once stopped, a held
+// call is only sent. ctx is the exit handler's, passed on for the stack.
+static __always_inline int iormesh_rw_on_exit(void *ctx, __u32 pid, __u32 tid, __u32 trace_id, __s64 ret,
+                                              __u64 now, int emits) {
     struct iormesh_rw_state *st;
     struct iormesh_rw_slot *s;
     __u32 idx, held, ident;
@@ -353,8 +375,8 @@ static __always_inline int iormesh_rw_on_exit(__u32 pid, __u32 tid, __u32 trace_
     // freed the slot or another key took it: the call can only be sent.
     if (iormesh_rw_stopped() || s->trace_id != trace_id) {
         if (held)
-            iormesh_rw_send_held_enter(pid, tid, trace_id, fd, ident, enter_ns);
+            iormesh_rw_send_held_enter(ctx, pid, tid, trace_id, fd, ident, enter_ns);
         return 1;
     }
-    return iormesh_rw_settle(st, s, pid, tid, ret, enter_ns, now, held);
+    return iormesh_rw_settle(ctx, st, s, pid, tid, ret, enter_ns, now, held);
 }

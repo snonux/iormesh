@@ -15,7 +15,8 @@ import "strings"
 // probe set, and read the ring buffer (M1 steps 4 and 5; process-tree
 // following and the exec watch, M2 steps 1–2; every event family, M2 step
 // 7; native stacks, M2 step 9; the Java mark's uprobes on a running JVM, M3
-// task td4; no skipped runs on a shared CPU, task 8e4; the tcp_sock
+// task td4, kept on a read the fold held, task ti4; no skipped runs on a
+// shared CPU, task 8e4; the tcp_sock
 // sequence fields, M4 task ve4; the data calls' tcp_seq, M4 task xe4; a
 // tracer in its own PID namespace, M7 task 4f4; a stale socket owner after
 // a lost TCP_CLOSE run, and a pod-mode connect's state records, task if4;
@@ -54,6 +55,7 @@ func RootBPFTests() []string {
 		"TestKernelSignalHasNoSender",
 		"TestNativeStacksOnlyWhenAsked",
 		"TestJavaMarkNamesTheNative",
+		"TestJavaMarkOnHeldRead",
 		"TestFollowForkExec",
 		"TestUntracedForkNotFollowed",
 		"TestExecWatchAdoptAndIgnore",

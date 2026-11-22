@@ -1643,6 +1643,9 @@ scenarios landing first (principle #1).
      the committed file). It sends a 40-byte `stack_event` (tid,
      the enter's own `now`, the id or the walk's negative errno,
      the image tag `mm->arg_start`) ahead of the enter record.
+     A read or write the fold held and then sends alone gets its
+     stack (and Java mark) from rwagg.c's owed enter at
+     `sys_exit` instead (`TestHeldEnterCarriesMarkAndStack`).
      `IORMESH_NATIVE_STACKS` is a load-time constant, so with the
      flag off the verifier prunes the call and userspace shrinks
      `stack_map` to one entry (it is preallocated, ~4.3 MB). User stacks only: at
@@ -1760,7 +1763,10 @@ scenarios landing first (principle #1).
     every other enter hook (`ior_on_syscall_enter*` in filter.c
     flush the thread first); every read or write sent as a single
     event sends all the thread's pending sums first (a held call
-    that turns out not hot: the sums, the enter it owes, its exit);
+    that turns out not hot: the sums, the enter it owes, its exit;
+    the owed enter sends the native stack and Java mark records
+    the held enter skipped, stamped with its enter time — the
+    thread is still in the same native at `sys_exit`, task ti4);
     100 ms of span or the count cap, checked when a call folds; a
     fifth key (LRU); `signal_generate` for a signal the thread sent
     itself (never a kernel-raised one, which may fire in an
@@ -2479,7 +2485,10 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
    enter handler), the root test `TestJavaMarkNamesTheNative` (a
    real JVM: its FileInputStream open and read carry `open0`'s
    and `readBytes`' cookies with an entry stamp, while `info0`'s
-   `/proc` reads carry none), `agentspool` dir tests (symlink,
+   `/proc` reads carry none), the root test
+   `TestJavaMarkOnHeldRead` (a 16-byte FileInputStream loop with
+   the fold on: the EOF read the fold held still carries
+   `readBytes`' mark, task ti4), `agentspool` dir tests (symlink,
    hard link, foreign owner, pid mismatch), and the integration
    test `TestJavaMethodFlow`: `method-flow` under the agent
    satisfies its `expect-pending.json`, every declared op on its
@@ -4204,7 +4213,9 @@ not, and share `bpf_prog_active` with the dispatchers (8e4).
   at its enter on a hot streak parks nothing, so if it then
   turns out slow (> 1 ms, the read waiting on the peer after a
   burst) it is sent alone without `tcp_seq`; parking held
-  enters too would put the walk back on every folded call. A
+  enters too would put the walk back on every folded call. (Its
+  native stack and Java mark are kept: the owed enter sends
+  them, rwagg.c.) A
   stale park (an exit missed) is still exact when
   the check holds; the residue is a field *assignment* inside
   the window (connect, disconnect, `TCP_REPAIR`) whose jump
