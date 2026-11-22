@@ -33,8 +33,8 @@ import (
 // /proc, equal to an event's pid_incarnation, so a ring of a process
 // that reused a traced one's pid stays unread — and so does a ring whose
 // process's start time could not be read, never matched by the ring's
-// own (writer-chosen) creation stamp. Only the newest waiting ring of a
-// pid is kept.
+// own (writer-chosen) creation stamp. Only the waiting ring of a pid
+// added last is kept (hold).
 
 // trace notes ev's process as traced and reads the rings that waited
 // for it. A run of one process's events costs a comparison.
@@ -62,11 +62,15 @@ func (j *JavaJoin) isTraced(v *jvm) bool {
 	return v.start != 0 && slices.Contains(j.traced[v.pid], v.start)
 }
 
-// hold puts v among the waiting rings. An older ring of the same pid
-// still waiting is closed and dropped: the newer one is the pid's
-// current file (the agent replaces a stale ring, never reuses it), and
-// a writer re-planting <pid>.ring under new inodes must not make every
-// scan map one more (task yi4 review).
+// hold puts v among the waiting rings. A ring of the same pid still
+// waiting is closed and dropped: the ring added last is taken as the
+// pid's current file (the agent replaces a stale ring, never reuses
+// it), and a writer re-planting <pid>.ring under new inodes must not
+// make every scan map one more (task yi4 review). Known gap (task 9j4):
+// two rings of one pid found in the same scan — two tagged
+// <pid>.<hex>.ring files, or one beside <pid>.ring — are added in the
+// directory listing's name order, so "added last" need not be the
+// newer one.
 func (j *JavaJoin) hold(v *jvm) {
 	for i, w := range j.waiting {
 		if w.pid == v.pid {

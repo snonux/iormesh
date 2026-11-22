@@ -23,8 +23,9 @@ import java.util.Set;
  * The agent → tracer transport (decision #27): one memory-mapped ring
  * per JVM, a file {@code <spool dir>/<pid>.ring} (or {@code
  * <pid>.<hex>.ring} when another user holds that name, see
- * {@link #create}) in the tracer-owned spool directory, mapped shared by the agent (writers: every target
- * thread that closes a bracket, plus the watermark thread) and the
+ * {@link #create}) in the tracer-owned spool directory, mapped shared
+ * by the agent (writers: every target thread that closes a bracket,
+ * plus the watermark thread) and the
  * tracer (one reader, internal/agentspool). After {@link #create} a
  * record is plain memory stores and one CAS — no syscall, no allocation
  * for BRACKET and WATERMARK — so the transport adds nothing to the
@@ -349,9 +350,9 @@ public final class Ring {
      * running write on into the unlinked file. Only the file this ring
      * created goes: the path is checked without following a symlink and
      * must name the same device and inode. While this JVM lives, its pid
-     * — which the name carries, tagged or not — is no other JVM's, and while it maps the file the
-     * inode cannot be reused, so a match is this ring. False when the
-     * file was gone or replaced.
+     * — which the name carries, tagged or not — is no other JVM's, and
+     * while it maps the file the inode cannot be reused, so a match is
+     * this ring. False when the file was gone or replaced.
      */
     boolean removeOwn() throws IOException {
         BasicFileAttributes a;

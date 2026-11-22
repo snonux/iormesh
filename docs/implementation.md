@@ -2233,10 +2233,9 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
    `<pid>.<hex>.ring` when another user holds that name, task
    9j4), in the tracer-owned directory, mapped `MAP_SHARED` by
    agent and tracer. The agent never creates the directory: a
-   missing one
-   disables the agent (no tracer is listening). Agent options:
-   `spool=<dir>`, `ringsize=<bytes>` (a power of two, 64 KiB–64
-   MiB, default 8 MiB; task yi4 lowered the cap from 1 GiB, and
+   missing one disables the agent (no tracer is listening). Agent
+   options: `spool=<dir>`, `ringsize=<bytes>` (a power of two, 64
+   KiB–64 MiB, default 8 MiB; task yi4 lowered the cap from 1 GiB, and
    the reader refuses a larger header), `watermark=<ms>` (default
    10, 0 = only at install and exit). Done (task 1b4). The
    header, little endian,

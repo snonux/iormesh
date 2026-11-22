@@ -13,11 +13,12 @@ import (
 // Dir finds the agents' rings in a spool directory: one file per JVM,
 // <pid>.ring (pid as the JVM sees it, so the JVM must share the tracer's
 // pid namespace), or <pid>.<hex>.ring when the agent could not delete a
-// stale <pid>.ring another user owns (task 9j4, ringPID). The directory is the tracer's -spool, or one staged
-// inside the root of a JVM in another mount namespace (decision #14),
-// which the tracer names /proc/self/fd/<n>: a descriptor it opened
-// through /proc/<pid>/root, so nothing in the JVM's tree is resolved by
-// name again. Each file is opened once.
+// stale <pid>.ring another user owns (task 9j4, ringPID). The directory
+// is the tracer's -spool, or one staged inside the root of a JVM in
+// another mount namespace (decision #14), which the tracer names
+// /proc/self/fd/<n>: a descriptor it opened through /proc/<pid>/root,
+// so nothing in the JVM's tree is resolved by name again. Each file is
+// opened once.
 type Dir struct {
 	path string
 	// owner returns the uid of process pid, false if it is gone; a
