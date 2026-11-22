@@ -32,8 +32,6 @@ import (
 // to the laptop's registry and a containerd mirror for localhost:5001
 // (docs/testing.md "M7 on an existing cluster").
 
-// ExistingNamespaces are the namespaces the run creates in an existing
-// cluster: Traefik's, and the two of integrationtests/kind.
 // ErrForeignRecord is ClaimExisting's refusal when the state file holds
 // another kubeconfig's or context's record. The refused run then tears
 // down with LeaveCluster: that record and its objects wait for an
@@ -41,7 +39,11 @@ import (
 // touched them.
 var ErrForeignRecord = errors.New("existing cluster: the state file records another cluster's objects")
 
-var ExistingNamespaces = []string{"traefik", "iormesh-m7", "iormesh-m7-clusterip"}
+// ExistingNamespaces are the namespaces the run creates in an existing
+// cluster: Traefik's, and the three of the tests mage k8sAcceptance runs
+// in integrationtests/kind (TestKindAcceptance's, TestKindClusterIP's and
+// TestKindMicroservices', task uh4).
+var ExistingNamespaces = []string{"traefik", "iormesh-m7", "iormesh-m7-clusterip", "iormesh-m7-micro"}
 
 // Owned is the record of what the run created in an existing cluster:
 // the kubeconfig and context it reached the cluster by, whether it

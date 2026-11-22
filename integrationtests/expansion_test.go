@@ -9,6 +9,7 @@ import (
 
 	"iormesh/internal/expand"
 	"iormesh/internal/federate"
+	"iormesh/internal/meshcheck"
 	"iormesh/internal/normalize"
 )
 
@@ -263,10 +264,10 @@ func assertMeshAsAdded(t *testing.T, h *Harness, last spreadRun) {
 	t.Run("a wrong mesh is caught", func(t *testing.T) {
 		assertCaught(t, got, want, map[string]func(*normalize.Expectation){
 			"the TLS hop to orders declared plain": func(x *normalize.Expectation) {
-				httpOf(x, clientHTTPIndex(x, "/orders")).Scheme = "http"
+				httpOf(x, meshcheck.ClientHTTPIndex(x, "/orders")).Scheme = "http"
 			},
 			"orders dialed inventory on loopback": func(x *normalize.Expectation) {
-				httpOf(x, clientHTTPIndex(x, "/inventory/reserve")).Host = "127.0.0.1"
+				httpOf(x, meshcheck.ClientHTTPIndex(x, "/inventory/reserve")).Host = "127.0.0.1"
 			},
 			"billing on the gateway's host": func(x *normalize.Expectation) {
 				x.Edges = slices.Clone(x.Edges) // assertCaught copies the events only

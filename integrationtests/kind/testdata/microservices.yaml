@@ -1,0 +1,34 @@
+# The microservices scenario as pods (task uh4), a text/template:
+# {{"{{"}}.NS{{"}}"}} the test's namespace, {{"{{"}}.Workload{{"}}"}} the
+# workload image (JRE and workload.jar), {{"{{"}}.PodLevel{{"}}"}} the MCS
+# level every pod pins (empty: none), {{"{{"}}.Apps{{"}}"}} the services.
+# One Deployment per service — billing, inventory, orders, gateway — each
+# pod one host, each traced by a debug container with the Java agent
+# (the prepare patch is applied on
+# top by the test, from internal/k8s, as an operator would). Every app
+# container sleeps; the test runs each service with kubectl exec. The
+# services dial each other's pod addresses, not Services: a TLS server's
+# certificate names the one address it binds (its pod's), so a ClusterIP
+# would fail the caller's pinning.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{.NS}}
+{{- range $app := .Apps}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: {{$app}}, namespace: {{$.NS}}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: {{$app}}}}
+  template:
+    metadata: {labels: {app: {{$app}}}}
+    spec:
+      terminationGracePeriodSeconds: 5
+{{- with $.PodLevel}}
+      securityContext: {seLinuxOptions: {level: "{{.}}"}}
+{{- end}}
+      containers:
+        - {name: app, image: {{$.Workload}}, command: [sleep, infinity]}
+{{- end}}

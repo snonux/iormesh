@@ -54,8 +54,8 @@ containerdConfigPatches:
 `
 
 // K8sAcceptance runs PLAN.md M7's acceptance on kind: TestKindAcceptance
-// under kube-proxy's iptables mode, then TestKindClusterIP again under
-// nftables, then K8sTeardown's steps. IORMESH_KIND_KEEP=1 keeps the
+// and TestKindMicroservices under kube-proxy's iptables mode, then
+// TestKindClusterIP again under nftables, then K8sTeardown's steps. IORMESH_KIND_KEEP=1 keeps the
 // cluster and the registry; IORMESH_KIND_KUBECONFIG puts the kubeconfig
 // elsewhere. IORMESH_K8S_KUBECONFIG (with IORMESH_K8S_CONTEXT, else its
 // current context, and IORMESH_K8S_CRICTL, the argv prefix that runs
@@ -68,6 +68,19 @@ containerdConfigPatches:
 // that fail, `mage k8sTeardown` is the recovery.
 func K8sAcceptance() error {
 	return kindRun("k8sAcceptance", kindTests)
+}
+
+// K8sMicroservices runs the microservices scenario as pods alone on kind
+// (TestKindMicroservices, task uh4, docs/testing.md "Microservices as
+// pods"): gateway, orders, inventory and billing each in a pod of its own
+// under a debug tracer with the agent, collected, built and held to the
+// rig spread's cross-service assertions. Same setup, environment and
+// teardown as K8sAcceptance; kube-proxy's mode is left as it is (the
+// services dial pod addresses, no ClusterIP).
+func K8sMicroservices() error {
+	return kindRun("k8sMicroservices", func(env map[string]string, _ bool) error {
+		return kindGoTest(env, "30m", "TestKindMicroservices")
+	})
 }
 
 // K8sDebugRestart runs task ah4's real-cluster check alone on kind
@@ -315,22 +328,27 @@ func kindUp(r shRunner, c kindrun.Config) (env map[string]string, err error) {
 		"IORMESH_KIND_SELINUX_LEVEL": os.Getenv("IORMESH_K8S_SELINUX_LEVEL"), "CGO_ENABLED": "0"}, err
 }
 
-// kindTests runs the suite under iptables, then the ClusterIP join under
-// nftables. An existing cluster's kube-proxy is not kind's daemonset
-// (k3s embeds it), so there both run in the cluster's own mode, and the
-// operator reruns after switching it. Each run fails on a skip or a test
-// not reported as passed (kindGoTest): on an existing cluster without
-// IORMESH_K8S_CRICTL the SIGTERM check skips, and the target fails.
+// kindTests runs the suite — TestKindAcceptance, then the microservices
+// pods (TestKindMicroservices, task uh4) — under iptables, then the
+// ClusterIP join under nftables. An existing cluster's kube-proxy is not
+// kind's daemonset (k3s embeds it), so there all run in the cluster's own
+// mode, and the operator reruns after switching it. Each run fails on a
+// skip or a test not reported as passed (kindGoTest): on an existing
+// cluster without IORMESH_K8S_CRICTL the SIGTERM check skips, and the
+// target fails.
 func kindTests(env map[string]string, existing bool) error {
 	run := func(test string) error { return kindGoTest(env, "40m", test) }
 	if existing {
 		fmt.Println("NOTICE existing cluster: kube-proxy's mode is the cluster's own, not switched")
-		return errors.Join(run("TestKindAcceptance"), run("TestKindClusterIP"))
+		return errors.Join(run("TestKindAcceptance"), run("TestKindMicroservices"), run("TestKindClusterIP"))
 	}
 	if err := kindProxyMode(env, "iptables"); err != nil {
 		return err
 	}
 	if err := run("TestKindAcceptance"); err != nil {
+		return err
+	}
+	if err := run("TestKindMicroservices"); err != nil {
 		return err
 	}
 	if err := kindProxyMode(env, "nftables"); err != nil {

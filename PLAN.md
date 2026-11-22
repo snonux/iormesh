@@ -364,7 +364,9 @@ Scenario notes:
   `--dir`. `expect-spread.json` is the merged golden for the
   rig's three emulated hosts: every service `runs_on` its
   host, and the three cross-host hops (two TLS, one plain) are
-  fused at their addresses.
+  fused at their addresses. As pods (task uh4, M7
+  "Microservices as pods"), `expect-pods.json` puts the gateway
+  on a host of its own too, and all four hops fuse.
 - **Restart scenario** (M2): the app exits mid-session and
   comes back with a new PID; expectations assert both
   incarnations were traced under one app identity, with
@@ -2361,8 +2363,9 @@ Built after plain Linux servers (M4); accepted on kind and el9
   another image pulled into those repositories (task oi4).
   Against an
   existing cluster (task li4) the run refuses namespaces
-  `traefik`, `iormesh-m7` and `iormesh-m7-clusterip` that are
-  already there and not its own, records the context and what it
+  `traefik`, `iormesh-m7`, `iormesh-m7-clusterip` and
+  `iormesh-m7-micro` (task uh4) that are already there and not
+  its own, records the context and what it
   creates before its helm step, and the teardown removes only
   what that record names, in that context — nothing in the
   cluster without one, with one naming no context, or from a run
@@ -2461,6 +2464,37 @@ Built after plain Linux servers (M4); accepted on kind and el9
   alone with the same session. Collect brought both sessions'
   segments into one `pod-<uid>`
   ([testing.md](docs/testing.md#debug-tracer-replacement-on-kind-task-ah4-2026-11-21)).
+  **Microservices as pods** (task uh4, owner-approved
+  2026-11-22): M0's microservices scenario "runs on plain hosts
+  (M4/M6) and as pods (M7)", but the M7 acceptance ran tcp-nat
+  and ingress only. `TestKindMicroservices` (`mage
+  k8sMicroservices` alone, and part of `mage k8sAcceptance`)
+  runs gateway, orders, inventory and billing each in a pod of
+  its own, one host per service, every pod under a debug tracer
+  with the Java agent, one registry project for all. Each JVM
+  starts behind the workload's startup gate, its tracer is
+  deployed and joined, the certificate it pins is shipped into
+  its pod (as the two-host acceptance copies it), and it is
+  released, leaves first. The services dial each other's pod
+  addresses at the rig spread's ports, not Services: a TLS
+  server's certificate names the one address it binds. Every
+  hop crosses pods, so all four fuse, gateway→inventory too.
+  The run is collected and built through iormeshctl's k8s path
+  and held to the same cross-service assertions as the rig's
+  spread (`TestMicroservicesAcrossHosts`), shared as one
+  function, `internal/meshcheck.Check`: every hop fused at its
+  server's address with a mirrored 4-tuple, nothing unresolved,
+  every request paired across the wire and timed, the golden
+  held and its wrong variants caught. The golden is
+  `expect-pods.json`, which is `expect-spread.json` with the
+  gateway on a host of its own (a unit test pins that), at the
+  pods' addresses. The run also checks sh4's pod fields: every
+  event carries its pod's namespace and name, and a process's
+  events the id of the app container, as the pod status lists
+  it. It also checks pod identity. Status (2026-11-22): built
+  and unit-tested, not yet run. The one kind run stopped at the
+  disk guard (`/var/lib/docker has 16 GiB free, need 20`)
+  before it created anything.
 
 ## Decisions
 

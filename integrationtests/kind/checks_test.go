@@ -5,27 +5,31 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
 	"iormesh/internal/federate"
+	"iormesh/internal/meshcheck"
 	"iormesh/internal/normalize"
 	"iormesh/internal/schema"
+	"iormesh/internal/segment"
 )
 
 // scenariosDir holds the workload's goldens.
 const scenariosDir = "../../workload/scenarios"
 
-// hostTrace is one pod's collected trace: its sources (segments) and its
-// events in the order its tracer wrote them.
+// hostTrace is one pod's collected trace: its sources (segments), its
+// events in the order its tracer wrote them, and its Java method table
+// (the session's methods table files, empty without the agent).
 type hostTrace struct {
+	host    string
 	sources []federate.Source
 	events  []schema.Event
+	methods map[uint64]schema.Method
 }
 
-// loadStore reads the project's collected segments as the build does
-// and groups them by store directory (pod-<uid>).
+// loadStore reads the project's collected segments and method tables as
+// the build does and groups them by store directory (pod-<uid>).
 func loadStore(t *testing.T, store, project string) map[string]*hostTrace {
 	t.Helper()
 	segs, err := federate.LoadSegments(context.Background(), store, []string{project}, federate.LoadOptions{})
@@ -36,18 +40,34 @@ func loadStore(t *testing.T, store, project string) map[string]*hostTrace {
 		t.Errorf("bad segment %s: %v", b.Name, b.Err)
 	}
 	hosts := map[string]*hostTrace{}
-	for _, s := range segs.Sources {
-		h := hosts[s.Host]
-		if h == nil {
-			h = &hostTrace{}
-			hosts[s.Host] = h
+	host := func(dir string) *hostTrace {
+		if hosts[dir] == nil {
+			hosts[dir] = &hostTrace{host: dir, methods: map[uint64]schema.Method{}}
 		}
+		return hosts[dir]
+	}
+	for _, s := range segs.Sources {
+		h := host(s.Host)
 		h.sources = append(h.sources, s)
 		if err := s.Events(context.Background(), func(e *schema.Event) error {
 			h.events = append(h.events, *e)
 			return nil
 		}); err != nil {
 			t.Fatalf("%s: %v", s.Name(), err)
+		}
+	}
+	// One session per pod, so a pod's tables are one id space: each
+	// segment's table holds the frames first named in it.
+	for _, tf := range segs.TableFiles {
+		if tf.File.Table != segment.TableMethods {
+			continue
+		}
+		h := host(tf.Host)
+		if _, err := segment.ReadMethods(context.Background(), tf.Path, tf.WantMeta, func(m *schema.Method) error {
+			h.methods[m.MethodID] = *m
+			return nil
+		}); err != nil {
+			t.Fatalf("%s: %v", tf.Name(), err)
 		}
 	}
 	return hosts
@@ -72,14 +92,17 @@ func (h *hostTrace) session(t *testing.T) schema.Session {
 // merge merges hosts as `iormeshctl build` does and returns the result
 // with the merged trace: the hosts' events interleaved by wall clock, each
 // host's kept in its own order, conn ids renamed to the merged graph's
-// (as integrationtests' mergeHosts).
+// (as integrationtests' mergeHosts), and the hosts' method tables merged
+// (meshcheck.MergeMethods), so a golden's java.method resolves.
 func merge(t *testing.T, hosts ...*hostTrace) (federate.Result, normalize.Trace) {
 	t.Helper()
 	var sources []federate.Source
 	streams := make([][]schema.Event, len(hosts))
+	tables := make([]meshcheck.HostMethods, len(hosts))
 	for i, h := range hosts {
 		sources = append(sources, h.sources...)
 		streams[i] = h.events
+		tables[i] = meshcheck.HostMethods{Host: h.host, Methods: h.methods}
 	}
 	res, err := federate.Merge(context.Background(), sources, federate.Options{})
 	if err != nil {
@@ -91,7 +114,9 @@ func merge(t *testing.T, hosts ...*hostTrace) (federate.Result, normalize.Trace)
 			events[i].ConnID = to
 		}
 	}
-	return res, normalize.Trace{Events: events, Graph: res.Graph}
+	trace := normalize.Trace{Events: events, Graph: res.Graph}
+	meshcheck.MergeMethods(&trace, tables)
+	return res, trace
 }
 
 // mergeByWall interleaves the streams by wall_ns, always taking the
@@ -146,19 +171,12 @@ func assertGolden(t *testing.T, trace normalize.Trace, scenario, tmp string, wan
 }
 
 // assertCaught: each mutation of want must fail the check, else the
-// golden proved nothing.
+// golden proved nothing (meshcheck.Caught; the copies own their events
+// and edges).
 func assertCaught(t *testing.T, got normalize.Trace, want normalize.Expectation,
 	mutations map[string]func(*normalize.Expectation)) {
 	t.Helper()
-	for name, mutate := range mutations {
-		wrong := want
-		wrong.Events = slices.Clone(want.Events)
-		wrong.Edges = slices.Clone(want.Edges)
-		mutate(&wrong)
-		if len(normalize.Check(got, wrong)) == 0 {
-			t.Errorf("%s: the golden check passed an expectation that does not hold", name)
-		}
-	}
+	meshcheck.Caught(t, got, want, mutations)
 }
 
 // assertIdentity: every pod is its own host, pod-<uid>, with the pod's

@@ -35,12 +35,20 @@ func (c *cluster) kubectl(t *testing.T, args ...string) string {
 }
 
 // try is kubectl returning the error instead of failing the test.
-func (c *cluster) try(args ...string) (string, error) {
+func (c *cluster) try(args ...string) (string, error) { return c.tryIn(nil, args...) }
+
+// tryIn is try with stdin as kubectl's standard input (none if nil): how
+// the microservices run ships a published certificate into its caller's
+// pod (copyFile).
+func (c *cluster) tryIn(stdin []byte, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	full := append([]string{"--context=" + c.cfg.context, "--namespace=" + c.ns}, args...)
 	cmd := exec.CommandContext(ctx, "kubectl", full...)
 	cmd.Env = append(os.Environ(), "KUBECONFIG="+c.cfg.kubeconfig)
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
@@ -76,19 +84,28 @@ func (c *cluster) ctl(t *testing.T, env []string, args ...string) string {
 // apply renders testdata/name with data and applies it.
 func (c *cluster) apply(t *testing.T, name string, data any) {
 	t.Helper()
-	tmpl, err := template.ParseFiles(filepath.Join("testdata", name))
+	text, err := render(name, data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var b bytes.Buffer
-	if err := tmpl.Execute(&b, data); err != nil {
-		t.Fatal(err)
-	}
 	path := filepath.Join(c.dir, name)
-	if err := os.WriteFile(path, b.Bytes(), 0o600); err != nil {
+	if err := os.WriteFile(path, text, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	c.kubectl(t, "apply", "--filename="+path)
+}
+
+// render executes the template testdata/name with data.
+func render(name string, data any) ([]byte, error) {
+	tmpl, err := template.ParseFiles(filepath.Join("testdata", name))
+	if err != nil {
+		return nil, err
+	}
+	var b bytes.Buffer
+	if err := tmpl.Execute(&b, data); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
 }
 
 // patch applies a strategic-merge patch file to a Deployment, as the

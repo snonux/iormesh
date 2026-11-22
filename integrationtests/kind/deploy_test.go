@@ -13,37 +13,50 @@ import (
 // the test once the tracer is attached.
 const pattern = "*workload.jar*"
 
-// agentFlags add the Java agent to the gateway's tracer (the only
-// registry flags: deploy passes the pod's disk bounds itself, task df4): live attach at
-// start into the gated JVM. The jar is the tracer image's, the spool is
+// agentFlags add the Java agent to the ingress gateway's tracer and to
+// every microservices pod's (task uh4) — the only registry flags: deploy
+// passes the pod's disk bounds itself, task df4 — live attach at start
+// into the gated JVM. The jar is the tracer image's, the spool is
 // on the tracer's emptyDir (the scratch image has no /tmp); the app
 // container sees neither, so the tracer stages both inside the JVM's
 // root (decision #14, task cf4).
 var agentFlags = []string{"-spool=/opt/iormesh/data/spool", "-agent=/opt/iormesh/lib/iormesh-agent.jar"}
 
-// writeRegistry writes the iormeshctl registry for the test's pods (0600
-// in a 0700 directory, the registry's rules) and returns its path.
+// podEntry is one pod entry of the test's registry: the app label it
+// selects, its mode ("" is debug) and its project's flags.
+type podEntry struct {
+	app, mode string
+	flags     []string
+}
+
+// writeRegistry writes the iormeshctl registry for the M7 acceptance's
+// pods: tcp-nat's two, and with full the hairpin and the ingress pair.
 func (c *cluster) writeRegistry(t *testing.T, full bool) string {
+	t.Helper()
+	entries := []podEntry{{app: "server"}, {app: "client"}}
+	if full {
+		entries = append(entries, podEntry{app: "hairpin"}, podEntry{app: "gateway", flags: agentFlags},
+			podEntry{app: "inventory", mode: "sidecar"})
+	}
+	return c.writeEntries(t, entries)
+}
+
+// writeEntries writes the iormeshctl registry with the test's pod entries
+// (0600 in a 0700 directory, the registry's rules) and returns its path.
+func (c *cluster) writeEntries(t *testing.T, entries []podEntry) string {
 	t.Helper()
 	var b strings.Builder
 	fmt.Fprintf(&b, "k8s:\n  image: %s\n  selinux_type: %s\n  selinux_level: %q\n", c.cfg.tracer, c.cfg.seType, c.cfg.seLevel)
 	fmt.Fprintf(&b, "  clusters:\n    - name: kind\n      context: %s\n      namespace: %s\npods:\n", c.cfg.context, c.ns)
-	entry := func(app, mode string, flags []string) {
-		fmt.Fprintf(&b, "  - cluster: kind\n    selector: app=%s\n    container: app\n", app)
-		if mode != "" {
-			fmt.Fprintf(&b, "    mode: %s\n", mode)
+	for _, e := range entries {
+		fmt.Fprintf(&b, "  - cluster: kind\n    selector: app=%s\n    container: app\n", e.app)
+		if e.mode != "" {
+			fmt.Fprintf(&b, "    mode: %s\n", e.mode)
 		}
 		fmt.Fprintf(&b, "    projects:\n      - target: {pattern: %q}\n", pattern)
-		if len(flags) > 0 {
-			fmt.Fprintf(&b, "        flags: [%s]\n", quoteAll(flags))
+		if len(e.flags) > 0 {
+			fmt.Fprintf(&b, "        flags: [%s]\n", quoteAll(e.flags))
 		}
-	}
-	entry("server", "", nil)
-	entry("client", "", nil)
-	if full {
-		entry("hairpin", "", nil)
-		entry("gateway", "", agentFlags)
-		entry("inventory", "sidecar", nil)
 	}
 	path := filepath.Join(c.dir, "servers.yaml")
 	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
