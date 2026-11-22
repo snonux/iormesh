@@ -29,7 +29,8 @@ import (
 // commands, two jobs"): merge what collect put in the store, offline.
 //
 //  1. federate.LoadSegments decodes every events segment of the projects
-//     once in a memory-capped child process (check.go: a compromised
+//     (with -from/-to or -last, only those of the window — window.go,
+//     task yh4) once in a memory-capped child process (check.go: a compromised
 //     server's file must not exhaust the build's memory), holds each
 //     store host directory to one host identity (pinned in hosts.json),
 //     and rebuilds each session's graph from its events (decision #3:
@@ -54,7 +55,8 @@ import (
 //     read, the sessions' methods tables (each checked in the child
 //     first, as query reads them), the merge's conn-id renames and the
 //     database's endpoints.
-//  5. <builds>/<projects>[@<namespace>]/graph.json (the merged graph export),
+//  5. <builds>/<projects>[@<namespace>][~window]/graph.json (the merged
+//     graph export),
 //     model.json, report.json and the SVG exports (graph.svg,
 //     sequence/<ID>.svg per conversation; internal/render) are written,
 //     then the run's local site (internal/site: a new folder under
@@ -113,11 +115,18 @@ var errBadSegments = errors.New("segments skipped")
 // namespace is -namespace (build and show only, addNamespaceFlag): the
 // Kubernetes namespace whose pods' sessions a build keeps, "" for all
 // (task sh4).
+//
+// window is build's -from/-to or -last (window.go, task yh4), and
+// windowed marks a windowed build — set by build's window, or by show's
+// -windowed — whose directory is the full build's name plus
+// windowSuffix (buildFlags.key).
 type buildFlags struct {
 	projects          projectList
 	store, db, builds string
 	routes, registry  string
 	namespace         string
+	window            windowSpec
+	windowed          bool
 }
 
 // addNamespaceFlag registers -namespace, build's and show's narrowing
@@ -167,6 +176,8 @@ func buildCommand(args []string, e env) error {
 	addRoutesFlag(fs, &f)
 	addNamespaceFlag(fs, &f, "build only the sessions of pods in this Kubernetes namespace, into "+
 		"<projects>@<namespace> (default: every session)")
+	var w windowFlags
+	addWindowFlags(fs, &w)
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %w", errUsage, err)
 	}
@@ -174,6 +185,9 @@ func buildCommand(args []string, e env) error {
 		return fmt.Errorf("%w: build takes no arguments", errUsage)
 	}
 	if err := checkNamespace(f.namespace); err != nil {
+		return err
+	}
+	if err := parseWindow(w, &f); err != nil {
 		return err
 	}
 	return buildAndReport(e.root(), e, f)
@@ -188,15 +202,32 @@ func buildAndReport(ctx context.Context, e env, f buildFlags) error {
 	if err := viewmodel.WriteSummary(e.stdout, out.model); err != nil {
 		return err
 	}
+	if out.window != nil {
+		if _, err := fmt.Fprintf(e.stdout, "\nwindow     %s (whole segments overlapping it)",
+			safe(windowText(out.window))); err != nil {
+			return err
+		}
+	}
 	_, err = fmt.Fprintf(e.stdout, "\ngraph      %s\nmodel      %s\nreport     %s\nsite       %s\n"+
-		"           iormeshctl open  ·  iormeshctl show\n",
+		"           %s\n",
 		safe(filepath.Join(out.dir, graphFileName)), safe(filepath.Join(out.dir, modelFileName)),
-		safe(filepath.Join(out.dir, reportFileName)), safe(filepath.Join(out.site, site.IndexName)))
+		safe(filepath.Join(out.dir, reportFileName)), safe(filepath.Join(out.site, site.IndexName)),
+		safe(readHint(f)))
 	if err == nil && len(out.model.Health.BadSegments) > 0 {
 		err = fmt.Errorf("%w: %d bad segments left out of the build (listed above)",
 			errBadSegments, len(out.model.Health.BadSegments))
 	}
 	return err
+}
+
+// readHint names the commands that read the build just written: open
+// and show for the full build; show -windowed for a windowed one (open
+// and tui read only full builds).
+func readHint(f buildFlags) string {
+	if f.windowed {
+		return "iormeshctl show -windowed" + namespaceArg(f.namespace)
+	}
+	return "iormeshctl open  ·  iormeshctl show"
 }
 
 // buildOutput is what a build wrote.
@@ -205,6 +236,8 @@ type buildOutput struct {
 	dir   string
 	// site is this run's site folder (internal/site).
 	site string
+	// window is the resolved window of a windowed build, nil otherwise.
+	window *federate.Window
 }
 
 // build runs the whole build (see the file comment) and writes its
@@ -220,31 +253,22 @@ func build(ctx context.Context, e env, f buildFlags) (buildOutput, error) {
 	if err != nil {
 		return buildOutput{}, err
 	}
-	projects, err := buildProjects(paths.store, f.projects)
+	sel, err := selectSegments(ctx, e, f, paths)
 	if err != nil {
 		return buildOutput{}, err
 	}
-	segs, err := loadSegments(ctx, paths, projects)
+	methods, err := loadMethodTables(ctx, &sel.segs)
 	if err != nil {
 		return buildOutput{}, err
 	}
-	segs, hosts := inNamespace(segs, f.namespace)
-	if len(segs.Sources) == 0 {
-		return buildOutput{}, fmt.Errorf("build: no readable segment for %s%s in %s (%d bad)",
-			strings.Join(projects, ", "), namespaceNote(f.namespace), paths.store, len(segs.Bad))
-	}
-	methods, err := loadMethodTables(ctx, &segs)
-	if err != nil {
-		return buildOutput{}, err
-	}
-	in, rep, err := mergeAndImport(ctx, paths.db, servicedb.Filter{Projects: projects, Hosts: hosts},
-		&segs, methods, routes)
+	in, rep, err := mergeAndImport(ctx, paths.db, servicedb.Filter{Projects: sel.projects, Hosts: sel.hosts},
+		&sel.segs, methods, routes)
 	if err != nil {
 		return buildOutput{}, err
 	}
 	in.Report = &rep // the processes view is projected from the rollup
 	model := viewmodel.New(in)
-	dir, err := writeOutputs(paths.builds, buildKey(projects, f.namespace), in.Merge.Graph, model)
+	dir, err := writeOutputs(paths.builds, f.key(sel.projects), in.Merge.Graph, model)
 	if err == nil {
 		err = writeReport(dir, rep)
 	}
@@ -255,15 +279,53 @@ func build(ctx context.Context, e env, f buildFlags) (buildOutput, error) {
 	if err != nil {
 		return buildOutput{}, fmt.Errorf("build: %w", err)
 	}
-	return buildOutput{model: model, dir: dir, site: run}, nil
+	return buildOutput{model: model, dir: dir, site: run, window: sel.window}, nil
 }
 
-// loadSegments loads the projects' segments, each checked in a
-// memory-capped child (check.go) and each host directory held to the
-// identity pinned for it, then pins the directories seen for the first
-// time.
-func loadSegments(ctx context.Context, paths buildPaths, projects []string) (federate.Segments, error) {
-	segs, pins, err := checkedSegments(ctx, paths, projects)
+// selection is what a build reads: its projects, the window resolved
+// (nil without one), the segments loaded and the host ids a -namespace
+// build narrows the database's views to (nil: every host).
+type selection struct {
+	projects []string
+	window   *federate.Window
+	segs     federate.Segments
+	hosts    []string
+}
+
+// selectSegments picks the build's projects, resolves its window, loads
+// the segments and narrows them to -namespace; a selection without one
+// readable segment is an error naming what was asked for.
+func selectSegments(ctx context.Context, e env, f buildFlags, paths buildPaths) (selection, error) {
+	var sel selection
+	var err error
+	if sel.projects, err = buildProjects(paths.store, f.projects); err != nil {
+		return selection{}, err
+	}
+	if sel.window, err = f.window.resolve(e, paths.store, sel.projects); err != nil {
+		return selection{}, err
+	}
+	segs, err := loadSegments(ctx, paths, sel.projects, sel.window)
+	if err != nil {
+		return selection{}, err
+	}
+	sel.segs, sel.hosts = inNamespace(segs, f.namespace)
+	if len(sel.segs.Sources) == 0 {
+		return selection{}, fmt.Errorf("build: no readable segment for %s%s%s in %s (%d bad)",
+			strings.Join(sel.projects, ", "), namespaceNote(f.namespace), windowNote(sel.window),
+			paths.store, len(sel.segs.Bad))
+	}
+	return sel, nil
+}
+
+// loadSegments loads the projects' segments (only window's, when not
+// nil), each checked in a memory-capped child (check.go) and each host
+// directory held to the identity pinned for it, then pins the
+// directories seen for the first time. A windowed load checks every
+// segment of a directory not pinned yet (federate.Window), so what it
+// pins is what a full build would.
+func loadSegments(ctx context.Context, paths buildPaths, projects []string,
+	window *federate.Window) (federate.Segments, error) {
+	segs, pins, err := checkedSegmentsIn(ctx, paths, projects, window)
 	if err != nil {
 		return federate.Segments{}, err
 	}
@@ -328,6 +390,13 @@ type hostPins struct {
 // its pinned identity — without pinning anything new: query and expand, which
 // read the store too, must not change what a later build trusts.
 func checkedSegments(ctx context.Context, paths buildPaths, projects []string) (federate.Segments, hostPins, error) {
+	return checkedSegmentsIn(ctx, paths, projects, nil)
+}
+
+// checkedSegmentsIn is checkedSegments narrowed to window (nil: every
+// segment; federate.LoadOptions.Window).
+func checkedSegmentsIn(ctx context.Context, paths buildPaths, projects []string,
+	window *federate.Window) (federate.Segments, hostPins, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return federate.Segments{}, hostPins{}, err
@@ -337,7 +406,7 @@ func checkedSegments(ctx context.Context, paths buildPaths, projects []string) (
 		return federate.Segments{}, hostPins{}, err
 	}
 	segs, err := federate.LoadSegments(ctx, paths.store, projects, federate.LoadOptions{
-		Check: childChecker(exe, checkAddressSpace), Known: pins.known})
+		Check: childChecker(exe, checkAddressSpace), Known: pins.known, Window: window})
 	return segs, pins, err
 }
 

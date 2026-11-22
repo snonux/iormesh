@@ -4632,6 +4632,74 @@ iormeshctl show [summary|services|edges|health] [-project P]... [-json]
   child (a good segment, garbage, and on Linux an address space
   too small to decode in), host pins, an open builds directory.
 
+### Build window and prune (task yh4)
+
+```
+internal/federate/window.go     # Span, Window, FirstStart
+internal/ctl/window.go          # build -from/-to/-last, show -windowed
+internal/ctl/prune.go           # iormeshctl prune
+```
+
+```sh
+iormeshctl build [...] [-from T] [-to T] [-last DUR]
+iormeshctl show [VIEW] [...] -windowed
+iormeshctl prune -older-than DUR [-project P]... [-store DIR] [-apply]
+```
+
+- **A segment's range, from its name.** `federate.Span` is the
+  named start minus a minute to the start plus the rotation
+  interval (one minute) plus a minute: the late tick that
+  rotates, the name's cut to the second and an event stamped
+  just before a rotation all fit inside. Reading the events to
+  place a segment would cost the decode a window is there to
+  save, so the range errs wide: a window takes whole segments,
+  about a minute or two past each edge.
+- **The window.** `T` is query's (`query.ParseTime`: RFC 3339,
+  or a UTC time of day on the day of the earliest segment of the
+  projects, `federate.FirstStart`); `-last DUR` is `-from
+  now−DUR`, and not combined with `-from`/`-to`. An empty window
+  is a usage error. The build echoes the resolved window
+  (`window     FROM .. TO`, `(open)` for a side not given).
+- **What it checks.** `LoadOptions.Window`: a pinned host
+  directory's segments outside the window are not decoded; an
+  unpinned directory's are, all of them, because the host
+  vetting judges a directory on every session (two identities
+  in one directory put all of it in doubt) — so the windowed
+  build trusts, and pins, exactly what a full build would, and
+  a damaged segment of an unpinned directory is reported though
+  it lies outside the window. Each session's graph is rebuilt
+  from its window alone, as from a store whose older segments
+  were deleted.
+- **Where it writes.** `<projects>[@NS]~window/` — `~` is in
+  neither the project nor the namespace alphabet — one
+  directory per project set and namespace, overwritten by each
+  windowed build and read by `show -windowed`; the full build's
+  directory is never touched. `open` and `tui` read full builds
+  only (as with `-namespace`). The window is not in the model.
+- **prune.** Lists the store's own files whose range ended
+  before now−DUR — exactly what `build -last DUR` would never
+  take — and deletes them only with `-apply`, printing each.
+  Its own means: directly in `<store>/<project>/<host>/` (both
+  real directories with valid names, never a symlink), a
+  regular non-dot file whose name `segment.ParseName` accepts.
+  A table file goes only once no events segment of its session
+  stays in the directory (a newer segment's events may name
+  rows it holds). Deletes go through an `os.Root` on the store.
+  Directories, host pins and the service database's counts
+  stay. Auto-cleaning stays out: prune runs only when the
+  operator runs it.
+- **Tests.** `internal/federate/window_test.go` (range edges);
+  `internal/ctl/window_test.go` (`-from`, a time of day, `-last`,
+  `-to` select the expected segments of the rotated fixture, the
+  full build unchanged, an unpinned directory checked whole and
+  a pinned one only in its window, refusals);
+  `internal/ctl/prune_test.go` (the listing deletes nothing,
+  `-apply` exactly the listed files, a live session's table kept
+  and an orphan's deleted, planted foreign entries — a stray
+  name, a dot file, a symlink named like a segment, a directory
+  named like one, a file above the host directories, a symlinked
+  host directory — untouched, `-project`, refusals).
+
 ### The microservices scenario
 
 `microservices` (task jb4) landed ahead of the multi-host work,
