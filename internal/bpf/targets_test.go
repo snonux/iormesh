@@ -10,10 +10,14 @@ import (
 
 // fakeTargets is a target_map in memory. after, when set, runs once after
 // the next read (GetValue or GetValueAndDeleteKey): the kernel acting
-// between userspace's read and its next call.
+// between userspace's read and its next call. takeOutErr, when set, is
+// what GetValueAndDeleteKey fails with (a kernel before 5.14 has no
+// lookup-and-delete on hash maps); takeOuts counts its calls.
 type fakeTargets struct {
-	m     map[uint32]targetValue
-	after func(*fakeTargets)
+	m          map[uint32]targetValue
+	after      func(*fakeTargets)
+	takeOutErr error
+	takeOuts   int
 }
 
 func newFakeTargets() *fakeTargets { return &fakeTargets{m: map[uint32]targetValue{}} }
@@ -36,6 +40,10 @@ func (f *fakeTargets) GetValue(key unsafe.Pointer) ([]byte, error) {
 
 func (f *fakeTargets) GetValueAndDeleteKey(key unsafe.Pointer) ([]byte, error) {
 	defer f.kernel()
+	f.takeOuts++
+	if f.takeOutErr != nil {
+		return nil, f.takeOutErr
+	}
 	pid := *(*uint32)(key)
 	v, ok := f.m[pid]
 	if !ok {
@@ -101,28 +109,50 @@ func TestIgnoreExecRacingNextExec(t *testing.T) {
 }
 
 // TestIgnoreExecKeepsLaterExec: the entry already belongs to a later exec
-// when the first one is dismissed; it stays, gap and all.
+// when the first one is dismissed; it stays, gap and all, and is never
+// taken out (records made while it was out would miss the gap).
 func TestIgnoreExecKeepsLaterExec(t *testing.T) {
 	f := newFakeTargets()
 	f.m[execPid] = pending(2, 3)
 	if err := ignoreExec(f, execPid, 1, alwaysAlive); err != nil {
 		t.Fatal(err)
 	}
-	if got, ok := f.m[execPid]; !ok || got != pending(2, 3) {
-		t.Fatalf("entry after dismissing an older exec = %+v, %v: want %+v", got, ok, pending(2, 3))
+	if got, ok := f.m[execPid]; !ok || got != pending(2, 3) || f.takeOuts != 0 {
+		t.Fatalf("entry after dismissing an older exec = %+v, %v (%d take-outs): want %+v, none taken out",
+			got, ok, f.takeOuts, pending(2, 3))
 	}
 }
 
 // TestIgnoreExecKeepsTraced: an adopted process is not dismissed by a
-// stale record of an earlier exec.
+// stale record of an earlier exec, and its entry is never taken out —
+// its syscalls in that window would be lost without a count.
 func TestIgnoreExecKeepsTraced(t *testing.T) {
 	f := newFakeTargets()
 	f.m[execPid] = targetValue{State: targetTraced}
 	if err := ignoreExec(f, execPid, 1, alwaysAlive); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.m[execPid]; got.State != targetTraced {
-		t.Fatalf("traced entry after a dismissal = %+v: want traced", got)
+	if got := f.m[execPid]; got.State != targetTraced || f.takeOuts != 0 {
+		t.Fatalf("traced entry after a dismissal = %+v (%d take-outs): want traced, never taken out",
+			got, f.takeOuts)
+	}
+}
+
+// TestIgnoreExecWithoutLookupAndDelete: a kernel before 5.14 has no
+// lookup-and-delete on hash maps (ENOTSUPP, 524, or EINVAL). The
+// dismissal still removes its own pending entry and never fails — an
+// error would end the session at the first exec that does not match.
+func TestIgnoreExecWithoutLookupAndDelete(t *testing.T) {
+	for _, errno := range []syscall.Errno{errENOTSUPP, syscall.EINVAL} {
+		f := newFakeTargets()
+		f.takeOutErr = errno
+		f.m[execPid] = pending(1, 5)
+		if err := ignoreExec(f, execPid, 1, alwaysAlive); err != nil {
+			t.Fatalf("errno %d: dismissal failed: %v", errno, err)
+		}
+		if _, ok := f.m[execPid]; ok {
+			t.Fatalf("errno %d: dismissed entry still there: %+v", errno, f.m[execPid])
+		}
 	}
 }
 
@@ -147,7 +177,8 @@ func TestIgnoreExecRemovesOwnEntry(t *testing.T) {
 // the PID would be adopted on the later exec's verdict.
 func TestIgnoreExecExitedWhilePutBack(t *testing.T) {
 	f := newFakeTargets()
-	f.m[execPid] = pending(2, 3)
+	f.m[execPid] = pending(1, 0)
+	f.after = func(f *fakeTargets) { f.m[execPid] = pending(2, 3) }
 	if err := ignoreExec(f, execPid, 1, func() bool { return false }); err != nil {
 		t.Fatal(err)
 	}

@@ -17,6 +17,11 @@ const (
 	targetPending = 2
 )
 
+// errENOTSUPP is the kernel's internal ENOTSUPP (524), which the bpf
+// syscall leaks to userspace for a command a map type lacks; package
+// syscall has no name for it.
+const errENOTSUPP = syscall.Errno(524)
+
 // targetValue mirrors struct iormesh_target (maps.h): 16 bytes, no
 // padding, so its memory is the kernel's value byte for byte.
 type targetValue struct {
@@ -135,11 +140,13 @@ func adoptExec(m targetStore, pid uint32) (gap uint64, adopted bool, err error) 
 // JVM, sh -c 'exec java …') still awaits its own verdict. A read, a
 // compare and a delete would race that newer exec: the kernel can replace
 // the entry between the read and the delete, which then removes the new
-// one, and the matching app would go untraced without a word. So the
-// entry is taken out atomically (BPF_MAP_LOOKUP_AND_DELETE_ELEM, hash
-// maps since 5.14) and put back when it was not the dismissed exec's
-// (putBackTarget). alive reports whether the process still runs; it is
-// asked only on that rare path.
+// one, and the matching app would go untraced without a word. So only an
+// entry the plain read shows as the dismissed exec's is removed, and it
+// is taken out atomically (BPF_MAP_LOOKUP_AND_DELETE_ELEM, hash maps
+// since 5.14) and put back if the kernel replaced it after the read
+// (putBackTarget). A traced or later entry is never taken out: records
+// made while an entry is out are lost uncounted. alive reports whether
+// the process still runs; it is asked only on the put-back path.
 func (t *Tracer) IgnoreExec(pid uint32, since uint64, alive func() bool) error {
 	m, err := t.targetMap()
 	if err != nil {
@@ -150,18 +157,37 @@ func (t *Tracer) IgnoreExec(pid uint32, since uint64, alive func() bool) error {
 
 // ignoreExec is IgnoreExec on m.
 func ignoreExec(m targetStore, pid uint32, since uint64, alive func() bool) error {
-	raw, err := m.GetValueAndDeleteKey(unsafe.Pointer(&pid))
-	if errors.Is(err, syscall.ENOENT) {
-		return nil // exited, or never inserted (map full)
+	v, ok, err := lookupTarget(m, pid)
+	if err != nil || !ok || v.State != targetPending || v.Since != since {
+		return err
 	}
-	if err != nil {
+	raw, err := m.GetValueAndDeleteKey(unsafe.Pointer(&pid))
+	switch {
+	case errors.Is(err, syscall.ENOENT):
+		return nil // exited since the read
+	case errors.Is(err, errENOTSUPP) || errors.Is(err, syscall.EINVAL):
+		return deleteTarget(m, pid)
+	case err != nil:
 		return fmt.Errorf("dismiss exec of %d: %w", pid, err)
 	}
-	v, _, err := decodeTargetValue(raw)
+	v, _, err = decodeTargetValue(raw)
 	if err != nil || (v.State == targetPending && v.Since == since) {
 		return err
 	}
 	return putBackTarget(m, pid, v, alive)
+}
+
+// deleteTarget is the dismissal on a kernel before 5.14, whose hash maps
+// lack lookup-and-delete (ENOTSUPP or EINVAL): a plain delete after
+// ignoreExec's compare. The race stays there — an exec landing between
+// the read and the delete loses its entry, and that app incarnation goes
+// untraced — but the session goes on: failing would end it at the first
+// exec on the host that does not match.
+func deleteTarget(m targetStore, pid uint32) error {
+	if err := m.DeleteKey(unsafe.Pointer(&pid)); err != nil && !errors.Is(err, syscall.ENOENT) {
+		return fmt.Errorf("dismiss exec of %d: %w", pid, err)
+	}
+	return nil
 }
 
 // putBackTarget re-inserts v, pid's entry that ignoreExec took out but
@@ -173,7 +199,11 @@ func ignoreExec(m targetStore, pid uint32, since uint64, alive func() bool) erro
 // and nothing ever would, so a process reusing the PID could be adopted
 // on the newer exec's verdict: alive is asked after the insert, as
 // adoptRunning does in the CLI, and a dead process's entry is removed
-// again. An exit after the insert removes the entry by itself.
+// again. An exit after the insert removes the entry by itself. A window
+// of microseconds remains: if the PID is reused and the new process
+// execs between the insert and that removal, the kernel overwrites the
+// put-back entry with the newcomer's pending one, and the unconditional
+// delete then removes the newcomer's entry instead.
 func putBackTarget(m targetStore, pid uint32, v targetValue, alive func() bool) error {
 	err := m.UpdateValueFlags(unsafe.Pointer(&pid), unsafe.Pointer(&v), bpf.MapFlagUpdateNoExist)
 	if errors.Is(err, syscall.EEXIST) {
