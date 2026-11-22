@@ -192,6 +192,56 @@ func TestMergeLoopbackPairUntouched(t *testing.T) {
 	}
 }
 
+// TestMergeTwoSessionsOneSocket: projects billing and ops both trace
+// hostB's server, so its socket has a conn id in each session (task
+// ei4). The merge fuses it with hostA's client and renames both server
+// ids to the fused one, so the graph has one socket node for it. A
+// second socket only one session saw and nobody dialed from a traced
+// host stays unresolved, its alias renamed to its kept id.
+func TestMergeTwoSessionsOneSocket(t *testing.T) {
+	const srv, cl = "10.0.2.2:8080", "10.0.1.1:45678"
+	k, lone := ISNPair{0x100, 0x200}, ISNPair{0x300, 0x400}
+	a := newTrace("hostA", "shop")
+	a.client(100, "a1", cl, srv, k, wall0)
+	billing, ops := newTrace("hostB", "billing"), newTrace("hostB", "ops")
+	billing.server(200, "b-billing", srv, cl, k, wall0)
+	ops.server(200, "b-ops", srv, cl, k, wall0+7)
+	billing.server(200, "u-billing", srv, "10.0.9.9:5000", lone, wall0)
+	ops.server(200, "u-ops", srv, "10.0.9.9:5000", lone, wall0+7)
+	dir := t.TempDir()
+	r, err := Merge(context.Background(), []Source{a.write(t, filepath.Join(dir, "a")),
+		billing.write(t, filepath.Join(dir, "b1")), ops.write(t, filepath.Join(dir, "b2"))},
+		Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Conns) != 1 || len(r.Unresolved) != 1 ||
+		r.Unresolved[0].Reason != ReasonNoMatch {
+		t.Fatalf("fusion %s", report(t, r))
+	}
+	id := r.Conns[0].ID
+	for _, conn := range []string{"a1", "b-billing", "b-ops"} {
+		host := map[bool]string{true: "hostA", false: "hostB"}[conn == "a1"]
+		if got := r.Renames[LocalConn{host, conn}]; got != id {
+			t.Errorf("rename %s/%s = %q, want %q", host, conn, got, id)
+		}
+	}
+	if got := r.Renames[LocalConn{"hostB", "u-ops"}]; got != "u-billing" {
+		t.Errorf("rename hostB/u-ops = %q, want u-billing", got)
+	}
+	var socks []string
+	for _, n := range r.Graph.Nodes {
+		if n.Type == schema.NodeSocket {
+			socks = append(socks, n.ID)
+		}
+	}
+	want := []string{schema.SocketNodeID(id), schema.SocketNodeID("u-billing")}
+	slices.Sort(want)
+	if !slices.Equal(socks, want) {
+		t.Fatalf("socket nodes %v, want %v", socks, want)
+	}
+}
+
 // TestMergeRejects covers inputs the merge refuses instead of guessing:
 // one source holding two hosts' events, a corrupt event line, a line
 // over the 1 MiB bound, a source without events whose sockets no host

@@ -3965,7 +3965,15 @@ Rules, each a table-driven test (`fuse_test.go`,
 - projects do not matter to the join: sources of several
   projects merge together, and `Conn.CrossProject` marks a fused
   edge whose ends two projects traced — on two hosts or, for two
-  sessions on one host, over loopback.
+  sessions on one host, over loopback;
+- two sessions tracing one process (task ei4): each gives the
+  socket its own conn id, since the id hashes the establish time
+  its own BPF program stamped. Before the join, halves of one
+  host with equal role, key and 4-tuple and `Established` inside
+  the window fold into one (`fold.go`): it keeps the smallest id,
+  lists the others as `Half.Aliases`, and `Result.Renames` maps
+  them where the kept id goes, so the far end fuses instead of
+  turning `ambiguous`, and the graph keeps one socket node.
 
 The merged graph is the union of the host graphs (sources read
 in name order, everything sorted, `Graph.Validate` before it is

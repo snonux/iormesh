@@ -70,20 +70,24 @@ type Fusion struct {
 // Established times at most window apart. Anything else — no key, no
 // partner, or two — leaves every half involved unresolved, so a fused
 // edge is always a fact and never a coin toss. The 4-tuples are not
-// compared: NAT rewrites them.
+// compared across hosts: NAT rewrites them. Within one host they are:
+// first, the halves several sessions of the host reported for one
+// socket, under different conn ids, fold into one (foldSessions), so a
+// second session tracing the same process does not make its
+// connections ambiguous.
 func Fuse(halves []Half, window time.Duration) Fusion {
 	var f Fusion
+	// A negative window admits nothing rather than wrapping into a huge
+	// unsigned one that would admit everything.
+	ns := uint64(max(window, 0))
 	groups := map[ISNPair][]Half{}
-	for _, h := range halves {
+	for _, h := range foldSessions(halves, ns) {
 		if reason := unkeyed(h); reason != "" {
 			f.Unresolved = append(f.Unresolved, Unresolved{h, reason})
 			continue
 		}
 		groups[h.Key] = append(groups[h.Key], h)
 	}
-	// A negative window admits nothing rather than wrapping into a huge
-	// unsigned one that would admit everything.
-	ns := uint64(max(window, 0))
 	for _, g := range groups {
 		f.fuseGroup(g, ns)
 	}
