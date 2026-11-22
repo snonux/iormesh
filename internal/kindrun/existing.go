@@ -1,6 +1,7 @@
 package kindrun
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -33,6 +34,13 @@ import (
 
 // ExistingNamespaces are the namespaces the run creates in an existing
 // cluster: Traefik's, and the two of integrationtests/kind.
+// ErrForeignRecord is ClaimExisting's refusal when the state file holds
+// another kubeconfig's or context's record. The refused run then tears
+// down with LeaveCluster: that record and its objects wait for an
+// explicit `mage k8sTeardown`, not the teardown of a run that never
+// touched them.
+var ErrForeignRecord = errors.New("existing cluster: the state file records another cluster's objects")
+
 var ExistingNamespaces = []string{"traefik", "iormesh-m7", "iormesh-m7-clusterip"}
 
 // Owned is the record of what the run created in an existing cluster:
@@ -73,8 +81,8 @@ func ClaimExisting(r Runner, c Config) error {
 		return err
 	}
 	if o := s.Owned; o != nil && (o.Context != c.Context || o.Kubeconfig != c.Kubeconfig) {
-		return fmt.Errorf("%s records the run's objects in context %s of %s: "+
-			"run `mage k8sTeardown` against it first", c.StateFile, o.Context, o.Kubeconfig)
+		return fmt.Errorf("%w: %s records the run's objects in context %s of %s: "+
+			"run `mage k8sTeardown` against it first", ErrForeignRecord, c.StateFile, o.Context, o.Kubeconfig)
 	}
 	present, err := presentNamespaces(r, c)
 	if err != nil {
@@ -115,13 +123,16 @@ func presentNamespaces(r Runner, c Config) ([]string, error) {
 // clusterTeardown is the in-cluster part of the teardown: kind's cluster
 // deletion, or, in an existing cluster, what the record o names — the
 // Traefik release and the namespaces — in o's kubeconfig and context;
-// nothing without a record. Traefik's CRDs, which helm never removes,
-// stay: the cluster is the operator's.
+// nothing without a record or with one naming no kubeconfig or context
+// (an empty --context= or --kubeconfig= would fall back to whatever the
+// operator's kubeconfig points at; Teardown screens such a record out
+// first and says so, this is the backstop). Traefik's CRDs, which helm
+// never removes, stay: the cluster is the operator's.
 func clusterTeardown(c Config, o *Owned) [][]string {
 	if !c.Existing {
 		return [][]string{kind("delete", "cluster", "--name="+c.Cluster)}
 	}
-	if o == nil {
+	if !usable(o) {
 		return nil
 	}
 	var plan [][]string
@@ -139,11 +150,40 @@ func clusterTeardown(c Config, o *Owned) [][]string {
 // Repeat-safe (--ignore-not-found); its success satisfies the whole
 // record, the release's storage being in namespace traefik.
 func namespaceDelete(o *Owned) []string {
-	if o == nil || len(o.Namespaces) == 0 {
+	if !usable(o) || len(o.Namespaces) == 0 {
 		return nil
 	}
 	return append([]string{"kubectl", "--kubeconfig=" + o.Kubeconfig, "--context=" + o.Context,
 		"delete", "namespace", "--ignore-not-found", "--wait=true", "--timeout=180s"}, o.Namespaces...)
+}
+
+// usable is a record that names both the kubeconfig and the context the
+// run reached the cluster by.
+func usable(o *Owned) bool { return o != nil && o.Kubeconfig != "" && o.Context != "" }
+
+// clusterRecord is the record Teardown may act on in the cluster, nil
+// when it must leave the cluster alone, with the notice to print, whether
+// the state file must stay, and the error to report. A refused run
+// (LeaveCluster) keeps another run's record; a record naming no
+// kubeconfig or context (hand-edited) is kept and fails the teardown,
+// for the operator to fix; no record is the normal case of a run that
+// never claimed. The kind path has no record.
+func clusterRecord(c Config, o *Owned) (use *Owned, notice string, keep bool, err error) {
+	const none = "nothing removed from the cluster"
+	switch {
+	case !c.Existing:
+		return nil, "", false, nil
+	case o == nil:
+		return nil, "no record of what the run created in the existing cluster: " + none, false, nil
+	case c.LeaveCluster:
+		return nil, fmt.Sprintf("%s records another run's objects (context %s): %s; "+
+			"state file kept for `mage k8sTeardown`", c.StateFile, o.Context, none), true, nil
+	case !usable(o):
+		err := fmt.Errorf("%s: record names no kubeconfig or no context: %s; state file kept",
+			c.StateFile, none)
+		return nil, err.Error(), true, err
+	}
+	return o, "", false, nil
 }
 
 // ownedFiles are the files the teardown removes: the state file, and the

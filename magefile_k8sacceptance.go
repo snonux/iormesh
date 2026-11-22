@@ -83,6 +83,9 @@ func K8sDebugRestart() error {
 // kindRun is the body K8sAcceptance and K8sDebugRestart share: skip
 // without the prerequisites, build, disk guard, the teardown deferred
 // (unless IORMESH_KIND_KEEP) and on signals, the cluster up, then tests.
+// A run refused because the state file records another cluster's
+// objects (kindrun.ErrForeignRecord) tears down with LeaveCluster: those
+// objects and their record are left for an explicit `mage k8sTeardown`.
 func kindRun(name string, tests func(env map[string]string, existing bool) error) error {
 	if why := kindMissing(); why != "" {
 		fmt.Println("SKIP "+name+":", why)
@@ -101,9 +104,14 @@ func kindRun(name string, tests func(env map[string]string, existing bool) error
 		var once sync.Once
 		stop := teardownOnSignal(&once)
 		defer stop()
+		// The closure reads c when it runs, so LeaveCluster set below
+		// reaches it.
 		defer once.Do(func() { reportTeardown(kindrun.Teardown(r, c, os.Stdout)) })
 	}
 	env, err := kindUp(r, c)
+	if errors.Is(err, kindrun.ErrForeignRecord) {
+		c.LeaveCluster = true
+	}
 	if err != nil {
 		return err
 	}

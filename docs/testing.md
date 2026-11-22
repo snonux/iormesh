@@ -2374,7 +2374,11 @@ it leaves the cluster alone; when the namespace deletion fails,
 the state file stays for the next `mage k8sTeardown`. It removes
 the registry and images as the kind path does and keeps the
 operator's kubeconfig. A record of another context makes the next
-run refuse until that one is torn down. The SIGTERM
+run refuse until that one is torn down; the refused run's own
+teardown leaves that record and its objects alone for an explicit
+`mage k8sTeardown`. A record naming no kubeconfig or context (a
+hand-edited state file) is not acted on in the cluster: the
+teardown says so, keeps the state file and fails. The SIGTERM
 check reads the tracer's exit through `IORMESH_K8S_CRICTL`, the
 argv prefix that runs crictl on the node (`ssh root@<node> k3s
 crictl`), and skips without it. Without `IORMESH_K8S_KUBECONFIG`
@@ -2410,8 +2414,9 @@ The harness option and the script are unit-tested
 (`TestTeardownExisting`, `TestExistingConfig`, `TestCrictlPrefix`,
 the claim and record in `TestClaimExistingRefusesTaken`,
 `TestClaimExistingUnreachable`, `TestClaimExistingRecords`,
-`TestTeardownExistingWithoutRecord` and
-`TestTeardownExistingKeepsRecord`; the script with shellcheck).
+`TestTeardownExistingWithoutRecord`,
+`TestTeardownExistingKeepsRecord`, `TestRefusedRunLeavesForeignRecord`
+and `TestTeardownRecordWithoutContext`; the script with shellcheck).
 
 #### Run on Rocky 9.9 (task zg4, 2026-11-21)
 

@@ -38,7 +38,9 @@ func TeardownPlan(c Config, o *Owned, pulled []string) [][]string {
 // namespace deletion and the file removals — not those of removals with
 // nothing to remove. When that namespace deletion fails the state file
 // stays, so the record of what is the run's survives for the next
-// `mage k8sTeardown` (task li4).
+// `mage k8sTeardown` (task li4); it also stays, with nothing removed in
+// the cluster, for a refused run (LeaveCluster) and for a record naming
+// no kubeconfig or context (clusterRecord).
 func Teardown(r Runner, c Config, w io.Writer) error {
 	before, known, err := c.Load()
 	if err != nil {
@@ -52,18 +54,18 @@ func Teardown(r Runner, c Config, w io.Writer) error {
 	if !known {
 		_, _ = fmt.Fprintln(w, "teardown: no record of the base images before the run: none removed")
 	}
-	if c.Existing && before.Owned == nil {
-		_, _ = fmt.Fprintln(w, "teardown: no record of what the run created in the existing cluster: "+
-			"nothing removed from the cluster")
+	owned, notice, keep, oerr := clusterRecord(c, before.Owned)
+	if notice != "" {
+		_, _ = fmt.Fprintln(w, "teardown: "+notice)
 	}
-	failed := runPlan(r, TeardownPlan(c, before.Owned, Pulled(before, known, now)), w)
+	failed := runPlan(r, TeardownPlan(c, owned, Pulled(before, known, now)), w)
 	var kerr error
-	if del := namespaceDelete(before.Owned); del != nil && slices.ContainsFunc(failed,
+	if del := namespaceDelete(owned); del != nil && slices.ContainsFunc(failed,
 		func(a []string) bool { return slices.Equal(a, del) }) {
 		kerr = fmt.Errorf("namespaces %s not deleted: record kept in %s",
-			strings.Join(before.Owned.Namespaces, " "), c.StateFile)
+			strings.Join(owned.Namespaces, " "), c.StateFile)
 	}
-	return errors.Join(serr, kerr, removeFiles(c, kerr != nil))
+	return errors.Join(serr, oerr, kerr, removeFiles(c, keep || kerr != nil))
 }
 
 // runPlan runs every step of plan, reports each failure on w, and

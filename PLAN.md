@@ -2121,7 +2121,8 @@ Later phase — plain Linux servers (M4) come first.
   already there and not its own, records the context and what it
   creates before its helm step, and the teardown removes only
   what that record names, in that context — nothing in the
-  cluster without one.
+  cluster without one, with one naming no context, or from a run
+  refused over another context's record.
   **Reopened on el9** (2026-11-21, task zg4): accepted on kind
   only. On a Rocky 9.9 k3s node (el9 5.14.0-741.22.1, SELinux
   enforcing, k3s v1.35.10, containerd 2.2.10, container-selinux

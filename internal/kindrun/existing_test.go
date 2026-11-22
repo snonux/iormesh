@@ -209,3 +209,60 @@ func TestTeardownExistingKeepsRecord(t *testing.T) {
 		}
 	}
 }
+
+// TestRefusedRunLeavesForeignRecord (task li4): a run refused because the
+// state file records another context's objects tears down with
+// LeaveCluster — no helm uninstall, no namespace deletion there, and the
+// state file with that record stays for an explicit `mage k8sTeardown`.
+func TestRefusedRunLeavesForeignRecord(t *testing.T) {
+	c := existingTest(t)
+	owned := &Owned{Kubeconfig: c.Kubeconfig, Context: "elsewhere", Traefik: true, Namespaces: ExistingNamespaces}
+	if err := c.Save(State{BaseImages: map[string][]string{}, Owned: owned}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ClaimExisting(&fake{}, c); !errors.Is(err, ErrForeignRecord) {
+		t.Fatalf("claim over another context's record: %v", err)
+	}
+	c.LeaveCluster = true
+	f := &fake{}
+	var log strings.Builder
+	if err := Teardown(f, c, &log); err != nil {
+		t.Fatal(err)
+	}
+	if got := inCluster(f.calls); got != nil {
+		t.Errorf("refused run changed the other context: %q", got)
+	}
+	if s, _, err := c.Load(); err != nil || s.Owned == nil || s.Owned.Context != "elsewhere" {
+		t.Errorf("foreign record lost: %+v, %v", s.Owned, err)
+	}
+	if !strings.Contains(log.String(), "nothing removed from the cluster") {
+		t.Errorf("no notice: %q", log.String())
+	}
+}
+
+// TestTeardownRecordWithoutContext (task li4): a record naming no
+// context or no kubeconfig (a hand-edited state file) would let
+// `--context=` or `--kubeconfig=` fall back to the kubeconfig's current
+// cluster, so the teardown removes nothing in the cluster, says so,
+// keeps the state file and fails.
+func TestTeardownRecordWithoutContext(t *testing.T) {
+	for name, o := range map[string]Owned{"no context": {Kubeconfig: "/k"}, "no kubeconfig": {Context: "default"}} {
+		c := existingTest(t)
+		o.Traefik, o.Namespaces = true, ExistingNamespaces
+		if err := c.Save(State{BaseImages: map[string][]string{}, Owned: &o}); err != nil {
+			t.Fatal(err)
+		}
+		f := &fake{}
+		var log strings.Builder
+		err := Teardown(f, c, &log)
+		if got := inCluster(f.calls); got != nil {
+			t.Errorf("%s: changed the cluster: %q", name, got)
+		}
+		if _, serr := os.Stat(c.StateFile); err == nil || serr != nil {
+			t.Errorf("%s: error %v, state file %v", name, err, serr)
+		}
+		if !strings.Contains(log.String(), "nothing removed from the cluster") {
+			t.Errorf("%s: no notice: %q", name, log.String())
+		}
+	}
+}

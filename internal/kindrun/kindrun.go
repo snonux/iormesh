@@ -50,6 +50,10 @@ type Config struct {
 	// deletes only the recorded ones (task li4).
 	Existing   bool
 	Namespaces []string
+	// LeaveCluster makes the teardown remove nothing in the cluster and
+	// keep the state file: set for a run that ClaimExisting refused with
+	// ErrForeignRecord, whose record names objects of another run.
+	LeaveCluster bool
 }
 
 // RegistryAt is where the node and the host reach the local registry.
