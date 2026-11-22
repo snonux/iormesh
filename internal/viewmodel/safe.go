@@ -31,6 +31,7 @@ func safeModel(m Model) Model {
 	for i := range h.Sessions {
 		x := &h.Sessions[i]
 		x.Project, x.Host, x.FQDN, x.ID, x.End = s(x.Project), s(x.Host), s(x.FQDN), s(x.ID), s(x.End)
+		x.HostID = s(x.HostID)
 	}
 	h.Clocks = slices.Clone(h.Clocks)
 	for i := range h.Clocks {

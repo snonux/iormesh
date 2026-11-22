@@ -29,7 +29,6 @@ type Tally struct {
 // sessionTally is one session's counts so far.
 type sessionTally struct {
 	Session
-	hostID                                 string
 	lost, skipped, unattributed, attachGap uint64
 	first, last                            uint64 // wall ns
 	segments                               map[string]bool
@@ -46,8 +45,8 @@ func (t *Tally) Add(k SessionKey, segment string, ev *schema.Event) {
 	s := t.session(k)
 	s.segments[segment] = true
 	s.Events++
-	if s.hostID == "" {
-		s.hostID = ev.HostID
+	if s.HostID == "" {
+		s.HostID = ev.HostID
 		t.fqdns[ev.HostID] = k.FQDN
 	}
 	if ev.WallNS != 0 {

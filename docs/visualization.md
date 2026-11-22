@@ -600,25 +600,30 @@ embedded whole:
   requests cut, sessions and how they ended, clock bounds, bad
   segments, ignored entries).
 - **Filter bar** on every list and the mesh: host (the run's
-  hosts, i.e. the store's host directories; a conversation or
-  thread is the directory's when one of its refs starts with
-  `<project>/<host dir>/`, so two directories sharing one FQDN —
+  hosts, i.e. the store's host directories; a conversation is the
+  directory's when one of its steps' refs starts with
+  `<project>/<host dir>/`, a thread when one of its own entries'
+  refs does (send, reply, file: a receive or response entry
+  carries the peer's ref), so two directories sharing one FQDN —
   cloned VMs, a host that only knows itself as `localhost` — never
-  show each other's; one without refs falls back to its FQDNs,
-  matched through the sessions that link a directory to its FQDN;
-  a mesh service is the directory's when a process of it runs
-  there, or an endpoint's whole address — or, for a loopback or
-  link-local one, its `@host` scope — is the directory or one of
-  its FQDNs, never a prefix of it), text (service, thread, pid, path,
+  show each other's; one without such refs falls back to its
+  FQDNs, matched through the sessions that link a directory to
+  its FQDN; a mesh service is the directory's when a process of it
+  runs there, when an endpoint's whole address is the directory or
+  one of its FQDNs (never a prefix of it), or when a loopback or
+  link-local endpoint's `@<host id>` scope is the host id
+  (`/etc/machine-id`, a pod's own id) of one of the directory's
+  sessions), text (service, thread, pid, path,
   method, a stack frame, a ref) and a time window on the
   conversations' start (`HH:MM[:SS]` against the time of day, or
   RFC 3339). The model has no pod yet (M7); the text filter
   matches host and service names meanwhile.
 - `#/selftest` renders every route of the model in turn and
   prints `selftest: ok N routes`, or the routes that threw; it
-  also selects each host of the filter and requires exactly that
-  host's conversations, threads and mesh services to be shown,
-  and nothing for a host the run lacks.
+  also selects each host of the filter and lists what it shows
+  (conversations, threads, mesh services), which the browser test
+  compares with lists pinned for its sample model, and requires
+  nothing for a host the run lacks.
 
 Tests: golden files on the serialized model and on every `show`
 view; `internal/site` tests the page itself — byte-identical

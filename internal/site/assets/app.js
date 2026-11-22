@@ -160,18 +160,23 @@
   }
 
   // endpointOn says whether endpoint label e — host:port, ip:port or
-  // [ip6]:port, plus @<host> for a loopback or link-local address
+  // [ip6]:port, plus @<host id> for a loopback or link-local address
   // scoped to the traced host it was seen on (servicedb
   // Endpoint.Label) — is on the filter's host. A scoped endpoint is
-  // that host's by its scope alone; any other by its whole address
-  // equal to the directory or one of its sessions' FQDNs, never by a
-  // prefix (h1 is not h10, and the directory is no FQDN: task mj4).
-  // Two directories sharing an FQDN both own an endpoint naming it:
-  // the label cannot tell them apart.
+  // that host's by its scope alone: the host id (/etc/machine-id, a
+  // pod's own id), matched against the host id of the directory's
+  // sessions. Any other is by its whole address equal to the directory
+  // or one of its sessions' FQDNs, never by a prefix (h1 is not h10,
+  // and the directory is no FQDN: task mj4). Two directories sharing
+  // an FQDN both own an unscoped endpoint naming it: the label cannot
+  // tell them apart.
   function endpointOn(e) {
     e = String(e || '');
     const at = e.lastIndexOf('@');
-    if (at >= 0) { return hostMatch(e.slice(at + 1)); }
+    if (at >= 0) {
+      const id = e.slice(at + 1);
+      return hostSessions().some(function (s) { return !!s.host_id && s.host_id === id; });
+    }
     const colon = e.lastIndexOf(':');
     return colon > 0 && hostMatch(e.slice(0, colon).replace(/^\[(.*)\]$/, '$1'));
   }
@@ -225,8 +230,15 @@
     return [s.label, s.service, s.to, s.thread, s.host, s.ref].concat(arr(s.stack)).join(' ');
   }
 
+  // ownActs are the thread story acts whose entry carries the thread's
+  // own ref; a receive or response entry carries the step's, which is
+  // the peer's (viewmodel storyBook.mark), so it never places the
+  // thread on a host.
+  const ownActs = ['send', 'reply', 'file'];
+
   function storyShown(t) {
-    if (filter.host && !onHost(arr(t.entries).map(function (e) { return e.ref; }), [t.host])) { return false; }
+    const own = arr(t.entries).filter(function (e) { return ownActs.indexOf(e.act) >= 0; });
+    if (filter.host && !onHost(own.map(function (e) { return e.ref; }), [t.host])) { return false; }
     return hit([t.service, t.thread, t.host, String(t.pid), String(t.tid)].concat(
       arr(t.entries).map(function (e) { return e.label + ' ' + e.peer; })));
   }
@@ -950,72 +962,47 @@
         });
       });
     }
-    hostFilterCheck(failed);
+    const shownByHost = hostFilterList(failed);
     routes.push.apply(routes, guarded);
     const out = el('pre', '', failed.length ? 'selftest: FAILED\n' + failed.join('\n') : 'selftest: ok ' + routes.length + ' routes');
     out.id = 'selftest';
-    document.getElementById('view').replaceChildren(out);
+    document.getElementById('view').replaceChildren(out, shownByHost);
   }
 
-  // hostFilterCheck selects each host of the dropdown (a store host
-  // directory) in turn and requires each conversation, thread and mesh
-  // service to be shown exactly when it is that directory's: a
-  // conversation or thread when one of its refs starts with
-  // <project>/<dir>/ — so two directories sharing one FQDN never show
-  // each other's (task mj4) — and a service when a process of it runs
-  // there or an endpoint names the directory or one of its sessions'
-  // FQDNs (task 4i4: the two differ in a real run). A host the run does
-  // not have shows nothing. It restores the filter after.
-  function hostFilterCheck(failed) {
+  // hostFilterList selects each host of the dropdown (a store host
+  // directory) in turn and lists, one item per host by its index, what
+  // the filter shows: conversation IDs, thread and service indices.
+  // The browser test compares the list with the model's expected one,
+  // pinned by hand (site_test.go hostFilterWant) rather than restated
+  // here. A host the run does not have must show nothing. It restores
+  // the filter after.
+  function hostFilterList(failed) {
     const saved = filter.host;
-    for (const h of arr(M.run && M.run.hosts)) {
+    const box = el('ul');
+    box.id = 'hostfilter';
+    arr(M.run && M.run.hosts).forEach(function (h, i) {
       filter.host = h;
-      const want = expectOnHost(h);
-      expectShown(failed, h, 'conversation', M.conversations, convShown, want.conv, function (c) { return c.id; });
-      expectShown(failed, h, 'thread', M.threads, storyShown, want.thread, function (t) { return t.service + ' ' + t.thread; });
-      expectShown(failed, h, 'service', M.services, serviceShown, want.svc, function (s) { return s.name; });
-    }
+      const s = shownOnHost();
+      add(box, el('li', '', 'host ' + i + ': convs ' + s.convs + '; threads ' + s.threads + '; services ' + s.services));
+    });
     filter.host = '\u0000no such host';
-    const none = function () { return false; };
-    expectShown(failed, filter.host, 'conversation', M.conversations, convShown, none, function (c) { return c.id; });
-    expectShown(failed, filter.host, 'thread', M.threads, storyShown, none, function (t) { return t.thread; });
-    expectShown(failed, filter.host, 'service', M.services, serviceShown, none, function (s) { return s.name; });
-    filter.host = saved;
-  }
-
-  // expectShown reports each item of list whose shown() under host h
-  // differs from want().
-  function expectShown(failed, h, what, list, shown, want, name) {
-    for (const x of arr(list)) {
-      const got = shown(x), exp = want(x);
-      if (got !== exp) {
-        failed.push('filter host ' + clean(h) + ': ' + what + ' ' + clean(name(x)) + (got ? ' shown' : ' hidden'));
-      }
+    const none = shownOnHost();
+    if (none.convs || none.threads || none.services) {
+      failed.push('filter host not in the run shows: ' + JSON.stringify(none));
     }
+    filter.host = saved;
+    return box;
   }
 
-  // expectOnHost states, apart from the filter's own code, which
-  // conversations, threads and services are host directory h's.
-  function expectOnHost(h) {
-    const sess = arr((M.health || {}).sessions).filter(function (s) { return s.host === h; });
-    const names = [h].concat(sess.map(function (s) { return s.fqdn; }).filter(Boolean));
-    const ofRef = function (ref) {
-      return sess.some(function (s) { return String(ref || '').indexOf(s.project + '/' + h + '/') === 0; });
-    };
-    const ep = function (e) {
-      return names.some(function (n) {
-        const rest = e.indexOf(n + ':') === 0 ? e.slice(n.length + 1) : '';
-        return /^[0-9]+$/.test(rest) || e.slice(-(n.length + 1)) === '@' + n;
-      });
+  // shownOnHost is what the current filter shows: the conversations'
+  // IDs and the threads' and services' indices, space-separated.
+  function shownOnHost() {
+    const idx = function (list, shown) {
+      return arr(list).map(function (x, i) { return shown(x) ? String(i) : ''; }).filter(Boolean).join(' ');
     };
     return {
-      conv: function (c) { return arr(c.steps).some(function (s) { return ofRef(s.ref); }); },
-      thread: function (t) { return arr(t.entries).some(function (e) { return ofRef(e.ref); }); },
-      svc: function (s) {
-        return arr(M.processes).some(function (p) {
-          return p.host === h && (p.service === s.name || arr(p.serves).indexOf(s.name) >= 0);
-        }) || arr(s.endpoints).some(ep);
-      },
+      convs: arr(M.conversations).filter(convShown).map(function (c) { return c.id; }).join(' '),
+      threads: idx(M.threads, storyShown), services: idx(M.services, serviceShown),
     };
   }
 
