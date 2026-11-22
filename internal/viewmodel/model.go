@@ -131,7 +131,12 @@ type Session struct {
 	Project string `json:"project"`
 	Host    string `json:"host"` // the store's host directory
 	FQDN    string `json:"fqdn"`
-	ID      string `json:"id"`
+	// HostID is the host id its events carry (/etc/machine-id, a pod's
+	// own id): what scopes a loopback or link-local endpoint
+	// (servicedb Endpoint.Host), which the site's host filter maps back
+	// to the host directory through it.
+	HostID string `json:"host_id"`
+	ID     string `json:"id"`
 	// Segments and Events count what was merged of it.
 	Segments int       `json:"segments"`
 	Events   uint64    `json:"events"`

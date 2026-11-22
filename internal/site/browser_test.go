@@ -45,11 +45,32 @@ func TestBrowserSelftest(t *testing.T) {
 	if want := "selftest: ok " + strconv.Itoa(selftestRoutes(sampleModel(hostile))) + " routes"; !strings.Contains(string(out), want) {
 		t.Errorf("selftest did not pass with %q; DOM:\n%s", want, out)
 	}
+	// The host filter, host by host (task mj4): exactly the pinned
+	// conversations, threads and services.
+	for _, want := range hostFilterWant {
+		if !strings.Contains(string(out), "<li>"+want+"</li>") {
+			t.Errorf("host filter: want %q in #hostfilter; got %s", want, hostFilterGot(string(out)))
+		}
+	}
 	for _, line := range strings.Split(stderr.String(), "\n") {
 		if strings.Contains(line, "CONSOLE") || strings.Contains(line, "Refused to") {
 			t.Errorf("console: %s", line)
 		}
 	}
+}
+
+// hostFilterGot is the selftest's #hostfilter list out of the dumped
+// DOM, for a failure message.
+func hostFilterGot(dom string) string {
+	i := strings.Index(dom, `<ul id="hostfilter">`)
+	if i < 0 {
+		return "no #hostfilter list"
+	}
+	rest := dom[i:]
+	if j := strings.Index(rest, "</ul>"); j >= 0 {
+		rest = rest[:j]
+	}
+	return rest
 }
 
 // selftestRoutes is how many routes app.js's selftest renders for m:
