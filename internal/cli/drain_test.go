@@ -14,38 +14,60 @@ import (
 	"iormesh/internal/target"
 )
 
-// overCapSession runs a session whose trace dir already holds 2 MiB of
-// published segments against a 1 MiB -disk-max-bytes — a sidecar
-// restarted after its previous session ended at the cap — on a fake
-// tracer in the background. It returns the oversized segment (removing
-// it is collect draining the dir), the stderr, the cancel (SIGTERM) and
-// the channel runSession's result arrives on.
-func overCapSession(t *testing.T) (string, *syncBuffer, context.CancelFunc, chan error) {
+// capSession is a session against a 1 MiB -disk-max-bytes on a fake
+// tracer, run in the background.
+type capSession struct {
+	tr     *fakeTracer
+	seg    string // a 2 MiB segment in ready/; removing it is collect draining the dir
+	stderr *syncBuffer
+	cancel context.CancelFunc // SIGTERM
+	done   chan error         // runSession's result
+}
+
+// startCapSession starts a capSession lasting duration. With preload,
+// seg is written before the start — a sidecar restarted after its
+// previous session ended at the cap; without, the dir starts empty and
+// the test writes seg itself (fillSegment).
+func startCapSession(t *testing.T, duration time.Duration, preload bool) capSession {
 	t.Helper()
-	tr := newFakeTracer()
+	s := capSession{tr: newFakeTracer(), stderr: &syncBuffer{}, done: make(chan error, 1)}
 	old := openTracer
-	openTracer = func(bpf.Config) (tracer, error) { return tr, nil }
+	openTracer = func(bpf.Config) (tracer, error) { return s.tr, nil }
 	t.Cleanup(func() { openTracer = old })
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	ready := filepath.Join(dir, "shop", segment.ReadyDir)
-	if err := os.MkdirAll(ready, 0o755); err != nil {
-		t.Fatal(err)
+	s.seg = filepath.Join(dir, "shop", segment.ReadyDir, "old.events.parquet")
+	if preload {
+		fillSegment(t, s.seg)
 	}
-	seg := filepath.Join(ready, "old.events.parquet")
-	if err := os.WriteFile(seg, make([]byte, 2<<20), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cfg := runConfig{project: "shop", duration: 300 * time.Millisecond, traceDir: dir,
+	cfg := runConfig{project: "shop", duration: duration, traceDir: dir,
 		diskMaxBytes: 1 << 20, spec: target.Spec{Pattern: "iormesh-drain-test-matches-nothing-*"}}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	stderr := &syncBuffer{}
-	done := make(chan error, 1)
-	go func() { done <- runSession(ctx, cfg, stderr) }()
-	return seg, stderr, cancel, done
+	s.cancel = cancel
+	go func() { s.done <- runSession(ctx, cfg, s.stderr) }()
+	return s
+}
+
+// fillSegment writes 2 MiB, twice the cap, as a published segment.
+func fillSegment(t *testing.T, seg string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(seg), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(seg, make([]byte, 2<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// overCapSession is a short session whose trace dir is over the cap
+// before it starts, returned as the earlier tests take it.
+func overCapSession(t *testing.T) (string, *syncBuffer, context.CancelFunc, chan error) {
+	t.Helper()
+	s := startCapSession(t, 300*time.Millisecond, true)
+	return s.seg, s.stderr, s.cancel, s.done
 }
 
 // fastDrainPoll makes the drain wait poll every few milliseconds.
@@ -119,5 +141,47 @@ func TestRunHostOverCapFails(t *testing.T) {
 	_, _, _, done := overCapSession(t)
 	if err := returned(t, done, "host"); !errors.Is(err, segment.ErrDiskLimit) {
 		t.Errorf("host: run returned %v, want the disk limit", err)
+	}
+}
+
+// waitStderr waits (polling, bounded) until the session's stderr holds
+// want, failing if the run returns first.
+func waitStderr(t *testing.T, s capSession, want string, bound time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(bound)
+	for !strings.Contains(s.stderr.String(), want) {
+		if time.Now().After(deadline) {
+			t.Fatalf("no %q on stderr within %v: %s", want, bound, s.stderr)
+		}
+		select {
+		case err := <-s.done:
+			t.Fatalf("run returned before %q: %v; stderr: %s", want, err, s.stderr)
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+// TestRunPodCapTripsMidSession: a pod session under its cap with a long
+// -duration; segments outgrow the cap while it traces, so the writer's
+// watchdog tick (segment.DefaultCheckEvery, 5 s) ends the session with
+// disk_limit. The run then waits with the tracer closed — BPF released
+// — and returns nil (a clean disk_limit end) once collect drained the
+// dir (task ki4).
+func TestRunPodCapTripsMidSession(t *testing.T) {
+	fakePodEnv(t, inPod)
+	fastDrainPoll(t)
+	s := startCapSession(t, time.Hour, false)
+	waitStderr(t, s, "iormesh: attached", 10*time.Second)
+	fillSegment(t, s.seg)
+	waitStderr(t, s, "waiting for collect to drain it", 20*time.Second)
+	if !s.tr.isClosed() {
+		t.Error("waiting at the cap with the tracer still open")
+	}
+	stillRunning(t, s.done, "mid-session cap")
+	if err := os.Remove(s.seg); err != nil {
+		t.Fatal(err)
+	}
+	if err := returned(t, s.done, "drained"); err != nil {
+		t.Errorf("drained after a disk_limit end: run returned %v, want nil", err)
 	}
 }

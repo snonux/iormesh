@@ -49,10 +49,10 @@ func (c collector) podEntryCollect(ctx context.Context, pe podEntry, projects []
 // collect to drain it rather than exiting (task ki4), so only a crash,
 // an OOM kill, the app container's restart taking a debug tracer with
 // it, or a session from before -linger stops it); one whose exec fails
-// is an error. The exec
-// names st.Container, the newest debug tracer (task ah4): the trace
-// emptyDir is the pod's, so its `iormesh ready` also serves what ended
-// predecessors published, under the same pod-<uid> host.
+// is an error. The exec names st.Container, the newest debug tracer
+// (task ah4): the trace emptyDir is the pod's, so its `iormesh ready`
+// also serves what ended predecessors published, under the same
+// pod-<uid> host.
 func (c collector) pod(ctx context.Context, pe podEntry, st k8s.PodState, projects []string) error {
 	label := pe.label(st.Name)
 	if !st.Tracer {
