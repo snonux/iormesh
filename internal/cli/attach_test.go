@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"iormesh/internal/javaattach"
+	"iormesh/internal/schema"
+	"iormesh/internal/types"
 )
 
 // fakeLoader records the loads asked of it and answers per pid.
@@ -163,5 +165,67 @@ func TestAttachAgentsHandlesRecords(t *testing.T) {
 	}
 	if len(l.got) != 3 {
 		t.Errorf("%d loads, want 3", len(l.got))
+	}
+}
+
+// blockingLoader hands the record loop a batch on its first load (fail
+// says how: a batch the ended correlator refuses, or a closed stream),
+// then blocks until its ctx is done, as a real attach would until its
+// timeout: the stage made for that load is still in flight when the
+// loop gives up.
+type blockingLoader struct {
+	tr    *fakeTracer
+	fail  func(*fakeTracer)
+	loads int
+}
+
+func (b *blockingLoader) Load(ctx context.Context, _ javaattach.Request) error {
+	b.loads++
+	if b.loads == 1 {
+		b.fail(b.tr)
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// TestAttachAgentsRemovesStagesOnError: when a record fails, or the
+// stream closes, while `run -agent` is still loading, the loads are
+// cancelled and every stage made inside a JVM's root is removed, not
+// left in its /tmp; no JVM after the failure is staged.
+func TestAttachAgentsRemovesStagesOnError(t *testing.T) {
+	fails := map[string]func(*fakeTracer){
+		"record fails":  func(tr *fakeTracer) { tr.records <- []any{&types.FdEvent{Pid: 20, Tid: 20}} },
+		"stream closed": func(tr *fakeTracer) { close(tr.records) },
+	}
+	for name, fail := range fails {
+		t.Run(name, func(t *testing.T) {
+			fakeProcs(t, 20, 21)
+			agent, spool := agentFiles(t)
+			tr := newFakeTracer()
+			l := &blockingLoader{tr: tr, fail: fail}
+			useLoader(t, l)
+			stages := useStages(t, agent, nil)
+			c := testCorrelator(t, t.TempDir())
+			defer func() { _ = c.Close() }()
+			s, _ := pidSession(t, tr, c, 20, 21)
+			if err := c.End(schema.EndStop); err != nil {
+				t.Fatal(err)
+			}
+			// Cancelled at cleanup, so a loader the loop abandoned ends.
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			if err := s.attachAgents(ctx, agent, spool, &bytes.Buffer{}); err == nil {
+				t.Fatal("attachAgents succeeded, want the record loop's error")
+			}
+			if err := s.java.close(); err != nil {
+				t.Fatal(err)
+			}
+			if len(*stages) != 1 {
+				t.Fatalf("%d stages made, want 1 (pid 21 not staged after the failure)", len(*stages))
+			}
+			if r := (*stages)[0].removed; r != 1 {
+				t.Errorf("stage %s removed %d times, want once", (*stages)[0].name, r)
+			}
+		})
 	}
 }
