@@ -87,15 +87,17 @@ func AppServices(eps []Endpoint) map[string]string {
 	return out
 }
 
-// clientRows aggregates the connections per (client, endpoint) and
-// calls fn for each, in order.
+// clientRows aggregates the connections per (client, endpoint) — the
+// endpoint keyed as endpointRows keys it, a local IP's scoping host
+// included — and calls fn for each, in order.
 func (d *DB) clientRows(ctx context.Context, f Filter, fn func(string, epKey, Interaction)) error {
 	rows, err := d.db.QueryContext(ctx, `SELECT
 		CASE WHEN client_host = '' THEN '`+Untraced+`'
 			ELSE COALESCE(NULLIF(client_app, ''), client_comm, '') END AS client,
-		hostname, ip, port, COUNT(*), SUM(state = 'unresolved'), MIN(first_seen), MAX(last_seen)
+		hostname, ip, port, `+endpointHostSQL+`,
+		COUNT(*), SUM(state = 'unresolved'), MIN(first_seen), MAX(last_seen)
 		FROM conn WHERE role <> 'unknown' AND ip <> '' AND `+projectClause+`
-		GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3, 4`, f.arg())
+		GROUP BY 1, 2, 3, 4, 5 ORDER BY 1, 2, 3, 4, 5`, f.arg())
 	if err != nil {
 		return fmt.Errorf("servicedb: %w", err)
 	}
@@ -105,7 +107,7 @@ func (d *DB) clientRows(ctx context.Context, f Filter, fn func(string, epKey, In
 		var k epKey
 		var port, first, last int64
 		var in Interaction
-		if err := rows.Scan(&client, &k.hostname, &k.ip, &port, &in.Conns, &in.Unresolved,
+		if err := rows.Scan(&client, &k.hostname, &k.ip, &port, &k.host, &in.Conns, &in.Unresolved,
 			&first, &last); err != nil {
 			return fmt.Errorf("servicedb: %w", err)
 		}

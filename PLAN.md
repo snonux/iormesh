@@ -1295,7 +1295,11 @@ Kubernetes (M7) build on it.
   The requests give the TLS and path hints; the hostname is
   the client's HTTP host when that is a name, else its DNS
   lookup of the endpoint's address (a best guess: one address
-  may serve many names). Rules match
+  may serve many names). An endpoint is hostname, IP and
+  port, plus the anchor host for a loopback or link-local IP
+  (task ai4): that address is a different machine on every
+  host, so two hosts' local services never fold into one.
+  Rules match
   hostname or IP, case-insensitively; port-specific beats
   any-port, then the longer glob, then the older rule; a
   duplicate is refused, never overwritten. The file is 0600 in

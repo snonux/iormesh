@@ -85,7 +85,7 @@ func TestNamesAreRetroactive(t *testing.T) {
 	s := observeMesh(t)
 	importSnap(t, d, s)
 	labels := func() []string { return endpointLabels(t, d) }
-	want := []string{"10.0.0.2:8443", "127.0.0.1:9000", "203.0.113.9:5432", "inventory.svc:8443"}
+	want := []string{"10.0.0.2:8443", "127.0.0.1:9000@hA", "203.0.113.9:5432", "inventory.svc:8443"}
 	if got := labels(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("labels %v, want %v", got, want)
 	}
@@ -94,7 +94,7 @@ func TestNamesAreRetroactive(t *testing.T) {
 		t.Fatal(err)
 	}
 	importSnap(t, d, s)
-	want = []string{"10.0.0.2:8443", "127.0.0.1:9000", "203.0.113.9:5432", "inventory"}
+	want = []string{"10.0.0.2:8443", "127.0.0.1:9000@hA", "203.0.113.9:5432", "inventory"}
 	if got := labels(); !reflect.DeepEqual(got, want) {
 		t.Errorf("after the rule: %v, want %v", got, want)
 	}
@@ -102,7 +102,7 @@ func TestNamesAreRetroactive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want = []string{"127.0.0.1:9000", "203.0.113.9:5432", "inventory", "inventory"}
+	want = []string{"127.0.0.1:9000@hA", "203.0.113.9:5432", "inventory", "inventory"}
 	if got := labels(); !reflect.DeepEqual(got, want) {
 		t.Errorf("unnamed first: %v, want %v", got, want)
 	}
