@@ -3319,7 +3319,8 @@ func (cfg startConfig) unitArgs(self string) []string {
   times, and the run's own tracer `version` and `argv` (task
   ph4: upgrade replaces the binary, not a running session, so
   only the run can say which build it is; a state from an older
-  tracer lacks both and reads as version unknown); `ended` with
+  tracer lacks both and reads as version unknown) and
+  `operator_stop: false` (task zh4); `ended` with
   the end reason before the segment writer
   closes (after that its lock is free and the next run of the
   project owns the file). `start` polls `systemctl show` and
@@ -3333,7 +3334,16 @@ func (cfg startConfig) unitArgs(self string) []string {
   publish) and prints the recorded end — and fails when
   `state.json` does not say `ended` (the run was killed after
   the stop timeout, or never attached: its last minute is
-  unpublished; task eb4). `status [-project P]
+  unpublished; task eb4). Before and after the stop it sets
+  `operator_stop: true` in `state.json` (task zh4: a reboot's
+  SIGTERM ends a run as `stop` too, and `iormeshctl ensure`
+  must leave only the operator's stops alone); the run's end
+  record re-reads the file, so the first mark survives it, and
+  covers a run SIGKILLed after the timeout. Each writer of
+  `state.json` uses its own temporary name (pid). Through the
+  sudoers rule the mark is written only under the confined
+  trace root, never into a `-trace-dir` the caller chose.
+  `status [-project P]
   [-json]` covers one project or every one with a loaded unit
   or a `state.json` under `-trace-dir`, with the count of
   events segments waiting in `ready/`; an unknown project or a
@@ -3661,6 +3671,43 @@ iormeshctl list [-registry FILE]                       # contacts nothing
   report / unreachable host, escaped control bytes, a pod with
   `-status`, an old image's `-state` fallback, a pod without a
   tracer, a pod gone; `list` for hosts and pods.
+
+`ensure` (task zh4, `internal/ctl/ensure.go`) keeps sessions
+going over days, from a timer
+([architecture.md](architecture.md#tracing-for-days)):
+
+```sh
+iormeshctl ensure [-project P]... [-registry FILE] [-store DIR] [HOST...]
+ssh H sudo -n /opt/iormesh/bin/iormesh status -json    # hostReports
+# per project that ended on its own (deployer.start, deploy's argv):
+ssh H sudo -n /opt/iormesh/bin/iormesh start -project P ...
+# then collect's calls for every selected project (collector.host)
+# a disk_limit end: status -json again, start only if ready/ is empty
+```
+
+- The decision (`ensureDecide`) reads the report: a live unit
+  or a running state is left; `dead`, a unit without a state,
+  and an `ended` session restart — unless `operator_stop` is
+  true, or the end is `stop` with no `operator_stop` (a tracer
+  that predates it cannot tell a reboot from the operator), or
+  it is `disk_limit`, which waits for the collect. A project
+  with no report (never ran there) is deploy's. A report error
+  is that project's failure; the host is still collected.
+- A status that cannot be read fails the host before anything
+  is started; a failed start or collect fails it after the
+  rest ran; every host runs under `env.onHost`, and the command
+  exits 1 naming the failed hosts. Hosts only: a pod entry is a
+  usage error. The deploy record is not touched (ensure does
+  not know the installed build).
+- Tests (`internal/ctl/ensure_test.go`): the exact calls for a
+  restart, an operator stop and a running session; each
+  decision; `disk_limit` collected-then-restarted, still full,
+  collect failed; an unreachable host, a failed start, a report
+  error; pod, unregistered host and stray project refused with
+  no call. Tracer side (`internal/cli/operatorstop_test.go`):
+  the mark before and after a stop, on an unclean stop, not
+  outside the trace root through sudo, `false` from the start,
+  absent in an old state.
 
 `collect`, as the commands it runs (built by task eb4,
 `internal/ctl/collect.go`; no sudo anywhere):

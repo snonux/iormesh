@@ -1417,6 +1417,31 @@ Kubernetes (M7) build on it.
   `state.json` so a skew between the deployed build and a
   running session is visible; a state from an older tracer
   lacks them and shows the version as unknown.
+  Built (task zh4, owner-approved 2026-11-22): **tracing over
+  days**. A session ends after its `-duration` and its
+  transient unit has no `Restart=`, so a reboot, an OOM kill
+  or a disk-limit trip ends it for good. `iormeshctl ensure
+  [-project P]... [HOST...]` reads each host's `status -json`
+  and starts again (deploy's start argv and start path) every
+  registered project whose session ended on its own —
+  `duration`, `targets_exited`, `error`, a `stop` that was not
+  the operator's, a run that died — then collects the host.
+  An explicit stop stays distinguishable from an end: `iormesh
+  stop` sets `operator_stop: true` in `state.json` (before the
+  stop, kept by the run's end record, and again after; the run
+  writes `false` from its start), since a reboot's SIGTERM ends
+  a run with the same `stop` reason; ensure leaves those
+  stopped. A tracer from before the field (`operator_stop`
+  absent) cannot tell, so its `stop` ends are left too. A
+  `disk_limit` end is collected first and restarted only when
+  the collect emptied its `ready/` (a second status read);
+  should the partition still be over the limit, the new run's
+  watchdog refuses at its start, so no restart loop fills the
+  disk. ensure starts no project the host never ran and never
+  upgrades — both are deploy's — takes hosts only (a pod's
+  tracer is its debug container), and run again only collects,
+  so a systemd user timer or a cron line drives it
+  ([architecture.md](docs/architecture.md#tracing-for-days)).
 - Target platform for the tracer: Rocky Linux 9 first (BTF
   present; ior's Rocky 9 build/Docker patterns apply), amd64
   and arm64. Deployed binaries come out of the container build

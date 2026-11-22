@@ -7,6 +7,7 @@
 //	                  [-image IMG] [-selinux-type TYPE] [-selinux-level LEVEL] [-attach-timeout D]
 //	                  HOST|POD...
 //	iormeshctl status [-project NAME]... [-registry FILE] [K8S] [HOST|POD...]
+//	iormeshctl ensure [-project NAME]... [-registry FILE] [-store DIR] [HOST...]
 //	iormeshctl list [-registry FILE]
 //	iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-routes FILE]
 //	                 [-registry FILE]
@@ -45,6 +46,8 @@
 // tracer through the sudoers rule and starts the projects (deploy.go).
 // status prints a table of each target's tracer state from the tracers'
 // own status reports (status.go), and list prints the registry (list.go).
+// ensure restarts the sessions that ended on their own and collects, for
+// tracing over days from a timer (ensure.go).
 // build merges the collected segments offline into the merged graph
 // export, the service database and the view model, and refresh is
 // collect then build (build.go); show prints the last build's view
@@ -227,6 +230,7 @@ var commands = map[string]func([]string, env) error{
 	"collect":    collectCommand,
 	"deploy":     deployCommand,
 	"status":     statusCommand,
+	"ensure":     ensureCommand,
 	"list":       listCommand,
 	"build":      buildCommand,
 	"refresh":    refreshCommand,
@@ -318,6 +322,7 @@ func usage(w io.Writer) {
                     [K8S] [-image IMG] [-selinux-type TYPE] [-selinux-level LEVEL]
                     [-attach-timeout D] HOST|POD...
   iormeshctl status [-project NAME]... [-registry FILE] [K8S] [HOST|POD...]
+  iormeshctl ensure [-project NAME]... [-registry FILE] [-store DIR] [HOST...]
   iormeshctl list [-registry FILE]
   iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-routes FILE]
                    [-registry FILE]
@@ -355,7 +360,12 @@ path and opens it with xdg-open (open on macOS) when there is one.
 deploy only upgrades a tracer already installed on the host (PLAN.md
 decision #1). status asks every target's tracer (sudo iormesh status, or
 iormesh ready -status in a pod) and prints one row per project; list
-prints the registry. collect without HOST collects every registered host; rm
+prints the registry. ensure, per host (every registered one without
+HOST), starts again every session that ended on its own (duration,
+targets gone, error, reboot, crash), never one stopped with iormesh
+stop, then collects; a disk_limit end restarts only once the collect
+emptied its ready/. It never upgrades and starts no project the host
+never ran, so it is safe from a timer (docs/architecture.md). collect without HOST collects every registered host; rm
 stops, syncs off and uninstalls before it unregisters, and refuses to
 uninstall over traces it could not sync unless -force. build (and
 refresh, which is collect then build) merges every project in the store

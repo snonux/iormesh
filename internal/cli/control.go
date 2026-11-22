@@ -66,7 +66,9 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 // stop stops the project's unit: systemd sends SIGTERM, the run drains,
 // writes its end event and publishes the active segment as its last
 // (decision #19). It then prints the end state.json recorded, and fails
-// when there is none: the stop happened, the clean end did not.
+// when there is none: the stop happened, the clean end did not. Before
+// and after the stop it marks state.json as the operator's stop
+// (markOperatorStop, task zh4), which iormeshctl ensure leaves ended.
 func (c control) stop(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
 	fs.SetOutput(c.stderr)
@@ -85,15 +87,20 @@ func (c control) stop(ctx context.Context, args []string) error {
 	if !u.live() {
 		return fmt.Errorf("project %s: %s is not running (%s)", *pf.project, unit, u)
 	}
+	dir := filepath.Join(*pf.traceDir, *pf.project)
+	mark := c.markStop(dir)
 	if err := stopUnit(ctx, c.sys, unit); err != nil {
-		return err
+		return errors.Join(err, mark)
 	}
+	// The second mark is the one that counts: it either finds the first
+	// kept by the run's end record or writes it again.
+	mark = c.markStop(dir)
 	// The unit is gone either way, but only an `ended` state says the run
 	// drained and published its last segment: a run SIGKILLed after
 	// TimeoutStopSec (or one that never attached) leaves its active minute
 	// unpublished. The caller — iormeshctl rm, before an uninstall that
 	// would delete that file — must learn of it, so this is an error.
-	st, err := readState(filepath.Join(*pf.traceDir, *pf.project))
+	st, err := readState(dir)
 	if err != nil {
 		return fmt.Errorf("stopped %s, but its end is unknown, the last segment may be unpublished: %w", unit, err)
 	}
@@ -103,7 +110,24 @@ func (c control) stop(ctx context.Context, args []string) error {
 	}
 	_, _ = fmt.Fprintf(c.stdout, "iormesh: stopped %s: session %s ended (%s) at %s\n",
 		unit, st.Session, st.EndReason, st.EndedAt.Format(time.RFC3339))
+	if mark != nil {
+		return fmt.Errorf("stopped %s, but could not record it as the operator's stop "+
+			"(iormeshctl ensure may restart it): %w", unit, mark)
+	}
 	return nil
+}
+
+// markStop records the operator's stop in dir's state.json
+// (markOperatorStop). Through the sudoers rule stop takes any
+// -trace-dir, and only reads there; it writes only under the confined
+// trace root, which is root's, never as root into a directory the
+// caller chose. Elsewhere it is a no-op, as for a session that was never
+// started confined.
+func (c control) markStop(dir string) error {
+	if sudoGated(c.self, c.env, os.Lstat) && filepath.Dir(filepath.Clean(dir)) != c.confine.traceRoot {
+		return nil
+	}
+	return markOperatorStop(dir)
 }
 
 // status reports the project's session, or with no -project every session

@@ -59,6 +59,13 @@ type sessionState struct {
 	// values as unknown, never as an error.
 	Version string   `json:"version,omitempty"`
 	Argv    []string `json:"argv,omitempty"`
+	// OperatorStop is true once `iormesh stop` ended (or is ending) the
+	// session (task zh4): the end reason alone cannot say so, since a
+	// reboot's or anyone's SIGTERM ends a run as "stop" too, and
+	// iormeshctl ensure restarts every end but the operator's. The run
+	// writes false from its start, so a reader tells "not the operator"
+	// (false) from a tracer that predates the field (absent: nil).
+	OperatorStop *bool `json:"operator_stop,omitempty"`
 }
 
 // markRunning writes state.json once the probes are attached (beside
@@ -66,7 +73,8 @@ type sessionState struct {
 // -trace-dir. The project directory was checked and locked by
 // segment.New, so only this run writes there. It records this binary's
 // version and os.Args, the run's own argv (for a unit, the `run` argv
-// start handed systemd-run).
+// start handed systemd-run). OperatorStop starts out false: only a later
+// `iormesh stop` sets it (markOperatorStop).
 func (o *segOutput) markRunning(cfg runConfig, targets string, now time.Time) error {
 	if o == nil {
 		return nil
@@ -75,7 +83,29 @@ func (o *segOutput) markRunning(cfg runConfig, targets string, now time.Time) er
 	return writeState(o.dir, sessionState{Project: cfg.project, Session: o.session, FQDN: o.fqdn,
 		PID: pid, PIDStartNS: processStart(uint32(pid)), InvocationID: os.Getenv("INVOCATION_ID"),
 		State: stateRunning, Targets: targets, StartedAt: now.UTC(), EndsBy: now.Add(cfg.duration).UTC(),
-		Version: version.Stamped(), Argv: slices.Clone(os.Args)})
+		Version: version.Stamped(), Argv: slices.Clone(os.Args), OperatorStop: new(false)})
+}
+
+// markOperatorStop sets OperatorStop in dir's state.json, if there is
+// one (task zh4). stop calls it before the unit stops and again after:
+// the run's markEnded re-reads the file, so the first mark survives the
+// end record, and covers a run SIGKILLed after the stop timeout; the
+// second covers a mark the run's own write raced past (an end by
+// duration at the same moment). Nothing to mark is not an error: a run
+// that never attached has no state to carry it.
+func markOperatorStop(dir string) error {
+	st, err := readState(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if st.OperatorStop != nil && *st.OperatorStop {
+		return nil
+	}
+	st.OperatorStop = new(true)
+	return writeState(dir, st)
 }
 
 // markEnded records the end in state.json, if markRunning wrote it. It is
@@ -98,13 +128,16 @@ func (o *segOutput) markEnded(reason string, now time.Time) error {
 
 // writeState replaces dir/state.json atomically (a temporary file, fsync,
 // rename), so status never reads half a file. 0644: status runs under
-// sudo, but the deploying user may read it too, like the segments.
+// sudo, but the deploying user may read it too, like the segments. The
+// temporary name carries the writer's pid: the run and a concurrent
+// `iormesh stop` (markOperatorStop) each write their own, never one
+// another's half-written file.
 func writeState(dir string, st sessionState) error {
 	b, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return fmt.Errorf("state: %w", err)
 	}
-	tmp := filepath.Join(dir, "."+StateFile+".tmp")
+	tmp := filepath.Join(dir, fmt.Sprintf(".%s.%d.tmp", StateFile, os.Getpid()))
 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o644)
 	if err != nil {
 		return fmt.Errorf("state: %w", err)

@@ -22,12 +22,14 @@ import (
 // never start, stop or list a real unit. It records every argv; show
 // answers from units (absent: not-found), list-units from the loaded
 // units, and onRun runs when systemd-run is called (a test's stand-in for
-// the unit's run writing its state).
+// the unit's run writing its state), onStop when systemctl stop is (the
+// run recording its end).
 type fakeSystemd struct {
-	calls [][]string
-	units map[string]unitState
-	onRun func(args []string)
-	fail  map[string]error // by subcommand: "systemd-run", "stop", ...
+	calls  [][]string
+	units  map[string]unitState
+	onRun  func(args []string)
+	onStop func()
+	fail   map[string]error // by subcommand: "systemd-run", "stop", ...
 }
 
 func newFakeSystemd() *fakeSystemd {
@@ -54,6 +56,9 @@ func (f *fakeSystemd) Output(_ context.Context, name string, args ...string) ([]
 		return f.list(), nil
 	case "stop":
 		delete(f.units, args[len(args)-1])
+		if f.onStop != nil {
+			f.onStop()
+		}
 	}
 	return nil, nil
 }
