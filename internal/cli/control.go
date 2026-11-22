@@ -257,8 +257,11 @@ func (c control) uninstall(ctx context.Context, args []string) error {
 // Every unit is stopped first, so each running tracer publishes its last
 // segment before the tree goes. A unit that will not stop stops the
 // uninstall: removing the binary under a live tracer would leave it
-// running with no way to reach it by name. Trace dirs outside root (a
-// start's -trace-dir) are left alone.
+// running with no way to reach it by name. A start is confined to the
+// trace dir /opt/iormesh/traces (confine.go), which lies under
+// installRoot, so its segments go with the tree; the agent spools under
+// /run/iormesh/spool are outside root and left alone (/run is emptied at
+// boot).
 func (c control) uninstallFrom(ctx context.Context, root string) error {
 	projects, err := listUnits(ctx, c.sys)
 	if err != nil {

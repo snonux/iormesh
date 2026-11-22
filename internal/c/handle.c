@@ -1,5 +1,6 @@
 // Adapted from ior internal/c/handle.c @ b21afc50328c.
-// Changes: none.
+// Changes: the consumer comment names ior's event loop and iormesh's
+// decoder (task gj4).
 
 //+build ignore
 
@@ -13,7 +14,9 @@
 // look at /proc/<pid>/fd/<fd>, which describes the descriptor number as it is
 // when the event loop gets there, not the file the call opened. With the
 // handle in both records the pathname is filed under the handle itself and
-// looked up by it (internal/eventloop_handle.go).
+// looked up by it (ior's event loop, ior internal/eventloop_handle.go).
+// iormesh's tracer decodes the record (internal/bpf/decode.go), but its
+// correlator does not use it yet.
 //
 // Two places read a handle from user memory:
 //   - sys_enter_open_by_handle_at, from args[1]: the handle is an input, so it

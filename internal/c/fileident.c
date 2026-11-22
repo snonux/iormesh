@@ -1,5 +1,6 @@
 // Adapted from ior internal/c/fileident.c @ b21afc50328c.
-// Changes: none.
+// Changes: comments state that iormesh leaves IOR_FILE_IDENT off, that
+// tcpseq.c runs the walk anyway, and that no second load backs it (task gj4).
 
 //+build ignore
 
@@ -55,24 +56,31 @@
 // instructions (+6%).
 //
 // Only that version is compiled in. On a kernel without the kfunc (mainline
-// before 6.2 and RHEL 8; RHEL 9 rebases its BPF subsystem and may have it,
-// which is unverified) the ksym is unresolved, libbpf turns the test below
+// before 6.2 and RHEL 8; RHEL 9 rebases its BPF subsystem, and Rocky 9.9
+// has it, task lb4) the ksym is unresolved, libbpf turns the test below
 // into a constant and the call into a poisoned instruction in a branch the
-// verifier never follows, and every identity is 0. Userspace does not even
-// ask such a kernel: it looks the kfunc up in the kernel's BTF and leaves
-// IOR_FILE_IDENT at 0 where it is missing (internal/bpfsetup_kfunc.go), so
-// that branch is the second line of defence. The probe-read walk was not
-// kept as a fallback: at its cost it would have to be opt-in, and nothing
-// here could test it on such a kernel.
+// verifier never follows, and every identity is 0. That branch is the only
+// guard: ior's userspace also looks the kfunc up in the kernel's BTF before
+// switching IOR_FILE_IDENT on (ior internal/bpfsetup_kfunc.go), but iormesh
+// never switches it on (flags.h), so the identity capture itself is off in
+// every iormesh run. The probe-read walk was not kept as a fallback: at its
+// cost it would have to be opt-in, and nothing here could test it on such a
+// kernel.
 //
-// Verified by loading on Linux 7.2 only; with the kfunc declared under a name
-// the kernel lacks the same object loads and reports 0. A kernel that has the
-// kfunc but is not 7.2 therefore runs the walk through a verifier it was
+// The walk below is still compiled in and runs in iormesh: tcpseq.c uses
+// ior_file_of_table whenever ior_file_ident_supported() holds, independent
+// of IOR_FILE_IDENT. It is verified by loading on Linux 7.2 and on Rocky
+// 9.9's el9 5.14 kernel, which has the kfunc (PLAN.md, task nf4); with the
+// kfunc declared under a name the kernel lacks, the same object loads on
+// 7.2 and reports 0. A kernel
+// that has the kfunc but is neither runs the walk through a verifier it was
 // never loaded on (typed loads from bpf_get_current_task_btf and the kfunc
-// in a tracepoint program are both younger than the rest of these programs);
-// the safety net for that is userspace's second load without the capture
-// when the first is refused (loadWithIdentFallback in
-// internal/ior_bpfsetup.go).
+// in a tracepoint program are both younger than the rest of these
+// programs). There is no load fallback for that: iormesh loads the object
+// once (internal/bpf/loader.go), with no switch that turns the walk off,
+// so a verifier refusal of the walk fails the whole load. ior's second load
+// without the capture (loadWithIdentFallback, ior internal/ior_bpfsetup.go)
+// was not lifted; docs/build.md says so.
 //
 // The fd slot is typed by borrowing struct kiocb, whose first member is a
 // struct file pointer: the kfunc needs the BTF id of a kernel struct, and the
@@ -145,9 +153,9 @@ static __always_inline __u32 ior_file_ident_of_table(struct files_struct *files,
 }
 
 // ior_file_ident returns the identity of the file the current task has at
-// descriptor fd, or 0 (unknown). IOR_FILE_IDENT is written by userspace
-// before the load (flags.h); it is tested first, so a run that switched the
-// capture off loads no part of the walk.
+// descriptor fd, or 0 (unknown). IOR_FILE_IDENT is a load-time constant
+// (flags.h) that ior's userspace writes and iormesh leaves 0; it is tested
+// first, so a run with the capture off loads no part of the walk here.
 static __always_inline __u32 ior_file_ident(__s32 fd) {
     struct task_struct *task;
 

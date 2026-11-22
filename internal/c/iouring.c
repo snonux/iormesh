@@ -1,5 +1,6 @@
 // Adapted from ior internal/c/iouring.c @ b21afc50328c.
-// Changes: none.
+// Changes: the consumer comment names ior's event loop and iormesh's
+// decoder (task gj4).
 
 //+build ignore
 
@@ -29,9 +30,10 @@
 // pointer and the opcode on the tid's enter state (ior_stash_ring_fds), the
 // exit handler takes them back with its one lookup of that state and
 // publishes the first ret entries as a RING_FDS_EVENT control record
-// (ior_emit_ring_fds). Userspace keeps a table per thread from these records
-// and names the rows that pass an index after the ring behind it
-// (internal/eventloop_ringfds.go).
+// (ior_emit_ring_fds). ior's userspace keeps a table per thread from these
+// records and names the rows that pass an index after the ring behind it
+// (ior internal/eventloop_ringfds.go). iormesh's tracer decodes the record
+// (internal/bpf/decode.go), but its correlator does not use it yet.
 //
 // The record is published whether or not the sampling decision emits the
 // call's own enter and exit records. It is state every later row of the

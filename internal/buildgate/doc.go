@@ -1,6 +1,6 @@
 // Adapted from ior internal/buildgate/doc.go @ b21afc50328c.
 // Changes: describes the trimmed iormesh gate set, plus the cgo-free
-// controller gate and the test-only import gate.
+// controller gate, the test-only import gate and the C-comment reference gate.
 
 // Package buildgate holds fitness tests for the repository's static-analysis
 // gates: that the vet, lint and test command lines stay the reviewed ones,
@@ -8,7 +8,9 @@
 // really rejects a planted defect, that no lint-suppression directive
 // silences it, and that the controller iormeshctl stays cgo-free and
 // cross-compiles for macOS (cgofree_test.go), and that test-only packages
-// such as internal/corereloc are imported by tests alone (testonly_test.go).
+// such as internal/corereloc are imported by tests alone (testonly_test.go),
+// and that the comments of the BPF C under internal/c name only internal/...
+// paths and Test* functions that exist here (ccomments_test.go).
 //
 // It has no production code. The gates it guards are configuration
 // (Magefile.go, .golangci.yml, internal/gatecmd) rather than Go APIs, so
