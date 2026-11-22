@@ -36,12 +36,19 @@ type Config struct {
 	Label string
 	// Images are the run's own tags.
 	Images []string
-	// BaseRepos are the base images the run may pull: kind's node image,
-	// the registry, the workload's JRE. Teardown removes only the IDs of
-	// these that were not there before the run (State).
+	// BaseRepos are the repositories of the base images the run may
+	// pull: kind's node image, the registry, the workload's JRE. Snapshot
+	// lists them before the run; they only say what was there, never
+	// what to remove (task oi4).
 	BaseRepos []string
+	// JREImage is the workload's base image exactly as
+	// scripts/container/kind-workload.Containerfile pins it (a test
+	// keeps the two equal); UsedImages resolves it to the ID the build
+	// used.
+	JREImage string
 	// Kubeconfig is the operator's kubeconfig file for the cluster;
-	// StateFile records the base images present before the run.
+	// StateFile records the base images present before the run and
+	// those the run used (State).
 	Kubeconfig, StateFile string
 	// Existing marks a cluster the run did not create (Existing, task
 	// zg4): no kind cluster is made or deleted and the kubeconfig stays.
@@ -66,9 +73,11 @@ func Default(kubeconfig, state string) Config {
 		Registry: "iormesh-registry", RegistryVolume: "iormesh-registry-data",
 		RegistryImage: "docker.io/library/registry:2@sha256:" +
 			"a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373",
-		Label:      "org.iormesh.acceptance=m7",
-		Images:     []string{RegistryAt + "/iormesh/tracer:m7", RegistryAt + "/iormesh/workload:m7"},
-		BaseRepos:  []string{"kindest/node", "registry", "eclipse-temurin"},
+		Label:     "org.iormesh.acceptance=m7",
+		Images:    []string{RegistryAt + "/iormesh/tracer:m7", RegistryAt + "/iormesh/workload:m7"},
+		BaseRepos: []string{"kindest/node", "registry", "eclipse-temurin"},
+		JREImage: "docker.io/library/eclipse-temurin:25-jre@sha256:" +
+			"4ed132f6832e9804b123e89a849a7b4502756ae64a4ee08ebab939d9d5d0a9fa",
 		Kubeconfig: kubeconfig, StateFile: state}
 }
 
@@ -80,10 +89,13 @@ func docker(args ...string) []string { return append([]string{"sudo", "-n", "doc
 func kind(args ...string) []string { return append([]string{"sudo", "-n", "kind"}, args...) }
 
 // State is what was there before the run — per base repository, the
-// image IDs present — and, in an existing cluster, what the run created
-// there (Owned, written by ClaimExisting; nil until then and on kind).
+// image IDs present — the exact base image IDs the run's setup used
+// (Used, added by RecordUsed), and, in an existing cluster, what the run
+// created there (Owned, written by ClaimExisting; nil until then and on
+// kind).
 type State struct {
 	BaseImages map[string][]string `json:"base_images"`
+	Used       []string            `json:"used_images,omitempty"`
 	Owned      *Owned              `json:"owned,omitempty"`
 }
 
@@ -103,6 +115,9 @@ func Snapshot(r Runner, c Config) (State, error) {
 
 // Save writes s to the state file (0600) unless one is there already: a
 // rerun over a kept cluster must not forget what preceded the first run.
+// It is never refreshed, so it alone must not decide removals: an image
+// pulled into a base repository after it was written is not the run's
+// unless the run also used it (RecordUsed, Pulled; task oi4).
 func (c Config) Save(s State) error {
 	if _, err := os.Stat(c.StateFile); err == nil {
 		return nil
@@ -136,18 +151,65 @@ func (c Config) Load() (State, bool, error) {
 	return s, true, nil
 }
 
-// Pulled is, per base repository, the IDs in now that were not in
-// before; with no recorded state nothing counts as pulled.
+// UsedImages resolves the base images the run's setup used to their
+// IDs: kind's node image (the node container's, not on an existing
+// cluster), the registry's (its container's) and the JRE the workload
+// build pulled (c.JREImage). One that cannot be resolved — not created,
+// not pulled — is left out: an image the run never got is not its own.
+func UsedImages(r Runner, c Config) []string {
+	argvs := [][]string{
+		docker("container", "inspect", "--format={{.Image}}", c.Registry),
+		docker("image", "inspect", "--format={{.Id}}", c.JREImage),
+	}
+	if !c.Existing {
+		argvs = append(argvs, docker("container", "inspect", "--format={{.Image}}", c.Node))
+	}
+	var ids []string
+	for _, argv := range argvs {
+		if out, err := r.Output(argv...); err == nil && strings.HasPrefix(strings.TrimSpace(out), "sha256:") {
+			ids = append(ids, strings.TrimSpace(out))
+		}
+	}
+	return ids
+}
+
+// RecordUsed adds ids to the state file's Used, keeping what an earlier
+// run over a kept cluster recorded. Without a state file it records
+// nothing: an ID is only the run's when the file also says it was
+// absent before, and Save writes that first.
+func (c Config) RecordUsed(ids []string) error {
+	s, known, err := c.Load()
+	if err != nil || !known {
+		return err
+	}
+	used := append(slices.Clone(s.Used), ids...)
+	slices.Sort(used)
+	s.Used = slices.Compact(used)
+	return c.write(s)
+}
+
+// Pulled is what the teardown removes of the base images: the IDs the
+// run recorded as used (before.Used) that no base repository held
+// before the run and that are still there now. An image that appeared
+// in a base repository since, but which the run did not use (the
+// operator's own pull for other work), is not among them (task oi4).
+// With no recorded state nothing counts as pulled.
 func Pulled(before State, known bool, now State) []string {
 	if !known {
 		return nil
 	}
-	var ids []string
-	for repo, cur := range now.BaseImages {
-		for _, id := range cur {
-			if !slices.Contains(before.BaseImages[repo], id) {
-				ids = append(ids, id)
+	held := func(s State, id string) bool {
+		for _, ids := range s.BaseImages {
+			if slices.Contains(ids, id) {
+				return true
 			}
+		}
+		return false
+	}
+	var ids []string
+	for _, id := range before.Used {
+		if !held(before, id) && held(now, id) {
+			ids = append(ids, id)
 		}
 	}
 	slices.Sort(ids)

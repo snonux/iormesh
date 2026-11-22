@@ -2193,7 +2193,11 @@ goes through `sudo -n`. It:
    says so (a NOTICE) when the `sudo -n btrfs` check cannot run;
 3. records which base images (`kindest/node`, `registry`,
    `eclipse-temurin`) are present, in a state file beside the
-   kubeconfig;
+   kubeconfig (the first run's; a rerun over a kept cluster keeps
+   it), and, once the setup below is done or has failed, the
+   exact image IDs it used: the node container's, the registry
+   container's and the Containerfile's pinned JRE
+   (`kindrun.UsedImages`, `RecordUsed`);
 4. starts a local registry (`registry:2`, pinned) on
    `localhost:5001` with a named volume `iormesh-registry-data`
    (a stopped container of that name is removed first), creates
@@ -2222,8 +2226,11 @@ goes through `sudo -n`. It:
    volumes and the named volume, the run's two tags, any image
    left with the run's label (`docker image prune --all
    --filter=label=org.iormesh.acceptance=m7`), the base images
-   the run pulled (by ID, against the recorded state; with no
-   state none), the kubeconfig and the state file.
+   the run pulled (by ID: those it recorded as used that no base
+   repository held before; with no state none — an
+   `eclipse-temurin` or `registry` image the operator pulls for
+   other work between a kept run and `mage k8sTeardown` stays,
+   task oi4), the kubeconfig and the state file.
    `IORMESH_KIND_KEEP=1` keeps everything; `mage k8sTeardown`
    runs the same steps on its own and is safe to repeat. Never
    `docker system prune` or an unfiltered prune: the daemon holds
@@ -2274,8 +2281,11 @@ gone by then, run `mage k8sTeardown` by hand — the recovery step
 for any interrupted run. `internal/kindrun`'s tests drive the
 plans with a fake runner recording every argv: teardown names only
 the run's objects (no `system prune`, no prune without the label
-filter), removes base images only against recorded state, keeps
-the first run's state across a kept cluster's rerun, replaces a
+filter), removes only base images the run recorded as used and
+that were absent before (never an unrelated ID new in a base
+repository), keeps the first run's state across a kept cluster's
+rerun while used IDs accumulate, keeps `JREImage` equal to the
+workload Containerfile's pin, replaces a
 stopped registry, never passes `--kubeconfig` to `kind create`,
 writes the kubeconfig without following a planted symlink, and
 the disk guard reads the data root and refuses a full disk or

@@ -48,8 +48,11 @@ func testConfig(t *testing.T) Config {
 
 // TestTeardownScoped: teardown names only the run's own objects — the
 // cluster, the registry with its volumes, the run's tags, its labelled
-// images and the base images pulled since the state was saved — never a
-// system prune or an unfiltered prune; the kubeconfig and state go.
+// images and the base images its setup used that were absent before —
+// never a system prune or an unfiltered prune, nor an image that
+// appeared in a base repository since without the run using it (task
+// oi4: sha256:other, the operator's own eclipse-temurin pull); the
+// kubeconfig and state go.
 func TestTeardownScoped(t *testing.T) {
 	c := testConfig(t)
 	before := &fake{replies: map[string]string{"reference=kindest/node": "sha256:old\n", "reference=registry": ""}}
@@ -60,11 +63,17 @@ func TestTeardownScoped(t *testing.T) {
 	if err := c.Save(s); err != nil {
 		t.Fatal(err)
 	}
+	setup := &fake{replies: map[string]string{"{{.Image}} iormesh-registry": "sha256:reg\n",
+		"image inspect": "sha256:jre\n", "iormesh-m7-control-plane": "sha256:new\n"}}
+	if err := c.RecordUsed(UsedImages(setup, c)); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(c.Kubeconfig, []byte("apiVersion: v1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	f := &fake{replies: map[string]string{"reference=kindest/node": "sha256:old\nsha256:new\n",
-		"reference=registry": "sha256:reg\n"}, fail: map[string]bool{"volume rm": true}}
+		"reference=registry": "sha256:reg\n", "reference=eclipse-temurin": "sha256:jre\nsha256:other\n"},
+		fail: map[string]bool{"volume rm": true}}
 	var log strings.Builder
 	if err := Teardown(f, c, &log); err != nil {
 		t.Fatal(err)
@@ -75,6 +84,9 @@ func TestTeardownScoped(t *testing.T) {
 		if strings.Contains(line, "system") || strings.Contains(line, "prune") &&
 			!strings.Contains(line, "--filter=label=org.iormesh.acceptance=m7") {
 			t.Errorf("unscoped removal: %s", line)
+		}
+		if strings.Contains(line, "sha256:other") {
+			t.Errorf("removed an image the run did not use: %s", line)
 		}
 		if !strings.Contains(line, "image ls") {
 			runs = append(runs, line)
@@ -87,6 +99,7 @@ func TestTeardownScoped(t *testing.T) {
 		"sudo -n docker image rm --force localhost:5001/iormesh/tracer:m7",
 		"sudo -n docker image rm --force localhost:5001/iormesh/workload:m7",
 		"sudo -n docker image prune --all --force --filter=label=org.iormesh.acceptance=m7",
+		"sudo -n docker image rm sha256:jre",
 		"sudo -n docker image rm sha256:new",
 		"sudo -n docker image rm sha256:reg",
 	}
@@ -135,6 +148,67 @@ func TestSaveKeepsFirstState(t *testing.T) {
 	s, known, err := c.Load()
 	if err != nil || !known || len(s.BaseImages["registry"]) != 1 {
 		t.Errorf("state %+v, %v, %v", s, known, err)
+	}
+}
+
+// TestPulledOnlyUsed: of the used IDs, one a base repository held
+// before the run stays, one gone since is not named, and a new ID the
+// run did not use is never named (task oi4).
+func TestPulledOnlyUsed(t *testing.T) {
+	before := State{BaseImages: map[string][]string{"registry": {"sha256:had"}},
+		Used: []string{"sha256:had", "sha256:gone", "sha256:mine"}}
+	now := State{BaseImages: map[string][]string{"registry": {"sha256:had", "sha256:mine"},
+		"eclipse-temurin": {"sha256:theirs"}}}
+	if got := Pulled(before, true, now); !slices.Equal(got, []string{"sha256:mine"}) {
+		t.Errorf("pulled %q, want only sha256:mine", got)
+	}
+	if got := Pulled(State{BaseImages: now.BaseImages}, true, now); got != nil {
+		t.Errorf("no used record: pulled %q", got)
+	}
+}
+
+// TestRecordUsed: used IDs accumulate over reruns of a kept cluster,
+// without the first state's base images changing; without a state file
+// none is recorded (it would count as absent before). An ID that cannot
+// be resolved is left out, and an existing cluster has no kind node.
+func TestRecordUsed(t *testing.T) {
+	c := testConfig(t)
+	if err := c.RecordUsed([]string{"sha256:a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, known, _ := c.Load(); known {
+		t.Fatal("RecordUsed wrote a state file without one")
+	}
+	if err := c.Save(State{BaseImages: map[string][]string{"registry": {"sha256:r"}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, ids := range [][]string{{"sha256:b", "sha256:a"}, {"sha256:a", "sha256:c"}} {
+		if err := c.RecordUsed(ids); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, _, err := c.Load()
+	if err != nil || !slices.Equal(s.Used, []string{"sha256:a", "sha256:b", "sha256:c"}) ||
+		!slices.Equal(s.BaseImages["registry"], []string{"sha256:r"}) {
+		t.Errorf("state %+v, %v", s, err)
+	}
+	e := Existing(c.Kubeconfig, "ctx", c.StateFile)
+	f := &fake{replies: map[string]string{"image inspect": "ERR", "container inspect": "sha256:reg\n"}}
+	if got := UsedImages(f, e); !slices.Equal(got, []string{"sha256:reg"}) || len(f.calls) != 2 {
+		t.Errorf("existing cluster used %q after %q", got, f.calls)
+	}
+}
+
+// TestJREImagePinned: c.JREImage is the base image the workload's
+// Containerfile pins, so UsedImages resolves the one the build pulled.
+func TestJREImagePinned(t *testing.T) {
+	data, err := os.ReadFile("../../scripts/container/kind-workload.Containerfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := Default("k", "s")
+	if !strings.Contains(string(data), "\nFROM "+c.JREImage+"\n") {
+		t.Errorf("kind-workload.Containerfile does not pin FROM %s", c.JREImage)
 	}
 }
 

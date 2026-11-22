@@ -120,7 +120,8 @@ func kindRun(name string, tests func(env map[string]string, existing bool) error
 
 // K8sTeardown removes what K8sAcceptance made — the cluster, the
 // registry and its volume, the run's labelled images, the base images
-// the run pulled (by the state recorded before it), the kubeconfig — and
+// the run pulled (the IDs its setup recorded as used that were absent
+// before it), the kubeconfig — and
 // nothing else. In an existing cluster it removes only the release and
 // namespaces the state file records, in the recorded kubeconfig and
 // context, and nothing in the cluster without that record. Safe to
@@ -245,13 +246,25 @@ func kindMissing() string {
 // will create there and in which context, before anything touches the
 // cluster: task li4), brings up the registry, the cluster (unless it is
 // an existing one), the images and Traefik, and returns the tests'
-// environment.
-func kindUp(r shRunner, c kindrun.Config) (map[string]string, error) {
+// environment. On the way out, a failed step included, it records the
+// base image IDs the setup used (kindrun.UsedImages): those, where
+// absent before, are all of the base images the teardown removes (task
+// oi4). A run ClaimExisting refused records nothing: the state file is
+// another run's.
+func kindUp(r shRunner, c kindrun.Config) (env map[string]string, err error) {
 	state, err := kindrun.Snapshot(r, c)
 	if err == nil {
 		err = c.Save(state)
 	}
-	if err == nil && c.Existing {
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if !errors.Is(err, kindrun.ErrForeignRecord) {
+			err = errors.Join(err, c.RecordUsed(kindrun.UsedImages(r, c)))
+		}
+	}()
+	if c.Existing {
 		err = kindrun.ClaimExisting(r, c)
 	}
 	if err == nil {
