@@ -349,7 +349,23 @@ truth.
   and the mapped header must name that pid. A ring its owner
   truncates under the mapping faults on access, which the reader
   turns into a corrupt ring, not a crash (docs/schema.md, "Java
-  attribution").
+  attribution"). The owner check keeps a user from speaking for
+  another user's process, not for an untraced process of their
+  own, so a ring is read only once its process is traced: an
+  event of that pid and incarnation (its attach or fork event at
+  the latest) has passed the Java join. Until then the ring is
+  held unread — not drained, no http or dns event, no table row,
+  no uprobe attached — so a ring mapped before the session adopts
+  its JVM (`JAVA_TOOL_OPTIONS` at exec) is still read, while a
+  forged ring, or one of a JVM outside the target that inherited
+  the agent, never is; nor is one whose process's start time
+  cannot be read when it is found (gone, or `/proc` unreadable),
+  since only the ring's own, writer-chosen stamp would be left to
+  match. Only the newest waiting ring per pid stays mapped. A
+  header naming a capacity over 64 MiB is refused, and a record
+  over 64 KiB (four times the largest the agent writes) is
+  skipped as malformed before anything of it is decoded, so one
+  ring puts at most about its capacity on the tracer's heap.
 - **Live attach touches the target only as `jcmd` would.**
   `run -agent` and `iormesh attach` create a trigger file in the
   JVM's working directory (or `/tmp`), send it one SIGQUIT — only

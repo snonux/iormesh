@@ -97,7 +97,11 @@ public final class Ring {
     static final int DROPPED_BYTES = DROPPED + 8 * DROPPED_SLOTS;
     static final int ABANDONED = DROPPED_BYTES + 8;
     static final long MIN_CAPACITY = 1L << 16;
-    static final long MAX_CAPACITY = 1L << 30;
+    /**
+     * The tracer refuses a larger ring (internal/agentspool maxCapacity,
+     * task yi4): one drain decodes a whole ring's records onto its heap.
+     */
+    static final long MAX_CAPACITY = 1L << 26;
     /** BRACKET body: hook, ktid, enter, exit, stack, thread. */
     static final int BRACKET_LEN = 8 + 40;
     /**
@@ -167,7 +171,11 @@ public final class Ring {
     static final int HTTP_HELD = 16;
     /** HTTP's leading strings: method, scheme, host, path, version, local, remote. */
     static final int HTTP_FIXED = 7;
-    /** Bounds a record with strings, so one never needs a large share of the ring. */
+    /**
+     * Bounds a record with strings, so one never needs a large share of
+     * the ring. The tracer skips any record past 64 KiB (agentspool
+     * maxRecord, task yi4); keep this below that.
+     */
     static final int MAX_RECORD = 16 * 1024;
     /** Each frame or thread name is cut to this many chars before encoding. */
     static final int MAX_STRING = 1024;

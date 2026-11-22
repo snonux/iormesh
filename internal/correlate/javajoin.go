@@ -48,12 +48,20 @@ import (
 // One goroutine owns a JavaJoin, like the Correlator feeding it: Event,
 // Poll and Close must not run concurrently.
 type JavaJoin struct {
-	cfg    JavaJoinConfig
-	held   []schema.Event // in seq order, waiting for their JVM's ring
-	head   int            // held[:head] are released (compact)
-	jvms   map[uint32]*jvm
-	dead   []*jvm // rings replaced by a newer JVM of the same pid
-	offset int64  // boot − mono, ns, from the last poll
+	cfg  JavaJoinConfig
+	held []schema.Event // in seq order, waiting for their JVM's ring
+	head int            // held[:head] are released (compact)
+	jvms map[uint32]*jvm
+	dead []*jvm // rings replaced by a newer JVM of the same pid
+	// waiting are rings of processes not traced (yet), held unread
+	// (javatrust.go, task yi4); traced lists, per pid, the incarnations
+	// the stream has named, and lastPID and lastInc the last one noted,
+	// which spares the lookup for a run of one process's events.
+	waiting []*jvm
+	traced  map[uint32][]uint64
+	lastPID uint32
+	lastInc uint64
+	offset  int64 // boot − mono, ns, from the last poll
 	// scanned is the boot time just before the last spool scan: a
 	// syscall that ended before it whose process had no ring then never
 	// will have a bracket (the agent maps its ring before its first one).
@@ -235,7 +243,8 @@ func NewJavaJoin(cfg JavaJoinConfig) *JavaJoin {
 	cfg.Grace = orDefault(cfg.Grace, defaultGrace)
 	cfg.Retain = orDefault(cfg.Retain, defaultRetain)
 	cfg.UpstreamHold = orDefault(cfg.UpstreamHold, defaultFuseWindowNS)
-	return &JavaJoin{cfg: cfg, jvms: map[uint32]*jvm{}, methods: map[methodKey]uint64{},
+	return &JavaJoin{cfg: cfg, jvms: map[uint32]*jvm{}, traced: map[uint32][]uint64{},
+		methods: map[methodKey]uint64{},
 		classes: map[schema.Class]uint64{},
 		conns:   newConnIndex(), policy: redact.Default(),
 		cookies: map[string]uint64{}, marks: map[uint32]*markQueue{}, tick: tick}
@@ -258,6 +267,7 @@ func orDefault(v, def uint64) uint64 {
 // widened schema.Sink contract would allow it (task ee4 review).
 func (j *JavaJoin) Event(ev *schema.Event) error {
 	j.seen(ev)
+	j.trace(ev)
 	j.held = append(j.held, *ev)
 	if now := j.tick(); now >= j.scanned+j.cfg.ScanEvery {
 		if err := j.poll(now); err != nil {
@@ -287,6 +297,11 @@ func (j *JavaJoin) Close() error {
 	}
 	for _, v := range j.allJVMs() {
 		j.stats.Lost = addLosses(j.stats.Lost, v.ring.Losses())
+		err = errors.Join(err, v.ring.Close())
+	}
+	// A ring never traced is closed uncounted: its loss counters are
+	// whatever its writer put there.
+	for _, v := range j.waiting {
 		err = errors.Join(err, v.ring.Close())
 	}
 	return errors.Join(err, j.cfg.Next.Close())
@@ -330,21 +345,36 @@ func (j *JavaJoin) poll(now uint64) error {
 	return nil
 }
 
-// addRing registers a ring under its JVM's pid. A newer ring for the same
-// pid (a reused pid, a restarted JVM) replaces the older, which is kept
-// only to be closed and counted.
+// addRing takes in a ring the spool scan found. It is read only once its
+// process is traced (task yi4, javatrust.go): until then it waits unread
+// — the spool takes a ring from any process whose owner matches the
+// file's, and only the stream knows which of them the session traces.
+// The process's start time is read now, while the scan's owner check
+// still holds, to tell its incarnation from a later one under the pid.
 func (j *JavaJoin) addRing(r AgentRing) {
 	h := r.Header()
 	pid := uint32(h.PID)
 	comm, start := j.cfg.ProcInfo(pid)
-	if old := j.jvms[pid]; old != nil {
-		j.dead = append(j.dead, old)
-	}
 	v := newJVM(r, pid, start, h.CreatedMono, j.boot(h.CreatedMono))
 	// The comm from /proc until a joined event brings the traced one: an
 	// http event may come before any of its JVM's syscall events.
 	v.comm = comm
-	j.jvms[pid] = v
+	if j.isTraced(v) {
+		j.accept(v)
+		return
+	}
+	j.hold(v)
+}
+
+// accept registers a traced process's ring under its JVM's pid, to be
+// drained from the next poll on. A newer ring for the same pid (a reused
+// pid, a restarted JVM) replaces the older, which is kept only to be
+// closed and counted.
+func (j *JavaJoin) accept(v *jvm) {
+	if old := j.jvms[v.pid]; old != nil {
+		j.dead = append(j.dead, old)
+	}
+	j.jvms[v.pid] = v
 	j.stats.Rings++
 }
 

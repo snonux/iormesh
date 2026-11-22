@@ -8,7 +8,8 @@
 // not a multiple of 8 or runs past the end of the data area, a head behind
 // the tail) leaves no way to find the next record, so the ring is marked
 // corrupt for good (ErrCorrupt). A record with sound framing but a body
-// that does not decode is skipped and counted (Losses.Malformed), as is a
+// that does not decode, or longer than maxRecord (64 KiB, never decoded),
+// is skipped and counted (Losses.Malformed), as is a
 // record of a type this reader does not know (Losses.Unknown). Records the
 // agent dropped because the reader lagged are counted by the agent in the
 // ring header and surface in Losses too, so delivered + lost always equals
@@ -48,8 +49,24 @@ const (
 	offAbandoned    = offDroppedBytes + 8
 	headerSize      = 4096
 
+	// The accepted data capacities (Ring.MIN_CAPACITY, MAX_CAPACITY). The
+	// cap is a bound on the tracer's heap, not only on the mapping (task
+	// yi4): one drain decodes every record a ring holds before handing
+	// them out, copying their strings, so a ring can put about its
+	// capacity on the heap at once. 64 MiB is eight times the agent's
+	// default ring and well inside the 1 GiB a started tracer may use
+	// (MemoryMax); a header naming more is corrupt.
 	minCapacity = 1 << 16
-	maxCapacity = 1 << 30
+	maxCapacity = 1 << 26
+
+	// maxRecord bounds a record other than PAD (task yi4): one that is
+	// longer is skipped and counted malformed without being decoded, so
+	// no single record allocates more than this. The agent writes none
+	// past Ring.MAX_RECORD (16 KiB: strings cut to 1024 chars, an HTTP
+	// record losing its headers first, a stack depth cap), so 64 KiB
+	// leaves room and an honest trace never meets it. A PAD may fill the
+	// rest of a lap and is never decoded, so it is exempt.
+	maxRecord = 64 << 10
 
 	// wordLen is the record framing word: len | type << 32.
 	wordLen = 8

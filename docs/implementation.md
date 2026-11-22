@@ -2220,9 +2220,11 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
    tracer-owned directory, mapped `MAP_SHARED` by agent and
    tracer. The agent never creates the directory: a missing one
    disables the agent (no tracer is listening). Agent options:
-   `spool=<dir>`, `ringsize=<bytes>` (a power of two, 64 KiB–1 GiB,
-   default 8 MiB), `watermark=<ms>` (default 10, 0 = only at
-   install and exit). Done (task 1b4). The header, little endian,
+   `spool=<dir>`, `ringsize=<bytes>` (a power of two, 64 KiB–64
+   MiB, default 8 MiB; task yi4 lowered the cap from 1 GiB, and
+   the reader refuses a larger header), `watermark=<ms>` (default
+   10, 0 = only at install and exit). Done (task 1b4). The
+   header, little endian,
    version-checked by the reader:
 
    ```
@@ -2289,8 +2291,10 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
    parked and moved carriers inside the bracket.
 
    STACK and THREAD are zero-padded to 8 and capped at 16 KiB
-   (strings cut to 1024 chars); BRACKET and WATERMARK allocate
-   nothing. A thread's first bracket writes its THREAD, a stack's
+   (strings cut to 1024 chars; the reader skips any record but a
+   PAD over 64 KiB as malformed, undecoded); BRACKET and
+   WATERMARK allocate nothing. A thread's first bracket writes
+   its THREAD, a stack's
    first sighting its STACK. Neither is guaranteed to precede the
    BRACKETs naming it: the stack id is visible to other threads
    before its STACK is published, so a second thread on the same

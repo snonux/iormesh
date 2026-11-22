@@ -50,6 +50,11 @@ func TestIdleStreamHeldAcceptKeepsConn(t *testing.T) {
 		// Another process's syscall gives the join its envelope (project,
 		// host), as the stream's first events always do.
 		jt.unmarked(99, 99, "write", at-500)
+		// The session takes the JVM on: its attach event makes its ring
+		// readable (task yi4), though its socket event is still held.
+		if err := c.Seed(jvmPID, Identity{Comm: "java", StartNS: jvmStart}); err != nil {
+			t.Fatal(err)
+		}
 		if err := c.Handle(tcp6(at, 0xB, jvmPID, 7, types.TCP_STATE_SNAPSHOT, tcpEstablished,
 			local, remote)); err != nil {
 			t.Fatal(err)

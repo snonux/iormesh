@@ -939,6 +939,10 @@ OTEL span ids, the start stamp and the two body sizes, then
 method, scheme, host, path, version, local and remote socket
 address, and the headers), redacted before it is written; a record
 that would pass 16 KiB keeps the request and drops its headers.
+The tracer skips any ring record over 64 KiB as malformed, and
+reads a ring only once its process is traced
+([security.md](security.md), "The agent spool is untrusted
+input").
 
 ## DNS events (M3)
 
