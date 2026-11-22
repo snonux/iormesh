@@ -1198,10 +1198,11 @@ Kubernetes (M7) build on it.
   call's first byte; the tracer fills it since task xe4: the
   socket's `write_seq`/`copied_seq` read at the call's enter
   and again at its exit, given only when the two differ by
-  exactly the call's return — so concurrent senders or readers
-  on one socket, MSG_PEEK, kTLS and the like give none, never a
-  guess; one ring record per call as before, the exit record
-  carrying it; decision #25's burst figure unchanged, +3 %
+  exactly the call's return, or by one more for a receive that
+  also consumes the peer's FIN, task wi4 — so concurrent
+  senders or readers on one socket, MSG_PEEK, kTLS and the like
+  give none, never a guess; one ring record per call as
+  before, the exit record carrying it; decision #25's burst figure unchanged, +3 %
   tracer instructions per TCP data event — s3-overhead.md,
   "Follow-up (xe4)"),
   the SYN adds one client→server edge (connect enter before
@@ -2613,10 +2614,17 @@ deferred.
   an older agent never reads it and an older tracer never bumps
   it, so the format version stays and either mix behaves as
   before (a later session on an older agent stays attribution
-  none). A ring lives as long as its JVM, not as long as a
-  session (task 2j4): the agent unlinks its own ring in its
-  shutdown hook after the last watermark (a tracer reading it
-  has it mapped); the Java join retires a JVM once its
+  none). Between sessions the agent goes dormant (task ej4): when
+  the tail stood still for 10 s while the ring kept dropping and
+  the epoch did not move, the watermark thread sets a flag the
+  hooks read first among their work (one volatile read when
+  awake); a dormant hook walks no stack and runs no probe, and
+  counts its record as dropped in the header, as the full ring
+  would. A moving tail or epoch, or a repeated load, wakes it
+  through the same resync as a new reader. A ring lives as long
+  as its JVM, not as long as a session (task 2j4): the agent
+  unlinks its own ring in its shutdown hook after the last
+  watermark (a tracer reading it has it mapped); the Java join retires a JVM once its
   group-dead exit was handled and nothing can ask for its ring
   (the fuse window plus the join timeout past the exit, none of
   its events held): a last drain, then close and unlink; and the

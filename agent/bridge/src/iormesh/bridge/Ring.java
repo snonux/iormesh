@@ -64,6 +64,10 @@ import java.util.Set;
  * Back-pressure: never block the target. When the reader is a full
  * capacity behind, the record is dropped and counted in the header by
  * type; the tracer turns the counters into the trace's loss accounting.
+ * A ring that stays full with its tail still has no reader left: the
+ * watermark thread then makes the agent dormant (task ej4, Hooks.dormant),
+ * and the hooks count their records as dropped ({@link #lost}) without
+ * the work of making them, until the tail moves or a reader comes.
  *
  * Readers come and go (task 5j4): a tracer session ends and the JVM
  * runs on, and the records a reader consumed are gone for the next one —

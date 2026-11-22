@@ -2340,9 +2340,11 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
    when to stop waiting. The S1 prototype had no watermark — it
    drained after exit. The promise holds without locks: a closing
    bracket marks its thread with its enter stamp before stamping
-   the exit and clears the mark after publishing; a watermark
-   reads the clock, then scans the threads and lowers itself to
-   any marked thread's enter stamp. Both sides put a full fence
+   the exit and clears the mark after publishing, entering a
+   small set of closing threads for that time; a watermark reads
+   the clock, then scans that set — never every live thread, so
+   parked threads cost it nothing (task dj4) — and lowers itself
+   to any marked thread's enter stamp. Both sides put a full fence
    between their volatile access and their clock read: the JMM
    does not order `System.nanoTime()` against volatiles, and on
    AArch64 the closing mark could otherwise become visible only
@@ -4206,22 +4208,45 @@ not, and share `bpf_prog_active` with the dispatchers (8e4).
   exit re-reads the field through the parked socket: the field
   only grows as bytes are queued (consumed), so `end − start ==
   ret` proves that every byte in between was the call's own
-  and the call moved exactly `[start, end)`. Anything else —
-  two senders interleaving, a send split around another, a
-  `MSG_PEEK`/`MSG_OOB` read, kTLS, a TFO send — gives no
-  `tcp_seq`. Not covered either: a `read`/`write` the fold held
-  at its enter on a hot streak parks nothing, so if it then
-  turns out slow (> 1 ms, the read waiting on the peer after a
-  burst) it is sent alone without `tcp_seq`; parking held
-  enters too would put the walk back on every folded call. (Its
-  native stack and Java mark are kept: the owed enter sends
-  them, rwagg.c.) A
-  stale park (an exit missed) is still exact when
-  the check holds; the residue is a field *assignment* inside
-  the window (connect, disconnect, `TCP_REPAIR`) whose jump
-  equals `ret`, 1 in 2³², and an untraced `dup2` of another
-  socket onto the fd mid-call while exactly `ret` bytes moved on
-  the parked one.
+  and the call moved exactly `[start, end)`. One exception
+  (task wi4): the read that drains the last data and consumes
+  the peer's FIN behind it — the final read of a "write, then
+  close" exchange — moves `copied_seq` by `ret + 1`, since the
+  FIN takes a sequence number (`tcp_recvmsg`'s `found_fin_ok`).
+  A receive passes with `ret + 1` when the socket's state says
+  the FIN arrived and the socket is still open (`CLOSE_WAIT`,
+  `LAST_ACK`, `CLOSING`) and `end` is `rcv_nxt`: the extra
+  number is then the last one received, so the data bytes are
+  still `[start, start + ret)`. The state is read first:
+  `tcp_data_queue` stores the FIN's `rcv_nxt` before `tcp_fin`
+  sets the state, so a FIN state implies an `rcv_nxt` read
+  after it counts the FIN. The state, not `sk_shutdown`,
+  because a local `shutdown(SHUT_RD)` sets `RCV_SHUTDOWN` too,
+  and `skc_state` is already in the trimmed el9 BTF. Not
+  `CLOSE`: a reset ends there without a FIN, and a skipped
+  urgent byte could then pass as one; userspace drops
+  `tcp_seq` after a `TCP_CLOSE` record anyway. So the final
+  read on a socket that shut its own side first (`FIN_WAIT2`,
+  which the FIN closes) still gets no `tcp_seq`. Anything
+  else — two senders interleaving, a send split around
+  another, a `MSG_PEEK`/`MSG_OOB` read (a skipped urgent byte
+  also moves `copied_seq` one further, but with no FIN), kTLS,
+  a TFO send — gives no `tcp_seq`. Not covered either: a
+  `read`/`write` the fold held at its enter on a hot streak
+  parks nothing, so if it then turns out slow (> 1 ms, the
+  read waiting on the peer after a burst) it is sent alone
+  without `tcp_seq`; parking held enters too would put the
+  walk back on every folded call. (Its native stack and Java
+  mark are kept: the owed enter sends them, rwagg.c, task
+  ti4.) A stale park (an exit missed) is still exact when the check holds; the residue is
+  a field *assignment* inside the window (connect, disconnect,
+  `TCP_REPAIR`) whose jump equals `ret`, 1 in 2³², an untraced
+  `dup2` of another socket onto the fd mid-call while exactly
+  `ret` bytes moved on the parked one, and, for the FIN case,
+  a CPU that reorders loads: the state and `rcv_nxt` loads
+  are kept in order by the compiler only, with no read
+  barrier, which suffices on x86 (the main target) but not
+  strictly on arm64.
 - **Record.** When the check holds, the exit record itself is
   a `tcp_seq_event` (a `ret_event` plus the socket and the
   sequence number, 48 bytes) in place of the `ret_event`, so a
@@ -4238,9 +4263,14 @@ not, and share `bpf_prog_active` with the dispatchers (8e4).
   buffers on one socket, where every `tcp_seq` given must
   locate exactly the caller's bytes in the received stream
   (about 110–180 of 200 calls carry one; with the check
-  disabled the test fails); and a hot loop whose folded records
-  carry none. `TestTCPFamilies` splits a real Java loopback
-  trace into two pretend hosts and requires
+  disabled the test fails); a hot loop whose folded records
+  carry none; a read that drains the data and the peer's FIN
+  together, which carries one (`TestStreamSeqFinRead`, no
+  `tcp_seq` before task wi4), and its negative, a read past an
+  urgent byte, which carries none (`TestStreamSeqUrgentSkipNoSeq`,
+  failing with the FIN-state check removed). `TestTCPFamilies`
+  splits a real Java loopback trace into two pretend hosts and
+  requires
   `federate.ClockBounds` to bound them from both sides around
   0 (≈ 64–145 µs raw width).
 - **Cost.** Unchanged per event on `syscall-burst`; on an

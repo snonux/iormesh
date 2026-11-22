@@ -56,6 +56,7 @@ public final class AgentTests {
         cases.addAll(iormesh.bridge.RingTest.cases());
         cases.addAll(iormesh.bridge.HttpHooksTest.cases());
         cases.addAll(iormesh.bridge.OtelTest.cases());
+        cases.addAll(iormesh.bridge.WatermarkScaleTest.cases());
         cases.addAll(OtelTransformerTest.cases());
         cases.addAll(OtelAttachRaceTest.cases());
         int failed = 0;

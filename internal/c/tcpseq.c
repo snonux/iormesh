@@ -27,14 +27,20 @@
 // The field only grows while bytes are queued (or consumed), and the call
 // moved ret bytes between the two reads, so end - start == ret proves that
 // no other bytes went through in between and the call's bytes are exactly
-// [start, end). Anything else - another sender or reader interleaving, a
-// call split around one, a MSG_PEEK or MSG_OOB read (copied_seq does not
-// move, or skips the urgent byte), a kTLS socket (write_seq counts record
-// framing), a TCP Fast Open send (the ISN is assigned inside the call) -
-// fails the check and the call gets no tcp_seq: never a guess. The one
-// residue is an assignment of the field inside the window (connect,
-// disconnect, TCP_REPAIR) whose jump equals ret by chance, 1 in 2^32 (and
-// a dup2 race, see iormesh_seq_on_exit).
+// [start, end). One exception, a receive that also consumes the peer's
+// FIN, moves copied_seq by ret + 1 and is accepted when the FIN is the
+// last number received and the socket is still open (CLOSE_WAIT,
+// LAST_ACK, CLOSING; iormesh_seq_moved_exactly). Such a read on a socket
+// that had shut its own side first (FIN_WAIT2, so the FIN closes it) gets
+// no tcp_seq. Anything else -
+// another sender or reader interleaving, a call split around one, a
+// MSG_PEEK or MSG_OOB read (copied_seq does not move, or skips the urgent
+// byte), a kTLS socket (write_seq counts record framing), a TCP Fast Open
+// send (the ISN is assigned inside the call) - fails the check and the
+// call gets no tcp_seq: never a guess. The one residue is an assignment
+// of the field inside the window (connect, disconnect, TCP_REPAIR) whose
+// jump equals ret by chance, 1 in 2^32 (and a dup2 race, see
+// iormesh_seq_on_exit).
 // Not covered: a read or write the fold held at its enter (a hot streak,
 // rwagg.c) parks nothing; if it then turns out not hot - it blocked over
 // IORMESH_RW_HOT_NS, the read that waits on the peer after a burst - it
@@ -175,10 +181,63 @@ static __always_inline void iormesh_emit_tcp_seq(__u32 pid, __u32 tid, __u32 tra
     bpf_ringbuf_submit(ev, 0);
 }
 
+// iormesh_tcp_fin_received tells whether state (skc_state) says the peer's
+// FIN has arrived: the states tcp_fin moves a socket to that keep it alive
+// - CLOSE_WAIT from ESTABLISHED, CLOSING from FIN_WAIT1 - and LAST_ACK,
+// which follows CLOSE_WAIT once the reader shuts its own side down. Not
+// CLOSE: a FIN in FIN_WAIT2 ends there (the time-wait handoff), but so
+// does a reset that never carried a FIN, which would let a skipped urgent
+// byte pass as the FIN; userspace drops tcp_seq after a TCP_CLOSE record
+// anyway. The state rather than sk_shutdown's RCV_SHUTDOWN, which a local
+// shutdown(SHUT_RD) sets too, without any FIN.
+static __always_inline int iormesh_tcp_fin_received(__u8 state) {
+    return state == TCP_CLOSE_WAIT || state == TCP_LAST_ACK || state == TCP_CLOSING;
+}
+
+// iormesh_seq_moved_exactly is the check of the top of this file: the
+// field moved from start to end by exactly the call's ret bytes. ret is at
+// most MAX_RW_COUNT (INT_MAX rounded down to a page), so it fits the
+// 32-bit distance. One case moves a receive's field one further: the read
+// that drains the last data and then finds the peer's FIN behind it
+// consumes the FIN too (tcp_recvmsg's found_fin_ok), and the FIN takes a
+// sequence number of its own - the final read of a "write, then close"
+// exchange (task wi4). end - start == ret + 1 is accepted for it only when
+// the FIN has arrived and end is rcv_nxt, the end of everything received:
+// the extra number is then the FIN, the last one there is, so the ret data
+// bytes are exactly [start, start + ret) - whether this call or another
+// reader consumed the FIN. Without those two, the extra one could be
+// another reader's byte or a skipped urgent byte, and the call gets no
+// tcp_seq as before.
+// Order: the state is read before rcv_nxt. tcp_data_queue stores the
+// FIN's rcv_nxt before tcp_fin sets the state, so a FIN state seen first
+// implies the rcv_nxt read after it already counts the FIN; the other
+// order could pair a FIN state with an rcv_nxt from before the FIN. The
+// empty asm keeps the compiler from hoisting the rcv_nxt load above the
+// state load (skc_state is volatile, rcv_nxt is not). There is no read
+// barrier for the CPU: x86 keeps loads in order, a weakly ordered CPU
+// (arm64) strictly may not - a residue there. The state is read
+// through struct sock, which a tcp_sock starts with (the verifier walks
+// the typed pointer to the same field), so the CO-RE relocation names
+// sock.__sk_common.skc_state like sock.c's reads and the trimmed el9 BTF
+// (internal/testdata/btf) needs no new types.
+static __always_inline int iormesh_seq_moved_exactly(struct tcp_sock *tp, __u32 dir, __u32 start,
+                                                     __u32 end, __s64 ret) {
+    __u64 moved = (__u32)(end - start);
+    __u8 state;
+
+    if (moved == (__u64)ret)
+        return 1;
+    if (dir != IORMESH_SEQ_RECV || moved != (__u64)ret + 1)
+        return 0;
+    state = ((struct sock *)tp)->__sk_common.skc_state;
+    asm volatile("" ::: "memory");
+    return iormesh_tcp_fin_received(state) && end == tp->rcv_nxt;
+}
+
 // iormesh_seq_on_exit is the exit hook of the seven data calls, behind
 // the hooks that decide the exit record is sent: it empties the thread's
 // park and, when the call moved bytes and the field moved by exactly that
-// many since the park (see the top of this file), sends the exit record
+// many since the park (iormesh_seq_moved_exactly), sends the exit record
 // itself, with the call's first sequence number, and returns 1 - the
 // handler then sends no ret_event. Otherwise it returns 0 and the handler
 // sends its plain ret_event. A park of the other direction is another
@@ -211,9 +270,7 @@ static __always_inline int iormesh_seq_on_exit(__u32 pid, __u32 tid, __u32 trace
         return 0;
     tp = bpf_rdonly_cast((void *)sk, bpf_core_type_id_kernel(struct tcp_sock));
     end = iormesh_tcp_seq_field(tp, dir);
-    // ret is at most MAX_RW_COUNT (INT_MAX rounded down to a page), so it
-    // fits the 32-bit distance.
-    if ((__u64)(__u32)(end - start) != (__u64)ret)
+    if (!iormesh_seq_moved_exactly(tp, dir, start, end, ret))
         return 0;
     iormesh_emit_tcp_seq(pid, tid, trace_id, now, ret, sk, start);
     return 1;

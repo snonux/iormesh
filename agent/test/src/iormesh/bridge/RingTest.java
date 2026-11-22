@@ -50,6 +50,9 @@ public final class RingTest {
                 new AgentTests.Case("ring/renamed thread described again", RingTest::renamed),
                 new AgentTests.Case("ring/virtual thread flagged", RingTest::virtualThread),
                 new AgentTests.Case("ring/watermark waits for closing", RingTest::watermark),
+                new AgentTests.Case("ring/nested closing keeps the older stamp",
+                        RingTest::nestedClosing),
+                new AgentTests.Case("ring/deep nesting grows slots", RingTest::deepNesting),
                 new AgentTests.Case("ring/release discards", RingTest::release),
                 new AgentTests.Case("ring/exit removes only its own file", RingTest::removeOwn),
                 new AgentTests.Case("ring/idle virtual thread described again",
@@ -59,7 +62,11 @@ public final class RingTest {
                 new AgentTests.Case("ring/partial resend holds watermarks",
                         RingTest::partialResend),
                 new AgentTests.Case("ring/old reader then new resyncs",
-                        RingTest::oldReaderThenNew));
+                        RingTest::oldReaderThenNew),
+                new AgentTests.Case("ring/unread full ring goes dormant", RingTest::dormant),
+                new AgentTests.Case("ring/new reader wakes the agent", RingTest::wakeByReader),
+                new AgentTests.Case("ring/dormant only when unread and full",
+                        RingTest::dormantNeedsBoth));
     }
 
     static void header() throws Exception {
@@ -619,18 +626,16 @@ public final class RingTest {
     static void watermark() throws Exception {
         Path dir = Files.createTempDirectory("iormesh-ring-test");
         Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
-        Hooks.ring = r;           // threads are tracked only with a ring
         Brackets b = new Brackets();
-        Hooks.ring = null;
         try {
             Watermarks.emit(r);
             long enter = System.nanoTime();
-            b.closing = enter;
+            Watermarks.closing(b, Brackets.IDLE, enter);
             Watermarks.emit(r);   // held back to enter, still newer than the first
-            b.closing = Brackets.IDLE;
+            end(b, Brackets.IDLE);
             Watermarks.emit(r);
         } finally {
-            b.closing = Brackets.IDLE;
+            end(b, Brackets.IDLE);
         }
         ByteBuffer m = map(r.path());
         List<Long> marks = new ArrayList<>();
@@ -640,6 +645,88 @@ public final class RingTest {
         equal(3, marks.size(), "three watermarks");
         check(marks.get(0) < marks.get(1), "second is newer than the first");
         check(marks.get(1) < marks.get(2), "third passes the closing bracket");
+        delete(dir);
+    }
+
+    /**
+     * A mark nested in an open one (an HTTP marker inside a probe's
+     * record, Watermarks.closing) keeps the older stamp in force, and
+     * ending it leaves the thread closing until the outer mark ends.
+     */
+    static void nestedClosing() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
+        Brackets b = new Brackets();
+        long enter;
+        try {
+            Watermarks.emit(r);
+            enter = System.nanoTime();
+            Watermarks.closing(b, Brackets.IDLE, enter);
+            long inner = b.closing;
+            Watermarks.closing(b, inner, System.nanoTime());
+            equal(enter, b.closing, "the older stamp stays in force");
+            end(b, inner);
+            equal(enter, b.closing, "still closing after the inner mark");
+            Watermarks.emit(r);   // held back to the outer enter
+            end(b, Brackets.IDLE);
+            equal(Brackets.IDLE, b.closing, "idle after the outer mark");
+            Watermarks.emit(r);
+        } finally {
+            end(b, Brackets.IDLE);
+        }
+        ByteBuffer m = map(r.path());
+        List<Long> marks = new ArrayList<>();
+        for (Rec x : records(m)) {
+            marks.add(m.getLong(x.off() + 8));
+        }
+        equal(3, marks.size(), "three watermarks");
+        equal(enter, marks.get(1), "the second stops at the outer enter");
+        check(marks.get(2) > enter, "the third passes it");
+        delete(dir);
+    }
+
+    /** Ends a mark as Hooks' finally blocks do: restore, then leave. */
+    private static void end(Brackets b, long was) {
+        b.closing = was;
+        Watermarks.leave(b, was);
+    }
+
+    /**
+     * Brackets nested MAX_DEPTH deep grow the thread's slots (task dj4)
+     * and each keeps its own hook, stamps and order.
+     */
+    static void deepNesting() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
+        Hooks.configure(5, false, false);
+        Hooks.ring = r;
+        try {
+            Thread t = new Thread(() -> {
+                for (int i = 0; i < Hooks.MAX_DEPTH; i++) {
+                    Hooks.enter(1 + i % 4);
+                }
+                for (int i = Hooks.MAX_DEPTH - 1; i >= 0; i--) {
+                    Hooks.exit(1 + i % 4);
+                }
+            }, "ring-deep");
+            t.start();
+            t.join();
+        } finally {
+            Hooks.ring = null;
+            Hooks.configure(5, true, false);
+        }
+        ByteBuffer b = map(r.path());
+        List<Rec> brackets = records(b).stream().filter(x -> x.type() == Ring.BRACKET).toList();
+        equal(Hooks.MAX_DEPTH, brackets.size(), "one bracket per depth");
+        long outerEnter = Long.MIN_VALUE;
+        for (int k = brackets.size() - 1; k >= 0; k--) {   // outermost first
+            int o = brackets.get(k).off();
+            int depth = brackets.size() - 1 - k;
+            equal(1 + depth % 4, b.getInt(o + 8), "hook at depth " + depth);
+            check(b.getLong(o + 16) <= b.getLong(o + 24), "enter <= exit at depth " + depth);
+            check(b.getLong(o + 16) >= outerEnter, "nested enters in order at depth " + depth);
+            outerEnter = b.getLong(o + 16);
+        }
         delete(dir);
     }
 
@@ -806,6 +893,141 @@ public final class RingTest {
             Hooks.ring = null;
         }
         delete(dir);
+    }
+
+    /**
+     * Task ej4: a ring nobody reads that stayed full for dormantTicks
+     * ticks puts the agent to sleep — an enter then walks no stack and
+     * counts its bracket as dropped, depth still balanced — and the
+     * reader's next drain (the tail moved) wakes it through the resync
+     * path, after which enters walk again.
+     */
+    static void dormant() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger walks = dormancyRing();
+        Ring r = Hooks.ring;
+        try {
+            ByteBuffer b = map(r.path());
+            Watermarks.Resync s = new Watermarks.Resync();
+            s.dormantTicks = 2;
+            bracket();
+            equal(1, walks.get(), "awake: the enter walks");
+            fillUp(r);
+            Watermarks.tick(r, s);
+            check(!Hooks.dormant, "one full tick is not enough");
+            Watermarks.tick(r, s);
+            check(Hooks.dormant, "unread and full for two ticks: dormant");
+            long lost = b.getLong(Ring.DROPPED + 8 * Ring.BRACKET);
+            bracket();
+            equal(1, walks.get(), "a dormant enter walks no stack");
+            equal(lost + 1, b.getLong(Ring.DROPPED + 8 * Ring.BRACKET),
+                    "its bracket counted as dropped");
+            equal(0, Hooks.depth(), "balanced");
+            int g = Hooks.generation;
+            setHeader(r.path(), Ring.TAIL, b.getLong(Ring.HEAD));   // the reader drained
+            Watermarks.tick(r, s);
+            check(!Hooks.dormant, "awake once the tail moved");
+            equal(g + 1, Hooks.generation, "woken through a resync");
+            bracket();
+            equal(2, walks.get(), "the enter walks again");
+        } finally {
+            endDormancy();
+        }
+        delete(dir(r));
+    }
+
+    /** A dormant agent wakes when a new reader bumps the epoch (task 5j4). */
+    static void wakeByReader() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger walks = dormancyRing();
+        Ring r = Hooks.ring;
+        try {
+            Watermarks.Resync s = new Watermarks.Resync();
+            s.dormantTicks = 1;
+            fillUp(r);
+            Watermarks.tick(r, s);
+            check(Hooks.dormant, "dormant");
+            setEpoch(r.path(), 2);
+            Watermarks.tick(r, s);
+            check(!Hooks.dormant, "a new reader woke it");
+            bracket();
+            equal(1, walks.get(), "the enter walks");
+        } finally {
+            endDormancy();
+        }
+        delete(dir(r));
+    }
+
+    /**
+     * Neither an unread ring with room (an idle reader-less JVM whose
+     * records still land) nor a full ring whose reader keeps draining
+     * puts the agent to sleep.
+     */
+    static void dormantNeedsBoth() throws Exception {
+        dormancyRing();
+        Ring r = Hooks.ring;
+        try {
+            Watermarks.Resync s = new Watermarks.Resync();
+            s.dormantTicks = 2;
+            for (int i = 0; i < 5; i++) {
+                Watermarks.tick(r, s);
+            }
+            check(!Hooks.dormant, "room left: awake");
+            ByteBuffer b = map(r.path());
+            for (int i = 0; i < 5; i++) {
+                fillUp(r);
+                setHeader(r.path(), Ring.TAIL, b.getLong(Ring.TAIL) + Ring.WATERMARK_LEN);
+                Watermarks.tick(r, s);
+            }
+            check(!Hooks.dormant, "a draining reader: awake");
+        } finally {
+            endDormancy();
+        }
+        delete(dir(r));
+    }
+
+    /**
+     * Opens a fresh ring in Hooks and counts the stack walks of its
+     * enters through the stacks seam.
+     */
+    private static java.util.concurrent.atomic.AtomicInteger dormancyRing() throws IOException {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        Hooks.configure(5, true, false);
+        Hooks.openRing(dir.toString(), Ring.MIN_CAPACITY);
+        java.util.concurrent.atomic.AtomicInteger walks =
+                new java.util.concurrent.atomic.AtomicInteger();
+        Hooks.stacks = () -> {
+            walks.incrementAndGet();
+            return StackIds.NONE;
+        };
+        return walks;
+    }
+
+    /**
+     * Undoes dormancyRing: no ring, awake, walking again; and this thread
+     * undescribed, so a later test's ring gets its THREAD first, as it
+     * would after the resync tests (HttpHooksTest relies on that).
+     */
+    private static void endDormancy() {
+        Hooks.ring = null;
+        Hooks.dormant = false;
+        Hooks.configure(5, true, false);
+        Hooks.state().described = null;
+    }
+
+    private static Path dir(Ring r) {
+        return r.path().getParent();
+    }
+
+    /**
+     * Writes BRACKETs, then WATERMARKs, until the ring drops one of each:
+     * full even for the watermark thread's own records.
+     */
+    private static void fillUp(Ring r) {
+        while (r.bracket(1, 1, 0, 0, 0, 0)) {
+            // until full
+        }
+        while (r.watermark(0)) {
+            // until full for the smallest record too
+        }
     }
 
     /**

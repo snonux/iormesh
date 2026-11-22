@@ -3,7 +3,6 @@ package iormesh.bridge;
 import java.lang.invoke.VarHandle;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * WATERMARK records: the promise "every bracket that exited before this
@@ -12,46 +11,85 @@ import java.util.concurrent.atomic.AtomicInteger;
  * watermark has passed it (docs/implementation.md M3 step 4); without
  * watermarks it would have to guess how long to wait.
  *
- * Why the promise holds: a closing bracket sets its thread's
- * {@code closing} to its enter stamp before stamping its exit, and
- * clears it after publishing. A watermark reads the clock first, then
- * scans every thread: a thread seen idle either published already (so
- * its record precedes the watermark's reservation) or will stamp its
- * exit after the scan, hence after the clock read; a thread seen
- * closing lowers the watermark to its enter stamp, which no exit
- * precedes. Watermarks never go backwards. Both sides fence between
- * their volatile access and their clock read (Dekker): the JMM does not
- * order System.nanoTime() against volatiles by itself.
+ * Why the promise holds: a closing bracket enters its thread in the
+ * set of closing threads and sets its {@code closing} to its enter
+ * stamp before stamping its exit, and clears both after publishing
+ * ({@link #closing}, {@link #leave}). A watermark reads the clock first,
+ * then scans that set: a thread not in it (or seen idle) either
+ * published already (so its record precedes the watermark's
+ * reservation) or will stamp its exit after the scan, hence after the
+ * clock read; a thread seen closing lowers the watermark to its enter
+ * stamp, which no exit precedes. Watermarks never go backwards. Both
+ * sides fence between their volatile access and their clock read
+ * (Dekker): the JMM does not order System.nanoTime() against volatiles
+ * by itself. The set's insertion is a volatile write the scan's
+ * iterator reads (ConcurrentHashMap: an element added before the
+ * iterator is created, and not removed, is seen), so the fences order
+ * it like the closing store itself.
+ *
+ * Only closing threads are scanned (task dj4): a tick costs the brackets
+ * being written at that instant, not the threads alive. A JVM with tens
+ * of thousands of parked (virtual) threads once burned most of a core
+ * here, scanning them all every tick.
  *
  * The same thread serves later readers (task 5j4): each tick it polls
  * the ring's reader epoch and, when a reader came after the first one,
  * resends the dictionary records that reader missed ({@link #resync}).
  * With watermark=0 there is no thread and so no resync either.
+ *
+ * It also notices when nobody reads the ring any more (task ej4): the
+ * tail stands still while the ring stays full for DORMANT_AFTER_MS. It
+ * then sets Hooks.dormant, and the hooks stop walking stacks for records
+ * the ring would drop; it clears the flag through a resync once the tail
+ * moves or a reader comes ({@link #doze}). With watermark=0 the agent
+ * never goes dormant.
  */
 final class Watermarks {
     /** The thread's name: the tracer recognises its syscalls as the agent's. */
     static final String THREAD_NAME = "iormesh-agent-watermark";
-    /** Every so many registrations, dead threads are pruned (see register). */
-    private static final int PRUNE_EVERY = 256;
-    private static final Set<Brackets> LIVE = ConcurrentHashMap.newKeySet();
-    private static final AtomicInteger REGISTERED = new AtomicInteger();
+    /**
+     * The threads writing a record under the watermark promise right now
+     * (closing not IDLE, or about to be or just been): the only ones a
+     * watermark scans. A thread is in it from {@link #closing} to
+     * {@link #leave} only, so it holds no thread longer than a record's
+     * write, and needs no pruning.
+     */
+    private static final Set<Brackets> CLOSING = ConcurrentHashMap.newKeySet();
     private static long last = Long.MIN_VALUE;
 
     private Watermarks() {}
 
     /**
-     * Tracks a thread's state for the scan; without a ring there are no
-     * watermarks and nothing to track. Dead threads are pruned by every
-     * scan, and here too, so an app that churns threads cannot grow the
-     * set when the timer is off (watermark=0).
+     * Marks t closing from stamp; no watermark passes stamp until the
+     * caller ends the mark. was is t.closing as the caller read it
+     * before its try, which its finally restores with a plain store and
+     * then calls {@link #leave}: assigned before anything that can throw
+     * (a StackOverflowError on entering this method), so a throw never
+     * clears an outer mark nor leaves t closing for good. The caller
+     * fences before its clock read (see the class comment). Nested in an
+     * open mark (an HTTP marker written inside a probe's record), the
+     * older stamp stays in force and t stays in the set: the inner write
+     * must not lift the floor the outer record still needs. t enters the
+     * set before its mark is stored, so a failed insertion (it allocates)
+     * leaves t idle, never closing but unseen.
      */
-    static void register(Brackets b) {
-        if (Hooks.ring == null) {
-            return;
+    static void closing(Brackets t, long was, long stamp) {
+        if (was == Brackets.IDLE) {
+            CLOSING.add(t);
         }
-        LIVE.add(b);
-        if (REGISTERED.incrementAndGet() % PRUNE_EVERY == 0) {
-            LIVE.removeIf(x -> x.closing == Brackets.IDLE && !x.owner.isAlive());
+        t.closing = Math.min(was, stamp);
+    }
+
+    /**
+     * Takes t out of the set once its caller restored t.closing to was,
+     * after the record is published — unless was is an outer mark still
+     * open. A remove that never happened (a throw on entering here)
+     * leaves an IDLE entry, which lowers no watermark and goes at the
+     * thread's next leave.
+     */
+    static void leave(Brackets t, long was) {
+        if (was == Brackets.IDLE) {
+            CLOSING.remove(t);
         }
     }
 
@@ -74,13 +112,8 @@ final class Watermarks {
         // the JMM alone does not; pairs with the fence in Hooks.close.
         VarHandle.fullFence();
         long w = now;
-        for (Brackets b : LIVE) {
-            long c = b.closing;
-            if (c < w) {
-                w = c;
-            } else if (c == Brackets.IDLE && !b.owner.isAlive()) {
-                LIVE.remove(b);  // dead thread: it can write nothing more
-            }
+        for (Brackets b : CLOSING) {
+            w = Math.min(w, b.closing);   // IDLE (entering or leaving) lowers nothing
         }
         long v = force ? Math.max(w, last) : w;
         if ((force || w > last) && ring.watermark(v)) {
@@ -92,12 +125,23 @@ final class Watermarks {
     static final long RESYNC_GAP_NS = 1_000_000_000L;
 
     /**
+     * How long the ring must stay full and unread before the agent goes
+     * dormant (task ej4), turned into ticks by {@link #dormantTicks}:
+     * long enough that a live tracer stalled by a loaded host is never
+     * taken for a gone one, short enough that a JVM outliving its session
+     * stops paying its walks soon.
+     */
+    static final long DORMANT_AFTER_MS = 10_000;
+
+    /**
      * The watermark thread's resync state (task 5j4), touched by that
      * thread only: the reader epoch it last acted on and the ring's tail
      * read just before (what earlier readers consumed), whether a resync
      * was asked for but waits out gapNs since the last one (pending), and
      * whether the hook table still has to be resent (due: a row or the
-     * THREAD was dropped last time).
+     * THREAD was dropped last time). Also the dormancy state (task ej4,
+     * {@link #doze}): the tail, epoch and drop count of the last tick and
+     * how many ticks in a row found the tail still and the ring full.
      */
     static final class Resync {
         long seen;
@@ -106,6 +150,59 @@ final class Watermarks {
         boolean due;
         long gapNs = RESYNC_GAP_NS;
         long lastNs = System.nanoTime() - RESYNC_GAP_NS;
+        long dozeTail;
+        long dozeEpoch;
+        long dozeDropped;
+        int stuck;
+        int dormantTicks = dormantTicks(10);
+    }
+
+    /** DORMANT_AFTER_MS in ticks of intervalMs, at least two. */
+    static int dormantTicks(long intervalMs) {
+        return (int) Math.max(2, Math.min(Integer.MAX_VALUE, DORMANT_AFTER_MS / intervalMs));
+    }
+
+    /**
+     * Puts the agent to sleep when nobody reads the ring, and wakes it
+     * (task ej4). Asleep after dormantTicks ticks in a row in which the
+     * tail did not move, no reader came (the epoch stood) and the ring
+     * dropped a record (it is full — the tick's own watermark drops when
+     * the app is quiet): the session ended or the tracer died, and every
+     * record would be dropped anyway. Awake as soon as the tail moves or
+     * the epoch does (a new reader, task 5j4), and a wake asks for a
+     * resync, as a new reader does: the reader then gets the dictionary
+     * again before brackets that need it, and the drops a dormant agent
+     * counted in the header (Hooks.lostDormant) keep the watermarks
+     * honest about the time it slept. A repeated agent load wakes it too
+     * (resync reads that request, see tick). Reads three header words per
+     * tick; app threads read only Hooks.dormant.
+     */
+    static void doze(Ring ring, Resync s) {
+        long tail = ring.consumed();
+        long epoch = ring.readerEpoch();
+        long dropped = ring.dropped();
+        boolean moved = tail != s.dozeTail || epoch != s.dozeEpoch;
+        boolean full = dropped != s.dozeDropped;
+        s.dozeTail = tail;
+        s.dozeEpoch = epoch;
+        s.dozeDropped = dropped;
+        if (Hooks.dormant) {
+            if (moved) {
+                wake(s);
+            }
+            return;
+        }
+        s.stuck = !moved && full ? s.stuck + 1 : 0;
+        if (s.stuck >= s.dormantTicks) {
+            Hooks.dormant = true;
+        }
+    }
+
+    /** Wakes the agent through a resync (see doze). */
+    private static void wake(Resync s) {
+        Hooks.dormant = false;
+        s.stuck = 0;
+        s.pending = true;
     }
 
     /**
@@ -129,7 +226,12 @@ final class Watermarks {
     static void resync(Ring ring, Resync s) {
         long tail = ring.consumed();
         long epoch = ring.readerEpoch();
-        s.pending |= Hooks.resyncRequested();
+        if (Hooks.resyncRequested()) {
+            s.pending = true;
+            if (Hooks.dormant) {
+                wake(s);   // a new session's load (task ej4)
+            }
+        }
         if (epoch != s.seen) {
             s.pending |= epoch > 1 || s.seenTail > 0;
             s.seen = epoch;
@@ -194,14 +296,16 @@ final class Watermarks {
             }
         }
         Resync s = new Resync();
+        s.dormantTicks = dormantTicks(intervalMs);
         while (pause(intervalMs)) {
             tick(ring, s);
         }
     }
 
     /**
-     * One tick: a resync if a new reader asked for one, then the
-     * watermark — but none while a resend is still due (review of 5j4).
+     * One tick: dormancy first (doze: a wake asks for a resync, which then
+     * runs in the same tick), a resync if a new reader asked for one, then
+     * the watermark — but none while a resend is still due (review of 5j4).
      * The tracer takes the first WATERMARK after resent HOOK rows as the
      * table's end and probes the natives of the rows it has: a watermark
      * after a resend whose rows the full ring partly dropped would close
@@ -213,6 +317,11 @@ final class Watermarks {
      * the watermarks.
      */
     static void tick(Ring ring, Resync s) {
+        try {
+            doze(ring, s);
+        } catch (Throwable e) {
+            Hooks.dormant = false;   // in doubt, awake: costs walks, loses nothing
+        }
         try {
             resync(ring, s);
         } catch (Throwable e) {
