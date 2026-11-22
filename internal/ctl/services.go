@@ -13,7 +13,6 @@ import (
 	"text/tabwriter"
 
 	"iormesh/internal/servicedb"
-	"iormesh/internal/termsafe"
 )
 
 // servicesCommand is `iormeshctl services [VERB] ...` (PLAN.md M4
@@ -79,7 +78,7 @@ func withDB(path string, e env, mode int, fn func(context.Context, *servicedb.DB
 	}
 	d, err := open(ctx, path)
 	if mode == dbRead && errors.Is(err, servicedb.ErrNoDatabase) {
-		_, err = fmt.Fprintf(e.stderr, "iormeshctl: no service database at %s yet (a build creates it)\n", path)
+		_, err = fmt.Fprintf(e.stderr, "iormeshctl: no service database at %s yet (a build creates it)\n", safe(path))
 		return err
 	}
 	if err != nil {
@@ -125,8 +124,8 @@ func writeEndpoints(w io.Writer, eps []servicedb.Endpoint, paths bool) error {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "SERVICE\tENDPOINT\tCONNS\tUNRESOLVED\tTLS\tCLIENTS")
 	for _, ep := range eps {
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%s\t%s\n", cmp.Or(ep.Service, "-"), endpointText(ep),
-			ep.Conns, ep.Unresolved, cmp.Or(ep.TLS, "?"), safe(strings.Join(ep.Clients, ",")))
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%s\t%s\n", safe(cmp.Or(ep.Service, "-")), safe(endpointText(ep)),
+			ep.Conns, ep.Unresolved, safe(cmp.Or(ep.TLS, "?")), safe(strings.Join(ep.Clients, ",")))
 		if !paths {
 			continue
 		}
@@ -140,9 +139,13 @@ func writeEndpoints(w io.Writer, eps []servicedb.Endpoint, paths bool) error {
 
 // endpointText is "hostname (ip:port)" or "ip:port"; a loopback or
 // link-local endpoint's address ends in "@host", the traced host it is
-// local to, so two hosts' 127.0.0.1:5432 rows tell apart.
+// local to, so two hosts' 127.0.0.1:5432 rows tell apart. Each part
+// from the database is quoted on its own (an IP that does not parse is
+// printed as stored), so a hostile one stays visibly apart from the
+// rest; the print wraps the whole in safe once more, which changes
+// nothing then.
 func endpointText(ep servicedb.Endpoint) string {
-	addr := ep.IP + ":" + strconv.Itoa(int(ep.Port))
+	addr := safe(ep.IP) + ":" + strconv.Itoa(int(ep.Port))
 	if a, err := netip.ParseAddr(ep.IP); err == nil {
 		addr = netip.AddrPortFrom(a, ep.Port).String()
 	}
@@ -195,7 +198,7 @@ func servicesName(args []string, e env) error {
 			return err
 		}
 		_, err = fmt.Fprintf(e.stdout, "rule %d: %s port %s -> %s\n", id,
-			safe(strings.ToLower(r.HostGlob)), portText(r.Port), safe(r.Service))
+			safe(strings.ToLower(r.HostGlob)), safe(portText(r.Port)), safe(r.Service))
 		return err
 	})
 }
@@ -213,7 +216,7 @@ func servicesRules(args []string, e env) error {
 		tw := tabwriter.NewWriter(e.stdout, 0, 4, 2, ' ', 0)
 		_, _ = fmt.Fprintln(tw, "ID\tHOST GLOB\tPORT\tSERVICE")
 		for _, r := range rules {
-			_, _ = fmt.Fprintf(tw, "%d\t%s\t%s\t%s\n", r.ID, safe(r.HostGlob), portText(r.Port), r.Service)
+			_, _ = fmt.Fprintf(tw, "%d\t%s\t%s\t%s\n", r.ID, safe(r.HostGlob), safe(portText(r.Port)), safe(r.Service))
 		}
 		return tw.Flush()
 	})
@@ -243,9 +246,3 @@ func portText(p uint16) string {
 	}
 	return strconv.Itoa(int(p))
 }
-
-// safe quotes a string from the traces that holds a control character:
-// hostnames and paths come from the traced apps, and printed raw they
-// could rewrite the operator's terminal (internal/termsafe, shared with
-// the build summary and show).
-func safe(s string) string { return termsafe.String(s) }

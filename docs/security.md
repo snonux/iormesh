@@ -476,7 +476,11 @@ truth.
   to others, like the registry. It holds no secrets beyond what
   the traces already redacted (decision #9), and `iormeshctl
   services` quotes control characters and invalid UTF-8 from the
-  traces before they reach the terminal.
+  traces before they reach the terminal. Every other iormeshctl
+  print of server-, cluster- or file-supplied text does the same;
+  a `mage test` gate (`internal/buildgate/ctlprint_test.go`, task
+  oj4) fails on an fmt print in `internal/ctl` whose text value
+  skips that escape.
 - **Kubernetes** (M7; decisions #13, #14, #18 are provisional —
   PLAN.md "Provisional — M7"): eBPF privileges are
   node-kernel-wide — a container with `CAP_BPF` and

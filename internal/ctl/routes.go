@@ -230,12 +230,14 @@ func readRouteObjects(ctx context.Context, kubeContext string, namespaces []stri
 // printDiscovery says what was found and where it went, and lists the
 // flags: what discovery left out and why.
 func printDiscovery(e env, s routemap.Snapshot, path string) error {
-	q := termsafe.String // the flags quote names the cluster chose
+	// Every value is quoted through safe: the flags name what the cluster
+	// chose, the context and namespaces come from the registry and the
+	// kubeconfig.
 	var b strings.Builder
 	fmt.Fprintf(&b, "discovered %d routes, %d services in %s (%s)\nsnapshot   %s\n", len(s.Map.Routes),
-		len(s.Map.Services), s.Context, strings.Join(s.Namespaces, ", "), q(path))
+		len(s.Map.Services), safe(s.Context), safe(strings.Join(s.Namespaces, ", ")), safe(path))
 	for _, f := range s.Flags {
-		fmt.Fprintf(&b, "route flag %s %s: %s\n", f.Kind, q(f.Subject), q(f.Detail))
+		fmt.Fprintf(&b, "route flag %s %s: %s\n", safe(f.Kind), safe(f.Subject), safe(f.Detail))
 	}
 	_, err := fmt.Fprint(e.stdout, b.String())
 	return err

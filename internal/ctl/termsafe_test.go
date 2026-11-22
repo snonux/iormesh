@@ -1,11 +1,15 @@
 package ctl
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"iormesh/internal/k8s"
+	"iormesh/internal/routemap"
+	"iormesh/internal/servicedb"
 	"iormesh/internal/termsafe"
 )
 
@@ -77,5 +81,46 @@ func TestHostileTextTerminalSafe(t *testing.T) {
 		}
 		assertTerminalSafe(t, "stdout", f.stdout.String())
 		assertTerminalSafe(t, "stderr", f.stderr.String())
+	})
+}
+
+// TestHostileValuesPrintedSafe (task oj4) feeds the printers of
+// services, routes discover and pods collect values a compromised trace,
+// cluster or service database could hold, past the validation that
+// normally stops them before they are printed (servicedb refuses such a
+// rule, internal/k8s such a pod name, the registry such a context): each
+// print escapes its values itself, whatever validated them upstream.
+// TestCtlPrintsAreTerminalSafe in internal/buildgate keeps every other
+// print in this package doing the same.
+func TestHostileValuesPrintedSafe(t *testing.T) {
+	t.Run("services list", func(t *testing.T) {
+		var b strings.Builder
+		eps := []servicedb.Endpoint{{Service: "inv" + escText, IP: "10.0.0.2" + escText, Port: 8443,
+			TLS: escText, Requests: []servicedb.EndpointRequest{{Method: "GET", Path: "/"}}}}
+		if err := writeEndpoints(&b, eps, true); err != nil {
+			t.Fatal(err)
+		}
+		assertTerminalSafe(t, "services list", b.String())
+	})
+	t.Run("routes discover", func(t *testing.T) {
+		e, stdout, _, _ := testEnv(t)
+		s := routemap.Snapshot{Context: "kind" + escText, Namespaces: []string{"prod" + escText},
+			Flags: []routemap.Flag{{Kind: "shadowed" + escText, Subject: "s", Detail: "d"}}}
+		if err := printDiscovery(e, s, "/snap"); err != nil {
+			t.Fatal(err)
+		}
+		assertTerminalSafe(t, "routes discover", stdout.String())
+	})
+	t.Run("pods collect", func(t *testing.T) {
+		e, stdout, _, _ := testEnv(t)
+		pe := podEntry{ref: "kind/shop/" + escText}
+		st := k8s.PodState{Name: "web-" + escText}
+		if err := (collector{e: e}).pod(context.Background(), pe, st, nil); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(stdout.String(), "nothing to collect") {
+			t.Errorf("stdout: %q", stdout)
+		}
+		assertTerminalSafe(t, "pods collect", stdout.String())
 	})
 }

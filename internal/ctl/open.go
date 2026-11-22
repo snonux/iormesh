@@ -38,7 +38,7 @@ func openCommand(args []string, e env) error {
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(e.stdout, "site       %s\n", index); err != nil {
+	if _, err := fmt.Fprintf(e.stdout, "site       %s\n", safe(index)); err != nil {
 		return err
 	}
 	opener := e.opener

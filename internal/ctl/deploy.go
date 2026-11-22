@@ -173,7 +173,7 @@ func (d deployer) all(ctx context.Context, servers []federate.Server, recPath st
 	for _, srv := range servers {
 		err := d.e.onHost(ctx, func(ctx context.Context) error { return one(ctx, srv) })
 		if err != nil {
-			_, _ = fmt.Fprintf(d.e.stderr, "iormeshctl: %s: %s\n", srv.Host, errText(err))
+			_, _ = fmt.Fprintf(d.e.stderr, "iormeshctl: %s: %s\n", safe(srv.Host), errText(err))
 			failed = append(failed, srv.Host)
 		}
 	}
@@ -457,9 +457,8 @@ func (d deployer) relay(host string, out []byte) {
 // (federate.ValidServer) and expand enrolls only addresses, so this is
 // defence in depth should either ever let a control byte through.
 func relay(w io.Writer, host string, out []byte) {
-	prefix := termsafe.String(host)
 	for line := range strings.Lines(string(out)) {
-		_, _ = fmt.Fprintf(w, "%s: %s\n", prefix, termsafe.String(strings.TrimSuffix(line, "\n")))
+		_, _ = fmt.Fprintf(w, "%s: %s\n", safe(host), termsafe.String(strings.TrimSuffix(line, "\n")))
 	}
 }
 
