@@ -78,8 +78,14 @@ func TestNonAnswersFail(t *testing.T) {
 				t.Errorf("gateway-chain: the wrong start %q passes", wrong)
 			}
 		}
-		if fails := q.Score("The chain: gateway, orders, inventory, billing."); len(fails) != 0 {
-			t.Errorf("gateway-chain: the right chain after a preamble fails: %v", fails)
+		// The right chain passes with a label in front and with the
+		// gateway mentioned again in an explanation after it.
+		for _, right := range []string{"The chain: gateway, orders, inventory, billing.",
+			"1. gateway (the checkout entry point)\n2. orders (called by the gateway)\n3. inventory\n4. billing",
+			"gateway -> orders -> inventory -> billing. The gateway's POST /orders starts the checkout."} {
+			if fails := q.Score(right); len(fails) != 0 {
+				t.Errorf("gateway-chain: the right chain %q fails: %v", right, fails)
+			}
 		}
 	}
 }
