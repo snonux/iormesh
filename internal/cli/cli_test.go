@@ -184,6 +184,37 @@ func TestMainDispatch(t *testing.T) {
 	}
 }
 
+// TestSubcommandHelpExitsZero pins task vh4: `SUBCMD -h` (and --help)
+// is a request, not an error. It exits 0 and prints only that
+// subcommand's flags — no "flag: help requested" line and no full
+// usage after them. Parsing comes first in every subcommand, so none
+// of these touches systemd, a JVM or the trace root.
+func TestSubcommandHelpExitsZero(t *testing.T) {
+	for _, name := range []string{"run", "normalize", "attach", "start", "stop", "status", "uninstall",
+		"upgrade", "ready"} {
+		for _, h := range []string{"-h", "--help"} {
+			var out, errOut bytes.Buffer
+			code := Main([]string{name, h}, &out, &errOut)
+			all := out.String() + errOut.String()
+			if code != exitOK {
+				t.Errorf("%s %s: exit %d, want 0; output %q", name, h, code, all)
+			}
+			if strings.Contains(all, "help requested") || strings.Contains(all, "usage:\n") {
+				t.Errorf("%s %s: printed more than the subcommand's help: %q", name, h, all)
+			}
+			if !strings.Contains(errOut.String(), "Usage of "+name) {
+				t.Errorf("%s %s: no subcommand help on stderr: %q", name, h, errOut.String())
+			}
+		}
+	}
+	// An unknown flag stays a usage error, with the full usage.
+	var out, errOut bytes.Buffer
+	if code := Main([]string{"status", "-nope"}, &out, &errOut); code != exitUsage ||
+		!strings.Contains(errOut.String(), "usage:\n") {
+		t.Errorf("status -nope: exit %d, stderr %q", code, errOut.String())
+	}
+}
+
 // writeTrace writes a small marker-bracketed trace like a run would.
 func writeTrace(t *testing.T, path string) string {
 	t.Helper()

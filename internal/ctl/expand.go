@@ -99,7 +99,7 @@ func parseExpandFlags(args []string, e env) (expandFlags, error) {
 	fs.StringVar(&f.key, "key", "", "with -apply: pinned minisign public key (default ~/.config/iormesh/"+
 		keyFileName+")")
 	if err := fs.Parse(args); err != nil {
-		return f, fmt.Errorf("%w: %v", errUsage, err)
+		return f, fmt.Errorf("%w: %w", errUsage, err)
 	}
 	switch {
 	case fs.NArg() != 0:

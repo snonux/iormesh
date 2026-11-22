@@ -55,7 +55,7 @@ func addProjectFlags(fs *flag.FlagSet) projectFlags {
 // parseFlags parses args into fs, which takes no positional arguments.
 func parseFlags(fs *flag.FlagSet, args []string) error {
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%w: unexpected argument %q", errUsage, fs.Arg(0))

@@ -110,7 +110,7 @@ func upgradeCommand(args []string, stdout, stderr io.Writer) error {
 	allowDowngrade := flags.Bool("allow-downgrade", false,
 		"install an older signed build (root only, not through the sudoers rule)")
 	if err := flags.Parse(args); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if flags.NArg() != 1 {
 		return fmt.Errorf("%w: upgrade takes one staged file", errUsage)

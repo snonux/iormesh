@@ -36,7 +36,7 @@ func addCommand(args []string, e env) error {
 	port := fs.Uint("listen-port", 0, "trace whoever listens on this TCP port")
 	path := fs.String("registry", "", "registry file (default ~/.config/iormesh/servers.yaml)")
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() < 1 {
 		return fmt.Errorf("%w: add needs a HOST", errUsage)
@@ -51,7 +51,7 @@ func addCommand(args []string, e env) error {
 	p := federate.Project{Name: *name, Flags: flags,
 		Target: federate.Target{Pattern: *pattern, ListenPort: uint16(*port)}}
 	if err := checkDeployFlags(p); err != nil {
-		return fmt.Errorf("%w: %v", errUsage, err)
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	return editRegistry(*path, e, func(r *federate.Registry) error {
 		return r.Add(host, p)
