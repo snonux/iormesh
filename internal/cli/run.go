@@ -266,7 +266,8 @@ func finish(cfg runConfig, tr tracer, c *correlate.Correlator, out outputs, reas
 	endErr := c.End(reason)
 	sinkErr := c.Close()
 	// The graph is -out's: on a server the controller rebuilds it from the
-	// segments (decision #3), so -trace-dir alone writes none.
+	// segments (decision #3), so -trace-dir alone writes none and its
+	// correlator never builds one (correlatorConfig).
 	var graphErr error
 	if cfg.out != "" {
 		graphErr = schema.WriteGraphFile(filepath.Join(cfg.out, GraphFile), c.Graph())
@@ -348,13 +349,21 @@ func newCorrelator(cfg runConfig, out outputs) (*correlate.Correlator, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := correlate.New(correlate.Config{Host: correlate.Host{ID: out.hostID, Project: cfg.project},
-		Sink: out.java.sink(out.seg.sink(events)), WallOffsetNS: offset,
-		Stacks: out.stacks.ids()})
+	c := correlate.New(correlatorConfig(cfg, out, out.java.sink(out.seg.sink(events)), offset))
 	if err := c.Session(out.session); err != nil {
 		return nil, errors.Join(err, c.Close())
 	}
 	return c, nil
+}
+
+// correlatorConfig is the correlator's configuration for a run writing to
+// sink. Without -out it builds no graph: finish writes graph.json only
+// into cfg.out, and on a server the controller rebuilds the graph from
+// the segments (decision #3), so a graph kept by a -trace-dir run would
+// only grow with every distinct path, connection and process (task 4j4).
+func correlatorConfig(cfg runConfig, out outputs, sink schema.Sink, offset int64) correlate.Config {
+	return correlate.Config{Host: correlate.Host{ID: out.hostID, Project: cfg.project},
+		Sink: sink, WallOffsetNS: offset, Stacks: out.stacks.ids(), NoGraph: cfg.out == ""}
 }
 
 // openEvents creates cfg.out and its NDJSON events sink; nil without

@@ -9,6 +9,11 @@ import (
 
 // graphBuilder accumulates the per-host graph as events are emitted.
 // Nodes and edges are keyed by id so repeats collapse; build sorts them.
+// A nil *graphBuilder is the graph switched off (Config.NoGraph): every
+// method is a no-op on it and build returns an empty graph, so the
+// correlator's call sites need no check of their own. The builder is
+// write-only for the correlator (nothing it decides reads the graph
+// back), so dropping it changes no event.
 // Attributes stay minimal on purpose: raw pids or ports in attrs would
 // survive normalization and make two runs' graphs differ.
 type graphBuilder struct {
@@ -27,6 +32,9 @@ func newGraphBuilder(hostID string) *graphBuilder {
 
 // process adds a process node and its runs_on edge.
 func (g *graphBuilder) process(pid uint32, inc uint64, comm string) {
+	if g == nil {
+		return
+	}
 	id := schema.ProcessNodeID(g.hostID, pid, inc)
 	node := schema.Node{Type: schema.NodeProcess, ID: id}
 	if comm != "" {
@@ -44,6 +52,9 @@ func (g *graphBuilder) process(pid uint32, inc uint64, comm string) {
 // what ps shows. The events keep each moment's comm, so the old name is
 // not lost. The node exists: proc() added it.
 func (g *graphBuilder) renamed(pid uint32, inc uint64, comm string) {
+	if g == nil {
+		return
+	}
 	id := schema.ProcessNodeID(g.hostID, pid, inc)
 	node := g.nodes[id]
 	node.Attrs = map[string]string{"comm": comm}
@@ -53,6 +64,9 @@ func (g *graphBuilder) renamed(pid uint32, inc uint64, comm string) {
 // incarnation adds the app node and its incarnation edge to one process
 // (M2 step 3). The process node itself comes from process().
 func (g *graphBuilder) incarnation(app string, pid uint32, inc uint64) {
+	if g == nil {
+		return
+	}
 	g.nodes[app] = schema.Node{Type: schema.NodeApp, ID: app}
 	g.edge(schema.Edge{Type: schema.EdgeIncarnation, From: app,
 		To: schema.ProcessNodeID(g.hostID, pid, inc)})
@@ -61,6 +75,9 @@ func (g *graphBuilder) incarnation(app string, pid uint32, inc uint64) {
 // forked adds the edge from a parent process to the child it forked (M2
 // step 6). Both process nodes exist: newTask registered both.
 func (g *graphBuilder) forked(parent uint32, parentInc uint64, child uint32, childInc uint64) {
+	if g == nil {
+		return
+	}
 	g.edge(schema.Edge{Type: schema.EdgeForked,
 		From: schema.ProcessNodeID(g.hostID, parent, parentInc),
 		To:   schema.ProcessNodeID(g.hostID, child, childInc)})
@@ -69,6 +86,9 @@ func (g *graphBuilder) forked(parent uint32, parentInc uint64, child uint32, chi
 // signaled adds the edge from a traced sender to the traced process it
 // signalled (M2 step 7). Both process nodes exist: proc() registered both.
 func (g *graphBuilder) signaled(sender uint32, senderInc uint64, target uint32, targetInc uint64) {
+	if g == nil {
+		return
+	}
 	g.edge(schema.Edge{Type: schema.EdgeSignaled,
 		From: schema.ProcessNodeID(g.hostID, sender, senderInc),
 		To:   schema.ProcessNodeID(g.hostID, target, targetInc)})
@@ -78,6 +98,9 @@ func (g *graphBuilder) signaled(sender uint32, senderInc uint64, target uint32, 
 // the path exactly as the open event reports it, so the normalizer's
 // bracket pruning finds the node from the event (internal/normalize).
 func (g *graphBuilder) opened(pid uint32, inc uint64, path string) {
+	if g == nil {
+		return
+	}
 	file := schema.FileNodeID(g.hostID, path)
 	g.nodes[file] = schema.Node{Type: schema.NodeFile, ID: file}
 	g.edge(schema.Edge{Type: schema.EdgeOpened,
@@ -87,6 +110,9 @@ func (g *graphBuilder) opened(pid uint32, inc uint64, path string) {
 // connected adds a socket node for connID and the process's connected
 // edge, fused when both ends were traced on this host.
 func (g *graphBuilder) connected(pid uint32, inc uint64, connID string, fused bool) {
+	if g == nil {
+		return
+	}
 	sock := schema.SocketNodeID(connID)
 	g.nodes[sock] = schema.Node{Type: schema.NodeSocket, ID: sock}
 	state := schema.StateUnresolved
@@ -101,7 +127,12 @@ func (g *graphBuilder) edge(e schema.Edge) {
 	g.edges[[3]string{e.Type, e.From, e.To}] = e
 }
 
+// build returns the sorted graph; with the graph off, an empty one (no
+// nodes, not even the host's).
 func (g *graphBuilder) build() schema.Graph {
+	if g == nil {
+		return schema.Graph{SchemaVersion: schema.Version}
+	}
 	gr := schema.Graph{SchemaVersion: schema.Version,
 		Nodes: slices.Collect(maps.Values(g.nodes)),
 		Edges: slices.Collect(maps.Values(g.edges))}
