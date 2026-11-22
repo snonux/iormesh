@@ -65,7 +65,7 @@ import java.util.function.LongSupplier;
 public final class Hooks {
     /** Deeper nesting than this is not tracked (still balanced). */
     static final int MAX_DEPTH = 16;
-    /** Entry-stamped HTTP hooks kept per thread (Brackets.httpStarts). */
+    /** Entry-stamped HTTP hooks kept per thread (Brackets.httpPush). */
     static final int MAX_HTTP_DEPTH = 8;
     /** How long a dropped THREAD or STACK waits before it is tried again. */
     static final long RETRY_NS = 1_000_000;
@@ -352,9 +352,10 @@ public final class Hooks {
     /** late's record, marked closing from before its stamp (see request). */
     private static boolean lateRecord(Brackets t, Ring r, long[] c,
                                       java.util.function.Function<long[], String[]> describer) {
-        t.closing = System.nanoTime();
-        VarHandle.fullFence();   // as in close: the stamp after the mark
+        long was = Brackets.IDLE;
         try {
+            was = Watermarks.closing(t, System.nanoTime());
+            VarHandle.fullFence();   // as in close: the stamp after the mark
             long mono = System.nanoTime();
             long[] meta = new long[Ring.META];
             meta[Ring.M_REQ_BYTES] = -1;
@@ -369,7 +370,7 @@ public final class Hooks {
             r.http(mono, c[0], c[1], (int) c[2], s, meta, c[3], c[4], c[5]);
             return true;
         } finally {
-            t.closing = Brackets.IDLE;
+            Watermarks.idle(t, was);
         }
     }
 
@@ -484,8 +485,15 @@ public final class Hooks {
             return;           // too deep: exit sees d >= MAX_DEPTH and drops it
         }
         // Skipped until fully open, so a throw below leaves a balanced,
-        // dropped slot instead of a half-written bracket.
-        t.hooks[d] = SKIPPED;
+        // dropped slot instead of a half-written bracket. Reserving may
+        // grow the thread's slots (Brackets, task dj4); if that throws,
+        // the slot stays missing and exit drops it as well.
+        try {
+            t.reserve(d, SKIPPED);
+        } catch (Throwable e) {
+            countSkip(FAILS);
+            return;
+        }
         if (t.busy) {
             countSkip(SKIPS);
             return;
@@ -496,18 +504,13 @@ public final class Hooks {
             if (r != null && describeDue(t)) {
                 describe(t, r);
             }
-            t.stacks[d] = stacks.getAsLong();
+            long stack = stacks.getAsLong();
             Otel.read(t);
-            t.traceHis[d] = t.otelHi;
-            t.traceLos[d] = t.otelLo;
-            t.spans[d] = t.otelSpan;
-            if (t.virtual) {
-                // The carrier now; close compares it with the one then.
-                t.ktids[d] = Brackets.lookupKtid();
-            }
-            // Stamped after the walk, so the walk is outside the bracket.
-            t.enters[d] = System.nanoTime();
-            t.hooks[d] = hook;
+            // The carrier now; close compares it with the one then.
+            int carrier = t.virtual ? Brackets.lookupKtid() : 0;
+            // Stamped after the walk, so the walk is outside the bracket;
+            // open marks the slot with its hook last.
+            t.open(d, hook, stack, carrier, System.nanoTime());
         } catch (Throwable e) {
             countSkip(FAILS);  // e.g. StackOverflowError in a deep recursion
         } finally {
@@ -522,7 +525,7 @@ public final class Hooks {
                 return;       // retransformed mid-call: no matching enter
             }
             int d = --t.depth;
-            if (d >= MAX_DEPTH || t.hooks[d] != hook) {
+            if (d >= MAX_DEPTH || t.hook(d) != hook) {
                 return;       // skipped, failed or overflowed enter
             }
             Ring r = ring;
@@ -560,15 +563,17 @@ public final class Hooks {
                 return;
             }
             Brackets t = STATE.get();
-            long wasClosing = t.closing;
-            t.closing = System.nanoTime();
-            VarHandle.fullFence();   // as in close: the stamp after the mark
+            long wasClosing = Brackets.IDLE;
             try {
+                // Nested in another record's closing window (a probe), the
+                // outer, older mark stays in force (Watermarks.closing).
+                wasClosing = Watermarks.closing(t, System.nanoTime());
+                VarHandle.fullFence();   // as in close: the stamp after the mark
                 long[] meta = {0, 0, Ring.HTTP_ASYNC_MARK, 1, 0, -1, -1};
                 r.http(System.nanoTime(), StackIds.NONE, t.owner.getId(), 0, NO_STRINGS, meta,
                         0, 0, 0);
             } finally {
-                t.closing = wasClosing;
+                Watermarks.idle(t, wasClosing);
             }
         } catch (Throwable e) {
             countSkip(FAILS);
@@ -586,11 +591,11 @@ public final class Hooks {
     public static void httpEnter(Object self, int id) {
         try {
             Brackets t = STATE.get();
+            // Counted before the push, which may allocate the thread's
+            // stamps and fail: every exit still pops its own entry.
             int d = t.httpDepth++;
             if (d < MAX_HTTP_DEPTH) {
-                t.httpSelves[d] = self;
-                t.httpIds[d] = id;
-                t.httpStarts[d] = System.nanoTime();
+                t.httpPush(d, self, id, System.nanoTime());
             }
         } catch (Throwable e) {
             countSkip(FAILS);
@@ -615,26 +620,16 @@ public final class Hooks {
             if (t.httpDepth > 0) {
                 int d = --t.httpDepth;
                 if (d < MAX_HTTP_DEPTH) {
-                    start = t.httpStarts[d];
-                    open = t.httpSelves[d];
-                    t.httpSelves[d] = null;
-                    nested = nestedIn(t, d, id);
+                    start = t.httpStart(d);
+                    open = t.httpSelf(d);
+                    t.httpClear(d);
+                    nested = t.httpNested(d, id);
                 }
             }
         } catch (Throwable e) {
             countSkip(FAILS);
         }
         record(ret, self, arg, id, open, start, nested);
-    }
-
-    /** Whether a stamp of hook id is open below depth d on t's thread. */
-    private static boolean nestedIn(Brackets t, int d, int id) {
-        for (int k = 0; k < d; k++) {
-            if (t.httpIds[k] == id) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**
@@ -654,8 +649,8 @@ public final class Hooks {
             Brackets t = STATE.get();
             int d = t.httpDepth - 1;
             if (d >= 0 && d < MAX_HTTP_DEPTH) {
-                start = t.httpStarts[d];
-                open = t.httpSelves[d];
+                start = t.httpStart(d);
+                open = t.httpSelf(d);
             }
         } catch (Throwable e) {
             countSkip(FAILS);
@@ -735,9 +730,10 @@ public final class Hooks {
     /** dns's record, marked closing from before its stamp (see request). */
     private static boolean lookup(Brackets t, Ring r, BiFunction<Object[], long[], String[]> probe,
                                   Object[] args) {
-        t.closing = System.nanoTime();
-        VarHandle.fullFence();   // as in close: the stamp after the mark
+        long was = Brackets.IDLE;
         try {
+            was = Watermarks.closing(t, System.nanoTime());
+            VarHandle.fullFence();   // as in close: the stamp after the mark
             long mono = System.nanoTime();
             String[] s = probe.apply(args, new long[Ring.META]);
             if (s == null || s.length < 2) {
@@ -752,7 +748,7 @@ public final class Hooks {
             r.dns(mono, stack, t.owner.getId(), ktid, s, t.otelHi, t.otelLo, t.otelSpan);
             return true;
         } finally {
-            t.closing = Brackets.IDLE;
+            Watermarks.idle(t, was);
         }
     }
 
@@ -784,9 +780,10 @@ public final class Hooks {
     private static boolean request(Brackets t, Ring r,
                                    BiFunction<Object[], long[], String[]> probe, Object[] args,
                                    long start) {
-        t.closing = System.nanoTime();
-        VarHandle.fullFence();   // as in close: the stamp after the mark
+        long was = Brackets.IDLE;
         try {
+            was = Watermarks.closing(t, System.nanoTime());
+            VarHandle.fullFence();   // as in close: the stamp after the mark
             long mono = System.nanoTime();
             long[] meta = new long[Ring.META];
             meta[Ring.M_START] = start;
@@ -808,7 +805,7 @@ public final class Hooks {
             r.http(mono, stack, t.owner.getId(), ktid, s, meta, t.otelHi, t.otelLo, t.otelSpan);
             return true;
         } finally {
-            t.closing = Brackets.IDLE;
+            Watermarks.idle(t, was);
         }
     }
 
@@ -824,24 +821,25 @@ public final class Hooks {
      * record is counted in the ring header, not here.
      */
     private static void close(Brackets t, int d, Ring r) {
-        t.closing = t.enters[d];
-        // The JMM does not order System.nanoTime() against volatiles:
-        // without a full fence the clock read below may take effect
-        // before the closing store is visible (AArch64's stlr has no
-        // trailing barrier), and a watermark that read the clock later
-        // could still see this thread idle and claim a time before our
-        // exit. Paired with the fence in Watermarks.emit (Dekker).
-        VarHandle.fullFence();
         boolean wasBusy = t.busy;
-        t.busy = true;
+        long was = Brackets.IDLE;
         try {
+            was = Watermarks.closing(t, t.enter(d));
+            // The JMM does not order System.nanoTime() against volatiles:
+            // without a full fence the clock read below may take effect
+            // before the closing mark is visible (AArch64's stlr has no
+            // trailing barrier), and a watermark that read the clock later
+            // could still see this thread idle and claim a time before our
+            // exit. Paired with the fence in Watermarks.emit (Dekker).
+            VarHandle.fullFence();
+            t.busy = true;
             int ktid = t.carrierTid(d);
             long exit = System.nanoTime();
-            r.bracket(t.hooks[d], ktid, t.enters[d], exit, t.stacks[d], t.owner.getId(),
-                    t.traceHis[d], t.traceLos[d], t.spans[d]);
+            r.bracket(t.hook(d), ktid, t.enter(d), exit, t.stack(d), t.owner.getId(),
+                    t.traceHi(d), t.traceLo(d), t.span(d));
         } finally {
             t.busy = wasBusy;
-            t.closing = Brackets.IDLE;
+            Watermarks.idle(t, was);
         }
     }
 
@@ -859,7 +857,11 @@ public final class Hooks {
      * learn again that the thread is virtual before its next bracket.
      * That costs a virtual thread a clock read per bracket; a platform
      * thread pays nothing more. Either way a retry after a drop waits for
-     * retryAt.
+     * retryAt. An unnamed virtual thread is described too (task dj4
+     * weighed skipping it): the THREAD record is the only place the
+     * tracer learns a thread is virtual, and without it the thread's
+     * joined I/O would lose its carrier flag (internal/correlate setJava).
+     * Only a thread that brackets pays, once per redescribeNs at most.
      */
     private static boolean describeDue(Brackets t) {
         if (t.owner.getName() != t.described || t.generation != generation) {

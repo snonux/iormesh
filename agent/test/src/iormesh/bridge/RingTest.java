@@ -50,6 +50,9 @@ public final class RingTest {
                 new AgentTests.Case("ring/renamed thread described again", RingTest::renamed),
                 new AgentTests.Case("ring/virtual thread flagged", RingTest::virtualThread),
                 new AgentTests.Case("ring/watermark waits for closing", RingTest::watermark),
+                new AgentTests.Case("ring/nested closing keeps the older stamp",
+                        RingTest::nestedClosing),
+                new AgentTests.Case("ring/deep nesting grows slots", RingTest::deepNesting),
                 new AgentTests.Case("ring/release discards", RingTest::release),
                 new AgentTests.Case("ring/exit removes only its own file", RingTest::removeOwn),
                 new AgentTests.Case("ring/idle virtual thread described again",
@@ -619,18 +622,17 @@ public final class RingTest {
     static void watermark() throws Exception {
         Path dir = Files.createTempDirectory("iormesh-ring-test");
         Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
-        Hooks.ring = r;           // threads are tracked only with a ring
         Brackets b = new Brackets();
-        Hooks.ring = null;
+        long was = Brackets.IDLE;
         try {
             Watermarks.emit(r);
             long enter = System.nanoTime();
-            b.closing = enter;
+            was = Watermarks.closing(b, enter);
             Watermarks.emit(r);   // held back to enter, still newer than the first
-            b.closing = Brackets.IDLE;
+            Watermarks.idle(b, was);
             Watermarks.emit(r);
         } finally {
-            b.closing = Brackets.IDLE;
+            Watermarks.idle(b, was);
         }
         ByteBuffer m = map(r.path());
         List<Long> marks = new ArrayList<>();
@@ -640,6 +642,83 @@ public final class RingTest {
         equal(3, marks.size(), "three watermarks");
         check(marks.get(0) < marks.get(1), "second is newer than the first");
         check(marks.get(1) < marks.get(2), "third passes the closing bracket");
+        delete(dir);
+    }
+
+    /**
+     * A mark nested in an open one (an HTTP marker inside a probe's
+     * record, Watermarks.closing) keeps the older stamp in force, and
+     * ending it leaves the thread closing until the outer mark ends.
+     */
+    static void nestedClosing() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
+        Brackets b = new Brackets();
+        long outer = Brackets.IDLE;
+        long enter;
+        try {
+            Watermarks.emit(r);
+            enter = System.nanoTime();
+            outer = Watermarks.closing(b, enter);
+            long inner = Watermarks.closing(b, System.nanoTime());
+            equal(enter, b.closing, "the older stamp stays in force");
+            Watermarks.idle(b, inner);
+            equal(enter, b.closing, "still closing after the inner mark");
+            Watermarks.emit(r);   // held back to the outer enter
+            Watermarks.idle(b, outer);
+            outer = Brackets.IDLE;
+            equal(Brackets.IDLE, b.closing, "idle after the outer mark");
+            Watermarks.emit(r);
+        } finally {
+            Watermarks.idle(b, outer);
+        }
+        ByteBuffer m = map(r.path());
+        List<Long> marks = new ArrayList<>();
+        for (Rec x : records(m)) {
+            marks.add(m.getLong(x.off() + 8));
+        }
+        equal(3, marks.size(), "three watermarks");
+        equal(enter, marks.get(1), "the second stops at the outer enter");
+        check(marks.get(2) > enter, "the third passes it");
+        delete(dir);
+    }
+
+    /**
+     * Brackets nested MAX_DEPTH deep grow the thread's slots (task dj4)
+     * and each keeps its own hook, stamps and order.
+     */
+    static void deepNesting() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        Ring r = Ring.create(dir, Ring.MIN_CAPACITY);
+        Hooks.configure(5, false, false);
+        Hooks.ring = r;
+        try {
+            Thread t = new Thread(() -> {
+                for (int i = 0; i < Hooks.MAX_DEPTH; i++) {
+                    Hooks.enter(1 + i % 4);
+                }
+                for (int i = Hooks.MAX_DEPTH - 1; i >= 0; i--) {
+                    Hooks.exit(1 + i % 4);
+                }
+            }, "ring-deep");
+            t.start();
+            t.join();
+        } finally {
+            Hooks.ring = null;
+            Hooks.configure(5, true, false);
+        }
+        ByteBuffer b = map(r.path());
+        List<Rec> brackets = records(b).stream().filter(x -> x.type() == Ring.BRACKET).toList();
+        equal(Hooks.MAX_DEPTH, brackets.size(), "one bracket per depth");
+        long outerEnter = Long.MIN_VALUE;
+        for (int k = brackets.size() - 1; k >= 0; k--) {   // outermost first
+            int o = brackets.get(k).off();
+            int depth = brackets.size() - 1 - k;
+            equal(1 + depth % 4, b.getInt(o + 8), "hook at depth " + depth);
+            check(b.getLong(o + 16) <= b.getLong(o + 24), "enter <= exit at depth " + depth);
+            check(b.getLong(o + 16) >= outerEnter, "nested enters in order at depth " + depth);
+            outerEnter = b.getLong(o + 16);
+        }
         delete(dir);
     }
 
