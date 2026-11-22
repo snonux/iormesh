@@ -69,6 +69,9 @@ func sampleModel(s string) viewmodel.Model {
 			Threads: []viewmodel.ProcThread{{Name: "http-1" + s, TID: 11}},
 			Files:   []viewmodel.ProcFile{{Path: "/etc/" + s, Ops: []string{"open"}}},
 			Sockets: []viewmodel.ProcSocket{{ID: "c1" + s, FD: 7, Role: "client", Service: "orders" + s}}}},
+		// A rollup past its tracking cap: the selftest renders the
+		// processes screen's partial line (task 2i4).
+		Untracked: 84,
 	}
 }
 
@@ -327,5 +330,30 @@ func TestRoutelessGraphUnchanged(t *testing.T) {
 	}
 	if svg := string(files[1].Data); strings.Contains(svg, "routed") || strings.Contains(svg, "flag") {
 		t.Errorf("routeless graph.svg draws a band:\n%s", svg)
+	}
+}
+
+// TestProcessesPartial (task 2i4): a model whose rollup hit its
+// tracking cap carries untracked in the page's data block, and the
+// processes screen words the same partial line `show processes` prints.
+func TestProcessesPartial(t *testing.T) {
+	m := sampleModel("")
+	files, err := Files(schema.Graph{}, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := inline(t, files[0].Data, `<script type="application/json" id="model">`, "</script>")
+	var back viewmodel.Model
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatalf("data block does not parse: %v", err)
+	}
+	if back.Untracked != 84 {
+		t.Errorf("data block untracked %d, want 84", back.Untracked)
+	}
+	for _, want := range []string{"function partial(", "partial(M.untracked)",
+		"' events past the rollup’s tracking cap are not in it'"} {
+		if !strings.Contains(appJS, want) {
+			t.Errorf("app.js lacks %q", want)
+		}
 	}
 }

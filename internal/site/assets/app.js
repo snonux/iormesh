@@ -111,6 +111,13 @@
 
   function more(n, what) { return n > 0 ? el('p', 'more', 'truncated: ' + n + ' more ' + what) : null; }
 
+  // partial says the processes list is partial when the rollup hit its
+  // tracking cap (the model's untracked, task 2i4), as `show processes`
+  // does (viewmodel.PartialLine); nothing for a complete rollup.
+  function partial(n) {
+    return n > 0 ? el('p', 'warn', 'partial: ' + n + ' events past the rollup’s tracking cap are not in it') : null;
+  }
+
   function kv(pairs) {
     return table(['', ''], pairs.filter(function (p) { return p[1] !== undefined && p[1] !== ''; })
       .map(function (p) { return { cells: [p[0], p[1]] }; }));
@@ -719,7 +726,7 @@
       }
     });
     add(view, [el('h2', '', 'Processes — ' + rows.length + ' of ' + arr(M.processes).length + ' shown'),
-      table(['host pid', 'comm', 'app', 'service', 'incarnations', 'threads', 'files', 'sockets'], rows),
+      partial(M.untracked), table(['host pid', 'comm', 'app', 'service', 'incarnations', 'threads', 'files', 'sockets'], rows),
       more(M.more_processes, 'processes')]);
   }
 

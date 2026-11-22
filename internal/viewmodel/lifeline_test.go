@@ -121,6 +121,27 @@ func TestStoryCap(t *testing.T) {
 	}
 }
 
+// TestProcessesPartial (task 2i4): a rollup that hit its tracking cap
+// carries its untracked count into the model, and the processes view
+// says the list is partial; a complete rollup prints no such line.
+func TestProcessesPartial(t *testing.T) {
+	for _, untracked := range []uint64{0, 84} {
+		m := New(Input{Report: &report.Report{Untracked: untracked, Processes: []report.Process{
+			{ID: "process:h/7@1", Host: "h", PID: 7, Incarnation: 1, Comm: "java"}}}})
+		if m.Untracked != untracked {
+			t.Errorf("model untracked %d, want %d", m.Untracked, untracked)
+		}
+		var out bytes.Buffer
+		if err := WriteProcesses(&out, m); err != nil {
+			t.Fatal(err)
+		}
+		want := "partial    84 events past the rollup's tracking cap are not in it"
+		if got := strings.Contains(out.String(), want); got != (untracked > 0) {
+			t.Errorf("untracked %d: partial line shown %v:\n%s", untracked, got, &out)
+		}
+	}
+}
+
 // TestProcessesProjection: the processes view projects the rollup —
 // incarnations of one pid counted, a carrier's virtual-thread I/O kept
 // apart and said so, every printed string terminal-safe — and a build

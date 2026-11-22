@@ -11,10 +11,15 @@ import (
 // WriteProcesses prints the processes view (`show processes`): one block
 // per process incarnation, grouped by host as the model sorts them —
 // header, restarts, threads (a carrier's virtual-thread I/O counted
-// apart), files and sockets.
+// apart), files and sockets. A rollup past its tracking cap is said to
+// be partial first, as report.WriteText does, so the list never reads
+// as complete.
 func WriteProcesses(w io.Writer, m Model) error {
 	m = safeModel(m)
 	var b strings.Builder
+	if l := PartialLine(m); l != "" {
+		b.WriteString(l + "\n\n")
+	}
 	for i, p := range m.Processes {
 		if i > 0 {
 			b.WriteString("\n")
@@ -26,6 +31,17 @@ func WriteProcesses(w io.Writer, m Model) error {
 	}
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// PartialLine says the processes list is partial when the rollup hit
+// its tracking cap (Model.Untracked), "" when it is complete. `show
+// processes` and the TUI's process detail print it; the site's
+// processes screen words the same from the model's untracked.
+func PartialLine(m Model) string {
+	if m.Untracked == 0 {
+		return ""
+	}
+	return fmt.Sprintf("partial    %d events past the rollup's tracking cap are not in it", m.Untracked)
 }
 
 // WriteProcess prints one process block, as `show processes` does: the

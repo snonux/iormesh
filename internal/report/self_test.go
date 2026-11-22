@@ -42,6 +42,38 @@ func TestUntrackedCountsEventsOnce(t *testing.T) {
 	}
 }
 
+// TestClosedFDsReturnTheirBudget (task 2i4): an open fd holds one
+// tracked entry only while it is open — a process opening, reading and
+// closing one file a hundred times under a cap of 20 keeps every byte,
+// and a process seen after it is still in the rollup. A second open of
+// an fd instance whose close was lost takes no second entry.
+func TestClosedFDsReturnTheirBudget(t *testing.T) {
+	tr := &trace{host: "h1"}
+	for range 100 {
+		tr.add(60, 60, schema.KindOpenat, 3, 3, "", schema.Args{Path: ptr("/d/f"), Flags: ptr(uint32(0))}, nil)
+		tr.add(60, 60, schema.KindRead, 3, 10, "", schema.Args{}, nil)
+		tr.add(60, 60, schema.KindClose, 3, 0, "", schema.Args{}, nil)
+	}
+	for range 30 { // no close seen: the fd instance is reopened in place
+		tr.add(60, 60, schema.KindOpenat, 4, 4, "", schema.Args{Path: ptr("/d/g"), Flags: ptr(uint32(0))}, nil)
+	}
+	tr.add(61, 61, schema.KindOpenat, 3, 3, "", schema.Args{Path: ptr("/d/f"), Flags: ptr(uint32(0))}, nil)
+	c := collect(tr, 20)
+	r := Build(c, Input{})
+	if r.Untracked != 0 || len(r.Processes) != 2 {
+		t.Fatalf("%d untracked, %d processes (tracked %d); want 0 and 2", r.Untracked, len(r.Processes),
+			c.tracked)
+	}
+	if f := r.Processes[0].Files[0]; f.ReadBytes != 1000 {
+		t.Errorf("read %d bytes of /d/f, want 1000", f.ReadBytes)
+	}
+	// Live: two processes, two threads, three files, the open fds 4 of
+	// pid 60 and 3 of pid 61.
+	if c.tracked != 9 {
+		t.Errorf("tracked %d entries, want 9", c.tracked)
+	}
+}
+
 // TestReportSelfConnection:a process holding both ends of a connection
 // or a pipe gets one entry per end — each with its own role, bytes and
 // requests, each the other's peer — and the client thread's call is

@@ -319,3 +319,22 @@ func TestEnterWithoutTarget(t *testing.T) {
 		t.Fatal("the note outlived the next key")
 	}
 }
+
+// TestProcessesPartial (task 2i4): when the rollup hit its tracking cap
+// the process detail says the list is partial, also with no process
+// to select; a complete rollup's detail does not.
+func TestProcessesPartial(t *testing.T) {
+	const partial = "partial    84 events past the rollup's tracking cap"
+	vm := fixture()
+	if strings.Contains(New(vm).detail(scrProcesses), "partial ") {
+		t.Error("a complete rollup's process detail says partial")
+	}
+	vm.Untracked = 84
+	if d := New(vm).detail(scrProcesses); !strings.Contains(d, partial) {
+		t.Errorf("process detail lacks the partial line:\n%s", d)
+	}
+	vm.Processes = nil
+	if d := New(vm).detail(scrProcesses); !strings.Contains(d, partial) {
+		t.Errorf("empty processes screen lacks the partial line:\n%s", d)
+	}
+}
