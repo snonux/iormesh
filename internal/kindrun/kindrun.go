@@ -151,17 +151,28 @@ func (c Config) Load() (State, bool, error) {
 	return s, true, nil
 }
 
-// UsedImages resolves the base images the run's setup used to their
-// IDs: kind's node image (the node container's, not on an existing
-// cluster), the registry's (its container's) and the JRE the workload
-// build pulled (c.JREImage). One that cannot be resolved — not created,
-// not pulled — is left out: an image the run never got is not its own.
-func UsedImages(r Runner, c Config) []string {
-	argvs := [][]string{
-		docker("container", "inspect", "--format={{.Image}}", c.Registry),
-		docker("image", "inspect", "--format={{.Id}}", c.JREImage),
+// Ran says which setup steps that can pull a base image ran in this
+// run: Registry when RegistryUp created the registry container (not when
+// it kept a running one), Node when this run created the kind cluster,
+// JRE when this run's workload build ran. A base image present now is
+// not the run's for being present — the operator may have pulled it —
+// only for a step of this run having used it (review of task oi4).
+type Ran struct{ Registry, Node, JRE bool }
+
+// UsedImages resolves the base images the steps in ran used to their
+// IDs: the registry's (its container's), the JRE the workload build
+// started from (c.JREImage) and kind's node image (the node container's;
+// never on an existing cluster). One that cannot be resolved is left
+// out: an image the run never got is not its own.
+func UsedImages(r Runner, c Config, ran Ran) []string {
+	var argvs [][]string
+	if ran.Registry {
+		argvs = append(argvs, docker("container", "inspect", "--format={{.Image}}", c.Registry))
 	}
-	if !c.Existing {
+	if ran.JRE {
+		argvs = append(argvs, docker("image", "inspect", "--format={{.Id}}", c.JREImage))
+	}
+	if ran.Node && !c.Existing {
 		argvs = append(argvs, docker("container", "inspect", "--format={{.Image}}", c.Node))
 	}
 	var ids []string
@@ -173,19 +184,41 @@ func UsedImages(r Runner, c Config) []string {
 	return ids
 }
 
-// RecordUsed adds ids to the state file's Used, keeping what an earlier
-// run over a kept cluster recorded. Without a state file it records
-// nothing: an ID is only the run's when the file also says it was
-// absent before, and Save writes that first.
-func (c Config) RecordUsed(ids []string) error {
+// RecordUsed adds to the state file's Used those of ids that pre — this
+// run's own snapshot, taken before its setup — did not hold, keeping
+// what an earlier run over a kept cluster recorded. The state file's
+// snapshot is the first run's and never refreshed, so without pre an
+// image the operator pulled between a kept run and this one would count
+// as the run's. Without a state file it records nothing: an ID is only
+// the run's when the file also says it was absent before, and Save
+// writes that first. With no ids (no step ran) the file is not touched.
+func (c Config) RecordUsed(pre State, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
 	s, known, err := c.Load()
 	if err != nil || !known {
 		return err
 	}
-	used := append(slices.Clone(s.Used), ids...)
+	used := slices.Clone(s.Used)
+	for _, id := range ids {
+		if !pre.holds(id) {
+			used = append(used, id)
+		}
+	}
 	slices.Sort(used)
 	s.Used = slices.Compact(used)
 	return c.write(s)
+}
+
+// holds reports whether any base repository of s holds id.
+func (s State) holds(id string) bool {
+	for _, ids := range s.BaseImages {
+		if slices.Contains(ids, id) {
+			return true
+		}
+	}
+	return false
 }
 
 // Pulled is what the teardown removes of the base images: the IDs the
@@ -198,17 +231,9 @@ func Pulled(before State, known bool, now State) []string {
 	if !known {
 		return nil
 	}
-	held := func(s State, id string) bool {
-		for _, ids := range s.BaseImages {
-			if slices.Contains(ids, id) {
-				return true
-			}
-		}
-		return false
-	}
 	var ids []string
 	for _, id := range before.Used {
-		if !held(before, id) && held(now, id) {
+		if !before.holds(id) && now.holds(id) {
 			ids = append(ids, id)
 		}
 	}

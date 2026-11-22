@@ -8,18 +8,21 @@ import (
 
 // RegistryUp starts the registry with its named data volume. A running
 // one is kept; a stopped one of the same name (a killed earlier run) is
-// removed first, else `docker run --name` would refuse.
-func RegistryUp(r Runner, c Config) error {
+// removed first, else `docker run --name` would refuse. ran reports
+// that this call ran `docker run` (which may pull the registry image,
+// also when it then fails): only then is the registry image the run's
+// to record (Ran.Registry, task oi4).
+func RegistryUp(r Runner, c Config) (ran bool, err error) {
 	state, err := r.Output(docker("container", "inspect", "--format={{.State.Running}}", c.Registry)...)
 	switch {
 	case err == nil && strings.TrimSpace(state) == "true":
-		return nil
+		return false, nil
 	case err == nil:
 		if err := r.Run(docker("rm", "--force", "--volumes", c.Registry)...); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return r.Run(docker("run", "--detach", "--restart=no", "--publish=127.0.0.1:5001:5000",
+	return true, r.Run(docker("run", "--detach", "--restart=no", "--publish=127.0.0.1:5001:5000",
 		"--name="+c.Registry, "--volume="+c.RegistryVolume+":/var/lib/registry", c.RegistryImage)...)
 }
 

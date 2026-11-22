@@ -65,7 +65,7 @@ func TestTeardownScoped(t *testing.T) {
 	}
 	setup := &fake{replies: map[string]string{"{{.Image}} iormesh-registry": "sha256:reg\n",
 		"image inspect": "sha256:jre\n", "iormesh-m7-control-plane": "sha256:new\n"}}
-	if err := c.RecordUsed(UsedImages(setup, c)); err != nil {
+	if err := c.RecordUsed(s, UsedImages(setup, c, Ran{Registry: true, Node: true, JRE: true})); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(c.Kubeconfig, []byte("apiVersion: v1\n"), 0o600); err != nil {
@@ -151,6 +151,70 @@ func TestSaveKeepsFirstState(t *testing.T) {
 	}
 }
 
+// teardownRemoved runs Teardown with now's base repositories and
+// reports whether it ran `docker image rm id`.
+func teardownRemoved(t *testing.T, c Config, now map[string]string, id string) bool {
+	t.Helper()
+	f := &fake{replies: now}
+	var log strings.Builder
+	if err := Teardown(f, c, &log); err != nil {
+		t.Fatal(err)
+	}
+	return slices.ContainsFunc(f.calls, func(a []string) bool {
+		return slices.Equal(a, docker("image", "rm", id))
+	})
+}
+
+// TestJREPulledByOperatorKept: the pinned JRE the operator pulls for
+// other work is not the run's when no run built with it — neither
+// between a kept run and a rerun that fails before its workload build,
+// nor between Save and a failed step of one run (review of task oi4).
+func TestJREPulledByOperatorKept(t *testing.T) {
+	jre := map[string]string{"reference=eclipse-temurin": "sha256:jre\n"}
+	setup := &fake{replies: map[string]string{"image inspect": "sha256:jre\n",
+		"container inspect": "ERR"}}
+
+	// A kept run that recorded nothing; the operator pulls; a rerun
+	// fails before the workload build.
+	c := testConfig(t)
+	if err := c.Save(State{BaseImages: map[string][]string{}}); err != nil {
+		t.Fatal(err)
+	}
+	pre, err := Snapshot(&fake{replies: jre}, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RecordUsed(pre, UsedImages(setup, c, Ran{})); err != nil {
+		t.Fatal(err)
+	}
+	if teardownRemoved(t, c, jre, "sha256:jre") {
+		t.Error("rerun: removed the operator's JRE")
+	}
+	// A rerun that does build uses it, but its own snapshot held it.
+	if err := c.RecordUsed(pre, UsedImages(setup, c, Ran{JRE: true})); err != nil {
+		t.Fatal(err)
+	}
+	if teardownRemoved(t, c, jre, "sha256:jre") {
+		t.Error("building rerun: removed the JRE its snapshot held")
+	}
+
+	// One run: Save, the operator pulls, a step fails before the build.
+	c = testConfig(t)
+	pre, err = Snapshot(&fake{}, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Save(pre); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RecordUsed(pre, UsedImages(setup, c, Ran{Registry: true})); err != nil {
+		t.Fatal(err)
+	}
+	if teardownRemoved(t, c, jre, "sha256:jre") {
+		t.Error("failed run: removed the JRE pulled after Save")
+	}
+}
+
 // TestPulledOnlyUsed: of the used IDs, one a base repository held
 // before the run stays, one gone since is not named, and a new ID the
 // run did not use is never named (task oi4).
@@ -168,34 +232,53 @@ func TestPulledOnlyUsed(t *testing.T) {
 }
 
 // TestRecordUsed: used IDs accumulate over reruns of a kept cluster,
-// without the first state's base images changing; without a state file
-// none is recorded (it would count as absent before). An ID that cannot
-// be resolved is left out, and an existing cluster has no kind node.
+// without the first state's base images changing; an ID the rerun's own
+// snapshot held is added only when already recorded; without a state
+// file none is recorded (it would count as absent before).
 func TestRecordUsed(t *testing.T) {
 	c := testConfig(t)
-	if err := c.RecordUsed([]string{"sha256:a"}); err != nil {
+	if err := c.RecordUsed(State{}, []string{"sha256:a"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, known, _ := c.Load(); known {
 		t.Fatal("RecordUsed wrote a state file without one")
 	}
-	if err := c.Save(State{BaseImages: map[string][]string{"registry": {"sha256:r"}}}); err != nil {
+	first := State{BaseImages: map[string][]string{"registry": {"sha256:r"}}}
+	if err := c.Save(first); err != nil {
 		t.Fatal(err)
 	}
-	for _, ids := range [][]string{{"sha256:b", "sha256:a"}, {"sha256:a", "sha256:c"}} {
-		if err := c.RecordUsed(ids); err != nil {
-			t.Fatal(err)
-		}
+	if err := c.RecordUsed(first, []string{"sha256:b", "sha256:a", "sha256:r"}); err != nil {
+		t.Fatal(err)
+	}
+	// The rerun's snapshot holds a and b (the first run's) and the
+	// operator's d; it uses a, c and d.
+	rerun := State{BaseImages: map[string][]string{"registry": {"sha256:r", "sha256:a", "sha256:b"},
+		"eclipse-temurin": {"sha256:d"}}}
+	if err := c.RecordUsed(rerun, []string{"sha256:a", "sha256:c", "sha256:d"}); err != nil {
+		t.Fatal(err)
 	}
 	s, _, err := c.Load()
 	if err != nil || !slices.Equal(s.Used, []string{"sha256:a", "sha256:b", "sha256:c"}) ||
 		!slices.Equal(s.BaseImages["registry"], []string{"sha256:r"}) {
 		t.Errorf("state %+v, %v", s, err)
 	}
-	e := Existing(c.Kubeconfig, "ctx", c.StateFile)
-	f := &fake{replies: map[string]string{"image inspect": "ERR", "container inspect": "sha256:reg\n"}}
-	if got := UsedImages(f, e); !slices.Equal(got, []string{"sha256:reg"}) || len(f.calls) != 2 {
-		t.Errorf("existing cluster used %q after %q", got, f.calls)
+}
+
+// TestUsedImagesRan: only the steps that ran this time are resolved — the
+// registry container it created, the node of the cluster it created, the
+// JRE of the build it ran — and an unresolvable one is left out.
+func TestUsedImagesRan(t *testing.T) {
+	c := testConfig(t)
+	replies := map[string]string{"image inspect": "ERR", "{{.Image}} iormesh-registry": "sha256:reg\n",
+		"iormesh-m7-control-plane": "sha256:node\n"}
+	f := &fake{replies: replies}
+	if got := UsedImages(f, c, Ran{}); got != nil || len(f.calls) != 0 {
+		t.Errorf("nothing ran: %q after %q", got, f.calls)
+	}
+	f = &fake{replies: replies}
+	if got := UsedImages(f, c, Ran{Registry: true, Node: true, JRE: true}); !slices.Equal(got,
+		[]string{"sha256:reg", "sha256:node"}) || len(f.calls) != 3 {
+		t.Errorf("all ran: %q after %q", got, f.calls)
 	}
 }
 
@@ -214,24 +297,27 @@ func TestJREImagePinned(t *testing.T) {
 
 // TestRegistryUp: a stopped registry of the same name is removed (with
 // its anonymous volumes) before the run; a running one is kept; the new
-// one gets the named data volume.
+// one gets the named data volume. It reports that it ran `docker run`
+// only when it did (the registry image is then the run's to record).
 func TestRegistryUp(t *testing.T) {
 	c := testConfig(t)
 	stopped := &fake{replies: map[string]string{"container inspect": "false\n"}}
-	if err := RegistryUp(stopped, c); err != nil {
-		t.Fatal(err)
+	ran, err := RegistryUp(stopped, c)
+	if err != nil || !ran {
+		t.Fatalf("stopped registry: ran %v, %v", ran, err)
 	}
 	if len(stopped.calls) != 3 || !slices.Contains(stopped.calls[1], "rm") ||
 		!slices.Contains(stopped.calls[2], "--volume=iormesh-registry-data:/var/lib/registry") {
 		t.Errorf("stopped registry: %q", stopped.calls)
 	}
 	running := &fake{replies: map[string]string{"container inspect": "true\n"}}
-	if err := RegistryUp(running, c); err != nil || len(running.calls) != 1 {
-		t.Errorf("running registry: %q, %v", running.calls, err)
+	if ran, err := RegistryUp(running, c); err != nil || ran || len(running.calls) != 1 {
+		t.Errorf("running registry: %q, ran %v, %v", running.calls, ran, err)
 	}
 	absent := &fake{replies: map[string]string{"container inspect": "ERR"}}
-	if err := RegistryUp(absent, c); err != nil || len(absent.calls) != 2 || !slices.Contains(absent.calls[1], "run") {
-		t.Errorf("no registry: %q, %v", absent.calls, err)
+	if ran, err := RegistryUp(absent, c); err != nil || !ran || len(absent.calls) != 2 ||
+		!slices.Contains(absent.calls[1], "run") {
+		t.Errorf("no registry: %q, ran %v, %v", absent.calls, ran, err)
 	}
 }
 

@@ -247,31 +247,31 @@ func kindMissing() string {
 // cluster: task li4), brings up the registry, the cluster (unless it is
 // an existing one), the images and Traefik, and returns the tests'
 // environment. On the way out, a failed step included, it records the
-// base image IDs the setup used (kindrun.UsedImages): those, where
-// absent before, are all of the base images the teardown removes (task
-// oi4). A run ClaimExisting refused records nothing: the state file is
-// another run's.
+// IDs of the base images that this run's steps used (kindrun.Ran: the
+// registry container it created, the kind cluster it created, the
+// workload build it ran) and that its own snapshot pre did not hold:
+// those are all of the base images the teardown removes (task oi4). A
+// run that stops before the registry step — ClaimExisting's refusals,
+// ErrForeignRecord among them — has run no such step and records
+// nothing.
 func kindUp(r shRunner, c kindrun.Config) (env map[string]string, err error) {
-	state, err := kindrun.Snapshot(r, c)
+	pre, err := kindrun.Snapshot(r, c)
 	if err == nil {
-		err = c.Save(state)
+		err = c.Save(pre)
 	}
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if !errors.Is(err, kindrun.ErrForeignRecord) {
-			err = errors.Join(err, c.RecordUsed(kindrun.UsedImages(r, c)))
-		}
-	}()
+	var ran kindrun.Ran
+	defer func() { err = errors.Join(err, c.RecordUsed(pre, kindrun.UsedImages(r, c, ran))) }()
 	if c.Existing {
 		err = kindrun.ClaimExisting(r, c)
 	}
 	if err == nil {
-		err = kindrun.RegistryUp(r, c)
+		ran.Registry, err = kindrun.RegistryUp(r, c)
 	}
 	if err == nil && !c.Existing {
-		err = kindClusterUp(r, c)
+		err = kindClusterUp(r, c, &ran)
 	}
 	if err != nil {
 		return nil, err
@@ -280,7 +280,7 @@ func kindUp(r shRunner, c kindrun.Config) (env map[string]string, err error) {
 	if err != nil {
 		return nil, err
 	}
-	workload, err := kindWorkloadImage(r, c)
+	workload, err := kindWorkloadImage(r, c, &ran)
 	if err != nil {
 		return nil, err
 	}
@@ -377,8 +377,10 @@ func writeTemp(pattern, text string) (string, error) {
 }
 
 // kindClusterUp creates the cluster unless it exists, writes the
-// kubeconfig as the operator, and wires the registry into the node.
-func kindClusterUp(r shRunner, c kindrun.Config) error {
+// kubeconfig as the operator, and wires the registry into the node. It
+// sets ran.Node when it runs `kind create cluster` (which may pull the
+// node image, also when it then fails), not for a kept cluster.
+func kindClusterUp(r shRunner, c kindrun.Config, ran *kindrun.Ran) error {
 	out, err := r.Output("sudo", "-n", "kind", "get", "clusters")
 	if err != nil {
 		return err
@@ -389,6 +391,7 @@ func kindClusterUp(r shRunner, c kindrun.Config) error {
 			return err
 		}
 		defer func() { _ = os.Remove(cfg) }()
+		ran.Node = true
 		if err := kindrun.CreateCluster(r, c, cfg); err != nil {
 			return err
 		}
