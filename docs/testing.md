@@ -762,39 +762,38 @@ Each host (two machines, Linux, x86_64 or aarch64):
   uninstalls `/opt/iormesh`, so it refuses a host whose traces
   are not its own.
 - Bootstrapped (decision #1: the first install is the
-  operator's own sudo), with `ops` standing for the SSH user
-  and `ARCH` for the host's `amd64` or `arm64`. Verify the build
-  against the pinned key before it leaves the controller — the
-  first install has no `upgrade` to check it:
+  operator's own sudo) with `iormeshctl bootstrap` (task qh4),
+  `ops` standing for the SSH user and `ARCH` for the host's
+  `amd64` or `arm64`. It verifies the build against the pinned
+  key before anything leaves the controller — the first
+  install has no installed `upgrade` to check it — and checks
+  every installed file's SHA-256 before it is renamed into
+  place ([security.md](security.md)):
 
   ```sh
-  # on the controller (./iormeshctl from `mage build`, or
-  # CGO_ENABLED=0 go build -o iormeshctl ./cmd/iormeshctl; or instead
-  # minisign -Vm dist/iormesh-linux-ARCH -p ~/.config/iormesh/minisign.pub)
-  ./iormeshctl verify dist/iormesh-linux-ARCH
-  scp dist/iormesh-linux-ARCH ~/.config/iormesh/minisign.pub HOST:
-  # on HOST
-  sudo install -d -o root -g root -m 0755 /opt/iormesh \
-       /opt/iormesh/bin /opt/iormesh/etc
-  sudo install -o root -g root -m 0755 iormesh-linux-ARCH \
-       /opt/iormesh/bin/iormesh
-  sudo install -o root -g root -m 0644 minisign.pub \
-       /opt/iormesh/etc/minisign.pub
-  rm iormesh-linux-ARCH minisign.pub
-  # the rule: written to a temp file, checked, then installed, so a
-  # typo never reaches /etc/sudoers.d (a broken file there breaks sudo)
-  t=$(mktemp)
-  echo 'ops ALL=(root) NOPASSWD: /opt/iormesh/bin/iormesh' > "$t"
-  visudo -cf "$t" &&
-       sudo install -o root -g root -m 0440 "$t" /etc/sudoers.d/iormesh
-  rm "$t"
+  # ./iormeshctl from `mage build`, or
+  # CGO_ENABLED=0 go build -o iormeshctl ./cmd/iormeshctl
+  # bootstrap contacts only registered hosts; a scratch registry
+  # keeps the operator's own clean (pass it to bootstrap too)
+  r=~/iormesh-boot/servers.yaml
+  ./iormeshctl add -registry "$r" -project boot -listen-port 1 HOST
+  # print the exact steps and run them on HOST by hand (sudo may
+  # ask for the password there):
+  ./iormeshctl bootstrap -registry "$r" -arch ARCH -user ops HOST
+  # or, when ops has sudo without a password, run them over ssh:
+  ./iormeshctl bootstrap -registry "$r" -apply HOST
   ```
 
+  Both install the rule
+  `ops ALL=(root) NOPASSWD: /opt/iormesh/bin/iormesh` as
+  `/etc/sudoers.d/iormesh`, under bootstrap's marker line.
   `/opt` itself must be root-owned and not writable by others
-  (`upgrade` checks the layout; [security.md](security.md)). A
-  host that will not be bootstrapped again after the run should
-  lose the rule too: `sudo rm /etc/sudoers.d/iormesh` (the run's
-  `rm` removes `/opt/iormesh`, not the rule).
+  (the steps' `upgrade` check refuses otherwise, before the
+  rule goes in). The run's `rm` uninstalls `/opt/iormesh` and,
+  with it, the rule bootstrap installed (a rule without the
+  marker, laid down by hand before task qh4, stays: `sudo rm
+  /etc/sudoers.d/iormesh` removes it), so the next run
+  bootstraps the hosts again.
 - For the NAT criterion, a DNAT on HOST2 from a port of the
   operator's choice to the NAT server's `PortBase+3`, the way
   `docker -p` would do it (removed again with `sudo nft delete

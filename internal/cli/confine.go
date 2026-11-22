@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"iormesh/internal/hostlayout"
 	"iormesh/internal/segment"
 )
 
@@ -23,8 +24,9 @@ import (
 // live-loads it into JVMs of every user, so through the rule it may name
 // only the jar `iormesh upgrade` verified and installed (task kf4).
 const (
-	// installedBinary is the path the sudoers rule names.
-	installedBinary = "/opt/iormesh/bin/iormesh"
+	// installedBinary is the path the sudoers rule names: hostlayout's,
+	// the one source of the rule bootstrap installs (task qh4).
+	installedBinary = hostlayout.Binary
 	// defaultSpoolRoot holds the confined sessions' agent spools, one per
 	// project: /run is root's, so nothing in the path can be planted.
 	defaultSpoolRoot = "/run/iormesh/spool"
