@@ -18,16 +18,19 @@ import (
 //   - Import replaces a source's rows on a connection instead of merging
 //     them by key (clearSources), so a source read again under other
 //     keys never counts its requests twice;
-//   - the reads fold the stored path by the built-in rules once more
-//     (pathTemplateSQL), so rows stored raw before the templating, from
-//     sources no build reads again, show as templates too. Folding is
-//     idempotent, so a stored template is unchanged by it. The operator's
-//     rules are not applied there: they live in the route map, not the
-//     database, and rows of an old rule keep the template they got.
+//   - the reads fold, by the built-in rules, the rows stored raw before
+//     the templating (templated = 0, schema version 3), from sources no
+//     build reads again, so they show as templates too. A row stored as
+//     a template is shown as stored: folding it again would turn an
+//     operator's literal digits (/status/404, /api/2024/{x}) into {id}.
+//     The operator's rules are not applied at read time: they live in
+//     the route map, not the database, and rows of an old rule keep the
+//     template they got.
 
-// pathTemplateSQL is pathtmpl.Builtin in SQL, computed at read time: no
-// column, no migration.
-const pathTemplateSQL = "iormesh_path_template(path)"
+// pathTemplateSQL is a request row's path as the reads show it: a
+// template as stored, a raw path of an older build folded by
+// pathtmpl.Builtin.
+const pathTemplateSQL = "CASE WHEN templated = 1 THEN path ELSE iormesh_path_template(path) END"
 
 func init() {
 	// Registered with the driver for every connection opened later; a

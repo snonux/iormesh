@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"iormesh/internal/pathtmpl"
+	"iormesh/internal/schema"
 )
 
 // withPaths is the mesh fixture with a1's two client requests and b1's
@@ -94,7 +95,7 @@ func rawReq(source, path string, n uint64) Request {
 func TestImportReplacesSourceRows(t *testing.T) {
 	d, _ := openTemp(t)
 	importSnap(t, d, a1With(t, rawReq("seg1", "/items/1", 1), rawReq("seg1", "/items/2", 1),
-		rawReq("seg0", "/items/9", 4)))
+		rawReq("seg0", "/items/{id}", 4)))
 	importSnap(t, d, a1With(t, rawReq("seg1", "/items/{id}", 2)))
 	if n, others := pathCount(t, d, "/items/{id}"); n != 6 || len(others) != 0 {
 		t.Errorf("seg1 re-keyed: %d requests on /items/{id} (others %q), want seg1's 2 + seg0's 4", n, others)
@@ -108,6 +109,51 @@ func TestImportReplacesSourceRows(t *testing.T) {
 	}
 }
 
+// TestTemplatesShownVerbatim: a path stored as a template is read back
+// as stored — the read-time fold is for rows stored before the
+// templating only — so an operator's literal rule keeps its digits and
+// a template's literal year is not folded to {id}.
+func TestTemplatesShownVerbatim(t *testing.T) {
+	rules, err := pathtmpl.Compile([]string{"/items/1", "/api/2024/{x}"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _ := openTemp(t)
+	importSnap(t, d, a1With(t, rawReq("seg1", rules.Template("/items/1"), 1),
+		rawReq("seg1", rules.Template("/api/2024/foo"), 2)))
+	for path, want := range map[string]int64{"/items/1": 1, "/api/2024/{x}": 2} {
+		if n, others := pathCount(t, d, path); n != want {
+			t.Errorf("%s: %d requests (others %q), want %d", path, n, others, want)
+		}
+	}
+}
+
+// TestSupersedeThenClear: a fused connection takes over the server row
+// an earlier server-only build stored, and a later import of the same
+// server source replaces the moved rows rather than adding to them;
+// another source's moved rows stand.
+func TestSupersedeThenClear(t *testing.T) {
+	d, _ := openTemp(t)
+	fused := pick(observeMesh(t), "a1").Conns[0]
+	server := Observation{Host: "hB", ConnID: "b1", Role: RoleServer,
+		State: schema.StateUnresolved, Reason: "no_match", Project: "inv", Server: fused.Server,
+		Endpoint: fused.Endpoint, TLS: 1, First: wall0 + 1, Last: wall0 + 2,
+		Requests: []Request{rawReq("hB-1", "/items/1", 2), rawReq("hB-0", "/items/{id}", 5)}}
+	importSnap(t, d, Snapshot{Conns: []Observation{server}})
+	fused.Requests = []Request{rawReq("hB-1", "/items/{id}", 2)}
+	importSnap(t, d, Snapshot{Conns: []Observation{fused}})
+	if n, others := pathCount(t, d, "/items/{id}"); n != 7 || len(others) != 0 {
+		t.Errorf("after the take-over: %d on /items/{id} (others %q), want hB-1's 2 + hB-0's 5", n, others)
+	}
+	var orphans int
+	if err := d.db.QueryRow(`SELECT COUNT(*) FROM http_request WHERE conn_id = 'b1'`).Scan(&orphans); err != nil {
+		t.Fatal(err)
+	}
+	if orphans != 0 {
+		t.Errorf("%d request rows left on the superseded server row", orphans)
+	}
+}
+
 // TestLegacyRowsFoldOnRead: rows a build stored before the templating
 // (raw paths, from sources no build reads again) are folded by the
 // built-in rules when read, so the listing never shows the raw ids.
@@ -115,6 +161,10 @@ func TestLegacyRowsFoldOnRead(t *testing.T) {
 	d, _ := openTemp(t)
 	importSnap(t, d, a1With(t, rawReq("old", "/items/1", 1), rawReq("old", "/items/2", 2),
 		rawReq("old", "/api/v2/users", 1)))
+	// What the version-3 migration leaves on rows an older build stored.
+	if _, err := d.db.Exec(`UPDATE http_request SET templated = 0`); err != nil {
+		t.Fatal(err)
+	}
 	if n, others := pathCount(t, d, "/items/{id}"); n != 3 || len(others) != 1 || others[0] != "/api/v2/users" {
 		t.Errorf("legacy rows: %d on /items/{id}, others %q; want 3 and /api/v2/users verbatim", n, others)
 	}

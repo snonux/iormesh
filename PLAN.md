@@ -2743,8 +2743,9 @@ deferred.
   a literal template pinning a path verbatim. A source
   imported again replaces its rows on a connection, so a
   changed rule or the upgrade never counts requests twice;
-  rows stored raw before it fold by the built-in rules when
-  read (internal/pathtmpl).
+  rows stored raw before it (marked by the database's schema
+  version 3) fold by the built-in rules when read, stored
+  templates never (internal/pathtmpl).
 - **#8 Hostname & TLS visibility** — DNS hostname↔IP via Java
   agent hooks (InetAddress) is the clean path; TLS peer
   identity (trust-manager/SSLSocket hooks) is extra value at

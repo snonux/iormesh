@@ -2141,8 +2141,11 @@ docs/implementation.md M7 steps 11 and 12):
   operator templates win, a literal one pins a path.
   `internal/servicedb/paths_test.go`: Observe counts one row per
   template; a source imported again under other keys replaces
-  its rows (never counted twice); raw rows stored before the
-  templating fold when read. `TestBuildPathTemplates`
+  its rows (never counted twice), also rows a fused connection
+  took over from a server row; raw rows stored before the
+  templating (schema version 3 marks them) fold when read,
+  while a stored template — a literal `/items/1` rule,
+  `/api/2024/{x}` — is shown as stored. `TestBuildPathTemplates`
   (internal/ctl): the model's top paths show `/orders/{id}`,
   then the route map's `/orders/{order}` over the same
   database, while report.json keeps `/orders/1`.

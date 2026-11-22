@@ -76,4 +76,11 @@ var migrations = []string{
 		requests, first_seen, last_seen FROM http_request;
 	DROP TABLE http_request;
 	ALTER TABLE http_request_v2 RENAME TO http_request;`,
+	// Version 3 marks the rows whose path is a template (task xh4,
+	// internal/pathtmpl): every row imported from now on. Rows stored
+	// before keep 0 — a raw path — and only those are folded by the
+	// built-in rules when read, so an operator's template (a literal
+	// /status/404, /api/2024/{x}) is shown as stored.
+	`ALTER TABLE http_request ADD COLUMN templated INTEGER NOT NULL DEFAULT 0
+		CHECK (templated IN (0, 1));`,
 }

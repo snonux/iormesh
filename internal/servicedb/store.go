@@ -55,26 +55,30 @@ ON CONFLICT (host, conn_id) DO UPDATE SET
 // first (clearSources, paths.go), so a source read again — grown, or
 // under other path templates — replaces its counts; the MAX only decides
 // between two rows of one key within a snapshot, and when moveRequests
-// merges a server row into a fused one.
+// merges a server row into a fused one. Every imported path is a
+// template (Observe templated it), so the row is marked templated: the
+// reads show it as stored (paths.go).
 const upsertRequest = `INSERT INTO http_request (host, conn_id, source, method, scheme,
-	http_host, path, requests, first_seen, last_seen)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	http_host, path, requests, first_seen, last_seen, templated)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
 ON CONFLICT (host, conn_id, source, method, scheme, http_host, path) DO UPDATE SET
 	requests = MAX(http_request.requests, excluded.requests),
 	first_seen = MIN(http_request.first_seen, excluded.first_seen),
-	last_seen = MAX(http_request.last_seen, excluded.last_seen)`
+	last_seen = MAX(http_request.last_seen, excluded.last_seen),
+	templated = MAX(http_request.templated, excluded.templated)`
 
 // moveRequests re-keys one connection row's requests onto another, by
-// upsertRequest's rule. The SELECT's WHERE is also what sqlite needs to
-// parse an upsert on INSERT … SELECT.
+// upsertRequest's rule, each keeping its templated mark. The SELECT's
+// WHERE is also what sqlite needs to parse an upsert on INSERT … SELECT.
 const moveRequests = `INSERT INTO http_request (host, conn_id, source, method, scheme,
-	http_host, path, requests, first_seen, last_seen)
-SELECT ?, ?, source, method, scheme, http_host, path, requests, first_seen, last_seen
+	http_host, path, requests, first_seen, last_seen, templated)
+SELECT ?, ?, source, method, scheme, http_host, path, requests, first_seen, last_seen, templated
 	FROM http_request WHERE host = ? AND conn_id = ?
 ON CONFLICT (host, conn_id, source, method, scheme, http_host, path) DO UPDATE SET
 	requests = MAX(http_request.requests, excluded.requests),
 	first_seen = MIN(http_request.first_seen, excluded.first_seen),
-	last_seen = MAX(http_request.last_seen, excluded.last_seen)`
+	last_seen = MAX(http_request.last_seen, excluded.last_seen),
+	templated = MAX(http_request.templated, excluded.templated)`
 
 // Import folds a snapshot into the database in one transaction: either
 // all of it lands or none. Naming rules are never touched. A fused
