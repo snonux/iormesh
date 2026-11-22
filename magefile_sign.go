@@ -47,6 +47,12 @@ func Sign() error {
 	if err != nil {
 		return err
 	}
+	return signDist(key)
+}
+
+// signDist is Sign's work with the key already loaded, shared with
+// Release, which needs the same key again for SHA256SUMS.
+func signDist(key minisign.PrivateKey) error {
 	signed, err := release.SignDir(key, distDir, version.Version, time.Now())
 	if err != nil {
 		return err

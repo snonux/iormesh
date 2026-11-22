@@ -4061,6 +4061,53 @@ whether the engine is Docker or Podman:
   never been loaded on a real arm64 kernel. Details:
   [docs/build.md](docs/build.md), "Container builds".
 
+### Release archives (task rh4, owner-approved 2026-11-22)
+
+An operator should not need a clone, libbpfgo and a key of their
+own to deploy: `mage release ENGINE` (docker or podman) turns a
+tagged commit into downloadable, signed archives. Nothing is
+published by it; uploading is a separate, human step.
+
+- **Version and tree**: `git describe --tags --dirty --match
+  'v[0-9]*'` must be exactly `v<internal/version.Version>` — a
+  dirty tree, a commit past the tag, or a tag that disagrees
+  with the version the signatures carry is refused before
+  anything is built.
+- **Pipeline**: the container builds (all targets), `mage
+  agentBuild`, then `mage sign`'s signing with the release key
+  (decision #28; stale builds refused as there), then the
+  archives in `dist/release/<version>/`.
+- **Archives**: one per arch, `iormesh-<version>-<arch>.tar.gz`
+  (amd64, arm64), each under a top directory of the same name
+  holding the static tracer `iormesh-linux-<arch>`, the agent
+  jar `iormesh-agent.jar`, the controllers
+  `iormeshctl-{linux,darwin}-<arch>`, each with its
+  `.minisig`, plus `minisign.pub` (the release public key),
+  `CHANGELOG.md`, and `LICENSE` once the repository has one
+  (each extra is packed when present). Every artifact is
+  verified against its signature at the release version before
+  it is packed, and the verified bytes are the packed ones.
+- **Checksums**: `SHA256SUMS` (sha256sum format) over the
+  archives, itself signed as `SHA256SUMS.minisig` with
+  `file:SHA256SUMS`.
+- **Reproducible**: entries in name order, owner root (0/0),
+  modes 0755/0644, every mtime `$SOURCE_DATE_EPOCH` or else the
+  release commit's time, gzip header without name or time; the
+  same signed `dist/` gives the same bytes with the same Go
+  toolchain (its gzip encoder; a unit test packs twice). The signatures themselves carry a signing timestamp,
+  so a re-signed `dist/` gives new archives.
+- **Operator check**: the key to trust is the one published
+  apart from the archives (the copy inside is a convenience,
+  not an anchor). With that key: `minisign -Vm SHA256SUMS -p
+  KEY`, `sha256sum -c SHA256SUMS`, then, after unpacking,
+  `iormeshctl verify -key KEY iormesh-linux-<arch>` (or
+  `minisign -Vm`) for each build; pinning that key at
+  `~/.config/iormesh/minisign.pub` lets `iormeshctl deploy`
+  check every build again before it pushes. Details:
+  [docs/build.md](docs/build.md), "Releases".
+- **Open**: the licence (LICENSE) is the owner's choice; the
+  BPF object declares `Dual BSD/GPL`.
+
 ## Component map
 
 | Component        | Language | Role                                            |
@@ -4153,6 +4200,7 @@ internal/javaattach/  # live attach of the Java agent (HotSpot
                       #   attach protocol)
 internal/stacks/      # native stack table (opt-in)
 internal/release/     # minisign signing and verification
+internal/dist/        # mage release's reproducible archives
 internal/hostlayout/  # the server install's paths and sudoers rule
 internal/version/     # release version and its ordering
 internal/termsafe/    # terminal-safe printing of trace text
