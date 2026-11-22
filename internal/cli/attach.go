@@ -230,22 +230,30 @@ func (s *session) startJava(ctx context.Context, cfg runConfig, stderr io.Writer
 // reads beside -spool and removes when the session ends. A process that
 // is no JVM, refuses the load or has no root to stage in is reported and
 // traced on without Java attribution: decision #2 reports a refusal
-// instead of retrying.
+// instead of retrying. However the loop ends — loads done, a signal, a
+// failed record or a closed stream — the stages made so far reach the
+// join, so the session removes them from the JVMs' roots (task ri4).
 func (s *session) attachAgents(ctx context.Context, agent, spool string, stderr io.Writer) error {
 	pids := make([]uint32, 0, len(s.live))
 	for pid := range s.live {
 		pids = append(pids, pid)
 	}
 	slices.Sort(pids)
+	// The loads run on their own ctx, so the loop can cancel them when it
+	// gives up on an error, not only when the session's ctx ends.
+	lctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	done := make(chan agentLoads, 1)
-	go func() { done <- loadAgents(ctx, newAgentLoader(), pids, agent, spool) }()
+	go func() { done <- loadAgents(lctx, newAgentLoader(), pids, agent, spool) }()
 	for {
 		select {
 		case batch, ok := <-s.tr.Records():
 			if !ok {
+				s.abandonLoads(cancel, done)
 				return errors.New("record stream closed unexpectedly")
 			}
 			if err := s.handleAll(batch); err != nil {
+				s.abandonLoads(cancel, done)
 				return err
 			}
 		case r := <-done:
@@ -255,16 +263,24 @@ func (s *session) attachAgents(ctx context.Context, agent, spool string, stderr 
 			s.java.addStages(r.stages)
 			return s.java.poll()
 		case <-ctx.Done():
-			// A signal during the loads: they end on the same ctx, and
-			// loadAgents stages nothing more once it is done, so the wait
-			// is short; it is needed for the stages already made, which
-			// the session must remove from the JVMs' roots. nil, not
-			// ctx.Err(): traceLoop sees the done ctx and ends the trace as
-			// stop, which an error would turn into error.
-			s.java.addStages((<-done).stages)
+			// A signal during the loads. nil, not ctx.Err(): traceLoop
+			// sees the done ctx and ends the trace as stop, which an
+			// error would turn into error.
+			s.abandonLoads(cancel, done)
 			return nil
 		}
 	}
+}
+
+// abandonLoads stops the loads attachAgents gave up on and hands their
+// stages to the join, which removes them when the session ends. The
+// loads end on the cancelled ctx, and loadAgents stages nothing more
+// once it is done, so the wait is short; it is needed for the stages
+// already made — and one still being made — which would otherwise stay
+// in the JVMs' roots. Their lines are dropped: the session is ending.
+func (s *session) abandonLoads(cancel context.CancelFunc, done <-chan agentLoads) {
+	cancel()
+	s.java.addStages((<-done).stages)
 }
 
 // agentLoads is what loadAgents did: one line per pid, and the stages it
