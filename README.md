@@ -77,7 +77,8 @@ app is ever the first test subject.
   is ever recorded. One deliberate exception: HTTP(S) request
   metadata captured at the Java API boundary. One redaction
   policy covers headers, query params and argv; URI path
-  segments are recorded verbatim (decision #22).
+  segments are recorded verbatim (decision #22); the
+  controller's per-path counts fold ids into templates.
 - Mesh expansion only from the controller, against an explicit
   allowlist, with a signed tracer binary, a hop limit and a
   node cap. Tracers never deploy and never connect anywhere.

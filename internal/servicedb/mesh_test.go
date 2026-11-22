@@ -150,7 +150,7 @@ func meshGraph() schema.Graph {
 func observeMesh(t *testing.T) Snapshot {
 	t.Helper()
 	sources, r := mesh()
-	s, err := Observe(context.Background(), sources, r)
+	s, err := Observe(context.Background(), sources, r, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

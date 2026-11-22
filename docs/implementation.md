@@ -6141,7 +6141,19 @@ depends on:
         endpoints:                      # optional; none skips checks
           - {addr: <pod ip>, pod: <namespace>/<pod>, uid: <pod uid>}
     service_cidrs: [<cidr>]             # optional: unknown_service
+    path_templates:                     # optional (task xh4): how
+      - /shops/{shop}/orders/{order}    # the services view counts
+                                        # HTTP paths
     ```
+
+    `path_templates` are the operator's rules for the per-path
+    counts (decision #22's templating, `internal/pathtmpl`): a
+    `{name}` segment matches any one segment, the first matching
+    template names the request, ahead of the built-in folding of
+    numeric, UUID and long-hex segments to `{id}`. Only the
+    static map's count; discovery writes none. A bad template
+    (relative, a query, a half placeholder, a duplicate, past
+    256 templates or 512 bytes) refuses the file like any entry.
 
     Names follow `internal/k8sname`; unknown keys, a second YAML
     document, duplicates (an FQDN, a Service, a ClusterIP and

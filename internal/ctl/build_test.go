@@ -301,6 +301,39 @@ func TestBuildNamesServices(t *testing.T) {
 	}
 }
 
+// TestBuildPathTemplates: the services view counts routes, not ids —
+// /orders/1 and /orders/2 are one /orders/{id} row, and the route map's
+// path_templates rename it, also over a database that holds the built-in
+// rows already — while the report keeps the raw paths (decision #22).
+func TestBuildPathTemplates(t *testing.T) {
+	f := newBuildFixture(t)
+	f.mustRun(t, "build")
+	if model := f.output(t, modelFileName); !strings.Contains(model, `"path": "/orders/{id}",
+          "count": 3`) {
+		t.Errorf("model lacks GET /orders/{id} x3:\n%s", model)
+	}
+	reg, err := f.e.registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes := "path_templates:\n  - /orders/{order}\n"
+	if err := os.WriteFile(filepath.Join(filepath.Dir(reg), "routes.yaml"), []byte(routes), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.mustRun(t, "build")
+	model := f.output(t, modelFileName)
+	if !strings.Contains(model, `"path": "/orders/{order}",
+          "count": 3`) || strings.Contains(model, `"path": "/orders/{id}"`) {
+		t.Errorf("model after the rule: want GET /orders/{order} x3 only:\n%s", model)
+	}
+	if n := f.requestCount(t); n != 3 {
+		t.Errorf("database counts %d requests after the rule, want 3 (never the old rows too)", n)
+	}
+	if rep := f.output(t, reportFileName); !strings.Contains(rep, `"/orders/1"`) {
+		t.Errorf("report lost the raw path:\n%s", rep)
+	}
+}
+
 // requestCount sums the endpoint requests the database holds.
 func (f *buildFixture) requestCount(t *testing.T) int64 {
 	t.Helper()

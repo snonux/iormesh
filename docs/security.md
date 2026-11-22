@@ -456,7 +456,8 @@ truth.
   in path segments and query strings. One redaction policy
   applies to HTTP headers, query params and argv alike (path
   segments are recorded verbatim in v1, decision #22's
-  default); environment capture is off by default. HTTP
+  default, and only the controller's per-path counts fold
+  ids into templates); environment capture is off by default. HTTP
   metadata is redacted twice: by the Java agent before it
   reaches the spool, and again by the tracer before it is
   written; a test keeps the agent's header lists equal to the
@@ -484,7 +485,15 @@ truth.
   metadata on a laptop deserves the care that implies.
   The service database (`~/.local/share/iormesh/services.db`,
   task hb4) distills them into hosts, addresses, hostnames and
-  redacted HTTP paths: it is created 0600 in a 0700 directory
+  redacted HTTP path templates. Ids are folded (task xh4): a
+  segment of only digits, a canonical UUID or 16+ hex digits
+  with a digit becomes `{id}`, and the operator's
+  `path_templates` in routes.yaml win over that, so the
+  database stores one row per route, not one per id, and not
+  the ids it recognizes. An id the rules miss stays, as do
+  rows a build stored before task xh4 (they are folded when
+  read); the traces keep the raw paths. The database is
+  created 0600 in a 0700 directory
   and refused when it or its directory is foreign-owned or open
   to others, like the registry. It holds no secrets beyond what
   the traces already redacted (decision #9), and `iormeshctl

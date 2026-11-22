@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"iormesh/internal/federate"
+	"iormesh/internal/pathtmpl"
 	"iormesh/internal/schema"
 )
 
@@ -22,6 +23,8 @@ type traffic struct {
 	// counted per source, so a sum over sources stays exact whichever of
 	// them a later build still has.
 	source string
+	// paths templates each request's path before it is counted.
+	paths *pathtmpl.Rules
 }
 
 // connAcc accumulates one (host, conn_id) across every source.
@@ -77,7 +80,7 @@ func (t *traffic) add(ev *schema.Event) error {
 			a.local = l
 		}
 	case schema.KindHTTP:
-		a.request(t.source, ev)
+		a.request(t.source, t.paths, ev)
 	}
 	return nil
 }
@@ -104,18 +107,20 @@ func (t *traffic) acc(k federate.LocalConn, ev *schema.Event) *connAcc {
 	return a
 }
 
-// request counts one http event of source.
-func (a *connAcc) request(source string, ev *schema.Event) {
+// request counts one http event of source under its path's template:
+// one route's requests on different ids share a key.
+func (a *connAcc) request(source string, paths *pathtmpl.Rules, ev *schema.Event) {
 	h := ev.HTTP
 	if h == nil {
 		return
 	}
-	k := reqKey{source, h.Method, h.Scheme, h.Host, h.Path}
+	path := paths.Template(h.Path)
+	k := reqKey{source, h.Method, h.Scheme, h.Host, path}
 	end := endOf(ev)
 	r := a.reqs[k]
 	if r == nil {
 		r = &Request{Source: source, Method: h.Method, Scheme: h.Scheme, Host: h.Host,
-			Path: h.Path, First: ev.WallNS, Last: end}
+			Path: path, First: ev.WallNS, Last: end}
 		a.reqs[k] = r
 	}
 	r.Count++

@@ -79,7 +79,8 @@ func TestRequestsViewsNotSummed(t *testing.T) {
 }
 
 // TestMigrateV1 opens a version-1 database: its request rows survive
-// the move to per-source counts, under source ”.
+// the move to per-source counts, under source ”, and stay marked raw
+// (not templated) through version 3.
 func TestMigrateV1(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "iormesh")
@@ -106,16 +107,19 @@ func TestMigrateV1(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = d.Close() }()
-	var v, n int
+	var v, n, templated int
 	var source string
 	if err := d.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.db.QueryRow("SELECT source, requests FROM http_request").Scan(&source, &n); err != nil {
+	if err := d.db.QueryRow("SELECT source, requests, templated FROM http_request").Scan(&source, &n,
+		&templated); err != nil {
 		t.Fatal(err)
 	}
-	if v != len(migrations) || source != "" || n != 4 {
-		t.Errorf("version %d, row (%q, %d): want %d and ('', 4)", v, source, n, len(migrations))
+	// An old row's path is raw (version 3: templated 0, folded on read).
+	if v != len(migrations) || source != "" || n != 4 || templated != 0 {
+		t.Errorf("version %d, row (%q, %d, templated %d): want %d and ('', 4, 0)", v, source, n,
+			templated, len(migrations))
 	}
 }
 

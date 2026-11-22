@@ -210,9 +210,13 @@ func (d *DB) endpointLists(ctx context.Context, f Filter, byKey map[epKey]*Endpo
 // requests, so the connection's count is the larger view — the one whose
 // segments a build kept more of — never the two added up. Connections
 // then add up per endpoint (keyed as endpointRows keys it, the scoping
-// host of a local IP included).
+// host of a local IP included). A row stored with a raw path, before the
+// templating, is folded by the built-in rules first (pathTemplateSQL,
+// paths.go), so it counts under its route's template; a stored template
+// is taken as it is.
 const requestCounts = `WITH per_view AS (
-		SELECT host, conn_id, method, path, http_host <> '' AS client, SUM(requests) AS n
+		SELECT host, conn_id, method, ` + pathTemplateSQL + ` AS path, http_host <> '' AS client,
+			SUM(requests) AS n
 		FROM http_request GROUP BY 1, 2, 3, 4, 5),
 	per_conn AS (
 		SELECT host, conn_id, method, path, MAX(n) AS n FROM per_view GROUP BY 1, 2, 3, 4)

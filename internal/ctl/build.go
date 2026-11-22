@@ -17,6 +17,7 @@ import (
 	"iormesh/internal/project"
 	"iormesh/internal/render"
 	"iormesh/internal/report"
+	"iormesh/internal/routemap"
 	"iormesh/internal/schema"
 	"iormesh/internal/servicedb"
 	"iormesh/internal/site"
@@ -37,7 +38,9 @@ import (
 //     bounds the clocks; the events it reads also feed the run's tally.
 //  3. servicedb.Observe and Import fold the mesh into the service
 //     database (task hb4), one source per segment so request counts stay
-//     exact after old segments are deleted.
+//     exact after old segments are deleted; requests count per path
+//     template (ids folded, the route map's path_templates first —
+//     task xh4), never per raw id.
 //  4. The view model (V1: run, health, services, edges; V2: the
 //     conversations; M7: the routed edges, from the route map read
 //     before step 1, routes.go) is built from the tally, the merge, the
@@ -203,12 +206,11 @@ func build(ctx context.Context, e env, f buildFlags) (buildOutput, error) {
 	if err != nil {
 		return buildOutput{}, err
 	}
-	in, rep, err := mergeAndImport(ctx, paths.db, projects, &segs, methods)
+	in, rep, err := mergeAndImport(ctx, paths.db, projects, &segs, methods, routes)
 	if err != nil {
 		return buildOutput{}, err
 	}
 	in.Report = &rep // the processes view is projected from the rollup
-	in.Routes = routes
 	model := viewmodel.New(in)
 	dir, err := writeOutputs(paths.builds, projects, in.Merge.Graph, model)
 	if err == nil {
@@ -263,9 +265,11 @@ func checkedSegments(ctx context.Context, paths buildPaths, projects []string) (
 // mergeAndImport merges the segments, folds the result into the service
 // database, reads the database's view of the projects back and records
 // the conversations (conversations.go); the rollup is built from the
-// events the merge read and the database's endpoints.
-func mergeAndImport(ctx context.Context, dbPath string, projects []string,
-	segs *federate.Segments, methods map[string]map[uint64]schema.Method) (viewmodel.Input, report.Report, error) {
+// events the merge read and the database's endpoints. routes (nil
+// without a route map) joins the routed edges and carries the operator's
+// path templates the import counts requests under.
+func mergeAndImport(ctx context.Context, dbPath string, projects []string, segs *federate.Segments,
+	methods map[string]map[uint64]schema.Method, routes *routemap.Table) (viewmodel.Input, report.Report, error) {
 	tally := viewmodel.NewTally()
 	col := report.NewCollector(methods)
 	tallied := make([]federate.Source, len(segs.Sources))
@@ -277,7 +281,7 @@ func mergeAndImport(ctx context.Context, dbPath string, projects []string,
 		return viewmodel.Input{}, report.Report{}, err
 	}
 	in := viewmodel.Input{Projects: projects, Tally: tally, Merge: res,
-		Conversations: viewmodel.NewRecorder(res.Renames)}
+		Conversations: viewmodel.NewRecorder(res.Renames), Routes: routes}
 	recorded := make([]federate.Source, len(segs.Sources))
 	for i, s := range segs.Sources {
 		recorded[i] = recordedSegment{s, in.Conversations}
@@ -294,9 +298,12 @@ func mergeAndImport(ctx context.Context, dbPath string, projects []string,
 }
 
 // importMesh runs Observe and Import and fills in's database view and
-// observations.
+// observations. Requests are stored under their path templates — the
+// route map's path_templates, then the built-in folding of ids (task
+// xh4) — so the services view counts routes; the events keep the raw
+// paths (decision #22) for query.
 func importMesh(ctx context.Context, dbPath string, sources []federate.Source, in *viewmodel.Input) error {
-	snap, err := servicedb.Observe(ctx, sources, in.Merge)
+	snap, err := servicedb.Observe(ctx, sources, in.Merge, in.Routes.Paths())
 	if err != nil {
 		return err
 	}
