@@ -103,7 +103,9 @@ _install_k3s() {
 
 up() {
     [[ "$(getenforce)" == Enforcing ]] || _die "SELinux is not enforcing"
-    [[ -e "$BIN/k3s" ]] && _die "k3s is installed already"
+    # The real path, not $BIN: a stray IORMESH_K3S_BIN must never let up
+    # adopt a node that already runs k3s (a later down would wipe it).
+    [[ -e /usr/local/bin/k3s ]] && _die "k3s is installed already"
     # Record what `down` may remove: only what was not there before.
     # _trust_cidrs appends firewalld_added once it has run; a state file
     # without it (up failed earlier) leaves firewalld alone in `down`.
