@@ -46,7 +46,11 @@ func rmPod(ref string, o rmPodOptions, e env) error {
 	if err != nil {
 		return err
 	}
-	if err := c.podEntryCollect(context.Background(), pe, projects); err != nil {
+	// Under the per-host bound (env.onHost), as collect's pod entries and
+	// rm's servers are: a kubectl that stalls fails the last collect,
+	// which leaves the registry unchanged (task pi4).
+	err = e.onHost(e.root(), func(ctx context.Context) error { return c.podEntryCollect(ctx, pe, projects) })
+	if err != nil {
 		if !o.force {
 			return fmt.Errorf("%s: last collect: %w (registry unchanged; rm -force drops the entry anyway "+
 				"and loses what was not collected)", ref, err)

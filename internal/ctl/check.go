@@ -91,7 +91,7 @@ func checkSegmentCommand(args []string, e env) error {
 	if err := capMemory(space); err != nil {
 		return err
 	}
-	s, err := checkFile(context.Background(), args[1])
+	s, err := checkFile(e.root(), args[1])
 	if err != nil {
 		return err
 	}

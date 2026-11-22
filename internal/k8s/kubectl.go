@@ -113,7 +113,29 @@ func (k *Kubectl) execArgs(argv ...string) []string {
 		[]string{"exec", k.t.Pod, "--container=" + k.tracer(), "--"}, argv)
 }
 
-// Run executes argv in the tracer container. A command that ran and
+// output is one kubectl call that answers and exits, under callTimeout
+// (boundedOutput): every get, debug and exec of a short remote command
+// goes through it, the fetch stream alone not (streamIdle bounds that).
+func (k *Kubectl) output(ctx context.Context, args []string) ([]byte, error) {
+	return boundedOutput(ctx, k.run, args)
+}
+
+// boundedOutput is r.output under callTimeout (task pi4). A call the
+// bound cut off is ErrStalled, naming it; one the caller's ctx ended (a
+// Ctrl-C, the per-host hour) is left as it failed, since the bound did
+// not end it.
+func boundedOutput(ctx context.Context, r runner, args []string) ([]byte, error) {
+	cctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	out, err := r.output(cctx, args)
+	if err != nil && ctx.Err() == nil && cctx.Err() != nil {
+		err = fmt.Errorf("%w: no answer within %s: %w", ErrStalled, callTimeout, err)
+	}
+	return out, err
+}
+
+// Run executes argv in the tracer container, under callTimeout (output):
+// a pod's remote commands are short. A command that ran and
 // exited non-zero returns an error wrapping *exec.ExitError with its
 // status, as federate.Transport promises; kubectl's own failures (it
 // exits 1 for those too) wrap ErrUnreachable instead and never the
@@ -123,7 +145,7 @@ func (k *Kubectl) Run(ctx context.Context, argv ...string) ([]byte, error) {
 	if len(argv) == 0 {
 		return nil, fmt.Errorf("%w: empty remote command", ErrTransport)
 	}
-	out, err := k.run.output(ctx, k.execArgs(argv...))
+	out, err := k.output(ctx, k.execArgs(argv...))
 	if err != nil {
 		return out, fmt.Errorf("kubectl exec %s/%s %s: %w", k.t.Namespace, k.t.Pod, argv[0], err)
 	}
@@ -147,7 +169,11 @@ func (k *Kubectl) Push(context.Context, string, ...string) error {
 // Files already unpacked are removed even when the stream broke later.
 // One fetch at a time per local dir (lockDir): Unpack's temporaries are
 // per segment name, and two collects of one pod would otherwise write
-// the same temporary at once.
+// the same temporary at once. Neither exec can hold that lock for good
+// (task pi4): the stream ends after streamIdle without a byte, ErrStalled,
+// and each remove exec after callTimeout. The fetch as a whole has no
+// bound of its own here — a large backlog may take long — beyond the
+// caller's ctx (iormeshctl's per-host hour and Ctrl-C).
 func (k *Kubectl) Fetch(ctx context.Context, remoteDir, localDir string) error {
 	proj, err := readyProject(remoteDir)
 	if err != nil {
@@ -185,11 +211,13 @@ func (k *Kubectl) Fetch(ctx context.Context, remoteDir, localDir string) error {
 	return nil
 }
 
-// removeTaken deletes the fetched files on the tracer, in batches.
+// removeTaken deletes the fetched files on the tracer, in batches, each
+// exec under callTimeout (output). It gets Fetch's ctx, not the stream's,
+// so the files that arrived before a stalled stream are still removed.
 func (k *Kubectl) removeTaken(ctx context.Context, proj string, taken []string) error {
 	for batch := range slices.Chunk(taken, removeBatch) {
 		argv := slices.Concat([]string{TracerBinary, "ready", "-project", proj, "-remove", "--"}, batch)
-		if _, err := k.run.output(ctx, k.execArgs(argv...)); err != nil {
+		if _, err := k.output(ctx, k.execArgs(argv...)); err != nil {
 			return fmt.Errorf("remove fetched segments: %w", err)
 		}
 	}

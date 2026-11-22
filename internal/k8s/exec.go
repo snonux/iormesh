@@ -42,6 +42,27 @@ const drainLimit = 64 << 10
 // child (an exec credential plugin) keep the pipes open.
 const waitDelay = 2 * time.Second
 
+// callTimeout bounds one kubectl call that answers and exits — a get, a
+// debug, an exec of a short remote command (Kubectl.output; task pi4).
+// Each is an API request or a command that returns in seconds; one past
+// this is an API server, a credential plugin or an exec stream that
+// hangs, and would otherwise hold its caller (collect, under the fetch
+// lock) until the per-host hour. As RouteReader's routeTimeout. A var so
+// tests can shorten it.
+var callTimeout = 2 * time.Minute
+
+// streamIdle is the fetch stream's idle timeout (execRunner.stream; task
+// pi4): no byte from kubectl for this long ends the stream as ErrStalled.
+// Not a bound on the whole fetch, which may legitimately move a large
+// ready/ backlog for a long time — only on silence, which a stream that
+// moves never shows. The per-host hour (internal/ctl env.onHost) is the
+// ceiling above it. A var so tests can shorten it.
+var streamIdle = 2 * time.Minute
+
+// ErrStalled is a kubectl call given up on by callTimeout or streamIdle:
+// the call reached nothing usable in time, a transport failure.
+var ErrStalled = fmt.Errorf("k8s: kubectl stalled: %w", ErrTransport)
+
 // remoteExit is the last stderr line kubectl exec writes when the remote
 // command ran and exited non-zero; kubectl then exits with that status.
 var remoteExit = regexp.MustCompile(`command terminated with exit code ([0-9]+)$`)
@@ -89,18 +110,27 @@ func (c *capBuffer) Write(p []byte) (int, error) {
 // that fails cancels kubectl, so a refused stream is never drained to the
 // end; its error wins over the kill's. After a consumer that succeeded,
 // at most drainLimit more bytes are read (the tar's trailing padding);
-// a stream that goes on is cancelled and refused.
+// a stream that goes on is cancelled and refused. A stream silent for
+// streamIdle (an exec that stalls once established, task pi4) is
+// cancelled too — killing kubectl closes the pipe, which ends the
+// consumer's blocked read — and fails as ErrStalled, whatever the
+// consumer then said about the cut-off tar.
 func (e execRunner) stream(ctx context.Context, args []string, consume func(io.Reader) error) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	cmd, stderr := e.command(ctx, args)
-	out, err := cmd.StdoutPipe()
+	pipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
 	}
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	idle := streamIdle
+	out := newIdleReader(pipe, idle, func() {
+		cancel(fmt.Errorf("%w: no data for %s on the fetch stream", ErrStalled, idle))
+	})
+	defer out.stop()
 	cerr := consume(out)
 	if cerr == nil {
 		if n, _ := io.CopyN(io.Discard, out, drainLimit); n == drainLimit {
@@ -108,14 +138,46 @@ func (e execRunner) stream(ctx context.Context, args []string, consume func(io.R
 		}
 	}
 	if cerr != nil {
-		cancel()
+		cancel(nil)
 	}
 	werr := explain(cmd.Wait(), stderr)
-	if cerr != nil {
-		return cerr
+	err = cerr
+	if err == nil {
+		err = werr
 	}
-	return werr
+	if cause := context.Cause(ctx); err != nil && errors.Is(cause, ErrStalled) {
+		return fmt.Errorf("%w: %w", cause, err)
+	}
+	return err
 }
+
+// idleReader is the fetch stream's reader under streamIdle: a timer,
+// re-armed by every read that returns bytes, calls fire once the stream
+// has been silent that long. The time the consumer spends writing what
+// it read counts as silence too; at minutes, a local disk never takes
+// that long.
+type idleReader struct {
+	r     io.Reader
+	idle  time.Duration
+	timer *time.Timer
+}
+
+func newIdleReader(r io.Reader, idle time.Duration, fire func()) *idleReader {
+	return &idleReader{r: r, idle: idle, timer: time.AfterFunc(idle, fire)}
+}
+
+func (i *idleReader) Read(p []byte) (int, error) {
+	n, err := i.r.Read(p)
+	if n > 0 {
+		// After the timer fired, a re-armed one fires again: harmless,
+		// the first cancel's cause stays.
+		i.timer.Reset(i.idle)
+	}
+	return n, err
+}
+
+// stop disarms the timer once the stream is done with.
+func (i *idleReader) stop() { i.timer.Stop() }
 
 // customProfileGate opens `kubectl debug --custom` on kubectl 1.30, where
 // the flag exists only behind this variable (checked on kind, task yb4:

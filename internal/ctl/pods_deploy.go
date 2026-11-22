@@ -57,18 +57,27 @@ func podDeployTargets(r *federate.Registry, refs []string, project string, kf *k
 
 // deployPods deploys every entry's pods in turn, a debug tracer waited
 // for up to attach until attached; a failed pod is reported and the next
-// one still deployed, and the result names them.
+// one still deployed, and the result names them. The entry's pod lookup
+// and each pod's deploy run under their own per-host bound (env.onHost,
+// task pi4), as a server's deploy does, so a kubectl that stalls past
+// its own bounds (internal/k8s callTimeout) still cannot hold the rest.
 func deployPods(ctx context.Context, e env, entries []podEntry, attach time.Duration) error {
 	var failed []string
 	for _, pe := range entries {
-		pods, err := pe.pods(ctx)
+		var pods []k8s.PodState
+		err := e.onHost(ctx, func(ctx context.Context) error {
+			var err error
+			pods, err = pe.pods(ctx)
+			return err
+		})
 		if err != nil {
 			_, _ = fmt.Fprintf(e.stderr, "iormeshctl: %s: %s\n", pe.ref, errText(err))
 			failed = append(failed, pe.ref)
 			continue
 		}
 		for _, st := range pods {
-			if err := deployPod(ctx, e, pe, st.Name, attach); err != nil {
+			err := e.onHost(ctx, func(ctx context.Context) error { return deployPod(ctx, e, pe, st.Name, attach) })
+			if err != nil {
 				_, _ = fmt.Fprintf(e.stderr, "iormeshctl: %s: %s\n", pe.label(st.Name), errText(err))
 				failed = append(failed, pe.label(st.Name))
 			}

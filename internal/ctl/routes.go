@@ -135,7 +135,7 @@ func routesCommand(args []string, e env) error {
 		(!ok || !k8sname.Label(ns) || !k8sname.Label(name)) {
 		return fmt.Errorf("%w: -ingress-service %q is not NAMESPACE/NAME", errUsage, f.ingressService)
 	}
-	return discoverRoutes(context.Background(), e, f)
+	return discoverRoutes(e.root(), e, f)
 }
 
 // discoverRoutes reads the cluster, builds the discovered map and

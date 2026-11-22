@@ -127,7 +127,7 @@ func collectCommand(args []string, e env) error {
 	}
 	// A pod's pin goes where the build that reads it looks (review N3).
 	c.db = *db
-	return c.all(context.Background(), targets)
+	return c.all(e.root(), targets)
 }
 
 // newCollector returns a collector over store, the default when empty.

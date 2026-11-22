@@ -23,11 +23,14 @@ import (
 // state-NAME for `exec NAME … ready -state` (else an attached session,
 // "running 1a2b3c4d"), and down-NAME makes every exec into NAME fail as
 // kubectl itself does (exit 1, no "command terminated" line). debug
-// keeps a copy of its --custom file as custom.json. No cluster is
-// reached.
+// keeps a copy of its --custom file as custom.json. A file hang makes
+// every call hang for 30 s without an answer (an API server or exec
+// stream that stalls, task pi4); the hang is the fake's own process, so
+// killing it ends it. No cluster is reached.
 const fakeKubectl = `#!/bin/sh
 for a in "$@"; do printf '%s\0' "$a" >> "$FAKE_DIR/log"; done
 printf '\036\0' >> "$FAKE_DIR/log"
+[ -f "$FAKE_DIR/hang" ] && exec sleep 30
 shift 2
 verb="$1"; shift
 case "$verb" in

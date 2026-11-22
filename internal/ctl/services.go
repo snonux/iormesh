@@ -72,7 +72,7 @@ func withDB(path string, e env, mode int, fn func(context.Context, *servicedb.DB
 			return err
 		}
 	}
-	ctx := context.Background()
+	ctx := e.root()
 	open := servicedb.OpenExisting
 	if mode == dbCreate {
 		open = servicedb.Open

@@ -164,11 +164,12 @@ func newLister(s Scope, r runner) (*Lister, error) {
 }
 
 // get runs `kubectl get` with args, every call carrying the scope's
-// context and namespace, and decodes the JSON into v.
+// context and namespace, and decodes the JSON into v. Each get runs under
+// callTimeout (boundedOutput, task pi4).
 func (l *Lister) get(ctx context.Context, v any, args ...string) error {
 	argv := slices.Concat([]string{"--context=" + l.s.Context, "--namespace=" + l.s.Namespace, "get"},
 		args, []string{"--output=json"})
-	out, err := l.run.output(ctx, argv)
+	out, err := boundedOutput(ctx, l.run, argv)
 	if err != nil {
 		return fmt.Errorf("kubectl get %s in %s: %w", strings.Join(args, " "), l.s.Namespace, err)
 	}
