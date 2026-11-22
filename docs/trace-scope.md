@@ -23,8 +23,9 @@ event families `iormesh run -trace-families` adds (see
   move (renameat2, cross-directory and cross-device),
   touch-style timestamps (utimensat/futimens), symlinks
   (symlink/readlink, lstat's no-follow distinction), hard links,
-  truncate, chmod/chown, xattrs, file mmaps (which JARs, libs,
-  data files), zero-copy paths (sendfile/splice/copy_file_range).
+  truncate, chmod/chown, xattrs, zero-copy paths
+  (sendfile/splice/copy_file_range). File mmaps (which JARs,
+  libs, data files are mapped) are not traced yet.
   *What data is touched — and what happened to it structurally:
   files created, deleted, renamed, relinked, touched.*
 - **Descriptor lifecycle** — dup/dup2/fcntl(F_DUPFD), fd
@@ -34,19 +35,23 @@ event families `iormesh run -trace-families` adds (see
   socket's state transitions rather than syscall arguments (so
   Java's non-blocking connects are covered), plus a
   NAT-tolerant join key; UDP per-packet
-  peers, poll/epoll wait registrations, DNS hostname↔IP maps,
-  optional TLS peer identity, and ingress route maps for proxy
-  hops that hide the peer. *Who talks to whom, under what
-  name — and which threads wait on what.*
+  peers (sendto/recvfrom; sendmsg and its kin are planned, task
+  oh4), poll/epoll wait registrations, DNS hostname↔IP maps,
+  and ingress route maps for proxy hops that hide the peer. TLS
+  peer identity is later (decision #8). *Who talks to whom,
+  under what name — and which threads wait on what.*
 - **HTTP/HTTPS** — method, scheme, host, path/URI, status,
   sizes, latency per request — captured at the Java HTTP
   client/server API boundary by the agent (so HTTPS included,
-  nothing sniffed off the wire), sensitive headers, query
-  params and path segments redacted by policy. *What is
-  actually said, at the level the mesh routes on.*
-- **Local IPC** — pipes, unix sockets (peer PID where the kernel
-  exposes it), eventfd, shared memory; loopback TCP pairs joined
-  locally. *Single-host edges a "mesh" would otherwise miss.*
+  nothing sniffed off the wire), sensitive headers and query
+  params redacted by policy, path segments verbatim (decision
+  #22; templating is planned, task xh4). *What is actually
+  said, at the level the mesh routes on.*
+- **Local IPC** — pipes and socketpairs (both ends), unix stream
+  connections (paired by the kernel), loopback TCP pairs and
+  UDP flows joined locally. eventfd and shared memory are not
+  traced yet. *Single-host edges a "mesh" would otherwise
+  miss.*
 - **Signals** — delivery with sender PID. *Who touched the
   process — e.g. which supervisor sent the SIGTERM.*
 - **Java** — class↔JAR map, thread names (kernel TID ↔ Java

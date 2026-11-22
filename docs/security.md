@@ -572,10 +572,16 @@ truth.
     itself node-wide read access: whoever holds it can start a
     BPF-capable container there, so grant it like root on the
     nodes;
-  - comes as an image pinned by digest and signed like the
-    tracer binary — the static tracer and the agent jar on
-    `scratch`, no shell or package manager (task vb4; the
-    manifests refuse a tag); a sidecar is added only by the
+  - comes as an image pinned by digest — the static tracer and
+    the agent jar on `scratch`, no shell or package manager
+    (task vb4; the manifests refuse a tag). Nothing signs or
+    publishes the image yet: `DefaultImage` is empty
+    (internal/k8s/target.go), so a deploy names the operator's
+    own digest-pinned build (`-image` or the registry's
+    `image:`) and is refused without one. The digest pins the
+    bytes; no signature vouches for them (signed release
+    tarballs are planned, task rh4). A sidecar is added only by
+    the
     deployment owner's explicit patch, a debug container only
     by the operator's `iormeshctl`. The patches and the debug
     profile are generated into `deploy/` from internal/k8s and

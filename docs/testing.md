@@ -63,10 +63,14 @@ introspection.
   a test-only knob (`IORMESH_TEST_CLOCK_SKEW`, below) injects a
   clock offset per tracer, and the merge must recover it; NAT is
   emulated with a DNAT hop.
-- The k8s mode rehearses the same scenarios as pods in kind.
+- The k8s mode rehearses M0's client/server and ingress
+  scenarios as pods in kind (PLAN.md M7); the microservices
+  scenario as pods is planned (task uh4).
 - The LLM claim is tested: a fixed question set over workload
-  traces, with answers known from the scenario declarations,
-  rerun on every schema change.
+  traces, with answers known from the scenario declarations.
+  Built (M5), but not yet run with a real model, so M5 is not
+  accepted; once it has run, it is to be rerun on every schema
+  change.
 
 ## Race detector gate (task ij4)
 
@@ -119,7 +123,7 @@ loss-honest re-runs, unexercised-skip markers, and pass gates
 that do not trust exit codes. See PLAN.md, "Integration tests —
 follow ior" for the full map.
 
-### The suite today (M1)
+### The suite today
 
 `integrationtests/` drives the real tracer binary (`./iormesh
 run`) against the real workload (`java -jar workload.jar`) and

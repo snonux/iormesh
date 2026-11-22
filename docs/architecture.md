@@ -148,11 +148,14 @@ views — happens on the controller.
   - Runs as a sidecar (or `kubectl debug` ephemeral container) in
     the target pod with a minimal capability set, privileged
     only as the fallback (#13);
-    enriches every event with pod/namespace/container identity;
+    identifies each pod as its own host (`host_id` `pod-<uid>`,
+    [schema.md](schema.md#pods-as-hosts-m7)); pod, namespace and
+    container fields on events are planned (task sh4);
     live-attaches the Java agent through the shared process
     namespace.
-  - Later phase, launched by `iormeshctl` with the kubectl
-    context and the debug container image configurable.
+  - Accepted on kind and el9 (M7), launched by `iormeshctl` with
+    the kubectl context and the debug container image
+    configurable.
 - **Route map: proxy-hop resolution**
   - A DNS name often terminates on an ingress (e.g. Traefik)
     behind a managed LB — no tracer can run there, so the far

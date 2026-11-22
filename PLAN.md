@@ -2,7 +2,10 @@
 
 Working plan for iormesh, the BPF-based process observability mesh.
 This file tracks scope, milestones, and open decisions. Code lands
-only once a milestone is picked up; nothing here is implemented yet.
+only once a milestone is picked up. Status (2026-11-22): M0, M1,
+M2, M3, M4, M6 and M7 are accepted; M5 is built but not accepted
+until its LLM eval has run with a real model. Rocky Linux 9.9
+(el9, kernel 5.14) is the main target.
 
 ## Purpose
 
@@ -732,9 +735,10 @@ Gated by S1 — done; the design below is S1's result
   scheme, host, path/URI, status, sizes and latency, joined to
   the socket 4-tuple, the Java stack and the OTEL span.
   Captured at the API boundary, so HTTPS is included without
-  ever touching the wire; sensitive headers, query params and
-  path segments are redacted by policy before anything is
-  recorded. Task 3b4 built the JDK's three — HttpServer (at
+  ever touching the wire; sensitive headers and query params
+  are redacted by policy before anything is recorded, path
+  segments are verbatim (#22; templating is planned, task
+  xh4). Task 3b4 built the JDK's three — HttpServer (at
   the exchange's close, or the handler's return), HttpClient
   (synchronous `send`) and HttpURLConnection (its response
   read): one `http` event per request with method, scheme,
@@ -1848,7 +1852,8 @@ operator's SSH key from the controller.
 
 ### M7 — Kubernetes: sidecar & debug-container deployment
 
-Later phase — plain Linux servers (M4) come first.
+Built after plain Linux servers (M4); accepted on kind and el9
+(Status, below).
 
 - iormesh runs as a sidecar (or `kubectl debug` ephemeral
   container) in the target pod, with the capabilities eBPF and
@@ -2262,10 +2267,12 @@ Later phase — plain Linux servers (M4) come first.
 Numbers are stable ids — references elsewhere in this plan and in
 the docs keep working — so the groups below are not in numeric
 order. Four groups: decided, open (grouped by the milestone they
-block, each with a default so work is never stalled on a missing
-answer), provisional (settled under the 2026-11-20 sequencing
-relaxation, each naming what the owner must confirm and what
-would overturn it), and deferred.
+were raised for, each with a default so work was never stalled on
+a missing answer; those milestones are accepted on the defaults,
+which stand until the owner decides otherwise), provisional
+(settled under the 2026-11-20 sequencing relaxation, each naming
+what the owner must confirm and what would overturn it), and
+deferred.
 
 ### Decided
 
@@ -2568,7 +2575,7 @@ would overturn it), and deferred.
   before (a later session on an older agent stays attribution
   none).
 
-### Open — blocks M2
+### Open — raised for M2 (built on the default)
 
 - **#7 Event families, default-on vs opt-in** — signals, epoll
   registrations, mmaps and renames all add volume; reuse ior's
@@ -2627,7 +2634,7 @@ would overturn it), and deferred.
   environment is never read. A process already running when the
   trace attaches has no exec, so its argv is not recorded (yet).
 
-### Open — blocks M3
+### Open — raised for M3 (built on the default)
 
 - **#29 JDK version support** — the plan says JDK 21, but
   fleets run 17 and older. Boundary hooks, stacks and HTTP
@@ -2696,7 +2703,7 @@ would overturn it), and deferred.
   Built so (task 4b4): span-context tagging, the `otel`
   envelope object; ingestion stays deferred (below).
 
-### Open — blocks M4
+### Open — raised for M4 (built on the default)
 
 - **#1 Remote bootstrapping and sudo scope** — transport is
   settled: SSH, key-based, from the controller only. The sudo
@@ -2819,16 +2826,19 @@ would overturn it), and deferred.
   (surface it, redeploy with a lower duration, or nothing).
   *Default: both limits, surface only.* The tracer side took the
   default (task 8b4): 90% and a 256 MiB floor, checked every
-  5 s and before every rotation; the controller half waits
-  for `collect`/`build`.
+  5 s and before every rotation. The controller half surfaces
+  it (task lf4): `build`'s summary and `show health` name a
+  session that ended on `disk_limit`; nothing is redeployed.
 
 ### Provisional — M7 (2026-11-20)
 
 Settled provisionally under the sequencing relaxation (see
 Milestones) with the plan's own leanings, task ub4. Each names
-what would overturn it and what the owner must confirm; none is
-proven on kind yet (the kind run needs Docker, which the
-settling host did not run). Fleet facts — kubectl contexts,
+what would overturn it and what the owner must confirm. When
+settled none was proven on kind (the settling host ran no
+Docker); M7's acceptance on kind and el9 (tasks yb4, cf4–ff4,
+5h4) has since exercised them, but they stay provisional until
+the owner confirms them. Fleet facts — kubectl contexts,
 namespaces, registries, kernels — are the owner's and appear
 here only as placeholders.
 
@@ -3335,8 +3345,9 @@ Metadata only — nothing below is payload (see non-goals):
 - **HTTP/HTTPS**: method, scheme, host, path/URI, status,
   sizes, latency per request — captured at the Java HTTP
   client/server API boundary by the agent (HTTPS included,
-  nothing sniffed off the wire), sensitive headers, query
-  params and path segments redacted by policy. *Why: URIs are
+  nothing sniffed off the wire), sensitive headers and query
+  params redacted by policy, path segments verbatim (#22;
+  templating planned, task xh4). *Why: URIs are
   what the mesh actually routes on — and what an LLM matches
   against source code.*
 - **Local IPC**: pipes (both ends), unix sockets (peer PID where
@@ -3368,6 +3379,12 @@ Metadata only — nothing below is payload (see non-goals):
   none`, so a reader never mistakes "not a JVM" for "nothing
   happened". *Why: real meshes end at nginx, a database or a
   sidecar — the graph must say so honestly.*
+
+The inventory is the target. Not traced as built (2026-11-22;
+`internal/tracepoints`, default_set.go and trace_family.go):
+file mmaps, eventfd and shared memory (no probes);
+sendmsg/recvmsg/sendmmsg/recvmmsg (planned, task oh4); TLS
+peer identity (later, decision #8).
 
 ## Trace output contract — built for LLM introspection
 
@@ -3538,9 +3555,11 @@ can reconstruct behavior and check it against source code:
 - **Deterministic SVG**: fixed layout rules, no randomness — the
   diagram of a given normalized graph is byte-stable, so M0
   gets visual goldens.
-- **Pod-aware identity**: under Kubernetes, the envelope gains
-  pod/namespace/container (cgroup-mapped); the graph treats pod
-  identity as a first-class node type.
+- **Pod-aware identity**: under Kubernetes an in-pod tracer
+  describes the pod as its host (`host_id` `pod-<uid>`, M7;
+  docs/schema.md "Pods as hosts"), so the pod is the graph's
+  host node. Pod, namespace and container fields on the
+  envelope (cgroup-mapped) are planned (task sh4).
 - **Project-scoped**: every session belongs to a named project
   (`-project`); traces always live under
   `/opt/iormesh/traces/<project>/`, graph nodes carry their
@@ -3550,20 +3569,23 @@ can reconstruct behavior and check it against source code:
   process-name pattern produce one app node linking every PID
   incarnation of the matched process — the graph says "the app
   restarted" instead of showing an unrelated new PID.
-- **Proxy-hop edges**: routes through an ingress render as
-  synthetic `routed_via` edges and introduce service + workload
-  (deployment/statefulset) node types — FQDN → ingress →
-  service → workload completes the graph across proxies no
-  tracer can run on.
+- **Proxy-hop edges**: a route through an ingress becomes one
+  routed edge in the build's model (`routes` in model.json) —
+  client → FQDN → ingress → Service → workload — completing the
+  picture across proxies no tracer can run on. As built (M7)
+  the graph gains no FQDN, ingress or workload nodes: those
+  hops exist only in the routed edge.
 - **OTEL correlation**: trace/span ids in the envelope make
   every event joinable with the app's distributed traces; an
   LLM can cross-reference the mesh with span timelines and
   instrumented code paths.
 - **HTTP request events**: method, scheme, host, path/URI,
   status and sizes as first-class events, correlated with
-  connection, stack and span; sensitive headers, query params
-  and path segments are redacted before recording. The same
-  policy covers argv (policy documented in docs/schema.md).
+  connection, stack and span; sensitive headers and query
+  params are redacted before recording, path segments are
+  verbatim (#22's default; templating id-like segments is
+  planned, task xh4). The same policy covers argv (policy
+  documented in docs/schema.md).
 - **Summary rollup**: per-process entry point — config files read,
   connections with hostnames, thread table, top methods by I/O —
   cheap context before diving into the event stream.
@@ -3765,19 +3787,19 @@ whether the engine is Docker or Podman:
   never been loaded on a real arm64 kernel. Details:
   [docs/build.md](docs/build.md), "Container builds".
 
-## Component map (planned)
+## Component map
 
 | Component        | Language | Role                                            |
 |------------------|----------|-------------------------------------------------|
 | eBPF probes      | C (CO-RE)| file/net syscall tracepoints, socket state, opt-in native stacks |
 | Correlator       | Go       | ring buffer consumer, fd/inode/socket joins, agent-event join, parquet segments |
-| Java agent       | Java     | I/O-boundary hooks, stacks, TID map, OTEL ids, HTTP events |
+| Java agent       | Java 17+ | I/O-boundary hooks, stacks, TID map, OTEL ids, HTTP events |
 | Test workload    | Java 21  | deterministic traceable scenarios with markers (M0) |
 | Output contract  | versioned JSON + parquet | NDJSON live/golden, parquet bulk files, graph, summary |
 | Normalizer       | Go, cgo-free | symbolic ids, marker brackets, golden check |
 | Controller (iormeshctl) | Go, cgo-free | registry, deploy, collect, offline merge, service-interaction db, expand, query, rm cleanup, projects |
 | Views            | Go + SVG/HTML/JS | one view model; local site, Bubble Tea TUI, plain text; deterministic SVG + sequence exports |
-| K8s mode         | manifests | sidecar/debug-container deploy, pod identity |
+| K8s mode         | Go + manifests | sidecar/debug-container deploy, pod as host (pod fields on events planned, task sh4) |
 | Route map        | YAML + k8s API | FQDN→ingress→service/workload edges |
 
 There is no long-lived collector and no mesh agent: the tracer
@@ -3785,19 +3807,24 @@ There is no long-lived collector and no mesh agent: the tracer
 everything cross-host — merge, graph, expansion — happens on the
 controller.
 
-## Suggested repo layout (when code starts)
+## Repo layout
+
+The tree as built (2026-11-22); `iormesh help` and `iormeshctl
+help` list each binary's subcommands and flags.
 
 ```
 cmd/iormesh/          # tracer binary (Linux, eBPF loader +
                       #   correlator); runs on the targets:
-                      #   run|start|stop|status|upgrade|
-                      #   uninstall|normalize
+                      #   run|attach|start|stop|status|
+                      #   upgrade|uninstall|ready|normalize|
+                      #   version
 cmd/iormeshctl/       # controller (Linux/macOS, no eBPF, no cgo):
                       #   add|rm registry, deploy, collect,
-                      #   build, refresh, expand, query,
-                      #   open, tui, show
-cmd/testworkload/     # wrapper for the Java test app scenarios
+                      #   build, refresh, show, open, tui,
+                      #   expand, query, services, routes,
+                      #   verify, version
 cmd/iormesheval/      # the LLM introspection eval's runner (M5)
+internal/cli/         # the tracer's subcommands
 internal/c/           # BPF C sources: ior-style helpers +
                       #   generated_tracepoints.c + vmlinux.h +
                       #   committed generation result (diff gate)
@@ -3813,7 +3840,8 @@ internal/target/      # target spec: PID, pattern, listening port
 internal/segment/     # minute-rotated parquet segments, ready/
                       #   contract, disk watchdog
 internal/redact/      # one redaction policy: argv, headers,
-                      #   query params, paths (cgo-free)
+                      #   query params; path segments verbatim
+                      #   (#22) (cgo-free)
 internal/agentspool/  # reader for the Java agent's spool
 internal/buildgate/   # repo-wide gates: controller stays
                       #   cgo-free, no //nolint
@@ -3841,9 +3869,18 @@ internal/site/        # local site: one self-contained page
                       #   (embedded JS/CSS, model inline), the
                       #   SVG exports, a folder per run (cgo-free)
 internal/tui/         # Bubble Tea terminal explorer
-internal/textview/    # plain-text views: show, collect summary
-internal/k8s/         # cgroup→pod identity mapping, k8s metadata
+internal/ctl/         # iormeshctl's subcommands
+internal/k8s/         # kubectl transport, pod targets, manifests
+                      #   (pod fields on events planned, sh4)
 internal/routemap/    # FQDN→ingress→workload map (config + k8s discovery)
+internal/javaattach/  # live attach of the Java agent (HotSpot
+                      #   attach protocol)
+internal/stacks/      # native stack table (opt-in)
+internal/release/     # minisign signing and verification
+internal/version/     # release version and its ordering
+internal/termsafe/    # terminal-safe printing of trace text
+internal/acceptance/  # M4's real-host acceptance driver
+internal/kindrun/     # M7's kind acceptance command plans
 internal/bpfembed.go  # go:embed of the compiled .bpf.o + env override
 agent/                # Java agent source (M3): bridge jar
                       #   (bootstrap-visible hooks) + core
@@ -3856,18 +3893,23 @@ eval/                 # LLM introspection eval: questions,
 spikes/               # throwaway spike prototypes (S1–S3);
                       #   their results live in docs/spikes/
 deploy/               # k8s manifests: sidecar patch, debug container
+packaging/selinux/    # opt-in SELinux policy RPM for pods (#13)
 assets/               # logo + wordmark (SVG)
 Magefile.go           # generate/build/test targets, ior-style
 scripts/              # container builds (docker/podman), ior-style
 docs/                 # design docs: architecture, trace scope,
-                      #   output contract, testing, security,
-                      #   build, implementation guide;
+                      #   output contract, schema, testing,
+                      #   java-attach, security, build,
+                      #   visualization, implementation guide;
                       #   docs/spikes/ holds the spike results,
                       #   docs/diagrams/ the generated SVGs
 ```
 
-(Layout mirrors ior's generation tree so the pattern can be lifted
-with minimal renaming; exact shapes settle when M0/M1 start.)
+(Layout mirrors ior's generation tree so the pattern could be
+lifted with minimal renaming. Smaller helper packages —
+`internal/csvlist`, `k8sname`, `project`, `gatecmd`,
+`containerbuild`, `corereloc` — are not listed; each has a
+package comment.)
 
 ## Non-goals (for now)
 

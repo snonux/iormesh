@@ -11,15 +11,14 @@ answers *"what is this process doing to its I/O right now?"*, iormesh
 answers *"what does this process touch — and what touches it back?"* —
 across hosts, not just one.
 
-**Status: early phase — PoC.** This project is a proof of
-concept in the making: the repo holds the project plan
-([PLAN.md](./PLAN.md)), the design docs ([docs/](./docs/)) and
-the first code — M0's Java test workload (`workload/`, built
-with `mage workloadBuild`) and M1's BPF build and generator
-lifted from ior (`mage generate`, `mage build`; see
-[docs/build.md](docs/build.md)). Everything described — flags,
-paths, schema, milestones — is subject to change as the PoC
-evolves.
+**Status: proof of concept.** Milestones M0, M1, M2, M3, M4, M6
+and M7 are accepted; M5 (views, query and the LLM eval) is built
+but not accepted until its eval has run with a real model (see
+[PLAN.md](./PLAN.md)). Rocky Linux 9.9 (el9, kernel 5.14) is the
+main target. The repo holds the tracer (`iormesh`), the
+controller (`iormeshctl`), the Java agent and test workload, the
+plan and the design docs ([docs/](./docs/)). Flags, paths and
+schema may still change as the PoC evolves.
 
 ## Goals
 
@@ -31,7 +30,7 @@ evolves.
    tracer there, attached to the process accepting that
    connection — from the controller, under an allowlist, signed
    binaries and hop limits. Tracers never deploy themselves.
-3. **Java code-flow instrumentation** (JDK 21) — attribute I/O
+3. **Java code-flow instrumentation** (JDK 17+) — attribute I/O
    events to the method stack that caused them, and to the
    OpenTelemetry span when the app is instrumented.
 4. **Correlated, queryable map** — hosts, PIDs, sockets, files
@@ -54,16 +53,19 @@ app is ever the first test subject.
 
 ## Deployment modes
 
-- **Standalone** — `sudo iormesh` on a host; traces that host.
+- **Standalone** — `sudo iormesh run -project NAME (-pid PID |
+  -pattern GLOB | -listen-port N)` on a host; traces the matched
+  processes there.
 - **Controller-managed (primary)** — `iormeshctl` on any laptop
   (Linux or macOS) manages the server list, pushes and starts
   tracers over SSH (`add` enrolls, `rm` tears down and removes
   `/opt/iormesh` on the host), collects the traces and renders
-  the mesh locally. Plain Linux servers first; Kubernetes is a
-  later phase.
-- **Kubernetes (later phase)** — sidecar or `iormeshctl`-driven
+  the mesh locally.
+- **Kubernetes (M7)** — sidecar or `iormeshctl`-driven
   `kubectl debug` container (context and image configurable)
-  next to the app; pod-aware identity.
+  next to the app; each pod is traced as its own host
+  (`pod-<uid>`). Pod, namespace and container fields on events
+  are planned (task sh4).
 - **Mesh expansion** — `iormeshctl expand` follows observed
   connections to untraced peers and deploys tracers there, under
   the allowlist and hop limits (M6). Driven by the controller;
@@ -74,7 +76,8 @@ app is ever the first test subject.
 - Read-only tracing, metadata only — no file or socket payload
   is ever recorded. One deliberate exception: HTTP(S) request
   metadata captured at the Java API boundary. One redaction
-  policy covers headers, query params, URI paths and argv.
+  policy covers headers, query params and argv; URI path
+  segments are recorded verbatim (decision #22).
 - Mesh expansion only from the controller, against an explicit
   allowlist, with a signed tracer binary, a hop limit and a
   node cap. Tracers never deploy and never connect anywhere.
