@@ -92,6 +92,10 @@ Details: [docs/security.md](./docs/security.md).
 
 - [PLAN.md](./PLAN.md) — the working plan: scope, spikes,
   milestones M0–M7, decisions. The source of truth.
+- [docs/quickstart.md](./docs/quickstart.md) — from zero to a
+  rendered mesh on two Rocky 9.9 hosts.
+- [docs/troubleshooting.md](./docs/troubleshooting.md) — common
+  failures, keyed by the message printed, and their fixes.
 - [docs/architecture.md](./docs/architecture.md) — components
   and how they fit together, with diagrams.
 - [docs/implementation.md](./docs/implementation.md) — the
