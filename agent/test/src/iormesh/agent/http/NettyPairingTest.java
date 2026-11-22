@@ -4,7 +4,9 @@ import static iormesh.agent.AgentTests.check;
 import static iormesh.agent.AgentTests.equal;
 
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpObjectDecoder;
@@ -14,11 +16,15 @@ import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
+import io.netty.handler.ssl.SslHandler;
 import iormesh.agent.AgentTests;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.util.AbstractMap;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.function.BiFunction;
 
 /**
@@ -31,7 +37,9 @@ import java.util.function.BiFunction;
  * unanswered requests, two completions in one call) poisons the channel:
  * nothing more is recorded on it. A loader whose Netty is only half
  * rewritten (older 4.1: no encoder write, task 6j4) records nothing and
- * never throws.
+ * never throws. A channel whose pipeline holds an SslHandler says scheme
+ * https, one without says http, one whose pipeline cannot be read says
+ * nothing — and still records (task aj4).
  */
 public final class NettyPairingTest {
     private NettyPairingTest() {}
@@ -63,7 +71,38 @@ public final class NettyPairingTest {
         public SocketAddress remoteAddress() { return new InetSocketAddress("127.0.0.1", 4000); }
     }
 
-    record Ctx(Channel channel) implements ChannelHandlerContext {}
+    record Ctx(Channel channel, ChannelPipeline pipeline) implements ChannelHandlerContext {}
+
+    /** A pipeline of these handlers (named h0, h1, ...); counts its reads. */
+    static final class Pipe implements ChannelPipeline {
+        final List<ChannelHandler> handlers;
+        int reads;
+
+        Pipe(ChannelHandler... handlers) {
+            this.handlers = List.of(handlers);
+        }
+
+        @Override
+        public Iterator<Map.Entry<String, ChannelHandler>> iterator() {
+            reads++;
+            List<Map.Entry<String, ChannelHandler>> out = new ArrayList<>();
+            for (ChannelHandler h : handlers) {
+                out.add(new AbstractMap.SimpleEntry<>("h" + out.size(), h));
+            }
+            return out.iterator();
+        }
+    }
+
+    /** A pipeline that fails when read: the scheme stays unknown. */
+    static final class BadPipe implements ChannelPipeline {
+        @Override
+        public Iterator<Map.Entry<String, ChannelHandler>> iterator() {
+            throw new IllegalStateException("pipeline unreadable");
+        }
+    }
+
+    /** Some handler that is not TLS. */
+    static final class Plain implements ChannelHandler {}
 
     /**
      * One channel with its codecs (the stand-ins' subclasses, as Netty's
@@ -75,7 +114,7 @@ public final class NettyPairingTest {
         final Netty netty = new Netty();
         final Object decoder = new HttpObjectDecoder() {};
         final Object encoder = new HttpObjectEncoder() {};
-        final Ctx ctx = new Ctx(new Ch());
+        final Ctx ctx;
         private BiFunction<Object[], long[], String[]> decode;
         private BiFunction<Object[], long[], String[]> decodeLast;
         private BiFunction<Object[], long[], String[]> write;
@@ -86,7 +125,17 @@ public final class NettyPairingTest {
             this(born, "decode", "decodeLast", "write");
         }
 
+        /** Fully hooked, born, on a channel with this pipeline. */
+        Wire(ChannelPipeline pipeline) {
+            this(pipeline, true, "decode", "decodeLast", "write");
+        }
+
         Wire(boolean born, String... rewritten) {
+            this(new Pipe(new Plain()), born, rewritten);
+        }
+
+        Wire(ChannelPipeline pipeline, boolean born, String... rewritten) {
+            ctx = new Ctx(new Ch(), pipeline);
             ClassLoader loader = HttpObjectDecoder.class.getClassLoader();
             for (Target t : netty.targets()) {
                 if (List.of(rewritten).contains(t.method())) {
@@ -117,10 +166,21 @@ public final class NettyPairingTest {
 
         /** write's exit; a recorded request is never held (Ring.HTTP_HELD, task mb4 review). */
         String out(Object ret, Object msg) {
+            String[] r = outRecord(ret, msg);
+            return path(r);
+        }
+
+        /** write's exit: the whole record (scheme at [1]), or null. */
+        String[] outRecord(Object ret, Object msg) {
             long[] m = meta();
-            String p = path(write.apply(args(ret, encoder, msg), m));
-            check(p == null || (m[Request.M_FLAGS] & 16) == 0, "a Netty request is never held");
-            return p;
+            String[] r = write.apply(args(ret, encoder, msg), m);
+            check(r == null || (m[Request.M_FLAGS] & 16) == 0, "a Netty request is never held");
+            return r;
+        }
+
+        /** decodeLast's exit: the whole record, or null. */
+        String[] lastRecord(Object... msgs) {
+            return decodeLast.apply(args(null, decoder, new ArrayList<>(List.of(msgs))), meta());
         }
 
         private Object[] args(Object ret, Object codec, Object second) {
@@ -140,7 +200,39 @@ public final class NettyPairingTest {
         return List.of(new AgentTests.Case("netty/pairing in order", NettyPairingTest::order),
                 new AgentTests.Case("netty/poisoned channels", NettyPairingTest::poison),
                 new AgentTests.Case("netty/half-hooked loader records nothing",
-                        NettyPairingTest::halfHooked));
+                        NettyPairingTest::halfHooked),
+                new AgentTests.Case("netty/scheme from the pipeline", NettyPairingTest::scheme));
+    }
+
+    /**
+     * Task aj4: https when the channel's pipeline holds an SslHandler (a
+     * subclass too: Netty's SniHandler swaps in one), http without, and
+     * empty when the pipeline cannot be read — never throwing, so the
+     * exchange still records. The pipeline is read once per channel.
+     */
+    static void scheme() {
+        Pipe tls = new Pipe(new Plain(), new SslHandler() {}, new Plain());
+        Wire server = new Wire(tls);
+        server.in(null, new Req("/a"));
+        equal("https", server.outRecord(null, new FullResp(200))[1], "a TLS server");
+        server.in(null, new Req("/b"));
+        equal("https", server.outRecord(null, new FullResp(200))[1], "its second exchange");
+        equal(1, tls.reads, "the pipeline read once per channel");
+        Wire client = new Wire(new Pipe(new SslHandler()));
+        client.out(null, new Req("/c"));
+        client.in(null, new Resp(200));
+        equal("https", client.lastRecord(new Resp(200), new Last())[1], "a TLS client");
+        Wire plain = new Wire(new Pipe(new Plain()));
+        plain.in(null, new Req("/d"));
+        equal("http", plain.outRecord(null, new FullResp(200))[1], "no SslHandler: http");
+        Wire bad = new Wire(new BadPipe());
+        bad.in(null, new Req("/e"));
+        String[] r = bad.outRecord(null, new FullResp(200));
+        equal("/e", r[3], "an unreadable pipeline still records");
+        equal("", r[1], "an unreadable pipeline: no scheme");
+        Wire none = new Wire((ChannelPipeline) null);
+        none.in(null, new Req("/f"));
+        equal("", none.outRecord(null, new FullResp(200))[1], "no pipeline: no scheme");
     }
 
     /**

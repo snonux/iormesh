@@ -53,6 +53,12 @@ import java.util.function.BiFunction;
  * the JVM's requests. A decode that throws still passes its output on,
  * so its messages count.
  *
+ * The scheme is https when the channel's pipeline holds an SslHandler
+ * (or a subclass) at its first message, http when it holds none, and
+ * empty when the pipeline cannot be read (task aj4): read once per
+ * channel, alongside the loader check, by walking the pipeline's
+ * handlers — no class is loaded for it.
+ *
  * The event's stack is the event loop's: Netty's codec, and the app's
  * handler only when it wrote from inside its read. HTTP/2 (Netty's
  * Http2 codecs) is not seen.
@@ -145,6 +151,8 @@ public final class Netty implements Library {
         boolean poisoned;
         /** Whether the channel's codec loader was checked for both hooks (once, task 6j4). */
         boolean vetted;
+        /** The channel's scheme, read with that check (task aj4): https, http, or unknown. */
+        volatile String scheme = "";
     }
 
     /**
@@ -272,10 +280,28 @@ public final class Netty implements Library {
                     return null;
                 }
                 st = channels.of(channel);
-                if (!channels.born(a[1])) {
-                    Channels.poison(st);   // a codec older than the agent: history unknown
-                } else if (Channels.firstLook(st)
-                        && !channels.hooked(a[1], inbound ? DECODER : ENCODER)) {
+                vet(st, a[1], api, pair[0]);
+                return st.poisoned ? null : seen(a, pair[1], api, channel, st, meta);
+            } catch (Throwable t) {
+                if (st != null) {
+                    Channels.poison(st);
+                }
+                throw t instanceof RuntimeException e ? e : new IllegalStateException(t);
+            }
+        }
+
+        /**
+         * Poisons st's channel when its codec predates the agent
+         * or, at the channel's first message, when its loader is half
+         * hooked; else, at that first message, reads the channel's scheme
+         * from ctx's pipeline (task aj4) — once per channel, never per
+         * message.
+         */
+        private void vet(State st, Object codec, Api api, Object ctx) {
+            if (!channels.born(codec)) {
+                Channels.poison(st);   // a codec older than the agent: history unknown
+            } else if (Channels.firstLook(st)) {
+                if (!channels.hooked(codec, inbound ? DECODER : ENCODER)) {
                     // Half hooked (task 6j4: older 4.1 has no encoder write
                     // to rewrite): one side of every exchange goes unseen,
                     // so the channel records nothing — silently, never a
@@ -285,13 +311,9 @@ public final class Netty implements Library {
                     // only after the first decode stays silent on that
                     // channel, since its earlier messages went unseen.
                     Channels.poison(st);
+                } else {
+                    st.scheme = api.scheme(ctx);
                 }
-                return st.poisoned ? null : seen(a, pair[1], api, channel, st, meta);
-            } catch (Throwable t) {
-                if (st != null) {
-                    Channels.poison(st);
-                }
-                throw t instanceof RuntimeException e ? e : new IllegalStateException(t);
             }
         }
 
@@ -336,7 +358,7 @@ public final class Netty implements Library {
                 throws Throwable {
             Class<?> c = msg.getClass();
             if (api.isRequest(c)) {
-                open(api.request(msg, inbound), st);
+                open(api.request(msg, inbound, st.scheme), st);
             } else if (api.isResponse(c)) {
                 answer(api.answer(msg), st);
             }
@@ -379,12 +401,16 @@ public final class Netty implements Library {
     }
 
     /** netty-codec-http's and netty-transport's API, in one loader. */
-    record Api(MethodHandle channel, MethodHandle localAddr, MethodHandle remoteAddr,
-               MethodHandle method, MethodHandle methodName, MethodHandle uri,
+    record Api(MethodHandle channel, MethodHandle pipeline, MethodHandle localAddr,
+               MethodHandle remoteAddr, MethodHandle method, MethodHandle methodName, MethodHandle uri,
                MethodHandle version, MethodHandle versionText, MethodHandle headers,
                MethodHandle names, MethodHandle values, MethodHandle status,
                MethodHandle code, ClassValue<int[]> kinds) {
         private static final String H = "io.netty.handler.codec.http.";
+        /** Netty's TLS handler: its presence in a pipeline means https (task aj4). */
+        private static final String SSL = "io.netty.handler.ssl.SslHandler";
+        /** Handlers looked at for it; a longer pipeline's scheme is unknown. */
+        static final int MAX_HANDLERS = 64;
 
         static ClassValue<Api> perClass() {
             return new ClassValue<>() {
@@ -400,8 +426,9 @@ public final class Netty implements Library {
             Class<?> req = Handles.sibling(near, H + "HttpRequest");
             Class<?> msg = Handles.sibling(near, H + "HttpMessage");
             Class<?> hdrs = Handles.sibling(near, H + "HttpHeaders");
-            return new Api(Handles.virtual(Handles.sibling(near,
-                            "io.netty.channel.ChannelHandlerContext"), "channel", ch),
+            Class<?> ctx = Handles.sibling(near, "io.netty.channel.ChannelHandlerContext");
+            return new Api(Handles.virtual(ctx, "channel", ch),
+                    Handles.virtual(ctx, "pipeline", "io.netty.channel.ChannelPipeline"),
                     Handles.virtual(ch, "localAddress", SocketAddress.class),
                     Handles.virtual(ch, "remoteAddress", SocketAddress.class),
                     Handles.virtual(req, "method", H + "HttpMethod"),
@@ -444,16 +471,45 @@ public final class Netty implements Library {
         }
 
         /**
+         * The scheme of ctx's channel (task aj4): https when its pipeline
+         * holds an SslHandler or a subclass (SniHandler swaps one in), http
+         * when it holds none, empty when the pipeline cannot be read or is
+         * longer than MAX_HANDLERS. The pipeline is iterated (name, handler
+         * entries) and each handler's own class hierarchy searched by name,
+         * so netty-handler's class is never loaded; never throws.
+         */
+        String scheme(Object ctx) {
+            try {
+                if (!(Handles.call(pipeline, ctx) instanceof Iterable<?> p)) {
+                    return "";
+                }
+                int n = 0;
+                for (Object e : p) {
+                    if (++n > MAX_HANDLERS) {
+                        return "";
+                    }
+                    if (e instanceof Map.Entry<?, ?> h && h.getValue() != null
+                            && Handles.find(h.getValue().getClass(), SSL) != null) {
+                        return "https";
+                    }
+                }
+                return "http";
+            } catch (Throwable t) {
+                return "";   // the scheme is optional; the exchange still records
+            }
+        }
+
+        /**
          * A request's head as its exchange begins: a server's (inbound)
          * stamped now, its latency's start; a client's host from its Host
-         * header.
+         * header; the channel's scheme as read at its first message.
          */
-        Request request(Object msg, boolean inbound) throws Throwable {
+        Request request(Object msg, boolean inbound, String scheme) throws Throwable {
             Request r = new Request();
             r.server = inbound;
             r.start = System.nanoTime();
             r.method = nz(Handles.string(methodName, Handles.call(method, msg)));
-            r.scheme = "http";
+            r.scheme = scheme;
             r.path = nz(Handles.string(uri, msg));
             r.version = nz(Handles.string(versionText, Handles.call(version, msg)));
             Map<String, List<String>> h = Handles.headers(names, values, Handles.call(headers, msg));
