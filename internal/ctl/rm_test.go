@@ -118,7 +118,8 @@ func TestRmSweepSkipsForeign(t *testing.T) {
 		out: "/opt/iormesh/traces/payments/ready/x.parquet\n"}
 	if code := f.run("rm", "app2"); code != exitError ||
 		!strings.Contains(f.stderr.String(), "1 trace files could not be synced off: "+
-			"/opt/iormesh/traces/payments/ready/x.parquet; nothing uninstalled") {
+			"/opt/iormesh/traces/payments/ready/x.parquet; project dirs not registered for this host, "+
+			"not collected: payments (re-add them to collect them); nothing uninstalled") {
 		t.Fatalf("exit %d, stderr %s", code, f.stderr)
 	}
 	sweepStart := [][]string{call("app2", "run", "test", "-d", "/opt/iormesh/traces"),
@@ -133,6 +134,37 @@ func TestRmSweepSkipsForeign(t *testing.T) {
 		sweepStart, [][]string{call("app2", "run", listLeft...), sudoCall("app2", "uninstall")})
 	if _, err := os.Stat(filepath.Join(f.store, "payments")); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("store/payments: %v, want it absent", err)
+	}
+}
+
+// TestRmProjectUnreachableStaysKnown: rm -project P on an unreachable
+// host drops P from the registry but leaves a tombstone in deploy's
+// record, since P's tracer and segments stay on the host; a later rm HOST
+// still stops and collects P (it is no foreign directory) and, having
+// succeeded, clears the host from the record.
+func TestRmProjectUnreachableStaysKnown(t *testing.T) {
+	f := newDeployFixture(t)
+	f.answers["app1 true"] = reply{err: errors.New("ssh: connect to host app1: No route to host")}
+	f.mustRun(t, "rm", "-project", "shop", "app1")
+	if !strings.Contains(f.stderr.String(), "dropping project shop from the registry only; "+
+		"a later rm app1 still collects it") {
+		t.Errorf("stderr: %s", f.stderr)
+	}
+	if rec, err := loadDeployed(f.record); err != nil || !rec["app1"]["shop"].Dropped ||
+		rec.same("app1", "shop", nil, "") {
+		t.Errorf("record after the unreachable rm: %v, %v", rec, err)
+	}
+	delete(f.answers, "app1 true")
+	f.answers["app1 find /opt/iormesh/traces -mindepth 1"] = reply{
+		out: "/opt/iormesh/traces/billing\n/opt/iormesh/traces/shop\n"}
+	f.mustRun(t, "rm", "app1")
+	checkLog(t, f.log, rmPrelude("app1"), [][]string{showCall("app1", "billing")}, f.collectLog("app1", "billing"),
+		[][]string{call("app1", "run", "test", "-d", "/opt/iormesh/traces"), call("app1", "run", listDirs...),
+			showCall("app1", "shop")}, f.collectLog("app1", "shop"),
+		[][]string{call("app1", "run", listLeft...), sudoCall("app1", "uninstall")})
+	rec, err := loadDeployed(f.record)
+	if err != nil || rec["app1"] != nil {
+		t.Errorf("record after rm app1: %v, %v", rec, err)
 	}
 }
 

@@ -28,15 +28,24 @@ const maxDeployedSize = 1 << 20
 // state.json says which flags or build it got, so the controller
 // remembers them: a re-deploy of the same build and registry entry leaves
 // a running session alone, a changed entry or a new build (possibly a
-// security fix) restarts it. It is a hint, not a trust boundary — a stale
-// or edited record only causes, or skips, one restart — so it is kept
-// private (0600) but not vetted like the registry.
+// security fix) restarts it. rm also reads it: its projects of a host,
+// tombstones included, are ones rm's sweep may collect (task hi4). Only
+// the operator writes it, never a server, so it is a hint, not a trust
+// boundary against the servers — a stale or edited record only causes, or
+// skips, one restart or one collect — and it is kept private (0600) but
+// not vetted like the registry.
 type deployedRecord map[string]map[string]deployedSession
 
-// deployedSession is one project's last start.
+// deployedSession is one project's last start, or a tombstone.
 type deployedSession struct {
 	Start   []string `json:"start"`
 	Version string   `json:"version"`
+	// Dropped marks a tombstone: rm dropped the project from the
+	// registry while its host was unreachable, so its tracer and
+	// segments are still there and a later rm of the host must still
+	// collect it. A tombstone has no start or version, so a re-add and
+	// deploy restarts the project (and set replaces the tombstone).
+	Dropped bool `json:"dropped,omitempty"`
 }
 
 // defaultDeployedPath is ~/.local/share/iormesh/deployed.json.
@@ -73,10 +82,10 @@ func loadDeployed(path string) (deployedRecord, error) {
 }
 
 // same reports whether deploy last started the project with argv on
-// build version.
+// build version. A tombstone matches nothing, so the project restarts.
 func (r deployedRecord) same(host, project string, argv []string, version string) bool {
 	last, ok := r[host][project]
-	return ok && last.Version == version && slices.Equal(last.Start, argv)
+	return ok && !last.Dropped && last.Version == version && slices.Equal(last.Start, argv)
 }
 
 // set records argv and version as the project's last start.
@@ -106,6 +115,24 @@ func (r deployedRecord) forget(host, project string) bool {
 		delete(r, host)
 	}
 	return true
+}
+
+// drop turns each of host's projects into a tombstone (see
+// deployedSession.Dropped), as rm does when it unregisters them from an
+// unreachable host. It reports whether the record changed.
+func (r deployedRecord) drop(host string, projects []string) bool {
+	changed := false
+	for _, p := range projects {
+		if last, ok := r[host][p]; ok && last.Dropped {
+			continue
+		}
+		if r[host] == nil {
+			r[host] = map[string]deployedSession{}
+		}
+		r[host][p] = deployedSession{Dropped: true}
+		changed = true
+	}
+	return changed
 }
 
 // save writes the record atomically (temp file, rename) into a 0700

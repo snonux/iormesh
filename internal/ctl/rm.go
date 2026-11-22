@@ -18,7 +18,9 @@ import (
 //
 //  1. true — reachability. An unreachable host is warned about and only
 //     dropped from the registry: its traces stay on it, and an operator
-//     must be able to forget a server that is gone for good;
+//     must be able to forget a server that is gone for good. Deploy's
+//     record keeps the dropped projects as tombstones, so a later rm of
+//     the host still collects them in step 4;
 //  2. test -x /opt/iormesh/bin/iormesh — a host without the tracer (exit
 //     status 1) has nothing to stop, sync or uninstall; any other failure
 //     is an error, never "not installed";
@@ -27,9 +29,9 @@ import (
 //     end cleanly), then collect it as collect does;
 //  4. when the host goes (rm HOST, or its last project): every other
 //     project directory under /opt/iormesh/traces that the registry or
-//     deploy's record lists for the host is stopped and collected too,
-//     since uninstall would stop it and delete what it publishes. A
-//     directory neither lists (started by hand, or planted by a
+//     deploy's record (tombstones included) lists for the host is
+//     stopped and collected too, since uninstall would stop it and
+//     delete what it publishes. A directory neither lists (started by hand, or planted by a
 //     compromised server) is not collected: the store's project comes
 //     from the controller, never from the server, or a server could put
 //     segments into another project's store. Then nothing may be left: a
@@ -96,12 +98,42 @@ func rmCommand(args []string, e env) error {
 		return r.teardown(ctx, host, sc.projects, sc.hostGoes)
 	})
 	if errors.Is(err, errUnreachable) {
-		_, _ = fmt.Fprintf(e.stderr, "iormeshctl: warning: %s: %s; its traces and tracer stay on it, "+
-			"dropping it from the registry only\n", host, errText(err))
+		return unregisterUnreachable(*regPath, e, host, *name, sc, err)
 	} else if err != nil {
 		return fmt.Errorf("%s: %w (registry unchanged)", host, err)
 	}
 	return unregister(*regPath, e, host, *name)
+}
+
+// unregisterUnreachable drops what rm removes from the registry when the
+// host cannot be reached, warning that its tracer and traces stay on it.
+// Deploy's record keeps the removed projects as tombstones, so a later rm
+// of the host (still registered, or added again) collects them as its own
+// rather than refusing over them as foreign directories.
+func unregisterUnreachable(regPath string, e env, host, name string, sc rmTarget, cause error) error {
+	what, later := "it", "add it again and rm it to collect them"
+	if name != "" {
+		what = "project " + name
+		if !sc.hostGoes {
+			later = "a later rm " + host + " still collects it"
+		}
+	}
+	_, _ = fmt.Fprintf(e.stderr, "iormeshctl: warning: %s: %s; its traces and tracer stay on it, "+
+		"dropping %s from the registry only; %s\n", host, errText(cause), what, later)
+	if err := editRegistry(regPath, e, func(r *federate.Registry) error {
+		return r.Remove(host, name)
+	}, "removed "+removedWhat(host, name)); err != nil {
+		return err
+	}
+	return editDeployed(e, func(r deployedRecord) bool { return r.drop(host, sc.projects) })
+}
+
+// removedWhat names what rm removed in the registry's edit message.
+func removedWhat(host, name string) string {
+	if name == "" {
+		return host
+	}
+	return host + " project " + name
 }
 
 // rmTarget is what one rm removes, as rmScope works it out.
@@ -251,26 +283,34 @@ func (r remover) sweep(ctx context.Context, t federate.Transport, host string, d
 	if err != nil {
 		return fmt.Errorf("listing %s: %w", confinedTraceDir, err)
 	}
-	var others []string
+	var others, skipped []string
 	for _, dir := range lines(out) {
 		name := strings.TrimPrefix(dir, confinedTraceDir+"/")
 		// A name no label rule admits cannot be a local path component,
 		// and a project the controller never listed for this host is not
 		// the server's to choose; the files of either show up as
-		// leftovers below.
-		if project.Valid(name) && !slices.Contains(done, name) && slices.Contains(r.known, name) {
+		// leftovers below, the unlisted project named there.
+		if !project.Valid(name) || slices.Contains(done, name) {
+			continue
+		}
+		if slices.Contains(r.known, name) {
 			others = append(others, name)
+		} else {
+			skipped = append(skipped, name)
 		}
 	}
 	if err := r.syncProjects(ctx, t, host, others); err != nil {
 		return err
 	}
-	return r.leftovers(ctx, t, host)
+	return r.leftovers(ctx, t, host, skipped)
 }
 
 // leftovers lists the segment files still under the trace dir — in a
 // ready/ or active — and refuses the uninstall over them unless -force.
-func (r remover) leftovers(ctx context.Context, t federate.Transport, host string) error {
+// The refusal names the project directories of skipped (the sweep's
+// unlisted projects) that hold such files, so the operator can tell them
+// from a failed sync.
+func (r remover) leftovers(ctx context.Context, t federate.Transport, host string, skipped []string) error {
 	out, err := t.Run(ctx, "find", confinedTraceDir, "-mindepth", "2", "-type", "f",
 		"(", "-path", "*/"+readyDir+"/*", "-o", "-name", ".active-*", ")", "-print")
 	if err != nil {
@@ -285,12 +325,29 @@ func (r remover) leftovers(ctx context.Context, t federate.Transport, host strin
 	if len(left) > len(shown) {
 		msg += " …"
 	}
+	if names := holding(skipped, left); len(names) > 0 {
+		msg += fmt.Sprintf("; project dirs not registered for this host, not collected: %s "+
+			"(re-add them to collect them)", strings.Join(names, " "))
+	}
 	if r.force {
 		_, _ = fmt.Fprintf(r.e.stderr, "iormeshctl: warning: %s: %s; -force: uninstalling, they are lost\n",
 			host, termsafe.String(msg))
 		return nil
 	}
 	return fmt.Errorf("%s; nothing uninstalled (rm -force uninstalls anyway and loses them)", msg)
+}
+
+// holding is the projects whose directory under the trace dir holds one
+// of the files.
+func holding(projects, files []string) []string {
+	var hold []string
+	for _, p := range projects {
+		prefix := confinedTraceDir + "/" + p + "/"
+		if slices.ContainsFunc(files, func(f string) bool { return strings.HasPrefix(f, prefix) }) {
+			hold = append(hold, p)
+		}
+	}
+	return hold
 }
 
 // lines splits a remote command's output into its non-empty lines.
@@ -307,22 +364,20 @@ func lines(out []byte) []string {
 // unregister drops host, or its project name, from the registry and from
 // deploy's record.
 func unregister(regPath string, e env, host, name string) error {
-	what := "removed " + host
-	if name != "" {
-		what += " project " + name
-	}
 	if err := editRegistry(regPath, e, func(r *federate.Registry) error {
 		return r.Remove(host, name)
-	}, what); err != nil {
+	}, "removed "+removedWhat(host, name)); err != nil {
 		return err
 	}
-	return forgetDeployed(e, host, name)
+	// Forgetting the host drops its tombstones too: the teardown just
+	// collected and uninstalled everything on it.
+	return editDeployed(e, func(r deployedRecord) bool { return r.forget(host, name) })
 }
 
-// forgetDeployed drops what rm removed from deploy's record too, so a
-// host or project registered again later starts afresh. The file is
-// rewritten only when it held the entry.
-func forgetDeployed(e env, host, name string) error {
+// editDeployed applies change to deploy's record, so a host or project
+// registered again later starts afresh. The file is rewritten only when
+// change reports it changed something.
+func editDeployed(e env, change func(deployedRecord) bool) error {
 	path, err := e.deployed()
 	if err != nil {
 		return err
@@ -331,7 +386,7 @@ func forgetDeployed(e env, host, name string) error {
 	if err != nil {
 		return err
 	}
-	if !r.forget(host, name) {
+	if !change(r) {
 		return nil
 	}
 	return r.save(path)
