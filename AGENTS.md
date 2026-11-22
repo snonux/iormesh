@@ -21,8 +21,9 @@ same commit.
 
 Run everything through Mage — `mage generate`, `mage build`,
 `mage test`, `mage testRace`, `mage vet`, `mage lint`,
-`mage fmtCheck`, `mage workloadTest`, `mage bpfRootTest` and `mage integrationTest`
-(both root, `sudo -n`; see [docs/testing.md](docs/testing.md)). Bare
+`mage fmtCheck`, `mage workloadTest`, `mage bpfRootTest` and
+`mage integrationTest` (both root, `sudo -n`; see
+[docs/testing.md](docs/testing.md)). Bare
 `go test`/`go vet` cannot build the packages that import
 libbpfgo. Prerequisites (libbpfgo at
 `../libbpfgo`, pinned tag, clang, bpftool, `sudo -n`) and the

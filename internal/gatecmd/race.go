@@ -13,9 +13,11 @@ import "slices"
 //   - iormesh/internal/generate took 2099 s under -race (2026-11-22). Its
 //     tests compile and run many small C harness programs and its Go code
 //     starts no goroutine, so the detector has nothing to watch there.
-//   - iormesh/internal/ctl took 947 s under -race. Neither its code nor
-//     its tests start a goroutine or call t.Parallel; the packages it
-//     drives (segment, federate, k8s) are race-checked by their own tests.
+//   - iormesh/internal/ctl took 947 s under -race. Its code starts no
+//     goroutine and no test calls t.Parallel; the tests' one goroutine
+//     is runBounded's watchdog (collect_test.go, task bi4), synchronised
+//     by a channel. The packages it drives (segment, federate, k8s) are
+//     race-checked by their own tests.
 //
 // Every package that starts goroutines itself (acceptance, bpf, cli,
 // stacks) stays in, which is what -race is for. A deny-list rather than a

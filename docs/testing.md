@@ -86,7 +86,7 @@ GOMAXPROCS=4, nice 15, a loaded host):
 | package | under `-race` | in the race gate |
 |---|---|---|
 | `internal/generate` | 2099 s | no: its tests compile and run C harness programs, and its Go code starts no goroutine |
-| `internal/ctl` | 947 s | no: neither its code nor its tests start a goroutine or call `t.Parallel`; what it drives (segment, federate, k8s) is race-checked in those packages |
+| `internal/ctl` | 947 s | no: its code starts no goroutine and no test calls `t.Parallel` (the tests' one goroutine is `runBounded`'s watchdog, synchronised by a channel); what it drives (segment, federate, k8s) is race-checked in those packages |
 | every other package | under 60 s each | yes, among them all that start goroutines: acceptance, bpf, cli, stacks |
 
 So the gate costs a few minutes, not the 50 the whole module
