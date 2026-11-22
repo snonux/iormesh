@@ -22,9 +22,10 @@ import (
 // completed after it.
 //
 // Connection: the record names the request's socket ends, as far as the
-// library still held them. The joiner keeps the ends of every socket
-// event that passed with a conn_id (tcp_state, connect, accept carry
-// them) and looks the request's up: both ends, else the remote, else the
+// library still held them. The joiner keeps the ends of every TCP socket
+// event that passed with a conn_id (tcp_state, connect, accept; a local
+// port 0 is no end), forgets all of a connection's Retain after its
+// close, and looks the request's up: both ends, else the remote, else the
 // local one (a server's local end reads as unknown once the exchange
 // closed the connection; a client's remote is known only for a literal
 // IP host). A request whose ends match nothing keeps no conn_id.
@@ -67,6 +68,14 @@ type connPair struct {
 	local, remote netip.AddrPort
 }
 
+// connKey is a connection as one process holds it: the unit the index
+// forgets on a close (a loopback connection's two ends in two processes
+// share the conn_id but close apart).
+type connKey struct {
+	pid  uint32
+	conn string
+}
+
 // connSeq keys a request counter: a connection's requests as one end of
 // it saw them. The side matters when both ends are one process (a
 // same-JVM loopback call): they share the conn_id, and one counter would
@@ -87,9 +96,8 @@ const seqStopped = ^uint32(0)
 // close: an http event of its last request may be emitted after the
 // close's event passed.
 type closedConn struct {
-	pair connPair
-	conn string
-	at   uint64
+	key connKey
+	at  uint64
 }
 
 // connSet is the connections seen on one key (an end or both): a lookup
@@ -105,40 +113,74 @@ type connIndex struct {
 	byRemote map[connEnd]connSet
 	seq      map[connSeq]uint32
 	closed   []closedConn
+	// keys is every pair a connection was indexed under — its tuple may
+	// change within one life (a wildcard local address at SYN_SENT, the
+	// real one from ESTABLISHED on) — so purge forgets them all.
+	keys map[connKey][]connPair
 }
 
 func newConnIndex() *connIndex {
 	return &connIndex{byPair: map[connPair]connSet{}, byLocal: map[connEnd]connSet{},
-		byRemote: map[connEnd]connSet{}, seq: map[connSeq]uint32{}}
+		byRemote: map[connEnd]connSet{}, seq: map[connSeq]uint32{},
+		keys: map[connKey][]connPair{}}
 }
 
-// observe indexes a socket event's ends under its conn_id; a closed
+// observe indexes a TCP socket event's ends under its conn_id; a closed
 // socket's entries stay until purge.
+//
+// Only the kinds a TCP connection alone names its ends with are indexed:
+// tcp_state, connect, accept (task 1j4). A UDP flow's sendto/recvfrom
+// also carries a conn_id and both ends, but no CLOSE ever forgets it, so
+// its local port would stay a second candidate for the TCP connection
+// that later reuses the port, and the lookup by that local end would
+// answer nothing. An HTTP request runs over TCP; a TCP socket's own
+// sendto/recvfrom adds nothing its tcp_state events do not.
 func (x *connIndex) observe(ev *schema.Event) {
 	a := ev.Args
-	if ev.ConnID == "" || a.LocalAddr == nil || a.LocalPort == nil {
+	if ev.ConnID == "" || !tcpEndsEvent(ev.Event) || a.LocalAddr == nil || a.LocalPort == nil {
 		return
 	}
 	local := eventEnd(*a.LocalAddr, *a.LocalPort)
+	if local.Port() == 0 {
+		// Every outbound connect's SYN_SENT names the local port 0 (not
+		// assigned yet): no end of this connection, and a key all of a
+		// process's connects would share for ever.
+		local = netip.AddrPort{}
+	}
 	remote := netip.AddrPort{}
 	if a.RemoteAddr != nil && a.RemotePort != nil {
 		remote = eventEnd(*a.RemoteAddr, *a.RemotePort)
 	}
-	p := connPair{ev.PID, local, remote}
-	x.add(p, ev.ConnID)
+	k := connKey{ev.PID, ev.ConnID}
+	x.add(k, connPair{ev.PID, local, remote})
 	if ev.Event == schema.KindTCPState && a.SockState != nil && *a.SockState == "CLOSE" {
-		x.closed = append(x.closed, closedConn{pair: p, conn: ev.ConnID, at: ev.BootNS})
+		x.closed = append(x.closed, closedConn{key: k, at: ev.BootNS})
 	}
 }
 
-func (x *connIndex) add(p connPair, conn string) {
+// tcpEndsEvent reports whether an event of this kind with a conn_id and
+// ends is a TCP socket's: tcp_state always, connect and accept for an inet
+// socket (a unix one names no addresses, a datagram connect no conn_id).
+func tcpEndsEvent(kind string) bool {
+	return kind == schema.KindTCPState || kind == schema.KindConnect || kind == schema.KindAccept
+}
+
+// add indexes p under k's conn_id by every end it knows and remembers p
+// as one of k's pairs.
+func (x *connIndex) add(k connKey, p connPair) {
+	if !p.local.IsValid() && !p.remote.IsValid() {
+		return
+	}
+	if !slices.Contains(x.keys[k], p) {
+		x.keys[k] = append(x.keys[k], p)
+	}
 	if p.local.IsValid() {
-		addTo(x.byLocal, connEnd{p.pid, p.local}, conn)
+		addTo(x.byLocal, connEnd{p.pid, p.local}, k.conn)
 	}
 	if p.remote.IsValid() {
-		addTo(x.byRemote, connEnd{p.pid, p.remote}, conn)
+		addTo(x.byRemote, connEnd{p.pid, p.remote}, k.conn)
 		if p.local.IsValid() {
-			addTo(x.byPair, p, conn)
+			addTo(x.byPair, p, k.conn)
 		}
 	}
 }
@@ -179,17 +221,23 @@ func only(set connSet) string {
 	return ""
 }
 
-// purge forgets the sockets closed more than retain before now, and
-// their request counters.
+// purge forgets the sockets closed more than retain before now under
+// every pair they were indexed by, and their request counters. Like the
+// counters, the unit is the conn_id in one process: a same-JVM loopback
+// connection's two ends are forgotten with the first close (a later
+// event of the other end indexes it again until its own close).
 func (x *connIndex) purge(now, retain uint64) {
 	n := 0
 	for ; n < len(x.closed) && x.closed[n].at+retain < now; n++ {
-		c := x.closed[n]
-		removeFrom(x.byPair, c.pair, c.conn)
-		removeFrom(x.byLocal, connEnd{c.pair.pid, c.pair.local}, c.conn)
-		removeFrom(x.byRemote, connEnd{c.pair.pid, c.pair.remote}, c.conn)
-		delete(x.seq, connSeq{c.pair.pid, c.conn, false})
-		delete(x.seq, connSeq{c.pair.pid, c.conn, true})
+		k := x.closed[n].key
+		for _, p := range x.keys[k] {
+			removeFrom(x.byPair, p, k.conn)
+			removeFrom(x.byLocal, connEnd{p.pid, p.local}, k.conn)
+			removeFrom(x.byRemote, connEnd{p.pid, p.remote}, k.conn)
+		}
+		delete(x.keys, k)
+		delete(x.seq, connSeq{k.pid, k.conn, false})
+		delete(x.seq, connSeq{k.pid, k.conn, true})
 	}
 	x.closed = slices.Delete(x.closed, 0, n)
 }
