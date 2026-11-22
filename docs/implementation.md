@@ -1251,12 +1251,14 @@ scenarios landing first (principle #1).
    socket-activated listener). Task mh4 follows the port across
    restarts (decision #23, `internal/cli/portfollow.go`): the
    session keeps each start owner's `target.Owner` (exe without
-   " (deleted)", effective uid) whose uid is the earliest-started
-   owner's (task qj4); once its live set is empty,
-   `session.ended` re-resolves the port every
+   " (deleted)", effective uid) whose exe is the earliest-started
+   owner's (task qj4: a privilege-separated server's root master
+   and its workers under another uid are all kept, a different
+   program with an inherited fd is not); once its live set is
+   empty, `session.ended` re-resolves the port every
    `portFollowEvery` (1s) for `-listen-grace` (default 2m) via
-   `ListenHolders` (each pid with the start time read before its
-   fd table), adopts a holder with a remembered key whose pid
+   `ListenHolders` (each holding pid with the start time read
+   before a second read of its fd table), adopts a holder with a remembered key whose pid
    still has the listed start time (`AddTarget`, the liveness
    re-check of `addRunning`, `Correlator.Seed` → an `attach` of
    the new incarnation) and names refused holders once on

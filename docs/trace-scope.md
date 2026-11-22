@@ -17,9 +17,12 @@ event families `iormesh run -trace-families` adds (see
   process-name pattern auto-detect restarts and follow the app
   to its new PID. Sessions bound to a listening port
   (`-listen-port`) follow the port to a restarted owner, within
-  `-listen-grace`, if it runs the same executable under the same
-  uid as the original owner and still is the process the port
-  listing saw (decision #23). A socket-activated port that only
+  `-listen-grace`, if it runs the original owner's executable
+  under a uid one of the original holders had, and still is the
+  process the port listing saw (decision #23). A
+  privilege-separated server — a root master and workers of the
+  same binary under their own uid — is followed whole; another
+  program that only inherited the listener fd is not. A socket-activated port that only
   systemd holds — the service is idle, not running — is refused
   at start, also by `expand -apply`: systemd itself is never a
   target, since tracing it would follow every service it

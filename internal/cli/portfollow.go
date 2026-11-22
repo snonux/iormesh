@@ -37,8 +37,8 @@ type portFollow struct {
 	port  uint16
 	grace time.Duration
 	// owners are the keys (executable, effective uid) of the processes
-	// the session started with, under the original holder's uid
-	// (remember): a later holder of the port is adopted only if it is
+	// the session started with that run the original holder's
+	// executable (remember): a later holder of the port is adopted only if it is
 	// one of them again. Empty when none could be read — then nothing
 	// is recognised and the session ends as before.
 	owners map[target.Owner]bool
@@ -58,15 +58,19 @@ func newPortFollow(cfg runConfig) *portFollow {
 
 // remember records the owner keys of the processes the session starts
 // with. One that cannot be read is no key: its restart is not followed.
-// Only keys under the original holder's uid count (task qj4): the
+// Only keys of the original holder's executable count (task qj4): the
 // original is the earliest-started holder, the one that most likely
-// bound the port; a process under another uid that merely inherited the
-// listener fd (a root helper, a worker that dropped privileges) would
-// otherwise widen which programs a later adoption accepts.
+// bound the port. Another program that merely inherited the listener fd
+// (a root helper) would otherwise widen which programs a later adoption
+// accepts. The uid is not restricted: a privilege-separated server
+// (nginx, httpd: a root master, workers of the same binary under their
+// own uid, all holding the listener) must have its restarted workers
+// adopted too, since they fork before the next re-resolve and
+// fork-following never picks up a process that already exists.
 func (f *portFollow) remember(pids []uint32) {
 	keys := map[uint32]target.Owner{}
 	var first uint64
-	var uid uint32
+	var exe string
 	for _, pid := range pids {
 		o, err := procOwner(pid)
 		start := processStart(pid)
@@ -75,11 +79,11 @@ func (f *portFollow) remember(pids []uint32) {
 		}
 		keys[pid] = o
 		if first == 0 || start < first {
-			first, uid = start, o.UID
+			first, exe = start, o.Exe
 		}
 	}
 	for _, o := range keys {
-		if o.UID == uid {
+		if o.Exe == exe {
 			f.owners[o] = true
 		}
 	}

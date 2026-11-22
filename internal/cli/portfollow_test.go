@@ -240,12 +240,42 @@ func TestPortFollowPIDReuse(t *testing.T) {
 	_ = c.Close()
 }
 
-// TestPortFollowRemembersOriginalUID (task qj4): at start the port is
+// TestPortFollowPrivilegeSeparated (task qj4): a privilege-separated
+// server — a root master and workers of the same binary under another
+// uid, all holding the listener — is followed whole across a restart:
+// the new master and its workers are adopted, since workers forked
+// before the re-resolve are never picked up by fork-following.
+func TestPortFollowPrivilegeSeparated(t *testing.T) {
+	f := newFakePort(t)
+	master := target.Owner{Exe: "/usr/sbin/nginx", UID: 0}
+	worker := target.Owner{Exe: "/usr/sbin/nginx", UID: 995}
+	f.live[10], f.owners[10], f.starts[10] = true, master, 100
+	f.live[11], f.owners[11], f.starts[11] = true, worker, 200
+	f.holders = []uint32{10, 11}
+	tr := newFakeTracer()
+	c := testCorrelator(t, t.TempDir())
+	s, _ := portSession(t, f, c, tr, time.Minute, 10, 11)
+	f.live[10], f.live[11], f.holders = false, false, nil
+	mustEnded(t, s, false, "server gone, within the grace")
+
+	f.now = f.now.Add(2 * time.Second)
+	f.live[24], f.owners[24] = true, master
+	f.live[25], f.owners[25] = true, worker
+	f.holders = []uint32{24, 25}
+	mustEnded(t, s, false, "restarted server")
+	if !slices.Equal(tr.added, []uint32{24, 25}) {
+		t.Fatalf("added %v; want the restarted master and worker [24 25]", tr.added)
+	}
+	_ = c.Close()
+}
+
+// TestPortFollowRemembersOriginalExe (task qj4): at start the port is
 // held by the app (the earliest-started holder, uid 1000) and by a helper
-// running as root that inherited the listener fd. Only keys under the
-// original holder's uid are remembered, so after the app exits a root
-// helper binding the port is not adopted; the restarted app is.
-func TestPortFollowRemembersOriginalUID(t *testing.T) {
+// of another program, running as root, that inherited the listener fd.
+// Only keys of the original holder's executable are remembered, so after
+// the app exits the root helper binding the port is not adopted; the
+// restarted app is.
+func TestPortFollowRemembersOriginalExe(t *testing.T) {
 	f := newFakePort(t)
 	app := target.Owner{Exe: "/usr/bin/app", UID: 1000}
 	helper := target.Owner{Exe: "/usr/bin/helper", UID: 0}
@@ -263,7 +293,7 @@ func TestPortFollowRemembersOriginalUID(t *testing.T) {
 	f.holders = []uint32{23}
 	mustEnded(t, s, false, "root helper on the port")
 	if len(tr.added) != 0 {
-		t.Fatalf("added %v; a holder under another uid than the original widened the follow", tr.added)
+		t.Fatalf("added %v; a holder of another program than the original widened the follow", tr.added)
 	}
 
 	f.now = f.now.Add(2 * time.Second)

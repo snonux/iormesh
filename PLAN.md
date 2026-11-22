@@ -2810,13 +2810,19 @@ deferred.
   ignored, so a package update still matches) under the same
   effective uid as a process the session started with: the same
   port alone is not the same app. Task qj4 tightens both halves:
-  only start holders under the uid of the earliest-started
-  holder (the one that most likely bound the port) are
-  remembered, so a process that merely inherited the listener fd
-  under another uid does not widen what is accepted; and a
-  holder is adopted only while its pid still has the start time
-  the port listing read with its fd table, so a pid reused in
-  between is never mistaken for the holder. An adopted holder
+  only start holders running the executable of the
+  earliest-started holder (the one that most likely bound the
+  port) are remembered, so another program that merely inherited
+  the listener fd (a root helper) does not widen what is
+  accepted. Their uids are kept as they are: a
+  privilege-separated server (nginx, httpd: a root master and
+  workers of the same binary under their own uid, all holding the
+  listener) is followed whole, since the restarted workers fork
+  before the next re-resolve and fork-following never picks up a
+  process that already exists. And a holder is adopted only
+  while its pid still has the start time the port listing read
+  with its fd table, so a pid reused in between is never
+  mistaken for the holder. An adopted holder
   gets an `attach` event of its own incarnation and the session
   goes on; stderr names it. No match within the grace ends the
   session `targets_exited`, stderr saying no new owner appeared.

@@ -98,10 +98,10 @@ func (p ProcFS) ListenOwners(port uint16) ([]uint32, error) {
 }
 
 // Holder is a process holding a listening socket, as one listing saw it:
-// its pid and the start time read just before its fd table. A port
-// session adopts the holder only while the pid still has that start time
-// (decision #23, task qj4): a pid reused after the listing by a process
-// that does not hold the port is not the holder.
+// its pid and the start time read before the last read of its fd table.
+// A port session adopts the holder only while the pid still has that
+// start time (decision #23, task qj4): a pid reused after the listing by
+// a process that does not hold the port is not the holder.
 type Holder struct {
 	PID     uint32
 	StartNS uint64
@@ -175,10 +175,12 @@ func listenInodes(table string, port uint16, inodes map[string]bool) error {
 
 // socketOwners returns the processes with an fd on one of the socket
 // inodes. Processes that vanish, hide their fds or have no readable start
-// time are skipped. The start time is read before the fd table: if the
-// pid is reused in between, the fds are the new process's and the start
-// time the old one's, a mismatch adoption refuses (Holder) rather than a
-// stranger passed off as the holder.
+// time are skipped. Only a pid whose fds hold the socket has its start
+// time read (a resolve runs every second while a port session waits),
+// and the fd table is read again after it: a holder confirmed after its
+// start time was read is that incarnation, or — reused in between — a
+// new process with the old start time, a mismatch adoption refuses
+// (Holder) rather than a stranger passed off as the holder.
 func (p ProcFS) socketOwners(inodes map[string]bool) ([]Holder, error) {
 	pids, err := p.PIDs()
 	if err != nil {
@@ -186,13 +188,14 @@ func (p ProcFS) socketOwners(inodes map[string]bool) ([]Holder, error) {
 	}
 	var owners []Holder
 	for _, pid := range pids {
-		st, err := p.Stat(pid)
-		if err != nil || st.StartNS == 0 {
+		if !p.holdsSocket(pid, inodes) {
 			continue
 		}
-		if p.holdsSocket(pid, inodes) {
-			owners = append(owners, Holder{PID: pid, StartNS: st.StartNS})
+		st, err := p.Stat(pid)
+		if err != nil || st.StartNS == 0 || !p.holdsSocket(pid, inodes) {
+			continue
 		}
+		owners = append(owners, Holder{PID: pid, StartNS: st.StartNS})
 	}
 	return owners, nil
 }
