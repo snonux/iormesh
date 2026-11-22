@@ -24,3 +24,4 @@ Nothing has been released yet. What exists, by milestone:
 - M7: Kubernetes sidecar and debug-container deployment.
 - `mage release`: signed, reproducible per-arch archives with
   checksums (docs/build.md, "Releases").
+- The MIT licence (`LICENSE`).

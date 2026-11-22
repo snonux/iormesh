@@ -24,8 +24,8 @@ import (
 )
 
 // releaseExtras are packed into every archive when the repository has
-// them: CHANGELOG.md, and LICENSE once the owner has chosen the licence
-// (task rh4). A missing one is noted, not fatal.
+// them: CHANGELOG.md and LICENSE (MIT, task rh4). A missing one is
+// noted, not fatal.
 var releaseExtras = []string{"CHANGELOG.md", "LICENSE"}
 
 // Release cuts the release of the tagged HEAD with engine (docker or

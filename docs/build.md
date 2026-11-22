@@ -377,9 +377,8 @@ ls dist/release/0.1.0/
   `iormesh-linux-<arch>`, `iormesh-agent.jar`,
   `iormeshctl-linux-<arch>`, `iormeshctl-darwin-<arch>`, each
   with its `.minisig`; `minisign.pub`; `CHANGELOG.md`; `LICENSE`
-  once the repository has one (the licence is the owner's choice,
-  still open). Each of the last two is packed when present, and
-  a missing one is noted. Each artifact is verified against its signature at the
+  (MIT). Each of the last two is packed when present, and a
+  missing one is noted. Each artifact is verified against its signature at the
   release version before it is packed, and the verified bytes
   are the packed ones.
 - **Reproducible**: entries sorted, owner root 0/0, modes

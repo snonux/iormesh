@@ -4182,8 +4182,8 @@ published by it; uploading is a separate, human step.
   jar `iormesh-agent.jar`, the controllers
   `iormeshctl-{linux,darwin}-<arch>`, each with its
   `.minisig`, plus `minisign.pub` (the release public key),
-  `CHANGELOG.md`, and `LICENSE` once the repository has one
-  (each extra is packed when present). Every artifact is
+  `CHANGELOG.md`, and `LICENSE` (each extra is packed when
+  present). Every artifact is
   verified against its signature at the release version before
   it is packed, and the verified bytes are the packed ones.
 - **Checksums**: `SHA256SUMS` (sha256sum format) over the
@@ -4204,8 +4204,14 @@ published by it; uploading is a separate, human step.
   `~/.config/iormesh/minisign.pub` lets `iormeshctl deploy`
   check every build again before it pushes. Details:
   [docs/build.md](docs/build.md), "Releases".
-- **Open**: the licence (LICENSE) is the owner's choice; the
-  BPF object declares `Dual BSD/GPL`.
+- **Licence** (owner, 2026-11-22): MIT for the whole
+  repository (`LICENSE`). The BPF object keeps declaring
+  `Dual BSD/GPL`: the kernel reads that string to allow
+  GPL-only helpers, and MIT code is compatible with both.
+  Third-party parts keep their own licences: ObjectWeb ASM in
+  the agent (`agent/third_party/asm/LICENSE.txt`), libbpf linked
+  into the tracer (LGPL-2.1 OR BSD-2-Clause), libbpfgo
+  (Apache-2.0).
 
 ## Component map
 
