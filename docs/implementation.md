@@ -1395,6 +1395,24 @@ scenarios landing first (principle #1).
      so those are known; the pipes it hands its spawn helper stay
      unknown and get a new generation after the exec (an unknown
      inherited fd above 2 also loses its path and socket).
+   - Exit (`sched_process_exit` with `group_dead`, task xi4,
+     `internal/correlate/reap.go`): the process is marked dead at
+     once, so unlinks and renames skip it and a rename after its
+     death gives it no `opened` edge. Its table goes one fuse
+     window later: a sibling thread's folded read/write records,
+     flushed at that thread's own exit, can trail the first
+     `group_dead` record (two threads may both report it on el9's
+     fallback) and still need their fd instance. Its
+     identity (incarnation, comm) stays while a TCP socket it
+     owns is still open — the kernel reports the socket's last
+     transitions after the exit, owned by the dead pid, and their
+     `fd_gen` and conn id live on the socket — then for one fuse
+     window, and is deleted after that. A new process under the
+     pid replaces the state at its `task_newtask` or attach as
+     before. Tests: `TestDeadChildrenLeaveNoState`,
+     `TestLateTCPStateOfDeadProcess`, `TestPIDReusedBeforeReap`,
+     `TestSiblingFlushAfterGroupDead`,
+     `TestRequeuedDeadProcessWaitsLatestWindow`.
    - `close_range` is not attached: the JDK 25 child closes its
      fds one by one through `close` (strace-measured). A
      program using it keeps those fds in the table.
