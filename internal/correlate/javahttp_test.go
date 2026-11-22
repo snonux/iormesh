@@ -1,6 +1,7 @@
 package correlate
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -308,6 +309,63 @@ func TestConnIndex(t *testing.T) {
 	x.purge(31+defaultRetain, defaultRetain)
 	if got := x.lookup(1, "", "10.0.0.2:5000"); got != "" || len(x.closed) != 0 {
 		t.Errorf("still known after Retain: %q", got)
+	}
+}
+
+// sockEvent is a socket event of pid 1 for the connIndex tests: kind with
+// conn, a TCP state (empty for none) and the two ends.
+func sockEvent(kind, conn, state string, at uint64, local string, lport uint16,
+	remote string, rport uint16) *schema.Event {
+	e := &schema.Event{PID: 1, Event: kind, ConnID: conn, BootNS: at}
+	e.Args.LocalAddr, e.Args.LocalPort = &local, &lport
+	e.Args.RemoteAddr, e.Args.RemotePort = &remote, &rport
+	if state != "" {
+		e.Args.SockState = &state
+	}
+	return e
+}
+
+// TestConnIndexTCPOnly: a UDP flow on a local port leaves the port to the
+// TCP connection that reuses it (task 1j4) — the flow's datagram events
+// are no key of the index, which only an HTTP request's TCP connection
+// may answer.
+func TestConnIndexTCPOnly(t *testing.T) {
+	x := newConnIndex()
+	x.observe(sockEvent(schema.KindRecvfrom, "u1", "", 10, "10.0.0.1", 45678, "10.0.0.53", 53))
+	x.observe(sockEvent(schema.KindSendto, "u1", "", 11, "10.0.0.1", 45678, "10.0.0.53", 53))
+	x.observe(sockEvent(schema.KindTCPState, "c1", "ESTABLISHED", 60_000_000_000,
+		"10.0.0.1", 45678, "10.0.0.2", 80))
+	if got := x.lookup(1, "10.0.0.1:45678", ""); got != "c1" {
+		t.Errorf("local end after a UDP flow on it gave %q, want c1", got)
+	}
+	if got := x.lookup(1, "", "10.0.0.53:53"); got != "" {
+		t.Errorf("the UDP flow's remote end gave %q, want none", got)
+	}
+}
+
+// TestConnIndexForgetsClosed: every outbound connect's SYN_SENT names a
+// local port 0, which is no end (task 1j4), and a closed connection is
+// forgotten under every key it was indexed by — the index does not grow
+// with the connections a session closed.
+func TestConnIndexForgetsClosed(t *testing.T) {
+	x := newConnIndex()
+	const n = 1000
+	for i := range n {
+		conn, at, port := fmt.Sprintf("c%d", i), uint64(i*100), uint16(30000+i)
+		x.observe(sockEvent(schema.KindTCPState, conn, "SYN_SENT", at, "10.0.0.1", 0, "10.0.0.2", 80))
+		x.observe(sockEvent(schema.KindConnect, conn, "", at+1, "10.0.0.1", port, "10.0.0.2", 80))
+		x.observe(sockEvent(schema.KindTCPState, conn, "ESTABLISHED", at+1, "10.0.0.1", port,
+			"10.0.0.2", 80))
+		x.observe(sockEvent(schema.KindTCPState, conn, "CLOSE", at+2, "10.0.0.1", port,
+			"10.0.0.2", 80))
+	}
+	if got := x.lookup(1, "10.0.0.1:0", ""); got != "" {
+		t.Errorf("local port 0 gave %q, want none", got)
+	}
+	x.purge(n*100+defaultRetain, defaultRetain)
+	if len(x.byPair)+len(x.byLocal)+len(x.byRemote)+len(x.keys) != 0 {
+		t.Errorf("after the purge: %d pairs, %d local, %d remote, %d conns still indexed",
+			len(x.byPair), len(x.byLocal), len(x.byRemote), len(x.keys))
 	}
 }
 
