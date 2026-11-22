@@ -48,15 +48,49 @@ final class Bridge {
         return new Bridge(hooks, null);
     }
 
-    /** Appends the bridge (path, or the nested jar if null) and links it. */
+    /**
+     * Appends the bridge (path, or the nested jar if null) and links it —
+     * unless an earlier load in this JVM appended one already (task 8j4).
+     * Then its Hooks is returned as is: the bootstrap loader defined it
+     * from that first jar and would never read a second one, while each
+     * append would cost the JVM one more descriptor, mapping and
+     * search-path entry for its life (and the extraction's I/O would be
+     * bracketed as the app's, the JDK being rewritten by then). The
+     * caller's claim then tells a repeated load (resync) from a retry
+     * after an install that failed and released its claim.
+     */
     static Bridge install(Instrumentation inst, String path) throws Exception {
+        Class<?> loaded = installed();
+        if (loaded != null) {
+            return new Bridge(loaded, null);
+        }
         Path extracted = path != null ? null : extractNested();
         Path jar = path != null ? Path.of(path) : extracted;
-        inst.appendToBootstrapClassLoaderSearch(new JarFile(jar.toFile()));
+        // The JVM takes only the file's name and opens the jar itself;
+        // this handle would otherwise hold a second descriptor until a GC.
+        try (JarFile file = new JarFile(jar.toFile())) {
+            inst.appendToBootstrapClassLoaderSearch(file);
+        }
         Class<?> hooks = Class.forName(HOOKS, true, null);
         inst.redefineModule(Object.class.getModule(), Set.of(hooks.getModule()),
                 Map.of(), Map.of(), Set.of(), Map.of());
         return new Bridge(hooks, extracted);
+    }
+
+    /**
+     * The bootstrap loader's Hooks if an earlier agent load appended the
+     * bridge, else null. Not initialized here: a found Hooks was
+     * initialized by that load. A failed lookup is not remembered by the
+     * bootstrap loader, so the append that follows still makes it load.
+     * That load also made java.base read the bridge's module, so nothing
+     * is redefined again.
+     */
+    private static Class<?> installed() {
+        try {
+            return Class.forName(HOOKS, false, null);
+        } catch (ClassNotFoundException e) {
+            return null;
+        }
     }
 
     /**
