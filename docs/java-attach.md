@@ -155,6 +155,22 @@ older agent leaves such a thread unnamed and unflagged, like one
 whose THREAD record was dropped). A virtual thread idle that long
 then gets a second, identical row in the thread table.
 
+Between sessions the agent goes dormant (task ej4, PLAN.md #27).
+Once the ring's tail has stood still for 10 s while the ring kept
+dropping records (it is full; the watermark thread's own
+watermarks drop when the application is quiet) and no reader
+bumped the epoch, the watermark thread sets a flag that every
+hook reads first among its work: a dormant hook walks no stack and
+runs no HTTP probe, and counts the record it skipped as dropped
+in the ring header, as the full ring would have, so the watermarks
+stay honest about the time it slept. A DNS lookup counts nothing
+and is recorded at its next resolution. An awake hook pays one
+volatile read for this. The flag clears as soon as the tail moves
+(a stalled tracer draining again) or the epoch does (a new
+reader), or the agent is loaded again, and waking goes through
+the same resync as a new reader. Without the watermark thread
+(`watermark=0`) the agent never goes dormant.
+
 Mixed versions: the epoch sits in what was zero padding, so the
 ring format version did not change. An agent older than 5j4 never
 reads the word: under a newer tracer its first session works and
