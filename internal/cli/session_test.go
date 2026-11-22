@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -250,12 +251,12 @@ func TestRunningTargetAttachArgv(t *testing.T) {
 	fakeProcs(t, 10, 11, 20, 30)
 	processIdentity = func(pid uint32) correlate.Identity { return correlate.Identity{Comm: "java", StartNS: 500} }
 	var asked []uint32
-	procCommand = func(pid uint32, start uint64) ([]string, string) {
+	procCommand = func(pid uint32, start uint64) ([]string, string, bool) {
 		asked = append(asked, pid)
 		if pid == 11 || start != 500 {
-			return nil, "" // unreadable (hidepid, gone, reused)
+			return nil, "", false // unreadable (hidepid, gone, reused)
 		}
-		return []string{"java", "-Dpassword=hunter2", "-jar", "app.jar"}, "/usr/bin/java"
+		return []string{"java", "-Dpassword=hunter2", "-jar", "app.jar"}, "/usr/bin/java", false
 	}
 	dir := t.TempDir()
 	c := testCorrelator(t, dir)
@@ -344,6 +345,88 @@ func TestExecArgvRecordedRedacted(t *testing.T) {
 	}
 }
 
+// longCmdlineProc is a /proc tree under dir with pid 10, started at
+// tick 500, whose command line is 1.5 MB: a class path no NDJSON line
+// (capped at 1 MiB by both readers) could hold whole. It returns the
+// command line's elements.
+func longCmdlineProc(t *testing.T, dir string) []string {
+	t.Helper()
+	argv := []string{"java", "-cp", strings.Repeat("/lib/a.jar:", 150_000), "-Dpassword=hunter2", "Main"}
+	pdir := filepath.Join(dir, "10")
+	if err := os.MkdirAll(pdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"stat":    "10 (java) S 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 500 0 0",
+		"cmdline": strings.Join(argv, "\x00") + "\x00",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(pdir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink("/usr/bin/java", filepath.Join(pdir, "exe")); err != nil {
+		t.Fatal(err)
+	}
+	return argv
+}
+
+// TestLongCmdlineBounded (review of task nh4): a command line read from
+// /proc — a running target's for its attach, a cut exec record's
+// completion — is read up to target.MaxCmdline only, and a cut one has
+// its partial last element masked whole, as a cut exec record's is: an
+// unbounded read put a 1.5 MB argv into one event line, past the 1 MiB
+// the NDJSON readers take, and lost the session.
+func TestLongCmdlineBounded(t *testing.T) {
+	fakeProcs(t, 10)
+	procDir := t.TempDir()
+	full := longCmdlineProc(t, procDir)
+	fs := target.ProcFS{Root: procDir}
+	processIdentity = func(uint32) correlate.Identity { return correlate.Identity{Comm: "java", StartNS: 500 * 10_000_000} }
+	procCommand = fs.Command
+	origCmdline := procCmdline
+	procCmdline = fs.CmdlineBounded
+	t.Cleanup(func() { procCmdline = origCmdline })
+	dir := t.TempDir()
+	c := testCorrelator(t, dir)
+	s, _ := pidSession(t, newFakeTracer(), c, 10)
+	// The exec record's copy: the block's first bytes, the rest cut.
+	rec := execRecord(10, 10, "/usr/bin/java")
+	rec.EventType = types.PROCESS_ARGV_EVENT
+	block := strings.Join(full, "\x00") + "\x00"
+	rec.ArgvLen = uint32(copy(rec.Argv[:], block))
+	rec.ArgvTotal = uint32(len(block))
+	if err := s.handle(rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, EventsFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		if len(line) > 2*target.MaxCmdline {
+			t.Fatalf("event line of %d bytes, want at most %d", len(line), 2*target.MaxCmdline)
+		}
+	}
+	kinds := 0
+	for _, e := range readEvents(t, dir) {
+		if e.Event != schema.KindAttach && e.Event != schema.KindExec {
+			continue
+		}
+		kinds++
+		a := e.Args.Argv
+		if len(a) != 3 || a[0] != "java" || a[1] != "-cp" || a[2] != "***" {
+			t.Errorf("%s argv %.80q, want java -cp and the cut class path masked", e.Event, a)
+		}
+	}
+	if kinds != 2 {
+		t.Fatalf("%d attach and exec events, want 2", kinds)
+	}
+}
+
 // cutExecRecord is a traced exec's record whose argv block was cut after
 // n bytes, as the BPF side reports a block longer than it copies.
 func cutExecRecord(pid uint32, n int, argv ...string) *types.ExecArgvEvent {
@@ -364,14 +447,14 @@ func TestCutArgvCompletion(t *testing.T) {
 	cutAt := len("app\x00--url\x00https://u:Secr") // inside the password
 	cases := []struct {
 		name string
-		proc func(uint32) ([]string, error)
+		proc func(uint32) ([]string, bool, error)
 		want []string
 	}{
-		{"proc agrees", func(uint32) ([]string, error) { return argv, nil },
+		{"proc agrees", func(uint32) ([]string, bool, error) { return argv, false, nil },
 			[]string{"app", "--url", "https://u:***@h/"}},
-		{"proc unreadable", func(uint32) ([]string, error) { return nil, os.ErrNotExist },
+		{"proc unreadable", func(uint32) ([]string, bool, error) { return nil, false, os.ErrNotExist },
 			[]string{"app", "--url", "***"}},
-		{"process exec'd again", func(uint32) ([]string, error) { return []string{"other", "x"}, nil },
+		{"process exec'd again", func(uint32) ([]string, bool, error) { return []string{"other", "x"}, false, nil },
 			[]string{"app", "--url", "***"}},
 	}
 	for _, c := range cases {

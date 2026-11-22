@@ -2683,6 +2683,9 @@ deferred.
   seeded, and redacted by the same policy before the event
   exists. An unreadable `/proc` (process gone, hidepid, another
   pid namespace) leaves both absent and never fails the attach.
+  Every `/proc` command line read for an event (this one, an
+  exec's completion) is bounded at 64 KiB, its cut last element
+  masked, so no event line nears the readers' 1 MiB cap.
 
 ### Open — raised for M3 (built on the default)
 

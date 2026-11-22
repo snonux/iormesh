@@ -350,7 +350,10 @@ attached has none; its `attach` carries the argv and executable
 `/proc` showed then instead, redacted by the same policy, read only
 while the process is still the incarnation seeded (a reused PID
 yields neither) and absent when unreadable (the process gone,
-`hidepid`, another pid namespace). `jspawnhelper`
+`hidepid`, another pid namespace). Its `args.path` is the resolved
+`/proc/<pid>/exe` link — a symlink-free path, with the kernel's
+` (deleted)` suffix when the binary was replaced or removed since —
+while an `exec`'s is the path as exec'd. `jspawnhelper`
 and the program it execs are two `exec` events of one process.
 BPF copies the first 1 KiB of the argument block; a longer one is
 completed from `/proc/<pid>/cmdline` only when that still starts
@@ -358,6 +361,12 @@ with the copied bytes — the process may have exec'd again, or its
 PID been reused, by the time userspace reads it. Otherwise the cut
 argv is kept, its partial last element masked as `***` (a cut
 `https://u:secr` is no longer recognizable as a URL password).
+Every read of `/proc/<pid>/cmdline` for an event (an `attach`'s
+argv, an `exec`'s completion) takes at most 64 KiB
+(`target.MaxCmdline`); a longer command line (a JVM's class path
+can be megabytes) is cut there and its partial last element masked
+the same way, so an event line stays far below the 1 MiB the NDJSON
+readers take.
 The environment is never captured (decision #9).
 
 ### Event kinds (M2 step 7: IPC, signals, UDP, poll, zero-copy)

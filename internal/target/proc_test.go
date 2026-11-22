@@ -140,11 +140,33 @@ func TestCommand(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			argv, exe := fs.Command(c.pid, c.start)
-			if !slices.Equal(argv, c.wantArgv) || exe != c.wantExe {
-				t.Errorf("Command(%d, %d) = %q, %q; want %q, %q", c.pid, c.start, argv, exe, c.wantArgv, c.wantExe)
+			argv, exe, cut := fs.Command(c.pid, c.start)
+			if !slices.Equal(argv, c.wantArgv) || exe != c.wantExe || cut {
+				t.Errorf("Command(%d, %d) = %q, %q, %v; want %q, %q, false", c.pid, c.start, argv, exe, cut,
+					c.wantArgv, c.wantExe)
 			}
 		})
+	}
+}
+
+// TestCmdlineBounded (review of task nh4): a command line is read up to
+// MaxCmdline bytes; a longer one is cut there and says so, one exactly
+// that long is whole.
+func TestCmdlineBounded(t *testing.T) {
+	f := newFakeProc(t)
+	exact := strings.Repeat("a", MaxCmdline-1) // plus its NUL: MaxCmdline
+	f.proc(10, 10, 1, 'S', 500, "", exact)
+	f.proc(11, 11, 1, 'S', 500, "", "java", "-cp", strings.Repeat("b", 2*MaxCmdline))
+	fs := f.fs()
+	if argv, cut, err := fs.CmdlineBounded(10); err != nil || cut || len(argv) != 1 || argv[0] != exact {
+		t.Errorf("exact: %d elements, cut %v, err %v; want whole", len(argv), cut, err)
+	}
+	argv, cut, err := fs.CmdlineBounded(11)
+	if err != nil || !cut || len(argv) != 3 || len(strings.Join(argv, "\x00")) != MaxCmdline {
+		t.Errorf("long: %d elements, cut %v, err %v; want cut at %d bytes", len(argv), cut, err, MaxCmdline)
+	}
+	if _, _, err := fs.CmdlineBounded(12); err == nil {
+		t.Error("gone: no error")
 	}
 }
 

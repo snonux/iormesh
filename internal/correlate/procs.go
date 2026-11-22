@@ -73,12 +73,16 @@ type procState struct {
 // caller read them from /proc/<pid>/cmdline and /proc/<pid>/exe, checked
 // against StartNS — and the correlator redacts them before the event
 // exists and keeps neither. Empty when unread: /proc could not be read,
-// or an exec event follows (a pattern's exec adoption).
+// or an exec event follows (a pattern's exec adoption). ArgvCut says
+// Argv is a bounded read's cut copy (target.MaxCmdline): its last
+// element is a fragment the policy cannot judge, masked whole like a
+// cut exec record's (ExecInfo.Cut).
 type Identity struct {
 	Comm    string
 	StartNS uint64
 	Argv    []string
 	Exe     string
+	ArgvCut bool
 }
 
 // Seed tells the correlator who pid is, read by the caller when the

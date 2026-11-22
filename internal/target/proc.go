@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -95,6 +96,35 @@ func (p ProcFS) Cmdline(pid uint32) ([]string, error) {
 	return SplitArgv(b), nil
 }
 
+// MaxCmdline bounds a command line read from /proc for an event (an
+// attach's argv, a cut exec record's completion): a process's argument
+// block can be megabytes (a JVM's class path), and an event holding it
+// whole would pass the 1 MiB line both NDJSON readers take
+// (schema.ReadNDJSON, federate.NDJSONDir), losing the session. 64 KiB
+// stays far below that even with JSON escaping and the exe path.
+const MaxCmdline = 64 << 10
+
+// CmdlineBounded returns pid's argv from at most MaxCmdline bytes of its
+// argument block, and whether the block was longer: then the last
+// element is a fragment the redaction policy cannot judge, and the
+// caller masks it whole (correlate.ExecInfo.Cut, Identity.ArgvCut). A
+// kernel thread's argv is empty.
+func (p ProcFS) CmdlineBounded(pid uint32) (argv []string, cut bool, err error) {
+	f, err := os.Open(p.path(pid, "cmdline"))
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = f.Close() }()
+	b, err := io.ReadAll(io.LimitReader(f, MaxCmdline+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if len(b) > MaxCmdline {
+		b, cut = b[:MaxCmdline], true
+	}
+	return SplitArgv(b), cut, nil
+}
+
 // Exe returns the path of pid's executable ("" when it has none, as for
 // a kernel thread, or when reading it is not permitted).
 func (p ProcFS) Exe(pid uint32) string {
@@ -116,21 +146,24 @@ func (p ProcFS) Exe(pid uint32) string {
 // thread or zombie (empty cmdline, no exe link) — leaves that part
 // empty, never an error: the attach goes on without it. Both reads only
 // read (cmdline a file, exe a link that is read, not followed). The
-// result is raw — a secret's carrier, redacted by the correlator and
-// never logged.
-func (p ProcFS) Command(pid uint32, startNS uint64) (argv []string, exe string) {
+// argv is bounded (CmdlineBounded): cut says its last element is a
+// fragment to mask. exe is the resolved link — " (deleted)" appended by
+// the kernel when the binary was replaced or removed since. The result
+// is raw — a secret's carrier, redacted by the correlator and never
+// logged.
+func (p ProcFS) Command(pid uint32, startNS uint64) (argv []string, exe string, cut bool) {
 	if startNS == 0 {
-		return nil, ""
+		return nil, "", false
 	}
-	argv, err := p.Cmdline(pid)
+	argv, cut, err := p.CmdlineBounded(pid)
 	if err != nil || len(argv) == 0 {
-		argv = nil
+		argv, cut = nil, false
 	}
 	exe = p.Exe(pid)
 	if st, err := p.Stat(pid); err != nil || st.StartNS != startNS {
-		return nil, ""
+		return nil, "", false
 	}
-	return argv, exe
+	return argv, exe, cut
 }
 
 // Tgid returns the thread group pid belongs to. /proc/<tid> resolves for

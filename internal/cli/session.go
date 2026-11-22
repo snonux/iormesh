@@ -194,30 +194,33 @@ func execAlive(ev *types.ExecArgvEvent) func() bool {
 	}
 }
 
-// procCmdline reads a process's command line; a variable so tests need
-// no /proc.
-var procCmdline = func(pid uint32) ([]string, error) {
-	return target.HostProcFS().Cmdline(pid)
+// procCmdline reads a process's command line, bounded
+// (target.ProcFS.CmdlineBounded: cut says it was longer); a variable so
+// tests need no /proc.
+var procCmdline = func(pid uint32) ([]string, bool, error) {
+	return target.HostProcFS().CmdlineBounded(pid)
 }
 
-// execArgv returns an exec record's argv and whether it is the record's
-// cut copy. A cut block (a Java main class sits behind the class path) is
-// completed from /proc/<pid>/cmdline — but only when that still starts
-// with the bytes the record copied: by the time userspace reads it, the
-// process may have exec'd again or its PID been reused, and another
-// program's command line must not be recorded as this exec's. Otherwise
-// the cut argv is all there is, and cut is true (the correlator masks its
-// partial last element). The argv is a secret's carrier: the record and
-// this result are never logged.
+// execArgv returns an exec record's argv and whether it is a cut copy. A
+// cut block (a Java main class sits behind the class path) is completed
+// from /proc/<pid>/cmdline — but only when that still starts with the
+// bytes the record copied: by the time userspace reads it, the process
+// may have exec'd again or its PID been reused, and another program's
+// command line must not be recorded as this exec's. Otherwise the cut
+// argv is all there is, and cut is true (the correlator masks its
+// partial last element). The completion is bounded too
+// (target.MaxCmdline), so an event line stays far below the NDJSON
+// readers' 1 MiB; a completion cut there is cut as well. The argv is a
+// secret's carrier: the record and this result are never logged.
 func execArgv(ev *types.ExecArgvEvent) (argv []string, cut bool) {
 	block := ev.Argv[:min(int(ev.ArgvLen), len(ev.Argv))]
 	argv = target.SplitArgv(block)
 	if ev.ArgvLen >= ev.ArgvTotal {
 		return argv, false
 	}
-	full, err := procCmdline(ev.Pid)
+	full, fullCut, err := procCmdline(ev.Pid)
 	if err == nil && len(block) > 0 && sameArgvStart(full, block) {
-		return full, false
+		return full, fullCut
 	}
 	return argv, true
 }

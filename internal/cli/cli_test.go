@@ -29,7 +29,7 @@ func fakeProcs(t *testing.T, pids ...uint32) {
 	processAlive = func(pid uint32, _ uint64) bool { return live[pid] }
 	processIdentity = func(uint32) correlate.Identity { return correlate.Identity{Comm: "x", StartNS: 1} }
 	// No command lines: the real /proc must not lend a fake pid one.
-	procCommand = func(uint32, uint64) ([]string, string) { return nil, "" }
+	procCommand = func(uint32, uint64) ([]string, string, bool) { return nil, "", false }
 	// No pod: the test's own environment must not supply a -project.
 	podEnv = func(string) string { return "" }
 	t.Cleanup(func() {

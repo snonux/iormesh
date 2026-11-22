@@ -104,10 +104,11 @@ var processIdentity = func(pid uint32) correlate.Identity {
 	return correlate.Identity{Comm: comm, StartNS: start}
 }
 
-// procCommand reads the argv and executable of pid while it is still the
-// incarnation that started at startNS (target.ProcFS.Command), both empty
-// when they cannot be read. A variable like processAlive.
-var procCommand = func(pid uint32, startNS uint64) ([]string, string) {
+// procCommand reads the argv (bounded, cut says its last element is a
+// fragment) and executable of pid while it is still the incarnation that
+// started at startNS (target.ProcFS.Command), both empty when they
+// cannot be read. A variable like processAlive.
+var procCommand = func(pid uint32, startNS uint64) ([]string, string, bool) {
 	return target.HostProcFS().Command(pid, startNS)
 }
 
@@ -120,7 +121,7 @@ var procCommand = func(pid uint32, startNS uint64) ([]string, string) {
 func attachIdentity(pid uint32) correlate.Identity {
 	id := processIdentity(pid)
 	if id.StartNS != 0 {
-		id.Argv, id.Exe = procCommand(pid, id.StartNS)
+		id.Argv, id.Exe, id.ArgvCut = procCommand(pid, id.StartNS)
 	}
 	return id
 }
