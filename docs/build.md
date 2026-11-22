@@ -349,6 +349,61 @@ iormeshctl verify dist/iormesh-linux-amd64   # the controller's check
   replaces `/opt/iormesh/bin/iormesh` ([security.md](security.md)
   has the checks).
 
+## Releases
+
+`mage release` turns a tagged commit into downloadable archives
+(PLAN.md "Release archives", task rh4). It publishes nothing:
+uploading the files is a human step.
+
+```bash
+# bump internal/version.Version, commit, then:
+git tag v0.1.0                # exactly v<internal/version.Version>
+export IORMESH_MINISIGN_KEY=~/.minisign/iormesh.key
+mage release podman           # or docker
+ls dist/release/0.1.0/
+# iormesh-0.1.0-amd64.tar.gz  iormesh-0.1.0-arm64.tar.gz
+# SHA256SUMS  SHA256SUMS.minisig
+```
+
+- **Refused up front**: a dirty tree, a HEAD past the tag, or a
+  tag other than `v<internal/version.Version>` (`git describe
+  --tags --dirty --match 'v[0-9]*'` must print exactly the tag).
+  The key's password is asked next, before the long builds.
+- **Steps**: every container build (`containerBuild ENGINE
+  all`), `agentBuild`, the signing `mage sign` does (stale builds
+  refused), then `internal/dist` packs a fresh
+  `dist/release/<version>/` and signs its `SHA256SUMS`.
+- **Archive contents**, under `iormesh-<version>-<arch>/`:
+  `iormesh-linux-<arch>`, `iormesh-agent.jar`,
+  `iormeshctl-linux-<arch>`, `iormeshctl-darwin-<arch>`, each
+  with its `.minisig`; `minisign.pub`; `LICENSE` once the
+  repository has one (the licence is the owner's choice, still
+  open). Each artifact is verified against its signature at the
+  release version before it is packed, and the verified bytes
+  are the packed ones.
+- **Reproducible**: entries sorted, owner root 0/0, modes
+  0755 (binaries, the top directory) or 0644, every mtime
+  `$SOURCE_DATE_EPOCH` or else the commit time, gzip header
+  without name or time. The same signed `dist/` packs to the same
+  bytes (`internal/dist`'s `TestPackDeterministic`); signing again
+  changes the signatures' timestamps and so the archives.
+
+An operator checks a download with the release key obtained
+apart from the archives (the `minisign.pub` inside is a
+convenience, not a trust anchor; compare it first):
+
+```bash
+minisign -Vm SHA256SUMS -p minisign.pub   # or iormeshctl verify -key
+sha256sum -c SHA256SUMS
+tar -xzf iormesh-0.1.0-amd64.tar.gz && cd iormesh-0.1.0-amd64
+iormeshctl verify -key minisign.pub iormesh-linux-amd64 \
+  iormesh-agent.jar                         # every build: OK
+install -m 0644 minisign.pub ~/.config/iormesh/minisign.pub
+```
+
+With the key pinned there, `iormeshctl deploy -dist DIR` checks
+every build again before it pushes.
+
 ## Tech choices
 
 - Go + libbpfgo + eBPF (CO-RE) — the same stack as ior, adopted
