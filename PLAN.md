@@ -2696,7 +2696,16 @@ deferred.
   `user/password@` (task zi4); every exec of a traced process
   becomes an `exec` event carrying its redacted argv, and the
   environment is never read. A process already running when the
-  trace attaches has no exec, so its argv is not recorded (yet).
+  trace attaches (a `-pid` or port target, a pattern's start-scan
+  match) has no exec; task nh4 records its argv and executable on
+  its `attach` event instead, read from `/proc/<pid>/cmdline` and
+  `/proc/<pid>/exe` at attach, checked against the start time
+  seeded, and redacted by the same policy before the event
+  exists. An unreadable `/proc` (process gone, hidepid, another
+  pid namespace) leaves both absent and never fails the attach.
+  Every `/proc` command line read for an event (this one, an
+  exec's completion) is bounded at 64 KiB, its cut last element
+  masked, so no event line nears the readers' 1 MiB cap.
 
 ### Open — raised for M3 (built on the default)
 

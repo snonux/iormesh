@@ -60,12 +60,14 @@ func newSession(tr tracer, c *correlate.Correlator, cfg runConfig) *session {
 // Each target's identity is read now and seeded into the correlator,
 // which handles the target's first record only later: by then the target
 // may have exited and its PID been reused, and /proc would name the new
-// process. A pattern scan runs after the probes attached, so a process
+// process. The identity includes the command line and executable
+// (attachIdentity): a target already running has no exec event to carry
+// them. A pattern scan runs after the probes attached, so a process
 // exec'ing meanwhile is seen by the scan, by its exec record, or by both
 // — adopt takes it once.
 func (s *session) start(pids []uint32) error {
 	for _, pid := range pids {
-		id := processIdentity(pid)
+		id := attachIdentity(pid)
 		s.live[pid] = id.StartNS
 		// A target already gone has nothing to seed: an empty identity
 		// would only add a pid@0 process node with no events.
@@ -96,9 +98,10 @@ func (s *session) start(pids []uint32) error {
 // exited in between had its exit handled before the entry existed, so
 // nothing would ever remove the entry, and a later process under the PID
 // would be traced. Such an entry is removed again. Its earlier syscalls
-// precede the session, so they are no attach gap.
+// precede the session, so they are no attach gap. Its exec precedes the
+// session too, so its attach carries its command line (attachIdentity).
 func (s *session) adoptRunning(pid uint32) error {
-	id := processIdentity(pid)
+	id := attachIdentity(pid)
 	if id.StartNS == 0 {
 		return nil // gone already
 	}
@@ -191,30 +194,33 @@ func execAlive(ev *types.ExecArgvEvent) func() bool {
 	}
 }
 
-// procCmdline reads a process's command line; a variable so tests need
-// no /proc.
-var procCmdline = func(pid uint32) ([]string, error) {
-	return target.HostProcFS().Cmdline(pid)
+// procCmdline reads a process's command line, bounded
+// (target.ProcFS.CmdlineBounded: cut says it was longer); a variable so
+// tests need no /proc.
+var procCmdline = func(pid uint32) ([]string, bool, error) {
+	return target.HostProcFS().CmdlineBounded(pid)
 }
 
-// execArgv returns an exec record's argv and whether it is the record's
-// cut copy. A cut block (a Java main class sits behind the class path) is
-// completed from /proc/<pid>/cmdline — but only when that still starts
-// with the bytes the record copied: by the time userspace reads it, the
-// process may have exec'd again or its PID been reused, and another
-// program's command line must not be recorded as this exec's. Otherwise
-// the cut argv is all there is, and cut is true (the correlator masks its
-// partial last element). The argv is a secret's carrier: the record and
-// this result are never logged.
+// execArgv returns an exec record's argv and whether it is a cut copy. A
+// cut block (a Java main class sits behind the class path) is completed
+// from /proc/<pid>/cmdline — but only when that still starts with the
+// bytes the record copied: by the time userspace reads it, the process
+// may have exec'd again or its PID been reused, and another program's
+// command line must not be recorded as this exec's. Otherwise the cut
+// argv is all there is, and cut is true (the correlator masks its
+// partial last element). The completion is bounded too
+// (target.MaxCmdline), so an event line stays far below the NDJSON
+// readers' 1 MiB; a completion cut there is cut as well. The argv is a
+// secret's carrier: the record and this result are never logged.
 func execArgv(ev *types.ExecArgvEvent) (argv []string, cut bool) {
 	block := ev.Argv[:min(int(ev.ArgvLen), len(ev.Argv))]
 	argv = target.SplitArgv(block)
 	if ev.ArgvLen >= ev.ArgvTotal {
 		return argv, false
 	}
-	full, err := procCmdline(ev.Pid)
+	full, fullCut, err := procCmdline(ev.Pid)
 	if err == nil && len(block) > 0 && sameArgvStart(full, block) {
-		return full, false
+		return full, fullCut
 	}
 	return argv, true
 }

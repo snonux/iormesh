@@ -115,6 +115,61 @@ func TestAlive(t *testing.T) {
 	}
 }
 
+// TestCommand (task nh4): a running process's argv and executable are
+// read for its attach event only while it is still the incarnation the
+// session took on; a reused PID, a process gone, or a kernel thread
+// (empty cmdline, no exe link) yields neither, and so does an unknown
+// start time (nothing to check the read against).
+func TestCommand(t *testing.T) {
+	f := newFakeProc(t)
+	f.proc(10, 10, 1, 'S', 500, "/usr/bin/java", "java", "-jar", "app.jar")
+	f.proc(11, 11, 2, 'S', 500, "")
+	fs := f.fs()
+	cases := []struct {
+		name     string
+		pid      uint32
+		start    uint64
+		wantArgv []string
+		wantExe  string
+	}{
+		{"same incarnation", 10, 500 * 10_000_000, []string{"java", "-jar", "app.jar"}, "/usr/bin/java"},
+		{"PID reused since", 10, 499 * 10_000_000, nil, ""},
+		{"unknown start", 10, 0, nil, ""},
+		{"kernel thread", 11, 500 * 10_000_000, nil, ""},
+		{"gone", 13, 500 * 10_000_000, nil, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			argv, exe, cut := fs.Command(c.pid, c.start)
+			if !slices.Equal(argv, c.wantArgv) || exe != c.wantExe || cut {
+				t.Errorf("Command(%d, %d) = %q, %q, %v; want %q, %q, false", c.pid, c.start, argv, exe, cut,
+					c.wantArgv, c.wantExe)
+			}
+		})
+	}
+}
+
+// TestCmdlineBounded (review of task nh4): a command line is read up to
+// MaxCmdline bytes; a longer one is cut there and says so, one exactly
+// that long is whole.
+func TestCmdlineBounded(t *testing.T) {
+	f := newFakeProc(t)
+	exact := strings.Repeat("a", MaxCmdline-1) // plus its NUL: MaxCmdline
+	f.proc(10, 10, 1, 'S', 500, "", exact)
+	f.proc(11, 11, 1, 'S', 500, "", "java", "-cp", strings.Repeat("b", 2*MaxCmdline))
+	fs := f.fs()
+	if argv, cut, err := fs.CmdlineBounded(10); err != nil || cut || len(argv) != 1 || argv[0] != exact {
+		t.Errorf("exact: %d elements, cut %v, err %v; want whole", len(argv), cut, err)
+	}
+	argv, cut, err := fs.CmdlineBounded(11)
+	if err != nil || !cut || len(argv) != 3 || len(strings.Join(argv, "\x00")) != MaxCmdline {
+		t.Errorf("long: %d elements, cut %v, err %v; want cut at %d bytes", len(argv), cut, err, MaxCmdline)
+	}
+	if _, _, err := fs.CmdlineBounded(12); err == nil {
+		t.Error("gone: no error")
+	}
+}
+
 // TestResolvePattern: running matches are found; the tracer, its
 // ancestors and other iormesh sessions (whose command lines name the
 // pattern) are skipped.

@@ -1611,9 +1611,13 @@ scenarios landing first (principle #1).
    `exec` event — `args.path` the exe, `args.argv` redacted
    there, before the event exists (`Config.Redaction`, nil =
    `Default()`). The normalizer rewrites argv elements under the
-   temp dir like paths. Not recorded: a process already running
-   at attach (a `-pid` target, the start scan's matches) has no
-   exec, so no argv. Graph node attrs stay `comm` only.
+   temp dir like paths. A process already running at attach (a
+   `-pid` or port target, the start scan's matches) has no exec;
+   task nh4 puts its argv and exe on its `attach` event instead
+   (`cli.attachIdentity` reads them with
+   `target.ProcFS.Command`, which re-reads the stat to reject a
+   reused PID; `Correlator.attach` redacts them). Graph node attrs
+   stay `comm` only.
    Scenario: `argv-secret` — the workload starts a child JVM
    with `-Dpassword=S`, `--token S`, `--api-key=S` and a URL
    with userinfo and a query value; its golden declares the

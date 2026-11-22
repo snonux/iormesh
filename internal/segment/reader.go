@@ -143,8 +143,8 @@ func boundTimes(ev *schema.Event) error {
 // nilEmptyLists turns the empty lists parquet-go decodes a null LIST
 // column into back into absent ones. docs/schema.md: an absent list and
 // an empty one are the same record — but Validate checks presence
-// (args.argv only on exec), so the reader hands out the NDJSON reader's
-// form, nil.
+// (args.argv only on exec and attach), so the reader hands out the
+// NDJSON reader's form, nil.
 func nilEmptyLists(ev *schema.Event) {
 	if len(ev.Args.Argv) == 0 {
 		ev.Args.Argv = nil
