@@ -56,11 +56,15 @@ truth.
   server cannot overwrite another's segments by naming files
   after it; project and host come from the registry, never from
   the server, and the directories above are refused when
-  foreign-owned or writable by others. Only the store and what
-  is below it are checked: a `-store` under a directory others
-  can write without the sticky bit is unsafe whatever its own
-  mode. Collect needs no sudo: `ready/` belongs to the
-  deploying user.
+  foreign-owned or writable by others. The file names are the
+  server's: a segment whose FQDN or session holds anything but
+  letters, digits, `-`, `.`, `_` and `:` is ignored as a stray,
+  so no server-chosen name puts shell or terminal text into a
+  ref (task 3i4). Only the store and what is below it are
+  checked: a `-store` under a directory others can write
+  without the sticky bit is unsafe whatever its own mode.
+  Collect needs no sudo: `ready/` belongs to the deploying
+  user.
 - **The local site treats trace text as hostile.** Every string
   a build shows came from a server, and the site
   (`iormeshctl open`, PLAN.md M5) is opened in the operator's
@@ -71,10 +75,11 @@ truth.
   close it; strings put on the page only as text nodes and
   attributes the script picks (never `innerHTML`); control and
   bidi characters shown escaped; the offered `query -ref`
-  command shell-quoted. Site folders are 0700, files 0600 — they
-  name production hosts, processes and files — and `latest` is
-  followed only to a folder directly beside it
-  ([visualization.md](visualization.md) "The local site").
+  command shell-quoted, as it is in the TUI. Site folders are
+  0700, files 0600 — they name production hosts, processes and
+  files — and `latest` is followed only to a folder directly
+  beside it ([visualization.md](visualization.md) "The local
+  site").
 - **The controller's rsync must be 3.4.0 or newer.** The
   receiving rsync parses what the server sends, and older ones
   let a malicious sender write outside the destination or read

@@ -116,6 +116,17 @@ func TestParseName(t *testing.T) {
 		{".h-a1b2c3d4-20261120T063000Z-000001.parquet.Xy12", FileName{}, false},
 		{"a1b2c3d4-20261120T063000Z-000001.parquet", FileName{}, false},
 		{"h-a1b2c3d4-20261320T063000Z-000001.parquet", FileName{}, false},
+		// A traced host names its files, and the name reaches a shell
+		// command (`iormeshctl query -ref`, task 3i4): an fqdn or a
+		// session holding anything but [A-Za-z0-9._:-] is refused.
+		{"hostb.example.org-s;touch PWNED;x-20261118T120000Z-000001.parquet", FileName{}, false},
+		{"h$(touch PWNED)-a1b2c3d4-20261118T120000Z-000001.parquet", FileName{}, false},
+		{"h-`touch PWNED`-20261118T120000Z-000001.parquet", FileName{}, false},
+		{"h x-a1b2c3d4-20261118T120000Z-000001.parquet", FileName{}, false},
+		{"h'x-a1b2c3d4-20261118T120000Z-000001.parquet", FileName{}, false},
+		{"h\nx-a1b2c3d4-20261118T120000Z-000001.parquet", FileName{}, false},
+		{"h\x1b[2J-a1b2c3d4-20261118T120000Z-000001.parquet", FileName{}, false},
+		{"hé-a1b2c3d4-20261118T120000Z-000001.parquet", FileName{}, false},
 	} {
 		got, err := ParseName(tc.name)
 		if (err == nil) != tc.ok || got != tc.want {

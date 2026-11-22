@@ -152,7 +152,11 @@ func (m *Model) listConversations(b *strings.Builder, sc scope) {
 // and joined, sizes, the whole Java stack and the query that prints its
 // raw event — the bottom of the walk from the mesh. A folded run's
 // whole-run query is printed as built (viewmodel.Safe leaves its shell
-// quoting intact, task 1i4), ready to paste.
+// quoting intact, task 1i4), ready to paste. The ref is built from
+// segment file names a traced host chose, so its raw-event query quotes
+// it as one inert shell word (viewmodel.ShellWord, task 3i4), as the
+// site's does; segment.ParseName already refuses names outside a safe
+// set, and the quoting keeps the pasted line inert whatever reaches it.
 func stepDetail(b *strings.Builder, c viewmodel.Conversation, i int) {
 	s := c.Steps[i]
 	fmt.Fprintf(b, "step       %d of conversation %s (%s)\n", i+1, c.ID, s.Kind)
@@ -182,7 +186,7 @@ func stepDetail(b *strings.Builder, c viewmodel.Conversation, i int) {
 		b.WriteString("  none recorded\n")
 	}
 	fmt.Fprintf(b, "ref        %s%s\n", s.Ref, ifRun(run, fmt.Sprintf(" (first of %d)", s.Count)))
-	fmt.Fprintf(b, "raw event  iormeshctl query -ref %s\n", s.Ref)
+	fmt.Fprintf(b, "raw event  iormeshctl query -ref %s\n", viewmodel.ShellWord(s.Ref))
 	if run {
 		fmt.Fprintf(b, "last ref   %s\n", s.LastRef)
 		fmt.Fprintf(b, "whole run  %s\n", s.RunQuery)
