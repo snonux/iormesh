@@ -15,7 +15,8 @@
 //	iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
 //	                 [-apply [-dist DIR] [-key FILE]]
 //	iormeshctl query [-project NAME]... [-from T] [-to T] [-host GLOB] [-app GLOB] [-thread GLOB]
-//	                 [-conn ID [-follow]] [-file GLOB] [-method GLOB] [-max-bytes N]
+//	                 [-conn ID [-follow]] [-file GLOB] [-method GLOB] [-ref REF] [-event KIND]
+//	                 [-pid PID] [-errno NAME|N] [-otel-trace ID] [-max-bytes N]
 //	iormeshctl services [list|edges|name|rules|unname] [-db FILE] ...
 //	iormeshctl verify [-key FILE] FILE...
 //	iormeshctl version
@@ -316,7 +317,8 @@ func usage(w io.Writer) {
                     [-apply [-dist DIR] [-key FILE]]
   iormeshctl query [-project NAME]... [-store DIR] [-db FILE] [-from T] [-to T]
                    [-host GLOB] [-app GLOB] [-thread GLOB] [-conn ID [-follow]]
-                   [-file GLOB] [-method GLOB] [-max-bytes N]
+                   [-file GLOB] [-method GLOB] [-ref REF] [-event KIND] [-pid PID]
+                   [-errno NAME|N] [-otel-trace ID] [-max-bytes N]
   iormeshctl services [list] [-db FILE] [-project NAME] [-paths]
   iormeshctl services edges [-db FILE] [-project NAME] [-from NAME]
   iormeshctl services name [-db FILE] [-port N] HOST-GLOB SERVICE
@@ -350,7 +352,9 @@ bound to its listening port) and deploys to it as deploy does; one
 query reads the store as build does and writes the matching
 events as schema NDJSON, at most -max-bytes (default 1 MiB) of it; a cut
 slice ends in a truncation record. T is RFC 3339 or HH:MM:SS[.frac] UTC
-on the trace's first day; -to is exclusive.
+on the trace's first day; -to is exclusive. Filters AND; -event takes
+a schema kind, -errno a Linux errno name or number, -otel-trace a W3C
+trace id.
 
 POD is a registry pods: entry, <cluster>/<namespace>/<pod> or
 <cluster>/<namespace>/<selector>; K8S is -context CTX -namespace NS,

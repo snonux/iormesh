@@ -93,7 +93,18 @@ func (m *matcher) match(src *Source, ev *schema.Event) (bool, error) {
 	f := m.f
 	return file && m.window(ev) &&
 		(f.Host == "" || glob(f.Host, src.Host) || glob(f.Host, src.FQDN)) &&
-		m.app(ev) && m.thread(ev) && m.conn(ev) && m.method(src, ev) && m.ref(src, ev), nil
+		m.app(ev) && m.thread(ev) && m.conn(ev) && m.method(src, ev) && m.ref(src, ev) &&
+		m.values(ev), nil
+}
+
+// values matches the exact-value filters (task wh4): the kind, the pid,
+// the recorded errno name and the OpenTelemetry trace id.
+func (m *matcher) values(ev *schema.Event) bool {
+	f := m.f
+	return (f.Event == "" || ev.Event == f.Event) &&
+		(!f.HasPID || ev.PID == f.PID) &&
+		(f.Errno == "" || ev.Err == f.Errno) &&
+		(f.OtelTrace == "" || (ev.Otel != nil && ev.Otel.TraceID == f.OtelTrace))
 }
 
 // ref matches the one event Ref names.

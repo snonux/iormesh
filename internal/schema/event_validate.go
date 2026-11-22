@@ -144,6 +144,12 @@ func (e *Event) validateOtel() error {
 	return nil
 }
 
+// ValidTraceID reports whether s is an otel.trace_id Validate accepts:
+// 32 lowercase hex digits, not all zero (query -otel-trace, task wh4).
+func ValidTraceID(s string) bool {
+	return w3cID(s, 32)
+}
+
 // w3cID reports whether s is a W3C trace-context id of n lowercase hex
 // digits, not all zero (the invalid id).
 func w3cID(s string, n int) bool {

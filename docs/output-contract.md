@@ -76,7 +76,8 @@ the plan is the source of truth.
   inside the scenario's marker bracket. Outside it, a JVM's
   background activity differs per run and no claim is made.
 - **Sliceable** — `iormeshctl query` cuts the merged trace by
-  time, host, app, thread, connection, file or method into
+  time, host, app, thread, connection, file, method, event
+  kind, pid, errno or OpenTelemetry trace id into
   size-capped NDJSON with an explicit truncation record. A
   full trace never fits an LLM's context; the slice is what
   gets read.
