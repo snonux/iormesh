@@ -53,7 +53,7 @@ mage bpfBuild      # vmlinux.h (first run) + clang CO-RE -> iormesh.bpf.o
 mage build         # bpfBuild + go build ./... + ./iormesh, ./iormeshctl
 mage test          # go test ./... (the generator's C harness tests too)
 mage vet           # go vet ./... with the cgo environment
-mage lint          # golangci-lint: errcheck + staticcheck SA
+mage lint          # golangci-lint: errcheck + staticcheck SA + unused
 mage fmt / fmtCheck
 mage clean         # keeps vmlinux.h (it needs root to recreate)
 mage workloadTest  # the Java workload, standalone (M0)
@@ -103,7 +103,8 @@ because only Mage sets `CGO_CFLAGS`/`CGO_LDFLAGS`.
 - **Generation host**: the committed artifacts were generated on
   Linux 7.2 and match ior's byte for byte but for iormesh's
   additions (the socket hooks of connect/accept, step 4's
-  `tcp_state_event`). On a kernel with
+  `tcp_state_event`; `generated_tracepoints.go` holds only
+  `List`, without ior's selector maps). On a kernel with
   another tracepoint set `mage generate` stops at the diff of
   `internal/c/generated_tracepoints_result.txt` without touching
   the tree; `IORMESH_FORCE_GENERATE=1` adopts the new set (for

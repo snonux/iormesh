@@ -74,14 +74,3 @@ func fileSurfaceSyscalls() []string {
 		"dup", "dup2", "dup3", "fcntl",
 	}
 }
-
-// defaultSyscallSet is DefaultSyscalls as a set, the shape the selector's
-// allowlist uses.
-func defaultSyscallSet() map[string]struct{} {
-	names := DefaultSyscalls()
-	set := make(map[string]struct{}, len(names))
-	for _, name := range names {
-		set[name] = struct{}{}
-	}
-	return set
-}

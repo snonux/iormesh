@@ -5,7 +5,8 @@
 // Changes: IOR_FORCE_GENERATE renamed to IORMESH_FORCE_GENERATE; split out
 // of the main Magefile; long helpers split under 50 lines; a failing
 // scan or sort of the result lines is an error instead of a silent fallback;
-// Generate also writes the syscall number tables (task 8e4).
+// Generate also writes the syscall number tables (task 8e4);
+// GenerateTracepointsGo reads only the C, the list needs no kinds (task hj4).
 
 package main
 
@@ -80,19 +81,15 @@ func GenerateTracepointsCStdout() error {
 }
 
 // GenerateTracepointsGo regenerates the tracepoint list in Go from the
-// generated C and the committed result file (which carries each kind).
+// generated C: List only, the attach families come from
+// internal/tracepoints/trace_family.go, not from generated maps.
 func GenerateTracepointsGo() error {
 	fmt.Println("Generating Go tracepoints list...")
 	input, err := os.ReadFile(tracepointsCPath)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", tracepointsCPath, err)
 	}
-	kindsInput, err := os.ReadFile(tracepointsResult)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", tracepointsResult, err)
-	}
-	output, err := generate.ExtractTracepointsWithKinds(
-		strings.NewReader(string(input)), strings.NewReader(string(kindsInput)))
+	output, err := generate.ExtractTracepoints(strings.NewReader(string(input)))
 	if err != nil {
 		return err
 	}

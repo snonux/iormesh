@@ -78,8 +78,6 @@ func (c *column) putInt32(v int32) { c.i32 = append(c.i32, v) }
 
 func (c *column) putInt64(v int64) { c.i64 = append(c.i64, v) }
 
-func (c *column) putString(s string) { c.plain = plain.AppendByteArrayString(c.plain, s) }
-
 func (c *column) putDict(s string) { c.i32 = append(c.i32, c.dict.index(s)) }
 
 // null records an absent value at level nullDef in a non-repeated

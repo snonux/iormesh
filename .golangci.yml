@@ -1,6 +1,7 @@
 # golangci-lint configuration for iormesh.
 # Adapted from ior .golangci.yml @ b21afc50328c.
-# Changes: dropped the cmd/ioworkload errcheck exclusion (no such binary here).
+# Changes: dropped the cmd/ioworkload errcheck exclusion (no such binary
+# here); enabled the unused linter (task hj4).
 #
 # Run it through `mage lint` rather than directly: the Mage target injects the
 # libbpfgo cgo environment (CGO_CFLAGS/CGO_LDFLAGS/LIBBPFGO) that every package
@@ -19,6 +20,11 @@ linters:
     # staticcheck's correctness analyses. Restricted to the SA (bug) checks
     # below; the style families are deliberately not part of a merge gate.
     - staticcheck
+    # Unused code (staticcheck's U1000, which golangci-lint runs as its own
+    # linter). Without it, code lifted from ior that nothing wired up - an
+    # attach selector, helpers, generated maps only it read - sat in the tree
+    # unnoticed (task hj4). Pinned by internal/buildgate.
+    - unused
 
   settings:
     staticcheck:
