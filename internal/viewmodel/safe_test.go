@@ -5,11 +5,13 @@ import (
 	"strings"
 	"testing"
 	"unicode"
+	"unicode/utf8"
 )
 
 // injected is what a compromised server would plant in every string it
-// controls: a CSI that clears the screen, a C1 CSI and a bidi override.
-const injected = "x\x1b[2J\u009b‮"
+// controls: a CSI that clears the screen, a C1 CSI, a bidi override and
+// three bytes that are not UTF-8 (a raw 0x9B is the 8-bit CSI).
+const injected = "x\x1b[2J\u009b‮\x9b2J\x90\xff"
 
 // maxDepth bounds the reflection walk; the model is a tree a few levels
 // deep, so this only stops a recursive type added by mistake.
@@ -73,8 +75,9 @@ func fillMap(v reflect.Value, depth int) {
 	v.SetMapIndex(k, e)
 }
 
-// check fails on any exported string under v holding a non-printable
-// rune (termsafe's rule), naming its path; n counts the strings seen.
+// check fails on any exported string under v that is not valid UTF-8 or
+// holds a non-printable rune (termsafe's rule), naming its path; n
+// counts the strings seen.
 func check(t *testing.T, v reflect.Value, path string, depth int, n *int) {
 	t.Helper()
 	if depth > maxDepth {
@@ -83,7 +86,8 @@ func check(t *testing.T, v reflect.Value, path string, depth int, n *int) {
 	switch v.Kind() {
 	case reflect.String:
 		*n++
-		if strings.IndexFunc(v.String(), func(r rune) bool { return !unicode.IsPrint(r) }) >= 0 {
+		if !utf8.ValidString(v.String()) ||
+			strings.IndexFunc(v.String(), func(r rune) bool { return !unicode.IsPrint(r) }) >= 0 {
 			t.Errorf("%s = %q: not terminal-safe (add it to safe.go)", path, v.String())
 		}
 	case reflect.Pointer:

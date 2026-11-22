@@ -433,8 +433,8 @@ truth.
   and refused when it or its directory is foreign-owned or open
   to others, like the registry. It holds no secrets beyond what
   the traces already redacted (decision #9), and `iormeshctl
-  services` quotes control characters from the traces before
-  they reach the terminal.
+  services` quotes control characters and invalid UTF-8 from the
+  traces before they reach the terminal.
 - **Kubernetes** (M7; decisions #13, #14, #18 are provisional —
   PLAN.md "Provisional — M7"): eBPF privileges are
   node-kernel-wide — a container with `CAP_BPF` and

@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // SSH is the Transport for plain Linux servers (decision #12). It wraps the
@@ -291,7 +292,8 @@ func controlBase() (string, error) {
 
 // runLocal is the real execFunc. stdin stays /dev/null, so ssh never reads
 // the operator's terminal; a failure carries the start of stderr, which is
-// where ssh explains itself (host key mismatch, permission denied).
+// where ssh explains itself (host key mismatch, permission denied), cut
+// by cutStderr.
 //
 // WaitDelay guards against the ControlPersist master, which ssh forks off
 // the first command: OpenSSH points its stdio at /dev/null when it
@@ -310,10 +312,23 @@ func runLocal(ctx context.Context, name string, args ...string) ([]byte, error) 
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		msg := strings.TrimSpace(stderr.String())
-		if len(msg) > stderrLimit {
-			msg = msg[:stderrLimit] + "…"
-		}
+		msg = cutStderr(msg)
 		return stdout.Bytes(), fmt.Errorf("%w: %s", err, msg)
 	}
 	return stdout.Bytes(), err
+}
+
+// cutStderr bounds msg to stderrLimit bytes, marking a cut with "…". The
+// cut backs off to the start of a rune: splitting a multi-byte rune would
+// leave invalid UTF-8, and termsafe.String quotes the whole error for it
+// when the error is printed.
+func cutStderr(msg string) string {
+	if len(msg) <= stderrLimit {
+		return msg
+	}
+	cut := stderrLimit
+	for cut > 0 && !utf8.RuneStart(msg[cut]) {
+		cut--
+	}
+	return msg[:cut] + "…"
 }
