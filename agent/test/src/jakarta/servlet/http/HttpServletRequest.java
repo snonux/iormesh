@@ -14,4 +14,6 @@ public interface HttpServletRequest extends ServletRequest {
     Enumeration<String> getHeaderNames();
 
     Enumeration<String> getHeaders(String name);
+
+    String getHeader(String name);
 }

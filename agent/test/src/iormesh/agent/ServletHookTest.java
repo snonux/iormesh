@@ -40,7 +40,9 @@ final class ServletHookTest {
                 new AgentTests.Case("servlet/forward, async, throw", ServletHookTest::special),
                 new AgentTests.Case("servlet/nested service records once",
                         ServletHookTest::nested),
-                new AgentTests.Case("servlet/javax, Servlet 2.5 shape", ServletHookTest::javax));
+                new AgentTests.Case("servlet/javax, Servlet 2.5 shape", ServletHookTest::javax),
+                new AgentTests.Case("servlet/forwarded remote dropped",
+                        ServletHookTest::forwarded));
     }
 
     /** One probe result: the record's strings and meta (status, flags, start, sizes). */
@@ -53,6 +55,9 @@ final class ServletHookTest {
         String query = "token=s3cret";
         DispatcherType type = DispatcherType.REQUEST;
         boolean async;
+        boolean headerThrows;
+        String remoteAddr = "0:0:0:0:0:0:0:1";
+        int remotePort = 40000;
         Map<String, String> headers = new TreeMap<>(Map.of("Authorization", "Bearer x",
                 "Accept", "*/*"));
 
@@ -63,12 +68,23 @@ final class ServletHookTest {
         public Enumeration<String> getHeaders(String n) {
             return Collections.enumeration(List.of(headers.get(n)));
         }
+        public String getHeader(String n) {   // by name, ignoring case, as containers do
+            if (headerThrows) {
+                throw new IllegalStateException("broken wrapper");
+            }
+            for (Map.Entry<String, String> e : headers.entrySet()) {
+                if (e.getKey().equalsIgnoreCase(n)) {
+                    return e.getValue();
+                }
+            }
+            return null;
+        }
         public String getScheme() { return "http"; }
         public String getProtocol() { return "HTTP/1.1"; }
         public String getLocalAddr() { return "127.0.0.1"; }
         public int getLocalPort() { return 8080; }
-        public String getRemoteAddr() { return "0:0:0:0:0:0:0:1"; }
-        public int getRemotePort() { return 40000; }
+        public String getRemoteAddr() { return remoteAddr; }
+        public int getRemotePort() { return remotePort; }
         public long getContentLengthLong() { return 0; }
         public DispatcherType getDispatcherType() { return type; }
         public boolean isAsyncStarted() { return async; }
@@ -236,6 +252,41 @@ final class ServletHookTest {
             equal(1, got.size(), "one request");
             equal("/orders/7?token=***", got.get(0).s().get(3), "redacted path");
             equal(200L, got.get(0).status(), "status");
+        } finally {
+            Hooks.release();
+            Files.deleteIfExists(dir);
+        }
+    }
+
+    /**
+     * Behind a proxy (task 7j4): Tomcat's RemoteIpValve or Spring's
+     * ForwardedHeaderFilter answer getRemoteAddr/getRemotePort from the
+     * X-Forwarded-For or Forwarded header — the client's claim, not the
+     * socket's peer — so a request carrying either records no remote end
+     * (the tracer must not join by an attacker-influenced address); one
+     * without keeps it (recorded), and one whose getHeader throws is
+     * still recorded, without a remote end (review of 7j4).
+     */
+    static void forwarded() throws Exception {
+        List<Got> got = new ArrayList<>();
+        Path dir = Files.createTempDirectory("iormesh-servlet-test");
+        Hooks.openRing(dir.toString(), 1 << 16);
+        try {
+            Class<?> c = rewritten(got);
+            for (String h : List.of("X-Forwarded-For", "forwarded")) {
+                Req req = new Req();
+                req.remoteAddr = "203.0.113.9";   // port: still the proxy's
+                req.headers.put(h, "203.0.113.9");
+                check(!serve(c, (q, s) -> { }, req, new Resp()), "served");
+                Got g = got.remove(0);
+                equal("127.0.0.1:8080", g.s().get(5), h + ": local end kept");
+                equal("", g.s().get(6), h + ": no remote end");
+            }
+            Req broken = new Req();
+            broken.headerThrows = true;
+            check(!serve(c, (q, s) -> { }, broken, new Resp()), "served");
+            equal("", got.remove(0).s().get(6), "a throwing getHeader: recorded, no remote end");
+            check(got.isEmpty(), "nothing else");
         } finally {
             Hooks.release();
             Files.deleteIfExists(dir);
