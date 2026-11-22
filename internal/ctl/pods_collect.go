@@ -56,7 +56,7 @@ func (c collector) podEntryCollect(ctx context.Context, pe podEntry, projects []
 func (c collector) pod(ctx context.Context, pe podEntry, st k8s.PodState, projects []string) error {
 	label := pe.label(st.Name)
 	if !st.Tracer {
-		_, err := fmt.Fprintf(c.e.stdout, "%s: no %q tracer container, nothing to collect\n", label,
+		_, err := fmt.Fprintf(c.e.stdout, "%s: no %q tracer container, nothing to collect\n", safe(label),
 			k8s.TracerContainer)
 		return err
 	}

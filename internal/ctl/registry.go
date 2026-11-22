@@ -77,7 +77,7 @@ func editRegistry(path string, e env, edit func(*federate.Registry) error, done 
 	if err := r.Save(path); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(e.stdout, "%s (%s)\n", done, path)
+	_, err = fmt.Fprintf(e.stdout, "%s (%s)\n", safe(done), safe(path))
 	return err
 }
 

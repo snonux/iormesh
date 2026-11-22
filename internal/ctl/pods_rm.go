@@ -56,10 +56,10 @@ func rmPod(ref string, o rmPodOptions, e env) error {
 				"and loses what was not collected)", ref, err)
 		}
 		_, _ = fmt.Fprintf(e.stderr, "iormeshctl: warning: %s: last collect: %s; -force: dropping the entry\n",
-			ref, errText(err))
+			safe(ref), errText(err))
 	}
 	_, _ = fmt.Fprintf(e.stdout, "%s: the tracer in its pods is not stopped: an ephemeral container runs "+
-		"until its -duration ends or the pod goes, a sidecar until its patch is reverted\n", ref)
+		"until its -duration ends or the pod goes, a sidecar until its patch is reverted\n", safe(ref))
 	what := "removed " + ref
 	if o.project != "" {
 		what += " project " + o.project

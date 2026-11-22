@@ -10,7 +10,6 @@ import (
 
 	"iormesh/internal/federate"
 	"iormesh/internal/k8s"
-	"iormesh/internal/termsafe"
 )
 
 // splitTargets separates pod entry references from host names.
@@ -72,14 +71,14 @@ func deployPods(ctx context.Context, e env, entries []podEntry, attach time.Dura
 			return err
 		})
 		if err != nil {
-			_, _ = fmt.Fprintf(e.stderr, "iormeshctl: %s: %s\n", pe.ref, errText(err))
+			_, _ = fmt.Fprintf(e.stderr, "iormeshctl: %s: %s\n", safe(pe.ref), errText(err))
 			failed = append(failed, pe.ref)
 			continue
 		}
 		for _, st := range pods {
 			err := e.onHost(ctx, func(ctx context.Context) error { return deployPod(ctx, e, pe, st.Name, attach) })
 			if err != nil {
-				_, _ = fmt.Fprintf(e.stderr, "iormeshctl: %s: %s\n", termsafe.String(pe.label(st.Name)),
+				_, _ = fmt.Fprintf(e.stderr, "iormeshctl: %s: %s\n", safe(pe.label(st.Name)),
 					errText(err))
 				failed = append(failed, pe.label(st.Name))
 			}
@@ -102,8 +101,8 @@ func deployPods(ctx context.Context, e env, entries []podEntry, attach time.Dura
 //
 // The pod name comes from the API server and the session id from the
 // tracer in the pod. internal/k8s already refuses a pod name that is no
-// DNS label and a session id that is not 8 hex digits; the label and the
-// session are quoted through termsafe.String all the same, so a
+// DNS label and a session id that is not 8 hex digits; printDeployed
+// quotes the label and the session through safe all the same, so a
 // compromised cluster can never put a control sequence on the
 // operator's terminal should either check ever loosen.
 func deployPod(ctx context.Context, e env, pe podEntry, pod string, attach time.Duration) error {
@@ -119,29 +118,37 @@ func deployPod(ctx context.Context, e env, pe podEntry, pod string, attach time.
 	if err != nil {
 		return err
 	}
-	label := termsafe.String(pe.label(pod))
+	label := pe.label(pod)
 	var session string
 	if out == k8s.Started || out == k8s.Running || out == k8s.Replaced {
 		if session, err = k.WaitAttached(ctx, pe.projects[0].Name, attach); err != nil {
 			return err
 		}
-		session = termsafe.String(session)
 	}
+	return printDeployed(e, out, label, pe, k.Tracer(), session)
+}
+
+// printDeployed says what deploy did to one pod. Every value goes
+// through safe: the label and session come from the cluster, the
+// project and image from the operator's registry.
+func printDeployed(e env, out k8s.Outcome, label string, pe podEntry, tracer, session string) error {
+	var err error
+	project, image := pe.projects[0].Name, pe.scope.Image
 	switch out {
 	case k8s.Started:
-		_, err = fmt.Fprintf(e.stdout, "%s: started tracer, project %s, image %s; attached, session %s\n", label,
-			pe.projects[0].Name, pe.scope.Image, session)
+		_, err = fmt.Fprintf(e.stdout, "%s: started tracer, project %s, image %s; attached, session %s\n",
+			safe(label), safe(project), safe(image), safe(session))
 	case k8s.Replaced:
 		_, err = fmt.Fprintf(e.stdout, "%s: earlier tracer ended (its unsealed segment is lost, its published "+
-			"ones stay for collect); started tracer %s, project %s, image %s; attached, session %s\n", label,
-			k.Tracer(), pe.projects[0].Name, pe.scope.Image, session)
+			"ones stay for collect); started tracer %s, project %s, image %s; attached, session %s\n",
+			safe(label), safe(tracer), safe(project), safe(image), safe(session))
 	case k8s.Running:
 		_, err = fmt.Fprintf(e.stdout, "%s: tracer %s already running the pinned image, attached, session %s; "+
 			"left alone (a running ephemeral container cannot be restarted: restart the pod for a new session)\n",
-			label, k.Tracer(), session)
+			safe(label), safe(tracer), safe(session))
 	case k8s.SidecarVerified:
 		_, err = fmt.Fprintf(e.stdout, "%s: sidecar running the pinned image; its sessions are the "+
-			"sidecar patch's command line\n", label)
+			"sidecar patch's command line\n", safe(label))
 	default:
 		err = errors.New("unknown deploy outcome")
 	}

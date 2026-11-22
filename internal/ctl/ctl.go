@@ -243,7 +243,7 @@ func run(args []string, e env) int {
 	case "verify":
 		err = verifyCommand(args[1:], e)
 	case "version", "-version", "--version":
-		_, _ = fmt.Fprintln(e.stdout, "iormeshctl", version.Stamped()) // keeps version.Stamp linked in
+		_, _ = fmt.Fprintln(e.stdout, "iormeshctl", safe(version.Stamped())) // keeps version.Stamp linked in
 		return exitOK
 	case "help", "-h", "--help":
 		usage(e.stdout)
@@ -284,6 +284,19 @@ func exitCodeOf(err error, stderr io.Writer) int {
 // segment and request names from the traces — so one holding a control
 // character is printed Go-quoted (internal/termsafe), never raw.
 func errText(err error) string { return termsafe.String(err.Error()) }
+
+// safe is text as the terminal may see it: unchanged when printable,
+// Go-quoted when it holds a control character (internal/termsafe).
+// Hostnames, pod names, contexts, paths and service names come from
+// servers, clusters, traces and files that may be compromised, and
+// printed raw they could rewrite the operator's terminal. Every fmt print
+// in this package passes each text value through safe, errText or
+// termsafe itself — TestCtlPrintsAreTerminalSafe in internal/buildgate
+// fails on one that does not (task oj4) — so no print has to decide
+// whether its value could be hostile. Wrapping text already safe, or
+// built from safe parts, changes nothing: String leaves printable text,
+// its own quoted output included, as it is.
+func safe(s string) string { return termsafe.String(s) }
 
 func usage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `usage:

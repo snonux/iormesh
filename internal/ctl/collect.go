@@ -158,7 +158,7 @@ func (c collector) all(ctx context.Context, targets []collectTarget) error {
 	for _, tg := range targets {
 		err := c.e.onHost(ctx, func(ctx context.Context) error { return c.host(ctx, tg) })
 		if err != nil {
-			_, _ = fmt.Fprintf(c.e.stderr, "iormeshctl: %s: %s\n", tg.host, errText(err))
+			_, _ = fmt.Fprintf(c.e.stderr, "iormeshctl: %s: %s\n", safe(tg.host), errText(err))
 			failed = append(failed, tg.host)
 		}
 	}
@@ -289,7 +289,8 @@ func (c collector) project(ctx context.Context, t federate.Transport, host, name
 		return err
 	}
 	if !present {
-		_, _ = fmt.Fprintf(c.e.stdout, "%s: project %s: no %s yet, nothing to collect\n", host, name, remote)
+		_, _ = fmt.Fprintf(c.e.stdout, "%s: project %s: no %s yet, nothing to collect\n", safe(host), safe(name),
+			safe(remote))
 		return nil
 	}
 	return c.fetch(ctx, t, host, host, name, remote)
@@ -311,8 +312,8 @@ func (c collector) fetch(ctx context.Context, t federate.Transport, label, dir, 
 	if err := t.Fetch(ctx, remote, local); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(c.e.stdout, "%s: project %s: %d new files in %s\n", label, name,
-		max(countFiles(local)-before, 0), local)
+	_, err = fmt.Fprintf(c.e.stdout, "%s: project %s: %d new files in %s\n", safe(label), safe(name),
+		max(countFiles(local)-before, 0), safe(local))
 	return err
 }
 

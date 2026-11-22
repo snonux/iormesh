@@ -119,7 +119,8 @@ func unregisterUnreachable(regPath string, e env, host, name string, sc rmTarget
 		}
 	}
 	_, _ = fmt.Fprintf(e.stderr, "iormeshctl: warning: %s: %s; its traces and tracer stay on it, "+
-		"dropping %s from the registry only; %s\n", host, errText(cause), what, later)
+		"dropping %s from the registry only; %s\n", safe(host), errText(cause), safe(what),
+		safe(later))
 	if err := editRegistry(regPath, e, func(r *federate.Registry) error {
 		return r.Remove(host, name)
 	}, "removed "+removedWhat(host, name)); err != nil {
@@ -213,7 +214,7 @@ func (r remover) teardown(ctx context.Context, host string, projects []string, u
 		return fmt.Errorf("checking for the tracer: %w", err)
 	}
 	if !installed {
-		_, _ = fmt.Fprintf(r.e.stdout, "%s: no tracer installed, nothing to stop, sync or uninstall\n", host)
+		_, _ = fmt.Fprintf(r.e.stdout, "%s: no tracer installed, nothing to stop, sync or uninstall\n", safe(host))
 		return nil
 	}
 	if err := r.syncProjects(ctx, t, host, projects); err != nil {
@@ -261,7 +262,7 @@ func (r remover) stopProject(ctx context.Context, t federate.Transport, host, na
 	}
 	if r.force {
 		_, _ = fmt.Fprintf(r.e.stderr, "iormeshctl: warning: %s: project %s: stop: %s; -force: going on\n",
-			host, name, errText(err))
+			safe(host), safe(name), errText(err))
 		return nil
 	}
 	return fmt.Errorf("stop: %w; its last segment may be unpublished: nothing uninstalled "+
@@ -331,7 +332,7 @@ func (r remover) leftovers(ctx context.Context, t federate.Transport, host strin
 	}
 	if r.force {
 		_, _ = fmt.Fprintf(r.e.stderr, "iormeshctl: warning: %s: %s; -force: uninstalling, they are lost\n",
-			host, termsafe.String(msg))
+			safe(host), termsafe.String(msg))
 		return nil
 	}
 	return fmt.Errorf("%s; nothing uninstalled (rm -force uninstalls anyway and loses them)", msg)

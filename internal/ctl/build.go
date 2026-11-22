@@ -144,8 +144,8 @@ func buildAndReport(ctx context.Context, e env, f buildFlags) error {
 	}
 	_, err = fmt.Fprintf(e.stdout, "\ngraph      %s\nmodel      %s\nreport     %s\nsite       %s\n"+
 		"           iormeshctl open  ·  iormeshctl show\n",
-		filepath.Join(out.dir, graphFileName), filepath.Join(out.dir, modelFileName),
-		filepath.Join(out.dir, reportFileName), filepath.Join(out.site, site.IndexName))
+		safe(filepath.Join(out.dir, graphFileName)), safe(filepath.Join(out.dir, modelFileName)),
+		safe(filepath.Join(out.dir, reportFileName)), safe(filepath.Join(out.site, site.IndexName)))
 	if err == nil && len(out.model.Health.BadSegments) > 0 {
 		err = fmt.Errorf("%w: %d bad segments left out of the build (listed above)",
 			errBadSegments, len(out.model.Health.BadSegments))
