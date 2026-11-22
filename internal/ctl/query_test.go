@@ -139,6 +139,13 @@ func TestQueryInvalid(t *testing.T) {
 		{[]string{"-max-bytes", "10"}, "below"},
 		{[]string{"extra"}, "takes no arguments"},
 		{[]string{"-project", "-bad"}, "invalid project"},
+		{[]string{"-event", "opennat"}, "unknown event kind \"opennat\""},
+		{[]string{"-event", "opennat"}, "openat"},
+		{[]string{"-errno", "ENOPE"}, "-errno \"ENOPE\""},
+		{[]string{"-errno", "-5"}, "-errno \"-5\""},
+		{[]string{"-pid", "abc"}, "-pid \"abc\""},
+		{[]string{"-pid", "4294967296"}, "-pid \"4294967296\""},
+		{[]string{"-otel-trace", "xyz"}, "32 lowercase hex"},
 	} {
 		code := f.run(slices.Concat([]string{"query"}, tc.args)...)
 		if code != exitUsage || !strings.Contains(f.stderr.String(), tc.msg) || f.stdout.Len() != 0 {
@@ -245,6 +252,38 @@ func TestQueryMethod(t *testing.T) {
 	if code := f.run(args...); code != exitError ||
 		!strings.Contains(f.stderr.String(), "left out shop/appJ/"+filepath.Base(table)) {
 		t.Errorf("damaged table: exit %d, stderr %s", code, f.stderr)
+	}
+}
+
+// TestQueryKindPidErrnoOtel: -event, -pid, -errno (a name or a number)
+// and -otel-trace (any case) select through the store and AND with each
+// other (task wh4). The fixture's app1 (pid 100) has two connects
+// failing EINPROGRESS; javaTrace's write (pid 300) runs in a span.
+func TestQueryKindPidErrnoOtel(t *testing.T) {
+	f := newBuildFixture(t)
+	h, methods := javaTrace()
+	h.events[2].Otel = &schema.Otel{TraceID: "4bf92f3577b34da6a3ce929d0e0e4736", SpanID: "00f067aa0ba902b7"}
+	writeJavaSegment(t, f.store, "appJ", h, methods)
+	for _, tc := range []struct {
+		args []string
+		want int
+	}{
+		{[]string{"-event", "connect", "-pid", "100", "-errno", "EINPROGRESS"}, 2},
+		{[]string{"-event", "connect", "-errno", "115"}, 2},
+		{[]string{"-errno", "einprogress", "-pid", "200"}, 0},
+		{[]string{"-event", "accept4", "-pid", "200"}, 1},
+		{[]string{"-otel-trace", "4BF92F3577B34DA6A3CE929D0E0E4736"}, 1},
+		{[]string{"-otel-trace", "4bf92f3577b34da6a3ce929d0e0e4736", "-event", "openat"}, 0},
+	} {
+		evs, _ := queryLines(t, f.mustRun(t, slices.Concat([]string{"query"}, queryProjects, tc.args)...))
+		if len(evs) != tc.want {
+			t.Errorf("%v: %d events, want %d", tc.args, len(evs), tc.want)
+		}
+		for _, ev := range evs {
+			if tc.args[0] == "-event" && ev.Event != tc.args[1] {
+				t.Errorf("%v: a %s event", tc.args, ev.Event)
+			}
+		}
 	}
 }
 

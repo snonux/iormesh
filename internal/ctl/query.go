@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"iormesh/internal/federate"
@@ -51,6 +52,7 @@ type queryFlags struct {
 	from, to                           string
 	host, app, thread, conn, file, mth string
 	ref                                string
+	event, pid, errno, otelTrace       string
 	follow                             bool
 	maxBytes                           int64
 }
@@ -90,6 +92,10 @@ func addQueryFlags(fs *flag.FlagSet, f *queryFlags) {
 	fs.StringVar(&f.file, "file", "", "path glob: events naming it and the fds opened from it")
 	fs.StringVar(&f.mth, "method", "", "Java frame glob: class#method or class#method(file:line)")
 	fs.StringVar(&f.ref, "ref", "", "one event, by a conversation step's ref (<session>/<seq>; iormeshctl show sequence)")
+	fs.StringVar(&f.event, "event", "", "event kind, exactly (openat, connect, http, ...)")
+	fs.StringVar(&f.pid, "pid", "", "process id, in decimal")
+	fs.StringVar(&f.errno, "errno", "", "failed with this errno: a name (ENOENT) or a number (2)")
+	fs.StringVar(&f.otelTrace, "otel-trace", "", "OpenTelemetry trace id (32 hex digits): events inside its spans")
 	fs.Int64Var(&f.maxBytes, "max-bytes", defaultMaxBytes, "output cap in bytes, the truncation record included")
 }
 
@@ -98,7 +104,10 @@ func addQueryFlags(fs *flag.FlagSet, f *queryFlags) {
 // only once the store is listed.
 func parseQueryFilter(f queryFlags) (query.Filter, *query.TimeSpec, *query.TimeSpec, error) {
 	filter := query.Filter{Host: f.host, App: f.app, Thread: f.thread, Conn: f.conn,
-		Follow: f.follow, File: f.file, Method: f.mth, Ref: f.ref}
+		Follow: f.follow, File: f.file, Method: f.mth, Ref: f.ref, Event: f.event}
+	if err := parseValueFlags(f, &filter); err != nil {
+		return query.Filter{}, nil, nil, err
+	}
 	var specs [2]*query.TimeSpec
 	for i, s := range []string{f.from, f.to} {
 		if s == "" {
@@ -118,6 +127,30 @@ func parseQueryFilter(f queryFlags) (query.Filter, *query.TimeSpec, *query.TimeS
 			errUsage, f.maxBytes, query.MinMaxBytes())
 	}
 	return filter, specs[0], specs[1], nil
+}
+
+// parseValueFlags puts -pid, -errno and -otel-trace into filter (task
+// wh4): the pid as a decimal uint32, the errno as the name events carry
+// (query.ParseErrno), the trace id lowercased — the form events carry,
+// so one copied from an OTEL backend in capitals still matches. The
+// filter's Validate checks the rest, -event's kind included.
+func parseValueFlags(f queryFlags, filter *query.Filter) error {
+	if f.pid != "" {
+		pid, err := strconv.ParseUint(f.pid, 10, 32)
+		if err != nil {
+			return fmt.Errorf("%w: -pid %q: want a decimal process id", errUsage, f.pid)
+		}
+		filter.PID, filter.HasPID = uint32(pid), true
+	}
+	if f.errno != "" {
+		name, err := query.ParseErrno(f.errno)
+		if err != nil {
+			return fmt.Errorf("%w: %v", errUsage, err)
+		}
+		filter.Errno = name
+	}
+	filter.OtelTrace = strings.ToLower(f.otelTrace)
+	return nil
 }
 
 // runQuery loads the store, merges it, and writes the slice; bad

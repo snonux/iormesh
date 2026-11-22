@@ -1662,7 +1662,13 @@ Kubernetes (M7) build on it.
   `{"event":"truncated","args":{"emitted":N,"remaining":M}}`;
   lines are escaped for terminals; bad segments are named and
   exit 1. Predicate pushdown waits for a cheaper check
-  (docs/implementation.md M5).
+  (docs/implementation.md M5). *Task wh4* adds exact-value
+  filters, ANDed with the rest: `-event KIND` (a schema kind;
+  an unknown one is a usage error listing the kinds), `-pid`,
+  `-errno` (a Linux errno name or number, matched against the
+  recorded `err` name) and `-otel-trace ID` (`otel.trace_id`:
+  the I/O inside one distributed trace's spans). All are
+  checked before anything is read.
 - Plus the per-run summary/report export — the LLM rollup of the
   whole mesh (see "Trace output contract"). *Built (task qb4):*
   `build` feeds `internal/report` the events the merge reads (no
@@ -3587,7 +3593,8 @@ can reconstruct behavior and check it against source code:
   background activity differs from run to run, and no claim
   is made.
 - **Sliceable**: `iormeshctl query` (M5) cuts the merged trace
-  by time, host, app, thread, connection, file or method into
+  by time, host, app, thread, connection, file, method, event
+  kind, pid, errno or OpenTelemetry trace id into
   size-capped, schema-conformant NDJSON with an explicit
   truncation record — the unit an LLM actually reads.
 - **Deterministic SVG**: fixed layout rules, no randomness — the

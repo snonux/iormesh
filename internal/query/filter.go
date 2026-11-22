@@ -72,11 +72,61 @@ type Filter struct {
 	// and the site turn a step into its raw event (docs/visualization.md
 	// "Detail on demand").
 	Ref string
+	// Event is one event kind (schema.Kinds), matched exactly.
+	Event string
+	// PID matches the event's pid when HasPID is set (a pid of 0 is
+	// a value, not "unset", as with HasTo).
+	PID    uint32
+	HasPID bool
+	// Errno matches the event's err: the errno name the tracer recorded
+	// for a failed syscall (ret < 0). It is the recorded spelling —
+	// ParseErrno turns a number, a lowercase name or an alias into it.
+	Errno string
+	// OtelTrace matches otel.trace_id: the events that ran inside a
+	// span of that OpenTelemetry trace (Java-attributed only).
+	OtelTrace string
 }
 
 // Validate rejects a filter no event could be judged by: a malformed
-// glob, Follow without Conn, an empty or reversed time window.
+// glob, Follow without Conn, an empty or reversed time window, an
+// unknown event kind or errno name, a malformed trace id.
 func (f Filter) Validate() error {
+	if err := f.validateGlobsAndRef(); err != nil {
+		return err
+	}
+	if err := f.validateValues(); err != nil {
+		return err
+	}
+	switch {
+	case f.Follow && f.Conn == "":
+		return fmt.Errorf("%w: -follow needs -conn", ErrInvalid)
+	case f.HasTo && f.From >= f.To:
+		return fmt.Errorf("%w: the window -from %d -to %d is empty", ErrInvalid, f.From, f.To)
+	}
+	return nil
+}
+
+// validateValues checks the exact-value filters (task wh4): an unknown
+// kind is refused with the list of known ones, an errno must be a name
+// the tracer records (ParseErrno's output), a trace id the W3C form
+// events carry.
+func (f Filter) validateValues() error {
+	if f.Event != "" && !schema.KnownKind(f.Event) {
+		return fmt.Errorf("%w: unknown event kind %q; the kinds are: %s",
+			ErrInvalid, f.Event, strings.Join(schema.Kinds(), ", "))
+	}
+	if f.Errno != "" && !knownErrno(f.Errno) {
+		return fmt.Errorf("%w: -errno %q is no errno name the tracer records", ErrInvalid, f.Errno)
+	}
+	if f.OtelTrace != "" && !schema.ValidTraceID(f.OtelTrace) {
+		return fmt.Errorf("%w: -otel-trace %q: want 32 lowercase hex digits, not all zero",
+			ErrInvalid, f.OtelTrace)
+	}
+	return nil
+}
+
+// validateGlobsAndRef checks the glob patterns and the ref.
+func (f Filter) validateGlobsAndRef() error {
 	for _, g := range []struct{ name, pattern string }{{"host", f.Host}, {"app", f.App},
 		{"thread", f.Thread}, {"file", f.File}, {"method", f.Method}} {
 		if _, err := path.Match(g.pattern, ""); err != nil {
@@ -87,12 +137,6 @@ func (f Filter) Validate() error {
 		if _, _, err := ParseRef(f.Ref); err != nil {
 			return err
 		}
-	}
-	switch {
-	case f.Follow && f.Conn == "":
-		return fmt.Errorf("%w: -follow needs -conn", ErrInvalid)
-	case f.HasTo && f.From >= f.To:
-		return fmt.Errorf("%w: the window -from %d -to %d is empty", ErrInvalid, f.From, f.To)
 	}
 	return nil
 }

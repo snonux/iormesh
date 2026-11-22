@@ -4887,12 +4887,15 @@ iormeshctl query --project shop --thread 'http-*' \
 iormeshctl query --project shop --conn conn:4be1… --follow
 iormeshctl query --project shop --file '/etc/orders.conf'
 iormeshctl query -ref shop/orders/orders.example.org-o1/20
+iormeshctl query --project shop --event openat --errno ENOENT --pid 4711
+iormeshctl query --project shop --otel-trace 4bf92f3577b34da6a3ce929d0e0e4736
 ```
 
 Built by task pb4 (cgo-free):
 
 ```
 internal/query/filter.go     # Filter, Validate, ParseTime/Resolve
+internal/query/errno.go      # Linux errno table, ParseErrno (wh4)
 internal/query/match.go      # the predicates and their state
 internal/query/write.go      # the byte cap, the truncation record
 internal/query/query.go      # Run: (follow pass,) filter, encode
@@ -4934,10 +4937,19 @@ internal/termsafe/           # + JSON: escape a line for a terminal
   text, through the session's methods tables (the union of its
   segments' tables, each checked in the child like a segment).
   `-ref` one event, by a conversation step's ref
-  (`<session>/<seq>`, task mb4). A malformed glob or ref,
-  `-follow` without `-conn`, an empty window or a cap below the
-  record's size is a usage error (exit 2) before anything is
-  read.
+  (`<session>/<seq>`, task mb4). Task wh4's exact-value
+  filters: `-event` one kind of `schema.Kinds()`; `-pid` the
+  decimal pid; `-errno` the recorded `err`, given as a name in
+  any case (`ENOENT`, an alias such as `EWOULDBLOCK` → `EAGAIN`)
+  or a number (`2`), mapped through a Linux errno table in
+  `internal/query/errno.go` — the controller also builds for
+  darwin, whose numbers differ, and a linux test holds the
+  table to the tracer's `unix.ErrnoName`; `-otel-trace`
+  `otel.trace_id`, lowercased first. A malformed glob or ref,
+  `-follow` without `-conn`, an unknown kind (the message lists
+  the kinds) or errno, a bad pid or trace id, an empty window
+  or a cap below the record's size is a usage error (exit 2)
+  before anything is read.
 - **Output** is schema NDJSON in source order (store name, a
   session's segments in seq order — the `(host, seq)` order),
   each line `termsafe.JSON`-escaped: C1 controls, DEL and bidi
