@@ -4061,8 +4061,9 @@ published by it; uploading is a separate, human step.
   holding the static tracer `iormesh-linux-<arch>`, the agent
   jar `iormesh-agent.jar`, the controllers
   `iormeshctl-{linux,darwin}-<arch>`, each with its
-  `.minisig`, plus `minisign.pub` (the release public key) and
-  `LICENSE` once the repository has one. Every artifact is
+  `.minisig`, plus `minisign.pub` (the release public key),
+  `CHANGELOG.md`, and `LICENSE` once the repository has one
+  (each extra is packed when present). Every artifact is
   verified against its signature at the release version before
   it is packed, and the verified bytes are the packed ones.
 - **Checksums**: `SHA256SUMS` (sha256sum format) over the
@@ -4071,15 +4072,15 @@ published by it; uploading is a separate, human step.
 - **Reproducible**: entries in name order, owner root (0/0),
   modes 0755/0644, every mtime `$SOURCE_DATE_EPOCH` or else the
   release commit's time, gzip header without name or time; the
-  same signed `dist/` gives the same bytes (a unit test packs
-  twice). The signatures themselves carry a signing timestamp,
+  same signed `dist/` gives the same bytes with the same Go
+  toolchain (its gzip encoder; a unit test packs twice). The signatures themselves carry a signing timestamp,
   so a re-signed `dist/` gives new archives.
 - **Operator check**: the key to trust is the one published
   apart from the archives (the copy inside is a convenience,
-  not an anchor). `minisign -Vm SHA256SUMS -p minisign.pub`,
-  `sha256sum -c SHA256SUMS`, then, after unpacking, `iormeshctl
-  verify -key minisign.pub iormesh-linux-<arch>` (or `minisign
-  -Vm`) for each build; pinning that key at
+  not an anchor). With that key: `minisign -Vm SHA256SUMS -p
+  KEY`, `sha256sum -c SHA256SUMS`, then, after unpacking,
+  `iormeshctl verify -key KEY iormesh-linux-<arch>` (or
+  `minisign -Vm`) for each build; pinning that key at
   `~/.config/iormesh/minisign.pub` lets `iormeshctl deploy`
   check every build again before it pushes. Details:
   [docs/build.md](docs/build.md), "Releases".

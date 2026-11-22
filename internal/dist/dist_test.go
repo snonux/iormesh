@@ -131,6 +131,9 @@ type entry struct {
 	data []byte
 }
 
+// readArchive returns path's entries, after checking its gzip header
+// carries nothing of the packing host: no mtime, no name, OS unknown
+// (255), as Go's writer leaves it.
 func readArchive(t *testing.T, path string) []entry {
 	t.Helper()
 	f, err := os.Open(path)
@@ -141,6 +144,10 @@ func readArchive(t *testing.T, path string) []entry {
 	zr, err := gzip.NewReader(f)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !zr.ModTime.IsZero() || zr.Name != "" || zr.Comment != "" || zr.OS != 255 {
+		t.Errorf("%s: gzip header mtime %v name %q comment %q OS %d, want zero, empty, empty, 255",
+			path, zr.ModTime, zr.Name, zr.Comment, zr.OS)
 	}
 	tr := tar.NewReader(zr)
 	var out []entry
@@ -254,6 +261,9 @@ func TestPackDeterministic(t *testing.T) {
 		if !bytes.Equal(a, b) {
 			t.Errorf("%s differs between %s and %s", filepath.Base(paths1[i]), out1, out2)
 		}
+	}
+	for _, p := range paths1[:len(paths1)-1] {
+		_ = readArchive(t, p) // checks the gzip header
 	}
 }
 

@@ -23,9 +23,10 @@ import (
 	"iormesh/internal/version"
 )
 
-// releaseLicense is packed into every archive once the repository has it;
-// the licence itself is the owner's choice (task rh4).
-const releaseLicense = "LICENSE"
+// releaseExtras are packed into every archive when the repository has
+// them: CHANGELOG.md, and LICENSE once the owner has chosen the licence
+// (task rh4). A missing one is noted, not fatal.
+var releaseExtras = []string{"CHANGELOG.md", "LICENSE"}
 
 // Release cuts the release of the tagged HEAD with engine (docker or
 // podman), e.g. "mage release podman": it refuses a dirty tree or a HEAD
@@ -84,9 +85,13 @@ func packRelease(key minisign.PrivateKey, mtime time.Time) error {
 	if err := os.RemoveAll(out); err != nil {
 		return err
 	}
-	var extra []string
-	if _, err := os.Stat(releaseLicense); err == nil {
-		extra = append(extra, releaseLicense)
+	var extra, missing []string
+	for _, name := range releaseExtras {
+		if _, err := os.Stat(name); err == nil {
+			extra = append(extra, name)
+		} else {
+			missing = append(missing, name)
+		}
 	}
 	paths, err := dist.Pack(dist.Options{
 		DistDir: distDir, OutDir: out, Version: version.Version,
@@ -100,8 +105,8 @@ func packRelease(key minisign.PrivateKey, mtime time.Time) error {
 		return err
 	}
 	fmt.Printf("release %s:\n  %s\n", version.Version, strings.Join(append(paths, sig), "\n  "))
-	if len(extra) == 0 {
-		fmt.Println("note: no LICENSE in the repository; the archives carry none")
+	for _, name := range missing {
+		fmt.Printf("note: no %s in the repository; the archives carry none\n", name)
 	}
 	return nil
 }

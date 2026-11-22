@@ -376,30 +376,39 @@ ls dist/release/0.1.0/
 - **Archive contents**, under `iormesh-<version>-<arch>/`:
   `iormesh-linux-<arch>`, `iormesh-agent.jar`,
   `iormeshctl-linux-<arch>`, `iormeshctl-darwin-<arch>`, each
-  with its `.minisig`; `minisign.pub`; `LICENSE` once the
-  repository has one (the licence is the owner's choice, still
-  open). Each artifact is verified against its signature at the
+  with its `.minisig`; `minisign.pub`; `CHANGELOG.md`; `LICENSE`
+  once the repository has one (the licence is the owner's choice,
+  still open). Each of the last two is packed when present, and
+  a missing one is noted. Each artifact is verified against its signature at the
   release version before it is packed, and the verified bytes
   are the packed ones.
 - **Reproducible**: entries sorted, owner root 0/0, modes
   0755 (binaries, the top directory) or 0644, every mtime
   `$SOURCE_DATE_EPOCH` or else the commit time, gzip header
   without name or time. The same signed `dist/` packs to the same
-  bytes (`internal/dist`'s `TestPackDeterministic`); signing again
-  changes the signatures' timestamps and so the archives.
+  bytes with the same Go toolchain (its gzip encoder could change
+  between releases; `internal/dist`'s `TestPackDeterministic`);
+  signing again changes the signatures' timestamps and so the
+  archives.
 
 An operator checks a download with the release key obtained
-apart from the archives (the `minisign.pub` inside is a
-convenience, not a trust anchor; compare it first):
+apart from the archives, here saved as `~/iormesh-release.pub`.
+The `minisign.pub` inside an archive is a convenience, not a
+trust anchor: use it only after comparing it with that key.
 
 ```bash
-minisign -Vm SHA256SUMS -p minisign.pub   # or iormeshctl verify -key
+KEY=~/iormesh-release.pub                 # the published key
+minisign -Vm SHA256SUMS -p "$KEY"
 sha256sum -c SHA256SUMS
 tar -xzf iormesh-0.1.0-amd64.tar.gz && cd iormesh-0.1.0-amd64
-iormeshctl verify -key minisign.pub iormesh-linux-amd64 \
-  iormesh-agent.jar                         # every build: OK
-install -m 0644 minisign.pub ~/.config/iormesh/minisign.pub
+./iormeshctl-linux-amd64 verify -key "$KEY" iormesh-linux-amd64 \
+  iormesh-agent.jar iormeshctl-linux-amd64  # every build: OK
+install -D -m 0644 "$KEY" ~/.config/iormesh/minisign.pub
 ```
+
+The controller checking itself proves nothing on its own; the
+`minisign -Vm SHA256SUMS` step, done with a trusted `minisign`,
+is what vouches for the archive it came in.
 
 With the key pinned there, `iormeshctl deploy -dist DIR` checks
 every build again before it pushes.

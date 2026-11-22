@@ -61,7 +61,8 @@ type Options struct {
 	PublicKey minisign.PublicKey
 	// ModTime is every entry's mtime (SourceDate), never the wall clock.
 	ModTime time.Time
-	// Extra are further files (LICENSE) packed at their base names.
+	// Extra are further files (CHANGELOG.md, LICENSE) packed at their
+	// base names.
 	Extra []string
 }
 
