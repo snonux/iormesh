@@ -145,6 +145,26 @@ func TestStatusPodGone(t *testing.T) {
 	}
 }
 
+// TestStatusPodFails: `ready -status` failing other than with the old
+// image's flag refusal (a corrupt state.json) is the row's error, never
+// hidden behind a `ready -state` answer.
+func TestStatusPodFails(t *testing.T) {
+	f := newPodFixture(t, "")
+	f.pod(t, podObject("checkout-0", uid(1), true))
+	f.file(t, "statusfail-checkout-0", nil)
+	if code := f.run("status", "kind/shop/checkout-0"); code != exitError {
+		t.Fatalf("exit %d, want 1: %s", code, f.stderr)
+	}
+	if out := f.stdout.String(); !strings.Contains(out, "state: corrupt") || !strings.Contains(out, " error ") {
+		t.Errorf("rows:\n%s", out)
+	}
+	for _, c := range f.calls(t) {
+		if strings.Contains(strings.Join(c, " "), " -state") {
+			t.Errorf("asked -state after a real failure: %q", c)
+		}
+	}
+}
+
 // TestList (task ph4): list prints the registry — every host and pod
 // entry with each project, what it traces and its pass-through flags —
 // and contacts nothing.

@@ -52,8 +52,9 @@ type sessionState struct {
 	EndReason    string    `json:"end_reason,omitempty"`
 	// Version and Argv are the build and the command line of the run
 	// (task ph4): upgrade replaces the binary, not a running session, so
-	// only the run itself can say which tracer and flags it has, and
-	// iormeshctl status shows them to make a version skew visible. Both
+	// only the run itself can say which tracer and flags it has.
+	// iormeshctl status shows the version, to make a version skew
+	// visible; Argv is there for an operator reading the file. Both
 	// are omitted by tracers from before them; a reader treats the empty
 	// values as unknown, never as an error.
 	Version string   `json:"version,omitempty"`

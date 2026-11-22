@@ -238,8 +238,14 @@ func podStatus(ctx context.Context, pe podEntry, st k8s.PodState, projects []str
 	return rows
 }
 
+// oldImageRefusal is what Go's flag package says about a flag it does not
+// know, on the tracer's stderr, which the kubectl transport's error
+// carries (internal/k8s explain).
+const oldImageRefusal = "flag provided but not defined"
+
 // podProjectStatus asks one pod's tracer for one project's report. An
-// image from before -status refuses the flag (a remote exit status); it
+// image from before -status refuses the flag (a remote exit status with
+// oldImageRefusal; any other failure is the row's error); it
 // is then asked `ready -state`, whose answer has the state and an end
 // reason but no version, ends-by or ready/ count.
 func podProjectStatus(ctx context.Context, t federate.Transport, label, p string) statusRow {
@@ -256,7 +262,9 @@ func podProjectStatus(ctx context.Context, t federate.Transport, label, p string
 			row.st.State = k8s.AttachPending // no state.json yet: not attached
 		}
 		return row
-	case !errors.As(err, &exitErr):
+	case !errors.As(err, &exitErr) || !strings.Contains(err.Error(), oldImageRefusal):
+		// kubectl's own failure, or -status failing for another reason
+		// (a corrupt state.json): asking -state would only hide it.
 		row.note, row.failed = errText(err), true
 		return row
 	}

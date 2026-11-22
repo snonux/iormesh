@@ -23,7 +23,7 @@ import (
 // state-NAME for `exec NAME … ready -state` (else an attached session,
 // "running 1a2b3c4d"), status-NAME for `exec NAME … ready -status` (else
 // the refusal of an image from before the flag: usage, exit status 2,
-// task ph4), and down-NAME makes every exec into NAME fail as
+// task ph4; statusfail-NAME makes it fail otherwise, exit 1), and down-NAME makes every exec into NAME fail as
 // kubectl itself does (exit 1, no "command terminated" line). debug
 // keeps a copy of its --custom file as custom.json. A file hang makes
 // every call hang for 30 s without an answer (an API server or exec
@@ -50,6 +50,9 @@ exec)
   case " $* " in *" -remove "*) exit 0 ;; esac
   case " $* " in *" -status "*)
     if [ -f "$FAKE_DIR/status-$pod" ]; then cat "$FAKE_DIR/status-$pod"; exit 0; fi
+    if [ -f "$FAKE_DIR/statusfail-$pod" ]; then
+      echo "state: corrupt" >&2; echo "command terminated with exit code 1" >&2; exit 1
+    fi
     echo "flag provided but not defined: -status" >&2
     echo "command terminated with exit code 2" >&2; exit 2 ;;
   esac

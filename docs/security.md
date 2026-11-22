@@ -286,7 +286,11 @@ truth.
     `ready/` segments, nothing else. Every answer is the
     server's text: it reaches the terminal through `termsafe`
     like everything iormeshctl prints. `iormeshctl list` reads
-    the registry only.
+    the registry only. `state.json` (0644) holds the tracer's
+    own argv, unredacted — never a traced process's: that argv
+    is the registry entry's flags as deploy passed them, which
+    the deploying user chose and which any local user already
+    sees in the tracer's `/proc/<pid>/cmdline`.
   - **What the rule then grants**: installing a build the
     release key signed, for this arch, not older, and the
     agent jar signed at that build's version — nothing
