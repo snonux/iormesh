@@ -208,16 +208,7 @@ func urlEnd(s string, start, from int, toWordEnd bool) int {
 // ("@//h:1521/svc"), "@h:1521:sid" or a descriptor holds one. Text without
 // a '/' there ("jdbc:oracle:thin:@//h/svc", "…:scott@h") has no password.
 func maskOracle(s string) string {
-	// Byte-wise ASCII folding keeps lower's offsets valid in s, which
-	// strings.ToLower does not promise (some runes and invalid UTF-8
-	// change length).
-	lb := []byte(s)
-	for i, c := range lb {
-		if c >= 'A' && c <= 'Z' {
-			lb[i] = c + 'a' - 'A'
-		}
-	}
-	lower := string(lb)
+	lower := asciiLower(s)
 	var b strings.Builder
 	last := 0
 	for off := 0; ; {
@@ -225,32 +216,54 @@ func maskOracle(s string) string {
 		if i < 0 {
 			break
 		}
-		drv := off + i + len("jdbc:oracle:")
-		off = drv
-		c := strings.IndexByte(s[drv:], ':')
-		if c <= 0 || !isName(s[drv:drv+c]) {
+		off += i + len("jdbc:oracle:")
+		from, to, ok := oraclePassword(s, off)
+		if !ok {
 			continue
 		}
-		creds := drv + c + 1
-		word := s[creds:]
-		if sp := strings.IndexFunc(word, unicode.IsSpace); sp >= 0 {
-			word = word[:sp]
-		}
-		at := strings.LastIndexByte(word, '@')
-		slash := strings.IndexByte(word, '/')
-		if at < 0 || slash < 0 || slash > at {
-			continue
-		}
-		b.WriteString(s[last : creds+slash+1])
+		b.WriteString(s[last:from])
 		b.WriteString(Mask)
-		last = creds + at
-		off = last
+		last, off = to, to
 	}
 	if last == 0 {
 		return s
 	}
 	b.WriteString(s[last:])
 	return b.String()
+}
+
+// oraclePassword returns the [from, to) range of the password in the
+// Oracle URL whose driver name starts at drv ("thin:scott/tiger@h"), and
+// false when there is none (see maskOracle).
+func oraclePassword(s string, drv int) (from, to int, ok bool) {
+	c := strings.IndexByte(s[drv:], ':')
+	if c <= 0 || !isName(s[drv:drv+c]) {
+		return 0, 0, false
+	}
+	creds := drv + c + 1
+	word := s[creds:]
+	if sp := strings.IndexFunc(word, unicode.IsSpace); sp >= 0 {
+		word = word[:sp]
+	}
+	at := strings.LastIndexByte(word, '@')
+	slash := strings.IndexByte(word, '/')
+	if at < 0 || slash < 0 || slash > at {
+		return 0, 0, false
+	}
+	return creds + slash + 1, creds + at, true
+}
+
+// asciiLower folds A-Z byte by byte. Unlike strings.ToLower it keeps
+// every byte offset valid in s (some runes and invalid UTF-8 change
+// length there), so an index found in the result can cut s.
+func asciiLower(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c + 'a' - 'A'
+		}
+	}
+	return string(b)
 }
 
 // isSchemeByte reports a byte that may appear in a URL scheme (RFC 3986:

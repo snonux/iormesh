@@ -157,10 +157,12 @@ func (p Policy) see(st *argvState, arg string) {
 // value of a denied option and must be masked too. The forms are tried
 // from the most specific: a program's own flag, a "Name: value" header or
 // colon pair, KEY=VALUE (whose value is redacted like an element of its
-// own: it may hold a header, a command or another pair), a parameter run
-// ("a=b&secret=x", "jdbc:h2:file:/d;USER=u;PASSWORD=x"), an element that
+// own: it may hold a header, a command or another pair), an element that
 // begins with a URL, several words, a bare denied option, and finally
-// URLs anywhere in the text.
+// URLs anywhere in the text. Before KEY=VALUE, the denied pairs of a
+// parameter run ("a=b&secret=x", "jdbc:h2:file:/d;USER=u;PASSWORD=x")
+// are masked; the element then goes on through the other forms, so a URL
+// in it is still masked as a URL.
 func (p Policy) argvElem(st *argvState, arg string) (string, bool) {
 	if out, next, ok := p.flagRule(st.progs, arg); ok {
 		return out, next
@@ -168,23 +170,18 @@ func (p Policy) argvElem(st *argvState, arg string) (string, bool) {
 	if out, next, ok := p.colonPair(arg); ok {
 		return out, next
 	}
+	if isParamRun(arg) {
+		arg = p.paramRun(arg)
+	}
 	// A key with URL, path or space characters is not an option name: in
 	// "https://h/?api_key=x" the '=' belongs to the query string. A denied
-	// first key masks the whole rest, '&' and ';' included; a harmless one
-	// may still start a run whose later pair is a secret
-	// ("grant_type=x&client_secret=y"), which is judged pair by pair.
+	// first key masks the whole rest, '&' and ';' included.
 	if key, value, ok := strings.Cut(arg, "="); ok && !strings.ContainsAny(key, "/?&#@") && !hasSpace(key) {
 		if denied(p.ArgvDeny, optionKey(key)) {
 			return key + "=" + Mask, false
 		}
-		if isParamRun(value) {
-			return p.paramRun(arg), false
-		}
 		out, next := p.argvElem(st, value)
 		return key + "=" + out, next
-	}
-	if isParamRun(arg) {
-		return p.paramRun(arg), false
 	}
 	if startsWithURL(arg) {
 		return p.urlElem(st, arg)
@@ -204,15 +201,15 @@ func (p Policy) argvElem(st *argvState, arg string) (string, bool) {
 	return p.wordText(arg), false
 }
 
-// isParamRun reports a run of "name=value" pairs joined by '&' or ';' —
-// a form body ("user=bob&password=x") or a JDBC property list without
-// "://" ("jdbc:h2:file:/data/db;USER=sa;PASSWORD=x"). A URL is not one:
-// Text masks its parameters under QueryDeny, which may mask more than
-// ArgvDeny does. Neither is a several-word element, which words splits
-// first and whose words come back here one by one.
+// isParamRun reports what may be a run of "name=value" pairs joined by
+// '&' or ';' — a form body ("user=bob&password=x"), a JDBC property list
+// without "://" ("jdbc:h2:file:/data/db;USER=sa;PASSWORD=x"), or a form
+// body holding a raw URL ("redirect_uri=https://app/cb&client_secret=x",
+// where the URL path would otherwise swallow the secret). A several-word
+// element is not one: words splits it first and its words come back to
+// argvElem one by one.
 func isParamRun(s string) bool {
-	return strings.ContainsAny(s, "&;") && strings.Contains(s, "=") &&
-		!strings.Contains(s, "://") && !hasSpace(s)
+	return strings.ContainsAny(s, "&;") && strings.Contains(s, "=") && !hasSpace(s)
 }
 
 // paramRun masks the value of every pair of a parameter run whose name
@@ -221,6 +218,12 @@ func isParamRun(s string) bool {
 // name is the whole option ("-Ddb.url=jdbc:h2:…;PASSWORD=x" yields
 // "-Ddb.url", "USER", "PASSWORD"). Splitting at every '&' and ';' is what
 // a form decoder and a JDBC driver do too, so a value cannot hold one.
+// It only adds masks: a URL query in the run is still masked under
+// QueryDeny afterwards (argvElem goes on), which may mask more than
+// ArgvDeny does. A masked value keeps a trailing quote, which closes a
+// quoted shell word ("'a=b&secret=x'" → "'a=b&secret=***'"); a quote
+// says nothing about the secret, and keeping it makes paramRun
+// idempotent, which the KEY=VALUE recursion relies on.
 func (p Policy) paramRun(run string) string {
 	var b strings.Builder
 	start := 0
@@ -229,8 +232,8 @@ func (p Policy) paramRun(run string) string {
 			continue
 		}
 		pair := run[start:i]
-		if name, _, ok := strings.Cut(pair, "="); ok && denied(p.ArgvDeny, optionKey(name)) {
-			pair = name + "=" + Mask
+		if name, value, ok := strings.Cut(pair, "="); ok && denied(p.ArgvDeny, optionKey(name)) {
+			pair = name + "=" + Mask + trailingQuote(value)
 		}
 		b.WriteString(pair)
 		if i < len(run) {
@@ -239,6 +242,14 @@ func (p Policy) paramRun(run string) string {
 		start = i + 1
 	}
 	return b.String()
+}
+
+// trailingQuote returns the ' or " that ends s, or "".
+func trailingQuote(s string) string {
+	if n := len(s); n > 0 && (s[n-1] == '\'' || s[n-1] == '"') {
+		return s[n-1:]
+	}
+	return ""
 }
 
 // urlElem redacts an element that begins with a URL (after an optional
