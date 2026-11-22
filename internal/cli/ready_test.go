@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -61,6 +62,65 @@ func TestReadyMissingProject(t *testing.T) {
 	}
 	if taken, err := k8s.Unpack(&stream, t.TempDir()); err != nil || len(taken) != 0 {
 		t.Errorf("no ready/ yet: Unpack = %q, %v", taken, err)
+	}
+}
+
+// TestReadyStatus: `iormesh ready -project P -status` is what iormeshctl
+// status reads from a pod (task ph4), where `iormesh status` cannot run
+// (no systemd in the tracer container): status's JSON report for the
+// project, without a unit — the state, the session with its version, and
+// the ready/ segments awaiting collection. No state.json yet is a report
+// without a session; a corrupt one fails, and -status takes neither
+// -state, -remove nor arguments.
+func TestReadyStatus(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "shop")
+	answer := func() statusReport {
+		t.Helper()
+		var out, errOut bytes.Buffer
+		if err := readyIn(root, []string{"-project", "shop", k8s.ReadyStatusFlag}, &out, &errOut); err != nil {
+			t.Fatal(err)
+		}
+		var r statusReport
+		if err := json.Unmarshal(out.Bytes(), &r); err != nil {
+			t.Fatalf("%q: %v", out.String(), err)
+		}
+		return r
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "ready"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if r := answer(); r.Project != "shop" || r.State != "" || r.Session != nil || r.Unit != "" {
+		t.Errorf("no state.json: %+v", r)
+	}
+	for _, name := range []string{"h-s-1-0.parquet", "h-s-1-0.files.parquet", "h-s-1-1.parquet"} {
+		if err := os.WriteFile(filepath.Join(dir, "ready", name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pid := os.Getpid()
+	st := sessionState{Project: "shop", Session: "s1", PID: pid, PIDStartNS: processStart(uint32(pid)),
+		State: stateEnded, EndReason: "duration", Version: "0.9.1", Argv: []string{"iormesh", "run"}}
+	if err := writeState(dir, st); err != nil {
+		t.Fatal(err)
+	}
+	r := answer()
+	if r.State != stateEnded || r.Session == nil || r.Session.Version != "0.9.1" ||
+		r.Session.EndReason != "duration" || r.ReadySegments != 2 {
+		t.Errorf("ended: %+v", r)
+	}
+	var out, errOut bytes.Buffer
+	for _, extra := range [][]string{{"-state"}, {"-remove"}, {"x"}} {
+		args := append([]string{"-project", "shop", k8s.ReadyStatusFlag}, extra...)
+		if err := readyIn(root, args, &out, &errOut); err == nil {
+			t.Errorf("%q accepted", args)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, StateFile), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := readyIn(root, []string{"-project", "shop", k8s.ReadyStatusFlag}, &out, &errOut); err == nil {
+		t.Errorf("corrupt state.json: %q", out.String())
 	}
 }
 

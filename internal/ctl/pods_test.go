@@ -21,7 +21,9 @@ import (
 // (absent: kubectl's NotFound, exit 1), list.json for `get pods
 // --selector`, tar-NAME for `exec NAME … ready` (else an empty stream),
 // state-NAME for `exec NAME … ready -state` (else an attached session,
-// "running 1a2b3c4d"), and down-NAME makes every exec into NAME fail as
+// "running 1a2b3c4d"), status-NAME for `exec NAME … ready -status` (else
+// the refusal of an image from before the flag: usage, exit status 2,
+// task ph4), and down-NAME makes every exec into NAME fail as
 // kubectl itself does (exit 1, no "command terminated" line). debug
 // keeps a copy of its --custom file as custom.json. A file hang makes
 // every call hang for 30 s without an answer (an API server or exec
@@ -46,6 +48,11 @@ exec)
     echo "error: unable to upgrade connection: container not found" >&2; exit 1
   fi
   case " $* " in *" -remove "*) exit 0 ;; esac
+  case " $* " in *" -status "*)
+    if [ -f "$FAKE_DIR/status-$pod" ]; then cat "$FAKE_DIR/status-$pod"; exit 0; fi
+    echo "flag provided but not defined: -status" >&2
+    echo "command terminated with exit code 2" >&2; exit 2 ;;
+  esac
   case " $* " in *" -state "*)
     if [ -f "$FAKE_DIR/state-$pod" ]; then cat "$FAKE_DIR/state-$pod"; else echo "running 1a2b3c4d"; fi
     exit 0 ;;

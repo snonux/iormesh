@@ -278,6 +278,15 @@ truth.
     tracer's version) before anything is pushed, staged with
     the tracer and installed by a second `upgrade` after the
     tracer's; any refusal starts nothing (task kf4).
+  - **`iormeshctl status`** (task ph4) runs only `sudo -n
+    /opt/iormesh/bin/iormesh status -json` on a host — a
+    subcommand the rule already lets through, so nothing is
+    widened — and in a pod `iormesh ready -project P -status`,
+    which reads that project's `state.json` and counts its
+    `ready/` segments, nothing else. Every answer is the
+    server's text: it reaches the terminal through `termsafe`
+    like everything iormeshctl prints. `iormeshctl list` reads
+    the registry only.
   - **What the rule then grants**: installing a build the
     release key signed, for this arch, not older, and the
     agent jar signed at that build's version — nothing

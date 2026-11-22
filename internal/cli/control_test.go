@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"iormesh/internal/segment"
+	"iormesh/internal/version"
 )
 
 // fakeSystemd stands in for systemd-run and systemctl: the unit tests
@@ -583,6 +584,7 @@ func TestStatusText(t *testing.T) {
 	want := "shop: running (unit iormesh-shop.service active/running)\n" +
 		"  session 1a2b3c4d on app1.example.org, pid " + strconv.Itoa(os.Getpid()) + `, tracing pattern "*java*"` + "\n" +
 		"  started 2026-11-20T08:00:00Z, ends by 2026-11-20T12:00:00Z\n" +
+		"  tracer version unknown (the state predates it)\n" +
 		"  ready/: 0 segments to collect\n"
 	if out.String() != want {
 		t.Fatalf("got\n%s\nwant\n%s", out, want)
@@ -683,6 +685,23 @@ func TestReadStateRefusesPlants(t *testing.T) {
 	}
 }
 
+// TestStateWithoutVersion: a state.json an older tracer wrote, without
+// version and argv (task ph4), still reads, with both empty — status
+// reports them as unknown instead of refusing the state.
+func TestStateWithoutVersion(t *testing.T) {
+	dir := t.TempDir()
+	old := `{"project":"p","session":"1a2b3c4d","fqdn":"h","pid":1,"pid_start_ns":2,` +
+		`"state":"ended","targets":"pid [1]","started_at":"2026-11-20T08:00:00Z",` +
+		`"ends_by":"2026-11-20T09:00:00Z","end_reason":"stop"}`
+	if err := os.WriteFile(filepath.Join(dir, StateFile), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := readState(dir)
+	if err != nil || st.Version != "" || st.Argv != nil || st.EndReason != "stop" {
+		t.Fatalf("old state %+v, %v", st, err)
+	}
+}
+
 func TestStateRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	o := &segOutput{dir: dir, session: "1a2b3c4d", fqdn: "h"}
@@ -697,6 +716,11 @@ func TestStateRoundTrip(t *testing.T) {
 		!st.EndsBy.Equal(now.Add(time.Hour)) || st.StartedAt.Location() != time.UTC ||
 		st.effective() != stateRunning {
 		t.Fatalf("state %+v, %v", st, err)
+	}
+	// The run records its build and argv (task ph4), so iormeshctl status
+	// shows which tracer a session runs and a version skew is visible.
+	if st.Version != version.Stamped() || !slices.Equal(st.Argv, os.Args) {
+		t.Fatalf("version %q, argv %q; want %q, %q", st.Version, st.Argv, version.Stamped(), os.Args)
 	}
 	if err := o.markEnded("stop", now.Add(time.Minute)); err != nil {
 		t.Fatal(err)

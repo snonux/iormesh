@@ -5,6 +5,8 @@
 //	iormeshctl collect [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [K8S] [HOST|POD...]
 //	iormeshctl deploy [-project NAME] [-registry FILE] [-dist DIR] [-key FILE] [-restart] [K8S]
 //	                  [-image IMG] [-attach-timeout D] HOST|POD...
+//	iormeshctl status [-project NAME]... [-registry FILE] [K8S] [HOST|POD...]
+//	iormeshctl list [-registry FILE]
 //	iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-routes FILE]
 //	                 [-registry FILE]
 //	iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR] [K8S]
@@ -35,6 +37,8 @@
 // (internal/release, decision #28); deploy verifies the tracer build,
 // stages it on registered hosts over the Transport, upgrades the installed
 // tracer through the sudoers rule and starts the projects (deploy.go).
+// status prints a table of each target's tracer state from the tracers'
+// own status reports (status.go), and list prints the registry (list.go).
 // build merges the collected segments offline into the merged graph
 // export, the service database and the view model, and refresh is
 // collect then build (build.go); show prints the last build's view
@@ -221,6 +225,10 @@ func run(args []string, e env) int {
 		err = collectCommand(args[1:], e)
 	case "deploy":
 		err = deployCommand(args[1:], e)
+	case "status":
+		err = statusCommand(args[1:], e)
+	case "list":
+		err = listCommand(args[1:], e)
 	case "build":
 		err = buildCommand(args[1:], e)
 	case "refresh":
@@ -306,6 +314,8 @@ func usage(w io.Writer) {
   iormeshctl collect [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [K8S] [HOST|POD...]
   iormeshctl deploy [-project NAME] [-registry FILE] [-dist DIR] [-key FILE] [-restart]
                     [K8S] [-image IMG] [-attach-timeout D] HOST|POD...
+  iormeshctl status [-project NAME]... [-registry FILE] [K8S] [HOST|POD...]
+  iormeshctl list [-registry FILE]
   iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-routes FILE]
                    [-registry FILE]
   iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR]
@@ -338,7 +348,9 @@ model.json, report.json and sites/<run>/index.html, one site folder per
 run, kept until deleted), dist/ to ./dist. open prints the newest site's
 path and opens it with xdg-open (open on macOS) when there is one.
 deploy only upgrades a tracer already installed on the host (PLAN.md
-decision #1). collect without HOST collects every registered host; rm
+decision #1). status asks every target's tracer (sudo iormesh status, or
+iormesh ready -status in a pod) and prints one row per project; list
+prints the registry. collect without HOST collects every registered host; rm
 stops, syncs off and uninstalls before it unregisters, and refuses to
 uninstall over traces it could not sync unless -force. build (and
 refresh, which is collect then build) merges every project in the store

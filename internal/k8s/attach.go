@@ -41,6 +41,12 @@ const (
 // instead of streaming its segments.
 const ReadyStateFlag = "-state"
 
+// ReadyStatusFlag makes `iormesh ready` print the project's status
+// report as JSON, `iormesh status -json`'s object without a unit:
+// iormeshctl status reads it from a pod (task ph4), whose tracer
+// container has no systemd for `iormesh status` to ask.
+const ReadyStatusFlag = "-status"
+
 // AttachStartedKey prefixes the last word of a running, ended or dead
 // answer: "started=" and the session's StartedAt, RFC3339 (as iormesh
 // writes it, in UTC with nanoseconds) or unix nanoseconds (task eh4).

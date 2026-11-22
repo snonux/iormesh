@@ -3312,7 +3312,11 @@ func (cfg startConfig) unitArgs(self string) []string {
 - `state.json` is written by the run (atomic rename, 0644), not
   by `start`: `running` once the probes are attached, with pid
   and incarnation, `$INVOCATION_ID`, targets, start and end-by
-  times; `ended` with the end reason before the segment writer
+  times, and the run's own tracer `version` and `argv` (task
+  ph4: upgrade replaces the binary, not a running session, so
+  only the run can say which build it is; a state from an older
+  tracer lacks both and reads as version unknown); `ended` with
+  the end reason before the segment writer
   closes (after that its lock is free and the next run of the
   project owns the file). `start` polls `systemctl show` and
   the file until the state carries the unit's invocation id —
@@ -3613,6 +3617,46 @@ ssh H sudo -n /opt/iormesh/bin/iormesh status -project shop
   (reported, the other project and host still deployed), stop
   or start-after-stop failing on a restart; `rm` pruning the
   record.
+
+`status` and `list` (task ph4, `internal/ctl/status.go`,
+`list.go`) change nothing anywhere:
+
+```sh
+iormeshctl status [-project P]... [-registry FILE] [K8S] [HOST|POD...]
+ssh H sudo -n /opt/iormesh/bin/iormesh status -json   # once per host
+# per pod of a pods: entry, per project (newest tracer container):
+kubectl exec POD -c iormesh -- iormesh ready -project P -status
+#   an image from before -status: ... ready -project P -state
+
+iormeshctl list [-registry FILE]                       # contacts nothing
+```
+
+- `status` resolves its targets as `collect` does (every
+  registered one by default; an unregistered one refused before
+  any contact) and prints one row per target and project:
+  state, end reason, ends-by (running sessions), the run's
+  tracer version from `state.json` (`unknown` for an older
+  tracer's state or image) and the events segments in `ready/`
+  awaiting collection. A registered project the host does not
+  know is `none`; a session the host reports that the registry
+  does not list is shown with a note. `status -json` exits 1
+  when one report carries an error but still prints them all,
+  so the output is read whatever the exit. A host or pod that
+  fails is a row saying why, the others are still asked, and
+  the command exits 1. Each target runs under the per-host
+  deadline (`env.onHost`). `status` is already in the sudoers
+  rule's subcommands, so nothing is widened; a pod's tracer
+  container has no systemd, so it is asked `iormesh ready
+  -status` (status's JSON report without a unit) instead.
+- `list` prints the registry: hosts (with an expand hop), pod
+  entries (mode, container), each project with its target and
+  pass-through flags.
+- Every value either prints goes through `safe` (the oj4
+  buildgate). Tests (`internal/ctl/status_test.go`): the exact
+  host call, rows for running / none / unlisted / failed
+  report / unreachable host, escaped control bytes, a pod with
+  `-status`, an old image's `-state` fallback, a pod without a
+  tracer, a pod gone; `list` for hosts and pods.
 
 `collect`, as the commands it runs (built by task eb4,
 `internal/ctl/collect.go`; no sudo anywhere):

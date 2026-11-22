@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -21,7 +22,9 @@ import (
 // #18, internal/k8s): it writes the project's ready/ segments as a tar
 // to stdout, or with -remove deletes the named ones once the controller
 // has them, or with -state prints whether the project's session has
-// attached (readyState: what deploy waits for, task ef4). It takes a
+// attached (readyState: what deploy waits for, task ef4), or with
+// -status prints its status report (readyStatus: what iormeshctl status
+// reads, task ph4). It takes a
 // project, never a path — the trace dir is the fixed k8s.TraceRoot,
 // inside the pod's emptyDir — so an exec into the tracer can read or
 // delete nothing but published segments. No tar, rsync or shell is
@@ -39,11 +42,19 @@ func readyIn(root string, args []string, stdout, stderr io.Writer) error {
 	remove := fs.Bool("remove", false, "delete the named segments instead of streaming")
 	state := fs.Bool(strings.TrimPrefix(k8s.ReadyStateFlag, "-"), false,
 		"print the session's attach state instead of streaming")
+	status := fs.Bool(strings.TrimPrefix(k8s.ReadyStatusFlag, "-"), false,
+		"print the session's status report as JSON instead of streaming")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
 	if !project.Valid(*name) {
 		return fmt.Errorf("%w: -project %q: %s", errUsage, *name, project.Rule)
+	}
+	if *status {
+		if *state || *remove || fs.NArg() != 0 {
+			return fmt.Errorf("%w: -status takes no -state, no -remove and no arguments", errUsage)
+		}
+		return readyStatus(stdout, root, *name)
 	}
 	if *state {
 		if *remove || fs.NArg() != 0 {
@@ -104,4 +115,27 @@ func readyState(stdout io.Writer, dir string) error {
 	words = slices.DeleteFunc(words, func(w string) bool { return w == "" })
 	_, err = fmt.Fprintln(stdout, strings.Join(words, " "))
 	return err
+}
+
+// readyStatus prints the status report of the project label under root
+// as one JSON object: `iormesh status -json`'s report (statusReport)
+// without the unit, which a pod's tracer container does not have — the
+// container is the session. No state.json yet is a report without a
+// session (the run has not attached); a corrupt one, or one naming
+// another project, fails rather than print a report the controller would
+// take for a session.
+func readyStatus(stdout io.Writer, root, label string) error {
+	dir := filepath.Join(root, label)
+	r := statusReport{Project: label, ReadySegments: countReady(filepath.Join(dir, segment.ReadyDir))}
+	st, err := readState(dir)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+	case err != nil:
+		return err
+	case st.Project != label:
+		return fmt.Errorf("%s names project %q", filepath.Join(dir, StateFile), st.Project)
+	default:
+		r.State, r.Session = st.effective(), &st
+	}
+	return json.NewEncoder(stdout).Encode(r)
 }

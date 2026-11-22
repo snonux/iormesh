@@ -7,8 +7,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"syscall"
 	"time"
+
+	"iormesh/internal/version"
 )
 
 // StateFile is a project's session state, <trace-dir>/<project>/state.json
@@ -47,12 +50,22 @@ type sessionState struct {
 	EndsBy       time.Time `json:"ends_by"`
 	EndedAt      time.Time `json:"ended_at,omitzero"`
 	EndReason    string    `json:"end_reason,omitempty"`
+	// Version and Argv are the build and the command line of the run
+	// (task ph4): upgrade replaces the binary, not a running session, so
+	// only the run itself can say which tracer and flags it has, and
+	// iormeshctl status shows them to make a version skew visible. Both
+	// are omitted by tracers from before them; a reader treats the empty
+	// values as unknown, never as an error.
+	Version string   `json:"version,omitempty"`
+	Argv    []string `json:"argv,omitempty"`
 }
 
 // markRunning writes state.json once the probes are attached (beside
 // announceReady): the session is tracing from here on. Nothing without
 // -trace-dir. The project directory was checked and locked by
-// segment.New, so only this run writes there.
+// segment.New, so only this run writes there. It records this binary's
+// version and os.Args, the run's own argv (for a unit, the `run` argv
+// start handed systemd-run).
 func (o *segOutput) markRunning(cfg runConfig, targets string, now time.Time) error {
 	if o == nil {
 		return nil
@@ -60,7 +73,8 @@ func (o *segOutput) markRunning(cfg runConfig, targets string, now time.Time) er
 	pid := os.Getpid()
 	return writeState(o.dir, sessionState{Project: cfg.project, Session: o.session, FQDN: o.fqdn,
 		PID: pid, PIDStartNS: processStart(uint32(pid)), InvocationID: os.Getenv("INVOCATION_ID"),
-		State: stateRunning, Targets: targets, StartedAt: now.UTC(), EndsBy: now.Add(cfg.duration).UTC()})
+		State: stateRunning, Targets: targets, StartedAt: now.UTC(), EndsBy: now.Add(cfg.duration).UTC(),
+		Version: version.Stamped(), Argv: slices.Clone(os.Args)})
 }
 
 // markEnded records the end in state.json, if markRunning wrote it. It is

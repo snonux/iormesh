@@ -24,9 +24,10 @@ const maxDeployedSize = 1 << 20
 // deployedRecord is what deploy last started per host and project: the
 // start argv and the build version it ran. A live session keeps its flags
 // and its binary until it is restarted (decision #19) — upgrade replaces
-// the file, not the running process — and neither the unit nor
-// state.json says which flags or build it got, so the controller
-// remembers them: a re-deploy of the same build and registry entry leaves
+// the file, not the running process. state.json records the run's version
+// and argv since task ph4 (iormeshctl status shows them), but the server
+// writes it, and a tracer from before then does not: deploy decides on
+// what the controller remembers itself. A re-deploy of the same build and registry entry leaves
 // a running session alone, a changed entry or a new build (possibly a
 // security fix) restarts it. rm also reads it: its projects of a host,
 // tombstones included, are ones rm's sweep may collect (task hi4). Only

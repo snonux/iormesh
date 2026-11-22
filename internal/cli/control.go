@@ -229,6 +229,13 @@ func (r statusReport) text() string {
 		fmt.Fprintf(&b, "  session %s on %s, pid %d, tracing %s\n", st.Session, st.FQDN, st.PID, st.Targets)
 		fmt.Fprintf(&b, "  started %s, ends by %s\n", st.StartedAt.Format(time.RFC3339),
 			st.EndsBy.Format(time.RFC3339))
+		// The run's own build (task ph4), which after an upgrade may
+		// differ from the installed binary answering this status.
+		if st.Version != "" {
+			fmt.Fprintf(&b, "  tracer version %s\n", st.Version)
+		} else {
+			b.WriteString("  tracer version unknown (the state predates it)\n")
+		}
 		if st.State == stateEnded {
 			fmt.Fprintf(&b, "  ended %s (%s)\n", st.EndedAt.Format(time.RFC3339), st.EndReason)
 		}

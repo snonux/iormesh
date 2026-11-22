@@ -1390,7 +1390,20 @@ Kubernetes (M7) build on it.
   are stop-and-restart with new flags (cheap under bounded 4h
   runs); status comes from the `status` subcommand reading its
   state files. The only way into a server is the operator's
-  SSH key.
+  SSH key. Built (task ph4, owner-approved 2026-11-22):
+  `iormeshctl status [-project P]... [HOST|POD...]` asks every
+  registered target (or the named ones) — a host through the
+  sudoers rule's `status -json`, which the rule already allows,
+  a pod through `kubectl exec … iormesh ready -status` — and
+  prints one row per target and project: state, end reason,
+  ends-by, tracer version and the segments in `ready/` awaiting
+  collection; a target that fails is a row, never an abort (exit
+  1 after all were asked). `iormeshctl list` prints the registry
+  (hosts, pod entries, projects, targets, flags) and contacts
+  nothing. The run records its tracer version and argv in
+  `state.json` so a skew between the deployed build and a
+  running session is visible; a state from an older tracer
+  lacks them and shows the version as unknown.
 - Target platform for the tracer: Rocky Linux 9 first (BTF
   present; ior's Rocky 9 build/Docker patterns apply), amd64
   and arm64. Deployed binaries come out of the container build
