@@ -66,8 +66,8 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 // stop stops the project's unit: systemd sends SIGTERM, the run drains,
 // writes its end event and publishes the active segment as its last
 // (decision #19). It then prints the end state.json recorded, and fails
-// when there is none: the stop happened, the clean end did not. Before
-// and after the stop it marks state.json as the operator's stop
+// when there is none: the stop happened, the clean end did not. Once the
+// unit is stopped it marks state.json as the operator's stop
 // (markOperatorStop, task zh4), which iormeshctl ensure leaves ended.
 func (c control) stop(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
@@ -87,14 +87,17 @@ func (c control) stop(ctx context.Context, args []string) error {
 	if !u.live() {
 		return fmt.Errorf("project %s: %s is not running (%s)", *pf.project, unit, u)
 	}
+	if err := stopUnit(ctx, c.sys, unit); err != nil {
+		return err // the unit may still be live: nothing is marked
+	}
+	// Marked only now that systemctl stop returned with the unit dead:
+	// the run (which holds the project's lock, not state.json's) writes
+	// state.json only while it lives, so this read-modify-write cannot
+	// roll back its start or end record (review of task zh4). A run
+	// SIGKILLed after the stop timeout left a running state; it is
+	// marked too, since the operator meant the stop either way.
 	dir := filepath.Join(*pf.traceDir, *pf.project)
 	mark := c.markStop(dir)
-	if err := stopUnit(ctx, c.sys, unit); err != nil {
-		return errors.Join(err, mark)
-	}
-	// The second mark is the one that counts: it either finds the first
-	// kept by the run's end record or writes it again.
-	mark = c.markStop(dir)
 	// The unit is gone either way, but only an `ended` state says the run
 	// drained and published its last segment: a run SIGKILLed after
 	// TimeoutStopSec (or one that never attached) leaves its active minute

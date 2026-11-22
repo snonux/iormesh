@@ -3334,13 +3334,18 @@ func (cfg startConfig) unitArgs(self string) []string {
   publish) and prints the recorded end — and fails when
   `state.json` does not say `ended` (the run was killed after
   the stop timeout, or never attached: its last minute is
-  unpublished; task eb4). Before and after the stop it sets
+  unpublished; task eb4). Once the unit is stopped it sets
   `operator_stop: true` in `state.json` (task zh4: a reboot's
   SIGTERM ends a run as `stop` too, and `iormeshctl ensure`
-  must leave only the operator's stops alone); the run's end
-  record re-reads the file, so the first mark survives it, and
-  covers a run SIGKILLed after the timeout. Each writer of
-  `state.json` uses its own temporary name (pid). Through the
+  must leave only the operator's stops alone) — only then,
+  since the mark is an unlocked read-modify-write and a live
+  run's start or end record landing in between would be rolled
+  back; a run SIGKILLed after the timeout is marked too. A
+  stop that fails marks nothing. Each writer of `state.json`
+  uses its own temporary name (pid), removed again when the
+  write fails. A deploy restart whose start fails after its
+  stop leaves the project marked stopped, so ensure will not
+  bring it back; deploy reports it. Through the
   sudoers rule the mark is written only under the confined
   trace root, never into a `-trace-dir` the caller chose.
   `status [-project P]

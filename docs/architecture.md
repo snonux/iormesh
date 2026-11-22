@@ -190,8 +190,8 @@ registered one without HOST — it reads the tracer's `status
 |---|---|
 | running, or its unit is live | nothing |
 | ended `duration`, `targets_exited`, `error` | starts it again |
-| ended `stop` without `operator_stop` (a reboot's SIGTERM) | starts it again |
-| `dead` (crash, OOM kill, power loss) | starts it again |
+| ended `stop` with `operator_stop: false` (a reboot's SIGTERM) | starts it again |
+| `dead` (crash, OOM kill, power loss), unless `operator_stop` | starts it again |
 | stopped with `iormesh stop` (`operator_stop: true`) | leaves it stopped |
 | ended `stop` on a tracer from before `operator_stop` | leaves it stopped: it cannot tell |
 | ended `disk_limit` | collects first; starts it only once `ready/` is empty |
@@ -206,7 +206,11 @@ so a timer never loops a full disk. To keep a session ended,
 stop it while it runs (`sudo iormesh stop -project P` on the
 host) or remove it (`iormeshctl rm`); a session that already
 ended cannot be stopped, so narrow ensure with `-project` or
-HOST instead. A `deploy` starts a stopped session again.
+HOST instead. A `deploy` starts a stopped session again; but a
+deploy restart whose start fails after its stop leaves the
+project marked stopped, so ensure will not recover it — deploy
+reports "session stopped, not restarted", and the next deploy
+starts it.
 
 Run again, ensure finds what it started running and only
 collects, so a timer may drive it. A systemd user timer on the

@@ -1428,11 +1428,13 @@ Kubernetes (M7) build on it.
   `duration`, `targets_exited`, `error`, a `stop` that was not
   the operator's, a run that died — then collects the host.
   An explicit stop stays distinguishable from an end: `iormesh
-  stop` sets `operator_stop: true` in `state.json` (before the
-  stop, kept by the run's end record, and again after; the run
+  stop` sets `operator_stop: true` in `state.json` once the
+  unit is dead (never while the run may write the file; the run
   writes `false` from its start), since a reboot's SIGTERM ends
   a run with the same `stop` reason; ensure leaves those
-  stopped. A tracer from before the field (`operator_stop`
+  stopped. A deploy restart whose start fails after its stop
+  leaves the project marked stopped, so ensure does not recover
+  it. A tracer from before the field (`operator_stop`
   absent) cannot tell, so its `stop` ends are left too. A
   `disk_limit` end is collected first and restarted only when
   the collect emptied its `ready/` (a second status read);
