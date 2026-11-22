@@ -81,11 +81,16 @@ func showCommand(args []string, e env) error {
 	addReadBuildFlags(fs, &f)
 	asJSON := fs.Bool("json", false, "print the view model's JSON for the view")
 	unresolved := fs.Bool("unresolved", false, "edges: only edges with an unresolved connection")
+	addNamespaceFlag(fs, &f, "read the build -namespace made of this Kubernetes namespace "+
+		"(default: the unfiltered build)")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%w: show takes one view: %s", errUsage, strings.Join(showViews, ", "))
+	}
+	if err := checkNamespace(f.namespace); err != nil {
+		return err
 	}
 	m, err := loadModel(e, f)
 	if err != nil {
@@ -100,7 +105,8 @@ func showCommand(args []string, e env) error {
 	return writeView(e, view, id, m, *unresolved)
 }
 
-// loadModel reads the model.json of the build of f's projects.
+// loadModel reads the model.json of the build of f's projects (of
+// f.namespace's pods for a -namespace build, buildKey).
 func loadModel(e env, f buildFlags) (viewmodel.Model, error) {
 	p, err := resolveShowPaths(e, f)
 	if err != nil {
@@ -110,11 +116,11 @@ func loadModel(e env, f buildFlags) (viewmodel.Model, error) {
 	if err != nil {
 		return viewmodel.Model{}, err
 	}
-	path := filepath.Join(p.builds, buildKey(projects), modelFileName)
+	path := filepath.Join(p.builds, buildKey(projects, f.namespace), modelFileName)
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return viewmodel.Model{}, fmt.Errorf("show: no build of %s yet (iormeshctl build)",
-			strings.Join(projects, "+"))
+		return viewmodel.Model{}, fmt.Errorf("show: no build of %s yet (iormeshctl build%s)",
+			buildName(projects, f.namespace), namespaceArg(f.namespace))
 	}
 	if err != nil {
 		return viewmodel.Model{}, fmt.Errorf("show: %w", err)

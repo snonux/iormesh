@@ -6,6 +6,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"iormesh/internal/schema"
 	"iormesh/internal/target"
 )
 
@@ -62,6 +63,10 @@ type procState struct {
 	// that are still in the socket table (not yet TCP_CLOSE): the ones
 	// the kernel may still report after the process died (reap.go).
 	socks int
+	// pod is the pod object its events carry in a pod (pod.go): resolved
+	// on its first event (procPod) or inherited at fork (inheritPod); nil
+	// until then, and always outside a pod.
+	pod *schema.Pod
 }
 
 // Identity is a process incarnation as one /proc/<pid>/stat read saw it:

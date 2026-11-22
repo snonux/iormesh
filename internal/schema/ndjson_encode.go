@@ -48,8 +48,8 @@ func AppendEvent(dst []byte, ev *Event) []byte {
 }
 
 // appendEventTail appends the optional nested objects, the optional
-// stack_id (M2 step 9), otel (M3 step 8) and dns (task wd4), in struct
-// order, then closes the event's object.
+// stack_id (M2 step 9), otel (M3 step 8), dns (task wd4) and pod (task
+// sh4), in struct order, then closes the event's object.
 func appendEventTail(dst []byte, ev *Event) []byte {
 	if ev.Java != nil {
 		dst = append(dst, `,"java":`...)
@@ -82,6 +82,14 @@ func appendEventTail(dst []byte, ev *Event) []byte {
 			dst = append(dst, "null"...) // as json.Marshal; Validate rejects it
 		} else {
 			dst = appendStringArray(dst, ev.DNS.Addrs)
+		}
+		dst = append(dst, '}')
+	}
+	if ev.Pod != nil {
+		dst = appendStringField(dst, `,"pod":{"namespace":`, ev.Pod.Namespace)
+		dst = appendStringField(dst, `,"name":`, ev.Pod.Name)
+		if ev.Pod.ContainerID != "" {
+			dst = appendStringField(dst, `,"container_id":`, ev.Pod.ContainerID)
 		}
 		dst = append(dst, '}')
 	}

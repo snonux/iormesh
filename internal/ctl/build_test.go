@@ -41,9 +41,17 @@ type hostTrace struct {
 	host, project string
 	// session names the run; "" is a1b2c3d4.
 	session string
-	seq     uint64
-	events  []schema.Event
+	// fqdn is the session's FQDN; "" is <host>.example.org. pod, when
+	// set, is the pod object of an in-pod tracer's events (task sh4),
+	// its container left off the host-level ones.
+	fqdn   string
+	pod    *schema.Pod
+	seq    uint64
+	events []schema.Event
 }
+
+// fqdnOf is the session's FQDN (hostTrace.fqdn).
+func (h *hostTrace) fqdnOf() string { return cmp.Or(h.fqdn, h.host+".example.org") }
 
 // add appends one event of pid at wall offset at (µs after buildWall0).
 func (h *hostTrace) add(pid uint32, kind string, fd int32, ret int64, at uint64, conn string,
@@ -57,6 +65,13 @@ func (h *hostTrace) add(pid uint32, kind string, fd int32, ret int64, at uint64,
 	if ret < 0 {
 		ev.Err = "EINPROGRESS"
 	}
+	if h.pod != nil {
+		p := *h.pod
+		if pid == 0 {
+			p.ContainerID = ""
+		}
+		ev.Pod = &p
+	}
 	h.events = append(h.events, ev)
 	return &h.events[len(h.events)-1]
 }
@@ -65,7 +80,7 @@ func (h *hostTrace) add(pid uint32, kind string, fd int32, ret int64, at uint64,
 func (h *hostTrace) header() {
 	ev := h.add(0, schema.KindSession, schema.NoFD, 0, 0, "", schema.Args{})
 	ev.PIDInc, ev.TID, ev.Comm = 0, 0, ""
-	ev.Session = &schema.Session{BootID: "b-" + h.host, FQDN: h.host + ".example.org",
+	ev.Session = &schema.Session{BootID: "b-" + h.host, FQDN: h.fqdnOf(),
 		Kernel: "6.12.0", Arch: "x86_64"}
 }
 
@@ -144,7 +159,7 @@ func writeStoreSegments(t *testing.T, store, host string, h *hostTrace, perSeg i
 	t.Helper()
 	t0 := time.Unix(0, int64(buildWall0)).UTC()
 	srv := filepath.Join(t.TempDir(), h.project)
-	w, err := segment.New(segment.Config{Dir: srv, FQDN: h.host + ".example.org", Session: cmp.Or(h.session, "a1b2c3d4"),
+	w, err := segment.New(segment.Config{Dir: srv, FQDN: h.fqdnOf(), Session: cmp.Or(h.session, "a1b2c3d4"),
 		Project: h.project, Now: func() time.Time { return t0 }})
 	if err != nil {
 		t.Fatal(err)
@@ -298,6 +313,39 @@ func TestBuildNamesServices(t *testing.T) {
 	out := f.mustRun(t, "show", "edges")
 	if !strings.Contains(out, "orders") || strings.Contains(out, "orders.example:8080") {
 		t.Errorf("show edges after naming:\n%s", out)
+	}
+}
+
+// TestBuildPathTemplates: the services view counts routes, not ids —
+// /orders/1 and /orders/2 are one /orders/{id} row, and the route map's
+// path_templates rename it, also over a database that holds the built-in
+// rows already — while the report keeps the raw paths (decision #22).
+func TestBuildPathTemplates(t *testing.T) {
+	f := newBuildFixture(t)
+	f.mustRun(t, "build")
+	if model := f.output(t, modelFileName); !strings.Contains(model, `"path": "/orders/{id}",
+          "count": 3`) {
+		t.Errorf("model lacks GET /orders/{id} x3:\n%s", model)
+	}
+	reg, err := f.e.registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes := "path_templates:\n  - /orders/{order}\n"
+	if err := os.WriteFile(filepath.Join(filepath.Dir(reg), "routes.yaml"), []byte(routes), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.mustRun(t, "build")
+	model := f.output(t, modelFileName)
+	if !strings.Contains(model, `"path": "/orders/{order}",
+          "count": 3`) || strings.Contains(model, `"path": "/orders/{id}"`) {
+		t.Errorf("model after the rule: want GET /orders/{order} x3 only:\n%s", model)
+	}
+	if n := f.requestCount(t); n != 3 {
+		t.Errorf("database counts %d requests after the rule, want 3 (never the old rows too)", n)
+	}
+	if rep := f.output(t, reportFileName); !strings.Contains(rep, `"/orders/1"`) {
+		t.Errorf("report lost the raw path:\n%s", rep)
 	}
 }
 
@@ -472,16 +520,25 @@ func dirExists(dir string) bool {
 	return err == nil && fi.IsDir()
 }
 
-// TestBuildKey: one project names its directory; many are hashed.
+// TestBuildKey: one project names its directory, a namespace build adds
+// "@<namespace>" (task sh4); many are hashed, the namespace with them,
+// so a namespace build never shares the unfiltered build's directory.
 func TestBuildKey(t *testing.T) {
-	if got := buildKey([]string{"billing", "shop"}); got != "billing+shop" {
+	if got := buildKey([]string{"billing", "shop"}, ""); got != "billing+shop" {
 		t.Errorf("buildKey = %q", got)
+	}
+	if got := buildKey([]string{"billing", "shop"}, "prod"); got != "billing+shop@prod" {
+		t.Errorf("buildKey with a namespace = %q", got)
 	}
 	var many []string
 	for i := range 30 {
 		many = append(many, fmt.Sprintf("project-%02d", i))
 	}
-	if got := buildKey(many); !strings.HasPrefix(got, "projects-") || len(got) > maxBuildKey {
+	got := buildKey(many, "")
+	if !strings.HasPrefix(got, "projects-") || len(got) > maxBuildKey {
 		t.Errorf("buildKey(30 projects) = %q", got)
+	}
+	if ns := buildKey(many, "prod"); ns == got || len(ns) > maxBuildKey {
+		t.Errorf("buildKey(30 projects, prod) = %q, unfiltered %q", ns, got)
 	}
 }

@@ -10,11 +10,12 @@
 //	iormeshctl status [-project NAME]... [-registry FILE] [K8S] [HOST|POD...]
 //	iormeshctl list [-registry FILE]
 //	iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-routes FILE]
-//	                 [-registry FILE]
+//	                 [-registry FILE] [-namespace NS]
 //	iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR] [K8S]
 //	                   [HOST|POD...]
 //	iormeshctl show [summary|services|edges|health|conversations|sequence [ID]|thread [SERVICE/THREAD]|
 //	                processes|report] [-project NAME]... [-store DIR] [-builds DIR] [-json] [-unresolved]
+//	                [-namespace NS]
 //	iormeshctl open [-project NAME]... [-store DIR] [-builds DIR]
 //	iormeshctl tui [-project NAME]... [-store DIR] [-builds DIR]
 //	iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
@@ -327,10 +328,11 @@ func usage(w io.Writer) {
   iormeshctl status [-project NAME]... [-registry FILE] [K8S] [HOST|POD...]
   iormeshctl list [-registry FILE]
   iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-routes FILE]
-                   [-registry FILE]
+                   [-registry FILE] [-namespace NS]
   iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR]
                      [-routes FILE] [K8S] [HOST|POD...]
   iormeshctl show [VIEW] [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-json] [-unresolved]
+                  [-namespace NS]
       VIEW: summary (default) | services | edges | health | conversations
             | sequence [ID] | thread [SERVICE/THREAD] | processes | report
   iormeshctl open [-project NAME]... [-store DIR] [-db FILE] [-builds DIR]
@@ -374,7 +376,10 @@ without -project, never contacts a server, and exits 1 when it had to
 leave a damaged segment out. show, open and tui read a build and
 never the segments: -project picks the build of exactly those projects
 (default: of every project in the store, which -store names), as build
--project wrote it; -db is accepted and unused. -ref on query is a
+-project wrote it; -db is accepted and unused. build -namespace NS
+keeps only the sessions of pods in Kubernetes namespace NS (and the
+services and edges their connections make) and writes
+<project>[+<project>...]@NS/, which show -namespace NS reads. -ref on query is a
 conversation step's ref from show sequence. expand lists the unresolved peers of the
 store's merged mesh against the registry's expand: allowlist, hop limit
 (-hops, default 1) and max_nodes; it contacts no server and deploys

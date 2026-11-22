@@ -25,7 +25,7 @@ func (j *JavaJoin) dnsEvent(h pendingHTTP) (schema.Event, error) {
 	ev := schema.Event{SchemaVersion: schema.Version, Project: j.project, HostID: j.hostID,
 		BootNS: h.boot, WallNS: uint64(int64(h.boot) + j.wallOff), PID: v.pid,
 		PIDInc: v.incarnation(), TID: uint32(r.KTID), Comm: v.comm, Event: schema.KindDNS,
-		FD: schema.NoFD, Attribution: schema.AttributionNone,
+		FD: schema.NoFD, Attribution: schema.AttributionNone, Pod: j.podOf(v),
 		DNS: &schema.DNS{Host: r.Host, Addrs: r.Addrs}}
 	j.stats.DNS++
 	stack, err := j.stack(v, r.StackID)

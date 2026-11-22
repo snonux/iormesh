@@ -14,6 +14,7 @@ import (
 
 	"iormesh/internal/bpf"
 	"iormesh/internal/correlate"
+	"iormesh/internal/k8s"
 	"iormesh/internal/schema"
 	"iormesh/internal/target"
 	"iormesh/internal/types"
@@ -187,6 +188,9 @@ type outputs struct {
 	java    *javaOutput
 	hostID  string
 	session schema.Session
+	// pod is the pod the run is in (podOf), nil outside one: the pod
+	// fields of its events (task sh4).
+	pod *k8s.PodRef
 }
 
 // openOutputs describes the host — before any trace file is touched, so
@@ -199,6 +203,7 @@ func openOutputs(ctx context.Context, cfg runConfig, tr tracer, stderr io.Writer
 	if o.hostID, o.session, err = describeHost(ctx, podEnv); err != nil {
 		return o, err
 	}
+	o.pod = podOf(podEnv)
 	if o.seg, err = openSegments(cfg, o.session.FQDN, stderr); err != nil {
 		return o, err
 	}
@@ -361,9 +366,12 @@ func newCorrelator(cfg runConfig, out outputs) (*correlate.Correlator, error) {
 // into cfg.out, and on a server the controller rebuilds the graph from
 // the segments (decision #3), so a graph kept by a -trace-dir run would
 // only grow with every distinct path, connection and process (task 4j4).
+// In a pod it also carries the pod and the container reader (podConfig).
 func correlatorConfig(cfg runConfig, out outputs, sink schema.Sink, offset int64) correlate.Config {
-	return correlate.Config{Host: correlate.Host{ID: out.hostID, Project: cfg.project},
+	c := correlate.Config{Host: correlate.Host{ID: out.hostID, Project: cfg.project},
 		Sink: sink, WallOffsetNS: offset, Stacks: out.stacks.ids(), NoGraph: cfg.out == ""}
+	podConfig(&c, out.pod) // in a pod: the pod fields of every event (task sh4)
+	return c
 }
 
 // openEvents creates cfg.out and its NDJSON events sink; nil without

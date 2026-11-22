@@ -11,10 +11,15 @@ type queued struct {
 }
 
 // enqueue numbers ev and appends it. Seq is assigned here, in completion
-// order, so it stays gap-free whatever the queue holds back.
+// order, so it stays gap-free whatever the queue holds back. In a pod it
+// also stamps the pod object (pod.go), the one place every event of the
+// correlator passes while its process's state is current.
 func (c *Correlator) enqueue(ev schema.Event, sock *sockState) {
 	c.seq++
 	ev.Seq = c.seq
+	if c.hostPod != nil {
+		ev.Pod = c.podOf(ev.PID, ev.PIDInc)
+	}
 	c.queue = append(c.queue, queued{ev: ev, sock: sock})
 }
 

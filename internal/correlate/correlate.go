@@ -69,6 +69,18 @@ type Config struct {
 	// The events do not depend on it. false keeps the graph, so a zero
 	// Config builds one.
 	NoGraph bool
+	// Pod, set for an in-pod tracer, stamps every event with the pod
+	// object (PLAN.md M7 "Pod fields on events", task sh4; pod.go): the
+	// pod's namespace and name, and on a process's events its container
+	// (ContainerOf). nil outside a pod: no event has a pod object and no
+	// cgroup is read.
+	Pod *PodConfig
+	// ContainerOf returns the container id of pid's process, "" for
+	// none (k8s.ContainerOf over /proc/<pid>/cgroup in a run). It is
+	// asked once per process incarnation, when the correlator first
+	// stamps one of its events; a forked child inherits its parent's
+	// answer. nil: no event names a container. Only used with Pod.
+	ContainerOf func(pid uint32) string
 }
 
 const defaultFuseWindowNS = 5_000_000_000
@@ -102,6 +114,11 @@ type Correlator struct {
 	lost         uint64 // cumulative losses already reported by drop events
 	skipped      uint64 // cumulative skipped program runs already reported
 	ended        bool   // End was called: nothing may follow the end event
+	// pods are the pod objects events share (pod.go): hostPod, the pod
+	// alone, for host-level events and processes in no container, and
+	// one per container id seen. nil hostPod: not in a pod.
+	hostPod *schema.Pod
+	pods    map[string]*schema.Pod
 }
 
 // New returns a Correlator writing to cfg.Sink.
@@ -123,7 +140,7 @@ func New(cfg Config) *Correlator {
 	if !cfg.NoGraph {
 		graph = newGraphBuilder(cfg.Host.ID)
 	}
-	return &Correlator{
+	c := &Correlator{
 		cfg:      cfg,
 		redact:   policy,
 		procs:    map[uint32]*procState{},
@@ -135,6 +152,11 @@ func New(cfg Config) *Correlator {
 		stacks:   map[uint32]stackRef{},
 		graph:    graph,
 	}
+	if cfg.Pod != nil {
+		c.hostPod = &schema.Pod{Namespace: cfg.Pod.Namespace, Name: cfg.Pod.Name}
+		c.pods = map[string]*schema.Pod{}
+	}
+	return c
 }
 
 // Handle consumes one record from bpf.Tracer.Records: syscall records

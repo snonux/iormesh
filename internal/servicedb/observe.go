@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"iormesh/internal/federate"
+	"iormesh/internal/pathtmpl"
 	"iormesh/internal/schema"
 )
 
@@ -67,7 +68,8 @@ type End struct {
 }
 
 // Request counts the HTTP requests of one connection that one source
-// recorded with one method, scheme, host and (redacted) path. Scheme is
+// recorded with one method, scheme, host and path template (the redacted
+// path with its id-like segments folded, internal/pathtmpl). Scheme is
 // "https" over TLS, as the library saw it at its API (never read off the
 // wire). Host is set only by the client's end, so a request with a host
 // is the client's view and one without the server's; both views are
@@ -88,9 +90,14 @@ type Request struct {
 // graph names apps and processes; the sources are read once more for
 // what the merge drops — HTTP requests, DNS lookups and each
 // connection's last record — and for same-host pairs, which the host's
-// own correlator fused before the merge (they are no halves).
-func Observe(ctx context.Context, sources []federate.Source, r federate.Result) (Snapshot, error) {
+// own correlator fused before the merge (they are no halves). Requests
+// are counted per path template (paths: the operator's rules, nil for
+// the built-in folding alone), so the database holds one row per route
+// rather than one per id; the events keep the raw path (decision #22).
+func Observe(ctx context.Context, sources []federate.Source, r federate.Result,
+	paths *pathtmpl.Rules) (Snapshot, error) {
 	t := newTraffic()
+	t.paths = paths
 	for _, s := range sources {
 		t.source = s.Name()
 		if err := s.Events(ctx, t.add); err != nil {

@@ -56,6 +56,48 @@ func TestEndpoints(t *testing.T) {
 	}
 }
 
+// TestFilterHosts: Hosts narrows the views to the connections one of
+// those traced hosts saw (either end), and ANDs with the projects — what
+// a namespace-filtered build reads (task sh4).
+func TestFilterHosts(t *testing.T) {
+	ctx := context.Background()
+	d, _ := openTemp(t)
+	importSnap(t, d, observeMesh(t))
+	ports := func(f Filter) []string {
+		t.Helper()
+		eps, err := d.Endpoints(ctx, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, e := range eps {
+			out = append(out, e.Hostname+"/"+e.IP)
+		}
+		return out
+	}
+	for name, c := range map[string]struct {
+		f    Filter
+		want []string
+	}{
+		"hB":         {Filter{Hosts: []string{"hB"}}, []string{"/10.0.0.2", "inventory.svc/10.0.0.2"}},
+		"hA":         {Filter{Hosts: []string{"hA"}}, []string{"/127.0.0.1", "/203.0.113.9", "inventory.svc/10.0.0.2"}},
+		"shop on hB": {Filter{Project: "shop", Hosts: []string{"hB"}}, []string{"inventory.svc/10.0.0.2"}},
+		"nosuch":     {Filter{Hosts: []string{"nosuch"}}, nil},
+	} {
+		if got := ports(c.f); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: endpoints %v, want %v", name, got, c.want)
+		}
+	}
+	in, err := d.Interactions(ctx, Filter{Hosts: []string{"nosuch"}})
+	if err != nil || len(in) != 0 {
+		t.Errorf("interactions of no host: %+v, %v", in, err)
+	}
+	in, err = d.Interactions(ctx, Filter{Hosts: []string{"hB"}})
+	if err != nil || len(in) != 2 {
+		t.Errorf("interactions of hB: %+v, %v; want its two", in, err)
+	}
+}
+
 // TestInteractions: who talks to whom, by service name once the rules
 // name the endpoints — and a client is named after the service it
 // serves, so the edge reads "orders → inventory" (PLAN.md M4).

@@ -7,7 +7,8 @@
 // app (project, host, app identity), the server endpoint (hostname from
 // the client's DNS lookups or its HTTP requests, IP, port), the merge's
 // verdict (fused, or unresolved with the merge's reason), protocol hints
-// (plain or TLS, HTTP host and path per request, table http_request) and
+// (plain or TLS, HTTP host and path template per request — ids folded
+// to {id}, internal/pathtmpl; table http_request) and
 // the activity window. Naming rules (table naming_rule) map a hostname
 // or IP glob plus a port to a service name; they are human input, which
 // the build never touches.
@@ -18,8 +19,9 @@
 //     host and host-local conn id when the client was traced, else the
 //     server half's — which is stable across rebuilds, and every merged
 //     value is a MIN, MAX or keep-if-unknown; request counts are kept
-//     per source (the trace unit read), so importing the same mesh
-//     twice changes nothing.
+//     per source (the trace unit read) and a source's import replaces
+//     its earlier counts, so importing the same mesh twice changes
+//     nothing.
 //   - Additive: a later import never forgets what an earlier one saw. A
 //     build over fewer segments (the operator deleted old ones) leaves
 //     rows, windows and the deleted segments' request counts as they

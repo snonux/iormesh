@@ -174,3 +174,24 @@ const PodHostPrefix = "pod-"
 
 // PodHostID is the host_id of the tracer in the pod with this UID.
 func PodHostID(uid string) string { return PodHostPrefix + uid }
+
+// PodNamespace returns the namespace an in-pod tracer's host identity
+// names: host_id "pod-<uid>" and FQDN "<name>.<namespace>.<uid[:8]>"
+// (internal/k8s PodFQDN, task 7f4). ok is false for any other identity —
+// a machine-id host, or a pod FQDN that does not end in its own UID's
+// prefix. The namespace is an RFC 1123 label, so it holds no dot and is
+// the FQDN's second-to-last part, whatever dots the pod name has. The
+// controller's namespace filter (task sh4) reads it from the pinned
+// identity, which collect derived from the pod's API metadata.
+func PodNamespace(hostID, fqdn string) (string, bool) {
+	uid, ok := strings.CutPrefix(hostID, PodHostPrefix)
+	if !ok || !UID(uid) {
+		return "", false
+	}
+	rest, ok := strings.CutSuffix(fqdn, "."+uid[:8])
+	i := strings.LastIndexByte(rest, '.')
+	if !ok || i <= 0 || !Pod(rest[:i]) || !Label(rest[i+1:]) {
+		return "", false
+	}
+	return rest[i+1:], true
+}

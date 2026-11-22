@@ -149,8 +149,9 @@ views — happens on the controller.
     the target pod with a minimal capability set, privileged
     only as the fallback (#13);
     identifies each pod as its own host (`host_id` `pod-<uid>`,
-    [schema.md](schema.md#pods-as-hosts-m7)); pod, namespace and
-    container fields on events are planned (task sh4);
+    [schema.md](schema.md#pods-as-hosts-m7)) and stamps every
+    event with its namespace, pod name and container id (task
+    sh4);
     live-attaches the Java agent through the shared process
     namespace.
   - Accepted on kind and el9 (M7), launched by `iormeshctl` with

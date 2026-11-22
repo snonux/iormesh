@@ -87,6 +87,9 @@ type joinTest struct {
 	now    uint64 // boot clock
 	spool  []AgentRing
 	seq    uint64
+	// pod, when set, makes the stream an in-pod tracer's (task sh4):
+	// unmarked's events carry it on the pod's host id.
+	pod *schema.Pod
 }
 
 func newJoinTest(t *testing.T) *joinTest {
@@ -178,6 +181,9 @@ func (jt *joinTest) unmarked(pid, tid uint32, kind string, at uint64) {
 	ev := schema.Event{SchemaVersion: schema.Version, Project: "p", Seq: jt.seq, BootNS: at,
 		HostID: "h", PID: pid, PIDInc: jvmStart, TID: tid, Comm: "java", Event: kind,
 		FD: 3, LatencyNS: 100, Attribution: schema.AttributionNone}
+	if jt.pod != nil {
+		ev.HostID, ev.Pod = podHostID, jt.pod
+	}
 	if err := jt.j.Event(&ev); err != nil {
 		jt.t.Fatal(err)
 	}

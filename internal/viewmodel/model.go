@@ -191,7 +191,9 @@ type Service struct {
 	MorePaths int        `json:"more_paths"`
 }
 
-// PathStat counts one HTTP method and (redacted) path.
+// PathStat counts one HTTP method and path template: the redacted path
+// with its ids folded (/orders/{id}) or the operator's template, as the
+// service database keys requests (internal/pathtmpl, task xh4).
 type PathStat struct {
 	Method string `json:"method"`
 	Path   string `json:"path"`
