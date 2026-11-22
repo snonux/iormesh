@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"iormesh/internal/termsafe"
 	"iormesh/internal/viewmodel"
 )
 
@@ -178,7 +180,8 @@ func writeView(e env, view, id string, m viewmodel.Model, unresolved bool) error
 	return fmt.Errorf("%w: unknown view %q (%s)", errUsage, view, strings.Join(showViews, ", "))
 }
 
-// writeViewJSON prints the part of the model a view shows.
+// writeViewJSON prints the part of the model a view shows, terminal-safe
+// (printJSON).
 func writeViewJSON(e env, view, id string, m viewmodel.Model) error {
 	var v any
 	switch view {
@@ -212,10 +215,22 @@ func writeViewJSON(e env, view, id string, m viewmodel.Model) error {
 	default:
 		return fmt.Errorf("%w: unknown view %q (%s)", errUsage, view, strings.Join(showViews, ", "))
 	}
+	return printJSON(e.stdout, v)
+}
+
+// printJSON prints v as indented JSON made terminal-safe: encoding/json
+// escapes only bytes below 0x20, so termsafe.JSON escapes what it lets
+// through — DEL, the C1 controls (U+009B is CSI) and bidi overrides —
+// which a compromised server could plant in any traced string. They
+// become JSON \u escapes, so the output decodes to the same value, and
+// output holding only printable text is unchanged. Every -json view
+// (show, show report, expand) prints through it, as iormeshctl query's
+// lines go through termsafe.JSON.
+func printJSON(w io.Writer, v any) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(e.stdout, "%s\n", data)
+	_, err = fmt.Fprintf(w, "%s\n", termsafe.JSON(data))
 	return err
 }

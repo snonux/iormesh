@@ -2,7 +2,6 @@ package ctl
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"iormesh/internal/expand"
@@ -169,17 +168,13 @@ func mergeStore(ctx context.Context, paths buildPaths, flagged []string) (
 	return res, segs, err
 }
 
-// writeProposal prints the plan as text or JSON.
+// writeProposal prints the plan as text or JSON; the JSON is
+// terminal-safe (printJSON), as its peers come from traced data.
 func writeProposal(e env, p expand.Proposal, asJSON bool) error {
 	if !asJSON {
 		return expand.WriteText(e.stdout, p)
 	}
-	data, err := json.MarshalIndent(p, "", "  ")
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(e.stdout, "%s\n", data)
-	return err
+	return printJSON(e.stdout, p)
 }
 
 // reportExpandBad names the segments left out on stderr and turns them into

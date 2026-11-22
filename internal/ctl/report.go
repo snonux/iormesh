@@ -162,19 +162,14 @@ func loadReport(e env, f buildFlags) (report.Report, error) {
 }
 
 // showReport prints the report view: the run summary, then the rollup
-// (or its JSON with -json).
+// (or its JSON with -json, terminal-safe: printJSON).
 func showReport(e env, f buildFlags, m viewmodel.Model, asJSON bool) error {
 	r, err := loadReport(e, f)
 	if err != nil {
 		return err
 	}
 	if asJSON {
-		data, err := json.MarshalIndent(r, "", "  ")
-		if err != nil {
-			return err
-		}
-		_, err = fmt.Fprintf(e.stdout, "%s\n", data)
-		return err
+		return printJSON(e.stdout, r)
 	}
 	if err := viewmodel.WriteSummary(e.stdout, m); err != nil {
 		return err
