@@ -24,7 +24,7 @@ func (m *Model) detail(s screen) string {
 	}
 	i := m.selected(s)
 	if i < 0 {
-		return m.emptyText(s)
+		return m.emptyText(s) + m.partialNote(s)
 	}
 	var b strings.Builder
 	switch s {
@@ -43,8 +43,21 @@ func (m *Model) detail(s screen) string {
 		b.WriteString("\n⏎ opens its newest step's conversation\n")
 	case scrProcesses:
 		_ = viewmodel.WriteProcess(&b, m.vm.Processes[i])
+		b.WriteString(m.partialNote(s))
 	}
 	return b.String()
+}
+
+// partialNote is, on the processes screen, the line `show processes`
+// starts with when the rollup hit its tracking cap (task 2i4): the
+// detail pane says the list is partial whichever process is selected,
+// or none. "" elsewhere and for a complete rollup.
+func (m *Model) partialNote(s screen) string {
+	l := viewmodel.PartialLine(m.vm)
+	if s != scrProcesses || l == "" {
+		return ""
+	}
+	return "\n" + l + "\n"
 }
 
 // emptyText says why a screen has nothing to select.

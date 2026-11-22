@@ -63,6 +63,11 @@ type Model struct {
 	// order (project, host, pid, incarnation); MoreProcesses counts those the rollup cut.
 	Processes     []Process `json:"processes"`
 	MoreProcesses int       `json:"more_processes"`
+	// Untracked is the rollup's report.Report.Untracked: events past its
+	// tracking cap, so processes, files, threads and connections first
+	// seen after it are missing. Not zero, every processes view says the
+	// list is partial (PartialLine).
+	Untracked uint64 `json:"untracked"`
 	// Routes are the route map's edges (routes.go, PLAN.md M7): ClusterIP
 	// connections with their Service named, and untraced Services and
 	// ingress FQDNs completed to their workload; empty without a map.

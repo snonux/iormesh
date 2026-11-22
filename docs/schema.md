@@ -1321,9 +1321,12 @@ The Go types are `internal/report`'s `Report`.
   first-seen first within a rank, listed in first-seen order (task
   vg4). A file lists its first 4 causing
   methods and does not count the rest. While reading, the collector
-  tracks at most 2²⁰ entries; an event that found no room for some
-  part of it is counted once in `untracked`, and the text starts
-  with a `partial` line.
+  tracks at most 2²⁰ entries at once; an open file fd holds one
+  only until its close (task 2i4), so the cap bounds the state
+  held, not the opens a long trace makes. An event that found no
+  room for some part of it is counted once in `untracked`, and the
+  text starts with a `partial` line, as do the processes views of
+  `show processes`, the TUI and the site.
 - Like the trace, the rollup is metadata only — paths, sizes,
   redacted request lines — and deterministic: the same store,
   database and methods tables give the same bytes.

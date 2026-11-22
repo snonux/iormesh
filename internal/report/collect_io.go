@@ -140,7 +140,7 @@ func (c *Collector) file(p *procAcc, ev *schema.Event, method string) bool {
 		return c.open(p, ev, method)
 	case ev.FD >= 0:
 		if i, ok := p.fds[fdKey{ev.FD, ev.FDGen}]; ok {
-			fdEvent(p, i, ev, method)
+			c.fdEvent(p, i, ev, method)
 			return true
 		}
 	}
@@ -167,7 +167,10 @@ func (c *Collector) file(p *procAcc, ev *schema.Event, method string) bool {
 
 // open records an open of a path: a failed one as an op, a successful
 // one as an open for reading or writing and as the fd instance its
-// later reads and writes are counted under.
+// later reads and writes are counted under. The fd instance holds one
+// tracked entry while it is open (fdEvent gives it back on close); an
+// instance already open (its close was lost) is pointed at the new path
+// without a second one.
 func (c *Collector) open(p *procAcc, ev *schema.Event, method string) bool {
 	if ev.Args.Path == nil {
 		return true
@@ -193,20 +196,25 @@ func (c *Collector) open(p *procAcc, ev *schema.Event, method string) bool {
 	if ev.FD < 0 {
 		return true
 	}
-	if !c.take() {
+	k := fdKey{ev.FD, ev.FDGen}
+	if _, open := p.fds[k]; !open && !c.take() {
 		return false
 	}
-	p.fds[fdKey{ev.FD, ev.FDGen}] = p.fileIdx[*ev.Args.Path]
+	p.fds[k] = p.fileIdx[*ev.Args.Path]
 	return true
 }
 
-// fdEvent folds an event on a tracked file fd into file i.
-func fdEvent(p *procAcc, i int, ev *schema.Event, method string) {
+// fdEvent folds an event on a tracked file fd into file i. A close
+// forgets the fd instance and returns its tracked entry: open fds are
+// state while reading, not rollup entries, so the cap bounds the fds
+// open at once rather than the opens a build reads (task 2i4).
+func (c *Collector) fdEvent(p *procAcc, i int, ev *schema.Event, method string) {
 	f := p.files[i]
 	f.method(method)
 	switch {
 	case ev.Event == schema.KindClose:
 		delete(p.fds, fdKey{ev.FD, ev.FDGen})
+		c.tracked--
 	case changesFS(ev.Event):
 		f.op(ev.Event, ev.Err)
 	case ev.Ret < 0:

@@ -550,7 +550,11 @@ processes"):
   opens ~90 library paths first, and a first-seen cut hid the
   service's own config and records) — a ranked selection, not a
   prefix of the files in the order they were opened. `show
-  processes` prints them, `-json` the list.
+  processes` prints them, `-json` the list. The model's
+  `untracked` is the rollup's count of events past its tracking
+  cap (task 2i4): when it is not zero, `show processes`, the TUI's
+  process detail and the site's processes screen say the list is
+  partial.
 
 V3 as built (task nb4; files in [implementation.md](implementation.md),
 M5 "Local site"): every `build` writes the run's site folder

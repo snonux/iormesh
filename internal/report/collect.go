@@ -11,8 +11,11 @@ import (
 // maxTracked caps the entries the collector keeps while reading —
 // processes, files, open fds, connections, threads, methods, requests
 // together — the same bound as query's filter state: a hostile trace
-// cannot grow the build's memory through the rollup. Past it, events
-// that would need a new entry are counted in Report.Untracked.
+// cannot grow the build's memory through the rollup. An open fd counts
+// only while it is open: its close returns the entry (fdEvent), so the
+// cap bounds the state held at once, never the number of opens a long
+// trace makes. Past it, events that would need a new entry are counted
+// in Report.Untracked.
 const maxTracked = 1 << 20
 
 // Open flags as Linux defines them: the trace is Linux's whatever
