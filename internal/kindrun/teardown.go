@@ -14,8 +14,9 @@ import (
 // namespaces, nothing without a record), the registry container with
 // its anonymous volumes and its named data volume, the run's own image
 // tags, any image left carrying the run's label, and the base images
-// the run pulled (by ID). Nothing else is named, and no prune runs
-// without the run's label filter.
+// the run pulled (by ID: Pulled, those its setup used that were absent
+// before). Nothing else is named, and no prune runs without the run's
+// label filter.
 func TeardownPlan(c Config, o *Owned, pulled []string) [][]string {
 	plan := append(clusterTeardown(c, o),
 		docker("rm", "--force", "--volumes", c.Registry),

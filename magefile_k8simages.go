@@ -44,8 +44,10 @@ func kindTracerImage(r shRunner, c kindrun.Config) (string, error) {
 // kindWorkloadImage builds the workload's pod image from a context of
 // just workload.jar (scripts/container/kind-workload.Containerfile; the
 // agent jar is the tracer image's, staged into the JVM's root by the
-// tracer, task cf4), labelled, pushes it and returns it pinned.
-func kindWorkloadImage(r shRunner, c kindrun.Config) (string, error) {
+// tracer, task cf4), labelled, pushes it and returns it pinned. It sets
+// ran.JRE when the build runs (which may pull the pinned JRE, also when
+// it then fails), not when it stops before.
+func kindWorkloadImage(r shRunner, c kindrun.Config, ran *kindrun.Ran) (string, error) {
 	if err := diskGuard(r); err != nil {
 		return "", err
 	}
@@ -58,6 +60,7 @@ func kindWorkloadImage(r shRunner, c kindrun.Config) (string, error) {
 		return "", err
 	}
 	tag := c.Images[1]
+	ran.JRE = true
 	if err := r.Run(kindrun.BuildArgv(c, "scripts/container/kind-workload.Containerfile", tag, dir)...); err != nil {
 		return "", err
 	}

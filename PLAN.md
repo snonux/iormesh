@@ -2148,7 +2148,13 @@ Later phase — plain Linux servers (M4) come first.
   the way: `build -registry`, selectors skipping terminating
   pods, kubectl 1.30's `--custom` gate. The target tears down
   only what it made (`mage k8sTeardown` alone, also after an
-  interrupted run; never a `docker system prune`). Against an
+  interrupted run; never a `docker system prune`). Of the base
+  images it removes only the exact IDs a run's own steps used
+  (kind's node for a cluster it created, the registry for a
+  container it created, the pinned JRE for a build it ran) that
+  were absent before both the first run and that run, never
+  another image pulled into those repositories (task oi4).
+  Against an
   existing cluster (task li4) the run refuses namespaces
   `traefik`, `iormesh-m7` and `iormesh-m7-clusterip` that are
   already there and not its own, records the context and what it
