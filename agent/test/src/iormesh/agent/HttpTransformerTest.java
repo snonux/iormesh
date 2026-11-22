@@ -3,6 +3,10 @@ package iormesh.agent;
 import static iormesh.agent.AgentTests.check;
 import static iormesh.agent.AgentTests.equal;
 
+import io.netty.handler.codec.http.HttpObjectDecoder;
+import io.netty.handler.codec.http.HttpObjectEncoder;
+import iormesh.agent.http.Library;
+import iormesh.agent.http.Netty;
 import iormesh.agent.http.Target;
 import iormesh.bridge.Hooks;
 import java.io.InputStream;
@@ -36,7 +40,59 @@ final class HttpTransformerTest {
                 new AgentTests.Case("http transformer/app loader needs the bridge",
                         HttpTransformerTest::appLoader),
                 new AgentTests.Case("http transformer/argument pair, stores refused",
-                        HttpTransformerTest::pairAndStores));
+                        HttpTransformerTest::pairAndStores),
+                new AgentTests.Case("http transformer/tells the library what it rewrote",
+                        HttpTransformerTest::tellsLibrary));
+    }
+
+    /**
+     * Each rewrite of a third-party class tells its library which methods
+     * were rewritten in which loader (task 6j4), over Netty's own targets
+     * and the stand-ins of its codecs: the decoder alone (older Netty
+     * 4.1's encoder has no write to rewrite) reports no write; the JDK's
+     * loaders and a class nothing of which is rewritten report nothing.
+     */
+    static void tellsLibrary() throws Exception {
+        List<String> told = new ArrayList<>();
+        Netty netty = new Netty();
+        Library lib = new Library() {
+            public String name() { return netty.name(); }
+            public String module() { return null; }
+            public List<String> opens() { return List.of(); }
+            public List<Target> targets() { return netty.targets(); }
+            @Override
+            public boolean appLoaded() { return true; }
+            @Override
+            public void rewritten(ClassLoader loader, Target t) {
+                told.add((loader == HttpTransformerTest.class.getClassLoader() ? "" : "?")
+                        + t.method());
+            }
+        };
+        HttpTransformer t = new HttpTransformer(HttpHooks.of(lib),
+                new BridgeSight(Hooks.class, null));
+        ClassLoader sees = HttpTransformerTest.class.getClassLoader();
+        check(t.transform(null, sees, internal(HttpObjectDecoder.class), null, null,
+                bytes(HttpObjectDecoder.class)) != null, "the decoder rewritten");
+        equal(List.of("<init>", "decode"), told, "the decoder alone: no write");
+        told.clear();
+        check(t.transform(null, sees, internal(HttpObjectEncoder.class), null, null,
+                bytes(HttpObjectEncoder.class)) != null, "the encoder rewritten");
+        equal(List.of("<init>", "write"), told, "the encoder");
+        told.clear();
+        check(t.rewrite(internal(HttpObjectEncoder.class), bytes(HttpObjectEncoder.class))
+                != null, "rewritten without a loader (the JDK's)");
+        check(t.rewrite(FIXTURE, fixtureBytes()) == null, "an unlisted class");
+        equal(List.of(), told, "nothing told without an application loader");
+    }
+
+    private static String internal(Class<?> c) {
+        return c.getName().replace('.', '/');
+    }
+
+    private static byte[] bytes(Class<?> c) throws Exception {
+        try (InputStream in = c.getResourceAsStream(c.getSimpleName() + ".class")) {
+            return in.readAllBytes();
+        }
     }
 
     /**

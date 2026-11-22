@@ -43,4 +43,17 @@ public interface Library {
     default boolean appLoaded() {
         return false;
     }
+
+    /**
+     * Told by the transformer (iormesh.agent.HttpTransformer) each time
+     * it rewrote target t's method in loader, an application loader, as
+     * that class is defined or retransformed. A library whose hooks only
+     * pair up together (Netty: a decoder's request with an encoder's
+     * answer, task 6j4) records nothing in a loader where only some of
+     * them were rewritten. Called on the transforming thread; the default
+     * ignores it.
+     */
+    default void rewritten(ClassLoader loader, Target t) {
+        // most libraries' hooks each stand alone
+    }
 }

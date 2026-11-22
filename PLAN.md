@@ -771,10 +771,16 @@ Gated by S1 — done; the design below is S1's result
   OkHttp 4/5 — the call's interceptor chain, its
   `CallServerInterceptor` per exchange (`http-okhttp`); Netty's
   HTTP/1.x codec — decoded requests paired per channel with the
-  answers the app's handlers write (`http-netty`). Decision #22's
-  v1 set is complete; HTTP/2 stays time-ordered (no stream ids),
-  and Apache HttpClient 4, OkHttp 3, Netty 4.1 and async Apache
-  are not hooked.
+  answers the app's handlers write (`http-netty`, Netty 4.2).
+  Decision #22's v1 set is complete; HTTP/2 stays time-ordered
+  (no stream ids), and Apache HttpClient 4, OkHttp 3 and async
+  Apache are not hooked. Netty 4.1 is hooked only from the
+  release whose `HttpObjectEncoder` has a `write` of its own
+  (4.1.110 has it, untested; 4.1.79 and older do not): a
+  loader's Netty records only when both its decoder's `decode`
+  and its encoder's `write` were rewritten, so an older 4.1
+  records nothing and never costs the JVM its `req_seq` (task
+  6j4).
 - **Request pairing across the wire**: a request on the client
   and on the server pair up by connection id plus a
   per-connection request ordinal — sound for HTTP/1.1. HTTP/2

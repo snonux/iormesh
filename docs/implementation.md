@@ -2901,7 +2901,10 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
      holds only while nothing of the channel went unseen (review of
      de4), so the channel is poisoned — nothing more recorded on it
      — when its codec predates the agent (a live attach: the codecs'
-     constructors, hooked, mark the ones made since), and, counting
+     constructors, hooked, mark the ones made since) or its codec's
+     loader did not get both `decode` and `write` rewritten (task
+     6j4: the transformer tells the library each method it rewrote,
+     per loader; older Netty 4.1 has no encoder `write`), and, counting
      a lost record, when a probe fails, a write throws, an answer
      finds no request of its own, 64 requests wait unanswered, or one
      call completes two exchanges (one record per call). A decode
@@ -2913,7 +2916,9 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
    the JDK HttpClient against a Netty server, one acceptor and one
    worker event loop), `NettyPairingTest` (stand-ins of Netty's types
    in `agent/test/src/io/netty`: pipelining, 1xx, a throwing decode,
-   decodeLast, and each poisoning case), `SlotsTest` (nested requests
+   decodeLast, each poisoning case, and a half-hooked loader),
+   `HttpTransformerTest` (the transformer tells Netty what it
+   rewrote in which loader), `SlotsTest` (nested requests
    on one client and across calls), `ServletHookTest` (a nested
    service records once; the javax target on a Servlet 2.5-shaped
    stand-in in `agent/test/src/javax/servlet`); `AgentSmoke` also runs one OkHttp call from
@@ -2923,9 +2928,12 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
    the integration suite's JDK (25).
 
    Not hooked: Apache HttpClient 4 (`org.apache.http`) and its async
-   client, OkHttp 3, Netty 4.1 (untested: a constructor the list
-   misses leaves its codecs unmarked, so their channels record
-   nothing — never a wrong pair), Jersey's `ServletContainer`
+   client, OkHttp 3, Netty 4.1 before its `HttpObjectEncoder` had
+   a `write` of its own (4.1.79 and older checked: only the decoder
+   is rewritten, so its channels record nothing and never count a
+   lost record — task 6j4; 4.1.110 has `write` and is hooked,
+   untested; a constructor the list misses leaves its codecs
+   unmarked, likewise silent), Jersey's `ServletContainer`
    (overrides `service`).
 8. OTEL (done, task 4b4): read `Span.current().getSpanContext()`
    reflectively in the app's class loader at `enter` and add the
