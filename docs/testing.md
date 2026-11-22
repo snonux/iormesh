@@ -1526,7 +1526,11 @@ bpfRootTest` now hold the fix on a 7.x host:
   regression (task bg4). A relocation the trimmed BTF cannot
   satisfy makes libbpf poison the instruction (a call with imm
   `0xbad2310`); the test then fails with a hint to regenerate
-  the BTF instead of reporting wrong offsets. A `mage test`
+  the BTF instead of reporting wrong offsets. The seven data
+  calls' enter and exit handlers (tail-call targets the
+  dispatchers do not cover, reading `tcp_sock` fields for
+  `tcp_seq`) are relocated against the same BTF and checked
+  for poison only (task wi4). A `mage test`
   gate (`internal/buildgate/testonly_test.go`) keeps
   `internal/corereloc` out of every non-test file.
 - **`TestDispatchSeesSeveralKinds`** traces an open/read/close
