@@ -190,11 +190,15 @@ pods:
 - **Reference.** A pod entry is named on the command line as
   `<cluster>/<namespace>/<pod>` or `<cluster>/<namespace>/<selector>`,
   for example `prod/shop/app=checkout`.
-- **Precedence.** For image, mode, profile and SELinux type and
-  level: a command-line flag beats the pod entry, which beats
-  the cluster, which beats the `k8s:` default. `-context` may
-  only restate the entry's own cluster's context. A context the
-  registry does not list is refused.
+- **Precedence.** Image and SELinux type and level: a deploy
+  flag (`-image`, `-selinux-type`, `-selinux-level`) beats the
+  pod entry, which beats the `k8s:` default. Mode and profile
+  have no flag: the pod entry beats the `k8s:` default. A
+  cluster sets none of these, only the context and namespace:
+  for those, `-context`/`-namespace` beat the pod entry, which
+  beats the cluster. `-context` may only restate the entry's
+  own cluster's context. A context the registry does not list
+  is refused.
 - **Projects.** A debug entry carries exactly one project, since
   an ephemeral container runs one session. A project's `name:`
   may be left out; it is then the namespace.
@@ -275,7 +279,10 @@ options; see [SELinux](#selinux).
    - `args:` the app's target, for example `-pattern
      '*app.jar*'` in place of `-listen-port 8080`. Keep
      `-disk-limit 0` and set `-disk-max-bytes` to match your
-     `sizeLimit` (1536MiB for the default 2Gi);
+     `sizeLimit` (1536MiB for the default 2Gi). `-duration
+     168h`, the longest a run takes, keeps sessions long: when
+     one ends the container exits and the kubelet restarts it
+     into the next session;
    - `level:` under `seLinuxOptions`, if the pod pins its MCS
      level ([SELinux](#selinux)).
 2. The workload owner applies it:
@@ -453,7 +460,9 @@ The details and the el9 runs are in [security.md](security.md)
 
 Errors name the pod entry or the pod they are about (deploy
 prints `iormeshctl: <ref> pod <name>: <error>`). Look for the
-fragments below.
+fragments below. The tracer's own side is in its log:
+`kubectl logs <pod> --container=iormesh` (or `iormesh-N` for a
+replaced debug tracer; the newest is the live one).
 
 | Message contains | Meaning and fix |
 |---|---|
