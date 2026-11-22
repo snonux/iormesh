@@ -687,9 +687,10 @@ behind them) until the ring's WATERMARK is 5 ms past the
 syscall's end — a bracket is written when its method returns —
 or 2 s after it if the agent stops writing watermarks; an event
 of a process without a ring leaves once a spool scan (every 50 ms
-and on the run loop's tick) after its syscall found none; a
-syscall that ended before its JVM's ring existed is decided at
-once. At the end of the trace everything is decided with what has
+and on the run loop's tick) after its syscall found none (or 2 s
+after it while the spool cannot be read: a failed scan is a
+warning, retried at the next poll); a syscall that ended before
+its JVM's ring existed is decided at once. At the end of the trace everything is decided with what has
 been read. The summary line counts the rings (and the JVMs whose
 natives could not be probed), brackets, joined events (and
 carrier ones), why a JVM's other events stayed `none` (unmarked,

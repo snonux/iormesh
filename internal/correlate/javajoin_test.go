@@ -459,17 +459,119 @@ func TestJavaJoinCorruptRing(t *testing.T) {
 	}
 }
 
-// TestJavaJoinErrors: scan, offset and table errors end the trace.
+// TestJavaJoinErrors: an offset error ends the trace; Close still
+// releases what it holds and closes the sink.
 func TestJavaJoinErrors(t *testing.T) {
 	boom := errors.New("boom")
 	jt := newJoinTest(t)
-	jt.j.cfg.Scan = func() ([]AgentRing, error) { return nil, boom }
-	if err := jt.j.Poll(); !errors.Is(err, boom) {
-		t.Errorf("scan error: %v", err)
-	}
+	jt.event(999, 1000, "write", jt.now+10)
 	jt.j.cfg.MonoOffset = func() (int64, error) { return 0, boom }
 	if err := jt.j.Close(); !errors.Is(err, boom) || !jt.sink.closed {
 		t.Errorf("close: %v, sink closed %v", err, jt.sink.closed)
+	}
+	if len(jt.sink.events) != 1 {
+		t.Errorf("close released %d of 1 events", len(jt.sink.events))
+	}
+}
+
+// scanFails makes the next n scans fail with err, then hands out the
+// spool again; warns collects what the join warned.
+func (jt *joinTest) scanFails(n int, err error) *[]error {
+	var warns []error
+	jt.j.cfg.Warn = func(e error) { warns = append(warns, e) }
+	jt.j.cfg.Scan = func() ([]AgentRing, error) {
+		if n > 0 {
+			n--
+			return nil, err
+		}
+		r := jt.spool
+		jt.spool = nil
+		return r, nil
+	}
+	return &warns
+}
+
+// TestJavaJoinScanErrorRetries: a failed spool scan is a warning, not the
+// end of the trace (task 3j4). The ring it missed is found by the next
+// scan, and an event of that JVM waits for it rather than being decided
+// on the failed scan's say-so; a failing streak warns once.
+func TestJavaJoinScanErrorRetries(t *testing.T) {
+	boom := errors.New("too many open files")
+	jt := newJoinTest(t)
+	at := jt.now + 1000
+	jt.ring(jt.bracket(1, mainTID, at-50, at+500, 10, 1), jt.watermark(at+20_000_000))
+	warns := jt.scanFails(2, boom)
+	jt.now = at + 200
+	jt.event(jvmPID, mainTID, "write", at)
+	jt.now += defaultScanEvery
+	if err := jt.j.Poll(); err != nil {
+		t.Fatalf("poll on a failed scan: %v", err)
+	}
+	if len(jt.sink.events) != 0 {
+		t.Fatalf("decided %d events on a failed scan", len(jt.sink.events))
+	}
+	if len(*warns) != 1 || !errors.Is((*warns)[0], boom) {
+		t.Fatalf("warnings %v, want the scan error once", *warns)
+	}
+	jt.now += defaultScanEvery
+	if err := jt.j.Poll(); err != nil {
+		t.Fatal(err)
+	}
+	if len(jt.sink.events) != 1 || jt.sink.events[0].Attribution != schema.AttributionJava {
+		t.Fatalf("events %+v", jt.sink.events)
+	}
+	jt.close()
+}
+
+// TestJavaJoinScanErrorPersists: a spool that stays unreadable warns once
+// and holds an event without a ring no longer than Timeout.
+func TestJavaJoinScanErrorPersists(t *testing.T) {
+	boom := errors.New("spool removed")
+	jt := newJoinTest(t)
+	warns := jt.scanFails(1<<30, boom)
+	at := jt.now + 1000
+	jt.now = at + 200
+	jt.event(999, 1000, "write", at)
+	for range 3 {
+		jt.now += defaultTimeout / 2
+		if err := jt.j.Poll(); err != nil {
+			t.Fatalf("poll: %v", err)
+		}
+	}
+	if len(jt.sink.events) != 1 {
+		t.Fatalf("released %d of 1 events after Timeout", len(jt.sink.events))
+	}
+	if len(*warns) != 1 {
+		t.Errorf("warnings %v, want one", *warns)
+	}
+	if err := jt.j.Close(); !errors.Is(err, boom) {
+		t.Errorf("close: %v, want the scan error", err)
+	}
+}
+
+// TestJavaJoinCloseScanError: a scan that fails at Close still releases
+// every held event, the end event included, and Close reports the
+// error (task 3j4).
+func TestJavaJoinCloseScanError(t *testing.T) {
+	boom := errors.New("boom")
+	jt := newJoinTest(t)
+	at := jt.now + 1000
+	jt.ring(jt.watermark(at))
+	jt.event(jvmPID, mainTID, "write", at)
+	jt.seq++
+	reason := schema.EndStop
+	end := schema.Event{SchemaVersion: schema.Version, Project: "p", Seq: jt.seq,
+		BootNS: at + 10, HostID: "h", Event: schema.KindEnd, Attribution: schema.AttributionNone,
+		Args: schema.Args{EndReason: &reason}}
+	if err := jt.j.Event(&end); err != nil {
+		t.Fatal(err)
+	}
+	jt.scanFails(1, boom)
+	if err := jt.j.Close(); !errors.Is(err, boom) || !jt.sink.closed {
+		t.Fatalf("close: %v, sink closed %v", err, jt.sink.closed)
+	}
+	if len(jt.sink.events) != 2 || jt.sink.events[1].Event != schema.KindEnd {
+		t.Fatalf("events %+v, want the write and the end", jt.sink.events)
 	}
 }
 

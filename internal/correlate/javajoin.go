@@ -2,6 +2,7 @@ package correlate
 
 import (
 	"errors"
+	"fmt"
 
 	"iormesh/internal/agentspool"
 	"iormesh/internal/redact"
@@ -65,10 +66,18 @@ type JavaJoin struct {
 	// count one a newer ring replaced, which retire's next pass drops.
 	exiting int
 	offset  int64 // boot − mono, ns, from the last poll
-	// scanned is the boot time just before the last spool scan: a
+	// scanned is the boot time just before the last poll, failed spool
+	// scan or not: the join's clock for its scan cadence, timeouts and
+	// retention. found is the same for the last scan that succeeded: a
 	// syscall that ended before it whose process had no ring then never
 	// will have a bracket (the agent maps its ring before its first one).
+	// A failed scan cannot vouch for that (task 3j4).
 	scanned uint64
+	found   uint64
+	// scanErr is the last scan's error, nil once one succeeds: a failed
+	// scan is warned about once per failing streak and retried at the
+	// next poll, never the end of the trace; Close reports it.
+	scanErr error
 	methods map[methodKey]uint64    // frame of a class → method id
 	classes map[schema.Class]uint64 // class row (id 0) → class id
 	// cookies numbers the natives the hook tables reach, by JNI symbol:
@@ -129,7 +138,10 @@ type JavaJoinConfig struct {
 	Next   schema.Sink
 	Tables JavaTables
 	// Scan returns the rings that appeared in the spool directory since
-	// the last call.
+	// the last call, with an error for what it could not read. The
+	// rings it returns are taken even then; the error is warned about
+	// (Warn) and the scan retried at the next poll, and only Close
+	// returns it, should the last scan fail too (task 3j4).
 	Scan func() ([]AgentRing, error)
 	// ProcInfo gives a JVM's start time, to tell its ring from a stale
 	// one of an earlier process with the same pid; defaults to
@@ -293,14 +305,15 @@ func (j *JavaJoin) Poll() error {
 
 // Close reads the rings one last time, releases every held event with
 // what is known by then (a bracket not yet written leaves its syscalls
-// none), closes the rings and then the next sink. The files stay: their
+// none), closes the rings and then the next sink. The release happens
+// even when that last poll fails, and a last scan that failed is
+// reported: the trace's tail and its end event are never dropped for an
+// error that only costs attribution (task 3j4). The files stay: their
 // JVMs still run — or exited too recently to be retired, and the next
 // session's scan removes those.
 func (j *JavaJoin) Close() error {
 	err := j.poll(j.cfg.Clock())
-	if err == nil {
-		err = j.release(true)
-	}
+	err = errors.Join(err, j.scanErr, j.release(true))
 	for _, v := range j.jvms {
 		j.stats.Lost = addLosses(j.stats.Lost, v.ring.Losses())
 		err = errors.Join(err, v.ring.Close())
@@ -320,24 +333,23 @@ func (j *JavaJoin) Stats() JavaStats {
 
 // poll samples the clock offset, opens new rings and drains every ring.
 // now is taken before the scan, so "no ring at scan time" is never
-// claimed for a moment the scan did not cover.
+// claimed for a moment the scan did not cover. A failed scan does not
+// stop the poll: the rings already open are drained as ever.
 func (j *JavaJoin) poll(now uint64) error {
 	off, err := j.cfg.MonoOffset()
 	if err != nil {
 		return err
 	}
 	j.offset = off
-	rings, err := j.cfg.Scan()
-	if err != nil {
-		return err
-	}
-	for _, r := range rings {
-		j.addRing(r)
-	}
 	// Event polls with bootClock's estimate, which can lag the precise
 	// reading a Poll took before it, so now may be behind scanned. Never
 	// step back: an earlier scan's claim still holds, and a smaller
 	// scanned would only delay decisions and timeouts (task ud4 review).
+	// scanned moves on after a failed scan too, or Event would poll — and
+	// fail — on every event while the spool stays unreadable.
+	if j.scan() == nil {
+		j.found = max(j.found, now)
+	}
 	j.scanned = max(j.scanned, now)
 	for _, v := range j.jvms {
 		if err := j.drain(v); err != nil {
@@ -349,6 +361,23 @@ func (j *JavaJoin) poll(now uint64) error {
 	j.conns.purge(j.maxEnd, j.cfg.Retain)
 	j.pruneMarks()
 	return nil
+}
+
+// scan opens the rings the spool scan found — those of the directories
+// that could be read, should another fail — and returns its error. A
+// failed scan (EMFILE, a spool directory removed) is warned about at the
+// first failure of a streak only, so a directory gone for good does not
+// flood stderr; the next poll retries it.
+func (j *JavaJoin) scan() error {
+	rings, err := j.cfg.Scan()
+	for _, r := range rings {
+		j.addRing(r)
+	}
+	if err != nil && j.scanErr == nil {
+		j.warn(fmt.Errorf("agent spool scan (retried at each poll): %w", err))
+	}
+	j.scanErr = err
+	return err
 }
 
 // addRing takes in a ring the spool scan found. It is read only once its
@@ -478,8 +507,9 @@ func (j *JavaJoin) pending(ev *schema.Event) (v *jvm, wait bool) {
 	v = j.jvms[ev.PID]
 	if v == nil || !v.owns(ev) {
 		// No ring for this process (yet): decidable once a scan after
-		// the syscall found none.
-		return nil, j.scanned <= end
+		// the syscall found none — or, while the spool cannot be read,
+		// Timeout after it, with no ring to join it to (task 3j4).
+		return nil, j.found <= end && j.scanned < end+j.cfg.Timeout
 	}
 	// Decidable: the ring failed, the watermark passed, or the syscall
 	// ended before the ring existed (JVM startup: no bracket can hold it).
