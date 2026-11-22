@@ -4770,8 +4770,8 @@ iormeshctl prune -older-than DUR [-project P]... [-store DIR] [-apply]
   `internal/ctl/window_test.go` (`-from`, a time of day, `-last`,
   `-to` select the expected segments of the rotated fixture, the
   full build unchanged, services and edges seen only before the
-  window left out of the windowed views, an unpinned directory checked whole and
-  a pinned one only in its window, refusals);
+  window left out of the windowed views, an unpinned directory
+  checked whole and a pinned one only in its window, refusals);
   `internal/ctl/prune_test.go` (the listing deletes nothing,
   `-apply` exactly the listed files, a live session's table kept
   and an orphan's deleted, planted foreign entries — a stray

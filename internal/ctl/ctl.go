@@ -409,8 +409,9 @@ services and edges their connections make) and writes
 -to (T as query's) or -last DUR builds only the segments whose time range
 overlaps that window, into <project>[+<project>...][@NS]~window/, which
 show -windowed reads; the full build stays. Its services and edges are
-the connections seen in the window, not the database's whole history. prune lists the store's
-segment files whose range ended more than DUR ago and deletes them only
+the connections seen in the window (a connection open across it shows
+its whole lifetime), not the database's whole history. prune lists the
+store's segment files whose range ended more than DUR ago and deletes them only
 with -apply; it never touches a file it cannot parse as a segment, a dot
 file or a symlink, and nothing is ever pruned on its own. -ref on query is a
 conversation step's ref from show sequence. expand lists the unresolved peers of the
