@@ -32,10 +32,11 @@ func pastFuseWindow(f feeder) {
 }
 
 // TestDeadChildrenLeaveNoState (task xi4): a parent holding many fds
-// forks children that inherit its table and exit. A dead child's table
-// goes at its group-dead exit — a rename right after names the parent
-// alone, no dead child — and its whole state once the fuse window has
-// passed, so the correlator holds the live parent only.
+// forks children that inherit its table and exit. A dead child is
+// skipped by renames from its group-dead exit on — a rename right after
+// names the parent alone, no dead child — and its table and whole state
+// go once the fuse window has passed, so the correlator holds the live
+// parent only.
 func TestDeadChildrenLeaveNoState(t *testing.T) {
 	c, _ := newTest(t)
 	now := uint64(0)
