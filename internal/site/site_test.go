@@ -26,6 +26,13 @@ const hostile = "</script><script>alert(1)</script><!--<img src=x onerror=alert(
 // directories (run hosts, sessions' and processes' Host) are not the
 // FQDNs that steps, lifelines and threads carry: the sessions link the
 // two, and the selftest's host filter check needs them to (task 4i4).
+// Host directories h2 and h3 share one FQDN (a cloned VM, or a host
+// that only knows itself as localhost): conversation 0002 and its
+// thread are h3's alone, which h2's filter must not show; only the
+// steps' and entries' refs, <project>/<host dir>/..., tell the two
+// apart (task mj4). The services pin the mesh's host filter: pay is on
+// h1 by its FQDN, db on h3 by its loopback scope and on no host by
+// h20, which h2 merely prefixes.
 func sampleModel(s string) viewmodel.Model {
 	t0 := time.Date(2025, 11, 20, 0, 53, 20, 0, time.UTC)
 	lanes := []viewmodel.Lifeline{{Service: "gw" + s, Host: "h1.example.org" + s, PID: 10, TID: 11, Thread: "http-1" + s},
@@ -33,22 +40,27 @@ func sampleModel(s string) viewmodel.Model {
 	steps := []viewmodel.Step{
 		{Kind: viewmodel.StepRequest, Service: lanes[0].Service, Host: lanes[0].Host, Thread: lanes[0].Thread,
 			To: lanes[1].Service, Label: "GET /x" + s, Ordering: viewmodel.OrderCausal, Hop: viewmodel.HopPaired,
-			Stack: []string{"a.B#c(B.java:1)" + s}, Ref: "p/h1/h1-s/5" + s, Lane: 0, ToLane: 1},
+			Stack: []string{"a.B#c(B.java:1)" + s}, Ref: "shop/h1" + s + "/h1.example.org" + s + "-s" + s + "/5",
+			Lane: 0, ToLane: 1},
 		{Kind: viewmodel.StepFile, Service: lanes[1].Service, Host: "h2.example.org", Thread: "w-3", Label: "open /etc/" + s,
-			Ordering: viewmodel.OrderNone, Stack: []string{}, Ref: "p/h2/h2-s/9", Lane: 1, ToLane: -1},
+			Ordering: viewmodel.OrderNone, Stack: []string{}, Ref: "shop/h2/h2.example.org-s2/9", Lane: 1, ToLane: -1},
 		// A folded run (task vg4): the selftest checks its detail.
 		{Kind: viewmodel.StepFile, Service: lanes[1].Service, Host: "h2.example.org", Thread: "w-3",
 			Label: "read /usr/lib/modules" + s + " (3 calls)", Count: 3, Bytes: 12, Latency: 3000,
-			Ordering: viewmodel.OrderCausal, Stack: []string{"a.B#c(B.java:2)"}, Ref: "p/h2/h2-s/10",
-			LastRef: "p/h2/h2-s/12" + s, RunQuery: "iormeshctl query -thread 21 -file '" + s + "'",
+			Ordering: viewmodel.OrderCausal, Stack: []string{"a.B#c(B.java:2)"}, Ref: "shop/h2/h2.example.org-s2/10",
+			LastRef: "shop/h2/h2.example.org-s2/12" + s, RunQuery: "iormeshctl query -thread 21 -file '" + s + "'",
 			Lane: 1, ToLane: -1},
 	}
+	h3Step := viewmodel.Step{Kind: viewmodel.StepFile, Service: lanes[1].Service, Host: "h2.example.org",
+		Thread: "w-3", Label: "open /srv", Ordering: viewmodel.OrderNone, Stack: []string{},
+		Ref: "shop/h3/h2.example.org-s3/4", Lane: 0, ToLane: -1}
 	return viewmodel.Model{
-		Run: viewmodel.Run{Projects: []string{"shop"}, Hosts: []string{"h1" + s, "h2"}, Sessions: 2,
+		Run: viewmodel.Run{Projects: []string{"shop"}, Hosts: []string{"h1" + s, "h2", "h3"}, Sessions: 3,
 			First: t0, Last: t0.Add(time.Second)},
 		Health: viewmodel.Health{Sessions: []viewmodel.Session{
 			{Project: "shop", Host: "h1" + s, FQDN: "h1.example.org" + s, ID: "s" + s, End: s},
-			{Project: "shop", Host: "h2", FQDN: "h2.example.org", ID: "s2"}},
+			{Project: "shop", Host: "h2", FQDN: "h2.example.org", ID: "s2"},
+			{Project: "shop", Host: "h3", FQDN: "h2.example.org", ID: "s3"}},
 			BadSegments: []viewmodel.BadSegment{{Name: s, Error: s}}, Ignored: []string{s},
 			RouteFlags: []viewmodel.RouteFlag{{Kind: "route_contradicted", Subject: "shop.example.org" + s,
 				Detail: s, Conns: 1}, {Kind: s, Subject: "__proto__", Detail: strings.Repeat("d", 3000)}}},
@@ -57,8 +69,11 @@ func sampleModel(s string) viewmodel.Model {
 		Routes: []viewmodel.Route{{From: "gw" + s, FQDN: "shop.example.org" + s, Ingress: "traefik",
 			Service: "prod/backend", Workload: "prod/deployment/backend", Basis: "route", Conns: 3, First: t0, Last: t0},
 			{From: s, Service: s + strings.Repeat("s", 3000), Pod: s, Basis: s, Endpoints: 2}},
-		Services: []viewmodel.Service{{Name: "gw" + s}, {Name: "orders" + s, Endpoints: []string{"h2:8080" + s},
-			TopPaths: []viewmodel.PathStat{{Method: "GET", Path: "/x" + s, Count: 2}}},
+		Services: []viewmodel.Service{{Name: "gw" + s},
+			{Name: "orders" + s, Endpoints: []string{"h2.example.org:8080", "orders" + s + ":8080"},
+				TopPaths: []viewmodel.PathStat{{Method: "GET", Path: "/x" + s, Count: 2}}},
+			{Name: "pay", Endpoints: []string{"h1.example.org" + s + ":7000"}},
+			{Name: "db", Endpoints: []string{"h20:5432", "127.0.0.1:5432@h3"}},
 			{Name: "__proto__"}, {Name: "constructor"}},
 		Edges: []viewmodel.Edge{{From: "gw" + s, To: "orders" + s, State: viewmodel.StateFused, Conns: 1},
 			{From: "gw" + s, To: "203.0.113.9:5432", State: viewmodel.StateUnresolved, Conns: 1},
@@ -67,9 +82,14 @@ func sampleModel(s string) viewmodel.Model {
 			{From: "__proto__", To: "constructor", State: viewmodel.StateFused, Conns: 1},
 			{From: "constructor", To: "toString", State: viewmodel.StateUnresolved, Conns: 1}},
 		Conversations: []viewmodel.Conversation{{ID: "0001", Start: t0, Entry: "gw" + s, Label: "GET /x" + s,
-			Hops: 1, Services: []string{"gw" + s, "orders" + s}, Lifelines: lanes, Steps: steps}},
+			Hops: 1, Services: []string{"gw" + s, "orders" + s}, Lifelines: lanes, Steps: steps},
+			{ID: "0002", Start: t0, Entry: "orders" + s, Label: "open /srv", Services: []string{"orders" + s},
+				Lifelines: lanes[1:], Steps: []viewmodel.Step{h3Step}}},
 		Threads: []viewmodel.ThreadStory{{Lifeline: lanes[0], Entries: []viewmodel.ThreadEntry{{Conversation: "0001",
-			Step: 1, Act: viewmodel.ActSend, Label: "GET /x" + s, Peer: "orders" + s, Ordering: "causal"}}}},
+			Step: 1, Act: viewmodel.ActSend, Label: "GET /x" + s, Peer: "orders" + s, Ordering: "causal",
+			Ref: steps[0].Ref}}},
+			{Lifeline: lanes[1], Entries: []viewmodel.ThreadEntry{{Conversation: "0002", Step: 1,
+				Act: viewmodel.ActFile, Label: h3Step.Label, Ordering: "causal", Ref: h3Step.Ref}}}},
 		Processes: []viewmodel.Process{{Host: "h1" + s, FQDN: "h1.example.org" + s, PID: 10, Comm: "java" + s, Service: "gw" + s,
 			Threads: []viewmodel.ProcThread{{Name: "http-1" + s, TID: 11}},
 			Files:   []viewmodel.ProcFile{{Path: "/etc/" + s, Ops: []string{"open"}}},

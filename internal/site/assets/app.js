@@ -150,27 +150,69 @@
     return hs;
   }
 
+  // serviceShown filters a mesh service. Under a host filter it is
+  // shown when a process of it runs in that host directory, or one of
+  // its endpoints is on that host (endpointOn).
   function serviceShown(s) {
     if (filter.host && hostsOfService(s.name).indexOf(filter.host) < 0 &&
-      !arr(s.endpoints).some(function (e) { return e.indexOf(filter.host) === 0; })) { return false; }
+      !arr(s.endpoints).some(endpointOn)) { return false; }
     return hit([s.name].concat(arr(s.endpoints), arr(s.top_paths).map(function (p) { return p.method + ' ' + p.path; })));
   }
 
-  // hostMatch says whether h — a step's, lifeline's or thread's host,
-  // which is a session's FQDN — is the filter's host. The dropdown
-  // lists the store's host directories (run.hosts), which are not the
-  // FQDNs, so the sessions link the two (task 4i4); h equal to the
+  // endpointOn says whether endpoint label e — host:port, ip:port or
+  // [ip6]:port, plus @<host> for a loopback or link-local address
+  // scoped to the traced host it was seen on (servicedb
+  // Endpoint.Label) — is on the filter's host. A scoped endpoint is
+  // that host's by its scope alone; any other by its whole address
+  // equal to the directory or one of its sessions' FQDNs, never by a
+  // prefix (h1 is not h10, and the directory is no FQDN: task mj4).
+  // Two directories sharing an FQDN both own an endpoint naming it:
+  // the label cannot tell them apart.
+  function endpointOn(e) {
+    e = String(e || '');
+    const at = e.lastIndexOf('@');
+    if (at >= 0) { return hostMatch(e.slice(at + 1)); }
+    const colon = e.lastIndexOf(':');
+    return colon > 0 && hostMatch(e.slice(0, colon).replace(/^\[(.*)\]$/, '$1'));
+  }
+
+  // hostMatch says whether name — a step's, lifeline's or thread's
+  // host (a session's FQDN), or an endpoint's — is the filter's host.
+  // The dropdown lists the store's host directories (run.hosts), which
+  // are not the FQDNs, so the sessions link the two (task 4i4); the
   // directory itself still matches, for a session that named no FQDN.
-  function hostMatch(h) {
-    if (h === filter.host) { return true; }
-    return arr((M.health || {}).sessions).some(function (s) {
-      return s.host === filter.host && !!s.fqdn && s.fqdn === h;
-    });
+  function hostMatch(name) {
+    if (name === filter.host) { return true; }
+    return hostSessions().some(function (s) { return !!s.fqdn && s.fqdn === name; });
+  }
+
+  // hostSessions are the sessions recorded in the filter's host
+  // directory.
+  function hostSessions() {
+    return arr((M.health || {}).sessions).filter(function (s) { return s.host === filter.host; });
+  }
+
+  // refOnHost says whether ref — a raw event's
+  // <project>/<host dir>/<fqdn>-<session>/<seq> (federate sessionKey) —
+  // was recorded in the filter's host directory: the exact directory,
+  // so two directories sharing one FQDN keep apart (task mj4).
+  function refOnHost(ref) {
+    ref = String(ref || '');
+    return hostSessions().some(function (s) { return ref.indexOf(s.project + '/' + filter.host + '/') === 0; });
+  }
+
+  // onHost says whether a step or thread — its refs, and its hosts,
+  // which are sessions' FQDNs — is the filter host's: by its refs when
+  // it has any, else by a host that hostMatch links to the directory
+  // (an FQDN two directories share then matches both).
+  function onHost(refs, hosts) {
+    const rs = refs.filter(Boolean);
+    return rs.length ? rs.some(refOnHost) : hosts.some(hostMatch);
   }
 
   function convShown(c) {
     const steps = arr(c.steps);
-    if (filter.host && !steps.some(function (s) { return hostMatch(s.host) || hostMatch(hostOfLane(c, s.lane)); })) {
+    if (filter.host && !steps.some(function (s) { return onHost([s.ref], [s.host, hostOfLane(c, s.lane)]); })) {
       return false;
     }
     if (!inTime(c.start)) { return false; }
@@ -184,7 +226,7 @@
   }
 
   function storyShown(t) {
-    if (filter.host && !hostMatch(t.host)) { return false; }
+    if (filter.host && !onHost(arr(t.entries).map(function (e) { return e.ref; }), [t.host])) { return false; }
     return hit([t.service, t.thread, t.host, String(t.pid), String(t.tid)].concat(
       arr(t.entries).map(function (e) { return e.label + ' ' + e.peer; })));
   }
@@ -196,8 +238,9 @@
   }
 
   // buildFilters makes the filter bar. The host dropdown lists the
-  // store's host directories (run.hosts); hostMatch maps one to its
-  // sessions' FQDNs for the conversation and thread lists.
+  // store's host directories (run.hosts); refOnHost matches one to the
+  // conversations' and threads' refs, hostMatch to its sessions' FQDNs
+  // for what has no ref and for the mesh's endpoints.
   function buildFilters() {
     const box = document.getElementById('filters');
     const host = el('select');
@@ -915,33 +958,65 @@
   }
 
   // hostFilterCheck selects each host of the dropdown (a store host
-  // directory) in turn and requires a conversation and a thread for it
-  // whenever one of its sessions' FQDNs is a step or thread host — the
-  // directory and the FQDN differ in a real run (task 4i4) — and none
-  // for a host the run does not have. It restores the filter after.
+  // directory) in turn and requires each conversation, thread and mesh
+  // service to be shown exactly when it is that directory's: a
+  // conversation or thread when one of its refs starts with
+  // <project>/<dir>/ — so two directories sharing one FQDN never show
+  // each other's (task mj4) — and a service when a process of it runs
+  // there or an endpoint names the directory or one of its sessions'
+  // FQDNs (task 4i4: the two differ in a real run). A host the run does
+  // not have shows nothing. It restores the filter after.
   function hostFilterCheck(failed) {
     const saved = filter.host;
-    const sess = arr((M.health || {}).sessions);
-    const convHosts = arr(M.conversations).flatMap(function (c) {
-      return arr(c.steps).map(function (s) { return s.host; }).concat(arr(c.lifelines).map(function (l) { return l.host; }));
-    });
-    const threadHosts = arr(M.threads).map(function (t) { return t.host; });
-    const count = function (list, shown) { return arr(list).filter(shown).length; };
     for (const h of arr(M.run && M.run.hosts)) {
-      const fqdns = sess.filter(function (s) { return s.host === h && s.fqdn; }).map(function (s) { return s.fqdn; });
       filter.host = h;
-      if (fqdns.some(function (f) { return convHosts.indexOf(f) >= 0; }) && !count(M.conversations, convShown)) {
-        failed.push('filter host ' + clean(h) + ': no conversation');
-      }
-      if (fqdns.some(function (f) { return threadHosts.indexOf(f) >= 0; }) && !count(M.threads, storyShown)) {
-        failed.push('filter host ' + clean(h) + ': no thread');
-      }
+      const want = expectOnHost(h);
+      expectShown(failed, h, 'conversation', M.conversations, convShown, want.conv, function (c) { return c.id; });
+      expectShown(failed, h, 'thread', M.threads, storyShown, want.thread, function (t) { return t.service + ' ' + t.thread; });
+      expectShown(failed, h, 'service', M.services, serviceShown, want.svc, function (s) { return s.name; });
     }
     filter.host = '\u0000no such host';
-    if (count(M.conversations, convShown) || count(M.threads, storyShown)) {
-      failed.push('filter host not in the run: conversations or threads shown');
-    }
+    const none = function () { return false; };
+    expectShown(failed, filter.host, 'conversation', M.conversations, convShown, none, function (c) { return c.id; });
+    expectShown(failed, filter.host, 'thread', M.threads, storyShown, none, function (t) { return t.thread; });
+    expectShown(failed, filter.host, 'service', M.services, serviceShown, none, function (s) { return s.name; });
     filter.host = saved;
+  }
+
+  // expectShown reports each item of list whose shown() under host h
+  // differs from want().
+  function expectShown(failed, h, what, list, shown, want, name) {
+    for (const x of arr(list)) {
+      const got = shown(x), exp = want(x);
+      if (got !== exp) {
+        failed.push('filter host ' + clean(h) + ': ' + what + ' ' + clean(name(x)) + (got ? ' shown' : ' hidden'));
+      }
+    }
+  }
+
+  // expectOnHost states, apart from the filter's own code, which
+  // conversations, threads and services are host directory h's.
+  function expectOnHost(h) {
+    const sess = arr((M.health || {}).sessions).filter(function (s) { return s.host === h; });
+    const names = [h].concat(sess.map(function (s) { return s.fqdn; }).filter(Boolean));
+    const ofRef = function (ref) {
+      return sess.some(function (s) { return String(ref || '').indexOf(s.project + '/' + h + '/') === 0; });
+    };
+    const ep = function (e) {
+      return names.some(function (n) {
+        const rest = e.indexOf(n + ':') === 0 ? e.slice(n.length + 1) : '';
+        return /^[0-9]+$/.test(rest) || e.slice(-(n.length + 1)) === '@' + n;
+      });
+    };
+    return {
+      conv: function (c) { return arr(c.steps).some(function (s) { return ofRef(s.ref); }); },
+      thread: function (t) { return arr(t.entries).some(function (e) { return ofRef(e.ref); }); },
+      svc: function (s) {
+        return arr(M.processes).some(function (p) {
+          return p.host === h && (p.service === s.name || arr(p.serves).indexOf(s.name) >= 0);
+        }) || arr(s.endpoints).some(ep);
+      },
+    };
   }
 
   buildHeader();
