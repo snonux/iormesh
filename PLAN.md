@@ -1096,7 +1096,12 @@ Kubernetes (M7) build on it.
   (default 2 minutes — boot clocks of two hosts share no epoch),
   and keeps every other TCP end unresolved with its reason
   (`no_role`, `no_key`, `key_conflict`, `no_match`,
-  `ambiguous`). The `tcp_state` schema carries the four
+  `ambiguous`). Two sessions of one host tracing one process
+  give its socket two conn ids (each hashes its own BPF
+  establish stamp); the merge folds such halves — same host,
+  role, ISN pair and 4-tuple, inside the window — into one
+  before the join, so they fuse rather than turn `ambiguous`
+  (task ei4). The `tcp_state` schema carries the four
   `tcp_sock` fields, and the tracer captures them (task ve4,
   `tcp_state_event` 88 → 112 bytes, one CO-RE read per field
   and record — negligible), so real traces now fuse: the

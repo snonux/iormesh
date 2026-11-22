@@ -33,9 +33,11 @@ type Result struct {
 	Graph schema.Graph
 	Fusion
 	// Renames maps each host-local conn id the merge changed to its id in
-	// Graph: both ends of a fused connection, and an unfused id two hosts
+	// Graph: both ends of a fused connection, an unfused id two hosts
 	// happened to share (requalified, so two connections never pose as
-	// one). Ids not listed are unchanged.
+	// one), and the further ids one socket got from further sessions of
+	// its host (Half.Aliases, joined to its kept id). Ids not listed are
+	// unchanged.
 	Renames map[LocalConn]string
 	// Clocks bounds each traced host pair's clock offset per window, from
 	// the fused connections' send→receive edges (PLAN.md M4 "Clock
@@ -90,6 +92,7 @@ func Merge(ctx context.Context, sources []Source, opt Options) (Result, error) {
 	}
 	r.Clocks = col.clocks(r.Conns, clockWindow, drift)
 	requalify(traces, r.Renames)
+	renameAliases(r.Fusion, r.Renames)
 	r.Graph = union(traces, r.Renames, fused)
 	if err := r.Graph.Validate(); err != nil {
 		return Result{}, fmt.Errorf("federate: merged graph: %w", err)
@@ -193,8 +196,10 @@ func graphHost(name string, g schema.Graph) (string, error) {
 // different hosts both use. Host-local ids hash the 4-tuple and a boot
 // time, so a clash is unlikely — but two private networks reuse
 // addresses, and one shared node would claim a connection nobody
-// observed. Two sessions on one host share ids legitimately: they saw
-// the same socket.
+// observed. Only ids shared across hosts count: two sessions on one host
+// give one socket two ids, each hashing its own session's establish
+// stamp, and Fuse folded those into one half whose aliases
+// renameAliases joins afterwards.
 func requalify(traces []hostGraph, renames map[LocalConn]string) {
 	hosts := map[string]map[string]bool{}
 	for _, t := range traces {
@@ -215,6 +220,30 @@ func requalify(traces []hostGraph, renames map[LocalConn]string) {
 				renames[k] = hashID("host|" + h + "|" + id)
 			}
 		}
+	}
+}
+
+// renameAliases sends every alias of a folded half (foldSessions) where
+// its kept conn id goes: the fused id, the requalified one, or the kept
+// id itself. It runs after requalify, so an alias follows the kept id's
+// final name and never a requalified alias of its own: the sessions'
+// socket nodes and events become one.
+func renameAliases(f Fusion, renames map[LocalConn]string) {
+	alias := func(h Half) {
+		to := h.ConnID
+		if r, ok := renames[LocalConn{h.Host, h.ConnID}]; ok {
+			to = r
+		}
+		for _, a := range h.Aliases {
+			renames[LocalConn{h.Host, a}] = to
+		}
+	}
+	for _, c := range f.Conns {
+		alias(c.Client)
+		alias(c.Server)
+	}
+	for _, u := range f.Unresolved {
+		alias(u.Half)
 	}
 }
 

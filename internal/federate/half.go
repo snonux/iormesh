@@ -17,6 +17,10 @@ type Half struct {
 	ConnID  string   // the host-local conn_id (schema Event.ConnID)
 	Procs   []string // process node ids that held the socket, sorted
 	Role    string   // RoleClient, RoleServer, or "" when no record said
+	// Aliases are the other host-local conn ids of the same socket: one
+	// per further session of the host that traced it (Fuse folds them,
+	// foldSessions), sorted. The merge renames them along with ConnID.
+	Aliases []string
 	// Local and Peer are the 4-tuple this host saw. Across NAT they
 	// differ between the two ends, so fusion never compares them; they
 	// are what an unresolved half reports as its far end (M6 expands to

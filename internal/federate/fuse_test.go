@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -84,6 +85,62 @@ func TestFuse(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			got := outcome(Fuse(c.halves, DefaultWindow))
+			if !slices.Equal(got, c.want) {
+				t.Fatalf("got %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// TestFuseFoldsSessions: two sessions tracing one process on one host
+// give its socket two conn ids — each id hashes the session's own
+// bpf_ktime stamp of the establish (task ei4) — but the same role, key,
+// 4-tuple and nearly the same Established. They are one half, folded
+// before the join, so the cross-host connection still fuses. Negatives:
+// another host, another tuple or a time outside the window is another
+// socket, and the halves stay apart.
+func TestFuseFoldsSessions(t *testing.T) {
+	k := ISNPair{1, 2}
+	srv := netip.MustParseAddrPort("10.0.2.2:8080")
+	peer := netip.MustParseAddrPort("10.0.1.1:45678")
+	server := func(host, conn string, at uint64, local netip.AddrPort) Half {
+		h := half(host, conn, RoleServer, k, at)
+		h.Local, h.Peer = local, peer
+		return h
+	}
+	client := half("A", "c1", RoleClient, k, wall0)
+	other := netip.MustParseAddrPort("10.0.2.3:8080")
+	cases := []struct {
+		name   string
+		halves []Half
+		want   []string
+	}{
+		{"two sessions, one socket", []Half{client,
+			server("B", "s-ops", wall0+5, srv), server("B", "s-billing", wall0, srv)},
+			[]string{"s-billing+s-ops<>c1"}},
+		{"another host", []Half{client,
+			server("B", "s1", wall0, srv), server("C", "s2", wall0, srv)},
+			[]string{"c1=ambiguous", "s1=ambiguous", "s2=ambiguous"}},
+		{"another tuple", []Half{client,
+			server("B", "s1", wall0, srv), server("B", "s2", wall0, other)},
+			[]string{"c1=ambiguous", "s1=ambiguous", "s2=ambiguous"}},
+		{"outside the window", []Half{client, server("B", "s1", wall0, srv),
+			server("B", "s2", wall0+uint64(DefaultWindow)+1, srv)},
+			[]string{"s1<>c1", "s2=no_match"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var got []string
+			f := Fuse(c.halves, DefaultWindow)
+			for _, conn := range f.Conns {
+				ids := append([]string{conn.Server.ConnID}, conn.Server.Aliases...)
+				slices.Sort(ids)
+				got = append(got, strings.Join(ids, "+")+"<>"+conn.Client.ConnID)
+			}
+			for _, u := range f.Unresolved {
+				got = append(got, u.Half.ConnID+"="+u.Reason)
+			}
+			slices.Sort(got)
 			if !slices.Equal(got, c.want) {
 				t.Fatalf("got %v, want %v", got, c.want)
 			}
