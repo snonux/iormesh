@@ -38,6 +38,10 @@ public final class RingTest {
                 new AgentTests.Case("ring/stale file replaced", RingTest::staleFile),
                 new AgentTests.Case("ring/held name falls back to a tagged one",
                         RingTest::heldName),
+                new AgentTests.Case("ring/failed header removes its file",
+                        RingTest::failedHeader),
+                new AgentTests.Case("ring/failed header keeps a replaced file",
+                        RingTest::failedHeaderKeepsOthers),
                 new AgentTests.Case("ring/hooks write records", RingTest::hooksWrite),
                 new AgentTests.Case("ring/hook table record", RingTest::hookRecord),
                 new AgentTests.Case("ring/class records ahead of stack", RingTest::classRecords),
@@ -183,6 +187,54 @@ public final class RingTest {
         check(r.removeOwn(), "the tagged ring removes its own");
         Files.delete(held.resolve("x"));
         Files.delete(held);
+        delete(dir);
+    }
+
+    /**
+     * A ring that cannot be created (task cj4) leaves no header-less file
+     * for the tracer to retry, and the IOException names the cause. On a
+     * full tmpfs spool the header store faults, which the JVM raises as
+     * an InternalError; the seam throws the same.
+     */
+    static void failedHeader() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        try {
+            Ring.create(dir, Ring.MIN_CAPACITY, (b, capacity, pid) -> {
+                throw new InternalError("a fault occurred in an unsafe memory access operation");
+            });
+            throw new AssertionError("ring created though its header write failed");
+        } catch (IOException e) {
+            check(String.valueOf(e.getMessage()).contains("unsafe memory access"),
+                    "message names the cause: " + e);
+            check(e.getCause() instanceof InternalError, "cause kept: " + e.getCause());
+        }
+        try (var files = Files.list(dir)) {
+            equal(List.of(), files.toList(), "spool left empty");
+        }
+        delete(dir);
+    }
+
+    /**
+     * The cleanup deletes only the file this attempt created: one put
+     * under the name meanwhile (another inode) stays.
+     */
+    static void failedHeaderKeepsOthers() throws Exception {
+        Path dir = Files.createTempDirectory("iormesh-ring-test");
+        Path name = dir.resolve(ProcessHandle.current().pid() + ".ring");
+        try {
+            Ring.create(dir, Ring.MIN_CAPACITY, (b, capacity, pid) -> {
+                try {
+                    Files.delete(name);
+                    Files.writeString(name, "planted");
+                } catch (IOException e) {
+                    throw new java.io.UncheckedIOException(e);
+                }
+                throw new InternalError("full");
+            });
+            throw new AssertionError("ring created though its header write failed");
+        } catch (IOException expected) {
+            equal("planted", Files.readString(name), "the replacing file kept");
+        }
         delete(dir);
     }
 

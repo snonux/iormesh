@@ -22,7 +22,34 @@ final class AgentArgsTest {
                 new AgentTests.Case("agentargs/ring options", AgentArgsTest::ringOptions),
                 new AgentTests.Case("agentargs/rejects", AgentArgsTest::rejections),
                 new AgentTests.Case("agent/failed prepare releases claim",
-                        AgentArgsTest::failedPrepare));
+                        AgentArgsTest::failedPrepare),
+                new AgentTests.Case("agent/openRing unwraps the cause",
+                        AgentArgsTest::openRingCause));
+    }
+
+    /** A Hooks stand-in whose openRing fails with an Error, as a full spool does. */
+    public static final class FaultingHooks {
+        private FaultingHooks() {}
+
+        public static String openRing(String dir, long capacity) {
+            throw new InternalError("full spool");
+        }
+    }
+
+    /**
+     * Bridge.openRing passes on the cause of the reflective call, an
+     * Error too (task cj4), so "disabled: …" names it instead of
+     * InvocationTargetException.
+     */
+    static void openRingCause() {
+        Throwable got = null;
+        try {
+            Bridge.of(FaultingHooks.class).openRing("/nonexistent", 1);
+        } catch (Throwable t) {
+            got = t;
+        }
+        check(got instanceof InternalError, "the cause, not its wrapper: " + got);
+        equal("full spool", got.getMessage(), "message");
     }
 
     static void defaults() {

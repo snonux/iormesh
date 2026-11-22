@@ -238,10 +238,22 @@ public final class Ring {
      * names under the same owner and header checks (agentspool ringPID).
      * The directory is the tracer's: the agent never creates it, so a
      * missing directory means no tracer is listening and fails the
-     * install. These are the agent's own syscalls, which the tracer
-     * recognises by the spool path.
+     * install. A failure after the open (a full spool, task cj4) removes
+     * the file again and throws an IOException naming the cause. These
+     * are the agent's own syscalls, which the tracer recognises by the
+     * spool path.
      */
     static Ring create(Path dir, long capacity) throws IOException {
+        return create(dir, capacity, Ring::writeHeader);
+    }
+
+    /** Fills a fresh mapping's header; a seam so tests can make it fail. */
+    interface HeaderWriter {
+        void write(ByteBuffer b, long capacity, long pid);
+    }
+
+    /** {@link #create(Path, long)} with the header written by header. */
+    static Ring create(Path dir, long capacity, HeaderWriter header) throws IOException {
         if (Long.bitCount(capacity) != 1 || capacity < MIN_CAPACITY || capacity > MAX_CAPACITY) {
             throw new IllegalArgumentException("ring size must be a power of two in ["
                     + MIN_CAPACITY + ", " + MAX_CAPACITY + "], got " + capacity);
@@ -253,22 +265,53 @@ public final class Ring {
             path = dir.resolve(pid + "." + tag() + ".ring");
             opened = openNew(path);
         }
+        Object key = null;
         try (FileChannel f = opened) {
+            // The name is ours from CREATE_NEW on: in the sticky spool
+            // only we (or root) can unlink or replace it. Read first, so
+            // a failure below can tell this file from a replacement.
+            key = Files.readAttributes(path, BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS).fileKey();
             ByteBuffer b = f.map(FileChannel.MapMode.READ_WRITE, 0, DATA + capacity);
             b.order(ByteOrder.LITTLE_ENDIAN);
-            b.putInt(8, VERSION);
-            b.putInt(12, DATA);
-            b.putLong(16, capacity);
-            b.putLong(24, pid);
-            b.putLong(32, System.nanoTime());
-            // Magic last: a reader that sees it sees a complete header.
-            LONGS.setRelease(b, 0, MAGIC);
-            // The name is ours from CREATE_NEW on: in the sticky spool
-            // only we (or root) can unlink or replace it.
-            Object key = Files.readAttributes(path, BasicFileAttributes.class,
-                    LinkOption.NOFOLLOW_LINKS).fileKey();
+            header.write(b, capacity, pid);
             return new Ring(b, capacity, path, key);
+        } catch (Throwable e) {
+            throw failed(path, key, e);
         }
+    }
+
+    /**
+     * Cleans up after a create that failed past the open (task cj4) and
+     * returns what to throw. The file is deleted — it has no header, and
+     * the tracer would retry it at every scan for the session's life —
+     * but only while the path still names the file this attempt created
+     * (removeIfSame); without a key (its read failed) it stays. The
+     * cause is kept and named in the message: on a full tmpfs spool
+     * mapping succeeds (the file is sparse) and the first header store
+     * faults, which the JVM raises as an InternalError, not an
+     * IOException; wrapped, the agent's "disabled: …" line says why.
+     */
+    private static IOException failed(Path path, Object key, Throwable e) {
+        try {
+            removeIfSame(path, key);
+        } catch (IOException | RuntimeException cleanup) {
+            e.addSuppressed(cleanup);
+        }
+        if (e instanceof IOException io) {
+            return io;
+        }
+        return new IOException("cannot set up ring " + path + ": " + e, e);
+    }
+
+    /** The header words, magic last: a reader that sees it sees them all. */
+    private static void writeHeader(ByteBuffer b, long capacity, long pid) {
+        b.putInt(8, VERSION);
+        b.putInt(12, DATA);
+        b.putLong(16, capacity);
+        b.putLong(24, pid);
+        b.putLong(32, System.nanoTime());
+        LONGS.setRelease(b, 0, MAGIC);
     }
 
     /**
@@ -355,13 +398,22 @@ public final class Ring {
      * this ring. False when the file was gone or replaced.
      */
     boolean removeOwn() throws IOException {
+        return removeIfSame(path, fileKey);
+    }
+
+    /**
+     * Unlinks path only while it names a regular file with this key
+     * (device and inode), checked without following a symlink; false
+     * when the file was gone or replaced, or key is null.
+     */
+    private static boolean removeIfSame(Path path, Object key) throws IOException {
         BasicFileAttributes a;
         try {
             a = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
         } catch (NoSuchFileException e) {
             return false;
         }
-        if (!a.isRegularFile() || fileKey == null || !fileKey.equals(a.fileKey())) {
+        if (!a.isRegularFile() || key == null || !key.equals(a.fileKey())) {
             return false;
         }
         return Files.deleteIfExists(path);

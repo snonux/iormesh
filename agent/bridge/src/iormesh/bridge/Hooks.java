@@ -147,7 +147,9 @@ public final class Hooks {
     /**
      * Undoes {@link #claim} after an install that failed before any JDK
      * class was rewritten, so a later live attach can still install;
-     * also discards the ring, so the tracer does not wait on it.
+     * also discards the ring, so the tracer does not wait on it. A ring
+     * whose create failed was never assigned here: Ring.create removed
+     * its file itself (task cj4).
      */
     public static void release() {
         Ring r = ring;
