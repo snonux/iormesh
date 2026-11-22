@@ -46,7 +46,7 @@ func TestTeardownExisting(t *testing.T) {
 	want := []string{
 		"helm uninstall traefik --namespace=traefik --wait " + kc + " --kube-context=default",
 		"kubectl " + kc + " --context=default delete namespace --ignore-not-found --wait=true --timeout=180s " +
-			"traefik iormesh-m7 iormesh-m7-clusterip",
+			"traefik iormesh-m7 iormesh-m7-clusterip iormesh-m7-micro",
 		"sudo -n docker rm --force --volumes iormesh-registry",
 		"sudo -n docker volume rm --force iormesh-registry-data",
 		"sudo -n docker image rm --force localhost:5001/iormesh/tracer:m7",

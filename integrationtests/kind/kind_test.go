@@ -150,12 +150,7 @@ func (c *cluster) prepare(t *testing.T, full bool) {
 			"traefik", "--output=jsonpath={.spec.clusterIP}"))
 	}
 	c.apply(t, "workloads.yaml", data)
-	m := k8s.Manifests{Image: c.cfg.tracer, TraceLimit: k8s.DefaultTraceLimit,
-		SidecarArgs: []string{"run", "-pattern", "*workload.jar*", "-duration", "1h"}}
-	files, err := m.Files()
-	if err != nil {
-		t.Fatal(err)
-	}
+	files := c.manifests(t)
 	debug := []string{"server", "client"}
 	if full {
 		debug = append(debug, "hairpin", "gateway")
@@ -168,6 +163,19 @@ func (c *cluster) prepare(t *testing.T, full bool) {
 		c.patch(t, "inventory", sidecarSELinux(files["sidecar-patch.yaml"], c.cfg.seType, c.cfg.seLevel))
 		c.rollout(t, "inventory")
 	}
+}
+
+// manifests renders deploy/'s patches for the test's tracer image, the
+// sidecar's target set to the workload's pattern.
+func (c *cluster) manifests(t *testing.T) map[string][]byte {
+	t.Helper()
+	m := k8s.Manifests{Image: c.cfg.tracer, TraceLimit: k8s.DefaultTraceLimit,
+		SidecarArgs: []string{"run", "-pattern", pattern, "-duration", "1h"}}
+	files, err := m.Files()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
 }
 
 // sidecarSELinux sets the static sidecar patch's tracer type and level

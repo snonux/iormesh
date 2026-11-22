@@ -190,9 +190,9 @@ func TestViewsAcceptance(t *testing.T) {
 func assertNamedMesh(t *testing.T, b *viewsBuild) {
 	t.Helper()
 	m := b.model
-	if m.Run.FusedConns != len(spreadServerEnds) || m.Run.UnresolvedConns != 0 || len(m.Health.BadSegments) != 0 {
+	if m.Run.FusedConns != len(spreadHops) || m.Run.UnresolvedConns != 0 || len(m.Health.BadSegments) != 0 {
 		t.Errorf("run: %d fused, %d unresolved, bad segments %v; want %d fused and nothing else",
-			m.Run.FusedConns, m.Run.UnresolvedConns, m.Health.BadSegments, len(spreadServerEnds))
+			m.Run.FusedConns, m.Run.UnresolvedConns, m.Health.BadSegments, len(spreadHops))
 	}
 	want := map[string]string{"orders": "tls", "inventory": "plain", "billing": "tls"}
 	for _, s := range m.Services {

@@ -3,12 +3,11 @@ package integrationtests
 import (
 	"net/netip"
 	"path/filepath"
-	"slices"
 	"testing"
 
 	"iormesh/internal/federate"
+	"iormesh/internal/meshcheck"
 	"iormesh/internal/normalize"
-	"iormesh/internal/schema"
 )
 
 // The microservices topology spread over the mesh rig's three network
@@ -127,48 +126,22 @@ func newSpreadRun(h *Harness, hosts []Host, runs []Run) spreadRun {
 	return s
 }
 
-// spreadServerEnds are the server ends of the hops between hosts: the
-// address and port each server bound, which its client dialed (no NAT
-// between the namespaces).
-var spreadServerEnds = map[netip.AddrPort]string{
-	netip.MustParseAddrPort(rigServerAddr + ":" + spreadTLSPort):    "gateway→orders (TLS)",
-	netip.MustParseAddrPort(rigClientAddr + ":" + spreadPlainPort):  "orders→inventory",
-	netip.MustParseAddrPort(rigContainerAddr + ":" + spreadTLSPort): "orders→billing (TLS)",
+// spreadHops are the hops between hosts, at the address and port each
+// server bound, which its client dialed (no NAT between the namespaces);
+// the gateway→inventory hop stays on hosta, its tracer's to fuse.
+var spreadHops = []meshcheck.Hop{
+	{Server: netip.MustParseAddrPort(rigServerAddr + ":" + spreadTLSPort), Label: "gateway→orders (TLS)"},
+	{Server: netip.MustParseAddrPort(rigClientAddr + ":" + spreadPlainPort), Label: "orders→inventory"},
+	{Server: netip.MustParseAddrPort(rigContainerAddr + ":" + spreadTLSPort), Label: "orders→billing (TLS)"},
 }
 
-// assertSpreadFused: the merge fused exactly the three cross-host hops,
-// each with one 4-tuple seen mirrored, and left no end unresolved — the
-// local gateway→inventory hop was its tracer's. With one project, every
-// hop is within it (mesh expansion enrolls a peer under the project that
-// revealed it, task tb4); without, each crosses two projects (one per
-// host, as the hosts were added by hand).
+// assertSpreadFused: the merge fused exactly the three cross-host hops
+// and left nothing unresolved (meshcheck.Fused, which the kind pod run
+// shares). With one project, every hop is within it; without, each
+// crosses two projects.
 func assertSpreadFused(t *testing.T, res federate.Result, project string) {
 	t.Helper()
-	for _, u := range res.Unresolved {
-		t.Errorf("unresolved %s end %s on %s: %s", u.Half.Role, u.Half.ConnID, u.Half.Host, u.Reason)
-	}
-	seen := map[netip.AddrPort]bool{}
-	for _, c := range res.Conns {
-		server := unmap(c.Server.Local)
-		hop, ok := spreadServerEnds[server]
-		switch {
-		case !ok:
-			t.Errorf("fused connection %s to %v is no cross-host hop", c.ID, server)
-		case project == "" && !c.CrossProject():
-			t.Errorf("%s fused within project %s", hop, c.Client.Project)
-		case project != "" && (c.Client.Project != project || c.Server.Project != project):
-			t.Errorf("%s fused across projects %s and %s, want %s", hop, c.Client.Project,
-				c.Server.Project, project)
-		case unmap(c.Client.Peer) != server || unmap(c.Client.Local) != unmap(c.Server.Peer):
-			t.Errorf("%s: the ends saw different 4-tuples: client %v->%v, server %v<-%v", hop,
-				c.Client.Local, c.Client.Peer, c.Server.Local, c.Server.Peer)
-		}
-		seen[server] = true
-	}
-	if len(res.Conns) != len(spreadServerEnds) || len(seen) != len(spreadServerEnds) {
-		t.Errorf("merge fused %d connections to %v, want one per cross-host hop %v",
-			len(res.Conns), seen, spreadServerEnds)
-	}
+	meshcheck.Fused(t, res, spreadHops, project)
 }
 
 // TestMicroservicesAcrossHosts: the four services on three emulated
@@ -197,81 +170,21 @@ func TestMicroservicesAcrossHosts(t *testing.T) {
 	requireSeqFieldsIn(t, s.hosts...)
 	res, merged := mergeHosts(t, s.hosts...)
 	mergeMethods(t, &merged, s.hosts)
-	assertSpreadFused(t, res, "")
-	got, err := normalize.Normalize(merged, normalize.Options{Bracket: "microservices",
-		TmpPrefix: h.Tmp})
-	if err != nil {
-		t.Fatalf("normalize merged: %v", err)
-	}
-	want := expectationFile(t, "microservices", "expect-spread.json")
-	assertGolden(t, got, want)
-	assertRequestsPaired(t, got.Events)
-	assertHTTPTimed(t, merged.Events, false)
-	t.Run("wrong expectations are caught", func(t *testing.T) {
-		assertSpreadCaught(t, got, want)
-	})
+	// The cross-service assertions the kind pod run makes too (task uh4):
+	// the hops fused, the golden, the requests paired and timed, and the
+	// golden's wrong variants caught.
+	meshcheck.Check(t, meshcheck.Mesh{Result: res, Merged: merged, TmpPrefix: h.Tmp,
+		Want: expectationFile(t, meshcheck.Scenario, "expect-spread.json"), Hops: spreadHops})
 }
 
-// mergeMethods gives the merged trace the hosts' Java method tables.
-// Method ids are per trace — the controller scopes them per session — so
-// each host's ids move into a range of their own (the host's index + 1 in
-// the top 16 bits), and every event's stack moves with its host's. The
-// stacks are copied: the hosts' own traces stay as read.
+// mergeMethods gives the merged trace the hosts' Java method tables, each
+// host's ids in a range of its own (meshcheck.MergeMethods, which the
+// kind pod run shares).
 func mergeMethods(t *testing.T, merged *normalize.Trace, runs []tracedRun) {
 	t.Helper()
-	merged.Methods = map[uint64]schema.Method{}
-	offset := map[string]uint64{}
+	tables := make([]meshcheck.HostMethods, len(runs))
 	for i, r := range runs {
-		off := uint64(i+1) << 48
-		offset[hostID(t, r)] = off
-		for id, m := range r.Trace.Methods {
-			merged.Methods[id+off] = m
-		}
+		tables[i] = meshcheck.HostMethods{Host: hostID(t, r), Methods: r.Trace.Methods}
 	}
-	for i, e := range merged.Events {
-		if e.Java == nil || len(e.Java.Stack) == 0 {
-			continue
-		}
-		j := *e.Java
-		j.Stack = make([]uint64, len(e.Java.Stack))
-		for k, id := range e.Java.Stack {
-			j.Stack[k] = id + offset[e.HostID]
-		}
-		merged.Events[i].Java = &j
-	}
-}
-
-// assertSpreadCaught: the spread golden is not vacuous — a service on
-// the wrong host, a hop at the wrong address and a cross-host TLS hop
-// declared plain each fail it.
-func assertSpreadCaught(t *testing.T, got normalize.Trace, want normalize.Expectation) {
-	t.Helper()
-	assertCaught(t, got, want, map[string]func(*normalize.Expectation){
-		"orders on the gateway's host": func(x *normalize.Expectation) {
-			// assertCaught copies the events only.
-			x.Edges = slices.Clone(x.Edges)
-			for i, e := range x.Edges {
-				if e.Type == "runs_on" && e.From == "$p3" {
-					x.Edges[i].To = "host:$h2"
-				}
-			}
-		},
-		"orders dialed inventory on loopback": func(x *normalize.Expectation) {
-			httpOf(x, clientHTTPIndex(x, "/inventory/reserve")).Host = "127.0.0.1"
-		},
-		"the cross-host TLS hop declared plain": func(x *normalize.Expectation) {
-			httpOf(x, clientHTTPIndex(x, "/orders")).Scheme = "http"
-		},
-	})
-}
-
-// clientHTTPIndex is the index of the declared client-side http event
-// for path: the one that names the host it dialed.
-func clientHTTPIndex(x *normalize.Expectation, path string) int {
-	for i, e := range x.Events {
-		if e.HTTP != nil && e.HTTP.Path == path && e.HTTP.Host != "" {
-			return i
-		}
-	}
-	panic("no declared client http event for " + path)
+	meshcheck.MergeMethods(merged, tables)
 }

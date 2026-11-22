@@ -417,7 +417,7 @@ pass, and orders must still remove its certificate.
 | Test | What it checks |
 |---|---|
 | `TestMicroservices` | microservices golden under the agent, the four services released leaves first on free ports in one `--dir`: every hop one fused connection with an `http` event on each end (`https` on the TLS hops) pairing by `(conn_id, req_seq)`; each server's request handled by `HttpServe#handle`, each call made by `HttpFetch#call`, orders' calls on its dispatcher thread inside the gateway's request; config, certificate and record I/O with their causing methods (`ServiceConfig#provision`/`#load`, `ServiceNode#publish`/`#readCert`/`#withdraw`, `DataStore#save`; the services' mkdir and rmdir stay unattributed, as no hook issues them); four rings; mutated goldens fail |
-| `TestMicroservicesAcrossHosts` | the services on three emulated hosts (task 1f4), each traced as its own project under the agent: each host's trace holds only its own processes, three distinct host ids; the merge fuses exactly the three cross-host hops, each across two projects with one 4-tuple mirrored, and leaves nothing unresolved; the merged trace satisfies `expect-spread.json` and its requests pair; a service on the wrong host, a hop declared at loopback and the cross-host TLS hop declared plain each fail it |
+| `TestMicroservicesAcrossHosts` | the services on three emulated hosts (task 1f4), each traced as its own project under the agent: each host's trace holds only its own processes, three distinct host ids; the merge fuses exactly the three cross-host hops, each across two projects with one 4-tuple mirrored, and leaves nothing unresolved; the merged trace satisfies `expect-spread.json` and its requests pair; a service on the wrong host, a hop declared at loopback and the cross-host TLS hop declared plain each fail it — `internal/meshcheck.Check`, shared with the kind pod run (task uh4) |
 
 The golden was written from strace runs of the four processes
 (JDK 25) and confirmed against a traced run (iormesh run +
@@ -2329,13 +2329,16 @@ goes through `sudo -n`. It:
    Service: kind has no load balancer) from a helm repository
    config and cache in a temporary directory, so the operator's
    helm repositories stay as they were;
-7. runs `TestKindAcceptance` with kube-proxy in iptables mode,
+7. runs `TestKindAcceptance` and `TestKindMicroservices` (below,
+   task uh4) with kube-proxy in iptables mode,
    switches kube-proxy to nftables and runs `TestKindClusterIP`,
    each with `go test -v`, judged as `mage integrationTest` is
    (`gatecmd.KindTestsVerdict`, task si4): the target fails when
    the test does not report `--- PASS`, or when it or any subtest
    reports `--- SKIP` (go test exits 0 for both); `mage
-   k8sDebugRestart` judges `TestKindDebugRestart` the same way;
+   k8sDebugRestart` judges `TestKindDebugRestart` the same way,
+   and `mage k8sMicroservices` `TestKindMicroservices`, each
+   alone;
 8. tears down exactly what it made (`internal/kindrun`
    `TeardownPlan`): the cluster, the registry container with its
    volumes and the named volume, the run's two tags, any image
@@ -2516,6 +2519,58 @@ sole endpoint is named, and the `ingress` check expects the
 inventory pod at the end of the routed edge, in the summary and
 `model.json`).
 
+### Microservices as pods (task uh4)
+
+PLAN.md M0 runs the microservices scenario "on plain hosts
+(M4/M6) and as pods (M7)"; `TestKindMicroservices` is the pod
+run (PLAN.md M7 "Microservices as pods"). `mage
+k8sMicroservices` runs it alone, with the same setup, disk
+guard, judging and scoped teardown as `mage k8sAcceptance`,
+which runs it too, after `TestKindAcceptance`.
+
+In namespace `iormesh-m7-micro` it applies
+`testdata/microservices.yaml`: one Deployment per service
+(billing, inventory, orders, gateway), each app container
+sleeping, the prepare patch on each. The registry gives every
+pod a debug entry with the agent flags, all in one project.
+Then, leaves first, for each service it:
+
+1. ships in the certificate the service pins (billing's into
+   orders' `/tmp/w`, orders' into the gateway's), `cat` out of
+   one pod and into the other through `kubectl exec`, so the
+   copy matches no tracer's pattern;
+2. starts the JVM behind the startup gate, deploys the pod's
+   debug tracer, waits for the agent's `joined` line, and opens
+   the gate;
+3. waits for a server's `listening` line, which comes after its
+   certificate is published.
+
+The servers bind their pod addresses at the rig spread's ports
+(billing and orders 443 with TLS, inventory 80), and the callers
+dial those addresses: a TLS certificate names the one address
+its server binds, so a ClusterIP would fail the pinning. Then
+it collects and builds.
+
+| Check | What it asserts |
+|---|---|
+| summary | the build saw 4 hosts and 4 sessions, `tcp 4 fused, 0 unresolved` |
+| `mesh` | `internal/meshcheck.Check`, the function `TestMicroservicesAcrossHosts` calls too: the four pods' traces, merged with their method tables, fuse the four hops at their server pods' addresses, inventory's end twice (orders and the gateway each call it from their own pod), every 4-tuple mirrored, all in the test's project, nothing unresolved; the merged trace holds `expect-pods.json`, the spread golden with the gateway on a host of its own, at the pods' addresses; every request's two http events agree and are timed; a wrong golden (orders on another host, orders dialing inventory on loopback, the TLS hop to orders declared plain) fails |
+| `pod fields` | every event names its pod's namespace and name (task sh4); a process's events also carry the app container's id from the pod status, host-level events none |
+| `identity` | each pod is its own `pod-<uid>` host with its FQDN, all on one `boot_id` |
+
+`internal/meshcheck`'s unit tests pin `expect-pods.json` to
+`expect-spread.json` (only the gateway's four edges move to
+`$h4`). They also check that two hops may share a server end,
+which the rig's spread never needed, that each mutation changes
+both goldens, and the request pairing. `TestMicroTemplate` and
+`TestMicroAddresses` check the template, each service's options
+and the address map.
+
+Status (2026-11-22): built and unit-tested, not yet run on kind.
+The one `mage k8sMicroservices` run built everything and stopped
+at the disk guard with `disk guard: /var/lib/docker has 16 GiB
+free, need 20`, before it created a registry, cluster or image.
+
 ### M7 on an existing cluster (task zg4)
 
 kind's node runs in a privileged container, so a kind run says
@@ -2533,8 +2588,9 @@ operator's, and a release `traefik` in namespace `traefik` is the
 chart's documented install of a cluster's own ingress controller
 (task li4). So before touching the cluster the run claims its
 namespaces (`kindrun.ClaimExisting`): it refuses when `traefik`,
-`iormesh-m7` or `iormesh-m7-clusterip` is already there and not
-recorded as its own, or when it cannot list them, and otherwise
+`iormesh-m7`, `iormesh-m7-clusterip` or `iormesh-m7-micro` is
+already there and not recorded as its own, or when it cannot list
+them, and otherwise
 records the kubeconfig, the context, the Traefik release and the
 namespaces in `.k8s-existing.state.json` at the repository root,
 beside the base-image state. The teardown removes only what that
