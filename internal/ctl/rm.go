@@ -31,8 +31,8 @@ import (
 //     project directory under /opt/iormesh/traces that the registry or
 //     deploy's record (tombstones included) lists for the host is
 //     stopped and collected too, since uninstall would stop it and
-//     delete what it publishes. A directory neither lists (started by hand, or planted by a
-//     compromised server) is not collected: the store's project comes
+//     delete what it publishes. A directory neither lists (started by
+//     hand, or planted by a compromised server) is not collected: the store's project comes
 //     from the controller, never from the server, or a server could put
 //     segments into another project's store. Then nothing may be left: a
 //     published segment or an .active-* file still there (an unclean
@@ -111,7 +111,7 @@ func rmCommand(args []string, e env) error {
 // of the host (still registered, or added again) collects them as its own
 // rather than refusing over them as foreign directories.
 func unregisterUnreachable(regPath string, e env, host, name string, sc rmTarget, cause error) error {
-	what, later := "it", "add it again and rm it to collect them"
+	what, later := "it", "add the host again and rm it to collect them"
 	if name != "" {
 		what = "project " + name
 		if !sc.hostGoes {
