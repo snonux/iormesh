@@ -143,6 +143,8 @@ public final class Netty implements Library {
     static final class State {
         final ArrayDeque<Pending> q = new ArrayDeque<>();
         boolean poisoned;
+        /** Whether the channel's codec loader was checked for both hooks (once, task 6j4). */
+        boolean vetted;
     }
 
     /**
@@ -193,6 +195,19 @@ public final class Netty implements Library {
                 synchronized (rewritten) {
                     rewritten.merge(loader, bit, (a, b) -> a | b);
                 }
+            }
+        }
+
+        /**
+         * True the first time st's channel is seen, false after: the
+         * loader check below runs once per channel, not on every decode
+         * and write of the event loops (a lock and a class walk).
+         */
+        static boolean firstLook(State st) {
+            synchronized (st) {
+                boolean first = !st.vetted;
+                st.vetted = true;
+                return first;
             }
         }
 
@@ -259,13 +274,16 @@ public final class Netty implements Library {
                 st = channels.of(channel);
                 if (!channels.born(a[1])) {
                     Channels.poison(st);   // a codec older than the agent: history unknown
-                } else if (!channels.hooked(a[1], inbound ? DECODER : ENCODER)) {
+                } else if (Channels.firstLook(st)
+                        && !channels.hooked(a[1], inbound ? DECODER : ENCODER)) {
                     // Half hooked (task 6j4: older 4.1 has no encoder write
                     // to rewrite): one side of every exchange goes unseen,
                     // so the channel records nothing — silently, never a
-                    // lost record. Poisoned, not just skipped: should the
-                    // other side be rewritten later, this channel's
-                    // earlier messages still went unseen.
+                    // lost record. Checked once, at the channel's first
+                    // message, and poisoned for good: a pipeline that adds
+                    // its encoder (its class first loaded, so rewritten)
+                    // only after the first decode stays silent on that
+                    // channel, since its earlier messages went unseen.
                     Channels.poison(st);
                 }
                 return st.poisoned ? null : seen(a, pair[1], api, channel, st, meta);
