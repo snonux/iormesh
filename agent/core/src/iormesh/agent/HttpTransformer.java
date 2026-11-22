@@ -10,7 +10,9 @@ import iormesh.agent.shaded.asm.Opcodes;
 import iormesh.agent.shaded.asm.Type;
 import java.lang.instrument.ClassFileTransformer;
 import java.security.ProtectionDomain;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -89,7 +91,7 @@ final class HttpTransformer implements ClassFileTransformer {
                     : !hooks.hasAppClass(className) || !sight.linkable(loader, module, className))) {
                 return null;
             }
-            return rewrite(className, bytes);
+            return rewrite(className, bytes, jdk ? null : loader);
         } catch (Throwable t) {
             System.err.println("iormesh-agent: not rewriting " + className + ": " + t);
             return null;
@@ -103,6 +105,16 @@ final class HttpTransformer implements ClassFileTransformer {
      * not rewritten.
      */
     byte[] rewrite(String className, byte[] bytes) {
+        return rewrite(className, bytes, null);
+    }
+
+    /**
+     * As {@link #rewrite(String, byte[])}; with an application loader
+     * (a third-party class), each library whose method was rewritten is
+     * then told so, once the bytes are complete (Library.rewritten, task
+     * 6j4: Netty pairs only where both its hooks are in).
+     */
+    byte[] rewrite(String className, byte[] bytes, ClassLoader loader) {
         if (className == null || !(hooks.hasClass(className) || hooks.hasAppClass(className))) {
             return null;
         }
@@ -117,7 +129,16 @@ final class HttpTransformer implements ClassFileTransformer {
         ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
         Rewriter rewriter = new Rewriter(writer, className, unsafe);
         reader.accept(rewriter, 0);
-        return rewriter.rewritten == 0 ? null : writer.toByteArray();
+        if (rewriter.hooked.isEmpty()) {
+            return null;
+        }
+        byte[] out = writer.toByteArray();
+        for (HttpHooks.Hook h : loader == null ? List.<HttpHooks.Hook>of() : rewriter.hooked) {
+            if (h.library() != null) {
+                h.library().rewritten(loader, h.target());
+            }
+        }
+        return out;
     }
 
     HttpHooks hooks() {
@@ -238,7 +259,8 @@ final class HttpTransformer implements ClassFileTransformer {
         private final String className;
         private final Set<String> unsafe;
         private int version;
-        int rewritten;
+        /** The hooks whose methods this class had rewritten. */
+        final List<HttpHooks.Hook> hooked = new ArrayList<>();
 
         Rewriter(ClassVisitor next, String className, Set<String> unsafe) {
             super(Opcodes.ASM9, next);
@@ -268,7 +290,7 @@ final class HttpTransformer implements ClassFileTransformer {
                         + descriptor + ": it stores into a slot the hook reads");
                 return mv;
             }
-            rewritten++;
+            hooked.add(h);
             applied.add(h.id());
             Exit e = new Exit(mv, p);
             e.mark = h.target().mark();

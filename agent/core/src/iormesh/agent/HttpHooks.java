@@ -134,6 +134,18 @@ final class HttpHooks {
         return h;
     }
 
+    /** For tests: lib's targets, ids 1.., with lib (told what is rewritten), no probes. */
+    static HttpHooks of(Library lib) throws ReflectiveOperationException {
+        HttpHooks h = new HttpHooks();
+        for (Target t : lib.targets()) {
+            Hook hook = new Hook(h.hooks.size() + 1, lib, t);
+            h.hooks.add(hook);
+            h.byKey.put(t.key(), hook);
+            (lib.appLoaded() ? h.appClasses : h.classes).add(t.owner());
+        }
+        return h;
+    }
+
     List<Hook> hooks() {
         return hooks;
     }

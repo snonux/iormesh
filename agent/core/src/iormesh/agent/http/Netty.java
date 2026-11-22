@@ -10,7 +10,8 @@ import java.util.WeakHashMap;
 import java.util.function.BiFunction;
 
 /**
- * Netty 4.2's HTTP/1.x codec (decision #22's v1 set, task de4): one
+ * Netty 4.2's HTTP/1.x codec, and 4.1's from the release whose encoder
+ * has a write of its own (decision #22's v1 set, task de4): one
  * http event per request a Netty server answered or a Netty client sent
  * through netty-codec-http (HttpServerCodec, HttpClientCodec, or their
  * decoder and encoder alone), whatever the app's handlers do between.
@@ -41,13 +42,16 @@ import java.util.function.BiFunction;
  * Pairing in order is only sound while no message of the channel went
  * unseen (review of de4), so a channel is poisoned — nothing more is
  * recorded on it — when its codec predates the agent (a live attach: the
- * codec constructors mark the ones made since), when a probe fails, when
+ * codec constructors mark the ones made since), when its codec's loader
+ * did not get both decode and write rewritten (task 6j4: Netty 4.1
+ * before the encoder had a write of its own, 4.1.79 and older checked,
+ * is only half hooked, so it records nothing), when a probe fails, when
  * a write throws, when an answer finds no request of its own, when 64
  * requests wait unanswered, or when one call completes two exchanges
- * (Hooks writes one record per call). Each of those but the first throws:
- * Hooks counts a lost record, so the tracer numbers no more of the JVM's
- * requests. A decode that throws still passes its output on, so its
- * messages count.
+ * (Hooks writes one record per call). Each of those but the first two
+ * throws: Hooks counts a lost record, so the tracer numbers no more of
+ * the JVM's requests. A decode that throws still passes its output on,
+ * so its messages count.
  *
  * The event's stack is the event loop's: Netty's codec, and the app's
  * handler only when it wrote from inside its read. HTTP/2 (Netty's
@@ -55,6 +59,9 @@ import java.util.function.BiFunction;
  */
 public final class Netty implements Library {
     private static final String P = "io/netty/handler/codec/http/";
+    /** The hooked codec classes' binary names, to find their loader from a codec. */
+    private static final String DECODER = "io.netty.handler.codec.http.HttpObjectDecoder";
+    private static final String ENCODER = "io.netty.handler.codec.http.HttpObjectEncoder";
     private static final String CTX = "Lio/netty/channel/ChannelHandlerContext;";
     private static final String BUF = "Lio/netty/buffer/ByteBuf;Ljava/util/List;";
     /** HttpObjectDecoder's constructors in 4.2 (the delegating ones too: marking twice is harmless). */
@@ -82,9 +89,11 @@ public final class Netty implements Library {
         return true;
     }
 
+    /** Every channel's exchanges, and which loaders' codecs are hooked (shared by the probes). */
+    private final Channels channels = new Channels();
+
     @Override
     public List<Target> targets() {
-        Channels channels = new Channels();
         List<Target> out = new ArrayList<>(List.of(
                 new Target(P + "HttpObjectDecoder", "decode", "(" + CTX + BUF + ")V", 0,
                         new Seen(channels, true, false)).withSecond(2),
@@ -100,6 +109,21 @@ public final class Netty implements Library {
                     channels.born));
         }
         return out;
+    }
+
+    /**
+     * Notes the two hooks a loader's Netty needs to pair (task 6j4):
+     * decode and write. Netty 4.1 before the encoder had a write of its
+     * own (4.1.52–4.1.79 checked; 4.1.110 has it) gets only its decoder
+     * rewritten; its channels then record nothing (see Seen.apply).
+     */
+    @Override
+    public void rewritten(ClassLoader loader, Target t) {
+        if (t.owner().equals(P + "HttpObjectDecoder") && t.method().equals("decode")) {
+            channels.rewrote(loader, Channels.DECODE);
+        } else if (t.owner().equals(P + "HttpObjectEncoder") && t.method().equals("write")) {
+            channels.rewrote(loader, Channels.WRITE);
+        }
     }
 
     /** One exchange on a channel: its request, then its answer's head. */
@@ -119,18 +143,26 @@ public final class Netty implements Library {
     static final class State {
         final ArrayDeque<Pending> q = new ArrayDeque<>();
         boolean poisoned;
+        /** Whether the channel's codec loader was checked for both hooks (once, task 6j4). */
+        boolean vetted;
     }
 
     /**
-     * Every channel's State, and the codecs made since the agent was
-     * installed (born). Weak both; the locks are held only to find or
-     * change an entry, never across the library's code.
+     * Every channel's State, the codecs made since the agent was
+     * installed (born), and the hooks rewritten per loader. Weak all; the
+     * locks are held only to find or change an entry, never across the
+     * library's code.
      */
     static final class Channels {
         /** Exchanges kept per channel; more means answers never come. */
         static final int MAX_PENDING = 64;
+        /** Bits of {@link #rewritten}: HttpObjectDecoder.decode, HttpObjectEncoder.write. */
+        static final int DECODE = 1;
+        static final int WRITE = 2;
         private final Map<Object, State> byChannel = new WeakHashMap<>();
         private final Map<Object, Boolean> codecs = new WeakHashMap<>();
+        /** Per loader defining Netty's codecs, which of decode and write were rewritten. */
+        private final Map<ClassLoader, Integer> rewritten = new WeakHashMap<>();
         /** A codec constructor's exit: the codec saw its channel from the start. */
         final BiFunction<Object[], long[], String[]> born = (a, meta) -> {
             if (a[1] != null) {
@@ -155,6 +187,43 @@ public final class Netty implements Library {
         boolean born(Object codec) {
             synchronized (codecs) {
                 return codecs.containsKey(codec);
+            }
+        }
+
+        void rewrote(ClassLoader loader, int bit) {
+            if (loader != null) {
+                synchronized (rewritten) {
+                    rewritten.merge(loader, bit, (a, b) -> a | b);
+                }
+            }
+        }
+
+        /**
+         * True the first time st's channel is seen, false after: the
+         * loader check below runs once per channel, not on every decode
+         * and write of the event loops (a lock and a class walk).
+         */
+        static boolean firstLook(State st) {
+            synchronized (st) {
+                boolean first = !st.vetted;
+                st.vetted = true;
+                return first;
+            }
+        }
+
+        /**
+         * Whether codec's loader (the one defining its HttpObjectDecoder
+         * or HttpObjectEncoder, owner) had both decode and write
+         * rewritten: only then can a request and its answer both be seen.
+         */
+        boolean hooked(Object codec, String owner) {
+            Class<?> c = Handles.find(codec.getClass(), owner);
+            ClassLoader l = c == null ? null : c.getClassLoader();
+            if (l == null) {
+                return false;
+            }
+            synchronized (rewritten) {
+                return rewritten.getOrDefault(l, 0) == (DECODE | WRITE);
             }
         }
 
@@ -205,6 +274,17 @@ public final class Netty implements Library {
                 st = channels.of(channel);
                 if (!channels.born(a[1])) {
                     Channels.poison(st);   // a codec older than the agent: history unknown
+                } else if (Channels.firstLook(st)
+                        && !channels.hooked(a[1], inbound ? DECODER : ENCODER)) {
+                    // Half hooked (task 6j4: older 4.1 has no encoder write
+                    // to rewrite): one side of every exchange goes unseen,
+                    // so the channel records nothing — silently, never a
+                    // lost record. Checked once, at the channel's first
+                    // message, and poisoned for good: a pipeline that adds
+                    // its encoder (its class first loaded, so rewritten)
+                    // only after the first decode stays silent on that
+                    // channel, since its earlier messages went unseen.
+                    Channels.poison(st);
                 }
                 return st.poisoned ? null : seen(a, pair[1], api, channel, st, meta);
             } catch (Throwable t) {
