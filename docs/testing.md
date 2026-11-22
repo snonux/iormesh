@@ -2216,7 +2216,12 @@ goes through `sudo -n`. It:
    config and cache in a temporary directory, so the operator's
    helm repositories stay as they were;
 7. runs `TestKindAcceptance` with kube-proxy in iptables mode,
-   switches kube-proxy to nftables and runs `TestKindClusterIP`;
+   switches kube-proxy to nftables and runs `TestKindClusterIP`,
+   each with `go test -v`, judged as `mage integrationTest` is
+   (`gatecmd.KindTestsVerdict`, task si4): the target fails when
+   the test does not report `--- PASS`, or when it or any subtest
+   reports `--- SKIP` (go test exits 0 for both); `mage
+   k8sDebugRestart` judges `TestKindDebugRestart` the same way;
 8. tears down exactly what it made (`internal/kindrun`
    `TeardownPlan`): the cluster, the registry container with its
    volumes and the named volume, the run's two tags, any image
@@ -2421,8 +2426,12 @@ hand-edited state file) is not acted on in the cluster: the
 teardown says so, keeps the state file and fails. The SIGTERM
 check reads the tracer's exit through `IORMESH_K8S_CRICTL`, the
 argv prefix that runs crictl on the node (`ssh root@<node> k3s
-crictl`), and skips without it. Without `IORMESH_K8S_KUBECONFIG`
-nothing changes.
+crictl`), and `mage k8sDebugRestart` kills the app container's
+init through it (`crictl stop --timeout 0`, a SIGKILL without
+grace: the prefix runs nothing but crictl). Without it both
+checks skip, and a skip fails the target (task si4), so a run on
+an existing cluster needs the prefix. Without
+`IORMESH_K8S_KUBECONFIG` nothing changes.
 
 The cluster must pull `localhost:5001/…` under that name: the
 images are pinned by the registry's digest, and that reference is
@@ -2821,7 +2830,9 @@ The steps:
    The agent joins the JVM, which is released and ends; the test
    then waits 75 s so the session publishes a segment.
 2. The app container's init is SIGKILLed from the kind node, its
-   pid taken from `crictl inspect`.
+   pid taken from `crictl inspect` (on an existing cluster, since
+   task si4, by `crictl stop --timeout 0` through
+   `IORMESH_K8S_CRICTL`).
 3. The ephemeral `iormesh` must end. A collect must fail with
    "session ended" and point to `iormeshctl deploy`.
 4. Another gated JVM is started, then `deploy` again. While that

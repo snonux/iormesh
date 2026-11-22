@@ -96,9 +96,10 @@ func RootBPFTestsNotPassed(output string) []string {
 }
 
 // notPassed returns the tests of names that output, the -test.v output of
-// a test binary, does not report as passed. Shared by the root BPF tests
-// and the integration tests (integration.go): both gates believe only a
-// "--- PASS" line, never the exit status.
+// a test binary, does not report as passed. Shared by the root BPF tests,
+// the integration tests (integration.go) and the kind acceptance runs
+// (kind.go): each gate believes only a "--- PASS" line, never the exit
+// status.
 func notPassed(output string, names []string) []string {
 	passed := map[string]bool{}
 	for line := range strings.SplitSeq(output, "\n") {
