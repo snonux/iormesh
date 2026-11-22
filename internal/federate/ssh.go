@@ -56,6 +56,13 @@ const stderrLimit = 2048
 // waitDelay is runLocal's cmd.WaitDelay (see there).
 const waitDelay = 2 * time.Second
 
+// rsyncTimeout is the I/O timeout both rsync calls carry: rsync exits
+// once no data has moved for 60 s. It bounds a stalled transfer, not a
+// long one, so a large ready/ backlog over a slow link still completes;
+// a minute leaves room for the remote side's file-list scan of a big
+// ready/ before the first byte moves.
+const rsyncTimeout = "--timeout=60"
+
 // Unix socket path limits for the control sockets: sun_path holds 104
 // bytes on macOS (108 on Linux; the smaller one counts), and a socket
 // name is "/" + %C (40 hex digits) + the ".<16 random>" suffix ssh binds
@@ -180,6 +187,8 @@ func (s SSH) Fetch(ctx context.Context, remoteDir, localDir string) error {
 // exported so a test standing in for the server runs exactly them:
 //   - -rt: recurse into remoteDir and keep mtimes; no -p (remote modes),
 //     no -l (a symlink is skipped, never recreated), no -o/-g;
+//   - --timeout (rsyncTimeout): give up once no data has moved for that
+//     long, however long the transfer itself takes;
 //   - --remove-source-files: delete a remote file once transferred;
 //   - --exclude=.*: never a dot file — the tracer publishes none, and in
 //     the local store dot files are rsync's own in-flight temporaries,
@@ -188,14 +197,15 @@ func (s SSH) Fetch(ctx context.Context, remoteDir, localDir string) error {
 //     remoteDir; the trailing exclude also matches every directory, so a
 //     subdirectory planted in ready/ is never descended into.
 func FetchFlags() []string {
-	return []string{"-rt", "--remove-source-files", "--exclude=.*", "--include=*.parquet", "--exclude=*"}
+	return []string{"-rt", rsyncTimeout, "--remove-source-files", "--exclude=.*", "--include=*.parquet", "--exclude=*"}
 }
 
 // Push copies localFiles into remoteDir with rsync over the multiplexed
 // ssh connection. -c compares checksums instead of size and mtime: the
 // files are a tracer build and its signature, cheap to hash, and a staged
 // copy damaged in place (same size, same mtime) is then sent again rather
-// than kept; an intact one still transfers nothing. -t keeps the mtime.
+// than kept; an intact one still transfers nothing. -t keeps the mtime;
+// --timeout bounds a stalled transfer as in Fetch.
 // As in Fetch, no -p,
 // -o or -l: the files arrive as the login user's own, with the remote
 // umask, which is what `iormesh upgrade` requires of a staged file (owned
@@ -208,7 +218,7 @@ func (s SSH) Push(ctx context.Context, remoteDir string, localFiles ...string) e
 	if len(localFiles) == 0 {
 		return fmt.Errorf("%w: nothing to push", ErrTransport)
 	}
-	args := []string{"-ct", "-e", s.rsyncShell(), "--"}
+	args := []string{"-ct", rsyncTimeout, "-e", s.rsyncShell(), "--"}
 	for _, f := range localFiles {
 		abs, err := filepath.Abs(f)
 		if err != nil {
@@ -235,6 +245,14 @@ func (s SSH) Push(ctx context.Context, remoteDir string, localFiles ...string) e
 //   - ControlMaster/ControlPath/ControlPersist: one connection per host,
 //     reused by the next command for a minute; %C hashes user, host and
 //     port, so the socket path stays short (macOS caps it at 104 bytes).
+//   - ConnectTimeout=15, ServerAliveInterval=15, ServerAliveCountMax=3:
+//     a host that does not answer the connect fails after 15 s, and one
+//     that stops answering mid-session (a dead link, a frozen server)
+//     after three unanswered keepalives, about 45 s, instead of hanging
+//     a collect or deploy loop until TCP gives up hours later. A live
+//     connection whose remote command hangs is the callers' per-host
+//     context deadline's (internal/ctl onHost), rsync's own stalls
+//     rsyncTimeout's.
 //   - ForwardAgent=no, ClearAllForwardings=yes, ForwardX11=no,
 //     ForwardX11Trusted=no: no agent, port or X11 forwarding, whatever
 //     ~/.ssh/config says. ClearAllForwardings does not cover X11, so it
@@ -249,6 +267,8 @@ func (s SSH) sshOptions() []string {
 		"-o", "ControlPath=" + filepath.Join(s.controlDir, "%C"),
 		"-o", "ControlPersist=60s",
 		"-o", "ConnectTimeout=15",
+		"-o", "ServerAliveInterval=15",
+		"-o", "ServerAliveCountMax=3",
 		"-o", "ForwardAgent=no",
 		"-o", "ClearAllForwardings=yes",
 		"-o", "ForwardX11=no",
@@ -299,11 +319,17 @@ func controlBase() (string, error) {
 // where ssh explains itself (host key mismatch, permission denied), cut
 // by cutStderr.
 //
+// ctx is the caller's deadline (the per-host one of internal/ctl): when
+// it expires the command is killed, and the error then wraps ctx.Err()
+// as well as the kill, so a caller can tell a deadline from a failure
+// with errors.Is.
+//
 // WaitDelay guards against the ControlPersist master, which ssh forks off
 // the first command: OpenSSH points its stdio at /dev/null when it
 // detaches, but should one ever keep our pipe open, Wait would block for
 // the whole persist time. Once the command itself has exited its output
-// is complete, so ErrWaitDelay counts as success.
+// is complete, so ErrWaitDelay counts as success. It also bounds the
+// wait after a deadline kill.
 func runLocal(ctx context.Context, name string, args ...string) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -312,6 +338,9 @@ func runLocal(ctx context.Context, name string, args ...string) ([]byte, error) 
 	err := cmd.Run()
 	if errors.Is(err, exec.ErrWaitDelay) {
 		err = nil
+	}
+	if err != nil && ctx.Err() != nil && !errors.Is(err, ctx.Err()) {
+		err = fmt.Errorf("%w (%w)", ctx.Err(), err)
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
