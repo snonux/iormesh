@@ -44,8 +44,10 @@ type Config struct {
 	// StateFile records the base images present before the run.
 	Kubeconfig, StateFile string
 	// Existing marks a cluster the run did not create (Existing, task
-	// zg4): no kind cluster is made or deleted, the kubeconfig stays,
-	// and the teardown deletes Namespaces instead.
+	// zg4): no kind cluster is made or deleted and the kubeconfig stays.
+	// Namespaces are those the run creates there; ClaimExisting refuses
+	// when any is already there and records them, and the teardown
+	// deletes only the recorded ones (task li4).
 	Existing   bool
 	Namespaces []string
 }
@@ -73,10 +75,12 @@ func docker(args ...string) []string { return append([]string{"sudo", "-n", "doc
 // kind is the same for kind, which drives docker.
 func kind(args ...string) []string { return append([]string{"sudo", "-n", "kind"}, args...) }
 
-// State is what was there before the run: per base repository, the image
-// IDs present.
+// State is what was there before the run — per base repository, the
+// image IDs present — and, in an existing cluster, what the run created
+// there (Owned, written by ClaimExisting; nil until then and on kind).
 type State struct {
 	BaseImages map[string][]string `json:"base_images"`
+	Owned      *Owned              `json:"owned,omitempty"`
 }
 
 // Snapshot lists the base images present now.
@@ -99,6 +103,11 @@ func (c Config) Save(s State) error {
 	if _, err := os.Stat(c.StateFile); err == nil {
 		return nil
 	}
+	return c.write(s)
+}
+
+// write writes s to the state file (0600), replacing what is there.
+func (c Config) write(s State) error {
 	data, err := json.Marshal(s)
 	if err != nil {
 		return err

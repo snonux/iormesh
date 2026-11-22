@@ -2115,7 +2115,13 @@ Later phase — plain Linux servers (M4) come first.
   the way: `build -registry`, selectors skipping terminating
   pods, kubectl 1.30's `--custom` gate. The target tears down
   only what it made (`mage k8sTeardown` alone, also after an
-  interrupted run; never a `docker system prune`).
+  interrupted run; never a `docker system prune`). Against an
+  existing cluster (task li4) the run refuses namespaces
+  `traefik`, `iormesh-m7` and `iormesh-m7-clusterip` that are
+  already there and not its own, records the context and what it
+  creates before its helm step, and the teardown removes only
+  what that record names, in that context — nothing in the
+  cluster without one.
   **Reopened on el9** (2026-11-21, task zg4): accepted on kind
   only. On a Rocky 9.9 k3s node (el9 5.14.0-741.22.1, SELinux
   enforcing, k3s v1.35.10, containerd 2.2.10, container-selinux

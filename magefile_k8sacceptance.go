@@ -12,8 +12,10 @@
 //
 // With IORMESH_K8S_KUBECONFIG set the run targets that existing cluster
 // instead (task zg4, docs/testing.md "M7 on an existing cluster"): no
-// kind cluster is made, kube-proxy's mode is the cluster's own, and the
-// teardown takes out only what the run put in (kindrun.Existing).
+// kind cluster is made, kube-proxy's mode is the cluster's own, the run
+// refuses namespaces (Traefik's among them) it did not create, and the
+// teardown takes out only what the state file records the run put in,
+// in the recorded context (kindrun.ClaimExisting, task li4).
 //
 // Never `docker system prune` here or in any teardown: the daemon holds
 // the operator's own images and volumes (review N7).
@@ -111,7 +113,10 @@ func kindRun(name string, tests func(env map[string]string, existing bool) error
 // K8sTeardown removes what K8sAcceptance made — the cluster, the
 // registry and its volume, the run's labelled images, the base images
 // the run pulled (by the state recorded before it), the kubeconfig — and
-// nothing else. Safe to repeat; the recovery after an interrupted run.
+// nothing else. In an existing cluster it removes only the release and
+// namespaces the state file records, in the recorded kubeconfig and
+// context, and nothing in the cluster without that record. Safe to
+// repeat; the recovery after an interrupted run.
 func K8sTeardown() error {
 	if err := exec.Command("sudo", "-n", "docker", "info").Run(); err != nil {
 		return fmt.Errorf("k8sTeardown needs the Docker daemon running (`sudo -n docker info` failed): %w", err)
@@ -144,7 +149,10 @@ func kindConfigFor() (kindrun.Config, error) {
 // existingConfig is the configuration against the existing cluster of
 // $IORMESH_K8S_KUBECONFIG, in $IORMESH_K8S_CONTEXT or else the
 // kubeconfig's current context; the base-image state goes to the
-// repository root (the kubeconfig's directory is the operator's).
+// repository root (the kubeconfig's directory is the operator's). The
+// context is looked up anew on every invocation, so the teardown does
+// not use it for the cluster: it uses the context the state file
+// recorded when the run claimed its namespaces.
 func existingConfig() (kindrun.Config, error) {
 	kc, err := filepath.Abs(os.Getenv("IORMESH_K8S_KUBECONFIG"))
 	if err != nil {
@@ -224,13 +232,19 @@ func kindMissing() string {
 	return ""
 }
 
-// kindUp records the base images, brings up the registry, the cluster
-// (unless it is an existing one), the images and Traefik, and returns
-// the tests' environment.
+// kindUp records the base images, claims an existing cluster's
+// namespaces (refusing ones it did not create, and recording what it
+// will create there and in which context, before anything touches the
+// cluster: task li4), brings up the registry, the cluster (unless it is
+// an existing one), the images and Traefik, and returns the tests'
+// environment.
 func kindUp(r shRunner, c kindrun.Config) (map[string]string, error) {
 	state, err := kindrun.Snapshot(r, c)
 	if err == nil {
 		err = c.Save(state)
+	}
+	if err == nil && c.Existing {
+		err = kindrun.ClaimExisting(r, c)
 	}
 	if err == nil {
 		err = kindrun.RegistryUp(r, c)
