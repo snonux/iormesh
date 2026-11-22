@@ -1477,9 +1477,38 @@ kernel produces — the 1024-message cap, a faulting read, a lost
 park — are pinned by `TestMmsgHarness`, the real
 `internal/c/mmsg.c` compiled against simulated maps, ring and
 user memory with the cap lowered to 4, plus its mutations
-(`TestMmsgHarnessCatchesMutations`). Not yet run on el9 (VMs
+(`TestMmsgHarnessCatchesMutations`). `TestMmsgVerifierHeadroom`
+loads the four mmsg handlers on the running kernel and logs the
+instructions its verifier processed (`verified_insns`): on the
+7.2 laptop 821 for each enter and about 42k for each exit (the
+loop), below its bound of 100k, a tenth of the 1M limit. That
+is 7.2's verifier, not el9's. Not yet run on el9 (VMs
 stopped); `TestEl9RecordLayout` relocates the eight new
-handlers against the trimmed el9 BTF.
+handlers against the trimmed el9 BTF — see "el9 runbook and
+pending runs" below.
+
+## el9 runbook and pending runs
+
+Rocky 9.9 is the main target, and some evidence exists only as
+far as the 7.2 laptop and the trimmed el9 BTF can give it. To
+run the root suites on el9, build `mage bpfRootTest`'s test
+binary (and the integration binary) statically on the laptop,
+stage it on `iom1` and run it serially as root, then remove it
+— the procedure of "Root suites on Rocky 9.9 (task nf4)" above.
+The VMs are started by the owner only.
+
+Not yet run on el9:
+
+- **oh4, the mmsg loop**: relocation checked against el9 BTF
+  (`TestEl9RecordLayout`); that 5.14's verifier accepts the
+  1024-message bounded loop of `internal/c/mmsg.c` is
+  estimated (unrolling disabled, constant bound; 7.2's
+  verifier processes about 42k instructions for the exit
+  handler against the 1M limit 5.14 also has) but not run.
+  On el9, run `TestMsgCallsTCP`, `TestMsgCallsUDP` and
+  `TestMmsgVerifierHeadroom` (5.14 has `verified_insns` only
+  from 5.16 upstream; if el9 lacks it, the load itself is the
+  evidence and the count check fails — read its log).
 
 ## Final socket snapshot (task sf4, 2026-11-21)
 

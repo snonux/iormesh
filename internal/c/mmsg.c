@@ -18,8 +18,14 @@
 //
 // The loop. A call moves at most UIO_MAXIOV (1024) messages: the kernel
 // clamps vlen to it. The exit reads at most IORMESH_MMSG_MAX entries, one
-// 4-byte bpf_probe_read_user each, in a bounded loop (el9's 5.14 verifier
-// accepts bounded loops; bpf_loop is 5.17). The cap equals the kernel's
+// 4-byte bpf_probe_read_user each, in a bounded loop (bounded loops exist
+// since 5.3, bpf_loop only since 5.17). On el9 only the CO-RE relocation
+// is checked (TestEl9RecordLayout, against its BTF); that 5.14's verifier
+// accepts the loop is estimated, NOT yet run on el9: unrolling is off and
+// the bound constant, and 7.2's verifier processes about 42k instructions
+// for the exit handler (TestMmsgVerifierHeadroom) against the 1M limit
+// 5.14 has too (docs/testing.md, "el9 runbook and pending runs"). The cap
+// equals the kernel's
 // clamp, so it truncates nothing a kernel returns today; it is still
 // checked, and the harness test lowers it. A read that faults (the caller
 // unmapped the array mid-call) ends the sum. Either way the record says so

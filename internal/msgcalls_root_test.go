@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"iormesh/internal"
+	"iormesh/internal/corereloc"
 	"iormesh/internal/schema"
 )
 
@@ -73,6 +75,33 @@ func TestMsgCallsUDP(t *testing.T) {
 			if want[e.Event] != 0 && e.Bytes != wantBytes {
 				t.Errorf("udp %s moved %d bytes, want %d", e.Event, e.Bytes, wantBytes)
 			}
+		}
+	}
+}
+
+// mmsgVerifierBudget is the most instructions TestMmsgVerifierHeadroom
+// lets this kernel's verifier process for an mmsg handler: a tenth of the
+// 1M complexity limit every kernel since 5.2 has, el9's 5.14 included.
+const mmsgVerifierBudget = 100_000
+
+// TestMmsgVerifierHeadroom loads the mmsg handlers - whose exit sums up to
+// 1024 messages in a bounded loop (internal/c/mmsg.c) - on this kernel and
+// logs how many instructions its verifier processed for each, requiring
+// a tenth of the limit at most. It is local evidence of headroom, not of
+// el9: the count is this kernel's verifier's, and 5.14's may differ
+// (docs/testing.md, "el9 runbook and pending runs").
+func TestMmsgVerifierHeadroom(t *testing.T) {
+	requireRoot(t)
+	progs := []string{"handle_sys_enter_sendmmsg", "handle_sys_exit_sendmmsg",
+		"handle_sys_enter_recvmmsg", "handle_sys_exit_recvmmsg"}
+	got, err := corereloc.VerifiedInsns(internal.EmbeddedBPFObject(), "iormesh.bpf.o", progs)
+	if err != nil {
+		t.Fatalf("load the mmsg handlers: %v", err)
+	}
+	for _, p := range progs {
+		t.Logf("%s: %d instructions processed", p, got[p])
+		if got[p] <= 0 || got[p] > mmsgVerifierBudget {
+			t.Errorf("%s: verifier processed %d instructions, want 1..%d", p, got[p], mmsgVerifierBudget)
 		}
 	}
 }

@@ -4398,9 +4398,13 @@ not, and share `bpf_prog_active` with the dispatchers (8e4).
   mmsghdr array by tid (`internal/c/mmsg.c`, `mmsg_park_map`)
   and their exit reads `msg_len` of the first `ret` entries —
   one 4-byte probe read each in a bounded loop capped at 1024,
-  the kernel's own `UIO_MAXIOV` clamp (bounded loops verify on
-  el9's 5.14; `bpf_loop` is 5.17) — and checks the sum, not
-  `ret`, against the parked sequence field. The exit record is
+  the kernel's own `UIO_MAXIOV` clamp (bounded loops exist
+  since 5.3, `bpf_loop` only since 5.17; that el9's 5.14
+  verifier accepts this one is estimated, not run — 7.2's
+  processes about 42k instructions for the exit handler,
+  `TestMmsgVerifierHeadroom`, against the 1M limit; see
+  testing.md, "el9 runbook and pending runs") — and checks the
+  sum, not `ret`, against the parked sequence field. The exit record is
   an `mmsg_event` (56 bytes: a `ret_event` plus the sum, the
   socket and sequence number, and flags) for every such call
   that moved messages. A sum it could not complete — a

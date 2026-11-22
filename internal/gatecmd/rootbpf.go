@@ -31,7 +31,8 @@ import "strings"
 // snapshot of a socket still open at the session's end, task sf4; a
 // prctl(PR_SET_NAME) rename reflected in the process's comm, task 0g4;
 // sendmsg, recvmsg, sendmmsg and recvmmsg with their bytes and tcp_seq,
-// the mmsg calls' byte sums on UDP too, task oh4). They
+// the mmsg calls' byte sums on UDP too, and this kernel's verifier cost
+// of the mmsg loop, task oh4). They
 // skip for anybody but root, so `mage test` passes them by, and `mage
 // bpfRootTest` is the one place that runs them. The names are listed
 // rather than matched by a pattern so that a renamed test fails a gate
@@ -79,6 +80,7 @@ func RootBPFTests() []string {
 		"TestRenameReflected",
 		"TestMsgCallsTCP",
 		"TestMsgCallsUDP",
+		"TestMmsgVerifierHeadroom",
 	}
 }
 

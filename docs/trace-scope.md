@@ -51,7 +51,10 @@ event families `iormesh run -trace-families` adds (see
   sendmsg/recvmsg/sendmmsg/recvmmsg with their bytes (the mmsg
   calls' summed over their messages) and TCP sequence ranges —
   their datagram peer inside the msghdr is not read yet (task
-  oh4) — poll/epoll wait registrations, DNS hostname↔IP maps,
+  oh4); their 8 handlers are on by default, and a
+  sendmmsg/recvmmsg exit pays up to 1024 user-memory reads per
+  call, one per message — heavy for UDP workloads that batch
+  with them — poll/epoll wait registrations, DNS hostname↔IP maps,
   and ingress route maps for proxy hops that hide the peer. TLS
   peer identity is later (decision #8). *Who talks to whom,
   under what name — and which threads wait on what.*

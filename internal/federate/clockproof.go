@@ -53,11 +53,12 @@ import "iormesh/internal/schema"
 //     (dropTaints). It covers every message of the direction. It is not a
 //     proof: it trusts the sums to hold every byte queued, and bytes can
 //     escape them with no drop recorded — untraced splice and io_uring
-//     (sendmsg and sendmmsg are traced since task oh4, a sendmmsg whose
-//     sum the tracer could not complete fails the check); a fork
+//     (sendmsg and sendmmsg are traced since task oh4, and a sendmmsg
+//     whose sum the tracer could not complete fails the check); a fork
 //     between the untraced socket() and connect(), an exec that keeps
-//     the socket (the correlator drops the fd's binding), or an fd passed by SCM_RIGHTS or pidfd_getfd, any of
-//     which leaves a holder whose calls name no connection. It also reads
+//     the socket (the correlator drops the fd's binding), or an fd
+//     passed by SCM_RIGHTS or pidfd_getfd, any of which leaves a
+//     holder whose calls name no connection. It also reads
 //     only the drops of the sessions that reported the half. What limits
 //     the damage: an offset past the sender's sum (sumsCover) or a
 //     bytes_acked above it (ackedCovered) proves untraced bytes and fails

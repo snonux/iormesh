@@ -228,6 +228,11 @@ trace never bound (opened before the session), nor a `read` or
 `write` the in-kernel fold held at its enter on a hot streak and
 then sent alone because it turned out slow — typically the read
 that waits for the peer's answer right after a burst of calls.
+A `recvfrom`, `recvmsg` or `recvmmsg` with `MSG_PEEK` still
+counts its `bytes` in the receiver's sums, although it consumed
+nothing (its `tcp_seq` is absent): the receiver's sums are the
+merge's second witness only, and a peek can only make them run
+high.
 
 ### Event kinds (M1)
 
