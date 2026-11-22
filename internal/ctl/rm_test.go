@@ -2,6 +2,9 @@ package ctl
 
 import (
 	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -81,10 +84,16 @@ func TestRmTeardown(t *testing.T) {
 }
 
 // TestRmSweepsUnlisted: before uninstalling, a project directory the
-// registry does not list (started by hand, or dropped by an earlier rm)
-// is stopped and collected too; a name that is no label is not.
+// registry no longer lists but deploy's record still does (dropped by an
+// earlier rm -project whose record edit did not land, say) is stopped and
+// collected too; a name that is no label is not.
 func TestRmSweepsUnlisted(t *testing.T) {
 	f := newDeployFixture(t)
+	rec := deployedRecord{}
+	rec.set("app2", "manual", []string{"start", "-project", "manual"}, "v1")
+	if err := rec.save(f.record); err != nil {
+		t.Fatal(err)
+	}
 	f.answers["app2 find /opt/iormesh/traces -mindepth 1"] = reply{
 		out: "/opt/iormesh/traces/shop\n/opt/iormesh/traces/manual\n/opt/iormesh/traces/.odd\n"}
 	f.answers["app2 systemctl show --property=ActiveState --value -- iormesh-manual.service"] = reply{out: "active\n"}
@@ -94,6 +103,37 @@ func TestRmSweepsUnlisted(t *testing.T) {
 			showCall("app2", "manual"), sudoCall("app2", "stop", "-project", "manual")},
 		f.collectLog("app2", "manual"),
 		[][]string{call("app2", "run", listLeft...), sudoCall("app2", "uninstall")})
+}
+
+// TestRmSweepSkipsForeign: a project directory the server reports that
+// neither the registry nor deploy's record ever listed for the host is not
+// stopped or collected — a compromised server must not plant segments in
+// another project's store — so its files are leftovers: rm refuses
+// without -force, with the registry unchanged, and -force uninstalls.
+func TestRmSweepSkipsForeign(t *testing.T) {
+	f := newDeployFixture(t)
+	f.answers["app2 find /opt/iormesh/traces -mindepth 1"] = reply{
+		out: "/opt/iormesh/traces/shop\n/opt/iormesh/traces/payments\n"}
+	f.answers["app2 find /opt/iormesh/traces -mindepth 2"] = reply{
+		out: "/opt/iormesh/traces/payments/ready/x.parquet\n"}
+	if code := f.run("rm", "app2"); code != exitError ||
+		!strings.Contains(f.stderr.String(), "1 trace files could not be synced off: "+
+			"/opt/iormesh/traces/payments/ready/x.parquet; nothing uninstalled") {
+		t.Fatalf("exit %d, stderr %s", code, f.stderr)
+	}
+	sweepStart := [][]string{call("app2", "run", "test", "-d", "/opt/iormesh/traces"),
+		call("app2", "run", listDirs...)}
+	checkLog(t, f.log, rmPrelude("app2"), [][]string{showCall("app2", "shop")}, f.collectLog("app2", "shop"),
+		sweepStart, [][]string{call("app2", "run", listLeft...)})
+	if got := f.hosts(t); len(got) != 3 {
+		t.Errorf("registry changed: %v", got)
+	}
+	f.mustRun(t, "rm", "-force", "app2")
+	checkLog(t, f.log, rmPrelude("app2"), [][]string{showCall("app2", "shop")}, f.collectLog("app2", "shop"),
+		sweepStart, [][]string{call("app2", "run", listLeft...), sudoCall("app2", "uninstall")})
+	if _, err := os.Stat(filepath.Join(f.store, "payments")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("store/payments: %v, want it absent", err)
+	}
 }
 
 // TestRmLeftovers: files still in the trace dir after the sweep (an

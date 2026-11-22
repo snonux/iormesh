@@ -1349,10 +1349,14 @@ Kubernetes (M7) build on it.
   timeout left its minute unpublished), then collected.
   `uninstall` runs only when the host leaves the registry
   (`rm HOST`, or its last project), and first every other
-  project directory under `/opt/iormesh/traces` (started by
-  hand, or dropped by an earlier rm of an unreachable host)
-  is stopped and collected too; then any segment file still
-  in a `ready/` or active refuses the uninstall, naming it.
+  project directory under `/opt/iormesh/traces` that the
+  registry or deploy's record lists for the host is stopped
+  and collected too. A directory neither lists (started by
+  hand, or named by a compromised server) is not collected
+  (task hi4): the server never picks the store's project.
+  Then any segment file still in a `ready/` or active —
+  an unlisted project's included — refuses the uninstall,
+  naming it.
   The registry changes only after all of that succeeded — a
   failed or unclean stop, a failed sync, a remote check that
   fails other than with "no" (exit status 1; ssh's 255 is a

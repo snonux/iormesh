@@ -26,12 +26,16 @@ import (
 //     which publishes the last segment and fails when the run did not
 //     end cleanly), then collect it as collect does;
 //  4. when the host goes (rm HOST, or its last project): every other
-//     project directory under /opt/iormesh/traces — a project started by
-//     hand, or dropped by an earlier rm while the host was unreachable —
-//     is stopped and collected too, since uninstall would stop it and
-//     delete what it publishes. Then nothing may be left: a published
-//     segment or an .active-* file still there (an unclean stop, a name
-//     that is no project label) refuses the uninstall, naming the files;
+//     project directory under /opt/iormesh/traces that the registry or
+//     deploy's record lists for the host is stopped and collected too,
+//     since uninstall would stop it and delete what it publishes. A
+//     directory neither lists (started by hand, or planted by a
+//     compromised server) is not collected: the store's project comes
+//     from the controller, never from the server, or a server could put
+//     segments into another project's store. Then nothing may be left: a
+//     published segment or an .active-* file still there (an unclean
+//     stop, an unlisted project, a name that is no project label) refuses
+//     the uninstall, naming the files;
 //  5. sudo iormesh uninstall, which stops every unit and removes
 //     /opt/iormesh;
 //  6. only then the registry and deploy's record are edited.
@@ -44,10 +48,14 @@ import (
 // maxListed bounds how many leftover files an error names.
 const maxListed = 10
 
-// remover is one rm run: a collector plus -force.
+// remover is one rm run: a collector plus -force and the projects the
+// sweep may collect.
 type remover struct {
 	collector
 	force bool
+	// known is every project the registry or deploy's record lists for
+	// the host: the only names the sweep collects into the store.
+	known []string
 }
 
 // rmCommand parses rm's flags, tears the deployment down and unregisters
@@ -73,7 +81,7 @@ func rmCommand(args []string, e env) error {
 	if federate.IsPodRef(host) {
 		return rmPod(host, rmPodOptions{regPath: *regPath, store: *store, project: *name, force: *force, kf: kf}, e)
 	}
-	projects, hostGoes, err := rmScope(*regPath, e, host, *name)
+	sc, err := rmScope(*regPath, e, host, *name)
 	if err != nil {
 		return err
 	}
@@ -81,11 +89,11 @@ func rmCommand(args []string, e env) error {
 	if err != nil {
 		return err
 	}
-	r := remover{collector: c, force: *force}
+	r := remover{collector: c, force: *force, known: sc.known}
 	// Bounded like collect's hosts (env.onHost): a host stalled after
 	// the probe fails the teardown and the registry stays as it was.
 	err = r.e.onHost(r.e.root(), func(ctx context.Context) error {
-		return r.teardown(ctx, host, projects, hostGoes)
+		return r.teardown(ctx, host, sc.projects, sc.hostGoes)
 	})
 	if errors.Is(err, errUnreachable) {
 		_, _ = fmt.Fprintf(e.stderr, "iormeshctl: warning: %s: %s; its traces and tracer stay on it, "+
@@ -96,30 +104,66 @@ func rmCommand(args []string, e env) error {
 	return unregister(*regPath, e, host, *name)
 }
 
-// rmScope checks host (and project) are registered and returns the
-// projects rm removes and whether the host leaves the registry with them.
-// Nothing is contacted before this passes.
-func rmScope(regPath string, e env, host, name string) ([]string, bool, error) {
+// rmTarget is what one rm removes, as rmScope works it out.
+type rmTarget struct {
+	// projects are the projects rm removes.
+	projects []string
+	// hostGoes is set when the host leaves the registry with them.
+	hostGoes bool
+	// known is every project the registry or deploy's record lists for
+	// the host (see remover.known).
+	known []string
+}
+
+// rmScope checks host (and project) are registered and returns what rm
+// removes. Nothing is contacted before this passes.
+func rmScope(regPath string, e env, host, name string) (rmTarget, error) {
 	r, err := loadRegistry(regPath, e)
 	if err != nil {
-		return nil, false, err
+		return rmTarget{}, err
 	}
 	srv, err := r.Lookup(host)
 	if err != nil {
-		return nil, false, err
-	}
-	if err := r.Remove(host, name); err != nil {
-		return nil, false, err
-	}
-	if name != "" {
-		_, err := r.Lookup(host)
-		return []string{name}, errors.Is(err, federate.ErrUnknownHost), nil
+		return rmTarget{}, err
 	}
 	var all []string
 	for _, p := range srv.Projects {
 		all = append(all, p.Name)
 	}
-	return all, true, nil
+	known, err := knownProjects(e, host, all)
+	if err != nil {
+		return rmTarget{}, err
+	}
+	if err := r.Remove(host, name); err != nil {
+		return rmTarget{}, err
+	}
+	if name != "" {
+		_, err := r.Lookup(host)
+		return rmTarget{projects: []string{name}, hostGoes: errors.Is(err, federate.ErrUnknownHost),
+			known: known}, nil
+	}
+	return rmTarget{projects: all, hostGoes: true, known: known}, nil
+}
+
+// knownProjects is listed (the registry's projects of host) plus every
+// project deploy's record still holds for it: deploy started those, so
+// their directories on the host are the controller's to collect.
+func knownProjects(e env, host string, listed []string) ([]string, error) {
+	path, err := e.deployed()
+	if err != nil {
+		return nil, err
+	}
+	rec, err := loadDeployed(path)
+	if err != nil {
+		return nil, err
+	}
+	known := slices.Clone(listed)
+	for p := range rec[host] {
+		if !slices.Contains(known, p) {
+			known = append(known, p)
+		}
+	}
+	return known, nil
 }
 
 // teardown stops and collects projects on host and, when uninstall is
@@ -192,10 +236,12 @@ func (r remover) stopProject(ctx context.Context, t federate.Transport, host, na
 		"(rm -force uninstalls anyway and loses it)", err)
 }
 
-// sweep handles what uninstall would delete beyond the registry's
-// projects: it stops and collects every other project directory under
-// the trace dir, then refuses (unless -force) while any published or
-// active segment file is still there.
+// sweep handles what uninstall would delete beyond the projects rm
+// removed: it stops and collects every other project directory under the
+// trace dir that the registry or deploy's record lists for the host, then
+// refuses (unless -force) while any published or active segment file is
+// still there. The directory names are the server's: one not in r.known
+// is never collected into the store, so its files count as leftovers.
 func (r remover) sweep(ctx context.Context, t federate.Transport, host string, done []string) error {
 	present, err := remoteTest(ctx, t, "test", "-d", confinedTraceDir)
 	if err != nil || !present {
@@ -208,9 +254,11 @@ func (r remover) sweep(ctx context.Context, t federate.Transport, host string, d
 	var others []string
 	for _, dir := range lines(out) {
 		name := strings.TrimPrefix(dir, confinedTraceDir+"/")
-		// A name no label rule admits cannot be a local path component;
-		// its files show up as leftovers below.
-		if project.Valid(name) && !slices.Contains(done, name) {
+		// A name no label rule admits cannot be a local path component,
+		// and a project the controller never listed for this host is not
+		// the server's to choose; the files of either show up as
+		// leftovers below.
+		if project.Valid(name) && !slices.Contains(done, name) && slices.Contains(r.known, name) {
 			others = append(others, name)
 		}
 	}
