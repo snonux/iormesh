@@ -96,11 +96,13 @@ truth.
 - **Host keys are verified, never trusted on first use.**
   iormeshctl runs the system `ssh`/`rsync` with
   `StrictHostKeyChecking=yes` and `BatchMode=yes`: an unknown or
-  changed server key fails the run (PLAN.md #12). Agent and
-  port forwarding are switched off on every call
-  (`ForwardAgent=no`, `ClearAllForwardings=yes`), whatever
-  `~/.ssh/config` says: expansion points the operator's key at
-  hosts found from traffic, which get a login and nothing more.
+  changed server key fails the run (PLAN.md #12). Agent, port
+  and X11 forwarding are switched off on every call
+  (`ForwardAgent=no`, `ClearAllForwardings=yes`, `ForwardX11=no`,
+  `ForwardX11Trusted=no`; `ClearAllForwardings` alone leaves X11
+  on), whatever `~/.ssh/config` says: expansion points the
+  operator's key at hosts found from traffic, which get a login
+  and nothing more.
   Its control sockets — live, authenticated sessions — sit in a private
   0700 directory that is refused if a symlink, foreign-owned or
   open to others.

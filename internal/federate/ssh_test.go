@@ -53,6 +53,8 @@ func TestSSHRunArgv(t *testing.T) {
 		"-o", "ConnectTimeout=15",
 		"-o", "ForwardAgent=no",
 		"-o", "ClearAllForwardings=yes",
+		"-o", "ForwardX11=no",
+		"-o", "ForwardX11Trusted=no",
 		"--", "ops@app1",
 		"'sudo' '/opt/iormesh/bin/iormesh' 'status' '-project' 'shop'"}
 	if !slices.Equal(rec.calls[0], want) {
@@ -61,13 +63,23 @@ func TestSSHRunArgv(t *testing.T) {
 	assertNoInsecureOptions(t, rec.calls[0])
 }
 
+// assertNoInsecureOptions fails when argv weakens host-key checking or
+// opens a forwarding, and when it misses an option that switches one off.
+// ClearAllForwardings does not cover X11, so ForwardX11 needs its own -o.
 func assertNoInsecureOptions(t *testing.T, argv []string) {
 	t.Helper()
 	joined := strings.Join(argv, " ")
 	for _, bad := range []string{"StrictHostKeyChecking=no", "UserKnownHostsFile=/dev/null",
-		"StrictHostKeyChecking=accept-new", "ForwardAgent=yes"} {
+		"StrictHostKeyChecking=accept-new", "ForwardAgent=yes", "ForwardX11=yes",
+		"ForwardX11Trusted=yes"} {
 		if strings.Contains(joined, bad) {
 			t.Errorf("argv carries %s: %q", bad, argv)
+		}
+	}
+	for _, need := range []string{"ForwardAgent=no", "ClearAllForwardings=yes", "ForwardX11=no",
+		"ForwardX11Trusted=no"} {
+		if !strings.Contains(joined, need) {
+			t.Errorf("argv misses %s: %q", need, argv)
 		}
 	}
 }
@@ -98,7 +110,8 @@ func TestSSHFetchArgv(t *testing.T) {
 	want := []string{"rsync", "-rt", "--remove-source-files", "--exclude=.*", "--include=*.parquet", "--exclude=*", "-e",
 		"ssh '-o' 'BatchMode=yes' '-o' 'StrictHostKeyChecking=yes' '-o' 'ControlMaster=auto'" +
 			" '-o' 'ControlPath=/ctl/%C' '-o' 'ControlPersist=60s' '-o' 'ConnectTimeout=15'" +
-			" '-o' 'ForwardAgent=no' '-o' 'ClearAllForwardings=yes'",
+			" '-o' 'ForwardAgent=no' '-o' 'ClearAllForwardings=yes'" +
+			" '-o' 'ForwardX11=no' '-o' 'ForwardX11Trusted=no'",
 		"--", "app1:/opt/iormesh/traces/shop/ready/", local + "/"}
 	if !slices.Equal(argv, want) {
 		t.Errorf("argv\n got %q\nwant %q", argv, want)
@@ -117,7 +130,8 @@ func TestSSHPushArgv(t *testing.T) {
 	want := []string{"rsync", "-ct", "-e",
 		"ssh '-o' 'BatchMode=yes' '-o' 'StrictHostKeyChecking=yes' '-o' 'ControlMaster=auto'" +
 			" '-o' 'ControlPath=/ctl/%C' '-o' 'ControlPersist=60s' '-o' 'ConnectTimeout=15'" +
-			" '-o' 'ForwardAgent=no' '-o' 'ClearAllForwardings=yes'",
+			" '-o' 'ForwardAgent=no' '-o' 'ClearAllForwardings=yes'" +
+			" '-o' 'ForwardX11=no' '-o' 'ForwardX11Trusted=no'",
 		"--", "/dist/iormesh-linux-amd64", "/dist/iormesh-linux-amd64.minisig", "ops@app1:/home/ops/.iormesh/staging/"}
 	if !slices.Equal(argv, want) {
 		t.Errorf("argv\n got %q\nwant %q", argv, want)

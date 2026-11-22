@@ -5129,8 +5129,9 @@ printed:
    first use), so a new host's key must already be in
    `known_hosts` — `ssh-keyscan` it and verify the fingerprint
    out of band; `-apply` prints that hint when ssh refuses a
-   key. Every ssh call also carries `ForwardAgent=no` and
-   `ClearAllForwardings=yes`.
+   key. Every ssh call also carries `ForwardAgent=no`,
+   `ClearAllForwardings=yes`, `ForwardX11=no` and
+   `ForwardX11Trusted=no`.
 
 `-apply` refuses a damaged segment (the visited set would be
 incomplete) and `-json` (the deploy's lines would follow the
