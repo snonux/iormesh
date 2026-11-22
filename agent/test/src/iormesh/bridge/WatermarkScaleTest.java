@@ -27,11 +27,13 @@ public final class WatermarkScaleTest {
     /**
      * The agent's bytes per thread that closed one bracket: its state
      * and the thread's ThreadLocal map (about 380, the JVM's stack chunks
-     * making the measure noisy by a few hundred); more than 1,100
-     * before task dj4, when every thread preallocated 16 slots and the
-     * watermark's set held it for good.
+     * making the measure noisy by a few hundred: up to about 920 seen
+     * on a loaded machine); 1,165 to 1,920 before task dj4, when every
+     * thread preallocated 16 slots and the watermark's set held it for
+     * good. The tick ratio above is the main guarantee; this bound only
+     * catches a return to the old per-thread arrays.
      */
-    private static final long MAX_BYTES_PER_THREAD = 720;
+    private static final long MAX_BYTES_PER_THREAD = 1000;
 
     private WatermarkScaleTest() {}
 
