@@ -494,3 +494,23 @@ func TestFinishWritesFinalSnapshots(t *testing.T) {
 		})
 	}
 }
+
+// TestCorrelatorGraphOnlyWithOut: the correlator builds a graph only for
+// a run with -out, the one place graph.json is written; a -trace-dir run
+// keeps none, as its graph would grow per path, connection and process
+// with nobody to read it (task 4j4).
+func TestCorrelatorGraphOnlyWithOut(t *testing.T) {
+	for _, tc := range []struct {
+		out       string
+		wantGraph bool
+	}{{t.TempDir(), true}, {"", false}} {
+		cfg := correlatorConfig(runConfig{out: tc.out, project: "p"}, outputs{hostID: "h"},
+			&failSink{}, 0)
+		if cfg.NoGraph == tc.wantGraph {
+			t.Errorf("out %q: NoGraph %v, want a graph %v", tc.out, cfg.NoGraph, tc.wantGraph)
+		}
+		if cfg.Host.ID != "h" || cfg.Host.Project != "p" || cfg.Sink == nil {
+			t.Errorf("out %q: config %+v", tc.out, cfg)
+		}
+	}
+}

@@ -61,6 +61,14 @@ type Config struct {
 	// fields (M2 step 9, -native-stacks; stacks.go). nil: stack records
 	// are ignored, as they never come without the switch anyway.
 	Stacks StackIDs
+	// NoGraph skips the per-host graph: Graph then returns an empty one.
+	// A run without -out writes no graph.json (on a server the
+	// controller rebuilds the graph from the segments, decision #3), and
+	// a graph kept anyway grows by a node and an edge per distinct file
+	// path, connection and process for the whole session (task 4j4).
+	// The events do not depend on it. false keeps the graph, so a zero
+	// Config builds one.
+	NoGraph bool
 }
 
 const defaultFuseWindowNS = 5_000_000_000
@@ -111,6 +119,10 @@ func New(cfg Config) *Correlator {
 	if cfg.Redaction != nil {
 		policy = *cfg.Redaction
 	}
+	var graph *graphBuilder // nil: the graph is off (graphBuilder)
+	if !cfg.NoGraph {
+		graph = newGraphBuilder(cfg.Host.ID)
+	}
 	return &Correlator{
 		cfg:      cfg,
 		redact:   policy,
@@ -121,7 +133,7 @@ func New(cfg Config) *Correlator {
 		flows:    map[[2]netip.AddrPort]*sockState{},
 		enters:   map[uint32]enter{},
 		stacks:   map[uint32]stackRef{},
-		graph:    newGraphBuilder(cfg.Host.ID),
+		graph:    graph,
 	}
 }
 
@@ -219,7 +231,8 @@ func (c *Correlator) Close() error {
 	return c.cfg.Sink.Close()
 }
 
-// Graph returns the graph of everything emitted so far, sorted.
+// Graph returns the graph of everything emitted so far, sorted; an empty
+// graph with Config.NoGraph.
 func (c *Correlator) Graph() schema.Graph {
 	return c.graph.build()
 }
