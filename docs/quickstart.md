@@ -79,7 +79,8 @@ Install the controller for your laptop and check a build with
 it:
 
 ```sh
-install -m 0755 dist/iormeshctl-linux-amd64 ~/bin/iormeshctl   # or -darwin-arm64, …
+# or dist/iormeshctl-darwin-arm64, … for your laptop
+install -m 0755 dist/iormeshctl-linux-amd64 ~/bin/iormeshctl
 iormeshctl verify dist/iormesh-linux-amd64
 ```
 

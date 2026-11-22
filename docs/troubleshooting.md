@@ -16,11 +16,15 @@ that reads differently in your version: grep for its fixed part.
 
 ## Reading an error
 
-- `iormeshctl` prints `iormeshctl: <error>`; deploy, collect,
-  ensure and status name the host first
+- `iormeshctl` prints `iormeshctl: <error>`; deploy, collect
+  and ensure name the host first
   (`iormeshctl: app1: <error>`) and then try the next host, and
   the command exits 1 at the end (`deploy failed on 1 of 2
   hosts: app1`).
+- `iormeshctl status` reports a host it could not ask in that
+  host's rows instead: `STATE error`, the reason in the `NOTE`
+  column. It still asks the other hosts and ends with
+  `status failed on N of M targets`.
 - A remote command that failed reads
   `ssh <host> <command>: exit status N: <its stderr>`. The part
   after `exit status N:` is what ssh, sudo or the tracer said —
@@ -167,7 +171,8 @@ so a timer never loops on a full disk
 | Message contains | Meaning and fix |
 |---|---|
 | `<host>: project …: no /opt/iormesh/traces/…/ready yet, nothing to collect` | No minute has completed yet, or the session never started. Wait a minute, check `iormeshctl status`. |
-| `build: nothing collected in … yet (iormeshctl collect)` | The local store is empty: collect first. |
+| `trace store: stat …/traces: no such file or directory` (build) or `trace store: open …/traces: no such file or directory` (show, open) | A fresh controller: nothing was ever collected, so the store does not exist yet. Run `iormeshctl collect` first. |
+| `build: nothing collected in … yet (iormeshctl collect)` | The local store is empty: collect first. `show` and `open` without `-project` answer an empty store with this same build error. |
 | `show: no build of … yet (iormeshctl build…)` / `open: no site of … yet (iormeshctl build)` | Build first; `show -project` and `open -project` read the build made with the same `-project` set. |
 | a running session whose build shows no events of the app | The `-pattern` matches nothing. It is a glob over the whole command line as `ps -eo args` shows it (or the executable path), so it usually needs `*` at both ends; it never matches the 15-character comm. A process outside the pattern is not traced. |
 | `STATE none`, `no session: never started here` | The project is registered but deploy never started it on that host. |
