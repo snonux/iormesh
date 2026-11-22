@@ -190,6 +190,10 @@ func (s SSH) Fetch(ctx context.Context, remoteDir, localDir string) error {
 //   - --timeout (rsyncTimeout): give up once no data has moved for that
 //     long, however long the transfer itself takes;
 //   - --remove-source-files: delete a remote file once transferred;
+//   - --max-size (maxFetchSize): skip a file over the cap, so a hostile
+//     server cannot fill the controller's disk with one segment; a
+//     skipped file is not transferred, so --remove-source-files leaves
+//     it on the server, where `iormeshctl rm` reports it as a leftover;
 //   - --exclude=.*: never a dot file — the tracer publishes none, and in
 //     the local store dot files are rsync's own in-flight temporaries,
 //     which the build skips;
@@ -197,8 +201,17 @@ func (s SSH) Fetch(ctx context.Context, remoteDir, localDir string) error {
 //     remoteDir; the trailing exclude also matches every directory, so a
 //     subdirectory planted in ready/ is never descended into.
 func FetchFlags() []string {
-	return []string{"-rt", rsyncTimeout, "--remove-source-files", "--exclude=.*", "--include=*.parquet", "--exclude=*"}
+	return []string{"-rt", rsyncTimeout, "--remove-source-files",
+		fmt.Sprintf("--max-size=%d", maxFetchSize),
+		"--exclude=.*", "--include=*.parquet", "--exclude=*"}
 }
+
+// maxFetchSize bounds one fetched file in bytes: 1 GiB, the pod path's
+// k8s.MaxSegmentSize (a segment rotates at 64 MB, decision #16), so both
+// transports refuse the same file. Given to rsync as a plain byte count,
+// which every rsync parses alike, rather than a K/M/G suffix. A variable
+// only so a test can lower it instead of writing a GiB.
+var maxFetchSize int64 = 1 << 30
 
 // Push copies localFiles into remoteDir with rsync over the multiplexed
 // ssh connection. -c compares checksums instead of size and mtime: the

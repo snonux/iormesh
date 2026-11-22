@@ -51,7 +51,11 @@ truth.
   and symlinks are not carried over, and the local trace
   directory is forced to 0700; only the non-dot `*.parquet`
   files directly in `ready/` are taken, never a subdirectory or
-  a dot file. Each host gets its own directory
+  a dot file. A file over 1 GiB is skipped (`--max-size`, the
+  cap the pod path's fetch stream applies per file), so one
+  segment cannot fill the controller's disk; it stays on the
+  server and `iormeshctl rm` lists it as a leftover (task gi4).
+  Each host gets its own directory
   (`~/.local/share/iormesh/traces/<project>/<host>/`), so one
   server cannot overwrite another's segments by naming files
   after it; project and host come from the registry, never from

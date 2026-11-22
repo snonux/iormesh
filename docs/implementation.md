@@ -3603,8 +3603,8 @@ iormeshctl collect [-project P]... [-store DIR] [HOST...]
 ssh H true                                   # reachable? else H fails
 # per project:
 ssh H test -d /opt/iormesh/traces/shop/ready # exit 1: never started, skip
-rsync -rt --timeout=60 --remove-source-files --exclude='.*' \
-    --include='*.parquet' --exclude='*' -e 'ssh …' -- \
+rsync -rt --timeout=60 --remove-source-files --max-size=1073741824 \
+    --exclude='.*' --include='*.parquet' --exclude='*' -e 'ssh …' -- \
     H:/opt/iormesh/traces/shop/ready/ \
     ~/.local/share/iormesh/traces/shop/H/
 ```
@@ -3622,12 +3622,14 @@ rsync -rt --timeout=60 --remove-source-files --exclude='.*' \
   renames it into `ready/` whole and synced, tables before
   events, so rsync only ever sees final files; and
   `--remove-source-files` deletes a server file only after it
-  transferred. Collect keeps no state: run repeatedly during a
-  live session, each run moves what was published since the
-  last, and between runs the server holds only unsynced
-  segments plus the active one. `ready/` is the deploying
-  user's (`-ready-owner`), so reading and deleting there needs
-  no privilege.
+  transferred. A file over 1 GiB (`--max-size`, the pod path's
+  `k8s.MaxSegmentSize`) is skipped and stays on the server, so
+  `rm` lists it as a leftover (task gi4). Collect keeps no
+  state: run repeatedly during a live session, each run moves
+  what was published since the last, and between runs the
+  server holds only unsynced segments plus the active one.
+  `ready/` is the deploying user's (`-ready-owner`), so reading
+  and deleting there needs no privilege.
 - Local layout, the build's input:
   `<store>/<project>/<host>/<fqdn>-<session>-<start-ts>-<seq>[.<table>].parquet`,
   store `~/.local/share/iormesh/traces`. One directory per
