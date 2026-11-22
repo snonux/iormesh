@@ -48,6 +48,50 @@ func TestListingEverythingFails(t *testing.T) {
 	}
 }
 
+// TestNonAnswersFail: an empty answer and a refusal pass no question —
+// every question needs something positive in the answer — and the
+// gateway chain told from the wrong start fails although it holds the
+// right sequence after it.
+func TestNonAnswersFail(t *testing.T) {
+	s, err := LoadSet(repoFile("eval/questions/microservices.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, reply := range []string{"ANSWER:", "ANSWER: I do not know"} {
+		act, ok := ParseReply(reply)
+		if !ok || act.Kind != ActAnswer {
+			t.Fatalf("%q: parsed as %+v, %v", reply, act, ok)
+		}
+		for _, q := range s.Questions {
+			if len(q.Score(act.Arg)) == 0 {
+				t.Errorf("%s: %q passes", q.ID, reply)
+			}
+		}
+	}
+	for _, q := range s.Questions {
+		if q.ID != "gateway-chain" {
+			continue
+		}
+		for _, wrong := range []string{"orders, then gateway, orders, inventory, billing",
+			"billing; gateway -> orders -> inventory -> billing"} {
+			if len(q.Score(wrong)) == 0 {
+				t.Errorf("gateway-chain: the wrong start %q passes", wrong)
+			}
+		}
+		// The right chain passes with a label in front and with the
+		// gateway mentioned again in an explanation after it.
+		for _, right := range []string{"The chain: gateway, orders, inventory, billing.",
+			"1. gateway (the checkout entry point)\n2. orders (called by the gateway)\n3. inventory\n4. billing",
+			"gateway -> orders -> inventory -> billing. The gateway's POST /orders starts the checkout.",
+			"The gateway calls orders, which calls inventory and then billing.",
+			"**The chain:** the gateway, then orders, inventory and billing."} {
+			if fails := q.Score(right); len(fails) != 0 {
+				t.Errorf("gateway-chain: the right chain %q fails: %v", right, fails)
+			}
+		}
+	}
+}
+
 // TestAnswersPass: the declared right answer, written concisely, passes
 // each question — the exclusions do not reject the truth.
 func TestAnswersPass(t *testing.T) {

@@ -44,9 +44,10 @@ func TestLoadSetRejects(t *testing.T) {
 	for name, tc := range map[string]struct{ yaml, want string }{
 		"unknown key":      {ok + "    answer_contain: [x]\n", "answer_contain"},
 		"no matcher":       {ok, "no matcher"},
+		"negative only":    {ok + "    answer_excludes: [x]\n    answer_not_regex: y\n", "no positive matcher"},
 		"empty matcher":    {ok + "    answer_contains: ['']\n", "empty matcher"},
 		"bad regex":        {ok + "    answer_regex: '('\n", "answer_regex"},
-		"bad not regex":    {ok + "    answer_not_regex: '('\n", "answer_not_regex"},
+		"bad not regex":    {ok + "    answer_regex: x\n    answer_not_regex: '('\n", "answer_not_regex"},
 		"zero threshold":   {strings.Replace(ok, "0.5", "0", 1) + "    answer_regex: x\n", "threshold"},
 		"no scenario":      {strings.Replace(ok, "scenario: s", "scenario: ''", 1) + "    answer_regex: x\n", "no scenario"},
 		"duplicate id":     {ok + "    answer_regex: x\n  - id: a\n    question: q?\n    answer_regex: x\n", "duplicate"},

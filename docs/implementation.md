@@ -4931,15 +4931,19 @@ magefile_eval.go            # mage evalTrace (root), mage eval
   (the sketch had a scenario per question). The matchers are
   `answer_contains` (all), `answer_sequence` (in order),
   `answer_excludes` (none of), `answer_regex` and
-  `answer_not_regex`, all case-insensitive; a set without a
-  matcher on some question, an unknown key or an empty matcher
-  string is refused. `TestQuestionSetGrounded` holds every
+  `answer_not_regex`, all case-insensitive; a set with a
+  question lacking a positive matcher (`answer_contains`,
+  `answer_sequence` or `answer_regex` — exclusions alone pass an
+  empty answer), an unknown key or an empty matcher string is
+  refused. `TestQuestionSetGrounded` holds every
   contains and sequence string to the scenario's `expect.json`.
   The exclusions name the wrong candidates (other methods, paths,
   services, an order reversed), so listing everything is no way to
   the threshold: `TestListingEverythingFails` scores every
   candidate string of the set and the declarations, sorted and
-  reversed, against each question and requires a failure, and
+  reversed, against each question and requires a failure,
+  `TestNonAnswersFail` requires an empty answer, "I do not know"
+  and the gateway chain told from the wrong start to fail, and
   `TestAnswersPass` requires the concise right answers to pass.
 - A run builds the store with `iormeshctl build` into a scratch
   database and builds directory (never the operator's), reads
