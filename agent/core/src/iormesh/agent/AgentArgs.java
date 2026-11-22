@@ -15,8 +15,9 @@ package iormesh.agent;
  *     (the smoke test's evidence that the hooks fire);</li>
  * <li>{@code nostack} — skip the stack walk (S1's cost split);</li>
  * <li>{@code spool=<dir>} — the tracer-owned spool directory: the agent
- *     writes its records to the ring {@code <dir>/<pid>.ring} (decision
- *     #27). Without it brackets go nowhere (counted for debug only);</li>
+ *     writes its records to the ring {@code <dir>/<pid>.ring}, or
+ *     {@code <pid>.<hex>.ring} when another user holds that name
+ *     (decision #27, task 9j4). Without it brackets go nowhere (counted for debug only);</li>
  * <li>{@code ringsize=<bytes>} — the ring's data size, a power of two
  *     from 64 KiB to 64 MiB (default 8 MiB; the tracer refuses more);</li>
  * <li>{@code watermark=<ms>} — how often the watermark thread writes a

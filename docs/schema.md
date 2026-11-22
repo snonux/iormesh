@@ -595,10 +595,15 @@ caused it (`internal/correlate`, `JavaJoin`). The tracer creates
 `DIR` (mode `1733`: every user may create its ring, none may list
 or delete another's); each agent maps one ring there,
 `<pid>.ring` (decision #27, `internal/agentspool`; the agent
-creates it `O_EXCL`, without following a symlink, mode `0600`). The
-tracer opens a ring without following a symlink and checks on the
-descriptor, before mapping anything, that it is a regular file with
-one link owned by the uid of the process its name names; a file
+creates it `O_EXCL`, without following a symlink, mode `0600`). A
+`<pid>.ring` the agent cannot delete — another user's, stale or
+planted — makes it use `<pid>.<hex>.ring` instead, the tag 16
+random hex digits (task 9j4), so a planted name cannot keep the
+agent from installing. The tracer accepts both names, with the
+same checks. It opens a ring without following a symlink and
+checks on the descriptor, before mapping anything, that it is a
+regular file with one link owned by the uid of the process its
+name names; a file
 that fails is reported on stderr and never mapped. After mapping,
 the header must name the same pid. A JVM already gone at the
 first scan after its ring appeared cannot be checked, so a JVM

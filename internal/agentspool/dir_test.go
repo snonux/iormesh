@@ -106,6 +106,25 @@ func TestDirRejects(t *testing.T) {
 		"bad name": {uid: uint32(os.Getuid()), alive: true, edit: func(t *testing.T, dir string) {
 			mustRename(t, filepath.Join(dir, "4242.ring"), filepath.Join(dir, "jvm.ring"))
 		}},
+		// A suffixed name (task 9j4) still names its pid, and the header
+		// must name the same one.
+		"suffixed, pid mismatch": {uid: uint32(os.Getuid()), alive: true,
+			edit: func(t *testing.T, dir string) {
+				mustRename(t, filepath.Join(dir, "4242.ring"), filepath.Join(dir, "4241.00ff.ring"))
+			}},
+		"suffixed, other owner": {uid: uint32(os.Getuid()) + 1, alive: true,
+			edit: func(t *testing.T, dir string) {
+				mustRename(t, filepath.Join(dir, "4242.ring"), filepath.Join(dir, "4242.00ff.ring"))
+			}},
+		"empty suffix": {uid: uint32(os.Getuid()), alive: true, edit: func(t *testing.T, dir string) {
+			mustRename(t, filepath.Join(dir, "4242.ring"), filepath.Join(dir, "4242..ring"))
+		}},
+		"two suffixes": {uid: uint32(os.Getuid()), alive: true, edit: func(t *testing.T, dir string) {
+			mustRename(t, filepath.Join(dir, "4242.ring"), filepath.Join(dir, "4242.ab.cd.ring"))
+		}},
+		"suffix not hex": {uid: uint32(os.Getuid()), alive: true, edit: func(t *testing.T, dir string) {
+			mustRename(t, filepath.Join(dir, "4242.ring"), filepath.Join(dir, "4242.x-y.ring"))
+		}},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -123,6 +142,36 @@ func TestDirRejects(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDirSuffixedRing (task 9j4): a ring the agent had to create as
+// <pid>.<hex>.ring — another user planted <pid>.ring in the sticky spool,
+// where the agent cannot delete it — is opened like <pid>.ring: the pid
+// its name carries passes the owner check before anything is mapped, and
+// the header must name it. A suffixed ring whose process is gone is
+// removed. The planted file itself needs a second user, so that part is
+// a manual check: user B creates <pid>.ring for user A's JVM before the
+// attach; A's ring then shows up suffixed and A's Java attribution works.
+func TestDirSuffixedRing(t *testing.T) {
+	const name = "4242.0123456789abcdef.ring"
+	t.Run("alive", func(t *testing.T) {
+		d, dir := testDir(t, uint32(os.Getuid()), true)
+		mustRename(t, filepath.Join(dir, "4242.ring"), filepath.Join(dir, name))
+		rings, skipped := scanOnce(t, d)
+		if len(rings) != 1 || len(skipped) != 0 || rings[0].Header().PID != 4242 {
+			t.Fatalf("rings %d, skipped %v", len(rings), skipped)
+		}
+	})
+	t.Run("dead", func(t *testing.T) {
+		d, dir := testDir(t, uint32(os.Getuid()), false)
+		mustRename(t, filepath.Join(dir, "4242.ring"), filepath.Join(dir, name))
+		if rings, skipped := scanOnce(t, d); len(rings)+len(skipped) != 0 {
+			t.Errorf("rings %d, skipped %v", len(rings), skipped)
+		}
+		if _, err := os.Lstat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("dead JVM's suffixed ring kept: %v", err)
+		}
+	})
 }
 
 // corruptMagic overwrites a ring file's magic.

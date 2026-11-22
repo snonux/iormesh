@@ -2229,9 +2229,11 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
    gone in 25, hence `jdk21` (21–24) and `jdk25` (25+), which
    differ in that one row.
 4. The ring (decision #27): one file per JVM,
-   `<spool dir>/<pid>.ring` (pid as the JVM sees it), in the
-   tracer-owned directory, mapped `MAP_SHARED` by agent and
-   tracer. The agent never creates the directory: a missing one
+   `<spool dir>/<pid>.ring` (pid as the JVM sees it; or
+   `<pid>.<hex>.ring` when another user holds that name, task
+   9j4), in the tracer-owned directory, mapped `MAP_SHARED` by
+   agent and tracer. The agent never creates the directory: a
+   missing one
    disables the agent (no tracer is listening). Agent options:
    `spool=<dir>`, `ringsize=<bytes>` (a power of two, 64 KiB–64
    MiB, default 8 MiB; task yi4 lowered the cap from 1 GiB, and
@@ -3084,7 +3086,7 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
     starting processes from a goroutine while the main one keeps
     handling records, prints one line per pid, then polls the
     spool so the new rings are marked before `-ready`. A load
-    the JVM confirmed but that left no `<spool>/<pid>.ring` (the
+    the JVM confirmed but that left no `<spool>/<pid>[.<hex>].ring` (the
     agent disabled itself; checked only for a JVM in the
     tracer's mount namespace) is reported as such. The tracer
     now prints `java agent of pid N joined, K natives probed`

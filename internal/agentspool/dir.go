@@ -12,7 +12,8 @@ import (
 
 // Dir finds the agents' rings in a spool directory: one file per JVM,
 // <pid>.ring (pid as the JVM sees it, so the JVM must share the tracer's
-// pid namespace). The directory is the tracer's -spool, or one staged
+// pid namespace), or <pid>.<hex>.ring when the agent could not delete a
+// stale <pid>.ring another user owns (task 9j4, ringPID). The directory is the tracer's -spool, or one staged
 // inside the root of a JVM in another mount namespace (decision #14),
 // which the tracer names /proc/self/fd/<n>: a descriptor it opened
 // through /proc/<pid>/root, so nothing in the JVM's tree is resolved by
@@ -158,16 +159,66 @@ func ringKey(e os.DirEntry) (key string, ino uint64, ok bool) {
 	return e.Name() + "\x00" + strconv.FormatUint(ino, 10), ino, true
 }
 
-// ringPID is the pid a <pid>.ring name names; ok is false for any other
-// name.
+// ringPID is the pid a ring's name names: <pid>.ring, or <pid>.<hex>.ring
+// (task 9j4) — the name the agent falls back to when it cannot delete a
+// stale <pid>.ring that another user owns (or planted) in the sticky
+// spool, so a planted file cannot keep its JVM's agent from installing.
+// The suffix is the agent's random tag, 1 to 32 lowercase hex digits; the
+// pid is as untrusted as in the plain name and passes the same owner and
+// header checks (open). ok is false for any other name.
 func ringPID(name string) (uint64, bool) {
-	pid, err := strconv.ParseUint(strings.TrimSuffix(name, ".ring"), 10, 32)
+	base, ok := strings.CutSuffix(name, ".ring")
+	if !ok {
+		return 0, false
+	}
+	if p, tag, suffixed := strings.Cut(base, "."); suffixed {
+		if !isTag(tag) {
+			return 0, false
+		}
+		base = p
+	}
+	pid, err := strconv.ParseUint(base, 10, 32)
 	return pid, err == nil && pid != 0
+}
+
+// HasRing reports whether dir holds a regular file (not a symlink) named
+// as a ring of pid, <pid>.ring or <pid>.<hex>.ring. It checks a name, not
+// a ring: `run -agent` uses it to tell a load that installed the agent
+// from one whose agent gave up, and the scan still checks every file it
+// opens (open).
+func HasRing(dir string, pid uint64) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if p, ok := ringPID(e.Name()); ok && p == pid && e.Type().IsRegular() {
+			return true
+		}
+	}
+	return false
+}
+
+// isTag reports whether s is a ring name's random suffix: 1 to 32
+// lowercase hex digits.
+func isTag(s string) bool {
+	if len(s) == 0 || len(s) > 32 {
+		return false
+	}
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // open opens one ring and checks that its JVM wrote it: the file belongs
 // to the user of the process its name names — checked on the descriptor
-// before anything is mapped — and the header names the same pid. A file
+// before anything is mapped — and the header names the same pid, so the
+// header's pid is trusted only once the owner check passed and only when
+// it is the pid whose process the file's owner runs. A suffixed name
+// (<pid>.<hex>.ring, task 9j4) gets the same checks. A file
 // another user planted for someone else's pid would otherwise put
 // made-up Java frames on that process's events. A JVM gone before the
 // scan cannot be checked, so its ring is never read (Scan removes it): a
@@ -177,7 +228,7 @@ func ringPID(name string) (uint64, bool) {
 func (d *Dir) open(name string) (*Ring, error) {
 	pid, ok := ringPID(name)
 	if !ok {
-		return nil, fmt.Errorf("spool: %s: not <pid>.ring: %w", name, ErrNotRing)
+		return nil, fmt.Errorf("spool: %s: not <pid>.ring or <pid>.<hex>.ring: %w", name, ErrNotRing)
 	}
 	r, err := OpenOwned(filepath.Join(d.path, name), func(fileUID uint32) error {
 		uid, alive := d.owner(pid)
