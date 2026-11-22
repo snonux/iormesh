@@ -1049,10 +1049,11 @@ Kubernetes (M7) build on it.
   failed: ssh gives up on a dead connection after about 45 s
   (`ServerAliveInterval=15`, `ServerAliveCountMax=3`), rsync
   on a transfer that moves no data for 60 s (`--timeout=60`),
-  and each host gets an hour in all (collect, deploy and rm
-  alike) before the controller moves on — generous, since an
-  interrupted collect loses nothing and a backlog may be
-  large. The build reads every
+  and each server host gets an hour in all (collect, deploy
+  and rm alike) before the controller moves on — generous,
+  since an interrupted collect loses nothing and a backlog may
+  be large. Pod entries (kubectl) are not bound yet (task
+  pi4). The build reads every
   `*.parquet` under `<project>/*/` and skips dot files
   (rsync's in-flight temporaries).
 - **Build**: merge the collected segments offline by stable

@@ -106,8 +106,9 @@ truth.
   A host cannot stall a run for the others: ssh drops a dead
   session after three missed keepalives
   (`ServerAliveInterval=15`, `ServerAliveCountMax=3`), rsync a
-  transfer idle for 60 s (`--timeout=60`), and each host gets an
-  hour before iormeshctl reports it failed and moves on.
+  transfer idle for 60 s (`--timeout=60`), and each server host
+  gets an hour before iormeshctl reports it failed and moves on
+  (kubectl calls for pods are not bound yet, task pi4).
   Its control sockets — live, authenticated sessions — sit in a private
   0700 directory that is refused if a symlink, foreign-owned or
   open to others.
