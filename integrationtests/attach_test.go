@@ -2,6 +2,7 @@ package integrationtests
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -191,7 +192,7 @@ func checkAttach(t *testing.T, java, flag string, wantLoad bool) {
 	if flag != "" {
 		h.JVMFlags = []string{flag}
 	}
-	stderr := attachBetweenHalves(t, h, wantLoad)
+	stderr, _ := attachBetweenHalves(t, h, wantLoad)
 	warned := strings.Contains(stderr, jep451Warning)
 	if wantWarn := wantLoad && flag == ""; warned != wantWarn {
 		t.Errorf("JEP 451 warning on the JVM's stderr: %v, want %v:\n%s", warned, wantWarn, stderr)
@@ -217,18 +218,13 @@ func checkAttachOtherUID(t *testing.T) {
 	h.WorkloadJar = copyReadable(t, h.WorkloadJar, shared)
 	h.Dir, h.Tmp = shared, shared
 	h.Credential = &syscall.Credential{Uid: nobody, Gid: nobody}
-	stderr := attachBetweenHalves(t, h, true)
+	stderr, ringUID := attachBetweenHalves(t, h, true)
 	if !strings.Contains(stderr, jep451Warning) {
 		t.Errorf("no JEP 451 warning on the JVM's stderr:\n%s", stderr)
 	}
-	// The agent ran as the JVM's user: its ring is nobody's.
-	rings, err := filepath.Glob(filepath.Join(h.Spool, "*.ring"))
-	if err != nil || len(rings) != 1 {
-		t.Fatalf("rings %v, %v; want one", rings, err)
-	}
-	var st unix.Stat_t
-	if err := unix.Stat(rings[0], &st); err != nil || st.Uid != nobody {
-		t.Errorf("ring %s: uid %d, %v; want %d", rings[0], st.Uid, err, nobody)
+	// The agent ran as the JVM's user: its ring was nobody's.
+	if ringUID != nobody {
+		t.Errorf("ring uid %d; want %d", ringUID, nobody)
 	}
 }
 
@@ -246,10 +242,12 @@ func newAttachHarness(t *testing.T, dir, agent string) *Harness {
 }
 
 // attachBetweenHalves runs live-attach, attaches at its gate, opens the
-// gate and returns the JVM's stderr once it exited cleanly. wantLoad says
-// whether the attach must succeed (and leave a ring) or be refused for
-// dynamic loading being disabled (and leave none).
-func attachBetweenHalves(t *testing.T, h *Harness, wantLoad bool) string {
+// gate and returns the JVM's stderr once it exited cleanly, and the uid
+// owning its ring while it ran (unknown: MaxUint32). wantLoad says
+// whether the attach must succeed (and leave a ring while the JVM runs,
+// which its shutdown hook removes, task 2j4) or be refused for dynamic
+// loading being disabled (and leave none).
+func attachBetweenHalves(t *testing.T, h *Harness, wantLoad bool) (string, uint32) {
 	t.Helper()
 	gate := filepath.Join(h.Dir, "attach-gate")
 	w, err := h.StartWorkload("live-attach", "--attach-gate", gate)
@@ -262,7 +260,12 @@ func attachBetweenHalves(t *testing.T, h *Harness, wantLoad bool) string {
 	}
 	out, err := h.Attach(w)
 	ring := filepath.Join(h.Spool, fmt.Sprintf("%d.ring", w.PID))
-	_, ringErr := os.Stat(ring)
+	var st unix.Stat_t
+	ringErr := unix.Stat(ring, &st)
+	ringUID := uint32(math.MaxUint32)
+	if ringErr == nil {
+		ringUID = st.Uid
+	}
 	switch {
 	case wantLoad && err != nil:
 		t.Errorf("attach failed: %v", err)
@@ -279,7 +282,10 @@ func attachBetweenHalves(t *testing.T, h *Harness, wantLoad bool) string {
 	if err := w.proc.wait(runTimeout); err != nil {
 		t.Fatalf("the JVM did not finish cleanly after the attach: %v", err)
 	}
-	return w.proc.stderr.String()
+	if _, err := os.Lstat(ring); wantLoad && !os.IsNotExist(err) {
+		t.Errorf("the JVM's shutdown hook left its ring %s: %v", ring, err)
+	}
+	return w.proc.stderr.String(), ringUID
 }
 
 // trustedAgentJar copies iormesh-agent.jar into a fresh root-owned

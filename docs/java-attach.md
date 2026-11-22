@@ -127,6 +127,31 @@ into a JVM that has it already (`iormesh attach` again, a second
 `-javaagent`) installs nothing twice but asks for the same
 resync; the first load's ring and options stay.
 
+A ring therefore lives as long as its JVM (task 2j4, PLAN.md #27).
+The JVM's agent unlinks its own ring in its shutdown hook, right
+after the last watermark: a tracer that reads the ring has had it
+mapped since its first scan, and unlinking leaves the mapping
+alone. A JVM killed without its shutdown hooks (SIGKILL) leaves
+the file to the tracer: the Java join, told of every traced
+process's group-dead exit, reads that JVM's ring one last time
+once every event the process may still have upstream is decided
+(the correlator's fuse window plus the join timeout past the
+exit), then closes and unlinks it and forgets the JVM; and each
+spool scan unlinks a ring whose process is gone, such as one left
+while no session ran. Nothing unlinks a live JVM's ring. Every
+unlink looks at the entry through the spool directory's
+descriptor without following a symlink and removes it only if it
+is still the regular, single-link file meant — the inode the
+reader mapped, the scan listed, or the agent created — so a new
+JVM that reused the pid keeps its fresh ring. The join also
+forgets a virtual thread once its last bracket is Retain (10 s)
+behind the watermark; the agent writes a virtual thread's THREAD
+record again at its first bracket 5 s after the last one, so the
+thread is known as virtual again before its I/O is joined (an
+older agent leaves such a thread unnamed and unflagged, like one
+whose THREAD record was dropped). A virtual thread idle that long
+then gets a second, identical row in the thread table.
+
 Mixed versions: the epoch sits in what was zero padding, so the
 ring format version did not change. An agent older than 5j4 never
 reads the word: under a newer tracer its first session works and

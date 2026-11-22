@@ -9,9 +9,11 @@ import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Set;
 
@@ -69,6 +71,10 @@ import java.util.Set;
  * padding: an agent older than 5j4 never reads it, a tracer older than
  * 5j4 never bumps it, and either pairing behaves as before, so VERSION
  * stays (an older peer misreads nothing).
+ *
+ * The file lives as long as the JVM (task 2j4): the agent's shutdown
+ * hook unlinks it after the last watermark ({@link #removeOwn}); the
+ * tracer removes the ring of a JVM that died without it.
  */
 public final class Ring {
     static final int PAD = 0;
@@ -203,11 +209,17 @@ public final class Ring {
     private final ByteBuffer buf;
     private final long capacity;
     private final Path path;
+    /**
+     * The file's identity (device and inode) as created: {@link #removeOwn}
+     * unlinks the path only while it still names this file.
+     */
+    private final Object fileKey;
 
-    private Ring(ByteBuffer buf, long capacity, Path path) {
+    private Ring(ByteBuffer buf, long capacity, Path path, Object fileKey) {
         this.buf = buf;
         this.capacity = capacity;
         this.path = path;
+        this.fileKey = fileKey;
     }
 
     /**
@@ -244,7 +256,11 @@ public final class Ring {
             b.putLong(32, System.nanoTime());
             // Magic last: a reader that sees it sees a complete header.
             LONGS.setRelease(b, 0, MAGIC);
-            return new Ring(b, capacity, path);
+            // The name is ours from CREATE_NEW on: in the sticky spool
+            // only we (or root) can unlink or replace it.
+            Object key = Files.readAttributes(path, BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS).fileKey();
+            return new Ring(b, capacity, path, key);
         }
     }
 
@@ -275,6 +291,33 @@ public final class Ring {
      */
     void discard() throws IOException {
         Files.deleteIfExists(path);
+    }
+
+    /**
+     * Unlinks the ring file at JVM exit (task 2j4), after the last
+     * watermark: a dead JVM's ring is nobody's, and it would otherwise
+     * stay in the spool (a tmpfs under /run) until a later session's scan.
+     * A tracer that will ever read it has it mapped already (it opens a
+     * ring within one scan of its creation, and refuses one whose process
+     * is gone), and unlink leaves mappings alone; the JVM's threads still
+     * running write on into the unlinked file. Only the file this ring
+     * created goes: the path is checked without following a symlink and
+     * must name the same device and inode. While this JVM lives, its pid
+     * — the name — is no other JVM's, and while it maps the file the
+     * inode cannot be reused, so a match is this ring. False when the
+     * file was gone or replaced.
+     */
+    boolean removeOwn() throws IOException {
+        BasicFileAttributes a;
+        try {
+            a = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        } catch (NoSuchFileException e) {
+            return false;
+        }
+        if (!a.isRegularFile() || fileKey == null || !fileKey.equals(a.fileKey())) {
+            return false;
+        }
+        return Files.deleteIfExists(path);
     }
 
     /** Writes a BRACKET outside any OTEL span (tests, RingStress). */

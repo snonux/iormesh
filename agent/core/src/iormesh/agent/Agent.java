@@ -210,7 +210,11 @@ public final class Agent {
 
     /**
      * At JVM exit: a last watermark — every bracket closed so far is in
-     * the ring, so the joiner need not time out — then the debug dump.
+     * the ring, so the joiner need not time out — then the ring file is
+     * unlinked (task 2j4: a tracer that reads it has it mapped; a dead
+     * JVM's file would otherwise stay in the spool), then the debug dump.
+     * A JVM killed without its shutdown hooks leaves the file to the
+     * tracer, which removes rings whose process is gone.
      */
     private static void atExit(AgentArgs args, HookTable table, BoundaryTransformer t,
                                HttpTransformer http, Bridge bridge) {
@@ -219,6 +223,11 @@ public final class Agent {
             bridge.watermark();
         } catch (ReflectiveOperationException e) {
             System.err.println("iormesh-agent: last watermark failed: " + e);
+        }
+        try {
+            bridge.removeRing();
+        } catch (ReflectiveOperationException e) {
+            System.err.println("iormesh-agent: removing the ring failed: " + e.getCause());
         }
         if (args.debug() != null) {
             writeDebug(args.debug(), table, t, http, bridge);

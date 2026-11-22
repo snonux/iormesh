@@ -69,6 +69,13 @@ public final class Hooks {
     static final int MAX_HTTP_DEPTH = 8;
     /** How long a dropped THREAD or STACK waits before it is tried again. */
     static final long RETRY_NS = 1_000_000;
+    /**
+     * A virtual thread's THREAD record is written again at its first
+     * bracket this long after the last one (describeDue, task 2j4): half
+     * the tracer's default Retain (internal/correlate, 10 s), after which
+     * it forgets an idle virtual thread. Not final only for tests.
+     */
+    static long redescribeNs = 5_000_000_000L;
     /** Marks a skipped slot, so its exit is dropped too. */
     private static final int SKIPPED = -1;
     private static final LongSupplier WALK = StackIds::current;
@@ -153,6 +160,17 @@ public final class Hooks {
             }
         }
         CLAIMED.set(false);
+    }
+
+    /**
+     * Unlinks the ring file at JVM exit, after the last watermark (task
+     * 2j4, Ring.removeOwn). The ring stays mapped and in use: threads
+     * still running write on, and a tracer reading it keeps its mapping.
+     * False without a ring, or when its file was already gone or replaced.
+     */
+    public static boolean removeRing() throws java.io.IOException {
+        Ring r = ring;
+        return r != null && r.removeOwn();
     }
 
     /**
@@ -832,12 +850,24 @@ public final class Hooks {
      * setName stored, so a rename is a new String and an identity
      * compare finds it — one volatile read per bracket, no allocation.
      * Also due when a resync (task 5j4) bumped the generation since: a
-     * later reader never saw the record. Either way a retry after a drop
-     * waits for retryAt.
+     * later reader never saw the record. And due for a virtual thread
+     * whose last THREAD is redescribeNs old (task 2j4): the tracer forgets
+     * a virtual thread once its last record is Retain (10 s) behind its
+     * watermark — one per request would otherwise pile up — and must
+     * learn again that the thread is virtual before its next bracket.
+     * That costs a virtual thread a clock read per bracket; a platform
+     * thread pays nothing more. Either way a retry after a drop waits for
+     * retryAt.
      */
     private static boolean describeDue(Brackets t) {
-        return (t.owner.getName() != t.described || t.generation != generation)
-                && System.nanoTime() >= t.retryAt;
+        if (t.owner.getName() != t.described || t.generation != generation) {
+            return System.nanoTime() >= t.retryAt;
+        }
+        if (!t.virtual) {
+            return false;
+        }
+        long now = System.nanoTime();
+        return now - t.describedAt >= redescribeNs && now >= t.retryAt;
     }
 
     /**
@@ -856,6 +886,7 @@ public final class Hooks {
         if (r.thread(t.owner.getId(), t.kernelTid(), t.virtual ? Ring.VIRTUAL : 0, name)) {
             t.described = name;
             t.generation = g;
+            t.describedAt = System.nanoTime();
         } else {
             t.retryAt = System.nanoTime() + RETRY_NS;
         }

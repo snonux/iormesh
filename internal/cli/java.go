@@ -138,14 +138,23 @@ func (o *javaOutput) warn(err error) {
 }
 
 // exited detaches the mark's uprobes from a process whose thread group
-// died (a pattern session's JVMs come and go; each kept link pins its
-// process). A pid that was never probed has nothing to detach. Should a
-// new JVM reuse the pid and be probed before this exit is handled - it
-// would have to start, install its agent and be scanned within the
-// moment the exit record takes to arrive - its marks would stop and its
-// I/O stay none, never misattributed.
-func (o *javaOutput) exited(pid uint32) {
-	if o == nil || o.marker == nil {
+// died at boot time at (a pattern session's JVMs come and go; each kept
+// link pins its process), and tells the joiner, which retires the JVM's
+// ring - a last read, then close and unlink - once nothing can ask for
+// it (task 2j4). A pid that was never probed has nothing to detach.
+// Should a new JVM reuse the pid and be probed before this exit is
+// handled - it would have to start, install its agent and be scanned
+// within the moment the exit record takes to arrive - its marks would
+// stop and its I/O stay none, never misattributed; its ring stays, the
+// joiner tells it by its later start.
+func (o *javaOutput) exited(pid uint32, at uint64) {
+	if o == nil {
+		return
+	}
+	if o.join != nil {
+		o.join.Exited(pid, at)
+	}
+	if o.marker == nil {
 		return
 	}
 	if err := o.marker.DetachJavaMarks(pid); err != nil {

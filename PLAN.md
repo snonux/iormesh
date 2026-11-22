@@ -2554,7 +2554,23 @@ would overturn it), and deferred.
   an older agent never reads it and an older tracer never bumps
   it, so the format version stays and either mix behaves as
   before (a later session on an older agent stays attribution
-  none).
+  none). A ring lives as long as its JVM, not as long as a
+  session (task 2j4): the agent unlinks its own ring in its
+  shutdown hook after the last watermark (a tracer reading it
+  has it mapped); the Java join retires a JVM once its
+  group-dead exit was handled and nothing can ask for its ring
+  (the fuse window plus the join timeout past the exit, none of
+  its events held): a last drain, then close and unlink; and the
+  spool scan unlinks a ring whose process is gone (SIGKILL, or
+  a JVM that died while no session ran). Every unlink goes
+  through the directory's descriptor and only if the name still
+  names the regular, single-link inode meant — the one mapped,
+  or the one listed — so a reused pid's new ring survives. A
+  live JVM's ring is never removed: a later session reads it. A
+  virtual thread's entry in the join goes with its last bracket
+  (Retain past the watermark); its agent rewrites its THREAD
+  record after 5 s without one, so the thread is known again
+  before its next bracket.
 
 ### Open — blocks M2
 

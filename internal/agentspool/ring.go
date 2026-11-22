@@ -32,6 +32,10 @@ type Ring struct {
 	err    error   // sticky ErrCorrupt
 	owner  uint32  // the file's uid
 	batch  []entry // DrainTo's records, reused between drains
+	// path names the file, and dev and ino are the inode it was mapped
+	// from: Remove unlinks the name only while it still names that inode.
+	path     string
+	dev, ino uint64
 }
 
 // Open maps the ring file read-write (the reader zeroes what it consumed
@@ -77,7 +81,7 @@ func OpenOwned(path string, owner func(uid uint32) error) (*Ring, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agentspool: mmap %s: %w", path, err)
 	}
-	r := &Ring{mem: mem, owner: st.Uid}
+	r := &Ring{mem: mem, owner: st.Uid, path: path, dev: st.Dev, ino: st.Ino}
 	if err := guarded(r.checkHeader); err != nil {
 		_ = syscall.Munmap(mem)
 		return nil, fmt.Errorf("%s: %w", path, err)
@@ -145,7 +149,9 @@ func guarded(fn func() error) (err error) {
 	return fn()
 }
 
-// Close unmaps the ring. The file stays: it is the tracer's to delete.
+// Close unmaps the ring. The file stays: a later session reads a live
+// JVM's ring again (task 5j4); Remove deletes it once the JVM is dead
+// (task 2j4).
 func (r *Ring) Close() error {
 	if r.mem == nil {
 		return nil

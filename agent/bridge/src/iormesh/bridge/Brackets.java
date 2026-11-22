@@ -84,6 +84,11 @@ final class Brackets {
     /** After a dropped THREAD, no retry before this nanoTime. */
     long retryAt;
     /**
+     * When that THREAD record was written (nanoTime): a virtual thread
+     * describes itself again Hooks.redescribeNs later (task 2j4).
+     */
+    long describedAt;
+    /**
      * The enter stamp of the bracket being written to the ring, or IDLE:
      * set before the exit is stamped and cleared after the record is
      * published, so a watermark never claims a time this bracket's

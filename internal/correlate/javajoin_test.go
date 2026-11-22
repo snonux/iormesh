@@ -23,10 +23,11 @@ const (
 // fakeRing hands out queued records on each DrainTo, like a ring the agent
 // keeps writing to.
 type fakeRing struct {
-	hdr    agentspool.Header
-	queue  []agentspool.Record
-	err    error
-	closed bool
+	hdr     agentspool.Header
+	queue   []agentspool.Record
+	err     error
+	closed  bool
+	removed bool
 }
 
 func (r *fakeRing) Header() agentspool.Header { return r.hdr }
@@ -42,6 +43,7 @@ func (r *fakeRing) DrainTo(v agentspool.Visitor) (int, error) {
 
 func (r *fakeRing) Losses() agentspool.Losses { return agentspool.Losses{DroppedBrackets: 1} }
 func (r *fakeRing) Close() error              { r.closed = true; return nil }
+func (r *fakeRing) Remove() error             { r.removed = true; return nil }
 
 // memTables collects the method, thread and class tables, validating
 // each row.

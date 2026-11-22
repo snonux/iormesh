@@ -158,13 +158,13 @@ func TestHTTPRedaction(t *testing.T) {
 	for i, f := range files {
 		files[i] = filepath.Join(run.Dir, f)
 	}
-	// The agent redacts before the spool: the rings it wrote must not
-	// hold a planted secret either, not even until the tracer read them.
-	rings, err := filepath.Glob(filepath.Join(h.Spool, "*.ring"))
-	if err != nil || len(rings) == 0 {
-		t.Fatalf("no agent ring left in the spool: %v", err)
+	// The agent redacts before the spool, so its rings never held the
+	// planted secret; they are gone by now, though: each JVM's shutdown
+	// hook unlinked its own (task 2j4), and the tracer removes any left.
+	if rings, err := filepath.Glob(filepath.Join(h.Spool, "*.ring")); err != nil || len(rings) != 0 {
+		t.Errorf("agent rings left in the spool after their JVMs exited: %v, %v", rings, err)
 	}
-	for _, path := range append(files, rings...) {
+	for _, path := range files {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)

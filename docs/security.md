@@ -379,6 +379,12 @@ truth.
   over 64 KiB (four times the largest the agent writes) is
   skipped as malformed before anything of it is decoded, so one
   ring puts at most about its capacity on the tracer's heap.
+  Rings of dead JVMs are unlinked (task 2j4) — by the agent at
+  exit, by the join after the JVM's exit, by the scan when the
+  process is gone — through the spool directory's descriptor,
+  without following a symlink, and only while the name still
+  names the regular single-link inode meant, so root never
+  removes a planted symlink or a reused pid's new ring.
 - **Live attach touches the target only as `jcmd` would.**
   `run -agent` and `iormesh attach` create a trigger file in the
   JVM's working directory (or `/tmp`), send it one SIGQUIT — only

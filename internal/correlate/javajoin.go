@@ -52,7 +52,6 @@ type JavaJoin struct {
 	held []schema.Event // in seq order, waiting for their JVM's ring
 	head int            // held[:head] are released (compact)
 	jvms map[uint32]*jvm
-	dead []*jvm // rings replaced by a newer JVM of the same pid
 	// waiting are rings of processes not traced (yet), held unread
 	// (javatrust.go, task yi4); traced lists, per pid, the incarnations
 	// the stream has named, and lastPID and lastInc the last one noted,
@@ -61,6 +60,10 @@ type JavaJoin struct {
 	traced  map[uint32][]uint64
 	lastPID uint32
 	lastInc uint64
+	// exiting counts the rings (accepted or waiting) whose process
+	// exited and that retire has not closed yet (javaretire.go); it may
+	// count one a newer ring replaced, which retire's next pass drops.
+	exiting int
 	offset  int64 // boot − mono, ns, from the last poll
 	// scanned is the boot time just before the last spool scan: a
 	// syscall that ended before it whose process had no ring then never
@@ -108,6 +111,7 @@ type AgentRing interface {
 	DrainTo(v agentspool.Visitor) (int, error)
 	Losses() agentspool.Losses
 	Close() error
+	Remove() error
 }
 
 // JavaTables receives the method, thread and class tables
@@ -289,13 +293,15 @@ func (j *JavaJoin) Poll() error {
 
 // Close reads the rings one last time, releases every held event with
 // what is known by then (a bracket not yet written leaves its syscalls
-// none), closes the rings and then the next sink.
+// none), closes the rings and then the next sink. The files stay: their
+// JVMs still run — or exited too recently to be retired, and the next
+// session's scan removes those.
 func (j *JavaJoin) Close() error {
 	err := j.poll(j.cfg.Clock())
 	if err == nil {
 		err = j.release(true)
 	}
-	for _, v := range j.allJVMs() {
+	for _, v := range j.jvms {
 		j.stats.Lost = addLosses(j.stats.Lost, v.ring.Losses())
 		err = errors.Join(err, v.ring.Close())
 	}
@@ -368,30 +374,29 @@ func (j *JavaJoin) addRing(r AgentRing) {
 
 // accept registers a traced process's ring under its JVM's pid, to be
 // drained from the next poll on. A newer ring for the same pid (a reused
-// pid, a restarted JVM) replaces the older, which is kept only to be
-// closed and counted.
+// pid, a restarted JVM) replaces the older, which is closed and counted
+// at once (task 2j4): no event looks at it any more — pending asks the
+// pid's current ring, which no longer owns the old process's events —
+// and its process, another incarnation, is dead, so its file goes too.
 func (j *JavaJoin) accept(v *jvm) {
 	if old := j.jvms[v.pid]; old != nil {
-		j.dead = append(j.dead, old)
+		j.closeRing(old, old.start != v.start)
 	}
 	j.jvms[v.pid] = v
 	j.stats.Rings++
 }
 
-func (j *JavaJoin) allJVMs() []*jvm {
-	all := append([]*jvm(nil), j.dead...)
-	for _, v := range j.jvms {
-		all = append(all, v)
-	}
-	return all
-}
-
 // release emits held events from the head while each is decidable, with
 // the http events that completed before each merged in ahead of it;
-// force decides everything with what is known now.
+// force decides everything with what is known now. Then the rings of
+// exited JVMs that nothing needs any more are retired (javaretire.go);
+// Close closes the rest itself.
 func (j *JavaJoin) release(force bool) error {
 	err := j.releaseHeld(force)
 	j.compact()
+	if err == nil && !force {
+		err = j.retire()
+	}
 	return err
 }
 
