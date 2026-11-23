@@ -72,9 +72,8 @@ func WorkloadBuild() error {
 	if err := sh.RunV("javac", args...); err != nil {
 		return err
 	}
-	if err := ensureBuildDir(); err != nil {
-		return err
-	}
+	// No ensureBuildDir: EchoPeerBuild ran first, and go build -o
+	// bin/echopeer created bin/.
 	return sh.RunV("jar", "--create", "--file", workloadJar,
 		"--main-class", workloadMainClass,
 		"-C", workloadClassesDir, ".",

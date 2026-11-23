@@ -63,9 +63,10 @@ var libsJars = []vendoredJar{
 // WorkloadLibsBuild builds workload-libs.jar, the third-party HTTP
 // module: its classes and the ServiceLoader entry registering its
 // scenarios with the core workload's Main. Like workload-otel.jar it
-// holds no dependency; its manifest's Class-Path names workload.jar and
-// the vendored jars by their repo-relative paths, so `java -jar
-// workload-libs.jar http-servlet …` runs from the repo root.
+// holds no dependency; its manifest's Class-Path names them relative to
+// the jar's own directory, bin/ (manifestClassPath: workload.jar beside
+// it, the vendored jars as ../workload/libs/third_party/…), so `java -jar
+// bin/workload-libs.jar http-servlet …` runs from any directory.
 func WorkloadLibsBuild() error {
 	mg.Deps(WorkloadBuild)
 	if err := verifyJars(libsVendorDir, libsJars); err != nil {

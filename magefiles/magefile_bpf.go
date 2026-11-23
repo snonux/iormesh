@@ -6,7 +6,8 @@
 // targets; the integration targets are in magefile_integration.go);
 // IOR_FORCE_GENERATE renamed to IORMESH_FORCE_GENERATE; Build compiles every
 // package instead of a binary, since cmd/iormesh lands in M1 step 10, and
-// links the cgo-free controller ./iormeshctl beside the tracer;
+// links the tracer and the cgo-free controller into bin/ (decision #30;
+// ior links ./ior at the root);
 // BpfRootTest is ior's runRootLinkTests/runRootTestBinary, reduced to the BPF
 // root tests of ./internal; GOARCH, the cgo cross compiler and the BPF
 // __TARGET_ARCH follow $IORMESH_TARGET_ARCH for the arm64 release build

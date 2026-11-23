@@ -3096,7 +3096,7 @@ cost is at its largest. Run it standalone:
 
 ```sh
 mage workloadBuild
-java -jar workload.jar syscall-burst --ops 1000000 --threads 4
+java -jar bin/workload.jar syscall-burst --ops 1000000 --threads 4
 ```
 
 After the PID it prints one result line,

@@ -39,8 +39,9 @@ var otelLibs = []vendoredJar{
 // its classes and the ServiceLoader entry that registers the otel
 // scenario with the core workload's Main. The jar holds no dependency;
 // its manifest's Class-Path names workload.jar and the vendored API jars
-// by their repo-relative paths, so `java -jar workload-otel.jar otel …`
-// runs from the repo root like `java -jar workload.jar`.
+// relative to the jar's own directory, bin/ (manifestClassPath), so
+// `java -jar bin/workload-otel.jar otel …` runs from any directory like
+// `java -jar bin/workload.jar`.
 func WorkloadOtelBuild() error {
 	mg.Deps(WorkloadBuild)
 	if err := verifyJars(otelLibDir, otelLibs); err != nil {
