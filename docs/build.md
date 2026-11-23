@@ -57,7 +57,9 @@ mage testRace      # go test -race, all but generate and ctl
 mage vet           # go vet ./... with the cgo environment
 mage lint          # golangci-lint: errcheck + staticcheck SA + unused
 mage fmt / fmtCheck
-mage clean         # keeps vmlinux.h (it needs root to recreate)
+mage clean         # sweeps the root build outputs too (decision #30);
+                   # keeps vmlinux.h (it needs root to recreate) and
+                   # dist/ (signed release artifacts)
 mage workloadTest  # the Java workload, standalone (M0)
 mage bpfRootTest   # BPF root tests: loader, TCP, fork, exec watch (sudo -n)
 mage integrationTest        # tracer + workload end to end, as root

@@ -183,10 +183,14 @@ func run(argv []string) error {
 	return sh.RunWithV(goEnv(), argv[0], argv[1:]...)
 }
 
-// Clean removes build artifacts. vmlinux.h is deliberately preserved: it is
-// a gitignored build input recoverable only with root (ensureVMLINUX dumps it
-// via sudo bpftool), so deleting it would leave the tree unbuildable on a
-// host without sudo.
+// Clean removes build artifacts: the BPF object and the generate
+// transients, and the outputs the root targets leave at the repository
+// root (decision #30) - the tracer and controller binaries, the Go peers,
+// the jars and the compiled test binaries. vmlinux.h is deliberately
+// preserved: it is a gitignored build input recoverable only with root
+// (ensureVMLINUX dumps it via sudo bpftool), so deleting it would leave
+// the tree unbuildable on a host without sudo. dist/ is left alone: it
+// holds the signed release artifacts, not intermediates.
 func Clean() error {
 	// The *.tmp-* glob sweeps generate temp renders orphaned by a signal
 	// between render and the atomic rename.
@@ -194,6 +198,19 @@ func Clean() error {
 		if err := removeFilesByGlob(pattern); err != nil {
 			return err
 		}
+	}
+	for _, path := range []string{
+		binaryName, ctlBinaryName, echoPeerBinary, edgePeerBinary,
+		workloadJar, libsJar, otelJar, agentJar,
+	} {
+		if err := removeFilesByPath(path); err != nil {
+			return err
+		}
+	}
+	// *.test sweeps every root test binary: the integration and root-BPF
+	// binaries the gates rebuild, and any stale one left behind.
+	if err := removeFilesByGlob("*.test"); err != nil {
+		return err
 	}
 	return removeFilesByPath(tracepointsResultNew)
 }
