@@ -130,6 +130,10 @@ type env struct {
 	// now is the clock build -last and prune -older-than count back
 	// from (window.go); nil is time.Now. Tests fix it.
 	now func() time.Time
+	// checked, when not nil, is called with each segment file before
+	// the child decodes it (build.go checkedSegmentsIn): tests count
+	// the segments a command opens. Nil outside tests.
+	checked func(path string)
 	// hostTimeout bounds everything one command does on one host
 	// (onHost); zero is defaultHostTimeout. Tests shorten it.
 	hostTimeout time.Duration
@@ -431,7 +435,11 @@ bound to its listening port) and deploys to it as deploy does; one
 query reads the store as build does and writes the matching
 events as schema NDJSON, at most -max-bytes (default 1 MiB) of it; a cut
 slice ends in a truncation record. T is RFC 3339 or HH:MM:SS[.frac] UTC
-on the trace's first day; -to is exclusive. Filters AND; -event takes
+on the trace's first day; -to is exclusive. -from/-to read only the
+segments whose range overlaps the window, as build -from/-to does: an
+event inside it written over a minute after -to is missed, and
+connection ids, -app, -file and -follow see only those segments.
+Filters AND; -event takes
 a schema kind, -errno a Linux errno name or number, -otel-trace a W3C
 trace id.
 

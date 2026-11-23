@@ -21,6 +21,7 @@ import (
 	"iormesh/internal/report"
 	"iormesh/internal/routemap"
 	"iormesh/internal/schema"
+	"iormesh/internal/segment"
 	"iormesh/internal/servicedb"
 	"iormesh/internal/site"
 	"iormesh/internal/viewmodel"
@@ -337,23 +338,19 @@ func wallNS(t time.Time) uint64 {
 	return uint64(t.UnixNano())
 }
 
-// selectSegments picks the build's projects, resolves its window, loads
-// the segments and narrows them to -namespace; a selection without one
-// readable segment is an error naming what was asked for.
+// selectSegments is build's selection: loadSelection, then the host
+// directories seen for the first time are pinned and the segments
+// narrowed to -namespace; a selection without one readable segment is an
+// error naming what was asked for.
 func selectSegments(ctx context.Context, e env, f buildFlags, paths buildPaths) (selection, error) {
-	var sel selection
-	var err error
-	if sel.projects, err = buildProjects(paths.store, f.projects); err != nil {
-		return selection{}, err
-	}
-	if sel.window, err = f.window.resolve(e, paths.store, sel.projects); err != nil {
-		return selection{}, err
-	}
-	segs, err := loadSegments(ctx, paths, sel.projects, sel.window)
+	sel, pins, err := loadSelection(ctx, e, f, paths)
 	if err != nil {
 		return selection{}, err
 	}
-	sel.segs, sel.hosts = inNamespace(segs, f.namespace)
+	if err := pinNewHosts(pins.path, sel.segs.Hosts); err != nil {
+		return selection{}, err
+	}
+	sel.segs, sel.hosts = inNamespace(sel.segs, f.namespace)
 	if len(sel.segs.Sources) == 0 {
 		return selection{}, fmt.Errorf("build: no readable segment for %s%s%s in %s (%d bad)",
 			strings.Join(sel.projects, ", "), namespaceNote(f.namespace), windowNote(sel.window),
@@ -362,19 +359,30 @@ func selectSegments(ctx context.Context, e env, f buildFlags, paths buildPaths) 
 	return sel, nil
 }
 
-// loadSegments loads the projects' segments (only window's, when not
-// nil), each checked in a memory-capped child (check.go) and each host
-// directory held to the identity pinned for it, then pins the
-// directories seen for the first time. A windowed load checks every
-// segment of a directory not pinned yet (federate.Window), so what it
+// loadSelection is the one selection build and query share (task ik4):
+// it picks the projects, resolves f's window (windowSpec.resolve, the
+// one place a time of day is anchored) and loads the projects' segments
+// — only the window's, when there is one — each checked in a
+// memory-capped child (check.go) and each host directory held to the
+// identity pinned for it. It pins nothing: build pins what it returns
+// (selectSegments), query never does. A windowed load checks every
+// segment of a directory not pinned yet (federate.Window), so what build
 // pins is what a full build would.
-func loadSegments(ctx context.Context, paths buildPaths, projects []string,
-	window *federate.Window) (federate.Segments, error) {
-	segs, pins, err := checkedSegmentsIn(ctx, paths, projects, window)
-	if err != nil {
-		return federate.Segments{}, err
+func loadSelection(ctx context.Context, e env, f buildFlags, paths buildPaths) (selection, hostPins, error) {
+	var sel selection
+	var err error
+	if sel.projects, err = buildProjects(paths.store, f.projects); err != nil {
+		return selection{}, hostPins{}, err
 	}
-	return segs, pinNewHosts(pins.path, segs.Hosts)
+	if sel.window, err = f.window.resolve(e, paths.store, sel.projects); err != nil {
+		return selection{}, hostPins{}, err
+	}
+	segs, pins, err := checkedSegmentsIn(ctx, paths, sel.projects, sel.window)
+	if err != nil {
+		return selection{}, hostPins{}, err
+	}
+	sel.segs = segs
+	return sel, pins, nil
 }
 
 // inNamespace narrows a build to the sessions of pods in namespace ns
@@ -450,8 +458,16 @@ func checkedSegmentsIn(ctx context.Context, paths buildPaths, projects []string,
 	if pins.known, err = loadHostPins(pins.path); err != nil {
 		return federate.Segments{}, hostPins{}, err
 	}
+	check := childChecker(exe, checkAddressSpace)
+	if paths.checked != nil { // a test counts the segments decoded
+		inner := check
+		check = func(ctx context.Context, path string) (segment.Summary, error) {
+			paths.checked(path)
+			return inner(ctx, path)
+		}
+	}
 	segs, err := federate.LoadSegments(ctx, paths.store, projects, federate.LoadOptions{
-		Check: childChecker(exe, checkAddressSpace), Known: pins.known, Window: window})
+		Check: check, Known: pins.known, Window: window})
 	return segs, pins, err
 }
 
@@ -523,13 +539,17 @@ func importMesh(ctx context.Context, dbPath string, sources []federate.Source, i
 	return err
 }
 
-// buildPaths are the resolved store, database and outputs paths.
-type buildPaths struct{ store, db, builds string }
+// buildPaths are the resolved store, database and outputs paths, and
+// env.checked (nil outside tests).
+type buildPaths struct {
+	store, db, builds string
+	checked           func(path string)
+}
 
 // resolveBuildPaths fills the defaults and checks the store: a store
 // others could write is refused here as collect refuses it.
 func resolveBuildPaths(e env, f buildFlags) (buildPaths, error) {
-	p := buildPaths{store: f.store, db: f.db, builds: f.builds}
+	p := buildPaths{store: f.store, db: f.db, builds: f.builds, checked: e.checked}
 	var err error
 	for _, d := range []struct {
 		dst *string

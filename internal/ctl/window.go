@@ -12,7 +12,9 @@ import (
 // build's time window (task yh4): `iormeshctl build -from T -to T` or
 // `-last DUR` builds only the segments whose time range overlaps the
 // window (federate.Window: by their file names, so a segment outside it
-// is never decoded once its host directory is pinned). The window
+// is never decoded once its host directory is pinned). `iormeshctl query
+// -from T -to T` selects its segments the same way (task ik4,
+// loadSelection) and then cuts their events to the window. The window
 // selects whole segments, not events: the build covers the window
 // widened to its segments' edges, about a minute or two each side. T is
 // query's (query.ParseTime): RFC 3339, or a UTC time of day placed on
@@ -91,7 +93,8 @@ func parseWindow(w windowFlags, f *buildFlags) error {
 // resolve turns the window into the instants federate selects by, nil
 // without one: -last from the clock, a time of day on the day of the
 // earliest segment of projects in store. An empty window is a usage
-// error.
+// error. Build and query both resolve their window here
+// (loadSelection), so this is the one place a time of day is anchored.
 func (w windowSpec) resolve(e env, store string, projects []string) (*federate.Window, error) {
 	if w.last > 0 {
 		return &federate.Window{From: e.clock().Add(-w.last).UTC().Truncate(time.Second)}, nil

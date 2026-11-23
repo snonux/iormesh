@@ -41,6 +41,14 @@ func queryLines(t *testing.T, out string) (events []schema.Event, truncated stri
 
 // TestQueryGolden: each filter over the collected store matches its
 // golden and decodes as schema events; rerunning gives the same bytes.
+//
+// The fixture's events are all stamped within 10 ms of t0 but written
+// into segments named minutes apart (writeStoreSegments), so the window
+// golden holds only the two events of the hosts' first segments: since
+// task ik4 a window selects the segments it decodes (TestQueryWindow*),
+// and an event written minutes after its stamp is outside the slack. The
+// merge, run on those segments alone, no longer sees app1's connect, so
+// app2's connection keeps its local id.
 func TestQueryGolden(t *testing.T) {
 	f := newBuildFixture(t)
 	for _, tc := range []struct {

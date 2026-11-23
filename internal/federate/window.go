@@ -9,8 +9,9 @@ import (
 
 // Time windows over the store (task yh4): `iormeshctl build -from/-to`
 // or `-last` builds only the segments whose time range overlaps a
-// window, and `iormeshctl prune -older-than` deletes the ones whose range
-// ended before a cutoff. A segment is placed by its file name alone —
+// window, `iormeshctl query -from/-to` reads only those (task ik4), and
+// `iormeshctl prune -older-than` deletes the ones whose range ended
+// before a cutoff. A segment is placed by its file name alone —
 // reading its events to find their clocks would cost the full decode a
 // window is there to save — so the range is a conservative one, Span.
 

@@ -1827,7 +1827,19 @@ Kubernetes (M7) build on it.
   `-errno` (a Linux errno name or number, matched against the
   recorded `err` name) and `-otel-trace ID` (`otel.trace_id`:
   the I/O inside one distributed trace's spans). All are
-  checked before anything is read.
+  checked before anything is read. *Task ik4:* `-from`/`-to`
+  select the segments query decodes, by build's selection
+  (**Build window and prune**: the same resolution and anchor,
+  the same `federate.Span` widening), instead of decoding the
+  whole store and cutting the events afterwards. The guarantee
+  is build's: an event inside the window is found when it was
+  written less than a minute after the window's end; a call
+  blocked longer is missed. The slice is then computed from the
+  window's segments alone, as a windowed build is: a connection
+  established before them keeps its host-local id, `-app`,
+  `-file` and `-follow` see only the attaches, opens and
+  connection use inside them. A window no segment overlaps is
+  the empty slice.
 - Plus the per-run summary/report export — the LLM rollup of the
   whole mesh (see "Trace output contract"). *Built (task qb4):*
   `build` feeds `internal/report` the events the merge reads (no

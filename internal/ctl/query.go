@@ -24,7 +24,10 @@ import (
 // segment is decoded first in the memory-capped child (check.go), each
 // host directory is held to its pinned identity, and a segment that
 // fails is left out — named on stderr, the exit status 1 — never half
-// read. The merge runs again so that the slice speaks the merged
+// read. With -from/-to only the segments whose range overlaps the
+// window are loaded (task ik4: loadSelection, build's selection and its
+// guarantee, window.go), and the slice is computed from them alone. The
+// merge runs again so that the slice speaks the merged
 // connection ids (both ends of a fused connection share one) and knows
 // each process's app. -method reads the sessions' methods tables, each
 // checked in the child the same way. Unlike build, query writes nothing:
@@ -69,11 +72,11 @@ func queryCommand(args []string, e env) error {
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%w: query takes no arguments", errUsage)
 	}
-	filter, from, to, err := parseQueryFilter(f)
+	filter, err := parseQueryFilter(&f)
 	if err != nil {
 		return err
 	}
-	return runQuery(e.root(), e, f, filter, from, to)
+	return runQuery(e.root(), e, f, filter)
 }
 
 // addQueryFlags registers query's flags on fs into f.
@@ -100,33 +103,26 @@ func addQueryFlags(fs *flag.FlagSet, f *queryFlags) {
 }
 
 // parseQueryFilter turns the flags into a filter and validates it, the
-// time window aside: a time of day needs the trace's first day, known
-// only once the store is listed.
-func parseQueryFilter(f queryFlags) (query.Filter, *query.TimeSpec, *query.TimeSpec, error) {
+// time window aside: -from and -to are parsed into f.paths.window as
+// build's are (parseWindow) and placed only once the store is listed — a
+// time of day needs the trace's first day (windowSpec.resolve).
+func parseQueryFilter(f *queryFlags) (query.Filter, error) {
 	filter := query.Filter{Host: f.host, App: f.app, Thread: f.thread, Conn: f.conn,
 		Follow: f.follow, File: f.file, Method: f.mth, Ref: f.ref, Event: f.event}
-	if err := parseValueFlags(f, &filter); err != nil {
-		return query.Filter{}, nil, nil, err
+	if err := parseValueFlags(*f, &filter); err != nil {
+		return query.Filter{}, err
 	}
-	var specs [2]*query.TimeSpec
-	for i, s := range []string{f.from, f.to} {
-		if s == "" {
-			continue
-		}
-		t, err := query.ParseTime(s)
-		if err != nil {
-			return query.Filter{}, nil, nil, fmt.Errorf("%w: %w", errUsage, err)
-		}
-		specs[i] = &t
+	if err := parseWindow(windowFlags{from: f.from, to: f.to}, &f.paths); err != nil {
+		return query.Filter{}, err
 	}
 	if err := filter.Validate(); err != nil {
-		return query.Filter{}, nil, nil, fmt.Errorf("%w: %w", errUsage, err)
+		return query.Filter{}, fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if f.maxBytes < query.MinMaxBytes() {
-		return query.Filter{}, nil, nil, fmt.Errorf("%w: -max-bytes %d is below %d, the truncation record's size",
+		return query.Filter{}, fmt.Errorf("%w: -max-bytes %d is below %d, the truncation record's size",
 			errUsage, f.maxBytes, query.MinMaxBytes())
 	}
-	return filter, specs[0], specs[1], nil
+	return filter, nil
 }
 
 // parseValueFlags puts -pid, -errno and -otel-trace into filter (task
@@ -153,28 +149,31 @@ func parseValueFlags(f queryFlags, filter *query.Filter) error {
 	return nil
 }
 
-// runQuery loads the store, merges it, and writes the slice; bad
-// segments are reported after it.
-func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter, from, to *query.TimeSpec) error {
+// runQuery loads the store — with -from or -to only the segments whose
+// range overlaps the window (loadSelection, build's selection; task
+// ik4) — merges it, and writes the slice; bad segments are reported
+// after it.
+func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter) error {
 	paths, err := resolveBuildPaths(e, f.paths)
 	if err != nil {
 		return err
 	}
-	projects, err := buildProjects(paths.store, f.paths.projects)
+	sel, _, err := loadSelection(ctx, e, f.paths, paths)
 	if err != nil {
 		return err
 	}
-	segs, _, err := checkedSegments(ctx, paths, projects)
-	if err != nil {
-		return err
+	segs := sel.segs
+	switch {
+	case len(segs.Sources) > 0:
+	case sel.window != nil && len(segs.Bad) == 0:
+		// No segment overlaps the window, so no event lies in it:
+		// the empty slice a whole-store query gave before.
+		return nil
+	default:
+		return fmt.Errorf("query: no readable segment for %s%s in %s (%d bad)",
+			strings.Join(sel.projects, ", "), windowNote(sel.window), paths.store, len(segs.Bad))
 	}
-	if len(segs.Sources) == 0 {
-		return fmt.Errorf("query: no readable segment for %s in %s (%d bad)",
-			strings.Join(projects, ", "), paths.store, len(segs.Bad))
-	}
-	if err := resolveWindow(&filter, segs.Sources, from, to); err != nil {
-		return err
-	}
+	windowFilter(&filter, sel.window)
 	in, err := queryInput(ctx, &segs, filter)
 	if err != nil {
 		return err
@@ -185,34 +184,16 @@ func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter, fro
 	return errors.Join(err, reportBad(e, segs.Bad))
 }
 
-// resolveWindow places -from and -to: a time of day lands on the UTC
-// date of the earliest segment's start (its file name), the day the
-// trace began.
-func resolveWindow(filter *query.Filter, sources []*federate.Segment, from, to *query.TimeSpec) error {
-	day := sources[0].File.Start
-	for _, s := range sources[1:] {
-		if s.File.Start.Before(day) {
-			day = s.File.Start
-		}
+// windowFilter cuts the events to the resolved window (nil: no window)
+// by their wall_ns, From ≤ wall_ns < To, a side not given left open:
+// the window selected the segments, whole, and they hold events of its
+// edges' neighbours too.
+func windowFilter(filter *query.Filter, w *federate.Window) {
+	if w == nil {
+		return
 	}
-	for _, t := range []struct {
-		spec *query.TimeSpec
-		dst  *uint64
-	}{{from, &filter.From}, {to, &filter.To}} {
-		if t.spec == nil {
-			continue
-		}
-		v, err := t.spec.Resolve(day)
-		if err != nil {
-			return fmt.Errorf("%w: %w", errUsage, err)
-		}
-		*t.dst = v
-	}
-	filter.HasTo = to != nil
-	if err := filter.Validate(); err != nil {
-		return fmt.Errorf("%w: %w", errUsage, err)
-	}
-	return nil
+	filter.From = wallNS(w.From)
+	filter.To, filter.HasTo = wallNS(w.To), !w.To.IsZero()
 }
 
 // queryInput merges the segments and, for -method, reads the method
