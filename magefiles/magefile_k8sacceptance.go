@@ -43,6 +43,13 @@ import (
 	"iormesh/internal/kindrun"
 )
 
+// k8sAcceptanceDir is where the acceptance runs keep their state at the
+// repository root (decision #30): the kind cluster's kubeconfig (it holds
+// credentials), the base-image state beside it, the existing-cluster
+// record and the interrupted-teardown log. The whole directory is
+// gitignored; kindConfigFor creates it before anything writes into it.
+const k8sAcceptanceDir = ".k8s-acceptance"
+
 // kindConfig points the node's containerd at /etc/containerd/certs.d,
 // where the local registry is mapped (kind's local-registry setup).
 const kindConfig = `kind: Cluster
@@ -170,16 +177,20 @@ func K8sTeardown() error {
 	return kindrun.Teardown(shRunner{}, c, os.Stdout)
 }
 
-// kindConfigFor is the run's configuration: kubeconfig at the repository
-// root unless $IORMESH_KIND_KUBECONFIG says otherwise, the base-image
-// state beside it — or, with $IORMESH_K8S_KUBECONFIG, existingConfig.
+// kindConfigFor is the run's configuration: kubeconfig under
+// .k8s-acceptance/ unless $IORMESH_KIND_KUBECONFIG says otherwise, the
+// base-image state beside it — or, with $IORMESH_K8S_KUBECONFIG,
+// existingConfig.
 func kindConfigFor() (kindrun.Config, error) {
 	if os.Getenv("IORMESH_K8S_KUBECONFIG") != "" {
 		return existingConfig()
 	}
 	kc := os.Getenv("IORMESH_KIND_KUBECONFIG")
 	if kc == "" {
-		kc = ".kind-kubeconfig"
+		if err := os.MkdirAll(k8sAcceptanceDir, 0o755); err != nil {
+			return kindrun.Config{}, fmt.Errorf("mkdir %s: %w", k8sAcceptanceDir, err)
+		}
+		kc = filepath.Join(k8sAcceptanceDir, "kubeconfig")
 	}
 	abs, err := filepath.Abs(kc)
 	if err == nil {
@@ -190,8 +201,8 @@ func kindConfigFor() (kindrun.Config, error) {
 
 // existingConfig is the configuration against the existing cluster of
 // $IORMESH_K8S_KUBECONFIG, in $IORMESH_K8S_CONTEXT or else the
-// kubeconfig's current context; the base-image state goes to the
-// repository root (the kubeconfig's directory is the operator's). The
+// kubeconfig's current context; the base-image state goes into
+// .k8s-acceptance/ (the kubeconfig's directory is the operator's). The
 // context is looked up anew on every invocation, so the teardown does
 // not use it for the cluster: it uses the context the state file
 // recorded when the run claimed its namespaces.
@@ -208,7 +219,10 @@ func existingConfig() (kindrun.Config, error) {
 		}
 		ctx = strings.TrimSpace(out)
 	}
-	state, err := filepath.Abs(".k8s-existing.state.json")
+	if err := os.MkdirAll(k8sAcceptanceDir, 0o755); err != nil {
+		return kindrun.Config{}, fmt.Errorf("mkdir %s: %w", k8sAcceptanceDir, err)
+	}
+	state, err := filepath.Abs(filepath.Join(k8sAcceptanceDir, "existing.state.json"))
 	return kindrun.Existing(kc, ctx, state), err
 }
 
@@ -231,10 +245,12 @@ func teardownOnSignal(once *sync.Once) func() {
 }
 
 // detachedTeardown runs this mage binary's k8sTeardown in its own
-// session, its output in k8s-teardown.log, and does not wait for it.
+// session, its output in .k8s-acceptance/teardown.log, and does not
+// wait for it. The dir exists: every target that arms this called
+// kindConfigFor first.
 func detachedTeardown(sig os.Signal) {
 	self, err := os.Executable()
-	log, lerr := os.Create("k8s-teardown.log")
+	log, lerr := os.Create(filepath.Join(k8sAcceptanceDir, "teardown.log"))
 	if err != nil || lerr != nil {
 		fmt.Printf("%v: cannot start the teardown (%v %v): run `mage k8sTeardown`\n", sig, err, lerr)
 		return
@@ -246,7 +262,7 @@ func detachedTeardown(sig os.Signal) {
 		fmt.Printf("%v: cannot start the teardown (%v): run `mage k8sTeardown`\n", sig, err)
 		return
 	}
-	fmt.Printf("%v: teardown running as pid %d, log in k8s-teardown.log\n", sig, cmd.Process.Pid)
+	fmt.Printf("%v: teardown running as pid %d, log in %s/teardown.log\n", sig, cmd.Process.Pid, k8sAcceptanceDir)
 }
 
 // reportTeardown prints a teardown's failure: the run's result stands.

@@ -2843,8 +2843,8 @@ deferred.
   `../iormesh`, `../workload.jar` and `../edgepeer`, and the
   non-java-peer looks for `echopeer` beside the jar — `mage
   clean` sweeps them instead. The kind acceptance's state files
-  (`.kind-kubeconfig`, the two `.state.json`s,
-  `k8s-teardown.log`) group under one hidden directory.
+  (`.k8s-acceptance/`: the kubeconfig, the two `.state.json`s,
+  `teardown.log`) group under one hidden directory.
   Rejected: a `build/` directory for the outputs — the sudoers
   pin, the harness defaults and the jars' manifest `Class-Path`
   names would all have to follow, for cosmetic gain.

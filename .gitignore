@@ -37,11 +37,8 @@ internal/c/generated_tracepoints.c.tmp-*
 # under eval/results/ are kept.
 /eval/store/
 
-# The kind acceptance cluster's kubeconfig (mage k8sAcceptance, task yb4):
-# credentials, never committed.
-/.kind-kubeconfig
-
-# mage k8sAcceptance state and interrupted-teardown log (task yb4).
-/.kind-kubeconfig.state.json
-/.k8s-existing.state.json
-/k8s-teardown.log
+# The acceptance runs' state directory (mage k8sAcceptance, task yb4,
+# decision #30): the kind cluster's kubeconfig (credentials, never
+# committed), the base-image and existing-cluster state files and the
+# interrupted teardown's log.
+/.k8s-acceptance/

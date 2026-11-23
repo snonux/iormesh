@@ -2324,11 +2324,11 @@ goes through `sudo -n`. It:
    (a stopped container of that name is removed first), creates
    the cluster `iormesh-m7` without `--kubeconfig` — root never
    writes a path the operator chose — and writes `kind get
-   kubeconfig`'s output as the operator to `.kind-kubeconfig` at
-   the repository root (or `$IORMESH_KIND_KUBECONFIG`; 0600,
-   ignored by git), then wires the node's containerd to the
-   registry; its kind and kube-proxy configs are `os.CreateTemp`
-   files;
+   kubeconfig`'s output as the operator to
+   `.k8s-acceptance/kubeconfig` at the repository root (or
+   `$IORMESH_KIND_KUBECONFIG`; 0600, ignored by git), then wires
+   the node's containerd to the registry; its kind and kube-proxy
+   configs are `os.CreateTemp` files;
 5. builds and pushes the tracer image
    (`scripts/container/tracer-image.Containerfile`) and a workload
    image (`scripts/container/kind-workload.Containerfile`: a JRE,
@@ -2409,7 +2409,8 @@ eight tags untouched), no volume or container left, no kind
 cluster, no kubeconfig or state file.
 
 Ctrl-C or SIGTERM during the run starts the teardown as `mage
-k8sTeardown` in a session of its own (log in `k8s-teardown.log`),
+k8sTeardown` in a session of its own (log in
+`.k8s-acceptance/teardown.log`),
 which outlives mage's 5-second grace for cancelled targets and the
 terminal's process-group SIGINT; if the daemon or the binary is
 gone by then, run `mage k8sTeardown` by hand — the recovery step
@@ -2607,10 +2608,11 @@ namespaces (`kindrun.ClaimExisting`): it refuses when `traefik`,
 already there and not recorded as its own, or when it cannot list
 them, and otherwise
 records the kubeconfig, the context, the Traefik release and the
-namespaces in `.k8s-existing.state.json` at the repository root,
-beside the base-image state. The teardown removes only what that
-record names, in the recorded kubeconfig and context (not the
-kubeconfig's current one, which may point elsewhere by then):
+namespaces in `.k8s-acceptance/existing.state.json` at the
+repository root, beside the base-image state. The teardown
+removes only what that record names, in the recorded kubeconfig
+and context (not the kubeconfig's current one, which may point
+elsewhere by then):
 it uninstalls the release and deletes the namespaces (Traefik's
 CRDs, which helm never removes, stay). Without a record — a run
 refused or failed before its claim, a bare `mage k8sTeardown` —
