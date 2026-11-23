@@ -25,7 +25,7 @@ const (
 	libsSrcDir     = "workload/libs/src"
 	libsResDir     = "workload/libs/resources"
 	libsClassesDir = "workload/libs/classes"
-	libsJar        = "workload-libs.jar"
+	libsJar        = buildDir + "/workload-libs.jar"
 	libsVendorDir  = "workload/libs/third_party"
 )
 
@@ -118,18 +118,42 @@ func verifyJars(dir string, jars []vendoredJar) error {
 
 // packModuleJar writes a workload module's jar: Main-Class is the core
 // workload's Main (the module's scenarios join its registry through
-// META-INF/services), Class-Path the jars it runs against, relative to
-// the jar's own directory.
+// META-INF/services), Class-Path the jars it runs against. classPath is
+// repo-relative (javac's -cp); the manifest wants each entry relative to
+// the jar's own directory, so manifestClassPath rewrites it.
 func packModuleJar(jar, classes, resources string, classPath []string) error {
-	manifest := filepath.Join(classes, "MANIFEST.MF")
-	err := os.WriteFile(manifest, []byte(manifestHeader("Main-Class", workloadMainClass)+
-		manifestHeader("Class-Path", strings.Join(classPath, " "))), 0o644)
+	cp, err := manifestClassPath(jar, classPath)
 	if err != nil {
+		return err
+	}
+	manifest := filepath.Join(classes, "MANIFEST.MF")
+	err = os.WriteFile(manifest, []byte(manifestHeader("Main-Class", workloadMainClass)+
+		manifestHeader("Class-Path", cp)), 0o644)
+	if err != nil {
+		return err
+	}
+	if err := ensureBuildDir(); err != nil {
 		return err
 	}
 	return sh.RunV("jar", "--create", "--file", jar, "--manifest", manifest,
 		"-C", classes, "iormesh",
 		"-C", resources, ".")
+}
+
+// manifestClassPath is classPath's repo-relative entries made relative to
+// jar's directory and space-separated, slashes as the manifest wants: with
+// the jars in bin/ (decision #30) workload.jar stays a bare name beside
+// them and a vendored jar becomes ../workload/….
+func manifestClassPath(jar string, classPath []string) (string, error) {
+	rel := make([]string, 0, len(classPath))
+	for _, p := range classPath {
+		r, err := filepath.Rel(filepath.Dir(jar), p)
+		if err != nil {
+			return "", err
+		}
+		rel = append(rel, filepath.ToSlash(r))
+	}
+	return strings.Join(rel, " "), nil
 }
 
 // manifestHeader is one manifest header, folded as the jar format wants:

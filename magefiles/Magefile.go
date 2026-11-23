@@ -25,17 +25,22 @@ import (
 )
 
 const (
+	// buildDir holds every build output - the binaries, the jars and the
+	// gates' test binaries - so none lands at the repository root
+	// (PLAN.md decision #30, tasks rk4/uk4). It is gitignored and removed
+	// by `mage clean`; dist/ stays the release output.
+	buildDir           = "bin"
 	workloadSrcDir     = "workload/src"
 	workloadClassesDir = "workload/classes"
-	workloadJar        = "workload.jar"
+	workloadJar        = buildDir + "/workload.jar"
 	workloadMainClass  = "iormesh.workload.Main"
-	// The non-java-peer scenario's Go peer, built next to the jar, where
-	// NonJavaPeer looks for it by default.
-	echoPeerBinary = "echopeer"
+	// The non-java-peer scenario's Go peer, built next to the jar (both in
+	// buildDir), where NonJavaPeer looks for it by default.
+	echoPeerBinary = buildDir + "/echopeer"
 	echoPeerPkg    = "./workload/echopeer"
 	// The integration suite's Go helper for the PID reuse and socket
 	// race edge cases (integrationtests/pidreuse_test.go, sockrace_test.go).
-	edgePeerBinary = "edgepeer"
+	edgePeerBinary = buildDir + "/edgepeer"
 	edgePeerPkg    = "./workload/edgepeer"
 	// The workload targets Java 21 (PLAN.md decision #5) whatever newer
 	// JDK builds it, so it never depends on post-21 APIs.
@@ -67,13 +72,16 @@ func WorkloadBuild() error {
 	if err := sh.RunV("javac", args...); err != nil {
 		return err
 	}
+	if err := ensureBuildDir(); err != nil {
+		return err
+	}
 	return sh.RunV("jar", "--create", "--file", workloadJar,
 		"--main-class", workloadMainClass,
 		"-C", workloadClassesDir, ".",
 		"-C", "workload", "scenarios")
 }
 
-// EchoPeerBuild builds ./echopeer, the non-JVM end of the non-java-peer
+// EchoPeerBuild builds bin/echopeer, the non-JVM end of the non-java-peer
 // scenario. CGO_ENABLED=0: it must not need the libbpfgo environment or
 // libc to run, and a static binary execs the same everywhere.
 func EchoPeerBuild() error {
@@ -81,12 +89,18 @@ func EchoPeerBuild() error {
 		"go", "build", "-o", echoPeerBinary, echoPeerPkg)
 }
 
-// EdgePeerBuild builds ./edgepeer, the integration suite's helper for
+// EdgePeerBuild builds bin/edgepeer, the integration suite's helper for
 // the edge cases a JVM cannot force deterministically (PID reuse, socket
 // races). Cgo-free for the same reasons as EchoPeerBuild.
 func EdgePeerBuild() error {
 	return sh.RunWithV(map[string]string{"CGO_ENABLED": "0"},
 		"go", "build", "-o", edgePeerBinary, edgePeerPkg)
+}
+
+// ensureBuildDir creates buildDir for the producers whose tool does not
+// create an output's parent itself (jar --file, cp); go build -o does.
+func ensureBuildDir() error {
+	return os.MkdirAll(buildDir, 0o755)
 }
 
 // javaSources lists every .java file under root, sorted by WalkDir.

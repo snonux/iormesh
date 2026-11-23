@@ -47,9 +47,9 @@ const (
 	typesHeaderPath      = "internal/c/types.h"
 	vmlinuxPath          = "internal/c/vmlinux.h"
 	forceGenerateEnv     = "IORMESH_FORCE_GENERATE"
-	rootTestBinary       = "iormesh-internal.test"
-	binaryName           = "iormesh"
-	ctlBinaryName        = "iormeshctl"
+	rootTestBinary       = buildDir + "/iormesh-internal.test"
+	binaryName           = buildDir + "/iormesh"
+	ctlBinaryName        = buildDir + "/iormeshctl"
 )
 
 // Default builds the project.
@@ -58,8 +58,8 @@ func Default() {
 }
 
 // Build compiles the BPF object and every Go package with the libbpfgo cgo
-// environment, then links the tracer binary ./iormesh (cmd/iormesh, M1
-// step 10) with the object embedded, and the controller ./iormeshctl
+// environment, then links the tracer binary bin/iormesh (cmd/iormesh, M1
+// step 10) with the object embedded, and the controller bin/iormeshctl
 // (cmd/iormeshctl, M4) with CGO_ENABLED=0: built the way it ships, so a cgo
 // dependency fails here and not first on a Mac.
 func Build() error {
@@ -184,9 +184,10 @@ func run(argv []string) error {
 }
 
 // Clean removes build artifacts: the BPF object and the generate
-// transients, and the outputs the root targets leave at the repository
-// root (decision #30) - the tracer and controller binaries, the Go peers,
-// the jars and the compiled test binaries. vmlinux.h is deliberately
+// transients, and bin/ (decision #30) - the tracer and controller
+// binaries, the Go peers, the jars and the compiled test binaries - plus
+// any of those a tree built before the move still has at the root
+// (cleanBuildOutputs). vmlinux.h is deliberately
 // preserved: it is a gitignored build input recoverable only with root
 // (ensureVMLINUX dumps it via sudo bpftool), so deleting it would leave
 // the tree unbuildable on a host without sudo. dist/ is left alone: it
@@ -199,20 +200,30 @@ func Clean() error {
 			return err
 		}
 	}
+	if err := cleanBuildOutputs(); err != nil {
+		return err
+	}
+	return removeFilesByPath(tracepointsResultNew)
+}
+
+// cleanBuildOutputs removes buildDir whole, then the same outputs by their
+// base names at the repository root, where every target wrote them before
+// decision #30 moved them (tasks rk4/uk4): a checkout built earlier is
+// swept clean too. The root *.test glob catches the integration and
+// root-BPF test binaries of such a tree and any stale one.
+func cleanBuildOutputs() error {
+	if err := os.RemoveAll(buildDir); err != nil {
+		return fmt.Errorf("remove %s: %w", buildDir, err)
+	}
 	for _, path := range []string{
 		binaryName, ctlBinaryName, echoPeerBinary, edgePeerBinary,
 		workloadJar, libsJar, otelJar, agentJar,
 	} {
-		if err := removeFilesByPath(path); err != nil {
+		if err := removeFilesByPath(filepath.Base(path)); err != nil {
 			return err
 		}
 	}
-	// *.test sweeps every root test binary: the integration and root-BPF
-	// binaries the gates rebuild, and any stale one left behind.
-	if err := removeFilesByGlob("*.test"); err != nil {
-		return err
-	}
-	return removeFilesByPath(tracepointsResultNew)
+	return removeFilesByGlob("*.test")
 }
 
 func buildBPFObject() error {

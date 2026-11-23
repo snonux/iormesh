@@ -1,8 +1,7 @@
-/workload.jar
-/iormesh
-/iormeshctl
-/echopeer
-/edgepeer
+# Build outputs (PLAN.md decision #30, tasks rk4/uk4): the binaries, the
+# four jars and the gates' test binaries all go to bin/, which `mage
+# clean` removes; none is written to the repository root.
+/bin/
 /workload/classes/
 
 # BPF build outputs and inputs (as in ior): the object is rebuilt by
@@ -16,15 +15,12 @@ internal/c/generated_tracepoints.c.tmp-*
 *.test
 
 # Java agent build (mage agentBuild).
-/iormesh-agent.jar
 /agent/build/
 
 # The OTEL workload flavor (mage workloadOtelBuild).
-/workload-otel.jar
 /workload/otel/classes/
 
 # The third-party HTTP workload module (mage workloadLibsBuild).
-/workload-libs.jar
 /workload/libs/classes/
 
 # Agent worktrees (Claude Code isolation)

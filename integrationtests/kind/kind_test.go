@@ -80,7 +80,7 @@ func loadConfig(t *testing.T) config {
 			envSEType, c.seType, envSELevel, c.seLevel)
 	}
 	if c.ctl == "" {
-		c.ctl = "../../iormeshctl"
+		c.ctl = "../../bin/iormeshctl"
 	}
 	abs, err := filepath.Abs(c.ctl)
 	if err != nil {

@@ -386,7 +386,7 @@ truth.
   without sudo or as root directly".
   Sessions are confined: `start` always (its unit runs as
   root), `run` under the same gate (a build run with the
-  operator's own full sudo, `sudo ./iormesh run -out DIR`, is
+  operator's own full sudo, `sudo bin/iormesh run -out DIR`, is
   not), and the unit's own run again: `start` launches it with
   `IORMESH_CONFINED_UNIT=1` (`systemd-run --setenv`), which only
   ever adds confinement, so the unit re-checks what `start`

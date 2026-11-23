@@ -63,7 +63,7 @@ reason.
 
 1. Build the release tracer and the agent jar: `mage buildPodman`
    (or `mage buildDocker`) for `dist/iormesh-linux-<arch>`, and
-   `mage agentBuild` for `iormesh-agent.jar`.
+   `mage agentBuild` for `bin/iormesh-agent.jar`.
 2. Build the image from the repository root, one per arch:
 
    ```

@@ -12,7 +12,7 @@ import (
 
 // agentJarDefault is `mage agentBuild`'s output, which `mage
 // integrationTest` builds first.
-const agentJarDefault = "../iormesh-agent.jar"
+const agentJarDefault = "../bin/iormesh-agent.jar"
 
 // TestJavaMethodFlow: method-flow under the agent, traced with -spool,
 // carries the Java side its pending golden declares (M3, task 2b4): each

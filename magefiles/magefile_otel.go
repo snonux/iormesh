@@ -22,7 +22,7 @@ const (
 	otelSrcDir     = "workload/otel/src"
 	otelResDir     = "workload/otel/resources"
 	otelClassesDir = "workload/otel/classes"
-	otelJar        = "workload-otel.jar"
+	otelJar        = buildDir + "/workload-otel.jar"
 	otelLibDir     = "workload/otel/third_party/opentelemetry"
 )
 

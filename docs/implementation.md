@@ -1026,7 +1026,7 @@ flags, mapped addresses — against the shipped `expect.json`
 files, plus one negative case per rule.
 
 **Step 10 — CLI** (`cmd/iormesh`, logic in `internal/cli`; built,
-`mage build` links `./iormesh`). `main.go` only dispatches.
+`mage build` links `bin/iormesh`). `main.go` only dispatches.
 
 - `iormesh run -pid PID[,PID…] -project NAME -out DIR
   [-duration 4h] [-ready FILE]` — the foreground tracer:
@@ -2152,7 +2152,7 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
 
 **Steps**
 
-1. Build: `mage agentBuild` → `iormesh-agent.jar` with the bridge
+1. Build: `mage agentBuild` → `bin/iormesh-agent.jar` with the bridge
    jar nested as a resource; ASM shaded under
    `iormesh.agent.shaded.asm` (the S1 prototype used
    `java.lang.classfile`, final only in JDK 24 — M3 must run on

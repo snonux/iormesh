@@ -36,7 +36,7 @@ import (
 // real-host re-check (task 3f4).
 
 // ctlBinaryDefault is iormeshctl, built by mage build.
-const ctlBinaryDefault = "../iormeshctl"
+const ctlBinaryDefault = "../bin/iormeshctl"
 
 // spreadNaming are the naming rules the operator adds: each server
 // endpoint of the spread named after its service.

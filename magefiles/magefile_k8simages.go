@@ -56,7 +56,7 @@ func kindWorkloadImage(r shRunner, c kindrun.Config, ran *kindrun.Ran) (string, 
 		return "", err
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	if err := sh.Copy(filepath.Join(dir, "workload.jar"), "workload.jar"); err != nil {
+	if err := sh.Copy(filepath.Join(dir, filepath.Base(workloadJar)), workloadJar); err != nil {
 		return "", err
 	}
 	tag := c.Images[1]
