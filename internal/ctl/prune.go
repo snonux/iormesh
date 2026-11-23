@@ -13,6 +13,7 @@ import (
 	"iormesh/internal/federate"
 	"iormesh/internal/project"
 	"iormesh/internal/segment"
+	"iormesh/internal/servicedb"
 )
 
 // `iormeshctl prune -older-than DUR [-project P]... [-store DIR]
@@ -36,27 +37,41 @@ import (
 //
 // Deleting goes through an os.Root on the store, so a directory swapped
 // for a symlink between the listing and the delete cannot lead outside
-// it. The service database keeps what the deleted segments counted
-// (each segment is its own source, task hb4), and the host pins stay.
+// it. The host pins stay.
+//
+// The service database forgets what it deletes (task gk4): each segment
+// is its own source there (task hb4), so -apply first has the database
+// forget every listed file (servicedb.DB.Forget, one transaction), and
+// only then deletes the files. That order never leaves the database
+// counting a file that is gone without saying so: when the database
+// update fails nothing is deleted and prune exits non-zero; when a
+// delete fails after it, the database has forgotten a file that is
+// still there, which the next build that reads it imports again. A
+// missing database (no build yet) has nothing to forget and is not
+// created. Naming rules are never touched.
 
 // pruneFlags are prune's flags.
 type pruneFlags struct {
 	projects  projectList
 	store     string
+	db        string
 	olderThan string
 	apply     bool
 }
 
-// pruneCommand parses prune's flags and lists, or with -apply deletes,
-// the old segment files.
+// pruneCommand parses prune's flags and lists, or with -apply forgets in
+// the service database and deletes, the old segment files.
 func pruneCommand(args []string, e env) error {
 	fs := newFlagSet("prune", e.stderr)
 	var f pruneFlags
 	fs.Var(&f.projects, "project", "prune only this project (repeatable; default: every project in the store)")
 	fs.StringVar(&f.store, "store", "", "local trace store (default ~/.local/share/iormesh/traces)")
+	fs.StringVar(&f.db, "db", "", "service database that forgets them "+
+		"(default ~/.local/share/iormesh/services.db)")
 	fs.StringVar(&f.olderThan, "older-than", "", "required: the segments whose time range ended "+
 		"more than DUR ago (e.g. 720h)")
-	fs.BoolVar(&f.apply, "apply", false, "delete them (default: only list what would be deleted)")
+	fs.BoolVar(&f.apply, "apply", false, "forget them in the service database, then delete them "+
+		"(default: only list what would be deleted)")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %w", errUsage, err)
 	}
@@ -81,7 +96,46 @@ func pruneCommand(args []string, e env) error {
 	if err != nil {
 		return err
 	}
-	return applyPrune(e, store, files, cutoff, f.apply)
+	if !f.apply {
+		return listPrune(e, files, cutoff)
+	}
+	if err := forgetPruned(e, f.db, files); err != nil {
+		return fmt.Errorf("prune: service database: %w; nothing deleted", err)
+	}
+	return applyPrune(e, store, files, cutoff)
+}
+
+// forgetPruned has the service database (dbPath, else the default)
+// forget files (paths below the store, which are the segments' source
+// names) and reports what it dropped. A missing database is left so.
+func forgetPruned(e env, dbPath string, files []string) error {
+	if len(files) == 0 {
+		return nil
+	}
+	if dbPath == "" {
+		var err error
+		if dbPath, err = e.servicedb(); err != nil {
+			return err
+		}
+	}
+	ctx := e.root()
+	d, err := servicedb.OpenExisting(ctx, dbPath)
+	if errors.Is(err, servicedb.ErrNoDatabase) {
+		return nil // no build yet: nothing counts these files
+	}
+	if err != nil {
+		return err
+	}
+	got, err := d.Forget(ctx, files)
+	if cerr := d.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(e.stdout, "service database: forgot %d segments, dropped %d connections seen only in them\n",
+		got.Sources, got.Conns)
+	return err
 }
 
 // pruneStore is the store prune works on, -store or the default, held to
@@ -191,21 +245,25 @@ func oldInHost(dir string, cutoff time.Time) ([]string, error) {
 	return old, nil
 }
 
-// applyPrune prints each file (paths below store) as it would be, or
-// with apply is, deleted, then a total. A file already gone is skipped;
-// any other failure is reported and the rest still go.
-func applyPrune(e env, store string, files []string, cutoff time.Time, apply bool) error {
-	when := cutoff.Format(time.RFC3339)
-	if !apply {
-		for _, rel := range files {
-			if _, err := fmt.Fprintf(e.stdout, "would delete  %s\n", safe(rel)); err != nil {
-				return err
-			}
+// listPrune prints each file (paths below the store) as it would be
+// deleted, then a total.
+func listPrune(e env, files []string, cutoff time.Time) error {
+	for _, rel := range files {
+		if _, err := fmt.Fprintf(e.stdout, "would delete  %s\n", safe(rel)); err != nil {
+			return err
 		}
-		_, err := fmt.Fprintf(e.stdout, "%d segment files ended before %s; prune again with -apply to delete them\n",
-			len(files), safe(when))
-		return err
 	}
+	_, err := fmt.Fprintf(e.stdout, "%d segment files ended before %s; prune again with -apply to delete them "+
+		"(the service database forgets them too)\n", len(files), safe(cutoff.Format(time.RFC3339)))
+	return err
+}
+
+// applyPrune deletes files (paths below store), printing each, then a
+// total. A file already gone is skipped; any other failure is reported
+// — the database has forgotten that file, and the next build that reads
+// it imports it again — and the rest still go.
+func applyPrune(e env, store string, files []string, cutoff time.Time) error {
+	when := cutoff.Format(time.RFC3339)
 	root, err := os.OpenRoot(store)
 	if err != nil {
 		return fmt.Errorf("trace store: %w", err)

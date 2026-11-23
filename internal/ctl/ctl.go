@@ -12,7 +12,7 @@
 //	iormeshctl list [-registry FILE]
 //	iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-routes FILE]
 //	                 [-registry FILE] [-namespace NS] [-from T] [-to T] [-last DUR]
-//	iormeshctl prune -older-than DUR [-project NAME]... [-store DIR] [-apply]
+//	iormeshctl prune -older-than DUR [-project NAME]... [-store DIR] [-db FILE] [-apply]
 //	iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR] [K8S]
 //	                   [HOST|POD...]
 //	iormeshctl show [summary|services|edges|health|conversations|sequence [ID]|thread [SERVICE/THREAD]|
@@ -57,7 +57,8 @@
 // build merges the collected segments offline into the merged graph
 // export, the service database and the view model, and refresh is
 // collect then build (build.go; a time window, window.go); prune deletes
-// old segments from the store on the operator's word (prune.go); show
+// old segments from the store on the operator's word, the service
+// database forgetting them first (prune.go); show
 // prints the last build's view model as text (show.go, internal/viewmodel); open opens the newest
 // local site a build wrote (open.go, internal/site); tui explores the same
 // model in a terminal (tui.go, internal/tui); query cuts the merged
@@ -348,7 +349,7 @@ func usage(w io.Writer) {
   iormeshctl list [-registry FILE]
   iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-routes FILE]
                    [-registry FILE] [-namespace NS] [-from T] [-to T] [-last DUR]
-  iormeshctl prune -older-than DUR [-project NAME]... [-store DIR] [-apply]
+  iormeshctl prune -older-than DUR [-project NAME]... [-store DIR] [-db FILE] [-apply]
   iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR]
                      [-routes FILE] [K8S] [HOST|POD...]
   iormeshctl show [VIEW] [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-json] [-unresolved]
@@ -412,8 +413,11 @@ show -windowed reads; the full build stays. Its services and edges are
 the connections seen in the window (a connection open across it shows
 its whole lifetime), not the database's whole history. prune lists the
 store's segment files whose range ended more than DUR ago and deletes them only
-with -apply; it never touches a file it cannot parse as a segment, a dot
-file or a symlink, and nothing is ever pruned on its own. -ref on query is a
+with -apply, which first has the service database forget them (their
+request counts, and the connections seen only in them; naming rules stay)
+and deletes nothing when that fails; it never touches a file it cannot
+parse as a segment, a dot file or a symlink, and nothing is ever pruned on
+its own. -ref on query is a
 conversation step's ref from show sequence. expand lists the unresolved peers of the
 store's merged mesh against the registry's expand: allowlist, hop limit
 (-hops, default 1) and max_nodes; it contacts no server and deploys

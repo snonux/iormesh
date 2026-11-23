@@ -56,6 +56,17 @@ type Observation struct {
 	// First and Last bound the connection's records (wall ns).
 	First, Last uint64
 	Requests    []Request // both ends' views, sorted by (Source, Method, Scheme, Host, Path)
+	// Sources are the sources whose records name the connection, either
+	// end's, sorted by Name: what DB.Forget drops when a segment is
+	// pruned (task gk4). A request's source counts as one too.
+	Sources []SourceSpan
+}
+
+// SourceSpan is one source's records of a connection: the source's
+// name and the window (wall ns) its records span.
+type SourceSpan struct {
+	Name        string
+	First, Last uint64
 }
 
 // End is one traced end of a connection.

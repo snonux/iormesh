@@ -8,10 +8,11 @@
 // the client's DNS lookups or its HTTP requests, IP, port), the merge's
 // verdict (fused, or unresolved with the merge's reason), protocol hints
 // (plain or TLS, HTTP host and path template per request — ids folded
-// to {id}, internal/pathtmpl; table http_request) and
-// the activity window. Naming rules (table naming_rule) map a hostname
-// or IP glob plus a port to a service name; they are human input, which
-// the build never touches.
+// to {id}, internal/pathtmpl; table http_request),
+// the activity window and the sources (segments) whose records name it,
+// each with its own window (table conn_source). Naming rules (table
+// naming_rule) map a hostname or IP glob plus a port to a service name;
+// they are human input, which neither the build nor prune touches.
 //
 // Three properties shape the design:
 //
@@ -23,14 +24,17 @@
 //     its earlier counts, so importing the same mesh twice changes
 //     nothing.
 //   - Additive: a later import never forgets what an earlier one saw. A
-//     build over fewer segments (the operator deleted old ones) leaves
-//     rows, windows and the deleted segments' request counts as they
-//     were, so a connection's requests spread over several segments
-//     still add up exactly. The client's and the server's view of the
-//     same requests are stored apart and the reads count the larger,
-//     never both. A fused verdict never reverts to unresolved, and a
-//     connection that fuses once its far end is traced takes over the
-//     row (window, TLS hint, requests) its server end had alone.
+//     build over fewer segments (a -last window, segments deleted by
+//     hand) leaves rows, windows and the missing segments' request
+//     counts as they were, so a connection's requests spread over
+//     several segments still add up exactly. The client's and the
+//     server's view of the same requests are stored apart and the reads
+//     count the larger, never both. A fused verdict never reverts to
+//     unresolved, and a connection that fuses once its far end is
+//     traced takes over the row (window, TLS hint, requests, sources)
+//     its server end had alone. Only Forget removes (forget.go, task
+//     gk4): prune -apply has it drop the segments it deletes — their
+//     request counts, and the connections no other source names.
 //   - Retroactive names: services are resolved at read time by joining
 //     the rules against the endpoints, so a new rule names every past
 //     connection without rewriting a row.
