@@ -916,6 +916,8 @@
     document.getElementById('title').textContent = clean('iormesh · ' + arr(r.projects).join('+'));
     document.getElementById('run').textContent = clean(arr(r.hosts).length + ' hosts · ' + (r.sessions || 0) +
       ' sessions · ' + (r.events || 0) + ' events · ' + (r.first || '') + ' – ' + (r.last || '') +
+      // A windowed build's window (task hk4); a full build has none.
+      (r.window ? ' · window ' + r.window : '') +
       (M.broken ? ' · MODEL UNREADABLE: ' + M.broken : ''));
     const nav = document.getElementById('tabs');
     for (const t of tabs) { const a = link([t[0]], t[1]); a.dataset.tab = t[0]; nav.appendChild(a); }

@@ -113,14 +113,15 @@ var errBadSegments = errors.New("segments skipped")
 // routes.yaml beside the registry, registry "" the default one. The
 // discovery snapshot is read beside db.
 //
-// namespace is -namespace (build and show only, addNamespaceFlag): the
-// Kubernetes namespace whose pods' sessions a build keeps, "" for all
-// (task sh4).
+// namespace is -namespace (build, show, open and tui, addNamespaceFlag):
+// the Kubernetes namespace whose pods' sessions a build keeps, "" for
+// all (task sh4); the readers read that build (task hk4).
 //
 // window is build's -from/-to or -last (window.go, task yh4), and
-// windowed marks a windowed build — set by build's window, or by show's
-// -windowed — whose directory is the full build's name plus
-// windowSuffix (buildFlags.key).
+// windowed marks a windowed build — set by build's window, or by the
+// readers' -windowed (show, open, tui: addReadBuildFlags) — whose
+// directory is the full build's name plus windowSuffix
+// (buildFlags.key).
 type buildFlags struct {
 	projects          projectList
 	store, db, builds string
@@ -130,9 +131,9 @@ type buildFlags struct {
 	windowed          bool
 }
 
-// addNamespaceFlag registers -namespace, build's and show's narrowing
-// to one Kubernetes namespace (PLAN.md M7 "Pod fields on events", task
-// sh4). refresh does not take it: its -namespace is the K8S flag, the
+// addNamespaceFlag registers -namespace, build's narrowing to one
+// Kubernetes namespace (PLAN.md M7 "Pod fields on events", task sh4),
+// and the readers' choice of that build (addReadBuildFlags). refresh does not take it: its -namespace is the K8S flag, the
 // kubectl namespace its collect reaches.
 func addNamespaceFlag(fs *flag.FlagSet, f *buildFlags, usage string) {
 	fs.StringVar(&f.namespace, "namespace", "", usage)
@@ -159,7 +160,10 @@ func addBuildFlags(fs *flag.FlagSet, f *buildFlags) {
 // addReadBuildFlags registers the same flags for show, open and tui,
 // which read a build and never write one: their -project picks which
 // build, and -db is accepted but unused (task vh4 fixed the help, which
-// said "build only this project").
+// said "build only this project"). -namespace and -windowed pick a
+// build -namespace or a windowed build made instead of the full one;
+// all three read the directory buildFlags.key names, so they cannot
+// disagree on which build a flag set means (task hk4).
 func addReadBuildFlags(fs *flag.FlagSet, f *buildFlags) {
 	addBuildFlags(fs, f)
 	fs.Lookup("project").Usage = "read the build of this project (repeatable, the set build -project made; " +
@@ -167,6 +171,20 @@ func addReadBuildFlags(fs *flag.FlagSet, f *buildFlags) {
 	fs.Lookup("store").Usage = "local trace store, listed for the default project set " +
 		"(default ~/.local/share/iormesh/traces)"
 	fs.Lookup("db").Usage = "accepted and unused: the build already holds what the database gave it"
+	addNamespaceFlag(fs, f, "read the build -namespace made of this Kubernetes namespace "+
+		"(default: the unfiltered build)")
+	fs.BoolVar(&f.windowed, "windowed", false, "read the last windowed build (build -from, -to or -last; "+
+		"default: the full build)")
+}
+
+// parseReadBuildFlags parses the flags of show, open or tui
+// (addReadBuildFlags, plus any the command added) and refuses a
+// -namespace that is no namespace before anything is read.
+func parseReadBuildFlags(fs *flag.FlagSet, f *buildFlags, args []string) error {
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("%w: %w", errUsage, err)
+	}
+	return checkNamespace(f.namespace)
 }
 
 // buildCommand parses build's flags and builds.
@@ -221,14 +239,15 @@ func buildAndReport(ctx context.Context, e env, f buildFlags) error {
 	return err
 }
 
-// readHint names the commands that read the build just written: open
-// and show for the full build; show -windowed for a windowed one (open
-// and tui read only full builds).
+// readHint names the commands that read the build just written, open
+// and show, with the flags that pick it (-namespace NS, -windowed):
+// since task hk4 open and tui read every build show does.
 func readHint(f buildFlags) string {
+	args := namespaceArg(f.namespace)
 	if f.windowed {
-		return "iormeshctl show -windowed" + namespaceArg(f.namespace)
+		args += " -windowed"
 	}
-	return "iormeshctl open  ·  iormeshctl show"
+	return "iormeshctl open" + args + "  ·  iormeshctl show" + args
 }
 
 // buildOutput is what a build wrote.
@@ -268,6 +287,9 @@ func build(ctx context.Context, e env, f buildFlags) (buildOutput, error) {
 	}
 	in.Report = &rep // the processes view is projected from the rollup
 	model := viewmodel.New(in)
+	if sel.window != nil { // the site and the TUI say which window they show
+		model.Run.Window = windowText(sel.window)
+	}
 	dir, err := writeOutputs(paths.builds, f.key(sel.projects), in.Merge.Graph, model)
 	if err == nil {
 		err = writeReport(dir, rep)

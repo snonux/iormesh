@@ -7,14 +7,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"iormesh/internal/site"
 )
 
-// `iormeshctl open [-project P]...` (PLAN.md M5 "Interactive explorer",
-// decision #11): open the newest local site of the projects' build in
-// the desktop's browser. It prints the page's path first, always — over
+// `iormeshctl open [-project P]... [-namespace NS] [-windowed]` (PLAN.md
+// M5 "Interactive explorer", decision #11): open the newest local site
+// of the projects' build — or of their -namespace or windowed build,
+// task hk4 — in the desktop's browser. It prints the page's path first, always — over
 // SSH, or on a host without a desktop opener, that path is the whole
 // answer (copy the folder, open it locally). open reads only the build
 // output and starts no server.
@@ -28,8 +28,8 @@ func openCommand(args []string, e env) error {
 	fs := newFlagSet("open", e.stderr)
 	var f buildFlags
 	addReadBuildFlags(fs, &f)
-	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %w", errUsage, err)
+	if err := parseReadBuildFlags(fs, &f, args); err != nil {
+		return err
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%w: open takes no arguments", errUsage)
@@ -53,7 +53,8 @@ func openCommand(args []string, e env) error {
 }
 
 // latestSite is the index.html the sites/latest link of f's projects'
-// build points at.
+// build points at: the full build's, or the -namespace or -windowed
+// build's (buildFlags.key, the directory show and tui read too).
 func latestSite(e env, f buildFlags) (string, error) {
 	p, err := resolveShowPaths(e, f)
 	if err != nil {
@@ -63,10 +64,10 @@ func latestSite(e env, f buildFlags) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	root := filepath.Join(p.builds, buildKey(projects, f.namespace), sitesDirName)
+	root := filepath.Join(p.builds, f.key(projects), sitesDirName)
 	index, err := site.Latest(root)
 	if errors.Is(err, fs.ErrNotExist) {
-		return "", fmt.Errorf("open: no site of %s yet (iormeshctl build)", strings.Join(projects, "+"))
+		return "", fmt.Errorf("open: no site of %s yet (iormeshctl build%s)", f.name(projects), f.rebuildArgs())
 	}
 	if err != nil {
 		return "", fmt.Errorf("open: %w", err)

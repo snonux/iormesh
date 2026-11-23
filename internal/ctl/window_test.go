@@ -179,3 +179,45 @@ func TestBuildWindowRefusals(t *testing.T) {
 		t.Errorf("show of an unbuilt window: exit %d, %s", code, f.stderr)
 	}
 }
+
+// TestOpenAndTUIWindowed (task hk4): open -windowed and tui -windowed
+// read the windowed build, <projects>~window, as show -windowed does,
+// and its model — so its site and the TUI's title — states the window
+// build echoed; the full build's model names none. Before a windowed
+// build, both name the directory they looked for.
+func TestOpenAndTUIWindowed(t *testing.T) {
+	f := newBuildFixture(t)
+	for _, cmd := range []string{"open", "tui"} {
+		f.e.terminal = func() bool { return true }
+		if code := f.run(cmd, "-windowed"); code == exitOK ||
+			!strings.Contains(f.stderr.String(), "billing+shop~window") {
+			t.Errorf("%s -windowed before a windowed build: exit %d, %s", cmd, code, f.stderr)
+		}
+	}
+	f.mustRun(t, "build")
+	from := windowT0.Add(5 * time.Minute).Format(time.RFC3339)
+	f.mustRun(t, "build", "-from", from)
+	dir := filepath.Join(f.builds, "billing+shop~window", sitesDirName)
+	index := sitePath(t, f.mustRun(t, "open", "-windowed"))
+	if !strings.HasPrefix(index, dir+string(filepath.Separator)) {
+		t.Errorf("open -windowed opened %s, want a site under %s", index, dir)
+	}
+	page, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(page), `"window":"`+from+` .. (open)"`) {
+		t.Errorf("the windowed site does not state its window %s .. (open)", from)
+	}
+	var got viewmodel.Model
+	f.e.tui = func(m viewmodel.Model) error { got = m; return nil }
+	f.mustRun(t, "tui", "-windowed")
+	if got.Run.Window != from+" .. (open)" || got.Run.Segments != 4 {
+		t.Errorf("tui -windowed: window %q, %d segments; want %s .. (open), 4", got.Run.Window,
+			got.Run.Segments, from)
+	}
+	f.mustRun(t, "tui")
+	if got.Run.Window != "" || got.Run.Segments != 8 {
+		t.Errorf("tui: window %q, %d segments; want none, 8", got.Run.Window, got.Run.Segments)
+	}
+}

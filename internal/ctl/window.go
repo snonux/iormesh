@@ -26,8 +26,10 @@ import (
 // replaces it: it writes <projects>[@<namespace>]~window/ ('~' is in
 // neither the project nor the namespace alphabet), one directory per
 // project set and namespace that each windowed build overwrites, and
-// `show -windowed` reads it. A window is not recorded in the model,
-// which stays a function of the segments it was built from.
+// `show -windowed`, `open -windowed` and `tui -windowed` read it (task
+// hk4). The resolved window is recorded in the model as Run.Window, the
+// text build echoes, so the site and the TUI can say which window they
+// show; a full build's model has none and is unchanged by it.
 
 // windowSuffix ends a windowed build's directory name (buildKey).
 const windowSuffix = "~window"
@@ -144,7 +146,8 @@ func windowNote(w *federate.Window) string {
 }
 
 // key is the build directory's name for projects under f: buildKey,
-// with windowSuffix for a windowed build (or show -windowed).
+// with windowSuffix for a windowed build (or a reader's -windowed). It
+// is the one key build writes and show, open and tui read.
 func (f buildFlags) key(projects []string) string {
 	k := buildKey(projects, f.namespace)
 	if f.windowed {

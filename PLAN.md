@@ -1230,8 +1230,10 @@ Kubernetes (M7) build on it.
   the import itself is never narrowed. A windowed build is a
   different build: it writes
   `<projects>[@NS]~window/` (one per project set and namespace,
-  overwritten by the next windowed build, read by `show
-  -windowed`) and never replaces the full build. `prune
+  overwritten by the next windowed build, read by `show`,
+  `open` and `tui -windowed`, task hk4) and never replaces the
+  full build; its model records the window (`run.window`), so
+  its site and TUI say which window they show. `prune
   -older-than DUR [-apply]` is the store's only delete: it
   takes what `-last DUR` would never select, regular files
   directly in a valid `<project>/<host>/` whose names parse as
@@ -2172,7 +2174,8 @@ Built after plain Linux servers (M4); accepted on kind and el9
   count too; a host outside a pod is left out), and the
   service database's views of the build only the connections
   one of those pods traced; the build goes to
-  `<projects>@<NS>/`, which `show -namespace NS` reads. Bad
+  `<projects>@<NS>/`, which `show`, `open` and `tui
+  -namespace NS` read (task hk4). Bad
   segments stay listed whatever their namespace (a damaged file
   cannot say whose it was). Status (2026-11-22, task sh4):
   built and unit-tested against kind's captured cgroup files and

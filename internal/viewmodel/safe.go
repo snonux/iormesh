@@ -26,6 +26,7 @@ func Safe(m Model) Model { return safeModel(m) }
 func safeModel(m Model) Model {
 	s := termsafe.String
 	m.Run.Projects, m.Run.Hosts = safeAll(m.Run.Projects), safeAll(m.Run.Hosts)
+	m.Run.Window = s(m.Run.Window) // build's own text, but read back from a file
 	h := &m.Health
 	h.Sessions = slices.Clone(h.Sessions)
 	for i := range h.Sessions {

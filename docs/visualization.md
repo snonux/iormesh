@@ -321,6 +321,30 @@ iormeshctl show report                # the summary, then the rollup
 - `--json` prints the view model's JSON for the same view.
 - The output is deterministic, so text goldens work.
 
+## Namespace and windowed builds
+
+`build -namespace NS` writes `<projects>@NS/` and a windowed
+build (`-from`, `-to` or `-last`) `<projects>[@NS]~window/`,
+beside the full build ([kubernetes.md](kubernetes.md#collect-and-build),
+PLAN.md "Build window and prune"). All three surfaces read them
+with the same two flags, which pick the same directory for each
+(task hk4):
+
+```
+iormeshctl open -namespace prod       # the site of <projects>@prod
+iormeshctl tui -windowed              # the TUI over <projects>~window
+iormeshctl show -namespace prod -windowed
+```
+
+Without them each reads the full build. A windowed build records
+its window in the model (`run.window`, the `FROM .. TO` text
+build echoes, `(open)` for a side not given), so the site's
+header and the TUI's title say which window they show; the run's
+first and last instants can lie a minute or two outside it, as
+the build takes whole segments. A full build's model has no
+`window`. `build` ends with the `open` and `show` commands, with
+these flags, that read what it just wrote.
+
 ## Build order
 
 | Step | Lands with | What |

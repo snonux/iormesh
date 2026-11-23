@@ -81,18 +81,11 @@ func showCommand(args []string, e env) error {
 	addReadBuildFlags(fs, &f)
 	asJSON := fs.Bool("json", false, "print the view model's JSON for the view")
 	unresolved := fs.Bool("unresolved", false, "edges: only edges with an unresolved connection")
-	addNamespaceFlag(fs, &f, "read the build -namespace made of this Kubernetes namespace "+
-		"(default: the unfiltered build)")
-	fs.BoolVar(&f.windowed, "windowed", false, "read the last windowed build (build -from, -to or -last; "+
-		"default: the full build)")
-	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %w", errUsage, err)
+	if err := parseReadBuildFlags(fs, &f, args); err != nil {
+		return err
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%w: show takes one view: %s", errUsage, strings.Join(showViews, ", "))
-	}
-	if err := checkNamespace(f.namespace); err != nil {
-		return err
 	}
 	m, err := loadModel(e, f)
 	if err != nil {
@@ -108,8 +101,8 @@ func showCommand(args []string, e env) error {
 }
 
 // loadModel reads the model.json of the build of f's projects (of
-// f.namespace's pods for a -namespace build, of the window for show
-// -windowed: buildFlags.key).
+// f.namespace's pods for a -namespace build, of the window for
+// -windowed: buildFlags.key), for show and tui.
 func loadModel(e env, f buildFlags) (viewmodel.Model, error) {
 	p, err := resolveShowPaths(e, f)
 	if err != nil {
