@@ -2831,6 +2831,24 @@ deferred.
   record after 5 s without one, so the thread is known again
   before its next bracket.
 
+- **#30 Repository-root layout** — the root keeps only what
+  the conventions pin. The Mage targets move into `magefiles/`
+  (mage ≥ 1.17, the pinned version, reads the directory; all
+  magefiles move together, keeping their `//go:build mage` tags
+  and provenance headers, so plain `go vet ./...` and
+  `go test ./...` keep skipping the mage `package main`). The
+  build outputs stay at the root, as in ior:
+  `integrationtests.test`'s absolute path matches the scoped
+  sudoers rule, the integration harness's defaults are
+  `../iormesh`, `../workload.jar` and `../edgepeer`, and the
+  non-java-peer looks for `echopeer` beside the jar — `mage
+  clean` sweeps them instead. The kind acceptance's state files
+  (`.kind-kubeconfig`, the two `.state.json`s,
+  `k8s-teardown.log`) group under one hidden directory.
+  Rejected: a `build/` directory for the outputs — the sudoers
+  pin, the harness defaults and the jars' manifest `Class-Path`
+  names would all have to follow, for cosmetic gain.
+
 ### Open — raised for M2 (built on the default)
 
 - **#7 Event families, default-on vs opt-in** — signals, epoll
@@ -4233,7 +4251,7 @@ controller.
 
 ## Repo layout
 
-The tree as built (2026-11-22); `iormesh help` and `iormeshctl
+The tree as built (2026-11-23); `iormesh help` and `iormeshctl
 help` list each binary's subcommands and flags.
 
 ```
@@ -4323,7 +4341,8 @@ spikes/               # throwaway spike prototypes (S1–S3);
 deploy/               # k8s manifests: sidecar patch, debug container
 packaging/selinux/    # opt-in SELinux policy RPM for pods (#13)
 assets/               # logo + wordmark (SVG)
-Magefile.go           # generate/build/test targets, ior-style
+magefiles/            # the mage targets: Magefile.go + the
+                      #   magefile_*.go, ior-style (decision #30)
 scripts/              # container builds (docker/podman), ior-style
 docs/                 # design docs: architecture, trace scope,
                       #   output contract, schema, testing,
