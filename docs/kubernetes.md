@@ -299,7 +299,9 @@ options; see [SELinux](#selinux).
 
 The patch's `-listen-port` finds the listener's owner at start,
 and fails if the app is not listening yet; after that it follows
-the port to a restarted app of the same executable and uid for
+the port to a restarted app of the same executable and uid (or,
+after an upgrade into a new path, the same executable base name
+in the same cgroup; PLAN.md decision #23) for
 `-listen-grace` (default 2m). `-pattern`
 only matches execs after the tracer attached. In either case the
 container restart (restart policy) retries.

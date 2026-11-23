@@ -305,3 +305,70 @@ func TestPortFollowRemembersOriginalExe(t *testing.T) {
 	}
 	_ = c.Close()
 }
+
+// TestPortFollowExecutableUpgrade (task kk4): the app restarts onto a
+// new executable path — a JDK upgrade into a versioned directory — and
+// is adopted, since it runs an executable of the same base name under
+// the same effective uid in the same cgroup (its systemd unit) as the
+// original holder. A different program under that uid and cgroup, the
+// same base name under another uid, and the same base name and uid in
+// another cgroup are all refused: the base name alone ("java") names
+// every JVM of the user.
+func TestPortFollowExecutableUpgrade(t *testing.T) {
+	f := newFakePort(t)
+	const unit = "/system.slice/app.service"
+	old := target.Owner{Exe: "/usr/lib/jvm/java-25-openjdk-25.0.5/bin/java", UID: 1000, Cgroup: unit}
+	f.live[10], f.owners[10], f.holders = true, old, []uint32{10}
+	tr := newFakeTracer()
+	c := testCorrelator(t, t.TempDir())
+	s, log := portSession(t, f, c, tr, time.Minute, 10)
+	f.live[10], f.holders = false, nil
+	mustEnded(t, s, false, "owner gone, within the grace")
+
+	const upgraded = "/usr/lib/jvm/java-25-openjdk-25.0.6/bin/java"
+	f.now = f.now.Add(2 * time.Second)
+	f.live[20], f.owners[20] = true, target.Owner{Exe: "/usr/bin/python3", UID: 1000, Cgroup: unit}
+	f.live[21], f.owners[21] = true, target.Owner{Exe: upgraded, UID: 1001, Cgroup: unit}
+	f.live[22], f.owners[22] = true, target.Owner{Exe: upgraded, UID: 1000,
+		Cgroup: "/user.slice/user-1000.slice/session-3.scope"}
+	f.holders = []uint32{20, 21, 22}
+	mustEnded(t, s, false, "strangers on the port")
+	if len(tr.added) != 0 {
+		t.Fatalf("added %v; a different program, uid or cgroup was adopted", tr.added)
+	}
+	if !strings.Contains(log.String(), "pid 20 holds it but is not the traced program") {
+		t.Fatalf("stderr %q does not name the refused holder", log.String())
+	}
+
+	f.now = f.now.Add(2 * time.Second)
+	f.live[23], f.owners[23] = true, target.Owner{Exe: upgraded, UID: 1000, Cgroup: unit}
+	f.holders = []uint32{20, 23}
+	mustEnded(t, s, false, "upgraded app")
+	if !slices.Equal(tr.added, []uint32{23}) {
+		t.Fatalf("added %v; want only the upgraded app 23", tr.added)
+	}
+	_ = c.Close()
+}
+
+// TestPortFollowUpgradeNeedsCgroup (task kk4): without a cgroup to tie
+// the restart to the original (unreadable, or the root cgroup that says
+// nothing), only the exact executable is followed: a same-named binary
+// at another path under the same uid is refused.
+func TestPortFollowUpgradeNeedsCgroup(t *testing.T) {
+	f := newFakePort(t)
+	f.live[10], f.owners[10], f.holders = true, target.Owner{Exe: "/opt/a/1.0/bin/app", UID: 1000}, []uint32{10}
+	tr := newFakeTracer()
+	c := testCorrelator(t, t.TempDir())
+	s, _ := portSession(t, f, c, tr, time.Minute, 10)
+	f.live[10], f.holders = false, nil
+	mustEnded(t, s, false, "owner gone, within the grace")
+
+	f.now = f.now.Add(2 * time.Second)
+	f.live[22], f.owners[22] = true, target.Owner{Exe: "/opt/a/1.1/bin/app", UID: 1000}
+	f.holders = []uint32{22}
+	mustEnded(t, s, false, "same name, no cgroup")
+	if len(tr.added) != 0 {
+		t.Fatalf("added %v; a base-name match without a cgroup was adopted", tr.added)
+	}
+	_ = c.Close()
+}

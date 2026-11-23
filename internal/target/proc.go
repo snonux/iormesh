@@ -199,12 +199,34 @@ func (p ProcFS) statusField(pid uint32, key string, n int) (uint32, error) {
 }
 
 // Owner is how a listening-port session recognises its app after a
-// restart (decision #23, task mh4): the executable and effective uid of
-// a process that owned the port. The same port alone is not the same
-// app: anything may bind a port the app released.
+// restart (decision #23, tasks mh4 and kk4): the executable, effective
+// uid and cgroup of a process that owned the port. The same port alone
+// is not the same app: anything may bind a port the app released.
+// Compare owners with SameApp, not ==.
 type Owner struct {
 	Exe string // the resolved exe link, " (deleted)" dropped
 	UID uint32 // the effective uid
+	// Cgroup is the process's cgroup path (procCgroup): on systemd the
+	// service's unit or the login session's scope. "" when unreadable or
+	// the root cgroup, which tie nothing together.
+	Cgroup string
+}
+
+// SameApp reports whether o, a new holder of the port, is the app prev
+// held it as (decision #23): always the same effective uid, and either
+// the same executable path (a plain restart, a package update in place)
+// or — task kk4, a restart onto an upgraded path such as a JDK in a
+// versioned directory — the same executable base name in the same
+// known cgroup. The base name alone is not enough ("java" names every
+// JVM of the user) and neither is the cgroup (a unit may run helpers).
+func (o Owner) SameApp(prev Owner) bool {
+	if o.UID != prev.UID {
+		return false
+	}
+	if o.Exe == prev.Exe {
+		return true
+	}
+	return prev.Cgroup != "" && o.Cgroup == prev.Cgroup && filepath.Base(o.Exe) == filepath.Base(prev.Exe)
 }
 
 // deletedSuffix is what the kernel appends to an exe link whose binary
@@ -213,7 +235,9 @@ type Owner struct {
 const deletedSuffix = " (deleted)"
 
 // Owner returns pid's owner key. A process with no readable exe link (a
-// kernel thread, a zombie, hidepid) or status has none: an error.
+// kernel thread, a zombie, hidepid) or status has none: an error. An
+// unreadable cgroup is no error, only an empty Cgroup: the key then
+// matches the exact executable only (SameApp).
 func (p ProcFS) Owner(pid uint32) (Owner, error) {
 	exe := strings.TrimSuffix(p.Exe(pid), deletedSuffix)
 	if exe == "" {
@@ -223,7 +247,33 @@ func (p ProcFS) Owner(pid uint32) (Owner, error) {
 	if err != nil {
 		return Owner{}, err
 	}
-	return Owner{Exe: exe, UID: uid}, nil
+	return Owner{Exe: exe, UID: uid, Cgroup: p.procCgroup(pid)}, nil
+}
+
+// procCgroup returns pid's cgroup path from /proc/<pid>/cgroup: the
+// cgroup v2 line ("0::<path>"), else the v1 name=systemd line (a hybrid
+// or legacy host), the hierarchy where systemd places units and scopes.
+// "" when the file is unreadable or only the root cgroup "/" is named:
+// every process outside a unit shares it, so it identifies nothing.
+func (p ProcFS) procCgroup(pid uint32) string {
+	b, err := os.ReadFile(p.path(pid, "cgroup"))
+	if err != nil {
+		return ""
+	}
+	var v2, systemd string
+	for line := range strings.SplitSeq(string(b), "\n") {
+		if path, ok := strings.CutPrefix(line, "0::"); ok {
+			v2 = path
+		} else if _, path, ok := strings.Cut(line, ":name=systemd:"); ok {
+			systemd = path
+		}
+	}
+	for _, path := range []string{v2, systemd} {
+		if path != "" && path != "/" {
+			return path
+		}
+	}
+	return ""
 }
 
 // pfExiting is the kernel's PF_EXITING task flag (include/linux/sched.h).

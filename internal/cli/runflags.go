@@ -216,7 +216,8 @@ func addRunFlags(fs *flag.FlagSet) runFlags {
 		pattern: fs.String("pattern", "", "glob over the command line or executable, matched on exec"),
 		port:    fs.Uint("listen-port", 0, "trace the owners of the TCP socket listening on this port"),
 		listenGrace: fs.Duration("listen-grace", defaultListenGrace,
-			"with -listen-port: how long to wait for the same program (executable and uid) "+
+			"with -listen-port: how long to wait for the same program (executable, or its base name "+
+				"in the same cgroup, and uid) "+
 				"to own the port again after its owners exited; 0 ends at once"),
 		project: fs.String("project", "",
 			"project label (required; in a pod run defaults to the pod's namespace, from the downward API)"),

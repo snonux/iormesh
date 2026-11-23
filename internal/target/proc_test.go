@@ -302,3 +302,34 @@ func TestOwner(t *testing.T) {
 		t.Fatal("a missing process has an owner key")
 	}
 }
+
+// TestOwnerCgroup (task kk4): the owner key carries the process's
+// cgroup — the cgroup v2 path, else the v1 name=systemd one — and none
+// when the file is missing or names only the root cgroup, which ties
+// nothing together.
+func TestOwnerCgroup(t *testing.T) {
+	f := newFakeProc(t)
+	status := "Name:\tapp\nUid:\t1000\t1000\t1000\t1000\n"
+	cases := []struct {
+		cgroup, want string
+	}{
+		{"0::/system.slice/app.service\n", "/system.slice/app.service"},
+		{"12:cpu,cpuacct:/system.slice/app.service\n1:name=systemd:/system.slice/app.service\n0::/\n",
+			"/system.slice/app.service"},
+		{"0::/\n", ""},
+		{"", ""},
+	}
+	for i, tc := range cases {
+		pid := uint32(60 + i)
+		f.proc(pid, pid, 1, 'S', 1, "/usr/bin/app")
+		dir := filepath.Join(f.root, strconv.Itoa(int(pid)))
+		f.write(dir, "status", status)
+		if tc.cgroup != "" {
+			f.write(dir, "cgroup", tc.cgroup)
+		}
+		got, err := f.fs().Owner(pid)
+		if err != nil || got != (Owner{Exe: "/usr/bin/app", UID: 1000, Cgroup: tc.want}) {
+			t.Fatalf("cgroup %q: Owner = %+v, %v; want cgroup %q", tc.cgroup, got, err, tc.want)
+		}
+	}
+}
