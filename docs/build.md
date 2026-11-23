@@ -143,6 +143,25 @@ because only Mage sets `CGO_CFLAGS`/`CGO_LDFLAGS`.
   discard is an explicit `_ =`; an exemption goes into
   `.golangci.yml` with its reasoning.
 
+### CI
+
+GitHub Actions (`.github/workflows/ci.yml`, task ck4) runs the
+unprivileged gates on every push and on pull requests to main,
+on `ubuntu-latest`: it builds the pinned libbpfgo (cached), then
+runs `mage fmtCheck`; the kernel-independent generate steps
+(`generateTracepointsGo`, `generateTypesGo`,
+`generateSyscallNumbersGo`), failing on any `git diff`; then
+`mage bpfBuild`, `mage vet`, `mage lint`, `mage agentBuild
+workloadBuild`, `mage test`, `mage testRace` and
+`mage workloadTest`. It uses no secrets, a read-only token and
+actions pinned by commit SHA. The runner is not the main
+target: the root gates (`mage bpfRootTest`,
+`mage integrationTest`), the el9 runs on Rocky 9.9 and the kind
+acceptance stay manual ([testing.md](testing.md), "CI"). So
+does the C step of `mage generate`: it numbers the handlers by
+the build kernel's tracepoint IDs, so only the generation host
+regenerates without a diff.
+
 ## Container builds
 
 The release binaries come out of containers, with the same

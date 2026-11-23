@@ -112,6 +112,19 @@ It still runs in `mage test`. The root suites
 (`mage bpfRootTest`, `mage integrationTest`) are not run under
 `-race`.
 
+## CI
+
+CI (GitHub Actions, task ck4) runs the gates that need neither
+root nor a particular kernel: `mage fmtCheck`, `vet`, `lint`,
+`test`, `testRace` and `workloadTest`, plus the generate diff
+check, on an Ubuntu runner ([build.md](build.md), "CI", has the
+steps). What stays manual is everything that needs root, el9 or
+a cluster: `mage bpfRootTest` and `mage integrationTest` (run as
+root on Rocky 9.9, the main target, and on the dev host), the
+el9 runbook runs below, and the kind and existing-cluster
+acceptance (`mage k8sAcceptance`). A green CI run therefore says
+nothing about the BPF object loading on el9's 5.14 kernel.
+
 ## Integration tests follow ior
 
 The end-to-end suite lifts ior's `integrationtests/` pattern

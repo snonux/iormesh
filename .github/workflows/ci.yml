@@ -1,0 +1,142 @@
+# CI for iormesh: the unprivileged gates of AGENTS.md, run through Mage
+# exactly as on a developer host (docs/build.md, docs/testing.md, "CI").
+#
+# The runner is ubuntu-latest, but the main target is Rocky Linux 9.9 (el9,
+# kernel 5.14). The root gates (mage bpfRootTest, mage integrationTest), the
+# el9 VM runs and the kind/k8s acceptance targets need root, el9 VMs or a
+# container engine and stay manual on those hosts; they are not run here.
+#
+# No secrets are used, and the token is read-only. Every third-party action
+# is pinned by full commit SHA, with its version in a comment.
+name: ci
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned like docs/build.md: libbpfgo's tag (magefiles/magefile_bpf.go,
+  # libbpfgoRequiredTag), the linter and mage (>= v1.17, see docs/build.md).
+  LIBBPFGO_TAG: v0.9.2-libbpf-1.5.1
+  GOLANGCI_LINT_VERSION: v2.15.0
+  MAGE_VERSION: v1.17.2
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      # JDK 21 builds the workload (--release 21) and the agent (--release
+      # 17, decision #29).
+      - name: Set up JDK
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # clang compiles the BPF object and libbpf; libelf/zstd/zlib are
+      # libbpf's link dependencies (goEnv's CGO_LDFLAGS); bpftool dumps
+      # vmlinux.h from the runner's BTF (ensureVMLINUX, via sudo -n).
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang llvm \
+            libelf-dev libzstd-dev zlib1g-dev pkg-config make \
+            linux-tools-common "linux-tools-$(uname -r)"
+          sudo bpftool version
+
+      - name: Install mage and golangci-lint
+        run: |
+          go install "github.com/magefile/mage@${MAGE_VERSION}"
+          go install \
+            "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+          mage -version
+          golangci-lint version
+
+      # The magefiles expect the pinned checkout at ../libbpfgo (or
+      # $LIBBPFGO) with its static libbpf built (docs/build.md, "Building
+      # and testing"). LIBBPFGO names that same place as an absolute path,
+      # since actions/cache refuses paths with "..". Restore and save are
+      # separate steps so a fresh build is cached even when a later gate
+      # fails.
+      - name: Locate libbpfgo
+        run: echo "LIBBPFGO=$(dirname "${GITHUB_WORKSPACE}")/libbpfgo" >> "${GITHUB_ENV}"
+
+      - name: Restore libbpfgo
+        id: libbpfgo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.LIBBPFGO }}
+          key: libbpfgo-${{ runner.os }}-${{ env.LIBBPFGO_TAG }}-v1
+
+      - name: Build libbpfgo
+        if: steps.libbpfgo-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "${LIBBPFGO_TAG}" \
+            --recurse-submodules --shallow-submodules \
+            https://github.com/aquasecurity/libbpfgo.git "${LIBBPFGO}"
+          make -C "${LIBBPFGO}" libbpfgo-static
+
+      - name: Save libbpfgo
+        if: steps.libbpfgo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.LIBBPFGO }}
+          key: ${{ steps.libbpfgo-cache.outputs.cache-primary-key }}
+
+      - name: mage fmtCheck
+        run: mage fmtCheck
+
+      # The generated artifacts are committed; regenerating must not change
+      # the tree. Only the steps that derive from committed inputs run here:
+      # the Go tracepoint list and Go types from the committed C, and the
+      # syscall number tables from golang.org/x/sys. The C step
+      # (generateTracepointsC, the first half of `mage generate`) reads the
+      # build kernel's tracefs and numbers every handler by that kernel's
+      # tracepoint IDs, so on this runner it rewrites every TraceId even
+      # when the tracepoint set matches; it belongs to the generation host
+      # (docs/build.md, "Generation host").
+      - name: mage generate, kernel-independent steps (no diff)
+        run: |
+          mage generateTracepointsGo generateTypesGo generateSyscallNumbersGo
+          git diff --exit-code
+
+      - name: mage bpfBuild
+        run: mage bpfBuild
+
+      - name: mage vet
+        run: mage vet
+
+      - name: mage lint
+        run: mage lint
+
+      # Some Go tests read the jars and the Go peers from the repo root.
+      - name: mage agentBuild workloadBuild
+        run: mage agentBuild workloadBuild
+
+      - name: mage test
+        run: mage test
+
+      - name: mage testRace
+        run: mage testRace
+
+      - name: mage workloadTest
+        run: mage workloadTest
