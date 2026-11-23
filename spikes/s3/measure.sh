@@ -12,7 +12,7 @@
 #        "-native-stacks -aggregate=false"; task ua4),
 #        S3_AGENT (1: every burst runs under the iormesh agent, and a
 #        traced one with -spool, both on a fresh spool dir per run;
-#        task ud4), S3_TRACER (the tracer binary, default ./iormesh: an
+#        task ud4), S3_TRACER (the tracer binary, default bin/iormesh: an
 #        A/B against another build; task ud4), S3_PERF (1: also count
 #        the tracer's instructions from its ready file to its exit with
 #        perf stat — a figure host load barely moves, unlike CPU time;
@@ -61,10 +61,10 @@ tracer_cpu=${S3_TRACER_CPU:-3}
 load_cpus=${S3_LOAD_CPUS:-0-2,4-6}
 # shellcheck disable=SC2206 # word splitting is the point: one flag per word
 tracer_flags=(${S3_TRACER_FLAGS:-})
-jar=$repo/workload.jar
-agent_jar=$repo/iormesh-agent.jar
+jar=$repo/bin/workload.jar
+agent_jar=$repo/bin/iormesh-agent.jar
 agent=${S3_AGENT:-0}
-tracer=${S3_TRACER:-$repo/iormesh}
+tracer=${S3_TRACER:-$repo/bin/iormesh}
 perf=${S3_PERF:-0}
 segment=${S3_SEGMENT:-0}
 clk_tck=$(getconf CLK_TCK)

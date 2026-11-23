@@ -19,7 +19,7 @@ readonly out="${3:?outdir}"
 readonly kase="${4:?case}"
 here="$(cd "$(dirname "$0")" && pwd)"
 readonly here
-readonly jar="$here/../../../workload.jar"
+readonly jar="$here/../../../bin/workload.jar"
 readonly aargs="$ad/bridge.jar,$out/$kase"
 
 mkdir -p "$out"

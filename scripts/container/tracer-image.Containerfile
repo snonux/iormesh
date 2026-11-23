@@ -3,7 +3,7 @@
 # jar, nothing else - no shell, no package manager, no libc. It is not a
 # builder: the binaries come from the release pipeline (`mage buildPodman`
 # or `mage buildDocker` for dist/iormesh-linux-<arch>, `mage agentBuild`
-# for iormesh-agent.jar), so the image carries the very bytes that were
+# for bin/iormesh-agent.jar), so the image carries the very bytes that were
 # verified and smoke-run there.
 #
 # Build from the repository root, one image per arch, then push and pin
@@ -36,7 +36,7 @@ ARG TARGETARCH
 # modes: nothing in the image is ever written, and the container runs as
 # root.
 COPY --chmod=0555 dist/iormesh-linux-${TARGETARCH} /opt/iormesh/bin/iormesh
-COPY --chmod=0444 iormesh-agent.jar /opt/iormesh/lib/iormesh-agent.jar
+COPY --chmod=0444 bin/iormesh-agent.jar /opt/iormesh/lib/iormesh-agent.jar
 
 # Root is required (decision #13: BPF and the HotSpot attach accept uid 0);
 # the pod's securityContext drops every capability but #13's set. Said

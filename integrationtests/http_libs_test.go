@@ -10,7 +10,7 @@ import (
 // integrationTest` builds first: the third-party HTTP module's jar (task
 // de4), run like workload.jar (its manifest names workload.jar and the
 // vendored libraries beside it).
-const libsJarDefault = "../workload-libs.jar"
+const libsJarDefault = "../bin/workload-libs.jar"
 
 // traceLibs traces one of workload-libs.jar's HTTP pairs under the agent
 // and checks its golden, its cross-wire pairing and that no otel object

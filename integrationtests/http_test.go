@@ -14,7 +14,7 @@ import (
 // otelJarDefault is `mage workloadOtelBuild`'s output, which `mage
 // integrationTest` builds first: the OTEL flavor's jar, run like
 // workload.jar (its manifest names workload.jar beside it).
-const otelJarDefault = "../workload-otel.jar"
+const otelJarDefault = "../bin/workload-otel.jar"
 
 // startHTTPPair starts an HTTP scenario's server and then its client on a
 // free port, the client released only once the server listens. dir

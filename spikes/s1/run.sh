@@ -17,7 +17,7 @@ readonly scenario="${2:?scenario}"
 readonly out="${3:?outdir}"
 here="$(cd "$(dirname "$0")" && pwd)"
 readonly here
-readonly jar="$here/../../workload.jar"
+readonly jar="$here/../../bin/workload.jar"
 readonly hooks="${HOOKS:-$here/hooks-v1.txt}"
 
 # probe_list <uprobe|uretprobe>: the hook set as a comma-separated list of

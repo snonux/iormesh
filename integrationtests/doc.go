@@ -1,6 +1,6 @@
 // Package integrationtests holds the end-to-end tests of iormesh: they run
-// the real tracer binary (../iormesh) against the real Java workload
-// (../workload.jar), read the trace it wrote and golden-check it against
+// the real tracer binary (../bin/iormesh) against the real Java workload
+// (../bin/workload.jar), read the trace it wrote and golden-check it against
 // the scenario's expect.json - every layer once, BPF to golden (PLAN.md
 // "M1 - Walking skeleton", "Integration tests - follow ior").
 //

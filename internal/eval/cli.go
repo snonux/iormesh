@@ -47,7 +47,7 @@ func ParseFlags(args []string, stderr io.Writer) (Options, error) {
 	fs.StringVar(&o.Questions, "questions", "eval/questions/microservices.yaml", "question set")
 	fs.StringVar(&o.Store, "store", "", "collected trace store holding the scenario's trace (required)")
 	fs.Var(&o.Projects, "project", "project of the store to build (repeatable; default: all)")
-	fs.StringVar(&o.Iormeshctl, "iormeshctl", "./iormeshctl", "iormeshctl binary")
+	fs.StringVar(&o.Iormeshctl, "iormeshctl", "bin/iormeshctl", "iormeshctl binary")
 	fs.StringVar(&o.Source, "source", "workload/src", "workload source root the model may read")
 	fs.StringVar(&o.Out, "out", "eval/results", "results directory")
 	fs.StringVar(&o.ModelCmd, "model-cmd", "", "model command: prompt on stdin, reply on stdout (required)")

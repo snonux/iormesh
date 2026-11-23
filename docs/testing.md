@@ -125,8 +125,8 @@ follow ior" for the full map.
 
 ### The suite today
 
-`integrationtests/` drives the real tracer binary (`./iormesh
-run`) against the real workload (`java -jar workload.jar`) and
+`integrationtests/` drives the real tracer binary (`bin/iormesh
+run`) against the real workload (`java -jar bin/workload.jar`) and
 reads the trace directory it writes. Each lifted file names its
 ior source and what changed:
 
@@ -242,9 +242,9 @@ would match anything. Syscall events and the graph are still
 compared exactly.
 
 `mage integrationTest` builds the tracer, the workload jar and
-the test binary (`integrationtests.test` at the repo root, for a
-scoped sudoers rule, as in ior), runs it as root with `sudo -n
--E` from `integrationtests/`, in parallel
+the test binary (`bin/integrationtests.test`, decision #30; ior
+uses the repo root), for a scoped sudoers rule, runs it as root
+with `sudo -n -E` from `integrationtests/`, in parallel
 (`INTEGRATION_PARALLEL`, default min(NumCPU, 2)) with
 `-test.failfast`; `mage integrationTestSerial` runs one test at
 a time. The binary runs with `-test.v`, and the target fails
@@ -638,7 +638,7 @@ M5 acceptance on the rig. It runs the spread of
 `TestMicroservicesAcrossHosts`, copies each host's ready segments
 into `<store>/<project>/<host>/` as collect leaves them, names
 the three servers (`iormeshctl services name`) and builds with
-the real `../iormeshctl` (`mage build`), as root, HOME in a
+the real `../bin/iormeshctl` (`mage build`), as root, HOME in a
 scratch directory. The SSH deploy and collect are what the rig
 does not do.
 
@@ -774,17 +774,17 @@ Each host (two machines, Linux, x86_64 or aarch64):
   place ([security.md](security.md)):
 
   ```sh
-  # ./iormeshctl from `mage build`, or
-  # CGO_ENABLED=0 go build -o iormeshctl ./cmd/iormeshctl
+  # bin/iormeshctl from `mage build`, or
+  # CGO_ENABLED=0 go build -o bin/iormeshctl ./cmd/iormeshctl
   # bootstrap contacts only registered hosts; a scratch registry
   # keeps the operator's own clean (pass it to bootstrap too)
   r=~/iormesh-boot/servers.yaml
-  ./iormeshctl add -registry "$r" -project boot -listen-port 1 HOST
+  bin/iormeshctl add -registry "$r" -project boot -listen-port 1 HOST
   # print the exact steps and run them on HOST by hand (sudo may
   # ask for the password there):
-  ./iormeshctl bootstrap -registry "$r" -arch ARCH -user ops HOST
+  bin/iormeshctl bootstrap -registry "$r" -arch ARCH -user ops HOST
   # or, when ops has sudo without a password, run them over ssh:
-  ./iormeshctl bootstrap -registry "$r" -apply HOST
+  bin/iormeshctl bootstrap -registry "$r" -apply HOST
   ```
 
   Both install the rule
@@ -858,7 +858,7 @@ variables cleared so it reads the run's registry:
 
 ```sh
 env -u XDG_CONFIG_HOME -u XDG_DATA_HOME HOME=$HOME/.iormesh-m4 \
-    ./iormeshctl rm HOST                   # per host
+    bin/iormeshctl rm HOST                  # per host
 ssh HOST pkill -f .iormesh-m4-run/workload.jar
 ssh HOST rm -rf .iormesh-m4-run            # HOST2 also: rm -f /var/tmp/.iormesh-m4-fill
 ```
@@ -3096,7 +3096,7 @@ cost is at its largest. Run it standalone:
 
 ```sh
 mage workloadBuild
-java -jar workload.jar syscall-burst --ops 1000000 --threads 4
+java -jar bin/workload.jar syscall-burst --ops 1000000 --threads 4
 ```
 
 After the PID it prints one result line,

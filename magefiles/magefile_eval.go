@@ -56,7 +56,7 @@ func Eval() error {
 		name = "unnamed"
 	}
 	return sh.RunWithV(map[string]string{"CGO_ENABLED": "0"}, "go", "run", "./cmd/iormesheval",
-		"-store", store, "-model-cmd", model, "-model-name", name, "-iormeshctl", "./"+ctlBinaryName)
+		"-store", store, "-model-cmd", model, "-model-name", name, "-iormeshctl", ctlBinaryName)
 }
 
 // EvalTrace records the eval's trace (requires root, sudo -n): it runs

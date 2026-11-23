@@ -29,7 +29,7 @@ modes=("$@")
 ((${#modes[@]})) || modes=(untraced sys uprobe noop nostack ring file all)
 here="$(cd "$(dirname "$0")" && pwd)"
 readonly here
-readonly jar="$here/../../workload.jar"
+readonly jar="$here/../../bin/workload.jar"
 readonly hooks="${HOOKS:-$here/hooks-burst.txt}"
 
 mkdir -p "$out"

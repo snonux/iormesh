@@ -50,25 +50,37 @@ the magefiles' doc comments); and non-interactive `sudo` for the two root reads
 mage generate      # tracepoint formats -> C handlers, Go tables, Go types,
                    # per-arch syscall numbers (from golang.org/x/sys)
 mage bpfBuild      # vmlinux.h (first run) + clang CO-RE -> iormesh.bpf.o
-mage build         # bpfBuild + go build ./... + ./iormesh, ./iormeshctl
+mage build         # bpfBuild + go build ./... + bin/iormesh, bin/iormeshctl
 mage test          # go test ./... (the generator's C harness tests too)
 mage testRace      # go test -race, all but generate and ctl
                    # (docs/testing.md, "Race detector gate")
 mage vet           # go vet ./... with the cgo environment
 mage lint          # golangci-lint: errcheck + staticcheck SA + unused
 mage fmt / fmtCheck
-mage clean         # sweeps the root build outputs too (decision #30);
+mage clean         # removes bin/, the build outputs (decision #30);
                    # keeps vmlinux.h (it needs root to recreate) and
                    # dist/ (signed release artifacts)
 mage workloadTest  # the Java workload, standalone (M0)
 mage bpfRootTest   # BPF root tests: loader, TCP, fork, exec watch (sudo -n)
 mage integrationTest        # tracer + workload end to end, as root
 mage integrationTestSerial  # the same, one test at a time
-mage agentBuild    # the Java agent -> ./iormesh-agent.jar (M3),
+mage agentBuild    # the Java agent -> bin/iormesh-agent.jar (M3),
                    # copied to dist/ for mage sign and deploy
 mage agentTest     # its unit tests, -javaagent smoke runs and
                    # the ring's Java-driven Go tests
 ```
+
+Every build output lands in `bin/` (gitignored; PLAN.md decision
+#30), none at the repository root: `iormesh`, `iormeshctl`, the
+Go peers `echopeer` and `edgepeer`, the four jars
+(`workload.jar`, `workload-otel.jar`, `workload-libs.jar`,
+`iormesh-agent.jar`) and the gates' test binaries
+(`integrationtests.test`, `iormesh-internal.test`). The jars and
+`echopeer` share the directory on purpose: the non-java-peer
+scenario finds `echopeer` beside `workload.jar`, and the module
+jars' manifest `Class-Path` names `workload.jar` beside them and
+the vendored jars as `../workload/…`. `dist/` stays the release
+output.
 
 The Java agent (`agent/`) is built with the JDK alone, like the
 workload, compiled for 17 (decision #29). Its one dependency, ASM,
@@ -226,7 +238,7 @@ fails up front with the fix named.
   the `iormesh-gomod` and `iormesh-gocache` volumes.
 - **The tracer image** (M7, task vb4; built and run on kind by
   task yb4): `scripts/container/tracer-image.Containerfile`
-  packs a release tracer from `dist/` and `iormesh-agent.jar`
+  packs a release tracer from `dist/` and `bin/iormesh-agent.jar`
   into `FROM scratch` — no shell, no libc — with the binary at
   `/opt/iormesh/bin/iormesh` (on `PATH`), run as uid 0; traces go
   to the pod's emptyDir, one level inside it (`k8s.TraceRoot`).

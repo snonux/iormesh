@@ -2,7 +2,8 @@ package integrationtests
 
 // Adapted from ior integrationtests/helpers_test.go @ b21afc50328c
 // (newTestHarness, absPath, enableParallelIfRequested, the judged-run
-// retry). Changes: the harness paths are ../iormesh and ../workload.jar;
+// retry). Changes: the harness paths are ../bin/iormesh and
+// ../bin/workload.jar (the build outputs live in bin/, decision #30);
 // the parallel switch is the -iormesh.parallel flag; the assertion helpers
 // are iormesh's: the golden check of internal/normalize and graph checks;
 // the judged-run retry is generic (judge), so a test with its own
@@ -29,10 +30,10 @@ import (
 )
 
 const (
-	tracerBinaryDefault = "../iormesh"
-	workloadJarDefault  = "../workload.jar"
+	tracerBinaryDefault = "../bin/iormesh"
+	workloadJarDefault  = "../bin/workload.jar"
 	// edgePeerDefault is workload/edgepeer, built by mage workloadBuild.
-	edgePeerDefault = "../edgepeer"
+	edgePeerDefault = "../bin/edgepeer"
 	scenariosDir    = "../workload/scenarios"
 	// lossAttempts: one retry tells a busy moment from a host that loses
 	// records all the time (ior's FirstRunWithoutKernelLoss callers).

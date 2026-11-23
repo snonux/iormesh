@@ -2864,17 +2864,29 @@ deferred.
   magefiles move together, keeping their `//go:build mage` tags
   and provenance headers, so plain `go vet ./...` and
   `go test ./...` keep skipping the mage `package main`). The
-  build outputs stay at the root, as in ior:
-  `integrationtests.test`'s absolute path matches the scoped
-  sudoers rule, the integration harness's defaults are
-  `../iormesh`, `../workload.jar` and `../edgepeer`, and the
-  non-java-peer looks for `echopeer` beside the jar — `mage
-  clean` sweeps them instead. The kind acceptance's state files
+  build outputs go to `bin/` (gitignored; owner override, tasks
+  rk4 and uk4, of the first cut that kept them at the root as
+  in ior): the binaries `iormesh`, `iormeshctl`, `echopeer` and
+  `edgepeer`, the four jars (`workload.jar`, `workload-otel.jar`,
+  `workload-libs.jar`, `iormesh-agent.jar`) and the gates' test
+  binaries (`integrationtests.test`, `iormesh-internal.test`).
+  One directory for all of them keeps what had pinned the root
+  working: the non-java-peer still finds `echopeer` beside the
+  jar, the module jars' manifest `Class-Path` still names
+  `workload.jar` beside them (the vendored jars as
+  `../workload/…`), the integration harness's defaults become
+  `../bin/iormesh`, `../bin/workload.jar` and `../bin/edgepeer`,
+  and a scoped sudoers rule names
+  `<repo>/bin/integrationtests.test`. `mage clean` removes
+  `bin/` (and any root artifact of a tree built before the
+  move); `dist/` stays the release output. The kind
+  acceptance's state files
   (`.k8s-acceptance/`: the kubeconfig, the two `.state.json`s,
   `teardown.log`) group under one hidden directory.
-  Rejected: a `build/` directory for the outputs — the sudoers
-  pin, the harness defaults and the jars' manifest `Class-Path`
-  names would all have to follow, for cosmetic gain.
+  Rejected: the outputs at the root (the first cut, for ior's
+  pattern) — they cluttered the top level; a `bin/java/` of its
+  own for the jars — the jars and `echopeer` must share a
+  directory, so a split buys nothing.
 
 ### Open — raised for M2 (built on the default)
 
@@ -4102,9 +4114,9 @@ not the replacement:
   `mage integrationTest` (plus a serial variant) that builds
   the tracer, the M0 workload and the compiled test binary,
   then runs it as root — skipping with an explanation when
-  root or BPF is unavailable. Like ior, the test binary is
-  compiled to the repo root so its absolute path matches a
-  scoped sudoers rule.
+  root or BPF is unavailable. The test binary is compiled to
+  `bin/` (ior uses the repo root; decision #30) so its absolute
+  path matches a scoped sudoers rule.
 - **Harness** (ior's `harness.go`): start the tracer against
   a known M0 workload process — or the whole microservices
   topology — collect the trace output (NDJSON live, parquet

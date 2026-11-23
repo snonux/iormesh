@@ -69,7 +69,7 @@ func checkPeerSkip() error {
 	if err != nil {
 		return err
 	}
-	lonely := filepath.Join(dir, workloadJar)
+	lonely := filepath.Join(dir, filepath.Base(workloadJar))
 	if err := os.WriteFile(lonely, jar, 0o644); err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func checkPeerSkip() error {
 func checkEchoPeerUsage() error {
 	for _, args := range [][]string{{}, {"-dir", "x", "stray"}, {"-bogus"}} {
 		ctx, cancel := context.WithTimeout(context.Background(), gateWait)
-		err := exec.CommandContext(ctx, "./"+echoPeerBinary, args...).Run()
+		err := exec.CommandContext(ctx, echoPeerBinary, args...).Run()
 		cancel()
 		if err := wantExitCode(err, 2, fmt.Sprintf("echopeer %q", args)); err != nil {
 			return err

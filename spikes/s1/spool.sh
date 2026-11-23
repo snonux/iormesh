@@ -17,7 +17,7 @@ readonly here
 mkdir -p "$out"
 rm -f "$out/burst.spool"
 "$jh/bin/java" -javaagent:"$ad/agent.jar=$ad/bridge.jar,$out/burst,ring:$k" \
-  -jar "$here/../../workload.jar" syscall-burst --ops "$ops" --dir "$out" \
+  -jar "$here/../../bin/workload.jar" syscall-burst --ops "$ops" --dir "$out" \
   > "$out/burst.stdout" 2> "$out/burst.stderr" &
 readonly jpid="$!"
 trap 'kill "$jpid" 2>/dev/null || true' EXIT

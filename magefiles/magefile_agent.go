@@ -1,7 +1,7 @@
 //go:build mage
 
 // The Java agent's build (M3, docs/implementation.md "M3 — Java agent",
-// steps 1–2): `mage agentBuild` → iormesh-agent.jar. Like the workload
+// steps 1–2): `mage agentBuild` → bin/iormesh-agent.jar. Like the workload
 // it is built with the JDK alone (no Maven or Gradle); unlike the
 // workload it has one dependency, ASM, vendored under agent/third_party
 // and shaded into the jar. Its tests are in magefile_agenttest.go.
@@ -20,7 +20,9 @@ import (
 )
 
 const (
-	agentJar = "iormesh-agent.jar"
+	// agentJar is the agent build's output in buildDir (decision #30);
+	// its dist/ copy keeps the base name, the one mage sign signs.
+	agentJar = buildDir + "/iormesh-agent.jar"
 	// distDir holds the release artifacts mage sign signs.
 	distDir       = "dist"
 	agentBuildDir = "agent/build"
@@ -51,7 +53,7 @@ var (
 	agentBridgeJar = filepath.Join(agentBuildDir, bridgeNested)
 )
 
-// AgentBuild builds iormesh-agent.jar: the agent core with ASM shaded
+// AgentBuild builds bin/iormesh-agent.jar: the agent core with ASM shaded
 // under iormesh.agent.shaded.asm, the hook tables, and the bridge jar
 // (the bootstrap-visible Hooks and StackIds) nested as a resource that
 // the agent appends to the bootstrap search path at install. A copy goes
@@ -79,7 +81,7 @@ func AgentBuild() error {
 	if err := os.MkdirAll(distDir, 0o755); err != nil {
 		return err
 	}
-	return sh.Copy(filepath.Join(distDir, agentJar), agentJar)
+	return sh.Copy(filepath.Join(distDir, filepath.Base(agentJar)), agentJar)
 }
 
 // verifyASM checks the vendored ASM jar against its pinned SHA-256.
@@ -152,6 +154,9 @@ func packAgent() error {
 		"Implementation-Title: iormesh-agent\n"+
 		"Implementation-Version: "+version.Version+"\n"), 0o644)
 	if err != nil {
+		return err
+	}
+	if err := ensureBuildDir(); err != nil {
 		return err
 	}
 	return sh.RunV("jar", "--create", "--file", agentJar, "--manifest", manifest,

@@ -5,8 +5,8 @@ package agentspool
 // sets the environment (absolute paths):
 //
 //	IORMESH_AGENT_TEST_CP  classpath with iormesh.bridge.RingStress
-//	IORMESH_AGENT_JAR      iormesh-agent.jar
-//	IORMESH_WORKLOAD_JAR   workload.jar
+//	IORMESH_AGENT_JAR      bin/iormesh-agent.jar
+//	IORMESH_WORKLOAD_JAR   bin/workload.jar
 
 import (
 	"bufio"

@@ -48,7 +48,7 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 readonly repo_root
 readonly perf_dir="$repo_root/perf"
-readonly workload_jar="$repo_root/workload.jar"
+readonly workload_jar="$repo_root/bin/workload.jar"
 
 die() {
     echo "perf-baseline: $*" >&2

@@ -113,7 +113,7 @@ const unitConfinedEnv = "IORMESH_CONFINED_UNIT"
 
 // runConfinement decides whether a run is confined: it came through the
 // sudoers rule (sudoGated), or it is the unit's run of a start
-// (unitConfinedEnv). A build run with `sudo ./iormesh run -out DIR` —
+// (unitConfinedEnv). A build run with `sudo bin/iormesh run -out DIR` —
 // standalone use, the operator's own full sudo — is not.
 func runConfinement(self string, env func(string) string) (confinement, bool) {
 	if !sudoGated(self, env, os.Lstat) && env(unitConfinedEnv) != "1" {
