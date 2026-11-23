@@ -26,7 +26,8 @@ event families `iormesh run -trace-families` adds (see
   onto an upgraded path (a JDK in a versioned directory,
   `.../25.0.5/bin/java` to `.../25.0.6/bin/java`) is followed
   if the executable keeps its base name, the uid is the same and
-  it runs in the original's cgroup — its systemd unit; without a
+  it runs in the original's cgroup — its systemd unit or login
+  session scope (no escalation: the uid must match); without a
   known cgroup only the exact path is followed (task kk4). A
   socket-activated port that only
   systemd holds — the service is idle, not running — is refused

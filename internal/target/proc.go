@@ -226,7 +226,10 @@ func (o Owner) SameApp(prev Owner) bool {
 	if o.Exe == prev.Exe {
 		return true
 	}
-	return prev.Cgroup != "" && o.Cgroup == prev.Cgroup && filepath.Base(o.Exe) == filepath.Base(prev.Exe)
+	// procCgroup never yields "/", but a key built elsewhere might: the
+	// root cgroup ties nothing together either.
+	return prev.Cgroup != "" && prev.Cgroup != "/" && o.Cgroup == prev.Cgroup &&
+		filepath.Base(o.Exe) == filepath.Base(prev.Exe)
 }
 
 // deletedSuffix is what the kernel appends to an exe link whose binary
@@ -255,17 +258,20 @@ func (p ProcFS) Owner(pid uint32) (Owner, error) {
 // or legacy host), the hierarchy where systemd places units and scopes.
 // "" when the file is unreadable or only the root cgroup "/" is named:
 // every process outside a unit shares it, so it identifies nothing.
+// The kernel writes one line per hierarchy; should a malformed file
+// repeat a line, the first one counts and the rest are ignored.
 func (p ProcFS) procCgroup(pid uint32) string {
 	b, err := os.ReadFile(p.path(pid, "cgroup"))
 	if err != nil {
 		return ""
 	}
 	var v2, systemd string
+	var seenV2, seenSystemd bool
 	for line := range strings.SplitSeq(string(b), "\n") {
-		if path, ok := strings.CutPrefix(line, "0::"); ok {
-			v2 = path
-		} else if _, path, ok := strings.Cut(line, ":name=systemd:"); ok {
-			systemd = path
+		if path, ok := strings.CutPrefix(line, "0::"); ok && !seenV2 {
+			v2, seenV2 = path, true
+		} else if _, path, ok := strings.Cut(line, ":name=systemd:"); ok && !seenSystemd {
+			systemd, seenSystemd = path, true
 		}
 	}
 	for _, path := range []string{v2, systemd} {

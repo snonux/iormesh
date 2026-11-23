@@ -317,6 +317,8 @@ func TestOwnerCgroup(t *testing.T) {
 		{"12:cpu,cpuacct:/system.slice/app.service\n1:name=systemd:/system.slice/app.service\n0::/\n",
 			"/system.slice/app.service"},
 		{"0::/\n", ""},
+		{"12:cpu,cpuacct:/\n1:name=systemd:/\n", ""}, // v1 only, root
+		{"0::/system.slice/app.service\n0::/user.slice\n", "/system.slice/app.service"},
 		{"", ""},
 	}
 	for i, tc := range cases {

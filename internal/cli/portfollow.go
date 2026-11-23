@@ -68,7 +68,10 @@ func newPortFollow(cfg runConfig) *portFollow {
 // (nginx, httpd: a root master, workers of the same binary under their
 // own uid, all holding the listener) must have its restarted workers
 // adopted too, since they fork before the next re-resolve and
-// fork-following never picks up a process that already exists.
+// fork-following never picks up a process that already exists. Only
+// start holders are remembered, never adopted ones: a chain of upgrades
+// (25.0.5, 25.0.6, 25.0.7) still matches through the original's base
+// name and cgroup (task kk4).
 func (f *portFollow) remember(pids []uint32) {
 	keys := map[uint32]target.Owner{}
 	var first uint64

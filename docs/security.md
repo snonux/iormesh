@@ -446,7 +446,8 @@ truth.
   its port across a restart (task mh4) adopts only a process of
   the same executable and uid as its start owner — or, after an
   upgrade into a new path, the same executable base name, uid
-  and cgroup (systemd unit; task kk4), never a base name alone —
+  and cgroup (systemd unit or login session scope; task kk4),
+  never a base name alone; no escalation, as the uid must match —
   and never
   systemd holding a socket-activated listener: another user's
   program binding the released port is not traced.

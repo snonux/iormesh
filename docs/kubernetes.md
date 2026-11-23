@@ -299,10 +299,14 @@ options; see [SELinux](#selinux).
 
 The patch's `-listen-port` finds the listener's owner at start,
 and fails if the app is not listening yet; after that it follows
-the port to a restarted app of the same executable and uid (or,
-after an upgrade into a new path, the same executable base name
-in the same cgroup; PLAN.md decision #23) for
-`-listen-grace` (default 2m). `-pattern`
+the port to a restarted app of the same executable and uid for
+`-listen-grace` (default 2m). A container restart gets a new
+container id and so a new cgroup: it is followed only for the
+exact executable path (the same image), while a path upgrade is
+a new image, a rollout and a new pod. The rule that accepts the
+same executable base name in the same cgroup (PLAN.md decision
+#23) covers only a process restarted inside the same container
+(by a supervisor). `-pattern`
 only matches execs after the tracer attached. In either case the
 container restart (restart policy) retries.
 
