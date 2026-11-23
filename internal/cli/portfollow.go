@@ -36,11 +36,13 @@ var (
 type portFollow struct {
 	port  uint16
 	grace time.Duration
-	// owners are the keys (executable, effective uid) of the processes
-	// the session started with that run the original holder's
-	// executable (remember): a later holder of the port is adopted only if it is
-	// one of them again. Empty when none could be read — then nothing
-	// is recognised and the session ends as before.
+	// owners are the keys (executable, effective uid, cgroup) of the
+	// processes the session started with that run the original holder's
+	// executable (remember): a later holder of the port is adopted only
+	// if it is the same app as one of them (target.Owner.SameApp: same
+	// uid and executable, or task kk4, an upgraded path of the same base
+	// name in the same cgroup). Empty when none could be read — then
+	// nothing is recognised and the session ends as before.
 	owners map[target.Owner]bool
 	// since is when the last target went, zero while one is traced; last
 	// is the last resolve. now is the clock, a field so tests set it.
@@ -66,7 +68,10 @@ func newPortFollow(cfg runConfig) *portFollow {
 // (nginx, httpd: a root master, workers of the same binary under their
 // own uid, all holding the listener) must have its restarted workers
 // adopted too, since they fork before the next re-resolve and
-// fork-following never picks up a process that already exists.
+// fork-following never picks up a process that already exists. Only
+// start holders are remembered, never adopted ones: a chain of upgrades
+// (25.0.5, 25.0.6, 25.0.7) still matches through the original's base
+// name and cgroup (task kk4).
 func (f *portFollow) remember(pids []uint32) {
 	keys := map[uint32]target.Owner{}
 	var first uint64
@@ -104,6 +109,17 @@ func (s *session) ended() (bool, error) {
 		return true, nil
 	}
 	return s.followPort()
+}
+
+// recognises reports whether o, a new holder's owner key, is the app of
+// one of the remembered owners (target.Owner.SameApp, decision #23).
+func (f *portFollow) recognises(o target.Owner) bool {
+	for prev := range f.owners {
+		if o.SameApp(prev) {
+			return true
+		}
+	}
+	return false
 }
 
 // followPort runs while a port session has no live target: once per
@@ -155,19 +171,20 @@ func (s *session) followPort() (bool, error) {
 // time the listing saw (task qj4): a pid reused since by a process that
 // does not hold the port is skipped — the next resolve lists whoever
 // holds it — and addRunning's re-check ties the owner key read in
-// between to that same incarnation. A holder of another program or
-// user is named once on stderr and left alone.
+// between to that same incarnation. A holder of another program, user
+// or — for an upgraded executable path — cgroup (recognises) is named
+// once on stderr and left alone.
 func (s *session) adoptOwner(h target.Holder) error {
 	f, pid := s.follow, h.PID
 	id := attachIdentity(pid)
 	if id.StartNS == 0 || id.StartNS != h.StartNS {
 		return nil // gone already, or no longer the listed holder
 	}
-	if o, err := procOwner(pid); err != nil || !f.owners[o] {
+	if o, err := procOwner(pid); err != nil || !f.recognises(o) {
 		if !f.refused[pid] {
 			f.refused[pid] = true
 			_, _ = fmt.Fprintf(s.log, "iormesh: port %d: pid %d holds it but is not the traced program "+
-				"(executable or uid differs); not following\n", f.port, pid)
+				"(executable, uid or cgroup differs); not following\n", f.port, pid)
 		}
 		return nil
 	}
