@@ -145,6 +145,30 @@ func (o *Observation) fill(established uint64, accs ...*connAcc) {
 	}
 	o.Requests = requestsOf(accs)
 	o.TLS = tlsOf(o.Requests)
+	o.Sources = sourcesOf(accs)
+}
+
+// sourcesOf joins both ends' per-source windows: a same-named source
+// (a same-host pair's one segment) is one span over both.
+func sourcesOf(accs []*connAcc) []SourceSpan {
+	byName := map[string]SourceSpan{}
+	for _, a := range accs {
+		if a == nil {
+			continue
+		}
+		for name, s := range a.seen {
+			v := *s // a copy: the accumulator stays as read
+			if old, ok := byName[name]; ok {
+				v.First, v.Last = min(v.First, old.First), max(v.Last, old.Last)
+			}
+			byName[name] = v
+		}
+	}
+	var out []SourceSpan
+	for _, name := range sortedKeys(byName) {
+		out = append(out, byName[name])
+	}
+	return out
 }
 
 // requestsOf collects both ends' views of the requests, per source. The

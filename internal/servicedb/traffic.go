@@ -34,6 +34,9 @@ type connAcc struct {
 	clients, server map[string]bool // process ids: connect, accept
 	peer, local     netip.AddrPort  // connect's remote, accept's local
 	reqs            map[reqKey]*Request
+	// seen is each source's window of the connection's records, so the
+	// database knows which sources a forgotten segment leaves (task gk4).
+	seen map[string]*SourceSpan
 }
 
 // reqKey groups a connection's requests per source. Host is set only on
@@ -68,6 +71,7 @@ func (t *traffic) add(ev *schema.Event) error {
 	a := t.acc(federate.LocalConn{Host: ev.HostID, ConnID: ev.ConnID}, ev)
 	// An http event starts at wall_ns and ends latency_ns later.
 	a.first, a.last = min(a.first, ev.WallNS), max(a.last, endOf(ev))
+	a.saw(t.source, ev.WallNS, endOf(ev))
 	switch ev.Event {
 	case schema.KindConnect:
 		a.clients[pid] = true
@@ -101,10 +105,21 @@ func (t *traffic) acc(k federate.LocalConn, ev *schema.Event) *connAcc {
 	a := t.conns[k]
 	if a == nil {
 		a = &connAcc{project: ev.Project, first: ev.WallNS, last: ev.WallNS,
-			clients: map[string]bool{}, server: map[string]bool{}, reqs: map[reqKey]*Request{}}
+			clients: map[string]bool{}, server: map[string]bool{}, reqs: map[reqKey]*Request{},
+			seen: map[string]*SourceSpan{}}
 		t.conns[k] = a
 	}
 	return a
+}
+
+// saw widens source's window of the connection by one record.
+func (a *connAcc) saw(source string, first, last uint64) {
+	s := a.seen[source]
+	if s == nil {
+		a.seen[source] = &SourceSpan{Name: source, First: first, Last: last}
+		return
+	}
+	s.First, s.Last = min(s.First, first), max(s.Last, last)
 }
 
 // request counts one http event of source under its path's template:

@@ -83,4 +83,24 @@ var migrations = []string{
 	// /status/404, /api/2024/{x}) is shown as stored.
 	`ALTER TABLE http_request ADD COLUMN templated INTEGER NOT NULL DEFAULT 0
 		CHECK (templated IN (0, 1));`,
+	// Version 4 records which sources saw each connection, and when
+	// (task gk4), so the database can forget a deleted segment
+	// (DB.Forget, run by prune -apply): a connection no source still
+	// names goes, the others keep the window their remaining sources
+	// give. Rows stored before are seeded from their request rows'
+	// sources — the only sources version 3 recorded; a row without
+	// requests gets none and is never forgotten, though a rebuild that
+	// still reads its segment adds them.
+	`CREATE TABLE conn_source (
+		host       TEXT    NOT NULL,
+		conn_id    TEXT    NOT NULL,
+		source     TEXT    NOT NULL,
+		first_seen INTEGER NOT NULL,
+		last_seen  INTEGER NOT NULL CHECK (last_seen >= first_seen),
+		PRIMARY KEY (host, conn_id, source),
+		FOREIGN KEY (host, conn_id) REFERENCES conn (host, conn_id) ON DELETE CASCADE);
+	CREATE INDEX conn_source_source ON conn_source (source);
+	CREATE INDEX http_request_source ON http_request (source);
+	INSERT INTO conn_source SELECT host, conn_id, source, MIN(first_seen), MAX(last_seen)
+		FROM http_request GROUP BY host, conn_id, source;`,
 }

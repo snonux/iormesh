@@ -29,9 +29,14 @@ const (
 	// diagLines bounds the journal tail, diagLineBytes each line as
 	// printed (after termsafe quoting, which can quadruple a line) and
 	// diagBytes the whole diagnosis: an error message, not a log dump.
+	// diagBytes also keeps the error within the 2048 bytes of a remote
+	// command's stderr that iormeshctl deploy and ensure keep (task zk4,
+	// internal/federate stderrLimit): that cut keeps the head, and the
+	// cause is logged last. 1536 leaves room for the error's own text
+	// with the longest unit name (TestDiagnoseExitFitsRelay).
 	diagLines     = 20
 	diagLineBytes = 300
-	diagBytes     = 4096
+	diagBytes     = 1536
 	// diagTimeout bounds each diagnostic command (task 8g4): a hung
 	// journald must not hold up start's error, which is the point.
 	diagTimeout = 5 * time.Second
@@ -68,17 +73,34 @@ func hostSELinux(path string) selinuxState {
 // terminal-safe: it carries the binary's path and systemd's own words.
 func (c control) diagnoseStart(ctx context.Context, unit string, since time.Time, runErr error) error {
 	tail := c.unitLog(ctx, unit, since)
+	return withUnitLog(runErr, unit, tail, c.selinuxHint(tail))
+}
+
+// diagnoseExit wraps exitErr, a unit started at since that exited before
+// its run attached, with the unit's journal tail (task zk4): the run
+// logs why it gave up there — "target spec: nothing listens on TCP port
+// N" for a -listen-port whose server is down — and start's caller
+// (iormeshctl deploy and ensure, on another host) sees only this error.
+// No SELinux hint: with --service-type=exec, systemd-run already failed
+// if systemd could not exec the binary, so this run did start.
+func (c control) diagnoseExit(ctx context.Context, unit string, since time.Time, exitErr error) error {
+	return withUnitLog(exitErr, unit, c.unitLog(ctx, unit, since), "")
+}
+
+// withUnitLog appends tail (already bounded and terminal-safe, see
+// unitLog) and hint to err; with neither, err is returned as it is.
+func withUnitLog(err error, unit, tail, hint string) error {
 	var b strings.Builder
 	if tail != "" {
 		b.WriteString("\n" + unit + " logged:\n" + tail)
 	}
-	if hint := c.selinuxHint(tail); hint != "" {
+	if hint != "" {
 		b.WriteString("\n" + hint)
 	}
 	if b.Len() == 0 {
-		return runErr
+		return err
 	}
-	return fmt.Errorf("%w%s", runErr, b.String())
+	return fmt.Errorf("%w%s", err, b.String())
 }
 
 // unitLog is the unit's journal tail since since, falling back to

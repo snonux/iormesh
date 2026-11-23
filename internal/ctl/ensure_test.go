@@ -181,9 +181,12 @@ func TestEnsureFailures(t *testing.T) {
 	f = newDeployFixture(t)
 	f.answers["app2 "+strings.Join(sudoTr, " ")+" status -json"] = reply{
 		out: statusJSON(ended("shop", "duration", "false", 0))}
-	f.answers["app2 "+strings.Join(sudoTr, " ")+" start"] = reply{err: errors.New("exit status 1")}
+	// The remote start's diagnosis, its unit's journal tail (task zk4),
+	// reaches the operator: the reason the run never attached.
+	f.answers["app2 "+strings.Join(sudoTr, " ")+" start"] = reply{err: errors.New(startDiagnosis)}
 	if code := f.run("ensure", "app2"); code != exitError ||
-		!strings.Contains(f.stderr.String(), "project shop: start") {
+		!strings.Contains(f.stderr.String(), "project shop: start: exit status 1") ||
+		!strings.Contains(f.stderr.String(), "nothing listens on TCP port 9") {
 		t.Errorf("failed start: exit %d, stderr %q", code, f.stderr)
 	}
 	// The host is still collected after a failed start.

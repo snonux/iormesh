@@ -154,7 +154,7 @@ func (c control) start(ctx context.Context, args []string) error {
 		_, _ = fmt.Fprintf(c.stdout, "iormesh: launched %s\n", cfg.unit)
 		return nil
 	}
-	st, err := c.waitAttached(ctx, cfg)
+	st, err := c.waitAttached(ctx, cfg, launched)
 	if err != nil {
 		return err
 	}
@@ -347,8 +347,10 @@ func seconds(d time.Duration) string {
 // state's invocation id is the unit's), the unit is gone, or cfg.wait
 // passed. A timeout leaves the unit running: it may still attach. The
 // invocation id is remembered from the first look, since a run that ends
-// at once takes its unit (--collect) and the id with it.
-func (c control) waitAttached(ctx context.Context, cfg startConfig) (sessionState, error) {
+// at once takes its unit (--collect) and the id with it. A unit gone
+// before attaching gets its journal since launched appended
+// (diagnoseExit): the run's reason is there, and nowhere else.
+func (c control) waitAttached(ctx context.Context, cfg startConfig, launched time.Time) (sessionState, error) {
 	dir := filepath.Join(cfg.run.traceDir, cfg.run.project)
 	deadline := c.now().Add(cfg.wait)
 	var inv string
@@ -368,8 +370,9 @@ func (c control) waitAttached(ctx context.Context, cfg startConfig) (sessionStat
 		case mine:
 			return st, fmt.Errorf("%s ended at once (%s)", cfg.unit, st.EndReason)
 		case !u.live():
-			return st, fmt.Errorf("%s exited before the tracer attached; see journalctl -u %s",
-				cfg.unit, cfg.unit)
+			return st, c.diagnoseExit(ctx, cfg.unit, launched,
+				fmt.Errorf("%s exited before the tracer attached; see journalctl -u %s",
+					cfg.unit, cfg.unit))
 		case !c.now().Before(deadline):
 			return st, fmt.Errorf("%s has not attached after %v; it keeps running (iormesh status, "+
 				"journalctl -u %s)", cfg.unit, cfg.wait, cfg.unit)

@@ -24,13 +24,14 @@ import (
 // answers from units (absent: not-found), list-units from the loaded
 // units, and onRun runs when systemd-run is called (a test's stand-in for
 // the unit's run writing its state), onStop when systemctl stop is (the
-// run recording its end).
+// run recording its end), and journalctl prints journal.
 type fakeSystemd struct {
-	calls  [][]string
-	units  map[string]unitState
-	onRun  func(args []string)
-	onStop func()
-	fail   map[string]error // by subcommand: "systemd-run", "stop", ...
+	calls   [][]string
+	units   map[string]unitState
+	onRun   func(args []string)
+	onStop  func()
+	fail    map[string]error // by subcommand: "systemd-run", "stop", ...
+	journal string           // what journalctl prints
 }
 
 func newFakeSystemd() *fakeSystemd {
@@ -47,6 +48,8 @@ func (f *fakeSystemd) Output(_ context.Context, name string, args ...string) ([]
 		return nil, err
 	}
 	switch sub {
+	case "journalctl":
+		return []byte(f.journal), nil
 	case "systemd-run":
 		if f.onRun != nil {
 			f.onRun(args)
@@ -432,18 +435,24 @@ func TestStartWaitsForAttach(t *testing.T) {
 }
 
 func TestStartWaitFailures(t *testing.T) {
+	// The unit's journal: the run's own last words (task zk4), with a
+	// control byte that must reach the error quoted.
+	const journal = "2026-11-23T21:00:00+00:00 h iormesh[42]: \x1b[31miormesh: target spec: " +
+		"nothing listens on TCP port 9\n"
 	for _, tc := range []struct {
 		name  string
 		after unitState // the unit once systemd-run returned
 		state string    // what the run writes: "", running, ended
 		want  string
+		log   bool // the journal tail is appended
 	}{
-		{"unit exits", unitState{LoadState: "not-found", ActiveState: "inactive"}, "", "exited before"},
-		{"never attaches", running, "", "has not attached after 2m0s"},
-		{"ends at once", running, stateEnded, "ended at once (targets_exited)"},
+		{"unit exits", unitState{LoadState: "not-found", ActiveState: "inactive"}, "", "exited before", true},
+		{"never attaches", running, "", "has not attached after 2m0s", false},
+		{"ends at once", running, stateEnded, "ended at once (targets_exited)", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sys := newFakeSystemd()
+			sys.journal = journal
 			c, _, traces := rootedControl(t, sys, nil)
 			sys.onRun = func([]string) {
 				sys.units["iormesh-p.service"] = tc.after
@@ -456,6 +465,13 @@ func TestStartWaitFailures(t *testing.T) {
 			err := c.start(context.Background(), []string{"-pattern", "x", "-project", "p", "-trace-dir", traces})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err %v, want %q", err, tc.want)
+			}
+			msg := err.Error()
+			if got := strings.Contains(msg, "nothing listens on TCP port 9"); got != tc.log {
+				t.Errorf("journal tail in error = %v, want %v:\n%v", got, tc.log, err)
+			}
+			if strings.ContainsRune(msg, 0x1b) {
+				t.Errorf("raw escape byte in error: %q", msg)
 			}
 		})
 	}

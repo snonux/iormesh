@@ -97,7 +97,7 @@ undone`. Until the rule is in place a rerun starts over.
 | Message contains | Meaning and fix |
 |---|---|
 | `target spec: nothing listens on TCP port …` | A `-listen-port` session resolves its target once, at start. Start the server first, then deploy again. |
-| `iormesh-….service exited before the tracer attached; see journalctl -u iormesh-….service` | The run failed before it attached; the cause is in the unit's journal, appended to the error when it can be read. |
+| `iormesh-….service exited before the tracer attached; see journalctl -u iormesh-….service` | The run failed before it attached. The unit's journal since the start is appended to the error when it can be read (at most 20 lines and 1536 bytes, the newest kept: the cause is logged last, e.g. `nothing listens on TCP port …`); `iormeshctl deploy` and `ensure` print it too, Go-quoted on one line. |
 | `iormesh-….service ended at once (…)` | The run attached and ended immediately; the reason is in parentheses (`disk_limit`: the disk is already over the limit, see below). |
 | `iormesh-….service has not attached after …; it keeps running` | Attaching is slow (many processes, a large `-agent` load). Check `iormeshctl status` again shortly. |
 | `iormesh-….service is already …; stop it first (flags change by stop and start)` | A standalone `iormesh start` over a live session of the same project. `sudo iormesh stop -project P` first. |

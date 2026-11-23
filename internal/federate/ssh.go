@@ -50,7 +50,9 @@ var remotePath = regexp.MustCompile(`^/[A-Za-z0-9._/-]*$`)
 var stagePath = regexp.MustCompile(`^[A-Za-z0-9._/][A-Za-z0-9._/-]*$`)
 
 // stderrLimit bounds how much of a failed command's stderr an error
-// carries: enough for ssh's diagnosis, not a remote log dump.
+// carries: enough for ssh's diagnosis, not a remote log dump. A remote
+// iormesh start's journal tail is bounded to fit it (internal/cli
+// startdiag.go diagBytes, task zk4): lowering this needs that lowered.
 const stderrLimit = 2048
 
 // waitDelay is runLocal's cmd.WaitDelay (see there).

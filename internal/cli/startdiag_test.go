@@ -257,3 +257,37 @@ func TestBoundedLinesKeepsTheTail(t *testing.T) {
 		t.Errorf("got %q", lines)
 	}
 }
+
+// relayLimit mirrors internal/federate's stderrLimit: iormeshctl deploy
+// and ensure keep only the first this many bytes of a remote start's
+// stderr, so the diagnosis must fit it whole (task zk4) — systemd logs
+// the cause last, where a cut would land.
+const relayLimit = 2048
+
+// A worst case — the longest project name, a full journal of over-long
+// lines — still fits relayLimit as the remote start prints it, with the
+// run's last line kept.
+func TestDiagnoseExitFitsRelay(t *testing.T) {
+	unit, err := unitName(strings.Repeat("p", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var journal strings.Builder
+	for i := range 3 * diagLines {
+		fmt.Fprintf(&journal, "line %d %s\n", i, strings.Repeat("y", 2*diagLineBytes))
+	}
+	journal.WriteString("iormesh: target spec: nothing listens on TCP port 9\n")
+	sys := newFakeSystemd()
+	sys.journal = journal.String()
+	c, _ := testControl(sys, nil)
+	err = c.diagnoseExit(context.Background(), unit, time.Now(),
+		fmt.Errorf("%s exited before the tracer attached; see journalctl -u %s", unit, unit))
+	// What runLocal's error holds: exit status, then cli.Main's stderr.
+	relayed := "exit status 1: iormesh: " + err.Error()
+	if len(relayed) > relayLimit {
+		t.Errorf("relayed diagnosis %d bytes, want ≤ %d", len(relayed), relayLimit)
+	}
+	if !strings.HasSuffix(relayed, "nothing listens on TCP port 9") {
+		t.Errorf("cause not last:\n%s", relayed)
+	}
+}
