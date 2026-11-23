@@ -13,8 +13,9 @@ import (
 // `-last DUR` builds only the segments whose time range overlaps the
 // window (federate.Window: by their file names, so a segment outside it
 // is never decoded once its host directory is pinned). `iormeshctl query
-// -from T -to T` selects its segments the same way (task ik4,
-// loadSelection) and then cuts their events to the window. The window
+// -from T -to T` resolves the same window (loadSelection) and cuts the
+// whole store's events to it; with -window-segments it selects its
+// segments the same way first (task ik4). The window
 // selects whole segments, not events: the build covers the window
 // widened to its segments' edges, about a minute or two each side. T is
 // query's (query.ParseTime): RFC 3339, or a UTC time of day placed on

@@ -11,9 +11,10 @@ import (
 	"iormesh/internal/schema"
 )
 
-// Task ik4: query's time window selects the segments it opens, as
-// build's does (loadSelection, federate.Window), instead of decoding the
-// whole store and cutting the events afterwards.
+// Task ik4: with -window-segments query's time window selects the
+// segments it opens, as build's does (loadSelection, federate.Window);
+// by default it still decodes the whole store and cuts the events
+// afterwards, exactly as before.
 
 // minuteHost adds host app3 (project shop) to f: one segment a minute,
 // each named by the minute its event was written at (writeStoreSegments,
@@ -62,25 +63,50 @@ func countChecks(f *buildFixture) func() int {
 func at(d time.Duration) string { return windowT0.Add(d).Format(time.RFC3339Nano) }
 
 // TestQueryWindowOpensItsSegments: once the host directories are pinned,
-// a windowed query decodes only the segments whose range (their start,
-// a minute before, to their interval and a minute after) overlaps the
-// window — not the whole store, which a query without a window still
-// reads.
+// a -window-segments query decodes only the segments whose range (their
+// start, a minute before, to their interval and a minute after) overlaps
+// the window; a query without the flag, windowed or not, still decodes
+// the whole store.
 func TestQueryWindowOpensItsSegments(t *testing.T) {
 	f := newBuildFixture(t)
 	minuteHost(t, f)
 	f.mustRun(t, "build") // pins the three host directories
 	count := countChecks(f)
-	f.mustRun(t, slices.Concat([]string{"query"}, queryProjects)...)
-	if n := count(); n != 20 { // app1 5, app2 3, app3 12
-		t.Fatalf("a query without a window decoded %d segments, want all 20", n)
+	window := []string{"-from", at(5 * time.Minute), "-to", at(7 * time.Minute)}
+	for _, args := range [][]string{nil, window} {
+		f.mustRun(t, slices.Concat([]string{"query"}, queryProjects, args)...)
+		if n := count(); n != 20 { // app1 5, app2 3, app3 12
+			t.Errorf("query %v decoded %d segments, want all 20", args, n)
+		}
 	}
 	// [t0+5m, t0+7m): app3's segments t0+4m..t0+7m, and the t0+6m one
 	// of app1 and of app2.
-	f.mustRun(t, slices.Concat([]string{"query"}, queryProjects,
-		[]string{"-from", at(5 * time.Minute), "-to", at(7 * time.Minute)})...)
+	f.mustRun(t, slices.Concat([]string{"query", "-window-segments"}, queryProjects, window)...)
 	if n := count(); n != 6 {
-		t.Errorf("a query of [t0+5m, t0+7m) decoded %d segments, want 6", n)
+		t.Errorf("a -window-segments query of [t0+5m, t0+7m) decoded %d segments, want 6", n)
+	}
+	if code := f.run("query", "-window-segments"); code != exitUsage {
+		t.Errorf("-window-segments without a window: exit %d, want %d", code, exitUsage)
+	}
+}
+
+// TestQueryDefaultWindowExact: without -window-segments a windowed query
+// keeps everything the whole store knows — app2's events inside the
+// window carry the merged id of a connection whose app1 connect lies in
+// a later segment — and returns the events -window-segments misses.
+func TestQueryDefaultWindowExact(t *testing.T) {
+	f := newBuildFixture(t)
+	f.mustRun(t, "build")
+	window := []string{"-from", "00:53:20.001", "-to", "00:53:20.002"}
+	exact, _ := queryLines(t, f.mustRun(t, slices.Concat([]string{"query"}, queryProjects, window)...))
+	narrow, _ := queryLines(t, f.mustRun(t,
+		slices.Concat([]string{"query", "-window-segments"}, queryProjects, window)...))
+	if len(exact) != 7 || len(narrow) >= len(exact) {
+		t.Fatalf("exact %d events, -window-segments %d: want 7 and fewer", len(exact), len(narrow))
+	}
+	if exact[0].ConnID == "s1" || narrow[0].ConnID != "s1" {
+		t.Errorf("conn ids: exact %q (want merged), -window-segments %q (want host-local s1)",
+			exact[0].ConnID, narrow[0].ConnID)
 	}
 }
 
@@ -97,10 +123,10 @@ func inWindow(evs []schema.Event, from, to time.Duration) []schema.Event {
 	return out
 }
 
-// TestQueryWindowEquivalent: for events written within the slack of
-// their stamp, a windowed query writes exactly what the whole store's
-// query, cut to the window afterwards, holds — the narrowing loses
-// nothing inside the window.
+// TestQueryWindowEquivalent: a windowed query (the default, no
+// -window-segments) writes exactly what the whole store's query, cut to
+// the window afterwards, holds; a time of day lands on t0's date, the
+// first segment's.
 func TestQueryWindowEquivalent(t *testing.T) {
 	f := newBuildFixture(t)
 	minuteHost(t, f)
@@ -111,7 +137,8 @@ func TestQueryWindowEquivalent(t *testing.T) {
 		lo, hi   time.Duration // the window, hi 0 for open
 	}{
 		{nil, at(5 * time.Minute), "", 5 * time.Minute, 0},
-		{nil, "00:58:20", "00:59:20", 5 * time.Minute, 6 * time.Minute}, // t0 is 00:53:20
+		{nil, "00:53:20.001", "00:53:20.002", time.Millisecond, 2 * time.Millisecond}, // the skewed mesh
+		{nil, "00:58:20", "00:59:20", 5 * time.Minute, 6 * time.Minute},               // t0 is 00:53:20
 		{[]string{"-host", "app3"}, "", at(2 * time.Minute), 0, 2 * time.Minute},
 		{[]string{"-file", "/data/*"}, at(3 * time.Minute), at(6 * time.Minute), 3 * time.Minute,
 			6 * time.Minute},
@@ -119,7 +146,7 @@ func TestQueryWindowEquivalent(t *testing.T) {
 		base := slices.Concat([]string{"query"}, queryProjects, c.filter)
 		whole, _ := queryLines(t, f.mustRun(t, base...))
 		want := inWindow(whole, c.lo, c.hi)
-		args := base
+		args := slices.Clone(base)
 		if c.from != "" {
 			args = append(args, "-from", c.from)
 		}
@@ -138,7 +165,8 @@ func eventsEqual(a, b schema.Event) bool {
 	return string(schema.AppendEvent(nil, &a)) == string(schema.AppendEvent(nil, &b))
 }
 
-// TestQueryWindowLongCall: a call stamped inside the window but written
+// TestQueryWindowLongCall: with -window-segments, a call stamped inside
+// the window but written
 // after its end is still found when it was written within the slack of
 // that end (the segment it lies in starts less than a minute after -to)
 // and missed when written later — build's guarantee, no more.
@@ -146,7 +174,7 @@ func TestQueryWindowLongCall(t *testing.T) {
 	f := newBuildFixture(t)
 	minuteHost(t, f)
 	f.mustRun(t, "build")
-	evs, _ := queryLines(t, f.mustRun(t, "query", "-project", "shop", "-host", "app3",
+	evs, _ := queryLines(t, f.mustRun(t, "query", "-window-segments", "-project", "shop", "-host", "app3",
 		"-from", at(6*time.Minute+30*time.Second), "-to", at(6*time.Minute+50*time.Second)))
 	var paths []string
 	for _, ev := range evs {

@@ -343,7 +343,7 @@ func wallNS(t time.Time) uint64 {
 // narrowed to -namespace; a selection without one readable segment is an
 // error naming what was asked for.
 func selectSegments(ctx context.Context, e env, f buildFlags, paths buildPaths) (selection, error) {
-	sel, pins, err := loadSelection(ctx, e, f, paths)
+	sel, pins, err := loadSelection(ctx, e, f, paths, true)
 	if err != nil {
 		return selection{}, err
 	}
@@ -362,13 +362,15 @@ func selectSegments(ctx context.Context, e env, f buildFlags, paths buildPaths) 
 // loadSelection is the one selection build and query share (task ik4):
 // it picks the projects, resolves f's window (windowSpec.resolve, the
 // one place a time of day is anchored) and loads the projects' segments
-// — only the window's, when there is one — each checked in a
+// — with narrow, only the window's when there is one; without, all of
+// them, the window still resolved into sel.window — each checked in a
 // memory-capped child (check.go) and each host directory held to the
 // identity pinned for it. It pins nothing: build pins what it returns
 // (selectSegments), query never does. A windowed load checks every
 // segment of a directory not pinned yet (federate.Window), so what build
 // pins is what a full build would.
-func loadSelection(ctx context.Context, e env, f buildFlags, paths buildPaths) (selection, hostPins, error) {
+func loadSelection(ctx context.Context, e env, f buildFlags, paths buildPaths,
+	narrow bool) (selection, hostPins, error) {
 	var sel selection
 	var err error
 	if sel.projects, err = buildProjects(paths.store, f.projects); err != nil {
@@ -377,7 +379,11 @@ func loadSelection(ctx context.Context, e env, f buildFlags, paths buildPaths) (
 	if sel.window, err = f.window.resolve(e, paths.store, sel.projects); err != nil {
 		return selection{}, hostPins{}, err
 	}
-	segs, pins, err := checkedSegmentsIn(ctx, paths, sel.projects, sel.window)
+	load := sel.window
+	if !narrow {
+		load = nil
+	}
+	segs, pins, err := checkedSegmentsIn(ctx, paths, sel.projects, load)
 	if err != nil {
 		return selection{}, hostPins{}, err
 	}

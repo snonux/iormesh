@@ -24,10 +24,13 @@ import (
 // segment is decoded first in the memory-capped child (check.go), each
 // host directory is held to its pinned identity, and a segment that
 // fails is left out — named on stderr, the exit status 1 — never half
-// read. With -from/-to only the segments whose range overlaps the
-// window are loaded (task ik4: loadSelection, build's selection and its
-// guarantee, window.go), and the slice is computed from them alone. The
-// merge runs again so that the slice speaks the merged
+// read. By default every segment is loaded and -from/-to cut the events
+// afterwards, so a window's slice is exactly the whole trace's events in
+// it. -window-segments (task ik4) trades that for speed: only the
+// segments whose range overlaps the window are loaded (loadSelection,
+// build's selection and its guarantee, window.go), and the slice is
+// computed from them alone. The merge runs again so that the slice
+// speaks the merged
 // connection ids (both ends of a fused connection share one) and knows
 // each process's app. -method reads the sessions' methods tables, each
 // checked in the child the same way. Unlike build, query writes nothing:
@@ -57,7 +60,9 @@ type queryFlags struct {
 	ref                                string
 	event, pid, errno, otelTrace       string
 	follow                             bool
-	maxBytes                           int64
+	// windowSegments loads only the window's segments (task ik4).
+	windowSegments bool
+	maxBytes       int64
 }
 
 // queryCommand parses query's flags, checks the filter before reading
@@ -87,6 +92,8 @@ func addQueryFlags(fs *flag.FlagSet, f *queryFlags) {
 		"(default ~/.local/share/iormesh/services.db)")
 	fs.StringVar(&f.from, "from", "", "first instant, RFC 3339 or HH:MM:SS[.frac] UTC on the trace's first day")
 	fs.StringVar(&f.to, "to", "", "end instant (exclusive), as -from")
+	fs.BoolVar(&f.windowSegments, "window-segments", false, "with -from/-to: read only the segments "+
+		"overlapping the window, as build does (faster, not exact: see the usage text)")
 	fs.StringVar(&f.host, "host", "", "host glob: store host name or FQDN")
 	fs.StringVar(&f.app, "app", "", "app glob: the app's target pattern or the process's comm")
 	fs.StringVar(&f.thread, "thread", "", "thread glob: Java thread name or kernel tid")
@@ -114,6 +121,9 @@ func parseQueryFilter(f *queryFlags) (query.Filter, error) {
 	}
 	if err := parseWindow(windowFlags{from: f.from, to: f.to}, &f.paths); err != nil {
 		return query.Filter{}, err
+	}
+	if f.windowSegments && !f.paths.windowed {
+		return query.Filter{}, fmt.Errorf("%w: -window-segments needs -from or -to", errUsage)
 	}
 	if err := filter.Validate(); err != nil {
 		return query.Filter{}, fmt.Errorf("%w: %w", errUsage, err)
@@ -149,25 +159,25 @@ func parseValueFlags(f queryFlags, filter *query.Filter) error {
 	return nil
 }
 
-// runQuery loads the store — with -from or -to only the segments whose
-// range overlaps the window (loadSelection, build's selection; task
-// ik4) — merges it, and writes the slice; bad segments are reported
-// after it.
+// runQuery loads the store (loadSelection, build's selection: the whole
+// store, or with -window-segments only the segments whose range overlaps
+// the window; task ik4), merges it, and writes the slice; bad segments
+// are reported after it.
 func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter) error {
 	paths, err := resolveBuildPaths(e, f.paths)
 	if err != nil {
 		return err
 	}
-	sel, _, err := loadSelection(ctx, e, f.paths, paths)
+	sel, _, err := loadSelection(ctx, e, f.paths, paths, f.windowSegments)
 	if err != nil {
 		return err
 	}
 	segs := sel.segs
 	switch {
 	case len(segs.Sources) > 0:
-	case sel.window != nil && len(segs.Bad) == 0:
+	case f.windowSegments && len(segs.Bad) == 0:
 		// No segment overlaps the window, so no event lies in it:
-		// the empty slice a whole-store query gave before.
+		// the empty slice the exact query gives.
 		return nil
 	default:
 		return fmt.Errorf("query: no readable segment for %s%s in %s (%d bad)",
@@ -186,8 +196,8 @@ func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter) err
 
 // windowFilter cuts the events to the resolved window (nil: no window)
 // by their wall_ns, From ≤ wall_ns < To, a side not given left open:
-// the window selected the segments, whole, and they hold events of its
-// edges' neighbours too.
+// the segments loaded hold events outside it (all of them by default;
+// with -window-segments whole segments around its edges).
 func windowFilter(filter *query.Filter, w *federate.Window) {
 	if w == nil {
 		return

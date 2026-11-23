@@ -22,8 +22,9 @@
 //	iormeshctl tui [-project NAME]... [-store DIR] [-builds DIR] [-namespace NS] [-windowed]
 //	iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
 //	                 [-apply [-dist DIR] [-key FILE]]
-//	iormeshctl query [-project NAME]... [-from T] [-to T] [-host GLOB] [-app GLOB] [-thread GLOB]
-//	                 [-conn ID [-follow]] [-file GLOB] [-method GLOB] [-ref REF] [-event KIND]
+//	iormeshctl query [-project NAME]... [-from T] [-to T] [-window-segments]
+//	                 [-host GLOB] [-app GLOB] [-thread GLOB] [-conn ID [-follow]]
+//	                 [-file GLOB] [-method GLOB] [-ref REF] [-event KIND]
 //	                 [-pid PID] [-errno NAME|N] [-otel-trace ID] [-max-bytes N]
 //	iormeshctl services [list|edges|name|rules|unname] [-db FILE] ...
 //	iormeshctl verify [-key FILE] FILE...
@@ -367,8 +368,9 @@ func usage(w io.Writer) {
   iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
                     [-apply [-dist DIR] [-key FILE]]
   iormeshctl query [-project NAME]... [-store DIR] [-db FILE] [-from T] [-to T]
-                   [-host GLOB] [-app GLOB] [-thread GLOB] [-conn ID [-follow]]
-                   [-file GLOB] [-method GLOB] [-ref REF] [-event KIND] [-pid PID]
+                   [-window-segments] [-host GLOB] [-app GLOB] [-thread GLOB]
+                   [-conn ID [-follow]] [-file GLOB] [-method GLOB] [-ref REF]
+                   [-event KIND] [-pid PID]
                    [-errno NAME|N] [-otel-trace ID] [-max-bytes N]
   iormeshctl services [list] [-db FILE] [-project NAME] [-paths]
   iormeshctl services edges [-db FILE] [-project NAME] [-from NAME]
@@ -435,11 +437,13 @@ bound to its listening port) and deploys to it as deploy does; one
 query reads the store as build does and writes the matching
 events as schema NDJSON, at most -max-bytes (default 1 MiB) of it; a cut
 slice ends in a truncation record. T is RFC 3339 or HH:MM:SS[.frac] UTC
-on the trace's first day; -to is exclusive. -from/-to read only the
-segments whose range overlaps the window, as build -from/-to does: an
-event inside it written over a minute after -to is missed, and
-connection ids, -app, -file and -follow see only those segments.
-Filters AND; -event takes
+on the trace's first day; -to is exclusive. A window is exact: query
+reads the whole store and cuts the events to it. -window-segments reads
+only the segments whose range overlaps the window, as build -from/-to
+does — faster on a large store, not exact: an event inside it written
+over a minute after -to is missed, a connection opened before those
+segments keeps its host-local id, and -app, -file and -follow see only
+them. Filters AND; -event takes
 a schema kind, -errno a Linux errno name or number, -otel-trace a W3C
 trace id.
 
