@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 
 	"github.com/magefile/mage/sh"
+	"github.com/magefile/mage/target"
 
 	"iormesh/internal/version"
 )
@@ -61,11 +62,42 @@ var (
 // the tracers, and `iormeshctl deploy` ships it to hosts whose projects
 // use the agent. A copy over an older one leaves that one's signature
 // behind, which no longer verifies, so a jar is never shipped unsigned
-// by `mage sign`.
+// by `mage sign`. A jar newer than all its inputs is kept (agentJarFresh),
+// so the targets depending on it (Test and TestRace, task yk4) do not
+// rebuild it on every run; its dist/ copy is refreshed only when missing
+// or older.
 func AgentBuild() error {
 	if err := verifyASM(); err != nil {
 		return err
 	}
+	fresh, err := agentJarFresh()
+	if err != nil {
+		return err
+	}
+	if !fresh {
+		if err := buildAgentJar(); err != nil {
+			return err
+		}
+	}
+	return copyAgentToDist()
+}
+
+// agentJarInputs are what agentJar is built from: the agent's sources,
+// resources and tools (not agent/build, the intermediates, nor agent/test),
+// the vendored ASM, and internal/version, whose release version packAgent
+// stamps into the manifest.
+var agentJarInputs = []string{"agent/bridge", "agent/core", "agent/tools",
+	"agent/third_party", "internal/version"}
+
+// agentJarFresh reports whether agentJar exists and is newer than every
+// file under agentJarInputs.
+func agentJarFresh() (bool, error) {
+	stale, err := target.Dir(agentJar, agentJarInputs...)
+	return !stale, err
+}
+
+// buildAgentJar builds agentJar from scratch, intermediates included.
+func buildAgentJar() error {
 	// A clean build dir keeps classes of deleted sources out of the jars.
 	if err := os.RemoveAll(agentBuildDir); err != nil {
 		return err
@@ -75,13 +107,21 @@ func AgentBuild() error {
 			return err
 		}
 	}
-	if err := packAgent(); err != nil {
+	return packAgent()
+}
+
+// copyAgentToDist copies agentJar to distDir unless the copy there is
+// already as new, which a fresh build never leaves it.
+func copyAgentToDist() error {
+	dst := filepath.Join(distDir, filepath.Base(agentJar))
+	stale, err := target.Path(dst, agentJar)
+	if err != nil || !stale {
 		return err
 	}
 	if err := os.MkdirAll(distDir, 0o755); err != nil {
 		return err
 	}
-	return sh.Copy(filepath.Join(distDir, filepath.Base(agentJar)), agentJar)
+	return sh.Copy(dst, agentJar)
 }
 
 // verifyASM checks the vendored ASM jar against its pinned SHA-256.

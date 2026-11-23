@@ -98,6 +98,7 @@ func IntegrationTests() []string {
 		"TestFirstRunWithoutKernelLoss",
 		"TestTracepointExists",
 		"TestKernelProbeFindsTheM1Tracepoints",
+		"TestBuildHint",
 	}
 }
 

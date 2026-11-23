@@ -51,8 +51,9 @@ mage generate      # tracepoint formats -> C handlers, Go tables, Go types,
                    # per-arch syscall numbers (from golang.org/x/sys)
 mage bpfBuild      # vmlinux.h (first run) + clang CO-RE -> iormesh.bpf.o
 mage build         # bpfBuild + go build ./... + bin/iormesh, bin/iormeshctl
-mage test          # go test ./... (the generator's C harness tests too)
-mage testRace      # go test -race, all but generate and ctl
+mage test          # go test ./... (the generator's C harness tests too);
+                   # builds what it reads first: bpfBuild, agentBuild
+mage testRace      # go test -race, all but generate and ctl, same deps
                    # (docs/testing.md, "Race detector gate")
 mage vet           # go vet ./... with the cgo environment
 mage lint          # golangci-lint: errcheck + staticcheck SA + unused
@@ -65,7 +66,8 @@ mage bpfRootTest   # BPF root tests: loader, TCP, fork, exec watch (sudo -n)
 mage integrationTest        # tracer + workload end to end, as root
 mage integrationTestSerial  # the same, one test at a time
 mage agentBuild    # the Java agent -> bin/iormesh-agent.jar (M3),
-                   # copied to dist/ for mage sign and deploy
+                   # copied to dist/ for mage sign and deploy;
+                   # kept when newer than its sources
 mage agentTest     # its unit tests, -javaagent smoke runs and
                    # the ring's Java-driven Go tests
 ```

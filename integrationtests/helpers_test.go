@@ -4,6 +4,7 @@ package integrationtests
 // (newTestHarness, absPath, enableParallelIfRequested, the judged-run
 // retry). Changes: the harness paths are ../bin/iormesh and
 // ../bin/workload.jar (the build outputs live in bin/, decision #30);
+// absPath names the mage target that builds a missing artifact (buildHint);
 // the parallel switch is the -iormesh.parallel flag; the assertion helpers
 // are iormesh's: the golden check of internal/normalize and graph checks;
 // the judged-run retry is generic (judge), so a test with its own
@@ -68,9 +69,31 @@ func absPath(t *testing.T, rel string) string {
 		t.Fatalf("resolve path %s: %v", rel, err)
 	}
 	if _, err := os.Stat(p); err != nil {
-		t.Fatalf("%s: %v (build it: mage build workloadBuild)", p, err)
+		t.Fatalf("%s: %v%s", p, err, buildHint(rel))
 	}
 	return p
+}
+
+// artifactTargets maps each bin/ artifact the suite reads to the mage target
+// that builds it; mage integrationTest builds them all.
+var artifactTargets = map[string]string{
+	"iormesh":           "build",
+	"iormeshctl":        "build",
+	"workload.jar":      "workloadBuild",
+	"edgepeer":          "workloadBuild",
+	"echopeer":          "workloadBuild",
+	"workload-otel.jar": "workloadOtelBuild",
+	"workload-libs.jar": "workloadLibsBuild",
+	"iormesh-agent.jar": "agentBuild",
+}
+
+// buildHint is absPath's advice for a missing rel: the target that builds
+// it when it is a build artifact, nothing for a source file.
+func buildHint(rel string) string {
+	if target, ok := artifactTargets[filepath.Base(rel)]; ok {
+		return " (build it: mage " + target + ")"
+	}
+	return ""
 }
 
 // enableParallelIfRequested runs the test in parallel when the binary was

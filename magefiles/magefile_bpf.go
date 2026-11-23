@@ -84,8 +84,14 @@ func BpfBuild() error {
 }
 
 // Test runs the full Go test suite (not the Java workload; see WorkloadTest).
+// It builds what the suite's unprivileged tests read (task yk4), so it
+// passes after `mage clean` or on a fresh clone: the BPF object internal
+// embeds, and bin/iormesh-agent.jar, which integrationtests'
+// TestJavaAttachDynamicLoading stats before its root skip. AgentBuild keeps
+// a fresh jar (agentJarFresh). The other bin/ artifacts are read only by
+// tests that skip without root; mage integrationTest builds those.
 func Test() error {
-	mg.Deps(BpfBuild)
+	mg.Deps(BpfBuild, AgentBuild)
 	if err := run(gatecmd.CleanTestCache()); err != nil {
 		return err
 	}
@@ -96,9 +102,10 @@ func Test() error {
 // `go list ./...` names except gatecmd.RaceExcluded, the two whose -race
 // cost dwarfs what they could find (docs/testing.md, "Race detector gate").
 // $IORMESH_RACE_PKGS (space-separated) replaces the package set, to race-check
-// one package while working on it.
+// one package while working on it. It builds what Test builds, for the same
+// reason.
 func TestRace() error {
-	mg.Deps(BpfBuild)
+	mg.Deps(BpfBuild, AgentBuild)
 	pkgs := strings.Fields(os.Getenv(gatecmd.RacePackagesEnv))
 	if len(pkgs) == 0 {
 		argv := gatecmd.ListPackages()
