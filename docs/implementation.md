@@ -4464,6 +4464,7 @@ internal/servicedb/observe.go  # Observe(sources, federate.Result)
 internal/servicedb/traffic.go  # per-conn window, http, dns from events
 internal/servicedb/builder.go  # fused / unresolved / same-host pairs
 internal/servicedb/store.go    # Import: validate, upsert, supersede
+internal/servicedb/forget.go   # Forget: drop pruned sources (task gk4)
 internal/servicedb/rules.go    # naming rules: glob + port -> service
 internal/servicedb/query.go    # Endpoints (unnamed first)
 internal/servicedb/edges.go    # Interactions: who talks to whom
@@ -4483,6 +4484,9 @@ CREATE TABLE http_request (        -- per conn and source (v2): method,
   ..., source, requests,           --   scheme, host, path; a count per
   first_seen, last_seen,           --   source, summed at read time
   FOREIGN KEY (host, conn_id) REFERENCES conn ON DELETE CASCADE);
+CREATE TABLE conn_source (         -- v4 (task gk4): the sources that saw
+  host, conn_id, source,           --   a conn, each with its window, so
+  first_seen, last_seen);          --   DB.Forget can drop pruned segments
 CREATE TABLE naming_rule (         -- human input: never touched by build
   id INTEGER PRIMARY KEY, host_glob TEXT, port INTEGER, -- 0: any
   service TEXT, UNIQUE (host_glob, port));
@@ -4769,7 +4773,7 @@ internal/ctl/prune.go           # iormeshctl prune
 iormeshctl build [...] [-from T] [-to T] [-last DUR]
 iormeshctl show [VIEW] [...] -windowed
 iormeshctl open|tui [...] -windowed
-iormeshctl prune -older-than DUR [-project P]... [-store DIR] [-apply]
+iormeshctl prune -older-than DUR [-project P]... [-store DIR] [-db FILE] [-apply]
 ```
 
 - **A segment's range, from its name.** `federate.Span` is the
@@ -4828,9 +4832,34 @@ iormeshctl prune -older-than DUR [-project P]... [-store DIR] [-apply]
   A table file goes only once no events segment of its session
   stays in the directory (a newer segment's events may name
   rows it holds). Deletes go through an `os.Root` on the store.
-  Directories, host pins and the service database's counts
-  stay. Auto-cleaning stays out: prune runs only when the
-  operator runs it.
+  Directories and host pins stay. Auto-cleaning stays out:
+  prune runs only when the operator runs it.
+- **The service database forgets** (task gk4). Without it a
+  full build after `prune -apply` still showed the deleted
+  segments' services, edges and counts: the import is additive,
+  and a connection's row did not say which segments saw it.
+  Schema version 4 adds `conn_source (host, conn_id, source,
+  first_seen, last_seen)`: `Observe` records per connection
+  every source whose records name it (`Observation.Sources`,
+  either end's) and `Import` upserts them (MIN/MAX, so
+  idempotent), plus each request's source; a fused takeover
+  moves them like the requests, and a server half skipped
+  because its connection is fused elsewhere still adds its
+  sources to the fused row. The migration seeds the table from
+  the request rows' sources. `DB.Forget(sources)` runs in one
+  transaction: it deletes the sources' `http_request` and
+  `conn_source` rows, then per touched connection drops it
+  when no source is left (its requests cascade) or sets its
+  window to the remaining sources' span. Verdict, ends,
+  hostname and TLS hint stay; `naming_rule` is never touched.
+  `prune -apply` calls it with every listed file *before*
+  deleting any (`-db`, default the usual path; a missing
+  database is skipped, not created): a failed update deletes
+  nothing and exits 1, a failed delete afterwards leaves a file
+  the database forgot, which the next build re-imports. Gaps:
+  a pre-version-4 row without requests has no source and stays;
+  a build running during prune can re-import what was just
+  forgotten.
 - **Tests.** `internal/federate/window_test.go` (range edges);
   `internal/ctl/window_test.go` (`-from`, a time of day, `-last`,
   `-to` select the expected segments of the rotated fixture, the
@@ -4842,7 +4871,17 @@ iormeshctl prune -older-than DUR [-project P]... [-store DIR] [-apply]
   and an orphan's deleted, planted foreign entries — a stray
   name, a dot file, a symlink named like a segment, a directory
   named like one, a file above the host directories, a symlinked
-  host directory — untouched, `-project`, refusals).
+  host directory — untouched, `-project`, refusals; task gk4:
+  a peer seen only in a pruned segment is gone from the next
+  full build's services, edges and `services list` while a
+  kept segment's peer and the naming rules stay, no database
+  is created by prune, and an unusable database deletes
+  nothing); `internal/servicedb/forget_test.go` (connections
+  only a forgotten source saw dropped, the others' requests and
+  window narrowed, a repeat or unknown source a no-op, a
+  re-import restores them, a later server segment keeps a fused
+  row, the version 3 migration's seeded sources, unnamed source
+  spans refused).
 
 ### The microservices scenario
 

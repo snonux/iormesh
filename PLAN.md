@@ -1083,7 +1083,9 @@ Kubernetes (M7) build on it.
   store's own segment files whose time range ended more than
   DUR ago and deletes them only with `-apply` — never a file it
   cannot parse as a segment, a dot file or a symlink (see
-  **Build** below); no command prunes on its own.
+  **Build** below); no command prunes on its own. What prune
+  deletes, the service database forgets in the same run (task
+  gk4, see **Build window and prune**).
   Collect is project-aware: one project at a time, or
   several together.
   Built (task eb4, `internal/ctl/collect.go`): `iormeshctl
@@ -1241,6 +1243,26 @@ Kubernetes (M7) build on it.
   segment; without `-apply` it lists, with it it deletes and
   prints each file. Auto-cleaning the store stays out of scope:
   prune is the operator's explicit command.
+  **Prune forgets** (task gk4): `prune -apply` also makes the
+  service database forget the files it deletes, so a full build
+  afterwards shows no service, edge or request count that only
+  deleted segments held. The database records which sources
+  (segments) named each connection (`conn_source`, schema
+  version 4, seeded from the request rows' sources);
+  `servicedb.DB.Forget` drops a source's request rows and every
+  connection no other source names, and narrows the rest's
+  window to their remaining sources. Naming rules, verdicts,
+  hostnames and TLS hints stay. Order: the database forgets
+  first, in one transaction, then the files go. A failed
+  database update deletes nothing and exits non-zero; a failed
+  delete after it leaves a file the database forgot, which the
+  next build that reads it imports again — so the database
+  never counts a file that is gone without prune saying so. No
+  database yet (no build) is nothing to forget, and prune does
+  not create one. Rows of a database from before version 4
+  without requests carry no source and are kept. A build
+  running alongside prune can import a segment again after it
+  was forgotten; prune is meant to run between builds.
 - **Clock reconciliation from the traffic itself**: every
   fused connection gives send-before-receive constraints in
   both directions (send = send-syscall enter, receive =
@@ -1421,7 +1443,9 @@ Kubernetes (M7) build on it.
   kept apart and the larger counts, never both (exact while
   one view's segments were all imported at some point, a lower
   bound otherwise). Re-import is
-  idempotent and a build over fewer segments loses nothing.
+  idempotent and a build over fewer segments loses nothing;
+  only `prune -apply` makes it forget the segments it deletes
+  (task gk4, **Build window and prune**).
   The requests give the TLS and path hints; the hostname is
   the client's HTTP host when that is a name, else its DNS
   lookup of the endpoint's address (a best guess: one address

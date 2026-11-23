@@ -209,3 +209,76 @@ func TestPruneRefusals(t *testing.T) {
 		}
 	}
 }
+
+// TestPruneForgetsInServiceDB (task gk4): prune -apply makes the service
+// database forget the deleted segments, so a full build afterwards no
+// longer shows a service seen only in them — while one seen in a
+// segment that stays, and the operator's naming rules, remain.
+func TestPruneForgetsInServiceDB(t *testing.T) {
+	f := newBuildFixture(t)
+	const early, late = "198.51.100.1:5432", "198.51.100.2:6379"
+	lateDialer(t, f, early, late) // early only in seq 0 (t0), late in seq 1 (t0+3m)
+	f.mustRun(t, "services", "name", "198.51.100.*", "dbs")
+	f.mustRun(t, "build")
+	if all := endpointsOf(t, f.mustRun(t, "show", "services", "-json")); !slices.Contains(all, early) {
+		t.Fatalf("full build's services %v: want %s", all, early)
+	}
+	// Cutoff t0+3m: every seq 0 (its range ends at t0+2m) goes, seq 1
+	// (ends at t0+5m) stays.
+	f.e.now = func() time.Time { return windowT0.Add(10 * time.Minute) }
+	out := f.mustRun(t, "prune", "-older-than", "7m")
+	if !strings.Contains(out, "service database") {
+		t.Errorf("the listing does not say the database forgets them too:\n%s", out)
+	}
+	out = f.mustRun(t, "prune", "-older-than", "7m", "-apply")
+	if !strings.Contains(out, "service database: forgot") {
+		t.Errorf("prune -apply does not report the database update:\n%s", out)
+	}
+	f.mustRun(t, "build")
+	got := endpointsOf(t, f.mustRun(t, "show", "services", "-json"))
+	if slices.Contains(got, early) || !slices.Contains(got, late) {
+		t.Errorf("services after prune -apply and a full build %v: want %s and not %s", got, late, early)
+	}
+	if edges := f.mustRun(t, "show", "edges", "-json"); strings.Contains(edges, "198.51.100.1") {
+		t.Errorf("edges still name the peer seen only in pruned segments:\n%s", edges)
+	}
+	if list := f.mustRun(t, "services", "-db", f.db); strings.Contains(list, "198.51.100.1") {
+		t.Errorf("services list still names the pruned peer:\n%s", list)
+	}
+	if rules := f.mustRun(t, "services", "rules"); !strings.Contains(rules, "dbs") {
+		t.Errorf("prune dropped the operator's rule:\n%s", rules)
+	}
+}
+
+// TestPruneNoServiceDB: prune -apply before any build (no service
+// database yet) deletes the files and creates no database.
+func TestPruneNoServiceDB(t *testing.T) {
+	f := newBuildFixture(t)
+	f.e.now = func() time.Time { return windowT0.Add(10 * time.Minute) }
+	out := f.mustRun(t, "prune", "-older-than", "7m", "-apply")
+	if len(listed(out, "deleted       ")) == 0 {
+		t.Errorf("nothing deleted:\n%s", out)
+	}
+	if _, err := os.Lstat(f.db); !os.IsNotExist(err) {
+		t.Errorf("prune created the service database: %v", err)
+	}
+}
+
+// TestPruneDBFailureDeletesNothing (negative): when the service
+// database cannot be updated, prune -apply deletes no file — the
+// database never keeps counting a file that is gone.
+func TestPruneDBFailureDeletesNothing(t *testing.T) {
+	f := newBuildFixture(t)
+	f.mustRun(t, "build")
+	if err := os.Chmod(f.db, 0o644); err != nil { // refused: readable by others
+		t.Fatal(err)
+	}
+	f.e.now = func() time.Time { return windowT0.Add(10 * time.Minute) }
+	if code := f.run("prune", "-older-than", "7m", "-apply"); code != exitError ||
+		!strings.Contains(f.stderr.String(), "nothing deleted") {
+		t.Errorf("prune over an unusable database: exit %d, %s", code, f.stderr)
+	}
+	if _, err := os.Lstat(f.app1Files[0]); err != nil {
+		t.Errorf("a failed database update still deleted %s: %v", f.app1Files[0], err)
+	}
+}

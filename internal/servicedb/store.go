@@ -80,6 +80,25 @@ ON CONFLICT (host, conn_id, source, method, scheme, http_host, path) DO UPDATE S
 	last_seen = MAX(http_request.last_seen, excluded.last_seen),
 	templated = MAX(http_request.templated, excluded.templated)`
 
+// upsertSource records that a source saw a connection, and when (task
+// gk4): the window only widens, so a source read again — the same, or
+// grown — and a request's source written after the connection's own
+// span both land idempotently. DB.Forget reads these rows to drop a
+// pruned segment's connections.
+const upsertSource = `INSERT INTO conn_source (host, conn_id, source, first_seen, last_seen)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (host, conn_id, source) DO UPDATE SET
+	first_seen = MIN(conn_source.first_seen, excluded.first_seen),
+	last_seen = MAX(conn_source.last_seen, excluded.last_seen)`
+
+// moveSources re-keys one connection row's sources onto another, by
+// upsertSource's rule (the WHERE as in moveRequests).
+const moveSources = `INSERT INTO conn_source (host, conn_id, source, first_seen, last_seen)
+SELECT ?, ?, source, first_seen, last_seen FROM conn_source WHERE host = ? AND conn_id = ?
+ON CONFLICT (host, conn_id, source) DO UPDATE SET
+	first_seen = MIN(conn_source.first_seen, excluded.first_seen),
+	last_seen = MAX(conn_source.last_seen, excluded.last_seen)`
+
 // Import folds a snapshot into the database in one transaction: either
 // all of it lands or none. Naming rules are never touched. A fused
 // connection whose server end had a row of its own (imported while only
@@ -103,12 +122,20 @@ func (d *DB) Import(ctx context.Context, s Snapshot) error {
 	})
 }
 
-// importOne writes one observation and its requests, which replace the
-// rows their sources had on the connection.
+// importOne writes one observation, its sources and its requests, which
+// replace the rows their sources had on the connection.
 func importOne(ctx context.Context, tx *sql.Tx, o Observation) error {
 	if o.State != schema.StateFused && o.Role == RoleServer {
-		if fused, err := fusedElsewhere(ctx, tx, o); err != nil || fused {
+		host, conn, err := fusedElsewhere(ctx, tx, o)
+		if err != nil {
 			return err
+		}
+		if host != "" {
+			// The fused row holds the connection; it still learns that
+			// o's sources name it, so forgetting the client's segments
+			// does not drop a connection a kept server segment shows.
+			o.Host, o.ConnID, o.Requests = host, conn, nil
+			return writeSources(ctx, tx, o)
 		}
 	}
 	server, err := serverRow(ctx, tx, &o)
@@ -132,17 +159,42 @@ func importOne(ctx context.Context, tx *sql.Tx, o Observation) error {
 			return err
 		}
 	}
+	return writeSources(ctx, tx, o)
+}
+
+// writeSources records o's sources on its row: its own spans and every
+// request's source, so a request row never outlives the record of the
+// source it came from when that source is forgotten.
+func writeSources(ctx context.Context, tx *sql.Tx, o Observation) error {
+	put := func(name string, first, last uint64) error {
+		_, err := tx.ExecContext(ctx, upsertSource, o.Host, o.ConnID, name, int64(first), int64(last))
+		return err
+	}
+	for _, s := range o.Sources {
+		if err := put(s.Name, s.First, s.Last); err != nil {
+			return err
+		}
+	}
+	for _, r := range o.Requests {
+		if err := put(r.Source, r.First, r.Last); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-// fusedElsewhere reports whether an earlier import fused the connection
-// whose server half o is: that row already holds it.
-func fusedElsewhere(ctx context.Context, tx *sql.Tx, o Observation) (bool, error) {
-	var n int
-	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM conn WHERE state = 'fused'
-		AND server_host = ? AND server_conn = ? AND NOT (host = ? AND conn_id = ?)`,
-		o.Host, o.ConnID, o.Host, o.ConnID).Scan(&n)
-	return n > 0, err
+// fusedElsewhere finds the row an earlier import fused the connection
+// whose server half o is into: that row already holds it. It returns
+// that row's key, or "" when there is none.
+func fusedElsewhere(ctx context.Context, tx *sql.Tx, o Observation) (host, conn string, err error) {
+	err = tx.QueryRowContext(ctx, `SELECT host, conn_id FROM conn WHERE state = 'fused'
+		AND server_host = ? AND server_conn = ? AND NOT (host = ? AND conn_id = ?)
+		ORDER BY host, conn_id LIMIT 1`,
+		o.Host, o.ConnID, o.Host, o.ConnID).Scan(&host, &conn)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", nil
+	}
+	return host, conn, err
 }
 
 // serverRow looks for the row a fused o's server end had on its own and
@@ -170,12 +222,15 @@ func serverRow(ctx context.Context, tx *sql.Tx, o *Observation) (bool, error) {
 	return true, nil
 }
 
-// supersede moves the server row's requests onto o's row, then removes
-// the server row (its requests' old keys go with it, ON DELETE CASCADE).
+// supersede moves the server row's requests and sources onto o's row,
+// then removes the server row (their old keys go with it, ON DELETE
+// CASCADE).
 func supersede(ctx context.Context, tx *sql.Tx, o Observation) error {
 	h, c := o.Server.Host, o.Server.ConnID
-	if _, err := tx.ExecContext(ctx, moveRequests, o.Host, o.ConnID, h, c); err != nil {
-		return err
+	for _, q := range []string{moveRequests, moveSources} {
+		if _, err := tx.ExecContext(ctx, q, o.Host, o.ConnID, h, c); err != nil {
+			return err
+		}
 	}
 	_, err := tx.ExecContext(ctx, `DELETE FROM conn WHERE host = ? AND conn_id = ?`, h, c)
 	return err
@@ -233,6 +288,14 @@ func validate(o *Observation) error {
 		}
 		if err := validWindow(r.First, r.Last); err != nil {
 			return bad("request %s %s: %v", r.Method, r.Path, err)
+		}
+	}
+	for _, s := range o.Sources {
+		if s.Name == "" {
+			return bad("a source without a name")
+		}
+		if err := validWindow(s.First, s.Last); err != nil {
+			return bad("source %s: %v", s.Name, err)
 		}
 	}
 	return nil
