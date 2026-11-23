@@ -1538,7 +1538,11 @@ Kubernetes (M7) build on it.
   stopped. A deploy restart whose start fails after its stop
   leaves the project marked stopped, so ensure does not recover
   it. A tracer from before the field (`operator_stop`
-  absent) cannot tell, so its `stop` ends are left too. A
+  absent) cannot tell, so its `stop` ends are left too. Both
+  status texts say which ends ensure leaves (task 0l4): the
+  `iormeshctl status` NOTE and the host's `iormesh status`
+  name an operator's stop and a `stop` of unknown origin;
+  `-json` carries the field itself. A
   `disk_limit` end is collected first and restarted only when
   the collect emptied its `ready/` (a second status read);
   should the partition still be over the limit, the new run's
