@@ -1483,12 +1483,10 @@ loads the four mmsg handlers on the running kernel and logs the
 instructions its verifier processed (`verified_insns`): on the
 7.2 laptop 821 for each enter and about 42k for each exit (the
 loop), below its bound of 100k, a tenth of the 1M limit. That
-is 7.2's verifier, not el9's. Not yet run on el9 (VMs
-stopped); `TestEl9RecordLayout` relocates the eight new
-handlers against the trimmed el9 BTF — see "el9 runbook and
-pending runs" below.
+is 7.2's verifier; on el9 (task rj4) the count is the same,
+42,078 — see "el9 runbook and runs" below.
 
-## el9 runbook and pending runs
+## el9 runbook and runs
 
 Rocky 9.9 is the main target, and some evidence exists only as
 far as the 7.2 laptop and the trimmed el9 BTF can give it. To
@@ -1498,18 +1496,30 @@ stage it on `iom1` and run it serially as root, then remove it
 — the procedure of "Root suites on Rocky 9.9 (task nf4)" above.
 The VMs are started by the owner only.
 
-Not yet run on el9:
+Stage `internal/testdata/btf/` next to the binary too
+(`<dir>/internal/testdata/btf/`): `TestEl9RecordLayout` reads
+the trimmed el9 BTF from there and fails without it.
 
-- **oh4, the mmsg loop**: relocation checked against el9 BTF
-  (`TestEl9RecordLayout`); that 5.14's verifier accepts the
-  1024-message bounded loop of `internal/c/mmsg.c` is
-  estimated (unrolling disabled, constant bound; 7.2's
-  verifier processes about 42k instructions for the exit
-  handler against the 1M limit 5.14 also has) but not run.
-  On el9, run `TestMsgCallsTCP`, `TestMsgCallsUDP` and
-  `TestMmsgVerifierHeadroom` (5.14 has `verified_insns` only
-  from 5.16 upstream; if el9 lacks it, the load itself is the
-  evidence and the count check fails — read its log).
+**Root BPF gate on el9 (task rj4, 2026-11-23): 41 of 41
+pass.** On `iom1` (5.14.0-741.22.1.el9_9), the static
+`./internal` test binary built on the 7.2 laptop (as in nf4,
+with the BPF object embedded) ran every test of
+`gatecmd.RootBPFTests` as root, staged under `/root/rj4` and
+removed afterwards; iom1 was started for the run and stopped
+again. It covers oh4's mmsg loop, which until then was only
+relocated against the el9 BTF:
+
+- `TestMsgCallsTCP` and `TestMsgCallsUDP` pass: sendmsg,
+  recvmsg, sendmmsg and recvmmsg move the expected bytes on el9.
+- `TestMmsgVerifierHeadroom` passes: el9 reports
+  `verified_insns` (backported; upstream has it from 5.16), and
+  its 5.14 verifier processes 1,002 instructions for each mmsg
+  enter handler and 42,078 for the sendmmsg exit, against the
+  1M limit — the same as 7.2.
+- `TestEl9RecordLayout` passes against the host's own BTF as
+  well as the trimmed one (both give the same record offsets).
+
+Nothing is pending on el9 for the root BPF gate.
 
 ## Final socket snapshot (task sf4, 2026-11-21)
 

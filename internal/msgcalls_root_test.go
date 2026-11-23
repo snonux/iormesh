@@ -87,9 +87,10 @@ const mmsgVerifierBudget = 100_000
 // TestMmsgVerifierHeadroom loads the mmsg handlers - whose exit sums up to
 // 1024 messages in a bounded loop (internal/c/mmsg.c) - on this kernel and
 // logs how many instructions its verifier processed for each, requiring
-// a tenth of the limit at most. It is local evidence of headroom, not of
-// el9: the count is this kernel's verifier's, and 5.14's may differ
-// (docs/testing.md, "el9 runbook and pending runs").
+// a tenth of the limit at most. The count is the running kernel's
+// verifier's: run on el9 too (iom1, 5.14.0-741.22.1.el9_9, task rj4), it
+// was 42,078 for the exit handler, as on 7.2 (docs/testing.md, "el9
+// runbook and runs").
 func TestMmsgVerifierHeadroom(t *testing.T) {
 	requireRoot(t)
 	progs := []string{"handle_sys_enter_sendmmsg", "handle_sys_exit_sendmmsg",

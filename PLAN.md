@@ -1289,13 +1289,12 @@ Kubernetes (M7) build on it.
   message count, so their exit sums the messages' `msg_len`
   from the caller's mmsghdr array (a bounded loop capped at
   the kernel's own 1024-message clamp) and checks `tcp_seq`
-  against that sum. On el9 only the relocation is checked
-  (against its BTF); that 5.14's verifier accepts the loop is
-  estimated, not run: unrolling is off and the bound constant,
-  and 7.2's verifier processes about 42k instructions for the
-  exit handler (`TestMmsgVerifierHeadroom`) against the 1M
-  limit 5.14 has too — docs/testing.md, "el9 runbook and
-  pending runs". A sum the
+  against that sum. el9's 5.14 verifier accepts the loop: on
+  `iom1` (5.14.0-741.22.1.el9_9, task rj4, 2026-11-23) it
+  processes 42,078 instructions for the exit handler
+  (`TestMmsgVerifierHeadroom`) against the 1M limit, and the
+  whole root BPF gate passes there — docs/testing.md, "el9
+  runbook and runs". A sum the
   tracer could not complete (a faulting read, the cap, a lost
   park) is marked `args.bytes_partial`, carries no `tcp_seq`
   and fails its direction's stream check — never a short sum
