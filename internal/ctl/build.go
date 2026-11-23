@@ -133,8 +133,9 @@ type buildFlags struct {
 
 // addNamespaceFlag registers -namespace, build's narrowing to one
 // Kubernetes namespace (PLAN.md M7 "Pod fields on events", task sh4),
-// and the readers' choice of that build (addReadBuildFlags). refresh does not take it: its -namespace is the K8S flag, the
-// kubectl namespace its collect reaches.
+// and the readers' choice of that build (addReadBuildFlags). refresh
+// does not take it: its -namespace is the K8S flag, the kubectl
+// namespace its collect reaches.
 func addNamespaceFlag(fs *flag.FlagSet, f *buildFlags, usage string) {
 	fs.StringVar(&f.namespace, "namespace", "", usage)
 }
