@@ -309,6 +309,15 @@ func TestDeployRestartFailures(t *testing.T) {
 	}
 }
 
+// startDiagnosis is a remote start's error as runLocal returns it: the
+// exit status, then cli.Main's stderr with the unit's journal tail
+// (internal/cli startdiag.go, task zk4), one line of it holding a
+// control byte the tracer already quoted.
+const startDiagnosis = "exit status 1: iormesh: iormesh-shop.service exited before the tracer " +
+	"attached; see journalctl -u iormesh-shop.service\niormesh-shop.service logged:\n" +
+	"  \"2026-11-23T21:00:00+00:00 app1 iormesh[42]: \\x1b[31m\"\n" +
+	"  2026-11-23T21:00:00+00:00 app1 iormesh[42]: iormesh: target spec: nothing listens on TCP port 9"
+
 // TestDeployRefusals: what stops a deploy, and how far it got. Every case
 // deploys app1 then app2 (unless the command is refused as a whole): a
 // failing host never keeps the next one from deploying.
@@ -353,6 +362,13 @@ func refusalCases() []refusal {
 				"start", "-project", "shop", "-pattern=*orders*", "-duration", "1h")[:2],
 				startLog("app1", "billing", "start", "-project", "billing", "-listen-port=8443")),
 			stderr: "project shop: start: exit status 1: boom"},
+		// Task zk4: the unit's journal tail in start's error is printed.
+		{name: "start fails, diagnosed",
+			answers: map[string]reply{sudo + "start -project shop": {err: errors.New(startDiagnosis)}},
+			app1: slices.Concat(preflightLog("app1", "amd64"), startLog("app1", "shop",
+				"start", "-project", "shop", "-pattern=*orders*", "-duration", "1h")[:2],
+				startLog("app1", "billing", "start", "-project", "billing", "-listen-port=8443")),
+			stderr: "nothing listens on TCP port 9"},
 	}
 }
 
