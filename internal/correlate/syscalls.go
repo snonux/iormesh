@@ -281,7 +281,7 @@ func (c *Correlator) acceptDetail(ev *schema.Event, p *procState, en enter, ret 
 	ev.FD, ev.FDGen = fd, p.create(fd, true)
 	p.openCloexec(fd, en.flags)
 	if en.addr != nil {
-		return c.unixEnd(p, fd, en)
+		return c.unixEnd(p, fd, en, true)
 	}
 	sock := p.sockOf[fd]
 	sock.fillArgs(&ev.Args)

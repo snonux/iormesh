@@ -417,7 +417,11 @@ ipc,signal,poll,zerocopy` (or `all`) adds them.
   accepted one are paired by the kernel (`unix_sk->peer`), so the
   two ends fuse when both are traced and the accept follows the
   connect within the fuse window (5 s); otherwise each stays
-  `unresolved` — a later accept is a node of its own;
+  `unresolved` — a later accept is a node of its own. Only an
+  accepted end and a connecting one fuse: two accepts (or two
+  connects) naming the same socket pair are two connections whose
+  untraced peers' sockets the kernel reused — the tracer's own
+  attach connections to two JVMs, say — each `unresolved`;
 - a **UDP flow** — UDP has no connection, so the unit is one
   (local, remote) address pair seen in the datagrams: the two
   sides of a loopback flow mirror each other and fuse within the

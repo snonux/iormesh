@@ -217,7 +217,7 @@ func (c *Correlator) connectDetail(ev *schema.Event, p *procState, en enter, soc
 	if a.family == afUnix {
 		setPath(&ev.Args, a.path)
 		if a.sockType == sockStream && a.peer != 0 {
-			return c.unixEnd(p, en.fd, en)
+			return c.unixEnd(p, en.fd, en, false)
 		}
 		return sock
 	}
@@ -304,13 +304,14 @@ func setRemote(args *schema.Args, ap netip.AddrPort) {
 
 // unixEnd binds fd to its end of a unix stream connection: the accepted
 // socket and the connecting one share a key, so whichever comes second
-// fuses with the first (unixTable.join).
-func (c *Correlator) unixEnd(p *procState, fd int32, en enter) *sockState {
+// fuses with the first (unixTable.join). accepted tells which end fd is:
+// an accept's, or a connect's.
+func (c *Correlator) unixEnd(p *procState, fd int32, en enter, accepted bool) *sockState {
 	a := en.addr
 	if a.family != afUnix || a.sockType != sockStream || a.sk == 0 || a.peer == 0 {
 		return p.sockOf[fd]
 	}
-	s := c.unix.join(a.sk, a.peer, en.time)
+	s := c.unix.join(a.sk, a.peer, en.time, accepted)
 	p.sockOf[fd] = s
 	return s
 }
@@ -375,30 +376,56 @@ func (c *Correlator) dropFlows(p *procState, fd int32) {
 
 // unixTable pairs the two ends of unix stream connections. Each end is
 // keyed by its socket and its peer, sorted, so both ends compute one key.
+// accepted tells a waiting end's role: only an accepted end and a
+// connecting one are the two ends of one connection.
 type unixTable struct {
-	waiting map[[2]uint64]*sockState
-	keys    map[*sockState][2]uint64
+	waiting  map[[2]uint64]*sockState
+	keys     map[*sockState][2]uint64
+	accepted map[*sockState]bool
 }
 
 func newUnixTable() *unixTable {
-	return &unixTable{waiting: map[[2]uint64]*sockState{}, keys: map[*sockState][2]uint64{}}
+	return &unixTable{waiting: map[[2]uint64]*sockState{}, keys: map[*sockState][2]uint64{},
+		accepted: map[*sockState]bool{}}
 }
 
-// join returns the end for (sk, peer): fused with the waiting other end
-// when there is one, else a new end that waits.
-func (t *unixTable) join(sk, peer, at uint64) *sockState {
+// join returns the end for (sk, peer), accepted or connecting: fused with
+// the waiting other end when there is one, else a new end that waits.
+//
+// A waiting end of the same role is not the other end but a connection
+// that is over: its peer was never traced (the tracer's own attach
+// connection to a JVM), both sockets were freed, and the kernel reused
+// their addresses for this one within the fuse window (task xk4: two
+// JVMs' attach listeners). That end resolves alone now, as its window
+// would have resolved it, and the new end waits in its place. Fusing the
+// two would make one connection of two, which the controller's rebuild
+// (connect and accept, federate) does not.
+func (t *unixTable) join(sk, peer, at uint64, accepted bool) *sockState {
 	k := [2]uint64{min(sk, peer), max(sk, peer)}
 	if other, ok := t.waiting[k]; ok && other.connID == "" {
-		delete(t.waiting, k)
-		delete(t.keys, other)
-		id := hashID(fmt.Sprintf("unix|%x|%x|%d", k[0], k[1], other.established))
-		other.connID, other.fused = id, true
-		return &sockState{firstSeen: at, established: at, connID: id, fused: true, table: t}
+		if t.accepted[other] == accepted {
+			t.resolveAlone(other)
+		} else {
+			t.forget(k, other)
+			id := hashID(fmt.Sprintf("unix|%x|%x|%d", k[0], k[1], other.established))
+			other.connID, other.fused = id, true
+			return &sockState{firstSeen: at, established: at, connID: id, fused: true, table: t}
+		}
 	}
 	s := &sockState{firstSeen: at, established: at, table: t}
 	t.waiting[k] = s
 	t.keys[s] = k
+	t.accepted[s] = accepted
 	return s
+}
+
+// forget drops s, waiting under k, from the table.
+func (t *unixTable) forget(k [2]uint64, s *sockState) {
+	if t.waiting[k] == s {
+		delete(t.waiting, k)
+	}
+	delete(t.keys, s)
+	delete(t.accepted, s)
 }
 
 // resolveAlone gives an end whose other end never came its own id.
@@ -407,9 +434,6 @@ func (t *unixTable) resolveAlone(s *sockState) {
 		return
 	}
 	k := t.keys[s]
-	if t.waiting[k] == s {
-		delete(t.waiting, k)
-	}
-	delete(t.keys, s)
+	t.forget(k, s)
 	s.connID = hashID(fmt.Sprintf("unix|%x|%x|%d", k[0], k[1], s.established))
 }
