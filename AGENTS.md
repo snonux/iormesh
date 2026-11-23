@@ -6,7 +6,8 @@ accepted until its eval has run with a real model. Rocky Linux
 9.9 (el9, kernel 5.14) is the main target. The code lives in
 `cmd/` (`iormesh`, `iormeshctl`, `iormesheval`), `internal/`,
 `agent/` (the Java agent), `workload/` (the Java test workload)
-and the `magefile_*.go` targets. [PLAN.md](PLAN.md) is the
+and the `magefiles/` targets (Magefile.go and the
+`magefile_*.go` files, decision #30). [PLAN.md](PLAN.md) is the
 working plan and the source of truth for scope, spikes (S1–S3),
 milestones (M0–M7), and decisions. `ior` (`../ior`) is the
 reference project for BPF/C code generation and integration

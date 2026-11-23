@@ -521,7 +521,8 @@ changes in a provenance header):
 - Mage targets `Build`, `BpfBuild`, `Generate*`, `Test`, `Vet`,
   `Lint`, `Fmt`, `FmtCheck`, `Clean` — split over
   `magefile_bpf.go`, `magefile_generate.go` and `magefile_fmt.go`
-  beside M0's `Magefile.go`. `Build` compiles every package
+  beside M0's `Magefile.go`, since decision #30 in `magefiles/`.
+  `Build` compiles every package
   (`go build ./...`) until `cmd/iormesh` exists (step 10). The
   force switch is `IORMESH_FORCE_GENERATE`.
 - `internal/generate/`, `internal/tracepoints/`,
@@ -5333,7 +5334,7 @@ internal/eval/tools.go      # Ctl (build, show, query), SourceTree, SplitArgs
 internal/eval/run.go        # Command model, ParseReply, Toolbox
 internal/eval/ask.go        # Session: turns, prompt, Result
 internal/eval/cli.go        # flags, opt-in refusal, results file
-magefile_eval.go            # mage evalTrace (root), mage eval
+magefiles/magefile_eval.go # mage evalTrace (root), mage eval
 ```
 
 - The set sits in one file with its scenario and threshold
