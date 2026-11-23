@@ -61,12 +61,16 @@ func (m *Model) Render() string {
 	return strings.Join(append(lines, m.footer()), "\n")
 }
 
-// title names the run: projects, its time span, its size.
+// title names the run: projects, its time span, a windowed build's
+// window (task hk4), its size.
 func (m *Model) title() string {
 	r := m.vm.Run
 	t := "iormesh · " + dash(strings.Join(r.Projects, "+"))
 	if !r.First.IsZero() {
 		t += fmt.Sprintf(" · %s – %s UTC", r.First.Format(timeLayout), r.Last.Format("15:04:05"))
+	}
+	if r.Window != "" { // only a windowed build: a full build's title is as before
+		t += " · window " + r.Window
 	}
 	t += fmt.Sprintf(" · %d services · %d edges", len(m.vm.Services), len(m.vm.Edges))
 	if n := len(m.vm.Routes); n > 0 { // only with routes: a routeless title is as before

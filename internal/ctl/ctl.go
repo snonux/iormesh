@@ -18,8 +18,8 @@
 //	iormeshctl show [summary|services|edges|health|conversations|sequence [ID]|thread [SERVICE/THREAD]|
 //	                processes|report] [-project NAME]... [-store DIR] [-builds DIR] [-json] [-unresolved]
 //	                [-namespace NS] [-windowed]
-//	iormeshctl open [-project NAME]... [-store DIR] [-builds DIR]
-//	iormeshctl tui [-project NAME]... [-store DIR] [-builds DIR]
+//	iormeshctl open [-project NAME]... [-store DIR] [-builds DIR] [-namespace NS] [-windowed]
+//	iormeshctl tui [-project NAME]... [-store DIR] [-builds DIR] [-namespace NS] [-windowed]
 //	iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
 //	                 [-apply [-dist DIR] [-key FILE]]
 //	iormeshctl query [-project NAME]... [-from T] [-to T] [-host GLOB] [-app GLOB] [-thread GLOB]
@@ -357,7 +357,9 @@ func usage(w io.Writer) {
       VIEW: summary (default) | services | edges | health | conversations
             | sequence [ID] | thread [SERVICE/THREAD] | processes | report
   iormeshctl open [-project NAME]... [-store DIR] [-db FILE] [-builds DIR]
-  iormeshctl tui [-project NAME]... [-store DIR] [-db FILE] [-builds DIR]     (needs a terminal)
+                  [-namespace NS] [-windowed]
+  iormeshctl tui [-project NAME]... [-store DIR] [-db FILE] [-builds DIR]
+                 [-namespace NS] [-windowed]     (needs a terminal)
   iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
                     [-apply [-dist DIR] [-key FILE]]
   iormeshctl query [-project NAME]... [-store DIR] [-db FILE] [-from T] [-to T]
@@ -406,10 +408,12 @@ never the segments: -project picks the build of exactly those projects
 -project wrote it; -db is accepted and unused. build -namespace NS
 keeps only the sessions of pods in Kubernetes namespace NS (and the
 services and edges their connections make) and writes
-<project>[+<project>...]@NS/, which show -namespace NS reads. build -from,
--to (T as query's) or -last DUR builds only the segments whose time range
-overlaps that window, into <project>[+<project>...][@NS]~window/, which
-show -windowed reads; the full build stays. Its services and edges are
+<project>[+<project>...]@NS/, which show, open and tui -namespace NS
+read. build -from, -to (T as query's) or -last DUR builds only the
+segments whose time range overlaps that window, into
+<project>[+<project>...][@NS]~window/, which show, open and tui
+-windowed read (its site and TUI title name the window); the full
+build stays. Its services and edges are
 the connections seen in the window (a connection open across it shows
 its whole lifetime), not the database's whole history. prune lists the
 store's segment files whose range ended more than DUR ago and deletes them only

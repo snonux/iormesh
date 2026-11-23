@@ -338,3 +338,17 @@ func TestProcessesPartial(t *testing.T) {
 		t.Errorf("empty processes screen lacks the partial line:\n%s", d)
 	}
 }
+
+// TestTitleNamesTheWindow (task hk4): a windowed build's title says
+// which window it shows; a full build's title names none.
+func TestTitleNamesTheWindow(t *testing.T) {
+	const window = "2025-11-20T12:00:30Z .. (open)"
+	if got := New(fixture()).title(); strings.Contains(got, "window") {
+		t.Errorf("a full build's title names a window: %q", got)
+	}
+	vm := fixture()
+	vm.Run.Window = window
+	if got := New(vm).title(); !strings.Contains(got, " · window "+window+" · ") {
+		t.Errorf("title %q does not name the window %s", got, window)
+	}
+}

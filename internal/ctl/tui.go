@@ -10,8 +10,8 @@ import (
 
 // `iormeshctl tui` (PLAN.md M5; docs/visualization.md "The terminal
 // UI"): the Bubble Tea explorer over the last build's model.json — the
-// same file `show` reads, through the same loadModel, so the TUI is no
-// second reading of the data.
+// same file `show` reads, through the same flags and loadModel, so the
+// TUI is no second reading of the data.
 
 // errNoTerminal is tui run without a terminal on stdin and stdout: a
 // full-screen UI drawn into a pipe or a file is garbage, and one reading
@@ -19,13 +19,14 @@ import (
 var errNoTerminal = errors.New("tui needs a terminal on stdin and stdout; " +
 	"for text use iormeshctl show (it pipes)")
 
-// tuiCommand opens the explorer over the build of -project.
+// tuiCommand opens the explorer over the build of -project, or the
+// -namespace or -windowed build of it (addReadBuildFlags, task hk4).
 func tuiCommand(args []string, e env) error {
 	fs := newFlagSet("tui", e.stderr)
 	var f buildFlags
 	addReadBuildFlags(fs, &f)
-	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %w", errUsage, err)
+	if err := parseReadBuildFlags(fs, &f, args); err != nil {
+		return err
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%w: tui takes no arguments", errUsage)

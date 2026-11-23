@@ -4765,13 +4765,14 @@ iormeshctl show [summary|services|edges|health] [-project P]... [-json]
 
 ```
 internal/federate/window.go     # Span, Window, FirstStart
-internal/ctl/window.go          # build -from/-to/-last, show -windowed
+internal/ctl/window.go          # build -from/-to/-last, the readers' -windowed
 internal/ctl/prune.go           # iormeshctl prune
 ```
 
 ```sh
 iormeshctl build [...] [-from T] [-to T] [-last DUR]
 iormeshctl show [VIEW] [...] -windowed
+iormeshctl open|tui [...] -windowed
 iormeshctl prune -older-than DUR [-project P]... [-store DIR] [-db FILE] [-apply]
 ```
 
@@ -4815,9 +4816,13 @@ iormeshctl prune -older-than DUR [-project P]... [-store DIR] [-db FILE] [-apply
 - **Where it writes.** `<projects>[@NS]~window/` — `~` is in
   neither the project nor the namespace alphabet — one
   directory per project set and namespace, overwritten by each
-  windowed build and read by `show -windowed`; the full build's
-  directory is never touched. `open` and `tui` read full builds
-  only (as with `-namespace`). The window is not in the model.
+  windowed build and read by `show`, `open` and `tui -windowed`
+  (task hk4: `addReadBuildFlags` registers `-namespace` and
+  `-windowed` for all three, which read the directory
+  `buildFlags.key` names); the full build's directory is never
+  touched. The model records the resolved window as
+  `run.window` (the echoed text, omitted for a full build), so
+  the site's header and the TUI's title name it.
 - **prune.** Lists the store's own files whose range ended
   before now−DUR — exactly what `build -last DUR` would never
   take — and deletes them only with `-apply`, printing each.
@@ -5880,7 +5885,8 @@ depends on:
    pinned pod FQDN names NS (`federate.Segments.InNamespace`),
    narrows the service database's views to those pods' host
    ids (`servicedb.Filter.Hosts`), and writes to
-   `<projects>@<NS>/`; `show -namespace NS` reads it.
+   `<projects>@<NS>/`; `show`, `open` and `tui -namespace NS`
+   read it (task hk4).
    **The pod is the host** (task 7f4, an advisor's provisional
    choice; review B2): in a pod `iormesh run` takes its host id
    from the downward API, never from `/etc/machine-id` — the

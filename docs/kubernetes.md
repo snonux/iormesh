@@ -342,11 +342,18 @@ told apart. To look at one namespace:
 ```
 iormeshctl build -namespace prod   # only pods in prod
 iormeshctl show services -namespace prod
+iormeshctl open -namespace prod    # its site in the browser
+iormeshctl tui -namespace prod     # its model in the terminal
 ```
 
 The build keeps the sessions of pods in `prod` (hosts outside a
 pod are left out) and the services and edges their connections
-make, and writes `<projects>@prod/` next to the unfiltered build.
+make, and writes `<projects>@prod/` next to the unfiltered build;
+`show`, `open` and `tui` read it with `-namespace prod`, and the
+unfiltered one without. With a window too (`build -namespace prod
+-last 2h`) it writes `<projects>@prod~window/`, which they read
+with `-namespace prod -windowed`
+([visualization.md](visualization.md#namespace-and-windowed-builds)).
 `refresh` does not take it: its `-namespace` is the kubectl
 namespace of the collect.
 

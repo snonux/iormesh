@@ -96,6 +96,12 @@ type Run struct {
 	// GraphNodes and GraphEdges size the merged graph export.
 	GraphNodes int `json:"graph_nodes"`
 	GraphEdges int `json:"graph_edges"`
+	// Window is a windowed build's window as build echoes it, "FROM ..
+	// TO" in RFC 3339 UTC with "(open)" for a side not given; empty (and
+	// absent from the JSON) for a full build. The build selects whole
+	// segments overlapping it, so First and Last can lie outside it. It
+	// is how the site and the TUI say which window they show (task hk4).
+	Window string `json:"window,omitempty"`
 }
 
 // Health is what the run could not see, or could not see well.
