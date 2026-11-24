@@ -174,10 +174,38 @@ func New(cfg Config) *Correlator {
 // ErrEnded after End. Handle keeps no reference to rec (it copies what it
 // needs), so the caller may recycle it once Handle returns
 // (types.Recycle).
+//
+// The dispatch is split by record family (handleFile, handleNet,
+// handleTask, handleStack, handleIPC), each reporting whether rec was one
+// of its types; the families' types are disjoint, so their order only
+// matters in that a stack record's error returns before reap and release.
 func (c *Correlator) Handle(rec any) error {
 	if c.ended {
 		return ErrEnded
 	}
+	handled, err := c.dispatch(rec)
+	if err != nil || !handled {
+		return err
+	}
+	c.reap()
+	return c.release(false)
+}
+
+// dispatch hands rec to its family's handler and reports whether one
+// took it; an unknown record is ignored (false, nil).
+func (c *Correlator) dispatch(rec any) (bool, error) {
+	if c.handleFile(rec) || c.handleNet(rec) || c.handleTask(rec) {
+		return true, nil
+	}
+	if handled, err := c.handleStack(rec); handled || err != nil {
+		return handled, err
+	}
+	return c.handleIPC(rec), nil
+}
+
+// handleFile dispatches the syscall enter and exit records of the file
+// surface (M1, M2) and reports whether rec was one of them.
+func (c *Correlator) handleFile(rec any) bool {
 	switch r := rec.(type) {
 	case *types.OpenEvent:
 		c.enterOpen(r)
@@ -193,18 +221,39 @@ func (c *Correlator) Handle(rec any) error {
 		c.enterDup3(r)
 	case *types.FcntlEvent:
 		c.enterFcntl(r)
-	case *types.AcceptEvent:
-		c.accept(r)
 	case *types.RetEvent:
 		c.exitRet(r)
 	case *types.RwAggregateEvent:
 		c.aggregate(r)
+	default:
+		return false
+	}
+	return true
+}
+
+// handleNet dispatches the socket records: accepts, TCP state and
+// sequence records (streamseq.go) and the mmsg batches, and reports
+// whether rec was one of them.
+func (c *Correlator) handleNet(rec any) bool {
+	switch r := rec.(type) {
+	case *types.AcceptEvent:
+		c.accept(r)
 	case *types.TcpStateEvent:
 		c.tcpState(r)
 	case *types.TcpSeqEvent:
 		c.tcpSeqRecord(r)
 	case *types.MmsgEvent:
 		c.mmsgRecord(r)
+	default:
+		return false
+	}
+	return true
+}
+
+// handleTask dispatches the process lifecycle records (new tasks, exits,
+// execs) and comm renames, and reports whether rec was one of them.
+func (c *Correlator) handleTask(rec any) bool {
+	switch r := rec.(type) {
 	case *types.TaskNewtaskEvent:
 		c.newTask(r)
 	case *types.ProcessExitEvent:
@@ -213,21 +262,22 @@ func (c *Correlator) Handle(rec any) error {
 		c.execTask(r)
 	case *types.TaskRenameEvent:
 		c.renameTask(r)
-	case *types.StackEvent:
-		if err := c.stackRecord(r); err != nil {
-			return err
-		}
-	case *types.StackInlineEvent:
-		if err := c.stackInlineRecord(r); err != nil {
-			return err
-		}
 	default:
-		if !c.handleIPC(rec) {
-			return nil
-		}
+		return false
 	}
-	c.reap()
-	return c.release(false)
+	return true
+}
+
+// handleStack dispatches the native stack records (stacks.go): handled
+// reports whether rec was one, err is the stack handler's.
+func (c *Correlator) handleStack(rec any) (handled bool, err error) {
+	switch r := rec.(type) {
+	case *types.StackEvent:
+		return true, c.stackRecord(r)
+	case *types.StackInlineEvent:
+		return true, c.stackInlineRecord(r)
+	}
+	return false, nil
 }
 
 // Unpaired counts exits that arrived without their enter (or with a

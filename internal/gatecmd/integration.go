@@ -42,7 +42,10 @@ const UnexercisedSkipMarker = "iormesh-integration: test skipped, case not exerc
 
 // IntegrationTests are the top-level tests of ./integrationtests. They are
 // listed rather than matched so a renamed test fails a gate
-// (internal/buildgate) instead of silently no longer running.
+// (internal/buildgate) instead of silently no longer running. The function
+// is over 50 lines and stays one: it is a pure data list, one name per
+// line, and splitting it would only scatter the list (task qk4). It is a
+// function, not a var, so no caller can append to the shared list.
 func IntegrationTests() []string {
 	return []string{
 		"TestWalkingSkeleton",
