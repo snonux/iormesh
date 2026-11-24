@@ -66,12 +66,13 @@ type lateAttacher struct {
 	mu sync.Mutex
 	// pending maps each process being tried to its job.
 	pending map[uint32]*lateJob
-	// held are the JVMs the start-time attach loads (hold, release):
-	// that attach claims them, so the late attacher never works on one
-	// at the same time — each attach may send a SIGQUIT, and a second
-	// one prints a thread dump on the app's stdout (task 7l4). The value
-	// says whether the process exec'd meanwhile.
-	held map[uint32]bool
+	// held are the JVMs the start-time attach loads (hold, loaded):
+	// that attach claims each until its own load is done, so the late
+	// attacher never works on one at the same time — each attach may
+	// send a SIGQUIT, and a second one prints a thread dump on the app's
+	// stdout (task 7l4). The value is the process's last exec meanwhile,
+	// zero if it did not exec.
+	held map[uint32]time.Time
 	// lines are the attaches' reports and made the stages they made, both
 	// not yet collected by the loop.
 	lines []string
@@ -100,11 +101,11 @@ func newLateAttacher(ctx context.Context, agent, spool string) *lateAttacher {
 	return &lateAttacher{ctx: ctx, cancel: cancel, l: newAgentLoader(), spool: spool,
 		sem: make(chan struct{}, lateAttachParallel), every: lateAttachEvery,
 		deadline: lateAttachFor, notJVM: lateNotJVMFor, st: newAgentStages(agent),
-		pending: map[uint32]*lateJob{}, held: map[uint32]bool{}}
+		pending: map[uint32]*lateJob{}, held: map[uint32]time.Time{}}
 }
 
 // hold claims pids for the start-time attach, before its loads begin:
-// until release, an exec of one of them only marks it.
+// until loaded releases one, an exec of it is only noted.
 func (a *lateAttacher) hold(pids []uint32) {
 	if a == nil {
 		return
@@ -112,39 +113,60 @@ func (a *lateAttacher) hold(pids []uint32) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, pid := range pids {
-		a.held[pid] = false
+		a.held[pid] = time.Time{}
 	}
 }
 
-// release ends the start-time attach's claims. A held process that
-// exec'd meanwhile is scheduled as exec would have — but only if it is
-// in retry, the pids whose start-time load failed before any SIGQUIT
-// could be sent (no libjvm.so or no handler yet: a wrapper still
-// exec'ing java, a JVM still starting). One the start-time attach
-// loaded, or that refused after the handshake began, is not tried
-// again, so a JVM gets at most one SIGQUIT from the session. The cost:
-// a JVM loaded at start that then execs another JVM before release
-// gets no agent in its new image (start it with -javaagent).
-func (a *lateAttacher) release(retry []uint32) {
+// loaded is told by the start-time attach that pid's own load ended
+// (loadAgents, a loadedFunc): it shares the stages that load made, then
+// releases pid's claim — at once, not after the other pids' loads, so a
+// JVM loaded early that then execs a new JVM gets the late attach in its
+// new image like any later exec (task 9l4).
+func (a *lateAttacher) loaded(pid uint32, retry bool, fresh []agentStage) {
+	a.share(fresh)
+	a.release(pid, retry)
+}
+
+// release ends the start-time attach's claim on pid. If it exec'd
+// meanwhile it is scheduled with its windows from that exec, as exec
+// would have — but only on retry, a start-time load that failed before
+// any SIGQUIT could be sent (no libjvm.so or no handler yet: a wrapper
+// still exec'ing java, a JVM still starting). One the start-time attach
+// loaded, or that refused after the handshake began, is not tried again
+// in that image, so a JVM gets at most one SIGQUIT from the session; an
+// exec after the release is a new image, scheduled by exec as usual.
+func (a *lateAttacher) release(pid uint32, retry bool) {
 	if a == nil {
 		return
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	for _, pid := range retry {
-		if a.held[pid] && a.ctx.Err() == nil {
-			a.schedule(pid)
-		}
+	execAt, ok := a.held[pid]
+	delete(a.held, pid)
+	if ok && retry && !execAt.IsZero() && a.ctx.Err() == nil {
+		a.schedule(pid, execAt)
 	}
+}
+
+// releaseAll ends every claim still held without scheduling any: the
+// start-time attach was given up, and the session is ending.
+func (a *lateAttacher) releaseAll() {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
 	clear(a.held)
+	a.mu.Unlock()
 }
 
 // share makes the stages the start-time attach made available to the
 // late ones, which reuse a stage when javaattach says a JVM may share it.
-// They reached the Java join already, so they are not in made. It runs
-// once, before the ready file, and may wait for a late stage being made.
+// They reach the Java join with the start-time attach's result, so they
+// are not in made. It runs on the start-time loads' goroutine, before
+// the pid whose load made them is released, and may wait for a late
+// stage being made.
 func (a *lateAttacher) share(stages []agentStage) {
-	if a == nil {
+	if a == nil || len(stages) == 0 {
 		return
 	}
 	a.stMu.Lock()
@@ -153,7 +175,7 @@ func (a *lateAttacher) share(stages []agentStage) {
 }
 
 // exec schedules pid's attach: it just exec'd (or was adopted) and may
-// be a JVM. A pid the start-time attach holds is only marked (release
+// be a JVM. A pid the start-time attach holds is only noted (release
 // decides), so the two never work on one JVM at once.
 func (a *lateAttacher) exec(pid uint32) {
 	if a == nil || a.ctx.Err() != nil {
@@ -162,19 +184,20 @@ func (a *lateAttacher) exec(pid uint32) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if _, ok := a.held[pid]; ok {
-		a.held[pid] = true
+		a.held[pid] = time.Now()
 		return
 	}
-	a.schedule(pid)
+	a.schedule(pid, time.Now())
 }
 
-// schedule starts pid's job, under mu. A pid tried already only has its
-// windows restarted. With lateAttachPending processes pending, pid gets
-// nothing; the first pid dropped in each overflow is named (full), the
-// rest until a slot frees are covered by that line.
-func (a *lateAttacher) schedule(pid uint32) {
+// schedule starts pid's job, its windows from execAt, under mu. A pid
+// tried already only has its windows restarted. With lateAttachPending
+// processes pending, pid gets nothing; the first pid dropped in each
+// overflow is named (full), the rest until a slot frees are covered by
+// that line.
+func (a *lateAttacher) schedule(pid uint32, execAt time.Time) {
 	if j, ok := a.pending[pid]; ok {
-		j.execAt = time.Now()
+		j.execAt = execAt
 		return
 	}
 	if len(a.pending) >= lateAttachPending {
@@ -186,7 +209,7 @@ func (a *lateAttacher) schedule(pid uint32) {
 		}
 		return
 	}
-	j := &lateJob{pid: pid, execAt: time.Now()}
+	j := &lateJob{pid: pid, execAt: execAt}
 	a.pending[pid] = j
 	a.wg.Add(1)
 	go a.run(j)
