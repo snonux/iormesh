@@ -159,6 +159,8 @@ func runSeqChild(scenario string) error {
 		err = childMsgTCP(fd)
 	case msgScenarioUDP:
 		r.UDP, err = childMsgUDP()
+	case peekScenario:
+		err = childPeek(fd)
 	default:
 		err = fmt.Errorf("unknown scenario %q", scenario)
 	}

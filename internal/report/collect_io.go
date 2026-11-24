@@ -38,7 +38,7 @@ func (c *Collector) conn(p *procAcc, ev *schema.Event) bool {
 	case schema.IsStreamSend(ev.Event):
 		a.sent += ev.Bytes
 	case schema.IsStreamReceive(ev.Event):
-		a.recv += ev.Bytes
+		a.recv += ev.StreamBytes() // a peek's bytes count once, when read (task ok4)
 	}
 	if ev.Event == schema.KindHTTP && ev.HTTP != nil {
 		c.request(p, a, ev)

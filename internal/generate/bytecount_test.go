@@ -68,8 +68,8 @@ func TestGenerateNonXattrSizeMetadataIsInvalid(t *testing.T) {
 	}
 }
 
-// receiveFixture is a recvfrom/recvmsg enter tracepoint classified the way the
-// generator's override table classifies it.
+// receiveFixture is a recvfrom/recvmsg/recvmmsg enter tracepoint classified
+// the way the generator's override table classifies it.
 func receiveFixture(name string) GeneratedTracepoint {
 	return GeneratedTracepoint{
 		Format:         &Format{Name: "sys_enter_" + name, ExternalFields: []Field{{Name: "__syscall_nr"}, {Name: "fd"}}},
@@ -78,7 +78,7 @@ func receiveFixture(name string) GeneratedTracepoint {
 }
 
 func TestReceiveSyscallsUseTheSizeCarryingFdRecord(t *testing.T) {
-	for _, name := range []string{"recvfrom", "recvmsg"} {
+	for _, name := range []string{"recvfrom", "recvmsg", "recvmmsg"} {
 		if got, ok := nameOnlyKindsTable["sys_enter_"+name]; !ok || got != KindFdSize {
 			t.Errorf("sys_enter_%s kind = %v (listed %v), want KindFdSize", name, got, ok)
 		}
@@ -121,6 +121,21 @@ func TestGenerateRecvmsgCapturesFlagsAndGuardsIovecRead(t *testing.T) {
 	}
 	if strings.Contains(got, "ev->size_valid = 1;") {
 		t.Errorf("recvmsg marks its capacity valid without reading the iovec:\n%s", got)
+	}
+}
+
+// TestGenerateRecvmmsgCapturesFlagsOnly pins that recvmmsg stores its
+// flags from args[3], for MSG_PEEK (task ok4), and leaves the capacity
+// unknown: its bytes are the messages' msg_len sum (mmsg.c), so it reads
+// no msghdr at the enter.
+func TestGenerateRecvmmsgCapturesFlagsOnly(t *testing.T) {
+	got := generateExtraFdSize(receiveFixture("recvmmsg").Format)
+	if !strings.Contains(got, "ev->flags = (__u32)ctx->args[3];") {
+		t.Errorf("recvmmsg does not capture its flags from args[3]:\n%s", got)
+	}
+	if !strings.Contains(got, "ev->size_valid = 0;\n    ev->size = 0;\n") ||
+		strings.Contains(got, "ev->size_valid = 1;") || strings.Contains(got, "ior_recvmsg_capacity") {
+		t.Errorf("recvmmsg must leave its capacity unknown:\n%s", got)
 	}
 }
 
@@ -174,15 +189,15 @@ func TestRecvHelperMatchesTheSocketABI(t *testing.T) {
 }
 
 // TestGeneratedReceiveHandlersMatchCommittedArtifact pins the complete enter
-// handlers of both receive syscalls against the committed C, so a caller that
-// stopped wiring writeReceiveFlagsCapture into generateExtraFdSize fails here
-// even though the helper's own tests stay green.
+// handlers of the three receive syscalls against the committed C, so a caller
+// that stopped wiring writeReceiveFlagsCapture into generateExtraFdSize fails
+// here even though the helper's own tests stay green.
 func TestGeneratedReceiveHandlersMatchCommittedArtifact(t *testing.T) {
 	artifact, err := readGeneratedTracepointsC()
 	if err != nil {
 		t.Fatalf("read generated tracepoints C: %v", err)
 	}
-	for _, name := range []string{"recvfrom", "recvmsg"} {
+	for _, name := range []string{"recvfrom", "recvmsg", "recvmmsg"} {
 		t.Run(name, func(t *testing.T) {
 			tp := receiveFixture(name)
 			got := handlerBody(t, artifact, tp.Format.Name)

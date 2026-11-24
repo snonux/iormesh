@@ -34,7 +34,8 @@ const (
 // thread runs one syscall at a time, so the tid alone keys it. fd is the
 // fd argument, or the dirfd of the path shapes; newDirfd and newPath are
 // the second name of a name_event. flags holds the syscall's flags (open,
-// accept4, dup3) or fcntl's command, arg fcntl's third argument. fd2 is a
+// accept4, dup3, the peekable receives) or fcntl's command, arg fcntl's
+// third argument. fd2 is a
 // second descriptor (a pipe's write end, epoll_ctl's target); addr and sig
 // are the side records of M2 step 7 that arrived while the call ran
 // (sock_addr_event, signal_event), nil when none did.
@@ -94,10 +95,19 @@ func (c *Correlator) fixupName(r *types.OpenNameFixupEvent) {
 	c.enters[r.Tid] = en
 }
 
+// enterFd keeps an fd call's descriptor and, for the receives that take
+// flags (recvfrom, recvmsg, recvmmsg: fd_size_event's flags word), their
+// flags, whose MSG_PEEK the exit marks (socketFdDetail, task ok4). The
+// word means nothing for any other kind: an fd_size_event of the xattr
+// reads writes 0, and an older object left padding there.
 func (c *Correlator) enterFd(r *types.FdEvent) {
 	c.advance(r.Time)
-	c.enters[r.Tid] = enter{name: r.TraceId.Name(), shape: shapeFd, time: r.Time,
-		pid: r.Pid, fd: r.Fd}
+	name := r.TraceId.Name()
+	en := enter{name: name, shape: shapeFd, time: r.Time, pid: r.Pid, fd: r.Fd}
+	if schema.IsPeekable(name) {
+		en.flags = int32(r.Flags)
+	}
+	c.enters[r.Tid] = en
 }
 
 // accept handles both halves: the enter carries nothing the exit needs

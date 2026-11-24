@@ -1323,6 +1323,16 @@ Kubernetes (M7) build on it.
   park) is marked `args.bytes_partial`, carries no `tcp_seq`
   and fails its direction's stream check — never a short sum
   passed off as the whole.
+  A `recvfrom`, `recvmsg` or `recvmmsg` with `MSG_PEEK`
+  copies bytes but consumes none, so it must not count twice
+  with the receive that later consumes them (task ok4): the
+  tracer captures the call's flags argument at its enter (the
+  three share `fd_size_event`; `recvmmsg` moved there from
+  `fd_event`, giving up the unused file identity word), the
+  correlator marks the event `args.peek` (always true when
+  set; never with `tcp_seq`) and keeps its `bytes`, and the
+  receiver's stream sums — the merge's and the report's —
+  skip it.
   The stream check is not a proof: it trusts the sums to hold
   every byte, and bytes escape them with no drop recorded —
   untraced `splice`, io_uring; a fork
