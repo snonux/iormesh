@@ -1600,6 +1600,81 @@ verifier count on 7.2 grew from 41,943/41,964 (sendmmsg/recvmmsg)
 to 42,554/42,579; `TestEl9RecordLayout` still relocates them
 clean against the el9 BTF. Not yet run on el9.
 
+## arm64 on an emulated el9 kernel (task 8k4, 2026-11-24)
+
+**Emulated CPU.** The guest ran in QEMU 10.2.2 with TCG on the
+x86 laptop (`-machine virt -cpu max`, 4 vCPUs, 4 GiB, UEFI from
+edk2's aarch64 pflash, user-mode networking with SSH forwarded
+on 127.0.0.1 only). The kernel is a real el9 aarch64 one —
+Rocky 9.9 GenericCloud aarch64, image
+`Rocky-9-GenericCloud-Base-9.9-20261112.0` checked against its
+CHECKSUM, kernel `5.14.0-741.22.1.el9_9.aarch64` with BTF,
+SELinux enforcing, cloud-init seeding a throwaway key. So this
+proves load, verifier and JIT acceptance and event flow on an
+arm64 el9 kernel; it says nothing about timing or overhead
+(a passing root test took 4–106 s there).
+The VM booted to SSH in 7.5 min and ran for 55 min in all
+(09:12–10:08 UTC), then was powered off; image, overlay and keys stayed in the
+session's scratch directory.
+
+What ran:
+
+- `dist/iormesh-linux-arm64` from `mage containerBuild podman
+  tracer-arm64` (the release build, clang 19.1.7 from Debian
+  trixie, compiled against the laptop's x86 `vmlinux.h`).
+- `./internal`'s test binary, cross-built static in the same
+  builder image (`go test -c -tags netgo,osusergo -ldflags
+  '-extldflags -static'` with `IORMESH_TARGET_ARCH=arm64`'s
+  environment), run as root from a copy of `internal/` with
+  `testdata/btf` beside it, with `gatecmd.RootBPFTestArgs`.
+- `iormesh run -project arm64 -pid <shell>` on a shell that
+  runs two `dd`s (4 MiB to a file, then back) and a Python
+  loopback TCP exchange (4096 bytes one way, 2 back).
+
+Results:
+
+- **The release object does not load.** The verifier refuses
+  `handle_sys_exit_read` ("R8 unbounded memory access",
+  `rwagg.c` `iormesh_rw_on_exit`): clang 19 checks
+  `idx >= IORMESH_RW_SLOTS` on a zero-extended copy and indexes
+  `st->slot[idx]` with the unchecked register, which the 5.14
+  verifier cannot follow. It is not arm64's doing: clang 19's
+  bytecode for that program is identical with
+  `-D__TARGET_ARCH_x86`, and that x86 object is refused on the
+  same kernel the same way. The amd64 release, built by the
+  Rocky builder's clang, is unaffected. Every root test that
+  loads the object fails the same way with the embedded one.
+  Filed as task il4.
+- **With the same source built by clang 22.1.1**
+  (`-D__TARGET_ARCH_arm64`, laptop `vmlinux.h`) and loaded
+  through `IORMESH_BPF_OBJECT`, the tracer attaches ("38
+  tracepoints missing on this kernel" — the legacy syscalls
+  arm64 never had), and the trace holds 861 events: `dd`'s
+  writes summing to 8 MiB (8388608 bytes) and its reads to
+  8 MiB plus its library loads, `connect` and
+  `accept4` with the loopback 4-tuple and one `conn_id`,
+  `sendto`/`recvfrom` with 4098 bytes each way, `tcp_state`
+  transitions, exec/fork of the children; the session record
+  names `arch: aarch64`. No lost records, no unpaired exits.
+- **Root BPF gate with that object**: 38 of 42 pass. Two fail
+  on x86 assumptions in the tests, filed as task jl4:
+  `TestLoaderAttachesEveryFamily` wants no tracepoint skipped,
+  but arm64 has no `open`, `mkdir`, `rename`, `dup2`, `pipe`,
+  `poll`, `epoll_wait` and the like (46 tracepoints);
+  `TestEl9RecordLayout` loads the arm64 object against the x86
+  el9 BTF fixture, where `handle_raw_sys_enter`'s `pt_regs`
+  relocation finds nothing. `TestJavaMarkNamesTheNative`
+  and `TestJavaMarkOnHeldRead` first failed only for want of
+  `java`; with the guest's `java-21-openjdk-headless` both
+  pass (160 s and 111 s), so `javamark.c`'s uprobes on
+  libjava's natives, `ctx->sp` included, work on arm64 — 40 of
+  42 in all.
+
+The x86 `vmlinux.h` was enough for the clang-22 object:
+CO-RE relocated every field the attached programs use on the
+arm64 kernel, `dispatch.c`'s guarded `thread_info.status`
+included.
+
 ## el9 runbook and runs
 
 Rocky 9.9 is the main target, and some evidence exists only as
