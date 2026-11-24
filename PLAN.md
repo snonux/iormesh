@@ -3122,15 +3122,26 @@ deferred.
   a service manager, and (3) runs in a `.service` unit cgroup
   (slices skipped; a delegated sub-cgroup of the unit counts)
   inside the holding manager's subtree: anywhere for pid 1, under
-  `user@UID.service` for a user manager. A login-session scope, a
-  shell or another unit's process holding a copy of the fd is
-  refused and named once. The parent pid is not checked: a
-  wrapper script that forks its server is still the service. The
-  uid is not checked either (`User=`). The adopted holders are
-  then remembered as start holders are (qj4's earliest-started
-  executable), so later restarts and re-activations follow the
-  ordinary rules above. No activation within the grace ends the
-  session `targets_exited`, stderr saying so. Not covered:
+  `user@UID.service` for a user manager. Task el4 makes the user
+  manager's subtree strict: the manager must run in the
+  `init.scope` directly below `user@UID.service`, UID its own
+  effective uid, or it names no subtree; and (4) a holder below a
+  user manager must have that manager's effective uid — a
+  user's services run as that user, so a setuid program or
+  another user's process in the tree is not one. A login-session
+  scope, a shell or another unit's process holding a copy of the
+  fd is refused and named once. The parent pid is not checked: a
+  wrapper script that forks its server is still the service. For
+  pid 1 the uid is not checked (`User=`). The adopted holders
+  are then remembered as start holders are (qj4's
+  earliest-started executable), so later restarts and
+  re-activations follow the ordinary rules above; if no adopted
+  holder's owner key can be read, the pin stays and the next
+  activation is waited for as at start (task el4). A service
+  that activates between the start's resolve and the pin is
+  caught by resolving the port once more (task el4). No
+  activation within the grace ends the session `targets_exited`,
+  stderr saying so. Not covered:
   `Accept=yes` sockets (each instance gets a connection, never
   the listener) and a socket unit restarted while waiting (new
   sockets, not the pinned ones). No unit name is read: that needs

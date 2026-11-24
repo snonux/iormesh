@@ -12,23 +12,31 @@ import (
 	"iormesh/internal/target"
 )
 
-// fakeActivation installs activatedHolders and managerListener for a
-// test: the holders of the pinned socket the session would adopt and
-// refuse, each listed with its start time now (fakePort.start), and
-// whether pinning the manager's listener fails.
+// fakeActivation installs activatedHolders, managerListener and
+// resolvePort for a test: the holders of the pinned socket the session
+// would adopt and refuse, each listed with its start time now
+// (fakePort.start) unless fakePort.listed overrides it, whether pinning
+// the manager's listener fails, and the owners a second resolve of the
+// port finds (nil: it fails as the first did).
 type fakeActivation struct {
 	adopt, refuse []uint32
 	pinErr        error
+	resolved      []uint32
+	resolves      int
 }
 
 func newFakeActivation(t *testing.T, f *fakePort) *fakeActivation {
 	t.Helper()
 	a := &fakeActivation{}
-	origHolders, origListener := activatedHolders, managerListener
+	origHolders, origListener, origResolve := activatedHolders, managerListener, resolvePort
 	list := func(pids []uint32) []target.Holder {
 		var hs []target.Holder
 		for _, pid := range pids {
-			hs = append(hs, target.Holder{PID: pid, StartNS: f.start(pid)})
+			start, ok := f.listed[pid]
+			if !ok {
+				start = f.start(pid)
+			}
+			hs = append(hs, target.Holder{PID: pid, StartNS: start})
 		}
 		return hs
 	}
@@ -38,7 +46,14 @@ func newFakeActivation(t *testing.T, f *fakePort) *fakeActivation {
 	managerListener = func(port uint16) (target.Activation, error) {
 		return target.Activation{Port: port}, a.pinErr
 	}
-	t.Cleanup(func() { activatedHolders, managerListener = origHolders, origListener })
+	resolvePort = func(target.Spec) ([]uint32, error) {
+		a.resolves++
+		if a.resolved == nil {
+			return nil, fmt.Errorf("%w: %w", target.ErrSpec, target.ErrManagerOnly)
+		}
+		return a.resolved, nil
+	}
+	t.Cleanup(func() { activatedHolders, managerListener, resolvePort = origHolders, origListener, origResolve })
 	return a
 }
 
@@ -53,9 +68,9 @@ func activationSession(t *testing.T, f *fakePort, grace time.Duration) (*session
 	t.Cleanup(func() { _ = c.Close() })
 	s, log := portSession(t, f, c, tr, grace)
 	cfg := runConfig{spec: target.Spec{ListenPort: 8080}, listenGrace: grace}
-	act, err := portActivation(cfg, target.ErrManagerOnly)
-	if err != nil || act == nil {
-		t.Fatalf("portActivation = %v, %v; want the pinned listener", act, err)
+	pids, act, err := portActivation(cfg, target.ErrManagerOnly)
+	if err != nil || act == nil || pids != nil {
+		t.Fatalf("portActivation = %v, %v, %v; want the pinned listener", pids, act, err)
 	}
 	s.awaitService(act)
 	if !strings.Contains(log.String(), "port 8080: only the service manager holds it; waiting up to") {
@@ -130,28 +145,102 @@ func TestPortSessionActivationTimeout(t *testing.T) {
 	}
 }
 
-// TestPortActivation (task lk4): only a manager-only port with a grace
-// waits for its service; -listen-grace 0, another resolve error and a
-// listener that cannot be pinned keep the start's refusal.
+// TestPortActivation (tasks lk4, el4): only a manager-only port with a
+// grace waits for its service; -listen-grace 0, another resolve error
+// and a listener that cannot be pinned keep the start's refusal — unless
+// the pin failed because the service activated in between: the port is
+// resolved once more and its owners are the session's start targets.
 func TestPortActivation(t *testing.T) {
 	f := newFakePort(t)
 	a := newFakeActivation(t, f)
 	cfg := runConfig{spec: target.Spec{ListenPort: 8080}, listenGrace: time.Minute}
 	managerOnly := fmt.Errorf("%w: %w", target.ErrSpec, target.ErrManagerOnly)
-	if act, err := portActivation(cfg, managerOnly); err != nil || act == nil || act.Port != 8080 {
-		t.Fatalf("manager only: %v, %v; want the pinned listener", act, err)
+	if pids, act, err := portActivation(cfg, managerOnly); err != nil || act == nil || act.Port != 8080 ||
+		pids != nil {
+		t.Fatalf("manager only: %v, %v, %v; want the pinned listener", pids, act, err)
 	}
 	other := fmt.Errorf("%w: nothing listens", target.ErrSpec)
-	if act, err := portActivation(cfg, other); !errors.Is(err, other) || act != nil {
-		t.Fatalf("nothing listens: %v, %v; want the error", act, err)
+	if pids, act, err := portActivation(cfg, other); !errors.Is(err, other) || act != nil || pids != nil {
+		t.Fatalf("nothing listens: %v, %v, %v; want the error", pids, act, err)
 	}
 	noGrace := cfg
 	noGrace.listenGrace = 0
-	if act, err := portActivation(noGrace, managerOnly); !errors.Is(err, target.ErrManagerOnly) || act != nil {
-		t.Fatalf("-listen-grace 0: %v, %v; want the refusal", act, err)
+	if pids, act, err := portActivation(noGrace, managerOnly); !errors.Is(err, target.ErrManagerOnly) ||
+		act != nil || pids != nil {
+		t.Fatalf("-listen-grace 0: %v, %v, %v; want the refusal", pids, act, err)
+	}
+	if a.resolves != 0 {
+		t.Fatalf("resolved the port %d times without a failed pin; want none", a.resolves)
 	}
 	a.pinErr = errors.New("no cgroup")
-	if act, err := portActivation(cfg, managerOnly); !errors.Is(err, target.ErrManagerOnly) || act != nil {
-		t.Fatalf("unpinnable: %v, %v; want the refusal", act, err)
+	if pids, act, err := portActivation(cfg, managerOnly); !errors.Is(err, target.ErrManagerOnly) ||
+		act != nil || pids != nil || a.resolves != 1 {
+		t.Fatalf("unpinnable: %v, %v, %v after %d resolves; want the refusal after one",
+			pids, act, err, a.resolves)
+	}
+
+	// The service activated between the start's resolve and the pin: pid
+	// 31 holds the port now, and the second resolve names it.
+	a.pinErr = fmt.Errorf("%w: pid 31 holds the listener on TCP port 8080: not socket activation", target.ErrSpec)
+	a.resolved = []uint32{31}
+	if pids, act, err := portActivation(cfg, managerOnly); err != nil || act != nil ||
+		!slices.Equal(pids, []uint32{31}) || a.resolves != 2 {
+		t.Fatalf("activated meanwhile: %v, %v, %v; want the owner 31", pids, act, err)
+	}
+}
+
+// TestPortSessionActivationStartChanged (task el4): a holder of the
+// pinned socket whose pid no longer has the start time the listing saw —
+// it exited and the pid was reused — is not adopted; the next resolve,
+// listing the right start time, adopts it.
+func TestPortSessionActivationStartChanged(t *testing.T) {
+	f := newFakePort(t)
+	a := newFakeActivation(t, f)
+	s, tr, _ := activationSession(t, f, time.Minute)
+	f.now = f.now.Add(2 * time.Second)
+	f.live[31], f.owners[31] = true, target.Owner{Exe: "/usr/bin/app", UID: 995}
+	f.listed[31] = 7 // the listing saw another incarnation
+	a.adopt = []uint32{31}
+	mustEnded(t, s, false, "listed holder gone")
+	if len(tr.added) != 0 || s.follow.activation == nil {
+		t.Fatalf("added %v, pin %v; want nothing traced, still waiting", tr.added, s.follow.activation)
+	}
+	delete(f.listed, 31)
+	f.now = f.now.Add(2 * time.Second)
+	mustEnded(t, s, false, "service listed right")
+	if !slices.Equal(tr.added, []uint32{31}) {
+		t.Fatalf("added %v; want the service 31", tr.added)
+	}
+}
+
+// TestPortSessionActivationOwnerUnreadable (task el4): an adopted
+// service whose owner key cannot be read leaves the session nothing to
+// recognise a restart by, so it keeps the pinned listener: once the
+// service exits the session waits for the next activation instead of
+// ending with a word about an executable "unreadable at start".
+func TestPortSessionActivationOwnerUnreadable(t *testing.T) {
+	f := newFakePort(t)
+	a := newFakeActivation(t, f)
+	s, tr, log := activationSession(t, f, time.Minute)
+	f.now = f.now.Add(2 * time.Second)
+	f.live[31] = true // no owner key
+	a.adopt = []uint32{31}
+	mustEnded(t, s, false, "service activated")
+	if !slices.Equal(tr.added, []uint32{31}) {
+		t.Fatalf("added %v; want the service 31", tr.added)
+	}
+
+	f.live[31], a.adopt = false, nil
+	f.now = f.now.Add(2 * time.Second)
+	mustEnded(t, s, false, "service gone, within the grace")
+	f.live[32], f.owners[32] = true, target.Owner{Exe: "/usr/bin/app", UID: 995}
+	a.adopt = []uint32{32}
+	f.now = f.now.Add(2 * time.Second)
+	mustEnded(t, s, false, "service re-activated")
+	if !slices.Equal(tr.added, []uint32{31, 32}) {
+		t.Fatalf("added %v; want the re-activated service 32 after 31", tr.added)
+	}
+	if out := log.String(); strings.Contains(out, "unreadable at start") {
+		t.Fatalf("stderr %q blames the start", out)
 	}
 }

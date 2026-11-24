@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"iormesh/internal/correlate"
@@ -29,8 +30,9 @@ const (
 // procOwner reads a process's owner key (target.ProcFS.Owner);
 // managerListener pins the listener of a port only a service manager
 // holds and activatedHolders lists who holds it since (task lk4,
-// target.ProcFS.ManagerListener and ActivatedHolders). Variables like
-// processAlive, so tests need no /proc.
+// target.ProcFS.ManagerListener and ActivatedHolders); resolvePort
+// resolves the port's owners once more when the pin failed (task el4,
+// portActivation). Variables like processAlive, so tests need no /proc.
 var (
 	listenOwners     = func(port uint16) ([]target.Holder, error) { return target.HostProcFS().ListenHolders(port) }
 	procOwner        = func(pid uint32) (target.Owner, error) { return target.HostProcFS().Owner(pid) }
@@ -38,24 +40,34 @@ var (
 	activatedHolders = func(a target.Activation) (adopt, refuse []target.Holder, err error) {
 		return target.HostProcFS().ActivatedHolders(a)
 	}
+	resolvePort = func(spec target.Spec) ([]uint32, error) {
+		return spec.Resolve(target.HostProcFS(), uint32(os.Getpid()))
+	}
 )
 
 // portActivation decides what a -listen-port session does when resolving
-// its port at start failed with err (decision #23, task lk4). A port only
-// the service manager holds — an idle socket-activated service — with a
-// grace to wait in gets its listener pinned: the session starts with no
-// target and waits for the activated service (awaitActivation). Any
-// other error, -listen-grace 0 or a listener that cannot be pinned keeps
-// the refusal.
-func portActivation(cfg runConfig, err error) (*target.Activation, error) {
+// its port at start failed with err (decision #23, task lk4): the start
+// targets, or the pinned listener to wait on. A port only the service
+// manager holds — an idle socket-activated service — with a grace to
+// wait in gets its listener pinned: the session starts with no target
+// and waits for the activated service (awaitActivation). Any other
+// error or -listen-grace 0 keeps the refusal. A listener that cannot be
+// pinned may be one the service took between the resolve and the pin
+// (task el4: activated in between, so an app holds it now), so the port
+// is resolved once more and its owners, if any, are the start targets;
+// otherwise the refusal stands.
+func portActivation(cfg runConfig, err error) ([]uint32, *target.Activation, error) {
 	if !errors.Is(err, target.ErrManagerOnly) || cfg.listenGrace == 0 {
-		return nil, err
+		return nil, nil, err
 	}
 	a, perr := managerListener(cfg.spec.ListenPort)
-	if perr != nil {
-		return nil, errors.Join(err, perr)
+	if perr == nil {
+		return nil, &a, nil
 	}
-	return &a, nil
+	if pids, rerr := resolvePort(cfg.spec); rerr == nil {
+		return pids, nil, nil
+	}
+	return nil, nil, errors.Join(err, perr)
 }
 
 // portFollow is a -listen-port session's wait for a restarted owner.
@@ -81,7 +93,8 @@ type portFollow struct {
 	// held the port at start (portActivation, task lk4): until its
 	// activated service is adopted the session has no owner key, and
 	// awaitActivation stands in for the follow. nil otherwise, and once
-	// the service is adopted and remembered.
+	// the service is adopted and an owner key of it remembered (kept
+	// while none could be read, task el4).
 	activation *target.Activation
 }
 
@@ -279,8 +292,11 @@ func (s *session) awaitService(act *target.Activation) {
 // once and left alone. Once one is traced, the adopted holders are
 // remembered as start holders are (remember: the earliest-started one's
 // executable), the pin is dropped, and later restarts or re-activations
-// follow the ordinary rules. An unreadable listing is no error: the next
-// resolve tries again.
+// follow the ordinary rules. If no adopted holder's owner key could be
+// read (task el4), nothing would recognise a restart, so the pin stays:
+// once the service exits the session waits for its next activation as
+// it did at start. An unreadable listing is no error: the next resolve
+// tries again.
 func (s *session) awaitActivation() error {
 	f := s.follow
 	adopt, refuse, err := activatedHolders(*f.activation)
@@ -306,7 +322,10 @@ func (s *session) awaitActivation() error {
 	}
 	if len(traced) > 0 {
 		f.remember(traced)
-		f.activation, f.since = nil, time.Time{}
+		f.since = time.Time{}
+		if len(f.owners) > 0 {
+			f.activation = nil
+		}
 	}
 	return nil
 }

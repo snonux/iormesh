@@ -2,6 +2,7 @@ package target
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -12,6 +13,13 @@ import (
 func (f fakeProc) cgroup(pid uint32, path string) {
 	f.t.Helper()
 	f.write(filepath.Join(f.root, strconv.Itoa(int(pid))), "cgroup", "0::"+path+"\n")
+}
+
+// uid gives pid an effective uid: its status rewritten with a Uid line.
+func (f fakeProc) uid(pid, uid uint32) {
+	f.t.Helper()
+	f.write(filepath.Join(f.root, strconv.Itoa(int(pid))), "status",
+		fmt.Sprintf("Name:\tx\nTgid:\t%d\nPid:\t%d\nUid:\t%d\t%d\t%d\t%d\n", pid, pid, uid, uid, uid, uid))
 }
 
 // holderPIDs lists the holders' pids.
@@ -83,10 +91,13 @@ func TestActivatedHoldersSystem(t *testing.T) {
 	f.proc(56, 56, 1, 'S', 2, "/usr/bin/app")
 	f.cgroup(56, "/system.slice")
 	f.socket(56, 3, "111")
+	f.proc(57, 57, 1, 'S', 2, "/usr/bin/app") // a look-alike unit name
+	f.cgroup(57, "/system.slice/x.service-evil")
+	f.socket(57, 3, "111")
 	adopt, refuse, err := fs.ActivatedHolders(a)
 	if err != nil || !slices.Equal(holderPIDs(adopt), []uint32{50, 52}) ||
-		!slices.Equal(holderPIDs(refuse), []uint32{51, 55, 56}) {
-		t.Fatalf("adopt %v refuse %v err %v; want adopt [50 52], refuse [51 55 56]",
+		!slices.Equal(holderPIDs(refuse), []uint32{51, 55, 56, 57}) {
+		t.Fatalf("adopt %v refuse %v err %v; want adopt [50 52], refuse [51 55 56 57]",
 			holderPIDs(adopt), holderPIDs(refuse), err)
 	}
 	if adopt[0].StartNS == 0 {
@@ -103,35 +114,86 @@ func TestActivatedHoldersSystem(t *testing.T) {
 	}
 }
 
-// TestActivatedHoldersUserManager (task lk4): a user manager's services
-// run below its user@UID.service; a .service elsewhere holding its socket
-// is not one of them.
+// userManager adds pid 900, the user manager of uid 1000, holding the
+// listener 111 from its init.scope below um, and pins it.
+func userManager(t *testing.T, f fakeProc, um string) Activation {
+	t.Helper()
+	f.proc(900, 900, 1, 'S', 1, "/usr/lib/systemd/systemd")
+	f.uid(900, 1000)
+	f.cgroup(900, um+"/init.scope")
+	f.socket(900, 40, "111")
+	a, err := f.fs().ManagerListener(8080)
+	if err != nil {
+		t.Fatalf("ManagerListener: %v", err)
+	}
+	return a
+}
+
+// TestActivatedHoldersUserManager (tasks lk4, el4): a user manager's
+// services run below its user@UID.service under the manager's uid; a
+// .service elsewhere — pid 1's, another user manager's
+// (user@10000.service against user@1000), a look-alike unit name
+// (user@1000.service-evil) — a scope, and a service of the manager run
+// under another uid (a setuid binary, unreadable status) are not one of
+// them.
 func TestActivatedHoldersUserManager(t *testing.T) {
 	f := newFakeProc(t)
 	f.listenTable()
 	um := "/user.slice/user-1000.slice/user@1000.service"
-	f.proc(900, 900, 1, 'S', 1, "/usr/lib/systemd/systemd")
-	f.cgroup(900, um+"/init.scope")
-	f.socket(900, 40, "111")
-	fs := f.fs()
-	a, err := fs.ManagerListener(8080)
-	if err != nil {
-		t.Fatalf("ManagerListener: %v", err)
+	a := userManager(t, f, um)
+	holder := func(pid, uid uint32, cg string) {
+		f.proc(pid, pid, 900, 'S', 2, "/usr/bin/app")
+		if uid != 0 {
+			f.uid(pid, uid)
+		}
+		f.cgroup(pid, cg)
+		f.socket(pid, 3, "111")
 	}
-	f.proc(60, 60, 900, 'S', 2, "/usr/bin/app")
-	f.cgroup(60, um+"/app.slice/app.service")
-	f.socket(60, 3, "111")
-	f.proc(61, 61, 1, 'S', 2, "/usr/bin/app")
-	f.cgroup(61, "/system.slice/app.service")
-	f.socket(61, 3, "111")
-	f.proc(62, 62, 1, 'S', 2, "/usr/bin/bash")
-	f.cgroup(62, um+"/app.slice/app-term.scope")
-	f.socket(62, 3, "111")
-	adopt, refuse, err := fs.ActivatedHolders(a)
+	holder(60, 1000, um+"/app.slice/app.service")
+	holder(61, 1000, "/system.slice/app.service")
+	holder(62, 1000, um+"/app.slice/app-term.scope")
+	holder(63, 10000, "/user.slice/user-10000.slice/user@10000.service/app.slice/app.service")
+	holder(64, 1000, "/user.slice/user-1000.slice/user@1000.service-evil/app.service")
+	holder(65, 1001, um+"/app.slice/app.service")
+	holder(66, 0, um+"/app.slice/app.service") // status without a Uid line
+	adopt, refuse, err := f.fs().ActivatedHolders(a)
 	if err != nil || !slices.Equal(holderPIDs(adopt), []uint32{60}) ||
-		!slices.Equal(holderPIDs(refuse), []uint32{61, 62}) {
-		t.Fatalf("adopt %v refuse %v err %v; want adopt [60], refuse [61 62]",
+		!slices.Equal(holderPIDs(refuse), []uint32{61, 62, 63, 64, 65, 66}) {
+		t.Fatalf("adopt %v refuse %v err %v; want adopt [60], refuse [61 62 63 64 65 66]",
 			holderPIDs(adopt), holderPIDs(refuse), err)
+	}
+}
+
+// TestManagerListenerUserManagerRoot (task el4): a user manager's units
+// run below its own user@UID.service, the parent of its init.scope, with
+// UID its own uid; a manager in any other cgroup — a nested systemd in a
+// service, an init.scope below something else, another user's
+// user@UID.service, an unreadable uid — names no subtree and pins
+// nothing.
+func TestManagerListenerUserManagerRoot(t *testing.T) {
+	for _, tc := range []struct {
+		name, cg string
+		uid      uint32
+	}{
+		{"in a service", "/user.slice/user-1000.slice/user@1000.service/app.slice/nested.service", 1000},
+		{"init.scope of a service", "/system.slice/evil.service/init.scope", 1000},
+		{"another user's manager unit", "/user.slice/user-1001.slice/user@1001.service/init.scope", 1000},
+		{"look-alike unit", "/user.slice/user-1000.slice/user@1000.service-evil/init.scope", 1000},
+		{"no uid", "/user.slice/user-1000.slice/user@1000.service/init.scope", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeProc(t)
+			f.listenTable()
+			f.proc(900, 900, 1, 'S', 1, "/usr/lib/systemd/systemd")
+			if tc.uid != 0 {
+				f.uid(900, tc.uid)
+			}
+			f.cgroup(900, tc.cg)
+			f.socket(900, 40, "111")
+			if a, err := f.fs().ManagerListener(8080); err == nil {
+				t.Fatalf("pinned %+v; want no known subtree", a)
+			}
+		})
 	}
 }
 
