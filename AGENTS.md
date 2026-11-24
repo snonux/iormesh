@@ -49,11 +49,11 @@ Never write `//nolint` — a test fails on it.
   modes, a short security summary, and the docs index. It must
   not accumulate detail sections again.
 - **Detailed documentation lives in `docs/`**, one topic per
-  file (architecture, decisions, milestones, trace-scope,
-  output-contract, schema, testing, java-attach, security,
-  build, implementation, visualization; spike results under
-  `docs/spikes/`), each linked from the README's Documentation
-  section.
+  file (quickstart, architecture, decisions, milestones,
+  trace-scope, output-contract, schema, testing, java-attach,
+  kubernetes, security, build, implementation, visualization,
+  troubleshooting; spike results under `docs/spikes/`), each
+  linked from the README's Documentation section.
 - **Diagrams are generated**: `docs/diagrams/*.svg` come from
   `docs/diagrams/gen.py` (`python3 docs/diagrams/gen.py
   docs/diagrams`). Change the generator, not the SVGs.
@@ -63,7 +63,11 @@ Never write `//nolint` — a test fails on it.
   decision changes, update the matching topic doc in the same
   commit — never leave docs contradicting docs/decisions.md.
   A milestone's scope and acceptance change in
-  `docs/milestones.md` the same way.
+  `docs/milestones.md` the same way. New scope beyond M7 that
+  needs its own acceptance gets a new milestone section (M8,
+  …) in `docs/milestones.md`, its decisions recorded first; a
+  change that fits an existing milestone or needs no
+  acceptance of its own is a decision only.
 - **New documentation goes into `docs/`** with a README index
   entry; new sections do not go into README.md.
 - Don't duplicate a decision verbatim in the topic docs; cite

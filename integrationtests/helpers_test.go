@@ -309,7 +309,7 @@ func normalized(t *testing.T, h *Harness, run tracedRun, scenario string) normal
 }
 
 // assertGolden is the integration-level assertion (docs/testing.md
-// "Integration tests - follow ior"): the normalized, bracketed trace holds
+// "Integration tests follow ior"): the normalized, bracketed trace holds
 // everything the scenario declares and nothing on its must-not-appear list.
 func assertGolden(t *testing.T, got normalize.Trace, want normalize.Expectation) {
 	t.Helper()

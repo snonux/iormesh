@@ -13,9 +13,9 @@ event families `iormesh run -trace-families` adds (see
 [schema.md](schema.md)).
 
 - **Identity & lifecycle** — exec (exe, argv — redacted by
-  policy), fork/clone, thread
-  create/exit, thread renames; PID incarnation ids so a reused
-  PID is never confused with the old one. Sessions bound to a
+  policy), fork/clone, thread create/exit, comm/thread renames;
+  PID incarnation ids so a reused PID is never confused with the
+  old one. Sessions bound to a
   process-name pattern auto-detect restarts and follow the app
   to its new PID. Sessions bound to a listening port
   (`-listen-port`) follow the port to a restarted owner, within
@@ -65,7 +65,7 @@ event families `iormesh run -trace-families` adds (see
 - **Network** — TCP lifecycle with full 4-tuples, read from the
   socket's state transitions rather than syscall arguments (so
   Java's non-blocking connects are covered), plus a
-  NAT-tolerant join key; UDP per-packet
+  NAT-tolerant join key (decision #26); UDP per-packet
   peers (sendto/recvfrom), the msghdr data calls
   sendmsg/recvmsg/sendmmsg/recvmmsg with their bytes (the mmsg
   calls' summed over their messages) and TCP sequence ranges
@@ -74,8 +74,9 @@ event families `iormesh run -trace-families` adds (see
   per call (task nk4); their 8 handlers are on by default, and a
   sendmmsg/recvmmsg exit pays up to 1024 user-memory reads per
   call, one per message — heavy for UDP workloads that batch
-  with them — poll/epoll wait registrations, DNS hostname↔IP maps,
-  and ingress route maps for proxy hops that hide the peer. TLS
+  with them — poll/epoll wait registrations, DNS hostname↔IP
+  maps (from the agent's hooks, decision #8), and ingress route
+  maps for proxy hops that hide the peer. TLS
   peer identity is later (decision #8). *Who talks to whom,
   under what name — and which threads wait on what.*
 - **HTTP/HTTPS** — method, scheme, host, path/URI, status,

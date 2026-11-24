@@ -22,11 +22,12 @@ License:  Apache-2.0 (LICENSE.txt and NOTICE.txt, the embed-core jar's own
           META-INF/LICENSE and META-INF/NOTICE; the annotations jar's
           LICENSE is the plain Apache-2.0 text the former begins with)
 
-Why vendored: the workload build is JDK-only (no Maven or Gradle) and must work
-offline. The core workload stays free of third-party code (docs/decisions.md
-#5); only this separate module's jar, workload-libs.jar, runs against
-these jars, named in its manifest's Class-Path, not copied into it. `mage
-workloadLibsBuild` checks the SHA-256s above before compiling.
+Why vendored: the workload build is JDK-only (no Maven or Gradle) and must
+work offline. The core workload stays free of third-party code
+(docs/decisions.md #5); only this separate module's jar, workload-libs.jar,
+runs against these jars, named in its manifest's Class-Path, not copied
+into it. `mage workloadLibsBuild` checks the SHA-256s above before
+compiling.
 
 Why Tomcat: one jar holds both the container and the Servlet API, so the
 scenario needs no further dependency (Jetty would need half a dozen).

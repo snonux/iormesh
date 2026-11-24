@@ -35,11 +35,11 @@ License:  Apache-2.0, all four; the jars ship no license file, so each
           LICENSE-annotations.txt (JetBrains/java-annotations, master —
           the repository has no 13.0 tag).
 
-Why vendored: the workload build is JDK-only (no Maven or Gradle) and must work
-offline. The core workload stays free of third-party code (docs/decisions.md
-#5); only workload-libs.jar runs against these jars, named in its
-manifest's Class-Path, not copied into it. `mage workloadLibsBuild` checks the
-SHA-256s above before compiling.
+Why vendored: the workload build is JDK-only (no Maven or Gradle) and must
+work offline. The core workload stays free of third-party code
+(docs/decisions.md #5); only workload-libs.jar runs against these jars,
+named in its manifest's Class-Path, not copied into it. `mage
+workloadLibsBuild` checks the SHA-256s above before compiling.
 
 Why this version: OkHttp 5.5.1 is the newest release at least two weeks
 old on the fetch date (okhttp-jvm is OkHttp 5's JVM artifact; `okhttp`

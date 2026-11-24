@@ -1,10 +1,10 @@
 # Milestones
 
 The milestones iormesh was built in, in execution order: what each
-one set out to land, how it was built, and what accepted it. Status
-(2026-11-22): M0, M1, M2, M3, M4, M6 and M7 are accepted; M5 is
-built but not accepted until its LLM eval has run with a real
-model. Rocky Linux 9.9 (el9, kernel 5.14) is the main target.
+one set out to land, how it was built, and what accepted it. When
+this record was written (2026-11-24), M0, M1, M2, M3, M4, M6 and M7
+were accepted; M5 was built but not accepted until its LLM eval has
+run with a real model. Rocky Linux 9.9 (el9, kernel 5.14) is the main target.
 
 Decision numbers (`#N`) refer to [decisions.md](decisions.md);
 what is traced and the trace format are in
@@ -426,8 +426,9 @@ It proves the central thesis — two processes fused into one edge
 by their connection — before the traced surface widens.
 
 - **Probes**: open/read/write/close and TCP connect/accept only,
-  built on the ior-pattern generation pipeline (see "BPF/C code
-  generation — follow ior").
+  built on the ior-pattern generation pipeline (see
+  [build.md](build.md#code-generation--follow-ior), "Code generation —
+  follow ior").
 - **TCP lifecycle from the socket, not the syscall**: Java NIO
   connects are non-blocking, so `connect()` returns
   `EINPROGRESS` and never carries the local port. The 4-tuple
@@ -766,8 +767,9 @@ Gated by S1 — done; the design below is S1's result
   under the sending thread's stack and span (scenario
   `http-async`), without latency or `req_seq`: the agent's
   completion runs after the app's own callbacks, so its stamp is
-  no evidence of the response's time or order. The DNS hooks (#8) landed with it: a `dns`
-  event per new host-to-addresses mapping of a JVM. Task de4
+  no evidence of the response's time or order. The DNS hooks
+  (#8) landed with it: a `dns` event per new host-to-addresses
+  mapping of a JVM. Task de4
   started the third-party libraries, which the agent rewrites
   in the application class loader that defines them (only one
   that sees the agent's bridge; per-class reflective probes, no
@@ -1293,8 +1295,9 @@ Kubernetes (M7) build on it.
   also consumes the peer's FIN, task wi4 — so concurrent
   senders or readers on one socket, MSG_PEEK, kTLS and the like
   give none, never a guess; one ring record per call as
-  before, the exit record carrying it; decision #25's burst figure unchanged, +3 %
-  tracer instructions per TCP data event — s3-overhead.md,
+  before, the exit record carrying it; decision #25's burst
+  figure unchanged, +3 % tracer instructions per TCP data
+  event — s3-overhead.md,
   "Follow-up (xe4)"),
   the SYN adds one client→server edge (connect enter before
   the server's accept exit). Offsets repeat every 4 GiB, so a
@@ -1411,10 +1414,11 @@ Kubernetes (M7) build on it.
   stepped or slewed harder breaks the assumption. The `build`
   summary and the view model print them per host pair
   (windows, widths, one-sided and empty ones; task ib4); M5's
-  views will show them too. The bound never feeds back
-  into fusion — it is proven by the fused connections, so it
-  cannot choose them; the fusion window stays a wrap guard,
-  and hosts skewed beyond it get neither edge nor bound.
+  views show them too (the health view's clock bounds). The
+  bound never feeds back into fusion — it is proven by the
+  fused connections, so it cannot choose them; the fusion
+  window stays a wrap guard, and hosts skewed beyond it get
+  neither edge nor bound.
   Cross-host order (`Timeline`) is decided only when the
   widened bound — summed along a chain of hosts when two never
   talked directly — leaves no doubt; otherwise, including a
@@ -1694,9 +1698,10 @@ Kubernetes (M7) build on it.
   its `CLOSE`, the correlator splits a socket address reused after
   a lost `CLOSE`); a sixth, with qf4, printed every criterion
   PASS (build of 35c7de7). No criterion counts as
-  accepted until one run passes all — the sixth did. `mage m4Acceptance HOST1 HOST2`
-  (`internal/acceptance`) runs the whole sequence against
-  exactly the two named, bootstrapped hosts and prints PASS,
+  accepted until one run passes all — the sixth did. `mage
+  m4Acceptance HOST1 HOST2` (`internal/acceptance`) runs the
+  whole sequence against exactly the two named, bootstrapped
+  hosts and prints PASS,
   FAIL, SKIP or NOT RUN per criterion; the runbook, its
   prerequisites, the local results and the Rocky 9.9 runs are
   in
@@ -1927,10 +1932,11 @@ Kubernetes (M7) build on it.
   only below `workload/src` — then scores each answer with the
   declared matchers (contains, in-order sequence, excludes,
   regex, excluded regex — an answer listing every candidate
-  fails every question, by test) into `eval/results/<date>-<scenario>.json`. The model is
-  a command (prompt on stdin, reply on stdout) the operator
-  must name: there is no default, since the prompt carries trace
-  data, so the eval never runs on its own and never in `mage
+  fails every question, by test) into
+  `eval/results/<date>-<scenario>.json`. The model is a command
+  (prompt on stdin, reply on stdout) the operator must name:
+  there is no default, since the prompt carries trace data, so
+  the eval never runs on its own and never in `mage
   test`; a local model keeps the data on the machine. `mage
   evalTrace` (root) records the store from one judged
   `TestMicroservices` run. The first scored run with a real
@@ -2594,8 +2600,9 @@ Built after plain Linux servers (M4); accepted on kind and el9
   and ingress only. `TestKindMicroservices` (`mage
   k8sMicroservices` alone, and part of `mage k8sAcceptance`
   since its first green run) runs gateway, orders, inventory
-  and billing each in a pod of its own, one host per service, every pod under a debug tracer
-  with the Java agent, one registry project for all. Each JVM
+  and billing each in a pod of its own, one host per service,
+  every pod under a debug tracer with the Java agent, one
+  registry project for all. Each JVM
   starts behind the workload's startup gate, its tracer is
   deployed and joined, the certificate it pins is shipped into
   its pod (as the two-host acceptance copies it), and it is

@@ -23,7 +23,8 @@ The decisions it cites are in [decisions.md](decisions.md).
   queryable; collected over rsync while the session runs
   (ior already records parquet). Variable event arguments map
   to one nullable column per field. NDJSON stays the
-  live/golden format. As built (task 8b4, `iormesh run
+  live/golden format. Sparse columns cost nothing, and no JSON
+  blob column hides fields from queries. As built (task 8b4, `iormesh run
   -trace-dir`): a segment is published by an atomic rename
   into `<trace-dir>/<project>/ready/` as
   `<fqdn>-<session>-<start-ts>-<seq>.parquet` plus a
@@ -34,7 +35,9 @@ The decisions it cites are in [decisions.md](decisions.md).
   the column mapping is in
   [schema.md](schema.md#parquet-mapping).
 - **Stable identifiers** — PID incarnation, fd generation,
-  cross-host connection ids, a deduplicated method table.
+  cross-host connection ids (per socket pair, assigned by the
+  merge on the controller and shared across mesh hosts), a
+  deduplicated method table.
 - **Normalization** — raw traces are full of run-specific
   values (PIDs, TIDs, fds, ephemeral ports, inodes,
   timestamps). The normalizer renumbers them to symbolic ids
@@ -52,9 +55,10 @@ The decisions it cites are in [decisions.md](decisions.md).
   connections themselves and records it. Ring-buffer drops are
   explicit events, never silent gaps.
 - **Explicit attribution** — every I/O event says whether a
-  Java stack was joined to it or not (non-JVM process, JNI or
-  JVM-internal I/O, agent absent). I/O that ran on a virtual
-  thread's carrier is flagged, because v1 attributes it to the
+  Java stack was joined to it (`attribution: java`) or not
+  (`none` — non-JVM process, JNI or JVM-internal I/O, agent
+  absent). I/O that ran on a virtual thread's carrier is
+  flagged (`carrier: true`), because v1 attributes it to the
   carrier and cannot name the virtual thread. Missing
   attribution is data, not a hole.
 - **Cross-service causality** — connection ids + per-connection
@@ -66,8 +70,9 @@ The decisions it cites are in [decisions.md](decisions.md).
   limits are stated: async hops and HTTP/2 requests without
   captured stream ids render as time-ordered, never guessed.
 - **Explicit end** — every trace records how it ended (duration,
-  disk limit, stop, targets exited, error), so a reader — LLM or
-  human — knows whether it is complete.
+  disk limit, stop, targets exited, error) as a final event and
+  in the summary rollup, so a reader — LLM or human — knows
+  whether it is complete.
 - **Source-matching frames** — `class#method(file:line)` plus the
   class's JAR origin, directly comparable with source code.
 - **Deterministic exports** — canonical key order, so two
@@ -95,9 +100,9 @@ The decisions it cites are in [decisions.md](decisions.md).
   name and the container id (task sh4;
   [schema.md](schema.md#pod-fields-on-events-m7)).
 - **Project-scoped** — every session belongs to a named project;
-  traces live under `/opt/iormesh/traces/<project>/`, and
-  cross-project connections render as explicit edges in the
-  merged mesh.
+  traces live under `/opt/iormesh/traces/<project>/`, graph
+  nodes carry their project label, and cross-project
+  connections render as explicit edges in the merged mesh.
 - **Proxy-hop edges** — a route through an ingress renders as
   one routed edge (client → FQDN → ingress → Service →
   workload) in the build's model and its views, so the mesh
@@ -139,13 +144,13 @@ field-by-field reference is [schema.md](schema.md).
   when the I/O ran for a virtual thread), java_thread,
   java_stack (method ids), otel (trace_id, span_id — present
   on java events inside an OTEL span; appended after stack_id
-  by task 4b4), http (method, scheme,
-  host, path, status, req_seq — on http events; headers per
-  redaction policy)`. S1 settled the Java fields: nested
-  `java.thread` (thread name) and `java.stack` (method ids,
-  innermost first), as `internal/schema` has them — the flat
-  names above are shorthand; `http` was provisional until M3's
-  acceptance froze it. Task 3b4 appended `version`, `req_headers` and
+  by task 4b4), http (method, scheme, host, path, status,
+  req_seq — on http events; headers per redaction policy)`. S1
+  settled the Java fields: nested `java.thread` (thread name)
+  and `java.stack` (method ids, innermost first), as
+  `internal/schema` has them — the flat names above are
+  shorthand; `http` was provisional until M3's acceptance froze
+  it. Task 3b4 appended `version`, `req_headers` and
   `resp_headers` ("name: value", redacted) to it and made `http`
   an event kind of its own (fd -1, conn_id when found).
   Cross-host, `conn_id` comes from the merge's ISN-pair join
@@ -204,9 +209,9 @@ field-by-field reference is [schema.md](schema.md).
   concurrent `bpfRootTest`s: 0 skipped in all 96 tracer runs),
   real under a deliberate map-lookup loop on the target's CPU
   (114 k skipped, 2.5 % of its reads lost), and still counted
-  as skipped runs. The gate's judgement stays
-  as vd4 set it: a skip cannot be attributed to a pid, and the
-  experiment shows it can be the target's. Cost: every syscall
+  as skipped runs. The gate's judgement stays as vd4 set it: a
+  skip cannot be attributed to a pid, and the experiment shows
+  it can be the target's. Cost: every syscall
   on the host now meets a dispatcher, traced kind or not. Kernel
   instructions per untraced syscall beside an idle trace
   (`perf stat`, 3 rounds, identical across rounds): dd's

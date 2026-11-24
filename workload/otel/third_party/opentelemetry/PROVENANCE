@@ -22,11 +22,12 @@ License:  Apache-2.0 (LICENSE.txt, from the v1.67.0 tag of
           https://github.com/open-telemetry/opentelemetry-java; the
           project ships no NOTICE file)
 
-Why vendored: the workload build is JDK-only (no Maven or Gradle) and must work
-offline. The core workload stays free of third-party code (docs/decisions.md
-#5); only this separate module's jar, workload-otel.jar, runs against
-these jars, named in its manifest's Class-Path, not copied into it. `mage
-workloadOtelBuild` checks the SHA-256s above before compiling.
+Why vendored: the workload build is JDK-only (no Maven or Gradle) and must
+work offline. The core workload stays free of third-party code
+(docs/decisions.md #5); only this separate module's jar, workload-otel.jar,
+runs against these jars, named in its manifest's Class-Path, not copied
+into it. `mage workloadOtelBuild` checks the SHA-256s above before
+compiling.
 
 Why the API and not the SDK: the Java agent reads the active span through
 the API (Span.current(), docs/implementation.md M3 step 8), and the golden

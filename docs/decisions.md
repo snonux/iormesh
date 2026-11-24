@@ -109,9 +109,10 @@ deferred.
      builds over 2 µs at load ≥ 10 (s3-overhead.md, "Follow-up
      (ae4)"); task ee4 re-measures it on M4's segment writer
      (it gates M4's acceptance), the limit unchanged. With the
-     Java join (`-spool`, every event joined): 5.2 µs, over budget (2b4; td4's Java mark
-     measured +0.7 µs per marked event on top, within the host's
-     noise, s3-overhead.md "Follow-up (td4)"). Task ud4 cut the
+     Java join (`-spool`, every event joined): 5.2 µs, over
+     budget (2b4; td4's Java mark measured +0.7 µs per marked
+     event on top, within the host's noise, s3-overhead.md
+     "Follow-up (td4)"). Task ud4 cut the
      consumer's per-event work (a per-event clock syscall, the
      mark's reflective decode, the join's map keys, the event's
      copies, integer and string encoding): instructions per event
@@ -161,11 +162,12 @@ deferred.
      medians sit inside the ~±20 % run-to-run noise (2 of 5 runs
      over the limit at 4 threads in each case), so the instruction
      counts — well under 12.5 k — are the robust part of the pass
-     (s3-overhead.md, "Follow-up (ee4): owner decision"). Measured as the
-     tracer's own user+sys CPU time per event from its ready
-     file to its exit (load and attach excluded), which host
-     load moves less than wall time — not nothing: on a loaded SMT host one thread's CPU
-     time still spreads 2–3×, hence medians of ≥ 5 runs;
+     (s3-overhead.md, "Follow-up (ee4): owner decision").
+     Measured as the tracer's own user+sys CPU time per event
+     from its ready file to its exit (load and attach excluded),
+     which host load moves less than wall time — not nothing: on
+     a loaded SMT host one thread's CPU time still spreads 2–3×,
+     hence medians of ≥ 5 runs;
   2. *bystander cost* (host-wide, every untraced process) — M1:
      ~1.14× per traced-kind syscall at 4 and 16 threads. Budget: ≤ 1.25× on
      `syscall-burst` at 4 threads, paid only while a trace runs.
@@ -328,11 +330,12 @@ deferred.
   as its JVM, not as long as a session (task 2j4): the agent
   unlinks its own ring in its shutdown hook after the last
   watermark (a tracer reading it has it mapped); the Java join
-  retires a JVM once its group-dead exit was handled and nothing can ask for its ring
-  (the fuse window plus the join timeout past the exit, none of
-  its events held): a last drain, then close and unlink; and the
-  spool scan unlinks a ring whose process is gone (SIGKILL, or
-  a JVM that died while no session ran). Every unlink goes
+  retires a JVM once its group-dead exit was handled and nothing
+  can ask for its ring (the fuse window plus the join timeout
+  past the exit, none of its events held): a last drain, then
+  close and unlink; and the spool scan unlinks a ring whose
+  process is gone (SIGKILL, or a JVM that died while no session
+  ran). Every unlink goes
   through the directory's descriptor and only if the name still
   names the regular, single-link inode meant — the one mapped,
   or the one listed — so a reused pid's new ring survives. A
@@ -414,8 +417,9 @@ deferred.
   whole byte sum goes to that first peer's flow or connection:
   a QUIC server's recvmmsg of datagrams from several clients
   adds them all to the first client's flow in the report
-  (task hl4 pins this with two senders). Renames and mmaps are not families: the
-  renames are the file surface's, mmaps are not traced yet.
+  (task hl4 pins this with two senders). Renames and mmaps are
+  not families: the renames are the file surface's, mmaps are
+  not traced yet.
   ior's restart fold (one row for a call a signal interrupted
   and the kernel re-executed) is not part of the signal family
   and not lifted: a restarted call stays two rows, the first
@@ -514,13 +518,13 @@ deferred.
   that activates between the start's resolve and the pin is
   caught by resolving the port once more (task el4). No
   activation within the grace ends the session `targets_exited`,
-  stderr saying so. Not covered:
-  `Accept=yes` sockets (each instance gets a connection, never
-  the listener) and a socket unit restarted while waiting (new
-  sockets, not the pinned ones). No unit name is read: that needs
-  systemd's D-Bus, which the tracer does not use. A new owner that listens while the old one still
-  runs (an overlapping restart) is adopted once the old one
-  exits, within the grace.
+  stderr saying so. Not covered: `Accept=yes` sockets (each
+  instance gets a connection, never the listener) and a socket
+  unit restarted while waiting (new sockets, not the pinned
+  ones). No unit name is read: that needs systemd's D-Bus,
+  which the tracer does not use. A new owner that listens while
+  the old one still runs (an overlapping restart) is adopted
+  once the old one exits, within the grace.
 - **#9 Capture policy for argv and env** — argv is in, but it
   is not harmless: command lines carry passwords and tokens
   (`-Dpassword=…`, `--token …`). Argv is recorded through the
@@ -549,16 +553,17 @@ deferred.
 
 ## Open — raised for M3 (built on the default)
 
-- **#29 JDK version support** — the plan says JDK 21, but
-  fleets run 17 and older. Boundary hooks, stacks and HTTP
-  events do not need 21 (only the deferred virtual-thread
+- **#29 JDK version support** — the project first targeted JDK
+  21, but fleets run 17 and older. Boundary hooks, stacks and
+  HTTP events do not need 21 (only the deferred virtual-thread
   support would). S1 (from sources, no 21 runtime then) found
   the hook set's natives identical from 21 to 25 (27-ea changes
   two signatures outside the set), while 17 differs (no
   `UnixFileDispatcherImpl`/`UnixDispatcher`, RAF `readBytes`
   instead of `readBytes0`); the hooked *Java* methods differ
-  more, which sc4 settled as three variants (below). M3 (task 0b4) builds the agent for 17 with
-  shaded ASM and ships per-JDK table variants. A real JDK 21
+  more, which sc4 settled as three variants (below). M3 (task
+  0b4) builds the agent for 17 with shaded ASM and ships
+  per-JDK table variants. A real JDK 21
   (task sc4) showed one hooked Java method S1's source reading
   missed: `Net.serverSocket` keeps its `boolean` stream flag
   through 24 and drops it in 25 — so three variants, `jdk17`
@@ -726,14 +731,14 @@ deferred.
   lie outside the repository; no private key is ever committed,
   tests generate throwaway keys. The controller pins the public
   key at `~/.config/iormesh/minisign.pub` (`iormeshctl verify`,
-  which deploy will run); servers hold the root-owned copy at
+  which deploy runs too); servers hold the root-owned copy at
   `/opt/iormesh/etc/minisign.pub`. Key rotation is replacing
   both files — the server's with the operator's own sudo, as
   in bootstrap.
   *Provisional (2026-11-21, owner-delegated default, task kf4):
   the Java agent jar is a release artifact signed and checked
-  exactly like the tracer* — the plan had not said how the jar
-  reaches a server, and M4's TLS label needs it there. `mage
+  exactly like the tracer* — no decision had yet said how the
+  jar reaches a server, and M4's TLS label needs it there. `mage
   agentBuild` copies it to `dist/iormesh-agent.jar`, `mage
   sign` signs it at the release version (`file:
   iormesh-agent.jar`) — and refuses to, as it refuses a tracer
@@ -806,7 +811,8 @@ deferred.
 ## Provisional — M7 (2026-11-20)
 
 Settled provisionally under the sequencing relaxation (see
-Milestones) with the plan's own leanings, task ub4. Each names
+[milestones.md](milestones.md)) on the leanings the project had
+already recorded, task ub4. Each names
 what would overturn it and what the owner must confirm. When
 settled none was proven on kind (the settling host ran no
 Docker); M7's acceptance on kind and el9 (tasks yb4, cf4–ff4,
@@ -818,9 +824,9 @@ here only as placeholders.
 - **#13 K8s privilege profile** — *Provisional (2026-11-20):*
   the minimal capability set, `privileged: true` the documented
   fallback; the tracer container — never the pod — runs as
-  SELinux type `spc_t` (task 5h4, below). The tracer container runs as uid 0 with
-  `allowPrivilegeEscalation: false` in a pod with `hostUsers:
-  true` (a user-namespaced pod's capabilities do not reach BPF
+  SELinux type `spc_t` (task 5h4, below). The tracer container
+  runs as uid 0 with `allowPrivilegeEscalation: false` in a pod
+  with `hostUsers: true` (a user-namespaced pod's capabilities do not reach BPF
   or the host kernel's tracing), drops ALL and adds:
   - `BPF` and `PERFMON` — loading tracing programs (tracepoint,
     raw tracepoint, uprobe_multi), the ring buffer and stack map,
@@ -898,9 +904,10 @@ here only as placeholders.
   `allowPrivilegeEscalation: false`; the API refuses the pair):
   a kernel before 5.8; a runtime that rejects the newer
   capability names; an SELinux-enforcing node whose policy has
-  no `spc_t` (or denies it what the tracer needs); an AppArmor or seccomp default that
-  cannot be relaxed per container; a node-level debug pod.
-  Privileged does not help under kernel lockdown
+  no `spc_t` (or denies it what the tracer needs); an AppArmor
+  or seccomp default that cannot be relaxed per container; a
+  node-level debug pod. Privileged does not help under kernel
+  lockdown
   (confidentiality): the tracer's kernel reads are refused
   there. Overturned if: the kind run (or a fleet node) needs a
   capability beyond this list, or namespace-aware targeting
@@ -1111,8 +1118,9 @@ here only as placeholders.
   for a fresh random one, never adopted. Every check runs for
   every JVM; two JVMs share a stage only with the same euid and
   the same `/tmp` directory object (device and inode), not
-  merely the same mount namespace (review of cf4). `iormesh attach` stages nothing: its spool belongs to
-  a separate `run`, which would not read a stage it made. Proven
+  merely the same mount namespace (review of cf4). `iormesh
+  attach` stages nothing: its spool belongs to a separate
+  `run`, which would not read a stage it made. Proven
   in `mage integrationTest` with JVMs in private mount
   namespaces (`TestJavaAttachMountNS`). On kind (task yb4),
   before cf4: `run -spool` in the scratch image failed with a
