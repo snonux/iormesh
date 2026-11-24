@@ -46,6 +46,15 @@ bpftool; mage ≥ v1.17 (older mage breaks on the backquotes in
 the magefiles' doc comments); and non-interactive `sudo` for the two root reads
 (`/sys/kernel/tracing` formats, `/sys/kernel/btf/vmlinux`).
 
+`../libbpfgo` is relative to the main checkout, not to the
+working tree: in a linked worktree (`git worktree add`, e.g.
+`.claude/worktrees/agent-*`) Mage takes the main checkout from
+`git rev-parse --git-common-dir` and uses its sibling libbpfgo,
+so worktrees need no `LIBBPFGO`. `$LIBBPFGO` still wins when
+set; without git (a source tarball) the path is relative to the
+working tree. `internal/buildenv` holds the resolution and its
+tests.
+
 ```bash
 mage generate      # tracepoint formats -> C handlers, Go tables, Go types,
                    # per-arch syscall numbers (from golang.org/x/sys)
