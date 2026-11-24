@@ -43,9 +43,10 @@ eBPF and no root):
 - rsync 3.4.0 or newer first in `PATH` — macOS's own rsync or
   openrsync will not do ([security.md](security.md)).
 
-**Each host** (Rocky Linux 9.9, x86_64; the arm64 tracer is
-built, but its release object does not yet load on el9 aarch64 —
-task il4, [build.md](build.md) "arm64 status"):
+**Each host** (Rocky Linux 9.9, x86_64; for arm64 the verifier
+refusal on el9 aarch64 is fixed in the source, decision #31, but
+a rebuilt release is not yet verified there —
+[build.md](build.md) "arm64 status"):
 
 - The stock el9 kernel (5.14.0-…el9_9) with BTF at
   `/sys/kernel/btf/vmlinux` — Rocky ships it.
