@@ -468,7 +468,11 @@ truth.
   never a base name alone; no escalation, as the uid must match —
   and never
   systemd holding a socket-activated listener: another user's
-  program binding the released port is not traced.
+  program binding the released port is not traced. A session
+  that starts while only systemd holds the port (task lk4)
+  adopts only a process holding that very listening socket in a
+  `.service` unit of the holding manager — not a login shell or
+  another unit that obtained a copy of the fd.
 - **The agent spool is untrusted input.** `iormesh run -spool`
   creates the directory mode 1733 (anyone may create, nobody may
   list or delete another's file) after checking, on a descriptor

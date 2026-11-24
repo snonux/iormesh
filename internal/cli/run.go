@@ -114,7 +114,7 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 	if err := preflight(cfg); err != nil {
 		return err
 	}
-	pids, err := initialTargets(cfg.spec)
+	pids, act, err := initialTargets(cfg)
 	if err != nil {
 		return err
 	}
@@ -134,6 +134,7 @@ func runTrace(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 	}
 	s := newSession(tr, c, cfg)
 	s.java, s.seg, s.log = out.java, out.seg, stderr
+	s.awaitService(act)
 	// end stops the late attaches (task lh4) before finish closes the
 	// Java join, so their stages are removed with the session's.
 	end := func(reason string, err error) error {
@@ -238,12 +239,20 @@ func (o outputs) summary() string {
 // once the last of them is gone the session re-resolves the port for a
 // restarted owner, portfollow.go, decision #23). A pattern starts empty;
 // its matches are added after the probes attached (session.start), so
-// none can exec unseen in between.
-func initialTargets(spec target.Spec) ([]uint32, error) {
+// none can exec unseen in between. A port only the service manager holds
+// (an idle socket-activated service) starts with no target and its
+// listener pinned, unless -listen-grace is 0 (portActivation, task lk4).
+func initialTargets(cfg runConfig) ([]uint32, *target.Activation, error) {
+	spec := cfg.spec
 	if spec.Mode() == target.ModePattern {
-		return nil, nil
+		return nil, nil, nil
 	}
-	return spec.Resolve(target.HostProcFS(), uint32(os.Getpid()))
+	pids, err := spec.Resolve(target.HostProcFS(), uint32(os.Getpid()))
+	if err == nil || spec.Mode() != target.ModeListenPort {
+		return pids, nil, err
+	}
+	act, err := portActivation(cfg, err)
+	return nil, act, err
 }
 
 // describe names the targets for the attach line.
@@ -252,6 +261,9 @@ func describe(spec target.Spec, pids []uint32) string {
 	case target.ModePattern:
 		return fmt.Sprintf("pattern %q", spec.Pattern)
 	case target.ModeListenPort:
+		if len(pids) == 0 { // only the service manager holds it (task lk4)
+			return fmt.Sprintf("port %d, waiting for its socket-activated service", spec.ListenPort)
+		}
 		return fmt.Sprintf("port %d owners, pid %v", spec.ListenPort, pids)
 	}
 	return fmt.Sprintf("pid %v", pids)
