@@ -85,7 +85,12 @@ execs while its own start-time load still runs is left to that
 load, so it never gets two SIGQUITs at once (task 7l4); it is
 tried late afterwards, its windows from that exec, only if its
 load found no JVM or no SIGQUIT handler yet — one loaded or
-refused then gets no agent in the new image. Its claim ends
+refused then gets no agent in the new image. What counts is
+when the exec was made, not when its record arrives (task dl4):
+a load that times out waiting for the socket after its SIGQUIT
+takes 10 s, and an exec record from before its end that arrives
+only after it is left to that load as well, so even then the
+JVM gets no second SIGQUIT. Its claim ends
 with its own load, not the others' (task 9l4): a JVM loaded at
 start that execs a new JVM while a later pid's load still runs
 gets the late attach there like any other exec. Every check of
