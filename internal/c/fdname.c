@@ -1,6 +1,7 @@
 // Adapted from ior internal/c/fdname.c @ b21afc50328c.
 // Changes: comments say where ior's userspace is meant and that iormesh
-// leaves IOR_FILE_IDENT off (task gj4).
+// leaves IOR_FILE_IDENT off (task gj4); the name length is bounded with
+// iormesh_index_clamp (task ll4).
 
 //+build ignore
 
@@ -130,9 +131,11 @@ static __always_inline void ior_copy_leaf_name(struct fd_name_event *ev, struct 
     len = dentry->d_name.len;
     ev->name_len = len;
     // The bound is what the verifier needs for a variable-length read into
-    // the record, and it leaves room for the terminator.
-    if (len > IOR_FD_NAME_LENGTH - 1)
-        len = IOR_FD_NAME_LENGTH - 1;
+    // the record and for the terminator's index, and it leaves room for the
+    // terminator. IOR_FD_NAME_LENGTH (68) is no power of two, so
+    // iormesh_index_clamp (maps.h, decision #31) bounds the register that
+    // both the read's size and name[len] use, not a copy (task ll4).
+    len = iormesh_index_clamp(len, IOR_FD_NAME_LENGTH - 1);
     if (bpf_probe_read_kernel(ev->name, len, dentry->d_name.name) < 0) {
         ev->name_len = 0;
         len = 0;

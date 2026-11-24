@@ -1,7 +1,7 @@
 // Adapted from ior internal/buildgate/doc.go @ b21afc50328c.
 // Changes: describes the trimmed iormesh gate set, plus the cgo-free
-// controller gate, the test-only import gate, the C-comment reference gate
-// and the controller's terminal-safe print gate.
+// controller gate, the test-only import gate, the C-comment reference gate,
+// the controller's terminal-safe print gate and the builder clang pin.
 
 // Package buildgate holds fitness tests for the repository's static-analysis
 // gates: that the vet, lint and test command lines stay the reviewed ones,
@@ -13,7 +13,8 @@
 // and that the comments of the BPF C under internal/c name only internal/...
 // paths and Test* functions that exist here (ccomments_test.go), and
 // that every fmt print in internal/ctl escapes its text values for the
-// terminal (ctlprint_test.go).
+// terminal (ctlprint_test.go), and that each tracer builder pins the clang
+// whose BPF object was last loaded on el9 (clangpin_test.go).
 //
 // It has no production code. The gates it guards are configuration
 // (Magefile.go, .golangci.yml, internal/gatecmd) rather than Go APIs, so

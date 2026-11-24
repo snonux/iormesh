@@ -6,7 +6,8 @@
 // filter() takes the pid and tid in the tracer's PID namespace (pidns.c, M7);
 // the target-set tests ask the target hint first (targethint.c, task 9f4);
 // the restart fold's hooks are gone with restart.c (task pf4); comments that
-// cited ior's userspace name it as ior's (task gj4).
+// cited ior's userspace name it as ior's (task gj4); the histogram bucket
+// index goes through iormesh_index_mask (task ll4).
 
 //+build ignore
 
@@ -146,6 +147,11 @@ static __always_inline void ior_update_syscall_aggregate(__u32 enter_trace_id, _
     bucket_idx = ior_histogram_bucket_index(duration_ns);
     if (bucket_idx >= IOR_HISTOGRAM_BUCKETS)
         bucket_idx = IOR_HISTOGRAM_BUCKETS - 1;
+    // The clamp keeps the last bucket for an out-of-range index; the mask
+    // (maps.h, decision #31) puts the bound on the register that indexes
+    // duration_histogram below, in the map value and in fresh on the stack,
+    // instead of leaving it to clang's codegen (task ll4).
+    bucket_idx = iormesh_index_mask(bucket_idx, IOR_HISTOGRAM_BUCKETS);
 
     if (existing) {
         // Store order matters. ior's userspace reads this CPU's slot while it

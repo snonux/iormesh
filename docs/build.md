@@ -268,8 +268,15 @@ fails up front with the fix named.
   Containerfiles); Go from the golang image, also in the Rocky
   builder; libbpfgo by tag and commit; the zstd and elfutils
   sources by SHA-256; mage by go.mod.
-  Distro packages (clang, gcc, bpftool, the static libs) follow
-  their repos and are not pinned.
+  Distro packages (gcc, bpftool, the static libs) follow their
+  repos and are not pinned. clang is checked, not pinned: each
+  tracer Containerfile names the clang it expects in
+  `ARG CLANG_VERSION` (amd64 22.1.8 from Rocky 9.9, arm64
+  19.1.7 from Debian trixie) and fails the image build when
+  `clang --version` says otherwise, and `TestBuilderClangPinned`
+  (internal/buildgate) holds that value to a recorded one, so
+  a new clang needs the el9 verifier check first
+  ([testing.md](testing.md), "Builder clang pin", task ll4).
 - **libbpf**: the amd64 builder runs `make libbpfgo-static` like
   ior's; the arm64 builder builds only `libbpf.a` and its headers,
   with `aarch64-linux-gnu-gcc`, and cgo cross-compiles libbpfgo
@@ -333,8 +340,14 @@ fails up front with the fix named.
   same aarch64 el9 guest, and the x86 one passed
   `TestLoaderAttachesEveryFamily` and `TestEl9RecordLayout` on
   the 7.2 laptop, whose verifier had refused it the same way.
-  Pending: a full `mage containerBuild podman tracer-arm64`
-  release run and the root gate on the guest with that build.
+  Task ll4 applied the same to the last two such sites
+  (`filter.c`'s histogram bucket, `fdname.c`'s name length,
+  the latter with `iormesh_index_clamp`), rebuilt the release
+  with `mage containerBuild podman tracer-arm64` and ran the
+  root BPF gate on the guest with the builder's static arm64
+  test binary: the release loads and traces, and all 43 root
+  tests pass (testing.md, "Builder clang pin"). arm64 has no
+  open verifier issue on el9.
 - **Checks**: each binary's header is verified (ELF machine or
   Mach-O CPU; the tracers must have no ELF interpreter), then
   every Linux binary runs `--help` on Rocky 9 of its own arch.

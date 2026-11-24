@@ -1732,6 +1732,91 @@ against the guest's own BTF. Not covered: that the arm64
 replacements deliver records (only that they attach), and the
 gate with the clang-19 object (task il4).
 
+## Builder clang pin (task ll4, 2026-11-24)
+
+Decision #31 puts every variable array index's bound on the
+indexing register (`iormesh_index_mask`, and
+`iormesh_index_clamp` where the bound is no power of two), so
+the source should load whatever clang builds it. The release
+builders still check their clang: `ARG CLANG_VERSION` in
+`scripts/container/tracer-amd64.Containerfile` (22.1.8, Rocky
+9.9) and `tracer-arm64.Containerfile` (19.1.7, Debian trixie)
+fails the image build when the distro's `clang --version`
+differs, and `TestBuilderClangPinned` (internal/buildgate, no
+root, CI-safe) fails when a Containerfile's value is not the
+one recorded in its `builderClang`. Red first: with the arm64
+entry recorded as 22.1.1 it failed with
+`scripts/container/tracer-arm64.Containerfile installs clang
+19.1.7, recorded "22.1.1": re-run the el9 verifier check ...`. `TestContainerfileClangRejects`
+covers a missing, a doubled and an unchecked `ARG`.
+
+**The el9 verifier check**, to run before changing either
+value (the image build has already failed, or a newer clang is
+wanted):
+
+1. Compile the object with the new clang, for the builder's
+   arch — `mage containerBuild podman tracer-<arch>` with the
+   new `CLANG_VERSION`, or the distro image with only clang
+   installed (`clang -g -O2 -Wall -fpie -target bpf
+   -D__TARGET_ARCH_<x86|arm64> -I<libbpfgo>/output -c
+   internal/c/iormesh.bpf.c`).
+2. Load it on el9: on an x86 el9 host, or in the emulated el9
+   aarch64 guest of "arm64 on an emulated el9 kernel" above,
+   run `gatecmd.RootBPFTests` as root with the release's static
+   test binary, or at least `TestLoaderAttachesEveryFamily`
+   and `TestEl9RecordLayout` with `IORMESH_BPF_OBJECT` set to
+   the new object. `TestLoaderAttachesEveryFamily` loads every
+   program, so a verifier refusal fails it.
+3. Only when that passes, update `CLANG_VERSION` and
+   `builderClang` together, and record the run here.
+
+**The two remaining clamp-then-index sites** (both loaded
+before, but only because of how clang 19 and 22 happened to
+compile them; `llvm-objdump -d -l` of the clang-19.1.7 object
+before and after):
+
+- `filter.c` `ior_update_syscall_aggregate`: the
+  `bucket_idx >= IOR_HISTOGRAM_BUCKETS` clamp emitted no
+  instruction at all — the index was a constant per branch of
+  `ior_histogram_bucket_index`. Now `r7 &= 0x7`
+  (`iormesh_index_mask`) on the register that indexes
+  `duration_histogram` in the map value and in `fresh` on the
+  stack.
+- `fdname.c` `ior_copy_leaf_name`: `IOR_FD_NAME_LENGTH` is 68,
+  no power of two, and a mask with 127 would not keep `name[len]`
+  inside the field. `iormesh_index_clamp` emits
+  `if r7 <= 0x43 goto +1; r7 = 0x43` as inline asm on the
+  register that is both `bpf_probe_read_kernel`'s size and the
+  terminator's index.
+
+**Runs.** `mage containerBuild podman tracer-arm64` rebuilt
+the release from this source in 61 s (the new
+`CLANG_VERSION` step printed "Debian clang version 19.1.7
+(3+b1)"; the embedded object's DWARF names that clang), and
+`./internal`'s static arm64 test binary was cross-built in
+the same image as in 8k4. The 8k4 aarch64 el9 guest
+(`5.14.0-741.22.1.el9_9.aarch64`, SELinux enforcing) was
+booted once for both, 4 vCPUs under TCG at `nice 10`, 4 GiB,
+SSH on 127.0.0.1 only: up 11:02–11:20 UTC (17 min), then
+powered off, and no `qemu-system-aarch64` process remained.
+
+- The release `iormesh-linux-arm64` traced 8k4's target (two
+  `dd`s and a loopback TCP exchange): attached with the 38
+  tracepoints arm64 lacks missing, 860 events, `arch:
+  aarch64`, no lost records, no unpaired exits.
+- **Root BPF gate with the release's clang-19 object: 43 of
+  43 pass** (`gatecmd.RootBPFTests` as root, from a copy of
+  `internal/testdata/btf`, 11:05–11:18 UTC; `-test.timeout=3h`
+  instead of 5m for the emulated CPU).
+- Rocky 9.9's clang 22.1.8 (the amd64 builder's) objects,
+  `-D__TARGET_ARCH_arm64` and `_x86`, pass
+  `TestLoaderAttachesEveryFamily` and `TestEl9RecordLayout`
+  through `IORMESH_BPF_OBJECT` on the same guest; the x86 one
+  passes both on the 7.2 laptop too. That is the el9 check
+  behind the amd64 value; the amd64 release itself was not
+  rebuilt or run on an x86 el9 host.
+- `mage bpfRootTest` on the 7.2 laptop passes.
+
 ## el9 runbook and runs
 
 Rocky 9.9 is the main target, and some evidence exists only as

@@ -2,7 +2,8 @@
 # Changes: base and Go pinned by digest (Go copied from the golang image
 # instead of a go.dev download), zstd checksummed, the elfutils source RPM
 # signature-checked (rpm -K), libbpfgo pinned by commit,
-# no mage install (the build `go run`s a pinned mage), make -j4, no
+# no mage install (the build `go run`s a pinned mage), make -j4, the
+# installed clang checked against CLANG_VERSION (task ll4), no
 # CMD (mage drives the build with `<engine> run`, see
 # internal/containerbuild).
 #
@@ -36,6 +37,15 @@ RUN dnf install -y \
         git make tar bzip2 wget && \
     dnf builddep -y elfutils && \
     dnf clean all
+
+# The BPF bytecode depends on the compiler (task il4, decision #31), and
+# Rocky updates clang with its point releases (9.9 ships 22.1.8).
+# CLANG_VERSION is the clang whose object was last loaded on el9 (docs/
+# testing.md, "Builder clang pin"). The image build fails when the distro's
+# clang has moved on, and TestBuilderClangPinned (internal/buildgate) fails
+# when this value changes without the recorded one.
+ARG CLANG_VERSION=22.1.8
+RUN clang --version | head -n 1 | grep -F "clang version ${CLANG_VERSION} "
 
 # Rocky 9 ships no libelf.a; build it from the distro's own source RPM so
 # it matches the headers installed above. rpm -K checks the source RPM's

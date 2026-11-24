@@ -24,6 +24,15 @@ RUN dpkg --add-architecture arm64 && \
         libelf-dev:arm64 zlib1g-dev:arm64 libzstd-dev:arm64 && \
     rm -rf /var/lib/apt/lists/*
 
+# The BPF bytecode depends on the compiler: this clang once tested a slot
+# index on a copy that the el9 verifier refused (task il4, decision #31).
+# CLANG_VERSION is the clang whose object was last loaded on el9 (docs/
+# testing.md, "Builder clang pin"). The image build fails when the distro's
+# clang has moved on, and TestBuilderClangPinned (internal/buildgate) fails
+# when this value changes without the recorded one.
+ARG CLANG_VERSION=19.1.7
+RUN clang --version | head -n 1 | grep -F "clang version ${CLANG_VERSION} "
+
 # Since elfutils 0.191 libelf calls eu_search_tree_* from its internal
 # libeu.a, which libelf.so links in but the static libelf.a does not, so
 # a static link fails on undefined references. Compile eu-search.o from

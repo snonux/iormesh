@@ -6,7 +6,8 @@
 // iormesh_java_mark added (javamark.c, task td4); restart_pending_map
 // removed with restart.c (task pf4); event_map's and the sampling map's
 // comments say what iormesh's userspace does with them (task gj4);
-// iormesh_index_mask added (verifier-safe slot index, task il4).
+// iormesh_index_mask added (verifier-safe slot index, task il4);
+// iormesh_index_clamp added (non-power-of-two bounds, task ll4).
 
 //+build ignore
 
@@ -226,6 +227,22 @@ struct iormesh_rw_slot {
         __u32 __iormesh_idx = (idx);                                                                                   \
         barrier_var(__iormesh_idx);                                                                                    \
         __iormesh_idx & ((n) - 1);                                                                                     \
+    })
+
+// iormesh_index_clamp(idx, max) is min(idx, max) for a bound that is not one
+// less than a power of two, where iormesh_index_mask cannot keep the value:
+// fdname.c's name length, at most IOR_FD_NAME_LENGTH - 1 = 67 (task ll4). The
+// compare and the move are inline asm, so the jump the verifier learns the
+// bound from tests the very register the macro returns, and clang can
+// neither move the test to a copy nor drop it as redundant. Copies made after
+// it carry the bound with them. max must be a compile-time constant (an
+// immediate); idx is widened to 64 bits first, so the upper half the 64-bit
+// compare sees is zero.
+#define iormesh_index_clamp(idx, max)                                                                                \
+    ({                                                                                                                 \
+        __u64 __iormesh_val = (idx);                                                                                   \
+        asm volatile("if %[v] <= %[m] goto +1; %[v] = %[m]" : [v] "+r"(__iormesh_val) : [m] "i"(max));                \
+        __iormesh_val;                                                                                                 \
     })
 
 // IORMESH_RW_SLOTS is how many keys one thread aggregates at once: a copy

@@ -386,11 +386,25 @@ deferred.
   5.14 and the 7.x verifiers refused `handle_sys_exit_read`
   (task il4). The source must load whatever reasonable clang
   builds it, so the fix is in the C, not a pinned compiler.
-  Applied to `rwagg.c`'s slot and `javamark.c`'s frame
-  indexes. Rejected: a newer clang in the builder only — it
-  hides the pattern until the next compiler change; a mask
-  without the barrier — clang drops a mask it proves redundant
-  and is back to the checked copy.
+  Where the bound is not a power of two,
+  `iormesh_index_clamp(idx, max)` does the same with an inline
+  asm `if idx <= max goto +1; idx = max` on the register it
+  returns. Applied to every clamp-then-index site:
+  `rwagg.c`'s slot and `javamark.c`'s frame indexes (task il4),
+  `filter.c`'s histogram bucket (mask, 8 buckets) and
+  `fdname.c`'s name length (clamp, at most 67; task ll4). The
+  builders still pin their clang (`CLANG_VERSION` in
+  `scripts/container/tracer-*.Containerfile`, held to a
+  recorded value by `TestBuilderClangPinned`): not to make the
+  C load, but so a compiler change cannot reach a release
+  without the el9 verifier check first (docs/testing.md,
+  "Builder clang pin"). Rejected: a newer clang in the builder
+  only — it hides the pattern until the next compiler change;
+  a mask without the barrier — clang drops a mask it proves
+  redundant and is back to the checked copy; a power-of-two
+  mask for the name length — 127 does not keep the index
+  inside the 68-byte field, 63 would cut names of 64–67
+  bytes.
 
 ## Open — raised for M2 (built on the default)
 
