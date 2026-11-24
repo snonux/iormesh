@@ -33,13 +33,18 @@ var el9BTFs = map[string]string{
 
 // el9BTF returns the trimmed el9 BTF of the running arch, skipping the test
 // on an arch iormesh has none for (el9 ships no other). A listed file that
-// is missing - not staged next to the test binary, say - is no skip: the
-// relocation against it fails the test, as it always has on amd64.
+// is missing - not staged next to the test binary, say - is no skip: it
+// fails the test naming the file (task jl4 review: a missing file used to
+// surface only as offset mismatches, the relocation falling back to the
+// kernel's own BTF).
 func el9BTF(t *testing.T) string {
 	t.Helper()
 	path, ok := el9BTFs[runtime.GOARCH]
 	if !ok {
 		t.Skipf("no trimmed el9 BTF for %s (internal/btf_root_test.go, el9BTFs)", runtime.GOARCH)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("trimmed el9 BTF %s: %v (stage internal/testdata/btf next to the test binary)", path, err)
 	}
 	return path
 }
