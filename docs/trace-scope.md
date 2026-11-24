@@ -37,8 +37,9 @@ event families `iormesh run -trace-families` adds (see
   up to `-listen-grace` for the service systemd activates: a
   process that holds that very socket and runs in a `.service`
   unit of that manager (pid 1's units, or below a user manager's
-  `user@UID.service`) is adopted, and from then on followed like
-  a start owner. A shell or another unit's process holding a copy
+  `user@UID.service` and running as that user, task el4) is
+  adopted, and from then on followed like a start owner. A shell,
+  another user's process or another unit's process holding a copy
   of the fd is refused and named on stderr. No activation within
   the grace ends the session; `-listen-grace 0` refuses the port
   at start as before. Not covered: `Accept=yes` sockets (each

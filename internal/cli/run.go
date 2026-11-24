@@ -241,7 +241,9 @@ func (o outputs) summary() string {
 // its matches are added after the probes attached (session.start), so
 // none can exec unseen in between. A port only the service manager holds
 // (an idle socket-activated service) starts with no target and its
-// listener pinned, unless -listen-grace is 0 (portActivation, task lk4).
+// listener pinned, unless -listen-grace is 0 (portActivation, task lk4);
+// a service activated between the resolve and the pin is resolved
+// again and traced from the start (task el4).
 func initialTargets(cfg runConfig) ([]uint32, *target.Activation, error) {
 	spec := cfg.spec
 	if spec.Mode() == target.ModePattern {
@@ -251,8 +253,7 @@ func initialTargets(cfg runConfig) ([]uint32, *target.Activation, error) {
 	if err == nil || spec.Mode() != target.ModeListenPort {
 		return pids, nil, err
 	}
-	act, err := portActivation(cfg, err)
-	return nil, act, err
+	return portActivation(cfg, err)
 }
 
 // describe names the targets for the attach line.

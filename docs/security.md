@@ -476,7 +476,10 @@ truth.
   that starts while only systemd holds the port (task lk4)
   adopts only a process holding that very listening socket in a
   `.service` unit of the holding manager — not a login shell or
-  another unit that obtained a copy of the fd.
+  another unit that obtained a copy of the fd. Under a user
+  manager the process must also run as the manager's uid, and the
+  manager must sit in its own `user@UID.service/init.scope` (task
+  el4): a setuid program or another user's process is refused.
 - **The agent spool is untrusted input.** `iormesh run -spool`
   creates the directory mode 1733 (anyone may create, nobody may
   list or delete another's file) after checking, on a descriptor
