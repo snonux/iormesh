@@ -126,6 +126,20 @@ func (o *object) str(name string, v *string) {
 	}
 }
 
+// optBool appends an optional boolean member: present exactly when the
+// pointer is set, as omitempty does for pointers.
+func (o *object) optBool(name string, v *bool) {
+	if v == nil {
+		return
+	}
+	o.key(name)
+	if *v {
+		o.dst = append(o.dst, "true"...)
+	} else {
+		o.dst = append(o.dst, "false"...)
+	}
+}
+
 func (o *object) close() []byte {
 	return append(o.dst, '}')
 }
@@ -183,14 +197,8 @@ func appendArgs(dst []byte, a *Args) []byte {
 	optUint(&o, "parent_pid", a.ParentPID)
 	optUint(&o, "parent_incarnation", a.ParentInc)
 	o.str("sock_snapshot", a.SockSnapshot)
-	if a.BytesPartial != nil {
-		o.key("bytes_partial")
-		if *a.BytesPartial {
-			o.dst = append(o.dst, "true"...)
-		} else {
-			o.dst = append(o.dst, "false"...)
-		}
-	}
+	o.optBool("bytes_partial", a.BytesPartial)
+	o.optBool("peek", a.Peek)
 	return o.close()
 }
 

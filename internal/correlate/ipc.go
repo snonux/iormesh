@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/netip"
 
+	"golang.org/x/sys/unix"
+
 	"iormesh/internal/schema"
 	"iormesh/internal/types"
 )
@@ -232,9 +234,15 @@ func (c *Correlator) connectDetail(ev *schema.Event, p *procState, en enter, soc
 // msghdr, task oh4). A sendmmsg's or recvmmsg's ret counts messages: its
 // bytes come from its mmsg_event (mmsgRecord), so an exit of one that
 // moved messages but came as a plain ret_event has an unknown sum and is
-// marked partial.
+// marked partial. A recvfrom, recvmsg or recvmmsg called with MSG_PEEK
+// keeps the bytes it copied but is marked args.peek (task ok4): it
+// consumed none, so the stream sums leave them to the receive that does.
 func (c *Correlator) socketFdDetail(ev *schema.Event, p *procState, en enter, ret int64,
 	sock *sockState) *sockState {
+	if en.flags&unix.MSG_PEEK != 0 && schema.IsPeekable(en.name) {
+		peek := true
+		ev.Args.Peek = &peek
+	}
 	switch {
 	case ret <= 0 || en.name == schema.KindBind:
 	case schema.IsMmsg(en.name):

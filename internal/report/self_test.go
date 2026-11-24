@@ -30,6 +30,21 @@ func selfTrace() *trace {
 	return tr
 }
 
+// TestPeekReceivedOnce (task ok4): a recvfrom that peeked (args.peek)
+// before the read that consumes the same bytes adds nothing to the
+// connection's received bytes: they count once, with the read.
+func TestPeekReceivedOnce(t *testing.T) {
+	tr := &trace{host: "h1"}
+	tr.add(50, 51, schema.KindConnect, 5, 0, "s1", schema.Args{RemoteAddr: ptr("127.0.0.1"),
+		RemotePort: ptr(uint16(9000))}, nil)
+	tr.add(50, 51, schema.KindRecvfrom, 5, 4, "s1", schema.Args{Peek: ptr(true)}, nil)
+	tr.add(50, 51, schema.KindRead, 5, 4, "s1", schema.Args{}, nil)
+	r := Build(collect(tr, 0), Input{})
+	if c := r.Processes[0].Conns; len(c) != 1 || c[0].RecvBytes != 4 {
+		t.Fatalf("connection entries %+v, want one that received 4 bytes", c)
+	}
+}
+
 // TestUntrackedCountsEventsOnce: an event that misses its thread, its
 // method, its connection and its file under the cap is one untracked
 // event, never four.

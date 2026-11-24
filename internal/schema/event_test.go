@@ -663,6 +663,48 @@ func TestBytesPartial(t *testing.T) {
 	}
 }
 
+// TestPeek: args.peek (task ok4) is valid as true on recvfrom, recvmsg
+// and recvmmsg without tcp_seq, round-trips through NDJSON as the last
+// arg, and takes the event's bytes out of StreamBytes; false, another
+// kind or a tcp_seq beside it are invalid.
+func TestPeek(t *testing.T) {
+	for _, kind := range []string{KindRecvfrom, KindRecvmsg, KindRecvmmsg} {
+		e := validStreamWrite()
+		e.Event, e.Args = kind, Args{Peek: ptr(true)}
+		if err := e.Validate(); err != nil {
+			t.Fatalf("%s: %v", kind, err)
+		}
+		if got := e.StreamBytes(); got != 0 {
+			t.Errorf("%s peek: stream bytes %d, want 0", kind, got)
+		}
+		line := string(AppendEvent(nil, &e))
+		if !strings.Contains(line, `"args":{"peek":true}`) {
+			t.Fatalf("encoded args lack peek:\n%s", line)
+		}
+		got, err := DecodeEvent([]byte(line))
+		if err != nil || got.Args.Peek == nil || !*got.Args.Peek {
+			t.Fatalf("round trip: %+v, %v", got.Args, err)
+		}
+	}
+	if e := validStreamWrite(); e.StreamBytes() != e.Bytes {
+		t.Errorf("unmarked write: stream bytes %d, want %d", e.StreamBytes(), e.Bytes)
+	}
+	bad := map[string]func(*Event){
+		"false":        func(e *Event) { e.Args.Peek = ptr(false) },
+		"on read":      func(e *Event) { e.Event = KindRead },
+		"on sendmsg":   func(e *Event) { e.Event = KindSendmsg },
+		"with tcp_seq": func(e *Event) { e.Args.TCPSeq = ptr(uint32(7)) },
+	}
+	for name, mutate := range bad {
+		e := validStreamWrite()
+		e.Event, e.Args = KindRecvfrom, Args{Peek: ptr(true)}
+		mutate(&e)
+		if err := e.Validate(); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: err %v, want ErrInvalid", name, err)
+		}
+	}
+}
+
 // TestStreamSeqValid: tcp_seq is valid on every unfolded socket data
 // kind, send or receive, and round-trips through NDJSON.
 func TestStreamSeqValid(t *testing.T) {

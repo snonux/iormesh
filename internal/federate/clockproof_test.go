@@ -217,6 +217,27 @@ func TestClockUnfoldedBytesCount(t *testing.T) {
 	wantBound(t, mergeTraces(t, Options{}, a, b), 1, false)
 }
 
+// TestClockPeekNotSummed: a receive that peeked (args.peek, task ok4)
+// consumed nothing, so its bytes stay out of the receiver's sums: a
+// 4 GiB peek leaves the bound as the conversation alone gives it, while
+// the same recvfrom without the mark counts and leaves the direction to
+// the counter proof.
+func TestClockPeekNotSummed(t *testing.T) {
+	a, b, _ := pingConv()
+	base := mergeTraces(t, Options{}, a, b)
+	a, b, _ = pingConv()
+	a.event(100, schema.KindRecvfrom, 7, 1<<20, t0+500*tus, "x-c", schema.Args{Peek: ptr(true)})
+	a.events[len(a.events)-1].Bytes = wrap4G
+	got := mergeTraces(t, Options{}, a, b)
+	if len(got.Clocks) != 1 || len(base.Clocks) != 1 || got.Clocks[0] != base.Clocks[0] {
+		t.Fatalf("a peek changed the bound: %v, want %v", got.Clocks, base.Clocks)
+	}
+	a, b, _ = pingConv()
+	a.event(100, schema.KindRecvfrom, 7, 1<<20, t0+500*tus, "x-c", schema.Args{})
+	a.events[len(a.events)-1].Bytes = wrap4G
+	wantBound(t, mergeTraces(t, Options{}, a, b), 1, false)
+}
+
 // TestClockPartialSumTaints: a sendmmsg whose byte sum the tracer could
 // not complete (args.bytes_partial, task oh4) leaves the sums short by
 // the tracer's own account, so its direction falls to the counter proof

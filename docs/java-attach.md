@@ -81,12 +81,16 @@ stage possible), is still not ready after 30 s or exits first is
 named once on stderr, `no Java attribution for pid N: …`, and
 never tried again; a load prints the same `agent loaded into
 pid N` line as at start. A JVM the session starts with that
-execs while the start-time loads still run is left to them, so
-it never gets two SIGQUITs at once (task 7l4); it is tried late
-afterwards only if its start-time load found no JVM or no
-SIGQUIT handler yet. Every check of the start-time attach
-applies unchanged — the same handshake and its checks of the
-JVM's uid and namespaces, the same trusted (in a confined
+execs while its own start-time load still runs is left to that
+load, so it never gets two SIGQUITs at once (task 7l4); it is
+tried late afterwards, its windows from that exec, only if its
+load found no JVM or no SIGQUIT handler yet — one loaded or
+refused then gets no agent in the new image. Its claim ends
+with its own load, not the others' (task 9l4): a JVM loaded at
+start that execs a new JVM while a later pid's load still runs
+gets the late attach there like any other exec. Every check of
+the start-time attach applies unchanged — the same handshake
+and its checks of the JVM's uid and namespaces, the same trusted (in a confined
 session pinned) jar, a stage inside a foreign root removed when
 the session ends. The attaches run beside the trace, never in
 its loop: at most 2 handshakes at a time and 64 processes
@@ -99,7 +103,8 @@ such a JVM does before its load stays unattributed — its start-up, mostly —
 so give a JVM whose start matters `-javaagent`, e.g. through
 `JAVA_TOOL_OPTIONS`. A process forked without an exec (a JVM's
 fork) is no new JVM and gets nothing; one that turns up in the
-start-time scan and execs while it is loaded may be loaded
+start-time scan and execs while it is loaded, its exec record
+reaching the session only after that load ended, may be loaded
 twice: the agent, already installed, installs nothing twice but
 resyncs its ring, as for any second load (above). `iormesh
 attach` returns once the JVM

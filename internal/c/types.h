@@ -12,7 +12,8 @@
 // emits it (task pf4); TCP_STATE_FINAL added (sock.c, task sf4);
 // task_rename_event's comment names its consumer (task 0g4); comments that
 // cited ior's Go files name them as ior's (task gj4); MMSG_EVENT,
-// MMSG_BYTES_PARTIAL and struct mmsg_event added (mmsg.c, task oh4).
+// MMSG_BYTES_PARTIAL and struct mmsg_event added (mmsg.c, task oh4);
+// fd_size_event's flags carry recvmmsg's too (task ok4).
 
 //+build ignore
 
@@ -305,12 +306,14 @@ struct fd_event {
 //     is a size probe returning the required capacity;
 //   - recvfrom and recvmsg, where MSG_TRUNC makes the return the datagram's
 //     real length rather than the bytes copied into the buffer, and MSG_PEEK
-//     copies without consuming.
+//     copies without consuming;
+//   - recvmmsg, for MSG_PEEK alone (task ok4): size stays invalid, its bytes
+//     are the messages' sum (mmsg.c).
 // flags occupies what was the alignment padding after fd, so the record stays
-// 48 bytes. It carries the recv flags argument for recvfrom/recvmsg and is 0
-// for every other user; older BPF objects left those four bytes as padding, and
-// userspace only interprets flags for the recv syscalls, which older objects
-// never sent in this record (they used the size-less fd_event).
+// 48 bytes. It carries the recv flags argument for recvfrom/recvmsg/recvmmsg
+// and is 0 for every other user; older BPF objects left those four bytes as
+// padding, and userspace only interprets flags for the recv syscalls, which
+// older objects never sent in this record (they used the size-less fd_event).
 struct fd_size_event {
     __u32 event_type;
     __u32 trace_id;

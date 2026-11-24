@@ -1860,7 +1860,7 @@ int handle_sys_exit_recvmsg(struct trace_event_raw_sys_exit___iormesh *ctx) {
     return 0;
 }
 
-/// sys_enter_recvmmsg is a struct fd_event (kind=fd)
+/// sys_enter_recvmmsg is a struct fd_size_event (kind=fd)
 SEC("tracepoint/syscalls/sys_enter_recvmmsg")
 int handle_sys_enter_recvmmsg(struct trace_event_raw_sys_enter___iormesh *ctx) {
     __u32 pid, tid;
@@ -1875,19 +1875,22 @@ int handle_sys_enter_recvmmsg(struct trace_event_raw_sys_enter___iormesh *ctx) {
     iormesh_mmsg_on_enter(tid, ctx->args[1], IORMESH_SEQ_RECV);
     iormesh_stack_on_enter(ctx, pid, tid, now);
     iormesh_java_mark_on_enter(pid, tid, now);
-    struct fd_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_event), 0);
+    struct fd_size_event *ev = bpf_ringbuf_reserve(&event_map, sizeof(struct fd_size_event), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
         return 0;
     }
 
-    ev->event_type = ENTER_FD_EVENT;
+    ev->event_type = ENTER_FD_SIZE_EVENT;
     ev->trace_id = SYS_ENTER_RECVMMSG;
     ev->pid = pid;
     ev->tid = tid;
     ev->time = now;
     ev->fd = (__s32)ctx->args[0];
-    ev->file_ident = ior_file_ident(ev->fd);
+    ev->flags = (__u32)ctx->args[3];
+    ev->size_valid = 0;
+    ev->size = 0;
+    ev->schema_version = FD_SIZE_EVENT_SCHEMA_VERSION;
 
     bpf_ringbuf_submit(ev, 0);
     return 0;

@@ -693,13 +693,16 @@ var fdArgumentOverrides = map[string]int{
 
 // receiveFlagsArgument names the argument slot of the flags word of the
 // receive syscalls whose return value depends on it: MSG_PEEK leaves the data
-// queued (nothing consumed) and MSG_TRUNC makes the return the datagram's real
-// length instead of the bytes copied. Indexes are fixed rather than looked up
-// by field name so the capture stays correct for a Format that lists only some
-// of the fields.
+// queued (nothing consumed; the correlator marks the event args.peek and the
+// stream sums skip it, task ok4) and MSG_TRUNC makes the return the
+// datagram's real length instead of the bytes copied. recvmmsg's flags apply
+// to each of its messages; it joined for MSG_PEEK (task ok4). Indexes are
+// fixed rather than looked up by field name so the capture stays correct for
+// a Format that lists only some of the fields.
 var receiveFlagsArgument = map[string]int{
 	"sys_enter_recvfrom": 3, // recvfrom(fd, ubuf, size, flags, addr, addr_len)
 	"sys_enter_recvmsg":  2, // recvmsg(fd, msg, flags)
+	"sys_enter_recvmmsg": 3, // recvmmsg(fd, mmsg, vlen, flags, timeout)
 }
 
 // writeReceiveFlagsCapture emits the flags word of an fd_size_event. Only the

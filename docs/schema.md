@@ -161,6 +161,7 @@ IPv4 peers of dual-stack sockets are written unmapped
 | `bytes_acked`, `bytes_received` | `tcp_state` only, optional (appended in M4): the `tcp_sock` byte counters, u64 |
 | `tcp_seq` | optional (appended in M4): the TCP sequence number of the first stream byte the call moved, u32; the call moved `[tcp_seq, tcp_seq + bytes)` mod 2³². Only on an unfolded `write`, `writev`, `sendto`, `sendfile64`, `sendmsg`, `sendmmsg`, `read`, `readv`, `recvfrom`, `recvmsg` or `recvmmsg` with a `conn_id` that moved bytes |
 | `bytes_partial` | `sendmmsg` and `recvmmsg` only, optional (appended in M4, task oh4): `true` when `bytes` is a lower bound — the tracer could not read every message's length (a faulting read, more messages than its cap, a lost enter). Never `false`; such a record carries no `tcp_seq` |
+| `peek` | `recvfrom`, `recvmsg` and `recvmmsg` only, optional (appended in M4, task ok4): `true` when the call passed `MSG_PEEK` — it copied `bytes` but consumed none, so the stream sums skip it. Never `false`; such a record carries no `tcp_seq` |
 | `pattern` | `attach` only, optional (appended in M4, task ze4): the `-pattern` the session matched the process by; with the project it names the app (`app:<project>/<pattern>`). Absent for a `-pid` or port target. Never empty |
 | `parent_pid`, `parent_incarnation` | `fork` only, both or none (appended in M4, task ze4): the process that forked the child, as its own events name it (raw pid, u32; incarnation, u64); absent when the kernel record could not say |
 | `sock_snapshot` | `tcp_state` only, optional (appended in M4, task sf4): `final` on the tracer's snapshot of a socket still open when the session ended — no transition, `sock_state` is the socket's state then, and the four `tcp_sock` fields are always present; absent on every other record, the accept snapshot's included |
@@ -228,11 +229,12 @@ trace never bound (opened before the session), nor a `read` or
 `write` the in-kernel fold held at its enter on a hot streak and
 then sent alone because it turned out slow — typically the read
 that waits for the peer's answer right after a burst of calls.
-A `recvfrom`, `recvmsg` or `recvmmsg` with `MSG_PEEK` still
-counts its `bytes` in the receiver's sums, although it consumed
-nothing (its `tcp_seq` is absent): the receiver's sums are the
-merge's second witness only, and a peek can only make them run
-high.
+A `recvfrom`, `recvmsg` or `recvmmsg` with `MSG_PEEK` copies
+bytes but consumes none: its `bytes` say what it copied, it is
+marked `args.peek` and carries no `tcp_seq`, and the receiver's
+stream sums (the merge's and the report's) skip it, so the
+bytes count once, with the receive that consumes them (task
+ok4).
 
 ### Event kinds (M1)
 
@@ -397,6 +399,7 @@ ipc,signal,poll,zerocopy` (or `all`) adds them.
 | socket | `sendto`, `recvfrom` | the socket | `bytes`; per datagram `local_*` and `remote_*` (the peer it went to or came from); AF_UNIX: `path`. On a stream socket (`send`/`recv` on a TCP or unix connection) only the connection's 4-tuple, as `read`/`write` |
 | socket | `sendmsg`, `recvmsg` | the socket | `bytes` (the return); on a connected socket the connection's 4-tuple, as `read`/`write`; `tcp_seq` on TCP. The peer address inside the msghdr is not read yet |
 | socket | `sendmmsg`, `recvmmsg` | the socket | `ret`: the messages moved; `bytes`: the sum of their lengths (`msg_len`), `bytes_partial` when incomplete; otherwise as `sendmsg` |
+| socket | `recvfrom`, `recvmsg`, `recvmmsg` with `MSG_PEEK` | the socket | as without, plus `peek`: the bytes copied, none consumed; no `tcp_seq` |
 | ipc | `pipe`, `pipe2`, `socketpair` | the first end (a pipe's read end) | `fd2`, `fd2_gen`: the second end |
 | signal | `kill`, `tgkill`, `tkill` | `-1` | `target_pid`, `signal` |
 | signal | `signal` | `-1` | `signal`, `sender_pid`; `pid`/`tid` are the receiver |
