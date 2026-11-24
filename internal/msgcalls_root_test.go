@@ -2,6 +2,7 @@ package internal_test
 
 import (
 	"io"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -15,8 +16,9 @@ import (
 // on a TCP connection each carries its bytes - for the mmsg calls the sum
 // of the messages' msg_len, read at the exit, while ret stays the message
 // count - and the sequence number of its first byte, like the other data
-// calls; between two UDP sockets the mmsg calls' byte sums are exact and
-// no record carries tcp_seq. Root only.
+// calls; between two unconnected UDP sockets the mmsg calls' byte sums
+// are exact, every call names its peer from its msghdr (task nk4) and no
+// record carries tcp_seq. Root only.
 
 // TestMsgCallsTCP: a sendmsg of two buffers and a sendmmsg of two
 // messages, then a recvmsg and a recvmmsg of two messages, each pinned to
@@ -49,7 +51,10 @@ func TestMsgCallsTCP(t *testing.T) {
 // TestMsgCallsUDP: a sendmmsg of three datagrams and the recvmmsg that
 // takes them carry the datagrams' byte sum and their count as ret; the
 // sendmsg and recvmsg of one datagram its size. None carries tcp_seq,
-// which is TCP's alone.
+// which is TCP's alone. The sockets are not connected, so each call's
+// peer is only in its msghdr's msg_name (the mmsg calls' first message):
+// every send must name the receiving socket, every receive the sending
+// one (task nk4).
 func TestMsgCallsUDP(t *testing.T) {
 	requireRoot(t)
 	child := startSeqChild(t, msgScenarioUDP)
@@ -75,7 +80,22 @@ func TestMsgCallsUDP(t *testing.T) {
 			if want[e.Event] != 0 && e.Bytes != wantBytes {
 				t.Errorf("udp %s moved %d bytes, want %d", e.Event, e.Bytes, wantBytes)
 			}
+			if want[e.Event] != 0 {
+				checkPeer(t, e, r.UDPAddr[1-i])
+			}
 		}
+	}
+}
+
+// checkPeer requires e to name peer ("addr:port") as its remote end.
+func checkPeer(t *testing.T, e schema.Event, peer string) {
+	t.Helper()
+	if e.Args.RemoteAddr == nil || e.Args.RemotePort == nil {
+		t.Errorf("udp %s names no peer, want %s", e.Event, peer)
+		return
+	}
+	if got := netip.AddrPortFrom(netip.MustParseAddr(*e.Args.RemoteAddr), *e.Args.RemotePort).String(); got != peer {
+		t.Errorf("udp %s names peer %s, want %s", e.Event, got, peer)
 	}
 }
 

@@ -65,9 +65,10 @@ event families `iormesh run -trace-families` adds (see
   NAT-tolerant join key; UDP per-packet
   peers (sendto/recvfrom), the msghdr data calls
   sendmsg/recvmsg/sendmmsg/recvmmsg with their bytes (the mmsg
-  calls' summed over their messages) and TCP sequence ranges —
-  their datagram peer inside the msghdr is not read yet (task
-  oh4); their 8 handlers are on by default, and a
+  calls' summed over their messages) and TCP sequence ranges
+  (task oh4) and, on a datagram socket, their peer from the
+  msghdr's `msg_name` — the mmsg calls' first message's, one
+  per call (task nk4); their 8 handlers are on by default, and a
   sendmmsg/recvmmsg exit pays up to 1024 user-memory reads per
   call, one per message — heavy for UDP workloads that batch
   with them — poll/epoll wait registrations, DNS hostname↔IP maps,

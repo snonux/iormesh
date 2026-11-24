@@ -1503,13 +1503,15 @@ scenarios landing first (principle #1).
      grows by bind, sendto and recvfrom — and, since task oh4, by
      sendmsg, recvmsg, sendmmsg and recvmmsg, whose bytes and
      `tcp_seq` are captured (the mmsg calls' bytes summed from
-     their mmsghdr arrays, `internal/c/mmsg.c`) but whose peer
-     address inside the msghdr is not. glibc's send(3)/recv(3) are these
-     syscalls, so a stream socket's sendto/recvfrom sends no
-     address record (`IORMESH_ADDR_NOT_STREAM`; its connection
-     already has the addresses) and pays only the enter-time park
-     of the argument by tid; each datagram costs a second,
-     232-byte record. Step 11's #25 measurement covers both.
+     their mmsghdr arrays, `internal/c/mmsg.c`), and since task
+     nk4 their datagram peer from the msghdr's `msg_name` (the
+     mmsg calls' first message's; `IORMESH_ADDR_MSGHDR`).
+     glibc's send(3)/recv(3) are these syscalls, so a stream
+     socket's sendto/recvfrom/msghdr call sends no address
+     record (`IORMESH_ADDR_NOT_STREAM`; its connection already
+     has the addresses) and pays only the enter-time park of the
+     argument by tid; each datagram costs a second, 232-byte
+     record. Step 11's #25 measurement covers both.
    - **Socket addresses** (`internal/c/sockaddr.c`): the generated
      handlers of bind, connect, sendto and recvfrom call
      `iormesh_addr_on_enter` (parks the address argument by tid) and
@@ -1521,7 +1523,11 @@ scenarios landing first (principle #1).
      a sun_path is cut at the length, abstract names included) and,
      for AF_UNIX, the path and `unix_sk(sk)->peer`. The accept exits report an
      accepted AF_UNIX socket the same way; TCP keeps sock.c's
-     state records. The hooks are listed in
+     state records. The msghdr calls (task nk4) park their
+     msghdr — for the mmsg calls the array, whose first entry
+     starts with one — and the exit, behind the stream check,
+     reads its `msg_name`/`msg_namelen` (16 bytes, no loop) and
+     goes on as for sendto. The hooks are listed in
      `internal/generate/sockowner.go` (`sockAddrHooks`), rendered
      behind `filter()` like the TCP owner hooks.
    - **Signals** (`internal/c/signal.c`): a raw `signal_generate`

@@ -397,8 +397,8 @@ ipc,signal,poll,zerocopy` (or `all`) adds them.
 | socket | `bind` | the socket | AF_UNIX: `path`; inet: `local_addr`/`local_port` (the bound address; the kernel's port for port 0) |
 | socket | `connect` (M1) | the socket | TCP: the 4-tuple; AF_UNIX: `path` |
 | socket | `sendto`, `recvfrom` | the socket | `bytes`; per datagram `local_*` and `remote_*` (the peer it went to or came from); AF_UNIX: `path`. On a stream socket (`send`/`recv` on a TCP or unix connection) only the connection's 4-tuple, as `read`/`write` |
-| socket | `sendmsg`, `recvmsg` | the socket | `bytes` (the return); on a connected socket the connection's 4-tuple, as `read`/`write`; `tcp_seq` on TCP. The peer address inside the msghdr is not read yet |
-| socket | `sendmmsg`, `recvmmsg` | the socket | `ret`: the messages moved; `bytes`: the sum of their lengths (`msg_len`), `bytes_partial` when incomplete; otherwise as `sendmsg` |
+| socket | `sendmsg`, `recvmsg` | the socket | `bytes` (the return); on a stream socket the connection's 4-tuple, as `read`/`write`, and `tcp_seq` on TCP; on a datagram socket `local_*` and `remote_*` as `sendto`/`recvfrom`, the peer from the msghdr's `msg_name` or, without one, the connected socket's (task nk4); AF_UNIX: `path` |
+| socket | `sendmmsg`, `recvmmsg` | the socket | `ret`: the messages moved; `bytes`: the sum of their lengths (`msg_len`), `bytes_partial` when incomplete; otherwise as `sendmsg`, the peer being the first message's `msg_name` (one per call; a batch to several peers is named by its first) |
 | socket | `recvfrom`, `recvmsg`, `recvmmsg` with `MSG_PEEK` | the socket | as without, plus `peek`: the bytes copied, none consumed; no `tcp_seq` |
 | ipc | `pipe`, `pipe2`, `socketpair` | the first end (a pipe's read end) | `fd2`, `fd2_gen`: the second end |
 | signal | `kill`, `tgkill`, `tkill` | `-1` | `target_pid`, `signal` |

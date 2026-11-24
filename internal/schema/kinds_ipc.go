@@ -16,7 +16,9 @@ package schema
 //     connected socket the connection's 4-tuple, as read and write. The
 //     mmsg calls' ret is the message count and bytes the sum of the
 //     messages' msg_len; args.bytes_partial marks a sum the tracer could
-//     not complete. A datagram's peer inside the msghdr is not read yet.
+//     not complete. On a datagram socket the peer and local address as
+//     for sendto/recvfrom, the peer from the msghdr's msg_name (the mmsg
+//     calls: the first message's) or the connected socket (task nk4).
 //     recvfrom, recvmsg and recvmmsg called with MSG_PEEK are marked
 //     args.peek (task ok4): their bytes stay out of the stream sums.
 //   - pipe, pipe2, socketpair: fd is the first descriptor, args.fd2 and

@@ -1669,6 +1669,8 @@ int handle_sys_enter_sendmsg(struct trace_event_raw_sys_enter___iormesh *ctx) {
     if (filter(&pid, &tid))
         return 0;
 
+    iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[1], 0, 0);
+
     __u64 now = bpf_ktime_get_boot_ns();
     if (!ior_on_syscall_enter(tid, SYS_ENTER_SENDMSG, now))
         return 0;
@@ -1701,6 +1703,8 @@ int handle_sys_exit_sendmsg(struct trace_event_raw_sys_exit___iormesh *ctx) {
     if (filter(&pid, &tid))
         return 0;
 
+    iormesh_addr_on_exit(pid, tid, SYS_EXIT_SENDMSG, ctx->ret, IORMESH_ADDR_NOT_STREAM | IORMESH_ADDR_MSGHDR);
+
     __u64 now = bpf_ktime_get_boot_ns();
     if (!ior_on_syscall_exit(tid, SYS_ENTER_SENDMSG, ctx->ret, now))
         return 0;
@@ -1732,6 +1736,8 @@ int handle_sys_enter_sendmmsg(struct trace_event_raw_sys_enter___iormesh *ctx) {
     __u32 pid, tid;
     if (filter(&pid, &tid))
         return 0;
+
+    iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[1], 0, 0);
 
     __u64 now = bpf_ktime_get_boot_ns();
     if (!ior_on_syscall_enter(tid, SYS_ENTER_SENDMMSG, now))
@@ -1766,6 +1772,8 @@ int handle_sys_exit_sendmmsg(struct trace_event_raw_sys_exit___iormesh *ctx) {
     if (filter(&pid, &tid))
         return 0;
 
+    iormesh_addr_on_exit(pid, tid, SYS_EXIT_SENDMMSG, ctx->ret, IORMESH_ADDR_NOT_STREAM | IORMESH_ADDR_MSGHDR);
+
     __u64 now = bpf_ktime_get_boot_ns();
     if (!ior_on_syscall_exit(tid, SYS_ENTER_SENDMMSG, ctx->ret, now))
         return 0;
@@ -1797,6 +1805,8 @@ int handle_sys_enter_recvmsg(struct trace_event_raw_sys_enter___iormesh *ctx) {
     __u32 pid, tid;
     if (filter(&pid, &tid))
         return 0;
+
+    iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[1], 0, 0);
 
     __u64 now = bpf_ktime_get_boot_ns();
     if (!ior_on_syscall_enter(tid, SYS_ENTER_RECVMSG, now))
@@ -1835,6 +1845,8 @@ int handle_sys_exit_recvmsg(struct trace_event_raw_sys_exit___iormesh *ctx) {
     if (filter(&pid, &tid))
         return 0;
 
+    iormesh_addr_on_exit(pid, tid, SYS_EXIT_RECVMSG, ctx->ret, IORMESH_ADDR_NOT_STREAM | IORMESH_ADDR_MSGHDR);
+
     __u64 now = bpf_ktime_get_boot_ns();
     if (!ior_on_syscall_exit(tid, SYS_ENTER_RECVMSG, ctx->ret, now))
         return 0;
@@ -1866,6 +1878,8 @@ int handle_sys_enter_recvmmsg(struct trace_event_raw_sys_enter___iormesh *ctx) {
     __u32 pid, tid;
     if (filter(&pid, &tid))
         return 0;
+
+    iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[1], 0, 0);
 
     __u64 now = bpf_ktime_get_boot_ns();
     if (!ior_on_syscall_enter(tid, SYS_ENTER_RECVMMSG, now))
@@ -1902,6 +1916,8 @@ int handle_sys_exit_recvmmsg(struct trace_event_raw_sys_exit___iormesh *ctx) {
     __u32 pid, tid;
     if (filter(&pid, &tid))
         return 0;
+
+    iormesh_addr_on_exit(pid, tid, SYS_EXIT_RECVMMSG, ctx->ret, IORMESH_ADDR_NOT_STREAM | IORMESH_ADDR_MSGHDR);
 
     __u64 now = bpf_ktime_get_boot_ns();
     if (!ior_on_syscall_exit(tid, SYS_ENTER_RECVMMSG, ctx->ret, now))

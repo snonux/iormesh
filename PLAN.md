@@ -3037,6 +3037,18 @@ deferred.
   they are socket data calls like sendto/recvfrom. Their
   events reuse the schema's rule that a syscall kind is its
   syscall's name (`sendmsg`, …, appended to schema v1).
+  Task nk4 names their datagram peer as sendto/recvfrom do,
+  for the DNS resolvers and QUIC servers that send through
+  them unconnected: the exit reads the msghdr's `msg_name`
+  and `msg_namelen` (recvmsg's kernel writes the sender's
+  length back there) and sends the same address record, IPv4,
+  IPv6 or AF_UNIX, never for a stream socket. For sendmmsg
+  and recvmmsg it is the first message's address only: one
+  record per call, a fixed 16-byte read with no loop, so the
+  el9 5.14 verifier sees a straight line next to mmsg.c's
+  bounded sum (the exits grew by about 600 processed
+  instructions, to 42.6k of the 1M limit). A batch to several
+  peers is named by its first; the rest are not guessed.
   Renames and mmaps are not families: the
   renames are the file surface's, mmaps are not traced yet.
   ior's restart fold (one row for a call a signal interrupted
@@ -3968,10 +3980,10 @@ Metadata only — nothing below is payload (see non-goals):
 
 The inventory is the target. Not traced as built (2026-11-22;
 `internal/tracepoints`, default_set.go and trace_family.go):
-file mmaps, eventfd and shared memory (no probes); the peer
-address inside a sendmsg/recvmsg msghdr (their bytes and
-`tcp_seq` are traced since task oh4, the address is not); TLS
-peer identity (later, decision #8).
+file mmaps, eventfd and shared memory (no probes); TLS peer
+identity (later, decision #8). The peer address inside a
+sendmsg/recvmsg msghdr is traced since task nk4 (see the
+socket family above).
 
 ## Trace output contract — built for LLM introspection
 

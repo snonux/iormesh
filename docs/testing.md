@@ -1481,8 +1481,9 @@ of two buffers and a `sendmmsg` of two messages, then a
 `recvmsg` and a `recvmmsg` of two messages, each pinned to its
 bytes and to `tcp_seq` from the handshake's `snd_una`/`rcv_nxt`;
 the mmsg calls' `ret` stays their message count. Between two
-connected UDP sockets: a `sendmmsg` of three datagrams and the
-`recvmmsg` taking them carry the datagrams' byte sum, the
+UDP sockets (unconnected since task nk4): a `sendmmsg` of three
+datagrams and the `recvmmsg` taking them carry the datagrams'
+byte sum, the
 single `sendmsg`/`recvmsg` their size, and no record carries
 `tcp_seq`. Red first on the 7.2 laptop: before the change both
 failed (`sends: calls moved [] bytes, want [7 11]`, `udp
@@ -1513,6 +1514,22 @@ bytes. `recvmmsg`'s enter moved from `fd_event` to
 `fd_size_event` to carry its flags; no CO-RE relocation was
 added (`TestEl9RecordLayout` already relocates the handler).
 Not yet run on el9.
+
+## The msghdr calls' datagram peer (task nk4, 2026-11-24)
+
+`TestMsgCallsUDP` now runs its UDP sockets unconnected: every
+send names the receiving socket in `msg_name` (each `sendmmsg`
+message too), every receive asks for the sender there, so the
+peer is only in the msghdr. Each of the four events must name
+the other socket as `remote_addr:remote_port`. Red first on the
+7.2 laptop: before the change all four failed (`udp sendmmsg
+names no peer, want 127.0.0.1:46226`, likewise sendmsg, recvmmsg
+and recvmsg). `TestMsghdrAddrHooks` (internal/generate) pins
+that the four calls park their msghdr and read it as one, and
+that bind, connect, sendto and recvfrom do not. The mmsg exits'
+verifier count on 7.2 grew from 41,943/41,964 (sendmmsg/recvmmsg)
+to 42,554/42,579; `TestEl9RecordLayout` still relocates them
+clean against the el9 BTF. Not yet run on el9.
 
 ## el9 runbook and runs
 
