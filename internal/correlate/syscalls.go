@@ -196,7 +196,7 @@ func (c *Correlator) wall(bootNS uint64) uint64 {
 // event until that socket's conn id is known, and false when the event
 // must not be emitted. The shape switch comes first and is an integer
 // compare: read and write, the hot kinds, pay for nothing they don't use
-// (decision #25).
+// (decision #25). The calls on one fd, the rest, go to fdDetail.
 func (c *Correlator) syscallDetail(ev *schema.Event, en enter, ret int64) (*sockState, bool) {
 	p := c.proc(en.pid)
 	switch en.shape {
@@ -214,6 +214,13 @@ func (c *Correlator) syscallDetail(ev *schema.Event, en enter, ret int64) (*sock
 	case schema.KindAccept, schema.KindAccept4:
 		return c.acceptDetail(ev, p, en, ret), true
 	}
+	return c.fdDetail(ev, p, en, ret), true
+}
+
+// fdDetail sets the fields of a call on one fd (read, write, close,
+// connect, the socket calls, the other fd calls) and returns the socket
+// the event acts on, if any. Every such event is emitted.
+func (c *Correlator) fdDetail(ev *schema.Event, p *procState, en enter, ret int64) *sockState {
 	// A negative fd (fstat(-1), close(-1): EBADF) names no instance, so
 	// the event keeps NoFD and gen 0, as the path and ipc shapes do. Never
 	// use() it: the number would enter the table, an exec would close it
@@ -247,7 +254,7 @@ func (c *Correlator) syscallDetail(ev *schema.Event, en enter, ret int64) (*sock
 	default:
 		fdFileDetail(ev, p, en, ret)
 	}
-	return sock, true
+	return sock
 }
 
 // openDetail turns an open into a file event, or a marker event when it
