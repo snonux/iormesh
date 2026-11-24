@@ -209,7 +209,7 @@ func collectTargets(r federate.Registry, args, projects []string, kf *k8sFlags) 
 	}
 	for _, p := range projects {
 		if !seen[p] {
-			return nil, fmt.Errorf("%w: %q on no selected host", federate.ErrUnknownProject, p)
+			return nil, fmt.Errorf("%w: %q on no selected target", federate.ErrUnknownProject, p)
 		}
 	}
 	return targets, nil

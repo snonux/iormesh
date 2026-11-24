@@ -181,10 +181,10 @@ removes. See PLAN.md, M4 and M6.
 A session ends after its `-duration` (4h by default, 7 days at
 most), and its transient unit has no `Restart=`: a reboot, an
 OOM kill at `MemoryMax` or a disk-limit trip ends it for good.
-`iormeshctl ensure [-project P]... [HOST...]` keeps it going
+`iormeshctl ensure [-project P]... [HOST|POD...]` keeps it going
 (PLAN.md M4, "No management plane"; task zh4). Per host — every
-registered one without HOST — it reads the tracer's `status
--json`, then:
+registered host and pod entry without HOST|POD; pods are below
+— it reads the tracer's `status -json`, then:
 
 | The session | ensure |
 |---|---|
@@ -221,11 +221,46 @@ project marked stopped, so ensure will not recover it — deploy
 reports "session stopped, not restarted", and the next deploy
 starts it.
 
+A pod entry (task pk4) has no unit, and a stopped tracer
+container cannot be entered to read its `state.json`, so ensure
+decides each of the entry's pods by its newest tracer container
+as the API server reports it:
+
+| The pod's tracer | ensure |
+|---|---|
+| debug, terminated non-zero (killed with its app container, OOM, crash) | starts `iormesh-N+1` as deploy does, waits for it to attach |
+| debug, exited 0 (a SIGTERM: a `-linger` run never exits on its own) | leaves it stopped, skips its collect with a note |
+| the pod is terminating (a `pod:` entry's, in its grace period) | nothing: its replacement is `deploy`'s |
+| debug, running, session running or attaching | nothing |
+| debug, running, session ended (`-duration`, `disk_limit`) | nothing it can do: says a pod restart is needed |
+| no tracer container (never deployed, a restarted pod) | nothing: `deploy` starts it |
+| sidecar | nothing: the kubelet restarts it |
+
+then reads the pods again and collects each as collect does. A
+`pod:` entry whose pod is gone, or a selector matching no
+running pod, fails the entry as collect does: there is nothing
+to restart or collect, and `deploy` starts a tracer in the pod
+that replaces it. A debug tracer ensure restarts counts toward
+the pod's 8 ([kubernetes.md](kubernetes.md#limits-you-will-hit)).
+
+"Exit 0 means stopped on purpose" holds for a session that ran
+without error: a session that failed lingers too, and the
+signal that ends that linger exits 1, so ensure restarts it. To
+stop a debug tracer deliberately, send its run SIGTERM through
+the PID namespace it shares with the app container, e.g.
+`kubectl exec <pod> -c <app> -- kill <pid of iormesh run>`
+(the app image needs a `kill`); a SIGKILL exits 137 and is
+restarted like a crash.
+
 Run again, ensure finds what it started running and only
 collects, so a timer may drive it. A systemd user timer on the
 laptop (it needs the SSH key without a prompt: an agent socket
 in the user manager's environment, `systemctl --user
-import-environment SSH_AUTH_SOCK`, or a key for this alone):
+import-environment SSH_AUTH_SOCK`, or a key for this alone;
+with pod entries registered, it also needs kubectl, the
+cluster's credential plugins and their kubeconfig:
+`systemctl --user import-environment KUBECONFIG PATH`, or
+`Environment=` lines in the service):
 
 ```ini
 # ~/.config/systemd/user/iormesh-ensure.service
@@ -261,8 +296,9 @@ A timer never starts a run while the last one is still going
 */15 * * * * flock -n ~/.cache/iormesh-ensure.lock ~/bin/iormeshctl ensure >>~/.cache/iormesh-ensure.log 2>&1
 ```
 
-ensure exits 1 when a host could not be reached or a start or
-collect failed, after trying every host; the next run retries.
+ensure exits 1 when a host or pod entry could not be reached or
+a start or collect failed, after trying every target; the next
+run retries.
 Run `iormeshctl build` (or `refresh`) when you want the picture;
 ensure only keeps the segments coming.
 

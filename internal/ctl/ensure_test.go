@@ -172,7 +172,7 @@ func TestEnsureFailures(t *testing.T) {
 	if code := f.run("ensure"); code != exitError {
 		t.Fatalf("exit %d, want 1", code)
 	}
-	if !strings.Contains(f.stderr.String(), "ensure failed on 1 of 2 hosts: app1") {
+	if !strings.Contains(f.stderr.String(), "ensure failed on 1 of 2 targets: app1") {
 		t.Errorf("stderr %q", f.stderr)
 	}
 	checkLog(t, f.log, [][]string{sudoCall("app1", "status", "-json"), sudoCall("app2", "status", "-json")},
@@ -206,9 +206,9 @@ func TestEnsureFailures(t *testing.T) {
 		collectLog(f, "app1", "shop", "billing"))
 }
 
-// TestEnsureRefuses: a pod entry (ensure keeps hosts' sessions; a pod's
-// tracer is its debug container's), an unregistered host and a stray
-// project fail before any host is contacted.
+// TestEnsureRefuses: an unregistered pod entry (registered ones are
+// ensured, task pk4: ensure_pods_test.go), an unregistered host and a
+// stray project fail before any host is contacted.
 func TestEnsureRefuses(t *testing.T) {
 	f := newDeployFixture(t)
 	for _, args := range [][]string{{"ensure", "kind/shop/app=web"}, {"ensure", "nope"},

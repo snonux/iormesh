@@ -161,6 +161,18 @@ type PodState struct {
 	// trace's form (k8sname.StatusContainerID); a status without a valid
 	// id or name adds nothing.
 	Containers map[string]string
+	// Exited is set when that tracer container terminated, ExitCode
+	// then its exit code. iormeshctl ensure (task pk4) reads it to tell
+	// a debug tracer ended on purpose — exit code 0: a -linger run
+	// exits only once SIGTERM or SIGINT ends it, cleanly — from one
+	// killed with its app container, OOM-killed or crashed.
+	Exited   bool
+	ExitCode int
+	// Terminating: the pod is being deleted (deletionTimestamp set),
+	// though it may still read phase Running. Select never returns such
+	// a pod; Get does, since a collect in the grace period may still
+	// save segments, and ensure reads this to start nothing in it.
+	Terminating bool
 }
 
 // Lister looks pods up in one scope's context and namespace.
@@ -201,7 +213,10 @@ func (l *Lister) get(ctx context.Context, v any, args ...string) error {
 // Get is the pod called name, refused unless it is running: a pod that
 // is pending or finished cannot be exec'd into, and that is the
 // operator's to know, not an empty collect. A pod kubectl cannot read
-// (gone, forbidden) is an error too.
+// (gone, forbidden) is an error too. A terminating pod still reads
+// Running and is returned, marked Terminating: unlike a selector's,
+// a named pod is the one the operator asked for, and collect may still
+// fetch its segments in the grace period (ensure starts nothing there).
 func (l *Lister) Get(ctx context.Context, name string) (PodState, error) {
 	if !k8sname.Pod(name) {
 		return PodState{}, fmt.Errorf("%w: pod %q", ErrName, name)
@@ -276,11 +291,14 @@ func (l *Lister) state(p podInfo) (PodState, error) {
 		name = ts[len(ts)-1].Name
 	}
 	st := PodState{Name: p.Metadata.Name, UID: p.Metadata.UID, Tracer: name != "", Container: name,
-		Containers: containerNames(p)}
+		Containers: containerNames(p), Terminating: p.Metadata.DeletionTimestamp != ""}
 	if st.Tracer {
 		cs, ok := statusOf(statuses, name)
 		if st.Stopped = "without a status yet"; ok {
 			st.Stopped = cs.notRunning()
+			if t := cs.State.Terminated; t != nil {
+				st.Exited, st.ExitCode = true, t.ExitCode
+			}
 		}
 	}
 	return st, nil

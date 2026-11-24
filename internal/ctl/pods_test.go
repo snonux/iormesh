@@ -26,7 +26,9 @@ import (
 // the refusal of an image from before the flag: usage, exit status 2,
 // task ph4; statusfail-NAME makes it fail otherwise, exit 1), and down-NAME makes every exec into NAME fail as
 // kubectl itself does (exit 1, no "command terminated" line). debug
-// keeps a copy of its --custom file as custom.json. A file hang makes
+// keeps a copy of its --custom file as custom.json, and when
+// after-NAME.json exists makes it pod NAME's from then on (the pod as
+// the kubelet shows it once the new tracer runs). A file hang makes
 // every call hang for 30 s without an answer (an API server or exec
 // stream that stalls, task pi4); the hang is the fake's own process, so
 // killing it ends it. No cluster is reached.
@@ -64,6 +66,7 @@ exec)
   if [ -f "$FAKE_DIR/tar-$pod" ]; then cat "$FAKE_DIR/tar-$pod"; else cat "$FAKE_DIR/empty.tar"; fi ;;
 debug)
   for a in "$@"; do case "$a" in --custom=*) cp "${a#--custom=}" "$FAKE_DIR/custom.json" ;; esac; done
+  [ -f "$FAKE_DIR/after-$1.json" ] && cp "$FAKE_DIR/after-$1.json" "$FAKE_DIR/pod-$1.json"
   echo "ephemeral container iormesh created" ;;
 esac
 `

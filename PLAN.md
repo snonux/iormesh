@@ -1592,10 +1592,39 @@ Kubernetes (M7) build on it.
   should the partition still be over the limit, the new run's
   watchdog refuses at its start, so no restart loop fills the
   disk. ensure starts no project the host never ran and never
-  upgrades — both are deploy's — takes hosts only (a pod's
-  tracer is its debug container), and run again only collects,
+  upgrades — both are deploy's — and run again only collects,
   so a systemd user timer or a cron line drives it
   ([architecture.md](docs/architecture.md#tracing-for-days)).
+  Decided (task pk4): **ensure covers pod entries** too, every
+  registered one without a target named. A pod's tracer has no
+  unit or `state.json` ensure can read once its container
+  stopped (`kubectl exec` cannot enter it), so ensure decides a
+  debug pod by its newest tracer container as the API server
+  reports it, and restarts only through deploy's pod path (a
+  fresh `iormesh-N`, at most `MaxDebugTracers`, then the attach
+  wait): a container that terminated with a non-zero exit code
+  — killed with its app container, OOM-killed, crashed — is
+  restarted; one that exited 0 was ended on purpose (only a
+  SIGTERM or SIGINT ends a `-linger` run cleanly; a session that
+  had failed exits 1 on the signal and is restarted) and is
+  left stopped, its collect skipped and reported rather than
+  failed. A terminating pod (`deletionTimestamp` set, still
+  phase Running) is left whatever its tracer: a selector never
+  returns one, but a `pod:` entry's named pod is returned
+  marked during its grace period (a collect there may still
+  save segments), and a tracer started in it would die before
+  attaching. A running tracer is asked `ready -status`: running or
+  attaching is nothing to do; ended (its `-duration`,
+  `disk_limit`) lingers in a container that cannot be restarted,
+  so ensure reports that a new session needs a pod restart and
+  leaves it. A pod without a tracer container (never deployed,
+  or the pod restarted under the same name or selector) is
+  deploy's, as a host's never-started project is; a `pod:`
+  entry's pod that is gone, or a selector matching no running
+  pod, fails the entry as collect does — nothing to restart or
+  collect, deploy starts a tracer in its replacement. A sidecar
+  is the kubelet's to restart: ensure only collects it. Every
+  other pod of the entry is then collected as collect does.
 - Target platform for the tracer: Rocky Linux 9 first (BTF
   present; ior's Rocky 9 build/Docker patterns apply), amd64
   and arm64. Deployed binaries come out of the container build

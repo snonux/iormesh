@@ -346,6 +346,23 @@ Collect often. Segments still in a pod are lost when the pod
 goes, and a full trace volume stops tracing until collect drains
 it.
 
+`iormeshctl ensure` (from a timer, see
+[architecture.md](architecture.md#tracing-for-days)) covers pod
+entries too, collecting each pod after it looked at the tracer:
+
+- a debug tracer that was killed (its container terminated with
+  a non-zero exit code: the app container restarted, an OOM
+  kill, a crash) is started again through deploy's path, as the
+  next `iormesh-N`, and the new one is collected;
+- one that exited 0 was stopped on purpose (a SIGTERM) and is
+  left stopped; its collect is skipped with a note;
+- a running one whose session ended (`-duration`, `disk_limit`)
+  cannot be restarted: ensure says a pod restart is needed;
+- a pod without a tracer (a restarted pod) or a terminating one
+  is `deploy`'s, and a gone `pod:` entry's pod fails the entry,
+  as collect does;
+- a sidecar is the kubelet's to restart: ensure only collects.
+
 Every event of a pod's tracer names its namespace, pod and the
 container its process runs in (the `pod` object,
 [schema.md](schema.md#pod-fields-on-events-m7)), so in sidecar
@@ -403,7 +420,8 @@ namespace of the collect.
   after `-duration` (4h unless the entry's flags set one). The
   tracer then frees its BPF and stays idle (`-linger`), so
   collect can still fetch its last segment. A new session needs
-  a pod restart.
+  a pod restart: `ensure` restarts only a killed tracer, never a
+  lingering one.
 - **A selector reaches at most 32 pods.** More than 32 running
   matches is refused as a selector broader than intended, and no
   pod is touched. Narrow the selector or split the entry.
@@ -524,7 +542,7 @@ replaced debug tracer; the newest is the live one).
 | `the session already ended (…); restart the pod for a new one` or `the tracer died without its end` | The debug session is over; restart the pod for a new one. |
 | `traces project "…", not "…"` | A running debug tracer traces another project; restart the pod. |
 | `debug tracer "…" ended and the pod has had 8, the most deploy starts in one pod` | Restart the pod, or use sidecar mode. |
-| `session ended: tracer container "…" …; kubectl exec cannot enter a stopped container: iormeshctl deploy … starts a fresh tracer` | Debug tracer killed with its app: run deploy, then collect again. |
+| `session ended: tracer container "…" …; kubectl exec cannot enter a stopped container: iormeshctl deploy … starts a fresh tracer` | Debug tracer killed with its app: run deploy, then collect again (`ensure` does both). |
 | `session ended: … stranded until the pod goes` | Nothing can enter the pod's emptyDir anymore. Its segments are lost when the pod goes. |
 | `k8s: another fetch into this directory is running` | A second collect into the same `pod-<uid>`; wait for the first. |
 | `k8s: kubectl stalled: … no answer within 2m0s` or `no data for 2m0s on the fetch stream` | The API server, a credential plugin or the exec stream hung. Retry; segments that were not fetched stay in the pod. |

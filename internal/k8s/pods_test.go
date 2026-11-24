@@ -54,6 +54,10 @@ func TestPodStateStopped(t *testing.T) {
 		if p.Stopped != want[i] {
 			t.Errorf("%s: Stopped %q, want %q", p.Name, p.Stopped, want[i])
 		}
+		// Only the terminated one carries an exit code (task pk4).
+		if exited := i == 0; p.Exited != exited || exited && p.ExitCode != 137 {
+			t.Errorf("%s: Exited %v, ExitCode %d", p.Name, p.Exited, p.ExitCode)
+		}
 	}
 }
 
@@ -214,6 +218,14 @@ func TestGet(t *testing.T) {
 	want := []string{"--context=kind-iormesh", "--namespace=shop", "get", "pod", "checkout-0", "--output=json"}
 	if calls := f.calls(t); !slices.Equal(calls[0], want) {
 		t.Errorf("argv %q, want %q", calls[0], want)
+	}
+	// A terminating pod is returned, marked (task pk4 review).
+	item := podItem("checkout-0", testUID(7), "Running", true)
+	item["metadata"].(map[string]any)["deletionTimestamp"] = "2026-11-24T08:00:00Z"
+	b, _ = json.Marshal(item)
+	f.pod(t, string(b))
+	if st, err := newTestLister(t).Get(context.Background(), "checkout-0"); err != nil || !st.Terminating {
+		t.Errorf("terminating: Get = %+v, %v", st, err)
 	}
 	b, _ = json.Marshal(podItem("checkout-0", testUID(7), "Pending", true))
 	f.pod(t, string(b))

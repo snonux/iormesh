@@ -8,7 +8,7 @@
 //	                  HOST|POD...
 //	iormeshctl bootstrap [-apply] [-registry FILE] [-dist DIR] [-key FILE] [-arch ARCH] [-user NAME] HOST
 //	iormeshctl status [-project NAME]... [-registry FILE] [K8S] [HOST|POD...]
-//	iormeshctl ensure [-project NAME]... [-registry FILE] [-store DIR] [HOST...]
+//	iormeshctl ensure [-project NAME]... [-registry FILE] [-store DIR] [HOST|POD...]
 //	iormeshctl list [-registry FILE]
 //	iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-routes FILE]
 //	                 [-registry FILE] [-namespace NS] [-from T] [-to T] [-last DUR]
@@ -350,7 +350,7 @@ func usage(w io.Writer) {
   iormeshctl bootstrap [-apply] [-registry FILE] [-dist DIR] [-key FILE] [-arch ARCH]
                        [-user NAME] HOST
   iormeshctl status [-project NAME]... [-registry FILE] [K8S] [HOST|POD...]
-  iormeshctl ensure [-project NAME]... [-registry FILE] [-store DIR] [HOST...]
+  iormeshctl ensure [-project NAME]... [-registry FILE] [-store DIR] [HOST|POD...]
   iormeshctl list [-registry FILE]
   iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-routes FILE]
                    [-registry FILE] [-namespace NS] [-from T] [-to T] [-last DUR]
@@ -398,12 +398,15 @@ the SSH user -user, default HOST's user@ part or yours; a User in
 runs them over ssh with sudo -n, which needs sudo without a password.
 rm's uninstall removes the sudoers rule bootstrap installed. status asks every target's tracer (sudo iormesh status, or
 iormesh ready -status in a pod) and prints one row per project; list
-prints the registry. ensure, per host (every registered one without
-HOST), starts again every session that ended on its own (duration,
+prints the registry. ensure, per host (every registered host and pod
+entry without HOST|POD), starts again every session that ended on its own (duration,
 targets gone, error, reboot, crash), never one stopped with iormesh
 stop, then collects; a disk_limit end restarts only once the collect
 emptied its ready/. It never upgrades and starts no project the host
-never ran, so it is safe from a timer (docs/architecture.md). collect without HOST collects every registered host; rm
+never ran, so it is safe from a timer (docs/architecture.md). In a pod
+entry's pods it starts the next debug tracer, as deploy does, where
+the last one was killed (a non-zero exit), never one that exited 0
+(stopped on purpose), then collects. collect without HOST collects every registered host; rm
 stops, syncs off and uninstalls before it unregisters, and refuses to
 uninstall over traces it could not sync unless -force. build (and
 refresh, which is collect then build) merges every project in the store
