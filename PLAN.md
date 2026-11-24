@@ -713,6 +713,32 @@ Gated by S1 — done; the design below is S1's result
   made before, is left to that load too — a load that timed out
   on the socket after its SIGQUIT takes 10 s — unless the pid
   is another process by then.
+  A late JVM's start-up (task mk4): *Decided (2026-11-24):* the
+  gap is accepted and documented, not closed by iormesh. A late
+  attach loads the agent up to 30 s after the exec, so the
+  JVM's start-up I/O (class loading, config reads, first
+  connections) stays unattributed; only `-javaagent` at launch
+  covers it, and that is a change to the application's start
+  configuration, which the operator makes — iormesh never
+  writes a unit, drop-in, environment or pod spec of the traced
+  application, and deploy applies nothing to it.
+  docs/java-attach.md shows the line: a systemd drop-in for the
+  app's unit setting `JAVA_TOOL_OPTIONS` to `-javaagent:` the
+  installed jar with `spool=/run/iormesh/spool/<project>`, with
+  what it costs (the `Picked up` line, inheritance by child
+  JVMs, a hardened unit's `ReadWritePaths`) and what happens
+  while no session runs (the agent finds no spool, prints
+  `iormesh-agent: disabled` and stays out; the next session's
+  start-time attach loads it live). No helper prints the
+  drop-in: it is fixed text that varies only by project, so a
+  command would add surface without adding information, and it
+  could not see the unit's hardening or SELinux domain. In a
+  pod `-javaagent` needs the jar and a spool shared with the
+  tracer inside the app container — a workload change with no
+  recipe shipped or tested (#14 stays the owner's call); the
+  docs state the limit there. Overturned if the owner wants a
+  print-only `iormeshctl` helper for the drop-in, or a tested
+  pod recipe.
 - **Stack capture cost**: the per-I/O `StackWalker` walk is the
   agent's dominant cost (S1: ≈8 µs per call on a loaded host vs
   ≈0.3 µs for the rest of the bracket); M3 engineers it down

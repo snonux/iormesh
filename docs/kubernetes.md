@@ -237,7 +237,10 @@ too (exit 137), and an ephemeral container is never restarted.
 In a sidecar pod, the pause container is init of the shared PID
 namespace, so the tracer survives. A restarted JVM gets no agent
 from `run -agent`; give such JVMs `-javaagent` (PLAN.md M7,
-[java-attach.md](java-attach.md)).
+[java-attach.md](java-attach.md)). That is a workload change
+the owner makes — the jar and a spool shared with the tracer
+inside the app container — and iormesh ships no recipe for it
+yet ([java-attach.md](java-attach.md#a-late-jvms-start-up)).
 
 ## Deploy
 

@@ -51,6 +51,67 @@ other JVMs loads the agent into all of them (each writing its
 ring into the same spool) — prefer `-javaagent` on the command
 line where the pattern allows it.
 
+### A late JVM's start-up
+
+A JVM that starts during a session gets the agent by late
+attach (below), up to 30 s after its exec. Its start-up I/O —
+class loading, config reads, the first connections — happens
+before that and stays unattributed; the tracer says so with
+`agent loaded into pid N; its I/O before now stays
+unattributed`. This is an accepted limit (PLAN.md M3, task
+mk4): only `-javaagent` at launch covers a JVM's start, and
+that is a change to how the application is started, which the
+operator makes. iormesh never writes an application's unit,
+drop-in, environment or pod spec, and `iormeshctl deploy`
+applies nothing to it.
+
+For an application run as a systemd unit, a drop-in does it
+without touching the unit file or the command line a `-pattern`
+matches (here the unit `shop.service`, project `shop`):
+
+```
+sudo systemctl edit shop.service
+```
+
+```
+[Service]
+Environment=JAVA_TOOL_OPTIONS=-javaagent:/opt/iormesh/lib/iormesh-agent.jar=spool=/run/iormesh/spool/shop
+```
+
+then `sudo systemctl restart shop.service`. Before that:
+
+- **An existing `JAVA_TOOL_OPTIONS`.** If the unit sets one
+  already (`Environment=`, or an `EnvironmentFile=`, which wins
+  over `Environment=`), the drop-in replaces it: put the
+  `-javaagent:` option into that value instead.
+- **A hardened unit.** Under `ProtectSystem=strict` `/run` is
+  read-only for the JVM; add
+  `ReadWritePaths=-/run/iormesh/spool/shop` to the drop-in so
+  the agent can create its ring. A JVM in a confined SELinux
+  domain may be denied the jar or the spool; the audit log
+  names the denial.
+- **No session running.** The spool exists from the project's
+  first session after boot (the tracer creates it and leaves
+  it). A JVM started before that finds none: its stderr (the
+  unit's journal) gets `iormesh-agent: disabled: …` and it runs
+  on without the agent. The next session's start-time attach
+  (`-agent`) then loads it live, from that point on. A JVM
+  started while no session runs but the spool exists keeps its
+  ring there (full, it drops and counts), and the next session
+  of the project picks the ring up.
+- **Every JVM in the unit.** All JVMs the unit starts inherit
+  the variable (see the `Picked up` note above), traced or not.
+
+Remove the drop-in (`sudo systemctl revert shop.service`, which
+drops every drop-in of the unit, or delete the file `systemctl
+edit` created) and restart to undo it.
+
+In a Kubernetes pod ([kubernetes.md](kubernetes.md#debug-or-sidecar))
+`-javaagent` needs the jar and a spool shared with the tracer
+inside the app container — a workload change for which iormesh
+ships and tests no recipe (decision #14 is open with the
+owner), so a pod's JVM start-up stays unattributed there.
+
 ## Live attach
 
 ```
