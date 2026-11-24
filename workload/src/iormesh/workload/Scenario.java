@@ -7,7 +7,8 @@ import java.util.Set;
  * One deterministic, declared behavior. Its syscalls between the begin
  * and end markers are what the scenario's expect.json declares; nothing
  * the JVM does outside that bracket is ever asserted on (docs/milestones.md,
- * M0). /
+ * M0).
+ */
 public interface Scenario {
     /** Registry key and marker name, e.g. "file-basic". */
     String name();

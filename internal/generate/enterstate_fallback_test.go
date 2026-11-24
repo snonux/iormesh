@@ -71,6 +71,9 @@ typedef long long __s64;
 #define __always_inline inline __attribute__((always_inline))
 #endif
 #define BPF_ANY 0
+/* maps.h's verifier-safe index mask (decision #31, task ll4): on the host
+   it is the plain mask; barrier_var only matters to the BPF verifier. */
+#define iormesh_index_mask(idx, n) ((idx) & ((n) - 1))
 
 %s
 %s

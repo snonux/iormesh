@@ -61,6 +61,9 @@ typedef unsigned long long __u64;
 #define __always_inline inline __attribute__((always_inline))
 #define __ksym
 #define __weak
+/* maps.h's verifier-safe clamp (decision #31, task ll4): on the host it is
+   the plain clamp; the inline asm only matters to the BPF verifier. */
+#define iormesh_index_clamp(idx, max) ((idx) > (max) ? (max) : (idx))
 
 %s
 
@@ -255,9 +258,12 @@ type fdNameMutation struct {
 // fdNameBound is the helper's cut of the copy length to the name field, and
 // fdNameBoundComment the comment in front of it.
 const (
-	fdNameBound        = "    if (len > IOR_FD_NAME_LENGTH - 1)\n        len = IOR_FD_NAME_LENGTH - 1;\n"
+	fdNameBound        = "    len = iormesh_index_clamp(len, IOR_FD_NAME_LENGTH - 1);\n"
 	fdNameBoundComment = "    // The bound is what the verifier needs for a variable-length read into\n" +
-		"    // the record, and it leaves room for the terminator.\n"
+		"    // the record and for the terminator's index, and it leaves room for the\n" +
+		"    // terminator. IOR_FD_NAME_LENGTH (68) is no power of two, so\n" +
+		"    // iormesh_index_clamp (maps.h, decision #31) bounds the register that\n" +
+		"    // both the read's size and name[len] use, not a copy (task ll4).\n"
 )
 
 var fdNameMutations = []fdNameMutation{
@@ -292,9 +298,9 @@ var fdNameMutations = []fdNameMutation{
 		fdNameBoundComment + fdNameBound + "    ev->name_len = len;\n", "name longer than the record"},
 	{"name not cut to the field", fdNameBound, "", "name longer than the record"},
 	{"name cut one byte late", fdNameBound,
-		"    if (len > IOR_FD_NAME_LENGTH)\n        len = IOR_FD_NAME_LENGTH;\n", "name longer than the record"},
+		"    len = iormesh_index_clamp(len, IOR_FD_NAME_LENGTH);\n", "name longer than the record"},
 	{"name cut one byte early", fdNameBound,
-		"    if (len > IOR_FD_NAME_LENGTH - 2)\n        len = IOR_FD_NAME_LENGTH - 2;\n", "name that just fits"},
+		"    len = iormesh_index_clamp(len, IOR_FD_NAME_LENGTH - 2);\n", "name that just fits"},
 }
 
 // TestFdNameCaptureCatchesRegressions runs the cases against mutated helpers:

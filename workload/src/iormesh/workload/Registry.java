@@ -40,7 +40,8 @@ final class Registry {
      * iormesh.workload.Scenario). That is how the OTEL flavor
      * (workload/otel, docs/milestones.md M0) joins without the core jar
      * depending on OpenTelemetry (decision #5): workload.jar alone finds no
-     * providers. /
+     * providers.
+     */
     static Registry builtin() {
         Registry r = new Registry();
         r.add(new ArgvSecret());

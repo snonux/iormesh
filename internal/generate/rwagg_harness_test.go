@@ -51,6 +51,9 @@ typedef long long __s64;
 #define ENTER_FD_EVENT 5
 #define RW_AGGREGATE_EVENT 73
 #define IORMESH_RW_MAX_COUNT 200
+/* maps.h's verifier-safe index mask (decision #31, task il4): on the host
+   it is the plain mask; barrier_var only matters to the BPF verifier. */
+#define iormesh_index_mask(idx, n) ((idx) & ((n) - 1))
 
 %s
 
@@ -457,7 +460,8 @@ var rwaggMutations = map[string][2]string{
 		"    if (now >= s->first_ns + IORMESH_RW_SPAN_NS)",
 	},
 	"eviction drops the oldest": {
-		"        free = iormesh_rw_lru(st);\n        iormesh_rw_send(st, &st->slot[free], tid);",
+		"        free = iormesh_rw_lru(st);\n" +
+			"        iormesh_rw_send(st, &st->slot[iormesh_index_mask(free, IORMESH_RW_SLOTS)], tid);",
 		"        free = iormesh_rw_lru(st);",
 	},
 	"identity not in the key": {
@@ -469,7 +473,10 @@ var rwaggMutations = map[string][2]string{
 		"    if (!IORMESH_RW_AGGREGATE)\n        return;\n    st = bpf_map_lookup_elem(",
 	},
 	"a shed exit keeps the call in flight": {
-		"    st->cur_slot = 0;\n    st->cur_held = 0;\n    if (!emits || idx >= IORMESH_RW_SLOTS)\n        return emits;",
+		"    st->cur_slot = 0;\n    st->cur_held = 0;\n" +
+			"    // The check says \"no read or write in flight\" (cur_slot 0 wraps idx);\n" +
+			"    // the mask is what bounds the index for the verifier (maps.h, task il4).\n" +
+			"    if (!emits || idx >= IORMESH_RW_SLOTS)\n        return emits;",
 		"    if (!emits || idx >= IORMESH_RW_SLOTS)\n        return emits;\n    st->cur_slot = 0;\n    st->cur_held = 0;",
 	},
 }
