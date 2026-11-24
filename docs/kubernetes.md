@@ -351,8 +351,9 @@ entries too, collecting each pod after it looked at the tracer:
   left stopped; its collect is skipped with a note;
 - a running one whose session ended (`-duration`, `disk_limit`)
   cannot be restarted: ensure says a pod restart is needed;
-- a pod without a tracer (a restarted pod) is `deploy`'s, and a
-  gone `pod:` entry's pod fails the entry, as collect does;
+- a pod without a tracer (a restarted pod) or a terminating one
+  is `deploy`'s, and a gone `pod:` entry's pod fails the entry,
+  as collect does;
 - a sidecar is the kubelet's to restart: ensure only collects.
 
 Every event of a pod's tracer names its namespace, pod and the

@@ -182,6 +182,14 @@ func TestGet(t *testing.T) {
 	if calls := f.calls(t); !slices.Equal(calls[0], want) {
 		t.Errorf("argv %q, want %q", calls[0], want)
 	}
+	// A terminating pod is returned, marked (task pk4 review).
+	item := podItem("checkout-0", testUID(7), "Running", true)
+	item["metadata"].(map[string]any)["deletionTimestamp"] = "2026-11-24T08:00:00Z"
+	b, _ = json.Marshal(item)
+	f.pod(t, string(b))
+	if st, err := newTestLister(t).Get(context.Background(), "checkout-0"); err != nil || !st.Terminating {
+		t.Errorf("terminating: Get = %+v, %v", st, err)
+	}
 	b, _ = json.Marshal(podItem("checkout-0", testUID(7), "Pending", true))
 	f.pod(t, string(b))
 	if _, err := newTestLister(t).Get(context.Background(), "checkout-0"); !errors.Is(err, ErrNoPod) {

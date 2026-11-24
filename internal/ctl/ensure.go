@@ -117,7 +117,7 @@ func (en ensurer) all(ctx context.Context, targets []collectTarget) error {
 		}
 	}
 	if len(failed) > 0 {
-		return fmt.Errorf("ensure failed on %d of %d hosts: %s", len(failed), len(targets),
+		return fmt.Errorf("ensure failed on %d of %d targets: %s", len(failed), len(targets),
 			strings.Join(failed, " "))
 	}
 	return nil

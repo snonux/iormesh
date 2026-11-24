@@ -98,6 +98,64 @@ func TestEnsurePodLeavesStopped(t *testing.T) {
 	}
 }
 
+// TestEnsurePodSelectorOneFails (review round 1): in a selector entry,
+// a pod whose restart fails — its eighth debug tracer killed, the most
+// deploy starts — is reported ("restart failed", exit 1), and the next
+// pod is still ensured and collected.
+func TestEnsurePodSelectorOneFails(t *testing.T) {
+	f := newPodFixture(t, "")
+	maxed := map[string]bool{}
+	for n := 1; n <= k8s.MaxDebugTracers; n++ {
+		maxed[k8s.TracerName(n)] = false
+	}
+	webA := tracerObject("web-a", uid(1), maxed)
+	f.pod(t, webA)
+	f.list(t, webA, podObject("web-b", uid(2), true))
+	if code := f.run("ensure", "kind/shop/app=web"); code != exitError {
+		t.Fatalf("exit %d, want %d: %s", code, exitError, f.stderr)
+	}
+	calls := f.calls(t)
+	if got := verbs(calls); slices.Contains(got, "debug web-a") {
+		t.Errorf("started a ninth tracer: %q", got)
+	}
+	if !slices.ContainsFunc(calls, func(c []string) bool {
+		return c[0] == "exec" && c[1] == "web-b" && slices.Contains(c, "ready") && !slices.Contains(c, "-state") &&
+			!slices.Contains(c, "-status")
+	}) {
+		t.Errorf("web-b not collected after web-a failed: %q", calls)
+	}
+	out := f.stdout.String()
+	for _, w := range []string{"kind/shop/app=web pod web-a: project web: tracer container \"iormesh-8\" " +
+		"terminated (Error, exit code 137), restart failed", "kind/shop/app=web pod web-b: project web: running"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("stdout lacks %q:\n%s", w, out)
+		}
+	}
+	for _, w := range []string{"pod web-a:", "the most deploy starts", "ensure failed on 1 of 1 targets"} {
+		if !strings.Contains(f.stderr.String(), w) {
+			t.Errorf("stderr lacks %q: %s", w, f.stderr)
+		}
+	}
+}
+
+// TestEnsurePodTerminating (review round 1): a pod: entry's pod in its
+// deletion grace period still reads phase Running, and its tracer dies
+// with the PID namespace (exit 137). ensure must not `kubectl debug`
+// into it — the tracer would never attach — but say why it left it.
+func TestEnsurePodTerminating(t *testing.T) {
+	f := newPodFixture(t, podOnlyRegistry)
+	obj := stoppedTracer("Error", 137)
+	obj["metadata"].(map[string]any)["deletionTimestamp"] = "2026-11-24T08:00:00Z"
+	f.pod(t, obj)
+	f.run("ensure")
+	if got := verbs(f.calls(t)); slices.Contains(got, "debug checkout-0") {
+		t.Errorf("started a tracer in a terminating pod: %q", got)
+	}
+	if w := "pod terminating, nothing restarted"; !strings.Contains(f.stdout.String(), w) {
+		t.Errorf("stdout lacks %q:\n%s", w, f.stdout)
+	}
+}
+
 // TestEnsurePodVanished: a pod: entry whose pod is gone fails the entry
 // (exit 1, kubectl's NotFound), as collect does; nothing is started.
 func TestEnsurePodVanished(t *testing.T) {
@@ -109,7 +167,7 @@ func TestEnsurePodVanished(t *testing.T) {
 		t.Errorf("calls %q, want the get alone", got)
 	}
 	for _, w := range []string{"kind/shop/checkout-0", "not found", "nothing restarted or collected",
-		"ensure failed on 1 of 1 hosts"} {
+		"ensure failed on 1 of 1 targets"} {
 		if !strings.Contains(f.stderr.String(), w) {
 			t.Errorf("stderr lacks %q: %s", w, f.stderr)
 		}

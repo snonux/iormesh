@@ -68,9 +68,9 @@ func TestCollectSelect(t *testing.T) {
 	}{
 		{[]string{"collect", "nope"}, "host not registered"},
 		{[]string{"collect", "app1", "nope"}, "host not registered"},
-		{[]string{"collect", "-project", "nope"}, `"nope" on no selected host`},
+		{[]string{"collect", "-project", "nope"}, `"nope" on no selected target`},
 		{[]string{"collect", "-project", "billing", "app2"}, "app2 carries none of billing"},
-		{[]string{"collect", "-project", "shop", "-project", "billing", "app2"}, `"billing" on no selected host`},
+		{[]string{"collect", "-project", "shop", "-project", "billing", "app2"}, `"billing" on no selected target`},
 	} {
 		if code := f.run(c.args...); code != exitError || !strings.Contains(f.stderr.String(), c.msg) {
 			t.Errorf("%v: exit %d, stderr %s", c.args, code, f.stderr)

@@ -172,7 +172,7 @@ func TestEnsureFailures(t *testing.T) {
 	if code := f.run("ensure"); code != exitError {
 		t.Fatalf("exit %d, want 1", code)
 	}
-	if !strings.Contains(f.stderr.String(), "ensure failed on 1 of 2 hosts: app1") {
+	if !strings.Contains(f.stderr.String(), "ensure failed on 1 of 2 targets: app1") {
 		t.Errorf("stderr %q", f.stderr)
 	}
 	checkLog(t, f.log, [][]string{sudoCall("app1", "status", "-json"), sudoCall("app2", "status", "-json")},

@@ -1605,10 +1605,15 @@ Kubernetes (M7) build on it.
   wait): a container that terminated with a non-zero exit code
   — killed with its app container, OOM-killed, crashed — is
   restarted; one that exited 0 was ended on purpose (only a
-  SIGTERM or SIGINT ends a `-linger` run cleanly; a pod's own
-  deletion makes it terminating, which no lister returns) and
-  is left stopped, its collect skipped and reported rather than
-  failed. A running tracer is asked `ready -status`: running or
+  SIGTERM or SIGINT ends a `-linger` run cleanly; a session that
+  had failed exits 1 on the signal and is restarted) and is
+  left stopped, its collect skipped and reported rather than
+  failed. A terminating pod (`deletionTimestamp` set, still
+  phase Running) is left whatever its tracer: a selector never
+  returns one, but a `pod:` entry's named pod is returned
+  marked during its grace period (a collect there may still
+  save segments), and a tracer started in it would die before
+  attaching. A running tracer is asked `ready -status`: running or
   attaching is nothing to do; ended (its `-duration`,
   `disk_limit`) lingers in a container that cannot be restarted,
   so ensure reports that a new session needs a pod restart and

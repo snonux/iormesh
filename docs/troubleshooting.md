@@ -195,6 +195,8 @@ rules). The lines that leave a session down:
 | `tracer container "…" terminated (…, exit code 0), stopped on purpose, left stopped` | A pod's debug tracer was ended with a signal; its collect is skipped (`collect skipped: …`). `deploy` starts the next tracer, which serves what it published. |
 | `…: a running debug tracer cannot be restarted, restart the pod for a new session` | A pod's debug session ended after its `-duration` or at its disk cap and lingers; restart the pod, then `deploy`. |
 | `no tracer container: deploy starts it, ensure only restarts` | A pod never deployed, or restarted since. Run `deploy`. |
+| `…, restart failed` for a pod, with `debug tracer "iormesh-8" ended and the pod has had 8, the most deploy starts in one pod` | Each ensure tick restarted a debug tracer that died again (a crash right after its start, an app container in a restart loop), using up the pod's 8 ephemeral containers, which are never removed. Read `kubectl logs <pod> --container=iormesh-8`, fix the cause, then restart the pod (or move it to sidecar mode). |
+| `pod terminating, nothing restarted (deploy starts a tracer in its replacement)` | A `pod:` entry's pod is being deleted. Once its replacement runs, `deploy` it. |
 | `… (nothing restarted or collected: deploy starts a tracer in a pod that replaces it)` | The pod entry's pod is gone, or its selector matches no running pod. |
 
 A deploy restart whose start failed (`session stopped, not

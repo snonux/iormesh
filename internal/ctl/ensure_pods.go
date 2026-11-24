@@ -18,9 +18,13 @@ import (
 //     with its app container (whose PID namespace it joins), OOM-killed,
 //     crashed — ended on its own: deploy's pod path (deployPod) starts
 //     the next iormesh-N with deploy's argv and waits for it to attach;
-//   - one that exited 0 was ended on purpose: a -linger run exits only
-//     once SIGTERM or SIGINT ends it, and a pod being deleted is
-//     terminating, which no lister returns. It is left stopped;
+//   - one that exited 0 was ended on purpose: a -linger run whose
+//     session did not fail exits only once SIGTERM or SIGINT ends it
+//     (a failed one exits 1 on the signal and is restarted). It is left
+//     stopped;
+//   - a terminating pod (a pod: entry's, in its deletion grace period:
+//     Get returns it, Select does not) is left whatever its tracer: a
+//     new one would die with it before attaching;
 //   - a running one is asked `ready -status` (livePod): a session ended
 //     after its -duration or at its disk cap lingers in a container that
 //     cannot be restarted, so ensure says a pod restart is needed;
@@ -93,6 +97,11 @@ func (en ensurer) pod(ctx context.Context, pe podEntry, st k8s.PodState, project
 func podDecide(pe podEntry, st k8s.PodState) (ensureAction, string) {
 	tracer := "tracer container " + strconv.Quote(st.Container) + " " + st.Stopped
 	switch {
+	case st.Terminating:
+		// Only a pod: entry's Get returns one (Select skips them). It
+		// still reads Running, but its tracer dies with it: a new one
+		// would never attach, and the next pod is deploy's.
+		return ensureLeave, "pod terminating, nothing restarted (deploy starts a tracer in its replacement)"
 	case pe.scope.Mode != k8s.ModeDebug:
 		return ensureLeave, "sidecar: the kubelet restarts it into each session, ensure only collects"
 	case !st.Tracer:

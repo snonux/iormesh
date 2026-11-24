@@ -230,6 +230,7 @@ as the API server reports it:
 |---|---|
 | debug, terminated non-zero (killed with its app container, OOM, crash) | starts `iormesh-N+1` as deploy does, waits for it to attach |
 | debug, exited 0 (a SIGTERM: a `-linger` run never exits on its own) | leaves it stopped, skips its collect with a note |
+| the pod is terminating (a `pod:` entry's, in its grace period) | nothing: its replacement is `deploy`'s |
 | debug, running, session running or attaching | nothing |
 | debug, running, session ended (`-duration`, `disk_limit`) | nothing it can do: says a pod restart is needed |
 | no tracer container (never deployed, a restarted pod) | nothing: `deploy` starts it |
@@ -242,11 +243,24 @@ to restart or collect, and `deploy` starts a tracer in the pod
 that replaces it. A debug tracer ensure restarts counts toward
 the pod's 8 ([kubernetes.md](kubernetes.md#limits-you-will-hit)).
 
+"Exit 0 means stopped on purpose" holds for a session that ran
+without error: a session that failed lingers too, and the
+signal that ends that linger exits 1, so ensure restarts it. To
+stop a debug tracer deliberately, send its run SIGTERM through
+the PID namespace it shares with the app container, e.g.
+`kubectl exec <pod> -c <app> -- kill <pid of iormesh run>`
+(the app image needs a `kill`); a SIGKILL exits 137 and is
+restarted like a crash.
+
 Run again, ensure finds what it started running and only
 collects, so a timer may drive it. A systemd user timer on the
 laptop (it needs the SSH key without a prompt: an agent socket
 in the user manager's environment, `systemctl --user
-import-environment SSH_AUTH_SOCK`, or a key for this alone):
+import-environment SSH_AUTH_SOCK`, or a key for this alone;
+with pod entries registered, it also needs kubectl, the
+cluster's credential plugins and their kubeconfig:
+`systemctl --user import-environment KUBECONFIG PATH`, or
+`Environment=` lines in the service):
 
 ```ini
 # ~/.config/systemd/user/iormesh-ensure.service
