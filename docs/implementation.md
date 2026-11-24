@@ -3744,7 +3744,8 @@ iormeshctl list [-registry FILE]                       # contacts nothing
 
 `ensure` (task zh4, `internal/ctl/ensure.go`) keeps sessions
 going over days, from a timer
-([architecture.md](architecture.md#tracing-for-days)):
+([architecture.md](architecture.md#tracing-for-days); the timer
+in [the guide](guide/09-tracing-for-days.md#from-a-systemd-user-timer)):
 
 ```sh
 iormeshctl ensure [-project P]... [-registry FILE] [-store DIR] [HOST|POD...]

@@ -6,7 +6,9 @@ the error strings in `internal/ctl`, `internal/cli` and the
 packages they call; `…` stands for the part that varies (a host,
 a path, a number). Pods have their own table in
 [kubernetes.md](kubernetes.md#troubleshooting). The first run is
-walked through in [quickstart.md](quickstart.md).
+walked through in [the guide](guide/README.md), whose
+[12. When things go wrong](guide/12-troubleshooting.md) is the
+order to look in.
 
 The messages come from the source, not from a failing run on real
 hosts; a few (`host not registered`, `pinned key`, the `add` usage

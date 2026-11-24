@@ -27,15 +27,18 @@ then the features and changes of the latest round.
 - `mage release`: signed, reproducible per-arch archives with
   checksums (docs/build.md, "Releases").
 - The MIT licence (`LICENSE`).
+- The iormesh guide ([docs/guide/](docs/guide/README.md)):
+  thirteen step-by-step chapters, for a human or an agent working
+  with one; the quickstart is now a pointer into it.
 - `iormeshctl bootstrap`: the one-time, verified tracer install
-  ([quickstart.md](docs/quickstart.md),
+  ([guide, chapter 4](docs/guide/04-register-bootstrap.md),
   [security.md](docs/security.md)).
 - `iormeshctl ensure`: restarts ended or dead sessions and
   collects ([architecture.md](docs/architecture.md)).
 - `iormeshctl status` (sessions per host) and `list` (registry)
-  ([quickstart.md](docs/quickstart.md)).
+  ([guide, chapter 5](docs/guide/05-deploy-status.md)).
 - `iormeshctl prune`: lists old segment files, deletes them with
-  `-apply` ([quickstart.md](docs/quickstart.md)).
+  `-apply` ([guide, chapter 9](docs/guide/09-tracing-for-days.md)).
 - `build -from`/`-to`/`-last` (windowed builds) and `-namespace`
   ([visualization.md](docs/visualization.md)).
 - `open`, `show` and `tui` read namespace and windowed builds with
@@ -89,7 +92,7 @@ then the features and changes of the latest round.
 - `iormesh start` appends the journal's tail when a run exits
   before attaching ([troubleshooting.md](docs/troubleshooting.md)).
 - `prune -apply` makes the service database forget the pruned
-  segments ([quickstart.md](docs/quickstart.md)).
+  segments ([guide, chapter 9](docs/guide/09-tracing-for-days.md)).
 - Build outputs go to the gitignored `bin/`, never the repository
   root ([build.md](docs/build.md)).
 - The mage targets live in `magefiles/`, and `mage clean` sweeps

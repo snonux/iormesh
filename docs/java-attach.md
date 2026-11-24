@@ -22,13 +22,11 @@ against the pinned key. On the host `sudo iormesh upgrade`
 checks it again against the root-owned key, requires the
 tracer's version, and installs it as
 `/opt/iormesh/lib/iormesh-agent.jar` (root's, 0644). A deployed
-session may use only that jar and its project's spool:
-
-```
-iormeshctl add -project shop -pattern 'java -jar */shop.jar*' app1 \
-    -spool /run/iormesh/spool/shop -agent /opt/iormesh/lib/iormesh-agent.jar
-iormeshctl deploy app1
-```
+session may use only that jar and its project's spool,
+`-spool /run/iormesh/spool/<project> -agent
+/opt/iormesh/lib/iormesh-agent.jar` on the registry entry; the
+`add` and `deploy` commands are in the guide,
+[8. Java code flow and query](guide/08-java-query.md#turn-on-the-java-agent).
 
 `-agent` reaches the JVMs running when the session starts. A
 JVM started later, matched at exec, needs the agent at launch —

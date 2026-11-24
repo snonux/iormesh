@@ -350,22 +350,14 @@ Collect often. Segments still in a pod are lost when the pod
 goes, and a full trace volume stops tracing until collect drains
 it.
 
-`iormeshctl ensure` (from a timer, see
-[architecture.md](architecture.md#tracing-for-days)) covers pod
-entries too, collecting each pod after it looked at the tracer:
-
-- a debug tracer that was killed (its container terminated with
-  a non-zero exit code: the app container restarted, an OOM
-  kill, a crash) is started again through deploy's path, as the
-  next `iormesh-N`, and the new one is collected;
-- one that exited 0 was stopped on purpose (a SIGTERM) and is
-  left stopped; its collect is skipped with a note;
-- a running one whose session ended (`-duration`, `disk_limit`)
-  cannot be restarted: ensure says a pod restart is needed;
-- a pod without a tracer (a restarted pod) or a terminating one
-  is `deploy`'s, and a gone `pod:` entry's pod fails the entry,
-  as collect does;
-- a sidecar is the kubelet's to restart: ensure only collects.
+`iormeshctl ensure` (from a timer, see the guide's
+[9. Tracing for days](guide/09-tracing-for-days.md#from-a-systemd-user-timer))
+covers pod entries too, collecting each pod after it looked at
+the tracer: a killed debug tracer (a non-zero exit) is started
+again as the next `iormesh-N`, one that exited 0 is left
+stopped, and a sidecar is the kubelet's to restart. The full
+table, a pod's every case, is in
+[architecture.md](architecture.md#tracing-for-days).
 
 Every event of a pod's tracer names its namespace, pod and the
 container its process runs in (the `pod` object,

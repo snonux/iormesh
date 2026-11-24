@@ -8,19 +8,15 @@ A *consolidation run* is `iormeshctl build`: it merges the
 collected trace segments and rebuilds the graph. (`collect` only
 syncs segments from the servers; `refresh` runs collect, then
 build.) Every build ends with three things to look at, all made
-from the same data:
-
-| Surface | Command | For |
-|---------|---------|-----|
-| Local site (HTML/JS/SVG) | `iormeshctl open` | exploring with a mouse: zoom, click, follow |
-| Terminal UI (Bubble Tea) | `iormeshctl tui` | exploring over SSH or without a browser |
-| Plain text | `iormeshctl show …` | reading, grepping, piping, pasting into an LLM |
+from the same data: the local site (HTML/JS/SVG, `iormeshctl
+open`), the terminal UI (Bubble Tea, `iormeshctl tui`) and plain
+text (`iormeshctl show …`). How to use them, on a real trace, is
+the guide's [7. Read the mesh](guide/07-read-the-mesh.md); this
+doc is how they are built.
 
 `build` itself prints the plain-text summary and the path of the
 site, so there is always something on screen when it finishes.
-[Example output](#example-output-a-real-trace) shows all three
-surfaces on a real trace. The sketch below is the design, not the
-output: as built,
+The sketch below is the design, not the output: as built,
 `refresh` prints collect's per-host `N new files` lines, then
 build's summary (`built`, `merged`, `health`, … — see V1 under
 [Build order](#build-order)) and the graph, model, report and
@@ -731,207 +727,20 @@ ClusterIP build).
 
 ## Example output (a real trace)
 
-Everything in this section is the output of one real run, not a
-mock-up: the synthetic test workload's microservices scenario
-(gateway → orders → inventory and billing, task jb4), four JVMs
-on one host's loopback under the tracer and the Java agent,
-recorded by `TestMicroservices` with `IORMESH_EVAL_EXPORT` set
-(what `mage evalTrace` does) on a Fedora laptop, then built and
-shown with the `iormeshctl` of the same commit (task wk4). Two
-edits were made after the fact, for a public repository: the
-laptop's host name reads `host1` and its machine id reads
-`machine-id`. Nothing else was changed or invented.
-
-The servers listen on free ports picked per run, so they were
-named once before the build, one rule per port:
-
-```
-iormeshctl services name -db DB -port 41331 '127.0.0.1*' orders
-iormeshctl services name -db DB -port 36845 '127.0.0.1*' inventory
-iormeshctl services name -db DB -port 34599 '127.0.0.1*' billing
-iormeshctl build -store STORE -db DB -builds BUILDS
-```
-
-One thing to read correctly: the test traces its JVMs by pid,
-with no `iormeshctl add -pattern` app, so a client is named by its
-process name — `java` for all four. Every client end is `java`,
-the edges read `java -> orders`, `java -> inventory` (two
-connections: the gateway's and orders') and `java -> billing`,
-and the gateway, a client only, is the service `java`. A
-deployment registered per app names each client after its app.
-
-Assets, all under [examples/](examples/):
-
-| File | What |
-|------|------|
-| [site/index.html](examples/site/index.html) | the build's whole site folder — download and open it from `file://` to click through |
-| [site/graph.svg](examples/site/graph.svg) | the static overview export |
-| [site/sequence/0002.svg](examples/site/sequence/0002.svg) | the checkout conversation's static sequence diagram |
-| [site-mesh.png](examples/site-mesh.png), [site-sequence.png](examples/site-sequence.png) | headless Chrome screenshots of the site |
-| [show-sequence-0002.txt](examples/show-sequence-0002.txt) | `show sequence 0002`, all 49 steps |
-| [query-http.ndjson](examples/query-http.ndjson) | `query -event http`: the run's eight http events |
-
-### The site
-
-The mesh screen (`#/mesh`) and the checkout's sequence with step
-23, orders calling billing, opened in the detail panel
-(`#/conv/0002/step/23`; the Java stack is the real one the agent
-recorded):
-
-![The site's mesh screen](examples/site-mesh.png)
-
-![The site's sequence screen with a step's detail](examples/site-sequence.png)
-
-The static export of the same conversation, lifelines left to
-right, file work as notes:
-
-![sequence/0002.svg](examples/site/sequence/0002.svg)
-
-### Plain text
-
-`iormeshctl show summary` (what `build` prints before the paths):
-
-```
-built      iormesh-it: 1 hosts, 1 sessions, 1 segments, 5276 events, 2026-11-24 09:24:19 - 2026-11-24 09:24:25 UTC
-merged     4 services, 3 edges (3 fused, 0 mixed, 0 unresolved); tcp 0 fused, 0 unresolved
-health     0 lost, 0 skipped runs, 0 unattributed, 0 attach gap; no clock bounds
-sequence   2 conversations, 51 steps (0 time-ordered, 0 unordered)
-```
-
-`show services`, `show edges` and `show conversations`:
-
-```
-SERVICE    NAMED  CONNS  UNRESOLVED  TLS    REQUESTS  ENDPOINTS
-billing    yes    1      0           tls    1         127.0.0.1:34599@machine-id
-inventory  yes    2      0           plain  2         127.0.0.1:36845@machine-id
-java       no     0      0           -      0         -
-orders     yes    1      0           tls    1         127.0.0.1:41331@machine-id
-
-FROM  TO         STATE  CONNS  UNRESOLVED  FIRST                LAST
-java  billing    fused  1      0           2026-11-24 09:24:23  2026-11-24 09:24:24
-java  inventory  fused  2      0           2026-11-24 09:24:23  2026-11-24 09:24:24
-java  orders     fused  1      0           2026-11-24 09:24:22  2026-11-24 09:24:24
-
-ID    START                    ENTRY  REQUEST                      HOPS  STEPS  SERVICES
-0001  2026-11-24 09:24:24.371  java   GET /inventory/stock/widget  1     2      java inventory
-0002  2026-11-24 09:24:22.477  java   POST /orders                 3     49     java orders inventory billing
-```
-
-`show sequence 0002`, the checkout, cut to its hops and
-inventory's record write (`…` marks the cuts; orders' resolver
-and `net.properties` reads in steps 2–13, billing's work and
-the later `tzdb.dat` reads are in the
-[full text](examples/show-sequence-0002.txt)):
-
-```
-conversation 0002  2026-11-24 09:24:22.477 UTC  java  POST /orders  (3 hops)
-services     java, orders, inventory, billing
-lifeline 1   java/main  host1 pid 2484090@1353275890000000 tid 2484092
-lifeline 2   orders/HTTP-Dispatcher  host1 pid 2484051@1353275280000000 tid 2484499
-lifeline 3   inventory/HTTP-Dispatcher  host1 pid 2484011@1353274450000000 tid 2484398
-lifeline 4   billing/HTTP-Dispatcher  host1 pid 2483913@1353273770000000 tid 2484384
-  1  causal        java/main -> orders/HTTP-Dispatcher: POST /orders [36 B]
-                     at jdk.internal.net.http.HttpClientImpl#send(HttpClientImpl.java:902)
-                     ref iormesh-it/local/host1-79d2d3d5/5112
-  2  causal        orders/HTTP-Dispatcher: open /etc/host.conf [15.676µs]
-                     ref iormesh-it/local/host1-79d2d3d5/2730
-  …
- 14  causal        orders/HTTP-Dispatcher -> inventory/HTTP-Dispatcher: POST /inventory/reserve [36 B]
-                     at jdk.internal.net.http.HttpClientImpl#send(HttpClientImpl.java:902)
-                     ref iormesh-it/local/host1-79d2d3d5/3950
- 15  causal        inventory/HTTP-Dispatcher: create /tmp/TestMicroservices1125629951/002/inventory.d/reservation-42.json.tmp [57.72µs]
-                     at java.io.FileOutputStream#open(FileOutputStream.java:-1)
-                     ref iormesh-it/local/host1-79d2d3d5/3724
- 16  causal        inventory/HTTP-Dispatcher: write /tmp/TestMicroservices1125629951/002/inventory.d/reservation-42.json.tmp [36 B, 19.159µs]
-                     at java.io.FileOutputStream#write(FileOutputStream.java:-1)
-                     ref iormesh-it/local/host1-79d2d3d5/3726
- 17  causal        inventory/HTTP-Dispatcher: rename /tmp/TestMicroservices1125629951/002/inventory.d/reservation-42.json.tmp -> /tmp/TestMicroservices1125629951/002/inventory.d/reservation-42.json [38.073µs]
-  …
- 22  causal        inventory/HTTP-Dispatcher -> orders/HTTP-Dispatcher: 200 [8 B, 313.527721ms]
-                     at sun.net.httpserver.HttpExchangeImpl#close(HttpExchangeImpl.java:67)
-                     ref iormesh-it/local/host1-79d2d3d5/3909
- 23  causal        orders/HTTP-Dispatcher -> billing/HTTP-Dispatcher: POST /billing/charge [32 B]
-                     at jdk.internal.net.http.HttpClientImpl#send(HttpClientImpl.java:902)
-                     ref iormesh-it/local/host1-79d2d3d5/4838
-  …
- 48  causal        orders/HTTP-Dispatcher: read /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat (13 calls) [104000 B, 58.136µs]
-                     at java.io.FileInputStream#read(FileInputStream.java:-1) (first call)
-                     ref iormesh-it/local/host1-79d2d3d5/5018 (first of 13)
-                     last iormesh-it/local/host1-79d2d3d5/5042
-                     run iormeshctl query -host host1 -thread 2484499 -file /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat -from 2026-11-24T09:24:24.265135999Z -to 2026-11-24T09:24:24.267939918Z
- 49  causal        orders/HTTP-Dispatcher -> java/main: 201 [33 B, 1.860686111s]
-                     at sun.net.httpserver.HttpsExchangeImpl#close(HttpsExchangeImpl.java:67)
-                     ref iormesh-it/local/host1-79d2d3d5/5052
-```
-
-### The TUI
-
-`iormeshctl tui` in a 120×28 terminal (tmux `capture-pane`;
-the colours are lost in the capture). The services screen with
-orders selected, its blank rows cut:
-
-```
-iormesh · iormesh-it · 2026-11-24 09:24:19 – 09:24:25 UTC · 4 services · 3 edges · 2 conversations
- 1 services  2 edges  3 conversations  4 sequence  5 threads  6 processes  7 health
- SERVICE    CONNS  REQS  TLS                    │service    orders  named by a rule
- billing    1      1     tls                    │endpoints  127.0.0.1:41331@machine-id
- inventory  2      2     plain                  │conns      1 (0 unresolved), TLS tls
- java       0      0     -                      │requests   1
- orders     1      1     tls                    │  POST   /orders  1
-                                                │called by  java (fused, 1 conns)
-                                                │
-                                                │conversations (newest first; ⏎ lists them all)
-                                                │  0002  09:24:22.477  POST /orders  3 hops
-↑↓ move · ⏎ open · esc back · tab detail · / filter · 1-7 screens · ? help · q quit
-```
-
-`3`, the checkout, `⏎`, then down to step 17 — inventory renames
-its reservation into place, and the stack shows which code did:
-
-```
-iormesh · iormesh-it · 2026-11-24 09:24:19 – 09:24:25 UTC · 4 services · 3 edges · 2 conversations
- 1 services  2 edges  3 conversations  4 sequence  5 threads  6 processes  7 health
- #   ORDERING  STEP 0002 POST /orders           │step       17 of conversation 0002 (file)
- 1   causal    java/main -> orders/HTTP-Dispatc…│what       rename
- 2   causal    orders/HTTP-Dispatcher: open /et…│/tmp/TestMicroservices1125629951/002/inventory.d/reservation-
- 3   causal    orders/HTTP-Dispatcher: read /et…│42.json.tmp ->
- 4   causal    orders/HTTP-Dispatcher: open /et…│/tmp/TestMicroservices1125629951/002/inventory.d/reservation-42.json
- 5   causal    orders/HTTP-Dispatcher: read /et…│on         inventory/HTTP-Dispatcher  host1 pid
- 6   causal    orders/HTTP-Dispatcher: open /et…│2484011@1353274450000000 tid 2484398
- 7   causal    orders/HTTP-Dispatcher: read /et…│ordering   causal (thread order or a paired send -> receive)
- 8   causal    orders/HTTP-Dispatcher: open /et…│latency    38.073µs
- 9   causal    orders/HTTP-Dispatcher: read /et…│java stack (top first)
- 10  causal    orders/HTTP-Dispatcher: open /et…│  at sun.nio.fs.UnixNativeDispatcher#rename(UnixNativeDispatcher.java:-
- 11  causal    orders/HTTP-Dispatcher: read /et…│1)
- 12  causal    orders/HTTP-Dispatcher: open /et…│  at sun.nio.fs.UnixFileSystem#move(UnixFileSystem.java:815)
- 13  causal    orders/HTTP-Dispatcher: read /et…│  at
- 14  causal    orders/HTTP-Dispatcher -> invent…│sun.nio.fs.UnixFileSystemProvider#move(UnixFileSystemProvider.java:289)
- 15  causal    inventory/HTTP-Dispatcher: creat…│  at java.nio.file.Files#move(Files.java:1319)
- 16  causal    inventory/HTTP-Dispatcher: write…│  at iormesh.workload.scenarios.DataStore#save(DataStore.java:38)
- 17  causal    inventory/HTTP-Dispatcher: renam…│  at
- 18  causal    inventory/HTTP-Dispatcher: open …│iormesh.workload.scenarios.ServiceNode#handle(ServiceNode.java:144)
- 19  causal    inventory/HTTP-Dispatcher: read …│  at iormesh.workload.scenarios.HttpServe#runWork(HttpServe.java:199)
- 20  causal    inventory/HTTP-Dispatcher: open …│  at iormesh.workload.scenarios.HttpServe#handle(HttpServe.java:171)
- 21  causal    inventory/HTTP-Dispatcher: read …│  at com.sun.net.httpserver.Filter$Chain#doFilter(Filter.java:98)
- 22  causal    inventory/HTTP-Dispatcher -> ord…│  at sun.net.httpserver.AuthFilter#doFilter(AuthFilter.java:76)
- 23  causal    orders/HTTP-Dispatcher -> billin…│ref        iormesh-it/local/host1-79d2d3d5/3729
- 24  causal    billing/HTTP-Dispatcher: open /e…│raw event  iormeshctl query -ref iormesh-it/local/host1-79d2d3d5/3729
-↑↓ move · ⏎ open · esc back · tab detail · / filter · 1-7 screens · ? help · q quit
-```
-
-### Query
-
-A step's `ref` is one raw event away. `iormeshctl query -ref
-iormesh-it/local/host1-79d2d3d5/4679` — billing's rename of its
-invoice, step 36 — prints one NDJSON line (the `stack` holds
-method ids of the session's methods table, not frames):
-
-```json
-{"schema_version":1,"project":"iormesh-it","seq":4679,"boot_ns":1353285566928846,"wall_ns":1795512264031679218,"host_id":"machine-id","pid":2483913,"pid_incarnation":1353273770000000,"tid":2484384,"comm":"java","event":"rename","fd":-1,"fd_gen":0,"ret":0,"latency_ns":30640,"bytes":0,"args":{"path":"/tmp/TestMicroservices1125629951/002/billing.d/invoice-42.json.tmp","new_path":"/tmp/TestMicroservices1125629951/002/billing.d/invoice-42.json"},"attribution":"java","java":{"thread":"HTTP-Dispatcher","stack":[274,275,276,277,278,265,266,267,268,269]}}
-```
-
-`query -event http` prints every http event the same way, both
-ends of each hop: [query-http.ndjson](examples/query-http.ndjson).
+One real run, the test workload's microservices scenario built
+and shown with the `iormeshctl` of the same commit (task wk4), is
+walked through on all three surfaces in the guide:
+[7. Read the mesh](guide/07-read-the-mesh.md) has the site's
+screenshots, every `show` view, the TUI captures, and (with
+[8. Java code flow and query](guide/08-java-query.md)) a step's
+raw event. The run's files are in [examples/](examples/): the
+whole site folder ([site/index.html](examples/site/index.html),
+openable from `file://`), its static
+[graph.svg](examples/site/graph.svg) and
+[sequence/0002.svg](examples/site/sequence/0002.svg), the
+full [show sequence 0002](examples/show-sequence-0002.txt) and
+the run's http events as
+[query -event http](examples/query-http.ndjson).
 
 ## See also
 

@@ -34,8 +34,12 @@ target; flags, paths and schema may still change. See
 
 ### Get started
 
-- [quickstart](docs/quickstart.md) — from zero to a rendered mesh
-  on two Rocky 9.9 hosts.
+- [guide](docs/guide/README.md) — the iormesh guide, step by
+  step: from zero to a rendered mesh on two Rocky 9.9 hosts, then
+  Java code flow, query, tracing for days, expansion and
+  Kubernetes; for a human, or an agent working with one.
+- [quickstart](docs/quickstart.md) — now a pointer into the
+  guide, kept for old links.
 
 ### Use
 

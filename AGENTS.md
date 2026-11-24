@@ -54,11 +54,18 @@ Never write `//nolint` — a test fails on it.
   `docs/security.md`. It must not accumulate detail sections
   again.
 - **Detailed documentation lives in `docs/`**, one topic per
-  file (quickstart, architecture, decisions, milestones,
-  trace-scope, output-contract, schema, testing, java-attach,
-  kubernetes, security, build, implementation, visualization,
+  file (architecture, decisions, milestones, trace-scope,
+  output-contract, schema, testing, java-attach, kubernetes,
+  security, build, implementation, visualization,
   troubleshooting; spike results under `docs/spikes/`), each
   linked from the README's Documentation section.
+- **The guide is the user's path**: `docs/guide/` (an index
+  `README.md` and numbered chapters) teaches how to use iormesh,
+  for a human or an agent working with one, with real commands
+  and outputs, and links into the topic docs for depth. One home
+  per fact: the guide teaches the path, a topic doc keeps the
+  depth and does not re-teach the path. `docs/quickstart.md` is
+  only a pointer into the guide, kept for old links.
 - **Diagrams are generated**: `docs/diagrams/*.svg` come from
   `docs/diagrams/gen.py` (`python3 docs/diagrams/gen.py
   docs/diagrams`). Change the generator, not the SVGs.

@@ -127,7 +127,7 @@ app is ever the first test subject (principle 1).
   (Linux or macOS) manages the server list, pushes and starts
   tracers over SSH (`add` enrolls, `rm` tears down and removes
   `/opt/iormesh` on the host), collects the traces and renders
-  the mesh locally. The [quickstart](quickstart.md) walks it.
+  the mesh locally. [The guide](guide/README.md) walks it.
 - **Kubernetes (M7)** — sidecar or `iormeshctl`-driven
   `kubectl debug` container (context and image configurable)
   next to the app; each pod is traced as its own host
@@ -397,54 +397,14 @@ the PID namespace it shares with the app container, e.g.
 restarted like a crash.
 
 Run again, ensure finds what it started running and only
-collects, so a timer may drive it. A systemd user timer on the
-laptop (it needs the SSH key without a prompt: an agent socket
-in the user manager's environment, `systemctl --user
-import-environment SSH_AUTH_SOCK`, or a key for this alone;
-with pod entries registered, it also needs kubectl, the
-cluster's credential plugins and their kubeconfig:
-`systemctl --user import-environment KUBECONFIG PATH`, or
-`Environment=` lines in the service):
-
-```ini
-# ~/.config/systemd/user/iormesh-ensure.service
-[Unit]
-Description=iormeshctl ensure: restart ended iormesh sessions, collect
-
-[Service]
-Type=oneshot
-ExecStart=%h/bin/iormeshctl ensure
-
-# ~/.config/systemd/user/iormesh-ensure.timer
-[Unit]
-Description=Run iormeshctl ensure every 15 minutes
-
-[Timer]
-OnCalendar=*:0/15
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-```sh
-systemctl --user daemon-reload
-systemctl --user enable --now iormesh-ensure.timer
-journalctl --user -u iormesh-ensure.service   # what each run did
-```
-
-A timer never starts a run while the last one is still going
-(a slow collect). With cron, `flock` gives the same:
-
-```cron
-*/15 * * * * flock -n ~/.cache/iormesh-ensure.lock ~/bin/iormeshctl ensure >>~/.cache/iormesh-ensure.log 2>&1
-```
-
+collects, so a timer may drive it: the systemd user timer (or
+cron line) and what it needs from the laptop's environment are in
+the guide,
+[9. Tracing for days](guide/09-tracing-for-days.md#from-a-systemd-user-timer).
 ensure exits 1 when a host or pod entry could not be reached or
 a start or collect failed, after trying every target; the next
-run retries.
-Run `iormeshctl build` (or `refresh`) when you want the picture;
-ensure only keeps the segments coming.
+run retries. It only keeps the segments coming; `build` (or
+`refresh`) makes the picture.
 
 ## The two joins
 

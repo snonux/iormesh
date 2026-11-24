@@ -1572,7 +1572,8 @@ Kubernetes (M7) build on it.
   disk. ensure starts no project the host never ran and never
   upgrades — both are deploy's — and run again only collects,
   so a systemd user timer or a cron line drives it
-  ([architecture.md](architecture.md#tracing-for-days)).
+  ([architecture.md](architecture.md#tracing-for-days); the
+  timer in [the guide](guide/09-tracing-for-days.md#from-a-systemd-user-timer)).
   Decided (task pk4): **ensure covers pod entries** too, every
   registered one without a target named. A pod's tracer has no
   unit or `state.json` ensure can read once its container
