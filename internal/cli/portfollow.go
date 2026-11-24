@@ -55,7 +55,8 @@ var (
 // pinned may be one the service took between the resolve and the pin
 // (task el4: activated in between, so an app holds it now), so the port
 // is resolved once more and its owners, if any, are the start targets;
-// otherwise the refusal stands.
+// otherwise the second resolve's refusal stands, since it says what the
+// port holds now, joined with the pin's error.
 func portActivation(cfg runConfig, err error) ([]uint32, *target.Activation, error) {
 	if !errors.Is(err, target.ErrManagerOnly) || cfg.listenGrace == 0 {
 		return nil, nil, err
@@ -64,10 +65,11 @@ func portActivation(cfg runConfig, err error) ([]uint32, *target.Activation, err
 	if perr == nil {
 		return nil, &a, nil
 	}
-	if pids, rerr := resolvePort(cfg.spec); rerr == nil {
+	pids, rerr := resolvePort(cfg.spec)
+	if rerr == nil {
 		return pids, nil, nil
 	}
-	return nil, nil, errors.Join(err, perr)
+	return nil, nil, errors.Join(rerr, perr)
 }
 
 // portFollow is a -listen-port session's wait for a restarted owner.
