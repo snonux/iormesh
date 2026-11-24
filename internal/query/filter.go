@@ -189,8 +189,9 @@ func ParseTime(s string) (TimeSpec, error) {
 }
 
 // Resolve is the spec's wall_ns. A time of day is taken on day's UTC
-// date — ctl passes the start of the earliest events segment listed
-// for the projects (federate.FirstStart, for build and query alike), so
+// date — ctl passes the start of the earliest segment queried (the
+// earliest readable; with -window-segments, as build, the earliest
+// listed: ctl's windowSpec.place), so
 // "12:00:05" means 12:00:05 of the day the trace began; a window across
 // midnight needs RFC 3339. A day whose date wall_ns cannot hold (a
 // segment name says year 9999) is an error, not a wrapped instant.

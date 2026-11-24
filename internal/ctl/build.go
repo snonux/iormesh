@@ -360,15 +360,16 @@ func selectSegments(ctx context.Context, e env, f buildFlags, paths buildPaths) 
 }
 
 // loadSelection is the one selection build and query share (task ik4):
-// it picks the projects, resolves f's window (windowSpec.resolve, the
-// one place a time of day is anchored) and loads the projects' segments
-// — with narrow, only the window's when there is one; without, all of
-// them, the window still resolved into sel.window — each checked in a
+// it picks the projects and loads their segments, each checked in a
 // memory-capped child (check.go) and each host directory held to the
-// identity pinned for it. It pins nothing: build pins what it returns
-// (selectSegments), query never does. A windowed load checks every
-// segment of a directory not pinned yet (federate.Window), so what build
-// pins is what a full build would.
+// identity pinned for it. With narrow it first resolves f's window
+// (windowSpec.resolve, anchored on the earliest listed segment:
+// firstListed) and loads only the window's segments; without, it loads
+// all of them and leaves sel.window nil for the caller to resolve
+// against what it read (the default query, firstReadable). It pins
+// nothing: build pins what it returns (selectSegments), query never
+// does. A windowed load checks every segment of a directory not pinned
+// yet (federate.Window), so what build pins is what a full build would.
 func loadSelection(ctx context.Context, e env, f buildFlags, paths buildPaths,
 	narrow bool) (selection, hostPins, error) {
 	var sel selection
@@ -376,14 +377,12 @@ func loadSelection(ctx context.Context, e env, f buildFlags, paths buildPaths,
 	if sel.projects, err = buildProjects(paths.store, f.projects); err != nil {
 		return selection{}, hostPins{}, err
 	}
-	if sel.window, err = f.window.resolve(e, paths.store, sel.projects); err != nil {
-		return selection{}, hostPins{}, err
+	if narrow {
+		if sel.window, err = f.window.resolve(e, firstListed(paths.store, sel.projects)); err != nil {
+			return selection{}, hostPins{}, err
+		}
 	}
-	load := sel.window
-	if !narrow {
-		load = nil
-	}
-	segs, pins, err := checkedSegmentsIn(ctx, paths, sel.projects, load)
+	segs, pins, err := checkedSegmentsIn(ctx, paths, sel.projects, sel.window)
 	if err != nil {
 		return selection{}, hostPins{}, err
 	}

@@ -1833,7 +1833,9 @@ Kubernetes (M7) build on it.
   the I/O inside one distributed trace's spans). All are
   checked before anything is read. *Task ik4:* a window stays
   exact by default — query reads the whole store and cuts the
-  events to `-from`/`-to` afterwards. The opt-in
+  events to `-from`/`-to` afterwards, a time of day on the
+  earliest readable segment's date (task 1l4 decides the
+  anchor policy). The opt-in
   `-window-segments` (with `-from` or `-to`) decodes only the
   segments build's selection takes (**Build window and
   prune**: the same resolution and anchor, the same

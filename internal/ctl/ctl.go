@@ -437,15 +437,15 @@ bound to its listening port) and deploys to it as deploy does; one
 query reads the store as build does and writes the matching
 events as schema NDJSON, at most -max-bytes (default 1 MiB) of it; a cut
 slice ends in a truncation record. T is RFC 3339 or HH:MM:SS[.frac] UTC
-on the trace's first day; -to is exclusive. A window is exact: query
-reads the whole store and cuts the events to it. -window-segments reads
-only the segments whose range overlaps the window, as build -from/-to
-does — faster on a large store, not exact: an event inside it written
-over a minute after -to is missed, a connection opened before those
-segments keeps its host-local id, and -app, -file and -follow see only
-them. Filters AND; -event takes
-a schema kind, -errno a Linux errno name or number, -otel-trace a W3C
-trace id.
+on the trace's first day (the earliest readable segment's); -to is
+exclusive. A window is exact: query reads the whole store and cuts the
+events to it. -window-segments reads only the segments whose range
+overlaps the window, as build -from/-to does (and places a time of day
+as build does) — faster on a large store, not exact: an event inside it
+written over a minute after -to is missed, a connection opened before
+those segments keeps its host-local id, and -app, -file and -follow see
+only them. Filters AND; -event takes a schema kind, -errno a Linux errno
+name or number, -otel-trace a W3C trace id.
 
 POD is a registry pods: entry, <cluster>/<namespace>/<pod> or
 <cluster>/<namespace>/<selector>; K8S is -context CTX -namespace NS,

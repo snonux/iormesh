@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"iormesh/internal/federate"
 	"iormesh/internal/query"
@@ -26,15 +27,15 @@ import (
 // fails is left out — named on stderr, the exit status 1 — never half
 // read. By default every segment is loaded and -from/-to cut the events
 // afterwards, so a window's slice is exactly the whole trace's events in
-// it. -window-segments (task ik4) trades that for speed: only the
-// segments whose range overlaps the window are loaded (loadSelection,
-// build's selection and its guarantee, window.go), and the slice is
-// computed from them alone. The merge runs again so that the slice
-// speaks the merged
-// connection ids (both ends of a fused connection share one) and knows
-// each process's app. -method reads the sessions' methods tables, each
-// checked in the child the same way. Unlike build, query writes nothing:
-// no database import, no new host pin, no build output.
+// it, a time of day placed on the earliest readable segment's date.
+// -window-segments (task ik4) trades that for speed: only the segments
+// whose range overlaps the window are loaded (loadSelection, build's
+// selection, anchor and guarantee, window.go), and the slice is computed
+// from them alone. The merge runs again so that the slice speaks the
+// merged connection ids (both ends of a fused connection share one) and
+// knows each process's app. -method reads the sessions' methods tables,
+// each checked in the child the same way. Unlike build, query writes
+// nothing: no database import, no new host pin, no build output.
 //
 // The store, not the last build's model, is the input: the model is a
 // bounded summary and holds no event (docs/visualization.md), the
@@ -161,8 +162,8 @@ func parseValueFlags(f queryFlags, filter *query.Filter) error {
 
 // runQuery loads the store (loadSelection, build's selection: the whole
 // store, or with -window-segments only the segments whose range overlaps
-// the window; task ik4), merges it, and writes the slice; bad segments
-// are reported after it.
+// the window; task ik4), places the window (queryWindow), merges, and
+// writes the slice; bad segments are reported after it.
 func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter) error {
 	paths, err := resolveBuildPaths(e, f.paths)
 	if err != nil {
@@ -183,7 +184,9 @@ func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter) err
 		return fmt.Errorf("query: no readable segment for %s%s in %s (%d bad)",
 			strings.Join(sel.projects, ", "), windowNote(sel.window), paths.store, len(segs.Bad))
 	}
-	windowFilter(&filter, sel.window)
+	if err := queryWindow(e, f, &filter, sel); err != nil {
+		return err
+	}
 	in, err := queryInput(ctx, &segs, filter)
 	if err != nil {
 		return err
@@ -194,16 +197,46 @@ func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter) err
 	return errors.Join(err, reportBad(e, segs.Bad))
 }
 
-// windowFilter cuts the events to the resolved window (nil: no window)
-// by their wall_ns, From ≤ wall_ns < To, a side not given left open:
-// the segments loaded hold events outside it (all of them by default;
-// with -window-segments whole segments around its edges).
-func windowFilter(filter *query.Filter, w *federate.Window) {
+// queryWindow cuts the events to the window by their wall_ns, From ≤
+// wall_ns < To, a side not given left open: the segments loaded hold
+// events outside it (all of them by default; with -window-segments whole
+// segments around its edges). -window-segments resolved the window
+// before loading (loadSelection); the default places it now, a time of
+// day on the earliest readable segment's date (firstReadable), and an
+// empty window fails the filter's check — the order and messages the
+// query had before task ik4.
+func queryWindow(e env, f queryFlags, filter *query.Filter, sel selection) error {
+	w := sel.window
+	if !f.windowSegments {
+		var err error
+		if w, err = f.paths.window.place(e, firstReadable(sel.segs.Sources)); err != nil {
+			return err
+		}
+	}
 	if w == nil {
-		return
+		return nil
 	}
 	filter.From = wallNS(w.From)
 	filter.To, filter.HasTo = wallNS(w.To), !w.To.IsZero()
+	if err := filter.Validate(); err != nil {
+		return fmt.Errorf("%w: %w", errUsage, err)
+	}
+	return nil
+}
+
+// firstReadable is the default query's anchor: the start of the
+// earliest segment that read (its file name), the day the readable
+// trace began. sources is not empty (runQuery).
+func firstReadable(sources []*federate.Segment) func() (time.Time, error) {
+	return func() (time.Time, error) {
+		day := sources[0].File.Start
+		for _, s := range sources[1:] {
+			if s.File.Start.Before(day) {
+				day = s.File.Start
+			}
+		}
+		return day, nil
+	}
 }
 
 // queryInput merges the segments and, for -method, reads the method

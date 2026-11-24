@@ -2,6 +2,8 @@ package ctl
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -9,7 +11,55 @@ import (
 	"time"
 
 	"iormesh/internal/schema"
+	"iormesh/internal/segment"
 )
+
+// TestQueryAnchorFirstReadable (review of task ik4): the default query
+// places a time of day on the earliest READABLE segment's date, as it
+// did before: an unreadable segment named 1999-12-31 next to app2's
+// first one is left out, named, and moves nothing — the window golden's
+// events are written unchanged (exit 1 for the bad segment). Build's
+// anchor (the earliest listed segment) is task 1l4's, not changed here.
+func TestQueryAnchorFirstReadable(t *testing.T) {
+	f := newBuildFixture(t)
+	name := segment.FileName{FQDN: "hostB.example.org", Session: "deadbeef",
+		Start: time.Date(1999, 12, 31, 0, 0, 0, 0, time.UTC)}.Base() + segment.Ext
+	bad := filepath.Join(filepath.Dir(f.app2Files[0]), name)
+	if err := os.WriteFile(bad, []byte("not parquet"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code := f.run(slices.Concat([]string{"query"}, queryProjects,
+		[]string{"-from", "00:53:20.001", "-to", "00:53:20.002"})...)
+	if code != exitError || !strings.Contains(f.stderr.String(), name) {
+		t.Fatalf("exit %d, stderr %s", code, f.stderr)
+	}
+	golden(t, "query_window.golden", f.stdout.String())
+}
+
+// TestQueryWindowErrorsAsBefore (review of task ik4): the default query
+// reports what it reported before — a store part with no readable
+// segment is "no readable segment" even with a time window, and an empty
+// window is refused after the load, in the filter's words.
+func TestQueryWindowErrorsAsBefore(t *testing.T) {
+	f := newBuildFixture(t)
+	if err := os.MkdirAll(filepath.Join(f.store, "ghost", "hostX"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		args []string
+		code int
+		msg  string
+	}{
+		{[]string{"-project", "ghost", "-from", "00:53:20"}, exitError, "query: no readable segment for ghost in "},
+		{slices.Concat(queryProjects, []string{"-from", "00:53:21", "-to", "00:53:20"}), exitUsage,
+			"usage: invalid filter: the window -from 1763600001000000000 -to 1763600000000000000 is empty"},
+	} {
+		if code := f.run(append([]string{"query"}, c.args...)...); code != c.code ||
+			!strings.Contains(f.stderr.String(), c.msg) {
+			t.Errorf("%v: exit %d, want %d with %q; stderr %s", c.args, code, c.code, c.msg, f.stderr)
+		}
+	}
+}
 
 // Task ik4: with -window-segments query's time window selects the
 // segments it opens, as build's does (loadSelection, federate.Window);
@@ -85,8 +135,9 @@ func TestQueryWindowOpensItsSegments(t *testing.T) {
 	if n := count(); n != 6 {
 		t.Errorf("a -window-segments query of [t0+5m, t0+7m) decoded %d segments, want 6", n)
 	}
-	if code := f.run("query", "-window-segments"); code != exitUsage {
-		t.Errorf("-window-segments without a window: exit %d, want %d", code, exitUsage)
+	if code := f.run("query", "-window-segments"); code != exitUsage ||
+		!strings.Contains(f.stderr.String(), "-window-segments needs -from or -to") {
+		t.Errorf("-window-segments without a window: exit %d, want %d; stderr %s", code, exitUsage, f.stderr)
 	}
 }
 

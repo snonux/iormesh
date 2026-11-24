@@ -5255,13 +5255,16 @@ internal/termsafe/           # + JSON: escape a line for a terminal
   segment that fails is left out, named on stderr, and the
   command exits 1 after writing the slice.
 - **The window is exact by default; `-window-segments` trades
-  exactness for speed** (task ik4). `-from`/`-to` are build's
-  window (`windowSpec.resolve`, the one anchor, inside
-  `loadSelection`, the one selection build and query share).
-  By default query still decodes the whole store and cuts the
-  events to the window afterwards, so a window's slice is
-  exactly the whole trace's events in it: merged ids, `-app`,
-  `-file` and `-follow` know everything before it. With
+  exactness for speed** (task ik4). `-from`/`-to` are placed by
+  build's code (`windowSpec.place`, each caller passing its
+  anchor) and the segments loaded by `loadSelection`, the one
+  selection build and query share. By default query still
+  decodes the whole store, then places the window on the
+  earliest readable segment's date and cuts the events to it, so
+  a window's slice is exactly the whole trace's events in it —
+  merged ids, `-app`, `-file` and `-follow` know everything
+  before it — and its errors are the ones it had before (no
+  readable segment, then the filter's empty window). With
   `-window-segments` (refused without `-from` or `-to`) a
   pinned host directory's segments whose range (`federate.Span`:
   the named start, a minute before, to the one-minute interval
@@ -5284,8 +5287,10 @@ internal/termsafe/           # + JSON: escape a line for a terminal
   `/`): `-from`/`-to` on each event's own `wall_ns`, as its host
   recorded it — not corrected for clock skew between hosts (RFC
   3339, or `HH:MM:SS[.frac]` UTC on the UTC date of the earliest
-  events segment the projects list, build's anchor; `-to`
-  exclusive); `-host` the store's host name or the
+  readable segment's start — with `-window-segments`, which must
+  place the window before decoding anything, build's anchor, the
+  earliest segment listed; `-to` exclusive); `-host` the store's
+  host name or the
   session's FQDN; `-app` the app's target pattern (the merged
   graph's app node) or the comm; `-thread` `java.thread` or the
   decimal tid; `-conn` a merged conn id, exactly; `-follow`
