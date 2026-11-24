@@ -18,9 +18,17 @@ public final class PipeChild {
 
     public static void main(String[] args) throws IOException {
         FileInputStream in = new FileInputStream(FileDescriptor.in);
-        byte[] data = in.readNBytes(PipeIpc.SIZE);
-        if (data.length != PipeIpc.SIZE) {
-            System.exit(1);
+        byte[] data = new byte[PipeIpc.SIZE];
+        // A plain read loop, not readNBytes(int): some JDK 21 updates
+        // (Temurin 21.0.13) have FileInputStream.readNBytes ask for the
+        // file position first, which throws "Illegal seek" on a pipe.
+        int n = 0;
+        while (n < data.length) {
+            int got = in.read(data, n, data.length - n);
+            if (got < 0) {
+                System.exit(1);
+            }
+            n += got;
         }
         new FileOutputStream(FileDescriptor.out).write(data);
         if (in.read() != -1) {
