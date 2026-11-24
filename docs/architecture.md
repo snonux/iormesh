@@ -1,7 +1,8 @@
 # Architecture
 
 How iormesh is put together: what it is for, the principles it is
-built on, its components and the repository that holds them. The
+built on, its goals and deployment modes, its components and the
+repository that holds them. The
 decisions behind it are in [decisions.md](decisions.md), the order
 it was built in is in [milestones.md](milestones.md); this doc
 gives the narrative.
@@ -82,6 +83,60 @@ applies them case by case.
    budget — are proven by spikes before milestones depend on
    them, and a walking skeleton (M1) fuses one edge end to end
    before the traced surface widens.
+
+## Goals
+
+What the proof of concept sets out to deliver; each goal maps to
+milestones in [milestones.md](milestones.md).
+
+1. **Full I/O map per PID** — every file op and every network
+   socket with resolved IPs and ports, plus the HTTP requests
+   riding them (method, URI, headers, status).
+2. **A mesh that grows along its edges** — when a connection to
+   an untraced host is observed, `iormeshctl` can deploy a
+   tracer there, attached to the process accepting that
+   connection — from the controller, under an allowlist, signed
+   binaries and hop limits. Tracers never deploy themselves.
+3. **Java code-flow instrumentation** (JDK 17+) — attribute I/O
+   events to the method stack that caused them, and to the
+   OpenTelemetry span when the app is instrumented.
+4. **Correlated, queryable map** — hosts, PIDs, sockets, files
+   and Java call stacks in one dataset over time. The end-goal:
+   the full picture of how every service talks to every other
+   service — in sequence, down to the driving Java threads.
+5. **LLM-introspectable trace outputs** — a stable,
+   self-describing contract an LLM (or human) can reconstruct
+   behavior from and verify against source code.
+6. **Rendered mesh** — deterministic SVG and sequence diagrams
+   of the mesh, plus an interactive explorer to walk it.
+7. **Controller-driven operation** — `iormeshctl` runs on any
+   laptop (Linux or macOS, no eBPF), manages the server list,
+   pushes tracers over SSH, collects traces over rsync, and
+   builds the complete mesh locally.
+
+Nothing gets instrumented "in production" before it has been
+proven against iormesh's own traceable test workload — no live
+app is ever the first test subject (principle 1).
+
+## Deployment modes
+
+- **Standalone** — `sudo iormesh run -project NAME (-pid PID |
+  -pattern GLOB | -listen-port N)` on a host; traces the matched
+  processes there.
+- **Controller-managed (primary)** — `iormeshctl` on any laptop
+  (Linux or macOS) manages the server list, pushes and starts
+  tracers over SSH (`add` enrolls, `rm` tears down and removes
+  `/opt/iormesh` on the host), collects the traces and renders
+  the mesh locally. The [quickstart](quickstart.md) walks it.
+- **Kubernetes (M7)** — sidecar or `iormeshctl`-driven
+  `kubectl debug` container (context and image configurable)
+  next to the app; each pod is traced as its own host
+  (`pod-<uid>`), and every event names its namespace, pod and
+  container. See [kubernetes.md](kubernetes.md).
+- **Mesh expansion** — `iormeshctl expand` follows observed
+  connections to untraced peers and deploys tracers there, under
+  the allowlist and hop limits (M6). Driven by the controller;
+  servers hold no credentials.
 
 ## Component map
 

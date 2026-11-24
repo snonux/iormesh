@@ -45,9 +45,14 @@ Never write `//nolint` — a test fails on it.
 
 ## Documentation layout — keep it that way
 
-- **README.md stays lean**: pitch, status, goals, deployment
-  modes, a short security summary, and the docs index. It must
-  not accumulate detail sections again.
+- **README.md stays lean**: a one-paragraph pitch, the general
+  idea and architecture in a few sentences with one generated
+  diagram, a short status line, and the docs index grouped by
+  audience (get started, use, understand, build & test), plus
+  the CHANGELOG and license lines. Goals, deployment modes and
+  the security summary live in `docs/architecture.md` and
+  `docs/security.md`. It must not accumulate detail sections
+  again.
 - **Detailed documentation lives in `docs/`**, one topic per
   file (quickstart, architecture, decisions, milestones,
   trace-scope, output-contract, schema, testing, java-attach,
