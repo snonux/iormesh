@@ -11,7 +11,9 @@
 // BpfRootTest is ior's runRootLinkTests/runRootTestBinary, reduced to the BPF
 // root tests of ./internal; GOARCH, the cgo cross compiler and the BPF
 // __TARGET_ARCH follow $IORMESH_TARGET_ARCH for the arm64 release build
-// (magefile_container.go replaces ior's docker targets).
+// (magefile_container.go replaces ior's docker targets); the default
+// libbpfgo path is ../libbpfgo next to the main checkout, also from a linked
+// git worktree (internal/buildenv, task 8l4).
 
 package main
 
@@ -29,6 +31,7 @@ import (
 	"github.com/magefile/mage/mg"
 	"github.com/magefile/mage/sh"
 
+	"iormesh/internal/buildenv"
 	"iormesh/internal/containerbuild"
 	"iormesh/internal/gatecmd"
 )
@@ -36,7 +39,6 @@ import (
 // Build-input and output paths of the BPF and generation targets. They
 // mirror ior's layout so ior fixes port file for file.
 const (
-	defaultLibbpfgoPath  = "../libbpfgo"
 	libbpfgoRequiredTag  = "v0.9.2-libbpf-1.5.1"
 	bpfSourcePath        = "internal/c/iormesh.bpf.c"
 	bpfObjectPath        = "internal/c/iormesh.bpf.o"
@@ -280,6 +282,7 @@ func libbpfgoSetupHint(libbpfgo string) string {
 		fmt.Sprintf("  git -C %s checkout %s", libbpfgo, libbpfgoRequiredTag),
 		fmt.Sprintf("  git -C %s submodule update --init --recursive", libbpfgo),
 		fmt.Sprintf("  make -C %s libbpfgo-static", libbpfgo),
+		"or set $LIBBPFGO to an existing checkout (default: ../libbpfgo next to the main checkout)",
 	}, "\n")
 }
 
@@ -330,11 +333,12 @@ func goEnv() map[string]string {
 	return env
 }
 
+// libbpfgoPath is $LIBBPFGO when set, else ../libbpfgo next to the main
+// checkout, which buildenv finds through git so a linked worktree (e.g.
+// .claude/worktrees/agent-*) shares the main checkout's libbpfgo (task 8l4).
 func libbpfgoPath() string {
-	if libbpfgo := os.Getenv("LIBBPFGO"); libbpfgo != "" {
-		return libbpfgo
-	}
-	return filepath.Clean(filepath.Join(repoRoot(), defaultLibbpfgoPath))
+	return buildenv.LibbpfgoPath(os.Getenv(buildenv.LibbpfgoEnv), repoRoot(),
+		buildenv.ExecGit)
 }
 
 func repoRoot() string {
