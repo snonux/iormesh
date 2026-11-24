@@ -151,7 +151,9 @@ type Thread struct {
 	Name   string `json:"name"`
 	TID    uint32 `json:"tid"`
 	Events uint64 `json:"events"`
-	Bytes  uint64 `json:"bytes"`
+	// Bytes are the bytes the thread moved (schema.Event.StreamBytes):
+	// a MSG_PEEK receive counts as an event but adds none (task cl4).
+	Bytes uint64 `json:"bytes"`
 	// Carried counts the events among Events that virtual threads issued
 	// while this kernel thread carried them (java.carrier): their I/O,
 	// named by the carrier, never the carrier's own work (task 0f4).
@@ -179,7 +181,9 @@ type Call struct {
 	Carrier bool `json:"carrier,omitempty"`
 }
 
-// MethodStat counts the events a Java method caused.
+// MethodStat counts the events a Java method caused and the bytes they
+// moved (schema.Event.StreamBytes: a MSG_PEEK receive adds none, task
+// cl4).
 type MethodStat struct {
 	Method string `json:"method"`
 	Events uint64 `json:"events"`

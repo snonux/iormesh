@@ -150,7 +150,7 @@ func (c *Collector) add(src Source, ev *schema.Event) bool {
 		method = normalize.CausingMethod(*ev, c.methods[src.Session])
 	}
 	ok := c.thread(p, ev)
-	ok = c.method(p, method, ev.Bytes) && ok
+	ok = c.method(p, method, ev.StreamBytes()) && ok
 	switch ev.Event {
 	case schema.KindExec:
 		p.p.Argv = append([]string(nil), ev.Args.Argv...)
@@ -198,7 +198,10 @@ func (c *Collector) proc(src Source, ev *schema.Event) *procAcc {
 }
 
 // thread counts ev on its thread and names the thread after the first
-// Java thread name it carries.
+// Java thread name it carries. Its bytes are the bytes the thread moved
+// through files and streams (Event.StreamBytes): a MSG_PEEK receive adds
+// none, so a peek-then-read counts once, as on the connection (task
+// cl4).
 func (c *Collector) thread(p *procAcc, ev *schema.Event) bool {
 	i, ok := p.thrIdx[ev.TID]
 	if !ok {
@@ -211,7 +214,7 @@ func (c *Collector) thread(p *procAcc, ev *schema.Event) bool {
 	}
 	t := p.threads[i]
 	t.Events++
-	t.Bytes += ev.Bytes
+	t.Bytes += ev.StreamBytes()
 	if ev.Java != nil && ev.Java.Carrier {
 		t.Carried++
 	}
@@ -221,7 +224,9 @@ func (c *Collector) thread(p *procAcc, ev *schema.Event) bool {
 	return true
 }
 
-// method counts an event on its causing method ("" for none).
+// method counts an event on its causing method ("" for none); bytes is
+// the event's StreamBytes, so a peek adds the event but no bytes (task
+// cl4).
 func (c *Collector) method(p *procAcc, method string, bytes uint64) bool {
 	if method == "" {
 		return true

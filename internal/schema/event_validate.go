@@ -463,9 +463,10 @@ func IsPeekable(kind string) bool {
 }
 
 // StreamBytes is what ev adds to its direction's stream byte sums - the
-// merge's (internal/federate) and the report's: its bytes, or 0 for a
-// receive that peeked (args.peek, task ok4), whose bytes stay queued for
-// the receive that consumes and counts them.
+// merge's (internal/federate) and the report's, whose per-connection,
+// per-thread and per-method bytes all use it (task cl4): its bytes, or 0
+// for a receive that peeked (args.peek, task ok4), whose bytes stay
+// queued for the receive that consumes and counts them.
 func (e *Event) StreamBytes() uint64 {
 	if e.Args.Peek != nil {
 		return 0

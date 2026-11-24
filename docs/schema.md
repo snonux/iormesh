@@ -12,8 +12,11 @@ traced surface, and M3's acceptance (2026-11-20) the Java, OTEL, `http`
 and `dns` fields and the methods, threads, classes and stacks tables,
 which were provisional until then. M4 appended the `fork` and
 `attach` kinds and `args.pattern`, `args.parent_pid` and
-`args.parent_incarnation` (task ze4, below), and
-`args.sock_snapshot` (task sf4). Fields are only ever
+`args.parent_incarnation` (task ze4, below), `args.sock_snapshot`
+(task sf4), the four `tcp_sock` fields of `tcp_state`
+(`args.snd_una`, `args.rcv_nxt`, `args.bytes_acked`,
+`args.bytes_received`), `args.tcp_seq`, `args.bytes_partial` (task
+oh4) and `args.peek` (task ok4). Fields are only ever
 appended, and appended fields are optional, so an older reader never
 sees a changed meaning. Enum values (`drop_reason`, `end_reason`, …)
 are appended the same way as event kinds, so a reader should pass an
@@ -232,9 +235,9 @@ that waits for the peer's answer right after a burst of calls.
 A `recvfrom`, `recvmsg` or `recvmmsg` with `MSG_PEEK` copies
 bytes but consumes none: its `bytes` say what it copied, it is
 marked `args.peek` and carries no `tcp_seq`, and the receiver's
-stream sums (the merge's and the report's) skip it, so the
-bytes count once, with the receive that consumes them (task
-ok4).
+stream sums (the merge's and the report's, its thread and
+method bytes included) skip it, so the bytes count once, with
+the receive that consumes them (tasks ok4, cl4).
 
 ### Event kinds (M1)
 
@@ -1457,6 +1460,14 @@ The Go types are `internal/report`'s `Report`.
   `events` but also in `carried`, and such a call has
   `"carrier": true` (both omitted when false; task 0f4): the text
   says so, never letting it read as the carrier's own work.
+- **Bytes** of a connection (`sent_bytes`, `recv_bytes`), a
+  thread and a method are the bytes moved by the stream, not the
+  bytes copied (task cl4): a `MSG_PEEK` receive (`args.peek`)
+  counts as an event but adds no bytes, so a peek followed by the
+  read that consumes the same bytes counts them once — on the
+  connection, the thread and the method alike. A file's
+  `read_bytes`/`write_bytes` never see a peek (files cannot be
+  peeked).
 - **Caps**: 256 processes, and per process 32 files, connections
   and threads, 32 calls per thread and requests per connection,
   10 methods (by events, then bytes), 8 ops per file; each cut is

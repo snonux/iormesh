@@ -30,18 +30,28 @@ func selfTrace() *trace {
 	return tr
 }
 
-// TestPeekReceivedOnce (task ok4): a recvfrom that peeked (args.peek)
-// before the read that consumes the same bytes adds nothing to the
-// connection's received bytes: they count once, with the read.
+// TestPeekReceivedOnce (tasks ok4, cl4): a recvfrom that peeked
+// (args.peek) before the read that consumes the same bytes adds nothing
+// to the connection's received bytes, nor to its thread's or its
+// causing method's bytes: they count once, with the read.
 func TestPeekReceivedOnce(t *testing.T) {
 	tr := &trace{host: "h1"}
+	call := &schema.Java{Thread: "main", Stack: []uint64{4}}
 	tr.add(50, 51, schema.KindConnect, 5, 0, "s1", schema.Args{RemoteAddr: ptr("127.0.0.1"),
 		RemotePort: ptr(uint16(9000))}, nil)
-	tr.add(50, 51, schema.KindRecvfrom, 5, 4, "s1", schema.Args{Peek: ptr(true)}, nil)
-	tr.add(50, 51, schema.KindRead, 5, 4, "s1", schema.Args{}, nil)
+	tr.add(50, 51, schema.KindRecvfrom, 5, 4, "s1", schema.Args{Peek: ptr(true)}, call)
+	tr.add(50, 51, schema.KindRead, 5, 4, "s1", schema.Args{}, call)
 	r := Build(collect(tr, 0), Input{})
-	if c := r.Processes[0].Conns; len(c) != 1 || c[0].RecvBytes != 4 {
+	p := r.Processes[0]
+	if c := p.Conns; len(c) != 1 || c[0].RecvBytes != 4 {
 		t.Fatalf("connection entries %+v, want one that received 4 bytes", c)
+	}
+	if th := p.Threads; len(th) != 1 || th[0].Bytes != 4 {
+		t.Errorf("threads %+v, want one with 4 bytes", th)
+	}
+	if m := p.Methods; len(m) != 1 || m[0].Method != "shop.HttpFetch#call" || m[0].Events != 2 ||
+		m[0].Bytes != 4 {
+		t.Errorf("methods %+v, want shop.HttpFetch#call with 2 events and 4 bytes", m)
 	}
 }
 

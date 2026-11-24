@@ -1364,7 +1364,9 @@ Kubernetes (M7) build on it.
   correlator marks the event `args.peek` (always true when
   set; never with `tcp_seq`) and keeps its `bytes`, and the
   receiver's stream sums — the merge's and the report's —
-  skip it.
+  skip it. The report's per-thread and per-method bytes skip it
+  too (task cl4): they are bytes moved, not bytes copied, so a
+  peek-then-read counts once everywhere in the rollup.
   The stream check is not a proof: it trusts the sums to hold
   every byte, and bytes escape them with no drop recorded —
   untraced `splice`, io_uring; a fork
