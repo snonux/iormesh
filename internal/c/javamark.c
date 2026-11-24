@@ -42,6 +42,7 @@
 SEC("uprobe.multi")
 int iormesh_java_native_enter(struct pt_regs *ctx) {
     struct iormesh_java_mark *m, init = {};
+    struct iormesh_java_frame *f;
     // Keyed like the enter handlers' lookup: the tid in the tracer's PID
     // namespace (pidns.c, M7).
     __u32 tid = (__u32)iormesh_current_pid_tgid();
@@ -61,9 +62,13 @@ int iormesh_java_native_enter(struct pt_regs *ctx) {
         m->lost = 1;
         return 0;
     }
-    m->frames[d].cookie = bpf_get_attach_cookie(ctx);
-    m->frames[d].entry = bpf_ktime_get_ns();
-    m->frames[d].sp = ctx->sp;
+    // The check above says the stack is full; the mask (maps.h) is what
+    // bounds the index for the verifier whatever clang makes of the check
+    // (task il4). It never changes an in-range d.
+    f = &m->frames[iormesh_index_mask(d, IORMESH_JAVA_MARK_DEPTH)];
+    f->cookie = bpf_get_attach_cookie(ctx);
+    f->entry = bpf_ktime_get_ns();
+    f->sp = ctx->sp;
     m->depth = d + 1;
     return 0;
 }
@@ -86,9 +91,10 @@ int iormesh_java_native_exit(struct pt_regs *ctx) {
     if (d > IORMESH_JAVA_MARK_DEPTH)
         d = IORMESH_JAVA_MARK_DEPTH;
     for (int i = 0; i < IORMESH_JAVA_MARK_DEPTH; i++) {
-        // The mask (the depth is a power of two) is for the verifier: it
-        // does not carry d's bounds across the loop's iterations.
-        if (d == 0 || m->frames[(d - 1) & (IORMESH_JAVA_MARK_DEPTH - 1)].sp > sp)
+        // The mask (the depth is a power of two; maps.h) is for the
+        // verifier: it does not carry d's bounds across the loop's
+        // iterations, and clang may test a copy of d (task il4).
+        if (d == 0 || m->frames[iormesh_index_mask(d - 1, IORMESH_JAVA_MARK_DEPTH)].sp > sp)
             break;
         d--;
     }
@@ -127,10 +133,13 @@ static __always_inline void iormesh_java_mark_on_enter(__u32 pid, __u32 tid, __u
     ev->time = now;
     ev->pid = pid;
     ev->tid = tid;
+    // d is 1..IORMESH_JAVA_MARK_DEPTH here; the mask bounds the index for
+    // the verifier on the register that indexes (maps.h, task il4).
+    d = iormesh_index_mask(d - 1, IORMESH_JAVA_MARK_DEPTH);
     // A lost frame is deeper than every kept one: the innermost native is
     // then unknown, which cookie 0 (never a native's id) says.
-    ev->cookie = m->lost ? 0 : m->frames[d - 1].cookie;
-    ev->entry = m->lost ? 0 : m->frames[d - 1].entry;
+    ev->cookie = m->lost ? 0 : m->frames[d].cookie;
+    ev->entry = m->lost ? 0 : m->frames[d].entry;
     bpf_ringbuf_submit(ev, 0);
 }
 

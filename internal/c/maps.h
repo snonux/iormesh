@@ -5,7 +5,8 @@
 // step 11); stack_map added (stack.c, M2 step 9); java_mark_map and struct
 // iormesh_java_mark added (javamark.c, task td4); restart_pending_map
 // removed with restart.c (task pf4); event_map's and the sampling map's
-// comments say what iormesh's userspace does with them (task gj4).
+// comments say what iormesh's userspace does with them (task gj4);
+// iormesh_index_mask added (verifier-safe slot index, task il4).
 
 //+build ignore
 
@@ -207,6 +208,25 @@ struct iormesh_rw_slot {
     __u32 count;
     __u32 reserved;
 };
+
+// iormesh_index_mask(idx, n) is idx & (n - 1) for an n that is a power of two,
+// computed so that the verifier sees the bound on the very register that
+// indexes the array. A plain `if (idx >= n) return; a[idx]` is not enough:
+// clang may test a zero-extended copy of idx and index with the unchecked
+// original, which the verifier rejects as an unbounded access (Debian clang
+// 19.1.7 does this in iormesh_rw_on_exit; the el9 5.14 and the 7.x verifiers
+// both refuse it; task il4). A mask after the check alone does not fix that
+// either, since clang drops a mask it can prove redundant. barrier_var hides
+// idx's range from clang, so the mask stays and is applied to the indexing
+// register itself. Callers keep their range check where an out-of-range idx
+// means "no slot"; the mask never changes an in-range value.
+#define iormesh_index_mask(idx, n)                                                                                   \
+    ({                                                                                                                 \
+        _Static_assert(((n) & ((n) - 1)) == 0, "iormesh_index_mask needs a power of two");                           \
+        __u32 __iormesh_idx = (idx);                                                                                   \
+        barrier_var(__iormesh_idx);                                                                                    \
+        __iormesh_idx & ((n) - 1);                                                                                     \
+    })
 
 // IORMESH_RW_SLOTS is how many keys one thread aggregates at once: a copy
 // loop needs two (read one fd, write another), the syscall burst too (a

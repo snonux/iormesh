@@ -1644,7 +1644,10 @@ Results:
   same kernel the same way. The amd64 release, built by the
   Rocky builder's clang, is unaffected. Every root test that
   loads the object fails the same way with the embedded one.
-  Filed as task il4.
+  Filed as task il4, fixed in the source (decision #31): the
+  builder's clang 19 objects, arm64 and x86, then loaded and
+  traced on the same guest ([build](build.md), "arm64
+  status").
 - **With the same source built by clang 22.1.1**
   (`-D__TARGET_ARCH_arm64`, laptop `vmlinux.h`) and loaded
   through `IORMESH_BPF_OBJECT`, the tracer attaches ("38
