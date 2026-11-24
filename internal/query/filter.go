@@ -16,6 +16,12 @@ import (
 // ("12:00:05", "12:00:05.250").
 const clockLayout = "15:04:05.999999999"
 
+// datedLayout is a date and time of day without a zone, taken as UTC
+// ("2026-11-20T12:00:05"): RFC 3339 short of its "Z", the form a store
+// spanning several days asks for instead of a bare time of day (task
+// 1l4).
+const datedLayout = "2006-01-02T15:04:05.999999999"
+
 // ErrInvalid marks a filter Validate (or ParseTime) rejected: a usage
 // error, reported before any segment is read.
 var ErrInvalid = errors.New("invalid filter")
@@ -159,8 +165,9 @@ func (f Filter) MatchesMethod(m *schema.Method) bool {
 	return f.Method != "" && (glob(f.Method, m.Class+"#"+m.Method) || glob(f.Method, m.Frame))
 }
 
-// TimeSpec is a -from or -to value: an absolute instant (RFC 3339), or
-// a time of day (UTC) that Resolve places on the trace's first day.
+// TimeSpec is a -from or -to value: an absolute instant (RFC 3339, or
+// a date and time of day in UTC), or a bare time of day (UTC) that
+// Resolve places on the date the caller gives.
 type TimeSpec struct {
 	abs   time.Time
 	clock time.Duration
@@ -168,12 +175,17 @@ type TimeSpec struct {
 	isClock bool
 }
 
-// ParseTime parses an RFC 3339 instant ("2026-11-20T12:00:05Z") or a
-// UTC time of day ("12:00:05", "12:00:05.5"). An instant outside
-// 1970–2262 is rejected: wall_ns (an int64 by the reader's bound)
-// cannot hold it.
+// ParseTime parses an RFC 3339 instant ("2026-11-20T12:00:05Z"), a
+// date and time of day in UTC ("2026-11-20T12:00:05", the same instant)
+// or a bare UTC time of day ("12:00:05", "12:00:05.5"). An instant
+// outside 1970–2262 is rejected: wall_ns (an int64 by the reader's
+// bound) cannot hold it.
 func ParseTime(s string) (TimeSpec, error) {
-	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		t, err = time.Parse(datedLayout, s) // no zone: UTC
+	}
+	if err == nil {
 		if t.Before(time.Unix(0, 0)) || t.After(time.Unix(0, math.MaxInt64)) {
 			return TimeSpec{}, fmt.Errorf("%w: time %q is outside 1970–2262", ErrInvalid, s)
 		}
@@ -181,20 +193,24 @@ func ParseTime(s string) (TimeSpec, error) {
 	}
 	c, err := time.Parse(clockLayout, s)
 	if err != nil {
-		return TimeSpec{}, fmt.Errorf("%w: time %q: want RFC 3339 or HH:MM:SS[.frac] (UTC)",
-			ErrInvalid, s)
+		return TimeSpec{}, fmt.Errorf("%w: time %q: want RFC 3339, YYYY-MM-DDTHH:MM:SS[.frac] "+
+			"or HH:MM:SS[.frac] (UTC)", ErrInvalid, s)
 	}
 	midnight := time.Date(c.Year(), c.Month(), c.Day(), 0, 0, 0, 0, time.UTC)
 	return TimeSpec{clock: c.Sub(midnight), isClock: true}, nil
 }
 
+// Clock is the time after midnight UTC and true for a bare time of day,
+// which needs a date (Resolve's day); false for an instant.
+func (t TimeSpec) Clock() (time.Duration, bool) { return t.clock, t.isClock }
+
 // Resolve is the spec's wall_ns. A time of day is taken on day's UTC
-// date — ctl passes the start of the earliest segment queried (the
-// earliest readable; with -window-segments, as build, the earliest
-// listed: ctl's windowSpec.place), so
-// "12:00:05" means 12:00:05 of the day the trace began; a window across
-// midnight needs RFC 3339. A day whose date wall_ns cannot hold (a
-// segment name says year 9999) is an error, not a wrapped instant.
+// date: ctl passes the one UTC date the store's listed segments start
+// on and refuses a time of day on a store spanning more than one (task
+// 1l4, its windowSpec.place), so "12:00:05" never silently means a
+// later day once a prune deleted the oldest. A day whose date wall_ns
+// cannot hold (a segment name says year 9999) is an error, not a
+// wrapped instant.
 func (t TimeSpec) Resolve(day time.Time) (uint64, error) {
 	if !t.isClock {
 		return uint64(t.abs.UnixNano()), nil

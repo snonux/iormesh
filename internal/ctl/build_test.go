@@ -154,10 +154,17 @@ func shopMesh() (app1, app2 *hostTrace) {
 
 // writeStoreSegments writes h with the tracer's segment writer, one
 // segment per perSeg events, into store/<project>/<host>/ as collect
-// leaves it.
+// leaves it. The writer's clock starts at buildWall0.
 func writeStoreSegments(t *testing.T, store, host string, h *hostTrace, perSeg int) []string {
 	t.Helper()
-	t0 := time.Unix(0, int64(buildWall0)).UTC()
+	return writeStoreSegmentsAt(t, store, host, h, perSeg, time.Unix(0, int64(buildWall0)).UTC())
+}
+
+// writeStoreSegmentsAt is writeStoreSegments with the writer's clock
+// starting at t0 (the first segment is named t0, the next a minute per
+// segment later), for a store spanning more than one day (task 1l4).
+func writeStoreSegmentsAt(t *testing.T, store, host string, h *hostTrace, perSeg int, t0 time.Time) []string {
+	t.Helper()
 	srv := filepath.Join(t.TempDir(), h.project)
 	w, err := segment.New(segment.Config{Dir: srv, FQDN: h.fqdnOf(), Session: cmp.Or(h.session, "a1b2c3d4"),
 		Project: h.project, Now: func() time.Time { return t0 }})

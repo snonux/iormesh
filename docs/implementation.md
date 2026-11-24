@@ -4764,7 +4764,7 @@ iormeshctl show [summary|services|edges|health] [-project P]... [-json]
 ### Build window and prune (task yh4)
 
 ```
-internal/federate/window.go     # Span, Window, FirstStart
+internal/federate/window.go     # Span, Window, StartRange
 internal/ctl/window.go          # build -from/-to/-last, the readers' -windowed
 internal/ctl/prune.go           # iormeshctl prune
 ```
@@ -4798,11 +4798,23 @@ iormeshctl prune -older-than DUR [-project P]... [-store DIR] [-db FILE] [-apply
   Without that, its summary would mix the window's tally with
   the database's whole history.
 - **The window.** `T` is query's (`query.ParseTime`: RFC 3339,
-  or a UTC time of day on the day of the earliest segment of the
-  projects, `federate.FirstStart`); `-last DUR` is `-from
-  now−DUR`, and not combined with `-from`/`-to`. An empty window
-  is a usage error. The build echoes the resolved window
-  (`window     FROM .. TO`, `(open)` for a side not given).
+  `YYYY-MM-DDTHH:MM:SS[.frac]` in UTC, or a bare UTC time of
+  day); `-last DUR` is `-from now−DUR`, and not combined with
+  `-from`/`-to`. An empty window is a usage error. The build
+  echoes the resolved window (`window     FROM .. TO`, `(open)`
+  for a side not given).
+- **A time of day's date** (task 1l4, PLAN.md). `windowSpec.day`
+  is the one rule, for build and both kinds of query: it lists
+  the projects' events segments (`federate.StartRange`, names
+  only, readable or not) and places the time of day on their UTC
+  date when every one starts on the same date. When they start
+  on more than one it refuses (`usage: -from 12:00:00 is a time
+  of day, but the store's segments start on D1 .. D2 (UTC):
+  give its date, e.g. -from D2T12:00:00`). Anchoring on the
+  earliest date (as before) let `prune` move a command to the
+  next day once it deleted the oldest; the latest date moves
+  with each collect — refusing leaves no date to drift. An
+  instant never lists the store.
 - **What it checks.** `LoadOptions.Window`: a pinned host
   directory's segments outside the window are not decoded; an
   unpinned directory's are, all of them, because the host
@@ -4860,12 +4872,18 @@ iormeshctl prune -older-than DUR [-project P]... [-store DIR] [-db FILE] [-apply
   a pre-version-4 row without requests has no source and stays;
   a build running during prune can re-import what was just
   forgotten.
-- **Tests.** `internal/federate/window_test.go` (range edges);
-  `internal/ctl/window_test.go` (`-from`, a time of day, `-last`,
-  `-to` select the expected segments of the rotated fixture, the
-  full build unchanged, services and edges seen only before the
-  window left out of the windowed views, an unpinned directory
-  checked whole and a pinned one only in its window, refusals);
+- **Tests.** `internal/federate/window_test.go` (range edges,
+  `StartRange`); `internal/ctl/window_test.go` (`-from`, a time
+  of day, `-last`, `-to` select the expected segments of the
+  rotated fixture, the full build unchanged, services and edges
+  seen only before the window left out of the windowed views,
+  an unpinned directory checked whole and a pinned one only in
+  its window, refusals); `internal/ctl/window_anchor_test.go`
+  (task 1l4: a two-day store refuses a time of day in build and
+  both queries and takes a dated one, the same command after a
+  prune of the first day resolves on the remaining one; build
+  and query echo the same window, and refuse alike for an
+  unreadable segment's date);
   `internal/ctl/prune_test.go` (the listing deletes nothing,
   `-apply` exactly the listed files, a live session's table kept
   and an orphan's deleted, planted foreign entries — a stray
@@ -5256,11 +5274,12 @@ internal/termsafe/           # + JSON: escape a line for a terminal
   command exits 1 after writing the slice.
 - **The window is exact by default; `-window-segments` trades
   exactness for speed** (task ik4). `-from`/`-to` are placed by
-  build's code (`windowSpec.place`, each caller passing its
-  anchor) and the segments loaded by `loadSelection`, the one
-  selection build and query share. By default query still
-  decodes the whole store, then places the window on the
-  earliest readable segment's date and cuts the events to it, so
+  build's code (`windowSpec.place`, a time of day on the date of
+  the listed segments, `listedDays`, task 1l4) and the segments
+  loaded by `loadSelection`, the one selection build and query
+  share. Query echoes the resolved window on stderr (`query:
+  window FROM .. TO`). By default query still decodes the whole
+  store, then places the window and cuts the events to it, so
   a window's slice is exactly the whole trace's events in it —
   merged ids, `-app`, `-file` and `-follow` know everything
   before it — and its errors are the ones it had before (no
@@ -5286,10 +5305,10 @@ internal/termsafe/           # + JSON: escape a line for a terminal
 - **Filters** (all AND; globs are `path.Match`, `*` stops at
   `/`): `-from`/`-to` on each event's own `wall_ns`, as its host
   recorded it — not corrected for clock skew between hosts (RFC
-  3339, or `HH:MM:SS[.frac]` UTC on the UTC date of the earliest
-  readable segment's start — with `-window-segments`, which must
-  place the window before decoding anything, build's anchor, the
-  earliest segment listed; `-to` exclusive); `-host` the store's
+  3339, `YYYY-MM-DDTHH:MM:SS[.frac]` UTC, or `HH:MM:SS[.frac]`
+  UTC on a store whose listed segments start on one UTC date,
+  refused on one spanning more — build's rule, **A time of day's
+  date** above; `-to` exclusive); `-host` the store's
   host name or the
   session's FQDN; `-app` the app's target pattern (the merged
   graph's app node) or the comm; `-thread` `java.thread` or the

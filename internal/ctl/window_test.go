@@ -50,7 +50,7 @@ func TestBuildWindow(t *testing.T) {
 	}{
 		// From t0+5m: seq 1 (range ends at t0+5m) is out, seq 2 on in.
 		{[]string{"-from", from}, 4, "window     " + from + " .. (open)"},
-		// A time of day lands on the first segment's day.
+		// A time of day lands on the store's one date (task 1l4).
 		{[]string{"-from", windowT0.Add(5 * time.Minute).Format(time.TimeOnly)}, 4, "window     " + from},
 		// -last 3m is -from now-3m.
 		{[]string{"-last", "3m"}, 4, "window     " + from + " .. (open)"},

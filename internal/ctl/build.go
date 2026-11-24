@@ -363,10 +363,10 @@ func selectSegments(ctx context.Context, e env, f buildFlags, paths buildPaths) 
 // it picks the projects and loads their segments, each checked in a
 // memory-capped child (check.go) and each host directory held to the
 // identity pinned for it. With narrow it first resolves f's window
-// (windowSpec.resolve, anchored on the earliest listed segment:
-// firstListed) and loads only the window's segments; without, it loads
-// all of them and leaves sel.window nil for the caller to resolve
-// against what it read (the default query, firstReadable). It pins
+// (windowSpec.resolve, a time of day on the store's one date:
+// listedDays) and loads only the window's segments; without, it loads
+// all of them and leaves sel.window nil for the caller to place after
+// the load, on the same date (the default query, queryWindow). It pins
 // nothing: build pins what it returns (selectSegments), query never
 // does. A windowed load checks every segment of a directory not pinned
 // yet (federate.Window), so what build pins is what a full build would.
@@ -378,7 +378,7 @@ func loadSelection(ctx context.Context, e env, f buildFlags, paths buildPaths,
 		return selection{}, hostPins{}, err
 	}
 	if narrow {
-		if sel.window, err = f.window.resolve(e, firstListed(paths.store, sel.projects)); err != nil {
+		if sel.window, err = f.window.resolve(e, listedDays(paths.store, sel.projects)); err != nil {
 			return selection{}, hostPins{}, err
 		}
 	}
