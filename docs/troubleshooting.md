@@ -177,7 +177,8 @@ execs `java`, a restarted `-listen-port` owner — is tried every
 ## Ensure and stopped sessions
 
 `iormeshctl ensure` prints one line per project,
-`<host>: project <p>: <what it did>`
+`<host>: project <p>: <what it did>` (for a pod,
+`<ref> pod <name>: project <p>: …`)
 ([architecture.md](architecture.md#tracing-for-days) has the
 rules). The lines that leave a session down:
 
@@ -191,6 +192,10 @@ rules). The lines that leave a session down:
 | `ended (disk_limit): collecting first` | Not an error: the restart waits for the collect ([next section](#disk-limit)). |
 | `collect failed, not restarted` | A `disk_limit` end whose collect failed; the collect's error follows. |
 | `no readable status after the collect, not restarted` / `status after collect, disk_limit ends not restarted: …` | The status read after the collect failed; run `ensure` again. |
+| `tracer container "…" terminated (…, exit code 0), stopped on purpose, left stopped` | A pod's debug tracer was ended with a signal; its collect is skipped (`collect skipped: …`). `deploy` starts the next tracer, which serves what it published. |
+| `…: a running debug tracer cannot be restarted, restart the pod for a new session` | A pod's debug session ended after its `-duration` or at its disk cap and lingers; restart the pod, then `deploy`. |
+| `no tracer container: deploy starts it, ensure only restarts` | A pod never deployed, or restarted since. Run `deploy`. |
+| `… (nothing restarted or collected: deploy starts a tracer in a pod that replaces it)` | The pod entry's pod is gone, or its selector matches no running pod. |
 
 A deploy restart whose start failed (`session stopped, not
 restarted: start: …`) leaves the project marked stopped, so

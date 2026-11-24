@@ -206,9 +206,9 @@ func TestEnsureFailures(t *testing.T) {
 		collectLog(f, "app1", "shop", "billing"))
 }
 
-// TestEnsureRefuses: a pod entry (ensure keeps hosts' sessions; a pod's
-// tracer is its debug container's), an unregistered host and a stray
-// project fail before any host is contacted.
+// TestEnsureRefuses: an unregistered pod entry (registered ones are
+// ensured, task pk4: ensure_pods_test.go), an unregistered host and a
+// stray project fail before any host is contacted.
 func TestEnsureRefuses(t *testing.T) {
 	f := newDeployFixture(t)
 	for _, args := range [][]string{{"ensure", "kind/shop/app=web"}, {"ensure", "nope"},

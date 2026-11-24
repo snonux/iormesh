@@ -12,7 +12,7 @@ import (
 	"iormesh/internal/schema"
 )
 
-// `iormeshctl ensure [-project P]... [HOST...]` (PLAN.md M4 "No
+// `iormeshctl ensure [-project P]... [HOST|POD...]` (PLAN.md M4 "No
 // management plane", task zh4): keep tracing over days. A session ends
 // after its -duration (4h by default, 7 days at most), and its transient
 // unit has no Restart=, so a reboot, an OOM kill or a disk-limit trip
@@ -38,8 +38,9 @@ import (
 // tell an operator stop from a reboot's, so its "stop" ends are left
 // stopped too; a dead run of such a tracer is restarted. Run again, it
 // finds the sessions it started running and only collects, so it is
-// safe from a timer (docs/architecture.md "Tracing for days"). Hosts
-// only: a pod's tracer is its debug container (deploy).
+// safe from a timer (docs/architecture.md "Tracing for days"). A pod
+// entry (task pk4) is decided by its pods' tracer containers instead
+// and restarted through deploy's pod path (ensure_pods.go).
 
 // ensureAction is what ensure does with one project's session.
 type ensureAction int
@@ -49,19 +50,21 @@ const (
 	ensureRestart                          // start it again now
 	ensureAfterCollect                     // a disk_limit end: collect, then maybe start
 	ensureFail                             // the tracer's report for it carries an error
+	ensureAsk                              // a pod's running debug tracer: ask its session (ensure_pods.go)
 )
 
-// ensurer is one ensure run: the registry it resolved the hosts in and
-// the collector that syncs them.
+// ensurer is one ensure run: the registry it resolved the targets in
+// and the collector that syncs them.
 type ensurer struct {
 	e env
 	r federate.Registry
 	c collector
 }
 
-// ensureCommand parses ensure's flags, resolves the hosts (every
-// registered one carrying the projects by default) and their projects
-// before contacting any, and ensures host by host.
+// ensureCommand parses ensure's flags, resolves the targets as collect
+// does (every registered host and pod entry carrying the projects by
+// default; a project none carries is refused) before contacting any,
+// and ensures target by target.
 func ensureCommand(args []string, e env) error {
 	fs := newFlagSet("ensure", e.stderr)
 	var projects projectList
@@ -75,18 +78,17 @@ func ensureCommand(args []string, e env) error {
 	if err != nil {
 		return err
 	}
-	hosts, err := ensureHosts(r, fs.Args(), projects)
+	// ensure takes no K8S flags: a pod entry is reached as the registry
+	// says, as a collect of every target reaches it.
+	targets, err := collectTargets(r, fs.Args(), projects, &k8sFlags{})
 	if err != nil {
 		return err
 	}
-	if len(hosts) == 0 {
-		_, err := fmt.Fprintln(e.stdout, "no hosts registered")
+	if len(targets) == 0 {
+		_, err := fmt.Fprintln(e.stdout, "no hosts or pods registered")
 		return err
 	}
-	// Always an explicit list here, so collectTargets never asks the
-	// (absent) K8S flags about a collect of every target.
-	targets, err := collectTargets(r, hosts, projects, nil)
-	if err != nil {
+	if err := checkEnsurePods(targets); err != nil {
 		return err
 	}
 	c, err := newCollector(e, *store)
@@ -96,41 +98,19 @@ func ensureCommand(args []string, e env) error {
 	return ensurer{e: e, r: r, c: c}.all(e.root(), targets)
 }
 
-// ensureHosts is the named hosts, or every registered host carrying one
-// of projects (any, when none is given; a project no host carries is
-// refused). A pod entry is refused: ensure keeps hosts' sessions only.
-func ensureHosts(r federate.Registry, args, projects []string) ([]string, error) {
-	for _, a := range args {
-		if federate.IsPodRef(a) {
-			return nil, fmt.Errorf("%w: ensure takes hosts, not the pod entry %q (deploy starts a pod's tracer)",
-				errUsage, a)
-		}
-	}
-	if len(args) > 0 {
-		return args, nil
-	}
-	var hosts []string
-	for _, s := range r.Servers {
-		if len(projects) == 0 || slices.ContainsFunc(s.Projects, func(p federate.Project) bool {
-			return slices.Contains(projects, p.Name)
-		}) {
-			hosts = append(hosts, s.Host)
-		}
-	}
-	if len(hosts) == 0 && len(projects) > 0 {
-		return nil, fmt.Errorf("%w: %s on no registered host", federate.ErrUnknownProject,
-			strings.Join(projects, ", "))
-	}
-	return hosts, nil
-}
-
-// all ensures every target in turn, each under its own deadline
-// (env.onHost), so a host that stalls is reported and the next still
-// ensured; the command then fails naming the failed hosts.
+// all ensures every target in turn — a host (host) or a pod entry
+// (podEntry, ensure_pods.go) — each under its own deadline
+// (env.onHost), so a target that stalls is reported and the next still
+// ensured; the command then fails naming the failed targets.
 func (en ensurer) all(ctx context.Context, targets []collectTarget) error {
 	var failed []string
 	for _, tg := range targets {
-		err := en.e.onHost(ctx, func(ctx context.Context) error { return en.host(ctx, tg) })
+		err := en.e.onHost(ctx, func(ctx context.Context) error {
+			if tg.pod != nil {
+				return en.podEntry(ctx, tg)
+			}
+			return en.host(ctx, tg)
+		})
 		if err != nil {
 			_, _ = fmt.Fprintf(en.e.stderr, "iormeshctl: %s: %s\n", safe(tg.host), errText(err))
 			failed = append(failed, tg.host)

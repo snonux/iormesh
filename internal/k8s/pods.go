@@ -142,6 +142,13 @@ type PodState struct {
 	// until a deploy starts the next debug tracer or the pod goes
 	// (review B1).
 	Stopped string
+	// Exited is set when that tracer container terminated, ExitCode
+	// then its exit code. iormeshctl ensure (task pk4) reads it to tell
+	// a debug tracer ended on purpose — exit code 0: a -linger run
+	// exits only once SIGTERM or SIGINT ends it, cleanly — from one
+	// killed with its app container, OOM-killed or crashed.
+	Exited   bool
+	ExitCode int
 }
 
 // Lister looks pods up in one scope's context and namespace.
@@ -261,6 +268,9 @@ func (l *Lister) state(p podInfo) (PodState, error) {
 		cs, ok := statusOf(statuses, name)
 		if st.Stopped = "without a status yet"; ok {
 			st.Stopped = cs.notRunning()
+			if t := cs.State.Terminated; t != nil {
+				st.Exited, st.ExitCode = true, t.ExitCode
+			}
 		}
 	}
 	return st, nil

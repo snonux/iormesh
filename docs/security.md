@@ -347,7 +347,11 @@ truth.
   - **`iormeshctl ensure`** (task zh4) runs only `status
     -json` and `start` with deploy's argv for the registry
     entry through the rule, plus collect's unprivileged calls:
-    nothing is widened, and it never pushes or upgrades.
+    nothing is widened, and it never pushes or upgrades. In a
+    pod entry (task pk4) it makes only deploy's and collect's
+    kubectl calls (`get`, `debug` with the pinned image,
+    `exec … iormesh ready`), so a cluster grants it nothing
+    deploy does not already need.
     `iormesh stop` now also rewrites the project's
     `state.json` to record `operator_stop` — through the rule
     only under the confined trace root (root's), never into a

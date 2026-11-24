@@ -52,6 +52,10 @@ func TestPodStateStopped(t *testing.T) {
 		if p.Stopped != want[i] {
 			t.Errorf("%s: Stopped %q, want %q", p.Name, p.Stopped, want[i])
 		}
+		// Only the terminated one carries an exit code (task pk4).
+		if exited := i == 0; p.Exited != exited || exited && p.ExitCode != 137 {
+			t.Errorf("%s: Exited %v, ExitCode %d", p.Name, p.Exited, p.ExitCode)
+		}
 	}
 }
 

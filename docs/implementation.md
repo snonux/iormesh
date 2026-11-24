@@ -3727,7 +3727,7 @@ going over days, from a timer
 ([architecture.md](architecture.md#tracing-for-days)):
 
 ```sh
-iormeshctl ensure [-project P]... [-registry FILE] [-store DIR] [HOST...]
+iormeshctl ensure [-project P]... [-registry FILE] [-store DIR] [HOST|POD...]
 ssh H sudo -n /opt/iormesh/bin/iormesh status -json    # hostReports
 # per project that ended on its own (deployer.start, deploy's argv):
 ssh H sudo -n /opt/iormesh/bin/iormesh start -project P ...
@@ -3746,18 +3746,33 @@ ssh H sudo -n /opt/iormesh/bin/iormesh start -project P ...
 - A status that cannot be read fails the host before anything
   is started; a failed start or collect fails it after the
   rest ran; every host runs under `env.onHost`, and the command
-  exits 1 naming the failed hosts. Hosts only: a pod entry is a
-  usage error. The deploy record is not touched (ensure does
-  not know the installed build).
+  exits 1 naming the failed hosts. The deploy record is not
+  touched (ensure does not know the installed build).
+- A pod entry (task pk4, `internal/ctl/ensure_pods.go`) is
+  decided per pod by its newest tracer container as the API
+  server reports it (`podDecide`): a debug tracer that
+  terminated non-zero is restarted through deploy's pod path
+  (`deployPod`: next `iormesh-N`, attach wait), one that exited
+  0 is left (a signal stopped it) and its collect skipped, a
+  running one is asked `ready -status` (`podProjectStatus`) and
+  an ended session there reported as needing a pod restart; no
+  tracer container is deploy's, a sidecar the kubelet's. The
+  pods are then read again and collected (`collector.pod`); a
+  gone pod fails the entry. `k8s.PodState` carries the exit
+  code (`Exited`, `ExitCode`).
 - Tests (`internal/ctl/ensure_test.go`): the exact calls for a
   restart, an operator stop and a running session; each
   decision; `disk_limit` collected-then-restarted, still full,
   collect failed; an unreachable host, a failed start, a report
-  error; pod, unregistered host and stray project refused with
-  no call. Tracer side (`internal/cli/operatorstop_test.go`):
-  the mark before and after a stop, on an unclean stop, not
-  outside the trace root through sudo, `false` from the start,
-  absent in an old state.
+  error; unregistered pod entry and host and a stray project
+  refused with no call. Pods (`ensure_pods_test.go`, the fake
+  kubectl): a killed tracer restarted as `iormesh-2` and
+  collected through it, an exit-0 tracer left, a gone pod
+  failed, running / lingering-ended / no-tracer pods left, a
+  refused flag before any call. Tracer side
+  (`internal/cli/operatorstop_test.go`): the mark before and
+  after a stop, on an unclean stop, not outside the trace root
+  through sudo, `false` from the start, absent in an old state.
 
 `collect`, as the commands it runs (built by task eb4,
 `internal/ctl/collect.go`; no sudo anywhere):
