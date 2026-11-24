@@ -80,7 +80,11 @@ handler yet (see "Safety") is tried again. One that refuses
 stage possible), is still not ready after 30 s or exits first is
 named once on stderr, `no Java attribution for pid N: …`, and
 never tried again; a load prints the same `agent loaded into
-pid N` line as at start. Every check of the start-time attach
+pid N` line as at start. A JVM the session starts with that
+execs while the start-time loads still run is left to them, so
+it never gets two SIGQUITs at once (task 7l4); it is tried late
+afterwards only if its start-time load found no JVM or no
+SIGQUIT handler yet. Every check of the start-time attach
 applies unchanged — the same handshake and its checks of the
 JVM's uid and namespaces, the same trusted (in a confined
 session pinned) jar, a stage inside a foreign root removed when
