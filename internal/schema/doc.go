@@ -1,6 +1,7 @@
 // Package schema is the trace output contract: one Event envelope, one
 // Graph export, and the validation both pass before anything downstream
-// trusts them. It is the Go form of PLAN.md's "Trace output contract".
+// trusts them. It is the Go form of docs/output-contract.md's "Trace output
+// contract".
 //
 // The package is cgo-free on purpose: the tracer (cgo, libbpfgo) writes
 // these types and the controller (CGO_ENABLED=0, darwin too) reads them,

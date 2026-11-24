@@ -19,10 +19,10 @@ import (
 )
 
 // `iormeshctl status [-project NAME]... [-registry FILE] [K8S]
-// [HOST|POD...]` (PLAN.md M4 "No management plane", task ph4): one table
-// row per target and project with the tracer's state, end reason, ends-by,
-// tracer version and the segments in ready/ awaiting collection, the NOTE
-// saying when ensure leaves an end stopped (stopNote, task 0l4). It
+// [HOST|POD...]` (docs/milestones.md M4 "No management plane", task ph4): one
+// table row per target and project with the tracer's state, end reason,
+// ends-by, tracer version and the segments in ready/ awaiting collection, the
+// NOTE saying when ensure leaves an end stopped (stopNote, task 0l4). It
 // composes what the tracers already report and changes nothing:
 //
 //   - a host answers `sudo -n /opt/iormesh/bin/iormesh status -json`

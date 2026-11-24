@@ -17,7 +17,7 @@ import (
 var update = flag.Bool("update", false, "rewrite testdata/*.golden from the current output")
 
 // Pod host ids of the synthetic cluster: an in-pod tracer's host id is
-// "pod-<uid>" (PLAN.md M7, task 7f4).
+// "pod-<uid>" (docs/milestones.md M7, task 7f4).
 const (
 	clientPod = "pod-5c1e0d2a-2222-4d4e-8b7a-0a1b2c3d4e5f"
 	backendA  = "pod-0b6e7a52-1111-4c3e-9a63-1d2f3e4a5b6c"

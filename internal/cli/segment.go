@@ -17,8 +17,8 @@ import (
 )
 
 // defaultTraceDir is where a server session's parquet segments go when
-// run is given no -out (PLAN.md M4 "Disk watchdog": -trace-dir, default
-// /opt/iormesh/traces). With -out alone a run writes NDJSON only, as
+// run is given no -out (docs/milestones.md M4 "Disk watchdog": -trace-dir,
+// default /opt/iormesh/traces). With -out alone a run writes NDJSON only, as
 // before M4, so the integration suite and local runs never touch /opt.
 const defaultTraceDir = "/opt/iormesh/traces"
 
@@ -133,7 +133,7 @@ func (cfg runConfig) watchdog() *segment.Watchdog {
 		MinFreeBytes: cfg.diskMinFree, MaxDirBytes: cfg.diskMaxBytes}
 }
 
-// checkTraceDisk is the startup check (PLAN.md: "fails fast if the
+// checkTraceDisk is the startup check (docs/milestones.md: "fails fast if the
 // partition is already at the limit"): it runs before the BPF object is
 // loaded, so a full disk costs milliseconds, not the seconds of a load.
 // The trace dir is created here, since statfs needs a path that exists;
@@ -257,8 +257,9 @@ func (t teeSink) Event(ev *schema.Event) error {
 func (t teeSink) Close() error { return errors.Join(t.a.Close(), t.b.Close()) }
 
 // endReason maps a poll error to the run's end: a disk-limit trip is a
-// clean end (PLAN.md: flush, record the reason, exit 0 — in a pod only
-// once collect drained the dir, awaitDrain), anything else an error.
+// clean end (docs/milestones.md M4 "Disk watchdog": flush, record the
+// reason, exit 0 — in a pod only once collect drained the dir,
+// awaitDrain), anything else an error.
 func endReason(err error) (string, error) {
 	if errors.Is(err, segment.ErrDiskLimit) {
 		return schema.EndDiskLimit, nil

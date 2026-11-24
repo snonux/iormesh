@@ -18,7 +18,7 @@ import java.util.Set;
 
 /**
  * M2's UDP: one datagram each way on 127.0.0.1 between two processes,
- * the per-packet peer exchange "What we trace" names for UDP.
+ * the per-packet peer exchange docs/trace-scope.md names for UDP.
  *
  * <pre>
  *   --role server [--port N]   bind, receive one datagram (5 bytes),

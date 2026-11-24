@@ -9,13 +9,13 @@ import (
 	"iormesh/internal/termsafe"
 )
 
-// `iormeshctl expand` (PLAN.md M6 "Discover"): list the unresolved peers
-// of the store's merged mesh, which of them the next round would enroll
+// `iormeshctl expand` (docs/milestones.md M6 "Discover"): list the unresolved
+// peers of the store's merged mesh, which of them the next round would enroll
 // and why each other one stays put. Without -apply, listing is all it
 // does — it reads the store, the host pins and the registry, never a
 // server, and writes nothing (not even the host pins build records:
-// checkedSegments). -apply enrolls and deploys (expandapply.go, PLAN.md
-// M6 "Apply").
+// checkedSegments). -apply enrolls and deploys (expandapply.go,
+// docs/milestones.md M6 "Apply").
 //
 // It merges the store itself rather than reading the last build's
 // outputs: the plan needs every unresolved half's 4-tuple, which the

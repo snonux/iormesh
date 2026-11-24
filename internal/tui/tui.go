@@ -1,9 +1,9 @@
-// Package tui is `iormeshctl tui` (PLAN.md M5; docs/visualization.md
-// "The terminal UI", step V4): a Bubble Tea explorer of one build's view
-// model for SSH sessions and hosts without a browser. It renders the same
-// internal/viewmodel.Model that `show` prints and the site draws — no
-// reading of its own, so the three surfaces cannot disagree — and reuses
-// the text views' formatting (StepText, WriteSequence, WriteThreads,
+// Package tui is `iormeshctl tui` (docs/milestones.md M5;
+// docs/visualization.md "The terminal UI", step V4): a Bubble Tea explorer of
+// one build's view model for SSH sessions and hosts without a browser. It
+// renders the same internal/viewmodel.Model that `show` prints and the site
+// draws — no reading of its own, so the three surfaces cannot disagree — and
+// reuses the text views' formatting (StepText, WriteSequence, WriteThreads,
 // WriteProcess, WriteSummary, WriteHealth) for its rows and details.
 //
 // Rules it keeps (ior's TUI rules, its AGENTS.md):

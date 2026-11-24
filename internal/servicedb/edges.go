@@ -7,7 +7,7 @@ import (
 	"slices"
 )
 
-// Interaction is one who-talks-to-whom edge (PLAN.md M4: "orders →
+// Interaction is one who-talks-to-whom edge (docs/milestones.md M4: "orders →
 // inventory"): a client, by service name when it serves one, else by
 // app; and an endpoint, by its Label.
 type Interaction struct {

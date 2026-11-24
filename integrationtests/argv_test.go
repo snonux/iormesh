@@ -3,8 +3,8 @@ package integrationtests
 // M2 step 8 end to end: a child JVM started with a planted secret in its
 // argv is traced through its exec, and the secret is nowhere in what the
 // tracer writes — not in events.ndjson, not in graph.json — while the
-// exec event still carries the argv, masked (PLAN.md decision #9 and the
-// M0 redaction expectation; docs/implementation.md M2 step 8).
+// exec event still carries the argv, masked (docs/decisions.md #9 and
+// the M0 redaction expectation; docs/implementation.md M2 step 8).
 
 import (
 	"os"

@@ -300,8 +300,8 @@ func isFileWrite(kind string) bool {
 }
 
 // changesFS reports the file kinds that change the file system — the
-// meta ops PLAN.md's sequence view protocols (create, delete,
-// rename/move, touch, symlink, …). Reads of metadata (stat, readlink,
+// meta ops the sequence view (docs/milestones.md M5) protocols (create,
+// delete, rename/move, touch, symlink, …). Reads of metadata (stat, readlink,
 // getxattr) are no change and stay out of the rollup.
 func changesFS(kind string) bool {
 	switch kind {

@@ -11,7 +11,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * M7's ingress scenario (PLAN.md M0 "Ingress scenario"): the
+ * M7's ingress scenario (docs/milestones.md M0 "Ingress scenario"): the
  * microservices scenario's front door — the gateway asking for the
  * inventory's stock — through an ingress controller (Traefik in kind) by
  * an FQDN, so no tracer sees the hop in the middle and the route map has

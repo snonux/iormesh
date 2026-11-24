@@ -104,8 +104,8 @@ var _ tracer = (*bpf.Tracer)(nil)
 // session only once no restarted owner appeared within -listen-grace —
 // then writes the event stream and the graph into cfg.out. The stream opens with a
 // session header, records loss as drop events while it runs and closes
-// with an end event naming why it stopped (PLAN.md, "Trace output
-// contract").
+// with an end event naming why it stopped (docs/output-contract.md,
+// "Explicit end").
 //
 // The tracer is opened before the output files are created, so a run that
 // cannot attach (no root, no BTF) leaves an existing trace directory

@@ -1,5 +1,5 @@
-// Package ctl implements iormeshctl, the controller (PLAN.md M4). Its
-// usage text lives in one place, the constants of usage.go that usage()
+// Package ctl implements iormeshctl, the controller (docs/milestones.md M4).
+// Its usage text lives in one place, the constants of usage.go that usage()
 // prints (`iormeshctl -h`), held to every subcommand and flag by
 // TestUsageNamesEverySubcommandAndFlag; this comment does not repeat it,
 // so the two cannot drift apart (task 2l4). `SUBCMD -h` prints only that
@@ -8,7 +8,7 @@
 // K8S is -context CTX and -namespace NS, and POD a registry pods: entry's
 // reference, <cluster>/<namespace>/<pod or selector>: deploy, collect,
 // refresh and rm reach pods through the operator's kubectl (pods.go,
-// internal/k8s, PLAN.md M7 and decision #18).
+// internal/k8s, docs/milestones.md M7 and decision #18).
 //
 // add manages the server registry (internal/federate, decisions #12 and
 // #21) and rm tears a host's deployment down before unregistering it
@@ -36,10 +36,10 @@
 // model in a terminal (tui.go, internal/tui); query cuts the merged
 // trace into a size-capped NDJSON slice (query.go, internal/query). expand
 // lists which unresolved peers the next expansion round would enroll and
-// why the others stay (expand.go, internal/expand, PLAN.md M6); with
-// -apply it enrolls them and runs deploy's steps on them (expandapply.go).
-// It is cgo-free (internal/buildgate checks it), so it cross-compiles for
-// the darwin and linux laptops it runs on.
+// why the others stay (expand.go, internal/expand, docs/milestones.md M6);
+// with -apply it enrolls them and runs deploy's steps on them
+// (expandapply.go). It is cgo-free (internal/buildgate checks it), so it
+// cross-compiles for the darwin and linux laptops it runs on.
 package ctl
 
 import (

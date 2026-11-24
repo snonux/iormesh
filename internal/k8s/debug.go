@@ -127,7 +127,7 @@ func checkContainers(p podInfo, t Target) error {
 	if t.Mode == ModeSidecar {
 		return checkSidecar(p, t)
 	}
-	// One tracer per pod (PLAN.md M7): a tracer's host_id is the pod
+	// One tracer per pod (docs/milestones.md M7): a tracer's host_id is the pod
 	// (pod.go HostID) and its pids are the pod's PID namespace's, so a
 	// second tracer in the same pod would write a second session under
 	// the same identity. Both refusals below keep it at one.

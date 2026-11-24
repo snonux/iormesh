@@ -11,8 +11,8 @@
 // the fused connections in happens-before order, each thread's file work
 // interleaved, each step on the lifelines of the threads at its ends;
 // task xb4 appended the routed edges and their flags (routes.go: the
-// route map's Services and ingress routes, PLAN.md M7, decision #15);
-// task 0f4 appended the thread stories (stories.go: one thread's steps
+// route map's Services and ingress routes, docs/milestones.md M7, decision
+// #15); task 0f4 appended the thread stories (stories.go: one thread's steps
 // across the conversations, `show thread`) and the processes
 // (process.go: per host, its threads, files and sockets, projected from
 // the run's rollup, internal/report).
@@ -68,8 +68,8 @@ type Model struct {
 	// seen after it are missing. Not zero, every processes view says the
 	// list is partial (PartialLine).
 	Untracked uint64 `json:"untracked"`
-	// Routes are the route map's edges (routes.go, PLAN.md M7): ClusterIP
-	// connections with their Service named, and untraced Services and
+	// Routes are the route map's edges (routes.go, docs/milestones.md M7):
+	// ClusterIP connections with their Service named, and untraced Services and
 	// ingress FQDNs completed to their workload; empty without a map.
 	Routes []Route `json:"routes"`
 }

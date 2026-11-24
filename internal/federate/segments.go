@@ -18,7 +18,7 @@ import (
 
 // Segment is one collected events segment in the controller's store,
 // <store>/<project>/<host>/<fqdn>-<session>-<start-ts>-<seq>.parquet
-// (collect's layout, PLAN.md M4 "Collect"), as a merge Source.
+// (collect's layout, docs/milestones.md M4 "Collect"), as a merge Source.
 //
 // Each segment is its own source, not each session: the service
 // database counts a connection's requests per source (servicedb

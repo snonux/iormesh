@@ -114,7 +114,7 @@ func TestArgvDoesNotModifyInput(t *testing.T) {
 
 // TestArgvNoSecretSurvives plants secrets in every recognized shape and
 // checks that none of them is anywhere in the output, which is the
-// property the trace contract needs (PLAN.md M0 HTTP scenarios).
+// property the trace contract needs (docs/milestones.md M0 HTTP scenarios).
 func TestArgvNoSecretSurvives(t *testing.T) {
 	const s = "hunter2"
 	in := []string{

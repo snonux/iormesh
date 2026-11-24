@@ -22,8 +22,8 @@ import java.util.Set;
 import java.util.function.Function;
 
 /**
- * The HTTP hooks (PLAN.md M3 "HTTP/HTTPS request events", decision #22):
- * the libraries' targets with their ids, ready for HttpTransformer. Ids
+ * The HTTP hooks (docs/milestones.md M3 "HTTP/HTTPS request events", decision
+ * #22): the libraries' targets with their ids, ready for HttpTransformer. Ids
  * are their own space, 1.., separate from the I/O hook table's: an HTTP
  * hook is no bracket and joins no syscall.
  *

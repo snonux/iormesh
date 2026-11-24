@@ -15,7 +15,7 @@ import (
 	"iormesh/internal/servicedb"
 )
 
-// servicesCommand is `iormeshctl services [VERB] ...` (PLAN.md M4
+// servicesCommand is `iormeshctl services [VERB] ...` (docs/milestones.md M4
 // "Service-interaction database"): humans name services here, never by
 // editing a file. The verbs:
 //

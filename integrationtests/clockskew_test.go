@@ -9,8 +9,8 @@ import (
 	"iormesh/internal/schema"
 )
 
-// The injected clock skew of PLAN.md's M4 acceptance (task ye4): the
-// rig's emulated hosts share one kernel clock, so each host's tracer is
+// The injected clock skew of docs/milestones.md's M4 acceptance (task ye4):
+// the rig's emulated hosts share one kernel clock, so each host's tracer is
 // told to stamp wall_ns that far off (Host.ClockSkew, the tracer's
 // test-only IORMESH_TEST_CLOCK_SKEW). The merge's fusion window and clock
 // bounds work on wall_ns; boot_ns stays the machine's one boot clock, so

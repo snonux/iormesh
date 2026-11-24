@@ -1,8 +1,8 @@
 // Package containerbuild holds the container builds of the release
 // binaries as data: which builder each target uses, the engine command
 // lines that build the builder images and run the builds, and the shell
-// script each build runs inside its container (PLAN.md "Container builds
-// (Docker/Podman)").
+// script each build runs inside its container (docs/build.md
+// "Container builds").
 //
 // Magefile.go is behind `//go:build mage`, so nothing can test it; keeping
 // the argv here (as internal/gatecmd does for the lint gates) makes it
@@ -99,7 +99,7 @@ func CtlBinary(goos, goarch string) string {
 }
 
 // CtlPlatforms are the controller's release platforms: macOS and Linux
-// laptops, both arches (PLAN.md M4).
+// laptops, both arches (docs/milestones.md M4).
 var CtlPlatforms = [][2]string{
 	{"darwin", "amd64"}, {"darwin", "arm64"},
 	{"linux", "amd64"}, {"linux", "arm64"},

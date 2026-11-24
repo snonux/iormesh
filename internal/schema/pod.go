@@ -10,12 +10,12 @@ const podHostPrefix = "pod-"
 // and Docker all use 64 hex digits.
 const containerIDLen = 64
 
-// validatePod keeps the pod object to what an in-pod tracer writes (PLAN.md
-// M7 "Pod fields on events", task sh4): only on a pod's host id, names the
-// API server could have issued — they reach the controller's namespace
-// filter and the operator's terminal — and a container id only on an
-// event of a process. The checks are byte loops, not k8sname's regexps:
-// the sink validates every event (decision #25's budget), and
+// validatePod keeps the pod object to what an in-pod tracer writes
+// (docs/milestones.md M7 "Pod fields on events", task sh4): only on a pod's
+// host id, names the API server could have issued — they reach the
+// controller's namespace filter and the operator's terminal — and a container
+// id only on an event of a process. The checks are byte loops, not k8sname's
+// regexps: the sink validates every event (decision #25's budget), and
 // TestPodNameRulesMatchK8sname holds the two to the same rules.
 func (e *Event) validatePod() error {
 	p := e.Pod

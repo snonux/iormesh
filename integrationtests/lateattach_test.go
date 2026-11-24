@@ -9,11 +9,11 @@ import (
 	"iormesh/internal/schema"
 )
 
-// TestJavaLateAttach is `run -agent`'s late attach end to end (PLAN.md M3
-// "Attach", task lh4): a -pattern session starts with no JVM; then
-// http-async's server and client are exec'd, matching the pattern, and
-// each waits at its startup gate. The tracer adopts both at their exec
-// and loads the agent once each JVM accepts it; only once it reported
+// TestJavaLateAttach is `run -agent`'s late attach end to end
+// (docs/milestones.md M3 "Attach", task lh4): a -pattern session starts with
+// no JVM; then http-async's server and client are exec'd, matching the
+// pattern, and each waits at its startup gate. The tracer adopts both at their
+// exec and loads the agent once each JVM accepts it; only once it reported
 // both JVMs joined are the gates opened. Both ends' requests are http
 // events and the client's lookup of "localhost" a dns event — records
 // only the late-loaded agent can have written — attributed to Java.

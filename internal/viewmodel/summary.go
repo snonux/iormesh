@@ -57,8 +57,8 @@ func WriteSummary(w io.Writer, m Model) error {
 // writeSessions prints one line per session the operator must look at:
 // one that recorded no end, and one whose end reason is not a normal
 // one (normalEnd) — the disk watchdog's disk_limit, a tracer error, or
-// a reason this build does not know. PLAN.md M4 wants the exit reason
-// in the summary, not only in `show health`: a run the watchdog cut
+// a reason this build does not know. docs/milestones.md M4 wants the exit
+// reason in the summary, not only in `show health`: a run the watchdog cut
 // short must not read like a complete one. A normal end stays out, so
 // the summary still lists only what needs the operator's eye.
 func writeSessions(b *strings.Builder, ss []Session) {

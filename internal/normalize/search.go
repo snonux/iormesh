@@ -23,9 +23,9 @@ type collectedThread struct {
 // eventSearch assigns declared threads to collected threads. Within a
 // thread it matches greedily — each declared event takes the first
 // collected event after the previous match that fits — and it backtracks
-// over candidate threads only (PLAN.md M0, docs/implementation.md step 9):
-// a JVM has dozens of threads but a scenario declares one or two, and the
-// greedy in-thread match is sound for the deterministic sequences goldens
+// over candidate threads only (docs/milestones.md M0, docs/implementation.md
+// step 9): a JVM has dozens of threads but a scenario declares one or two, and
+// the greedy in-thread match is sound for the deterministic sequences goldens
 // declare.
 type eventSearch struct {
 	plans   []threadPlan

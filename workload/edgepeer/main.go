@@ -1,6 +1,7 @@
 // Command edgepeer drives the M2 edge cases the Java workload cannot force
-// deterministically, for the integration suite (PLAN.md M2 acceptance:
-// "PID reuse" and "socket races"; docs/testing.md, "M2 acceptance"):
+// deterministically, for the integration suite (docs/milestones.md M2
+// acceptance: "PID reuse" and "socket races"; docs/testing.md, "M2
+// acceptance"):
 //
 //   - pid-target -dir D: the traced process whose PID gets reused. It
 //     brackets itself as pid-reuse, writes D/pid-reuse-target.dat and

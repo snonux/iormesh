@@ -1,5 +1,5 @@
 // Package normalize makes traces comparable across runs and checks them
-// against a scenario's declared expectations (PLAN.md M0 "Golden
+// against a scenario's declared expectations (docs/milestones.md M0 "Golden
 // semantics", M1). It is cgo-free: the controller runs the same checks.
 //
 // Normalize cuts a trace to its scenario's marker bracket and rewrites

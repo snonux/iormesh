@@ -29,9 +29,9 @@ var tracefsRoots = []string{
 
 // m1Tracepoints are what the M1 scenarios cannot do without: the file data
 // ops and the TCP connect/accept syscalls, and the socket state tracepoint
-// the 4-tuple comes from (PLAN.md M1 "TCP lifecycle from the socket").
-// accept(2) itself is left out: the JVM accepts with accept4, and arm64
-// kernels have no plain accept.
+// the 4-tuple comes from (docs/milestones.md M1 "TCP lifecycle from the
+// socket"). accept(2) itself is left out: the JVM accepts with accept4, and
+// arm64 kernels have no plain accept.
 var m1Tracepoints = []string{
 	"syscalls/sys_enter_openat",
 	"syscalls/sys_enter_read",

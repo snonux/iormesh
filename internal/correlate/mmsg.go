@@ -5,8 +5,8 @@ import (
 	"iormesh/internal/types"
 )
 
-// M4 (PLAN.md "Clock reconciliation from the traffic itself", task oh4):
-// sendmmsg and recvmmsg return how many messages they moved, not bytes.
+// M4 (docs/milestones.md "Clock reconciliation from the traffic itself", task
+// oh4): sendmmsg and recvmmsg return how many messages they moved, not bytes.
 // The kernel side (internal/c/mmsg.c) sums the messages' msg_len at the
 // exit and sends an mmsg_event as the exit record of every such call that
 // moved messages: the ret (the count), the byte sum, a flag when the sum

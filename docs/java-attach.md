@@ -1,6 +1,6 @@
 # Attaching the Java agent
 
-The Java agent (`iormesh-agent.jar`, PLAN.md "M3 — Java agent")
+The Java agent (`iormesh-agent.jar`, milestones.md "M3 — Java agent")
 names the Java method, stack and thread behind each syscall of a
 JVM. It gets into a JVM in one of two ways (decision #2):
 
@@ -13,7 +13,7 @@ JVM. It gets into a JVM in one of two ways (decision #2):
 
 ## On hosts iormeshctl deploys to
 
-The jar ships like the tracer (task kf4, PLAN.md decision #28):
+The jar ships like the tracer (task kf4, decisions.md #28):
 `mage agentBuild` copies it to `dist/iormesh-agent.jar`, `mage
 sign` signs it at the release version, and `iormeshctl deploy`
 pushes it to every host with a project that uses the agent — a
@@ -58,7 +58,7 @@ attach (below), up to 30 s after its exec. Its start-up I/O —
 class loading, config reads, the first connections — happens
 before that and stays unattributed; the tracer says so with
 `agent loaded into pid N; its I/O before now stays
-unattributed`. This is an accepted limit (PLAN.md M3, task
+unattributed`. This is an accepted limit (milestones.md M3, task
 mk4): only `-javaagent` at launch covers a JVM's start, and
 that is a change to how the application is started, which the
 operator makes. iormesh never writes an application's unit,
@@ -204,7 +204,7 @@ dictionary records — the hook table (HOOK), each thread
 (THREAD), stack (STACK) and class (CLASS) — once each, so a later
 session would read brackets it could never attribute. Each reader
 therefore adds one to the ring header's reader epoch (offset 40)
-when it opens the ring (task 5j4, PLAN.md #27). The agent's
+when it opens the ring (task 5j4, decisions.md #27). The agent's
 watermark thread polls the word every tick (`watermark=`, 10 ms):
 the first reader finds everything still in the ring and needs
 nothing; from the second reader on, the thread writes the hook
@@ -233,7 +233,7 @@ bridge in the bootstrap loader before extracting anything (task
 8j4), so it costs the JVM no temporary jar, descriptor, mapping
 or bootstrap search-path entry.
 
-A ring therefore lives as long as its JVM (task 2j4, PLAN.md #27).
+A ring therefore lives as long as its JVM (task 2j4, decisions.md #27).
 The JVM's agent unlinks its own ring in its shutdown hook, right
 after the last watermark: a tracer that reads the ring has had it
 mapped since its first scan, and unlinking leaves the mapping
@@ -258,7 +258,7 @@ older agent leaves such a thread unnamed and unflagged, like one
 whose THREAD record was dropped). A virtual thread idle that long
 then gets a second, identical row in the thread table.
 
-Between sessions the agent goes dormant (task ej4, PLAN.md #27).
+Between sessions the agent goes dormant (task ej4, decisions.md #27).
 Once the ring's tail has stood still for 10 s while the ring kept
 dropping records (it is full; the watermark thread's own
 watermarks drop when the application is quiet) and no reader
@@ -380,8 +380,8 @@ dictionary.
   namespace, and the kernel kills it along with that namespace's
   init (task ah4). `iormeshctl deploy` then starts a fresh debug
   tracer, which live-attaches to the JVM running at that point. For
-  a pod that restarts, use the sidecar and `-javaagent` (PLAN.md
-  #14).
+  a pod that restarts, use the sidecar and `-javaagent`
+  (decisions.md #14).
 
 ## Safety
 

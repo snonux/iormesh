@@ -1,8 +1,8 @@
 # Visualization — exploring a consolidated mesh
 
 How the result of a consolidation run is shown. Companion to
-[PLAN.md](../PLAN.md) (M4, M5, decision #11) — the plan is the
-source of truth; this doc is the design.
+[milestones.md](milestones.md) (M4, M5) and
+[decisions.md](decisions.md) (#11); this doc is the design.
 
 A *consolidation run* is `iormeshctl build`: it merges the
 collected trace segments and rebuilds the graph. (`collect` only
@@ -207,7 +207,7 @@ Everywhere: a filter bar (service, host, thread, path, time
 range) and text search.
 
 The static `graph.svg` and `sequence/*.svg` are the deterministic
-exports PLAN.md already requires; the interactive screens draw
+exports milestones.md M5 already requires; the interactive screens draw
 the same model with the same layout rules, so a screenshot and
 the export match.
 
@@ -328,7 +328,7 @@ iormeshctl show report                # the summary, then the rollup
 `build -namespace NS` writes `<projects>@NS/` and a windowed
 build (`-from`, `-to` or `-last`) `<projects>[@NS]~window/`,
 beside the full build ([kubernetes.md](kubernetes.md#collect-and-build),
-PLAN.md "Build window and prune"). All three surfaces read them
+milestones.md "Build window and prune"). All three surfaces read them
 with the same two flags, which pick the same directory for each
 (task hk4):
 
@@ -379,7 +379,7 @@ A `session` line names each session the operator must look at:
 one that recorded no end, and one whose end reason is not a
 normal one (`duration`, `stop`, `targets_exited`), so a run the
 disk watchdog cut short reads `session    m4disk/iom2 …: ended
-disk_limit (the disk watchdog stopped the tracer)` — PLAN.md M4
+disk_limit (the disk watchdog stopped the tracer)` — milestones.md M4
 puts the exit reason in the summary (task lf4). `show health`
 lists every session's end.
 
@@ -398,7 +398,7 @@ from `report.json`, which build writes beside the model: one
 block per process — files, connections, threads with their
 requests in order, top methods ([schema.md](schema.md#summary-rollup-m5)).
 The rollup is no fourth reading of the data for the three
-surfaces: it is the export an LLM reads first (PLAN.md M5). (Lines cut
+surfaces: it is the export an LLM reads first (milestones.md M5). (Lines cut
 with … here; `internal/ctl/testdata/build_summary.golden` has
 them whole.) Every string from the traces is printed
 terminal-safe: one holding a control character comes out
@@ -677,7 +677,7 @@ goldens in `internal/ctl/testdata/tui_*.golden`).
 
 ## Routed edges (M7)
 
-The route map (PLAN.md M7 "Ingress route mapping", decision #15)
+The route map (milestones.md M7 "Ingress route mapping", decision #15)
 adds `routes` and `health.route_flags` to the model, and `build`
 prints them as `routed` and `route flag` lines. As built by task
 bf4, the three surfaces draw them too. A routed edge is one

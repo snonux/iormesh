@@ -8,9 +8,9 @@ import (
 	"iormesh/internal/viewmodel"
 )
 
-// The routed edges on the edges screen (task bf4, PLAN.md M7 "Ingress
-// route mapping"). A routed edge is a row after the traced edges — its
-// client, "=>", its last hop (the workload, else the pod or Service) and
+// The routed edges on the edges screen (task bf4, docs/milestones.md M7
+// "Ingress route mapping"). A routed edge is a row after the traced edges —
+// its client, "=>", its last hop (the workload, else the pod or Service) and
 // "routed BASIS" — and every route flag a row after those ("flag",
 // subject, kind), so a flag is on screen beside the edges it qualifies,
 // not only in the health text. The rows stay narrow — the FROM column

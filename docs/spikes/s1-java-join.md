@@ -1,15 +1,14 @@
 # S1 — Java↔syscall join: result
 
-Companion to [PLAN.md](../../PLAN.md) — the plan is the source of
-truth; this is spike S1's written result. Raw notes, per-run
-numbers and the throwaway code are in
-[spikes/s1/](../../spikes/s1/NOTES.md). Kernel 7.2.15-200.fc44,
-bpftrace 0.24.2, JDK 25.0.4.1 (Red Hat build; 27-ea for the
-uprobe join), November 2026. No JDK 21 runtime was installed:
-JDK 21 was checked against its sources only — which missed one
-signature: 21 has `Net.serverSocket(ProtocolFamily, boolean)`, not
-25's `serverSocket(ProtocolFamily)`. M3 found it on real 21
-runtimes (task sc4) and split the hook table (PLAN.md #29).
+Companion to [milestones.md](../milestones.md) ("Spikes") and
+[decisions.md](../decisions.md); this is spike S1's written result. Raw notes,
+per-run numbers and the throwaway code are in
+[spikes/s1/](../../spikes/s1/NOTES.md). Kernel 7.2.15-200.fc44, bpftrace
+0.24.2, JDK 25.0.4.1 (Red Hat build; 27-ea for the uprobe join), November 2026.
+No JDK 21 runtime was installed: JDK 21 was checked against its sources only —
+which missed one signature: 21 has `Net.serverSocket(ProtocolFamily, boolean)`,
+not 25's `serverSocket(ProtocolFamily)`. M3 found it on real 21 runtimes (task
+sc4) and split the hook table (docs/decisions.md #29).
 
 **Verdict: works.** Every declared I/O op of `file-basic` (6/6)
 and `tcp-loopback` (server 11/11, client 10/10) is attributed to
@@ -302,7 +301,7 @@ stacks, and a per-thread cache of the last stack for tight loops
   `internal/schema` already has them — `java.thread` (the Java
   thread name, from the agent's `THREAD` record) and `java.stack`
   (method-table ids, innermost first, from its `STACK` record),
-  set exactly when `attribution` is `java`. PLAN.md's flat
+  set exactly when `attribution` is `java`. The envelope sketch's flat
   `java_thread`/`java_stack` were a sketch. A syscall the uprobe
   marked but no agent bracket contains stays `attribution: none`;
   whether to also record the native's name is M3's call (an

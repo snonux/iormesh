@@ -2,8 +2,8 @@ package integrationtests
 
 // The M4 segment writer against the real tracer (task 8b4): a run that
 // writes NDJSON and parquet segments at once must put the same trace in
-// both — the parquet files are the same schema, columnar (PLAN.md "Two
-// serializations, one schema").
+// both — the parquet files are the same schema, columnar
+// (docs/output-contract.md "Parquet bulk files").
 
 import (
 	"os"

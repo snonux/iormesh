@@ -253,7 +253,7 @@ final class Brackets {
      * joiner never joins a virtual thread's bracket of a hook that can
      * park (internal/correlate canPark). These two
      * readlinks per bracket are the price of virtual threads, which v1
-     * only flags (PLAN.md M3, "Platform threads only").
+     * only flags (docs/milestones.md M3, "Platform threads only").
      */
     int carrierTid(int d) {
         if (!virtual) {

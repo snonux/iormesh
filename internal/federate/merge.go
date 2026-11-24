@@ -40,7 +40,7 @@ type Result struct {
 	// unchanged.
 	Renames map[LocalConn]string
 	// Clocks bounds each traced host pair's clock offset per window, from
-	// the fused connections' send→receive edges (PLAN.md M4 "Clock
+	// the fused connections' send→receive edges (docs/milestones.md M4 "Clock
 	// reconciliation"), sorted by (HostA, HostB, Start). A pair without a
 	// fused connection has none: no traffic, no estimate. An empty bound
 	// is kept and reported (ClockBound.Empty). NewTimeline orders
@@ -62,7 +62,7 @@ type hostGraph struct {
 // traces always merge into the same bytes. The sources may belong to
 // several projects: the join is the same across projects, so building
 // project A with project B fuses A's calls into B into cross-project
-// edges (PLAN.md M4 "Build").
+// edges (docs/milestones.md M4 "Build").
 //
 // The clock bounds are computed after fusing, from the fused connections
 // only, and never feed back into Fuse: a bound proves offsets only

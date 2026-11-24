@@ -6,8 +6,8 @@ import java.util.Set;
 
 /**
  * The microservices scenario's service roles and the topology between
- * them (PLAN.md M0 "Microservices end-to-end scenario"). Every hop is
- * REST over one HTTP/1.1 connection of its own; a service with a TLS
+ * them (docs/milestones.md M0 "Microservices end-to-end scenario"). Every hop
+ * is REST over one HTTP/1.1 connection of its own; a service with a TLS
  * server is reached over TLS, pinned to the certificate it published:
  *
  * <pre>

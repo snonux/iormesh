@@ -6,7 +6,7 @@
 # CMD (mage drives the build with `<engine> run`, see
 # internal/containerbuild).
 #
-# Builder for the linux/amd64 tracer (PLAN.md "Container builds"): Rocky
+# Builder for the linux/amd64 tracer (docs/build.md "Container builds"): Rocky
 # Linux 9, the first tracer target, with the toolchain ior builds on. The
 # image holds only the toolchain; the source tree is mounted at run time,
 # so one image serves every commit.

@@ -1,5 +1,5 @@
 // Package hostlayout is the one source of the server install's fixed
-// paths and of its sudoers rule (PLAN.md decision #1): the tracer's
+// paths and of its sudoers rule (docs/decisions.md #1): the tracer's
 // sudo gate (internal/cli confine.go) and uninstall, the controller's
 // deploy, rm and bootstrap (internal/ctl), and the docs' tests all read
 // them from here, so the rule bootstrap installs is exactly the one the

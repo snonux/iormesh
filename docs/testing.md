@@ -1,14 +1,15 @@
 # Testing strategy
 
-Companion to [PLAN.md](../PLAN.md) — the plan is the source of
-truth.
+How iormesh is tested. The milestones whose acceptance it records
+are in [milestones.md](milestones.md), the decisions it cites in
+[decisions.md](decisions.md).
 
 The test workload comes *first*, not last — and it comes first
 per milestone:
 
 - The workload framework (M0) lands before any tracer code. Every
   later milestone adds its own scenarios before its tracer code,
-  so each one lands against a known target. PLAN.md's scenario
+  so each one lands against a known target. milestones.md's scenario
   catalogue says which scenarios prove which milestone.
 - A walking skeleton (M1) runs the whole chain once — probes,
   correlator, schema, normalizer, golden check, harness — on the
@@ -64,7 +65,7 @@ introspection.
   clock offset per tracer, and the merge must recover it; NAT is
   emulated with a DNAT hop.
 - The k8s mode rehearses M0's client/server and ingress
-  scenarios as pods in kind (PLAN.md M7); the microservices
+  scenarios as pods in kind (milestones.md M7); the microservices
   scenario as pods is planned (task uh4).
 - The LLM claim is tested: a fixed question set over workload
   traces, with answers known from the scenario declarations.
@@ -127,14 +128,82 @@ nothing about the BPF object loading on el9's 5.14 kernel.
 
 ## Integration tests follow ior
 
-The end-to-end suite lifts ior's `integrationtests/` pattern
-(in `../ior`): a dedicated package with a harness that runs the
-tracer against the known workload, two expectation layers
-(aggregated events vs exact per-event rows), one test file per
-trace family, kernel-support probes with explained skips,
-loss-honest re-runs, unexercised-skip markers, and pass gates
-that do not trust exit codes. See PLAN.md, "Integration tests —
-follow ior" for the full map.
+iormesh does not invent its end-to-end test machinery: the
+suite lifts ior's `integrationtests/` package (in `../ior`, its
+README first) with the workload swapped for M0's. Before
+changing the suite, re-read ior; this section is the map, not
+the replacement:
+
+- **Suite layout**: a dedicated `integrationtests/` package and
+  `mage integrationTest` (plus a serial variant) that builds
+  the tracer, the M0 workload and the compiled test binary,
+  then runs it as root — skipping with an explanation when
+  root or BPF is unavailable. The test binary is compiled to
+  `bin/` (ior uses the repo root; decision #30) so its absolute
+  path matches a scoped sudoers rule.
+- **Harness** (ior's `harness.go`): start the tracer against
+  a known M0 workload process — or the whole microservices
+  topology — collect the trace output (NDJSON live, parquet
+  segments), and expose parsed rows for assertions; ior's
+  readiness wait, timeouts and BPF-object override env apply
+  as-is.
+- **Two expectation layers** (ior's `expectations.go`):
+  aggregated event assertions (path contains, event, comm,
+  min count, flag bits) over the recording, and exact
+  per-event fields (fd, fd_gen, ret, err, bytes, latency)
+  over the parquet rows — aggregate where exactness doesn't
+  matter, row-exact where it does.
+- **Per-family test files**: one `*_test.go` per trace family,
+  each running its M0 scenario and asserting the declared
+  events — file ops (data + meta: rename, symlink, touch,
+  xattr, chmod/chown…), sockets (IPv4/IPv6, TCP/UDP
+  lifecycle), local IPC, signals, process/thread/fd
+  lifecycle, and with M3: Java stacks,
+  class loads, HTTP events (plain + TLS — including the
+  redaction expectations: the planted Authorization header,
+  query secret and argv secret must be absent), OTEL ids.
+- **The golden check is the integration-level assertion**:
+  the normalized trace, cut to the scenario's marker bracket,
+  must contain everything the scenario declares and nothing
+  on its must-not-appear list ("What a golden check asserts"
+  above) — subset semantics, the same spirit as ior's min-count
+  and row-presence assertions. The per-family expectations are
+  the fine-grained complement, not a replacement.
+- **Multi-host tests**: the microservices topology across two
+  test hosts (or containers in distinct network namespaces)
+  drives deploy → collect → merge (and expand, M6) and asserts
+  the fused cross-host edges and the sequence view's thread
+  causality.
+- **Emulated hosts share a kernel — compensate**: tracers in
+  network namespaces on one machine share one clock, so
+  reconciliation would never be exercised. A test-only flag
+  injects a clock offset per tracer; the merge must recover
+  it within its recorded bound. NAT is emulated the same way
+  (a DNAT hop between namespaces). Built (task ye4): the knob
+  is the environment variable `IORMESH_TEST_CLOCK_SKEW` on
+  `run` — not a flag, so no usage text shows it and `start`
+  cannot forward it; refused through the sudoers rule and by
+  `start` — and shifts `wall_ns` only, the clock the fusion
+  window and the bounds use; `boot_ns`, shared by the emulated
+  hosts, is the truth the tests order against. Skews of
+  −0.25 s and +1.25 s fuse and are recovered inside two-sided
+  bounds ≈250–800 µs wide, with no cross-host order
+  contradicting the truth; +3 min fuses nothing (`no_match`,
+  no bound) — see "M4 two-host and NAT'ed pairs" below.
+- **Kernel-support probes** (ior's `kernel_support_test.go`):
+  probe for the newer syscalls/tracepoints a scenario needs
+  and skip with the reason — never infer support from kernel
+  version.
+- **Loss honesty** (ior's `kernelloss.go` + `unexercised.go`):
+  a run missing events that kernel-side loss could explain
+  is re-run; a test none of whose runs exercised its case
+  skips with a marker instead of passing — a silent green is
+  not a green.
+- **Gates, not exit codes** (ior's `gatecmd`): the runner
+  verifies the required tests actually reported passed and
+  prints a skip summary — exit 0 alone is not believed.
+- **Parallelism**: `INTEGRATION_PARALLEL`-style knob with
+  `-test.failfast` by default, serial mode for debugging.
 
 ### The suite today
 
@@ -175,7 +244,7 @@ ior source and what changed:
   the syscall handlers behind classic `raw_syscalls`
   dispatchers, which run with preemption disabled; a skip left
   is a task preempted inside a `bpf()` map syscall, and still
-  counts (PLAN.md, "Syscall handlers run behind `raw_syscalls`
+  counts (output-contract.md, "Syscall handlers run behind `raw_syscalls`
   dispatchers").
   Undecodable records fail at once: they are a decoder bug.
 - Every run also writes parquet segments (`-trace-dir` beside
@@ -273,7 +342,7 @@ to keep a failed test's trace directories.
 
 `mage integrationTest`: 27 tests (25 at acceptance, plus the PID
 reuse and socket race tests of task id4), two consecutive full
-runs green on HEAD, no skips, zero lost records. PLAN.md's M2
+runs green on HEAD, no skips, zero lost records. milestones.md's M2
 edge cases map to the suite as follows:
 
 | Edge case | Proven by |
@@ -297,7 +366,7 @@ both inside the budget ("Follow-up (md4)").
 ### M3 scenarios ahead of the agent
 
 `method-flow`, `http-plain`, `http-tls` and `http-redaction`
-(PLAN.md scenario catalogue, M3) landed before the Java agent
+(milestones.md scenario catalogue, M3) landed before the Java agent
 (task ya4), the OTEL flavor `otel` after them (task za4), and
 `http-async` with the agent's `sendAsync` hook (task wd4).
 `mage workloadTest` runs each one untraced: the self-test, the
@@ -390,7 +459,7 @@ directory), with `TestMakeSpoolAt` in
 
 ### M4 microservices scenario (task jb4)
 
-`microservices` (PLAN.md scenario notes, "Microservices
+`microservices` (milestones.md scenario notes, "Microservices
 end-to-end scenario") landed ahead of M4's multi-host work: four
 service roles, one process each, on loopback.
 
@@ -512,7 +581,7 @@ without it the event loses it.
 
 ### M4 two-host and NAT'ed pairs (task kb4)
 
-`tcp-two-host` and `tcp-nat` (PLAN.md scenario notes, "Two-host
+`tcp-two-host` and `tcp-nat` (milestones.md scenario notes, "Two-host
 scenarios") are one Java scenario (`TcpHosts`) under two names:
 M0's client and server with explicit IPv4 literals, the server
 `--bind`ing an address and the client dialing `--host`. Only the
@@ -574,7 +643,7 @@ across the DNAT hop too. A trace without those fields fails
 daemon (the rig's DNAT rule is docker's) and on two real hosts is
 still the owner's.
 
-The injected clock skew of PLAN.md's M4 acceptance (task ye4)
+The injected clock skew of milestones.md's M4 acceptance (task ye4)
 is the environment variable `IORMESH_TEST_CLOCK_SKEW`, a Go
 duration (`1.5s`, `-3m`, at most a day either way) that `iormesh
 run` adds to the boot-to-wall offset it measures at start.
@@ -609,7 +678,7 @@ tracer is the default one, bound by its workloads' PIDs or, with
 ### M6 on the rig (task tb4)
 
 `TestMeshExpansion` (`integrationtests/expansion_test.go`) is
-PLAN.md's M6 acceptance on the rig: the spread of
+milestones.md's M6 acceptance on the rig: the spread of
 `TestMicroservicesAcrossHosts` with only hosta (the gateway's
 host, project `edge`) registered and the allowlist covering
 10.231.0.0/24 and 172.31.0.0/24. Each round re-runs the whole
@@ -646,7 +715,7 @@ rings never wait for a later round's tracer.
 
 ### M5 on the rig (task rb4)
 
-`TestViewsAcceptance` (`integrationtests/m5*_test.go`) is PLAN.md's
+`TestViewsAcceptance` (`integrationtests/m5*_test.go`) is milestones.md's
 M5 acceptance on the rig. It runs the spread of
 `TestMicroservicesAcrossHosts`, copies each host's ready segments
 into `<store>/<project>/<host>/` as collect leaves them, names
@@ -676,8 +745,8 @@ hop is drawn time-ordered or unordered is held by
 ## M4 acceptance on two real hosts (task lb4)
 
 The rig above proves M4's criteria on network namespaces; the
-acceptance itself (PLAN.md M4, "Acceptance") also needs one run
-on two real hosts. **Status (2026-11-21): accepted** (PLAN.md
+acceptance itself (milestones.md M4, "Acceptance") also needs one run
+on two real hosts. **Status (2026-11-21): accepted** (milestones.md
 M4, an owner-delegated advisor decision): run six times on two
 Rocky 9.9 VMs the owner provided; the sixth (qf4, the build of
 35c7de7) printed every criterion PASS, and so did a seventh on
@@ -747,7 +816,7 @@ Each host (two machines, Linux, x86_64 or aarch64):
   clock bound (M4-10: `tcp_seq` reads use `bpf_rdonly_cast`).
   The Java mark uprobes need 6.10 (or 6.6–6.9 with commit
   46ba0e49); the microservices projects load the agent (task
-  kf4). The dispatcher findings (PLAN.md, "Syscall handlers run
+  kf4). The dispatcher findings (output-contract.md, "Syscall handlers run
   behind `raw_syscalls` dispatchers") were measured on Linux 7.2.
   Rocky 9.9's 5.14.0-741.22.1.el9_9 has backported the BPF
   features these floors name (`bpf_rdonly_cast`, uprobe_multi
@@ -882,7 +951,7 @@ Send back the results block and the work directory's path.
 
 ### What the run checks
 
-| Id | Criterion (PLAN.md M4) | How | Expected |
+| Id | Criterion (milestones.md M4) | How | Expected |
 |---|---|---|---|
 | M4-0 | — preflight | ssh `pwd`; arch, kernel, machine ids (distinct, neither the controller's); `test -f` of the binary and key; `sudo -n -l /opt/iormesh/bin/iormesh`; the tools; no unit or trace; signed build per arch and signed `dist/iormesh-agent.jar`; local rsync; jar pushed | PASS, arch and kernel per host printed |
 | M4-1 | `add` → `deploy`, zero manual steps on the servers | `add -project P -pattern 'java -jar */.iormesh-m4-run/workload.jar <scenario> --role <role> *' HOST -duration 1h` per role, `deploy HOST1 HOST2`, then `status -json` per project | every project `running` |
@@ -1037,7 +1106,7 @@ run-2 failures are not the kernel's:
   without `-spool`/`-agent` (deploy has no way to ship the agent
   jar). The rig's `TestMicroservices` loads the agent. Fixed in
   kf4: deploy ships the signed jar to `/opt/iormesh/lib`
-  (PLAN.md #28, provisional), the microservices projects carry
+  (decisions.md #28, provisional), the microservices projects carry
   `-spool`/`-agent`, and their JVMs start with the installed jar
   as `-javaagent` (see "Run with the agent (kf4)" below).
 - **M4-9 (if4)**: a skipped `inet_sock_set_state` run (a
@@ -1348,7 +1417,7 @@ su run. A writer's error now names the event it rejects.
 
 ### M5 on Rocky 9.9 (task 3f4, 2026-11-21)
 
-PLAN.md M5's re-check on the real hosts. The input is the store
+milestones.md M5's re-check on the real hosts. The input is the store
 of the seventh M4 run above — the spread's four projects
 (m4sgw, m4sinv, m4sord, m4sbill), traced with the agent,
 deployed and collected over SSH — copied under a scratch `HOME`
@@ -1378,7 +1447,7 @@ for boot classes only, as the JVM warns) adds to the reads but
 is the same on both.
 
 **Rebuilt with folded runs (task vg4).** The same store, built by
-an iormeshctl with PLAN.md M5's folded runs (`iormeshctl build
+an iormeshctl with milestones.md M5's folded runs (`iormeshctl build
 -store … -db … -builds …` on a copy, nothing sent anywhere):
 
 | Surface | Result |
@@ -1394,7 +1463,7 @@ noise pattern, trimmed, as a unit test.
 
 ### M6 on Rocky 9.9 (task 3f4, 2026-11-21)
 
-PLAN.md M6's re-check on the real hosts, by hand with the
+milestones.md M6's re-check on the real hosts, by hand with the
 `iormeshctl` of the build above, `HOME` a scratch directory
 (`~/.iormesh-m6-3f4`). Two hosts cannot give every service a
 host of its own, so the layout differs from M4-9's: iom1 runs
@@ -1467,7 +1536,7 @@ orders listens.
 | convergence honesty | PASS — the store's merge over all three rounds keeps round 1's gateway → orders end and round 2's orders → billing end unresolved (`mixed`, 1 of 3 and 1 of 2 connections), and round 1's server half of orders' untraced call to inventory |
 | a cyclic topology terminates | PASS — orders → inventory goes back to iom1, a registered host; after round 3, `expand -hops 2`, `-hops 5` and `-hops 5 -apply` propose nothing (both peers `enrolled`) |
 
-M6 is accepted on this run (PLAN.md M6). All three VMs share one
+M6 is accepted on this run (milestones.md M6). All three VMs share one
 physical host. Afterwards every host was removed with `rm` from
 both scratch homes (every session collected), bootstrapped again
 with the same build, and the ports and the rich rule removed.
@@ -1698,7 +1767,7 @@ the C, and requires every attached program to be in the object
 
 ## Command-line help (task vh4)
 
-PLAN.md M4 ("Command-line conventions") makes `SUBCMD -h` a
+milestones.md M4 ("Command-line conventions") makes `SUBCMD -h` a
 request: exit 0, only that subcommand's flags. Both binaries pin
 it with `TestSubcommandHelpExitsZero` (`internal/ctl/usage_test.go`
 over every subcommand, services verb and show view;
@@ -1736,7 +1805,7 @@ injected script would show. It passed with Chrome 144 on
 
 ## LLM introspection eval (task qb4)
 
-PLAN.md M5's eval is no part of `mage test` — it needs a model —
+milestones.md M5's eval is no part of `mage test` — it needs a model —
 but everything around the model is: `internal/eval`'s tests run
 the harness against a scripted model and a stub iormeshctl. The
 eval itself is two opt-in steps:
@@ -1754,11 +1823,11 @@ send elsewhere; the workload's traces hold nothing but the
 scenario's own files and requests. The question set and its
 pinned threshold (0.8) are in `eval/questions/microservices.yaml`;
 results land in `eval/results/<date>-<scenario>.json`. Rerun it on
-every schema change (PLAN.md M5).
+every schema change (milestones.md M5).
 
 ## K8s capability set (task ub4)
 
-PLAN.md decision #13 (provisional) names the capabilities the
+decisions.md #13 (provisional) names the capabilities the
 tracer needs without `privileged`. They were checked on the host,
 not in a cluster (2026-11-20, Fedora kernel 7.2.15, SELinux off,
 JDK 25.0.4, libbpfgo v0.9.2): a container's root is uid 0 with a
@@ -1801,7 +1870,7 @@ namespaces are covered on the host (task 4f4, below).
 ## PID namespaces (task 4f4)
 
 An in-pod tracer numbers every process as its PID namespace does
-(PLAN.md #13, docs/implementation.md M7 step 1). Checked on the
+(decisions.md #13, docs/implementation.md M7 step 1). Checked on the
 host, without a cluster, with `unshare --pid --fork --mount-proc`
 (a new PID namespace and a `/proc` mounted for it — what a pod's
 container has):
@@ -1839,7 +1908,7 @@ The tracer refuses a namespace whose `/proc` is the host's
 
 ## K8s transport (task wb4)
 
-The controller's kubectl transport (`internal/k8s`, PLAN.md #12,
+The controller's kubectl transport (`internal/k8s`, decisions.md #12,
 #18; docs/implementation.md M7 step 9) is tested without a
 cluster: `fake_test.go` puts a fake `kubectl` first on `PATH`, a
 shell script that logs its argv (NUL-separated, one record per
@@ -1896,7 +1965,7 @@ What only kind can show is checked by task yb4's run
 
 ## K8s controller wiring (task af4)
 
-iormeshctl's pod path (PLAN.md #18's "Wired" note;
+iormeshctl's pod path (decisions.md #18's "Wired" note;
 docs/implementation.md M7 step 10) is tested in `mage test`
 without a cluster, against fake kubectls on `PATH`:
 
@@ -2053,7 +2122,7 @@ without a cluster, against fake kubectls on `PATH`:
 ## K8s manifests and pod identity (task vb4)
 
 Unit tests in `mage test`, no cluster and no container engine
-(PLAN.md M7; docs/implementation.md M7 steps 5, 6 and 8):
+(milestones.md M7; docs/implementation.md M7 steps 5, 6 and 8):
 
 - `internal/k8s/manifest_test.go`: `deploy/` must equal what
   `mage k8sManifests` writes (golden; edit the generator, never
@@ -2213,7 +2282,7 @@ containerd 2.2.0 was run).
 
 ## Route map and ClusterIP join (task xb4)
 
-Unit tests in `mage test`, no cluster (PLAN.md M7 "Service-NAT
+Unit tests in `mage test`, no cluster (milestones.md M7 "Service-NAT
 correlation", "Ingress route mapping", #15;
 docs/implementation.md M7 steps 11 and 12):
 
@@ -2337,7 +2406,7 @@ absence was exercised).
 
 ## M7 acceptance on kind (task yb4)
 
-PLAN.md M7's acceptance runs on one local kind cluster:
+milestones.md M7's acceptance runs on one local kind cluster:
 `mage k8sAcceptance` (`magefile_k8sacceptance.go`,
 `magefile_k8simages.go`) and the tests in `integrationtests/kind`.
 The target says SKIP and succeeds when `kind`, `kubectl`, `helm`
@@ -2592,9 +2661,9 @@ inventory pod at the end of the routed edge, in the summary and
 
 ### Microservices as pods (task uh4)
 
-PLAN.md M0 runs the microservices scenario "on plain hosts
+milestones.md M0 runs the microservices scenario "on plain hosts
 (M4/M6) and as pods (M7)"; `TestKindMicroservices` is the pod
-run (PLAN.md M7 "Microservices as pods"). `mage
+run (milestones.md M7 "Microservices as pods"). `mage
 k8sMicroservices` runs it alone, with the same setup, disk
 guard, judging and scoped teardown as `mage k8sAcceptance`,
 which runs it too, after `TestKindAcceptance`; a failure there
@@ -2747,7 +2816,7 @@ One VM (2 vCPU, 4 GB for the run, 20 GB disk): Rocky 9.9, el9
 5.14.0-741.22.1, SELinux enforcing, k3s v1.35.10+k3s1 with
 containerd 2.2.10, container-selinux 2.250 and k3s-selinux 1.6,
 firewalld active; the laptop built and pushed the images.
-**M7 does not pass as shipped** (PLAN.md M7, reopened):
+**M7 does not pass as shipped** (milestones.md M7, reopened):
 
 | Criterion | #13 spec as shipped | With the diagnostic module |
 |---|---|---|
@@ -2834,7 +2903,7 @@ as shipped by task 5h4 — #13's seven capabilities,
 `seLinuxOptions: {type: spc_t, level: s0}` — and **no node-local
 policy**: `semodule --list-modules=full` listed only the packaged
 `container` and `k3s` modules (priority 200), nothing at the
-local priority 400. **M7 passes on el9** (PLAN.md M7):
+local priority 400. **M7 passes on el9** (milestones.md M7):
 
 | Criterion | iptables | nftables |
 |---|---|---|
@@ -2924,7 +2993,7 @@ the agent was live-loaded into the JVM (`java agent of pid 41
 joined, 37 natives probed`). A JVM started after the tracer, as a
 restarted app's always is, gets no agent from `run -agent` — as
 [java-attach.md](java-attach.md) documents; it needs `-javaagent`.
-Task ah4 takes the debug-mode finding: PLAN.md M7 now recommends
+Task ah4 takes the debug-mode finding: milestones.md M7 now recommends
 the sidecar for pods that restart, and `iormeshctl deploy` replaces
 an ended debug tracer with `iormesh-2` (up to `iormesh-8`), whose
 `iormesh ready` serves the stranded sealed segments. This is checked
@@ -2945,7 +3014,7 @@ copied kubeconfig deleted.
 
 #### Dedicated type `iormesh_container_t` (task 7h4, 2026-11-21)
 
-The opt-in policy module (PLAN.md #13, `packaging/selinux/`) on the
+The opt-in policy module (decisions.md #13, `packaging/selinux/`) on the
 same VM and versions (4 GB): Rocky 9.9, container-selinux 2.250,
 selinux-policy 38.1.86, k3s v1.35.10+k3s1. The RPM came from `mage
 selinuxRPM podman` on the laptop and was installed with `dnf`; its
@@ -3022,7 +3091,7 @@ rules were added as `allow iormesh_container_t container_t:…` with
 exactly these permissions; the permissive module was removed and
 the dontaudit rules restored (`semodule -B`) before runs 3 to 5.
 Not run: the type at `s0` (MCS refuses the Java attach there,
-PLAN.md #13), a multi-node cluster, a pod without a pinned level.
+decisions.md #13), a multi-node cluster, a pod without a pinned level.
 
 **Without the boolean (task gh4, 2026-11-21).** The module now
 grants the tracer's seven capabilities itself
@@ -3147,7 +3216,7 @@ the state before. The `kind` network predates the run (created
 
 ## Performance baselines
 
-S3 (PLAN.md, decision #25) measures overhead against a load the
+S3 (decisions.md, decision #25) measures overhead against a load the
 workload can state in advance: `syscall-burst`, a tight loop of
 1-byte `write` + `read` pairs on per-thread temp files — the
 most syscalls per unit of real work, so the tracer's per-event

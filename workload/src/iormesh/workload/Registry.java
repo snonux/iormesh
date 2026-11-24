@@ -38,9 +38,9 @@ final class Registry {
      * The registry with every built-in scenario, plus any a separate
      * module on the class path provides (META-INF/services/
      * iormesh.workload.Scenario). That is how the OTEL flavor
-     * (workload/otel, PLAN.md M0) joins without the core jar depending on
-     * OpenTelemetry (decision #5): workload.jar alone finds no providers.
-     */
+     * (workload/otel, docs/milestones.md M0) joins without the core jar
+     * depending on OpenTelemetry (decision #5): workload.jar alone finds no
+     * providers. /
     static Registry builtin() {
         Registry r = new Registry();
         r.add(new ArgvSecret());

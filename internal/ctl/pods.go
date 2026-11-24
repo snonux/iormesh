@@ -11,8 +11,8 @@ import (
 	"iormesh/internal/k8s"
 )
 
-// Pods as targets (PLAN.md M7, decision #18, task af4). The registry's
-// pods: entries are named on the command line by their reference,
+// Pods as targets (docs/milestones.md M7, decision #18, task af4). The
+// registry's pods: entries are named on the command line by their reference,
 // <cluster>/<namespace>/<pod or selector> (federate.Registry.PodRef):
 // the "/" tells one from a host, which may not contain it. Every pod is
 // reached through the operator's kubectl (internal/k8s), with the

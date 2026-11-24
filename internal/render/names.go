@@ -7,8 +7,8 @@ import (
 )
 
 // Names are the view model's names for the merged graph's nodes, so
-// graph.svg speaks the same names as every other surface (PLAN.md M5:
-// "named services render by name in graph and SVG"; task rb4 found the
+// graph.svg speaks the same names as every other surface (docs/milestones.md
+// M5: "named services render by name in graph and SVG"; task rb4 found the
 // export drawing machine ids and "java PID" while `show`, the TUI and
 // the site said "orders" on "hostb"). The graph itself carries neither:
 // host names come from the store's host directories and service names
@@ -20,7 +20,7 @@ type Names struct {
 	// to its lifeline name when that says more than its comm (its app).
 	Services map[string]string
 	// Routes and RouteFlags are the model's routed edges and route flags
-	// (task bf4, PLAN.md M7): the hops no tracer saw — FQDN, ingress,
+	// (task bf4, docs/milestones.md M7): the hops no tracer saw — FQDN, ingress,
 	// Service, workload — which the graph has no nodes for, so Graph
 	// draws them in a band of their own (routes.go).
 	Routes     []viewmodel.Route

@@ -89,7 +89,7 @@ type Edge struct {
 }
 
 // HostNodeID names a host by its host_id: a machine id, or "pod-<uid>"
-// for an in-pod tracer (the pod is the host, PLAN.md M7).
+// for an in-pod tracer (the pod is the host, docs/milestones.md M7).
 func HostNodeID(hostID string) string { return prefixHost + hostID }
 
 // ProcessNodeID names one process incarnation: the incarnation keeps a

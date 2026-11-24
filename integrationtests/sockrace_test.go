@@ -1,7 +1,7 @@
 package integrationtests
 
-// Socket races end to end (PLAN.md M2 acceptance; docs/testing.md, "M2
-// acceptance"): workload/edgepeer's sock-races role runs, in one traced
+// Socket races end to end (docs/milestones.md M2 acceptance; docs/testing.md,
+// "M2 acceptance"): workload/edgepeer's sock-races role runs, in one traced
 // process, a refused connect, an unreachable connect, a reset in the
 // accept queue, a reset mid-stream and a shutdown racing a blocked
 // accept. Its facts lines name each race's fds and ports; the trace must

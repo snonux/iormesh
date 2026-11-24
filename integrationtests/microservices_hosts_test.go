@@ -11,7 +11,7 @@ import (
 )
 
 // The microservices topology spread over the mesh rig's three network
-// namespaces as three emulated hosts (task 1f4; PLAN.md M4 "The
+// namespaces as three emulated hosts (task 1f4; docs/milestones.md M4 "The
 // microservices scenario spreads one service per host, each as its own
 // project"):
 //
@@ -146,8 +146,8 @@ func assertSpreadFused(t *testing.T, res federate.Result, project string) {
 
 // TestMicroservicesAcrossHosts: the four services on three emulated
 // hosts, each host its own project and tracer, under the Java agent
-// (PLAN.md M4 acceptance, the microservices spread; the multi-host run of
-// "Testing strategy"). Each host's trace holds only its own processes;
+// (docs/milestones.md M4 acceptance, the microservices spread; the multi-host
+// run of "Testing strategy"). Each host's trace holds only its own processes;
 // merged, the three cross-host hops fuse and the whole satisfies
 // expect-spread.json — expect.json's service graph with every service on
 // its host, every hop at its address and scheme.

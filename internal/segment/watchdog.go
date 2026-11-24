@@ -10,7 +10,7 @@ import (
 )
 
 // Watchdog defaults (decision #17: both a percentage and a free-bytes
-// floor). 90% is PLAN.md's -disk-limit default. The floor is four
+// floor). 90% is M4's -disk-limit default. The floor is four
 // segments at the size cap (decision #16's 64 MB): on a large partition
 // 10% is plenty, but on a small one 10% may be less than the last
 // segment, the end event and the collector's next run need.
@@ -32,7 +32,7 @@ type Usage struct {
 	Avail uint64 // bytes available to unprivileged users
 }
 
-// Watchdog bounds tracing by disk (PLAN.md M4 "Disk watchdog"): it
+// Watchdog bounds tracing by disk (docs/milestones.md M4 "Disk watchdog"): it
 // reports ErrDiskLimit when the partition holding Dir is more than
 // MaxUsedPercent used or has less than MinFreeBytes available. Either
 // limit 0 is off.

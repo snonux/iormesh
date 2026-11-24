@@ -1,7 +1,7 @@
 // Package pathtmpl folds an HTTP request path into its template, so the
-// controller's per-path views count routes, not ids (PLAN.md decision
-// #22's templating step, task xh4): /orders/123 and /orders/124 are both
-// /orders/{id}. The trace events keep the raw path (decision #22: path
+// controller's per-path views count routes, not ids (docs/decisions.md
+// #22's templating step, task xh4): /orders/123 and /orders/124 are
+// both /orders/{id}. The trace events keep the raw path (decision #22: path
 // segments are verbatim); only the aggregations fold — the service
 // database's request keys and the views built from them — so `iormeshctl
 // query` still shows what was requested.

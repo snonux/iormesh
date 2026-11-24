@@ -22,8 +22,8 @@ import java.util.Set;
  * workload/echopeer, a cgo-free Go echo server built next to
  * workload.jar by {@code mage workloadBuild} — so the tracer has to show
  * the degraded node shape: files and sockets only, every event
- * {@code attribution: none} (PLAN.md "Non-Java processes"). Solo; options
- * {@code --dir} and {@code --peer PATH} (default: echopeer next to the
+ * {@code attribution: none} (docs/trace-scope.md "Non-Java processes"). Solo;
+ * options {@code --dir} and {@code --peer PATH} (default: echopeer next to the
  * jar). Syscalls (strace, JDK 25, 26 and 27-ea; Go 1.26):
  *
  * <pre>

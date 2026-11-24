@@ -1,5 +1,5 @@
 // Package query cuts the merged trace into a slice a human or an LLM can
-// read whole (PLAN.md M5 "Query / slice interface", task pb4):
+// read whole (docs/milestones.md M5 "Query / slice interface", task pb4):
 // `iormeshctl query` filters the controller's collected segments by time
 // window, host, app, thread, connection, file and Java method — and, by
 // exact value, event kind, pid, errno and OpenTelemetry trace id (task

@@ -105,7 +105,7 @@ public final class Ring {
      * never released, but a bump costs nothing and a mismatched agent
      * and tracer then fail loudly instead of misreading HTTP records.
      * 5 (task wd4): HTTP's fixed part gains the request's start stamp
-     * and its body sizes (latency and sizes, PLAN.md M3), and DNS
+     * and its body sizes (latency and sizes, docs/milestones.md M3), and DNS
      * records (decision #8) are new. 6 (task wd4, review round 2): the
      * HTTP flags HTTP_ASYNC_MARK and HTTP_NET_HTTP. 7 (task fe4): CLASS
      * records, a class id per frame in STACK, and sixteen drop counters

@@ -10,8 +10,9 @@ import (
 	"iormesh/internal/version"
 )
 
-// controllerPkg is iormeshctl, which PLAN.md M4 requires cgo-free: it runs
-// on the operator's laptop, darwin or linux, cross-compiled with no eBPF.
+// controllerPkg is iormeshctl, which docs/milestones.md M4 requires cgo-free:
+// it runs on the operator's laptop, darwin or linux, cross-compiled with no
+// eBPF.
 const controllerPkg = "./cmd/iormeshctl"
 
 // TestControllerIsCgoFree lists every non-standard package iormeshctl
@@ -42,8 +43,8 @@ func TestControllerIsCgoFree(t *testing.T) {
 }
 
 // TestControllerCrossCompiles builds iormeshctl for macOS with cgo off,
-// the build PLAN.md M4 promises and the Linux host never exercises. The
-// build must carry the version stamp `mage sign` reads (task uf4): a
+// the build docs/milestones.md M4 promises and the Linux host never exercises.
+// The build must carry the version stamp `mage sign` reads (task uf4): a
 // darwin binary cannot be run here to ask its --version.
 func TestControllerCrossCompiles(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "iormeshctl")

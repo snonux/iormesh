@@ -3,9 +3,9 @@ package integrationtests
 // M2 step 10 end to end: a JVM talking to a process that is not a JVM
 // (workload/echopeer, a cgo-free Go echo server it spawns) shows the
 // degraded node shape — files and sockets only, every event attribution
-// none, no Java fields, no agent-sourced records (PLAN.md M0 "Non-Java
-// peer", "What we trace: Non-Java processes"; docs/implementation.md M2
-// step 10).
+// none, no Java fields, no agent-sourced records (docs/milestones.md M0
+// "Non-Java peer"; docs/trace-scope.md "Non-Java processes";
+// docs/implementation.md M2 step 10).
 
 import (
 	"errors"

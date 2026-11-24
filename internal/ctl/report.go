@@ -17,8 +17,8 @@ import (
 	"iormesh/internal/viewmodel"
 )
 
-// The per-run summary rollup (PLAN.md M5, internal/report): build feeds
-// a report.Collector the events the merge reads, with the sessions'
+// The per-run summary rollup (docs/milestones.md M5, internal/report): build
+// feeds a report.Collector the events the merge reads, with the sessions'
 // methods tables so a file write is named by the Java method that did
 // it, and writes report.json beside model.json; `iormeshctl show
 // report` prints the run summary, then the rollup as text — the

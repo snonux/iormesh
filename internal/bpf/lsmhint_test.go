@@ -46,7 +46,7 @@ func TestLoadHint(t *testing.T) {
 			selinuxEnforcePath: "1\n", selfAttrPath: containerCtx,
 			lsmListPath: el9Lsms, osReleasePath: "5.14.0-741.22.1.el9_7.x86_64\n",
 		}, 512 << 20, []string{"SELinux is enforcing", "container_t:s0:c123,c456:",
-			"PLAN.md #13", "audit.log", "memcg"}, []string{"\x00", "raise it"}},
+			"docs/decisions.md #13", "audit.log", "memcg"}, []string{"\x00", "raise it"}},
 		{"enforcing spc_t", map[string]string{
 			selinuxEnforcePath: "1", selfAttrPath: "system_u:system_r:spc_t:s0",
 			lsmListPath: "capability,selinux", osReleasePath: "6.12.0",

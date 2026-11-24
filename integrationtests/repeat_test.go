@@ -1,7 +1,7 @@
 package integrationtests
 
-// PLAN.md M1 acceptance, second half: "the normalized trace passes the
-// golden check on repeated runs", and docs/implementation.md M1 step 11's
+// docs/milestones.md M1 acceptance, second half: "the normalized trace passes
+// the golden check on repeated runs", and docs/implementation.md M1 step 11's
 // done-when: a second normalized run diffs empty against the first inside
 // the bracket. The golden is a subset check; this one is exact, so it also
 // catches run-to-run noise the golden does not declare.

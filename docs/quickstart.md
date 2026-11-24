@@ -59,7 +59,7 @@ built but has never been loaded on a real arm64 kernel):
 ## 2. Release key and signed builds
 
 Hosts only run builds signed with your key
-([build.md](build.md#signing), PLAN.md decision #28). Make the
+([build.md](build.md#signing), decisions.md #28). Make the
 key once, outside the repository:
 
 ```sh
@@ -129,7 +129,7 @@ load stays unattributed.
 
 `deploy` only upgrades a tracer that is already installed
 through a narrow sudoers rule; the first install is your own
-sudo, once per host (PLAN.md decision #1,
+sudo, once per host (decisions.md #1,
 [security.md](security.md)). `bootstrap` verifies
 `dist/iormesh-linux-<arch>` against the pinned key before
 anything leaves the laptop, and prints or runs the exact steps:
@@ -312,7 +312,7 @@ iormeshctl rm app2
 
 - Pods instead of hosts: [kubernetes.md](kubernetes.md).
 - Following connections to untraced peers:
-  `iormeshctl expand` (PLAN.md M6, [security.md](security.md)).
+  `iormeshctl expand` (milestones.md M6, [security.md](security.md)).
 - Naming services: `iormeshctl services name`.
 - Querying events: `iormeshctl query`
   ([output-contract.md](output-contract.md)).

@@ -1,40 +1,87 @@
 # Build & code generation
 
-iormesh follows ior's BPF/C generation pattern wholesale, so
-nothing below gets invented twice. Companion to
-[PLAN.md](../PLAN.md) ("BPF/C code generation — follow ior" and
-"Container builds").
+How iormesh is built: the BPF/C code generation it takes from
+ior, the local build and test targets, the container builds, the
+signing and the release archives. The decisions it cites are in
+[decisions.md](decisions.md).
 
-- Tracepoint discovery from the build host's kernel → generated C
-  enter/exit handlers, generated Go tracepoint tables and
-  C-derived Go types — all from a unit-tested `internal/generate`
-  package, driven by Mage targets.
-- Generated artifacts are committed, with a committed result file as
-  the diff gate pinning the kernel tracepoint set: regenerating on
-  a different kernel shows up as a diff and stops the build.
-- `vmlinux.h` from BTF, clang CO-RE compile, the `.bpf.o` embedded
-  into the static binary via `go:embed` (env override to load an
-  external object for testing).
-- Container builds with Docker **or Podman**: the container pins
-  the build environment; the static binary is
-  copyable to any BTF host, and tracepoints missing there are
-  skipped at runtime. The tracer builds for linux/amd64 + arm64
-  from its container; the cgo-free controller cross-compiles
-  darwin/linux for both arches from the same pipeline.
+## Code generation — follow ior
 
-Where ior already solved a problem — fd→path resolution in BPF,
-syscall enter/exit pairing and restart edge cases, thread/TID
-handling, ring buffer consumption, safe libbpf link teardown —
-iormesh reuses that approach and code rather than re-deriving it.
-Every copied file records the ior commit it came from, so later
-ior fixes can be ported deliberately.
+iormesh does not reinvent ior's generation machinery; it copies the
+pattern (and, where sensible, the code) from `../ior`:
 
-Reuse has an edge. ior reads no socket peer addresses, follows no
-child processes, and captures no stacks — so 4-tuples (from the
-socket's state transitions), process-tree following with
-exec-time pattern matching, stack capture and uprobes on the
-JDK's native I/O functions are new work in iormesh. See PLAN.md,
-"What ior does not give us".
+- **Generator package** (`internal/generate/` in ior): reads the
+  build host's tracepoint set and emits
+  - the C enter/exit handlers
+    (`internal/c/generated_tracepoints.c`),
+  - a Go tracepoint table
+    (`internal/tracepoints/generated_tracepoints.go`),
+  - C-derived Go types (`internal/types/generated_types.go`).
+  Unit-tested, with harness tests exercising generated-handler
+  behavior.
+- **Diff gate**: the generation result is committed
+  (`internal/c/generated_tracepoints_result.txt`); regenerating on a
+  kernel whose tracepoint set differs shows up as a diff and fails
+  the gate (force via env override, ior-style). Builds happen on a
+  matching kernel — ior pins its generation host with
+  `scripts/build-with-docker.sh`; iormesh does the same.
+- **vmlinux.h** from the build host's BTF (`/sys/kernel/btf/vmlinux`),
+  kept in the working tree (gitignored, as in ior) and
+  deliberately preserved by clean targets.
+- **Compile & embed**: hand-written BPF C (ior's helpers: fd name
+  resolution, file identification, poll/recv handling…) plus the
+  generated handlers, clang with CO-RE relocations → `.bpf.o` →
+  `go:embed` into the static binary, with an env override
+  (`IOR_BPF_OBJECT`-style) to load an external object for testing.
+- **Runtime portability**: static binary, copyable to any BTF host;
+  tracepoints missing on the target kernel are skipped — the same
+  rule ior runs under.
+- **Problems ior already solved** — reuse the approach and code
+  rather than re-derive: fd→path resolution and file identification
+  in BPF (`fdname.c`/`fileident.c`), syscall enter/exit pairing
+  including restart edge cases, thread/TID and comm resolution,
+  ring buffer consumption, and the libbpf link-wrapper seam that
+  keeps teardown safe.
+- **Build tooling**: Magefile with generate/build/test/vet/lint
+  targets wired for cgo (libbpfgo paths), container builds that
+  run on Docker **and Podman** (engine-agnostic scripts,
+  ior's build-with-docker pattern with a podman alias), and
+  generated-artifact drift checked in CI like ior does.
+- **Provenance**: every file copied or adapted from ior records
+  the ior commit it came from, so ior's later fixes in the same
+  code can be ported on purpose instead of drifting apart
+  unnoticed (decision #4).
+
+### What ior does not give us
+
+Checked against `../ior` on 2026-11-17 (re-check when picking
+this up — ior moves). These are new work, not reuse, and M1/M2
+are sized accordingly:
+
+- **Peer addresses and 4-tuples**: ior traces the socket
+  syscalls but identifies sockets only as descriptors
+  (`socket:…`); it never reads local or remote addresses.
+  iormesh adds the `sock:inet_sock_set_state` handler, the
+  sock-pointer join back to pid/fd, and the join key (M1, S2).
+- **Process-tree following**: ior's in-kernel filter accepts
+  one TGID (or all); following children is a plan there
+  (`docs/follow-forks-plan.md`), not code. iormesh needs
+  fork/exec following, exec-time pattern matching and restart
+  re-attach (M2).
+- **Stack capture**: ior's BPF code captures no stacks. Native
+  stacks are an opt-in addition (M2, done: `-native-stacks`);
+  Java stacks come from the agent (M3).
+- **Per-syscall cost**: ior documents what classic syscall
+  tracepoints cost every task on the host, and prototypes
+  cheaper dispatch (`docs/raw-tracepoint-design.md`). iormesh
+  inherits the cost with the pattern — S3 measures it, and
+  ior's findings there are the first place to look for relief.
+  Task 8e4 left the pattern for correctness, not cost: the
+  handlers run behind classic `raw_syscalls` dispatchers, which
+  makes traced kinds slightly dearer and untraced kinds about
+  twice as dear in kernel instructions ("Syscall handlers run
+  behind `raw_syscalls` dispatchers" in
+  [output-contract.md](output-contract.md)).
 
 ## Building and testing
 
@@ -81,7 +128,7 @@ mage agentTest     # its unit tests, -javaagent smoke runs and
                    # the ring's Java-driven Go tests
 ```
 
-Every build output lands in `bin/` (gitignored; PLAN.md decision
+Every build output lands in `bin/` (gitignored; decisions.md
 #30), none at the repository root: `iormesh`, `iormeshctl`, the
 Go peers `echopeer` and `edgepeer`, the four jars
 (`workload.jar`, `workload-otel.jar`, `workload-libs.jar`,
@@ -160,8 +207,8 @@ because only Mage sets `CGO_CFLAGS`/`CGO_LDFLAGS`.
   capture (`loadWithIdentFallback`) was not lifted, and iormesh
   leaves `IOR_FILE_IDENT` at 0, so that capture is off anyway. The
   walk is verified to load on Linux 7.2 and on Rocky 9.9's el9
-  5.14 kernel (PLAN.md, task nf4); a rejection elsewhere is a
-  defect to fix in the walk, as PLAN.md says of el9 load failures.
+  5.14 kernel (task nf4); a rejection elsewhere is a defect to fix
+  in the walk, as milestones.md M4 says of el9 load failures.
 - **`//nolint` is banned** (`internal/buildgate`): a deliberate
   discard is an explicit `_ =`; an exemption goes into
   `.golangci.yml` with its reasoning.
@@ -294,7 +341,7 @@ fails up front with the fix named.
   pushed digest with `-image` or the registry's `k8s.image`, as
   `mage k8sAcceptance` does for its local registry
   ([testing.md](testing.md#m7-acceptance-on-kind-task-yb4)). The
-  capability set it runs with is provisional (PLAN.md decision
+  capability set it runs with is provisional (decisions.md
   #13, [security.md](security.md) "Kubernetes").
 - **kubectl on the controller** (k8s mode only, task wb4): 1.30
   or later. The debug container's security context and volume
@@ -315,11 +362,11 @@ fails up front with the fix named.
   neither does `mage test`: `packaging/selinux/policy_test.go`
   reads the `.te` and the spec as text. Install the RPM on an
   SELinux-enforcing el9 node that has container-selinux;
-  PLAN.md #13 and [security.md](security.md) say when to.
+  decisions.md #13 and [security.md](security.md) say when to.
 
 ## Signing
 
-Release binaries are signed with minisign (PLAN.md decision
+Release binaries are signed with minisign (decisions.md
 #28, built with its default by task bb4) after the container
 builds:
 
@@ -396,7 +443,7 @@ iormeshctl verify dist/iormesh-linux-amd64   # the controller's check
 ## Releases
 
 `mage release` turns a tagged commit into downloadable archives
-(PLAN.md "Release archives", task rh4). It publishes nothing:
+(task rh4, owner-approved 2026-11-22). It publishes nothing:
 uploading the files is a human step.
 
 ```bash
@@ -455,6 +502,14 @@ is what vouches for the archive it came in.
 
 With the key pinned there, `iormeshctl deploy -dist DIR` checks
 every build again before it pushes.
+
+**Licence** (owner, 2026-11-22): MIT for the whole repository
+(`LICENSE`). The BPF object keeps declaring `Dual BSD/GPL`: the
+kernel reads that string to allow GPL-only helpers, and MIT code
+is compatible with both. Third-party parts keep their own
+licences: ObjectWeb ASM in the agent
+(`agent/third_party/asm/LICENSE.txt`), libbpf linked into the
+tracer (LGPL-2.1 OR BSD-2-Clause), libbpfgo (Apache-2.0).
 
 ## Tech choices
 

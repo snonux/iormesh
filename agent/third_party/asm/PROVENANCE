@@ -20,7 +20,7 @@ redistributions.
 
 Why this version: 9.11.1 reads class files up to Java 28 (Opcodes.V28)
 and is itself Java 5 bytecode, so it runs on the agent's JDK 17 floor
-(PLAN.md decision #29) and parses the JDK classes of 17 through 27-ea.
+(docs/decisions.md #29) and parses the JDK classes of 17 through 27-ea.
 
 To update: download the new asm-<v>.jar from Maven Central, compare its
 SHA-1 with the published .sha1, replace the jar and LICENSE.txt, and

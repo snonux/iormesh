@@ -11,8 +11,8 @@ import (
 )
 
 // A -listen-port session follows its port across restarts of the program
-// that owns it (PLAN.md decision #23, task mh4): every host expand -apply
-// enrolls is bound by port, and ending at the app's first restart lost
+// that owns it (docs/decisions.md #23, task mh4): every host expand
+// -apply enrolls is bound by port, and ending at the app's first restart lost
 // the host's trace.
 const (
 	// defaultListenGrace is how long a port session whose targets are

@@ -69,10 +69,10 @@ release key to ~/.config/iormesh/minisign.pub, the service database to
 model.json, report.json and sites/<run>/index.html, one site folder per
 run, kept until deleted), dist/ to ./dist. open prints the newest site's
 path and opens it with xdg-open (open on macOS) when there is one.
-deploy only upgrades a tracer already installed on the host (PLAN.md
-decision #1); bootstrap is the first install of a registered host with
-your own sudo: it prints the exact steps (for -arch, default amd64, and
-the SSH user -user, default HOST's user@ part or yours; a User in
+deploy only upgrades a tracer already installed on the host
+(docs/decisions.md #1); bootstrap is the first install of a registered
+host with your own sudo: it prints the exact steps (for -arch, default
+amd64, and the SSH user -user, default HOST's user@ part or yours; a User in
 ~/.ssh/config is not seen) and contacts nothing, or with -apply
 runs them over ssh with sudo -n, which needs sudo without a password.
 rm's uninstall removes the sudoers rule bootstrap installed. status asks every target's tracer (sudo iormesh status, or
@@ -132,7 +132,7 @@ only them. Filters AND; -event takes a schema kind, -errno a Linux errno
 name or number, -otel-trace a W3C trace id.
 `
 
-// usagePods is the paragraph on Kubernetes targets (PLAN.md M7).
+// usagePods is the paragraph on Kubernetes targets (docs/milestones.md M7).
 const usagePods = `
 POD is a registry pods: entry, <cluster>/<namespace>/<pod> or
 <cluster>/<namespace>/<selector>; K8S is -context CTX -namespace NS,

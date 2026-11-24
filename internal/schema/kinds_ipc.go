@@ -1,9 +1,9 @@
 package schema
 
-// The M2 step 7 kinds (PLAN.md M2 "Full mental-model scope", decision #7):
-// the socket family's address calls, which are on by default like the rest
-// of the socket family, and the opt-in families — ipc, signal, poll and
-// zerocopy (`iormesh run -trace-families`). Each is its kernel
+// The M2 step 7 kinds (docs/milestones.md M2 "Full mental-model scope",
+// decision #7): the socket family's address calls, which are on by default
+// like the rest of the socket family, and the opt-in families — ipc, signal,
+// poll and zerocopy (`iormesh run -trace-families`). Each is its kernel
 // tracepoint's syscall name, as for every syscall kind, except KindSignal,
 // which is a delivery. Appended, never renamed.
 //
@@ -53,7 +53,7 @@ const (
 	KindTkill  = "tkill"
 	// KindSignal is a signal generated for a traced process
 	// (signal:signal_generate), recorded on the receiver with its sender:
-	// "who touched the process" (PLAN.md "What we trace", Signals).
+	// "who touched the process" (docs/trace-scope.md, Signals).
 	KindSignal = "signal"
 
 	// poll family.

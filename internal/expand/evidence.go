@@ -33,9 +33,9 @@ type evidence struct {
 	comms map[string]string
 }
 
-// The controller's own traffic (PLAN.md M6: "the controller's SSH/rsync
-// traffic is excluded"). Collect, deploy and rm reach every host over
-// SSH, rsync riding on it. On a traced host that traffic is inbound to
+// The controller's own traffic (docs/milestones.md M6: "the controller's
+// SSH/rsync traffic is excluded"). Collect, deploy and rm reach every host
+// over SSH, rsync riding on it. On a traced host that traffic is inbound to
 // sshd, never a candidate; it can only propose a peer when a traced
 // process is the SSH client itself — a project whose pattern matches
 // ssh or rsync, or the controller's own machine registered and traced —

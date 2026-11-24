@@ -1,5 +1,5 @@
-# The ingress scenario's route map (PLAN.md M0 "Ingress scenario", M7
-# "Ingress route mapping"), as a static routes.yaml beside the registry
+# The ingress scenario's route map (docs/milestones.md M0 "Ingress scenario",
+# M7 "Ingress route mapping"), as a static routes.yaml beside the registry
 # would declare it for the kind acceptance's namespace (task yb4,
 # integrationtests/kind). Discovery (`iormeshctl routes discover
 # -ingress-service traefik/traefik`) finds the same route from the

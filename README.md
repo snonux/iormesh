@@ -14,11 +14,11 @@ across hosts, not just one.
 **Status: proof of concept.** Milestones M0, M1, M2, M3, M4, M6
 and M7 are accepted; M5 (views, query and the LLM eval) is built
 but not accepted until its eval has run with a real model (see
-[PLAN.md](./PLAN.md)). Rocky Linux 9.9 (el9, kernel 5.14) is the
-main target. The repo holds the tracer (`iormesh`), the
-controller (`iormeshctl`), the Java agent and test workload, the
-plan and the design docs ([docs/](./docs/)). Flags, paths and
-schema may still change as the PoC evolves.
+[docs/milestones.md](./docs/milestones.md)). Rocky Linux 9.9 (el9,
+kernel 5.14) is the main target. The repo holds the tracer
+(`iormesh`), the controller (`iormeshctl`), the Java agent and
+test workload, and the design docs ([docs/](./docs/)). Flags,
+paths and schema may still change as the PoC evolves.
 
 ## Goals
 
@@ -90,8 +90,10 @@ Details: [docs/security.md](./docs/security.md).
 
 ## Documentation
 
-- [PLAN.md](./PLAN.md) — the working plan: scope, spikes,
-  milestones M0–M7, decisions. The source of truth.
+- [docs/decisions.md](./docs/decisions.md) — every numbered
+  decision and its reasons. The source of truth.
+- [docs/milestones.md](./docs/milestones.md) — spikes and
+  milestones M0–M7 in build order, with their acceptance.
 - [docs/quickstart.md](./docs/quickstart.md) — from zero to a
   rendered mesh on two Rocky 9.9 hosts.
 - [docs/troubleshooting.md](./docs/troubleshooting.md) — common

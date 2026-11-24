@@ -1,6 +1,6 @@
 // Command echopeer is the non-JVM end of the workload's non-java-peer
-// scenario (PLAN.md M0 "Non-Java peer", docs/implementation.md M2 step
-// 10): a TCP echo server on 127.0.0.1 that also writes a file, so the
+// scenario (docs/milestones.md M0 "Non-Java peer", docs/implementation.md M2
+// step 10): a TCP echo server on 127.0.0.1 that also writes a file, so the
 // tracer has a process with files and sockets but no JVM — the degraded
 // node shape whose events carry attribution "none".
 //

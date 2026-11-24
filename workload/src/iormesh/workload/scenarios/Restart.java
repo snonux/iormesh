@@ -11,8 +11,8 @@ import java.util.Set;
 
 /**
  * M2's restart: an app exits mid-session and comes back as a new process
- * with the same command line (PLAN.md M0 "Restart scenario", M2 "Target
- * spec", decision #23). Solo, {@code --dir} its only option.
+ * with the same command line (docs/milestones.md M0 "Restart scenario", M2
+ * "Target spec", decision #23). Solo, {@code --dir} its only option.
  *
  * This process is only the launcher: it starts {@link RestartApp} as a
  * child JVM, waits for it to exit (and reaps it), then starts it again

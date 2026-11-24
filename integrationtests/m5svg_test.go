@@ -17,8 +17,8 @@ import (
 	"iormesh/internal/viewmodel"
 )
 
-// The SVG goldens of the spread (PLAN.md M5 "Deterministic SVG export":
-// "M0 scenarios get visual goldens"), beside its expect-spread.json.
+// The SVG goldens of the spread (docs/milestones.md M5 "Deterministic SVG
+// export": "M0 scenarios get visual goldens"), beside its expect-spread.json.
 // IORMESH_UPDATE_SVG=1 rewrites them from the run.
 const (
 	graphGolden    = "graph-spread.svg"

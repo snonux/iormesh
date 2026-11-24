@@ -1,7 +1,7 @@
 package integrationtests
 
-// A -listen-port session follows its port across a restart (PLAN.md
-// decision #23, task mh4): every host expand -apply enrolls is bound by
+// A -listen-port session follows its port across a restart (docs/decisions.md
+// #23, task mh4): every host expand -apply enrolls is bound by
 // port, so a session that ended at the app's first restart lost the host.
 // The app is workload/edgepeer's port-owner: the test kills the first
 // incarnation, starts the second on the same port, and the session must

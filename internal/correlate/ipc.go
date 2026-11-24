@@ -10,10 +10,10 @@ import (
 	"iormesh/internal/types"
 )
 
-// M2 step 7 (PLAN.md "What we trace": local IPC, UDP, poll/epoll): the
-// records of the ipc and poll families and the socket addresses of the
-// socket family. Connections other than TCP become sockStates too, so their
-// events wait for a conn id and draw connected edges exactly like TCP's:
+// M2 step 7 (docs/trace-scope.md: local IPC, UDP, poll/epoll): the records of
+// the ipc and poll families and the socket addresses of the socket family.
+// Connections other than TCP become sockStates too, so their events wait for a
+// conn id and draw connected edges exactly like TCP's:
 //   - a pipe or socketpair: both ends are made by one call, so it is one
 //     connection, fused at once; a child that inherits an end (fork, dup2
 //     onto its stdio) joins the same node;

@@ -16,7 +16,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * M4's microservices scenario (PLAN.md M0 "Microservices end-to-end
+ * M4's microservices scenario (docs/milestones.md M0 "Microservices end-to-end
  * scenario"): four service roles talking REST — a chain, a fan-out and a
  * fan-in, plain HTTP and TLS — each also doing its own file work. The
  * topology is {@link Service}'s; one service is one process, as it is one

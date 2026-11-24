@@ -413,8 +413,8 @@ func unmap(ap netip.AddrPort) netip.AddrPort {
 }
 
 // TestTwoHostsTwoProjects: M0's client and server on two hosts, traced
-// as two projects (PLAN.md M4 acceptance) — each host's trace satisfies
-// its own golden, and merging both fuses the connection into one
+// as two projects (docs/milestones.md M4 acceptance) — each host's trace
+// satisfies its own golden, and merging both fuses the connection into one
 // cross-project edge whose ends saw one 4-tuple, mirrored.
 func TestTwoHostsTwoProjects(t *testing.T) {
 	enableParallelIfRequested(t)
@@ -438,8 +438,8 @@ func TestTwoHostsTwoProjects(t *testing.T) {
 	})
 }
 
-// TestNATPair: the NAT'ed pair (PLAN.md M4 acceptance) — the server in a
-// container behind docker-style port publishing, so the client dials
+// TestNATPair: the NAT'ed pair (docs/milestones.md M4 acceptance) — the server
+// in a container behind docker-style port publishing, so the client dials
 // 10.231.0.2:880 and the server accepts on 172.31.0.2:80. Each host's
 // trace shows its own 4-tuple; the merge fuses the two into one edge by
 // the ISN pair, which the DNAT hop leaves untouched.

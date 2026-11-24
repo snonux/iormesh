@@ -1,7 +1,7 @@
 //go:build mage
 
-// Release signing (PLAN.md decision #28, docs/build.md "Signing"): Sign
-// writes a minisign signature next to every binary the container builds
+// Release signing (docs/decisions.md #28, docs/build.md "Signing"):
+// Sign writes a minisign signature next to every binary the container builds
 // left in dist/, and next to the agent jar `mage agentBuild` copies there
 // (task kf4). The private key is the release pipeline's and never
 // enters the repo: it is read from the path IORMESH_MINISIGN_KEY names,

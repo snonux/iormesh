@@ -36,9 +36,9 @@ func newTestSSH(t *testing.T, host string) (SSH, *recorder) {
 	return s, rec
 }
 
-// TestSSHRunArgv: the options PLAN's security rules need are on every
-// call, the host follows "--", and the remote command is one quoted
-// string.
+// TestSSHRunArgv: the options decision #12's security rules need are on
+// every call, the host follows "--", and the remote command is one
+// quoted string.
 func TestSSHRunArgv(t *testing.T) {
 	s, rec := newTestSSH(t, "ops@app1")
 	out, err := s.Run(context.Background(), "sudo", "/opt/iormesh/bin/iormesh", "status", "-project", "shop")

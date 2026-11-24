@@ -8,8 +8,8 @@ import (
 	"iormesh/internal/csvlist"
 )
 
-// TraceFamily is one of iormesh's event families (PLAN.md decision #7):
-// the unit `iormesh run -trace-families` turns on. It follows ior's
+// TraceFamily is one of iormesh's event families (docs/decisions.md
+// #7): the unit `iormesh run -trace-families` turns on. It follows ior's
 // trace-family concept (-trace-families), but over iormesh's own grouping:
 // ior's families (types.SyscallFamily) put sendfile and splice under
 // Network and pipes under IPC, while a family here is what the correlator

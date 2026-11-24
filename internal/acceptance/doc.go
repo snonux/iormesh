@@ -1,5 +1,5 @@
-// Package acceptance drives PLAN.md M4's acceptance against two real
-// Linux hosts (`mage m4Acceptance HOST1 HOST2`; docs/testing.md, "M4
+// Package acceptance drives docs/milestones.md M4's acceptance against two
+// real Linux hosts (`mage m4Acceptance HOST1 HOST2`; docs/testing.md, "M4
 // acceptance on two real hosts"). The simulated rig in integrationtests/
 // proves the same criteria on network namespaces; this package is the
 // run on real machines, which only the owner can do.

@@ -12,8 +12,8 @@ import (
 	"time"
 )
 
-// start's unit (PLAN.md M4 "The tracer runs as a transient systemd unit",
-// decision #19).
+// start's unit (docs/milestones.md M4 "The tracer runs as a transient systemd
+// unit", decision #19).
 const (
 	// defaultCPUQuota and defaultMemoryMax are the cgroup caps, the
 	// enforced half of decision #25's overhead budget: one core — the
@@ -301,10 +301,10 @@ func forwardedArgs(fs *flag.FlagSet) ([]string, error) {
 	return args, nil
 }
 
-// sudoOwner hands ready/ to the user who ran `sudo iormesh start` (PLAN.md
-// M4: start records who invoked sudo), so their collector reads and
-// deletes segments unprivileged. Without sudo, or under root's own sudo,
-// ready/ stays root's.
+// sudoOwner hands ready/ to the user who ran `sudo iormesh start`
+// (docs/milestones.md M4: start records who invoked sudo), so their collector
+// reads and deletes segments unprivileged. Without sudo, or under root's own
+// sudo, ready/ stays root's.
 func (c control) sudoOwner(args []string) ([]string, error) {
 	uid, gid := c.env("SUDO_UID"), c.env("SUDO_GID")
 	if uid == "" || uid == "0" {

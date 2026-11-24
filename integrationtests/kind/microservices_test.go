@@ -11,8 +11,8 @@ import (
 	"iormesh/internal/schema"
 )
 
-// The microservices scenario as pods (task uh4; PLAN.md M0 "Runs on plain
-// hosts (M4/M6) and as pods (M7)"): one pod per service, each its own
+// The microservices scenario as pods (task uh4; docs/milestones.md M0 "Runs on
+// plain hosts (M4/M6) and as pods (M7)"): one pod per service, each its own
 // host, traced by a debug container with the Java agent, the services
 // dialing each other's pod addresses at the rig spread's ports:
 //
@@ -212,10 +212,10 @@ func checkMicroMesh(t *testing.T, hosts map[string]*hostTrace, pods map[string]p
 	t.Logf("mesh: %d fused connections, %d unresolved", len(res.Conns), len(res.Unresolved))
 }
 
-// assertPodFields: every event a pod's tracer wrote names the pod (PLAN.md
-// M7 "Pod fields on events", task sh4) — namespace and name on every
-// event, and on a process's events the runtime id of the app container
-// its JVM runs in, as the pod's status lists it; none on host-level
+// assertPodFields: every event a pod's tracer wrote names the pod
+// (docs/milestones.md M7 "Pod fields on events", task sh4) — namespace and
+// name on every event, and on a process's events the runtime id of the app
+// container its JVM runs in, as the pod's status lists it; none on host-level
 // events (pid 0).
 func assertPodFields(t *testing.T, hosts map[string]*hostTrace, ns string, pods map[string]podJSON) {
 	for app, p := range pods {

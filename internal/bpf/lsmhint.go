@@ -88,7 +88,7 @@ func loadHint(env hintEnv) string {
 	if ctx, ok := confiningSELinux(env); ok {
 		return "BPF load refused; SELinux is enforcing and this process " +
 			"runs as " + ctx + ": a container_t tracer needs the el9 " +
-			"profile (PLAN.md #13, task 5h4), see docs/security.md; the " +
+			"profile (docs/decisions.md #13, task 5h4), see docs/security.md; the " +
 			"denial (avc ... tclass=bpf) shows in the raw audit.log, " +
 			"not always in ausearch -m avc" + note
 	}

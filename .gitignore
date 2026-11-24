@@ -1,5 +1,5 @@
-# Build outputs (PLAN.md decision #30, tasks rk4/uk4): the binaries, the
-# four jars and the gates' test binaries all go to bin/, which `mage
+# Build outputs (docs/decisions.md #30, tasks rk4/uk4): the binaries,
+# the four jars and the gates' test binaries all go to bin/, which `mage
 # clean` removes; none is written to the repository root.
 /bin/
 /workload/classes/

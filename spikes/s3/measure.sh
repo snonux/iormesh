@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# S3 measurement (docs/implementation.md "S3", PLAN.md decision #25):
+# S3 measurement (docs/implementation.md "S3", docs/decisions.md #25):
 # target slowdown, bystander cost, tracer CPU, loss and output volume of
 # the tracer on the syscall-burst load scenario.
 #
@@ -308,8 +308,8 @@ traced_line() {
     local t=$1 tag=$2 work=$3 lost kernel skipped attributed events bytes
     # lost counts every record the trace wanted but did not get (kernel
     # ring drops plus undecodable records); kernel is the drop part.
-    # skipped is the program runs the kernel skipped host-wide: possible
-    # loss, not in lost (PLAN.md "Trace output contract", task vd4).
+    # skipped is the program runs the kernel skipped host-wide: possible loss,
+    # not in lost (docs/output-contract.md, task vd4).
     lost=$(sed -n 's/.*lost records \([0-9][0-9]*\).*/\1/p' "$work/tracer.err")
     kernel=$(sed -n 's/.*(kernel \([0-9][0-9]*\)).*/\1/p' "$work/tracer.err")
     skipped=$(sed -n 's/.*skipped runs \([0-9][0-9]*\).*/\1/p' "$work/tracer.err")

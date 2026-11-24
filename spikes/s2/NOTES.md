@@ -193,7 +193,7 @@ both:              irs = rcv_nxt - bytes_received - 1
   socket on the NAT host. Cloud NAT gateways, managed load balancers and
   kube-proxy on nodes iormesh doesn't trace give no access to it.
 
-## Pick for decision #26 (recommendation; PLAN.md is updated by 7b4)
+## Pick for decision #26 (recommendation; recorded in docs/decisions.md by 7b4)
 
 Use the ISN pair as the primary cross-host key: `(iss, irs)` on one side
 equals `(irs, iss)` on the other. It needs nothing on the NAT host,

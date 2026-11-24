@@ -1,8 +1,8 @@
-// Package dist packs a signed dist/ into the release archives `mage
-// release` publishes (PLAN.md "Release archives", docs/build.md
-// "Releases"): one gzipped tarball per arch holding the tracer, the agent
-// jar and that arch's controllers, each next to its minisign signature,
-// plus the release public key, and a SHA256SUMS over the tarballs.
+// Package dist packs a signed dist/ into the release archives `mage release`
+// publishes (docs/build.md "Releases"): one gzipped tarball per arch holding
+// the tracer, the agent jar and that arch's controllers, each next to its
+// minisign signature, plus the release public key, and a SHA256SUMS over the
+// tarballs.
 //
 // Every artifact is verified against its signature before it is packed,
 // and the bytes packed are the bytes verified (release.ReadVerified), so an

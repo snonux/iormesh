@@ -1,5 +1,5 @@
-// Package k8s is iormesh's Kubernetes side (PLAN.md M7, decisions #12,
-// #13, #14, #18 and #21; docs/implementation.md M7 steps 5, 6, 8 and 9):
+// Package k8s is iormesh's Kubernetes side (docs/milestones.md M7, decisions
+// #12, #13, #14, #18 and #21; docs/implementation.md M7 steps 5, 6, 8 and 9):
 // the Kubectl transport, which reaches a tracer container in a pod
 // through the operator's kubectl the way federate.SSH reaches a server
 // through the operator's ssh, the tracer half of its trace fetch, the

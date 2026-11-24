@@ -21,9 +21,9 @@ import (
 	"iormesh/internal/termsafe"
 )
 
-// `iormeshctl deploy [-project P] HOST...` (PLAN.md M4 "Deploy"): put the
-// signed tracer build on each registered host and start its projects. Per
-// host, every step an argv through the Transport (docs/implementation.md
+// `iormeshctl deploy [-project P] HOST...` (docs/milestones.md M4 "Deploy"):
+// put the signed tracer build on each registered host and start its projects.
+// Per host, every step an argv through the Transport (docs/implementation.md
 // M4 "Controller side"):
 //
 //  1. preflight: uname -m picks the build (amd64/arm64); rsync and
@@ -317,7 +317,7 @@ func preflight(ctx context.Context, t federate.Transport) (string, error) {
 	if _, err := t.Run(ctx, "test", "-x", installedTracer); err != nil {
 		return "", fmt.Errorf("%s is not installed: deploy only upgrades an installed tracer; "+
 			"the first install takes the operator's own sudo (iormeshctl bootstrap) or configuration "+
-			"management (PLAN.md decision #1, docs/security.md): %w", installedTracer, err)
+			"management (decision #1 in docs/decisions.md, docs/security.md): %w", installedTracer, err)
 	}
 	return arch, nil
 }

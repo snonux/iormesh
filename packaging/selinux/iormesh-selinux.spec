@@ -1,5 +1,5 @@
-# The iormesh_container_t SELinux policy module (PLAN.md #13, task 7h4):
-# an opt-in type for the in-pod tracer on SELinux-enforcing el9 nodes;
+# The iormesh_container_t SELinux policy module (docs/decisions.md #13, task
+# 7h4): an opt-in type for the in-pod tracer on SELinux-enforcing el9 nodes;
 # spc_t stays the default. Built by `mage selinuxRPM` (build.sh) on Rocky
 # Linux 9 against its selinux-policy-devel and container-selinux.
 %global modulename iormesh

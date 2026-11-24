@@ -15,10 +15,10 @@ import java.util.Set;
 import javax.net.ssl.SSLContext;
 
 /**
- * M3's HTTP scenarios (PLAN.md M0 "HTTP scenarios"): a JDK HttpClient
- * sends declared requests to a JDK HttpServer on 127.0.0.1, one HTTP/1.1
- * keep-alive connection between two processes. Three variants share the
- * roles:
+ * M3's HTTP scenarios (docs/milestones.md M0 "HTTP scenarios"): a JDK
+ * HttpClient sends declared requests to a JDK HttpServer on 127.0.0.1, one
+ * HTTP/1.1 keep-alive connection between two processes. Three variants share
+ * the roles:
  *
  * <pre>
  *   http-plain      GET hello (200), POST echo (200), GET missing (404)

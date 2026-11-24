@@ -15,9 +15,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * M4's cross-host pair (PLAN.md scenario catalogue, M4): M0's client and
- * server — file work, then one TCP connection, 5 bytes each way, the
- * client closing first — on two hosts, each traced by its own tracer as
+ * M4's cross-host pair (docs/milestones.md scenario catalogue, M4): M0's
+ * client and server — file work, then one TCP connection, 5 bytes each way,
+ * the client closing first — on two hosts, each traced by its own tracer as
  * its own project. Registered twice, because the two M4 rows differ only
  * in the network between the hosts and so in what each end observes:
  *

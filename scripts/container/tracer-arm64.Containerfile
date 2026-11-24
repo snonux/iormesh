@@ -1,4 +1,4 @@
-# Cross builder for the linux/arm64 tracer (PLAN.md "Container builds"):
+# Cross builder for the linux/arm64 tracer (docs/build.md "Container builds"):
 # runs natively on an amd64 host and cross-compiles with an aarch64
 # toolchain and sysroot, so no emulation is needed to build.
 #

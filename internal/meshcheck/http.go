@@ -7,8 +7,8 @@ import (
 
 // RequestsPaired: the client's and the server's http events pair one to
 // one by (conn_id, req_seq) with the same method, path and status — the
-// cross-wire pairing the merge relies on (PLAN.md "Request pairing across
-// the wire"). Every http test of integrationtests checks it too.
+// cross-wire pairing the merge relies on (docs/milestones.md "Request pairing
+// across the wire"). Every http test of integrationtests checks it too.
 func RequestsPaired(t T, events []schema.Event) {
 	t.Helper()
 	type key struct {

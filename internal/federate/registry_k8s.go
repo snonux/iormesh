@@ -9,7 +9,7 @@ import (
 	"iormesh/internal/k8sname"
 )
 
-// The registry's Kubernetes sections (PLAN.md M7, decision #18 —
+// The registry's Kubernetes sections (docs/milestones.md M7, decision #18 —
 // provisional, the owner's examples pending; task af4): k8s: holds the
 // defaults and the clusters, pods: the pod entries, each with the same
 // projects: as a server. Only what is listed here is ever reached

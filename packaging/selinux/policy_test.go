@@ -1,6 +1,6 @@
 // Package selinux holds the iormesh-selinux policy module and its RPM spec
-// (PLAN.md #13, task 7h4). These tests read the sources as text, so CI
-// needs no SELinux tools: they pin the module's exact permissions and its
+// (docs/decisions.md #13, task 7h4). These tests read the sources as text, so
+// CI needs no SELinux tools: they pin the module's exact permissions and its
 // packaging, and refuse wildcards, complements and permissive domains.
 package selinux
 

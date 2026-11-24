@@ -5,9 +5,9 @@ import (
 	"iormesh/internal/types"
 )
 
-// M4 (PLAN.md "Clock reconciliation from the traffic itself", task xe4):
-// args.tcp_seq, the TCP sequence number of the first byte a single send or
-// receive moved. The kernel side (internal/c/tcpseq.c) sends a
+// M4 (docs/milestones.md "Clock reconciliation from the traffic itself", task
+// xe4): args.tcp_seq, the TCP sequence number of the first byte a single send
+// or receive moved. The kernel side (internal/c/tcpseq.c) sends a
 // tcp_seq_event as the exit record of a write, writev, sendto,
 // sendfile64, sendmsg, read, readv, recvfrom or recvmsg on a TCP socket
 // (sendmmsg and recvmmsg carry theirs in an mmsg_event, mmsg.go) - a

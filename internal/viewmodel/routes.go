@@ -12,8 +12,8 @@ import (
 	"iormesh/internal/termsafe"
 )
 
-// The routed edges (PLAN.md M7 "Service-NAT correlation", "Ingress route
-// mapping", decision #15): what the route map adds to the edges the
+// The routed edges (docs/milestones.md M7 "Service-NAT correlation", "Ingress
+// route mapping", decision #15): what the route map adds to the edges the
 // traces made. A connection through a ClusterIP gets the Service named
 // (and, fused, the pod that answered); one to an untraced Service or an
 // FQDN on an ingress is completed to the Service and its workload. The

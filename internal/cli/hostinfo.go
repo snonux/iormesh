@@ -29,8 +29,8 @@ var machineIDPath = "/etc/machine-id"
 // intact, like a tracer that cannot attach.
 //
 // In a pod (the downward-API variables set, k8s.PodFromEnv) the host is
-// the pod (PLAN.md M7, task 7f4): host_id is "pod-<uid>" and the FQDN
-// <name>.<namespace>.<uid[:8]>, and neither /etc/machine-id nor the
+// the pod (docs/milestones.md M7, task 7f4): host_id is "pod-<uid>" and the
+// FQDN <name>.<namespace>.<uid[:8]>, and neither /etc/machine-id nor the
 // resolver is consulted — even when the image carries a machine-id,
 // which would be the image's, not the node's or the pod's. A partial or
 // malformed pod environment is an error, never a fallback to the

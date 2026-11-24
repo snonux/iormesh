@@ -10,9 +10,9 @@ import (
 	"iormesh/internal/project"
 )
 
-// The tracer's systemd units (PLAN.md M4, decision #19): one transient
-// service per project, iormesh-<project>.service. The suffix is always
-// spelled out: a project label may contain dots, and systemd-run would
+// The tracer's systemd units (docs/milestones.md M4, decision #19): one
+// transient service per project, iormesh-<project>.service. The suffix is
+// always spelled out: a project label may contain dots, and systemd-run would
 // read a label like "x.socket" as a different unit type.
 const (
 	unitPrefix = "iormesh-"

@@ -1,4 +1,4 @@
-// Package routemap is the controller's routing metadata (PLAN.md M7
+// Package routemap is the controller's routing metadata (docs/milestones.md M7
 // "Service-NAT correlation", "Ingress route mapping", decision #15): which
 // FQDN terminates on which ingress, and which Kubernetes Service — by its
 // ClusterIP — fronts which workload and pods. The build uses it to name

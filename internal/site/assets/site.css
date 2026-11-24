@@ -82,9 +82,9 @@ svg .arrow.unordered { stroke-dasharray: 2 3; stroke: var(--warn); }
 svg .note rect { fill: var(--file); stroke: var(--line); }
 svg .label { fill: var(--muted); }
 #selftest { white-space: pre-wrap; }
-/* Routed edges (route map, PLAN.md M7): hops no tracer saw, as boxes of
-   their own kind; a completed edge dashed in its own colour, a fused one
-   solid. */
+/* Routed edges (route map, docs/milestones.md M7): hops no tracer saw,
+   as boxes of their own kind; a completed edge dashed in its own colour,
+   a fused one solid. */
 svg .routed { cursor: pointer; }
 svg .routed.dim { opacity: 0.2; }
 svg .routed .hopline { stroke: var(--route); stroke-width: 1.5; stroke-dasharray: 6 3; }

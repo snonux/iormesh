@@ -43,10 +43,10 @@ type Config struct {
 	Now func() time.Time
 }
 
-// Writer is a schema.Sink that writes a trace as parquet segments (PLAN.md
-// M4 "Trace files", decision #16). Only the active segment's files are
-// ever open; a finished segment is renamed into ready/, which makes it
-// immutable and safe to rsync while the session runs.
+// Writer is a schema.Sink that writes a trace as parquet segments
+// (docs/milestones.md M4 "Trace files", decision #16). Only the active
+// segment's files are ever open; a finished segment is renamed into ready/,
+// which makes it immutable and safe to rsync while the session runs.
 //
 // A segment is the events file plus a file per table (methods, threads,
 // classes, stacks) that got rows while it was active, so the union of a

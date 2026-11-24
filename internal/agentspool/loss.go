@@ -2,8 +2,8 @@ package agentspool
 
 // Losses counts every record the agent meant to deliver that did not
 // arrive, cumulative since the ring was created, in the shape of
-// bpf.Losses so the correlator can turn deltas into drop events (PLAN.md,
-// "Trace output contract": loss is recorded, never silent).
+// bpf.Losses so the correlator can turn deltas into drop events
+// (docs/output-contract.md: loss is recorded, never silent).
 type Losses struct {
 	// Dropped* are records the agent did not write because the reader
 	// was a whole ring behind (counted by the agent in the header, per

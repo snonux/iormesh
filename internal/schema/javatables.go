@@ -18,7 +18,8 @@ import (
 // event's stack a short list of integers. The table is its own file, like
 // stacks.ndjson, because a frame is shared by every event made through it:
 // written once, before the first event naming it. The parquet tags are
-// the M4 segment writer's mapping (PLAN.md: "methods" parquet file).
+// the M4 segment writer's mapping (docs/milestones.md M4: the
+// .methods.parquet table file).
 //
 // Ids are per trace and keyed by Frame and ClassID (task fe4): the same
 // frame text from two JARs (two class-table entries) is two ids, from

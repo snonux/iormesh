@@ -29,7 +29,7 @@ const (
 	// distDir holds the release artifacts mage sign signs.
 	distDir       = "dist"
 	agentBuildDir = "agent/build"
-	// The agent runs on 17+ (PLAN.md decision #29), so it is compiled
+	// The agent runs on 17+ (docs/decisions.md #29), so it is compiled
 	// for 17 whatever newer JDK builds it.
 	agentRelease = "17"
 	agentMain    = "iormesh.agent.Agent"

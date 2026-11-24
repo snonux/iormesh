@@ -2,9 +2,9 @@ package correlate
 
 import "iormesh/internal/schema"
 
-// The pod object of an in-pod tracer's events (PLAN.md M7 "Pod fields on
-// events", task sh4). The pod is the tracer's own, from the downward API;
-// the container is the event's process's, from its cgroup. In sidecar
+// The pod object of an in-pod tracer's events (docs/milestones.md M7 "Pod
+// fields on events", task sh4). The pod is the tracer's own, from the downward
+// API; the container is the event's process's, from its cgroup. In sidecar
 // mode with a shared PID namespace one tracer sees the app's, the
 // sidecars' and its own processes, and the container tells them apart.
 

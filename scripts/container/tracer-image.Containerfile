@@ -1,5 +1,5 @@
-# The tracer's runtime image for Kubernetes (PLAN.md M7, decision #13;
-# docs/implementation.md M7 step 8): the static tracer and the Java agent
+# The tracer's runtime image for Kubernetes (docs/milestones.md M7, decision
+# #13; docs/implementation.md M7 step 8): the static tracer and the Java agent
 # jar, nothing else - no shell, no package manager, no libc. It is not a
 # builder: the binaries come from the release pipeline (`mage buildPodman`
 # or `mage buildDocker` for dist/iormesh-linux-<arch>, `mage agentBuild`

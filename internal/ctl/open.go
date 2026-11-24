@@ -11,13 +11,13 @@ import (
 	"iormesh/internal/site"
 )
 
-// `iormeshctl open [-project P]... [-namespace NS] [-windowed]` (PLAN.md
-// M5 "Interactive explorer", decision #11): open the newest local site
-// of the projects' build — or of their -namespace or windowed build,
-// task hk4 — in the desktop's browser. It prints the page's path first, always — over
-// SSH, or on a host without a desktop opener, that path is the whole
-// answer (copy the folder, open it locally). open reads only the build
-// output and starts no server.
+// `iormeshctl open [-project P]... [-namespace NS] [-windowed]`
+// (docs/milestones.md M5 "Interactive explorer", decision #11): open the
+// newest local site of the projects' build — or of their -namespace or
+// windowed build, task hk4 — in the desktop's browser. It prints the page's
+// path first, always — over SSH, or on a host without a desktop opener, that
+// path is the whole answer (copy the folder, open it locally). open reads only
+// the build output and starts no server.
 
 // errNoOpener says no desktop opener is installed: the path printed is
 // the result, not a failure.

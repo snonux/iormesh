@@ -1,5 +1,5 @@
 // Package render draws the deterministic SVG exports of a build
-// (PLAN.md M5 "Deterministic SVG export", "Sequence view";
+// (docs/milestones.md M5 "Deterministic SVG export", "Sequence view";
 // docs/implementation.md M5 "Determinism rules"): graph.svg from the
 // merged graph, labeled with the view model's names (names.go), and one
 // sequence diagram per conversation of the view model. Same input, same

@@ -8,7 +8,7 @@ import (
 	"golang.org/x/term"
 )
 
-// `iormeshctl tui` (PLAN.md M5; docs/visualization.md "The terminal
+// `iormeshctl tui` (docs/milestones.md M5; docs/visualization.md "The terminal
 // UI"): the Bubble Tea explorer over the last build's model.json — the
 // same file `show` reads, through the same flags and loadModel, so the
 // TUI is no second reading of the data.

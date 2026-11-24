@@ -70,17 +70,16 @@
 // The walk below is still compiled in and runs in iormesh: tcpseq.c uses
 // ior_file_of_table whenever ior_file_ident_supported() holds, independent
 // of IOR_FILE_IDENT. It is verified by loading on Linux 7.2 and on Rocky
-// 9.9's el9 5.14 kernel, which has the kfunc (PLAN.md, task nf4); with the
-// kfunc declared under a name the kernel lacks, the same object loads on
-// 7.2 and reports 0. A kernel
-// that has the kfunc but is neither runs the walk through a verifier it was
-// never loaded on (typed loads from bpf_get_current_task_btf and the kfunc
-// in a tracepoint program are both younger than the rest of these
-// programs). There is no load fallback for that: iormesh loads the object
-// once (internal/bpf/loader.go), with no switch that turns the walk off,
-// so a verifier refusal of the walk fails the whole load. ior's second load
-// without the capture (loadWithIdentFallback, ior internal/ior_bpfsetup.go)
-// was not lifted; docs/build.md says so.
+// 9.9's el9 5.14 kernel, which has the kfunc (docs/milestones.md M4, task
+// nf4); with the kfunc declared under a name the kernel lacks, the same object
+// loads on 7.2 and reports 0. A kernel that has the kfunc but is neither runs
+// the walk through a verifier it was never loaded on (typed loads from
+// bpf_get_current_task_btf and the kfunc in a tracepoint program are both
+// younger than the rest of these programs). There is no load fallback for
+// that: iormesh loads the object once (internal/bpf/loader.go), with no switch
+// that turns the walk off, so a verifier refusal of the walk fails the whole
+// load. ior's second load without the capture (loadWithIdentFallback,
+// ior internal/ior_bpfsetup.go) was not lifted; docs/build.md says so.
 //
 // The fd slot is typed by borrowing struct kiocb, whose first member is a
 // struct file pointer: the kfunc needs the BTF id of a kernel struct, and the

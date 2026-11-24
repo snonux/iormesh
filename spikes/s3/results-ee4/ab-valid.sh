@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ab-valid.sh OUT ROUNDS AGENT THREADS: ab.sh with the validity rules of
-# the owner decision of 2026-11-20 (PLAN.md decision #25): a run counts
-# only at load <= 10 (the 1-minute load average before it starts and as
+# the owner decision of 2026-11-20 (docs/decisions.md #25): a run
+# counts only at load <= 10 (the 1-minute load average before it starts and as
 # measure.sh records it after), with zero lost records and — with the
 # agent — every burst event attributed (attributed >= 2 x ops). Any
 # other run is neither pass nor fail: it is kept apart (rejected-*) and

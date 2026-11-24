@@ -8,7 +8,7 @@ import (
 
 // Hosts emulated as network namespaces on one machine share one kernel
 // clock, so the merge's clock reconciliation would only ever see an
-// offset of zero (PLAN.md "Testing strategy": "Emulated hosts share a
+// offset of zero (docs/testing.md "Testing strategy": "Emulated hosts share a
 // kernel — compensate"). The test-only clock skew shifts every wall_ns
 // one tracer stamps by a fixed amount, as if its host's wall clock were
 // that far off, and leaves boot_ns alone: the merge's fusion window and

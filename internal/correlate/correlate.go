@@ -47,8 +47,8 @@ type Config struct {
 	WallOffsetNS int64
 	// FuseWindowNS is how long a socket event waits for its connection's
 	// other end before it is emitted as unresolved; 0 means 5s, the
-	// window the plan gives the loopback join. The Java join waits for
-	// it before it releases an http record by the clock
+	// window docs/implementation.md gives the loopback join. The Java
+	// join waits for it before it releases an http record by the clock
 	// (JavaJoinConfig.UpstreamHold, which must equal it): change both.
 	FuseWindowNS uint64
 	// Clock stamps session, drop and end events; it defaults to BootNow.
@@ -70,8 +70,8 @@ type Config struct {
 	// Config builds one.
 	NoGraph bool
 	// Pod, set for an in-pod tracer, stamps every event with the pod
-	// object (PLAN.md M7 "Pod fields on events", task sh4; pod.go): the
-	// pod's namespace and name, and on a process's events its container
+	// object (docs/milestones.md M7 "Pod fields on events", task sh4; pod.go):
+	// the pod's namespace and name, and on a process's events its container
 	// (ContainerOf). nil outside a pod: no event has a pod object and no
 	// cgroup is read.
 	Pod *PodConfig

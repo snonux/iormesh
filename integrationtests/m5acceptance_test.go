@@ -14,8 +14,8 @@ import (
 	"iormesh/internal/viewmodel"
 )
 
-// M5's acceptance on the rig (task rb4; PLAN.md M5 "Acceptance"): the
-// microservices spread of task 1f4 — four services on three emulated
+// M5's acceptance on the rig (task rb4; docs/milestones.md M5 "Acceptance"):
+// the microservices spread of task 1f4 — four services on three emulated
 // hosts, each host its own project and tracer, under the Java agent — is
 // collected into a store as `iormeshctl collect` lays one out, its
 // servers named in the service database, and built by the real
@@ -26,14 +26,14 @@ import (
 // rebuilt byte for byte and held to goldens, the checkout's sequence to
 // the declared hops and file work, and the eval harness is run end to
 // end over the same store with a scripted stand-in model — never a real
-// one: that needs the owner's model command (PLAN.md M5 "LLM
+// one: that needs the owner's model command (docs/milestones.md M5 "LLM
 // introspection eval").
 //
 // What the rig cannot do is M4's SSH deploy and collect: the store is
 // filled from the tracers' ready segments directly, as task tb4's
 // expansion test starts the tracers itself. Sequencing relaxation
-// (PLAN.md): this is "passes on the rig", not M5's acceptance, until the
-// real-host re-check (task 3f4).
+// (docs/milestones.md): this is "passes on the rig", not M5's acceptance,
+// until the real-host re-check (task 3f4).
 
 // ctlBinaryDefault is iormeshctl, built by mage build.
 const ctlBinaryDefault = "../bin/iormeshctl"

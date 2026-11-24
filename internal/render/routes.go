@@ -7,8 +7,8 @@ import (
 	"iormesh/internal/viewmodel"
 )
 
-// The routed edges in graph.svg (PLAN.md M7 "Ingress route mapping":
-// the ingress scenario "renders as one routed edge — app → FQDN →
+// The routed edges in graph.svg (docs/milestones.md M7 "Ingress route
+// mapping": the ingress scenario "renders as one routed edge — app → FQDN →
 // Traefik → deployment"). The merged graph has no node for an FQDN, an
 // ingress, a Service or a workload — no tracer ran there — so the routed
 // edges do not join the columns above: they are a band below them, one

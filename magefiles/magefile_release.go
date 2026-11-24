@@ -1,10 +1,10 @@
 //go:build mage
 
-// Release archives (PLAN.md "Release archives", docs/build.md "Releases",
-// task rh4): Release builds, signs and packs a tagged commit into
-// per-arch tarballs plus a signed SHA256SUMS under dist/release/. It
-// publishes nothing; uploading the files is a human step. The packing
-// and its checks live in internal/dist, where they are unit-tested.
+// Release archives (docs/build.md "Releases", task rh4): Release builds, signs
+// and packs a tagged commit into per-arch tarballs plus a signed SHA256SUMS
+// under dist/release/. It publishes nothing; uploading the files is a human
+// step. The packing and its checks live in internal/dist, where they are
+// unit-tested.
 
 package main
 

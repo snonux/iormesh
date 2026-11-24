@@ -141,5 +141,5 @@ const sidecarHeader = generated +
 # If the pod pins its MCS level (pod securityContext.seLinuxOptions.level,
 # e.g. s0:c123,c456), set the tracer's level below to that same pair to
 # keep those files at the pod's own pair (iormeshctl deploy -selinux-level
-# does this for a debug tracer; PLAN.md #13).
+# does this for a debug tracer; docs/decisions.md #13).
 `

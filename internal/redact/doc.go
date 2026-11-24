@@ -1,5 +1,5 @@
 // Package redact is the one redaction policy for everything iormesh records
-// that may carry a secret (PLAN.md decisions #9 and #22;
+// that may carry a secret (docs/decisions.md #9 and #22;
 // docs/implementation.md M2 step 8; docs/schema.md "Redaction"): exec argv
 // now, HTTP headers, URIs and query parameters in M3, and whatever M5 adds.
 //

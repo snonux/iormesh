@@ -69,8 +69,8 @@ type normalizer struct {
 // scenario compare equal. It never reorders events and never modifies
 // the input.
 //
-// Cutting comes first (PLAN.md M0 "Golden semantics"): ids numbered over
-// the whole trace would shift with every JVM startup file outside the
+// Cutting comes first (docs/milestones.md M0 "Golden semantics"): ids numbered
+// over the whole trace would shift with every JVM startup file outside the
 // bracket, and the bracket is exactly where runs must agree. The graph is
 // pruned to what the bracketed events touched for the same reason.
 func Normalize(in Trace, opt Options) (Trace, error) {

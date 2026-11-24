@@ -12,7 +12,7 @@ import (
 	"iormesh/internal/version"
 )
 
-// The agent jar's half of `iormesh upgrade` (task kf4, PLAN.md decision
+// The agent jar's half of `iormesh upgrade` (task kf4, docs/decisions.md
 // #28's "the agent jar ships like the tracer"). A JVM traced with
 // -javaagent, or live-attached by a session's -agent, runs the jar's code
 // as its own user — root's JVMs included — so the jar gets the tracer's

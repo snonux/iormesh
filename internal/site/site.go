@@ -1,7 +1,7 @@
 // Package site writes the local explorer of a consolidation run
-// (PLAN.md M5 "Interactive explorer", decision #11; docs/visualization.md
-// "The local site", step V3): a folder of static files that opens from
-// file:// — no server, no dependency, no network request.
+// (docs/milestones.md M5 "Interactive explorer", decision #11;
+// docs/visualization.md "The local site", step V3): a folder of static files
+// that opens from file:// — no server, no dependency, no network request.
 //
 //	<builds>/<projects>/sites/
 //	  latest -> 20251120T005320Z-3f9c0a1b2c4d/

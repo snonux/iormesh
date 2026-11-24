@@ -233,7 +233,7 @@ func (l *Lister) Get(ctx context.Context, name string) (PodState, error) {
 
 // Select is every running, not terminating pod selector matches, sorted
 // by name. None is ErrNoPod, more than MaxSelected ErrTooManyPods
-// (PLAN.md #18).
+// (docs/decisions.md #18).
 func (l *Lister) Select(ctx context.Context, selector string) ([]PodState, error) {
 	if !k8sname.Selector(selector) {
 		return nil, fmt.Errorf("%w: selector %q (k=v[,k!=v...], one = at least)", ErrName, selector)

@@ -148,7 +148,8 @@ func (s SSH) Run(ctx context.Context, argv ...string) ([]byte, error) {
 // *.parquet files directly in it) into localDir with rsync over the same
 // multiplexed ssh connection. --remove-source-files deletes a remote file
 // only after it transferred, and --fsync makes that mean "on the
-// controller's disk", the delete-on-transfer of PLAN.md M4 "Collect".
+// controller's disk", the delete-on-transfer of docs/milestones.md M4
+// "Collect".
 //
 // The server is not trusted with anything on the controller beyond file
 // contents, so rsync runs -rt, not -a: without -p the remote modes do not

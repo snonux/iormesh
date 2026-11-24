@@ -76,8 +76,8 @@ func writeRow[T any](w *Writer, t *table[T], row T) error {
 }
 
 // rotate publishes the active segment and opens the next. The disk is
-// checked first (PLAN.md: "before every segment rotation"); over the
-// limit, nothing rotates and the tracer ends the trace. A segment
+// checked first (docs/milestones.md: "before every segment rotation"); over
+// the limit, nothing rotates and the tracer ends the trace. A segment
 // without a single row is not published: an idle session would
 // otherwise leave an empty file in ready/ every minute. It restarts its
 // clock instead, so <start-ts> stays when its first row's minute began.

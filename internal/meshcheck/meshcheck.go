@@ -1,6 +1,6 @@
 // Package meshcheck holds the cross-service checks of the microservices
-// scenario (PLAN.md M0 "Microservices end-to-end scenario") that every run
-// of it with one service per host makes, wherever the hosts are: the
+// scenario (docs/milestones.md M0 "Microservices end-to-end scenario") that
+// every run of it with one service per host makes, wherever the hosts are: the
 // three emulated hosts of the namespaces rig (integrationtests,
 // TestMicroservicesAcrossHosts, root) and the four pods of the kind
 // acceptance (integrationtests/kind, TestKindMicroservices, task uh4).

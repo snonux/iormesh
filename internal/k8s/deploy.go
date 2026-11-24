@@ -87,7 +87,7 @@ func (k *Kubectl) Deploy(ctx context.Context, argv ...string) (Outcome, error) {
 // wait and every exec after it.
 func (k *Kubectl) deployDebug(ctx context.Context, p podInfo, argv []string) (Outcome, error) {
 	if hasContainer(p.Spec.Containers, TracerContainer) {
-		// One tracer per pod (PLAN.md M7, task 7f4): a sidecar pod has
+		// One tracer per pod (docs/milestones.md M7, task 7f4): a sidecar pod has
 		// its tracer already, and a debug one beside it would be a
 		// second session under the same pod identity.
 		return 0, fmt.Errorf("%w: %s/%s already has a %q sidecar; trace it in sidecar mode",

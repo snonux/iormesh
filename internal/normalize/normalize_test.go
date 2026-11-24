@@ -14,7 +14,8 @@ import (
 // TestNormalizeDeterministic: the same trace normalized twice is
 // identical, and two runs differing in every run-specific value (host,
 // PIDs, TIDs, incarnations, fds, ports, conn id, times, tmp dir) diff
-// empty inside the bracket — PLAN.md's "Deterministic exports".
+// empty inside the bracket — docs/output-contract.md's "Deterministic
+// exports".
 func TestNormalizeDeterministic(t *testing.T) {
 	for _, tt := range []struct {
 		scenario string

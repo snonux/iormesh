@@ -60,8 +60,8 @@ var (
 // (fileOp.fold): on a real host a JVM's serving thread loads classes
 // from its runtime image on the first request, hundreds of reads of
 // lib/modules back to back, and step by step they would push the
-// declared story past MaxSteps (task vg4; PLAN.md M5 "Sequence view").
-// The fold keeps the order exact and counts every call, so nothing is
+// declared story past MaxSteps (task vg4; docs/milestones.md M5 "Sequence
+// view"). The fold keeps the order exact and counts every call, so nothing is
 // hidden; the per-request cap counts ops after folding.
 //
 // "The same outcome" is success, or failure with the same errno: return

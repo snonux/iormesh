@@ -25,8 +25,8 @@ type Stamp struct {
 }
 
 // Timeline orders instants across hosts by the merge's clock bounds,
-// never by comparing raw timestamps of two clocks (PLAN.md M4 "Clock
-// reconciliation"): x on host X precedes y on host Y only when y − x
+// never by comparing raw timestamps of two clocks (docs/milestones.md M4
+// "Clock reconciliation"): x on host X precedes y on host Y only when y − x
 // strictly exceeds every offset the bound's Interval allows. Hosts
 // without traffic of their own are related through a chain of hosts that
 // have some, the intervals adding up along it.

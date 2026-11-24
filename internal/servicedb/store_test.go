@@ -68,7 +68,8 @@ func pick(s Snapshot, conns ...string) Snapshot {
 }
 
 // TestImportIdempotent: rebuilding the same mesh updates rows instead of
-// duplicating them (PLAN.md M4) — the second import changes no byte.
+// duplicating them (docs/milestones.md M4) — the second import changes no
+// byte.
 func TestImportIdempotent(t *testing.T) {
 	d, _ := openTemp(t)
 	s := observeMesh(t)

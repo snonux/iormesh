@@ -4,11 +4,12 @@ This is the operator's runbook for tracing pods with iormesh:
 what a cluster and a pod need first, which mode to pick, how to
 deploy, collect and clean up, the limits you will run into, and
 what the tools' error messages mean. The decisions behind it are
-in [PLAN.md](../PLAN.md): milestone
-[M7](../PLAN.md#m7--kubernetes-sidecar--debug-container-deployment)
+in [milestones.md](milestones.md) and
+[decisions.md](decisions.md): milestone
+[M7](milestones.md#m7--kubernetes-sidecar--debug-container-deployment)
 and the provisional decisions #13 (privilege profile), #14 (Java
 attach) and #18 (iormeshctl's config), under
-["Provisional — M7"](../PLAN.md#provisional--m7-2026-11-20). The
+["Provisional — M7"](decisions.md#provisional--m7-2026-11-20). The
 owner has confirmed them for now. The security reasoning is in
 [security.md](security.md) ("Kubernetes"), and the test evidence
 is in [testing.md](testing.md#m7-acceptance-on-kind-task-yb4).
@@ -236,7 +237,7 @@ when the app container's init dies, the kernel kills the tracer
 too (exit 137), and an ephemeral container is never restarted.
 In a sidecar pod, the pause container is init of the shared PID
 namespace, so the tracer survives. A restarted JVM gets no agent
-from `run -agent`; give such JVMs `-javaagent` (PLAN.md M7,
+from `run -agent`; give such JVMs `-javaagent` (milestones.md M7,
 [java-attach.md](java-attach.md)). That is a workload change
 the owner makes — the jar and a spool shared with the tracer
 inside the app container — and iormesh ships no recipe for it
@@ -307,7 +308,7 @@ the port to a restarted app of the same executable and uid for
 container id and so a new cgroup: it is followed only for the
 exact executable path (the same image), while a path upgrade is
 a new image, a rollout and a new pod. The rule that accepts the
-same executable base name in the same cgroup (PLAN.md decision
+same executable base name in the same cgroup (decisions.md
 #23) covers only a process restarted inside the same container
 (by a supervisor). `-pattern`
 only matches execs after the tracer attached. In either case the
@@ -445,7 +446,8 @@ namespace of the collect.
   (SELinux enforcing, containerd 2.2.10, kubectl 1.35). There
   has been no multi-node cluster, no CRI-O, no OpenShift and no
   Pod Security level below `privileged`
-  ([PLAN.md M7](../PLAN.md#m7--kubernetes-sidecar--debug-container-deployment)).
+  ([milestones.md
+  M7](milestones.md#m7--kubernetes-sidecar--debug-container-deployment)).
 
 ## SELinux
 

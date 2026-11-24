@@ -236,7 +236,7 @@ def roadmap():
         s.arrow(cx, 158, cx, 194, AMBER)
     s.text(330, 180, "gates", 11, AMBER)
     s.rect(40, 384, 12, 12, BOX, CYAN, 3)
-    s.text(60, 395, "milestone — done when its PLAN.md acceptance holds", 11,
+    s.text(60, 395, "milestone — done when its acceptance holds", 11,
            MUTED)
     s.rect(420, 384, 12, 12, BOX, AMBER, 6)
     s.text(440, 395, "spike — time-boxed, ends with a written result; each "

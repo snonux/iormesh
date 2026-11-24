@@ -1,6 +1,6 @@
 //go:build mage
 
-// M4Acceptance runs PLAN.md M4's acceptance against two real hosts
+// M4Acceptance runs docs/milestones.md M4's acceptance against two real hosts
 // (docs/testing.md, "M4 acceptance on two real hosts"): the runbook's
 // prerequisites must hold first — both hosts bootstrapped, a signed
 // build in dist/, the release key pinned. The sequence and its checks

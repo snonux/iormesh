@@ -17,9 +17,9 @@ const (
 	traefikNS = "traefik/traefik"
 )
 
-// TestKindAcceptance is PLAN.md M7's acceptance on kind: M0's tcp-nat
-// client and server as pods traced by debug containers, joined across a
-// ClusterIP and matching their goldens with pod identity; the hairpin
+// TestKindAcceptance is docs/milestones.md M7's acceptance on kind: M0's
+// tcp-nat client and server as pods traced by debug containers, joined across
+// a ClusterIP and matching their goldens with pod identity; the hairpin
 // (a pod calling its own Service); the ingress scenario through a real
 // Traefik, its backend traced by a sidecar and its gateway by a debug
 // container with the Java agent, rendered as one routed edge; route

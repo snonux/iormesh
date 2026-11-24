@@ -1,8 +1,10 @@
 # Trace scope — what we trace and why
 
 The mental-model inventory: an app needs more than file and
-socket events to be understood. Companion to [PLAN.md](../PLAN.md)
-("What we trace") — the plan is the source of truth.
+socket events to be understood. The decisions it cites are in
+[decisions.md](decisions.md); the events it produces are described
+in [output-contract.md](output-contract.md) and
+[schema.md](schema.md).
 
 Metadata only — nothing below is payload. Not all of it is on
 by default (decision #7): files, sockets (TCP, unix, UDP) and
@@ -107,6 +109,26 @@ event families `iormesh run -trace-families` adds (see
   happened". *Real meshes end at nginx, a database or a
   sidecar — the graph says so honestly.*
 
+## Local edges
+
+How the local IPC above becomes edges in the graph (M2 step 7): a
+pipe or socketpair is one connection node, fused at creation,
+joined by whoever inherits an end; a unix stream connection fuses
+through the kernel's own pairing of its two sockets; UDP has no
+connection, so its unit is the flow — one local/remote address
+pair — whose two loopback sides fuse like TCP's ends, while a flow
+to another host stays unresolved. A signal one traced process sends
+another is a `signaled` edge; a kernel-raised one (timer, SIGCHLD)
+has no sender.
+
+## Not traced as built
+
+The inventory is the target. Not traced as built (2026-11-22;
+`internal/tracepoints`, default_set.go and trace_family.go): file
+mmaps, eventfd and shared memory (no probes); TLS peer identity
+(later, decision #8). The peer address inside a sendmsg/recvmsg
+msghdr is traced since task nk4 (see the network family above).
+
 ## The end-goal picture
 
 One level up from the inventory: a complete picture of how every
@@ -115,4 +137,5 @@ it happened, attributed to the Java threads that drove it, and
 interleaved with those threads' local file I/O. The graph is the
 source; the sequence view and the controller's
 service-interaction database are the renderings of it (see
-PLAN.md, M4/M5 and "Trace output contract").
+[milestones.md](milestones.md), M4/M5, and
+[output-contract.md](output-contract.md)).

@@ -2,7 +2,7 @@ package viewmodel
 
 import "time"
 
-// Conversations (V2, docs/visualization.md; PLAN.md M5 "Sequence
+// Conversations (V2, docs/visualization.md; docs/milestones.md M5 "Sequence
 // view"): one request entering the mesh and everything it caused, as a
 // list of steps in happens-before order. The model renders the
 // correlated trace instead of re-inferring it, and says how each step's
@@ -106,7 +106,7 @@ type Conversation struct {
 	ID string `json:"id"`
 	// Start is the entering request's start on its own host's clock.
 	// The list is sorted by it (newest first) for presentation only:
-	// raw timestamps of two hosts order nothing (PLAN.md M4 "Clock
+	// raw timestamps of two hosts order nothing (docs/milestones.md M4 "Clock
 	// reconciliation").
 	Start time.Time `json:"start"`
 	// Entry is the service the request entered, Label the request

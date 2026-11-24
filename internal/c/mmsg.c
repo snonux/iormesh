@@ -1,6 +1,6 @@
 //+build ignore
 
-// Byte sums of sendmmsg and recvmmsg (iormesh, PLAN.md M4 "Clock
+// Byte sums of sendmmsg and recvmmsg (iormesh, docs/milestones.md M4 "Clock
 // reconciliation from the traffic itself", task oh4). Included by
 // iormesh.bpf.c after tcpseq.c, whose park and check it shares, and ahead of
 // the generated handlers, which call the two hooks below

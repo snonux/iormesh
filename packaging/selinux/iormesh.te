@@ -2,7 +2,7 @@ policy_module(iormesh, 0.1.0)
 
 ########################################
 #
-# iormesh_container_t: the in-pod tracer's SELinux type (PLAN.md #13,
+# iormesh_container_t: the in-pod tracer's SELinux type (docs/decisions.md #13,
 # task 7h4), an opt-in alternative to the default spc_t. It is a
 # container domain built like container_t - container-selinux's own
 # template, so containerd may transition to it, it manages

@@ -2,8 +2,9 @@
 
 All notable changes to iormesh are recorded here, in the style of
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
-follow `internal/version.Version`. [PLAN.md](PLAN.md) holds the
-scope, milestones and decisions; this file only summarises.
+follow `internal/version.Version`. [docs/milestones.md](docs/milestones.md)
+and [docs/decisions.md](docs/decisions.md) hold the milestones and
+decisions; this file only summarises.
 
 ## [Unreleased]
 

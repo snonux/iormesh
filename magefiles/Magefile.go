@@ -27,8 +27,8 @@ import (
 const (
 	// buildDir holds every build output - the binaries, the jars and the
 	// gates' test binaries - so none lands at the repository root
-	// (PLAN.md decision #30, tasks rk4/uk4). It is gitignored and removed
-	// by `mage clean`; dist/ stays the release output.
+	// (docs/decisions.md #30, tasks rk4/uk4). It is gitignored and
+	// removed by `mage clean`; dist/ stays the release output.
 	buildDir           = "bin"
 	workloadSrcDir     = "workload/src"
 	workloadClassesDir = "workload/classes"
@@ -42,7 +42,7 @@ const (
 	// race edge cases (integrationtests/pidreuse_test.go, sockrace_test.go).
 	edgePeerBinary = buildDir + "/edgepeer"
 	edgePeerPkg    = "./workload/edgepeer"
-	// The workload targets Java 21 (PLAN.md decision #5) whatever newer
+	// The workload targets Java 21 (docs/decisions.md #5) whatever newer
 	// JDK builds it, so it never depends on post-21 APIs.
 	workloadRelease = "21"
 )

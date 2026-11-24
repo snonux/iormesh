@@ -2,9 +2,9 @@ package tracepoints
 
 // DefaultSyscalls returns the syscalls attached when -trace-families is
 // not given: those of DefaultFamilies (decision #7: file and socket on) —
-// M1's walking-skeleton set (PLAN.md, "M1 — Walking skeleton", Probes),
-// M2's file surface (fileSurfaceSyscalls) and the socket calls that carry
-// addresses (socketSyscalls).
+// M1's walking-skeleton set (docs/milestones.md, "M1 — Walking skeleton",
+// Probes), M2's file surface (fileSurfaceSyscalls) and the socket calls that
+// carry addresses (socketSyscalls).
 //
 // Only attachment is narrowed. The generator still emits handlers for every
 // syscall the kernel has, so widening the set later is a change here, not a
@@ -29,8 +29,8 @@ func m1FileSyscalls() []string {
 // family alone still sees a connection's data. sendmsg, recvmsg and their
 // mmsg forms are socket data calls too (task oh4): a stream's bytes that
 // went through them would escape the byte sums the merge's clock proof
-// trusts (PLAN.md M4), so they are on by default with the rest of the
-// family. Their bytes and tcp_seq are captured (the mmsg calls' bytes are
+// trusts (docs/milestones.md M4), so they are on by default with the rest of
+// the family. Their bytes and tcp_seq are captured (the mmsg calls' bytes are
 // their messages' msg_len sum, internal/c/mmsg.c), and so is a datagram's
 // peer from the msghdr's msg_name - the mmsg calls' first message's (task
 // nk4, internal/c/sockaddr.c).
@@ -42,10 +42,10 @@ func socketSyscalls() []string {
 
 // fileSurfaceSyscalls is M2 step 4's file surface, on by default
 // (decision #7: file, socket and lifecycle on, the rest opt-in): what
-// PLAN.md's "What we trace" lists for the filesystem — create and delete,
-// rename and links, the stat family, truncate, timestamps, chmod/chown,
-// xattrs and positional data I/O — plus the fd lifecycle (M2 step 6):
-// dup*, which file-attrs' golden declares, and fcntl, whose F_DUPFD forms
+// docs/trace-scope.md lists for the filesystem — create and
+// delete, rename and links, the stat family, truncate, timestamps,
+// chmod/chown, xattrs and positional data I/O — plus the fd lifecycle (M2 step
+// 6): dup*, which file-attrs' golden declares, and fcntl, whose F_DUPFD forms
 // copy an fd and whose F_SETFD/F_GETFD forms tell the correlator which
 // fds an exec closes. A JVM calls fcntl when it sets a descriptor up, not
 // per I/O; the #25 measurement due before M2's acceptance covers it.

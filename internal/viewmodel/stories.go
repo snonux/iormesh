@@ -6,8 +6,8 @@ import (
 )
 
 // Thread stories (docs/visualization.md "Plain text", `show thread`;
-// PLAN.md M5 "Sequence view": "one thread's story reads as one line"):
-// for every lifeline with a thread, what that thread did across the
+// docs/milestones.md M5 "Sequence view": "one thread's story reads as one
+// line"): for every lifeline with a thread, what that thread did across the
 // kept conversations — received a request, read a file, made a call,
 // got its answer, replied — in the thread's own order. Every entry is a
 // step of a conversation (ID and number), so a story adds no reading of

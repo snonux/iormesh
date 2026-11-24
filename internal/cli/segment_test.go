@@ -18,7 +18,8 @@ import (
 	"iormesh/internal/segment"
 )
 
-// TestDiskLimitEndsTraceCleanly is PLAN.md's watchdog path through the
+// TestDiskLimitEndsTraceCleanly is the watchdog path (docs/milestones.md
+// M4 "Disk watchdog") through the
 // run loop: once the (fake) partition fills, the loop ends the trace as
 // disk_limit without an error (exit 0), and finish publishes a last
 // segment that holds the session header through the end event.

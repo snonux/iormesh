@@ -12,7 +12,7 @@ import (
 	"iormesh/internal/federate"
 )
 
-// `iormeshctl expand -apply` (PLAN.md M6 "Apply", "Rounds"): one
+// `iormeshctl expand -apply` (docs/milestones.md M6 "Apply", "Rounds"): one
 // expansion round. The plan expand prints is acted on, in this order:
 //
 //  1. expand.Enroll adds the candidates to the registry in memory — one

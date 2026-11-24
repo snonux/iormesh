@@ -1,6 +1,6 @@
 package integrationtests
 
-// PID reuse end to end (PLAN.md M2 acceptance; docs/testing.md, "M2
+// PID reuse end to end (docs/milestones.md M2 acceptance; docs/testing.md, "M2
 // acceptance"): a traced process exits, an untraced process takes over
 // its PID while the session still runs, and the tracer neither traces the
 // newcomer nor lets the old incarnation's events drift onto it, and the

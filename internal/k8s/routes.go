@@ -11,9 +11,9 @@ import (
 	"iormesh/internal/k8sname"
 )
 
-// Route discovery's reads (PLAN.md M7 "Ingress route mapping", decision
-// #15): read-only `kubectl get` of the objects internal/routemap turns
-// into a route map — Ingress, Traefik's IngressRoute, Service,
+// Route discovery's reads (docs/milestones.md M7 "Ingress route mapping",
+// decision #15): read-only `kubectl get` of the objects internal/routemap
+// turns into a route map — Ingress, Traefik's IngressRoute, Service,
 // EndpointSlice and the pods and ReplicaSets that own the endpoints —
 // through the operator's kubectl and a registered context, never from a
 // tracer. Nothing here writes to the cluster.

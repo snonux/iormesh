@@ -101,13 +101,13 @@ func (p PodRef) Validate() error {
 }
 
 // HostID is the host_id a tracer in pod p stamps on every event,
-// PodHostID: "pod-" and the pod UID (PLAN.md M7, task 7f4) — the same
-// helper the controller pins the pod's store directory with, so the two
+// PodHostID: "pod-" and the pod UID (docs/milestones.md M7, task 7f4) — the
+// same helper the controller pins the pod's store directory with, so the two
 // can never disagree. In k8s mode the graph's host node is the pod. Its
 // tracer sees the pod's PID namespace, so pids are unique only within
 // the pod; keying by the pod keeps proc:<host_id>/<pid>@<inc> of two
-// pods on one node apart, given one tracer per pod (PLAN.md M7). The
-// pods of one node share the session's boot_id, which groups them by
+// pods on one node apart, given one tracer per pod (docs/milestones.md M7).
+// The pods of one node share the session's boot_id, which groups them by
 // node.
 func (p PodRef) HostID() string { return PodHostID(p.UID) }
 

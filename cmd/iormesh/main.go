@@ -1,5 +1,5 @@
 // Command iormesh is the tracer: it runs on a traced host, loads the BPF
-// probes and writes the trace (PLAN.md, M1). All logic lives in
+// probes and writes the trace (docs/milestones.md, M1). All logic lives in
 // internal/cli; main only dispatches, so the subcommands stay testable.
 package main
 

@@ -19,8 +19,8 @@ import (
 	"iormesh/internal/release"
 )
 
-// `iormeshctl bootstrap [-apply] HOST` (PLAN.md decision #1, task qh4):
-// the first install of the tracer on a registered host — the one step
+// `iormeshctl bootstrap [-apply] HOST` (docs/decisions.md #1, task
+// qh4): the first install of the tracer on a registered host — the one step
 // deploy cannot take, since deploy only upgrades through the sudoers rule
 // and the rule does not exist yet. It takes the operator's own sudo once.
 //
@@ -352,7 +352,7 @@ func bootstrapScript(host, login string, b bootstrapBundle) []string {
 	sum := sha256.Sum256(b.binary)
 	remote := host + ":" + stagingRel + "/"
 	lines := []string{
-		"# iormeshctl bootstrap " + host + ": the first install of the tracer (PLAN.md decision #1).",
+		"# iormeshctl bootstrap " + host + ": the first install of the tracer (decision #1 in docs/decisions.md).",
 		"# Verified " + b.path + ": " + b.meta.File + " " + b.meta.Version + " against the pinned key, sha256 " +
 			hex.EncodeToString(sum[:]) + ".",
 		"# The rule names the SSH user " + login + " (-user); the build is for " + b.name + " (-arch).",

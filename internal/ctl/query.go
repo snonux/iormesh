@@ -16,8 +16,8 @@ import (
 	"iormesh/internal/termsafe"
 )
 
-// `iormeshctl query` (PLAN.md M5 "Query / slice interface", task pb4):
-// cut the merged trace of the collected segments into a size-capped
+// `iormeshctl query` (docs/milestones.md M5 "Query / slice interface", task
+// pb4): cut the merged trace of the collected segments into a size-capped
 // slice of schema NDJSON (internal/query).
 //
 // It reads the store exactly as build does, and trusts it no more: every

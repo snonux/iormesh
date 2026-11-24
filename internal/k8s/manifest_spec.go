@@ -78,7 +78,7 @@ func (m Manifests) sidecarPatch() workloadPatch {
 	p.Spec.Template.Spec.ShareProcessNamespace = &share
 	c := customSpec(ProfileMinimal, DefaultSELinuxType, DefaultSELinuxLevel)
 	c["name"], c["image"], c["args"] = TracerContainer, m.Image, m.sidecarArgs()
-	// The container is the unit (PLAN.md M7): its limits are the caps
+	// The container is the unit (docs/milestones.md M7): its limits are the caps
 	// `iormesh start` puts on a server's unit by default (one CPU, 1 GiB).
 	// Small explicit requests keep the scheduler from reserving the
 	// limits (requests default to limits when unset) for a tracer that

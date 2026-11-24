@@ -15,8 +15,8 @@ import (
 	"iormesh/internal/eval"
 )
 
-// The eval criterion (PLAN.md M5 "LLM introspection eval") needs a real
-// model, and the eval sends the trace's rollup and slices to it, so it
+// The eval criterion (docs/milestones.md M5 "LLM introspection eval") needs a
+// real model, and the eval sends the trace's rollup and slices to it, so it
 // runs only with the owner's model command — never here. What the rig
 // can prove is the pipeline: eval.Main builds the store into its own
 // scratch database, reads `show report`, runs every reply's QUERY and

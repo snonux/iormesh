@@ -154,7 +154,7 @@ func (w windowSpec) place(e env, days storeDays) (*federate.Window, error) {
 }
 
 // day is the date a bare time of day in -from or -to is placed on (task
-// 1l4, PLAN.md **A time of day's date**): the one UTC date every
+// 1l4, docs/milestones.md **A time of day's date**): the one UTC date every
 // listed segment of the store starts on. A store whose segments start on
 // more than one date refuses it — the earliest date moves when prune
 // deletes the oldest day, the latest when a new day is collected, so

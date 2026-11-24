@@ -2,7 +2,7 @@ package federate
 
 import "iormesh/internal/schema"
 
-// Which data messages the clock bounds may use (PLAN.md M4, "Clock
+// Which data messages the clock bounds may use (docs/milestones.md M4, "Clock
 // reconciliation from the traffic itself"; task jf4).
 //
 // A data message pairs a receive with the send whose recorded range holds

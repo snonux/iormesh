@@ -21,7 +21,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The OpenTelemetry-instrumented flavor (PLAN.md M0 catalogue, M3
+ * The OpenTelemetry-instrumented flavor (docs/milestones.md M0 catalogue, M3
  * "OpenTelemetry introspection", decision #20): an HTTP client and the
  * JDK HttpServer on 127.0.0.1, two processes, where every call runs in a
  * declared client span and is answered in a declared server span of the

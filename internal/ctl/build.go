@@ -27,7 +27,7 @@ import (
 	"iormesh/internal/viewmodel"
 )
 
-// `iormeshctl build [-project P]...` (PLAN.md M4 "Build", "Three
+// `iormeshctl build [-project P]...` (docs/milestones.md M4 "Build", "Three
 // commands, two jobs"): merge what collect put in the store, offline.
 //
 //  1. federate.LoadSegments decodes every events segment of the projects
@@ -53,8 +53,8 @@ import (
 //     database's view of the projects and the conversations' recording — whose http
 //     events ride along with step 3's read, and whose file work and Java
 //     frames take one more read (conversations.go). The per-run rollup
-//     (internal/report, PLAN.md M5) is built from the events of step 2's
-//     read, the sessions' methods tables (each checked in the child
+//     (internal/report, docs/milestones.md M5) is built from the events of
+// step 2's read, the sessions' methods tables (each checked in the child
 //     first, as query reads them), the merge's conn-id renames and the
 //     database's endpoints.
 //  5. <builds>/<projects>[@<namespace>][~window]/graph.json (the merged
@@ -133,8 +133,8 @@ type buildFlags struct {
 }
 
 // addNamespaceFlag registers -namespace, build's narrowing to one
-// Kubernetes namespace (PLAN.md M7 "Pod fields on events", task sh4),
-// and the readers' choice of that build (addReadBuildFlags). refresh
+// Kubernetes namespace (docs/milestones.md M7 "Pod fields on events", task
+// sh4), and the readers' choice of that build (addReadBuildFlags). refresh
 // does not take it: its -namespace is the K8S flag, the kubectl
 // namespace its collect reaches.
 func addNamespaceFlag(fs *flag.FlagSet, f *buildFlags, usage string) {

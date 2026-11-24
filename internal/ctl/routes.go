@@ -17,8 +17,8 @@ import (
 	"iormesh/internal/termsafe"
 )
 
-// The route map (PLAN.md M7, decision #15). Two sources, compiled into
-// the table the view model's routed edges are joined from:
+// The route map (docs/milestones.md M7, decision #15). Two sources, compiled
+// into the table the view model's routed edges are joined from:
 //
 //   - the static map, ~/.config/iormesh/routes.yaml beside the registry
 //     and under its ownership and mode rules (-routes on build and
@@ -88,8 +88,9 @@ func loadRoutes(e env, f buildFlags, db string) (*routemap.Table, error) {
 // registry's clusters: a snapshot of a cluster the operator no longer
 // traces would name its ClusterIPs on another cluster's connections. A
 // registry that lists several clusters still shares one snapshot (the
-// last discovered); the map applies to every flow of the build (PLAN.md
-// #15). registry is the build's -registry, "" for the default.
+// last discovered); the map applies to every flow of the build
+// (docs/decisions.md #15). registry is the build's -registry, "" for the
+// default.
 func checkSnapshotContext(e env, registry string, snap *routemap.Snapshot) error {
 	if snap == nil {
 		return nil

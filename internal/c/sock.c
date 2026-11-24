@@ -1,8 +1,8 @@
 //+build ignore
 
 // TCP connections of the traced processes, read from the socket rather than
-// the syscalls (iormesh; PLAN.md M1 "TCP lifecycle from the socket, not the
-// syscall"). Included by iormesh.bpf.c after filter.c and ahead of the
+// the syscalls (iormesh; docs/milestones.md M1 "TCP lifecycle from the socket,
+// not the syscall"). Included by iormesh.bpf.c after filter.c and ahead of the
 // generated handlers, which call the two hooks below.
 //
 // Why not the syscalls: a non-blocking connect (every Java NIO connect)

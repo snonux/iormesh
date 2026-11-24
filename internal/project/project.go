@@ -1,5 +1,5 @@
-// Package project holds the one rule for project labels (PLAN.md M4,
-// decision #21), shared by the tracer (`iormesh run -project`) and the
+// Package project holds the one rule for project labels (docs/milestones.md
+// M4, decision #21), shared by the tracer (`iormesh run -project`) and the
 // controller's server registry (`iormeshctl add -project`). It is cgo-free
 // so iormeshctl can import it; a copy in each binary would drift, and a
 // label one side accepts and the other rejects would only fail on deploy.

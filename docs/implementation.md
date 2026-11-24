@@ -2,13 +2,14 @@
 
 Step-by-step work packages with code sketches, for whoever — human
 or agent — picks up a spike or milestone. Companion to
-[PLAN.md](../PLAN.md): the plan decides *what* and *in which
-order*; this guide shows *how*.
+[milestones.md](milestones.md) and [decisions.md](decisions.md):
+they decide *what* and *in which order*; this guide shows *how*.
 
 Read this first:
 
-- **The plan wins.** Where a sketch here disagrees with PLAN.md,
-  PLAN.md is right and this file needs fixing in the same commit.
+- **The decisions win.** Where a sketch here disagrees with
+  decisions.md or milestones.md, they are right and this file
+  needs fixing in the same commit.
 - **ior wins on mechanics.** Sketches are written against `../ior`
   as it looked on 2026-11-17. ior moves; when a sketch and ior's
   current code disagree, follow ior and update the sketch.
@@ -111,7 +112,7 @@ func TestControllerIsCgoFree(t *testing.T) {
 
 These types are used by every package after M1. They live in
 `internal/schema` (cgo-free, landed with M1 as the v1 *draft*) and
-are the Go form of PLAN.md's "Trace output contract". The package
+are the Go form of output-contract.md. The package
 is the reference; the sketches below show its shape.
 
 ### The event envelope
@@ -207,7 +208,7 @@ Field notes:
   assigns `conn_id` locally to fused loopback pairs;
   across hosts the merge assigns it from the ISN-pair join (S2,
   decision #26). The Java fields are nested
-  (`java.thread`, `java.stack`) — settled by S1; PLAN.md's flat
+  (`java.thread`, `java.stack`) — settled by S1; the envelope sketch's flat
   `java_thread`/`java_stack` were a sketch. `HTTP` was
   provisional until M3's acceptance froze it.
 - `schema.Sink` (`Event(*Event) error`, `Close() error`) is what
@@ -369,7 +370,7 @@ tcp-loopback ship real ones):
 **Goal**: a JDK-only Java 21 app (the core; the OTEL flavor is
 its own jar, #5) that runs one named scenario, brackets it with
 markers, and ships the scenario's expectations.
-PLAN.md: "M0 — Traceable test workload".
+milestones.md: "M0 — Traceable test workload".
 
 **Files** (the framework landed with M0 and its code is now the
 reference — the sketches below only record intent)
@@ -504,7 +505,7 @@ bad `--peer`, and `echopeer` itself exits 2 on bad arguments
 (`magefile_restartpeer.go`). The process harness lives in
 `magefile_workload.go`.
 
-**Done when**: PLAN.md's M0 acceptance holds — the M1 scenarios
+**Done when**: milestones.md's M0 acceptance holds — the M1 scenarios
 run standalone and `strace -f -e trace=openat` shows the two
 marker opens around each scenario.
 
@@ -512,7 +513,7 @@ marker opens around each scenario.
 
 **Goal**: every layer, once: probes → correlator → NDJSON →
 normalizer → golden check → integration harness, on `file-basic`
-and `tcp-loopback`. PLAN.md: "M1 — Walking skeleton".
+and `tcp-loopback`. milestones.md: "M1 — Walking skeleton".
 
 **Step 1 — lift the build and generator from ior** (done, from
 ior `b21afc50328c`; every copied file names that commit and its
@@ -779,7 +780,7 @@ unit-tested with synthetic record streams:
 - **Pairing**: an enter waits per tid for its exit (a thread runs
   one syscall at a time); an exit without the matching enter
   (lost to a drop) emits nothing and is counted (`Unpaired`).
-  ior's restart fold is not lifted (PLAN.md decision #7): a call
+  ior's restart fold is not lifted (decisions.md #7): a call
   a signal interrupted and the kernel re-executed stays two
   rows. M2's signal work did not take it either. The copied
   kernel half (`restart.c`, `restart_pending_map`, the enter and
@@ -1096,7 +1097,7 @@ docs/testing.md for why per process). That last check made the
 tcp-loopback server wait for the client's EOF before closing:
 the racing closes traced different TCP teardowns run to run.
 
-**Done when**: PLAN.md's M1 acceptance holds;
+**Done when**: milestones.md's M1 acceptance holds;
 `mage integrationTest` passes ten times in a row; a second
 normalized run diffs empty against the first inside the bracket.
 
@@ -1137,7 +1138,7 @@ Runs on the M1 build. Result: `docs/spikes/s3-overhead.md`.
    `syscall-burst ops=N threads=T syscalls=2N elapsed_ns=E` on
    stdout, E timing the loops alone (opens before a start latch,
    JVM startup outside). Its expect.json declares only the
-   marker bracket (PLAN.md, "Load scenarios"). `mage
+   marker bracket (milestones.md, "Load scenarios"). `mage
    workloadTest` checks the result line and that bad `--ops` /
    `--threads` exit 2.
 3. Measure, three runs each, idle host:
@@ -1181,7 +1182,7 @@ joined count recorded), `S3_TRACER` (another build) and `S3_PERF=1`
 
 ## M2 — full trace surface
 
-**Goal**: everything in PLAN.md's "What we trace" except Java.
+**Goal**: everything in trace-scope.md except Java.
 Work in this order — each item is one PR-sized unit with its
 scenarios landing first (principle #1).
 
@@ -1866,7 +1867,7 @@ scenarios landing first (principle #1).
     profile `iormesh run -cpuprofile FILE`). Measured with
     `spikes/s3/measure.sh` against the #25 budget.
 
-**Done when**: PLAN.md's M2 acceptance holds, including the S3
+**Done when**: milestones.md's M2 acceptance holds, including the S3
 budget (decision #25) checked by a documented
 `spikes/s3/measure.sh` run by #25's paired CPU-time method — not
 a CI gate, CI machines are too noisy. M2's two timing items moved
@@ -1942,7 +1943,7 @@ call is as tight as it gets, and the captured stack still
 contains every caller above. (It is also what would later make
 virtual threads tractable — they cannot park inside such a
 bracket — but virtual-thread attribution is deferred; v1 only
-flags carrier-thread I/O. See PLAN.md, "Deferred — not in v1".)
+flags carrier-thread I/O. See decisions.md, "Deferred — not in v1".)
 
 **Experiment 2 — the agent skeleton.**
 
@@ -2124,15 +2125,15 @@ silent; live attach works and prints the JEP 451 warning on both;
 `AgentLoadException`; a root attacher reaches a JVM of another uid
 as is.
 
-**Exit**: PLAN.md's S1 exit criterion, plus a recommendation for
+**Exit**: milestones.md's S1 exit criterion, plus a recommendation for
 each of decisions #2, #6, #27 and #29. Met — see
 [the S1 result](spikes/s1-java-join.md); #2, #6 and #27 are
-decided in PLAN.md, #29 keeps its default with the 17 → 21 table
+decided in decisions.md, #29 keeps its default with the 17 → 21 table
 differences recorded.
 
 ## M3 — Java agent
 
-**Goal**: S1's prototype, productionized. PLAN.md: "M3 — Java
+**Goal**: S1's prototype, productionized. milestones.md: "M3 — Java
 agent". S1 confirmed the design with the corrections below
 ([result](spikes/s1-java-join.md)): the join is the uprobe TID
 mark plus the agent bracket on the same TID, compared in
@@ -2373,7 +2374,7 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
    A thread renamed after its first bracket writes another THREAD
    at its next bracket (an identity compare of `getName()` with
    the name last written, task fe4). A later reader gets all of
-   these again (task 5j4, PLAN.md #27): its open bumps the
+   these again (task 5j4, decisions.md #27): its open bumps the
    reader epoch, and the watermark thread resends the hook table
    (closed by a WATERMARK) and bumps a generation, so each
    THREAD, STACK and CLASS is written once more at its next
@@ -2549,7 +2550,7 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
    distinct frame (`class#method(file:line)`, parsed into class,
    method, file, line), keyed by the frame text and its class.
 
-   The class-load map (task fe4; PLAN.md M3 "Supporting
+   The class-load map (task fe4; milestones.md M3 "Supporting
    mappings" has the decision) is a third table,
    `classes.ndjson` (`schema.Class`): one row per class a
    written method row names — class, loader label, code source —
@@ -3176,7 +3177,7 @@ internal/cli/attach.go  # `iormesh attach`, `run -agent`
     collect) before `finish` closes the Java join. Unit tests in
     `lateattach_test.go`, end to end `TestJavaLateAttach`.
 
-**Done when**: PLAN.md's M3 acceptance holds.
+**Done when**: milestones.md's M3 acceptance holds.
 
 ## S2 — cross-host join
 
@@ -3283,8 +3284,8 @@ inequality); single request/response connections alone gave
 82–104 µs, because only a receiver already blocked in `recv`
 gives a tight inequality.
 
-**Exit**: PLAN.md's S2 exit criterion, plus a pick for decision
-#26. Met: the ISN pair, decided in PLAN.md.
+**Exit**: milestones.md's S2 exit criterion, plus a pick for decision
+#26. Met: the ISN pair, decided in decisions.md.
 
 ## M4 — controller
 
@@ -3292,7 +3293,7 @@ gives a tight inequality.
 laptop. `collect` and `build` are separate commands — sync only,
 and offline build only — and `refresh` is the two in a row;
 keep them separate in code too (`collect.go` never imports the
-merge). PLAN.md: "M4 — Controller".
+merge). milestones.md: "M4 — Controller".
 
 ![Operator workflow](diagrams/workflow.svg)
 
@@ -3665,7 +3666,7 @@ ssh H sudo -n /opt/iormesh/bin/iormesh status -project shop
   pushed; upgraded after the tracer, by the new binary, which
   installs a file signed as `iormesh-agent.jar` at
   `/opt/iormesh/lib/iormesh-agent.jar` only at its own version
-  (PLAN.md #28, provisional). A host whose projects do not use
+  (decisions.md #28, provisional). A host whose projects do not use
   the agent gets no jar. A tracer upgrade to another version
   removes the installed jar (it matched the old tracer); `start`
   forwards `-agent` as the checked real path and its unit re-checks
@@ -4200,7 +4201,8 @@ connection into messages, `bound.go` intersects them,
   offset there could name two sends. A receive whose byte no
   traced send holds gives nothing. Beyond that a message must
   be shown to pair bytes of one 4 GiB lap (`clockproof.go`,
-  task jf4; the rule is PLAN.md's):
+  task jf4; the rule is milestones.md M4's, "Clock
+  reconciliation from the traffic itself"):
   - *Stream check*, per direction: the sums of every data
     record (folded and `tcp_seq`-less ones included) and every
     `tcp_sock` counter stay below 4 GiB, no recorded send or
@@ -4841,7 +4843,7 @@ iormeshctl prune -older-than DUR [-project P]... [-store DIR] [-db FILE] [-apply
   `-from`/`-to`. An empty window is a usage error. The build
   echoes the resolved window (`window     FROM .. TO`, `(open)`
   for a side not given).
-- **A time of day's date** (task 1l4, PLAN.md). `windowSpec.day`
+- **A time of day's date** (task 1l4, milestones.md M4). `windowSpec.day`
   is the one rule, for build and both kinds of query: it lists
   the projects' events segments (`federate.StartRange`, names
   only, readable or not) and places the time of day on their UTC
@@ -4984,7 +4986,7 @@ traces with `federate.Merge`, renaming each event's conn id by
 `Result.Renames` before the merged golden check.
 Testing notes: [testing.md](testing.md#m4-two-host-and-nated-pairs-task-kb4).
 
-**Done when**: PLAN.md's M4 acceptance holds, driven by
+**Done when**: milestones.md's M4 acceptance holds, driven by
 `integrationtests/multihost_test.go` on two network namespaces
 plus one run on two real hosts. That run is `mage m4Acceptance
 HOST1 HOST2` (task lb4): `internal/acceptance` holds the
@@ -5003,7 +5005,7 @@ the view model they share are designed in
 health, services and edges, and its text views. Extend the model
 and its goldens first (conversations and processes, V2); a
 renderer never reads the merged graph directly — `graph.svg`, a
-drawing of the graph export itself, is the one exception (PLAN.md
+drawing of the graph export itself, is the one exception (milestones.md
 M5 "Deterministic SVG export"), and even it takes its names from
 the model (`render.NamesOf`: hosts by store name, servers by the
 service they serve, task rb4). Conversations are built (task
@@ -5542,7 +5544,7 @@ TUI and the site, holds the SVG exports to goldens and runs
 `eval.Main` with a scripted stand-in model (the test binary,
 re-executed) — the real model run stays the owner's.
 
-**Done when**: PLAN.md's M5 acceptance holds.
+**Done when**: milestones.md's M5 acceptance holds.
 
 ## M6 — mesh expansion
 
@@ -5725,12 +5727,12 @@ host with `Plan` and `Enroll`, starting each enrolled host's
 tracer as `iormesh run -listen-port PORT` (`Host.ListenPort`)
 where a real round deploys over SSH.
 
-**Done when**: PLAN.md's M6 acceptance holds.
+**Done when**: milestones.md's M6 acceptance holds.
 
 ## M7 — Kubernetes
 
-Accepted on kind and el9 (PLAN.md M7). Decisions #13, #14, #15
-and #18 are still provisional (PLAN.md "Provisional — M7", task
+Accepted on kind and el9 (milestones.md M7). Decisions #13, #14, #15
+and #18 are still provisional (decisions.md "Provisional — M7", task
 ub4): built to them and proven on kind, with #18 expected to
 move once the owner's fleet examples arrive.
 
@@ -5837,7 +5839,7 @@ depends on:
    through `NewModuleFromFileArgs{SkipMemlockBump: true}` from a
    memfd of the embedded object (libbpf ≥ 1.0 bumps only on
    kernels without memcg accounting), or patch libbpfgo; then
-   drop `SYS_RESOURCE` from the set, PLAN.md #13 and the docs.
+   drop `SYS_RESOURCE` from the set, decisions.md #13 and the docs.
 3. **Java staging inside the JVM's root** (#14). The jar and
    spool paths are resolved in the JVM's mount namespace, and an
    ephemeral container cannot give the app container a volume.
@@ -5969,7 +5971,7 @@ depends on:
    `TestParseProcCgroupKindCaptures` — from the host, from the
    node, the tracer's own, and the tracer seen from the app's
    private namespace (`0::/../cri-containerd-<id>.scope`).
-   **Pod fields on events** (task sh4; PLAN.md M7): the
+   **Pod fields on events** (task sh4; milestones.md M7): the
    correlator stamps each event's `pod` object at enqueue —
    namespace and name from `Config.Pod`, the container id from
    the event's process, read once per process through
@@ -5999,7 +6001,7 @@ depends on:
    tracer and controller cannot disagree on case or suffix —
    and `cli.describeHost` uses them instead
    of the machine-id and hostname, even when the image carries a
-   machine-id. Because one tracer runs per pod (PLAN.md M7;
+   machine-id. Because one tracer runs per pod (milestones.md M7;
    `Kubectl.Check` refuses a debug session in a pod with a
    debug container or a sidecar already), the pod is one PID
    namespace, so `proc:pod-<uid>/<pid>@<inc>` is unique without
@@ -6081,7 +6083,7 @@ depends on:
    spc_t, level: s0}` on this container (never the pod; `iormeshctl deploy
    -selinux-type` or the registry's `selinux_type` picks another,
    `-selinux-level` or `selinux_level` the level (task 8h4),
-   empty omits it; PLAN.md #13; the opt-in `iormesh_container_t`
+   empty omits it; decisions.md #13; the opt-in `iormesh_container_t`
    type ships as a policy RPM, `packaging/selinux/`, task 7h4). The
    sidecar adds resource limits
    of one CPU and 1 GiB (start's unit defaults: the container is
@@ -6298,7 +6300,7 @@ depends on:
     context the registry does not list is refused, as an
     unregistered host is.
 
-    Built by task af4 (the rules: PLAN.md #18's "Wired" note).
+    Built by task af4 (the rules: decisions.md #18's "Wired" note).
     `internal/k8sname` holds the name rules both sides check —
     `internal/federate` when it loads the sections
     (`registry_k8s.go`: types, validation, `PodRef`,
@@ -6383,7 +6385,7 @@ depends on:
     for an earlier debug container, `pinNewHosts` re-reading
     `hosts.json` under `hosts.json.lock`, `collect -db`, and
     `iormesh ready` failing for a project with no trace dir.
-    App container restarts (task ah4, PLAN.md M7): a debug
+    App container restarts (task ah4, milestones.md M7): a debug
     tracer shares the app container's PID namespace, so it dies
     with that container's init (exit 137). An ephemeral container
     is never restarted, removed or renamed. So
@@ -6448,7 +6450,7 @@ depends on:
     tracer says to run deploy, or, when it is `iormesh-8` (the
     cap), to restart the pod or use sidecar mode. Sidecar mode is
     unchanged and is the recommendation for pods that restart.
-11. ClusterIP join: S2's key survives kube-proxy's DNAT (PLAN.md
+11. ClusterIP join: S2's key survives kube-proxy's DNAT (milestones.md
     M7 "Service-NAT correlation", settled by task xb4), so M4's
     `federate.Fuse` joins both ends unchanged and no conntrack is
     read. `internal/routemap` (`join.go`) then names the Service
@@ -6470,7 +6472,7 @@ depends on:
     endpoint whose `pod-<uid>` is among them — its pod name, else
     the host id. Two endpoints, one without a UID or an untraced
     pod name none. Why a route asks more than a ClusterIP edge
-    (PLAN.md M7, task 5g4): an unfused ClusterIP flow's own trace
+    (milestones.md M7, task 5g4): an unfused ClusterIP flow's own trace
     shows the client dialing the Service's address, which
     kube-proxy forwards only to the Service's endpoints, so a sole
     endpoint is one map lookup from what was observed. A route's
@@ -6578,4 +6580,4 @@ depends on:
     Design and tests: [visualization.md](visualization.md),
     "Routed edges".
 
-**Done when**: PLAN.md's M7 acceptance holds.
+**Done when**: milestones.md's M7 acceptance holds.

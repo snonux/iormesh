@@ -1,9 +1,9 @@
 package schema
 
-// The M2 file surface (PLAN.md M2, "What we trace"; decision #7: the file
-// family is on by default). Each kind is the kernel tracepoint's syscall
-// name, as for the M1 kinds — "newfstatat", not strace's "fstatat" — so a
-// kind always says which syscall fired. Appended, never renamed: a trace
+// The M2 file surface (docs/milestones.md M2, docs/trace-scope.md; decision
+// #7: the file family is on by default). Each kind is the kernel tracepoint's
+// syscall name, as for the M1 kinds — "newfstatat", not strace's "fstatat" —
+// so a kind always says which syscall fired. Appended, never renamed: a trace
 // written by an older tracer must keep validating.
 //
 // Args per shape (docs/schema.md "Event kinds (M2 file surface)"):

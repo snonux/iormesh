@@ -134,8 +134,9 @@ func TestRunPodOverCapSIGTERM(t *testing.T) {
 }
 
 // TestRunHostOverCapFails: outside a pod nothing restarts the run and
-// nothing collects through an exec, so it still fails at once (PLAN.md:
-// fails fast if the disk is already at the limit).
+// nothing collects through an exec, so it still fails at once
+// (docs/milestones.md M4 "Disk watchdog": fails fast if the disk is already at
+// the limit).
 func TestRunHostOverCapFails(t *testing.T) {
 	fakePodEnv(t, map[string]string{})
 	_, _, _, done := overCapSession(t)

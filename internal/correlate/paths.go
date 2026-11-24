@@ -11,13 +11,13 @@ const atFDCWD = -100
 // It follows the file by name, not by inode. A rename record carries the
 // two names but no inode, and a directory rename moves every file below
 // it — each its own inode — so matching by inode alone would miss exactly
-// the move PLAN.md asks to follow. Instead a rename rewrites every open
-// fd whose path is the old name or lies below it, in every traced process
-// of the host (the rename is filesystem-wide). What name matching could
-// get wrong is a name that came to stand for another file: unlink marks
-// the fds of the removed name gone, and so does a rename onto an existing
-// name for the fds of the file it replaced, so a later traced file reusing
-// the name does not drag them along.
+// the move docs/trace-scope.md asks to follow. Instead a rename rewrites every
+// open fd whose path is the old name or lies below it, in every traced process
+// of the host (the rename is filesystem-wide). What name matching could get
+// wrong is a name that came to stand for another file: unlink marks the fds of
+// the removed name gone, and so does a rename onto an existing name for the
+// fds of the file it replaced, so a later traced file reusing the name does
+// not drag them along.
 //
 // That narrows the hazard; it does not close it. Still open:
 //   - an unlink, recreate or rename by an untraced process: no record;

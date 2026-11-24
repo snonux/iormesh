@@ -24,9 +24,9 @@ const perCPUStride = 8
 
 // Losses counts every record a trace wanted but did not deliver, and
 // beside it the program runs the kernel skipped. All counters are
-// cumulative since the tracer was opened, so the correlator can turn a
-// delta into a drop event (PLAN.md, "Trace output contract": loss is
-// recorded, never silent - and never inflated).
+// cumulative since the tracer was opened, so the correlator can turn a delta
+// into a drop event (docs/output-contract.md: loss is recorded, never silent -
+// and never inflated).
 type Losses struct {
 	// Kernel is the number of records the BPF programs could not reserve in
 	// the ring buffer (userspace backpressure), summed over CPUs.

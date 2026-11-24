@@ -15,8 +15,8 @@ import javax.net.ssl.SSLContext;
  * The client end of the HTTP scenarios: the JDK's HttpClient, another of
  * decision #22's v1 hook targets. HTTP/1.1 is forced — v1 pairs requests
  * across the wire by connection and per-connection ordinal, which an
- * HTTP/2 connection's multiplexing would break (PLAN.md "Request pairing
- * across the wire"). The calls go out one after another on one client,
+ * HTTP/2 connection's multiplexing would break (docs/milestones.md "Request
+ * pairing across the wire"). The calls go out one after another on one client,
  * so the pool reuses one keep-alive connection for all of them. Each
  * request is sent from {@link #call}, the causing method the http event's
  * Java stack must name; the socket I/O itself may run on the client's

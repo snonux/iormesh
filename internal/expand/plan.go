@@ -64,7 +64,7 @@ type Peer struct {
 }
 
 // Candidate is a peer to enroll: a tracer on Addr bound to whatever
-// listens on Port (the tracer's -listen-port, PLAN.md M2).
+// listens on Port (the tracer's -listen-port, docs/milestones.md M2).
 type Candidate struct {
 	Peer
 	// Hop is one more than the smallest hop among the registered hosts

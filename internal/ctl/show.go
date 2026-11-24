@@ -14,7 +14,7 @@ import (
 	"iormesh/internal/viewmodel"
 )
 
-// `iormeshctl refresh` and `iormeshctl show` (PLAN.md M4 "Three
+// `iormeshctl refresh` and `iormeshctl show` (docs/milestones.md M4 "Three
 // commands, two jobs"; docs/visualization.md "Plain text").
 
 // refreshCommand is collect, then build — the everyday command. A

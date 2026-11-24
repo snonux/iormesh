@@ -1,4 +1,4 @@
-// Command iormesheval runs the LLM introspection eval (PLAN.md M5):
+// Command iormesheval runs the LLM introspection eval (docs/milestones.md M5):
 // a question set over a scenario's collected trace, put to the model
 // command the operator names. `mage eval` runs it; it is never part of
 // `mage test`. All logic lives in internal/eval.

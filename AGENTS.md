@@ -7,19 +7,22 @@ accepted until its eval has run with a real model. Rocky Linux
 `cmd/` (`iormesh`, `iormeshctl`, `iormesheval`), `internal/`,
 `agent/` (the Java agent), `workload/` (the Java test workload)
 and the `magefiles/` targets (Magefile.go and the
-`magefile_*.go` files, decision #30). [PLAN.md](PLAN.md) is the
-working plan and the source of truth for scope, spikes (S1–S3),
-milestones (M0–M7), and decisions. `ior` (`../ior`) is the
-reference project for BPF/C code generation and integration
-tests — consult it before inventing patterns.
-Don't scaffold implementation ahead of the milestones — the
-plan moves first.
+`magefile_*.go` files, decision #30).
+[docs/decisions.md](docs/decisions.md) holds every numbered
+decision and is the source of truth;
+[docs/milestones.md](docs/milestones.md) holds the spikes
+(S1–S3) and milestones (M0–M7) with their acceptance. `ior`
+(`../ior`) is the reference project for BPF/C code generation
+and integration tests — consult it before inventing patterns.
+Don't scaffold implementation ahead of a recorded decision —
+the decision moves first.
 
 Picking up a spike or milestone? Read its section in
 [docs/implementation.md](docs/implementation.md) — files, order
-of work, code sketches, tests — after PLAN.md. If a sketch there
-disagrees with PLAN.md, the plan is right; fix the guide in the
-same commit.
+of work, code sketches, tests — after docs/milestones.md. If a
+sketch there disagrees with docs/decisions.md or
+docs/milestones.md, they are right; fix the guide in the same
+commit.
 
 ## Build and test
 
@@ -46,24 +49,29 @@ Never write `//nolint` — a test fails on it.
   modes, a short security summary, and the docs index. It must
   not accumulate detail sections again.
 - **Detailed documentation lives in `docs/`**, one topic per
-  file (architecture, trace-scope, output-contract, schema,
-  testing, java-attach, security, build, implementation,
-  visualization; spike results under `docs/spikes/`), each
-  linked from the README's Documentation section.
+  file (architecture, decisions, milestones, trace-scope,
+  output-contract, schema, testing, java-attach, security,
+  build, implementation, visualization; spike results under
+  `docs/spikes/`), each linked from the README's Documentation
+  section.
 - **Diagrams are generated**: `docs/diagrams/*.svg` come from
   `docs/diagrams/gen.py` (`python3 docs/diagrams/gen.py
   docs/diagrams`). Change the generator, not the SVGs.
-- **PLAN.md decides, docs narrate**: decisions land in PLAN.md
-  first; the docs expand and explain them. When the plan
-  changes, update the matching docs file in the same commit —
-  never leave docs contradicting PLAN.md.
+- **Decisions first, docs narrate**: a decision is recorded
+  first in `docs/decisions.md` (the next free number, with its
+  reasons); the topic docs expand and explain it. When a
+  decision changes, update the matching topic doc in the same
+  commit — never leave docs contradicting docs/decisions.md.
+  A milestone's scope and acceptance change in
+  `docs/milestones.md` the same way.
 - **New documentation goes into `docs/`** with a README index
   entry; new sections do not go into README.md.
-- Don't duplicate PLAN.md verbatim in docs; link to it instead.
+- Don't duplicate a decision verbatim in the topic docs; cite
+  its number (`docs/decisions.md #N`) instead.
 
 ## Style
 
-- Wrap prose at 79 columns (PLAN.md and docs/ use this).
+- Wrap prose at 79 columns (docs/ uses this).
 - Commit messages: lowercase `area: summary` — e.g.
-  `plan: …`, `docs: …`, `readme: …`. Commit and push after each
+  `docs: …`, `readme: …`. Commit and push after each
   change-set.

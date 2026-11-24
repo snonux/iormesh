@@ -126,11 +126,11 @@ func ParseProcCgroup(data []byte) (CgroupIdentity, error) {
 }
 
 // ContainerOf is the container id an in-pod tracer stamps on a process's
-// events (PLAN.md M7 "Pod fields on events", task sh4): the container
-// /proc/<pid>/cgroup (data) names, when it is a container of the tracer's
-// own pod, podUID. Inside the tracer's private cgroup namespace a sibling
-// container reads relative ("/../<container>", no pod: the tracer's), a
-// tracer sharing the node's namespace reads the full kubelet path,
+// events (docs/milestones.md M7 "Pod fields on events", task sh4): the
+// container /proc/<pid>/cgroup (data) names, when it is a container of the
+// tracer's own pod, podUID. Inside the tracer's private cgroup namespace a
+// sibling container reads relative ("/../<container>", no pod: the tracer's),
+// a tracer sharing the node's namespace reads the full kubelet path,
 // whose pod must be podUID. Everything else names no container and
 // gives "": the tracer's own container ("0::/" — its id is not in its
 // own view), the pod cgroup itself, another pod's cgroup (a process the

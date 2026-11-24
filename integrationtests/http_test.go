@@ -241,8 +241,8 @@ func httpOf(x *normalize.Expectation, i int) *normalize.ExpectedHTTP {
 
 // assertRequestsPaired: the client's and the server's http events pair
 // one to one by (conn_id, req_seq) with the same method, path and status
-// — the cross-wire pairing the merge relies on (PLAN.md "Request pairing
-// across the wire"). meshcheck.RequestsPaired, which the microservices
+// — the cross-wire pairing the merge relies on (docs/milestones.md "Request
+// pairing across the wire"). meshcheck.RequestsPaired, which the microservices
 // runs on hosts and pods share.
 func assertRequestsPaired(t *testing.T, events []schema.Event) {
 	t.Helper()

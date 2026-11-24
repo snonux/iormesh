@@ -1,6 +1,6 @@
 # S3 — overhead and volume budget
 
-Result of spike S3 (PLAN.md, "Spikes"; decision #25). It measures
+Result of spike S3 (docs/milestones.md, "Spikes"; decision #25). It measures
 what the M1 tracer costs on the per-syscall worst case and turns
 the numbers into the budget M2 is accepted against. Every figure
 below is computed from `spikes/s3/results/samples.txt`, written
@@ -98,7 +98,7 @@ the ring buffer.
    cost is what makes them expensive.
 
 The budget itself (the acceptance criteria) is decision #25 in
-PLAN.md.
+[decisions.md](../decisions.md).
 
 ## Follow-up (wc4): the consumer's per-event CPU
 
@@ -341,7 +341,7 @@ so it can make a ratio look better as well as worse.
 
 Loss and volume pass. The two timing items moved to task md4
 (2026-11-19), which gates M3's acceptance: this host never gets
-quiet, so PLAN.md #25 now measures them load-tolerantly — the
+quiet, so docs/decisions.md #25 now measures them load-tolerantly — the
 tracer's own CPU time per event, and the bystander as the median
 of ≥ 10 interleaved, pinned traced/untraced pairs on CPU time,
 with the wall-clock ratio recorded alongside. The limits are
@@ -352,7 +352,7 @@ per-event figure above was an artefact of its method; see
 ## Follow-up (md4): the timing items by the paired CPU-time method
 
 Task md4 took decision #25's two timing items by the load-tolerant
-method PLAN.md adopted on 2026-11-19. The host was as busy as ever
+method decision #25 adopted on 2026-11-19. The host was as busy as ever
 (load average 4.6–9.0, a nice-19 desktop indexer plus unrelated
 builds), which is what the method is for. `spikes/s3/measure.sh`
 now pins every process — the tracer to CPU 3, the burst JVM to
@@ -547,10 +547,10 @@ ring, and with them their marks.
 ## Follow-up (ae4): the bystander after 8e4's `raw_syscalls` dispatch
 
 Task 8e4 moved the syscall handlers behind two dispatchers on the
-classic `raw_syscalls:sys_enter`/`sys_exit` tracepoints (PLAN.md,
-"Syscall handlers run behind `raw_syscalls` dispatchers"), so every
-syscall on the host now meets a BPF program while a trace runs,
-whether or not any family traces its kind. Task ae4 re-ran
+classic `raw_syscalls:sys_enter`/`sys_exit` tracepoints
+(docs/output-contract.md, "Syscall handlers run behind `raw_syscalls`
+dispatchers"), so every syscall on the host now meets a BPF program while a
+trace runs, whether or not any family traces its kind. Task ae4 re-ran
 decision #25's bystander item by md4's method, added a bystander of
 an untraced kind, and re-checked the tracer's CPU per event. Same
 host as md4 (i7-1185G7, 8 CPUs, kernel 7.2.15, JDK 25), as busy or
@@ -609,7 +609,7 @@ attaching per syscall again on kernels before 7.2, whose per-syscall
 programs run with preemption disabled. That was not done: the gated
 item passes, this host runs 7.2 only (the other path could not be
 tested here), and it would bring back a second attach mode the
-integration suite would have to cover on each kernel line (PLAN.md,
+integration suite would have to cover on each kernel line (docs/decisions.md,
 decision #25).
 
 **Tracer CPU per event** (`S3_MODES=traced
@@ -786,7 +786,7 @@ the per-event text encoding), not another micro-cut; the default fold
 Status (2026-11-19): M3 is accepted with the tracer-CPU item open and
 over (plain unfolded 2.28 µs at 4 threads, `-spool` 3.8 / 5.6 µs);
 it is split to task ee4 on the M2 pattern, gating M4's acceptance,
-limit unchanged (PLAN.md, M3 status).
+limit unchanged (docs/milestones.md, M3 status).
 
 ## Follow-up (xe4): the cost of `args.tcp_seq`
 
@@ -1012,7 +1012,7 @@ a relaxation, argued by the extra agent records each joined event
 consumes (one core still sustains 250 k joined events/s) and by the
 default fold keeping JVM hot loops out of the join. Plain stays
 ≤ 2 µs. The decision came with one bounded round of the join cuts
-listed above first (PLAN.md, decision #25 item 1 and M4 status).
+listed above first (docs/decisions.md, decision #25 item 1 and M4 status).
 
 **The cuts** (commit `83b5c61`; output unchanged — the join, ring
 and segment tests, the integration suite):
@@ -1077,7 +1077,7 @@ Decision #25's tracer-CPU item is met on the segment path.
 
 ## Follow-up (4f4): PID-namespace-aware targeting
 
-Task 4f4 (PLAN.md M7, decision #13; docs/implementation.md M7 step
+Task 4f4 (docs/milestones.md M7, decision #13; docs/implementation.md M7 step
 1) numbers every task by its pid in the tracer's PID namespace.
 On the host that namespace is the initial one and the BPF side is
 the old host read, pruned at load; in a namespace every `filter()`

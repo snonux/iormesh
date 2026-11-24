@@ -21,9 +21,9 @@ type Enrollment struct {
 	Candidate Candidate
 }
 
-// Enroll adds p's candidates to reg (PLAN.md M6 "Apply"), in memory: the
-// caller saves the registry before any host is contacted, so the registry
-// stays the one list deploy reaches (principle #3).
+// Enroll adds p's candidates to reg (docs/milestones.md M6 "Apply"), in
+// memory: the caller saves the registry before any host is contacted, so the
+// registry stays the one list deploy reaches (principle #3).
 //
 // Each candidate address becomes one registry host, written as the
 // address the clients reached (the visited set then knows it by that

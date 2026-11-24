@@ -10,8 +10,8 @@ import (
 	"iormesh/internal/segment"
 )
 
-// The one sudoers rule (PLAN.md M4, decision #1) lets a deploying user
-// run the installed binary as root with arguments of their choosing. A
+// The one sudoers rule (docs/milestones.md M4, decision #1) lets a deploying
+// user run the installed binary as root with arguments of their choosing. A
 // run's path flags would then be root writes wherever the caller points
 // them — -out and -cpuprofile truncate a file, -ready removes and creates
 // one, -trace-dir chowns and fills a directory, -spool makes one

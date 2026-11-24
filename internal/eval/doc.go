@@ -1,4 +1,4 @@
-// Package eval is the LLM introspection eval (PLAN.md M5, principle
+// Package eval is the LLM introspection eval (docs/milestones.md M5, principle
 // #6): a fixed question set over an M0 scenario's trace, with answers
 // known from the scenario's declarations, put to a model that works only
 // through the per-run summary rollup (`iormeshctl show report`), the

@@ -7,8 +7,8 @@
 # `go test -bench` plus ior's static BPF metrics; record builds the jar
 # with `mage workloadBuild` first; record is split into small functions.
 #
-# Record and compare iormesh performance baselines (PLAN.md S3, decision
-# #25; docs/testing.md "Performance baselines").
+# Record and compare iormesh performance baselines (docs/milestones.md S3,
+# decision #25; docs/testing.md "Performance baselines").
 #
 #   scripts/perf-baseline.sh record [label]   measure the current commit
 #                                             (a dirty tree always gets a

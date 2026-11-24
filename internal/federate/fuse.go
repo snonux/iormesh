@@ -48,8 +48,8 @@ type Conn struct {
 }
 
 // CrossProject reports whether the two ends were traced by sessions of
-// different projects: project A's app calling project B's (PLAN.md M4,
-// "Build is project-aware").
+// different projects: project A's app calling project B's (docs/milestones.md
+// M4, "Build is project-aware").
 func (c Conn) CrossProject() bool { return c.Client.Project != c.Server.Project }
 
 // Unresolved is a half the merge could not fuse, and why.

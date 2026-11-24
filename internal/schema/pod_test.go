@@ -9,8 +9,8 @@ import (
 	"iormesh/internal/k8sname"
 )
 
-// The pod fields of an in-pod tracer's events (PLAN.md M7 "Pod fields on
-// events", task sh4).
+// The pod fields of an in-pod tracer's events (docs/milestones.md M7 "Pod
+// fields on events", task sh4).
 const (
 	podHost   = "pod-3b1c9a52-7e0d-4c1f-9a8e-2f6d5b4c3a21"
 	podCtr    = "4f6c0f1e0a3d2b8c9e7f5a6b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d"

@@ -8,8 +8,8 @@ import java.util.Map;
  * One declared HTTP request and the reply the server gives it. The HTTP
  * scenarios send their calls in list order on one HTTP/1.1 connection, so
  * the n-th call is request n of that connection on both ends (the http
- * event's req_seq, PLAN.md "Request pairing across the wire"). Both ends
- * check the exchange against the declaration: a request that reaches the
+ * event's req_seq, docs/milestones.md "Request pairing across the wire"). Both
+ * ends check the exchange against the declaration: a request that reaches the
  * server without its planted header is a failed run, not a pass that
  * proves nothing about redaction. Public, with its factories, for the
  * OTEL flavor's separate module (workload/otel), which declares its own

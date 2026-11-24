@@ -100,7 +100,7 @@ func TestFilterHosts(t *testing.T) {
 
 // TestInteractions: who talks to whom, by service name once the rules
 // name the endpoints — and a client is named after the service it
-// serves, so the edge reads "orders → inventory" (PLAN.md M4).
+// serves, so the edge reads "orders → inventory" (docs/milestones.md M4).
 func TestInteractions(t *testing.T) {
 	ctx := context.Background()
 	d, _ := openTemp(t)

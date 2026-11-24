@@ -66,9 +66,9 @@ const (
 	KindAttach = "attach"
 )
 
-// End reasons, the values of args.end_reason. PLAN.md ("Explicit end")
-// names duration, disk limit, controller stop and error; targets_exited
-// is the foreground tracer's own natural end.
+// End reasons, the values of args.end_reason. docs/output-contract.md
+// ("Explicit end") names duration, disk limit, controller stop and error;
+// targets_exited is the foreground tracer's own natural end.
 const (
 	EndDuration      = "duration"       // the -duration bound was reached
 	EndStop          = "stop"           // SIGINT/SIGTERM: a user or controller stop
@@ -185,8 +185,8 @@ type Event struct {
 	// wd4); frozen with M3's acceptance.
 	DNS *DNS `json:"dns,omitempty" parquet:"dns,optional"`
 	// Pod names the Kubernetes pod and container the event happened in
-	// (PLAN.md M7 "Pod fields on events", task sh4): set on every event
-	// of an in-pod tracer, absent outside a pod and in segments written
+	// (docs/milestones.md M7 "Pod fields on events", task sh4): set on every
+	// event of an in-pod tracer, absent outside a pod and in segments written
 	// before it. Appended after DNS.
 	Pod *Pod `json:"pod,omitempty" parquet:"pod,optional"`
 }
@@ -343,7 +343,7 @@ type Java struct {
 	// Stack lists method-table ids (methods.ndjson, Method), innermost
 	// frame first.
 	Stack []uint64 `json:"stack,omitempty" parquet:"stack,list"`
-	// Carrier flags I/O a virtual thread issued (PLAN.md M3, "Platform
+	// Carrier flags I/O a virtual thread issued (docs/milestones.md M3, "Platform
 	// threads only in v1"): the stack is the virtual thread's, but v1
 	// names only the carrier thread it ran on. Appended in M3 (task
 	// 2b4); absent means a platform thread.

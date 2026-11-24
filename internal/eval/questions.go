@@ -12,8 +12,8 @@ import (
 )
 
 // Set is one question file: the scenario its trace comes from, the
-// pass threshold pinned with the questions (PLAN.md M5: "pinned when the
-// question set is written"), and the questions.
+// pass threshold pinned with the questions (docs/milestones.md M5: "pinned
+// when the question set is written"), and the questions.
 type Set struct {
 	Scenario  string     `yaml:"scenario"`
 	Threshold float64    `yaml:"threshold"`

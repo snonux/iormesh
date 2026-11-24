@@ -11,8 +11,8 @@ import (
 	"iormesh/internal/k8s"
 )
 
-// k8sManifestDir holds the generated Kubernetes manifests (PLAN.md M7,
-// "Suggested repo layout": deploy/).
+// k8sManifestDir holds the generated Kubernetes manifests (docs/milestones.md
+// M7, "Suggested repo layout": deploy/).
 const k8sManifestDir = "deploy"
 
 // K8sManifests regenerates deploy/ - the prepare patch, the sidecar patch

@@ -10,8 +10,8 @@ import (
 )
 
 // JavaJoin attributes the syscall events of JVMs running the iormesh agent
-// to the Java code that caused them (M3 steps 5–6, PLAN.md "Join to kernel
-// events"). It is a schema.Sink between the Correlator and the trace's
+// to the Java code that caused them (M3 steps 5–6, docs/milestones.md "Join to
+// kernel events"). It is a schema.Sink between the Correlator and the trace's
 // sink: every event passes through it in seq order, and the events of a
 // JVM wait until the agent's ring (decision #27, internal/agentspool)
 // says every bracket that could contain them has been read.
@@ -39,7 +39,7 @@ import (
 //
 // I/O of a virtual thread is joined the same way (the agent records the
 // carrier it ran on) and flagged java.carrier, naming the carrier thread
-// (PLAN.md, "Platform threads only in v1").
+// (docs/milestones.md, "Platform threads only in v1").
 //
 // The agent's HTTP hooks add events of their own: each request becomes an
 // http event, merged into the stream by time (javahttp.go). Because it

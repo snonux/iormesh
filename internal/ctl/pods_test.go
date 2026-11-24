@@ -548,8 +548,8 @@ func TestPodCollectNoTracer(t *testing.T) {
 
 // TestPodCollectSelector: a selector entry collects every running pod it
 // matches, each into its own pod-<uid>; one matching nothing fails the
-// collect (PLAN.md #18), and `collect` without targets includes the pod
-// entries.
+// collect (docs/decisions.md #18), and `collect` without targets includes the
+// pod entries.
 func TestPodCollectSelector(t *testing.T) {
 	f := newPodFixture(t, "")
 	f.list(t, podObject("web-b", uid(3), true), podObject("web-a", uid(2), true))

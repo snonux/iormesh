@@ -15,7 +15,7 @@ import java.util.Set;
 /**
  * M2's fd lifecycle: one fd number reused for a second file, an fd
  * duplicated, and fds inherited across fork/exec into a child process
- * — the classic mis-attribution cases (PLAN.md, "What we trace").
+ * — the classic mis-attribution cases (docs/trace-scope.md).
  * Options: {@code --dir} (default: a fresh temp directory). Syscalls, in
  * order (strace, JDK 25 running the --release 21 classes; see the
  * expect.json for the exact list):

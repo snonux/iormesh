@@ -69,7 +69,7 @@
   <path d="M560 158 L560 194" fill="none" stroke="#fbbf24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#afbbf24)"/>
   <text x="330" y="180" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#fbbf24" text-anchor="start">gates</text>
   <rect x="40" y="384" width="12" height="12" rx="3" fill="#1b2454" stroke="#22d3ee" stroke-width="1.5"/>
-  <text x="60" y="395" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">milestone — done when its PLAN.md acceptance holds</text>
+  <text x="60" y="395" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">milestone — done when its acceptance holds</text>
   <rect x="420" y="384" width="12" height="12" rx="6" fill="#1b2454" stroke="#fbbf24" stroke-width="1.5"/>
   <text x="440" y="395" font-family="'Inter','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif" font-size="11" fill="#9fb0d0" text-anchor="start">spike — time-boxed, ends with a written result; each milestone lands its scenarios first</text>
 </svg>

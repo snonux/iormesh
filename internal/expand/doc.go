@@ -1,4 +1,4 @@
-// Package expand decides how the mesh grows (PLAN.md M6 "Discover",
+// Package expand decides how the mesh grows (docs/milestones.md M6 "Discover",
 // "Rounds"): which unresolved peers of a merged build the controller may
 // enroll next, and why every other peer stays where it is.
 //

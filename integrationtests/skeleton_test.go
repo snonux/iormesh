@@ -1,6 +1,6 @@
 package integrationtests
 
-// The M1 acceptance tests (PLAN.md "M1 - Walking skeleton"; guide
+// The M1 acceptance tests (docs/milestones.md "M1 - Walking skeleton"; guide
 // docs/implementation.md M1 step 11): the real tracer against the real
 // workload, golden-checked, plus the negative controls - a wrong golden
 // must fail, and an untraced process must not show up.

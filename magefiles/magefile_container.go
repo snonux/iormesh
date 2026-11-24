@@ -1,7 +1,7 @@
 //go:build mage
 
-// Container builds of the release binaries (PLAN.md "Container builds
-// (Docker/Podman)", docs/build.md): the host side - BuildDocker,
+// Container builds of the release binaries (docs/build.md "Container
+// builds"): the host side - BuildDocker,
 // BuildPodman, ContainerBuild, ContainerClean - runs the engine; the
 // in-container side - ReleaseTracer, ReleaseCtl - is ordinary mage targets
 // that also work on a host with the right toolchain. The command lines live

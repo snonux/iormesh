@@ -13,7 +13,7 @@ import java.util.Map;
 import java.util.TreeSet;
 
 /**
- * Entry point of the traceable workload (PLAN.md, M0). Usage:
+ * Entry point of the traceable workload (docs/milestones.md, M0). Usage:
  *
  * <pre>
  *   java -jar workload.jar &lt;scenario&gt; [--role R] [--key value ...]

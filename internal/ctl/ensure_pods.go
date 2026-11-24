@@ -9,8 +9,8 @@ import (
 	"iormesh/internal/k8s"
 )
 
-// ensure on a pod entry (PLAN.md M4 "No management plane", task pk4). A
-// pod's tracer has no systemd unit, and once its container stopped no
+// ensure on a pod entry (docs/milestones.md M4 "No management plane", task
+// pk4). A pod's tracer has no systemd unit, and once its container stopped no
 // `kubectl exec` can read its state.json, so a pod is decided by its
 // tracer container as the API server reports it (podDecide):
 //

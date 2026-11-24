@@ -60,10 +60,10 @@ containerdConfigPatches:
     config_path = "/etc/containerd/certs.d"
 `
 
-// K8sAcceptance runs PLAN.md M7's acceptance on kind: TestKindAcceptance
-// and TestKindMicroservices (task uh4, green on kind 2026-11-22) under
-// kube-proxy's iptables mode, then TestKindClusterIP again under
-// nftables, then K8sTeardown's steps. IORMESH_KIND_KEEP=1 keeps the
+// K8sAcceptance runs docs/milestones.md M7's acceptance on kind:
+// TestKindAcceptance and TestKindMicroservices (task uh4, green on kind
+// 2026-11-22) under kube-proxy's iptables mode, then TestKindClusterIP again
+// under nftables, then K8sTeardown's steps. IORMESH_KIND_KEEP=1 keeps the
 // cluster and the registry; IORMESH_KIND_KUBECONFIG puts the kubeconfig
 // elsewhere. IORMESH_K8S_KUBECONFIG (with IORMESH_K8S_CONTEXT, else its
 // current context, and IORMESH_K8S_CRICTL, the argv prefix that runs

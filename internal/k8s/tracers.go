@@ -96,8 +96,8 @@ func ended(statuses []containerStatus, name string) bool {
 }
 
 // nextTracer is the name Deploy gives a fresh debug tracer in place of
-// the ended ones in ts (one tracer per pod, PLAN.md M7): every one of
-// them must have terminated — one running, waiting or without a status
+// the ended ones in ts (one tracer per pod, docs/milestones.md M7): every one
+// of them must have terminated — one running, waiting or without a status
 // yet is still the pod's tracer, and a second beside it would write a
 // second session under the same pod identity — and the pod must have
 // room under MaxDebugTracers.

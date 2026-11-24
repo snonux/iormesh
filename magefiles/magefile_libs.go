@@ -1,8 +1,8 @@
 //go:build mage
 
-// The third-party HTTP workload module (task de4, PLAN.md decision #22's
-// Servlet, Apache HttpClient, OkHttp and Netty): workload/libs, built into
-// its own jar like the OTEL flavor (magefile_otel.go), so the core
+// The third-party HTTP workload module (task de4, docs/decisions.md
+// #22's Servlet, Apache HttpClient, OkHttp and Netty): workload/libs, built
+// into its own jar like the OTEL flavor (magefile_otel.go), so the core
 // workload stays JDK-only (decision #5). Its dependencies are vendored
 // under workload/libs/third_party/<library>, each directory with the
 // library's license and a PROVENANCE file, every jar pinned by SHA-256.

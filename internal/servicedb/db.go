@@ -37,8 +37,8 @@ type DB struct {
 }
 
 // DefaultPath is ~/.local/share/iormesh/services.db: the directory the
-// collected traces live under (PLAN.md M4 "Collect"), that path on every
-// platform, so a laptop's state is always in one place.
+// collected traces live under (docs/milestones.md M4 "Collect"), that path on
+// every platform, so a laptop's state is always in one place.
 func DefaultPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

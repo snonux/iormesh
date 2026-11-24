@@ -8,8 +8,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * The class-load map (task fe4, PLAN.md M3 "Supporting mappings"): a
- * per-JVM id for each class a recorded frame names, described once in a
+ * The class-load map (task fe4, docs/milestones.md M3 "Supporting mappings"):
+ * a per-JVM id for each class a recorded frame names, described once in a
  * CLASS record — binary name, class loader, code source — so the tracer
  * can join every frame to its JAR.
  *

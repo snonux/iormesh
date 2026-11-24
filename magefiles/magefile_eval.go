@@ -1,6 +1,6 @@
 //go:build mage
 
-// The LLM introspection eval (PLAN.md M5, internal/eval): EvalTrace
+// The LLM introspection eval (docs/milestones.md M5, internal/eval): EvalTrace
 // records the microservices scenario's trace into a store, Eval puts the
 // question set to a model over it. Both are opt-in and neither is part
 // of Test: the eval sends the trace's rollup and query slices to the

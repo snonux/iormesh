@@ -41,11 +41,11 @@ type KernelLoss struct {
 // host decides, which a re-run can tell from a bug. A skipped program run
 // counts: the count cannot say whether a target's call was among them,
 // and one that was can leave no other trace (a skipped exit, a skipped
-// held read/write), so such a run cannot be judged loss-free (PLAN.md,
-// "Trace output contract", task vd4). Undecodable records are not asked:
-// they are a decoder bug and fail the test instead. Unpaired exits are not
-// asked either: a syscall in flight when the probes attached leaves one
-// without any loss.
+// held read/write), so such a run cannot be judged loss-free
+// (docs/output-contract.md, task vd4). Undecodable records are not asked: they
+// are a decoder bug and fail the test instead. Unpaired exits are not asked
+// either: a syscall in flight when the probes attached leaves one without any
+// loss.
 func (l KernelLoss) Any() bool {
 	return l.Kernel > 0 || l.Skipped > 0
 }

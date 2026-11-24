@@ -1,7 +1,7 @@
 // Package servicedb is the controller's service-interaction database
-// (PLAN.md M4 "Service-interaction database", decision #24): one sqlite
-// file under ~/.local/share/iormesh/, next to the collected traces, that
-// every build folds the merged mesh into and `iormeshctl services` reads.
+// (docs/milestones.md M4 "Service-interaction database", decision #24): one
+// sqlite file under ~/.local/share/iormesh/, next to the collected traces,
+// that every build folds the merged mesh into and `iormeshctl services` reads.
 //
 // What it holds, per observed TCP connection (table conn): the client
 // app (project, host, app identity), the server endpoint (hostname from

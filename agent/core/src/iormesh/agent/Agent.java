@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * The iormesh Java agent (M3): brackets the JDK's I/O boundary methods
  * so the tracer can attribute each syscall to the Java stack and thread
- * that issued it (PLAN.md "M3 — Java agent", S1's design).
+ * that issued it (docs/milestones.md "M3 — Java agent", S1's design).
  *
  * premain ({@code -javaagent}, the primary path) and agentmain (live
  * attach, decision #2) run the same install: the JDK's I/O classes are

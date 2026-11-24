@@ -1,10 +1,10 @@
 # S2 — cross-host join: result
 
-Companion to [PLAN.md](../../PLAN.md) — the plan is the source of
-truth; this is spike S2's written result. Raw notes, per-run
-numbers and the throwaway code are in
-[spikes/s2/](../../spikes/s2/NOTES.md). Kernel 7.2.15-200.fc44,
-bpftrace 0.24.2, November 2026.
+Companion to [milestones.md](../milestones.md) ("Spikes") and
+[decisions.md](../decisions.md); this is spike S2's written result. Raw notes,
+per-run numbers and the throwaway code are in
+[spikes/s2/](../../spikes/s2/NOTES.md). Kernel 7.2.15-200.fc44, bpftrace
+0.24.2, November 2026.
 
 **Verdict: works.** The TCP initial-sequence-number pair is the
 cross-host join key (decision #26, now decided). It survives DNAT

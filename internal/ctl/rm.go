@@ -12,8 +12,8 @@ import (
 	"iormesh/internal/termsafe"
 )
 
-// `iormeshctl rm [-project P] [-force] HOST` (PLAN.md M4 "Cleanup (rm)"):
-// tear the deployment down, then unregister. rm never destroys an
+// `iormeshctl rm [-project P] [-force] HOST` (docs/milestones.md M4 "Cleanup
+// (rm)"): tear the deployment down, then unregister. rm never destroys an
 // uncollected segment unless told to with -force:
 //
 //  1. true — reachability. An unreachable host is warned about and only

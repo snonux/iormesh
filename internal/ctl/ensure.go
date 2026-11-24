@@ -12,7 +12,7 @@ import (
 	"iormesh/internal/schema"
 )
 
-// `iormeshctl ensure [-project P]... [HOST|POD...]` (PLAN.md M4 "No
+// `iormeshctl ensure [-project P]... [HOST|POD...]` (docs/milestones.md M4 "No
 // management plane", task zh4): keep tracing over days. A session ends
 // after its -duration (4h by default, 7 days at most), and its transient
 // unit has no Restart=, so a reboot, an OOM kill or a disk-limit trip

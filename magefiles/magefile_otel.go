@@ -1,8 +1,8 @@
 //go:build mage
 
-// The OTEL-instrumented workload flavor (task za4, PLAN.md M0 catalogue):
-// a separate module, workload/otel, built into its own jar so the core
-// workload stays JDK-only (decision #5). Its only dependencies are the
+// The OTEL-instrumented workload flavor (task za4, docs/milestones.md M0
+// catalogue): a separate module, workload/otel, built into its own jar so the
+// core workload stays JDK-only (decision #5). Its only dependencies are the
 // OpenTelemetry API jars, vendored with their license and provenance
 // (workload/otel/third_party/opentelemetry/PROVENANCE) and pinned by
 // SHA-256, as agent/third_party/asm is for the agent (verifyJars and

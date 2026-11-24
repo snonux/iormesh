@@ -1,10 +1,10 @@
 //+build ignore
 
-// TCP sequence numbers of single sends and receives (iormesh, PLAN.md M4
-// "Clock reconciliation from the traffic itself", task xe4). Included by
-// iormesh.bpf.c after fileident.c and sock.c, whose walk and constants it
-// uses, and ahead of the generated handlers, which call the two hooks below
-// (internal/generate/tcpseq.go).
+// TCP sequence numbers of single sends and receives (iormesh,
+// docs/milestones.md M4 "Clock reconciliation from the traffic itself", task
+// xe4). Included by iormesh.bpf.c after fileident.c and sock.c, whose walk and
+// constants it uses, and ahead of the generated handlers, which call the two
+// hooks below (internal/generate/tcpseq.go).
 //
 // The controller's merge pairs every receive with the send that queued its
 // last byte, by stream offset (internal/federate, clock.go), so each unfolded

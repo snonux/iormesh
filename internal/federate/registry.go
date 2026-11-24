@@ -20,8 +20,8 @@ import (
 	"iormesh/internal/target"
 )
 
-// The server registry (PLAN.md M4 "Server registry", decisions #12, #21):
-// the controller's list of hosts it may deploy to, kept in
+// The server registry (docs/milestones.md M4 "Server registry", decisions #12,
+// #21): the controller's list of hosts it may deploy to, kept in
 // ~/.config/iormesh/servers.yaml. Only registered hosts are ever deployed
 // to (principle #3), so the file is the controller's trust boundary: it is
 // written 0600 in a 0700 directory and refused when others could write it.
@@ -52,8 +52,8 @@ var hostName = regexp.MustCompile(
 // project: a host is registered to trace something, and a server without a
 // project could not be started (#21: the project is a manual label kept
 // with the registry entry). Expand is the optional expand: section
-// (expandcfg.go, PLAN.md M6). K8s and Pods are the optional Kubernetes
-// sections (registry_k8s.go, PLAN.md M7, decision #18).
+// (expandcfg.go, docs/milestones.md M6). K8s and Pods are the optional
+// Kubernetes sections (registry_k8s.go, docs/milestones.md M7, decision #18).
 type Registry struct {
 	Servers []Server `yaml:"servers"`
 	Expand  *Expand  `yaml:"expand,omitempty"`
@@ -63,9 +63,9 @@ type Registry struct {
 
 // Server is one registered host and the independent sessions, one per
 // project, it hosts. Hop is how many expansion rounds away from the
-// originally enrolled hosts it was enrolled (PLAN.md M6 "Rounds"): 0, the
-// default, for a host the operator added; expand --apply records n+1 for
-// a peer a hop-n host revealed, so the next round can enforce the limit.
+// originally enrolled hosts it was enrolled (docs/milestones.md M6 "Rounds"):
+// 0, the default, for a host the operator added; expand --apply records n+1
+// for a peer a hop-n host revealed, so the next round can enforce the limit.
 type Server struct {
 	Host     string    `yaml:"host"`
 	Hop      int       `yaml:"hop,omitempty"`
@@ -73,9 +73,9 @@ type Server struct {
 }
 
 // Project is one session on a server: its label, what it traces, and the
-// tracer flags that pass through on deploy (PLAN.md M4 "No management
-// plane"). The flags are stored verbatim; deploy hands them to the tracer
-// as separate argv elements, never as a shell string.
+// tracer flags that pass through on deploy (docs/milestones.md M4 "No
+// management plane"). The flags are stored verbatim; deploy hands them to the
+// tracer as separate argv elements, never as a shell string.
 type Project struct {
 	Name   string   `yaml:"name"`
 	Target Target   `yaml:"target"`
@@ -118,7 +118,7 @@ func ValidServer(host string) bool {
 
 // DefaultRegistryPath is ~/.config/iormesh/servers.yaml (decision #12), or
 // the same under $XDG_CONFIG_HOME. os.UserConfigDir is not used: on macOS
-// it is ~/Library/Application Support, and PLAN.md names one path for
+// it is ~/Library/Application Support, and decision #12 names one path for
 // every controller platform.
 func DefaultRegistryPath() (string, error) {
 	base := os.Getenv("XDG_CONFIG_HOME")
@@ -234,8 +234,8 @@ func (r *Registry) Add(host string, p Project) error {
 	return nil
 }
 
-// AddHop registers a host mesh expansion enrolled (PLAN.md M6 "Apply"):
-// a new entry with project p and its hop recorded, so the next round
+// AddHop registers a host mesh expansion enrolled (docs/milestones.md M6
+// "Apply"): a new entry with project p and its hop recorded, so the next round
 // counts from it. A host already registered is ErrDuplicate whatever its
 // projects: expansion only ever adds hosts, it never edits an entry the
 // operator wrote.

@@ -132,12 +132,12 @@ log (`journalctl -u iormesh-<project>.service`):
 ## BPF load and the el9 kernel
 
 Rocky 9.9's 5.14.0-…el9_9 kernel runs the tracer, the root BPF
-suites and the integration suite (PLAN.md, task nf4;
+suites and the integration suite (milestones.md M4, task nf4;
 [testing.md](testing.md#root-suites-on-rocky-99-task-nf4-2026-11-21)).
 The kernel version floors quoted for upstream kernels (6.2 for
 the clock bound, 6.10 for the Java uprobes) do not describe el9,
 which has backported what they name. A load failure on el9 is a
-defect to report, not an expected gap (PLAN.md).
+defect to report, not an expected gap (milestones.md M4).
 
 | Message contains | Meaning and fix |
 |---|---|
@@ -280,7 +280,7 @@ one-sided clock bound (next section).
 | `show health` | `clock      A ~ B: N windows, width …, N one-sided, N EMPTY (contradicting)`: an empty window means the edges contradict each other — a clock was stepped or slewed harder than the assumed 1 ppm drift. Check NTP on both hosts. |
 
 Hosts skewed beyond the fusion window get neither a fused edge
-nor a bound (PLAN.md M4).
+nor a bound (milestones.md M4).
 
 ## Windowed builds and prune
 

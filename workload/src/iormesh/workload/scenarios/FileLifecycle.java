@@ -38,8 +38,8 @@ import java.util.Set;
  *
  * The write after the rename is the point of the scenario: a correlator
  * that keeps fd1's path as D/a.dat attributes it to a file that no longer
- * exists (PLAN.md M2, rename-aware paths). Truncating back to the first
- * write's size makes the final content checkable. The JDK sets times
+ * exists (docs/milestones.md M2, rename-aware paths). Truncating back to the
+ * first write's size makes the final content checkable. The JDK sets times
  * through an fd of its own (open, then utimensat with a NULL path), so
  * "touch" arrives as an fd event, not a path event.
  *

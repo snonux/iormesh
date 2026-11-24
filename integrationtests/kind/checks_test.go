@@ -74,7 +74,7 @@ func loadStore(t *testing.T, store, project string) map[string]*hostTrace {
 }
 
 // session returns the host's session header (one session per pod: one
-// tracer per pod, PLAN.md M7).
+// tracer per pod, docs/milestones.md M7).
 func (h *hostTrace) session(t *testing.T) schema.Session {
 	t.Helper()
 	var out []schema.Session

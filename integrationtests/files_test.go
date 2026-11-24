@@ -1,7 +1,7 @@
 package integrationtests
 
 // M2 steps 4–5 end to end: the file surface's scenarios under the real
-// tracer pass their goldens (PLAN.md M2 "Full file surface";
+// tracer pass their goldens (docs/milestones.md M2 "Full file surface";
 // docs/implementation.md M2 steps 4–5), including the rename-aware path of
 // an fd that stays open across a rename.
 

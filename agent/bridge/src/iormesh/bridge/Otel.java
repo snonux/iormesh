@@ -9,9 +9,9 @@ import java.util.List;
 
 /**
  * Reads the OpenTelemetry span context current on the calling thread
- * (PLAN.md M3 "OpenTelemetry introspection", decision #20: span-context
- * tagging), so each bracket and HTTP record carries the trace and span
- * ids of the span the I/O ran in.
+ * (docs/milestones.md M3 "OpenTelemetry introspection", decision #20:
+ * span-context tagging), so each bracket and HTTP record carries the trace and
+ * span ids of the span the I/O ran in.
  *
  * No OTEL dependency: the agent cannot know OTEL at compile time, and an
  * app may have none, or several copies on several class loaders. A copy

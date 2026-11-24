@@ -15,8 +15,8 @@ import (
 )
 
 // StateFile is a project's session state, <trace-dir>/<project>/state.json
-// (PLAN.md M4, decision #19): what `iormesh status` reports and what
-// `start` waits on. The run itself writes it, not start, so it describes
+// (docs/milestones.md M4, decision #19): what `iormesh status` reports and
+// what `start` waits on. The run itself writes it, not start, so it describes
 // the tracer as it is — attached, or ended and why — for a foreground
 // run as much as for a unit's.
 const StateFile = "state.json"

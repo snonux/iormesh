@@ -13,7 +13,7 @@ import (
 	"iormesh/internal/normalize"
 )
 
-// Mesh expansion's acceptance on the rig (task tb4; PLAN.md M6
+// Mesh expansion's acceptance on the rig (task tb4; docs/milestones.md M6
 // "Acceptance"): the microservices spread of task 1f4 with only the
 // gateway's host enrolled by hand, grown round by round by internal/
 // expand's Plan and Enroll — the code `iormeshctl expand -apply` runs.

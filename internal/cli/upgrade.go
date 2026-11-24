@@ -20,8 +20,8 @@ import (
 )
 
 // `iormesh upgrade FILE` replaces the installed binary with a staged one
-// (PLAN.md decisions #1 and #28). It runs through the one sudoers rule, so
-// it is the most sensitive subcommand there is: whoever controls what
+// (docs/decisions.md #1 and #28). It runs through the one sudoers
+// rule, so it is the most sensitive subcommand there is: whoever controls what
 // lands at installedBinary owns every later sudo call. What makes it safe
 // to offer a deploying user:
 //

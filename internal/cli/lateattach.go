@@ -14,8 +14,8 @@ import (
 )
 
 // A `run -agent` session also loads the agent into JVMs that appear
-// while it runs (PLAN.md M3 "Attach", task lh4): a pattern match exec'd
-// later, a traced process that execs a JVM, a restarted port owner the
+// while it runs (docs/milestones.md M3 "Attach", task lh4): a pattern match
+// exec'd later, a traced process that execs a JVM, a restarted port owner the
 // session adopts. Such a JVM is still starting at its exec, so it is
 // tried again until it accepts the agent or the deadline passes.
 const (

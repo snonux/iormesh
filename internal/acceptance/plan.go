@@ -38,8 +38,8 @@ const (
 )
 
 // Project labels. One per scenario role, so cross-project fusion is what
-// joins a client to its server (PLAN.md M4 acceptance: "The M0 client and
-// server run as two projects").
+// joins a client to its server (docs/milestones.md M4 acceptance: "The M0
+// client and server run as two projects").
 const (
 	projSingle    = "m4single"  // tcp-loopback, both roles: the single-host scenario
 	projStream    = "m4stream"  // file-basic, rerun per streaming round

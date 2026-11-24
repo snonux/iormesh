@@ -172,8 +172,8 @@ func TestSummaryClockHeadline(t *testing.T) {
 }
 
 // TestSummaryNamesEndReason: the summary names a session the disk
-// watchdog (or an error) ended, with its reason — PLAN.md M4 and the
-// acceptance check M4-13 read the reason from the plain summary — and
+// watchdog (or an error) ended, with its reason — docs/milestones.md M4 and
+// the acceptance check M4-13 read the reason from the plain summary — and
 // leaves sessions that ran their course out.
 func TestSummaryNamesEndReason(t *testing.T) {
 	tl := NewTally()

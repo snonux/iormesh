@@ -1,9 +1,9 @@
 # Trace schema (v1, frozen)
 
 The field-level reference of the trace output. The contract's
-goals and guarantees are in [output-contract.md](output-contract.md)
-and PLAN.md ("Trace output contract"); this file says what is on
-disk. The Go form — and the authority when this file lags — is the
+goals and guarantees are in [output-contract.md](output-contract.md);
+this file says what is on disk. The Go form — and the authority
+when this file lags — is the
 cgo-free package `internal/schema`.
 
 Version 1 is frozen: spikes S1 (Java ↔ syscall join) and S2 (cross-host
@@ -198,7 +198,7 @@ transition; a reader counting state changes skips it. Its
 counters are the session's last reading of the socket's byte
 counts, which the merge's clock bounds use to prove that a
 send and a receive of one sequence offset are the same bytes
-(PLAN.md M4, "Clock reconciliation"); it never keys the
+(milestones.md M4, "Clock reconciliation"); it never keys the
 connection, since it reads an unlocked socket like the accept
 snapshot.
 
@@ -206,7 +206,7 @@ snapshot.
 sequence plus `bytes`). A byte has the same sequence number on
 both hosts, so the merge pairs each receive with the send that
 queued its last byte and bounds the two hosts' clock offset by
-it (S2; PLAN.md M4 "Clock reconciliation"). A folded record
+it (S2; milestones.md M4 "Clock reconciliation"). A folded record
 cannot carry it — its `boot_ns` is the first call's and its
 `latency_ns` a sum, so no instant of it belongs to the call that
 moved a given byte. The tracer fills it (task xe4) from the
@@ -493,7 +493,7 @@ stays gap-free.
   raised on that CPU — since task 8e4 the host-wide one of the
   syscall dispatchers and other classic tracepoint programs,
   held by another BPF program or by a task preempted inside a
-  `bpf()` map syscall (PLAN.md, "Syscall handlers run behind
+  `bpf()` map syscall (output-contract.md, "Syscall handlers run behind
   `raw_syscalls` dispatchers"); a skip of a target's call loses
   the one record, or the one folded call, that run would have
   written. But the skip comes before the program's target
@@ -503,7 +503,7 @@ stays gap-free.
   processes' calls (a two-record trace saw 691 on a loaded
   host) and is an upper bound on the target records lost, not
   a count of them
-  (PLAN.md, "Trace output contract"). A reader adds it to the
+  (output-contract.md). A reader adds it to the
   lost records only for a worst case; the summary line reports
   it apart, as "skipped runs".
 
@@ -723,7 +723,7 @@ How an event gets `attribution: java` — never by guessing:
   carrier for the native call and join as usual. A joined event
   gets the virtual thread's stack, `carrier: true`, and as
   `thread` the name of the platform thread with that tid — v1
-  does not name virtual threads (PLAN.md M3).
+  does not name virtual threads (milestones.md M3).
 
 Events of a JVM with a ring wait (in seq order, holding the events
 behind them) until the ring's WATERMARK is 5 ms past the
@@ -775,7 +775,7 @@ running the same JAR one.
 `classes.ndjson` — the class-load map (task fe4): one line per
 class some method row names, written before the first method row
 naming it. The agent describes only classes on recorded stacks,
-not every class the JVM loads (PLAN.md M3, "Supporting
+not every class the JVM loads (milestones.md M3, "Supporting
 mappings"). Rows are deduplicated across the trace's JVMs by
 class, loader and code source.
 
@@ -807,7 +807,7 @@ from then on carry the new name:
 | `virtual` | bool, optional | `true` for a virtual thread |
 
 The tables carry `parquet:` tags for the M4 segment writer
-(`methods`, `threads` and `classes` files, PLAN.md M3); with
+(`methods`, `threads` and `classes` files, milestones.md M3); with
 `-trace-dir` they are written as segment tables (task 8b4,
 [Parquet mapping](#parquet-mapping)).
 
@@ -1142,13 +1142,13 @@ every single-host run's rebuild to its `graph.json`.
 ### Pods as hosts (M7)
 
 An in-pod tracer (all three downward-API variables `POD_NAME`,
-`POD_NAMESPACE`, `POD_UID` set; PLAN.md M7, task 7f4) describes
+`POD_NAMESPACE`, `POD_UID` set; milestones.md M7, task 7f4) describes
 the pod, not the node: `host_id` is `pod-<uid>` and the session's
 `fqdn` `<name>.<namespace>.<uid[:8]>` (the UID prefix tells apart
 a pod recreated under the same name). So `host:pod-<uid>` is the
 pod's host node, and `proc:pod-<uid>/<pid>@<inc>` keys a process
 by the pod — its pids are the pod's PID namespace's, unique only
-within the pod, and one tracer per pod (PLAN.md M7) makes the
+within the pod, and one tracer per pod (milestones.md M7) makes the
 pod and the PID namespace one. Two pods of one node with the same
 pod-local pid and start tick are two process nodes. The pods of a
 node share the session's `boot_id`, which groups them by node.
@@ -1169,7 +1169,7 @@ nothing changes.
 ### Pod fields on events (M7)
 
 An in-pod tracer also stamps every event with the `pod` object
-(PLAN.md M7 "Pod fields on events", task sh4), last in the
+(milestones.md M7 "Pod fields on events", task sh4), last in the
 envelope:
 
 ```json
@@ -1199,7 +1199,7 @@ envelope:
   mode with a shared PID namespace it tells the app's, the
   sidecars' and the tracer's processes apart.
 - The container's *name* is not in the cgroup and the tracer has
-  no API access; the controller joins it (PLAN.md M7 "Pod fields
+  no API access; the controller joins it (milestones.md M7 "Pod fields
   on events", task jk4). Every collect of a pod records the pod's
   container map, from the status the API server reports, in
   `<store>/<project>/pod-<uid>/containers.json` beside the
@@ -1240,7 +1240,7 @@ envelope:
 
 One policy, `internal/redact` (`redact.Default()`), masks secrets
 before an event exists — no queue, sink or later stage holds the
-raw value (PLAN.md decisions #9 and #22). A masked value is `***`
+raw value (decisions.md #9 and #22). A masked value is `***`
 and the structure stays:
 
 | Input | Recorded |
@@ -1386,7 +1386,7 @@ record lacks the envelope's required fields.
 ## Summary rollup (M5)
 
 `iormeshctl build` writes `report.json` beside `model.json` (task
-qb4; PLAN.md M5, "Trace output contract" → "Summary rollup"): one
+qb4; milestones.md M5; output-contract.md "Summary rollup"): one
 entry per traced process, the cheap context read before slicing the
 events with `query`. `iormeshctl show report` prints the run summary
 and then the rollup as text; `-json` prints `report.json`'s object.

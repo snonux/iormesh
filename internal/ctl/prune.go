@@ -18,9 +18,9 @@ import (
 
 // `iormeshctl prune -older-than DUR [-project P]... [-store DIR]
 // [-apply]` (task yh4): delete old segments from the controller's trace
-// store. The store is never cleaned on its own (PLAN.md M4 "Collect":
-// nothing is auto-cleaned); prune is the operator's explicit command,
-// and without -apply it only lists what it would delete.
+// store. The store is never cleaned on its own (docs/milestones.md M4
+// "Collect": nothing is auto-cleaned); prune is the operator's explicit
+// command, and without -apply it only lists what it would delete.
 //
 // A file is the store's own only when it sits directly in a host
 // directory, <store>/<project>/<host>/, and its name parses as a segment

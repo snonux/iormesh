@@ -7,8 +7,8 @@ import (
 	"iormesh/internal/schema"
 )
 
-// Kubernetes namespaces of the store's sessions (PLAN.md M7 "Pod fields
-// on events", task sh4). An in-pod tracer's session is a pod's: host id
+// Kubernetes namespaces of the store's sessions (docs/milestones.md M7 "Pod
+// fields on events", task sh4). An in-pod tracer's session is a pod's: host id
 // "pod-<uid>", FQDN "<name>.<namespace>.<uid[:8]>", which collect pins
 // to the pod's API metadata and vetHosts holds every session to. The
 // namespace is read from that identity, never from the events alone, so

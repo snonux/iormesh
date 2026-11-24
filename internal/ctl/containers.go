@@ -8,8 +8,8 @@ import (
 	"iormesh/internal/federate"
 )
 
-// Container maps (PLAN.md M7 "Pod fields on events", task jk4): collect
-// records each pod's container id → name map, which the API server
+// Container maps (docs/milestones.md M7 "Pod fields on events", task jk4):
+// collect records each pod's container id → name map, which the API server
 // reports, in the pod's store directory of every project it collects
 // (federate.ContainersFile); build reads it back to name the container
 // each process's pod.container_id points at, offline.

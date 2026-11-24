@@ -19,9 +19,10 @@ import (
 	"iormesh/internal/servicedb"
 )
 
-// `iormeshctl collect [-project P]... [HOST...]` (PLAN.md M4 "Collect"):
-// move each published segment from the servers' ready/ folders into the
-// controller's store. Per host, every step an argv through the Transport:
+// `iormeshctl collect [-project P]... [HOST...]` (docs/milestones.md M4
+// "Collect"): move each published segment from the servers' ready/ folders
+// into the controller's store. Per host, every step an argv through the
+// Transport:
 //
 //  1. true — reachability: a host that cannot be reached fails, it is
 //     never mistaken for one with nothing to collect;
@@ -78,7 +79,7 @@ type collector struct {
 }
 
 // projectList is the repeatable -project flag: one project, or several
-// together (PLAN.md M4 "Collect", decision #21's explicit list).
+// together (docs/milestones.md M4 "Collect", decision #21's explicit list).
 type projectList []string
 
 func (p *projectList) String() string { return strings.Join(*p, ",") }
@@ -89,7 +90,8 @@ func (p *projectList) Set(v string) error {
 }
 
 // defaultStorePath is ~/.local/share/iormesh/traces, next to the service
-// database: PLAN.md names that one path on every platform.
+// database: docs/milestones.md M4 "Collect" names that one path on
+// every platform.
 func defaultStorePath() (string, error) {
 	db, err := servicedb.DefaultPath()
 	if err != nil {

@@ -1,8 +1,7 @@
 # Trace output — built for LLM introspection
 
 Outputs are a stable, versioned contract — not an internal dump.
-Companion to [PLAN.md](../PLAN.md) ("Trace output contract") —
-the plan is the source of truth.
+The decisions it cites are in [decisions.md](decisions.md).
 
 - **Self-describing schema** — NDJSON event stream, graph export
   (typed nodes + edges), per-run summary rollup; documented
@@ -103,12 +102,12 @@ the plan is the source of truth.
   one routed edge (client → FQDN → ingress → Service →
   workload) in the build's model and its views, so the mesh
   completes even where no tracer can run. The graph itself has
-  no FQDN, ingress or workload nodes (PLAN.md M7).
+  no FQDN, ingress or workload nodes (milestones.md M7).
 - **OTEL-correlated** — events carry the active OpenTelemetry
   trace/span ids when the app is instrumented, so the mesh joins
   with any tracing backend. Ingesting the app's spans to
-  overlay the distributed service graph is deferred (PLAN.md
-  decision #20).
+  overlay the distributed service graph is deferred (decisions.md
+  #20).
 - **HTTP request events** — method, scheme, host, path/URI,
   status and sizes as first-class events, correlated with
   the connection, the method stack and the OTEL span; sensitive
@@ -125,6 +124,114 @@ the plan is the source of truth.
   everything declared is present and nothing on the
   must-not-appear list is. The declarations double as few-shot
   examples for introspecting real runs.
+
+## Contract details
+
+The envelope, the method table, how loss is counted and the
+summary rollup, in more depth than the list above; the
+field-by-field reference is [schema.md](schema.md).
+
+- **Event envelope (v1 sketch)**: `schema_version, project, seq,
+  boot_ns, wall_ns, host_id, pid, pid_incarnation, tid, comm,
+  event, fd, fd_gen, ret, err, latency_ns, bytes, args (path,
+  old+new path on renames / 4-tuple / …), conn_id, stack_id
+  (native, opt-in), attribution (java | none), carrier (set
+  when the I/O ran for a virtual thread), java_thread,
+  java_stack (method ids), otel (trace_id, span_id — present
+  on java events inside an OTEL span; appended after stack_id
+  by task 4b4), http (method, scheme,
+  host, path, status, req_seq — on http events; headers per
+  redaction policy)`. S1 settled the Java fields: nested
+  `java.thread` (thread name) and `java.stack` (method ids,
+  innermost first), as `internal/schema` has them — the flat
+  names above are shorthand; `http` was provisional until M3's
+  acceptance froze it. Task 3b4 appended `version`, `req_headers` and
+  `resp_headers` ("name: value", redacted) to it and made `http`
+  an event kind of its own (fd -1, conn_id when found).
+  Cross-host, `conn_id` comes from the merge's ISN-pair join
+  (S2, decision #26).
+- **Method table**: `method_id, class, method, signature,
+  source_file, line, jar, classloader`. Frames reference ids, so
+  stacks stay compact and every frame joins to its JAR. As built
+  (tasks 2b4, fe4): the method row carries `class_id`, and JAR
+  and class loader live once per class in the class table
+  (`classes.ndjson`); `signature` is not recorded (StackWalker
+  frames do not need it to be unique: the line tells call sites
+  apart).
+- **Skipped program runs are possible loss, not lost records**
+  (task vd4, 2026-11-19): the kernel skips a BPF program while
+  another one runs on that CPU (its recursion guard), and the
+  skip happens before the program's target filter, so a
+  program's `recursion_misses` counts untraced processes' calls
+  too — host-wide BPF activity, not the trace's loss. It bounds
+  the target records lost from above and cannot be attributed:
+  nothing runs to look at the pid. So the contract reports it on
+  its own and never adds it to the lost records (ring-buffer
+  reservation failures and undecodable records, which are the
+  trace's own): a host-level `drop` with `drop_reason`
+  `skipped_runs` whose `args.lost` is the runs skipped since the
+  previous one, and the summary's "skipped runs" figure beside
+  "lost records". Loss stays never silent — a skip that did hit
+  a target is inside that count — and never inflated. The
+  integration gate stays conservative: a run with skipped runs
+  cannot be judged loss-free and is retried like kernel loss
+  (skipped as unexercised when every attempt had some); the
+  root loader test requires zero lost records and only logs
+  skipped runs.
+- **Syscall handlers run behind `raw_syscalls` dispatchers**
+  (task 8e4, 2026-11-19). Why runs were skipped: Linux 7.2 runs
+  a per-syscall tracepoint program (`syscalls:sys_enter_<name>`)
+  with preemption enabled behind a per-program, per-CPU
+  recursion guard, so a task preempted inside it makes the
+  kernel skip that syscall for every other task on the CPU until
+  it resumes — the target's calls too, in time-slice bursts; on
+  a loaded host every integration run had some, whoever else
+  traced. A traced read loop sharing its CPU with an untraced
+  one: ~900 k skipped runs, ~4 % of the target's reads lost.
+  Raw tracepoints and `tp_btf` take the same preemptible guard;
+  the classic `raw_syscalls:sys_enter`/`sys_exit` events run
+  their program with preemption disabled (same test: 0 skipped,
+  every read seen). So two dispatchers there tail-call the
+  generated per-syscall handlers by syscall number
+  (`internal/c/dispatch.c`, program arrays filled by userspace;
+  per-arch number tables generated from `golang.org/x/sys`);
+  handlers, records and the attach-or-skip rule per syscall pair
+  are unchanged. What can still skip the dispatchers is the
+  host-wide `bpf_prog_active` guard they share with kprobes and
+  classic tracepoints, held by a task preempted inside a `bpf()`
+  map syscall on that CPU (a tracer makes ~5 a second) — rare
+  in practice (three full integration runs, one beside two
+  concurrent `bpfRootTest`s: 0 skipped in all 96 tracer runs),
+  real under a deliberate map-lookup loop on the target's CPU
+  (114 k skipped, 2.5 % of its reads lost), and still counted
+  as skipped runs. The gate's judgement stays
+  as vd4 set it: a skip cannot be attributed to a pid, and the
+  experiment shows it can be the target's. Cost: every syscall
+  on the host now meets a dispatcher, traced kind or not. Kernel
+  instructions per untraced syscall beside an idle trace
+  (`perf stat`, 3 rounds, identical across rounds): dd's
+  read/write 1626 → 1708 (untraced 728): ~5 % more kernel
+  instructions per call of a traced kind, which puts the gated
+  `syscall-burst` bystander ratio at an estimated ~1.21× (md4:
+  1.19×), still under 1.25×; a syscall of a kind no family
+  traces (getppid) 595 → 1142 (untraced 443) — the price of the
+  `raw_syscalls` perf path. Task ae4 measured it by #25's
+  paired method (s3-overhead.md, "Follow-up (ae4)"): the gated
+  `syscall-burst` bystander 1.16× and 1.14× at 4 threads
+  (passes); a pure `getppid` loop ~2.0× (+0.2–0.3 µs per call),
+  recorded, not gated. Of that, the dispatcher programs are
+  ~5 % of the loop's cycles and the kernel's perf-tracepoint
+  path the rest, so no dispatcher fast path is worth adding.
+  Attaching per syscall again on kernels before 7.2 (whose
+  per-syscall programs run with preemption disabled), which
+  would spare untraced kinds there, is not taken: the budget
+  holds without it, a second attach mode would need the
+  integration suite on each kernel line, and no host here runs
+  one. Revisit if a real workload's bystander cost exceeds
+  #25.
+- **Summary rollup**: per-process entry point — config files read,
+  connections with hostnames, thread table, top methods by I/O —
+  cheap context before diving into the event stream.
 
 ## See also
 

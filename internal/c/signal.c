@@ -1,7 +1,7 @@
 //+build ignore
 
-// Signals sent by or to the traced processes (iormesh, M2 step 7; PLAN.md
-// "What we trace": signals, delivery with sender PID). Included by
+// Signals sent by or to the traced processes (iormesh, M2 step 7;
+// docs/trace-scope.md: signals, delivery with sender PID). Included by
 // iormesh.bpf.c after filter.c. Attached only when the signal family is
 // selected (internal/tracepoints, -trace-families signal).
 //

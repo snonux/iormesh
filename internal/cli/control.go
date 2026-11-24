@@ -20,8 +20,8 @@ import (
 )
 
 // installRoot is what uninstall removes: the binary and the default
-// trace dir under it (PLAN.md M4 "Cleanup"). It is deliberately not a
-// flag: uninstall runs under the one sudoers rule, and a path argument
+// trace dir under it (docs/milestones.md M4 "Cleanup"). It is deliberately not
+// a flag: uninstall runs under the one sudoers rule, and a path argument
 // would turn it into "delete any tree as root". The path comes from
 // internal/hostlayout, which the controller's bootstrap reads too.
 const installRoot = hostlayout.Root

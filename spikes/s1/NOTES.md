@@ -1,7 +1,7 @@
 # S1 spike notes — raw observations (task wa4)
 
-Throwaway prototype for PLAN.md "Spikes" S1. These are raw notes; the
-write-up (`docs/spikes/s1-java-join.md`), clocks, transport (#27),
+Throwaway prototype for docs/milestones.md "Spikes" S1. These are raw notes;
+the write-up (`docs/spikes/s1-java-join.md`), clocks, transport (#27),
 attach (#2) and cost belong to the follow-up task xa4.
 
 ## Setup
@@ -259,7 +259,7 @@ Known by construction (not exercised here):
 - Unhooked JDK libraries: libprefs (`FileSystemPreferences` locks),
   libmanagement, libattach (in the attaching JVM), libsctp,
   libj2pkcs11 — add globs if they matter.
-- Virtual threads: deferred (PLAN.md "Deferred — not in v1").
+- Virtual threads: deferred (docs/decisions.md "Deferred — not in v1").
 
 ## Not done in wa4 (picked up by xa4 below)
 

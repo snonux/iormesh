@@ -55,8 +55,8 @@ func (c *Correlator) aggregate(r *types.RwAggregateEvent) {
 }
 
 // unattributedDrop records a folded record no fd instance explains as an
-// explicit loss of its calls (PLAN.md decision #25: any loss is a drop
-// event), naming the thread whose calls they were.
+// explicit loss of its calls (docs/decisions.md #25: any loss is a
+// drop event), naming the thread whose calls they were.
 func (c *Correlator) unattributedDrop(p *procState, r *types.RwAggregateEvent) {
 	c.unattributed++
 	lost, reason := uint64(r.Count), schema.DropUnattributed

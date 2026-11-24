@@ -1,8 +1,10 @@
 # Architecture
 
-How iormesh is put together. Companion to
-[PLAN.md](../PLAN.md) — the plan is the source of truth; this
-doc gives the narrative.
+How iormesh is put together: what it is for, the principles it is
+built on, its components and the repository that holds them. The
+decisions behind it are in [decisions.md](decisions.md), the order
+it was built in is in [milestones.md](milestones.md); this doc
+gives the narrative.
 
 ![How iormesh works](diagrams/architecture.svg)
 
@@ -10,6 +12,93 @@ There is no long-lived collector and no mesh agent. Each server
 runs one tracer (probes + correlator) that writes trace segments;
 everything cross-host — merging, the graph, mesh expansion, the
 views — happens on the controller.
+
+## Purpose
+
+What iormesh is meant to show, from one process up to the whole
+service mesh.
+
+Map what a PID touches (files, sockets), follow each connection
+across the wire to its other side, and trace Java-level code flow
+inside the process — correlated into one queryable graph:
+
+hosts ↔ PIDs ↔ sockets ↔ remote PIDs ↔ files ↔ Java method stacks.
+
+The end-goal reads one level up: a complete picture of how
+every service talks to every other service — every edge,
+in the order it happened, attributed to the Java threads
+that drove it — and interleaved with the local file I/O
+those same threads performed: which files they opened, what
+was read from or written to them. The graph is the source;
+the service-level sequence view (M5) and the interaction
+database (M4) are the renderings of it.
+
+## Guiding principles
+
+The rules every milestone was held to; [decisions.md](decisions.md)
+applies them case by case.
+
+1. **The test workload comes first — per milestone.** We build a
+   purpose-built Java test app to be traced, and every tracer
+   feature is validated against it *before* iormesh ever attaches
+   to a live application. No live app is the first test subject —
+   not in spirit, not ever. M0 is the framework, not the whole
+   catalogue: each milestone lands its own scenarios before its
+   tracer code.
+2. **Read-only tracing.** eBPF and the Java agent observe; they
+   never change what the target does or the data it handles.
+   Observation is not free, though: probes cost time and the agent
+   rewrites bytecode at I/O boundaries, so the overhead the target
+   pays is budgeted and measured (decision #25). "Read-only" is
+   about function — never an excuse to ignore cost.
+3. **Expansion is opt-in, bounded and controller-driven.** The
+   mesh grows along observed connections only from the controller,
+   with the operator's SSH key, against an explicit allowlist,
+   with a hop limit and a node cap checked before anything is
+   deployed. Tracers hold no credentials and open no connections.
+4. **One graph, many vantage points.** Every milestone must end with
+   events landing in the same correlated dataset — never a
+   per-component output format that needs re-joining later.
+5. **Reuse ior's machinery — BPF/C and tests.** The
+   code-generation pattern — generated tracepoint handlers,
+   generated Go tables, diff-gated results, CO-RE embed, Mage +
+   Docker generation host — and the integration-test suite are
+   ior's, proven and pinned by its tests. iormesh copies/adapts
+   them instead of inventing its own (whoever implements this
+   should look at `../ior` for inspiration first — see
+   [build.md](build.md), "Code generation — follow ior", and
+   [testing.md](testing.md), "Integration tests follow ior").
+   Reuse has an edge, though: what ior does *not* provide is
+   listed there too, and is planned as new work.
+6. **The trace is a document, not a dump.** Outputs follow a
+   versioned, self-describing schema with stable ids and explicit
+   loss accounting — precise enough for an LLM to reconstruct
+   behavior and check it against source code, and, once
+   normalized, deterministic enough to diff two runs. A trace is
+   too big to read whole, so it is sliceable by query; and the
+   LLM claim is tested by an eval (M5), not asserted.
+7. **Risk first.** The mechanisms the whole project stands on —
+   the Java↔syscall join, the cross-host join, the overhead
+   budget — are proven by spikes before milestones depend on
+   them, and a walking skeleton (M1) fuses one edge end to end
+   before the traced surface widens.
+
+## Component map
+
+Each component at a glance; the sections below describe them.
+
+| Component        | Language | Role                                            |
+|------------------|----------|-------------------------------------------------|
+| eBPF probes      | C (CO-RE)| file/net syscall tracepoints, socket state, opt-in native stacks |
+| Correlator       | Go       | ring buffer consumer, fd/inode/socket joins, agent-event join, parquet segments |
+| Java agent       | Java 17+ | I/O-boundary hooks, stacks, TID map, OTEL ids, HTTP events |
+| Test workload    | Java 21  | deterministic traceable scenarios with markers (M0) |
+| Output contract  | versioned JSON + parquet | NDJSON live/golden, parquet bulk files, graph, summary |
+| Normalizer       | Go, cgo-free | symbolic ids, marker brackets, golden check |
+| Controller (iormeshctl) | Go, cgo-free | registry, deploy, collect, offline merge, service-interaction db, expand, query, rm cleanup, projects |
+| Views            | Go + SVG/HTML/JS | one view model; local site, Bubble Tea TUI, plain text; deterministic SVG + sequence exports |
+| K8s mode         | Go + manifests | sidecar/debug-container deploy, pod as host, pod fields on events (task sh4) |
+| Route map        | YAML + k8s API | FQDN→ingress→service/workload edges |
 
 ## Components
 
@@ -39,7 +128,7 @@ views — happens on the controller.
   - Loaded via `-javaagent` (primary) or live-attached to a
     running JVM by the tracer (`run -agent`, `iormesh attach`,
     speaking HotSpot's attach protocol itself) — with JDK 21's
-    dynamic-loading caveats, see PLAN.md decision #2 and
+    dynamic-loading caveats, see decisions.md #2 and
     [java-attach.md](java-attach.md).
   - Instruments only the JDK methods where Java hands I/O to the
     kernel and captures the Java stack there. Cost follows the
@@ -47,7 +136,7 @@ views — happens on the controller.
     tracing is a non-goal.
   - Platform threads only in v1. I/O from virtual threads is
     traced but attributed to the carrier thread and flagged;
-    naming the virtual thread is deferred (PLAN.md,
+    naming the virtual thread is deferred (decisions.md,
     "Deferred — not in v1").
   - Hands events to the tracer through a memory-mapped ring in a
     tracer-owned directory — no socket, and no syscall per
@@ -61,8 +150,8 @@ views — happens on the controller.
   - HTTP/HTTPS instrumentation: hooks at known client/server API
     boundaries record method, URI, headers (redacted), status
     and latency — joined to the socket, the stack and the span.
-  - The design was gated by spike S1 (PLAN.md), which proved
-    the join and measured its cost.
+  - The design was gated by spike S1 ([milestones.md](milestones.md)), which
+    proved the join and measured its cost.
 - **Traceable test workload (Java)**
   - A purpose-built Java app — never a live app — that iormesh is
     developed and validated against first. It runs scripted,
@@ -106,7 +195,7 @@ views — happens on the controller.
     offsets between hosts are bounded from the traffic itself.
   - Additively maintains a service-interaction database of
     app-to-app network interaction; humans name services through
-    the CLI via hostname-pattern + port rules (see PLAN.md, M4).
+    the CLI via hostname-pattern + port rules (see milestones.md, M4).
   - Project-aware: unrelated apps on the same server trace as
     separate projects — every trace lives under
     `/opt/iormesh/traces/<project>/`. Build can merge
@@ -174,7 +263,7 @@ Everything is driven from the laptop. `collect` syncs and
 `build` merges and renders; `refresh` does both and repeats
 while a session runs; `expand` turns the unresolved edges of one round
 into the newly enrolled hosts of the next; `rm` stops, syncs and
-removes. See PLAN.md, M4 and M6.
+removes. See milestones.md, M4 and M6.
 
 ## Tracing for days
 
@@ -182,7 +271,7 @@ A session ends after its `-duration` (4h by default, 7 days at
 most), and its transient unit has no `Restart=`: a reboot, an
 OOM kill at `MemoryMax` or a disk-limit trip ends it for good.
 `iormeshctl ensure [-project P]... [HOST|POD...]` keeps it going
-(PLAN.md M4, "No management plane"; task zh4). Per host — every
+(milestones.md M4, "No management plane"; task zh4). Per host — every
 registered host and pod entry without HOST|POD; pods are below
 — it reads the tracer's `status -json`, then:
 
@@ -320,6 +409,153 @@ never a comparison of clocks.
 The step-by-step version, with code sketches, is the
 [implementation guide](implementation.md).
 
+## Repo layout
+
+The tree as built (2026-11-23); `iormesh help` and `iormeshctl
+help` list each binary's subcommands and flags.
+
+```
+cmd/iormesh/          # tracer binary (Linux, eBPF loader +
+                      #   correlator); runs on the targets:
+                      #   run|attach|start|stop|status|
+                      #   upgrade|uninstall|ready|normalize|
+                      #   version
+cmd/iormeshctl/       # controller (Linux/macOS, no eBPF, no cgo):
+                      #   add|rm registry, deploy, collect,
+                      #   build, refresh, show, open, tui,
+                      #   expand, query, services, routes,
+                      #   verify, version
+cmd/iormesheval/      # the LLM introspection eval's runner (M5)
+internal/cli/         # the tracer's subcommands
+internal/c/           # BPF C sources: ior-style helpers +
+                      #   generated_tracepoints.c + vmlinux.h +
+                      #   committed generation result (diff gate)
+internal/generate/    # tracepoint/type generators (Go, ior pattern)
+internal/tracepoints/ # generated Go tracepoint tables
+internal/types/       # generated C-derived Go types
+internal/schema/      # the output contract in Go: Event, Graph,
+                      #   NDJSON + parquet mapping (cgo-free)
+internal/bpf/         # libbpfgo loader, attach, ring buffer (cgo)
+internal/correlate/   # event joins, pid/fd/path graphs,
+                      #   agent-event join
+internal/target/      # target spec: PID, pattern, listening port
+internal/segment/     # minute-rotated parquet segments, ready/
+                      #   contract, disk watchdog
+internal/redact/      # one redaction policy: argv, headers,
+                      #   query params; path segments verbatim
+                      #   (#22) (cgo-free)
+internal/agentspool/  # reader for the Java agent's spool
+internal/buildgate/   # repo-wide gates: controller stays
+                      #   cgo-free, no //nolint
+internal/normalize/   # symbolic ids, marker brackets, golden
+                      #   check (cgo-free — tracer, tests and
+                      #   iormeshctl share it)
+internal/federate/    # server registry, trace sync (rsync,
+                      #   delete-after-transfer), offline
+                      #   merge (cgo-free — shared with iormeshctl)
+internal/servicedb/   # service-interaction database: observed
+                      #   connections, naming rules, CLI-facing
+                      #   queries (cgo-free)
+internal/pathtmpl/    # HTTP path templates: ids fold to {id},
+                      #   operator rules first (#22, cgo-free)
+internal/report/      # per-run summary rollup (M5, cgo-free)
+internal/eval/        # LLM eval harness: question sets, model
+                      #   command protocol, scoring (M5)
+internal/expand/      # controller-driven mesh expansion:
+                      #   unresolved peers, allowlist, hop and
+                      #   node limits (cgo-free)
+internal/query/       # trace slicing for humans and LLMs
+                      #   (cgo-free)
+internal/render/      # deterministic SVG diagram generation
+internal/viewmodel/   # the one model every surface renders
+                      #   (cgo-free)
+internal/site/        # local site: one self-contained page
+                      #   (embedded JS/CSS, model inline), the
+                      #   SVG exports, a folder per run (cgo-free)
+internal/tui/         # Bubble Tea terminal explorer
+internal/ctl/         # iormeshctl's subcommands
+internal/k8s/         # kubectl transport, pod targets, manifests
+                      #   cgroup → container (pod fields, sh4)
+internal/routemap/    # FQDN→ingress→workload map (config + k8s discovery)
+internal/javaattach/  # live attach of the Java agent (HotSpot
+                      #   attach protocol)
+internal/stacks/      # native stack table (opt-in)
+internal/release/     # minisign signing and verification
+internal/dist/        # mage release's reproducible archives
+internal/hostlayout/  # the server install's paths and sudoers rule
+internal/version/     # release version and its ordering
+internal/termsafe/    # terminal-safe printing of trace text
+internal/acceptance/  # M4's real-host acceptance driver
+internal/kindrun/     # M7's kind acceptance command plans
+internal/bpfembed.go  # go:embed of the compiled .bpf.o + env override
+agent/                # Java agent source (M3): bridge jar
+                      #   (bootstrap-visible hooks) + core
+workload/             # traceable test app source (M0) + container image
+integrationtests/     # end-to-end suite, ior pattern: harness,
+                      #   expectations, per-family scenario tests,
+                      #   kernel probes, multi-host topology runs
+eval/                 # LLM introspection eval: questions,
+                      #   results (M5)
+spikes/               # throwaway spike prototypes (S1–S3);
+                      #   their results live in docs/spikes/
+deploy/               # k8s manifests: sidecar patch, debug container
+packaging/selinux/    # opt-in SELinux policy RPM for pods (#13)
+assets/               # logo + wordmark (SVG)
+magefiles/            # the mage targets: Magefile.go + the
+                      #   magefile_*.go, ior-style (decision #30)
+scripts/              # container builds (docker/podman), ior-style
+docs/                 # design docs: architecture, decisions,
+                      #   milestones, trace scope, output
+                      #   contract, schema, testing,
+                      #   java-attach, security, build,
+                      #   visualization, implementation guide;
+                      #   docs/spikes/ holds the spike results,
+                      #   docs/diagrams/ the generated SVGs
+```
+
+(Layout mirrors ior's generation tree so the pattern could be
+lifted with minimal renaming. Smaller helper packages —
+`internal/csvlist`, `k8sname`, `project`, `gatecmd`,
+`containerbuild`, `corereloc` — are not listed; each has a
+package comment.)
+
+## Non-goals (for now)
+
+What iormesh deliberately does not do; the decisions in
+[decisions.md](decisions.md) keep to these boundaries.
+
+- Modifying target behavior (writes, injection, parameter edits).
+- Blanket Java method entry/exit tracing — the agent instruments
+  I/O boundaries only; cost must scale with I/O, not with calls.
+- Credentials on servers, or tracers that deploy or connect
+  anywhere — expansion is the controller's job (M6).
+- Kernel-mode dedup or aggregation — correlation happens in
+  userspace. The one exception is decision #25's fold of hot
+  read/write loops, which keeps every call (as a count) and its
+  thread's order.
+- Non-Linux hosts — BPF + JDK 21 on Linux is the whole universe.
+- No payload capture for files and non-HTTP socket streams:
+  paths, sizes, offsets, endpoints only. (Argv is metadata but
+  recorded redacted; env capture is off by default — decision
+  #9.) The one deliberate exception:
+  HTTP(S) request metadata (method, URI, headers) via
+  agent-boundary hooks, redacted per policy — decision #22.
+- No Java method-argument capture: stacks and lines suffice to
+  match source; args add cost and secrets risk.
+- No GC/JIT events — I/O attribution only. (Exception events are
+  decision #10.)
+- No Kubernetes operator or auto-injection webhook — the
+  deployment owner adds the sidecar explicitly, by patch.
+- No packet sniffing: nothing is parsed off the wire — HTTP
+  request metadata comes from the Java agent's API-boundary
+  hooks; routing knowledge comes from DNS answers, the
+  configured route map, then k8s API discovery (#15).
+- Tracing the mesh itself into the mesh: the tracer's own
+  footprint, the Java agent's spool writes and the controller's
+  SSH/rsync traffic are out of the traced set.
+- Cross-host pairing of HTTP/2 requests in v1, unless stream ids
+  are captured (decision #22) — recorded, rendered time-ordered.
+
 ## See also
 
 - [Trace scope](trace-scope.md) — what is traced, and why each
@@ -327,7 +563,10 @@ The step-by-step version, with code sketches, is the
 - [Output contract](output-contract.md) — the trace format.
 - [Implementation guide](implementation.md) — work packages
   with code sketches.
-- [PLAN.md](../PLAN.md) — milestones, spikes and decisions.
+- [Milestones](milestones.md) — milestones and spikes, in build
+  order, with their acceptance.
+- [Decisions](decisions.md) — every numbered decision and its
+  reasons.
 
 The diagrams are generated: edit `diagrams/gen.py` and run
 `python3 docs/diagrams/gen.py docs/diagrams`.

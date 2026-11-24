@@ -77,7 +77,8 @@ func (s *stream[T]) write(rows []T) error {
 // publish writes the footer with meta, syncs and closes the file, and
 // renames it to readyPath. The sync comes first so a crash after the
 // rename cannot leave a published name over unwritten blocks: ready/ is
-// the promise that a file there is whole (PLAN.md M4 "Trace files").
+// the promise that a file there is whole (docs/milestones.md M4 "Trace
+// files").
 func (s *stream[T]) publish(readyPath string, meta map[string]string) error {
 	for k, v := range meta {
 		s.pw.SetKeyValueMetadata(k, v)

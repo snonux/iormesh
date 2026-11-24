@@ -1,7 +1,7 @@
 //+build ignore
 
-// Native user stacks of syscall enters (iormesh, M2 step 9; PLAN.md M2
-// "Native stacks are opt-in"). Included by iormesh.bpf.c after filter.c (it
+// Native user stacks of syscall enters (iormesh, M2 step 9; docs/milestones.md
+// M2 "Native stacks are opt-in"). Included by iormesh.bpf.c after filter.c (it
 // uses ior_count_ringbuf_drop) and before the generated handlers, whose
 // enter side calls iormesh_stack_on_enter once the enter is known to be
 // emitted (internal/generate/bpfhandler.go, renderStackHook).

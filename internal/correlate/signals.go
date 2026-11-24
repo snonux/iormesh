@@ -5,12 +5,12 @@ import (
 	"iormesh/internal/types"
 )
 
-// Signals (M2 step 7, the signal family; PLAN.md "What we trace": delivery
-// with sender PID). One signal_generate record (signal.c) names both ends:
-// the sender's pending kill, tgkill or tkill gets the target and the signal
-// number, and a traced receiver gets a signal event naming its sender —
-// also when the sender is not traced (a supervisor's SIGTERM). Both traced:
-// a signaled edge, sender → receiver. Only a task-sent signal has a sender
+// Signals (M2 step 7, the signal family; docs/trace-scope.md: delivery with
+// sender PID). One signal_generate record (signal.c) names both ends: the
+// sender's pending kill, tgkill or tkill gets the target and the signal
+// number, and a traced receiver gets a signal event naming its sender — also
+// when the sender is not traced (a supervisor's SIGTERM). Both traced: a
+// signaled edge, sender → receiver. Only a task-sent signal has a sender
 // (signal.c reads the siginfo): a kernel-raised SIGALRM, SIGCHLD or SIGIO
 // fires in whatever task runs, which the record's scope leaves without
 // SIGNAL_SCOPE_USER, so it gets no sender_pid and no edge.

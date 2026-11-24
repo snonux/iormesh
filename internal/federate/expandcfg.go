@@ -7,12 +7,12 @@ import (
 	"strings"
 )
 
-// The registry's expand: section (PLAN.md M6, docs/implementation.md
-// "Server registry"): which unresolved peers mesh expansion may enroll,
-// and how large the mesh may grow. It lives in servers.yaml because it
-// widens the deploy boundary the registry draws (principle #3): whoever
-// may write it already chooses where the operator's key deploys, so the
-// file's privacy rules (0600, owner-only) guard both.
+// The registry's expand: section (docs/milestones.md M6,
+// docs/implementation.md "Server registry"): which unresolved peers mesh
+// expansion may enroll, and how large the mesh may grow. It lives in
+// servers.yaml because it widens the deploy boundary the registry draws
+// (principle #3): whoever may write it already chooses where the operator's
+// key deploys, so the file's privacy rules (0600, owner-only) guard both.
 
 // Bounds on the section, so a hand-edited file cannot make every peer
 // pay for thousands of rules.

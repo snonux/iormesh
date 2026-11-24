@@ -3,7 +3,7 @@ package integrationtests
 // M2 step 6 end to end: the fd lifecycle under the real tracer — fd reuse,
 // a dup, and stdio a child JVM inherits — passes fd-lifecycle's golden,
 // and the per-process bracket cut keeps the children a bracketed process
-// forks (PLAN.md M2; docs/implementation.md M2 step 6).
+// forks (docs/milestones.md M2; docs/implementation.md M2 step 6).
 
 import (
 	"encoding/json"

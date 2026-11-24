@@ -1,8 +1,8 @@
 package integrationtests
 
 // M2 step 7 end to end: local IPC, signals, UDP and both TCP address
-// families under the real tracer pass their goldens (PLAN.md M2 "Full
-// mental-model scope"; docs/implementation.md M2 step 7). pipe-ipc and
+// families under the real tracer pass their goldens (docs/milestones.md M2
+// "Full mental-model scope"; docs/implementation.md M2 step 7). pipe-ipc and
 // signals need their opt-in families (decision #7: -trace-families ipc,
 // signal); unix-socket, udp-loopback and tcp-ipv4/6 run on the defaults,
 // since unix sockets and UDP are the socket family.

@@ -9,8 +9,8 @@ import (
 	"iormesh/internal/release"
 )
 
-// The agent jar's half of deploy (task kf4, PLAN.md decision #28): a host
-// with a project that uses the Java agent gets dist/iormesh-agent.jar
+// The agent jar's half of deploy (task kf4, docs/decisions.md #28): a
+// host with a project that uses the Java agent gets dist/iormesh-agent.jar
 // shipped the way its tracer is — verified here against the pinned key
 // before anything is pushed, staged next to the tracer, and installed by
 // `sudo iormesh upgrade`, which verifies it again against the server's

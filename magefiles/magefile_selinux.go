@@ -1,6 +1,6 @@
 //go:build mage
 
-// The iormesh-selinux RPM (PLAN.md #13, task 7h4): the opt-in
+// The iormesh-selinux RPM (docs/decisions.md #13, task 7h4): the opt-in
 // iormesh_container_t policy module, built on Rocky Linux 9 in a throwaway
 // container so the build host needs no SELinux tools. The command line
 // lives in internal/containerbuild (SelinuxRPMArgv), where it is

@@ -17,8 +17,8 @@ const Untraced = "(untraced)"
 // Filter narrows a query to projects: a connection belongs to a project
 // when either end was traced in it. Project and Projects together name
 // the projects; none is every project. Projects is what a build of
-// several projects together reads (PLAN.md M4 "Build": a cross-project
-// connection is one edge, counted once).
+// several projects together reads (docs/milestones.md M4 "Build": a
+// cross-project connection is one edge, counted once).
 //
 // Hosts, when set, narrows further to the connections one of those
 // traced hosts (host ids) saw, either end: a namespace-filtered build
@@ -90,8 +90,9 @@ func (e Endpoint) Label() string {
 }
 
 // Endpoints lists the observed endpoints — unnamed ones first, the ones
-// a human still has to name (PLAN.md M4), then by hostname, IP and port.
-// Connections whose anchor had no role name no endpoint and are left out.
+// a human still has to name (docs/milestones.md M4), then by hostname, IP and
+// port. Connections whose anchor had no role name no endpoint and are left
+// out.
 func (d *DB) Endpoints(ctx context.Context, f Filter) ([]Endpoint, error) {
 	rules, err := d.Rules(ctx)
 	if err != nil {

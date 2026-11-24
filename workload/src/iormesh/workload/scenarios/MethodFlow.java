@@ -17,8 +17,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
- * M3's method-flow scenario (PLAN.md M3 acceptance: "every declared I/O op
- * of M3's method-flow scenarios carries its declared causing method").
+ * M3's method-flow scenario (docs/milestones.md M3 acceptance: "every declared
+ * I/O op of M3's method-flow scenarios carries its declared causing method").
  * Solo, {@code --dir} its only option. Each I/O op is issued by its own
  * named method, so the golden can declare the causing method per op —
  * the innermost workload frame of the event's Java stack:
@@ -40,8 +40,8 @@ import java.util.concurrent.TimeUnit;
  * to a sink thread (CompletableFuture stages on two single-thread
  * executors), so the events of one logical flow land on three threads,
  * each with its own Java thread name. Platform threads only: virtual
- * threads are deferred (PLAN.md), and each hand-off is joined before the
- * next step, so the per-thread order is fixed.
+ * threads are deferred (docs/decisions.md), and each hand-off is joined before
+ * the next step, so the per-thread order is fixed.
  */
 public final class MethodFlow implements Scenario {
     static final String NAME = "method-flow";

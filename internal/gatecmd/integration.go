@@ -18,8 +18,8 @@ import (
 
 // IntegrationTestBinary is where `mage integrationTest` compiles the test
 // binary of ./integrationtests: bin/, beside every other build output
-// (PLAN.md decision #30; ior uses the repository root), a fixed place so
-// its absolute path can match a scoped sudoers rule.
+// (docs/decisions.md #30; ior uses the repository root), a fixed
+// place so its absolute path can match a scoped sudoers rule.
 const IntegrationTestBinary = "bin/integrationtests.test"
 
 // IntegrationParallelEnv is the knob for `go test -parallel` of the

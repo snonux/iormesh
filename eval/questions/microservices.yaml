@@ -1,6 +1,6 @@
 # The LLM introspection eval's question set for M4's microservices
-# scenario (PLAN.md M5 "LLM introspection eval"; internal/eval). Every
-# answer is known from the scenario's declarations
+# scenario (docs/milestones.md M5 "LLM introspection eval"; internal/eval).
+# Every answer is known from the scenario's declarations
 # (workload/scenarios/microservices/expect.json) — a test holds each
 # answer_contains and answer_sequence string to that file — and the model
 # finds it only through the summary rollup, iormeshctl query and the
@@ -10,8 +10,8 @@
 # (TestListingEverythingFails); a concise answer has no reason to
 # mention them.
 #
-# The threshold is pinned here, with the questions (PLAN.md: "pinned when
-# the question set is written"): 8 of 10. Change it only with the set,
+# The threshold is pinned here, with the questions (docs/milestones.md: "pinned
+# when the question set is written"): 8 of 10. Change it only with the set,
 # and say why in the commit.
 scenario: microservices
 threshold: 0.8

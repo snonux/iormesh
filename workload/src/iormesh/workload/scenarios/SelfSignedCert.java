@@ -26,10 +26,10 @@ import javax.net.ssl.TrustManagerFactory;
  * private key exists only inside the server's JVM — never in the
  * repository, never in a file — and is new on every run; only the public
  * certificate is handed to the client, which trusts exactly that one
- * certificate (pinned, PLAN.md M0 "HTTP scenarios"). The subject alternative name carries the IP
- * address, so HttpClient's endpoint identification passes for
- * https://ADDRESS:port without disabling any check, and fails for any
- * other address the server might also be reached at.
+ * certificate (pinned, docs/milestones.md M0 "HTTP scenarios"). The subject
+ * alternative name carries the IP address, so HttpClient's endpoint
+ * identification passes for https://ADDRESS:port without disabling any check,
+ * and fails for any other address the server might also be reached at.
  */
 final class SelfSignedCert {
     private static final String SUBJECT = "iormesh-workload";

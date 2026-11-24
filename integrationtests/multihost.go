@@ -1,8 +1,8 @@
 package integrationtests
 
-// Emulated hosts for M4's multi-host scenarios (task kb4; PLAN.md "Testing
-// strategy": "Emulated hosts share a kernel — compensate"). One machine
-// plays several hosts: each host is a network namespace for its
+// Emulated hosts for M4's multi-host scenarios (task kb4; docs/testing.md
+// "Testing strategy": "Emulated hosts share a kernel — compensate"). One
+// machine plays several hosts: each host is a network namespace for its
 // processes, and its tracer runs in a mount and UTS namespace of its own
 // with a private /etc/machine-id bind-mounted over the real one, so the
 // tracer stamps a host id of its own on every event (internal/cli
@@ -48,8 +48,8 @@ const testClockSkewEnv = "IORMESH_TEST_CLOCK_SKEW"
 //
 // ListenPort, if not 0, binds the host's tracer by listening port
 // instead of by its Workloads' PIDs (-listen-port, the target spec mesh
-// expansion deploys with, PLAN.md M6): such a tracer is started once the
-// servers listen — a port nobody listens on is no target — and before
+// expansion deploys with, docs/milestones.md M6): such a tracer is started
+// once the servers listen — a port nobody listens on is no target — and before
 // the clients are released. Workloads then only name the PIDs its trace
 // may hold.
 type Host struct {

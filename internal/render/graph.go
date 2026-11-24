@@ -27,7 +27,8 @@ const (
 )
 
 // graphStyle styles graph.svg: unresolved connections dashed, fused ones
-// solid (PLAN.md: an unresolved edge is never drawn as a fact).
+// solid (docs/milestones.md M4 "Build": an unresolved edge is never
+// drawn as a fact).
 const graphStyle = `rect{fill:#fff;stroke:#333}rect.host{fill:#e8eef8}rect.app{fill:#eef8e8}` +
 	`rect.socket{fill:#f8f0e8}rect.more{fill:#f4f4f4;stroke-dasharray:3 3}` +
 	`line{stroke:#888}line.unresolved{stroke:#c33;stroke-dasharray:6 4}` +

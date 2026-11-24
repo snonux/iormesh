@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Layout of a project directory, <trace-dir>/<project>/ (PLAN.md M4
+// Layout of a project directory, <trace-dir>/<project>/ (docs/milestones.md M4
 // "Trace files"): the active segment's files at the top as .active-*,
 // published segments in ready/.
 const (
@@ -212,7 +212,8 @@ func lockDir(dir string) (*os.File, error) {
 // sweepActive removes active files a crashed or killed run left in dir.
 // It runs under lockDir's lock, so no live writer owns them. They have
 // no footer, so no reader can open them; the minute they held
-// is the loss PLAN.md accepts for a crash.
+// is the loss docs/milestones.md M4 "Trace files" accepts for a
+// crash.
 func sweepActive(dir string) error {
 	stale, err := filepath.Glob(filepath.Join(dir, activePrefix+"*"))
 	if err != nil {

@@ -35,7 +35,7 @@ type Filter struct {
 	// the epoch itself (0) is an empty window, not an open one. Each
 	// event is judged by its own host's clock, as recorded and not
 	// corrected for the skew between hosts — the merge's clock bounds
-	// order cross-host instants but do not rewrite them (PLAN.md M4
+	// order cross-host instants but do not rewrite them (docs/milestones.md M4
 	// "Clock reconciliation").
 	From, To uint64
 	HasTo    bool

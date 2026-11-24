@@ -9,9 +9,9 @@ import (
 	"iormesh/internal/types"
 )
 
-// The fd lifecycle (M2 step 6, PLAN.md "Descriptor lifecycle"): copies
-// (dup*, fcntl F_DUPFD*), inheritance across fork and the closes an exec
-// makes. Each per-process fd table is the procState maps (fds, lastGen,
+// The fd lifecycle (M2 step 6, docs/trace-scope.md "Descriptor lifecycle"):
+// copies (dup*, fcntl F_DUPFD*), inheritance across fork and the closes an
+// exec makes. Each per-process fd table is the procState maps (fds, lastGen,
 // sockOf, paths, cloexec); an fd instance is (pid, incarnation, fd,
 // fd_gen), and everything here keeps that identity from aliasing: a copy
 // is a new instance of its number, a closed number's next instance gets a

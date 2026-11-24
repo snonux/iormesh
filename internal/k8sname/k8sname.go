@@ -1,7 +1,7 @@
 // Package k8sname holds the Kubernetes name rules iormesh checks before a
-// value reaches a kubectl argv (PLAN.md M7, decision #18): namespaces,
-// containers and cluster labels, pod names, kubeconfig contexts, images
-// pinned by digest, the label selectors a registry pods: entry picks
+// value reaches a kubectl argv (docs/milestones.md M7, decision #18):
+// namespaces, containers and cluster labels, pod names, kubeconfig contexts,
+// images pinned by digest, the label selectors a registry pods: entry picks
 // pods by, and the SELinux type and MCS level a minimal-profile tracer
 // runs as. It is its own package because two sides need the same rules:
 // internal/federate validates the registry's k8s: and pods: sections
@@ -185,9 +185,9 @@ var uid = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[
 func UID(s string) bool { return uid.MatchString(s) }
 
 // PodHostPrefix starts the host_id of an in-pod tracer, "pod-<uid>"
-// (PLAN.md M7, task 7f4). It lives here, beside UID, so internal/k8s
-// (which writes it: k8s.PodHostID) and internal/routemap (which reads
-// it back to find a pod by UID, and cannot import internal/k8s) spell it
+// (docs/milestones.md M7, task 7f4). It lives here, beside UID, so
+// internal/k8s (which writes it: k8s.PodHostID) and internal/routemap (which
+// reads it back to find a pod by UID, and cannot import internal/k8s) spell it
 // once (task 5g4).
 const PodHostPrefix = "pod-"
 

@@ -97,9 +97,9 @@ const evalExportEnv = "IORMESH_EVAL_EXPORT"
 // exportEvalStore copies a judged run's segments into the store named by
 // IORMESH_EVAL_EXPORT, laid out as collect leaves it
 // (<store>/<project>/local/), owned by the user sudo ran the test for —
-// the store the LLM eval builds and queries (PLAN.md M5, `mage eval`).
-// Only a run that passed its golden is exported: the eval's answers are
-// the declarations, so its trace must hold them. Without the variable it
+// the store the LLM eval builds and queries (docs/milestones.md M5, `mage
+// eval`). Only a run that passed its golden is exported: the eval's answers
+// are the declarations, so its trace must hold them. Without the variable it
 // does nothing.
 func exportEvalStore(t *testing.T, run Run) {
 	store := os.Getenv(evalExportEnv)

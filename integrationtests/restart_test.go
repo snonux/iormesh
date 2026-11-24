@@ -2,8 +2,8 @@ package integrationtests
 
 // M2 steps 2–3 end to end: a pattern-bound session traces both
 // incarnations of the restart scenario's app — never its launcher — and
-// links them under one app node (PLAN.md M2 "Target spec", decision #23;
-// docs/implementation.md M2 step 2).
+// links them under one app node (docs/milestones.md M2 "Target spec", decision
+// #23; docs/implementation.md M2 step 2).
 
 import (
 	"fmt"

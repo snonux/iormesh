@@ -13,7 +13,7 @@ import (
 	"iormesh/internal/k8sname"
 )
 
-// Container map (PLAN.md M7 "Pod fields on events", task jk4): an
+// Container map (docs/milestones.md M7 "Pod fields on events", task jk4): an
 // in-pod tracer's events carry the runtime id of a process's container
 // (pod.container_id), never its name — the tracer has no API access.
 // Collect, which asks the API server for the pod anyway, stores the

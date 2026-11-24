@@ -98,7 +98,7 @@ type Endpoint struct {
 	Addr string `yaml:"addr" json:"addr"`
 	Pod  string `yaml:"pod,omitempty" json:"pod,omitempty"` // "<namespace>/<pod>"
 	// UID is the pod's UID: an in-pod tracer's host id is "pod-<uid>"
-	// (PLAN.md M7 "The pod is the host"), so a fused server end is
+	// (docs/milestones.md M7 "The pod is the host"), so a fused server end is
 	// matched to its endpoint by it before any address.
 	UID string `yaml:"uid,omitempty" json:"uid,omitempty"`
 }

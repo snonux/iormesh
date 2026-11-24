@@ -385,7 +385,8 @@
     if (rs.length > 0) { routedBand(g, top, sel); }
   }
 
-  // ---- routed edges (route map, PLAN.md M7) ------------------------
+  // ---- routed edges (route map, docs/milestones.md M7)
+  // ------------------------
 
   // A routed edge is one row: client → FQDN → ingress → Service →
   // workload (→ pod), the hops no tracer saw drawn as boxes of their

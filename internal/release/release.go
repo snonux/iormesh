@@ -1,9 +1,9 @@
-// Package release signs and verifies iormesh release binaries (PLAN.md
-// decision #28): minisign signatures, made with aead.dev/minisign, whose
-// trusted comment names the artifact and its version. It is cgo-free, so
-// the controller (iormeshctl verify, and deploy after it) and the tracer
-// (iormesh upgrade) share it, and `mage sign` uses it in the release
-// pipeline.
+// Package release signs and verifies iormesh release binaries
+// (docs/decisions.md #28): minisign signatures, made with
+// aead.dev/minisign, whose trusted comment names the artifact and its version.
+// It is cgo-free, so the controller (iormeshctl verify, and deploy after it)
+// and the tracer (iormesh upgrade) share it, and `mage sign` uses it in the
+// release pipeline.
 //
 // The trusted comment is signed along with the binary, which is why the
 // metadata lives there and not in a file name: a deploying user who can

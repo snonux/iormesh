@@ -34,8 +34,8 @@ func runSession(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 }
 
 // linger waits for ctx — SIGINT or SIGTERM — after the session ended
-// (PLAN.md #18, task af4 review B1). A k8s debug container's process is
-// its tracer run: were it to exit with the session's -duration, the
+// (docs/decisions.md #18, task af4 review B1). A k8s debug container's process
+// is its tracer run: were it to exit with the session's -duration, the
 // container would stop, `kubectl exec` could no longer enter it, and the
 // last segments would sit unreachable in the pod's emptyDir until the pod
 // went. runTrace has returned by now, so finish has closed the tracer —

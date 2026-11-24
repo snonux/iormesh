@@ -1,7 +1,6 @@
 # Security & scope
 
-Companion to [PLAN.md](../PLAN.md) — the plan is the source of
-truth.
+The decisions it cites are in [decisions.md](decisions.md).
 
 - **Read-only tracing.** Privileged (root) for eBPF, but
   observation only — no tampering with what the target does or
@@ -11,7 +10,7 @@ truth.
   time, so overhead is budgeted, measured, and capped by the
   tracer's cgroup limits.
 - **The LLM eval sends trace data only where the operator
-  says.** `mage eval` (PLAN.md M5) puts the rollup and query
+  says.** `mage eval` (milestones.md M5) puts the rollup and query
   slices of a trace into a model's prompt. It has no default
   model: without an explicit `IORMESH_EVAL_MODEL_CMD` it refuses
   to run, and `mage test` never runs it. It is meant for the
@@ -78,7 +77,7 @@ truth.
   user.
 - **The local site treats trace text as hostile.** Every string
   a build shows came from a server, and the site
-  (`iormeshctl open`, PLAN.md M5) is opened in the operator's
+  (`iormeshctl open`, milestones.md M5) is opened in the operator's
   browser. Its page loads nothing and runs only its own code: a
   `default-src 'none'` CSP allowing just the inline script and
   stylesheet by hash; the model embedded as an inert JSON block
@@ -107,7 +106,7 @@ truth.
 - **Host keys are verified, never trusted on first use.**
   iormeshctl runs the system `ssh`/`rsync` with
   `StrictHostKeyChecking=yes` and `BatchMode=yes`: an unknown or
-  changed server key fails the run (PLAN.md #12). Agent, port
+  changed server key fails the run (decisions.md #12). Agent, port
   and X11 forwarding are switched off on every call
   (`ForwardAgent=no`, `ClearAllForwardings=yes`, `ForwardX11=no`,
   `ForwardX11Trusted=no`; `ClearAllForwardings` alone leaves X11
@@ -170,7 +169,7 @@ truth.
   be root-owned and not writable by the deploying user, and
   upgrades verify the signature against a root-owned key.
   Signing and upgrade are built with #28's default (task bb4),
-  the first install with `iormeshctl bootstrap` (PLAN.md #1,
+  the first install with `iormeshctl bootstrap` (decisions.md #1,
   task qh4):
   - **`iormeshctl bootstrap HOST`** is the one step that uses
     the operator's own sudo. Without `-apply` it contacts
@@ -274,7 +273,7 @@ truth.
     sessions keep the old binary; the next `start` runs the
     new one.
   - **The Java agent jar takes the same path** (task kf4,
-    PLAN.md #28): `mage agentBuild` copies it to
+    decisions.md #28): `mage agentBuild` copies it to
     `dist/iormesh-agent.jar`, `mage sign` signs it at the
     release version (only if its manifest's
     `Implementation-Version` is that version, task uf4;
@@ -323,7 +322,7 @@ truth.
     deploy before any host is contacted. A new build restarts
     the live sessions, so a fixed hole does not keep running in
     the old binary. A host without the installed tracer is
-    reported, not bootstrapped (PLAN.md #1; that is
+    reported, not bootstrapped (decisions.md #1; that is
     `iormeshctl bootstrap`'s job). A host with a
     project that uses the Java agent (`-spool` or `-agent`)
     also gets `dist/iormesh-agent.jar`, verified on the
@@ -540,7 +539,7 @@ truth.
   group- or other-writable (sticky directories excepted).
   Details in [java-attach.md](java-attach.md).
 - **Late attach adds JVMs, not trust** (task lh4; behaviour and
-  bounds in PLAN.md M3 "Attach"). With `-agent`, a `run` also
+  bounds in milestones.md M3 "Attach"). With `-agent`, a `run` also
   loads the agent into JVMs that appear during the session, and
   only into processes the session traces already: a traced
   process (a child included) that execs (`session.handle`), a
@@ -605,7 +604,7 @@ truth.
   paths, like the file events' paths, verbatim; a remote code
   source URL loses its userinfo, query and fragment in the agent
   and again in the tracer.
-  The msghdr data calls (task oh4; why, in PLAN.md M4 "Clock
+  The msghdr data calls (task oh4; why, in milestones.md M4 "Clock
   reconciliation from the traffic itself") read the caller's
   memory only for lengths. `sendmsg` and `recvmsg` take their
   bytes from the return value; a `recvmsg` with `MSG_TRUNC`
@@ -678,7 +677,7 @@ truth.
   oj4) fails on an fmt print in `internal/ctl` whose text value
   skips that escape.
 - **Prune deletes only the store's own old segments, and only
-  when told** (tasks yh4, gk4; the rule is PLAN.md M4 "Collect"
+  when told** (tasks yh4, gk4; the rule is milestones.md M4 "Collect"
   and "Build window and prune"). Nothing cleans the store on its
   own: `iormeshctl prune -older-than DUR` runs only as the
   operator's command, as the operator (no sudo, no server
@@ -707,7 +706,7 @@ truth.
   not repeated at the delete: a name swapped meanwhile for a
   symlink is removed as the link, never its target.
 - **Kubernetes** (M7; decisions #13, #14, #18 are provisional —
-  PLAN.md "Provisional — M7"): eBPF privileges are
+  decisions.md "Provisional — M7"): eBPF privileges are
   node-kernel-wide — a container with `CAP_BPF` and
   `CAP_PERFMON` can in principle read any process's memory and
   the kernel's. What the minimal profile buys over `privileged`
@@ -719,7 +718,7 @@ truth.
     `SYS_RESOURCE` (libbpfgo's memlock bump, not the kernel),
     plus `SYS_PTRACE`, `DAC_OVERRIDE`, `KILL` and
     `CHECKPOINT_RESTORE` when it attributes Java — each traced
-    to the code that needs it in PLAN.md #13 and checked by
+    to the code that needs it in decisions.md #13 and checked by
     leaving it out
     ([testing.md](testing.md#k8s-capability-set-task-ub4));
   - runs as SELinux type `spc_t` at level `s0` — the tracer
@@ -772,7 +771,7 @@ truth.
     separates none of those pods and containment rests on the
     namespaces. Stop its tracers before removing the RPM, or they
     become `unlabeled_t`. The rules and
-    the el9 run are in PLAN.md #13 and
+    the el9 run are in decisions.md #13 and
     [testing.md](testing.md#dedicated-type-iormesh_container_t-task-7h4-2026-11-21)
     (tasks 7h4, gh4);
   - mounts the host's tracefs read-only and nothing else of the
@@ -793,7 +792,7 @@ truth.
     open. `hostPID` is not used: it would give the app
     containers the node's process table too;
   - stages the agent jar and spool inside the JVM's root for a
-    live attach (PLAN.md #14; built by task cf4): a root-owned
+    live attach (decisions.md #14; built by task cf4): a root-owned
     0755 directory under the JVM's `/tmp`, created exclusively
     (`mkdirat` on the `RESOLVE_IN_ROOT` fd) under a random name
     — a name that already exists is never adopted, the JVM's
@@ -875,7 +874,7 @@ truth.
   tracer's load error then names SELinux and its context instead
   of libbpf's memlock hint (task 6h4; the denial shows in the
   raw audit.log, not always in `ausearch -m avc`), and the el9
-  choices are PLAN.md #13's (task 5h4). Pod Security `baseline` and
+  choices are decisions.md #13's (task 5h4). Pod Security `baseline` and
   `restricted` refuse both profiles: the tracer needs a
   namespace at the `privileged` level or an exemption — the
   owner's call per namespace.
