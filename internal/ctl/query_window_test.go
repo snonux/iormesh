@@ -14,13 +14,15 @@ import (
 	"iormesh/internal/segment"
 )
 
-// TestQueryAnchorFirstReadable (review of task ik4): the default query
-// places a time of day on the earliest READABLE segment's date, as it
-// did before: an unreadable segment named 1999-12-31 next to app2's
-// first one is left out, named, and moves nothing — the window golden's
-// events are written unchanged (exit 1 for the bad segment). Build's
-// anchor (the earliest listed segment) is task 1l4's, not changed here.
-func TestQueryAnchorFirstReadable(t *testing.T) {
+// TestQueryWindowBadSegment (review of task ik4, anchor changed by task
+// 1l4): an unreadable segment named 1999-12-31 next to app2's first one
+// is left out, named, and changes nothing in a dated window — the window
+// golden's events are written unchanged (exit 1 for the bad segment).
+// Its date still counts for a bare time of day, which the store now
+// refuses as spanning 1999-12-31 .. 2025-11-20
+// (TestBuildAndQueryShareTheWindow); before task 1l4 the default query
+// placed it on the earliest readable segment's date instead.
+func TestQueryWindowBadSegment(t *testing.T) {
 	f := newBuildFixture(t)
 	name := segment.FileName{FQDN: "hostB.example.org", Session: "deadbeef",
 		Start: time.Date(1999, 12, 31, 0, 0, 0, 0, time.UTC)}.Base() + segment.Ext
@@ -29,7 +31,7 @@ func TestQueryAnchorFirstReadable(t *testing.T) {
 		t.Fatal(err)
 	}
 	code := f.run(slices.Concat([]string{"query"}, queryProjects,
-		[]string{"-from", "00:53:20.001", "-to", "00:53:20.002"})...)
+		[]string{"-from", "2025-11-20T00:53:20.001", "-to", "2025-11-20T00:53:20.002"})...)
 	if code != exitError || !strings.Contains(f.stderr.String(), name) {
 		t.Fatalf("exit %d, stderr %s", code, f.stderr)
 	}
@@ -177,7 +179,7 @@ func inWindow(evs []schema.Event, from, to time.Duration) []schema.Event {
 // TestQueryWindowEquivalent: a windowed query (the default, no
 // -window-segments) writes exactly what the whole store's query, cut to
 // the window afterwards, holds; a time of day lands on t0's date, the
-// first segment's.
+// store's one date (task 1l4).
 func TestQueryWindowEquivalent(t *testing.T) {
 	f := newBuildFixture(t)
 	minuteHost(t, f)

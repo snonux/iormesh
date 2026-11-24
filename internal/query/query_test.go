@@ -251,7 +251,7 @@ func TestInvalidFilter(t *testing.T) {
 	}
 }
 
-// TestParseTime: both forms, and the inputs refused.
+// TestParseTime: the three forms, and the inputs refused.
 func TestParseTime(t *testing.T) {
 	day := time.Date(2025, 11, 20, 0, 53, 20, 0, time.UTC)
 	for _, tc := range []struct {
@@ -260,6 +260,8 @@ func TestParseTime(t *testing.T) {
 	}{
 		{"2025-11-20T12:00:05Z", "2025-11-20T12:00:05Z"},
 		{"2025-11-20T13:00:05.5+01:00", "2025-11-20T12:00:05.5Z"},
+		{"2025-11-21T12:00:05", "2025-11-21T12:00:05Z"}, // no zone: UTC, its own date
+		{"2025-11-21T12:00:05.25", "2025-11-21T12:00:05.25Z"},
 		{"12:00:05", "2025-11-20T12:00:05Z"},
 		{"00:00:00.000000001", "2025-11-20T00:00:00.000000001Z"},
 	} {
@@ -276,7 +278,8 @@ func TestParseTime(t *testing.T) {
 		}
 	}
 	for _, bad := range []string{"", "noon", "25:00:00", "12:00", "1969-12-31T23:59:59Z",
-		"2300-01-01T00:00:00Z", "1763600000"} {
+		"2300-01-01T00:00:00Z", "1763600000", "2025-11-21", "2025-11-21T12:00",
+		"2300-01-01T00:00:00"} {
 		if _, err := ParseTime(bad); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%q: err %v, want ErrInvalid", bad, err)
 		}

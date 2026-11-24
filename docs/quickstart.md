@@ -275,8 +275,10 @@ iormeshctl build -last 2h            # or -from 09:00:00 -to 11:00:00
 iormeshctl show -windowed            # open -windowed, tui -windowed alike
 ```
 
-`-from` and `-to` take RFC 3339 or `HH:MM:SS` UTC on the trace's
-first day (`-to` exclusive), and `-last` goes alone. A window keeps
+`-from` and `-to` take RFC 3339, `YYYY-MM-DDTHH:MM:SS` (UTC), or
+a bare `HH:MM:SS` UTC while the store spans one UTC day — on a
+longer one give the date (`-to` exclusive) — and `-last` goes
+alone. A window keeps
 the whole segments that overlap it, and its services and edges
 are the connections seen in it.
 

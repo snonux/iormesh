@@ -1215,8 +1215,9 @@ Kubernetes (M7) build on it.
   **Build window and prune** (task yh4, owner-approved
   2026-11-22): `build -from T -to T` or `-last DUR` builds only
   the segments whose time range overlaps the window, T as
-  query's (RFC 3339, or a UTC time of day on the trace's first
-  day), and echoes the resolved window. A segment's range comes
+  query's (RFC 3339, or a UTC time of day on a store within one
+  UTC day: **A time of day's date** below), and echoes the
+  resolved window. A segment's range comes
   from its name — its start, a minute before, to its one-minute
   interval and a minute after — so a window takes whole
   segments and never decodes one outside it once its host
@@ -1243,6 +1244,26 @@ Kubernetes (M7) build on it.
   segment; without `-apply` it lists, with it it deletes and
   prints each file. Auto-cleaning the store stays out of scope:
   prune is the operator's explicit command.
+  **A time of day's date** (task 1l4): `-from`/`-to` take RFC
+  3339, a date and time of day in UTC
+  (`YYYY-MM-DDTHH:MM:SS[.frac]`), or a bare UTC time of day.
+  One rule places a bare time of day for `build`, `query` and
+  `query -window-segments` alike: on the UTC date the listed
+  events segments of the projects start on (their names,
+  readable or not), when they all start on one date; a store
+  whose segments start on more than one UTC date refuses it as
+  a usage error that names the dates and asks for the date.
+  Why refuse, not anchor: the earliest date moves when `prune`
+  deletes the oldest day, and the latest moves when a new day
+  is collected, so any anchor lets the same command silently
+  mean another day; refusing on a multi-day store means a bare
+  time of day only ever resolves where one date is possible.
+  The listed segments, not the readable ones, decide, because
+  build must place the window before it decodes anything; an
+  unreadable segment's name therefore counts too. An instant
+  needs no date, so it never lists the store. `build` echoes the
+  resolved window on its summary and `query` on stderr (stdout
+  is the slice).
   **Prune forgets** (task gk4): `prune -apply` also makes the
   service database forget the files it deletes, so a full build
   afterwards shows no service, edge or request count that only
@@ -1833,9 +1854,9 @@ Kubernetes (M7) build on it.
   the I/O inside one distributed trace's spans). All are
   checked before anything is read. *Task ik4:* a window stays
   exact by default — query reads the whole store and cuts the
-  events to `-from`/`-to` afterwards, a time of day on the
-  earliest readable segment's date (task 1l4 decides the
-  anchor policy). The opt-in
+  events to `-from`/`-to` afterwards, a time of day placed as
+  build places it (**A time of day's date**, task 1l4: the
+  store's one date, refused on a multi-day store). The opt-in
   `-window-segments` (with `-from` or `-to`) decodes only the
   segments build's selection takes (**Build window and
   prune**: the same resolution and anchor, the same

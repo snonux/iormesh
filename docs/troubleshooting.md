@@ -278,9 +278,10 @@ nor a bound (PLAN.md M4).
 |---|---|
 | `usage: -last is a window of its own: give it or -from/-to, not both` | `build -last DUR` or `-from`/`-to`, not both. |
 | `usage: -last …: want a positive duration (90m, 2h)` | `-last` takes a Go duration: `90m`, `2h`, `48h` (no `d`). |
-| `usage: the window -from … -to … is empty` | `-from` is not before `-to` (`-to` is exclusive). A bare `HH:MM:SS` is UTC on the trace's first day; use RFC 3339 for a later day. |
+| `usage: the window -from … -to … is empty` | `-from` is not before `-to` (`-to` is exclusive). A bare `HH:MM:SS` is UTC on the store's one date; a window across midnight needs dates (`2025-11-21T09:00:00` or RFC 3339). |
+| `usage: -from … is a time of day, but the store's segments start on D1 .. D2 (UTC): give its date, e.g. …` | The store (`build` and `query` alike) spans more than one UTC day, so a bare `HH:MM:SS` could mean any of them, and would change meaning when `prune` deletes the oldest day. Give the date: `YYYY-MM-DDTHH:MM:SS` (UTC) or RFC 3339. A segment that does not read still counts with its name's date. |
 | `build: no readable segment for … in the window … in … (0 bad)` | No collected segment overlaps the window: collect first, or check the window (UTC). |
-| `federate: no segment collected in … yet` | `-from` or `-to` needs a collected segment to fix the trace's first day: collect first. |
+| `federate: no segment collected in … yet` | A bare time of day in `-from` or `-to` needs a collected segment to fix its date: collect first, or give a date. |
 | `show: no build of …~window yet (iormeshctl build -from T\|-to T\|-last DUR)` / `open: no site of …~window yet (…)` | `-windowed` reads the last windowed build of the same `-project` set (and `-namespace`): make one with `build -last` or `-from`/`-to`. |
 | `usage: prune needs -older-than DUR, a positive duration (720h)` | `prune` has no default age. |
 | `prune: nothing collected for project … in …` | That `-project` has no directory in the store: check the spelling against the store's directories. |

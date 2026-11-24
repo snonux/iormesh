@@ -101,24 +101,28 @@ func (w *Window) narrow(groups [][]*Segment) [][]*Segment {
 	return out
 }
 
-// FirstStart is the earliest start an events segment of projects (every
-// project directory when none is given) names in store: the trace's
-// first day, which a -from or -to time of day is placed on. It reads
-// only the directory listings.
-func FirstStart(store string, projects []string) (time.Time, error) {
+// StartRange is the earliest and the latest start the events segments
+// of projects (every project directory when none is given) name in
+// store, whether they read or not: ctl places a -from or -to time of day
+// on their UTC date when both share one, and refuses it otherwise (task
+// 1l4). It reads only the directory listings.
+func StartRange(store string, projects []string) (first, last time.Time, err error) {
 	var out Segments
 	segs, err := listStore(store, projects, &out)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, time.Time{}, err
 	}
 	if len(segs) == 0 {
-		return time.Time{}, fmt.Errorf("federate: no segment collected in %s yet", store)
+		return time.Time{}, time.Time{}, fmt.Errorf("federate: no segment collected in %s yet", store)
 	}
-	first := segs[0].File.Start
+	first, last = segs[0].File.Start, segs[0].File.Start
 	for _, s := range segs[1:] {
 		if s.File.Start.Before(first) {
 			first = s.File.Start
 		}
+		if s.File.Start.After(last) {
+			last = s.File.Start
+		}
 	}
-	return first, nil
+	return first, last, nil
 }

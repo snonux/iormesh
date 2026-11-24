@@ -18,12 +18,14 @@ import (
 // segments the same way first (task ik4). The window
 // selects whole segments, not events: the build covers the window
 // widened to its segments' edges, about a minute or two each side. T is
-// query's (query.ParseTime): RFC 3339, or a UTC time of day placed on
-// the day of the earliest segment of the projects; -last counts back
-// from now. build echoes the resolved window. The service database's
-// views (services, edges, request counts) are read back narrowed to the
-// window too (selection.scope): the database keeps every import ever
-// made.
+// query's (query.ParseTime): RFC 3339, a UTC date and time of day, or a
+// bare UTC time of day, placed on the one UTC date the projects' listed
+// segments start on and refused when they start on more than one (task
+// 1l4: windowSpec.day, the same for build and query); -last counts back
+// from now. build and query echo the resolved window. The service
+// database's views (services, edges, request counts) are read back
+// narrowed to the window too (selection.scope): the database keeps
+// every import ever made.
 //
 // A windowed build is another build than the full one, so it never
 // replaces it: it writes <projects>[@<namespace>]~window/ ('~' is in
@@ -55,7 +57,8 @@ type windowFlags struct {
 // (not refresh's: refresh builds everything it collected).
 func addWindowFlags(fs *flag.FlagSet, w *windowFlags) {
 	fs.StringVar(&w.from, "from", "", "build only the segments from this instant on: RFC 3339, "+
-		"or HH:MM:SS[.frac] UTC on the trace's first day; into <projects>~window")
+		"YYYY-MM-DDTHH:MM:SS[.frac] UTC, or HH:MM:SS[.frac] UTC on a store within one UTC day; "+
+		"into <projects>~window")
 	fs.StringVar(&w.to, "to", "", "build only the segments before this instant (exclusive), as -from")
 	fs.StringVar(&w.last, "last", "", "build only the segments of the last DUR (e.g. 2h), "+
 		"not with -from or -to")
@@ -93,8 +96,8 @@ func parseWindow(w windowFlags, f *buildFlags) error {
 
 // resolve turns the window into the instants federate selects by, nil
 // without one: place, then an empty window is a usage error.
-func (w windowSpec) resolve(e env, anchor func() (time.Time, error)) (*federate.Window, error) {
-	out, err := w.place(e, anchor)
+func (w windowSpec) resolve(e env, days storeDays) (*federate.Window, error) {
+	out, err := w.place(e, days)
 	if err != nil || out == nil {
 		return out, err
 	}
@@ -105,29 +108,31 @@ func (w windowSpec) resolve(e env, anchor func() (time.Time, error)) (*federate.
 	return out, nil
 }
 
-// firstListed is build's anchor: the start of the earliest events
-// segment of projects listed in store (federate.FirstStart), whether it
-// reads or not.
-func firstListed(store string, projects []string) func() (time.Time, error) {
-	return func() (time.Time, error) { return federate.FirstStart(store, projects) }
+// storeDays is the earliest and the latest start the store's listed
+// segments name: what a time of day is placed by (windowSpec.day).
+type storeDays func() (first, last time.Time, err error)
+
+// listedDays is the one storeDays build and query share (task 1l4): the
+// events segments of projects listed in store (federate.StartRange),
+// whether they read or not, so build (before it decodes anything) and
+// the default query (after it read the store) place a time of day on
+// the same date.
+func listedDays(store string, projects []string) storeDays {
+	return func() (time.Time, time.Time, error) { return federate.StartRange(store, projects) }
 }
 
 // place turns the window's flags into instants, nil without a window:
-// -last from the clock, a time of day on the UTC date of anchor()'s
-// instant, called only for -from or -to. It is the one place a time of
-// day is placed; each caller says which day by its anchor — build and
-// query -window-segments the earliest listed segment (firstListed, known
-// before anything is decoded), the default query the earliest readable
-// one (firstReadable, as before task ik4). Which anchor is right is task
-// 1l4's to decide.
-func (w windowSpec) place(e env, anchor func() (time.Time, error)) (*federate.Window, error) {
+// -last from the clock, an instant as given, a bare time of day on the
+// store's one UTC date (day; days is called only then). It is the one
+// place a time of day is placed, for build and both kinds of query.
+func (w windowSpec) place(e env, days storeDays) (*federate.Window, error) {
 	if w.last > 0 {
 		return &federate.Window{From: e.clock().Add(-w.last).UTC().Truncate(time.Second)}, nil
 	}
 	if w.from == nil && w.to == nil {
 		return nil, nil
 	}
-	day, err := anchor()
+	day, err := w.day(days)
 	if err != nil {
 		return nil, err
 	}
@@ -147,6 +152,46 @@ func (w windowSpec) place(e env, anchor func() (time.Time, error)) (*federate.Wi
 	}
 	return &out, nil
 }
+
+// day is the date a bare time of day in -from or -to is placed on (task
+// 1l4, PLAN.md **A time of day's date**): the one UTC date every
+// listed segment of the store starts on. A store whose segments start on
+// more than one date refuses it — the earliest date moves when prune
+// deletes the oldest day, the latest when a new day is collected, so
+// either anchor would silently change what the same command means —
+// and asks for the date, the latest one as the example. Without a time
+// of day the store is not listed: an instant needs no date.
+func (w windowSpec) day(days storeDays) (time.Time, error) {
+	name, clock := "", time.Duration(0)
+	for _, t := range []struct {
+		flag string
+		spec *query.TimeSpec
+	}{{"-to", w.to}, {"-from", w.from}} {
+		if t.spec == nil {
+			continue
+		}
+		if c, ok := t.spec.Clock(); ok {
+			name, clock = t.flag, c
+		}
+	}
+	if name == "" {
+		return time.Time{}, nil
+	}
+	first, last, err := days()
+	if err != nil {
+		return time.Time{}, err
+	}
+	d1, d2 := first.UTC().Format(time.DateOnly), last.UTC().Format(time.DateOnly)
+	if d1 == d2 {
+		return first, nil
+	}
+	c := time.Time{}.Add(clock).Format(clockText)
+	return time.Time{}, fmt.Errorf("%w: %s %s is a time of day, but the store's segments start on "+
+		"%s .. %s (UTC): give its date, e.g. %s %sT%s", errUsage, name, c, d1, d2, name, d2, c)
+}
+
+// clockText prints a time of day as ParseTime reads it.
+const clockText = "15:04:05.999999999"
 
 // windowText is the resolved window as build echoes it, "FROM .. TO"
 // in RFC 3339 UTC, "(open)" for a side not given.

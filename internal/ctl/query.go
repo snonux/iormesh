@@ -8,7 +8,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"iormesh/internal/federate"
 	"iormesh/internal/query"
@@ -27,7 +26,8 @@ import (
 // fails is left out — named on stderr, the exit status 1 — never half
 // read. By default every segment is loaded and -from/-to cut the events
 // afterwards, so a window's slice is exactly the whole trace's events in
-// it, a time of day placed on the earliest readable segment's date.
+// it, a time of day placed as build places it (windowSpec.day: the
+// store's one UTC date, refused on a store spanning more; task 1l4).
 // -window-segments (task ik4) trades that for speed: only the segments
 // whose range overlaps the window are loaded (loadSelection, build's
 // selection, anchor and guarantee, window.go), and the slice is computed
@@ -91,7 +91,8 @@ func addQueryFlags(fs *flag.FlagSet, f *queryFlags) {
 	fs.StringVar(&f.paths.store, "store", "", "local trace store (default ~/.local/share/iormesh/traces)")
 	fs.StringVar(&f.paths.db, "db", "", "service database; the host pins next to it are honored "+
 		"(default ~/.local/share/iormesh/services.db)")
-	fs.StringVar(&f.from, "from", "", "first instant, RFC 3339 or HH:MM:SS[.frac] UTC on the trace's first day")
+	fs.StringVar(&f.from, "from", "", "first instant: RFC 3339, YYYY-MM-DDTHH:MM:SS[.frac] UTC, "+
+		"or HH:MM:SS[.frac] UTC on a store within one UTC day")
 	fs.StringVar(&f.to, "to", "", "end instant (exclusive), as -from")
 	fs.BoolVar(&f.windowSegments, "window-segments", false, "with -from/-to: read only the segments "+
 		"overlapping the window, as build does (faster, not exact: see the usage text)")
@@ -113,7 +114,7 @@ func addQueryFlags(fs *flag.FlagSet, f *queryFlags) {
 // parseQueryFilter turns the flags into a filter and validates it, the
 // time window aside: -from and -to are parsed into f.paths.window as
 // build's are (parseWindow) and placed only once the store is listed — a
-// time of day needs the trace's first day (windowSpec.resolve).
+// time of day needs the store's date (windowSpec.day).
 func parseQueryFilter(f *queryFlags) (query.Filter, error) {
 	filter := query.Filter{Host: f.host, App: f.app, Thread: f.thread, Conn: f.conn,
 		Follow: f.follow, File: f.file, Method: f.mth, Ref: f.ref, Event: f.event}
@@ -163,7 +164,8 @@ func parseValueFlags(f queryFlags, filter *query.Filter) error {
 // runQuery loads the store (loadSelection, build's selection: the whole
 // store, or with -window-segments only the segments whose range overlaps
 // the window; task ik4), places the window (queryWindow), merges, and
-// writes the slice; bad segments are reported after it.
+// writes the slice; bad segments are reported after it. The resolved
+// window is echoed on stderr (task 1l4).
 func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter) error {
 	paths, err := resolveBuildPaths(e, f.paths)
 	if err != nil {
@@ -172,6 +174,11 @@ func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter) err
 	sel, _, err := loadSelection(ctx, e, f.paths, paths, f.windowSegments)
 	if err != nil {
 		return err
+	}
+	if f.windowSegments { // resolved by the load, never nil (parseQueryFilter)
+		if err := echoQueryWindow(e, sel.window, " (whole segments overlapping it)"); err != nil {
+			return err
+		}
 	}
 	segs := sel.segs
 	switch {
@@ -184,7 +191,7 @@ func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter) err
 		return fmt.Errorf("query: no readable segment for %s%s in %s (%d bad)",
 			strings.Join(sel.projects, ", "), windowNote(sel.window), paths.store, len(segs.Bad))
 	}
-	if err := queryWindow(e, f, &filter, sel); err != nil {
+	if err := queryWindow(e, f, &filter, sel, paths.store); err != nil {
 		return err
 	}
 	in, err := queryInput(ctx, &segs, filter)
@@ -201,15 +208,17 @@ func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter) err
 // wall_ns < To, a side not given left open: the segments loaded hold
 // events outside it (all of them by default; with -window-segments whole
 // segments around its edges). -window-segments resolved the window
-// before loading (loadSelection); the default places it now, a time of
-// day on the earliest readable segment's date (firstReadable), and an
-// empty window fails the filter's check — the order and messages the
-// query had before task ik4.
-func queryWindow(e env, f queryFlags, filter *query.Filter, sel selection) error {
+// before loading (loadSelection); the default places it now — on the
+// same date as build and -window-segments, the store's listed segments'
+// (listedDays, task 1l4), but after the load, so a store part with no
+// readable segment is still reported as that first — and an empty
+// window fails the filter's check, the order and messages the query had
+// before task ik4. The default echoes the window it placed.
+func queryWindow(e env, f queryFlags, filter *query.Filter, sel selection, store string) error {
 	w := sel.window
 	if !f.windowSegments {
 		var err error
-		if w, err = f.paths.window.place(e, firstReadable(sel.segs.Sources)); err != nil {
+		if w, err = f.paths.window.place(e, listedDays(store, sel.projects)); err != nil {
 			return err
 		}
 	}
@@ -221,22 +230,18 @@ func queryWindow(e env, f queryFlags, filter *query.Filter, sel selection) error
 	if err := filter.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", errUsage, err)
 	}
+	if !f.windowSegments {
+		return echoQueryWindow(e, w, "")
+	}
 	return nil
 }
 
-// firstReadable is the default query's anchor: the start of the
-// earliest segment that read (its file name), the day the readable
-// trace began. sources is not empty (runQuery).
-func firstReadable(sources []*federate.Segment) func() (time.Time, error) {
-	return func() (time.Time, error) {
-		day := sources[0].File.Start
-		for _, s := range sources[1:] {
-			if s.File.Start.Before(day) {
-				day = s.File.Start
-			}
-		}
-		return day, nil
-	}
+// echoQueryWindow tells the resolved window on stderr (stdout is the
+// slice), as build echoes it on its summary: "query: window FROM .. TO"
+// and note.
+func echoQueryWindow(e env, w *federate.Window, note string) error {
+	_, err := fmt.Fprintf(e.stderr, "query: window %s\n", safe(windowText(w)+note))
+	return err
 }
 
 // queryInput merges the segments and, for -method, reads the method
