@@ -337,3 +337,98 @@ func TestLateAttachOverflowNamedEachTime(t *testing.T) {
 		t.Errorf("%d overflow lines, want one per overflow:\n%s", n, log.String())
 	}
 }
+
+// raceLoader counts each pid's loads and the most in flight at once.
+// The first load of first — the start-time attach's — hands the record
+// loop an exec record of first and answers startErr once a second load
+// of first began or a grace period passed, so a late attach that
+// overlaps it is seen.
+type raceLoader struct {
+	tr       *fakeTracer
+	first    uint32
+	startErr error
+
+	mu       sync.Mutex
+	loads    map[uint32]int
+	inFlight map[uint32]int
+	maxIn    map[uint32]int
+}
+
+func (l *raceLoader) Load(_ context.Context, r javaattach.Request) error {
+	l.mu.Lock()
+	l.loads[r.PID]++
+	n := l.loads[r.PID]
+	l.inFlight[r.PID]++
+	l.maxIn[r.PID] = max(l.maxIn[r.PID], l.inFlight[r.PID])
+	l.mu.Unlock()
+	defer func() {
+		l.mu.Lock()
+		l.inFlight[r.PID]--
+		l.mu.Unlock()
+	}()
+	if r.PID != l.first || n != 1 {
+		return nil
+	}
+	rec := execRecord(l.first, 40, "/jdk/bin/java", "/jdk/bin/java", "-jar", "w.jar")
+	rec.EventType = types.PROCESS_ARGV_EVENT
+	l.tr.records <- []any{rec}
+	for deadline := time.Now().Add(300 * time.Millisecond); time.Now().Before(deadline); {
+		l.mu.Lock()
+		second := l.loads[r.PID] > 1
+		l.mu.Unlock()
+		if second {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return l.startErr
+}
+
+func (l *raceLoader) counts(pid uint32) (loads, maxIn int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.loads[pid], l.maxIn[pid]
+}
+
+// TestLateAttachSkipsStartTimeJVM (task 7l4): a JVM the session starts
+// with that execs (or whose exec record arrives) while its start-time
+// load is in flight is not tried by the late attacher at the same time
+// — two attaches could each send a SIGQUIT, and the second prints a
+// thread dump on the app's stdout. Loaded at start, it is not loaded
+// again; one the start-time attach found no JVM yet (a wrapper that
+// exec'd java) is handed to the late attacher once that load ended.
+func TestLateAttachSkipsStartTimeJVM(t *testing.T) {
+	cases := []struct {
+		name      string
+		startErr  error
+		wantLoads int
+	}{
+		{"loaded at start", nil, 1},
+		{"no JVM yet at start", javaattach.ErrNotJVM, 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeProcs(t, 10)
+			agent, spool := agentFiles(t)
+			tr := newFakeTracer()
+			l := &raceLoader{tr: tr, first: 10, startErr: tc.startErr, loads: map[uint32]int{},
+				inFlight: map[uint32]int{}, maxIn: map[uint32]int{}}
+			useLoader(t, l)
+			c := testCorrelator(t, t.TempDir())
+			defer func() { _ = c.Close() }()
+			s, _ := pidSession(t, tr, c, 10)
+			log := startAgentSession(t, s, agent, spool)
+			for deadline := time.Now().Add(5 * time.Second); s.late.busy() && time.Now().Before(deadline); {
+				time.Sleep(time.Millisecond)
+			}
+			s.stopLate()
+			loads, maxIn := l.counts(10)
+			if maxIn != 1 {
+				t.Errorf("%d loads of pid 10 in flight at once, want 1", maxIn)
+			}
+			if loads != tc.wantLoads {
+				t.Errorf("%d loads of pid 10, want %d:\n%s", loads, tc.wantLoads, log.String())
+			}
+		})
+	}
+}

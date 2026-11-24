@@ -216,7 +216,8 @@ var sameMountNS = func(pid uint32) bool {
 // probed (the Java mark, task td4), and with -agent the JVMs the session
 // starts with get the agent loaded first (task ge4). With -agent the
 // late attacher starts first too: a JVM that execs while the start-time
-// loads run is tried by it (task lh4), and it reuses their stages.
+// loads run is tried by it (task lh4), and it reuses their stages — but
+// not one of the JVMs those loads hold until they are done (task 7l4).
 // Without -spool it does nothing.
 func (s *session) startJava(ctx context.Context, cfg runConfig, stderr io.Writer) error {
 	if cfg.agent == "" {
@@ -252,6 +253,9 @@ func (s *session) attachAgents(ctx context.Context, agent, spool string, stderr 
 		pids = append(pids, pid)
 	}
 	slices.Sort(pids)
+	// The late attacher runs already: it leaves these pids to the loads
+	// below until they are done (task 7l4).
+	s.late.hold(pids)
 	// The loads run on their own ctx, so the loop can cancel them when it
 	// gives up on an error, not only when the session's ctx ends.
 	lctx, cancel := context.WithCancel(ctx)
@@ -275,6 +279,7 @@ func (s *session) attachAgents(ctx context.Context, agent, spool string, stderr 
 			}
 			s.java.addStages(r.stages)
 			s.late.share(r.stages)
+			s.late.release(r.retry)
 			return s.java.poll()
 		case <-ctx.Done():
 			// A signal during the loads. nil, not ctx.Err(): traceLoop
@@ -291,18 +296,24 @@ func (s *session) attachAgents(ctx context.Context, agent, spool string, stderr 
 // loads end on the cancelled ctx, and loadAgents stages nothing more
 // once it is done, so the wait is short; it is needed for the stages
 // already made — and one still being made — which would otherwise stay
-// in the JVMs' roots. Their lines are dropped: the session is ending.
+// in the JVMs' roots. Their lines are dropped: the session is ending,
+// and so are its claims on the pids, which hand nothing to the late
+// attacher.
 func (s *session) abandonLoads(cancel context.CancelFunc, done <-chan agentLoads) {
 	cancel()
 	s.java.addStages((<-done).stages)
+	s.late.release(nil)
 }
 
-// agentLoads is what loadAgents did: one line per pid, and the stages it
+// agentLoads is what loadAgents did: one line per pid, the stages it
 // made inside JVMs' roots (decision #14), for the session to read and
-// remove.
+// remove, and the pids to retry — whose load failed before any SIGQUIT
+// could be sent, so the late attacher may try them if they exec'd
+// meanwhile (lateAttacher.release).
 type agentLoads struct {
 	lines  []string
 	stages []agentStage
+	retry  []uint32
 }
 
 // loadAgents loads the agent into each pid in turn, each attach bounded
@@ -312,12 +323,16 @@ type agentLoads struct {
 // once ctx is done.
 func loadAgents(ctx context.Context, l agentLoader, pids []uint32, agent, spool string) agentLoads {
 	var lines []string
+	var retry []uint32
 	st := newAgentStages(agent)
 	for _, pid := range pids {
 		if ctx.Err() != nil {
 			break
 		}
 		note, err := loadOne(ctx, l, st, pid, spool)
+		if errors.Is(err, javaattach.ErrNotJVM) || errors.Is(err, javaattach.ErrNoQuitHandler) {
+			retry = append(retry, pid)
+		}
 		switch {
 		case errors.Is(err, javaattach.ErrNotJVM):
 			note = fmt.Sprintf("pid %d is not a JVM, no agent loaded", pid)
@@ -329,7 +344,7 @@ func loadAgents(ctx context.Context, l agentLoader, pids []uint32, agent, spool 
 		}
 		lines = append(lines, note)
 	}
-	return agentLoads{lines: lines, stages: st.all}
+	return agentLoads{lines: lines, stages: st.all, retry: retry}
 }
 
 // loadOne stages (if pid needs it) and loads the agent into one JVM.

@@ -66,6 +66,12 @@ type lateAttacher struct {
 	mu sync.Mutex
 	// pending maps each process being tried to its job.
 	pending map[uint32]*lateJob
+	// held are the JVMs the start-time attach loads (hold, release):
+	// that attach claims them, so the late attacher never works on one
+	// at the same time — each attach may send a SIGQUIT, and a second
+	// one prints a thread dump on the app's stdout (task 7l4). The value
+	// says whether the process exec'd meanwhile.
+	held map[uint32]bool
 	// lines are the attaches' reports and made the stages they made, both
 	// not yet collected by the loop.
 	lines []string
@@ -94,7 +100,43 @@ func newLateAttacher(ctx context.Context, agent, spool string) *lateAttacher {
 	return &lateAttacher{ctx: ctx, cancel: cancel, l: newAgentLoader(), spool: spool,
 		sem: make(chan struct{}, lateAttachParallel), every: lateAttachEvery,
 		deadline: lateAttachFor, notJVM: lateNotJVMFor, st: newAgentStages(agent),
-		pending: map[uint32]*lateJob{}}
+		pending: map[uint32]*lateJob{}, held: map[uint32]bool{}}
+}
+
+// hold claims pids for the start-time attach, before its loads begin:
+// until release, an exec of one of them only marks it.
+func (a *lateAttacher) hold(pids []uint32) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, pid := range pids {
+		a.held[pid] = false
+	}
+}
+
+// release ends the start-time attach's claims. A held process that
+// exec'd meanwhile is scheduled as exec would have — but only if it is
+// in retry, the pids whose start-time load failed before any SIGQUIT
+// could be sent (no libjvm.so or no handler yet: a wrapper still
+// exec'ing java, a JVM still starting). One the start-time attach
+// loaded, or that refused after the handshake began, is not tried
+// again, so a JVM gets at most one SIGQUIT from the session. The cost:
+// a JVM loaded at start that then execs another JVM before release
+// gets no agent in its new image (start it with -javaagent).
+func (a *lateAttacher) release(retry []uint32) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, pid := range retry {
+		if a.held[pid] && a.ctx.Err() == nil {
+			a.schedule(pid)
+		}
+	}
+	clear(a.held)
 }
 
 // share makes the stages the start-time attach made available to the
@@ -111,16 +153,26 @@ func (a *lateAttacher) share(stages []agentStage) {
 }
 
 // exec schedules pid's attach: it just exec'd (or was adopted) and may
-// be a JVM. A pid tried already only has its windows restarted. With
-// lateAttachPending processes pending, pid gets nothing; the first pid
-// dropped in each overflow is named (full), the rest until a slot frees
-// are covered by that line.
+// be a JVM. A pid the start-time attach holds is only marked (release
+// decides), so the two never work on one JVM at once.
 func (a *lateAttacher) exec(pid uint32) {
 	if a == nil || a.ctx.Err() != nil {
 		return
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if _, ok := a.held[pid]; ok {
+		a.held[pid] = true
+		return
+	}
+	a.schedule(pid)
+}
+
+// schedule starts pid's job, under mu. A pid tried already only has its
+// windows restarted. With lateAttachPending processes pending, pid gets
+// nothing; the first pid dropped in each overflow is named (full), the
+// rest until a slot frees are covered by that line.
+func (a *lateAttacher) schedule(pid uint32) {
 	if j, ok := a.pending[pid]; ok {
 		j.execAt = time.Now()
 		return
