@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,14 +16,33 @@ import (
 	"iormesh/internal/corereloc"
 )
 
-// el9BTF is the Rocky 9.9 kernel's BTF (5.14.0-741.22.1.el9_9.x86_64),
-// trimmed by `bpftool gen min_core_btf` to the types iormesh.bpf.o's CO-RE
-// relocations name. It came from the kernel-core RPM's vmlinuz
+// el9BTFs are the Rocky 9.9 kernel's BTF per arch, trimmed by `bpftool gen
+// min_core_btf` to the types iormesh.bpf.o's CO-RE relocations name. The
+// object is relocated against the file of the arch it was built for: its
+// pt_regs accesses follow __TARGET_ARCH, and x86's pt_regs has no field of
+// arm64's (task jl4). The x86_64 one came from the kernel-core RPM's vmlinuz
 // (scripts/extract-vmlinux, then the .BTF section); the same trim of iom1's
-// /sys/kernel/btf/vmlinux is byte-identical. Regenerate it when the
-// programs below gain relocations against types the file lacks
-// (docs/testing.md, "el9 record layout").
-var el9BTF = filepath.Join("testdata", "btf", "rocky9.9-5.14.0-741.22.1.el9_9.x86_64.min.btf")
+// /sys/kernel/btf/vmlinux is byte-identical. The aarch64 one is the trim of
+// the emulated el9 aarch64 guest's /sys/kernel/btf/vmlinux (task 8k4's
+// image). Regenerate them when the programs below gain relocations against
+// types the files lack (docs/testing.md, "el9 record layout").
+var el9BTFs = map[string]string{
+	"amd64": filepath.Join("testdata", "btf", "rocky9.9-5.14.0-741.22.1.el9_9.x86_64.min.btf"),
+	"arm64": filepath.Join("testdata", "btf", "rocky9.9-5.14.0-741.22.1.el9_9.aarch64.min.btf"),
+}
+
+// el9BTF returns the trimmed el9 BTF of the running arch, skipping the test
+// on an arch iormesh has none for (el9 ships no other). A listed file that
+// is missing - not staged next to the test binary, say - is no skip: the
+// relocation against it fails the test, as it always has on amd64.
+func el9BTF(t *testing.T) string {
+	t.Helper()
+	path, ok := el9BTFs[runtime.GOARCH]
+	if !ok {
+		t.Skipf("no trimmed el9 BTF for %s (internal/btf_root_test.go, el9BTFs)", runtime.GOARCH)
+	}
+	return path
+}
 
 // rawSyscallPrograms are the programs whose raw_syscalls record loads
 // TestEl9RecordLayout checks, each with the record field it reads: the two
@@ -40,8 +60,9 @@ var rawSyscallPrograms = map[string]string{
 // raw_syscalls record's id to offset 16 and args and ret to 24; upstream's
 // is 8 (id 8, args/ret 16). dispatch.c's record structs are CO-RE flavors,
 // so libbpf relocates each field to the running kernel's offset. Relocating
-// the object against the committed el9 BTF in place of the host's (libbpf's
-// btf_custom_path) must therefore yield record loads at 16 and 24, and
+// the object against the committed el9 BTF of its arch (el9BTFs) in place
+// of the host's (libbpf's btf_custom_path) must therefore yield record
+// loads at 16 and 24 (RHEL's trace_entry is the same on aarch64), and
 // relocating it against the host BTF the offsets of the host's own tracefs
 // format file - which on a 7.x host are the other layout, so a
 // fixed-offset struct cannot pass both.
@@ -52,7 +73,8 @@ var rawSyscallPrograms = map[string]string{
 // is no regression, so an exact list match is not required (task bg4).
 func TestEl9RecordLayout(t *testing.T) {
 	requireRoot(t)
-	el9 := ctxLoadOffsets(t, el9BTF)
+	btf := el9BTF(t)
+	el9 := ctxLoadOffsets(t, btf)
 	want := map[string]int16{"id": 16, "args": 24, "ret": 24}
 	for prog, field := range rawSyscallPrograms {
 		if !readsFieldAt(el9[prog], want[field]) {
@@ -73,7 +95,7 @@ func TestEl9RecordLayout(t *testing.T) {
 		}
 	}
 	t.Logf("record loads with el9 BTF %v, with host BTF %v", el9, host)
-	checkRelocatesClean(t, el9BTF, seqDataPrograms)
+	checkRelocatesClean(t, btf, seqDataPrograms)
 }
 
 // seqDataPrograms are tail-call targets that read tcp_sock fields through

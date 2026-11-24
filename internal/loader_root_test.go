@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -151,13 +152,19 @@ func TestLoaderDeliversRecords(t *testing.T) {
 // attaches on this kernel - the opt-in ones' programs pass the verifier
 // too - and the signal family's raw signal_generate reports a signal sent
 // to a target from outside the trace (the test process), attributed to the
-// target.
+// target. The only probes it lets the loader skip are those of the
+// syscalls this arch has none of (tracepoints.ArchAbsentSyscalls): none on
+// amd64, the legacy calls of the generic syscall table on arm64, whose
+// replacements must then attach like every other probe (task jl4).
 func TestLoaderAttachesEveryFamily(t *testing.T) {
 	tg := startTarget(t)
 	tr := openTracerWith(t, ibpf.Config{Pids: []uint32{tg.pid()},
 		Probes: ibpf.ProbesFor(tracepoints.AllFamilies())})
+	if s := unexpectedSkips(tr.Skipped(), runtime.GOARCH); len(s) != 0 {
+		t.Fatalf("probes skipped with every family on %s: %v", runtime.GOARCH, s)
+	}
 	if s := tr.Skipped(); len(s) != 0 {
-		t.Fatalf("probes skipped with every family: %v", s)
+		t.Logf("probes of syscalls %s lacks, skipped as expected: %v", runtime.GOARCH, s)
 	}
 	// SIGWINCH: bash ignores it, so the target lives on; the record is
 	// emitted whatever the result.

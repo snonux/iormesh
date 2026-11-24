@@ -1668,12 +1668,66 @@ Results:
   `java`; with the guest's `java-21-openjdk-headless` both
   pass (160 s and 111 s), so `javamark.c`'s uprobes on
   libjava's natives, `ctx->sp` included, work on arm64 — 40 of
-  42 in all.
+  42 in all. Task jl4 (next section) made the two arm64-aware.
 
 The x86 `vmlinux.h` was enough for the clang-22 object:
 CO-RE relocated every field the attached programs use on the
 arm64 kernel, `dispatch.c`'s guarded `thread_info.status`
 included.
+
+## The root BPF gate on arm64 (task jl4, 2026-11-24)
+
+The two tests 8k4 found x86-bound now know the arch, and stay
+exactly as strict on amd64:
+
+- **`TestLoaderAttachesEveryFamily`** lets the loader skip
+  only the probes of `tracepoints.ArchAbsentSyscalls(GOARCH)`
+  and fails on any other skip. The list is empty for amd64.
+  For arm64 it is the 23 family syscalls the kernel's generic
+  syscall table (`include/uapi/asm-generic/unistd.h`) leaves
+  out: `open`, `creat`, `mkdir`, `mknod`, `rmdir`, `unlink`,
+  `rename`, `link`, `symlink`, `readlink`, `newstat`,
+  `newlstat`, `utime`, `utimes`, `futimesat`, `chmod`,
+  `chown`, `lchown`, `dup2`, `pipe`, `epoll_create`,
+  `epoll_wait` and `poll` (46 tracepoints, 8k4's skip list).
+  `TestArchAbsentSyscallsMatchTable` (internal/tracepoints,
+  no root) pins the list to the family syscalls without an
+  entry in `internal/bpf/sysnum_<arch>.go`, generated from
+  x/sys's `zsysnum_linux_arm64.go`, which is that generic
+  table: no name more, none less, and none for amd64.
+  `TestArchAbsentSyscallsReplacements` checks that each has
+  its replacement in the families (`openat`, `mkdirat`,
+  `unlinkat`, `renameat2`, `newfstatat`, `utimensat`,
+  `fchmodat`, `fchownat`, `dup3`, `pipe2`, `epoll_create1`,
+  `epoll_pwait`, `ppoll`, ...), and since any other skip
+  fails the root test, those replacements must attach on
+  arm64. `TestUnexpectedSkips` (internal/archskips_test.go,
+  no root) pins the filter. Red first: the list was empty, and
+  `TestArchAbsentSyscallsMatchTable` failed naming the 23.
+- **`TestEl9RecordLayout`** relocates the object against the
+  trimmed el9 BTF of its own arch. The new
+  `internal/testdata/btf/rocky9.9-5.14.0-741.22.1.el9_9.aarch64.min.btf`
+  (10,747 bytes) is `bpftool gen min_core_btf` of the 8k4
+  guest's `/sys/kernel/btf/vmlinux` (sha256 `1167cf6c…`,
+  kernel `5.14.0-741.22.1.el9_9.aarch64`) for the arm64 object
+  (`IORMESH_TARGET_ARCH=arm64 mage bpfBuild`, clang 22.1.1);
+  adding 8k4's clang-19 arm64 object to the trim gives the same
+  file. el9's aarch64 `raw_syscalls` records have the same
+  layout as x86's (id 16, args and ret 24, tracefs format). On
+  an arch without a file the test skips naming it; a listed
+  file that is missing still fails, as on amd64 before.
+
+Runs: on the x86 7.2 laptop both root tests pass unchanged
+(`sudo -n -E` on `./internal`'s test binary, `-test.run` for
+the two). In the 8k4 aarch64 guest (booted once for this, 2
+vCPUs under TCG, 10:27–10:39 UTC, then powered off), the
+static arm64 test binary with the clang-22 object embedded
+(cross-built in the `tracer-arm64` builder image) passes
+both: 46 probes skipped as expected, every other one attached;
+record loads at 16/24 against the trimmed aarch64 BTF and
+against the guest's own BTF. Not covered: that the arm64
+replacements deliver records (only that they attach), and the
+gate with the clang-19 object (task il4).
 
 ## el9 runbook and runs
 
@@ -1811,6 +1865,15 @@ scripts/extract-vmlinux lib/modules/*/vmlinuz > vmlinux  # kernel tree
 bpftool gen min_core_btf vmlinux el9.min.btf internal/c/iormesh.bpf.o
 # or: ssh root@iom1 cat /sys/kernel/btf/vmlinux > el9.btf
 ```
+
+The test picks the file by `GOARCH` (`el9BTFs` in
+`internal/btf_root_test.go`): the object's `pt_regs` accesses
+follow `__TARGET_ARCH`, so an arm64 object finds no field in
+x86's BTF. The aarch64 one,
+`rocky9.9-5.14.0-741.22.1.el9_9.aarch64.min.btf`, is trimmed
+the same way from the emulated el9 aarch64 guest's
+`/sys/kernel/btf/vmlinux` for the object `IORMESH_TARGET_ARCH=arm64
+mage bpfBuild` builds (task jl4, previous sections).
 
 The nf4 review changed `TestProcessExitGroupDead` in the same
 change-set. It waits for the record it needs, then for a 200 ms
