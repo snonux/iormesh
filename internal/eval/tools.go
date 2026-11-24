@@ -107,7 +107,12 @@ func (c Ctl) Query(ctx context.Context, flags []string) (string, error) {
 	return out, err
 }
 
-// run runs iormeshctl and returns stdout and stderr together.
+// run runs iormeshctl and returns stdout and stderr together, in the
+// order written. Kept merged on purpose (task al4): query's stderr is its
+// resolved window ("query: window FROM .. TO", task 1l4), a refusal's
+// reason or the bad segments left out — each tells the model what its
+// slice covers or what to fix, and the prompt names the window line. It
+// is a few lines next to a slice capped by SliceBytes.
 func (c Ctl) run(ctx context.Context, args []string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, cmp.Or(c.Timeout, DefaultCtlTimeout))
 	defer cancel()

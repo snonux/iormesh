@@ -92,6 +92,20 @@ func TestSessionRun(t *testing.T) {
 	}
 }
 
+// TestPromptTimeForm (task al4): the prompt teaches the dated time form
+// — a bare time of day is refused on a store spanning more than one UTC
+// day (task 1l4) — and tells the model what the window line on a
+// query's output is.
+func TestPromptTimeForm(t *testing.T) {
+	p := Session{}.prompt(Question{Question: "q"}, nil, false)
+	for _, want := range []string{"YYYY-MM-DDTHH:MM:SS (UTC) or RFC 3339",
+		"a bare HH:MM:SS only on a one-day trace", "query: window FROM .. TO"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("the prompt lacks %q:\n%s", want, p)
+		}
+	}
+}
+
 // TestSessionModelError: a failing model command fails the question,
 // not the run.
 func TestSessionModelError(t *testing.T) {

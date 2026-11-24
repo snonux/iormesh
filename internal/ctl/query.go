@@ -165,7 +165,10 @@ func parseValueFlags(f queryFlags, filter *query.Filter) error {
 // store, or with -window-segments only the segments whose range overlaps
 // the window; task ik4), places the window (queryWindow), merges, and
 // writes the slice; bad segments are reported after it. The resolved
-// window is echoed on stderr (task 1l4).
+// window is echoed on stderr (task 1l4). A store part with no readable
+// segment fails with "no readable segment", with or without
+// -window-segments (task al4); only -window-segments' window that no
+// listed segment overlaps is an empty slice.
 func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter) error {
 	paths, err := resolveBuildPaths(e, f.paths)
 	if err != nil {
@@ -183,9 +186,11 @@ func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter) err
 	segs := sel.segs
 	switch {
 	case len(segs.Sources) > 0:
-	case f.windowSegments && len(segs.Bad) == 0:
-		// No segment overlaps the window, so no event lies in it:
-		// the empty slice the exact query gives.
+	case f.windowSegments && len(segs.Bad) == 0 && listsSegments(paths.store, sel.projects):
+		// The store holds segments but none overlaps the window, so no
+		// event lies in it: the empty slice the exact query gives. A
+		// store part with no segment at all fails below, as the default
+		// query does (task al4).
 		return nil
 	default:
 		return fmt.Errorf("query: no readable segment for %s%s in %s (%d bad)",
@@ -202,6 +207,15 @@ func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter) err
 	// it wrote is still missing them.
 	_, err = query.Run(ctx, e.stdout, in, filter, f.maxBytes)
 	return errors.Join(err, reportBad(e, segs.Bad))
+}
+
+// listsSegments tells whether the projects' directories in store list
+// any events segment, readable or not (federate.StartRange, a directory
+// listing only): what tells -window-segments' "no segment overlaps the
+// window" from "no segment collected yet".
+func listsSegments(store string, projects []string) bool {
+	_, _, err := federate.StartRange(store, projects)
+	return err == nil
 }
 
 // queryWindow cuts the events to the window by their wall_ns, From ≤

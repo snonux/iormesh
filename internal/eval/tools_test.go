@@ -131,6 +131,23 @@ func TestCtlArgs(t *testing.T) {
 	}
 }
 
+// TestCtlQueryKeepsStderr (task al4): query's stderr stays in the tool
+// output, after the slice — the resolved window line ("query: window
+// FROM .. TO") tells the model where a time of day landed, and a refusal
+// tells it what to fix.
+func TestCtlQueryKeepsStderr(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "iormeshctl")
+	script := "#!/bin/sh\necho '{\"event\":\"openat\"}'\necho 'query: window A .. B' >&2\n"
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	c := Ctl{Path: bin, Store: "/s", SliceBytes: 4096}
+	got, err := c.Query(context.Background(), []string{"-from", "2025-11-20T00:00:00"})
+	if err != nil || got != "{\"event\":\"openat\"}\nquery: window A .. B\n" {
+		t.Errorf("query: %q %v", got, err)
+	}
+}
+
 // TestCtlSandbox: every iormeshctl run gets the scratch HOME and XDG
 // directories, and one that hangs is cut by the timeout.
 func TestCtlSandbox(t *testing.T) {

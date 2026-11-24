@@ -63,6 +63,34 @@ func TestQueryWindowErrorsAsBefore(t *testing.T) {
 	}
 }
 
+// TestQueryWindowSegmentsEmptyProject (task al4): -window-segments on a
+// project with no segment at all fails as the default query does, "no
+// readable segment" and exit 1, instead of an empty slice that passes
+// for "nothing happened then"; on a store that holds segments, a window
+// none of them overlaps is still the empty slice, exit 0, as the
+// default's.
+func TestQueryWindowSegmentsEmptyProject(t *testing.T) {
+	f := newBuildFixture(t)
+	if err := os.MkdirAll(filepath.Join(f.store, "ghost", "hostX"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	dated := []string{"-from", "2025-11-20T00:53:20", "-to", "2025-11-20T00:53:21"}
+	for _, cmd := range [][]string{{"query"}, {"query", "-window-segments"}} {
+		args := slices.Concat(cmd, []string{"-project", "ghost"}, dated)
+		if code := f.run(args...); code != exitError ||
+			!strings.Contains(f.stderr.String(), "query: no readable segment for ghost") {
+			t.Errorf("%v: exit %d, want %d; stderr %s", args, code, exitError, f.stderr)
+		}
+	}
+	late := []string{"-from", "2030-01-01T00:00:00", "-to", "2030-01-01T00:00:01"}
+	for _, cmd := range [][]string{{"query"}, {"query", "-window-segments"}} {
+		args := slices.Concat(cmd, queryProjects, late)
+		if code := f.run(args...); code != 0 || f.stdout.Len() != 0 {
+			t.Errorf("%v: exit %d, stdout %q; want 0 and empty; stderr %s", args, code, f.stdout, f.stderr)
+		}
+	}
+}
+
 // Task ik4: with -window-segments query's time window selects the
 // segments it opens, as build's does (loadSelection, federate.Window);
 // by default it still decodes the whole store and cuts the events

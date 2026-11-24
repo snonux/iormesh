@@ -108,13 +108,20 @@ func (s Session) run(ctx context.Context, act Action) (string, error) {
 	return s.Tools.Query(ctx, flags)
 }
 
-// promptHead explains the task and the protocol.
+// promptHead explains the task and the protocol. TIME names the dated
+// form first: on a store spanning more than one UTC day query refuses a
+// bare time of day (task 1l4), and the eval's store may span midnight
+// (task al4). The window line is query's stderr, kept in the tool output
+// (Ctl.run) so the model sees where its window landed.
 const promptHead = `You are answering a question about a traced Java system from its iormesh trace.
 You see the trace's per-run summary rollup below. Each turn, reply with exactly one action line:
 
 QUERY <flags>    events of the merged trace as NDJSON (iormeshctl query), flags:
                  -from/-to TIME, -host GLOB, -app GLOB, -thread GLOB (Java thread name or tid),
                  -conn ID [-follow], -file GLOB, -method GLOB (class#method)
+                 TIME is YYYY-MM-DDTHH:MM:SS (UTC) or RFC 3339;
+                 a bare HH:MM:SS only on a one-day trace; -to is exclusive; the output's
+                 'query: window FROM .. TO' line names the window the query used
                  globs match the whole string and '*' stops at '/': a -file glob names
                  every directory level, e.g. QUERY -file '/tmp/*/*/orders.d/order-42.json*'
 SOURCE <path>    a file of the workload's source, path from the list below

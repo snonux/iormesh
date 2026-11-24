@@ -5314,8 +5314,10 @@ internal/termsafe/           # + JSON: escape a line for a terminal
   store, then places the window and cuts the events to it, so
   a window's slice is exactly the whole trace's events in it —
   merged ids, `-app`, `-file` and `-follow` know everything
-  before it — and its errors are the ones it had before (no
-  readable segment, then the filter's empty window). With
+  before it — and its errors come in this order: no readable
+  segment, then a time of day refused on a store whose segments
+  start on more than one UTC date (task 1l4), then the filter's
+  empty window. With
   `-window-segments` (refused without `-from` or `-to`) a
   pinned host directory's segments whose range (`federate.Span`:
   the named start, a minute before, to the one-minute interval
@@ -5333,7 +5335,9 @@ internal/termsafe/           # + JSON: escape a line for a terminal
   `-app` knows the processes attached inside them, `-file`
   follows the fds opened inside them, and `-follow` the threads'
   use of the connection inside them. A window no segment
-  overlaps is the empty slice (exit 0).
+  overlaps is the empty slice (exit 0); a project with no
+  segment at all fails as the default query does, "no readable
+  segment" and exit 1 (task al4).
 - **Filters** (all AND; globs are `path.Match`, `*` stops at
   `/`): `-from`/`-to` on each event's own `wall_ns`, as its host
   recorded it — not corrected for clock skew between hosts (RFC
@@ -5495,7 +5499,13 @@ magefiles/magefile_eval.go # mage evalTrace (root), mage eval
   minutes; a query that hits it is the model's to read) and a
   scratch `HOME` and `XDG_*_HOME`, so no default path reaches the
   operator's own files. Refusals and errors are the model's to
-  read; a failing model command fails the question, its stderr
+  read: a query's stderr stays in its tool output after the slice
+  (task al4), so the model sees the resolved window (`query:
+  window FROM .. TO`, which the protocol names), a refusal's
+  reason and the segments left out; the protocol gives `-from`/
+  `-to` as `YYYY-MM-DDTHH:MM:SS` (UTC) or RFC 3339, a bare time
+  of day only on a one-day trace (task 1l4). A failing model
+  command fails the question, its stderr
   going to the terminal only — never into the kept results file.
 - `eval/results/<date>-<scenario>.json` keeps per question the
   answer, turns, actions and failures, and the score; the model

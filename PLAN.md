@@ -1920,7 +1920,9 @@ Kubernetes (M7) build on it.
   connection established before them keeps its host-local id,
   and `-app`, `-file` and `-follow` see only the attaches,
   opens and connection use inside them. A window no segment
-  overlaps is the empty slice.
+  overlaps is the empty slice; a project with no segment at
+  all fails as the default query does (no readable segment,
+  task al4).
 - Plus the per-run summary/report export — the LLM rollup of the
   whole mesh (see "Trace output contract"). *Built (task qb4):*
   `build` feeds `internal/report` the events the merge reads (no
