@@ -1,38 +1,8 @@
-// Package ctl implements iormeshctl, the controller (PLAN.md M4):
-//
-//	iormeshctl add -project NAME (-pattern GLOB | -listen-port N) [-registry FILE] HOST [TRACER-FLAG...]
-//	iormeshctl rm [-project NAME] [-registry FILE] [-store DIR] [-force] [K8S] HOST|POD
-//	iormeshctl collect [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [K8S] [HOST|POD...]
-//	iormeshctl deploy [-project NAME] [-registry FILE] [-dist DIR] [-key FILE] [-restart] [K8S]
-//	                  [-image IMG] [-selinux-type TYPE] [-selinux-level LEVEL] [-attach-timeout D]
-//	                  HOST|POD...
-//	iormeshctl bootstrap [-apply] [-registry FILE] [-dist DIR] [-key FILE] [-arch ARCH] [-user NAME] HOST
-//	iormeshctl status [-project NAME]... [-registry FILE] [K8S] [HOST|POD...]
-//	iormeshctl ensure [-project NAME]... [-registry FILE] [-store DIR] [HOST|POD...]
-//	iormeshctl list [-registry FILE]
-//	iormeshctl build [-project NAME]... [-store DIR] [-db FILE] [-builds DIR] [-routes FILE]
-//	                 [-registry FILE] [-namespace NS] [-from T] [-to T] [-last DUR]
-//	iormeshctl prune -older-than DUR [-project NAME]... [-store DIR] [-db FILE] [-apply]
-//	iormeshctl refresh [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-builds DIR] [K8S]
-//	                   [HOST|POD...]
-//	iormeshctl show [summary|services|edges|health|conversations|sequence [ID]|thread [SERVICE/THREAD]|
-//	                processes|report] [-project NAME]... [-store DIR] [-builds DIR] [-json] [-unresolved]
-//	                [-namespace NS] [-windowed]
-//	iormeshctl open [-project NAME]... [-store DIR] [-builds DIR] [-namespace NS] [-windowed]
-//	iormeshctl tui [-project NAME]... [-store DIR] [-builds DIR] [-namespace NS] [-windowed]
-//	iormeshctl expand [-project NAME]... [-registry FILE] [-store DIR] [-db FILE] [-hops N] [-json]
-//	                 [-apply [-dist DIR] [-key FILE]]
-//	iormeshctl query [-project NAME]... [-from T] [-to T] [-window-segments]
-//	                 [-host GLOB] [-app GLOB] [-thread GLOB] [-conn ID [-follow]]
-//	                 [-file GLOB] [-method GLOB] [-ref REF] [-event KIND]
-//	                 [-pid PID] [-errno NAME|N] [-otel-trace ID] [-max-bytes N]
-//	iormeshctl services [list|edges|name|rules|unname] [-db FILE] ...
-//	iormeshctl verify [-key FILE] FILE...
-//	iormeshctl version
-//
-// usage() prints the full text, kept as data in usage.go and held to
-// every subcommand and flag by TestUsageNamesEverySubcommandAndFlag;
-// `SUBCMD -h` prints only that
+// Package ctl implements iormeshctl, the controller (PLAN.md M4). Its
+// usage text lives in one place, the constants of usage.go that usage()
+// prints (`iormeshctl -h`), held to every subcommand and flag by
+// TestUsageNamesEverySubcommandAndFlag; this comment does not repeat it,
+// so the two cannot drift apart (task 2l4). `SUBCMD -h` prints only that
 // subcommand's flags and exits 0 (task vh4).
 //
 // K8S is -context CTX and -namespace NS, and POD a registry pods: entry's
