@@ -2235,9 +2235,32 @@ Built after plain Linux servers (M4); accepted on kind and el9
   itself or in another pod's cgroup gets no `container_id`.
   The container's *name* is not in the cgroup and the tracer
   has no API access, so the id is what a trace carries; the
-  name join (pod status' `containerStatuses`) is left to the
-  controller, not built yet. Outside a pod there is no `pod`
-  object. Backward compatible: an older segment has no pod
+  controller joins the name (task jk4). **Container names**:
+  every collect of a pod reads its status anyway
+  (`k8s.Lister`); from it the controller takes each
+  container's name with its `containerID` — `containerStatuses`,
+  `initContainerStatuses` and `ephemeralContainerStatuses`, the
+  running id and `lastState.terminated`'s, so a container that
+  restarted once between collects keeps its old id named — and
+  merges them into `containers.json` (`{"<id>": "<name>"}`) in
+  the pod's store directory of every project collected,
+  `<store>/<project>/pod-<uid>/`, beside the segments: a build,
+  of a copied store too, names containers offline and
+  reproducibly, never asking the cluster. Ids are normalised to
+  the trace's form: the API's `<runtime>://<id>` (containerd,
+  cri-o, docker) loses its scheme, and an id that is not then 64
+  lowercase hex digits, or a name that is not an RFC 1123
+  label, is left out. A recorded id is never renamed (ids are
+  unique; the first name stays); the file is written
+  atomically, and a pod cannot write it (the fetch unpacks
+  segment names only). The store listing skips it. Build reads
+  each pod directory's map; the rollup keeps each process's
+  `container_id` (from its events) and the model's process
+  `container_id` and `container`, the name. A session collected
+  before the map, a container that restarted twice between
+  collects, or a map that does not parse (its whole file, listed
+  as ignored in health) shows the id. Outside a pod there is no
+  `pod` object. Backward compatible: an older segment has no pod
   column and reads as before (no `pod`). The controller
   checks a segment's `pod` against its pinned FQDN
   (`<name>.<namespace>.<uid[:8]>`), so a session cannot claim

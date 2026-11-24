@@ -65,6 +65,11 @@ type Process struct {
 	// could not be read then.
 	App  string   `json:"app"`
 	Argv []string `json:"argv"`
+	// ContainerID is the runtime id of the container it ran in, from its
+	// events' pod.container_id (an in-pod tracer, task sh4); "" outside
+	// a pod or for the tracer's own processes. The view model names it
+	// from the pod's container map (task jk4).
+	ContainerID string `json:"container_id,omitempty"`
 	// Serves lists the endpoint labels it accepted connections on (a
 	// service name, hostname:port or ip:port), sorted.
 	Serves []string `json:"serves"`

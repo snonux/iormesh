@@ -37,6 +37,11 @@ type Input struct {
 	// Routes is the compiled route map (internal/routemap): the routed
 	// edges are joined from it and Observations; nil for none.
 	Routes *routemap.Table
+	// Containers are the pods' container maps by store host directory
+	// (pod-<uid>), each a runtime id → container name
+	// (federate.ContainersFile, task jk4): what names a process's
+	// container; nil, or a directory without one, leaves the id.
+	Containers map[string]map[string]string
 }
 
 // New builds the model. Every list is sorted, so equal inputs give equal
@@ -61,7 +66,7 @@ func New(in Input) Model {
 		m.Conversations, m.Threads = r.conversations(n)
 		m.MoreConversations, m.Health.RequestsCut = r.more, r.cut
 	}
-	m.Processes, m.MoreProcesses = processes(in.Report, n)
+	m.Processes, m.MoreProcesses = processes(in.Report, n, in.Containers)
 	if in.Report != nil {
 		m.Untracked = in.Report.Untracked
 	}

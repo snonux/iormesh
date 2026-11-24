@@ -98,6 +98,9 @@ func safeProcess(p Process) Process {
 	s := termsafe.String
 	p.ID, p.Project, p.Host, p.FQDN, p.Comm, p.App = s(p.ID), s(p.Project), s(p.Host), s(p.FQDN), s(p.Comm), s(p.App)
 	p.Service, p.Serves = s(p.Service), safeAll(p.Serves)
+	// Both are checked where they are read (schema, the container map);
+	// made safe here too so no renderer depends on that.
+	p.ContainerID, p.Container = s(p.ContainerID), s(p.Container)
 	p.Threads = slices.Clone(p.Threads)
 	for i := range p.Threads {
 		p.Threads[i].Name = s(p.Threads[i].Name)

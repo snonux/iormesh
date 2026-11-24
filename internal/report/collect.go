@@ -139,6 +139,11 @@ func (c *Collector) add(src Source, ev *schema.Event) bool {
 	if ev.Comm != "" {
 		p.p.Comm = ev.Comm
 	}
+	// The tracer reads a process's container once and its children
+	// inherit it, so every event of the process carries the same id.
+	if ev.Pod != nil && ev.Pod.ContainerID != "" {
+		p.p.ContainerID = ev.Pod.ContainerID
+	}
 	method := ""
 	if ev.Attribution == schema.AttributionJava && ev.Java != nil {
 		p.p.JavaEvents++

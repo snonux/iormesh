@@ -245,7 +245,8 @@
 
   function procShown(p) {
     if (filter.host && p.host !== filter.host) { return false; }
-    return hit([p.host, p.fqdn, String(p.pid), p.comm, p.app, p.service].concat(arr(p.serves),
+    return hit([p.host, p.fqdn, String(p.pid), p.comm, p.app, p.service, p.container, p.container_id]
+      .concat(arr(p.serves),
       arr(p.threads).map(function (t) { return t.name; }), arr(p.files).map(function (f) { return f.path; })));
   }
 
@@ -801,11 +802,21 @@
       more(M.more_processes, 'processes')]);
   }
 
+  // containerLabel is viewmodel.ContainerLabel (task jk4): "NAME (ID12)"
+  // when the pod's container map names the container, the whole id when
+  // it does not, '' outside a container.
+  function containerLabel(p) {
+    if (!p.container_id) { return ''; }
+    if (!p.container) { return p.container_id; }
+    return p.container + ' (' + p.container_id.slice(0, 12) + ')';
+  }
+
   function renderProc(view, i) {
     const p = arr(M.processes)[i];
     if (!p) { return add(view, el('p', 'empty', 'no such process')); }
     add(view, [el('h2', '', p.host + ' pid ' + p.pid + ' ' + (p.comm || '')), kv([['fqdn', p.fqdn],
-      ['project', p.project], ['app', p.app], ['service', p.service], ['serves', arr(p.serves).join(', ')],
+      ['project', p.project], ['container', containerLabel(p)], ['app', p.app], ['service', p.service],
+      ['serves', arr(p.serves).join(', ')],
       ['incarnation', String(p.pid_incarnation) + ' of ' + p.incarnations], ['events', String(p.events)],
       ['java events', String(p.java_events)]])]);
     add(view, [el('h3', '', 'threads'), table(['name', 'tid', 'events', 'bytes', 'calls', 'carried (virtual threads)'],

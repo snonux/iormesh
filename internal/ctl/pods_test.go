@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -279,6 +280,46 @@ func TestPodCollect(t *testing.T) {
 	wantPin := federate.HostIdentity{HostID: "pod-" + uid(1), FQDN: "checkout-0.shop.0123abcd"}
 	if err != nil || pins["pod-"+uid(1)] != wantPin {
 		t.Errorf("pins %v, %v; want %v", pins, err, wantPin)
+	}
+}
+
+// TestPodCollectContainers (task jk4): collect records the pod's
+// container id → name map, from the status the API server reports, in
+// <store>/<project>/pod-<uid>/containers.json; the next collect, after
+// the app container restarted twice (so its first id left the status),
+// adds the new ids and keeps the old one named. The build reads it (the
+// store listing does not count it as a segment or a stray entry).
+func TestPodCollectContainers(t *testing.T) {
+	id := func(c string) string { return strings.Repeat(c, 64) }
+	f := newPodFixture(t, "")
+	obj := podObject("checkout-0", uid(1), true)
+	st := obj["status"].(map[string]any)
+	st["containerStatuses"] = []map[string]any{{"name": "app", "containerID": "containerd://" + id("a")},
+		{"name": "sidecar", "containerID": "containerd://" + id("c")}}
+	f.pod(t, obj)
+	f.file(t, "tar-checkout-0", segmentTar(t, nil))
+	if code := f.run("collect", "kind/shop/checkout-0"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr)
+	}
+	dir := filepath.Join(f.store, "shop", k8s.PodHostID(uid(1)))
+	got, err := federate.ReadContainers(dir)
+	want := map[string]string{id("a"): "app", id("c"): "sidecar"}
+	if err != nil || !maps.Equal(got, want) {
+		t.Fatalf("container map %v, %v; want %v", got, err, want)
+	}
+	st["containerStatuses"] = []map[string]any{{"name": "app", "containerID": "containerd://" + id("e"),
+		"lastState": map[string]any{"terminated": map[string]any{"containerID": "containerd://" + id("b")}}},
+		{"name": "sidecar", "containerID": "containerd://" + id("c")}}
+	f.pod(t, obj)
+	if code := f.run("collect", "kind/shop/checkout-0"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr)
+	}
+	want[id("b")], want[id("e")] = "app", "app"
+	if got, err = federate.ReadContainers(dir); err != nil || !maps.Equal(got, want) {
+		t.Errorf("container map after the restarts %v, %v; want %v", got, err, want)
+	}
+	if fi, err := os.Stat(filepath.Join(dir, federate.ContainersFile)); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("container map file: %v, %v; want mode 0600", fi, err)
 	}
 }
 

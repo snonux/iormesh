@@ -1193,8 +1193,27 @@ envelope:
   mode with a shared PID namespace it tells the app's, the
   sidecars' and the tracer's processes apart.
 - The container's *name* is not in the cgroup and the tracer has
-  no API access; map the id with `kubectl get pod -o json`
-  (`status.containerStatuses[].containerID`).
+  no API access; the controller joins it (PLAN.md M7 "Pod fields
+  on events", task jk4). Every collect of a pod records the pod's
+  container map, from the status the API server reports, in
+  `<store>/<project>/pod-<uid>/containers.json` beside the
+  segments:
+
+  ```json
+  {"4f6c0f1e…7b6c5d": "app", "9a0b1c2d…3e4f5a": "sidecar"}
+  ```
+
+  Each id is a `containerID` of `containerStatuses`,
+  `initContainerStatuses` or `ephemeralContainerStatuses` (the
+  running one and `lastState.terminated`'s) without its
+  `containerd://`, `cri-o://` or `docker://` scheme — the form
+  `container_id` has. An id keeps its first name, and the map
+  only grows. `iormeshctl build` reads it offline: each process
+  in the model (and `show processes`) carries `container_id` and
+  `container`, the name. Without a map (a session collected
+  before task jk4) or for an id it lacks, the id is shown; a map
+  that does not parse names nothing and is listed under health's
+  ignored entries.
 - The Java join's `http` and `dns` events carry their JVM's.
 - In parquet the three keys are `pod.namespace`, `pod.name` and
   `pod.container_id`, dictionary-encoded. A segment written
@@ -1394,7 +1413,10 @@ The Go types are `internal/report`'s `Report`.
   is the target pattern of the session's `attach`, `argv` the last
   `exec`'s (redacted by the tracer) — the `attach`'s for a process
   running before the trace with no exec since — `serves` the endpoint labels
-  it accepted connections on.
+  it accepted connections on. `container_id`, absent outside a
+  pod, is the `pod.container_id` its events carry; the view
+  model names it (see [Pod fields on
+  events](#pod-fields-on-events-m7)).
 - **Files** are listed in the order the process first opened or
   changed them (past the cap, which ones stay is ranked: see
   Caps). Opens count by access mode (`O_RDONLY` vs.

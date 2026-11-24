@@ -3,6 +3,7 @@ package viewmodel
 import (
 	"bytes"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -155,7 +156,7 @@ func TestProcessesProjection(t *testing.T) {
 			Conns: []report.Conn{{ID: "m-c1", FD: 5, Role: report.RoleClient},
 				{ID: "m-c1", FD: 6, Role: report.RoleServer}}},
 	}}
-	ps, more := processes(r, newNamer(schema.Graph{}, nil, nil))
+	ps, more := processes(r, newNamer(schema.Graph{}, nil, nil), nil)
 	if len(ps) != 2 || more != 3 || ps[0].Incarnations != 2 || ps[1].Service != "pid 7" {
 		t.Fatalf("processes: %+v, %d more", ps, more)
 	}
@@ -174,8 +175,36 @@ func TestProcessesProjection(t *testing.T) {
 	if bytes.ContainsRune(out.Bytes(), 0x1b) {
 		t.Error("a raw escape reached the text")
 	}
-	if ps, _ := processes(nil, namer{}); ps == nil {
+	if ps, _ := processes(nil, namer{}, nil); ps == nil {
 		t.Error("no rollup: nil processes")
+	}
+}
+
+// TestProcessContainers (task jk4): a process's container is named from
+// its own host directory's container map alone — another pod's map
+// cannot name it — and shown "NAME (ID12)"; an id no map names is shown
+// whole, and a process outside a container has no container line.
+func TestProcessContainers(t *testing.T) {
+	id := strings.Repeat("ab", 32)
+	r := &report.Report{Processes: []report.Process{
+		{ID: "process:pod-a/7@1", Host: "pod-a", PID: 7, Incarnation: 1, Comm: "java", ContainerID: id},
+		{ID: "process:pod-b/7@1", Host: "pod-b", PID: 7, Incarnation: 1, Comm: "java", ContainerID: id},
+		{ID: "process:h/8@1", Host: "h", PID: 8, Incarnation: 1, Comm: "java"},
+	}}
+	m := New(Input{Report: r, Containers: map[string]map[string]string{"pod-a": {id: "app"}}})
+	var labels []string
+	for _, p := range m.Processes {
+		labels = append(labels, ContainerLabel(p))
+	}
+	if want := []string{"app (" + id[:12] + ")", id, ""}; !slices.Equal(labels, want) {
+		t.Errorf("container labels %q, want %q", labels, want)
+	}
+	var out bytes.Buffer
+	if err := WriteProcess(&out, m.Processes[2]); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "container") {
+		t.Errorf("a process outside a container names one:\n%s", &out)
 	}
 }
 

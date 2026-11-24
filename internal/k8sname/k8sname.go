@@ -40,6 +40,8 @@ var (
 	// "<repo>@sha256:<hex>" (containerd, CRI-O) or the same behind
 	// "docker-pullable://" (cri-dockerd).
 	repoDigest = regexp.MustCompile(`@sha256:([0-9a-f]{64})$`)
+	// runtimeID is a container runtime's id (RuntimeID).
+	runtimeID = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	// selinuxType is an SELinux type name as the policy spells one
 	// (spc_t, container_t, iormesh_container_t): lowercase letters,
 	// digits and underscores, nothing that could carry a user, role or
@@ -132,6 +134,23 @@ func StatusDigest(imageID string) string {
 		return ""
 	}
 	return m[1]
+}
+
+// RuntimeID reports whether s is a container's runtime id in the form a
+// trace carries it (pod.container_id): 64 lowercase hex digits, what
+// containerd, CRI-O and Docker issue.
+func RuntimeID(s string) bool { return runtimeID.MatchString(s) }
+
+// StatusContainerID returns a container status's containerID in the
+// trace's form (task jk4): the API server's "<runtime>://<id>"
+// (containerd://, cri-o://, docker://) without its scheme, or "" when
+// the rest is no RuntimeID — a container not started yet has none.
+func StatusContainerID(containerID string) string {
+	_, id, ok := strings.Cut(containerID, "://")
+	if !ok || !RuntimeID(id) {
+		return ""
+	}
+	return id
 }
 
 // Selector reports whether s is a label selector a registry pods: entry

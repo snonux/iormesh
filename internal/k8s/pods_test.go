@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -55,6 +57,39 @@ func TestPodStateStopped(t *testing.T) {
 	}
 }
 
+// TestPodStateContainers (task jk4): the lister maps every container
+// status's runtime id — app, init and ephemeral, the running run's and
+// the one before the last restart — to the container's name, the
+// runtime scheme cut; a container not started yet (no id), an id that
+// is not 64 hex digits and a name no API server issues add nothing.
+func TestPodStateContainers(t *testing.T) {
+	id := func(c string) string { return strings.Repeat(c, 64) }
+	f := newFake(t)
+	item := podItem("web-a", testUID(1), "Running", true)
+	st := item["status"].(map[string]any)
+	st["containerStatuses"] = []map[string]any{
+		{"name": "app", "containerID": "containerd://" + id("a"),
+			"lastState": map[string]any{"terminated": map[string]any{"containerID": "containerd://" + id("b")}}},
+		{"name": "sidecar", "containerID": "cri-o://" + id("c")},
+		{"name": "pending"},
+		{"name": "short", "containerID": "containerd://abc"},
+		{"name": "Bad\u001b[31m", "containerID": "containerd://" + id("d")},
+	}
+	st["initContainerStatuses"] = []map[string]any{{"name": "init", "containerID": "docker://" + id("e")}}
+	st["ephemeralContainerStatuses"] = []map[string]any{{"name": TracerContainer,
+		"containerID": "containerd://" + id("f"), "state": map[string]any{"running": map[string]any{}}}}
+	f.pod(t, podList(t, item))
+	pods, err := newTestLister(t).Select(context.Background(), "app=web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{id("a"): "app", id("b"): "app", id("c"): "sidecar", id("e"): "init",
+		id("f"): TracerContainer}
+	if got := pods[0].Containers; !maps.Equal(got, want) {
+		t.Errorf("Containers %v, want %v", got, want)
+	}
+}
+
 // podList is `kubectl get pods -o json` holding items.
 func podList(t *testing.T, items ...map[string]any) string {
 	t.Helper()
@@ -99,9 +134,10 @@ func TestSelectArgvAndFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []PodState{{Name: "web-a", UID: testUID(1), Tracer: true, Container: TracerContainer},
-		{Name: "web-b", UID: testUID(2)}}
-	if !slices.Equal(pods, want) {
+	none := map[string]string{} // no status carries a container id
+	want := []PodState{{Name: "web-a", UID: testUID(1), Tracer: true, Container: TracerContainer, Containers: none},
+		{Name: "web-b", UID: testUID(2), Containers: none}}
+	if !reflect.DeepEqual(pods, want) {
 		t.Errorf("pods = %+v, want %+v", pods, want)
 	}
 	wantArgv := []string{"--context=kind-iormesh", "--namespace=shop", "get", "pods",
@@ -171,7 +207,8 @@ func TestGet(t *testing.T) {
 	b, _ := json.Marshal(podItem("checkout-0", testUID(7), "Running", true))
 	f.pod(t, string(b))
 	st, err := newTestLister(t).Get(context.Background(), "checkout-0")
-	if err != nil || st != (PodState{Name: "checkout-0", UID: testUID(7), Tracer: true, Container: TracerContainer}) {
+	if err != nil || !reflect.DeepEqual(st, PodState{Name: "checkout-0", UID: testUID(7), Tracer: true,
+		Container: TracerContainer, Containers: map[string]string{}}) {
 		t.Fatalf("Get = %+v, %v", st, err)
 	}
 	want := []string{"--context=kind-iormesh", "--namespace=shop", "get", "pod", "checkout-0", "--output=json"}

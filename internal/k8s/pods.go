@@ -15,7 +15,8 @@ import (
 // entry names its pod or a label selector, and the controller asks the
 // API server — through the operator's kubectl, as for everything else —
 // which running pods that is, and for each its UID (the store directory
-// and host identity) and whether a tracer container is in it.
+// and host identity), whether a tracer container is in it, and its
+// containers' names by runtime id (the container map, task jk4).
 
 // Lookup errors, for errors.Is.
 var (
@@ -60,6 +61,7 @@ type podInfo struct {
 	Status struct {
 		Phase                      string            `json:"phase"`
 		ContainerStatuses          []containerStatus `json:"containerStatuses"`
+		InitContainerStatuses      []containerStatus `json:"initContainerStatuses"`
 		EphemeralContainerStatuses []containerStatus `json:"ephemeralContainerStatuses"`
 	} `json:"status"`
 }
@@ -75,11 +77,20 @@ type named struct {
 }
 
 // containerStatus is a container's status: the image it really runs
-// (imageID, resolved by the kubelet) and its state.
+// (imageID, resolved by the kubelet), its runtime id ("<runtime>://<id>",
+// empty before it starts), its state, and the runtime id of its run
+// before the last restart (lastState.terminated.containerID), which the
+// container map keeps named too (containerNames, task jk4).
 type containerStatus struct {
-	Name    string `json:"name"`
-	ImageID string `json:"imageID"`
-	State   struct {
+	Name        string `json:"name"`
+	ImageID     string `json:"imageID"`
+	ContainerID string `json:"containerID"`
+	LastState   struct {
+		Terminated *struct {
+			ContainerID string `json:"containerID"`
+		} `json:"terminated"`
+	} `json:"lastState"`
+	State struct {
 		// Running.StartedAt is when the kubelet started the container
 		// (RFC3339, whole seconds): WaitAttached's line between a
 		// predecessor's state.json and the new run's (task eh4).
@@ -142,6 +153,14 @@ type PodState struct {
 	// until a deploy starts the next debug tracer or the pod goes
 	// (review B1).
 	Stopped string
+	// Containers maps the runtime id of each of the pod's containers —
+	// app, init and ephemeral; the running run's and the one before its
+	// last restart — to the container's name, as the API server reports
+	// them (task jk4): collect stores it with the pod's segments, and
+	// build names a process's pod.container_id from it. Ids are in the
+	// trace's form (k8sname.StatusContainerID); a status without a valid
+	// id or name adds nothing.
+	Containers map[string]string
 }
 
 // Lister looks pods up in one scope's context and namespace.
@@ -256,7 +275,8 @@ func (l *Lister) state(p podInfo) (PodState, error) {
 	} else if ts := debugTracers(p.Spec.EphemeralContainers); len(ts) > 0 {
 		name = ts[len(ts)-1].Name
 	}
-	st := PodState{Name: p.Metadata.Name, UID: p.Metadata.UID, Tracer: name != "", Container: name}
+	st := PodState{Name: p.Metadata.Name, UID: p.Metadata.UID, Tracer: name != "", Container: name,
+		Containers: containerNames(p)}
 	if st.Tracer {
 		cs, ok := statusOf(statuses, name)
 		if st.Stopped = "without a status yet"; ok {
@@ -264,6 +284,29 @@ func (l *Lister) state(p podInfo) (PodState, error) {
 		}
 	}
 	return st, nil
+}
+
+// containerNames is p's container id → name map (PodState.Containers).
+func containerNames(p podInfo) map[string]string {
+	out := map[string]string{}
+	for _, l := range [][]containerStatus{p.Status.ContainerStatuses, p.Status.InitContainerStatuses,
+		p.Status.EphemeralContainerStatuses} {
+		for _, cs := range l {
+			if !k8sname.Label(cs.Name) {
+				continue
+			}
+			ids := []string{cs.ContainerID}
+			if t := cs.LastState.Terminated; t != nil {
+				ids = append(ids, t.ContainerID)
+			}
+			for _, raw := range ids {
+				if id := k8sname.StatusContainerID(raw); id != "" {
+					out[id] = cs.Name
+				}
+			}
+		}
+	}
+	return out
 }
 
 // PodHostID is the host_id a tracer in the pod with this UID reports

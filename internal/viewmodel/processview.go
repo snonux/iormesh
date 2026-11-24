@@ -60,6 +60,9 @@ func writeProcess(b *strings.Builder, p Process) {
 	if p.Incarnations > 1 {
 		fmt.Fprintf(b, "  pid      %d incarnations of pid %d on this host (restart or reused pid)\n", p.Incarnations, p.PID)
 	}
+	if c := ContainerLabel(p); c != "" {
+		fmt.Fprintf(b, "  container %s\n", c)
+	}
 	if len(p.Serves) > 0 {
 		fmt.Fprintf(b, "  serves   %s\n", strings.Join(p.Serves, ", "))
 	}
@@ -76,6 +79,24 @@ func writeProcess(b *strings.Builder, p Process) {
 		fmt.Fprintf(b, "  socket   %s\n", socketLine(s))
 	}
 	moreLine(b, "sockets", p.MoreSockets)
+}
+
+// containerIDShort is how many hex digits of a named container's id the
+// label keeps: enough to tell runs apart, as `crictl ps` shows them.
+const containerIDShort = 12
+
+// ContainerLabel is how the surfaces show a process's container (task
+// jk4): "NAME (ID12)" when the pod's container map names it, the whole
+// id when it does not (a session collected before the map), "" outside
+// a container.
+func ContainerLabel(p Process) string {
+	switch {
+	case p.ContainerID == "":
+		return ""
+	case p.Container == "":
+		return p.ContainerID
+	}
+	return p.Container + " (" + p.ContainerID[:min(containerIDShort, len(p.ContainerID))] + ")"
 }
 
 // procThreadLine is "NAME (tid N): E events, B B, C calls", and for a

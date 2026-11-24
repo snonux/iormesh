@@ -10,6 +10,7 @@ import (
 
 	"iormesh/internal/federate"
 	"iormesh/internal/k8s"
+	"iormesh/internal/project"
 )
 
 // cutFlag splits a "-key=value" or "--key" argument; key is "" for an
@@ -41,7 +42,8 @@ func (c collector) podEntryCollect(ctx context.Context, pe podEntry, projects []
 }
 
 // pod collects projects from one pod into <store>/<project>/pod-<uid>,
-// after pinning that directory to the pod's host identity. A pod without
+// after pinning that directory to the pod's host identity and recording
+// the pod's container map in it (task jk4). A pod without
 // a tracer container — the API server says so — has nothing to collect;
 // one whose tracer container is stopped cannot be entered, which is said
 // plainly rather than as kubectl's exec failure (review B1: deploy runs
@@ -73,12 +75,36 @@ func (c collector) pod(ctx context.Context, pe podEntry, st k8s.PodState, projec
 	}
 	var errs []error
 	for _, p := range projects {
+		// The map first: this status names the containers of the
+		// segments about to arrive. A map that fails to write does not
+		// keep them from arriving — the build then shows ids.
+		if err := c.containers(p, dir, st.Containers); err != nil {
+			errs = append(errs, fmt.Errorf("project %s: %w", p, err))
+		}
 		remote := path.Join(k8s.TraceRoot, p, readyDir)
 		if err := c.fetch(ctx, t, label, dir, p, remote); err != nil {
 			errs = append(errs, fmt.Errorf("project %s: %w", p, err))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// containers merges the pod's container map (k8s.PodState.Containers,
+// from the API server) into <store>/<name>/<dir>/containers.json (task
+// jk4), where build reads it to name each process's container; a pod
+// whose status names no container id yet adds nothing.
+func (c collector) containers(name, dir string, seen map[string]string) error {
+	if len(seen) == 0 {
+		return nil
+	}
+	if !project.Valid(name) || !federate.ValidHost(dir) {
+		return fmt.Errorf("unsafe path component %q/%q", name, dir)
+	}
+	local, err := c.localDir(name, dir)
+	if err != nil {
+		return err
+	}
+	return recordContainers(local, seen)
 }
 
 // stranded is collect's error for a pod whose tracer container stopped:

@@ -86,6 +86,34 @@ func TestDigests(t *testing.T) {
 	}
 }
 
+// TestStatusContainerID (task jk4): a status's containerID loses its
+// runtime scheme, whichever runtime; anything but 64 lowercase hex
+// digits after it — a container not started yet, a short id, upper
+// case, a path — is none.
+func TestStatusContainerID(t *testing.T) {
+	for id, want := range map[string]string{
+		"containerd://" + digest:      digest,
+		"cri-o://" + digest:           digest,
+		"docker://" + digest:          digest,
+		digest:                        "",
+		"":                            "",
+		"containerd://":               "",
+		"containerd://" + digest[:12]: "",
+		"containerd://" + strings.ToUpper(digest):         "",
+		"containerd://" + digest + "/x":                   "",
+		"containerd://../" + digest[3:]:                   "",
+		"containerd://" + digest[:63] + "\n":              "",
+		"containerd://" + digest[:32] + " " + digest[:31]: "",
+	} {
+		if got := StatusContainerID(id); got != want {
+			t.Errorf("StatusContainerID(%q) = %q, want %q", id, got, want)
+		}
+	}
+	if !RuntimeID(digest) || RuntimeID("containerd://"+digest) {
+		t.Errorf("RuntimeID: the bare id alone is one")
+	}
+}
+
 // TestNames: labels, pod names, contexts and UIDs.
 func TestNames(t *testing.T) {
 	cases := []struct {

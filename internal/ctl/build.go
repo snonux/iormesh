@@ -288,6 +288,10 @@ func build(ctx context.Context, e env, f buildFlags) (buildOutput, error) {
 		return buildOutput{}, err
 	}
 	in.Report = &rep // the processes view is projected from the rollup
+	// The pods' container maps name the processes' containers (task jk4).
+	var badMaps []string
+	in.Containers, badMaps = containerMaps(paths.store, sel.segs)
+	in.Ignored = append(in.Ignored, badMaps...)
 	model := viewmodel.New(in)
 	if sel.window != nil { // the site and the TUI say which window they show
 		model.Run.Window = windowText(sel.window)

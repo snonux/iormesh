@@ -327,6 +327,13 @@ iormeshctl build
   pod's own segments claim it. The pins live in `hosts.json`
   beside the service database. If you pass `-db` to `build`,
   pass the same `-db` to `collect`; `refresh` shares one.
+- Collect also records the pod's container names by runtime id,
+  from the same `get pod`, in
+  `<store>/<project>/pod-<uid>/containers.json`. Build reads it
+  offline, so `show processes`, the TUI and the site name a
+  process's container (`container app (4f6c0f1e7b6c)`), not only
+  its id. A container that restarted more than once between two
+  collects loses its oldest id's name; collect often.
 - In debug mode, collect enters the pod's newest tracer
   container. The emptyDir is the pod's, so it also serves what
   earlier tracers in the pod published.

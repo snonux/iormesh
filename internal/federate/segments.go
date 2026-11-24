@@ -64,7 +64,8 @@ type Segments struct {
 	// validate. They are skipped whole, never half-read.
 	Bad []BadSegment
 	// Ignored are store entries that are no segment file (dot files,
-	// rsync's in-flight temporaries, are skipped silently).
+	// rsync's in-flight temporaries, and a pod's container map,
+	// ContainersFile, are skipped silently).
 	Ignored []string
 	// Tables counts the table files seen (methods, threads, classes,
 	// stacks); the build does not read them yet (M5's conversations do).
@@ -355,7 +356,8 @@ func listStore(store string, projects []string, out *Segments) ([]*Segment, erro
 	return segs, nil
 }
 
-// listHost lists one host directory's events segments.
+// listHost lists one host directory's events segments; its container
+// map, if any, is the build's to read (ReadContainers).
 func listHost(dir, proj, host string, out *Segments) ([]*Segment, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -366,6 +368,9 @@ func listHost(dir, proj, host string, out *Segments) ([]*Segment, error) {
 		name := en.Name()
 		if strings.HasPrefix(name, ".") {
 			continue // rsync's in-flight temporaries
+		}
+		if name == ContainersFile && en.Type().IsRegular() {
+			continue // a pod's container map, which the build reads apart (task jk4)
 		}
 		f, err := segment.ParseName(name)
 		if err != nil || !en.Type().IsRegular() {

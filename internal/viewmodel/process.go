@@ -35,6 +35,16 @@ type Process struct {
 	Incarnations int    `json:"incarnations"`
 	Comm         string `json:"comm"`
 	App          string `json:"app"`
+	// ContainerID is the 64-hex runtime id of the container it ran in,
+	// from its events' pod.container_id (an in-pod tracer's sibling
+	// container, task sh4); "" outside a pod and for the tracer's own.
+	// Container is that container's name from the pod's container map
+	// (task jk4: containers.json, collected with the pod's segments);
+	// "" when the map does not name it — a session collected before the
+	// map — and the surfaces then show the id. Both are absent from the
+	// JSON when empty.
+	ContainerID string `json:"container_id,omitempty"`
+	Container   string `json:"container,omitempty"`
 	// Service is its name on the conversations' lifelines: the service
 	// its app serves, else the app, else the comm (namer.process).
 	Service     string       `json:"service"`
@@ -92,8 +102,9 @@ type ProcSocket struct {
 }
 
 // processes projects the rollup's processes, in its order (project,
-// host, pid, incarnation).
-func processes(r *report.Report, n namer) ([]Process, int) {
+// host, pid, incarnation), naming each one's container from its host
+// directory's container map (containers, by host directory).
+func processes(r *report.Report, n namer, containers map[string]map[string]string) ([]Process, int) {
 	out := []Process{}
 	if r == nil {
 		return out, 0
@@ -108,12 +119,24 @@ func processes(r *report.Report, n namer) ([]Process, int) {
 		key := [3]string{p.Project, p.Host, itoa(p.PID)}
 		out = append(out, Process{ID: p.ID, Project: p.Project, Host: p.Host, FQDN: p.FQDN, PID: p.PID,
 			Incarnation: p.Incarnation, Incarnations: incs[key], Comm: p.Comm,
-			App: p.App, Service: n.processID(p.ID, p.PID), Serves: nonNil(p.Serves), Events: p.Events,
+			App: p.App, ContainerID: p.ContainerID, Container: containerName(containers, p.Host, p.ContainerID),
+			Service: n.processID(p.ID, p.PID), Serves: nonNil(p.Serves), Events: p.Events,
 			JavaEvents: p.JavaEvents, Threads: procThreads(p.Threads), MoreThreads: p.MoreThreads,
 			Files: procFiles(p.Files), MoreFiles: p.MoreFiles, Sockets: procSockets(p.Conns),
 			MoreSockets: p.MoreConns})
 	}
 	return out, r.MoreProcesses
+}
+
+// containerName is container id's name in host's container map; "" for
+// no id, or one the map does not name (a session collected before the
+// map, task jk4). Only the process's own host directory's map counts:
+// another pod's map cannot name it.
+func containerName(containers map[string]map[string]string, host, id string) string {
+	if id == "" {
+		return ""
+	}
+	return containers[host][id]
 }
 
 // procThreads projects a process's threads.

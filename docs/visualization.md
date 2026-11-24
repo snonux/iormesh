@@ -571,7 +571,10 @@ processes"):
   `-json` prints the stories.
 - **Processes** (`processes`, `more_processes`): projected from the
   run's rollup (`report.json`, task qb4), not a reading of their
-  own — per process incarnation its host, pid, comm, app, the name
+  own — per process incarnation its host, pid, comm, app, in a pod
+  its container (`container_id`, and `container`, the name from
+  the pod's container map when collect recorded one, task jk4:
+  shown `app (4f6c0f1e7b6c)`, the bare id without a name), the name
   it carries as a client lifeline, the services it serves, how
   many incarnations of its pid the run saw (a restart), its
   threads (events, bytes, calls, and `carried` / `carried_calls`:
