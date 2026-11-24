@@ -45,6 +45,9 @@ then the features and changes of the latest round.
 - `query -window-segments`: a time window skips the segments
   outside it, trading exactness for speed
   ([implementation.md](docs/implementation.md), M5 "Query").
+- Dated times of day (`2025-11-21T00:54:20`, UTC) in `build` and
+  `query` windows; `query` echoes its resolved window on stderr
+  ([troubleshooting.md](docs/troubleshooting.md)).
 - URI path templates (`/orders/{id}`) in the service database's
   per-path counts ([output-contract.md](docs/output-contract.md)).
 - `-listen-port` sessions follow the port to a restarted owner
@@ -68,6 +71,10 @@ then the features and changes of the latest round.
 
 ### Changed
 
+- A bare time of day in `build` or `query` is refused when the
+  store's segments start on more than one UTC date, so a prune can
+  no longer shift it to another day
+  ([troubleshooting.md](docs/troubleshooting.md)).
 - `iormesh stop` records `operator_stop`, and `ensure` leaves such
   a session stopped ([architecture.md](docs/architecture.md)).
 - `iormeshctl status` says in its NOTE column which stopped
