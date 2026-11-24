@@ -7,7 +7,8 @@ scope, milestones and decisions; this file only summarises.
 
 ## [Unreleased]
 
-Nothing has been released yet. What exists, by milestone:
+Nothing has been released yet. What exists: the milestones first,
+then the features and changes of the latest round.
 
 ### Added
 
@@ -25,3 +26,71 @@ Nothing has been released yet. What exists, by milestone:
 - `mage release`: signed, reproducible per-arch archives with
   checksums (docs/build.md, "Releases").
 - The MIT licence (`LICENSE`).
+- `iormeshctl bootstrap`: the one-time, verified tracer install
+  ([quickstart.md](docs/quickstart.md),
+  [security.md](docs/security.md)).
+- `iormeshctl ensure`: restarts ended or dead sessions and
+  collects ([architecture.md](docs/architecture.md)).
+- `iormeshctl status` (sessions per host) and `list` (registry)
+  ([quickstart.md](docs/quickstart.md)).
+- `iormeshctl prune`: lists old segment files, deletes them with
+  `-apply` ([quickstart.md](docs/quickstart.md)).
+- `build -from`/`-to`/`-last` (windowed builds) and `-namespace`
+  ([visualization.md](docs/visualization.md)).
+- `open`, `show` and `tui` read namespace and windowed builds with
+  `-namespace` and `-windowed`
+  ([visualization.md](docs/visualization.md)).
+- `iormeshctl query` filters, writing merged-trace slices
+  ([schema.md](docs/schema.md), "Query slices").
+- `query -window-segments`: a time window skips the segments
+  outside it, trading exactness for speed
+  ([implementation.md](docs/implementation.md), M5 "Query").
+- URI path templates (`/orders/{id}`) in the service database's
+  per-path counts ([output-contract.md](docs/output-contract.md)).
+- `-listen-port` sessions follow the port to a restarted owner
+  within `-listen-grace` ([trace-scope.md](docs/trace-scope.md)).
+- Late Java attach: a JVM started after the session gets the
+  agent ([java-attach.md](docs/java-attach.md)).
+- `sendmsg`, `recvmsg`, `sendmmsg` and `recvmmsg` tracing
+  ([schema.md](docs/schema.md)).
+- Pod, namespace and container id on every event of an in-pod
+  tracer ([schema.md](docs/schema.md), "Pod fields on events").
+- The microservices-as-pods acceptance on kind
+  ([testing.md](docs/testing.md)).
+- Quickstart and troubleshooting guides
+  ([quickstart.md](docs/quickstart.md),
+  [troubleshooting.md](docs/troubleshooting.md)) and the
+  Kubernetes guide ([kubernetes.md](docs/kubernetes.md)).
+- GitHub Actions CI runs the unprivileged mage gates
+  ([build.md](docs/build.md), "CI").
+- Mage finds libbpfgo from a linked git worktree
+  ([build.md](docs/build.md)).
+
+### Changed
+
+- `iormesh stop` records `operator_stop`, and `ensure` leaves such
+  a session stopped ([architecture.md](docs/architecture.md)).
+- `iormeshctl status` says in its NOTE column which stopped
+  sessions `ensure` leaves alone
+  ([architecture.md](docs/architecture.md)).
+- A `-listen-port` that only systemd holds (socket activation)
+  fails the start ([trace-scope.md](docs/trace-scope.md)).
+- Port follow adopts an upgraded executable path in the same
+  cgroup ([trace-scope.md](docs/trace-scope.md)).
+- `iormesh start` appends the journal's tail when a run exits
+  before attaching ([troubleshooting.md](docs/troubleshooting.md)).
+- `prune -apply` makes the service database forget the pruned
+  segments ([quickstart.md](docs/quickstart.md)).
+- Build outputs go to the gitignored `bin/`, never the repository
+  root ([build.md](docs/build.md)).
+- The mage targets live in `magefiles/`, and `mage clean` sweeps
+  the root build artifacts too ([build.md](docs/build.md)).
+- `mage test` builds the jars and binaries its tests need
+  ([build.md](docs/build.md)).
+
+### Fixed
+
+- Unix-socket accepts of a reused socket no longer fuse into one
+  connection ([schema.md](docs/schema.md)).
+- Start-time and late attach never send one JVM a second SIGQUIT
+  ([java-attach.md](docs/java-attach.md)).
