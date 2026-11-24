@@ -393,7 +393,8 @@ deferred.
   `rwagg.c`'s slot and `javamark.c`'s frame indexes (task il4),
   `filter.c`'s histogram bucket (mask, 8 buckets) and
   `fdname.c`'s name length (clamp, at most 67; task ll4). The
-  builders still pin their clang (`CLANG_VERSION` in
+  builders still check their clang against a recorded version
+  (`CLANG_VERSION` in
   `scripts/container/tracer-*.Containerfile`, held to a
   recorded value by `TestBuilderClangPinned`): not to make the
   C load, but so a compiler change cannot reach a release

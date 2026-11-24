@@ -1747,8 +1747,9 @@ root, CI-safe) fails when a Containerfile's value is not the
 one recorded in its `builderClang`. Red first: with the arm64
 entry recorded as 22.1.1 it failed with
 `scripts/container/tracer-arm64.Containerfile installs clang
-19.1.7, recorded "22.1.1": re-run the el9 verifier check ...`. `TestContainerfileClangRejects`
-covers a missing, a doubled and an unchecked `ARG`.
+19.1.7, recorded "22.1.1": re-run the el9 verifier check ...`.
+`TestContainerfileClangRejects` covers a missing, a doubled and
+an unchecked `ARG`.
 
 **The el9 verifier check**, to run before changing either
 value (the image build has already failed, or a newer clang is
