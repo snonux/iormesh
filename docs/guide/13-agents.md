@@ -29,13 +29,17 @@ makes it safe to run from an agent, and makes the line between
 
 | Touches | Commands | Ask first? |
 |---|---|---|
-| nothing, or only reads local files | `version`, `list`, `verify`, `bootstrap` (prints), `build`, `show …`, `query …`, `services`, `services rules`, `services edges`, `expand` (lists), `prune` (lists) | no |
-| the laptop's registry or service database | `add`, `services name`, `services unname` | say what you add |
-| reads hosts | `status` | no |
+| nothing, or only reads local files | `version`, `list`, `verify`, `bootstrap` (prints), `show …`, `query …`, `services`, `services rules`, `services edges`, `expand` (lists), `prune` (lists) | no |
+| the laptop's store, registry or service database | `build` (writes the builds dir and the service database), `add`, `services name`, `services unname` | say what you add |
+| reads hosts | `status` (runs the tracer's read-only `status` as root through the narrow sudoers rule) | no |
 | moves segments off hosts | `collect`, `refresh` | no, once tracing is agreed |
 | changes hosts | `bootstrap -apply`, `deploy`, `ensure`, `expand -apply`, `rm` | **yes, every time** |
 | deletes trace data | `prune -apply`, `rm -force` | **yes, every time** |
 | the human's screen | `open` (starts a browser), `tui` (needs a terminal) | use `show`; `open` when asked |
+
+Any command run on a host with `sudo` — installing rsync (chapter 2),
+`iormesh stop` (chapter 9), reading the journal as root (chapter 12)
+— is the human's to run or approve, like the rows marked **yes**.
 
 ## Checkpoints
 

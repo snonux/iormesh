@@ -16,7 +16,7 @@ The allowlist lives in the registry, beside the hosts. Without an
 expand:
   allow:
     cidrs: [10.0.0.0/8]       # canonical, no host bits
-    hosts: ["192.168.7.*"]    # address-text globs; prefer cidrs
+    hosts: ["198.51.100.*"]    # address-text globs; prefer cidrs
   max_nodes: 16               # registered hosts included
 ```
 
