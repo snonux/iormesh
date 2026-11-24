@@ -9,8 +9,10 @@ When something fails, look the message up in
 
 **Verification status.** Every command and flag here was checked
 against the `-h` output of `iormeshctl` and `iormesh` built from
-this tree, and `add`, `list` and the "nothing yet" answers of
-`build`, `show` and `open` were run against a scratch registry.
+this tree, and `add`, `list`, `prune` on an empty store and the
+"nothing yet" answers of `build` (also with `-last`), `show` and
+`open` (also with `-windowed`) were run against a scratch
+registry and store.
 The sequence itself has **not been run end to end as written**:
 `bootstrap` (task qh4), `deploy`, `status`, `collect` and `ensure`
 were not run against real hosts for this guide. The M4
@@ -75,8 +77,10 @@ mage agentBuild       # only if a project uses the Java agent
 IORMESH_MINISIGN_KEY=~/.minisign/iormesh.key mage sign
 ```
 
-Install the controller for your laptop and check a build with
-it:
+`mage build` and the other development targets put their
+outputs in `bin/` instead ([build.md](build.md)); hosts only take
+the signed release files in `dist/`. Install the controller for
+your laptop and check a build with it:
 
 ```sh
 # or dist/iormeshctl-darwin-arm64, … for your laptop
@@ -104,11 +108,21 @@ iormeshctl list
 executable path), matched at every exec and against the
 processes already running at start, so it usually needs `*` at
 both ends. `-listen-port` traces whoever owns that listening
-socket when the session starts. `-duration` bounds the session
-(4h by default, 7 days at most). [trace-scope.md](trace-scope.md)
-says what gets traced. For Java stack attribution add
+socket when the session starts. When the server restarts, the
+session follows the port to the new owner if it is the same
+program under the same uid (the same executable, or an upgraded
+path with the same base name in the same cgroup) and takes the
+port within `-listen-grace` (2m by default; add e.g.
+`-listen-grace 5m` after HOST for a slow restart). A port only
+systemd holds (socket activation, service idle) is refused.
+`-duration` bounds the session (4h by default, 7 days at most).
+[trace-scope.md](trace-scope.md) says what gets traced. For Java
+stack attribution add
 `-spool /run/iormesh/spool/shop -agent /opt/iormesh/lib/iormesh-agent.jar`
-after HOST and read [java-attach.md](java-attach.md).
+after HOST and read [java-attach.md](java-attach.md): the agent
+is loaded into the JVMs running at start and into those that
+start later in the session (late attach), whose I/O before the
+load stays unattributed.
 
 ## 4. Bootstrap: the one-time install
 
@@ -161,7 +175,9 @@ bytes) and starts each project as a transient systemd unit
 `iormesh-<project>.service`. A host that fails is reported and
 the next one is still deployed. Deploying again with the same
 build and flags leaves a running session alone; `-restart`
-restarts it.
+restarts it. A run that exits before it attaches fails the
+deploy with the tail of the unit's journal, which names the
+cause ([troubleshooting.md](troubleshooting.md#a-session-that-does-not-start)).
 
 ## 6. Check status
 
@@ -172,7 +188,9 @@ iormeshctl status
 One row per host and project: `TARGET`, `PROJECT`, `STATE`
 (`running`, `ended`, `dead`, `none`), `END-REASON`, `ENDS-BY`,
 `VERSION`, `UNCOLLECTED` (segments waiting in `ready/`) and a
-`NOTE`. It changes nothing on the hosts.
+`NOTE`. It changes nothing on the hosts. For an ended or dead
+session the NOTE says `stopped by operator: ensure leaves it`
+when someone ran `iormesh stop` (step 10).
 
 Now make the client talk to the server, so there is something to
 see.
@@ -221,20 +239,62 @@ model. [visualization.md](visualization.md) explains each view.
 With both ends traced, `shop → billing` shows as one fused edge;
 with only one side traced it stays unresolved.
 
-## 10. Keep it running, then clean up
+## 10. Keep it running, look at a window, prune
 
-A session ends at its `-duration`, on a reboot or when the disk
-watchdog trips, and is not restarted by itself. For runs over
-several days, run `ensure` from a timer: per host it starts again
-every session that ended on its own (never one you stopped with
-`iormesh stop`), then collects:
+A session ends at its `-duration`, on a reboot, when its targets
+are gone or when the disk watchdog trips, and is not restarted by
+itself. For runs over several days, run `ensure` from a timer:
+per host it starts again every session that ended on its own,
+then collects:
 
 ```sh
 iormeshctl ensure
 ```
 
-[architecture.md](architecture.md#tracing-for-days) has the
-systemd user timer and the cron line.
+It prints one line per project, e.g. `app1: project shop: ended
+(duration), restarted` or `running, nothing to do`. Two ends it
+treats differently:
+
+- A session stopped with `sudo iormesh stop -project P` on the
+  host is left stopped (`stopped by the operator, left
+  stopped`); `iormeshctl status` marks it in its NOTE column.
+  `deploy` starts it again.
+- A `disk_limit` end is restarted only after the collect has
+  emptied its `ready/`; otherwise ensure says how many segments
+  are still there.
+
+[architecture.md](architecture.md#tracing-for-days) has the full
+table, the systemd user timer and the cron line.
+
+After days of tracing, a build of everything is slow and mixes
+old with new. Build only a window instead; the full build stays,
+and `-windowed` reads the window's build:
+
+```sh
+iormeshctl build -last 2h            # or -from 09:00:00 -to 11:00:00
+iormeshctl show -windowed            # open -windowed, tui -windowed alike
+```
+
+`-from` and `-to` take RFC 3339 or `HH:MM:SS` UTC on the trace's
+first day (`-to` exclusive), and `-last` goes alone. A window keeps
+the whole segments that overlap it, and its services and edges
+are the connections seen in it.
+
+The local store only grows. `prune` lists the segment files
+whose range ended more than `-older-than` ago, and deletes them
+only with `-apply`, which first makes the service database
+forget them (their request counts and the connections seen only
+in them; naming rules stay):
+
+```sh
+iormeshctl prune -older-than 720h          # lists, deletes nothing
+iormeshctl prune -older-than 720h -apply
+```
+
+Nothing is ever pruned on its own. `-project` narrows it; `-db`
+names the service database if `build` used another one.
+
+## 11. Clean up
 
 When you are done, `rm` stops each project, syncs its last
 segments off and uninstalls `/opt/iormesh` with the sudoers rule
@@ -254,3 +314,6 @@ iormeshctl rm app2
 - Querying events: `iormeshctl query`
   ([output-contract.md](output-contract.md)).
 - `iormeshctl <subcommand> -h` prints each subcommand's flags.
+- Working on iormesh itself: the Mage gates, of which GitHub
+  Actions runs the unprivileged ones ([build.md](build.md#ci),
+  [testing.md](testing.md)).

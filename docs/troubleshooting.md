@@ -11,12 +11,15 @@ walked through in [quickstart.md](quickstart.md).
 The messages come from the source, not from a failing run on real
 hosts; a few (`host not registered`, `pinned key`, the `add` usage
 refusals, `nothing listens on TCP port`, the `build`, `show` and
-`open` "nothing yet" answers) were reproduced locally. A message
-that reads differently in your version: grep for its fixed part.
+`open` "nothing yet" answers, the `prune` and window refusals)
+were reproduced locally. A message that reads differently in your
+version: grep for its fixed part.
 
 ## Reading an error
 
-- `iormeshctl` prints `iormeshctl: <error>`; deploy, collect
+- `iormeshctl` prints `iormeshctl: <error>` — for a wrong flag
+  or argument `iormeshctl: usage: <error>`, the usage text and
+  exit 2; deploy, collect
   and ensure name the host first
   (`iormeshctl: app1: <error>`) and then try the next host, and
   the command exits 1 at the end (`deploy failed on 1 of 2
@@ -100,12 +103,29 @@ undone`. Until the rule is in place a rerun starts over.
 
 | Message contains | Meaning and fix |
 |---|---|
-| `target spec: nothing listens on TCP port …` | A `-listen-port` session resolves its target once, at start. Start the server first, then deploy again. |
+| `target spec: nothing listens on TCP port …` | A `-listen-port` session needs a listener at start. Start the server first, then deploy again. A restart of the server later in the session is followed ([next section](#a-port-session-after-a-restart)). |
+| `target spec: only the service manager (pid […]) holds the listener on TCP port … (socket activation; the service is not running)` | systemd holds the socket of an idle socket-activated service. systemd itself is never traced: it would follow every service it spawns (decision #23, [trace-scope.md](trace-scope.md)). Start the service (`systemctl start`, or a connection to the port), then deploy again. |
+| `target spec: no visible process owns the listener on TCP port …` | The listener's owner is not visible in the tracer's `/proc` (another PID namespace, e.g. a container on the host network), or it exited between the reads. Trace it where it runs ([kubernetes.md](kubernetes.md)), or deploy again. |
+| `usage: -listen-grace …: want 0 to 168h0m0s` | `-listen-grace` takes a duration up to 7 days; 0 ends the session as soon as the port's owners are gone. |
 | `iormesh-….service exited before the tracer attached; see journalctl -u iormesh-….service` | The run failed before it attached. The unit's journal since the start is appended to the error when it can be read (at most 20 lines and 1536 bytes, the newest kept: the cause is logged last, e.g. `nothing listens on TCP port …`); `iormeshctl deploy` and `ensure` print it too, Go-quoted on one line. |
 | `iormesh-….service ended at once (…)` | The run attached and ended immediately; the reason is in parentheses (`disk_limit`: the disk is already over the limit, see below). |
 | `iormesh-….service has not attached after …; it keeps running` | Attaching is slow (many processes, a large `-agent` load). Check `iormeshctl status` again shortly. |
 | `iormesh-….service is already …; stop it first (flags change by stop and start)` | A standalone `iormesh start` over a live session of the same project. `sudo iormesh stop -project P` first. |
 | `SELinux is enforcing and … is labelled …: systemd may not exec a binary outside a bin_t or usr_t path` | A standalone `start` of a binary under `/root` or a home directory. Install it under `/usr/local/bin` or `/opt` and `restorecon` it. Deployed tracers live in `/opt/iormesh/bin` and are not affected. |
+
+## A port session after a restart
+
+A `-listen-port` session follows the port when its owners exit
+and a new process takes it (decision #23,
+[trace-scope.md](trace-scope.md)). The tracer prints these on its
+log (`journalctl -u iormesh-<project>.service`):
+
+| Message contains | Meaning and fix |
+|---|---|
+| `iormesh: port …: following new owner pid …` | Not an error: the restarted server was recognised and is traced from now on; it shows as a new process in the build. |
+| `iormesh: port …: no new owner within …` | Nothing of the same program took the port within `-listen-grace` (2m by default): the session ends `targets_exited`, which `ensure` restarts — and that start fails with `nothing listens on TCP port …` until the server is back. For a slow restart give the registry entry a longer `-listen-grace` (`rm -project P HOST`, `add` again, `deploy`). |
+| `iormesh: port …: pid … holds it but is not the traced program (executable, uid or cgroup differs); not following` | Another program, user or cgroup holds the port now, or an upgraded executable runs in another cgroup; it is left alone and named once. Across a container restart only the exact executable path is followed ([kubernetes.md](kubernetes.md)). If it is the program you want, `deploy -restart` traces it from a fresh start. |
+| `iormesh: port …: the owner's executable was unreadable at start; not following the port` | The session could not record what its owner runs, so it cannot recognise a restart and ends with the owners. |
 
 ## BPF load and the el9 kernel
 
@@ -131,9 +151,13 @@ not a failure ([build.md](build.md)).
 ## Java agent
 
 The tracer prints these on its log (`journalctl -u
-iormesh-<project>.service`), traces the process on without Java
-attribution, and does not retry (decision #2,
-[java-attach.md](java-attach.md)).
+iormesh-<project>.service`) and traces the process on without
+Java attribution (decision #2, [java-attach.md](java-attach.md)).
+A JVM running at start is tried once; one that starts later in
+the session — a later `-pattern` match, a traced process that
+execs `java`, a restarted `-listen-port` owner — is tried every
+250 ms for up to 30 s from its exec (late attach,
+[java-attach.md](java-attach.md#live-attach)) and named once.
 
 | Message contains | Meaning and fix |
 |---|---|
@@ -143,10 +167,34 @@ attribution, and does not retry (decision #2,
 | `the JVM is in another PID namespace than the tracer` | A containerised JVM seen from the host. Trace it from inside the pod ([kubernetes.md](kubernetes.md)). |
 | `pid … is not a JVM, no agent loaded` | The target is not a HotSpot JVM: nothing to attach; its syscalls are traced as usual. |
 | `no Java attribution for pid …: … (start it with -javaagent instead)` | The agent could not be staged in the JVM's `/tmp` (owned by another user, or not sticky). Use `-javaagent`. |
-| `agent loaded into pid …; its I/O before now stays unattributed` | Not an error: live attach never sees what happened before it. |
+| `no Java attribution for pid …: its JVM did not accept the agent within 30s (…)` | A late JVM did not get its SIGQUIT handler ready in time (a very slow start, or `-Xrs`). Use `-javaagent`. |
+| `no Java attribution for pid …: it exited before its JVM accepted the agent` | A short-lived JVM; nothing to fix. |
+| `64 processes wait for the agent already; pid … gets no agent, nor does any other process exec'd before one of them is done (start them with -javaagent)` | An exec storm filled the late-attach queue. The processes exec'd until a slot frees get no agent; later ones are tried again. Start such JVMs with `-javaagent`. |
+| `agent loaded into pid …; its I/O before now stays unattributed` | Not an error: live attach never sees what happened before it — for a late JVM, its start-up. Give a JVM whose start matters `-javaagent` (e.g. through `JAVA_TOOL_OPTIONS`). |
+| `agent loaded into pid …, but it wrote no ring …: no Java attribution (its reason, iormesh-agent: …, is on the JVM's stderr)` | The agent loaded but did not start (an unsupported JDK, an unwritable spool). The JVM's own stderr says why. |
+| `agent loaded into pid …, but its ring could not be verified: the JVM is in another mount namespace …` | An `iormesh attach` into a containerised JVM; the line names the ways that work ([java-attach.md](java-attach.md)). |
 
-A JVM matched by `-pattern` after the session started is never
-live-attached; give it `-javaagent` at launch.
+## Ensure and stopped sessions
+
+`iormeshctl ensure` prints one line per project,
+`<host>: project <p>: <what it did>`
+([architecture.md](architecture.md#tracing-for-days) has the
+rules). The lines that leave a session down:
+
+| Line ends in | Meaning and fix |
+|---|---|
+| `stopped by the operator, left stopped` | Someone ran `iormesh stop` on the host (the `status` NOTE reads `stopped by operator: ensure leaves it`). Intended: ensure never undoes a stop. `iormeshctl deploy` starts it again. |
+| `ended (stop) on a tracer that cannot tell an operator stop from a reboot's, left stopped (deploy upgrades it)` | The host runs a tracer from before `operator_stop` (`status` NOTE: `stop origin unknown (tracer predates operator_stop): ensure leaves it`). `deploy` upgrades and starts it; from then on a reboot's end is restarted. |
+| `no session here: deploy starts it, ensure only restarts` | The project is registered but was never deployed on the host. Run `deploy`. |
+| `running outside its unit, left alone` | A run outside the systemd unit (an `iormesh run` by hand) holds the project. Stop it on the host if the unit should run instead. |
+| `…, restart failed` | The start failed; the error printed for the host names the cause, with the unit's journal tail ([above](#a-session-that-does-not-start)). |
+| `ended (disk_limit): collecting first` | Not an error: the restart waits for the collect ([next section](#disk-limit)). |
+| `collect failed, not restarted` | A `disk_limit` end whose collect failed; the collect's error follows. |
+| `no readable status after the collect, not restarted` / `status after collect, disk_limit ends not restarted: …` | The status read after the collect failed; run `ensure` again. |
+
+A deploy restart whose start failed (`session stopped, not
+restarted: start: …`) leaves the project marked stopped, so
+ensure leaves it too; the next `deploy` starts it.
 
 ## Disk limit
 
@@ -160,7 +208,7 @@ under 256 MiB free (`-disk-limit`, `-disk-min-free`,
 | `iormeshctl status` | `STATE ended`, `END-REASON disk_limit` |
 | the unit's journal | `disk limit reached: … is …% used (limit 90%)`, or `… has … bytes free (floor …)` |
 | `iormeshctl build` / `show` | `session    <project>/<host> <id>: ended disk_limit (the disk watchdog stopped the tracer)` |
-| `iormeshctl ensure` | `ended (disk_limit): N segments still in ready/ after the collect, not restarted`, or `ended (disk_limit), restarted after collecting` |
+| `iormeshctl ensure` | `ended (disk_limit): N segments still in ready/ after the collect, not restarted`, `ended (disk_limit): restart after collecting failed`, or `ended (disk_limit), restarted after collecting` |
 
 Fix: collect (the collected segments leave the host), free space
 on the partition holding `/opt/iormesh`, or adjust the limits on
@@ -218,10 +266,27 @@ one-sided clock bound (next section).
 |---|---|
 | `show`, `show edges` | `unresolved <from> -> <to> (N of M connections)`: the other end was not traced, or not built together. Trace the peer (add a project on its host) and `build` both projects in one run (no `-project`, or both); `iormeshctl expand` lists untraced peers. |
 | `show` | `no clock bounds`, `no two-sided clock bound`, or `… N pairs without a bound`: no fused connection between those hosts carried traffic in both directions in any window. The bound comes from traffic between traced processes on both hosts; a one-way exchange, or loss on one host, leaves it one-sided. |
+| `query` output | `"bytes_partial":true` on a `sendmmsg` or `recvmmsg`: the tracer could not read every message's length, so `bytes` is a lower bound and the event carries no `tcp_seq`. That direction of the connection fails its stream check and gives no bound ([schema.md](schema.md)); other connections between the hosts still can. |
 | `show health` | `clock      A ~ B: N windows, width …, N one-sided, N EMPTY (contradicting)`: an empty window means the edges contradict each other — a clock was stepped or slewed harder than the assumed 1 ppm drift. Check NTP on both hosts. |
 
 Hosts skewed beyond the fusion window get neither a fused edge
 nor a bound (PLAN.md M4).
+
+## Windowed builds and prune
+
+| Message contains | Meaning and fix |
+|---|---|
+| `usage: -last is a window of its own: give it or -from/-to, not both` | `build -last DUR` or `-from`/`-to`, not both. |
+| `usage: -last …: want a positive duration (90m, 2h)` | `-last` takes a Go duration: `90m`, `2h`, `48h` (no `d`). |
+| `usage: the window -from … -to … is empty` | `-from` is not before `-to` (`-to` is exclusive). A bare `HH:MM:SS` is UTC on the trace's first day; use RFC 3339 for a later day. |
+| `build: no readable segment for … in the window … in … (0 bad)` | No collected segment overlaps the window: collect first, or check the window (UTC). |
+| `federate: no segment collected in … yet` | `-from` or `-to` needs a collected segment to fix the trace's first day: collect first. |
+| `show: no build of …~window yet (iormeshctl build -from T\|-to T\|-last DUR)` / `open: no site of …~window yet (…)` | `-windowed` reads the last windowed build of the same `-project` set (and `-namespace`): make one with `build -last` or `-from`/`-to`. |
+| `usage: prune needs -older-than DUR, a positive duration (720h)` | `prune` has no default age. |
+| `prune: nothing collected for project … in …` | That `-project` has no directory in the store: check the spelling against the store's directories. |
+| `… segment files ended before …; prune again with -apply to delete them (the service database forgets them too)` | Not an error: without `-apply` prune only lists. |
+| `prune: service database: …; nothing deleted` | `-apply` could not make the service database forget the files, so it deleted none. Fix the database error and run again; `-db` names the database if `build` used another one. |
+| `prune: removeat …` after `deleted N segment files that ended before …` | The database forgot that file, but it could not be deleted; the next build imports it again. Fix its permissions and prune again. |
 
 ## Damaged segments
 
