@@ -438,7 +438,25 @@ truth.
   written by the run in its checked, locked project directory
   (atomic rename of a file opened without following symlinks);
   `status` and `stop` read it only as a regular file, not
-  through a symlink, at most 64 KiB. By design, `-pid`,
+  through a symlink, at most 64 KiB. A `start` whose
+  `systemd-run` fails, or whose unit exits before its run
+  attached (task zk4), returns with its error the journal of
+  that one unit since the launch — `journalctl
+  --unit=iormesh-<project>`, read as root; where that is empty,
+  the unit's `systemctl status --lines=0` header — and, after a
+  failed `systemd-run` only, a hint naming the binary's SELinux
+  label (`internal/cli/startdiag.go`: `unitLog`,
+  `boundedLines`, `selinuxHint`). So the sudo caller reads what
+  the session's own run and systemd logged for its unit — the
+  tracer's messages, which name pids, ports and refused
+  attaches — never another unit's lines and never the whole
+  journal: at most 20 lines, each made terminal-safe and cut to
+  300 bytes, 1536 bytes in all, which keeps it inside the
+  2048 bytes of stderr `iormeshctl deploy` and `ensure` relay
+  (`internal/federate` `cutStderr`). The window starts at the
+  launch's whole second (`--since=@<seconds>`), so a line an
+  earlier session of the same project logged within that
+  second can come along. By design, `-pid`,
   `-pattern`, `-listen-port` and `-agent` reach other users'
   processes — that is what a tracer is for — so the sudoer gets
   their I/O metadata in segments they own; grant the rule only
@@ -510,6 +528,49 @@ truth.
   the jar and each directory above it owned by them and not
   group- or other-writable (sticky directories excepted).
   Details in [java-attach.md](java-attach.md).
+- **Late attach adds JVMs, not trust** (task lh4; behaviour and
+  bounds in PLAN.md M3 "Attach"). With `-agent`, a `run` also
+  loads the agent into JVMs that appear during the session, and
+  only into processes the session traces already: a traced
+  process (a child included) that execs (`session.handle`), a
+  pattern match the session adopts at its exec
+  (`session.judgeExec`, after the tracer's own exec is left
+  out), and a restarted port owner it follows
+  (`session.adoptOwner`, under the owner rule above). A child
+  forked without an exec gets nothing. Each attempt is the
+  start-time attach unchanged (`lateAttacher.attempt`, like
+  `loadOne`): the same loader and the same `agentStages.target`,
+  so the same jar — the path `trustedAgent` resolved and checked
+  at start, which a confined session pins to
+  `/opt/iormesh/lib/iormesh-agent.jar` — and, for a JVM in
+  another mount namespace, a stage made by `javaattach.Stage`'s
+  checks (a trusted `/` and `/tmp` of the JVM's root, its PID
+  namespace the tracer's, shared only with a JVM of the same
+  euid and `/tmp`), removed with the session (`lateAttacher.stop`
+  hands every stage to the Java join). `javaattach.Attacher.Load`
+  then runs its checks as for any attach: `libjvm.so` mapped, the
+  attach mechanism not disabled (`attachDisabled`), the trigger
+  file created `O_EXCL|O_NOFOLLOW` or an existing one accepted
+  only as root's or the JVM's euid's (`createTrigger`,
+  `checkTrigger`), the SIGQUIT sent through a pidfd after
+  re-checking the JVM and its handler (`sigquit`), and the
+  socket's peer held to the target's pid and euid
+  (`checkPeer`). A JVM that refuses — `-XX:+DisableAttachMechanism`,
+  a failed stage or handshake — is named once and never tried
+  again (`lateAttacher.try`). Retries happen only for the two
+  errors raised before any signal is sent, no `libjvm.so` yet
+  (`ErrNotJVM`, for 5 s from the exec) and no SIGQUIT handler yet
+  (`ErrNoQuitHandler`, for 30 s): one attempt sends at most one
+  SIGQUIT, and a job that sent one ends with that attempt,
+  whatever its outcome. `attachDisabled` sees the flag only on
+  the command line or in `JAVA_TOOL_OPTIONS`/`JDK_JAVA_OPTIONS`;
+  a JVM that sets it elsewhere (an options file) still never
+  loads the agent, but answers the one SIGQUIT with a thread
+  dump on its stdout. The attaches run beside the trace loop, at
+  most 2 handshakes and 64 waiting processes at a time
+  (`lateAttachParallel`, `lateAttachPending`); an exec beyond
+  that gets no agent and is named, so an exec storm in the
+  target costs the tracer bounded work.
 - **Bounded by design.** Sessions end after 4h by default
   (enforced twice — by the tracer and by its systemd unit) and
   stop before the trace partition fills.
@@ -524,6 +585,26 @@ truth.
   paths, like the file events' paths, verbatim; a remote code
   source URL loses its userinfo, query and fragment in the agent
   and again in the tracer.
+  The msghdr data calls (task oh4; why, in PLAN.md M4 "Clock
+  reconciliation from the traffic itself") read the caller's
+  memory only for lengths. `sendmsg` and `recvmsg` take their
+  bytes from the return value; a `recvmsg` with `MSG_TRUNC`
+  also reads the leading fields of its `struct msghdr` and the
+  `iov_len` of at most 8 iovec entries, to bound what was copied
+  (`internal/c/recv.c` `ior_recvmsg_capacity`, emitted by
+  `internal/generate` `writeRecvmsgCapacityCapture`).
+  `sendmmsg` and `recvmmsg` park the address of the caller's
+  `mmsghdr` array at the enter, and the exit reads only the
+  4-byte `msg_len` of each of the first `ret` entries — at most
+  1024, one `bpf_probe_read_user` each — and sends their sum
+  (`internal/c/mmsg.c` `iormesh_mmsg_on_enter`,
+  `iormesh_mmsg_sum`, `iormesh_mmsg_on_exit`). No buffer the
+  iovecs point to, nothing `msg_name` or `msg_control` points to
+  is read; the enter records the fd, as for every other data
+  call (the generated handlers in
+  `internal/c/generated_tracepoints.c`). A read that faults, or an exit
+  without its park, makes the sum a marked lower bound
+  (`MMSG_BYTES_PARTIAL`), never a guess.
 - **Metadata is not harmless — redaction covers it.** Command
   lines carry passwords and tokens, URIs carry ids and secrets
   in path segments and query strings. One redaction policy
@@ -576,6 +657,35 @@ truth.
   a `mage test` gate (`internal/buildgate/ctlprint_test.go`, task
   oj4) fails on an fmt print in `internal/ctl` whose text value
   skips that escape.
+- **Prune deletes only the store's own old segments, and only
+  when told** (tasks yh4, gk4; the rule is PLAN.md M4 "Collect"
+  and "Build window and prune"). Nothing cleans the store on its
+  own: `iormeshctl prune -older-than DUR` runs only as the
+  operator's command, as the operator (no sudo, no server
+  contacted), and without `-apply` it only lists
+  (`pruneCommand`, `listPrune` in `internal/ctl/prune.go`). The
+  store must pass collect's rule — a directory the operator owns
+  and others cannot write (`pruneStore`, `checkStoreDir`). A
+  file is a candidate only if it is a regular, non-dot file
+  directly in `<store>/<project>/<host>/`, under a project and
+  host directory that are real directories (not symlinks) with
+  valid names, and its name parses as a segment whose time range
+  ended before now−DUR; a table file goes only once no events
+  segment of its session stays (`planPrune`, `realSubdirs`,
+  `oldInHost`). Other names, dot files (rsync's temporaries, the
+  fetch lock), symlinks, subdirectories and the host pins are
+  never listed. `-apply` first has the service database forget
+  the listed segments in one transaction
+  (`servicedb.DB.Forget`): their request rows, and every
+  connection no remaining segment names; naming rules are never
+  touched, and a missing database is not created
+  (`forgetPruned`, `internal/servicedb/forget.go`). If that
+  fails, nothing is deleted. Then each listed path is removed
+  through an `os.Root` opened on the store (`applyPrune`), so a
+  directory swapped for a symlink between the listing and the
+  delete cannot lead outside the store. The listing's checks are
+  not repeated at the delete: a name swapped meanwhile for a
+  symlink is removed as the link, never its target.
 - **Kubernetes** (M7; decisions #13, #14, #18 are provisional —
   PLAN.md "Provisional — M7"): eBPF privileges are
   node-kernel-wide — a container with `CAP_BPF` and
