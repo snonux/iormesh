@@ -5254,11 +5254,43 @@ internal/termsafe/           # + JSON: escape a line for a terminal
   writes nothing — no import, no new pin, no build output. A
   segment that fails is left out, named on stderr, and the
   command exits 1 after writing the slice.
+- **The window is exact by default; `-window-segments` trades
+  exactness for speed** (task ik4). `-from`/`-to` are placed by
+  build's code (`windowSpec.place`, each caller passing its
+  anchor) and the segments loaded by `loadSelection`, the one
+  selection build and query share. By default query still
+  decodes the whole store, then places the window on the
+  earliest readable segment's date and cuts the events to it, so
+  a window's slice is exactly the whole trace's events in it —
+  merged ids, `-app`, `-file` and `-follow` know everything
+  before it — and its errors are the ones it had before (no
+  readable segment, then the filter's empty window). With
+  `-window-segments` (refused without `-from` or `-to`) a
+  pinned host directory's segments whose range (`federate.Span`:
+  the named start, a minute before, to the one-minute interval
+  and a minute after) misses the window are never decoded; an
+  unpinned directory is checked whole, as build checks it, and
+  query still pins nothing. Its guarantee is build's, no more:
+  the range bounds when a segment was *written*, so an event
+  inside the window is found when it was written less than a
+  minute after the window's end (a call that blocked past `-to`
+  by up to the slack); one written later is missed. The rest of
+  the slice is computed from the selected segments alone, as
+  from a store whose other segments were deleted: the merge
+  fuses only connections whose establishment it sees (a
+  connection opened before the window keeps its host-local id),
+  `-app` knows the processes attached inside them, `-file`
+  follows the fds opened inside them, and `-follow` the threads'
+  use of the connection inside them. A window no segment
+  overlaps is the empty slice (exit 0).
 - **Filters** (all AND; globs are `path.Match`, `*` stops at
   `/`): `-from`/`-to` on each event's own `wall_ns`, as its host
   recorded it — not corrected for clock skew between hosts (RFC
   3339, or `HH:MM:SS[.frac]` UTC on the UTC date of the earliest
-  segment's start; `-to` exclusive); `-host` the store's host name or the
+  readable segment's start — with `-window-segments`, which must
+  place the window before decoding anything, build's anchor, the
+  earliest segment listed; `-to` exclusive); `-host` the store's
+  host name or the
   session's FQDN; `-app` the app's target pattern (the merged
   graph's app node) or the comm; `-thread` `java.thread` or the
   decimal tid; `-conn` a merged conn id, exactly; `-follow`

@@ -41,6 +41,10 @@ func queryLines(t *testing.T, out string) (events []schema.Event, truncated stri
 
 // TestQueryGolden: each filter over the collected store matches its
 // golden and decodes as schema events; rerunning gives the same bytes.
+// The window golden is unchanged by task ik4: a windowed query reads the
+// whole store by default, and its time of day still lands on the first
+// segment's date (windowSpec.resolve's earliest listed segment is the
+// earliest readable one here, as before).
 func TestQueryGolden(t *testing.T) {
 	f := newBuildFixture(t)
 	for _, tc := range []struct {

@@ -12,7 +12,10 @@ import (
 // build's time window (task yh4): `iormeshctl build -from T -to T` or
 // `-last DUR` builds only the segments whose time range overlaps the
 // window (federate.Window: by their file names, so a segment outside it
-// is never decoded once its host directory is pinned). The window
+// is never decoded once its host directory is pinned). `iormeshctl query
+// -from T -to T` resolves the same window (loadSelection) and cuts the
+// whole store's events to it; with -window-segments it selects its
+// segments the same way first (task ik4). The window
 // selects whole segments, not events: the build covers the window
 // widened to its segments' edges, about a minute or two each side. T is
 // query's (query.ParseTime): RFC 3339, or a UTC time of day placed on
@@ -89,17 +92,42 @@ func parseWindow(w windowFlags, f *buildFlags) error {
 }
 
 // resolve turns the window into the instants federate selects by, nil
-// without one: -last from the clock, a time of day on the day of the
-// earliest segment of projects in store. An empty window is a usage
-// error.
-func (w windowSpec) resolve(e env, store string, projects []string) (*federate.Window, error) {
+// without one: place, then an empty window is a usage error.
+func (w windowSpec) resolve(e env, anchor func() (time.Time, error)) (*federate.Window, error) {
+	out, err := w.place(e, anchor)
+	if err != nil || out == nil {
+		return out, err
+	}
+	if w.from != nil && w.to != nil && !out.From.Before(out.To) {
+		return nil, fmt.Errorf("%w: the window -from %s -to %s is empty", errUsage,
+			safe(out.From.Format(time.RFC3339Nano)), safe(out.To.Format(time.RFC3339Nano)))
+	}
+	return out, nil
+}
+
+// firstListed is build's anchor: the start of the earliest events
+// segment of projects listed in store (federate.FirstStart), whether it
+// reads or not.
+func firstListed(store string, projects []string) func() (time.Time, error) {
+	return func() (time.Time, error) { return federate.FirstStart(store, projects) }
+}
+
+// place turns the window's flags into instants, nil without a window:
+// -last from the clock, a time of day on the UTC date of anchor()'s
+// instant, called only for -from or -to. It is the one place a time of
+// day is placed; each caller says which day by its anchor — build and
+// query -window-segments the earliest listed segment (firstListed, known
+// before anything is decoded), the default query the earliest readable
+// one (firstReadable, as before task ik4). Which anchor is right is task
+// 1l4's to decide.
+func (w windowSpec) place(e env, anchor func() (time.Time, error)) (*federate.Window, error) {
 	if w.last > 0 {
 		return &federate.Window{From: e.clock().Add(-w.last).UTC().Truncate(time.Second)}, nil
 	}
 	if w.from == nil && w.to == nil {
 		return nil, nil
 	}
-	day, err := federate.FirstStart(store, projects)
+	day, err := anchor()
 	if err != nil {
 		return nil, err
 	}
@@ -116,10 +144,6 @@ func (w windowSpec) resolve(e env, store string, projects []string) (*federate.W
 			return nil, fmt.Errorf("%w: %w", errUsage, err)
 		}
 		*t.dst = time.Unix(0, int64(ns)).UTC()
-	}
-	if w.from != nil && w.to != nil && !out.From.Before(out.To) {
-		return nil, fmt.Errorf("%w: the window -from %s -to %s is empty", errUsage,
-			safe(out.From.Format(time.RFC3339Nano)), safe(out.To.Format(time.RFC3339Nano)))
 	}
 	return &out, nil
 }
