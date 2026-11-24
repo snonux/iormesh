@@ -30,8 +30,9 @@
 //	iormeshctl verify [-key FILE] FILE...
 //	iormeshctl version
 //
-// usage() prints the full text, kept as data in usage.go and held to every subcommand and flag by
-// TestUsageNamesEverySubcommandAndFlag; `SUBCMD -h` prints only that
+// usage() prints the full text, kept as data in usage.go and held to
+// every subcommand and flag by TestUsageNamesEverySubcommandAndFlag;
+// `SUBCMD -h` prints only that
 // subcommand's flags and exits 0 (task vh4).
 //
 // K8S is -context CTX and -namespace NS, and POD a registry pods: entry's
