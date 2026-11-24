@@ -2492,6 +2492,20 @@ golden, which had pinned the backend's `close` to its main
 thread — the JDK HttpServer closes on whichever thread finishes
 the exchange, so the golden no longer declares it.
 
+Run on 2026-11-24 at 4ca2f82 (task 5k4; kind 0.31.0, Kubernetes
+1.35.0 from `kindest/node:v1.35.0`, its containerd 2.2.0, Docker
+29.9.2, Fedora kernel 7.2.15, one node): `mage k8sAcceptance`
+from scratch, Docker freshly started, passed in 7 min 40 s wall
+time, the first full run since sh4, ki4, ii4, the kindrun
+claim/record/teardown changes and `TestKindMicroservices` joined
+the suite. `TestKindAcceptance` passed every subtest (133 s;
+iptables), `TestKindMicroservices` its `mesh`, `pod_fields` and
+`identity` subtests (122 s), and `TestKindClusterIP` passed
+(95 s; nftables), none skipped. The scoped teardown left `kind
+get clusters` empty and no `iormesh-registry` container; it
+removed the registry's volume, the two pushed images and the base
+images the run had pulled.
+
 Checked by hand on the same cluster and recorded here, not
 automated:
 
