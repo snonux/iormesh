@@ -18,7 +18,9 @@ import (
 // count - and the sequence number of its first byte, like the other data
 // calls; between two unconnected UDP sockets the mmsg calls' byte sums
 // are exact, every call names its peer from its msghdr (task nk4) and no
-// record carries tcp_seq. Root only.
+// record carries tcp_seq; the msghdr peer paths without a msg_name, an
+// mmsg batch from two senders and an AF_UNIX datagram sendmsg are pinned
+// too (task hl4). Root only.
 
 // TestMsgCallsTCP: a sendmsg of two buffers and a sendmmsg of two
 // messages, then a recvmsg and a recvmmsg of two messages, each pinned to
@@ -83,6 +85,65 @@ func TestMsgCallsUDP(t *testing.T) {
 			if want[e.Event] != 0 {
 				checkPeer(t, e, r.UDPAddr[1-i])
 			}
+		}
+	}
+}
+
+// TestMsgCallsPeers pins the msghdr peer paths TestMsgCallsUDP leaves out
+// (task hl4): a connected UDP sendmsg with msg_name NULL names the
+// socket's remote end; an unconnected recvmsg with msg_name NULL names no
+// peer at all; a recvmmsg of datagrams from two senders names the first
+// message's sender and carries the whole byte sum (docs/schema.md); an
+// AF_UNIX SOCK_DGRAM sendmsg names the sun_path it sent to.
+func TestMsgCallsPeers(t *testing.T) {
+	requireRoot(t)
+	child := startSeqChild(t, msgScenarioPeers)
+	log := collectRecords(openSeqTracer(t, child.pid(), false))
+	child.start(t)
+	r := child.result(t).Peers
+	if r == nil {
+		t.Fatal("the child reported no peers")
+	}
+	all := log.all(t)
+	single := int64(msgPeerSingle)
+	send := eventsOf(all, child.pid(), r.Send)
+	checkMsgKinds(t, send, map[string]int64{schema.KindSendmsg: single})
+	recv := eventsOf(all, child.pid(), r.Recv)
+	checkMsgKinds(t, recv, map[string]int64{
+		schema.KindRecvmsg: single, schema.KindRecvmmsg: int64(len(msgPeerBatch)),
+	})
+	unixSend := eventsOf(all, child.pid(), r.Unix)
+	checkMsgKinds(t, unixSend, map[string]int64{schema.KindSendmsg: int64(msgPeerUnix)})
+	checkMsgPeers(t, r, send, recv, unixSend)
+}
+
+// checkMsgPeers requires the peers scenario's msghdr calls - among the
+// events of its sender, receiver and unix sender - to name the peers
+// TestMsgCallsPeers describes.
+func checkMsgPeers(t *testing.T, r *msgPeers, send, recv, unixSend []schema.Event) {
+	t.Helper()
+	for _, e := range send {
+		if e.Event == schema.KindSendmsg {
+			checkPeer(t, e, r.RecvAddr)
+		}
+	}
+	for _, e := range recv {
+		switch e.Event {
+		case schema.KindRecvmsg:
+			if e.Args.RemoteAddr != nil || e.Args.RemotePort != nil {
+				t.Errorf("recvmsg with msg_name NULL names a peer: %v:%v",
+					e.Args.RemoteAddr, e.Args.RemotePort)
+			}
+		case schema.KindRecvmmsg:
+			if want := uint64(sum(msgPeerBatch)); e.Bytes != want {
+				t.Errorf("recvmmsg moved %d bytes, want %d", e.Bytes, want)
+			}
+			checkPeer(t, e, r.OtherAddr)
+		}
+	}
+	for _, e := range unixSend {
+		if e.Event == schema.KindSendmsg && (e.Args.Path == nil || *e.Args.Path != r.UnixPath) {
+			t.Errorf("unix sendmsg names path %v, want %s", e.Args.Path, r.UnixPath)
 		}
 	}
 }

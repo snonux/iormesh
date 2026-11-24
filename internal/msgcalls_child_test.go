@@ -3,6 +3,8 @@ package internal_test
 import (
 	"fmt"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"time"
 	"unsafe"
 
@@ -12,13 +14,15 @@ import (
 // The child side of msgcalls_root_test.go (task oh4): two more scenarios
 // of the seq child (streamseq_child_test.go), which move known bytes
 // through sendmsg, sendmmsg, recvmsg and recvmmsg - on the TCP connection
-// (msgScenarioTCP) and between two unconnected UDP sockets of the child
-// (msgScenarioUDP).
+// (msgScenarioTCP), between two unconnected UDP sockets of the child
+// (msgScenarioUDP) and along the msghdr peer paths those two leave out
+// (msgScenarioPeers, task hl4).
 
 // Scenarios.
 const (
-	msgScenarioTCP = "msg-tcp"
-	msgScenarioUDP = "msg-udp"
+	msgScenarioTCP   = "msg-tcp"
+	msgScenarioUDP   = "msg-udp"
+	msgScenarioPeers = "msg-peers"
 )
 
 // The TCP scenario, call by call: a sendmsg of two buffers, a sendmmsg of
@@ -39,6 +43,15 @@ var (
 var (
 	msgUDPDatagrams = []int{10, 20, 30}
 	msgUDPSingle    = 13
+)
+
+// The peers scenario (childMsgPeers): one sendmsg and recvmsg of
+// msgPeerSingle bytes, a recvmmsg of msgPeerBatch from two senders, one
+// unix sendmsg of msgPeerUnix bytes. Every size differs.
+var (
+	msgPeerSingle = 14
+	msgPeerBatch  = []int{7, 9}
+	msgPeerUnix   = 15
 )
 
 // childMsgTCP sends through sendmsg and sendmmsg, then receives through
@@ -98,25 +111,143 @@ func childMsgUDP() (fds [2]int32, addrs [2]string, err error) {
 	return fds, addrs, nil
 }
 
+// msgPeers is what the peers scenario reports: its UDP sockets - the
+// sender connected to the receiver, the other, unconnected sender - and
+// the AF_UNIX datagram sender, with the UDP sockets' bound addresses and
+// the unix receiver's sun_path.
+type msgPeers struct {
+	Send, Recv, Other, Unix       int32
+	SendAddr, RecvAddr, OtherAddr string
+	UnixPath                      string
+}
+
+// childMsgPeers runs the msghdr peer paths TestMsgCallsUDP leaves out
+// (task hl4): a connected UDP sendmsg and an unconnected recvmsg, both
+// with msg_name NULL; a recvmmsg of two datagrams from two senders; an
+// AF_UNIX SOCK_DGRAM sendmsg to a sun_path.
+func childMsgPeers() (*msgPeers, error) {
+	r := &msgPeers{}
+	if err := childMsgPeersUDP(r); err != nil {
+		return nil, err
+	}
+	return r, childMsgPeersUnix(r)
+}
+
+// childMsgPeersUDP connects the sender to the receiver and sends one
+// datagram through sendmsg with msg_name NULL, so its peer is only the
+// socket's remote end; the unconnected receiver takes it through recvmsg
+// with msg_name NULL, so it learns no sender at all. Then the other
+// socket and the sender send one datagram each, in that order, and one
+// recvmmsg takes both, asking for each sender's address: the call's
+// whole byte sum goes to its first message's peer, the other socket.
+func childMsgPeersUDP(r *msgPeers) error {
+	send, recv, bound, err := udpPair()
+	if err != nil {
+		return err
+	}
+	other, otherAddr, err := udpBound()
+	if err != nil {
+		return err
+	}
+	r.Send, r.Recv, r.Other = int32(send), int32(recv), int32(other)
+	r.SendAddr, r.RecvAddr, r.OtherAddr = bound[0].String(), bound[1].String(), otherAddr.String()
+	to := &unix.SockaddrInet4{Addr: bound[1].Addr().As4(), Port: int(bound[1].Port())}
+	if err := unix.Connect(send, to); err != nil {
+		return err
+	}
+	if err := msgCallNamed(unix.SYS_SENDMSG, send, msgPeerSingle, nil); err != nil {
+		return err
+	}
+	if err := msgCallNamed(unix.SYS_RECVMSG, recv, msgPeerSingle, nil); err != nil {
+		return err
+	}
+	if err := unix.Sendto(other, make([]byte, msgPeerBatch[0]), 0, to); err != nil {
+		return err
+	}
+	if _, err := unix.Write(send, make([]byte, msgPeerBatch[1])); err != nil {
+		return err
+	}
+	from := make([]byte, unix.SizeofSockaddrInet4)
+	return mmsgCallNamed(unix.SYS_RECVMMSG, recv, msgPeerBatch, 0, from)
+}
+
+// childMsgPeersUnix binds an AF_UNIX datagram socket to a file name and
+// sends it msgPeerUnix bytes from an unbound one through sendmsg naming
+// that sun_path, as a journald client does. The name lives under /tmp, not
+// $TMPDIR, which may be too long for a sun_path.
+func childMsgPeersUnix(r *msgPeers) error {
+	dir, err := os.MkdirTemp("/tmp", "iormesh-msg")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	r.UnixPath = filepath.Join(dir, "sock")
+	var fds [2]int
+	for i := range fds {
+		if fds[i], err = unix.Socket(unix.AF_UNIX, unix.SOCK_DGRAM, 0); err != nil {
+			return err
+		}
+	}
+	dst := &unix.SockaddrUnix{Name: r.UnixPath}
+	if err := unix.Bind(fds[1], dst); err != nil {
+		return err
+	}
+	r.Unix = int32(fds[0])
+	if n, err := unix.SendmsgBuffers(fds[0], buffers([]int{msgPeerUnix}), nil, dst, 0); err != nil ||
+		n != msgPeerUnix {
+		return fmt.Errorf("unix sendmsg: %d bytes, want %d: %v", n, msgPeerUnix, err)
+	}
+	_, err = unix.Read(fds[1], make([]byte, msgPeerUnix))
+	return err
+}
+
+// msgCallNamed runs sendmsg or recvmsg (nr) on fd with one buffer of size
+// bytes and msg_name name - NULL when name is nil, which x/sys/unix's
+// RecvmsgBuffers never passes - and requires it to move exactly size.
+func msgCallNamed(nr uintptr, fd, size int, name []byte) error {
+	buf := make([]byte, size)
+	iov := unix.Iovec{Base: &buf[0]}
+	iov.SetLen(size)
+	hdr := unix.Msghdr{Iov: &iov}
+	hdr.SetIovlen(1)
+	if name != nil {
+		hdr.Name, hdr.Namelen = &name[0], uint32(len(name))
+	}
+	n, _, errno := unix.Syscall(nr, uintptr(fd), uintptr(unsafe.Pointer(&hdr)), 0)
+	if errno != 0 || int(n) != size {
+		return fmt.Errorf("syscall %d: %d bytes, want %d: %v", nr, n, size, errno)
+	}
+	return nil
+}
+
 // udpPair returns two loopback UDP sockets, bound but not connected, and
 // their addresses.
 func udpPair() (send, recv int, addrs [2]netip.AddrPort, err error) {
 	var fds [2]int
 	for i := range fds {
-		if fds[i], err = unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, 0); err != nil {
+		if fds[i], addrs[i], err = udpBound(); err != nil {
 			return -1, -1, addrs, err
 		}
-		if err = unix.Bind(fds[i], &unix.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); err != nil {
-			return -1, -1, addrs, err
-		}
-		sa, err := unix.Getsockname(fds[i])
-		if err != nil {
-			return -1, -1, addrs, err
-		}
-		in := sa.(*unix.SockaddrInet4)
-		addrs[i] = netip.AddrPortFrom(netip.AddrFrom4(in.Addr), uint16(in.Port))
 	}
 	return fds[0], fds[1], addrs, nil
+}
+
+// udpBound returns a UDP socket bound to a loopback port the kernel picks,
+// and that address.
+func udpBound() (int, netip.AddrPort, error) {
+	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, 0)
+	if err != nil {
+		return -1, netip.AddrPort{}, err
+	}
+	if err = unix.Bind(fd, &unix.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); err != nil {
+		return -1, netip.AddrPort{}, err
+	}
+	sa, err := unix.Getsockname(fd)
+	if err != nil {
+		return -1, netip.AddrPort{}, err
+	}
+	in := sa.(*unix.SockaddrInet4)
+	return fd, netip.AddrPortFrom(netip.AddrFrom4(in.Addr), uint16(in.Port)), nil
 }
 
 // sockaddrBytes is ap as the kernel's struct sockaddr_in, port in network
