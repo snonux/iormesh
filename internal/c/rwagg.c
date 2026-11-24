@@ -232,15 +232,17 @@ static __always_inline __u32 iormesh_rw_lru(struct iormesh_rw_state *st) {
     __u32 oldest = 0;
 
     for (int i = 1; i < IORMESH_RW_SLOTS; i++) {
-        if (st->slot[i].last_ns < st->slot[oldest & (IORMESH_RW_SLOTS - 1)].last_ns)
+        if (st->slot[i].last_ns < st->slot[iormesh_index_mask(oldest, IORMESH_RW_SLOTS)].last_ns)
             oldest = i;
     }
-    return oldest & (IORMESH_RW_SLOTS - 1);
+    return iormesh_index_mask(oldest, IORMESH_RW_SLOTS);
 }
 
 // iormesh_rw_slot_for returns the slot of key (trace_id, fd, ident),
 // claiming a free one - or the least recently used, flushed first - for a
-// new key. The result is always < IORMESH_RW_SLOTS.
+// new key. The result is always < IORMESH_RW_SLOTS; every slot index below
+// goes through iormesh_index_mask (maps.h) so the verifier sees that bound
+// on the indexing register whatever clang makes of the range checks.
 static __always_inline __u32 iormesh_rw_slot_for(struct iormesh_rw_state *st, __u32 tid, __u32 trace_id,
                                                  __s32 fd, __u32 ident) {
     __u32 free = IORMESH_RW_SLOTS;
@@ -255,8 +257,9 @@ static __always_inline __u32 iormesh_rw_slot_for(struct iormesh_rw_state *st, __
     }
     if (free >= IORMESH_RW_SLOTS) {
         free = iormesh_rw_lru(st);
-        iormesh_rw_send(st, &st->slot[free], tid);
+        iormesh_rw_send(st, &st->slot[iormesh_index_mask(free, IORMESH_RW_SLOTS)], tid);
     }
+    free = iormesh_index_mask(free, IORMESH_RW_SLOTS);
     s = &st->slot[free];
     s->trace_id = trace_id;
     s->fd = fd;
@@ -284,7 +287,7 @@ static __always_inline int iormesh_rw_on_enter(__u32 pid, __u32 tid, __u32 trace
     if (!st)
         return 1;
     idx = iormesh_rw_slot_for(st, tid, trace_id, fd, ident);
-    s = &st->slot[idx & (IORMESH_RW_SLOTS - 1)];
+    s = &st->slot[iormesh_index_mask(idx, IORMESH_RW_SLOTS)];
     st->cur_slot = idx + 1;
     st->cur_enter_ns = now;
     st->cur_fd = fd;
@@ -368,9 +371,11 @@ static __always_inline int iormesh_rw_on_exit(void *ctx, __u32 pid, __u32 tid, _
     ident = st->cur_ident;
     st->cur_slot = 0;
     st->cur_held = 0;
+    // The check says "no read or write in flight" (cur_slot 0 wraps idx);
+    // the mask is what bounds the index for the verifier (maps.h, task il4).
     if (!emits || idx >= IORMESH_RW_SLOTS)
         return emits;
-    s = &st->slot[idx];
+    s = &st->slot[iormesh_index_mask(idx, IORMESH_RW_SLOTS)];
     // Stopped, or a flush inside the call (a SIGPIPE the write raised)
     // freed the slot or another key took it: the call can only be sent.
     if (iormesh_rw_stopped() || s->trace_id != trace_id) {

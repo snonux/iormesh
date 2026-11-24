@@ -375,6 +375,23 @@ deferred.
   own for the jars — the jars and `echopeer` must share a
   directory, so a split buys nothing.
 
+- **#31 Verifier-safe array indexes in the BPF C** — a variable
+  index into a map value's array is bounded on the register
+  that indexes, not only by a range check:
+  `iormesh_index_mask(idx, n)` (`internal/c/maps.h`) hides
+  idx's range from clang (`barrier_var`) and masks it with
+  `n - 1` (n a power of two). A plain `if (idx >= n) return;
+  a[idx]` leaves the compiler free to test a copy: Debian clang
+  19.1.7 (the `tracer-arm64` builder) did, and both the el9
+  5.14 and the 7.x verifiers refused `handle_sys_exit_read`
+  (task il4). The source must load whatever reasonable clang
+  builds it, so the fix is in the C, not a pinned compiler.
+  Applied to `rwagg.c`'s slot and `javamark.c`'s frame
+  indexes. Rejected: a newer clang in the builder only — it
+  hides the pattern until the next compiler change; a mask
+  without the barrier — clang drops a mask it proves redundant
+  and is back to the checked copy.
+
 ## Open — raised for M2 (built on the default)
 
 - **#7 Event families, default-on vs opt-in** — signals, epoll

@@ -323,9 +323,18 @@ fails up front with the fix named.
   fine, `iormesh run` traced file and TCP I/O, and 40 of the
   root BPF gate's 42 tests passed, the Java marks' uprobes
   (`ctx->sp`) included; the other two assume x86 (task jl4;
-  docs/testing.md, "arm64 on an emulated el9 kernel"). Until
-  task il4 fixes the source or the builder's
-  clang, the arm64 release tracer does not run on el9.
+  docs/testing.md, "arm64 on an emulated el9 kernel").
+  **Fixed in the source** (task il4, decision #31): every
+  variable slot or frame index goes through
+  `iormesh_index_mask` (`internal/c/maps.h`), so the bound sits
+  on the indexing register whatever clang makes of the check.
+  The builder's clang 19 objects, `-D__TARGET_ARCH_arm64` and
+  `_x86`, then loaded, attached and traced `dd`'s reads on the
+  same aarch64 el9 guest, and the x86 one passed
+  `TestLoaderAttachesEveryFamily` and `TestEl9RecordLayout` on
+  the 7.2 laptop, whose verifier had refused it the same way.
+  Pending: a full `mage containerBuild podman tracer-arm64`
+  release run and the root gate on the guest with that build.
 - **Checks**: each binary's header is verified (ELF machine or
   Mach-O CPU; the tracers must have no ELF interpreter), then
   every Linux binary runs `--help` on Rocky 9 of its own arch.
