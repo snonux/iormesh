@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="794" viewBox="0 0 640 794" font-family="monospace" font-size="11">
+<style>rect{fill:#fff;stroke:#333}rect.host{fill:#e8eef8}rect.app{fill:#eef8e8}rect.socket{fill:#f8f0e8}rect.more{fill:#f4f4f4;stroke-dasharray:3 3}line{stroke:#888}line.unresolved{stroke:#c33;stroke-dasharray:6 4}line.fused{stroke:#36c;stroke-width:1.5}text.title{font-weight:bold}</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<line class="fused" x1="280" y1="76" x2="320" y2="50" marker-end="url(#arrow)"/>
+<line class="fused" x1="280" y1="102" x2="320" y2="76" marker-end="url(#arrow)"/>
+<line class="fused" x1="280" y1="102" x2="320" y2="102" marker-end="url(#arrow)"/>
+<line class="fused" x1="280" y1="128" x2="320" y2="50" marker-end="url(#arrow)"/>
+<line class="fused" x1="280" y1="128" x2="320" y2="102" marker-end="url(#arrow)"/>
+<line class="fused" x1="280" y1="128" x2="320" y2="128" marker-end="url(#arrow)"/>
+<line class="fused" x1="280" y1="154" x2="320" y2="76" marker-end="url(#arrow)"/>
+<line class="fused" x1="280" y1="154" x2="320" y2="128" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="76" x2="20" y2="180" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="76" x2="20" y2="206" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="76" x2="20" y2="232" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="76" x2="20" y2="284" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="76" x2="20" y2="310" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="76" x2="20" y2="336" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="76" x2="20" y2="362" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="76" x2="20" y2="388" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="76" x2="20" y2="596" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="76" x2="20" y2="622" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="76" x2="20" y2="648" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="76" x2="20" y2="674" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="76" x2="20" y2="700" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="76" x2="20" y2="726" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="102" x2="20" y2="466" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="102" x2="20" y2="492" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="102" x2="20" y2="674" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="102" x2="20" y2="726" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="128" x2="20" y2="180" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="128" x2="20" y2="206" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="128" x2="20" y2="232" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="128" x2="20" y2="258" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="128" x2="20" y2="284" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="128" x2="20" y2="310" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="128" x2="20" y2="336" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="128" x2="20" y2="518" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="128" x2="20" y2="544" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="128" x2="20" y2="570" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="128" x2="20" y2="596" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="128" x2="20" y2="622" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="128" x2="20" y2="648" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="128" x2="20" y2="674" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="128" x2="20" y2="700" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="128" x2="20" y2="726" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="154" x2="20" y2="258" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="154" x2="20" y2="414" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="154" x2="20" y2="440" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="154" x2="20" y2="518" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="154" x2="20" y2="596" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="154" x2="20" y2="622" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="154" x2="20" y2="648" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="154" x2="20" y2="674" marker-end="url(#arrow)"/>
+<line class="opened" x1="20" y1="154" x2="20" y2="700" marker-end="url(#arrow)"/>
+<line class="runs_on" x1="20" y1="76" x2="20" y2="50" marker-end="url(#arrow)"/>
+<line class="runs_on" x1="20" y1="102" x2="20" y2="50" marker-end="url(#arrow)"/>
+<line class="runs_on" x1="20" y1="128" x2="20" y2="50" marker-end="url(#arrow)"/>
+<line class="runs_on" x1="20" y1="154" x2="20" y2="50" marker-end="url(#arrow)"/>
+<text class="title" x="20" y="26" text-anchor="start">host local</text>
+<rect class="host" x="20" y="40" width="260" height="20"/>
+<text class="label" x="26" y="54" text-anchor="start">local machine-id</text>
+<rect class="process" x="20" y="66" width="260" height="20"/>
+<text class="label" x="26" y="80" text-anchor="start">billing: java 2483913@1353273770000000</text>
+<rect class="process" x="20" y="92" width="260" height="20"/>
+<text class="label" x="26" y="106" text-anchor="start">inventory: java 2484011@1353274450000000</text>
+<rect class="process" x="20" y="118" width="260" height="20"/>
+<text class="label" x="26" y="132" text-anchor="start">orders: java 2484051@1353275280000000</text>
+<rect class="process" x="20" y="144" width="260" height="20"/>
+<text class="label" x="26" y="158" text-anchor="start">java 2484090@1353275890000000</text>
+<rect class="file" x="20" y="170" width="260" height="20"/>
+<text class="label" x="26" y="184" text-anchor="start">/etc/gai.conf</text>
+<rect class="file" x="20" y="196" width="260" height="20"/>
+<text class="label" x="26" y="210" text-anchor="start">/etc/host.conf</text>
+<rect class="file" x="20" y="222" width="260" height="20"/>
+<text class="label" x="26" y="236" text-anchor="start">/etc/hosts</text>
+<rect class="file" x="20" y="248" width="260" height="20"/>
+<text class="label" x="26" y="262" text-anchor="start">/etc/java/java-25-openjdk/java-25-openj…</text>
+<rect class="file" x="20" y="274" width="260" height="20"/>
+<text class="label" x="26" y="288" text-anchor="start">/etc/resolv.conf</text>
+<rect class="file" x="20" y="300" width="260" height="20"/>
+<text class="label" x="26" y="314" text-anchor="start">/proc/sys/vm/overcommit_memory</text>
+<rect class="file" x="20" y="326" width="260" height="20"/>
+<text class="label" x="26" y="340" text-anchor="start">/tmp/TestMicroservices1125629951/002/bi…</text>
+<rect class="file" x="20" y="352" width="260" height="20"/>
+<text class="label" x="26" y="366" text-anchor="start">/tmp/TestMicroservices1125629951/002/bi…</text>
+<rect class="file" x="20" y="378" width="260" height="20"/>
+<text class="label" x="26" y="392" text-anchor="start">/tmp/TestMicroservices1125629951/002/bi…</text>
+<rect class="file" x="20" y="404" width="260" height="20"/>
+<text class="label" x="26" y="418" text-anchor="start">/tmp/TestMicroservices1125629951/002/ga…</text>
+<rect class="file" x="20" y="430" width="260" height="20"/>
+<text class="label" x="26" y="444" text-anchor="start">/tmp/TestMicroservices1125629951/002/ga…</text>
+<rect class="file" x="20" y="456" width="260" height="20"/>
+<text class="label" x="26" y="470" text-anchor="start">/tmp/TestMicroservices1125629951/002/in…</text>
+<rect class="file" x="20" y="482" width="260" height="20"/>
+<text class="label" x="26" y="496" text-anchor="start">/tmp/TestMicroservices1125629951/002/in…</text>
+<rect class="file" x="20" y="508" width="260" height="20"/>
+<text class="label" x="26" y="522" text-anchor="start">/tmp/TestMicroservices1125629951/002/or…</text>
+<rect class="file" x="20" y="534" width="260" height="20"/>
+<text class="label" x="26" y="548" text-anchor="start">/tmp/TestMicroservices1125629951/002/or…</text>
+<rect class="file" x="20" y="560" width="260" height="20"/>
+<text class="label" x="26" y="574" text-anchor="start">/tmp/TestMicroservices1125629951/002/or…</text>
+<rect class="file" x="20" y="586" width="260" height="20"/>
+<text class="label" x="26" y="600" text-anchor="start">/usr/lib/jvm/java-25-openjdk/conf/secur…</text>
+<rect class="file" x="20" y="612" width="260" height="20"/>
+<text class="label" x="26" y="626" text-anchor="start">/usr/lib/jvm/java-25-openjdk/conf/secur…</text>
+<rect class="file" x="20" y="638" width="260" height="20"/>
+<text class="label" x="26" y="652" text-anchor="start">/usr/lib/jvm/java-25-openjdk/conf/secur…</text>
+<rect class="file" x="20" y="664" width="260" height="20"/>
+<text class="label" x="26" y="678" text-anchor="start">/usr/lib/jvm/java-25-openjdk/lib/libext…</text>
+<rect class="file" x="20" y="690" width="260" height="20"/>
+<text class="label" x="26" y="704" text-anchor="start">/usr/lib/jvm/java-25-openjdk/lib/securi…</text>
+<rect class="file" x="20" y="716" width="260" height="20"/>
+<text class="label" x="26" y="730" text-anchor="start">/usr/lib/jvm/java-25-openjdk/lib/tzdb.d…</text>
+<text class="title" x="320" y="26" text-anchor="start">connections</text>
+<rect class="socket" x="320" y="40" width="260" height="20"/>
+<text class="label" x="326" y="54" text-anchor="start">35d12125bc623638</text>
+<rect class="socket" x="320" y="66" width="260" height="20"/>
+<text class="label" x="326" y="80" text-anchor="start">404a35ad413be54a</text>
+<rect class="socket" x="320" y="92" width="260" height="20"/>
+<text class="label" x="326" y="106" text-anchor="start">88850e4aae916f0d</text>
+<rect class="socket" x="320" y="118" width="260" height="20"/>
+<text class="label" x="326" y="132" text-anchor="start">ae2c175ebd637acd</text>
+</svg>

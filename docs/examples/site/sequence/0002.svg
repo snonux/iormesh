@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="1580" viewBox="0 0 1120 1580" font-family="monospace" font-size="11">
+<style>rect{fill:#fff;stroke:#333}rect.note{fill:#fdf6d8;stroke:#c9b458}rect.carrier{fill:#f4f4ff;stroke:#66c;stroke-dasharray:4 3}line.life{stroke:#bbb;stroke-dasharray:2 2}line.step{stroke:#222}line.time-ordered{stroke:#666;stroke-dasharray:6 4}line.unordered{stroke:#c33;stroke-dasharray:2 3}text.title{font-weight:bold}</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="title" x="10" y="16" text-anchor="start">conversation 0002: java POST /orders</text>
+<rect class="lane" x="35" y="30" width="170" height="32"/>
+<text class="label" x="120" y="43" text-anchor="middle">java</text>
+<text class="label" x="120" y="57" text-anchor="middle">main</text>
+<line class="life" x1="120" y1="62" x2="120" y2="1570"/>
+<rect class="lane" x="255" y="30" width="170" height="32"/>
+<text class="label" x="340" y="43" text-anchor="middle">orders</text>
+<text class="label" x="340" y="57" text-anchor="middle">HTTP-Dispatcher</text>
+<line class="life" x1="340" y1="62" x2="340" y2="1570"/>
+<rect class="lane" x="475" y="30" width="170" height="32"/>
+<text class="label" x="560" y="43" text-anchor="middle">inventory</text>
+<text class="label" x="560" y="57" text-anchor="middle">HTTP-Dispatcher</text>
+<line class="life" x1="560" y1="62" x2="560" y2="1570"/>
+<rect class="lane" x="695" y="30" width="170" height="32"/>
+<text class="label" x="780" y="43" text-anchor="middle">billing</text>
+<text class="label" x="780" y="57" text-anchor="middle">HTTP-Dispatcher</text>
+<line class="life" x1="780" y1="62" x2="780" y2="1570"/>
+<line class="step" x1="120" y1="90" x2="340" y2="90" marker-end="url(#arrow)"/>
+<text class="label" x="230" y="86" text-anchor="middle">POST /orders</text>
+<rect class="note" x="346" y="108" width="260" height="16"/>
+<text class="label" x="350" y="120" text-anchor="start">open /etc/host.conf</text>
+<rect class="note" x="346" y="138" width="260" height="16"/>
+<text class="label" x="350" y="150" text-anchor="start">read /etc/host.conf (2 calls)</text>
+<rect class="note" x="346" y="168" width="260" height="16"/>
+<text class="label" x="350" y="180" text-anchor="start">open /etc/resolv.conf</text>
+<rect class="note" x="346" y="198" width="260" height="16"/>
+<text class="label" x="350" y="210" text-anchor="start">read /etc/resolv.conf (2 calls)</text>
+<rect class="note" x="346" y="228" width="260" height="16"/>
+<text class="label" x="350" y="240" text-anchor="start">open /etc/hosts</text>
+<rect class="note" x="346" y="258" width="260" height="16"/>
+<text class="label" x="350" y="270" text-anchor="start">read /etc/hosts</text>
+<rect class="note" x="346" y="288" width="260" height="16"/>
+<text class="label" x="350" y="300" text-anchor="start">open /etc/hosts</text>
+<rect class="note" x="346" y="318" width="260" height="16"/>
+<text class="label" x="350" y="330" text-anchor="start">read /etc/hosts (3 calls)</text>
+<rect class="note" x="346" y="348" width="260" height="16"/>
+<text class="label" x="350" y="360" text-anchor="start">open /etc/gai.conf</text>
+<rect class="note" x="346" y="378" width="260" height="16"/>
+<text class="label" x="350" y="390" text-anchor="start">read /etc/gai.conf</text>
+<rect class="note" x="346" y="408" width="260" height="16"/>
+<text class="label" x="350" y="420" text-anchor="start">open /etc/java/java-25-openjdk/java-25-…</text>
+<rect class="note" x="346" y="438" width="260" height="16"/>
+<text class="label" x="350" y="450" text-anchor="start">read /etc/java/java-25-openjd… (3 calls)</text>
+<line class="step" x1="340" y1="480" x2="560" y2="480" marker-end="url(#arrow)"/>
+<text class="label" x="450" y="476" text-anchor="middle">POST /inventory/reserve</text>
+<rect class="note" x="566" y="498" width="260" height="16"/>
+<text class="label" x="570" y="510" text-anchor="start">create /tmp/TestMicroservices1125629951…</text>
+<rect class="note" x="566" y="528" width="260" height="16"/>
+<text class="label" x="570" y="540" text-anchor="start">write /tmp/TestMicroservices1125629951/…</text>
+<rect class="note" x="566" y="558" width="260" height="16"/>
+<text class="label" x="570" y="570" text-anchor="start">rename /tmp/TestMicroservices1125629951…</text>
+<rect class="note" x="566" y="588" width="260" height="16"/>
+<text class="label" x="570" y="600" text-anchor="start">open /usr/lib/jvm/java-25-openjdk/lib/t…</text>
+<rect class="note" x="566" y="618" width="260" height="16"/>
+<text class="label" x="570" y="630" text-anchor="start">read /usr/lib/jvm/java-25-op… (13 calls)</text>
+<rect class="note" x="566" y="648" width="260" height="16"/>
+<text class="label" x="570" y="660" text-anchor="start">open /usr/lib/jvm/java-25-openjdk/lib/t…</text>
+<rect class="note" x="566" y="678" width="260" height="16"/>
+<text class="label" x="570" y="690" text-anchor="start">read /usr/lib/jvm/java-25-op… (13 calls)</text>
+<line class="step" x1="560" y1="720" x2="340" y2="720" marker-end="url(#arrow)"/>
+<text class="label" x="450" y="716" text-anchor="middle">200</text>
+<line class="step" x1="340" y1="750" x2="780" y2="750" marker-end="url(#arrow)"/>
+<text class="label" x="560" y="746" text-anchor="middle">POST /billing/charge</text>
+<rect class="note" x="786" y="768" width="260" height="16"/>
+<text class="label" x="790" y="780" text-anchor="start">open /etc/host.conf</text>
+<rect class="note" x="786" y="798" width="260" height="16"/>
+<text class="label" x="790" y="810" text-anchor="start">read /etc/host.conf (2 calls)</text>
+<rect class="note" x="786" y="828" width="260" height="16"/>
+<text class="label" x="790" y="840" text-anchor="start">open /etc/resolv.conf</text>
+<rect class="note" x="786" y="858" width="260" height="16"/>
+<text class="label" x="790" y="870" text-anchor="start">read /etc/resolv.conf (2 calls)</text>
+<rect class="note" x="786" y="888" width="260" height="16"/>
+<text class="label" x="790" y="900" text-anchor="start">open /etc/hosts</text>
+<rect class="note" x="786" y="918" width="260" height="16"/>
+<text class="label" x="790" y="930" text-anchor="start">read /etc/hosts</text>
+<rect class="note" x="786" y="948" width="260" height="16"/>
+<text class="label" x="790" y="960" text-anchor="start">open /etc/hosts</text>
+<rect class="note" x="786" y="978" width="260" height="16"/>
+<text class="label" x="790" y="990" text-anchor="start">read /etc/hosts (3 calls)</text>
+<rect class="note" x="786" y="1008" width="260" height="16"/>
+<text class="label" x="790" y="1020" text-anchor="start">open /etc/gai.conf</text>
+<rect class="note" x="786" y="1038" width="260" height="16"/>
+<text class="label" x="790" y="1050" text-anchor="start">read /etc/gai.conf</text>
+<rect class="note" x="786" y="1068" width="260" height="16"/>
+<text class="label" x="790" y="1080" text-anchor="start">create /tmp/TestMicroservices1125629951…</text>
+<rect class="note" x="786" y="1098" width="260" height="16"/>
+<text class="label" x="790" y="1110" text-anchor="start">write /tmp/TestMicroservices1125629951/…</text>
+<rect class="note" x="786" y="1128" width="260" height="16"/>
+<text class="label" x="790" y="1140" text-anchor="start">rename /tmp/TestMicroservices1125629951…</text>
+<rect class="note" x="786" y="1158" width="260" height="16"/>
+<text class="label" x="790" y="1170" text-anchor="start">open /usr/lib/jvm/java-25-openjdk/lib/t…</text>
+<rect class="note" x="786" y="1188" width="260" height="16"/>
+<text class="label" x="790" y="1200" text-anchor="start">read /usr/lib/jvm/java-25-op… (13 calls)</text>
+<rect class="note" x="786" y="1218" width="260" height="16"/>
+<text class="label" x="790" y="1230" text-anchor="start">open /usr/lib/jvm/java-25-openjdk/lib/t…</text>
+<rect class="note" x="786" y="1248" width="260" height="16"/>
+<text class="label" x="790" y="1260" text-anchor="start">read /usr/lib/jvm/java-25-op… (13 calls)</text>
+<line class="step" x1="780" y1="1290" x2="340" y2="1290" marker-end="url(#arrow)"/>
+<text class="label" x="560" y="1286" text-anchor="middle">200</text>
+<rect class="note" x="346" y="1308" width="260" height="16"/>
+<text class="label" x="350" y="1320" text-anchor="start">create /tmp/TestMicroservices1125629951…</text>
+<rect class="note" x="346" y="1338" width="260" height="16"/>
+<text class="label" x="350" y="1350" text-anchor="start">write /tmp/TestMicroservices1125629951/…</text>
+<rect class="note" x="346" y="1368" width="260" height="16"/>
+<text class="label" x="350" y="1380" text-anchor="start">rename /tmp/TestMicroservices1125629951…</text>
+<rect class="note" x="346" y="1398" width="260" height="16"/>
+<text class="label" x="350" y="1410" text-anchor="start">open /usr/lib/jvm/java-25-openjdk/lib/t…</text>
+<rect class="note" x="346" y="1428" width="260" height="16"/>
+<text class="label" x="350" y="1440" text-anchor="start">read /usr/lib/jvm/java-25-op… (13 calls)</text>
+<rect class="note" x="346" y="1458" width="260" height="16"/>
+<text class="label" x="350" y="1470" text-anchor="start">open /usr/lib/jvm/java-25-openjdk/lib/t…</text>
+<rect class="note" x="346" y="1488" width="260" height="16"/>
+<text class="label" x="350" y="1500" text-anchor="start">read /usr/lib/jvm/java-25-op… (13 calls)</text>
+<line class="step" x1="340" y1="1530" x2="120" y2="1530" marker-end="url(#arrow)"/>
+<text class="label" x="230" y="1526" text-anchor="middle">201</text>
+</svg>

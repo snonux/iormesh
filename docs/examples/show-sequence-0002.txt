@@ -1,0 +1,159 @@
+conversation 0002  2026-11-24 09:24:22.477 UTC  java  POST /orders  (3 hops)
+services     java, orders, inventory, billing
+lifeline 1   java/main  host1 pid 2484090@1353275890000000 tid 2484092
+lifeline 2   orders/HTTP-Dispatcher  host1 pid 2484051@1353275280000000 tid 2484499
+lifeline 3   inventory/HTTP-Dispatcher  host1 pid 2484011@1353274450000000 tid 2484398
+lifeline 4   billing/HTTP-Dispatcher  host1 pid 2483913@1353273770000000 tid 2484384
+  1  causal        java/main -> orders/HTTP-Dispatcher: POST /orders [36 B]
+                     at jdk.internal.net.http.HttpClientImpl#send(HttpClientImpl.java:902)
+                     ref iormesh-it/local/host1-79d2d3d5/5112
+  2  causal        orders/HTTP-Dispatcher: open /etc/host.conf [15.676µs]
+                     ref iormesh-it/local/host1-79d2d3d5/2730
+  3  causal        orders/HTTP-Dispatcher: read /etc/host.conf (2 calls) [9 B, 7.48µs]
+                     ref iormesh-it/local/host1-79d2d3d5/2732 (first of 2)
+                     last iormesh-it/local/host1-79d2d3d5/2733
+                     run iormeshctl query -host host1 -thread 2484499 -file /etc/host.conf -from 2026-11-24T09:24:22.769512442Z -to 2026-11-24T09:24:22.769522774Z
+  4  causal        orders/HTTP-Dispatcher: open /etc/resolv.conf [8.402µs]
+                     ref iormesh-it/local/host1-79d2d3d5/2735
+  5  causal        orders/HTTP-Dispatcher: read /etc/resolv.conf (2 calls) [920 B, 6.525µs]
+                     ref iormesh-it/local/host1-79d2d3d5/2737 (first of 2)
+                     last iormesh-it/local/host1-79d2d3d5/2738
+                     run iormeshctl query -host host1 -thread 2484499 -file /etc/resolv.conf -from 2026-11-24T09:24:22.769552097Z -to 2026-11-24T09:24:22.769565593Z
+  6  causal        orders/HTTP-Dispatcher: open /etc/hosts [5.851µs]
+                     ref iormesh-it/local/host1-79d2d3d5/2742
+  7  causal        orders/HTTP-Dispatcher: read /etc/hosts [4096 B, 3.395µs]
+                     ref iormesh-it/local/host1-79d2d3d5/2744
+  8  causal        orders/HTTP-Dispatcher: open /etc/hosts [10.693µs]
+                     ref iormesh-it/local/host1-79d2d3d5/2752
+  9  causal        orders/HTTP-Dispatcher: read /etc/hosts (3 calls) [5869 B, 7.422µs]
+                     ref iormesh-it/local/host1-79d2d3d5/2754 (first of 3)
+                     last iormesh-it/local/host1-79d2d3d5/2756
+                     run iormeshctl query -host host1 -thread 2484499 -file /etc/hosts -from 2026-11-24T09:24:22.7708436Z -to 2026-11-24T09:24:22.770897912Z
+ 10  causal        orders/HTTP-Dispatcher: open /etc/gai.conf [4.789µs]
+                     ref iormesh-it/local/host1-79d2d3d5/2758
+ 11  causal        orders/HTTP-Dispatcher: read /etc/gai.conf [805ns]
+                     ref iormesh-it/local/host1-79d2d3d5/2761
+ 12  causal        orders/HTTP-Dispatcher: open /etc/java/java-25-openjdk/java-25-openjdk/conf/net.properties [20.887µs]
+                     at java.io.FileInputStream#open(FileInputStream.java:-1)
+                     ref iormesh-it/local/host1-79d2d3d5/3581
+ 13  causal        orders/HTTP-Dispatcher: read /etc/java/java-25-openjdk/java-25-openjdk/conf/net.properties (3 calls) [7341 B, 16.783µs]
+                     at java.io.FileInputStream#read(FileInputStream.java:-1) (first call)
+                     ref iormesh-it/local/host1-79d2d3d5/3583 (first of 3)
+                     last iormesh-it/local/host1-79d2d3d5/3585
+                     run iormeshctl query -host host1 -thread 2484499 -file /etc/java/java-25-openjdk/java-25-openjdk/conf/net.properties -from 2026-11-24T09:24:23.295446048Z -to 2026-11-24T09:24:23.29634942Z
+ 14  causal        orders/HTTP-Dispatcher -> inventory/HTTP-Dispatcher: POST /inventory/reserve [36 B]
+                     at jdk.internal.net.http.HttpClientImpl#send(HttpClientImpl.java:902)
+                     ref iormesh-it/local/host1-79d2d3d5/3950
+ 15  causal        inventory/HTTP-Dispatcher: create /tmp/TestMicroservices1125629951/002/inventory.d/reservation-42.json.tmp [57.72µs]
+                     at java.io.FileOutputStream#open(FileOutputStream.java:-1)
+                     ref iormesh-it/local/host1-79d2d3d5/3724
+ 16  causal        inventory/HTTP-Dispatcher: write /tmp/TestMicroservices1125629951/002/inventory.d/reservation-42.json.tmp [36 B, 19.159µs]
+                     at java.io.FileOutputStream#write(FileOutputStream.java:-1)
+                     ref iormesh-it/local/host1-79d2d3d5/3726
+ 17  causal        inventory/HTTP-Dispatcher: rename /tmp/TestMicroservices1125629951/002/inventory.d/reservation-42.json.tmp -> /tmp/TestMicroservices1125629951/002/inventory.d/reservation-42.json [38.073µs]
+                     at sun.nio.fs.UnixNativeDispatcher#rename(UnixNativeDispatcher.java:-1)
+                     ref iormesh-it/local/host1-79d2d3d5/3729
+ 18  causal        inventory/HTTP-Dispatcher: open /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat [39.281µs]
+                     at java.io.FileInputStream#open(FileInputStream.java:-1)
+                     ref iormesh-it/local/host1-79d2d3d5/3824
+ 19  causal        inventory/HTTP-Dispatcher: read /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat (13 calls) [104000 B, 71.644µs]
+                     at java.io.FileInputStream#read(FileInputStream.java:-1) (first call)
+                     ref iormesh-it/local/host1-79d2d3d5/3826 (first of 13)
+                     last iormesh-it/local/host1-79d2d3d5/3859
+                     run iormeshctl query -host host1 -thread 2484398 -file /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat -from 2026-11-24T09:24:23.570018246Z -to 2026-11-24T09:24:23.578234041Z
+ 20  causal        inventory/HTTP-Dispatcher: open /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat [31.671µs]
+                     at java.io.FileInputStream#open(FileInputStream.java:-1)
+                     ref iormesh-it/local/host1-79d2d3d5/3865
+ 21  causal        inventory/HTTP-Dispatcher: read /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat (13 calls) [104000 B, 61.48µs]
+                     at java.io.FileInputStream#read(FileInputStream.java:-1) (first call)
+                     ref iormesh-it/local/host1-79d2d3d5/3867 (first of 13)
+                     last iormesh-it/local/host1-79d2d3d5/3891
+                     run iormeshctl query -host host1 -thread 2484398 -file /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat -from 2026-11-24T09:24:23.591623822Z -to 2026-11-24T09:24:23.595697025Z
+ 22  causal        inventory/HTTP-Dispatcher -> orders/HTTP-Dispatcher: 200 [8 B, 313.527721ms]
+                     at sun.net.httpserver.HttpExchangeImpl#close(HttpExchangeImpl.java:67)
+                     ref iormesh-it/local/host1-79d2d3d5/3909
+ 23  causal        orders/HTTP-Dispatcher -> billing/HTTP-Dispatcher: POST /billing/charge [32 B]
+                     at jdk.internal.net.http.HttpClientImpl#send(HttpClientImpl.java:902)
+                     ref iormesh-it/local/host1-79d2d3d5/4838
+ 24  causal        billing/HTTP-Dispatcher: open /etc/host.conf [15.911µs]
+                     ref iormesh-it/local/host1-79d2d3d5/4019
+ 25  causal        billing/HTTP-Dispatcher: read /etc/host.conf (2 calls) [9 B, 8.481µs]
+                     ref iormesh-it/local/host1-79d2d3d5/4021 (first of 2)
+                     last iormesh-it/local/host1-79d2d3d5/4022
+                     run iormeshctl query -host host1 -thread 2484384 -file /etc/host.conf -from 2026-11-24T09:24:23.753779359Z -to 2026-11-24T09:24:23.753790166Z
+ 26  causal        billing/HTTP-Dispatcher: open /etc/resolv.conf [8.471µs]
+                     ref iormesh-it/local/host1-79d2d3d5/4024
+ 27  causal        billing/HTTP-Dispatcher: read /etc/resolv.conf (2 calls) [920 B, 6.144µs]
+                     ref iormesh-it/local/host1-79d2d3d5/4026 (first of 2)
+                     last iormesh-it/local/host1-79d2d3d5/4027
+                     run iormeshctl query -host host1 -thread 2484384 -file /etc/resolv.conf -from 2026-11-24T09:24:23.753819418Z -to 2026-11-24T09:24:23.753833446Z
+ 28  causal        billing/HTTP-Dispatcher: open /etc/hosts [5.574µs]
+                     ref iormesh-it/local/host1-79d2d3d5/4031
+ 29  causal        billing/HTTP-Dispatcher: read /etc/hosts [4096 B, 3.308µs]
+                     ref iormesh-it/local/host1-79d2d3d5/4033
+ 30  causal        billing/HTTP-Dispatcher: open /etc/hosts [12.799µs]
+                     ref iormesh-it/local/host1-79d2d3d5/4041
+ 31  causal        billing/HTTP-Dispatcher: read /etc/hosts (3 calls) [5869 B, 8.761µs]
+                     ref iormesh-it/local/host1-79d2d3d5/4043 (first of 3)
+                     last iormesh-it/local/host1-79d2d3d5/4045
+                     run iormeshctl query -host host1 -thread 2484384 -file /etc/hosts -from 2026-11-24T09:24:23.756158187Z -to 2026-11-24T09:24:23.756233048Z
+ 32  causal        billing/HTTP-Dispatcher: open /etc/gai.conf [6.315µs]
+                     ref iormesh-it/local/host1-79d2d3d5/4047
+ 33  causal        billing/HTTP-Dispatcher: read /etc/gai.conf [1.3µs]
+                     ref iormesh-it/local/host1-79d2d3d5/4050
+ 34  causal        billing/HTTP-Dispatcher: create /tmp/TestMicroservices1125629951/002/billing.d/invoice-42.json.tmp [55.347µs]
+                     at java.io.FileOutputStream#open(FileOutputStream.java:-1)
+                     ref iormesh-it/local/host1-79d2d3d5/4674
+ 35  causal        billing/HTTP-Dispatcher: write /tmp/TestMicroservices1125629951/002/billing.d/invoice-42.json.tmp [32 B, 18.693µs]
+                     at java.io.FileOutputStream#write(FileOutputStream.java:-1)
+                     ref iormesh-it/local/host1-79d2d3d5/4676
+ 36  causal        billing/HTTP-Dispatcher: rename /tmp/TestMicroservices1125629951/002/billing.d/invoice-42.json.tmp -> /tmp/TestMicroservices1125629951/002/billing.d/invoice-42.json [30.64µs]
+                     at sun.nio.fs.UnixNativeDispatcher#rename(UnixNativeDispatcher.java:-1)
+                     ref iormesh-it/local/host1-79d2d3d5/4679
+ 37  causal        billing/HTTP-Dispatcher: open /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat [32.102µs]
+                     at java.io.FileInputStream#open(FileInputStream.java:-1)
+                     ref iormesh-it/local/host1-79d2d3d5/4761
+ 38  causal        billing/HTTP-Dispatcher: read /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat (13 calls) [104000 B, 76.09µs]
+                     at java.io.FileInputStream#read(FileInputStream.java:-1) (first call)
+                     ref iormesh-it/local/host1-79d2d3d5/4763 (first of 13)
+                     last iormesh-it/local/host1-79d2d3d5/4787
+                     run iormeshctl query -host host1 -thread 2484384 -file /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat -from 2026-11-24T09:24:24.098697097Z -to 2026-11-24T09:24:24.103677721Z
+ 39  causal        billing/HTTP-Dispatcher: open /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat [32.862µs]
+                     at java.io.FileInputStream#open(FileInputStream.java:-1)
+                     ref iormesh-it/local/host1-79d2d3d5/4793
+ 40  causal        billing/HTTP-Dispatcher: read /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat (13 calls) [104000 B, 86.094µs]
+                     at java.io.FileInputStream#read(FileInputStream.java:-1) (first call)
+                     ref iormesh-it/local/host1-79d2d3d5/4795 (first of 13)
+                     last iormesh-it/local/host1-79d2d3d5/4819
+                     run iormeshctl query -host host1 -thread 2484384 -file /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat -from 2026-11-24T09:24:24.118797724Z -to 2026-11-24T09:24:24.125867749Z
+ 41  causal        billing/HTTP-Dispatcher -> orders/HTTP-Dispatcher: 200 [7 B, 454.514195ms]
+                     at sun.net.httpserver.HttpsExchangeImpl#close(HttpsExchangeImpl.java:67)
+                     ref iormesh-it/local/host1-79d2d3d5/4829
+ 42  causal        orders/HTTP-Dispatcher: create /tmp/TestMicroservices1125629951/002/orders.d/order-42.json.tmp [55.149µs]
+                     at java.io.FileOutputStream#open(FileOutputStream.java:-1)
+                     ref iormesh-it/local/host1-79d2d3d5/4854
+ 43  causal        orders/HTTP-Dispatcher: write /tmp/TestMicroservices1125629951/002/orders.d/order-42.json.tmp [36 B, 17.605µs]
+                     at java.io.FileOutputStream#write(FileOutputStream.java:-1)
+                     ref iormesh-it/local/host1-79d2d3d5/4857
+ 44  causal        orders/HTTP-Dispatcher: rename /tmp/TestMicroservices1125629951/002/orders.d/order-42.json.tmp -> /tmp/TestMicroservices1125629951/002/orders.d/order-42.json [45.881µs]
+                     at sun.nio.fs.UnixNativeDispatcher#rename(UnixNativeDispatcher.java:-1)
+                     ref iormesh-it/local/host1-79d2d3d5/4860
+ 45  causal        orders/HTTP-Dispatcher: open /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat [34.421µs]
+                     at java.io.FileInputStream#open(FileInputStream.java:-1)
+                     ref iormesh-it/local/host1-79d2d3d5/4984
+ 46  causal        orders/HTTP-Dispatcher: read /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat (13 calls) [104000 B, 88.388µs]
+                     at java.io.FileInputStream#read(FileInputStream.java:-1) (first call)
+                     ref iormesh-it/local/host1-79d2d3d5/4986 (first of 13)
+                     last iormesh-it/local/host1-79d2d3d5/5010
+                     run iormeshctl query -host host1 -thread 2484499 -file /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat -from 2026-11-24T09:24:24.244587077Z -to 2026-11-24T09:24:24.252208563Z
+ 47  causal        orders/HTTP-Dispatcher: open /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat [40.471µs]
+                     at java.io.FileInputStream#open(FileInputStream.java:-1)
+                     ref iormesh-it/local/host1-79d2d3d5/5016
+ 48  causal        orders/HTTP-Dispatcher: read /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat (13 calls) [104000 B, 58.136µs]
+                     at java.io.FileInputStream#read(FileInputStream.java:-1) (first call)
+                     ref iormesh-it/local/host1-79d2d3d5/5018 (first of 13)
+                     last iormesh-it/local/host1-79d2d3d5/5042
+                     run iormeshctl query -host host1 -thread 2484499 -file /usr/lib/jvm/java-25-openjdk/lib/tzdb.dat -from 2026-11-24T09:24:24.265135999Z -to 2026-11-24T09:24:24.267939918Z
+ 49  causal        orders/HTTP-Dispatcher -> java/main: 201 [33 B, 1.860686111s]
+                     at sun.net.httpserver.HttpsExchangeImpl#close(HttpsExchangeImpl.java:67)
+                     ref iormesh-it/local/host1-79d2d3d5/5052
