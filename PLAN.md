@@ -3074,11 +3074,34 @@ deferred.
   A service manager — a process whose executable is named
   `systemd`, pid 1 or a user manager, holding a socket-activated
   listener — is never a target, at start or later: tracing it
-  would follow every service it spawns. A port only the manager
-  holds fails the start (the service is not running) — also for
-  `expand -apply` on an idle socket-activated service: wake the
-  service (one request) and deploy again, or enroll it by
-  `-pattern`. A new owner that listens while the old one still
+  would follow every service it spawns. Task lk4 settles a port
+  only the manager holds (an idle socket-activated service, also
+  under `expand -apply`): *wait for the activated service,
+  conservatively.* The session starts with no target, pins the
+  listening sockets the manager holds (their inodes), and
+  re-resolves about once a second within `-listen-grace` (0
+  keeps the old refusal at start). With no original owner there
+  is no owner key to compare against, so the socket itself and
+  the manager's unit layout identify the service: a holder is
+  adopted only if it (1) holds one of the pinned sockets — still
+  listening on the port, the very socket systemd hands to the
+  service it activates, not merely the port — (2) is not itself
+  a service manager, and (3) runs in a `.service` unit cgroup
+  (slices skipped; a delegated sub-cgroup of the unit counts)
+  inside the holding manager's subtree: anywhere for pid 1, under
+  `user@UID.service` for a user manager. A login-session scope, a
+  shell or another unit's process holding a copy of the fd is
+  refused and named once. The parent pid is not checked: a
+  wrapper script that forks its server is still the service. The
+  uid is not checked either (`User=`). The adopted holders are
+  then remembered as start holders are (qj4's earliest-started
+  executable), so later restarts and re-activations follow the
+  ordinary rules above. No activation within the grace ends the
+  session `targets_exited`, stderr saying so. Not covered:
+  `Accept=yes` sockets (each instance gets a connection, never
+  the listener) and a socket unit restarted while waiting (new
+  sockets, not the pinned ones). No unit name is read: that needs
+  systemd's D-Bus, which the tracer does not use. A new owner that listens while the old one still
   runs (an overlapping restart) is adopted once the old one
   exits, within the grace.
 - **#9 Capture policy for argv and env** — argv is in, but it

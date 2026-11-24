@@ -3,6 +3,7 @@ package target
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -84,7 +85,8 @@ func IsTracer(exe, selfExe string) bool {
 // pid 1 or a user manager keeps the socket and hands it to the service)
 // is never an owner (decision #23, task mh4): tracing it would follow
 // every service it spawns. A port only a manager holds is an error of
-// its own — the service is not running.
+// its own, ErrManagerOnly — the service is not running; a port session
+// may wait for its activation instead (ManagerListener, task lk4).
 func (p ProcFS) ListenOwners(port uint16) ([]uint32, error) {
 	hs, err := p.ListenHolders(port)
 	if err != nil {
@@ -110,14 +112,9 @@ type Holder struct {
 // ListenHolders is ListenOwners with each owner's start time (Holder),
 // the same rules and errors.
 func (p ProcFS) ListenHolders(port uint16) ([]Holder, error) {
-	inodes := map[string]bool{}
-	for _, f := range []string{"tcp", "tcp6"} {
-		if err := listenInodes(filepath.Join(p.Root, "net", f), port, inodes); err != nil {
-			return nil, err
-		}
-	}
-	if len(inodes) == 0 {
-		return nil, fmt.Errorf("%w: nothing listens on TCP port %d", ErrSpec, port)
+	inodes, err := p.listenSockets(port)
+	if err != nil {
+		return nil, err
 	}
 	owners, err := p.socketOwners(inodes)
 	if err != nil {
@@ -136,10 +133,30 @@ func (p ProcFS) ListenHolders(port uint16) ([]Holder, error) {
 		}
 	}
 	if len(apps) == 0 {
-		return nil, fmt.Errorf("%w: only the service manager (pid %v) holds the listener on TCP port %d "+
-			"(socket activation; the service is not running)", ErrSpec, managers, port)
+		return nil, fmt.Errorf("%w: %w (pid %v) on TCP port %d "+
+			"(socket activation; the service is not running)", ErrSpec, ErrManagerOnly, managers, port)
 	}
 	return apps, nil
+}
+
+// ErrManagerOnly marks a ListenHolders error for a port whose listener
+// only a service manager holds: an idle socket-activated service. A port
+// session may wait for the service instead (ManagerListener, task lk4).
+var ErrManagerOnly = errors.New("only the service manager holds the listener")
+
+// listenSockets returns the inodes of the TCP sockets (IPv4 or IPv6)
+// listening on port; none is an error.
+func (p ProcFS) listenSockets(port uint16) (map[string]bool, error) {
+	inodes := map[string]bool{}
+	for _, f := range []string{"tcp", "tcp6"} {
+		if err := listenInodes(filepath.Join(p.Root, "net", f), port, inodes); err != nil {
+			return nil, err
+		}
+	}
+	if len(inodes) == 0 {
+		return nil, fmt.Errorf("%w: nothing listens on TCP port %d", ErrSpec, port)
+	}
+	return inodes, nil
 }
 
 // IsServiceManager reports whether exe, a process's executable, is a

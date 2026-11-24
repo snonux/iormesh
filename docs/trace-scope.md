@@ -29,13 +29,22 @@ event families `iormesh run -trace-families` adds (see
   it runs in the original's cgroup — its systemd unit or login
   session scope (no escalation: the uid must match); without a
   known cgroup only the exact path is followed (task kk4). A
-  socket-activated port that only
-  systemd holds — the service is idle, not running — is refused
-  at start, also by `expand -apply`: systemd itself is never a
-  target, since tracing it would follow every service it
-  spawns. Wake the service (one request) and deploy again, or
-  enroll it by `-pattern`. *Who exists, spawned by whom, for
-  how long.*
+  socket-activated port that only systemd holds — the service is
+  idle, not running — starts a session with no target, also
+  under `expand -apply` (task lk4): systemd itself is never a
+  target, since tracing it would follow every service it spawns.
+  The session pins the listening socket systemd holds and waits
+  up to `-listen-grace` for the service systemd activates: a
+  process that holds that very socket and runs in a `.service`
+  unit of that manager (pid 1's units, or below a user manager's
+  `user@UID.service`) is adopted, and from then on followed like
+  a start owner. A shell or another unit's process holding a copy
+  of the fd is refused and named on stderr. No activation within
+  the grace ends the session; `-listen-grace 0` refuses the port
+  at start as before. Not covered: `Accept=yes` sockets (each
+  instance gets a connection, never the listener) and a socket
+  unit restarted while the session waits. *Who exists, spawned
+  by whom, for how long.*
 - **Filesystem** — the full syscall surface, not just data
   movement: open/close, read/write/pread, stat family, create
   (open O_CREAT, creat, mkdir), delete (unlink/rmdir), rename &

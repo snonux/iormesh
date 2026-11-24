@@ -1267,6 +1267,19 @@ scenarios landing first (principle #1).
    `targets_exited` with a stderr line saying so; 0 ends at
    once. `TestListenPortFollowsRestart` (integration, root)
    kills and restarts an `edgepeer port-owner` on one port.
+   Task lk4: a port only a manager holds is `target.ErrManagerOnly`;
+   with a grace, `portActivation` pins it
+   (`ProcFS.ManagerListener`: the manager-held LISTEN inodes and
+   each manager's unit root, `/` for pid 1, the parent of a user
+   manager's `init.scope`), the session starts with no target and
+   `awaitActivation` stands in for the follow: each second
+   `ProcFS.ActivatedHolders` lists holders of a pinned inode still
+   listening on the port, adopting those in a `.service` unit
+   below a root (slices skipped, `user@*.service` excluded) and
+   naming the rest once. The first adopted holders are
+   `remember`ed as start owners, the pin dropped. Unit tests use
+   the fake procfs (`internal/target/activation_test.go`) and the
+   fake port (`internal/cli/activation_test.go`).
 
    Pattern sessions load the object with `IORMESH_EXEC_WATCH`
    set: every exec of an untraced process is reported as an

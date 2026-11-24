@@ -114,7 +114,8 @@ program under the same uid (the same executable, or an upgraded
 path with the same base name in the same cgroup) and takes the
 port within `-listen-grace` (2m by default; add e.g.
 `-listen-grace 5m` after HOST for a slow restart). A port only
-systemd holds (socket activation, service idle) is refused.
+systemd holds (socket activation, service idle) waits within
+`-listen-grace` for the service systemd activates on it.
 `-duration` bounds the session (4h by default, 7 days at most).
 [trace-scope.md](trace-scope.md) says what gets traced. For Java
 stack attribution add

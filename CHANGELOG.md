@@ -81,7 +81,8 @@ then the features and changes of the latest round.
   sessions `ensure` leaves alone
   ([architecture.md](docs/architecture.md)).
 - A `-listen-port` that only systemd holds (socket activation)
-  fails the start ([trace-scope.md](docs/trace-scope.md)).
+  waits within `-listen-grace` for the activated service instead
+  of failing the start ([trace-scope.md](docs/trace-scope.md)).
 - Port follow adopts an upgraded executable path in the same
   cgroup ([trace-scope.md](docs/trace-scope.md)).
 - `iormesh start` appends the journal's tail when a run exits
