@@ -168,7 +168,7 @@ func (s *session) handle(rec any) error {
 	switch r := rec.(type) {
 	case *types.ExecArgvEvent:
 		if r.EventType == types.PROCESS_ARGV_EVENT {
-			s.late.exec(r.Pid)
+			s.late.execBoot(r.Pid, r.Time)
 			argv, cut := execArgv(r)
 			return s.c.Exec(execInfo(r, argv, cut))
 		}
@@ -211,7 +211,7 @@ func (s *session) judgeExec(ev *types.ExecArgvEvent) error {
 	if err := s.adopt(ev.Pid, processIdentity(ev.Pid), gap); err != nil {
 		return err
 	}
-	s.late.exec(ev.Pid)
+	s.late.execBoot(ev.Pid, ev.Time)
 	return s.c.Exec(execInfo(ev, argv, cut))
 }
 

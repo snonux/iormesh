@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"iormesh/internal/correlate"
 	"iormesh/internal/javaattach"
 	"iormesh/internal/target"
 	"iormesh/internal/types"
@@ -467,11 +469,122 @@ func (l *hookLoader) count(pid uint32) int {
 	return l.loads[pid]
 }
 
-// javaExec is the exec record of pid starting a JVM.
+// javaExec is the exec record of pid starting a JVM now (on the boot
+// clock, as the BPF stamps it): an exec after a released pid's own load
+// is a new image (task dl4).
 func javaExec(pid uint32) []any {
-	rec := execRecord(pid, 40, "/jdk/bin/java", "/jdk/bin/java", "-jar", "w.jar")
+	return []any{javaExecAt(pid, bootNow())}
+}
+
+// javaExecAt is the record of an exec of a JVM by pid at bootNS.
+func javaExecAt(pid uint32, bootNS uint64) *types.ExecArgvEvent {
+	rec := execRecord(pid, bootNS, "/jdk/bin/java", "/jdk/bin/java", "-jar", "w.jar")
 	rec.EventType = types.PROCESS_ARGV_EVENT
-	return []any{rec}
+	return rec
+}
+
+// heldExec reports whether the start-time attach's claim on pid noted an
+// exec (lateAttacher.exec).
+func heldExec(a *lateAttacher, pid uint32) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return !a.held[pid].IsZero()
+}
+
+// waitIdle waits until s's late attacher tries no process.
+func waitIdle(s *session) {
+	for deadline := time.Now().Add(5 * time.Second); s.late.busy() && time.Now().Before(deadline); {
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestLateAttachHandOverKeepsExecTime (task dl4): a held pid handed over
+// after its start-time load found no JVM gets its windows from the exec
+// noted during that load, not from the hand-over. The load outlasts the
+// notJVM window, so the late job's first try, which finds no JVM either,
+// ends it: one late load, not a window's worth of them.
+func TestLateAttachHandOverKeepsExecTime(t *testing.T) {
+	fakeProcs(t, 10)
+	agent, spool := agentFiles(t)
+	tr := newFakeTracer()
+	var s *session
+	l := &hookLoader{loads: map[uint32]int{}}
+	l.hook = func(_ context.Context, _ uint32, n int) error {
+		if n != 1 {
+			return javaattach.ErrNotJVM
+		}
+		// The late attacher runs, and starts no job before this load
+		// ends (the go statement in schedule orders these writes).
+		s.late.every, s.late.notJVM = 5*time.Millisecond, 100*time.Millisecond
+		tr.records <- javaExec(10)
+		for deadline := time.Now().Add(2 * time.Second); !heldExec(s.late, 10) && time.Now().Before(deadline); {
+			time.Sleep(time.Millisecond)
+		}
+		time.Sleep(200 * time.Millisecond) // past notJVM since the exec
+		return javaattach.ErrNotJVM
+	}
+	useLoader(t, l)
+	c := testCorrelator(t, t.TempDir())
+	defer func() { _ = c.Close() }()
+	s, _ = pidSession(t, tr, c, 10)
+	log := startAgentSession(t, s, agent, spool)
+	waitIdle(s)
+	s.stopLate()
+	if n := l.count(10); n != 2 {
+		t.Errorf("%d loads of pid 10, want 2 (at start, one late try past its window):\n%s", n, log.String())
+	}
+}
+
+// TestLateAttachLateExecRecord (task dl4): the exec record of an exec
+// made before a held pid's own load ended may arrive only after that
+// load released it. If the load may have sent a SIGQUIT (here: it timed
+// out waiting for the socket), that image is left to it — a second try
+// would send a second SIGQUIT, a thread dump on the app's stdout. An
+// exec after the release, or of another process with the pid, is a new
+// image and tried late.
+func TestLateAttachLateExecRecord(t *testing.T) {
+	timedOut := errors.New("no attach socket .java_pid10 after SIGQUIT: context deadline exceeded")
+	cases := []struct {
+		name      string
+		after     bool   // the exec was made after the release
+		start     uint64 // processStart of pid 10 at the record
+		wantLoads int
+	}{
+		{"exec before the release", false, 1, 1},
+		{"exec after the release", true, 1, 2},
+		{"pid reused since the load", false, 2, 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeProcs(t, 10)
+			agent, spool := agentFiles(t)
+			tr := newFakeTracer()
+			l := &hookLoader{loads: map[uint32]int{}, hook: func(context.Context, uint32, int) error {
+				return timedOut
+			}}
+			useLoader(t, l)
+			c := testCorrelator(t, t.TempDir())
+			defer func() { _ = c.Close() }()
+			before := bootNow()
+			s, _ := pidSession(t, tr, c, 10)
+			log := startAgentSession(t, s, agent, spool)
+			at := before
+			if tc.after {
+				at = bootNow()
+			}
+			processIdentity = func(uint32) correlate.Identity {
+				return correlate.Identity{Comm: "x", StartNS: tc.start}
+			}
+			if err := s.handle(javaExecAt(10, at)); err != nil {
+				t.Fatal(err)
+			}
+			waitIdle(s)
+			s.stopLate()
+			if n := l.count(10); n != tc.wantLoads {
+				t.Errorf("%d loads of pid 10, want %d:\n%s", n, tc.wantLoads, log.String())
+			}
+		})
+	}
 }
 
 // TestLateAttachAfterOwnLoad (task 9l4): a JVM the session starts with

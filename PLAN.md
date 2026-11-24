@@ -707,7 +707,12 @@ Gated by S1 — done; the design below is S1's result
   session; an exec after its own load ended is a new image,
   tried late like any other, even while other pids' start-time
   loads still run. One that execs during its own successful
-  (or refused) load gets no agent in its new image.
+  (or refused) load gets no agent in its new image. An exec is
+  placed by its time, not by when its record arrives (task
+  dl4): a record that arrives after the load ended, of an exec
+  made before, is left to that load too — a load that timed out
+  on the socket after its SIGQUIT takes 10 s — unless the pid
+  is another process by then.
 - **Stack capture cost**: the per-I/O `StackWalker` walk is the
   agent's dominant cost (S1: ≈8 µs per call on a loaded host vs
   ≈0.3 µs for the rest of the bracket); M3 engineers it down

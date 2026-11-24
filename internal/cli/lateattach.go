@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"iormesh/internal/javaattach"
 )
 
@@ -35,6 +37,17 @@ const (
 	// so an exec storm cannot pile up goroutines.
 	lateAttachPending = 64
 )
+
+// bootNow reads the boot clock, the clock the BPF stamps exec records
+// with (bpf_ktime_get_boot_ns), 0 when it cannot be read. A variable
+// like processAlive.
+var bootNow = func() uint64 {
+	var ts unix.Timespec
+	if unix.ClockGettime(unix.CLOCK_BOOTTIME, &ts) != nil {
+		return 0
+	}
+	return uint64(ts.Nano())
+}
 
 // lateAttacher runs the late attaches of one `run -agent` session. The
 // trace loop (the main goroutine) hands it processes (exec) and, at its
@@ -73,6 +86,10 @@ type lateAttacher struct {
 	// stdout (task 7l4). The value is the process's last exec meanwhile,
 	// zero if it did not exec.
 	held map[uint32]time.Time
+	// quit are the pids released after a start-time load that may have
+	// sent a SIGQUIT (release without retry), kept for the session: a
+	// start-time pid set at most.
+	quit map[uint32]quitImage
 	// lines are the attaches' reports and made the stages they made, both
 	// not yet collected by the loop.
 	lines []string
@@ -101,7 +118,16 @@ func newLateAttacher(ctx context.Context, agent, spool string) *lateAttacher {
 	return &lateAttacher{ctx: ctx, cancel: cancel, l: newAgentLoader(), spool: spool,
 		sem: make(chan struct{}, lateAttachParallel), every: lateAttachEvery,
 		deadline: lateAttachFor, notJVM: lateNotJVMFor, st: newAgentStages(agent),
-		pending: map[uint32]*lateJob{}, held: map[uint32]time.Time{}}
+		pending: map[uint32]*lateJob{}, held: map[uint32]time.Time{}, quit: map[uint32]quitImage{}}
+}
+
+// quitImage is the image of a pid that a start-time load may have sent
+// a SIGQUIT: the process's start time (processStart, the same across its
+// execs, so it only tells a reused pid apart) and its release on the
+// boot clock. An exec of that process before until made either that
+// image or one release would not have handed over (task dl4).
+type quitImage struct {
+	start, until uint64
 }
 
 // hold claims pids for the start-time attach, before its loads begin:
@@ -134,16 +160,28 @@ func (a *lateAttacher) loaded(pid uint32, retry bool, fresh []agentStage) {
 // still exec'ing java, a JVM still starting). One the start-time attach
 // loaded, or that refused after the handshake began, is not tried again
 // in that image, so a JVM gets at most one SIGQUIT from the session; an
-// exec after the release is a new image, scheduled by exec as usual.
+// exec after the release is a new image, scheduled by exec as usual. An
+// exec's record may arrive only after the release, though — a load that
+// timed out waiting for the socket took javaattach.DefaultTimeout — so
+// without retry the release is noted in quit, and execBoot drops a record
+// of an exec made before it (task dl4).
 func (a *lateAttacher) release(pid uint32, retry bool) {
 	if a == nil {
 		return
+	}
+	var q quitImage
+	if !retry {
+		q = quitImage{start: processStart(pid), until: bootNow()}
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	execAt, ok := a.held[pid]
 	delete(a.held, pid)
-	if ok && retry && !execAt.IsZero() && a.ctx.Err() == nil {
+	switch {
+	case !ok:
+	case !retry:
+		a.quit[pid] = q
+	case !execAt.IsZero() && a.ctx.Err() == nil:
 		a.schedule(pid, execAt)
 	}
 }
@@ -174,10 +212,21 @@ func (a *lateAttacher) share(stages []agentStage) {
 	a.stMu.Unlock()
 }
 
-// exec schedules pid's attach: it just exec'd (or was adopted) and may
-// be a JVM. A pid the start-time attach holds is only noted (release
-// decides), so the two never work on one JVM at once.
+// exec schedules pid's attach: it was just adopted (a port owner) and
+// may be a JVM. It is execBoot of an exec made now.
 func (a *lateAttacher) exec(pid uint32) {
+	a.execBoot(pid, 0)
+}
+
+// execBoot schedules pid's attach: its exec record says it exec'd at
+// bootNS on the boot clock (0: now) and may be a JVM. A pid the
+// start-time attach holds is only noted (release decides), so the two
+// never work on one JVM at once. An exec made before the release of a
+// pid whose start-time load may have sent a SIGQUIT is dropped (task
+// dl4): its record arrived late, and the image it made is the one that
+// load worked on — or one it held, which release would not have handed
+// over either. Unless pid is another process by now (processStart).
+func (a *lateAttacher) execBoot(pid uint32, bootNS uint64) {
 	if a == nil || a.ctx.Err() != nil {
 		return
 	}
@@ -185,6 +234,9 @@ func (a *lateAttacher) exec(pid uint32) {
 	defer a.mu.Unlock()
 	if _, ok := a.held[pid]; ok {
 		a.held[pid] = time.Now()
+		return
+	}
+	if q, ok := a.quit[pid]; ok && bootNS != 0 && bootNS < q.until && processStart(pid) == q.start {
 		return
 	}
 	a.schedule(pid, time.Now())

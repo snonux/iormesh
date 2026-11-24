@@ -578,7 +578,9 @@ truth.
   `loaded`, `release`, tasks 7l4, 9l4): an exec of one
   meanwhile is not tried beside it, and handed over afterwards
   only if its start-time load failed before any signal, so each
-  JVM gets at most one SIGQUIT per image from the session. When
+  JVM gets at most one SIGQUIT per image from the session — also
+  when an exec's record arrives after the release: one made
+  before it is dropped (`execBoot`, task dl4). When
   the session gives the start-time loads up, the claims left
   hand nothing over (`releaseAll`). `attachDisabled` sees the flag only on
   the command line or in `JAVA_TOOL_OPTIONS`/`JDK_JAVA_OPTIONS`;
