@@ -21,9 +21,9 @@ import (
 // exit's group_dead (task nf4), a call on fd -1 across an exec (task
 // mf4), the key an RST abort's CLOSE rebuilds (task qf4), the el9
 // record layout relocated on any kernel (task of4), the final socket
-// snapshot (task sf4), a prctl rename reflected in the comm (task 0g4)
-// and the msghdr data calls (task oh4), all in the one test binary of
-// ./internal.
+// snapshot (task sf4), a prctl rename reflected in the comm (task
+// 0g4), the msghdr data calls (task oh4) and the MSG_PEEK receives
+// counted once (task ok4), all in the one test binary of ./internal.
 var rootBPFTestFiles = []string{"internal/sock_root_test.go", "internal/sockseq_root_test.go",
 	"internal/loader_root_test.go", "internal/follow_root_test.go",
 	"internal/javamark_root_test.go", "internal/dispatch_root_test.go",
@@ -32,7 +32,7 @@ var rootBPFTestFiles = []string{"internal/sock_root_test.go", "internal/sockseq_
 	"internal/pidnsconnect_root_test.go", "internal/badfd_root_test.go",
 	"internal/sockclose_root_test.go", "internal/sockfinal_root_test.go",
 	"internal/btf_root_test.go", "internal/rename_root_test.go",
-	"internal/msgcalls_root_test.go"}
+	"internal/msgcalls_root_test.go", "internal/peek_root_test.go"}
 
 // testFunctionsIn returns the names of the top-level Test functions of the Go
 // file at the repository path rel. Adapted from ior

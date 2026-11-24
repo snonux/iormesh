@@ -10,7 +10,8 @@ import "strings"
 // internal/exit_root_test.go, internal/pidnsconnect_root_test.go,
 // internal/badfd_root_test.go, internal/sockclose_root_test.go,
 // internal/sockfinal_root_test.go, internal/btf_root_test.go,
-// internal/rename_root_test.go and internal/msgcalls_root_test.go: they
+// internal/rename_root_test.go, internal/msgcalls_root_test.go and
+// internal/peek_root_test.go: they
 // load the real BPF object, attach the TCP programs or the loader's default
 // probe set, and read the ring buffer (M1 steps 4 and 5; process-tree
 // following and the exec watch, M2 steps 1–2; every event family, M2 step
@@ -32,7 +33,8 @@ import "strings"
 // prctl(PR_SET_NAME) rename reflected in the process's comm, task 0g4;
 // sendmsg, recvmsg, sendmmsg and recvmmsg with their bytes and tcp_seq,
 // the mmsg calls' byte sums on UDP too, and this kernel's verifier cost
-// of the mmsg loop, task oh4). They
+// of the mmsg loop, task oh4; recvfrom, recvmsg and recvmmsg with MSG_PEEK
+// marked and counted once, task ok4). They
 // skip for anybody but root, so `mage test` passes them by, and `mage
 // bpfRootTest` is the one place that runs them. The names are listed
 // rather than matched by a pattern so that a renamed test fails a gate
@@ -81,6 +83,7 @@ func RootBPFTests() []string {
 		"TestMsgCallsTCP",
 		"TestMsgCallsUDP",
 		"TestMmsgVerifierHeadroom",
+		"TestPeekCountedOnce",
 	}
 }
 

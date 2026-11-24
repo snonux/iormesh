@@ -1499,6 +1499,21 @@ loop), below its bound of 100k, a tenth of the 1M limit. That
 is 7.2's verifier; on el9 (task rj4) the count is the same,
 42,078 — see "el9 runbook and runs" below.
 
+## MSG_PEEK receives (task ok4, 2026-11-24)
+
+`TestPeekCountedOnce` (`internal/peek_root_test.go`, in `mage
+bpfRootTest`) runs through the seq child too: the parent sends
+one 12-byte chunk, the child peeks at it with `recvfrom`,
+`recvmsg` and `recvmmsg` (each `MSG_PEEK`) and then reads it.
+Each peek keeps its 12 bytes, is marked `args.peek` and carries
+no `tcp_seq`; the read carries the chunk's range; the receives'
+`StreamBytes` sum is 12. Red first on the 7.2 laptop: before the
+change the peeks were unmarked and the receives counted 48
+bytes. `recvmmsg`'s enter moved from `fd_event` to
+`fd_size_event` to carry its flags; no CO-RE relocation was
+added (`TestEl9RecordLayout` already relocates the handler).
+Not yet run on el9.
+
 ## el9 runbook and runs
 
 Rocky 9.9 is the main target, and some evidence exists only as

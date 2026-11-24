@@ -38,7 +38,9 @@ func (c *Correlator) tcpSeqRecord(r *types.TcpSeqEvent) {
 // The conn id comes later, when the queue releases the event (emit drops
 // tcp_seq from an event that ends up without one).
 func (c *Correlator) streamSeq(ev *schema.Event, sock *sockState, sk uint64, seq uint32) {
-	if ev.Bytes == 0 || sock == nil || c.socks.bySk[sk] != sock {
+	// A peek (args.peek, task ok4) moved no stream bytes: the kernel's
+	// check leaves it none (copied_seq stays), and this one makes sure.
+	if ev.Bytes == 0 || ev.Args.Peek != nil || sock == nil || c.socks.bySk[sk] != sock {
 		return
 	}
 	if !schema.IsStreamSend(ev.Event) && !schema.IsStreamReceive(ev.Event) {

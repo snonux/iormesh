@@ -136,6 +136,12 @@ type mmsghdr struct {
 // mmsgCall runs sendmmsg or recvmmsg (nr) on fd with one single-buffer
 // message per size and requires every message to move exactly its size.
 func mmsgCall(nr uintptr, fd int, sizes []int) error {
+	return mmsgCallFlags(nr, fd, sizes, 0)
+}
+
+// mmsgCallFlags is mmsgCall with the call's flags argument (MSG_PEEK for
+// the peek scenario, peek_child_test.go).
+func mmsgCallFlags(nr uintptr, fd int, sizes []int, flags int) error {
 	msgs := make([]mmsghdr, len(sizes))
 	iovs := make([]unix.Iovec, len(sizes))
 	bufs := buffers(sizes)
@@ -146,7 +152,7 @@ func mmsgCall(nr uintptr, fd int, sizes []int) error {
 		msgs[i].hdr.SetIovlen(1)
 	}
 	n, _, errno := unix.Syscall6(nr, uintptr(fd), uintptr(unsafe.Pointer(&msgs[0])),
-		uintptr(len(msgs)), 0, 0, 0)
+		uintptr(len(msgs)), uintptr(flags), 0, 0)
 	if errno != 0 || int(n) != len(msgs) {
 		return fmt.Errorf("syscall %d: %d messages, want %d: %v", nr, n, len(msgs), errno)
 	}

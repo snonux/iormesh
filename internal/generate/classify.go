@@ -123,7 +123,8 @@ const (
 	// KindFdSize is KindFd plus the requested output-buffer size, for the
 	// fd-based xattr reads whose zero-size call is a size probe, and plus the
 	// recv flags and buffer capacity of recvfrom/recvmsg, whose MSG_PEEK and
-	// MSG_TRUNC change what the return value means. It has its own
+	// MSG_TRUNC change what the return value means, and plus the recv flags
+	// of recvmmsg, whose MSG_PEEK does (task ok4). It has its own
 	// fd_size_event so that every other fd syscall - read and write above all -
 	// keeps the lean fd_event. Its metadata name stays "fd".
 	KindFdSize
@@ -339,6 +340,10 @@ var nameOnlyKindsTable = map[string]TracepointKind{
 	// so the bare return value is not a byte count for either.
 	"sys_enter_recvfrom": KindFdSize,
 	"sys_enter_recvmsg":  KindFdSize,
+	// recvmmsg captures only its flags (no capacity: its bytes are the
+	// messages' msg_len sum, mmsg.c), for MSG_PEEK (task ok4). It gave up
+	// fd_event's file identity word, which nothing reads for a socket.
+	"sys_enter_recvmmsg": KindFdSize,
 
 	"sys_enter_epoll_create":  KindEventfd,
 	"sys_exit_epoll_create":   KindEventfd,

@@ -307,6 +307,12 @@ type Args struct {
 	// tcp_seq, and the merge's stream check does not trust its
 	// direction's sums (internal/federate). Appended in M4 (task oh4).
 	BytesPartial *bool `json:"bytes_partial,omitempty" parquet:"bytes_partial,optional"`
+	// Peek marks a recvfrom, recvmsg or recvmmsg called with MSG_PEEK:
+	// it copied bytes (its bytes say how many) but consumed none, so the
+	// receive that later consumes them counts them; the receiver's stream
+	// sums skip a peek (StreamBytes). Always true when set; such a record
+	// carries no tcp_seq. Appended in M4 (task ok4).
+	Peek *bool `json:"peek,omitempty" parquet:"peek,optional"`
 }
 
 // Session is the host description of the session header. Its fields are
