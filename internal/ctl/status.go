@@ -15,12 +15,14 @@ import (
 
 	"iormesh/internal/federate"
 	"iormesh/internal/k8s"
+	"iormesh/internal/schema"
 )
 
 // `iormeshctl status [-project NAME]... [-registry FILE] [K8S]
 // [HOST|POD...]` (PLAN.md M4 "No management plane", task ph4): one table
 // row per target and project with the tracer's state, end reason, ends-by,
-// tracer version and the segments in ready/ awaiting collection. It
+// tracer version and the segments in ready/ awaiting collection, the NOTE
+// saying when ensure leaves an end stopped (stopNote, task 0l4). It
 // composes what the tracers already report and changes nothing:
 //
 //   - a host answers `sudo -n /opt/iormesh/bin/iormesh status -json`
@@ -52,10 +54,10 @@ type remoteStatus struct {
 	Error         string         `json:"error"`
 }
 
-// remoteSession is the part of state.json the table shows, and
-// OperatorStop, which ensure reads (task zh4): true when `iormesh stop`
-// ended the session, false when anything else did, nil from a tracer
-// that predates the field.
+// remoteSession is the part of state.json the table shows. OperatorStop,
+// which ensure decides by (task zh4), shows only in the NOTE (stopNote,
+// task 0l4): true when `iormesh stop` ended the session, false when
+// anything else did, nil from a tracer that predates the field.
 type remoteSession struct {
 	EndsBy       time.Time `json:"ends_by"`
 	EndReason    string    `json:"end_reason"`
@@ -310,9 +312,43 @@ func printStatusTable(w io.Writer, rows []statusRow) error {
 	for _, r := range rows {
 		state, reason, endsBy, ver, ready := r.cells()
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", safe(r.target), safe(r.project),
-			safe(state), safe(reason), safe(endsBy), safe(ver), safe(ready), safe(r.note))
+			safe(state), safe(reason), safe(endsBy), safe(ver), safe(ready), safe(r.noteCell()))
 	}
 	return tw.Flush()
+}
+
+// noteCell is the row's note joined with its stopNote, "; " apart.
+func (r statusRow) noteCell() string {
+	stop := r.stopNote()
+	switch {
+	case stop == "":
+		return r.note
+	case r.note == "":
+		return stop
+	}
+	return r.note + "; " + stop
+}
+
+// stopNote says, for an ended or dead session, what ensure reads beyond
+// the state and end reason (task 0l4): a reboot's SIGTERM and the
+// operator's `iormesh stop` both end a run "stop", yet ensure restarts
+// only the former (ensureDecide). It names the operator's stop, and an
+// ended "stop" from a tracer that predates operator_stop, which ensure
+// leaves too since it cannot tell; every other end, which ensure
+// restarts, gets nothing, so the NOTE column stays narrow. -json already
+// carries the field itself.
+func (r statusRow) stopNote() string {
+	s := r.st.Session
+	if r.failed || s == nil || r.st.State != k8s.AttachEnded && r.st.State != k8s.AttachDead {
+		return ""
+	}
+	switch {
+	case s.OperatorStop != nil && *s.OperatorStop:
+		return "stopped by operator: ensure leaves it"
+	case s.OperatorStop == nil && r.st.State == k8s.AttachEnded && s.EndReason == schema.EndStop:
+		return "stop origin unknown (tracer predates operator_stop): ensure leaves it"
+	}
+	return ""
 }
 
 // cells are a row's state, end reason, ends-by, version and ready/ count

@@ -121,6 +121,58 @@ func TestUnixConnectionFuses(t *testing.T) {
 	}
 }
 
+// unixAccept feeds an accept on listener returning fd, its sock_addr
+// record naming the accepted socket sk and its peer.
+func (f feeder) unixAccept(listener, fd int32, sk, peer uint64) {
+	f.handle(&types.AcceptEvent{EventType: types.ENTER_ACCEPT_EVENT, TraceId: types.SYS_ENTER_ACCEPT,
+		Time: f.tick(), Pid: f.pid, Tid: f.tid, Fd: listener})
+	acc := unixAddr("", sk, peer)
+	acc.EventType, acc.TraceId, acc.Time, acc.Pid, acc.Tid, acc.Fd =
+		types.SOCK_ADDR_EVENT, types.SYS_EXIT_ACCEPT, f.tick(), f.pid, f.tid, fd
+	f.handle(acc)
+	f.handle(&types.AcceptEvent{EventType: types.EXIT_ACCEPT_EVENT, TraceId: types.SYS_EXIT_ACCEPT,
+		Time: f.tick(), Pid: f.pid, Tid: f.tid, Fd: -1, Ret: int64(fd)})
+}
+
+// reusedUnixAccepts is two JVMs' attach listeners each accepting the
+// tracer's own (untraced) attach connection, one after the other: the
+// first connection closed, and the kernel reused both its socket
+// addresses for the second (task xk4, seen in TestJavaAttachMountNS).
+func reusedUnixAccepts(first, second feeder) {
+	first.unixAccept(4, 6, 0xA, 0xC)
+	first.read(6, 1)
+	first.close(6)
+	second.unixAccept(4, 6, 0xA, 0xC)
+	second.read(6, 1)
+	second.close(6)
+}
+
+// TestUnixAcceptsOfReusedSocketsStayApart (task xk4): two accepted ends
+// are never the two ends of one connection, even when they name the same
+// socket pair: the kernel reused a closed connection's socket addresses.
+// Each is a connection of its own, unresolved — not one fused connection
+// whose graph the controller's rebuild (connect and accept) disagrees
+// with.
+func TestUnixAcceptsOfReusedSocketsStayApart(t *testing.T) {
+	c, sink := newTest(t)
+	now := new(uint64)
+	reusedUnixAccepts(feeder{t, c, 10, 11, now}, feeder{t, c, 20, 21, now})
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	accepts := byKind(sink.events, schema.KindAccept)
+	if len(accepts) != 2 || accepts[0].ConnID == "" || accepts[0].ConnID == accepts[1].ConnID {
+		t.Fatalf("accepts %+v, want two with conn ids of their own", accepts)
+	}
+	g := c.Graph()
+	for i, pid := range []uint32{10, 20} {
+		if !hasEdge(g, schema.EdgeConnected, schema.ProcessNodeID("h1", pid, 1000+uint64(pid)),
+			schema.SocketNodeID(accepts[i].ConnID), schema.StateUnresolved) {
+			t.Errorf("pid %d has no unresolved connected edge to %s", pid, accepts[i].ConnID)
+		}
+	}
+}
+
 // TestUnixEndAloneResolves: an end whose other end is never traced gets a
 // conn id of its own once the window passed, unresolved.
 func TestUnixEndAloneResolves(t *testing.T) {

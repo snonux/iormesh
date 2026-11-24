@@ -51,7 +51,8 @@ func TestRebuiltGraphIsTheCorrelators(t *testing.T) {
 	}
 }
 
-// fdRebuildCases: the fd table through forks, fcntl, execs and dups.
+// fdRebuildCases: the fd table through forks, fcntl, execs and dups,
+// and the connections of pipes and unix sockets.
 func fdRebuildCases() []rebuildCase {
 	return []rebuildCase{
 		{"a child's rename moves the fd it inherited", func(p, c feeder) {
@@ -91,6 +92,7 @@ func fdRebuildCases() []rebuildCase {
 			c.read(5, 1)
 			p.write(6, 1)
 		}},
+		{"two unix accepts of reused sockets", reusedUnixAccepts},
 	}
 }
 

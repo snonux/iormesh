@@ -308,7 +308,9 @@ func assertOnlyTracedPIDs(t *testing.T, events []schema.Event, pids []int) {
 
 // dumpOnFailure keeps a failed run's trace for the reader: t.TempDir is
 // removed when the test ends, so the directory is copied to
-// IORMESH_IT_KEEP when that is set. Each copy gets its own fresh
+// IORMESH_IT_KEEP when that is set, with its segments and the tracer's
+// stderr beside it (task xk4: a rebuilt-graph mismatch cannot be read
+// from the trace alone). Each copy gets its own fresh
 // directory: a test with two harnesses (TestSecondRunNormalizesIdentically)
 // has two runs both named trace-1, and copying the second onto the first
 // failed with "file exists" and lost it.
@@ -336,6 +338,15 @@ func dumpOnFailure(t *testing.T, run tracedRun) {
 			t.Logf("keep trace: %v", err)
 			return
 		}
-		t.Logf("trace kept in %s", dst)
+		// The segments (a mismatch with graph.json is judged on them) and
+		// the tracer's stderr go beside the trace, which they explain.
+		segs := run.Dir + segmentsSuffix
+		if err := os.CopyFS(dst+segmentsSuffix, os.DirFS(segs)); err != nil {
+			t.Logf("keep segments: %v", err)
+		}
+		if err := os.WriteFile(dst+".log", []byte(run.Logged), 0o644); err != nil {
+			t.Logf("keep tracer log: %v", err)
+		}
+		t.Logf("trace kept in %s (segments in %s, tracer log in %s.log)", dst, dst+segmentsSuffix, dst)
 	})
 }

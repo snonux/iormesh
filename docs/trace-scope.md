@@ -22,7 +22,14 @@ event families `iormesh run -trace-families` adds (see
   process the port listing saw (decision #23). A
   privilege-separated server — a root master and workers of the
   same binary under their own uid — is followed whole; another
-  program that only inherited the listener fd is not. A socket-activated port that only
+  program that only inherited the listener fd is not. A restart
+  onto an upgraded path (a JDK in a versioned directory,
+  `.../25.0.5/bin/java` to `.../25.0.6/bin/java`) is followed
+  if the executable keeps its base name, the uid is the same and
+  it runs in the original's cgroup — its systemd unit or login
+  session scope (no escalation: the uid must match); without a
+  known cgroup only the exact path is followed (task kk4). A
+  socket-activated port that only
   systemd holds — the service is idle, not running — is refused
   at start, also by `expand -apply`: systemd itself is never a
   target, since tracing it would follow every service it

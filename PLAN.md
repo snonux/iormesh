@@ -1540,7 +1540,11 @@ Kubernetes (M7) build on it.
   stopped. A deploy restart whose start fails after its stop
   leaves the project marked stopped, so ensure does not recover
   it. A tracer from before the field (`operator_stop`
-  absent) cannot tell, so its `stop` ends are left too. A
+  absent) cannot tell, so its `stop` ends are left too. Both
+  status texts say which ends ensure leaves (task 0l4): the
+  `iormeshctl status` NOTE and the host's `iormesh status`
+  name an operator's stop and a `stop` of unknown origin;
+  `-json` carries the field itself. A
   `disk_limit` end is collected first and restarted only when
   the collect emptied its `ready/` (a second status read);
   should the partition still be over the limit, the new run's
@@ -2972,7 +2976,23 @@ deferred.
   process that already exists. And a holder is adopted only
   while its pid still has the start time the port listing read
   with its fd table, so a pid reused in between is never
-  mistaken for the holder. An adopted holder
+  mistaken for the holder. Task kk4 widens the executable half
+  for an upgrade, conservatively: a restart onto a new path (a
+  JDK or package upgrade into a versioned directory,
+  `.../java-25-openjdk-25.0.5/bin/java` to `.../25.0.6/...`) is
+  adopted if its executable has the same base name, its
+  effective uid is the same, *and* it runs in the same cgroup
+  (on systemd the service's unit, on cgroup v2 the `0::` path,
+  else the `name=systemd` one) as a remembered holder. The base
+  name alone is not enough — `java` names every JVM of the user
+  — and the cgroup alone is not either: a unit may run helpers.
+  No readable cgroup, or the root cgroup `/` (which says
+  nothing), leaves only the exact path. A different program
+  (another base name), another uid, and qj4's inherited-fd
+  helper (not remembered) stay refused; the service manager is
+  never a holder. A manual restart of an upgraded binary from
+  another login session is not followed (another scope): start
+  a new session. An adopted holder
   gets an `attach` event of its own incarnation and the session
   goes on; stderr names it. No match within the grace ends the
   session `targets_exited`, stderr saying no new owner appeared.
