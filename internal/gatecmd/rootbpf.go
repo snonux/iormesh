@@ -34,7 +34,9 @@ import "strings"
 // sendmsg, recvmsg, sendmmsg and recvmmsg with their bytes and tcp_seq,
 // the mmsg calls' byte sums on UDP too, and this kernel's verifier cost
 // of the mmsg loop, task oh4; recvfrom, recvmsg and recvmmsg with MSG_PEEK
-// marked and counted once, task ok4). They
+// marked and counted once, task ok4; the msghdr calls' peers with and
+// without msg_name, an mmsg batch from two senders and an AF_UNIX
+// datagram path, task hl4). They
 // skip for anybody but root, so `mage test` passes them by, and `mage
 // bpfRootTest` is the one place that runs them. The names are listed
 // rather than matched by a pattern so that a renamed test fails a gate
@@ -82,6 +84,7 @@ func RootBPFTests() []string {
 		"TestRenameReflected",
 		"TestMsgCallsTCP",
 		"TestMsgCallsUDP",
+		"TestMsgCallsPeers",
 		"TestMmsgVerifierHeadroom",
 		"TestPeekCountedOnce",
 	}
