@@ -235,9 +235,11 @@ func (c *Correlator) connectDetail(ev *schema.Event, p *procState, en enter, soc
 // sends none, so a TCP msghdr call keeps its connection's). A sendmmsg's
 // or recvmmsg's ret counts messages: its bytes come from its mmsg_event
 // (mmsgRecord), so an exit of one that moved messages but came as a plain
-// ret_event has an unknown sum and is marked partial. A recvfrom, recvmsg or recvmmsg called with MSG_PEEK
-// keeps the bytes it copied but is marked args.peek (task ok4): it
-// consumed none, so the stream sums leave them to the receive that does.
+// ret_event has an unknown sum and is marked partial; that whole sum goes
+// to the first message's peer, whatever the others' (docs/schema.md). A
+// recvfrom, recvmsg or recvmmsg called with MSG_PEEK keeps the bytes it
+// copied but is marked args.peek (task ok4): it consumed none, so the
+// stream sums leave them to the receive that does.
 func (c *Correlator) socketFdDetail(ev *schema.Event, p *procState, en enter, ret int64,
 	sock *sockState) *sockState {
 	if en.flags&unix.MSG_PEEK != 0 && schema.IsPeekable(en.name) {

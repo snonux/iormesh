@@ -11,8 +11,9 @@
 // address argument (or its msghdr's msg_name), never in the socket; a unix
 // socket's only name is the sun_path of its bind and connect; and the two
 // ends of a unix connection can only be joined through the kernel's own
-// pairing (unix_sk->peer). TCP needs none of this: sock.c reads its 4-tuple from the socket's state
-// transitions, so a TCP connect sends no record here.
+// pairing (unix_sk->peer). TCP needs none of this: sock.c reads its
+// 4-tuple from the socket's state transitions, so a TCP connect sends no
+// record here.
 //
 // How: the enter hook parks the address argument's user pointer and its
 // length by tid (recvfrom fills both in only at exit, so they cannot be read
@@ -174,7 +175,13 @@ static __always_inline __u32 iormesh_addr_len(struct addr_arg *arg) {
 // msg_name and *len with its msg_namelen; an unreadable msghdr or a
 // negative length leaves no address (both 0). Only the two leading fields
 // of the 64-bit ABI are read (as in recv.c's ior_user_msghdr), 16 bytes of
-// constant size and no loop: a straight line for el9's verifier.
+// constant size and no loop: a straight line for el9's verifier. A 32-bit
+// compat msghdr (4-byte pointer, then the length) would not fit this
+// layout, but none arrives: x86-64's syscall tracepoints skip compat
+// syscalls (ARCH_TRACE_IGNORE_COMPAT_SYSCALLS), so these handlers never
+// run for one. Were one read, msg_name would be its pointer and length
+// joined, beyond a compat task's 4 GiB, and the failed read would leave no
+// address rather than a wrong one.
 static __always_inline void iormesh_msghdr_name(__u64 *uaddr, __u32 *len) {
     struct {
         __u64 msg_name;

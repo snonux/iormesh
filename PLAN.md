@@ -3083,8 +3083,11 @@ deferred.
   el9 5.14 verifier sees a straight line next to mmsg.c's
   bounded sum (the exits grew by about 600 processed
   instructions, to 42.6k of the 1M limit). A batch to several
-  peers is named by its first; the rest are not guessed.
-  Renames and mmaps are not families: the
+  peers is named by its first; the rest are not guessed. Its
+  whole byte sum goes to that first peer's flow or connection:
+  a QUIC server's recvmmsg of datagrams from several clients
+  adds them all to the first client's flow in the report
+  (task hl4 pins this with two senders). Renames and mmaps are not families: the
   renames are the file surface's, mmaps are not traced yet.
   ior's restart fold (one row for a call a signal interrupted
   and the kernel re-executed) is not part of the signal family
