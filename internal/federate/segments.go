@@ -369,8 +369,10 @@ func listHost(dir, proj, host string, out *Segments) ([]*Segment, error) {
 		if strings.HasPrefix(name, ".") {
 			continue // rsync's in-flight temporaries
 		}
-		if name == ContainersFile && en.Type().IsRegular() {
-			continue // a pod's container map, which the build reads apart (task jk4)
+		if name == ContainersFile {
+			// A pod's container map, which the build reads apart (task
+			// jk4) and reports there when it is no regular file.
+			continue
 		}
 		f, err := segment.ParseName(name)
 		if err != nil || !en.Type().IsRegular() {

@@ -1214,9 +1214,12 @@ envelope:
   only grows. `iormeshctl build` reads it offline: each process
   in the model (and `show processes`) carries `container_id` and
   `container`, the name. Without a map (a session collected
-  before task jk4) or for an id it lacks, the id is shown; a map
-  that does not parse names nothing and is listed under health's
-  ignored entries.
+  before task jk4) or for an id it lacks, the id is shown. A map
+  that does not read (bad JSON, a bad id or name, over 1 MiB, a
+  symlink, a FIFO or other non-regular file) names nothing and is
+  listed, with why, under health's ignored entries; collect then
+  refuses to merge into it and says to remove it, and the next
+  collect writes it anew from the pod's current status.
 - The Java join's `http` and `dns` events carry their JVM's.
 - In parquet the three keys are `pod.namespace`, `pod.name` and
   `pod.container_id`, dictionary-encoded. A segment written

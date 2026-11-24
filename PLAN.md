@@ -2271,8 +2271,16 @@ Built after plain Linux servers (M4); accepted on kind and el9
   `container_id` (from its events) and the model's process
   `container_id` and `container`, the name. A session collected
   before the map, a container that restarted twice between
-  collects, or a map that does not parse (its whole file, listed
-  as ignored in health) shows the id. Outside a pod there is no
+  collects, or a map that does not read (its whole file, listed
+  as ignored in health with why) shows the id. A map that does
+  not read — bad JSON, a bad id or name, over 1 MiB, or no
+  regular file: it is opened without following a symlink or
+  waiting on a FIFO, and read no further than the bound — is
+  never rewritten by collect on its own (that would drop the
+  names of ids the status no longer lists, and hide a file that
+  went bad); collect refuses the merge and says to remove it,
+  after which the next collect writes it anew from the pod's
+  current status. Outside a pod there is no
   `pod` object. Backward compatible: an older segment has no pod
   column and reads as before (no `pod`). The controller
   checks a segment's `pod` against its pinned FQDN

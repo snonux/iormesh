@@ -80,10 +80,13 @@ func TestBuildContainerNames(t *testing.T) {
 
 // TestBuildContainerNamesBadMap: a container map that is not one (bad
 // JSON, an id or a name a cluster would not issue) names nothing and
-// fails no build: the ids stay, and health lists the file as ignored.
+// fails no build: the ids stay, and health lists the file as ignored
+// with why it did not read.
 func TestBuildContainerNamesBadMap(t *testing.T) {
 	id := strings.Repeat("ab", 32)
-	for _, m := range []string{`{`, `{"` + id + `": "App\u001b[31m"}`, `{"` + strings.ToUpper(id) + `": "app"}`} {
+	for m, why := range map[string]string{`{`: "unexpected end of JSON input",
+		`{"` + id + `": "App\u001b[31m"}`:        "is not a container name",
+		`{"` + strings.ToUpper(id) + `": "app"}`: "is not a 64-hex-digit runtime id"} {
 		f := newBuildFixture(t)
 		podClient(t, f, prodUID, "web-7d9f", "prod", "10.0.9.9:80")
 		path := filepath.Join(f.store, "shop", "pod-"+prodUID, federate.ContainersFile)
@@ -101,8 +104,41 @@ func TestBuildContainerNamesBadMap(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := filepath.Join("shop", "pod-"+prodUID, federate.ContainersFile)
-		if len(health.Ignored) != 1 || !strings.HasPrefix(health.Ignored[0], want) {
-			t.Errorf("map %q: ignored %v, want %s", m, health.Ignored, want)
+		if len(health.Ignored) != 1 || !strings.HasPrefix(health.Ignored[0], want) ||
+			!strings.Contains(health.Ignored[0], why) {
+			t.Errorf("map %q: ignored %v, want %s: …%s", m, health.Ignored, want, why)
 		}
+	}
+}
+
+// TestRecordContainers: collect merges into the map already in the
+// store — a JSON null there is an empty map (it once panicked: an
+// assignment into a nil map) — and refuses to merge into a map that does
+// not read, naming the file and how to recover, leaving it as it was.
+func TestRecordContainers(t *testing.T) {
+	id := strings.Repeat("ab", 32)
+	dir := t.TempDir()
+	path := filepath.Join(dir, federate.ContainersFile)
+	if err := os.WriteFile(path, []byte("null"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordContainers(dir, map[string]string{id: "app"}); err != nil {
+		t.Fatalf("merge into null: %v", err)
+	}
+	if m, err := federate.ReadContainers(dir); err != nil || m[id] != "app" {
+		t.Errorf("after the merge into null: %v, %v", m, err)
+	}
+	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := recordContainers(dir, map[string]string{id: "app"})
+	if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "remove it") {
+		t.Errorf("merge into a bad map: err %v, want the path and how to recover", err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "{" {
+		t.Errorf("the bad map was rewritten: %q", b)
+	}
+	if err := recordContainers(dir, map[string]string{"x": "app"}); err == nil {
+		t.Error("an invalid id was recorded")
 	}
 }

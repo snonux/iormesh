@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"iormesh/internal/k8sname"
 )
@@ -25,36 +27,70 @@ import (
 // listing skips it (listHost): it is no segment and no stray entry.
 const ContainersFile = "containers.json"
 
-// maxContainersSize bounds the map read: a pod has a few containers and
-// each restart adds one id, so a megabyte is far past any real one.
+// maxContainersSize bounds the map read (readBounded reads at most one
+// byte past it): a pod has a few containers and each restart adds one
+// id, so a megabyte is far past any real one.
 const maxContainersSize = 1 << 20
 
 // ReadContainers reads the container map in host directory dir; a
-// missing file is an empty map. A file over maxContainersSize, not a
-// JSON object, or holding an id that is no runtime id
+// missing file, or a JSON null, is an empty map, never nil. A store
+// entry that is no regular file (a symlink is not followed, a FIFO not
+// waited on), a file over maxContainersSize, one that is not a JSON
+// object, or one holding an id that is no runtime id
 // (k8sname.RuntimeID) or a name that is no container name (an RFC 1123
 // label) is an error: the whole file is then distrusted, never half
-// read.
+// read. The error says why without the file's path, which the caller
+// names as it shows it (the build's health holds no local paths).
 func ReadContainers(dir string) (map[string]string, error) {
-	path := filepath.Join(dir, ContainersFile)
-	data, err := os.ReadFile(path)
+	data, err := readBounded(filepath.Join(dir, ContainersFile))
 	if errors.Is(err, fs.ErrNotExist) {
 		return map[string]string{}, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("container map: %w", err)
+		return nil, err
 	}
-	if len(data) > maxContainersSize {
-		return nil, fmt.Errorf("container map: %s is over %d bytes", path, maxContainersSize)
-	}
-	m := map[string]string{}
+	var m map[string]string
 	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("container map: %s: %w", path, err)
+		return nil, err
 	}
 	if err := ValidContainers(m); err != nil {
-		return nil, fmt.Errorf("container map: %s: %w", path, err)
+		return nil, err
+	}
+	if m == nil { // the file held null
+		m = map[string]string{}
 	}
 	return m, nil
+}
+
+// readBounded reads the regular file at path, refusing anything else
+// before a read could block or follow a link — O_NOFOLLOW, O_NONBLOCK
+// (a FIFO's open returns at once), then fstat — and anything over
+// maxContainersSize without reading past it. A missing file is
+// fs.ErrNotExist; errors carry no path.
+func readBounded(path string) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		var pe *fs.PathError
+		if errors.As(err, &pe) {
+			err = pe.Err
+		}
+		if errors.Is(err, syscall.ELOOP) {
+			return nil, errors.New("a symlink, not a regular file")
+		}
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
+		return nil, errors.New("not a regular file")
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxContainersSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxContainersSize {
+		return nil, fmt.Errorf("over %d bytes", maxContainersSize)
+	}
+	return data, nil
 }
 
 // ValidContainers checks every entry of a container map: a runtime id
