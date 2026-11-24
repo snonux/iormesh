@@ -31,9 +31,9 @@ func m1FileSyscalls() []string {
 // went through them would escape the byte sums the merge's clock proof
 // trusts (PLAN.md M4), so they are on by default with the rest of the
 // family. Their bytes and tcp_seq are captured (the mmsg calls' bytes are
-// their messages' msg_len sum, internal/c/mmsg.c); a datagram's peer
-// inside the msghdr is not walked yet - the JDK's DatagramChannel sends
-// through sendto and recvfrom anyway.
+// their messages' msg_len sum, internal/c/mmsg.c), and so is a datagram's
+// peer from the msghdr's msg_name - the mmsg calls' first message's (task
+// nk4, internal/c/sockaddr.c).
 func socketSyscalls() []string {
 	return []string{"read", "write", "close",
 		"connect", "accept", "accept4", "bind", "sendto", "recvfrom",

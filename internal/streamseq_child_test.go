@@ -78,11 +78,12 @@ const seqUrgentChunk = 3
 // seqResult is what a child reports: its socket's descriptor and, for the
 // concurrent scenario, each sender's thread and write calls; for the UDP
 // msghdr scenario (msgcalls_child_test.go) its sending and receiving UDP
-// sockets.
+// sockets and their bound addresses.
 type seqResult struct {
 	Fd      int32
 	Senders []seqSender
 	UDP     [2]int32
+	UDPAddr [2]string
 }
 
 // seqSender is one sender thread: its tid and its write calls in order.
@@ -158,7 +159,7 @@ func runSeqChild(scenario string) error {
 	case msgScenarioTCP:
 		err = childMsgTCP(fd)
 	case msgScenarioUDP:
-		r.UDP, err = childMsgUDP()
+		r.UDP, r.UDPAddr, err = childMsgUDP()
 	case peekScenario:
 		err = childPeek(fd)
 	default:

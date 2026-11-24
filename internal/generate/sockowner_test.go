@@ -82,3 +82,24 @@ func TestConnectRendersBothHooks(t *testing.T) {
 		t.Errorf("connect enter renders %q, want the owner hook, then the address hook", got)
 	}
 }
+
+// TestMsghdrAddrHooks (task nk4): the four msghdr data calls park their
+// msghdr argument and read its msg_name at the exit, never for a stream
+// socket; the calls whose address is the argument itself do not treat it
+// as a msghdr - that would read a sockaddr's bytes as pointers.
+func TestMsghdrAddrHooks(t *testing.T) {
+	for _, call := range []string{"sendmsg", "recvmsg", "sendmmsg", "recvmmsg"} {
+		enter, exit := sockAddrHooks["sys_enter_"+call], sockAddrHooks["sys_exit_"+call]
+		if !strings.Contains(enter, "ctx->args[1], 0, 0)") {
+			t.Errorf("%s enter hook %q, want the msghdr (args[1]) parked with length 0", call, enter)
+		}
+		if !strings.Contains(exit, "IORMESH_ADDR_MSGHDR") || !strings.Contains(exit, "IORMESH_ADDR_NOT_STREAM") {
+			t.Errorf("%s exit hook %q, want IORMESH_ADDR_MSGHDR and IORMESH_ADDR_NOT_STREAM", call, exit)
+		}
+	}
+	for _, call := range []string{"bind", "connect", "sendto", "recvfrom"} {
+		if exit := sockAddrHooks["sys_exit_"+call]; strings.Contains(exit, "IORMESH_ADDR_MSGHDR") {
+			t.Errorf("%s exit hook %q reads its address argument as a msghdr", call, exit)
+		}
+	}
+}

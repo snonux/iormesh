@@ -1,21 +1,22 @@
 //+build ignore
 
-// Socket addresses of the traced processes' bind, connect, sendto, recvfrom
-// and AF_UNIX accepts (iormesh, M2 step 7). Included by iormesh.bpf.c after
+// Socket addresses of the traced processes' bind, connect, sendto, recvfrom,
+// msghdr data calls (sendmsg, recvmsg, sendmmsg, recvmmsg; task nk4) and
+// AF_UNIX accepts (iormesh, M2 step 7). Included by iormesh.bpf.c after
 // sock.c (whose iormesh_file_of_fd it uses) and ahead of the generated
 // handlers, which call the hooks below (internal/generate/sockowner.go).
 //
 // Why: the generated records of these calls carry the fd and the return
 // value only. UDP is connectionless, so its peer is in each datagram's
-// address argument, never in the socket; a unix socket's only name is the
-// sun_path of its bind and connect; and the two ends of a unix connection
-// can only be joined through the kernel's own pairing (unix_sk->peer). TCP
-// needs none of this: sock.c reads its 4-tuple from the socket's state
+// address argument (or its msghdr's msg_name), never in the socket; a unix
+// socket's only name is the sun_path of its bind and connect; and the two
+// ends of a unix connection can only be joined through the kernel's own
+// pairing (unix_sk->peer). TCP needs none of this: sock.c reads its 4-tuple from the socket's state
 // transitions, so a TCP connect sends no record here.
 //
 // How: the enter hook parks the address argument's user pointer and its
 // length by tid (recvfrom fills both in only at exit, so they cannot be read
-// at enter);
+// at enter; the msghdr calls park the msghdr itself, IORMESH_ADDR_MSGHDR);
 // the exit hook reads it together with the socket and sends one
 // sock_addr_event right before the exit record, which userspace attaches to
 // the thread's pending enter. Every read is fault-safe: an unreadable
@@ -34,9 +35,16 @@
 // recvfrom): glibc's send(3) and recv(3) are these syscalls, so every TCP
 // or connected unix send and receive would otherwise pay a record whose
 // addresses the connection already has (decision #25).
+// IORMESH_ADDR_MSGHDR: the parked pointer is a user struct msghdr (sendmsg,
+// recvmsg) or the first entry of a struct mmsghdr array, which begins with
+// one (sendmmsg, recvmmsg; task nk4), and the address is its msg_name of
+// msg_namelen bytes. Both are read at the exit, behind the stream check:
+// recvmsg's kernel writes the sender's length back into msg_namelen
+// (move_addr_to_user), and a TCP send must not pay the read.
 #define IORMESH_ADDR_FAILED_TOO 1
 #define IORMESH_ADDR_NOT_TCP 2
 #define IORMESH_ADDR_NOT_STREAM 4
+#define IORMESH_ADDR_MSGHDR 8
 
 // addr_arg is a parked address argument: the user pointer, its length -
 // the socklen_t value (bind, connect, sendto) or, with len_is_ptr, a
@@ -76,8 +84,10 @@ static __always_inline struct sock *iormesh_sock_of_any_fd(__s32 fd) {
 
 // iormesh_addr_on_enter is the enter hook of bind, connect (args[1],
 // length args[2]), sendto (args[4], args[5]) and recvfrom (args[4], length
-// pointer args[5]): it parks the address argument. A NULL pointer is parked
-// too, so the exit still reports the socket itself.
+// pointer args[5]): it parks the address argument; and of the msghdr calls
+// (the msghdr or mmsghdr array args[1], length 0: IORMESH_ADDR_MSGHDR reads
+// both at the exit). A NULL pointer is parked too, so the exit still
+// reports the socket itself.
 static __always_inline void iormesh_addr_on_enter(__u32 tid, __s32 fd, __u64 uaddr, __u64 len,
                                                   __u32 len_is_ptr) {
     struct addr_arg arg = {.uaddr = uaddr, .len = len, .fd = fd, .len_is_ptr = len_is_ptr};
@@ -160,6 +170,27 @@ static __always_inline __u32 iormesh_addr_len(struct addr_arg *arg) {
     return len;
 }
 
+// iormesh_msghdr_name replaces *uaddr, a user msghdr's address, with its
+// msg_name and *len with its msg_namelen; an unreadable msghdr or a
+// negative length leaves no address (both 0). Only the two leading fields
+// of the 64-bit ABI are read (as in recv.c's ior_user_msghdr), 16 bytes of
+// constant size and no loop: a straight line for el9's verifier.
+static __always_inline void iormesh_msghdr_name(__u64 *uaddr, __u32 *len) {
+    struct {
+        __u64 msg_name;
+        __s32 msg_namelen;
+        __u32 pad;
+    } hdr = {};
+
+    *len = 0;
+    if (!*uaddr || bpf_probe_read_user(&hdr, sizeof(hdr), (void *)*uaddr) || hdr.msg_namelen < 0) {
+        *uaddr = 0;
+        return;
+    }
+    *uaddr = hdr.msg_name;
+    *len = (__u32)hdr.msg_namelen;
+}
+
 // iormesh_read_addr_arg reads the address argument by its own family, only
 // as far as its length says: a recvfrom whose kernel wrote no address (len
 // 0) has none, whatever its buffer holds.
@@ -203,7 +234,9 @@ static __always_inline void iormesh_read_sock_addrs(struct sock_addr_event *ev, 
 // address argument at uaddr, 0 for none). Zeroed, because ring-buffer
 // memory holds earlier records' bytes and an IPv4 record leaves address
 // bytes unwritten. With IORMESH_ADDR_NOT_TCP a TCP socket sends nothing,
-// with IORMESH_ADDR_NOT_STREAM no stream socket does.
+// with IORMESH_ADDR_NOT_STREAM no stream socket does; with
+// IORMESH_ADDR_MSGHDR uaddr is a msghdr whose msg_name is read only after
+// those checks passed.
 static __always_inline void iormesh_emit_sock_addr(__u32 pid, __u32 tid, __u32 trace_id,
                                                    __s32 fd, __u64 uaddr, __u32 len,
                                                    __u32 flags) {
@@ -215,6 +248,8 @@ static __always_inline void iormesh_emit_sock_addr(__u32 pid, __u32 tid, __u32 t
     if ((flags & IORMESH_ADDR_NOT_STREAM) && sk &&
         BPF_CORE_READ(sk, sk_type) == IORMESH_SOCK_STREAM)
         return;
+    if (flags & IORMESH_ADDR_MSGHDR)
+        iormesh_msghdr_name(&uaddr, &len);
     ev = bpf_ringbuf_reserve(&event_map, sizeof(*ev), 0);
     if (!ev) {
         ior_count_ringbuf_drop();
@@ -233,8 +268,10 @@ static __always_inline void iormesh_emit_sock_addr(__u32 pid, __u32 tid, __u32 t
     bpf_ringbuf_submit(ev, 0);
 }
 
-// iormesh_addr_on_exit is the exit hook of the four address calls; flags
-// are the IORMESH_ADDR_* above.
+// iormesh_addr_on_exit is the exit hook of the address calls and the msghdr
+// calls; flags are the IORMESH_ADDR_* above. A failed call reports nothing
+// unless IORMESH_ADDR_FAILED_TOO; an mmsg call's ret > 0 means its first
+// message moved, so the first msg_name is that message's peer.
 static __always_inline void iormesh_addr_on_exit(__u32 pid, __u32 tid, __u32 trace_id, __s64 ret,
                                                  __u32 flags) {
     struct addr_arg *parked = bpf_map_lookup_elem(&addr_arg_map, &tid);

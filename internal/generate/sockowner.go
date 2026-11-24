@@ -27,7 +27,8 @@ var sockOwnerHooks = map[string]string{
 // accept exits report an accepted AF_UNIX socket and its peer. bind and
 // connect report failures too, connect never a TCP socket, sendto and
 // recvfrom never a stream socket - send(3)/recv(3) on a connection are
-// these syscalls (IORMESH_ADDR_* in sockaddr.c).
+// these syscalls (IORMESH_ADDR_* in sockaddr.c). The msghdr data calls
+// report a datagram's peer the same way, from their msg_name (task nk4).
 var sockAddrHooks = map[string]string{
 	"sys_enter_bind":     "iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[1], ctx->args[2], 0)",
 	"sys_enter_connect":  "iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[1], ctx->args[2], 0)",
@@ -43,6 +44,21 @@ var sockAddrHooks = map[string]string{
 		"IORMESH_ADDR_NOT_STREAM)",
 	"sys_exit_accept":  "iormesh_addr_on_accept(pid, tid, SYS_EXIT_ACCEPT, ctx->ret)",
 	"sys_exit_accept4": "iormesh_addr_on_accept(pid, tid, SYS_EXIT_ACCEPT4, ctx->ret)",
+	// The msghdr calls (task nk4) park the msghdr (the mmsg calls: their
+	// array, whose first entry starts with one) and read its msg_name at
+	// the exit; a stream socket sends nothing, as for sendto.
+	"sys_enter_sendmsg":  "iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[1], 0, 0)",
+	"sys_enter_recvmsg":  "iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[1], 0, 0)",
+	"sys_enter_sendmmsg": "iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[1], 0, 0)",
+	"sys_enter_recvmmsg": "iormesh_addr_on_enter(tid, (__s32)ctx->args[0], ctx->args[1], 0, 0)",
+	"sys_exit_sendmsg": "iormesh_addr_on_exit(pid, tid, SYS_EXIT_SENDMSG, ctx->ret, " +
+		"IORMESH_ADDR_NOT_STREAM | IORMESH_ADDR_MSGHDR)",
+	"sys_exit_recvmsg": "iormesh_addr_on_exit(pid, tid, SYS_EXIT_RECVMSG, ctx->ret, " +
+		"IORMESH_ADDR_NOT_STREAM | IORMESH_ADDR_MSGHDR)",
+	"sys_exit_sendmmsg": "iormesh_addr_on_exit(pid, tid, SYS_EXIT_SENDMMSG, ctx->ret, " +
+		"IORMESH_ADDR_NOT_STREAM | IORMESH_ADDR_MSGHDR)",
+	"sys_exit_recvmmsg": "iormesh_addr_on_exit(pid, tid, SYS_EXIT_RECVMMSG, ctx->ret, " +
+		"IORMESH_ADDR_NOT_STREAM | IORMESH_ADDR_MSGHDR)",
 }
 
 // renderSockOwnerHook writes the socket (un)registration call of the handler
