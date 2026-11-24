@@ -253,12 +253,32 @@ fails up front with the fix named.
   `bpf_core_field_exists` (as dispatch.c does for
   `thread_info.status`). `javamark.c`'s `ctx->sp` relies on
   libbpf matching `sp` inside arm64 `pt_regs`' anonymous struct
-  (it should relocate; unverified), and its exit-probe comment
-  about the popped return address is x86-only reasoning. **The
-  arm64 object has never been loaded on a real arm64 kernel.**
+  (it does: see "arm64 status" below), and its exit-probe comment
+  about the popped return address is x86-only reasoning.
   To compile against arm64 types, dump an arm64 host's BTF
   (`bpftool btf dump file /sys/kernel/btf/vmlinux format c`)
   and point `IORMESH_VMLINUX_ARM64` at the file.
+- **arm64 status** (task 8k4, 2026-11-24): loaded on Rocky 9.9
+  aarch64 (`5.14.0-741.22.1.el9_9.aarch64`, BTF) in QEMU on the
+  x86 laptop — an **emulated CPU** (TCG, `-cpu max`), so it
+  proves load, verifier and JIT acceptance and event flow on an
+  arm64 el9 kernel, and nothing about timing or overhead. The
+  release `iormesh-linux-arm64` from `tracer-arm64` is
+  **refused by the verifier** (`handle_sys_exit_read`, "R8
+  unbounded memory access" in `rwagg.c`'s exit path): the
+  builder's Debian clang 19 bound-checks `idx` on a copy and
+  indexes with the unchecked register. The fault is the
+  compiler's, not arm64's — clang 19's bytecode is identical
+  with `-D__TARGET_ARCH_x86`, and that object is refused the
+  same way — so the amd64 tracer, built by the Rocky builder's
+  own clang, is not affected. The same source built with clang
+  22 loads with no other change: the x86 `vmlinux.h` relocated
+  fine, `iormesh run` traced file and TCP I/O, and 40 of the
+  root BPF gate's 42 tests passed, the Java marks' uprobes
+  (`ctx->sp`) included; the other two assume x86 (task jl4;
+  docs/testing.md, "arm64 on an emulated el9 kernel"). Until
+  task il4 fixes the source or the builder's
+  clang, the arm64 release tracer does not run on el9.
 - **Checks**: each binary's header is verified (ELF machine or
   Mach-O CPU; the tracers must have no ELF interpreter), then
   every Linux binary runs `--help` on Rocky 9 of its own arch.

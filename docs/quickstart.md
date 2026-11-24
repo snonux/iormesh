@@ -44,7 +44,8 @@ eBPF and no root):
   openrsync will not do ([security.md](security.md)).
 
 **Each host** (Rocky Linux 9.9, x86_64; the arm64 tracer is
-built but has never been loaded on a real arm64 kernel):
+built, but its release object does not yet load on el9 aarch64 —
+task il4, [build.md](build.md) "arm64 status"):
 
 - The stock el9 kernel (5.14.0-…el9_9) with BTF at
   `/sys/kernel/btf/vmlinux` — Rocky ships it.

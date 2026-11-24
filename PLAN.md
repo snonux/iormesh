@@ -4387,8 +4387,10 @@ whether the engine is Docker or Podman:
   digest. The arm64 BPF object compiles against the build
   host's `vmlinux.h` unless an arm64 host's is supplied; CO-RE
   relocates by field name, but an unguarded x86-only field
-  would fail only at load on arm64, and the arm64 object has
-  never been loaded on a real arm64 kernel. Details:
+  would fail only at load on arm64. On an emulated el9 aarch64
+  kernel (task 8k4) the released arm64 object is refused by the
+  verifier — a clang-19 codegen defect, not an arm64 one (task
+  il4); the same source built with a newer clang loads. Details:
   [docs/build.md](docs/build.md), "Container builds".
 
 ### Release archives (task rh4, owner-approved 2026-11-22)
