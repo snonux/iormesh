@@ -78,7 +78,7 @@ func TestLoadAgentsStagesForeignMountNS(t *testing.T) {
 	l := &fakeLoader{}
 	useLoader(t, l)
 	stages := useStages(t, agent, map[uint32]string{20: "a", 21: "a", 30: "b"})
-	got := loadAgents(context.Background(), l, []uint32{10, 20, 21, 30, 40, 50, 70, 60, 61}, agent, spool)
+	got := loadAgents(context.Background(), l, []uint32{10, 20, 21, 30, 40, 50, 70, 60, 61}, agent, spool, nil)
 	if len(got.stages) != 4 || len(*stages) != 4 {
 		t.Fatalf("stages %d (made %d), want 4: %v", len(got.stages), len(*stages), got.lines)
 	}
@@ -111,7 +111,7 @@ func TestLoadAgentsStagesForeignMountNS(t *testing.T) {
 		t.Fatal(err)
 	}
 	made := slices.Clone(*stages)
-	again := loadAgents(context.Background(), l, []uint32{30}, agent, spool)
+	again := loadAgents(context.Background(), l, []uint32{30}, agent, spool, nil)
 	if !strings.Contains(again.lines[0], "agent loaded into pid 30;") {
 		t.Errorf("ring in the stage not seen: %q", again.lines[0])
 	}
@@ -149,7 +149,7 @@ func TestLoadAgentsStopsWhenDone(t *testing.T) {
 	stages := useStages(t, agent, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	got := loadAgents(ctx, l, []uint32{10, 20}, agent, spool)
+	got := loadAgents(ctx, l, []uint32{10, 20}, agent, spool, nil)
 	if len(got.lines)+len(l.got)+len(*stages) != 0 {
 		t.Errorf("lines %v, loads %d, stages %d after ctx ended", got.lines, len(l.got), len(*stages))
 	}

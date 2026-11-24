@@ -347,6 +347,8 @@ type raceLoader struct {
 	tr       *fakeTracer
 	first    uint32
 	startErr error
+	// noExec sends no exec record: the start-time load just fails.
+	noExec bool
 
 	mu       sync.Mutex
 	loads    map[uint32]int
@@ -368,6 +370,9 @@ func (l *raceLoader) Load(_ context.Context, r javaattach.Request) error {
 	}()
 	if r.PID != l.first || n != 1 {
 		return nil
+	}
+	if l.noExec {
+		return l.startErr
 	}
 	rec := execRecord(l.first, 40, "/jdk/bin/java", "/jdk/bin/java", "-jar", "w.jar")
 	rec.EventType = types.PROCESS_ARGV_EVENT
@@ -396,22 +401,29 @@ func (l *raceLoader) counts(pid uint32) (loads, maxIn int) {
 // — two attaches could each send a SIGQUIT, and the second prints a
 // thread dump on the app's stdout. Loaded at start, it is not loaded
 // again; one the start-time attach found no JVM yet (a wrapper that
-// exec'd java) is handed to the late attacher once that load ended.
+// exec'd java) or with no SIGQUIT handler yet (a JVM still starting) is
+// handed to the late attacher once that load ended — but only if it
+// exec'd meanwhile, and one that refused is not tried again (task 9l4).
 func TestLateAttachSkipsStartTimeJVM(t *testing.T) {
 	cases := []struct {
 		name      string
 		startErr  error
+		noExec    bool
 		wantLoads int
 	}{
-		{"loaded at start", nil, 1},
-		{"no JVM yet at start", javaattach.ErrNotJVM, 2},
+		{"loaded at start", nil, false, 1},
+		{"no JVM yet at start", javaattach.ErrNotJVM, false, 2},
+		{"no SIGQUIT handler yet at start", javaattach.ErrNoQuitHandler, false, 2},
+		{"refused at start", javaattach.ErrAttachDisabled, false, 1},
+		{"no JVM at start, no exec", javaattach.ErrNotJVM, true, 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			fakeProcs(t, 10)
 			agent, spool := agentFiles(t)
 			tr := newFakeTracer()
-			l := &raceLoader{tr: tr, first: 10, startErr: tc.startErr, loads: map[uint32]int{},
+			l := &raceLoader{tr: tr, first: 10, startErr: tc.startErr, noExec: tc.noExec,
+				loads:    map[uint32]int{},
 				inFlight: map[uint32]int{}, maxIn: map[uint32]int{}}
 			useLoader(t, l)
 			c := testCorrelator(t, t.TempDir())
@@ -430,5 +442,105 @@ func TestLateAttachSkipsStartTimeJVM(t *testing.T) {
 				t.Errorf("%d loads of pid 10, want %d:\n%s", loads, tc.wantLoads, log.String())
 			}
 		})
+	}
+}
+
+// hookLoader counts each pid's loads and answers each with hook, given
+// the load's ctx, pid and number (1 for the first).
+type hookLoader struct {
+	hook  func(ctx context.Context, pid uint32, n int) error
+	mu    sync.Mutex
+	loads map[uint32]int
+}
+
+func (l *hookLoader) Load(ctx context.Context, r javaattach.Request) error {
+	l.mu.Lock()
+	l.loads[r.PID]++
+	n := l.loads[r.PID]
+	l.mu.Unlock()
+	return l.hook(ctx, r.PID, n)
+}
+
+func (l *hookLoader) count(pid uint32) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.loads[pid]
+}
+
+// javaExec is the exec record of pid starting a JVM.
+func javaExec(pid uint32) []any {
+	rec := execRecord(pid, 40, "/jdk/bin/java", "/jdk/bin/java", "-jar", "w.jar")
+	rec.EventType = types.PROCESS_ARGV_EVENT
+	return []any{rec}
+}
+
+// TestLateAttachAfterOwnLoad (task 9l4): a JVM the session starts with
+// is released to the late attacher as soon as its own start-time load
+// ends, not once every start-time load did. Pid 10 loads at once and
+// then execs a new JVM while pid 20's load still runs: the new image
+// gets the agent too — once, after pid 10's first load was done.
+func TestLateAttachAfterOwnLoad(t *testing.T) {
+	fakeProcs(t, 10, 20)
+	agent, spool := agentFiles(t)
+	tr := newFakeTracer()
+	l := &hookLoader{loads: map[uint32]int{}}
+	l.hook = func(_ context.Context, pid uint32, n int) error {
+		if pid != 20 || n != 1 {
+			return nil
+		}
+		// Pid 10's load is done; it execs while this one runs.
+		tr.records <- javaExec(10)
+		for deadline := time.Now().Add(2 * time.Second); l.count(10) < 2 && time.Now().Before(deadline); {
+			time.Sleep(time.Millisecond)
+		}
+		return nil
+	}
+	useLoader(t, l)
+	c := testCorrelator(t, t.TempDir())
+	defer func() { _ = c.Close() }()
+	s, _ := pidSession(t, tr, c, 10, 20)
+	log := startAgentSession(t, s, agent, spool)
+	for deadline := time.Now().Add(5 * time.Second); s.late.busy() && time.Now().Before(deadline); {
+		time.Sleep(time.Millisecond)
+	}
+	s.stopLate()
+	if n := l.count(10); n != 2 {
+		t.Errorf("%d loads of pid 10, want 2 (at start, then its new image):\n%s", n, log.String())
+	}
+	if n := l.count(20); n != 1 {
+		t.Errorf("%d loads of pid 20, want 1", n)
+	}
+}
+
+// TestAbandonLoadsHandsNothingOver (task 9l4): when the record stream
+// closes during a start-time load, the session gives its loads up; a
+// held pid that exec'd and whose load then failed before any SIGQUIT is
+// not handed to the late attacher — the session is ending.
+func TestAbandonLoadsHandsNothingOver(t *testing.T) {
+	fakeProcs(t, 10)
+	agent, spool := agentFiles(t)
+	tr := newFakeTracer()
+	l := &hookLoader{loads: map[uint32]int{}, hook: func(ctx context.Context, _ uint32, n int) error {
+		if n != 1 {
+			return nil
+		}
+		tr.records <- javaExec(10)
+		close(tr.records)
+		<-ctx.Done()
+		return javaattach.ErrNotJVM
+	}}
+	useLoader(t, l)
+	c := testCorrelator(t, t.TempDir())
+	defer func() { _ = c.Close() }()
+	s, _ := pidSession(t, tr, c, 10)
+	var log bytes.Buffer
+	s.log = &log
+	if err := s.startJava(context.Background(), runConfig{agent: agent, spool: spool}, &log); err == nil {
+		t.Fatal("startJava succeeded on a closed record stream")
+	}
+	busy := s.late.busy()
+	s.stopLate()
+	if n := l.count(10); busy || n != 1 {
+		t.Errorf("abandoned pid 10 handed over (busy %v, %d loads, want 1):\n%s", busy, n, log.String())
 	}
 }

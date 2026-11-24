@@ -696,15 +696,18 @@ Gated by S1 — done; the design below is S1's result
   overflow named, the next overflow named again once a slot
   freed); the loop only collects
   their lines and stages at its tick. A JVM forked without an
-  exec is no new JVM and gets nothing. The JVMs the start-time
-  attach loads are its own until those loads end (task 7l4): an
-  exec of one meanwhile is not tried beside it — two attaches
-  could each send a SIGQUIT, and the second prints a thread
-  dump on the app's stdout — but handed to the late attach
-  afterwards only if its start-time load failed before any
-  signal (no `libjvm.so` or no handler yet). So a JVM gets at
-  most one SIGQUIT from the session; one loaded at start that
-  execs a new JVM before the loads end gets no agent there.
+  exec is no new JVM and gets nothing. Each JVM the start-time
+  attach loads is its own until that JVM's own load ends (tasks
+  7l4, 9l4): an exec of it meanwhile is not tried beside it —
+  two attaches could each send a SIGQUIT, and the second prints
+  a thread dump on the app's stdout — but handed to the late
+  attach afterwards, its windows from that exec, only if its
+  start-time load failed before any signal (no `libjvm.so` or
+  no handler yet). So a JVM gets at most one SIGQUIT from the
+  session; an exec after its own load ended is a new image,
+  tried late like any other, even while other pids' start-time
+  loads still run. One that execs during its own successful
+  (or refused) load gets no agent in its new image.
 - **Stack capture cost**: the per-I/O `StackWalker` walk is the
   agent's dominant cost (S1: ≈8 µs per call on a loaded host vs
   ≈0.3 µs for the rest of the bracket); M3 engineers it down
