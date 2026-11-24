@@ -10,7 +10,9 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -84,15 +86,42 @@ func AgentBuild() error {
 
 // agentJarInputs are what agentJar is built from: the agent's sources,
 // resources and tools (not agent/build, the intermediates, nor agent/test),
-// the vendored ASM, and internal/version, whose release version packAgent
-// stamps into the manifest.
+// the vendored ASM, internal/version, whose release version packAgent
+// stamps into the manifest. agentRecipeGlob adds the magefiles.
 var agentJarInputs = []string{"agent/bridge", "agent/core", "agent/tools",
 	"agent/third_party", "internal/version"}
 
-// agentJarFresh reports whether agentJar exists and is newer than every
-// file under agentJarInputs.
+// agentRecipeGlob is the build recipe itself (manifest text, --release and
+// -Xlint flags, the ASM shading, the resources copied, javaSources): an
+// edited recipe must not leave a stale jar for mage release to sign and
+// ship, so editing any magefile rebuilds the jar, a cheap price for never
+// missing one. It is a glob of the files, not target.Dir of the directory:
+// mage writes and removes mage_output_file.go there on every run, so the
+// directory's own mtime is always newer than the jar. The JDK is no input:
+// an upgrade does not rebuild, which is fine while javacAgent compiles with
+// --release agentRelease.
+const agentRecipeGlob = "magefiles/*.go"
+
+// agentBuildOutputs are the intermediates AgentTest compiles its tests
+// against; a missing one makes the jar stale, so AgentBuild recreates it.
+var agentBuildOutputs = []string{agentCoreDir, agentASMDir, agentBridgeDir}
+
+// agentJarFresh reports whether agentJar exists, is newer than every file
+// under agentJarInputs and agentRecipeGlob, and the intermediates in
+// agentBuildOutputs exist.
 func agentJarFresh() (bool, error) {
+	for _, dir := range agentBuildOutputs {
+		if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		} else if err != nil {
+			return false, err
+		}
+	}
 	stale, err := target.Dir(agentJar, agentJarInputs...)
+	if err != nil || stale {
+		return false, err
+	}
+	stale, err = target.Glob(agentJar, agentRecipeGlob)
 	return !stale, err
 }
 

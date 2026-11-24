@@ -33,10 +33,15 @@ var smokeKinds = []string{"open", "read", "write", "seek", "close", "socket",
 // hook table), and finally runs the workload's file-basic scenario under
 // the agent. Last, internal/agentspool's Java-driven tests read rings
 // the real agent wrote (decision #27): a concurrent RingStress writer and
-// the workload under the agent with a spool directory.
+// the workload under the agent with a spool directory. agentTestDir is
+// cleared first: AgentBuild may keep agent/build (agentJarFresh), and
+// classes of deleted test sources must not survive into the run.
 func AgentTest() error {
 	mg.SerialDeps(AgentBuild, WorkloadBuild)
-	cp := strings.Join([]string{agentCoreDir, agentASMDir, agentBridgeDir}, ":")
+	cp := strings.Join(agentBuildOutputs, ":")
+	if err := os.RemoveAll(agentTestDir); err != nil {
+		return err
+	}
 	if err := javacAgent("agent/test/src", agentTestDir, cp); err != nil {
 		return err
 	}
