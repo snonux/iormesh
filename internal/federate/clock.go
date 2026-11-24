@@ -134,12 +134,15 @@ func (t *timing) state(ev *schema.Event) {
 // tcp_seq, nor does a call another thread interleaved with — since the
 // sums must not undercount the stream (streamProof). A record whose
 // bytes are a lower bound (args.bytes_partial) marks the half partial.
+// A receive that peeked (args.peek, task ok4) adds nothing: its bytes
+// stay queued and count with the receive that consumes them
+// (StreamBytes).
 func (t *timing) data(ev *schema.Event) {
 	send := schema.IsStreamSend(ev.Event)
 	if send {
-		t.sent += ev.Bytes
+		t.sent += ev.StreamBytes()
 	} else {
-		t.received += ev.Bytes
+		t.received += ev.StreamBytes()
 	}
 	if ev.Args.BytesPartial != nil {
 		t.partial = true

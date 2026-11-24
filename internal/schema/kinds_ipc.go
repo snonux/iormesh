@@ -17,6 +17,8 @@ package schema
 //     mmsg calls' ret is the message count and bytes the sum of the
 //     messages' msg_len; args.bytes_partial marks a sum the tracer could
 //     not complete. A datagram's peer inside the msghdr is not read yet.
+//     recvfrom, recvmsg and recvmmsg called with MSG_PEEK are marked
+//     args.peek (task ok4): their bytes stay out of the stream sums.
 //   - pipe, pipe2, socketpair: fd is the first descriptor, args.fd2 and
 //     args.fd2_gen the second; both name one connection (conn_id).
 //   - kill, tgkill, tkill: args.target_pid and args.signal, when the

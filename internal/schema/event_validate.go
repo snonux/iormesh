@@ -189,6 +189,9 @@ func (e *Event) validateKindArgs() error {
 	if err := e.validateBytesPartial(); err != nil {
 		return err
 	}
+	if err := e.validatePeek(); err != nil {
+		return err
+	}
 	switch e.Event {
 	case KindOpen, KindOpenat, KindOpenat2, KindCreat:
 		if e.Args.Path == nil || *e.Args.Path == "" {
@@ -428,4 +431,44 @@ func (e *Event) validateBytesPartial() error {
 		return invalidf("args.tcp_seq on a %s whose bytes are partial", e.Event)
 	}
 	return nil
+}
+
+// validatePeek keeps args.peek (task ok4) to what it means: a receive
+// called with MSG_PEEK, which copied bytes without consuming them. Only
+// the receive calls that take flags can peek, and only true is ever
+// written. A peek moved no stream bytes, so it has no tcp_seq.
+func (e *Event) validatePeek() error {
+	p := e.Args.Peek
+	switch {
+	case p == nil:
+		return nil
+	case !IsPeekable(e.Event):
+		return invalidf("args.peek on a %s event (recvfrom, recvmsg and recvmmsg only)", e.Event)
+	case !*p:
+		return invalidf("args.peek false, want true or none")
+	case e.Args.TCPSeq != nil:
+		return invalidf("args.tcp_seq on a %s that peeked", e.Event)
+	}
+	return nil
+}
+
+// IsPeekable reports whether kind is a receive whose flags argument can
+// carry MSG_PEEK: recvfrom, recvmsg and recvmmsg.
+func IsPeekable(kind string) bool {
+	switch kind {
+	case KindRecvfrom, KindRecvmsg, KindRecvmmsg:
+		return true
+	}
+	return false
+}
+
+// StreamBytes is what ev adds to its direction's stream byte sums - the
+// merge's (internal/federate) and the report's: its bytes, or 0 for a
+// receive that peeked (args.peek, task ok4), whose bytes stay queued for
+// the receive that consumes and counts them.
+func (e *Event) StreamBytes() uint64 {
+	if e.Args.Peek != nil {
+		return 0
+	}
+	return e.Bytes
 }

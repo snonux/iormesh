@@ -562,12 +562,14 @@ truth.
   (`ErrNotJVM`, for 5 s from the exec) and no SIGQUIT handler yet
   (`ErrNoQuitHandler`, for 30 s): one attempt sends at most one
   SIGQUIT, and a job that sent one ends with that attempt,
-  whatever its outcome. The start-time attach holds the JVMs it
-  loads until its loads end (`lateAttacher.hold`, `release`,
-  task 7l4): an exec of one meanwhile is not tried beside it,
-  and handed over afterwards only if its start-time load failed
-  before any signal, so each JVM gets at most one SIGQUIT from
-  the session. `attachDisabled` sees the flag only on
+  whatever its outcome. The start-time attach holds each JVM it
+  loads until that JVM's own load ends (`lateAttacher.hold`,
+  `loaded`, `release`, tasks 7l4, 9l4): an exec of one
+  meanwhile is not tried beside it, and handed over afterwards
+  only if its start-time load failed before any signal, so each
+  JVM gets at most one SIGQUIT per image from the session. When
+  the session gives the start-time loads up, the claims left
+  hand nothing over (`releaseAll`). `attachDisabled` sees the flag only on
   the command line or in `JAVA_TOOL_OPTIONS`/`JDK_JAVA_OPTIONS`;
   a JVM that sets it elsewhere (an options file) still never
   loads the agent, but answers the one SIGQUIT with a thread

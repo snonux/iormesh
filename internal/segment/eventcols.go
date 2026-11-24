@@ -67,6 +67,7 @@ const (
 	colArgsParentInc
 	colArgsSockSnapshot
 	colArgsBytesPartial
+	colArgsPeek
 	colConnID
 	colAttribution
 	colJavaThread
@@ -136,7 +137,8 @@ var eventColumnSpecs = [numEventColumns]columnSpec{
 	colArgsPattern: {"args.pattern", kindBytes}, colArgsParentPID: {"args.parent_pid", kindInt32},
 	colArgsParentInc:    {"args.parent_incarnation", kindInt64},
 	colArgsSockSnapshot: {"args.sock_snapshot", kindBytes},
-	colArgsBytesPartial: {"args.bytes_partial", kindBool}, colConnID: {"conn_id", kindBytes},
+	colArgsBytesPartial: {"args.bytes_partial", kindBool}, colArgsPeek: {"args.peek", kindBool},
+	colConnID:      {"conn_id", kindBytes},
 	colAttribution: {"attribution", kindDict}, colJavaThread: {"java.thread", kindBytes},
 	colJavaStack:   {"java.stack.list.element", kindInt64},
 	colJavaCarrier: {"java.carrier", kindBool}, colHTTPMethod: {"http.method", kindBytes},
@@ -274,6 +276,7 @@ func (e *eventColumns) args(a *schema.Args) {
 	optI64(&c[colArgsParentInc], a.ParentInc)
 	optStr(&c[colArgsSockSnapshot], a.SockSnapshot)
 	c[colArgsBytesPartial].optBool(deref(a.BytesPartial), a.BytesPartial != nil, 0)
+	c[colArgsPeek].optBool(deref(a.Peek), a.Peek != nil, 0)
 }
 
 // java, http, session, otel, dns and pod write an optional nested object: a
