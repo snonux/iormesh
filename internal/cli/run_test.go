@@ -343,8 +343,12 @@ func TestTraceLoopWriteError(t *testing.T) {
 
 // TestDrainQuiet: the drain ends targets_exited once quiet, still polls
 // losses while it waits, and reports a signal or the duration that cut it
-// short as the reason instead.
+// short as the reason instead. The target pid 10 is faked as already
+// gone: on a host where the real pid 10 is alive (a CI runner) start
+// would seed it and write an attach event the drain did not cause.
 func TestDrainQuiet(t *testing.T) {
+	fakeProcs(t)
+	processIdentity = func(uint32) correlate.Identity { return correlate.Identity{} }
 	dir := t.TempDir()
 	tr := newFakeTracer()
 	tr.setLosses(bpf.Losses{Kernel: 2}, nil)

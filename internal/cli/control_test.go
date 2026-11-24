@@ -613,6 +613,38 @@ func TestStatusText(t *testing.T) {
 	}
 }
 
+// TestStatusTextOperatorStop (task 0l4): the text tells an operator's
+// stop from any other "stop" end, since iormeshctl ensure restarts the
+// other and leaves the operator's, and says when a state from before
+// operator_stop cannot tell; a dead session the operator stopped says so
+// too.
+func TestStatusTextOperatorStop(t *testing.T) {
+	ended := func(op *bool) statusReport {
+		at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+		return statusReport{Project: "shop", Unit: "iormesh-shop.service", UnitState: "inactive/dead",
+			State: stateEnded, Session: &sessionState{Project: "shop", State: stateEnded,
+				EndReason: "stop", EndedAt: at, Version: "1.0", OperatorStop: op}}
+	}
+	operator, sigterm, old := ended(new(true)).text(), ended(new(false)).text(), ended(nil).text()
+	dead := ended(new(true))
+	dead.State, dead.Session.State = stateDead, stateRunning
+	for _, c := range []struct {
+		name, text, want, not string
+	}{
+		{"operator", operator, "  stopped by the operator: iormeshctl ensure leaves it stopped\n", "unknown"},
+		{"sigterm", sigterm, "  ended 2026-11-20T09:00:00Z (stop)\n", "operator:"},
+		{"old", old, "  stop origin unknown", "operator:"},
+		{"dead", dead.text(), "  stopped by the operator: iormeshctl ensure leaves it stopped\n", "unknown"},
+	} {
+		if !strings.Contains(c.text, c.want) || strings.Contains(c.text, c.not) {
+			t.Errorf("%s: got\n%s\nwant %q, not %q", c.name, c.text, c.want, c.not)
+		}
+	}
+	if operator == sigterm {
+		t.Errorf("an operator stop and a SIGTERM read the same:\n%s", operator)
+	}
+}
+
 // TestStatusErrors: an unknown project, a corrupt state and a state of
 // another project are errors, reported, never shown as a session.
 func TestStatusErrors(t *testing.T) {

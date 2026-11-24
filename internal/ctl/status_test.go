@@ -90,6 +90,56 @@ func TestStatusHosts(t *testing.T) {
 	}
 }
 
+// TestStatusOperatorStop (task 0l4): two sessions that both ended
+// "stop" read apart in the table, since ensure restarts one and not the
+// other (ensureDecide): the operator's stop says so in the NOTE column,
+// a reboot's SIGTERM (operator_stop false) adds nothing, a tracer that
+// predates the field says the stop's origin is unknown (ensure leaves
+// it), and a dead session the operator stopped says so too. A dead
+// session from such a tracer, or a session ended otherwise, is
+// restarted, so it gets no stop note.
+func TestStatusOperatorStop(t *testing.T) {
+	f := newDeployFixture(t)
+	f.answers["app1 "+strings.Join(sudoTr, " ")+" status -json"] = reply{out: `[
+	 {"project":"shop","unit_state":"inactive/dead","state":"ended","ready_segments":0,
+	  "session":{"end_reason":"stop","version":"1.0","operator_stop":true}},
+	 {"project":"billing","unit_state":"inactive/dead","state":"ended","ready_segments":0,
+	  "session":{"end_reason":"stop","version":"1.0","operator_stop":false}},
+	 {"project":"old","unit_state":"inactive/dead","state":"ended","ready_segments":0,
+	  "session":{"end_reason":"stop","version":"0.9"}},
+	 {"project":"gone","unit_state":"inactive/dead","state":"dead","ready_segments":0,
+	  "session":{"version":"1.0","operator_stop":true}},
+	 {"project":"crash","unit_state":"inactive/dead","state":"dead","ready_segments":0,
+	  "session":{"version":"0.9"}},
+	 {"project":"done","unit_state":"inactive/dead","state":"ended","ready_segments":0,
+	  "session":{"end_reason":"duration","version":"0.9"}}]`}
+	if code := f.run("status", "app1"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr)
+	}
+	out := f.stdout.String()
+	line := func(project string) string {
+		return strings.Join(statusLine(out, "app1", project), " ")
+	}
+	for _, c := range []struct {
+		project, want, not string
+	}{
+		{"shop", "stopped by operator", "unknown"},
+		{"billing", "", "operator"},
+		{"old", "stop origin unknown", "stopped by operator"},
+		{"gone", "stopped by operator", "unknown"},
+		{"crash", "", "operator"},
+		{"done", "", "operator"},
+	} {
+		l := line(c.project)
+		if l == "" || !strings.Contains(l, c.want) || strings.Contains(l, c.not) {
+			t.Errorf("%s: %q, want %q and not %q in\n%s", c.project, l, c.want, c.not, out)
+		}
+	}
+	if line("shop") == line("billing") {
+		t.Errorf("an operator stop and a SIGTERM read the same:\n%s", out)
+	}
+}
+
 // TestStatusPods (task ph4): a pod's tracer is asked `iormesh ready
 // -status` per project through the kubectl transport; an image from
 // before the flag answers `ready -state` instead, its version and ready/

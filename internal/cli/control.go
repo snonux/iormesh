@@ -15,6 +15,7 @@ import (
 	"iormesh/internal/hostlayout"
 	"iormesh/internal/project"
 	"iormesh/internal/release"
+	"iormesh/internal/schema"
 	"iormesh/internal/segment"
 )
 
@@ -269,6 +270,7 @@ func (r statusReport) text() string {
 		if st.State == stateEnded {
 			fmt.Fprintf(&b, "  ended %s (%s)\n", st.EndedAt.Format(time.RFC3339), st.EndReason)
 		}
+		b.WriteString(r.stopLine())
 	}
 	if r.State == stateDead {
 		b.WriteString("  the tracer died without its end: the active minute was not published\n")
@@ -278,6 +280,27 @@ func (r statusReport) text() string {
 		fmt.Fprintf(&b, "  error: %s\n", r.Error)
 	}
 	return b.String()
+}
+
+// stopLine is the text's line on who stopped an ended or dead session
+// (task 0l4), "" when there is nothing to add. A reboot's SIGTERM and
+// `iormesh stop` both end a run "stop", but iormeshctl ensure restarts
+// only the former (OperatorStop): the operator's stop says so, and so
+// does an ended "stop" whose state predates the field, which ensure
+// leaves too since it cannot tell. Any other end ensure restarts, and
+// gets no line.
+func (r statusReport) stopLine() string {
+	st := r.Session
+	if st == nil || r.State != stateEnded && r.State != stateDead {
+		return ""
+	}
+	switch {
+	case st.OperatorStop != nil && *st.OperatorStop:
+		return "  stopped by the operator: iormeshctl ensure leaves it stopped\n"
+	case st.OperatorStop == nil && r.State == stateEnded && st.EndReason == schema.EndStop:
+		return "  stop origin unknown (the state predates operator_stop): iormeshctl ensure leaves it stopped\n"
+	}
+	return ""
 }
 
 // uninstall stops every iormesh unit, then removes installRoot and the

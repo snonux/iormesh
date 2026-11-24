@@ -197,6 +197,15 @@ registered one without HOST — it reads the tracer's `status
 | ended `disk_limit` | collects first; starts it only once `ready/` is empty |
 | never ran on the host | nothing: `deploy` starts new projects |
 
+The END-REASON column reads `stop` for an operator's stop and a
+reboot's alike, so `iormeshctl status` tells them apart in its
+NOTE column (task 0l4): `stopped by operator: ensure leaves it`,
+or `stop origin unknown (tracer predates operator_stop): ensure
+leaves it` for an ended `stop` from an older tracer; a row
+without either is one ensure starts again. The host's `sudo
+iormesh status` prints the same as a line under the session, and
+`status -json` carries `operator_stop` itself.
+
 then collects every selected project of the host. A start uses
 deploy's argv for the registry entry and goes through the same
 sudoers rule (`status`, `start`); ensure never pushes or

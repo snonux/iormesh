@@ -37,8 +37,12 @@ that reads differently in your version: grep for its fixed part.
   `systemd-journal`). The sudoers rule only lets `ops` run the
   tracer, not journalctl.
 - `iormeshctl status` shows each session's state and end reason
-  without changing anything; `iormeshctl show health` shows what
-  a build saw (loss, session ends, clock bounds).
+  without changing anything, and in its NOTE column whether an
+  ended or dead session was stopped by the operator, which
+  `iormeshctl ensure` leaves stopped ([Tracing for
+  days](architecture.md#tracing-for-days)); `iormeshctl show
+  health` shows what a build saw (loss, session ends, clock
+  bounds).
 
 ## SSH, rsync and the registry
 

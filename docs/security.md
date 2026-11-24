@@ -444,7 +444,11 @@ truth.
   their I/O metadata in segments they own; grant the rule only
   to whoever may see that. A `-listen-port` session that follows
   its port across a restart (task mh4) adopts only a process of
-  the same executable and uid as its start owner, and never
+  the same executable and uid as its start owner — or, after an
+  upgrade into a new path, the same executable base name, uid
+  and cgroup (systemd unit or login session scope; task kk4),
+  never a base name alone; no escalation, as the uid must match —
+  and never
   systemd holding a socket-activated listener: another user's
   program binding the released port is not traced.
 - **The agent spool is untrusted input.** `iormesh run -spool`
