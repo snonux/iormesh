@@ -28,9 +28,10 @@ import (
 )
 
 const (
-	// signKeyEnv names the minisign secret key file (`minisign -G` makes
-	// one); signPasswordEnv may carry its password for unattended runs,
-	// otherwise it is read from the terminal.
+	// signKeyEnv names the minisign secret key file (`minisign -G` or
+	// `iormeshctl keygen` makes one); signPasswordEnv may carry its
+	// password for unattended runs, otherwise it is read from the
+	// terminal.
 	signKeyEnv      = "IORMESH_MINISIGN_KEY"
 	signPasswordEnv = "IORMESH_MINISIGN_PASSWORD"
 )

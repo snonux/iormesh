@@ -88,9 +88,9 @@ the step.
 
 | # | Step | Guide | Main commands |
 |---|------|-------|---------------|
-| 1 | Check controller and hosts | [ch. 2](../../guide/02-prerequisites.md) | `ssh -o BatchMode=yes HOST true`, `rsync --version`, `minisign -v` |
-| 2 | Make the signing key | [ch. 3, key](../../guide/03-release.md#make-your-key-once) | `minisign -G …` |
-| 3 | Get the release archive | [ch. 3, release](../../guide/03-release.md#get-a-release) | `sha256sum -c --ignore-missing SHA256SUMS`, `tar -xzf …` |
+| 1 | Check controller and hosts | [ch. 2](../../guide/02-prerequisites.md) | `ssh -o BatchMode=yes HOST true`, `rsync --version` |
+| 2 | Get the release archive | [ch. 3, release](../../guide/03-release.md#get-a-release) | `sha256sum -c --ignore-missing SHA256SUMS`, `tar -xzf …` |
+| 3 | Make the signing key (skip if the user has one) | [ch. 3, key](../../guide/03-release.md#make-your-key-once) | `./iormeshctl-linux-amd64 keygen -key ~/.minisign/iormesh.key` |
 | 4 | Sign it | [ch. 3, sign](../../guide/03-release.md#sign-it-with-your-key) | `./iormeshctl-linux-amd64 sign -key KEY .` |
 | 5 | Install and verify | [ch. 3, install](../../guide/03-release.md#install-iormeshctl-and-verify) | `install -m 0755 …`, `iormeshctl verify …` |
 | 6 | Register hosts | [ch. 4, register](../../guide/04-register-bootstrap.md#register-the-hosts) | `iormeshctl add …`, `iormeshctl list` |
@@ -123,11 +123,12 @@ the exact text to type, even in automatic mode:
 
 1. Accept a host key (compare its fingerprint first) — ch. 2.
 2. Grant sudo, or type a sudo password — ch. 2, ch. 4.
-3. Choose or type the signing key's password — ch. 3. If the user
-   has already put it in `$IORMESH_MINISIGN_PASSWORD`, you may run
-   `sign`, which reads it from there. `minisign -G` still asks on
-   the terminal: without one, hand that command to the user. Never
-   print, echo or write the password.
+3. Choose or type the signing key's password — ch. 3. Once the
+   user has put it in `$IORMESH_MINISIGN_PASSWORD`, you may run
+   `keygen` (makes the key; it never replaces one) and `sign`,
+   which both read it from there. If it is not set, ask the user
+   to set it; do not run `minisign -G`, which asks on a terminal.
+   Never print, echo or write the password.
 4. Run bootstrap's printed steps on a host when sudo asks for a
    password — ch. 4.
 5. Apply a `-javaagent` drop-in, a systemd timer or a Kubernetes

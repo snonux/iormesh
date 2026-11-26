@@ -33,7 +33,7 @@ then open only the part you need.
   - [Runtime control, explorer and the Java
     agent](decisions/decided/runtime-java.md) — #19, #11, #2, #6, #27.
   - [Repository layout, BPF C, release and
-    Go](decisions/decided/layout-release.md) — #30–#33.
+    Go](decisions/decided/layout-release.md) — #30–#33, #38.
   - [Container ids, pre-session connections, docs and
     agents](decisions/decided/tracing-docs-agents.md) — #34–#37.
 - [Open — built on the default](decisions/open.md) — open questions raised for
@@ -51,7 +51,7 @@ then open only the part you need.
 ## By number
 
 Every decision, in numeric order, with the part that holds it. The
-next free number is #38.
+next free number is #39.
 
 - **#1** [Remote bootstrapping and sudo scope](decisions/open.md) — open
 - **#2** [Java agent attach
@@ -109,3 +109,5 @@ next free number is #38.
   parts](decisions/decided/tracing-docs-agents.md) — decided
 - **#37** [A smaller agent installs and uses iormesh from the docs
   and a skill](decisions/decided/tracing-docs-agents.md) — decided
+- **#38** [`iormeshctl keygen` makes the operator's key without a
+  terminal](decisions/decided/layout-release.md) — decided
