@@ -33,6 +33,11 @@ internal/c/generated_tracepoints.c.tmp-*
 # under eval/results/ are kept.
 /eval/store/
 
+# The M8 agent trial's runs (mage agentTrial, decision #37): transcripts,
+# command logs and the docs copy of each run; its results under
+# eval/agent-trial/results/ are kept.
+/eval/agent-trial/runs/
+
 # The acceptance runs' state directory (mage k8sAcceptance, task yb4,
 # decision #30): the kind cluster's kubeconfig (credentials, never
 # committed), the base-image and existing-cluster state files and the

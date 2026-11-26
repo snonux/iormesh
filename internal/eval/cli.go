@@ -141,7 +141,7 @@ func newSession(ctx context.Context, o Options, set Set, work string) (Session, 
 
 // writeResult writes <out>/<date>-<scenario>-<model>.json. The model
 // label is part of the name so that two models run on the same day keep
-// one file each (task 9k4); fileLabel keeps it a plain name part.
+// one file each (task 9k4); FileLabel keeps it a plain name part.
 func writeResult(out string, r Result) error {
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return err
@@ -150,13 +150,14 @@ func writeResult(out string, r Result) error {
 	if err != nil {
 		return err
 	}
-	name := r.Date + "-" + r.Scenario + "-" + fileLabel(r.Model) + ".json"
+	name := r.Date + "-" + r.Scenario + "-" + FileLabel(r.Model) + ".json"
 	return os.WriteFile(filepath.Join(out, name), append(data, '\n'), 0o644)
 }
 
-// fileLabel maps a model label to letters, digits, '.', '_' and '-'
-// (anything else becomes '-'), so no label can name a path.
-func fileLabel(s string) string {
+// FileLabel maps a model label to letters, digits, '.', '_' and '-'
+// (anything else becomes '-'), so no label can name a path. The M8 agent
+// trial names its results with it too (internal/agenttrial).
+func FileLabel(s string) string {
 	b := []byte(s)
 	for i, c := range b {
 		ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||

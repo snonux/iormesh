@@ -1,0 +1,88 @@
+# The M8 agent trial's question set (decision #37, "Budget and score";
+# docs/milestones/m8.md; internal/agenttrial). The agent answers it after
+# installing iormesh on the controller VM and tracing the microservices
+# scenario on the traced VM, from its own mesh: `iormeshctl show`, its
+# views and `query`. Every answer is known from the scenario's
+# declarations (workload/scenarios/microservices/expect.json) — a test
+# holds each answer_contains and answer_sequence string to that file —
+# and is scored by M5's matchers (eval.Question.Score).
+# answer_excludes and answer_not_regex name the wrong answers a guess
+# would give: the other services, paths and methods.
+#
+# The threshold is pinned here, with the questions, before the first run
+# (#37: 8 of 10, M5's bar). The questions are never reworded, dropped or
+# re-scored to make a run pass; they change only when the scenario does,
+# recorded with the reason.
+scenario: microservices
+threshold: 0.8
+questions:
+  - id: orders-caller
+    question: >-
+      Which of the four services calls the orders service? Name the
+      service.
+    answer_contains: ["gateway"]
+    answer_excludes: ["billing"]
+
+  - id: orders-callees
+    question: >-
+      Which services does the orders service call? Name them.
+    answer_contains: ["inventory", "billing"]
+    answer_excludes: ["gateway"]
+
+  - id: gateway-callees
+    question: >-
+      Which services does the gateway call directly? Name them.
+    answer_contains: ["orders", "inventory"]
+    answer_excludes: ["billing"]
+
+  - id: checkout-entry
+    question: >-
+      Which HTTP request (method and path) starts the conversation that
+      reaches orders, inventory and billing?
+    answer_contains: ["POST", "/orders"]
+    answer_excludes: ["/inventory/stock", "/billing/charge"]
+
+  - id: gateway-stock
+    question: >-
+      Which HTTP request (method and path) does the gateway send to the
+      inventory service directly, outside the checkout?
+    answer_contains: ["GET", "/inventory/stock/widget"]
+    answer_excludes: ["/inventory/reserve"]
+
+  - id: orders-next-call
+    question: >-
+      While serving the checkout, the orders service called two other
+      services. List the requests (method and path) it made, in the order
+      it made them.
+    answer_sequence: ["/inventory/reserve", "/billing/charge"]
+    answer_excludes: ["/inventory/stock"]
+    answer_not_regex: '/billing/charge[\s\S]*/inventory/reserve'
+
+  - id: tls-hops
+    question: >-
+      Which request paths went over TLS (https)? Name the paths.
+    answer_contains: ["/orders", "/billing/charge"]
+    answer_excludes: ["/inventory/"]
+
+  - id: billing-record
+    question: >-
+      What record file did the billing service write while serving its
+      request, and how did it make it appear (the file operations, in
+      order)?
+    answer_contains: ["invoice-42.json"]
+    answer_regex: 'invoice-42\.json\.tmp[\s\S]*renam'
+    answer_excludes: ["reservation-42", "checkout-42", "/order-42"]
+
+  - id: order-file-writer
+    question: >-
+      Which Java method (class#method) wrote the orders service's record
+      file order-42.json?
+    answer_contains: ["DataStore#save"]
+    answer_excludes: ["ServiceConfig#provision"]
+
+  - id: billing-cert-reader
+    question: >-
+      Which service read the certificate the billing service published
+      (billing.crt), and with which Java method (class#method)?
+    answer_contains: ["orders", "ServiceNode#readCert"]
+    answer_excludes: ["gateway"]

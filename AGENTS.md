@@ -6,7 +6,8 @@ its eval passed with real models (task 9k4). M8 (a smaller
 agent installs and uses iormesh from the docs and a skill,
 decision #37) is planned. Rocky Linux
 9.9 (el9, kernel 5.14) is the main target. The code lives in
-`cmd/` (`iormesh`, `iormeshctl`, `iormesheval`), `internal/`,
+`cmd/` (`iormesh`, `iormeshctl`, `iormesheval`, `iormeshtrial`),
+`internal/`,
 `agent/` (the Java agent), `workload/` (the Java test workload)
 and the `magefiles/` targets (Magefile.go and the
 `magefile_*.go` files, decision #30).
