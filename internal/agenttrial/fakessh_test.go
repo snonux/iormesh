@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -54,6 +55,8 @@ func fakeSSH(log string, args []string, stdin io.Reader, stdout io.Writer) int {
 	}
 	host, command := args[sep+1], strings.Join(args[sep+2:], " ")
 	switch {
+	case killsItsOwnShell(command):
+		return 255 // pkill took the remote shell, as on the real VM (task nm4)
 	case strings.Contains(command, "cat > "):
 		_, _ = io.Copy(io.Discard, stdin)
 	case strings.Contains(command, "id_ed25519.pub"):
@@ -66,6 +69,24 @@ func fakeSSH(log string, args []string, stdin io.Reader, stdout io.Writer) int {
 		_, _ = fmt.Fprintf(stdout, "ran on %s: %s\n", host, command)
 	}
 	return 0
+}
+
+// pkillPattern finds the patterns of `pkill -f '<pattern>'` in a command.
+var pkillPattern = regexp.MustCompile(`pkill -f '([^']+)'`)
+
+// killsItsOwnShell reports whether a `pkill -f` in command matches
+// command itself: sshd runs it as `bash -c <command>`, so pkill would
+// kill the very shell running it and ssh would exit 255. The first real
+// trial (task nm4) hit this: the scenario's restart named
+// iormesh-trial/scenario.sh in its nohup after a pkill of that pattern.
+func killsItsOwnShell(command string) bool {
+	for _, m := range pkillPattern.FindAllStringSubmatch(command, -1) {
+		re, err := regexp.Compile(m[1])
+		if err == nil && re.MatchString(command) {
+			return true
+		}
+	}
+	return false
 }
 
 // fakeShell is a Shell whose ssh is the fake, logging to a temp file,
@@ -102,4 +123,17 @@ func sshCalls(t *testing.T, log string) [][]string {
 		calls = append(calls, argv)
 	}
 	return calls
+}
+
+// TestScenarioStopSparesItsShell: the scenario's stop matches no text of
+// its own call, while the one-call restart the first trial ran (task
+// nm4) did, so the fake refuses it as the VM did.
+func TestScenarioStopSparesItsShell(t *testing.T) {
+	if killsItsOwnShell(stopScenarioCommand) {
+		t.Errorf("%q kills its own shell", stopScenarioCommand)
+	}
+	old := stopScenarioCommand + "; nohup sh ~/" + RemoteDir + "/scenario.sh &"
+	if !killsItsOwnShell(old) {
+		t.Errorf("%q should kill its own shell", old)
+	}
 }

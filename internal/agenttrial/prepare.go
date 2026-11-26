@@ -94,23 +94,30 @@ func (p Prep) setPassword(ctx context.Context) error {
 
 // startScenario copies the workload and its loop to the traced host and
 // starts the loop in the background, replacing one a previous
-// preparation left. The pkill patterns start with a bracket class
-// ("[i]ormesh…") so they cannot match the remote shell running pkill,
-// whose own command line holds the pattern.
+// preparation left. The stop and the start are separate calls: sshd runs
+// each command as `bash -c <command>`, so a pkill pattern must not match
+// anything in its own call. The bracket class ("[i]ormesh…") keeps the
+// pattern from matching itself, but the start names the loop's path
+// plainly, so in one call the pkill killed its own shell (ssh exit 255,
+// found by the first real trial, task nm4).
 func (p Prep) startScenario(ctx context.Context) error {
 	for _, f := range [][2]string{{p.Workload, "workload.jar"}, {p.Scenario, "scenario.sh"}} {
 		if err := p.copyFile(ctx, f[0], f[1]); err != nil {
 			return err
 		}
 	}
-	err := p.must(ctx, Call{Host: p.Traced, Command: "pkill -f '[i]ormesh-trial/scenario.sh'; " +
-		"pkill -f '[i]ormesh-trial/workload.jar'; nohup sh ~/" + RemoteDir + "/scenario.sh > ~/" +
-		RemoteDir + "/scenario.log 2>&1 < /dev/null &"})
-	if err != nil {
-		return err
-	}
-	return p.must(ctx, Call{Host: p.Traced, Command: ScenarioAliveCommand})
+	return p.mustAll(ctx, []Call{
+		{Host: p.Traced, Command: stopScenarioCommand},
+		{Host: p.Traced, Command: "nohup sh ~/" + RemoteDir + "/scenario.sh > ~/" +
+			RemoteDir + "/scenario.log 2>&1 < /dev/null &"},
+		{Host: p.Traced, Command: ScenarioAliveCommand},
+	})
 }
+
+// stopScenarioCommand ends a loop and JVMs a previous preparation left;
+// it exits 0 whether or not one ran (pkill exits 1 on no match).
+const stopScenarioCommand = "pkill -f '[i]ormesh-trial/scenario.sh'; " +
+	"pkill -f '[i]ormesh-trial/workload.jar'; true"
 
 // ScenarioAliveCommand proves the scenario runs on the traced host: the
 // loop and, inside its first round (billing starts at once, inventory
