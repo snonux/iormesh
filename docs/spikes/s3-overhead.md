@@ -1505,8 +1505,11 @@ iom1: the whole dispatcher logic is ~95 ns of the 320, the part
 that could be cut without the scope test ~0, and an empty program
 alone sits at 1.18×. The
 gap is the platform: a guest with retpolines, PTI and MDS clearing
-on a cheap xfs syscall. Decision #25 records it and a proposed
-amendment for the owner; the limit is unchanged.
+on a cheap xfs syscall. Decision #25 records it; the owner
+accepted the amendment (2026-11-26): ≤ 1.25× stays the gate where
+mitigations are the hardware's own, el9 in a fully software-mitigated
+guest takes 1.25× CPU / 1.27× wall, guarded by ≤ 0.35 µs added CPU
+per bystander read or write.
 
 **Netlink after am4** (`netlink:100000`, 5 rounds,
 `-aggregate=false` as in ak4; a 4-round set with aggregation on in

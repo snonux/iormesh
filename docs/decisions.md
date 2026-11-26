@@ -220,9 +220,9 @@ deferred.
      retpolines, PTI and MDS clearing (bhyve hides the N100's
      `ARCH_CAPABILITIES`): booted with `mitigations=off` the same
      VM measures 1.195× (wall 1.22×) (s3-overhead.md, "Follow-up
-     (9m4)"). *Proposed amendment, for the owner — the limit is
-     unchanged until then:* keep ≤ 1.25× as the gate on a host
-     whose CPU mitigations are the hardware's own (bare metal or a
+     (9m4)"). *Amended (owner, 2026-11-26):* keep ≤ 1.25× as
+     the gate on a host whose CPU mitigations are the hardware's
+     own (bare metal or a
      hypervisor that passes `ARCH_CAPABILITIES`), and accept the
      measured **1.25× (CPU) / 1.27× (wall)** as el9's figure in a
      guest running the full software mitigation set, with the
