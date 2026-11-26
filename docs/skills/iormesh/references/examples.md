@@ -70,8 +70,8 @@ After it ran, do not run the printed steps. Hand them over:
 
 ```text
 These steps are yours (sudo may ask for your password):
-  1. On the laptop, in ~/iormesh-0.1.0-amd64: the two
-     "On the controller" lines.
+  1. On the laptop, from the directory you ran bootstrap in: the
+     two "On the controller" lines.
   2. On app1, as ops (not in a root shell): the rest.
 Paste me the output of the last one; it should read
 "iormesh: no sessions".

@@ -22,7 +22,8 @@ import (
 // commands it names exactly as written. A renamed subcommand or a moved
 // guide chapter would not fail any build; it would send that model down a
 // dead end. This gate is the compiler for the skill: every iormeshctl and
-// iormesh subcommand it names must be in the programs' own usage output,
+// iormesh subcommand, and every flag after it, that the skill names must
+// be in the programs' own usage output,
 // every relative link must resolve, and the frontmatter must carry what
 // both Claude Code and pi load a skill by.
 
@@ -33,32 +34,56 @@ const skillDir = "../../docs/skills/iormesh"
 const guideDir = "../../docs/guide"
 
 // commandSet is what a program's usage output allows: its subcommands,
-// and the second word each multi-verb subcommand takes (show's views,
-// services' and routes' verbs).
+// the second word each multi-verb subcommand takes (show's views,
+// services' and routes' verbs), and the flags of each.
 type commandSet struct {
 	top  map[string]bool
 	verb map[string]map[string]bool
+	// synFlags are the flags each subcommand's synopsis lines name.
+	synFlags map[string]map[string]bool
+	// flags returns the flags "sub" or "sub verb" accepts.
+	flags func(key string) map[string]bool
 }
 
 // usageWord is a subcommand or verb in a synopsis line; brackets mark an
 // optional verb (`services [list]`).
 var usageWord = regexp.MustCompile(`^\[?([a-z][a-z0-9-]*)\]?$`)
 
+// usageFlag is a flag named in a synopsis line: after a space, a bracket,
+// a parenthesis or a "|" ("(-pid PID | -pattern GLOB", "[-aggregate=false]").
+var usageFlag = regexp.MustCompile(`(?:^|[\s\[(|])-([a-z][a-z0-9-]*)`)
+
 // parseUsage reads the synopsis lines of a usage text: each is indented
-// two spaces and starts with prog. The words after a "VIEW:" line, split
-// on "|", are show's views. Prose lines are not indented and are skipped.
+// two spaces and starts with prog, and the lines indented deeper below it
+// continue it. The words after a "VIEW:" line, split on "|", are show's
+// views. Prose lines are not indented and are skipped. Its flags are the
+// synopsis flags; realCommands replaces them for iormeshctl, whose
+// synopsis folds the Kubernetes flags into a [K8S] placeholder.
 func parseUsage(prog, text string) commandSet {
-	cs := commandSet{top: map[string]bool{}, verb: map[string]map[string]bool{}}
+	cs := commandSet{top: map[string]bool{}, verb: map[string]map[string]bool{},
+		synFlags: map[string]map[string]bool{}}
+	cs.flags = func(key string) map[string]bool {
+		sub, _, _ := strings.Cut(key, " ")
+		return cs.synFlags[sub]
+	}
 	lines := strings.Split(text, "\n")
+	cur := ""
 	for i, line := range lines {
 		fields := strings.Fields(line)
-		if strings.HasPrefix(line, "  "+prog+" ") && len(fields) > 1 {
-			cs.top[fields[1]] = true
+		switch {
+		case strings.HasPrefix(line, "  "+prog+" ") && len(fields) > 1:
+			cur = fields[1]
+			cs.top[cur] = true
 			if len(fields) > 2 {
 				if m := usageWord.FindStringSubmatch(fields[2]); m != nil {
-					cs.addVerb(fields[1], m[1])
+					cs.addVerb(cur, m[1])
 				}
 			}
+		case !strings.HasPrefix(line, "   "):
+			cur = ""
+		}
+		if cur != "" {
+			cs.addFlags(cur, line)
 		}
 		if _, views, ok := strings.Cut(line, "VIEW:"); ok {
 			for j := i + 1; j < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[j]), "|"); j++ {
@@ -72,6 +97,22 @@ func parseUsage(prog, text string) commandSet {
 		}
 	}
 	return cs
+}
+
+// addFlags records the flags a synopsis line of sub names. The tracer's
+// `start [run's flags]` takes every run flag, so it gets run's.
+func (cs commandSet) addFlags(sub, line string) {
+	if cs.synFlags[sub] == nil {
+		cs.synFlags[sub] = map[string]bool{}
+	}
+	for _, m := range usageFlag.FindAllStringSubmatch(line, -1) {
+		cs.synFlags[sub][m[1]] = true
+	}
+	if strings.Contains(line, "[run's flags]") {
+		for f := range cs.synFlags["run"] {
+			cs.synFlags[sub][f] = true
+		}
+	}
 }
 
 func (cs commandSet) addVerb(cmd, verb string) {
@@ -127,6 +168,20 @@ func realCommands(t *testing.T) map[string]commandSet {
 		"iormeshctl": parseUsage("iormeshctl", ctlOut.String()),
 		"iormesh":    parseUsage("iormesh", tracerUsage(t)),
 	}
+	ctlSet, runFlags := sets["iormeshctl"], sets["iormesh"].synFlags["run"]
+	ctlSet.flags = func(key string) map[string]bool {
+		flags := ctlFlags(strings.Fields(key))
+		if key == "add" { // the flags after HOST are the tracer's run flags
+			for f := range runFlags {
+				flags[f] = true
+			}
+		}
+		return flags
+	}
+	sets["iormeshctl"] = ctlSet
+	if len(runFlags) < 5 || len(ctlSet.flags("deploy")) < 3 {
+		t.Fatalf("parsed run flags %v, deploy flags %v; did the help layout change?", runFlags, ctlSet.flags("deploy"))
+	}
 	for prog, cs := range sets {
 		if len(cs.top) < 5 {
 			t.Fatalf("%s help: parsed only %v; did the usage layout change?", prog, cs.top)
@@ -136,6 +191,22 @@ func realCommands(t *testing.T) map[string]commandSet {
 		t.Fatalf("iormeshctl help: parsed show views %v; did the VIEW line change?", sets["iormeshctl"].verb["show"])
 	}
 	return sets
+}
+
+// ctlFlags returns the flags `iormeshctl INV... -h` lists: its flag set's
+// help, one "  -name ..." line per flag on stderr.
+func ctlFlags(inv []string) map[string]bool {
+	var sink, help bytes.Buffer
+	ctl.Main(append(append([]string{}, inv...), "-h"), &sink, &help)
+	flags := map[string]bool{}
+	for _, line := range strings.Split(help.String(), "\n") {
+		if rest, ok := strings.CutPrefix(line, "  -"); ok {
+			name, _, _ := strings.Cut(rest, " ")
+			name, _, _ = strings.Cut(name, "\t")
+			flags[name] = true
+		}
+	}
+	return flags
 }
 
 // codeSpan is a fenced block's body or an inline code span.
@@ -182,8 +253,42 @@ func endOfCommand(tok string) bool {
 		strings.ContainsAny(tok[:1], "|;&)>")
 }
 
+// cmdFlag is a flag token in a documented command line ("-dist",
+// "-aggregate=false", "--help").
+var cmdFlag = regexp.MustCompile(`^--?([a-z][a-z0-9-]*)(=.*)?$`)
+
+// staleCommand checks one command line, args starting at the subcommand:
+// the subcommand, its verb when it takes one, and each flag up to the end
+// of the shell command. It returns what usage does not list.
+func staleCommand(prog string, args []string, cs commandSet) []string {
+	sub, key, rest := args[0], args[0], args[1:]
+	if !cs.top[sub] {
+		return []string{prog + " " + sub}
+	}
+	if verbs := cs.verb[sub]; verbs != nil && len(rest) > 0 && usageWord.MatchString(rest[0]) &&
+		!endOfCommand(rest[0]) {
+		if !verbs[rest[0]] {
+			return []string{prog + " " + sub + " " + rest[0]}
+		}
+		key, rest = sub+" "+rest[0], rest[1:]
+	}
+	var stale []string
+	flags := cs.flags(key)
+	for _, tok := range rest {
+		if tok == "#" || strings.HasPrefix(tok, "#") || strings.ContainsAny(tok[:1], "|;&)>") {
+			break
+		}
+		m := cmdFlag.FindStringSubmatch(tok)
+		if m != nil && m[1] != "h" && m[1] != "help" && !flags[m[1]] {
+			stale = append(stale, prog+" "+key+" -"+m[1])
+		}
+	}
+	return stale
+}
+
 // staleCommands returns each command in a markdown text that its
-// program's usage does not list, as "prog sub" or "prog sub verb".
+// program's usage does not list, as "prog sub", "prog sub verb" or
+// "prog sub -flag".
 func staleCommands(text string, sets map[string]commandSet) []string {
 	var stale []string
 	for _, line := range codeLines(text) {
@@ -199,21 +304,8 @@ func staleCommands(text string, sets map[string]commandSet) []string {
 			}
 		}
 		for i, tok := range toks {
-			prog := progOf(tok)
-			if prog == "" || i+1 >= len(toks) || endOfCommand(toks[i+1]) {
-				continue
-			}
-			sub, cs := toks[i+1], sets[prog]
-			if !cs.top[sub] {
-				stale = append(stale, prog+" "+sub)
-				continue
-			}
-			verbs := cs.verb[sub]
-			if verbs == nil || i+2 >= len(toks) || !usageWord.MatchString(toks[i+2]) || endOfCommand(toks[i+2]) {
-				continue
-			}
-			if v := toks[i+2]; !verbs[v] {
-				stale = append(stale, prog+" "+sub+" "+v)
+			if prog := progOf(tok); prog != "" && i+1 < len(toks) && !endOfCommand(toks[i+1]) {
+				stale = append(stale, staleCommand(prog, toks[i+1:], sets[prog])...)
 			}
 		}
 	}
@@ -259,15 +351,19 @@ func TestSkillNamesOnlyRealCommands(t *testing.T) {
 func TestSkillCommandGateCatchesMadeUpCommands(t *testing.T) {
 	sets := realCommands(t)
 	text := "Run `iormeshctl frobnicate app1`, then\n```sh\niormeshctl show bogus -json\n" +
-		"sudo -n /opt/iormesh/bin/iormesh launch\nSuccess: ends in \"iormesh bogus\".\n```\n"
-	want := []string{"iormeshctl frobnicate", "iormeshctl show bogus", "iormesh launch", "iormesh bogus"}
+		"sudo -n /opt/iormesh/bin/iormesh launch\nSuccess: ends in \"iormesh bogus\".\n" +
+		"iormeshctl deploy -bogus app1   # a made-up flag\niormesh stop -project p -nope\n```\n"
+	want := []string{"iormeshctl frobnicate", "iormeshctl show bogus", "iormesh launch", "iormesh bogus",
+		"iormeshctl deploy -bogus", "iormesh stop -nope"}
 	if got := staleCommands(text, sets); !slices.Equal(got, want) {
 		t.Errorf("made-up commands: got %q, want %q", got, want)
 	}
 	good := "`iormeshctl show edges -unresolved`, `iormeshctl services name -port 1 'h*' s`,\n" +
 		"`./iormeshctl-linux-amd64 sign -key K .`, `sudo /opt/iormesh/bin/iormesh stop -project p`,\n" +
 		"`pi --skill docs/skills/iormesh`, `iormeshctl -h`, `iormeshctl show sequence 0002`\n" +
-		"```text\nSuccess: ends in \"sudo -n /opt/iormesh/bin/iormesh status\".\n```\n"
+		"```text\nSuccess: ends in \"sudo -n /opt/iormesh/bin/iormesh status\".\n```\n" +
+		"`iormeshctl deploy -dist D app1 | tee x -q`, `iormeshctl add -project p -pattern 'j*' app1 -duration 8h`,\n" +
+		"`iormesh start -pattern x -project p -cpu-quota 50%`, `iormeshctl services name -port 1 'h*' s`\n"
 	if got := staleCommands(good, sets); len(got) != 0 {
 		t.Errorf("real commands reported as stale: %q", got)
 	}

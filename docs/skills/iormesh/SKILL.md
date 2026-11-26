@@ -51,6 +51,10 @@ the user's to type, in either mode.
 Before **every** step, send an explanation in this form and stop.
 Do nothing until the user answers.
 
+Reading this skill and the guide needs no approval: read them from
+the files you were given, with your file-reading tool, not with a
+shell command on a host. Everything else is a step.
+
 ```text
 Step N: <what this step does, one line> (guide chapter C)
 Runs on: <machine>; contacts: <hosts, URLs, or "nothing">
@@ -94,7 +98,7 @@ the step.
 | 8 | Deploy, check | [ch. 5](../../guide/05-deploy-status.md) | `iormeshctl deploy -dist DIR HOST`, `iormeshctl status` |
 | 9 | Collect, build | [ch. 6](../../guide/06-collect-build.md) | `iormeshctl collect`, `iormeshctl build`, `iormeshctl refresh`, `iormeshctl services name …` |
 | 10 | Read the mesh | [ch. 7](../../guide/07-read-the-mesh.md), [ch. 8](../../guide/08-java-query.md#from-a-step-to-its-raw-events-query) | `iormeshctl show`, `iormeshctl show health`, `iormeshctl show edges`, `iormeshctl show conversations`, `iormeshctl show sequence ID`, `iormeshctl query -ref REF`, `iormeshctl open` (only when asked) |
-| 11 | Stop, clean up | [ch. 9, clean up](../../guide/09-tracing-for-days.md#clean-up) | `sudo /opt/iormesh/bin/iormesh stop -project NAME` (on the host), `iormeshctl rm HOST` |
+| 11 | Stop, clean up | [ch. 9, clean up](../../guide/09-tracing-for-days.md#clean-up) | `iormeshctl rm HOST`, `iormeshctl rm -project NAME HOST` |
 
 Notes:
 
@@ -130,6 +134,11 @@ the exact text to type, even in automatic mode:
    patch — ch. 8, 9, 11. You may draft it.
 6. Write the `expand:` allowlist — ch. 10.
 7. Decide where trace data may go — ch. 13.
+
+The guide's Human-step boxes on `deploy` (ch. 5), `prune -apply`
+and `rm` (ch. 9) and `expand -apply` (ch. 10) are different: in
+automatic mode they mean explain, ask, then run it yourself — do
+not hand them to the user.
 
 These run only after the user's explicit **yes for that command
 and those hosts** (the explanation is enough when it names them):
