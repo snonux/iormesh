@@ -98,6 +98,20 @@ your model, do not run these and do not ask for their output
 user to run and read on their own, from
 [chapter 7](../../../guide/07-read-the-mesh.md).
 
+## A value the approved command computes
+
+The approved step 1 names:
+
+```text
+  1. ssh -o BatchMode=yes "$(id -un)@app1" true
+```
+
+Run that line as it stands; the shell fills in `$(id -un)`. Do
+not run `id -un` first and then `ssh -o BatchMode=yes
+"ops@app1" true`: neither command is in the explanation, so
+neither is approved. If you want the value written out, ask the
+user for it, then explain the new command and wait again.
+
 ## When the user says "change"
 
 The user: "change: only app1 for now". You write a new

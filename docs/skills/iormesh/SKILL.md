@@ -70,7 +70,14 @@ Approve? yes / no / change
 
 - One step may hold several commands; name each one.
 - Run only the commands the approved explanation names, exactly
-  as written. A new or changed command needs a new explanation.
+  as written, character for character. A new or changed command
+  needs a new explanation and a new approval.
+- Never edit an approved command, not even to fill in a value
+  it computes. Approved `ssh -o BatchMode=yes "$(id -un)@app1"
+  true`: run exactly that. `ssh -o BatchMode=yes "ops@app1" true`
+  is a new command, so explain it and wait again. Prefer
+  commands that need no value from an earlier one; ask the user
+  for the value instead.
 - "no": stop and ask what to do instead. "change": write a new
   explanation.
 - After the step, quote the line that proves success. On a
