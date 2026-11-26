@@ -39,7 +39,7 @@ const (
 )
 
 var criteria = []struct{ id, text string }{
-	{cPreflight, "preflight: both hosts bootstrapped (#1), idle, distinct; controller rsync >= 3.4.0"},
+	{cPreflight, "preflight: both hosts bootstrapped (#1), idle, distinct; controller rsync >= 3.4.0 or patched (#39)"},
 	{cDeploy, "add -> deploy starts every project from the controller, no step on the servers"},
 	{cStream, "streaming collect: repeated collect moves ready/ segments, deleted on the server"},
 	{cCollect, "collect alone changes nothing but the local segment store"},

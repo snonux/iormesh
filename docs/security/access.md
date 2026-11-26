@@ -93,11 +93,16 @@ Part of [Security & scope](../security.md).
   files — and `latest` is followed only to a folder directly
   beside it ([visualization.md](../visualization.md) "The local
   site").
-- **The controller's rsync must be 3.4.0 or newer.** The
+- **The controller's rsync must be 3.4.0 or newer, or a
+  patched distribution build** (decisions.md #39). The
   receiving rsync parses what the server sends, and older ones
   let a malicious sender write outside the destination or read
   the receiver's memory (CVE-2024-12087, CVE-2024-12088,
-  CVE-2022-29154). macOS ships rsync 2.6.9 (or openrsync):
+  CVE-2022-29154). A distribution build of 3.2.4 or newer with
+  the two 2024 fixes backported (el9's `rsync-3.2.7-1.el9_8`)
+  closes the same holes; the guide's
+  [chapter 2](../guide/02-prerequisites.md#the-laptop-the-controller)
+  checks it. macOS ships rsync 2.6.9 (or openrsync):
   install a current one (Homebrew `rsync`) and put it first in
   `PATH`.
 - **rm never deletes uncollected traces silently.** Before
