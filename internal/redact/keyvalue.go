@@ -104,16 +104,24 @@ func valueSpan(s string, at int) (from, to int, ok bool) {
 // bracket at s[open], or len(s) when it is unclosed. Brackets of either
 // kind nest; brackets inside a quoted string do not count — a quote and
 // its run of escaping backslashes open a string that quotedEnd closes at
-// the same escape level. A mismatched closer still closes a level: the
-// value is masked either way, and over-masking cannot leak.
+// the same escape level. Only the matching kind closes a level: a '}'
+// or ']' that does not match the innermost open bracket means malformed
+// input whose value end cannot be known, so the value runs to the end of
+// s — closing early there leaked what followed (rm4 review round 2), and
+// over-masking is the safe side.
 func bracketEnd(s string, open int) int {
-	depth := 0
+	var stack []byte // the closer each open level waits for
 	for i := open; i < len(s); i++ {
 		switch c := s[i]; {
-		case c == '{' || c == '[':
-			depth++
+		case c == '{':
+			stack = append(stack, '}')
+		case c == '[':
+			stack = append(stack, ']')
 		case c == '}' || c == ']':
-			if depth--; depth == 0 {
+			if c != stack[len(stack)-1] {
+				return len(s) // malformed: mask to the end
+			}
+			if stack = stack[:len(stack)-1]; len(stack) == 0 {
 				return i + 1
 			}
 		case c == '\\' || isQuote(c):

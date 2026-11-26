@@ -46,7 +46,9 @@ as a bare positional argument is not recognized; neither is a
 pair without `:` or `=` (XML, `<password>s</password>`), a key
 written with JSON `\u` escapes, or a pair whose key is split
 across argv elements or whose separator starts the next element
-(`"password"` then `:"s"`); a quoted
+(`"password"` then `:"s"`), or whose bracketed value opens in
+one element and continues in the next (`{"password":["x` then
+`s"]}`); a quoted
 value with spaces inside a shell string is masked only up to the
 quote's end as a shell would split it, and the
 defaults over-mask rather than leak (`--password-stdin` masks the

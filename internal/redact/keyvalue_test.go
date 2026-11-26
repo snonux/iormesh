@@ -40,6 +40,10 @@ func TestArgvJSONValues(t *testing.T) {
 		// round 1): its inner keys need not be denied themselves.
 		{[]string{"curl", "-d", `{"user":"a","api_tokens":["` + s + `"]}`},
 			[]string{"curl", "-d", `{"user":"a","api_tokens":***}`}},
+		// A mismatched closer must not end the value early (rm4 review
+		// round 2): the stray "]" makes the value malformed; all is masked.
+		{[]string{"app", `{"password":{"a":"x"]},"` + s + `"]}`},
+			[]string{"app", `{"password":***`}},
 		{[]string{"app", `{"tokens":["` + s + `","` + s + `2"],"n":1}`},
 			[]string{"app", `{"tokens":***,"n":1}`}},
 		{[]string{"sh", "-c", `curl -d "{\"password\": [\"` + s + `\"]}" http://h`},
