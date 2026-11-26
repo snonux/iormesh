@@ -78,6 +78,9 @@ then the features and changes of the latest round.
 
 ### Changed
 
+- `mage sign` refuses a secret key that is symlinked,
+  someone else's, or open to group or other (`chmod 600`;
+  decisions.md #32).
 - A bare time of day in `build` or `query` is refused when the
   store's segments start on more than one UTC date, so a prune can
   no longer shift it to another day

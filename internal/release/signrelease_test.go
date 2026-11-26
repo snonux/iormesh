@@ -98,6 +98,48 @@ func TestSignRelease(t *testing.T) {
 	}
 }
 
+// TestSignReleaseReplacesPlantedSymlinks: an untrusted archive may carry
+// NAME.minisig as a symlink (to a victim file, or dangling). Signing must
+// replace the link with a regular file and never write through it.
+func TestSignReleaseReplacesPlantedSymlinks(t *testing.T) {
+	pub, priv := newKey(t)
+	dir := unpackedRelease(t, "0.3.0")
+	victim := filepath.Join(t.TempDir(), "bashrc")
+	if err := os.WriteFile(victim, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tracer := filepath.Join(dir, TracerFile("amd64"))
+	jar := filepath.Join(dir, AgentFile)
+	if err := os.Symlink(victim, tracer+SigSuffix); err != nil {
+		t.Fatal(err)
+	}
+	dangling := filepath.Join(t.TempDir(), "nowhere", "x")
+	if err := os.Symlink(dangling, jar+SigSuffix); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SignRelease(priv, dir, "0.3.0", testTime); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(victim); err != nil || string(data) != "keep me" {
+		t.Errorf("victim = %q, %v; want it untouched", data, err)
+	}
+	if _, err := os.Lstat(dangling); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("dangling target was created: %v", err)
+	}
+	for _, p := range []string{tracer, jar} {
+		info, err := os.Lstat(p + SigSuffix)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o644 {
+			t.Errorf("%s: %v, %v; want a regular 0644 file", p+SigSuffix, info, err)
+		}
+		if _, err := VerifyFile(pub, p); err != nil {
+			t.Errorf("%s: %v", p, err)
+		}
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, ".*.tmp*")); len(left) != 0 {
+		t.Errorf("temporary files left: %v", left)
+	}
+}
+
 // A release at another version than the one asked for is refused whole,
 // and a directory without artifacts is an error, not a silent no-op.
 func TestSignReleaseRefuses(t *testing.T) {

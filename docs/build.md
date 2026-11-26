@@ -116,7 +116,7 @@ mage lint          # golangci-lint: errcheck + staticcheck SA + unused
 mage fmt / fmtCheck
 mage clean         # removes bin/, the build outputs (decision #30);
                    # keeps vmlinux.h (it needs root to recreate) and
-                   # dist/ (signed release artifacts)
+                   # dist/ (the release builds, signed after mage sign)
 mage workloadTest  # the Java workload, standalone (M0)
 mage bpfRootTest   # BPF root tests: loader, TCP, fork, exec watch (sudo -n)
 mage integrationTest        # tracer + workload end to end, as root

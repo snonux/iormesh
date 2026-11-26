@@ -1,6 +1,8 @@
 package release
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -256,8 +258,63 @@ func signFile(key minisign.PrivateKey, path string, m Meta, now time.Time) error
 	if err != nil {
 		return fmt.Errorf("sign %s: %w", path, err)
 	}
-	if err := os.WriteFile(path+SigSuffix, sig, 0o644); err != nil {
+	if err := replaceFile(path+SigSuffix, sig); err != nil {
 		return fmt.Errorf("sign: %w", err)
 	}
 	return nil
+}
+
+// replaceFile puts data at path as a fresh regular 0644 file without ever
+// writing through what path names now: an unpacked, untrusted archive may
+// carry NAME.minisig as a symlink to a victim file (or a dangling one),
+// and os.WriteFile would follow it. The data goes to a new temporary file
+// in the same directory, opened O_CREAT|O_EXCL|O_NOFOLLOW, is synced and
+// then renamed over path; rename replaces a symlink itself, not its
+// target. The temporary file is removed on any error.
+func replaceFile(path string, data []byte) (err error) {
+	tmp, f, err := createTemp(path)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = f.Close()
+			_ = os.Remove(tmp)
+		}
+	}()
+	// The umask may have narrowed the mode; a signature is public.
+	if err = f.Chmod(0o644); err != nil {
+		return err
+	}
+	if _, err = f.Write(data); err != nil {
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// createTemp creates ".NAME.tmp-<random>" next to path, never following
+// or reusing an existing name.
+func createTemp(path string) (string, *os.File, error) {
+	dir, base := filepath.Split(path)
+	for range 16 {
+		var b [8]byte
+		if _, err := rand.Read(b[:]); err != nil {
+			return "", nil, err
+		}
+		tmp := filepath.Join(dir, "."+base+".tmp-"+hex.EncodeToString(b[:]))
+		f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
+		if err == nil {
+			return tmp, f, nil
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return "", nil, err
+		}
+	}
+	return "", nil, fmt.Errorf("%s: no free temporary name", path)
 }
