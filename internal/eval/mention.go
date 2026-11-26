@@ -8,9 +8,10 @@ var mentionStart = regexp.MustCompile(`(^|\s)@`)
 
 // DefuseMentions escapes every "@" that starts a word as "\@". Claude
 // Code expands an "@<path>" in its prompt into that file's contents,
-// attached to the request, even with `--tools ''` (found in review round
-// 1 of task mm4) — and the text both harnesses send carries what neither
-// controls: here the trace's rollup, query slices and workload source
+// attached to the request, even with its tools set to the empty list
+// (found in review round 1 of task mm4) — and the text both harnesses
+// send carries what neither controls: here the trace's rollup, query
+// slices and workload source
 // (task wm4), in internal/agenttrial VM output and docs the agent can
 // steer. No CLI may take a word of it for a laptop file to attach. The
 // choice: a visible backslash, which a model reads as an escape, over an
