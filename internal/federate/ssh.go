@@ -192,7 +192,8 @@ func (s SSH) Fetch(ctx context.Context, remoteDir, localDir string) error {
 //     no -l (a symlink is skipped, never recreated), no -o/-g;
 //   - --timeout (rsyncTimeout): give up once no data has moved for that
 //     long, however long the transfer itself takes;
-//   - --fsync (rsync 3.2.4+; the controller's must be 3.4.0+ anyway):
+//   - --fsync (rsync 3.2.4+; the controller's must be 3.4.0+ or a
+//     patched distribution build of 3.2.4+ anyway, decision #39):
 //     fsync each received file before rsync counts it transferred, so
 //     --remove-source-files never deletes the server's copy of a segment
 //     the controller holds only in its page cache (task ii4) — a crash

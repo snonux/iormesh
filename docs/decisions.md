@@ -27,7 +27,8 @@ then open only the part you need.
 - [Decided](decisions/decided.md) — settled decisions; an index of its
   own, by area.
   - [Storage, transport and the join
-    key](decisions/decided/storage-transport.md) — #3, #4, #12, #16, #26.
+    key](decisions/decided/storage-transport.md) — #3, #4, #12, #39,
+    #16, #26.
   - [Test workload and overhead
     budget](decisions/decided/workload-overhead.md) — #5, #25.
   - [Runtime control, explorer and the Java
@@ -51,7 +52,7 @@ then open only the part you need.
 ## By number
 
 Every decision, in numeric order, with the part that holds it. The
-next free number is #39.
+next free number is #40.
 
 - **#1** [Remote bootstrapping and sudo scope](decisions/open.md) — open
 - **#2** [Java agent attach
@@ -111,3 +112,5 @@ next free number is #39.
   and a skill](decisions/decided/tracing-docs-agents.md) — decided
 - **#38** [`iormeshctl keygen` makes the operator's key without a
   terminal](decisions/decided/layout-release.md) — decided
+- **#39** [Patched distribution rsync on the
+  controller](decisions/decided/storage-transport.md) — decided
