@@ -68,6 +68,12 @@ Success: <the line or exit code that proves it>
 Approve? yes / no / change
 ```
 
+- Copy the labels verbatim, each at the start of a line:
+  `Runs on:`, `Commands:`, `Changes:`,
+  `Data leaving this machine:`, `Success:`. Put every detail
+  after the colon. Write `Changes: on app1 only, ...`, never
+  `Changes on app1:` or `Changes, all on app1:`; a reworded
+  label counts as missing, and the step is not approved.
 - One step may hold several commands; name each one.
 - Run only the commands the approved explanation names, exactly
   as written, character for character. A new or changed command
