@@ -2,7 +2,9 @@
 
 iormesh is a proof of concept: all milestones, M0 to M7, are
 accepted; M5 (views, query and the LLM eval) was the last, once
-its eval passed with real models (task 9k4). Rocky Linux
+its eval passed with real models (task 9k4). M8 (a smaller
+agent installs and uses iormesh from the docs and a skill,
+decision #37) is planned. Rocky Linux
 9.9 (el9, kernel 5.14) is the main target. The code lives in
 `cmd/` (`iormesh`, `iormeshctl`, `iormesheval`), `internal/`,
 `agent/` (the Java agent), `workload/` (the Java test workload)
@@ -11,7 +13,7 @@ and the `magefiles/` targets (Magefile.go and the
 [docs/decisions.md](docs/decisions.md) holds every numbered
 decision and is the source of truth;
 [docs/milestones.md](docs/milestones.md) holds the spikes
-(S1–S3) and milestones (M0–M7) with their acceptance. `ior`
+(S1–S3) and milestones (M0–M8) with their acceptance. `ior`
 (`../ior`) is the reference project for BPF/C code generation
 and integration tests — consult it before inventing patterns.
 Don't scaffold implementation ahead of a recorded decision —
@@ -90,8 +92,8 @@ Never write `//nolint` — a test fails on it.
   decision changes, update the matching topic doc in the same
   commit — never leave docs contradicting docs/decisions.md.
   A milestone's scope and acceptance change in
-  `docs/milestones.md` the same way. New scope beyond M7 that
-  needs its own acceptance gets a new milestone section (M8,
+  `docs/milestones.md` the same way. New scope beyond M8 that
+  needs its own acceptance gets a new milestone section (M9,
   …) in `docs/milestones.md`, its decisions recorded first; a
   change that fits an existing milestone or needs no
   acceptance of its own is a decision only.

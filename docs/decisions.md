@@ -40,7 +40,7 @@ then open only the part you need.
 ## By number
 
 Every decision, in numeric order, with the part that holds it. The
-next free number is #37.
+next free number is #38.
 
 - **#1** [Remote bootstrapping and sudo scope](decisions/open.md) — open
 - **#2** [Java agent attach strategy](decisions/decided.md) — decided
@@ -86,3 +86,5 @@ next free number is #37.
   seeded](decisions/decided.md) — decided
 - **#36** [Large docs are an index plus a folder of
   parts](decisions/decided.md) — decided
+- **#37** [A smaller agent installs and uses iormesh from the docs
+  and a skill](decisions/decided.md) — decided

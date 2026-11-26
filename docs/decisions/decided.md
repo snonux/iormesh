@@ -593,3 +593,117 @@ Part of [Decisions](../decisions.md).
   dozens of 15-line files for testing.md's task records, which
   are read together; splitting by line count — parts would
   start mid-section.
+- **#37 A smaller agent installs and uses iormesh from the docs
+  and a skill** — owner decision (2026-11-26, task lm4; built
+  and accepted as M8, [milestones/m8.md](../milestones/m8.md)).
+  iormesh must be easy to install and use for a less capable
+  agent than the ones that built it: Claude Sonnet 5.5 at
+  medium effort (`claude -p`) and glm-5.3-flash (the `pi`
+  coding agent, ollama cloud). What ships, what is tested and
+  the numbers:
+  - **The skill.** The repository ships an agent skill for
+    using iormesh, `docs/skills/iormesh/SKILL.md` (the owner's
+    choice of home), written by the skill-maintenance skill's
+    rules (task om4). One file loads in both agents: the
+    operator copies or links the folder into Claude Code's
+    skills directory (`~/.claude/skills/iormesh/`) or pi's
+    (`~/.pi/agent/skills/iormesh/`). Its rules: (1) before
+    every step it tells the user what is about to happen —
+    which host, which commands, what they change, what data
+    leaves the machine — and waits for approval; a step may
+    hold several commands when the explanation names each;
+    (2) at the start the user picks a mode: *automatic* (the
+    agent runs each approved command itself) or *guided* (the
+    agent only names the commands; the user types them and
+    pastes the output back). The guide stays the one home of
+    the path; the skill carries the protocol and points into
+    the guide, it does not re-teach it.
+  - **Where.** The throwaway iom VMs on f3 (Rocky 9.9, the
+    main target): the agent's shell lands on `iom1`, which
+    plays the controller (the guide's laptop); `iom2` is the
+    traced host. Each agent runs on the laptop, but its only
+    shell is SSH into the VMs (sudo there); it gets no tool
+    that reads, writes or runs anything on the laptop.
+  - **Path tested: the release archive** (guide chapter 3,
+    "Get a release": download, `sha256sum -c`, sign, install).
+    Building from source needs Go, mage, Podman and a libbpfgo
+    checkout — the builder's path, not the user's — and a
+    smaller agent failing there would grade the build, not
+    iormesh's use. Until a release is published, the archive
+    is `mage release` of the commit under test, served to the
+    VMs at a URL the task prompt names, as a release page
+    would.
+  - **What the agent gets:** the fixed task prompt and
+    question set (`eval/agent-trial/`), a copy of README.md,
+    `docs/guide/` and the skill at the commit under test, and
+    VMs prepared as chapter 2's trust steps leave them —
+    `iom1`'s SSH key on `iom2`, `iom2`'s host key in `iom1`'s
+    `known_hosts`, sudo without a password, and a throwaway
+    signing-key password in `$IORMESH_MINISIGN_PASSWORD` —
+    because each of those is a **Human step** in the guide an
+    agent must not take. Everything else (packages, the key,
+    the release, bootstrap, deploy) the agent does itself. The
+    harness starts the test workload's microservices scenario
+    on `iom2` before the run: it is the application under
+    observation, as an operator's service would be. Links out
+    of the guide into the topic docs are not copied: a run
+    that needs one has found a gap in the guide.
+  - **Help** is any human message during a run; any message
+    from the scripted user beyond the mode choice, an approval
+    and (guided) the verbatim output; any file placed on the
+    VMs beyond the list above; any rerun of the same commit
+    to try again. A run with help fails.
+  - **Approval in the unattended trial:** a scripted user
+    approves every explanation that names the host, the
+    commands, the change and the outgoing data, and nothing
+    else. A command run that the latest approved explanation
+    did not name fails the run, however good its answers. In
+    guided mode the agent has no shell; the harness types
+    exactly the commands the agent named, on the named host,
+    and pastes back the output.
+  - **Budget and score:** 150 agent turns (one model reply,
+    with or without a tool call; the scripted user's replies
+    are not turns) and 60 minutes of wall time per run; past
+    either the run fails. The question set holds 10 questions
+    with answers known from the scenario's declarations; the
+    pass is 8 of 10 (0.8), and only after the install and the
+    trace succeeded (a built mesh holding the workload's
+    cross-service edges). Why these numbers: the guide's path
+    from chapter 2 to chapter 8 is a few dozen commands, and
+    M5's eval allows 8 turns a question (80 for ten); 150
+    leaves room for a smaller model's retries on top of both,
+    not for wandering. Segments rotate each minute (#16), so the
+    trace needs a few minutes before collect, and ollama
+    cloud's replies are slow; 60 minutes covers both with
+    room. 0.8 is M5's pinned threshold: the same bar for the
+    same kind of question, now asked after a self-made
+    install.
+  - **Acceptance runs four cells** — both agents, both modes —
+    once each, on one commit; all four must pass. A failed
+    cell becomes a task with its transcript and is rerun only
+    after a change to the docs, the skill or iormesh. The
+    questions are never reworded, dropped or re-scored to make
+    a run pass; they change only when the scenario changes,
+    recorded with the reason.
+  - **Data.** Both providers see everything the agent sees:
+    the prompt, the docs, and all command output from the VMs
+    — host names and addresses of the f3 VMs, the synthetic
+    workload's trace, the throwaway key's password when it is
+    printed. Claude Sonnet sends it to Anthropic, glm-5.3-flash
+    to ollama cloud. Nothing from the laptop reaches either;
+    the VMs hold no real data and are destroyed after the
+    trial. The owner authorises this for the trial only; it
+    does not relax the rule that real trace data stays local.
+
+  Why: the guide is written for "a human, or an agent working
+  with one" (docs/guide/README.md), and only a run proves an
+  agent can follow it; a capable agent fills gaps a smaller one
+  falls into, so the smaller one is the test. The approval
+  protocol makes an agent safe to point at real hosts, and
+  guided mode serves an operator who will not hand an agent a
+  shell. The harness is task mm4, the trial task nm4. Rejected:
+  building from source as the tested path (above); scoring by
+  install only — iormesh is used for its answers; an agent shell
+  on the laptop — it holds the operator's keys and data, the
+  very thing the trial must not expose; tuning the questions
+  after a failure — it hides the gap the trial exists to find.

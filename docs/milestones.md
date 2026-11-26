@@ -4,8 +4,9 @@ The milestones iormesh was built in, in execution order: what each
 one set out to land, how it was built, and what accepted it. When
 this record was written (2026-11-24), M0, M1, M2, M3, M4, M6 and M7
 were accepted; M5 was accepted on 2026-11-26, when its LLM eval
-passed with real models (task 9k4). Rocky Linux 9.9 (el9, kernel
-5.14) is the main target.
+passed with real models (task 9k4). M8, added on 2026-11-26
+(decision #37), is planned. Rocky Linux 9.9 (el9, kernel 5.14)
+is the main target.
 
 Decision numbers (`#N`) refer to [decisions.md](decisions.md);
 what is traced and the trace format are in
@@ -30,6 +31,7 @@ and M7 kept their numbers.)
 | M5        | Views, query and the LLM eval               | —        |
 | M6        | Mesh expansion, controller-driven           | —        |
 | M7        | Kubernetes                                  | —        |
+| M8        | A smaller agent installs and uses iormesh   | —        |
 
 Sequencing relaxation (2026-11-20, owner-delegated advisor
 decision): M4's real-host run (task lb4) gates acceptance, not the
@@ -80,3 +82,6 @@ then open only the part you need.
 - [M7 — Kubernetes: sidecar & debug-container deployment](milestones/m7.md) —
   debug containers and sidecars, the privilege profile, k8s transport, route
   map.
+- [M8 — A smaller agent installs and uses iormesh](milestones/m8.md) — the
+  iormesh skill, the trial harness on the iom VMs, and the four-cell
+  acceptance (planned).
