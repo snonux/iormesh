@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -230,6 +231,29 @@ func TestTrialScoreAndMesh(t *testing.T) {
 	}
 }
 
+// TestTerminalNeverEmpty: a command that succeeds silently still gives
+// the agent a message. The first real trial (task nm4) sent claude an
+// empty message after `ssh iom2 true`, and `claude -p --resume` with an
+// empty prompt failed the run ("No deferred tool marker found").
+func TestTerminalNeverEmpty(t *testing.T) {
+	tests := []struct {
+		text string
+		code int
+		err  error
+		want string
+	}{
+		{"", 0, nil, "[no output, exit status 0]\n"},
+		{"out\n", 0, nil, "out\n"},
+		{"", 3, nil, "[exit status 3]\n"},
+		{"", 0, errors.New("ssh: broken"), "[ssh: broken]\n"},
+	}
+	for _, tt := range tests {
+		if got := terminal(tt.text, tt.code, tt.err); got != tt.want {
+			t.Errorf("terminal(%q, %d, %v) = %q, want %q", tt.text, tt.code, tt.err, got, tt.want)
+		}
+	}
+}
+
 // TestCheckEdges: a fused edge to each service is needed; an unresolved
 // or missing one fails.
 func TestCheckEdges(t *testing.T) {
@@ -239,5 +263,83 @@ func TestCheckEdges(t *testing.T) {
 	partial := strings.Replace(fakeEdges, "billing    fused", "billing    mixed", 1)
 	if err := CheckEdges(partial, MeshServices); err == nil || !strings.Contains(err.Error(), "billing") {
 		t.Errorf("mixed edge to billing: %v", err)
+	}
+	if err := CheckEdges(spacedEdges, MeshServices); err != nil {
+		t.Errorf("a FROM with spaces: %v", err)
+	}
+	spacedPartial := strings.Replace(spacedEdges, "orders     fused", "orders     mixed", 1)
+	if err := CheckEdges(spacedPartial, MeshServices); err == nil || !strings.Contains(err.Error(), "orders") {
+		t.Errorf("a FROM with spaces, mixed edge to orders: %v", err)
+	}
+}
+
+// spacedEdges is `show edges` as the first real trial printed it (task
+// nm4): the gateway, a client with no port, is named by its pattern,
+// spaces and all, so the columns are not whitespace-separated fields.
+const spacedEdges = `FROM                                         TO         STATE  CONNS  UNRESOLVED  FIRST                LAST
+app:gateway/*microservices --role gateway *  inventory  fused  9      0           2026-11-26 20:42:20  2026-11-26 20:46:47
+app:gateway/*microservices --role gateway *  orders     fused  9      0           2026-11-26 20:42:17  2026-11-26 20:46:47
+orders                                       billing    fused  9      0           2026-11-26 20:42:19  2026-11-26 20:46:47
+orders                                       inventory  fused  9      0           2026-11-26 20:42:18  2026-11-26 20:46:46
+`
+
+// TestTypedKeepsDirectory: guided mode's user types a step's commands
+// into one terminal, so a `cd` carries to the next command, as it did not
+// when each command ran in its own ssh session (the first real guided
+// run, task nm4: the downloads landed in ~ after `cd ~/iormesh-release`).
+// The wrapper runs here under sh -c with fixed commands, as the VM's
+// shell would run it; its exit status and output stay the command's.
+func TestTypedKeepsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	run := func(cwd, command string) (string, int, string) {
+		t.Helper()
+		// ssh carries stdout and stderr on two channels, which arrive in
+		// no fixed order: here stderr always comes after stdout, the
+		// order that broke the first guided pi run (task nm4) when a
+		// command's error text landed after the directory report.
+		var stdout, stderr bytes.Buffer
+		cmd := exec.Command("sh", "-c", typedCommand(cwd, command))
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		err := cmd.Run()
+		out := stdout.Bytes()
+		out = append(out, stderr.Bytes()...)
+		code := 0
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			code = exit.ExitCode()
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		text, next := splitTyped(string(out), cwd)
+		return text, code, next
+	}
+	text, code, cwd := run("", "cd "+dir)
+	if text != "" || code != 0 || cwd != dir {
+		t.Fatalf("cd: %q, exit %d, cwd %q", text, code, cwd)
+	}
+	if text, _, _ = run(cwd, "pwd"); text != dir+"\n" {
+		t.Errorf("pwd after cd = %q, want %q", text, dir+"\n")
+	}
+	if text, code, next := run(cwd, "printf half; false"); text != "half" || code != 1 || next != dir {
+		t.Errorf("failing command: %q, exit %d, cwd %q", text, code, next)
+	}
+	// A command that leaves the shell keeps the directory it had.
+	if _, code, next := run(cwd, "exit 3"); code != 3 || next != dir {
+		t.Errorf("exit 3: exit %d, cwd %q", code, next)
+	}
+	// Error text stays the command's output, in order, and the
+	// directory stays a directory.
+	if text, code, next := run(cwd, "echo out; echo err >&2; false"); text != "out\nerr\n" || code != 1 || next != dir {
+		t.Errorf("stderr: %q, exit %d, cwd %q", text, code, next)
+	}
+	// A directory gone since is reported as cd reports it, and the
+	// terminal falls back to the login directory rather than keep a
+	// path every later command would fail on.
+	if text, code, next := run(dir+"/gone", "echo never"); !strings.Contains(text, "gone") || code == 0 || next == dir+"/gone" {
+		t.Errorf("missing directory: %q, exit %d, cwd %q", text, code, next)
+	}
+	// A report that is not one absolute path is not taken.
+	if text, next := splitTyped("x"+cwdMark+"/a\nnoise\n", dir); next != dir || text != "x"+cwdMark+"/a\nnoise\n" {
+		t.Errorf("garbled report: %q, cwd %q", text, next)
 	}
 }

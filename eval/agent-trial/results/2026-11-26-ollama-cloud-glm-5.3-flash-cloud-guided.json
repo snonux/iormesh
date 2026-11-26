@@ -1,0 +1,83 @@
+{
+  "agent": "pi",
+  "model": "ollama-cloud/glm-5.3-flash:cloud",
+  "mode": "guided",
+  "date": "2026-11-26",
+  "commit": "3000681",
+  "turns": 46,
+  "max_turns": 150,
+  "minutes": 10.623984604516666,
+  "mesh": false,
+  "mesh_error": "no fused edge to orders, inventory, billing in show edges",
+  "threshold": 0.8,
+  "score": 0.8,
+  "passed": false,
+  "questions": [
+    {
+      "id": "orders-caller",
+      "passed": true,
+      "answer": "The gateway (`app:gateway/*--role gateway*`). Edge `app:gateway → 127.0.0.1:18216` (orders) with 5 connections (4 fused, 1 unresolved), and the checkout conversations (0005/0007/0009) enter with the gateway's `POST /orders`.",
+      "failures": []
+    },
+    {
+      "id": "orders-callees",
+      "passed": true,
+      "answer": "inventory and billing. In conversation 0005, orders sends `POST /inventory/reserve` to `127.0.0.1:18215` (step 25, ref `orders/iom2/iom2-b753381d/11169`) and `POST /billing/charge` to `127.0.0.1:18214` (step 36, ref 11291).",
+      "failures": []
+    },
+    {
+      "id": "gateway-callees",
+      "passed": true,
+      "answer": "orders and inventory — directly. Edges: gateway → `18216` (orders, 5 conns) and gateway → `18215` (inventory, 5 conns, fused); its http events show `POST /orders` (https) and `GET /inventory/stock/widget` (http) on its `main` thread.",
+      "failures": []
+    },
+    {
+      "id": "checkout-entry",
+      "passed": true,
+      "answer": "`POST /orders` — the gateway's entry request; the 3-hop conversations (e.g. 0005, 66 steps) run gateway → orders (`18216`) → inventory (`18215`) → billing (`18214`).",
+      "failures": []
+    },
+    {
+      "id": "gateway-stock",
+      "passed": true,
+      "answer": "`GET /inventory/stock/widget` — one-hop conversations with the gateway as entry (0004/0006/0008/0010/0012), answered 200 by inventory on `18215`, scheme http (e.g. gateway event: `\"method\":\"GET\",\"scheme\":\"http\",\"path\":\"/inventory/stock/widget\",\"status\":200`).",
+      "failures": []
+    },
+    {
+      "id": "orders-next-call",
+      "passed": true,
+      "answer": "first `POST /inventory/reserve` (to inventory), then `POST /billing/charge` (to billing) — causal steps 25 and 36 of conversation 0005, refs `11169` then `11291`, ~4 s apart, each answered 200 before the next.",
+      "failures": []
+    },
+    {
+      "id": "tls-hops",
+      "passed": false,
+      "answer": "`POST /orders` (gateway → orders) and `POST /billing/charge` (orders → billing). Both ends' http events read `\"scheme\":\"https\"` for these two paths; inventory's paths (`POST /inventory/reserve`, `GET /inventory/stock/widget`) are all `\"scheme\":\"http\"`.",
+      "failures": [
+        "contains excluded \"/inventory/\""
+      ]
+    },
+    {
+      "id": "billing-record",
+      "passed": true,
+      "answer": "`invoice-42.json` (in that cycle's `/tmp/tmp.\u003cdir\u003e/billing.d/`). It made it appear in three steps (0005 steps 46–48): create/open `invoice-42.json.tmp` for writing (ref `billing/iom2/iom2-ebb0eff4/7125`), write 32 B to the `.tmp` (ref 7127), then rename `invoice-42.json.tmp` → `invoice-42.json` (ref 7130) — attributed to `iormesh.workload.scenarios.DataStore#save`.",
+      "failures": []
+    },
+    {
+      "id": "order-file-writer",
+      "passed": true,
+      "answer": "`iormesh.workload.scenarios.DataStore#save`. The 36-byte write of `orders.d/order-42.json.tmp` (ref `orders/iom2/iom2-b753381d/11306`, step 56, top frame `java.io.FileOutputStream#write`) carries `DataStore#save` in its recorded stack (`query -ref 11306 -method 'iormesh.workload.scenarios.DataStore#save'` returns the event), and the rollup names `DataStore#save` on the write and the rename into `order-42.json`.",
+      "failures": []
+    },
+    {
+      "id": "billing-cert-reader",
+      "passed": false,
+      "answer": "the orders service. Every cycle, right at its startup, orders reads `/tmp/tmp.\u003cdir\u003e/billing.crt` (statx → openat → 322-byte read → close, on `main`, ~3.5 ms after its exec, seconds before its first `POST /billing/charge`). The read itself is unattributed in this capture (the agent attaches after exec); the same startup TLS setup's attributed frame, opening the JDK `cacerts` 0.9 s later on the same thread, is `iormesh.workload.scenarios.SelfSignedCert#serverContext` — the method to name for the cert handling.",
+      "failures": [
+        "missing \"ServiceNode#readCert\""
+      ]
+    }
+  ],
+  "transcript": "eval/agent-trial/runs/20261126T212933Z-ollama-cloud-glm-5.3-flash-cloud-guided/transcript.jsonl",
+  "commands": "eval/agent-trial/runs/20261126T212933Z-ollama-cloud-glm-5.3-flash-cloud-guided/commands.jsonl"
+}

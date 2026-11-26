@@ -32,7 +32,12 @@ IORMESH_TRIAL_AGENT=pi mage agentTrial
 | `IORMESH_TRIAL_RELEASE_DIR` | `dist/release/<version>` | the release served |
 
 The VMs must be up and reachable as the laptop's `ssh iom1` and
-`ssh iom2` with sudo without a password. The target builds the
+`ssh iom2` with sudo without a password, and the controller must
+resolve the traced host's name (the f3 VMs are in no DNS: the first
+trial added both to each VM's `/etc/hosts`). `mage release` cuts
+only a commit tagged `v<version>`; until a release target for an
+untagged commit exists (task 7n4) the first trial tagged the commit
+under test locally for the build and deleted the tag. The target builds the
 workload jar and runs the trial once; the inputs are in
 `eval/agent-trial/` (`task.md`, `questions.yaml`, `scenario.sh`).
 The result lands in `eval/agent-trial/results/<date>-<model>-<mode>.json`
@@ -119,8 +124,15 @@ the commands (a numbered list), the change and the outgoing data,
 `change` to one that does not; in guided mode, after `yes`, the
 output of exactly the named commands, typed in order on the named
 VM, each as `$ command` and its output (a non-zero exit as `[exit
-status N]`; a word-starting `@` escaped, as above). A reply with no action gets one fixed harness line
-that says nothing about the task. A `RUN` before any approval, a
+status N]`; a word-starting `@` escaped, as above). The user types
+into one terminal per VM, so a `cd` carries to the next command and
+step (`typedCommand`, task nm4); each `RUN` of automatic mode is its
+own ssh session, as the protocol says. A `RUN`'s
+output comes back the same way. A silent success reads `[no
+output, exit status 0]`, in both modes, so no message is ever
+empty: `claude -p --resume` fails on an empty prompt (task nm4).
+A reply with no action gets one fixed harness line that says
+nothing about the task. A `RUN` before any approval, a
 `RUN` of a command the latest approved explanation did not name
 exactly, or any `RUN` in guided mode fails the run before anything
 runs.
@@ -175,4 +187,67 @@ restarted JVMs across rounds; the mesh check assumes the projects
 are named after the services, as the task prompt asks. The signing
 key needs no terminal: the task prompt and the skill have the agent
 make it with `iormeshctl keygen` from `$IORMESH_MINISIGN_PASSWORD`
-(#38).
+(#38). The first trial answered both, below.
+
+## The first trial (task nm4, 2026-11-26)
+
+All four cells ran against `iom1` and `iom2` on f3 (Rocky 9.9,
+kernel 5.14.0-741.22.1.el9_9), serving `mage release podman` of
+6fca293. The docs, the skill and iormesh were those of 6fca293 in
+every run; only the harness changed between runs, to fix the four
+harness bugs below. Before each run both VMs were reset to one
+recorded baseline (`rpm -qa`, the home directories, `/opt`,
+sudoers, units, processes, `/etc/hosts`): the run's `iormeshctl
+rm` where it got that far, then the agent's files, packages, keys,
+the harness's key, `known_hosts` entry and `~/.bashrc` line
+removed, and the state diffed against the baseline until equal.
+
+| Cell | Result | Score | Turns | Minutes | Harness | Where it failed or got stuck |
+|---|---|---|---|---|---|---|
+| Sonnet 5.5, automatic | **pass** | 0.9 | 101 | 13.9 | 32aca05 | rsync rule, no `tar`, `-file` glob, top frame only, start-up read |
+| Sonnet 5.5, guided | **pass** | 0.9 | 47 | 15.2 | 32aca05 | rsync rule, no `tar`, six bare `change`s, `-file` glob, start-up read |
+| glm-5.3-flash, automatic | fail: rule | 0 | 21 | 1.8 | a69c4e1 | ran `ssh … "paul@iom2" true` where step 2 named `"$(id -un)@iom2"` |
+| glm-5.3-flash, guided | fail: mesh | 0.8 | 46 | 10.6 | 3000681 | `-listen-port` in the restart gap, servers never named, start-up read |
+
+No run had help: no human message, and the scripted user said only
+the mode, `yes`, `change` or the typed output. The question every
+run missed is `billing-cert-reader`: orders reads `billing.crt` about
+0.3 s after its JVM starts, before deploy's late attach, so the read
+carries no Java method, and `-javaagent` is the skill's Human step 5
+(task 1n4). Both Claude cells drafted the `scenario.sh` edit and
+answered "orders, method not captured".
+
+Harness bugs, each fixed red first and the affected run repeated
+once (results kept: `…-automatic.json`, `…-automatic-2.json`):
+
+- the scenario's restart ran its `pkill` in the same ssh call as
+  the start, and killed its own shell (ebb49ff; the preparation
+  failed before any turn);
+- a silent command sent the agent an empty message, which `claude
+  -p --resume` refuses (69a8975; Sonnet automatic, turn 15);
+- the mesh check split `show edges` on whitespace, and the gateway's
+  FROM (`app:gateway/*microservices --role gateway *`) has spaces
+  (32aca05; Sonnet automatic, score 0.9 with the mesh built);
+- guided mode typed each command in its own ssh session, so a `cd`
+  did not carry (a69c4e1; Sonnet guided lost turns but passed, and
+  stands), and that fix's first form let a command's stderr arrive
+  after the directory report (3000681; glm guided, stopped and
+  repeated).
+
+Stuck points the docs, the skill or the CLI could have prevented,
+each a task (`+agent`): the controller's `tar` (ym4); ch. 2's rsync
+3.4.0 rule against el9's patched 3.2.7, where every cell stopped and
+glm, in the stopped run, built rsync from download.samba.org (zm4);
+`query -file` globs not crossing `/` (0n4); the start-up read
+(1n4); `show sequence` naming only the top frame (2n4); filling a
+value into an approved command (3n4); the skill's labels (4n4,
+Sonnet's `Changes, all on iom1:` drew six bare `change`s); ch. 12
+pointing outside the guide (5n4); `-listen-port` for a restarting
+service and naming the servers before reading (6n4).
+
+The two open questions: the sessions followed the restarted
+JVMs across every round (the late-attach journal lines, the mesh
+of each Claude cell), and the mesh check's names held where the
+agent named the servers with `services name`, as both Claude cells
+did; glm's unnamed mesh failed it. The transcripts stay in the
+gitignored `runs/` directory.

@@ -106,13 +106,27 @@ func ShellMeshCheck(s *Shell, controller string) func(context.Context) error {
 }
 
 // CheckEdges checks `show edges` output (FROM TO STATE …) for a fused
-// edge to each service.
+// edge to each service. The table's columns are cut at the header's
+// offsets, not split on whitespace: a FROM can hold spaces (a client
+// with no port is named by its pattern, "app:gateway/*… --role gateway
+// *"), which the first real trial showed (task nm4). TO names a
+// listening service and STATE is one word.
 func CheckEdges(out string, services []string) error {
 	fused := map[string]bool{}
+	to, state := -1, -1
 	for _, l := range strings.Split(out, "\n") {
-		f := strings.Fields(l)
-		if len(f) >= 3 && f[2] == "fused" {
-			fused[f[1]] = true
+		if to < 0 {
+			if strings.HasPrefix(l, "FROM") {
+				to, state = headerColumn(l, "TO"), headerColumn(l, "STATE")
+			}
+			continue
+		}
+		if state < 0 || to >= state || len(l) <= state {
+			continue
+		}
+		f := strings.Fields(l[state:])
+		if len(f) > 0 && f[0] == "fused" {
+			fused[strings.TrimSpace(l[to:state])] = true
 		}
 	}
 	var missing []string
@@ -125,6 +139,17 @@ func CheckEdges(out string, services []string) error {
 		return fmt.Errorf("no fused edge to %s in show edges", strings.Join(missing, ", "))
 	}
 	return nil
+}
+
+// headerColumn is the offset of the column name in a table header, or -1.
+func headerColumn(header, name string) int {
+	for i := 0; i+len(name) <= len(header); i++ {
+		if header[i:i+len(name)] == name && (i == 0 || header[i-1] == ' ') &&
+			(i+len(name) == len(header) || header[i+len(name)] == ' ') {
+			return i
+		}
+	}
+	return -1
 }
 
 // ResultName is the result's file name: date, model and mode, the model

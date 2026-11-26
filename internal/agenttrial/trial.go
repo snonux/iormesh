@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"iormesh/internal/eval"
@@ -67,6 +68,9 @@ type state struct {
 	modeGiven bool
 	step      int
 	approved  *Explanation
+	// cwd is guided mode's terminal directory per host (typedCommand):
+	// empty until a typed command reports one, the login directory.
+	cwd map[string]string
 }
 
 // Run plays the trial: each agent reply is a turn, the scripted user
@@ -171,15 +175,68 @@ func (t *Trial) approve(ctx context.Context, st *state, e Explanation) (string, 
 
 // typeCommands is guided mode's user at the terminal: exactly the
 // approved commands, in order, on the named host, and their output
-// pasted back as the terminal showed it.
+// pasted back as the terminal showed it. A user types into one terminal
+// per host, so a `cd` carries to the next command and the next step
+// (typedCommand); the log shows each command as typed.
 func (t *Trial) typeCommands(ctx context.Context, st *state) string {
+	if st.cwd == nil {
+		st.cwd = map[string]string{}
+	}
+	host := st.approved.Host
 	var out string
 	for _, c := range st.approved.Commands {
-		text, code, err := t.Shell.Run(ctx, Call{Host: st.approved.Host, Command: c, By: ByUser,
-			Step: st.step})
+		text, code, err := t.Shell.Run(ctx, Call{Host: host, Command: typedCommand(st.cwd[host], c),
+			LogAs: c, By: ByUser, Step: st.step})
+		text, st.cwd[host] = splitTyped(text, st.cwd[host])
 		out += "$ " + c + "\n" + terminal(text, code, err)
 	}
 	return out
+}
+
+// cwdMark starts the line typedCommand appends to report the directory
+// a command left its shell in: an ASCII record separator, which no
+// command's own output is expected to hold.
+const cwdMark = "\n\x1ecwd="
+
+// typedCommand wraps a typed command so it runs in the terminal's
+// directory cwd (none: the login directory) and reports the directory it
+// leaves, keeping its exit status. A command that exits its shell
+// reports nothing and the directory stays; a cwd gone since fails the
+// command with cd's own error and reports the login directory. The
+// command sits on its own lines inside braces, so a trailing comment or
+// `&` stays its own. Its stderr joins its stdout inside the wrapper, as
+// on a terminal: ssh carries the two on separate channels with no order
+// between them, and the first guided pi run (task nm4) had a command's
+// error text arrive after the report, so it was taken for the directory
+// and every later command failed in silence.
+func typedCommand(cwd, command string) string {
+	cd := ""
+	if cwd != "" {
+		cd = "cd " + shellQuote(cwd) + " && "
+	}
+	return "{ " + cd + "{\n" + command + "\n}; } 2>&1; s=$?; printf '" +
+		strings.ReplaceAll(cwdMark, "\n", `\n`) + "%s\\n' \"$PWD\"; exit $s"
+}
+
+// splitTyped takes typedCommand's report off a command's output and
+// returns the output and the directory. Only a report that ends the
+// output and names one absolute path is taken; otherwise the output stays
+// whole and the directory stays cwd.
+func splitTyped(out, cwd string) (string, string) {
+	i := strings.LastIndex(out, cwdMark)
+	if i < 0 {
+		return out, cwd
+	}
+	dir, ok := strings.CutSuffix(out[i+len(cwdMark):], "\n")
+	if !ok || !strings.HasPrefix(dir, "/") || strings.Contains(dir, "\n") {
+		return out, cwd
+	}
+	return out[:i], dir
+}
+
+// shellQuote quotes s as one POSIX shell word.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // runCommand is automatic mode's RUN: only a command the latest approved
@@ -202,13 +259,19 @@ func (t *Trial) runCommand(ctx context.Context, st *state, command string) (stri
 }
 
 // terminal is a command's output as a terminal shows it, with a non-zero
-// exit status or an ssh failure noted after it.
+// exit status or an ssh failure noted after it, and a silent success
+// noted as such: the message is never empty. An empty message is no
+// prompt to `claude -p --resume`, which then fails the run ("No deferred
+// tool marker found"), as the first real trial's `ssh iom2 true` did
+// (task nm4).
 func terminal(text string, code int, err error) string {
 	switch {
 	case err != nil:
 		return text + "[" + err.Error() + "]\n"
 	case code != 0:
 		return text + fmt.Sprintf("[exit status %d]\n", code)
+	case text == "":
+		return "[no output, exit status 0]\n"
 	}
 	return text
 }

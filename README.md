@@ -27,8 +27,9 @@ from the controller, under an allowlist. Details:
 
 **Status: proof of concept.** M0–M7 are accepted; M5's LLM eval
 passed with real models on 2026-11-26; M8 (usable by a smaller
-agent) is planned. Rocky Linux 9.9 is the main
-target; flags, paths and schema may still change. See
+agent) is not accepted yet (two of four trial cells passed).
+Rocky Linux 9.9 is the main target; flags, paths and schema may
+still change. See
 [docs/milestones.md](docs/milestones.md).
 
 ## Documentation
