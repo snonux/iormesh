@@ -293,7 +293,16 @@ func TestTypedKeepsDirectory(t *testing.T) {
 	dir := t.TempDir()
 	run := func(cwd, command string) (string, int, string) {
 		t.Helper()
-		out, err := exec.Command("sh", "-c", typedCommand(cwd, command)).Output()
+		// ssh carries stdout and stderr on two channels, which arrive in
+		// no fixed order: here stderr always comes after stdout, the
+		// order that broke the first guided pi run (task nm4) when a
+		// command's error text landed after the directory report.
+		var stdout, stderr bytes.Buffer
+		cmd := exec.Command("sh", "-c", typedCommand(cwd, command))
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		err := cmd.Run()
+		out := stdout.Bytes()
+		out = append(out, stderr.Bytes()...)
 		code := 0
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
@@ -317,5 +326,20 @@ func TestTypedKeepsDirectory(t *testing.T) {
 	// A command that leaves the shell keeps the directory it had.
 	if _, code, next := run(cwd, "exit 3"); code != 3 || next != dir {
 		t.Errorf("exit 3: exit %d, cwd %q", code, next)
+	}
+	// Error text stays the command's output, in order, and the
+	// directory stays a directory.
+	if text, code, next := run(cwd, "echo out; echo err >&2; false"); text != "out\nerr\n" || code != 1 || next != dir {
+		t.Errorf("stderr: %q, exit %d, cwd %q", text, code, next)
+	}
+	// A directory gone since is reported as cd reports it, and the
+	// terminal falls back to the login directory rather than keep a
+	// path every later command would fail on.
+	if text, code, next := run(dir+"/gone", "echo never"); !strings.Contains(text, "gone") || code == 0 || next == dir+"/gone" {
+		t.Errorf("missing directory: %q, exit %d, cwd %q", text, code, next)
+	}
+	// A report that is not one absolute path is not taken.
+	if text, next := splitTyped("x"+cwdMark+"/a\nnoise\n", dir); next != dir || text != "x"+cwdMark+"/a\nnoise\n" {
+		t.Errorf("garbled report: %q, cwd %q", text, next)
 	}
 }

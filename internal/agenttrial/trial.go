@@ -197,25 +197,37 @@ const cwdMark = "\n\x1ecwd="
 // typedCommand wraps a typed command so it runs in the terminal's
 // directory cwd (none: the login directory) and reports the directory it
 // leaves, keeping its exit status. A command that exits its shell
-// reports nothing and the directory stays. The command sits on its own
-// lines inside braces, so a trailing comment or `&` stays its own.
+// reports nothing and the directory stays; a cwd gone since fails the
+// command with cd's own error and reports the login directory. The
+// command sits on its own lines inside braces, so a trailing comment or
+// `&` stays its own. Its stderr joins its stdout inside the wrapper, as
+// on a terminal: ssh carries the two on separate channels with no order
+// between them, and the first guided pi run (task nm4) had a command's
+// error text arrive after the report, so it was taken for the directory
+// and every later command failed in silence.
 func typedCommand(cwd, command string) string {
 	cd := ""
 	if cwd != "" {
 		cd = "cd " + shellQuote(cwd) + " && "
 	}
-	return cd + "{\n" + command + "\n}; s=$?; printf '" + strings.ReplaceAll(cwdMark, "\n", `\n`) +
-		"%s\\n' \"$PWD\"; exit $s"
+	return "{ " + cd + "{\n" + command + "\n}; } 2>&1; s=$?; printf '" +
+		strings.ReplaceAll(cwdMark, "\n", `\n`) + "%s\\n' \"$PWD\"; exit $s"
 }
 
 // splitTyped takes typedCommand's report off a command's output and
-// returns the output and the directory, cwd when there is no report.
+// returns the output and the directory. Only a report that ends the
+// output and names one absolute path is taken; otherwise the output stays
+// whole and the directory stays cwd.
 func splitTyped(out, cwd string) (string, string) {
 	i := strings.LastIndex(out, cwdMark)
 	if i < 0 {
 		return out, cwd
 	}
-	return out[:i], strings.TrimSuffix(out[i+len(cwdMark):], "\n")
+	dir, ok := strings.CutSuffix(out[i+len(cwdMark):], "\n")
+	if !ok || !strings.HasPrefix(dir, "/") || strings.Contains(dir, "\n") {
+		return out, cwd
+	}
+	return out[:i], dir
 }
 
 // shellQuote quotes s as one POSIX shell word.

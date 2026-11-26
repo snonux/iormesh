@@ -56,7 +56,7 @@ func fakeSSH(log string, args []string, stdin io.Reader, stdout io.Writer) int {
 	host, command := args[sep+1], strings.Join(args[sep+2:], " ")
 	// Guided mode's typed command (typedCommand): answer for the command
 	// inside and report a directory, as the VM's shell would.
-	if start, end := strings.Index(command, "{\n"), strings.LastIndex(command, "\n}; s=$?"); start >= 0 && end > start {
+	if start, end := strings.Index(command, "{\n"), strings.LastIndex(command, "\n}; } 2>&1; s=$?"); start >= 0 && end > start {
 		command = command[start+2 : end]
 		defer func() { _, _ = fmt.Fprint(stdout, cwdMark+"/home/fake\n") }()
 	}
