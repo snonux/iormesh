@@ -13,6 +13,18 @@ nothing listens yet (`target spec: nothing listens on TCP port
 started later, but a JVM started after the session gets its Java
 agent late ([chapter 8](08-java-query.md)).
 
+A connection that is already open when the session starts is not
+seen as a connection: the tracer sees reads and writes on its
+socket, but no connect or accept, so it makes no edge (task cm4).
+A client that keeps one pooled or keep-alive connection open
+shows no edge until it opens a new one. Run on Rocky 9.9 (task
+4k4), a JVM calling an HTTP server every 3 s over one keep-alive
+connection, deployed while both ran, built `merged 0 services, 0
+edges` from 726 events; after the client was restarted under the
+running session, the next build had the edge, fused. Deploy before
+the clients connect where you can, or restart them once the
+sessions run.
+
 ## Deploy
 
 > **Human step.** `deploy` changes production hosts: it may
@@ -31,19 +43,31 @@ bytes), pushes the agent jar when a project uses it, and starts
 each project as the transient unit `iormesh-<project>.service`.
 It then waits until the session's probes are attached.
 
-What it prints, as the source writes it (not captured from a
-run): `verified dist/iormesh-linux-amd64: iormesh-linux-amd64
-0.1.0`, then the host's own lines prefixed with the host, among
-them
+Run on two Rocky 9.9 hosts (task 4k4: `iom1` running the shop
+JVM, `iom2` a JDK HTTP server on 8443; the hosts' names stand
+for `app1` and `app2`):
 
 ```text
-app1: iormesh: started iormesh-shop.service: session <id> on <fqdn>, pid <n>, tracing <targets> until <time>
-app1: shop: running (unit iormesh-shop.service <unit state>)
-app1:   session <id> on <fqdn>, pid <n>, tracing <targets>
-app1:   started <time>, ends by <time>
-app1:   tracer version 0.1.0
-app1:   ready/: 0 segments to collect
+$ iormeshctl deploy iom1 iom2
+verified dist/iormesh-linux-amd64: iormesh-linux-amd64 0.1.0
+iom1: iormesh: iormesh-linux-amd64 0.1.0 is already installed
+iom1: iormesh: started iormesh-shop.service: session 2ab80e31 on iom1, pid 3057, tracing pattern "java -jar */shop.jar*" until 2026-11-26T16:33:20Z
+iom1: shop: running (unit iormesh-shop.service active/running)
+iom1:   session 2ab80e31 on iom1, pid 3057, tracing pattern "java -jar */shop.jar*"
+iom1:   started 2026-11-26T08:33:20Z, ends by 2026-11-26T16:33:20Z
+iom1:   tracer version 0.1.0
+iom1:   ready/: 0 segments to collect
+verified dist/iormesh-linux-amd64: iormesh-linux-amd64 0.1.0
+iom2: iormesh: iormesh-linux-amd64 0.1.0 is already installed
+iom2: iormesh: started iormesh-billing.service: session 312f2e27 on iom2, pid 3858, tracing port 8443 owners, pid [3558] until 2026-11-26T16:33:24Z
+iom2: billing: running (unit iormesh-billing.service active/running)
+…
 ```
+
+The `verified` line comes once per host. With a project that
+uses the agent, a `verified dist/iormesh-agent.jar` line and
+`installed iormesh-agent.jar 0.1.0 as
+/opt/iormesh/lib/iormesh-agent.jar` follow.
 
 A host that fails is reported (`iormeshctl: app1: <error>`) and
 the next host is still deployed; the command then exits 1
@@ -56,7 +80,10 @@ with these flags, left alone (-restart restarts it)`).
 
 **If not:** a session that exits before it attaches fails the
 deploy with the tail of the unit's journal, which names the cause.
-Look it up in
+It is printed Go-quoted on one line, its line breaks as `\n`; the
+cause is near the end, e.g. `iormesh: target spec: nothing
+listens on TCP port 8443` (run on Rocky 9.9, task 4k4). Look it
+up in
 [troubleshooting.md](../troubleshooting.md#a-session-that-does-not-start);
 deploy's own refusals (not bootstrapped, `sudo: a password is
 required`, a refused upgrade) are under
@@ -70,11 +97,14 @@ iormeshctl status            # every registered host and project
 iormeshctl status app1       # one host
 ```
 
-It changes nothing on the hosts. One row per host and project,
-under this header (from the source):
+It changes nothing on the hosts. One row per host and project;
+run on Rocky 9.9 (task 4k4) a minute after the deploy:
 
 ```text
-TARGET  PROJECT  STATE  END-REASON  ENDS-BY  VERSION  UNCOLLECTED  NOTE
+$ iormeshctl status
+TARGET  PROJECT  STATE    END-REASON  ENDS-BY               VERSION  UNCOLLECTED  NOTE
+iom1    shop     running  -           2026-11-26T16:33:20Z  0.1.0    1
+iom2    billing  running  -           2026-11-26T16:33:24Z  0.1.0    1
 ```
 
 | Column | Meaning |
@@ -91,7 +121,9 @@ minute or two: the tracer publishes a segment per minute.
 
 On the host itself, `sudo /opt/iormesh/bin/iormesh status` prints
 the same per project, and `journalctl -u iormesh-shop.service`
-(as a user who may read the system journal) is the session's log.
+(as a user who may read the system journal: root, or a member
+of `adm`, `systemd-journal` or `wheel`; the sudoers rule does not
+cover it) is the session's log.
 
 Reference: [architecture.md](../architecture.md) (deployment
 modes, the session unit), [security.md](../security.md) (what the

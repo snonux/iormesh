@@ -20,16 +20,18 @@ Run for this guide (scratch registry):
 
 ```text
 $ iormeshctl add -project shop -pattern 'java -jar */shop.jar*' app1 -duration 8h
-added app1 project shop (~/.config/iormesh/servers.yaml)
+added app1 project shop (/home/you/.config/iormesh/servers.yaml)
 $ iormeshctl add -project billing -listen-port 8443 app2 -duration 8h
-added app2 project billing (~/.config/iormesh/servers.yaml)
+added app2 project billing (/home/you/.config/iormesh/servers.yaml)
 $ iormeshctl list
 KIND  TARGET  PROJECT  TRACES                         FLAGS         NOTE
 host  app1    shop     pattern java -jar */shop.jar*  -duration 8h  -
 host  app2    billing  listen-port 8443               -duration 8h  -
 ```
 
-The registry is plain YAML, written 0600 in a 0700 directory:
+The registry is plain YAML, written 0600; a directory iormeshctl
+creates is 0700, and one that already exists is refused if others
+may write to it:
 
 ```yaml
 servers:
@@ -125,15 +127,22 @@ sudo mv -f -T /etc/sudoers.d/.iormesh.new /etc/sudoers.d/iormesh
 sudo -n /opt/iormesh/bin/iormesh status
 ```
 
-The cut part installs the tracer and the key, each through a
-temporary name and a SHA-256 check against the laptop's, and runs
+The `scp` line names the build as bootstrap read it (`dist/…`,
+or the `-dist` directory), so run the controller lines from the
+directory you ran bootstrap in. The cut part installs the tracer
+and the key, each through a temporary name and a SHA-256 check
+against the laptop's, and runs
 `sudo /opt/iormesh/bin/iormesh upgrade` on the staged build, which
 re-verifies it against the root-owned key and checks the layout.
 
 > **Human step.** Run the `On the controller` lines on the laptop,
 > then the rest on `app1` as `ops` in a terminal, where sudo may
 > ask for the password. Read the steps before you run them: they
-> are the whole install.
+> are the whole install. Run them as `ops`, not in a root shell
+> (`sudo -i`): there `~` is root's home, and the `upgrade` step
+> refuses the staged build (`unsafe file: … is owned by uid 1000,
+> not by the caller`), since it must belong to the user sudo was
+> called by.
 
 **Checkpoint:** the last step, `sudo -n /opt/iormesh/bin/iormesh
 status`, runs without a password prompt and, with no session yet,
@@ -148,6 +157,28 @@ the same steps; it reads the arch and the user from the host:
 iormeshctl bootstrap -apply app2
 ```
 
+Run on Rocky 9.9 (task 4k4; the host `iom2`, a temporary
+`NOPASSWD: ALL` rule for its SSH user, removed after):
+
+```text
+$ iormeshctl bootstrap -apply iom2
+verified dist/iormesh-linux-amd64: iormesh-linux-amd64 0.1.0
+iom2: create /opt/iormesh, bin/ and etc/, root's 0755
+iom2: install the tracer as /opt/iormesh/bin/.iormesh.new, root's 0755
+…
+iom2: the installed tracer re-verifies the build against its root-owned key and checks the layout (same bytes: a no-op)
+iom2: iormesh: iormesh-linux-amd64 0.1.0 is already installed
+…
+iom2: move the sudoers rule into place at /etc/sudoers.d/iormesh
+iom2: the rule runs the tracer without a password
+iom2: iormesh: no sessions
+iom2: bootstrapped; iormeshctl deploy iom2 starts its projects
+```
+
+The `-apply` rule is needed only for this one command; take it
+away again once the host is bootstrapped, since deploy and the
+rest go through the narrow rule alone.
+
 A failed step ends with `…; stopped here, nothing undone`; until
 the rule is in place a rerun starts over.
 
@@ -160,8 +191,11 @@ the rule is in place a rerun starts over.
 | `local build, nothing pushed: … signature verification failed: …` | sign the `-dist` directory again with the pinned key's secret half ([chapter 3](03-release.md)) |
 | `sudo -n failed (…): -apply needs the SSH user's own sudo without a password` | drop `-apply`, run the printed steps by hand |
 | `/etc/sudoers.d/iormesh already exists: …` | the host is bootstrapped: go on with `deploy` |
+| `upgrade: unsafe file: … is owned by uid 1000, not by the caller` | the printed steps ran in a root shell: run them as `ops` |
+| `transport: control socket path under … would be N bytes, over the 104 a unix socket allows` | your home (or `$XDG_CACHE_HOME`) path is too long for ssh's control socket: point `XDG_CACHE_HOME` at a shorter directory |
 
-The first three were run for this guide; the rest are in
+The first three were run for this guide, the last four on Rocky
+9.9 (task 4k4); the rest are in
 [troubleshooting.md](../troubleshooting.md#bootstrap).
 
 `-user` defaults to HOST's `user@` part, else your own login

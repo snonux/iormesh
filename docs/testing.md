@@ -757,7 +757,10 @@ the fifth the spread M4-9 (skipped runs, qf4) (see "Run on
 Rocky 9.9" below). The M5 and M6 re-checks on the same VMs are
 "M5 on Rocky 9.9" and "M6 on Rocky 9.9" below. A rerun at
 9bca1b2 (task 3k4, 2026-11-26) passed 14 of 15: the runner's
-M4-8 check misses the `@host` loopback labels (task 7m4).
+M4-8 check missed the `@host` loopback labels (task 7m4). With
+7m4's fix, a rerun at c10b0a3 (task 4k4, 2026-11-26) passed all
+15: **M4 is accepted on el9** (see "Guide walk on Rocky 9.9"
+below).
 
 `mage m4Acceptance HOST1 HOST2` (`magefile_m4acceptance.go`,
 `internal/acceptance`) runs the whole sequence and checks each
@@ -1619,6 +1622,145 @@ homes (every session collected), the build of 9bca1b2 installed
 again as at the start (the 5eedf77 tracer is not restored), the
 run directories, ports, rich rule and DNAT removed, and the three
 VMs stopped.
+
+### Guide walk on Rocky 9.9 (task 4k4, 2026-11-26)
+
+The user guide ([guide/](guide/README.md), chapters 2–10) walked
+end to end on `iom1` and `iom2` (as above; 08:19 to 08:53 UTC),
+with the commands as the chapters write them, then M4 once more.
+Builds of c10b0a3: `mage containerBuild podman tracer-amd64,ctl`
+and `mage agentBuild` into `dist/`, signed with a throwaway key
+made by `minisign -G` (`aead.dev/minisign/cmd/minisign@v0.3.0`;
+the laptop has no minisign package) through
+`dist/iormeshctl-linux-amd64 sign -key … .`; the controller
+installed from `dist/` as `~/bin/iormeshctl`. iormeshctl ran with
+`HOME` set to a scratch directory, so the key, registry, store
+and service database were the walk's own; the operator's were
+not touched.
+
+**Start and end state.** Both hosts had 3k4's state: the 9bca1b2
+tracer (sha256 6674249a…) and the 3k4 test key in
+`/opt/iormesh`, the hand-laid rule `paul ALL=(root) NOPASSWD:
+/opt/iormesh/bin/iormesh` without bootstrap's marker, the staged
+9bca1b2 builds in `~paul/.iormesh/staging`; no unit, no port. To
+start from the state chapter 4 assumes, `sudo -n iormesh
+uninstall` (it left the unmarked rule, as documented), then the
+rule and `~/.iormesh` removed as root. At the end the same bytes,
+modes and rule were put back as root, the hashes compared, and
+the VMs stopped.
+
+**Workload.** A 1.9 KiB `shop.jar` (a JDK HttpClient calling
+billing every 3 s over keep-alive and writing an order record
+through a temporary file and a rename) on `iom1`, and billing as
+`java -m jdk.httpserver -b 10.20.0.141 -p 8443` on `iom2`, 8443
+opened runtime-only for the walk.
+
+**Bootstrap.** The SSH user `paul` has no password and no sudo of
+its own, so the by-hand path on `iom1` ran the printed controller
+lines on the laptop, the `printf` lines as `paul`, and the `sudo`
+lines as root over SSH with `HOME=/home/paul`; the staged
+`upgrade` needs the caller to own the staged file, so that one
+line ran with `SUDO_UID=1000` — in a root shell it refuses
+(`unsafe file: … is owned by uid 1000, not by the caller`, now in
+the guide and troubleshooting.md). The checkpoint, `sudo -n
+/opt/iormesh/bin/iormesh status` as `paul`, printed `iormesh: no
+sessions`. On `iom2`, `bootstrap -apply` without sudo refused as
+documented; with the temporary rule `/etc/sudoers.d/zz-4k4-temp`
+(`paul ALL=(ALL) NOPASSWD: ALL`, 0440, added at 08:30:15 UTC and
+removed at 08:30:43 right after the bootstrap; `sudo -n true` as
+`paul` then failed again) it ran every step and ended
+`bootstrapped; iormeshctl deploy iom2 starts its projects`; a
+rerun refused with `/etc/sudoers.d/iormesh already exists`.
+
+**Walked**, each as the chapter shows it: `add` (and its two
+refusals), `list`, `bootstrap`, `deploy` (a `-listen-port` with
+nothing listening, both hosts, a no-op redeploy), `status`,
+`collect`, `build`, `services`/`services name`/`rules`/`unname`,
+every `show` view, `show -json`, `tui` without a terminal, the
+site folder (CSP `default-src 'none'`, no remote reference; no
+browser was opened), `query` (`-event`, `-host`, `-file`, `-from`/
+`-to`, `-conn`, `-errno`), the agent added to `shop` (deploy
+pushed the jar, the running JVM got it by live attach, "37
+natives probed", conversations appeared), `ensure` twice
+(`shortshop`, `-duration 1m`, ended `duration` and was restarted;
+`billing`, stopped with `sudo iormesh stop`, was left stopped and
+marked `stopped by operator: ensure leaves it`; the second run
+only collected; `deploy` started billing again), `build -last 2m`
+and `-from`/`-to`, `show -windowed`, the two `-last` refusals,
+`prune -older-than` listing then `-apply`, flags changed in the
+registry by hand and `deploy` (it restarted the session),
+`expand` and `expand -apply` (iom2 bootstrapped again, untraced,
+allowed as `10.20.0.141/32`: enrolled at hop 1 and deployed bound
+to billing's pid; the next `expand` lists it `enrolled`), and
+`rm` (`rm iom1`, `rm -project billing iom2`; both removed
+`/opt/iormesh` and the bootstrap rule).
+
+**Findings, fixed in the guide and troubleshooting.md:**
+
+- A connection already open when its session starts makes no
+  connection and no edge (only reads and writes on its socket):
+  the first build after deploying over the running keep-alive
+  client was `0 services, 0 edges` from 726 events; with the
+  client restarted it fused at once. A product gap, task cm4
+  (priority H); chapter 5 now says so, chapter 10's run shows the
+  resulting `mixed` edge.
+- `rm -project` of a host's last project uninstalls the host, so
+  chapter 8's "rm -project, then add again" to add `-agent` left
+  `iom1` without a tracer (deploy: `/opt/iormesh/bin/iormesh is
+  not installed`). Chapter 8 now edits the registry's flags and
+  deploys again; chapter 9 and troubleshooting.md say what rm
+  does to a host's last project.
+- `services name 'iom2*'` named nothing: the glob matches the
+  name the client asked for or the IP, never the registry's host
+  name; a client dialing an IP needs an IP glob (chapter 6,
+  troubleshooting.md).
+- Without the agent there are no http events, so no
+  conversations (`show sequence`: `no such conversation: the
+  build holds none (no http events)`), chapters 6 and 7.
+- `mkdir -p ~/.config/iormesh` (chapter 3) made the registry's
+  directory 0755, not the 0700 chapter 4 promised; chapter 3 now
+  uses `mkdir -p -m 0700`.
+- A long `HOME` breaks every ssh with `control socket path under
+  … would be 191 bytes, over the 104 a unix socket allows`
+  (`XDG_CACHE_HOME` moves it), chapter 4 and troubleshooting.md.
+- `sudo -v` (chapter 2) succeeds for a user whose only rule is
+  iormesh's narrow one; the check is `sudo -l` now.
+- Chapter 5's deploy and status output, chapter 6's collect,
+  chapter 9's ensure, prune and rm, and chapter 10's `expand
+  -apply` are now captured from this run. rm leaves the SSH
+  user's `~/.iormesh/staging` and an empty `/run/iormesh/spool`
+  (chapter 9).
+- deploy prints a failed unit's journal tail Go-quoted on one
+  line (as troubleshooting.md said); readability task dm4.
+
+**M4** (`mage m4Acceptance iom1 iom2`, the procedure and variables
+of "Run on Rocky 9.9" above, `IORMESH_M4_KEY` the walk's
+throwaway key, work directory `~/.iormesh-m4-4k4`; both hosts
+bootstrapped again by hand as above; 08:42:41 to 08:48:12 UTC):
+**every criterion PASS — M4 is accepted on el9.**
+
+| Id | Result |
+|---|---|
+| M4-0 | PASS — both amd64, 5.14.0-741.22.1.el9_9.x86_64 |
+| M4-1 | PASS — 14 projects running on iom1 and iom2 |
+| M4-2 | PASS — 3 rounds, 43 files collected and deleted on the servers |
+| M4-3 | PASS |
+| M4-4 | PASS |
+| M4-5 | PASS — the tcp-loopback golden on 1485 events |
+| M4-6 | PASS — one conn fused across iom1 and iom2; the client alone unresolved |
+| M4-7 | PASS — client :18880, server :18203 |
+| M4-8 | PASS — all hops fused: `127.0.0.1:18213@a425… tls x1, 127.0.0.1:18211@a425… tls x1, 127.0.0.1:18212@a425… plain x2` (task 7m4's fix) |
+| M4-9 | PASS — two conns fused across iom1 and iom2; `10.20.0.141:18216 tls x1, 10.20.0.141:18214 tls x1, 10.20.0.140:18215 plain x2` |
+| M4-10 | PASS — one window, two-sided, width 750µs |
+| M4-11 | PASS — byte-identical under `unshare -rn` |
+| M4-12 | PASS |
+| M4-13 | PASS — `ended disk_limit`, the segment intact |
+| M4-14 | PASS — 15 sessions collected, nothing under `/opt/iormesh` |
+
+Afterwards the ports and the DNAT were removed, the scratch homes
+and the run directory deleted on the laptop, the 3k4 state put
+back on both hosts, and both VMs stopped (`doas vm list`: `iom1`,
+`iom2`, `iom3` Stopped; only `rocky` running).
 
 ## msghdr data calls (task oh4, 2026-11-22)
 

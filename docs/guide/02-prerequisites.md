@@ -12,7 +12,7 @@ Linux or macOS; it needs no eBPF and no root.
 |---|---|---|
 | this repository, Go, [mage](https://magefile.org) ≥ 1.17 | `mage -version` | a version of 1.17 or newer |
 | Podman or Docker, for the release builds | `podman version` (or `docker version`) | client and server versions, no error |
-| `minisign`, once, to make your signing key | `minisign -v` | a version line |
+| `minisign`, once, to make your signing key (no package? `go install aead.dev/minisign/cmd/minisign@v0.3.0`, the library iormeshctl signs with) | `minisign -v` | a version line |
 | rsync 3.4.0 or newer, first in `PATH` | `rsync --version` | `rsync  version 3.4.0` or newer |
 | key-based SSH to each host through your agent | `ssh -o BatchMode=yes app1 true` | returns at once, no prompt, exit 0 |
 | each host's key in `~/.ssh/known_hosts` | the same command | no `Host key verification failed.` |
@@ -57,7 +57,7 @@ Run these on the host as `ops`:
 | rsync (a minimal install lacks it) | `command -v rsync` | a path; else `sudo dnf install -y rsync` |
 | a POSIX login shell for `ops` | `getent passwd ops` | ends in `/bin/bash` or another POSIX shell |
 | `/opt` root-owned, not writable by others | `stat -c '%U %a' /opt` | `root 755` |
-| sudo for `ops`, once | `sudo -v` | succeeds (a password prompt is fine) |
+| sudo for `ops`, once | `sudo -l` | lists `(ALL) ALL` or a rule that covers the install (a password prompt is fine) |
 
 No firewall change is needed: the tracer listens on nothing, and
 everything goes through SSH.

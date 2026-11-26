@@ -17,12 +17,15 @@ installs iormeshctl.
 > key path inside the tree).
 
 ```sh
-mkdir -p ~/.config/iormesh ~/.minisign
+mkdir -p -m 0700 ~/.config/iormesh ~/.minisign
 minisign -G -p ~/.config/iormesh/minisign.pub -s ~/.minisign/iormesh.key
 chmod 600 ~/.minisign/iormesh.key
 ```
 
-Give the key a password: the signing library reads only
+`-m 0700` keeps both directories yours alone; a plain `mkdir -p`
+makes them 0755, and iormeshctl later writes the registry into
+that directory as it finds it. Give the key a password: the
+signing library reads only
 password-encrypted secret keys, and both signers refuse a key
 file others may read. `~/.config/iormesh/minisign.pub` is where
 iormeshctl looks for the pinned public key by default (`-key`
@@ -92,9 +95,12 @@ with `decryption failed`.
 Building from source instead of a release? `mage buildPodman`
 (or `buildDocker`) and `mage agentBuild` fill `dist/`, and
 `IORMESH_MINISIGN_KEY=~/.minisign/iormesh.key mage sign` signs
-it the same way ([build.md](../build.md#signing)); `mage build`
-and the other development targets write to `bin/` instead,
-which hosts never take.
+it the same way ([build.md](../build.md#signing)); so does
+`dist/iormeshctl-linux-amd64 sign -key ~/.minisign/iormesh.key
+dist`. For amd64 hosts only, `mage containerBuild podman
+tracer-amd64,ctl` is the lighter build (the amd64 tracer and the
+four controllers). `mage build` and the other development
+targets write to `bin/` instead, which hosts never take.
 
 **Checkpoint:** every build in the directory has a `.minisig`
 next to it; `LICENSE` has none.

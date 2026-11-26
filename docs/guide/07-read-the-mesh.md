@@ -214,7 +214,8 @@ iormeshctl open
 
 `open` prints the newest site's path and opens it with `xdg-open`
 (`open` on macOS); over SSH or without a browser, the printed path
-is the answer. The site is one self-contained `index.html` that
+is the answer; `$BUILDS/<projects>/sites/latest` links the newest
+run's folder. The site is one self-contained `index.html` that
 loads nothing from the network, so it works from `file://` and
 can be copied to a colleague with the folder.
 
@@ -314,7 +315,15 @@ Reference: [visualization.md](../visualization.md#the-terminal-ui)
 of that project set: `show -project` and `open -project` read the
 build made with the same `-project` set. On a fresh laptop they
 answer `trace store: open …/traces: no such file or directory`
-(run for this guide): collect and build first.
+(run for this guide): collect and build first. A build without
+http events (no Java agent, [chapter 8](08-java-query.md)) has no
+conversations: `show sequence` answers `show: no such
+conversation: the build holds none (no http events)` and exits 1,
+`show conversations` and `show thread` print only their header,
+while `show services`, `edges`, `processes` and `report` still
+read the build (run on Rocky 9.9, task 4k4). `tui` without a
+terminal exits 1 with `tui needs a terminal on stdin and stdout;
+for text use iormeshctl show (it pipes)`.
 
 ---
 
