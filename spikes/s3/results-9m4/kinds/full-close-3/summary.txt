@@ -1,0 +1,1 @@
+kind=close threads=1 kind_cpu=1.48503 kind_wall=1.48027 (pairs=3)

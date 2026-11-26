@@ -1,0 +1,1 @@
+kind=getppid threads=1 kind_cpu=1.38453 kind_wall=1.38403 (pairs=3)

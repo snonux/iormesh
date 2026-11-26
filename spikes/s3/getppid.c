@@ -6,7 +6,11 @@
 // reachable from the JDK, and a C loop leaves the per-call kernel cost as
 // the larger part of the CPU time.
 //
-// Usage: getppid THREADS OPS   (OPS calls per thread)
+// Usage: getppid THREADS OPS [CALL]   (OPS calls per thread)
+// CALL is getppid (the default) or close: close(-1), EBADF at once, a kind
+// the file family traces, so the loop meets the dispatcher's scope test as
+// well (task 9m4: the two loops beside each other split the bystander's
+// cost into the dispatch every syscall pays and the traced kinds' extra).
 // Prints one line: getppid threads=T ops=N elapsed_ns=W cpu_ms=C, where
 // elapsed_ns is the loops' wall time and cpu_ms the process's user+sys CPU
 // time (getrusage; startup is a few hundred microseconds of it).
@@ -14,19 +18,22 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/resource.h>
 #include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
 
 static long ops;
+static long nr = SYS_getppid;
+static long arg0;
 
-// loop calls getppid through syscall(2), so no libc wrapper could ever
+// loop calls the syscall through syscall(2), so no libc wrapper could ever
 // answer from a cache.
 static void *loop(void *arg) {
     (void)arg;
     for (long i = 0; i < ops; i++)
-        syscall(SYS_getppid);
+        syscall(nr, arg0);
     return NULL;
 }
 
@@ -46,8 +53,15 @@ static long long cpu_ms(void) {
 }
 
 int main(int argc, char **argv) {
-    if (argc != 3) {
-        fprintf(stderr, "usage: getppid THREADS OPS\n");
+    if (argc != 3 && argc != 4) {
+        fprintf(stderr, "usage: getppid THREADS OPS [getppid|close]\n");
+        return 2;
+    }
+    if (argc == 4 && strcmp(argv[3], "close") == 0) {
+        nr = SYS_close;
+        arg0 = -1;
+    } else if (argc == 4 && strcmp(argv[3], "getppid") != 0) {
+        fprintf(stderr, "getppid: CALL must be getppid or close\n");
         return 2;
     }
     int threads = atoi(argv[1]);

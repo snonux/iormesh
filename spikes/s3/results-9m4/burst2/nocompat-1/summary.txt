@@ -1,0 +1,1 @@
+threads=4 tracer_ns_per_event=- (n=0) slowdown=- bystander_cpu=1.26016 bystander_wall=1.27163 (pairs=5 load=1.56-2.45)

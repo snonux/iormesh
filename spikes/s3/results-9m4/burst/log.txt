@@ -1,0 +1,8 @@
+start 2026-11-26T09:41:46Z
+empty 1 rc=0 09:42:10
+mirror 1 rc=0 09:42:36
+full 1 rc=0 09:43:01
+empty 2 rc=0 09:43:27
+mirror 2 rc=0 09:43:52
+full 2 rc=0 09:44:18
+end 2026-11-26T09:44:18Z

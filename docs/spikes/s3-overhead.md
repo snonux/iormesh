@@ -1399,7 +1399,8 @@ address record among them; the four padded ones (socketpair, accept,
 pipe, poll) keep it behind their hand-written fast decoders.
 `BenchmarkNewSockAddrEvent` on the laptop (i7-1185G7, 7.3): 4.5–5.4 µs
 and 2 allocations (288 B) per record before, 51–53 ns and none after.
-The el9 netlink re-measure (`S3_MODES=msg`) is still to be run.
+The el9 netlink re-measure (`S3_MODES=msg`) is in the next section
+(task 9m4): 1.50 µs per event, from 3.87.
 
 | #25 item | ak4 verdict (el9, iom1) |
 |---|---|
@@ -1407,3 +1408,124 @@ The el9 netlink re-measure (`S3_MODES=msg`) is still to be run.
 | bystander | **over by a hair** in both builds: 1.255× new, 1.245× base, wall 1.269× / 1.261×; the new handlers do not change it; el9's own cost, task 9m4 |
 | loss | **passes**: 0 on the folded burst and on every msghdr load, up to 221 k events/s |
 | volume | not re-measured (no `zstd` on iom1); NDJSON 325 B per burst event as before, 402–432 B per mmsg event with its peer |
+
+## Follow-up (9m4, 2026-11-26): where el9's bystander cost goes
+
+Task ak4 left decision #25's bystander item on the 1.25× line on el9
+in both builds, where the 7.2 laptop had measured 1.15–1.19×. Task
+9m4 took it apart on the same VM: `iom1`, Rocky 9.9,
+5.14.0-741.22.1.el9_9, 2 vCPUs (N100), idle but for the runs; the
+tracer pinned to CPU 1 and every load to CPU 0 as in ak4,
+`syscall-burst` at 4 threads and 500 k ops, `-aggregate=false`. The
+laptop only built (static tracers of `bd2bbe4`, main with am4).
+Samples, drivers and the pooled medians:
+`spikes/s3/results-9m4/` (`pooled.txt`, `drivers/`). iom1 has no
+`perf`, so the cost was split by tracer builds that differ only in
+the dispatchers (`internal/c/dispatch.c`, throwaway, not committed):
+
+- **empty**: both dispatchers `return 0` at once — the tracer
+  attached, nothing traced: the `raw_syscalls` tracepoint path and
+  an empty program;
+- **mirror**: return after the traced-kind mirror lookup — what a
+  syscall of an untraced kind pays;
+- **nocompat**, **tgidonly**, **kernonly**: the full dispatcher
+  without the compat test, with the scope test cut to the tgid
+  read, and with the target hint's user-bitmap lookup left out;
+- **full**: main as it is.
+
+`getppid.c` grew a `close` mode (`close(-1)`, a traced kind, EBADF
+at once) and `measure.sh` an `S3_KIND_CALL` for it, so the kind
+pairs price a traced and an untraced kind from C, without the JVM.
+
+**The burst, by variant** (bystander pairs, ABAB, the variants
+interleaved by round; CPU-time medians; "added" is the bystander's
+extra CPU per read or write):
+
+| Variant | Pairs | CPU ratio | Wall ratio | Added per syscall | Pairs > 1.25 |
+|---|--:|--:|--:|--:|--:|
+| empty | 30 | 1.179× | 1.186× | 225 ns | 0 |
+| mirror | 50 | 1.202× | 1.212× | 255 ns | 3 |
+| tgidonly | 20 | 1.235× | 1.245× | 305 ns | 7 |
+| kernonly | 20 | 1.228× | 1.246× | 290 ns | 7 |
+| nocompat | 20 | 1.248× | 1.256× | 310 ns | 9 |
+| **full** | 50 | **1.252×** | 1.265× | 320 ns | 25 |
+
+An untraced read or write cost 1.26 µs of CPU in every set. Of the
+~320 ns the trace adds, ~225 ns (70 %) is there with an empty
+program: the kernel's `raw_syscalls` perf-tracepoint path at enter
+and exit, which no BPF change reaches. The mirror lookup adds
+~30 ns, the scope test (tgid read and target-hint lookups) ~55 ns;
+the compat test is free (nocompat = full), so moving the scope
+test ahead of it — which spares a bystander exactly the compat
+test — would buy nothing. The scope test is the only part that
+could go, and it cannot: it is what keeps a bystander out of the
+handlers' `target_map` lookup (task 9f4). A dispatcher with no
+logic at all would still be at 1.18–1.20×.
+
+The dispatchers' own run time (`kernel.bpf_stats_enabled`,
+`bpfstats.txt`) says the same at a finer grain: the enter program
+runs 94–96 ns empty in the burst and 129–133 ns full; exit 41 and
+61 ns. An empty program costs twice as much in the burst as in the
+`close(-1)` loop (45 ns): the burst's I/O path evicts the program
+and its maps between calls.
+
+**Not el9's tracer, el9's syscall.** The added cost per bystander
+syscall is no larger here than on the laptop: 320 ns on iom1
+against 275 ns (9f4, 4 threads) and 290–370 ns (ae4) on 7.2. What
+differs is the denominator: a 1-byte read or write on iom1's xfs,
+one CPU, costs 1.26 µs, on the laptop's btrfs under host load
+1.9–2.7 µs. The same ~0.3 µs is 1.15× of the one and 1.25× of the
+other.
+
+**Mitigations.** The guest runs with the full spectre/meltdown set
+(`/sys/devices/system/cpu/vulnerabilities`): retpolines
+(spectre_v2), PTI (meltdown) and MDS buffer clearing, because bhyve
+does not pass the N100's `ARCH_CAPABILITIES` through and the kernel
+assumes a vulnerable CPU. The laptop (7.3) runs Enhanced IBRS with
+no PTI and no MDS clearing. One run on iom1 booted with
+`mitigations=off` (then reverted and rebooted) shows how much of
+the tax that is:
+
+| iom1 | untraced read/write | added, empty | added, full | burst CPU ratio | wall | `getppid` untraced / added |
+|---|--:|--:|--:|--:|--:|--:|
+| mitigations on (50 / 30 pairs) | 1.26 µs | 225 ns | 320 ns | **1.252×** | 1.265× | 432 / 198 ns |
+| `mitigations=off` (15 pairs) | 0.77 µs | 130 ns | 150 ns | **1.195×** | 1.220× | 121 / 62 ns |
+
+The mitigations raise the bystander's syscall by 1.6× and the
+tracer's addition to it by 2.1× — the tracepoint path and the
+program run are indirect calls and kernel entries, which retpolines
+and PTI tax hardest. Without them el9 measures what the laptop
+measures. BPF JIT settings: `bpf_jit_enable` 1 on both;
+`bpf_jit_harden` is 1 on el9 (0 on the laptop), which blinds only
+unprivileged programs, so not the tracer's; `bpf_stats_enabled` 0
+on both.
+
+**Verdict.** No cheap tracer change brings the item under 1.25× on
+iom1: the whole dispatcher logic is ~95 ns of the 320, the part
+that could be cut without the scope test ~0, and an empty program
+alone sits at 1.18×. The
+gap is the platform: a guest with retpolines, PTI and MDS clearing
+on a cheap xfs syscall. Decision #25 records it and a proposed
+amendment for the owner; the limit is unchanged.
+
+**Netlink after am4** (`netlink:100000`, 5 rounds,
+`-aggregate=false` as in ak4; a 4-round set with aggregation on in
+`netlink-agg/` agrees: 1.58 µs):
+
+| `netlink:100000` | ak4 (`4948da0`) | 9m4 (`bd2bbe4`, with am4) |
+|---|--:|--:|
+| tracer CPU per event | 3.87 µs | **1.50 µs** |
+| events/s | 221 k | 223 k |
+| traced load CPU | 1.439× | 1.436× |
+| added per call (load) | +1.35 µs | +1.36 µs |
+| bystander CPU | 1.117× | 1.108× |
+| lost | 0 | 0 |
+
+am4 cut the tracer's cost per netlink event by 61 %; at 1.50 µs it is now under #25's 2 µs per event (that item is gated on
+the burst only; this load is information). The traced load's own
+cost is kernel-side and did not move.
+
+| #25 item | 9m4 verdict (el9, iom1) |
+|---|---|
+| bystander | **1.252×** (50 pairs, wall 1.265×): on the line, as in ak4; 70 % of it is the tracepoint path with an empty program; with `mitigations=off` 1.195×; platform, limit unchanged, amendment proposed in #25 |
+| tracer CPU, netlink (not gated) | 1.50 µs per event after am4, from 3.87 |

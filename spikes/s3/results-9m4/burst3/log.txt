@@ -1,0 +1,18 @@
+start 2026-11-26T09:55:45Z
+mirror 1 rc=0 09:56:11
+tgidonly 1 rc=0 09:56:36
+kernonly 1 rc=0 09:57:02
+full 1 rc=0 09:57:27
+mirror 2 rc=0 09:57:52
+tgidonly 2 rc=0 09:58:18
+kernonly 2 rc=0 09:58:44
+full 2 rc=0 09:59:09
+mirror 3 rc=0 09:59:35
+tgidonly 3 rc=0 10:00:01
+kernonly 3 rc=0 10:00:26
+full 3 rc=0 10:00:52
+mirror 4 rc=0 10:01:18
+tgidonly 4 rc=0 10:01:43
+kernonly 4 rc=0 10:02:09
+full 4 rc=0 10:02:34
+end 2026-11-26T10:02:34Z
