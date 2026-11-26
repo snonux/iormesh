@@ -473,6 +473,33 @@ deferred.
   change every trace's bytes; a `toolchain go1.26.x` line —
   it hides the 1.27 difference instead of settling it and
   costs a download.
+- **#34 The pod sandbox's container id is shown bare** — the
+  pod sandbox's `pause` process sits in a container cgroup of
+  its own (`cri-containerd-<sandbox id>.scope` on k3s on el9,
+  task 6k4), so an in-pod tracer stamps its events with the
+  sandbox's runtime id, like any other container's
+  (`k8s.ContainerOf`). No container status lists that id —
+  `containerStatuses`, `initContainerStatuses` and
+  `ephemeralContainerStatuses` name containers only, and `kubectl
+  get pod -o json` carries no sandbox id at all — so the pod's
+  container map (task jk4) never names it and the build shows
+  the bare id, as for any id the map lacks (task fm4). That is
+  the decision, not a gap to fill: pause does no traced I/O, so
+  the id is seen at most on a process line (pid 1 to a sidecar
+  tracer with `shareProcessNamespace`). Rejected: recognising
+  the sandbox by its `comm` `pause` — the infra image is the
+  runtime's configuration (containerd's `sandbox_image`, CRI-O's
+  `pause_image`, any binary name), CRI-O drops the infra
+  container altogether unless the pod shares its PID namespace
+  (`drop_infra_ctr`), and any app may name a process `pause`, so
+  the name would be a guess an app can forge; labelling every
+  id the map lacks as the sandbox — a container that restarted
+  more than once between two collects is also missing (the
+  status keeps only the last `lastState.terminated`), so an
+  unknown id is not a sandbox; asking the runtime (CRI
+  `PodSandboxStatus`) — the tracer's only host mount is tracefs
+  (#13), no CRI socket, and the controller talks to the API
+  server alone.
 - **#35 Connections open before the session are seeded** (task
   cm4). A TCP socket registers its owner only at connect or
   accept (`sock_owner_map`), so a connection a target opened

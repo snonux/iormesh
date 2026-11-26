@@ -136,7 +136,13 @@ func ParseProcCgroup(data []byte) (CgroupIdentity, error) {
 // own view), the pod cgroup itself, another pod's cgroup (a process the
 // tracer should not see; it is not this pod's to name), a host process,
 // an unreadable or malformed file. Never an error: the container is
-// enrichment, and a process without one is still traced.
+// enrichment, and a process without one is still traced. The pod
+// sandbox's pause process gets an id too: containerd gives it a scope of
+// its own (cri-containerd-<sandbox id>.scope, captured on k3s on el9 by
+// task 6k4), so it names the sandbox's id, which the pod status does not
+// list; no process was found in the pod cgroup itself there. It stays
+// that id: nothing in the cgroup tells a sandbox from a container, and
+// the build shows it bare (docs/decisions.md #34, task fm4).
 func ContainerOf(data []byte, podUID string) string {
 	id, err := ParseProcCgroup(data)
 	if err != nil || (id.PodUID != "" && id.PodUID != podUID) {

@@ -3,8 +3,12 @@ package types
 import (
 	"bytes"
 	"encoding/binary"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"math/rand"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -130,6 +134,73 @@ func TestGeneratedDecodersMatchReflectiveDecode(t *testing.T) {
 				}
 				got.(interface{ Recycle() }).Recycle()
 			}
+		}
+	}
+}
+
+// handWrittenFastDecoders are the generated constructors that delegate to,
+// or are emitted from, a hand-written fast decoder with its own length rules
+// and tests (fastdecode.go); they have no binary.Read oracle case.
+var handWrittenFastDecoders = map[string]bool{
+	"FdEvent": true, "FdSizeEvent": true, "EventfdEvent": true,
+	"EventfdNameEvent": true, "TwoFdEvent": true, "TwoFdNamesEvent": true,
+}
+
+// generatedRecordConstructors returns the record names T of every
+// func NewT(raw []byte) *T in generated_types.go.
+func generatedRecordConstructors(t *testing.T) map[string]bool {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), "generated_types.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || !strings.HasPrefix(fn.Name.Name, "New") {
+			continue
+		}
+		res := fn.Type.Results
+		if fn.Type.Params.NumFields() != 1 || res.NumFields() != 1 {
+			continue
+		}
+		star, ok := res.List[0].Type.(*ast.StarExpr)
+		if !ok {
+			continue
+		}
+		if id, ok := star.X.(*ast.Ident); ok && id.Name == strings.TrimPrefix(fn.Name.Name, "New") {
+			names[id.Name] = true
+		}
+	}
+	return names
+}
+
+// TestDirectDecodeCasesCoverGeneratedConstructors keeps the hand-written
+// oracle case list in sync with the generator: a record struct added to
+// internal/c/types.h gets a generated direct decoder, and this test fails
+// until directDecodeCases holds it to the binary.Read oracle too. The
+// hand-written fast decoders are the only constructors left out.
+func TestDirectDecodeCasesCoverGeneratedConstructors(t *testing.T) {
+	want := generatedRecordConstructors(t)
+	for name := range handWrittenFastDecoders {
+		if !want[name] {
+			t.Errorf("hand-written fast decoder %s has no generated constructor", name)
+		}
+		delete(want, name)
+	}
+	got := map[string]bool{}
+	for _, tc := range directDecodeCases() {
+		if got[tc.name] {
+			t.Errorf("oracle case %s listed twice", tc.name)
+		}
+		got[tc.name] = true
+		if !want[tc.name] {
+			t.Errorf("oracle case %s has no generated direct constructor", tc.name)
+		}
+	}
+	for name := range want {
+		if !got[name] {
+			t.Errorf("generated constructor New%s has no oracle case in directDecodeCases", name)
 		}
 	}
 }

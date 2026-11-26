@@ -20,7 +20,12 @@ import (
 // offsets only when the C struct has no internal padding; the generator
 // checks that against the natural alignment of every C member and keeps the
 // reflective decoder for a struct where they differ, so a layout change that
-// introduces a hole can never silently shift a direct read.
+// introduces a hole between parsed members cannot silently shift a direct
+// read. That check sees only the members the types.h parser returns, so
+// ParseCTypesInput fails on any member line it cannot parse (a bitfield, a
+// nested struct or union, a multi-word type, a pointer) instead of dropping
+// it (task em4); a dropped member would shift the direct read and the
+// binary.Read fallback alike. A member line's trailing comment is stripped.
 
 // decodeField is one Go struct field of a direct decoder: its element type
 // and size, its array length (0 for a scalar) and its packed offset.
