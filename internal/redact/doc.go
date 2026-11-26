@@ -7,11 +7,14 @@
 // option, a KEY=VALUE name, a header or a query-parameter name — matches a
 // deny glob, and URL userinfo is always masked. Masking keeps the structure
 // ("-Dpassword=***", "--token ***", "https://user:***@host/?q=***"), so a
-// reader still sees which option was given, never its value.
+// reader still sees which option was given, never its value. In argv a
+// denied key's value is masked in any key-value syntax — options, KEY=VALUE,
+// JSON, YAML, a pair inside a shell string — because a generic last pass
+// (keyValues) looks for "denied key, separator, value" in every element.
 //
 // A denylist is best effort by nature: a secret passed under an innocuous
-// name ("--db x"), inside a JSON blob, or as a bare positional argument is
-// not recognized. The defaults therefore err on the side of masking too
+// name ("--db x", {"db":"x"}) or as a bare positional argument is not
+// recognized. The defaults therefore err on the side of masking too
 // much (a "--password-stdin" flag masks the next argument), never too
 // little, and environment variables are never captured at all (decision #9:
 // env off), so a secret passed the conventional way never reaches the

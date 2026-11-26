@@ -21,6 +21,7 @@ and the structure stays:
 | `--token s` in one element; `sh -c "mysql -ps"` | `--token ***`; `mysql -p***` — several words are redacted word by word, separators and quoting kept |
 | `curl -H "Authorization: Bearer s"`, `--header=Cookie: s`, `--api_key:s`, `pass:s` | `Authorization: ***`, `--header=Cookie: ***`, `--api_key:***`, `pass:***` |
 | `sudo -u root mysql -ps`, `env X=1 mysql -p s`, `docker login -p s` | `-p***`, `-p ***`, `-p ***` — a flag rule applies after any word naming its program |
+| `--spring.application.json={"db":{"password":"s"}}`, `-d '{"token": "s"}'`, `{'secret': 's'}`, `{\"pwd\":\"s\"}`, `/p?token=s&a=1` | `{"db":{"password":"***"}}`, `{"token": "***"}`, `{'secret': '***'}`, `{\"pwd\":\"***\"}`, `/p?token=***&a=1` — any denied key, then `:` or `=`, then a value, in any element; `{"password":` as one element masks the next |
 
 Keys match case-insensitively with `-`, `_` and `.` ignored, so
 one glob covers every spelling. The argv denylist names
@@ -29,8 +30,18 @@ one glob covers every spelling. The argv denylist names
 `token`, `apikey`, `accesskey`, `privatekey`, `credential`,
 `authorization`, `bearer` and `cookie` anywhere in a key; URL
 userinfo is always masked, query values all (decision #22's
-default). It is best effort: a secret under an innocuous name or
-as a bare positional argument is not recognized, a quoted
+default). After the specific forms above, one generic pass looks
+at every argv element for a denied key (optionally quoted or
+escaped-quoted), optional blanks, `:` or `=`, optional blanks
+and a value — a quoted string up to its matching unescaped
+quote, or a bare run up to white space, a quote or one of
+`,;&})]` — and masks only the value, so JSON, YAML, dicts and
+pairs inside shell strings need no parser of their own; the
+pass is linear in the element's length. A value that is itself
+an object (`"credentials":{…}`) is judged pair by pair inside.
+It is best effort: a secret under an innocuous name (also in
+JSON, `{"db":"s"}`) or as a bare positional argument is not
+recognized, a quoted
 value with spaces inside a shell string is masked only up to the
 quote's end as a shell would split it, and the
 defaults over-mask rather than leak (`--password-stdin` masks the

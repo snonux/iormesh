@@ -121,7 +121,11 @@ type argvState struct {
 // after it ("--token X" → "--token ***"), whatever that element looks like:
 // a secret may begin with '-', and guessing wrong would leak it. An element
 // holding several words ("--token x", sh -c "mysql -psecret") is redacted
-// word by word with the same rules (see words).
+// word by word with the same rules (see words). Every element then goes
+// through keyValues once, which masks a denied key's value in any syntax
+// the specific forms do not know (JSON, YAML, a pair inside a longer
+// string); it runs here, once per element, so nested forms do not repeat
+// it. A denied key left open at the element's end masks the next one.
 func (p Policy) Argv(argv []string) []string {
 	if argv == nil {
 		return nil
@@ -133,9 +137,12 @@ func (p Policy) Argv(argv []string) []string {
 			// The program itself is a path, never an option.
 			out[i] = p.Text(arg)
 			p.see(&st, arg)
-			continue
+		} else {
+			out[i] = p.word(&st, arg)
 		}
-		out[i] = p.word(&st, arg)
+		var open bool
+		out[i], open = p.keyValues(out[i])
+		st.maskNext = st.maskNext || open
 	}
 	return out
 }
