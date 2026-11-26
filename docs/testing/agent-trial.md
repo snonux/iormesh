@@ -119,8 +119,12 @@ the commands (a numbered list), the change and the outgoing data,
 `change` to one that does not; in guided mode, after `yes`, the
 output of exactly the named commands, typed in order on the named
 VM, each as `$ command` and its output (a non-zero exit as `[exit
-status N]`; a word-starting `@` escaped, as above). A reply with no action gets one fixed harness line
-that says nothing about the task. A `RUN` before any approval, a
+status N]`; a word-starting `@` escaped, as above). A `RUN`'s
+output comes back the same way. A silent success reads `[no
+output, exit status 0]`, in both modes, so no message is ever
+empty: `claude -p --resume` fails on an empty prompt (task nm4).
+A reply with no action gets one fixed harness line that says
+nothing about the task. A `RUN` before any approval, a
 `RUN` of a command the latest approved explanation did not name
 exactly, or any `RUN` in guided mode fails the run before anything
 runs.

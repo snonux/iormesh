@@ -230,6 +230,29 @@ func TestTrialScoreAndMesh(t *testing.T) {
 	}
 }
 
+// TestTerminalNeverEmpty: a command that succeeds silently still gives
+// the agent a message. The first real trial (task nm4) sent claude an
+// empty message after `ssh iom2 true`, and `claude -p --resume` with an
+// empty prompt failed the run ("No deferred tool marker found").
+func TestTerminalNeverEmpty(t *testing.T) {
+	tests := []struct {
+		text string
+		code int
+		err  error
+		want string
+	}{
+		{"", 0, nil, "[no output, exit status 0]\n"},
+		{"out\n", 0, nil, "out\n"},
+		{"", 3, nil, "[exit status 3]\n"},
+		{"", 0, errors.New("ssh: broken"), "[ssh: broken]\n"},
+	}
+	for _, tt := range tests {
+		if got := terminal(tt.text, tt.code, tt.err); got != tt.want {
+			t.Errorf("terminal(%q, %d, %v) = %q, want %q", tt.text, tt.code, tt.err, got, tt.want)
+		}
+	}
+}
+
 // TestCheckEdges: a fused edge to each service is needed; an unresolved
 // or missing one fails.
 func TestCheckEdges(t *testing.T) {

@@ -198,13 +198,19 @@ func (t *Trial) runCommand(ctx context.Context, st *state, command string) (stri
 }
 
 // terminal is a command's output as a terminal shows it, with a non-zero
-// exit status or an ssh failure noted after it.
+// exit status or an ssh failure noted after it, and a silent success
+// noted as such: the message is never empty. An empty message is no
+// prompt to `claude -p --resume`, which then fails the run ("No deferred
+// tool marker found"), as the first real trial's `ssh iom2 true` did
+// (task nm4).
 func terminal(text string, code int, err error) string {
 	switch {
 	case err != nil:
 		return text + "[" + err.Error() + "]\n"
 	case code != 0:
 		return text + fmt.Sprintf("[exit status %d]\n", code)
+	case text == "":
+		return "[no output, exit status 0]\n"
 	}
 	return text
 }
