@@ -1853,6 +1853,37 @@ relocated against the el9 BTF:
 
 Nothing is pending on el9 for the root BPF gate.
 
+**Both root gates on el9 (task 2k4, 2026-11-26): 43 of 43 and
+54 of 54 pass.** On `iom1` (5.14.0-741.22.1.el9_9.x86_64), at
+6597008, with no test or subtest skipped. The first integration
+run on el9 since nf4 (2026-11-21); it adds
+`TestListenPortFollowsRestart`, `TestJavaLateAttach`, the Java
+attach tests after 7l4/9l4, and every correlator, agent and BPF
+fix since. The binaries were built on the 7.2 laptop as in nf4
+(the static tracer, `internal.test` and `integrationtests.test`
+with the cgo env plus `-tags netgo,osusergo -ldflags '-w
+-extldflags "-static"'`; `iormeshctl`, `edgepeer`, `echopeer`
+and the four jars from `mage build agentBuild workloadBuild
+workloadOtelBuild workloadLibsBuild`), staged under `/opt/2k4`
+with `bin/`, `workload/{scenarios,src,libs,otel}`,
+`eval/questions` and `internal/testdata/btf` (iom1 has no `tar`;
+`rsync -aR` copies the tree), run serially as root with
+`IORMESH_IT_KEEP` set, removed afterwards; iom1 was started for
+the run and stopped again.
+
+| Gate | Result | Wall time |
+|---|---|---|
+| Root BPF (`gatecmd.RootBPFTests`) | 43 of 43 pass | 81 s |
+| Integration (`gatecmd.IntegrationTests`, serial) | 54 of 54 pass | 218 s |
+
+The integration binary ran with `gatecmd.IntegrationTestArgs(0)`
+minus `-test.failfast`, so a failure would not have hidden the
+tests after it. Newly covered on el9: `TestMsgCallsPeers` (hl4)
+and `TestPeekCountedOnce` (ok4) pass. `TestMmsgVerifierHeadroom`
+reports 993 and 992 instructions for the sendmmsg and recvmmsg
+enter handlers and 42,659 and 42,684 for their exits (rj4:
+1,002 and 42,078), still far below the 1M limit.
+
 ## Final socket snapshot (task sf4, 2026-11-21)
 
 `TestSockFinalSnapshot` (`internal/sockfinal_root_test.go`, in
