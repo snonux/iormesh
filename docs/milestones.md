@@ -2306,9 +2306,12 @@ Built after plain Linux servers (M4); accepted on kind and el9
   `<projects>@<NS>/`, which `show`, `open` and `tui
   -namespace NS` read (task hk4). Bad
   segments stay listed whatever their namespace (a damaged file
-  cannot say whose it was). Status (2026-11-22, task sh4):
-  built and unit-tested against kind's captured cgroup files and
-  constructed k3s-on-el9 shapes; not yet run on a cluster.
+  cannot say whose it was). Status (2026-11-26, task 6k4):
+  unit-tested against cgroup files captured on kind (task yb4)
+  and on k3s on el9 (task 6k4); `pod fields` passed in
+  `TestKindMicroservices` on kind (task uh4) and on k3s on el9
+  under both kube-proxy modes (docs/testing.md "Rerun with pod
+  fields (task 6k4)").
 - Java agent live-attach through the shared process namespace
   (`kubectl debug --target`, or `shareProcessNamespace: true`
   for a sidecar; attach socket reached via `/proc/<pid>/root`),

@@ -5982,7 +5982,10 @@ depends on:
    none) and inherited by a forked child. The Java join copies a
    JVM's `pod` from its joined events onto its http and dns
    events. `TestContainerOfShapes` holds the reader to kind's
-   captures and k3s-on-el9 systemd and cgroupfs shapes.
+   and k3s on el9's captures (task 6k4,
+   `TestParseProcCgroupK3sCaptures`: sidecar and debug pods, the
+   tracer, the app and the sandbox's pause) and to cgroupfs
+   paths.
    `iormeshctl build -namespace NS` keeps the sessions whose
    pinned pod FQDN names NS (`federate.Segments.InNamespace`),
    narrows the service database's views to those pods' host

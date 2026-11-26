@@ -3311,7 +3311,9 @@ has 16 GiB free, need 20`) before it created anything; after
 space was freed, the rerun passed: `TestKindMicroservices` with
 its `mesh`, `pod_fields` and `identity` subtests in 152 s, and
 the teardown removed exactly the cluster, the registry, its
-volume and the images it had made. Not run on el9 k3s.
+volume and the images it had made. Green on el9 k3s under both
+kube-proxy modes, 2026-11-26 ("Rerun with pod fields (task
+6k4)" below).
 
 ### M7 on an existing cluster (task zg4)
 
@@ -3811,6 +3813,87 @@ images and the two base images it pulled (`kindest/node`,
 `docker images -a`, `docker volume ls` and `docker ps -a` matched
 the state before. The `kind` network predates the run (created
 11:37 that day) and was left alone.
+
+#### Rerun with pod fields (task 6k4, 2026-11-26)
+
+zg4's procedure at 26da303, the first existing-cluster run since
+the pod fields (task sh4) and with `TestKindMicroservices`. iom1
+(2 vCPU, raised to 4 GB for the run and set back to 2 GB after,
+the config diffed identical): Rocky 9.9, el9 5.14.0-741.22.1,
+SELinux enforcing, firewalld active; `el9-k3s.sh up` installed
+k3s v1.35.10+k3s1 (containerd 2.2.10-k3s1, systemd cgroup
+driver, cgroup v2) with container-selinux 2.250 and k3s-selinux
+1.6; Traefik v3.7.19 from the harness. The tracer as shipped
+(`spc_t` at `s0`), no node-local policy (`semodule
+--list-modules=full`: only the packaged `container` and `k3s`
+at priority 200). The laptop built and pushed the images. `mage
+k8sAcceptance` with `IORMESH_K8S_KUBECONFIG` and
+`IORMESH_K8S_CRICTL='ssh root@iom1 k3s crictl'`, once per
+kube-proxy mode (`el9-k3s.sh proxy nftables` between). **All
+green:**
+
+| Test, subtest | iptables | nftables |
+|---|---|---|
+| `TestKindAcceptance` | PASS (178 s) | PASS (138 s) |
+| `clusterip`, `hairpin`, `ingress`, `rbac` | PASS | PASS |
+| `identity` | PASS: 5 pods, 6 process ids, one `boot_id` | PASS, the same |
+| `sigterm` | PASS: exit 0, 754 ms | PASS: exit 0, 848 ms |
+| `TestKindMicroservices` | PASS (123 s) | PASS (124 s) |
+| `mesh` | PASS: 4 hosts, 4 sessions, `tcp 4 fused, 0 unresolved` | PASS, the same |
+| `pod_fields` | PASS | PASS |
+| `identity` | PASS: 4 pods, one `boot_id` | PASS |
+| `TestKindClusterIP` | PASS (94 s) | PASS (95 s) |
+
+The raw `/var/log/audit/audit.log` and its four rotations, read
+after each pass (they rotate every few minutes under the BPF
+audit records, so each read covered its whole pass), held no
+`AVC`, `USER_AVC` or `SELINUX_ERR`.
+
+**Real cgroup files.** During both passes a sampler on the node
+read, every 3 s, `/proc/<pid>/cgroup` of each process under
+`kubepods` as the node sees it and, for each `iormesh` tracer,
+of every process of its pod through `nsenter -C -t <tracer>`
+(the tracer's private cgroup namespace), mapping ids to
+containers and sandboxes with `crictl ps -a` and `crictl pods`.
+They replace task sh4's constructed k3s shapes in
+`internal/k8s/container_test.go` (`TestContainerOfShapes`,
+`TestParseProcCgroupK3sCaptures`):
+
+| Pod (namespace `iormesh-m7`) | Captured |
+|---|---|
+| `inventory`, burstable, sidecar tracer (`shareProcessNamespace`) | node view of the tracer, the app (its `sleep` and the JVM) and the sandbox's `pause`; the tracer's view of the app and of `pause` (`0::/../cri-containerd-<id>.scope`) and of itself (`0::/`) |
+| `gateway`, best-effort, debug tracer (`kubectl debug --target app`) | node view of the tracer, the app and `pause`; the tracer's view of the app |
+| `inventory` again (nftables pass) | the app's view of itself (`0::/`) and of the tracer (`0::/../cri-containerd-<tracer>.scope`) |
+
+Every shape is the systemd driver's
+`/kubepods.slice/kubepods-<qos>.slice/kubepods-<qos>-pod<uid_>.slice/cri-containerd-<id>.scope`,
+the one kind showed without kind's `kubelet` root: the parser
+read each one as the constructed fixtures expected, and needed
+no change. Two things the constructed set had wrong. No process
+sat in the pod slice itself (cgroup v2 keeps processes out of
+an inner cgroup): the sandbox's `pause` has a scope of its own,
+so `ContainerOf` names the sandbox id for it, an id no container
+status lists — a sidecar tracer sees `pause` as pid 1, but
+`pause` does no traced I/O. And `pause` shares the node's
+cgroup namespace, so from inside it the full path shows. k3s
+on el9 runs the systemd driver; the cgroupfs cases stay as
+paths built from the formats.
+
+After the run `el9-k3s.sh down` (state file present) removed
+k3s, the two SELinux packages it added, the repository and the
+two trusted firewalld sources: `rpm -qa` matched the 372
+packages before, `/opt/iormesh` matched (paths, sizes, mtimes,
+modes), the sampler and its files were removed. The laptop's
+`docker images -a`, volumes, containers and networks matched
+the state before; Docker was stopped, the tunnel closed, the
+kubeconfig deleted. iom1 was stopped and its config restored;
+`doas vm list` on f3 afterwards:
+
+```
+iom1       default    uefi       2    2G      -               No       Stopped
+iom2       default    uefi       2    2G      -               No       Stopped
+iom3       default    uefi       2    2G      -               No       Stopped
+```
 
 ## Performance baselines
 
