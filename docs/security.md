@@ -222,12 +222,20 @@ The decisions it cites are in [decisions.md](decisions.md).
     the rule. A failed `-apply` step stops there, undoes
     nothing, and is rerun from the start until the rule is in
     place.
-  - **Who signs**: the release pipeline, with `mage sign` over
-    `dist/` (minisign via `aead.dev/minisign`). The secret key
-    is minisign's scrypt-encrypted file at
-    `$IORMESH_MINISIGN_KEY`, refused inside the repository;
-    no private key is ever committed — tests generate
-    throwaway keys per run.
+  - **Who signs**: the operator, with their own key
+    (decisions.md #32): release archives ship unsigned, with a
+    `SHA256SUMS` that only catches corruption, and the project
+    holds no key operators must trust. `iormeshctl sign` signs
+    an unpacked release, `mage sign` a `dist/` built from
+    source (minisign via `aead.dev/minisign`, one
+    implementation). The secret key is minisign's
+    scrypt-encrypted file, refused when it is a symlink,
+    someone else's, or open to group or other; `mage sign`
+    also refuses one inside the repository. Its password comes
+    from the terminal without echo or from
+    `$IORMESH_MINISIGN_PASSWORD`, and is never printed. No
+    private key is ever committed — tests generate throwaway
+    keys per run.
   - **What is signed**: each binary, with a trusted comment
     `file:<name> version:<x.y.z>` that the signature covers. A
     file renamed to another artifact's name, the arm64 tracer

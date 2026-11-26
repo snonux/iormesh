@@ -62,7 +62,8 @@ const (
 	// the server: private to the user and not shared like /tmp, where
 	// another user could pre-create the name.
 	stagingRel = ".iormesh/staging"
-	// defaultDist is where `mage build` and `mage sign` leave the builds.
+	// defaultDist is where the container builds and `mage sign` leave the
+	// builds; an unpacked, `iormeshctl sign`ed release is named by -dist.
 	defaultDist = "dist"
 	// The paths the tracer pins confined sessions to (internal/cli
 	// confine.go); a registry flag naming another is refused there.

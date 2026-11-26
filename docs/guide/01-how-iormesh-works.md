@@ -88,7 +88,7 @@ trace is built for reading by a human or an LLM),
 
 | Once | Chapter |
 |---|---|
-| make a release key, build and sign `dist/` | [3](03-release.md) |
+| make your key, get a release (or build `dist/`) and sign it | [3](03-release.md) |
 | register each host and its projects (`add`) | [4](04-register-bootstrap.md) |
 | install the tracer with your sudo (`bootstrap`) | [4](04-register-bootstrap.md) |
 

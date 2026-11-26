@@ -1,12 +1,15 @@
 //go:build mage
 
-// Release signing (docs/decisions.md #28, docs/build.md "Signing"):
+// Signing (docs/decisions.md #28 and #32, docs/build.md "Signing"):
 // Sign writes a minisign signature next to every binary the container builds
 // left in dist/, and next to the agent jar `mage agentBuild` copies there
-// (task kf4). The private key is the release pipeline's and never
-// enters the repo: it is read from the path IORMESH_MINISIGN_KEY names,
-// which must lie outside the tree, and stays encrypted at rest (minisign's
-// scrypt-encrypted key file).
+// (task kf4). It is the operator's path for builds made from source; an
+// unpacked release archive is signed with `iormeshctl sign`, which runs
+// the same internal/release code. The private key is the operator's and
+// never enters the repo: it is read from the path IORMESH_MINISIGN_KEY
+// names, which must lie outside the tree, be the operator's own file with
+// mode 0600 (release.ReadSecretKey), and stays encrypted at rest
+// (minisign's scrypt-encrypted key file).
 
 package main
 
@@ -50,8 +53,7 @@ func Sign() error {
 	return signDist(key)
 }
 
-// signDist is Sign's work with the key already loaded, shared with
-// Release, which needs the same key again for SHA256SUMS.
+// signDist is Sign's work with the key already loaded.
 func signDist(key minisign.PrivateKey) error {
 	signed, err := release.SignDir(key, distDir, version.Version, time.Now())
 	if err != nil {
@@ -93,9 +95,11 @@ func loadSigningKey() (minisign.PrivateKey, error) {
 	if err != nil {
 		return minisign.PrivateKey{}, err
 	}
-	key, err := minisign.PrivateKeyFromFile(password, path)
+	// The same checks and decryption iormeshctl sign uses: a regular
+	// file, no symlink, the caller's, readable by nobody else.
+	key, err := release.ReadSecretKey(path, password, os.Getuid())
 	if err != nil {
-		return minisign.PrivateKey{}, fmt.Errorf("sign: %s: %w", path, err)
+		return minisign.PrivateKey{}, fmt.Errorf("sign: %w", err)
 	}
 	return key, nil
 }

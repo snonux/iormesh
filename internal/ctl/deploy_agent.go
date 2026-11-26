@@ -66,7 +66,8 @@ func (d deployer) verifyAgent(version string) (string, error) {
 	}
 	if m.Version != version {
 		return "", fmt.Errorf("local build, nothing pushed: %s is signed as %s, the tracer as %s "+
-			"(mage agentBuild, then mage sign, signs both)", jar, m.Version, version)
+			"(sign one release's jar and tracer together: iormeshctl sign, or mage sign after mage agentBuild)",
+			jar, m.Version, version)
 	}
 	printVerified(d.e.stdout, jar, m)
 	return jar, nil

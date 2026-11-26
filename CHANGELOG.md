@@ -24,8 +24,11 @@ then the features and changes of the latest round.
 - M5 (built, not yet accepted): views, query and the LLM eval.
 - M6: mesh expansion, following edges from the controller.
 - M7: Kubernetes sidecar and debug-container deployment.
-- `mage release`: signed, reproducible per-arch archives with
-  checksums (docs/build.md, "Releases").
+- `mage release`: reproducible per-arch archives with checksums,
+  unsigned (docs/build.md, "Releases"; decisions.md #32).
+- `iormeshctl sign -key KEY DIR`: operators sign an unpacked
+  release with their own minisign key, the one deploy and
+  bootstrap verify against.
 - The MIT licence (`LICENSE`).
 - The iormesh guide ([docs/guide/](docs/guide/README.md)):
   thirteen step-by-step chapters, for a human or an agent working
