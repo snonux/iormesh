@@ -73,8 +73,14 @@ func WorkloadBuild() error {
 		return err
 	}
 	// No ensureBuildDir: EchoPeerBuild ran first, and go build -o
-	// bin/echopeer created bin/.
-	return sh.RunV("jar", "--create", "--file", workloadJar,
+	// bin/echopeer created bin/. The workload jars are not released, but
+	// they are dated like the agent jar (jarCreate, task bm4) so that a
+	// rebuild of the same commit gives the same bytes there too.
+	date, err := sourceDate()
+	if err != nil {
+		return err
+	}
+	return jarCreate(date, "--file", workloadJar,
 		"--main-class", workloadMainClass,
 		"-C", workloadClassesDir, ".",
 		"-C", "workload", "scenarios")

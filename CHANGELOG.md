@@ -112,3 +112,6 @@ then the features and changes of the latest round.
   connection ([schema.md](docs/schema.md)).
 - Start-time and late attach never send one JVM a second SIGQUIT
   ([java-attach.md](docs/java-attach.md)).
+- The agent jar rebuilds to the same bytes from the same commit
+  and JDK, so a release rebuilt from its tag matches the
+  published archive ([build.md](docs/build.md#releases)).

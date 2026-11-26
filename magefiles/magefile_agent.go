@@ -15,10 +15,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/magefile/mage/sh"
 	"github.com/magefile/mage/target"
 
+	"iormesh/internal/dist"
 	"iormesh/internal/version"
 )
 
@@ -67,17 +69,23 @@ var (
 // by `mage sign`. A jar newer than all its inputs is kept (agentJarFresh),
 // so the targets depending on it (Test and TestRace, task yk4) do not
 // rebuild it on every run; its dist/ copy is refreshed only when missing
-// or older.
+// or older. Both jars are reproducible (task bm4): every entry carries
+// sourceDate ($SOURCE_DATE_EPOCH or HEAD's commit time), not the build
+// time, so the same commit and JDK give the same bytes.
 func AgentBuild() error {
 	if err := verifyASM(); err != nil {
 		return err
 	}
-	fresh, err := agentJarFresh()
+	date, err := sourceDate()
+	if err != nil {
+		return err
+	}
+	fresh, err := agentJarFresh(date)
 	if err != nil {
 		return err
 	}
 	if !fresh {
-		if err := buildAgentJar(); err != nil {
+		if err := buildAgentJar(date); err != nil {
 			return err
 		}
 	}
@@ -107,9 +115,14 @@ const agentRecipeGlob = "magefiles/*.go"
 var agentBuildOutputs = []string{agentCoreDir, agentASMDir, agentBridgeDir}
 
 // agentJarFresh reports whether agentJar exists, is newer than every file
-// under agentJarInputs and agentRecipeGlob, and the intermediates in
-// agentBuildOutputs exist.
-func agentJarFresh() (bool, error) {
+// under agentJarInputs and agentRecipeGlob, the intermediates in
+// agentBuildOutputs exist, and its entries carry date. The first checks
+// compare file mtimes, which the jar tool sets to the wall clock whatever
+// --date says, so a fixed entry date never makes a stale jar look fresh.
+// The last rebuilds a jar left from an older commit even when no input
+// changed: kept, it would carry that commit's date, and a clean build of
+// this commit (an operator's own `mage release`) would not match it.
+func agentJarFresh(date time.Time) (bool, error) {
 	for _, dir := range agentBuildOutputs {
 		if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
 			return false, nil
@@ -122,21 +135,29 @@ func agentJarFresh() (bool, error) {
 		return false, err
 	}
 	stale, err = target.Glob(agentJar, agentRecipeGlob)
-	return !stale, err
+	if err != nil || stale {
+		return false, err
+	}
+	return dist.JarDated(agentJar, date)
 }
 
-// buildAgentJar builds agentJar from scratch, intermediates included.
-func buildAgentJar() error {
+// buildAgentJar builds agentJar from scratch, intermediates included,
+// every jar entry dated date.
+func buildAgentJar(date time.Time) error {
 	// A clean build dir keeps classes of deleted sources out of the jars.
 	if err := os.RemoveAll(agentBuildDir); err != nil {
 		return err
 	}
-	for _, step := range []func() error{relocateASM, buildBridge, buildAgentCore} {
-		if err := step(); err != nil {
-			return err
-		}
+	if err := relocateASM(); err != nil {
+		return err
 	}
-	return packAgent()
+	if err := buildBridge(date); err != nil {
+		return err
+	}
+	if err := buildAgentCore(); err != nil {
+		return err
+	}
+	return packAgent(date)
 }
 
 // copyAgentToDist copies agentJar to distDir unless the copy there is
@@ -174,12 +195,14 @@ func relocateASM() error {
 }
 
 // buildBridge compiles the bridge and jars it on its own: it must reach
-// the bootstrap loader as a separate jar, never as agent-jar classes.
-func buildBridge() error {
+// the bootstrap loader as a separate jar, never as agent-jar classes. Its
+// entries carry date too: its bytes, CRC included, are part of the agent
+// jar's.
+func buildBridge(date time.Time) error {
 	if err := javacAgent("agent/bridge/src", agentBridgeDir, ""); err != nil {
 		return err
 	}
-	return sh.RunV("jar", "--create", "--file", agentBridgeJar, "-C", agentBridgeDir, ".")
+	return jarCreate(date, "--file", agentBridgeJar, "-C", agentBridgeDir, ".")
 }
 
 // buildAgentCore compiles the core against the relocated ASM and copies
@@ -214,8 +237,10 @@ func buildAgentCore() error {
 // is the release version (internal/version), which `mage sign` requires
 // to equal the version it signs the jar as (release.CheckStamp, task
 // uf4): a jar left over from an older build is refused, not signed as
-// the new release.
-func packAgent() error {
+// the new release. The jar tool adds Created-By with its JDK's version,
+// which with the classes javac wrote is why the same JDK release is needed
+// to rebuild the same bytes (docs/build.md "Releases").
+func packAgent(date time.Time) error {
 	manifest := filepath.Join(agentBuildDir, "MANIFEST.MF")
 	err := os.WriteFile(manifest, []byte("Premain-Class: "+agentMain+"\n"+
 		"Agent-Class: "+agentMain+"\n"+
@@ -228,7 +253,7 @@ func packAgent() error {
 	if err := ensureBuildDir(); err != nil {
 		return err
 	}
-	return sh.RunV("jar", "--create", "--file", agentJar, "--manifest", manifest,
+	return jarCreate(date, "--file", agentJar, "--manifest", manifest,
 		"-C", agentCoreDir, ".", "-C", agentASMDir, ".")
 }
 

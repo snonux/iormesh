@@ -61,11 +61,32 @@ func checkReleaseTree() (time.Time, error) {
 	if err := dist.CheckDescribe(describe, version.Version); err != nil {
 		return time.Time{}, err
 	}
+	return sourceDate()
+}
+
+// sourceDate is the build's fixed time (dist.SourceDate):
+// $SOURCE_DATE_EPOCH, else HEAD's commit time. The release archives' mtimes
+// and the jars' entry dates (jarCreate) both come from it, so a rebuild of
+// the same commit gives the same bytes. Without git (a source tarball)
+// SOURCE_DATE_EPOCH must be set.
+func sourceDate() (time.Time, error) {
+	epoch := os.Getenv("SOURCE_DATE_EPOCH")
+	if epoch != "" {
+		return dist.SourceDate(epoch, "")
+	}
 	commitTime, err := sh.Output("git", "log", "-1", "--format=%ct")
 	if err != nil {
-		return time.Time{}, fmt.Errorf("release: commit time: %w", err)
+		return time.Time{}, fmt.Errorf("no commit time (git log: %w); set SOURCE_DATE_EPOCH", err)
 	}
-	return dist.SourceDate(os.Getenv("SOURCE_DATE_EPOCH"), commitTime)
+	return dist.SourceDate(epoch, commitTime)
+}
+
+// jarCreate runs `jar --create` with args, every entry stamped with date
+// (sourceDate) instead of the build time (task bm4): the jar tool sorts
+// the entries itself, so the same classes give the same jar. Every jar
+// the magefiles pack goes through it.
+func jarCreate(date time.Time, args ...string) error {
+	return sh.RunV("jar", append([]string{"--create", "--date", dist.JarDate(date)}, args...)...)
 }
 
 // packRelease writes the archives and SHA256SUMS into a fresh

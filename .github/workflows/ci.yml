@@ -132,6 +132,11 @@ jobs:
       - name: mage agentBuild workloadBuild
         run: mage agentBuild workloadBuild
 
+      # Two clean agent jar builds must give the same bytes (task bm4), so
+      # a rebuild of a release tag matches the published archive.
+      - name: mage agentReproTest
+        run: mage agentReproTest
+
       - name: mage test
         run: mage test
 

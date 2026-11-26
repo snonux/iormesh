@@ -148,8 +148,9 @@ is vendored as the released jar in `agent/third_party/asm` with
 its license and provenance; `mage agentBuild` checks the jar's
 pinned SHA-256 and relocates its classes to
 `iormesh.agent.shaded.asm` (`agent/tools/Relocate.java`), so
-neither build nor tests touch the network. `mage agentTest` runs
-with the `java` on `PATH` and again with each JDK listed in
+neither build nor tests touch the network. `mage agentTest` starts
+with `mage agentReproTest` (two clean builds, same bytes;
+"Releases" below), then runs with the `java` on `PATH` and again with each JDK listed in
 `IORMESH_AGENT_JDKS` (colon-separated `JAVA_HOME`s), which is how
 each hook-table variant gets checked against its JDK: list a 17
 and a 21 (`jdk17`, `jdk21`) when `java` on `PATH` is 25 or later
@@ -224,10 +225,11 @@ runs `mage fmtCheck`; the kernel-independent generate steps
 (`generateTracepointsGo`, `generateTypesGo`,
 `generateSyscallNumbersGo`), failing on any `git diff`; then
 `mage bpfBuild`, `mage vet`, `mage lint`, `mage agentBuild
-workloadBuild`, `mage test`, `mage testRace` and
-`mage workloadTest`. It uses no secrets, a read-only token and
-actions pinned by commit SHA. The runner is not the main
-target: the root gates (`mage bpfRootTest`,
+workloadBuild`, `mage agentReproTest` ("Releases", below),
+`mage test`, `mage testRace` and `mage workloadTest`. It uses
+no secrets, a read-only token and actions pinned by commit SHA.
+The runner is not the main target: the root gates (`mage
+bpfRootTest`,
 `mage integrationTest`), the el9 runs on Rocky 9.9 and the kind
 acceptance stay manual ([testing.md](testing.md), "CI"). So
 does the C step of `mage generate`: it numbers the handlers by
@@ -537,20 +539,32 @@ ls dist/release/0.1.0/
   bytes with the same Go toolchain (its gzip encoder could change
   between releases; `internal/dist`'s `TestPackDeterministic`).
   The container builds rebuild to the same bytes too (two runs
-  of the v0.1.0 dry run, [testing.md](testing.md), task 7k4).
-  The agent jar does not yet: `mage agentBuild` packs it with
-  each entry's build time, so a jar built from a clean checkout
-  differs (task bm4) — until that is fixed, a rebuild of the tag
-  matches a downloaded archive only in its tracer and controller
-  binaries, not byte for byte.
+  of the v0.1.0 dry run, [testing.md](testing.md), task 7k4),
+  and so does the agent jar (task bm4): `mage agentBuild` packs
+  it and its nested bridge jar with `jar --create --date`, every
+  entry dated `$SOURCE_DATE_EPOCH` or else the commit time, and
+  the jar tool sorts the entries by name. What still varies is
+  the JDK: javac's class files and the manifest's `Created-By`
+  (the jar tool's JDK version, e.g. `25.0.5 (Red Hat, Inc.)`)
+  come from the builder's JDK, which the repository does not
+  pin, so a rebuild matches only with the same JDK release —
+  read it from the published jar's manifest (`unzip -p
+  iormesh-agent.jar META-INF/MANIFEST.MF`). `mage
+  agentReproTest` (in `mage agentTest` and CI) builds the jar
+  from scratch twice and fails unless the SHA-256s match. A
+  kept jar whose entries carry another date (an older commit)
+  is rebuilt, so a fresh jar is never one a clean build of this
+  commit would not reproduce; freshness otherwise still goes by
+  file mtimes, which `--date` leaves at the build time. The
+  workload jars are dated the same way, though not released.
 
 An operator goes from a download (or their own `mage release`)
 to a deploy in four steps: check, unpack, sign with their own
 key, deploy. `SHA256SUMS` catches a corrupt or truncated
 download; it is not a signature, so trusting the archive is the
 operator's call (where it came from, or a rebuild of the tag
-compared byte for byte — for now binary by binary, as the jar
-does not rebuild identically, "Reproducible" above). The key
+compared byte for byte, with the JDK release the published jar
+names, "Reproducible" above). The key
 comes from the `minisign` CLI (`minisign -G`, "Key" under
 [Signing](#signing)); iormeshctl has no key generator. What
 deploy and bootstrap trust from then on is the operator's own

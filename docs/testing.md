@@ -117,7 +117,8 @@ It still runs in `mage test`. The root suites
 
 CI (GitHub Actions, task ck4) runs the gates that need neither
 root nor a particular kernel: `mage fmtCheck`, `vet`, `lint`,
-`test`, `testRace` and `workloadTest`, plus the generate diff
+`test`, `testRace`, `workloadTest` and `agentReproTest` (two
+clean agent jar builds must match, task bm4), plus the generate diff
 check, on an Ubuntu runner ([build.md](build.md), "CI", has the
 steps). What stays manual is everything that needs root, el9 or
 a cluster: `mage bpfRootTest` and `mage integrationTest` (run as
@@ -1953,9 +1954,8 @@ no upload, no GitHub release. Releases ship unsigned
   `bin/iormesh-agent.jar` and running `mage agentBuild` again
   (OpenJDK 25.0.5) gave other bytes (`fdc86361…` against
   `5779b517…`): each zip entry carries its build time and the
-  nested bridge jar differs with it. Filed as task bm4; until
-  then a rebuild of a tag matches a downloaded archive only
-  binary by binary.
+  nested bridge jar differs with it. Filed as task bm4, since
+  fixed ("Reproducible agent jar" below).
 - **Refusal**: with the tag deleted, `mage release podman`
   stopped up front: `release: no v0.1.0 tag reachable from
   HEAD`.
@@ -1975,13 +1975,46 @@ Where the docs and reality differed (fixed in this commit):
   download a release; they are marked as needed only to build
   one.
 - build.md and chapter 3 offered "a rebuild of the tag compared
-  byte for byte" as a trust check, which the jar defeats (task
-  bm4); both now say binary by binary until it is fixed.
+  byte for byte" as a trust check, which the jar defeated (task
+  bm4); they said binary by binary until bm4 restored the
+  byte-for-byte claim.
 
 Everything else ran as written: the `ls` of
 `dist/release/0.1.0/`, the archive contents, the `sign` output
 format, `verify`'s pinned key and `-key`, and the both-arches
 step.
+
+## Reproducible agent jar (task bm4, 2026-11-26)
+
+The dry run above found the agent jar rebuilt to other bytes.
+The magefiles now pack every jar with `jar --create --date`
+(`jarCreate`), dated `$SOURCE_DATE_EPOCH` or else the commit
+time, the date the release archives use
+([build.md](build.md#releases), "Reproducible").
+
+- **Red first**: `mage agentReproTest`, which builds the agent
+  jar from scratch twice and compares SHA-256s, failed without
+  `--date` (`1847d87f…` against `ebeec05e…`, OpenJDK 25.0.5);
+  so did `rm -rf agent/build bin/iormesh-agent.jar; mage
+  agentBuild`, twice (`9c5e564d…` against `7d276ba0…`).
+- **After**: both gave `4b46f8ef…` twice, and a copy of the
+  tree at another path, without `.git` and with
+  `SOURCE_DATE_EPOCH` set to the commit time, the same bytes.
+  `mage workloadBuild workloadOtelBuild workloadLibsBuild` run
+  twice gave identical workload jars too.
+- **Freshness** (task yk4): a second `mage agentBuild` kept the
+  jar (its mtime unchanged); a touched input rebuilt it, and so
+  did another `SOURCE_DATE_EPOCH`, whose jar's entries then
+  carried that date (`internal/dist` `JarDated`).
+- **Entry order**: the jar tool of JDK 17.0.9 and of 25.0.5
+  both sort a directory's entries by name whatever order the
+  file system lists them in. `internal/dist`'s
+  `TestJarToolReproducible` packs one tree written in two orders
+  with the `jar` on `PATH` (skipped without one) and wants the
+  same bytes.
+- **Gap**: the builder's JDK is not pinned; javac's output and
+  the manifest's `Created-By` follow it, so a rebuild matches
+  only with the JDK release the published jar names.
 
 ## el9 runbook and runs
 

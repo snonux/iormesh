@@ -6,6 +6,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +17,8 @@ import (
 
 	"github.com/magefile/mage/mg"
 	"github.com/magefile/mage/sh"
+
+	"iormesh/internal/dist"
 )
 
 // agentTestDir holds the compiled tests and the smoke target.
@@ -35,9 +39,10 @@ var smokeKinds = []string{"open", "read", "write", "seek", "close", "socket",
 // the real agent wrote (decision #27): a concurrent RingStress writer and
 // the workload under the agent with a spool directory. agentTestDir is
 // cleared first: AgentBuild may keep agent/build (agentJarFresh), and
-// classes of deleted test sources must not survive into the run.
+// classes of deleted test sources must not survive into the run. It
+// starts with AgentReproTest, whose second build AgentBuild then keeps.
 func AgentTest() error {
-	mg.SerialDeps(AgentBuild, WorkloadBuild)
+	mg.SerialDeps(AgentReproTest, AgentBuild, WorkloadBuild)
 	cp := strings.Join(agentBuildOutputs, ":")
 	if err := os.RemoveAll(agentTestDir); err != nil {
 		return err
@@ -57,6 +62,51 @@ func AgentTest() error {
 		return err
 	}
 	return agentSpoolJavaTests()
+}
+
+// AgentReproTest builds the agent jar from scratch twice (agent/build
+// removed, as on a clean checkout) and fails unless both have the same
+// SHA-256 and carry sourceDate (task bm4): an operator's own `mage
+// release` of a tag must match the published archive byte for byte. The
+// two builds take about 40 s on the laptop, a bounded price; the second
+// is left as the current jar, which AgentBuild then finds fresh. CI runs
+// it as its own step, as it runs no AgentTest.
+func AgentReproTest() error {
+	if err := verifyASM(); err != nil {
+		return err
+	}
+	date, err := sourceDate()
+	if err != nil {
+		return err
+	}
+	var sums [2]string
+	for i := range sums {
+		if err := buildAgentJar(date); err != nil {
+			return err
+		}
+		if sums[i], err = fileSHA256(agentJar); err != nil {
+			return err
+		}
+	}
+	if sums[0] != sums[1] {
+		return fmt.Errorf("%s is not reproducible: two clean builds gave sha256 %s and %s",
+			agentJar, sums[0], sums[1])
+	}
+	if ok, err := dist.JarDated(agentJar, date); err != nil || !ok {
+		return fmt.Errorf("%s: entries not dated %s (%v)", agentJar, dist.JarDate(date), err)
+	}
+	fmt.Printf("%s: two clean builds, sha256 %s, entries dated %s\n", agentJar, sums[0], dist.JarDate(date))
+	return nil
+}
+
+// fileSHA256 is the hex SHA-256 of the file at path.
+func fileSHA256(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // agentSpoolJavaTests runs internal/agentspool's TestJava* tests, which

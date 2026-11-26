@@ -136,7 +136,12 @@ func packModuleJar(jar, classes, resources string, classPath []string) error {
 	if err := ensureBuildDir(); err != nil {
 		return err
 	}
-	return sh.RunV("jar", "--create", "--file", jar, "--manifest", manifest,
+	// Dated like the core workload jar (jarCreate, task bm4).
+	date, err := sourceDate()
+	if err != nil {
+		return err
+	}
+	return jarCreate(date, "--file", jar, "--manifest", manifest,
 		"-C", classes, "iormesh",
 		"-C", resources, ".")
 }
