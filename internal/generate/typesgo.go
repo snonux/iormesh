@@ -1,5 +1,5 @@
 // Adapted from ior internal/generate/typesgo.go @ b21afc50328c.
-// Changes: generated constructors decode with direct field loads (task am4).
+// Changes: direct-load decoders (task am4); reject unparsed members (task em4).
 
 package generate
 
@@ -32,52 +32,67 @@ type CStruct struct {
 	Members []CMember
 }
 
-// ParseCTypesInput parses C struct definitions and #define constants.
+// ParseCTypesInput parses the C struct definitions and #define constants of
+// internal/c/types.h followed by the generated tracepoints C. A block opened
+// by "struct name {" and closed by "};" is a record type. Every non-comment
+// line inside it must be a member parseMember accepts, or the parse fails
+// naming the line: a dropped member would shift every later field of the
+// generated direct decoder and of the binary.Read fallback alike (task em4).
+// A block closed by any other "}" line ("} ts = {};") declares a local
+// variable in a generated handler body and is dropped.
 func ParseCTypesInput(r io.Reader) ([]CStruct, []CConstant, error) {
+	var p cTypesParser
 	scanner := bufio.NewScanner(r)
-	var structs []CStruct
-	var constants []CConstant
-	var current *CStruct
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-
-		if strings.HasPrefix(line, "#define") {
-			c, ok := parseDefine(line)
-			if ok {
-				constants = append(constants, c)
-			}
-			continue
-		}
-
-		if isCommentLine(line) || line == "" {
-			continue
-		}
-
-		if strings.HasPrefix(line, "struct") && strings.HasSuffix(line, "{") {
-			name := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "struct"), "{"))
-			current = &CStruct{Name: name}
-			continue
-		}
-
-		if line == "};" && current != nil {
-			structs = append(structs, *current)
-			current = nil
-			continue
-		}
-
-		if current != nil {
-			m, ok := parseMember(line)
-			if ok {
-				current.Members = append(current.Members, m)
-			}
+	for lineNo := 1; scanner.Scan(); lineNo++ {
+		if err := p.parseLine(strings.TrimSpace(scanner.Text())); err != nil {
+			return nil, nil, fmt.Errorf("C types input line %d: %w", lineNo, err)
 		}
 	}
-
 	if err := scanner.Err(); err != nil {
 		return nil, nil, fmt.Errorf("scanning C input: %w", err)
 	}
-	return structs, constants, nil
+	if p.current != nil {
+		return nil, nil, fmt.Errorf("C types input: struct %s has no closing \"};\"", p.current.Name)
+	}
+	return p.structs, p.constants, nil
+}
+
+// cTypesParser is the line state of ParseCTypesInput: the structs and
+// constants parsed so far and the struct being read, nil between structs.
+type cTypesParser struct {
+	structs   []CStruct
+	constants []CConstant
+	current   *CStruct
+}
+
+// parseLine consumes one trimmed input line. Outside a struct only #define
+// lines and struct openers matter (the rest is C code); inside one, every
+// line is a #define, a comment, the closing brace or a member.
+func (p *cTypesParser) parseLine(line string) error {
+	switch {
+	case strings.HasPrefix(line, "#define"):
+		if c, ok := parseDefine(line); ok {
+			p.constants = append(p.constants, c)
+		}
+	case line == "" || isCommentLine(line):
+	case p.current == nil:
+		if strings.HasPrefix(line, "struct") && strings.HasSuffix(line, "{") {
+			name := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "struct"), "{"))
+			p.current = &CStruct{Name: name}
+		}
+	case strings.HasPrefix(line, "}"):
+		if line == "};" {
+			p.structs = append(p.structs, *p.current)
+		}
+		p.current = nil
+	default:
+		m, ok := parseMember(line)
+		if !ok {
+			return fmt.Errorf("struct %s: cannot parse member %q: want \"type name;\" or \"type name[N];\"", p.current.Name, line)
+		}
+		p.current.Members = append(p.current.Members, m)
+	}
+	return nil
 }
 
 // GenerateTypesGo produces the generated_types.go content.
@@ -143,20 +158,44 @@ func isCommentLine(line string) bool {
 	return strings.HasPrefix(line, "//") || strings.HasPrefix(line, "/*") || strings.HasPrefix(line, "*")
 }
 
-var arrayRe = regexp.MustCompile(`^(\w+)\s+(\w+)\[(\w+)\];?$`)
-var simpleRe = regexp.MustCompile(`^(\w+)\s+(\w+);?$`)
+var arrayRe = regexp.MustCompile(`^(\w+)\s+(\w+)\[(\w+)\];$`)
+var simpleRe = regexp.MustCompile(`^(\w+)\s+(\w+);$`)
 
+// parseMember parses a "type name;" or "type name[N];" member line, after
+// stripping a trailing comment. ok is false for anything else — a bitfield,
+// a nested struct or union, a multi-word type ("unsigned int"), a pointer, a
+// missing semicolon or an unclosed comment — which the caller rejects.
 func parseMember(line string) (CMember, bool) {
-	line = strings.TrimSuffix(strings.TrimSpace(line), ";")
-	line = strings.TrimSpace(line)
-
-	if m := arrayRe.FindStringSubmatch(line + ";"); m != nil {
+	line, ok := stripTrailingComment(line)
+	if !ok {
+		return CMember{}, false
+	}
+	if m := arrayRe.FindStringSubmatch(line); m != nil {
 		return CMember{TypeName: m[1], FieldName: m[2], ArraySize: m[3]}, true
 	}
-	if m := simpleRe.FindStringSubmatch(line + ";"); m != nil {
+	if m := simpleRe.FindStringSubmatch(line); m != nil {
 		return CMember{TypeName: m[1], FieldName: m[2]}, true
 	}
 	return CMember{}, false
+}
+
+// stripTrailingComment removes a trailing "// ..." or "/* ... */" comment
+// from a member line and trims it. ok is false when a "/*" comment is not
+// closed on the line or code follows its "*/".
+func stripTrailingComment(line string) (string, bool) {
+	slash, block := strings.Index(line, "//"), strings.Index(line, "/*")
+	switch {
+	case slash >= 0 && (block < 0 || slash < block):
+		line = line[:slash]
+	case block >= 0:
+		rest := line[block+2:]
+		end := strings.Index(rest, "*/")
+		if end < 0 || strings.TrimSpace(rest[end+2:]) != "" {
+			return "", false
+		}
+		line = line[:block]
+	}
+	return strings.TrimSpace(line), true
 }
 
 func writeTypeDefsAndMaps(b *strings.Builder, constants []CConstant) {
