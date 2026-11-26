@@ -12,7 +12,7 @@
 // extensions or skills of the laptop, our system prompt in place of its
 // own, and an empty working directory outside the checkout; claude also
 // has its "@path" file mentions disabled (ClaudeEnv), and every message
-// the harness sends has a word-starting "@" escaped (DefuseMentions),
+// the harness sends has a word-starting "@" escaped (eval.DefuseMentions),
 // since the messages carry VM output the agent steers. It acts by
 // text, one action per reply, which the harness carries out:
 //

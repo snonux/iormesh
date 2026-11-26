@@ -17,7 +17,10 @@ Part of [Security & scope](../security.md).
   workload's traces, with a local model unless sending them out
   is fine; the model's replies can run only slice flags of
   `iormeshctl query` on the eval's own store and read only the
-  workload's source.
+  workload's source. No word of a prompt can make a model CLI
+  attach a laptop file: the harness escapes `@` mentions and
+  turns Claude Code's file mentions off (task wm4,
+  [testing/focused-checks.md](../testing/focused-checks.md#llm-introspection-eval-task-qb4)).
 - **The operator's SSH key is the only way in.** The tracer
   listens on nothing and connects to nothing; control flows only
   through SSH (or `kubectl exec`). Servers hold no iormesh

@@ -133,7 +133,10 @@ names each file's and each process's causing methods (class#method).
 `
 
 // prompt builds one turn's prompt: the head, the rollup, the sources,
-// the transcript so far and the question.
+// the transcript so far and the question. The whole prompt is defused
+// (DefuseMentions, task wm4): the rollup, the slices and the source text
+// come from the trace and the workload, the transcript echoes the
+// model's own lines, and none of it may name a laptop file to a CLI.
 func (s Session) prompt(q Question, transcript []string, last bool) string {
 	var b strings.Builder
 	b.WriteString(promptHead)
@@ -153,5 +156,5 @@ func (s Session) prompt(q Question, transcript []string, last bool) string {
 	if last {
 		b.WriteString("\nThis is your last turn: reply with ANSWER: now.\n")
 	}
-	return b.String()
+	return DefuseMentions(b.String())
 }

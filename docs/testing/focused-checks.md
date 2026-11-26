@@ -88,15 +88,46 @@ question set and its pinned threshold (0.8) are in
 `IORMESH_EVAL_MODEL_NAME`, so two models run on one day keep both
 (task 9k4). Rerun it on every schema change (milestones.md M5).
 
+A model CLI must send the prompt and nothing more (task wm4).
+Claude Code expands an `@<path>` in its prompt — even with
+`--tools ''`, even a relative `@Override` against its working
+directory — into that file's contents, attached to the request,
+and the prompt carries text the harness does not control: the
+rollup, query slices and workload source. So the harness escapes
+every `@` that starts a word as `\@` in every prompt, and runs
+every model command with `CLAUDE_CODE_DISABLE_FILE_MENTIONS=1`
+and `CLAUDE_CODE_EVAL_CONFINED=1` in its environment (each was
+shown to stop the expansion against a local capture server,
+`internal/agenttrial`'s `TestClaudeFileMention`). Name them on a
+claude command line all the same, so the command is safe when
+run by hand or by another harness. The recommended Claude
+command:
+
+```sh
+IORMESH_EVAL_MODEL_NAME=claude-sonnet-5-5 \
+IORMESH_EVAL_MODEL_CMD="env -C / CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 \
+CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1 \
+CLAUDE_CODE_DISABLE_FILE_MENTIONS=1 CLAUDE_CODE_EVAL_CONFINED=1 \
+claude -p --model claude-sonnet-5-5 --tools '' --strict-mcp-config \
+--setting-sources '' --disable-slash-commands --no-session-persistence \
+--system-prompt 'Follow the instructions in the user message and \
+answer only from it.'" mage eval
+```
+
+`env -C /` runs it from `/`, so a mention that slipped through
+would resolve against the root directory, not the checkout.
+
 ### First runs with real models (task 9k4, 2026-11-26)
 
 Owner-authorised, one run per model, on one store recorded by
 `mage evalTrace` on the laptop (Fedora 45, kernel 7.3.4; one
 judged `TestMicroservices` run, 4 segment files, 5443 events). The
 store was checked before it was sent: four services, three fused
-edges, the paths listed above. Nothing else left the machine. Each
-model ran with no tools and no context files, from `/`, so it
-answered from the prompt alone:
+edges, the paths listed above. Each model ran with no tools and no
+context files, from `/`. These are the command lines as run; the
+Claude one predates task wm4 and lacks the two file-mention
+variables and `--disable-slash-commands` — use the recommended
+command above, not this one:
 
 ```sh
 IORMESH_EVAL_MODEL_NAME=claude-sonnet-5-5 \
@@ -115,6 +146,25 @@ IORMESH_EVAL_MODEL_CMD="env -C / pi -p --no-tools --no-session \
 (The system prompt was `Follow the instructions in the user
 message and answer only from it.`; Claude Code still adds its own
 session block — working directory `/`, OS — to every request.)
+
+Could a mention have attached a laptop file to the Claude run
+(checked in task wm4, after the store was deleted)? The prompts
+were not logged; what remains says no. The question set and both
+results files (answers and actions) hold no `@` at all. The
+`QUERY` actions were `-file`, `-conn` and `-method` slices: NDJSON
+whose paths sit inside JSON strings, after a `"`, where Claude
+Code does not expand a mention (shown against the capture server,
+as `{@…}` and `x@…` are not). The one `SOURCE` file read,
+`scenarios/Microservices.java`, holds four word-starting
+`@Override` annotations — and the CLI does treat `@Override` as a
+mention, a relative path: from a directory holding a file named
+`Override`, claude 2.1.332 attached it (capture server again).
+The run's working directory was `/`, and no `/Override` exists, so
+nothing was attached; nothing in `workload/src` starts a word
+with `@/`, `@~` or `@./`, only `@Override`, `@FunctionalInterface`
+and `@param`, none of which name a file in `/`. The rollup and the
+slices themselves cannot be re-read. The fix escapes all of these
+(`\@Override`), and the guard variables turn the expansion off.
 
 | Question | Claude Sonnet 5.5 | GLM 5.3 (756B, ollama cloud) |
 |---|---|---|

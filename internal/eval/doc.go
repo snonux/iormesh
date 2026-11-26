@@ -15,6 +15,12 @@
 // eval never runs unless a command was named, and `mage test` never
 // runs it. Point it at workload traces, never at production ones.
 //
+// A model CLI must not send more than the prompt (task wm4): Claude Code
+// expands an "@<path>" in its prompt into that laptop file, attached to
+// the request, even with no tools. Every prompt therefore has its
+// word-starting "@" escaped (DefuseMentions), and every model command
+// runs with MentionGuardEnv, which turns the expansion off in claude.
+//
 // The protocol is plain text, one action per reply:
 //
 //	QUERY <iormeshctl query flags>   a slice, e.g. QUERY -file '/data/*/order-42.json'

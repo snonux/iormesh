@@ -60,16 +60,6 @@ func TestMageArgs(t *testing.T) {
 	}
 }
 
-// TestDefuseMentions: an "@" starting a word is escaped, one inside a
-// word is not.
-func TestDefuseMentions(t *testing.T) {
-	in := "@/home/u/.ssh/id_ed25519\nsee @x and\t@y, mail paul@host, a\\@b"
-	want := "\\@/home/u/.ssh/id_ed25519\nsee \\@x and\t\\@y, mail paul@host, a\\@b"
-	if got := DefuseMentions(in); got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
-}
-
 // TestTrialDefusesRunOutput: VM output naming a laptop file with "@"
 // reaches the agent escaped (review round 1 of task mm4).
 func TestTrialDefusesRunOutput(t *testing.T) {

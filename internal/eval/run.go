@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -58,14 +59,17 @@ type Command struct {
 var _ Model = Command{}
 
 // Reply runs the command once, bounded by Timeout (plus at most the
-// one-second WaitDelay for a lingering grandchild), and returns at most
-// maxReplyBytes of its stdout.
+// one-second WaitDelay for a lingering grandchild), with MentionGuardEnv
+// added to its environment, and returns at most maxReplyBytes of its
+// stdout.
 func (c Command) Reply(ctx context.Context, prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.Timeout)
 	defer cancel()
 	var out bytes.Buffer
 	cmd := exec.CommandContext(ctx, c.Argv[0], c.Argv[1:]...)
 	cmd.Stdin = strings.NewReader(prompt)
+	// The operator's environment plus the mention guards (task wm4).
+	cmd.Env = append(os.Environ(), MentionGuardEnv...)
 	cmd.Stdout = &capped{w: &out, n: maxReplyBytes}
 	if c.Stderr != nil {
 		cmd.Stderr = c.Stderr
