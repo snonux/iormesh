@@ -80,8 +80,9 @@ escaped as `\@` — a visible escape a model reads as one, rather
 than an invisible change to the output; `user@host` is left alone.
 `TestClaudeFileMention` runs the real `claude` binary, where it is
 installed, against a capture server with a dummy key: the control
-run without the two variables sends the file, the trial's flags do
-not.
+run without the two variables must send the file (the test skips,
+naming why, when this CLI no longer expands mentions), and the
+trial's flags must not.
 
 `RUN` and the guided user's commands go through one `Shell`: `ssh
 -T -e none -o BatchMode=yes -o ForwardAgent=no -o ForwardX11=no -o

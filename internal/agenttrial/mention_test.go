@@ -98,8 +98,13 @@ func TestClaudeFileMention(t *testing.T) {
 	runClaudeAgainst(t, slices.DeleteFunc(slices.Clone(argv), func(a string) bool {
 		return a == "CLAUDE_CODE_DISABLE_FILE_MENTIONS=1" || a == "CLAUDE_CODE_EVAL_CONFINED=1"
 	}), srv.URL, secret)
-	t.Logf("control run without the mention variables: marker sent %v",
-		strings.Contains(captured(), mentionMarker))
+	// The guarded run below proves something only if this CLI leaks
+	// without the variables; a CLI that no longer expands mentions (or
+	// never reached the server) skips loudly instead of passing quietly.
+	if !strings.Contains(captured(), mentionMarker) {
+		t.Skip("control run without the mention variables sent no marker: " +
+			"this claude does not expand @ mentions here, so the guard is untested")
+	}
 
 	srv, captured = captureServer(t)
 	runClaudeAgainst(t, argv, srv.URL, secret)
