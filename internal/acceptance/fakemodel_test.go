@@ -34,8 +34,10 @@ func (w *fakeWorld) model(projects []string) viewmodel.Model {
 
 // microServices are the refresh's services and edges: the three
 // microservices servers, and the two-host server named after naming.
+// A loopback endpoint ends in "@host" as the build labels it since task
+// ai4 (servicedb.Endpoint.Label); the fake missed that and hid task 7m4.
 func (w *fakeWorld) microServices() ([]viewmodel.Service, []viewmodel.Edge) {
-	ep := func(off int) string { return fmt.Sprintf("127.0.0.1:%d", w.cfg.port(off)) }
+	ep := func(off int) string { return fmt.Sprintf("127.0.0.1:%d@h1", w.cfg.port(off)) }
 	orders, billing := ep(portOrders), "10.9.0.2:"+fmt.Sprint(w.cfg.port(portTwoHost))
 	named := false
 	if w.named {

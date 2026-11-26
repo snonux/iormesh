@@ -88,7 +88,7 @@ are sized accordingly:
 The tracer build is ior's, lifted in M1 (provenance headers name
 the ior commit). Go: 1.26 (go.mod's floor, what CI uses) or 1.27;
 go.mod has no `toolchain` line, and code must be gofmt-clean and
-pass the gates under both (decision #32). Prerequisites, as for
+pass the gates under both (decision #33). Prerequisites, as for
 ior: a libbpfgo checkout at `../libbpfgo` (or `$LIBBPFGO`)
 pinned to `v0.9.2-libbpf-1.5.1` and built with `make -C ../libbpfgo libbpfgo-static`; clang;
 bpftool; mage ≥ v1.17 (older mage breaks on the backquotes in
@@ -118,7 +118,7 @@ mage lint          # golangci-lint: errcheck + staticcheck SA + unused
 mage fmt / fmtCheck
 mage clean         # removes bin/, the build outputs (decision #30);
                    # keeps vmlinux.h (it needs root to recreate) and
-                   # dist/ (signed release artifacts)
+                   # dist/ (the release builds, signed after mage sign)
 mage workloadTest  # the Java workload, standalone (M0)
 mage bpfRootTest   # BPF root tests: loader, TCP, fork, exec watch (sudo -n)
 mage integrationTest        # tracer + workload end to end, as root
@@ -245,7 +245,7 @@ mage buildDocker   # the same with Docker
 mage containerBuild podman tracer-amd64,ctl  # a subset (ctl,
                    # tracer-amd64, tracer-arm64; all by default)
 mage containerClean podman  # drop builder images and cache volumes
-mage sign          # sign dist/ with the release key (see "Signing")
+mage sign          # sign dist/ with your own key (see "Signing")
 ```
 
 A missing engine, or Docker's CLI without a running daemon,
@@ -410,11 +410,16 @@ fails up front with the fix named.
 
 ## Signing
 
-Release binaries are signed with minisign (decisions.md
-#28, built with its default by task bb4) after the container
-builds:
+Hosts run only builds signed with minisign (decisions.md #28,
+built with its default by task bb4) — signed by the operator,
+with their own key: release archives ship unsigned
+(decisions.md #32). There are two ways to sign, one
+implementation (`internal/release`):
 
 ```bash
+# an unpacked release archive ("Releases" below), no checkout:
+iormeshctl sign -key ~/.minisign/iormesh.key iormesh-0.1.0-amd64
+# or a dist/ built from source, after the container builds:
 export IORMESH_MINISIGN_KEY=~/.minisign/iormesh.key  # outside the tree
 mage agentBuild    # also dist/iormesh-agent.jar (task kf4)
 mage sign          # dist/NAME -> dist/NAME.minisig, then verified
@@ -423,16 +428,24 @@ iormeshctl verify dist/iormesh-linux-amd64   # the controller's check
 
 - **Key**: a minisign key pair made once, e.g. `minisign -G -p
   iormesh.pub -s iormesh.key`, with a password (the Go library
-  reads only scrypt-encrypted secret keys). The secret key
-  belongs to the release pipeline and never enters the
-  repository: `mage sign` refuses a key path inside the tree.
-  The password comes from the terminal prompt, or from
-  `$IORMESH_MINISIGN_PASSWORD` for unattended runs. Prefer the
+  reads only scrypt-encrypted secret keys). The secret key is
+  the operator's and never enters the repository: `mage sign`
+  refuses a key path inside the tree. Both signers refuse a key
+  file that is a symlink, not a regular file, someone else's,
+  or open to group or other (`chmod 600` it).
+  The password comes from the terminal prompt (no echo), or from
+  `$IORMESH_MINISIGN_PASSWORD` for unattended runs; it is never
+  printed. Prefer the
   prompt or a CI secret store that masks it: an environment
   variable is readable by every process of the same uid
   (`/proc/<pid>/environ`) and leaks into logs that dump the
   environment.
-- **What is signed**: each file in `dist/` (not hidden, not a
+- **What is signed**: `iormeshctl sign DIR` signs the release
+  artifacts in DIR — `iormesh-linux-<arch>`,
+  `iormesh-agent.jar`, `iormeshctl-{linux,darwin}-<arch>` —
+  and nothing else there (`LICENSE`, `CHANGELOG.md`), at
+  `-version` (default its own version). `mage sign` signs each
+  file in `dist/` (not hidden, not a
   `.minisig`) — the tracers, the controllers and, after `mage
   agentBuild`, the agent jar `iormesh-agent.jar`, which
   `iormeshctl deploy` ships to hosts whose projects use the
@@ -445,7 +458,8 @@ iormeshctl verify dist/iormesh-linux-amd64   # the controller's check
   and the controller both check the signed `file:` and
   `version:`, so the comment is part of what is verified.
 - **Stale builds are refused** (task uf4): every artifact
-  carries its own version, and `mage sign` checks all of them
+  carries its own version, and `mage sign` (or `iormeshctl
+  sign`, against `-version`) checks all of them
   against `internal/version.Version` before it signs any. The
   jar's manifest has `Implementation-Version` (written by `mage
   agentBuild`); the tracers and controllers carry
@@ -487,65 +501,67 @@ iormeshctl verify dist/iormesh-linux-amd64   # the controller's check
 ## Releases
 
 `mage release` turns a tagged commit into downloadable archives
-(task rh4, owner-approved 2026-11-22). It publishes nothing:
-uploading the files is a human step.
+(task rh4, owner-approved 2026-11-22). The archives are unsigned
+(decisions.md #32, task 5m4): no key, no password, no
+`.minisig`. It publishes nothing: uploading the files is a human
+step.
 
 ```bash
 # bump internal/version.Version, commit, then:
 git tag v0.1.0                # exactly v<internal/version.Version>
-export IORMESH_MINISIGN_KEY=~/.minisign/iormesh.key
-mage release podman           # or docker
+mage release podman           # or docker; no IORMESH_MINISIGN_KEY
 ls dist/release/0.1.0/
-# iormesh-0.1.0-amd64.tar.gz  iormesh-0.1.0-arm64.tar.gz
-# SHA256SUMS  SHA256SUMS.minisig
+# iormesh-0.1.0-amd64.tar.gz  iormesh-0.1.0-arm64.tar.gz  SHA256SUMS
 ```
 
 - **Refused up front**: a dirty tree, a HEAD past the tag, or a
   tag other than `v<internal/version.Version>` (`git describe
   --tags --dirty --match 'v[0-9]*'` must print exactly the tag).
-  The key's password is asked next, before the long builds.
 - **Steps**: every container build (`containerBuild ENGINE
-  all`), `agentBuild`, the signing `mage sign` does (stale builds
-  refused), then `internal/dist` packs a fresh
-  `dist/release/<version>/` and signs its `SHA256SUMS`.
+  all`), `agentBuild`, then `internal/dist` packs a fresh
+  `dist/release/<version>/` and writes its `SHA256SUMS`.
 - **Archive contents**, under `iormesh-<version>-<arch>/`:
   `iormesh-linux-<arch>`, `iormesh-agent.jar`,
-  `iormeshctl-linux-<arch>`, `iormeshctl-darwin-<arch>`, each
-  with its `.minisig`; `minisign.pub`; `CHANGELOG.md`; `LICENSE`
-  (MIT). Each of the last two is packed when present, and a
-  missing one is noted. Each artifact is verified against its signature at the
-  release version before it is packed, and the verified bytes
-  are the packed ones.
+  `iormeshctl-linux-<arch>`, `iormeshctl-darwin-<arch>`;
+  `CHANGELOG.md`; `LICENSE` (MIT). Each of the last two is
+  packed when present, and a missing one is noted. Each artifact
+  must carry the release version's stamp (as `mage sign`
+  checks, "Stale builds are refused" above), checked on the
+  bytes packed; a `.minisig` left in `dist/` is not packed.
 - **Reproducible**: entries sorted, owner root 0/0, modes
   0755 (binaries, the top directory) or 0644, every mtime
   `$SOURCE_DATE_EPOCH` or else the commit time, gzip header
-  without name or time. The same signed `dist/` packs to the same
+  without name or time. The same `dist/` packs to the same
   bytes with the same Go toolchain (its gzip encoder could change
-  between releases; `internal/dist`'s `TestPackDeterministic`);
-  signing again changes the signatures' timestamps and so the
-  archives.
+  between releases; `internal/dist`'s `TestPackDeterministic`).
 
-An operator checks a download with the release key obtained
-apart from the archives, here saved as `~/iormesh-release.pub`.
-The `minisign.pub` inside an archive is a convenience, not a
-trust anchor: use it only after comparing it with that key.
+An operator goes from a download (or their own `mage release`)
+to a deploy in four steps: check, unpack, sign with their own
+key, deploy. `SHA256SUMS` catches a corrupt or truncated
+download; it is not a signature, so trusting the archive is the
+operator's call (where it came from, or a rebuild of the tag
+compared byte for byte). What deploy and bootstrap trust from
+then on is the operator's own signature:
 
 ```bash
-KEY=~/iormesh-release.pub                 # the published key
-minisign -Vm SHA256SUMS -p "$KEY"
-sha256sum -c SHA256SUMS
-tar -xzf iormesh-0.1.0-amd64.tar.gz && cd iormesh-0.1.0-amd64
-./iormeshctl-linux-amd64 verify -key "$KEY" iormesh-linux-amd64 \
+sha256sum -c --ignore-missing SHA256SUMS   # the archives you have
+tar -xzf iormesh-0.1.0-amd64.tar.gz
+cd iormesh-0.1.0-amd64
+./iormeshctl-linux-amd64 sign -key ~/.minisign/iormesh.key .
+./iormeshctl-linux-amd64 verify iormesh-linux-amd64 \
   iormesh-agent.jar iormeshctl-linux-amd64  # every build: OK
-install -D -m 0644 "$KEY" ~/.config/iormesh/minisign.pub
+./iormeshctl-linux-amd64 deploy -dist . HOST
 ```
 
-The controller checking itself proves nothing on its own; the
-`minisign -Vm SHA256SUMS` step, done with a trusted `minisign`,
-is what vouches for the archive it came in.
-
-With the key pinned there, `iormeshctl deploy -dist DIR` checks
-every build again before it pushes.
+`sign` asks for the key's password on the terminal (or reads
+`$IORMESH_MINISIGN_PASSWORD`), signs the four artifacts at its
+own version (`-version` for another; each artifact's stamp must
+match), and verifies every signature it wrote. `verify` and
+`deploy` use the pinned `~/.config/iormesh/minisign.pub` — the
+public half of that same key ([Signing](#signing)). Hosts of
+both arches: sign both unpacked archives and copy the arm64
+tracer with its `.minisig` next to the amd64 files, so one
+`-dist` holds both tracers.
 
 **Licence** (owner, 2026-11-22): MIT for the whole repository
 (`LICENSE`). The BPF object keeps declaring `Dual BSD/GPL`: the

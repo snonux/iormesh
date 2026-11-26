@@ -9,7 +9,7 @@ import "unicode/utf8"
 // except invalid UTF-8, which is the project's own rule, not the
 // installed Go's: each invalid byte becomes the six-byte escape \ufffd
 // (Go 1.26's json.Marshal; Go 1.27 writes the raw U+FFFD bytes instead,
-// decision #32, task 8m4). TestAppendEventMatchesMarshal holds it to
+// decision #33, task 8m4). TestAppendEventMatchesMarshal holds it to
 // that on randomly filled events, every field of the schema types
 // included, so a field added to Event without teaching the encoder fails
 // the test.
@@ -301,7 +301,7 @@ const hexDigits = "0123456789abcdef"
 // (json.Marshal's default): ", \ and control bytes escaped (\b \f \n \r
 // \t by name, the rest as \u00XX), <, > and & as \u003c, \u003e and
 // \u0026, each byte of invalid UTF-8 as the escape \ufffd (never the raw
-// U+FFFD Go 1.27's encoding/json writes; decision #32), and U+2028/U+2029 as
+// U+FFFD Go 1.27's encoding/json writes; decision #33), and U+2028/U+2029 as
 // \u2028 and \u2029. Plain ASCII, the common case, is copied in runs.
 func appendJSONString(dst []byte, s string) []byte {
 	dst = append(dst, '"')

@@ -81,14 +81,14 @@ undone`. Until the rule is in place a rerun starts over.
 
 | Message contains | Meaning and fix |
 |---|---|
-| `local build, nothing pushed: signature verification failed: signed by key …, the pinned key is …` | `dist/` was signed with another key than the pinned one. Re-sign with your key (`mage sign`), or pin the right public key. Nothing left the laptop. |
-| `signature verification failed: the file does not match its signature` | The file changed after signing (a rebuild without `mage sign`). Sign again. |
+| `local build, nothing pushed: signature verification failed: signed by key …, the pinned key is …` | The `-dist` directory was signed with another key than the pinned one. Re-sign with your key (`iormeshctl sign`, or `mage sign` for `dist/`), or pin the right public key. Nothing left the laptop. |
+| `signature verification failed: the file does not match its signature` | The file changed after signing (a rebuild, or a new release unpacked over a signed one). Sign again. |
 | `signature verification failed: … was signed as …` | A file renamed into place, e.g. one arch's tracer as another's. Use the file as built. |
-| `artifact is not stamped with the version being signed: … rebuild it` (from `mage sign`) | A tracer, controller or jar in `dist/` is left from an older build. Rebuild `dist/` from the current commit, then sign. |
+| `artifact is not stamped with the version being signed: … rebuild it` (from `mage sign` or `iormeshctl sign`) | A tracer, controller or jar is from another version than the one signed. For `dist/`, rebuild it from the current commit, then sign; for an unpacked release, pass its version with `iormeshctl sign -version`. |
 | `upgrade of iormesh-linux-… refused, nothing started: …` | The host's tracer refused the staged build; the reason follows (the rest of this table and the next). The host keeps what it ran. |
 | `upgrade: refusing to downgrade from … to … (root may pass -allow-downgrade)` | `dist/` is older than the installed tracer. Build and sign the current version. |
 | `upgrade: … is installed with other bytes; through the sudoers rule a new build must carry a new version` | A rebuild at the same version. Bump `internal/version.Version` for a release ([build.md](build.md#signing)), or reinstall as root on a test host. |
-| `upgrade: iormesh-agent.jar … does not match the installed tracer …; upgrade the tracer first` | The jar in `dist/` is from another version than the tracer. Run `mage agentBuild` and `mage sign` together with the tracer build. |
+| `upgrade: iormesh-agent.jar … does not match the installed tracer …; upgrade the tracer first` | The jar in `dist/` is from another version than the tracer. Sign one release's jar and tracer together (`iormeshctl sign`), or run `mage agentBuild` and `mage sign` with the tracer build. |
 
 ## Deploy and the sudoers rule
 

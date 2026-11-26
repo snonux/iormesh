@@ -157,7 +157,7 @@ the rule is in place a rerun starts over.
 |---|---|
 | `registry: host not registered: app9 (iormeshctl add it first)` | `add` the host, or check the spelling against `list` |
 | `pinned key: open …/minisign.pub: no such file or directory` | make or copy the key ([chapter 3](03-release.md)) |
-| `local build, nothing pushed: … signature verification failed: …` | sign `dist/` again ([chapter 3](03-release.md)) |
+| `local build, nothing pushed: … signature verification failed: …` | sign the `-dist` directory again with the pinned key's secret half ([chapter 3](03-release.md)) |
 | `sudo -n failed (…): -apply needs the SSH user's own sudo without a password` | drop `-apply`, run the printed steps by hand |
 | `/etc/sudoers.d/iormesh already exists: …` | the host is bootstrapped: go on with `deploy` |
 
@@ -173,4 +173,4 @@ rule and what passes it).
 
 ---
 
-← [3. Build and sign a release](03-release.md) · [Contents](README.md) · Next: [5. Deploy and check status](05-deploy-status.md) →
+← [3. Get and sign a release](03-release.md) · [Contents](README.md) · Next: [5. Deploy and check status](05-deploy-status.md) →

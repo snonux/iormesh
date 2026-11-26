@@ -55,6 +55,7 @@ const usageSynopsis = `usage:
   iormeshctl routes discover [-registry FILE] [-cluster NAME] [-namespace NS]... [-db FILE]
                             [-ingress-service NS/NAME]
   iormeshctl verify [-key FILE] FILE...      (FILE.minisig next to each)
+  iormeshctl sign -key SECRET-KEY [-version V] DIR
   iormeshctl version
 `
 
@@ -75,7 +76,13 @@ host with your own sudo: it prints the exact steps (for -arch, default
 amd64, and the SSH user -user, default HOST's user@ part or yours; a User in
 ~/.ssh/config is not seen) and contacts nothing, or with -apply
 runs them over ssh with sudo -n, which needs sudo without a password.
-rm's uninstall removes the sudoers rule bootstrap installed. status asks every target's tracer (sudo iormesh status, or
+rm's uninstall removes the sudoers rule bootstrap installed. sign
+signs the release builds in DIR (an unpacked release archive or dist/)
+with your own minisign secret key (mode 0600, password from
+$IORMESH_MINISIGN_PASSWORD or the terminal, never echoed), each at
+-version (default this iormeshctl's), which must be its own stamp;
+verify, deploy and bootstrap then accept them under your pinned key.
+status asks every target's tracer (sudo iormesh status, or
 iormesh ready -status in a pod) and prints one row per project; list
 prints the registry. ensure, per host (every registered host and pod
 entry without HOST|POD), starts again every session that ended on its own (duration,

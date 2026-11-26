@@ -13,7 +13,7 @@ import (
 func helpInvocations() [][]string {
 	var out [][]string
 	for _, name := range []string{"add", "rm", "collect", "deploy", "bootstrap", "build", "refresh", "open", "tui",
-		"expand", "query", "verify", "status", "list", "ensure", "prune"} {
+		"expand", "query", "verify", "sign", "status", "list", "ensure", "prune"} {
 		out = append(out, []string{name})
 	}
 	for _, v := range showViews {

@@ -14,7 +14,7 @@ import (
 // (docs/schema.md). Every event is validated first: a producer bug fails
 // the write instead of reaching a file a strict reader would reject.
 // Lines are encoded by AppendEvent, byte-identical to Go 1.26's
-// json.Marshal (keys in struct order; invalid UTF-8 as decision #32
+// json.Marshal (keys in struct order; invalid UTF-8 as decision #33
 // fixes it), so two writes of the same event are byte-identical;
 // it appends straight into the bufio buffer, so a line costs no
 // allocation (decision #25's per-event budget, task wc4).

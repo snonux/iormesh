@@ -67,7 +67,7 @@ ending, and rejects a line of 1 MiB or more. Linux paths are raw
 bytes: a path that is not valid UTF-8 is written with U+FFFD in
 place of the invalid bytes — lossy, and a known v1 limit. Each
 invalid byte becomes the six-byte escape `\ufffd`, whichever Go
-built the writer (decision #32); a valid U+FFFD stays raw.
+built the writer (decision #33); a valid U+FFFD stays raw.
 
 **The graph export** is written atomically by `WriteGraphFile`
 (synced temp file, mode 0644, renamed into place) with

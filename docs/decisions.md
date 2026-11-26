@@ -407,7 +407,41 @@ deferred.
   inside the 68-byte field, 63 would cut names of 64–67
   bytes.
 
-- **#32 Invalid UTF-8 in NDJSON, and the supported Go range** —
+- **#32 Unsigned release archives; operators sign** — owner
+  decision (2026-11-26, asked during task 7k4; built by task
+  5m4), amending #28 for releases. `mage release` builds and
+  packs the per-arch archives with a `SHA256SUMS` only: no
+  `.minisig`, no `minisign.pub` in an archive, no
+  `SHA256SUMS.minisig`; it needs no `IORMESH_MINISIGN_KEY` and
+  asks no password. Each artifact must still carry the release
+  version's stamp (`release.CheckStamp`), so a stale build is
+  never packed. Deploy and bootstrap keep verifying every build
+  against the operator's pinned key exactly as #28 says, so the
+  operator signs the builds they deploy with their own key:
+  `iormeshctl sign -key SECRET-KEY [-version V] DIR` signs the
+  release artifacts in an unpacked archive (the tracer, the
+  agent jar, the controllers; nothing else there) with no
+  repository checkout, and `mage sign` stays for a `dist/`
+  built from source. Both run the same `internal/release` code
+  (`SignRelease`/`SignDir`, `ReadSecretKey`): the stamp check
+  before any file is signed, the trusted comment
+  `file:<name> version:<x.y.z>`, a secret key that is a
+  regular file, not a symlink, the caller's own, with no group
+  or other permission, its password from
+  `$IORMESH_MINISIGN_PASSWORD` or read without echo from the
+  terminal, never printed. Why: the project holds no release
+  key that every operator would have to trust; each operator
+  already pins their own key on the controller and their
+  hosts, so a project signature would add a second trust
+  anchor nobody checks against, and a leaked project key would
+  reach every operator who pinned it. `SHA256SUMS` catches a
+  corrupt download; what is trusted is the operator's own
+  signature after they checked it. Rejected: signed archives
+  plus re-signing by the operator — two keys, and the project
+  key protects nothing deploy checks; shipping the project's
+  public key for operators to pin — the trust anchor this
+  decision removes.
+- **#33 Invalid UTF-8 in NDJSON, and the supported Go range** —
   the NDJSON writer (`schema.AppendEvent`) writes each invalid
   UTF-8 byte of a string as the six-byte escape `\ufffd`, by
   the project's own rule, not by whichever Go builds it. That
@@ -777,7 +811,10 @@ deferred.
   pinned (controller config; a root-owned copy on servers for
   upgrades), and who holds the private key (the release
   pipeline). *Default: minisign, key pinned in the controller
-  config.* Built with the default (task bb4; the owner has not
+  config.* *Amended by #32 (owner, 2026-11-26): release archives
+  ship unsigned and each operator signs with their own key, so
+  "the release pipeline" below is the operator.* Built with the
+  default (task bb4; the owner has not
   decided otherwise): minisign signatures made and checked with
   `aead.dev/minisign` (pinned in go.mod/go.sum; the files are
   plain minisign, so the `minisign` tool checks them too). The
