@@ -27,7 +27,10 @@
 #        host without a compiler; task ak4), S3_REV (the commit to name
 #        when the tree is no git checkout, e.g. staged on a test VM),
 #        S3_TIME (GNU time, default /usr/bin/time; a host without it
-#        takes a static build of cputime.c; task ak4)
+#        takes a static build of cputime.c; task ak4),
+#        S3_KIND_CALL (the kind mode's syscall, getppid or close: close(-1)
+#        is a traced kind, so its loop also meets the dispatcher's scope
+#        test; task 9m4)
 #
 # The method is load-tolerant (decision #25 as changed 2026-11-19, task
 # md4): the host is never quiet, so the gated figures are CPU times, not
@@ -69,6 +72,7 @@ runs=${S3_RUNS:-3}
 pairs=${S3_PAIRS:-10}
 modes=${S3_MODES:-traced bystander volume}
 kind_ops=${S3_KIND_OPS:-5000000}
+kind_call=${S3_KIND_CALL:-getppid}
 msg_loads=${S3_MSG_LOADS:-udp-mmsg netlink exec}
 msg_ops=${S3_MSG_OPS:-20000}
 time_bin=${S3_TIME:-/usr/bin/time}
@@ -405,7 +409,7 @@ volume() {
 # own CPU time: it starts in a few hundred microseconds, so no gate).
 kind_loop() {
     local t=$1 line
-    line=$(taskset -c "$load_cpus" "$kind_bin" "$t" "$kind_ops") ||
+    line=$(taskset -c "$load_cpus" "$kind_bin" "$t" "$kind_ops" "$kind_call") ||
         die "getppid loop failed"
     burst_elapsed=$(sed -n 's/.* elapsed_ns=\([0-9]*\) .*/\1/p' <<<"$line")
     burst_cpu=$(sed -n 's/.* cpu_ms=\([0-9]*\)$/\1/p' <<<"$line")
@@ -416,7 +420,7 @@ kind_loop() {
 kind_pair() {
     local t=$1 tag=$2 work idle
     kind_loop "$t"
-    echo "mode=kuntraced threads=$t ops=$kind_ops $tag" \
+    echo "mode=kuntraced threads=$t ops=$kind_ops call=$kind_call $tag" \
         "elapsed_ns=$burst_elapsed burst_cpu_ms=$burst_cpu load=$(loadavg)" >>"$samples"
     newdir
     sleep 600 &
@@ -428,7 +432,7 @@ kind_pair() {
     wait "$idle" 2>/dev/null || true
     forget "$idle"
     tracer_wait "$work"
-    echo "mode=kbystander threads=$t ops=$kind_ops $tag" \
+    echo "mode=kbystander threads=$t ops=$kind_ops call=$kind_call $tag" \
         "elapsed_ns=$burst_elapsed burst_cpu_ms=$burst_cpu" \
         "tracer_cpu_ms=$tracer_total load=$(loadavg)" >>"$samples"
     done_dir "$work"
@@ -579,6 +583,7 @@ summarize() {
         if (f["mode"] == "traced") sl[t][++ns2[t]] = f["elapsed_ns"] / ue[k]
         if (f["mode"] == "kuntraced") { kue[k] = f["elapsed_ns"]; kuc[k] = f["burst_cpu_ms"] }
         if (f["mode"] == "kbystander") {
+            kc_call = ("call" in f) ? f["call"] : "getppid"
             kc[t][++nk[t]] = f["burst_cpu_ms"] / kuc[k]
             ke[t][nk[t]] = f["elapsed_ns"] / kue[k]
         }
@@ -614,8 +619,8 @@ summarize() {
                 median(bc[t], nb[t]), median(be[t], nb[t]), nb[t], lo[t], hi[t]
         }
         for (t in kt)
-            printf "kind=getppid threads=%s kind_cpu=%s kind_wall=%s (pairs=%d)\n", \
-                t, median(kc[t], nk[t]), median(ke[t], nk[t]), nk[t]
+            printf "kind=%s threads=%s kind_cpu=%s kind_wall=%s (pairs=%d)\n", \
+                kc_call, t, median(kc[t], nk[t]), median(ke[t], nk[t]), nk[t]
         # msg: per spec, the traced load CPU and wall ratios and added
         # CPU ns per call, the tracer ns per event, events per call and
         # per second, NDJSON bytes per event, lost records (the largest),
@@ -649,7 +654,7 @@ header() {
         echo "# kernel $(uname -r); cpu $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | xargs) x$(nproc)"
         echo "# java $(java -version 2>&1 | head -1); workdir fs $(df -T "${TMPDIR:-/tmp}" | awk 'NR==2{print $2}')"
         echo "# ops=$ops threads=$threads runs=$runs pairs=$pairs modes=$modes" \
-            "kind_ops=$kind_ops msg_loads=$msg_loads msg_ops=$msg_ops" \
+            "kind_ops=$kind_ops kind_call=$kind_call msg_loads=$msg_loads msg_ops=$msg_ops" \
             "tracer_cpu=$tracer_cpu load_cpus=$load_cpus" \
             "tracer_flags=${tracer_flags[*]} agent=$agent perf=$perf segment=$segment" \
             "tracer=$tracer"

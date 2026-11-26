@@ -1,0 +1,14 @@
+# S3 samples 2026-11-26T09:50:28Z commit bd2bbe4+9m4 (no git checkout)
+# kernel 5.14.0-741.22.1.el9_9.x86_64; cpu Intel(R) N100 x2
+# java openjdk version "25.0.5.1" 2026-11-17 LTS; workdir fs xfs
+# ops=500000 threads=4 runs=3 pairs=5 modes=bystander kind_ops=5000000 kind_call=getppid msg_loads=udp-mmsg netlink exec msg_ops=20000 tracer_cpu=1 load_cpus=0 tracer_flags=-aggregate=false agent=0 perf=0 segment=0 tracer=/opt/9m4/bin/iormesh-nocompat
+mode=untraced threads=4 ops=500000 pair=1 elapsed_ns=1289212758 burst_cpu_ms=1350 load=3.70
+mode=bystander threads=4 ops=500000 pair=1 elapsed_ns=1515715972 burst_cpu_ms=1570 tracer_cpu_ms=930 events=3 load=3.48
+mode=untraced threads=4 ops=500000 pair=2 elapsed_ns=1277477296 burst_cpu_ms=1340 load=3.48
+mode=bystander threads=4 ops=500000 pair=2 elapsed_ns=1629577110 burst_cpu_ms=1700 tracer_cpu_ms=930 events=3 load=3.52
+mode=untraced threads=4 ops=500000 pair=3 elapsed_ns=1179014478 burst_cpu_ms=1200 load=3.52
+mode=bystander threads=4 ops=500000 pair=3 elapsed_ns=1516560108 burst_cpu_ms=1560 tracer_cpu_ms=920 events=3 load=3.32
+mode=untraced threads=4 ops=500000 pair=4 elapsed_ns=1243720430 burst_cpu_ms=1300 load=3.32
+mode=bystander threads=4 ops=500000 pair=4 elapsed_ns=1519272569 burst_cpu_ms=1560 tracer_cpu_ms=930 events=3 load=3.13
+mode=untraced threads=4 ops=500000 pair=5 elapsed_ns=1183477430 burst_cpu_ms=1240 load=3.13
+mode=bystander threads=4 ops=500000 pair=5 elapsed_ns=1520225771 burst_cpu_ms=1550 tracer_cpu_ms=930 events=3 load=3.04
