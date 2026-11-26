@@ -183,8 +183,9 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
     `known_hosts`, sudo without a password, and a throwaway
     signing-key password in `$IORMESH_MINISIGN_PASSWORD` —
     because each of those is a **Human step** in the guide an
-    agent must not take. Everything else (packages, the key,
-    the release, bootstrap, deploy) the agent does itself. The
+    agent must not take. Everything else (packages, the key —
+    `iormeshctl keygen` from that password, #38 — the release,
+    bootstrap, deploy) the agent does itself. The
     harness starts the test workload's microservices scenario
     on `iom2` before the run: it is the application under
     observation, as an operator's service would be. Links out

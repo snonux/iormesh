@@ -17,7 +17,8 @@
 // database and edits its naming rules (internal/servicedb, decision #24); verify checks
 // release binaries' minisign signatures against the pinned key
 // (internal/release, decision #28) and sign signs an unpacked release
-// with the operator's own key (sign.go, decision #32); deploy verifies the tracer build,
+// with the operator's own key (sign.go, decision #32), which keygen makes
+// without a terminal (keygen.go, decision #38); deploy verifies the tracer build,
 // stages it on registered hosts over the Transport, upgrades the installed
 // tracer through the sudoers rule and starts the projects (deploy.go).
 // bootstrap is the first install deploy cannot do: it prints the steps
@@ -242,6 +243,7 @@ var commands = map[string]func([]string, env) error{
 	"routes":     routesCommand,
 	"verify":     verifyCommand,
 	"sign":       signCommand,
+	"keygen":     keygenCommand,
 }
 
 func run(args []string, e env) int {

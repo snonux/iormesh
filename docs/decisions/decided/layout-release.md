@@ -122,3 +122,43 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
   change every trace's bytes; a `toolchain go1.26.x` line —
   it hides the 1.27 difference instead of settling it and
   costs a download.
+- **#38 `iormeshctl keygen` makes the operator's key without a
+  terminal** — task vm4 (2026-11-26), completing #32 for #37's
+  agent: `minisign -G` asks for the password on a terminal, so
+  an agent or a script holding it in
+  `$IORMESH_MINISIGN_PASSWORD` could sign but not make the key.
+  `iormeshctl keygen -key SECRET-KEY [-pub PUBLIC-KEY]` makes the
+  pair with the library `sign` already uses (`aead.dev/minisign`,
+  `release.WriteKeyPair`): the secret key encrypted with the
+  password exactly as `minisign -G` does (scrypt, the same
+  file format, so either tool reads the other's keys), the
+  public key at `-pub`, by default the pinned key path verify,
+  deploy and bootstrap read (`~/.config/iormesh/minisign.pub`).
+  Both files are new and 0600: an existing file or symlink at
+  either path is refused before anything is written, each is
+  created `O_CREAT|O_EXCL|O_NOFOLLOW` (the path `sign`'s
+  signature writes use), and a failed public key write removes
+  the secret key just made. A missing directory is made 0700,
+  and each key's directory must be the caller's and writable by
+  nobody else, as #28 holds the pinned key's. Nothing it prints
+  holds the password or the secret key: the two paths and the
+  key id. The password comes only from the environment, and an
+  unset or empty variable is refused; there is no `-unencrypted`
+  flag. Why: `ReadSecretKey`, and so `sign` and `mage sign`,
+  read only a password-encrypted key, so an unencrypted one
+  could sign nothing here and would protect every host that
+  pins it with a file read alone; a terminal prompt would
+  duplicate `minisign -G`, which asks twice and stays the way
+  by hand. Choosing the password stays a **Human step**; an
+  agent may run `keygen` once the human put the password in the
+  environment, as it may run `sign`. Rejected: documenting a
+  piped `minisign -G` — the Go CLI
+  (`aead.dev/minisign/cmd/minisign@v0.3.0`) reads one line of
+  stdin as the password when stdin is no terminal, but chapter 2
+  lets the operator install either CLI (a distribution's is
+  jedisct1's C one, whose non-terminal behaviour is its own), the
+  pipe is one more thing a smaller agent gets wrong (a trailing
+  newline, an `echo` that puts the password in the process
+  list), and the release archive already holds the controller,
+  so `keygen` needs no extra package; an unencrypted key for
+  agents — see above.

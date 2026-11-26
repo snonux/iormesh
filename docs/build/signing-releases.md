@@ -20,11 +20,13 @@ mage sign          # dist/NAME -> dist/NAME.minisig, then verified
 iormeshctl verify dist/iormesh-linux-amd64   # the controller's check
 ```
 
-- **Key**: a minisign key pair made once, e.g. `minisign -G -p
-  iormesh.pub -s iormesh.key`, with a password (the Go library
-  reads only scrypt-encrypted secret keys). It needs the
-  `minisign` CLI (your distribution's or Homebrew's `minisign`
-  package): iormeshctl signs and verifies but makes no keys.
+- **Key**: a minisign key pair made once, with a password (the
+  Go library reads only scrypt-encrypted secret keys): `iormeshctl
+  keygen -key iormesh.key [-pub iormesh.pub]` with the password
+  in `$IORMESH_MINISIGN_PASSWORD`, no terminal needed
+  (decisions.md #38), or by hand `minisign -G -p iormesh.pub -s
+  iormesh.key` with the `minisign` CLI (your distribution's or
+  Homebrew's package). Either reads the other's keys.
   The secret key is the operator's and never enters the
   repository: `mage sign` refuses a key path inside the tree. Both signers refuse a key
   file that is a symlink, not a regular file, someone else's,
@@ -163,8 +165,9 @@ download; it is not a signature, so trusting the archive is the
 operator's call (where it came from, or a rebuild of the tag
 compared byte for byte, with the JDK release the published jar
 names, "Reproducible" above). The key
-comes from the `minisign` CLI (`minisign -G`, "Key" under
-[Signing](#signing)); iormeshctl has no key generator. What
+comes from the archive's own controller (`iormeshctl keygen`)
+or the `minisign` CLI (`minisign -G`; "Key" under
+[Signing](#signing)). What
 deploy and bootstrap trust from then on is the operator's own
 signature:
 
