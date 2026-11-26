@@ -2312,6 +2312,15 @@ whose reference now knows `Before`), `internal/schema`
 and `internal/bpf` (`TestDrainIter`). Not yet run on el9
 (`iom1`); the iterators use only kernel 5.8 features.
 
+The cm4 review found that a host with a million open files in
+view would not have been seeded at all. The kernel's
+`bpf_seq_read` returns `EAGAIN` once one read() visits
+`MAX_ITER_OBJECTS` (1M) objects without output, and the seed
+programs write none; `drainIter` ended there. It now reads on,
+and the walk resumes. `TestDrainIter`'s EAGAIN case failed first
+(`resource temporarily unavailable after 1 reads`). The listener
+map is emptied after the walk too.
+
 ## el9 record layout (task of4)
 
 lb4's dispatch bug, the raw_syscalls record read at upstream's

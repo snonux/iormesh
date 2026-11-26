@@ -33,7 +33,17 @@ const (
 // It empties seed_listen_map, runs the listener pass, then the socket
 // pass: each iterator is attached, read to the end once — the programs
 // write nothing to the reader, their work is the visit — and detached.
-func (t *Tracer) SeedSockets() error {
+// It empties the map again afterwards, so the addresses and ports of
+// listeners that belong to no target do not stay in the kernel until
+// the next seeding.
+//
+// The records go into the ring buffer while the caller may not be
+// draining it (session.start seeds before its loop runs): the 16 MiB
+// ring holds about 140,000 of them. Past that a record is dropped and
+// counted like any ring drop; its socket stays registered, so its later
+// state changes still arrive, but its reads and writes name no
+// connection until one of them does.
+func (t *Tracer) SeedSockets() (err error) {
 	if t.closed() {
 		return errClosed
 	}
@@ -46,6 +56,11 @@ func (t *Tracer) SeedSockets() error {
 	if err := clearMap(listeners); err != nil {
 		return fmt.Errorf("empty %s: %w", seedListenMapName, err)
 	}
+	defer func() {
+		if cerr := clearMap(listeners); cerr != nil {
+			err = errors.Join(err, fmt.Errorf("empty %s: %w", seedListenMapName, cerr))
+		}
+	}()
 	for _, name := range []string{seedListenProg, seedSockProg} {
 		if err := t.runIter(name); err != nil {
 			return err
@@ -81,14 +96,19 @@ func (t *Tracer) runIter(name string) (err error) {
 	return nil
 }
 
-// drainIter reads r until EOF. An iterator's read returns 0 at the end;
-// EAGAIN never comes (the fd is blocking), and EINTR only retries.
+// drainIter reads r until EOF. An iterator's read returns 0 at the end.
+// EINTR retries, and so does EAGAIN: the kernel's bpf_seq_read
+// (kernel/bpf/bpf_iter.c, since 5.8, so on el9) returns it when one
+// read() visited MAX_ITER_OBJECTS (1M) objects without producing output
+// — the seed programs never write any — and the walk resumes where it
+// stopped on the next read. Ending there would leave every host with a
+// million open files in view unseeded.
 func drainIter(r io.Reader) error {
 	buf := make([]byte, 4096)
 	for {
 		n, err := r.Read(buf)
 		switch {
-		case errors.Is(err, syscall.EINTR):
+		case errors.Is(err, syscall.EINTR), errors.Is(err, syscall.EAGAIN):
 			continue
 		case err != nil:
 			return err

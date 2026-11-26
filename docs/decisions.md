@@ -540,8 +540,12 @@ deferred.
   every TCP socket of a traced target that is in no state of
   CLOSE or LISTEN and not registered yet, registers it as a
   connect would (pid, fd, socket inode; `BPF_NOEXIST`, so a
-  connect or accept racing the walk keeps its own entry and no
-  socket is seeded twice), and emits a `tcp_state` record
+  socket a connect or accept registered first is not seeded,
+  and a second seeding adds nothing; an accept whose exit runs
+  after the walk seeded its socket still emits its accept
+  snapshot — a second snapshot of one socket, harmless: the
+  correlator binds the same fd to the same socket), and emits
+  a `tcp_state` record
   whose old state is a marker beyond every TCP state:
   `TCP_STATE_INITIAL_SERVER` (258) when a listener holds the
   socket's local port, on its address or the wildcard (or the

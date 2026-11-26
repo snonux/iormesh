@@ -710,10 +710,13 @@ static __always_inline __s32 iormesh_seed_role(struct sock *sk, int state) {
 
 // iormesh_seed_register registers sk to pid's descriptor fd, as a connect
 // would, and reports whether it did. A socket registered already - by an
-// earlier seeding, or by a connect or accept racing this walk - keeps its
-// entry and is not seeded again: the update is BPF_NOEXIST. An entry of
-// another inode is an earlier life's whose TCP_CLOSE run was lost
-// (sock_owner_map): it is dropped first.
+// earlier seeding, or by a connect or accept that ran first - keeps its
+// entry and is not seeded again: the update is BPF_NOEXIST. The other
+// order is possible too: an accept whose exit runs after the walk seeded
+// its socket emits its accept snapshot all the same, a second snapshot of
+// one socket, which the correlator binds to the same fd and role - harmless.
+// An entry of another inode is an earlier life's whose TCP_CLOSE run was
+// lost (sock_owner_map): it is dropped first.
 static __always_inline int iormesh_seed_register(struct sock *sk, __u32 pid, __s32 fd, __u64 ino) {
     __u64 key = (__u64)sk;
     struct sock_owner owner = {.pid = pid, .fd = fd, .ino = ino};
