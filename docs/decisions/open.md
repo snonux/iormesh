@@ -164,7 +164,11 @@ Part of [Decisions](../decisions.md).
   denylist, program-scoped flags (mysql's `-p`), URL userinfo
   and query values, denied pairs of `&`/`;` runs (form bodies,
   scheme-less JDBC such as h2 files) and Oracle's thin
-  `user/password@` (task zi4); every exec of a traced process
+  `user/password@` (task zi4), and, in one generic last pass, a
+  denied key's value in any "key, `:` or `=`, value" syntax —
+  JSON (`--spring.application.json=`, `curl -d '{…}'`), YAML,
+  quoted dicts, pairs inside shell strings (task rm4); every
+  exec of a traced process
   becomes an `exec` event carrying its redacted argv, and the
   environment is never read. A process already running when the
   trace attaches (a `-pid` or port target, a pattern's start-scan
