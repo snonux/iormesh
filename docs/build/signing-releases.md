@@ -158,6 +158,17 @@ ls dist/release/0.1.0/
   file mtimes, which `--date` leaves at the build time. The
   workload jars are dated the same way, though not released.
 
+**An untagged commit for tests** (decisions.md #40, task 7n4):
+`mage releaseUntagged podman` builds and packs a clean, untagged
+HEAD exactly as above — same artifacts, stamps and archive names,
+since the version is the one compiled in — into
+`dist/untagged/<version>/`, never `dist/release/`. An `UNTAGGED`
+note sits next to `SHA256SUMS` and in every archive; its first
+line reads `iormesh 0.1.0 untagged build of commit <sha>: NOT a
+release`. It refuses a dirty tree and a HEAD at the release tag.
+The M8 agent trial serves it ([testing/agent-trial.md](../testing/agent-trial.md));
+never publish it.
+
 An operator goes from a download (or their own `mage release`)
 to a deploy in four steps: check, unpack, sign with their own
 key, deploy. `SHA256SUMS` catches a corrupt or truncated

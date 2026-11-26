@@ -28,8 +28,9 @@ type Options struct {
 	// and its results/ and runs/; Repo is the checkout the docs are
 	// copied from.
 	Dir, Repo string
-	// Workload is the workload jar; ReleaseDir is `mage release`'s
-	// directory of the commit under test, served to the controller.
+	// Workload is the workload jar; ReleaseDir is the directory of the
+	// commit under test's archives, served to the controller: `mage
+	// releaseUntagged`'s, or `mage release`'s at a release tag (#40).
 	Workload, ReleaseDir string
 	ReleasePort          int
 	Commit, Date         string
@@ -97,7 +98,8 @@ func (o Options) validate() error {
 	case o.Controller == "" || o.Traced == "" || o.Controller == o.Traced:
 		return fmt.Errorf("-controller %q and -traced %q: want two VMs", o.Controller, o.Traced)
 	case o.ReleaseDir == "":
-		return errors.New("-release-dir is required: `mage release`'s directory of the commit under test")
+		return errors.New("-release-dir is required: the archives of the commit under test " +
+			"(`mage releaseUntagged`'s directory, or `mage release`'s at a tag)")
 	case o.MaxTurns < 1 || o.Timeout <= 0:
 		return fmt.Errorf("-max-turns %d, -timeout %v: want both positive", o.MaxTurns, o.Timeout)
 	}

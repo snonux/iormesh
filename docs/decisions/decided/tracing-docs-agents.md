@@ -180,9 +180,9 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
     checkout — the builder's path, not the user's — and a
     smaller agent failing there would grade the build, not
     iormesh's use. Until a release is published, the archive
-    is `mage release` of the commit under test, served to the
-    VMs at a URL the task prompt names, as a release page
-    would.
+    is `mage releaseUntagged` of the commit under test (#40),
+    served to the VMs at a URL the task prompt names, as a
+    release page would.
   - **What the agent gets:** the fixed task prompt and
     question set (`eval/agent-trial/`), a copy of README.md,
     `docs/guide/` and the skill at the commit under test, and

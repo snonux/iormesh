@@ -162,3 +162,36 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
   list), and the release archive already holds the controller,
   so `keygen` needs no extra package; an unencrypted key for
   agents — see above.
+- **#40 An untagged build for tests, marked and kept apart** —
+  task 7n4 (2026-11-27), for #37's trial: `mage release` cuts
+  only a clean HEAD at the tag `v<internal/version.Version>`,
+  and the commit under test has no tag, so the first trial
+  tagged it locally for the build and deleted the tag.
+  `mage releaseUntagged ENGINE` runs Release's builds, stamp
+  checks and packing (`internal/dist`) on a clean HEAD that is
+  not that tag, into `dist/untagged/<version>/`, never
+  `dist/release/`. Next to `SHA256SUMS` and inside every
+  archive, beside the artifacts, it writes `UNTAGGED`, whose
+  first line reads `iormesh <version> untagged build of commit
+  <full sha>: NOT a release`, then the `git describe` and why.
+  A dirty tree is refused, so the build is one commit; a HEAD at
+  the release tag is refused, so the note is never false.
+  `mage release` is unchanged and still refuses every untagged
+  commit. The trial serves `dist/untagged/<version>/` by
+  default (`IORMESH_TRIAL_RELEASE_DIR` names another, such as a
+  tagged release's). Why: the artifacts' version is the
+  compiled-in stamp, and `internal/version` allows
+  MAJOR.MINOR.PATCH only, because signing's trusted comment,
+  deploy's verification and the upgrade's downgrade check (#1)
+  compare it; so the build keeps the stamp and the archive names
+  of its source's version, which also keeps the trial on guide
+  chapter 3's path, `iormesh-<version>-<arch>.tar.gz` and all.
+  What marks it is where it lands and the note it carries, not a
+  version string. Rejected: a pre-release or build-metadata
+  version (`0.1.0-trial.<sha>`) — every version check would
+  have to learn a second spelling, and deploy and the upgrade
+  would order builds by it; a documented temporary tag — a
+  `v*` tag on an unreleased commit is one push away from a
+  false release; an explicit `VERSION` override for `mage
+  release` — the stamp is compiled from the source, so the
+  override would name a version the binaries do not carry.

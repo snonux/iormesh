@@ -16,7 +16,7 @@ command output from the VMs to the agent's model provider (#37,
 "Data"), so it runs only with an agent named.
 
 ```sh
-mage release podman                 # dist/release/<version>/
+mage releaseUntagged podman         # dist/untagged/<version>/
 IORMESH_TRIAL_AGENT=claude IORMESH_TRIAL_MODE=guided mage agentTrial
 IORMESH_TRIAL_AGENT=pi mage agentTrial
 ```
@@ -29,16 +29,21 @@ IORMESH_TRIAL_AGENT=pi mage agentTrial
 | `IORMESH_TRIAL_CONTROLLER` | `iom1` | the VM the agent's shell lands on |
 | `IORMESH_TRIAL_TRACED` | `iom2` | the VM running the workload |
 | `IORMESH_TRIAL_SSH_CONFIG` | ssh's own | an `ssh -F` file naming the VMs |
-| `IORMESH_TRIAL_RELEASE_DIR` | `dist/release/<version>` | the release served |
+| `IORMESH_TRIAL_RELEASE_DIR` | `dist/untagged/<version>` | the release served |
 
 The VMs must be up and reachable as the laptop's `ssh iom1` and
 `ssh iom2` with sudo without a password, and the controller must
 resolve the traced host's name (the f3 VMs are in no DNS: the first
 trial added both to each VM's `/etc/hosts`). `mage release` cuts
-only a commit tagged `v<version>`; until a release target for an
-untagged commit exists (task 7n4) the first trial tagged the commit
-under test locally for the build and deleted the tag. The target builds the
-workload jar and runs the trial once; the inputs are in
+only a commit tagged `v<version>`, so the commit under test is
+packed by `mage releaseUntagged` (decisions.md #40, task 7n4): the
+same archives under the guide's names, in `dist/untagged/`, each
+carrying an `UNTAGGED` note with the commit. The first trial, before
+that target, tagged the commit locally for `mage release` and
+deleted the tag. To serve a tagged release instead, name its
+`dist/release/<version>/` in `IORMESH_TRIAL_RELEASE_DIR`.
+`mage agentTrial` builds the workload jar and runs the trial once;
+the inputs are in
 `eval/agent-trial/` (`task.md`, `questions.yaml`, `scenario.sh`).
 The result lands in `eval/agent-trial/results/<date>-<model>-<mode>.json`
 (kept; a rerun the same day gets `-2`, `-3`, never overwriting); the

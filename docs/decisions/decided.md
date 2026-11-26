@@ -24,7 +24,8 @@ Each part is its own file; open only the one you need.
   Go](decided/layout-release.md) — #30 repository-root layout,
   #31 verifier-safe array indexes, #32 unsigned release archives,
   #33 invalid UTF-8 in NDJSON and the supported Go range, #38
-  `iormeshctl keygen` makes the operator's key without a terminal.
+  `iormeshctl keygen` makes the operator's key without a terminal,
+  #40 an untagged build for tests, marked and kept apart.
 - [Container ids, pre-session connections, docs and
   agents](decided/tracing-docs-agents.md) — #34 the pod sandbox's
   container id, #35 connections open before the session, #36

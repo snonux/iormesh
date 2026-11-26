@@ -5,7 +5,9 @@
 // dist/release/. It signs nothing and needs no key (decision #32, task
 // 5m4): each operator signs an unpacked release with their own key
 // (`iormeshctl sign`). It publishes nothing; uploading the files is a
-// human step. The packing and its checks live in internal/dist, where
+// human step. ReleaseUntagged packs an untagged commit the same way into
+// dist/untagged/, marked UNTAGGED, for tests such as the M8 agent trial
+// (decision #40). The packing and its checks live in internal/dist, where
 // they are unit-tested.
 
 package main
@@ -42,13 +44,85 @@ func Release(engine string) error {
 	if err != nil {
 		return err
 	}
-	if err := ContainerBuild(engine, "all"); err != nil {
-		return err
-	}
-	if err := AgentBuild(); err != nil {
+	if err := buildReleaseArtifacts(engine); err != nil {
 		return err
 	}
 	return packRelease(mtime)
+}
+
+// ReleaseUntagged packs the clean, untagged HEAD with engine the way
+// Release packs a tagged one (decision #40), e.g. "mage releaseUntagged
+// podman", for tests that must serve the commit under test as a release
+// page would (the M8 agent trial, #37). The same builds, stamp checks and
+// archive names as Release — the artifacts carry internal/version's
+// stamp, which allows MAJOR.MINOR.PATCH only — but into
+// dist/untagged/<version>/, never dist/release/, with an UNTAGGED note
+// naming the commit next to SHA256SUMS and inside every archive. It
+// refuses a dirty tree and a HEAD at the release tag; Release still
+// refuses every untagged commit.
+func ReleaseUntagged(engine string) error {
+	note, mtime, err := checkUntaggedTree()
+	if err != nil {
+		return err
+	}
+	if err := buildReleaseArtifacts(engine); err != nil {
+		return err
+	}
+	return packUntagged(note, mtime)
+}
+
+// buildReleaseArtifacts runs every container build and mage agentBuild:
+// the dist/ both release targets pack.
+func buildReleaseArtifacts(engine string) error {
+	if err := ContainerBuild(engine, "all"); err != nil {
+		return err
+	}
+	return AgentBuild()
+}
+
+// checkUntaggedTree requires a clean HEAD that is not the version's tag
+// and returns the UNTAGGED note and the archives' mtime.
+func checkUntaggedTree() ([]byte, time.Time, error) {
+	describe, err := sh.Output("git", "describe", "--tags", "--dirty", "--always", "--match", "v[0-9]*")
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("untagged build: git describe: %w", err)
+	}
+	if err := dist.CheckUntagged(describe, version.Version); err != nil {
+		return nil, time.Time{}, err
+	}
+	commit, err := sh.Output("git", "rev-parse", "HEAD")
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("untagged build: git rev-parse: %w", err)
+	}
+	note, err := dist.UntaggedNote(commit, describe, version.Version)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	mtime, err := sourceDate()
+	return note, mtime, err
+}
+
+// packUntagged writes the UNTAGGED note into a fresh
+// dist/untagged/<version>/ and packs the archives there with the note as
+// one more extra, so it lands in every archive too.
+func packUntagged(note []byte, mtime time.Time) error {
+	out := filepath.Join(distDir, "untagged", version.Version)
+	if err := os.RemoveAll(out); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		return err
+	}
+	marker := filepath.Join(out, dist.UntaggedFile)
+	if err := os.WriteFile(marker, note, 0o644); err != nil {
+		return err
+	}
+	if err := packArchives(out, mtime, marker); err != nil {
+		return err
+	}
+	first, _, _ := strings.Cut(string(note), "\n")
+	fmt.Println(first)
+	return nil
 }
 
 // checkReleaseTree requires a clean HEAD at the version's tag and returns
@@ -96,6 +170,13 @@ func packRelease(mtime time.Time) error {
 	if err := os.RemoveAll(out); err != nil {
 		return err
 	}
+	return packArchives(out, mtime)
+}
+
+// packArchives packs dist/ into out with the releaseExtras the
+// repository has, then more (ReleaseUntagged's note), and prints what it
+// wrote.
+func packArchives(out string, mtime time.Time, more ...string) error {
 	var extra, missing []string
 	for _, name := range releaseExtras {
 		if _, err := os.Stat(name); err == nil {
@@ -106,7 +187,7 @@ func packRelease(mtime time.Time) error {
 	}
 	paths, err := dist.Pack(dist.Options{
 		DistDir: distDir, OutDir: out, Version: version.Version,
-		Arches: tracerArches, ModTime: mtime, Extra: extra,
+		Arches: tracerArches, ModTime: mtime, Extra: append(extra, more...),
 	})
 	if err != nil {
 		return err

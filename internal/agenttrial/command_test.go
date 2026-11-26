@@ -46,7 +46,7 @@ func TestMageArgs(t *testing.T) {
 	env := map[string]string{EnvAgent: "claude"}
 	got, err := MageArgs(func(k string) string { return env[k] })
 	want := []string{"run", "./cmd/iormeshtrial", "-agent", "claude", "-release-dir",
-		filepath.Join("dist", "release", version.Version)}
+		filepath.Join("dist", "untagged", version.Version)}
 	if err != nil || !slices.Equal(got, want) {
 		t.Errorf("defaults: %q, %v; want %q", got, err, want)
 	}

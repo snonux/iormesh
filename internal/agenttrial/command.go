@@ -36,7 +36,9 @@ func Command(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 // The environment of `mage agentTrial`: the agent is required, the rest
 // has defaults (the mode automatic, the agent's model, iom1 and iom2,
-// ssh's own config, `mage release`'s directory of this version).
+// ssh's own config, `mage releaseUntagged`'s directory of this version:
+// the commit under test is untagged until a release is cut, decision
+// #40; a tagged release is served by naming its directory).
 const (
 	EnvAgent      = "IORMESH_TRIAL_AGENT"
 	EnvMode       = "IORMESH_TRIAL_MODE"
@@ -62,7 +64,7 @@ func MageArgs(getenv func(string) string) ([]string, error) {
 	}
 	release := getenv(EnvReleaseDir)
 	if release == "" {
-		release = filepath.Join("dist", "release", version.Version)
+		release = filepath.Join("dist", "untagged", version.Version)
 	}
 	args := []string{"run", "./cmd/iormeshtrial", "-agent", agent, "-release-dir", release}
 	for _, f := range mageFlags {

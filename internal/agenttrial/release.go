@@ -16,7 +16,8 @@ import (
 const DefaultReleasePort = 18480
 
 // ReleaseServer serves the release archive of the commit under test
-// (decision #37, "Path tested": `mage release`'s directory) to the
+// (decision #37, "Path tested"; `mage releaseUntagged`'s directory for an
+// untagged commit, #40) to the
 // controller as a release page would: an HTTP file server on the laptop's
 // loopback, reached from the controller through an SSH reverse tunnel, so
 // the VMs need no route to the laptop and the laptop opens no port to any

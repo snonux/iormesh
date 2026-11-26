@@ -21,8 +21,10 @@ import (
 // AgentTrial runs cmd/iormeshtrial once with IORMESH_TRIAL_AGENT (claude
 // or pi) in IORMESH_TRIAL_MODE (automatic or guided) against
 // IORMESH_TRIAL_CONTROLLER and IORMESH_TRIAL_TRACED (default iom1, iom2),
-// serving IORMESH_TRIAL_RELEASE_DIR (default dist/release/<version>, made
-// by `mage release`). It builds the workload jar first. The result lands
+// serving IORMESH_TRIAL_RELEASE_DIR (default dist/untagged/<version>, made
+// by `mage releaseUntagged` from the untagged commit under test, decision
+// #40; for a tagged release name `mage release`'s directory). It builds
+// the workload jar first. The result lands
 // in eval/agent-trial/results/, the transcript and command log in
 // eval/agent-trial/runs/ (gitignored).
 func AgentTrial() error {
