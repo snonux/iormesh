@@ -1,0 +1,18 @@
+{
+  "agent": "claude",
+  "model": "claude-sonnet-5-5",
+  "mode": "automatic",
+  "date": "2026-11-26",
+  "commit": "ebb49ff",
+  "turns": 15,
+  "max_turns": 150,
+  "minutes": 0.8101911103333334,
+  "mesh": false,
+  "threshold": 0.8,
+  "score": 0,
+  "passed": false,
+  "failure": "agent: model command: exit status 1 (its stderr went to the terminal)",
+  "questions": [],
+  "transcript": "eval/agent-trial/runs/20261126T203559Z-claude-sonnet-5-5-automatic/transcript.jsonl",
+  "commands": "eval/agent-trial/runs/20261126T203559Z-claude-sonnet-5-5-automatic/commands.jsonl"
+}

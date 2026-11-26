@@ -4,7 +4,8 @@ iormesh is a proof of concept: all milestones, M0 to M7, are
 accepted; M5 (views, query and the LLM eval) was the last, once
 its eval passed with real models (task 9k4). M8 (a smaller
 agent installs and uses iormesh from the docs and a skill,
-decision #37) is planned. Rocky Linux
+decision #37) is not accepted: its first trial passed two of
+four cells (task nm4). Rocky Linux
 9.9 (el9, kernel 5.14) is the main target. The code lives in
 `cmd/` (`iormesh`, `iormeshctl`, `iormesheval`, `iormeshtrial`),
 `internal/`,

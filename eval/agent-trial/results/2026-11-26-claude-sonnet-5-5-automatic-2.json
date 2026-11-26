@@ -1,0 +1,81 @@
+{
+  "agent": "claude",
+  "model": "claude-sonnet-5-5",
+  "mode": "automatic",
+  "date": "2026-11-26",
+  "commit": "69a8975",
+  "turns": 81,
+  "max_turns": 150,
+  "minutes": 9.8387584498,
+  "mesh": false,
+  "mesh_error": "no fused edge to orders in show edges",
+  "threshold": 0.8,
+  "score": 0.9,
+  "passed": false,
+  "questions": [
+    {
+      "id": "orders-caller",
+      "passed": true,
+      "answer": "gateway",
+      "failures": []
+    },
+    {
+      "id": "orders-callees",
+      "passed": true,
+      "answer": "inventory and billing",
+      "failures": []
+    },
+    {
+      "id": "gateway-callees",
+      "passed": true,
+      "answer": "orders and inventory",
+      "failures": []
+    },
+    {
+      "id": "checkout-entry",
+      "passed": true,
+      "answer": "POST /orders",
+      "failures": []
+    },
+    {
+      "id": "gateway-stock",
+      "passed": true,
+      "answer": "GET /inventory/stock/widget",
+      "failures": []
+    },
+    {
+      "id": "orders-next-call",
+      "passed": true,
+      "answer": "POST /inventory/reserve, then POST /billing/charge",
+      "failures": []
+    },
+    {
+      "id": "tls-hops",
+      "passed": true,
+      "answer": "/orders and /billing/charge",
+      "failures": []
+    },
+    {
+      "id": "billing-record",
+      "passed": true,
+      "answer": "invoice-42.json (in billing.d/): created invoice-42.json.tmp, wrote it, then renamed it to invoice-42.json",
+      "failures": []
+    },
+    {
+      "id": "order-file-writer",
+      "passed": true,
+      "answer": "iormesh.workload.scenarios.DataStore#save",
+      "failures": []
+    },
+    {
+      "id": "billing-cert-reader",
+      "passed": false,
+      "answer": "orders; the Java method was not recorded (all 9 orders opens of billing.crt have attribution \"none\", consistent with the agent attaching after startup, and the -javaagent change that could capture it was not applied)",
+      "failures": [
+        "missing \"ServiceNode#readCert\""
+      ]
+    }
+  ],
+  "transcript": "eval/agent-trial/runs/20261126T203814Z-claude-sonnet-5-5-automatic/transcript.jsonl",
+  "commands": "eval/agent-trial/runs/20261126T203814Z-claude-sonnet-5-5-automatic/commands.jsonl"
+}

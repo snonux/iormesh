@@ -5,7 +5,8 @@ one set out to land, how it was built, and what accepted it. When
 this record was written (2026-11-24), M0, M1, M2, M3, M4, M6 and M7
 were accepted; M5 was accepted on 2026-11-26, when its LLM eval
 passed with real models (task 9k4). M8, added on 2026-11-26
-(decision #37), is planned. Rocky Linux 9.9 (el9, kernel 5.14)
+(decision #37), is not accepted: its first trial passed two of
+four cells (task nm4). Rocky Linux 9.9 (el9, kernel 5.14)
 is the main target.
 
 Decision numbers (`#N`) refer to [decisions.md](decisions.md);
@@ -84,4 +85,4 @@ then open only the part you need.
   map.
 - [M8 — A smaller agent installs and uses iormesh](milestones/m8.md) — the
   iormesh skill, the trial harness on the iom VMs, and the four-cell
-  acceptance (planned).
+  acceptance (not accepted: two of four cells passed, nm4).

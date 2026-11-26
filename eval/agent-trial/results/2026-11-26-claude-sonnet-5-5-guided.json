@@ -1,0 +1,80 @@
+{
+  "agent": "claude",
+  "model": "claude-sonnet-5-5",
+  "mode": "guided",
+  "date": "2026-11-26",
+  "commit": "32aca05",
+  "turns": 47,
+  "max_turns": 150,
+  "minutes": 15.204168486916666,
+  "mesh": true,
+  "threshold": 0.8,
+  "score": 0.9,
+  "passed": true,
+  "questions": [
+    {
+      "id": "orders-caller",
+      "passed": true,
+      "answer": "gateway",
+      "failures": []
+    },
+    {
+      "id": "orders-callees",
+      "passed": true,
+      "answer": "inventory and billing",
+      "failures": []
+    },
+    {
+      "id": "gateway-callees",
+      "passed": true,
+      "answer": "orders and inventory",
+      "failures": []
+    },
+    {
+      "id": "checkout-entry",
+      "passed": true,
+      "answer": "POST /orders",
+      "failures": []
+    },
+    {
+      "id": "gateway-stock",
+      "passed": true,
+      "answer": "GET /inventory/stock/widget",
+      "failures": []
+    },
+    {
+      "id": "orders-next-call",
+      "passed": true,
+      "answer": "POST /inventory/reserve, then POST /billing/charge",
+      "failures": []
+    },
+    {
+      "id": "tls-hops",
+      "passed": true,
+      "answer": "/orders and /billing/charge",
+      "failures": []
+    },
+    {
+      "id": "billing-record",
+      "passed": true,
+      "answer": "invoice-42.json (in billing.d): create invoice-42.json.tmp, write it, then rename it to invoice-42.json",
+      "failures": []
+    },
+    {
+      "id": "order-file-writer",
+      "passed": true,
+      "answer": "iormesh.workload.scenarios.DataStore#save",
+      "failures": []
+    },
+    {
+      "id": "billing-cert-reader",
+      "passed": false,
+      "answer": "orders; Java class#method not captured (its start-up reads of billing.crt have attribution \"none\", and the -javaagent restart was not applied)",
+      "failures": [
+        "missing \"ServiceNode#readCert\""
+      ]
+    }
+  ],
+  "transcript": "eval/agent-trial/runs/20261126T210504Z-claude-sonnet-5-5-guided/transcript.jsonl",
+  "commands": "eval/agent-trial/runs/20261126T210504Z-claude-sonnet-5-5-guided/commands.jsonl"
+}

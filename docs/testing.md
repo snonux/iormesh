@@ -136,10 +136,12 @@ then open only the part you need.
     replacement (ah4), rerun with pod fields (6k4).
 - [The M8 agent trial harness](testing/agent-trial.md) — running
   `mage agentTrial`, the sandbox, the scripted user, preparation, budget
-  and score, the tests (mm4).
+  and score, the tests (mm4), the first trial's four cells (nm4).
   - [Running it (task mm4)](testing/agent-trial.md#running-it-task-mm4)
   - [The sandbox](testing/agent-trial.md#the-sandbox)
   - [The scripted user](testing/agent-trial.md#the-scripted-user)
   - [Preparation, budget and
     score](testing/agent-trial.md#preparation-budget-and-score)
   - [Tests](testing/agent-trial.md#tests)
+  - [The first trial (task nm4,
+    2026-11-26)](testing/agent-trial.md#the-first-trial-task-nm4-2026-11-26)
