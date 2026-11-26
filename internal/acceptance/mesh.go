@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"iormesh/internal/normalize"
@@ -187,6 +188,7 @@ func checkMicroAt(m viewmodel.Model, c Config, ps microPorts) (string, error) {
 	}{{ps.orders, "tls", 1, "orders"}, {ps.billing, "tls", 1, "billing"},
 		{ps.inventory, "plain", 2, "inventory"}}
 	var seen []string
+	servers := map[string]bool{} // the found services' names, edge targets
 	for _, w := range want {
 		s, ok := serviceByPort(m, c.port(w.port))
 		if !ok {
@@ -196,22 +198,29 @@ func checkMicroAt(m viewmodel.Model, c Config, ps microPorts) (string, error) {
 			return "", fmt.Errorf("%s: %d conns, %d unresolved, tls %q; want >= %d, 0, %q",
 				s.Name, s.Conns, s.Unresolved, s.TLS, w.minConns, w.tls)
 		}
+		servers[s.Name] = true
 		seen = append(seen, fmt.Sprintf("%s %s x%d", s.Name, s.TLS, s.Conns))
 	}
+	// An edge's To is its server's service name: the endpoint label for
+	// an unnamed server, the rule's name for a named one. Matching the
+	// found services by name covers both, where parsing a port out of
+	// e.To missed a named server.
 	for _, e := range m.Edges {
-		if microPort(e.To, c, ps) && e.State != viewmodel.StateFused {
+		if servers[e.To] && e.State != viewmodel.StateFused {
 			return "", fmt.Errorf("edge %s -> %s is %s", e.From, e.To, e.State)
 		}
 	}
 	return "all hops fused: " + strings.Join(seen, ", "), nil
 }
 
-// serviceByPort finds the service with an endpoint on port.
+// serviceByPort finds the service with an endpoint on port. The model
+// carries an endpoint only as its label, so the port is parsed from it
+// (endpointPort), which ignores the "@host" a loopback endpoint carries
+// since task ai4; a ":PORT" suffix match missed those (task 7m4).
 func serviceByPort(m viewmodel.Model, port int) (viewmodel.Service, bool) {
-	suffix := fmt.Sprintf(":%d", port)
 	for _, s := range m.Services {
 		for _, ep := range s.Endpoints {
-			if strings.HasSuffix(ep, suffix) {
+			if p, ok := endpointPort(ep); ok && p == port {
 				return s, true
 			}
 		}
@@ -219,12 +228,24 @@ func serviceByPort(m viewmodel.Model, port int) (viewmodel.Service, bool) {
 	return viewmodel.Service{}, false
 }
 
-// microPort reports whether a service label names one of ps's ports.
-func microPort(label string, c Config, ps microPorts) bool {
-	for _, off := range []int{ps.orders, ps.billing, ps.inventory} {
-		if strings.HasSuffix(label, fmt.Sprintf(":%d", c.port(off))) {
-			return true
-		}
+// endpointPort is the port of an endpoint label as the view model
+// writes it (servicedb.Endpoint.Label without its service): host:port,
+// [ipv6]:port or ip:port, ending in "@host" for a loopback or
+// link-local endpoint since task ai4. A host id has no '@' or ':', a
+// hostname or IP has no '@', so the port is the text between the last
+// ':' and an optional '@'. A label without a port (a named service's
+// name) gives false.
+func endpointPort(label string) (int, bool) {
+	if i := strings.LastIndexByte(label, '@'); i >= 0 {
+		label = label[:i]
 	}
-	return false
+	i := strings.LastIndexByte(label, ':')
+	if i < 0 {
+		return 0, false
+	}
+	port, err := strconv.Atoi(label[i+1:])
+	if err != nil || port <= 0 {
+		return 0, false
+	}
+	return port, true
 }
