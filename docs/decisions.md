@@ -167,7 +167,11 @@ deferred.
      from its ready file to its exit (load and attach excluded),
      which host load moves less than wall time — not nothing: on
      a loaded SMT host one thread's CPU time still spreads 2–3×,
-     hence medians of ≥ 5 runs;
+     hence medians of ≥ 5 runs. Task ak4 (2026-11-26, Rocky 9.9 on
+     the 2-vCPU `iom1`, after the msghdr handlers, ti4, wi4 and
+     lh4): 1.06 / 1.05 µs at 1 / 4 threads, the build before them
+     1.02 / 1.00 — passes; a msghdr event on a netlink-heavy load
+     costs 3.9 µs (not gated; task am4);
   2. *bystander cost* (host-wide, every untraced process) — M1:
      ~1.14× per traced-kind syscall at 4 and 16 threads. Budget: ≤ 1.25× on
      `syscall-burst` at 4 threads, paid only while a trace runs.
@@ -198,7 +202,11 @@ deferred.
      build's namespace 1.23× / 1.23× (wall 1.24× / 1.25×) in the
      same set — a thin margin the burst barely resolves; the
      instruction counts are the firm part (s3-overhead.md,
-     "Follow-up (9f4)");
+     "Follow-up (9f4)"). On el9 (task ak4, `iom1`, 30 pairs):
+     1.255× after the msghdr handlers and 1.245× before them, wall
+     1.269× / 1.261× — the handlers change nothing, but the item
+     is **over** by a hair on el9 in both builds, task 9m4
+     (s3-overhead.md, "Re-measure on Rocky 9.9");
   3. *loss* — M1: 16–42 % of ring records on a sustained burst,
      0 on a short burst and on the M0 scenarios. Budget: zero
      lost records on every M0/M2 scenario, and < 1 % on

@@ -1,0 +1,4 @@
+threads=1 tracer_ns_per_event=234375 (n=3) slowdown=1.56738 bystander_cpu=- bystander_wall=- (pairs=0 load=-)
+threads=4 tracer_ns_per_event=31832.7 (n=3) slowdown=1.55237 bystander_cpu=- bystander_wall=- (pairs=0 load=-)
+kind=getppid threads=1 kind_cpu=1.43124 kind_wall=1.43222 (pairs=3)
+kind=getppid threads=4 kind_cpu=1.49853 kind_wall=1.49937 (pairs=3)

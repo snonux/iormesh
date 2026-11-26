@@ -1,0 +1,28 @@
+# S3 samples 2026-11-26T08:06:37Z commit f049b03 (no git checkout)
+# kernel 5.14.0-741.22.1.el9_9.x86_64; cpu Intel(R) N100 x2
+# java openjdk version "25.0.5.1" 2026-11-17 LTS; workdir fs xfs
+# ops=200000 threads=1 4 runs=3 pairs=3 modes=traced kind kind_ops=2000000 msg_loads=udp-mmsg netlink exec msg_ops=20000 tracer_cpu=1 load_cpus=0 tracer_flags= agent=0 perf=0 segment=0 tracer=/opt/ak4/bin/iormesh-base
+mode=untraced threads=1 ops=200000 run=1 elapsed_ns=518560983 burst_cpu_ms=560 load=1.25
+mode=traced threads=1 ops=200000 run=1 elapsed_ns=801492224 burst_cpu_ms=850 tracer_cpu_ms=960 tracer_run_cpu_ms=30 lost=0 kernel_lost=0 skipped_runs=0 events=118 ndjson_bytes=38212 attributed=0 insn_u=0 insn_k=0 cyc_u=0 cyc_k=0 load=1.25
+mode=untraced threads=4 ops=200000 run=1 elapsed_ns=509621984 burst_cpu_ms=560 load=1.25
+mode=traced threads=4 ops=200000 run=1 elapsed_ns=792878071 burst_cpu_ms=840 tracer_cpu_ms=1000 tracer_run_cpu_ms=70 lost=0 kernel_lost=0 skipped_runs=0 events=2199 ndjson_bytes=700375 attributed=0 insn_u=0 insn_k=0 cyc_u=0 cyc_k=0 load=1.23
+mode=untraced threads=1 ops=200000 run=2 elapsed_ns=516078952 burst_cpu_ms=560 load=1.23
+mode=traced threads=1 ops=200000 run=2 elapsed_ns=817243782 burst_cpu_ms=850 tracer_cpu_ms=960 tracer_run_cpu_ms=30 lost=0 kernel_lost=0 skipped_runs=0 events=128 ndjson_bytes=41388 attributed=0 insn_u=0 insn_k=0 cyc_u=0 cyc_k=0 load=1.21
+mode=untraced threads=4 ops=200000 run=2 elapsed_ns=512764915 burst_cpu_ms=570 load=1.21
+mode=traced threads=4 ops=200000 run=2 elapsed_ns=794212391 burst_cpu_ms=850 tracer_cpu_ms=1010 tracer_run_cpu_ms=80 lost=0 kernel_lost=0 skipped_runs=0 events=2249 ndjson_bytes=716230 attributed=0 insn_u=0 insn_k=0 cyc_u=0 cyc_k=0 load=1.21
+mode=untraced threads=1 ops=200000 run=3 elapsed_ns=530516487 burst_cpu_ms=580 load=1.21
+mode=traced threads=1 ops=200000 run=3 elapsed_ns=831518554 burst_cpu_ms=870 tracer_cpu_ms=960 tracer_run_cpu_ms=30 lost=0 kernel_lost=0 skipped_runs=0 events=137 ndjson_bytes=44248 attributed=0 insn_u=0 insn_k=0 cyc_u=0 cyc_k=0 load=1.19
+mode=untraced threads=4 ops=200000 run=3 elapsed_ns=510018073 burst_cpu_ms=570 load=1.19
+mode=traced threads=4 ops=200000 run=3 elapsed_ns=791736822 burst_cpu_ms=830 tracer_cpu_ms=1000 tracer_run_cpu_ms=60 lost=0 kernel_lost=0 skipped_runs=0 events=2219 ndjson_bytes=706684 attributed=0 insn_u=0 insn_k=0 cyc_u=0 cyc_k=0 load=1.10
+mode=kuntraced threads=1 ops=2000000 pair=1 elapsed_ns=865157279 burst_cpu_ms=859 load=1.10
+mode=kbystander threads=1 ops=2000000 pair=1 elapsed_ns=1285086272 burst_cpu_ms=1283 tracer_cpu_ms=950 load=1.01
+mode=kuntraced threads=1 ops=2000000 pair=2 elapsed_ns=859258308 burst_cpu_ms=858 load=1.01
+mode=kbystander threads=1 ops=2000000 pair=2 elapsed_ns=1230645601 burst_cpu_ms=1228 tracer_cpu_ms=950 load=1.01
+mode=kuntraced threads=1 ops=2000000 pair=3 elapsed_ns=865676165 burst_cpu_ms=864 load=1.01
+mode=kbystander threads=1 ops=2000000 pair=3 elapsed_ns=1230434337 burst_cpu_ms=1228 tracer_cpu_ms=950 load=1.01
+mode=kuntraced threads=4 ops=2000000 pair=1 elapsed_ns=3437309877 burst_cpu_ms=3426 load=1.25
+mode=kbystander threads=4 ops=2000000 pair=1 elapsed_ns=5107163199 burst_cpu_ms=5094 tracer_cpu_ms=950 load=1.47
+mode=kuntraced threads=4 ops=2000000 pair=2 elapsed_ns=3412112505 burst_cpu_ms=3404 load=1.67
+mode=kbystander threads=4 ops=2000000 pair=2 elapsed_ns=5116030239 burst_cpu_ms=5101 tracer_cpu_ms=960 load=1.86
+mode=kuntraced threads=4 ops=2000000 pair=3 elapsed_ns=3401171445 burst_cpu_ms=3391 load=2.03
+mode=kbystander threads=4 ops=2000000 pair=3 elapsed_ns=5144814069 burst_cpu_ms=5132 tracer_cpu_ms=960 load=2.19

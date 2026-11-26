@@ -1,0 +1,1 @@
+msg=exec:300 traced_cpu=1.13458 traced_wall=1.1418 added_ns_per_call=251667 tracer_ns_per_event=8135.63 events_per_call=63.5067 events_per_s=29233.9 bytes_per_event=328.168 max_lost=0 (n=5) bystander_cpu=1.05551 bystander_wall=1.05451 (n=5)

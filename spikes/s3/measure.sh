@@ -20,7 +20,14 @@
 #        S3_SEGMENT (1: the traced run writes M4's parquet segments —
 #        -trace-dir in its work dir, -disk-limit 0, no -out — and its
 #        events are counted from the segments' footers by rowcount.go;
-#        task ee4)
+#        task ee4),
+#        S3_MSG_LOADS (the "msg" mode's msgload specs, LOAD[:OPS[:BATCH]],
+#        default "udp-mmsg netlink exec"), S3_MSG_OPS (default 20000),
+#        S3_MSG_BIN and S3_KIND_BIN (a built msgload / getppid, for a
+#        host without a compiler; task ak4), S3_REV (the commit to name
+#        when the tree is no git checkout, e.g. staged on a test VM),
+#        S3_TIME (GNU time, default /usr/bin/time; a host without it
+#        takes a static build of cputime.c; task ak4)
 #
 # The method is load-tolerant (decision #25 as changed 2026-11-19, task
 # md4): the host is never quiet, so the gated figures are CPU times, not
@@ -43,6 +50,11 @@
 #              S3_KIND_OPS calls per thread) in place of the burst: a
 #              syscall of a kind no family traces, which since task 8e4
 #              still meets the raw_syscalls dispatchers (task ae4).
+#   msg        S3_RUNS rounds of untraced, traced and bystander runs of
+#              each msgload spec (msgload.c): sendmmsg/recvmmsg batches,
+#              netlink dumps over sendmsg/recvmsg, and `ip`/`ss` execs —
+#              the default handlers and late attaches added after S3
+#              (task ak4). Opt-in.
 #
 # Every sample is one line in OUTDIR/samples.txt; summary.txt holds the
 # medians (summarize below). Throwaway spike code: the numbers, not the
@@ -57,6 +69,9 @@ runs=${S3_RUNS:-3}
 pairs=${S3_PAIRS:-10}
 modes=${S3_MODES:-traced bystander volume}
 kind_ops=${S3_KIND_OPS:-5000000}
+msg_loads=${S3_MSG_LOADS:-udp-mmsg netlink exec}
+msg_ops=${S3_MSG_OPS:-20000}
+time_bin=${S3_TIME:-/usr/bin/time}
 tracer_cpu=${S3_TRACER_CPU:-3}
 load_cpus=${S3_LOAD_CPUS:-0-2,4-6}
 # shellcheck disable=SC2206 # word splitting is the point: one flag per word
@@ -239,7 +254,7 @@ tracer_start() {
     # used percent, and a developer's root may be fuller than its 90 %
     # default; the free-bytes floor stays.
     [ "$segment" = 1 ] && sink=(-trace-dir "$dir/td" -disk-limit 0)
-    sudo -n taskset -c "$tracer_cpu" /usr/bin/time -f '%U %S' -o "$dir/time" \
+    sudo -n taskset -c "$tracer_cpu" "$time_bin" -f '%U %S' -o "$dir/time" \
         "$tracer" run -pid "$pid" -project s3 "${sink[@]}" -duration 10m \
         -ready "$dir/ready" "${tracer_flags[@]}" "${spool[@]}" 2>"$dir/tracer.err" &
     tpid=$!
@@ -419,15 +434,111 @@ kind_pair() {
     done_dir "$work"
 }
 
+# msg_start starts msgload (S3_MSG_BIN) with one load spec, pinned to the
+# load CPUs and held at its startup gate, and sets jpid and bpid as
+# burst_start does. A spec is LOAD[:OPS[:BATCH]] (msgload.c's usage; OPS
+# defaults to S3_MSG_OPS); one thread, since the VM this mode was written
+# for has two CPUs (task ak4).
+msg_start() {
+    local spec=$1 dir=$2 l o b
+    IFS=: read -r l o b <<<"$spec"
+    IORMESH_WORKLOAD_STARTUP_FILE=$dir/gate \
+        taskset -c "$load_cpus" "$msg_bin" "$l" 1 "${o:-$msg_ops}" ${b:+"$b"} \
+        >"$dir/out" 2>"$dir/load.err" &
+    jpid=$!
+    pids+=("$jpid")
+    bpid=$(wait_line "$dir/out" '^[0-9]+$')
+}
+
+# msg_finish opens the gate, waits for msgload's result line and sets
+# burst_elapsed, burst_cpu (its own getrusage, children included) and
+# msg_calls.
+msg_finish() {
+    local dir=$1 line
+    touch "$dir/gate"
+    line=$(wait_line "$dir/out" '^msgload ')
+    wait "$jpid" || die "msgload failed: $(tail -3 "$dir/load.err")"
+    forget "$jpid"
+    burst_elapsed=$(sed -n 's/.* elapsed_ns=\([0-9]*\) .*/\1/p' <<<"$line")
+    burst_cpu=$(sed -n 's/.* cpu_ms=\([0-9]*\)$/\1/p' <<<"$line")
+    msg_calls=$(sed -n 's/.* calls=\([0-9]*\) .*/\1/p' <<<"$line")
+}
+
+# msg_round takes one round of a load: untraced, traced by its own PID
+# (the tracer's CPU per event, loss, events and NDJSON bytes), and
+# beside a tracer attached to an idle process. spec= tags the samples
+# (load= is the load average, as everywhere); run= pairs the three for
+# summarize.
+msg_round() {
+    local spec=$1 tag="spec=$1 run=$2" work idle
+    newdir
+    msg_start "$spec" "$work"
+    msg_finish "$work"
+    echo "mode=muntraced $tag elapsed_ns=$burst_elapsed burst_cpu_ms=$burst_cpu" \
+        "calls=$msg_calls load=$(loadavg)" >>"$samples"
+    done_dir "$work"
+    newdir
+    msg_start "$spec" "$work"
+    tracer_start "$bpid" "$work"
+    msg_finish "$work"
+    tracer_wait "$work"
+    echo "mode=mtraced $tag elapsed_ns=$burst_elapsed burst_cpu_ms=$burst_cpu" \
+        "calls=$msg_calls tracer_cpu_ms=$tracer_total" \
+        "tracer_run_cpu_ms=$((tracer_total - ready_cpu))" \
+        "lost=$(sed -n 's/.*lost records \([0-9][0-9]*\).*/\1/p' "$work/tracer.err")" \
+        "skipped_runs=$(sed -n 's/.*skipped runs \([0-9][0-9]*\).*/\1/p' "$work/tracer.err")" \
+        "events=$(wc -l <"$work/trace/events.ndjson")" \
+        "ndjson_bytes=$(stat -c %s "$work/trace/events.ndjson") load=$(loadavg)" >>"$samples"
+    done_dir "$work"
+    newdir
+    sleep 600 &
+    idle=$!
+    pids+=("$idle")
+    tracer_start "$idle" "$work"
+    msg_start "$spec" "$work"
+    msg_finish "$work"
+    kill "$idle"
+    wait "$idle" 2>/dev/null || true
+    forget "$idle"
+    tracer_wait "$work"
+    echo "mode=mbystander $tag elapsed_ns=$burst_elapsed burst_cpu_ms=$burst_cpu" \
+        "calls=$msg_calls tracer_cpu_ms=$tracer_total load=$(loadavg)" >>"$samples"
+    done_dir "$work"
+}
+
+# run_msg builds msgload.c into a work dir (gone with the run) unless
+# S3_MSG_BIN names a built one (a host without a compiler), and takes
+# S3_RUNS rounds of every spec in S3_MSG_LOADS, the specs interleaved
+# within a round.
+run_msg() {
+    local -i r
+    local s
+    msg_bin=${S3_MSG_BIN:-}
+    if [ -z "$msg_bin" ]; then
+        newdir
+        msg_bin=$work/msgload
+        cc -O2 -pthread -o "$msg_bin" "$repo/spikes/s3/msgload.c" ||
+            die "cannot build msgload.c"
+    fi
+    for ((r = 1; r <= runs; r++)); do
+        for s in $msg_loads; do
+            msg_round "$s" "$r"
+        done
+    done
+}
+
 # run_kind builds the getppid loop into a work dir (gone with the run) and
 # takes S3_PAIRS pairs of it per thread count.
 run_kind() {
     local -i p
     local t
-    newdir
-    kind_bin=$work/getppid
-    cc -O2 -pthread -o "$kind_bin" "$repo/spikes/s3/getppid.c" ||
-        die "cannot build getppid.c"
+    kind_bin=${S3_KIND_BIN:-}
+    if [ -z "$kind_bin" ]; then
+        newdir
+        kind_bin=$work/getppid
+        cc -O2 -pthread -o "$kind_bin" "$repo/spikes/s3/getppid.c" ||
+            die "cannot build getppid.c"
+    fi
     for t in $threads; do
         for ((p = 1; p <= pairs; p++)); do
             kind_pair "$t" "pair=$p"
@@ -471,7 +582,26 @@ summarize() {
             kc[t][++nk[t]] = f["burst_cpu_ms"] / kuc[k]
             ke[t][nk[t]] = f["elapsed_ns"] / kue[k]
         }
-        if (f["mode"] !~ /^k/) th[t] = 1
+        if (f["mode"] ~ /^m/) {
+            sp = f["spec"]; k = sp SUBSEP f["run"]; ms[sp] = 1
+            if (f["mode"] == "muntraced") { mue[k] = f["elapsed_ns"]; muc[k] = f["burst_cpu_ms"] }
+            if (f["mode"] == "mtraced" && f["events"] > 0) {
+                n = ++mn[sp]
+                mns[sp][n] = f["tracer_run_cpu_ms"] * 1e6 / f["events"]
+                mtc[sp][n] = f["burst_cpu_ms"] / muc[k]
+                mtw[sp][n] = f["elapsed_ns"] / mue[k]
+                mev[sp][n] = f["events"] / f["calls"]
+                mrt[sp][n] = f["events"] * 1e9 / f["elapsed_ns"]
+                mby[sp][n] = f["ndjson_bytes"] / f["events"]
+                mlo[sp][n] = f["lost"]
+                mad[sp][n] = (f["burst_cpu_ms"] - muc[k]) * 1e6 / f["calls"]
+            }
+            if (f["mode"] == "mbystander") {
+                n = ++mb[sp]
+                mbc[sp][n] = f["burst_cpu_ms"] / muc[k]
+                mbw[sp][n] = f["elapsed_ns"] / mue[k]
+            }
+        } else if (f["mode"] !~ /^k/) th[t] = 1
         else kt[t] = 1
     }
     END {
@@ -486,6 +616,21 @@ summarize() {
         for (t in kt)
             printf "kind=getppid threads=%s kind_cpu=%s kind_wall=%s (pairs=%d)\n", \
                 t, median(kc[t], nk[t]), median(ke[t], nk[t]), nk[t]
+        # msg: per spec, the traced load CPU and wall ratios and added
+        # CPU ns per call, the tracer ns per event, events per call and
+        # per second, NDJSON bytes per event, lost records (the largest),
+        # and the bystander ratios.
+        for (sp in ms) {
+            asort(mlo[sp], lw, "@val_num_desc")
+            printf "msg=%s traced_cpu=%s traced_wall=%s added_ns_per_call=%s" \
+                " tracer_ns_per_event=%s events_per_call=%s events_per_s=%s" \
+                " bytes_per_event=%s max_lost=%s (n=%d)", \
+                sp, median(mtc[sp], mn[sp]), median(mtw[sp], mn[sp]), median(mad[sp], mn[sp]), \
+                median(mns[sp], mn[sp]), median(mev[sp], mn[sp]), median(mrt[sp], mn[sp]), \
+                median(mby[sp], mn[sp]), lw[1], mn[sp]
+            printf " bystander_cpu=%s bystander_wall=%s (n=%d)\n", \
+                median(mbc[sp], mb[sp]), median(mbw[sp], mb[sp]), mb[sp]
+        }
     }' "$samples" >"$out/summary.txt"
 }
 
@@ -493,14 +638,19 @@ summarize() {
 # it, so a sample file never claims a script version it was not taken by.
 header() {
     local rev
-    rev=$(git -C "$repo" rev-parse --short HEAD)
-    git -C "$repo" diff --quiet HEAD -- spikes/s3/measure.sh || rev+=+dirty
+    # A tree staged without .git (a test VM) names S3_REV instead.
+    if rev=$(git -C "$repo" rev-parse --short HEAD 2>/dev/null); then
+        git -C "$repo" diff --quiet HEAD -- spikes/s3/measure.sh || rev+=+dirty
+    else
+        rev="${S3_REV:-unknown} (no git checkout)"
+    fi
     {
         echo "# S3 samples $(date -u +%Y-%m-%dT%H:%M:%SZ) commit $rev"
         echo "# kernel $(uname -r); cpu $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | xargs) x$(nproc)"
         echo "# java $(java -version 2>&1 | head -1); workdir fs $(df -T "${TMPDIR:-/tmp}" | awk 'NR==2{print $2}')"
         echo "# ops=$ops threads=$threads runs=$runs pairs=$pairs modes=$modes" \
-            "kind_ops=$kind_ops tracer_cpu=$tracer_cpu load_cpus=$load_cpus" \
+            "kind_ops=$kind_ops msg_loads=$msg_loads msg_ops=$msg_ops" \
+            "tracer_cpu=$tracer_cpu load_cpus=$load_cpus" \
             "tracer_flags=${tracer_flags[*]} agent=$agent perf=$perf segment=$segment" \
             "tracer=$tracer"
     } >>"$samples"
@@ -550,6 +700,7 @@ main() {
         bystander) run_bystander ;;
         volume) volume ;;
         kind) run_kind ;;
+        msg) run_msg ;;
         *) die "unknown mode $m" ;;
         esac
     done
