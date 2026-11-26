@@ -1,0 +1,47 @@
+# gawk -f drivers/pool.awk per set: medians over pairs; added_ns and base_ns are CPU ns per syscall
+## burst
+empty              n=10 cpu=1.193 wall=1.188 added_ns=240 base_ns=1255 over1.25=0
+full               n=10 cpu=1.261 wall=1.279 added_ns=325 base_ns=1260 over1.25=5
+mirror             n=10 cpu=1.190 wall=1.207 added_ns=240 base_ns=1260 over1.25=1
+## burst2
+empty              n=20 cpu=1.175 wall=1.184 added_ns=220 base_ns=1260 over1.25=0
+full               n=20 cpu=1.249 wall=1.261 added_ns=310 base_ns=1290 over1.25=9
+mirror             n=20 cpu=1.202 wall=1.215 added_ns=255 base_ns=1250 over1.25=1
+nocompat           n=20 cpu=1.248 wall=1.256 added_ns=310 base_ns=1260 over1.25=9
+## burst3
+full               n=20 cpu=1.255 wall=1.262 added_ns=325 base_ns=1265 over1.25=11
+kernonly           n=20 cpu=1.228 wall=1.246 added_ns=290 base_ns=1300 over1.25=7
+mirror             n=20 cpu=1.213 wall=1.211 added_ns=265 base_ns=1265 over1.25=1
+tgidonly           n=20 cpu=1.235 wall=1.245 added_ns=305 base_ns=1320 over1.25=7
+## burst burst2 burst3
+empty              n=30 cpu=1.179 wall=1.186 added_ns=225 base_ns=1260 over1.25=0
+full               n=50 cpu=1.252 wall=1.265 added_ns=320 base_ns=1260 over1.25=25
+kernonly           n=20 cpu=1.228 wall=1.246 added_ns=290 base_ns=1300 over1.25=7
+mirror             n=50 cpu=1.202 wall=1.212 added_ns=255 base_ns=1260 over1.25=3
+nocompat           n=20 cpu=1.248 wall=1.256 added_ns=310 base_ns=1260 over1.25=9
+tgidonly           n=20 cpu=1.235 wall=1.245 added_ns=305 base_ns=1320 over1.25=7
+## burst-mitoff
+empty              n=15 cpu=1.169 wall=1.176 added_ns=130 base_ns=770 over1.25=0
+full               n=15 cpu=1.195 wall=1.220 added_ns=150 base_ns=770 over1.25=0
+## kinds
+empty-close        n= 9 cpu=1.386 wall=1.386 added_ns=162 base_ns=420 over1.25=9
+empty-getppid      n= 9 cpu=1.405 wall=1.405 added_ns=178 base_ns=434 over1.25=9
+full-close         n= 9 cpu=1.526 wall=1.527 added_ns=223 base_ns=418 over1.25=9
+full-getppid       n= 9 cpu=1.458 wall=1.453 added_ns=198 base_ns=432 over1.25=9
+mirror-close       n= 9 cpu=1.475 wall=1.475 added_ns=200 base_ns=410 over1.25=9
+mirror-getppid     n= 9 cpu=1.463 wall=1.464 added_ns=201 base_ns=434 over1.25=9
+nocompat-close     n= 9 cpu=1.514 wall=1.511 added_ns=217 base_ns=416 over1.25=9
+nocompat-getppid   n= 9 cpu=1.437 wall=1.442 added_ns=193 base_ns=436 over1.25=9
+## kinds-mitoff
+empty-close        n= 3 cpu=1.423 wall=1.421 added_ns=54 base_ns=126 over1.25=3
+empty-getppid      n= 3 cpu=1.444 wall=1.440 added_ns=54 base_ns=122 over1.25=3
+full-close         n= 3 cpu=1.631 wall=1.634 added_ns=80 base_ns=126 over1.25=3
+full-getppid       n= 3 cpu=1.512 wall=1.515 added_ns=62 base_ns=121 over1.25=3
+## ak4 (iom1, for comparison)
+by4-new            n=20 cpu=1.255 wall=1.268 added_ns=320 base_ns=1260 over1.25=11
+by4-base           n=20 cpu=1.246 wall=1.263 added_ns=310 base_ns=1255 over1.25=9
+## laptop ae4 (7.2, btrfs, load 4-7; "bystander" pools its 1- and 4-thread pairs)
+bystander          n=20 cpu=1.195 wall=1.190 added_ns=288 base_ns=1908 over1.25=5
+bystander-4b       n=10 cpu=1.143 wall=1.186 added_ns=370 base_ns=2658 over1.25=1
+## laptop 9f4 bench-new-host, 4 threads (7.2, btrfs, load 2-9)
+x                  n=20 cpu=1.148 wall=1.150 added_ns=275 base_ns=1988 over1.25=4   (its threads=4 lines alone)

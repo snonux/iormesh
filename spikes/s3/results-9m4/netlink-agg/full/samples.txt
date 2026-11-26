@@ -1,0 +1,16 @@
+# S3 samples 2026-11-26T10:02:34Z commit bd2bbe4 (no git checkout)
+# kernel 5.14.0-741.22.1.el9_9.x86_64; cpu Intel(R) N100 x2
+# java openjdk version "25.0.5.1" 2026-11-17 LTS; workdir fs xfs
+# ops=200000 threads=1 4 16 runs=4 pairs=10 modes=msg kind_ops=5000000 kind_call=getppid msg_loads=netlink:100000 msg_ops=20000 tracer_cpu=1 load_cpus=0 tracer_flags= agent=0 perf=0 segment=0 tracer=/opt/9m4/bin/iormesh-full
+mode=muntraced spec=netlink:100000 run=1 elapsed_ns=943582689 burst_cpu_ms=941 calls=300000 load=2.04
+mode=mtraced spec=netlink:100000 run=1 elapsed_ns=1316452248 burst_cpu_ms=1310 calls=300000 tracer_cpu_ms=1550 tracer_run_cpu_ms=550 lost=0 skipped_runs=0 events=300005 ndjson_bytes=98091679 load=1.96
+mode=mbystander spec=netlink:100000 run=1 elapsed_ns=1076842136 burst_cpu_ms=1072 calls=300000 tracer_cpu_ms=1030 load=1.88
+mode=muntraced spec=netlink:100000 run=2 elapsed_ns=949837968 burst_cpu_ms=947 calls=300000 load=1.88
+mode=mtraced spec=netlink:100000 run=2 elapsed_ns=1331213717 burst_cpu_ms=1324 calls=300000 tracer_cpu_ms=1460 tracer_run_cpu_ms=460 lost=0 skipped_runs=0 events=300005 ndjson_bytes=98091702 load=1.88
+mode=mbystander spec=netlink:100000 run=2 elapsed_ns=1045078662 burst_cpu_ms=1041 calls=300000 tracer_cpu_ms=1020 load=1.81
+mode=muntraced spec=netlink:100000 run=3 elapsed_ns=957910289 burst_cpu_ms=954 calls=300000 load=1.81
+mode=mtraced spec=netlink:100000 run=3 elapsed_ns=1394739461 burst_cpu_ms=1384 calls=300000 tracer_cpu_ms=1510 tracer_run_cpu_ms=490 lost=0 skipped_runs=0 events=300005 ndjson_bytes=98094419 load=1.75
+mode=mbystander spec=netlink:100000 run=3 elapsed_ns=1042603779 burst_cpu_ms=1039 calls=300000 tracer_cpu_ms=1030 load=2.17
+mode=muntraced spec=netlink:100000 run=4 elapsed_ns=942470406 burst_cpu_ms=939 calls=300000 load=2.17
+mode=mtraced spec=netlink:100000 run=4 elapsed_ns=1334250880 burst_cpu_ms=1326 calls=300000 tracer_cpu_ms=1460 tracer_run_cpu_ms=450 lost=0 skipped_runs=0 events=300005 ndjson_bytes=98091637 load=2.17
+mode=mbystander spec=netlink:100000 run=4 elapsed_ns=1048950761 burst_cpu_ms=1042 calls=300000 tracer_cpu_ms=1040 load=2.07

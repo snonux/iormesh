@@ -1,0 +1,31 @@
+# 9m4, iom1 (Rocky 9.9, 5.14.0-741.22.1.el9_9, 2 vCPU N100), 2026-11-26.
+# drivers/stats.sh: the dispatchers' run_cnt / run_time_ns (sysctl
+# kernel.bpf_stats_enabled=1, which itself adds two clock reads per run)
+# while a load runs beside a tracer of an idle sleep. close = 2 M close(-1)
+# calls (getppid.c's close mode), burst = syscall-burst 4 threads 500 k ops.
+# Two interleaved rounds. "empty" returns at once, so its figure is the
+# stats' own cost plus the program's entry from a cold cache.
+empty close handle_raw_sys_enter runs=2034908 ns_per_run=46.8
+empty close handle_raw_sys_exit runs=2034908 ns_per_run=35.1
+empty burst handle_raw_sys_enter runs=1038511 ns_per_run=95.7
+empty burst handle_raw_sys_exit runs=1038521 ns_per_run=41.1
+mirror close handle_raw_sys_enter runs=2034818 ns_per_run=60.2
+mirror close handle_raw_sys_exit runs=2034818 ns_per_run=36.8
+mirror burst handle_raw_sys_enter runs=1038497 ns_per_run=119.5
+mirror burst handle_raw_sys_exit runs=1038507 ns_per_run=42.6
+full close handle_raw_sys_enter runs=2034877 ns_per_run=72.5
+full close handle_raw_sys_exit runs=2034877 ns_per_run=46.7
+full burst handle_raw_sys_enter runs=1038556 ns_per_run=132.7
+full burst handle_raw_sys_exit runs=1038566 ns_per_run=60.6
+empty close handle_raw_sys_enter runs=2034822 ns_per_run=44.4
+empty close handle_raw_sys_exit runs=2034822 ns_per_run=33.9
+empty burst handle_raw_sys_enter runs=1038568 ns_per_run=93.7
+empty burst handle_raw_sys_exit runs=1038577 ns_per_run=40.8
+mirror close handle_raw_sys_enter runs=2034844 ns_per_run=65.6
+mirror close handle_raw_sys_exit runs=2034844 ns_per_run=36.0
+mirror burst handle_raw_sys_enter runs=1038486 ns_per_run=123.1
+mirror burst handle_raw_sys_exit runs=1038496 ns_per_run=42.3
+full close handle_raw_sys_enter runs=2034861 ns_per_run=75.5
+full close handle_raw_sys_exit runs=2034861 ns_per_run=46.5
+full burst handle_raw_sys_enter runs=1038588 ns_per_run=129.0
+full burst handle_raw_sys_exit runs=1038598 ns_per_run=62.1

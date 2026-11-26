@@ -171,7 +171,8 @@ deferred.
      the 2-vCPU `iom1`, after the msghdr handlers, ti4, wi4 and
      lh4): 1.06 / 1.05 µs at 1 / 4 threads, the build before them
      1.02 / 1.00 — passes; a msghdr event on a netlink-heavy load
-     costs 3.9 µs (not gated; task am4);
+     costs 3.9 µs (not gated; task am4), 1.50 µs after am4's
+     reflection-free decode (task 9m4, same VM);
   2. *bystander cost* (host-wide, every untraced process) — M1:
      ~1.14× per traced-kind syscall at 4 and 16 threads. Budget: ≤ 1.25× on
      `syscall-burst` at 4 threads, paid only while a trace runs.
@@ -206,7 +207,27 @@ deferred.
      1.255× after the msghdr handlers and 1.245× before them, wall
      1.269× / 1.261× — the handlers change nothing, but the item
      is **over** by a hair on el9 in both builds, task 9m4
-     (s3-overhead.md, "Re-measure on Rocky 9.9");
+     (s3-overhead.md, "Re-measure on Rocky 9.9"). Task 9m4
+     (2026-11-26, same VM): **1.252×** CPU, wall 1.265× (50
+     pairs) — on the line. The trace adds ~0.32 µs to each
+     bystander read or write, no more than on the laptop
+     (0.28–0.37 µs); 70 % of it is the `raw_syscalls` tracepoint
+     path with an empty program (1.18× alone), the rest the
+     dispatcher's mirror lookup and scope test, which no cheap
+     change removes. The ratio is higher because the el9 guest's
+     syscall is cheap (1.26 µs on xfs, one CPU, against
+     1.9–2.7 µs on the laptop's btrfs) and because the guest runs
+     retpolines, PTI and MDS clearing (bhyve hides the N100's
+     `ARCH_CAPABILITIES`): booted with `mitigations=off` the same
+     VM measures 1.195× (wall 1.22×) (s3-overhead.md, "Follow-up
+     (9m4)"). *Proposed amendment, for the owner — the limit is
+     unchanged until then:* keep ≤ 1.25× as the gate on a host
+     whose CPU mitigations are the hardware's own (bare metal or a
+     hypervisor that passes `ARCH_CAPABILITIES`), and accept the
+     measured **1.25× (CPU) / 1.27× (wall)** as el9's figure in a
+     guest running the full software mitigation set, with the
+     added CPU per bystander read or write (≤ 0.35 µs there) as
+     the figure that must not grow;
   3. *loss* — M1: 16–42 % of ring records on a sustained burst,
      0 on a short burst and on the M0 scenarios. Budget: zero
      lost records on every M0/M2 scenario, and < 1 % on

@@ -1,0 +1,10 @@
+# S3 samples 2026-11-26T09:39:01Z commit bd2bbe4+9m4 (no git checkout)
+# kernel 5.14.0-741.22.1.el9_9.x86_64; cpu Intel(R) N100 x2
+# java openjdk version "25.0.5.1" 2026-11-17 LTS; workdir fs xfs
+# ops=200000 threads=1 runs=3 pairs=3 modes=kind kind_ops=2000000 kind_call=close msg_loads=udp-mmsg netlink exec msg_ops=20000 tracer_cpu=1 load_cpus=0 tracer_flags= agent=0 perf=0 segment=0 tracer=/opt/9m4/bin/iormesh-mirror
+mode=kuntraced threads=1 ops=2000000 call=close pair=1 elapsed_ns=813719654 burst_cpu_ms=812 load=0.79
+mode=kbystander threads=1 ops=2000000 call=close pair=1 elapsed_ns=1274257896 burst_cpu_ms=1268 tracer_cpu_ms=1020 load=0.79
+mode=kuntraced threads=1 ops=2000000 call=close pair=2 elapsed_ns=867084211 burst_cpu_ms=866 load=0.81
+mode=kbystander threads=1 ops=2000000 call=close pair=2 elapsed_ns=1206547058 burst_cpu_ms=1204 tracer_cpu_ms=1040 load=0.81
+mode=kuntraced threads=1 ops=2000000 call=close pair=3 elapsed_ns=800550134 burst_cpu_ms=799 load=0.81
+mode=kbystander threads=1 ops=2000000 call=close pair=3 elapsed_ns=1240715215 burst_cpu_ms=1235 tracer_cpu_ms=1020 load=0.82

@@ -1,0 +1,1 @@
+msg=netlink:100000 traced_cpu=1.43603 traced_wall=1.4384 added_ns_per_call=1356.67 tracer_ns_per_event=1499.98 events_per_call=1.00002 events_per_s=222954 bytes_per_event=326.967 max_lost=0 (n=5) bystander_cpu=1.10817 bystander_wall=1.10842 (n=5)

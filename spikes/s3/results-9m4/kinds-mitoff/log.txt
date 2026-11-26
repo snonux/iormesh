@@ -1,0 +1,6 @@
+start 2026-11-26T10:06:34Z
+empty getppid 1 rc=0 10:06:41
+empty close 1 rc=0 10:06:48
+full getppid 1 rc=0 10:06:56
+full close 1 rc=0 10:07:03
+end 2026-11-26T10:07:03Z
