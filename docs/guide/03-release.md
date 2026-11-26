@@ -22,7 +22,9 @@ minisign -G -p ~/.config/iormesh/minisign.pub -s ~/.minisign/iormesh.key
 chmod 600 ~/.minisign/iormesh.key
 ```
 
-Give the key a password: the signing library reads only
+This needs the `minisign` CLI from chapter 2; iormeshctl signs
+and verifies but makes no keys. Give the key a password (`-G`
+asks for it): the signing library reads only
 password-encrypted secret keys, and both signers refuse a key
 file others may read. `~/.config/iormesh/minisign.pub` is where
 iormeshctl looks for the pinned public key by default (`-key`
@@ -46,8 +48,10 @@ tar -xzf iormesh-0.1.0-amd64.tar.gz
 
 `SHA256SUMS` catches a corrupt download; it is no signature.
 Whether to trust the archive is your call — where it came from,
-or your own `mage release` of the tag compared with it — and
-your signature, next, is what deploy trusts from then on.
+or your own `mage release` of the tag compared with it (for now
+binary by binary: the agent jar does not rebuild to the same
+bytes yet, [build.md](../build.md#releases)) — and your
+signature, next, is what deploy trusts from then on.
 
 **Checkpoint:** `sha256sum -c` prints `OK` for the archive;
 `iormesh-0.1.0-amd64/` holds `iormesh-linux-amd64`,

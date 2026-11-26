@@ -1897,6 +1897,92 @@ powered off, and no `qemu-system-aarch64` process remained.
   rebuilt or run on an x86 el9 host.
 - `mage bpfRootTest` on the 7.2 laptop passes.
 
+## Release dry run v0.1.0 (task 7k4, 2026-11-26)
+
+The first release candidate, cut as a dry run and checked as an
+operator would, following [build.md](build.md#releases) and
+[guide chapter 3](guide/03-release.md) literally. Nothing was
+published: the `v0.1.0` tag was local only, on `c10b0a3` (commit
+time 2026-11-26 09:58:16 +0200) in a git worktree, never
+pushed, and deleted again (`git tag -d v0.1.0`) after the runs;
+no upload, no GitHub release. Releases ship unsigned
+(decisions.md #32), so the run needed no key or password.
+
+- **Release**: `LIBBPFGO=… nice -n 10 mage release podman`
+  exited 0 in about three minutes on the Fedora laptop (builder
+  images cached from earlier work). Every Linux binary passed
+  its `--help` smoke run on Rocky 9 of its own arch (arm64
+  emulated), none skipped. Output, `dist/release/0.1.0/`:
+
+  | File | Bytes | SHA-256 |
+  |---|---|---|
+  | `iormesh-0.1.0-amd64.tar.gz` | 26626747 | `0c9ec424…71f3c` |
+  | `iormesh-0.1.0-arm64.tar.gz` | 24621304 | `2d90a316…772c6` |
+  | `SHA256SUMS` | 186 | `106ad907…ddbdb7` |
+
+  Each archive holds, under `iormesh-0.1.0-<arch>/`, root 0/0,
+  every mtime the commit time: `CHANGELOG.md` (5524),
+  `LICENSE` (1068), `iormesh-agent.jar` (291845, 0644), and
+  0755 `iormesh-linux-<arch>` (amd64 32260664, arm64 30229584),
+  `iormeshctl-darwin-<arch>` (23586176, 22130898),
+  `iormeshctl-linux-<arch>` (23404150, 21898733) — what the
+  guide's checkpoint lists.
+- **Checksums**: in a fresh scratch directory, `sha256sum -c
+  --ignore-missing SHA256SUMS` and plain `sha256sum -c` printed
+  `OK` for both archives.
+- **Sign**: with a throwaway key pair (below),
+  `./iormeshctl-linux-amd64 sign -key KEY .` in the unpacked
+  amd64 archive (password from `$IORMESH_MINISIGN_PASSWORD`)
+  signed the four builds at 0.1.0, `4 files signed by key
+  E2864DAA8B31E755`; `CHANGELOG.md` and `LICENSE` got no
+  `.minisig`. The same controller signed the unpacked arm64
+  archive the same way.
+- **Verify**: `verify -key PUB` printed `OK, signed <file>
+  0.1.0` for all four amd64 builds and for the arm64 tracer
+  copied with its `.minisig` next to them (the guide's
+  both-arches step). Refusals, exit 1 each: `LICENSE` (`open
+  LICENSE.minisig: no such file or directory`), the jar with
+  one byte appended (`the file does not match its signature`),
+  and the tracer against the laptop's real pinned key (`signed
+  by key E2864DAA8B31E755, the pinned key is …`). `deploy` was
+  not run: no hosts in a dry run.
+- **Determinism**: a second `mage release podman` rebuilt
+  every container binary and gave byte-identical archives and
+  `SHA256SUMS` (`cmp`). The jar was **not** rebuilt in that
+  run (`agentBuild` found it fresh); removing
+  `bin/iormesh-agent.jar` and running `mage agentBuild` again
+  (OpenJDK 25.0.5) gave other bytes (`fdc86361…` against
+  `5779b517…`): each zip entry carries its build time and the
+  nested bridge jar differs with it. Filed as task bm4; until
+  then a rebuild of a tag matches a downloaded archive only
+  binary by binary.
+- **Refusal**: with the tag deleted, `mage release podman`
+  stopped up front: `release: no v0.1.0 tag reachable from
+  HEAD`.
+
+Where the docs and reality differed (fixed in this commit):
+
+- The guide's key step needs the `minisign` CLI, and nothing
+  said that iormeshctl cannot make a key or where minisign
+  comes from; it is not installed on this laptop, so the
+  throwaway key came from a ten-line Go helper outside the
+  repository (`aead.dev/minisign` v0.3.0 `GenerateKey` and
+  `EncryptKey`, the library iormeshctl uses), and `minisign
+  -Vm` was not run. build.md "Signing", guide chapters 2 and 3
+  now say so.
+- Guide chapter 2 listed the repository, Go, mage and Podman as
+  laptop prerequisites, though chapter 3 lets an operator
+  download a release; they are marked as needed only to build
+  one.
+- build.md and chapter 3 offered "a rebuild of the tag compared
+  byte for byte" as a trust check, which the jar defeats (task
+  bm4); both now say binary by binary until it is fixed.
+
+Everything else ran as written: the `ls` of
+`dist/release/0.1.0/`, the archive contents, the `sign` output
+format, `verify`'s pinned key and `-key`, and the both-arches
+step.
+
 ## el9 runbook and runs
 
 Rocky 9.9 is the main target, and some evidence exists only as
