@@ -1391,6 +1391,16 @@ exec'd command.
   600 execs (~0.15 ms of tracer CPU per exec of a traced process),
   and the traced load 2 points more; no JVM was involved.
 
+**Task am4** took the reflection out: the generator
+(`internal/generate/typesgo_decode.go`) now emits fixed-offset
+little-endian loads for every record whose C layout has no internal
+padding — 38 of the 42 constructors that used `binary.Read`, the
+address record among them; the four padded ones (socketpair, accept,
+pipe, poll) keep it behind their hand-written fast decoders.
+`BenchmarkNewSockAddrEvent` on the laptop (i7-1185G7, 7.3): 4.5–5.4 µs
+and 2 allocations (288 B) per record before, 51–53 ns and none after.
+The el9 netlink re-measure (`S3_MODES=msg`) is still to be run.
+
 | #25 item | ak4 verdict (el9, iom1) |
 |---|---|
 | tracer CPU | **passes**: 1.06 / 1.05 µs per burst event at 1 / 4 threads, base 1.02 / 1.00; a msghdr event costs 3.9 µs on the netlink load (not gated; task am4) |

@@ -7,12 +7,12 @@ import "encoding/binary"
 const tcpSeqEventSize = 48
 
 // NewTcpSeqEventFast decodes a TCP data call's exit record with its
-// sequence number (tcpseq.c, task xe4) field by field, as NewTcpSeqEvent's
-// binary.Read does by reflection: it is the exit record of every single
-// TCP send and receive, so it is decoded the way the hot records are
-// (decision #25; NewJavaMarkEventFast). Like
-// binary.Read it rejects a short payload (nil) and ignores bytes past the
-// struct.
+// sequence number (tcpseq.c, task xe4) field by field, as NewTcpSeqEvent
+// did with reflective binary.Read (and, since task am4, reads directly
+// too): it is the exit record of every single TCP send and receive, so it
+// is decoded the way the hot records are (decision #25;
+// NewJavaMarkEventFast). Like binary.Read it rejects a short payload (nil)
+// and ignores bytes past the struct.
 func NewTcpSeqEventFast(raw []byte) *TcpSeqEvent {
 	if len(raw) < tcpSeqEventSize {
 		return nil

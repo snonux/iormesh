@@ -1,5 +1,5 @@
 // Adapted from ior internal/generate/typesgo.go @ b21afc50328c.
-// Changes: none.
+// Changes: generated constructors decode with direct field loads (task am4).
 
 package generate
 
@@ -97,8 +97,12 @@ func GenerateTypesGo(structs []CStruct, constants []CConstant) string {
 		fmt.Fprintf(&b, "const %s%s = %s\n", c.Name, constType, c.Value)
 	}
 
+	consts := make(map[string]string, len(constants))
+	for _, c := range constants {
+		consts[c.Name] = c.Value
+	}
 	for _, s := range structs {
-		writeGoStruct(&b, s)
+		writeGoStruct(&b, s, consts)
 	}
 
 	return b.String()
@@ -325,7 +329,7 @@ func (s TraceId) NoReturn() bool {
 `)
 }
 
-func writeGoStruct(b *strings.Builder, s CStruct) {
+func writeGoStruct(b *strings.Builder, s CStruct, consts map[string]string) {
 	goName := snakeToCamel(s.Name)
 	selfRef := strings.ToLower(goName[:1])
 	// These fields belong to older, wider records that can still arrive from
@@ -350,7 +354,7 @@ func writeGoStruct(b *strings.Builder, s CStruct) {
 
 	if strings.HasSuffix(goName, "Event") {
 		b.WriteString("\n")
-		writeSyncPool(b, goName, selfRef)
+		writeSyncPool(b, goName, selfRef, s.Members, members, consts)
 	}
 }
 
@@ -500,7 +504,12 @@ func writeRetGetterMethod(b *strings.Builder, goName, selfRef string, members []
 	fmt.Fprintf(b, "func (%s *%s) GetRet() int64 {\n\treturn %s\n}\n\n", selfRef, goName, expr)
 }
 
-func writeSyncPool(b *strings.Builder, goName, selfRef string) {
+// writeSyncPool emits the pool, the New<goName> decoder, Bytes and Recycle
+// of an event struct. cMembers are the C struct's members, members the Go
+// struct's (cMembers plus any compatibility fields); the decoder reads them
+// with direct little-endian loads when the layout allows it (task am4, see
+// typesgo_decode.go) and with binary.Read otherwise.
+func writeSyncPool(b *strings.Builder, goName, selfRef string, cMembers, members []CMember, consts map[string]string) {
 	if write, ok := specialCodecs[goName]; ok {
 		write(b, selfRef)
 		return
@@ -511,12 +520,11 @@ func writeSyncPool(b *strings.Builder, goName, selfRef string) {
 		b.WriteString("\tif len(raw) != 300 && len(raw) != 304 {\n\t\treturn nil\n\t}\n")
 		b.WriteString("\tif binary.LittleEndian.Uint32(raw[296:300]) != FD_PATH_EVENT_SCHEMA_VERSION {\n\t\treturn nil\n\t}\n")
 	}
-	fmt.Fprintf(b, "\t%s := poolOf%ss.Get().(*%s)\n", selfRef, goName, goName)
-	fmt.Fprintf(b, "\tif err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, %s); err != nil {\n", selfRef)
-	fmt.Fprintf(b, "\t\t*%s = %s{}\n", selfRef, goName)
-	fmt.Fprintf(b, "\t\tpoolOf%ss.Put(%s)\n", goName, selfRef)
-	b.WriteString("\t\treturn nil\n\t}\n")
-	fmt.Fprintf(b, "\treturn %s\n}\n\n", selfRef)
+	if fields, size, ok := planDirectDecode(cMembers, members, consts); ok {
+		writeDirectDecode(b, goName, selfRef, fields, size)
+	} else {
+		writeReflectiveDecode(b, goName, selfRef)
+	}
 
 	fmt.Fprintf(b, "func (%s *%s) Bytes() ([]byte, error) {\n", selfRef, goName)
 	b.WriteString("\tbuf := new(bytes.Buffer)\n")

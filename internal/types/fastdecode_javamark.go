@@ -7,11 +7,13 @@ import "encoding/binary"
 const javaMarkEventSize = 40
 
 // NewJavaMarkEventFast decodes a Java mark (javamark.c, task td4) field
-// by field, as NewJavaMarkEvent's binary.Read does by reflection: with
+// by field, as NewJavaMarkEvent did with reflective binary.Read: with
 // -spool every hooked call of a JVM sends one ahead of its enter, so on
 // the S3 burst under the agent the reflective decode was ~0.2 µs of the
-// tracer's CPU per event (task ud4, decision #25). Like binary.Read it
-// rejects a short payload (nil) and ignores bytes past the struct.
+// tracer's CPU per event (task ud4, decision #25). Since task am4 the
+// generated NewJavaMarkEvent reads the fields directly too. Like
+// binary.Read it rejects a short payload (nil) and ignores bytes past the
+// struct.
 func NewJavaMarkEventFast(raw []byte) *JavaMarkEvent {
 	if len(raw) < javaMarkEventSize {
 		return nil
