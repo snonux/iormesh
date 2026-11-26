@@ -6,6 +6,27 @@ commands, reads output, checks each checkpoint and explains what
 it sees; the human owns every decision that touches trust,
 production hosts or trace data. Read it before chapter 2.
 
+## The iormesh skill
+
+The repository ships an agent skill,
+[docs/skills/iormesh/](../skills/iormesh/SKILL.md), for Claude
+Code and the `pi` coding agent (decisions.md #37). It explains
+each step — host, commands, what they change, what data leaves
+the machine — and waits for a yes; at the start you pick
+*automatic* (the agent runs each approved command) or *guided*
+(it names the commands, you type them and paste the output back).
+Install it by copying or linking the folder:
+
+```sh
+cp -r docs/skills/iormesh ~/.claude/skills/    # Claude Code
+cp -r docs/skills/iormesh ~/.pi/skills/        # pi
+pi --skill docs/skills/iormesh                 # pi, for one run
+```
+
+Its links into this guide resolve inside the repository; a copied
+skill names each chapter's file, so the agent still finds it in
+your copy of `docs/guide/`.
+
 ## Who does what
 
 | The human | The agent |
@@ -25,14 +46,17 @@ The **Human step** boxes in chapters 2–11 mark each of these.
 iormeshctl never prompts — ssh runs with `BatchMode=yes` — so a
 command that would need a password fails instead of hanging. The
 one exception is `sign`, which asks for the signing key's
-password on the terminal: that is the human's to run. That
+password on the terminal: the human runs it, unless the human has
+put the password in `$IORMESH_MINISIGN_PASSWORD`, which `sign`
+reads instead; then the agent may run it, and never prints the
+password (decisions.md #37). That
 makes the rest safe to run from an agent, and makes the line
 between "reads" and "changes" the one that matters:
 
 | Touches | Commands | Ask first? |
 |---|---|---|
 | nothing, or only reads local files | `version`, `list`, `verify`, `bootstrap` (prints), `show …`, `query …`, `services`, `services rules`, `services edges`, `expand` (lists), `prune` (lists) | no |
-| the builds' signatures, with the human's key | `sign` (writes `NAME.minisig` next to each build) | **the human runs it** |
+| the builds' signatures, with the human's key | `sign` (writes `NAME.minisig` next to each build) | **the human runs it**, or the agent once the password is in `$IORMESH_MINISIGN_PASSWORD` |
 | the laptop's store, registry or service database | `build` (writes the builds dir and the service database), `add`, `services name`, `services unname` | say what you add |
 | reads hosts | `status` (runs the tracer's read-only `status` as root through the narrow sudoers rule) | no |
 | moves segments off hosts | `collect`, `refresh` | no, once tracing is agreed |
