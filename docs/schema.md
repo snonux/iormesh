@@ -1203,7 +1203,9 @@ envelope:
   `pause` (pid 1 there) has a scope of its own,
   `cri-containerd-<sandbox id>.scope`, so its events would carry
   the sandbox's id, which no container status lists (k3s on el9,
-  task 6k4; pause does no traced I/O in practice).
+  task 6k4; pause does no traced I/O in practice). The build
+  shows that id bare, never a guessed name
+  ([decisions.md #34](decisions.md)).
 - The container's *name* is not in the cgroup and the tracer has
   no API access; the controller joins it (milestones.md M7 "Pod fields
   on events", task jk4). Every collect of a pod records the pod's

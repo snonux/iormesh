@@ -208,6 +208,35 @@ func TestProcessContainers(t *testing.T) {
 	}
 }
 
+// TestProcessContainerSandbox (task fm4, docs/decisions.md #34): the pod
+// sandbox's pause process carries the sandbox's runtime id, which no
+// container status lists and so no container map names; it is shown
+// bare, like any id the map lacks, never guessed into a name. The ids
+// are task 6k4's k3s on el9 captures (internal/k8s/container_test.go):
+// the sidecar pod's map holds what its status listed, the tracer and the
+// app.
+func TestProcessContainerSandbox(t *testing.T) {
+	const (
+		tracer  = "e54d9ee01313dd9f59c1a40dfe98f18b4dab16866047d438d44a330f602d7e43"
+		app     = "feb2f54761daf781477ab7ee3d3d5fedd25c99c90f1c2ec4b335fc287307754d"
+		sandbox = "b0ce75927580ac0afa804190c107b2a2f8082929b0f77bc6c88bfc5f583be8d4"
+	)
+	host := "pod-56795aaf-b609-464e-8f6c-292450aaea2d"
+	r := &report.Report{Processes: []report.Process{
+		{ID: "process:" + host + "/1@1", Host: host, PID: 1, Incarnation: 1, Comm: "pause", ContainerID: sandbox},
+		{ID: "process:" + host + "/7@1", Host: host, PID: 7, Incarnation: 1, Comm: "java", ContainerID: app},
+	}}
+	maps := map[string]map[string]string{host: {tracer: "iormesh", app: "app"}}
+	m := New(Input{Report: r, Containers: maps})
+	var labels []string
+	for _, p := range m.Processes {
+		labels = append(labels, ContainerLabel(p))
+	}
+	if want := []string{sandbox, "app (" + app[:12] + ")"}; !slices.Equal(labels, want) {
+		t.Errorf("container labels %q, want %q", labels, want)
+	}
+}
+
 // TestThreadViewsTerminalSafe: names and labels from the traces reach
 // the thread views escaped, and an unknown SERVICE/THREAD is an error.
 func TestThreadViewsTerminalSafe(t *testing.T) {

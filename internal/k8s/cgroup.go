@@ -140,7 +140,9 @@ func ParseProcCgroup(data []byte) (CgroupIdentity, error) {
 // sandbox's pause process gets an id too: containerd gives it a scope of
 // its own (cri-containerd-<sandbox id>.scope, captured on k3s on el9 by
 // task 6k4), so it names the sandbox's id, which the pod status does not
-// list; no process was found in the pod cgroup itself there.
+// list; no process was found in the pod cgroup itself there. It stays
+// that id: nothing in the cgroup tells a sandbox from a container, and
+// the build shows it bare (docs/decisions.md #34, task fm4).
 func ContainerOf(data []byte, podUID string) string {
 	id, err := ParseProcCgroup(data)
 	if err != nil || (id.PodUID != "" && id.PodUID != podUID) {
