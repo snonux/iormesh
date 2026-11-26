@@ -258,3 +258,28 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
   on the laptop — it holds the operator's keys and data, the
   very thing the trial must not expose; tuning the questions
   after a failure — it hides the gap the trial exists to find.
+- **#41 A `-file` glob that matches only a last element says so**
+  — task 0n4 (2026-11-27), from #37's first trial (task nm4):
+  query's globs are Go `path.Match` patterns, whose `*` stops at
+  `/`, so `-file '*billing.crt*'` matches no absolute path and
+  query printed an empty slice with no word on stderr; both
+  agents then spent turns guessing why, one blaming its target.
+  The globs stay `path.Match` (`-host`, `-app`, `-thread` and
+  `-method` keep the same rule, `-file '/etc/*'` keeps meaning
+  the files directly in `/etc`). When `-file`'s glob matched no
+  event's path or new path but did match a path's last element,
+  query names the first such path on stderr and the glob in its
+  directory that would match (`try -file '/etc/*shop.conf*'`);
+  the slice and the exit status are unchanged (0), the query
+  having run as asked, and the path, from a server, is printed
+  terminal-safe. The guide (chapter 8) and query's usage text
+  state the rule. Why: the hint costs one more glob per
+  non-matching path, fires only when the slice cannot hold the
+  file the reader meant, and turns a silent miss into the fix.
+  Rejected: matching `*` across `/` (a `**`, or a basename match
+  for a glob with no `/`) — it changes what every existing glob
+  selects, the `run` lines `show sequence` prints among them;
+  a hint on every empty slice — other filters empty a slice
+  too, and the hint would then guess; an error exit — the
+  query is valid and a script would read the miss as a
+  failure.

@@ -30,4 +30,5 @@ Each part is its own file; open only the one you need.
   agents](decided/tracing-docs-agents.md) — #34 the pod sandbox's
   container id, #35 connections open before the session, #36
   large docs as an index plus parts, #37 a smaller agent installs
-  and uses iormesh.
+  and uses iormesh, #41 a `-file` glob that matches only a last
+  element says so.

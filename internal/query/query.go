@@ -43,6 +43,12 @@ type Stats struct {
 	Emitted, Remaining uint64
 	// Truncated says the last line written was the truncation record.
 	Truncated bool
+	// FileBaseMatch is set when File matched no event's path but the
+	// last element of one: the first such path. A path.Match '*' stops
+	// at '/', so "*billing.crt*" names no absolute path; the caller
+	// tells the user so instead of leaving an empty slice unexplained
+	// (decision #41, task 0n4). The path comes from a server.
+	FileBaseMatch string
 }
 
 // Run writes the events of in that f selects to w as NDJSON, at most
@@ -79,7 +85,9 @@ func Run(ctx context.Context, w io.Writer, in Input, f Filter, maxBytes int64) (
 	if err != nil {
 		return out.stats, err
 	}
-	return out.close()
+	st, err := out.close()
+	st.FileBaseMatch = m.fileBaseMatch()
+	return st, err
 }
 
 // each calls fn for every event of every source, in order, with the

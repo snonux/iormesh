@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 
@@ -101,7 +102,8 @@ func addQueryFlags(fs *flag.FlagSet, f *queryFlags) {
 	fs.StringVar(&f.thread, "thread", "", "thread glob: Java thread name or kernel tid")
 	fs.StringVar(&f.conn, "conn", "", "connection id of the merged trace")
 	fs.BoolVar(&f.follow, "follow", false, "with -conn: also the threads' other events while they used it")
-	fs.StringVar(&f.file, "file", "", "path glob: events naming it and the fds opened from it")
+	fs.StringVar(&f.file, "file", "", "path glob (path.Match: '*' stops at '/', so match the whole "+
+		"path, e.g. '/tmp/*/billing.crt'): events naming it and the fds opened from it")
 	fs.StringVar(&f.mth, "method", "", "Java frame glob: class#method or class#method(file:line)")
 	fs.StringVar(&f.ref, "ref", "", "one event, by a conversation step's ref (<session>/<seq>; iormeshctl show sequence)")
 	fs.StringVar(&f.event, "event", "", "event kind, exactly (openat, connect, http, ...)")
@@ -205,8 +207,28 @@ func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter) err
 	}
 	// The bad segments are reported even when the query fails: what
 	// it wrote is still missing them.
-	_, err = query.Run(ctx, e.stdout, in, filter, f.maxBytes)
+	st, err := query.Run(ctx, e.stdout, in, filter, f.maxBytes)
+	if err == nil {
+		err = fileBaseHint(e, filter.File, st.FileBaseMatch)
+	}
 	return errors.Join(err, reportBad(e, segs.Bad))
+}
+
+// fileBaseHint explains on stderr a -file glob that matched no path but
+// the last element of one (decision #41, task 0n4): path.Match's '*'
+// stops at '/', so "*billing.crt*" names no absolute path and the slice
+// is silently empty of file events. It names the path and the glob in
+// that path's directory that would match; the exit status stays 0, the
+// query having run as asked. The path comes from a server: printed
+// terminal-safe.
+func fileBaseHint(e env, glob, match string) error {
+	if match == "" {
+		return nil
+	}
+	_, err := fmt.Fprintf(e.stderr, "query: -file %s matched no path, only the last element of %s: "+
+		"'*' stops at '/' and the glob must match the whole path; try -file '%s'\n",
+		safe(strconv.Quote(glob)), safe(match), safe(path.Join(path.Dir(match), glob)))
+	return err
 }
 
 // listsSegments tells whether the projects' directories in store list

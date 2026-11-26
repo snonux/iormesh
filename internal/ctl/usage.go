@@ -142,7 +142,10 @@ faster on a large store, not exact: an event inside it
 written over a minute after -to is missed, a connection opened before
 those segments keeps its host-local id, and -app, -file and -follow see
 only them. Filters AND; -event takes a schema kind, -errno a Linux errno
-name or number, -otel-trace a W3C trace id.
+name or number, -otel-trace a W3C trace id. The GLOBs are Go path.Match
+patterns: '*' stops at '/', so -file matches the whole path
+('/tmp/*/billing.crt', not '*billing.crt*'); a -file glob that matched
+no path but a path's last element says so on stderr.
 `
 
 // usagePods is the paragraph on Kubernetes targets (docs/milestones.md M7).

@@ -291,6 +291,33 @@ func TestQueryKindPidErrnoOtel(t *testing.T) {
 	}
 }
 
+// TestQueryFileBaseHint: a -file glob that matches no path but the last
+// element of one ('*' stops at '/') still exits 0 with an empty slice,
+// and stderr says why and which glob would match (decision #41, task
+// 0n4). A glob that matches, or matches nothing at all, adds no hint.
+func TestQueryFileBaseHint(t *testing.T) {
+	f := newBuildFixture(t)
+	for _, tc := range []struct {
+		glob, hint string
+	}{
+		{"*shop.conf*", "try -file '/etc/*shop.conf*'"},
+		{"/etc/*.conf", ""},
+		{"*nothing-like-it*", ""},
+	} {
+		out := f.mustRun(t, slices.Concat([]string{"query"}, queryProjects, []string{"-file", tc.glob})...)
+		stderr := f.stderr.String()
+		if tc.hint == "" {
+			if strings.Contains(stderr, "stops at '/'") {
+				t.Errorf("%s: unwanted hint: %s", tc.glob, stderr)
+			}
+			continue
+		}
+		if out != "" || !strings.Contains(stderr, tc.hint) || !strings.Contains(stderr, "stops at '/'") {
+			t.Errorf("%s: stdout %q, stderr %s; want the hint %q", tc.glob, out, stderr, tc.hint)
+		}
+	}
+}
+
 // TestCheckFileRefusesOtherTables: the child checks events files and
 // methods tables only.
 func TestCheckFileRefusesOtherTables(t *testing.T) {

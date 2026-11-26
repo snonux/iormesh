@@ -2,6 +2,7 @@ package query
 
 import (
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 
@@ -48,6 +49,11 @@ type matcher struct {
 	methods map[string]map[uint64]bool
 	// files are the open fd instances of a matching path.
 	files map[fdKey]bool
+	// pathHit says some event's path matched File; baseMatch is the
+	// first path that did not but whose last element did (Stats'
+	// FileBaseMatch, decision #41).
+	pathHit   bool
+	baseMatch string
 	// follow holds the threads that used Conn and when (Follow).
 	follow map[threadKey]span
 	// refSession and refSeq are Ref, parsed (Validate checked it).
@@ -202,9 +208,37 @@ func (m *matcher) file(ev *schema.Event) (bool, error) {
 	return named, nil
 }
 
-// paths reports whether the event's path or new path matches File.
+// paths reports whether the event's path or new path matches File, and
+// notes whether any path did (pathHit).
 func (m *matcher) paths(a *schema.Args) bool {
-	return (a.Path != nil && glob(m.f.File, *a.Path)) || (a.NewPath != nil && glob(m.f.File, *a.NewPath))
+	named := m.pathMatches(a.Path) || m.pathMatches(a.NewPath)
+	m.pathHit = m.pathHit || named
+	return named
+}
+
+// pathMatches reports whether p is set and matches File. A miss whose
+// last element matches is kept as baseMatch, the first one only: what
+// fileBaseMatch reports when no path matched (decision #41).
+func (m *matcher) pathMatches(p *string) bool {
+	if p == nil {
+		return false
+	}
+	if glob(m.f.File, *p) {
+		return true
+	}
+	if m.baseMatch == "" && glob(m.f.File, path.Base(*p)) {
+		m.baseMatch = *p
+	}
+	return false
+}
+
+// fileBaseMatch is Stats.FileBaseMatch: a path whose last element
+// matched File, when no path matched it whole; "" otherwise.
+func (m *matcher) fileBaseMatch() string {
+	if m.pathHit {
+		return ""
+	}
+	return m.baseMatch
 }
 
 // threadOf is the event's thread.

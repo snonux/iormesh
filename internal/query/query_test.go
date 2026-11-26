@@ -361,3 +361,32 @@ func TestFileTracksOnlyOpens(t *testing.T) {
 		t.Errorf("matched seqs %v, want %v", got, want)
 	}
 }
+
+// TestFileBaseMatch: a -file glob that matched no path, but the last
+// element of one, reports that path (decision #41, task 0n4): '*' stops
+// at '/', so "*order-42.json*" names no absolute path. A glob that
+// matched a path, or whose last element matched none, reports nothing.
+func TestFileBaseMatch(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		f    Filter
+		want string
+	}{
+		{"basename only", Filter{File: "*order-42.json*"}, "/tmp/order-42.json"},
+		{"other filters too", Filter{File: "order-42.json", Host: "app2"}, "/tmp/order-42.json"},
+		{"path matched", Filter{File: "/tmp/*.json"}, ""},
+		{"nothing at all", Filter{File: "*billing.crt*"}, ""},
+		{"slash in glob", Filter{File: "/var/*/order-42.json"}, ""},
+		{"no -file", Filter{}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st, err := Run(context.Background(), &bytes.Buffer{}, fixture(t), tc.f, 1<<20)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if st.FileBaseMatch != tc.want {
+				t.Errorf("FileBaseMatch %q, want %q", st.FileBaseMatch, tc.want)
+			}
+		})
+	}
+}

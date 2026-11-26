@@ -111,12 +111,26 @@ prints every http event the same way, both ends of each hop:
 | `-ref REF` | one event, by a step's ref |
 | `-event KIND` | one event kind, exactly (`openat`, `connect`, `http`, …) |
 | `-host GLOB`, `-app GLOB`, `-pid PID`, `-thread GLOB` | where: store host or FQDN, app pattern or comm, process, Java thread name or kernel tid |
-| `-file GLOB` | events naming a path, and the fds opened from it |
+| `-file GLOB` | events naming a path the glob matches whole, and the fds opened from it |
 | `-method GLOB` | a Java frame, `class#method` or `class#method(file:line)` |
 | `-conn ID` (`-follow`) | one merged connection (and its threads' other events while they used it) |
 | `-errno NAME` | calls that failed with it (`ENOENT` or `2`) |
 | `-otel-trace ID` | events inside an OpenTelemetry trace's spans |
 | `-from T`, `-to T` | a window; `-to` is exclusive |
+
+The GLOBs are Go `path.Match` patterns: `*` stops at `/`. A
+`-file` glob must match the whole path, so `-file
+'/tmp/*/billing.crt'` finds a `billing.crt` one directory below
+`/tmp`, while `-file '*billing.crt*'` matches no absolute path at
+all. When a `-file` glob matched no path but a path's last
+element, query still prints what it found (nothing, for the file)
+and says so on stderr (decision #41). From the test fixture of
+`internal/ctl/query_test.go`:
+
+```text
+$ iormeshctl query -file '*shop.conf*'
+query: -file "*shop.conf*" matched no path, only the last element of /etc/shop.conf: '*' stops at '/' and the glob must match the whole path; try -file '/etc/*shop.conf*'
+```
 
 `T` is RFC 3339, `YYYY-MM-DDTHH:MM:SS` (UTC), or a bare
 `HH:MM:SS` (UTC) while the store spans one UTC day; query echoes
