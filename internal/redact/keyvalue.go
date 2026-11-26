@@ -14,10 +14,13 @@ import "strings"
 // A pair is a key (name bytes, see isKeyByte) that ArgvDeny denies, then
 // an optional closing quote (escaped or not), optional blanks, ':' or
 // '=', optional blanks, and a value: a quoted string up to its matching
-// unescaped quote (or to the end when unclosed), or a bare run up to a
-// delimiter (see bareEnd). Only the value becomes Mask; key, quotes and
-// separators stay. A value starting with '{' or '[' is a nested object:
-// its own pairs are judged one by one. open reports a denied key whose
+// unescaped quote (or to the end when unclosed), an object or array up to
+// its matching bracket (see bracketEnd), or a bare run up to a delimiter
+// (see bareEnd). Only the value becomes Mask; key, quotes and separators
+// stay. An object or array under a denied key is masked whole — its inner
+// keys ({"secrets":{"db":"x"}}) need not be denied themselves; under any
+// other key the scan goes on inside it, pair by pair. open reports a
+// denied key whose
 // separator ends the text ({"password": then "x"} as two elements), so
 // the caller masks the next element.
 //
@@ -48,9 +51,9 @@ func (p Policy) keyValues(s string) (out string, open bool) {
 }
 
 // deniedKeyBefore reports whether the separator at s[sep] follows a key
-// ArgvDeny denies: blanks, then a closing quote and its escaping
-// backslashes, are skipped back over first ("password" : …,
-// \"password\":…).
+// ArgvDeny denies: blanks, then a closing quote with its escaping
+// backslashes and the blanks inside it, are skipped back over first
+// ("password" : …, \"password\":…, " password ":…).
 func (p Policy) deniedKeyBefore(s string, sep int) bool {
 	j := sep
 	for j > 0 && isBlank(s[j-1]) {
@@ -59,6 +62,9 @@ func (p Policy) deniedKeyBefore(s string, sep int) bool {
 	if j > 0 && isQuote(s[j-1]) {
 		j--
 		for j > 0 && s[j-1] == '\\' {
+			j--
+		}
+		for j > 0 && isBlank(s[j-1]) {
 			j--
 		}
 	}
@@ -70,8 +76,9 @@ func (p Policy) deniedKeyBefore(s string, sep int) bool {
 }
 
 // valueSpan returns the [from, to) range of the value that starts after
-// blanks at s[at], and false when there is none to mask: a nested '{' or
-// '[', an empty bare run, or the end of s (then from is len(s)).
+// blanks at s[at], and false when there is none to mask: an empty bare
+// run, or the end of s (then from is len(s)). An object or array value
+// spans its brackets, which are masked with it.
 func valueSpan(s string, at int) (from, to int, ok bool) {
 	for at < len(s) && isBlank(s[at]) {
 		at++
@@ -87,10 +94,46 @@ func valueSpan(s string, at int) (from, to int, ok bool) {
 		return esc + 1, quotedEnd(s, esc+1, s[esc], esc-at), true
 	}
 	if s[at] == '{' || s[at] == '[' {
-		return at, at, false
+		return at, bracketEnd(s, at), true
 	}
 	end := bareEnd(s, at)
 	return at, end, end > at
+}
+
+// bracketEnd returns the index just past the '}' or ']' that closes the
+// bracket at s[open], or len(s) when it is unclosed. Brackets of either
+// kind nest; brackets inside a quoted string do not count — a quote and
+// its run of escaping backslashes open a string that quotedEnd closes at
+// the same escape level. A mismatched closer still closes a level: the
+// value is masked either way, and over-masking cannot leak.
+func bracketEnd(s string, open int) int {
+	depth := 0
+	for i := open; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '{' || c == '[':
+			depth++
+		case c == '}' || c == ']':
+			if depth--; depth == 0 {
+				return i + 1
+			}
+		case c == '\\' || isQuote(c):
+			esc := i
+			for esc < len(s) && s[esc] == '\\' {
+				esc++
+			}
+			if esc == len(s) || !isQuote(s[esc]) {
+				i = esc - 1 // a backslash escaping no quote
+				continue
+			}
+			k := esc - i
+			end := quotedEnd(s, esc+1, s[esc], k)
+			if end == len(s) {
+				return len(s)
+			}
+			i = end + k // the closing quote
+		}
+	}
+	return len(s)
 }
 
 // quotedEnd returns where the string opened by quote q (escaped with k
@@ -117,10 +160,24 @@ func quotedEnd(s string, from int, q byte, k int) int {
 }
 
 // bareEnd returns where an unquoted value starting at s[at] ends: at
-// white space, a quote, a backslash or one of ",;&})]".
+// white space, a quote, one of ",;&})]", or a run of backslashes that
+// escapes a quote (the end of an escaped string, …\"}). A backslash
+// escaping anything else is part of the value (ab\SEC).
 func bareEnd(s string, at int) int {
-	if n := strings.IndexAny(s[at:], " \t\r\n\v\f'\"\\,;&})]"); n >= 0 {
-		return at + n
+	for i := at; i < len(s); i++ {
+		switch c := s[i]; {
+		case strings.IndexByte(" \t\r\n\v\f'\",;&})]", c) >= 0:
+			return i
+		case c == '\\':
+			esc := i
+			for esc < len(s) && s[esc] == '\\' {
+				esc++
+			}
+			if esc < len(s) && isQuote(s[esc]) {
+				return i
+			}
+			i = esc - 1
+		}
 	}
 	return len(s)
 }

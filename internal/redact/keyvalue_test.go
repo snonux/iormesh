@@ -36,6 +36,24 @@ func TestArgvJSONValues(t *testing.T) {
 			[]string{"app", `{\"password\":\"***\"}`}},
 		{[]string{"app", `{"password": "a \"q\" ` + s + `"}`},
 			[]string{"app", `{"password": "***"}`}},
+		// A denied key's object or array value is masked whole (review
+		// round 1): its inner keys need not be denied themselves.
+		{[]string{"curl", "-d", `{"user":"a","api_tokens":["` + s + `"]}`},
+			[]string{"curl", "-d", `{"user":"a","api_tokens":***}`}},
+		{[]string{"app", `{"tokens":["` + s + `","` + s + `2"],"n":1}`},
+			[]string{"app", `{"tokens":***,"n":1}`}},
+		{[]string{"sh", "-c", `curl -d "{\"password\": [\"` + s + `\"]}" http://h`},
+			[]string{"sh", "-c", `curl -d "{\"password\": ***}" http://h`}},
+		{[]string{"app", `{"secrets":{"db":"` + s + `","x":"}]"}}`},
+			[]string{"app", `{"secrets":***}`}},
+		{[]string{"app", `{"password":{"value":"` + s + `"`},
+			[]string{"app", `{"password":***`}},
+		{[]string{"app", `{password: ab\` + s + `}`},
+			[]string{"app", `{password: ***}`}},
+		{[]string{"app", `{"password":\` + s + `}`},
+			[]string{"app", `{"password":***}`}},
+		{[]string{"app", `{" password ":"` + s + `"}`},
+			[]string{"app", `{" password ":"***"}`}},
 		{[]string{"curl", "-d", `{"password":`, `"` + s + `"}`},
 			[]string{"curl", "-d", `{"password":`, Mask}},
 		{[]string{"app", "/login?token=" + s + "&x=1"},
@@ -83,6 +101,17 @@ var corpusSyntaxes = [][]string{
 	{`{\"K\":\"V\"}`},
 	{`{"K":V}`},
 	{`[{"K":"V"}]`},
+	// No plurals here: "*pwd" and "*pass" deny suffixes only.
+	{`{"user":"a","api_K":["V"]}`},
+	{`{"K":["V1","V2"]}`},
+	{`{"K":{"db":"V"}}`},
+	{`{"K":{"value":"V"}}`},
+	{`{"K":[{"a":"]"},"V"]}`},
+	{`{"K":["V"`},
+	{`{K: ab\V}`},
+	{`{"K":\V}`},
+	{`{" K ":"V"}`},
+	{"sh", "-c", `curl -d "{\"K\": [\"V\"]}" http://h`},
 	{`{"K":`, `"V"}`},
 	{`{"K": `, `"V"}`},
 	{"K: V\nother: 1"},
@@ -145,6 +174,8 @@ func FuzzArgvKeyValue(f *testing.F) {
 	f.Add(`sh -c '`, `'`)
 	f.Add(`\`, `\"`)
 	f.Add("--x=", ",")
+	f.Add(`{"a":["]`, `]}`)
+	f.Add(`{"tokens":{"x":`, `}}`)
 	f.Fuzz(func(t *testing.T, prefix, suffix string) {
 		in := []string{"x", prefix + `"password":"` + planted + `"` + suffix}
 		out := Default().Argv(in)
