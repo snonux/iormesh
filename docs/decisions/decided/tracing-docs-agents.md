@@ -98,7 +98,7 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
   the target's socket, delaying its close; keeping it a
   documented limitation — pooled clients are the common case.
 - **#36 Large docs are an index plus a folder of parts** — a
-  topic doc in `docs/` that grows past about 600 lines keeps
+  topic doc in `docs/` that grows past the limit below keeps
   its path and becomes an index: its intro, then a "Parts"
   list with one summary line per part and the sections each
   part holds. The sections move to `docs/<topic>/<part>.md`
@@ -115,10 +115,25 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
   decision by number with the part that holds it, so the next
   free number stays one glance away. A section heading kept as
   a part's title keeps its anchor. Docs under the limit stay
-  one file. Rejected: one file per `##` section everywhere —
-  dozens of 15-line files for testing.md's task records, which
-  are read together; splitting by line count — parts would
-  start mid-section.
+  one file. The limit is exact and checked (task sm4): every
+  Markdown file of the repository — `docs/**/*.md`,
+  `AGENTS.md`, `CHANGELOG.md`, `spikes/*/NOTES.md` — has at
+  most 600 lines, and `README.md` at most 150, the "README
+  stays lean" rule made a number. `internal/buildgate`'s
+  `TestDocsUnderSizeLimit` fails naming each file over its
+  limit and its line count. Directories that are not the
+  repository's docs are skipped: dot directories (`.git`, and
+  `.claude`, which holds other worktrees), `bin/` (build
+  outputs, #30), `vendor/`, `node_modules/`. No file is exempt;
+  an exemption would be a reviewed entry with its reason in the
+  gate's table, and an entry whose file is no longer over the
+  limit fails. A file over the limit splits; the limit is not
+  raised to fit it. Rejected: one file per `##` section
+  everywhere — dozens of 15-line files for testing.md's task
+  records, which are read together; splitting by line count —
+  parts would start mid-section; a check by hand — the rule
+  broke in the next commit after it landed (decided.md reached
+  710 lines).
 - **#37 A smaller agent installs and uses iormesh from the docs
   and a skill** — owner decision (2026-11-26, task lm4; built
   and accepted as M8, [milestones/m8.md](../../milestones/m8.md)).

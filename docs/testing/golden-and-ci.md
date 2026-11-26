@@ -92,6 +92,18 @@ It still runs in `mage test`. The root suites
 `-race`.
 
 
+## Docs size gate (task sm4)
+
+`internal/buildgate`'s `TestDocsUnderSizeLimit`, run by
+`mage test`, fails on every Markdown file of the repository
+over its line limit, naming the file and its count; the limits,
+the files covered and what is skipped are in
+[docs/decisions.md #36](../decisions/decided/tracing-docs-agents.md).
+A file it names splits into an index plus a folder of parts.
+`TestDocSizeGateCatchesOversize` plants files at and one line
+over the limit and proves only the second is reported.
+
+
 ## CI
 
 CI (GitHub Actions, task ck4) runs the gates that need neither

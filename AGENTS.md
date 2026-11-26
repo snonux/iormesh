@@ -63,8 +63,10 @@ Never write `//nolint` — a test fails on it.
   troubleshooting; spike results under `docs/spikes/`), each
   linked from the README's Documentation section.
 - **Large docs are an index plus parts** (decision #36): a
-  topic doc past about 600 lines keeps its path as an index —
-  intro, then a "Parts" list with a summary line and the
+  Markdown file past 600 lines (README.md: 150) fails
+  `internal/buildgate`'s `TestDocsUnderSizeLimit`; a topic doc
+  that reaches the limit keeps its path as an index — intro,
+  then a "Parts" list with a summary line and the
   sections of each part — and its sections live in
   `docs/<topic>/<part>.md`; a part past the same size becomes
   an index of its own with a `docs/<topic>/<part>/` folder.

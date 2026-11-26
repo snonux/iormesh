@@ -32,12 +32,15 @@ This file is the index: each part below is its own file. Read the summaries,
 then open only the part you need.
 
 - [Golden checks, race gate and CI](testing/golden-and-ci.md) — what a golden
-  check asserts, beyond single-host, the race gate, CI.
+  check asserts, beyond single-host, the race gate, the docs size gate,
+  CI.
   - [What a golden check
     asserts](testing/golden-and-ci.md#what-a-golden-check-asserts)
   - [Beyond single-host](testing/golden-and-ci.md#beyond-single-host)
   - [Race detector gate (task
     ij4)](testing/golden-and-ci.md#race-detector-gate-task-ij4)
+  - [Docs size gate (task
+    sm4)](testing/golden-and-ci.md#docs-size-gate-task-sm4)
   - [CI](testing/golden-and-ci.md#ci)
 - [Integration tests follow ior](testing/integration.md) — the integration
   suite, and the rig runs for M2–M6.
