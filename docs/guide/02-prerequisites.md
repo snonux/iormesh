@@ -12,7 +12,7 @@ Linux or macOS; it needs no eBPF and no root.
 |---|---|---|
 | this repository, Go, [mage](https://magefile.org) ≥ 1.17 | `mage -version` | a version of 1.17 or newer |
 | Podman or Docker, for the release builds | `podman version` (or `docker version`) | client and server versions, no error |
-| `minisign`, once, to make the release key | `minisign -v` | a version line |
+| `minisign`, once, to make your signing key | `minisign -v` | a version line |
 | rsync 3.4.0 or newer, first in `PATH` | `rsync --version` | `rsync  version 3.4.0` or newer |
 | key-based SSH to each host through your agent | `ssh -o BatchMode=yes app1 true` | returns at once, no prompt, exit 0 |
 | each host's key in `~/.ssh/known_hosts` | the same command | no `Host key verification failed.` |
@@ -81,4 +81,4 @@ permissions).
 
 ---
 
-← [1. How iormesh works](01-how-iormesh-works.md) · [Contents](README.md) · Next: [3. Build and sign a release](03-release.md) →
+← [1. How iormesh works](01-how-iormesh-works.md) · [Contents](README.md) · Next: [3. Get and sign a release](03-release.md) →

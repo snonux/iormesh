@@ -2,8 +2,10 @@
 // (docs/decisions.md #28): minisign signatures, made with
 // aead.dev/minisign, whose trusted comment names the artifact and its version.
 // It is cgo-free, so the controller (iormeshctl verify, and deploy after it)
-// and the tracer (iormesh upgrade) share it, and `mage sign` uses it in the
-// release pipeline.
+// and the tracer (iormesh upgrade) share it. Signing is the operator's,
+// with their own key (decision #32): `mage sign` over a dist/ built from
+// source and `iormeshctl sign` over an unpacked release archive run the
+// same code here (SignDir, SignRelease, ReadSecretKey).
 //
 // The trusted comment is signed along with the binary, which is why the
 // metadata lives there and not in a file name: a deploying user who can
@@ -70,6 +72,37 @@ func TracerFile(goarch string) string {
 // name serves every host. `iormesh upgrade` installs a file signed with
 // this name as the host's agent jar, never as the tracer.
 const AgentFile = "iormesh-agent.jar"
+
+// Artifacts are the release names an archive packs for arch (decision
+// #32): its static tracer, the architecture-neutral agent jar, and the
+// controller for Linux and macOS on that arch. Deploy and bootstrap
+// verify the tracer and the jar; the controllers are signed alike so an
+// operator can check the one they install.
+func Artifacts(arch string) []string {
+	return []string{
+		TracerFile(arch),
+		AgentFile,
+		"iormeshctl-linux-" + arch,
+		"iormeshctl-darwin-" + arch,
+	}
+}
+
+// IsArtifact reports whether name is a release artifact's name, of any
+// arch (lowercase letters and digits): what SignRelease signs in an
+// unpacked release, and nothing else there (LICENSE, SHA256SUMS).
+func IsArtifact(name string) bool {
+	if name == AgentFile {
+		return true
+	}
+	for _, prefix := range []string{"iormesh-linux-", "iormeshctl-linux-", "iormeshctl-darwin-"} {
+		if arch, ok := strings.CutPrefix(name, prefix); ok {
+			return arch != "" && !strings.ContainsFunc(arch, func(r rune) bool {
+				return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+			})
+		}
+	}
+	return false
+}
 
 // ParsePublicKey reads a minisign public key file (an untrusted comment
 // line, then the base64 key) or the bare base64 key.

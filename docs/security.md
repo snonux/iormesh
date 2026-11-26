@@ -182,8 +182,8 @@ The decisions it cites are in [decisions.md](decisions.md).
       `~/.config/iormesh/minisign.pub` exactly as deploy
       verifies it (signed name, version), read once, and those
       very bytes are staged — the key it pins on the host is
-      that same key, so whoever holds the release key holds the
-      host from then on;
+      that same key, so whoever holds the operator's signing
+      key (decisions.md #32) holds the host from then on;
     - *the registry and known_hosts*: only a registered host,
       reached under deploy's SSH rules, is ever contacted;
     - *the SSH login account and its sudo*: the files sit in the
@@ -222,12 +222,24 @@ The decisions it cites are in [decisions.md](decisions.md).
     the rule. A failed `-apply` step stops there, undoes
     nothing, and is rerun from the start until the rule is in
     place.
-  - **Who signs**: the release pipeline, with `mage sign` over
-    `dist/` (minisign via `aead.dev/minisign`). The secret key
-    is minisign's scrypt-encrypted file at
-    `$IORMESH_MINISIGN_KEY`, refused inside the repository;
-    no private key is ever committed — tests generate
-    throwaway keys per run.
+  - **Who signs**: the operator, with their own key
+    (decisions.md #32): release archives ship unsigned, with a
+    `SHA256SUMS` that only catches corruption, and the project
+    holds no key operators must trust. `iormeshctl sign` signs
+    an unpacked release, `mage sign` a `dist/` built from
+    source (minisign via `aead.dev/minisign`, one
+    implementation). The secret key is minisign's
+    scrypt-encrypted file, refused when it is a symlink,
+    someone else's, or open to group or other; `mage sign`
+    also refuses one inside the repository. Its password comes
+    from the terminal without echo or from
+    `$IORMESH_MINISIGN_PASSWORD`, and is never printed. A
+    signature is written to a fresh temporary file
+    (`O_EXCL|O_NOFOLLOW`) renamed over `NAME.minisig`, so a
+    `.minisig` symlink planted in an untrusted archive is
+    replaced, never written through. No
+    private key is ever committed — tests generate throwaway
+    keys per run.
   - **What is signed**: each binary, with a trusted comment
     `file:<name> version:<x.y.z>` that the signature covers. A
     file renamed to another artifact's name, the arm64 tracer
@@ -357,9 +369,9 @@ The decisions it cites are in [decisions.md](decisions.md).
     `-trace-dir` the caller chose, which stop otherwise only
     reads.
   - **What the rule then grants**: installing a build the
-    release key signed, for this arch, not older, and the
+    signing key signed, for this arch, not older, and the
     agent jar signed at that build's version — nothing
-    else. Whoever holds the release key holds every server
+    else. Whoever holds the signing key holds every server
     that pins it.
 - **Through the sudoers rule, the tracer writes only to its own
   paths.** The rule names the installed binary and nothing else:
@@ -417,7 +429,7 @@ The decisions it cites are in [decisions.md](decisions.md).
     directory above it must belong to root or the caller (the
     euid, root under sudo) and not be group- or other-writable,
     sticky directories excepted — so a sudoer cannot have root
-    load a jar they could rewrite, nor one the release key
+    load a jar they could rewrite, nor one the signing key
     never signed. Since `start` is always confined, root's own
     `start` too takes only the installed jar; a jar of root's
     choice goes through `run` directly.
@@ -833,8 +845,10 @@ The decisions it cites are in [decisions.md](decisions.md).
     (internal/k8s/target.go), so a deploy names the operator's
     own digest-pinned build (`-image` or the registry's
     `image:`) and is refused without one. The digest pins the
-    bytes; no signature vouches for them (signed release
-    tarballs are planned, task rh4). A sidecar is added only by
+    bytes; no signature vouches for them. (The release
+    archives of the host builds ship unsigned too; the
+    operator signs those with their own key, decisions.md
+    #32.) A sidecar is added only by
     the deployment owner's explicit patch, a debug container
     only by the operator's `iormeshctl`. The patches and the debug
     profile are generated into `deploy/` from internal/k8s and

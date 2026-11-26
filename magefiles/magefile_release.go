@@ -1,22 +1,22 @@
 //go:build mage
 
-// Release archives (docs/build.md "Releases", task rh4): Release builds, signs
-// and packs a tagged commit into per-arch tarballs plus a signed SHA256SUMS
-// under dist/release/. It publishes nothing; uploading the files is a human
-// step. The packing and its checks live in internal/dist, where they are
-// unit-tested.
+// Release archives (docs/build.md "Releases", task rh4): Release builds and
+// packs a tagged commit into per-arch tarballs plus a SHA256SUMS under
+// dist/release/. It signs nothing and needs no key (decision #32, task
+// 5m4): each operator signs an unpacked release with their own key
+// (`iormeshctl sign`). It publishes nothing; uploading the files is a
+// human step. The packing and its checks live in internal/dist, where
+// they are unit-tested.
 
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"aead.dev/minisign"
 	"github.com/magefile/mage/sh"
 
 	"iormesh/internal/dist"
@@ -30,18 +30,15 @@ var releaseExtras = []string{"CHANGELOG.md", "LICENSE"}
 
 // Release cuts the release of the tagged HEAD with engine (docker or
 // podman), e.g. "mage release podman": it refuses a dirty tree or a HEAD
-// that is not exactly the tag v<internal/version.Version>, asks for the
-// signing key's password up front, then runs every container build, mage
-// agentBuild and mage sign's signing, and packs
+// that is not exactly the tag v<internal/version.Version>, then runs every
+// container build and mage agentBuild, and packs
 // dist/release/<version>/iormesh-<version>-<arch>.tar.gz for amd64 and
-// arm64 plus SHA256SUMS and SHA256SUMS.minisig. Archive mtimes come from
-// $SOURCE_DATE_EPOCH or the commit time, so they are reproducible.
+// arm64 plus SHA256SUMS, with no signature, no key and no password asked
+// (decision #32). Every artifact must carry the release version's stamp.
+// Archive mtimes come from $SOURCE_DATE_EPOCH or the commit time, so they
+// are reproducible.
 func Release(engine string) error {
 	mtime, err := checkReleaseTree()
-	if err != nil {
-		return err
-	}
-	key, err := loadSigningKey()
 	if err != nil {
 		return err
 	}
@@ -51,10 +48,7 @@ func Release(engine string) error {
 	if err := AgentBuild(); err != nil {
 		return err
 	}
-	if err := signDist(key); err != nil {
-		return err
-	}
-	return packRelease(key, mtime)
+	return packRelease(mtime)
 }
 
 // checkReleaseTree requires a clean HEAD at the version's tag and returns
@@ -74,13 +68,9 @@ func checkReleaseTree() (time.Time, error) {
 	return dist.SourceDate(os.Getenv("SOURCE_DATE_EPOCH"), commitTime)
 }
 
-// packRelease writes the archives and the signed SHA256SUMS into a fresh
+// packRelease writes the archives and SHA256SUMS into a fresh
 // dist/release/<version>/, so no file of an earlier attempt survives.
-func packRelease(key minisign.PrivateKey, mtime time.Time) error {
-	pub, ok := key.Public().(minisign.PublicKey)
-	if !ok {
-		return errors.New("release: key has no minisign public half")
-	}
+func packRelease(mtime time.Time) error {
 	out := filepath.Join(distDir, "release", version.Version)
 	if err := os.RemoveAll(out); err != nil {
 		return err
@@ -95,18 +85,15 @@ func packRelease(key minisign.PrivateKey, mtime time.Time) error {
 	}
 	paths, err := dist.Pack(dist.Options{
 		DistDir: distDir, OutDir: out, Version: version.Version,
-		Arches: tracerArches, PublicKey: pub, ModTime: mtime, Extra: extra,
+		Arches: tracerArches, ModTime: mtime, Extra: extra,
 	})
 	if err != nil {
 		return err
 	}
-	sig, err := dist.SignSums(key, out, version.Version, time.Now())
-	if err != nil {
-		return err
-	}
-	fmt.Printf("release %s:\n  %s\n", version.Version, strings.Join(append(paths, sig), "\n  "))
+	fmt.Printf("release %s:\n  %s\n", version.Version, strings.Join(paths, "\n  "))
 	for _, name := range missing {
 		fmt.Printf("note: no %s in the repository; the archives carry none\n", name)
 	}
+	fmt.Println("the archives are unsigned: operators sign an unpacked one with iormeshctl sign -key KEY DIR")
 	return nil
 }

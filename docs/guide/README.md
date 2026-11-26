@@ -24,7 +24,7 @@ agent's own chapter.
 |---|---------|-----------|
 | 1 | [How iormesh works](01-how-iormesh-works.md) | Tracer, controller, registry, project, session, segment, store, build, fused edge; what runs where |
 | 2 | [Prepare the laptop and the hosts](02-prerequisites.md) | What the controller and each Rocky 9.9 host need, and how to check it |
-| 3 | [Build and sign a release](03-release.md) | The release key, `dist/`, `mage sign`, `iormeshctl verify` |
+| 3 | [Get and sign a release](03-release.md) | Your key, a release or `dist/`, `sha256sum -c`, `iormeshctl sign`, `iormeshctl verify` |
 | 4 | [Register hosts and bootstrap them](04-register-bootstrap.md) | `add`, `list`, `-pattern` and `-listen-port`, the one-time `bootstrap` |
 | 5 | [Deploy and check status](05-deploy-status.md) | `deploy`, `status`, the session unit on the host |
 | 6 | [Collect and build](06-collect-build.md) | `collect`, `build`, `refresh`, the store, naming services |

@@ -1,15 +1,15 @@
-// Package dist packs a signed dist/ into the release archives `mage release`
+// Package dist packs dist/ into the release archives `mage release`
 // publishes (docs/build.md "Releases"): one gzipped tarball per arch holding
-// the tracer, the agent jar and that arch's controllers, each next to its
-// minisign signature, plus the release public key, and a SHA256SUMS over the
-// tarballs.
+// the tracer, the agent jar and that arch's controllers, and a SHA256SUMS
+// over the tarballs. The archives carry no signature and no key (decision
+// #32): each operator signs an unpacked release with their own key
+// (`iormeshctl sign`), the one deploy and bootstrap verify against.
 //
-// Every artifact is verified against its signature before it is packed,
-// and the bytes packed are the bytes verified (release.ReadVerified), so an
-// archive never carries an unsigned, stale or tampered build. The archives
-// are reproducible: entries in name order, fixed mode, owner and mtime,
-// and a gzip header without name or time, so the same signed dist/ and
-// ModTime give the same bytes.
+// Every artifact's own version stamp is checked against the release
+// version on the very bytes packed (release.CheckStamp), so an archive
+// never carries a stale build. The archives are reproducible: entries in
+// name order, fixed mode, owner and mtime, and a gzip header without name
+// or time, so the same dist/ and ModTime give the same bytes.
 //
 // The package is cgo-free and lives apart from internal/release so the
 // tracer and the controller, which import that one, do not link tar and
@@ -31,34 +31,26 @@ import (
 	"strings"
 	"time"
 
-	"aead.dev/minisign"
-
 	"iormesh/internal/release"
 	"iormesh/internal/version"
 )
 
-const (
-	// SumsFile lists every archive's SHA-256 in sha256sum's format, so
-	// `sha256sum -c SHA256SUMS` checks a download.
-	SumsFile = "SHA256SUMS"
-	// KeyFile is the release public key inside each archive. It lets an
-	// operator verify offline, but it is no trust anchor by itself: compare
-	// it with the key published apart from the archive before pinning it.
-	KeyFile = "minisign.pub"
-)
+// SumsFile lists every archive's SHA-256 in sha256sum's format, so
+// `sha256sum -c SHA256SUMS` checks a download for corruption. It vouches
+// for nothing else: the operator's own signature does (decision #32).
+const SumsFile = "SHA256SUMS"
 
 // Options says what Pack packs and where.
 type Options struct {
-	// DistDir holds the signed builds (`mage sign`'s dist/); OutDir is
-	// created for the archives and SHA256SUMS.
+	// DistDir holds the builds (the container builds' and `mage
+	// agentBuild`'s dist/); OutDir is created for the archives and
+	// SHA256SUMS.
 	DistDir, OutDir string
 	// Version is the release version (MAJOR.MINOR.PATCH), the one every
-	// artifact must be signed at; it is part of each archive's name.
+	// artifact must be stamped with; it is part of each archive's name.
 	Version string
 	// Arches are the release arches, one archive each.
 	Arches []string
-	// PublicKey verifies every artifact and is packed as KeyFile.
-	PublicKey minisign.PublicKey
 	// ModTime is every entry's mtime (SourceDate), never the wall clock.
 	ModTime time.Time
 	// Extra are further files (CHANGELOG.md, LICENSE) packed at their
@@ -66,16 +58,10 @@ type Options struct {
 	Extra []string
 }
 
-// Artifacts are the dist/ names packed for arch: its static tracer, the
-// architecture-neutral agent jar, and the controller for Linux and macOS
-// on that arch. Each is packed with its NAME.minisig.
+// Artifacts are the dist/ names packed for arch (release.Artifacts): the
+// files `iormeshctl sign` signs once an operator unpacked the archive.
 func Artifacts(arch string) []string {
-	return []string{
-		release.TracerFile(arch),
-		release.AgentFile,
-		"iormeshctl-linux-" + arch,
-		"iormeshctl-darwin-" + arch,
-	}
+	return release.Artifacts(arch)
 }
 
 // ArchiveName is arch's archive at ver, e.g. iormesh-0.1.0-amd64.tar.gz;
@@ -88,9 +74,9 @@ func archiveDir(ver, arch string) string {
 	return "iormesh-" + ver + "-" + arch
 }
 
-// Pack verifies and packs one archive per arch into OutDir, then writes
+// Pack checks and packs one archive per arch into OutDir, then writes
 // SumsFile over them. It returns the archives' paths in arch order, then
-// SumsFile's. Nothing is written until every arch's artifacts verified.
+// SumsFile's. Nothing is written until every arch's artifacts passed.
 func Pack(o Options) ([]string, error) {
 	if err := o.validate(); err != nil {
 		return nil, err
@@ -127,26 +113,6 @@ func Pack(o Options) ([]string, error) {
 	return append(paths, sumsPath), nil
 }
 
-// SignSums signs outDir's SumsFile as file:SHA256SUMS at ver, writing
-// SHA256SUMS.minisig, and returns its path. One signature then vouches for
-// every archive's hash: `minisign -Vm SHA256SUMS` before `sha256sum -c`.
-func SignSums(key minisign.PrivateKey, outDir, ver string, now time.Time) (string, error) {
-	path := filepath.Join(outDir, SumsFile)
-	data, err := release.ReadFile(path, release.MaxBinarySize, nil)
-	if err != nil {
-		return "", fmt.Errorf("dist: %w", err)
-	}
-	sig, err := release.Sign(key, data, release.Meta{File: SumsFile, Version: ver}, now)
-	if err != nil {
-		return "", fmt.Errorf("dist: %w", err)
-	}
-	sigPath := path + release.SigSuffix
-	if err := os.WriteFile(sigPath, sig, 0o644); err != nil {
-		return "", fmt.Errorf("dist: %w", err)
-	}
-	return sigPath, nil
-}
-
 // validate refuses options that would name an archive oddly or stamp the
 // wall clock into it.
 func (o Options) validate() error {
@@ -176,30 +142,27 @@ type file struct {
 	mode int64
 }
 
-// collect reads arch's verified artifacts and signatures, the key and the
-// extras, sorted by name.
+// collect reads arch's artifacts, each stamped with the release version,
+// and the extras, sorted by name. A signature an earlier `mage sign` left
+// in dist/ is not packed: it would be the builder's, not the operator's.
 func (o Options) collect(arch string) ([]file, error) {
 	var files []file
 	for _, name := range Artifacts(arch) {
-		data, sig, m, err := release.ReadVerified(o.PublicKey, filepath.Join(o.DistDir, name))
+		// ReadFile refuses a symlink or non-regular file; the stamp is
+		// checked on the very bytes packed.
+		data, err := release.ReadFile(filepath.Join(o.DistDir, name), release.MaxBinarySize, nil)
 		if err != nil {
 			return nil, fmt.Errorf("dist: %w", err)
 		}
-		if m.Version != o.Version {
-			return nil, fmt.Errorf("dist: %s is signed at version %s, the release is %s; rebuild and sign dist/",
-				name, m.Version, o.Version)
+		if err := release.CheckStamp(name, data, o.Version); err != nil {
+			return nil, fmt.Errorf("dist: %w", err)
 		}
 		mode := int64(0o755)
 		if name == release.AgentFile {
 			mode = 0o644
 		}
-		files = append(files, file{name, data, mode}, file{name + release.SigSuffix, sig, 0o644})
+		files = append(files, file{name, data, mode})
 	}
-	key, err := o.PublicKey.MarshalText()
-	if err != nil {
-		return nil, fmt.Errorf("dist: public key: %w", err)
-	}
-	files = append(files, file{KeyFile, append(key, '\n'), 0o644})
 	for _, path := range o.Extra {
 		data, err := os.ReadFile(path)
 		if err != nil {

@@ -8,9 +8,10 @@ goes from a step down to its raw events with `query`.
 
 ## Turn on the Java agent
 
-The agent jar ships like the tracer: `mage agentBuild` puts it in
-`dist/iormesh-agent.jar`, `mage sign` signs it
-([chapter 3](03-release.md)), and `deploy` pushes it to every host
+The agent jar ships like the tracer: a release archive carries
+it (or `mage agentBuild` puts it in `dist/iormesh-agent.jar`),
+you sign it with the tracer (`iormeshctl sign` or `mage sign`,
+[chapter 3](03-release.md)), and `deploy` pushes it to every host
 with a project that uses it, where the tracer installs it as
 `/opt/iormesh/lib/iormesh-agent.jar`. A project uses it when its
 registry entry carries `-spool` and `-agent` after HOST:

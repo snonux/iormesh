@@ -2,6 +2,7 @@ package dist
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"compress/gzip"
@@ -26,57 +27,58 @@ const testVersion = "0.3.0"
 
 var testDate = time.Unix(1_763_800_000, 0)
 
-// fakeDist writes a dist/ of every artifact both arches need, each signed
-// with a throwaway key generated per run (no private key is committed),
-// as `mage sign` would leave it. Contents are fake: Pack checks
-// signatures, not what is signed.
-func fakeDist(t *testing.T, ver string) (string, minisign.PublicKey) {
+// fakeDist writes a dist/ of every artifact both arches need, each
+// stamped with ver as the builds stamp themselves (release.CheckStamp),
+// and no signature: `mage release` packs without a key (decision #32).
+// Contents are otherwise fake.
+func fakeDist(t *testing.T, ver string) string {
 	t.Helper()
-	dir, pub, _ := fakeDistKeys(t, ver)
-	return dir, pub
-}
-
-// fakeDistKeys is fakeDist that also returns the signing key.
-func fakeDistKeys(t *testing.T, ver string) (string, minisign.PublicKey, minisign.PrivateKey) {
-	t.Helper()
-	pub, priv, err := minisign.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
 	dir := t.TempDir()
-	names := map[string]bool{}
 	for _, arch := range []string{"amd64", "arm64"} {
 		for _, n := range Artifacts(arch) {
-			names[n] = true
+			writeStamped(t, dir, n, ver)
 		}
 	}
-	for n := range names {
-		writeSigned(t, priv, dir, n, ver, []byte("build of "+n))
-	}
-	return dir, pub, priv
+	return dir
 }
 
-func writeSigned(t *testing.T, priv minisign.PrivateKey, dir, name, ver string, data []byte) {
+// writeStamped writes dir/name stamped at ver: a jar with the manifest
+// `mage agentBuild` writes, any other file with version.Stamp's bytes.
+func writeStamped(t *testing.T, dir, name, ver string) {
 	t.Helper()
-	sig, err := release.Sign(priv, data, release.Meta{File: name, Version: ver}, testDate)
-	if err != nil {
-		t.Fatal(err)
+	data := []byte("build of " + name + "\x00iormesh-version:" + ver + "\x00")
+	if name == release.AgentFile {
+		data = agentJar(t, ver)
 	}
 	if err := os.WriteFile(filepath.Join(dir, name), data, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, name+release.SigSuffix), sig, 0o644); err != nil {
-		t.Fatal(err)
-	}
 }
 
-func packTo(t *testing.T, distDir string, pub minisign.PublicKey, extra ...string) (string, []string) {
+// agentJar is a jar whose manifest carries Implementation-Version ver.
+func agentJar(t *testing.T, ver string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create("META-INF/MANIFEST.MF")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("Manifest-Version: 1.0\r\nImplementation-Version: " + ver + "\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func packTo(t *testing.T, distDir string, extra ...string) (string, []string) {
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "release")
 	paths, err := Pack(Options{
 		DistDir: distDir, OutDir: out, Version: testVersion,
-		Arches: []string{"amd64", "arm64"}, PublicKey: pub,
-		ModTime: testDate, Extra: extra,
+		Arches: []string{"amd64", "arm64"}, ModTime: testDate, Extra: extra,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -85,12 +87,12 @@ func packTo(t *testing.T, distDir string, pub minisign.PublicKey, extra ...strin
 }
 
 func TestPackLayout(t *testing.T) {
-	distDir, pub := fakeDist(t, testVersion)
+	distDir := fakeDist(t, testVersion)
 	license := filepath.Join(t.TempDir(), "LICENSE")
 	if err := os.WriteFile(license, []byte("licence text\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out, paths := packTo(t, distDir, pub, license)
+	out, paths := packTo(t, distDir, license)
 	want := []string{
 		filepath.Join(out, "iormesh-0.3.0-amd64.tar.gz"),
 		filepath.Join(out, "iormesh-0.3.0-arm64.tar.gz"),
@@ -103,11 +105,8 @@ func TestPackLayout(t *testing.T) {
 	top := "iormesh-0.3.0-arm64/"
 	wantNames := []string{top}
 	for _, n := range []string{
-		"LICENSE", "iormesh-agent.jar", "iormesh-agent.jar.minisig",
-		"iormesh-linux-arm64", "iormesh-linux-arm64.minisig",
-		"iormeshctl-darwin-arm64", "iormeshctl-darwin-arm64.minisig",
-		"iormeshctl-linux-arm64", "iormeshctl-linux-arm64.minisig",
-		KeyFile,
+		"LICENSE", "iormesh-agent.jar", "iormesh-linux-arm64",
+		"iormeshctl-darwin-arm64", "iormeshctl-linux-arm64",
 	} {
 		wantNames = append(wantNames, top+n)
 	}
@@ -122,8 +121,76 @@ func TestPackLayout(t *testing.T) {
 		t.Fatalf("arm64 archive entries\n got %v\nwant %v", gotNames, wantNames)
 	}
 	checkModes(t, entries)
-	checkKeyAndSignatures(t, entries, pub)
+	checkContents(t, entries, distDir)
 	checkSums(t, out, paths[:2])
+}
+
+// TestPackNeedsNoKey pins decision #32: packing takes no key, the
+// environment's signing variables are not read, and nothing signed or
+// key-shaped reaches the output — not even a .minisig an earlier `mage
+// sign` left in dist/.
+func TestPackNeedsNoKey(t *testing.T) {
+	t.Setenv("IORMESH_MINISIGN_KEY", "")
+	t.Setenv("IORMESH_MINISIGN_PASSWORD", "")
+	distDir := fakeDist(t, testVersion)
+	if err := os.WriteFile(filepath.Join(distDir, "iormesh-linux-amd64"+release.SigSuffix), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, paths := packTo(t, distDir)
+	files, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if strings.HasSuffix(f.Name(), release.SigSuffix) {
+			t.Errorf("output holds %s", f.Name())
+		}
+	}
+	for _, p := range paths[:len(paths)-1] {
+		for _, e := range readArchive(t, p) {
+			if strings.HasSuffix(e.hdr.Name, release.SigSuffix) || strings.HasSuffix(e.hdr.Name, "/minisign.pub") {
+				t.Errorf("%s holds %s", filepath.Base(p), e.hdr.Name)
+			}
+		}
+	}
+}
+
+// TestUnpackedReleaseSigns is the operator's path after a download:
+// unpack an archive, sign it with their own key (release.SignRelease,
+// what `iormeshctl sign` runs), and every artifact verifies as itself at
+// the release version — and not with another key.
+func TestUnpackedReleaseSigns(t *testing.T) {
+	_, paths := packTo(t, fakeDist(t, testVersion))
+	dir := t.TempDir()
+	for _, e := range readArchive(t, paths[0]) {
+		if e.hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(dir, filepath.Base(e.hdr.Name)), e.data, os.FileMode(e.hdr.Mode)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pub, priv, err := minisign.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _, err := minisign.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed, err := release.SignRelease(priv, dir, testVersion, testDate)
+	if err != nil || len(signed) != len(Artifacts("amd64")) {
+		t.Fatalf("SignRelease = %v, %v", signed, err)
+	}
+	for _, n := range Artifacts("amd64") {
+		path := filepath.Join(dir, n)
+		if m, err := release.VerifyFile(pub, path); err != nil || m != (release.Meta{File: n, Version: testVersion}) {
+			t.Errorf("%s: VerifyFile = %+v, %v", n, m, err)
+		}
+		if _, err := release.VerifyFile(other, path); !errors.Is(err, release.ErrBadSignature) {
+			t.Errorf("%s with another key: %v, want ErrBadSignature", n, err)
+		}
+	}
 }
 
 type entry struct {
@@ -174,8 +241,8 @@ func checkModes(t *testing.T, entries []entry) {
 	for _, e := range entries {
 		base := filepath.Base(e.hdr.Name)
 		want := int64(0o644)
-		if strings.HasSuffix(e.hdr.Name, "/") || strings.HasPrefix(base, "iormesh-linux-") && !strings.HasSuffix(base, release.SigSuffix) ||
-			strings.HasPrefix(base, "iormeshctl-") && !strings.HasSuffix(base, release.SigSuffix) {
+		if strings.HasSuffix(e.hdr.Name, "/") || strings.HasPrefix(base, "iormesh-linux-") ||
+			strings.HasPrefix(base, "iormeshctl-") {
 			want = 0o755
 		}
 		if e.hdr.Mode != want {
@@ -184,22 +251,17 @@ func checkModes(t *testing.T, entries []entry) {
 	}
 }
 
-// checkKeyAndSignatures verifies every packed artifact against its packed
-// signature with the packed public key, as an operator would.
-func checkKeyAndSignatures(t *testing.T, entries []entry, pub minisign.PublicKey) {
+// checkContents wants every packed artifact byte for byte as in dist/.
+func checkContents(t *testing.T, entries []entry, distDir string) {
 	t.Helper()
-	byName := map[string][]byte{}
 	for _, e := range entries {
-		byName[filepath.Base(e.hdr.Name)] = e.data
-	}
-	key, err := release.ParsePublicKey(byName[KeyFile])
-	if err != nil || key.ID() != pub.ID() {
-		t.Fatalf("packed key: %v (id match %v)", err, err == nil && key.ID() == pub.ID())
-	}
-	for _, n := range Artifacts("arm64") {
-		m, err := release.Verify(key, byName[n], byName[n+release.SigSuffix])
-		if err != nil || m.File != n || m.Version != testVersion {
-			t.Errorf("%s: Verify = %+v, %v", n, m, err)
+		base := filepath.Base(e.hdr.Name)
+		if !release.IsArtifact(base) {
+			continue
+		}
+		want, err := os.ReadFile(filepath.Join(distDir, base))
+		if err != nil || !bytes.Equal(e.data, want) {
+			t.Errorf("%s: packed bytes differ from dist/ (%v)", base, err)
 		}
 	}
 }
@@ -234,10 +296,10 @@ func checkSums(t *testing.T, out string, archives []string) {
 
 // TestPackDeterministic packs the same dist/ twice, the second time after
 // changing every input file's mtime, and wants identical bytes: the
-// archives depend on the signed contents and Options.ModTime only.
+// archives depend on the builds' contents and Options.ModTime only.
 func TestPackDeterministic(t *testing.T) {
-	distDir, pub := fakeDist(t, testVersion)
-	out1, paths1 := packTo(t, distDir, pub)
+	distDir := fakeDist(t, testVersion)
+	out1, paths1 := packTo(t, distDir)
 	later := time.Now().Add(time.Hour)
 	files, err := os.ReadDir(distDir)
 	if err != nil {
@@ -248,7 +310,7 @@ func TestPackDeterministic(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	out2, paths2 := packTo(t, distDir, pub)
+	out2, paths2 := packTo(t, distDir)
 	if len(paths1) != len(paths2) {
 		t.Fatalf("runs gave %d and %d files", len(paths1), len(paths2))
 	}
@@ -278,58 +340,61 @@ func TestPackRefuses(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, "iormeshctl-darwin-arm64"},
-		{"missing signature", func(t *testing.T, dir string) {
-			if err := os.Remove(filepath.Join(dir, "iormesh-agent.jar.minisig")); err != nil {
-				t.Fatal(err)
-			}
-		}, "iormesh-agent.jar.minisig"},
-		{"tampered tracer", func(t *testing.T, dir string) {
+		{"unstamped tracer", func(t *testing.T, dir string) {
 			if err := os.WriteFile(filepath.Join(dir, "iormesh-linux-amd64"), []byte("evil"), 0o755); err != nil {
 				t.Fatal(err)
 			}
-		}, "does not match its signature"},
-		{"foreign key", func(t *testing.T, dir string) {
-			_, priv, err := minisign.GenerateKey(rand.Reader)
-			if err != nil {
+		}, "iormesh-linux-amd64"},
+		{"stale jar", func(t *testing.T, dir string) {
+			writeStamped(t, dir, release.AgentFile, "0.2.9")
+		}, "stamped 0.2.9"},
+		{"symlinked controller", func(t *testing.T, dir string) {
+			p := filepath.Join(dir, "iormeshctl-linux-amd64")
+			if err := os.Rename(p, p+".real"); err != nil {
 				t.Fatal(err)
 			}
-			writeSigned(t, priv, dir, "iormesh-linux-amd64", testVersion, []byte("foreign"))
-		}, "signed by key"},
+			if err := os.Symlink(p+".real", p); err != nil {
+				t.Fatal(err)
+			}
+		}, "symlink"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			distDir, pub := fakeDist(t, testVersion)
+			distDir := fakeDist(t, testVersion)
 			tt.spoil(t, distDir)
 			out := filepath.Join(t.TempDir(), "release")
 			_, err := Pack(Options{DistDir: distDir, OutDir: out, Version: testVersion,
-				Arches: []string{"amd64", "arm64"}, PublicKey: pub, ModTime: testDate})
+				Arches: []string{"amd64", "arm64"}, ModTime: testDate})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("Pack err = %v, want it to name %q", err, tt.want)
+			}
+			if _, err := os.Stat(out); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("a refused Pack wrote %s (%v)", out, err)
 			}
 		})
 	}
 }
 
-// TestPackRefusesOtherVersion signs dist/ with the right key at another
-// version: a stale signed build must not be packed as this release.
+// TestPackRefusesOtherVersion stamps dist/ at another version: a stale
+// build must not be packed as this release.
 func TestPackRefusesOtherVersion(t *testing.T) {
-	distDir, pub := fakeDist(t, "0.2.9")
+	distDir := fakeDist(t, "0.2.9")
 	out := filepath.Join(t.TempDir(), "release")
 	_, err := Pack(Options{DistDir: distDir, OutDir: out, Version: testVersion,
-		Arches: []string{"amd64"}, PublicKey: pub, ModTime: testDate})
-	if err == nil || !strings.Contains(err.Error(), "0.2.9") {
-		t.Fatalf("Pack err = %v, want a version mismatch naming 0.2.9", err)
+		Arches: []string{"amd64"}, ModTime: testDate})
+	if !errors.Is(err, release.ErrStaleBuild) || !strings.Contains(err.Error(), "0.2.9") {
+		t.Fatalf("Pack err = %v, want a stale build naming 0.2.9", err)
 	}
 }
 
 func TestPackRefusesBadOptions(t *testing.T) {
-	distDir, pub := fakeDist(t, testVersion)
+	distDir := fakeDist(t, testVersion)
 	out := filepath.Join(t.TempDir(), "release")
 	for _, o := range []Options{
-		{DistDir: distDir, OutDir: out, Version: "v0.3.0", Arches: []string{"amd64"}, PublicKey: pub, ModTime: testDate},
-		{DistDir: distDir, OutDir: out, Version: testVersion, PublicKey: pub, ModTime: testDate},
-		{DistDir: distDir, OutDir: out, Version: testVersion, Arches: []string{"../x"}, PublicKey: pub, ModTime: testDate},
-		{DistDir: distDir, OutDir: out, Version: testVersion, Arches: []string{"amd64"}, PublicKey: pub},
+		{DistDir: distDir, OutDir: out, Version: "v0.3.0", Arches: []string{"amd64"}, ModTime: testDate},
+		{DistDir: distDir, OutDir: out, Version: testVersion, ModTime: testDate},
+		{DistDir: distDir, OutDir: out, Version: testVersion, Arches: []string{"../x"}, ModTime: testDate},
+		{DistDir: distDir, OutDir: out, Version: testVersion, Arches: []string{"amd64"}},
 	} {
 		if _, err := Pack(o); err == nil {
 			t.Errorf("Pack(%+v) succeeded", o)
@@ -375,30 +440,5 @@ func TestSourceDate(t *testing.T) {
 		if (err == nil) != tt.ok || (tt.ok && got.Unix() != tt.want) {
 			t.Errorf("SourceDate(%q, %q) = %v, %v; want %d ok %v", tt.epoch, tt.commit, got, err, tt.want, tt.ok)
 		}
-	}
-}
-
-// TestSignSums wants SHA256SUMS.minisig to verify as file:SHA256SUMS at
-// the release version, and to fail once a hash line is altered.
-func TestSignSums(t *testing.T) {
-	distDir, pub, priv := fakeDistKeys(t, testVersion)
-	out, paths := packTo(t, distDir, pub)
-	sums := paths[len(paths)-1]
-	sigPath, err := SignSums(priv, out, testVersion, testDate)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sigPath != sums+release.SigSuffix {
-		t.Fatalf("SignSums = %s, want %s", sigPath, sums+release.SigSuffix)
-	}
-	m, err := release.VerifyFile(pub, sums)
-	if err != nil || m != (release.Meta{File: SumsFile, Version: testVersion}) {
-		t.Fatalf("VerifyFile = %+v, %v", m, err)
-	}
-	if err := os.WriteFile(sums, []byte("0  iormesh-0.3.0-amd64.tar.gz\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := release.VerifyFile(pub, sums); !errors.Is(err, release.ErrBadSignature) {
-		t.Fatalf("altered sums: err = %v, want ErrBadSignature", err)
 	}
 }

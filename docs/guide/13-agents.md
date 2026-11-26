@@ -10,7 +10,7 @@ production hosts or trace data. Read it before chapter 2.
 
 | The human | The agent |
 |---|---|
-| types passwords: sudo on the hosts, the release key's password at `mage sign` | runs `mage` targets and iormeshctl, reads the output |
+| types passwords: sudo on the hosts, the signing key's password at `iormeshctl sign` or `mage sign` | runs `mage` targets and iormeshctl, reads the output |
 | compares host key fingerprints and accepts them | checks `ssh -o BatchMode=yes HOST true` works |
 | runs bootstrap's printed steps on each host | runs `bootstrap` to print them, then checks the result |
 | says yes to every change on a host (`deploy`, `ensure`, `rm`, `expand -apply`) | shows what will change and asks, naming the hosts |
@@ -23,13 +23,16 @@ The **Human step** boxes in chapters 2–11 mark each of these.
 ## Commands by what they touch
 
 iormeshctl never prompts — ssh runs with `BatchMode=yes` — so a
-command that would need a password fails instead of hanging. That
-makes it safe to run from an agent, and makes the line between
-"reads" and "changes" the one that matters:
+command that would need a password fails instead of hanging. The
+one exception is `sign`, which asks for the signing key's
+password on the terminal: that is the human's to run. That
+makes the rest safe to run from an agent, and makes the line
+between "reads" and "changes" the one that matters:
 
 | Touches | Commands | Ask first? |
 |---|---|---|
 | nothing, or only reads local files | `version`, `list`, `verify`, `bootstrap` (prints), `show …`, `query …`, `services`, `services rules`, `services edges`, `expand` (lists), `prune` (lists) | no |
+| the builds' signatures, with the human's key | `sign` (writes `NAME.minisig` next to each build) | **the human runs it** |
 | the laptop's store, registry or service database | `build` (writes the builds dir and the service database), `add`, `services name`, `services unname` | say what you add |
 | reads hosts | `status` (runs the tracer's read-only `status` as root through the narrow sudoers rule) | no |
 | moves segments off hosts | `collect`, `refresh` | no, once tracing is agreed |

@@ -8,7 +8,7 @@ when a step fails. This page stays so old links keep working.
 | Quickstart section | Guide chapter |
 |---|---|
 | 1. Prerequisites | [2. Prepare the laptop and the hosts](guide/02-prerequisites.md) |
-| 2. Release key and signed builds | [3. Build and sign a release](guide/03-release.md) |
+| 2. Release key and signed builds | [3. Get and sign a release](guide/03-release.md) |
 | 3. Register the hosts | [4. Register hosts and bootstrap them](guide/04-register-bootstrap.md#register-the-hosts) |
 | 4. Bootstrap: the one-time install | [4. Register hosts and bootstrap them](guide/04-register-bootstrap.md#bootstrap-the-one-time-install) |
 | 5. Deploy, 6. Check status | [5. Deploy and check status](guide/05-deploy-status.md) |
