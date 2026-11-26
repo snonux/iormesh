@@ -68,9 +68,22 @@ Success: <the line or exit code that proves it>
 Approve? yes / no / change
 ```
 
+- Copy the labels verbatim, each at the start of a line:
+  `Runs on:`, `Commands:`, `Changes:`,
+  `Data leaving this machine:`, `Success:`. Put every detail
+  after the colon. Write `Changes: on app1 only, ...`, never
+  `Changes on app1:` or `Changes, all on app1:`; a reworded
+  label counts as missing, and the step is not approved.
 - One step may hold several commands; name each one.
 - Run only the commands the approved explanation names, exactly
-  as written. A new or changed command needs a new explanation.
+  as written, character for character. A new or changed command
+  needs a new explanation and a new approval.
+- Never edit an approved command, not even to fill in a value
+  it computes. Approved `ssh -o BatchMode=yes "$(id -un)@app1"
+  true`: run exactly that. `ssh -o BatchMode=yes "ops@app1" true`
+  is a new command, so explain it and wait again. Prefer
+  commands that need no value from an earlier one; ask the user
+  for the value instead.
 - "no": stop and ask what to do instead. "change": write a new
   explanation.
 - After the step, quote the line that proves success. On a

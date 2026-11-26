@@ -10,8 +10,10 @@ The controller (Linux or macOS):
 - The repo with Go, a JDK (`mage workloadBuild`) and mage; the
   target builds the workload jar and a cgo-free iormeshctl
   itself.
-- rsync 3.4.0 or newer first in `PATH` (the preflight refuses
-  older ones and openrsync; [security.md](../../security.md)).
+- rsync 3.4.0 or newer first in `PATH`, or a patched
+  distribution build (decisions.md #39: the preflight reads its
+  rpm or Debian changelog for the backported fixes); it refuses
+  others and openrsync ([security.md](../../security.md)).
 - Key-based SSH to both hosts through the agent (`BatchMode`),
   each host key already in `~/.ssh/known_hosts`
   (`StrictHostKeyChecking=yes`; compare the fingerprint out of

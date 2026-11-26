@@ -26,6 +26,22 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
   hanging one either (M4 "Collect"). The k8s fetch path is
   provisionally settled in #18: an exec-streamed tar, no
   `kubectl cp`.
+- **#39 Patched distribution rsync on the controller** (owner,
+  2026-11-27, task zm4) — the controller's rsync must be 3.4.0
+  or newer, or a distribution build of 3.2.4 or newer with the
+  January 2025 receiver fixes backported: CVE-2024-12087 (path
+  traversal) and CVE-2024-12088 (`--safe-links` bypass). el9's
+  `rsync-3.2.7-1.el9_8` and later qualify; its changelog names
+  them by Red Hat's ids, RHEL-70208 and RHEL-70210, not by CVE.
+  Reasons: the main target's own package is 3.2.7 with the fixes,
+  every agent of the M8 trial stopped on a bare "3.4.0" rule, and
+  one built rsync from an unnamed source instead; a distribution
+  build is maintained, a self-built one is not. 3.2.4 is the
+  floor because collect needs `--fsync`. The guide (ch. 2) gives
+  a one-line check per distribution; the M4 acceptance preflight
+  reads the package changelog of the rsync first in `PATH`.
+  [security.md](../../security/access.md) keeps the reasons for
+  the rule itself.
 - **#16 Trace-file segmentation** — rotate once per minute,
   close-then-rename into `ready/`, collect-while-running via
   rsync with delete-after-sync (see M4). Compression is

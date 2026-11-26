@@ -8,7 +8,8 @@ a path, a number). Pods have their own table in
 [kubernetes.md](kubernetes.md#troubleshooting). The first run is
 walked through in [the guide](guide/README.md), whose
 [12. When things go wrong](guide/12-troubleshooting.md) is the
-order to look in.
+order to look in and the short fix for each symptom that path
+meets; this page is the depth behind it.
 
 The messages come from the source, not from a failing run on real
 hosts; a few (`host not registered`, `pinned key`, the `add` usage

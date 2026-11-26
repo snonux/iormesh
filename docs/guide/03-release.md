@@ -14,7 +14,9 @@ release and installs iormeshctl.
 Either download the archive for your hosts' arch and
 `SHA256SUMS`, or build them from the release tag with `mage
 release podman` (they land in `dist/release/<version>/`;
-[build.md](../build/signing-releases.md#releases)). Then check and unpack:
+[build.md](../build/signing-releases.md#releases)). Then check and unpack
+(`tar` is a controller prerequisite,
+[chapter 2](02-prerequisites.md#the-laptop-the-controller)):
 
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS   # the archives you have
