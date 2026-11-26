@@ -150,8 +150,8 @@ pinned SHA-256 and relocates its classes to
 `iormesh.agent.shaded.asm` (`agent/tools/Relocate.java`), so
 neither build nor tests touch the network. `mage agentTest` starts
 with `mage agentReproTest` (two clean builds, same bytes;
-"Releases" below), then runs with the `java` on `PATH` and again with each JDK listed in
-`IORMESH_AGENT_JDKS` (colon-separated `JAVA_HOME`s), which is how
+"Releases" below), then runs with the `java` on `PATH` and
+again with each JDK listed in `IORMESH_AGENT_JDKS` (colon-separated `JAVA_HOME`s), which is how
 each hook-table variant gets checked against its JDK: list a 17
 and a 21 (`jdk17`, `jdk21`) when `java` on `PATH` is 25 or later
 (`jdk25`). It ends
@@ -542,13 +542,18 @@ ls dist/release/0.1.0/
   of the v0.1.0 dry run, [testing.md](testing.md), task 7k4),
   and so does the agent jar (task bm4): `mage agentBuild` packs
   it and its nested bridge jar with `jar --create --date`, every
-  entry dated `$SOURCE_DATE_EPOCH` or else the commit time, and
-  the jar tool sorts the entries by name. What still varies is
+  entry dated `$SOURCE_DATE_EPOCH` or else the commit time (so
+  outside a git checkout every jar target needs
+  `SOURCE_DATE_EPOCH` set), and the jar tool sorts the entries
+  by name. What still varies is
   the JDK: javac's class files and the manifest's `Created-By`
   (the jar tool's JDK version, e.g. `25.0.5 (Red Hat, Inc.)`)
   come from the builder's JDK, which the repository does not
-  pin, so a rebuild matches only with the same JDK release —
-  read it from the published jar's manifest (`unzip -p
+  pin: `mage release` builds the agent with the `java` on the
+  release machine's `PATH`, not in a container. A rebuild
+  matches only with the same JDK build, version and vendor, as
+  the manifest's `Created-By` names — read it from the
+  published jar's manifest (`unzip -p
   iormesh-agent.jar META-INF/MANIFEST.MF`). `mage
   agentReproTest` (in `mage agentTest` and CI) builds the jar
   from scratch twice and fails unless the SHA-256s match. A

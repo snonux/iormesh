@@ -49,8 +49,8 @@ tar -xzf iormesh-0.1.0-amd64.tar.gz
 `SHA256SUMS` catches a corrupt download; it is no signature.
 Whether to trust the archive is your call — where it came from,
 or your own `mage release` of the tag compared with it byte for
-byte (build with the JDK release that the published jar's
-`Created-By` names, [build.md](../build.md#releases)) — and your
+byte (build with the JDK build, version and vendor, that the
+published jar's `Created-By` names, [build.md](../build.md#releases)) — and your
 signature, next, is what deploy trusts from then on.
 
 **Checkpoint:** `sha256sum -c` prints `OK` for the archive;
