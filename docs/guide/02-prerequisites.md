@@ -14,6 +14,7 @@ Linux or macOS; it needs no eBPF and no root.
 | only to build a release yourself: Podman or Docker | `podman version` (or `docker version`) | client and server versions, no error |
 | optional: `minisign` (your distribution's or Homebrew's package; no package? `go install aead.dev/minisign/cmd/minisign@v0.3.0`, the library iormeshctl signs with), to make your signing key by hand — `iormeshctl keygen` makes it too ([ch. 3](03-release.md#make-your-key-once)) | `minisign -v` | a version line |
 | rsync 3.4.0 or newer, first in `PATH` | `rsync --version` | `rsync  version 3.4.0` or newer |
+| `tar`, to unpack the release (a minimal Rocky 9 lacks it) | `command -v tar` | a path; else `sudo dnf install -y tar` |
 | key-based SSH to each host through your agent | `ssh -o BatchMode=yes app1 true` | returns at once, no prompt, exit 0 |
 | each host's key in `~/.ssh/known_hosts` | the same command | no `Host key verification failed.` |
 
