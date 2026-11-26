@@ -31,8 +31,8 @@ type traffic struct {
 type connAcc struct {
 	project         string
 	first, last     uint64
-	clients, server map[string]bool // process ids: connect, accept
-	peer, local     netip.AddrPort  // connect's remote, accept's local
+	clients, server map[string]bool // process ids: connect, accept (or an initial snapshot's role)
+	peer, local     netip.AddrPort  // connect's remote, accept's local (likewise)
 	reqs            map[reqKey]*Request
 	// seen is each source's window of the connection's records, so the
 	// database knows which sources a forgotten segment leaves (task gk4).
@@ -83,10 +83,32 @@ func (t *traffic) add(ev *schema.Event) error {
 		if l, ok := addrPort(ev.Args.LocalAddr, ev.Args.LocalPort); ok {
 			a.local = l
 		}
+	case schema.KindTCPState:
+		a.initial(pid, ev)
 	case schema.KindHTTP:
 		a.request(t.source, t.paths, ev)
 	}
 	return nil
+}
+
+// initial takes the role of a socket open before the session from its
+// initial snapshot (decision #35), which stands in for the connect or
+// accept the trace never saw: the client end's remote address is the
+// peer, the server end's local address the endpoint. A connect or accept
+// of the same conn id, had there been one, sets the same.
+func (a *connAcc) initial(pid string, ev *schema.Event) {
+	switch ev.InitialRole() {
+	case RoleClient:
+		a.clients[pid] = true
+		if p, ok := addrPort(ev.Args.RemoteAddr, ev.Args.RemotePort); ok {
+			a.peer = p
+		}
+	case RoleServer:
+		a.server[pid] = true
+		if l, ok := addrPort(ev.Args.LocalAddr, ev.Args.LocalPort); ok {
+			a.local = l
+		}
+	}
 }
 
 // endOf is when an event ends, wall_ns + latency_ns, saturated at int64

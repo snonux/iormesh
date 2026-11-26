@@ -10,8 +10,8 @@ import "strings"
 // internal/exit_root_test.go, internal/pidnsconnect_root_test.go,
 // internal/badfd_root_test.go, internal/sockclose_root_test.go,
 // internal/sockfinal_root_test.go, internal/btf_root_test.go,
-// internal/rename_root_test.go, internal/msgcalls_root_test.go and
-// internal/peek_root_test.go: they
+// internal/rename_root_test.go, internal/msgcalls_root_test.go,
+// internal/peek_root_test.go and internal/preopen_root_test.go: they
 // load the real BPF object, attach the TCP programs or the loader's default
 // probe set, and read the ring buffer (M1 steps 4 and 5; process-tree
 // following and the exec watch, M2 steps 1–2; every event family, M2 step
@@ -36,7 +36,8 @@ import "strings"
 // of the mmsg loop, task oh4; recvfrom, recvmsg and recvmmsg with MSG_PEEK
 // marked and counted once, task ok4; the msghdr calls' peers with and
 // without msg_name, an mmsg batch from two senders and an AF_UNIX
-// datagram path, task hl4). They
+// datagram path, task hl4; a connection opened before the session
+// seeded with its role and key, task cm4). They
 // skip for anybody but root, so `mage test` passes them by, and `mage
 // bpfRootTest` is the one place that runs them. The names are listed
 // rather than matched by a pattern so that a renamed test fails a gate
@@ -56,6 +57,7 @@ func RootBPFTests() []string {
 		"TestSockReuseAfterLostClose",
 		"TestSockStaleOwnerOfLiveSocket",
 		"TestSockFinalSnapshot",
+		"TestSeedPreopenedConnection",
 		"TestLoaderDeliversRecords",
 		"TestLoaderTargetsOnlyTheMap",
 		"TestLoaderCloseEndsRecords",

@@ -619,6 +619,41 @@ func TestSockSnapshotFinal(t *testing.T) {
 	}
 }
 
+// TestSockSnapshotInitial: an initial snapshot (decision #35, task cm4) is
+// a tcp_state record marked initial_client or initial_server, with the
+// four tcp_sock fields or — a socket still in SYN_SENT, a torn read —
+// without; InitialRole names its role. On another kind it is invalid, and
+// no other event names a role.
+func TestSockSnapshotInitial(t *testing.T) {
+	for mark, role := range map[string]string{SockSnapshotInitialClient: "client",
+		SockSnapshotInitialServer: "server"} {
+		e := validTCPState()
+		e.Args.SockSnapshot = ptr(mark)
+		if err := e.Validate(); err != nil {
+			t.Errorf("%s: %v", mark, err)
+		}
+		if got := e.InitialRole(); got != role {
+			t.Errorf("%s: role %q, want %q", mark, got, role)
+		}
+		e.Args.SndUna, e.Args.RcvNxt, e.Args.BytesAcked, e.Args.BytesReceived = nil, nil, nil, nil
+		if err := e.Validate(); err != nil {
+			t.Errorf("%s without the fields: %v", mark, err)
+		}
+		e = validEvent()
+		e.Args.SockSnapshot = ptr(mark)
+		if err := e.Validate(); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s on %s: err %v, want ErrInvalid", mark, e.Event, err)
+		}
+	}
+	final := validTCPState()
+	final.Args.SockSnapshot = ptr(SockSnapshotFinal)
+	for _, e := range []Event{validTCPState(), final, validEvent()} {
+		if got := e.InitialRole(); got != "" {
+			t.Errorf("%s (snapshot %v): role %q, want none", e.Event, e.Args.SockSnapshot, got)
+		}
+	}
+}
+
 // validStreamWrite is one write of 5 bytes on a TCP socket carrying the
 // sequence number of its first byte (M4, task gb4).
 func validStreamWrite() Event {

@@ -94,6 +94,9 @@ type Tracer struct {
 	pidNS uint32
 	// hintMu orders AddTarget's updates of the target hint (targets.go).
 	hintMu sync.Mutex
+	// seedMu keeps two seedings (seedsock.go) from emptying and filling
+	// seed_listen_map under each other.
+	seedMu sync.Mutex
 }
 
 // Open loads the object, excludes the tracer itself, fills target_map,

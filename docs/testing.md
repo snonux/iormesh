@@ -1703,8 +1703,9 @@ to billing's pid; the next `expand` lists it `enrolled`), and
   the first build after deploying over the running keep-alive
   client was `0 services, 0 edges` from 726 events; with the
   client restarted it fused at once. A product gap, task cm4
-  (priority H); chapter 5 now says so, chapter 10's run shows the
-  resulting `mixed` edge.
+  (priority H); chapter 5 said so, chapter 10's run shows the
+  resulting `mixed` edge. Task cm4 closed it (decision #35,
+  "Connections open before the session" below).
 - `rm -project` of a host's last project uninstalls the host, so
   chapter 8's "rm -project, then add again" to add `-agent` left
   `iom1` without a tracer (deploy: `/opt/iormesh/bin/iormesh is
@@ -2270,6 +2271,55 @@ The unit tests: `internal/federate` (`TestClockFinalSnapshot`,
 (`TestSockSnapshotFinal`) and `internal/normalize`
 (`TestNormalizeDropsFinalSnapshots`). Each guard was mutated out
 once and a test failed every time.
+
+## Connections open before the session (task cm4, 2026-11-26)
+
+`TestSeedPreopenedConnection` (`internal/preopen_root_test.go`,
+in `mage bpfRootTest`) starts two children of the test binary
+(`internal/preopen_child_test.go`). Each listens on loopback,
+connects to itself and accepts, all before the tracer loads, and
+keeps the listener open. The tracer traces the first child only,
+with the state tracepoint and the data calls, and runs
+`bpf.Tracer.SeedSockets` twice. Then both children move 5 bytes
+one way and 7 back. Run through the correlator, the target's two
+ends must give exactly one initial `tcp_state` event each:
+`initial_client` on the connecting fd, `initial_server` on the
+accepted one (its port the listener's), `ESTABLISHED`, the
+loopback tuple and the four fields. Both ends and their reads and
+writes must carry one conn id. Split onto two hosts, the ends
+must give a client and a server half with one key, which the
+merge fuses. The bystander child gets no event. It failed first
+(red) with `fd 6: 0 initial tcp_state events, want 1`. Mutations
+caught: the listener lookup dropped (both ends read as clients;
+the keys then differ by one and both halves stay `no_match`), the
+target check dropped (bystander events), and the
+already-registered check dropped (two snapshots per end after
+the second seeding). `TestEl9RecordLayout` relocates the two
+iterators against the trimmed el9 BTF too; their context struct
+is sock.c's own, so they need no type the file lacks. Passed on
+the 7.3 laptop; the pod-mode loads (`TestPidNS*`) load the
+iterators too.
+
+The unit tests: `internal/correlate`
+(`TestInitialSnapshotFusion`), `internal/federate`
+(`TestHalvesFromEvents`' initial cases, `TestFuse`'s open-before
+cases, `TestFuseFoldsSessions`, and `TestFuseMatchesReference`,
+whose reference now knows `Before`), `internal/schema`
+(`TestSockSnapshotInitial`), `internal/servicedb`
+(`TestInitialSnapshotLocalPair`), `internal/report`
+(`TestReportInitialSnapshotRoles`), `internal/cli`
+(`TestSessionSeedsOpenSockets`, `TestPortSessionFollowsRestart`)
+and `internal/bpf` (`TestDrainIter`). Not yet run on el9
+(`iom1`); the iterators use only kernel 5.8 features.
+
+The cm4 review found that a host with a million open files in
+view would not have been seeded at all. The kernel's
+`bpf_seq_read` returns `EAGAIN` once one read() visits
+`MAX_ITER_OBJECTS` (1M) objects without output, and the seed
+programs write none; `drainIter` ended there. It now reads on,
+and the walk resumes. `TestDrainIter`'s EAGAIN case failed first
+(`resource temporarily unavailable after 1 reads`). The listener
+map is emptied after the walk too.
 
 ## el9 record layout (task of4)
 

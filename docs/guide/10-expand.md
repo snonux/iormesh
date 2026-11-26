@@ -90,9 +90,11 @@ host  10.20.0.141  shop     listen-port 8443               -             hop 1
 
 After the next refresh the edge read `mixed` (2 connections, 1
 unresolved): the keep-alive connection that revealed the peer
-predates its session and stays one-sided
-([chapter 5](05-deploy-status.md#start-what-you-want-to-trace));
-the client's next connection fused. `expand` then lists the peer
+predated the new session, and the tracer of that run (before
+task cm4) left it one-sided; the client's next connection fused.
+A current tracer seeds such a connection when the session starts
+([chapter 5](05-deploy-status.md#start-what-you-want-to-trace)),
+so it fuses too. `expand` then lists the peer
 as `enrolled`. Each new host still needs
 bootstrapping first ([chapter 4](04-register-bootstrap.md)) unless
 it already has the tracer: deploy only upgrades an installed one.

@@ -30,6 +30,32 @@ func selfTrace() *trace {
 	return tr
 }
 
+// TestReportInitialSnapshotRoles (decision #35, task cm4): a connection
+// open before the session has no connect or accept; each end's initial
+// snapshot names its role instead, and a plain state change names none.
+func TestReportInitialSnapshotRoles(t *testing.T) {
+	tr := &trace{host: "h1"}
+	snap := func(mark string, local, remote uint16) schema.Args {
+		a := schema.Args{SockState: ptr("ESTABLISHED"), LocalAddr: ptr("127.0.0.1"),
+			LocalPort: ptr(local), RemoteAddr: ptr("127.0.0.1"), RemotePort: ptr(remote)}
+		if mark != "" {
+			a.SockSnapshot = ptr(mark)
+		}
+		return a
+	}
+	tr.add(50, 51, schema.KindTCPState, 5, 0, "s1", snap(schema.SockSnapshotInitialClient, 40000, 9000), nil)
+	tr.add(50, 52, schema.KindTCPState, 6, 0, "s1", snap(schema.SockSnapshotInitialServer, 9000, 40000), nil)
+	tr.add(50, 51, schema.KindTCPState, 7, 0, "s2", snap("", 40001, 9001), nil)
+	r := Build(collect(tr, 0), Input{})
+	roles := map[int32]string{}
+	for _, c := range r.Processes[0].Conns {
+		roles[c.FD] = c.Role
+	}
+	if roles[5] != RoleClient || roles[6] != RoleServer || roles[7] != "" {
+		t.Errorf("roles by fd %v, want 5 client, 6 server, 7 none", roles)
+	}
+}
+
 // TestPeekReceivedOnce (tasks ok4, cl4): a recvfrom that peeked
 // (args.peek) before the read that consumes the same bytes adds nothing
 // to the connection's received bytes, nor to its thread's or its

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -39,6 +40,32 @@ func patternSession(t *testing.T, tr *fakeTracer, c *correlate.Correlator) *sess
 		t.Fatal(err)
 	}
 	return s
+}
+
+// TestSessionSeedsOpenSockets (decision #35, task cm4): a started session
+// has seeded its targets' open sockets once; a seeding that fails is
+// named on stderr and the session still starts — the trace only lacks
+// the connections opened before it.
+func TestSessionSeedsOpenSockets(t *testing.T) {
+	fakeProcs(t, 10)
+	tr := newFakeTracer()
+	pidSession(t, tr, testCorrelator(t, t.TempDir()), 10)
+	if len(tr.seeded) != 1 {
+		t.Fatalf("seeded %d times at start, want once", len(tr.seeded))
+	}
+
+	tr = newFakeTracer()
+	tr.seedErr = errors.New("no iterators")
+	cfg := runConfig{spec: target.Spec{PIDs: []uint32{10}}, project: "p"}
+	s := newSession(tr, testCorrelator(t, t.TempDir()), cfg)
+	var log strings.Builder
+	s.log = &log
+	if err := s.start([]uint32{10}); err != nil {
+		t.Fatalf("start with a failing seeding: %v", err)
+	}
+	if !strings.Contains(log.String(), "stay unseen: no iterators") {
+		t.Fatalf("stderr %q does not name the failed seeding", log.String())
+	}
 }
 
 // TestPatternSessionJudgesExecs: a matching exec is adopted and linked to

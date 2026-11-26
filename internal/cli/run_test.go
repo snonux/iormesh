@@ -37,6 +37,10 @@ type fakeTracer struct {
 	// finals is what FinalSockets hands finish, finalErr its error.
 	finals   []*types.TcpStateEvent
 	finalErr error
+	// seeded holds, per SeedSockets call, how many targets were added by
+	// then; seedErr is what each call returns.
+	seeded  []int
+	seedErr error
 }
 
 func newFakeTracer() *fakeTracer { return &fakeTracer{records: make(chan []any, 16)} }
@@ -106,6 +110,13 @@ func (f *fakeTracer) FinalSockets() ([]*types.TcpStateEvent, error) {
 		return nil, errors.New("final sockets read after Close")
 	}
 	return f.finals, f.finalErr
+}
+
+func (f *fakeTracer) SeedSockets() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.seeded = append(f.seeded, len(f.added))
+	return f.seedErr
 }
 
 // StackTrace has no stacks to give: the fake sends no stack records.

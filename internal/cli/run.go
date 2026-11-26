@@ -89,6 +89,7 @@ type tracer interface {
 	StopAggregation() error
 	PendingAggregates() ([]*types.RwAggregateEvent, error)
 	FinalSockets() ([]*types.TcpStateEvent, error)
+	SeedSockets() error
 	StackTrace(id uint32) ([]uint64, error)
 	AttachJavaMarks(pid uint32, natives []bpf.JavaNative) ([]string, error)
 	DetachJavaMarks(pid uint32) error

@@ -26,6 +26,12 @@ func half(host, conn, role string, key ISNPair, at uint64) Half {
 		Procs: []string{"proc:" + host + "/1@1"}}
 }
 
+// before marks h as open before its session (decision #35).
+func before(h Half) Half {
+	h.Before = true
+	return h
+}
+
 // outcome is a Fusion flattened for comparison: "client<>server" per
 // fused connection, "conn=reason" per unresolved half.
 func outcome(f Fusion) []string {
@@ -75,6 +81,22 @@ func TestFuse(t *testing.T) {
 		{"outside the window", []Half{half("A", "c1", RoleClient, k1, wall0),
 			half("B", "s1", RoleServer, k1, wall0+uint64(DefaultWindow)+1)},
 			[]string{"c1=no_match", "s1=no_match"}},
+		// Halves open before their sessions (Half.Before, decision #35):
+		// Established is an upper bound only.
+		{"both open before sessions started minutes apart", []Half{
+			before(half("A", "c1", RoleClient, k1, wall0)),
+			before(half("B", "s1", RoleServer, k1, wall0+600*sec))}, []string{"c1<>s1"}},
+		{"open before the client's session, accepted in the server's", []Half{
+			before(half("A", "c1", RoleClient, k1, wall0+600*sec)),
+			half("B", "s1", RoleServer, k1, wall0)}, []string{"c1<>s1"}},
+		{"open before, but the partner established after it", []Half{
+			before(half("A", "c1", RoleClient, k1, wall0)),
+			half("B", "s1", RoleServer, k1, wall0+uint64(DefaultWindow)+1)},
+			[]string{"c1=no_match", "s1=no_match"}},
+		{"two open-before servers with the key: ambiguous", []Half{
+			before(half("A", "c1", RoleClient, k1, wall0)),
+			before(half("B", "s1", RoleServer, k1, wall0)), half("C", "s2", RoleServer, k1, wall0)},
+			[]string{"c1=ambiguous", "s1=ambiguous", "s2=ambiguous"}},
 		{"no key, no role, key conflict", []Half{
 			{Host: "A", ConnID: "c1", Role: RoleClient},
 			{Host: "A", ConnID: "c2", HasKey: true, Key: k1},
@@ -127,6 +149,11 @@ func TestFuseFoldsSessions(t *testing.T) {
 		{"outside the window", []Half{client, server("B", "s1", wall0, srv),
 			server("B", "s2", wall0+uint64(DefaultWindow)+1, srv)},
 			[]string{"s1<>c1", "s2=no_match"}},
+		// A session started minutes later finds the socket already open
+		// (decision #35): its half is the same socket, not a rival.
+		{"a later session's open-before half", []Half{client, server("B", "s1", wall0, srv),
+			before(server("B", "s2", wall0+600*sec, srv))},
+			[]string{"s1+s2<>c1"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -294,7 +321,7 @@ func refFuseGroup(f *Fusion, g []Half, window uint64) {
 	candidates := make([][]int, len(g))
 	for i := range g {
 		for j := range g {
-			if g[i].Role != g[j].Role && within(g[i].Established, g[j].Established, window) {
+			if g[i].Role != g[j].Role && refCandidates(g[i], g[j], window) {
 				candidates[i] = append(candidates[i], j)
 			}
 		}
@@ -310,6 +337,22 @@ func refFuseGroup(f *Fusion, g []Half, window uint64) {
 			f.Conns = append(f.Conns, newConn(h, g[c[0]]))
 		}
 	}
+}
+
+// refCandidates is the reference's window test of two halves: within for
+// two exact ones; a half open before its session (Before) has only an
+// upper bound, so an exact partner must be established no later than
+// that bound plus window, and two such halves always qualify.
+func refCandidates(a, b Half, window uint64) bool {
+	switch {
+	case a.Before && b.Before:
+		return true
+	case a.Before:
+		return b.Established <= a.Established || b.Established-a.Established <= window
+	case b.Before:
+		return a.Established <= b.Established || a.Established-b.Established <= window
+	}
+	return within(a.Established, b.Established, window)
 }
 
 // within is the reference's window test: a and b at most window apart.
@@ -333,6 +376,7 @@ func randomHalves(r *rand.Rand, w uint64) []Half {
 		hs[i] = Half{Host: "H" + strconv.Itoa(r.IntN(3)), ConnID: fmt.Sprintf("c%02d", i),
 			Role: role, Key: ISNPair{1, uint32(r.IntN(2))}, HasKey: r.IntN(8) != 0,
 			Established: bases[r.IntN(len(bases))] + offsets[r.IntN(len(offsets))]}
+		hs[i].Before = r.IntN(4) == 0
 	}
 	return hs
 }

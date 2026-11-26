@@ -130,6 +130,11 @@ func TestPortSessionFollowsRestart(t *testing.T) {
 	if !strings.Contains(log.String(), "port 8080: following new owner pid 22") {
 		t.Fatalf("stderr %q does not name the new owner", log.String())
 	}
+	// The restarted owner ran before the session took it on: its open
+	// sockets are seeded once it is a target (task cm4).
+	if !slices.Equal(tr.seeded, []int{0, 1}) {
+		t.Fatalf("seedings after %v targets, want at start and after adopting 22", tr.seeded)
+	}
 
 	f.live[22], f.holders = false, nil
 	f.now = f.now.Add(10 * time.Second)

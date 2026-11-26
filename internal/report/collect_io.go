@@ -7,9 +7,10 @@ import (
 )
 
 // conn folds an event with a conn_id into its connection end: the role
-// from connect or accept, the addresses from the first event naming
-// them, stream bytes, and an http event's request (on the end and on the
-// thread's line).
+// from connect or accept — or, for a socket open before the session, its
+// initial snapshot (decision #35) — the addresses from the first event
+// naming them, stream bytes, and an http event's request (on the end and
+// on the thread's line).
 func (c *Collector) conn(p *procAcc, ev *schema.Event) bool {
 	if isPair(ev.Event) && ev.Args.FD2 != nil && ev.Args.FD2Gen != nil {
 		// pipe, pipe2, socketpair: both ends are born here.
@@ -26,6 +27,10 @@ func (c *Collector) conn(p *procAcc, ev *schema.Event) bool {
 		a.role = RoleClient
 	case schema.KindAccept, schema.KindAccept4:
 		a.role = RoleServer
+	case schema.KindTCPState:
+		if role := ev.InitialRole(); role != "" {
+			a.role = role
+		}
 	}
 	if a.addrL == "" {
 		a.addrL = addrPort(ev.Args.LocalAddr, ev.Args.LocalPort)

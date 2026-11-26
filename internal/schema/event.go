@@ -98,9 +98,17 @@ const (
 	DropSkippedRuns = "skipped_runs"
 )
 
-// SockSnapshotFinal is args.sock_snapshot's one value: the snapshot the
-// tracer takes of each socket still open at the end of the session.
-const SockSnapshotFinal = "final"
+// args.sock_snapshot's values: SockSnapshotFinal is the snapshot the
+// tracer takes of each socket still open at the end of the session;
+// SockSnapshotInitialClient and SockSnapshotInitialServer the one it
+// takes of a target's socket already open when the session started
+// (decision #35, task cm4), which also says the end's role: server when
+// a listener held its local port, client otherwise.
+const (
+	SockSnapshotFinal         = "final"
+	SockSnapshotInitialClient = "initial_client"
+	SockSnapshotInitialServer = "initial_server"
+)
 
 // Attribution values. Missing attribution is data, not a hole: every
 // event says which one applies, and the empty string is invalid.
