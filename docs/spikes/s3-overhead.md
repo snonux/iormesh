@@ -1268,3 +1268,132 @@ firm result is the kernel cost: the tracer now adds 17 % fewer
 kernel instructions to every bystander syscall in either mode,
 and an in-namespace bystander pays less than a host-mode one did
 before. What is left is mostly the tracepoint path itself.
+
+## Re-measure on Rocky 9.9 with the msghdr handlers (ak4, 2026-11-26)
+
+S3 and every follow-up above ran on the 7.2 laptop. After them came
+the eight default sendmsg/recvmsg/sendmmsg/recvmmsg handlers with
+their msghdr peer read (oh4, nk4: a second, 232-byte address record
+per call on a non-stream socket; an mmsg exit reads up to 1024
+`msg_len`s), the `MSG_PEEK` mark (ok4), the held-enter mark (ti4),
+the FIN rule (wi4) and the late attaches of `run -agent` (lh4).
+Task ak4 re-ran decision #25's items by the methods above, on the
+main target instead of the laptop (owner decision), A/B against
+the build before those changes, and added the loads they are about.
+
+**Conditions.** `iom1`: Rocky 9.9, kernel
+5.14.0-741.22.1.el9_9, JDK 25.0.5.1, a bhyve guest with **2 vCPUs**
+(Intel N100) and 2 GiB, nothing else running (load 0.5–4, all of it
+the runs' own). Absolute figures are a small VM's; the ratios and
+the A/B are the result. The tracer was pinned to CPU 1 and every
+load to CPU 0 (`S3_TRACER_CPU=1 S3_LOAD_CPUS=0`), so "4 threads"
+are four burst threads on one CPU. Builds: **new** = `4948da0`
+(main), **base** = `f049b03` (the commit before ti4, after the el9
+fixes gf4/hf4: no msghdr handlers, no late attach), both linked
+static on the laptop as `ReleaseTracer` does and run against the
+same workload jar; each round ran base then new. iom1 has no GNU
+time, git, `perf` or `zstd`, so `measure.sh` got `S3_TIME` (a
+static build of `spikes/s3/cputime.c`), `S3_REV`, and the
+`volume` mode and instruction counts were not taken. The VM ran
+07:52–08:16 UTC, the measurements 19 minutes of it; the laptop
+only built. Samples: `spikes/s3/results-ak4/` (each `samples.txt`
+concatenates the rounds' files, headers included; `log.txt` is the
+driver's).
+
+**New loads** (`spikes/s3/msgload.c`, `measure.sh`'s new opt-in
+`msg` mode: per round an untraced run, one traced by its PID, and
+one beside a tracer on an idle process, each reporting its own CPU
+time from its startup gate; one thread):
+
+- `udp-mmsg:5000` — 5000 × (one `sendmmsg` of 64 datagrams of
+  64 bytes from an unconnected socket with `msg_name` set, then
+  `recvmmsg` until they are back) on 127.0.0.1;
+- `udp-mmsg:1000:1024` — the same at 1024 per `sendmmsg`, the
+  kernel's limit and the mmsg exit's worst case (the receiver's
+  buffer keeps ~250 per batch; the rest are dropped and counted,
+  not waited for);
+- `netlink:100000` — 100 000 `RTM_GETLINK` dumps, a `sendmsg` and
+  two `recvmsg` each on a `NETLINK_ROUTE` socket (what `ip -s link`
+  does): every call an event plus its address record;
+- `exec:300` — 300 × fork/exec of `ip -s link` and `ss -s`, the
+  netlink load as hosts run it; once more under
+  `run -agent … -spool …`, where every exec of a traced process
+  goes to the late attacher.
+
+### The gated items (`syscall-burst`, `-aggregate=false` for the CPU items)
+
+| #25 item | base `f049b03` | new `4948da0` | Budget |
+|---|--:|--:|---|
+| tracer CPU per event, 1 thread (5 runs) | 1.02 µs | **1.06 µs** | ≤ 2 µs: passes |
+| tracer CPU per event, 4 threads (5 runs) | 1.00 µs | **1.05 µs** | ≤ 2 µs: passes |
+| bystander CPU, 4 threads (30 pairs) | 1.245× (wall 1.261×) | **1.255×** (wall 1.269×) | ≤ 1.25×: **over, by a hair, in both** |
+| bystander CPU, 1 thread (10 pairs, not gated) | 1.254× | 1.243× | — |
+| loss, folded burst, 1 and 4 threads (3 runs) | 0 | **0** | < 1 %: passes |
+| traced slowdown, 1 / 4 threads (wall, recorded) | 1.64× / 1.63× | 1.64× / 1.67× | — |
+| `getppid` bystander, 1 / 4 threads (3 pairs, recorded) | 1.43× / 1.50× | 1.49× / 1.47× | — |
+
+The unfolded burst lost nothing at either thread count here (one
+CPU's burst is slower than the tracer). The folded runs sent
+107–137 events at 1 thread and 2199–2317 at 4.
+
+The tracer's own cost per burst event is the laptop's (md4 1.2 /
+1.7 µs, ee4 1.59 / 1.95 µs) or lower, and the new handlers did not
+move it. The bystander did not move either — +0.01 is one 10 ms
+CPU tick on the burst's ~1.25 s — but on el9 both builds sit **on**
+the 1.25× line (13 and 17 of 30 pairs above it, ratios 1.20–1.33×),
+and the wall-clock guard trips in both, on an idle VM, so no paused
+host can settle it; the laptop measured 1.15–1.19× on 7.2. A
+bystander read or write here costs ~1.25 µs and the trace adds
+~0.3 µs to it, 5.14's tracepoint path being the likely share (the
+getppid kind pays 1.43–1.50×, the laptop's 2.0×, so the
+dispatcher's untraced-kind path is not where el9 is dearer). Over
+budget, unrelated to this task's handlers: task 9m4.
+
+### The new loads (5 rounds each)
+
+| Load (new build) | traced CPU | added per call | tracer per event | events/s | NDJSON B/event | lost | bystander CPU |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| `udp-mmsg:5000` | 1.057× | +4.2 µs (66 ns a message) | 10.0 µs | 7.9 k | 432 | 0 | 1.008× |
+| `udp-mmsg:1000:1024` | 1.031× | +20.7 µs | 83 µs | 0.8 k | 402 | 0 | 0.999× |
+| `netlink:100000` | **1.439×** | +1.35 µs | **3.87 µs** | 221 k | 325 | 0 | 1.117× |
+| `exec:300` | 1.114× | +213 µs an exec | 6.0 µs | 29.7 k | 326 | 0 | 1.049× |
+| `exec:300`, `-agent` | 1.135× | +252 µs an exec | 8.1 µs | 29.2 k | 328 | 0 | 1.056× |
+
+The base build traces none of these calls, so its traced runs show
+what the dispatchers cost on them: `udp-mmsg` 1.005× / 0.999×,
+`netlink` 1.104× (+0.32 µs a call), `exec` 1.112× (61.5 events an
+exec against new's 63.5: `ip`'s and `ss`'s own netlink calls), and
+`-agent` 1.116× with 6.0 µs per event. The untraced loads cost
+74 µs per 64-datagram call, 3.1 µs per netlink call and 1.9 ms per
+exec'd command.
+
+- **mmsg**: the per-message reads are cheap: 64 messages add
+  4.2 µs to a 74 µs call (+5.7 %), 1024 add 20.7 µs to a 666 µs
+  one (+3.1 %). The high per-event tracer figures are not a
+  per-message cost: at 0.8–8 k events/s the tracer is woken for
+  nearly every record, and the wake-up dominates — the 1024 run's
+  profile (`profile/new-udp-mmsg_3000_1024.pprof`, 9 007 events in
+  10.8 s) is 80 % `runtime.cgocall` (the ring poll), and the tracer
+  used ~6 % of a core in all. The address fields put 75–105 bytes
+  on each NDJSON event.
+- **netlink** is the expensive one: every call is an event plus an
+  address record, nothing folds, and at 221 k events/s the tracer
+  spends 3.87 µs per event — 3.7× a burst event, ~85 % of its core,
+  with no loss yet. The profile (`profile/new-netlink_200000.pprof`)
+  puts 40 % of the tracer's CPU in `types.NewSockAddrEvent`, the
+  address record's reflective `encoding/binary` decode — the kind
+  of decode task ud4 removed from the other hot records. Item 1 of
+  #25 is gated on `syscall-burst` only, so this is not a budget
+  failure, but it is the cheapest large cut on offer: task am4.
+  As a bystander, a netlink caller pays 1.10× before and 1.12×
+  after (these calls now reach the dispatcher's scope test).
+- **Late attach**: under `-agent` the tracer spends ~90 ms more per
+  600 execs (~0.15 ms of tracer CPU per exec of a traced process),
+  and the traced load 2 points more; no JVM was involved.
+
+| #25 item | ak4 verdict (el9, iom1) |
+|---|---|
+| tracer CPU | **passes**: 1.06 / 1.05 µs per burst event at 1 / 4 threads, base 1.02 / 1.00; a msghdr event costs 3.9 µs on the netlink load (not gated; task am4) |
+| bystander | **over by a hair** in both builds: 1.255× new, 1.245× base, wall 1.269× / 1.261×; the new handlers do not change it; el9's own cost, task 9m4 |
+| loss | **passes**: 0 on the folded burst and on every msghdr load, up to 221 k events/s |
+| volume | not re-measured (no `zstd` on iom1); NDJSON 325 B per burst event as before, 402–432 B per mmsg event with its peer |

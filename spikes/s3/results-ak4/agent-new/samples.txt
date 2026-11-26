@@ -1,0 +1,35 @@
+# S3 samples 2026-11-26T08:08:53Z commit 4948da0 (no git checkout)
+# kernel 5.14.0-741.22.1.el9_9.x86_64; cpu Intel(R) N100 x2
+# java openjdk version "25.0.5.1" 2026-11-17 LTS; workdir fs xfs
+# ops=200000 threads=1 4 16 runs=1 pairs=10 modes=msg kind_ops=5000000 msg_loads=exec:300 msg_ops=20000 tracer_cpu=1 load_cpus=0 tracer_flags=-agent /opt/ak4/bin/iormesh-agent.jar -spool /root/ak4-spool agent=0 perf=0 segment=0 tracer=/opt/ak4/bin/iormesh
+mode=muntraced spec=exec:300 run=1 elapsed_ns=1144919515 burst_cpu_ms=1122 calls=600 load=2.45
+mode=mtraced spec=exec:300 run=1 elapsed_ns=1307712778 burst_cpu_ms=1273 calls=600 tracer_cpu_ms=1350 tracer_run_cpu_ms=320 lost=0 skipped_runs=0 events=38104 ndjson_bytes=12429191 load=2.26
+mode=mbystander spec=exec:300 run=1 elapsed_ns=1224162907 burst_cpu_ms=1198 calls=600 tracer_cpu_ms=1060 load=2.26
+# S3 samples 2026-11-26T08:09:08Z commit 4948da0 (no git checkout)
+# kernel 5.14.0-741.22.1.el9_9.x86_64; cpu Intel(R) N100 x2
+# java openjdk version "25.0.5.1" 2026-11-17 LTS; workdir fs xfs
+# ops=200000 threads=1 4 16 runs=1 pairs=10 modes=msg kind_ops=5000000 msg_loads=exec:300 msg_ops=20000 tracer_cpu=1 load_cpus=0 tracer_flags=-agent /opt/ak4/bin/iormesh-agent.jar -spool /root/ak4-spool agent=0 perf=0 segment=0 tracer=/opt/ak4/bin/iormesh
+mode=muntraced spec=exec:300 run=1 elapsed_ns=1139979386 burst_cpu_ms=1117 calls=600 load=2.06
+mode=mtraced spec=exec:300 run=1 elapsed_ns=1330767981 burst_cpu_ms=1271 calls=600 tracer_cpu_ms=1359 tracer_run_cpu_ms=329 lost=0 skipped_runs=0 events=38104 ndjson_bytes=12419795 load=1.98
+mode=mbystander spec=exec:300 run=1 elapsed_ns=1202118430 burst_cpu_ms=1179 calls=600 tracer_cpu_ms=1050 load=1.98
+# S3 samples 2026-11-26T08:09:24Z commit 4948da0 (no git checkout)
+# kernel 5.14.0-741.22.1.el9_9.x86_64; cpu Intel(R) N100 x2
+# java openjdk version "25.0.5.1" 2026-11-17 LTS; workdir fs xfs
+# ops=200000 threads=1 4 16 runs=1 pairs=10 modes=msg kind_ops=5000000 msg_loads=exec:300 msg_ops=20000 tracer_cpu=1 load_cpus=0 tracer_flags=-agent /opt/ak4/bin/iormesh-agent.jar -spool /root/ak4-spool agent=0 perf=0 segment=0 tracer=/opt/ak4/bin/iormesh
+mode=muntraced spec=exec:300 run=1 elapsed_ns=1141541350 burst_cpu_ms=1119 calls=600 load=1.83
+mode=mtraced spec=exec:300 run=1 elapsed_ns=1303416889 burst_cpu_ms=1271 calls=600 tracer_cpu_ms=1340 tracer_run_cpu_ms=310 lost=0 skipped_runs=0 events=38104 ndjson_bytes=12505777 load=1.76
+mode=mbystander spec=exec:300 run=1 elapsed_ns=1201000347 burst_cpu_ms=1178 calls=600 tracer_cpu_ms=1050 load=1.76
+# S3 samples 2026-11-26T08:09:39Z commit 4948da0 (no git checkout)
+# kernel 5.14.0-741.22.1.el9_9.x86_64; cpu Intel(R) N100 x2
+# java openjdk version "25.0.5.1" 2026-11-17 LTS; workdir fs xfs
+# ops=200000 threads=1 4 16 runs=1 pairs=10 modes=msg kind_ops=5000000 msg_loads=exec:300 msg_ops=20000 tracer_cpu=1 load_cpus=0 tracer_flags=-agent /opt/ak4/bin/iormesh-agent.jar -spool /root/ak4-spool agent=0 perf=0 segment=0 tracer=/opt/ak4/bin/iormesh
+mode=muntraced spec=exec:300 run=1 elapsed_ns=1142751698 burst_cpu_ms=1120 calls=600 load=1.64
+mode=mtraced spec=exec:300 run=1 elapsed_ns=1293745945 burst_cpu_ms=1263 calls=600 tracer_cpu_ms=1350 tracer_run_cpu_ms=310 lost=0 skipped_runs=0 events=38104 ndjson_bytes=12506681 load=1.59
+mode=mbystander spec=exec:300 run=1 elapsed_ns=1198943345 burst_cpu_ms=1175 calls=600 tracer_cpu_ms=1050 load=1.59
+# S3 samples 2026-11-26T08:09:53Z commit 4948da0 (no git checkout)
+# kernel 5.14.0-741.22.1.el9_9.x86_64; cpu Intel(R) N100 x2
+# java openjdk version "25.0.5.1" 2026-11-17 LTS; workdir fs xfs
+# ops=200000 threads=1 4 16 runs=1 pairs=10 modes=msg kind_ops=5000000 msg_loads=exec:300 msg_ops=20000 tracer_cpu=1 load_cpus=0 tracer_flags=-agent /opt/ak4/bin/iormesh-agent.jar -spool /root/ak4-spool agent=0 perf=0 segment=0 tracer=/opt/ak4/bin/iormesh
+mode=muntraced spec=exec:300 run=1 elapsed_ns=1143669166 burst_cpu_ms=1120 calls=600 load=1.58
+mode=mtraced spec=exec:300 run=1 elapsed_ns=1297668138 burst_cpu_ms=1265 calls=600 tracer_cpu_ms=1330 tracer_run_cpu_ms=300 lost=0 skipped_runs=0 events=38104 ndjson_bytes=12504528 load=1.45
+mode=mbystander spec=exec:300 run=1 elapsed_ns=1221480828 burst_cpu_ms=1196 calls=600 tracer_cpu_ms=1050 load=1.45

@@ -1,0 +1,6 @@
+threads=1 tracer_ns_per_event=1019.94 (n=5) slowdown=1.64342 bystander_cpu=1.25391 bystander_wall=1.26359 (pairs=10 load=0.48-1.41)
+threads=4 tracer_ns_per_event=998.92 (n=5) slowdown=1.62576 bystander_cpu=1.24398 bystander_wall=1.25712 (pairs=10 load=0.56-1.34)
+msg=exec:300 traced_cpu=1.1123 traced_wall=1.11733 added_ns_per_call=210000 tracer_ns_per_event=5690.44 events_per_call=61.5067 events_per_s=28786.9 bytes_per_event=326.031 max_lost=0 (n=5) bystander_cpu=1.04902 bystander_wall=1.04826 (n=5)
+msg=netlink:100000 traced_cpu=1.1036 traced_wall=1.10445 added_ns_per_call=316.667 tracer_ns_per_event=4000000 events_per_call=1.66667e-05 events_per_s=4.89036 bytes_per_event=336.8 max_lost=0 (n=5) bystander_cpu=1.10087 bystander_wall=1.0998 (n=5)
+msg=udp-mmsg:5000 traced_cpu=1.00543 traced_wall=1.00742 added_ns_per_call=400 tracer_ns_per_event=4.28571e+06 events_per_call=0.0007 events_per_s=5.68649 bytes_per_event=336.714 max_lost=0 (n=5) bystander_cpu=1.00538 bystander_wall=1.00186 (n=5)
+msg=udp-mmsg:1000:1024 traced_cpu=0.998997 traced_wall=1.00183 added_ns_per_call=-666.667 tracer_ns_per_event=4.28571e+06 events_per_call=0.00233333 events_per_s=1.97276 bytes_per_event=336.714 max_lost=0 (n=5) bystander_cpu=1.0005 bystander_wall=1.00201 (n=5)

@@ -1,0 +1,33 @@
+start 2026-11-26T07:55:34Z
+main base 1 rc=0 07:56:39
+main new 1 rc=0 07:57:47
+main base 2 rc=0 07:58:52
+main new 2 rc=0 07:59:59
+main base 3 rc=0 08:01:04
+main new 3 rc=0 08:02:11
+main base 4 rc=0 08:03:17
+main new 4 rc=0 08:04:25
+main base 5 rc=0 08:05:30
+main new 5 rc=0 08:06:37
+fold base rc=0 08:07:41
+fold new rc=0 08:08:46
+agent base 1 rc=0 08:08:53
+agent new 1 rc=0 08:09:01
+agent base 2 rc=0 08:09:08
+agent new 2 rc=0 08:09:16
+agent base 3 rc=0 08:09:24
+agent new 3 rc=0 08:09:31
+agent base 4 rc=0 08:09:39
+agent new 4 rc=0 08:09:46
+agent base 5 rc=0 08:09:53
+agent new 5 rc=0 08:10:01
+end 2026-11-26T08:10:01Z
+by4 base 1 rc=0 08:11:01
+by4 new 1 rc=0 08:11:27
+by4 base 2 rc=0 08:11:51
+by4 new 2 rc=0 08:12:17
+by4 base 3 rc=0 08:12:42
+by4 new 3 rc=0 08:13:07
+by4 base 4 rc=0 08:13:32
+by4 new 4 rc=0 08:13:57
+end2 08:13:57
