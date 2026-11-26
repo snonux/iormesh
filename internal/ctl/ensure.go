@@ -112,7 +112,7 @@ func (en ensurer) all(ctx context.Context, targets []collectTarget) error {
 			return en.host(ctx, tg)
 		})
 		if err != nil {
-			_, _ = fmt.Fprintf(en.e.stderr, "iormeshctl: %s: %s\n", safe(tg.host), errText(err))
+			_, _ = fmt.Fprintf(en.e.stderr, "iormeshctl: %s: %s\n", safe(tg.host), errLines(err))
 			failed = append(failed, tg.host)
 		}
 	}

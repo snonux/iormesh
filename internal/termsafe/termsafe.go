@@ -33,6 +33,28 @@ func String(s string) string {
 	return s
 }
 
+// Lines makes multi-line text safe to print as lines (task dm4): s is
+// split at its newlines, each line goes through String on its own, and
+// every line after the first is prefixed by indent, so a remote tracer's
+// error with its unit's journal tail reads as the error's first line
+// with the journal lines indented beneath it rather than as one quoted
+// string full of \n. A line's leading spaces stay outside its quotes,
+// keeping the indentation the text already has. One trailing newline is
+// dropped; a carriage return or any other control byte still quotes its
+// line. indent itself is printed as it is: callers pass a constant.
+func Lines(s, indent string) string {
+	var b strings.Builder
+	for i, line := range strings.Split(strings.TrimSuffix(s, "\n"), "\n") {
+		if i > 0 {
+			b.WriteString("\n" + indent)
+		}
+		rest := strings.TrimLeft(line, " ")
+		b.WriteString(line[:len(line)-len(rest)])
+		b.WriteString(String(rest))
+	}
+	return b.String()
+}
+
 // JSON makes one encoded JSON value safe to print: every rune that is
 // not printable is written as its \u escape (a surrogate pair above
 // U+FFFF), which a JSON reader decodes to the same string. A JSON

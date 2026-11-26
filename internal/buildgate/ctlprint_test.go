@@ -29,16 +29,20 @@ var printFuncs = map[string]int{
 }
 
 // sanitizers are the functions whose result may be printed as it is:
-// termsafe's escapers and internal/ctl's two names for termsafe.String
-// (safe, and errText for an error's text). A helper that builds text
-// from safe parts is not listed: its result is wrapped once more at the
-// print, which costs nothing, because termsafe.String leaves printable
-// text, its own output included, unchanged.
+// termsafe's escapers, internal/ctl's two names for termsafe.String
+// (safe, and errText for an error's text) and its name for
+// termsafe.Lines (errLines: a host's multi-line error, each line escaped
+// on its own, task dm4). A helper that builds text from safe parts is
+// not listed: its result is wrapped once more at the print, which costs
+// nothing, because termsafe.String leaves printable text, its own output
+// included, unchanged.
 var sanitizers = map[string]bool{
 	"iormesh/internal/termsafe.String": true,
 	"iormesh/internal/termsafe.JSON":   true,
+	"iormesh/internal/termsafe.Lines":  true,
 	ctlPkg + ".safe":                   true,
 	ctlPkg + ".errText":                true,
+	ctlPkg + ".errLines":               true,
 }
 
 // rawAllowed are the reviewed exceptions, "file.go: expression" to why
@@ -106,8 +110,11 @@ func safe(s string) string { return termsafe.String(s) }
 
 func errText(err error) string { return termsafe.String(err.Error()) }
 
+func errLines(err error) string { return termsafe.Lines(err.Error(), "  ") }
+
 func f(w io.Writer, host string, err error, d time.Duration, args []any) {
-	fmt.Fprintf(w, "%s %d %t %s %s %s\n", "lit", 3, true, safe(host), termsafe.String(host), errText(err))
+	fmt.Fprintf(w, "%s %d %t %s %s %s %s %s\n", "lit", 3, true, safe(host), termsafe.String(host), errText(err),
+		errLines(err), termsafe.Lines(host, "  "))
 	fmt.Fprintf(w, "%s\n", host)
 	fmt.Fprintln(w, err)
 	fmt.Fprint(w, level(1), d)
@@ -124,12 +131,12 @@ func f(w io.Writer, host string, err error, d time.Duration, args []any) {
 	info := typeCheck(t, fset, []*ast.File{file}, imp, ctlPkg)
 	got, _ := rawPrints(fset, []*ast.File{file}, info)
 	want := []string{
-		"fixture.go:21: fmt.Fprintf prints host (string) raw",
-		"fixture.go:22: fmt.Fprintln prints err (error) raw",
-		"fixture.go:23: fmt.Fprint prints level(1) (iormesh/internal/ctl.level) raw",
-		"fixture.go:23: fmt.Fprint prints d (time.Duration) raw",
-		"fixture.go:24: fmt.Printf has a format that is not a constant",
-		"fixture.go:25: fmt.Println spreads args...; list the values",
+		"fixture.go:24: fmt.Fprintf prints host (string) raw",
+		"fixture.go:25: fmt.Fprintln prints err (error) raw",
+		"fixture.go:26: fmt.Fprint prints level(1) (iormesh/internal/ctl.level) raw",
+		"fixture.go:26: fmt.Fprint prints d (time.Duration) raw",
+		"fixture.go:27: fmt.Printf has a format that is not a constant",
+		"fixture.go:28: fmt.Println spreads args...; list the values",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("findings\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

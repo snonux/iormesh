@@ -186,7 +186,9 @@ func TestEnsureFailures(t *testing.T) {
 	f.answers["app2 "+strings.Join(sudoTr, " ")+" start"] = reply{err: errors.New(startDiagnosis)}
 	if code := f.run("ensure", "app2"); code != exitError ||
 		!strings.Contains(f.stderr.String(), "project shop: start: exit status 1") ||
-		!strings.Contains(f.stderr.String(), "nothing listens on TCP port 9") {
+		// Task dm4: each journal line on its own line, indented.
+		!strings.Contains(f.stderr.String(), "\n    2026-11-23T21:00:00+00:00 app1 iormesh[42]: "+
+			"iormesh: target spec: nothing listens on TCP port 9\n") {
 		t.Errorf("failed start: exit %d, stderr %q", code, f.stderr)
 	}
 	// The host is still collected after a failed start.

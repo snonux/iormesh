@@ -80,8 +80,18 @@ with these flags, left alone (-restart restarts it)`).
 
 **If not:** a session that exits before it attaches fails the
 deploy with the tail of the unit's journal, which names the cause.
-It is printed Go-quoted on one line, its line breaks as `\n`; the
-cause is near the end, e.g. `iormesh: target spec: nothing
+The error's first line is followed by the journal, one indented
+line per journal line (a line holding a control character is
+Go-quoted on its own, task dm4):
+
+```
+iormeshctl: app1: project billing: start: ... exited before the tracer attached
+  iormesh-billing.service logged:
+    ... systemd[1]: Starting iormesh-billing.service ...
+    ... iormesh: target spec: nothing listens on TCP port 8443
+```
+
+The cause is near the end, e.g. `iormesh: target spec: nothing
 listens on TCP port 8443` (run on Rocky 9.9, task 4k4). Look it
 up in
 [troubleshooting.md](../troubleshooting.md#a-session-that-does-not-start);

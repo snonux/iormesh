@@ -329,6 +329,32 @@ func TestDeployRefusals(t *testing.T) {
 	}
 }
 
+// TestDeployPrintsJournalLines (task dm4): a failed start's journal tail
+// prints as indented lines under the error's first line, one per journal
+// line, each escaped on its own: a raw ESC a hostile host slipped into
+// the tail prints Go-quoted on its line and never reaches the terminal.
+func TestDeployPrintsJournalLines(t *testing.T) {
+	f := newDeployFixture(t)
+	diag := "exit status 1: iormesh: iormesh-shop.service exited before the tracer attached\n" +
+		"iormesh-shop.service logged:\n" +
+		"  app1 systemd[1]: Starting iormesh-shop.service\n" +
+		"  app1 iormesh[42]: \x1b[31mred\n" +
+		"  app1 iormesh[42]: iormesh: target spec: nothing listens on TCP port 9"
+	f.answers["app1 sudo -n /opt/iormesh/bin/iormesh start -project shop"] = reply{err: errors.New(diag)}
+	if code := f.run("deploy", "-dist", f.dist, "app1"); code != exitError {
+		t.Fatalf("exit %d, stderr %s", code, f.stderr)
+	}
+	want := "iormeshctl: app1: project shop: start: exit status 1: iormesh: " +
+		"iormesh-shop.service exited before the tracer attached\n" +
+		"  iormesh-shop.service logged:\n" +
+		"    app1 systemd[1]: Starting iormesh-shop.service\n" +
+		"    \"app1 iormesh[42]: \\x1b[31mred\"\n" +
+		"    app1 iormesh[42]: iormesh: target spec: nothing listens on TCP port 9\n"
+	if got := f.stderr.String(); !strings.Contains(got, want) || strings.Contains(got, "\x1b") {
+		t.Errorf("stderr:\n%s\nwant it to hold:\n%s", got, want)
+	}
+}
+
 // refusal is one TestDeployRefusals case.
 type refusal struct {
 	name    string

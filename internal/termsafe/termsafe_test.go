@@ -61,6 +61,28 @@ func TestString(t *testing.T) {
 	}
 }
 
+// TestLines (task dm4): each line is escaped on its own, the lines after
+// the first indented, leading spaces kept outside the quotes; no raw
+// control byte survives.
+func TestLines(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"one line", "one line"},
+		{"bad\x1b[2J", `"bad\x1b[2J"`},
+		{"head\nlogged:\n  a\n  b\x1b]0;x\x07\n", "head\n> logged:\n>   a\n>   \"b\\x1b]0;x\\a\""},
+		{"head\r\nnext", "\"head\\r\"\n> next"},
+		{"a\x9bb\n\n  \u202ex", "\"a\\x9bb\"\n> \n>   \"\\u202ex\""},
+	} {
+		got := Lines(tc.in, "> ")
+		if got != tc.want {
+			t.Errorf("Lines(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		// 0x9b on its own: ContainsAny reads an invalid byte as U+FFFD.
+		if strings.ContainsAny(got, "\x1b\x07\r\u202e") || strings.Contains(got, "\x9b") {
+			t.Errorf("Lines(%q) kept a control byte: %q", tc.in, got)
+		}
+	}
+}
+
 // TestStringInvalidUTF8: a byte that is not UTF-8 — a raw 0x9B is the
 // 8-bit CSI on terminals that honor C1 — is quoted, though a decoder
 // reads it as U+FFFD, which is printable.

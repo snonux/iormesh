@@ -299,13 +299,24 @@ func exitCodeOf(err error, stderr io.Writer) int {
 // character is printed Go-quoted (internal/termsafe), never raw.
 func errText(err error) string { return termsafe.String(err.Error()) }
 
+// errLines is a host's error as deploy, ensure and expand -apply print it
+// on a line of its own (task dm4): the first line as errText would show
+// it, every further line — a failed tracer unit's journal tail, which
+// the remote start appends (internal/cli startdiag.go) — indented
+// beneath it, each line escaped on its own (termsafe.Lines). errText
+// would quote the whole multi-line error into one line of \n escapes,
+// burying the journal line that says why the unit failed. Kept for
+// prints that end their line with it; a table cell (status) keeps
+// errText.
+func errLines(err error) string { return termsafe.Lines(err.Error(), "  ") }
+
 // safe is text as the terminal may see it: unchanged when printable,
 // Go-quoted when it holds a control character (internal/termsafe).
 // Hostnames, pod names, contexts, paths and service names come from
 // servers, clusters, traces and files that may be compromised, and
 // printed raw they could rewrite the operator's terminal. Every fmt print
-// in this package passes each text value through safe, errText or
-// termsafe itself — TestCtlPrintsAreTerminalSafe in internal/buildgate
+// in this package passes each text value through safe, errText,
+// errLines or termsafe itself — TestCtlPrintsAreTerminalSafe in internal/buildgate
 // fails on one that does not (task oj4) — so no print has to decide
 // whether its value could be hostile. Wrapping text already safe, or
 // built from safe parts, changes nothing: String leaves printable text,
