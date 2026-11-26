@@ -77,12 +77,14 @@ func TestShellMetacharactersStayRemote(t *testing.T) {
 	}
 }
 
-// TestShellArgv: BatchMode, no escape character, no tty, the options
-// before "--".
+// TestShellArgv: BatchMode, no escape character, no tty, nothing
+// forwarded, the options before "--".
 func TestShellArgv(t *testing.T) {
 	s := &Shell{SSH: "ssh", Options: []string{"-F", "cfg"}, Hosts: []string{"iom1"}}
 	got := s.Argv("iom1", "uname -a")
-	want := []string{"ssh", "-F", "cfg", "-T", "-e", "none", "-o", "BatchMode=yes", "--", "iom1", "uname -a"}
+	want := []string{"ssh", "-F", "cfg", "-T", "-e", "none", "-o", "BatchMode=yes", "-o", "ForwardAgent=no",
+		"-o", "ForwardX11=no", "-o", "PermitLocalCommand=no", "-o", "ClearAllForwardings=yes",
+		"--", "iom1", "uname -a"}
 	if !slices.Equal(got, want) {
 		t.Errorf("argv %q, want %q", got, want)
 	}

@@ -3,8 +3,10 @@ package agenttrial
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -131,7 +133,10 @@ func ResultName(r Result) string {
 	return r.Date + "-" + eval.FileLabel(r.Model) + "-" + r.Mode + ".json"
 }
 
-// WriteResult writes the result as <dir>/ResultName.
+// WriteResult writes the result as <dir>/ResultName, or, when a run of
+// the same day, model and mode already wrote that, as <name>-2.json,
+// -3, …: a rerun never overwrites an earlier result (#37 keeps every
+// failed cell's record).
 func WriteResult(dir string, r Result) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -140,8 +145,23 @@ func WriteResult(dir string, r Result) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(dir, ResultName(r))
-	return path, os.WriteFile(path, append(data, '\n'), 0o644)
+	base := strings.TrimSuffix(ResultName(r), ".json")
+	for n := 1; ; n++ {
+		name := base + ".json"
+		if n > 1 {
+			name = fmt.Sprintf("%s-%d.json", base, n)
+		}
+		path := filepath.Join(dir, name)
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		_, err = f.Write(append(data, '\n'))
+		return path, errors.Join(err, f.Close())
+	}
 }
 
 // PrintResult prints one line per question, the checks and the verdict.

@@ -97,8 +97,11 @@ func openRun(o Options) (*runFiles, error) {
 	return rf, nil
 }
 
-// close closes the logs and removes the agent's working directory (its
-// session files: the transcript is the record).
+// close closes the logs and removes the agent's working directory: pi's
+// session files live there. claude keeps its session under the
+// operator's ~/.claude/projects/ (named after this directory); it stays,
+// because claude finds its credentials under the same HOME, which the
+// trial therefore leaves alone. The transcript is the record either way.
 func (rf *runFiles) close() {
 	for _, f := range []*os.File{rf.transcript, rf.commands, rf.stderr} {
 		if f != nil {

@@ -103,10 +103,21 @@ func (p Prep) startScenario(ctx context.Context) error {
 			return err
 		}
 	}
-	return p.must(ctx, Call{Host: p.Traced, Command: "pkill -f '[i]ormesh-trial/scenario.sh'; " +
+	err := p.must(ctx, Call{Host: p.Traced, Command: "pkill -f '[i]ormesh-trial/scenario.sh'; " +
 		"pkill -f '[i]ormesh-trial/workload.jar'; nohup sh ~/" + RemoteDir + "/scenario.sh > ~/" +
 		RemoteDir + "/scenario.log 2>&1 < /dev/null &"})
+	if err != nil {
+		return err
+	}
+	return p.must(ctx, Call{Host: p.Traced, Command: ScenarioAliveCommand})
 }
+
+// ScenarioAliveCommand proves the scenario runs on the traced host: the
+// loop and, inside its first round (billing starts at once, inventory
+// after 5 s), a workload JVM. A java missing on the VM or a jar that will
+// not start fails the preparation, not the agent.
+const ScenarioAliveCommand = "sleep 8 && pgrep -f '[i]ormesh-trial/scenario.sh' && " +
+	"pgrep -f '[i]ormesh-trial/workload.jar'"
 
 // copyFile copies a local file to ~/RemoteDir/name on the traced host,
 // through the remote command's stdin.

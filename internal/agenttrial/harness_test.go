@@ -180,7 +180,10 @@ func TestCLIArgv(t *testing.T) {
 	next, _ := c.Argv()
 	for _, want := range [][]string{{"env", "-C", "/w"}, {"--tools", ""}, {"--effort", "medium"},
 		{"--setting-sources", ""}, {"--strict-mcp-config"}, {"--system-prompt", "sp"},
-		{"CLAUDE_CODE_DISABLE_CLAUDE_MDS=1"}, {"CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"}} {
+		{"CLAUDE_CODE_DISABLE_CLAUDE_MDS=1"}, {"CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"},
+		// Review round 1: with no tools Claude Code still expanded an
+		// "@<path>" in the message into a file read; these two stop it.
+		{"CLAUDE_CODE_DISABLE_FILE_MENTIONS=1"}, {"CLAUDE_CODE_EVAL_CONFINED=1"}} {
 		if !hasRun(first, want) || !hasRun(next, want) {
 			t.Errorf("claude argv lacks %q: %q", want, first)
 		}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"iormesh/internal/eval"
@@ -90,15 +91,27 @@ func (c *CLI) Argv() ([]string, error) {
 	return nil, fmt.Errorf("agent %q: want %s or %s", c.Kind, AgentClaude, AgentPi)
 }
 
+// ClaudeEnv is the environment claude runs with on top of the
+// operator's. The first three are M5's (task 9k4): no CLAUDE.md, no
+// memory, no git instructions. The last two close a hole review round 1
+// of task mm4 found: even with no tools, Claude Code expands an
+// "@<path>" in the user message into a read of that file, attached to
+// the request — and the harness's messages carry VM output the agent
+// controls (`RUN echo @/home/…/.ssh/id_ed25519`), so a laptop file would
+// reach Anthropic. CLAUDE_CODE_DISABLE_FILE_MENTIONS turns the expansion
+// off, CLAUDE_CODE_EVAL_CONFINED confines the CLI further; each was
+// shown to stop it against a capture server (TestClaudeFileMention).
+var ClaudeEnv = []string{"CLAUDE_CODE_DISABLE_CLAUDE_MDS=1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1",
+	"CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1", "CLAUDE_CODE_DISABLE_FILE_MENTIONS=1",
+	"CLAUDE_CODE_EVAL_CONFINED=1"}
+
 // claudeArgv: the flags of M5's Claude run (docs/testing/focused-checks.md,
-// task 9k4) plus the session: --session-id on the first turn, --resume
-// after it.
+// task 9k4), ClaudeEnv, and the session: --session-id on the first turn,
+// --resume after it.
 func (c *CLI) claudeArgv() []string {
-	argv := []string{"env", "-C", c.Dir, "CLAUDE_CODE_DISABLE_CLAUDE_MDS=1",
-		"CLAUDE_CODE_DISABLE_AUTO_MEMORY=1", "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1",
-		"claude", "-p", "--model", c.Model, "--effort", ClaudeEffort, "--tools", "",
-		"--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands",
-		"--system-prompt", c.SystemPrompt}
+	argv := slices.Concat([]string{"env", "-C", c.Dir}, ClaudeEnv, []string{"claude", "-p",
+		"--model", c.Model, "--effort", ClaudeEffort, "--tools", "", "--strict-mcp-config",
+		"--setting-sources", "", "--disable-slash-commands", "--system-prompt", c.SystemPrompt})
 	if c.turns == 0 {
 		return append(argv, "--session-id", c.Session)
 	}

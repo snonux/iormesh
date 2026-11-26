@@ -100,12 +100,23 @@ func (s *Shell) Check(host, command string) error {
 	return nil
 }
 
+// noForwarding keeps a command's ssh from handing the VM anything of the
+// laptop's, whatever the operator's ssh config says: no agent (a VM
+// could use the operator's keys through it), no X11, no forwarded ports,
+// no LocalCommand run on the laptop. The release tunnel builds its own
+// command line (ReleaseServer.TunnelArgv), the one forward the trial
+// needs.
+var noForwarding = []string{"-o", "ForwardAgent=no", "-o", "ForwardX11=no",
+	"-o", "PermitLocalCommand=no", "-o", "ClearAllForwardings=yes"}
+
 // Argv is the ssh command line of a call: BatchMode so nothing prompts on
-// the laptop, no escape character, no tty, and the host and the command
-// after "--" so neither can be taken for an option.
+// the laptop, no escape character, no tty, nothing forwarded
+// (noForwarding), and the host and the command after "--" so neither can
+// be taken for an option.
 func (s *Shell) Argv(host, command string) []string {
-	argv := append([]string{cmp.Or(s.SSH, "ssh")}, s.Options...)
-	return append(argv, "-T", "-e", "none", "-o", "BatchMode=yes", "--", host, command)
+	argv := slices.Concat([]string{cmp.Or(s.SSH, "ssh")}, s.Options,
+		[]string{"-T", "-e", "none", "-o", "BatchMode=yes"}, noForwarding)
+	return append(argv, "--", host, command)
 }
 
 // Run runs one call and returns its output (stdout and stderr merged, in

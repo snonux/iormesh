@@ -30,9 +30,10 @@ give when you ask:
    and `SHA256SUMS`. Install from the release archive (guide chapter
    3).
 5. **Trace data:** yes, the output may go to your model provider. The
-   hosts are throwaway test machines with synthetic data only. The
-   signing key's password is in `$IORMESH_MINISIGN_PASSWORD` on
-   `{{controller}}`.
+   hosts are throwaway test machines with synthetic data only. I
+   have no signing key yet; its password is in
+   `$IORMESH_MINISIGN_PASSWORD` on `{{controller}}`, for `keygen`
+   and `sign` (guide chapter 3).
 
 When the mesh is built and you can answer, send all your answers in
 one final message, one `ANSWER <id>:` line per question, concise and

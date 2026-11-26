@@ -36,7 +36,8 @@ The VMs must be up and reachable as the laptop's `ssh iom1` and
 workload jar and runs the trial once; the inputs are in
 `eval/agent-trial/` (`task.md`, `questions.yaml`, `scenario.sh`).
 The result lands in `eval/agent-trial/results/<date>-<model>-<mode>.json`
-(kept); the run's `transcript.jsonl` (every message),
+(kept; a rerun the same day gets `-2`, `-3`, never overwriting); the
+run's `transcript.jsonl` (every message),
 `commands.jsonl` (every command: who ran it, under which approved
 step, on which VM, its exit status) and the docs copy in
 `eval/agent-trial/runs/<time>-<model>-<mode>/` (gitignored). The
@@ -67,22 +68,42 @@ permission check, not a sandbox. A reply-per-turn protocol also
 lets the harness count turns as #37 does (one model reply) and
 check a command against the approved explanation *before* it runs.
 
+"No tool" is not enough for Claude Code: it still expands an
+`@<path>` in a message into a read of that laptop file, attached to
+the request, and the harness's messages carry VM output the agent
+controls (`RUN echo @/home/…/.ssh/id_ed25519`). Review round 1
+reproduced the leak against a local capture server. So claude also
+runs with `CLAUDE_CODE_DISABLE_FILE_MENTIONS=1` and
+`CLAUDE_CODE_EVAL_CONFINED=1` (`agenttrial.ClaudeEnv`), and every
+message the harness sends either CLI has each `@` that starts a word
+escaped as `\@` — a visible escape a model reads as one, rather
+than an invisible change to the output; `user@host` is left alone.
+`TestClaudeFileMention` runs the real `claude` binary, where it is
+installed, against a capture server with a dummy key: the control
+run without the two variables sends the file, the trial's flags do
+not.
+
 `RUN` and the guided user's commands go through one `Shell`: `ssh
--T -e none -o BatchMode=yes -- <host> <command>`, no local shell in
-between. The host must be one of the two VMs exactly, so
+-T -e none -o BatchMode=yes -o ForwardAgent=no -o ForwardX11=no -o
+PermitLocalCommand=no -o ClearAllForwardings=yes -- <host>
+<command>`, no local shell in between and nothing of the laptop's
+forwarded, whatever the operator's ssh config says. The host must be one of the two VMs exactly, so
 `localhost`, a path or an `-oProxyCommand=…` cannot stand in for
 it; the command is ssh's single remote argument, so `;`, `$(…)`,
 backquotes or a redirection to a laptop path are the VM shell's to
 read (`TestShellRefusesLocal`, `TestShellMetacharactersStayRemote`).
 `READ` goes through `eval.SourceTree` (`os.Root`) over a copy of
 README.md, `docs/guide/` and `docs/skills/iormesh/` only, laid out
-as in the repository so the skill's relative links resolve.
+as in the repository so the skill's relative links resolve; a path
+up the tree or an absolute one returns an error text
+(`TestTrialReadStaysInLibrary`).
 
 What still leaves the laptop beyond #37's list: the CLI's own
 request metadata (Claude Code adds a session block with the working
 directory, a temp path, and the OS, as M5 noted). The CLI keeps the
-operator's `HOME` for its credentials; with no tool, the model
-cannot make it read anything there.
+operator's `HOME` for its credentials, so claude's session file
+stays in `~/.claude/projects/`; with no tool and no file mentions,
+the model cannot make it read anything there.
 
 The skill reaches the agent inline in the first message, as a skill
 loader would place it in context: neither CLI can load a skill's
@@ -97,7 +118,7 @@ the commands (a numbered list), the change and the outgoing data,
 `change` to one that does not; in guided mode, after `yes`, the
 output of exactly the named commands, typed in order on the named
 VM, each as `$ command` and its output (a non-zero exit as `[exit
-status N]`). A reply with no action gets one fixed harness line
+status N]`; a word-starting `@` escaped, as above). A reply with no action gets one fixed harness line
 that says nothing about the task. A `RUN` before any approval, a
 `RUN` of a command the latest approved explanation did not name
 exactly, or any `RUN` in guided mode fails the run before anything
@@ -117,7 +138,8 @@ redacted in the log); and the workload jar and
 `eval/agent-trial/scenario.sh` copied to `~/iormesh-trial/` on the
 traced host and started there: one microservices checkout per round
 on fixed ports (billing 18214, inventory 18215, orders 18216), in
-a loop. The release is served from the laptop's loopback over an
+a loop, proved alive by `pgrep` of the loop and a workload JVM
+eight seconds later. The release is served from the laptop's loopback over an
 SSH reverse tunnel to the controller's `127.0.0.1:18480`, so the
 VMs need no route to the laptop; a `curl` of its `SHA256SUMS` on
 the controller proves it.
@@ -141,10 +163,15 @@ like a VM without running anything: a pass in automatic mode and
 in guided mode, `Main` end to end (preparation, tunnel, first
 message, result and logs), a `RUN` without an explanation, an
 unnamed command, an incomplete explanation, a guided `RUN`, both
-budgets, a low score, a missing mesh, the CLIs' argv.
+budgets, a low score, a missing mesh, the CLIs' argv and
+environment, `READ` outside the copy, `@` mentions in VM output
+(and, with `claude` installed, against a capture server), the
+command line and the mage environment (`Command`, `MageArgs`).
 
 Left to the trial (task nm4), which runs it for the first time on
 real VMs and models: whether a session follows the scenario's
-restarted JVMs across rounds; `minisign -G` asks on a terminal and
-the agent's commands have none; the mesh check assumes the projects
-are named after the services, as the task prompt asks.
+restarted JVMs across rounds; the mesh check assumes the projects
+are named after the services, as the task prompt asks. The signing
+key needs no terminal: the task prompt and the skill have the agent
+make it with `iormeshctl keygen` from `$IORMESH_MINISIGN_PASSWORD`
+(#38).

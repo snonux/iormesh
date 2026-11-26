@@ -202,9 +202,13 @@ func TestTrialGuidedPass(t *testing.T) {
 // a RUN fails the run, approved command or not.
 func TestTrialGuidedRunFails(t *testing.T) {
 	agent := &standIn{replies: []string{askMode, skillStep, "RUN rsync --version"}}
-	tr, _, _ := newTestTrial(t, Guided, agent)
+	tr, _, log := newTestTrial(t, Guided, agent)
 	if r := tr.Run(context.Background()); r.Passed || !strings.Contains(r.Failure, "guided mode") {
 		t.Fatalf("result %+v", r)
+	}
+	// Only the user's two typed commands reached ssh, not the refused RUN.
+	if calls := sshCalls(t, log); len(calls) != 2 {
+		t.Errorf("%d ssh calls, want the user's 2: %v", len(calls), calls)
 	}
 }
 

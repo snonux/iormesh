@@ -165,7 +165,15 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
     plays the controller (the guide's laptop); `iom2` is the
     traced host. Each agent runs on the laptop, but its only
     shell is SSH into the VMs (sudo there); it gets no tool
-    that reads, writes or runs anything on the laptop.
+    that reads, writes or runs anything on the laptop. The
+    mechanism (task mm4): the agent CLI runs with no tools at
+    all and acts by a text protocol (`RUN`, `READ`, `ANSWER`)
+    the harness carries out — `RUN` only as ssh to the two VMs,
+    `READ` only in the docs copy — with the skill pasted into
+    the first message and the CLI's file mentions disabled
+    (Claude Code reads an `@path` in a message even with no
+    tools); an `@` starting a word in any text the harness
+    sends is escaped as `\@`.
   - **Path tested: the release archive** (guide chapter 3,
     "Get a release": download, `sha256sum -c`, sign, install).
     Building from source needs Go, mage, Podman and a libbpfgo

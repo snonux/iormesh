@@ -10,7 +10,10 @@
 // agent CLI therefore gets no tool at all (claude's --tools with an
 // empty list, pi's --no-tools), no context files, memory, settings, MCP servers,
 // extensions or skills of the laptop, our system prompt in place of its
-// own, and an empty working directory outside the checkout. It acts by
+// own, and an empty working directory outside the checkout; claude also
+// has its "@path" file mentions disabled (ClaudeEnv), and every message
+// the harness sends has a word-starting "@" escaped (DefuseMentions),
+// since the messages carry VM output the agent steers. It acts by
 // text, one action per reply, which the harness carries out:
 //
 //	(an explanation in the skill's form)   the scripted user answers it

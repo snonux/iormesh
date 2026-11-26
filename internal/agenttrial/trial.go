@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
 	"time"
 
 	"iormesh/internal/eval"
@@ -91,7 +92,7 @@ func (t *Trial) Run(ctx context.Context) Result {
 // converse runs the turns and returns the answers, or sets r.Failure.
 func (t *Trial) converse(ctx context.Context, r *Result) map[string]string {
 	st := &state{}
-	msg := t.First
+	msg := DefuseMentions(t.First)
 	t.record(0, "user", msg)
 	for r.Turns < t.MaxTurns {
 		r.Turns++
@@ -116,8 +117,8 @@ func (t *Trial) converse(ctx context.Context, r *Result) map[string]string {
 		case answers != nil:
 			return answers
 		}
-		t.record(r.Turns, "user", next)
-		msg = next
+		msg = DefuseMentions(next)
+		t.record(r.Turns, "user", msg)
 	}
 	r.Failure = fmt.Sprintf("turn budget: no answers within %d turns", t.MaxTurns)
 	return nil
@@ -206,6 +207,22 @@ func terminal(text string, code int, err error) string {
 		return text + fmt.Sprintf("[exit status %d]\n", code)
 	}
 	return text
+}
+
+// mentionStart is an "@" that starts a word: what an agent CLI may read
+// as a file mention ("@/path").
+var mentionStart = regexp.MustCompile(`(^|\s)@`)
+
+// DefuseMentions escapes every "@" that starts a word as "\@", in every
+// message the harness sends the agent. Belt and braces to ClaudeEnv's
+// CLAUDE_CODE_DISABLE_FILE_MENTIONS (review round 1 of task mm4): the
+// messages carry VM output and docs the agent can steer, and no CLI may
+// take a word of them for a laptop file to attach. The choice: a visible
+// backslash, which a model reads as an escape, over an invisible or
+// look-alike character that would change the output silently; "@"
+// inside a word (user@host) is left alone, it is no mention.
+func DefuseMentions(s string) string {
+	return mentionStart.ReplaceAllString(s, `$1\@`)
 }
 
 // record writes one transcript line; a write error is dropped, as in
