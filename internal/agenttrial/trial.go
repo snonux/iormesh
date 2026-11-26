@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strings"
 	"time"
 
 	"iormesh/internal/eval"
@@ -68,6 +69,9 @@ type state struct {
 	modeGiven bool
 	step      int
 	approved  *Explanation
+	// cwd is guided mode's terminal directory per host (typedCommand):
+	// empty until a typed command reports one, the login directory.
+	cwd map[string]string
 }
 
 // Run plays the trial: each agent reply is a turn, the scripted user
@@ -167,15 +171,56 @@ func (t *Trial) approve(ctx context.Context, st *state, e Explanation) (string, 
 
 // typeCommands is guided mode's user at the terminal: exactly the
 // approved commands, in order, on the named host, and their output
-// pasted back as the terminal showed it.
+// pasted back as the terminal showed it. A user types into one terminal
+// per host, so a `cd` carries to the next command and the next step
+// (typedCommand); the log shows each command as typed.
 func (t *Trial) typeCommands(ctx context.Context, st *state) string {
+	if st.cwd == nil {
+		st.cwd = map[string]string{}
+	}
+	host := st.approved.Host
 	var out string
 	for _, c := range st.approved.Commands {
-		text, code, err := t.Shell.Run(ctx, Call{Host: st.approved.Host, Command: c, By: ByUser,
-			Step: st.step})
+		text, code, err := t.Shell.Run(ctx, Call{Host: host, Command: typedCommand(st.cwd[host], c),
+			LogAs: c, By: ByUser, Step: st.step})
+		text, st.cwd[host] = splitTyped(text, st.cwd[host])
 		out += "$ " + c + "\n" + terminal(text, code, err)
 	}
 	return out
+}
+
+// cwdMark starts the line typedCommand appends to report the directory
+// a command left its shell in: an ASCII record separator, which no
+// command's own output is expected to hold.
+const cwdMark = "\n\x1ecwd="
+
+// typedCommand wraps a typed command so it runs in the terminal's
+// directory cwd (none: the login directory) and reports the directory it
+// leaves, keeping its exit status. A command that exits its shell
+// reports nothing and the directory stays. The command sits on its own
+// lines inside braces, so a trailing comment or `&` stays its own.
+func typedCommand(cwd, command string) string {
+	cd := ""
+	if cwd != "" {
+		cd = "cd " + shellQuote(cwd) + " && "
+	}
+	return cd + "{\n" + command + "\n}; s=$?; printf '" + strings.ReplaceAll(cwdMark, "\n", `\n`) +
+		"%s\\n' \"$PWD\"; exit $s"
+}
+
+// splitTyped takes typedCommand's report off a command's output and
+// returns the output and the directory, cwd when there is no report.
+func splitTyped(out, cwd string) (string, string) {
+	i := strings.LastIndex(out, cwdMark)
+	if i < 0 {
+		return out, cwd
+	}
+	return out[:i], strings.TrimSuffix(out[i+len(cwdMark):], "\n")
+}
+
+// shellQuote quotes s as one POSIX shell word.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // runCommand is automatic mode's RUN: only a command the latest approved

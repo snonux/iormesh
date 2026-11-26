@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -281,3 +282,40 @@ app:gateway/*microservices --role gateway *  orders     fused  9      0         
 orders                                       billing    fused  9      0           2026-11-26 20:42:19  2026-11-26 20:46:47
 orders                                       inventory  fused  9      0           2026-11-26 20:42:18  2026-11-26 20:46:46
 `
+
+// TestTypedKeepsDirectory: guided mode's user types a step's commands
+// into one terminal, so a `cd` carries to the next command, as it did not
+// when each command ran in its own ssh session (the first real guided
+// run, task nm4: the downloads landed in ~ after `cd ~/iormesh-release`).
+// The wrapper runs here under sh -c with fixed commands, as the VM's
+// shell would run it; its exit status and output stay the command's.
+func TestTypedKeepsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	run := func(cwd, command string) (string, int, string) {
+		t.Helper()
+		out, err := exec.Command("sh", "-c", typedCommand(cwd, command)).Output()
+		code := 0
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			code = exit.ExitCode()
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		text, next := splitTyped(string(out), cwd)
+		return text, code, next
+	}
+	text, code, cwd := run("", "cd "+dir)
+	if text != "" || code != 0 || cwd != dir {
+		t.Fatalf("cd: %q, exit %d, cwd %q", text, code, cwd)
+	}
+	if text, _, _ = run(cwd, "pwd"); text != dir+"\n" {
+		t.Errorf("pwd after cd = %q, want %q", text, dir+"\n")
+	}
+	if text, code, next := run(cwd, "printf half; false"); text != "half" || code != 1 || next != dir {
+		t.Errorf("failing command: %q, exit %d, cwd %q", text, code, next)
+	}
+	// A command that leaves the shell keeps the directory it had.
+	if _, code, next := run(cwd, "exit 3"); code != 3 || next != dir {
+		t.Errorf("exit 3: exit %d, cwd %q", code, next)
+	}
+}

@@ -119,7 +119,10 @@ the commands (a numbered list), the change and the outgoing data,
 `change` to one that does not; in guided mode, after `yes`, the
 output of exactly the named commands, typed in order on the named
 VM, each as `$ command` and its output (a non-zero exit as `[exit
-status N]`; a word-starting `@` escaped, as above). A `RUN`'s
+status N]`; a word-starting `@` escaped, as above). The user types
+into one terminal per VM, so a `cd` carries to the next command and
+step (`typedCommand`, task nm4); each `RUN` of automatic mode is its
+own ssh session, as the protocol says. A `RUN`'s
 output comes back the same way. A silent success reads `[no
 output, exit status 0]`, in both modes, so no message is ever
 empty: `claude -p --resume` fails on an empty prompt (task nm4).
