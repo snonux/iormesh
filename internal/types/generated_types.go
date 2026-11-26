@@ -1005,12 +1005,22 @@ var poolOfOpenEvents = sync.Pool{
 }
 
 func NewOpenEvent(raw []byte) *OpenEvent {
-	o := poolOfOpenEvents.Get().(*OpenEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, o); err != nil {
-		*o = OpenEvent{}
-		poolOfOpenEvents.Put(o)
+	if len(raw) < 316 {
 		return nil
 	}
+	o := poolOfOpenEvents.Get().(*OpenEvent)
+	o.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	o.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	o.Time = binary.LittleEndian.Uint64(raw[8:])
+	o.Pid = binary.LittleEndian.Uint32(raw[16:])
+	o.Tid = binary.LittleEndian.Uint32(raw[20:])
+	o.Flags = int32(binary.LittleEndian.Uint32(raw[24:]))
+	copy(o.Filename[:], raw[28:284])
+	copy(o.Comm[:], raw[284:300])
+	o.Dirfd = int32(binary.LittleEndian.Uint32(raw[300:]))
+	o.SchemaVersion = binary.LittleEndian.Uint32(raw[304:])
+	o.FilenameStatus = binary.LittleEndian.Uint32(raw[308:])
+	o.SchemaReserved = binary.LittleEndian.Uint32(raw[312:])
 	return o
 }
 
@@ -1064,12 +1074,15 @@ var poolOfOpenNameFixupEvents = sync.Pool{
 }
 
 func NewOpenNameFixupEvent(raw []byte) *OpenNameFixupEvent {
-	o := poolOfOpenNameFixupEvents.Get().(*OpenNameFixupEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, o); err != nil {
-		*o = OpenNameFixupEvent{}
-		poolOfOpenNameFixupEvents.Put(o)
+	if len(raw) < 272 {
 		return nil
 	}
+	o := poolOfOpenNameFixupEvents.Get().(*OpenNameFixupEvent)
+	o.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	o.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	o.Tid = binary.LittleEndian.Uint32(raw[8:])
+	copy(o.Filename[:], raw[12:268])
+	o.Slot = binary.LittleEndian.Uint32(raw[268:])
 	return o
 }
 
@@ -1137,12 +1150,21 @@ var poolOfExecEvents = sync.Pool{
 }
 
 func NewExecEvent(raw []byte) *ExecEvent {
-	e := poolOfExecEvents.Get().(*ExecEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, e); err != nil {
-		*e = ExecEvent{}
-		poolOfExecEvents.Put(e)
+	if len(raw) < 312 {
 		return nil
 	}
+	e := poolOfExecEvents.Get().(*ExecEvent)
+	e.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	e.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	e.Time = binary.LittleEndian.Uint64(raw[8:])
+	e.Pid = binary.LittleEndian.Uint32(raw[16:])
+	e.Tid = binary.LittleEndian.Uint32(raw[20:])
+	e.Dirfd = int32(binary.LittleEndian.Uint32(raw[24:]))
+	e.Flags = int32(binary.LittleEndian.Uint32(raw[28:]))
+	copy(e.Filename[:], raw[32:288])
+	copy(e.Comm[:], raw[288:304])
+	e.FilenameStatus = binary.LittleEndian.Uint32(raw[304:])
+	e.SchemaVersion = binary.LittleEndian.Uint32(raw[308:])
 	return e
 }
 
@@ -1204,12 +1226,15 @@ var poolOfNullEvents = sync.Pool{
 }
 
 func NewNullEvent(raw []byte) *NullEvent {
-	n := poolOfNullEvents.Get().(*NullEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, n); err != nil {
-		*n = NullEvent{}
-		poolOfNullEvents.Put(n)
+	if len(raw) < 24 {
 		return nil
 	}
+	n := poolOfNullEvents.Get().(*NullEvent)
+	n.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	n.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	n.Time = binary.LittleEndian.Uint64(raw[8:])
+	n.Pid = binary.LittleEndian.Uint32(raw[16:])
+	n.Tid = binary.LittleEndian.Uint32(raw[20:])
 	return n
 }
 
@@ -1435,12 +1460,18 @@ var poolOfRetEvents = sync.Pool{
 }
 
 func NewRetEvent(raw []byte) *RetEvent {
-	r := poolOfRetEvents.Get().(*RetEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, r); err != nil {
-		*r = RetEvent{}
-		poolOfRetEvents.Put(r)
+	if len(raw) < 40 {
 		return nil
 	}
+	r := poolOfRetEvents.Get().(*RetEvent)
+	r.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	r.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	r.Time = binary.LittleEndian.Uint64(raw[8:])
+	r.Ret = int64(binary.LittleEndian.Uint64(raw[16:]))
+	r.Pid = binary.LittleEndian.Uint32(raw[24:])
+	r.Tid = binary.LittleEndian.Uint32(raw[28:])
+	r.RetType = binary.LittleEndian.Uint32(raw[32:])
+	r.FileIdent = binary.LittleEndian.Uint32(raw[36:])
 	return r
 }
 
@@ -1510,12 +1541,23 @@ var poolOfNameEvents = sync.Pool{
 }
 
 func NewNameEvent(raw []byte) *NameEvent {
-	n := poolOfNameEvents.Get().(*NameEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, n); err != nil {
-		*n = NameEvent{}
-		poolOfNameEvents.Put(n)
+	if len(raw) < 560 {
 		return nil
 	}
+	n := poolOfNameEvents.Get().(*NameEvent)
+	n.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	n.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	n.Time = binary.LittleEndian.Uint64(raw[8:])
+	n.Pid = binary.LittleEndian.Uint32(raw[16:])
+	n.Tid = binary.LittleEndian.Uint32(raw[20:])
+	copy(n.Oldname[:], raw[24:280])
+	copy(n.Newname[:], raw[280:536])
+	n.Olddirfd = int32(binary.LittleEndian.Uint32(raw[536:]))
+	n.Newdirfd = int32(binary.LittleEndian.Uint32(raw[540:]))
+	n.OldnameStatus = binary.LittleEndian.Uint32(raw[544:])
+	n.NewnameStatus = binary.LittleEndian.Uint32(raw[548:])
+	n.Flags = binary.LittleEndian.Uint32(raw[552:])
+	n.SchemaVersion = binary.LittleEndian.Uint32(raw[556:])
 	return n
 }
 
@@ -1585,12 +1627,23 @@ var poolOfPathEvents = sync.Pool{
 }
 
 func NewPathEvent(raw []byte) *PathEvent {
-	p := poolOfPathEvents.Get().(*PathEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, p); err != nil {
-		*p = PathEvent{}
-		poolOfPathEvents.Put(p)
+	if len(raw) < 312 {
 		return nil
 	}
+	p := poolOfPathEvents.Get().(*PathEvent)
+	p.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	p.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	p.Time = binary.LittleEndian.Uint64(raw[8:])
+	p.Pid = binary.LittleEndian.Uint32(raw[16:])
+	p.Tid = binary.LittleEndian.Uint32(raw[20:])
+	copy(p.Pathname[:], raw[24:280])
+	p.Dirfd = int32(binary.LittleEndian.Uint32(raw[280:]))
+	p.PathnameStatus = binary.LittleEndian.Uint32(raw[284:])
+	p.Flags = binary.LittleEndian.Uint32(raw[288:])
+	p.SchemaVersion = binary.LittleEndian.Uint32(raw[292:])
+	p.TargetStatus = binary.LittleEndian.Uint32(raw[296:])
+	p.SizeValid = binary.LittleEndian.Uint32(raw[300:])
+	p.Size = binary.LittleEndian.Uint64(raw[304:])
 	return p
 }
 
@@ -1664,12 +1717,21 @@ func NewFdPathEvent(raw []byte) *FdPathEvent {
 	if binary.LittleEndian.Uint32(raw[296:300]) != FD_PATH_EVENT_SCHEMA_VERSION {
 		return nil
 	}
-	f := poolOfFdPathEvents.Get().(*FdPathEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, f); err != nil {
-		*f = FdPathEvent{}
-		poolOfFdPathEvents.Put(f)
+	if len(raw) < 300 {
 		return nil
 	}
+	f := poolOfFdPathEvents.Get().(*FdPathEvent)
+	f.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	f.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	f.Time = binary.LittleEndian.Uint64(raw[8:])
+	f.Pid = binary.LittleEndian.Uint32(raw[16:])
+	f.Tid = binary.LittleEndian.Uint32(raw[20:])
+	f.Fd = int32(binary.LittleEndian.Uint32(raw[24:]))
+	f.Dirfd = int32(binary.LittleEndian.Uint32(raw[28:]))
+	copy(f.Pathname[:], raw[32:288])
+	f.PathnameStatus = binary.LittleEndian.Uint32(raw[288:])
+	f.Flags = binary.LittleEndian.Uint32(raw[292:])
+	f.SchemaVersion = binary.LittleEndian.Uint32(raw[296:])
 	return f
 }
 
@@ -1734,12 +1796,18 @@ var poolOfFcntlEvents = sync.Pool{
 }
 
 func NewFcntlEvent(raw []byte) *FcntlEvent {
-	f := poolOfFcntlEvents.Get().(*FcntlEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, f); err != nil {
-		*f = FcntlEvent{}
-		poolOfFcntlEvents.Put(f)
+	if len(raw) < 40 {
 		return nil
 	}
+	f := poolOfFcntlEvents.Get().(*FcntlEvent)
+	f.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	f.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	f.Time = binary.LittleEndian.Uint64(raw[8:])
+	f.Pid = binary.LittleEndian.Uint32(raw[16:])
+	f.Tid = binary.LittleEndian.Uint32(raw[20:])
+	f.Fd = binary.LittleEndian.Uint32(raw[24:])
+	f.Cmd = binary.LittleEndian.Uint32(raw[28:])
+	f.Arg = binary.LittleEndian.Uint64(raw[32:])
 	return f
 }
 
@@ -1804,12 +1872,18 @@ var poolOfDup3Events = sync.Pool{
 }
 
 func NewDup3Event(raw []byte) *Dup3Event {
-	d := poolOfDup3Events.Get().(*Dup3Event)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, d); err != nil {
-		*d = Dup3Event{}
-		poolOfDup3Events.Put(d)
+	if len(raw) < 36 {
 		return nil
 	}
+	d := poolOfDup3Events.Get().(*Dup3Event)
+	d.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	d.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	d.Time = binary.LittleEndian.Uint64(raw[8:])
+	d.Pid = binary.LittleEndian.Uint32(raw[16:])
+	d.Tid = binary.LittleEndian.Uint32(raw[20:])
+	d.Fd = int32(binary.LittleEndian.Uint32(raw[24:]))
+	d.Flags = int32(binary.LittleEndian.Uint32(raw[28:]))
+	d.FileIdent = binary.LittleEndian.Uint32(raw[32:])
 	return d
 }
 
@@ -1876,12 +1950,20 @@ var poolOfOpenByHandleAtEvents = sync.Pool{
 }
 
 func NewOpenByHandleAtEvent(raw []byte) *OpenByHandleAtEvent {
-	o := poolOfOpenByHandleAtEvents.Get().(*OpenByHandleAtEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, o); err != nil {
-		*o = OpenByHandleAtEvent{}
-		poolOfOpenByHandleAtEvents.Put(o)
+	if len(raw) < 168 {
 		return nil
 	}
+	o := poolOfOpenByHandleAtEvents.Get().(*OpenByHandleAtEvent)
+	o.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	o.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	o.Time = binary.LittleEndian.Uint64(raw[8:])
+	o.Pid = binary.LittleEndian.Uint32(raw[16:])
+	o.Tid = binary.LittleEndian.Uint32(raw[20:])
+	o.Flags = int32(binary.LittleEndian.Uint32(raw[24:]))
+	o.HandleStatus = binary.LittleEndian.Uint32(raw[28:])
+	o.HandleBytes = binary.LittleEndian.Uint32(raw[32:])
+	o.HandleType = int32(binary.LittleEndian.Uint32(raw[36:]))
+	copy(o.FHandle[:], raw[40:168])
 	return o
 }
 
@@ -1949,12 +2031,21 @@ var poolOfFileHandleEvents = sync.Pool{
 }
 
 func NewFileHandleEvent(raw []byte) *FileHandleEvent {
-	f := poolOfFileHandleEvents.Get().(*FileHandleEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, f); err != nil {
-		*f = FileHandleEvent{}
-		poolOfFileHandleEvents.Put(f)
+	if len(raw) < 176 {
 		return nil
 	}
+	f := poolOfFileHandleEvents.Get().(*FileHandleEvent)
+	f.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	f.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	f.Time = binary.LittleEndian.Uint64(raw[8:])
+	f.Pid = binary.LittleEndian.Uint32(raw[16:])
+	f.Tid = binary.LittleEndian.Uint32(raw[20:])
+	f.Reserved = binary.LittleEndian.Uint32(raw[24:])
+	f.HandleStatus = binary.LittleEndian.Uint32(raw[28:])
+	f.HandleBytes = binary.LittleEndian.Uint32(raw[32:])
+	f.HandleType = int32(binary.LittleEndian.Uint32(raw[36:]))
+	copy(f.FHandle[:], raw[40:168])
+	f.EnterTime = binary.LittleEndian.Uint64(raw[168:])
 	return f
 }
 
@@ -2021,12 +2112,20 @@ var poolOfRingFdsEvents = sync.Pool{
 }
 
 func NewRingFdsEvent(raw []byte) *RingFdsEvent {
-	r := poolOfRingFdsEvents.Get().(*RingFdsEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, r); err != nil {
-		*r = RingFdsEvent{}
-		poolOfRingFdsEvents.Put(r)
+	if len(raw) < 296 {
 		return nil
 	}
+	r := poolOfRingFdsEvents.Get().(*RingFdsEvent)
+	r.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	r.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	r.Time = binary.LittleEndian.Uint64(raw[8:])
+	r.Pid = binary.LittleEndian.Uint32(raw[16:])
+	r.Tid = binary.LittleEndian.Uint32(raw[20:])
+	r.Opcode = binary.LittleEndian.Uint32(raw[24:])
+	r.Status = binary.LittleEndian.Uint32(raw[28:])
+	r.Count = binary.LittleEndian.Uint32(raw[32:])
+	r.Reserved = binary.LittleEndian.Uint32(raw[36:])
+	copy(r.Updates[:], raw[40:296])
 	return r
 }
 
@@ -2092,12 +2191,19 @@ var poolOfFdNameEvents = sync.Pool{
 }
 
 func NewFdNameEvent(raw []byte) *FdNameEvent {
-	f := poolOfFdNameEvents.Get().(*FdNameEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, f); err != nil {
-		*f = FdNameEvent{}
-		poolOfFdNameEvents.Put(f)
+	if len(raw) < 104 {
 		return nil
 	}
+	f := poolOfFdNameEvents.Get().(*FdNameEvent)
+	f.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	f.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	f.Time = binary.LittleEndian.Uint64(raw[8:])
+	f.Pid = binary.LittleEndian.Uint32(raw[16:])
+	f.Tid = binary.LittleEndian.Uint32(raw[20:])
+	f.Fd = int32(binary.LittleEndian.Uint32(raw[24:]))
+	f.FileIdent = binary.LittleEndian.Uint32(raw[28:])
+	f.NameLen = binary.LittleEndian.Uint32(raw[32:])
+	copy(f.Name[:], raw[36:104])
 	return f
 }
 
@@ -2162,12 +2268,18 @@ var poolOfSocketEvents = sync.Pool{
 }
 
 func NewSocketEvent(raw []byte) *SocketEvent {
-	s := poolOfSocketEvents.Get().(*SocketEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, s); err != nil {
-		*s = SocketEvent{}
-		poolOfSocketEvents.Put(s)
+	if len(raw) < 36 {
 		return nil
 	}
+	s := poolOfSocketEvents.Get().(*SocketEvent)
+	s.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	s.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	s.Time = binary.LittleEndian.Uint64(raw[8:])
+	s.Pid = binary.LittleEndian.Uint32(raw[16:])
+	s.Tid = binary.LittleEndian.Uint32(raw[20:])
+	s.Family = int32(binary.LittleEndian.Uint32(raw[24:]))
+	s.Type = int32(binary.LittleEndian.Uint32(raw[28:]))
+	s.Protocol = int32(binary.LittleEndian.Uint32(raw[32:]))
 	return s
 }
 
@@ -2677,12 +2789,19 @@ var poolOfEpollCtlEvents = sync.Pool{
 }
 
 func NewEpollCtlEvent(raw []byte) *EpollCtlEvent {
-	e := poolOfEpollCtlEvents.Get().(*EpollCtlEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, e); err != nil {
-		*e = EpollCtlEvent{}
-		poolOfEpollCtlEvents.Put(e)
+	if len(raw) < 40 {
 		return nil
 	}
+	e := poolOfEpollCtlEvents.Get().(*EpollCtlEvent)
+	e.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	e.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	e.Time = binary.LittleEndian.Uint64(raw[8:])
+	e.Pid = binary.LittleEndian.Uint32(raw[16:])
+	e.Tid = binary.LittleEndian.Uint32(raw[20:])
+	e.Epfd = int32(binary.LittleEndian.Uint32(raw[24:]))
+	e.Op = int32(binary.LittleEndian.Uint32(raw[28:]))
+	e.Fd = int32(binary.LittleEndian.Uint32(raw[32:]))
+	e.Events = binary.LittleEndian.Uint32(raw[36:])
 	return e
 }
 
@@ -2819,12 +2938,19 @@ var poolOfMemEvents = sync.Pool{
 }
 
 func NewMemEvent(raw []byte) *MemEvent {
-	m := poolOfMemEvents.Get().(*MemEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, m); err != nil {
-		*m = MemEvent{}
-		poolOfMemEvents.Put(m)
+	if len(raw) < 56 {
 		return nil
 	}
+	m := poolOfMemEvents.Get().(*MemEvent)
+	m.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	m.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	m.Time = binary.LittleEndian.Uint64(raw[8:])
+	m.Pid = binary.LittleEndian.Uint32(raw[16:])
+	m.Tid = binary.LittleEndian.Uint32(raw[20:])
+	m.Addr = binary.LittleEndian.Uint64(raw[24:])
+	m.Length = binary.LittleEndian.Uint64(raw[32:])
+	m.Length2 = binary.LittleEndian.Uint64(raw[40:])
+	m.Flags = binary.LittleEndian.Uint64(raw[48:])
 	return m
 }
 
@@ -2891,12 +3017,20 @@ var poolOfMmapEvents = sync.Pool{
 }
 
 func NewMmapEvent(raw []byte) *MmapEvent {
-	m := poolOfMmapEvents.Get().(*MmapEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, m); err != nil {
-		*m = MmapEvent{}
-		poolOfMmapEvents.Put(m)
+	if len(raw) < 60 {
 		return nil
 	}
+	m := poolOfMmapEvents.Get().(*MmapEvent)
+	m.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	m.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	m.Time = binary.LittleEndian.Uint64(raw[8:])
+	m.Pid = binary.LittleEndian.Uint32(raw[16:])
+	m.Tid = binary.LittleEndian.Uint32(raw[20:])
+	m.Addr = binary.LittleEndian.Uint64(raw[24:])
+	m.Length = binary.LittleEndian.Uint64(raw[32:])
+	m.Prot = binary.LittleEndian.Uint64(raw[40:])
+	m.Flags = binary.LittleEndian.Uint64(raw[48:])
+	m.Fd = int32(binary.LittleEndian.Uint32(raw[56:]))
 	return m
 }
 
@@ -2959,12 +3093,16 @@ var poolOfSleepEvents = sync.Pool{
 }
 
 func NewSleepEvent(raw []byte) *SleepEvent {
-	s := poolOfSleepEvents.Get().(*SleepEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, s); err != nil {
-		*s = SleepEvent{}
-		poolOfSleepEvents.Put(s)
+	if len(raw) < 32 {
 		return nil
 	}
+	s := poolOfSleepEvents.Get().(*SleepEvent)
+	s.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	s.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	s.Time = binary.LittleEndian.Uint64(raw[8:])
+	s.Pid = binary.LittleEndian.Uint32(raw[16:])
+	s.Tid = binary.LittleEndian.Uint32(raw[20:])
+	s.RequestedNs = int64(binary.LittleEndian.Uint64(raw[24:]))
 	return s
 }
 
@@ -3244,12 +3382,16 @@ var poolOfBpfEvents = sync.Pool{
 }
 
 func NewBpfEvent(raw []byte) *BpfEvent {
-	b := poolOfBpfEvents.Get().(*BpfEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, b); err != nil {
-		*b = BpfEvent{}
-		poolOfBpfEvents.Put(b)
+	if len(raw) < 28 {
 		return nil
 	}
+	b := poolOfBpfEvents.Get().(*BpfEvent)
+	b.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	b.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	b.Time = binary.LittleEndian.Uint64(raw[8:])
+	b.Pid = binary.LittleEndian.Uint32(raw[16:])
+	b.Tid = binary.LittleEndian.Uint32(raw[20:])
+	b.Cmd = binary.LittleEndian.Uint32(raw[24:])
 	return b
 }
 
@@ -3314,12 +3456,18 @@ var poolOfKeyctlEvents = sync.Pool{
 }
 
 func NewKeyctlEvent(raw []byte) *KeyctlEvent {
-	k := poolOfKeyctlEvents.Get().(*KeyctlEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, k); err != nil {
-		*k = KeyctlEvent{}
-		poolOfKeyctlEvents.Put(k)
+	if len(raw) < 40 {
 		return nil
 	}
+	k := poolOfKeyctlEvents.Get().(*KeyctlEvent)
+	k.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	k.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	k.Time = binary.LittleEndian.Uint64(raw[8:])
+	k.Pid = binary.LittleEndian.Uint32(raw[16:])
+	k.Tid = binary.LittleEndian.Uint32(raw[20:])
+	k.Option = int32(binary.LittleEndian.Uint32(raw[24:]))
+	k.KeySerial = int32(binary.LittleEndian.Uint32(raw[28:]))
+	k.Value = binary.LittleEndian.Uint64(raw[32:])
 	return k
 }
 
@@ -3385,12 +3533,19 @@ var poolOfPtraceEvents = sync.Pool{
 }
 
 func NewPtraceEvent(raw []byte) *PtraceEvent {
-	p := poolOfPtraceEvents.Get().(*PtraceEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, p); err != nil {
-		*p = PtraceEvent{}
-		poolOfPtraceEvents.Put(p)
+	if len(raw) < 48 {
 		return nil
 	}
+	p := poolOfPtraceEvents.Get().(*PtraceEvent)
+	p.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	p.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	p.Time = binary.LittleEndian.Uint64(raw[8:])
+	p.Pid = binary.LittleEndian.Uint32(raw[16:])
+	p.Tid = binary.LittleEndian.Uint32(raw[20:])
+	p.Request = int64(binary.LittleEndian.Uint64(raw[24:]))
+	p.TargetPid = int32(binary.LittleEndian.Uint32(raw[32:]))
+	p.Pad = int32(binary.LittleEndian.Uint32(raw[36:]))
+	p.Data = binary.LittleEndian.Uint64(raw[40:])
 	return p
 }
 
@@ -3459,12 +3614,22 @@ var poolOfPerfOpenEvents = sync.Pool{
 }
 
 func NewPerfOpenEvent(raw []byte) *PerfOpenEvent {
-	p := poolOfPerfOpenEvents.Get().(*PerfOpenEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, p); err != nil {
-		*p = PerfOpenEvent{}
-		poolOfPerfOpenEvents.Put(p)
+	if len(raw) < 56 {
 		return nil
 	}
+	p := poolOfPerfOpenEvents.Get().(*PerfOpenEvent)
+	p.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	p.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	p.Time = binary.LittleEndian.Uint64(raw[8:])
+	p.Pid = binary.LittleEndian.Uint32(raw[16:])
+	p.Tid = binary.LittleEndian.Uint32(raw[20:])
+	p.AttrType = binary.LittleEndian.Uint32(raw[24:])
+	p.AttrSize = binary.LittleEndian.Uint32(raw[28:])
+	p.Config = binary.LittleEndian.Uint64(raw[32:])
+	p.TargetPid = int32(binary.LittleEndian.Uint32(raw[40:]))
+	p.Cpu = int32(binary.LittleEndian.Uint32(raw[44:]))
+	p.GroupFd = int32(binary.LittleEndian.Uint32(raw[48:]))
+	p.Flags = binary.LittleEndian.Uint32(raw[52:])
 	return p
 }
 
@@ -3529,12 +3694,18 @@ var poolOfProcessExecEvents = sync.Pool{
 }
 
 func NewProcessExecEvent(raw []byte) *ProcessExecEvent {
-	p := poolOfProcessExecEvents.Get().(*ProcessExecEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, p); err != nil {
-		*p = ProcessExecEvent{}
-		poolOfProcessExecEvents.Put(p)
+	if len(raw) < 48 {
 		return nil
 	}
+	p := poolOfProcessExecEvents.Get().(*ProcessExecEvent)
+	p.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	p.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	p.Time = binary.LittleEndian.Uint64(raw[8:])
+	p.Pid = binary.LittleEndian.Uint32(raw[16:])
+	p.Tid = binary.LittleEndian.Uint32(raw[20:])
+	copy(p.Comm[:], raw[24:40])
+	p.OldTid = binary.LittleEndian.Uint32(raw[40:])
+	p.ExitUntraced = binary.LittleEndian.Uint32(raw[44:])
 	return p
 }
 
@@ -3598,12 +3769,17 @@ var poolOfProcessExitEvents = sync.Pool{
 }
 
 func NewProcessExitEvent(raw []byte) *ProcessExitEvent {
-	p := poolOfProcessExitEvents.Get().(*ProcessExitEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, p); err != nil {
-		*p = ProcessExitEvent{}
-		poolOfProcessExitEvents.Put(p)
+	if len(raw) < 32 {
 		return nil
 	}
+	p := poolOfProcessExitEvents.Get().(*ProcessExitEvent)
+	p.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	p.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	p.Time = binary.LittleEndian.Uint64(raw[8:])
+	p.Pid = binary.LittleEndian.Uint32(raw[16:])
+	p.Tid = binary.LittleEndian.Uint32(raw[20:])
+	p.GroupDead = binary.LittleEndian.Uint32(raw[24:])
+	p.ExitFlags = binary.LittleEndian.Uint32(raw[28:])
 	return p
 }
 
@@ -3669,12 +3845,19 @@ var poolOfTaskNewtaskEvents = sync.Pool{
 }
 
 func NewTaskNewtaskEvent(raw []byte) *TaskNewtaskEvent {
-	t := poolOfTaskNewtaskEvents.Get().(*TaskNewtaskEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, t); err != nil {
-		*t = TaskNewtaskEvent{}
-		poolOfTaskNewtaskEvents.Put(t)
+	if len(raw) < 56 {
 		return nil
 	}
+	t := poolOfTaskNewtaskEvents.Get().(*TaskNewtaskEvent)
+	t.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	t.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	t.Time = binary.LittleEndian.Uint64(raw[8:])
+	t.Pid = binary.LittleEndian.Uint32(raw[16:])
+	t.Tid = binary.LittleEndian.Uint32(raw[20:])
+	copy(t.Comm[:], raw[24:40])
+	t.CloneFlags = binary.LittleEndian.Uint64(raw[40:])
+	t.CreatorPid = binary.LittleEndian.Uint32(raw[48:])
+	t.ScopeFlags = binary.LittleEndian.Uint32(raw[52:])
 	return t
 }
 
@@ -3737,12 +3920,16 @@ var poolOfTaskRenameEvents = sync.Pool{
 }
 
 func NewTaskRenameEvent(raw []byte) *TaskRenameEvent {
-	t := poolOfTaskRenameEvents.Get().(*TaskRenameEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, t); err != nil {
-		*t = TaskRenameEvent{}
-		poolOfTaskRenameEvents.Put(t)
+	if len(raw) < 40 {
 		return nil
 	}
+	t := poolOfTaskRenameEvents.Get().(*TaskRenameEvent)
+	t.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	t.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	t.Time = binary.LittleEndian.Uint64(raw[8:])
+	t.Pid = binary.LittleEndian.Uint32(raw[16:])
+	t.Tid = binary.LittleEndian.Uint32(raw[20:])
+	copy(t.Comm[:], raw[24:40])
 	return t
 }
 
@@ -3806,12 +3993,17 @@ var poolOfSyscallRestartEvents = sync.Pool{
 }
 
 func NewSyscallRestartEvent(raw []byte) *SyscallRestartEvent {
-	s := poolOfSyscallRestartEvents.Get().(*SyscallRestartEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, s); err != nil {
-		*s = SyscallRestartEvent{}
-		poolOfSyscallRestartEvents.Put(s)
+	if len(raw) < 32 {
 		return nil
 	}
+	s := poolOfSyscallRestartEvents.Get().(*SyscallRestartEvent)
+	s.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	s.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	s.Time = binary.LittleEndian.Uint64(raw[8:])
+	s.Pid = binary.LittleEndian.Uint32(raw[16:])
+	s.Tid = binary.LittleEndian.Uint32(raw[20:])
+	s.Phase = binary.LittleEndian.Uint32(raw[24:])
+	s.SaRestart = binary.LittleEndian.Uint32(raw[28:])
 	return s
 }
 
@@ -3878,12 +4070,28 @@ var poolOfTcpStateEvents = sync.Pool{
 }
 
 func NewTcpStateEvent(raw []byte) *TcpStateEvent {
-	t := poolOfTcpStateEvents.Get().(*TcpStateEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, t); err != nil {
-		*t = TcpStateEvent{}
-		poolOfTcpStateEvents.Put(t)
+	if len(raw) < 112 {
 		return nil
 	}
+	t := poolOfTcpStateEvents.Get().(*TcpStateEvent)
+	t.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	t.SchemaVersion = binary.LittleEndian.Uint32(raw[4:])
+	t.Time = binary.LittleEndian.Uint64(raw[8:])
+	t.Sk = binary.LittleEndian.Uint64(raw[16:])
+	t.Pid = binary.LittleEndian.Uint32(raw[24:])
+	t.Fd = int32(binary.LittleEndian.Uint32(raw[28:]))
+	t.Oldstate = int32(binary.LittleEndian.Uint32(raw[32:]))
+	t.Newstate = int32(binary.LittleEndian.Uint32(raw[36:]))
+	t.Family = binary.LittleEndian.Uint32(raw[40:])
+	t.Sport = binary.LittleEndian.Uint32(raw[44:])
+	t.Dport = binary.LittleEndian.Uint32(raw[48:])
+	t.SeqStatus = binary.LittleEndian.Uint32(raw[52:])
+	copy(t.Saddr[:], raw[56:72])
+	copy(t.Daddr[:], raw[72:88])
+	t.SndUna = binary.LittleEndian.Uint32(raw[88:])
+	t.RcvNxt = binary.LittleEndian.Uint32(raw[92:])
+	t.BytesAcked = binary.LittleEndian.Uint64(raw[96:])
+	t.BytesReceived = binary.LittleEndian.Uint64(raw[104:])
 	return t
 }
 
@@ -3949,12 +4157,19 @@ var poolOfExecArgvEvents = sync.Pool{
 }
 
 func NewExecArgvEvent(raw []byte) *ExecArgvEvent {
-	e := poolOfExecArgvEvents.Get().(*ExecArgvEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, e); err != nil {
-		*e = ExecArgvEvent{}
-		poolOfExecArgvEvents.Put(e)
+	if len(raw) < 1312 {
 		return nil
 	}
+	e := poolOfExecArgvEvents.Get().(*ExecArgvEvent)
+	e.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	e.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	e.Time = binary.LittleEndian.Uint64(raw[8:])
+	e.Pid = binary.LittleEndian.Uint32(raw[16:])
+	e.Tid = binary.LittleEndian.Uint32(raw[20:])
+	e.ArgvLen = binary.LittleEndian.Uint32(raw[24:])
+	e.ArgvTotal = binary.LittleEndian.Uint32(raw[28:])
+	copy(e.Exe[:], raw[32:288])
+	copy(e.Argv[:], raw[288:1312])
 	return e
 }
 
@@ -4031,12 +4246,30 @@ var poolOfSockAddrEvents = sync.Pool{
 }
 
 func NewSockAddrEvent(raw []byte) *SockAddrEvent {
-	s := poolOfSockAddrEvents.Get().(*SockAddrEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, s); err != nil {
-		*s = SockAddrEvent{}
-		poolOfSockAddrEvents.Put(s)
+	if len(raw) < 232 {
 		return nil
 	}
+	s := poolOfSockAddrEvents.Get().(*SockAddrEvent)
+	s.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	s.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	s.Time = binary.LittleEndian.Uint64(raw[8:])
+	s.Pid = binary.LittleEndian.Uint32(raw[16:])
+	s.Tid = binary.LittleEndian.Uint32(raw[20:])
+	s.Fd = int32(binary.LittleEndian.Uint32(raw[24:]))
+	s.Family = binary.LittleEndian.Uint32(raw[28:])
+	s.SockType = binary.LittleEndian.Uint32(raw[32:])
+	s.LocalPort = binary.LittleEndian.Uint32(raw[36:])
+	s.RemotePort = binary.LittleEndian.Uint32(raw[40:])
+	s.ArgFamily = binary.LittleEndian.Uint32(raw[44:])
+	s.ArgPort = binary.LittleEndian.Uint32(raw[48:])
+	s.PathKind = binary.LittleEndian.Uint32(raw[52:])
+	s.Sk = binary.LittleEndian.Uint64(raw[56:])
+	s.Peer = binary.LittleEndian.Uint64(raw[64:])
+	copy(s.LocalAddr[:], raw[72:88])
+	copy(s.RemoteAddr[:], raw[88:104])
+	copy(s.ArgAddr[:], raw[104:120])
+	copy(s.Path[:], raw[120:228])
+	s.Reserved = binary.LittleEndian.Uint32(raw[228:])
 	return s
 }
 
@@ -4104,12 +4337,21 @@ var poolOfSignalEvents = sync.Pool{
 }
 
 func NewSignalEvent(raw []byte) *SignalEvent {
-	s := poolOfSignalEvents.Get().(*SignalEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, s); err != nil {
-		*s = SignalEvent{}
-		poolOfSignalEvents.Put(s)
+	if len(raw) < 48 {
 		return nil
 	}
+	s := poolOfSignalEvents.Get().(*SignalEvent)
+	s.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	s.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	s.Time = binary.LittleEndian.Uint64(raw[8:])
+	s.Pid = binary.LittleEndian.Uint32(raw[16:])
+	s.Tid = binary.LittleEndian.Uint32(raw[20:])
+	s.TargetPid = binary.LittleEndian.Uint32(raw[24:])
+	s.TargetTid = binary.LittleEndian.Uint32(raw[28:])
+	s.Sig = int32(binary.LittleEndian.Uint32(raw[32:]))
+	s.Result = int32(binary.LittleEndian.Uint32(raw[36:]))
+	s.Group = binary.LittleEndian.Uint32(raw[40:])
+	s.Scope = binary.LittleEndian.Uint32(raw[44:])
 	return s
 }
 
@@ -4178,12 +4420,22 @@ var poolOfRwAggregateEvents = sync.Pool{
 }
 
 func NewRwAggregateEvent(raw []byte) *RwAggregateEvent {
-	r := poolOfRwAggregateEvents.Get().(*RwAggregateEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, r); err != nil {
-		*r = RwAggregateEvent{}
-		poolOfRwAggregateEvents.Put(r)
+	if len(raw) < 64 {
 		return nil
 	}
+	r := poolOfRwAggregateEvents.Get().(*RwAggregateEvent)
+	r.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	r.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	r.Time = binary.LittleEndian.Uint64(raw[8:])
+	r.EndTime = binary.LittleEndian.Uint64(raw[16:])
+	r.TotalBytes = binary.LittleEndian.Uint64(raw[24:])
+	r.LatencyNs = binary.LittleEndian.Uint64(raw[32:])
+	r.Pid = binary.LittleEndian.Uint32(raw[40:])
+	r.Tid = binary.LittleEndian.Uint32(raw[44:])
+	r.Fd = int32(binary.LittleEndian.Uint32(raw[48:]))
+	r.FileIdent = binary.LittleEndian.Uint32(raw[52:])
+	r.Count = binary.LittleEndian.Uint32(raw[56:])
+	r.Reserved = binary.LittleEndian.Uint32(raw[60:])
 	return r
 }
 
@@ -4248,12 +4500,18 @@ var poolOfStackEvents = sync.Pool{
 }
 
 func NewStackEvent(raw []byte) *StackEvent {
-	s := poolOfStackEvents.Get().(*StackEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, s); err != nil {
-		*s = StackEvent{}
-		poolOfStackEvents.Put(s)
+	if len(raw) < 40 {
 		return nil
 	}
+	s := poolOfStackEvents.Get().(*StackEvent)
+	s.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	s.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	s.Time = binary.LittleEndian.Uint64(raw[8:])
+	s.Pid = binary.LittleEndian.Uint32(raw[16:])
+	s.Tid = binary.LittleEndian.Uint32(raw[20:])
+	s.StackId = int32(binary.LittleEndian.Uint32(raw[24:]))
+	s.Reserved = binary.LittleEndian.Uint32(raw[28:])
+	s.Image = binary.LittleEndian.Uint64(raw[32:])
 	return s
 }
 
@@ -4319,11 +4577,20 @@ var poolOfStackInlineEvents = sync.Pool{
 }
 
 func NewStackInlineEvent(raw []byte) *StackInlineEvent {
-	s := poolOfStackInlineEvents.Get().(*StackInlineEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, s); err != nil {
-		*s = StackInlineEvent{}
-		poolOfStackInlineEvents.Put(s)
+	if len(raw) < 552 {
 		return nil
+	}
+	s := poolOfStackInlineEvents.Get().(*StackInlineEvent)
+	s.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	s.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	s.Time = binary.LittleEndian.Uint64(raw[8:])
+	s.Pid = binary.LittleEndian.Uint32(raw[16:])
+	s.Tid = binary.LittleEndian.Uint32(raw[20:])
+	s.StackId = int32(binary.LittleEndian.Uint32(raw[24:]))
+	s.Nr = binary.LittleEndian.Uint32(raw[28:])
+	s.Image = binary.LittleEndian.Uint64(raw[32:])
+	for i := range s.Ips {
+		s.Ips[i] = binary.LittleEndian.Uint64(raw[40+i*8:])
 	}
 	return s
 }
@@ -4388,12 +4655,17 @@ var poolOfJavaMarkEvents = sync.Pool{
 }
 
 func NewJavaMarkEvent(raw []byte) *JavaMarkEvent {
-	j := poolOfJavaMarkEvents.Get().(*JavaMarkEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, j); err != nil {
-		*j = JavaMarkEvent{}
-		poolOfJavaMarkEvents.Put(j)
+	if len(raw) < 40 {
 		return nil
 	}
+	j := poolOfJavaMarkEvents.Get().(*JavaMarkEvent)
+	j.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	j.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	j.Time = binary.LittleEndian.Uint64(raw[8:])
+	j.Pid = binary.LittleEndian.Uint32(raw[16:])
+	j.Tid = binary.LittleEndian.Uint32(raw[20:])
+	j.Cookie = binary.LittleEndian.Uint64(raw[24:])
+	j.Entry = binary.LittleEndian.Uint64(raw[32:])
 	return j
 }
 
@@ -4464,12 +4736,19 @@ var poolOfTcpSeqEvents = sync.Pool{
 }
 
 func NewTcpSeqEvent(raw []byte) *TcpSeqEvent {
-	t := poolOfTcpSeqEvents.Get().(*TcpSeqEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, t); err != nil {
-		*t = TcpSeqEvent{}
-		poolOfTcpSeqEvents.Put(t)
+	if len(raw) < 48 {
 		return nil
 	}
+	t := poolOfTcpSeqEvents.Get().(*TcpSeqEvent)
+	t.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	t.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	t.Time = binary.LittleEndian.Uint64(raw[8:])
+	t.Ret = int64(binary.LittleEndian.Uint64(raw[16:]))
+	t.Pid = binary.LittleEndian.Uint32(raw[24:])
+	t.Tid = binary.LittleEndian.Uint32(raw[28:])
+	t.Sk = binary.LittleEndian.Uint64(raw[32:])
+	t.Seq = binary.LittleEndian.Uint32(raw[40:])
+	t.Reserved = binary.LittleEndian.Uint32(raw[44:])
 	return t
 }
 
@@ -4541,12 +4820,20 @@ var poolOfMmsgEvents = sync.Pool{
 }
 
 func NewMmsgEvent(raw []byte) *MmsgEvent {
-	m := poolOfMmsgEvents.Get().(*MmsgEvent)
-	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, m); err != nil {
-		*m = MmsgEvent{}
-		poolOfMmsgEvents.Put(m)
+	if len(raw) < 56 {
 		return nil
 	}
+	m := poolOfMmsgEvents.Get().(*MmsgEvent)
+	m.EventType = EventType(binary.LittleEndian.Uint32(raw[0:]))
+	m.TraceId = TraceId(binary.LittleEndian.Uint32(raw[4:]))
+	m.Time = binary.LittleEndian.Uint64(raw[8:])
+	m.Ret = int64(binary.LittleEndian.Uint64(raw[16:]))
+	m.Pid = binary.LittleEndian.Uint32(raw[24:])
+	m.Tid = binary.LittleEndian.Uint32(raw[28:])
+	m.TotalBytes = binary.LittleEndian.Uint64(raw[32:])
+	m.Sk = binary.LittleEndian.Uint64(raw[40:])
+	m.Seq = binary.LittleEndian.Uint32(raw[48:])
+	m.Flags = binary.LittleEndian.Uint32(raw[52:])
 	return m
 }
 
