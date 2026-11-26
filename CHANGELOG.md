@@ -30,6 +30,9 @@ then the features and changes of the latest round.
 - `iormeshctl sign -key KEY DIR`: operators sign an unpacked
   release with their own minisign key, the one deploy and
   bootstrap verify against.
+- `iormeshctl keygen -key KEY [-pub PUB]`: makes that key pair
+  without a terminal, the password from
+  `$IORMESH_MINISIGN_PASSWORD` (decisions.md #38).
 - The MIT licence (`LICENSE`).
 - The iormesh guide ([docs/guide/](docs/guide/README.md)):
   thirteen step-by-step chapters, for a human or an agent working

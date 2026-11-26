@@ -118,8 +118,8 @@ func ReadKeyFile(path string, uid int) (minisign.PublicKey, error) {
 // symlink, owned by uid, with no group or other permission at all — a
 // secret key others may read is as good as published, so it is refused
 // (chmod 600) rather than used. Only scrypt-encrypted keys (minisign -G
-// with a password) decrypt; the password is the caller's and never part
-// of an error.
+// with a password, or WriteKeyPair: iormeshctl keygen) decrypt; the
+// password is the caller's and never part of an error.
 func ReadSecretKey(path, password string, uid int) (minisign.PrivateKey, error) {
 	data, err := ReadFile(path, MaxKeySize, ownedWithout(uid, 0o077, "group or other may access it; chmod 600"))
 	if err != nil {
@@ -308,7 +308,7 @@ func createTemp(path string) (string, *os.File, error) {
 			return "", nil, err
 		}
 		tmp := filepath.Join(dir, "."+base+".tmp-"+hex.EncodeToString(b[:]))
-		f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
+		f, err := createNew(tmp, 0o644)
 		if err == nil {
 			return tmp, f, nil
 		}
@@ -317,4 +317,13 @@ func createTemp(path string) (string, *os.File, error) {
 		}
 	}
 	return "", nil, fmt.Errorf("%s: no free temporary name", path)
+}
+
+// createNew creates path as a new file with perm, opened for writing. It
+// fails on any existing name — a file, a directory or a symlink, dangling
+// or not (O_CREAT|O_EXCL never follows one; O_NOFOLLOW says so twice) —
+// so nothing is ever written through or over what path already names.
+// replaceFile's temporary files and WriteKeyPair's keys are made this way.
+func createNew(path string, perm os.FileMode) (*os.File, error) {
+	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, perm)
 }

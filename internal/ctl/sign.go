@@ -30,7 +30,7 @@ const signPasswordEnv = "IORMESH_MINISIGN_PASSWORD"
 // is read without echo from /dev/tty.
 func signCommand(args []string, e env) error {
 	fs := newFlagSet("sign", e.stderr)
-	keyPath := fs.String("key", "", "your minisign secret key file (minisign -G; mode 0600, password-encrypted)")
+	keyPath := fs.String("key", "", "your minisign secret key file (iormeshctl keygen or minisign -G; mode 0600, password-encrypted)")
 	ver := fs.String("version", version.Version, "release version every artifact must be stamped with")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %w", errUsage, err)

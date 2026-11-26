@@ -31,7 +31,7 @@ your copy of `docs/guide/`.
 
 | The human | The agent |
 |---|---|
-| types passwords: sudo on the hosts, the signing key's password at `iormeshctl sign` or `mage sign` | runs `mage` targets and iormeshctl, reads the output |
+| chooses and types passwords: sudo on the hosts, the signing key's password at `iormeshctl sign` or `mage sign`, or once into `$IORMESH_MINISIGN_PASSWORD` for `keygen` and `sign` | runs `mage` targets and iormeshctl, reads the output |
 | compares host key fingerprints and accepts them | checks `ssh -o BatchMode=yes HOST true` works |
 | runs bootstrap's printed steps on each host | runs `bootstrap` to print them, then checks the result |
 | says yes to every change on a host (`deploy`, `ensure`, `rm`, `expand -apply`) | shows what will change and asks, naming the hosts |
@@ -49,14 +49,16 @@ one exception is `sign`, which asks for the signing key's
 password on the terminal: the human runs it, unless the human has
 put the password in `$IORMESH_MINISIGN_PASSWORD`, which `sign`
 reads instead; then the agent may run it, and never prints the
-password (decisions.md #37). That
+password (decisions.md #37). `keygen`, which makes the key from
+that same variable, never prompts: without it, it fails
+(decisions.md #38). That
 makes the rest safe to run from an agent, and makes the line
 between "reads" and "changes" the one that matters:
 
 | Touches | Commands | Ask first? |
 |---|---|---|
 | nothing, or only reads local files | `version`, `list`, `verify`, `bootstrap` (prints), `show …`, `query …`, `services`, `services rules`, `services edges`, `expand` (lists), `prune` (lists) | no |
-| the builds' signatures, with the human's key | `sign` (writes `NAME.minisig` next to each build) | **the human runs it**, or the agent once the password is in `$IORMESH_MINISIGN_PASSWORD` |
+| the human's signing key and the builds' signatures | `keygen` (writes a new key pair, never over an old one), `sign` (writes `NAME.minisig` next to each build) | **the human runs them**, or the agent once the password is in `$IORMESH_MINISIGN_PASSWORD`; say where `keygen` writes |
 | the laptop's store, registry or service database | `build` (writes the builds dir and the service database), `add`, `services name`, `services unname` | say what you add |
 | reads hosts | `status` (runs the tracer's read-only `status` as root through the narrow sudoers rule) | no |
 | moves segments off hosts | `collect`, `refresh` | no, once tracing is agreed |

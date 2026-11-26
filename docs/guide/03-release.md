@@ -5,37 +5,9 @@ signature before a file leaves it, and the host's tracer checks
 it again, against its own root-owned copy of the public key,
 before it installs anything. Release archives ship unsigned
 (checksums only; [decisions.md #32](../decisions.md)): you sign
-the builds you deploy yourself. This chapter makes the key, gets
-a release — downloaded or built — checks it, signs it and
-installs iormeshctl.
-
-## Make your key, once
-
-> **Human step.** The secret key's password protects every host
-> that trusts it. Choose it yourself, type it yourself, and keep
-> the secret key outside any repository (`mage sign` refuses a
-> key path inside the tree).
-
-```sh
-mkdir -p -m 0700 ~/.config/iormesh ~/.minisign
-minisign -G -p ~/.config/iormesh/minisign.pub -s ~/.minisign/iormesh.key
-chmod 600 ~/.minisign/iormesh.key
-```
-
-This needs the `minisign` CLI from chapter 2; iormeshctl signs
-and verifies but makes no keys. `-m 0700` keeps both
-directories yours alone; a plain `mkdir -p` makes them 0755,
-and iormeshctl later writes the registry into that directory
-as it finds it. Give the key a password (`-G` asks for it):
-the signing library reads only
-password-encrypted secret keys, and both signers refuse a key
-file others may read. `~/.config/iormesh/minisign.pub` is where
-iormeshctl looks for the pinned public key by default (`-key`
-overrides it on `verify`, `bootstrap`, `deploy` and `expand
--apply`).
-
-**Checkpoint:** both files exist; `minisign.pub` starts with
-`untrusted comment: minisign public key`.
+the builds you deploy yourself. This chapter gets a release —
+downloaded or built — checks it, makes your key, signs the
+release and installs iormeshctl.
 
 ## Get a release
 
@@ -61,14 +33,74 @@ signature, next, is what deploy trusts from then on.
 `iormesh-agent.jar`, `iormeshctl-{linux,darwin}-amd64`,
 `CHANGELOG.md` and `LICENSE`.
 
+## Make your key, once
+
+> **Human step.** The secret key's password protects every host
+> that trusts it. Choose it yourself and keep the secret key
+> outside any repository (`mage sign` refuses a key path inside
+> the tree). For `keygen` and `sign`, put it in
+> `$IORMESH_MINISIGN_PASSWORD` yourself — `read -rs
+> IORMESH_MINISIGN_PASSWORD; export IORMESH_MINISIGN_PASSWORD`,
+> not on a command line the shell history keeps; an agent may
+> run both once it is there, and never prints it.
+
+With the controller you just unpacked, no terminal needed:
+
+```sh
+cd iormesh-0.1.0-amd64
+./iormeshctl-linux-amd64 keygen -key ~/.minisign/iormesh.key
+```
+
+It writes the password-encrypted secret key at `-key` and its
+public half at `~/.config/iormesh/minisign.pub`, where iormeshctl
+looks for the pinned public key by default (`-pub` writes it
+elsewhere; `-key` overrides the default on `verify`,
+`bootstrap`, `deploy` and `expand -apply`). Both are new 0600
+files and missing directories are made 0700; it refuses an
+existing file rather than replace a key hosts may already pin,
+an unset or empty `$IORMESH_MINISIGN_PASSWORD`, and prints only
+the paths and the key id ([decisions.md #38](../decisions.md)).
+
+Run for this guide in a scratch directory (a throwaway key,
+then once more over it):
+
+```text
+$ ./iormeshctl keygen -key keys/iormesh.key -pub keys/minisign.pub
+secret key: keys/iormesh.key
+public key: keys/minisign.pub
+key id: F5D0CA9166F0AD42
+$ ./iormeshctl keygen -key keys/iormesh.key -pub keys/minisign.pub
+iormeshctl: keygen: keys/iormesh.key: file already exists; keygen never replaces a key
+[exit status 1]
+```
+
+By hand, the `minisign` CLI from chapter 2 makes the same pair
+and asks for the password twice on the terminal:
+
+```sh
+mkdir -p -m 0700 ~/.config/iormesh ~/.minisign
+minisign -G -p ~/.config/iormesh/minisign.pub -s ~/.minisign/iormesh.key
+chmod 600 ~/.minisign/iormesh.key
+```
+
+`-m 0700` keeps both directories yours alone; a plain `mkdir -p`
+makes them 0755, and iormeshctl later writes the registry into
+that directory as it finds it. Give the key a password: the
+signing library reads only password-encrypted secret keys, and
+both signers refuse a key file others may read.
+
+**Checkpoint:** both files exist; `minisign.pub` starts with
+`untrusted comment: minisign public key`.
+
 ## Sign it with your key
 
 > **Human step.** `sign` asks for the key's password on the
 > terminal, without echo. For unattended runs it reads
 > `$IORMESH_MINISIGN_PASSWORD` instead; it never prints it.
 
+Still in the release directory:
+
 ```sh
-cd iormesh-0.1.0-amd64
 ./iormeshctl-linux-amd64 sign -key ~/.minisign/iormesh.key .
 ```
 

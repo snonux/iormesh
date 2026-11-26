@@ -12,7 +12,7 @@ Linux or macOS; it needs no eBPF and no root.
 |---|---|---|
 | only to build a release yourself: this repository, Go, [mage](https://magefile.org) ≥ 1.17 | `mage -version` | a version of 1.17 or newer |
 | only to build a release yourself: Podman or Docker | `podman version` (or `docker version`) | client and server versions, no error |
-| `minisign` (your distribution's or Homebrew's package; no package? `go install aead.dev/minisign/cmd/minisign@v0.3.0`, the library iormeshctl signs with), once, to make your signing key — iormeshctl makes none | `minisign -v` | a version line |
+| optional: `minisign` (your distribution's or Homebrew's package; no package? `go install aead.dev/minisign/cmd/minisign@v0.3.0`, the library iormeshctl signs with), to make your signing key by hand — `iormeshctl keygen` makes it too ([ch. 3](03-release.md#make-your-key-once)) | `minisign -v` | a version line |
 | rsync 3.4.0 or newer, first in `PATH` | `rsync --version` | `rsync  version 3.4.0` or newer |
 | key-based SSH to each host through your agent | `ssh -o BatchMode=yes app1 true` | returns at once, no prompt, exit 0 |
 | each host's key in `~/.ssh/known_hosts` | the same command | no `Host key verification failed.` |

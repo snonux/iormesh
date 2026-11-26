@@ -56,6 +56,7 @@ const usageSynopsis = `usage:
                             [-ingress-service NS/NAME]
   iormeshctl verify [-key FILE] FILE...      (FILE.minisig next to each)
   iormeshctl sign -key SECRET-KEY [-version V] DIR
+  iormeshctl keygen -key SECRET-KEY [-pub PUBLIC-KEY]
   iormeshctl version
 `
 
@@ -82,6 +83,11 @@ with your own minisign secret key (mode 0600, password from
 $IORMESH_MINISIGN_PASSWORD or the terminal, never echoed), each at
 -version (default this iormeshctl's), which must be its own stamp;
 verify, deploy and bootstrap then accept them under your pinned key.
+keygen makes that key pair without a terminal: the secret key at -key,
+encrypted with $IORMESH_MINISIGN_PASSWORD (required, not empty), the
+public key at -pub (default the pinned key path), both new files 0600,
+missing directories 0700; it never replaces a file and never prints the
+password or the secret key.
 status asks every target's tracer (sudo iormesh status, or
 iormesh ready -status in a pod) and prints one row per project; list
 prints the registry. ensure, per host (every registered host and pod
