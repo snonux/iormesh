@@ -428,9 +428,11 @@ iormeshctl verify dist/iormesh-linux-amd64   # the controller's check
 
 - **Key**: a minisign key pair made once, e.g. `minisign -G -p
   iormesh.pub -s iormesh.key`, with a password (the Go library
-  reads only scrypt-encrypted secret keys). The secret key is
-  the operator's and never enters the repository: `mage sign`
-  refuses a key path inside the tree. Both signers refuse a key
+  reads only scrypt-encrypted secret keys). It needs the
+  `minisign` CLI (your distribution's or Homebrew's `minisign`
+  package): iormeshctl signs and verifies but makes no keys.
+  The secret key is the operator's and never enters the
+  repository: `mage sign` refuses a key path inside the tree. Both signers refuse a key
   file that is a symlink, not a regular file, someone else's,
   or open to group or other (`chmod 600` it).
   The password comes from the terminal prompt (no echo), or from
@@ -534,14 +536,25 @@ ls dist/release/0.1.0/
   without name or time. The same `dist/` packs to the same
   bytes with the same Go toolchain (its gzip encoder could change
   between releases; `internal/dist`'s `TestPackDeterministic`).
+  The container builds rebuild to the same bytes too (two runs
+  of the v0.1.0 dry run, [testing.md](testing.md), task 7k4).
+  The agent jar does not yet: `mage agentBuild` packs it with
+  each entry's build time, so a jar built from a clean checkout
+  differs (task bm4) — until that is fixed, a rebuild of the tag
+  matches a downloaded archive only in its tracer and controller
+  binaries, not byte for byte.
 
 An operator goes from a download (or their own `mage release`)
 to a deploy in four steps: check, unpack, sign with their own
 key, deploy. `SHA256SUMS` catches a corrupt or truncated
 download; it is not a signature, so trusting the archive is the
 operator's call (where it came from, or a rebuild of the tag
-compared byte for byte). What deploy and bootstrap trust from
-then on is the operator's own signature:
+compared byte for byte — for now binary by binary, as the jar
+does not rebuild identically, "Reproducible" above). The key
+comes from the `minisign` CLI (`minisign -G`, "Key" under
+[Signing](#signing)); iormeshctl has no key generator. What
+deploy and bootstrap trust from then on is the operator's own
+signature:
 
 ```bash
 sha256sum -c --ignore-missing SHA256SUMS   # the archives you have
