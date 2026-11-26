@@ -18,13 +18,29 @@ session that ended on its own (`duration`, `targets_exited`,
 `error`, a reboot, a crash), then collects. It never upgrades,
 never starts a project the host never ran, and never undoes an
 operator's stop, so it is safe from a timer. It prints one line
-per project, as the source writes it, for example:
+per project, then the collect's lines. Run on Rocky 9.9 (task
+4k4): `shortshop` registered with `-duration 1m` and ended by it,
+`billing` stopped by hand on `iom2`, home cut to `~`:
 
 ```text
-app1: project shop: running, nothing to do
-app1: project shop: ended (duration), restarted
-app1: project shop: stopped by the operator, left stopped
+$ iormeshctl ensure
+iom2: project billing: stopped by the operator, left stopped
+iom2: project billing: 2 new files in ~/.local/share/iormesh/traces/billing/iom2
+iom1: project shop: running, nothing to do
+iom1: iormesh: started iormesh-shortshop.service: session f18ae37f on iom1, pid 6057, tracing pattern "java -jar */shop.jar*" until 2026-11-26T08:40:38Z
+iom1: project shortshop: ended (duration), restarted
+iom1: project shop: 4 new files in ~/.local/share/iormesh/traces/shop/iom1
+iom1: project shortshop: 2 new files in ~/.local/share/iormesh/traces/shortshop/iom1
+$ iormeshctl ensure
+iom2: project billing: stopped by the operator, left stopped
+iom2: project billing: 0 new files in ~/.local/share/iormesh/traces/billing/iom2
+iom1: project shop: running, nothing to do
+iom1: project shortshop: running, nothing to do
+…
 ```
+
+A restarted session gets the registry's flags again, so its
+`-duration` starts over.
 
 Two ends it treats differently:
 
@@ -132,6 +148,21 @@ iormeshctl prune -older-than 720h          # lists, deletes nothing
 iormeshctl prune -older-than 720h -apply
 ```
 
+Run on Rocky 9.9 (task 4k4), on a store a few minutes old:
+
+```text
+$ iormeshctl prune -older-than 5m
+would delete  billing/iom2/iom2-312f2e27-20261126T083324Z-000000.parquet
+would delete  shop/iom1/iom1-2ab80e31-20261126T083320Z-000000.parquet
+2 segment files ended before 2026-11-26T08:36:16Z; prune again with -apply to delete them (the service database forgets them too)
+$ iormeshctl prune -older-than 5m -apply
+service database: forgot 0 segments, dropped 0 connections seen only in them
+deleted       billing/iom2/iom2-312f2e27-20261126T083324Z-000000.parquet
+deleted       shop/iom1/iom1-2ab80e31-20261126T083320Z-000000.parquet
+deleted 2 segment files that ended before 2026-11-26T08:36:16Z
+```
+
+(Those two segments held no connection, hence `forgot 0`.)
 Nothing is ever pruned on its own. `-project` narrows it; `-db`
 names the service database if `build` used another one.
 
@@ -149,9 +180,26 @@ iormeshctl rm app1
 iormeshctl rm -project billing app2      # one project only
 ```
 
+Run on Rocky 9.9 (task 4k4):
+
+```text
+$ iormeshctl rm -project billing iom2
+iom2: iormesh: stopped iormesh-billing.service: session d91a44d0 ended (stop) at 2026-11-26T08:41:38Z
+iom2: project billing: 1 new files in ~/.local/share/iormesh/traces/billing/iom2
+iom2: iormesh: removed /opt/iormesh
+iom2: iormesh: removed /etc/sudoers.d/iormesh
+removed iom2 project billing (~/.config/iormesh/servers.yaml)
+```
+
+`billing` was the host's last project, so `rm -project` removed
+the host too: a host's last project takes the install with it.
 rm refuses to uninstall over traces it could not sync off;
 `-force` uninstalls anyway and loses them. The collected traces
-stay in your store until you delete them.
+stay in your store until you delete them. On the host, rm leaves
+the SSH user's `~/.iormesh/staging` (the staged builds, the key
+and the rule's text) and an empty `/run/iormesh/spool` of a
+project that used the agent (gone at the next boot); remove them
+by hand if you want the host as it was.
 
 > **Human step.** `rm` uninstalls from a production host, and
 > `-force` loses data. Ask first.

@@ -15,11 +15,15 @@ iormeshctl collect app1          # one host
 
 Over rsync, collect takes each host's `ready/` segments into
 `~/.local/share/iormesh/traces/<project>/<host>/` and removes them
-from the host. It prints one line per host and project, as the
-source writes it:
+from the host. It prints one line per host and project; run on
+Rocky 9.9 (task 4k4), the home cut to `~`:
 
 ```text
-app1: project shop: 3 new files in ~/.local/share/iormesh/traces/shop/app1
+$ iormeshctl collect
+iom1: project shop: 1 new files in ~/.local/share/iormesh/traces/shop/iom1
+iom2: project billing: 1 new files in ~/.local/share/iormesh/traces/billing/iom2
+$ iormeshctl collect iom1
+iom1: project shop: 0 new files in ~/.local/share/iormesh/traces/shop/iom1
 ```
 
 Collect as often as you like while the sessions run; segments
@@ -71,6 +75,29 @@ How to read it:
   (still running is fine) or an unusual end such as `disk_limit`.
 - **`unresolved`** — a peer no tracer saw. Trace it
   ([chapter 10](10-expand.md)) or leave it.
+- **`sequence`** — conversations are built from http events,
+  which the Java agent records ([chapter 8](08-java-query.md)).
+  Without `-agent` it reads `0 conversations` even with fused
+  edges.
+
+The two-host run of chapter 5 (task 4k4), its client restarted
+once under the session ([chapter 5](05-deploy-status.md#start-what-you-want-to-trace)),
+no agent yet:
+
+```text
+built      billing+shop: 2 hosts, 2 sessions, 4 segments, 2857 events, 2026-11-26 08:33:20 - 2026-11-26 08:35:23 UTC
+merged     2 services, 1 edges (1 fused, 0 mixed, 0 unresolved); tcp 1 fused, 0 unresolved
+health     0 lost, 0 skipped runs, 0 unattributed, 112 attach gap; clock bounds <= 1.078427ms
+clock      iom1 ~ iom2: 1 windows, width 1.078427ms-1.078427ms
+sequence   0 conversations, 0 steps (0 time-ordered, 0 unordered)
+session    billing/iom2 312f2e27: no end recorded (running, or cut short)
+session    shop/iom1 2ab80e31: no end recorded (running, or cut short)
+```
+
+The `attach gap` is the restarted JVM's start: a `-pattern`
+session takes up a new process at its exec, and the records lost
+before it did are counted, not hidden
+([schema.md](../schema.md), `drop_reason`).
 
 `$BUILDS` is `~/.local/share/iormesh/builds`; a build of several
 projects is named after all of them (`billing+shop`). Each run's
@@ -113,8 +140,25 @@ iormeshctl services unname RULE-ID    # drop one
 iormeshctl services                   # services, endpoints and counts
 ```
 
-A client is named after its project's app, or, with no app,
-after its process name (`java`). The names live in the service
+The host name is the one the client asked for (its DNS lookup,
+or an HTTP request's host), not the registry's name for the
+server. A client that dials an IP address leaves only the
+address: on Rocky 9.9 (task 4k4) a shop that called
+`http://10.20.0.141:8443` was not named by `'iom2*'`, only by
+`'10.20.0.141'`. `iormeshctl services` shows what a rule can
+match:
+
+```text
+$ iormeshctl services
+SERVICE  ENDPOINT          CONNS  UNRESOLVED  TLS  CLIENTS
+-        10.20.0.141:8443  1      0           ?    app:shop/java -jar */shop.jar*
+$ iormeshctl services name -port 8443 '10.20.0.141' billing
+rule 1: 10.20.0.141 port 8443 -> billing
+```
+
+A client is named after its project's app
+(`app:shop/java -jar */shop.jar*`), or, with no app, after its
+process name (`java`). The names live in the service
 database, `~/.local/share/iormesh/services.db`, which a build
 creates; before the first build `iormeshctl services` answers
 `no service database at … yet (a build creates it)`. Rebuild to

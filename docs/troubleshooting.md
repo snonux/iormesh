@@ -72,6 +72,8 @@ version: grep for its fixed part.
 | `-user …: the SSH user on the host is …` / `-arch …: the host is …` | `-apply` reads both from the host; drop the flag or fix it. |
 | `SSH user name "…" cannot be named in a sudoers rule: pass -user` | The default user (HOST's `user@` part, else your login name) is not a valid name for the rule. A `User` from `~/.ssh/config` is not seen: pass `-user`. |
 | `pinned key: open …: no such file or directory` | No pinned key at `~/.config/iormesh/minisign.pub` (or at `-key`). Make or copy it ([build.md](build.md#signing)). |
+| a printed step fails with `upgrade: unsafe file: …/.iormesh/staging/iormesh-linux-… is owned by uid N, not by the caller` | The steps ran in a root shell (`sudo -i`, `su -`), so sudo was called by root while the staged build belongs to the SSH user. Run them as that user, the one `-user` named; the steps before it are safe to repeat. |
+| `transport: control socket path under … would be N bytes, over the 104 a unix socket allows` | Not bootstrap's own: every ssh iormeshctl runs shares a control socket under `$XDG_CACHE_HOME/iormesh/ssh` (default `~/.cache`), and a long home path does not fit a unix socket. Point `XDG_CACHE_HOME` at a shorter directory. |
 | a printed step fails with `install layout: …` | The tracer's own `upgrade` check refused the layout: `/opt` or `/opt/iormesh` is not root's or is writable by others. Fix the ownership; nothing after that step ran. |
 
 With `-apply`, a failed step ends in `…; stopped here, nothing
@@ -94,10 +96,10 @@ undone`. Until the rule is in place a rerun starts over.
 
 | Message contains | Meaning and fix |
 |---|---|
-| `/opt/iormesh/bin/iormesh is not installed: deploy only upgrades an installed tracer` | The host was never bootstrapped (or `rm` uninstalled it): run `iormeshctl bootstrap` first. |
+| `/opt/iormesh/bin/iormesh is not installed: deploy only upgrades an installed tracer` | The host was never bootstrapped (or `rm` uninstalled it — `rm -project` of the host's last project does too): run `iormeshctl bootstrap` first. |
 | `sudo: a password is required` | The sudoers rule is missing or names another user. Check `/etc/sudoers.d/iormesh` on the host names the SSH user deploy logs in as; bootstrap again if it is gone. |
 | `… is not allowed through the sudoers rule (only run, start, stop, status, upgrade and uninstall are)` | Only the lifecycle subcommands pass the rule; run others as root directly. |
-| `flag …: not allowed through the sudoers rule` / `flag -… …: a deployed session may only use …` | A tracer flag a confined session may not use (`-out`, `-cpuprofile`, `-ready`), or `-trace-dir`, `-spool` or `-agent` off its pinned path. `add` refuses these up front (`iormeshctl: usage: flag -cpuprofile: …`); at deploy they come from a hand-edited or older registry. Remove the project (`iormeshctl rm -project P HOST`) and add it again without them. |
+| `flag …: not allowed through the sudoers rule` / `flag -… …: a deployed session may only use …` | A tracer flag a confined session may not use (`-out`, `-cpuprofile`, `-ready`), or `-trace-dir`, `-spool` or `-agent` off its pinned path. `add` refuses these up front (`iormeshctl: usage: flag -cpuprofile: …`); at deploy they come from a hand-edited or older registry. Drop them from the project's `flags:` in the registry and deploy again (changed flags restart the session), or remove the project (`iormeshctl rm -project P HOST`) and add it again without them — when it is the host's last project, rm uninstalls the host and it needs bootstrap again. |
 | `session stopped, not restarted: start: …` | Deploy stopped a running session to restart it and the new start failed: the project has no session now. Fix the cause and deploy again; `ensure` will not restart it. |
 | `project … already running this build with these flags, left alone (-restart restarts it)` | Not an error: re-deploying the same build changes nothing. |
 
@@ -239,6 +241,9 @@ so a timer never loops on a full disk
 | `build: nothing collected in … yet (iormeshctl collect)` | The local store is empty: collect first. `show` and `open` without `-project` answer an empty store with this same build error. |
 | `show: no build of … yet (iormeshctl build…)` / `open: no site of … yet (iormeshctl build)` | Build first; `show -project` and `open -project` read the build made with the same `-project` set. |
 | a running session whose build shows no events of the app | The `-pattern` matches nothing. It is a glob over the whole command line as `ps -eo args` shows it (or the executable path), so it usually needs `*` at both ends; it never matches the 15-character comm. A process outside the pattern is not traced. |
+| a running session whose build shows events of the app but `0 services, 0 edges` | The app's connections were already open when the session started: the tracer sees reads and writes on their sockets but no connect or accept, so they make no connection (task cm4). A pooled or keep-alive client shows up once it opens a new connection; restart it under the running session, or deploy before it connects. |
+| `show: no such conversation: the build holds none (no http events)` | Conversations come from http events, which the Java agent records; a project without `-spool`/`-agent` has fused edges but no conversations ([guide chapter 8](guide/08-java-query.md)). |
+| `services name` with a host-name glob names nothing | The glob matches the name the client asked for (its DNS lookup or HTTP host) or the IP address, never the registry's host name. A client that dials an IP leaves only the address: name it by an IP glob. `iormeshctl services` lists the endpoints as a rule sees them. |
 | `STATE none`, `no session: never started here` | The project is registered but deploy never started it on that host. |
 | `the tracer died without its end: its active minute was not published` | The tracer was killed (OOM at `MemoryMax`, a crash, power loss). `ensure` starts it again. |
 

@@ -25,9 +25,36 @@ iormeshctl deploy app1
 
 A deployed session may use only that jar and its own project's
 spool, `/run/iormesh/spool/<project>`. `add` refuses a project
-that is already registered on the host; to add the flags to an
-existing one, `iormeshctl rm -project shop app1` (it stops and
-collects that project) and add it again.
+that is already registered on the host. To add the flags to an
+existing one, add them to its `flags:` list in
+`~/.config/iormesh/servers.yaml` and `deploy` again: changed
+flags stop the session and start it with the new ones (decision
+#19). `iormeshctl rm -project shop app1` and `add` work too, but
+only while the host has another project: rm of a host's last
+project removes the host, which uninstalls `/opt/iormesh` and the
+bootstrap rule, and the next deploy then needs bootstrap first
+(`/opt/iormesh/bin/iormesh is not installed`; run on Rocky 9.9,
+task 4k4).
+
+Run on Rocky 9.9 (task 4k4), deploying a shop JVM that already
+ran:
+
+```text
+$ iormeshctl deploy iom1
+verified dist/iormesh-linux-amd64: iormesh-linux-amd64 0.1.0
+verified dist/iormesh-agent.jar: iormesh-agent.jar 0.1.0
+iom1: iormesh: iormesh-linux-amd64 0.1.0 is already installed
+iom1: iormesh: installed iormesh-agent.jar 0.1.0 as /opt/iormesh/lib/iormesh-agent.jar
+iom1: iormesh: started iormesh-shop.service: session b6a80912 on iom1, pid 4965, tracing pattern "java -jar */shop.jar*" until 2026-11-26T16:37:00Z
+…
+```
+
+and the session's log (`journalctl -u iormesh-shop.service`):
+
+```text
+iormesh: agent loaded into pid 3876; its I/O before now stays unattributed, and unless it runs with -XX:+EnableDynamicAgentLoading the JVM printed JEP 451's warning on its stderr
+iormesh: java agent of pid 3876 joined, 37 natives probed
+```
 
 What `-agent` reaches:
 
