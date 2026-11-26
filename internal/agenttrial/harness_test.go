@@ -244,6 +244,39 @@ func TestQuestionSetGrounded(t *testing.T) {
 	}
 }
 
+// startUpMethods are the workload methods whose I/O the microservices
+// scenario does in a service's first second, before the trial's late
+// attach can load the agent (ServiceNode's boot and the cert publish
+// before listen; guide ch.8: a JVM started later in the session gets
+// the agent up to 30 s after its exec and its start-up stays
+// unattributed). scenario.sh starts every JVM after the tracer, and the
+// trial gives the agent no -javaagent path, so these methods never show
+// up in the agent's mesh.
+var startUpMethods = []string{
+	"ServiceConfig#provision", "ServiceConfig#load",
+	"ServiceNode#readCert", "ServiceNode#publish",
+}
+
+// TestQuestionSetAfterAttach: no question's right answer is a start-up
+// method — that answer is unanswerable by design under the trial's
+// late attach (docs/testing/agent-trial.md "Known limits", task 1n4).
+// A method may still be named as a wrong answer to exclude.
+func TestQuestionSetAfterAttach(t *testing.T) {
+	s, err := eval.LoadSet(filepath.Join("..", "..", "eval", "agent-trial", QuestionsFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range s.Questions {
+		for _, want := range slices.Concat(q.Contains, q.Sequence) {
+			for _, m := range startUpMethods {
+				if strings.Contains(strings.ToLower(want), strings.ToLower(m)) {
+					t.Errorf("%s: answer %q is a start-up method late attach never records", q.ID, want)
+				}
+			}
+		}
+	}
+}
+
 // TestListingEverythingFails: an answer naming every service, path and
 // method of the scenario fails most questions — the exclusions catch a
 // guess that lists every candidate.
@@ -254,7 +287,8 @@ func TestListingEverythingFails(t *testing.T) {
 	}
 	all := "gateway orders inventory billing POST GET /orders /inventory/reserve /inventory/stock/widget " +
 		"/billing/charge invoice-42.json.tmp renamed reservation-42 checkout-42 /order-42 " +
-		"DataStore#save ServiceConfig#provision ServiceNode#readCert"
+		"DataStore#save ServiceConfig#provision ServiceNode#readCert ServiceNode#withdraw " +
+		"ServiceNode#retire"
 	passed := 0
 	for _, q := range s.Questions {
 		if len(q.Score(all)) == 0 {

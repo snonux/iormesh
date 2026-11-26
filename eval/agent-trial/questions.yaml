@@ -80,9 +80,15 @@ questions:
     answer_contains: ["DataStore#save"]
     answer_excludes: ["ServiceConfig#provision"]
 
-  - id: billing-cert-reader
+  # Replaced billing-cert-reader (orders, ServiceNode#readCert) on
+  # 2026-11-27, task 1n4: orders reads billing.crt in its first second,
+  # before the trial's late attach loads the agent, so no run could
+  # answer it (docs/testing/agent-trial.md "Known limits"). Billing
+  # withdraws the certificate after serving its call, well after attach.
+  - id: billing-cert-remover
     question: >-
-      Which service read the certificate the billing service published
-      (billing.crt), and with which Java method (class#method)?
-    answer_contains: ["orders", "ServiceNode#readCert"]
-    answer_excludes: ["gateway"]
+      The billing service removes the certificate it published
+      (billing.crt) once it has served its request. With which Java
+      method (class#method) did it remove the file?
+    answer_contains: ["ServiceNode#withdraw"]
+    answer_excludes: ["ServiceNode#retire"]

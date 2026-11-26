@@ -41,16 +41,16 @@ func (s *standIn) Reply(ctx context.Context, msg string) (string, error) {
 // goodAnswers answers every question of eval/agent-trial/questions.yaml
 // right, concisely.
 var goodAnswers = map[string]string{
-	"orders-caller":       "gateway",
-	"orders-callees":      "inventory and billing",
-	"gateway-callees":     "orders and inventory",
-	"checkout-entry":      "POST /orders",
-	"gateway-stock":       "GET /inventory/stock/widget",
-	"orders-next-call":    "POST /inventory/reserve, then POST /billing/charge",
-	"tls-hops":            "/orders and /billing/charge",
-	"billing-record":      "invoice-42.json: written as invoice-42.json.tmp, then renamed",
-	"order-file-writer":   "iormesh.workload.scenarios.DataStore#save",
-	"billing-cert-reader": "orders, with ServiceNode#readCert",
+	"orders-caller":        "gateway",
+	"orders-callees":       "inventory and billing",
+	"gateway-callees":      "orders and inventory",
+	"checkout-entry":       "POST /orders",
+	"gateway-stock":        "GET /inventory/stock/widget",
+	"orders-next-call":     "POST /inventory/reserve, then POST /billing/charge",
+	"tls-hops":             "/orders and /billing/charge",
+	"billing-record":       "invoice-42.json: written as invoice-42.json.tmp, then renamed",
+	"order-file-writer":    "iormesh.workload.scenarios.DataStore#save",
+	"billing-cert-remover": "iormesh.workload.scenarios.ServiceNode#withdraw",
 }
 
 // answerReply is a final message with the answers, after some prose;

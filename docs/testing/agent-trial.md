@@ -167,6 +167,42 @@ edge to orders, inventory and billing in `iormeshctl show edges`.
 A run passes with no rule broken, within budget, with the mesh and
 with the score.
 
+## Known limits
+
+**Start-up reads before late attach carry no Java method.**
+`scenario.sh` starts every service's JVM after the agent's tracer,
+in every round, so each gets the agent by late attach, up to 30 s
+after its exec ([guide ch. 8](../guide/08-java-query.md#turn-on-the-java-agent)):
+its start-up stays unattributed. In the microservices scenario that
+is each service's boot — provisioning and loading its config,
+publishing its certificate, reading the certificates of its TLS
+callees — within about its first second. The guide's only way to
+cover a JVM's start is `-javaagent`, a change to how the
+application starts and the skill's Human step, which the scripted
+user never applies (#37, "Help"). The trial's mesh therefore holds
+no Java method for those reads; `expect.json` declares them because
+the integration test starts its JVMs with the agent. Everything a
+service does after it listens — serving its requests, its
+downstream calls, its records, withdrawing its certificate,
+retiring — carries its method.
+
+So no question asks for a start-up method:
+`TestQuestionSetAfterAttach` fails on a right answer naming one
+(`startUpMethods` in `internal/agenttrial/harness_test.go`). The
+first set's `billing-cert-reader` (orders, `ServiceNode#readCert`)
+did, and every run of the first trial missed it for that reason.
+It was replaced on 2026-11-27 by the owner's decision (task 1n4)
+with `billing-cert-remover` (`ServiceNode#withdraw`): the same
+kind of question — the Java method behind a file operation on the
+billing certificate — about an I/O billing does after serving its
+request, well after the attach (every first-trial mesh shows the
+unlink with that method). This is not tuning to pass: #37 forbids
+rewording a question to make a run pass and lets the set change
+only with the scenario, and the old question asked for something
+the scenario, as the trial runs it, never puts in the agent's mesh.
+No run could answer it from the docs and the skill alone, so it
+measured the trial's setup, not the agent.
+
 ## Tests
 
 `go test ./internal/agenttrial/` drives the harness with a scripted
@@ -215,7 +251,9 @@ run missed is `billing-cert-reader`: orders reads `billing.crt` about
 0.3 s after its JVM starts, before deploy's late attach, so the read
 carries no Java method, and `-javaagent` is the skill's Human step 5
 (task 1n4). Both Claude cells drafted the `scenario.sh` edit and
-answered "orders, method not captured".
+answered "orders, method not captured". The question has since been
+replaced ("Known limits" above); the scores here are those of the
+first set.
 
 Harness bugs, each fixed red first and the affected run repeated
 once (results kept: `…-automatic.json`, `…-automatic-2.json`):
