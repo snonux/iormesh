@@ -263,4 +263,21 @@ func TestCheckEdges(t *testing.T) {
 	if err := CheckEdges(partial, MeshServices); err == nil || !strings.Contains(err.Error(), "billing") {
 		t.Errorf("mixed edge to billing: %v", err)
 	}
+	if err := CheckEdges(spacedEdges, MeshServices); err != nil {
+		t.Errorf("a FROM with spaces: %v", err)
+	}
+	spacedPartial := strings.Replace(spacedEdges, "orders     fused", "orders     mixed", 1)
+	if err := CheckEdges(spacedPartial, MeshServices); err == nil || !strings.Contains(err.Error(), "orders") {
+		t.Errorf("a FROM with spaces, mixed edge to orders: %v", err)
+	}
 }
+
+// spacedEdges is `show edges` as the first real trial printed it (task
+// nm4): the gateway, a client with no port, is named by its pattern,
+// spaces and all, so the columns are not whitespace-separated fields.
+const spacedEdges = `FROM                                         TO         STATE  CONNS  UNRESOLVED  FIRST                LAST
+app:gateway/*microservices --role gateway *  inventory  fused  9      0           2026-11-26 20:42:20  2026-11-26 20:46:47
+app:gateway/*microservices --role gateway *  orders     fused  9      0           2026-11-26 20:42:17  2026-11-26 20:46:47
+orders                                       billing    fused  9      0           2026-11-26 20:42:19  2026-11-26 20:46:47
+orders                                       inventory  fused  9      0           2026-11-26 20:42:18  2026-11-26 20:46:46
+`
