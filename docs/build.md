@@ -86,9 +86,11 @@ are sized accordingly:
 ## Building and testing
 
 The tracer build is ior's, lifted in M1 (provenance headers name
-the ior commit). Prerequisites, as for ior: a libbpfgo checkout at
-`../libbpfgo` (or `$LIBBPFGO`) pinned to `v0.9.2-libbpf-1.5.1`
-and built with `make -C ../libbpfgo libbpfgo-static`; clang;
+the ior commit). Go: 1.26 (go.mod's floor, what CI uses) or 1.27;
+go.mod has no `toolchain` line, and code must be gofmt-clean and
+pass the gates under both (decision #32). Prerequisites, as for
+ior: a libbpfgo checkout at `../libbpfgo` (or `$LIBBPFGO`)
+pinned to `v0.9.2-libbpf-1.5.1` and built with `make -C ../libbpfgo libbpfgo-static`; clang;
 bpftool; mage ≥ v1.17 (older mage breaks on the backquotes in
 the magefiles' doc comments); and non-interactive `sudo` for the two root reads
 (`/sys/kernel/tracing` formats, `/sys/kernel/btf/vmlinux`).

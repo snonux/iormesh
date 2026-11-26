@@ -407,6 +407,31 @@ deferred.
   inside the 68-byte field, 63 would cut names of 64–67
   bytes.
 
+- **#32 Invalid UTF-8 in NDJSON, and the supported Go range** —
+  the NDJSON writer (`schema.AppendEvent`) writes each invalid
+  UTF-8 byte of a string as the six-byte escape `\ufffd`, by
+  the project's own rule, not by whichever Go builds it. That
+  is the bytes every trace and golden written so far holds:
+  the encoder copied Go 1.26's `json.Marshal`, and Go 1.27's
+  `encoding/json` now writes the raw U+FFFD bytes instead (task
+  8m4). Both decode to the same string, so readers on either
+  Go see the same event; only the bytes would differ, and
+  byte-stable output for the same event (docs/schema.md,
+  "NDJSON framing") is the contract. The encoder's test takes
+  `json.Marshal` as its reference for everything else and the
+  fixed `\ufffd` escape for invalid UTF-8. Go: go.mod's
+  `go 1.26.0` is the floor, CI builds with it, and Go 1.27 is
+  supported too (the local gates pass on both); go.mod gets no
+  `toolchain` line, which would force a toolchain download on
+  every host with another Go. Source must be gofmt-clean under
+  both versions: where their gofmt differ (1.27 aligns a map
+  literal's keys differently when one key is far longer), the
+  code takes a form both print alike. Rejected: following the
+  installed Go's `json.Marshal` — a Go update would silently
+  change every trace's bytes; a `toolchain go1.26.x` line —
+  it hides the 1.27 difference instead of settling it and
+  costs a download.
+
 ## Open — raised for M2 (built on the default)
 
 - **#7 Event families, default-on vs opt-in** — signals, epoll

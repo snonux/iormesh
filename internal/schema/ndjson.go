@@ -13,8 +13,9 @@ import (
 // NDJSONSink writes one event per line, the live and golden format
 // (docs/schema.md). Every event is validated first: a producer bug fails
 // the write instead of reaching a file a strict reader would reject.
-// Lines are encoded by AppendEvent, byte-identical to json.Marshal (keys
-// in struct order), so two writes of the same event are byte-identical;
+// Lines are encoded by AppendEvent, byte-identical to Go 1.26's
+// json.Marshal (keys in struct order; invalid UTF-8 as decision #32
+// fixes it), so two writes of the same event are byte-identical;
 // it appends straight into the bufio buffer, so a line costs no
 // allocation (decision #25's per-event budget, task wc4).
 type NDJSONSink struct {

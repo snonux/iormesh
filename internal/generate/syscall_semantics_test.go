@@ -2097,13 +2097,16 @@ func validatePathTargetStatus(name, body string) error {
 		return validateBeforeSubmit("sys_enter_"+name, body, required[0][1])
 	}
 
-	for fragment, description := range map[string]string{
-		"struct __kernel_timespec ior_times[2] = {};":                                         "two-element timespec buffer",
-		"if (ctx->args[2] != 0) {":                                                            "non-NULL timespec guard",
-		"if (bpf_probe_read_user(&ior_times, sizeof(ior_times), (void *)ctx->args[2]) < 0) {": "guarded full-array read",
+	// A slice of positional pairs, not a map literal: gofmt 1.26 and 1.27
+	// align map keys differently when one key is much longer than the
+	// others, and positional elements leave nothing to align.
+	for _, want := range []struct{ fragment, description string }{
+		{"struct __kernel_timespec ior_times[2] = {};", "two-element timespec buffer"},
+		{"if (ctx->args[2] != 0) {", "non-NULL timespec guard"},
+		{"if (bpf_probe_read_user(&ior_times, sizeof(ior_times), (void *)ctx->args[2]) < 0) {", "guarded full-array read"},
 	} {
-		if strings.Count(body, fragment) != 1 {
-			return fmt.Errorf("sys_enter_utimensat must contain exactly one %s", description)
+		if strings.Count(body, want.fragment) != 1 {
+			return fmt.Errorf("sys_enter_utimensat must contain exactly one %s", want.description)
 		}
 	}
 	unknownRE := regexp.MustCompile(`(?m)^\s*ev->target_status\s*=\s*PATH_TARGET_UNKNOWN\s*;`)

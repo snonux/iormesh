@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"reflect"
+	"strings"
 	"testing"
 	"unicode/utf8"
 )
@@ -93,14 +94,82 @@ func randEvent(r *rand.Rand) Event {
 	return ev
 }
 
-func assertSameAsMarshal(t *testing.T, ev Event) {
+// invalidMark stands in for each invalid UTF-8 byte in the copy of an
+// event that json.Marshal encodes: a private-use rune every Go version
+// writes as its raw three bytes, which the reference then turns into the
+// documented `\ufffd` escape. fill never produces it; the fuzzer skips
+// inputs that contain it.
+const invalidMark = "\ue000"
+
+// marshalReference is the encoder's expected output for ev: json.Marshal
+// for everything json.Marshal writes the same on every Go version, and
+// the six-byte escape `\ufffd` for each invalid UTF-8 byte, as
+// docs/schema.md ("NDJSON framing") defines it. json.Marshal itself is no
+// reference there: Go 1.26 writes `\ufffd`, Go 1.27 the raw U+FFFD bytes
+// (task 8m4).
+func marshalReference(t *testing.T, ev Event) []byte {
 	t.Helper()
-	want, err := json.Marshal(ev)
+	markInvalid(reflect.ValueOf(&ev).Elem())
+	out, err := json.Marshal(ev)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return bytes.ReplaceAll(out, []byte(invalidMark), []byte(`\ufffd`))
+}
+
+// markInvalid replaces, in every string reachable from v, each invalid
+// UTF-8 byte with invalidMark. Slices are copied first, so the caller's
+// event (whose slices the copy shares) stays unchanged.
+func markInvalid(v reflect.Value) {
+	switch v.Kind() {
+	case reflect.String:
+		if !utf8.ValidString(v.String()) {
+			v.SetString(replaceInvalid(v.String()))
+		}
+	case reflect.Pointer:
+		if !v.IsNil() {
+			p := reflect.New(v.Type().Elem())
+			p.Elem().Set(v.Elem())
+			markInvalid(p.Elem())
+			v.Set(p)
+		}
+	case reflect.Slice:
+		if !v.IsNil() {
+			c := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+			reflect.Copy(c, v)
+			for i := range c.Len() {
+				markInvalid(c.Index(i))
+			}
+			v.Set(c)
+		}
+	case reflect.Struct:
+		for i := range v.NumField() {
+			markInvalid(v.Field(i))
+		}
+	}
+}
+
+// replaceInvalid is s with each invalid UTF-8 byte (one byte per
+// utf8.RuneError of size 1, as the decoder steps) replaced by invalidMark.
+func replaceInvalid(s string) string {
+	var b []byte
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			b = append(b, invalidMark...)
+		} else {
+			b = append(b, s[i:i+size]...)
+		}
+		i += size
+	}
+	return string(b)
+}
+
+func assertSameAsMarshal(t *testing.T, ev Event) {
+	t.Helper()
+	want := marshalReference(t, ev)
 	if got := AppendEvent(nil, &ev); !bytes.Equal(got, want) {
-		t.Fatalf("AppendEvent differs from json.Marshal:\n got %s\nwant %s", got, want)
+		t.Fatalf("AppendEvent differs from the json.Marshal reference:\n got %s\nwant %s", got, want)
 	}
 }
 
@@ -108,7 +177,9 @@ func assertSameAsMarshal(t *testing.T, ev Event) {
 // filled events (every field of Event, Args, Java, HTTP and Session, nil
 // and zero and extreme values, awkward strings) its bytes equal
 // json.Marshal's, so swapping the encoder cannot change a trace file or
-// a golden.
+// a golden — except for invalid UTF-8, where the reference is the
+// project's documented `\ufffd` escape, not the installed Go's choice
+// (marshalReference).
 func TestAppendEventMatchesMarshal(t *testing.T) {
 	r := rand.New(rand.NewPCG(25, 4))
 	assertSameAsMarshal(t, Event{})
@@ -122,9 +193,63 @@ func TestAppendEventMatchesMarshal(t *testing.T) {
 func TestAppendEventAppends(t *testing.T) {
 	ev := sampleEvent(7)
 	got := AppendEvent([]byte("prefix"), &ev)
-	want, _ := json.Marshal(ev)
+	want := marshalReference(t, ev)
 	if !bytes.Equal(got, append([]byte("prefix"), want...)) {
 		t.Fatalf("got %s", got)
+	}
+}
+
+// invalidUTF8Cases are invalid-UTF-8 strings with their documented
+// encoding (docs/schema.md, "NDJSON framing"): each invalid byte as the
+// six-byte escape `\ufffd`, a valid U+FFFD as its raw bytes. The expected
+// bytes are fixed here, not taken from json.Marshal, whose choice changed
+// in Go 1.27 (task 8m4).
+var invalidUTF8Cases = []struct{ in, want string }{
+	{"\xff", `"\ufffd"`},
+	{"ab\xe2\x82", `"ab\ufffd\ufffd"`},
+	{"mixed é<\x02>\xc3", `"mixed é\u003c\u0002\u003e\ufffd"`},
+	{"abcdefghijklmnop\xff", `"abcdefghijklmnop\ufffd"`},
+	{"\xed\xa0\x80", `"\ufffd\ufffd\ufffd"`}, // a UTF-16 surrogate
+	{"\xc0\xaf", `"\ufffd\ufffd"`},           // an overlong encoding
+	{"\ufffd\xff", "\"\ufffd\\ufffd\""},      // valid U+FFFD stays raw
+}
+
+// TestAppendJSONStringInvalidUTF8 holds the encoder to the documented
+// bytes for invalid UTF-8, whichever Go is installed.
+func TestAppendJSONStringInvalidUTF8(t *testing.T) {
+	for _, c := range invalidUTF8Cases {
+		if got := string(appendJSONString(nil, c.in)); got != c.want {
+			t.Errorf("appendJSONString(%q) = %s, want %s", c.in, got, c.want)
+		}
+		if got := string(marshalReference(t, Event{Comm: c.in})); !strings.Contains(got, `"comm":`+c.want) {
+			t.Errorf("marshalReference(%q) = %s, want comm %s", c.in, got, c.want)
+		}
+	}
+}
+
+// TestInvalidUTF8RoundTrip: the installed Go's json.Unmarshal reads the
+// encoder's `\ufffd` back to the same string it reads from json.Marshal's
+// own output (U+FFFD per invalid byte), so a reader on any Go version
+// sees what the encoder meant.
+func TestInvalidUTF8RoundTrip(t *testing.T) {
+	for _, c := range invalidUTF8Cases {
+		var fromEncoder, fromMarshal string
+		if err := json.Unmarshal(appendJSONString(nil, c.in), &fromEncoder); err != nil {
+			t.Fatalf("%q: %v", c.in, err)
+		}
+		std, err := json.Marshal(c.in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(std, &fromMarshal); err != nil {
+			t.Fatalf("%q: %v", c.in, err)
+		}
+		if fromEncoder != fromMarshal {
+			t.Errorf("%q: encoder decodes to %q, json.Marshal's output to %q", c.in, fromEncoder, fromMarshal)
+		}
+		if want := strings.ReplaceAll(replaceInvalid(c.in), invalidMark, "\ufffd"); fromEncoder != want {
+			t.Errorf("%q: decodes to %q, want %q", c.in, fromEncoder, want)
+		}
 	}
 }
 
@@ -135,6 +260,9 @@ func FuzzAppendEventStrings(f *testing.F) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, s string) {
+		if strings.Contains(s, invalidMark) {
+			t.Skip("contains marshalReference's stand-in rune")
+		}
 		ev := sampleEvent(1)
 		ev.Comm, ev.Args.Path, ev.Args.Argv = s, &s, []string{s, s}
 		assertSameAsMarshal(t, ev)
