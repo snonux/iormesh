@@ -98,8 +98,16 @@ $ iormeshctl query -ref iormesh-it/local/host1-79d2d3d5/4679
 ```
 
 One NDJSON line per event, in the trace schema. The `stack` holds
-method ids of the session's methods table, not frames; `show
-sequence` and the site print the frames. `query -event http`
+method ids of the session's methods table, not frames, so `query
+-ref` is not where to read a step's code. The frames are in `show
+sequence ID -json` (every step's stack, top first; `show
+sequence` prints only the top one,
+[chapter 7](07-read-the-mesh.md#one-conversation-show-sequence)),
+the site's and the TUI's step detail. The first frame outside the
+JDK is the application method, e.g. `DataStore#save` under a
+`java.io.FileOutputStream#write`. From that method back to all
+its events: `query -method
+'iormesh.workload.scenarios.DataStore#save'`. `query -event http`
 prints every http event the same way, both ends of each hop:
 [query-http.ndjson](../examples/query-http.ndjson).
 

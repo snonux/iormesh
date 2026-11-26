@@ -101,7 +101,8 @@ session    iormesh-it/local host1 79d2d3d5: 1 segments, 5276 events, 2026-11-24 
 `show sequence ID` (the newest without an ID) prints a
 conversation as numbered steps: ordering, actor
 (`service/thread`), arrow, label, bytes and latency, then the
-step's top Java frame and its `ref`. The short one:
+step's top Java frame and its `ref` (the whole stack: **The `at`
+line is the top frame only**, below). The short one:
 
 ```text
 $ iormeshctl show sequence 0001
@@ -180,6 +181,31 @@ How to read a step:
   that prints every call.
 - **A hop that is not `paired`** (a lost record, an untraced
   peer) is named on its step; such a step ends at its peer.
+- **The `at` line is the top frame only**, most often a JDK I/O
+  method (`java.io.FileOutputStream#write`). The application
+  method that made the call sits further down the stack. The
+  site's and the TUI's step detail print the stack (up to 12
+  frames, below), and `show sequence ID -json` carries it on
+  every step; `.steps[N-1]` is step N. Run for this guide
+  against this example's model, inventory's write (step 16):
+
+  ```text
+  $ iormeshctl show sequence 0002 -json | jq '.steps[15] | {label, stack: .stack[:3]}'
+  {
+    "label": "write /tmp/TestMicroservices1125629951/002/inventory.d/reservation-42.json.tmp",
+    "stack": [
+      "java.io.FileOutputStream#write(FileOutputStream.java:-1)",
+      "iormesh.workload.scenarios.DataStore#save(DataStore.java:34)",
+      "iormesh.workload.scenarios.ServiceNode#handle(ServiceNode.java:144)"
+    ]
+  }
+  ```
+
+  The first frame outside the JDK, `DataStore#save`, is the
+  code behind the step. `query -ref` prints the raw event, whose
+  stack holds method ids, not frames; `query -method` goes the
+  other way, from a method to its events
+  ([chapter 8](08-java-query.md#from-a-step-to-its-raw-events-query)).
 
 ### More views
 
