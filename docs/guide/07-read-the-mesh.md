@@ -203,7 +203,7 @@ story        received POST /orders from java => open /etc/host.conf => read /etc
                      ref iormesh-it/local/host1-79d2d3d5/2730
 ```
 
-Reference: [visualization.md](../visualization.md#plain-text)
+Reference: [visualization.md](../visualization/renderers.md#plain-text)
 (every view, its caps and rules).
 
 ## The local site: `open`
@@ -238,7 +238,7 @@ conversation, lifelines left to right, file work as notes:
 
 ![sequence/0002.svg](../examples/site/sequence/0002.svg)
 
-Reference: [visualization.md](../visualization.md#the-local-site)
+Reference: [visualization.md](../visualization/renderers.md#the-local-site)
 (screens, the filter bar, deep links, the CSP).
 
 ## The terminal UI: `tui`
@@ -307,7 +307,7 @@ iormesh · iormesh-it · 2026-11-24 09:24:19 – 09:24:25 UTC · 4 services · 3
 ↑↓ move · ⏎ open · esc back · tab detail · / filter · 1-7 screens · ? help · q quit
 ```
 
-Reference: [visualization.md](../visualization.md#the-terminal-ui)
+Reference: [visualization.md](../visualization/renderers.md#the-terminal-ui)
 (the screens and their rules).
 
 **If not:** `show: no build of … yet (iormeshctl build…)` and

@@ -9,9 +9,10 @@ import (
 // TestDocsShowTheRule holds the documentation to the generated rule:
 // security.md's example (user deploy) and testing.md's manual bootstrap
 // (user ops) must spell exactly Rule, so the docs cannot drift from what
-// bootstrap installs and the tracer's gate expects.
+// bootstrap installs and the tracer's gate expects. Both docs are indexes
+// (decision #36); the rule lives in the part that holds each section.
 func TestDocsShowTheRule(t *testing.T) {
-	for file, user := range map[string]string{"../../docs/security.md": "deploy", "../../docs/testing.md": "ops"} {
+	for file, user := range map[string]string{"../../docs/security/sudoers.md": "deploy", "../../docs/testing/m4-acceptance/setup.md": "ops"} {
 		data, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)

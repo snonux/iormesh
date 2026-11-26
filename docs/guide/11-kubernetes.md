@@ -80,7 +80,7 @@ you will hit (a debug tracer dies with its app container; at most
 
 Reference: [kubernetes.md](../kubernetes.md),
 [security.md](../security.md) ("Kubernetes"),
-[schema.md](../schema.md#pod-fields-on-events-m7) (the pod fields
+[schema.md](../schema/graph.md#pod-fields-on-events-m7) (the pod fields
 on every event).
 
 ---

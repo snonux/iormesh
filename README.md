@@ -32,6 +32,9 @@ target; flags, paths and schema may still change. See
 
 ## Documentation
 
+The larger docs are indexes: each lists its parts with a one-line
+summary, so read the index and open only the part you need.
+
 ### Get started
 
 - [guide](docs/guide/README.md) — the iormesh guide, step by

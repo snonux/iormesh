@@ -83,7 +83,7 @@ Four rules the first, two-function experiment did not show:
 
 The Java-level hook table (body rewrites only — retransformation
 cannot add methods, so the native-prefix trick is out) is in the
-[implementation guide](../implementation.md#s1--javasyscall-join),
+[implementation guide](../implementation/s1.md#s1--javasyscall-join),
 corrected by S1: `UnixFileDispatcherImpl` since JDK 21, the
 callers of the native `Net.accept`/`Net.listen`, socket close via
 `UnixDispatcher.close0`. JDK 21 and 25 agree on every native the

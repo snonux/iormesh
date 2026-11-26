@@ -71,7 +71,7 @@ version: grep for its fixed part.
 | `/etc/sudoers.d/iormesh already exists: the host is bootstrapped (iormeshctl deploy upgrades it) or another rule is there` | Bootstrap never overwrites a rule. Deploy instead; to start over, `iormeshctl rm HOST` (it removes the rule bootstrap installed) and add the host again. A rule laid down by hand stays; remove it with `sudo rm /etc/sudoers.d/iormesh`. |
 | `-user …: the SSH user on the host is …` / `-arch …: the host is …` | `-apply` reads both from the host; drop the flag or fix it. |
 | `SSH user name "…" cannot be named in a sudoers rule: pass -user` | The default user (HOST's `user@` part, else your login name) is not a valid name for the rule. A `User` from `~/.ssh/config` is not seen: pass `-user`. |
-| `pinned key: open …: no such file or directory` | No pinned key at `~/.config/iormesh/minisign.pub` (or at `-key`). Make or copy it ([build.md](build.md#signing)). |
+| `pinned key: open …: no such file or directory` | No pinned key at `~/.config/iormesh/minisign.pub` (or at `-key`). Make or copy it ([build.md](build/signing-releases.md#signing)). |
 | a printed step fails with `upgrade: unsafe file: …/.iormesh/staging/iormesh-linux-… is owned by uid N, not by the caller` | The steps ran in a root shell (`sudo -i`, `su -`), so sudo was called by root while the staged build belongs to the SSH user. Run them as that user, the one `-user` named; the steps before it are safe to repeat. |
 | `transport: control socket path under … would be N bytes, over the 104 a unix socket allows` | Not bootstrap's own: every ssh iormeshctl runs shares a control socket under `$XDG_CACHE_HOME/iormesh/ssh` (default `~/.cache`), and a long home path does not fit a unix socket. Point `XDG_CACHE_HOME` at a shorter directory. |
 | a printed step fails with `install layout: …` | The tracer's own `upgrade` check refused the layout: `/opt` or `/opt/iormesh` is not root's or is writable by others. Fix the ownership; nothing after that step ran. |
@@ -89,7 +89,7 @@ undone`. Until the rule is in place a rerun starts over.
 | `artifact is not stamped with the version being signed: … rebuild it` (from `mage sign` or `iormeshctl sign`) | A tracer, controller or jar is from another version than the one signed. For `dist/`, rebuild it from the current commit, then sign; for an unpacked release, pass its version with `iormeshctl sign -version`. |
 | `upgrade of iormesh-linux-… refused, nothing started: …` | The host's tracer refused the staged build; the reason follows (the rest of this table and the next). The host keeps what it ran. |
 | `upgrade: refusing to downgrade from … to … (root may pass -allow-downgrade)` | `dist/` is older than the installed tracer. Build and sign the current version. |
-| `upgrade: … is installed with other bytes; through the sudoers rule a new build must carry a new version` | A rebuild at the same version. Bump `internal/version.Version` for a release ([build.md](build.md#signing)), or reinstall as root on a test host. |
+| `upgrade: … is installed with other bytes; through the sudoers rule a new build must carry a new version` | A rebuild at the same version. Bump `internal/version.Version` for a release ([build.md](build/signing-releases.md#signing)), or reinstall as root on a test host. |
 | `upgrade: iormesh-agent.jar … does not match the installed tracer …; upgrade the tracer first` | The jar in `dist/` is from another version than the tracer. Sign one release's jar and tracer together (`iormeshctl sign`), or run `mage agentBuild` and `mage sign` with the tracer build. |
 
 ## Deploy and the sudoers rule
@@ -137,7 +137,7 @@ log (`journalctl -u iormesh-<project>.service`):
 
 Rocky 9.9's 5.14.0-…el9_9 kernel runs the tracer, the root BPF
 suites and the integration suite (milestones.md M4, task nf4;
-[testing.md](testing.md#root-suites-on-rocky-99-task-nf4-2026-11-21)).
+[testing.md](testing/m4-acceptance/root-suites.md#root-suites-on-rocky-99-task-nf4-2026-11-21)).
 The kernel version floors quoted for upstream kernels (6.2 for
 the clock bound, 6.10 for the Java uprobes) do not describe el9,
 which has backported what they name. A load failure on el9 is a
@@ -148,7 +148,7 @@ defect to report, not an expected gap (milestones.md M4).
 | `load BPF object: …; BPF load refused; SELinux is enforcing and this process runs as …` | The tracer runs in a confined SELinux domain (`container_t` in a pod). See [kubernetes.md](kubernetes.md#selinux) and [security.md](security.md); the denial (`avc … tclass=bpf`) is in the raw `audit.log`, not always in `ausearch -m avc`. |
 | `BPF load refused; active LSMs that can refuse BPF: …` | AppArmor, a BPF LSM program or kernel lockdown refused the load. Check `/sys/kernel/security/lsm` and the LSM's policy. |
 | `BPF load refused; no LSM is confining it, check the capabilities (CAP_BPF and CAP_PERFMON, or CAP_SYS_ADMIN)` | The tracer did not run as root (or lacks the capabilities). Through the sudoers rule it does; a standalone run needs `sudo`. libbpf's own `RLIMIT_MEMLOCK` hint does not apply on 5.11+ and el9 kernels. |
-| `load BPF object:` after libbpf's `BPF program load failed` and a verifier log | The verifier rejected a program. On el9 that is a defect: report it with the verifier log, `uname -r` and the tracer version (the last ones were tasks gf4 and hf4, [testing.md](testing.md#run-on-rocky-99-2026-11-21)). |
+| `load BPF object:` after libbpf's `BPF program load failed` and a verifier log | The verifier rejected a program. On el9 that is a defect: report it with the verifier log, `uname -r` and the tracer version (the last ones were tasks gf4 and hf4, [testing.md](testing/m4-acceptance/first-runs.md#run-on-rocky-99-2026-11-21)). |
 | the load fails without `/sys/kernel/btf/vmlinux` | The kernel has no BTF, which CO-RE needs. Every Rocky 9 kernel has it; a custom kernel needs `CONFIG_DEBUG_INFO_BTF=y`. |
 
 A tracepoint missing on a host's kernel is skipped at runtime,

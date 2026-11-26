@@ -64,7 +64,7 @@ Commands that contact a host (`bootstrap -apply`, `deploy`,
 `status`, `collect`, `ensure`, `rm`) were **not** run for this
 guide; for them it shows the shape of the output as the source
 prints it, never invented numbers. The M4 acceptance on two Rocky
-9.9 VMs ([testing.md](../testing.md#m4-acceptance-on-two-real-hosts-task-lb4))
+9.9 VMs ([testing.md](../testing/m4-acceptance.md#m4-acceptance-on-two-real-hosts-task-lb4))
 ran the same `add`, `deploy`, `collect`, `refresh`, `build`,
 `show` and `rm` path. Every flag in the guide was checked against
 `iormeshctl <subcommand> -h`; when yours reads differently, `-h`

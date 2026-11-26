@@ -6,13 +6,13 @@ deploy, collect and clean up, the limits you will run into, and
 what the tools' error messages mean. The decisions behind it are
 in [milestones.md](milestones.md) and
 [decisions.md](decisions.md): milestone
-[M7](milestones.md#m7--kubernetes-sidecar--debug-container-deployment)
+[M7](milestones/m7.md#m7--kubernetes-sidecar--debug-container-deployment)
 and the provisional decisions #13 (privilege profile), #14 (Java
 attach) and #18 (iormeshctl's config), under
-["Provisional — M7"](decisions.md#provisional--m7-2026-11-20). The
+["Provisional — M7"](decisions/provisional-m7.md#provisional--m7-2026-11-20). The
 owner has confirmed them for now. The security reasoning is in
 [security.md](security.md) ("Kubernetes"), and the test evidence
-is in [testing.md](testing.md#m7-acceptance-on-kind-task-yb4).
+is in [testing.md](testing/m7-acceptance.md#m7-acceptance-on-kind-task-yb4).
 
 iormeshctl reaches a cluster only through your own `kubectl`,
 and always with an explicit `--context` taken from the registry.
@@ -361,7 +361,7 @@ table, a pod's every case, is in
 
 Every event of a pod's tracer names its namespace, pod and the
 container its process runs in (the `pod` object,
-[schema.md](schema.md#pod-fields-on-events-m7)), so in sidecar
+[schema.md](schema/graph.md#pod-fields-on-events-m7)), so in sidecar
 mode the app's, a sidecar's and the tracer's own processes are
 told apart. To look at one namespace:
 
@@ -379,7 +379,7 @@ make, and writes `<projects>@prod/` next to the unfiltered build;
 unfiltered one without. With a window too (`build -namespace prod
 -last 2h`) it writes `<projects>@prod~window/`, which they read
 with `-namespace prod -windowed`
-([visualization.md](visualization.md#namespace-and-windowed-builds)).
+([visualization.md](visualization/builds.md#namespace-and-windowed-builds)).
 `refresh` does not take it: its `-namespace` is the kubectl
 namespace of the collect.
 
@@ -439,7 +439,7 @@ namespace of the collect.
   has been no multi-node cluster, no CRI-O, no OpenShift and no
   Pod Security level below `privileged`
   ([milestones.md
-  M7](milestones.md#m7--kubernetes-sidecar--debug-container-deployment)).
+  M7](milestones/m7.md#m7--kubernetes-sidecar--debug-container-deployment)).
 
 ## SELinux
 
@@ -485,7 +485,7 @@ after a debug tracer exits.
 
 The details and the el9 runs are in [security.md](security.md)
 ("Kubernetes") and
-[testing.md](testing.md#dedicated-type-iormesh_container_t-task-7h4-2026-11-21).
+[testing.md](testing/m7-acceptance/selinux.md#dedicated-type-iormesh_container_t-task-7h4-2026-11-21).
 
 ## Cleanup
 

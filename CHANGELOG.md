@@ -115,4 +115,4 @@ then the features and changes of the latest round.
   ([java-attach.md](docs/java-attach.md)).
 - The agent jar rebuilds to the same bytes from the same commit
   and JDK, so a release rebuilt from its tag matches the
-  published archive ([build.md](docs/build.md#releases)).
+  published archive ([build.md](docs/build/signing-releases.md#releases)).

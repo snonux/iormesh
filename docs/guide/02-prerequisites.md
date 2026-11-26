@@ -39,7 +39,7 @@ Why so strict:
 > you.
 
 Reference: [security.md](../security.md) (the SSH and rsync rules),
-[build.md](../build.md#container-builds) (the build engines).
+[build.md](../build/containers.md#container-builds) (the build engines).
 
 ## Each host
 

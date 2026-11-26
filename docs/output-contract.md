@@ -33,7 +33,7 @@ The decisions it cites are in [decisions.md](decisions.md).
   first); a session's tables are the union over its segments.
   Each footer repeats project, FQDN, session, seq and start;
   the column mapping is in
-  [schema.md](schema.md#parquet-mapping).
+  [schema.md](schema/files-parquet.md#parquet-mapping).
 - **Stable identifiers** — PID incarnation, fd generation,
   cross-host connection ids (per socket pair, assigned by the
   merge on the controller and shared across mesh hosts), a
@@ -95,10 +95,10 @@ The decisions it cites are in [decisions.md](decisions.md).
   exports; same for the sequence-diagram export.
 - **Pod-aware identity** — under Kubernetes, an in-pod tracer
   describes its pod as the host (`host_id` `pod-<uid>`, pids in
-  the pod's PID namespace; [schema.md](schema.md#pods-as-hosts-m7)).
+  the pod's PID namespace; [schema.md](schema/graph.md#pods-as-hosts-m7)).
   Every event carries the optional `pod` object: namespace, pod
   name and the container id (task sh4;
-  [schema.md](schema.md#pod-fields-on-events-m7)).
+  [schema.md](schema/graph.md#pod-fields-on-events-m7)).
 - **Project-scoped** — every session belongs to a named project;
   traces live under `/opt/iormesh/traces/<project>/`, graph
   nodes carry their project label, and cross-project

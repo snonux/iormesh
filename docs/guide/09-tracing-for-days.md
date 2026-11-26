@@ -131,7 +131,7 @@ segments that overlap it, and its services and edges are the
 connections seen in it. The build prints a `window` line before
 its paths, and the site and the TUI title name the window.
 
-Reference: [visualization.md](../visualization.md#namespace-and-windowed-builds),
+Reference: [visualization.md](../visualization/builds.md#namespace-and-windowed-builds),
 [troubleshooting.md](../troubleshooting.md#windowed-builds-and-prune)
 (the refusals).
 

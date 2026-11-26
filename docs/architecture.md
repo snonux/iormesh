@@ -293,7 +293,7 @@ Each component at a glance; the sections below describe them.
     the target pod with a minimal capability set, privileged
     only as the fallback (#13);
     identifies each pod as its own host (`host_id` `pod-<uid>`,
-    [schema.md](schema.md#pods-as-hosts-m7)) and stamps every
+    [schema.md](schema/graph.md#pods-as-hosts-m7)) and stamps every
     event with its namespace, pod name and container id (task
     sh4);
     live-attaches the Java agent through the shared process

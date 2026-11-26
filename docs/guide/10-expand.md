@@ -106,7 +106,7 @@ peer's tracer starts after the connection that revealed it, so
 earlier conversations stay one-sided: those edges stay
 unresolved, never dropped and never invented.
 
-Reference: [milestones.md](../milestones.md#m6--mesh-expansion-follow-the-edges-from-the-controller)
+Reference: [milestones.md](../milestones/m6.md#m6--mesh-expansion-follow-the-edges-from-the-controller)
 (the rules and their acceptance), [security.md](../security.md)
 (the registry as the deploy boundary),
 [implementation.md](../implementation.md) (every skip reason).

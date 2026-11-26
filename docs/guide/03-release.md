@@ -42,7 +42,7 @@ overrides it on `verify`, `bootstrap`, `deploy` and `expand
 Either download the archive for your hosts' arch and
 `SHA256SUMS`, or build them from the release tag with `mage
 release podman` (they land in `dist/release/<version>/`;
-[build.md](../build.md#releases)). Then check and unpack:
+[build.md](../build/signing-releases.md#releases)). Then check and unpack:
 
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS   # the archives you have
@@ -53,7 +53,7 @@ tar -xzf iormesh-0.1.0-amd64.tar.gz
 Whether to trust the archive is your call — where it came from,
 or your own `mage release` of the tag compared with it byte for
 byte (build with the JDK build, version and vendor, that the
-published jar's `Created-By` names, [build.md](../build.md#releases)) — and your
+published jar's `Created-By` names, [build.md](../build/signing-releases.md#releases)) — and your
 signature, next, is what deploy trusts from then on.
 
 **Checkpoint:** `sha256sum -c` prints `OK` for the archive;
@@ -99,7 +99,7 @@ with `decryption failed`.
 Building from source instead of a release? `mage buildPodman`
 (or `buildDocker`) and `mage agentBuild` fill `dist/`, and
 `IORMESH_MINISIGN_KEY=~/.minisign/iormesh.key mage sign` signs
-it the same way ([build.md](../build.md#signing)); so does
+it the same way ([build.md](../build/signing-releases.md#signing)); so does
 `dist/iormeshctl-linux-amd64 sign -key ~/.minisign/iormesh.key
 dist`. For amd64 hosts only, `mage containerBuild podman
 tracer-amd64,ctl` is the lighter build (the amd64 tracer and the
@@ -146,8 +146,8 @@ release directory, or run them from a repository root whose
 archives and copy the arm64 tracer and its `.minisig` next to
 the amd64 files, so one directory holds both.
 
-Reference: [build.md](../build.md#signing) (the key, what is
-signed, stale builds), [build.md](../build.md#releases) (release
+Reference: [build.md](../build/signing-releases.md#signing) (the key, what is
+signed, stale builds), [build.md](../build/signing-releases.md#releases) (release
 archives), [security.md](../security.md) (the checks on each
 side).
 

@@ -17,9 +17,10 @@ and integration tests — consult it before inventing patterns.
 Don't scaffold implementation ahead of a recorded decision —
 the decision moves first.
 
-Picking up a spike or milestone? Read its section in
-[docs/implementation.md](docs/implementation.md) — files, order
-of work, code sketches, tests — after docs/milestones.md. If a
+Picking up a spike or milestone? Read its part of the
+[implementation guide](docs/implementation.md) (the index links
+`docs/implementation/<milestone>.md`) — files, order of work,
+code sketches, tests — after its part of docs/milestones.md. If a
 sketch there disagrees with docs/decisions.md or
 docs/milestones.md, they are right; fix the guide in the same
 commit.
@@ -59,6 +60,19 @@ Never write `//nolint` — a test fails on it.
   security, build, implementation, visualization,
   troubleshooting; spike results under `docs/spikes/`), each
   linked from the README's Documentation section.
+- **Large docs are an index plus parts** (decision #36): a
+  topic doc past about 600 lines keeps its path as an index —
+  intro, then a "Parts" list with a summary line and the
+  sections of each part — and its sections live in
+  `docs/<topic>/<part>.md`; a part past the same size becomes
+  an index of its own with a `docs/<topic>/<part>/` folder.
+  Read the index first and open only the part you need. New
+  content goes into the matching part, and the index's entry
+  for it is updated in the same commit; a new decision goes
+  into its group's part and the "By number" list of
+  `docs/decisions.md`. Link to a section through its part
+  (`testing/el9.md#…`), never to an anchor the index no
+  longer holds.
 - **The guide is the user's path**: `docs/guide/` (an index
   `README.md` and numbered chapters) teaches how to use iormesh,
   for a human or an agent working with one, with real commands
@@ -70,8 +84,9 @@ Never write `//nolint` — a test fails on it.
   `docs/diagrams/gen.py` (`python3 docs/diagrams/gen.py
   docs/diagrams`). Change the generator, not the SVGs.
 - **Decisions first, docs narrate**: a decision is recorded
-  first in `docs/decisions.md` (the next free number, with its
-  reasons); the topic docs expand and explain it. When a
+  first in `docs/decisions.md`'s parts (the next free number,
+  with its reasons, also added to its "By number" list); the
+  topic docs expand and explain it. When a
   decision changes, update the matching topic doc in the same
   commit — never leave docs contradicting docs/decisions.md.
   A milestone's scope and acceptance change in

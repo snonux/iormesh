@@ -41,7 +41,7 @@ JAVA_TOOL_OPTIONS=-javaagent:/opt/iormesh/lib/iormesh-agent.jar=spool=/run/iorme
 That line is an example for operators, not something iormesh
 sets: the product never touches a JVM's environment. The M4
 acceptance runner uses it to start its microservices
-([testing.md](testing.md#m4-acceptance-on-two-real-hosts-task-lb4)).
+([testing.md](testing/m4-acceptance.md#m4-acceptance-on-two-real-hosts-task-lb4)).
 Mind what `JAVA_TOOL_OPTIONS` does: every JVM started with it
 in its environment prints `Picked up JAVA_TOOL_OPTIONS: …` on
 stderr, and child processes inherit it, so a JVM that spawns
@@ -439,6 +439,6 @@ the jar's resolved real path.
 
 25 runs in `mage integrationTest` (`TestJavaLiveAttach`,
 `TestJavaLiveAttachAtStart`, `TestJavaAttachDynamicLoading`,
-[testing.md](testing.md#live-attach-task-ge4)); 21 and 27-ea
+[testing.md](testing/integration/m3.md#live-attach-task-ge4)); 21 and 27-ea
 through `IORMESH_ATTACH_JDKS`, 17 by hand (the workload needs
 21).
