@@ -103,11 +103,14 @@ func (t *timing) add(ev *schema.Event) {
 //
 // A final snapshot (isFinal) gives only its counters: it marks no
 // transition, so it dates neither the SYN nor the handshake — a connect
-// still pending at the end reads SYN_SENT long after its SYN left.
+// still pending at the end reads SYN_SENT long after its SYN left. An
+// initial snapshot (a socket open before the session, decision #35) is
+// taken after the SYN too, so it dates the server's side of it but never
+// the client's SYN_SENT, which must precede the SYN.
 func (t *timing) state(ev *schema.Event) {
 	if !isFinal(ev) {
 		t.afterSYN.see(ev.WallNS)
-		if ev.Args.SockState != nil && *ev.Args.SockState == "SYN_SENT" {
+		if ev.Args.SockState != nil && *ev.Args.SockState == "SYN_SENT" && ev.InitialRole() == "" {
 			t.synSent.see(ev.WallNS)
 		}
 	}

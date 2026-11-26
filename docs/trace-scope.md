@@ -65,7 +65,12 @@ event families `iormesh run -trace-families` adds (see
 - **Network** — TCP lifecycle with full 4-tuples, read from the
   socket's state transitions rather than syscall arguments (so
   Java's non-blocking connects are covered), plus a
-  NAT-tolerant join key (decision #26); UDP per-packet
+  NAT-tolerant join key (decision #26); connections a target
+  already held when the session started (a keep-alive client, a
+  connection pool) are seeded at the start with one initial
+  snapshot per socket, which names the end's role — server when
+  a listener holds its local port — so they become connections
+  and edges without a reconnect (decision #35); UDP per-packet
   peers (sendto/recvfrom), the msghdr data calls
   sendmsg/recvmsg/sendmmsg/recvmmsg with their bytes (the mmsg
   calls' summed over their messages) and TCP sequence ranges

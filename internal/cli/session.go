@@ -80,7 +80,8 @@ func newSession(tr tracer, c *correlate.Correlator, cfg runConfig) *session {
 // them. A pattern scan runs after the probes attached, so a process
 // exec'ing meanwhile is seen by the scan, by its exec record, or by both
 // — adopt takes it once. A port session also remembers its owners'
-// keys, by which it recognises them after a restart (portFollow).
+// keys, by which it recognises them after a restart (portFollow). Last,
+// the targets' already open TCP sockets are seeded (seedSockets).
 func (s *session) start(pids []uint32) error {
 	if s.follow != nil {
 		s.follow.remember(pids)
@@ -97,19 +98,33 @@ func (s *session) start(pids []uint32) error {
 			return err
 		}
 	}
-	if s.pattern == "" {
-		return nil
-	}
-	found, err := s.spec.Resolve(target.HostProcFS(), uint32(os.Getpid()))
-	if err != nil {
-		return fmt.Errorf("scan for %q: %w", s.spec.Pattern, err)
-	}
-	for _, pid := range found {
-		if err := s.adoptRunning(pid); err != nil {
-			return err
+	if s.pattern != "" {
+		found, err := s.spec.Resolve(target.HostProcFS(), uint32(os.Getpid()))
+		if err != nil {
+			return fmt.Errorf("scan for %q: %w", s.spec.Pattern, err)
+		}
+		for _, pid := range found {
+			if err := s.adoptRunning(pid); err != nil {
+				return err
+			}
 		}
 	}
+	s.seedSockets()
 	return nil
+}
+
+// seedSockets has the tracer register the TCP sockets the targets
+// already hold and report each in an initial snapshot (decision #35,
+// task cm4): a connection opened before the session — a keep-alive
+// client, a pool — otherwise names no connection until it reconnects.
+// It runs once the start targets are in and again for every running
+// process adopted later (traceHolder); sockets seeded or registered
+// before are left alone. A failure costs only those connections, so it
+// is reported on stderr and the session goes on.
+func (s *session) seedSockets() {
+	if err := s.tr.SeedSockets(); err != nil {
+		_, _ = fmt.Fprintf(s.log, "iormesh: connections opened before the session stay unseen: %v\n", err)
+	}
 }
 
 // adoptRunning traces a process the start scan found (addRunning). Its

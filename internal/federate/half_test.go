@@ -91,6 +91,29 @@ func TestHalvesFromEvents(t *testing.T) {
 				t.Fatalf("got %+v, want established at wall0+30", h)
 			}
 		}},
+		// Sockets open before the session (decision #35): the initial
+		// snapshot names the role and keys the half when nothing locked
+		// does; Established is then only an upper bound (Before).
+		{"initial client snapshot: client, keyed, open before", func(tr *trace) {
+			tr.event(1, schema.KindTCPState, 3, 0, wall0, "x", initialSnap(
+				withSeq(tuple(local, peer), "ESTABLISHED", clientEst), schema.SockSnapshotInitialClient))
+			tr.event(1, schema.KindWrite, 3, 0, wall0+5, "x", schema.Args{})
+		}, func(t *testing.T, h Half) {
+			if h.Role != RoleClient || !h.HasKey || h.Key != k || !h.Before || h.Established != wall0 {
+				t.Fatalf("got %+v, want a client keyed %v, open before, established by wall0", h, k)
+			}
+		}},
+		{"initial server snapshot disagreeing with a state change: no conflict", func(tr *trace) {
+			tr.event(1, schema.KindTCPState, 3, 0, wall0, "x", initialSnap(withSeq(tuple(local, peer),
+				"ESTABLISHED", seqFields{SndUna: 999, RcvNxt: 101}), schema.SockSnapshotInitialServer))
+			tr.event(1, schema.KindTCPState, 3, 0, wall0+20, "x", withSeq(tuple(local, peer),
+				"CLOSE_WAIT", seqFields{SndUna: 201, RcvNxt: 101 + 6, BytesReceived: 6}))
+		}, func(t *testing.T, h Half) {
+			if h.Role != RoleServer || !h.HasKey || h.Key != k || h.KeyConflict || !h.Before ||
+				h.Established != wall0 {
+				t.Fatalf("got %+v, want a server keyed %v by CLOSE_WAIT, open before by wall0", h, k)
+			}
+		}},
 		{"forked child shares the socket: both processes listed", func(tr *trace) {
 			tr.event(1, schema.KindConnect, 3, 0, wall0, "x", tuple(local, peer))
 			tr.event(1, schema.KindTCPState, 3, 0, wall0+5, "x",
@@ -113,6 +136,12 @@ func TestHalvesFromEvents(t *testing.T) {
 			c.check(t, hs[0])
 		})
 	}
+}
+
+// initialSnap marks a tcp_state record's args as an initial snapshot.
+func initialSnap(a schema.Args, mark string) schema.Args {
+	a.SockSnapshot = &mark
+	return a
 }
 
 // TestHalvesSkipNonTCP: a conn_id without a tcp_state record — a unix

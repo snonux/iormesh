@@ -349,22 +349,47 @@ func (e *Event) validateTCPSeq() error {
 	return nil
 }
 
-// validateSockSnapshot keeps args.sock_snapshot (task sf4) to records
-// with the four tcp_sock fields, which validateTCPSeq keeps to tcp_state:
-// a final snapshot exists for its counters alone, and a reader that skips
-// it as no transition must find it marked on that kind only.
+// validateSockSnapshot keeps args.sock_snapshot to tcp_state records and
+// its known values. A final snapshot (task sf4) needs the four tcp_sock
+// fields, which validateTCPSeq keeps to tcp_state: it exists for its
+// counters alone, and a reader that skips it as no transition must find
+// it marked on that kind only. An initial one (decision #35, task cm4)
+// carries them when its state can rebuild the key — not one still in
+// SYN_SENT, nor a torn read.
 func (e *Event) validateSockSnapshot() error {
 	s := e.Args.SockSnapshot
 	switch {
 	case s == nil:
 		return nil
+	case e.Event != KindTCPState:
+		return invalidf("args.sock_snapshot on a %s event (tcp_state only)", e.Event)
+	case *s == SockSnapshotInitialClient || *s == SockSnapshotInitialServer:
+		return nil
 	case *s != SockSnapshotFinal:
-		return invalidf("args.sock_snapshot %q, want %q", *s, SockSnapshotFinal)
+		return invalidf("args.sock_snapshot %q, want %q, %q or %q", *s, SockSnapshotFinal,
+			SockSnapshotInitialClient, SockSnapshotInitialServer)
 	case e.Args.BytesAcked == nil:
-		return invalidf("args.sock_snapshot on a %s event without the four tcp_sock fields (tcp_state only)",
-			e.Event)
+		return invalidf("args.sock_snapshot %q without the four tcp_sock fields", *s)
 	}
 	return nil
+}
+
+// InitialRole is the role an initial snapshot names (args.sock_snapshot
+// initial_client or initial_server: a socket already open when the
+// session started, decision #35) — "client" or "server" — and "" for any
+// other event. It is role evidence like a connect or an accept: the merge,
+// the report and the service database read it where those name none.
+func (e *Event) InitialRole() string {
+	if e.Event != KindTCPState || e.Args.SockSnapshot == nil {
+		return ""
+	}
+	switch *e.Args.SockSnapshot {
+	case SockSnapshotInitialClient:
+		return "client"
+	case SockSnapshotInitialServer:
+		return "server"
+	}
+	return ""
 }
 
 // validateStreamSeq keeps args.tcp_seq (M4, task gb4) to the records

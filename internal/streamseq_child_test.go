@@ -102,8 +102,9 @@ type seqCall struct{ Buf, Off, N int }
 // the multithreaded child of TestProcessExitGroupDead (exit_root_test.go),
 // the namespace side of TestPidNSConnectEstablished
 // (pidnsconnect_root_test.go), the self-renaming child of
-// TestRenameReflected (rename_root_test.go) and the fstat(-1) pair of
-// TestNegativeFdAcrossExec (badfd_root_test.go).
+// TestRenameReflected (rename_root_test.go), the fstat(-1) pair of
+// TestNegativeFdAcrossExec (badfd_root_test.go) and the pre-opened
+// connection of TestSeedPreopenedConnection (preopen_root_test.go).
 func TestMain(m *testing.M) {
 	if host := os.Getenv(pidnsChildEnv); host != "" {
 		os.Exit(pidnsChildMain(host))
@@ -119,6 +120,9 @@ func TestMain(m *testing.M) {
 	}
 	if role := os.Getenv(badFDChildEnv); role != "" {
 		os.Exit(badFDChildMain(role))
+	}
+	if os.Getenv(preopenChildEnv) != "" {
+		os.Exit(preopenChildMain())
 	}
 	if scenario := os.Getenv(seqChildEnv); scenario != "" {
 		if err := runSeqChild(scenario); err != nil {

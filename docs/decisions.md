@@ -473,6 +473,70 @@ deferred.
   change every trace's bytes; a `toolchain go1.26.x` line —
   it hides the 1.27 difference instead of settling it and
   costs a download.
+- **#35 Connections open before the session are seeded** (task
+  cm4). A TCP socket registers its owner only at connect or
+  accept (`sock_owner_map`), so a connection a target opened
+  before the session — a keep-alive client, a connection pool
+  — gave no state record, its reads and writes no conn id, and
+  the build no edge until it reconnected (Rocky 9.9, task 4k4:
+  726 events, 0 edges). Now the tracer seeds such sockets:
+  right after the probes attach and the start targets are in
+  (a pattern's start scan included), and again whenever it
+  adopts a process that was already running (a `-listen-port`
+  session's restarted owner), userspace runs two BPF task-file
+  iterators once each (`iter/task_file`, Linux 5.8; el9 has
+  it) by reading them to the end; nothing stays attached. The
+  first, `iormesh_seed_listen`, notes the (local address,
+  port) of every listening TCP socket of any task the tracer's
+  PID namespace shows. The second, `iormesh_seed_sock`, takes
+  every TCP socket of a traced target that is in no state of
+  CLOSE or LISTEN and not registered yet, registers it as a
+  connect would (pid, fd, socket inode; `BPF_NOEXIST`, so a
+  connect or accept racing the walk keeps its own entry and no
+  socket is seeded twice), and emits a `tcp_state` record
+  whose old state is a marker beyond every TCP state:
+  `TCP_STATE_INITIAL_SERVER` (258) when a listener holds the
+  socket's local port, on its address or the wildcard (or the
+  socket is in SYN_RECV), else `TCP_STATE_INITIAL_CLIENT`
+  (257). It carries the 4-tuple and the four `tcp_sock` fields
+  (#26), read like the accept snapshot's: re-read until two
+  reads agree, else torn. The correlator binds the fd to the
+  socket (as a connect's first record does), takes the socket
+  as established, and writes a `tcp_state` event with
+  `args.sock_snapshot` `initial_client` or `initial_server`.
+  The merge reads that value as role evidence, keys the half
+  from it as from an accept snapshot (only when no locked
+  state change keys it), and takes the half's `Established`
+  as an upper bound: such a half is a candidate for a partner
+  established no later than its own time plus the window, two
+  of them always — the ISN pair alone already tells reused
+  tuples apart (S2); the window only guards the ISN clock's
+  wrap. `report` and the service database take the role too.
+  Why the listener test: the kernel keeps no "accepted" mark
+  on an established socket, and the key's SYN correction
+  (#26) needs the role; a local port some listener holds is
+  how `ss`-based tools tell a server end. Why iterators: the
+  owner map is keyed by `struct sock` address, which /proc
+  and sock_diag never show; the iterator runs in the kernel
+  over the tracer's own PID namespace, so a pod's tracer seeds
+  its pod's processes only. What stays: a client whose local
+  port a listener of another network namespace also holds, or
+  one bound to a listening port on purpose, reads as a server
+  — its key then misses by one and the half stays `no_match`,
+  never a wrong fuse (likewise a server whose listener closed,
+  read as a client); calls between the attach and the seeding
+  walk (milliseconds) name no connection; bytes moved before
+  the session are in no sum, so the stream check fails for
+  such a direction as it must (the counter proof still
+  holds); and an initial half gives no handshake clock bound.
+  Rejected: inferring the role at the merge from the two
+  ends' raw ISN pairs — it needs both ends traced, and a
+  single host's report needs the role too; registering lazily
+  on a socket's first read or write — an fd walk on every data
+  call; duplicating the target's descriptor (`pidfd_getfd`)
+  to snapshot it through a test run — the tracer would hold
+  the target's socket, delaying its close; keeping it a
+  documented limitation — pooled clients are the common case.
 
 ## Open — raised for M2 (built on the default)
 

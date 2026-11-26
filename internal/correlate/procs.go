@@ -208,7 +208,9 @@ func (p *procState) nextGen(fd int32) uint32 {
 //     it reports the generation that creation will get (use() would
 //     register, and maybe bump, the number before it exists);
 //   - the first record of a connecting socket (CLOSE -> SYN_SENT, inside
-//     connect) binds the fd the connect acts on;
+//     connect) binds the fd the connect acts on, and an initial snapshot
+//     (a socket open before the session, decision #35) the fd it was
+//     found at — usually gen 0, an fd that predates the trace;
 //   - later transitions report the instance bound then (kept on the
 //     socket), even once the fd was closed (TCP_CLOSE often follows
 //     close(2)) — never re-binding a number another open may reuse.

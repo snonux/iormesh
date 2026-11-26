@@ -13,17 +13,18 @@ nothing listens yet (`target spec: nothing listens on TCP port
 started later, but a JVM started after the session gets its Java
 agent late ([chapter 8](08-java-query.md)).
 
-A connection that is already open when the session starts is not
-seen as a connection: the tracer sees reads and writes on its
-socket, but no connect or accept, so it makes no edge (task cm4).
-A client that keeps one pooled or keep-alive connection open
-shows no edge until it opens a new one. Run on Rocky 9.9 (task
-4k4), a JVM calling an HTTP server every 3 s over one keep-alive
-connection, deployed while both ran, built `merged 0 services, 0
-edges` from 726 events; after the client was restarted under the
-running session, the next build had the edge, fused. Deploy before
-the clients connect where you can, or restart them once the
-sessions run.
+A connection that is already open when the session starts — a
+pooled or keep-alive client's — needs no restart: right after
+the probes attach, the tracer seeds every TCP socket the targets
+hold with an initial snapshot (`tcp_state` with
+`args.sock_snapshot` `initial_client` or `initial_server`), so
+its reads and writes carry a connection from then on and it
+makes an edge like any other (decision #35). A tracer older than
+that (task cm4) saw such a connection only once the client
+opened a new one: on Rocky 9.9 (task 4k4) the first build after
+deploying over a running keep-alive client was `merged 0
+services, 0 edges` from 726 events. Upgrade such hosts by
+deploying; the session starts over with the new tracer.
 
 ## Deploy
 

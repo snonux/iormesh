@@ -101,7 +101,16 @@ func TestEl9RecordLayout(t *testing.T) {
 	}
 	t.Logf("record loads with el9 BTF %v, with host BTF %v", el9, host)
 	checkRelocatesClean(t, btf, seqDataPrograms)
+	checkRelocatesClean(t, btf, seedPrograms)
 }
+
+// seedPrograms are the session-start seeding's task-file iterators
+// (internal/c/sock.c; decision #35, task cm4), which nothing attaches at
+// load and which read struct sock, socket, file, inode and tcp_sock
+// fields and, in pod mode, the PID-namespace walk through CO-RE
+// relocations. Their context is a struct of sock.c's own, not vmlinux.h's,
+// so it carries no relocation the trimmed BTF would have to hold.
+var seedPrograms = []string{"iormesh_seed_listen", "iormesh_seed_sock"}
 
 // seqDataPrograms are tail-call targets that read tcp_sock fields through
 // CO-RE relocations (internal/c/tcpseq.c, tasks xe4 and wi4), so

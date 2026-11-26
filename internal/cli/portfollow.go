@@ -260,8 +260,9 @@ func (s *session) refuseHolder(pid uint32, why string) {
 // traceHolder traces pid, a holder of the port whose identity id was
 // checked against the listing: into target_map with addRunning's
 // liveness re-check, into the live set, a stderr line naming it as what,
-// an -agent late attach (task lh4), and the correlator's attach event of
-// this incarnation. It reports whether pid is traced now.
+// an -agent late attach (task lh4), the correlator's attach event of
+// this incarnation, and the seeding of its open sockets (task cm4). It
+// reports whether pid is traced now.
 func (s *session) traceHolder(pid uint32, id correlate.Identity, what string) (bool, error) {
 	added, err := s.addRunning(pid, id.StartNS)
 	if err != nil || !added {
@@ -270,7 +271,13 @@ func (s *session) traceHolder(pid uint32, id correlate.Identity, what string) (b
 	s.live[pid] = id.StartNS
 	_, _ = fmt.Fprintf(s.log, "iormesh: port %d: following %s pid %d\n", s.follow.port, what, pid)
 	s.late.exec(pid)
-	return true, s.c.Seed(pid, id)
+	if err := s.c.Seed(pid, id); err != nil {
+		return true, err
+	}
+	// It ran before the session took it on: its open connections need
+	// seeding like the start targets' (decision #35).
+	s.seedSockets()
+	return true, nil
 }
 
 // awaitService makes a port session that starts with no target wait for

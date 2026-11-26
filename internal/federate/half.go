@@ -39,6 +39,13 @@ type Half struct {
 	// boot ns: two hosts' boot clocks share no epoch, while NTP keeps
 	// wall clocks within far less than the fusion window.
 	Established uint64
+	// Before marks a half whose socket was already open when its session
+	// started (an initial snapshot, args.sock_snapshot initial_client or
+	// initial_server; decision #35): the trace saw no connect or accept,
+	// so Established is only an upper bound of when the connection was
+	// established, and the fusion window bounds it from one side only
+	// (countCandidates).
+	Before bool
 }
 
 // stateRec is one tcp_state record of a half, kept until the half's role
@@ -49,6 +56,10 @@ type stateRec struct {
 	boot  uint64 // the host's boot clock: one clock for every session on the host
 	f     seqFields
 	has   bool // the record carried the four tcp_sock fields
+	// initial marks the tracer's initial snapshot of a socket open before
+	// the session (decision #35): read unlocked like the accept snapshot,
+	// so it keys a half only when no state change does (key).
+	initial bool
 }
 
 // halfAcc accumulates one (host, conn_id) across all events and sources.
@@ -56,8 +67,9 @@ type halfAcc struct {
 	project        string
 	projects       map[string]bool // every session's project that reported the half
 	procs          map[string]bool
-	client, server bool // role evidence: connect / accept, SYN_SENT
+	client, server bool // role evidence: connect / accept, SYN_SENT, an initial snapshot
 	tcp            bool // a tcp_state record: only TCP ends are halves
+	before         bool // an initial snapshot: open before the session (Half.Before)
 	local, peer    netip.AddrPort
 	first          uint64 // earliest wall ns of any record
 	recs           []stateRec
@@ -151,6 +163,18 @@ func (c *collector) add(ev *schema.Event) {
 	}
 }
 
+// initialRole folds an initial snapshot's role (schema.Event.InitialRole)
+// into the half's role evidence: the socket was open before the session,
+// so no connect or accept will ever say it.
+func (a *halfAcc) initialRole(ev *schema.Event) {
+	switch ev.InitialRole() {
+	case RoleClient:
+		a.client, a.before = true, true
+	case RoleServer:
+		a.server, a.before = true, true
+	}
+}
+
 // isFinal reports whether ev is the tracer's final snapshot of a socket
 // still open at the end of its session (args.sock_snapshot; task sf4). It
 // is there for the counter proof alone (timing.state): no transition, so
@@ -179,11 +203,14 @@ func (a *halfAcc) tuple(args *schema.Args) {
 }
 
 // addState records a tcp_state event: its role evidence (only the
-// connecting side passes through SYN_SENT) and its tcp_sock fields.
+// connecting side passes through SYN_SENT; an initial snapshot names its
+// role) and its tcp_sock fields.
 func (a *halfAcc) addState(ev *schema.Event) {
 	a.tcp = true
 	args := &ev.Args
-	r := stateRec{state: *args.SockState, wall: ev.WallNS, boot: ev.BootNS}
+	r := stateRec{state: *args.SockState, wall: ev.WallNS, boot: ev.BootNS,
+		initial: ev.InitialRole() != ""}
+	a.initialRole(ev)
 	if args.SndUna != nil {
 		// Validate guarantees all four together on a tcp_state record.
 		r.f = seqFields{SndUna: *args.SndUna, RcvNxt: *args.RcvNxt,
@@ -214,14 +241,15 @@ func (c *collector) halves() []Half {
 }
 
 // half finishes one accumulated half: its role and its key. A server end
-// whose accept the trace never saw (accepted before the session
-// attached, or by an untraced thread of a traced process) has no role
-// evidence — the accept snapshot is no proof on its own — and stays
-// unresolved as no_role.
+// whose accept the trace never saw (accepted by an untraced thread of a
+// traced process) has no role evidence — the accept snapshot is no proof
+// on its own — and stays unresolved as no_role. One accepted before the
+// session has its initial snapshot's role (decision #35), unless the
+// tracer could not seed it (an old tracer, a socket it missed).
 func (a *halfAcc) half(k LocalConn) Half {
 	h := Half{Host: k.Host, Project: a.project, ConnID: k.ConnID,
 		Procs: slices.Sorted(maps.Keys(a.procs)), Local: a.local, Peer: a.peer,
-		Established: a.first}
+		Established: a.first, Before: a.before}
 	switch {
 	case a.client:
 		h.Role = RoleClient
@@ -250,13 +278,23 @@ func (a *halfAcc) half(k LocalConn) Half {
 // snapshot is the half's earliest record: the tracer timestamps it before
 // it registers the socket, so every state change of it is later. A lost
 // snapshot makes the first state change the fallback instead, which only
-// costs that record's say in the conflict check.
+// costs that record's say in the conflict check. An initial snapshot (a
+// socket open before the session, decision #35) is read the same
+// unlocked way, on either role, and is marked as such: it is the
+// snapshot, and a server half that has one had no accept snapshot.
 func (a *halfAcc) key(h *Half) {
 	recs := slices.Clone(a.recs)
 	slices.SortStableFunc(recs, func(x, y stateRec) int { return cmp.Compare(x.boot, y.boot) })
-	locked, snap := recs, []stateRec(nil)
-	if h.Role == RoleServer && len(recs) > 0 {
-		snap, locked = recs[:1], recs[1:]
+	var locked, snap []stateRec
+	for _, r := range recs {
+		if r.initial {
+			snap = append(snap, r)
+		} else {
+			locked = append(locked, r)
+		}
+	}
+	if h.Role == RoleServer && len(snap) == 0 && len(locked) > 0 {
+		snap, locked = locked[:1], locked[1:]
 	}
 	keyRecords(h, locked)
 	if !h.HasKey && !h.KeyConflict {

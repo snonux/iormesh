@@ -263,7 +263,8 @@ func objectPrograms(t *testing.T) map[string]string {
 // some family, a dispatcher, the PID-namespace pick of the task_newtask
 // program or the Java mark's uprobes - or one it runs instead: the final
 // socket snapshot, which FinalSockets runs through BPF_PROG_TEST_RUN (task
-// sf4). restart.c defined two programs no Go code attached, so the state
+// sf4), and the session-start seeding's two iterators, which SeedSockets
+// attaches and reads once (task cm4). restart.c defined two programs no Go code attached, so the state
 // they were to keep was never kept (task pf4), and exec.c's task_rename was compiled and loaded for nothing until
 // task 0g4 attached it. The generated handle_sys_* handlers are left out:
 // they cover the whole syscall table, and only the families pick which
@@ -271,7 +272,8 @@ func objectPrograms(t *testing.T) map[string]string {
 // the object, so a renamed handler fails here, not on a host.
 func TestEveryHandWrittenProgramIsAttached(t *testing.T) {
 	attached := map[string]bool{newtaskProg: true, newtaskNSProg: true,
-		javaMarkEnterProg: true, javaMarkExitProg: true, sockFinalProg: true}
+		javaMarkEnterProg: true, javaMarkExitProg: true, sockFinalProg: true,
+		seedListenProg: true, seedSockProg: true}
 	for _, p := range append(ProbesFor(tracepoints.AllFamilies()), dispatchers...) {
 		attached[p.Program] = true
 	}

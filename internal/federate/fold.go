@@ -30,12 +30,17 @@ type socketKey struct {
 // tuple and the same ISN pair at once would fold, a contrived case the
 // halves cannot tell apart since they carry no netns). The window keeps
 // a reuse of tuple and pair after an ISN-clock wrap apart, as Fuse
-// does. Halves without a key or a known tuple never fold. The folded
-// half keeps the smallest conn id (deterministic) and the earliest
-// Established, takes the union of the processes, and lists the other
-// ids as Aliases, which the merge renames with it; its records are the
-// kept id's (clock.go reads one session's records, which hold every
-// event of the socket that session saw).
+// does. A half whose socket was open before its session (Before,
+// decision #35) has an Established that only bounds the true time from
+// above, so it joins the cluster before it whatever the gap: a session
+// started minutes after another one that saw the connect still reports
+// the same socket. Halves without a key or a known tuple never fold.
+// The folded half keeps the smallest conn id (deterministic) and the
+// earliest Established, takes the union of the processes, and lists the
+// other ids as Aliases, which the merge renames with it; it is Before
+// only when every half was. Its records are the kept id's (clock.go
+// reads one session's records, which hold every event of the socket
+// that session saw).
 func foldSessions(halves []Half, window uint64) []Half {
 	groups := map[socketKey][]Half{}
 	var out []Half
@@ -54,7 +59,7 @@ func foldSessions(halves []Half, window uint64) []Half {
 		})
 		for len(g) > 0 {
 			n := 1
-			for n < len(g) && g[n].Established-g[0].Established <= window {
+			for n < len(g) && (g[n].Before || g[n].Established-g[0].Established <= window) {
 				n++
 			}
 			out = append(out, foldOne(g[:n]))
@@ -71,6 +76,7 @@ func foldOne(g []Half) Half {
 	}
 	keep := slices.MinFunc(g, func(a, b Half) int { return cmp.Compare(a.ConnID, b.ConnID) })
 	keep.Established = g[0].Established
+	keep.Before = !slices.ContainsFunc(g, func(h Half) bool { return !h.Before })
 	var procs, aliases []string
 	for _, h := range g {
 		procs = append(procs, h.Procs...)

@@ -38,7 +38,14 @@
 // the merge's counter proof. Userspace runs iormesh_sock_final once per
 // sock_owner_map entry; nothing attaches it (task sf4).
 //
-// Both kinds of record also carry four struct tcp_sock fields (snd_una,
+// The start of the session needs a fourth: a socket a target opened before
+// the session saw no connect or accept, so nothing registered it and its
+// reads and writes named no connection (task cm4). Userspace runs two
+// task-file iterators once each (iormesh_seed_listen, iormesh_seed_sock;
+// decision #35): they register every such socket of a target and emit an
+// initial snapshot of it (oldstate TCP_STATE_INITIAL_CLIENT/_SERVER).
+//
+// Every kind of record also carries four struct tcp_sock fields (snd_una,
 // rcv_nxt, bytes_acked, bytes_received; M4, decision #26), from which the
 // controller's merge rebuilds the TCP initial-sequence-number pair - the
 // key that joins the two ends of one connection traced on two hosts.
@@ -142,14 +149,14 @@ static __always_inline int iormesh_sock_is_tcp(struct sock *sk) {
     return BPF_CORE_READ_BITFIELD_PROBED(sk, sk_protocol) == IPPROTO_TCP;
 }
 
-// iormesh_tcp_sock_of_fd returns the struct sock behind descriptor fd when it
-// is a TCP socket, else NULL, and stores the socket file's inode number in
-// *ino (the owner's generation, struct sock_owner). A socket inode alone is
-// not proof: an O_PATH descriptor of a bound AF_UNIX path has one too, with
-// no struct socket behind private_data - hence the NULL and type checks
-// before the sock.
-static __always_inline struct sock *iormesh_tcp_sock_of_fd(__s32 fd, __u64 *ino) {
-    struct file *file = iormesh_file_of_fd(fd);
+// iormesh_tcp_sock_of_file returns the struct sock behind file when it is a
+// TCP socket, else NULL, and stores the socket file's inode number in *ino
+// (the owner's generation, struct sock_owner). A socket inode alone is not
+// proof: an O_PATH descriptor of a bound AF_UNIX path has one too, with no
+// struct socket behind private_data - hence the NULL and type checks before
+// the sock. Shared by the descriptor walk below and the session-start
+// iterators (iormesh_seed_sock), which are handed the file itself.
+static __always_inline struct sock *iormesh_tcp_sock_of_file(struct file *file, __u64 *ino) {
     struct socket *sock;
     struct sock *sk;
 
@@ -165,6 +172,12 @@ static __always_inline struct sock *iormesh_tcp_sock_of_fd(__s32 fd, __u64 *ino)
     if (!sk || !iormesh_sock_is_tcp(sk))
         return 0;
     return sk;
+}
+
+// iormesh_tcp_sock_of_fd is iormesh_tcp_sock_of_file for the current
+// task's descriptor fd.
+static __always_inline struct sock *iormesh_tcp_sock_of_fd(__s32 fd, __u64 *ino) {
+    return iormesh_tcp_sock_of_file(iormesh_file_of_fd(fd), ino);
 }
 
 // iormesh_sock_register records pid/fd, with the socket file's inode
@@ -577,4 +590,186 @@ int iormesh_sock_final(struct bpf_raw_tracepoint_args *ctx) {
     iormesh_read_sk_tuple(ev, sk);
     iormesh_read_tcp_seq(ev, sk);
     return 1;
+}
+
+// The session-start seeding (decision #35, task cm4). A socket a target
+// opened before the session gave no connect or accept to register it, so
+// none of its records reached the trace and its reads and writes named no
+// connection: a pooled or keep-alive client was invisible until it
+// reconnected. Userspace runs the two iterators below once each, in order,
+// right after the probes attached and again whenever it adopts a process
+// that was already running (internal/bpf/seedsock.go): it attaches one,
+// reads it to the end and detaches it. A task-file iterator (Linux 5.8;
+// el9's 5.14 has it) visits every open file of every process the tracer's
+// PID namespace shows, in the kernel, with the struct file in hand - the
+// struct sock address sock_owner_map is keyed by is what neither /proc nor
+// sock_diag ever shows.
+
+// struct iormesh_iter_task_file mirrors the kernel's iterator context
+// struct bpf_iter__task_file: meta, task and file are 8-byte pointer slots
+// (__bpf_md_ptr), fd a u32 in between. Declared here, not taken from
+// vmlinux.h, whose structs carry preserve_access_index: the context is a
+// fixed ABI, and a CO-RE relocation against it would need a type the
+// trimmed el9 BTF of internal/btf_root_test.go does not hold. The context
+// is copied with one probe read, so task and file are plain scalars:
+// handed on as the verifier's BTF pointers they could not reach a global
+// function such as iormesh_ns_ids (pidns.c), which takes scalars only.
+struct iormesh_iter_task_file {
+    __u64 meta;
+    __u64 task;
+    __u32 fd;
+    __u64 file;
+};
+
+// struct iormesh_listen_key is a listening TCP socket's local address
+// (IPv4 in the first 4 bytes, zeroes after; all zero for the wildcard of
+// either family) and port.
+struct iormesh_listen_key {
+    __u8 addr[TCP_ADDR_LEN];
+    __u32 port;
+};
+
+// seed_listen_map is the first iterator's output, the second's input: the
+// local address and port of every listening TCP socket. Userspace empties
+// it before each seeding, so a listener closed since the last one leaves
+// nothing behind. A full map loses only listeners - their accepted
+// sockets then read as client ends (iormesh_seed_role).
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 16384);
+    __type(key, struct iormesh_listen_key);
+    __type(value, __u8);
+} seed_listen_map SEC(".maps");
+
+// iormesh_listen_key_of fills k with sk's local address and port.
+static __always_inline void iormesh_listen_key_of(struct iormesh_listen_key *k, struct sock *sk) {
+    k->port = BPF_CORE_READ(sk, __sk_common.skc_num);
+    if (BPF_CORE_READ(sk, __sk_common.skc_family) == IORMESH_AF_INET6) {
+        bpf_core_read(k->addr, TCP_ADDR_LEN, &sk->__sk_common.skc_v6_rcv_saddr);
+        return;
+    }
+    bpf_core_read(k->addr, 4, &sk->__sk_common.skc_rcv_saddr);
+}
+
+// iormesh_iter_copy copies the iterator's context into *it and reports
+// whether it names a task and a file (the last call of an iteration names
+// neither).
+static __always_inline int iormesh_iter_copy(struct iormesh_iter_task_file *it, void *ctx) {
+    if (bpf_probe_read_kernel(it, sizeof(*it), ctx))
+        return 0;
+    return it->task && it->file;
+}
+
+// iormesh_seed_listen is the first iterator: it notes every listening TCP
+// socket in seed_listen_map, whichever process holds it - a server's
+// listener is often its supervisor's, which need not be a target.
+SEC("iter/task_file")
+int iormesh_seed_listen(void *ctx) {
+    struct iormesh_iter_task_file it;
+    struct iormesh_listen_key k = {};
+    struct sock *sk;
+    __u64 ino = 0;
+    __u8 one = 1;
+
+    if (!iormesh_iter_copy(&it, ctx))
+        return 0;
+    sk = iormesh_tcp_sock_of_file((struct file *)it.file, &ino);
+    if (!sk || iormesh_sock_state(sk) != TCP_LISTEN)
+        return 0;
+    iormesh_listen_key_of(&k, sk);
+    bpf_map_update_elem(&seed_listen_map, &k, &one, BPF_ANY);
+    return 0;
+}
+
+// iormesh_seed_role is the role marker of an initial snapshot of sk, in
+// state. The kernel keeps no "accepted" mark on an established socket, and
+// the merge's key needs the role (internal/federate, keyFrom), so: a
+// socket still in SYN_SENT is connecting, one in SYN_RECV (a fast-open
+// child accepted before its handshake completed) was accepted, and any
+// other is a server end when a listener holds its local port - on its own
+// address or the wildcard - and a client end otherwise. That is how
+// ss-based tools tell; a client whose local port a listener of another
+// network namespace holds, or which bound a listening port on purpose,
+// reads as a server - its key then misses by one and the merge leaves it
+// unfused, never fused wrongly (decision #35).
+static __always_inline __s32 iormesh_seed_role(struct sock *sk, int state) {
+    struct iormesh_listen_key k = {};
+
+    if (state == TCP_SYN_SENT)
+        return TCP_STATE_INITIAL_CLIENT;
+    if (state == TCP_SYN_RECV || state == TCP_NEW_SYN_RECV)
+        return TCP_STATE_INITIAL_SERVER;
+    iormesh_listen_key_of(&k, sk);
+    if (bpf_map_lookup_elem(&seed_listen_map, &k))
+        return TCP_STATE_INITIAL_SERVER;
+    __builtin_memset(k.addr, 0, sizeof(k.addr));
+    if (bpf_map_lookup_elem(&seed_listen_map, &k))
+        return TCP_STATE_INITIAL_SERVER;
+    return TCP_STATE_INITIAL_CLIENT;
+}
+
+// iormesh_seed_register registers sk to pid's descriptor fd, as a connect
+// would, and reports whether it did. A socket registered already - by an
+// earlier seeding, or by a connect or accept racing this walk - keeps its
+// entry and is not seeded again: the update is BPF_NOEXIST. An entry of
+// another inode is an earlier life's whose TCP_CLOSE run was lost
+// (sock_owner_map): it is dropped first.
+static __always_inline int iormesh_seed_register(struct sock *sk, __u32 pid, __s32 fd, __u64 ino) {
+    __u64 key = (__u64)sk;
+    struct sock_owner owner = {.pid = pid, .fd = fd, .ino = ino};
+    struct sock_owner *old = bpf_map_lookup_elem(&sock_owner_map, &key);
+
+    if (old && old->ino == ino)
+        return 0;
+    if (old)
+        bpf_map_delete_elem(&sock_owner_map, &key);
+    return !bpf_map_update_elem(&sock_owner_map, &key, &owner, BPF_NOEXIST);
+}
+
+// iormesh_seed_sock is the second iterator: every TCP socket of a traced
+// target, other than a listener or one already closed, that nothing
+// registered yet is registered to the descriptor the walk found it at and
+// reported in an initial snapshot (types.h, struct tcp_state_event): its
+// role marker, state, tuple and the four tcp_sock fields. The fields are
+// read like the accept snapshot's - the socket is not locked, so they are
+// re-read until two reads agree, else the record is TCP_SEQ_TORN - and the
+// record is reserved, so timestamped, before the socket is registered:
+// every state change of it is then later than its snapshot. The tracer's
+// own process is never a target (filter.c, IOR_PID_FILTER), and a task
+// outside the tracer's PID namespace has pid 0 (pidns.c), so a pod's
+// tracer seeds its pod's processes only.
+SEC("iter/task_file")
+int iormesh_seed_sock(void *ctx) {
+    struct iormesh_iter_task_file it;
+    struct tcp_state_event *ev;
+    struct sock *sk;
+    __u64 ino = 0;
+    __u32 pid;
+    int state;
+
+    if (!iormesh_iter_copy(&it, ctx))
+        return 0;
+    pid = iormesh_task_tgid((struct task_struct *)it.task);
+    if (!pid || pid == IOR_PID_FILTER || !iormesh_pid_targeted(pid))
+        return 0;
+    sk = iormesh_tcp_sock_of_file((struct file *)it.file, &ino);
+    if (!sk)
+        return 0;
+    state = iormesh_sock_state(sk);
+    if (state == TCP_CLOSE || state == TCP_LISTEN)
+        return 0;
+    ev = iormesh_reserve_tcp_state((__u64)sk, pid, (__s32)it.fd);
+    if (!iormesh_seed_register(sk, pid, (__s32)it.fd, ino)) {
+        if (ev)
+            bpf_ringbuf_discard(ev, 0);
+        return 0;
+    }
+    if (!ev)
+        return 0;
+    ev->oldstate = iormesh_seed_role(sk, state);
+    ev->newstate = state;
+    iormesh_read_sk_tuple(ev, sk);
+    iormesh_read_tcp_seq_stable(ev, sk);
+    bpf_ringbuf_submit(ev, 0);
+    return 0;
 }

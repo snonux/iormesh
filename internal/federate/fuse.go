@@ -67,7 +67,9 @@ type Fusion struct {
 
 // Fuse pairs client and server halves by ISN pair. A client and a server
 // fuse only when each is the other's single candidate: equal keys and
-// Established times at most window apart. Anything else — no key, no
+// Established times at most window apart, from one side only for a half
+// whose socket was open before its session (Half.Before, countRun).
+// Anything else — no key, no
 // partner, or two — leaves every half involved unresolved, so a fused
 // edge is always a fact and never a coin toss. The 4-tuples are not
 // compared across hosts: NAT rewrites them. Within one host they are:
@@ -136,54 +138,93 @@ func (f *Fusion) fuseGroup(g []Half, window uint64) {
 // the window of one half, and, when n == 1, that one's index in g.
 type candidates struct{ n, only int }
 
+// roleSet is one role's halves of a group, as indexes into it, each part
+// sorted by Established: exact are the halves whose connect or accept
+// the trace saw, before those whose socket was open before their session
+// (Half.Before).
+type roleSet struct{ exact, before []int }
+
 // countCandidates counts every half's candidates in O(n log n) time and
 // O(n) memory: each role's halves sorted by Established, a half's
-// candidates are one contiguous run of the other role's, found by two
-// binary searches. Unkeyed halves are already gone, so a role is client
-// or server.
+// candidates in each part of the other role's are one contiguous run,
+// found by two binary searches. Unkeyed halves are already gone, so a
+// role is client or server.
 func countCandidates(g []Half, window uint64) []candidates {
-	var clients, servers []int
+	var clients, servers roleSet
 	for i, h := range g {
+		set := &servers
 		if h.Role == RoleClient {
-			clients = append(clients, i)
+			set = &clients
+		}
+		if h.Before {
+			set.before = append(set.before, i)
 		} else {
-			servers = append(servers, i)
+			set.exact = append(set.exact, i)
 		}
 	}
 	byTime := func(a, b int) int { return cmp.Compare(g[a].Established, g[b].Established) }
-	slices.SortFunc(clients, byTime)
-	slices.SortFunc(servers, byTime)
+	for _, s := range [][]int{clients.exact, clients.before, servers.exact, servers.before} {
+		slices.SortFunc(s, byTime)
+	}
 	m := make([]candidates, len(g))
 	countRun(g, clients, servers, window, m)
 	countRun(g, servers, clients, window, m)
 	return m
 }
 
-// countRun fills m for each half in own from opp, sorted by Established:
-// the run of opp within [t-window, t+window], saturating at both ends of
-// uint64: two halves are candidates when their Established times differ
-// by at most window.
-func countRun(g []Half, own, opp []int, window uint64, m []candidates) {
-	for _, i := range own {
+// countRun fills m for each half of own from opp. Two exact halves are
+// candidates when their Established times differ by at most window. A
+// Before half's time t is only an upper bound — its connection was
+// established at t or earlier — so it is a candidate for an exact half
+// established no later than t + window, and for every Before half: both
+// were open at their sessions' starts, whenever those were. The ISN pair
+// already tells reused tuples apart (S2); the window only guards the ISN
+// clock's wrap, which a pair of halves dated from one side cannot.
+func countRun(g []Half, own, opp roleSet, window uint64, m []candidates) {
+	count := func(i int, before bool) {
 		t := g[i].Established
 		from := t - min(t, window)
 		to := t + min(window, math.MaxUint64-t)
-		lo, _ := slices.BinarySearchFunc(opp, from, func(j int, v uint64) int {
-			return cmp.Compare(g[j].Established, v)
-		})
-		// n is the run's length: searching opp[lo:], with equal times
-		// counted as smaller, lands just past the last half at exactly to.
-		n, _ := slices.BinarySearchFunc(opp[lo:], to, func(j int, v uint64) int {
-			if g[j].Established <= v {
-				return -1
-			}
-			return 1
-		})
-		m[i] = candidates{n: n}
-		if n > 0 {
-			m[i].only = opp[lo]
+		var e, b run
+		if before {
+			e, b = span(g, opp.exact, 0, to), run{n: len(opp.before)}
+		} else {
+			e, b = span(g, opp.exact, from, to), span(g, opp.before, from, math.MaxUint64)
+		}
+		m[i] = candidates{n: e.n + b.n}
+		switch {
+		case e.n > 0:
+			m[i].only = opp.exact[e.lo]
+		case b.n > 0:
+			m[i].only = opp.before[b.lo]
 		}
 	}
+	for _, i := range own.exact {
+		count(i, false)
+	}
+	for _, i := range own.before {
+		count(i, true)
+	}
+}
+
+// run is a contiguous run of a sorted index list: its start and length.
+type run struct{ lo, n int }
+
+// span returns the run of idx, sorted by Established, whose times lie in
+// [from, to].
+func span(g []Half, idx []int, from, to uint64) run {
+	lo, _ := slices.BinarySearchFunc(idx, from, func(j int, v uint64) int {
+		return cmp.Compare(g[j].Established, v)
+	})
+	// n is the run's length: searching idx[lo:], with equal times counted
+	// as smaller, lands just past the last half at exactly to.
+	n, _ := slices.BinarySearchFunc(idx[lo:], to, func(j int, v uint64) int {
+		if g[j].Established <= v {
+			return -1
+		}
+		return 1
+	})
+	return run{lo: lo, n: n}
 }
 
 // newConn names a fused connection. The id hashes the key and both

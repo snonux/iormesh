@@ -93,6 +93,70 @@ func TestLoopbackFusion(t *testing.T) {
 	}
 }
 
+// TestInitialSnapshotFusion (decision #35, task cm4): a loopback
+// connection both of whose ends were open before the session — no
+// connect, no accept, only the tracer's two initial snapshots — fuses
+// into one conn id, which the ends' later reads and writes carry; each
+// snapshot is a tcp_state event marked with its role, bound to the fd
+// it was found at as an fd that predates the trace (gen 0), and the
+// graph has a fused connected edge per process. A snapshot whose reads
+// tore carries none of the four fields, and a write on an fd no record
+// bound names no connection.
+func TestInitialSnapshotFusion(t *testing.T) {
+	c, sink := newTest(t)
+	cnow, snow := uint64(100), uint64(100)
+	client := feeder{t, c, 100, 101, &cnow}
+	server := feeder{t, c, 200, 201, &snow}
+	ci := tcp(client.tick(), 0xA, 100, 6, types.TCP_STATE_INITIAL_CLIENT, tcpEstablished, cli, srv)
+	ci.SndUna, ci.RcvNxt, ci.BytesAcked, ci.BytesReceived = 0x1006, 0xF0000008, 6, 7
+	client.handle(ci)
+	snow = cnow
+	si := tcp(server.tick(), 0xB, 200, 7, types.TCP_STATE_INITIAL_SERVER, tcpEstablished, srv, cli)
+	si.SeqStatus = types.TCP_SEQ_TORN
+	server.handle(si)
+	client.write(6, 5)
+	server.read(7, 5)
+	server.write(9, 5) // an fd no record bound
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	states := byKind(sink.events, schema.KindTCPState)
+	if len(states) != 2 {
+		t.Fatalf("%d tcp_state events, want the two initial snapshots", len(states))
+	}
+	id := states[0].ConnID
+	for i, want := range []string{schema.SockSnapshotInitialClient, schema.SockSnapshotInitialServer} {
+		e := states[i]
+		if e.Args.SockSnapshot == nil || *e.Args.SockSnapshot != want || e.ConnID == "" || e.ConnID != id ||
+			e.FDGen != 0 {
+			t.Errorf("snapshot %d: mark %v conn %q gen %d, want %s on one conn, gen 0", i,
+				e.Args.SockSnapshot, e.ConnID, e.FDGen, want)
+		}
+		if err := e.Validate(); err != nil {
+			t.Errorf("snapshot %d invalid: %v", i, err)
+		}
+	}
+	if states[0].Args.SndUna == nil || *states[0].Args.BytesAcked != 6 || states[1].Args.SndUna != nil {
+		t.Errorf("fields: client %+v, torn server %+v; want the client's only", states[0].Args, states[1].Args)
+	}
+	for _, e := range append(byKind(sink.events, schema.KindWrite), byKind(sink.events, schema.KindRead)...) {
+		want := id
+		if e.FD == 9 {
+			want = ""
+		}
+		if e.ConnID != want {
+			t.Errorf("%s on fd %d: conn %q, want %q", e.Event, e.FD, e.ConnID, want)
+		}
+	}
+	g := c.Graph()
+	for _, pid := range []uint32{100, 200} {
+		if !hasEdge(g, schema.EdgeConnected, schema.ProcessNodeID("h1", pid, 1000+uint64(pid)),
+			schema.SocketNodeID(id), schema.StateFused) {
+			t.Errorf("no fused connected edge for pid %d: %+v", pid, g.Edges)
+		}
+	}
+}
+
 // TestLoopbackHeldUntilFused: the client's socket events are held until
 // the server's end arrives, so they are emitted with the fused id rather
 // than an early guess.

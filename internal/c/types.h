@@ -13,7 +13,9 @@
 // task_rename_event's comment names its consumer (task 0g4); comments that
 // cited ior's Go files name them as ior's (task gj4); MMSG_EVENT,
 // MMSG_BYTES_PARTIAL and struct mmsg_event added (mmsg.c, task oh4);
-// fd_size_event's flags carry recvmmsg's too (task ok4).
+// fd_size_event's flags carry recvmmsg's too (task ok4);
+// TCP_STATE_INITIAL_CLIENT and TCP_STATE_INITIAL_SERVER added (sock.c,
+// task cm4).
 
 //+build ignore
 
@@ -1035,7 +1037,15 @@ struct syscall_restart_event {
 //     TCP_STATE_FINAL (256, beyond every TCP state) and newstate the
 //     socket's state then. Its byte counters, taken after every call the
 //     session recorded, complete the merge's counter proof
-//     (internal/federate/clockproof.go).
+//     (internal/federate/clockproof.go);
+//   - the session's start, as an initial snapshot of every socket a
+//     target already held (iormesh_seed_sock, a task-file iterator
+//     userspace runs once; decision #35, task cm4): oldstate is
+//     TCP_STATE_INITIAL_CLIENT (257) or TCP_STATE_INITIAL_SERVER (258) -
+//     the end's role, which no transition will tell, server when a
+//     listener held the socket's local port - and newstate the socket's
+//     state then. Its fields are read like the accept snapshot's
+//     (re-read until two reads agree, else TCP_SEQ_TORN).
 // sk is the struct sock address, the join key back to the owner: an fd
 // number can be reused, the socket is the connection. family is AF_INET (2)
 // or AF_INET6 (10); sport/dport are host byte order (sport is the local
@@ -1071,6 +1081,8 @@ struct syscall_restart_event {
 // No implicit padding, 112 bytes.
 #define TCP_STATE_SNAPSHOT 0
 #define TCP_STATE_FINAL 256
+#define TCP_STATE_INITIAL_CLIENT 257
+#define TCP_STATE_INITIAL_SERVER 258
 // seq_status values.
 #define TCP_SEQ_OK 0
 #define TCP_SEQ_TORN 1

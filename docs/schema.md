@@ -16,7 +16,8 @@ which were provisional until then. M4 appended the `fork` and
 (task sf4), the four `tcp_sock` fields of `tcp_state`
 (`args.snd_una`, `args.rcv_nxt`, `args.bytes_acked`,
 `args.bytes_received`), `args.tcp_seq`, `args.bytes_partial` (task
-oh4) and `args.peek` (task ok4). Fields are only ever
+oh4) and `args.peek` (task ok4); `args.sock_snapshot` gained the
+values `initial_client` and `initial_server` (task cm4). Fields are only ever
 appended, and appended fields are optional, so an older reader never
 sees a changed meaning. Enum values (`drop_reason`, `end_reason`, …)
 are appended the same way as event kinds, so a reader should pass an
@@ -169,7 +170,7 @@ IPv4 peers of dual-stack sockets are written unmapped
 | `peek` | `recvfrom`, `recvmsg` and `recvmmsg` only, optional (appended in M4, task ok4): `true` when the call passed `MSG_PEEK` — it copied `bytes` but consumed none, so the stream sums skip it. Never `false`; such a record carries no `tcp_seq` |
 | `pattern` | `attach` only, optional (appended in M4, task ze4): the `-pattern` the session matched the process by; with the project it names the app (`app:<project>/<pattern>`). Absent for a `-pid` or port target. Never empty |
 | `parent_pid`, `parent_incarnation` | `fork` only, both or none (appended in M4, task ze4): the process that forked the child, as its own events name it (raw pid, u32; incarnation, u64); absent when the kernel record could not say |
-| `sock_snapshot` | `tcp_state` only, optional (appended in M4, task sf4): `final` on the tracer's snapshot of a socket still open when the session ended — no transition, `sock_state` is the socket's state then, and the four `tcp_sock` fields are always present; absent on every other record, the accept snapshot's included |
+| `sock_snapshot` | `tcp_state` only, optional (appended in M4, task sf4): `final` on the tracer's snapshot of a socket still open when the session ended — no transition, `sock_state` is the socket's state then, and the four `tcp_sock` fields are always present; `initial_client` or `initial_server` (task cm4, decision #35) on its snapshot of a socket a target already held when the session started — no transition either, the end's role in the value, the four fields present when the state can rebuild the key; absent on every other record, the accept snapshot's included |
 
 The four `tcp_sock` fields come together or not at all: the
 controller's merge rebuilds the connection's ISN pair — the
@@ -203,6 +204,29 @@ send and a receive of one sequence offset are the same bytes
 (milestones.md M4, "Clock reconciliation"); it never keys the
 connection, since it reads an unlocked socket like the accept
 snapshot.
+
+When a session starts — and again when it takes on a process
+that was already running — the tracer adds one `tcp_state`
+record for every TCP socket a target already held, other than
+a listener: the initial snapshot (`args.sock_snapshot:
+"initial_client"` or `"initial_server"`, task cm4, decision
+#35). Without it a connection opened before the session — a
+keep-alive client, a connection pool — had no connect, no
+accept and no state change in the trace, so its reads and
+writes named no connection until it reconnected. The record
+binds the socket to the descriptor it was found at (an fd that
+predates the trace, `fd_gen` 0 unless the trace saw the number
+before), gives the connection its `conn_id` and carries the
+state, tuple and — from `ESTABLISHED` on, unless its reads
+never agreed — the four fields. Its value is the end's role,
+which no later record will say: `initial_server` when a
+listening socket holds the socket's local port (on its address
+or the wildcard), or the socket is in `SYN_RECV`;
+`initial_client` otherwise. It reports no transition either.
+Read from an unlocked socket like the accept snapshot, it keys
+the connection only when no state change does; and since the
+connection was established at its `wall_ns` or earlier, the
+merge's fusion window bounds it from one side only.
 
 `tcp_seq` gives a send or receive its TCP sequence range (start
 sequence plus `bytes`). A byte has the same sequence number on
@@ -248,7 +272,7 @@ the receive that consumes them (tasks ok4, cl4).
 | `open`, `openat`, `openat2` | syscall pair |
 | `read`, `write`, `close` | syscall pair |
 | `connect`, `accept`, `accept4` | syscall pair; args carry the 4-tuple |
-| `tcp_state` | `sock:inet_sock_set_state`, joined to the owning pid/fd |
+| `tcp_state` | `sock:inet_sock_set_state`, joined to the owning pid/fd; the accept snapshot at the accept exit; the initial (task cm4) and final (task sf4) snapshots at the session's start and end |
 | `marker` | an open of `/iormesh-marker/<scenario>/<edge>` |
 | `drop` | loss — gaps are explicit: ring-buffer and decoder loss, skipped program runs (possible loss), or a pattern session's attach gap (`drop_reason`) |
 | `session` | the per-trace header |

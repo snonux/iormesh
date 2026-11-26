@@ -107,10 +107,10 @@ func newSockTable(window uint64) *sockTable {
 //     a connect's CLOSE -> SYN_SENT is its socket's first record — so it
 //     starts a new socket and binds the fd, as on an unknown address;
 //   - a record whose tuple contradicts the socket's (otherLife) is a new
-//     life too. An accept snapshot binds its own fd anyway; any other such
-//     record came before the accept and went out under the stale owner's
-//     pid and fd, which belong to the old life: it binds nothing and is
-//     reported stale.
+//     life too. An accept or initial snapshot binds its own fd anyway (its
+//     owner was registered with it); any other such record came before
+//     the accept and went out under the stale owner's pid and fd, which
+//     belong to the old life: it binds nothing and is reported stale.
 func (t *sockTable) observe(r *types.TcpStateEvent) (s *sockState, first, stale bool) {
 	local, remote := tuple(r)
 	s, ok := t.bySk[r.Sk]
@@ -120,7 +120,7 @@ func (t *sockTable) observe(r *types.TcpStateEvent) (s *sockState, first, stale 
 		first = true
 	case s.otherLife(local, remote):
 		reborn = true
-		stale = r.Oldstate != types.TCP_STATE_SNAPSHOT
+		stale = r.Oldstate != types.TCP_STATE_SNAPSHOT && !isInitial(r)
 	}
 	if first || reborn {
 		s = &sockState{firstSeen: r.Time}
@@ -180,15 +180,24 @@ func complete(a netip.AddrPort) bool {
 }
 
 // establishes reports whether r shows the connection established: the
-// SYN_SENT -> ESTABLISHED transition, or an accept snapshot taken in any
-// state the connection only reaches after establishing (CLOSE_WAIT when
-// the peer already sent its FIN, say) — the snapshot is the only record
-// such a server end gets.
+// SYN_SENT -> ESTABLISHED transition, or an accept or initial snapshot
+// taken in any state the connection only reaches after establishing
+// (CLOSE_WAIT when the peer already sent its FIN, say) — the snapshot is
+// the only record such an end gets. An initial snapshot's socket
+// established before the session, so its time is when the trace learnt
+// of it, not when it happened (federate, Half.Before).
 func establishes(r *types.TcpStateEvent) bool {
-	if r.Oldstate != types.TCP_STATE_SNAPSHOT {
+	if r.Oldstate != types.TCP_STATE_SNAPSHOT && !isInitial(r) {
 		return r.Newstate == tcpEstablished
 	}
 	return r.Newstate != tcpClose && r.Newstate != tcpSynSent && r.Newstate != tcpSynRecv
+}
+
+// isInitial reports whether r is the tracer's initial snapshot of a socket
+// a target already held when the session started (sock.c,
+// iormesh_seed_sock; decision #35, task cm4).
+func isInitial(r *types.TcpStateEvent) bool {
+	return r.Oldstate == types.TCP_STATE_INITIAL_CLIENT || r.Oldstate == types.TCP_STATE_INITIAL_SERVER
 }
 
 // fuse joins s with an established, unfused socket whose tuple mirrors
@@ -268,7 +277,10 @@ func tuple(r *types.TcpStateEvent) (local, remote netip.AddrPort) {
 // tcpState records the socket transition as an event and binds the
 // owner's fd to the socket. It also keeps the socket's owner (own,
 // disownGone): a process dead by now keeps its identity for the records
-// still to come while the socket is open (reap.go).
+// still to come while the socket is open (reap.go). An initial snapshot
+// binds the fd it was found at like a connect's first record — the fd
+// exists already, before the session — even at an address the table
+// still holds.
 func (c *Correlator) tcpState(r *types.TcpStateEvent) {
 	c.advance(r.Time)
 	if r.Oldstate == types.TCP_STATE_FINAL {
@@ -284,6 +296,7 @@ func (c *Correlator) tcpState(r *types.TcpStateEvent) {
 	if r.Pid != 0 && !stale {
 		p := c.proc(r.Pid)
 		snapshot := r.Oldstate == types.TCP_STATE_SNAPSHOT
+		first = first || isInitial(r)
 		gen := p.sockGen(r.Fd, s, first, snapshot)
 		if first || snapshot {
 			c.own(s, p) // its records name p, even after p died (reap.go)
@@ -330,11 +343,25 @@ func (c *Correlator) emitState(r *types.TcpStateEvent, s *sockState, p *procStat
 	if carriesSeq(r) {
 		fillSeq(&ev.Args, r)
 	}
-	if r.Oldstate == types.TCP_STATE_FINAL {
-		final := schema.SockSnapshotFinal
-		ev.Args.SockSnapshot = &final
+	if mark := snapshotMark(r); mark != "" {
+		ev.Args.SockSnapshot = &mark
 	}
 	c.enqueue(ev, s)
+}
+
+// snapshotMark is args.sock_snapshot for r: final for the session-end
+// snapshot, initial_client or initial_server for the session-start one
+// (decision #35), "" for a transition and for the accept snapshot.
+func snapshotMark(r *types.TcpStateEvent) string {
+	switch r.Oldstate {
+	case types.TCP_STATE_FINAL:
+		return schema.SockSnapshotFinal
+	case types.TCP_STATE_INITIAL_CLIENT:
+		return schema.SockSnapshotInitialClient
+	case types.TCP_STATE_INITIAL_SERVER:
+		return schema.SockSnapshotInitialServer
+	}
+	return ""
 }
 
 // carriesSeq reports whether r's tcp_sock fields can rebuild the ISN pair
