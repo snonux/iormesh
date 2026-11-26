@@ -755,7 +755,9 @@ one physical host; the two kf4 runs before the sixth passed 14
 of 15 each, the fourth failing the clock bound (before jf4),
 the fifth the spread M4-9 (skipped runs, qf4) (see "Run on
 Rocky 9.9" below). The M5 and M6 re-checks on the same VMs are
-"M5 on Rocky 9.9" and "M6 on Rocky 9.9" below.
+"M5 on Rocky 9.9" and "M6 on Rocky 9.9" below. A rerun at
+9bca1b2 (task 3k4, 2026-11-26) passed 14 of 15: the runner's
+M4-8 check misses the `@host` loopback labels (task 7m4).
 
 `mage m4Acceptance HOST1 HOST2` (`magefile_m4acceptance.go`,
 `internal/acceptance`) runs the whole sequence and checks each
@@ -1541,6 +1543,83 @@ physical host. Afterwards every host was removed with `rm` from
 both scratch homes (every session collected), bootstrapped again
 with the same build, and the ports and the rich rule removed.
 
+### M4 and M6 rerun at 9bca1b2 (task 3k4, 2026-11-26)
+
+Both acceptances again on iom1, iom2 and iom3 (each Rocky 9.9,
+5.14.0-741.22.1.el9_9.x86_64, JDK 25.0.5.1), with builds of
+9bca1b2 (main's head): `mage containerBuild podman
+tracer-amd64,ctl` and `mage agentBuild` into `dist/`, signed with
+the test key (`mage sign`), `bin/iormeshctl` and `bin/workload.jar`
+from the same tree. Since the last runs the controller gained
+bootstrap, ensure, status/list, prune and windowed builds, and
+deploy, collect, rm and federate changed in the audit fixes.
+
+At the start every host had the 5eedf77 tracer installed (with its
+key), a hand-laid sudoers rule without bootstrap's marker (so `rm`
+leaves it) and `~/.iormesh/staging`; no unit, no trace, no
+firewall port. Each install of the new build ran as root over SSH
+(the printed bootstrap steps without the sudoers rule, which was
+there), then `sudo -n iormesh upgrade` of the staged build through
+the rule. The VMs were started one at a time; f3 never used swap.
+
+**M4** (`mage m4Acceptance iom1 iom2`, the variables of "Run on
+Rocky 9.9" above, work directory `~/.iormesh-m4-3k4-1`; 07:21:17
+to 07:26:36 UTC, 5 min 19 s): **14 of 15 PASS, not accepted** —
+M4-8's check fails, though the model meets the criterion (task
+7m4).
+
+| Id | Result |
+|---|---|
+| M4-0 | PASS — both amd64, 5.14.0-741.22.1.el9_9.x86_64 |
+| M4-1 | PASS — 14 projects running on iom1 and iom2 |
+| M4-2 | PASS — 3 rounds, 48 files collected and deleted on the servers |
+| M4-3 | PASS |
+| M4-4 | PASS |
+| M4-5 | PASS — the tcp-loopback golden on 1475 events |
+| M4-6 | PASS — one conn fused across iom1 and iom2; the client alone unresolved |
+| M4-7 | PASS — client :18880, server :18203 |
+| M4-8 | FAIL — "orders (:18213) not among the services" (task 7m4) |
+| M4-9 | PASS — two conns fused across iom1 and iom2; `10.20.0.141:18216 tls x1, 10.20.0.141:18214 tls x1, 10.20.0.140:18215 plain x2` |
+| M4-10 | PASS — one window, two-sided, width 947µs |
+| M4-11 | PASS — byte-identical under `unshare -rn` |
+| M4-12 | PASS |
+| M4-13 | PASS — `ended disk_limit`, the segment intact |
+| M4-14 | PASS — 15 sessions collected, nothing under `/opt/iormesh` |
+
+M4-8 is a regression of the runner, not of the tracer or the
+merge: since task ai4 (b496ff9) a loopback endpoint's label ends in
+`@host` (`127.0.0.1:18213@a425…`), and the runner's
+`serviceByPort` still matches the label's `:PORT` suffix, so it
+finds none of the loopback services. The refresh's model holds the
+criterion: `m4-orders-svc` (127.0.0.1:18213) `tls` x1,
+127.0.0.1:18211 `tls` x1, 127.0.0.1:18212 `plain` x2, every edge
+to them fused, 0 unresolved. Task 7m4 fixes the check.
+
+**M6** on three hosts, wg4's procedure and layout above
+(gateway and inventory with the agent on iom1, orders on iom2,
+billing on iom3, iom3's 18214 open to iom2 alone), scratch home
+`~/.iormesh-m6-3k4`; rounds 07:28:33 to 07:35:15 UTC, the
+by-hand run (`~/.iormesh-m6-3k4h`) 07:35:42 to 07:37:29. **Every
+criterion PASS.**
+
+| Criterion | Result |
+|---|---|
+| only the gateway host enrolled, rounds discover and deploy every service host | PASS — round 1 proposes exactly `10.20.0.141:18216 hop 1` (one inbound skip aside); round 2's `expand -apply` enrolls and deploys iom2 at hop 1, bound to orders' pid; round 3's `expand -hops 2 -apply` enrolls `10.20.0.142` (`hop 2`, `listen-port 18214`) and starts the session on iom3 over SSH, bound to billing's pid |
+| a hop limit of 1 stops at the first ring | PASS — after round 2, `expand -hops 1` lists `10.20.0.142:18214 hop_limit` ("hop 2, limit 1", via 10.20.0.141 java); `-apply` prints "nothing to enroll", the registry's hash unchanged |
+| a peer outside the allowlist is listed, never contacted | PASS — with 10.20.0.142/32 dropped, `expand -hops 2` lists billing `not_allowed`, `-apply` enrolls nothing, the hash unchanged; iom3's sshd logged no login from round 2's last step (07:30:44) to the check (07:32:44), across `collect`, `refresh`, both `-hops 1` and both narrowed `-hops 2` runs |
+| after the scenario re-runs, the merge equals the one of all hosts added by hand | PASS — round 3's own sessions merge to 4 edges fused, tcp 3 fused, 0 unresolved, orders `tls`, inventory `plain` x2, billing `-` (no agent on that hop); the by-hand run builds the same, and both graphs' connection shapes are identical (8 sockets; the one-ended ones a DNS socket to 10.20.0.1:53 on iom2 and on iom3 and an address-less accept in each agent JVM on iom1, in both) |
+| convergence honesty | PASS — the store's merge over the three rounds keeps round 1's gateway → orders end and round 2's orders → billing end unresolved (`mixed`, 1 of 3 and 1 of 2), and round 1's server half of orders' untraced call to inventory (`(untraced)` → 18215) |
+| a cyclic topology terminates | PASS — after round 3, `expand -hops 2`, `-hops 5` and `-hops 5 -apply` propose nothing (both peers `enrolled`), the hash unchanged |
+
+The two-host M6 layout (3f4) was not run again: the three-host
+run covers each of its criteria.
+
+Afterwards every host was removed with `rm` from both scratch
+homes (every session collected), the build of 9bca1b2 installed
+again as at the start (the 5eedf77 tracer is not restored), the
+run directories, ports, rich rule and DNAT removed, and the three
+VMs stopped.
+
 ## msghdr data calls (task oh4, 2026-11-22)
 
 `TestMsgCallsTCP` and `TestMsgCallsUDP`
@@ -1852,6 +1931,37 @@ relocated against the el9 BTF:
   well as the trimmed one (both give the same record offsets).
 
 Nothing is pending on el9 for the root BPF gate.
+
+**Both root gates on el9 (task 2k4, 2026-11-26): 43 of 43 and
+54 of 54 pass.** On `iom1` (5.14.0-741.22.1.el9_9.x86_64), at
+6597008, with no test or subtest skipped. The first integration
+run on el9 since nf4 (2026-11-21); it adds
+`TestListenPortFollowsRestart`, `TestJavaLateAttach`, the Java
+attach tests after 7l4/9l4, and every correlator, agent and BPF
+fix since. The binaries were built on the 7.2 laptop as in nf4
+(the static tracer, `internal.test` and `integrationtests.test`
+with the cgo env plus `-tags netgo,osusergo -ldflags '-w
+-extldflags "-static"'`; `iormeshctl`, `edgepeer`, `echopeer`
+and the four jars from `mage build agentBuild workloadBuild
+workloadOtelBuild workloadLibsBuild`), staged under `/opt/2k4`
+with `bin/`, `workload/{scenarios,src,libs,otel}`,
+`eval/questions` and `internal/testdata/btf` (iom1 has no `tar`;
+`rsync -aR` copies the tree), run serially as root with
+`IORMESH_IT_KEEP` set, removed afterwards; iom1 was started for
+the run and stopped again.
+
+| Gate | Result | Wall time |
+|---|---|---|
+| Root BPF (`gatecmd.RootBPFTests`) | 43 of 43 pass | 81 s |
+| Integration (`gatecmd.IntegrationTests`, serial) | 54 of 54 pass | 218 s |
+
+The integration binary ran with `gatecmd.IntegrationTestArgs(0)`
+minus `-test.failfast`, so a failure would not have hidden the
+tests after it. Newly covered on el9: `TestMsgCallsPeers` (hl4)
+and `TestPeekCountedOnce` (ok4) pass. `TestMmsgVerifierHeadroom`
+reports 993 and 992 instructions for the sendmmsg and recvmmsg
+enter handlers and 42,659 and 42,684 for their exits (rj4:
+1,002 and 42,078), still far below the 1M limit.
 
 ## Final socket snapshot (task sf4, 2026-11-21)
 
