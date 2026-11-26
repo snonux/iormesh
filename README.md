@@ -26,7 +26,8 @@ from the controller, under an allowlist. Details:
 ![How iormesh works](docs/diagrams/architecture.svg)
 
 **Status: proof of concept.** M0–M7 are accepted; M5's LLM eval
-passed with real models on 2026-11-26. Rocky Linux 9.9 is the main
+passed with real models on 2026-11-26; M8 (usable by a smaller
+agent) is planned. Rocky Linux 9.9 is the main
 target; flags, paths and schema may still change. See
 [docs/milestones.md](docs/milestones.md).
 
@@ -64,7 +65,7 @@ summary, so read the index and open only the part you need.
 - [schema](docs/schema.md) — the field-level trace schema.
 - [decisions](docs/decisions.md) — every numbered decision; the
   source of truth.
-- [milestones](docs/milestones.md) — spikes and M0–M7, with
+- [milestones](docs/milestones.md) — spikes and M0–M8, with
   acceptance.
 
 ### Build & test

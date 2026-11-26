@@ -607,7 +607,8 @@ Part of [Decisions](../decisions.md).
     rules (task om4). One file loads in both agents: the
     operator copies or links the folder into Claude Code's
     skills directory (`~/.claude/skills/iormesh/`) or pi's
-    (`~/.pi/agent/skills/iormesh/`). Its rules: (1) before
+    (`~/.pi/skills/iormesh/`), or passes it per run (`pi
+    --skill docs/skills/iormesh`). Its rules: (1) before
     every step it tells the user what is about to happen —
     which host, which commands, what they change, what data
     leaves the machine — and waits for approval; a step may
