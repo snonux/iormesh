@@ -26,13 +26,15 @@ func TestInitialSnapshotLocalPair(t *testing.T) {
 		return ev
 	}
 	const cli, srv = "127.0.0.1:40000", "127.0.0.1:8080"
-	for name, c := range map[string]struct {
+	for _, c := range []struct {
+		name  string
 		marks [2]string
 		pairs int
 	}{
-		"initial snapshots": {[2]string{schema.SockSnapshotInitialClient, schema.SockSnapshotInitialServer}, 1},
-		"state changes only": {[2]string{"", ""}, 0},
+		{"initial snapshots", [2]string{schema.SockSnapshotInitialClient, schema.SockSnapshotInitialServer}, 1},
+		{"state changes only", [2]string{"", ""}, 0},
 	} {
+		name := c.name
 		tr := newTraffic()
 		tr.source = "h"
 		for _, ev := range []schema.Event{state(1, cli, srv, c.marks[0]), state(2, srv, cli, c.marks[1])} {

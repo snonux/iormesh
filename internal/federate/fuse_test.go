@@ -375,8 +375,8 @@ func randomHalves(r *rand.Rand, w uint64) []Half {
 		role := []string{RoleClient, RoleServer, RoleClient, RoleServer, ""}[r.IntN(5)]
 		hs[i] = Half{Host: "H" + strconv.Itoa(r.IntN(3)), ConnID: fmt.Sprintf("c%02d", i),
 			Role: role, Key: ISNPair{1, uint32(r.IntN(2))}, HasKey: r.IntN(8) != 0,
-			Established: bases[r.IntN(len(bases))] + offsets[r.IntN(len(offsets))],
-			Before: r.IntN(4) == 0}
+			Established: bases[r.IntN(len(bases))] + offsets[r.IntN(len(offsets))]}
+		hs[i].Before = r.IntN(4) == 0
 	}
 	return hs
 }
