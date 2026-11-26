@@ -5516,7 +5516,7 @@ magefiles/magefile_eval.go # mage evalTrace (root), mage eval
   of day only on a one-day trace (task 1l4). A failing model
   command fails the question, its stderr
   going to the terminal only — never into the kept results file.
-- `eval/results/<date>-<scenario>.json` keeps per question the
+- `eval/results/<date>-<scenario>-<model>.json` keeps per question the
   answer, turns, actions and failures, and the score; the model
   appears only by its `-model-name` label (a command line may
   carry credentials). Below the threshold the command exits 1.

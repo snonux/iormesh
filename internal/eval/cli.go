@@ -139,7 +139,9 @@ func newSession(ctx context.Context, o Options, set Set, work string) (Session, 
 		MaxTurns: o.MaxTurns}, nil
 }
 
-// writeResult writes <out>/<date>-<scenario>.json.
+// writeResult writes <out>/<date>-<scenario>-<model>.json. The model
+// label is part of the name so that two models run on the same day keep
+// one file each (task 9k4); fileLabel keeps it a plain name part.
 func writeResult(out string, r Result) error {
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return err
@@ -148,7 +150,25 @@ func writeResult(out string, r Result) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(out, r.Date+"-"+r.Scenario+".json"), append(data, '\n'), 0o644)
+	name := r.Date + "-" + r.Scenario + "-" + fileLabel(r.Model) + ".json"
+	return os.WriteFile(filepath.Join(out, name), append(data, '\n'), 0o644)
+}
+
+// fileLabel maps a model label to letters, digits, '.', '_' and '-'
+// (anything else becomes '-'), so no label can name a path.
+func fileLabel(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+			c == '.' || c == '_' || c == '-'
+		if !ok {
+			b[i] = '-'
+		}
+	}
+	if len(b) == 0 {
+		return "unnamed"
+	}
+	return string(b)
 }
 
 // printResult prints one line per question and the score.

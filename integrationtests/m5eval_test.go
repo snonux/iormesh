@@ -145,7 +145,9 @@ func runEval(t *testing.T, b *viewsBuild, model string) (eval.Result, error) {
 	var stdout bytes.Buffer
 	runErr := eval.Main(context.Background(), o, &stdout)
 	t.Logf("eval (%s):\n%s", strings.Fields(model)[1], stdout.String())
-	data, err := os.ReadFile(filepath.Join(o.Out, o.Date+"-microservices.json"))
+	// <date>-<scenario>-<model>.json, the label's space made a '-'
+	// (eval's writeResult, task 9k4).
+	data, err := os.ReadFile(filepath.Join(o.Out, o.Date+"-microservices-scripted-stand-in.json"))
 	if err != nil {
 		t.Fatalf("eval wrote no results: %v (Main: %v)", err, runErr)
 	}

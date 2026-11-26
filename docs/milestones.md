@@ -3,8 +3,9 @@
 The milestones iormesh was built in, in execution order: what each
 one set out to land, how it was built, and what accepted it. When
 this record was written (2026-11-24), M0, M1, M2, M3, M4, M6 and M7
-were accepted; M5 was built but not accepted until its LLM eval has
-run with a real model. Rocky Linux 9.9 (el9, kernel 5.14) is the main target.
+were accepted; M5 was accepted on 2026-11-26, when its LLM eval
+passed with real models (task 9k4). Rocky Linux 9.9 (el9, kernel
+5.14) is the main target.
 
 Decision numbers (`#N`) refer to [decisions.md](decisions.md);
 what is traced and the trace format are in
@@ -1934,14 +1935,17 @@ Kubernetes (M7) build on it.
   declared matchers (contains, in-order sequence, excludes,
   regex, excluded regex — an answer listing every candidate
   fails every question, by test) into
-  `eval/results/<date>-<scenario>.json`. The model is a command
-  (prompt on stdin, reply on stdout) the operator must name:
+  `eval/results/<date>-<scenario>-<model>.json`. The model is a
+  command (prompt on stdin, reply on stdout) the operator must
+  name:
   there is no default, since the prompt carries trace data, so
   the eval never runs on its own and never in `mage
   test`; a local model keeps the data on the machine. `mage
   evalTrace` (root) records the store from one judged
-  `TestMicroservices` run. The first scored run with a real
-  model is still to be recorded.
+  `TestMicroservices` run. *First runs with real models (task
+  9k4, 2026-11-26):* Claude Sonnet 5.5 scored 1.00 and GLM 5.3
+  0.90 on one `mage evalTrace` store, both above the pinned 0.8
+  ([docs/testing.md](testing.md) "First runs with real models").
 - Acceptance: an operator can answer "what does this process touch,
   and what touches it back" from one screen; `add` → `deploy` →
   `refresh` yields the merged mesh's SVG, matching its golden;
@@ -2007,6 +2011,16 @@ Kubernetes (M7) build on it.
   `order-42.json` record. The sequence criterion now holds on
   the real store; M5 stays not accepted until the eval has run
   with the owner's model.
+  *Status (task 9k4, 2026-11-26): accepted.* The last open
+  criterion, the LLM eval, passes its pinned threshold with both
+  owner-authorised real models: Claude Sonnet 5.5 (via `claude
+  -p`, no tools) 10/10 = 1.00 and GLM 5.3 (via `pi`, ollama
+  cloud, no tools) 9/10 = 0.90, on one store from `mage
+  evalTrace`. GLM's one miss (gateway-chain) is the question's
+  excluded regex matching the explanation after its correct
+  chain, not a gap in the views or the query; the set stays as
+  pinned ([docs/testing.md](testing.md) "First runs with real
+  models").
 
 ## M6 — Mesh expansion: follow the edges, from the controller
 

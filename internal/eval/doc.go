@@ -32,6 +32,6 @@
 // that must not appear, a regular expression), all checked
 // case-insensitively; the score is the share of questions passed, and
 // the set's pinned threshold decides pass or fail. Results go to
-// eval/results/<date>-<scenario>.json (writeResult in cli.go), so two
-// scenarios run on one day keep separate files.
+// eval/results/<date>-<scenario>-<model>.json (writeResult in cli.go), so
+// two scenarios or two models run on one day keep separate files.
 package eval

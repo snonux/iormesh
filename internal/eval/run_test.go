@@ -171,14 +171,25 @@ func TestOptIn(t *testing.T) {
 	}
 }
 
-// TestWriteResult: the results file is named by date and scenario.
+// TestWriteResult: the results file is named by date, scenario and model
+// label, so two models run on one day keep two files (task 9k4); a label
+// is reduced to a safe file-name part, never a path.
 func TestWriteResult(t *testing.T) {
 	dir := t.TempDir()
-	if err := writeResult(dir, Result{Scenario: "microservices", Date: "2026-11-20"}); err != nil {
-		t.Fatal(err)
+	for _, m := range []string{"claude-sonnet-5-5", "glm-5.3", "../x y"} {
+		r := Result{Scenario: "microservices", Date: "2026-11-20", Model: m}
+		if err := writeResult(dir, r); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, "2026-11-20-microservices.json")); err != nil {
-		t.Error(err)
+	for _, name := range []string{"2026-11-20-microservices-claude-sonnet-5-5.json",
+		"2026-11-20-microservices-glm-5.3.json", "2026-11-20-microservices-..-x-y.json"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Error(err)
+		}
+	}
+	if got, _ := filepath.Glob(filepath.Join(dir, "*")); len(got) != 3 {
+		t.Errorf("results %v, want three files in %s", got, dir)
 	}
 }
 

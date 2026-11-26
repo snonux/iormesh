@@ -1,0 +1,102 @@
+{
+  "scenario": "microservices",
+  "date": "2026-11-26",
+  "model": "claude-sonnet-5-5",
+  "threshold": 0.8,
+  "score": 1,
+  "passed": true,
+  "questions": [
+    {
+      "id": "order-file-writer",
+      "passed": true,
+      "answer": "`iormesh.workload.scenarios.DataStore#save` wrote it, through the temporary file `/tmp/TestMicroservices620604276/002/orders.d/order-42.json.tmp`, which was then renamed to `order-42.json`.",
+      "turns": 1,
+      "actions": [],
+      "failures": []
+    },
+    {
+      "id": "orders-config-reader",
+      "passed": true,
+      "answer": "`iormesh.workload.scenarios.ServiceConfig#load` read the orders service's configuration file, `/tmp/TestMicroservices620604276/002/orders.d/orders.conf` (file name `orders.conf`).",
+      "turns": 2,
+      "actions": [
+        "QUERY -file '/tmp/TestMicroservices620604276/002/orders.d/orders.conf'"
+      ],
+      "failures": []
+    },
+    {
+      "id": "gateway-chain",
+      "passed": true,
+      "answer": "gateway → orders → inventory → billing",
+      "turns": 2,
+      "actions": [
+        "QUERY -method 'iormesh.workload.scenarios.HttpFetch#call'"
+      ],
+      "failures": []
+    },
+    {
+      "id": "orders-next-call",
+      "passed": true,
+      "answer": "1. POST /inventory/reserve, 2. POST /billing/charge",
+      "turns": 2,
+      "actions": [
+        "QUERY -app * -host * -thread HTTP-Dispatcher -method iormesh.workload.scenarios.HttpFetch#call"
+      ],
+      "failures": []
+    },
+    {
+      "id": "http-call-method",
+      "passed": true,
+      "answer": "iormesh.workload.scenarios.HttpFetch#call",
+      "turns": 2,
+      "actions": [
+        "QUERY -method 'iormesh.workload.scenarios.HttpFetch#call'"
+      ],
+      "failures": []
+    },
+    {
+      "id": "billing-cert-reader",
+      "passed": true,
+      "answer": "The **orders** service (pid 53655) read billing.crt (323 B), using `iormesh.workload.scenarios.ServiceNode#readCert`.",
+      "turns": 1,
+      "actions": [],
+      "failures": []
+    },
+    {
+      "id": "inventory-paths",
+      "passed": true,
+      "answer": "The inventory service served `POST /inventory/reserve` and `GET /inventory/stock/widget`.",
+      "turns": 1,
+      "actions": [],
+      "failures": []
+    },
+    {
+      "id": "billing-record",
+      "passed": true,
+      "answer": "The billing service wrote `/tmp/TestMicroservices620604276/002/billing.d/invoice-42.json`, making it appear by write-to-temp-then-rename on the HTTP-Dispatcher thread: (1) `openat` of `invoice-42.json.tmp` in the same directory (flags 577: write-only, create, truncate); (2) `newfstat` on that fd; (3) `write` of 32 bytes; (4) `close`; (5) `rename` of `invoice-42.json.tmp` to `invoice-42.json`.",
+      "turns": 2,
+      "actions": [
+        "QUERY -file '/tmp/TestMicroservices620604276/002/billing.d/invoice-42.json*'"
+      ],
+      "failures": []
+    },
+    {
+      "id": "tls-hops",
+      "passed": true,
+      "answer": "The https paths were `/orders` (POST, gateway → orders) and `/billing/charge` (POST, orders → billing).",
+      "turns": 1,
+      "actions": [],
+      "failures": []
+    },
+    {
+      "id": "gateway-cleanup",
+      "passed": true,
+      "answer": "`iormesh.workload.scenarios.ServiceNode#retire`",
+      "turns": 2,
+      "actions": [
+        "QUERY -file '/tmp/TestMicroservices620604276/002/gateway.d/checkout-42.json'"
+      ],
+      "failures": []
+    }
+  ]
+}

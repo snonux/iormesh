@@ -1,0 +1,106 @@
+{
+  "scenario": "microservices",
+  "date": "2026-11-26",
+  "model": "glm-5.3",
+  "threshold": 0.8,
+  "score": 0.9,
+  "passed": true,
+  "questions": [
+    {
+      "id": "order-file-writer",
+      "passed": true,
+      "answer": "iormesh.workload.scenarios.DataStore#save wrote it, via the temporary file /tmp/TestMicroservices620604276/002/orders.d/order-42.json.tmp (36 B written, then renamed to /tmp/TestMicroservices620604276/002/orders.d/order-42.json).",
+      "turns": 1,
+      "actions": [],
+      "failures": []
+    },
+    {
+      "id": "orders-config-reader",
+      "passed": true,
+      "answer": "iormesh.workload.scenarios.ServiceConfig#load read the orders service's configuration file, /tmp/TestMicroservices620604276/002/orders.d/orders.conf",
+      "turns": 1,
+      "actions": [],
+      "failures": []
+    },
+    {
+      "id": "gateway-chain",
+      "passed": false,
+      "answer": "gateway → orders → inventory → billing — the checkout first POSTs /orders; while serving it, orders calls inventory (/inventory/reserve at 17:52:02.259) before billing (/billing/charge at 17:52:02.751); the gateway's later direct GET /inventory/stock/widget (17:52:03.712) re-reaches inventory, which was already touched.",
+      "turns": 5,
+      "actions": [
+        "SOURCE iormesh/workload/scenarios/Microservices.java",
+        "QUERY -thread main -app java[53739]*QUERY -thread main -app java[53739]*QUERY -thread main -app java[53739]*",
+        "QUERY -method 'iormesh.workload.scenarios.HttpFetch#call'",
+        "QUERY -conn b1d5315eeb8b8ab7"
+      ],
+      "failures": [
+        "matches excluded /billing[\\s\\S]*inventory[\\s\\S]*billing|inventory[\\s\\S]*orders[\\s\\S]*inventory/"
+      ]
+    },
+    {
+      "id": "orders-next-call",
+      "passed": true,
+      "answer": "POST /inventory/reserve first, then POST /billing/charge.",
+      "turns": 4,
+      "actions": [
+        "QUERY -conn f0627e8171c41c2a",
+        "QUERY -conn 9405280e9c450bde",
+        "SOURCE iormesh/workload/scenarios/Microservices.java"
+      ],
+      "failures": []
+    },
+    {
+      "id": "http-call-method",
+      "passed": true,
+      "answer": "iormesh.workload.scenarios.HttpFetch#call",
+      "turns": 3,
+      "actions": [
+        "QUERY -method 'iormesh.workload.scenarios.HttpFetch#call'",
+        "SOURCE iormesh/workload/scenarios/Microservices.java"
+      ],
+      "failures": []
+    },
+    {
+      "id": "billing-cert-reader",
+      "passed": true,
+      "answer": "The orders service (process java[53655], serving 127.0.0.1:40541) read billing.crt, via iormesh.workload.scenarios.ServiceNode#readCert.",
+      "turns": 1,
+      "actions": [],
+      "failures": []
+    },
+    {
+      "id": "inventory-paths",
+      "passed": true,
+      "answer": "The inventory service (127.0.0.1:39719) served two requests: POST /inventory/reserve and GET /inventory/stock/widget (both http, returning 200).",
+      "turns": 1,
+      "actions": [],
+      "failures": []
+    },
+    {
+      "id": "billing-record",
+      "passed": true,
+      "answer": "While serving POST /billing/charge, the billing service wrote its invoice record `/tmp/TestMicroservices620604276/002/billing.d/invoice-42.json` (via DataStore#save), making it appear atomically by: openat of `invoice-42.json.tmp` (O_WRONLY|O_CREAT|O_TRUNC), a newfstat on it, write of 32 bytes, close, then rename of `invoice-42.json.tmp` to `invoice-42.json` — i.e. the write-to-temp-then-rename pattern. (The file was statx'd and unlinked later on the main thread at retire, not while serving.)",
+      "turns": 2,
+      "actions": [
+        "QUERY -file '/tmp/TestMicroservices620604276/002/billing.d/invoice-42.json*'"
+      ],
+      "failures": []
+    },
+    {
+      "id": "tls-hops",
+      "passed": true,
+      "answer": "/orders and /billing/charge",
+      "turns": 1,
+      "actions": [],
+      "failures": []
+    },
+    {
+      "id": "gateway-cleanup",
+      "passed": true,
+      "answer": "iormesh.workload.scenarios.ServiceNode#retire",
+      "turns": 1,
+      "actions": [],
+      "failures": []
+    }
+  ]
+}

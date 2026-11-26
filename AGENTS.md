@@ -1,8 +1,8 @@
 # AGENTS.md — conventions for agents working in this repo
 
-iormesh is a proof of concept: M0, M1, M2, M3, M4, M6 and M7 are
-accepted; M5 (views, query and the LLM eval) is built but not
-accepted until its eval has run with a real model. Rocky Linux
+iormesh is a proof of concept: all milestones, M0 to M7, are
+accepted; M5 (views, query and the LLM eval) was the last, once
+its eval passed with real models (task 9k4). Rocky Linux
 9.9 (el9, kernel 5.14) is the main target. The code lives in
 `cmd/` (`iormesh`, `iormeshctl`, `iormesheval`), `internal/`,
 `agent/` (the Java agent), `workload/` (the Java test workload)

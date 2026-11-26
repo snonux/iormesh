@@ -87,9 +87,9 @@ The decisions it cites are in [decisions.md](decisions.md).
   gets read.
 - **Tested, not asserted** — an eval asks an LLM a fixed
   question set over workload traces with known answers. The
-  eval is built (M5) but has not yet run with a real model, so
-  M5 is not accepted; once it has, it is meant to rerun on
-  every schema change.
+  eval (M5) passed with real models on 2026-11-26 (Claude
+  Sonnet 5.5 1.00, GLM 5.3 0.90; threshold 0.8), which
+  accepted M5; it is meant to rerun on every schema change.
 - **Deterministic SVG too** — the diagram export is stable for a
   given normalized graph, so it diffs and goldens like the data
   exports; same for the sequence-diagram export.

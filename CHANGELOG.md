@@ -21,7 +21,8 @@ then the features and changes of the latest round.
   stacks.
 - M4: the controller (`iormeshctl`): deploy, collect and merge
   from servers over SSH, signed builds (minisign).
-- M5 (built, not yet accepted): views, query and the LLM eval.
+- M5: views, query and the LLM eval (accepted 2026-11-26: Claude
+  Sonnet 5.5 1.00, GLM 5.3 0.90 against the pinned 0.8).
 - M6: mesh expansion, following edges from the controller.
 - M7: Kubernetes sidecar and debug-container deployment.
 - `mage release`: reproducible per-arch archives with checksums,

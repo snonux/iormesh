@@ -25,8 +25,8 @@ from the controller, under an allowlist. Details:
 
 ![How iormesh works](docs/diagrams/architecture.svg)
 
-**Status: proof of concept.** M0–M4, M6 and M7 are accepted; M5
-awaits its eval with a real model. Rocky Linux 9.9 is the main
+**Status: proof of concept.** M0–M7 are accepted; M5's LLM eval
+passed with real models on 2026-11-26. Rocky Linux 9.9 is the main
 target; flags, paths and schema may still change. See
 [docs/milestones.md](docs/milestones.md).
 

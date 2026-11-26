@@ -69,9 +69,9 @@ introspection.
   scenario as pods is planned (task uh4).
 - The LLM claim is tested: a fixed question set over workload
   traces, with answers known from the scenario declarations.
-  Built (M5), but not yet run with a real model, so M5 is not
-  accepted; once it has run, it is to be rerun on every schema
-  change.
+  It passed with real models on 2026-11-26 ("First runs with
+  real models", below), which accepted M5; it is to be rerun on
+  every schema change.
 
 ## Race detector gate (task ij4)
 
@@ -2476,11 +2476,72 @@ IORMESH_EVAL_MODEL_NAME=MODEL mage eval
 The model command reads the prompt on stdin and writes its reply
 on stdout. The prompt carries the trace's rollup and query
 slices, so pick a local model unless the trace is one you may
-send elsewhere; the workload's traces hold nothing but the
-scenario's own files and requests. The question set and its
-pinned threshold (0.8) are in `eval/questions/microservices.yaml`;
-results land in `eval/results/<date>-<scenario>.json`. Rerun it on
-every schema change (milestones.md M5).
+send elsewhere. The workload's trace holds the scenario's own
+files and requests, and also what the JVMs touch on the recording
+host: the host name, the java argv (the jars' paths under the
+checkout), the JDK's files and the paths of `/etc/hosts` and
+`/etc/resolv.conf` with byte counts (never file contents). The
+question set and its pinned threshold (0.8) are in
+`eval/questions/microservices.yaml`; results land in
+`eval/results/<date>-<scenario>-<model>.json`, one file per
+`IORMESH_EVAL_MODEL_NAME`, so two models run on one day keep both
+(task 9k4). Rerun it on every schema change (milestones.md M5).
+
+### First runs with real models (task 9k4, 2026-11-26)
+
+Owner-authorised, one run per model, on one store recorded by
+`mage evalTrace` on the laptop (Fedora 45, kernel 7.3.4; one
+judged `TestMicroservices` run, 4 segment files, 5443 events). The
+store was checked before it was sent: four services, three fused
+edges, the paths listed above. Nothing else left the machine. Each
+model ran with no tools and no context files, from `/`, so it
+answered from the prompt alone:
+
+```sh
+IORMESH_EVAL_MODEL_NAME=claude-sonnet-5-5 \
+IORMESH_EVAL_MODEL_CMD="env -C / CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 \
+CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1 \
+claude -p --model claude-sonnet-5-5 --tools '' --strict-mcp-config \
+--setting-sources '' --no-session-persistence --system-prompt '...'" \
+mage eval
+IORMESH_EVAL_MODEL_NAME=glm-5.3 \
+IORMESH_EVAL_MODEL_CMD="env -C / pi -p --no-tools --no-session \
+--no-context-files --no-extensions --no-skills --no-prompt-templates \
+--no-themes --no-approve --model ollama-cloud/glm-5.3:cloud \
+--system-prompt '...'" mage eval
+```
+
+(The system prompt was `Follow the instructions in the user
+message and answer only from it.`; Claude Code still adds its own
+session block — working directory `/`, OS — to every request.)
+
+| Question | Claude Sonnet 5.5 | GLM 5.3 (756B, ollama cloud) |
+|---|---|---|
+| order-file-writer | PASS (1 turn) | PASS (1) |
+| orders-config-reader | PASS (2) | PASS (1) |
+| gateway-chain | PASS (2) | FAIL (5) |
+| orders-next-call | PASS (2) | PASS (4) |
+| http-call-method | PASS (2) | PASS (3) |
+| billing-cert-reader | PASS (1) | PASS (1) |
+| inventory-paths | PASS (1) | PASS (1) |
+| billing-record | PASS (2) | PASS (2) |
+| tls-hops | PASS (1) | PASS (1) |
+| gateway-cleanup | PASS (2) | PASS (1) |
+| **Score** (threshold 0.80) | **1.00, passed** | **0.90, passed** |
+
+Results: `eval/results/2026-11-26-microservices-claude-sonnet-5-5.json`
+and `eval/results/2026-11-26-microservices-glm-5.3.json`. Both
+models pass the pinned threshold, so the eval criterion of M5
+holds (milestones.md M5).
+
+GLM's one failure is the matcher, not the views or the query: its
+chain was right (`gateway → orders → inventory → billing`), but
+its explanation went on to say that orders calls inventory and
+that the gateway later "re-reaches inventory", which the
+question's `answer_not_regex` (written to catch a chain told out
+of order) also matches. The question set was left as pinned.
+GLM also once sent three `QUERY` lines glued into one line (a
+model formatting slip) and went on with other queries.
 
 ## K8s capability set (task ub4)
 
