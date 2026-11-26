@@ -14,7 +14,9 @@ agent can drive it together with a human: steps only a human can
 do (a sudo password, a passphrase, a host key fingerprint, a yes
 to a change on a production host) are marked **Human step**, and
 every step has a checkpoint. [Chapter 13](13-agents.md) is the
-agent's own chapter.
+agent's own chapter, and the
+[iormesh skill](../skills/iormesh/SKILL.md) is how an agent
+works through the guide with you.
 
 ![How iormesh works: one tracer per server, one controller on a laptop](../diagrams/architecture.svg)
 

@@ -6,6 +6,27 @@ commands, reads output, checks each checkpoint and explains what
 it sees; the human owns every decision that touches trust,
 production hosts or trace data. Read it before chapter 2.
 
+## The iormesh skill
+
+The repository ships an agent skill,
+[docs/skills/iormesh/](../skills/iormesh/SKILL.md), for Claude
+Code and the `pi` coding agent (decisions.md #37). It explains
+each step — host, commands, what they change, what data leaves
+the machine — and waits for a yes; at the start you pick
+*automatic* (the agent runs each approved command) or *guided*
+(it names the commands, you type them and paste the output back).
+Install it by copying or linking the folder:
+
+```sh
+cp -r docs/skills/iormesh ~/.claude/skills/    # Claude Code
+cp -r docs/skills/iormesh ~/.pi/skills/        # pi
+pi --skill docs/skills/iormesh                 # pi, for one run
+```
+
+Its links into this guide resolve inside the repository; a copied
+skill names each chapter's file, so the agent still finds it in
+your copy of `docs/guide/`.
+
 ## Who does what
 
 | The human | The agent |

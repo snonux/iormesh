@@ -54,6 +54,9 @@ summary, so read the index and open only the part you need.
 - [kubernetes](docs/kubernetes.md) — runbook for tracing pods.
 - [troubleshooting](docs/troubleshooting.md) — failures by message.
 - [java-attach](docs/java-attach.md) — getting the agent into a JVM.
+- [iormesh skill](docs/skills/iormesh/SKILL.md) — the agent skill
+  for Claude Code and pi: explain each step, wait for approval,
+  automatic or guided mode.
 
 ### Understand
 

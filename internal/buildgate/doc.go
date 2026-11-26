@@ -14,9 +14,12 @@
 // paths and Test* functions that exist here (ccomments_test.go), and
 // that every fmt print in internal/ctl escapes its text values for the
 // terminal (ctlprint_test.go), and that each tracer builder pins the clang
-// whose BPF object was last loaded on el9 (clangpin_test.go).
+// whose BPF object was last loaded on el9 (clangpin_test.go), and that the
+// iormesh agent skill under docs/skills/iormesh names only subcommands the
+// programs' usage lists, links only to files and headings that exist and
+// keeps a frontmatter both Claude Code and pi load (skilldoc_test.go).
 //
 // It has no production code. The gates it guards are configuration
-// (Magefile.go, .golangci.yml, internal/gatecmd) rather than Go APIs, so
-// nothing else in the tree fails when they are quietly weakened.
+// (Magefile.go, .golangci.yml, internal/gatecmd) and docs rather than Go
+// APIs, so nothing else in the tree fails when they are quietly weakened.
 package buildgate
