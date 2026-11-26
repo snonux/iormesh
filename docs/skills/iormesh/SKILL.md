@@ -117,6 +117,14 @@ Notes:
 
 - `bootstrap`, `deploy` read `./dist` unless `-dist` names the
   signed release directory (ch. 3).
+- Restarting service: register a pattern, not a port
+  ([ch. 4](../../guide/04-register-bootstrap.md#choosing-the-target)).
+- Name services before reading; `show edges` shows names
+  ([ch. 6](../../guide/06-collect-build.md#name-your-services)).
+- Full stack: `show sequence ID -json`
+  ([ch. 7](../../guide/07-read-the-mesh.md#one-conversation-show-sequence)).
+- `query -file` globs match whole paths
+  ([ch. 8](../../guide/08-java-query.md#from-a-step-to-its-raw-events-query)).
 - Use `-apply` on bootstrap only when the SSH user has sudo
   without a password (`ssh HOST sudo -n true` exits 0). Else
   print the steps and hand them to the user (Human step).
