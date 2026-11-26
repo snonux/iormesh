@@ -31,7 +31,10 @@ the laptop's host name reads `host1` and its machine id reads
 
 The servers listen on free ports picked per run, so they were
 named before the build, one rule per port
-([chapter 6](06-collect-build.md#name-your-services)):
+([chapter 6](06-collect-build.md#name-your-services)). Do the
+same before you read your own mesh: until its servers are named,
+`show edges` reads `java -> 127.0.0.1:18214@…` instead of `java
+-> orders` (chapter 6's checkpoint). This run's rules:
 
 ```sh
 iormeshctl services name -db DB -port 41331 '127.0.0.1*' orders

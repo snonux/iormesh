@@ -66,6 +66,16 @@ servers:
   port to the new owner if it is the same program under the same
   uid, within `-listen-grace` (2m by default; put e.g.
   `-listen-grace 5m` after HOST for a slow restart).
+- **A pattern beats a port** for a service that restarts, or that
+  does work before it listens. A `-listen-port` session sees its
+  server only from the moment the session finds the socket: a
+  deploy that lands in a restart's gap fails (`target spec:
+  nothing listens on TCP port 8443`), and the config and
+  certificate reads a server makes before it listens are never
+  traced. A `-pattern` session takes up every matching process at
+  its exec, the restarted one and its start-up included. Use
+  `-listen-port` for a long-running server whose command line you
+  cannot match.
 - **`-duration`** bounds every session (4h by default, 7 days at
   most). [Chapter 9](09-tracing-for-days.md) keeps sessions
   going past it.

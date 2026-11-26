@@ -93,8 +93,14 @@ iormeshctl: app1: project billing: start: ... exited before the tracer attached
 ```
 
 The cause is near the end, e.g. `iormesh: target spec: nothing
-listens on TCP port 8443` (run on Rocky 9.9, task 4k4). Look it
-up in
+listens on TCP port 8443` (run on Rocky 9.9, task 4k4). For a
+server that restarts on its own, that line comes back each time
+the deploy lands in the gap: register it by `-pattern` instead
+([chapter 4](04-register-bootstrap.md#choosing-the-target)):
+in `~/.config/iormesh/servers.yaml`, replace the project's
+`listen_port: N` under `target:` with `pattern: '…'` and deploy
+again (a changed target, like changed flags, starts the session
+anew). Look it up in
 [troubleshooting.md](../troubleshooting.md#a-session-that-does-not-start);
 deploy's own refusals (not bootstrapped, `sudo: a password is
 required`, a refused upgrade) are under

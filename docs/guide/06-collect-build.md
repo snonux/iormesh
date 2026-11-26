@@ -164,6 +164,18 @@ creates; before the first build `iormeshctl services` answers
 `no service database at … yet (a build creates it)`. Rebuild to
 see a new name.
 
+**Checkpoint, before you read the mesh:** every server you traced
+is named. After the rebuild, the TO column of `iormeshctl show
+edges` holds names (`orders`, `billing`), not addresses such as
+`127.0.0.1:18214@machine-id`; an address left there is a server
+still to name, one rule per port. A `mixed` edge state means some
+of the edge's connections were seen from one end only (made while
+a session restarted, or before it attached): let the sessions
+run, `refresh` again, and check that the new connections fused
+(`CONNS` grows, `UNRESOLVED` stays). An edge whose `UNRESOLVED`
+keeps growing has an end no session traces: check `status`
+([chapter 5](05-deploy-status.md)).
+
 Reference: [architecture.md](../architecture.md) (the controller,
 the service database), [output-contract.md](../output-contract.md)
 (segments and the graph), [visualization.md](../visualization.md)
