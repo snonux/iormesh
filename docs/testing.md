@@ -2309,8 +2309,17 @@ whose reference now knows `Before`), `internal/schema`
 (`TestInitialSnapshotLocalPair`), `internal/report`
 (`TestReportInitialSnapshotRoles`), `internal/cli`
 (`TestSessionSeedsOpenSockets`, `TestPortSessionFollowsRestart`)
-and `internal/bpf` (`TestDrainIter`). Not yet run on el9
-(`iom1`); the iterators use only kernel 5.8 features.
+and `internal/bpf` (`TestDrainIter`).
+
+**On el9 (2026-11-26): 44 of 44 pass.** On `iom1`
+(5.14.0-741.22.1.el9_9.x86_64), at dc76ca6, the static
+`internal.test` built on the 7.3 laptop ran every test of
+`gatecmd.RootBPFTests` as root (staged under `/opt/cm4` with
+`internal/testdata/btf`, removed afterwards), none skipped.
+`TestSeedPreopenedConnection` passes, so el9's 5.14 loads and runs
+both `iter/task_file` programs; `TestEl9RecordLayout` passes
+against the host's own BTF. iom1 was started for the run and
+stopped again.
 
 The cm4 review found that a host with a million open files in
 view would not have been seeded at all. The kernel's
