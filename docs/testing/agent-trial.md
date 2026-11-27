@@ -332,7 +332,7 @@ No harness bug turned up, so the series ran once.
 No run had help: the scripted user said only the mode, `yes` (no
 `change` in any cell) or the typed output; glm drew the harness's
 fixed no-action line four times in automatic mode by putting `RUN`
-inside a sentence. M8 is not accepted.
+inside a sentence. M8 was still not accepted.
 
 The first trial's fixes held where the runs reached them: the
 rsync check by the package changelog took one command (zm4);
@@ -458,7 +458,8 @@ The rerun's fixes held:
   `(untraced) -> orders` connection, unresolved, at 11:29:04–08,
   while deploy was still starting the sessions (gateway's last,
   at 11:29:08): chapter 6's one-sided connection from before
-  `deploy` started, and the agent's answers name it so.
+  the far end's session started, and the agent's answers name
+  it so.
 
 The stuck points, each a task (`+agent`):
 
