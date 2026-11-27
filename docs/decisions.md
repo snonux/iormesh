@@ -28,7 +28,7 @@ then open only the part you need.
   own, by area.
   - [Storage, transport and the join
     key](decisions/decided/storage-transport.md) — #3, #4, #12, #39,
-    #16, #26.
+    #16, #26, #43.
   - [Test workload and overhead
     budget](decisions/decided/workload-overhead.md) — #5, #25.
   - [Runtime control, explorer and the Java
@@ -53,7 +53,7 @@ then open only the part you need.
 ## By number
 
 Every decision, in numeric order, with the part that holds it. The
-next free number is #42.
+next free number is #44 (#42 is reserved).
 
 - **#1** [Remote bootstrapping and sudo scope](decisions/open.md) — open
 - **#2** [Java agent attach
@@ -119,3 +119,5 @@ next free number is #42.
   apart](decisions/decided/layout-release.md) — decided
 - **#41** [A `-file` glob that matches only a last element says
   so](decisions/decided/tracing-docs-agents.md) — decided
+- **#43** [A one-sided connection in a build's tail is pending, not
+  unresolved](decisions/decided/storage-transport.md) — decided

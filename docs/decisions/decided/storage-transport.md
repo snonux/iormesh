@@ -72,3 +72,43 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
   guess; L4/L7 proxies that terminate the connection stay the
   route map's job (#15). Details:
   [docs/spikes/s2-cross-host.md](../../spikes/s2-cross-host.md).
+- **#43 A one-sided connection in a build's tail is pending, not
+  unresolved** — task cn4 (2026-11-27), from #37's rerun (task
+  8n4): three edges between traced services read `mixed`, one
+  one-sided connection each, all in the last round before the
+  collect. Each running session rotates its segment a minute
+  after its own start (#16), so four sessions started seconds
+  apart are collected up to different instants, and a
+  connection made between them has only its near half in the
+  store (billing's round-4 JVM's trace stops before the accept
+  it went on to serve). The merge called it `no_match`, the
+  service database stored it unresolved, and its edge read
+  mixed. Now the merge marks a `no_match` half `pending` when
+  the far end may still come: the half lies within one segment
+  interval plus 10 s of the build's newest record (older ones'
+  far ends are collected already, if any session traces them:
+  a running session's unpublished records all lie in its open
+  segment), and a running session that did not record the half
+  — a collected segment's session with no `end` event — has
+  records only up to 10 s after it (its next segment may hold
+  the far end; the 10 s absorb the writer's rotation lag and two
+  hosts' clocks). A pending half is no verdict: it is left out
+  of the unresolved count and the service database, the summary
+  counts it (`tcp …, N pending` and a `pending` line saying to
+  collect again), and a later build fuses it or, once older than
+  that minute, calls it `no_match`. A session alone, NDJSON trace
+  directories (finished runs) and sessions that recorded their
+  end have nothing more to publish, so their halves are judged
+  as before. Why: the M8 mesh check requires every
+  cross-service edge fused (#37, amended), and a mixed edge must
+  mean one end really was not traced, not that the build cut
+  the trace at another instant. Rejected: asking every session
+  to publish its open segment at collect time — a new control
+  path to the root tracer on every host, and a collect running
+  while connections are made still cuts some; aligning
+  rotations to the wall-clock minute — the cut instants match,
+  but a connection straddling one still splits by write lag,
+  and the segment names and the store's windows (#16) would
+  change; leaving the tail unresolved and teaching the reader to
+  rebuild — every build has a new tail, so an edge between two
+  traced services could read mixed at any time.

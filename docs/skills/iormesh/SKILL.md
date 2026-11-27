@@ -119,7 +119,7 @@ Notes:
   signed release directory (ch. 3).
 - Restarting service: register a pattern, not a port
   ([ch. 4](../../guide/04-register-bootstrap.md#choosing-the-target)).
-- Name services before reading; `show edges` shows names
+- Name services; every expected edge must read `fused`
   ([ch. 6](../../guide/06-collect-build.md#name-your-services)).
 - Full stack: `show sequence ID -json`
   ([ch. 7](../../guide/07-read-the-mesh.md#one-conversation-show-sequence)).

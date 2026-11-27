@@ -13,7 +13,7 @@ import (
 // Why a peer is not a candidate (Skip.Reason). Each one names a fact the
 // traces or the registry state (see the package comment).
 const (
-	ReasonUnjoined        = "unjoined"         // merge said ambiguous, no_key, no_role, key_conflict
+	ReasonUnjoined        = "unjoined"         // merge said ambiguous, no_key, no_role, key_conflict, pending
 	ReasonInbound         = "inbound"          // the peer connected in: an ephemeral port
 	ReasonViaUnregistered = "via_unregistered" // revealed by a host no longer registered
 	ReasonLocal           = "local"            // loopback, link-local, multicast, none

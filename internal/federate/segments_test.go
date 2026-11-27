@@ -78,11 +78,15 @@ func moveReady(t *testing.T, ready, dst string) []string {
 }
 
 // meshStore writes the golden scenario as a collected store, a few
-// events per segment so every session spans several.
+// events per segment so every session spans several. Each session ends
+// with its end event, as a stopped tracer's does: the store is complete,
+// so the merge marks nothing pending (pending.go) and its result is the
+// NDJSON traces'.
 func meshStore(t *testing.T) string {
 	t.Helper()
 	store := t.TempDir()
 	for name, tr := range meshTraces() {
+		tr.end(schema.EndTargetsExited, tr.events[len(tr.events)-1].WallNS+1)
 		writeSegments(t, store, meshHosts[name][1], "a1b2c3d4", tr, 3)
 	}
 	return store

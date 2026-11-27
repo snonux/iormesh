@@ -63,6 +63,14 @@ disk_limit (the disk watchdog stopped the tracer)` — milestones.md M4
 puts the exit reason in the summary (task lf4). `show health`
 lists every session's end.
 
+When the merge marked connections pending (decision #43: made in
+the build's last minute, their far end maybe in a segment not
+collected yet), the `merged` line's tcp part ends in `, N
+pending` and a `pending    N connections in the build's last
+minute: …` line follows the edges; `Run.PendingConns` holds the
+count. Pending connections are in no edge and in neither tcp
+count; a build without any prints the lines as before.
+
 Differences from the sketch above (V1; still so after M5's
 renderers landed): the text is plain (no colors, `->` for
 arrows); an edge between

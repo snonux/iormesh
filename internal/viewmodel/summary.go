@@ -23,8 +23,8 @@ const timeLayout = "2006-01-02 15:04:05"
 
 // WriteSummary prints the run summary: one line per aspect, then one
 // line per session that recorded no end or ended abnormally, unresolved
-// edge, bad segment and stray store entry — what needs the operator's
-// eye.
+// edge, bad segment and stray store entry, and one line when connections
+// are pending (Run.PendingConns) — what needs the operator's eye.
 func WriteSummary(w io.Writer, m Model) error {
 	m = safeModel(m)
 	var b strings.Builder
@@ -33,8 +33,8 @@ func WriteSummary(w io.Writer, m Model) error {
 		strings.Join(r.Projects, "+"), len(r.Hosts), r.Sessions, r.Segments, r.Events, span(r.First, r.Last))
 	fused, mixed, unresolved := edgeStates(m.Edges)
 	fmt.Fprintf(&b, "merged     %d services, %d edges (%d fused, %d mixed, %d unresolved); "+
-		"tcp %d fused, %d unresolved\n", len(m.Services), len(m.Edges), fused, mixed, unresolved,
-		r.FusedConns, r.UnresolvedConns)
+		"tcp %d fused, %d unresolved%s\n", len(m.Services), len(m.Edges), fused, mixed, unresolved,
+		r.FusedConns, r.UnresolvedConns, pendingNote(r.PendingConns))
 	h := m.Health
 	fmt.Fprintf(&b, "health     %d lost, %d skipped runs, %d unattributed, %d attach gap; %s\n",
 		h.Lost, h.SkippedRuns, h.Unattributed, h.AttachGap, clockHeadline(h.Clocks))
@@ -48,10 +48,23 @@ func WriteSummary(w io.Writer, m Model) error {
 			fmt.Fprintf(&b, "unresolved %s -> %s (%d of %d connections)\n", e.From, e.To, e.Unresolved, e.Conns)
 		}
 	}
+	if r.PendingConns > 0 {
+		fmt.Fprintf(&b, "pending    %d connections in the build's last minute: their far end's "+
+			"segment is not collected yet; collect and build again\n", r.PendingConns)
+	}
 	writeRoutes(&b, m.Routes, h.RouteFlags)
 	writeBad(&b, h)
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// pendingNote is the tcp count's pending part, empty when none: a build
+// with nothing pending prints the line it always printed.
+func pendingNote(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(", %d pending", n)
 }
 
 // writeSessions prints one line per session the operator must look at:

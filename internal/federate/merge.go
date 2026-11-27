@@ -64,6 +64,11 @@ type hostGraph struct {
 // project A with project B fuses A's calls into B into cross-project
 // edges (docs/milestones.md M4 "Build").
 //
+// A no_match half the merge cannot judge yet — made in the build's last
+// minute, when another running session's collected trace ends before it
+// — is marked pending (ReasonPending, pending.go, decision #43): the
+// far end may be in a segment the collect has not pulled.
+//
 // The clock bounds are computed after fusing, from the fused connections
 // only, and never feed back into Fuse: a bound proves offsets only
 // because its connections are facts, so letting it pick partners would
@@ -77,6 +82,7 @@ func Merge(ctx context.Context, sources []Source, opt Options) (Result, error) {
 	col := newCollector()
 	traces := make([]hostGraph, 0, len(sorted))
 	for _, s := range sorted {
+		col.cur = sessionOf(s)
 		hg, err := readSource(ctx, s, col)
 		if err != nil {
 			return Result{}, err
@@ -84,6 +90,7 @@ func Merge(ctx context.Context, sources []Source, opt Options) (Result, error) {
 		traces = append(traces, hg)
 	}
 	r := Result{Fusion: Fuse(col.halves(), window), Renames: map[LocalConn]string{}}
+	col.settle(&r.Fusion)
 	fused := map[string]bool{}
 	for _, c := range r.Conns {
 		r.Renames[LocalConn{c.Client.Host, c.Client.ConnID}] = c.ID

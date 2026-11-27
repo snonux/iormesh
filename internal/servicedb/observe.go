@@ -97,7 +97,8 @@ type Request struct {
 }
 
 // Observe turns a merge into a Snapshot. The merge says which halves
-// fused (r.Conns) and which stayed unresolved (r.Unresolved), and its
+// fused (r.Conns) and which stayed unresolved (r.Unresolved, less the
+// pending ones, which wait for a later build), and its
 // graph names apps and processes; the sources are read once more for
 // what the merge drops — HTTP requests, DNS lookups and each
 // connection's last record — and for same-host pairs, which the host's
@@ -121,7 +122,12 @@ func Observe(ctx context.Context, sources []federate.Source, r federate.Result,
 		out = append(out, b.fused(c))
 	}
 	for _, u := range r.Unresolved {
-		out = append(out, b.unresolved(u))
+		// A pending half is no verdict yet (federate.ReasonPending): its
+		// far end may be in a segment not collected, so it is not stored
+		// as unresolved; a later build stores it fused or no_match.
+		if u.Reason != federate.ReasonPending {
+			out = append(out, b.unresolved(u))
+		}
 	}
 	out = append(out, b.localPairs()...)
 	slices.SortFunc(out, func(a, b Observation) int {

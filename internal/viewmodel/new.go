@@ -51,7 +51,14 @@ func New(in Input) Model {
 	if in.Tally != nil {
 		in.Tally.fill(&m)
 	}
-	m.Run.FusedConns, m.Run.UnresolvedConns = len(in.Merge.Conns), len(in.Merge.Unresolved)
+	m.Run.FusedConns = len(in.Merge.Conns)
+	for _, u := range in.Merge.Unresolved {
+		if u.Reason == federate.ReasonPending {
+			m.Run.PendingConns++
+		} else {
+			m.Run.UnresolvedConns++
+		}
+	}
 	m.Run.GraphNodes, m.Run.GraphEdges = len(in.Merge.Graph.Nodes), len(in.Merge.Graph.Edges)
 	m.Health.Clocks = clocks(in.Merge.Clocks, fqdns(in.Tally))
 	for _, b := range in.BadSegments {

@@ -318,7 +318,7 @@ No harness bug turned up, so the series ran once.
 | Sonnet 5.5, automatic | **pass** | 1.0 | 83 | 9.1 | an event's Java method outside a conversation (an4) |
 | Sonnet 5.5, guided | **pass** | 1.0 | 29 | 7.5 | the same (an4); a restart gap in its first `ps` |
 | glm-5.3-flash, automatic | fail: rule | 0 | 32 | 3.4 | ran `sudo dnf install -y tar` where step 2 named `sudo dnf install -y tar — only if command 1 shows no tar` (bn4) |
-| glm-5.3-flash, guided | fail: mesh | 0.9 | 27 | 8.3 | three edges `mixed`, one one-sided connection each, right after deploy (cn4) |
+| glm-5.3-flash, guided | fail: mesh | 0.9 | 27 | 8.3 | three edges `mixed`, one one-sided connection each, in the last round before the collect (cn4) |
 
 No run had help: the scripted user said only the mode, `yes` (no
 `change` in any cell) or the typed output; glm drew the harness's
@@ -352,17 +352,20 @@ The stuck points, each a task (`+agent`):
   says, so the run failed; the skill says `<exact command>` but
   never that an item holds the command alone, or that a command
   that depends on an earlier result is a new step.
-- **cn4** — glm guided's mesh held every cross-service edge, but
-  three of them `mixed`: 4 connections, 1 unresolved each, all in
-  the first round after deploy (00:47:20–23 UTC), after every
-  session had attached (00:47:11, the `iom2` journal). Both Claude
-  meshes, same scenario, were all `fused`, so it is timing. The
-  state stays `mixed` however long one refreshes, while chapter 6
-  says to refresh until new connections fuse and the mesh check
-  wants `fused`; why one end missed the connection, and which of
-  the guide and the check is right, are cn4's (the latter for the
-  owner: #37 asks for "a built mesh holding the workload's
-  cross-service edges").
+- **cn4** (fixed) — glm guided's mesh held every cross-service
+  edge, but three of them `mixed`: 4 connections, 1 unresolved
+  each. First read as the first round after deploy (the edges'
+  `FIRST`, 00:47:20–23 UTC); the transcript's `query -event http`
+  and `show report` place them in the last round before the
+  collect (00:49:02–04): the round's client calls are there, the
+  servers' sides are not, and billing's round-4 JVM's trace stops
+  before the accept it went on to serve. Each running session is
+  collected up to its own last rotation, a minute after its own
+  start (sessions started 00:47:05–11), so the build cut the
+  trace at different instants. #43 marks such a half `pending`
+  instead of unresolved. The owner settled the other half: the
+  mesh check stays strict and every cross-service edge must read
+  `fused` (#37, amended); chapter 6 says so and what to do.
 
 Results: in `eval/agent-trial/results/`,
 `2026-11-26-claude-sonnet-5-5-automatic-4.json` (the date is the

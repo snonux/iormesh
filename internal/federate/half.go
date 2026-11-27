@@ -74,6 +74,10 @@ type halfAcc struct {
 	first          uint64 // earliest wall ns of any record
 	recs           []stateRec
 	timing         timing // what the clock bounds read (clock.go)
+	// sessions are the open-ended sessions (collector.cur) whose records
+	// name the half, usually one: never a candidate to hold its far end
+	// (pending.go).
+	sessions []string
 }
 
 // LocalConn names a conn_id on one host: conn ids are host-local, so the
@@ -93,6 +97,13 @@ type collector struct {
 	// it: whether a final snapshot of that session followed the targets'
 	// last calls (ackedCovered).
 	ends map[hostProject][]string
+	// cur is the session of the source being read when it may still
+	// publish segments (sessionOf), "" otherwise; spans holds each such
+	// session's coverage and maxWall the newest record of any source:
+	// what Merge's settle judges pending halves by (pending.go).
+	cur     string
+	spans   map[string]*sessionSpan
+	maxWall uint64
 }
 
 // hostProject names one host's sessions of one project: a drop is the
@@ -102,7 +113,7 @@ type hostProject struct{ Host, Project string }
 
 func newCollector() *collector {
 	return &collector{acc: map[LocalConn]*halfAcc{}, drops: map[hostProject][]dropRec{},
-		ends: map[hostProject][]string{}}
+		ends: map[hostProject][]string{}, spans: map[string]*sessionSpan{}}
 }
 
 // Halves folds events — of any number of hosts, in any order — into the
@@ -122,7 +133,8 @@ func Halves(events []schema.Event) []Half {
 // add folds one event into its half. Events without a conn_id name no
 // connection and are ignored, as are kinds that say nothing about role,
 // key, owner or the instants the clock bounds read (timing.add); a drop
-// is kept for the session that reported it (dropRec).
+// is kept for the session that reported it (dropRec). Every event, conn
+// id or not, extends the coverage settle reads (span, pending.go).
 func (c *collector) add(ev *schema.Event) {
 	if ev.Event == schema.KindDrop {
 		k := hostProject{ev.HostID, ev.Project}
@@ -132,6 +144,7 @@ func (c *collector) add(ev *schema.Event) {
 		k := hostProject{ev.HostID, ev.Project}
 		c.ends[k] = append(c.ends[k], *ev.Args.EndReason)
 	}
+	c.span(ev)
 	if ev.ConnID == "" {
 		return
 	}
@@ -143,6 +156,9 @@ func (c *collector) add(ev *schema.Event) {
 		c.acc[k] = a
 	}
 	a.projects[ev.Project] = true
+	if c.cur != "" && !slices.Contains(a.sessions, c.cur) {
+		a.sessions = append(a.sessions, c.cur)
+	}
 	a.first = min(a.first, ev.WallNS)
 	if ev.PID != 0 {
 		a.procs[schema.ProcessNodeID(ev.HostID, ev.PID, ev.PIDInc)] = true

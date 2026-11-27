@@ -65,6 +65,37 @@ func TestObserve(t *testing.T) {
 }
 
 // TestObserveDeterministic: source order changes nothing.
+// TestObservePendingLeftOut: a half the merge marked pending (its far
+// end maybe in a segment not collected, task cn4) is no observation:
+// stored unresolved, it would turn its edge mixed until a later build.
+// The fixture's other halves are observed as before.
+func TestObservePendingLeftOut(t *testing.T) {
+	sources, r := mesh()
+	var pending int
+	for i := range r.Unresolved {
+		if r.Unresolved[i].Half.ConnID == "a2" {
+			r.Unresolved[i].Reason = federate.ReasonPending
+			pending++
+		}
+	}
+	if pending != 1 {
+		t.Fatalf("fixture lacks the unresolved half a2: %+v", r.Unresolved)
+	}
+	s, err := Observe(context.Background(), sources, r, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := observeMesh(t)
+	if len(s.Conns) != len(all.Conns)-1 {
+		t.Fatalf("%d observations, want %d", len(s.Conns), len(all.Conns)-1)
+	}
+	for _, o := range s.Conns {
+		if o.ConnID == "a2" {
+			t.Fatalf("pending half observed: %+v", o)
+		}
+	}
+}
+
 func TestObserveDeterministic(t *testing.T) {
 	sources, r := mesh()
 	first := observeMesh(t)

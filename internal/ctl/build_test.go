@@ -218,7 +218,25 @@ type buildFixture struct {
 	app1Files, app2Files []string
 }
 
+// newBuildFixture is the shop mesh's store, shop's session still
+// running (no end recorded).
 func newBuildFixture(t *testing.T) *buildFixture {
+	t.Helper()
+	return newShopFixture(t, false)
+}
+
+// newEndedBuildFixture is newBuildFixture with shop's session ended
+// too, for a test that adds sessions of its own: with shop running and
+// its trace ending before their connections, a connection of theirs in
+// the build's last minute would be pending (federate.ReasonPending,
+// task cn4) — shop's next segment could hold its far end — and not in
+// the services view the test reads.
+func newEndedBuildFixture(t *testing.T) *buildFixture {
+	t.Helper()
+	return newShopFixture(t, true)
+}
+
+func newShopFixture(t *testing.T, ended bool) *buildFixture {
 	t.Helper()
 	root := t.TempDir()
 	f := &buildFixture{stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{},
@@ -234,6 +252,9 @@ func newBuildFixture(t *testing.T) *buildFixture {
 		registry:  func() (string, error) { return filepath.Join(root, "servers.yaml"), nil },
 	}
 	app1, app2 := shopMesh()
+	if ended {
+		app1.end(10_000, schema.EndStop)
+	}
 	f.app1Files = writeStoreSegments(t, f.store, "app1", app1, 3)
 	f.app2Files = writeStoreSegments(t, f.store, "app2", app2, 3)
 	return f

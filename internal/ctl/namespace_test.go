@@ -46,7 +46,7 @@ func endpointsOf(t *testing.T, out string) []string {
 // every connection in the database first; it writes <projects>@NS,
 // which show -namespace reads, and the unfiltered build stays as it was.
 func TestBuildNamespace(t *testing.T) {
-	f := newBuildFixture(t)
+	f := newEndedBuildFixture(t)
 	podClient(t, f, "3b1c9a52-7e0d-4c1f-9a8e-2f6d5b4c3a21", "web-7d9f", "prod", "10.0.9.9:80")
 	podClient(t, f, "9d8c7b6a-5e4f-4a3b-8c2d-1e0f9a8b7c6d", "web-1a2b", "dev", "10.0.8.8:80")
 	f.mustRun(t, "build")

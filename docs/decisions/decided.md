@@ -13,7 +13,8 @@ Each part is its own file; open only the one you need.
 - [Storage, transport and the join key](decided/storage-transport.md)
   — #3 graph storage, #4 Go eBPF library, #12 controller
   transport, #39 patched distribution rsync on the controller, #16
-  trace-file segmentation, #26 cross-host join key.
+  trace-file segmentation, #26 cross-host join key, #43 a
+  one-sided connection in a build's tail is pending.
 - [Test workload and overhead budget](decided/workload-overhead.md)
   — #5 test workload scope, #25 tracer overhead and volume budget.
 - [Runtime control, explorer and the Java

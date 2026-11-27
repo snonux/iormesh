@@ -97,7 +97,7 @@ func lateDialer(t *testing.T, f *buildFixture, peerEarly, peerLate string) {
 // holds every import ever made, so its views are read back narrowed to
 // the connections seen in the window — not the database's whole history.
 func TestBuildWindowScopesServices(t *testing.T) {
-	f := newBuildFixture(t)
+	f := newEndedBuildFixture(t)
 	const early, late = "198.51.100.1:5432", "198.51.100.2:6379"
 	lateDialer(t, f, early, late)
 	f.mustRun(t, "build")
@@ -115,6 +115,30 @@ func TestBuildWindowScopesServices(t *testing.T) {
 	}
 	if again := endpointsOf(t, f.mustRun(t, "show", "services", "-json")); !slices.Equal(again, all) {
 		t.Errorf("the full build's services changed: %v, was %v", again, all)
+	}
+}
+
+// TestBuildPendingTail (task cn4): with shop's session still running
+// and its collected trace ending minutes before app3's late connection,
+// that connection is pending — shop's next segment, not collected yet,
+// could hold its far end — so the summary counts it apart and says to
+// collect again, and the service database does not store it as
+// unresolved. app3's early connection, older than the build's last
+// minute, stays unresolved.
+func TestBuildPendingTail(t *testing.T) {
+	f := newBuildFixture(t)
+	const early, late = "198.51.100.1:5432", "198.51.100.2:6379"
+	lateDialer(t, f, early, late)
+	out := f.mustRun(t, "build")
+	for _, want := range []string{"tcp 1 fused, 2 unresolved, 1 pending\n",
+		"pending    1 connections in the build's last minute"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("build summary lacks %q:\n%s", want, out)
+		}
+	}
+	all := endpointsOf(t, f.mustRun(t, "show", "services", "-json"))
+	if !slices.Contains(all, early) || slices.Contains(all, late) {
+		t.Errorf("services %v: want %s and not the pending %s", all, early, late)
 	}
 }
 

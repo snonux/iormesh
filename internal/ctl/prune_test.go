@@ -215,7 +215,7 @@ func TestPruneRefusals(t *testing.T) {
 // longer shows a service seen only in them — while one seen in a
 // segment that stays, and the operator's naming rules, remain.
 func TestPruneForgetsInServiceDB(t *testing.T) {
-	f := newBuildFixture(t)
+	f := newEndedBuildFixture(t)
 	const early, late = "198.51.100.1:5432", "198.51.100.2:6379"
 	lateDialer(t, f, early, late) // early only in seq 0 (t0), late in seq 1 (t0+3m)
 	f.mustRun(t, "services", "name", "198.51.100.*", "dbs")

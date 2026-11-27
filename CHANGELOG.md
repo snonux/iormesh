@@ -119,3 +119,8 @@ then the features and changes of the latest round.
 - The agent jar rebuilds to the same bytes from the same commit
   and JDK, so a release rebuilt from its tag matches the
   published archive ([build.md](docs/build/signing-releases.md#releases)).
+- A connection in a build's last minute whose far end a running
+  session has not published yet is `pending`, not unresolved, so
+  an edge between two traced services no longer reads `mixed`
+  because the build cut the sessions' traces at different
+  instants ([decisions.md](docs/decisions.md) #43).

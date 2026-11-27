@@ -236,6 +236,18 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
     questions are never reworded, dropped or re-scored to make
     a run pass; they change only when the scenario changes,
     recorded with the reason.
+  - **Amended (owner, 2026-11-27): the mesh check requires every
+    cross-service edge fused** (task cn4). "A built mesh holding
+    the workload's cross-service edges" means each expected
+    edge's state in `show edges` is `fused`; the harness's check
+    (`internal/agenttrial` `CheckEdges`, a `fused` edge into
+    each of the scenario's servers) stays as strict as it is,
+    never loosened to accept `mixed`. A `mixed` or `unresolved`
+    edge between two traced
+    services is a defect to explain, never an acceptable steady
+    state; guide chapter 6 says so and what to do. The rerun's
+    three mixed edges were the build cutting each running
+    session's trace at a different instant, fixed by #43.
   - **Data.** Both providers see everything the agent sees:
     the prompt, the docs, and all command output from the VMs
     — host names and addresses of the f3 VMs, the synthetic

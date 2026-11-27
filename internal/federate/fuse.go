@@ -37,6 +37,13 @@ const (
 	ReasonNoMatch = "no_match"
 	// ReasonAmbiguous: more than one partner has the key in the window.
 	ReasonAmbiguous = "ambiguous"
+	// ReasonPending: no_match so far, but the far end may still come:
+	// the half lies in the build's last minute and another running
+	// session's collected trace ends before it, so that session's next
+	// segment, not collected yet, may hold the far end (Merge marks it,
+	// pending.go; task cn4). It is not counted as unresolved: a later
+	// build fuses it or calls it no_match.
+	ReasonPending = "pending"
 )
 
 // Conn is one connection fused across traces: a client half and the
@@ -59,7 +66,9 @@ type Unresolved struct {
 }
 
 // Fusion is what Fuse found: fused connections sorted by ID, unresolved
-// halves sorted by (host, conn_id).
+// halves sorted by (host, conn_id). After Merge, an unresolved half's
+// reason may be ReasonPending: not fused yet, and not counted as
+// unresolved by the views and the service database.
 type Fusion struct {
 	Conns      []Conn
 	Unresolved []Unresolved

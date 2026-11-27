@@ -171,6 +171,39 @@ func TestSummaryClockHeadline(t *testing.T) {
 	}
 }
 
+// TestSummaryPending: a pending half (federate.ReasonPending, task cn4)
+// counts apart from the unresolved ones, and the summary says to collect
+// again; without one the tcp line reads as it always did.
+func TestSummaryPending(t *testing.T) {
+	half := func(conn, reason string) federate.Unresolved {
+		return federate.Unresolved{Half: federate.Half{Host: "h", ConnID: conn}, Reason: reason}
+	}
+	m := New(Input{Merge: federate.Result{Fusion: federate.Fusion{Unresolved: []federate.Unresolved{
+		half("a", federate.ReasonNoMatch), half("b", federate.ReasonPending),
+		half("c", federate.ReasonPending)}}}})
+	if m.Run.UnresolvedConns != 1 || m.Run.PendingConns != 2 {
+		t.Fatalf("unresolved %d, pending %d; want 1 and 2", m.Run.UnresolvedConns, m.Run.PendingConns)
+	}
+	var b bytes.Buffer
+	if err := WriteSummary(&b, m); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"tcp 0 fused, 1 unresolved, 2 pending\n",
+		"pending    2 connections in the build's last minute"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("summary lacks %q:\n%s", want, b.String())
+		}
+	}
+	b.Reset()
+	if err := WriteSummary(&b, New(Input{})); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.String(); !strings.Contains(got, "tcp 0 fused, 0 unresolved\n") ||
+		strings.Contains(got, "pending") {
+		t.Errorf("summary without pending halves:\n%s", got)
+	}
+}
+
 // TestSummaryNamesEndReason: the summary names a session the disk
 // watchdog (or an error) ended, with its reason — docs/milestones.md M4 and
 // the acceptance check M4-13 read the reason from the plain summary — and

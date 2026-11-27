@@ -67,7 +67,11 @@ How to read it:
 - **`merged`** — `fused` edges had both ends traced and joined;
   an `unresolved` one had only one end traced. With `shop` and
   `billing` both traced and built together, `shop → billing`
-  shows as one fused edge.
+  shows as one fused edge. While sessions run, the tcp part may
+  end in `, N pending`, with a `pending` line below: connections
+  of the build's last minute whose far end may sit in a segment
+  not collected yet. They are in no edge yet; the next `refresh`
+  a minute later fuses them.
 - **`health`** — `lost` counts records dropped because a ring
   buffer was full; `clock bounds` are how far apart two hosts'
   clocks can be, proved by traffic between them.
@@ -168,13 +172,40 @@ see a new name.
 is named. After the rebuild, the TO column of `iormeshctl show
 edges` holds names (`orders`, `billing`), not addresses such as
 `127.0.0.1:18214@machine-id`; an address left there is a server
-still to name, one rule per port. A `mixed` edge state means some
-of the edge's connections were seen from one end only (made while
-a session restarted, or before it attached): let the sessions
-run, `refresh` again, and check that the new connections fused
-(`CONNS` grows, `UNRESOLVED` stays). An edge whose `UNRESOLVED`
-keeps growing has an end no session traces: check `status`
-([chapter 5](05-deploy-status.md)).
+still to name, one rule per port.
+
+**Checkpoint, every expected edge fused:** each edge between two
+services you trace must read `fused` in `show edges`. A `mixed`
+edge (some connections seen from one end only) or an
+`unresolved` one is a fault to find, not a state to accept, and
+refreshing until the count looks stable does not fix it. The
+build already holds back
+the connections of its last minute whose far end it may not have
+collected yet (`pending`, above), so a one-sided connection
+really missed one end. What to do:
+
+1. `iormeshctl status`: every session of both services is
+   `running`. A session stopped, ended or never started on the
+   far end's host misses its connections: deploy it again
+   ([chapter 5](05-deploy-status.md)).
+2. An edge whose `FIRST` is before the far end's session
+   started (`deploy` printed `started …`): its one-sided
+   connections were made while only one end was traced, and
+   they stay in the service database, which keeps every
+   build's connections. Let the sessions run a few
+   minutes, `refresh`, and check that the new connections fuse
+   (`CONNS` grows, `UNRESOLVED` does not). Then drop the early
+   segments: `prune -older-than DUR` lists the segments that
+   ended more than `DUR` ago, `-apply` deletes them and makes the
+   database forget the connections seen only in them
+   ([chapter 9](09-tracing-for-days.md#trim-the-store-prune));
+   `-apply` is a human step. `refresh` once more.
+3. An edge whose `UNRESOLVED` still grows has an end no session
+   traces: the far end runs outside the pattern, or on a host
+   not registered. Check the pattern against `ps -eo args` on
+   that host ([chapter 4](04-register-bootstrap.md#choosing-the-target)).
+
+Stop and report the edge if none of these explains it.
 
 Reference: [architecture.md](../architecture.md) (the controller,
 the service database), [output-contract.md](../output-contract.md)

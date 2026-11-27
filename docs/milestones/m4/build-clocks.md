@@ -24,7 +24,10 @@ locally](../m4.md), in [Milestones](../../milestones.md).
   (default 2 minutes — boot clocks of two hosts share no epoch),
   and keeps every other TCP end unresolved with its reason
   (`no_role`, `no_key`, `key_conflict`, `no_match`,
-  `ambiguous`). Two sessions of one host tracing one process
+  `ambiguous`; a `no_match` end in the build's last minute whose
+  far end a running session may not have published yet is
+  `pending` instead, kept out of the unresolved counts, #43,
+  task cn4). Two sessions of one host tracing one process
   give its socket two conn ids (each hashes its own BPF
   establish stamp); the merge folds such halves — same host,
   role, ISN pair and 4-tuple, inside the window — into one

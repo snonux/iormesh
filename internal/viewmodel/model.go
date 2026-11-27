@@ -91,8 +91,12 @@ type Run struct {
 	Last  time.Time `json:"last"`
 	// FusedConns and UnresolvedConns count this build's cross-trace TCP
 	// connections: joined by the merge, and halves it could not join.
+	// PendingConns are the halves it could not join yet: made in the
+	// build's last minute, their far end maybe in a segment not
+	// collected (federate.ReasonPending); not counted as unresolved.
 	FusedConns      int `json:"fused_conns"`
 	UnresolvedConns int `json:"unresolved_conns"`
+	PendingConns    int `json:"pending_conns,omitempty"`
 	// GraphNodes and GraphEdges size the merged graph export.
 	GraphNodes int `json:"graph_nodes"`
 	GraphEdges int `json:"graph_edges"`
