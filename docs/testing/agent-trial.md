@@ -542,8 +542,9 @@ says).
   register such a service by pattern; Haiku registered the
   three servers by port, the deploy started only the gateway
   (17:38) and failed the others (`nothing listens on TCP
-  port`). Five turns later the three were patterns and started
-  at 17:39:28, the gateway still running. Its first connections
+  port`). Five turns later the three were patterns, their
+  sessions started at 17:39:14–18 (first fused connection
+  17:39:28), the gateway still running. Its first connections
   stayed one-sided: gateway → inventory and gateway → orders
   read `mixed`, 2 unresolved each, still after `sleep 300` and
   `refresh` (2 of 15). The agent named chapter 6's case, read
