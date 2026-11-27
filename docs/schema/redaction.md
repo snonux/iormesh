@@ -26,6 +26,7 @@ and the structure stays:
 | `$ENV{PASSWORD} = 's'`, `token[i] = s`, `passwords := []string{"s"}`, `token := []byte("s")` | `$ENV{PASSWORD} = '***'`, `token[i] = ***`, `passwords := ***`, `token := ***` — a Perl hash key, the name before a subscript, a value glued from parts (task qp4) |
 | `psql -c "ALTER USER u PASSWORD 's'"`, `mysql -e "CREATE USER u IDENTIFIED BY 's'"`, `SET PASSWORD FOR u = PASSWORD('s')`, `IDENTIFIED BY s` | `PASSWORD '***'`, `IDENTIFIED BY '***'`, `PASSWORD('***')`, `IDENTIFIED BY ***` — SQL statements, in any element (task qp4) |
 | `--dsn=u:s@tcp(h:3306)/db`, `u:s@unix(/sock)/db`, `u:s@/db` | `u:***@tcp(h:3306)/db`, … — Go MySQL DSNs without a scheme (task qp4) |
+| `redis-cli AUTH s`, `redis-cli auth u s`, `aws configure set aws_secret_access_key s`, `npm config set //r/:_authToken s`, `sqlplus scott/s@db` | `AUTH ***`, `auth *** ***`, `aws_secret_access_key ***`, `//r/:_authToken ***`, `scott/***@db` — positional rules of one program, also in shell strings (decision #44, task wp4) |
 
 Keys match case-insensitively with `-`, `_` and `.` ignored, so
 one glob covers every spelling. The argv denylist names
@@ -38,7 +39,18 @@ one glob covers every spelling. The argv denylist names
 `-p` of `mysql*`, `mariadb*`, `mongo*`, `az`, `sshpass` and
 `docker`/`podman login`, `redis-cli -a`, curl's `-u`, `--user`,
 `-U` and `--proxy-user`, httpie's `-a` and `gh secret set`'s
-`-b`/`--body`. URL userinfo is always masked, query values all
+`-b`/`--body`. The same program scoping holds the positional
+rules (decision #44): `redis-cli`'s `AUTH` (any case) masks the
+two words after it, the password and, in `AUTH user pass`, the
+user; `set` after `aws`, `npm`, `yarn` or `pnpm` (`aws
+configure set`, `npm config set`, `npm set`), `config` after
+`poetry` and `set` after `dotnet user-secrets` read the next
+word as a key and mask the word after it when the argv
+denylist denies the key (`config set color false` stays); and
+an Oracle logon word of `sqlplus`, `user/pass` or
+`user/pass@connect`, has its password masked up to the last
+`@` (`/nolog`, `/`, `/@db`, `@script.sql` and `user@db` are no
+logon). URL userinfo is always masked, query values all
 (decision #22's default). After the specific forms above, one
 generic pass looks at every argv element for a denied key
 (optionally quoted or escaped-quoted, optionally inside a
@@ -82,7 +94,13 @@ them; a quoted word after `PASSWORD`, or a word after
 `IDENTIFIED BY`, in prose is masked as a SQL value (an unclosed
 quote after it masks to the end of the string); `host:x@/path`
 shapes read as a Go MySQL DSN; `mongod`/`mongos -p PORT` and
-`kubectl get secret -b x` mask the flag's value; and the whole
+`kubectl get secret -b x` mask the flag's value; under
+`redis-cli` the two words after any `auth` are masked, the user
+of `AUTH user pass`, the next word in a shell string
+(`redis-cli AUTH s && x` → `*** ***`) and a key's value
+(`redis-cli SET auth v` → `***`) too; a relative path with a
+`/` after `sqlplus` in the same command (`sqlplus … && cp a/b
+c`) loses its part after the first `/`; and the whole
 `Sec-WebSocket-Protocol` header and `X-Hmac-*` headers are
 masked, ordinary subprotocols included. HTTP headers (M3) use the
 same package:
@@ -146,7 +164,7 @@ case that keeps its canary:
 
 | Limit | Example | Why it stays |
 |-------|---------|--------------|
-| `positional` | `redis-cli AUTH s`, `aws configure set aws_secret_access_key s`, `npm config set //r/:_authToken s`, `sqlplus scott/s@db`, `echo s \| docker login --password-stdin` | a bare argument has no key; only its place in one program's grammar marks it, which needs a new rule kind (task wp4) |
+| `stdin` | `echo s \| docker login --password-stdin` | the secret is an argument of `echo`; only the pipe to a program reading it from stdin marks it, and a positional rule (decision #44) is scoped to the program that takes the word |
 | `innocuous-name` | `--db s`, `{"db":"s"}`, `X-Custom: s`, `X-Custom: token=s` | the name says nothing; masking every value would hide all arguments and headers |
 | `no-separator` | `<password>s</password>`, `<wsse:Password>s</wsse:Password>`, `password -> s`, `password s` | no `:` or `=` between key and value (XML, an arrow, prose); a parser per syntax is out of scope |
 | `call-argument` | `define('DB_PASSWORD', 's')`, `os.environ.setdefault("TOKEN", "s")`, `System.setProperty("db.password", "s")`, `db.auth("u", "s")` | key and value are separate arguments of a call; which argument is secret depends on the function |

@@ -16,7 +16,7 @@
 #         limit that starts to be masked fails the test, so the line
 #         becomes a masked one and the doc is updated with it.
 # note    where the form comes from: a tool, a language, an earlier
-#         leak task (zi4, 0j4, rm4, np4, op4, qp4).
+#         leak task (zi4, 0j4, rm4, np4, op4, qp4, wp4).
 #
 # Every input holds the canary SEKRET. "<TAB>" in an input stands for a
 # TAB character. Lines starting with '#' and blank lines are skipped.
@@ -166,13 +166,30 @@ argv	masked	js assignment	node	-e	process.env.API_TOKEN = 'SEKRET'
 argv	masked	yaml pair	app	--config	password: SEKRET
 argv	masked	operator after blank (op4)	ruby	-e	password = => SEKRET
 
+# --- positional rules (decision #44, task wp4) ------------------------
+argv	masked	redis AUTH takes the password as a command word	redis-cli	AUTH	SEKRET
+argv	masked	redis AUTH user password	redis-cli	-h	h	AUTH	default	SEKRET
+argv	masked	redis auth in lower case	redis-cli	auth	SEKRET
+argv	masked	redis AUTH in a shell string	sh	-c	redis-cli -h h AUTH default SEKRET
+argv	masked	redis AUTH in a nested shell string	sh	-c	sudo sh -c 'redis-cli Auth SEKRET'
+argv	masked	aws configure set KEY VALUE	aws	configure	set	aws_secret_access_key	SEKRET
+argv	masked	aws configure set with a profile	aws	configure	--profile	p	set	aws_session_token	SEKRET
+argv	masked	npm config set KEY VALUE	npm	config	set	//registry.npmjs.org/:_authToken	SEKRET
+argv	masked	npm set KEY VALUE	npm	set	_auth	SEKRET
+argv	masked	yarn config set	yarn	config	set	npmAuthToken	SEKRET
+argv	masked	pnpm config set	pnpm	config	set	//npm.pkg.github.com/:_authToken	SEKRET
+argv	masked	npm config set in a shell string	sh	-c	npm config set //r/:_authToken SEKRET && npm ci
+argv	masked	npm config set key=value	npm	config	set	//r/:_authToken=SEKRET
+argv	masked	poetry config KEY VALUE	poetry	config	pypi-token.pypi	SEKRET
+argv	masked	dotnet user-secrets set	dotnet	user-secrets	set	Stripe:SecretKey	SEKRET
+argv	masked	sqlplus user/password@db	sqlplus	scott/SEKRET@orcl
+argv	masked	sqlplus user/password	sqlplus	-S	scott/SEKRET	@report.sql
+argv	masked	sqlplus easy connect	sqlplus	scott/SEKRET@//db:1521/svc
+argv	masked	sqlplus as sysdba in one element	sqlplus	sys/SEKRET@orcl as sysdba
+argv	masked	sqlplus in a shell string	sh	-c	sqlplus -s "scott/SEKRET@orcl" @a.sql
+
 # --- accepted limits --------------------------------------------------
-argv	limit:positional	redis AUTH takes the password as a command word	redis-cli	AUTH	SEKRET
-argv	limit:positional	redis AUTH in a shell string	sh	-c	redis-cli -h h AUTH default SEKRET
-argv	limit:positional	aws configure set KEY VALUE	aws	configure	set	aws_secret_access_key	SEKRET
-argv	limit:positional	npm config set KEY VALUE	npm	config	set	//registry.npmjs.org/:_authToken	SEKRET
-argv	limit:positional	sqlplus user/password@db	sqlplus	scott/SEKRET@orcl
-argv	limit:positional	piped to --password-stdin	sh	-c	echo SEKRET | docker login -u u --password-stdin
+argv	limit:stdin	piped to --password-stdin, never in argv	sh	-c	echo SEKRET | docker login -u u --password-stdin
 argv	limit:innocuous-name	a secret under a name the denylist does not know	app	--db	SEKRET
 argv	limit:innocuous-name	json under an innocuous key	app	{"db":"SEKRET"}
 argv	limit:no-separator	XML element	curl	-d	<password>SEKRET</password>	h

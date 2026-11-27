@@ -20,9 +20,18 @@ const Mask = "***"
 // -p…" with Program "login"). Flag is the option as written ("-p",
 // "--user"). A short Flag ("-p") also masks a value glued to it
 // ("-psecret" → "-p***").
+//
+// Kind extends the same program scoping to positional secrets (decision
+// #44): a command word Verb with the words after it (redis-cli AUTH x),
+// a "set <denied key> <value>" command (aws configure set), an Oracle
+// logon word (sqlplus scott/x@db); see RuleKind. Such a rule leaves Flag
+// empty.
 type FlagRule struct {
 	Program string
 	Flag    string
+	Kind    RuleKind
+	Verb    string // the command word of a VerbArgs or VerbKeyValue rule
+	Args    int    // how many words after Verb a VerbArgs rule masks
 }
 
 // Policy masks secrets before anything is written. Every list is a set of
@@ -33,7 +42,8 @@ type Policy struct {
 	// ArgvDeny names options and KEY=VALUE keys whose value is masked:
 	// "--password=x", "--token x", "-Ddb.password=x", "DB_PASSWORD=x".
 	ArgvDeny []string
-	// FlagRules deny program-specific options (see FlagRule).
+	// FlagRules deny program-specific options and positional words (see
+	// FlagRule and RuleKind).
 	FlagRules []FlagRule
 	// HeaderDeny names HTTP headers whose whole value is masked.
 	HeaderDeny []string
@@ -78,9 +88,10 @@ func Default() Policy {
 // defaultFlagRules is Default's FlagRules: the options whose name is too
 // generic to deny everywhere, each for the programs where it carries a
 // password (mongo* and az: -p; curl -U/--proxy-user and httpie -a:
-// user:password; gh secret set -b/--body: the secret, task qp4).
+// user:password; gh secret set -b/--body: the secret, task qp4), then the
+// positional rules (see defaultPositionalRules).
 func defaultFlagRules() []FlagRule {
-	return []FlagRule{
+	return append([]FlagRule{
 		{Program: "mysql*", Flag: "-p"},
 		{Program: "mariadb*", Flag: "-p"},
 		{Program: "mongo*", Flag: "-p"},
@@ -98,7 +109,7 @@ func defaultFlagRules() []FlagRule {
 		// gh secret set NAME -b x.
 		{Program: "secret", Flag: "-b"},
 		{Program: "secret", Flag: "--body"},
-	}
+	}, defaultPositionalRules()...)
 }
 
 // defaultHeaderDeny is Default's header denylist. The globs follow the
@@ -147,11 +158,14 @@ func defaultURLHeaders() []string {
 }
 
 // argvState is what redacting one element needs from the elements before
-// it: whether it is the value of a denied option, and the program words
-// seen so far, which FlagRules match against.
+// it: whether it is the value of a denied option, the program words seen
+// so far, which FlagRules match against, and what a positional rule
+// (decision #44) announced for the words after its command word.
 type argvState struct {
-	maskNext bool
-	progs    []string // lower-cased basenames of program words FlagRules name
+	maskNext  bool
+	progs     []string // lower-cased basenames of program words FlagRules name
+	maskWords int      // words still to mask after a VerbArgs verb or a denied key
+	keyNext   bool     // the next word is the key after a VerbKeyValue verb
 }
 
 // Argv returns argv with every secret masked; argv itself is not modified.
@@ -208,15 +222,23 @@ func (p Policy) Header(name, value string) string {
 // sequence: it is masked whole when the word before asked for it, and it
 // may ask the same of the word after it. A masked word still counts as an
 // option of its own: in "--token --password x" either reading may be the
-// right one, and only masking both cannot leak.
+// right one, and only masking both cannot leak. A positional rule's
+// command word asks for the words after it the same way (see positional);
+// a masked word is never a command word or a key.
 func (p Policy) word(st *argvState, arg string) string {
-	masked := st.maskNext
+	masked := st.maskNext || st.maskWords > 0
+	if st.maskWords > 0 {
+		st.maskWords--
+	}
+	keyWord := st.keyNext
+	st.keyNext = false
 	out, next := p.argvElem(st, arg)
 	st.maskNext = next
 	if masked {
 		return Mask
 	}
 	p.see(st, arg)
+	p.positional(st, arg, keyWord)
 	return out
 }
 
@@ -246,7 +268,8 @@ func (p Policy) see(st *argvState, arg string) {
 
 // argvElem redacts one element and reports whether the next one is the
 // value of a denied option and must be masked too. The forms are tried
-// from the most specific: a program's own flag, a "Name: value" header or
+// from the most specific: a program's logon word (sqlplus scott/x@db,
+// decision #44), a program's own flag, a "Name: value" header or
 // colon pair, KEY=VALUE (whose value is redacted like an element of its
 // own: it may hold a header, a command or another pair), an element that
 // begins with a URL, several words, a bare denied option, and finally
@@ -255,6 +278,9 @@ func (p Policy) see(st *argvState, arg string) {
 // are masked; the element then goes on through the other forms, so a URL
 // in it is still masked as a URL.
 func (p Policy) argvElem(st *argvState, arg string) (string, bool) {
+	if out, ok := p.logonRule(st.progs, arg); ok {
+		return out, false
+	}
 	if out, next, ok := p.flagRule(st.progs, arg); ok {
 		return out, next
 	}
@@ -360,11 +386,10 @@ func (p Policy) urlElem(st *argvState, arg string) (string, bool) {
 
 // flagRule applies the FlagRules whose program is among progs to arg. ok
 // is false when no rule is about arg, so the generic handling applies.
+// Positional rules have no Flag and are skipped (see positional).
 func (p Policy) flagRule(progs []string, arg string) (out string, next, ok bool) {
 	for _, r := range p.FlagRules {
-		if r.Flag == "" || !slices.ContainsFunc(progs, func(prog string) bool {
-			return globMatch(strings.ToLower(r.Program), prog)
-		}) {
+		if r.Kind != FlagValue || r.Flag == "" || !ruleApplies(progs, r) {
 			continue
 		}
 		switch {
