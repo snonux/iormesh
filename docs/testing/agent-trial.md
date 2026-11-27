@@ -130,12 +130,15 @@ change and the outgoing data, `change` to one that does not. An
 item with prose besides its command — a typographic dash, "only
 if …", "if needed" — names no command (task bn4, #37's amendment):
 the harness would match a `RUN` of the bare command against the
-whole line, and guided mode would type the prose. In guided mode,
-after `yes`, the output of exactly the named commands, typed in
-order on the named VM, each as `$ command` and its output (a
-non-zero exit as `[exit status N]`; a word-starting `@` escaped,
-as above). The user types
-into one terminal per VM, so a `cd` carries to the next command and
+whole line, and guided mode would type the prose. The listed
+forms get `change`; other wording (`(when missing)`, a trailing
+`# comment`) is not spotted, and an em dash inside a quoted
+argument is flagged too, a trade-off the guide's commands never
+meet. In guided mode, after `yes`, the output of exactly the
+named commands, typed in order on the named VM, each as
+`$ command` and its output (a non-zero exit as
+`[exit status N]`; a word-starting `@` escaped, as above). The
+user types into one terminal per VM, so a `cd` carries to the next command and
 step (`typedCommand`, task nm4); each `RUN` of automatic mode is its
 own ssh session, as the protocol says. A `RUN`'s
 output comes back the same way. A silent success reads `[no

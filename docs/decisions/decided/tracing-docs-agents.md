@@ -214,8 +214,9 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
     and pastes back the output. *Amended (task bn4,
     2026-11-27):* a command is named only by a Commands item
     that holds it alone; an item with prose besides its command
-    (a typographic dash, "only if …", "if needed") names none,
-    and the explanation gets `change`. In the rerun (task 8n4)
+    names none, and one with the prose the harness spots (a
+    typographic dash, "only if/when …", "if needed/necessary")
+    gets `change`. In the rerun (task 8n4)
     glm-5.3-flash's approved item read `sudo dnf install -y tar
     — only if command 1 shows no tar`; it then ran the bare
     command, which no item named, and in guided mode the user
