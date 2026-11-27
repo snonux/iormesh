@@ -17,7 +17,9 @@
 //     end. Its peer address and port are where a server listens.
 //     ambiguous, no_key, no_role and key_conflict halves are listed as
 //     unjoined — their far end may well be traced, and the merge could
-//     not tell — and an unresolved server half is inbound: its peer is a
+//     not tell — and so are pending ones (the build's last minute,
+//     federate.ReasonPending): a later build fuses them or turns them
+//     no_match; an unresolved server half is inbound: its peer is a
 //     client's ephemeral port, nothing to bind a tracer to.
 //   - A peer is the address the client reached, never a name: a DNS name
 //     the client looked up is a guess about which machine answered, so

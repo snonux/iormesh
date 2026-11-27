@@ -68,8 +68,11 @@ the build's last minute, their far end maybe in a segment not
 collected yet), the `merged` line's tcp part ends in `, N
 pending` and a `pending    N connections in the build's last
 minute: …` line follows the edges; `Run.PendingConns` holds the
-count. Pending connections are in no edge and in neither tcp
-count; a build without any prints the lines as before.
+count. Pending connections are in no edge of the model (`show
+edges`, the site, the TUI) and in neither tcp count; `graph.json`
+still marks their connected edge `unresolved`, the graph saying
+only what is fused. A build without any prints the lines as
+before.
 
 Differences from the sketch above (V1; still so after M5's
 renderers landed): the text is plain (no colors, `->` for

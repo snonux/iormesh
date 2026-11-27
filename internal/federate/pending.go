@@ -12,14 +12,29 @@ import (
 // a segment a minute, on its own clock: each session's rotation falls
 // at its start plus whole minutes, so sessions started seconds apart
 // rotate seconds apart, and a collect pulls only published segments.
-// The build therefore sees each running session up to a different
-// instant, and a connection made in that tail — after the far end's
-// last collected rotation, before the near end's — has only its near
-// half in the store. Fuse calls it no_match, the service database
-// counts it unresolved, and its edge reads mixed although both ends
-// are traced (the M8 trial's three mixed edges, each the last round
-// before the collect). A later collect brings the far half and fuses
-// it, but every build has a new tail.
+// And a record reaches the segment late: the correlator holds a socket
+// event whose conn id is not known yet — every connect or accept whose
+// other end another session traces — for its fuse window
+// (correlate.DefaultFuseWindowNS, 5 s; Correlator.release), with every
+// event behind it, and the Java join holds an http record for that
+// window plus its timeout (correlate.DefaultJavaTimeoutNS, 2 s). So a
+// session's collected records stop up to that hold before its last
+// collected rotation. The build therefore sees each running session up
+// to a different instant, and a connection made in that tail — after
+// the far end's collected records stop, before the near end's — has
+// only its near half in the store. Fuse calls it no_match, the service
+// database counts it unresolved, and its edge reads mixed although
+// both ends are traced (the M8 trial's three mixed edges, each the last
+// round before the collect, every session's records stopping near
+// 00:49:02–03 though they rotated 00:49:05–11). A later collect brings
+// the far half and fuses it, but every build has a new tail.
+//
+// The far end is not known, so a half is judged against every other
+// running session: an idle one, one that died without its end, or one
+// tracing something unrelated makes a tail no_match pending too, an
+// untraced external peer's included, until the build's newest record
+// is a minute past it. A windowed build (-to in the past) keeps its
+// own tail pending however often it is rebuilt.
 //
 // So settle marks such a half pending instead: a no_match half is
 // pending when the far end may still come, which takes both of
@@ -43,12 +58,14 @@ import (
 // until a build with newer segments fuses it or, once it is older than
 // the window, calls it no_match.
 
-// settleSlack widens both tests: an event stamped just before a
-// rotation can be written into the next segment (window.go spanSlack),
-// the writer rotates on the first tick after its interval, and the two
-// ends of one connection are stamped by two hosts' clocks. Ten seconds
-// covers these with room; a wider slack only keeps a truly one-sided
-// half pending a little longer.
+// settleSlack widens both tests. It must exceed the hold above — the
+// correlator's fuse window plus the Java join's http timeout, 7 s by
+// default — since records stamped that long before a rotation are
+// written into the next segment (TestSettleSlackCoversHold fails when
+// the hold outgrows it); on top, the writer rotates on the first tick
+// after its interval and the two ends of one connection are stamped by
+// two hosts' clocks. Ten seconds covers these; a wider slack only keeps
+// a truly one-sided half pending a little longer.
 const settleSlack = 10 * time.Second
 
 // sessionSpan is what the collect brought of one session that may still

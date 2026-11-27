@@ -70,8 +70,11 @@ How to read it:
   shows as one fused edge. While sessions run, the tcp part may
   end in `, N pending`, with a `pending` line below: connections
   of the build's last minute whose far end may sit in a segment
-  not collected yet. They are in no edge yet; the next `refresh`
-  a minute later fuses them.
+  not collected yet. They are in no edge of `show edges` yet
+  (`graph.json` marks them `unresolved`); the next `refresh` a
+  minute later fuses them, or reports them `unresolved` when no
+  session traces the far end. A `-to` in the past keeps its
+  pending ones: widen the window.
 - **`health`** — `lost` counts records dropped because a ring
   buffer was full; `clock bounds` are how far apart two hosts'
   clocks can be, proved by traffic between them.
@@ -181,8 +184,8 @@ edge (some connections seen from one end only) or an
 refreshing until the count looks stable does not fix it. The
 build already holds back
 the connections of its last minute whose far end it may not have
-collected yet (`pending`, above), so a one-sided connection
-really missed one end. What to do:
+collected yet (`pending`, above), so a one-sided connection older
+than that most likely missed one end. What to do:
 
 1. `iormeshctl status`: every session of both services is
    `running`. A session stopped, ended or never started on the

@@ -234,6 +234,11 @@ type JavaStats struct {
 	Lost agentspool.Losses
 }
 
+// DefaultJavaTimeoutNS is JavaJoinConfig.Timeout's default: an http
+// record may wait it on top of UpstreamHold before it is written, so
+// federate's pending slack must exceed both (decision #43).
+const DefaultJavaTimeoutNS = defaultTimeout
+
 // The defaults of JavaJoinConfig.
 const (
 	defaultScanEvery = 50_000_000

@@ -85,6 +85,13 @@ type Config struct {
 
 const defaultFuseWindowNS = 5_000_000_000
 
+// DefaultFuseWindowNS is the default fuse window, exported because it
+// delays every event behind a held socket event into the segment
+// (release): the merge's pending slack must exceed it plus the Java
+// join's http timeout (federate settleSlack, decision #43), and a test
+// there fails if it grows past that.
+const DefaultFuseWindowNS = defaultFuseWindowNS
+
 // Correlator holds the per-host state between records.
 type Correlator struct {
 	cfg     Config

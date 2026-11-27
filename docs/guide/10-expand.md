@@ -45,7 +45,10 @@ it and either as a candidate or with the reason it is skipped:
 or traced), `nat` (a fused connection proves it is NAT in front
 of a traced server), `transport` (the controller's own SSH or
 rsync), `local`, `inbound`, `ipv6` and a few more. Nothing is
-contacted.
+contacted. A peer reached only in the build's last minute may be
+`unjoined` (`merge: pending`): its far end may not be collected
+yet ([chapter 6](06-collect-build.md#build)); collect, build and
+plan again a minute later.
 
 ## Apply one round
 

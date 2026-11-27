@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
+	"iormesh/internal/correlate"
 	"iormesh/internal/schema"
 )
 
@@ -109,6 +111,19 @@ func TestMergePendingTail(t *testing.T) {
 				t.Fatalf("o2: %s, want %s", got, c.want)
 			}
 		})
+	}
+}
+
+// TestSettleSlackCoversHold: the pending slack exceeds how long a
+// session's records may wait before they reach a segment — the
+// correlator's fuse window plus the Java join's http timeout (task cn4,
+// decision #43). A grown window must grow the slack too, or tail
+// connections turn mixed again.
+func TestSettleSlackCoversHold(t *testing.T) {
+	hold := correlate.DefaultFuseWindowNS + correlate.DefaultJavaTimeoutNS
+	if uint64(settleSlack) <= uint64(hold) {
+		t.Fatalf("settleSlack %v does not exceed the correlator's hold %v (fuse window + http timeout)",
+			settleSlack, time.Duration(hold))
 	}
 }
 

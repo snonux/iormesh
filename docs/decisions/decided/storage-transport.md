@@ -76,12 +76,22 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
   unresolved** — task cn4 (2026-11-27), from #37's rerun (task
   8n4): three edges between traced services read `mixed`, one
   one-sided connection each, all in the last round before the
-  collect. Each running session rotates its segment a minute
-  after its own start (#16), so four sessions started seconds
-  apart are collected up to different instants, and a
-  connection made between them has only its near half in the
-  store (billing's round-4 JVM's trace stops before the accept
-  it went on to serve). The merge called it `no_match`, the
+  collect. Two things cut each session's trace at its own
+  instant. Each running session rotates its segment a minute
+  after its own start (#16), so sessions started seconds apart
+  are collected up to different rotations. And records reach
+  the segment late: the correlator holds a socket event whose
+  conn id is not known yet — every connect or accept whose
+  other end another session traces — for its fuse window (5 s,
+  `internal/correlate` `release`), and every event behind it
+  waits too; the Java join holds an http record for that window
+  plus its 2 s timeout. So a session's collected records stop up
+  to 7 s before its rotation — in the rerun every session's
+  near 00:49:02–03 though they rotated 00:49:05–11 — and a
+  connection made in that tail has only its near half in the
+  store (inventory lacks the accepts at 00:49:02.62 and
+  00:49:03.87, billing the one at 00:49:03.03, which its round-4
+  JVM went on to serve). The merge called it `no_match`, the
   service database stored it unresolved, and its edge read
   mixed. Now the merge marks a `no_match` half `pending` when
   the far end may still come: the half lies within one segment
@@ -91,15 +101,27 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
   segment), and a running session that did not record the half
   — a collected segment's session with no `end` event — has
   records only up to 10 s after it (its next segment may hold
-  the far end; the 10 s absorb the writer's rotation lag and two
-  hosts' clocks). A pending half is no verdict: it is left out
-  of the unresolved count and the service database, the summary
+  the far end). The 10 s must exceed that hold — the
+  correlator's fuse window plus the http timeout, 7 s — with
+  room for the writer's tick and two hosts' clocks;
+  `TestSettleSlackCoversHold` fails if the hold outgrows it. A
+  pending half is no verdict: it is left out of the unresolved
+  count, the edges of the model and `show edges`, and the
+  service database (`graph.json` still marks its connected edge
+  `unresolved`: the graph states what is fused); the summary
   counts it (`tcp …, N pending` and a `pending` line saying to
-  collect again), and a later build fuses it or, once older than
-  that minute, calls it `no_match`. A session alone, NDJSON trace
-  directories (finished runs) and sessions that recorded their
-  end have nothing more to publish, so their halves are judged
-  as before. Why: the M8 mesh check requires every
+  collect again), `expand` skips its peer until a later build,
+  and a later build fuses it or, once older than that minute,
+  calls it `no_match`. The far end is not known, so a half is
+  judged against every other running session: an idle one, one
+  that died without its end, or an unrelated one makes a tail
+  `no_match` pending too, an untraced external peer's included;
+  a windowed build whose `-to` lies in the past keeps its tail
+  pending however often it is rebuilt (widen the window). A
+  session alone, NDJSON trace directories (finished runs) and
+  sessions that recorded their end have nothing more to
+  publish, so their halves are judged as before. Why: the M8
+  mesh check requires every
   cross-service edge fused (#37, amended), and a mixed edge must
   mean one end really was not traced, not that the build cut
   the trace at another instant. Rejected: asking every session
