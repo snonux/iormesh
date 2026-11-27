@@ -32,7 +32,9 @@ var printFuncs = map[string]int{
 // termsafe's escapers, internal/ctl's two names for termsafe.String
 // (safe, and errText for an error's text) and its name for
 // termsafe.Lines (errLines: a host's multi-line error, each line escaped
-// on its own, task dm4). A helper that builds text from safe parts is
+// on its own, task dm4), and query's -file suggestion
+// (fileBaseSuggestion: a shell word whose every rune is printable, which
+// termsafe.String would Go-quote and so break, task pp4). A helper that builds text from safe parts is
 // not listed: its result is wrapped once more at the print, which costs
 // nothing, because termsafe.String leaves printable text, its own output
 // included, unchanged.
@@ -43,6 +45,7 @@ var sanitizers = map[string]bool{
 	ctlPkg + ".safe":                   true,
 	ctlPkg + ".errText":                true,
 	ctlPkg + ".errLines":               true,
+	ctlPkg + ".fileBaseSuggestion":     true,
 }
 
 // rawAllowed are the reviewed exceptions, "file.go: expression" to why

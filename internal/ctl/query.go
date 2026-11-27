@@ -15,6 +15,7 @@ import (
 	"iormesh/internal/schema"
 	"iormesh/internal/segment"
 	"iormesh/internal/termsafe"
+	"iormesh/internal/viewmodel"
 )
 
 // `iormeshctl query` (docs/milestones.md M5 "Query / slice interface", task
@@ -227,15 +228,30 @@ func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter) err
 // is silently empty of file events. It names the path and the glob in
 // that path's directory that would match; the exit status stays 0, the
 // query having run as asked. The path comes from a server: printed
-// terminal-safe.
+// terminal-safe where it is named, and in the suggestion — a command
+// an agent or operator pastes verbatim — built by fileBaseSuggestion.
 func fileBaseHint(e env, glob, match string) error {
 	if match == "" {
 		return nil
 	}
 	_, err := fmt.Fprintf(e.stderr, "query: -file %s matched no path, only the last element of %s: "+
-		"'*' stops at '/' and the glob must match the whole path; try -file '%s'\n",
-		safe(strconv.Quote(glob)), safe(match), safe(path.Join(path.Dir(match), glob)))
+		"'*' stops at '/' and the glob must match the whole path; try -file %s\n",
+		safe(strconv.Quote(glob)), safe(match), fileBaseSuggestion(glob, match))
 	return err
+}
+
+// fileBaseSuggestion is the -file glob the hint suggests, glob in
+// match's directory, as one inert shell word (task pp4): the directory
+// is escaped to match itself alone (viewmodel.GlobLiteral, so "[prod]"
+// is not read as a class), the glob keeps its wildcards, each
+// non-printable rune of either becomes '?', and viewmodel.ShellWord
+// quotes the whole, so a quote or $(...) in the path stays text when
+// pasted. Every rune is printable, so it is not passed through
+// termsafe.String, whose Go-quoting would break the shell quotes (task
+// 1i4); internal/buildgate's print gate lists it as a sanitizer.
+func fileBaseSuggestion(glob, match string) string {
+	return viewmodel.ShellWord(path.Join(viewmodel.GlobLiteral(path.Dir(match)),
+		viewmodel.GlobPrintable(glob)))
 }
 
 // listsSegments tells whether the projects' directories in store list

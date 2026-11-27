@@ -307,7 +307,11 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
   directory that would match (`try -file '/etc/*shop.conf*'`);
   the slice and the exit status are unchanged (0), the query
   having run as asked, and the path, from a server, is printed
-  terminal-safe. The guide (chapter 8) and query's usage text
+  terminal-safe. The suggested glob is ready to paste (task
+  pp4): the directory's glob metacharacters are escaped, so
+  it matches `/data/[prod]/billing.crt`, and the glob is one
+  inert shell word (`viewmodel.ShellWord`), so a quote or
+  `$(…)` in the path stays text. The guide (chapter 8) and query's usage text
   state the rule. Why: the hint costs one more glob per
   non-matching path, fires only when the slice cannot hold the
   file the reader meant, and turns a silent miss into the fix.

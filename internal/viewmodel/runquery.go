@@ -19,13 +19,13 @@ import (
 // host, thread and path come from the servers: each is a glob escaped
 // to match only itself, and the command is quoted into inert shell
 // words, so pasting it runs nothing else. Every rune of the result is
-// printable (globLiteral turns the others into '?'), so no surface
+// printable (GlobLiteral turns the others into '?'), so no surface
 // passes it through termsafe.String: Go-quoting the finished command
 // would break its single quotes and make the path's text shell code
 // (task 1i4).
 func runQuery(host string, tid uint32, path string, first, last uint64) string {
-	words := []string{"iormeshctl", "query", "-host", globLiteral(host),
-		"-thread", strconv.FormatUint(uint64(tid), 10), "-file", globLiteral(path),
+	words := []string{"iormeshctl", "query", "-host", GlobLiteral(host),
+		"-thread", strconv.FormatUint(uint64(tid), 10), "-file", GlobLiteral(path),
 		"-from", instant(first), "-to", instant(last + 1)}
 	for i, w := range words {
 		words[i] = ShellWord(w)
@@ -38,13 +38,14 @@ func instant(ns uint64) string {
 	return time.Unix(0, int64(ns)).UTC().Format(time.RFC3339Nano)
 }
 
-// globLiteral escapes path.Match's metacharacters, so the glob matches
+// GlobLiteral escapes path.Match's metacharacters, so the glob matches
 // s alone, except that each rune wild reports becomes the wildcard '?':
 // the glob then also matches names differing from s only there, but it
 // is printable, so it can be shown and pasted as is (task 1i4).
 // path.Match's '?' matches one rune or one invalid byte, as range
-// yields them.
-func globLiteral(s string) string {
+// yields them. query's -file hint escapes a traced path's directory
+// with it too (internal/ctl fileBaseHint, task pp4).
+func GlobLiteral(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		if wild(r) {
@@ -57,6 +58,18 @@ func globLiteral(s string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// GlobPrintable is the glob s with each rune wild reports turned into
+// the wildcard '?' and its metacharacters kept: a glob as printable as
+// GlobLiteral's, matching at least what s matched (task pp4).
+func GlobPrintable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if wild(r) {
+			return '?'
+		}
+		return r
+	}, s)
 }
 
 // wild reports whether r, as range over a string yields it, cannot be
