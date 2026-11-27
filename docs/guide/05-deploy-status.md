@@ -107,6 +107,28 @@ required`, a refused upgrade) are under
 [Deploy and the sudoers rule](../troubleshooting.md#deploy-and-the-sudoers-rule)
 and [Signatures](../troubleshooting.md#signatures-and-pinned-keys).
 
+**After a partial failure:** the hosts that deployed are already
+tracing, the failed ones are not, and a connection between them
+is seen from one end only (a `mixed` edge in
+[chapter 6](06-collect-build.md#name-your-services)). Once the
+failed hosts are fixed, start every session of the run again in
+one command, before the traffic you want to trace:
+
+> **Human step.** `-restart` stops and starts the running
+> sessions too; an agent asks first, naming the hosts.
+
+```sh
+iormeshctl deploy -restart app1 app2
+```
+
+Without `-restart`, the hosts that did start keep their sessions
+(`left alone`) and only the fixed ones start, minutes later; a
+fixed host whose entry changed (a `pattern:` for a `listen_port:`)
+starts anew either way. `rm` is not the way: it uninstalls the
+tracer and unregisters the host. A restart keeps what the early
+sessions already published, so connections made in the gap still
+reach the next build: drop them as chapter 6's step 2 says.
+
 ## Check status
 
 ```sh
