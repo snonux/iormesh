@@ -22,6 +22,7 @@ and the structure stays:
 | `curl -H "Authorization: Bearer s"`, `--header=Cookie: s`, `--api_key:s`, `pass:s` | `Authorization: ***`, `--header=Cookie: ***`, `--api_key:***`, `pass:***` |
 | `sudo -u root mysql -ps`, `env X=1 mysql -p s`, `docker login -p s` | `-p***`, `-p ***`, `-p ***` — a flag rule applies after any word naming its program |
 | `--spring.application.json={"db":{"password":"s"}}`, `-d '{"token": "s"}'`, `{'secret': 's'}`, `{\"pwd\":\"s\"}`, `{"tokens":["s"]}`, `/p?token=s&a=1` | `{"db":{"password":"***"}}`, `{"token": "***"}`, `{'secret': '***'}`, `{\"pwd\":\"***\"}`, `{"tokens":***}`, `/p?token=***&a=1` — any denied key, then `:` or `=`, then a value, in any element; `{"password":` as one element masks the next |
+| `ruby -e 'h = {"password" => "s"}'`, `password := s`, `os.environ["PASSWORD"] = "s"`, `sh -c 'run --password a\ s'` | `{"password" => "***"}`, `password := ***`, `os.environ["PASSWORD"] = "***"`, `run --password ***` — an operator run after the separator, a key in a subscript, a backslash-escaped blank in a value |
 
 Keys match case-insensitively with `-`, `_` and `.` ignored, so
 one glob covers every spelling. The argv denylist names
@@ -32,27 +33,39 @@ one glob covers every spelling. The argv denylist names
 userinfo is always masked, query values all (decision #22's
 default). After the specific forms above, one generic pass looks
 at every argv element for a denied key (optionally quoted or
-escaped-quoted), optional blanks, `:` or `=`, optional blanks
-and a value — a quoted string up to its matching unescaped
-quote, an object or array up to its matching bracket, or a bare
-run up to white space, a quote or one of `,;&})]` — and masks
-only the value, so JSON, YAML, dicts and pairs inside shell
-strings need no parser of their own; the pass is linear in the
-element's length. An object or array under a denied key is
-masked whole (`"secrets":***`, `"tokens":***`); under any other
-key its pairs are judged one by one. It is best effort: a
-secret under an innocuous name (also in JSON, `{"db":"s"}`) or
-as a bare positional argument is not recognized; neither is a
-pair without `:` or `=` (XML, `<password>s</password>`), a key
-written with JSON `\u` escapes, or a pair whose key is split
-across argv elements or whose separator starts the next element
-(`"password"` then `:"s"`), or whose bracketed value opens in
-one element and continues in the next (`{"password":["x` then
-`s"]}`); a quoted
-value with spaces inside a shell string is masked only up to the
-quote's end as a shell would split it, and the
-defaults over-mask rather than leak (`--password-stdin` masks the
-argument after it). HTTP headers (M3) use the same package:
+escaped-quoted, optionally inside a subscript or call:
+`os.environ["PASSWORD"]`, `getenv(TOKEN)`), optional blanks,
+`:` or `=` with the rest of an operator run (`=>` of Ruby, PHP
+and Perl, `:=`, `==`), optional blanks and a value — a quoted
+string up to its matching unescaped quote, an object or array up
+to its matching bracket, or a bare run up to white space, a
+quote or one of `,;&})]` — and masks only the value, so JSON,
+YAML, dicts, hashes, assignments and pairs inside shell strings
+need no parser of their own (`{"password" => "s"}` →
+`{"password" => "***"}`); the pass is linear in the element's
+length. An object or array under a denied key is masked whole
+(`"secrets":***`, `"tokens":***`); under any other key its pairs
+are judged one by one. A blank escaped by a backslash stays in
+its word and its value, as a shell keeps it (`--password a\ s`
+→ `--password ***`).
+
+It is best effort. Not recognized: a secret under an innocuous
+name (also in JSON, `{"db":"s"}`) or as a bare positional
+argument; a pair without `:` or `=` (XML,
+`<password>s</password>`; `password -> s`; `password s` in
+prose); a key written with JSON `\u` escapes; a pair whose key
+is split across argv elements or whose separator starts the
+next element (`"password"` then `:"s"`), or whose bracketed
+value opens in one element and continues in the next
+(`{"password":["x` then `s"]}`). A quoted value with spaces
+inside a shell string is masked up to the quote's end, as a
+shell would split it. Over-masked, never leaked: an operator
+run glued to a bare value (`password:>s`) is masked with it; a
+one-word `KEY=VALUE` under a denied key loses the rest of the
+word (`{"password"=>"s"}` → `{"password"=***`); a blank after an
+even run of backslashes, which a shell does split at, still
+counts as part of the value; and `--password-stdin` masks the
+argument after it. HTTP headers (M3) use the same package:
 names containing `authorization`, `cookie`, `bearer`,
 `credential`, `token`, `secret`, `password`, `passwd`,
 `passphrase`, `session` or `signature`, names ending in `pwd` or

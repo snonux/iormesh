@@ -73,11 +73,14 @@ func hasWordAfter(toks []token, i int) bool {
 
 // splitWords cuts s into words and separators. With quotes, a run between
 // matching ' or " quotes (an unclosed one runs to the end) is part of its
-// word even where it holds spaces, as a shell would read it.
+// word even where it holds spaces, and so is a space escaped by a
+// backslash ("SEK\ RET", task op4), as a shell would read it. Without
+// quotes every space splits, so words always makes progress.
 func splitWords(s string, quotes bool) []token {
 	var toks []token
 	start, inSep := 0, false
 	var quote rune
+	escaped := false // the rune before was an unescaped backslash
 	for i, r := range s {
 		if quote != 0 {
 			if r == quote {
@@ -85,7 +88,8 @@ func splitWords(s string, quotes bool) []token {
 			}
 			continue
 		}
-		sp := unicode.IsSpace(r)
+		sp := unicode.IsSpace(r) && !escaped
+		escaped = quotes && r == '\\' && !escaped
 		switch {
 		case i == 0:
 			inSep = sp
