@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -161,19 +160,25 @@ func (q Question) Score(answer string) []string {
 // clauseEnd splits an answer into the clauses ExcludesUnless scopes:
 // at ";", a line end, or a "." that ends a sentence (followed by space
 // or the end), so the dots of a file name or an address do not split.
+// An abbreviation's "." before a space ("e.g. x") splits as well: an
+// ExcludesUnless word then counts only on its own side of it.
 var clauseEnd = regexp.MustCompile(`;|\n|\.(\s|$)`)
 
 // excluded reports whether the lower-cased answer a holds the
 // lower-cased excluded string s: anywhere, or with ExcludesUnless set,
-// in a clause that holds none of its words.
+// in a clause that holds none of its words. The words match whole
+// words, so "plain" does not count inside "explain".
 func (q Question) excluded(a, s string) bool {
 	if len(q.ExcludesUnless) == 0 {
 		return strings.Contains(a, s)
 	}
+	words := make([]string, len(q.ExcludesUnless))
+	for i, w := range q.ExcludesUnless {
+		words[i] = regexp.QuoteMeta(strings.ToLower(w))
+	}
+	unless := regexp.MustCompile(`\b(?:` + strings.Join(words, "|") + `)\b`)
 	for _, clause := range clauseEnd.Split(a, -1) {
-		if strings.Contains(clause, s) && !slices.ContainsFunc(q.ExcludesUnless, func(w string) bool {
-			return strings.Contains(clause, strings.ToLower(w))
-		}) {
+		if strings.Contains(clause, s) && !unless.MatchString(clause) {
 			return true
 		}
 	}

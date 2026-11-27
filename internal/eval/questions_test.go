@@ -94,6 +94,12 @@ func TestScore(t *testing.T) {
 		"unless elsewhere":          {unless, "/inventory/reserve is https; /stock is plain", 1},
 		"unless no word":            {unless, "/orders and /inventory/reserve are https", 1},
 		"unless every clause":       {unless, "/inventory/a is plain. /inventory/b is https", 1},
+		// The words match whole words: "explain" holds no "plain".
+		"unless inside a word": {unless, "/inventory/reserve went over TLS as the logs explain", 1},
+		// An abbreviation's "." followed by a space splits too, so the
+		// word must sit on the same side of it as the path (pinned).
+		"unless split at e.g.": {unless, "the plain ones, e.g. /inventory/reserve", 1},
+		"unless before e.g.":   {unless, "/inventory/reserve was plain, e.g. no TLS", 0},
 	} {
 		if got := tc.q.Score(tc.answer); len(got) != tc.fails {
 			t.Errorf("%s: failures %v, want %d", name, got, tc.fails)
