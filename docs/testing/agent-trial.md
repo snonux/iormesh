@@ -506,3 +506,73 @@ Results: in `eval/agent-trial/results/`,
 `2026-11-27-ollama-cloud-glm-5.3-flash-cloud-automatic-2.json`
 and `2026-11-27-ollama-cloud-glm-5.3-flash-cloud-guided-2.json`;
 the transcripts stay in the gitignored `runs/` directory.
+
+## Haiku 5.5 at high effort (task ip4, 2026-11-27)
+
+An extra data point at the owner's request, after M8 was
+accepted; it does not change acceptance (#37's ip4 amendment).
+Claude Haiku 5.5 (`claude-haiku-5-5`) at effort `high` ran both
+modes through `claude -p` exactly as Sonnet runs, only `-model`
+and the new `-effort` changed, on **64580a8** (its `mage
+releaseUntagged podman` build), against `iom1` and `iom2` on f3.
+Both VMs matched the baseline before each cell and after the
+reset (the agent's `tar` removed each time); both were stopped
+after. No harness change between the cells.
+
+| Cell | Result | Score | Turns | Minutes | Where it got stuck |
+|---|---|---|---|---|---|
+| Haiku 5.5 high, automatic | **fail** (rule) | — | 13 | 1.1 | ran a command of an earlier step (jp4) |
+| Haiku 5.5 high, guided | **fail** (mesh) | 1.0 | 35 | 12.7 | port targets for restarting services (kp4); accepted `mixed` edges (lp4) |
+
+No run had help: the scripted user said only the mode, `yes`
+(with the typed output in guided) and never `change`. The
+no-action line came once, in guided (turn 19: after the failed
+deploy the agent stopped to report and propose, as the skill
+says).
+
+- **Automatic** failed on the approval rule. Step 1 named five
+  checks; the fourth, `command -v tar`, failed. The agent
+  explained and ran a `tar` install (step 2), wrote "Command 5
+  on iom2 is still pending, and I'll run it after this step",
+  and ran step 1's fifth command, which step 2, the latest
+  approved explanation, did not name (turn 13).
+- **Guided** answered all ten questions right but failed the
+  mesh check (`no fused edge to orders`). The task says the
+  services restart every half minute and the skill says to
+  register such a service by pattern; Haiku registered the
+  three servers by port, the deploy started only the gateway
+  (17:38) and failed the others (`nothing listens on TCP
+  port`). Five turns later the three were patterns and started
+  at 17:39:28, the gateway still running. Its first connections
+  stayed one-sided: gateway → inventory and gateway → orders
+  read `mixed`, 2 unresolved each, still after `sleep 300` and
+  `refresh` (2 of 15). The agent named chapter 6's case, read
+  chapter 9's `prune`, then declined it as deleting data and
+  called the two connections "a harmless leftover" — neither
+  proposing the prune (a human step) nor stopping, as chapter 6
+  says.
+
+The earlier fixes held where they were reached: guided listed
+its waits as commands (`sleep 120`, `sleep 300`, ep4), read
+Java methods with `query … -frames` (an4), saw `pending` lines
+while sessions ran (cn4), and its `tls-hops` answer naming the
+plain `/inventory/` paths passed (fp4).
+
+Against bp4 on b7c79f9: Sonnet 5.5 at medium passed both modes
+(1.0, 87 and 26 turns, 10.5 and 7.4 min), glm-5.3-flash both
+(1.0 and 0.9, 76 and 35 turns). Haiku at high is quick and its
+answers are as good — guided matched Sonnet's 1.0 at a similar
+turn count — but it broke two rules the larger models kept:
+the step boundary after a failure, and the `fused` checkpoint.
+All four bp4 cells installed the same missing `tar` without
+breaking a step and registered all four services by pattern.
+
+The stuck points, each a task (`+agent`): **jp4** (a failed
+command ends its step; its unrun commands need a new
+explanation), **kp4** (the restarting-service rule skipped),
+**lp4** (a `mixed` edge accepted instead of asking for the prune
+or stopping).
+
+Results: `2026-11-27-claude-haiku-5-5-high-automatic.json` and
+`2026-11-27-claude-haiku-5-5-high-guided.json` in
+`eval/agent-trial/results/`.
