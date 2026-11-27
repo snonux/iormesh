@@ -53,7 +53,7 @@ then open only the part you need.
 ## By number
 
 Every decision, in numeric order, with the part that holds it. The
-next free number is #44.
+next free number is #45.
 
 - **#1** [Remote bootstrapping and sudo scope](decisions/open.md) — open
 - **#2** [Java agent attach
@@ -123,3 +123,5 @@ next free number is #44.
   frames](decisions/decided/tracing-docs-agents.md) — decided
 - **#43** [A one-sided connection in a build's tail is pending, not
   unresolved](decisions/decided/storage-transport.md) — decided
+- **#44** [Positional secrets: per-program
+  rules](decisions/open.md) — decided
