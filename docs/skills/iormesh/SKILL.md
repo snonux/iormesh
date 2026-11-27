@@ -10,8 +10,8 @@ The **guide** holds the path, the commands and what success looks
 like. This skill holds only the protocol. Do not invent commands;
 take them from the guide.
 
-Guide links below are relative to `docs/skills/iormesh/` in the
-iormesh repository; if one does not open, open the same file under
+Guide links are relative to `docs/skills/iormesh/` in the iormesh
+repository; if one does not open, open the same file under
 `docs/guide/` in your docs copy, or ask the user.
 
 Read first: [chapter 13](../../guide/13-agents.md).
@@ -108,7 +108,7 @@ section.
 | 3 | Make the signing key (skip if the user has one) | [ch. 3, key](../../guide/03-release.md#make-your-key-once) | `./iormeshctl-linux-amd64 keygen -key ~/.minisign/iormesh.key` |
 | 4 | Sign it | [ch. 3, sign](../../guide/03-release.md#sign-it-with-your-key) | `./iormeshctl-linux-amd64 sign -key KEY .` |
 | 5 | Install and verify | [ch. 3, install](../../guide/03-release.md#install-iormeshctl-and-verify) | `install -m 0755 …`, `iormeshctl verify …` |
-| 6 | Register hosts | [ch. 4, register](../../guide/04-register-bootstrap.md#register-the-hosts) | `iormeshctl add …`, `iormeshctl list` |
+| 6 | Register hosts (first the `-pattern` check below) | [ch. 4, register](../../guide/04-register-bootstrap.md#register-the-hosts) | `iormeshctl add …`, `iormeshctl list` |
 | 7 | Bootstrap (first install) | [ch. 4, bootstrap](../../guide/04-register-bootstrap.md#bootstrap-the-one-time-install) | `iormeshctl bootstrap -dist DIR HOST` (prints), or `iormeshctl bootstrap -apply -dist DIR HOST` |
 | 8 | Deploy, check | [ch. 5](../../guide/05-deploy-status.md) | `iormeshctl deploy -dist DIR HOST`, `iormeshctl status` |
 | 9 | Collect, build | [ch. 6](../../guide/06-collect-build.md) | `iormeshctl collect`, `iormeshctl build`, `iormeshctl refresh`, `iormeshctl services name …` |
@@ -117,10 +117,11 @@ section.
 
 Notes:
 
+- **Before writing the `add` commands**, check each service:
+  one that restarts or changes pid gets `-pattern`, never a port
+  ([ch. 4](../../guide/04-register-bootstrap.md#choosing-the-target)).
 - `bootstrap`, `deploy` read `./dist` unless `-dist` names the
   signed release directory.
-- Restarting service: register a pattern, not a port
-  ([ch. 4](../../guide/04-register-bootstrap.md#choosing-the-target)).
 - Name services; every expected edge must read `fused`
   ([ch. 6](../../guide/06-collect-build.md#name-your-services)).
 - Full stack: `show sequence ID -json` or `query -frames`
@@ -131,21 +132,21 @@ Notes:
   without a password (`ssh HOST sudo -n true` exits 0). Else
   print the steps and hand them to the user (Human step).
 - Start the traced services before `deploy`; the step after it
-  begins with `sleep 120` (ch. 5).
+  begins with `sleep 120`.
 - Reading: start small — `show`, `show health`, `show edges` —
   then one conversation, then single events by ref
   ([ch. 13](../../guide/13-agents.md#trace-data-stays-local)).
   Answer with the quoted lines and their refs.
 - `rm` stops the sessions itself; `iormesh stop` on the host only
-  pauses tracing and keeps the install (ch. 9).
+  pauses tracing and keeps the install.
 
 ## 4. Human steps: never do these yourself
 
 Hand each guide **Human step** to the user, with the exact text
 to type, even in automatic mode:
 
-1. Accept a host key (compare its fingerprint first) — ch. 2.
-2. Grant sudo, or type a sudo password — ch. 2, ch. 4.
+1. Accept a host key (compare its fingerprint first).
+2. Grant sudo, or type a sudo password.
 3. Choose or type the signing key's password — ch. 3. Once the
    user has put it in `$IORMESH_MINISIGN_PASSWORD`, you may run
    `keygen` (makes the key; it never replaces one) and `sign`,
@@ -153,7 +154,7 @@ to type, even in automatic mode:
    to set it; do not run `minisign -G`, which asks on a terminal.
    Never print, echo or write the password.
 4. Run bootstrap's printed steps on a host when sudo asks for a
-   password — ch. 4.
+   password.
 5. Apply a `-javaagent` drop-in, a systemd timer or a Kubernetes
    patch — ch. 8, 9, 11. You may draft it.
 6. Write the `expand:` allowlist — ch. 10.

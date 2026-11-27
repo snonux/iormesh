@@ -575,7 +575,10 @@ The stuck points, each a task (`+agent`):
   ends the step, its commands not yet run need a new explanation
   and approval, only the latest approved explanation's commands
   run) and an example in `references/examples.md`.
-- **kp4** — the restarting-service rule skipped.
+- **kp4** — the restarting-service rule skipped. Fixed by
+  SKILL.md's path: row 6 points to a check that now opens the
+  notes, done before writing the `add` commands (a service that
+  restarts or changes pid gets `-pattern`, never a port).
 - **lp4** — a `mixed` edge accepted instead of asking for the
   prune or stopping.
 
