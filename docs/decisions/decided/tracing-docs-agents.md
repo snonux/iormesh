@@ -211,7 +211,16 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
     did not name fails the run, however good its answers. In
     guided mode the agent has no shell; the harness types
     exactly the commands the agent named, on the named host,
-    and pastes back the output.
+    and pastes back the output. *Amended (task bn4,
+    2026-11-27):* a command is named only by a Commands item
+    that holds it alone; an item with prose besides its command
+    (a typographic dash, "only if …", "if needed") names none,
+    and the explanation gets `change`. In the rerun (task 8n4)
+    glm-5.3-flash's approved item read `sudo dnf install -y tar
+    — only if command 1 shows no tar`; it then ran the bare
+    command, which no item named, and in guided mode the user
+    would have typed the prose into dnf. The skill says the same:
+    a command that depends on an earlier output is a new step.
   - **Budget and score:** 150 agent turns (one model reply,
     with or without a tool call; the scripted user's replies
     are not turns) and 60 minutes of wall time per run; past

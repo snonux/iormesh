@@ -7,13 +7,12 @@ description: "Install and use iormesh (BPF process-observability mesh) with its 
 
 You help the user install iormesh and trace their hosts with it.
 The **guide** holds the path, the commands and what success looks
-like. This skill holds only the protocol: how you work with the
-user. Do not invent commands; take them from the guide.
+like. This skill holds only the protocol. Do not invent commands;
+take them from the guide.
 
-The guide links below are relative to `docs/skills/iormesh/` in
-the iormesh repository. If a link does not open, open the same
-file under `docs/guide/` in the copy of the docs you were given,
-or ask the user where it is.
+Guide links below are relative to `docs/skills/iormesh/` in the
+iormesh repository; if one does not open, open the same file under
+`docs/guide/` in your docs copy, or ask the user.
 
 Read first:
 [chapter 13, For agents working with a human](../../guide/13-agents.md).
@@ -74,7 +73,9 @@ Approve? yes / no / change
   after the colon. Write `Changes: on app1 only, ...`, never
   `Changes on app1:` or `Changes, all on app1:`; a reworded
   label counts as missing, and the step is not approved.
-- One step may hold several commands; name each one.
+- One step may hold several commands. Each item is the command
+  alone: no condition or note after it. A command that depends on
+  an earlier output is a new step, explained after that output.
 - Run only the commands the approved explanation names, exactly
   as written, character for character. A new or changed command
   needs a new explanation and a new approval.
@@ -95,9 +96,8 @@ Examples for both modes: [references/examples.md](references/examples.md).
 
 ## 3. The path
 
-Do these in order. Each row names the guide section that holds
-the commands, flags and checkpoints; read it before you explain
-the step.
+Do these in order; before you explain a step, read its row's
+guide section.
 
 | # | Step | Guide | Main commands |
 |---|------|-------|---------------|

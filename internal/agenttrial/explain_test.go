@@ -1,7 +1,9 @@
 package agenttrial
 
 import (
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -60,6 +62,40 @@ func TestParseExplanationMissing(t *testing.T) {
 	}
 	if _, ok := ParseExplanation("Which mode do you want: automatic or guided?", vms); ok {
 		t.Error("a question parsed as an explanation")
+	}
+}
+
+// TestParseExplanationProseInCommand: a Commands item holds the command
+// alone. glm-5.3-flash's approved step listed "sudo dnf install -y tar —
+// only if command 1 shows no tar", then ran the bare command, which no
+// item named (task bn4); guided mode would have typed the prose into
+// dnf. Such an item is not approvable, with the item named; a plain
+// command with its own dashes, `--`, `#` or `if` stays approvable.
+func TestParseExplanationProseInCommand(t *testing.T) {
+	const form = "Runs on: iom1\nCommands:\n  1. %s\nChanges: none\nData leaving: none\n"
+	for _, item := range []string{
+		"sudo dnf install -y tar — only if command 1 shows no tar",
+		"`ssh iom2 ps -eo args` – only if command 3 finds nothing",
+		"sudo dnf install -y tar (only if tar is missing)",
+		"sudo dnf install -y tar, only if command 1 shows no tar",
+		"`sudo dnf install -y tar` (if needed)",
+	} {
+		e, ok := ParseExplanation(fmt.Sprintf(form, item), vms)
+		if !ok || len(e.Missing) != 1 || !strings.Contains(e.Missing[0], "item 1") {
+			t.Errorf("%q: ok %v, missing %v, want the item named as prose", item, ok, e.Missing)
+		}
+	}
+	for _, item := range []string{
+		"rpm -q tar || sudo dnf install -y tar",
+		"git log -1 -- docs",
+		"if command -v tar; then echo yes; fi",
+		"ssh -o BatchMode=yes iom2 true # check the key",
+		"tar -xzf iormesh-0.1.0-linux-amd64.tar.gz",
+	} {
+		e, ok := ParseExplanation(fmt.Sprintf(form, item), vms)
+		if !ok || len(e.Missing) != 0 {
+			t.Errorf("%q: ok %v, missing %v, want approvable", item, ok, e.Missing)
+		}
 	}
 }
 

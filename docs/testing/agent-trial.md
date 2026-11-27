@@ -125,11 +125,16 @@ files without a file tool.
 It says only what #37 ("Help") allows: the mode (`Mode: guided.`),
 in answer to the agent's first message that is not a `READ`;
 `yes` to an explanation that names the host (`Runs on:` one VM),
-the commands (a numbered list), the change and the outgoing data,
-`change` to one that does not; in guided mode, after `yes`, the
-output of exactly the named commands, typed in order on the named
-VM, each as `$ command` and its output (a non-zero exit as `[exit
-status N]`; a word-starting `@` escaped, as above). The user types
+the commands (a numbered list, each item the command alone), the
+change and the outgoing data, `change` to one that does not. An
+item with prose besides its command — a typographic dash, "only
+if …", "if needed" — names no command (task bn4, #37's amendment):
+the harness would match a `RUN` of the bare command against the
+whole line, and guided mode would type the prose. In guided mode,
+after `yes`, the output of exactly the named commands, typed in
+order on the named VM, each as `$ command` and its output (a
+non-zero exit as `[exit status N]`; a word-starting `@` escaped,
+as above). The user types
 into one terminal per VM, so a `cd` carries to the next command and
 step (`typedCommand`, task nm4); each `RUN` of automatic mode is its
 own ssh session, as the protocol says. A `RUN`'s
@@ -216,7 +221,8 @@ fake ssh — the test binary itself, which logs its argv and answers
 like a VM without running anything: a pass in automatic mode and
 in guided mode, `Main` end to end (preparation, tunnel, first
 message, result and logs), a `RUN` without an explanation, an
-unnamed command, an incomplete explanation, a guided `RUN`, both
+unnamed command, an incomplete explanation, a Commands item with a
+condition in words (`change`, nothing typed), a guided `RUN`, both
 budgets, a low score, a missing mesh, the CLIs' argv and
 environment, `READ` outside the copy, `@` mentions in VM output
 (and, with `claude` installed, against a capture server), the
@@ -351,7 +357,9 @@ The stuck points, each a task (`+agent`):
   then ran the bare command. The harness matches exactly, as #37
   says, so the run failed; the skill says `<exact command>` but
   never that an item holds the command alone, or that a command
-  that depends on an earlier result is a new step.
+  that depends on an earlier result is a new step. Now it does,
+  with an example, and the scripted user answers such an item
+  `change` (#37's amendment).
 - **cn4** — glm guided's mesh held every cross-service edge, but
   three of them `mixed`: 4 connections, 1 unresolved each, all in
   the first round after deploy (00:47:20–23 UTC), after every
