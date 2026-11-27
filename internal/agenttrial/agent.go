@@ -23,14 +23,20 @@ type Agent interface {
 const (
 	AgentClaude = "claude"
 	AgentPi     = "pi"
-	// DefaultClaudeModel runs at ClaudeEffort.
-	DefaultClaudeModel = "claude-sonnet-5-5"
-	ClaudeEffort       = "medium"
-	DefaultPiModel     = "ollama-cloud/glm-5.3-flash:cloud"
+	// DefaultClaudeModel runs at DefaultClaudeEffort, #37's "medium
+	// effort"; -effort picks another of ClaudeEfforts for an extra data
+	// point (task ip4: Haiku at high).
+	DefaultClaudeModel  = "claude-sonnet-5-5"
+	DefaultClaudeEffort = "medium"
+	DefaultPiModel      = "ollama-cloud/glm-5.3-flash:cloud"
 	// DefaultTurnTimeout bounds one model reply (ollama cloud is slow);
 	// the run's own deadline bounds it too.
 	DefaultTurnTimeout = 10 * time.Minute
 )
+
+// ClaudeEfforts are the levels claude's --effort takes. pi is run with
+// no effort flag, so it takes none.
+var ClaudeEfforts = []string{"low", "medium", "high", "xhigh", "max"}
 
 // CLI is an agent CLI run in print mode once per turn, its session
 // resumed by id. It gets no tool at all — claude's --tools with an empty
@@ -42,6 +48,9 @@ const (
 // (the package comment says why).
 type CLI struct {
 	Kind, Model, SystemPrompt string
+	// Effort is claude's --effort, DefaultClaudeEffort when empty; pi
+	// ignores it.
+	Effort string
 	// Dir is the CLI's working directory (empty, the run's own); pi keeps
 	// its session file under it.
 	Dir     string
@@ -107,10 +116,14 @@ var ClaudeEnv = []string{"CLAUDE_CODE_DISABLE_CLAUDE_MDS=1", "CLAUDE_CODE_DISABL
 
 // claudeArgv: the flags of M5's Claude run (docs/testing/focused-checks.md,
 // task 9k4), ClaudeEnv, and the session: --session-id on the first turn,
-// --resume after it.
+// --resume after it. The effort is c.Effort, medium (M5's) by default.
 func (c *CLI) claudeArgv() []string {
+	effort := c.Effort
+	if effort == "" {
+		effort = DefaultClaudeEffort
+	}
 	argv := slices.Concat([]string{"env", "-C", c.Dir}, ClaudeEnv, []string{"claude", "-p",
-		"--model", c.Model, "--effort", ClaudeEffort, "--tools", "", "--strict-mcp-config",
+		"--model", c.Model, "--effort", effort, "--tools", "", "--strict-mcp-config",
 		"--setting-sources", "", "--disable-slash-commands", "--system-prompt", c.SystemPrompt})
 	if c.turns == 0 {
 		return append(argv, "--session-id", c.Session)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -19,6 +20,9 @@ var ErrOptIn = errors.New("no agent: the trial sends the docs and the VMs' comma
 // Options are the command line of cmd/iormeshtrial.
 type Options struct {
 	Agent, Mode, Model string
+	// Effort is claude's effort level (DefaultClaudeEffort unless -effort
+	// names another); empty for pi, which takes none.
+	Effort string
 	// Controller is the VM the agent's shell lands on (the guide's
 	// laptop), Traced the VM running the workload.
 	Controller, Traced string
@@ -50,6 +54,8 @@ func ParseFlags(args []string, stderr io.Writer) (Options, error) {
 	fs.StringVar(&o.Agent, "agent", "", "agent CLI: claude or pi (required)")
 	fs.StringVar(&o.Mode, "mode", Automatic, "skill mode: automatic or guided")
 	fs.StringVar(&o.Model, "model", "", "model (default: claude-sonnet-5-5 or glm-5.3-flash by agent)")
+	fs.StringVar(&o.Effort, "effort", "", "claude's effort: "+strings.Join(ClaudeEfforts, ", ")+
+		" (default "+DefaultClaudeEffort+"; pi takes none)")
 	fs.StringVar(&o.Controller, "controller", "iom1", "VM the agent's shell lands on")
 	fs.StringVar(&o.Traced, "traced", "iom2", "VM running the workload")
 	fs.StringVar(&o.SSH, "ssh", "ssh", "ssh binary")
@@ -70,6 +76,9 @@ func ParseFlags(args []string, stderr io.Writer) (Options, error) {
 		return Options{}, errors.New("iormeshtrial takes no arguments")
 	}
 	o.Model = o.defaultModel()
+	if o.Effort == "" && o.Agent == AgentClaude {
+		o.Effort = DefaultClaudeEffort
+	}
 	return o, o.validate()
 }
 
@@ -93,6 +102,10 @@ func (o Options) validate() error {
 		return ErrOptIn
 	case !slices.Contains([]string{AgentClaude, AgentPi}, o.Agent):
 		return fmt.Errorf("-agent %q: want %s or %s", o.Agent, AgentClaude, AgentPi)
+	case o.Agent == AgentClaude && !slices.Contains(ClaudeEfforts, o.Effort):
+		return fmt.Errorf("-effort %q: want one of %s", o.Effort, strings.Join(ClaudeEfforts, ", "))
+	case o.Agent == AgentPi && o.Effort != "":
+		return fmt.Errorf("-effort %q: %s is run with no effort", o.Effort, AgentPi)
 	case o.Mode != Automatic && o.Mode != Guided:
 		return fmt.Errorf("-mode %q: want %s or %s", o.Mode, Automatic, Guided)
 	case o.Controller == "" || o.Traced == "" || o.Controller == o.Traced:

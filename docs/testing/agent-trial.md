@@ -25,11 +25,21 @@ IORMESH_TRIAL_AGENT=pi mage agentTrial
 |---|---|---|
 | `IORMESH_TRIAL_AGENT` | (required) | `claude` or `pi` |
 | `IORMESH_TRIAL_MODE` | `automatic` | the skill's mode, or `guided` |
-| `IORMESH_TRIAL_MODEL` | by agent | `claude-sonnet-5-5` (effort medium) or `ollama-cloud/glm-5.3-flash:cloud` |
+| `IORMESH_TRIAL_MODEL` | by agent | `claude-sonnet-5-5` or `ollama-cloud/glm-5.3-flash:cloud` |
+| `IORMESH_TRIAL_EFFORT` | `medium` | claude's effort: `low`, `medium`, `high`, `xhigh` or `max`; pi takes none |
 | `IORMESH_TRIAL_CONTROLLER` | `iom1` | the VM the agent's shell lands on |
 | `IORMESH_TRIAL_TRACED` | `iom2` | the VM running the workload |
 | `IORMESH_TRIAL_SSH_CONFIG` | ssh's own | an `ssh -F` file naming the VMs |
 | `IORMESH_TRIAL_RELEASE_DIR` | `dist/untagged/<version>` | the release served |
+
+Another model or effort is an extra data point beside #37's two
+agents (task ip4), run the same way with only these two changed:
+`IORMESH_TRIAL_AGENT=claude IORMESH_TRIAL_MODEL=claude-haiku-5-5
+IORMESH_TRIAL_EFFORT=high mage agentTrial` (or `iormeshtrial -model
+… -effort …`). The result records `effort` (results from before it
+have none: claude then ran at medium), and an effort other than
+medium is in the result's and the run's names
+(`<date>-claude-haiku-5-5-high-<mode>.json`).
 
 The VMs must be up and reachable as the laptop's `ssh iom1` and
 `ssh iom2` with sudo without a password, and the controller must

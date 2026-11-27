@@ -72,7 +72,7 @@ func Main(ctx context.Context, o Options, stdout io.Writer) error {
 // logs, and the agent's empty working directory outside the checkout (so
 // no CLI can find the repository's own CLAUDE.md or AGENTS.md above it).
 func openRun(o Options) (*runFiles, error) {
-	name := time.Now().UTC().Format("20060102T150405Z") + "-" + eval.FileLabel(o.Model) + "-" + o.Mode
+	name := time.Now().UTC().Format("20060102T150405Z") + "-" + modelLabel(o.Model, o.Effort) + "-" + o.Mode
 	rf := &runFiles{dir: filepath.Join(o.Dir, RunsDir, name)}
 	rf.library = filepath.Join(rf.dir, "library")
 	if err := os.MkdirAll(rf.library, 0o755); err != nil {
@@ -156,8 +156,8 @@ func newTrial(o Options, rf *runFiles, shell *Shell, set eval.Set, task, url str
 		return nil, fmt.Errorf("the skill %s: %v %s", SkillFile, err, skill)
 	}
 	vars := map[string]string{"controller": o.Controller, "traced": o.Traced, "release_url": url}
-	var agent Agent = &CLI{Kind: o.Agent, Model: o.Model, SystemPrompt: SystemPrompt, Dir: rf.agentWorkdir,
-		Session: NewSessionID(), Stderr: rf.stderr}
+	var agent Agent = &CLI{Kind: o.Agent, Model: o.Model, Effort: o.Effort, SystemPrompt: SystemPrompt,
+		Dir: rf.agentWorkdir, Session: NewSessionID(), Stderr: rf.stderr}
 	if o.agent != nil {
 		agent = o.agent // the tests' stand-in
 	}
@@ -168,7 +168,7 @@ func newTrial(o Options, rf *runFiles, shell *Shell, set eval.Set, task, url str
 
 // report labels the result, writes it under results/ and prints it.
 func report(o Options, rf *runFiles, r Result, stdout io.Writer) error {
-	r.Agent, r.Model, r.Date, r.Commit = o.Agent, o.Model, o.Date, o.Commit
+	r.Agent, r.Model, r.Effort, r.Date, r.Commit = o.Agent, o.Model, o.Effort, o.Date, o.Commit
 	r.Transcript = filepath.Join(rf.dir, "transcript.jsonl")
 	r.Commands = filepath.Join(rf.dir, "commands.jsonl")
 	path, err := WriteResult(filepath.Join(o.Dir, ResultsDir), r)

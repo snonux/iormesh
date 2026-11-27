@@ -45,8 +45,8 @@ func testOptions(t *testing.T, mode string, agent Agent) Options {
 			t.Fatal(err)
 		}
 	}
-	return Options{Agent: AgentClaude, Model: DefaultClaudeModel, Mode: mode, Controller: "iom1",
-		Traced: "iom2", SSH: shell.SSH, Dir: trialDir(t), Repo: filepath.Join("..", ".."), Workload: jar,
+	return Options{Agent: AgentClaude, Model: DefaultClaudeModel, Effort: DefaultClaudeEffort, Mode: mode,
+		Controller: "iom1", Traced: "iom2", SSH: shell.SSH, Dir: trialDir(t), Repo: filepath.Join("..", ".."), Workload: jar,
 		ReleaseDir: rel, ReleasePort: DefaultReleasePort, Commit: "abc1234", Date: "2026-11-26",
 		MaxTurns: DefaultMaxTurns, Timeout: time.Minute, agent: agent}
 }
@@ -72,7 +72,7 @@ func TestMainEndToEnd(t *testing.T) {
 		t.Error("first message holds an unfilled placeholder")
 	}
 	r := readResult(t, filepath.Join(o.Dir, ResultsDir, "2026-11-26-claude-sonnet-5-5-automatic.json"))
-	if !r.Passed || r.Commit != "abc1234" || r.Agent != AgentClaude || r.Turns != 4 {
+	if !r.Passed || r.Commit != "abc1234" || r.Agent != AgentClaude || r.Turns != 4 || r.Effort != "medium" {
 		t.Errorf("result %+v", r)
 	}
 	checkRunLogs(t, r)
@@ -147,7 +147,8 @@ func TestMainPrepareFailure(t *testing.T) {
 }
 
 // TestParseFlags: no agent, no run (the opt-in); the default model
-// follows the agent.
+// follows the agent; claude's effort defaults to medium and takes only
+// claude's levels, pi takes none (task ip4).
 func TestParseFlags(t *testing.T) {
 	if _, err := ParseFlags([]string{"-release-dir", "r"}, io.Discard); !errors.Is(err, ErrOptIn) {
 		t.Errorf("no agent: err %v, want ErrOptIn", err)
@@ -159,6 +160,8 @@ func TestParseFlags(t *testing.T) {
 		{"-agent", "pi"},
 		{"-agent", "pi", "-release-dir", "r", "-max-turns", "0"},
 		{"-agent", "pi", "-release-dir", "r", "extra"},
+		{"-agent", "claude", "-release-dir", "r", "-effort", "turbo"},
+		{"-agent", "pi", "-release-dir", "r", "-effort", "high"},
 	} {
 		if _, err := ParseFlags(args, io.Discard); err == nil {
 			t.Errorf("%q: accepted", args)
@@ -167,6 +170,17 @@ func TestParseFlags(t *testing.T) {
 	o, err := ParseFlags([]string{"-agent", "pi", "-mode", "guided", "-release-dir", "r"}, io.Discard)
 	if err != nil || o.Model != DefaultPiModel || o.MaxTurns != 150 || o.Timeout != time.Hour {
 		t.Errorf("pi: %+v, %v", o, err)
+	}
+	if o.Effort != "" {
+		t.Errorf("pi effort %q, want none", o.Effort)
+	}
+	o, err = ParseFlags([]string{"-agent", "claude", "-release-dir", "r"}, io.Discard)
+	if err != nil || o.Effort != DefaultClaudeEffort || DefaultClaudeEffort != "medium" {
+		t.Errorf("claude default effort: %q, %v", o.Effort, err)
+	}
+	o, err = ParseFlags([]string{"-agent", "claude", "-release-dir", "r", "-effort", "high"}, io.Discard)
+	if err != nil || o.Effort != "high" {
+		t.Errorf("claude -effort high: %q, %v", o.Effort, err)
 	}
 }
 
@@ -190,6 +204,12 @@ func TestCLIArgv(t *testing.T) {
 	}
 	if !hasRun(first, []string{"--session-id", "s"}) || !hasRun(next, []string{"--resume", "s"}) {
 		t.Errorf("claude session: %q then %q", first, next)
+	}
+	// An effort set runs in place of the default (task ip4).
+	c = &CLI{Kind: AgentClaude, Model: "m", Effort: "high", SystemPrompt: "sp", Dir: "/w", Session: "s"}
+	if argv, _ := c.Argv(); !hasRun(argv, []string{"--effort", "high"}) ||
+		hasRun(argv, []string{"--effort", "medium"}) {
+		t.Errorf("claude effort high: %q", argv)
 	}
 	p := &CLI{Kind: AgentPi, Model: "m", SystemPrompt: "sp", Dir: "/w", Session: "s"}
 	argv, _ := p.Argv()

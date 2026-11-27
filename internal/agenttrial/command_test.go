@@ -3,6 +3,7 @@ package agenttrial
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -50,11 +51,11 @@ func TestMageArgs(t *testing.T) {
 	if err != nil || !slices.Equal(got, want) {
 		t.Errorf("defaults: %q, %v; want %q", got, err, want)
 	}
-	env = map[string]string{EnvAgent: "pi", EnvMode: "guided", EnvModel: "m", EnvController: "c",
-		EnvTraced: "t", EnvSSHConfig: "cfg", EnvReleaseDir: "rel"}
+	env = map[string]string{EnvAgent: "claude", EnvMode: "guided", EnvModel: "m", EnvEffort: "high",
+		EnvController: "c", EnvTraced: "t", EnvSSHConfig: "cfg", EnvReleaseDir: "rel"}
 	got, _ = MageArgs(func(k string) string { return env[k] })
-	want = []string{"run", "./cmd/iormeshtrial", "-agent", "pi", "-release-dir", "rel", "-mode", "guided",
-		"-model", "m", "-controller", "c", "-traced", "t", "-ssh-config", "cfg"}
+	want = []string{"run", "./cmd/iormeshtrial", "-agent", "claude", "-release-dir", "rel", "-mode", "guided",
+		"-model", "m", "-effort", "high", "-controller", "c", "-traced", "t", "-ssh-config", "cfg"}
 	if !slices.Equal(got, want) {
 		t.Errorf("all set: %q, want %q", got, want)
 	}
@@ -111,5 +112,27 @@ func TestWriteResultKeepsReruns(t *testing.T) {
 	}
 	if filepath.Base(first) != "2026-11-26-m-guided.json" || filepath.Base(second) != "2026-11-26-m-guided-2.json" {
 		t.Errorf("names %s, %s", first, second)
+	}
+}
+
+// TestResultEffort (task ip4): the result records the effort; a result
+// at medium, or of an old run without one, keeps the old name, another
+// effort is in the name, so a model's runs at two efforts never share
+// one.
+func TestResultEffort(t *testing.T) {
+	r := Result{Model: "m", Mode: Guided, Date: "2026-11-26"}
+	for _, effort := range []string{"", "medium"} {
+		r.Effort = effort
+		if got := ResultName(r); got != "2026-11-26-m-guided.json" {
+			t.Errorf("effort %q: %s", effort, got)
+		}
+	}
+	r.Effort = "high"
+	if got := ResultName(r); got != "2026-11-26-m-high-guided.json" {
+		t.Errorf("effort high: %s", got)
+	}
+	data, err := json.Marshal(r)
+	if err != nil || !strings.Contains(string(data), `"effort":"high"`) {
+		t.Errorf("json %s, %v", data, err)
 	}
 }

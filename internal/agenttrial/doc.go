@@ -5,6 +5,8 @@
 // archive on throwaway VMs, traces the microservices scenario and
 // answers a fixed question set, with a scripted user and within a turn
 // and time budget. cmd/iormeshtrial and `mage agentTrial` run it.
+// -model and -effort run another model or claude effort as an extra data
+// point (task ip4); the defaults are #37's.
 //
 // The sandbox. The agent's only reach is the VMs (#37, "Where"). The
 // agent CLI therefore gets no tool at all (claude's --tools with an

@@ -18,7 +18,10 @@ import (
 type Result struct {
 	Agent string `json:"agent"`
 	// Model is the model's name, never a command line.
-	Model    string  `json:"model"`
+	Model string `json:"model"`
+	// Effort is claude's effort level (task ip4); results from before it,
+	// and pi's, have none — claude's then ran at medium.
+	Effort   string  `json:"effort,omitempty"`
 	Mode     string  `json:"mode"`
 	Date     string  `json:"date"`
 	Commit   string  `json:"commit"`
@@ -152,10 +155,21 @@ func headerColumn(header, name string) int {
 	return -1
 }
 
-// ResultName is the result's file name: date, model and mode, the model
-// as eval.FileLabel makes it a plain name part (M5's naming per model).
+// ResultName is the result's file name: date, model (and its effort, see
+// modelLabel) and mode, the model as eval.FileLabel makes it a plain name
+// part (M5's naming per model).
 func ResultName(r Result) string {
-	return r.Date + "-" + eval.FileLabel(r.Model) + "-" + r.Mode + ".json"
+	return r.Date + "-" + modelLabel(r.Model, r.Effort) + "-" + r.Mode + ".json"
+}
+
+// modelLabel is the model as a name part, followed by its effort unless
+// that is the default: a run at medium keeps the name runs had before
+// the effort was an option, and one model at two efforts gets two names.
+func modelLabel(model, effort string) string {
+	if effort == "" || effort == DefaultClaudeEffort {
+		return eval.FileLabel(model)
+	}
+	return eval.FileLabel(model) + "-" + effort
 }
 
 // WriteResult writes the result as <dir>/ResultName, or, when a run of

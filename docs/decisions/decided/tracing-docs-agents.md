@@ -265,6 +265,12 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
     (`answer_excludes_unless`). For later runs only: the runs
     it would have changed (8n4, bp4 glm guided) keep their
     scores.
+  - **Amended (owner, 2026-11-27): other Claude models and
+    efforts as extra data points** (task ip4). The harness's
+    `-effort` (`IORMESH_TRIAL_EFFORT`, default medium) runs
+    claude at another effort, `-model` another model; such a
+    run is recorded beside the cells and never counts toward
+    acceptance. Its data goes to Anthropic, as Sonnet's does.
   - **Data.** Both providers see everything the agent sees:
     the prompt, the docs, and all command output from the VMs
     — host names and addresses of the f3 VMs, the synthetic

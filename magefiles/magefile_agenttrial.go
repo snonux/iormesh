@@ -19,7 +19,9 @@ import (
 )
 
 // AgentTrial runs cmd/iormeshtrial once with IORMESH_TRIAL_AGENT (claude
-// or pi) in IORMESH_TRIAL_MODE (automatic or guided) against
+// or pi) in IORMESH_TRIAL_MODE (automatic or guided), optionally with
+// IORMESH_TRIAL_MODEL and claude's IORMESH_TRIAL_EFFORT (default medium),
+// against
 // IORMESH_TRIAL_CONTROLLER and IORMESH_TRIAL_TRACED (default iom1, iom2),
 // serving IORMESH_TRIAL_RELEASE_DIR (default dist/untagged/<version>, made
 // by `mage releaseUntagged` from the untagged commit under test, decision

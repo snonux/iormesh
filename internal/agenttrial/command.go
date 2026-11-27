@@ -35,7 +35,8 @@ func Command(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 }
 
 // The environment of `mage agentTrial`: the agent is required, the rest
-// has defaults (the mode automatic, the agent's model, iom1 and iom2,
+// has defaults (the mode automatic, the agent's model, claude's medium
+// effort, iom1 and iom2,
 // ssh's own config, `mage releaseUntagged`'s directory of this version:
 // the commit under test is untagged until a release is cut, decision
 // #40; a tagged release is served by naming its directory).
@@ -43,6 +44,7 @@ const (
 	EnvAgent      = "IORMESH_TRIAL_AGENT"
 	EnvMode       = "IORMESH_TRIAL_MODE"
 	EnvModel      = "IORMESH_TRIAL_MODEL"
+	EnvEffort     = "IORMESH_TRIAL_EFFORT"
 	EnvController = "IORMESH_TRIAL_CONTROLLER"
 	EnvTraced     = "IORMESH_TRIAL_TRACED"
 	EnvSSHConfig  = "IORMESH_TRIAL_SSH_CONFIG"
@@ -50,8 +52,8 @@ const (
 )
 
 // mageFlags maps each optional variable to its flag, in a fixed order.
-var mageFlags = [][2]string{{EnvMode, "-mode"}, {EnvModel, "-model"}, {EnvController, "-controller"},
-	{EnvTraced, "-traced"}, {EnvSSHConfig, "-ssh-config"}}
+var mageFlags = [][2]string{{EnvMode, "-mode"}, {EnvModel, "-model"}, {EnvEffort, "-effort"},
+	{EnvController, "-controller"}, {EnvTraced, "-traced"}, {EnvSSHConfig, "-ssh-config"}}
 
 // MageArgs is the `go run ./cmd/iormeshtrial …` command line `mage
 // agentTrial` runs, from the environment (getenv). Without an agent it
