@@ -6,8 +6,8 @@ this record was written (2026-11-24), M0, M1, M2, M3, M4, M6 and M7
 were accepted; M5 was accepted on 2026-11-26, when its LLM eval
 passed with real models (task 9k4). M8, added on 2026-11-26
 (decision #37), is not accepted: its first trial (task nm4) and
-its rerun (task 8n4) each passed two of four cells. Rocky Linux 9.9 (el9, kernel 5.14)
-is the main target.
+its rerun (task 8n4) each passed two of four cells. Rocky
+Linux 9.9 (el9, kernel 5.14) is the main target.
 
 Decision numbers (`#N`) refer to [decisions.md](decisions.md);
 what is traced and the trace format are in
