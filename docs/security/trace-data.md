@@ -49,7 +49,11 @@ Part of [Security & scope](../security.md).
   tracer's. Header names use the argv globs anywhere in the
   name, so prefixed credential headers
   (`X-Forwarded-Authorization`, `X-Amz-Credential`,
-  `X-Auth-Key`) are masked too, and forward-auth URI headers
+  `X-Auth-Key`) are masked too, as are the identity headers
+  auth proxies and clouds forward (`X-JWT-Assertion`,
+  `Cf-Access-Jwt-Assertion`, `X-Amzn-Oidc-Data`, `X-Auth`) and,
+  under any name, a value holding a JWT or a `Bearer`/`Basic`
+  credential; forward-auth URI headers
   (`X-Original-URI`, `X-Forwarded-URI`) have their query
   values masked like a `Location`; the full list is in
   [schema.md](../schema/redaction.md#redaction). The workload plants

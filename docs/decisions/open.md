@@ -232,7 +232,14 @@ Part of [Decisions](../decisions.md).
   masks the forward-auth URI headers (X-Original-URI/-URL,
   X-Forwarded-URI, X-Rewrite-URL, X-Envoy-Original-Path) as
   URLs like Location; a test fails when the agent's copy and
-  internal/redact's lists differ.
+  internal/redact's lists differ. Task np4 adds identity
+  globs (`*jwt*`, `*assertion*`, `*oidc*`, `*userinfo*`,
+  `*principal*`, `*csrf*`, `*xsrf*`, `*otp`, `*auth`,
+  `authentication*`) and masks a value by its shape under any
+  name — a JWT anywhere in it, or a Bearer/Basic/Digest/
+  Negotiate scheme with a credential — since a vendor header
+  name says nothing reliable while these shapes do; still a
+  denylist, the shapes are only more deny rules.
   *Decided (task xh4): templated at the controller's
   aggregations, raw in the events.* The trace keeps the path
   verbatim (no schema change, no data lost, `iormeshctl query`

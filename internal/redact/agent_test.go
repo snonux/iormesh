@@ -36,10 +36,13 @@ func normalized(globs []string) []string {
 	return out
 }
 
-// TestAgentPolicyMatchesDefault keeps the Java agent's header lists in
-// step with Default (task 0j4): the agent masks before the spool, so a
-// header it lets through would reach disk even though the tracer masks
-// it again afterwards. The lists are compared entry for entry, normalized.
+// TestAgentPolicyMatchesDefault keeps the Java agent's header lists (task
+// 0j4) and auth schemes (task np4) in step with Default: the agent masks
+// before the spool, so a header it lets through would reach disk even
+// though the tracer masks it again afterwards. The lists are compared
+// entry for entry, normalized. The JWT shape test has no list to compare;
+// the same value tables in TestHeaderMasksCredentialValues and the
+// agent's HttpProbeTest keep the two implementations in step.
 func TestAgentPolicyMatchesDefault(t *testing.T) {
 	b, err := os.ReadFile(agentRedaction)
 	if err != nil {
@@ -52,6 +55,7 @@ func TestAgentPolicyMatchesDefault(t *testing.T) {
 		goes []string
 	}{
 		{"HEADER_DENY", d.HeaderDeny},
+		{"AUTH_SCHEMES", d.AuthSchemes},
 		{"URL_HEADERS", d.URLHeaders},
 	} {
 		got, want := normalized(javaList(t, src, c.java)), normalized(c.goes)

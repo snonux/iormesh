@@ -37,6 +37,10 @@ type Policy struct {
 	FlagRules []FlagRule
 	// HeaderDeny names HTTP headers whose whole value is masked.
 	HeaderDeny []string
+	// AuthSchemes names HTTP auth schemes (lower case, matched in any
+	// case, not a glob): a header value starting with one and a
+	// credential after it is masked whatever the header's name.
+	AuthSchemes []string
 	// URLHeaders names HTTP headers whose value is a URI reference, often
 	// relative ("/login?token=x"), so it is masked as a URL whole: Text
 	// finds only URLs with "://".
@@ -70,9 +74,10 @@ func Default() Policy {
 			// docker/podman login: "run -p" is a port mapping.
 			{Program: "login", Flag: "-p"},
 		},
-		HeaderDeny: defaultHeaderDeny(),
-		URLHeaders: defaultURLHeaders(),
-		QueryDeny:  []string{"*"},
+		HeaderDeny:  defaultHeaderDeny(),
+		AuthSchemes: defaultAuthSchemes(),
+		URLHeaders:  defaultURLHeaders(),
+		QueryDeny:   []string{"*"},
 	}
 }
 
@@ -84,7 +89,14 @@ func Default() Policy {
 // headers: X-Forwarded-Authorization, X-Amz-Credential, Cookie2. The key
 // globs keep a word before "key" (api, auth, access, private,
 // subscription, functions) rather than "*key*", which would mask
-// Sec-WebSocket-Key and similar non-secrets.
+// Sec-WebSocket-Key and similar non-secrets. The identity globs (task
+// np4) name the signed tokens and assertions auth proxies and clouds
+// forward: X-JWT-Assertion (WSO2), Cf-Access-Jwt-Assertion, X-Goog-IAP-
+// JWT-Assertion, X-Amzn-Oidc-Data, X-Userinfo, X-Ms-Client-Principal,
+// CSRF/XSRF and OTP headers. "auth" counts only as a whole last word
+// (X-Auth, X-Upstream-Auth) and "authentication" only first
+// (Authentication, Authentication-Info), so WWW-Authenticate, a
+// challenge without a secret, stays readable.
 func defaultHeaderDeny() []string {
 	return []string{
 		"*authorization*", "*cookie*", "*bearer*", "*credential*",
@@ -92,6 +104,8 @@ func defaultHeaderDeny() []string {
 		"*passphrase*", "*pwd", "*pass", "*session*", "*signature*",
 		"*api*key*", "*auth*key*", "*access*key*", "*private*key*",
 		"*subscription*key*", "*functions*key*",
+		"*jwt*", "*assertion*", "*oidc*", "*userinfo*", "*principal*",
+		"*csrf*", "*xsrf*", "*otp", "*auth", "authentication*",
 	}
 }
 
@@ -148,12 +162,13 @@ func (p Policy) Argv(argv []string) []string {
 }
 
 // Header returns the value to record for an HTTP header: Mask when its name
-// is denied; the value masked as one URL when the name is a URL header (a
-// relative "/next?token=x" has no "://" for Text to find); else the value
-// with embedded URLs masked.
+// is denied or its value is a credential by shape (a JWT, an auth scheme
+// and its credential; see credentialValue); the value masked as one URL
+// when the name is a URL header (a relative "/next?token=x" has no "://"
+// for Text to find); else the value with embedded URLs masked.
 func (p Policy) Header(name, value string) string {
 	switch {
-	case denied(p.HeaderDeny, name):
+	case denied(p.HeaderDeny, name), p.credentialValue(value):
 		return Mask
 	case denied(p.URLHeaders, name):
 		return p.URL(value)

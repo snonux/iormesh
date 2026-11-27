@@ -54,7 +54,47 @@ public final class HttpProbeTest {
                 "URL in an allowed value");
         check(Redaction.glob("a*b?c", "axxbyc") && !Redaction.glob("a*b", "ac"), "glob");
         credentialHeaders();
+        identityHeaders();
+        credentialValues();
         urlHeaders();
+    }
+
+    /**
+     * Task np4: JWT and identity-assertion headers are masked by name, a
+     * JWT or auth-scheme credential value by its shape under any name, and
+     * look-alike values are not (the same tables as internal/redact's
+     * TestHeaderDeniesIdentityHeaders, TestHeaderMasksCredentialValues and
+     * TestHeaderKeepsOrdinaryValues).
+     */
+    static void identityHeaders() {
+        for (String n : List.of("X-JWT-Assertion", "Cf-Access-Jwt-Assertion",
+                "X-Goog-IAP-JWT-Assertion", "X-Amzn-Oidc-Data", "X-Amzn-Oidc-Identity", "X-Jwt",
+                "X-Auth", "X-Upstream-Auth", "Authentication", "Authentication-Info",
+                "X-Userinfo", "X-Ms-Client-Principal", "X-Ms-Client-Principal-Name", "X-Csrf",
+                "X-Xsrf", "X-Otp")) {
+            String lower = n.toLowerCase(java.util.Locale.ROOT);
+            equal(lower + ": ***", Redaction.header(n, "S3CRET"), "identity header " + n);
+        }
+        for (String n : List.of("WWW-Authenticate", "Accept-Encoding", "X-Forwarded-Host")) {
+            String lower = n.toLowerCase(java.util.Locale.ROOT);
+            equal(lower + ": plain", Redaction.header(n, "plain"), "ordinary header " + n);
+        }
+    }
+
+    /** See identityHeaders. */
+    static void credentialValues() {
+        String jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.c2lnbmF0dXJl";
+        for (String v : List.of(jwt, " " + jwt + " ", "eyJhbGciOiJub25lIn0.eyJzdWIiOiIxMjMifQ.",
+                "eyJhbGciOiJSU0EtT0FFUCJ9.a.b.c.d", "jwt=" + jwt + "; Path=/", "Bearer abc.def",
+                "bearer abc", "Basic dXNlcjpwYXNz", "Digest username=\"u\", response=\"r\"",
+                "Negotiate YIIGhgYJKoZI")) {
+            equal("x-custom: ***", Redaction.header("X-Custom", v), "credential value " + v);
+        }
+        for (String v : List.of("1.2.3", "a.b.c", "eyJ", "eyJ.x", "eyJhbGci..x", "Bearer",
+                "Basic ", "Basically fine", "Negotiated rate", "text/html; q=0.9",
+                "www.example.com", "eyJhbGci.eyJzdWIi.sig.x")) {
+            equal("x-custom: " + v, Redaction.header("X-Custom", v), "ordinary value " + v);
+        }
     }
 
     /**

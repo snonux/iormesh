@@ -173,9 +173,64 @@ func TestHeaderKeepsOrdinaryHeaders(t *testing.T) {
 		"Content-Type", "Accept", "User-Agent", "Host", "X-Request-Id",
 		"Keep-Alive", "Cache-Control", "X-Forwarded-For",
 		"X-Forwarded-Proto", "Sec-WebSocket-Key", "Content-Length",
+		"WWW-Authenticate", "Accept-Encoding", "X-Forwarded-Host",
 	} {
 		if got := Default().Header(name, "plain"); got != "plain" {
 			t.Errorf("Header(%q, \"plain\") = %q, want it unmasked", name, got)
+		}
+	}
+}
+
+// TestHeaderDeniesIdentityHeaders is task np4's leak: JWT and identity
+// assertion headers that auth proxies and clouds add (AWS ALB, Cloudflare
+// Access, Google IAP, WSO2, Azure App Service, OIDC proxies) carry a
+// replayable signed token, yet no deny glob named them.
+func TestHeaderDeniesIdentityHeaders(t *testing.T) {
+	for _, name := range []string{
+		"X-JWT-Assertion", "Cf-Access-Jwt-Assertion", "X-Goog-IAP-JWT-Assertion",
+		"X-Amzn-Oidc-Data", "X-Amzn-Oidc-Identity", "X-Jwt", "X-Auth",
+		"X-Upstream-Auth", "Authentication", "Authentication-Info",
+		"X-Userinfo", "X-Ms-Client-Principal", "X-Ms-Client-Principal-Name",
+		"X-Csrf", "X-Xsrf", "X-Otp",
+	} {
+		if got := Default().Header(name, "S3CRET"); got != Mask {
+			t.Errorf("Header(%q) = %q, want %q", name, got, Mask)
+		}
+	}
+}
+
+// TestHeaderMasksCredentialValues is task np4's value-shape rule: a value
+// holding a JWT or starting with an HTTP auth credential is masked
+// whatever its header's name, since a custom name says nothing reliable.
+func TestHeaderMasksCredentialValues(t *testing.T) {
+	const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.c2lnbmF0dXJl"
+	for _, value := range []string{
+		jwt,
+		" " + jwt + " ",
+		"eyJhbGciOiJub25lIn0.eyJzdWIiOiIxMjMifQ.", // unsigned, alg none
+		"eyJhbGciOiJSU0EtT0FFUCJ9.a.b.c.d",        // JWE, five parts
+		"jwt=" + jwt + "; Path=/",
+		"Bearer abc.def", "bearer abc", "Basic dXNlcjpwYXNz",
+		`Digest username="u", response="r"`, "Negotiate YIIGhgYJKoZI",
+	} {
+		if got := Default().Header("X-Custom", value); got != Mask {
+			t.Errorf("Header(X-Custom, %q) = %q, want %q", value, got, Mask)
+		}
+	}
+}
+
+// TestHeaderKeepsOrdinaryValues guards the value-shape rule against
+// over-masking: dotted versions and host names, a lone "eyJ", a scheme
+// word with no credential after it, and words that merely start like a
+// scheme stay readable.
+func TestHeaderKeepsOrdinaryValues(t *testing.T) {
+	for _, value := range []string{
+		"1.2.3", "a.b.c", "eyJ", "eyJ.x", "eyJhbGci..x", "Bearer", "Basic ",
+		"Basically fine", "Negotiated rate", "text/html; q=0.9",
+		"www.example.com", "eyJhbGci.eyJzdWIi.sig.x", // four parts: no JWT
+	} {
+		if got := Default().Header("X-Custom", value); got != value {
+			t.Errorf("Header(X-Custom, %q) = %q, want it unmasked", value, got)
 		}
 	}
 }

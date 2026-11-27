@@ -17,7 +17,13 @@ import java.util.Locale;
  *       credential, token, secret, password, passwd, passphrase,
  *       session or signature in it, ending in pwd or pass, or an
  *       api/auth/access/private/subscription/functions key
- *       (X-Forwarded-Authorization, Cookie2, X-Api-Key, X-Auth-Key);
+ *       (X-Forwarded-Authorization, Cookie2, X-Api-Key, X-Auth-Key),
+ *       or naming a JWT, assertion, OIDC, userinfo, principal, CSRF/XSRF
+ *       or OTP header, "auth" as its last word or "authentication" as
+ *       its first (X-JWT-Assertion, X-Amzn-Oidc-Data, X-Auth);
+ *   <li>a header value that is a credential by its shape is "name: ***"
+ *       under any name: a JWT anywhere in it, or a Bearer, Basic, Digest
+ *       or Negotiate scheme with a credential after it;
  *   <li>every query parameter's value is masked ("?user=***&token=***"),
  *       decision #22's default, since a query string's names say
  *       nothing reliable about what is secret; ';' and '#' parameters
@@ -43,13 +49,28 @@ public final class Redaction {
      * list and fails when it drifts). Globs match anywhere in a name, as
      * proxies prefix credential headers (X-Forwarded-Authorization,
      * X-Amz-Credential, Cookie2); the key globs name the word before
-     * "key" so Sec-WebSocket-Key and the like stay readable.
+     * "key" so Sec-WebSocket-Key and the like stay readable. The identity
+     * globs (task np4) name the signed tokens and assertions auth proxies
+     * and clouds forward (X-JWT-Assertion, Cf-Access-Jwt-Assertion,
+     * X-Amzn-Oidc-Data, X-Userinfo, X-Ms-Client-Principal, CSRF and OTP
+     * headers); "auth" counts only as a whole last word and
+     * "authentication" only first, so WWW-Authenticate stays readable.
      */
     static final List<String> HEADER_DENY = List.of("*authorization*", "*cookie*",
             "*bearer*", "*credential*", "*token*", "*secret*", "*password*", "*passwd*",
             "*passphrase*", "*pwd", "*pass", "*session*", "*signature*", "*api*key*",
             "*auth*key*", "*access*key*", "*private*key*", "*subscription*key*",
-            "*functions*key*");
+            "*functions*key*", "*jwt*", "*assertion*", "*oidc*", "*userinfo*",
+            "*principal*", "*csrf*", "*xsrf*", "*otp", "*auth", "authentication*");
+
+    /**
+     * internal/redact.Default().AuthSchemes (checked by the same test): a
+     * header value whose first word is one of these, in any case, with a
+     * credential after it ("Bearer abc", "Basic dXNlcjpwYXNz") is masked
+     * whatever the header is called.
+     */
+    static final List<String> AUTH_SCHEMES = List.of("bearer", "basic", "digest",
+            "negotiate");
 
     /**
      * Headers whose value is a URI reference, often relative
@@ -68,13 +89,13 @@ public final class Redaction {
     /**
      * One header as recorded: "name: value", the name lower-cased (HTTP/1
      * names are case-insensitive, HTTP/2 lower-cases them anyway), the
-     * value masked when the name is denied, else with any URL in it
-     * masked.
+     * value masked when the name is denied or the value is a credential
+     * by its shape (credentialValue), else with any URL in it masked.
      */
     public static String header(String name, String value) {
         String n = name.toLowerCase(Locale.ROOT);
         String v = value == null ? "" : value;
-        if (denied(n)) {
+        if (denied(n) || credentialValue(v)) {
             v = MASK;
         } else if (matches(URL_HEADERS, n)) {
             v = url(v);   // a relative reference has no "://" for text to find
@@ -87,6 +108,62 @@ public final class Redaction {
     /** Whether a header name matches a deny glob. */
     static boolean denied(String name) {
         return matches(HEADER_DENY, name);
+    }
+
+    /**
+     * Whether a header value is a credential by its shape whatever the
+     * header is called (task np4), as internal/redact's credentialValue:
+     * an auth scheme with a credential after it, or a JWT anywhere in it.
+     */
+    static boolean credentialValue(String value) {
+        return authCredential(value) || hasJwt(value);
+    }
+
+    /** "Bearer abc" yes; "Bearer" alone or "Basically fine" no. */
+    private static boolean authCredential(String value) {
+        String v = value.strip();
+        int sp = v.indexOf(' ');
+        if (sp < 0 || v.substring(sp + 1).isBlank()) {
+            return false;
+        }
+        return AUTH_SCHEMES.contains(v.substring(0, sp).toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * Whether value holds a JWT: a run of base64url characters and dots,
+     * split by any other character, that is a JWS (three parts, the
+     * payload not empty) or a JWE (five parts, the ciphertext not empty)
+     * whose first part starts with "eyJ" and holds more than that.
+     */
+    private static boolean hasJwt(String value) {
+        int start = 0;
+        for (int i = 0; i <= value.length(); i++) {
+            if (i < value.length() && jwtChar(value.charAt(i))) {
+                continue;
+            }
+            if (i > start && isJwt(value.substring(start, i))) {
+                return true;
+            }
+            start = i + 1;
+        }
+        return false;
+    }
+
+    private static boolean jwtChar(char c) {
+        return c == '.' || c == '-' || c == '_' || (c >= '0' && c <= '9')
+                || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+    }
+
+    /** One run is a JWS or JWE compact serialization (see hasJwt). */
+    private static boolean isJwt(String run) {
+        String[] parts = run.split("\\.", -1);
+        if (parts[0].length() <= 3 || !parts[0].startsWith("eyJ")) {
+            return false;
+        }
+        if (parts.length == 3) {
+            return !parts[1].isEmpty();
+        }
+        return parts.length == 5 && !parts[3].isEmpty();
     }
 
     /** Whether a name, normalized, matches one of globs (also normalized). */

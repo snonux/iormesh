@@ -60,8 +60,20 @@ names containing `authorization`, `cookie`, `bearer`,
 functions keys (`*api*key*`, `*auth*key*`, …) are recorded as
 `***` — so `X-Forwarded-Authorization`, `Cookie2`,
 `X-Amz-Credential`, `X-Api-Key` and `Ocp-Apim-Subscription-Key`
-are too, while `Sec-WebSocket-Key`, `Keep-Alive` or
-`X-Forwarded-For` stay. URLs in the other headers' values and
+are too. So are the identity headers auth proxies and clouds
+forward: names containing `jwt`, `assertion`, `oidc`,
+`userinfo`, `principal`, `csrf` or `xsrf`, ending in `otp` or
+in the word `auth`, or starting with `authentication`
+(`X-JWT-Assertion`, `Cf-Access-Jwt-Assertion`,
+`X-Amzn-Oidc-Data`, `X-Ms-Client-Principal`, `X-Auth`,
+`Authentication-Info`). `Sec-WebSocket-Key`, `Keep-Alive`,
+`WWW-Authenticate` or `X-Forwarded-For` stay. A value is
+masked by its shape under any name: one holding a JWT (three
+or five dot-separated base64url parts, the first starting
+`eyJ`) or starting with `Bearer`, `Basic`, `Digest` or
+`Negotiate` and a credential after it (a `WWW-Authenticate`
+challenge such as `Basic realm=x` is masked too, an
+over-mask). URLs in the other headers' values and
 every query value of the path are masked; `location`,
 `content-location`, `referer`, `origin` and the forward-auth
 headers `x-original-uri`, `x-original-url`, `x-forwarded-uri`,
